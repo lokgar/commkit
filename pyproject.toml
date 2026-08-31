@@ -1,0 +1,132 @@
+[project]
+name = "commkit"
+version = "1.0.0"
+description = "A Python library for high-performance digital communications research."
+readme = "README.md"
+license = { text = "MIT" }
+requires-python = ">=3.12"
+dependencies = [
+    "matplotlib>=3.11",
+    "numpy>=2.4",
+    "pyyaml>=6.0.2",
+    "scipy>=1.17",
+    "pydantic>=2.13",
+    "numba>=0.65",
+    # JAX (CPU) is the soft-demap engine behind compute_llr/gmi and the
+    # equalizers' 'jax' backend - required on CPU, not just GPU. The 'gpu'
+    # extra below layers the CUDA plugins on top via jax[cuda13].
+    "jax>=0.10",
+]
+
+[project.optional-dependencies]
+gpu = [
+    "jax[cuda13]>=0.10",
+    "cupy-cuda13x>=14.1",
+    "nvidia-curand>=10.4.1.34",
+]
+# Running the example notebooks and the rich HTML `Signal.print_info()` table.
+# Not required for the library itself (print_info falls back to plain text).
+notebook = [
+    "jupyter>=1.1.1",
+]
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["commkit"]
+# CUDA kernel sources are loaded at runtime via importlib.resources and
+# must ship with the package. py.typed marks the package as typed (PEP 561).
+artifacts = ["commkit/_cuda/src/*.cu", "commkit/py.typed"]
+
+[dependency-groups]
+dev = [
+    "bump-my-version>=1.2.7",
+    "mypy>=2.1.0",
+    "nbstripout>=0.9.1",
+    "pytest>=8.3.5",
+    "pytest-benchmark>=5.2.3",
+    "pytest-cov>=7.0.0",
+    "ruff>=0.15.15",
+]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = "--device=all"
+# bench_* patterns exist for the explicit-only benchmarks/ suite;
+# the default run still collects tests/ only via testpaths.
+python_files = ["test_*.py", "bench_*.py"]
+python_functions = ["test_*", "bench_*"]
+filterwarnings = [
+    "ignore::FutureWarning:cupyx",
+]
+markers = [
+    "gpu: marks tests as requiring a GPU (skipped automatically when CuPy is unavailable)",
+]
+
+[tool.bumpversion]
+current_version = "1.0.0"
+parse = "(?P<major>\\d+)\\.(?P<minor>\\d+)\\.(?P<patch>\\d+)"
+serialize = ["{major}.{minor}.{patch}"]
+search = "{current_version}"
+replace = "{new_version}"
+regex = false
+ignore_missing_version = false
+ignore_missing_files = false
+tag = true
+sign_tags = false
+tag_name = "v{new_version}"
+tag_message = "Bump version: {current_version} -> {new_version}"
+allow_dirty = true
+commit = true
+message = "Bump version: {current_version} -> {new_version}"
+moveable_tags = []
+commit_args = ""
+setup_hooks = []
+pre_commit_hooks = ["uv sync --all-extras", "git add uv.lock"]
+post_commit_hooks = []
+
+[[tool.bumpversion.files]]
+filename = "pyproject.toml"
+
+[[tool.bumpversion.files]]
+filename = "commkit/__init__.py"
+
+[tool.ruff]
+line-length = 88
+target-version = "py312"
+
+[tool.ruff.lint]
+# High-value, low-noise baseline: E/F (pycodestyle + pyflakes), I (import
+# sorting), UP (pyupgrade - modernizes typing for a 3.12+ project), B (bugbear).
+# SIM and RUF are deliberately left out for now; they fire mostly on stylistic
+# choices and domain false-positives (Greek letters in math docstrings, int()
+# casts, test tuple-unpacking) and can be ratcheted in per-module later, the
+# same way mypy strictness is.
+select = ["E", "F", "I", "UP", "B"]
+ignore = [
+    "E501",  # line length is handled by the formatter; long strings/URLs are fine
+    "B008",  # function calls in argument defaults (common in DSP signatures)
+    "B905",  # zip() strict= is opinionated; lengths are invariant-guaranteed here
+]
+
+[tool.ruff.lint.per-file-ignores]
+# Numba/JAX kernel factories rely on closures and loop-variable rebinding that
+# trip bugbear's B023; tests intentionally use broad constructs.
+"commkit/equalization/_kernels_*.py" = ["B023"]
+# Package re-export hubs deliberately import names for the public namespace.
+"commkit/equalization/__init__.py" = ["F401"]
+"commkit/plotting/__init__.py" = ["F401"]
+"commkit/recovery/__init__.py" = ["F401"]
+"tests/**" = ["B011", "E741"]
+
+[tool.mypy]
+ignore_missing_imports = true
+# Strictness is ratcheted per-module via overrides below as modules are
+# cleaned up; the default stays lenient so the whole tree type-checks today.
+# Example (uncomment to enforce on a clean leaf module):
+# [[tool.mypy.overrides]]
+# module = "commkit.helpers"
+# disallow_untyped_defs = true
+

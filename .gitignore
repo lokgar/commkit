@@ -1,0 +1,31 @@
+# Python-generated files
+__pycache__/
+.pytest_cache/
+*.py[oc]
+build/
+dist/
+wheels/
+*.egg-info
+.ruff_cache
+.benchmarks
+
+# Virtual environments
+.venv
+
+# mypy
+.mypy_cache/
+
+.vscode/
+
+tmp/
+
+# DSP captures / large binaries
+*.npy
+*.npz
+*.mat
+*.wav
+*.bin
+*.h5
+*.hdf5
+*.pdf
+
