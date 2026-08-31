@@ -559,14 +559,15 @@ def _validate_sps(sps, num_taps):
         )
     elif sps > 2:
         logger.warning(
-            f"sps={sps}: non-standard oversampling ratio for adaptive equalization. "
-            "T/2-spaced (sps=2) is the industry standard. Higher values give "
-            "marginal benefit but require proportionally more taps."
+            "sps=%s: non-standard oversampling ratio for adaptive equalization. T/2-spaced (sps=2) is the industry standard. Higher values give marginal benefit but require proportionally more taps.",
+            sps,
         )
     if num_taps < 2 * sps:
         logger.warning(
-            f"num_taps={num_taps} is small for sps={sps}. "
-            f"Recommend num_taps >= {4 * sps + 1} for fractionally-spaced equalization."
+            "num_taps=%s is small for sps=%s. Recommend num_taps >= %s for fractionally-spaced equalization.",
+            num_taps,
+            sps,
+            4 * sps + 1,
         )
 
 

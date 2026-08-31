@@ -117,20 +117,20 @@ Since `bump-my-version` is defined in the project's development dependencies, al
 
 #### Release Step-by-Step Guide
 
-1. **Commit your active code changes**:
-   Make sure all your actual development features or bugfixes are committed in Git first:
-
-   ```bash
-   git add .
-   git commit -m "feat: add digital transceiver enhancement"
-   ```
-
-2. **Verify tests & package build correctness**:
+1. **Verify tests & package build correctness**:
    Ensure all tests are passing and the library compiles cleanly:
 
    ```bash
    uv run pytest
    uv build
+   ```
+
+2. **Commit your active code changes**:
+   Make sure all your actual development features or bugfixes are committed in Git first:
+
+   ```bash
+   git add .
+   git commit -m "feat: add digital transceiver enhancement"
    ```
 
 3. **Bump the version locally**:

@@ -143,7 +143,11 @@ def compute_llr(
     use ``gmi`` instead for correct scale.
     """
     logger.debug(
-        f"Computing LLRs for {modulation.upper()} {order}-level (method={method}, output={output})."
+        "Computing LLRs for %s %s-level (method=%s, output=%s).",
+        modulation.upper(),
+        order,
+        method,
+        output,
     )
 
     k = int(np.log2(order))

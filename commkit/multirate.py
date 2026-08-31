@@ -124,7 +124,7 @@ def decimate_to_symbol_rate(
 
     if sps is None:
         raise ValueError("decimate_to_symbol_rate() requires sps for array input.")
-    logger.debug(f"Downsampling to symbols: sps={sps}, offset={offset}")
+    logger.debug("Downsampling to symbols: sps=%s, offset=%s", sps, offset)
     arr, xp, _ = dispatch(samples)
 
     # Build slicing for arbitrary axis
@@ -160,7 +160,7 @@ def expand(samples: ArrayType, factor: int, axis: int = -1) -> ArrayType:
         The expanded sample array with zeros inserted.
         Shape: (..., N_samples * factor).
     """
-    logger.debug(f"Inserting zeros (expansion factor={factor}).")
+    logger.debug("Inserting zeros (expansion factor=%s).", factor)
     samples, xp, _ = dispatch(samples)
 
     n_in = samples.shape[axis]
@@ -226,7 +226,7 @@ def upsample(
         new.sampling_rate = sig.sampling_rate * factor
         return new
 
-    logger.debug(f"Upsampling by factor {factor} (polyphase, axis={axis}).")
+    logger.debug("Upsampling by factor %s (polyphase, axis=%s).", factor, axis)
     arr, xp, sp = dispatch(samples)
     out = sp.signal.resample_poly(arr, factor, 1, axis=axis)
     if correct_power:
@@ -295,7 +295,7 @@ def decimate(
         new.sampling_rate = sig.sampling_rate / factor
         return new
 
-    logger.debug(f"Decimating by factor {factor} (method: {method}).")
+    logger.debug("Decimating by factor %s (method: %s).", factor, method)
     arr, _, sp = dispatch(samples)
 
     if method == "decimate":
@@ -396,7 +396,9 @@ def resample(
     elif up is None or down is None:
         raise ValueError("Must specify either (up, down) or (sps_in, sps_out).")
 
-    logger.debug(f"Resampling by rational factor {up}/{down} (polyphase, axis={axis}).")
+    logger.debug(
+        "Resampling by rational factor %s/%s (polyphase, axis=%s).", up, down, axis
+    )
     arr, xp, sp = dispatch(samples)
     out = sp.signal.resample_poly(arr, int(up), int(down), axis=axis)
     if correct_power:

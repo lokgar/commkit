@@ -47,7 +47,7 @@ def zf_equalizer(
     array_like
         Equalized samples. Same shape and backend as input.
     """
-    logger.info(f"ZF/MMSE equalizer: noise_variance={noise_variance:.2e}")
+    logger.info("ZF/MMSE equalizer: noise_variance=%.2e", noise_variance)
     samples, xp, _ = dispatch(samples)
     channel_estimate = xp.asarray(channel_estimate)
 
@@ -69,7 +69,9 @@ def zf_equalizer(
     # and anti-causal tails both decay within the discarded guard regions.
     N_fft = max(1024, 1 << (max(1, 4 * L) - 1).bit_length())
 
-    logger.debug(f"ZF/MMSE internals: N={N}, L={L}, num_ch={num_ch}, N_fft={N_fft}")
+    logger.debug(
+        "ZF/MMSE internals: N=%s, L=%s, num_ch=%s, N_fft=%s", N, L, num_ch, N_fft
+    )
 
     # --- Shared OLS forward pass: pad -> stride_tricks -> batch FFT ---
     Y, meta = _ols_forward(samples, N_fft)  # Y: (num_ch, num_blocks, N_fft)

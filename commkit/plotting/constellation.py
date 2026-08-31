@@ -80,7 +80,7 @@ def plot_ideal_constellation(
     if pmf is not None and nu is not None:
         raise ValueError("Provide at most one of `pmf` or `nu`, not both.")
 
-    logger.debug(f"Generating ideal constellation for {modulation} ({order}-level).")
+    logger.debug("Generating ideal constellation for %s (%s-level).", modulation, order)
     from ..mapping import gray_constellation, maxwell_boltzmann
 
     if nu is not None:
@@ -96,7 +96,7 @@ def plot_ideal_constellation(
         # Generate constellation on backend (returns NumPy)
         const = gray_constellation(modulation, order, unipolar=unipolar)
     except ValueError as e:
-        logger.error(f"Error generating constellation: {e}")
+        logger.error("Error generating constellation: %s", e)
         return None
 
     # Move to cpu for plotting (already NumPy but good practice)
@@ -457,7 +457,7 @@ def plot_constellation(
                     marker="o",
                 )
             except ValueError as e:
-                logger.warning(f"Could not overlay ideal constellation: {e}")
+                logger.warning("Could not overlay ideal constellation: %s", e)
 
     # Add center lines
     ax.axhline(0, color="white", alpha=0.4, zorder=0)

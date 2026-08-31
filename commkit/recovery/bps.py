@@ -140,9 +140,9 @@ def recover_carrier_phase_bps(
     # 4-fold unwrap corrections.  Warn early so users diagnose this easily.
     if block_size < 4:
         logger.warning(
-            f"CPR (BPS): block_size={block_size} is very small. "
-            f"Averaging the distance metric over only {block_size} symbol(s) per block "
-            f"makes the 4-fold phase unwrap unreliable. Recommended minimum: block_size ≥ 4."
+            "CPR (BPS): block_size=%s is very small. Averaging the distance metric over only %s symbol(s) per block makes the 4-fold phase unwrap unreliable. Recommended minimum: block_size ≥ 4.",
+            block_size,
+            block_size,
         )
 
     # block_centers[b] = b * block_size + block_size/2  (consistent with VV)
@@ -312,10 +312,15 @@ def recover_carrier_phase_bps(
         phi_std_deg = float(np.std(phi_full_np)) * 180.0 / np.pi
         mode_str = "joint" if (joint_channels and C > 1) else "independent"
         logger.info(
-            f"CPR (BPS, B={B}, {mode_str}): phase mean={phi_mean_deg:.2f}°, "
-            f"std={phi_std_deg:.2f}° "
-            f"[{N_blocks} blocks x {block_size} symbols, C={C}, "
-            f"cycle_slip_correction={cycle_slip_correction}]"
+            "CPR (BPS, B=%s, %s): phase mean=%.2f°, std=%.2f° [%s blocks x %s symbols, C=%s, cycle_slip_correction=%s]",
+            B,
+            mode_str,
+            phi_mean_deg,
+            phi_std_deg,
+            N_blocks,
+            block_size,
+            C,
+            cycle_slip_correction,
         )
 
     if debug_plot:

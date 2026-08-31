@@ -57,8 +57,9 @@ def apply_iq_imbalance(
     >>> r = apply_iq_imbalance(s, amplitude_imbalance_db=1.0, phase_imbalance_deg=3.0)
     """
     logger.info(
-        f"Applying IQ imbalance "
-        f"(amplitude={amplitude_imbalance_db:.2f} dB, phase={phase_imbalance_deg:.2f} deg)."
+        "Applying IQ imbalance (amplitude=%.2f dB, phase=%.2f deg).",
+        amplitude_imbalance_db,
+        phase_imbalance_deg,
     )
 
     samples, xp, _ = dispatch(samples)

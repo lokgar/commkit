@@ -272,10 +272,11 @@ def recover_carrier_phase_tikhonov(
         _min_bs = max(8, 4 * int(np.ceil(order**0.5)))
         if block_size < _min_bs:
             logger.warning(
-                f"CPR (Tikhonov): block_size={block_size} is too small for {order}-QAM. "
-                f"Block phases are estimated via Viterbi-Viterbi; the data-residual "
-                f"constraint is identical - see recover_carrier_phase_viterbi_viterbi. "
-                f"Recommended minimum for {order}-QAM: block_size ≥ {_min_bs}."
+                "CPR (Tikhonov): block_size=%s is too small for %s-QAM. Block phases are estimated via Viterbi-Viterbi; the data-residual constraint is identical - see recover_carrier_phase_viterbi_viterbi. Recommended minimum for %s-QAM: block_size ≥ %s.",
+                block_size,
+                order,
+                order,
+                _min_bs,
             )
 
     # Smoother noise parameters
@@ -393,10 +394,18 @@ def recover_carrier_phase_tikhonov(
         phi_std_deg = float(np.std(phi_full_np)) * 180.0 / np.pi
         mode_str = "joint" if (joint_channels and C > 1) else "independent"
         logger.info(
-            f"CPR (Tikhonov-{method.upper()}, M={M}, {mode_str}): "
-            f"phase mean={phi_mean_deg:.2f}°, std={phi_std_deg:.2f}° "
-            f"[{N_blocks} blocks x {block_size}, σ_p²={sigma_p2:.2e}, σ_v²={sigma_v2:.2e}, "
-            f"C={C}, cycle_slip_correction={cycle_slip_correction}]"
+            "CPR (Tikhonov-%s, M=%s, %s): phase mean=%.2f°, std=%.2f° [%s blocks x %s, σ_p²=%.2e, σ_v²=%.2e, C=%s, cycle_slip_correction=%s]",
+            method.upper(),
+            M,
+            mode_str,
+            phi_mean_deg,
+            phi_std_deg,
+            N_blocks,
+            block_size,
+            sigma_p2,
+            sigma_v2,
+            C,
+            cycle_slip_correction,
         )
 
     if debug_plot:

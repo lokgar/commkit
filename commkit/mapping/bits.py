@@ -49,7 +49,7 @@ def map_bits(
         Array of symbols. Shape: (N_bits / log2(order),).
         Backend (NumPy/CuPy) matches the input `bits`.
     """
-    logger.debug(f"Mapping bits to {modulation.upper()} {order}-level symbols.")
+    logger.debug("Mapping bits to %s %s-level symbols.", modulation.upper(), order)
     bits, xp, _ = dispatch(bits)
 
     if order < 2:
@@ -157,7 +157,7 @@ def demap_symbols_hard(
     if modulation is None or order is None:
         raise ValueError("demap_symbols_hard() requires modulation and order.")
 
-    logger.debug(f"Demapping {modulation.upper()} {order}-level symbols to bits.")
+    logger.debug("Demapping %s %s-level symbols to bits.", modulation.upper(), order)
     symbols, xp, _ = dispatch(symbols)
 
     # Capture original shape to restore structure later

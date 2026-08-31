@@ -239,7 +239,7 @@ def evm(
             evm_db = (
                 float(20.0 * xp.log10(evm_ratio)) if evm_ratio > 0 else float("-inf")
             )
-        logger.info(f"EVM [{mode}]: {evm_percent:.2f}% ({evm_db:.2f} dB)")
+        logger.info("EVM [%s]: %.2f%% (%.2f dB)", mode, evm_percent, evm_db)
         return evm_percent, evm_db
 
     evm_percent = evm_ratio * 100.0
@@ -255,8 +255,11 @@ def evm(
         evm_db_np = to_device(evm_db, "cpu")
         for ch in range(evm_pct_np.shape[0]):
             logger.info(
-                f"EVM [{mode}] Ch{ch}: {float(evm_pct_np[ch]):.2f}%"
-                f" ({float(evm_db_np[ch]):.2f} dB)"
+                "EVM [%s] Ch%s: %.2f%% (%.2f dB)",
+                mode,
+                ch,
+                float(evm_pct_np[ch]),
+                float(evm_db_np[ch]),
             )
 
     return evm_percent, evm_db
@@ -373,7 +376,7 @@ def snr(
         if low_pwr_mask:
             return float("-inf")
         snr_val = float(snr_db)
-        logger.info(f"SNR: {snr_val:.2f} dB")
+        logger.info("SNR: %.2f dB", snr_val)
         return snr_val
 
     # Array case: Overwrite with -inf where (low_pwr_mask AND NOT zero_noise_mask)
@@ -384,7 +387,7 @@ def snr(
     if logger.isEnabledFor(logging.INFO):
         snr_db_np = to_device(snr_db, "cpu")
         for ch in range(snr_db_np.shape[0]):
-            logger.info(f"SNR Ch{ch}: {float(snr_db_np[ch]):.2f} dB")
+            logger.info("SNR Ch%s: %.2f dB", ch, float(snr_db_np[ch]))
 
     return snr_db
 
@@ -472,7 +475,7 @@ def ber(
 
     if ber_values.ndim == 0:
         ber_value = float(ber_values)
-        logger.info(f"BER: {ber_value:.2e} ({int(errors)}/{total} errors)")
+        logger.info("BER: %.2e (%s/%s errors)", ber_value, int(errors), total)
         return ber_value
 
     if logger.isEnabledFor(logging.INFO):
@@ -480,8 +483,11 @@ def ber(
         errors_np = to_device(errors, "cpu")
         for ch in range(ber_np.shape[0]):
             logger.info(
-                f"BER Ch{ch}: {float(ber_np[ch]):.2e} "
-                f"({int(errors_np[ch])}/{total} errors)"
+                "BER Ch%s: %.2e (%s/%s errors)",
+                ch,
+                float(ber_np[ch]),
+                int(errors_np[ch]),
+                total,
             )
     return ber_values
 
@@ -623,7 +629,7 @@ def ser(
 
     if ser_values.ndim == 0:
         ser_val = float(ser_values)
-        logger.info(f"SER: {ser_val:.2e} ({int(errors)}/{total} errors)")
+        logger.info("SER: %.2e (%s/%s errors)", ser_val, int(errors), total)
         return ser_val
 
     if logger.isEnabledFor(logging.INFO):
@@ -631,8 +637,11 @@ def ser(
         errors_np = to_device(errors, "cpu")
         for ch in range(ser_np.shape[0]):
             logger.info(
-                f"SER Ch{ch}: {float(ser_np[ch]):.2e} "
-                f"({int(errors_np[ch])}/{total} errors)"
+                "SER Ch%s: %.2e (%s/%s errors)",
+                ch,
+                float(ser_np[ch]),
+                int(errors_np[ch]),
+                total,
             )
     return ser_values
 
@@ -781,7 +790,7 @@ def gmi(
 
     # GMI = Σ_{b=0}^{k-1} (1 - mean_n[softplus_b]) = k * (1 - mean_all[softplus])
     gmi_value = float(k * (1.0 - xp.mean(softplus)))
-    logger.info(f"GMI: {gmi_value:.4f} b/cu")
+    logger.info("GMI: %.4f b/cu", gmi_value)
     return gmi_value
 
 
@@ -936,5 +945,5 @@ def mi(
     mi_nats = float(acc) / N_sym
     mi_value = float(np.clip(h_x_bits + mi_nats / ln2, 0.0, h_x_bits))
 
-    logger.info(f"MI: {mi_value:.4f} b/cu  (max {h_x_bits:.2f} b/cu)")
+    logger.info("MI: %.4f b/cu  (max %.2f b/cu)", mi_value, h_x_bits)
     return mi_value

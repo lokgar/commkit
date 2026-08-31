@@ -82,8 +82,11 @@ def rect_taps(sps: int, duty_cycle: float = 1.0, rise_time: float = 0.0) -> np.n
         h = np.concatenate([ramp_up, flat, ramp_dn])
 
     logger.debug(
-        f"Generating Rect taps: sps={sps}, duty_cycle={duty_cycle}, "
-        f"rise_time={rise_time}, n_taps={len(h)}"
+        "Generating Rect taps: sps=%s, duty_cycle=%s, rise_time=%s, n_taps=%s",
+        sps,
+        duty_cycle,
+        rise_time,
+        len(h),
     )
     return h
 
@@ -122,8 +125,11 @@ def gaussian_taps(sps: float, span: int = 4, duty_cycle: float = 1.0) -> np.ndar
     # Rearranged: bt = √2·ln(2) / (π·duty_cycle)
     bt = np.sqrt(2) * np.log(2) / (np.pi * duty_cycle)
     logger.debug(
-        f"Generating Gaussian taps: sps={sps}, span={span}, "
-        f"duty_cycle={duty_cycle} (bt={bt:.4f})"
+        "Generating Gaussian taps: sps=%s, span=%s, duty_cycle=%s (bt=%.4f)",
+        sps,
+        span,
+        duty_cycle,
+        bt,
     )
     # Ensure odd number of taps to have a center peak
     num_taps = int(span * sps)
@@ -173,8 +179,11 @@ def smoothrect_taps(
         Shape: (N_taps,).
     """
     logger.debug(
-        f"Generating SmoothRect taps: sps={sps}, span={span}, "
-        f"rise_time={rise_time}, duty_cycle={duty_cycle}"
+        "Generating SmoothRect taps: sps=%s, span=%s, rise_time=%s, duty_cycle=%s",
+        sps,
+        span,
+        rise_time,
+        duty_cycle,
     )
     # Ensure odd number of taps to have a center peak
     num_taps = int(span * sps)
@@ -221,7 +230,7 @@ def rrc_taps(sps: float, rolloff: float = 0.35, span: int = 8) -> np.ndarray:
         RRC filter taps normalized to unit energy.
         Shape: (N_taps,).
     """
-    logger.debug(f"Generating RRC taps: sps={sps}, rolloff={rolloff}, span={span}")
+    logger.debug("Generating RRC taps: sps=%s, rolloff=%s, span=%s", sps, rolloff, span)
     # Ensure odd number of taps
     num_taps = int(span * sps)
     if num_taps % 2 == 0:
@@ -289,7 +298,7 @@ def rc_taps(sps: float, rolloff: float = 0.35, span: int = 8) -> ArrayType:
         RC filter taps normalized to unit energy.
         Shape: (N_taps,).
     """
-    logger.debug(f"Generating RC taps: sps={sps}, rolloff={rolloff}, span={span}")
+    logger.debug("Generating RC taps: sps=%s, rolloff=%s, span=%s", sps, rolloff, span)
     # Ensure odd number of taps
     num_taps = int(span * sps)
     if num_taps % 2 == 0:
@@ -368,7 +377,7 @@ def lowpass_taps(
         Filter taps with 0 dB passband gain.
         Shape: (num_taps,).
     """
-    logger.debug(f"Designing Lowpass FIR: cutoff={cutoff} Hz, taps={num_taps}")
+    logger.debug("Designing Lowpass FIR: cutoff=%s Hz, taps=%s", cutoff, num_taps)
     h = scipy.signal.firwin(
         num_taps, cutoff, window=window, fs=sampling_rate, pass_zero=True
     )
@@ -402,7 +411,7 @@ def highpass_taps(
         Filter taps with 0 dB passband gain.
         Shape: (num_taps,).
     """
-    logger.debug(f"Designing Highpass FIR: cutoff={cutoff} Hz, taps={num_taps}")
+    logger.debug("Designing Highpass FIR: cutoff=%s Hz, taps=%s", cutoff, num_taps)
     # pass_zero=False for highpass
     h = scipy.signal.firwin(
         num_taps, cutoff, window=window, fs=sampling_rate, pass_zero=False
@@ -440,7 +449,10 @@ def bandpass_taps(
         Shape: (num_taps,).
     """
     logger.debug(
-        f"Designing Bandpass FIR: range=[{low_cutoff}, {high_cutoff}] Hz, taps={num_taps}"
+        "Designing Bandpass FIR: range=[%s, %s] Hz, taps=%s",
+        low_cutoff,
+        high_cutoff,
+        num_taps,
     )
     # pass_zero=False for bandpass
     h = scipy.signal.firwin(
@@ -483,7 +495,10 @@ def bandstop_taps(
         Shape: (num_taps,).
     """
     logger.debug(
-        f"Designing Bandstop FIR: range=[{low_cutoff}, {high_cutoff}] Hz, taps={num_taps}"
+        "Designing Bandstop FIR: range=[%s, %s] Hz, taps=%s",
+        low_cutoff,
+        high_cutoff,
+        num_taps,
     )
     # pass_zero=True for bandstop
     h = scipy.signal.firwin(
@@ -674,8 +689,12 @@ def ols_fir_filter(
         N_fft = max(1024, 1 << (max(1, 4 * L) - 1).bit_length())
 
     logger.debug(
-        f"ols_fir_filter: L={L}, N={N}, N_fft={N_fft}, "
-        f"num_ch={samples.shape[0]}, center={center}"
+        "ols_fir_filter: L=%s, N=%s, N_fft=%s, num_ch=%s, center=%s",
+        L,
+        N,
+        N_fft,
+        samples.shape[0],
+        center,
     )
 
     H = xp.fft.fft(taps, n=N_fft)  # frequency response of the filter
@@ -729,7 +748,7 @@ def shaping_filter_taps(sig: Signal) -> ArrayType:
     """
     if not sig.pulse_shape or sig.pulse_shape == "none":
         raise ValueError("No pulse shape defined for this signal.")
-    logger.info(f"Generating shaping filter taps (shape: {sig.pulse_shape}).")
+    logger.info("Generating shaping filter taps (shape: %s).", sig.pulse_shape)
 
     # Use stored duty_cycle for RZ; NRZ always uses the full symbol period.
     duty_cycle = sig.duty_cycle if sig.mod_rz else 1.0
@@ -788,7 +807,7 @@ def fir_filter(
         return new
 
     logger.debug(
-        f"Applying FIR filter via convolution ({len(taps)} taps, axis={axis})."
+        "Applying FIR filter via convolution (%s taps, axis=%s).", len(taps), axis
     )
     samples, xp, sp = dispatch(samples)
 
@@ -886,7 +905,7 @@ def shape_pulse(
     convention). For peak-normalized samples (e.g. eye diagrams), apply
     ``normalize(..., "peak")`` after.
     """
-    logger.debug(f"Applying pulse shaping: {pulse_shape}")
+    logger.debug("Applying pulse shaping: %s", pulse_shape)
 
     if rz:
         duty_cycle = 0.5
@@ -977,7 +996,7 @@ def matched_filter(
             try:
                 taps = shaping_filter_taps(sig)
             except ValueError as e:
-                logger.error(f"Cannot apply matched filter: {e}")
+                logger.error("Cannot apply matched filter: %s", e)
                 return sig.copy()
         new = sig.copy()
         new.samples = matched_filter(
@@ -988,7 +1007,7 @@ def matched_filter(
     if pulse_taps is None:
         raise ValueError("matched_filter() requires pulse_taps for array input.")
 
-    logger.debug(f"Applying Matched Filter (taps length={len(pulse_taps)}).")
+    logger.debug("Applying Matched Filter (taps length=%s).", len(pulse_taps))
     samples, xp, _ = dispatch(samples)
 
     # Matched filter is conjugate and time-reversed version of pulse
@@ -1067,8 +1086,10 @@ def compensate_chromatic_dispersion(
     ...     center_wavelength_nm=1550.0, sampling_rate=fs)
     """
     logger.info(
-        f"Compensating CD (D={dispersion_ps_nm_km} ps/nm/km, "
-        f"L={fiber_length_km} km, λ={center_wavelength_nm} nm)."
+        "Compensating CD (D=%s ps/nm/km, L=%s km, λ=%s nm).",
+        dispersion_ps_nm_km,
+        fiber_length_km,
+        center_wavelength_nm,
     )
 
     samples, xp, _ = dispatch(samples)

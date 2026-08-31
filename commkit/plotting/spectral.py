@@ -114,7 +114,7 @@ def plot_psd(
             **kwargs,
         )
 
-    logger.debug(f"Generating PSD plot (sampling_rate={sampling_rate} Hz).")
+    logger.debug("Generating PSD plot (sampling_rate=%s Hz).", sampling_rate)
 
     samples, xp, _ = dispatch(samples)
 
@@ -373,7 +373,7 @@ def plot_spectrogram(
             **kwargs,
         )
 
-    logger.debug(f"Generating spectrogram plot (sampling_rate={sampling_rate} Hz).")
+    logger.debug("Generating spectrogram plot (sampling_rate=%s Hz).", sampling_rate)
 
     samples, xp, _ = dispatch(samples)
 
@@ -472,8 +472,10 @@ def plot_spectrogram(
             f_start, f_end = f_indices[0], f_indices[-1] + 1
         else:
             logger.warning(
-                f"xlim (frequency) {xlim} does not overlap with frequency range "
-                f"[{f_shifted[0]:.3f}, {f_shifted[-1]:.3f}]. Plotting whole frequency range."
+                "xlim (frequency) %s does not overlap with frequency range [%.3f, %.3f]. Plotting whole frequency range.",
+                xlim,
+                f_shifted[0],
+                f_shifted[-1],
             )
 
     # Masking time axis (ylim corresponds to time axis)
@@ -485,8 +487,10 @@ def plot_spectrogram(
             t_start, t_end = t_indices[0], t_indices[-1] + 1
         else:
             logger.warning(
-                f"ylim (time) {ylim} does not overlap with time range "
-                f"[{t[0]:.3f}, {t[-1]:.3f}]. Plotting whole time axis."
+                "ylim (time) %s does not overlap with time range [%.3f, %.3f]. Plotting whole time axis.",
+                ylim,
+                t[0],
+                t[-1],
             )
 
     # Slice arrays for plotting performance

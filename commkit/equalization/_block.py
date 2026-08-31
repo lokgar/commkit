@@ -898,8 +898,15 @@ def block_lms(
             f", cpr=bps(P={cpr_bps_test_phases}, K={cpr_bps_block_size}{_joint}{_cs})"
         )
     logger.info(
-        f"Block-LMS: C={C}, num_taps={num_taps}, sps={sps}, block_size={block_size}, "
-        f"fftsize={fftsize}, mu={step_size}, n_sym={n_sym}{_cpr_info}"
+        "Block-LMS: C=%s, num_taps=%s, sps=%s, block_size=%s, fftsize=%s, mu=%s, n_sym=%s%s",
+        C,
+        num_taps,
+        sps,
+        block_size,
+        fftsize,
+        step_size,
+        n_sym,
+        _cpr_info,
     )
 
     # -- Padding - matches lms() convention -----------------------------------
@@ -1586,9 +1593,9 @@ def _block_fdaf_blind(
     samples, xp, _ = dispatch(samples)
     if xp is np:
         logger.warning(
-            f"{name} is running on CPU (NumPy). For CPU workloads "
-            f"{kind}(..., backend='numba') is typically faster. Move samples to "
-            "GPU (CuPy) to benefit from block-FFT acceleration."
+            "%s is running on CPU (NumPy). For CPU workloads %s(..., backend='numba') is typically faster. Move samples to GPU (CuPy) to benefit from block-FFT acceleration.",
+            name,
+            kind,
         )
 
     was_1d = samples.ndim == 1
@@ -1614,8 +1621,16 @@ def _block_fdaf_blind(
     _ols_min = block_size * sps + num_taps - 1
     fftsize = 1 << (_ols_min - 1).bit_length()
     logger.info(
-        f"{name}: C={C}, num_taps={num_taps}, sps={sps}, block_size={block_size}, "
-        f"fftsize={fftsize}, mu={step_size}, n_sym={n_sym}, pilot_aided={use_pilots}"
+        "%s: C=%s, num_taps=%s, sps=%s, block_size=%s, fftsize=%s, mu=%s, n_sym=%s, pilot_aided=%s",
+        name,
+        C,
+        num_taps,
+        sps,
+        block_size,
+        fftsize,
+        step_size,
+        n_sym,
+        use_pilots,
     )
     c_tap = num_taps // 2
     pad_total = max(0, n_sym * sps - N + num_taps - 1)

@@ -461,8 +461,11 @@ def recover_carrier_phase_pll(
         phi_mean_deg = float(np.mean(phi_full)) * 180.0 / np.pi
         phi_std_deg = float(np.std(phi_full)) * 180.0 / np.pi
         logger.info(
-            f"CPR (DD-PLL, {loop_desc}): phase mean={phi_mean_deg:.2f}°, "
-            f"std={phi_std_deg:.2f}° [C={C}]"
+            "CPR (DD-PLL, %s): phase mean=%.2f°, std=%.2f° [C=%s]",
+            loop_desc,
+            phi_mean_deg,
+            phi_std_deg,
+            C,
         )
 
     if debug_plot:

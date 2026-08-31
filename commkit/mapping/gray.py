@@ -132,7 +132,10 @@ def gray_constellation(
     pilots with QAM payload), they start from a consistent power baseline.
     """
     logger.debug(
-        f"Generating Gray-coded constellation: modulation={modulation}, order={order}, normalize={normalize}"
+        "Generating Gray-coded constellation: modulation=%s, order=%s, normalize=%s",
+        modulation,
+        order,
+        normalize,
     )
     modulation = modulation.lower()
 

@@ -129,8 +129,10 @@ def dsh_beat(
             f"delay of {m} samples must be in [1, {n}) for a length-{n} trajectory."
         )
     logger.info(
-        f"DSH beat: delay {m} samples ({m / sampling_rate * 1e6:.3g} µs), "
-        f"f_shift {f_shift:.4g} Hz."
+        "DSH beat: delay %s samples (%.3g µs), f_shift %.4g Hz.",
+        m,
+        m / sampling_rate * 1e6,
+        f_shift,
     )
 
     delta_phi = x[..., m:] - x[..., :-m]

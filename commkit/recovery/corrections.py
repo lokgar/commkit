@@ -122,8 +122,11 @@ def smooth_phase_wiener(
         std_in = float(xp.std(phi_c))
         std_out = float(xp.std(phi_s - trend))
         logger.info(
-            f"Wiener phase smoother: q={q:.3g}, r={r:.3g} rad², "
-            f"residual std {np.degrees(std_in):.2f}° -> {np.degrees(std_out):.2f}°."
+            "Wiener phase smoother: q=%.3g, r=%.3g rad², residual std %.2f° -> %.2f°.",
+            q,
+            r,
+            np.degrees(std_in),
+            np.degrees(std_out),
         )
 
     return phi_s[0] if was_1d else phi_s
@@ -181,7 +184,7 @@ def correct_carrier_phase(
         Phase-corrected symbols, same shape and dtype as ``symbols``.
     """
     symbols, xp, _ = dispatch(symbols)
-    logger.debug(f"Applying carrier phase correction: shape={symbols.shape}")
+    logger.debug("Applying carrier phase correction: shape=%s", symbols.shape)
     # Wrap to [-π, π] in float64 (handles unbounded phase trajectories from
     # standalone CPR), then rotate with a float32 phasor.
     phase_f64 = xp.asarray(phase_vector, dtype=xp.float64)
@@ -496,18 +499,20 @@ def resolve_channel_permutation(
         # An output did not lock to any distinct reference stream - the demux
         # likely collapsed (both outputs on one pol) rather than swapped.
         logger.warning(
-            f"resolve_channel_permutation: weak match (min coherence "
-            f"{float(assigned.min()):.2f}) - streams may not be cleanly "
-            f"separated (EQ collapse?). Applying best assignment {perm.tolist()} "
-            f"anyway. Coherence matrix (rows=out, cols=ref):\n{matrix_str}"
+            "resolve_channel_permutation: weak match (min coherence %.2f) - streams may not be cleanly separated (EQ collapse?). Applying best assignment %s anyway. Coherence matrix (rows=out, cols=ref):\n%s",
+            float(assigned.min()),
+            perm.tolist(),
+            matrix_str,
         )
     elif is_identity:
-        logger.info(f"resolve_channel_permutation: identity {perm.tolist()} (no swap).")
+        logger.info(
+            "resolve_channel_permutation: identity %s (no swap).", perm.tolist()
+        )
     else:
         logger.info(
-            f"resolve_channel_permutation: POLARIZATION SWAP {perm.tolist()} - "
-            f"reordering outputs to reference order. Coherence matrix "
-            f"(rows=out, cols=ref):\n{matrix_str}"
+            "resolve_channel_permutation: POLARIZATION SWAP %s - reordering outputs to reference order. Coherence matrix (rows=out, cols=ref):\n%s",
+            perm.tolist(),
+            matrix_str,
         )
 
     return symbols[xp.asarray(inv)]
@@ -661,9 +666,11 @@ def resolve_phase_ambiguity(
                 )
             )
             logger.info(
-                f"Phase ambiguity resolution: ch={ch}, best_k={int(best_k_np[ch])}, "
-                f"rotation={best_k_np[ch] * step * 180.0 / np.pi:.1f}°, "
-                f"SER={best_ser:.4f}"
+                "Phase ambiguity resolution: ch=%s, best_k=%s, rotation=%.1f°, SER=%.4f",
+                ch,
+                int(best_k_np[ch]),
+                best_k_np[ch] * step * 180.0 / np.pi,
+                best_ser,
             )
 
     if was_1d:
@@ -737,7 +744,7 @@ def correct_phase_rotation(
         # the correction itself (phasors) is computed on-device above.
         thetas_deg = np.degrees(to_device(thetas, "cpu"))
         for ch, deg in enumerate(thetas_deg.tolist()):
-            logger.info(f"correct_phase_rotation: ch={ch}, theta={deg:.2f}°")
+            logger.info("correct_phase_rotation: ch=%s, theta=%.2f°", ch, deg)
 
     if was_1d:
         return out[0]

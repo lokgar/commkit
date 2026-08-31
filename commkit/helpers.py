@@ -33,7 +33,7 @@ def generate_bits(length: int, seed: int | None = None) -> ArrayType:
         Array of bits (0 or 1). Shape: (length,).
         Data type is `int8`.
     """
-    logger.debug(f"Generating {length} random bits (seed={seed}).")
+    logger.debug("Generating %s random bits (seed=%s).", length, seed)
     rng = np.random.default_rng(seed)
     bits = rng.integers(0, 2, size=length, dtype="int8")
 
@@ -161,7 +161,7 @@ def normalize(
     array_like
         The normalized array.
     """
-    logger.debug(f"Normalizing array (mode: {mode}, axis={axis}, sps={sps}).")
+    logger.debug("Normalizing array (mode: %s, axis=%s, sps=%s).", mode, axis, sps)
     x, xp, _ = dispatch(x)
 
     # keepdims for proper broadcasting when axis is specified

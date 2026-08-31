@@ -87,11 +87,13 @@ def shift_frequency(
 
     if not xp.isclose(offset, actual_offset):
         logger.warning(
-            f"Requested offset {offset:.3f} Hz quantized to {actual_offset:.3f} Hz "
-            f"(step {df:.3f} Hz) to maintain phase continuity."
+            "Requested offset %.3f Hz quantized to %.3f Hz (step %.3f Hz) to maintain phase continuity.",
+            offset,
+            actual_offset,
+            df,
         )
     else:
-        logger.debug(f"Applying frequency offset: {actual_offset:.3f} Hz.")
+        logger.debug("Applying frequency offset: %.3f Hz.", actual_offset)
 
     # Time vector
     t = xp.arange(n) / sampling_rate
@@ -256,9 +258,10 @@ def add_pilot_tone(
     for f_in, f_out in zip(f_req, actual):
         if abs(f_out - f_in) > 1e-12 * max(1.0, abs(f_in)):
             logger.warning(
-                f"add_pilot_tone: requested {f_in:.3f} Hz quantized to "
-                f"{f_out:.3f} Hz (grid step fs/N={df:.3f} Hz) for "
-                f"buffer-periodic (loop-seamless) playback."
+                "add_pilot_tone: requested %.3f Hz quantized to %.3f Hz (grid step fs/N=%.3f Hz) for buffer-periodic (loop-seamless) playback.",
+                f_in,
+                f_out,
+                df,
             )
 
     # Normalise ``power_ratio_db`` to a per-channel (C,) list, mirroring how
@@ -303,9 +306,13 @@ def add_pilot_tone(
     f_log = f"{actual[0]:.3g} Hz" if scalar_input else f"{actual} Hz"
     psr_log = f"{psr_req[0]:.1f} dB" if scalar_power else f"{psr_req} dB"
     logger.info(
-        f"add_pilot_tone: f_p={f_log}, PSR={psr_log}, "
-        f"phase_init={phase_init:.3g} rad, "
-        f"renormalize={renormalize} [C={C}, N={N}]"
+        "add_pilot_tone: f_p=%s, PSR=%s, phase_init=%.3g rad, renormalize=%s [C=%s, N=%s]",
+        f_log,
+        psr_log,
+        phase_init,
+        renormalize,
+        C,
+        N,
     )
 
     out = out[0] if was_1d else out

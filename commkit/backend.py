@@ -232,7 +232,7 @@ def to_device(data: Any, device: str) -> ArrayType:
     typically returns a view or the original array to avoid
     unnecessary copies.
     """
-    logger.debug(f"Moving data to {device.upper()}.")
+    logger.debug("Moving data to %s.", device.upper())
     device = device.lower()
     if device == "cpu":
         # Dispatch by the *actual array type*, independent of the force-CPU flag
@@ -398,7 +398,8 @@ def to_jax(data: Any, device: str | None = None, dtype: Any | None = None) -> An
 
         except Exception as e:
             logger.debug(
-                f"DLPack transfer from CuPy to JAX failed: {e}. Falling back to explicit conversion."
+                "DLPack transfer from CuPy to JAX failed: %s. Falling back to explicit conversion.",
+                e,
             )
 
     # 2. Optimized Placement
@@ -427,8 +428,9 @@ def to_jax(data: Any, device: str | None = None, dtype: Any | None = None) -> An
         jax_target = jnp.dtype(target_dtype)
         if result.dtype != jax_target:
             logger.debug(
-                f"to_jax: post-conversion dtype mismatch ({result.dtype} != "
-                f"{jax_target}), casting."
+                "to_jax: post-conversion dtype mismatch (%s != %s), casting.",
+                result.dtype,
+                jax_target,
             )
             result = result.astype(jax_target)
 
@@ -472,7 +474,8 @@ def from_jax(data: Any) -> ArrayType:
             return cp.from_dlpack(data)
         except Exception as e:
             logger.debug(
-                f"DLPack transfer from JAX to CuPy failed: {e}. Falling back to NumPy conversion."
+                "DLPack transfer from JAX to CuPy failed: %s. Falling back to NumPy conversion.",
+                e,
             )
 
     if is_gpu and not is_cupy_available():

@@ -43,9 +43,9 @@ def _modulation_power_m(modulation: str, order: int) -> int:
     if "psk" in mod:
         if order > 4:
             logger.warning(
-                f"{order}-PSK: M={order}th-power raises noise variance by M² - "
-                "VV/FOE reliability degrades severely for order > 4. "
-                "Prefer BPS or pilot-aided CPR for 8-PSK and higher."
+                "%s-PSK: M=%sth-power raises noise variance by M² - VV/FOE reliability degrades severely for order > 4. Prefer BPS or pilot-aided CPR for 8-PSK and higher.",
+                order,
+                order,
             )
         return order  # M-th power exactly removes M-PSK modulation
 
@@ -55,16 +55,16 @@ def _modulation_power_m(modulation: str, order: int) -> int:
             return 4  # Square QAM: 4-fold rotational symmetry, 4th power is exact
         # Cross-QAM (32, 128, 512-QAM): 4-fold symmetry is only approximate
         logger.warning(
-            f"{order}-QAM is not square - 4th-power FOE/CPR will have residual "
-            "modulation spurs. Prefer pilot-aided or data-aided estimation."
+            "%s-QAM is not square - 4th-power FOE/CPR will have residual modulation spurs. Prefer pilot-aided or data-aided estimation.",
+            order,
         )
         return 4
 
     # PAM, ASK, or unrecognised scheme
     logger.warning(
-        f"Modulation '{modulation}' (order {order}): M=4 is a heuristic. "
-        "4th-power methods are unreliable for non-QAM/PSK formats. "
-        "Prefer pilot-aided or data-aided estimation."
+        "Modulation '%s' (order %s): M=4 is a heuristic. 4th-power methods are unreliable for non-QAM/PSK formats. Prefer pilot-aided or data-aided estimation.",
+        modulation,
+        order,
     )
     return 4
 
@@ -238,10 +238,9 @@ def estimate_frequency_offset_mth_power(
 
     if "qam" in mod_lower and order >= 64:
         logger.warning(
-            f"QAM order {order}: M-th power lock range is ±fs/8 = ±{sampling_rate / 8:.0f} Hz "
-            "and AM spectral spreading reduces accuracy for high-order constellations. "
-            "Consider estimate_frequency_offset_mengali_morelli (blind) or find_bias_tone "
-            "(pilot tone)."
+            "QAM order %s: M-th power lock range is ±fs/8 = ±%.0f Hz and AM spectral spreading reduces accuracy for high-order constellations. Consider estimate_frequency_offset_mengali_morelli (blind) or find_bias_tone (pilot tone).",
+            order,
+            sampling_rate / 8,
         )
 
     if nfft is None:
@@ -328,8 +327,12 @@ def estimate_frequency_offset_mth_power(
     ]
 
     logger.info(
-        f"FOE (M-th power, M={M}): {[f'{f:.2f}' for f in f_per_ch]} Hz "
-        f"[nfft={nfft}, interp={interpolation}, search_range={search_range}]"
+        "FOE (M-th power, M=%s): %s Hz [nfft=%s, interp=%s, search_range=%s]",
+        M,
+        [f"{f:.2f}" for f in f_per_ch],
+        nfft,
+        interpolation,
+        search_range,
     )
 
     if debug_plot:
@@ -351,8 +354,10 @@ def estimate_frequency_offset_mth_power(
         weights = to_device(mag[:, k_peak], "cpu").tolist()  # one batch transfer
         combined = float(np.average(f_per_ch, weights=weights))
         logger.info(
-            f"FOE (M-th power, M={M}): combined={combined:.2f} Hz "
-            f"(magnitude-weighted mean of {C} channels)"
+            "FOE (M-th power, M=%s): combined=%.2f Hz (magnitude-weighted mean of %s channels)",
+            M,
+            combined,
+            C,
         )
         return combined
     return np.array(f_per_ch)
@@ -492,8 +497,11 @@ def estimate_frequency_offset_mengali_morelli(
 
     mode_str = "data-aided" if ref_signal is not None else f"blind M={M}"
     logger.info(
-        f"FOE (Mengali-Morelli, {mode_str}): {[f'{f:.2f}' for f in f_per_ch]} Hz "
-        f"[L={L} lags, N={N}]"
+        "FOE (Mengali-Morelli, %s): %s Hz [L=%s lags, N=%s]",
+        mode_str,
+        [f"{f:.2f}" for f in f_per_ch],
+        L,
+        N,
     )
 
     if debug_plot:
@@ -514,8 +522,10 @@ def estimate_frequency_offset_mengali_morelli(
         weights = [float(np.sum(np.abs(R_per_ch_np[c]) ** 2)) for c in range(C)]
         combined = float(np.average(f_per_ch, weights=weights))
         logger.info(
-            f"FOE (Mengali-Morelli, {mode_str}): combined={combined:.2f} Hz "
-            f"(autocorrelation-weighted mean of {C} channels)"
+            "FOE (Mengali-Morelli, %s): combined=%.2f Hz (autocorrelation-weighted mean of %s channels)",
+            mode_str,
+            combined,
+            C,
         )
         return combined
     return np.array(f_per_ch)
@@ -670,8 +680,12 @@ def estimate_frequency_offset_pilot_symbols(
     f_per_ch = [float(slopes_np[c]) / (2.0 * np.pi) for c in range(C)]
 
     logger.info(
-        f"FOE (pilots, {wt_str}): {[f'{f:.2f}' for f in f_per_ch]} Hz "
-        f"[P={P}, max_gap={max_gap} samples, lock_range=±{lock_range:.1f} Hz]"
+        "FOE (pilots, %s): %s Hz [P=%s, max_gap=%s samples, lock_range=±%.1f Hz]",
+        wt_str,
+        [f"{f:.2f}" for f in f_per_ch],
+        P,
+        max_gap,
+        lock_range,
     )
 
     if debug_plot:
@@ -693,8 +707,10 @@ def estimate_frequency_offset_pilot_symbols(
         weights = [float(pwr_per_ch[c]) for c in range(C)]
         combined = float(np.average(f_per_ch, weights=weights))
         logger.info(
-            f"FOE (pilots, {wt_str}): combined={combined:.2f} Hz "
-            f"(pilot-power-weighted mean of {C} channels)"
+            "FOE (pilots, %s): combined=%.2f Hz (pilot-power-weighted mean of %s channels)",
+            wt_str,
+            combined,
+            C,
         )
         return combined
     return np.array(f_per_ch)
@@ -815,10 +831,13 @@ def find_bias_tone(
     f_refined = float(freqs_np[k]) + delta * (sampling_rate / nfft)
 
     logger.debug(
-        f"find_bias_tone: peak bin {k} ({freqs_np[k]:.2f} Hz), "
-        f"delta={delta:.4f} -> {f_refined:.2f} Hz "
-        f"[nfft={nfft}, window="
-        f"{'full' if target_frequency is None else f'{target_frequency}±{search_band} Hz'}]"
+        "find_bias_tone: peak bin %s (%.2f Hz), delta=%.4f -> %.2f Hz [nfft=%s, window=%s]",
+        k,
+        freqs_np[k],
+        delta,
+        f_refined,
+        nfft,
+        "full" if target_frequency is None else f"{target_frequency}±{search_band} Hz",
     )
 
     return float(f_refined)
@@ -1041,15 +1060,20 @@ def correct_frequency_offset_blockwise(
 
     df_log = df_all.mean(axis=0) if (combine_channels and C > 1) else df_all[0]
     logger.debug(
-        f"correct_frequency_offset_blockwise: C={C}, B={B} blocks, "
-        f"freq range=[{df_log.min():.2f}, {df_log.max():.2f}] Hz, "
-        f"total phase drift={float(theta_np_full[0, -1]):.3f} rad"
+        "correct_frequency_offset_blockwise: C=%s, B=%s blocks, freq range=[%.2f, %.2f] Hz, total phase drift=%.3f rad",
+        C,
+        B,
+        df_log.min(),
+        df_log.max(),
+        float(theta_np_full[0, -1]),
     )
     logger.info(
-        f"correct_frequency_offset_blockwise:  mean = {df_all.mean():+.1f} Hz,  "
-        f"std = {df_all.std():.1f} Hz,  "
-        f"range = [{df_all.min():+.1f}, {df_all.max():+.1f}] Hz "
-        f"({len(starts)} segments)"
+        "correct_frequency_offset_blockwise:  mean = %+.1f Hz,  std = %.1f Hz,  range = [%+.1f, %+.1f] Hz (%s segments)",
+        df_all.mean(),
+        df_all.std(),
+        df_all.min(),
+        df_all.max(),
+        len(starts),
     )
 
     if debug_plot and df_dense_plot is not None:
@@ -1117,15 +1141,15 @@ def correct_static_frequency_offset(
 
     if per_channel:
         logger.debug(
-            f"Applying per-channel frequency offset correction: "
-            f"{[f'{f:.4f}' for f in offset_arr.flat]} Hz "
-            f"(sampling_rate={sampling_rate:.0f} Hz)"
+            "Applying per-channel frequency offset correction: %s Hz (sampling_rate=%.0f Hz)",
+            [f"{f:.4f}" for f in offset_arr.flat],
+            sampling_rate,
         )
     else:
         logger.debug(
-            f"Applying frequency offset correction: "
-            f"{float(offset_arr.reshape(-1)[0]):.4f} Hz "
-            f"(sampling_rate={sampling_rate:.0f} Hz)"
+            "Applying frequency offset correction: %.4f Hz (sampling_rate=%.0f Hz)",
+            float(offset_arr.reshape(-1)[0]),
+            sampling_rate,
         )
 
     n = samples.shape[-1]

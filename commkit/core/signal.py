@@ -279,8 +279,10 @@ class Signal(BaseModel):
             # We want (Channels, Time).
             if s0 > s1 and s0 > 32:  # Heuristic: Time dim usually > 32
                 logger.warning(
-                    f"Samples shape is {arr.shape}. Converting to Time-Last convention (N_channels={s1}, N_samples={s0}). "
-                    "Please provide input as (N_channels, N_samples) for MIMO signals."
+                    "Samples shape is %s. Converting to Time-Last convention (N_channels=%s, N_samples=%s). Please provide input as (N_channels, N_samples) for MIMO signals.",
+                    arr.shape,
+                    s1,
+                    s0,
                 )
                 arr = arr.T  # Transpose to (Channels, Time)
 
@@ -526,7 +528,7 @@ class Signal(BaseModel):
         else:
             width = max(len(prop) for prop, _ in rows)
             text = "\n".join(f"{prop.ljust(width)}  {val}" for prop, val in rows)
-            logger.info("\n" + text)
+            logger.info("\n%s", text)
 
     def copy(self) -> "Signal":  # type: ignore[override]
         """

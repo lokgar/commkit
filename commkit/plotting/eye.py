@@ -254,7 +254,7 @@ def plot_eye_diagram(
     if sps is None:
         raise ValueError("plot_eye_diagram() requires sps for array input.")
 
-    logger.debug(f"Generating eye diagram ({type} mode).")
+    logger.debug("Generating eye diagram (%s mode).", type)
 
     if sps % 1 != 0:
         raise ValueError("sps must be an integer")

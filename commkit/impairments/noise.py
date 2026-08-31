@@ -55,7 +55,7 @@ def apply_awgn(
     >>> sig = generate_pam(order=4, num_symbols=1000, sps=4, symbol_rate=1e6)
     >>> noisy = apply_awgn(sig.samples, esn0_db=20, sps=sig.sps)
     """
-    logger.info(f"Adding AWGN (Es/N0 target: {esn0_db:.2f} dB).")
+    logger.info("Adding AWGN (Es/N0 target: %.2f dB).", esn0_db)
 
     samples, xp, _ = dispatch(samples)
 

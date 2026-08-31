@@ -156,7 +156,7 @@ def _log_equalizer_exit(
                 mse_db = 10.0 * np.log10(mse_final + 1e-30)
                 if want_log:
                     logger.info(
-                        f"{name}: exit MSE={mse_db:.1f} dB (final {window} symbols)"
+                        "%s: exit MSE=%.1f dB (final %s symbols)", name, mse_db, window
                     )
             else:  # MIMO: per-channel MSE; keep the mean for the convergence check
                 per_ch_mse = np.mean(np.abs(tail) ** 2, axis=-1)  # (C,)
@@ -166,7 +166,7 @@ def _log_equalizer_exit(
                         for c, m in enumerate(per_ch_mse)
                     )
                     logger.info(
-                        f"{name}: exit MSE (final {window} symbols): {parts} dB"
+                        "%s: exit MSE (final %s symbols): %s dB", name, window, parts
                     )
                 mse_final = float(np.mean(per_ch_mse))
                 mse_db = 10.0 * np.log10(mse_final + 1e-30)
@@ -177,10 +177,10 @@ def _log_equalizer_exit(
                 mse_init = float(np.mean(np.abs(head) ** 2))
                 if mse_init > 0 and mse_final > mse_init * 0.9:
                     logger.warning(
-                        f"{name}: convergence may be poor - "
-                        f"final MSE ({mse_db:.1f} dB) not significantly below "
-                        f"initial MSE ({10.0 * np.log10(mse_init + 1e-30):.1f} dB). "
-                        "Consider reducing step_size or increasing signal length."
+                        "%s: convergence may be poor - final MSE (%.1f dB) not significantly below initial MSE (%.1f dB). Consider reducing step_size or increasing signal length.",
+                        name,
+                        mse_db,
+                        10.0 * np.log10(mse_init + 1e-30),
                     )
 
     if debug_plot:

@@ -104,12 +104,13 @@ target-version = "py312"
 # choices and domain false-positives (Greek letters in math docstrings, int()
 # casts, test tuple-unpacking) and can be ratcheted in per-module later, the
 # same way mypy strictness is.
-select = ["E", "F", "I", "UP", "B"]
+select = ["E", "F", "I", "UP", "B", "G"]
 ignore = [
     "E501",  # line length is handled by the formatter; long strings/URLs are fine
     "B008",  # function calls in argument defaults (common in DSP signatures)
     "B905",  # zip() strict= is opinionated; lengths are invariant-guaranteed here
 ]
+logger-objects = ["commkit.logger.logger"]
 
 [tool.ruff.lint.per-file-ignores]
 # Numba/JAX kernel factories rely on closures and loop-variable rebinding that

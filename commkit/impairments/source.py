@@ -112,8 +112,10 @@ def generate_phase_noise(
     and GPU (same convention as :func:`~commkit.helpers.generate_bits`).
     """
     logger.info(
-        f"Generating phase noise (linewidth={linewidth:.3g} Hz, "
-        f"flicker={flicker:.3g} Hz², {num_streams} stream(s))."
+        "Generating phase noise (linewidth=%.3g Hz, flicker=%.3g Hz², %s stream(s)).",
+        linewidth,
+        flicker,
+        num_streams,
     )
 
     rng = np.random.default_rng(seed)
@@ -183,8 +185,10 @@ def apply_phase_noise(
     ...                           sampling_rate=sig.sampling_rate)
     """
     logger.info(
-        f"Applying phase noise (linewidth={linewidth:.3g} Hz, "
-        f"flicker={flicker:.3g} Hz², shared_lo={shared_lo})."
+        "Applying phase noise (linewidth=%.3g Hz, flicker=%.3g Hz², shared_lo=%s).",
+        linewidth,
+        flicker,
+        shared_lo,
     )
 
     samples, xp, _ = dispatch(samples)

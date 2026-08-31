@@ -177,8 +177,12 @@ def recover_carrier_phase_pilot_symbols(
         phi_mean_deg = float(np.mean(phi_full_np)) * 180.0 / np.pi
         phi_std_deg = float(np.std(phi_full_np)) * 180.0 / np.pi
         logger.info(
-            f"CPR (pilot-aided, {interpolation}): phase mean={phi_mean_deg:.2f}°, "
-            f"std={phi_std_deg:.2f}° [P={P} pilots, C={C}]"
+            "CPR (pilot-aided, %s): phase mean=%.2f°, std=%.2f° [P=%s pilots, C=%s]",
+            interpolation,
+            phi_mean_deg,
+            phi_std_deg,
+            P,
+            C,
         )
 
     if debug_plot:
@@ -472,9 +476,9 @@ def recover_carrier_phase_pilot_tone(
     df = sampling_rate / N
     if bandwidth < df:
         logger.warning(
-            f"CPR (pilot-tone): bandwidth={bandwidth:.3g} Hz is below the FFT "
-            f"resolution df=fs/N={df:.3g} Hz; the extraction window may capture too few "
-            f"bins. Increase bandwidth or the record length N."
+            "CPR (pilot-tone): bandwidth=%.3g Hz is below the FFT resolution df=fs/N=%.3g Hz; the extraction window may capture too few bins. Increase bandwidth or the record length N.",
+            bandwidth,
+            df,
         )
 
     # Isolate the tone and strip the nominal carrier (shared core).
@@ -519,9 +523,16 @@ def recover_carrier_phase_pilot_tone(
         phi_std_deg = float(np.std(theta_np)) * 180.0 / np.pi
         mode_str = "joint" if (joint_channels and C > 1) else "independent"
         logger.info(
-            f"CPR (pilot-tone, {window}, {mode_str}): phase mean={phi_mean_deg:.2f}°, "
-            f"std={phi_std_deg:.2f}° [f_p={tone_frequency:.3g} Hz, B={bandwidth:.3g} Hz, "
-            f"refine={refine_tone}, remove_foe={remove_frequency_offset}, C={C}]"
+            "CPR (pilot-tone, %s, %s): phase mean=%.2f°, std=%.2f° [f_p=%.3g Hz, B=%.3g Hz, refine=%s, remove_foe=%s, C=%s]",
+            window,
+            mode_str,
+            phi_mean_deg,
+            phi_std_deg,
+            tone_frequency,
+            bandwidth,
+            refine_tone,
+            remove_frequency_offset,
+            C,
         )
 
     if debug_plot:
@@ -730,8 +741,10 @@ def recover_carrier_phase_pilot_tones(
             coh = float(xp.mean(xp.abs(c_k))) / np.sqrt(max(sig[k] * sig[ref], 1e-30))
             if snr[k] < snr_gate or coh < coherence_gate:
                 logger.info(
-                    f"CPR (pilot-tones): tone {k} dropped "
-                    f"(SNR={10 * np.log10(snr[k]):.1f} dB, coherence={coh:.2f})."
+                    "CPR (pilot-tones): tone %s dropped (SNR=%.1f dB, coherence=%.2f).",
+                    k,
+                    10 * np.log10(snr[k]),
+                    coh,
                 )
                 if want_diag:
                     delta_diag.append(
@@ -756,9 +769,14 @@ def recover_carrier_phase_pilot_tones(
         phi_np = to_device(phi, "cpu")
     if _want_log:
         logger.info(
-            f"CPR (pilot-tones, MRC): phase std={float(np.std(phi_np)) * 180 / np.pi:.2f}°, "
-            f"[K={K}, used={used}, ref={ref}, B={bandwidth:.3g} Hz, "
-            f"diff_B={differential_bandwidth:.3g} Hz, C={C}]"
+            "CPR (pilot-tones, MRC): phase std=%.2f°, [K=%s, used=%s, ref=%s, B=%.3g Hz, diff_B=%.3g Hz, C=%s]",
+            float(np.std(phi_np)) * 180 / np.pi,
+            K,
+            used,
+            ref,
+            bandwidth,
+            differential_bandwidth,
+            C,
         )
 
     if debug_plot:

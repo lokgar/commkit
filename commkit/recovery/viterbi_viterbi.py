@@ -99,11 +99,11 @@ def recover_carrier_phase_viterbi_viterbi(
         _min_bs = max(8, 4 * int(np.ceil(order**0.5)))
         if block_size < _min_bs:
             logger.warning(
-                f"CPR (VV): block_size={block_size} is too small for {order}-QAM. "
-                f"Individual QAM symbols' M-th powers do not cancel the data modulation; "
-                f"insufficient averaging causes block-phase variance that exceeds the "
-                f"π/M unwrap threshold, producing persistent 2π/M phase slips. "
-                f"Recommended minimum for {order}-QAM: block_size ≥ {_min_bs}."
+                "CPR (VV): block_size=%s is too small for %s-QAM. Individual QAM symbols' M-th powers do not cancel the data modulation; insufficient averaging causes block-phase variance that exceeds the π/M unwrap threshold, producing persistent 2π/M phase slips. Recommended minimum for %s-QAM: block_size ≥ %s.",
+                block_size,
+                order,
+                order,
+                _min_bs,
             )
 
     # Reshape for block processing: (C, N_blocks, block_size).
@@ -200,9 +200,15 @@ def recover_carrier_phase_viterbi_viterbi(
         phi_std_deg = float(np.std(phi_full_np)) * 180.0 / np.pi
         mode_str = "joint" if (joint_channels and C > 1) else "independent"
         logger.info(
-            f"CPR (Viterbi-Viterbi, M={M}, {mode_str}): phase mean={phi_mean_deg:.2f}°, "
-            f"std={phi_std_deg:.2f}° [{N_blocks} blocks x {block_size} symbols, C={C}, "
-            f"cycle_slip_correction={cycle_slip_correction}]"
+            "CPR (Viterbi-Viterbi, M=%s, %s): phase mean=%.2f°, std=%.2f° [%s blocks x %s symbols, C=%s, cycle_slip_correction=%s]",
+            M,
+            mode_str,
+            phi_mean_deg,
+            phi_std_deg,
+            N_blocks,
+            block_size,
+            C,
+            cycle_slip_correction,
         )
 
     if debug_plot:

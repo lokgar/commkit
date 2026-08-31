@@ -469,9 +469,13 @@ def lms(
 
     n_train_log = training_symbols.shape[-1] if training_symbols is not None else 0
     logger.info(
-        f"LMS equalizer: num_taps={num_taps}, mu={step_size}, sps={sps}, "
-        f"backend={backend}, n_train={n_train_log}"
-        + (f", cpr={cpr_type}" if cpr_type else "")
+        "LMS equalizer: num_taps=%s, mu=%s, sps=%s, backend=%s, n_train=%s%s",
+        num_taps,
+        step_size,
+        sps,
+        backend,
+        n_train_log,
+        f", cpr={cpr_type}" if cpr_type else "",
     )
     if sps > 1:
         logger.warning(
@@ -494,8 +498,9 @@ def lms(
 
     if training_symbols is not None and training_symbols.shape[-1] > n_sym:
         logger.warning(
-            f"training_symbols length ({training_symbols.shape[-1]}) exceeds "
-            f"available symbol count ({n_sym}); excess training symbols will be ignored."
+            "training_symbols length (%s) exceeds available symbol count (%s); excess training symbols will be ignored.",
+            training_symbols.shape[-1],
+            n_sym,
         )
 
     c_tap = center_tap if center_tap is not None else num_taps // 2
@@ -1296,9 +1301,8 @@ def rls(
     """
     if sps > 1:
         logger.warning(
-            f"RLS is mathematically ill-conditioned for fractionally-spaced signals (sps={sps}). "
-            "The noise-only null-subspace creates a singular correlation matrix, causing tap bloat. "
-            "Use LMS for fractionally-spaced equalization unless heavy Tikhonov regularization is applied."
+            "RLS is mathematically ill-conditioned for fractionally-spaced signals (sps=%s). The noise-only null-subspace creates a singular correlation matrix, causing tap bloat. Use LMS for fractionally-spaced equalization unless heavy Tikhonov regularization is applied.",
+            sps,
         )
 
     if cpr_type is not None and cpr_type not in ("pll", "bps"):
@@ -1306,10 +1310,15 @@ def rls(
 
     n_train_log = training_symbols.shape[-1] if training_symbols is not None else 0
     logger.info(
-        f"RLS equalizer: num_taps={num_taps}, forgetting_factor={forgetting_factor}, "
-        f"delta={delta:.2e}, leakage={leakage:.2e}, sps={sps}, "
-        f"backend={backend}, n_train={n_train_log}"
-        + (f", cpr={cpr_type}" if cpr_type else "")
+        "RLS equalizer: num_taps=%s, forgetting_factor=%s, delta=%.2e, leakage=%.2e, sps=%s, backend=%s, n_train=%s%s",
+        num_taps,
+        forgetting_factor,
+        delta,
+        leakage,
+        sps,
+        backend,
+        n_train_log,
+        f", cpr={cpr_type}" if cpr_type else "",
     )
     if sps > 1:
         logger.warning(
@@ -1334,8 +1343,9 @@ def rls(
 
     if training_symbols is not None and training_symbols.shape[-1] > n_sym:
         logger.warning(
-            f"training_symbols length ({training_symbols.shape[-1]}) exceeds "
-            f"available symbol count ({n_sym}); excess training symbols will be ignored."
+            "training_symbols length (%s) exceeds available symbol count (%s); excess training symbols will be ignored.",
+            training_symbols.shape[-1],
+            n_sym,
         )
 
     # Early-halt boundary: freeze W and P once the sliding window reaches the
@@ -1344,10 +1354,8 @@ def rls(
     tail_trim = num_taps // 2
     if tail_trim > 0:
         logger.warning(
-            f"RLS tail trim: last {tail_trim} symbols removed from y_hat "
-            "(zero-padding contamination zone). Trim reference arrays to match: "
-            "source_symbols = source_symbols[..., :-result.tail_trim], "
-            "source_bits = source_bits[..., :-result.tail_trim * bits_per_symbol]."
+            "RLS tail trim: last %s symbols removed from y_hat (zero-padding contamination zone). Trim reference arrays to match: source_symbols = source_symbols[..., :-result.tail_trim], source_bits = source_bits[..., :-result.tail_trim * bits_per_symbol].",
+            tail_trim,
         )
 
     c_tap = center_tap if center_tap is not None else num_taps // 2
@@ -1639,8 +1647,12 @@ def rls(
             ).astype(np.complex64)
 
     logger.debug(
-        f"RLS internals: n_sym={n_sym}, n_train={n_train_log}, "
-        f"n_update_halt={n_update_halt}, leakage={leakage:.2e}, delta={delta:.2e}"
+        "RLS internals: n_sym=%s, n_train=%s, n_update_halt=%s, leakage=%.2e, delta=%.2e",
+        n_sym,
+        n_train_log,
+        n_update_halt,
+        leakage,
+        delta,
     )
 
     train_full, n_train_aligned = _prepare_training_jax(
@@ -2044,8 +2056,13 @@ def cma(
     use_pilots = pilot_ref is not None and pilot_mask is not None
     _validate_block_mode(update_mode, block_len, backend, store_weights=store_weights)
     logger.info(
-        f"CMA equalizer: num_taps={num_taps}, mu={step_size}, sps={sps}, "
-        f"backend={backend}, pilot_aided={use_pilots}, pilot_gain_db={pilot_gain_db}"
+        "CMA equalizer: num_taps=%s, mu=%s, sps=%s, backend=%s, pilot_aided=%s, pilot_gain_db=%s",
+        num_taps,
+        step_size,
+        sps,
+        backend,
+        use_pilots,
+        pilot_gain_db,
     )
     if sps > 1:
         logger.warning(
@@ -2082,11 +2099,14 @@ def cma(
             if _e_ps < 1.0 - 1e-6:
                 _c_ps = np.float32(1.0 / np.sqrt(_e_ps))
             logger.debug(
-                f"CMA R2 (PS-QAM pmf-weighted, {modulation.upper()}-{order}): {r2:.4f}"
+                "CMA R2 (PS-QAM pmf-weighted, %s-%s): %.4f",
+                modulation.upper(),
+                order,
+                r2,
             )
         else:
             r2 = float(np.mean(np.abs(const) ** 4) / np.mean(np.abs(const) ** 2))
-            logger.debug(f"CMA R2 from {modulation.upper()}-{order}: {r2:.4f}")
+            logger.debug("CMA R2 from %s-%s: %.4f", modulation.upper(), order, r2)
     else:
         r2 = 1.0
 
@@ -2504,8 +2524,13 @@ def rde(
     use_pilots = pilot_ref is not None and pilot_mask is not None
     _validate_block_mode(update_mode, block_len, backend, store_weights=store_weights)
     logger.info(
-        f"RDE equalizer: num_taps={num_taps}, mu={step_size}, sps={sps}, "
-        f"backend={backend}, pilot_aided={use_pilots}, pilot_gain_db={pilot_gain_db}"
+        "RDE equalizer: num_taps=%s, mu=%s, sps=%s, backend=%s, pilot_aided=%s, pilot_gain_db=%s",
+        num_taps,
+        step_size,
+        sps,
+        backend,
+        use_pilots,
+        pilot_gain_db,
     )
     if sps > 1:
         logger.warning(
@@ -2543,8 +2568,10 @@ def rde(
         # Round to 6 significant digits to merge numerically identical radii
         radii = np.unique(np.round(raw_radii, 6))
         logger.debug(
-            f"RDE radii from {modulation.upper()}-{order}: "
-            + ", ".join(f"{r:.4f}" for r in radii)
+            "RDE radii from %s-%s: %s",
+            modulation.upper(),
+            order,
+            ", ".join(f"{r:.4f}" for r in radii),
         )
     else:
         radii = np.array([1.0], dtype=np.float32)

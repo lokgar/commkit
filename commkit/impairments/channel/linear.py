@@ -74,7 +74,7 @@ def apply_pmd(
     >>> samples = sig.samples  # shape (2, N), dual-pol
     >>> distorted = apply_pmd(samples, sig.sampling_rate, dgd=5e-12, theta=np.pi/5)
     """
-    logger.info(f"Applying PMD (DGD={dgd:.2e} s, theta={theta:.3f} rad).")
+    logger.info("Applying PMD (DGD=%.2e s, theta=%.3f rad).", dgd, theta)
 
     samples, xp, _ = dispatch(samples)
 
@@ -169,8 +169,9 @@ def apply_polarization_mixing(
     ...                                     drift_rate_rad_per_sym=1e-3)
     """
     logger.info(
-        f"Applying polarization mixing (theta={theta if np.ndim(theta) == 0 else 'array'}, "
-        f"drift={drift_rate_rad_per_sym:.3g} rad/sym)."
+        "Applying polarization mixing (theta=%s, drift=%.3g rad/sym).",
+        theta if np.ndim(theta) == 0 else "array",
+        drift_rate_rad_per_sym,
     )
 
     samples, xp, _ = dispatch(samples)
@@ -275,8 +276,10 @@ def apply_chromatic_dispersion(
     ...     center_wavelength_nm=1550.0, sampling_rate=sig.sampling_rate)
     """
     logger.info(
-        f"Applying CD (D={dispersion_ps_nm_km} ps/nm/km, "
-        f"L={fiber_length_km} km, λ={center_wavelength_nm} nm)."
+        "Applying CD (D=%s ps/nm/km, L=%s km, λ=%s nm).",
+        dispersion_ps_nm_km,
+        fiber_length_km,
+        center_wavelength_nm,
     )
 
     samples, xp, _ = dispatch(samples)

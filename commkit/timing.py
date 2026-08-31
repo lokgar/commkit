@@ -69,7 +69,7 @@ def barker_sequence(length: int) -> ArrayType:
     if is_cupy_available():
         seq = to_device(seq, "gpu")
 
-    logger.debug(f"Generated Barker-{length} sequence.")
+    logger.debug("Generated Barker-%s sequence.", length)
     return seq
 
 
@@ -127,7 +127,7 @@ def zadoff_chu_sequence(length: int, root: int = 1) -> ArrayType:
 
     seq = seq.astype(xp.complex64)
 
-    logger.debug(f"Generated ZC sequence: length={length}, root={root}.")
+    logger.debug("Generated ZC sequence: length=%s, root=%s.", length, root)
     return seq
 
 
@@ -611,14 +611,15 @@ def estimate_timing(
         p_val = float(metrics_np[ch])
         if c_val < 0.5 and p_val >= threshold:
             logger.warning(
-                f"Channel {ch}: Peak phase coherence is very low ({c_val:.2f}), but "
-                f"peak is visually prominent (PAPR={p_val:.1f} >= {threshold}). "
-                f"This suggests strong Carrier Frequency Offset (CFO) or uncompensated "
-                f"dispersion destroying phase alignment over the sequence length."
+                "Channel %s: Peak phase coherence is very low (%.2f), but peak is visually prominent (PAPR=%.1f >= %s). This suggests strong Carrier Frequency Offset (CFO) or uncompensated dispersion destroying phase alignment over the sequence length.",
+                ch,
+                c_val,
+                p_val,
+                threshold,
             )
         else:
             logger.debug(
-                f"Channel {ch}: Peak prominence = {p_val:.1f}, coherence = {c_val:.2f}"
+                "Channel %s: Peak prominence = %.1f, coherence = %.2f", ch, p_val, c_val
             )
 
     # === Threshold Check === (reuses the host copy - no further syncs)
@@ -631,8 +632,10 @@ def estimate_timing(
         _m = float(metrics_np[_ch])
         if _m < threshold:
             logger.warning(
-                f"Channel {_ch}: correlation metric {_m:.3f} is below threshold "
-                f"{threshold}. Integer offset for this channel may be unreliable."
+                "Channel %s: correlation metric %.3f is below threshold %s. Integer offset for this channel may be unreliable.",
+                _ch,
+                _m,
+                threshold,
             )
 
     # === Skew Check (Robust) ===
@@ -645,11 +648,12 @@ def estimate_timing(
 
             if spread > 0:
                 logger.warning(
-                    f"Skew detected among valid channels! "
-                    f"Valid Peaks: {valid_peaks.tolist()}. Spread: {spread} samples."
+                    "Skew detected among valid channels! Valid Peaks: %s. Spread: %s samples.",
+                    valid_peaks.tolist(),
+                    spread,
                 )
             else:
-                logger.info(f"Channels aligned (spread {spread}).")
+                logger.info("Channels aligned (spread %s).", spread)
 
     # Each channel's peak is found independently so hardware skew is preserved.
     integer_offsets = xp.maximum(0, peak_indices + offset)
@@ -674,10 +678,10 @@ def estimate_timing(
     if logger.isEnabledFor(logging.INFO):
         # Three .tolist() host syncs, only for this summary line.
         logger.info(
-            "Timing estimated. "
-            f"Integer: {integer_offsets.tolist()}, "
-            f"Fractional: {fractional_offsets.tolist()}, "
-            f"Metrics: {metrics.tolist()}"
+            "Timing estimated. Integer: %s, Fractional: %s, Metrics: %s",
+            integer_offsets.tolist(),
+            fractional_offsets.tolist(),
+            metrics.tolist(),
         )
 
     return integer_offsets, fractional_offsets
@@ -823,13 +827,13 @@ def correct_timing(
 
     if mode == "slice":
         logger.warning(
-            f"correct_timing(mode='slice'): output is shorter than input "
-            f"(trimmed by {int(xp.max(xp.asarray(integer_offset)))} samples). "
-            "Signal length metadata (e.g. duration) will no longer match the original."
+            "correct_timing(mode='slice'): output is shorter than input (trimmed by %s samples). Signal length metadata (e.g. duration) will no longer match the original.",
+            int(xp.max(xp.asarray(integer_offset))),
         )
     logger.info(
-        f"Timing corrected: integer=applied, "
-        f"fractional={'applied' if apply_frac else 'skipped'}, mode={mode!r}."
+        "Timing corrected: integer=applied, fractional=%s, mode=%r.",
+        "applied" if apply_frac else "skipped",
+        mode,
     )
 
     if was_1d:
