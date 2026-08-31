@@ -54,10 +54,10 @@ CommKit is a Python library for digital communications research that treats hard
 
 ```bash
 # Using uv (Recommended)
-uv pip install git+https://github.com/lokgar/commkit.git
+uv pip install commkit
 
 # Or with standard pip
-pip install git+https://github.com/lokgar/commkit.git
+pip install commkit
 ```
 
 ### GPU Support
@@ -66,10 +66,10 @@ To install with CUDA acceleration (includes JAX CUDA 13 and CuPy stacks):
 
 ```bash
 # Using uv
-uv pip install "commkit[gpu] @ git+https://github.com/lokgar/commkit.git"
+uv pip install "commkit[gpu]"
 
 # Or with standard pip
-pip install "commkit[gpu] @ git+https://github.com/lokgar/commkit.git"
+pip install "commkit[gpu]"
 ```
 
 > [!NOTE]
