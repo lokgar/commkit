@@ -5,6 +5,7 @@ import logging
 import numpy as np
 
 from ..backend import ArrayType, dispatch, to_device
+from ..helpers import as_2d, restore_1d
 from ..logger import logger
 from .corrections import correct_cycle_slips
 
@@ -97,9 +98,7 @@ def recover_carrier_phase_bps(
     from ..mapping import constellation_power, gray_constellation
 
     symbols, xp, _ = dispatch(symbols)
-    was_1d = symbols.ndim == 1
-    if was_1d:
-        symbols = symbols[None, :]
+    symbols, was_1d = as_2d(symbols, name="symbols")
     C, N = symbols.shape
 
     # Normalise each channel to unit average power so the metric is computed at
@@ -332,6 +331,4 @@ def recover_carrier_phase_bps(
             title="CPR - Blind Phase Search",
         )
 
-    if was_1d:
-        return phi_full[0]
-    return phi_full
+    return restore_1d(was_1d, phi_full)

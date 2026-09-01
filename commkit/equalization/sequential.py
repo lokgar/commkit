@@ -7,7 +7,7 @@ from typing import Any
 import numpy as np
 
 from ..backend import ArrayType, _get_jax, dispatch, from_jax, to_device, to_jax
-from ..helpers import resolve_pll_gains
+from ..helpers import resolve_pll_gains, restore_1d
 from ..logger import logger
 from ._block import (
     _build_slicer_constellation,
@@ -752,7 +752,7 @@ def lms(
                 input_norm_factor=eq_norm,
             )
             phi_t = xp.asarray(phase_out.T)  # (C, N_sym)
-            result.phase_trajectory = phi_t[0] if was_1d else phi_t
+            result.phase_trajectory = restore_1d(was_1d, phi_t)
             result.cpr_state = CPRState(
                 pll_phi=pll_phi.copy(),
                 pll_freq=pll_freq.copy(),
@@ -990,7 +990,7 @@ def lms(
         # host-side and np.asarray never sees a CuPy array.
         phi_np = to_device(from_jax(phi_jax), "cpu")  # (N_sym, C)
         phi_t = xp.asarray(phi_np.T)  # (C, N_sym)
-        result.phase_trajectory = phi_t[0] if was_1d else phi_t
+        result.phase_trajectory = restore_1d(was_1d, phi_t)
         result.cpr_state = CPRState(
             pll_phi=to_device(from_jax(pll_phi_f), "cpu"),
             pll_freq=to_device(from_jax(pll_freq_f), "cpu"),
@@ -1564,7 +1564,7 @@ def rls(
                 input_norm_factor=eq_norm,
             )
             phi_t = xp.asarray(phase_out[:n_update_halt].T)  # (C, n_update_halt)
-            result.phase_trajectory = phi_t[0] if was_1d else phi_t
+            result.phase_trajectory = restore_1d(was_1d, phi_t)
             result.cpr_state = CPRState(
                 pll_phi=pll_phi.copy(),
                 pll_freq=pll_freq.copy(),
@@ -1834,7 +1834,7 @@ def rls(
         # host-side and np.asarray never sees a CuPy array.
         phi_np = to_device(from_jax(phi_jax), "cpu")  # (N_sym, C)
         phi_t = xp.asarray(phi_np[:n_update_halt].T)  # (C, n_update_halt)
-        result.phase_trajectory = phi_t[0] if was_1d else phi_t
+        result.phase_trajectory = restore_1d(was_1d, phi_t)
         result.cpr_state = CPRState(
             pll_phi=to_device(from_jax(pll_phi_f), "cpu"),
             pll_freq=to_device(from_jax(pll_freq_f), "cpu"),

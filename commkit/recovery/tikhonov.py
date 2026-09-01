@@ -6,6 +6,7 @@ import numpy as np
 
 from ..backend import ArrayType, dispatch, to_device
 from ..frequency import _modulation_power_m
+from ..helpers import as_2d, restore_1d
 from ..logger import logger
 from .corrections import correct_cycle_slips
 
@@ -249,9 +250,7 @@ def recover_carrier_phase_tikhonov(
         raise ValueError(f"Unknown method {method!r}. Choose 'exact' or 'sskf'.")
 
     symbols, xp, sp = dispatch(symbols)
-    was_1d = symbols.ndim == 1
-    if was_1d:
-        symbols = symbols[None, :]
+    symbols, was_1d = as_2d(symbols, name="symbols")
     C, N = symbols.shape
 
     M = _modulation_power_m(modulation, order)
@@ -419,6 +418,4 @@ def recover_carrier_phase_tikhonov(
             title=f"CPR - Tikhonov-{method.upper()}",
         )
 
-    if was_1d:
-        return phi_full[0]
-    return phi_full
+    return restore_1d(was_1d, phi_full)

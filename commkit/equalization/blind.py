@@ -7,6 +7,7 @@ from typing import Any
 import numpy as np
 
 from ..backend import ArrayType
+from ..helpers import broadcast_channels
 from ._block import _block_fdaf_blind
 from ._common import _godard_radius, _rde_ring_radii
 from .result import EqualizerResult
@@ -210,8 +211,8 @@ def build_pilot_ref(
     n_pilots = len(pilot_positions)
 
     if pilot_symbols.ndim == 1:
-        pilot_symbols = np.broadcast_to(
-            pilot_symbols[np.newaxis, :], (num_ch, n_pilots)
+        pilot_symbols = broadcast_channels(
+            pilot_symbols, num_ch, np, name="pilot_symbols"
         )
     else:
         pilot_symbols = np.asarray(pilot_symbols, dtype=np.complex64)

@@ -8,6 +8,7 @@ from typing import Any
 import numpy as np
 
 from ..backend import ArrayType, _get_jax, dispatch, to_device, to_jax
+from ..helpers import as_2d
 from ..logger import logger
 from ._common import (
     _build_padded_samples,
@@ -715,9 +716,7 @@ def block_lms(
             "Move samples to GPU (CuPy) to benefit from block-FFT acceleration."
         )
 
-    was_1d = samples.ndim == 1
-    if was_1d:
-        samples = samples[np.newaxis, :]
+    samples, was_1d = as_2d(samples, name="samples")
 
     C = samples.shape[0]
     N = samples.shape[1]
@@ -1598,9 +1597,7 @@ def _block_fdaf_blind(
             kind,
         )
 
-    was_1d = samples.ndim == 1
-    if was_1d:
-        samples = samples[np.newaxis, :]
+    samples, was_1d = as_2d(samples, name="samples")
     C = samples.shape[0]
     N = samples.shape[1]
     n_sym = N // sps

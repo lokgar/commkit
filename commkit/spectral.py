@@ -13,6 +13,7 @@ import numpy as np
 
 from .backend import ArrayType, dispatch
 from .core.signal import Signal
+from .helpers import as_2d, restore_1d
 from .logger import logger
 
 
@@ -225,9 +226,7 @@ def add_pilot_tone(
         )
 
     samples, xp, _ = dispatch(samples)
-    was_1d = samples.ndim == 1
-    if was_1d:
-        samples = samples[None, :]  # (1, N)
+    samples, was_1d = as_2d(samples, name="samples")
     C, N = samples.shape
 
     # Normalise ``frequency`` to a per-channel (C,) host array.  A scalar is
@@ -315,9 +314,9 @@ def add_pilot_tone(
         N,
     )
 
-    out = out[0] if was_1d else out
+    samples_out = restore_1d(was_1d, out)
     actual_frequency: float | list[float] = actual[0] if scalar_input else actual
-    return out, actual_frequency
+    return samples_out, actual_frequency
 
 
 def welch_psd(

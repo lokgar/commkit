@@ -7,6 +7,7 @@ device model (the widely-linear I/Q mixing) and are read as a pair.
 import math
 
 from ..backend import ArrayType, dispatch
+from ..helpers import as_2d, restore_1d
 from ..logger import logger
 
 __all__ = [
@@ -115,9 +116,7 @@ def compensate_iq_imbalance_lowdin(samples: ArrayType) -> ArrayType:
 
     samples, xp, _ = dispatch(samples)
 
-    was_1d = samples.ndim == 1
-    if was_1d:
-        samples = samples[xp.newaxis, :]  # (1, N)
+    samples, was_1d = as_2d(samples, name="samples")
 
     C, N = samples.shape
     result = xp.empty_like(samples)
@@ -147,9 +146,7 @@ def compensate_iq_imbalance_lowdin(samples: ArrayType) -> ArrayType:
 
         result[ch] = s_corr
 
-    if was_1d:
-        return result[0]
-    return result
+    return restore_1d(was_1d, result)
 
 
 def compensate_iq_imbalance_gram_schmidt(samples: ArrayType) -> ArrayType:
@@ -190,9 +187,7 @@ def compensate_iq_imbalance_gram_schmidt(samples: ArrayType) -> ArrayType:
 
     samples, xp, _ = dispatch(samples)
 
-    was_1d = samples.ndim == 1
-    if was_1d:
-        samples = samples[xp.newaxis, :]  # (1, N)
+    samples, was_1d = as_2d(samples, name="samples")
 
     C, N = samples.shape
     result = xp.empty_like(samples)
@@ -224,6 +219,4 @@ def compensate_iq_imbalance_gram_schmidt(samples: ArrayType) -> ArrayType:
 
         result[ch] = s_corr
 
-    if was_1d:
-        return result[0]
-    return result
+    return restore_1d(was_1d, result)

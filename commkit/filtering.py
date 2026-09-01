@@ -12,7 +12,7 @@ import scipy
 
 from .backend import ArrayType, dispatch, to_device
 from .core.signal import Signal
-from .helpers import normalize
+from .helpers import as_2d, normalize, restore_1d
 from .logger import logger
 from .multirate import expand
 
@@ -679,9 +679,7 @@ def ols_fir_filter(
     L = len(taps)
     half = L // 2
 
-    was_1d = samples.ndim == 1
-    if was_1d:
-        samples = samples[None, :]
+    samples, was_1d = as_2d(samples, name="samples")
 
     N = samples.shape[-1]
 
@@ -719,7 +717,7 @@ def ols_fir_filter(
         out = out.astype(
             out_dtype
         )  # guard complex inputs (e.g. complex64 -> complex128)
-    return out[0] if was_1d else out
+    return restore_1d(was_1d, out)
 
 
 def shaping_filter_taps(sig: Signal) -> ArrayType:
@@ -1093,9 +1091,7 @@ def compensate_chromatic_dispersion(
     )
 
     samples, xp, _ = dispatch(samples)
-    was_1d = samples.ndim == 1
-    if was_1d:
-        samples = samples[None, :]
+    samples, was_1d = as_2d(samples, name="samples")
     C, N = samples.shape
 
     # Convert to SI
@@ -1115,6 +1111,4 @@ def compensate_chromatic_dispersion(
     if result.dtype != samples.dtype:
         result = result.astype(samples.dtype)
 
-    if was_1d:
-        return result[0]
-    return result
+    return restore_1d(was_1d, result)

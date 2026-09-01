@@ -5,6 +5,7 @@ from __future__ import annotations
 import numpy as np
 
 from ..backend import dispatch, from_jax, to_device
+from ..helpers import restore_1d
 from ..logger import logger
 from .result import CPRState, EqualizerResult
 
@@ -439,8 +440,7 @@ def _unpack_result_jax(
         errors = errors[..., :n_sym]
 
     if was_1d:
-        y_hat = y_hat[0]
-        errors = errors[0]
+        y_hat, errors = restore_1d(was_1d, y_hat, errors)
         W_final = W_final[0, 0]
 
     w_history = None
@@ -502,8 +502,7 @@ def _unpack_result_numpy(
         errors = errors[..., :n_sym]
 
     if was_1d:
-        y_hat = y_hat[0]
-        errors = errors[0]
+        y_hat, errors = restore_1d(was_1d, y_hat, errors)
         W = W[0, 0]
 
     w_history = None

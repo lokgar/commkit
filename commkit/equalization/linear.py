@@ -6,6 +6,7 @@ import numpy as np
 
 from ..backend import ArrayType, dispatch, to_device
 from ..filtering import _ols_backward, _ols_forward
+from ..helpers import as_2d, restore_1d
 from ..logger import logger
 from ._common import _build_padded_samples, _normalize_inputs
 
@@ -55,11 +56,9 @@ def zf_equalizer(
     # can still take the efficient scalar path for SISO channels.
     siso_channel = channel_estimate.ndim == 1
 
-    was_1d = samples.ndim == 1
-    if was_1d:
-        samples = samples[None, :]
-        if siso_channel:
-            channel_estimate = channel_estimate[None, None, :]
+    samples, was_1d = as_2d(samples, name="samples")
+    if was_1d and siso_channel:
+        channel_estimate = channel_estimate[None, None, :]
 
     num_ch, N = samples.shape
     L = channel_estimate.shape[-1] if channel_estimate.ndim > 0 else 1
@@ -128,7 +127,7 @@ def zf_equalizer(
             show=True,
         )
 
-    return out[0] if was_1d else out
+    return restore_1d(was_1d, out)
 
 
 def apply_taps(
@@ -201,11 +200,8 @@ def apply_taps(
     samples, xp, _ = dispatch(samples)
     weights = xp.asarray(weights)
 
-    was_1d = samples.ndim == 1
-
     # Promote SISO -> MIMO shapes for uniform butterfly code path
-    if was_1d:
-        samples = samples[None, :]  # (N,) -> (1, N)
+    samples, was_1d = as_2d(samples, name="samples")
     if weights.ndim == 1:
         weights = weights[None, None, :]  # (T,) -> (1, 1, T)
 
@@ -254,7 +250,7 @@ def apply_taps(
     # y[i, n] = Σ_j Σ_t conj(W[i,j,t]) * windows[j, n, t]
     y = xp.einsum("ijt,jnt->in", xp.conj(weights), windows)  # (C, N_sym)
 
-    return y[0] if was_1d else y
+    return restore_1d(was_1d, y)
 
 
 # -----------------------------------------------------------------------------

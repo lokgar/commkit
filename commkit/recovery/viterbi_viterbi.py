@@ -6,6 +6,7 @@ import numpy as np
 
 from ..backend import ArrayType, dispatch, to_device
 from ..frequency import _modulation_power_m
+from ..helpers import as_2d, restore_1d
 from ..logger import logger
 from .corrections import correct_cycle_slips
 
@@ -75,9 +76,7 @@ def recover_carrier_phase_viterbi_viterbi(
     noise prefer ``recover_carrier_phase_bps`` (no unwrap required).
     """
     symbols, xp, _ = dispatch(symbols)
-    was_1d = symbols.ndim == 1
-    if was_1d:
-        symbols = symbols[None, :]  # (1, N)
+    symbols, was_1d = as_2d(symbols, name="symbols")
     C, N = symbols.shape
 
     M = _modulation_power_m(modulation, order)
@@ -222,6 +221,4 @@ def recover_carrier_phase_viterbi_viterbi(
             title="CPR - Viterbi-Viterbi",
         )
 
-    if was_1d:
-        return phi_full[0]
-    return phi_full
+    return restore_1d(was_1d, phi_full)

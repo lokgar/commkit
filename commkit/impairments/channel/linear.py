@@ -5,6 +5,7 @@ import math
 import numpy as np
 
 from ...backend import ArrayType, dispatch
+from ...helpers import as_2d, require_channels, restore_1d
 from ...logger import logger
 
 __all__ = [
@@ -78,11 +79,9 @@ def apply_pmd(
 
     samples, xp, _ = dispatch(samples)
 
-    if samples.ndim != 2 or samples.shape[0] != 2:
-        raise ValueError(
-            f"apply_pmd requires dual-pol input with shape (2, N). "
-            f"Got shape {samples.shape}."
-        )
+    require_channels(
+        samples, 2, name="samples", description="dual-pol input with shape (2, N)"
+    )
 
     N = samples.shape[1]
     freqs = xp.fft.fftfreq(N, d=1.0 / sampling_rate)
@@ -176,11 +175,9 @@ def apply_polarization_mixing(
 
     samples, xp, _ = dispatch(samples)
 
-    if samples.ndim != 2 or samples.shape[0] != 2:
-        raise ValueError(
-            f"apply_polarization_mixing requires dual-pol input with shape (2, N). "
-            f"Got shape {samples.shape}."
-        )
+    require_channels(
+        samples, 2, name="samples", description="dual-pol input with shape (2, N)"
+    )
 
     N = samples.shape[1]
 
@@ -283,9 +280,7 @@ def apply_chromatic_dispersion(
     )
 
     samples, xp, _ = dispatch(samples)
-    was_1d = samples.ndim == 1
-    if was_1d:
-        samples = samples[None, :]
+    samples, was_1d = as_2d(samples, name="samples")
     _, N = samples.shape
 
     # Convert to SI
@@ -305,6 +300,4 @@ def apply_chromatic_dispersion(
     if result.dtype != samples.dtype:
         result = result.astype(samples.dtype)
 
-    if was_1d:
-        return result[0]
-    return result
+    return restore_1d(was_1d, result)

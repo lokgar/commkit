@@ -5,6 +5,7 @@ import math
 import numpy as np
 
 from ..backend import ArrayType, dispatch, is_cupy_available, to_device
+from ..helpers import as_2d, restore_1d
 from ..logger import logger
 
 __all__ = ["apply_phase_noise", "generate_phase_noise"]
@@ -192,9 +193,7 @@ def apply_phase_noise(
     )
 
     samples, xp, _ = dispatch(samples)
-    was_1d = samples.ndim == 1
-    if was_1d:
-        samples = samples[None, :]  # (1, N)
+    samples, was_1d = as_2d(samples, name="samples")
     C, N = samples.shape
 
     rng = np.random.default_rng(seed)
@@ -214,6 +213,4 @@ def apply_phase_noise(
     if result.dtype != samples.dtype:
         result = result.astype(samples.dtype)
 
-    if was_1d:
-        return result[0]
-    return result
+    return restore_1d(was_1d, result)

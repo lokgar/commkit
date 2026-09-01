@@ -14,6 +14,7 @@ import numpy as np
 
 from .backend import ArrayType, dispatch, is_cupy_available, to_device
 from .core import Preamble
+from .helpers import as_2d, restore_1d
 from .logger import logger
 
 # Window length for DFT-upsampling in estimate_fractional_delay()
@@ -332,9 +333,7 @@ def fft_fractional_delay(
     ideal sinc interpolation with perfect power preservation.
     """
     samples, xp, _ = dispatch(samples)
-    was_1d = samples.ndim == 1
-    if was_1d:
-        samples = samples[None, :]  # (1, N)
+    samples, was_1d = as_2d(samples, name="samples")
 
     C, N = samples.shape
 
@@ -373,9 +372,7 @@ def fft_fractional_delay(
         # Complex input: ifft may return complex128 from complex64 input
         result = result.astype(samples.dtype)
 
-    if was_1d:
-        return result[0]
-    return result
+    return restore_1d(was_1d, result)
 
 
 def estimate_timing(
@@ -741,9 +738,7 @@ def correct_timing(
     wrap-around stays at the buffer ends.
     """
     samples, xp, _ = dispatch(samples)
-    was_1d = samples.ndim == 1
-    if was_1d:
-        samples = samples[None, :]
+    samples, was_1d = as_2d(samples, name="samples")
 
     num_ch = samples.shape[0]
     N = samples.shape[-1]
@@ -836,6 +831,4 @@ def correct_timing(
         mode,
     )
 
-    if was_1d:
-        return samples[0]
-    return samples
+    return restore_1d(was_1d, samples)
