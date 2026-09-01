@@ -350,3 +350,57 @@ class TestCorrectPhaseRotation:
             ref * xp.array(np.exp(1j * 0.3), dtype=ref.dtype), ref
         )
         assert out.ndim == 1
+
+
+class TestResolveChannelPermutation:
+    """Stream-assignment resolution under both scoring metrics."""
+
+    @staticmethod
+    def _dual_pol(xp, n=4096, seed=7):
+        """Two independent QPSK streams and the equalizer's swapped output."""
+        rng = np.random.default_rng(seed)
+        s = rng.choice([1 + 1j, 1 - 1j, -1 + 1j, -1 - 1j], (2, n)) / np.sqrt(2.0)
+        return xp.asarray(s), xp.asarray(s[::-1].copy())
+
+    @pytest.mark.parametrize("metric", ["coherence", "phase_increment"])
+    def test_resolves_swap(self, backend_device, xp, xpt, metric):
+        """A swapped output is reordered back to reference order."""
+        ref, swapped = self._dual_pol(xp)
+        out = recovery.resolve_channel_permutation(swapped, ref, metric=metric)
+        xpt.assert_allclose(out, ref)
+
+    @pytest.mark.parametrize("metric", ["coherence", "phase_increment"])
+    def test_identity_is_a_no_op(self, backend_device, xp, xpt, metric):
+        """Already-aligned streams are returned in the same order."""
+        ref, _ = self._dual_pol(xp)
+        out = recovery.resolve_channel_permutation(ref, ref, metric=metric)
+        xpt.assert_allclose(out, ref)
+
+    def test_phase_increment_survives_a_frequency_offset(self, backend_device, xp, xpt):
+        """The metric that exists for carrier-phase-intact records.
+
+        With the carrier left on, ``|Σ y·conj(s)|`` averages a rotating phasor
+        toward zero for *every* pairing, so the coherence scores collapse below
+        even the weak-match threshold and the assignment is arbitrary.  The
+        phase-increment metric differences the phase error first and is
+        unaffected.
+        """
+        from commkit.recovery.corrections import _pairing_scores
+
+        ref, swapped = self._dual_pol(xp)
+        n = ref.shape[-1]
+        # 0.01 cycles/symbol: many full rotations across the record.
+        ramp = xp.exp(2j * np.pi * 0.01 * xp.arange(n, dtype=xp.float64))
+        spun = (swapped * ramp[None, :]).astype(ref.dtype)
+
+        coh = _pairing_scores(spun, ref, xp, "coherence")
+        assert float(np.max(coh)) < 0.3, "coherence should collapse under a FOE"
+
+        out = recovery.resolve_channel_permutation(spun, ref, metric="phase_increment")
+        # Correct pairing leaves only the common ramp on each channel.
+        xpt.assert_allclose(out * xp.conj(ramp)[None, :], ref, atol=1e-6)
+
+    def test_rejects_unknown_metric(self, backend_device, xp):
+        ref, swapped = self._dual_pol(xp, n=64)
+        with pytest.raises(ValueError, match="metric"):
+            recovery.resolve_channel_permutation(swapped, ref, metric="nonsense")

@@ -6,6 +6,7 @@ import numpy as np
 
 from ..backend import ArrayType, dispatch, to_device
 from ..core.signal import Signal
+from ..helpers import as_2d, broadcast_channels, restore_1d
 from ..logger import logger
 
 
@@ -85,9 +86,7 @@ def smooth_phase_wiener(
         raise ValueError(f"process/measurement variance must be > 0, got q={q}, r={r}.")
 
     phase, xp, _ = dispatch(phase)
-    was_1d = phase.ndim == 1
-    if was_1d:
-        phase = phase[None, :]
+    phase, was_1d = as_2d(phase, name="phase")
     C, N = phase.shape
     phi = phase.astype(xp.float64)
 
@@ -129,7 +128,7 @@ def smooth_phase_wiener(
             np.degrees(std_out),
         )
 
-    return phi_s[0] if was_1d else phi_s
+    return restore_1d(was_1d, phi_s)
 
 
 _PHASE_ROTATE_KERNEL: dict = {}
@@ -400,11 +399,49 @@ def correct_cycle_slips(
     return kernel(phi_u, int(symmetry), int(history_length), float(threshold))
 
 
+def _pairing_scores(y, s, xp, metric: str):
+    """``(C_out, C_ref)`` match scores between output and reference streams.
+
+    Higher is better, so the assignment below maximizes the total score.
+
+    * ``"coherence"`` - rotation-invariant normalized cross-correlation
+      magnitude ``|<y_i, s_j>| / (||y_i|| ||s_j||)``, in ``[0, 1]``.  One
+      matmul, and blind to any constant phase rotation.
+    * ``"phase_increment"`` - minus the variance of the *wrapped phase-error
+      increment* ``Var(Δ angle(y_i · conj(s_j)))``.  Immune not only to a
+      constant rotation but to a residual frequency offset and to phase noise,
+      which drive the coherence sum toward zero for every pairing (the
+      rotating phasor averages out) and make ``"coherence"`` unusable on
+      records whose carrier phase is deliberately left intact.  Evaluated one
+      reference stream at a time so the working set stays ``(C, N)`` rather
+      than ``(C, C, N)``.
+    """
+    if metric == "coherence":
+        yn = y / xp.maximum(xp.linalg.norm(y, axis=-1, keepdims=True), 1e-12)
+        sn = s / xp.maximum(xp.linalg.norm(s, axis=-1, keepdims=True), 1e-12)
+        return to_device(xp.abs(yn @ xp.conj(sn).T), "cpu")
+    if metric == "phase_increment":
+        cols = [
+            xp.var(
+                xp.diff(
+                    xp.angle(y * xp.conj(s[j][None, :])).astype(xp.float64), axis=-1
+                ),
+                axis=-1,
+            )
+            for j in range(s.shape[0])
+        ]
+        return to_device(-xp.stack(cols, axis=-1), "cpu")
+    raise ValueError(
+        f"Unknown metric {metric!r} (use 'coherence' or 'phase_increment')."
+    )
+
+
 def resolve_channel_permutation(
     symbols: ArrayType | Signal,
     ref_symbols: ArrayType | None = None,
     *,
     num_skip_symbols: int = 0,
+    metric: str = "coherence",
 ) -> ArrayType | Signal:
     """Resolve a polarization (channel) permutation after MIMO equalization.
 
@@ -434,6 +471,16 @@ def resolve_channel_permutation(
     num_skip_symbols : int, default 0
         Leading symbols excluded from the correlation scoring (e.g. an
         unconverged transient).  The reorder still covers the full input.
+    metric : {"coherence", "phase_increment"}, default "coherence"
+        How output streams are scored against reference streams.
+        ``"coherence"`` is the rotation-invariant correlation magnitude - the
+        right choice after carrier recovery.  ``"phase_increment"`` scores by
+        the (negated) variance of the wrapped phase-error increment, which
+        survives a residual frequency offset and strong phase noise; use it on
+        records whose carrier phase is deliberately intact (e.g. frozen-tap
+        output feeding ``analysis.carrier_phase_trajectory``), where the
+        coherence sum collapses toward zero for *every* pairing and the
+        assignment would be arbitrary.
 
     Returns
     -------
@@ -460,6 +507,7 @@ def resolve_channel_permutation(
             sig.resolved_symbols,
             sig.source_symbols,
             num_skip_symbols=num_skip_symbols,
+            metric=metric,
         )
         return new
 
@@ -476,17 +524,12 @@ def resolve_channel_permutation(
     if C == 1:
         return symbols
 
-    ref = xp.asarray(ref_symbols)
-    if ref.ndim == 1:
-        ref = ref[None, :]
+    ref = broadcast_channels(xp.asarray(ref_symbols), C, xp, name="ref_symbols")
     n = min(N, ref.shape[-1])
     y = symbols[:, num_skip_symbols:n]
     s = ref[:, num_skip_symbols:n]
 
-    # Rotation-invariant coherence matrix M[i, j] = |<y_i, s_j>| / (||y_i|| ||s_j||).
-    yn = y / xp.maximum(xp.linalg.norm(y, axis=-1, keepdims=True), 1e-12)
-    sn = s / xp.maximum(xp.linalg.norm(s, axis=-1, keepdims=True), 1e-12)
-    M = to_device(xp.abs(yn @ xp.conj(sn).T), "cpu")  # (C_out, C_ref)
+    M = _pairing_scores(y, s, xp, metric)  # (C_out, C_ref), higher = better
 
     _, perm = linear_sum_assignment(-M)  # perm[i] = ref stream matched by output i
     perm = np.asarray(perm)
@@ -495,12 +538,22 @@ def resolve_channel_permutation(
     assigned = M[np.arange(C), perm]
     is_identity = bool(np.array_equal(perm, np.arange(C)))
     matrix_str = np.array2string(M, precision=2, suppress_small=True)
-    if float(assigned.min()) < 0.3:
+    if metric == "coherence":
+        weak = float(assigned.min()) < 0.3
+        quality = f"min coherence {float(assigned.min()):.2f}"
+    else:
+        # A mismatched pairing leaves a uniformly distributed phase error,
+        # whose increment variance approaches 2π²/3 ≈ 6.6 rad²; a locked
+        # pairing sits orders of magnitude below that.
+        worst = float(-assigned.min())
+        weak = worst > 1.0
+        quality = f"max increment variance {worst:.2f} rad²"
+    if weak:
         # An output did not lock to any distinct reference stream - the demux
         # likely collapsed (both outputs on one pol) rather than swapped.
         logger.warning(
-            "resolve_channel_permutation: weak match (min coherence %.2f) - streams may not be cleanly separated (EQ collapse?). Applying best assignment %s anyway. Coherence matrix (rows=out, cols=ref):\n%s",
-            float(assigned.min()),
+            "resolve_channel_permutation: weak match (%s) - streams may not be cleanly separated (EQ collapse?). Applying best assignment %s anyway. Score matrix (rows=out, cols=ref):\n%s",
+            quality,
             perm.tolist(),
             matrix_str,
         )
@@ -510,7 +563,7 @@ def resolve_channel_permutation(
         )
     else:
         logger.info(
-            "resolve_channel_permutation: POLARIZATION SWAP %s - reordering outputs to reference order. Coherence matrix (rows=out, cols=ref):\n%s",
+            "resolve_channel_permutation: POLARIZATION SWAP %s - reordering outputs to reference order. Score matrix (rows=out, cols=ref):\n%s",
             perm.tolist(),
             matrix_str,
         )
@@ -611,9 +664,7 @@ def resolve_phase_ambiguity(
     from ..metrics import ser as _ser
 
     symbols, xp, _ = dispatch(symbols)
-    was_1d = symbols.ndim == 1
-    if was_1d:
-        symbols = symbols[None, :]
+    symbols, was_1d = as_2d(symbols, name="symbols")
     C, N = symbols.shape
 
     if num_skip_symbols >= N:
@@ -622,11 +673,7 @@ def resolve_phase_ambiguity(
             f"symbol count N={N}."
         )
 
-    ref = xp.asarray(ref_symbols)
-    if ref.ndim == 1:
-        ref = ref[None, :]
-    if ref.shape[0] == 1 and C > 1:
-        ref = xp.broadcast_to(ref, (C, N))
+    ref = broadcast_channels(xp.asarray(ref_symbols), C, xp, name="ref_symbols")
 
     if symmetry_order is None:
         symmetry_order = 4 if "qam" in modulation.lower() else order
@@ -673,9 +720,7 @@ def resolve_phase_ambiguity(
                 best_ser,
             )
 
-    if was_1d:
-        return out[0]
-    return out
+    return restore_1d(was_1d, out)
 
 
 def correct_phase_rotation(
@@ -715,17 +760,11 @@ def correct_phase_rotation(
         Phase-corrected symbols, same shape and dtype as ``symbols``.
     """
     symbols, xp, _ = dispatch(symbols)
-    was_1d = symbols.ndim == 1
-    if was_1d:
-        symbols = symbols[None, :]
+    symbols, was_1d = as_2d(symbols, name="symbols")
     C, N = symbols.shape
 
-    ref = xp.asarray(ref_symbols)
-    if ref.ndim == 1:
-        ref = ref[None, :]
+    ref = broadcast_channels(xp.asarray(ref_symbols), C, xp, name="ref_symbols")
     N_ref = ref.shape[-1]
-    if ref.shape[0] == 1 and C > 1:
-        ref = xp.broadcast_to(ref, (C, N_ref))
 
     if num_skip_symbols >= N_ref:
         raise ValueError(
@@ -746,6 +785,4 @@ def correct_phase_rotation(
         for ch, deg in enumerate(thetas_deg.tolist()):
             logger.info("correct_phase_rotation: ch=%s, theta=%.2f°", ch, deg)
 
-    if was_1d:
-        return out[0]
-    return out
+    return restore_1d(was_1d, out)
