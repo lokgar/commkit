@@ -17,7 +17,7 @@ CommKit is a Python library for digital communications research that treats hard
 
 - **One object, complete context:** Sampling rate, symbol rate, modulation format, and pulse shape travel with the signal through the processing pipeline.
 - **Backend-transparent DSP:** `dispatch()` resolves NumPy, CuPy, or SciPy modules at runtime. The same code executes seamlessly on CPU or GPU.
-- **Method chaining:** High-level fluent API (`sig.to("gpu").fir_filter(taps).resample(sps_out=2)...`) for rapid prototyping.
+- **Functional pipelines:** DSP functions accept and return a `Signal` directly (`sig = fir_filter(sig, taps)`; `sig = resample(sig, sps_out=2)`), so pipelines compose without a monolithic `Signal` wrapper API - `sig.to("gpu")` moves data across backends, the rest is plain function composition.
 - **JAX escape hatch:** Zero-copy DLPack export on GPU allows direct application of JAX transforms (gradients, `vmap`, `scan`) without leaving the research loop.
 
 ---
