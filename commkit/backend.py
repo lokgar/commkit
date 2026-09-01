@@ -279,6 +279,15 @@ def dispatch(
         The array module (`numpy` or `cupy`).
     sp : module
         The signal processing module (`scipy` or `cupyx.scipy`).
+
+    Notes
+    -----
+    Dispatch recognizes **NumPy and CuPy only**.  A JAX array reports ``numpy``
+    (see :func:`get_array_module`) and is then materialized on the host by
+    ``np.asarray`` - a silent device-to-host transfer.  JAX is a *boundary*
+    backend in CommKit: convert explicitly with :func:`to_jax` /
+    :func:`from_jax` around the JAX kernel instead of passing JAX arrays into
+    dispatch-based functions.
     """
     xp = get_array_module(data)
     sp = get_scipy_module(xp)

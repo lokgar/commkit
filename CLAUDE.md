@@ -264,6 +264,41 @@ Inside library code, **never extract a scalar from a possibly-GPU array inside a
 * **SISO**: 1-D array: `(N_samples,)`
 * **MIMO**: 2-D array: `(N_channels, N_samples)` - **time is always on the last axis**.
 
+Never hand-roll the promote/squeeze idiom.  `commkit/helpers.py` owns it, so the
+validation is identical everywhere (0-d and 3-D inputs raise a shape error
+naming the offending argument instead of silently reaching a confusing
+broadcast failure downstream):
+
+```python
+from commkit.helpers import as_2d, broadcast_channels, require_channels, restore_1d
+
+def my_dsp_function(samples, ref_symbols):
+    x, xp, _ = dispatch(samples)
+    x2, was_1d = as_2d(x, name="samples")             # (N,) -> (1, N)
+    ref = broadcast_channels(xp.asarray(ref_symbols),  # (L,) / (1, L) -> (C, L)
+                             x2.shape[0], xp, name="ref_symbols")
+    out = ...                                          # channel-batched body
+    return restore_1d(was_1d, out)                     # squeeze back for SISO
+```
+
+* `as_2d` / `restore_1d` - the promote/squeeze pair.  `restore_1d` takes several
+  outputs at once: `drift, pn = restore_1d(was_1d, drift, pn)`.
+* `broadcast_channels` - a shared reference across channels, with the
+  channel-count check the bare `ref[None, :]` promotion lacks.  Returns a
+  **read-only** broadcast view; `.copy()` before writing.
+* `require_channels` - for entry points defined only at a fixed channel count
+  (dual-pol channel models); pass `description=` to keep domain wording in the
+  error.
+* `to_report_scalar` - the reporting-layer counterpart: collapses a `(C,)`
+  metric to a Python float for SISO, transferring from device if needed.
+* `linear_trend_slope` / `remove_linear_trend` - the per-channel least-squares
+  slope shared by the pilot-tone and DSH detrend stages; keeps `Σ(x-x̄)²` on
+  device rather than syncing it back as a float.
+
+Note these are plain indexing/broadcast helpers, valid on NumPy, CuPy **and**
+JAX arrays - unlike `dispatch`, which recognizes NumPy/CuPy only and will
+silently pull a JAX array to the host.
+
 ### Naming Conventions
 
 * **Verb prefixes for processing functions.** Recovery/correction routines follow a
