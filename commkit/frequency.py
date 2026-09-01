@@ -12,6 +12,7 @@ from collections.abc import Callable
 import numpy as np
 
 from .backend import ArrayType, dispatch, to_device
+from .helpers import as_2d, broadcast_channels, linear_trend_slope, restore_1d
 from .logger import logger
 
 
@@ -223,9 +224,7 @@ def estimate_frequency_offset_mth_power(
     is unbiased for a rectangular window.
     """
     samples, xp, _ = dispatch(samples)
-    was_1d = samples.ndim == 1
-    if was_1d:
-        samples = samples[None, :]  # (1, N)
+    samples, was_1d = as_2d(samples, name="samples")
     C, N = samples.shape
 
     if N < 8:
@@ -443,17 +442,13 @@ def estimate_frequency_offset_mengali_morelli(
     [-fs/2, fs/2] for data-aided or generic blind mode.
     """
     samples, xp, _ = dispatch(samples)
-    was_1d = samples.ndim == 1
-    if was_1d:
-        samples = samples[None, :]  # (1, N)
+    samples, was_1d = as_2d(samples, name="samples")
     C, N = samples.shape
 
     # Pre-process: data-aided, blind M-th power, or generic blind
     if ref_signal is not None:
         ref, _, _ = dispatch(ref_signal)
-        if ref.ndim == 1:
-            ref = ref[None, :]
-        ref = xp.asarray(ref)
+        ref = broadcast_channels(xp.asarray(ref), C, xp, name="ref_signal")
         y = samples * xp.conj(ref)  # derotate -> complex tone at Δf
         M = 1
     elif modulation is not None and order is not None:
@@ -623,9 +618,7 @@ def estimate_frequency_offset_pilot_symbols(
     consecutive entries of ``pilot_indices``.
     """
     samples, xp, _ = dispatch(samples)
-    was_1d = samples.ndim == 1
-    if was_1d:
-        samples = samples[None, :]
+    samples, was_1d = as_2d(samples, name="samples")
     C, N = samples.shape
 
     pilot_indices_np = to_device(pilot_indices, "cpu").astype(np.intp)
@@ -633,8 +626,7 @@ def estimate_frequency_offset_pilot_symbols(
     pilot_values_xp = xp.asarray(pilot_values)
     P = len(pilot_indices_np)
 
-    if pilot_values_xp.ndim == 1:
-        pilot_values_xp = xp.broadcast_to(pilot_values_xp[None, :], (C, P))
+    pilot_values_xp = broadcast_channels(pilot_values_xp, C, xp, name="pilot_values")
 
     # Extract and demodulate: phase = angle(r · conj(s)) = 2π·Δf·t + φ₀ + noise
     r_pilots = samples[:, pilot_indices_xp]  # (C, P)
@@ -666,11 +658,10 @@ def estimate_frequency_offset_pilot_symbols(
         safe_denom = xp.where(xp.abs(t_var_w) > 1e-30, t_var_w, xp.ones_like(t_var_w))
         slopes = xp.sum(v * phi_c * t_c, axis=-1) / safe_denom  # (C,)
     else:
-        # Unweighted OLS: centered normal equations (Tretter 1985 MVUE).
-        t_c = t_xp - xp.mean(t_xp)  # (P,) centred
-        t_var = float(xp.dot(t_c, t_c))  # scalar Σ(t-t̄)²
-        phi_c = phi_pilots_u - xp.mean(phi_pilots_u, axis=-1, keepdims=True)  # (C, P)
-        slopes = xp.sum(phi_c * t_c[None, :], axis=-1) / t_var  # (C,)
+        # Unweighted OLS: centered normal equations (Tretter 1985 MVUE), on the
+        # shared least-squares slope helper - which keeps Σ(t-t̄)² on device
+        # instead of syncing it back as a Python float.
+        slopes = linear_trend_slope(phi_pilots_u, x=t_xp, xp=xp)  # (C,) rad/s
 
     max_gap = int(np.max(np.diff(pilot_indices_np))) if P > 1 else 0
     lock_range = sampling_rate / (2 * max_gap) if max_gap > 0 else float("inf")
@@ -880,8 +871,7 @@ def _refine_tones_from_spectrum(
         Refined frequencies in Hz (float64, on host).
     """
     X, xp, _ = dispatch(X)
-    if X.ndim == 1:
-        X = X[None, :]
+    X, _ = as_2d(X, name="X")
     N = X.shape[-1]
     df = sampling_rate / N
     targets = [float(f) for f in targets]
@@ -989,11 +979,7 @@ def correct_frequency_offset_blockwise(
         raise ValueError(f"overlap must be in [0, 1), got {overlap}.")
 
     samples, xp, _ = dispatch(samples)
-    was_1d = samples.ndim == 1
-    if was_1d:
-        samples_2d = samples[None, :]  # (1, N)
-    else:
-        samples_2d = samples
+    samples_2d, was_1d = as_2d(samples, name="samples")
     C, N = samples_2d.shape
 
     step = max(1, round(block_size * (1.0 - overlap)))
@@ -1094,7 +1080,7 @@ def correct_frequency_offset_blockwise(
             title=title,
         )
 
-    return corrected_2d[0] if was_1d else corrected_2d
+    return restore_1d(was_1d, corrected_2d)
 
 
 def correct_static_frequency_offset(

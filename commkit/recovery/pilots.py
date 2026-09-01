@@ -5,6 +5,7 @@ import logging
 import numpy as np
 
 from ..backend import ArrayType, dispatch, to_device
+from ..helpers import as_2d, broadcast_channels, remove_linear_trend, restore_1d
 from ..logger import logger
 from .corrections import correct_cycle_slips
 
@@ -78,9 +79,7 @@ def recover_carrier_phase_pilot_symbols(
     with constant-hold extrapolation.  Single-carrier only.
     """
     symbols, xp, _ = dispatch(symbols)
-    was_1d = symbols.ndim == 1
-    if was_1d:
-        symbols = symbols[None, :]
+    symbols, was_1d = as_2d(symbols, name="symbols")
     C, N = symbols.shape
 
     pilot_indices_np = to_device(pilot_indices, "cpu").astype(np.intp)
@@ -89,8 +88,7 @@ def recover_carrier_phase_pilot_symbols(
     P = len(pilot_indices_np)
 
     # Broadcast shared pilots (P,) -> (C, P) for all channels
-    if pilot_values_xp.ndim == 1:
-        pilot_values_xp = xp.broadcast_to(pilot_values_xp[None, :], (C, P))
+    pilot_values_xp = broadcast_channels(pilot_values_xp, C, xp, name="pilot_values")
 
     # Phase at each pilot position: angle(r_pilot · conj(s_pilot))
     r_pilots = symbols[:, pilot_indices_np]  # (C, P)
@@ -197,9 +195,7 @@ def recover_carrier_phase_pilot_symbols(
             title="CPR - Pilot-Aided Phase",
         )
 
-    if was_1d:
-        return phi_full[0]
-    return phi_full
+    return restore_1d(was_1d, phi_full)
 
 
 def _extract_pilot_phasor(
@@ -468,9 +464,7 @@ def recover_carrier_phase_pilot_tone(
         raise ValueError(f"tone_frequency={tone_frequency} must lie in (-fs/2, fs/2).")
 
     samples, xp, _ = dispatch(samples)
-    was_1d = samples.ndim == 1
-    if was_1d:
-        samples = samples[None, :]  # (1, N)
+    samples, was_1d = as_2d(samples, name="samples")
     C, N = samples.shape
 
     df = sampling_rate / N
@@ -493,7 +487,6 @@ def recover_carrier_phase_pilot_tone(
         window=window,
         return_window=debug_plot,
     )
-    n = xp.arange(N, dtype=xp.float64)  # for the residual-FOE detrend below
 
     # 5) Phase extraction + unwrap in float64.
     if joint_channels and C > 1:
@@ -506,11 +499,7 @@ def recover_carrier_phase_pilot_tone(
     if not remove_frequency_offset:
         # Subtract the per-channel least-squares linear trend (residual FOE),
         # preserving the mean phase; leaves only the phase-noise fluctuation.
-        nc = n - xp.mean(n)
-        denom = xp.sum(nc * nc)
-        theta_c = theta - xp.mean(theta, axis=-1, keepdims=True)
-        slope = xp.sum(theta_c * nc[None, :], axis=-1, keepdims=True) / denom  # (C, 1)
-        theta = theta - slope * nc[None, :]
+        theta, _ = remove_linear_trend(theta)
 
     # Host copy of theta is needed only for the INFO summary and the optional
     # debug plot; skip the transfer + reductions otherwise (the device theta is
@@ -549,9 +538,7 @@ def recover_carrier_phase_pilot_tone(
             show=True,
         )
 
-    if was_1d:
-        return theta[0]
-    return theta
+    return restore_1d(was_1d, theta)
 
 
 def _lowpass_fft(z: ArrayType, sampling_rate: float, cutoff: float, xp) -> ArrayType:
@@ -664,9 +651,7 @@ def recover_carrier_phase_pilot_tones(
         raise ValueError("tone_frequencies must contain at least one frequency.")
 
     samples, xp, _ = dispatch(samples)
-    was_1d = samples.ndim == 1
-    if was_1d:
-        samples = samples[None, :]
+    samples, was_1d = as_2d(samples, name="samples")
     C, N = samples.shape
     if per_tone_channel is not None and len(per_tone_channel) != K:
         raise ValueError(
@@ -790,7 +775,7 @@ def recover_carrier_phase_pilot_tones(
             show=True,
         )
 
-    phi_out = phi_full[0] if was_1d else phi_full
+    phi_out = restore_1d(was_1d, phi_full)
     if return_diagnostics:
         diagnostics = {
             "delta": delta_diag,
