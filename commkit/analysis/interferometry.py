@@ -52,9 +52,15 @@ import numpy as np
 
 from ..backend import ArrayType, dispatch, to_device
 from ..frequency import correct_static_frequency_offset
+from ..helpers import as_2d, remove_linear_trend, restore_1d, to_report_scalar
 from ..logger import logger
 from ..spectral import welch_psd
-from ._common import _as_2d, _plateau_mask, _scalar_or_array, _welch_median_bias
+from ._common import (
+    _floor_levels,
+    _increment_variance_fit,
+    _resolve_nperseg,
+    _welch_floor_bias,
+)
 from .linewidth import fm_noise_psd
 
 __all__ = ["dsh_beat", "dsh_fm_noise_psd", "dsh_phase", "linewidth_dsh"]
@@ -63,7 +69,7 @@ __all__ = ["dsh_beat", "dsh_fm_noise_psd", "dsh_phase", "linewidth_dsh"]
 def _analytic_beat(samples):
     """Complex analytic beat ``(C, N)`` from raw DSH samples (Hilbert if real)."""
     z, xp, sp = dispatch(samples)
-    z2, was_1d = _as_2d(z)
+    z2, was_1d = as_2d(z, name="samples")
     if xp.iscomplexobj(z2):
         return z2.astype(xp.complex128, copy=False), was_1d, xp
     return sp.signal.hilbert(z2.astype(xp.float64), axis=-1), was_1d, xp
@@ -206,20 +212,16 @@ def dsh_phase(
       the delay arm, AOM RF-synthesizer phase noise - is indistinguishable
       from laser phase noise here and adds to the low-frequency PSD.
     """
-    z, xp, sp = dispatch(samples)
-    z2, was_1d = _as_2d(z)
+    z, xp, _ = dispatch(samples)
     fs = float(sampling_rate)
 
-    if not xp.iscomplexobj(z2):
-        if f_shift is not None and float(f_shift) == 0.0:
-            raise ValueError(
-                "Real-valued samples with f_shift=0 (self-homodyne on a single "
-                "photodetector) observe cos(Δφ) only and cannot be inverted to "
-                "phase. Use an AOM shift (heterodyne) or an IQ front-end."
-            )
-        z2 = sp.signal.hilbert(z2.astype(xp.float64), axis=-1)
-    else:
-        z2 = z2.astype(xp.complex128, copy=False)
+    if not xp.iscomplexobj(z) and f_shift is not None and float(f_shift) == 0.0:
+        raise ValueError(
+            "Real-valued samples with f_shift=0 (self-homodyne on a single "
+            "photodetector) observe cos(Δφ) only and cannot be inverted to "
+            "phase. Use an AOM shift (heterodyne) or an IQ front-end."
+        )
+    z2, was_1d, xp = _analytic_beat(samples)
 
     estimate = f_shift is None
     if f_shift is None:
@@ -242,8 +244,6 @@ def dsh_phase(
     else:
         f_hat = xp.full(z2.shape[0], float(f_shift), dtype=xp.float64)
 
-    n = z2.shape[-1]
-    n_idx = xp.arange(n, dtype=xp.float64)
     z_bb = correct_static_frequency_offset(z2, fs, f_hat)
     dphi = xp.unwrap(xp.angle(z_bb), axis=-1)
 
@@ -252,13 +252,11 @@ def dsh_phase(
         # unwrapped phase (the exact linear-ramp / mean-frequency component the
         # Kay stage leaves behind).  Skipped when f_shift is user-supplied so
         # genuine drift stays visible.
-        nc = n_idx - 0.5 * (n - 1)
-        slope = (dphi @ nc) / (n * (n * n - 1.0) / 12.0)  # (C,) rad/sample
-        dphi = dphi - slope[:, None] * nc[None, :]
+        dphi, slope = remove_linear_trend(dphi)  # slope in rad/sample
         f_hat = f_hat + slope * (fs / (2.0 * np.pi))
 
-    f_used = _scalar_or_array(to_device(f_hat, "cpu"))
-    return (dphi[0] if was_1d else dphi), f_used
+    f_used = to_report_scalar(f_hat)
+    return restore_1d(was_1d, dphi), f_used
 
 
 def dsh_fm_noise_psd(
@@ -353,8 +351,9 @@ def dsh_fm_noise_psd(
     if td <= 0.0:
         raise ValueError(f"delay={delay} must be positive (seconds).")
 
+    dphi_arr, _, _ = dispatch(delta_phi)
     f, S_beat = fm_noise_psd(
-        delta_phi,
+        dphi_arr,
         float(sampling_rate),
         nperseg=nperseg,
         bias_correction=bias_correction,
@@ -365,7 +364,11 @@ def dsh_fm_noise_psd(
     # spans a sizable fraction of the response period 1/τ_d (long decoherence
     # spools), each bin *averages* across lobes and notches and the result is
     # biased low.  Require ≥ 4 bins per period; recommend ≥ 8.
-    bin_hz = float(f[1])
+    # f[1] = f_s / nperseg by construction - reproduce it from the resolver
+    # instead of syncing a scalar back off the device frequency axis.
+    bin_hz = float(sampling_rate) / _resolve_nperseg(
+        dphi_arr.shape[-1] - 1, nperseg, cap=4096
+    )
     if bin_hz > 0.25 / td:
         rec = 1 << int(np.ceil(np.log2(8.0 * float(sampling_rate) * td)))
         logger.warning(
@@ -620,30 +623,16 @@ def linewidth_dsh(
         S_cpu = np.asarray(to_device(S_l, "cpu"), dtype=np.float64)
         valid_cpu = np.asarray(to_device(valid, "cpu"), dtype=bool)
         S2 = S_cpu[None, :] if S_cpu.ndim == 1 else S_cpu
-        n_ch = S2.shape[0]
 
         # Welch bins are χ²-distributed, so every median-based floor below
         # reads the true level low by median(χ²_ν)/ν ≈ 1 - 1/(3K); the factor
-        # is divided back out of the linewidth at the end.
-        nps_used = int(round(fs / float(f_cpu[1])))
-        m_med, k_seg = _welch_median_bias(dphi.shape[-1] - 1, nps_used)
-        if k_seg < 4:
-            logger.warning(
-                "linewidth_dsh(fm_psd): only %d Welch segment(s) at "
-                "nperseg=%d - the plateau median is noisy and the χ²-median "
-                "correction (÷%.3f) is asymptotic; extend the record (aim "
-                "for ≥ 5·nperseg samples).",
-                k_seg,
-                nps_used,
-                m_med,
-            )
-        else:
-            logger.info(
-                "linewidth_dsh(fm_psd): %d Welch segments - χ²-median floor "
-                "bias corrected by ÷%.4f.",
-                k_seg,
-                m_med,
-            )
+        # is divided back out of the linewidth at the end.  The segment length
+        # is reproduced from the resolver (f[1] = f_s/nperseg) rather than read
+        # back off the device.
+        nps_used = _resolve_nperseg(dphi.shape[-1] - 1, nperseg, cap=4096)
+        m_med, k_seg = _welch_floor_bias(
+            dphi.shape[-1] - 1, nps_used, label="linewidth_dsh(fm_psd)"
+        )
 
         auto_band = f_min is None and f_max is None
         if auto_band:
@@ -660,28 +649,29 @@ def linewidth_dsh(
                 f_cap = min(fh, fs / 2.0 - fh)
                 base = base & (f_cpu <= f_cap)
             base2 = np.broadcast_to(base, S2.shape)
-            used2, levels = _plateau_mask(f_cpu, S2, base2)
-            lw = np.pi * levels
-            # Channels where no plateau was found fall back to the first lobe.
-            for c in range(n_ch):
-                if not np.isfinite(lw[c]):
-                    logger.warning(
-                        "linewidth_dsh(fm_psd): no plateau detected "
-                        "(channel %d) - falling back to the first-lobe band "
-                        "[0, 1/τ_d]. Inspect the PSD before quoting Δν.",
-                        c,
-                    )
-                    used2[c] = valid_cpu & (f_cpu > 0) & (f_cpu <= 1.0 / td)
-                    if used2[c].any():
-                        lw[c] = np.pi * np.median(S2[c][used2[c]])
+            # Channels where no plateau is found fall back to the first lobe.
+            first_lobe = np.broadcast_to(
+                valid_cpu & (f_cpu > 0) & (f_cpu <= 1.0 / td), S2.shape
+            )
+            used2, levels = _floor_levels(
+                f_cpu,
+                S2,
+                base2,
+                auto=True,
+                label="linewidth_dsh(fm_psd)",
+                fallback2=first_lobe,
+                fallback_desc="the first-lobe band [0, 1/τ_d]",
+            )
         else:
             fmin = 0.0 if f_min is None else float(f_min)
             fmax = (1.0 / td) if f_max is None else float(f_max)
-            used2 = np.broadcast_to(
+            base2 = np.broadcast_to(
                 valid_cpu & (f_cpu >= fmin) & (f_cpu <= fmax), S2.shape
             )
-            if used2.any(axis=-1).all():
-                lw = np.array([np.pi * np.median(S2[c][used2[c]]) for c in range(n_ch)])
+            used2, levels = _floor_levels(
+                f_cpu, S2, base2, auto=False, label="linewidth_dsh(fm_psd)"
+            )
+        lw = np.pi * levels
 
         if not used2.any(axis=-1).all():
             raise ValueError(
@@ -694,7 +684,7 @@ def linewidth_dsh(
 
         used_cpu = used2[0] if S_cpu.ndim == 1 else used2
         result = {
-            "linewidth": _scalar_or_array(lw),
+            "linewidth": to_report_scalar(lw),
             "f": f_cpu,
             "S_f": S_cpu,
             "valid": valid_cpu,
@@ -720,7 +710,7 @@ def linewidth_dsh(
 
     if method == "increment":
         dphi, f_hat = dsh_phase(samples, fs, f_shift=f_shift)
-        d2, _ = _as_2d(dphi)
+        d2, _ = as_2d(dphi, name="delta_phi")
         _, xp, _ = dispatch(d2)
 
         m_int = int(round(m_samp))
@@ -756,15 +746,11 @@ def linewidth_dsh(
                 m_int,
             )
 
-        var_l = xp.stack(
-            [xp.var(d2[:, lag:] - d2[:, :-lag], axis=-1) for lag in ls], axis=0
-        )  # (n_lag, C)
         dphi_var = xp.var(d2, axis=-1)
-        # Tiny (n_lag, C) fit input - one D2H transfer + host polyfit.
-        var_cpu = np.asarray(to_device(var_l, "cpu"), dtype=np.float64)
-        a_sec = ls.astype(np.float64) / fs
-        coeffs = np.polyfit(a_sec, var_cpu, 1)  # (2, C): [slope, intercept]
-        slope, intercept = coeffs[0], coeffs[1]
+        # Shared with linewidth_increment: same Var-vs-lag least squares, only
+        # the constant differs (a DSH differential phase accumulates the walk
+        # twice, hence 4π rather than 2π).
+        slope, intercept, var_cpu, a_sec = _increment_variance_fit(d2, ls, 1.0 / fs, xp)
         lw_cpu = np.maximum(slope, 0.0) / (4.0 * np.pi)
 
         if debug_plot:
@@ -780,9 +766,9 @@ def linewidth_dsh(
             )
 
         return {
-            "linewidth": _scalar_or_array(lw_cpu),
-            "awgn_var": _scalar_or_array(intercept),
-            "dphi_var": _scalar_or_array(to_device(dphi_var, "cpu")),
+            "linewidth": to_report_scalar(lw_cpu),
+            "awgn_var": to_report_scalar(intercept),
+            "dphi_var": to_report_scalar(to_device(dphi_var, "cpu")),
             "lags": ls,
             "f_shift": f_hat,
             "method": method,
@@ -791,8 +777,7 @@ def linewidth_dsh(
     if method == "lorentzian":
         z2, was_1d, xp = _analytic_beat(samples)
         n = z2.shape[-1]
-        npseg = int(min(max(n // 8, 256), 1 << 14)) if nperseg is None else nperseg
-        npseg = min(npseg, n)
+        npseg = _resolve_nperseg(n, nperseg, cap=1 << 14)
         f, P = welch_psd(
             z2, sampling_rate=fs, nperseg=npseg, return_onesided=False, axis=-1
         )
@@ -863,7 +848,7 @@ def linewidth_dsh(
 
             _plotting.plot_dsh_beat_psd(
                 f_cpu,
-                P2[0] if was_1d else P2,
+                restore_1d(was_1d, P2),
                 f_peak=f_peak,
                 linewidth=dnu_deep,
                 linewidth_3db=dnu_3db,
@@ -872,13 +857,13 @@ def linewidth_dsh(
             )
 
         return {
-            "linewidth": _scalar_or_array(dnu_deep),
-            "linewidth_3db": _scalar_or_array(dnu_3db),
-            "lineshape_ratio": _scalar_or_array(ratio),
-            "coherence_factor": _scalar_or_array(coh),
+            "linewidth": to_report_scalar(dnu_deep),
+            "linewidth_3db": to_report_scalar(dnu_3db),
+            "lineshape_ratio": to_report_scalar(ratio),
+            "coherence_factor": to_report_scalar(coh),
             "f": f_cpu,
-            "psd": P2[0] if was_1d else P2,
-            "f_peak": _scalar_or_array(f_peak),
+            "psd": restore_1d(was_1d, P2),
+            "f_peak": to_report_scalar(f_peak),
             "method": method,
         }
 

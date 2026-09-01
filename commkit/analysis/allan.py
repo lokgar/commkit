@@ -3,7 +3,7 @@
 import numpy as np
 
 from ..backend import ArrayType, dispatch, to_device
-from ._common import _as_2d
+from ..helpers import as_2d, restore_1d
 
 __all__ = ["allan_deviation"]
 
@@ -66,7 +66,7 @@ def allan_deviation(
       noise-floor improvements.
     """
     df_arr, xp, _ = dispatch(df)
-    y2, was_1d = _as_2d(df_arr)
+    y2, was_1d = as_2d(df_arr, name="df")
     c, n = y2.shape
     tau0 = 1.0 / float(symbol_rate)
 
@@ -98,7 +98,7 @@ def allan_deviation(
 
     tau_s_cpu = np.asarray(tau_s, dtype=np.float64)
     adev_cpu = to_device(adev, "cpu")
-    adev_out = adev_cpu[0] if was_1d else adev_cpu
+    adev_out = restore_1d(was_1d, adev_cpu)
 
     if debug_plot:
         from .. import plotting as _plotting

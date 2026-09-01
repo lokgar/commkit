@@ -6,8 +6,8 @@ Allan deviation) consumes.
 """
 
 from ..backend import ArrayType, dispatch
-from ..logger import logger
-from ._common import _as_2d, _pairing_variance
+from ..helpers import as_2d, broadcast_channels, restore_1d
+from ..recovery.corrections import resolve_channel_permutation
 
 __all__ = ["carrier_phase_trajectory"]
 
@@ -38,10 +38,13 @@ def carrier_phase_trajectory(
         Known transmitted symbols, same layout as ``y_eq``.  The two are
         truncated to their common length on the last axis.
     channel_pairing : {"auto", "identity", "swap"}, default "auto"
-        For dual-pol (``C == 2``) inputs the equalizer may map pol 0<->1.
-        ``"auto"`` picks the pairing (identity vs swapped ``ref``) with the
-        lower total phase-error variance; ``"identity"`` / ``"swap"`` force it.
-        Ignored for SISO or ``C != 2``.
+        For MIMO inputs the equalizer may permute the streams (for dual-pol,
+        map pol 0<->1).  ``"auto"`` resolves it with
+        ``recovery.resolve_channel_permutation(metric="phase_increment")``,
+        which picks the assignment of lowest total phase-error increment
+        variance - the frequency-offset-immune scoring this stage needs.
+        ``"swap"`` forces the dual-pol swap and ``"identity"`` forces none.
+        Ignored for SISO.
 
     Returns
     -------
@@ -56,7 +59,7 @@ def carrier_phase_trajectory(
     * ``y_eq`` and ``ref_symbols`` must be *symbol-aligned* (same start, same
       ordering).  A misalignment does not fail loudly - it turns the product
       ``y·conj(d)`` into noise-like phase and inflates every downstream
-      linewidth estimate.  ``channel_pairing="auto"`` only resolves the 0<->1
+      linewidth estimate.  ``channel_pairing="auto"`` only resolves a channel
       permutation, not a time shift.
     * The per-symbol phase *step* must stay below π for ``unwrap`` to be
       exact: ``|2πΔf·T_sym + Δφ_pn + Δφ_awgn| < π``.  In practice this bounds
@@ -68,24 +71,21 @@ def carrier_phase_trajectory(
       instead of requiring an explicit noise estimate.
     """
     y, xp, _ = dispatch(y_eq)
-    d = xp.asarray(ref_symbols)
 
-    y2, was_1d = _as_2d(y)
-    d2, _ = _as_2d(d)
+    y2, was_1d = as_2d(y, name="y_eq")
+    c = y2.shape[0]
+    d2 = broadcast_channels(xp.asarray(ref_symbols), c, xp, name="ref_symbols")
 
     n = min(y2.shape[-1], d2.shape[-1])
     y2, d2 = y2[:, :n], d2[:, :n]
-    c = y2.shape[0]
 
-    if c == 2 and channel_pairing == "auto":
-        var_id = _pairing_variance(y2, d2, xp)
-        var_sw = _pairing_variance(y2, d2[::-1], xp)
-        # Single host sync for the pairing decision (0-d device comparands).
-        if bool(var_sw < var_id):
-            d2 = d2[::-1]
-            logger.info("carrier_phase_trajectory: swapped pol pairing (lower var).")
+    if c > 1 and channel_pairing == "auto":
+        # Same assignment machinery as the post-CPR resolver, scored by the
+        # phase-increment metric: the carrier phase is intact here by design,
+        # so the coherence metric would collapse for every pairing.
+        d2 = resolve_channel_permutation(d2, y2, metric="phase_increment")
     elif c == 2 and channel_pairing == "swap":
         d2 = d2[::-1]
 
     phi = xp.unwrap(xp.angle(y2 * xp.conj(d2)).astype(xp.float64), axis=-1)
-    return phi[0] if was_1d else phi
+    return restore_1d(was_1d, phi)

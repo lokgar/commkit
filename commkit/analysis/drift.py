@@ -3,7 +3,7 @@
 import numpy as np
 
 from ..backend import ArrayType, dispatch, to_device
-from ._common import _as_2d, _scalar_or_array
+from ..helpers import as_2d, restore_1d, to_report_scalar
 
 __all__ = ["frequency_drift_metrics", "separate_drift_phase_noise"]
 
@@ -89,7 +89,7 @@ def separate_drift_phase_noise(
             "phi is sampled at the symbol rate."
         )
 
-    phi2, was_1d = _as_2d(phi_arr)
+    phi2, was_1d = as_2d(phi_arr, name="phi")
     in_dtype = phi2.dtype
 
     if method == "butterworth":
@@ -118,8 +118,7 @@ def separate_drift_phase_noise(
         raise ValueError(f"Unknown method {method!r}.")
 
     pn = phi2 - drift
-    if was_1d:
-        drift, pn = drift[0], pn[0]
+    drift, pn = restore_1d(was_1d, drift, pn)
 
     drift = drift.astype(in_dtype, copy=False)
     pn = pn.astype(in_dtype, copy=False)
@@ -185,18 +184,27 @@ def frequency_drift_metrics(
     corrects for it).
     """
     d, xp, _ = dispatch(drift_phase)
-    d2, was_1d = _as_2d(d)
+    d2, was_1d = as_2d(d, name="drift_phase")
     if edge_trim > 0:
         d2 = d2[:, edge_trim:-edge_trim]
 
     t_sym = 1.0 / float(symbol_rate)
     df = xp.diff(d2.astype(xp.float64), axis=-1) / (2.0 * np.pi * t_sym)
 
-    std = to_device(xp.std(df, axis=-1), "cpu")
-    pp = to_device(xp.max(df, axis=-1) - xp.min(df, axis=-1), "cpu")
-    max_abs = to_device(xp.max(xp.abs(df), axis=-1), "cpu")
+    # One D2H transfer for all three summaries instead of three syncs.
+    stats = to_device(
+        xp.stack(
+            [
+                xp.std(df, axis=-1),
+                xp.max(df, axis=-1) - xp.min(df, axis=-1),
+                xp.max(xp.abs(df), axis=-1),
+            ]
+        ),
+        "cpu",
+    )
+    std, pp, max_abs = stats[0], stats[1], stats[2]
 
-    df_out = df[0] if was_1d else df
+    df_out = restore_1d(was_1d, df)
 
     if debug_plot:
         from .. import plotting as _plotting
@@ -207,7 +215,7 @@ def frequency_drift_metrics(
 
     return {
         "df": df_out,
-        "std": _scalar_or_array(std),
-        "pp": _scalar_or_array(pp),
-        "max_abs": _scalar_or_array(max_abs),
+        "std": to_report_scalar(std),
+        "pp": to_report_scalar(pp),
+        "max_abs": to_report_scalar(max_abs),
     }

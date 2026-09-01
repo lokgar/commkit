@@ -48,3 +48,34 @@ def test_carrier_phase_trajectory_auto_pairing(xp):
     # tiny (only the phase walk); a wrong pairing would be ~uniform on [-π, π].
     var = float(xp.var(xp.diff(phi, axis=-1)))
     assert var < 0.1
+
+
+def test_carrier_phase_trajectory_auto_pairing_under_frequency_offset(xp):
+    """Pairing must survive the residual FOE this stage exists to measure."""
+    n = 1 << 13
+    d0, d1 = _qpsk(n, 1), _qpsk(n, 2)
+    p0, p1 = _wiener_phase(5e5, n, 3), _wiener_phase(5e5, n, 4)
+    # 0.005 cycles/symbol of residual carrier left on both channels.
+    ramp = 2.0 * np.pi * 0.005 * np.arange(n)
+    y = np.stack([d0 * np.exp(1j * (p0 + ramp)), d1 * np.exp(1j * (p1 + ramp))])
+    d_swapped = np.stack([d1, d0])
+    phi = analysis.carrier_phase_trajectory(
+        xp.asarray(y), xp.asarray(d_swapped), channel_pairing="auto"
+    )
+    # Correct pairing -> increments are the common ramp plus the phase walk.
+    dphi = xp.diff(phi, axis=-1) - 2.0 * np.pi * 0.005
+    assert float(xp.var(dphi)) < 0.1
+
+
+def test_carrier_phase_trajectory_auto_pairing_beyond_dual_pol(xp, xpt):
+    """Auto pairing generalizes past C == 2 (cyclically permuted 3-stream)."""
+    n = 1 << 12
+    d = [_qpsk(n, s) for s in (1, 2, 3)]
+    p = [_wiener_phase(5e5, n, s) for s in (4, 5, 6)]
+    y = np.stack([di * np.exp(1j * pi) for di, pi in zip(d, p)])
+    d_rolled = np.stack([d[1], d[2], d[0]])  # equalizer emitted a 3-cycle
+    phi = analysis.carrier_phase_trajectory(
+        xp.asarray(y), xp.asarray(d_rolled), channel_pairing="auto"
+    )
+    for c in range(3):
+        xpt.assert_allclose(xp.diff(phi[c]), xp.asarray(np.diff(p[c])), atol=1e-6)

@@ -3,15 +3,15 @@
 import numpy as np
 
 from ..backend import ArrayType, dispatch, to_device
-from ..logger import logger
+from ..helpers import as_2d, broadcast_channels, restore_1d, to_report_scalar
 from ..spectral import welch_psd
 from ._common import (
     _BETA_SLOPE,
     _FWHM_FROM_AREA,
-    _as_2d,
-    _plateau_mask,
-    _scalar_or_array,
-    _welch_median_bias,
+    _floor_levels,
+    _increment_variance_fit,
+    _resolve_nperseg,
+    _welch_floor_bias,
 )
 
 __all__ = ["fm_noise_psd", "linewidth_beta_separation", "linewidth_increment"]
@@ -28,7 +28,7 @@ def linewidth_increment(
     ref_symbols: ArrayType | None = None,
     edge_trim: int = 0,
     debug_plot: bool = False,
-) -> dict[str, float | np.ndarray | bool]:
+) -> dict[str, float | np.ndarray | str]:
     r"""Wiener linewidth from the phase-increment variance.
 
     For a Wiener phase + AWGN angle noise, the variance of the lag-``k``
@@ -105,7 +105,7 @@ def linewidth_increment(
       below ``2σ_φ²`` - prefer the β-separation/PSD route there.
     """
     p, xp, _ = dispatch(pn_phase)
-    p2, was_1d = _as_2d(p)
+    p2, _was_1d = as_2d(p, name="pn_phase")
     n_full = p2.shape[-1]
     sl = slice(edge_trim, n_full - edge_trim) if edge_trim > 0 else slice(None)
     p2 = p2[:, sl].astype(xp.float64)
@@ -122,29 +122,34 @@ def linewidth_increment(
         ks = np.asarray(sorted(set(int(k) for k in lags if k >= 1)), dtype=np.float64)
         if ks.size < 2:
             raise ValueError("method='slope' needs at least two distinct lags ≥ 1.")
-        var_k = xp.stack([_var_lag(int(k)) for k in ks], axis=0)  # (n_lag, C)
-        # The fit input is a tiny (n_lag, C) matrix - one D2H transfer and a
-        # host-side polyfit beat launching a device least-squares here.
-        var_k_cpu = np.asarray(to_device(var_k, "cpu"), dtype=np.float64)
-        coeffs = np.polyfit(ks, var_k_cpu, 1)  # (2, C): [slope, intercept]
-        slope, intercept = coeffs[0], coeffs[1]
-        linewidth_cpu = np.maximum(slope, 0.0) / (2.0 * np.pi * t_sym)
+        # Shared with linewidth_dsh(method='increment'): the fit is in
+        # seconds, so ``slope`` is rad²/s and only the constant differs.
+        slope, intercept, var_k_cpu, lag_sec = _increment_variance_fit(
+            p2, ks.astype(int), t_sym, xp
+        )
+        linewidth_cpu = np.maximum(slope, 0.0) / (2.0 * np.pi)
         awgn_var_cpu = intercept
     elif method == "subtract":
+        # The AWGN inputs are caller-supplied host scalars, so resolve them
+        # host-side and upload once: building them on device would force a
+        # sync back for the ``size == 1`` and ``any()`` branch tests below.
         if noise_var is not None:
-            sigma_n2 = xp.full(c, float(noise_var), dtype=xp.float64)
+            sigma_host = np.full(c, float(noise_var), dtype=np.float64)
         elif snr_db is not None:
-            snr_val = xp.atleast_1d(xp.asarray(snr_db, dtype=xp.float64))
-            sigma_n2 = 10.0 ** (-snr_val / 10.0)
-            if sigma_n2.size == 1:
-                sigma_n2 = xp.full(c, float(sigma_n2[0]))
+            snr_host = np.atleast_1d(
+                np.asarray(to_device(snr_db, "cpu"), dtype=np.float64)
+            )
+            sigma_host = 10.0 ** (-snr_host / 10.0)
+            if sigma_host.size == 1:
+                sigma_host = np.full(c, float(sigma_host[0]))
         else:
-            sigma_n2 = xp.zeros(c, dtype=xp.float64)
+            sigma_host = np.zeros(c, dtype=np.float64)
+        sigma_n2 = xp.asarray(sigma_host)
 
-        if ref_symbols is not None and xp.any(sigma_n2):
+        if ref_symbols is not None and bool(np.any(sigma_host)):
             from ..helpers import normalize
 
-            d2, _ = _as_2d(xp.asarray(ref_symbols))
+            d2 = broadcast_channels(xp.asarray(ref_symbols), c, xp, name="ref_symbols")
             d2 = d2[:, :n_full][:, sl]
             d2 = normalize(d2, mode="average_power", axis=-1)
             inv = 1.0 / xp.maximum(xp.abs(d2) ** 2, 1e-12)
@@ -167,10 +172,10 @@ def linewidth_increment(
 
         if method == "slope":
             _plotting.plot_increment_variance(
-                ks * t_sym,
+                lag_sec,
                 var_k_cpu.T,
-                slope=coeffs[0] / t_sym,
-                intercept=coeffs[1],
+                slope=slope,
+                intercept=intercept,
                 show=True,
             )
         else:
@@ -179,9 +184,9 @@ def linewidth_increment(
             )
 
     return {
-        "linewidth": _scalar_or_array(linewidth_cpu),
-        "dphi_var": _scalar_or_array(var1_cpu),
-        "awgn_var": _scalar_or_array(awgn_var_cpu),
+        "linewidth": to_report_scalar(linewidth_cpu),
+        "dphi_var": to_report_scalar(var1_cpu),
+        "awgn_var": to_report_scalar(awgn_var_cpu),
         "method": method,
     }
 
@@ -254,14 +259,12 @@ def fm_noise_psd(
       bins.
     """
     p, xp, _ = dispatch(phi)
-    p2, was_1d = _as_2d(p)
+    p2, was_1d = as_2d(p, name="phi")
     t_sym = 1.0 / float(symbol_rate)
 
     f_inst = xp.diff(p2.astype(xp.float64), axis=-1) / (2.0 * np.pi * t_sym)
     n = f_inst.shape[-1]
-    if nperseg is None:
-        nperseg = int(min(max(n // 8, 256), 4096))
-    nperseg = min(nperseg, n)
+    nperseg = _resolve_nperseg(n, nperseg, cap=4096)
 
     f, S_f = welch_psd(
         f_inst,
@@ -274,7 +277,7 @@ def fm_noise_psd(
     if bias_correction:
         # S_f,est = S_f,true · sinc²(fT); undo the diff-differentiator droop.
         S_f = S_f / (xp.sinc(f * t_sym) ** 2)
-    S_out = S_f[0] if was_1d else S_f
+    S_out = restore_1d(was_1d, S_f)
 
     if debug_plot:
         from .. import plotting as _plotting
@@ -376,16 +379,32 @@ def linewidth_beta_separation(
       estimate when a clean white-FM plateau exists in the band; the two
       should agree within tens of percent, otherwise inspect the PSD.
     """
-    f, S_f = fm_noise_psd(phi, symbol_rate, nperseg=nperseg)
+    phi_arr, _, _ = dispatch(phi)
+    n_phi = phi_arr.shape[-1]
+    f, S_f = fm_noise_psd(phi_arr, symbol_rate, nperseg=nperseg)
     _, xp, _ = dispatch(f)
-    S2 = S_f[None, :] if S_f.ndim == 1 else S_f
 
-    beta = _BETA_SLOPE * f
+    # Transfer the plot-sized spectrum once, up front: every fence, mask and
+    # median below is host-side arithmetic on these arrays, so reading f[1] /
+    # f[-1] off the device beforehand would only add two syncs.
+    f_cpu = np.asarray(to_device(f, "cpu"), dtype=np.float64)
+    S_cpu = np.asarray(to_device(S_f, "cpu"), dtype=np.float64)
+    S2c = S_cpu[None, :] if S_cpu.ndim == 1 else S_cpu
+
     # One-sided Welch axis: f[0] = 0, f[1] is the first non-zero bin.
-    fmin = float(f[1]) if f_min is None else float(f_min)
-    fmax = float(f[-1]) if f_max is None else float(f_max)
-    band = (f >= fmin) & (f <= fmax)
+    fmin = float(f_cpu[1]) if f_min is None else float(f_min)
+    fmax = float(f_cpu[-1]) if f_max is None else float(f_max)
+    beta_cpu = _BETA_SLOPE * f_cpu
+    band_cpu = (f_cpu >= fmin) & (f_cpu <= fmax)
+    # The reported/plotted mask is rebuilt from the transferred spectrum -
+    # same expression, same float64 values - instead of being transferred.
+    above_cpu = band_cpu[None, :] & (S2c > beta_cpu[None, :])
 
+    # The β-area integral itself stays on the input backend (sample-rate work),
+    # with the fence rebuilt there from the host scalars.
+    S2 = S_f[None, :] if S_f.ndim == 1 else S_f
+    beta = _BETA_SLOPE * f
+    band = (f >= fmin) & (f <= fmax)
     # Vectorized over channels: (C, nfreq) masks instead of a per-channel loop.
     above = band[None, :] & (S2 > beta[None, :])
     integrand = xp.where(above, S2, 0.0)
@@ -395,66 +414,39 @@ def linewidth_beta_separation(
     # Pack the two (C,) metrics into one D2H transfer; the floor median runs
     # host-side so the plateau auto-detection is shared with linewidth_dsh.
     lw_cpu, area_cpu = to_device(xp.stack([lw, area]), "cpu")
-    f_cpu = np.asarray(to_device(f, "cpu"), dtype=np.float64)
-    S_cpu = np.asarray(to_device(S_f, "cpu"), dtype=np.float64)
-    beta_cpu = np.asarray(to_device(beta, "cpu"), dtype=np.float64)
-    above_cpu = np.asarray(to_device(above, "cpu"), dtype=bool)
 
-    S2c = S_cpu[None, :] if S_cpu.ndim == 1 else S_cpu
-    n_ch = S2c.shape[0]
-    band_cpu = (f_cpu >= fmin) & (f_cpu <= fmax)
     base2 = np.zeros(S2c.shape, dtype=bool)
     base2[:] = band_cpu & (f_cpu > 0)
     base2 &= np.isfinite(S2c)
 
     # Welch bins are χ²-distributed: the median-based floor reads the true
-    # level low by median(χ²_ν)/ν ≈ 1 - 1/(3K); divided back out below.
-    nps_used = int(round(float(symbol_rate) / float(f_cpu[1])))
-    m_med, k_seg = _welch_median_bias(phi.shape[-1] - 1, nps_used)
-    if k_seg < 4:
-        logger.warning(
-            "linewidth_beta_separation: only %d Welch segment(s) at "
-            "nperseg=%d - the floor median is noisy and the χ²-median "
-            "correction (÷%.3f) is asymptotic; extend the record (aim for "
-            "≥ 5·nperseg samples).",
-            k_seg,
-            nps_used,
-            m_med,
-        )
+    # level low by median(χ²_ν)/ν ≈ 1 - 1/(3K); divided back out below.  The
+    # segment length is reproduced from the resolver rather than read back off
+    # the device frequency axis (f[1] = R/nperseg by construction).
+    nps_used = _resolve_nperseg(n_phi - 1, nperseg, cap=4096)
+    m_med, k_seg = _welch_floor_bias(
+        n_phi - 1, nps_used, label="linewidth_beta_separation"
+    )
 
-    if f_min is None and f_max is None:
-        used2, levels = _plateau_mask(f_cpu, S2c, base2)
-        lw_floor_cpu = np.pi * levels
-        for c in range(n_ch):
-            if not np.isfinite(lw_floor_cpu[c]):
-                logger.warning(
-                    "linewidth_beta_separation: no plateau detected "
-                    "(channel %d) - floor median falls back to the full "
-                    "band. Inspect the PSD before quoting it.",
-                    c,
-                )
-                used2[c] = base2[c]
-                lw_floor_cpu[c] = (
-                    np.pi * np.median(S2c[c][used2[c]]) if used2[c].any() else 0.0
-                )
-    else:
-        used2 = base2
-        lw_floor_cpu = np.array(
-            [
-                np.pi * np.median(S2c[c][used2[c]]) if used2[c].any() else 0.0
-                for c in range(n_ch)
-            ]
-        )
-    lw_floor_cpu = lw_floor_cpu / m_med
+    used2, levels = _floor_levels(
+        f_cpu,
+        S2c,
+        base2,
+        auto=(f_min is None and f_max is None),
+        label="linewidth_beta_separation",
+        fallback_desc="the full band",
+    )
+    # A band with no eligible bin reports a zero floor rather than NaN.
+    lw_floor_cpu = np.pi * np.where(np.isfinite(levels), levels, 0.0) / m_med
     used_cpu = used2[0] if S_cpu.ndim == 1 else used2
     if S_cpu.ndim == 1:
         above_cpu = above_cpu[0]
 
     result = {
-        "linewidth": _scalar_or_array(lw_cpu),
-        "linewidth_floor": _scalar_or_array(lw_floor_cpu),
+        "linewidth": to_report_scalar(lw_cpu),
+        "linewidth_floor": to_report_scalar(lw_floor_cpu),
         "n_segments": k_seg,
-        "area_hz2": _scalar_or_array(area_cpu),
+        "area_hz2": to_report_scalar(area_cpu),
         "f": f_cpu,
         "S_f": S_cpu,
         "beta_line": beta_cpu,

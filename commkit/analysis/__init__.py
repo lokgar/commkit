@@ -24,6 +24,10 @@ package is deliberate and limited to three cases:
   floats and *plot-sized* NumPy arrays (Welch/Allan grids, ≤ ``nperseg``
   bins) after one transfer, because their consumers are prints and plots.
 
+JAX arrays are **not** an input backend here (nor anywhere behind
+``backend.dispatch``): they report NumPy and are silently pulled to the host.
+Convert at the boundary with ``backend.from_jax`` before calling in.
+
 Sample-rate arrays returned to the caller (``carrier_phase_trajectory``,
 ``separate_drift_phase_noise``, ``frequency_drift_metrics['df']``,
 ``dsh_phase``, ``fm_noise_psd``, ``dsh_fm_noise_psd``) always stay on the

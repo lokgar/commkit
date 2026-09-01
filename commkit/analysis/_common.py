@@ -2,13 +2,17 @@
 
 import numpy as np
 
+from ..backend import to_device
+from ..logger import logger
+
 __all__ = [
     "_BETA_SLOPE",
     "_FWHM_FROM_AREA",
-    "_as_2d",
-    "_pairing_variance",
+    "_floor_levels",
+    "_increment_variance_fit",
     "_plateau_mask",
-    "_scalar_or_array",
+    "_resolve_nperseg",
+    "_welch_floor_bias",
     "_welch_median_bias",
 ]
 
@@ -19,15 +23,22 @@ _BETA_SLOPE = 8.0 * np.log(2.0) / (np.pi**2)
 _FWHM_FROM_AREA = 8.0 * np.log(2.0)
 
 
-def _as_2d(arr):
-    """Promote SISO ``(N,)`` to ``(1, N)``; return ``(arr2d, was_1d)``."""
-    return (arr[None, :], True) if arr.ndim == 1 else (arr, False)
+def _resolve_nperseg(n: int, nperseg: int | None, *, cap: int) -> int:
+    """Welch segment length actually used for a length-``n`` record.
 
+    ``None`` selects the default ``n//8`` with a floor of 256 bins (a short
+    record still resolves the FM-noise shape) and a ceiling of ``cap`` (so
+    ``K = n/nperseg`` stays large enough for the Welch average, and for the
+    χ²-median correction of ``_welch_median_bias`` to be in its asymptotic
+    regime).  An explicit value is honoured, clipped to the record length.
 
-def _scalar_or_array(values):
-    """Collapse a length-1 per-channel result to a Python float."""
-    values = np.asarray(values, dtype=np.float64)
-    return float(values[0]) if values.size == 1 else values
+    Callers use the returned value both to *drive* Welch and to reproduce its
+    bin spacing (``f[1] = f_s / nperseg``) without reading the frequency axis
+    back off the device.
+    """
+    if nperseg is None:
+        return int(min(max(n // 8, 256), cap, n))
+    return int(min(int(nperseg), n))
 
 
 def _welch_median_bias(n_samples: int, nperseg: int) -> tuple[float, int]:
@@ -225,12 +236,161 @@ def _plateau_mask(
     return used2, levels
 
 
-def _pairing_variance(y2, d2, xp):
-    """Total wrapped phase-error increment variance for a channel pairing.
+def _welch_floor_bias(n_samples: int, nperseg: int, *, label: str) -> tuple[float, int]:
+    """``_welch_median_bias`` plus the shared segment-count diagnostic.
 
-    Returns a 0-d array on the input backend (no host sync); the caller
-    compares the candidate pairings and pays a single device->host transfer
-    for the final boolean decision.
+    Every median-based white-FM floor in this package (β-separation and DSH
+    alike) divides out the same χ²-median bias and wants the same warning when
+    too few Welch segments back it, so the message lives here rather than being
+    re-typed per estimator.
+
+    Parameters
+    ----------
+    n_samples : int
+        Length of the sequence handed to Welch (the differentiated phase).
+    nperseg : int
+        Welch segment length actually used (see ``_resolve_nperseg``).
+    label : str
+        Caller name used in the log messages.
+
+    Returns
+    -------
+    factor : float
+        ``median/mean`` ratio to divide the median-based floor by.
+    n_segments : int
+        Welch segment count ``K``.
     """
-    pe = xp.angle(y2 * xp.conj(d2)).astype(xp.float64)
-    return xp.sum(xp.var(xp.diff(pe, axis=-1), axis=-1))
+    m_med, k_seg = _welch_median_bias(n_samples, nperseg)
+    if k_seg < 4:
+        logger.warning(
+            "%s: only %d Welch segment(s) at nperseg=%d - the floor median is "
+            "noisy and the χ²-median correction (÷%.3f) is asymptotic; extend "
+            "the record (aim for ≥ 5·nperseg samples).",
+            label,
+            k_seg,
+            nperseg,
+            m_med,
+        )
+    else:
+        logger.info(
+            "%s: %d Welch segments - χ²-median floor bias corrected by ÷%.4f.",
+            label,
+            k_seg,
+            m_med,
+        )
+    return m_med, k_seg
+
+
+def _floor_levels(
+    f,
+    s2,
+    base2,
+    *,
+    auto: bool,
+    label: str,
+    fallback2=None,
+    fallback_desc: str = "the fenced band",
+):
+    """White-FM floor level per channel, by plateau auto-detection or fence.
+
+    The summary half of both PSD linewidth routes: ``Δν = π · level`` once the
+    caller divides out the χ²-median bias.  Host-side NumPy by design (the
+    spectrum has already been transferred once).
+
+    Parameters
+    ----------
+    f : ndarray, (nf,)
+        One-sided frequency axis (host).
+    s2 : ndarray, (C, nf)
+        FM-noise PSD per channel (host; NaN allowed at masked bins).
+    base2 : ndarray of bool, (C, nf)
+        Eligible bins (validity mask and any user fences).
+    auto : bool
+        If True, auto-detect the plateau (``_plateau_mask``) and fall back to
+        ``fallback2`` per channel where detection fails.  If False, the median
+        runs over ``base2`` as given.
+    label : str
+        Caller name used in the fallback warning.
+    fallback2 : ndarray of bool, (C, nf), optional
+        Per-channel fallback mask for failed detection; defaults to ``base2``.
+    fallback_desc : str
+        Human-readable description of that fallback, for the warning.
+
+    Returns
+    -------
+    used2 : ndarray of bool, (C, nf)
+        Bins the median actually ran over.
+    levels : ndarray, (C,)
+        Raw median level per channel - **not** χ²-corrected - or NaN where no
+        eligible bin remained (the caller decides whether that is a zero floor
+        or an error).
+    """
+    n_ch = s2.shape[0]
+
+    def _median(mask_row, ch):
+        return float(np.median(s2[ch][mask_row])) if mask_row.any() else np.nan
+
+    if auto:
+        used2, levels = _plateau_mask(f, s2, base2)
+        fb = base2 if fallback2 is None else np.broadcast_to(fallback2, s2.shape)
+        for c in range(n_ch):
+            if np.isfinite(levels[c]):
+                continue
+            logger.warning(
+                "%s: no plateau detected (channel %d) - the floor median falls "
+                "back to %s. Inspect the PSD before quoting Δν.",
+                label,
+                c,
+                fallback_desc,
+            )
+            used2[c] = fb[c]
+            levels[c] = _median(used2[c], c)
+        return used2, levels
+
+    used2 = np.broadcast_to(base2, s2.shape)
+    levels = np.array([_median(used2[c], c) for c in range(n_ch)])
+    return used2, levels
+
+
+def _increment_variance_fit(y2, lags, dt: float, xp):
+    r"""Least-squares fit of the increment variance ``Var(Δ_a)`` against lag.
+
+    For a Wiener phase process the lag-``a`` increment variance is linear in
+    ``a``, with the uncorrelated additive (AWGN angle) noise contributing a
+    lag-independent intercept - the property both linewidth-from-increment
+    estimators exploit, so the fit itself is defined once here.  The lag axis
+    is converted to **seconds**, so the returned slope is in rad²/s and the
+    caller only applies its own constant (``Δν = slope/2π`` for a direct phase
+    record, ``slope/4π`` for a DSH differential phase).
+
+    The variances are computed on the input backend and the ``(n_lag, C)``
+    result is transferred once - a tiny host-side ``polyfit`` beats launching a
+    device least-squares.
+
+    Parameters
+    ----------
+    y2 : array_like, (C, N)
+        Phase record on the input backend.
+    lags : sequence of int
+        Increment lags in samples (each ``≥ 1``).
+    dt : float
+        Sample interval in seconds.
+    xp : module
+        Array module of ``y2``.
+
+    Returns
+    -------
+    slope, intercept : ndarray, (C,)
+        Fitted line coefficients (rad²/s and rad²).
+    var_cpu : ndarray, (n_lag, C)
+        The fitted variances, host-side.
+    x_sec : ndarray, (n_lag,)
+        Lag axis in seconds.
+    """
+    var = xp.stack(
+        [xp.var(y2[:, int(a) :] - y2[:, : -int(a)], axis=-1) for a in lags], axis=0
+    )  # (n_lag, C)
+    var_cpu = np.asarray(to_device(var, "cpu"), dtype=np.float64)
+    x_sec = np.asarray(lags, dtype=np.float64) * float(dt)
+    coeffs = np.polyfit(x_sec, var_cpu, 1)  # (2, C): [slope, intercept]
+    return coeffs[0], coeffs[1], var_cpu, x_sec
