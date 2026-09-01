@@ -1,6 +1,6 @@
 """General library utility functions."""
 
-from typing import Any
+from typing import Any, overload
 
 import numpy as np
 
@@ -362,9 +362,7 @@ def cross_correlate_fft(
     samples, xp, _ = dispatch(samples)
     template = xp.asarray(template)
 
-    was_1d = samples.ndim == 1
-    if was_1d:
-        samples = samples[None, :]
+    samples, was_1d = as_2d(samples, name="samples")
     if template.ndim == 1:
         template = template[None, :]
 
@@ -487,3 +485,312 @@ def resolve_pll_gains(bandwidth: float, mu: float | None, beta: float | None):
     if beta is not None:  # beta without mu is ambiguous
         raise ValueError("beta requires mu to be set (or use the bandwidth shortcut).")
     return cpr_pll_gains(bandwidth)
+
+
+# ---------------------------------------------------------------------------
+# Array shape helpers
+# ---------------------------------------------------------------------------
+#
+# CommKit's SISO/MIMO convention is ``(N,)`` / ``(C, N)`` with time on the last
+# axis (CLAUDE.md, "Array Shapes").  Nearly every DSP entry point therefore
+# promotes a 1-D input to ``(1, N)``, runs one vectorized channel-batched
+# implementation, and squeezes the leading axis back off on the way out.  These
+# helpers are that idiom, defined once, so the promotion is validated the same
+# way everywhere instead of silently passing 3-D (or 0-d) input through to a
+# confusing downstream broadcast error.
+#
+# They are pure indexing/broadcast operations and therefore correct on every
+# array type the library sees - NumPy, CuPy, and JAX - without dispatching.
+
+
+def as_2d(arr: ArrayType, *, name: str = "array") -> tuple[ArrayType, bool]:
+    """
+    Promotes a SISO ``(N,)`` array to the MIMO layout ``(1, N)``.
+
+    The canonical entry half of the library's SISO/MIMO shape idiom; pair it
+    with :func:`restore_1d` to squeeze the promoted axis back off the outputs.
+
+    Parameters
+    ----------
+    arr : array_like
+        Input array, ``(N,)`` (SISO) or ``(C, N)`` (MIMO, time last).
+        Must already be an array (call ``dispatch`` first); no conversion or
+        host transfer is performed.
+    name : str, default "array"
+        Variable name used in the error message.
+
+    Returns
+    -------
+    arr_2d : array_like
+        ``arr[None, :]`` for 1-D input, ``arr`` itself (no copy) for 2-D.
+    was_1d : bool
+        Whether the promotion happened - pass this to :func:`restore_1d`.
+
+    Raises
+    ------
+    ValueError
+        If ``arr`` is 0-d or has more than two dimensions.  CommKit signals
+        carry at most a channel axis and a time axis; a 3-D input is a caller
+        error, not a batch dimension.
+    """
+    ndim = np.ndim(arr)  # reads ``arr.ndim``; never converts CuPy/JAX to host
+    if ndim == 1:
+        return arr[None, :], True
+    if ndim == 2:
+        return arr, False
+    raise ValueError(
+        f"{name} must be 1-D (N,) for SISO or 2-D (C, N) for MIMO with time on "
+        f"the last axis; got ndim={ndim}."
+    )
+
+
+@overload
+def restore_1d(was_1d: bool, arr: ArrayType, /) -> ArrayType: ...
+
+
+@overload
+def restore_1d(
+    was_1d: bool, arr: ArrayType, arr2: ArrayType, /, *rest: ArrayType
+) -> tuple[ArrayType, ...]: ...
+
+
+def restore_1d(was_1d: bool, *arrays: ArrayType) -> ArrayType | tuple[ArrayType, ...]:
+    """
+    Undoes :func:`as_2d` on one or more outputs.
+
+    Parameters
+    ----------
+    was_1d : bool
+        The flag returned by :func:`as_2d`.
+    *arrays : array_like
+        Channel-batched results, each ``(1, ...)`` when ``was_1d`` is True.
+
+    Returns
+    -------
+    array_like or tuple of array_like
+        ``arr[0]`` per input when ``was_1d``, otherwise the inputs unchanged.
+        A single input returns bare (not a 1-tuple), so both
+        ``out = restore_1d(was_1d, out)`` and
+        ``drift, pn = restore_1d(was_1d, drift, pn)`` read naturally.
+    """
+    if not arrays:
+        raise ValueError("restore_1d() requires at least one array.")
+    out = tuple(a[0] for a in arrays) if was_1d else arrays
+    return out[0] if len(out) == 1 else out
+
+
+def broadcast_channels(
+    ref: ArrayType, num_channels: int, xp: Any = None, *, name: str = "reference"
+) -> ArrayType:
+    """
+    Broadcasts a shared reference sequence across ``num_channels`` channels.
+
+    Replaces the ad-hoc ``if ref.ndim == 1: ref = ref[None, :]`` promotion used
+    at every reference/pilot input, adding the channel-count check that the
+    bare promotion leaves to a later, far more opaque broadcast failure.
+
+    Parameters
+    ----------
+    ref : array_like
+        Reference sequence: ``(L,)`` shared by all channels, ``(1, L)``
+        (broadcast), or ``(C, L)`` (per-channel).
+    num_channels : int
+        Number of channels ``C`` the reference must cover.
+    xp : module, optional
+        Array module to broadcast with.  Inferred from ``ref`` when omitted.
+    name : str, default "reference"
+        Variable name used in the error message.
+
+    Returns
+    -------
+    array_like
+        A ``(C, L)`` view.  Shared references are returned as a **read-only
+        broadcast view** (no data is copied); call ``.copy()`` before writing.
+
+    Raises
+    ------
+    ValueError
+        If ``ref`` is not 1-D/2-D, or its channel count is neither
+        ``num_channels`` nor 1.
+    """
+    if xp is None:
+        xp = get_array_module(ref)
+    ndim = np.ndim(ref)
+    if ndim == 1:
+        return xp.broadcast_to(ref[None, :], (num_channels, ref.shape[-1]))
+    if ndim == 2:
+        c = ref.shape[0]
+        if c == num_channels:
+            return ref
+        if c == 1:
+            return xp.broadcast_to(ref, (num_channels, ref.shape[-1]))
+        raise ValueError(
+            f"{name} has {c} channels, which matches neither the signal's "
+            f"{num_channels} channels nor 1 (broadcast)."
+        )
+    raise ValueError(f"{name} must be 1-D (L,) or 2-D (C, L); got ndim={ndim}.")
+
+
+def require_channels(
+    arr: ArrayType,
+    num_channels: int,
+    *,
+    name: str = "samples",
+    description: str | None = None,
+) -> ArrayType:
+    """
+    Validates a strict MIMO layout with an exact channel count.
+
+    For entry points that are *only* defined for a fixed number of channels -
+    dual-polarization channel models and polarization equalizers - where a
+    SISO input is a caller error rather than something to promote.
+
+    Parameters
+    ----------
+    arr : array_like
+        Input array; must be ``(num_channels, N)``.
+    num_channels : int
+        Required channel count (e.g. ``2`` for dual-pol).
+    name : str, default "samples"
+        Variable name used in the error message.
+    description : str, optional
+        Domain wording for the requirement, e.g. ``"dual-pol input with shape
+        (2, N)"``.  Defaults to a generic ``"a 2-D (C, N) array"``.
+
+    Returns
+    -------
+    array_like
+        ``arr`` unchanged.
+
+    Raises
+    ------
+    ValueError
+        If ``arr`` is not 2-D or does not have exactly ``num_channels`` rows.
+    """
+    ndim = np.ndim(arr)
+    if ndim != 2 or arr.shape[0] != num_channels:
+        shape = tuple(arr.shape) if hasattr(arr, "shape") else np.shape(arr)
+        what = description or f"a 2-D ({num_channels}, N) array"
+        raise ValueError(
+            f"{name} must be {what} with time on the last axis; got shape {shape}."
+        )
+    return arr
+
+
+def to_report_scalar(values: Any) -> float | np.ndarray:
+    """
+    Collapses a per-channel result to a Python float, or a host NumPy array.
+
+    The reporting-layer counterpart of :func:`as_2d`: channel-batched metrics
+    are computed as ``(C,)`` vectors, but a SISO caller wants a plain float
+    back.  Device arrays are transferred to the host internally, so this is
+    safe to call on a CuPy result directly.
+
+    Parameters
+    ----------
+    values : array_like or scalar
+        Per-channel metric, ``(C,)`` (or 0-d / scalar).
+
+    Returns
+    -------
+    float or numpy.ndarray
+        A Python float when a single value is present, otherwise a
+        ``float64`` NumPy array.
+    """
+    arr = np.asarray(to_device(values, "cpu"), dtype=np.float64)
+    return float(arr.reshape(-1)[0]) if arr.size == 1 else arr
+
+
+# ---------------------------------------------------------------------------
+# Linear-trend (least-squares slope) helpers
+# ---------------------------------------------------------------------------
+
+
+def _centered_axis(n: int, x: Any, xp: Any) -> tuple[ArrayType, ArrayType]:
+    """Mean-removed abscissa and its sum of squares, as device arrays."""
+    if x is None:
+        # Analytic form for x = arange(n): Σ(i - (n-1)/2)² = n(n²-1)/12, which
+        # avoids a reduction and is exact in float64 for realistic record
+        # lengths (n < 2⁵², well inside the mantissa).
+        xc = xp.arange(n, dtype=xp.float64) - 0.5 * (n - 1)
+        denom = xp.asarray(n * (n * n - 1.0) / 12.0, dtype=xp.float64)
+    else:
+        x_arr = xp.asarray(x, dtype=xp.float64)
+        xc = x_arr - xp.mean(x_arr)
+        denom = xp.sum(xc * xc)
+    # Guard n == 1 (or a degenerate axis) without a host sync on the value.
+    return xc, xp.where(denom > 0.0, denom, xp.ones_like(denom))
+
+
+def linear_trend_slope(y: ArrayType, *, x: Any = None, xp: Any = None) -> ArrayType:
+    r"""
+    Per-channel least-squares slope of a phase (or any) record.
+
+    Ordinary least squares on the centred normal equations,
+
+    .. math:: \hat{a} = \frac{\sum_k (x_k - \bar{x})(y_k - \bar{y})}
+                             {\sum_k (x_k - \bar{x})^2},
+
+    evaluated for every channel in one vectorized pass and returned **on the
+    input backend** - no host synchronization, so the caller decides when (and
+    whether) to transfer.
+
+    Parameters
+    ----------
+    y : array_like
+        Record to fit, ``(C, N)`` with the fit axis last (promote SISO with
+        :func:`as_2d` first).
+    x : array_like, optional
+        Abscissa, ``(N,)``.  Defaults to the sample index ``arange(N)``, so the
+        slope is then in *units of y per sample*.  Pass a time axis in seconds
+        to get a slope per second (e.g. for non-uniform pilot positions).
+    xp : module, optional
+        Array module; inferred from ``y`` when omitted.
+
+    Returns
+    -------
+    array_like
+        Slope per channel, ``(C,)``, ``float64``, on the input backend.
+    """
+    if xp is None:
+        y, xp, _ = dispatch(y)
+    n = y.shape[-1]
+    xc, denom = _centered_axis(n, x, xp)
+    # Subtracting the per-channel mean is mathematically redundant (xc is
+    # already centred) but keeps the products small when the record carries a
+    # large constant offset - phase trajectories routinely do.
+    yc = y - xp.mean(y, axis=-1, keepdims=True)
+    return xp.sum(yc * xc, axis=-1) / denom
+
+
+def remove_linear_trend(y: ArrayType, *, x: Any = None) -> tuple[ArrayType, ArrayType]:
+    r"""
+    Removes the per-channel least-squares linear trend, preserving the mean.
+
+    On an unwrapped phase record the linear term *is* the mean frequency
+    offset, so this is the canonical "strip the residual FOE, keep the phase
+    fluctuation" step shared by the pilot-tone recovery and the DSH
+    fine-frequency stage.  Only the slope term is subtracted, so the mean phase
+    (and hence any constant offset) survives.
+
+    Parameters
+    ----------
+    y : array_like
+        Record to detrend, ``(C, N)`` with time on the last axis.
+    x : array_like, optional
+        Abscissa, ``(N,)``; defaults to the sample index (slope per sample).
+
+    Returns
+    -------
+    detrended : array_like
+        ``y`` minus the fitted slope term, ``float64``, on the input backend.
+    slope : array_like
+        Fitted slope per channel, ``(C,)`` - in units of ``y`` per unit ``x``
+        (per sample by default).
+    """
+    y, xp, _ = dispatch(y)
+    n = y.shape[-1]
+    xc, denom = _centered_axis(n, x, xp)
+    yc = y - xp.mean(y, axis=-1, keepdims=True)
+    slope = xp.sum(yc * xc, axis=-1) / denom
+    return y - slope[..., None] * xc[None, :], slope
