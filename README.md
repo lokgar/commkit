@@ -82,6 +82,20 @@ pip install "commkit[gpu]"
 >
 > *(Assumes `commkit` is cloned in `$HOME/commkit`. If located elsewhere, replace `$HOME/commkit` with `<path-to-repo>`. `python3.*/` matches any Python version automatically).*
 
+### Notebook Support
+
+To run the example notebooks and enable the rich HTML `Signal.print_info()` table (falls back to plain text without it):
+
+```bash
+# Using uv
+uv pip install "commkit[notebook]"
+
+# Or with standard pip
+pip install "commkit[notebook]"
+```
+
+Extras can be combined, e.g. `commkit[gpu,notebook]`, or install everything at once with `commkit[full]`.
+
 ### Development Installation
 
 ```bash
@@ -91,7 +105,7 @@ cd commkit
 # Sync core environment
 uv sync
 
-# Sync environment with all extras (including GPU packages)
+# Sync environment with all extras (including GPU and notebook packages)
 uv sync --all-extras
 ```
 

@@ -29,6 +29,9 @@ gpu = [
 notebook = [
     "jupyter>=1.1.1",
 ]
+full = [
+    "commkit[gpu,notebook]",
+]
 
 [build-system]
 requires = ["hatchling"]
