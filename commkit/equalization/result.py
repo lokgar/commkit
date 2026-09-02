@@ -138,7 +138,7 @@ def _log_equalizer_exit(
     """Log exit MSE and optionally show a debug plot for an EqualizerResult."""
     if result.error is not None:
         n_sym = result.error.shape[-1]  # time axis; (N_sym,) or (C, N_sym)
-        want_log = logger.isEnabledFor(logging.INFO)
+        _want_log = logger.isEnabledFor(logging.INFO)
         # The convergence check emits a WARNING (normally always enabled), but
         # only runs when explicitly requested and the signal is long enough.
         want_conv = check_convergence and n_sym >= 20
@@ -147,20 +147,20 @@ def _log_equalizer_exit(
         # nothing will consume the result.  When it is needed, transfer only the
         # tail (and head, for convergence) windows rather than the full error
         # array: ≤100 samples/channel instead of N.
-        if want_log or want_conv:
+        if _want_log or want_conv:
             window = max(1, min(100, n_sym))
             tail = to_device(result.error[..., -window:], "cpu")
 
             if tail.ndim == 1:  # SISO
                 mse_final = float(np.mean(np.abs(tail) ** 2))
                 mse_db = 10.0 * np.log10(mse_final + 1e-30)
-                if want_log:
+                if _want_log:
                     logger.info(
                         "%s: exit MSE=%.1f dB (final %s symbols)", name, mse_db, window
                     )
             else:  # MIMO: per-channel MSE; keep the mean for the convergence check
                 per_ch_mse = np.mean(np.abs(tail) ** 2, axis=-1)  # (C,)
-                if want_log:
+                if _want_log:
                     parts = ", ".join(
                         f"ch{c}={10.0 * np.log10(m + 1e-30):.1f}"
                         for c, m in enumerate(per_ch_mse)
