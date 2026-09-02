@@ -103,10 +103,29 @@ def sync(backend_device):
 
 
 def pytest_benchmark_update_machine_info(config, machine_info):
-    """Strip the hostname pytest-benchmark auto-captures via platform.node().
+    """Strip the hostname pytest-benchmark auto-captures via platform.node(),
+    and add a GPU descriptor - py-cpuinfo only probes the CPU, so machine_info
+    otherwise carries no record of which device produced the gpu-* results.
 
     baselines/ is committed and this is an open-source repo - the raw
     hostname (e.g. a workstation name tied to the author) has no benchmarking
     value and shouldn't end up in public git history.
     """
     machine_info["node"] = "redacted"
+
+    gpu_info = None
+    if _CUPY_AVAILABLE:
+        try:
+            props = cp.cuda.runtime.getDeviceProperties(0)
+            gpu_info = {
+                "name": props["name"].decode(),
+                "compute_capability": f"{props['major']}.{props['minor']}",
+                "total_memory_bytes": props["totalGlobalMem"],
+                "multi_processor_count": props["multiProcessorCount"],
+                "cuda_runtime_version": cp.cuda.runtime.runtimeGetVersion(),
+                "cuda_driver_version": cp.cuda.runtime.driverGetVersion(),
+                "cupy_version": cp.__version__,
+            }
+        except Exception:  # pragma: no cover - environment-dependent
+            gpu_info = None
+    machine_info["gpu"] = gpu_info
