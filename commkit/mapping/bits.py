@@ -10,6 +10,7 @@ import numpy as np
 
 from ..backend import ArrayType, dispatch
 from ..core.signal import Signal
+from ..helpers import unwrap_signal
 from ..logger import logger
 from .gray import gray_code, gray_constellation
 from .shaping import constellation_power
@@ -144,9 +145,13 @@ def demap_symbols_hard(
             raise ValueError(
                 "No resolved symbols available. Call resolve_symbols(sig) first."
             )
+        # Output field (resolved_bits) differs from the input field
+        # (resolved_symbols), so this is assigned by hand rather than via
+        # rewrap_signal (which always sets .samples).
+        resolved_symbols, _ = unwrap_signal(sig, field="resolved_symbols")
         new = sig.copy()
         new.resolved_bits = demap_symbols_hard(
-            sig.resolved_symbols,
+            resolved_symbols,
             sig.mod_scheme,
             sig.mod_order,
             unipolar=sig.mod_unipolar or False,

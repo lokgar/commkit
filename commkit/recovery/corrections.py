@@ -6,7 +6,7 @@ import numpy as np
 
 from ..backend import ArrayType, dispatch, to_device
 from ..core.signal import Signal
-from ..helpers import as_2d, broadcast_channels, restore_1d
+from ..helpers import as_2d, broadcast_channels, restore_1d, unwrap_signal
 from ..logger import logger
 
 
@@ -502,9 +502,13 @@ def resolve_channel_permutation(
                 "source_symbols is not set. Populate source_symbols (the known TX "
                 "symbol sequence) before calling resolve_channel_permutation()."
             )
+        # Output field (resolved_symbols) is written by hand: rewrap_signal
+        # always targets .samples, and here input and output share a field
+        # name that isn't it.
+        resolved_symbols, _ = unwrap_signal(sig, field="resolved_symbols")
         new = sig.copy()
         new.resolved_symbols = resolve_channel_permutation(
-            sig.resolved_symbols,
+            resolved_symbols,
             sig.source_symbols,
             num_skip_symbols=num_skip_symbols,
             metric=metric,
@@ -648,9 +652,10 @@ def resolve_phase_ambiguity(
             )
         if sig.mod_scheme is None or sig.mod_order is None:
             raise ValueError("mod_scheme and mod_order must be set.")
+        resolved_symbols, _ = unwrap_signal(sig, field="resolved_symbols")
         new = sig.copy()
         new.resolved_symbols = resolve_phase_ambiguity(
-            sig.resolved_symbols,
+            resolved_symbols,
             sig.source_symbols,
             sig.mod_scheme,
             sig.mod_order,

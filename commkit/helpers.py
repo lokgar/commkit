@@ -1,16 +1,24 @@
 """General library utility functions."""
 
-from typing import Any, overload
+from typing import TYPE_CHECKING, Any, overload
 
 import numpy as np
 
 from .backend import ArrayType, dispatch, get_array_module, is_cupy_available, to_device
 from .logger import logger
 
+if TYPE_CHECKING:
+    from .core import Signal
+
 try:
     import cupy as cp
 except ImportError:
     cp = None
+
+
+# ---------------------------------------------------------------------------
+# Random generation
+# ---------------------------------------------------------------------------
 
 
 def generate_bits(length: int, seed: int | None = None) -> ArrayType:
@@ -80,6 +88,11 @@ def generate_symbols(
     k = int(np.log2(order))
     bits = generate_bits(num_symbols * k, seed=seed)
     return mapping.map_bits(bits, modulation, order, unipolar=unipolar)
+
+
+# ---------------------------------------------------------------------------
+# Power / normalization
+# ---------------------------------------------------------------------------
 
 
 def rms(x: ArrayType, axis: int | None = None, keepdims: bool = False) -> ArrayType:
@@ -216,6 +229,11 @@ def normalize(
     return xp.where(norm_factor == 0, xp.zeros(x.shape, dtype=x.dtype), result)
 
 
+# ---------------------------------------------------------------------------
+# Formatting
+# ---------------------------------------------------------------------------
+
+
 def format_si(value: float | None, unit: str = "Hz") -> str:
     """
     Formats a numeric value into a human-readable string with SI prefixes.
@@ -263,6 +281,11 @@ def format_si(value: float | None, unit: str = "Hz") -> str:
 
     scaled = value / (1000.0**rank)
     return f"{scaled:.2f} {si_units[rank]}{unit}"
+
+
+# ---------------------------------------------------------------------------
+# Validation
+# ---------------------------------------------------------------------------
 
 
 def validate_array(
@@ -320,6 +343,11 @@ def validate_array(
         v = v.astype(complex_dtype)
 
     return v
+
+
+# ---------------------------------------------------------------------------
+# Correlation & sequences
+# ---------------------------------------------------------------------------
 
 
 def cross_correlate_fft(
@@ -437,6 +465,11 @@ def zc_mimo_root(stream_idx: int, base_root: int, length: int) -> int:
     [10, 11, 12, 1]
     """
     return ((base_root - 1 + stream_idx) % (length - 1)) + 1
+
+
+# ---------------------------------------------------------------------------
+# CPR / PLL loop gains
+# ---------------------------------------------------------------------------
 
 
 def cpr_pll_gains(bandwidth: float):
@@ -794,3 +827,92 @@ def remove_linear_trend(y: ArrayType, *, x: Any = None) -> tuple[ArrayType, Arra
     yc = y - xp.mean(y, axis=-1, keepdims=True)
     slope = xp.sum(yc * xc, axis=-1) / denom
     return y - slope[..., None] * xc[None, :], slope
+
+
+# ---------------------------------------------------------------------------
+# Signal unwrap/rewrap helpers
+# ---------------------------------------------------------------------------
+
+
+def unwrap_signal(
+    x: "ArrayType | Signal", *, field: str = "samples"
+) -> tuple[ArrayType, "Signal | None"]:
+    """
+    Extracts the working array from a :class:`~commkit.core.Signal`, or
+    passes a raw array through unchanged.
+
+    The canonical entry half of the library's Signal-awareness idiom; pair it
+    with :func:`rewrap_signal` so a function transparently returns an array
+    for array input and a :class:`Signal` for :class:`Signal` input.
+
+    Parameters
+    ----------
+    x : array_like or Signal
+        Input samples, or a :class:`Signal` wrapping them.
+    field : str, default "samples"
+        Attribute to read off ``x`` when it is a :class:`Signal`. Most DSP
+        functions operate on ``.samples``; a few (e.g. hard-decision mapping)
+        instead read ``.resolved_symbols``.
+
+    Returns
+    -------
+    array : array_like
+        ``getattr(x, field)`` for :class:`Signal` input, or ``x`` itself for
+        array input. Not yet passed through :func:`~commkit.backend.dispatch`.
+    signal : Signal or None
+        The originating :class:`Signal`, or ``None`` for array input - pass
+        this straight to :func:`rewrap_signal`.
+    """
+    # Local import: commkit.core.signal imports this module, so importing
+    # Signal at module scope here would be circular (see io.py for the same
+    # pattern).
+    from .core import Signal
+
+    if isinstance(x, Signal):
+        return getattr(x, field), x
+    return x, None
+
+
+@overload
+def rewrap_signal(sig: None, array: ArrayType, /, **metadata: Any) -> ArrayType: ...
+
+
+@overload
+def rewrap_signal(sig: "Signal", array: ArrayType, /, **metadata: Any) -> "Signal": ...
+
+
+def rewrap_signal(
+    sig: "Signal | None", array: ArrayType, /, **metadata: Any
+) -> "ArrayType | Signal":
+    """
+    Rebuilds a :class:`~commkit.core.Signal` around a result array, or
+    passes the array through unchanged.
+
+    The inverse of :func:`unwrap_signal`. ``sig`` is normally the value
+    :func:`unwrap_signal` returned alongside the array being processed.
+
+    Parameters
+    ----------
+    sig : Signal or None
+        The originating :class:`Signal` from :func:`unwrap_signal`, or
+        ``None`` to pass ``array`` through unchanged (the array-input case).
+    array : array_like
+        The result to store on the copy's ``.samples``.
+    **metadata
+        Additional fields to set on the copy via ``setattr`` (e.g.
+        ``sampling_rate=sig.symbol_rate`` after decimating to symbol rate).
+
+    Returns
+    -------
+    array_like or Signal
+        ``array`` unchanged when ``sig`` is ``None``; otherwise a
+        :meth:`Signal.copy` with ``.samples = array`` and ``**metadata``
+        applied.
+    """
+    if sig is None:
+        return array
+    new = sig.copy()
+    new.samples = array
+    for key, value in metadata.items():
+        setattr(new, key, value)
+    return new

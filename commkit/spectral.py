@@ -13,7 +13,7 @@ import numpy as np
 
 from .backend import ArrayType, dispatch
 from .core.signal import Signal
-from .helpers import as_2d, restore_1d
+from .helpers import as_2d, restore_1d, rewrap_signal, unwrap_signal
 from .logger import logger
 
 
@@ -61,17 +61,13 @@ def shift_frequency(
     with the shift applied and ``digital_frequency_offset`` accumulated;
     ``sampling_rate`` is taken from the signal.
     """
-    if isinstance(samples, Signal):
-        sig = samples
-        new = sig.copy()
-        out = shift_frequency(sig.samples, offset, sig.sampling_rate)
+    x, sig = unwrap_signal(samples)
+    if sig is not None:
+        out = shift_frequency(x, offset, sig.sampling_rate)
         assert isinstance(out, tuple)  # array input -> (samples, actual_offset)
         shifted, actual = out
-        new.samples = shifted
-        if new.digital_frequency_offset is None:
-            new.digital_frequency_offset = 0.0
-        new.digital_frequency_offset += actual
-        return new
+        dfo = (sig.digital_frequency_offset or 0.0) + actual
+        return rewrap_signal(sig, shifted, digital_frequency_offset=dfo)
 
     if sampling_rate is None:
         raise ValueError("shift_frequency() requires sampling_rate for array input.")
@@ -201,15 +197,14 @@ def add_pilot_tone(
     ``add_pilot_tone(sig, freq, ...)``).  A new :class:`Signal` is returned with
     ``pilot_tone_frequency`` / ``pilot_tone_power_ratio_db`` recorded.
     """
-    if isinstance(samples, Signal):
-        sig = samples
+    x, sig = unwrap_signal(samples)
+    if sig is not None:
         # Signal rate is implicit; the second positional carries the frequency.
         freq = frequency if frequency is not None else sampling_rate
         if freq is None:
             raise ValueError("add_pilot_tone() requires a frequency.")
-        new = sig.copy()
         out = add_pilot_tone(
-            sig.samples,
+            x,
             sig.sampling_rate,
             freq,
             power_ratio_db=power_ratio_db,
@@ -217,9 +212,13 @@ def add_pilot_tone(
             renormalize=renormalize,
         )
         assert isinstance(out, tuple)  # array input -> (samples, actual_frequency)
-        new.samples, new.pilot_tone_frequency = out
-        new.pilot_tone_power_ratio_db = power_ratio_db
-        return new
+        shifted, actual_freq = out
+        return rewrap_signal(
+            sig,
+            shifted,
+            pilot_tone_frequency=actual_freq,
+            pilot_tone_power_ratio_db=power_ratio_db,
+        )
 
     if sampling_rate is None or frequency is None:
         raise ValueError(
@@ -388,10 +387,10 @@ def welch_psd(
     ValueError
         If `return_onesided` set to True for complex-valued inputs.
     """
-    if isinstance(samples, Signal):
-        sig = samples
+    x, sig = unwrap_signal(samples)
+    if sig is not None:
         return welch_psd(
-            sig.samples,
+            x,
             sig.sampling_rate,
             nperseg=nperseg,
             detrend=detrend,
@@ -510,10 +509,10 @@ def spectrogram(
     ValueError
         If `return_onesided` set to True for complex-valued inputs.
     """
-    if isinstance(samples, Signal):
-        sig = samples
+    x, sig = unwrap_signal(samples)
+    if sig is not None:
         return spectrogram(
-            sig.samples,
+            x,
             sig.sampling_rate,
             window=window,
             nperseg=nperseg,

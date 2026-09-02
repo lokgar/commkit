@@ -12,7 +12,7 @@ import scipy
 
 from .backend import ArrayType, dispatch, to_device
 from .core.signal import Signal
-from .helpers import as_2d, normalize, restore_1d
+from .helpers import as_2d, normalize, restore_1d, rewrap_signal, unwrap_signal
 from .logger import logger
 from .multirate import expand
 
@@ -798,11 +798,9 @@ def fir_filter(
     array_like or Signal
         Filtered samples with the same shape as `samples` (mode='same').
     """
-    if isinstance(samples, Signal):
-        sig = samples
-        new = sig.copy()
-        new.samples = fir_filter(sig.samples, taps, axis=-1)
-        return new
+    x, sig = unwrap_signal(samples)
+    if sig is not None:
+        return rewrap_signal(sig, fir_filter(x, taps, axis=-1))
 
     logger.debug(
         "Applying FIR filter via convolution (%s taps, axis=%s).", len(taps), axis
@@ -987,8 +985,8 @@ def matched_filter(
     array_like or Signal
         Matched filtered samples. Shape: (..., N_samples).
     """
-    if isinstance(samples, Signal):
-        sig = samples
+    x, sig = unwrap_signal(samples)
+    if sig is not None:
         taps = pulse_taps
         if taps is None:
             try:
@@ -996,11 +994,9 @@ def matched_filter(
             except ValueError as e:
                 logger.error("Cannot apply matched filter: %s", e)
                 return sig.copy()
-        new = sig.copy()
-        new.samples = matched_filter(
-            sig.samples, taps, taps_normalization=taps_normalization, axis=-1
+        return rewrap_signal(
+            sig, matched_filter(x, taps, taps_normalization=taps_normalization, axis=-1)
         )
-        return new
 
     if pulse_taps is None:
         raise ValueError("matched_filter() requires pulse_taps for array input.")
