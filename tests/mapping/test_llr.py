@@ -4,6 +4,7 @@ import numpy as np
 import pytest
 
 from commkit import mapping
+from commkit.core import Signal
 
 
 def test_compute_llr_sign_correctness(xp, xpt):
@@ -294,3 +295,36 @@ def test_compute_llr_output_numpy_values_match_jax():
     llrs_jax = mapping.compute_llr(symbols, "qam", 16, noise_var=0.1, output="jax")
     llrs_np = mapping.compute_llr(symbols, "qam", 16, noise_var=0.1, output="numpy")
     np.testing.assert_allclose(np.asarray(llrs_jax), llrs_np, atol=1e-6)
+
+
+def test_compute_llr_signal_input_uses_metadata():
+    """Signal input: resolved_symbols/modulation/order come from the signal."""
+    pytest.importorskip("jax")
+
+    bits = np.array([0, 0, 0, 0, 1, 1, 1, 1, 0, 1, 0, 1, 1, 0, 1, 0], dtype="int32")
+    symbols = mapping.map_bits(bits, "qam", 16)
+    sig = Signal(
+        samples=symbols,
+        sampling_rate=1.0,
+        symbol_rate=1.0,
+        mod_scheme="qam",
+        mod_order=16,
+    )
+    sig.resolved_symbols = symbols
+
+    llrs_sig = mapping.compute_llr(sig, noise_var=1e-6, output="numpy")
+    llrs_arr = mapping.compute_llr(symbols, "qam", 16, noise_var=1e-6, output="numpy")
+
+    np.testing.assert_allclose(llrs_sig, llrs_arr)
+
+
+def test_compute_llr_signal_input_raises_without_resolved():
+    """Signal input without resolved_symbols raises ValueError."""
+    pytest.importorskip("jax")
+
+    bits = np.array([0, 1, 0, 1], dtype="int32")
+    symbols = mapping.map_bits(bits, "qam", 4)
+    sig = Signal(samples=symbols, sampling_rate=1.0, symbol_rate=1.0)
+
+    with pytest.raises(ValueError, match="resolved symbols"):
+        mapping.compute_llr(sig, noise_var=0.1)

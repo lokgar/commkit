@@ -5,7 +5,8 @@ import math
 import numpy as np
 
 from ...backend import ArrayType, dispatch
-from ...helpers import as_2d, require_channels, restore_1d
+from ...core.signal import Signal
+from ...helpers import as_2d, require_channels, restore_1d, rewrap_signal, unwrap_signal
 from ...logger import logger
 
 __all__ = [
@@ -16,11 +17,11 @@ __all__ = [
 
 
 def apply_pmd(
-    samples: ArrayType,
-    sampling_rate: float,
-    dgd: float,
+    samples: ArrayType | Signal,
+    sampling_rate: float | None = None,
+    dgd: float | None = None,
     theta: float = 0.0,
-) -> ArrayType:
+) -> ArrayType | Signal:
     """
     Applies first-order Polarization Mode Dispersion (PMD) to a dual-pol signal.
 
@@ -46,10 +47,11 @@ def apply_pmd(
 
     Parameters
     ----------
-    samples : array_like
+    samples : array_like or Signal
         Dual-polarization signal. Shape: ``(2, N_samples)``.
-    sampling_rate : float
-        Sampling rate in Hz.
+    sampling_rate : float, optional
+        Sampling rate in Hz.  Required for array input; defaults to the
+        signal's ``sampling_rate`` for :class:`Signal` input.
     dgd : float
         Differential group delay tau in seconds.
         Set to ``0`` to apply pure SOP rotation with no delay (equivalent
@@ -62,8 +64,9 @@ def apply_pmd(
 
     Returns
     -------
-    array_like
-        PMD-distorted signal, same backend/shape as input.
+    array_like or Signal
+        PMD-distorted signal, same backend/shape as input.  A :class:`Signal`
+        returns a new distorted :class:`Signal`.
 
     Raises
     ------
@@ -74,7 +77,23 @@ def apply_pmd(
     --------
     >>> samples = sig.samples  # shape (2, N), dual-pol
     >>> distorted = apply_pmd(samples, sig.sampling_rate, dgd=5e-12, theta=np.pi/5)
+    >>> distorted = apply_pmd(sig, dgd=5e-12, theta=np.pi / 5)  # Signal input
     """
+    x, sig = unwrap_signal(samples)
+    if sig is not None:
+        result = apply_pmd(
+            x,
+            sampling_rate if sampling_rate is not None else sig.sampling_rate,
+            dgd,
+            theta,
+        )
+        return rewrap_signal(sig, result)
+
+    if sampling_rate is None:
+        raise ValueError("apply_pmd() requires sampling_rate for array input.")
+    if dgd is None:
+        raise ValueError("apply_pmd() requires dgd.")
+
     logger.info("Applying PMD (DGD=%.2e s, theta=%.3f rad).", dgd, theta)
 
     samples, xp, _ = dispatch(samples)
@@ -112,10 +131,10 @@ def apply_pmd(
 
 
 def apply_polarization_mixing(
-    samples: ArrayType,
+    samples: ArrayType | Signal,
     theta: float | ArrayType,
     drift_rate_rad_per_sym: float = 0.0,
-) -> ArrayType:
+) -> ArrayType | Signal:
     """
     Applies a static or time-varying polarization rotation (pure SOP mixing).
 
@@ -131,7 +150,7 @@ def apply_polarization_mixing(
 
     Parameters
     ----------
-    samples : array_like
+    samples : array_like or Signal
         Dual-polarization signal. Shape: ``(2, N_samples)``.
     theta : float or array_like of shape ``(N_samples,)``
         Rotation angle(s) in radians.
@@ -149,9 +168,9 @@ def apply_polarization_mixing(
 
     Returns
     -------
-    array_like
+    array_like or Signal
         Rotated dual-polarization signal, same shape, dtype, and backend as
-        input.
+        input.  A :class:`Signal` returns a new rotated :class:`Signal`.
 
     Raises
     ------
@@ -167,6 +186,11 @@ def apply_polarization_mixing(
     >>> drifted = apply_polarization_mixing(samples, theta=0.0,
     ...                                     drift_rate_rad_per_sym=1e-3)
     """
+    x, sig = unwrap_signal(samples)
+    if sig is not None:
+        result = apply_polarization_mixing(x, theta, drift_rate_rad_per_sym)
+        return rewrap_signal(sig, result)
+
     logger.info(
         "Applying polarization mixing (theta=%s, drift=%.3g rad/sym).",
         theta if np.ndim(theta) == 0 else "array",
@@ -222,12 +246,12 @@ def apply_polarization_mixing(
 
 
 def apply_chromatic_dispersion(
-    samples: ArrayType,
-    sampling_rate: float,
-    dispersion_ps_nm_km: float,
-    fiber_length_km: float,
-    center_wavelength_nm: float,
-) -> ArrayType:
+    samples: ArrayType | Signal,
+    sampling_rate: float | None = None,
+    dispersion_ps_nm_km: float | None = None,
+    fiber_length_km: float | None = None,
+    center_wavelength_nm: float | None = None,
+) -> ArrayType | Signal:
     """
     Applies chromatic dispersion (CD) to a signal in the frequency domain.
 
@@ -244,10 +268,11 @@ def apply_chromatic_dispersion(
 
     Parameters
     ----------
-    samples : array_like
+    samples : array_like or Signal
         Complex baseband signal. Shape: ``(N,)`` (SISO) or ``(C, N)`` (MIMO).
-    sampling_rate : float
-        Sampling rate in Hz.
+    sampling_rate : float, optional
+        Sampling rate in Hz.  Required for array input; defaults to the
+        signal's ``sampling_rate`` for :class:`Signal` input.
     dispersion_ps_nm_km : float
         Fiber dispersion parameter D in ps / (nm * km).
         Standard SMF-28: 17 ps/(nm*km) at 1550 nm.
@@ -258,8 +283,9 @@ def apply_chromatic_dispersion(
 
     Returns
     -------
-    array_like
-        CD-impaired signal, same shape, dtype, and backend as input.
+    array_like or Signal
+        CD-impaired signal, same shape, dtype, and backend as input.  A
+        :class:`Signal` returns a new impaired :class:`Signal`.
 
     See Also
     --------
@@ -271,7 +297,35 @@ def apply_chromatic_dispersion(
     >>> distorted = apply_chromatic_dispersion(
     ...     sig.samples, dispersion_ps_nm_km=17.0, fiber_length_km=80.0,
     ...     center_wavelength_nm=1550.0, sampling_rate=sig.sampling_rate)
+    >>> distorted = apply_chromatic_dispersion(  # Signal input
+    ...     sig, dispersion_ps_nm_km=17.0, fiber_length_km=80.0,
+    ...     center_wavelength_nm=1550.0)
     """
+    x, sig = unwrap_signal(samples)
+    if sig is not None:
+        result = apply_chromatic_dispersion(
+            x,
+            sampling_rate if sampling_rate is not None else sig.sampling_rate,
+            dispersion_ps_nm_km,
+            fiber_length_km,
+            center_wavelength_nm,
+        )
+        return rewrap_signal(sig, result)
+
+    if sampling_rate is None:
+        raise ValueError(
+            "apply_chromatic_dispersion() requires sampling_rate for array input."
+        )
+    if (
+        dispersion_ps_nm_km is None
+        or fiber_length_km is None
+        or center_wavelength_nm is None
+    ):
+        raise ValueError(
+            "apply_chromatic_dispersion() requires dispersion_ps_nm_km, "
+            "fiber_length_km, and center_wavelength_nm."
+        )
+
     logger.info(
         "Applying CD (D=%s ps/nm/km, L=%s km, λ=%s nm).",
         dispersion_ps_nm_km,

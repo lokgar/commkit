@@ -5,8 +5,9 @@ from __future__ import annotations
 import numpy as np
 
 from ..backend import ArrayType, dispatch, to_device
+from ..core.signal import Signal
 from ..filtering import _ols_backward, _ols_forward
-from ..helpers import as_2d, restore_1d
+from ..helpers import as_2d, restore_1d, rewrap_signal, unwrap_signal
 from ..logger import logger
 from ._common import _build_padded_samples, _normalize_inputs
 
@@ -16,11 +17,11 @@ from ._common import _build_padded_samples, _normalize_inputs
 
 
 def zf_equalizer(
-    samples: ArrayType,
+    samples: ArrayType | Signal,
     channel_estimate: ArrayType,
     noise_variance: float = 0.0,
     debug_plot: bool = False,
-) -> ArrayType:
+) -> ArrayType | Signal:
     """
     Zero-Forcing / MMSE frequency-domain block equalizer.
 
@@ -33,8 +34,9 @@ def zf_equalizer(
 
     Parameters
     ----------
-    samples : array_like
+    samples : array_like or Signal
         Received samples. Shape: ``(N,)`` for SISO or ``(C, N)`` for MIMO.
+        A :class:`Signal` returns a new equalized :class:`Signal`.
     channel_estimate : array_like
         Channel impulse response. Shape: ``(L,)`` for SISO or
         ``(C, C, L)`` for MIMO (each ``[i, j]`` is the FIR from input j
@@ -45,9 +47,16 @@ def zf_equalizer(
 
     Returns
     -------
-    array_like
+    array_like or Signal
         Equalized samples. Same shape and backend as input.
     """
+    x, sig = unwrap_signal(samples)
+    if sig is not None:
+        result = zf_equalizer(
+            x, channel_estimate, noise_variance=noise_variance, debug_plot=debug_plot
+        )
+        return rewrap_signal(sig, result)
+
     logger.info("ZF/MMSE equalizer: noise_variance=%.2e", noise_variance)
     samples, xp, _ = dispatch(samples)
     channel_estimate = xp.asarray(channel_estimate)

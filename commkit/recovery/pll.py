@@ -5,7 +5,8 @@ import logging
 import numpy as np
 
 from ..backend import ArrayType, dispatch, to_device
-from ..helpers import as_2d, restore_1d
+from ..core.signal import Signal
+from ..helpers import as_2d, restore_1d, unwrap_signal
 from ..logger import logger
 from .corrections import correct_cycle_slips
 
@@ -236,9 +237,9 @@ def _get_numba_dd_pll_joint():
 
 
 def recover_carrier_phase_pll(
-    symbols: ArrayType,
-    modulation: str,
-    order: int,
+    symbols: ArrayType | Signal,
+    modulation: str | None = None,
+    order: int | None = None,
     mu: float | None = 1e-2,
     beta: float | None = None,
     phase_init: float = 0.0,
@@ -268,15 +269,18 @@ def recover_carrier_phase_pll(
 
     Parameters
     ----------
-    symbols : array_like
+    symbols : array_like or Signal
         1-SPS complex symbols after matched filtering and FOE.
-        Shape: ``(N,)`` or ``(C, N)``.
-    modulation : str
+        Shape: ``(N,)`` or ``(C, N)``.  A :class:`Signal` supplies
+        ``modulation``/``order`` from its metadata when not given explicitly.
+    modulation : str, optional
         Modulation scheme (case-insensitive): ``'qam'``, ``'psk'``, etc.
         Used to fetch the reference constellation via
-        ``gray_constellation``.
-    order : int
-        Modulation order (4, 16, 64, ...).
+        ``gray_constellation``.  Required for array input; defaults to the
+        signal's ``mod_scheme`` for :class:`Signal` input.
+    order : int, optional
+        Modulation order (4, 16, 64, ...).  Required for array input;
+        defaults to the signal's ``mod_order`` for :class:`Signal` input.
     mu : float or None, default 1e-2
         Proportional gain - controls convergence speed and steady-state
         jitter.  Larger ``mu`` converges faster but amplifies noise.
@@ -333,6 +337,28 @@ def recover_carrier_phase_pll(
     """
     from ..helpers import normalize, resolve_pll_gains
     from ..mapping import gray_constellation
+
+    x, sig = unwrap_signal(symbols)
+    if sig is not None:
+        return recover_carrier_phase_pll(
+            x,
+            modulation or sig.mod_scheme,
+            order or sig.mod_order,
+            mu=mu,
+            beta=beta,
+            phase_init=phase_init,
+            loop_bandwidth_normalized=loop_bandwidth_normalized,
+            joint_channels=joint_channels,
+            cycle_slip_correction=cycle_slip_correction,
+            cycle_slip_history=cycle_slip_history,
+            cycle_slip_threshold=cycle_slip_threshold,
+            debug_plot=debug_plot,
+        )
+
+    if modulation is None or order is None:
+        raise ValueError(
+            "recover_carrier_phase_pll() requires modulation and order for array input."
+        )
 
     # Resolve PI gains: raw mu/beta if given, else the critically-damped
     # bandwidth shortcut (mu=None).  Validate the bandwidth only on that path.

@@ -3,20 +3,34 @@
 from __future__ import annotations
 
 from collections.abc import Sequence
-from typing import Any, cast
+from typing import Any, cast, overload
 
 import numpy as np
 
 from ..backend import ArrayType, dispatch, to_device
+from ..core.signal import Signal
 from ..filtering import fir_filter, lowpass_taps
+from ..helpers import rewrap_signal, unwrap_signal
 from ..logger import logger
 
 
+@overload
 def apply_interpolated_matrix(
-    samples: ArrayType,
+    samples: ArrayType, matrix_grid: ArrayType, grid_positions: ArrayType
+) -> ArrayType: ...
+
+
+@overload
+def apply_interpolated_matrix(
+    samples: Signal, matrix_grid: ArrayType, grid_positions: ArrayType
+) -> Signal: ...
+
+
+def apply_interpolated_matrix(
+    samples: ArrayType | Signal,
     matrix_grid: ArrayType,
     grid_positions: ArrayType,
-) -> ArrayType:
+) -> ArrayType | Signal:
     r"""Apply a time-varying matrix ``M(n)`` to ``samples``, interpolated from a grid.
 
     Output sample ``n`` is ``M(n) · samples[:, n]``, where ``M(n)`` is the exact
@@ -36,8 +50,8 @@ def apply_interpolated_matrix(
 
     Parameters
     ----------
-    samples : (C, N) array
-        Input channels.
+    samples : (C, N) array, or Signal
+        Input channels.  A :class:`Signal` returns a new :class:`Signal`.
     matrix_grid : (G, K, C) array
         Per-grid-point matrices mapping the ``C`` inputs to ``K`` outputs.
     grid_positions : (G,) array
@@ -49,6 +63,12 @@ def apply_interpolated_matrix(
     (K, N) array
         ``M(n) · samples[:, n]``, same dtype as ``samples``.
     """
+    x, sig = unwrap_signal(samples)
+    if sig is not None:
+        return rewrap_signal(
+            sig, apply_interpolated_matrix(x, matrix_grid, grid_positions)
+        )
+
     samples, xp, _ = dispatch(samples)
     C, N = samples.shape
     M = xp.asarray(matrix_grid, dtype=xp.complex64)  # (G, K, C)
@@ -276,15 +296,15 @@ def _jones_at_grid_points(
 
 
 def demultiplex_polarization_tones_static(
-    samples: ArrayType,
-    sampling_rate: float,
-    tone_frequencies: Sequence[float],
+    samples: ArrayType | Signal,
+    sampling_rate: float | None = None,
+    tone_frequencies: Sequence[float] | None = None,
     *,
     refine_tones: bool = True,
     search_band: float | None = None,
     normalize: bool = True,
     return_matrix: bool = False,
-) -> ArrayType | tuple[ArrayType, ArrayType]:
+) -> ArrayType | Signal | tuple[ArrayType | Signal, ArrayType]:
     r"""
     One-shot polarization demux from distinct per-stream CW pilot tones.
 
@@ -326,10 +346,12 @@ def demultiplex_polarization_tones_static(
 
     Parameters
     ----------
-    samples : array_like
-        Received MIMO samples. Shape ``(C, N)`` - time on the last axis.
-    sampling_rate : float
-        Sampling rate f_s in Hz.
+    samples : array_like or Signal
+        Received MIMO samples. Shape ``(C, N)`` - time on the last axis.  A
+        :class:`Signal` returns a new demultiplexed :class:`Signal`.
+    sampling_rate : float, optional
+        Sampling rate f_s in Hz.  Required for array input; defaults to the
+        signal's ``sampling_rate`` for :class:`Signal` input.
     tone_frequencies : sequence of float
         The ``K`` distinct per-stream tone frequencies in Hz (as added at the
         TX, in transmitted-stream order).  Require ``K <= C``.  Output row ``j``
@@ -377,6 +399,32 @@ def demultiplex_polarization_tones_static(
     add_pilot_tone : Add the per-stream tones at the transmitter.
     demultiplex_polarization_tones_dynamic : Time-varying (drifting-SOP) demux.
     """
+    x, sig = unwrap_signal(samples)
+    if sig is not None:
+        result = demultiplex_polarization_tones_static(
+            x,
+            sampling_rate if sampling_rate is not None else sig.sampling_rate,
+            tone_frequencies,
+            refine_tones=refine_tones,
+            search_band=search_band,
+            normalize=normalize,
+            return_matrix=return_matrix,
+        )
+        if isinstance(result, tuple):
+            demuxed, W = result
+            return rewrap_signal(sig, demuxed), W
+        return rewrap_signal(sig, result)
+
+    if sampling_rate is None:
+        raise ValueError(
+            "demultiplex_polarization_tones_static() requires sampling_rate for "
+            "array input."
+        )
+    if tone_frequencies is None:
+        raise ValueError(
+            "demultiplex_polarization_tones_static() requires tone_frequencies."
+        )
+
     samples, xp, _ = dispatch(samples)
     if samples.ndim != 2:
         raise ValueError(
@@ -456,9 +504,9 @@ def demultiplex_polarization_tones_static(
 
 
 def demultiplex_polarization_tones_dynamic(
-    samples: ArrayType,
-    sampling_rate: float,
-    tone_frequencies: Sequence[float],
+    samples: ArrayType | Signal,
+    sampling_rate: float | None = None,
+    tone_frequencies: Sequence[float] | None = None,
     *,
     track_bandwidth: float,
     num_taps: int | None = None,
@@ -514,10 +562,13 @@ def demultiplex_polarization_tones_dynamic(
 
     Parameters
     ----------
-    samples : array_like
-        Received MIMO samples. Shape ``(C, N)`` - time on the last axis.
-    sampling_rate : float
-        Sampling rate f_s in Hz.
+    samples : array_like or Signal
+        Received MIMO samples. Shape ``(C, N)`` - time on the last axis.  A
+        :class:`Signal` returns a new demultiplexed :class:`Signal` (when
+        ``apply=True``).
+    sampling_rate : float, optional
+        Sampling rate f_s in Hz.  Required for array input; defaults to the
+        signal's ``sampling_rate`` for :class:`Signal` input.
     tone_frequencies : sequence of float
         The ``K`` distinct per-stream tone frequencies in Hz (as added at the
         TX, in transmitted-stream order).  Require ``K <= C``.  Output row ``j``
@@ -604,6 +655,39 @@ def demultiplex_polarization_tones_dynamic(
     demultiplex_polarization_tones_static : One-shot static-SOP demux (faster).
     add_pilot_tone : Add the per-stream tones at the transmitter.
     """
+    x, sig = unwrap_signal(samples)
+    if sig is not None:
+        result = demultiplex_polarization_tones_dynamic(
+            x,
+            sampling_rate if sampling_rate is not None else sig.sampling_rate,
+            tone_frequencies,
+            track_bandwidth=track_bandwidth,
+            num_taps=num_taps,
+            grid_step=grid_step,
+            refine_tones=refine_tones,
+            search_band=search_band,
+            normalize=normalize,
+            trim_edges=trim_edges,
+            return_matrix=return_matrix,
+            apply=apply,
+        )
+        if not apply:
+            return result  # (W_grid, grid_positions) - no signal-shaped output
+        if isinstance(result, tuple):
+            demuxed, *rest = result
+            return (rewrap_signal(sig, demuxed), *rest)
+        return rewrap_signal(sig, result)
+
+    if sampling_rate is None:
+        raise ValueError(
+            "demultiplex_polarization_tones_dynamic() requires sampling_rate for "
+            "array input."
+        )
+    if tone_frequencies is None:
+        raise ValueError(
+            "demultiplex_polarization_tones_dynamic() requires tone_frequencies."
+        )
+
     samples, xp, _ = dispatch(samples)
     if samples.ndim != 2:
         raise ValueError(

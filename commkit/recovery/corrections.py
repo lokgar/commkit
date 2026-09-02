@@ -6,7 +6,13 @@ import numpy as np
 
 from ..backend import ArrayType, dispatch, to_device
 from ..core.signal import Signal
-from ..helpers import as_2d, broadcast_channels, restore_1d, unwrap_signal
+from ..helpers import (
+    as_2d,
+    broadcast_channels,
+    restore_1d,
+    rewrap_signal,
+    unwrap_signal,
+)
 from ..logger import logger
 
 
@@ -160,9 +166,9 @@ def _get_cupy_phase_rotate():
 
 
 def correct_carrier_phase(
-    symbols: ArrayType,
+    symbols: ArrayType | Signal,
     phase_vector: ArrayType,
-) -> ArrayType:
+) -> ArrayType | Signal:
     """
     Applies carrier phase correction to a symbol sequence.
 
@@ -171,7 +177,7 @@ def correct_carrier_phase(
 
     Parameters
     ----------
-    symbols : array_like
+    symbols : array_like or Signal
         Complex symbols. Shape: (N,) or (C, N).
     phase_vector : array_like
         Per-symbol phase estimates in radians.  Shape: (N,) for SISO, or
@@ -179,9 +185,14 @@ def correct_carrier_phase(
 
     Returns
     -------
-    array_like
-        Phase-corrected symbols, same shape and dtype as ``symbols``.
+    array_like or Signal
+        Phase-corrected symbols, same shape and dtype as ``symbols``.  A
+        :class:`Signal` returns a new phase-corrected :class:`Signal`.
     """
+    x, sig = unwrap_signal(symbols)
+    if sig is not None:
+        return rewrap_signal(sig, correct_carrier_phase(x, phase_vector))
+
     symbols, xp, _ = dispatch(symbols)
     logger.debug("Applying carrier phase correction: shape=%s", symbols.shape)
     # Wrap to [-π, π] in float64 (handles unbounded phase trajectories from
@@ -734,10 +745,10 @@ def resolve_phase_ambiguity(
 
 
 def correct_phase_rotation(
-    symbols: ArrayType,
-    ref_symbols: ArrayType,
+    symbols: ArrayType | Signal,
+    ref_symbols: ArrayType | None = None,
     num_skip_symbols: int = 0,
-) -> ArrayType:
+) -> ArrayType | Signal:
     """Correct the static per-channel phase rotation using a reference sequence.
 
     A rotationally-invariant blind equalizer (CMA, RDE) leaves an arbitrary
@@ -753,12 +764,15 @@ def correct_phase_rotation(
 
     Parameters
     ----------
-    symbols : array_like
-        Equalizer output symbols.  Shape: ``(N,)`` or ``(C, N)``.
-    ref_symbols : array_like
+    symbols : array_like or Signal
+        Equalizer output symbols.  Shape: ``(N,)`` or ``(C, N)``.  When a
+        :class:`Signal` is passed, ``resolved_symbols`` is corrected and
+        ``ref_symbols`` defaults to ``source_symbols``.
+    ref_symbols : array_like, optional
         Known transmitted symbols.  Shape: ``(N_ref,)`` or ``(C, N_ref)``,
         where ``N_ref <= N``.  Each channel is matched independently; a
         single-channel ref is broadcast across all output channels.
+        Required for array input.
     num_skip_symbols : int, default 0
         Leading symbols excluded from the rotation estimate (e.g. the
         unconverged equalizer transient).  The correction is still applied
@@ -766,9 +780,36 @@ def correct_phase_rotation(
 
     Returns
     -------
-    array_like
-        Phase-corrected symbols, same shape and dtype as ``symbols``.
+    array_like or Signal
+        Phase-corrected symbols, same shape and dtype as ``symbols``.  A
+        :class:`Signal` returns a new :class:`Signal` with ``resolved_symbols``
+        corrected.
     """
+    if isinstance(symbols, Signal):
+        sig = symbols
+        if sig.resolved_symbols is None:
+            raise ValueError(
+                "resolved_symbols is not set. Call resolve_symbols(sig) or assign "
+                "resolved_symbols before calling correct_phase_rotation()."
+            )
+        ref = ref_symbols if ref_symbols is not None else sig.source_symbols
+        if ref is None:
+            raise ValueError(
+                "No reference available. Provide ref_symbols or ensure "
+                "source_symbols is set on the Signal."
+            )
+        resolved_symbols, _ = unwrap_signal(sig, field="resolved_symbols")
+        new = sig.copy()
+        new.resolved_symbols = correct_phase_rotation(
+            resolved_symbols, ref, num_skip_symbols=num_skip_symbols
+        )
+        return new
+
+    if ref_symbols is None:
+        raise ValueError(
+            "correct_phase_rotation() requires ref_symbols for array input."
+        )
+
     symbols, xp, _ = dispatch(symbols)
     symbols, was_1d = as_2d(symbols, name="symbols")
     C, N = symbols.shape

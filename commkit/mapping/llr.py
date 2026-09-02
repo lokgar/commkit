@@ -10,6 +10,8 @@ from typing import Any
 import numpy as np
 
 from ..backend import ArrayType, _get_jax, dispatch, is_jax_array, to_jax
+from ..core.signal import Signal
+from ..helpers import unwrap_signal
 from ..logger import logger
 from .gray import gray_constellation
 
@@ -88,10 +90,10 @@ def _get_jitted_soft_demap():
 
 
 def compute_llr(
-    symbols: ArrayType,
-    modulation: str,
-    order: int,
-    noise_var: float,
+    symbols: ArrayType | Signal,
+    modulation: str | None = None,
+    order: int | None = None,
+    noise_var: float | None = None,
     method: str = "maxlog",
     unipolar: bool = False,
     output: str = "jax",
@@ -105,12 +107,17 @@ def compute_llr(
 
     Parameters
     ----------
-    symbols : array_like
+    symbols : array_like or Signal
         Received noisy symbols. Shape: (..., N_symbols). NumPy, CuPy, or JAX.
-    modulation : {"psk", "qam", "ask"}
-        Modulation type.
-    order : int
-        Modulation order.
+        A :class:`Signal` supplies ``resolved_symbols`` and defaults
+        ``modulation``/``order``/``pmf`` from its metadata when not given
+        explicitly.
+    modulation : {"psk", "qam", "ask"}, optional
+        Modulation type.  Required for array input; defaults to the signal's
+        ``mod_scheme`` for :class:`Signal` input.
+    order : int, optional
+        Modulation order.  Required for array input; defaults to the
+        signal's ``mod_order`` for :class:`Signal` input.
     noise_var : float
         Complex noise variance sigma^2 referenced to the normalised
         constellation (unit avg power).  sigma^2 = 10^(-EsN0_dB / 10).
@@ -142,6 +149,29 @@ def compute_llr(
     ``resolve_symbols`` the receiver renormalises;
     use ``gmi`` instead for correct scale.
     """
+    x, sig = unwrap_signal(symbols, field="resolved_symbols")
+    if sig is not None:
+        if x is None:
+            raise ValueError(
+                "No resolved symbols available. Call resolve_symbols(sig) first."
+            )
+        return compute_llr(
+            x,
+            modulation or sig.mod_scheme,
+            order or sig.mod_order,
+            noise_var,
+            method=method,
+            unipolar=unipolar,
+            output=output,
+            pmf=sig.ps_pmf if pmf is None else pmf,
+        )
+
+    if modulation is None or order is None:
+        raise ValueError("compute_llr() requires modulation and order for array input.")
+    if noise_var is None:
+        raise ValueError("compute_llr() requires noise_var.")
+    symbols = x
+
     logger.debug(
         "Computing LLRs for %s %s-level (method=%s, output=%s).",
         modulation.upper(),

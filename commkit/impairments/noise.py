@@ -1,18 +1,20 @@
 """Additive measurement noise (ASE / thermal) impairments."""
 
 from ..backend import ArrayType, dispatch
+from ..core.signal import Signal
+from ..helpers import rewrap_signal, unwrap_signal
 from ..logger import logger
 
 __all__ = ["apply_awgn"]
 
 
 def apply_awgn(
-    samples: ArrayType,
-    sps: float,
-    esn0_db: float,
+    samples: ArrayType | Signal,
+    sps: float | None = None,
+    esn0_db: float | None = None,
     seed: int | None = None,
     signal_power: float | None = None,
-) -> ArrayType:
+) -> ArrayType | Signal:
     """
     Adds Additive White Gaussian Noise (AWGN) to a signal based on Es/N0.
 
@@ -22,10 +24,11 @@ def apply_awgn(
 
     Parameters
     ----------
-    samples : array_like
+    samples : array_like or Signal
         The input signal samples. Shape: (..., N_samples)
-    sps : float
-        Samples per symbol.
+    sps : float, optional
+        Samples per symbol.  Required for array input; defaults to the
+        signal's ``sps`` for :class:`Signal` input.
     esn0_db : float
         Symbol energy to noise spectral density ratio (Es/N0) in dB.
     seed : int, optional
@@ -40,8 +43,9 @@ def apply_awgn(
 
     Returns
     -------
-    array_like
-        The noisy signal with the same type and backend as the input.
+    array_like or Signal
+        The noisy signal with the same type and backend as the input.  A
+        :class:`Signal` returns a new noisy :class:`Signal`.
 
     Notes
     -----
@@ -54,7 +58,24 @@ def apply_awgn(
     --------
     >>> sig = generate_pam(order=4, num_symbols=1000, sps=4, symbol_rate=1e6)
     >>> noisy = apply_awgn(sig.samples, esn0_db=20, sps=sig.sps)
+    >>> noisy = apply_awgn(sig, esn0_db=20)  # Signal input: sps taken from sig
     """
+    x, sig = unwrap_signal(samples)
+    if sig is not None:
+        result = apply_awgn(
+            x,
+            sps if sps is not None else sig.sps,
+            esn0_db,
+            seed=seed,
+            signal_power=signal_power,
+        )
+        return rewrap_signal(sig, result)
+
+    if sps is None:
+        raise ValueError("apply_awgn() requires sps for array input.")
+    if esn0_db is None:
+        raise ValueError("apply_awgn() requires esn0_db.")
+
     logger.info("Adding AWGN (Es/N0 target: %.2f dB).", esn0_db)
 
     samples, xp, _ = dispatch(samples)

@@ -3,6 +3,7 @@
 import numpy as np
 import pytest
 
+from commkit.core import Signal
 from commkit.impairments import (
     apply_chromatic_dispersion,
     apply_pmd,
@@ -263,3 +264,50 @@ class TestApplyChomaticDispersion:
         power_in = float(xp.sum(xp.abs(samples) ** 2))
         power_out = float(xp.sum(xp.abs(out) ** 2))
         xpt.assert_allclose(power_out, power_in, rtol=1e-4)
+
+    def test_signal_input_returns_signal(self, backend_device, xp, xpt):
+        """Signal input: sampling_rate is taken from the signal."""
+        fs = 64e9
+        data = xp.ones(512, dtype=xp.complex64)
+        sig = Signal(samples=data, sampling_rate=fs, symbol_rate=fs / 2)
+
+        out_sig = apply_chromatic_dispersion(
+            sig,
+            dispersion_ps_nm_km=17.0,
+            fiber_length_km=80.0,
+            center_wavelength_nm=1550.0,
+        )
+        out_arr = apply_chromatic_dispersion(data, fs, 17.0, 80.0, 1550.0)
+
+        assert isinstance(out_sig, Signal)
+        xpt.assert_allclose(out_sig.samples, out_arr)
+        xpt.assert_allclose(sig.samples, data)  # original untouched
+
+
+class TestSignalInputPMDAndPolarizationMixing:
+    """Signal-awareness for apply_pmd and apply_polarization_mixing."""
+
+    def test_apply_pmd_signal_input(self, backend_device, xp, xpt):
+        """Signal input: sampling_rate is taken from the signal."""
+        fs = 56e9
+        rng = xp.random.RandomState(3)
+        data = (rng.randn(2, 256) + 1j * rng.randn(2, 256)).astype(xp.complex64)
+        sig = Signal(samples=data, sampling_rate=fs, symbol_rate=fs / 2)
+
+        out_sig = apply_pmd(sig, dgd=5e-12, theta=np.pi / 5)
+        out_arr = apply_pmd(data, fs, dgd=5e-12, theta=np.pi / 5)
+
+        assert isinstance(out_sig, Signal)
+        xpt.assert_allclose(out_sig.samples, out_arr)
+
+    def test_apply_polarization_mixing_signal_input(self, backend_device, xp, xpt):
+        """Signal input returns a Signal with the rotated samples."""
+        rng = xp.random.RandomState(4)
+        data = (rng.randn(2, 128) + 1j * rng.randn(2, 128)).astype(xp.complex64)
+        sig = Signal(samples=data, sampling_rate=1.0, symbol_rate=1.0)
+
+        out_sig = apply_polarization_mixing(sig, theta=0.6)
+        out_arr = apply_polarization_mixing(data, theta=0.6)
+
+        assert isinstance(out_sig, Signal)
+        xpt.assert_allclose(out_sig.samples, out_arr)

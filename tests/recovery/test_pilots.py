@@ -5,6 +5,7 @@ import pytest
 
 from commkit import generate_qam, recovery, spectral
 from commkit.backend import to_device
+from commkit.core import Signal
 from commkit.impairments import apply_awgn
 
 FS = 1e6  # 1 MHz sampling rate, common to all tests
@@ -598,3 +599,54 @@ class TestPilotsCPREnhancements:
         assert phi.shape == (2, mimo.shape[-1])
         phi_np = phi if xp is np else phi.get()
         np.testing.assert_array_equal(phi_np[0], phi_np[1])
+
+
+class TestSignalInputPilotFunctions:
+    """Signal-awareness for pilot-symbol and pilot-tone CPR."""
+
+    def test_pilot_symbols_signal_input(self, backend_device, xp, xpt):
+        """Signal input: symbols come from .samples, output stays a raw array."""
+        samples, pilot_indices, pilot_values, _ = TestCprPilots()._pilot_setup(xp)
+        sig = Signal(samples=samples, sampling_rate=FS, symbol_rate=FS)
+
+        phi_sig = recovery.recover_carrier_phase_pilot_symbols(
+            sig, pilot_indices=pilot_indices, pilot_values=pilot_values
+        )
+        phi_arr = recovery.recover_carrier_phase_pilot_symbols(
+            samples, pilot_indices=pilot_indices, pilot_values=pilot_values
+        )
+
+        assert not isinstance(phi_sig, Signal)
+        xpt.assert_allclose(phi_sig, phi_arr)
+
+    def test_pilot_tone_signal_input_uses_sampling_rate(self, backend_device, xp, xpt):
+        """Signal input: sampling_rate is taken from the signal."""
+        cpr = TestCprPilotTone()
+        samples, fs, _ = cpr._setup(xp, df=0.05e6)
+        sig = Signal(samples=samples, sampling_rate=fs, symbol_rate=FS)
+
+        theta_sig = recovery.recover_carrier_phase_pilot_tone(
+            sig, tone_frequency=cpr.F_TONE, bandwidth=cpr.BW
+        )
+        theta_arr = recovery.recover_carrier_phase_pilot_tone(
+            samples, fs, cpr.F_TONE, bandwidth=cpr.BW
+        )
+
+        assert not isinstance(theta_sig, Signal)
+        xpt.assert_allclose(theta_sig, theta_arr)
+
+    def test_pilot_tones_signal_input_uses_sampling_rate(self, backend_device, xp, xpt):
+        """Signal input: sampling_rate is taken from the signal."""
+        cpr = TestCprPilotTones()
+        samples, fs, _ = cpr._setup(xp, df=0.05e6, linewidth=5e3)
+        sig = Signal(samples=samples, sampling_rate=fs, symbol_rate=FS)
+
+        phi_sig = recovery.recover_carrier_phase_pilot_tones(
+            sig, tone_frequencies=[cpr.F0, cpr.F1], bandwidth=cpr.BW
+        )
+        phi_arr = recovery.recover_carrier_phase_pilot_tones(
+            samples, fs, [cpr.F0, cpr.F1], bandwidth=cpr.BW
+        )
+
+        assert not isinstance(phi_sig, Signal)
+        xpt.assert_allclose(phi_sig, phi_arr)

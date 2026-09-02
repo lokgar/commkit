@@ -606,11 +606,11 @@ def _ols_backward(X_hat_f: ArrayType, meta: dict) -> ArrayType:
 
 
 def ols_fir_filter(
-    samples: ArrayType,
+    samples: ArrayType | Signal,
     taps: ArrayType,
     N_fft: int | None = None,
     center: bool = True,
-) -> ArrayType:
+) -> ArrayType | Signal:
     """
     Overlap-and-save FIR filter for long-tap or large-signal convolution.
 
@@ -625,9 +625,10 @@ def ols_fir_filter(
 
     Parameters
     ----------
-    samples : array_like
+    samples : array_like or Signal
         Input signal. Shape: ``(N,)`` for SISO or ``(C, N)`` for
-        multi-channel.
+        multi-channel.  A :class:`Signal` returns a new filtered
+        :class:`Signal`.
     taps : array_like
         FIR filter coefficients. Shape: ``(L,)``.
     N_fft : int, optional
@@ -663,6 +664,10 @@ def ols_fir_filter(
     before OLS processing and trims the same number of leading output
     samples - a zero-copy shift that costs one extra OLS block at most.
     """
+    x, sig = unwrap_signal(samples)
+    if sig is not None:
+        return rewrap_signal(sig, ols_fir_filter(x, taps, N_fft=N_fft, center=center))
+
     samples, xp, _ = dispatch(samples)
     taps = xp.asarray(taps)
     is_real = not xp.iscomplexobj(samples) and not xp.iscomplexobj(taps)
@@ -1028,12 +1033,12 @@ def matched_filter(
 
 
 def compensate_chromatic_dispersion(
-    samples: ArrayType,
-    sampling_rate: float,
-    dispersion_ps_nm_km: float,
-    fiber_length_km: float,
-    center_wavelength_nm: float,
-) -> ArrayType:
+    samples: ArrayType | Signal,
+    sampling_rate: float | None = None,
+    dispersion_ps_nm_km: float | None = None,
+    fiber_length_km: float | None = None,
+    center_wavelength_nm: float | None = None,
+) -> ArrayType | Signal:
     """
     Electronic dispersion compensation (EDC) for chromatic dispersion.
 
@@ -1051,10 +1056,11 @@ def compensate_chromatic_dispersion(
 
     Parameters
     ----------
-    samples : array_like
+    samples : array_like or Signal
         Complex baseband signal. Shape: ``(N,)`` (SISO) or ``(C, N)`` (MIMO).
-    sampling_rate : float
-        Sampling rate in Hz.
+    sampling_rate : float, optional
+        Sampling rate in Hz.  Required for array input; defaults to the
+        signal's ``sampling_rate`` for :class:`Signal` input.
     dispersion_ps_nm_km : float
         Fiber dispersion parameter D in ps / (nm * km).
         Standard SMF-28: 17 ps/(nm*km) at 1550 nm.
@@ -1065,8 +1071,9 @@ def compensate_chromatic_dispersion(
 
     Returns
     -------
-    array_like
-        CD-compensated signal, same shape, dtype, and backend as input.
+    array_like or Signal
+        CD-compensated signal, same shape, dtype, and backend as input.  A
+        :class:`Signal` returns a new compensated :class:`Signal`.
 
     See Also
     --------
@@ -1079,6 +1086,31 @@ def compensate_chromatic_dispersion(
     ...     received, dispersion_ps_nm_km=17.0, fiber_length_km=80.0,
     ...     center_wavelength_nm=1550.0, sampling_rate=fs)
     """
+    x, sig = unwrap_signal(samples)
+    if sig is not None:
+        result = compensate_chromatic_dispersion(
+            x,
+            sampling_rate if sampling_rate is not None else sig.sampling_rate,
+            dispersion_ps_nm_km,
+            fiber_length_km,
+            center_wavelength_nm,
+        )
+        return rewrap_signal(sig, result)
+
+    if sampling_rate is None:
+        raise ValueError(
+            "compensate_chromatic_dispersion() requires sampling_rate for array input."
+        )
+    if (
+        dispersion_ps_nm_km is None
+        or fiber_length_km is None
+        or center_wavelength_nm is None
+    ):
+        raise ValueError(
+            "compensate_chromatic_dispersion() requires dispersion_ps_nm_km, "
+            "fiber_length_km, and center_wavelength_nm."
+        )
+
     logger.info(
         "Compensating CD (D=%s ps/nm/km, L=%s km, λ=%s nm).",
         dispersion_ps_nm_km,

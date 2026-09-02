@@ -7,7 +7,8 @@ device model (the widely-linear I/Q mixing) and are read as a pair.
 import math
 
 from ..backend import ArrayType, dispatch
-from ..helpers import as_2d, restore_1d
+from ..core.signal import Signal
+from ..helpers import as_2d, restore_1d, rewrap_signal, unwrap_signal
 from ..logger import logger
 
 __all__ = [
@@ -18,10 +19,10 @@ __all__ = [
 
 
 def apply_iq_imbalance(
-    samples: ArrayType,
+    samples: ArrayType | Signal,
     amplitude_imbalance_db: float,
     phase_imbalance_deg: float,
-) -> ArrayType:
+) -> ArrayType | Signal:
     """
     Applies IQ imbalance to a complex baseband signal.
 
@@ -39,7 +40,7 @@ def apply_iq_imbalance(
 
     Parameters
     ----------
-    samples : array_like
+    samples : array_like or Signal
         Complex baseband signal. Shape: ``(N,)`` (SISO) or ``(C, N)`` (MIMO).
     amplitude_imbalance_db : float
         Amplitude imbalance between I and Q branches in dB.  Positive values
@@ -50,13 +51,19 @@ def apply_iq_imbalance(
 
     Returns
     -------
-    array_like
-        Imbalanced signal, same shape and dtype as input.
+    array_like or Signal
+        Imbalanced signal, same shape and dtype as input.  A :class:`Signal`
+        returns a new imbalanced :class:`Signal`.
 
     Examples
     --------
     >>> r = apply_iq_imbalance(s, amplitude_imbalance_db=1.0, phase_imbalance_deg=3.0)
     """
+    x, sig = unwrap_signal(samples)
+    if sig is not None:
+        result = apply_iq_imbalance(x, amplitude_imbalance_db, phase_imbalance_deg)
+        return rewrap_signal(sig, result)
+
     logger.info(
         "Applying IQ imbalance (amplitude=%.2f dB, phase=%.2f deg).",
         amplitude_imbalance_db,
@@ -80,7 +87,7 @@ def apply_iq_imbalance(
     return result
 
 
-def compensate_iq_imbalance_lowdin(samples: ArrayType) -> ArrayType:
+def compensate_iq_imbalance_lowdin(samples: ArrayType | Signal) -> ArrayType | Signal:
     """
     Blind IQ imbalance compensation via Löwdin symmetric orthogonalisation.
 
@@ -94,13 +101,14 @@ def compensate_iq_imbalance_lowdin(samples: ArrayType) -> ArrayType:
 
     Parameters
     ----------
-    samples : array_like
+    samples : array_like or Signal
         Complex baseband signal. Shape: ``(N,)`` (SISO) or ``(C, N)`` (MIMO).
 
     Returns
     -------
-    array_like
-        IQ-corrected signal, same shape and dtype as input.
+    array_like or Signal
+        IQ-corrected signal, same shape and dtype as input.  A :class:`Signal`
+        returns a new corrected :class:`Signal`.
 
     Notes
     -----
@@ -112,6 +120,10 @@ def compensate_iq_imbalance_lowdin(samples: ArrayType) -> ArrayType:
     >>> r = apply_iq_imbalance(s, amplitude_imbalance_db=1.5, phase_imbalance_deg=4.0)
     >>> s_hat = compensate_iq_imbalance_lowdin(r)
     """
+    x, sig = unwrap_signal(samples)
+    if sig is not None:
+        return rewrap_signal(sig, compensate_iq_imbalance_lowdin(x))
+
     logger.info("Applying Löwdin IQ imbalance compensation.")
 
     samples, xp, _ = dispatch(samples)
@@ -149,7 +161,9 @@ def compensate_iq_imbalance_lowdin(samples: ArrayType) -> ArrayType:
     return restore_1d(was_1d, result)
 
 
-def compensate_iq_imbalance_gram_schmidt(samples: ArrayType) -> ArrayType:
+def compensate_iq_imbalance_gram_schmidt(
+    samples: ArrayType | Signal,
+) -> ArrayType | Signal:
     """
     Blind IQ imbalance compensation via Gram-Schmidt sequential orthogonalisation.
 
@@ -161,13 +175,14 @@ def compensate_iq_imbalance_gram_schmidt(samples: ArrayType) -> ArrayType:
 
     Parameters
     ----------
-    samples : array_like
+    samples : array_like or Signal
         Complex baseband signal. Shape: ``(N,)`` (SISO) or ``(C, N)`` (MIMO).
 
     Returns
     -------
-    array_like
-        IQ-corrected signal, same shape and dtype as input.
+    array_like or Signal
+        IQ-corrected signal, same shape and dtype as input.  A :class:`Signal`
+        returns a new corrected :class:`Signal`.
 
     Notes
     -----
@@ -183,6 +198,10 @@ def compensate_iq_imbalance_gram_schmidt(samples: ArrayType) -> ArrayType:
     >>> r = apply_iq_imbalance(s, amplitude_imbalance_db=1.5, phase_imbalance_deg=4.0)
     >>> s_hat = compensate_iq_imbalance_gram_schmidt(r)
     """
+    x, sig = unwrap_signal(samples)
+    if sig is not None:
+        return rewrap_signal(sig, compensate_iq_imbalance_gram_schmidt(x))
+
     logger.info("Applying Gram-Schmidt IQ imbalance compensation.")
 
     samples, xp, _ = dispatch(samples)

@@ -1,5 +1,6 @@
 """Tests for additive-noise impairments (AWGN)."""
 
+from commkit.core import Signal
 from commkit.impairments import apply_awgn
 
 
@@ -56,3 +57,15 @@ class TestAddAWGN:
         noisy = apply_awgn(data, esn0_db=-300, sps=1)
         measured_power = float(xp.mean(xp.abs(noisy) ** 2))
         assert measured_power > 1e15
+
+    def test_awgn_signal_input_returns_signal(self, backend_device, xp, xpt):
+        """Signal input: sps is taken from the signal and a Signal is returned."""
+        data = xp.ones(1000, dtype=xp.complex64)
+        sig = Signal(samples=data, sampling_rate=4e9, symbol_rate=1e9)  # sps=4
+
+        noisy_sig = apply_awgn(sig, esn0_db=10, seed=1)
+        noisy_arr = apply_awgn(data, esn0_db=10, sps=4, seed=1)
+
+        assert isinstance(noisy_sig, Signal)
+        xpt.assert_allclose(noisy_sig.samples, noisy_arr)
+        xpt.assert_allclose(sig.samples, data)  # original Signal untouched

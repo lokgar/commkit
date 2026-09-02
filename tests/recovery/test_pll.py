@@ -4,6 +4,7 @@ import numpy as np
 import pytest
 
 from commkit import generate_qam, recovery, spectral
+from commkit.core import Signal
 from commkit.impairments import apply_awgn
 from commkit.mapping import gray_constellation
 
@@ -203,3 +204,19 @@ class TestDDPLL:
         syms = self._qpsk_symbols(xp, N=64)
         with pytest.raises(ValueError, match="beta requires mu"):
             recovery.recover_carrier_phase_pll(syms, "psk", 4, mu=None, beta=1e-3)
+
+
+class TestSignalInputPll:
+    """Signal-awareness for recover_carrier_phase_pll."""
+
+    def test_signal_input_uses_metadata(self, backend_device, xp, xpt):
+        """Signal input: modulation/order come from the signal's metadata."""
+        sig = _qam_signal(xp, 16, 512)
+
+        phi_sig = recovery.recover_carrier_phase_pll(sig)
+        phi_arr = recovery.recover_carrier_phase_pll(
+            sig.samples, modulation="qam", order=16
+        )
+
+        assert not isinstance(phi_sig, Signal)  # phase estimate stays a raw array
+        xpt.assert_allclose(phi_sig, phi_arr)

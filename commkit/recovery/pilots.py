@@ -1,17 +1,25 @@
 """Pilot-symbol and pilot-tone aided carrier phase recovery."""
 
 import logging
+from collections.abc import Sequence
 
 import numpy as np
 
 from ..backend import ArrayType, dispatch, to_device
-from ..helpers import as_2d, broadcast_channels, remove_linear_trend, restore_1d
+from ..core.signal import Signal
+from ..helpers import (
+    as_2d,
+    broadcast_channels,
+    remove_linear_trend,
+    restore_1d,
+    unwrap_signal,
+)
 from ..logger import logger
 from .corrections import correct_cycle_slips
 
 
 def recover_carrier_phase_pilot_symbols(
-    symbols: ArrayType,
+    symbols: ArrayType | Signal,
     pilot_indices: ArrayType,
     pilot_values: ArrayType,
     interpolation: str = "linear",
@@ -29,7 +37,7 @@ def recover_carrier_phase_pilot_symbols(
 
     Parameters
     ----------
-    symbols : array_like
+    symbols : array_like or Signal
         Received 1-SPS complex symbols. Shape: (N,) or (C, N).
     pilot_indices : array_like of int
         Indices of pilot symbols within the frame, in increasing order.
@@ -78,6 +86,20 @@ def recover_carrier_phase_pilot_symbols(
     interpolation constant-holds at the boundaries; cubic uses natural spline
     with constant-hold extrapolation.  Single-carrier only.
     """
+    x, sig = unwrap_signal(symbols)
+    if sig is not None:
+        return recover_carrier_phase_pilot_symbols(
+            x,
+            pilot_indices,
+            pilot_values,
+            interpolation=interpolation,
+            joint_channels=joint_channels,
+            cycle_slip_correction=cycle_slip_correction,
+            cycle_slip_history=cycle_slip_history,
+            cycle_slip_threshold=cycle_slip_threshold,
+            debug_plot=debug_plot,
+        )
+
     symbols, xp, _ = dispatch(symbols)
     symbols, was_1d = as_2d(symbols, name="symbols")
     C, N = symbols.shape
@@ -354,10 +376,10 @@ def _extract_pilot_phasor(
 
 
 def recover_carrier_phase_pilot_tone(
-    samples: ArrayType,
-    sampling_rate: float,
-    tone_frequency: float,
-    bandwidth: float,
+    samples: ArrayType | Signal,
+    sampling_rate: float | None = None,
+    tone_frequency: float | None = None,
+    bandwidth: float | None = None,
     search_band: float | None = None,
     refine_tone: bool = True,
     window: str | tuple = "tukey",
@@ -388,11 +410,12 @@ def recover_carrier_phase_pilot_tone(
 
     Parameters
     ----------
-    samples : array_like
+    samples : array_like or Signal
         Oversampled complex samples (``sps > 1``). Shape: ``(N,)`` or
         ``(C, N)``.  Same rate as used for ``add_pilot_tone``.
-    sampling_rate : float
-        Sampling rate f_s in Hz.
+    sampling_rate : float, optional
+        Sampling rate f_s in Hz.  Required for array input; defaults to the
+        signal's ``sampling_rate`` for :class:`Signal` input.
     tone_frequency : float
         Nominal pilot-tone frequency f_p in Hz (as added at the TX).
         The recovered phase is referenced to **this** carrier, so any carrier
@@ -458,6 +481,29 @@ def recover_carrier_phase_pilot_tone(
     Upper bound: B below the guard between the tone and the signal band edge.
     Place the tone at |f_p| > (1+beta)*R_s/2 + B and keep |f_p| + B < f_s/2.
     """
+    x, sig = unwrap_signal(samples)
+    if sig is not None:
+        return recover_carrier_phase_pilot_tone(
+            x,
+            sampling_rate if sampling_rate is not None else sig.sampling_rate,
+            tone_frequency,
+            bandwidth,
+            search_band=search_band,
+            refine_tone=refine_tone,
+            window=window,
+            remove_frequency_offset=remove_frequency_offset,
+            joint_channels=joint_channels,
+            debug_plot=debug_plot,
+        )
+
+    if sampling_rate is None:
+        raise ValueError(
+            "recover_carrier_phase_pilot_tone() requires sampling_rate for array input."
+        )
+    if tone_frequency is None:
+        raise ValueError("recover_carrier_phase_pilot_tone() requires tone_frequency.")
+    if bandwidth is None:
+        raise ValueError("recover_carrier_phase_pilot_tone() requires bandwidth.")
     if bandwidth <= 0.0:
         raise ValueError(f"bandwidth must be > 0, got {bandwidth}.")
     if not (-sampling_rate / 2.0 < tone_frequency < sampling_rate / 2.0):
@@ -557,10 +603,10 @@ def _lowpass_fft(z: ArrayType, sampling_rate: float, cutoff: float, xp) -> Array
 
 
 def recover_carrier_phase_pilot_tones(
-    samples: ArrayType,
-    sampling_rate: float,
-    tone_frequencies,
-    bandwidth: float,
+    samples: ArrayType | Signal,
+    sampling_rate: float | None = None,
+    tone_frequencies: Sequence[float] | None = None,
+    bandwidth: float | None = None,
     differential_bandwidth: float = 5e3,
     search_band: float | None = None,
     per_tone_channel: list | None = None,
@@ -603,11 +649,12 @@ def recover_carrier_phase_pilot_tones(
 
     Parameters
     ----------
-    samples : (N,) or (C, N) array
+    samples : (N,) or (C, N) array, or Signal
         Oversampled complex samples (``sps > 1``).
-    sampling_rate : float
+    sampling_rate : float, optional
         Sampling rate in Hz (of *these* samples - pass the post-resample rate if
-        the demux/resample ran first).
+        the demux/resample ran first).  Required for array input; defaults to
+        the signal's ``sampling_rate`` for :class:`Signal` input.
     tone_frequencies : sequence of float
         Nominal pilot-tone frequencies in Hz (length ``K``).
     bandwidth : float
@@ -646,8 +693,36 @@ def recover_carrier_phase_pilot_tones(
         ``correct_carrier_phase``.  If ``return_diagnostics``, returns
         ``(phi, diagnostics)``.
     """
+    x, sig_obj = unwrap_signal(samples)
+    if sig_obj is not None:
+        return recover_carrier_phase_pilot_tones(
+            x,
+            sampling_rate if sampling_rate is not None else sig_obj.sampling_rate,
+            tone_frequencies,
+            bandwidth,
+            differential_bandwidth=differential_bandwidth,
+            search_band=search_band,
+            per_tone_channel=per_tone_channel,
+            snr_gate_db=snr_gate_db,
+            coherence_gate=coherence_gate,
+            refine_tone=refine_tone,
+            window=window,
+            return_diagnostics=return_diagnostics,
+            debug_plot=debug_plot,
+        )
+
+    if sampling_rate is None:
+        raise ValueError(
+            "recover_carrier_phase_pilot_tones() requires sampling_rate for array input."
+        )
+    if bandwidth is None:
+        raise ValueError("recover_carrier_phase_pilot_tones() requires bandwidth.")
     if bandwidth <= 0.0:
         raise ValueError(f"bandwidth must be > 0, got {bandwidth}.")
+    if tone_frequencies is None:
+        raise ValueError(
+            "recover_carrier_phase_pilot_tones() requires tone_frequencies."
+        )
     tone_frequencies = list(tone_frequencies)
     K = len(tone_frequencies)
     if K < 1:

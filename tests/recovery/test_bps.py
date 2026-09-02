@@ -4,6 +4,7 @@ import numpy as np
 import pytest
 
 from commkit import generate_qam, recovery, spectral
+from commkit.core import Signal
 from commkit.impairments import apply_awgn
 from commkit.mapping import gray_constellation
 
@@ -137,3 +138,32 @@ class TestBPS:
         syms = self._qam16_symbols(xp, N=16)
         with pytest.raises(ValueError, match="block_size"):
             recovery.recover_carrier_phase_bps(syms, "qam", 16, block_size=64)
+
+
+class TestSignalInputBpsAndCorrectCarrierPhase:
+    """Signal-awareness for recover_carrier_phase_bps and correct_carrier_phase."""
+
+    def test_bps_signal_input_uses_metadata(self, backend_device, xp, xpt):
+        """Signal input: modulation/order come from the signal's metadata."""
+        sig = _qam_signal(xp, 16, 512)
+
+        phi_sig = recovery.recover_carrier_phase_bps(sig)
+        phi_arr = recovery.recover_carrier_phase_bps(
+            sig.samples, modulation="qam", order=16
+        )
+
+        assert not isinstance(phi_sig, Signal)  # phase estimate stays a raw array
+        xpt.assert_allclose(phi_sig, phi_arr)
+
+    def test_correct_carrier_phase_signal_input_returns_signal(
+        self, backend_device, xp, xpt
+    ):
+        """Signal input returns a Signal with the phase-corrected samples."""
+        sig = _qam_signal(xp, 16, 256)
+        phase = xp.full(256, 0.3)
+
+        out_sig = recovery.correct_carrier_phase(sig, phase)
+        out_arr = recovery.correct_carrier_phase(sig.samples, phase)
+
+        assert isinstance(out_sig, Signal)
+        xpt.assert_allclose(out_sig.samples, out_arr)

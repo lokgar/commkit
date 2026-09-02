@@ -4,6 +4,7 @@ import numpy as np
 import pytest
 
 from commkit import generate_psk, generate_qam, recovery, spectral
+from commkit.core import Signal
 from commkit.impairments import apply_awgn
 
 FS = 1e6  # 1 MHz sampling rate, common to all tests
@@ -274,3 +275,21 @@ class TestCprTikhonov:
         )
 
         assert float(xp.std(phi_tik)) < float(xp.std(phi_vv))
+
+
+class TestSignalInputTikhonov:
+    """Signal-awareness for recover_carrier_phase_tikhonov."""
+
+    def test_signal_input_uses_metadata(self, backend_device, xp, xpt):
+        """Signal input: modulation/order come from the signal's metadata."""
+        sig = _qam_signal(xp, 16, 512)
+
+        phi_sig = recovery.recover_carrier_phase_tikhonov(
+            sig, linewidth_symbol_periods=1e-5
+        )
+        phi_arr = recovery.recover_carrier_phase_tikhonov(
+            sig.samples, modulation="qam", order=16, linewidth_symbol_periods=1e-5
+        )
+
+        assert not isinstance(phi_sig, Signal)  # phase estimate stays a raw array
+        xpt.assert_allclose(phi_sig, phi_arr)

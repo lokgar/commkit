@@ -5,16 +5,17 @@ import logging
 import numpy as np
 
 from ..backend import ArrayType, dispatch, to_device
+from ..core.signal import Signal
 from ..frequency import _modulation_power_m
-from ..helpers import as_2d, restore_1d
+from ..helpers import as_2d, restore_1d, unwrap_signal
 from ..logger import logger
 from .corrections import correct_cycle_slips
 
 
 def recover_carrier_phase_viterbi_viterbi(
-    symbols: ArrayType,
-    modulation: str,
-    order: int,
+    symbols: ArrayType | Signal,
+    modulation: str | None = None,
+    order: int | None = None,
     block_size: int = 32,
     joint_channels: bool = False,
     cycle_slip_correction: bool = False,
@@ -32,12 +33,17 @@ def recover_carrier_phase_viterbi_viterbi(
 
     Parameters
     ----------
-    symbols : array_like
+    symbols : array_like or Signal
         1-SPS complex symbols after matched filter. Shape: (N,) or (C, N).
-    modulation : str
-        Modulation scheme (case-insensitive): 'psk', 'qam', etc.
-    order : int
-        Modulation order.
+        A :class:`Signal` supplies ``modulation``/``order`` from its
+        metadata when not given explicitly.
+    modulation : str, optional
+        Modulation scheme (case-insensitive): 'psk', 'qam', etc.  Required
+        for array input; defaults to the signal's ``mod_scheme`` for
+        :class:`Signal` input.
+    order : int, optional
+        Modulation order.  Required for array input; defaults to the
+        signal's ``mod_order`` for :class:`Signal` input.
     block_size : int, default 32
         Number of symbols per estimation block. Larger blocks reduce
         variance but reduce tracking bandwidth for fast phase noise.
@@ -75,6 +81,26 @@ def recover_carrier_phase_viterbi_viterbi(
     minimum reliable block_size scales as ~4*ceil(sqrt(order)).  For high phase
     noise prefer ``recover_carrier_phase_bps`` (no unwrap required).
     """
+    x, sig = unwrap_signal(symbols)
+    if sig is not None:
+        return recover_carrier_phase_viterbi_viterbi(
+            x,
+            modulation or sig.mod_scheme,
+            order or sig.mod_order,
+            block_size=block_size,
+            joint_channels=joint_channels,
+            cycle_slip_correction=cycle_slip_correction,
+            cycle_slip_history=cycle_slip_history,
+            cycle_slip_threshold=cycle_slip_threshold,
+            debug_plot=debug_plot,
+        )
+
+    if modulation is None or order is None:
+        raise ValueError(
+            "recover_carrier_phase_viterbi_viterbi() requires modulation and order "
+            "for array input."
+        )
+
     symbols, xp, _ = dispatch(symbols)
     symbols, was_1d = as_2d(symbols, name="symbols")
     C, N = symbols.shape

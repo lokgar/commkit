@@ -351,6 +351,36 @@ class TestCorrectPhaseRotation:
         )
         assert out.ndim == 1
 
+    def test_signal_input_corrects_resolved_symbols(self, backend_device, xp):
+        """Signal input: resolved_symbols is corrected, ref defaults to source_symbols."""
+        from commkit.metrics import ser
+
+        sig = generate_qam(order=16, num_symbols=self.N, sps=1, symbol_rate=1e6, seed=9)
+        sig.samples = apply_awgn(sig.samples, esn0_db=30, sps=1, seed=9)
+        ref = xp.asarray(sig.source_symbols)
+        sig.resolved_symbols = sig.samples * xp.array(
+            np.exp(1j * 0.7), dtype=sig.samples.dtype
+        )
+
+        out_sig = recovery.correct_phase_rotation(sig)
+
+        assert out_sig.resolved_symbols is not None
+        assert float(ser(out_sig.resolved_symbols, ref, "qam", 16)) < 0.05
+
+    def test_signal_input_raises_without_resolved(self, backend_device, xp):
+        """Raises ValueError when resolved_symbols is None."""
+        sig = generate_qam(order=16, num_symbols=256, sps=1, symbol_rate=1e6, seed=0)
+        with pytest.raises(ValueError, match="resolved_symbols"):
+            recovery.correct_phase_rotation(sig)
+
+    def test_signal_input_raises_without_ref(self, backend_device, xp):
+        """Raises ValueError when ref_symbols is omitted and source_symbols is None."""
+        sig = generate_qam(order=16, num_symbols=256, sps=1, symbol_rate=1e6, seed=0)
+        sig.resolved_symbols = sig.samples
+        sig.source_symbols = None
+        with pytest.raises(ValueError, match="source_symbols"):
+            recovery.correct_phase_rotation(sig)
+
 
 class TestResolveChannelPermutation:
     """Stream-assignment resolution under both scoring metrics."""

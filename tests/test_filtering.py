@@ -4,6 +4,7 @@ import numpy as np
 import pytest
 
 from commkit import filtering
+from commkit.core import Signal
 
 # -----------------------------------------------------------------------------
 # TAP GENERATOR TESTS - these functions always return NumPy arrays regardless
@@ -291,6 +292,22 @@ def test_ols_fir_filter_complex_input_stays_complex(backend_device, xp):
     assert xp.iscomplexobj(out), f"Expected complex output, got dtype={out.dtype}"
 
 
+def test_ols_fir_filter_signal_input_returns_signal(backend_device, xp, xpt):
+    """Signal input returns a Signal with the filtered samples."""
+    rng = np.random.default_rng(5)
+    data = xp.asarray(
+        (rng.standard_normal(512) + 1j * rng.standard_normal(512)).astype(np.complex64)
+    )
+    taps = xp.asarray(np.hanning(32).astype(np.float32))
+    sig = Signal(samples=data, sampling_rate=1.0, symbol_rate=1.0)
+
+    out_sig = filtering.ols_fir_filter(sig, taps)
+    out_arr = filtering.ols_fir_filter(data, taps)
+
+    assert isinstance(out_sig, Signal)
+    xpt.assert_allclose(out_sig.samples, out_arr)
+
+
 # -----------------------------------------------------------------------------
 # DTYPE PRESERVATION TESTS
 # -----------------------------------------------------------------------------
@@ -427,3 +444,26 @@ class TestCompensateChromaticDispersion:
         power_in = float(xp.sum(xp.abs(samples) ** 2))
         power_out = float(xp.sum(xp.abs(out) ** 2))
         xpt.assert_allclose(power_out, power_in, rtol=1e-4)
+
+    def test_signal_input_returns_signal(self, backend_device, xp, xpt):
+        """Signal input: sampling_rate is taken from the signal."""
+        fs = 64e9
+        data = xp.ones(512, dtype=xp.complex64)
+        sig = Signal(samples=data, sampling_rate=fs, symbol_rate=fs / 2)
+
+        out_sig = filtering.compensate_chromatic_dispersion(
+            sig,
+            dispersion_ps_nm_km=17.0,
+            fiber_length_km=80.0,
+            center_wavelength_nm=1550.0,
+        )
+        out_arr = filtering.compensate_chromatic_dispersion(
+            data,
+            sampling_rate=fs,
+            dispersion_ps_nm_km=17.0,
+            fiber_length_km=80.0,
+            center_wavelength_nm=1550.0,
+        )
+
+        assert isinstance(out_sig, Signal)
+        xpt.assert_allclose(out_sig.samples, out_arr)

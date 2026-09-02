@@ -5,6 +5,7 @@ import math
 import numpy as np
 
 from commkit.backend import to_device
+from commkit.core import Signal
 from commkit.impairments import apply_phase_noise, generate_phase_noise
 
 
@@ -94,6 +95,18 @@ class TestApplyPhaseNoise:
         )
         assert float(xp.max(xp.abs(xp.abs(out) - 1.0))) < 1e-9
         assert float(xp.max(xp.abs(out - samples))) > 1e-4
+
+    def test_signal_input_returns_signal(self, backend_device, xp, xpt):
+        """Signal input: sampling_rate is taken from the signal."""
+        fs = 64e9
+        data = xp.ones(1024, dtype=xp.complex128)
+        sig = Signal(samples=data, sampling_rate=fs, symbol_rate=fs / 4)
+
+        out_sig = apply_phase_noise(sig, linewidth=100e3, seed=1)
+        out_arr = apply_phase_noise(data, sampling_rate=fs, linewidth=100e3, seed=1)
+
+        assert isinstance(out_sig, Signal)
+        xpt.assert_allclose(out_sig.samples, out_arr)
 
 
 class TestGeneratePhaseNoise:

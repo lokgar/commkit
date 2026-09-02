@@ -4,6 +4,7 @@ import numpy as np
 import pytest
 
 from commkit import generate_psk, generate_qam, recovery, spectral
+from commkit.core import Signal
 from commkit.impairments import apply_awgn
 from commkit.mapping import gray_constellation
 
@@ -183,3 +184,19 @@ class TestViterbiViterbi:
             recovery.recover_carrier_phase_viterbi_viterbi(
                 syms, "psk", 4, block_size=64
             )
+
+
+class TestSignalInputViterbiViterbi:
+    """Signal-awareness for recover_carrier_phase_viterbi_viterbi."""
+
+    def test_signal_input_uses_metadata(self, backend_device, xp, xpt):
+        """Signal input: modulation/order come from the signal's metadata."""
+        sig = _qam_signal(xp, 16, 512)
+
+        phi_sig = recovery.recover_carrier_phase_viterbi_viterbi(sig)
+        phi_arr = recovery.recover_carrier_phase_viterbi_viterbi(
+            sig.samples, modulation="qam", order=16
+        )
+
+        assert not isinstance(phi_sig, Signal)  # phase estimate stays a raw array
+        xpt.assert_allclose(phi_sig, phi_arr)

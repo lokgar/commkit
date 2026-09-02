@@ -4,6 +4,7 @@ import numpy as np
 import pytest
 
 from commkit import equalization
+from commkit.core import Signal
 
 
 @pytest.fixture(autouse=True)
@@ -135,6 +136,45 @@ class TestDemultiplexPolarizationTones:
         with pytest.raises(ValueError, match=r"2-D \(C, N\)"):
             equalization.demultiplex_polarization_tones_static(s, fs, [10.0])
 
+    def test_signal_input_returns_signal(self, backend_device, xp, xpt):
+        """Signal input: sampling_rate is taken from the signal."""
+        from commkit.impairments import apply_polarization_mixing
+        from commkit.spectral import add_pilot_tone
+
+        fs = 100.0
+        s = self._streams(xp)
+        tx, f_used = add_pilot_tone(s, fs, self.TONES, power_ratio_db=-10.0)
+        rx = apply_polarization_mixing(tx, theta=0.6)
+        sig = Signal(samples=rx, sampling_rate=fs, symbol_rate=fs)
+
+        demuxed_sig = equalization.demultiplex_polarization_tones_static(
+            sig, tone_frequencies=f_used
+        )
+        demuxed_arr = equalization.demultiplex_polarization_tones_static(rx, fs, f_used)
+
+        assert isinstance(demuxed_sig, Signal)
+        xpt.assert_allclose(demuxed_sig.samples, demuxed_arr)
+
+    def test_signal_input_with_return_matrix(self, backend_device, xp, xpt):
+        """Signal input + return_matrix=True: (Signal, W) tuple."""
+        from commkit.spectral import add_pilot_tone
+
+        fs = 100.0
+        s = self._streams(xp)
+        tx, f_used = add_pilot_tone(s, fs, self.TONES, power_ratio_db=-10.0)
+        sig = Signal(samples=tx, sampling_rate=fs, symbol_rate=fs)
+
+        demuxed_sig, W_sig = equalization.demultiplex_polarization_tones_static(
+            sig, tone_frequencies=f_used, return_matrix=True
+        )
+        demuxed_arr, W_arr = equalization.demultiplex_polarization_tones_static(
+            tx, fs, f_used, return_matrix=True
+        )
+
+        assert isinstance(demuxed_sig, Signal)
+        xpt.assert_allclose(demuxed_sig.samples, demuxed_arr)
+        xpt.assert_allclose(W_sig, W_arr)
+
 
 class TestDemultiplexPolarizationTonesDynamic:
     """Tests for equalization.demultiplex_polarization_tones_dynamic (drifting SOP)."""
@@ -256,6 +296,72 @@ class TestDemultiplexPolarizationTonesDynamic:
         assert int(grid[-1]) == N - 1
         assert Wg.shape[1:] == (2, 2)
 
+    def test_signal_input_returns_signal(self, backend_device, xp, xpt):
+        """Signal input: sampling_rate is taken from the signal."""
+        from commkit.impairments import apply_polarization_mixing
+        from commkit.spectral import add_pilot_tone
+
+        fs = 100.0
+        s = self._streams(xp, N=8192)
+        tx, f_used = add_pilot_tone(s, fs, self.TONES, power_ratio_db=-10.0)
+        rx = apply_polarization_mixing(tx, theta=0.6)
+        sig = Signal(samples=rx, sampling_rate=fs, symbol_rate=fs)
+
+        demuxed_sig = equalization.demultiplex_polarization_tones_dynamic(
+            sig, tone_frequencies=f_used, track_bandwidth=2.0
+        )
+        demuxed_arr = equalization.demultiplex_polarization_tones_dynamic(
+            rx, fs, f_used, track_bandwidth=2.0
+        )
+
+        assert isinstance(demuxed_sig, Signal)
+        xpt.assert_allclose(demuxed_sig.samples, demuxed_arr)
+
+    def test_signal_input_apply_false_returns_raw_tuple(self, backend_device, xp, xpt):
+        """apply=False: no signal-shaped output, so the tuple stays raw arrays."""
+        from commkit.spectral import add_pilot_tone
+
+        fs = 100.0
+        s = self._streams(xp, N=8192)
+        tx, f_used = add_pilot_tone(s, fs, self.TONES, power_ratio_db=-10.0)
+        sig = Signal(samples=tx, sampling_rate=fs, symbol_rate=fs)
+
+        Wg_sig, grid_sig = equalization.demultiplex_polarization_tones_dynamic(
+            sig, tone_frequencies=f_used, track_bandwidth=2.0, apply=False
+        )
+        Wg_arr, grid_arr = equalization.demultiplex_polarization_tones_dynamic(
+            tx, fs, f_used, track_bandwidth=2.0, apply=False
+        )
+
+        assert not isinstance(Wg_sig, Signal)
+        xpt.assert_allclose(Wg_sig, Wg_arr)
+        xpt.assert_allclose(grid_sig, grid_arr)
+
+    def test_signal_input_trim_edges_with_return_matrix(self, backend_device, xp, xpt):
+        """Signal input + trim_edges + return_matrix: (Signal, valid, W_grid, grid)."""
+        from commkit.spectral import add_pilot_tone
+
+        fs = 100.0
+        N = 8192
+        s = self._streams(xp, N=N)
+        tx, f_used = add_pilot_tone(s, fs, self.TONES, power_ratio_db=-10.0)
+        sig = Signal(samples=tx, sampling_rate=fs, symbol_rate=fs)
+
+        demuxed_sig, valid, Wg, grid = (
+            equalization.demultiplex_polarization_tones_dynamic(
+                sig,
+                tone_frequencies=f_used,
+                track_bandwidth=2.0,
+                trim_edges=True,
+                return_matrix=True,
+            )
+        )
+
+        assert isinstance(demuxed_sig, Signal)
+        assert isinstance(valid, slice)
+        assert demuxed_sig.samples.shape[-1] == valid.stop - valid.start
+        assert Wg.shape[1:] == (2, 2)
+
 
 class TestApplyInterpolatedMatrix:
     """Generic grid-interpolated time-varying matrix apply (the demux apply core)."""
@@ -298,3 +404,21 @@ class TestApplyInterpolatedMatrix:
         )
         out = equalization.apply_interpolated_matrix(x, M, gp)
         xpt.assert_allclose(out, M2 @ x, rtol=1e-4, atol=1e-4)
+
+    def test_signal_input_returns_signal(self, backend_device, xp, xpt):
+        """Signal input returns a Signal with the interpolated-matrix output."""
+        N = 4096
+        M2 = xp.asarray([[1.0, 0.5j], [0.2, -1.0]], dtype=xp.complex64)
+        M = xp.broadcast_to(M2, (5, 2, 2)).copy()
+        gp = xp.linspace(0.0, N - 1, 5)
+        rng = xp.random.RandomState(2)
+        data = (rng.standard_normal((2, N)) + 1j * rng.standard_normal((2, N))).astype(
+            xp.complex64
+        )
+        sig = Signal(samples=data, sampling_rate=1.0, symbol_rate=1.0)
+
+        out_sig = equalization.apply_interpolated_matrix(sig, M, gp)
+        out_arr = equalization.apply_interpolated_matrix(data, M, gp)
+
+        assert isinstance(out_sig, Signal)
+        xpt.assert_allclose(out_sig.samples, out_arr)

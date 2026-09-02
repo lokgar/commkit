@@ -1,5 +1,6 @@
 """Tests for transceiver front-end IQ-imbalance application and compensation."""
 
+from commkit.core import Signal
 from commkit.impairments import (
     apply_iq_imbalance,
     compensate_iq_imbalance_gram_schmidt,
@@ -183,3 +184,47 @@ class TestIQImbalanceCompensation:
         _, r = self._make_imbalanced(xp)
         out = compensate_iq_imbalance_gram_schmidt(r)
         assert out.dtype == xp.complex64
+
+
+class TestSignalInputFrontend:
+    """Signal-awareness for apply_iq_imbalance and its compensators."""
+
+    def test_apply_iq_imbalance_signal_input(self, backend_device, xp, xpt):
+        """Signal input returns a Signal with the imbalanced samples."""
+        rng = xp.random.RandomState(1)
+        data = (rng.randn(512) + 1j * rng.randn(512)).astype(xp.complex64)
+        sig = Signal(samples=data, sampling_rate=1.0, symbol_rate=1.0)
+
+        out_sig = apply_iq_imbalance(
+            sig, amplitude_imbalance_db=1.0, phase_imbalance_deg=3.0
+        )
+        out_arr = apply_iq_imbalance(
+            data, amplitude_imbalance_db=1.0, phase_imbalance_deg=3.0
+        )
+
+        assert isinstance(out_sig, Signal)
+        xpt.assert_allclose(out_sig.samples, out_arr)
+
+    def test_compensate_lowdin_signal_input(self, backend_device, xp, xpt):
+        """Signal input returns a Signal with the compensated samples."""
+        rng = xp.random.RandomState(2)
+        data = (rng.randn(256) + 1j * rng.randn(256)).astype(xp.complex64)
+        sig = Signal(samples=data, sampling_rate=1.0, symbol_rate=1.0)
+
+        out_sig = compensate_iq_imbalance_lowdin(sig)
+        out_arr = compensate_iq_imbalance_lowdin(data)
+
+        assert isinstance(out_sig, Signal)
+        xpt.assert_allclose(out_sig.samples, out_arr)
+
+    def test_compensate_gram_schmidt_signal_input(self, backend_device, xp, xpt):
+        """Signal input returns a Signal with the compensated samples."""
+        rng = xp.random.RandomState(5)
+        data = (rng.randn(256) + 1j * rng.randn(256)).astype(xp.complex64)
+        sig = Signal(samples=data, sampling_rate=1.0, symbol_rate=1.0)
+
+        out_sig = compensate_iq_imbalance_gram_schmidt(sig)
+        out_arr = compensate_iq_imbalance_gram_schmidt(data)
+
+        assert isinstance(out_sig, Signal)
+        xpt.assert_allclose(out_sig.samples, out_arr)

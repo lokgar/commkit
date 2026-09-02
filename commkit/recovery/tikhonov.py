@@ -5,8 +5,9 @@ import logging
 import numpy as np
 
 from ..backend import ArrayType, dispatch, to_device
+from ..core.signal import Signal
 from ..frequency import _modulation_power_m
-from ..helpers import as_2d, restore_1d
+from ..helpers import as_2d, restore_1d, unwrap_signal
 from ..logger import logger
 from .corrections import correct_cycle_slips
 
@@ -155,10 +156,10 @@ def _sskf_smoother_1d(
 
 
 def recover_carrier_phase_tikhonov(
-    symbols: ArrayType,
-    modulation: str,
-    order: int,
-    linewidth_symbol_periods: float,
+    symbols: ArrayType | Signal,
+    modulation: str | None = None,
+    order: int | None = None,
+    linewidth_symbol_periods: float | None = None,
     block_size: int = 32,
     snr_db: float | None = None,
     method: str = "exact",
@@ -184,13 +185,17 @@ def recover_carrier_phase_tikhonov(
 
     Parameters
     ----------
-    symbols : array_like
+    symbols : array_like or Signal
         1-SPS complex symbols after matched filter and FOE.
-        Shape: ``(N,)`` or ``(C, N)``.
-    modulation : str
+        Shape: ``(N,)`` or ``(C, N)``.  A :class:`Signal` supplies
+        ``modulation``/``order`` from its metadata when not given explicitly.
+    modulation : str, optional
         Modulation scheme (case-insensitive): ``'psk'``, ``'qam'``, etc.
-    order : int
-        Modulation order.
+        Required for array input; defaults to the signal's ``mod_scheme``
+        for :class:`Signal` input.
+    order : int, optional
+        Modulation order.  Required for array input; defaults to the
+        signal's ``mod_order`` for :class:`Signal` input.
     linewidth_symbol_periods : float
         Combined linewidth-symbol-time product delta_nu * T_s.
         Typical values: ``1e-5`` (narrow laser, 32 GBd), ``5e-4`` (wide
@@ -246,6 +251,33 @@ def recover_carrier_phase_tikhonov(
     and sigma_v^2 ≈ 1/(M^2 * SNR * N_b), then interpolated to per-symbol
     resolution.  A residual 2*pi/M ambiguity always remains.
     """
+    x, sig = unwrap_signal(symbols)
+    if sig is not None:
+        return recover_carrier_phase_tikhonov(
+            x,
+            modulation or sig.mod_scheme,
+            order or sig.mod_order,
+            linewidth_symbol_periods,
+            block_size=block_size,
+            snr_db=snr_db,
+            method=method,
+            joint_channels=joint_channels,
+            cycle_slip_correction=cycle_slip_correction,
+            cycle_slip_history=cycle_slip_history,
+            cycle_slip_threshold=cycle_slip_threshold,
+            debug_plot=debug_plot,
+        )
+
+    if modulation is None or order is None:
+        raise ValueError(
+            "recover_carrier_phase_tikhonov() requires modulation and order for "
+            "array input."
+        )
+    if linewidth_symbol_periods is None:
+        raise ValueError(
+            "recover_carrier_phase_tikhonov() requires linewidth_symbol_periods."
+        )
+
     if method not in ("exact", "sskf"):
         raise ValueError(f"Unknown method {method!r}. Choose 'exact' or 'sskf'.")
 

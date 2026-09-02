@@ -3,6 +3,7 @@
 import pytest
 
 from commkit import equalization
+from commkit.core import Signal
 
 
 @pytest.fixture(autouse=True)
@@ -129,6 +130,19 @@ class TestZFEqualizer:
 
         # At σ²=0.0025, worst-case MMSE MSE ≈ σ²/min(|H|²) ≈ 0.0025/0.36 ≈ 0.007
         assert mse < 0.05, f"MMSE multi-block IIR test failed: interior MSE={mse:.4f}"
+
+    def test_signal_input_returns_signal(self, backend_device, xp, xpt):
+        """Signal input returns a Signal with the equalized samples."""
+        n = 128
+        channel = xp.array([1.0 + 0j], dtype=xp.complex64)
+        data = xp.ones(n, dtype=xp.complex64)
+        sig = Signal(samples=data, sampling_rate=1.0, symbol_rate=1.0)
+
+        out_sig = equalization.zf_equalizer(sig, channel)
+        out_arr = equalization.zf_equalizer(data, channel)
+
+        assert isinstance(out_sig, Signal)
+        xpt.assert_allclose(out_sig.samples, out_arr)
 
 
 jax = pytest.importorskip("jax", reason="JAX not installed")

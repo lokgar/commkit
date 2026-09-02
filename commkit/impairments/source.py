@@ -5,7 +5,8 @@ import math
 import numpy as np
 
 from ..backend import ArrayType, dispatch, is_cupy_available, to_device
-from ..helpers import as_2d, restore_1d
+from ..core.signal import Signal
+from ..helpers import as_2d, restore_1d, rewrap_signal, unwrap_signal
 from ..logger import logger
 
 __all__ = ["apply_phase_noise", "generate_phase_noise"]
@@ -136,14 +137,14 @@ def generate_phase_noise(
 
 
 def apply_phase_noise(
-    samples: ArrayType,
-    sampling_rate: float,
-    linewidth: float,
+    samples: ArrayType | Signal,
+    sampling_rate: float | None = None,
+    linewidth: float | None = None,
     flicker: float = 0.0,
     flicker_f_min: float | None = None,
     seed: int | None = None,
     shared_lo: bool = False,
-) -> ArrayType:
+) -> ArrayType | Signal:
     """
     Adds laser / oscillator phase noise to a signal.
 
@@ -155,10 +156,11 @@ def apply_phase_noise(
 
     Parameters
     ----------
-    samples : array_like
+    samples : array_like or Signal
         Complex baseband signal. Shape: ``(N,)`` (SISO) or ``(C, N)`` (MIMO).
-    sampling_rate : float
-        Sampling rate in Hz.
+    sampling_rate : float, optional
+        Sampling rate in Hz.  Required for array input; defaults to the
+        signal's ``sampling_rate`` for :class:`Signal` input.
     linewidth : float
         Combined transmitter + receiver laser linewidth delta_nu in Hz.
         Typical values: 100 kHz (narrow-linewidth laser) to 10 MHz (DFB).
@@ -177,14 +179,34 @@ def apply_phase_noise(
 
     Returns
     -------
-    array_like
+    array_like or Signal
         Phase-noise-impaired signal, same shape, dtype, and backend as input.
+        A :class:`Signal` returns a new impaired :class:`Signal`.
 
     Examples
     --------
     >>> noisy = apply_phase_noise(sig.samples, linewidth=100e3,
     ...                           sampling_rate=sig.sampling_rate)
+    >>> noisy = apply_phase_noise(sig, linewidth=100e3)  # Signal input
     """
+    x, sig = unwrap_signal(samples)
+    if sig is not None:
+        result = apply_phase_noise(
+            x,
+            sampling_rate if sampling_rate is not None else sig.sampling_rate,
+            linewidth,
+            flicker=flicker,
+            flicker_f_min=flicker_f_min,
+            seed=seed,
+            shared_lo=shared_lo,
+        )
+        return rewrap_signal(sig, result)
+
+    if sampling_rate is None:
+        raise ValueError("apply_phase_noise() requires sampling_rate for array input.")
+    if linewidth is None:
+        raise ValueError("apply_phase_noise() requires linewidth.")
+
     logger.info(
         "Applying phase noise (linewidth=%.3g Hz, flicker=%.3g Hz², shared_lo=%s).",
         linewidth,

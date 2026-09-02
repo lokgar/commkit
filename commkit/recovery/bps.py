@@ -5,15 +5,16 @@ import logging
 import numpy as np
 
 from ..backend import ArrayType, dispatch, to_device
-from ..helpers import as_2d, restore_1d
+from ..core.signal import Signal
+from ..helpers import as_2d, restore_1d, unwrap_signal
 from ..logger import logger
 from .corrections import correct_cycle_slips
 
 
 def recover_carrier_phase_bps(
-    symbols: ArrayType,
-    modulation: str,
-    order: int,
+    symbols: ArrayType | Signal,
+    modulation: str | None = None,
+    order: int | None = None,
     num_test_phases: int = 64,
     block_size: int = 32,
     joint_channels: bool = False,
@@ -33,14 +34,18 @@ def recover_carrier_phase_bps(
 
     Parameters
     ----------
-    symbols : array_like
+    symbols : array_like or Signal
         1-SPS complex symbols after matched filter. Shape: (N,) or (C, N).
-    modulation : str
+        A :class:`Signal` supplies ``modulation``/``order``/``pmf`` from its
+        metadata when not given explicitly.
+    modulation : str, optional
         Modulation scheme (case-insensitive). Used to fetch the reference
         constellation via
-        ``gray_constellation``.
-    order : int
-        Modulation order.
+        ``gray_constellation``.  Required for array input; defaults to the
+        signal's ``mod_scheme`` for :class:`Signal` input.
+    order : int, optional
+        Modulation order.  Required for array input; defaults to the
+        signal's ``mod_order`` for :class:`Signal` input.
     num_test_phases : int, default 64
         Number of candidate phase offsets B. Resolution is ``π/(2B)``
         rad per step. More candidates improve accuracy at higher compute cost.
@@ -83,7 +88,8 @@ def recover_carrier_phase_bps(
     -------
     array_like
         Per-symbol phase estimate in radians. Shape matches ``symbols``.
-        Same backend as input.
+        Same backend as input.  Always a raw array, even for :class:`Signal`
+        input (a phase trajectory is not itself a signal).
 
     Notes
     -----
@@ -96,6 +102,27 @@ def recover_carrier_phase_bps(
     """
     from ..helpers import normalize
     from ..mapping import constellation_power, gray_constellation
+
+    x, sig = unwrap_signal(symbols)
+    if sig is not None:
+        return recover_carrier_phase_bps(
+            x,
+            modulation or sig.mod_scheme,
+            order or sig.mod_order,
+            num_test_phases=num_test_phases,
+            block_size=block_size,
+            joint_channels=joint_channels,
+            cycle_slip_correction=cycle_slip_correction,
+            cycle_slip_history=cycle_slip_history,
+            cycle_slip_threshold=cycle_slip_threshold,
+            pmf=sig.ps_pmf if pmf is None else pmf,
+            debug_plot=debug_plot,
+        )
+
+    if modulation is None or order is None:
+        raise ValueError(
+            "recover_carrier_phase_bps() requires modulation and order for array input."
+        )
 
     symbols, xp, _ = dispatch(symbols)
     symbols, was_1d = as_2d(symbols, name="symbols")
