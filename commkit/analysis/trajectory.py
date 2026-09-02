@@ -6,14 +6,15 @@ Allan deviation) consumes.
 """
 
 from ..backend import ArrayType, dispatch
-from ..helpers import as_2d, broadcast_channels, restore_1d
+from ..core.signal import Signal
+from ..helpers import as_2d, broadcast_channels, restore_1d, unwrap_signal
 from ..recovery.corrections import resolve_channel_permutation
 
 __all__ = ["carrier_phase_trajectory"]
 
 
 def carrier_phase_trajectory(
-    y_eq: ArrayType,
+    y_eq: ArrayType | Signal,
     ref_symbols: ArrayType,
     *,
     channel_pairing: str = "auto",
@@ -30,10 +31,11 @@ def carrier_phase_trajectory(
 
     Parameters
     ----------
-    y_eq : array_like
+    y_eq : array_like or Signal
         Equalized symbols at 1 sps (e.g. ``apply_taps``
         output with the CPR **disabled** so the carrier phase is left intact).
-        Shape ``(N,)`` (SISO) or ``(C, N)`` (MIMO, time on last axis).
+        Shape ``(N,)`` (SISO) or ``(C, N)`` (MIMO, time on last axis).  A
+        :class:`Signal` is unwrapped to its ``.samples``.
     ref_symbols : array_like
         Known transmitted symbols, same layout as ``y_eq``.  The two are
         truncated to their common length on the last axis.
@@ -70,6 +72,7 @@ def carrier_phase_trajectory(
       ``linewidth_increment(method="slope")`` fits it into the intercept
       instead of requiring an explicit noise estimate.
     """
+    y_eq, _ = unwrap_signal(y_eq)
     y, xp, _ = dispatch(y_eq)
 
     y2, was_1d = as_2d(y, name="y_eq")

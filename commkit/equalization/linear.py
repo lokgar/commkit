@@ -288,8 +288,8 @@ def apply_taps(
 
 
 def estimate_transfer_function(
-    reference: ArrayType,
-    received: ArrayType,
+    reference: ArrayType | Signal,
+    received: ArrayType | Signal,
     *,
     n_fft: int = 512,
     reg: float = 1e-2,
@@ -312,8 +312,9 @@ def estimate_transfer_function(
 
     Parameters
     ----------
-    reference, received : array_like
+    reference, received : array_like or Signal
         Time-aligned, same-rate input / output.  ``(N,)`` SISO or ``(C, N)`` MIMO.
+        A :class:`Signal` is unwrapped to its ``.samples``.
     n_fft : int, default 512
         Welch segment length (frequency resolution ``fs / n_fft``).
     reg : float, default 1e-2
@@ -338,6 +339,8 @@ def estimate_transfer_function(
     array_like
         Frequency response or impulse response (see ``num_taps``).
     """
+    reference, _ = unwrap_signal(reference)
+    received, _ = unwrap_signal(received)
     x, xp, _ = dispatch(reference)
     y = xp.asarray(received)
     single = x.ndim == 1

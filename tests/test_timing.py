@@ -6,7 +6,7 @@ import numpy as np
 import pytest
 
 from commkit import timing
-from commkit.core import Preamble
+from commkit.core import Preamble, Signal
 from commkit.helpers import cross_correlate_fft
 
 
@@ -983,3 +983,51 @@ class TestCorrectTimingErrors:
         offsets = xp.asarray(np.array([2, 4], dtype=np.int64))
         with pytest.raises(ValueError, match="Unknown mode"):
             timing.correct_timing(sig, offsets, mode="wrap")
+
+
+class TestSignalInputTiming:
+    """Signal-awareness for fft_fractional_delay, estimate_timing, correct_timing."""
+
+    def test_fft_fractional_delay_signal_input(self, backend_device, xp, xpt):
+        """Signal input returns a Signal with the delayed samples."""
+        rng = np.random.default_rng(0)
+        data = xp.asarray(
+            (rng.standard_normal(256) + 1j * rng.standard_normal(256)).astype(
+                np.complex64
+            )
+        )
+        sig = Signal(samples=data, sampling_rate=1.0, symbol_rate=1.0)
+
+        out_sig = timing.fft_fractional_delay(sig, 0.3)
+        out_arr = timing.fft_fractional_delay(data, 0.3)
+
+        assert isinstance(out_sig, Signal)
+        xpt.assert_allclose(out_sig.samples, out_arr)
+
+    def test_estimate_timing_signal_input(self, backend_device, xp, xpt):
+        """Signal input: estimate_timing still returns a raw (int, frac) tuple."""
+        preamble_symbols = timing.barker_sequence(13)
+        data = xp.zeros(200, dtype="complex64")
+        start_pos = 50
+        data[start_pos : start_pos + 13] = preamble_symbols
+        sig = Signal(samples=data, sampling_rate=1.0, symbol_rate=1.0)
+
+        int_sig, frac_sig = timing.estimate_timing(sig, preamble_symbols, threshold=2.0)
+        int_arr, frac_arr = timing.estimate_timing(
+            data, preamble_symbols, threshold=2.0
+        )
+
+        assert not isinstance(int_sig, Signal)
+        xpt.assert_allclose(int_sig, int_arr)
+        xpt.assert_allclose(frac_sig, frac_arr)
+
+    def test_correct_timing_signal_input(self, backend_device, xp, xpt):
+        """Signal input returns a Signal with the timing-corrected samples."""
+        data = xp.asarray(np.ones(64, dtype=np.complex64))
+        sig = Signal(samples=data, sampling_rate=1.0, symbol_rate=1.0)
+
+        out_sig = timing.correct_timing(sig, 4, mode="slice")
+        out_arr = timing.correct_timing(data, 4, mode="slice")
+
+        assert isinstance(out_sig, Signal)
+        xpt.assert_allclose(out_sig.samples, out_arr)

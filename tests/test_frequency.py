@@ -4,6 +4,7 @@ import numpy as np
 import pytest
 
 from commkit import frequency, generate_psk, generate_qam, spectral
+from commkit.core import Signal
 from commkit.impairments import apply_awgn
 
 # -----------------------------------------------------------------------------
@@ -797,3 +798,79 @@ class TestCorrectFrequencyOffsetBlockwise:
         out_np = out if xp is np else out.get()
         assert out.shape == sig.shape
         assert np.all(np.isfinite(out_np))
+
+
+class TestSignalInputFrequency:
+    """Signal-awareness across all frequency.py estimators/correctors."""
+
+    def test_mth_power_signal_input(self, backend_device, xp):
+        """Signal input: sampling_rate/modulation/order come from the signal."""
+        sig = _qam_signal(xp, 16, 2048, fo_hz=10_000.0)
+        est_sig = frequency.estimate_frequency_offset_mth_power(sig)
+        est_arr = frequency.estimate_frequency_offset_mth_power(
+            sig.samples, FS, "qam", 16
+        )
+        assert est_sig == pytest.approx(est_arr)
+
+    def test_mengali_morelli_signal_input(self, backend_device, xp):
+        sig = _qam_signal(xp, 16, 2048, fo_hz=10_000.0)
+        est_sig = frequency.estimate_frequency_offset_mengali_morelli(sig)
+        est_arr = frequency.estimate_frequency_offset_mengali_morelli(
+            sig.samples, FS, modulation="qam", order=16
+        )
+        assert est_sig == pytest.approx(est_arr)
+
+    def test_pilot_symbols_signal_input(self, backend_device, xp):
+        sig = _qam_signal(xp, 16, 512, fo_hz=1_000.0)
+        pilot_indices = np.arange(0, 512, 8)
+        pilot_values = xp.asarray(sig.source_symbols)[pilot_indices]
+        est_sig = frequency.estimate_frequency_offset_pilot_symbols(
+            sig, pilot_indices=pilot_indices, pilot_values=pilot_values
+        )
+        est_arr = frequency.estimate_frequency_offset_pilot_symbols(
+            sig.samples, FS, pilot_indices, pilot_values
+        )
+        assert est_sig == pytest.approx(est_arr)
+
+    def test_find_bias_tone_signal_input(self, backend_device, xp):
+        fs = 1e9
+        N = 8192
+        tone_hz = 100e6
+        t = np.arange(N) / fs
+        tone = xp.asarray((np.exp(2j * np.pi * tone_hz * t)).astype(np.complex64))
+        sig = Signal(samples=tone, sampling_rate=fs, symbol_rate=fs / 2)
+
+        est_sig = frequency.find_bias_tone(sig)
+        est_arr = frequency.find_bias_tone(tone, fs)
+        assert est_sig == pytest.approx(est_arr)
+
+    def test_correct_frequency_offset_blockwise_signal_input(
+        self, backend_device, xp, xpt
+    ):
+        sig = _qam_signal(xp, 16, 2048, fo_hz=5_000.0)
+
+        def estimator(block, fs):
+            return frequency.estimate_frequency_offset_mth_power(block, fs, "qam", 16)
+
+        out_sig = frequency.correct_frequency_offset_blockwise(
+            sig, block_size=256, overlap=0.5, estimator=estimator
+        )
+        out_arr = frequency.correct_frequency_offset_blockwise(
+            sig.samples, FS, block_size=256, overlap=0.5, estimator=estimator
+        )
+
+        assert isinstance(out_sig, Signal)
+        xpt.assert_allclose(out_sig.samples, out_arr, atol=1e-4)
+
+    def test_correct_static_frequency_offset_signal_input(
+        self, backend_device, xp, xpt
+    ):
+        sig = _qam_signal(xp, 4, 1024)
+
+        out_sig = frequency.correct_static_frequency_offset(sig, offset=5_000.0)
+        out_arr = frequency.correct_static_frequency_offset(
+            sig.samples, FS, offset=5_000.0
+        )
+
+        assert isinstance(out_sig, Signal)
+        xpt.assert_allclose(out_sig.samples, out_arr)

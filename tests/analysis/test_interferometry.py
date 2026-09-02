@@ -11,6 +11,7 @@ import pytest
 
 from commkit import analysis
 from commkit.backend import to_device
+from commkit.core import Signal
 from commkit.impairments import apply_awgn, generate_phase_noise
 
 FS = 500e6  # beat sampling rate (Hz)
@@ -256,3 +257,33 @@ def test_linewidth_dsh_debug_plots(xp):
         dp, _ = analysis.dsh_phase(z, FS, f_shift=80e6)
         analysis.dsh_fm_noise_psd(dp, FS, m / FS, debug_plot=True)
     plt.close("all")
+
+
+class TestSignalInputInterferometry:
+    """Signal-awareness for dsh_phase and linewidth_dsh."""
+
+    def test_dsh_phase_signal_input(self, xp, xpt):
+        n, m = 1 << 16, 500
+        z, _ = _dsh_beat(2e6, n, m, 80e6, snr_db=None, seed=1)
+        sig = Signal(samples=xp.asarray(z), sampling_rate=FS, symbol_rate=FS)
+
+        dp_sig, f_sig = analysis.dsh_phase(sig, f_shift=80e6)
+        dp_arr, f_arr = analysis.dsh_phase(xp.asarray(z), FS, f_shift=80e6)
+
+        assert not isinstance(dp_sig, Signal)
+        assert f_sig == pytest.approx(f_arr)
+        xpt.assert_allclose(dp_sig, dp_arr)
+
+    def test_linewidth_dsh_signal_input(self, xp):
+        n, m = 1 << 18, 500
+        z, _ = _dsh_beat(2e6, n, m, 80e6, snr_db=25, seed=4)
+        sig = Signal(samples=xp.asarray(z), sampling_rate=FS, symbol_rate=FS)
+
+        res_sig = analysis.linewidth_dsh(
+            sig, delay=m / FS, method="fm_psd", nperseg=1 << 13
+        )
+        res_arr = analysis.linewidth_dsh(
+            xp.asarray(z), FS, m / FS, method="fm_psd", nperseg=1 << 13
+        )
+
+        assert res_sig["linewidth"] == pytest.approx(res_arr["linewidth"])

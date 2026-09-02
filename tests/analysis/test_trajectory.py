@@ -8,6 +8,7 @@ import numpy as np
 
 from commkit import analysis
 from commkit.backend import to_device
+from commkit.core import Signal
 from commkit.impairments import generate_phase_noise
 
 R = 32e9  # symbol rate (Baud)
@@ -79,3 +80,18 @@ def test_carrier_phase_trajectory_auto_pairing_beyond_dual_pol(xp, xpt):
     )
     for c in range(3):
         xpt.assert_allclose(xp.diff(phi[c]), xp.asarray(np.diff(p[c])), atol=1e-6)
+
+
+def test_carrier_phase_trajectory_signal_input(xp, xpt):
+    """Signal input: y_eq is unwrapped to .samples; output stays a raw array."""
+    n = 1 << 12
+    phi_true = _wiener_phase(1e6, n)
+    d = _qpsk(n)
+    y = d * np.exp(1j * phi_true)
+    sig = Signal(samples=xp.asarray(y), sampling_rate=R, symbol_rate=R)
+
+    phi_sig = analysis.carrier_phase_trajectory(sig, xp.asarray(d))
+    phi_arr = analysis.carrier_phase_trajectory(xp.asarray(y), xp.asarray(d))
+
+    assert not isinstance(phi_sig, Signal)
+    xpt.assert_allclose(phi_sig, phi_arr)

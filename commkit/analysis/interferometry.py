@@ -51,8 +51,15 @@ Estimators (see ``linewidth_dsh``):
 import numpy as np
 
 from ..backend import ArrayType, dispatch, to_device
+from ..core.signal import Signal
 from ..frequency import correct_static_frequency_offset
-from ..helpers import as_2d, remove_linear_trend, restore_1d, to_report_scalar
+from ..helpers import (
+    as_2d,
+    remove_linear_trend,
+    restore_1d,
+    to_report_scalar,
+    unwrap_signal,
+)
 from ..logger import logger
 from ..spectral import welch_psd
 from ._common import (
@@ -150,8 +157,8 @@ def dsh_beat(
 
 
 def dsh_phase(
-    samples: ArrayType,
-    sampling_rate: float,
+    samples: ArrayType | Signal,
+    sampling_rate: float | None = None,
     *,
     f_shift: float | None = None,
 ) -> tuple[ArrayType, float | np.ndarray]:
@@ -167,11 +174,13 @@ def dsh_phase(
 
     Parameters
     ----------
-    samples : array_like
+    samples : array_like or Signal
         Beat record, ``(N,)`` or ``(C, N)``.  Real (single photodetector,
-        heterodyne) or complex (IQ front-end).
-    sampling_rate : float
-        Sampling rate in Hz.
+        heterodyne) or complex (IQ front-end).  A :class:`Signal` supplies
+        ``sampling_rate`` from its metadata when not given explicitly.
+    sampling_rate : float, optional
+        Sampling rate in Hz.  Required for array input; defaults to the
+        signal's ``sampling_rate`` for :class:`Signal` input.
     f_shift : float, optional
         Known beat carrier in Hz (AOM frequency).  If None, the mean beat
         frequency is estimated per channel in two stages - coarse Kay
@@ -212,6 +221,17 @@ def dsh_phase(
       the delay arm, AOM RF-synthesizer phase noise - is indistinguishable
       from laser phase noise here and adds to the low-frequency PSD.
     """
+    samples, sig = unwrap_signal(samples)
+    if sig is not None:
+        return dsh_phase(
+            samples,
+            sampling_rate if sampling_rate is not None else sig.sampling_rate,
+            f_shift=f_shift,
+        )
+
+    if sampling_rate is None:
+        raise ValueError("dsh_phase() requires sampling_rate for array input.")
+
     z, xp, _ = dispatch(samples)
     fs = float(sampling_rate)
 
@@ -425,9 +445,9 @@ def _lorentzian_widths(f, p, level_lin):
 
 
 def linewidth_dsh(
-    samples: ArrayType,
-    sampling_rate: float,
-    delay: float,
+    samples: ArrayType | Signal,
+    sampling_rate: float | None = None,
+    delay: float | None = None,
     *,
     f_shift: float | None = None,
     method: str = "fm_psd",
@@ -466,11 +486,13 @@ def linewidth_dsh(
 
     Parameters
     ----------
-    samples : array_like
+    samples : array_like or Signal
         Beat record, ``(N,)`` or ``(C, N)``, real (heterodyne photocurrent) or
-        complex (IQ).
-    sampling_rate : float
-        Sampling rate in Hz.
+        complex (IQ).  A :class:`Signal` supplies ``sampling_rate`` from its
+        metadata when not given explicitly.
+    sampling_rate : float, optional
+        Sampling rate in Hz.  Required for array input; defaults to the
+        signal's ``sampling_rate`` for :class:`Signal` input.
     delay : float
         Interferometer differential delay τ_d in seconds.
     f_shift : float, optional
@@ -601,6 +623,28 @@ def linewidth_dsh(
       plotted log-binned median curve is *not* corrected, so at small
       ``K`` the ``Δν/π`` floor guide sits visibly above it.
     """
+    samples, sig = unwrap_signal(samples)
+    if sig is not None:
+        return linewidth_dsh(
+            samples,
+            sampling_rate if sampling_rate is not None else sig.sampling_rate,
+            delay,
+            f_shift=f_shift,
+            method=method,
+            lags=lags,
+            nperseg=nperseg,
+            f_min=f_min,
+            f_max=f_max,
+            notch_guard=notch_guard,
+            level_db=level_db,
+            debug_plot=debug_plot,
+        )
+
+    if sampling_rate is None:
+        raise ValueError("linewidth_dsh() requires sampling_rate for array input.")
+    if delay is None:
+        raise ValueError("linewidth_dsh() requires delay.")
+
     fs = float(sampling_rate)
     td = float(delay)
     if td <= 0.0:

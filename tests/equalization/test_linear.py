@@ -292,3 +292,22 @@ class TestEstimateTransferFunction:
         # taps drop straight into zf_equalizer without shape juggling
         out = equalization.zf_equalizer(y, taps, noise_variance=1e-2)
         assert out.shape == (2, n)
+
+    def test_signal_input_unwraps_both_arguments(self, backend_device, xp, xpt):
+        """Signal input for either/both arguments unwraps to .samples; output
+        stays a raw array (frequency response is not signal-domain data)."""
+        rng = xp.random.RandomState(0)
+        n = 1 << 14
+        x = (rng.standard_normal(n) + 1j * rng.standard_normal(n)).astype(xp.complex64)
+        g = 2.0 - 1.0j
+        y = (g * x).astype(xp.complex64)
+        ref_sig = Signal(samples=x, sampling_rate=1.0, symbol_rate=1.0)
+        rx_sig = Signal(samples=y, sampling_rate=1.0, symbol_rate=1.0)
+
+        B_sig = equalization.estimate_transfer_function(
+            ref_sig, rx_sig, n_fft=256, reg=1e-3
+        )
+        B_arr = equalization.estimate_transfer_function(x, y, n_fft=256, reg=1e-3)
+
+        assert not isinstance(B_sig, Signal)
+        xpt.assert_allclose(B_sig, B_arr)

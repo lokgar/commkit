@@ -8,13 +8,13 @@ fractional timing offset estimation and correction.
 """
 
 import logging
-from typing import Union
+from typing import Union, overload
 
 import numpy as np
 
 from .backend import ArrayType, dispatch, is_cupy_available, to_device
-from .core import Preamble
-from .helpers import as_2d, restore_1d
+from .core import Preamble, Signal
+from .helpers import as_2d, restore_1d, rewrap_signal, unwrap_signal
 from .logger import logger
 
 # Window length for DFT-upsampling in estimate_fractional_delay()
@@ -300,10 +300,18 @@ def estimate_fractional_delay(
     return mu
 
 
+@overload
+def fft_fractional_delay(samples: ArrayType, delay: float | ArrayType) -> ArrayType: ...
+
+
+@overload
+def fft_fractional_delay(samples: Signal, delay: float | ArrayType) -> Signal: ...
+
+
 def fft_fractional_delay(
-    samples: ArrayType,
+    samples: ArrayType | Signal,
     delay: float | ArrayType,
-) -> ArrayType:
+) -> ArrayType | Signal:
     """
     Applies fractional sample delay using FFT-based frequency-domain method.
 
@@ -315,8 +323,9 @@ def fft_fractional_delay(
 
     Parameters
     ----------
-    samples : array_like
-        Input signal. Shape: (N,) or (C, N).
+    samples : array_like or Signal
+        Input signal. Shape: (N,) or (C, N).  A :class:`Signal` returns a
+        new delayed :class:`Signal`.
     delay : float or array_like
         Fractional delay in samples. Positive = delay (shift right).
         Scalar applies the same delay to all channels.
@@ -324,7 +333,7 @@ def fft_fractional_delay(
 
     Returns
     -------
-    array_like
+    array_like or Signal
         Delayed signal with the same shape as input.
 
     Notes
@@ -332,6 +341,10 @@ def fft_fractional_delay(
     Applies Y(f) = X(f) * exp(-j * 2*pi * f * delay / N) - equivalent to
     ideal sinc interpolation with perfect power preservation.
     """
+    x, sig = unwrap_signal(samples)
+    if sig is not None:
+        return rewrap_signal(sig, fft_fractional_delay(x, delay))
+
     samples, xp, _ = dispatch(samples)
     samples, was_1d = as_2d(samples, name="samples")
 
@@ -376,7 +389,7 @@ def fft_fractional_delay(
 
 
 def estimate_timing(
-    samples: ArrayType,
+    samples: ArrayType | Signal,
     reference: Union[ArrayType, "Preamble"] | None = None,
     threshold: float = 3.0,
     sps: int | None = None,
@@ -401,7 +414,7 @@ def estimate_timing(
 
     Parameters
     ----------
-    samples : array_like
+    samples : array_like or Signal
         Received signal samples. Shape: ``(N,)`` or ``(C, N)``.
     reference : array_like or Preamble
         Reference for correlation.  A Preamble object is reconstructed via
@@ -449,6 +462,21 @@ def estimate_timing(
     for best timing SNR.
     """
     from .helpers import cross_correlate_fft
+
+    samples, sig = unwrap_signal(samples)
+    if sig is not None:
+        return estimate_timing(
+            samples,
+            reference=reference,
+            threshold=threshold,
+            sps=sps,
+            pulse_shape=pulse_shape,
+            filter_params=filter_params,
+            search_range=search_range,
+            dft_upsample=dft_upsample,
+            fractional_method=fractional_method,
+            debug_plot=debug_plot,
+        )
 
     # 1. Resolve Inputs & Metadata
     if filter_params is None:
@@ -691,11 +719,11 @@ def estimate_timing(
 
 
 def correct_timing(
-    samples: ArrayType,
+    samples: ArrayType | Signal,
     integer_offset: int | ArrayType,
     fractional_offset: float | ArrayType = 0.0,
     mode: str = "circular",
-) -> ArrayType:
+) -> ArrayType | Signal:
     """
     Combined integer and fractional timing correction.
 
@@ -704,8 +732,9 @@ def correct_timing(
 
     Parameters
     ----------
-    samples : array_like
-        Input signal. Shape: (N,) or (C, N).
+    samples : array_like or Signal
+        Input signal. Shape: (N,) or (C, N).  A :class:`Signal` returns a
+        new timing-corrected :class:`Signal`.
     integer_offset : int or array_like
         Integer sample offset(s) to correct. Positive values shift
         the signal left (i.e., remove leading samples).
@@ -731,9 +760,10 @@ def correct_timing(
 
     Returns
     -------
-    array_like
+    array_like or Signal
         Timing-corrected signal.  Same shape as input for
-        ``'circular'`` and ``'zero'``; shorter for ``'slice'``.
+        ``'circular'`` and ``'zero'``; shorter for ``'slice'``.  A
+        :class:`Signal` returns a new corrected :class:`Signal`.
 
     Notes
     -----
@@ -743,6 +773,13 @@ def correct_timing(
     fractional delay is applied to the full buffer before slicing so the
     wrap-around stays at the buffer ends.
     """
+    x, sig = unwrap_signal(samples)
+    if sig is not None:
+        result = correct_timing(
+            x, integer_offset, fractional_offset=fractional_offset, mode=mode
+        )
+        return rewrap_signal(sig, result)
+
     samples, xp, _ = dispatch(samples)
     samples, was_1d = as_2d(samples, name="samples")
 

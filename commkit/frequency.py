@@ -12,7 +12,15 @@ from collections.abc import Callable
 import numpy as np
 
 from .backend import ArrayType, dispatch, to_device
-from .helpers import as_2d, broadcast_channels, linear_trend_slope, restore_1d
+from .core.signal import Signal
+from .helpers import (
+    as_2d,
+    broadcast_channels,
+    linear_trend_slope,
+    restore_1d,
+    rewrap_signal,
+    unwrap_signal,
+)
 from .logger import logger
 
 
@@ -147,10 +155,10 @@ def _get_numba_mm_bootstrap():
 
 
 def estimate_frequency_offset_mth_power(
-    samples: ArrayType,
-    sampling_rate: float,
-    modulation: str,
-    order: int,
+    samples: ArrayType | Signal,
+    sampling_rate: float | None = None,
+    modulation: str | None = None,
+    order: int | None = None,
     search_range: tuple[float, float] | None = None,
     nfft: int | None = None,
     interpolation: str = "jacobsen",
@@ -166,16 +174,22 @@ def estimate_frequency_offset_mth_power(
 
     Parameters
     ----------
-    samples : array_like
+    samples : array_like or Signal
         Complex IQ samples. Shape: (N,) or (C, N). For MIMO, channel
         magnitude spectra are summed for robust peak detection, then
         per-channel sub-bin interpolation is applied at the shared peak bin.
-    sampling_rate : float
-        Sampling rate in Hz.
-    modulation : str
+        A :class:`Signal` supplies ``sampling_rate``/``modulation``/``order``
+        from its metadata when not given explicitly.
+    sampling_rate : float, optional
+        Sampling rate in Hz.  Required for array input; defaults to the
+        signal's ``sampling_rate`` for :class:`Signal` input.
+    modulation : str, optional
         Modulation scheme (case-insensitive): 'psk', 'qam', 'bpsk', etc.
-    order : int
-        Modulation order (2, 4, 16, 64, ...).
+        Required for array input; defaults to the signal's ``mod_scheme``
+        for :class:`Signal` input.
+    order : int, optional
+        Modulation order (2, 4, 16, 64, ...).  Required for array input;
+        defaults to the signal's ``mod_order`` for :class:`Signal` input.
     search_range : tuple of float, optional
         ``(f_min, f_max)`` in Hz to limit the frequency offset search.
         The spectral search is mapped to ``[M·f_min, M·f_max]``.
@@ -228,6 +242,31 @@ def estimate_frequency_offset_mth_power(
     and has a sinc-function bias for small NFFT), the Jacobsen estimator
     is unbiased for a rectangular window.
     """
+    x, sig = unwrap_signal(samples)
+    if sig is not None:
+        return estimate_frequency_offset_mth_power(
+            x,
+            sampling_rate if sampling_rate is not None else sig.sampling_rate,
+            modulation or sig.mod_scheme,
+            order or sig.mod_order,
+            search_range=search_range,
+            nfft=nfft,
+            interpolation=interpolation,
+            combine_channels=combine_channels,
+            debug_plot=debug_plot,
+        )
+
+    if sampling_rate is None:
+        raise ValueError(
+            "estimate_frequency_offset_mth_power() requires sampling_rate for "
+            "array input."
+        )
+    if modulation is None or order is None:
+        raise ValueError(
+            "estimate_frequency_offset_mth_power() requires modulation and order "
+            "for array input."
+        )
+
     samples, xp, _ = dispatch(samples)
     samples, was_1d = as_2d(samples, name="samples")
     C, N = samples.shape
@@ -372,8 +411,8 @@ def estimate_frequency_offset_mth_power(
 
 
 def estimate_frequency_offset_mengali_morelli(
-    samples: ArrayType,
-    sampling_rate: float,
+    samples: ArrayType | Signal,
+    sampling_rate: float | None = None,
     modulation: str | None = None,
     order: int | None = None,
     ref_signal: ArrayType | None = None,
@@ -402,13 +441,17 @@ def estimate_frequency_offset_mengali_morelli(
 
     Parameters
     ----------
-    samples : array_like
-        Complex IQ samples. Shape: (N,) or (C, N).
-    sampling_rate : float
-        Sampling rate in Hz.
+    samples : array_like or Signal
+        Complex IQ samples. Shape: (N,) or (C, N).  A :class:`Signal`
+        supplies ``sampling_rate``/``modulation``/``order`` from its
+        metadata when not given explicitly.
+    sampling_rate : float, optional
+        Sampling rate in Hz.  Required for array input; defaults to the
+        signal's ``sampling_rate`` for :class:`Signal` input.
     modulation : str, optional
         Modulation type (case-insensitive). Required for blind M-th power mode.
-        Ignored when ``ref_signal`` is provided.
+        Ignored when ``ref_signal`` is provided.  Defaults to the signal's
+        ``mod_scheme`` for :class:`Signal` input.
     order : int, optional
         Modulation order. Required with ``modulation`` for blind mode.
     ref_signal : array_like, optional
@@ -450,6 +493,25 @@ def estimate_frequency_offset_mengali_morelli(
     Lock range: [-fs/(2M), fs/(2M)] for blind M-th power mode;
     [-fs/2, fs/2] for data-aided or generic blind mode.
     """
+    x, sig = unwrap_signal(samples)
+    if sig is not None:
+        return estimate_frequency_offset_mengali_morelli(
+            x,
+            sampling_rate if sampling_rate is not None else sig.sampling_rate,
+            modulation=modulation or sig.mod_scheme,
+            order=order or sig.mod_order,
+            ref_signal=ref_signal,
+            max_lag=max_lag,
+            combine_channels=combine_channels,
+            debug_plot=debug_plot,
+        )
+
+    if sampling_rate is None:
+        raise ValueError(
+            "estimate_frequency_offset_mengali_morelli() requires sampling_rate "
+            "for array input."
+        )
+
     samples, xp, _ = dispatch(samples)
     samples, was_1d = as_2d(samples, name="samples")
     C, N = samples.shape
@@ -537,10 +599,10 @@ def estimate_frequency_offset_mengali_morelli(
 
 
 def estimate_frequency_offset_pilot_symbols(
-    samples: ArrayType,
-    sampling_rate: float,
-    pilot_indices: ArrayType,
-    pilot_values: ArrayType,
+    samples: ArrayType | Signal,
+    sampling_rate: float | None = None,
+    pilot_indices: ArrayType | None = None,
+    pilot_values: ArrayType | None = None,
     snr_weighted: bool = True,
     combine_channels: bool = False,
     debug_plot: bool = False,
@@ -556,10 +618,13 @@ def estimate_frequency_offset_pilot_symbols(
 
     Parameters
     ----------
-    samples : array_like
-        Received complex samples. Shape: (N,) or (C, N).
-    sampling_rate : float
-        Sampling rate in Hz.
+    samples : array_like or Signal
+        Received complex samples. Shape: (N,) or (C, N).  A :class:`Signal`
+        supplies ``sampling_rate`` from its metadata when not given
+        explicitly.
+    sampling_rate : float, optional
+        Sampling rate in Hz.  Required for array input; defaults to the
+        signal's ``sampling_rate`` for :class:`Signal` input.
     pilot_indices : array_like of int
         Sample indices of pilot positions in increasing order. Shape: (P,).
         Must be unique and sorted.  Supports any pilot arrangement:
@@ -627,6 +692,29 @@ def estimate_frequency_offset_pilot_symbols(
     where ``max_gap`` is the maximum spacing (in samples) between any two
     consecutive entries of ``pilot_indices``.
     """
+    x, sig = unwrap_signal(samples)
+    if sig is not None:
+        return estimate_frequency_offset_pilot_symbols(
+            x,
+            sampling_rate if sampling_rate is not None else sig.sampling_rate,
+            pilot_indices,
+            pilot_values,
+            snr_weighted=snr_weighted,
+            combine_channels=combine_channels,
+            debug_plot=debug_plot,
+        )
+
+    if sampling_rate is None:
+        raise ValueError(
+            "estimate_frequency_offset_pilot_symbols() requires sampling_rate for "
+            "array input."
+        )
+    if pilot_indices is None or pilot_values is None:
+        raise ValueError(
+            "estimate_frequency_offset_pilot_symbols() requires pilot_indices and "
+            "pilot_values."
+        )
+
     samples, xp, _ = dispatch(samples)
     samples, was_1d = as_2d(samples, name="samples")
     C, N = samples.shape
@@ -719,8 +807,8 @@ def estimate_frequency_offset_pilot_symbols(
 
 
 def find_bias_tone(
-    seg: ArrayType,
-    sampling_rate: float,
+    seg: ArrayType | Signal,
+    sampling_rate: float | None = None,
     target_frequency: float | None = None,
     search_band: float | None = None,
 ) -> float:
@@ -736,10 +824,13 @@ def find_bias_tone(
 
     Parameters
     ----------
-    seg : array_like
+    seg : array_like or Signal
         1-D complex IQ samples.  Must reside on a single backend (CPU or GPU).
-    sampling_rate : float
-        Sampling rate in Hz.
+        A :class:`Signal` supplies ``sampling_rate`` from its metadata when
+        not given explicitly.
+    sampling_rate : float, optional
+        Sampling rate in Hz.  Required for array input; defaults to the
+        signal's ``sampling_rate`` for :class:`Signal` input.
     target_frequency : float, optional
         Centre of the frequency search window in Hz.  Must be paired with
         ``search_band``.  If both are given the argmax is restricted to
@@ -779,6 +870,17 @@ def find_bias_tone(
     windowed spectral peak than standard parabolic (magnitude-domain) fits,
     reducing estimation bias for non-integer tone frequencies.
     """
+    x, sig = unwrap_signal(seg)
+    if sig is not None:
+        return find_bias_tone(
+            x,
+            sampling_rate if sampling_rate is not None else sig.sampling_rate,
+            target_frequency=target_frequency,
+            search_band=search_band,
+        )
+
+    if sampling_rate is None:
+        raise ValueError("find_bias_tone() requires sampling_rate for array input.")
     if (target_frequency is None) != (search_band is None):
         raise ValueError(
             "target_frequency and search_band must both be provided or both omitted."
@@ -918,14 +1020,14 @@ def _refine_tones_from_spectrum(
 
 
 def correct_frequency_offset_blockwise(
-    samples: ArrayType,
-    sampling_rate: float,
-    block_size: int,
-    overlap: float,
-    estimator: Callable[[np.ndarray, float], float],
+    samples: ArrayType | Signal,
+    sampling_rate: float | None = None,
+    block_size: int | None = None,
+    overlap: float | None = None,
+    estimator: Callable[[np.ndarray, float], float] | None = None,
     combine_channels: bool = False,
     debug_plot: bool = False,
-) -> ArrayType:
+) -> ArrayType | Signal:
     """
     Estimate and correct a time-varying frequency offset in one call.
 
@@ -938,10 +1040,13 @@ def correct_frequency_offset_blockwise(
 
     Parameters
     ----------
-    samples : array_like
-        Complex IQ samples.  Shape: ``(N,)`` or ``(C, N)``.
-    sampling_rate : float
-        Sampling rate in Hz.
+    samples : array_like or Signal
+        Complex IQ samples.  Shape: ``(N,)`` or ``(C, N)``.  A :class:`Signal`
+        returns a new corrected :class:`Signal`; ``sampling_rate`` defaults
+        to the signal's ``sampling_rate`` when not given explicitly.
+    sampling_rate : float, optional
+        Sampling rate in Hz.  Required for array input; defaults to the
+        signal's ``sampling_rate`` for :class:`Signal` input.
     block_size : int
         Number of samples per analysis block.
     overlap : float
@@ -972,9 +1077,10 @@ def correct_frequency_offset_blockwise(
 
     Returns
     -------
-    array_like
+    array_like or Signal
         Frequency-offset-corrected samples, **same shape and dtype as the
-        input**, on the same backend device.
+        input**, on the same backend device.  A :class:`Signal` returns a
+        new corrected :class:`Signal`.
 
     Notes
     -----
@@ -987,6 +1093,29 @@ def correct_frequency_offset_blockwise(
     4. Integrate: theta(n) = (2 * pi / fs) * cumsum(delta_f).
     5. Apply: y[n] = x[n] * exp(-j * theta[n]).
     """
+    x, sig = unwrap_signal(samples)
+    if sig is not None:
+        result = correct_frequency_offset_blockwise(
+            x,
+            sampling_rate if sampling_rate is not None else sig.sampling_rate,
+            block_size,
+            overlap,
+            estimator,
+            combine_channels=combine_channels,
+            debug_plot=debug_plot,
+        )
+        return rewrap_signal(sig, result)
+
+    if sampling_rate is None:
+        raise ValueError(
+            "correct_frequency_offset_blockwise() requires sampling_rate for "
+            "array input."
+        )
+    if block_size is None or overlap is None or estimator is None:
+        raise ValueError(
+            "correct_frequency_offset_blockwise() requires block_size, overlap, "
+            "and estimator."
+        )
     if not (0.0 <= overlap < 1.0):
         raise ValueError(f"overlap must be in [0, 1), got {overlap}.")
 
@@ -1098,10 +1227,10 @@ def correct_frequency_offset_blockwise(
 
 
 def correct_static_frequency_offset(
-    samples: ArrayType,
-    sampling_rate: float,
-    offset: float | np.ndarray,
-) -> ArrayType:
+    samples: ArrayType | Signal,
+    sampling_rate: float | None = None,
+    offset: float | np.ndarray | None = None,
+) -> ArrayType | Signal:
     """
     Applies a **constant** frequency offset correction via exact complex mixing.
 
@@ -1119,10 +1248,13 @@ def correct_static_frequency_offset(
 
     Parameters
     ----------
-    samples : array_like
-        Input signal samples. Shape: (..., N).
-    sampling_rate : float
-        Sampling rate in Hz.
+    samples : array_like or Signal
+        Input signal samples. Shape: (..., N).  A :class:`Signal` returns a
+        new corrected :class:`Signal`; ``sampling_rate`` defaults to the
+        signal's ``sampling_rate`` when not given explicitly.
+    sampling_rate : float, optional
+        Sampling rate in Hz.  Required for array input; defaults to the
+        signal's ``sampling_rate`` for :class:`Signal` input.
     offset : float or np.ndarray
         Estimated frequency offset in Hz. Either a scalar (same correction
         applied to all channels) or a 1-D array of shape ``(C,)`` as
@@ -1132,9 +1264,24 @@ def correct_static_frequency_offset(
 
     Returns
     -------
-    array_like
-        Frequency-corrected samples, same shape and dtype as input.
+    array_like or Signal
+        Frequency-corrected samples, same shape and dtype as input.  A
+        :class:`Signal` returns a new corrected :class:`Signal`.
     """
+    x, sig = unwrap_signal(samples)
+    if sig is not None:
+        result = correct_static_frequency_offset(
+            x, sampling_rate if sampling_rate is not None else sig.sampling_rate, offset
+        )
+        return rewrap_signal(sig, result)
+
+    if sampling_rate is None:
+        raise ValueError(
+            "correct_static_frequency_offset() requires sampling_rate for array input."
+        )
+    if offset is None:
+        raise ValueError("correct_static_frequency_offset() requires offset.")
+
     samples, xp, _ = dispatch(samples)
     offset_arr = xp.asarray(offset)
     per_channel = offset_arr.ndim >= 1 and offset_arr.size > 1
