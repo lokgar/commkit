@@ -100,3 +100,13 @@ def sync(backend_device):
             pass
 
     return _sync
+
+
+def pytest_benchmark_update_machine_info(config, machine_info):
+    """Strip the hostname pytest-benchmark auto-captures via platform.node().
+
+    baselines/ is committed and this is an open-source repo - the raw
+    hostname (e.g. a workstation name tied to the author) has no benchmarking
+    value and shouldn't end up in public git history.
+    """
+    machine_info["node"] = "redacted"
