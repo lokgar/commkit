@@ -608,7 +608,11 @@ def estimate_timing(
         p_val = float(metrics_np[ch])
         if c_val < 0.5 and p_val >= threshold:
             logger.warning(
-                "Channel %s: Peak phase coherence is very low (%.2f), but peak is visually prominent (PAPR=%.1f >= %s). This suggests strong Carrier Frequency Offset (CFO) or uncompensated dispersion destroying phase alignment over the sequence length.",
+                "Channel %s: Peak phase coherence is very low (%.2f), but "
+                "peak is visually prominent (PAPR=%.1f >= %s). This "
+                "suggests strong Carrier Frequency Offset (CFO) or "
+                "uncompensated dispersion destroying phase alignment "
+                "over the sequence length.",
                 ch,
                 c_val,
                 p_val,
@@ -629,7 +633,8 @@ def estimate_timing(
         _m = float(metrics_np[_ch])
         if _m < threshold:
             logger.warning(
-                "Channel %s: correlation metric %.3f is below threshold %s. Integer offset for this channel may be unreliable.",
+                "Channel %s: correlation metric %.3f is below threshold "
+                "%s. Integer offset for this channel may be unreliable.",
                 _ch,
                 _m,
                 threshold,
@@ -645,7 +650,8 @@ def estimate_timing(
 
             if spread > 0:
                 logger.warning(
-                    "Skew detected among valid channels! Valid Peaks: %s. Spread: %s samples.",
+                    "Skew detected among valid channels! Valid Peaks: %s. "
+                    "Spread: %s samples.",
                     valid_peaks.tolist(),
                     spread,
                 )
@@ -822,7 +828,9 @@ def correct_timing(
 
     if mode == "slice":
         logger.warning(
-            "correct_timing(mode='slice'): output is shorter than input (trimmed by %s samples). Signal length metadata (e.g. duration) will no longer match the original.",
+            "correct_timing(mode='slice'): output is shorter than input "
+            "(trimmed by %s samples). Signal length metadata (e.g. "
+            "duration) will no longer match the original.",
             int(xp.max(xp.asarray(integer_offset))),
         )
     logger.info(

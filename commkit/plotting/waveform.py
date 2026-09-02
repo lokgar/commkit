@@ -90,7 +90,8 @@ def plot_time_domain(
         else:
             if not isinstance(ax, (list, tuple, np.ndarray)):
                 logger.warning(
-                    "Multiple channels detected but single axis provided. Overlaying plots."
+                    "Multiple channels detected but single axis provided. "
+                    "Overlaying plots."
                 )
                 axes = np.array([[ax] * num_channels])
                 fig = ax.figure

@@ -407,7 +407,8 @@ def to_jax(data: Any, device: str | None = None, dtype: Any | None = None) -> An
 
         except Exception as e:
             logger.debug(
-                "DLPack transfer from CuPy to JAX failed: %s. Falling back to explicit conversion.",
+                "DLPack transfer from CuPy to JAX failed: %s. "
+                "Falling back to explicit conversion.",
                 e,
             )
 
@@ -483,13 +484,15 @@ def from_jax(data: Any) -> ArrayType:
             return cp.from_dlpack(data)
         except Exception as e:
             logger.debug(
-                "DLPack transfer from JAX to CuPy failed: %s. Falling back to NumPy conversion.",
+                "DLPack transfer from JAX to CuPy failed: %s. "
+                "Falling back to NumPy conversion.",
                 e,
             )
 
     if is_gpu and not is_cupy_available():
         logger.warning(
-            "JAX array is on GPU, but CuPy is not available. Falling back to NumPy (CPU)."
+            "JAX array is on GPU, but CuPy is not available. "
+            "Falling back to NumPy (CPU)."
         )
 
     # Convert to numpy (will copy from GPU/TPU if needed)

@@ -177,7 +177,9 @@ def _log_equalizer_exit(
                 mse_init = float(np.mean(np.abs(head) ** 2))
                 if mse_init > 0 and mse_final > mse_init * 0.9:
                     logger.warning(
-                        "%s: convergence may be poor - final MSE (%.1f dB) not significantly below initial MSE (%.1f dB). Consider reducing step_size or increasing signal length.",
+                        "%s: convergence may be poor - final MSE (%.1f dB) "
+                        "not significantly below initial MSE (%.1f dB). "
+                        "Consider reducing step_size or increasing signal length.",
                         name,
                         mse_db,
                         10.0 * np.log10(mse_init + 1e-30),

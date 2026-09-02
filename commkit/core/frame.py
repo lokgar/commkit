@@ -186,7 +186,8 @@ class Preamble(BaseModel):
 
         if sps != int(sps) or sps < 1:
             logger.warning(
-                "sps=%r is not a positive integer. Non-integer sps causes sample buffer / sampling_rate metadata mismatch.",
+                "sps=%r is not a positive integer. Non-integer sps causes "
+                "sample buffer / sampling_rate metadata mismatch.",
                 sps,
             )
             raise ValueError(
@@ -343,7 +344,10 @@ class SingleCarrierFrame(BaseModel):
                     math.ceil(self.payload_len / data_per_period) * data_per_period
                 )
                 logger.warning(
-                    "SingleCarrierFrame (comb): payload_len=%s is not divisible by data_per_period=%s (pilot_period=%s). Snapping payload_len %s -> %s so that num_pilot_periods == num_data_periods == %s.",
+                    "SingleCarrierFrame (comb): payload_len=%s is not "
+                    "divisible by data_per_period=%s (pilot_period=%s). "
+                    "Snapping payload_len %s -> %s so that "
+                    "num_pilot_periods == num_data_periods == %s.",
                     self.payload_len,
                     data_per_period,
                     self.pilot_period,
@@ -361,7 +365,10 @@ class SingleCarrierFrame(BaseModel):
             if self.payload_len % data_per_block != 0:
                 snapped = math.ceil(self.payload_len / data_per_block) * data_per_block
                 logger.warning(
-                    "SingleCarrierFrame (block): payload_len=%s is not divisible by data_per_block=%s (pilot_period=%s, pilot_block_len=%s). Snapping payload_len %s -> %s so that num_pilot_blocks == num_data_blocks == %s.",
+                    "SingleCarrierFrame (block): payload_len=%s is not "
+                    "divisible by data_per_block=%s (pilot_period=%s, "
+                    "pilot_block_len=%s). Snapping payload_len %s -> %s so "
+                    "that num_pilot_blocks == num_data_blocks == %s.",
                     self.payload_len,
                     data_per_block,
                     self.pilot_period,
@@ -866,7 +873,8 @@ class SingleCarrierFrame(BaseModel):
 
         if sps != int(sps) or sps < 1:
             logger.warning(
-                "sps=%r is not a positive integer. Non-integer sps causes sample buffer / sampling_rate metadata mismatch.",
+                "sps=%r is not a positive integer. Non-integer sps causes "
+                "sample buffer / sampling_rate metadata mismatch.",
                 sps,
             )
             raise ValueError(

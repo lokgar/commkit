@@ -552,7 +552,9 @@ def resolve_channel_permutation(
         # An output did not lock to any distinct reference stream - the demux
         # likely collapsed (both outputs on one pol) rather than swapped.
         logger.warning(
-            "resolve_channel_permutation: weak match (%s) - streams may not be cleanly separated (EQ collapse?). Applying best assignment %s anyway. Score matrix (rows=out, cols=ref):\n%s",
+            "resolve_channel_permutation: weak match (%s) - streams may not "
+            "be cleanly separated (EQ collapse?). Applying best assignment "
+            "%s anyway. Score matrix (rows=out, cols=ref):\n%s",
             quality,
             perm.tolist(),
             matrix_str,
@@ -563,7 +565,9 @@ def resolve_channel_permutation(
         )
     else:
         logger.info(
-            "resolve_channel_permutation: POLARIZATION SWAP %s - reordering outputs to reference order. Score matrix (rows=out, cols=ref):\n%s",
+            "resolve_channel_permutation: POLARIZATION SWAP %s - "
+            "reordering outputs to reference order. "
+            "Score matrix (rows=out, cols=ref):\n%s",
             perm.tolist(),
             matrix_str,
         )
@@ -713,7 +717,8 @@ def resolve_phase_ambiguity(
                 )
             )
             logger.info(
-                "Phase ambiguity resolution: ch=%s, best_k=%s, rotation=%.1f°, SER=%.4f",
+                "Phase ambiguity resolution: ch=%s, best_k=%s, "
+                "rotation=%.1f°, SER=%.4f",
                 ch,
                 int(best_k_np[ch]),
                 best_k_np[ch] * step * 180.0 / np.pi,

@@ -470,7 +470,9 @@ def recover_carrier_phase_pilot_tone(
     df = sampling_rate / N
     if bandwidth < df:
         logger.warning(
-            "CPR (pilot-tone): bandwidth=%.3g Hz is below the FFT resolution df=fs/N=%.3g Hz; the extraction window may capture too few bins. Increase bandwidth or the record length N.",
+            "CPR (pilot-tone): bandwidth=%.3g Hz is below the FFT "
+            "resolution df=fs/N=%.3g Hz; the extraction window may capture "
+            "too few bins. Increase bandwidth or the record length N.",
             bandwidth,
             df,
         )
@@ -512,7 +514,8 @@ def recover_carrier_phase_pilot_tone(
         phi_std_deg = float(np.std(theta_np)) * 180.0 / np.pi
         mode_str = "joint" if (joint_channels and C > 1) else "independent"
         logger.info(
-            "CPR (pilot-tone, %s, %s): phase mean=%.2f°, std=%.2f° [f_p=%.3g Hz, B=%.3g Hz, refine=%s, remove_foe=%s, C=%s]",
+            "CPR (pilot-tone, %s, %s): phase mean=%.2f°, std=%.2f° "
+            "[f_p=%.3g Hz, B=%.3g Hz, refine=%s, remove_foe=%s, C=%s]",
             window,
             mode_str,
             phi_mean_deg,
@@ -754,7 +757,8 @@ def recover_carrier_phase_pilot_tones(
         phi_np = to_device(phi, "cpu")
     if _want_log:
         logger.info(
-            "CPR (pilot-tones, MRC): phase std=%.2f°, [K=%s, used=%s, ref=%s, B=%.3g Hz, diff_B=%.3g Hz, C=%s]",
+            "CPR (pilot-tones, MRC): phase std=%.2f°, [K=%s, used=%s, "
+            "ref=%s, B=%.3g Hz, diff_B=%.3g Hz, C=%s]",
             float(np.std(phi_np)) * 180 / np.pi,
             K,
             used,

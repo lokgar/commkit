@@ -94,7 +94,12 @@ def generate(
 
     if sps != int(sps) or sps < 1:
         logger.warning(
-            "sps=%r is not a positive integer. Non-integer sps is valid for captured/resampled signals but not for generation: resample_poly requires an integer upsampling factor, so the sample buffer would not match the stored sampling_rate metadata. To generate at a fractional sps, generate at an integer sps then call Signal.resample(up=..., down=...).",
+            "sps=%r is not a positive integer. Non-integer sps is valid for "
+            "captured/resampled signals but not for generation: "
+            "resample_poly requires an integer upsampling factor, so the "
+            "sample buffer would not match the stored sampling_rate "
+            "metadata. To generate at a fractional sps, generate at an "
+            "integer sps then call Signal.resample(up=..., down=...).",
             sps,
         )
         raise ValueError(
@@ -144,7 +149,8 @@ def generate(
     )
 
     logger.info(
-        "Generated %s-%s signal: %s symbols x %s stream(s), sps=%s, pulse_shape=%s, %s samples/stream @ %.3g Sa/s.",
+        "Generated %s-%s signal: %s symbols x %s stream(s), sps=%s, "
+        "pulse_shape=%s, %s samples/stream @ %.3g Sa/s.",
         modulation.upper(),
         order,
         num_symbols,
@@ -501,7 +507,12 @@ def generate_psqam(
 
     if sps != int(sps) or sps < 1:
         logger.warning(
-            "sps=%r is not a positive integer. Non-integer sps is valid for captured/resampled signals but not for generation: resample_poly requires an integer upsampling factor, so the sample buffer would not match the stored sampling_rate metadata. To generate at a fractional sps, generate at an integer sps then call Signal.resample(up=..., down=...).",
+            "sps=%r is not a positive integer. Non-integer sps is valid for "
+            "captured/resampled signals but not for generation: "
+            "resample_poly requires an integer upsampling factor, so the "
+            "sample buffer would not match the stored sampling_rate "
+            "metadata. To generate at a fractional sps, generate at an "
+            "integer sps then call Signal.resample(up=..., down=...).",
             sps,
         )
         raise ValueError(
@@ -554,7 +565,8 @@ def generate_psqam(
 
     _ps_tag = f"entropy={entropy:.3g}" if entropy is not None else f"ν={nu_val:.3g}"
     logger.info(
-        "Generated PS-QAM-%s signal: %s symbols x %s stream(s), sps=%s, %s, pulse_shape=%s, %s samples/stream @ %.3g Sa/s.",
+        "Generated PS-QAM-%s signal: %s symbols x %s stream(s), sps=%s, %s, "
+        "pulse_shape=%s, %s samples/stream @ %.3g Sa/s.",
         order,
         num_symbols,
         num_streams,

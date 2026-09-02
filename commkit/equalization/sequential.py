@@ -498,7 +498,8 @@ def lms(
 
     if training_symbols is not None and training_symbols.shape[-1] > n_sym:
         logger.warning(
-            "training_symbols length (%s) exceeds available symbol count (%s); excess training symbols will be ignored.",
+            "training_symbols length (%s) exceeds available symbol count "
+            "(%s); excess training symbols will be ignored.",
             training_symbols.shape[-1],
             n_sym,
         )
@@ -1301,7 +1302,11 @@ def rls(
     """
     if sps > 1:
         logger.warning(
-            "RLS is mathematically ill-conditioned for fractionally-spaced signals (sps=%s). The noise-only null-subspace creates a singular correlation matrix, causing tap bloat. Use LMS for fractionally-spaced equalization unless heavy Tikhonov regularization is applied.",
+            "RLS is mathematically ill-conditioned for fractionally-spaced "
+            "signals (sps=%s). The noise-only null-subspace creates a "
+            "singular correlation matrix, causing tap bloat. Use LMS for "
+            "fractionally-spaced equalization unless heavy Tikhonov "
+            "regularization is applied.",
             sps,
         )
 
@@ -1310,7 +1315,8 @@ def rls(
 
     n_train_log = training_symbols.shape[-1] if training_symbols is not None else 0
     logger.info(
-        "RLS equalizer: num_taps=%s, forgetting_factor=%s, delta=%.2e, leakage=%.2e, sps=%s, backend=%s, n_train=%s%s",
+        "RLS equalizer: num_taps=%s, forgetting_factor=%s, delta=%.2e, "
+        "leakage=%.2e, sps=%s, backend=%s, n_train=%s%s",
         num_taps,
         forgetting_factor,
         delta,
@@ -1343,7 +1349,8 @@ def rls(
 
     if training_symbols is not None and training_symbols.shape[-1] > n_sym:
         logger.warning(
-            "training_symbols length (%s) exceeds available symbol count (%s); excess training symbols will be ignored.",
+            "training_symbols length (%s) exceeds available symbol count "
+            "(%s); excess training symbols will be ignored.",
             training_symbols.shape[-1],
             n_sym,
         )
@@ -1354,7 +1361,11 @@ def rls(
     tail_trim = num_taps // 2
     if tail_trim > 0:
         logger.warning(
-            "RLS tail trim: last %s symbols removed from y_hat (zero-padding contamination zone). Trim reference arrays to match: source_symbols = source_symbols[..., :-result.tail_trim], source_bits = source_bits[..., :-result.tail_trim * bits_per_symbol].",
+            "RLS tail trim: last %s symbols removed from y_hat "
+            "(zero-padding contamination zone). Trim reference arrays to "
+            "match: source_symbols = source_symbols[..., :-result.tail_trim], "
+            "source_bits = source_bits[..., "
+            ":-result.tail_trim * bits_per_symbol].",
             tail_trim,
         )
 
@@ -1647,7 +1658,8 @@ def rls(
             ).astype(np.complex64)
 
     logger.debug(
-        "RLS internals: n_sym=%s, n_train=%s, n_update_halt=%s, leakage=%.2e, delta=%.2e",
+        "RLS internals: n_sym=%s, n_train=%s, n_update_halt=%s, "
+        "leakage=%.2e, delta=%.2e",
         n_sym,
         n_train_log,
         n_update_halt,
@@ -2056,7 +2068,8 @@ def cma(
     use_pilots = pilot_ref is not None and pilot_mask is not None
     _validate_block_mode(update_mode, block_len, backend, store_weights=store_weights)
     logger.info(
-        "CMA equalizer: num_taps=%s, mu=%s, sps=%s, backend=%s, pilot_aided=%s, pilot_gain_db=%s",
+        "CMA equalizer: num_taps=%s, mu=%s, sps=%s, backend=%s, "
+        "pilot_aided=%s, pilot_gain_db=%s",
         num_taps,
         step_size,
         sps,
@@ -2524,7 +2537,8 @@ def rde(
     use_pilots = pilot_ref is not None and pilot_mask is not None
     _validate_block_mode(update_mode, block_len, backend, store_weights=store_weights)
     logger.info(
-        "RDE equalizer: num_taps=%s, mu=%s, sps=%s, backend=%s, pilot_aided=%s, pilot_gain_db=%s",
+        "RDE equalizer: num_taps=%s, mu=%s, sps=%s, backend=%s, "
+        "pilot_aided=%s, pilot_gain_db=%s",
         num_taps,
         step_size,
         sps,

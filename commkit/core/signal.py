@@ -279,7 +279,9 @@ class Signal(BaseModel):
             # We want (Channels, Time).
             if s0 > s1 and s0 > 32:  # Heuristic: Time dim usually > 32
                 logger.warning(
-                    "Samples shape is %s. Converting to Time-Last convention (N_channels=%s, N_samples=%s). Please provide input as (N_channels, N_samples) for MIMO signals.",
+                    "Samples shape is %s. Converting to Time-Last convention "
+                    "(N_channels=%s, N_samples=%s). Please provide input as "
+                    "(N_channels, N_samples) for MIMO signals.",
                     arr.shape,
                     s1,
                     s0,

@@ -136,7 +136,8 @@ def plot_psd(
                 # But if the user provides a single axis, we must respect it.
                 # Let's overlay if single axis provided, or fail.
                 logger.warning(
-                    "Multiple channels detected but single axis provided. Overlaying plots."
+                    "Multiple channels detected but single axis provided. "
+                    "Overlaying plots."
                 )
                 axes = np.array([[ax] * num_channels])
                 fig = ax.figure
@@ -390,7 +391,8 @@ def plot_spectrogram(
         else:
             if not isinstance(ax, (list, tuple, np.ndarray)):
                 logger.warning(
-                    "Multiple channels detected but single axis provided. Overlaying plots."
+                    "Multiple channels detected but single axis provided. "
+                    "Overlaying plots."
                 )
                 axes = np.array([[ax] * num_channels])
                 fig = ax.figure
@@ -472,7 +474,8 @@ def plot_spectrogram(
             f_start, f_end = f_indices[0], f_indices[-1] + 1
         else:
             logger.warning(
-                "xlim (frequency) %s does not overlap with frequency range [%.3f, %.3f]. Plotting whole frequency range.",
+                "xlim (frequency) %s does not overlap with frequency range "
+                "[%.3f, %.3f]. Plotting whole frequency range.",
                 xlim,
                 f_shifted[0],
                 f_shifted[-1],
@@ -487,7 +490,8 @@ def plot_spectrogram(
             t_start, t_end = t_indices[0], t_indices[-1] + 1
         else:
             logger.warning(
-                "ylim (time) %s does not overlap with time range [%.3f, %.3f]. Plotting whole time axis.",
+                "ylim (time) %s does not overlap with time range "
+                "[%.3f, %.3f]. Plotting whole time axis.",
                 ylim,
                 t[0],
                 t[-1],

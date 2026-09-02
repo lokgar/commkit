@@ -88,7 +88,8 @@ def shift_frequency(
 
     if not xp.isclose(offset, actual_offset):
         logger.warning(
-            "Requested offset %.3f Hz quantized to %.3f Hz (step %.3f Hz) to maintain phase continuity.",
+            "Requested offset %.3f Hz quantized to %.3f Hz (step %.3f Hz) "
+            "to maintain phase continuity.",
             offset,
             actual_offset,
             df,
@@ -257,7 +258,9 @@ def add_pilot_tone(
     for f_in, f_out in zip(f_req, actual):
         if abs(f_out - f_in) > 1e-12 * max(1.0, abs(f_in)):
             logger.warning(
-                "add_pilot_tone: requested %.3f Hz quantized to %.3f Hz (grid step fs/N=%.3f Hz) for buffer-periodic (loop-seamless) playback.",
+                "add_pilot_tone: requested %.3f Hz quantized to %.3f Hz "
+                "(grid step fs/N=%.3f Hz) for buffer-periodic "
+                "(loop-seamless) playback.",
                 f_in,
                 f_out,
                 df,
@@ -305,7 +308,8 @@ def add_pilot_tone(
     f_log = f"{actual[0]:.3g} Hz" if scalar_input else f"{actual} Hz"
     psr_log = f"{psr_req[0]:.1f} dB" if scalar_power else f"{psr_req} dB"
     logger.info(
-        "add_pilot_tone: f_p=%s, PSR=%s, phase_init=%.3g rad, renormalize=%s [C=%s, N=%s]",
+        "add_pilot_tone: f_p=%s, PSR=%s, phase_init=%.3g rad, "
+        "renormalize=%s [C=%s, N=%s]",
         f_log,
         psr_log,
         phase_init,
