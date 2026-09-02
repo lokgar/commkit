@@ -145,6 +145,26 @@ class TestZFEqualizer:
         xpt.assert_allclose(out_sig.samples, out_arr)
 
 
+class TestApplyTaps:
+    """Tests for apply_taps (frozen-weight inference pass)."""
+
+    def test_signal_input_returns_signal_at_symbol_rate(self, backend_device, xp, xpt):
+        """Signal input: sps is taken from the signal and sampling_rate is
+        set to symbol_rate on the returned Signal."""
+        n = 256
+        sps = 2
+        weights = xp.array([1.0 + 0j], dtype=xp.complex64)  # single-tap identity
+        data = xp.ones(n, dtype=xp.complex64)
+        sig = Signal(samples=data, sampling_rate=sps * 1e6, symbol_rate=1e6)
+
+        out_sig = equalization.apply_taps(sig, weights, normalize=False)
+        out_arr = equalization.apply_taps(data, weights, sps=sps, normalize=False)
+
+        assert isinstance(out_sig, Signal)
+        assert out_sig.sampling_rate == 1e6
+        xpt.assert_allclose(out_sig.samples, out_arr)
+
+
 jax = pytest.importorskip("jax", reason="JAX not installed")
 
 

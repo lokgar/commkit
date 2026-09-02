@@ -20,6 +20,7 @@ import numpy as np
 import pytest
 
 from commkit.backend import to_device
+from commkit.core import Signal
 from commkit.equalization import CPRState, block_lms
 from commkit.helpers import normalize
 from commkit.mapping import gray_constellation
@@ -1030,3 +1031,24 @@ def test_input_norm_factor_block_lms(backend_device, xp, xpt):
         rtol=1e-5,
         atol=1e-6,
     )
+
+
+# -----------------------------------------------------------------------------
+# 15. Signal input
+# -----------------------------------------------------------------------------
+
+
+def test_block_lms_signal_input(backend_device, xp, xpt):
+    """Signal input: sps is taken from the signal, y_hat becomes a Signal at
+    the symbol rate."""
+    samples_np, syms_np = _qam16(n_sym=2048, sps=2)
+    samples, syms = xp.asarray(samples_np), xp.asarray(syms_np)
+    sig = Signal(samples=samples, sampling_rate=2e6, symbol_rate=1e6)
+    kw = dict(num_taps=11, modulation="qam", order=16, block_size=128)
+
+    result_sig = block_lms(sig, syms[:200], **kw)
+    result_arr = block_lms(samples, syms[:200], sps=2, **kw)
+
+    assert isinstance(result_sig.y_hat, Signal)
+    assert result_sig.y_hat.sampling_rate == 1e6
+    xpt.assert_allclose(result_sig.y_hat.samples, result_arr.y_hat)

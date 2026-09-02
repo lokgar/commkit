@@ -4,6 +4,7 @@ import numpy as np
 import pytest
 
 from commkit import equalization, generate_psk, generate_qam
+from commkit.core import Signal
 from commkit.equalization import EqualizerResult
 from commkit.mapping import gray_constellation
 
@@ -1164,3 +1165,71 @@ class TestCmaPilotAided:
         assert mask_u8.shape == (n_sym,)
         assert mask_u8.dtype == np.uint8
         assert int(mask_u8.sum()) == n_pilots
+
+
+class TestSignalInputSequentialEqualizers:
+    """Signal-awareness for lms, rls, cma, rde: sps from the signal, y_hat as
+    a new Signal at the symbol rate."""
+
+    def _rx_signal(self, xp, order=16, n_symbols=2000, sps=2, seed=0):
+        sig = generate_qam(
+            symbol_rate=1e6,
+            num_symbols=n_symbols,
+            order=order,
+            pulse_shape="rrc",
+            sps=sps,
+            seed=seed,
+        )
+        return sig
+
+    def test_lms_signal_input(self, backend_device, xp, xpt):
+        sig = self._rx_signal(xp)
+        data = xp.asarray(sig.samples)
+
+        result_sig = equalization.lms(sig, num_taps=11, modulation="qam", order=16)
+        result_arr = equalization.lms(
+            data, num_taps=11, sps=2, modulation="qam", order=16
+        )
+
+        assert isinstance(result_sig.y_hat, Signal)
+        assert result_sig.y_hat.sampling_rate == 1e6
+        xpt.assert_allclose(result_sig.y_hat.samples, result_arr.y_hat)
+
+    def test_rls_signal_input(self, backend_device, xp, xpt):
+        sig = self._rx_signal(xp, sps=1, n_symbols=500)
+        data = xp.asarray(sig.samples)
+
+        result_sig = equalization.rls(sig, num_taps=11, modulation="qam", order=16)
+        result_arr = equalization.rls(
+            data, num_taps=11, sps=1, modulation="qam", order=16
+        )
+
+        assert isinstance(result_sig.y_hat, Signal)
+        assert result_sig.y_hat.sampling_rate == 1e6
+        xpt.assert_allclose(result_sig.y_hat.samples, result_arr.y_hat)
+
+    def test_cma_signal_input(self, backend_device, xp, xpt):
+        sig = self._rx_signal(xp)
+        data = xp.asarray(sig.samples)
+
+        result_sig = equalization.cma(sig, num_taps=11, modulation="qam", order=16)
+        result_arr = equalization.cma(
+            data, num_taps=11, sps=2, modulation="qam", order=16
+        )
+
+        assert isinstance(result_sig.y_hat, Signal)
+        assert result_sig.y_hat.sampling_rate == 1e6
+        xpt.assert_allclose(result_sig.y_hat.samples, result_arr.y_hat)
+
+    def test_rde_signal_input(self, backend_device, xp, xpt):
+        sig = self._rx_signal(xp)
+        data = xp.asarray(sig.samples)
+
+        result_sig = equalization.rde(sig, num_taps=11, modulation="qam", order=16)
+        result_arr = equalization.rde(
+            data, num_taps=11, sps=2, modulation="qam", order=16
+        )
+
+        assert isinstance(result_sig.y_hat, Signal)
+        assert result_sig.y_hat.sampling_rate == 1e6
+        xpt.assert_allclose(result_sig.y_hat.samples, result_arr.y_hat)

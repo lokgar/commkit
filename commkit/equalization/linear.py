@@ -140,14 +140,14 @@ def zf_equalizer(
 
 
 def apply_taps(
-    samples: ArrayType,
+    samples: ArrayType | Signal,
     weights: ArrayType,
-    sps: int = 2,
+    sps: int | None = None,
     normalize: bool = True,
     input_norm_factor: float | np.ndarray | None = None,
     samples_prefix: ArrayType | None = None,
     pad_mode: str = "zeros",
-) -> ArrayType:
+) -> ArrayType | Signal:
     """Apply frozen equalizer taps to a signal (inference pass, no weight updates).
 
     Performs the butterfly FIR forward pass using pre-converged weights,
@@ -164,16 +164,20 @@ def apply_taps(
 
     Parameters
     ----------
-    samples : array_like
+    samples : array_like or Signal
         Input samples. Shape: ``(N_samples,)`` for SISO or
-        ``(C, N_samples)`` for MIMO. Typically at ``sps`` samples/symbol.
+        ``(C, N_samples)`` for MIMO. Typically at ``sps`` samples/symbol.  A
+        :class:`Signal` returns a new :class:`Signal` at the symbol rate
+        (``sampling_rate = symbol_rate``).
     weights : array_like
         Frozen tap weights, typically ``EqualizerResult.weights`` from a
         prior equalizer run. Shape: ``(num_taps,)`` for SISO or
         ``(C, C, num_taps)`` for MIMO butterfly.
-    sps : int, default 2
+    sps : int, optional
         Samples per symbol. Output length is ``N_samples // sps``.
         Unlike the adaptive equalizers, any ``sps >= 1`` is accepted.
+        Defaults to ``2`` for array input; defaults to the signal's ``sps``
+        for :class:`Signal` input.
     normalize : bool, default True
         If ``True``, normalize ``samples`` to unit symbol power before
         filtering (same pre-processing as the adaptive equalizers via
@@ -206,6 +210,22 @@ def apply_taps(
         y = equalization.apply_taps(new_signal, result.weights,
                                     input_norm_factor=result.input_norm_factor)
     """
+    x, sig = unwrap_signal(samples)
+    if sig is not None:
+        result = apply_taps(
+            x,
+            weights,
+            sps=sps if sps is not None else int(sig.sps),
+            normalize=normalize,
+            input_norm_factor=input_norm_factor,
+            samples_prefix=samples_prefix,
+            pad_mode=pad_mode,
+        )
+        return rewrap_signal(sig, result, sampling_rate=sig.symbol_rate)
+
+    if sps is None:
+        sps = 2
+
     samples, xp, _ = dispatch(samples)
     weights = xp.asarray(weights)
 

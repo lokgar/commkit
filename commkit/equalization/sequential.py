@@ -7,7 +7,8 @@ from typing import Any
 import numpy as np
 
 from ..backend import ArrayType, _get_jax, dispatch, from_jax, to_device, to_jax
-from ..helpers import resolve_pll_gains, restore_1d
+from ..core.signal import Signal
+from ..helpers import resolve_pll_gains, restore_1d, rewrap_signal, unwrap_signal
 from ..logger import logger
 from ._block import (
     _build_slicer_constellation,
@@ -59,10 +60,10 @@ from .result import CPRState, EqualizerResult, _log_equalizer_exit
 
 
 def lms(
-    samples: ArrayType,
+    samples: ArrayType | Signal,
     training_symbols: ArrayType | None = None,
     num_taps: int = 21,
-    sps: int = 2,
+    sps: int | None = None,
     step_size: float = 0.01,
     modulation: str | None = None,
     order: int | None = None,
@@ -196,10 +197,14 @@ def lms(
 
     Parameters
     ----------
-    samples : array_like
+    samples : array_like or Signal
         Input signal samples. Shape: ``(N_samples,)`` for SISO or
         ``(C, N_samples)`` for MIMO butterfly equalization.
         Typically at 2 samples/symbol for fractionally-spaced equalization.
+        A :class:`Signal` returns an :class:`EqualizerResult` whose ``y_hat``
+        is a new :class:`Signal` at the symbol rate (``sampling_rate =
+        symbol_rate``); ``sps`` defaults to the signal's ``sps`` when not
+        given explicitly.
     training_symbols : array_like, optional
         Known transmitted symbols (at symbol rate, 1 SPS).
         Shape: ``(N_train,)`` for SISO or ``(C, N_train)`` for MIMO.
@@ -207,13 +212,14 @@ def lms(
     num_taps : int, default 21
         Number of equalizer taps per FIR filter. For fractionally-spaced
         equalization (sps > 1), use at least ``4 * sps`` taps.
-    sps : int, default 2
+    sps : int, optional, default 2
         Samples per symbol at the input.  Use ``sps=2`` (T/2-spaced, default)
         for the first equalization stage.  ``sps=1`` is valid for a second
         symbol-spaced stage after FOE + CPR; use a short filter (3-11 taps)
         for residual ISI cleanup.  ``sps > 2`` is accepted but uncommon.
         The equalizer decimates by ``sps`` to produce one output symbol per
-        input stride.
+        input stride.  Defaults to the signal's ``sps`` for :class:`Signal`
+        input.
     step_size : float, default 0.01
         Plain LMS step size (mu). The gradient is applied directly without
         input-power normalization, matching the convention in Haykin's
@@ -417,7 +423,9 @@ def lms(
         Result container with the following fields:
 
         * ``y_hat`` - equalized symbol estimates, shape ``(N_sym,)`` SISO
-          or ``(C, N_sym)`` MIMO, at 1 SPS (symbol rate).
+          or ``(C, N_sym)`` MIMO, at 1 SPS (symbol rate).  A new
+          :class:`Signal` (``sampling_rate = symbol_rate``) when ``samples``
+          was a :class:`Signal`.
         * ``weights`` - final tap-weight tensor, shape ``(num_taps,)`` SISO
           or ``(C, C, num_taps)`` MIMO.
         * ``error`` - complex error signal ``e[n] = d[n] - y[n]``, same
@@ -457,6 +465,48 @@ def lms(
     independent signals externally.  For CPU-optimal throughput use
     ``backend='numba'`` (the default).
     """
+    x, sig = unwrap_signal(samples)
+    if sig is not None:
+        result = lms(
+            x,
+            training_symbols=training_symbols,
+            num_taps=num_taps,
+            sps=sps if sps is not None else int(sig.sps),
+            step_size=step_size,
+            modulation=modulation,
+            order=order,
+            unipolar=unipolar,
+            store_weights=store_weights,
+            device=device,
+            center_tap=center_tap,
+            backend=backend,
+            w_init=w_init,
+            pmf=pmf,
+            cpr_type=cpr_type,
+            cpr_pll_bandwidth=cpr_pll_bandwidth,
+            cpr_pll_mu=cpr_pll_mu,
+            cpr_pll_beta=cpr_pll_beta,
+            cpr_bps_test_phases=cpr_bps_test_phases,
+            cpr_bps_block_size=cpr_bps_block_size,
+            cpr_joint_channels=cpr_joint_channels,
+            cpr_cycle_slip_correction=cpr_cycle_slip_correction,
+            cpr_cycle_slip_history=cpr_cycle_slip_history,
+            cpr_cycle_slip_threshold=cpr_cycle_slip_threshold,
+            debug_plot=debug_plot,
+            plot_smoothing=plot_smoothing,
+            cpr_state=cpr_state,
+            input_norm_factor=input_norm_factor,
+            samples_prefix=samples_prefix,
+            pad_mode=pad_mode,
+            update_mode=update_mode,
+            block_len=block_len,
+        )
+        result.y_hat = rewrap_signal(sig, result.y_hat, sampling_rate=sig.symbol_rate)
+        return result
+
+    if sps is None:
+        sps = 2
+
     if cpr_type is not None and cpr_type not in ("pll", "bps"):
         raise ValueError(f"cpr_type must be 'pll', 'bps', or None. Got {cpr_type!r}.")
     _validate_block_mode(
@@ -1029,10 +1079,10 @@ def _check_rls_divergence(weights, xp, forgetting_factor, delta):
 
 
 def rls(
-    samples: ArrayType,
+    samples: ArrayType | Signal,
     training_symbols: ArrayType | None = None,
     num_taps: int = 21,
-    sps: int = 1,
+    sps: int | None = None,
     forgetting_factor: float = 0.99,
     delta: float = 0.01,
     leakage: float = 0.0,
@@ -1093,14 +1143,19 @@ def rls(
 
     Parameters
     ----------
-    samples : array_like
+    samples : array_like or Signal
         Input signal samples. Shape: ``(N_samples,)`` or ``(C, N_samples)``.
+        A :class:`Signal` returns an :class:`EqualizerResult` whose ``y_hat``
+        is a new :class:`Signal` at the symbol rate (``sampling_rate =
+        symbol_rate``); ``sps`` defaults to the signal's ``sps`` when not
+        given explicitly.
     training_symbols : array_like, optional
         Known symbols for data-aided adaptation (at symbol rate, 1 SPS).
     num_taps : int, default 21
         Number of equalizer taps per FIR filter.
-    sps : int, default 1
-        Samples per symbol at the input.
+    sps : int, optional, default 1
+        Samples per symbol at the input.  Defaults to the signal's ``sps``
+        for :class:`Signal` input.
     forgetting_factor : float, default 0.99
         RLS forgetting factor (lambda). Range: (0, 1].
         Values close to 1 give longer memory.
@@ -1270,7 +1325,9 @@ def rls(
         Result container with the following fields:
 
         * ``y_hat`` - equalized symbol estimates, shape ``(N_sym,)`` SISO
-          or ``(C, N_sym)`` MIMO, at 1 SPS.
+          or ``(C, N_sym)`` MIMO, at 1 SPS.  A new :class:`Signal`
+          (``sampling_rate = symbol_rate``) when ``samples`` was a
+          :class:`Signal`.
         * ``weights`` - final tap-weight tensor, shape ``(num_taps,)`` SISO
           or ``(C, C, num_taps)`` MIMO.
         * ``error`` - complex error signal ``e[n] = d[n] - y[n]``, same
@@ -1300,6 +1357,48 @@ def rls(
     ``w_init`` warms-start the tap weights; the inverse correlation matrix ``P``
     always begins at ``(1/delta) · I`` regardless of ``w_init``.
     """
+    x, sig = unwrap_signal(samples)
+    if sig is not None:
+        result = rls(
+            x,
+            training_symbols=training_symbols,
+            num_taps=num_taps,
+            sps=sps if sps is not None else int(sig.sps),
+            forgetting_factor=forgetting_factor,
+            delta=delta,
+            leakage=leakage,
+            modulation=modulation,
+            order=order,
+            unipolar=unipolar,
+            store_weights=store_weights,
+            device=device,
+            center_tap=center_tap,
+            backend=backend,
+            w_init=w_init,
+            pmf=pmf,
+            cpr_type=cpr_type,
+            cpr_pll_bandwidth=cpr_pll_bandwidth,
+            cpr_pll_mu=cpr_pll_mu,
+            cpr_pll_beta=cpr_pll_beta,
+            cpr_bps_test_phases=cpr_bps_test_phases,
+            cpr_bps_block_size=cpr_bps_block_size,
+            cpr_joint_channels=cpr_joint_channels,
+            cpr_cycle_slip_correction=cpr_cycle_slip_correction,
+            cpr_cycle_slip_history=cpr_cycle_slip_history,
+            cpr_cycle_slip_threshold=cpr_cycle_slip_threshold,
+            debug_plot=debug_plot,
+            plot_smoothing=plot_smoothing,
+            cpr_state=cpr_state,
+            input_norm_factor=input_norm_factor,
+            samples_prefix=samples_prefix,
+            pad_mode=pad_mode,
+        )
+        result.y_hat = rewrap_signal(sig, result.y_hat, sampling_rate=sig.symbol_rate)
+        return result
+
+    if sps is None:
+        sps = 1
+
     if sps > 1:
         logger.warning(
             "RLS is mathematically ill-conditioned for fractionally-spaced "
@@ -1871,9 +1970,9 @@ def rls(
 
 
 def cma(
-    samples: ArrayType,
+    samples: ArrayType | Signal,
     num_taps: int = 21,
-    sps: int = 2,
+    sps: int | None = None,
     step_size: float = 1e-3,
     modulation: str | None = None,
     order: int | None = None,
@@ -1968,16 +2067,21 @@ def cma(
 
     Parameters
     ----------
-    samples : array_like
+    samples : array_like or Signal
         Input signal samples. Shape: ``(N_samples,)`` or ``(C, N_samples)``.
         Typically at 2 samples/symbol for fractionally-spaced equalization.
+        A :class:`Signal` returns an :class:`EqualizerResult` whose ``y_hat``
+        is a new :class:`Signal` at the symbol rate (``sampling_rate =
+        symbol_rate``); ``sps`` defaults to the signal's ``sps`` when not
+        given explicitly.
     num_taps : int, default 21
         Number of equalizer taps per FIR filter.
-    sps : int, default 2
+    sps : int, optional, default 2
         Samples per symbol at the input.  Use ``sps=2`` (T/2-spaced, default)
         for the standard first-stage blind equalization.  ``sps=1`` enables
         symbol-spaced CMA, useful when input is already decimated but phase
-        ambiguity resolution is still needed.
+        ambiguity resolution is still needed.  Defaults to the signal's
+        ``sps`` for :class:`Signal` input.
     step_size : float, default 1e-3
         CMA step size (mu). Unlike LMS, CMA's cost surface is non-convex and
         higher-order, so input-power normalization distorts the gradient geometry.
@@ -2055,7 +2159,9 @@ def cma(
     -------
     EqualizerResult
         Equalized symbols, final weights, CMA error history, and optionally
-        weight trajectory.  ``input_norm_factor`` field is populated.
+        weight trajectory.  ``input_norm_factor`` field is populated.  When
+        ``samples`` is a :class:`Signal`, ``y_hat`` is a new :class:`Signal`
+        at the symbol rate (``sampling_rate = symbol_rate``).
 
     Warnings
     --------
@@ -2065,6 +2171,39 @@ def cma(
     ``device='cpu'`` for typical SISO sequences, or ``backend='numba'`` for
     CPU-optimal throughput.
     """
+    x, sig = unwrap_signal(samples)
+    if sig is not None:
+        result = cma(
+            x,
+            num_taps=num_taps,
+            sps=sps if sps is not None else int(sig.sps),
+            step_size=step_size,
+            modulation=modulation,
+            order=order,
+            unipolar=unipolar,
+            store_weights=store_weights,
+            device=device,
+            center_tap=center_tap,
+            backend=backend,
+            w_init=w_init,
+            pilot_ref=pilot_ref,
+            pilot_mask=pilot_mask,
+            pilot_gain_db=pilot_gain_db,
+            pmf=pmf,
+            debug_plot=debug_plot,
+            plot_smoothing=plot_smoothing,
+            input_norm_factor=input_norm_factor,
+            samples_prefix=samples_prefix,
+            pad_mode=pad_mode,
+            update_mode=update_mode,
+            block_len=block_len,
+        )
+        result.y_hat = rewrap_signal(sig, result.y_hat, sampling_rate=sig.symbol_rate)
+        return result
+
+    if sps is None:
+        sps = 2
+
     use_pilots = pilot_ref is not None and pilot_mask is not None
     _validate_block_mode(update_mode, block_len, backend, store_weights=store_weights)
     logger.info(
@@ -2349,9 +2488,9 @@ def cma(
 
 
 def rde(
-    samples: ArrayType,
+    samples: ArrayType | Signal,
     num_taps: int = 21,
-    sps: int = 2,
+    sps: int | None = None,
     step_size: float = 1e-3,
     modulation: str | None = None,
     order: int | None = None,
@@ -2431,14 +2570,19 @@ def rde(
 
     Parameters
     ----------
-    samples : array_like
+    samples : array_like or Signal
         Input signal samples. Shape: ``(N_samples,)`` or ``(C, N_samples)``.
         Typically at 2 samples/symbol for fractionally-spaced equalization.
+        A :class:`Signal` returns an :class:`EqualizerResult` whose ``y_hat``
+        is a new :class:`Signal` at the symbol rate (``sampling_rate =
+        symbol_rate``); ``sps`` defaults to the signal's ``sps`` when not
+        given explicitly.
     num_taps : int, default 21
         Number of equalizer taps per FIR filter.
-    sps : int, default 2
+    sps : int, optional, default 2
         Samples per symbol at the input.  Use ``sps=2`` (T/2-spaced, default)
-        for standard blind equalization.  ``sps=1`` is accepted.
+        for standard blind equalization.  ``sps=1`` is accepted.  Defaults
+        to the signal's ``sps`` for :class:`Signal` input.
     step_size : float, default 1e-3
         RDE step size (mu). Same non-convex gradient geometry as CMA; use a
         fixed step in the range 1e-5 to 1e-3 for stability.
@@ -2512,7 +2656,9 @@ def rde(
     -------
     EqualizerResult
         Equalized symbols, final weights, RDE error history, and optionally
-        weight trajectory.  ``input_norm_factor`` field is populated.
+        weight trajectory.  ``input_norm_factor`` field is populated.  When
+        ``samples`` is a :class:`Signal`, ``y_hat`` is a new :class:`Signal`
+        at the symbol rate (``sampling_rate = symbol_rate``).
 
     Notes
     -----
@@ -2534,6 +2680,39 @@ def rde(
     Use ``device='cpu'`` for typical SISO sequences, or ``backend='numba'``
     for CPU-optimal throughput.
     """
+    x, sig = unwrap_signal(samples)
+    if sig is not None:
+        result = rde(
+            x,
+            num_taps=num_taps,
+            sps=sps if sps is not None else int(sig.sps),
+            step_size=step_size,
+            modulation=modulation,
+            order=order,
+            unipolar=unipolar,
+            store_weights=store_weights,
+            device=device,
+            center_tap=center_tap,
+            backend=backend,
+            w_init=w_init,
+            pilot_ref=pilot_ref,
+            pilot_mask=pilot_mask,
+            pilot_gain_db=pilot_gain_db,
+            pmf=pmf,
+            debug_plot=debug_plot,
+            plot_smoothing=plot_smoothing,
+            input_norm_factor=input_norm_factor,
+            samples_prefix=samples_prefix,
+            pad_mode=pad_mode,
+            update_mode=update_mode,
+            block_len=block_len,
+        )
+        result.y_hat = rewrap_signal(sig, result.y_hat, sampling_rate=sig.symbol_rate)
+        return result
+
+    if sps is None:
+        sps = 2
+
     use_pilots = pilot_ref is not None and pilot_mask is not None
     _validate_block_mode(update_mode, block_len, backend, store_weights=store_weights)
     logger.info(

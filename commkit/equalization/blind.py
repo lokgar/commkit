@@ -7,16 +7,17 @@ from typing import Any
 import numpy as np
 
 from ..backend import ArrayType
-from ..helpers import broadcast_channels
+from ..core.signal import Signal
+from ..helpers import broadcast_channels, rewrap_signal, unwrap_signal
 from ._block import _block_fdaf_blind
 from ._common import _godard_radius, _rde_ring_radii
 from .result import EqualizerResult
 
 
 def block_cma(
-    samples: ArrayType,
+    samples: ArrayType | Signal,
     num_taps: int = 21,
-    sps: int = 2,
+    sps: int | None = None,
     step_size: float = 2e-4,
     block_size: int = 256,
     modulation: str | None = None,
@@ -61,8 +62,39 @@ def block_cma(
     launches into a single graph launch (a large win at small ``block_size``);
     it is ignored on CPU and silently disabled for the pilot-aided path.
     Returns an :class:`EqualizerResult` with ``y_hat``, ``weights``, ``error``
-    on the input's device.
+    on the input's device.  A :class:`Signal` returns ``y_hat`` as a new
+    :class:`Signal` at the symbol rate (``sampling_rate = symbol_rate``);
+    ``sps`` defaults to the signal's ``sps`` when not given explicitly.
     """
+    x, sig = unwrap_signal(samples)
+    if sig is not None:
+        result = block_cma(
+            x,
+            num_taps=num_taps,
+            sps=sps if sps is not None else int(sig.sps),
+            step_size=step_size,
+            block_size=block_size,
+            modulation=modulation,
+            order=order,
+            unipolar=unipolar,
+            w_init=w_init,
+            pilot_ref=pilot_ref,
+            pilot_mask=pilot_mask,
+            pilot_gain_db=pilot_gain_db,
+            pmf=pmf,
+            input_norm_factor=input_norm_factor,
+            samples_prefix=samples_prefix,
+            pad_mode=pad_mode,
+            cuda_graph=cuda_graph,
+            debug_plot=debug_plot,
+            plot_smoothing=plot_smoothing,
+        )
+        result.y_hat = rewrap_signal(sig, result.y_hat, sampling_rate=sig.symbol_rate)
+        return result
+
+    if sps is None:
+        sps = 2
+
     r2, c_ps = _godard_radius(modulation, order, unipolar, pmf)
     return _block_fdaf_blind(
         "cma",
@@ -89,9 +121,9 @@ def block_cma(
 
 
 def block_rde(
-    samples: ArrayType,
+    samples: ArrayType | Signal,
     num_taps: int = 21,
-    sps: int = 2,
+    sps: int | None = None,
     step_size: float = 2e-4,
     block_size: int = 256,
     modulation: str | None = None,
@@ -128,8 +160,40 @@ def block_rde(
     per-block kernel launches into a single graph launch (a large win at small
     ``block_size``); it is ignored on CPU and silently disabled for the
     pilot-aided path.  Returns an :class:`EqualizerResult` with ``y_hat``,
-    ``weights``, ``error`` on the input's device.
+    ``weights``, ``error`` on the input's device.  A :class:`Signal` returns
+    ``y_hat`` as a new :class:`Signal` at the symbol rate (``sampling_rate =
+    symbol_rate``); ``sps`` defaults to the signal's ``sps`` when not given
+    explicitly.
     """
+    x, sig = unwrap_signal(samples)
+    if sig is not None:
+        result = block_rde(
+            x,
+            num_taps=num_taps,
+            sps=sps if sps is not None else int(sig.sps),
+            step_size=step_size,
+            block_size=block_size,
+            modulation=modulation,
+            order=order,
+            unipolar=unipolar,
+            w_init=w_init,
+            pilot_ref=pilot_ref,
+            pilot_mask=pilot_mask,
+            pilot_gain_db=pilot_gain_db,
+            pmf=pmf,
+            input_norm_factor=input_norm_factor,
+            samples_prefix=samples_prefix,
+            pad_mode=pad_mode,
+            cuda_graph=cuda_graph,
+            debug_plot=debug_plot,
+            plot_smoothing=plot_smoothing,
+        )
+        result.y_hat = rewrap_signal(sig, result.y_hat, sampling_rate=sig.symbol_rate)
+        return result
+
+    if sps is None:
+        sps = 2
+
     radii_np, c_ps = _rde_ring_radii(modulation, order, unipolar, pmf)
     return _block_fdaf_blind(
         "rde",

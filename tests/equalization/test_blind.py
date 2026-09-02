@@ -9,6 +9,7 @@ import numpy as np
 import pytest
 
 from commkit import generate_psk, generate_qam
+from commkit.core import Signal
 from commkit.equalization import (
     block_cma,
     block_lms,
@@ -151,6 +152,23 @@ class TestBlockCMA:
         mse_db = 10 * np.log10(float(np.mean(np.abs(e) ** 2)) + 1e-30)
         assert mse_db < -10.0, f"PA block_cma did not resolve phase: {mse_db:.1f} dB"
 
+    def test_signal_input(self, backend_device, xp, xpt):
+        """Signal input: sps is taken from the signal, y_hat becomes a Signal
+        at the symbol rate."""
+        channel = np.array([0.06, 1.0, -0.25, 0.08], np.complex64)
+        _, rx = _isi_signal(xp, "psk", 4, 4000, 5, channel)
+        sig = Signal(samples=rx, sampling_rate=2e6, symbol_rate=1e6)
+        kw = dict(
+            modulation="psk", order=4, num_taps=15, step_size=1e-3, block_size=256
+        )
+
+        result_sig = block_cma(sig, **kw)
+        result_arr = block_cma(rx, sps=2, **kw)
+
+        assert isinstance(result_sig.y_hat, Signal)
+        assert result_sig.y_hat.sampling_rate == 1e6
+        xpt.assert_allclose(result_sig.y_hat.samples, result_arr.y_hat)
+
 
 class TestBlockRDE:
     def test_blind_converges_16qam(self, backend_device, xp):
@@ -182,6 +200,23 @@ class TestBlockRDE:
             block_size=256,
         )
         assert r.y_hat.shape[-1] == n_odd
+
+    def test_signal_input(self, backend_device, xp, xpt):
+        """Signal input: sps is taken from the signal, y_hat becomes a Signal
+        at the symbol rate."""
+        channel = np.array([0.06, 1.0, -0.25, 0.08], np.complex64)
+        _, rx = _isi_signal(xp, "qam", 16, 4000, 5, channel)
+        sig = Signal(samples=rx, sampling_rate=2e6, symbol_rate=1e6)
+        kw = dict(
+            modulation="qam", order=16, num_taps=15, step_size=1e-4, block_size=256
+        )
+
+        result_sig = block_rde(sig, **kw)
+        result_arr = block_rde(rx, sps=2, **kw)
+
+        assert isinstance(result_sig.y_hat, Signal)
+        assert result_sig.y_hat.sampling_rate == 1e6
+        xpt.assert_allclose(result_sig.y_hat.samples, result_arr.y_hat)
 
 
 class TestBlockBlindMIMO:

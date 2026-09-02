@@ -8,7 +8,8 @@ from typing import Any
 import numpy as np
 
 from ..backend import ArrayType, _get_jax, dispatch, to_device, to_jax
-from ..helpers import as_2d
+from ..core.signal import Signal
+from ..helpers import as_2d, rewrap_signal, unwrap_signal
 from ..logger import logger
 from ._common import (
     _build_padded_samples,
@@ -424,10 +425,10 @@ def _run_block_equalizer(
 
 
 def block_lms(
-    samples: ArrayType,
+    samples: ArrayType | Signal,
     training_symbols: ArrayType | None = None,
     num_taps: int = 21,
-    sps: int = 2,
+    sps: int | None = None,
     step_size: float = 2e-4,
     block_size: int = 256,
     modulation: str | None = None,
@@ -524,17 +525,22 @@ def block_lms(
 
     Parameters
     ----------
-    samples : array_like
+    samples : array_like or Signal
         Input signal samples.  Shape: ``(N_samples,)`` for SISO or
         ``(C, N_samples)`` for MIMO butterfly equalization.
         Typically at 2 samples/symbol for fractionally-spaced equalization.
+        A :class:`Signal` returns an :class:`EqualizerResult` whose ``y_hat``
+        is a new :class:`Signal` at the symbol rate (``sampling_rate =
+        symbol_rate``); ``sps`` defaults to the signal's ``sps`` when not
+        given explicitly.
     training_symbols : array_like, optional
         Known transmitted symbols at 1 SPS.
         Shape: ``(N_train,)`` for SISO or ``(C, N_train)`` for MIMO.
     num_taps : int, default 21
         Number of taps per FIR filter (tap count in samples).
-    sps : int, default 2
-        Samples per symbol.  ``sps=2`` (T/2-spaced) is the default.
+    sps : int, optional, default 2
+        Samples per symbol.  ``sps=2`` (T/2-spaced) is the default.  Defaults
+        to the signal's ``sps`` for :class:`Signal` input.
     step_size : float, default 2e-4
         LMS step size μ, on the **same scale as** ``lms``.  Use the same
         value you would use for ``lms``: because the block update is the
@@ -662,6 +668,9 @@ def block_lms(
         ``phase_trajectory`` is populated when ``cpr_type='bps'``; shape
         ``(N_sym,)`` SISO or ``(C, N_sym)`` MIMO, one estimate per symbol.
 
+        When ``samples`` is a :class:`Signal`, ``y_hat`` is a new
+        :class:`Signal` at the symbol rate (``sampling_rate = symbol_rate``).
+
     Warnings
     --------
     **GPU throughput - use large block_size:** On GPU (CuPy) each Python
@@ -696,6 +705,42 @@ def block_lms(
     do **not** routinely divide by ``block_size`` (that under-adapts the
     filter by the same factor).
     """
+    x, sig = unwrap_signal(samples)
+    if sig is not None:
+        result = block_lms(
+            x,
+            training_symbols=training_symbols,
+            num_taps=num_taps,
+            sps=sps if sps is not None else int(sig.sps),
+            step_size=step_size,
+            block_size=block_size,
+            modulation=modulation,
+            order=order,
+            unipolar=unipolar,
+            store_weights=store_weights,
+            w_init=w_init,
+            pmf=pmf,
+            cpr_type=cpr_type,
+            cpr_bps_test_phases=cpr_bps_test_phases,
+            cpr_bps_block_size=cpr_bps_block_size,
+            cpr_joint_channels=cpr_joint_channels,
+            cpr_cycle_slip_correction=cpr_cycle_slip_correction,
+            cpr_cycle_slip_history=cpr_cycle_slip_history,
+            cpr_cycle_slip_threshold=cpr_cycle_slip_threshold,
+            debug_plot=debug_plot,
+            plot_smoothing=plot_smoothing,
+            cpr_state=cpr_state,
+            input_norm_factor=input_norm_factor,
+            samples_prefix=samples_prefix,
+            pad_mode=pad_mode,
+            cuda_graph=cuda_graph,
+        )
+        result.y_hat = rewrap_signal(sig, result.y_hat, sampling_rate=sig.symbol_rate)
+        return result
+
+    if sps is None:
+        sps = 2
+
     if cpr_type is not None and cpr_type != "bps":
         raise ValueError(
             f"block_lms only supports cpr_type='bps' or None. Got {cpr_type!r}. "
