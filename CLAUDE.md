@@ -299,6 +299,57 @@ Note these are plain indexing/broadcast helpers, valid on NumPy, CuPy **and**
 JAX arrays - unlike `dispatch`, which recognizes NumPy/CuPy only and will
 silently pull a JAX array to the host.
 
+### Signal-Awareness
+
+Any new DSP function whose primary argument is genuinely **signal-representable
+data** (raw IQ samples, or a field a `Signal` actually carries, like
+`resolved_symbols`) should accept a `Signal` alongside a raw array, transparently:
+array in → array out, `Signal` in → `Signal` out.  Use the same idiom
+everywhere, defined once in `commkit/helpers.py`:
+
+```python
+from commkit.helpers import unwrap_signal, rewrap_signal
+
+def fir_filter(samples, taps, axis=-1):
+    x, sig = unwrap_signal(samples)          # x: array; sig: Signal | None
+    if sig is not None:
+        return rewrap_signal(sig, fir_filter(x, taps, axis=-1))
+    ... existing array-only body, unchanged ...
+```
+
+* `unwrap_signal(x, *, field="samples")` - returns `(array, signal_or_None)`.
+  Most functions read `.samples`; a few (hard-decision demapping, phase-rotation
+  correction on `resolved_symbols`) pass `field=` to read a different attribute.
+* `rewrap_signal(sig, array, **metadata)` - `sig=None` passes `array` through
+  unchanged; otherwise returns `sig.copy()` with `.samples = array` and any
+  `**metadata` kwargs applied via `setattr` (e.g. `sampling_rate=sig.symbol_rate`
+  after decimating to symbol rate).
+
+**Metadata rules for functions that change rate or domain:**
+
+| Situation | What to pass `rewrap_signal` |
+| --- | --- |
+| Shape/rate unchanged (most `apply_*`/`correct_*`) | `rewrap_signal(sig, result)` - no metadata |
+| Decimates to one sample/symbol (equalizers) | `sampling_rate=sig.symbol_rate` |
+| Upsamples by an integer factor | `sampling_rate=sig.sampling_rate * factor` |
+| Resamples to an explicit target rate | `sampling_rate=<the target rate param>` |
+| Output field differs from the input field (`resolve_symbols`, `demap_symbols_hard`) | Skip `rewrap_signal`; `sig.copy()` + `setattr` by hand - the one sanctioned exception |
+| Returns a scalar/dict/tuple in a different domain (frequency/tau/PSD bins, phase or frequency *estimates*) | `unwrap_signal` only, on the input - never wrap the output |
+
+**Not every array parameter is signal-representable.** A function that
+consumes a *derived* quantity - a phase or frequency trajectory, a
+correlation array, PSD bins, an `EqualizerResult`, filter taps - one or more
+stages downstream of the original capture has no sound field to unwrap from;
+forcing Signal-awareness there is backwards, since there is no `Signal` yet
+(or any more) to preserve metadata from.  `smooth_phase_wiener`,
+`estimate_fractional_delay`, `allan_deviation`, and every `plot_*` function
+in `plotting/{analysis,equalizer,sync}.py` are examples: they take arrays a
+`Signal` would never hold as `.samples`, so they stay plain-array functions.
+Likewise, a function whose only job is to build the data a `Signal` gets
+constructed *from* (`filtering.shape_pulse`, `multirate.expand`,
+`equalization.build_pilot_ref`) is a synthesis primitive, not a transform on
+existing `Signal` data - same exclusion as `generate_*`.
+
 ### Naming Conventions
 
 * **Verb prefixes for processing functions.** Recovery/correction routines follow a
