@@ -105,6 +105,7 @@ def recover_carrier_phase_bps(
     """
     from ..helpers import normalize
     from ..mapping import constellation_power, gray_constellation
+    from ..mapping.gray import square_qam_slicer_params
 
     x, sig = unwrap_signal(symbols)
     if sig is not None:
@@ -227,13 +228,10 @@ def recover_carrier_phase_bps(
     # For square QAM (order a perfect square): the nearest constellation point
     # can be found in O(1) per symbol via per-component rounding, eliminating
     # the (CHUNK, B, M_const) distance tensor entirely.
-    side = int(order**0.5)
-    is_sq_qam = ("qam" in modulation.lower()) and (side * side == order)
-    if is_sq_qam:
-        # Sorted unique real levels of the constellation (shape: (side,))
-        levels = xp.sort(xp.unique(const_xp.real))
-        d_grid = float(levels[1] - levels[0])  # uniform grid spacing
-        lev_min = float(levels[0])
+    side, lev_min_f32, d_grid_f32 = square_qam_slicer_params(const_np)
+    is_sq_qam = side > 0
+    lev_min = float(lev_min_f32)
+    d_grid = float(d_grid_f32)
 
     float_dtype = xp.float32 if symbols.dtype == xp.complex64 else xp.float64
 
@@ -306,8 +304,8 @@ def recover_carrier_phase_bps(
                         0,
                         side - 1,
                     )
-                    r_near = levels[r_idx]  # (CHUNK, B)
-                    i_near = levels[i_idx]  # (CHUNK, B)
+                    r_near = lev_min + r_idx.astype(float_dtype) * d_grid  # (CHUNK, B)
+                    i_near = lev_min + i_idx.astype(float_dtype) * d_grid  # (CHUNK, B)
                     chunk_min_d = (
                         (x_rot.real - r_near) ** 2 + (x_rot.imag - i_near) ** 2
                     ).astype(float_dtype)

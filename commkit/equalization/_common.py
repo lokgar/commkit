@@ -10,27 +10,6 @@ from ..logger import logger
 from .result import CPRState, EqualizerResult
 
 
-def _sq_qam_slicer_params(constellation_np):
-    """Return (sq_side, lev_min_f32, d_grid_f32) for O(1) square-QAM slicing.
-
-    For a square M-QAM constellation the nearest symbol can be found by
-    independently snapping the real and imaginary components to the nearest
-    level - no O(M) search required.  Returns sq_side=0 for non-square
-    constellations (PSK, PAM, shaped QAM) to indicate the O(M) fallback
-    should be used.
-    """
-    M = len(constellation_np)
-    sq_side = int(M**0.5)
-    if sq_side * sq_side != M:
-        return 0, np.float32(0.0), np.float32(1.0)
-    levels = np.unique(np.round(constellation_np.real, 6))
-    if len(levels) != sq_side:
-        return 0, np.float32(0.0), np.float32(1.0)
-    lev_min = np.float32(levels[0])
-    d_grid = np.float32(levels[1] - levels[0]) if sq_side > 1 else np.float32(1.0)
-    return sq_side, lev_min, d_grid
-
-
 def _cpr_state_to_jax_inits(state: CPRState, num_ch: int, KB: int, H: int):
     """Extract CPR carry init arrays from a CPRState for JAX warm-start.
 

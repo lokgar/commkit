@@ -106,3 +106,51 @@ def test_qam_cross_fallback():
 
     res = _gray_qam_cross(8)
     assert res.shape == (8,)
+
+
+def test_square_qam_slicer_params_valid():
+    """16-QAM is square-sliceable: side=4, uniform lev_min/d_grid."""
+    from commkit.mapping.gray import square_qam_slicer_params
+
+    const = mapping.gray_constellation("qam", 16)
+    side, lev_min, d_grid = square_qam_slicer_params(const)
+    assert side == 4
+    levels = np.unique(np.round(const.real, 6))
+    assert np.isclose(lev_min, levels[0])
+    assert np.isclose(d_grid, levels[1] - levels[0])
+
+
+def test_square_qam_slicer_params_non_square():
+    """PSK / cross-QAM constellations fall back to side=0 (O(M) search)."""
+    from commkit.mapping.gray import square_qam_slicer_params
+
+    const_psk = mapping.gray_constellation("psk", 8)
+    side, _, _ = square_qam_slicer_params(const_psk)
+    assert side == 0
+
+    const_cross = mapping.gray_constellation("qam", 32)
+    side, _, _ = square_qam_slicer_params(const_cross)
+    assert side == 0
+
+
+def test_square_qam_slicer_params_non_uniform_grid():
+    """A hand-built 16-point constellation whose real axis collapses to
+    fewer than sqrt(M) unique levels must be rejected (side=0), even
+    though 4x4=16 matches a square-QAM order.
+
+    Regression test: bps.py and pll.py used to re-derive these parameters
+    inline without this "levels grid actually matches sqrt(M)" guard,
+    silently misclassifying such a grid as sliceable square QAM.
+    """
+    from commkit.mapping.gray import square_qam_slicer_params
+
+    # Degenerate I levels: only 3 unique values for a 4x4=16-point grid.
+    i_levels = np.array([-3.0, -1.0, 1.0, 1.0])
+    q_levels = np.array([-3.0, -1.0, 1.0, 3.0])
+    const = (i_levels[:, None] + 1j * q_levels[None, :]).ravel()
+    assert len(const) == 16
+
+    side, lev_min, d_grid = square_qam_slicer_params(const)
+    assert side == 0
+    assert lev_min == np.float32(0.0)
+    assert d_grid == np.float32(1.0)

@@ -10,6 +10,7 @@ from ..backend import ArrayType, _get_jax, dispatch, from_jax, to_device, to_jax
 from ..core.signal import Signal
 from ..helpers import resolve_pll_gains, restore_1d, rewrap_signal, unwrap_signal
 from ..logger import logger
+from ..mapping.gray import square_qam_slicer_params
 from ._block import (
     _build_slicer_constellation,
     _prep_blind_block_inputs,
@@ -25,7 +26,6 @@ from ._common import (
     _normalize_inputs,
     _prepare_training_jax,
     _prepare_training_numpy,
-    _sq_qam_slicer_params,
     _unpack_result_jax,
     _unpack_result_numpy,
     _validate_sps,
@@ -588,7 +588,7 @@ def lms(
         train_full, n_train_aligned = _prepare_training_numpy(
             training_np, num_ch, n_sym
         )
-        _sq_side, _sq_lev_min, _sq_d_grid = _sq_qam_slicer_params(constellation_np)
+        _sq_side, _sq_lev_min, _sq_d_grid = square_qam_slicer_params(constellation_np)
         if w_init is not None:
             w_arr = _validate_w_init(
                 np.ascontiguousarray(to_device(w_init, "cpu"), dtype=np.complex64),
@@ -671,7 +671,7 @@ def lms(
             num_ch,
             n_sym,
         )
-        _sq_side, _sq_lev_min, _sq_d_grid = _sq_qam_slicer_params(constellation_np)
+        _sq_side, _sq_lev_min, _sq_d_grid = square_qam_slicer_params(constellation_np)
         if w_init is not None:
             w_arr = np.ascontiguousarray(to_device(w_init, "cpu"), dtype=np.complex64)
             w_arr = _validate_w_init(w_arr, num_ch, num_taps)
@@ -915,7 +915,7 @@ def lms(
     n_train_jax = to_jax(jnp.int32(n_train_aligned), device=platform)
 
     if cpr_type is None:
-        _sq_side_j, _sq_lev_min_j, _sq_d_grid_j = _sq_qam_slicer_params(
+        _sq_side_j, _sq_lev_min_j, _sq_d_grid_j = square_qam_slicer_params(
             constellation_np
         )
         scan_fn = _get_jax_lms(
@@ -966,7 +966,7 @@ def lms(
         bps_phases_neg_np = np.exp(-1j * bps_angles_np).astype(np.complex64)
         bps_pn_jax = to_jax(bps_phases_neg_np, device=platform)
         bps_ang_jax = to_jax(bps_angles_np, device=platform)
-        _sq_side_j, _sq_lev_min_j, _sq_d_grid_j = _sq_qam_slicer_params(
+        _sq_side_j, _sq_lev_min_j, _sq_d_grid_j = square_qam_slicer_params(
             constellation_np
         )
         scan_fn = _get_jax_lms_cpr(
@@ -1544,7 +1544,7 @@ def rls(
             num_ch,
             n_sym,
         )
-        _sq_side, _sq_lev_min, _sq_d_grid = _sq_qam_slicer_params(constellation_np)
+        _sq_side, _sq_lev_min, _sq_d_grid = square_qam_slicer_params(constellation_np)
         if w_init is not None:
             w_arr = np.ascontiguousarray(to_device(w_init, "cpu"), dtype=np.complex64)
             w_arr = _validate_w_init(w_arr, num_ch, num_taps)
@@ -1829,7 +1829,7 @@ def rls(
     n_update_halt_jax = to_jax(jnp.int32(n_update_halt), device=platform)
 
     if cpr_type is None:
-        _sq_side_j, _sq_lev_min_j, _sq_d_grid_j = _sq_qam_slicer_params(
+        _sq_side_j, _sq_lev_min_j, _sq_d_grid_j = square_qam_slicer_params(
             constellation_np
         )
         scan_fn = _get_jax_rls(
@@ -1877,7 +1877,7 @@ def rls(
         bps_phases_neg_np = np.exp(-1j * bps_angles_np).astype(np.complex64)
         bps_pn_jax = to_jax(bps_phases_neg_np, device=platform)
         bps_ang_jax = to_jax(bps_angles_np, device=platform)
-        _sq_side_j, _sq_lev_min_j, _sq_d_grid_j = _sq_qam_slicer_params(
+        _sq_side_j, _sq_lev_min_j, _sq_d_grid_j = square_qam_slicer_params(
             constellation_np
         )
         scan_fn = _get_jax_rls_cpr(

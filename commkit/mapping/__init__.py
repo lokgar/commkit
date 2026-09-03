@@ -20,7 +20,12 @@ Note: codes and constellations are generated using NumPy (host-side).
 
 from .bits import demap_symbols_hard, map_bits
 from .constellation import Constellation
-from .gray import gray_code, gray_constellation, gray_to_binary
+from .gray import (
+    gray_code,
+    gray_constellation,
+    gray_to_binary,
+    square_qam_slicer_params,
+)
 from .llr import compute_llr
 from .shaping import (
     constellation_power,
@@ -43,4 +48,5 @@ __all__ = [
     "optimal_nu",
     "ps_entropy",
     "sample_ps_symbols",
+    "square_qam_slicer_params",
 ]

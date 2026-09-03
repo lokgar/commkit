@@ -406,20 +406,16 @@ def recover_carrier_phase_pll(
     # Square-QAM O(1) decision parameters.  For square QAM (order a perfect
     # square, e.g. 4/16/64/256/1024) the constellation is a uniform grid and
     # the nearest point can be found by rounding to the closest axis level.
-    import math as _math
+    from ..mapping.gray import square_qam_slicer_params
 
-    _sq_root = _math.isqrt(order)
-    _is_sq_qam = ("qam" in modulation.lower()) and (_sq_root * _sq_root == order)
+    _side, _lev_min_f32, _d_grid_f32 = square_qam_slicer_params(const_np)
+    _is_sq_qam = _side > 0
+    _lev_min = float(_lev_min_f32)
+    _d_grid = float(_d_grid_f32)
     if _is_sq_qam:
-        _levels = np.unique(const_np.real).astype(np.float64)
-        _d_grid = float(_levels[1] - _levels[0]) if len(_levels) > 1 else 1.0
-        _lev_min = float(_levels[0])
-        _side = _sq_root
+        _levels = (_lev_min + np.arange(_side) * _d_grid).astype(np.float64)
     else:
         _levels = np.empty(0, dtype=np.float64)
-        _d_grid = 1.0
-        _lev_min = 0.0
-        _side = 0
 
     # Move to CPU for sequential processing
     if xp is not np:

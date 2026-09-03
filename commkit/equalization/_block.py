@@ -11,12 +11,12 @@ from ..backend import ArrayType, _get_jax, dispatch, to_device, to_jax
 from ..core.signal import Signal
 from ..helpers import as_2d, rewrap_signal, unwrap_signal
 from ..logger import logger
+from ..mapping.gray import square_qam_slicer_params
 from ._common import (
     _build_padded_samples,
     _cpr_symmetry,
     _init_butterfly_weights_numpy,
     _normalize_inputs,
-    _sq_qam_slicer_params,
     _unpack_result_jax,
     _unpack_result_numpy,
     _validate_sps,
@@ -814,7 +814,7 @@ def block_lms(
             constellation_np = (constellation_np / np.sqrt(_e_ps)).astype(np.complex64)
 
     constellation = xp.asarray(constellation_np)  # (M,) on device
-    _sq_side, _sq_lev_min_f, _sq_d_grid_f = _sq_qam_slicer_params(constellation_np)
+    _sq_side, _sq_lev_min_f, _sq_d_grid_f = square_qam_slicer_params(constellation_np)
     _sq_lev_min = float(_sq_lev_min_f)
     _sq_d_grid = float(_sq_d_grid_f)
     _sq_m1 = _sq_side - 1  # clip upper bound (0 when sq_side==0 - never used)
