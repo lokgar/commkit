@@ -8,7 +8,7 @@ import math
 
 from ..backend import ArrayType, dispatch
 from ..core.signal import Signal
-from ..helpers import as_2d, restore_1d, rewrap_signal, unwrap_signal
+from ..helpers import as_2d, db_to_linear, restore_1d, rewrap_signal, unwrap_signal
 from ..logger import logger
 
 __all__ = [
@@ -72,7 +72,7 @@ def apply_iq_imbalance(
 
     samples, xp, _ = dispatch(samples)
 
-    g = 10.0 ** (amplitude_imbalance_db / 20.0)
+    g = db_to_linear(amplitude_imbalance_db, power=False)
     phi = math.radians(phase_imbalance_deg)
 
     # Mixing coefficients: r = K1*s + K2*conj(s)

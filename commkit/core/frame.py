@@ -684,7 +684,9 @@ class SingleCarrierFrame(BaseModel):
                 assert pilot_symbols is not None
                 # Apply pilot boosting/gain (dB to linear)
                 if self.pilot_gain_db != 0.0:
-                    pilot_symbols = pilot_symbols * (10 ** (self.pilot_gain_db / 20))
+                    pilot_symbols = pilot_symbols * helpers.db_to_linear(
+                        self.pilot_gain_db, power=False
+                    )
 
                 body[:, mask] = pilot_symbols
 
@@ -696,7 +698,9 @@ class SingleCarrierFrame(BaseModel):
                 assert pilot_symbols is not None
                 # Apply pilot boosting/gain (dB to linear)
                 if self.pilot_gain_db != 0.0:
-                    pilot_symbols = pilot_symbols * (10 ** (self.pilot_gain_db / 20))
+                    pilot_symbols = pilot_symbols * helpers.db_to_linear(
+                        self.pilot_gain_db, power=False
+                    )
 
                 body[mask] = pilot_symbols
             body[~mask] = self.payload_symbols

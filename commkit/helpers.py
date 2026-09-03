@@ -246,6 +246,67 @@ def normalize(
 
 
 # ---------------------------------------------------------------------------
+# dB <-> linear ratio conversion
+# ---------------------------------------------------------------------------
+
+
+def db_to_linear(db: ArrayType | float, *, power: bool = True) -> ArrayType | float:
+    """Convert decibels to a linear ratio.
+
+    ``power=True`` (default) uses the power/energy convention
+    (``10**(db/10)``) - e.g. Es/N0, SNR.  ``power=False`` uses the
+    amplitude/field convention (``10**(db/20)``) - e.g. an I/Q gain
+    imbalance or a pilot-tone gain applied directly to complex amplitude
+    samples.  Picking the wrong convention silently mis-scales the result
+    by a factor of 2 in the exponent, so verify which quantity a given
+    ``_db`` parameter actually represents before choosing.
+
+    Parameters
+    ----------
+    db : array_like or float
+        Value(s) in decibels.
+    power : bool, default True
+        Selects the 10x (power) or 20x (amplitude) convention.
+
+    Returns
+    -------
+    array_like or float
+        The linear ratio, same type as ``db``.
+    """
+    exponent = 10.0 if power else 20.0
+    return 10.0 ** (db / exponent)
+
+
+def linear_to_db(x: ArrayType, *, power: bool = True) -> ArrayType:
+    """Convert a linear ratio to decibels (inverse of :func:`db_to_linear`).
+
+    ``power=True`` (default) uses the power/energy convention
+    (``10*log10(x)``) - e.g. an SNR ratio.  ``power=False`` uses the
+    amplitude/field convention (``20*log10(x)``) - e.g. an EVM ratio
+    (RMS error amplitude / RMS reference amplitude).  ``x <= 0`` maps to
+    ``-inf`` (or ``nan`` for ``x < 0``) without raising a RuntimeWarning -
+    callers that need a different zero/negative policy should guard before
+    calling.
+
+    Parameters
+    ----------
+    x : array_like
+        Linear ratio value(s), any backend (NumPy/CuPy).
+    power : bool, default True
+        Selects the 10x (power) or 20x (amplitude) convention.
+
+    Returns
+    -------
+    array_like
+        Value(s) in decibels, same shape/backend as ``x``.
+    """
+    x, xp, _ = dispatch(x)
+    factor = 10.0 if power else 20.0
+    with np.errstate(divide="ignore", invalid="ignore"):
+        return factor * xp.log10(x)
+
+
+# ---------------------------------------------------------------------------
 # Formatting
 # ---------------------------------------------------------------------------
 

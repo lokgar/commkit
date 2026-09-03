@@ -17,6 +17,54 @@ from .helpers import as_2d, restore_1d, rewrap_signal, unwrap_signal
 from .logger import logger
 
 
+def _validate_and_shift(
+    xp: Any, is_complex: bool, return_onesided: bool | None, label: str
+):
+    """Resolve/validate ``return_onesided`` and build the matching post-shift closure.
+
+    Shared by :func:`welch_psd` and :func:`spectrogram`, which both: default
+    ``return_onesided`` to ``not is_complex``, reject the one-sided request
+    for complex data, and - when the result ends up two-sided - fftshift the
+    frequency axis (and any data arrays indexed by it) back to centered
+    (``-fs/2`` to ``fs/2``) order.
+
+    Parameters
+    ----------
+    xp : module
+        Array module (NumPy/CuPy) providing ``fft.fftshift``.
+    is_complex : bool
+        Whether the input samples are complex-valued.
+    return_onesided : bool or None
+        The caller-supplied value (``None`` triggers the default).
+    label : str
+        Human-readable name for the error message (e.g. ``"PSD"``,
+        ``"spectrogram"``).
+
+    Returns
+    -------
+    return_onesided : bool
+        The resolved value to pass through to the ``scipy.signal`` call.
+    shift : callable
+        ``shift(f, *arrays_with_axis) -> (f, *arrays)`` where each element of
+        ``arrays_with_axis`` is an ``(array, axis)`` pair.  No-op when
+        ``return_onesided`` is ``True``; otherwise fftshifts ``f`` and every
+        array at its given axis.
+    """
+    if return_onesided is None:
+        return_onesided = not is_complex
+    if is_complex and return_onesided:
+        raise ValueError(f"Cannot compute one-sided {label} for complex data.")
+
+    def shift(f, *arrays_with_axis):
+        if return_onesided:
+            return (f, *(a for a, _ in arrays_with_axis))
+        f_shifted = xp.fft.fftshift(f)
+        shifted = (xp.fft.fftshift(a, axes=ax) for a, ax in arrays_with_axis)
+        return (f_shifted, *shifted)
+
+    return return_onesided, shift
+
+
 def shift_frequency(
     samples: ArrayType | Signal,
     offset: float,
@@ -409,17 +457,12 @@ def welch_psd(
     samples, xp, sp = dispatch(samples)
     is_complex = xp.iscomplexobj(samples)
 
-    if return_onesided is None:
-        return_onesided = not is_complex
-
     # scipy.signal.welch returns onesided by default for real, two-sided for complex
     # unless return_onesided is explicitly set.
     # Note: scipy's return_onesided argument serves to force one-sided for real data.
     # It cannot force one-sided for complex data (always raises error).
     # For complex data, it always returns two-sided (0 to fs).
-
-    if is_complex and return_onesided:
-        raise ValueError("Cannot compute one-sided PSD for complex data.")
+    return_onesided, shift = _validate_and_shift(xp, is_complex, return_onesided, "PSD")
 
     f, Pxx = sp.signal.welch(
         samples,
@@ -435,13 +478,7 @@ def welch_psd(
         average=average,
     )
 
-    if not return_onesided:
-        # Shift zero frequency to center
-        # f is typically 1D array of frequencies
-        f = xp.fft.fftshift(f)
-        # Pxx needs shift along the frequency axis
-        Pxx = xp.fft.fftshift(Pxx, axes=axis)
-
+    f, Pxx = shift(f, (Pxx, axis))
     return f, Pxx
 
 
@@ -531,11 +568,9 @@ def spectrogram(
     samples, xp, sp = dispatch(samples)
     is_complex = xp.iscomplexobj(samples)
 
-    if return_onesided is None:
-        return_onesided = not is_complex
-
-    if is_complex and return_onesided:
-        raise ValueError("Cannot compute one-sided spectrogram for complex data.")
+    return_onesided, shift = _validate_and_shift(
+        xp, is_complex, return_onesided, "spectrogram"
+    )
 
     f, t, Sxx = sp.signal.spectrogram(
         samples,
@@ -551,12 +586,7 @@ def spectrogram(
         mode=mode,
     )
 
-    if not return_onesided:
-        # Shift zero frequency to center
-        f = xp.fft.fftshift(f)
-        # Sxx frequency axis is at position axis_pos in output
-        ndim = samples.ndim
-        axis_pos = axis % ndim
-        Sxx = xp.fft.fftshift(Sxx, axes=axis_pos)
-
+    # Sxx frequency axis is at position axis_pos in output
+    axis_pos = axis % samples.ndim
+    f, Sxx = shift(f, (Sxx, axis_pos))
     return f, t, Sxx

@@ -146,6 +146,33 @@ def test_parabolic_peak_offset_log_mode_host_scalars():
     assert -0.5 <= float(delta) <= 0.5
 
 
+def test_db_to_linear_power_vs_amplitude(backend_device, xp):
+    """power=True uses the 10x convention; power=False uses 20x."""
+    assert helpers.db_to_linear(10.0, power=True) == pytest.approx(10.0)
+    assert helpers.db_to_linear(20.0, power=False) == pytest.approx(10.0)
+    assert helpers.db_to_linear(0.0, power=True) == pytest.approx(1.0)
+    assert helpers.db_to_linear(0.0, power=False) == pytest.approx(1.0)
+
+
+def test_linear_to_db_is_inverse_of_db_to_linear(backend_device, xp):
+    """linear_to_db(db_to_linear(x)) must round-trip for both conventions."""
+    for power in (True, False):
+        for db in (-6.0, 0.0, 3.0, 12.5):
+            linear = helpers.db_to_linear(db, power=power)
+            back = float(helpers.linear_to_db(xp.asarray(linear), power=power))
+            assert back == pytest.approx(db, abs=1e-6)
+
+
+def test_linear_to_db_zero_is_negative_inf_no_warning(backend_device, xp):
+    """x=0 must map to -inf without raising a RuntimeWarning."""
+    import warnings
+
+    with warnings.catch_warnings():
+        warnings.simplefilter("error")
+        result = helpers.linear_to_db(xp.asarray(0.0), power=True)
+    assert float(result) == float("-inf")
+
+
 def test_normalize_unity_gain(backend_device, xp):
     """Verify unity-gain normalization (sum of elements = 1)."""
     data = xp.array([1.0, 2.0, 3.0, 4.0])

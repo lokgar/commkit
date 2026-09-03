@@ -2,7 +2,7 @@
 
 from ..backend import ArrayType, dispatch
 from ..core.signal import Signal
-from ..helpers import rewrap_signal, unwrap_signal
+from ..helpers import db_to_linear, rewrap_signal, unwrap_signal
 from ..logger import logger
 
 __all__ = ["apply_awgn"]
@@ -109,7 +109,7 @@ def apply_awgn(
 
     if signal_power is None:
         signal_power = xp.mean(xp.abs(samples) ** 2)
-    esn0_linear = 10 ** (esn0_db / 10)
+    esn0_linear = db_to_linear(esn0_db, power=True)
 
     # Noise power accounting for oversampling
     if esn0_linear <= 1e-20:
