@@ -78,7 +78,7 @@ uv run pytest benchmarks/ --benchmark-only --device=all \
     --benchmark-compare=0001 --benchmark-storage=file://benchmarks/baselines
 ```
 
-See **Section 6 - Benchmark Suite** for what each file measures and how to read the results.
+See **Section 5 - Benchmark Suite** for what each file measures and how to read the results.
 
 ### Linting & Formatting
 
@@ -153,37 +153,7 @@ Since `bump-my-version` is defined in the project's development dependencies, al
 
 ---
 
-## 3. Reference Implementation Files
-
-> `examples/` holds notebook-style scripts (jupytext `# %%` cell format, ready
-> to convert to `.ipynb`) that walk through a full analysis chain end-to-end
-> with the physics, method limitations, and interpretation of the results
-> spelled out in markdown cells:
->
-> * `examples/carrier_phase_analysis.py` - data-aided carrier-phase
->   characterization of a coherent transmission (trajectory -> drift/PN split ->
->   linewidth -> Allan -> dashboard).
-> * `examples/laser_linewidth_dsh.py` - delayed self-heterodyne (AOM receiver)
->   laser linewidth and FM-noise PSD estimation (all three estimators, both
->   coherence regimes, flicker-noise effects).
-> * `examples/laser_linewidth_homodyne_iq.py` - the decoherence interferometer
->   with a 90°-hybrid IQ receiver (no AOM) as the main path: dark-capture DC
->   calibration, GSOP, all three estimators at 0 Hz, discriminator Allan
->   deviation.
-> * `examples/measurement_laser_linewidth_dsh.py` /
->   `examples/measurement_laser_linewidth_homodyne_iq.py` - **measurement
->   templates**: edit the system-parameter cell, point `DATA_FILE` at a real
->   capture, run.  Include τ_d calibration from the notch comb (DSH) and a
->   seeded synthetic demo fallback so they run end-to-end without data.
->
-> Examples are **runners, not library code**: orchestration chains belong in
-> `examples/` (or user projects), never as `commkit` functions.  For
-> everything not yet covered by an example, `tests/` is the most current usage
-> reference for every public function.
-
----
-
-## 4. DSP & Coding Guidelines
+## 3. DSP & Coding Guidelines
 
 ### Multi-Backend Dispatching
 
@@ -450,8 +420,8 @@ that does both internally.  This lets a caller design once and apply many
 times (e.g. reuse the same filter across a batch of signals) and keeps each
 function's signature focused.  Established examples in `filtering.py`:
 
-* FIR taps generators (`rrc_taps`, `rc_taps`, `gaussian_taps`, `lowpass_taps`,
-  `highpass_taps`, `bandpass_taps`, `bandstop_taps`, ...) produce coefficient
+* FIR taps generators (`rrc_taps`, `rc_taps`, `gaussian_taps`, `fir_taps`
+  (lowpass/highpass/bandpass/bandstop via `btype=`), ...) produce coefficient
   arrays; `fir_filter(samples, taps)` applies them.
 * IIR SOS generators (`butterworth_sos`, `chebyshev1_sos`, `chebyshev2_sos`,
   `elliptic_sos`, `bessel_sos`) produce second-order-section coefficients;
@@ -472,7 +442,7 @@ a peak search belongs in `smoothing.py`.
 
 ---
 
-## 5. Testing Conventions
+## 4. Testing Conventions
 
 * **Parametrization**: Test cases must utilize `backend_device` and `xp` fixtures from `conftest.py` to automatically validate code correctness on both CPU and GPU backends.
 * **Assertions**: Standard `numpy.testing` assertions raise `TypeError` when evaluated on GPU arrays. Always use the `xpt` helper assertion module. Use `xp.asarray(expected)` to cast expectation variables to the active backend, and cast reductions to standard Python scalars before comparison:
@@ -538,7 +508,7 @@ a peak search belongs in `smoothing.py`.
 
 ---
 
-## 6. Benchmark Suite
+## 5. Benchmark Suite
 
 The `benchmarks/` directory tracks the performance of the GPU-relevant hot paths. Baselines are committed under `benchmarks/baselines/` so any optimization PR can be gated quantitatively (run -> compare -> quote the delta).
 
