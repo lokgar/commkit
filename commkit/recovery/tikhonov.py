@@ -191,11 +191,12 @@ def recover_carrier_phase_tikhonov(
         ``modulation``/``order`` from its metadata when not given explicitly.
     modulation : str, optional
         Modulation scheme (case-insensitive): ``'psk'``, ``'qam'``, etc.
-        Required for array input; defaults to the signal's ``mod_scheme``
-        for :class:`Signal` input.
+        Required for array input; for :class:`Signal` input, used only as a
+        fallback when the signal's ``mod_scheme`` is unset.
     order : int, optional
-        Modulation order.  Required for array input; defaults to the
-        signal's ``mod_order`` for :class:`Signal` input.
+        Modulation order.  Required for array input; for :class:`Signal`
+        input, used only as a fallback when the signal's ``mod_order`` is
+        unset.
     linewidth_symbol_periods : float
         Combined linewidth-symbol-time product delta_nu * T_s.
         Typical values: ``1e-5`` (narrow laser, 32 GBd), ``5e-4`` (wide
@@ -253,10 +254,28 @@ def recover_carrier_phase_tikhonov(
     """
     x, sig = unwrap_signal(symbols)
     if sig is not None:
+        mod = sig.mod_scheme
+        if mod is None:
+            mod = modulation
+            if mod is not None:
+                logger.warning(
+                    "recover_carrier_phase_tikhonov(): Signal has no "
+                    "mod_scheme set; falling back to supplied modulation=%r.",
+                    mod,
+                )
+        ord_ = sig.mod_order
+        if ord_ is None:
+            ord_ = order
+            if ord_ is not None:
+                logger.warning(
+                    "recover_carrier_phase_tikhonov(): Signal has no "
+                    "mod_order set; falling back to supplied order=%r.",
+                    ord_,
+                )
         return recover_carrier_phase_tikhonov(
             x,
-            modulation or sig.mod_scheme,
-            order or sig.mod_order,
+            mod,
+            ord_,
             linewidth_symbol_periods,
             block_size=block_size,
             snr_db=snr_db,

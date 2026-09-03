@@ -355,8 +355,9 @@ def demultiplex_polarization_tones_static(
         Received MIMO samples. Shape ``(C, N)`` - time on the last axis.  A
         :class:`Signal` returns a new demultiplexed :class:`Signal`.
     sampling_rate : float, optional
-        Sampling rate f_s in Hz.  Required for array input; defaults to the
-        signal's ``sampling_rate`` for :class:`Signal` input.
+        Sampling rate f_s in Hz.  Required for array input; ignored for
+        :class:`Signal` input, which always uses the signal's own
+        ``sampling_rate``.
     tone_frequencies : sequence of float
         The ``K`` distinct per-stream tone frequencies in Hz (as added at the
         TX, in transmitted-stream order).  Require ``K <= C``.  Output row ``j``
@@ -406,9 +407,19 @@ def demultiplex_polarization_tones_static(
     """
     x, sig = unwrap_signal(samples)
     if sig is not None:
+        # sig.sampling_rate is a required field, so it always wins over a
+        # supplied sampling_rate - see CLAUDE.md, "Signal-Awareness".
+        if sampling_rate is not None:
+            logger.warning(
+                "demultiplex_polarization_tones_static(): ignoring supplied "
+                "sampling_rate=%r for Signal input; using the signal's own "
+                "sampling_rate=%r instead.",
+                sampling_rate,
+                sig.sampling_rate,
+            )
         result = demultiplex_polarization_tones_static(
             x,
-            sampling_rate if sampling_rate is not None else sig.sampling_rate,
+            sig.sampling_rate,
             tone_frequencies,
             refine_tones=refine_tones,
             search_band=search_band,
@@ -572,8 +583,9 @@ def demultiplex_polarization_tones_dynamic(
         :class:`Signal` returns a new demultiplexed :class:`Signal` (when
         ``apply=True``).
     sampling_rate : float, optional
-        Sampling rate f_s in Hz.  Required for array input; defaults to the
-        signal's ``sampling_rate`` for :class:`Signal` input.
+        Sampling rate f_s in Hz.  Required for array input; ignored for
+        :class:`Signal` input, which always uses the signal's own
+        ``sampling_rate``.
     tone_frequencies : sequence of float
         The ``K`` distinct per-stream tone frequencies in Hz (as added at the
         TX, in transmitted-stream order).  Require ``K <= C``.  Output row ``j``
@@ -662,9 +674,19 @@ def demultiplex_polarization_tones_dynamic(
     """
     x, sig = unwrap_signal(samples)
     if sig is not None:
+        # sig.sampling_rate is a required field, so it always wins over a
+        # supplied sampling_rate - see CLAUDE.md, "Signal-Awareness".
+        if sampling_rate is not None:
+            logger.warning(
+                "demultiplex_polarization_tones_dynamic(): ignoring supplied "
+                "sampling_rate=%r for Signal input; using the signal's own "
+                "sampling_rate=%r instead.",
+                sampling_rate,
+                sig.sampling_rate,
+            )
         result = demultiplex_polarization_tones_dynamic(
             x,
-            sampling_rate if sampling_rate is not None else sig.sampling_rate,
+            sig.sampling_rate,
             tone_frequencies,
             track_bandwidth=track_bandwidth,
             num_taps=num_taps,

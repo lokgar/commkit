@@ -276,11 +276,13 @@ def recover_carrier_phase_pll(
     modulation : str, optional
         Modulation scheme (case-insensitive): ``'qam'``, ``'psk'``, etc.
         Used to fetch the reference constellation via
-        ``gray_constellation``.  Required for array input; defaults to the
-        signal's ``mod_scheme`` for :class:`Signal` input.
+        ``gray_constellation``.  Required for array input; for :class:`Signal`
+        input, used only as a fallback when the signal's ``mod_scheme`` is
+        unset.
     order : int, optional
-        Modulation order (4, 16, 64, ...).  Required for array input;
-        defaults to the signal's ``mod_order`` for :class:`Signal` input.
+        Modulation order (4, 16, 64, ...).  Required for array input; for
+        :class:`Signal` input, used only as a fallback when the signal's
+        ``mod_order`` is unset.
     mu : float or None, default 1e-2
         Proportional gain - controls convergence speed and steady-state
         jitter.  Larger ``mu`` converges faster but amplifies noise.
@@ -340,10 +342,28 @@ def recover_carrier_phase_pll(
 
     x, sig = unwrap_signal(symbols)
     if sig is not None:
+        mod = sig.mod_scheme
+        if mod is None:
+            mod = modulation
+            if mod is not None:
+                logger.warning(
+                    "recover_carrier_phase_pll(): Signal has no mod_scheme "
+                    "set; falling back to supplied modulation=%r.",
+                    mod,
+                )
+        ord_ = sig.mod_order
+        if ord_ is None:
+            ord_ = order
+            if ord_ is not None:
+                logger.warning(
+                    "recover_carrier_phase_pll(): Signal has no mod_order "
+                    "set; falling back to supplied order=%r.",
+                    ord_,
+                )
         return recover_carrier_phase_pll(
             x,
-            modulation or sig.mod_scheme,
-            order or sig.mod_order,
+            mod,
+            ord_,
             mu=mu,
             beta=beta,
             phase_init=phase_init,

@@ -218,8 +218,8 @@ def lms(
         symbol-spaced stage after FOE + CPR; use a short filter (3-11 taps)
         for residual ISI cleanup.  ``sps > 2`` is accepted but uncommon.
         The equalizer decimates by ``sps`` to produce one output symbol per
-        input stride.  Defaults to the signal's ``sps`` for :class:`Signal`
-        input.
+        input stride.  Ignored for :class:`Signal` input, which always uses
+        the signal's own ``sps``.
     step_size : float, default 0.01
         Plain LMS step size (mu). The gradient is applied directly without
         input-power normalization, matching the convention in Haykin's
@@ -467,11 +467,21 @@ def lms(
     """
     x, sig = unwrap_signal(samples)
     if sig is not None:
+        # sig.sps is always populated (derived from the required sampling_rate
+        # / symbol_rate fields), so the Signal's own value always wins over a
+        # supplied sps - see CLAUDE.md, "Signal-Awareness".
+        if sps is not None:
+            logger.warning(
+                "lms(): ignoring supplied sps=%r for Signal input; using the "
+                "signal's own sps=%r instead.",
+                sps,
+                sig.sps,
+            )
         result = lms(
             x,
             training_symbols=training_symbols,
             num_taps=num_taps,
-            sps=sps if sps is not None else int(sig.sps),
+            sps=int(sig.sps),
             step_size=step_size,
             modulation=modulation,
             order=order,
@@ -1154,8 +1164,8 @@ def rls(
     num_taps : int, default 21
         Number of equalizer taps per FIR filter.
     sps : int, optional, default 1
-        Samples per symbol at the input.  Defaults to the signal's ``sps``
-        for :class:`Signal` input.
+        Samples per symbol at the input.  Ignored for :class:`Signal` input,
+        which always uses the signal's own ``sps``.
     forgetting_factor : float, default 0.99
         RLS forgetting factor (lambda). Range: (0, 1].
         Values close to 1 give longer memory.
@@ -1359,11 +1369,21 @@ def rls(
     """
     x, sig = unwrap_signal(samples)
     if sig is not None:
+        # sig.sps is always populated (derived from the required sampling_rate
+        # / symbol_rate fields), so the Signal's own value always wins over a
+        # supplied sps - see CLAUDE.md, "Signal-Awareness".
+        if sps is not None:
+            logger.warning(
+                "rls(): ignoring supplied sps=%r for Signal input; using the "
+                "signal's own sps=%r instead.",
+                sps,
+                sig.sps,
+            )
         result = rls(
             x,
             training_symbols=training_symbols,
             num_taps=num_taps,
-            sps=sps if sps is not None else int(sig.sps),
+            sps=int(sig.sps),
             forgetting_factor=forgetting_factor,
             delta=delta,
             leakage=leakage,
@@ -2080,8 +2100,8 @@ def cma(
         Samples per symbol at the input.  Use ``sps=2`` (T/2-spaced, default)
         for the standard first-stage blind equalization.  ``sps=1`` enables
         symbol-spaced CMA, useful when input is already decimated but phase
-        ambiguity resolution is still needed.  Defaults to the signal's
-        ``sps`` for :class:`Signal` input.
+        ambiguity resolution is still needed.  Ignored for :class:`Signal`
+        input, which always uses the signal's own ``sps``.
     step_size : float, default 1e-3
         CMA step size (mu). Unlike LMS, CMA's cost surface is non-convex and
         higher-order, so input-power normalization distorts the gradient geometry.
@@ -2173,10 +2193,20 @@ def cma(
     """
     x, sig = unwrap_signal(samples)
     if sig is not None:
+        # sig.sps is always populated (derived from the required sampling_rate
+        # / symbol_rate fields), so the Signal's own value always wins over a
+        # supplied sps - see CLAUDE.md, "Signal-Awareness".
+        if sps is not None:
+            logger.warning(
+                "cma(): ignoring supplied sps=%r for Signal input; using the "
+                "signal's own sps=%r instead.",
+                sps,
+                sig.sps,
+            )
         result = cma(
             x,
             num_taps=num_taps,
-            sps=sps if sps is not None else int(sig.sps),
+            sps=int(sig.sps),
             step_size=step_size,
             modulation=modulation,
             order=order,
@@ -2581,8 +2611,8 @@ def rde(
         Number of equalizer taps per FIR filter.
     sps : int, optional, default 2
         Samples per symbol at the input.  Use ``sps=2`` (T/2-spaced, default)
-        for standard blind equalization.  ``sps=1`` is accepted.  Defaults
-        to the signal's ``sps`` for :class:`Signal` input.
+        for standard blind equalization.  ``sps=1`` is accepted.  Ignored for
+        :class:`Signal` input, which always uses the signal's own ``sps``.
     step_size : float, default 1e-3
         RDE step size (mu). Same non-convex gradient geometry as CMA; use a
         fixed step in the range 1e-5 to 1e-3 for stability.
@@ -2682,10 +2712,20 @@ def rde(
     """
     x, sig = unwrap_signal(samples)
     if sig is not None:
+        # sig.sps is always populated (derived from the required sampling_rate
+        # / symbol_rate fields), so the Signal's own value always wins over a
+        # supplied sps - see CLAUDE.md, "Signal-Awareness".
+        if sps is not None:
+            logger.warning(
+                "rde(): ignoring supplied sps=%r for Signal input; using the "
+                "signal's own sps=%r instead.",
+                sps,
+                sig.sps,
+            )
         result = rde(
             x,
             num_taps=num_taps,
-            sps=sps if sps is not None else int(sig.sps),
+            sps=int(sig.sps),
             step_size=step_size,
             modulation=modulation,
             order=order,

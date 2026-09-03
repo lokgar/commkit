@@ -186,18 +186,22 @@ def estimate_frequency_offset_mth_power(
         Complex IQ samples. Shape: (N,) or (C, N). For MIMO, channel
         magnitude spectra are summed for robust peak detection, then
         per-channel sub-bin interpolation is applied at the shared peak bin.
-        A :class:`Signal` supplies ``sampling_rate``/``modulation``/``order``
-        from its metadata when not given explicitly.
+        For :class:`Signal` input, the signal's own ``sampling_rate`` /
+        ``mod_scheme`` / ``mod_order`` take priority over the corresponding
+        arguments below; a set ``modulation``/``order`` argument is used only
+        as a fallback when the signal's metadata is unset, with a warning.
     sampling_rate : float, optional
-        Sampling rate in Hz.  Required for array input; defaults to the
-        signal's ``sampling_rate`` for :class:`Signal` input.
+        Sampling rate in Hz.  Required for array input; ignored for
+        :class:`Signal` input, which always uses the signal's own
+        ``sampling_rate``.
     modulation : str, optional
         Modulation scheme (case-insensitive): 'psk', 'qam', 'bpsk', etc.
-        Required for array input; defaults to the signal's ``mod_scheme``
-        for :class:`Signal` input.
+        Required for array input; for :class:`Signal` input, used only as a
+        fallback when the signal's ``mod_scheme`` is unset.
     order : int, optional
         Modulation order (2, 4, 16, 64, ...).  Required for array input;
-        defaults to the signal's ``mod_order`` for :class:`Signal` input.
+        for :class:`Signal` input, used only as a fallback when the signal's
+        ``mod_order`` is unset.
     search_range : tuple of float, optional
         ``(f_min, f_max)`` in Hz to limit the frequency offset search.
         The spectral search is mapped to ``[M·f_min, M·f_max]``.
@@ -252,11 +256,41 @@ def estimate_frequency_offset_mth_power(
     """
     x, sig = unwrap_signal(samples)
     if sig is not None:
+        # sig.sampling_rate is required, so it always wins over a supplied
+        # value; mod_scheme/mod_order are optional, so they win only when
+        # set, falling back to the supplied value (with a warning) otherwise
+        # - see CLAUDE.md, "Signal-Awareness".
+        if sampling_rate is not None:
+            logger.warning(
+                "estimate_frequency_offset_mth_power(): ignoring supplied "
+                "sampling_rate=%r for Signal input; using the signal's own "
+                "sampling_rate=%r instead.",
+                sampling_rate,
+                sig.sampling_rate,
+            )
+        mod = sig.mod_scheme
+        if mod is None:
+            mod = modulation
+            if mod is not None:
+                logger.warning(
+                    "estimate_frequency_offset_mth_power(): Signal has no "
+                    "mod_scheme set; falling back to supplied modulation=%r.",
+                    mod,
+                )
+        ord_ = sig.mod_order
+        if ord_ is None:
+            ord_ = order
+            if ord_ is not None:
+                logger.warning(
+                    "estimate_frequency_offset_mth_power(): Signal has no "
+                    "mod_order set; falling back to supplied order=%r.",
+                    ord_,
+                )
         return estimate_frequency_offset_mth_power(
             x,
-            sampling_rate if sampling_rate is not None else sig.sampling_rate,
-            modulation or sig.mod_scheme,
-            order or sig.mod_order,
+            sig.sampling_rate,
+            mod,
+            ord_,
             search_range=search_range,
             nfft=nfft,
             interpolation=interpolation,
@@ -450,18 +484,21 @@ def estimate_frequency_offset_mengali_morelli(
     Parameters
     ----------
     samples : array_like or Signal
-        Complex IQ samples. Shape: (N,) or (C, N).  A :class:`Signal`
-        supplies ``sampling_rate``/``modulation``/``order`` from its
-        metadata when not given explicitly.
+        Complex IQ samples. Shape: (N,) or (C, N).  For :class:`Signal`
+        input, the signal's own ``sampling_rate``/``mod_scheme``/``mod_order``
+        take priority over the corresponding arguments below.
     sampling_rate : float, optional
-        Sampling rate in Hz.  Required for array input; defaults to the
-        signal's ``sampling_rate`` for :class:`Signal` input.
+        Sampling rate in Hz.  Required for array input; ignored for
+        :class:`Signal` input, which always uses the signal's own
+        ``sampling_rate``.
     modulation : str, optional
         Modulation type (case-insensitive). Required for blind M-th power mode.
-        Ignored when ``ref_signal`` is provided.  Defaults to the signal's
-        ``mod_scheme`` for :class:`Signal` input.
+        Ignored when ``ref_signal`` is provided.  For :class:`Signal` input,
+        used only as a fallback when the signal's ``mod_scheme`` is unset.
     order : int, optional
-        Modulation order. Required with ``modulation`` for blind mode.
+        Modulation order. Required with ``modulation`` for blind mode.  For
+        :class:`Signal` input, used only as a fallback when the signal's
+        ``mod_order`` is unset.
     ref_signal : array_like, optional
         Ideal transmitted waveform used to derotate ``samples`` before
         autocorrelation.  Computes ``y[n] = samples[n] * conj(ref[n])``,
@@ -503,11 +540,42 @@ def estimate_frequency_offset_mengali_morelli(
     """
     x, sig = unwrap_signal(samples)
     if sig is not None:
+        # sig.sampling_rate is required, so it always wins; mod_scheme/
+        # mod_order are optional, so they win only when set (fallback to the
+        # supplied value, with a warning, otherwise) - see CLAUDE.md,
+        # "Signal-Awareness".
+        if sampling_rate is not None:
+            logger.warning(
+                "estimate_frequency_offset_mengali_morelli(): ignoring "
+                "supplied sampling_rate=%r for Signal input; using the "
+                "signal's own sampling_rate=%r instead.",
+                sampling_rate,
+                sig.sampling_rate,
+            )
+        mod = sig.mod_scheme
+        if mod is None:
+            mod = modulation
+            if mod is not None:
+                logger.warning(
+                    "estimate_frequency_offset_mengali_morelli(): Signal has "
+                    "no mod_scheme set; falling back to supplied "
+                    "modulation=%r.",
+                    mod,
+                )
+        ord_ = sig.mod_order
+        if ord_ is None:
+            ord_ = order
+            if ord_ is not None:
+                logger.warning(
+                    "estimate_frequency_offset_mengali_morelli(): Signal has "
+                    "no mod_order set; falling back to supplied order=%r.",
+                    ord_,
+                )
         return estimate_frequency_offset_mengali_morelli(
             x,
-            sampling_rate if sampling_rate is not None else sig.sampling_rate,
-            modulation=modulation or sig.mod_scheme,
-            order=order or sig.mod_order,
+            sig.sampling_rate,
+            modulation=mod,
+            order=ord_,
             ref_signal=ref_signal,
             max_lag=max_lag,
             combine_channels=combine_channels,
@@ -627,12 +695,13 @@ def estimate_frequency_offset_pilot_symbols(
     Parameters
     ----------
     samples : array_like or Signal
-        Received complex samples. Shape: (N,) or (C, N).  A :class:`Signal`
-        supplies ``sampling_rate`` from its metadata when not given
-        explicitly.
+        Received complex samples. Shape: (N,) or (C, N).  For :class:`Signal`
+        input, the signal's own ``sampling_rate`` always wins over a
+        supplied ``sampling_rate``.
     sampling_rate : float, optional
-        Sampling rate in Hz.  Required for array input; defaults to the
-        signal's ``sampling_rate`` for :class:`Signal` input.
+        Sampling rate in Hz.  Required for array input; ignored for
+        :class:`Signal` input, which always uses the signal's own
+        ``sampling_rate``.
     pilot_indices : array_like of int
         Sample indices of pilot positions in increasing order. Shape: (P,).
         Must be unique and sorted.  Supports any pilot arrangement:
@@ -702,9 +771,19 @@ def estimate_frequency_offset_pilot_symbols(
     """
     x, sig = unwrap_signal(samples)
     if sig is not None:
+        # sig.sampling_rate is a required field, so it always wins over a
+        # supplied sampling_rate - see CLAUDE.md, "Signal-Awareness".
+        if sampling_rate is not None:
+            logger.warning(
+                "estimate_frequency_offset_pilot_symbols(): ignoring supplied "
+                "sampling_rate=%r for Signal input; using the signal's own "
+                "sampling_rate=%r instead.",
+                sampling_rate,
+                sig.sampling_rate,
+            )
         return estimate_frequency_offset_pilot_symbols(
             x,
-            sampling_rate if sampling_rate is not None else sig.sampling_rate,
+            sig.sampling_rate,
             pilot_indices,
             pilot_values,
             snr_weighted=snr_weighted,
@@ -834,11 +913,12 @@ def find_bias_tone(
     ----------
     seg : array_like or Signal
         1-D complex IQ samples.  Must reside on a single backend (CPU or GPU).
-        A :class:`Signal` supplies ``sampling_rate`` from its metadata when
-        not given explicitly.
+        For :class:`Signal` input, the signal's own ``sampling_rate`` always
+        wins over a supplied ``sampling_rate``.
     sampling_rate : float, optional
-        Sampling rate in Hz.  Required for array input; defaults to the
-        signal's ``sampling_rate`` for :class:`Signal` input.
+        Sampling rate in Hz.  Required for array input; ignored for
+        :class:`Signal` input, which always uses the signal's own
+        ``sampling_rate``.
     target_frequency : float, optional
         Centre of the frequency search window in Hz.  Must be paired with
         ``search_band``.  If both are given the argmax is restricted to
@@ -880,9 +960,19 @@ def find_bias_tone(
     """
     x, sig = unwrap_signal(seg)
     if sig is not None:
+        # sig.sampling_rate is a required field, so it always wins over a
+        # supplied sampling_rate - see CLAUDE.md, "Signal-Awareness".
+        if sampling_rate is not None:
+            logger.warning(
+                "find_bias_tone(): ignoring supplied sampling_rate=%r for "
+                "Signal input; using the signal's own sampling_rate=%r "
+                "instead.",
+                sampling_rate,
+                sig.sampling_rate,
+            )
         return find_bias_tone(
             x,
-            sampling_rate if sampling_rate is not None else sig.sampling_rate,
+            sig.sampling_rate,
             target_frequency=target_frequency,
             search_band=search_band,
         )
@@ -1057,11 +1147,12 @@ def correct_frequency_offset_blockwise(
     ----------
     samples : array_like or Signal
         Complex IQ samples.  Shape: ``(N,)`` or ``(C, N)``.  A :class:`Signal`
-        returns a new corrected :class:`Signal`; ``sampling_rate`` defaults
-        to the signal's ``sampling_rate`` when not given explicitly.
+        returns a new corrected :class:`Signal`; its own ``sampling_rate``
+        always wins over a supplied ``sampling_rate``.
     sampling_rate : float, optional
-        Sampling rate in Hz.  Required for array input; defaults to the
-        signal's ``sampling_rate`` for :class:`Signal` input.
+        Sampling rate in Hz.  Required for array input; ignored for
+        :class:`Signal` input, which always uses the signal's own
+        ``sampling_rate``.
     block_size : int
         Number of samples per analysis block.
     overlap : float
@@ -1110,9 +1201,19 @@ def correct_frequency_offset_blockwise(
     """
     x, sig = unwrap_signal(samples)
     if sig is not None:
+        # sig.sampling_rate is a required field, so it always wins over a
+        # supplied sampling_rate - see CLAUDE.md, "Signal-Awareness".
+        if sampling_rate is not None:
+            logger.warning(
+                "correct_frequency_offset_blockwise(): ignoring supplied "
+                "sampling_rate=%r for Signal input; using the signal's own "
+                "sampling_rate=%r instead.",
+                sampling_rate,
+                sig.sampling_rate,
+            )
         result = correct_frequency_offset_blockwise(
             x,
-            sampling_rate if sampling_rate is not None else sig.sampling_rate,
+            sig.sampling_rate,
             block_size,
             overlap,
             estimator,
@@ -1265,11 +1366,12 @@ def correct_static_frequency_offset(
     ----------
     samples : array_like or Signal
         Input signal samples. Shape: (..., N).  A :class:`Signal` returns a
-        new corrected :class:`Signal`; ``sampling_rate`` defaults to the
-        signal's ``sampling_rate`` when not given explicitly.
+        new corrected :class:`Signal`; its own ``sampling_rate`` always
+        wins over a supplied ``sampling_rate``.
     sampling_rate : float, optional
-        Sampling rate in Hz.  Required for array input; defaults to the
-        signal's ``sampling_rate`` for :class:`Signal` input.
+        Sampling rate in Hz.  Required for array input; ignored for
+        :class:`Signal` input, which always uses the signal's own
+        ``sampling_rate``.
     offset : float or np.ndarray
         Estimated frequency offset in Hz. Either a scalar (same correction
         applied to all channels) or a 1-D array of shape ``(C,)`` as
@@ -1285,9 +1387,17 @@ def correct_static_frequency_offset(
     """
     x, sig = unwrap_signal(samples)
     if sig is not None:
-        result = correct_static_frequency_offset(
-            x, sampling_rate if sampling_rate is not None else sig.sampling_rate, offset
-        )
+        # sig.sampling_rate is a required field, so it always wins over a
+        # supplied sampling_rate - see CLAUDE.md, "Signal-Awareness".
+        if sampling_rate is not None:
+            logger.warning(
+                "correct_static_frequency_offset(): ignoring supplied "
+                "sampling_rate=%r for Signal input; using the signal's own "
+                "sampling_rate=%r instead.",
+                sampling_rate,
+                sig.sampling_rate,
+            )
+        result = correct_static_frequency_offset(x, sig.sampling_rate, offset)
         return rewrap_signal(sig, result)
 
     if sampling_rate is None:

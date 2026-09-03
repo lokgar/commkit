@@ -325,6 +325,60 @@ def fir_filter(samples, taps, axis=-1):
   `**metadata` kwargs applied via `setattr` (e.g. `sampling_rate=sig.symbol_rate`
   after decimating to symbol rate).
 
+**Metadata priority: the `Signal`'s own value always wins.** When a function
+takes both a `Signal` and a scalar metadata parameter that duplicates one of
+its fields (`sampling_rate`, `sps`, `mod_scheme`, `mod_order`, `ps_pmf`,
+...), the `Signal`'s field - never the supplied argument - is what the
+Signal-branch call actually uses. A caller passing a conflicting value on a
+`Signal` is a bug to catch, not a request to honor: silently letting the
+supplied value win would let a signal at 2 GSa/s be equalized with a stale
+`sps=2` nobody meant to apply to it.
+
+There is no shared helper for this - both cases are short enough to write
+inline in the `if sig is not None:` branch, and a generic helper covering
+both the "always wins" and "falls back with a warning" behaviors in one call
+signature ends up harder to read at the call site than the few extra lines.
+
+* **Required fields** (`sampling_rate`, `symbol_rate`, and the derived `sps`)
+  are never `None` on a `Signal` - pydantic enforces it - so the Signal
+  branch references `sig.sampling_rate`/`sig.sps` directly and drops the
+  supplied argument entirely.  There is no case where the Signal is missing
+  the field, but the caller can still pass a stale/conflicting value by
+  mistake, so warn whenever one was supplied at all:
+
+  ```python
+  x, sig = unwrap_signal(samples)
+  if sig is not None:
+      # sig.sampling_rate is required, so it always wins over a supplied
+      # sampling_rate - see CLAUDE.md, "Signal-Awareness".
+      if sampling_rate is not None:
+          logger.warning(
+              "my_dsp_function(): ignoring supplied sampling_rate=%r for "
+              "Signal input; using the signal's own sampling_rate=%r instead.",
+              sampling_rate,
+              sig.sampling_rate,
+          )
+      return my_dsp_function(x, sig.sampling_rate, ...)
+  ```
+
+* **Optional fields** (`mod_scheme`, `mod_order`, `ps_pmf`, ...) can
+  legitimately be unset on a `Signal` (e.g. an unshaped QAM signal has
+  `ps_pmf=None`). Read the Signal's field first; fall back to the supplied
+  argument - logging a `logger.warning` - only when the Signal genuinely
+  lacks it *and* a fallback was supplied. Passing neither stays silent (the
+  common case), so the log isn't spammed on every call to an unshaped signal:
+
+  ```python
+  mod = sig.mod_scheme
+  if mod is None:
+      mod = modulation
+      if mod is not None:
+          logger.warning(
+              "my_dsp_function(): Signal has no mod_scheme set; falling "
+              "back to supplied modulation=%r.", mod,
+          )
+  ```
+
 **Metadata rules for functions that change rate or domain:**
 
 | Situation | What to pass `rewrap_signal` |

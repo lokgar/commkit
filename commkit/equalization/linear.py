@@ -176,8 +176,8 @@ def apply_taps(
     sps : int, optional
         Samples per symbol. Output length is ``N_samples // sps``.
         Unlike the adaptive equalizers, any ``sps >= 1`` is accepted.
-        Defaults to ``2`` for array input; defaults to the signal's ``sps``
-        for :class:`Signal` input.
+        Defaults to ``2`` for array input; ignored for :class:`Signal` input,
+        which always uses the signal's own ``sps``.
     normalize : bool, default True
         If ``True``, normalize ``samples`` to unit symbol power before
         filtering (same pre-processing as the adaptive equalizers via
@@ -212,10 +212,20 @@ def apply_taps(
     """
     x, sig = unwrap_signal(samples)
     if sig is not None:
+        # sig.sps is always populated (derived from the required sampling_rate
+        # / symbol_rate fields), so the Signal's own value always wins over a
+        # supplied sps - see CLAUDE.md, "Signal-Awareness".
+        if sps is not None:
+            logger.warning(
+                "apply_taps(): ignoring supplied sps=%r for Signal input; "
+                "using the signal's own sps=%r instead.",
+                sps,
+                sig.sps,
+            )
         result = apply_taps(
             x,
             weights,
-            sps=sps if sps is not None else int(sig.sps),
+            sps=int(sig.sps),
             normalize=normalize,
             input_norm_factor=input_norm_factor,
             samples_prefix=samples_prefix,

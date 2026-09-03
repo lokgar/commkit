@@ -170,8 +170,9 @@ def apply_phase_noise(
     samples : array_like or Signal
         Complex baseband signal. Shape: ``(N,)`` (SISO) or ``(C, N)`` (MIMO).
     sampling_rate : float, optional
-        Sampling rate in Hz.  Required for array input; defaults to the
-        signal's ``sampling_rate`` for :class:`Signal` input.
+        Sampling rate in Hz.  Required for array input; ignored for
+        :class:`Signal` input, which always uses the signal's own
+        ``sampling_rate``.
     linewidth : float
         Combined transmitter + receiver laser linewidth delta_nu in Hz.
         Typical values: 100 kHz (narrow-linewidth laser) to 10 MHz (DFB).
@@ -202,9 +203,18 @@ def apply_phase_noise(
     """
     x, sig = unwrap_signal(samples)
     if sig is not None:
+        # sig.sampling_rate is a required field, so it always wins over a
+        # supplied sampling_rate - see CLAUDE.md, "Signal-Awareness".
+        if sampling_rate is not None:
+            logger.warning(
+                "apply_phase_noise(): ignoring supplied sampling_rate=%r for "
+                "Signal input; using the signal's own sampling_rate=%r instead.",
+                sampling_rate,
+                sig.sampling_rate,
+            )
         result = apply_phase_noise(
             x,
-            sampling_rate if sampling_rate is not None else sig.sampling_rate,
+            sig.sampling_rate,
             linewidth,
             flicker=flicker,
             flicker_f_min=flicker_f_min,

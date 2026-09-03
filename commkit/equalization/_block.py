@@ -539,8 +539,9 @@ def block_lms(
     num_taps : int, default 21
         Number of taps per FIR filter (tap count in samples).
     sps : int, optional, default 2
-        Samples per symbol.  ``sps=2`` (T/2-spaced) is the default.  Defaults
-        to the signal's ``sps`` for :class:`Signal` input.
+        Samples per symbol.  ``sps=2`` (T/2-spaced) is the default.  Ignored
+        for :class:`Signal` input, which always uses the signal's own
+        ``sps``.
     step_size : float, default 2e-4
         LMS step size μ, on the **same scale as** ``lms``.  Use the same
         value you would use for ``lms``: because the block update is the
@@ -707,11 +708,21 @@ def block_lms(
     """
     x, sig = unwrap_signal(samples)
     if sig is not None:
+        # sig.sps is always populated (derived from the required sampling_rate
+        # / symbol_rate fields), so the Signal's own value always wins over a
+        # supplied sps - see CLAUDE.md, "Signal-Awareness".
+        if sps is not None:
+            logger.warning(
+                "block_lms(): ignoring supplied sps=%r for Signal input; "
+                "using the signal's own sps=%r instead.",
+                sps,
+                sig.sps,
+            )
         result = block_lms(
             x,
             training_symbols=training_symbols,
             num_taps=num_taps,
-            sps=sps if sps is not None else int(sig.sps),
+            sps=int(sig.sps),
             step_size=step_size,
             block_size=block_size,
             modulation=modulation,

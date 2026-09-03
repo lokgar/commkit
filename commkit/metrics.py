@@ -136,13 +136,38 @@ def evm(
             )
         resolved_symbols, _ = unwrap_signal(sig, field="resolved_symbols")
         if mode == "blind":
+            mod = sig.mod_scheme
+            if mod is None:
+                mod = modulation
+                if mod is not None:
+                    logger.warning(
+                        "evm(): Signal has no mod_scheme set; falling back to "
+                        "supplied modulation=%r.",
+                        mod,
+                    )
+            ord_ = sig.mod_order
+            if ord_ is None:
+                ord_ = order
+                if ord_ is not None:
+                    logger.warning(
+                        "evm(): Signal has no mod_order set; falling back to "
+                        "supplied order=%r.",
+                        ord_,
+                    )
+            eff_pmf = sig.ps_pmf
+            if eff_pmf is None:
+                eff_pmf = pmf
+                if eff_pmf is not None:
+                    logger.warning(
+                        "evm(): Signal has no ps_pmf set; falling back to supplied pmf."
+                    )
             return evm(
                 resolved_symbols,
                 num_train_symbols=num_train_symbols,
                 mode="blind",
-                modulation=modulation or sig.mod_scheme,
-                order=order or sig.mod_order,
-                pmf=sig.ps_pmf,
+                modulation=mod,
+                order=ord_,
+                pmf=eff_pmf,
             )
         ref = tx_symbols if tx_symbols is not None else sig.source_symbols
         if ref is None:
@@ -566,13 +591,36 @@ def ser(
             raise ValueError(
                 "No resolved symbols available. Call resolve_symbols(sig) first."
             )
-        mod = modulation or sig.mod_scheme
-        ord_ = order or sig.mod_order
+        mod = sig.mod_scheme
+        if mod is None:
+            mod = modulation
+            if mod is not None:
+                logger.warning(
+                    "ser(): Signal has no mod_scheme set; falling back to "
+                    "supplied modulation=%r.",
+                    mod,
+                )
+        ord_ = sig.mod_order
+        if ord_ is None:
+            ord_ = order
+            if ord_ is not None:
+                logger.warning(
+                    "ser(): Signal has no mod_order set; falling back to "
+                    "supplied order=%r.",
+                    ord_,
+                )
         if mod is None or ord_ is None:
             raise ValueError(
                 "SER requires modulation and order. Pass them explicitly or ensure "
                 "mod_scheme/mod_order are set on the Signal."
             )
+        eff_pmf = sig.ps_pmf
+        if eff_pmf is None:
+            eff_pmf = pmf
+            if eff_pmf is not None:
+                logger.warning(
+                    "ser(): Signal has no ps_pmf set; falling back to supplied pmf."
+                )
         resolved_symbols, _ = unwrap_signal(sig, field="resolved_symbols")
         return ser(
             resolved_symbols,
@@ -580,7 +628,7 @@ def ser(
             mod,
             ord_,
             num_train_symbols=num_train_symbols,
-            pmf=sig.ps_pmf if pmf is None else pmf,
+            pmf=eff_pmf,
         )
 
     if modulation is None or order is None:
@@ -719,8 +767,24 @@ def gmi(
                 "GMI requires source_bits. Ensure the Signal was created via a "
                 "factory (e.g. generate_qam(), generate_psqam())."
             )
-        mod = modulation or sig.mod_scheme
-        ord_ = order or sig.mod_order
+        mod = sig.mod_scheme
+        if mod is None:
+            mod = modulation
+            if mod is not None:
+                logger.warning(
+                    "gmi(): Signal has no mod_scheme set; falling back to "
+                    "supplied modulation=%r.",
+                    mod,
+                )
+        ord_ = sig.mod_order
+        if ord_ is None:
+            ord_ = order
+            if ord_ is not None:
+                logger.warning(
+                    "gmi(): Signal has no mod_order set; falling back to "
+                    "supplied order=%r.",
+                    ord_,
+                )
         if mod is None or ord_ is None:
             raise ValueError(
                 "GMI requires modulation and order. Ensure mod_scheme/mod_order "
@@ -731,7 +795,13 @@ def gmi(
 
         from .mapping import compute_llr
 
-        eff_pmf = sig.ps_pmf if pmf is None else pmf
+        eff_pmf = sig.ps_pmf
+        if eff_pmf is None:
+            eff_pmf = pmf
+            if eff_pmf is not None:
+                logger.warning(
+                    "gmi(): Signal has no ps_pmf set; falling back to supplied pmf."
+                )
         resolved_symbols, _ = unwrap_signal(sig, field="resolved_symbols")
         rx, xp_, _ = dispatch(resolved_symbols)
         resolved, adj_noise_var = _ps_unit_power_rescale(
@@ -874,8 +944,24 @@ def mi(
             raise ValueError(
                 "No resolved symbols available. Call resolve_symbols(sig) first."
             )
-        mod = modulation or sig.mod_scheme
-        ord_ = order or sig.mod_order
+        mod = sig.mod_scheme
+        if mod is None:
+            mod = modulation
+            if mod is not None:
+                logger.warning(
+                    "mi(): Signal has no mod_scheme set; falling back to "
+                    "supplied modulation=%r.",
+                    mod,
+                )
+        ord_ = sig.mod_order
+        if ord_ is None:
+            ord_ = order
+            if ord_ is not None:
+                logger.warning(
+                    "mi(): Signal has no mod_order set; falling back to "
+                    "supplied order=%r.",
+                    ord_,
+                )
         if mod is None or ord_ is None:
             raise ValueError(
                 "MI requires modulation and order. Ensure mod_scheme/mod_order "
@@ -883,13 +969,20 @@ def mi(
             )
         if noise_var is None:
             raise ValueError("mi() requires noise_var.")
+        eff_pmf = sig.ps_pmf
+        if eff_pmf is None:
+            eff_pmf = pmf
+            if eff_pmf is not None:
+                logger.warning(
+                    "mi(): Signal has no ps_pmf set; falling back to supplied pmf."
+                )
         resolved_symbols, _ = unwrap_signal(sig, field="resolved_symbols")
         return mi(
             resolved_symbols,
             mod,
             ord_,
             noise_var,
-            pmf=sig.ps_pmf if pmf is None else pmf,
+            pmf=eff_pmf,
             rescale_unit_power=True,
         )
 

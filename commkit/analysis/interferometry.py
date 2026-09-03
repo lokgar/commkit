@@ -191,8 +191,9 @@ def dsh_phase(
         heterodyne) or complex (IQ front-end).  A :class:`Signal` supplies
         ``sampling_rate`` from its metadata when not given explicitly.
     sampling_rate : float, optional
-        Sampling rate in Hz.  Required for array input; defaults to the
-        signal's ``sampling_rate`` for :class:`Signal` input.
+        Sampling rate in Hz.  Required for array input; ignored for
+        :class:`Signal` input, which always uses the signal's own
+        ``sampling_rate``.
     f_shift : float, optional
         Known beat carrier in Hz (AOM frequency).  If None, the mean beat
         frequency is estimated per channel in two stages - coarse Kay
@@ -235,9 +236,18 @@ def dsh_phase(
     """
     samples, sig = unwrap_signal(samples)
     if sig is not None:
+        # sig.sampling_rate is a required field, so it always wins over a
+        # supplied sampling_rate - see CLAUDE.md, "Signal-Awareness".
+        if sampling_rate is not None:
+            logger.warning(
+                "dsh_phase(): ignoring supplied sampling_rate=%r for Signal "
+                "input; using the signal's own sampling_rate=%r instead.",
+                sampling_rate,
+                sig.sampling_rate,
+            )
         return dsh_phase(
             samples,
-            sampling_rate if sampling_rate is not None else sig.sampling_rate,
+            sig.sampling_rate,
             f_shift=f_shift,
         )
 
@@ -503,8 +513,9 @@ def linewidth_dsh(
         complex (IQ).  A :class:`Signal` supplies ``sampling_rate`` from its
         metadata when not given explicitly.
     sampling_rate : float, optional
-        Sampling rate in Hz.  Required for array input; defaults to the
-        signal's ``sampling_rate`` for :class:`Signal` input.
+        Sampling rate in Hz.  Required for array input; ignored for
+        :class:`Signal` input, which always uses the signal's own
+        ``sampling_rate``.
     delay : float
         Interferometer differential delay τ_d in seconds.
     f_shift : float, optional
@@ -637,9 +648,19 @@ def linewidth_dsh(
     """
     samples, sig = unwrap_signal(samples)
     if sig is not None:
+        # sig.sampling_rate is a required field, so it always wins over a
+        # supplied sampling_rate - see CLAUDE.md, "Signal-Awareness".
+        if sampling_rate is not None:
+            logger.warning(
+                "linewidth_dsh(): ignoring supplied sampling_rate=%r for "
+                "Signal input; using the signal's own sampling_rate=%r "
+                "instead.",
+                sampling_rate,
+                sig.sampling_rate,
+            )
         return linewidth_dsh(
             samples,
-            sampling_rate if sampling_rate is not None else sig.sampling_rate,
+            sig.sampling_rate,
             delay,
             f_shift=f_shift,
             method=method,

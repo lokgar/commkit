@@ -50,8 +50,9 @@ def apply_pmd(
     samples : array_like or Signal
         Dual-polarization signal. Shape: ``(2, N_samples)``.
     sampling_rate : float, optional
-        Sampling rate in Hz.  Required for array input; defaults to the
-        signal's ``sampling_rate`` for :class:`Signal` input.
+        Sampling rate in Hz.  Required for array input; ignored for
+        :class:`Signal` input, which always uses the signal's own
+        ``sampling_rate``.
     dgd : float
         Differential group delay tau in seconds.
         Set to ``0`` to apply pure SOP rotation with no delay (equivalent
@@ -81,12 +82,16 @@ def apply_pmd(
     """
     x, sig = unwrap_signal(samples)
     if sig is not None:
-        result = apply_pmd(
-            x,
-            sampling_rate if sampling_rate is not None else sig.sampling_rate,
-            dgd,
-            theta,
-        )
+        # sig.sampling_rate is a required field, so it always wins over a
+        # supplied sampling_rate - see CLAUDE.md, "Signal-Awareness".
+        if sampling_rate is not None:
+            logger.warning(
+                "apply_pmd(): ignoring supplied sampling_rate=%r for Signal "
+                "input; using the signal's own sampling_rate=%r instead.",
+                sampling_rate,
+                sig.sampling_rate,
+            )
+        result = apply_pmd(x, sig.sampling_rate, dgd, theta)
         return rewrap_signal(sig, result)
 
     if sampling_rate is None:
@@ -271,8 +276,9 @@ def apply_chromatic_dispersion(
     samples : array_like or Signal
         Complex baseband signal. Shape: ``(N,)`` (SISO) or ``(C, N)`` (MIMO).
     sampling_rate : float, optional
-        Sampling rate in Hz.  Required for array input; defaults to the
-        signal's ``sampling_rate`` for :class:`Signal` input.
+        Sampling rate in Hz.  Required for array input; ignored for
+        :class:`Signal` input, which always uses the signal's own
+        ``sampling_rate``.
     dispersion_ps_nm_km : float
         Fiber dispersion parameter D in ps / (nm * km).
         Standard SMF-28: 17 ps/(nm*km) at 1550 nm.
@@ -303,9 +309,19 @@ def apply_chromatic_dispersion(
     """
     x, sig = unwrap_signal(samples)
     if sig is not None:
+        # sig.sampling_rate is a required field, so it always wins over a
+        # supplied sampling_rate - see CLAUDE.md, "Signal-Awareness".
+        if sampling_rate is not None:
+            logger.warning(
+                "apply_chromatic_dispersion(): ignoring supplied "
+                "sampling_rate=%r for Signal input; using the signal's own "
+                "sampling_rate=%r instead.",
+                sampling_rate,
+                sig.sampling_rate,
+            )
         result = apply_chromatic_dispersion(
             x,
-            sampling_rate if sampling_rate is not None else sig.sampling_rate,
+            sig.sampling_rate,
             dispersion_ps_nm_km,
             fiber_length_km,
             center_wavelength_nm,

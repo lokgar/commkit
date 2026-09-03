@@ -113,9 +113,13 @@ def demap_symbols_hard(
     symbols : array_like
         Input array of received symbols. Shape: (..., N_symbols).
     modulation : {"psk", "qam", "ask"}
-        Modulation type.
+        Modulation type.  Required for array input; for :class:`Signal`
+        input, used only as a fallback when the signal's ``mod_scheme`` is
+        unset.
     order : int
-        Modulation order.
+        Modulation order.  Required for array input; for :class:`Signal`
+        input, used only as a fallback when the signal's ``mod_order`` is
+        unset.
     unipolar : bool, default False
         Trigger unipolar demapping for ASK/PAM.
     pmf : np.ndarray, optional
@@ -126,7 +130,8 @@ def demap_symbols_hard(
         back to the ``{s_m}`` grid used by ``gray_constellation``.
         Use this when ``symbols`` comes from
         ``resolved_symbols`` of a PS-QAM signal.
-        Has no effect for uniform modulations.
+        Has no effect for uniform modulations.  For :class:`Signal` input,
+        used only as a fallback when the signal's ``ps_pmf`` is unset.
 
     Returns
     -------
@@ -143,12 +148,38 @@ def demap_symbols_hard(
                 "a plain Signal before demapping."
             )
             return sig.copy()
-        if sig.mod_scheme is None or sig.mod_order is None:
+        mod = sig.mod_scheme
+        if mod is None:
+            mod = modulation
+            if mod is not None:
+                logger.warning(
+                    "demap_symbols_hard(): Signal has no mod_scheme set; "
+                    "falling back to supplied modulation=%r.",
+                    mod,
+                )
+        ord_ = sig.mod_order
+        if ord_ is None:
+            ord_ = order
+            if ord_ is not None:
+                logger.warning(
+                    "demap_symbols_hard(): Signal has no mod_order set; "
+                    "falling back to supplied order=%r.",
+                    ord_,
+                )
+        if mod is None or ord_ is None:
             raise ValueError("Modulation scheme and order required for demapping.")
         if sig.resolved_symbols is None:
             raise ValueError(
                 "No resolved symbols available. Call resolve_symbols(sig) first."
             )
+        eff_pmf = sig.ps_pmf
+        if eff_pmf is None:
+            eff_pmf = pmf
+            if eff_pmf is not None:
+                logger.warning(
+                    "demap_symbols_hard(): Signal has no ps_pmf set; falling "
+                    "back to supplied pmf."
+                )
         # Output field (resolved_bits) differs from the input field
         # (resolved_symbols), so this is assigned by hand rather than via
         # rewrap_signal (which always sets .samples).
@@ -156,10 +187,10 @@ def demap_symbols_hard(
         new = sig.copy()
         new.resolved_bits = demap_symbols_hard(
             resolved_symbols,
-            sig.mod_scheme,
-            sig.mod_order,
+            mod,
+            ord_,
             unipolar=sig.mod_unipolar or False,
-            pmf=sig.ps_pmf if pmf is None else pmf,
+            pmf=eff_pmf,
         )
         return new
 

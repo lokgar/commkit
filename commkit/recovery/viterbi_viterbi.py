@@ -39,11 +39,12 @@ def recover_carrier_phase_viterbi_viterbi(
         metadata when not given explicitly.
     modulation : str, optional
         Modulation scheme (case-insensitive): 'psk', 'qam', etc.  Required
-        for array input; defaults to the signal's ``mod_scheme`` for
-        :class:`Signal` input.
+        for array input; for :class:`Signal` input, used only as a fallback
+        when the signal's ``mod_scheme`` is unset.
     order : int, optional
-        Modulation order.  Required for array input; defaults to the
-        signal's ``mod_order`` for :class:`Signal` input.
+        Modulation order.  Required for array input; for :class:`Signal`
+        input, used only as a fallback when the signal's ``mod_order`` is
+        unset.
     block_size : int, default 32
         Number of symbols per estimation block. Larger blocks reduce
         variance but reduce tracking bandwidth for fast phase noise.
@@ -83,10 +84,28 @@ def recover_carrier_phase_viterbi_viterbi(
     """
     x, sig = unwrap_signal(symbols)
     if sig is not None:
+        mod = sig.mod_scheme
+        if mod is None:
+            mod = modulation
+            if mod is not None:
+                logger.warning(
+                    "recover_carrier_phase_viterbi_viterbi(): Signal has no "
+                    "mod_scheme set; falling back to supplied modulation=%r.",
+                    mod,
+                )
+        ord_ = sig.mod_order
+        if ord_ is None:
+            ord_ = order
+            if ord_ is not None:
+                logger.warning(
+                    "recover_carrier_phase_viterbi_viterbi(): Signal has no "
+                    "mod_order set; falling back to supplied order=%r.",
+                    ord_,
+                )
         return recover_carrier_phase_viterbi_viterbi(
             x,
-            modulation or sig.mod_scheme,
-            order or sig.mod_order,
+            mod,
+            ord_,
             block_size=block_size,
             joint_channels=joint_channels,
             cycle_slip_correction=cycle_slip_correction,

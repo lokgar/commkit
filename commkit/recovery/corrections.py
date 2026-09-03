@@ -742,8 +742,12 @@ def resolve_phase_ambiguity(
         Shape: ``(N,)`` or ``(C, N)``.
     modulation : str
         Modulation scheme (case-insensitive): ``'qam'``, ``'psk'``, etc.
+        Required for array input; for :class:`Signal` input, used only as a
+        fallback when the signal's ``mod_scheme`` is unset.
     order : int
-        Modulation order.
+        Modulation order.  Required for array input; for :class:`Signal`
+        input, used only as a fallback when the signal's ``mod_order`` is
+        unset.
     symmetry_order : int, optional
         Number of rotationally equivalent constellation copies to test.
         Defaults to 4 for QAM (4-fold ``π/2`` symmetry) and ``order`` for
@@ -759,7 +763,8 @@ def resolve_phase_ambiguity(
         ``ser`` so the diagnostic SER reported in
         the log is unbiased for shaped constellations.  The phase-rotation
         choice itself uses a scale-invariant inner product and does not
-        depend on ``pmf``.
+        depend on ``pmf``.  For :class:`Signal` input, used only as a
+        fallback when the signal's ``ps_pmf`` is unset.
 
     Returns
     -------
@@ -782,18 +787,44 @@ def resolve_phase_ambiguity(
                 "source_symbols is not set. Populate source_symbols (the known TX "
                 "symbol sequence) before calling resolve_phase_ambiguity()."
             )
-        if sig.mod_scheme is None or sig.mod_order is None:
+        mod = sig.mod_scheme
+        if mod is None:
+            mod = modulation
+            if mod is not None:
+                logger.warning(
+                    "resolve_phase_ambiguity(): Signal has no mod_scheme "
+                    "set; falling back to supplied modulation=%r.",
+                    mod,
+                )
+        ord_ = sig.mod_order
+        if ord_ is None:
+            ord_ = order
+            if ord_ is not None:
+                logger.warning(
+                    "resolve_phase_ambiguity(): Signal has no mod_order set; "
+                    "falling back to supplied order=%r.",
+                    ord_,
+                )
+        if mod is None or ord_ is None:
             raise ValueError("mod_scheme and mod_order must be set.")
+        eff_pmf = sig.ps_pmf
+        if eff_pmf is None:
+            eff_pmf = pmf
+            if eff_pmf is not None:
+                logger.warning(
+                    "resolve_phase_ambiguity(): Signal has no ps_pmf set; "
+                    "falling back to supplied pmf."
+                )
         resolved_symbols, _ = unwrap_signal(sig, field="resolved_symbols")
         new = sig.copy()
         new.resolved_symbols = resolve_phase_ambiguity(
             resolved_symbols,
             sig.source_symbols,
-            sig.mod_scheme,
-            sig.mod_order,
+            mod,
+            ord_,
             symmetry_order=symmetry_order,
             num_skip_symbols=num_skip_symbols,
-            pmf=sig.ps_pmf,
+            pmf=eff_pmf,
         )
         return new
 

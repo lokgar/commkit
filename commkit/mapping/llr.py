@@ -113,11 +113,13 @@ def compute_llr(
         ``modulation``/``order``/``pmf`` from its metadata when not given
         explicitly.
     modulation : {"psk", "qam", "ask"}, optional
-        Modulation type.  Required for array input; defaults to the signal's
-        ``mod_scheme`` for :class:`Signal` input.
+        Modulation type.  Required for array input; for :class:`Signal`
+        input, used only as a fallback when the signal's ``mod_scheme`` is
+        unset.
     order : int, optional
-        Modulation order.  Required for array input; defaults to the
-        signal's ``mod_order`` for :class:`Signal` input.
+        Modulation order.  Required for array input; for :class:`Signal`
+        input, used only as a fallback when the signal's ``mod_order`` is
+        unset.
     noise_var : float
         Complex noise variance sigma^2 referenced to the normalised
         constellation (unit avg power).  sigma^2 = 10^(-EsN0_dB / 10).
@@ -131,7 +133,8 @@ def compute_llr(
     pmf : np.ndarray, optional
         Symbol PMF of shape ``(order,)`` for PS-QAM.  Pass
         ``maxwell_boltzmann(order, nu)`` to incorporate the non-uniform prior.
-        ``None`` assumes uniform prior.
+        ``None`` assumes uniform prior.  For :class:`Signal` input, used
+        only as a fallback when the signal's ``ps_pmf`` is unset.
 
     Returns
     -------
@@ -155,15 +158,41 @@ def compute_llr(
             raise ValueError(
                 "No resolved symbols available. Call resolve_symbols(sig) first."
             )
+        mod = sig.mod_scheme
+        if mod is None:
+            mod = modulation
+            if mod is not None:
+                logger.warning(
+                    "compute_llr(): Signal has no mod_scheme set; falling "
+                    "back to supplied modulation=%r.",
+                    mod,
+                )
+        ord_ = sig.mod_order
+        if ord_ is None:
+            ord_ = order
+            if ord_ is not None:
+                logger.warning(
+                    "compute_llr(): Signal has no mod_order set; falling "
+                    "back to supplied order=%r.",
+                    ord_,
+                )
+        eff_pmf = sig.ps_pmf
+        if eff_pmf is None:
+            eff_pmf = pmf
+            if eff_pmf is not None:
+                logger.warning(
+                    "compute_llr(): Signal has no ps_pmf set; falling back "
+                    "to supplied pmf."
+                )
         return compute_llr(
             x,
-            modulation or sig.mod_scheme,
-            order or sig.mod_order,
+            mod,
+            ord_,
             noise_var,
             method=method,
             unipolar=unipolar,
             output=output,
-            pmf=sig.ps_pmf if pmf is None else pmf,
+            pmf=eff_pmf,
         )
 
     if modulation is None or order is None:

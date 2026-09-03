@@ -27,8 +27,8 @@ def apply_awgn(
     samples : array_like or Signal
         The input signal samples. Shape: (..., N_samples)
     sps : float, optional
-        Samples per symbol.  Required for array input; defaults to the
-        signal's ``sps`` for :class:`Signal` input.
+        Samples per symbol.  Required for array input; ignored for
+        :class:`Signal` input, which always uses the signal's own ``sps``.
     esn0_db : float
         Symbol energy to noise spectral density ratio (Es/N0) in dB.
     seed : int, optional
@@ -62,9 +62,19 @@ def apply_awgn(
     """
     x, sig = unwrap_signal(samples)
     if sig is not None:
+        # sig.sps is always populated (derived from the required sampling_rate
+        # / symbol_rate fields), so the Signal's own value always wins over a
+        # supplied sps - see CLAUDE.md, "Signal-Awareness".
+        if sps is not None:
+            logger.warning(
+                "apply_awgn(): ignoring supplied sps=%r for Signal input; "
+                "using the signal's own sps=%r instead.",
+                sps,
+                sig.sps,
+            )
         result = apply_awgn(
             x,
-            sps if sps is not None else sig.sps,
+            sig.sps,
             esn0_db,
             seed=seed,
             signal_power=signal_power,

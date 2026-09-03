@@ -414,8 +414,9 @@ def recover_carrier_phase_pilot_tone(
         Oversampled complex samples (``sps > 1``). Shape: ``(N,)`` or
         ``(C, N)``.  Same rate as used for ``add_pilot_tone``.
     sampling_rate : float, optional
-        Sampling rate f_s in Hz.  Required for array input; defaults to the
-        signal's ``sampling_rate`` for :class:`Signal` input.
+        Sampling rate f_s in Hz.  Required for array input; ignored for
+        :class:`Signal` input, which always uses the signal's own
+        ``sampling_rate``.
     tone_frequency : float
         Nominal pilot-tone frequency f_p in Hz (as added at the TX).
         The recovered phase is referenced to **this** carrier, so any carrier
@@ -483,9 +484,19 @@ def recover_carrier_phase_pilot_tone(
     """
     x, sig = unwrap_signal(samples)
     if sig is not None:
+        # sig.sampling_rate is a required field, so it always wins over a
+        # supplied sampling_rate - see CLAUDE.md, "Signal-Awareness".
+        if sampling_rate is not None:
+            logger.warning(
+                "recover_carrier_phase_pilot_tone(): ignoring supplied "
+                "sampling_rate=%r for Signal input; using the signal's own "
+                "sampling_rate=%r instead.",
+                sampling_rate,
+                sig.sampling_rate,
+            )
         return recover_carrier_phase_pilot_tone(
             x,
-            sampling_rate if sampling_rate is not None else sig.sampling_rate,
+            sig.sampling_rate,
             tone_frequency,
             bandwidth,
             search_band=search_band,
@@ -653,8 +664,9 @@ def recover_carrier_phase_pilot_tones(
         Oversampled complex samples (``sps > 1``).
     sampling_rate : float, optional
         Sampling rate in Hz (of *these* samples - pass the post-resample rate if
-        the demux/resample ran first).  Required for array input; defaults to
-        the signal's ``sampling_rate`` for :class:`Signal` input.
+        the demux/resample ran first).  Required for array input; ignored for
+        :class:`Signal` input, which always uses the signal's own
+        ``sampling_rate``.
     tone_frequencies : sequence of float
         Nominal pilot-tone frequencies in Hz (length ``K``).
     bandwidth : float
@@ -695,9 +707,19 @@ def recover_carrier_phase_pilot_tones(
     """
     x, sig_obj = unwrap_signal(samples)
     if sig_obj is not None:
+        # sig_obj.sampling_rate is a required field, so it always wins over a
+        # supplied sampling_rate - see CLAUDE.md, "Signal-Awareness".
+        if sampling_rate is not None:
+            logger.warning(
+                "recover_carrier_phase_pilot_tones(): ignoring supplied "
+                "sampling_rate=%r for Signal input; using the signal's own "
+                "sampling_rate=%r instead.",
+                sampling_rate,
+                sig_obj.sampling_rate,
+            )
         return recover_carrier_phase_pilot_tones(
             x,
-            sampling_rate if sampling_rate is not None else sig_obj.sampling_rate,
+            sig_obj.sampling_rate,
             tone_frequencies,
             bandwidth,
             differential_bandwidth=differential_bandwidth,

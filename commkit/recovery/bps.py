@@ -41,11 +41,13 @@ def recover_carrier_phase_bps(
     modulation : str, optional
         Modulation scheme (case-insensitive). Used to fetch the reference
         constellation via
-        ``gray_constellation``.  Required for array input; defaults to the
-        signal's ``mod_scheme`` for :class:`Signal` input.
+        ``gray_constellation``.  Required for array input; for :class:`Signal`
+        input, used only as a fallback when the signal's ``mod_scheme`` is
+        unset.
     order : int, optional
-        Modulation order.  Required for array input; defaults to the
-        signal's ``mod_order`` for :class:`Signal` input.
+        Modulation order.  Required for array input; for :class:`Signal`
+        input, used only as a fallback when the signal's ``mod_order`` is
+        unset.
     num_test_phases : int, default 64
         Number of candidate phase offsets B. Resolution is ``π/(2B)``
         rad per step. More candidates improve accuracy at higher compute cost.
@@ -79,7 +81,8 @@ def recover_carrier_phase_bps(
         nearest-neighbour distance metric matches the scale of the
         unit-avg-power input.  Without this, mid-shell PS points cross
         decision boundaries in the BPS metric and bias the phase estimate.
-        No-op for uniform modulations.
+        No-op for uniform modulations.  For :class:`Signal` input, used
+        only as a fallback when the signal's ``ps_pmf`` is unset.
     debug_plot : bool, default False
         If ``True``, opens a diagnostic figure showing the per-symbol phase
         trajectory alongside the block-phase estimates.
@@ -105,17 +108,43 @@ def recover_carrier_phase_bps(
 
     x, sig = unwrap_signal(symbols)
     if sig is not None:
+        mod = sig.mod_scheme
+        if mod is None:
+            mod = modulation
+            if mod is not None:
+                logger.warning(
+                    "recover_carrier_phase_bps(): Signal has no mod_scheme "
+                    "set; falling back to supplied modulation=%r.",
+                    mod,
+                )
+        ord_ = sig.mod_order
+        if ord_ is None:
+            ord_ = order
+            if ord_ is not None:
+                logger.warning(
+                    "recover_carrier_phase_bps(): Signal has no mod_order "
+                    "set; falling back to supplied order=%r.",
+                    ord_,
+                )
+        eff_pmf = sig.ps_pmf
+        if eff_pmf is None:
+            eff_pmf = pmf
+            if eff_pmf is not None:
+                logger.warning(
+                    "recover_carrier_phase_bps(): Signal has no ps_pmf set; "
+                    "falling back to supplied pmf."
+                )
         return recover_carrier_phase_bps(
             x,
-            modulation or sig.mod_scheme,
-            order or sig.mod_order,
+            mod,
+            ord_,
             num_test_phases=num_test_phases,
             block_size=block_size,
             joint_channels=joint_channels,
             cycle_slip_correction=cycle_slip_correction,
             cycle_slip_history=cycle_slip_history,
             cycle_slip_threshold=cycle_slip_threshold,
-            pmf=sig.ps_pmf if pmf is None else pmf,
+            pmf=eff_pmf,
             debug_plot=debug_plot,
         )
 

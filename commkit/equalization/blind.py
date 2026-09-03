@@ -9,6 +9,7 @@ import numpy as np
 from ..backend import ArrayType
 from ..core.signal import Signal
 from ..helpers import broadcast_channels, rewrap_signal, unwrap_signal
+from ..logger import logger
 from ._block import _block_fdaf_blind
 from ._common import _godard_radius, _rde_ring_radii
 from .result import EqualizerResult
@@ -68,14 +69,25 @@ def block_cma(
     Returns an :class:`EqualizerResult` with ``y_hat``, ``weights``, ``error``
     on the input's device.  A :class:`Signal` returns ``y_hat`` as a new
     :class:`Signal` at the symbol rate (``sampling_rate = symbol_rate``);
-    ``sps`` defaults to the signal's ``sps`` when not given explicitly.
+    ``sps`` is ignored for :class:`Signal` input, which always uses the
+    signal's own ``sps``.
     """
     x, sig = unwrap_signal(samples)
     if sig is not None:
+        # sig.sps is always populated (derived from the required sampling_rate
+        # / symbol_rate fields), so the Signal's own value always wins over a
+        # supplied sps - see CLAUDE.md, "Signal-Awareness".
+        if sps is not None:
+            logger.warning(
+                "block_cma(): ignoring supplied sps=%r for Signal input; "
+                "using the signal's own sps=%r instead.",
+                sps,
+                sig.sps,
+            )
         result = block_cma(
             x,
             num_taps=num_taps,
-            sps=sps if sps is not None else int(sig.sps),
+            sps=int(sig.sps),
             step_size=step_size,
             block_size=block_size,
             modulation=modulation,
@@ -166,15 +178,25 @@ def block_rde(
     pilot-aided path.  Returns an :class:`EqualizerResult` with ``y_hat``,
     ``weights``, ``error`` on the input's device.  A :class:`Signal` returns
     ``y_hat`` as a new :class:`Signal` at the symbol rate (``sampling_rate =
-    symbol_rate``); ``sps`` defaults to the signal's ``sps`` when not given
-    explicitly.
+    symbol_rate``); ``sps`` is ignored for :class:`Signal` input, which
+    always uses the signal's own ``sps``.
     """
     x, sig = unwrap_signal(samples)
     if sig is not None:
+        # sig.sps is always populated (derived from the required sampling_rate
+        # / symbol_rate fields), so the Signal's own value always wins over a
+        # supplied sps - see CLAUDE.md, "Signal-Awareness".
+        if sps is not None:
+            logger.warning(
+                "block_rde(): ignoring supplied sps=%r for Signal input; "
+                "using the signal's own sps=%r instead.",
+                sps,
+                sig.sps,
+            )
         result = block_rde(
             x,
             num_taps=num_taps,
-            sps=sps if sps is not None else int(sig.sps),
+            sps=int(sig.sps),
             step_size=step_size,
             block_size=block_size,
             modulation=modulation,
