@@ -9,6 +9,7 @@ from ..core.signal import Signal
 from ..helpers import (
     as_2d,
     broadcast_channels,
+    remove_linear_trend,
     restore_1d,
     rewrap_signal,
     unwrap_signal,
@@ -106,18 +107,17 @@ def smooth_phase_wiener(
     C, N = phase.shape
     phi = phase.astype(xp.float64)
 
-    # Detrend per channel (mean + linear) so the DC-divergent random-walk PSD
-    # does not distort the residual-FOE ramp; restore the trend after filtering.
-    n = xp.arange(N, dtype=xp.float64)
+    # Detrend per channel so the DC-divergent random-walk PSD does not distort
+    # the residual-FOE ramp; restore the slope after filtering.  Only the
+    # slope is removed (helpers.remove_linear_trend keeps the mean) - the
+    # Wiener gain forces H[0] = 1.0 below, so a constant offset passes through
+    # filtering unchanged regardless of whether it was present going in.
+    xc = xp.arange(N, dtype=xp.float64) - 0.5 * (N - 1)
     if detrend:
-        nc = n - xp.mean(n)
-        denom = xp.sum(nc * nc)
-        mean = xp.mean(phi, axis=-1, keepdims=True)
-        slope = xp.sum((phi - mean) * nc[None, :], axis=-1, keepdims=True) / denom
-        trend = mean + slope * nc[None, :]
+        phi_c, slope = remove_linear_trend(phi)
     else:
-        trend = xp.zeros((C, 1), dtype=xp.float64)
-    phi_c = phi - trend
+        phi_c = phi
+        slope = xp.zeros(C, dtype=xp.float64)
 
     # Real, even Wiener gain H(ω); keep DC (H[0]=1) where S_φ -> ∞.  The phase
     # track is real, so the filter runs on the half spectrum (rfft/irfft) -
@@ -130,12 +130,12 @@ def smooth_phase_wiener(
     H[0] = 1.0
 
     phi_s = xp.fft.irfft(xp.fft.rfft(phi_c, axis=-1) * H[None, :], n=N, axis=-1)
-    phi_s = phi_s + trend
+    phi_s = phi_s + slope[:, None] * xc[None, :]
 
     if logger.isEnabledFor(logging.INFO):
         # Two std reductions + host syncs, needed only for the line below.
         std_in = float(xp.std(phi_c))
-        std_out = float(xp.std(phi_s - trend))
+        std_out = float(xp.std(phi_s - slope[:, None] * xc[None, :]))
         logger.info(
             "Wiener phase smoother: q=%.3g, r=%.3g rad², residual std %.2f° -> %.2f°.",
             q,
