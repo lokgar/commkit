@@ -72,6 +72,18 @@ from .linewidth import fm_noise_psd
 
 __all__ = ["dsh_beat", "dsh_fm_noise_psd", "dsh_phase", "linewidth_dsh"]
 
+# -----------------------------------------------------------------------------
+# Functions stay in *pipeline* order (beat -> phase -> FM-noise PSD -> linewidth
+# summary) rather than grouped by Signal-awareness, since each stage is the
+# next one's input:
+#   dsh_beat          - array-only forward model (synthesizes a beat from a
+#                        phase trajectory for validation; no Signal to unwrap).
+#   dsh_phase         - Signal-aware: takes the real captured beat record.
+#   dsh_fm_noise_psd  - array-only: takes dsh_phase's differential-phase output.
+#   linewidth_dsh     - Signal-aware: the end-to-end orchestrator, also takes
+#                        the real captured beat record.
+# -----------------------------------------------------------------------------
+
 
 def _analytic_beat(samples):
     """Complex analytic beat ``(C, N)`` from raw DSH samples (Hilbert if real)."""

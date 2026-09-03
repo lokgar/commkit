@@ -13,6 +13,11 @@ from ..filtering import fir_filter, lowpass_taps
 from ..helpers import rewrap_signal, unwrap_signal
 from ..logger import logger
 
+# -----------------------------------------------------------------------------
+# TIME-VARYING MATRIX APPLY (Signal-aware)
+# -----------------------------------------------------------------------------
+# Generic interpolate-and-apply core shared with the dynamic demux below.
+
 
 @overload
 def apply_interpolated_matrix(
@@ -104,7 +109,7 @@ def apply_interpolated_matrix(
 
 
 # -----------------------------------------------------------------------------
-# TONE-BASED POLARIZATION DEMULTIPLEXING
+# TONE-BASED POLARIZATION DEMULTIPLEXING (Signal-aware)
 # -----------------------------------------------------------------------------
 
 _EXTRACT_CHUNK = 1 << 20  # samples per block in the chunked tone-phasor GEMM

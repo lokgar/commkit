@@ -86,17 +86,6 @@ def test_decimate_to_symbol_rate(backend_device, xp, xpt):
     xpt.assert_array_equal(syms_mimo[1], xp.array([10, 20, 30, 40]))
 
 
-def test_expand(backend_device, xp, xpt):
-    """Verify up-sampling by zero-stuffing correctly inserts zeros."""
-    data = xp.array([1, 2, 3], dtype="float32")
-    factor = 3
-    expanded = multirate.expand(data, factor)
-
-    # Expected: 1, 0, 0, 2, 0, 0, 3, 0, 0
-    expected = xp.array([1, 0, 0, 2, 0, 0, 3, 0, 0])
-    xpt.assert_array_equal(expanded, expected)
-
-
 def test_decimate_polyphase(backend_device, xp):
     """Verify decimation using the polyphase method."""
     data = xp.ones(100)

@@ -14,10 +14,9 @@ from .backend import ArrayType, dispatch, to_device
 from .core.signal import Signal
 from .helpers import as_2d, normalize, restore_1d, rewrap_signal, unwrap_signal
 from .logger import logger
-from .multirate import expand
 
 # -----------------------------------------------------------------------------
-# FILTER DESIGN - TAP GENERATORS
+# FILTER DESIGN - TAP GENERATORS (array-only)
 # -----------------------------------------------------------------------------
 # rect_taps:     Hard or trapezoidal rectangular pulse taps
 # gaussian_taps: Gaussian filter taps
@@ -25,6 +24,9 @@ from .multirate import expand
 # rrc_taps:      Root Raised Cosine filter taps
 # rc_taps:       Raised Cosine filter taps
 # lowpass_taps, highpass_taps, bandpass_taps, bandstop_taps: FIR filters
+#
+# All build taps from parameters alone - no signal input, so none are
+# Signal-aware (same category as gray_code/barker_sequence).
 
 
 def rect_taps(sps: int, duty_cycle: float = 1.0, rise_time: float = 0.0) -> np.ndarray:
@@ -512,14 +514,20 @@ def bandstop_taps(
 
 
 # -----------------------------------------------------------------------------
-# FILTERING OPERATIONS
+# FILTERING OPERATIONS (Signal-aware)
 # -----------------------------------------------------------------------------
 # _ols_forward:  OLS block windowing + batch FFT (shared scaffold)
 # _ols_backward: OLS batch IFFT + symmetric discard + reshape (shared scaffold)
 # ols_fir_filter: Public OLS FIR convolution (long-tap / memory-bounded)
+# shaping_filter_taps: Reconstruct pulse-shaping taps from a Signal's own
+#   metadata (pulse_shape/sps/rolloff) - takes a Signal, returns taps, used
+#   by matched_filter below to derive default taps for Signal input.
 # fir_filter: Generic FIR filtering operation (short-to-medium taps)
 # matched_filter: Apply matched filter (time-reversed conjugate of pulse shape)
-# shape_pulse: Apply pulse shaping to symbols
+#
+# shape_pulse (TX symbol -> waveform synthesis) lives in core/generation.py,
+# not here: it is a signal-construction primitive, not a transform on an
+# existing Signal's samples (see CLAUDE.md, "Signal-Awareness").
 
 
 def _ols_forward(samples: ArrayType, N_fft: int):
@@ -842,121 +850,6 @@ def fir_filter(
     return result
 
 
-def shape_pulse(
-    symbols: ArrayType,
-    sps: float,
-    pulse_shape: str = "none",
-    *,
-    duty_cycle: float = 1.0,
-    rise_time: float = 0.0,
-    filter_span: int = 10,
-    rrc_rolloff: float = 0.35,
-    rc_rolloff: float = 0.35,
-    rz: bool = False,
-) -> ArrayType:
-    """
-    Applies pulse shaping to a symbol sequence.
-
-    Parameters
-    ----------
-    symbols : array_like
-        Input symbol sequence. Shape: (..., N_symbols).
-    sps : float
-        Samples per symbol (upsampling factor).
-    pulse_shape : {"none", "rect", "smoothrect", "gaussian", "rrc", "rc", "sinc"}, default "none"
-        Identifier for the pulse shaping filter type.
-    duty_cycle : float, default 1.0
-        Pulse width in symbol periods, in the range ``(0, 1]``.
-
-        - ``"rect"``, ``"smoothrect"``: total on-time of the pulse (including
-          ramps for rect, underlying rect width for smoothrect).
-        - ``"gaussian"``: Full-Width at Half-Maximum (FWHM) of the Gaussian.
-        - NRZ signals always use 1.0; use 0.5 for canonical RZ.
-    rise_time : float, default 0.0
-        Edge transition duration in symbol periods. Applies to ``"rect"`` and
-        ``"smoothrect"`` only; ignored for all other pulse types.
-
-        - ``"rect"``: duration of each linear ramp. The flat top width is
-          ``duty_cycle - 2 * rise_time``. Must satisfy
-          ``rise_time <= duty_cycle / 2``.
-        - ``"smoothrect"``: 10%-90% erf-edge duration. Smaller values give
-          sharper edges; larger values give softer Gaussian-like transitions.
-        - ``0.0`` (default): hard rectangular edges for ``"rect"``.
-    filter_span : int, default 10
-        Filter span in symbols for FIR tap generators
-        (``"smoothrect"``, ``"gaussian"``, ``"rrc"``, ``"rc"``, ``"sinc"``).
-    rrc_rolloff : float, default 0.35
-        Roll-off factor for the Root-Raised-Cosine filter (``"rrc"``). Range [0, 1].
-    rc_rolloff : float, default 0.35
-        Roll-off factor for the Raised-Cosine filter (``"rc"``). Range [0, 1].
-    rz : bool, default False
-        Convenience flag for Return-to-Zero signaling. When ``True``, overrides
-        ``duty_cycle`` to 0.5 (if not already set below 1.0) and converts
-        ``pulse_shape="none"`` to ``"rect"`` automatically.
-
-    Returns
-    -------
-    array_like
-        The pulse-shaped waveform at rate ``sps * symbol_rate``, normalized to
-        **unit symbol power** (Es = 1). Average sample power = 1/sps.
-
-    Notes
-    -----
-    All pulse types produce output satisfying E[|x|²] * sps = 1 (symbol-power
-    convention). For peak-normalized samples (e.g. eye diagrams), apply
-    ``normalize(..., "peak")`` after.
-    """
-    logger.debug("Applying pulse shaping: %s", pulse_shape)
-
-    if rz:
-        duty_cycle = 0.5
-
-    symbols, xp, sp = dispatch(symbols)
-
-    if pulse_shape == "none":
-        if rz:
-            logger.debug("RZ signaling requested, using rect pulse shape")
-            pulse_shape = "rect"
-        else:
-            logger.debug("Pulse shaping disabled, expanding symbols by sps")
-            return normalize(
-                expand(symbols, int(sps), axis=-1),
-                "symbol_power",
-                sps=int(sps),
-                axis=-1,
-            )
-
-    if pulse_shape == "rect":
-        h = rect_taps(int(sps), duty_cycle=duty_cycle, rise_time=rise_time)
-    elif pulse_shape == "smoothrect":
-        h = smoothrect_taps(
-            int(sps), span=filter_span, rise_time=rise_time, duty_cycle=duty_cycle
-        )
-    elif pulse_shape == "gaussian":
-        h = gaussian_taps(sps, span=filter_span, duty_cycle=duty_cycle)
-    elif pulse_shape == "rrc":
-        h = rrc_taps(sps, span=filter_span, rolloff=rrc_rolloff)
-    elif pulse_shape == "rc":
-        h = rc_taps(sps, span=filter_span, rolloff=rc_rolloff)
-    elif pulse_shape == "sinc":
-        # Sinc pulse shaping is equivalent to RRC with rolloff=0
-        h = rrc_taps(sps, span=filter_span, rolloff=0.0)
-    else:
-        raise ValueError(f"Not implemented pulse shape: {pulse_shape}")
-
-    # Ensure h is on the correct backend and matches symbol precision.
-    # Tap generators return float64; casting here prevents scipy's resample_poly
-    # from promoting complex64 symbols to complex128.
-    h = xp.asarray(h).astype(symbols.real.dtype)
-
-    # Apply Pulse Shaping via Polyphase Resampling
-    res = sp.signal.resample_poly(symbols, int(sps), 1, window=h, axis=-1)
-    if res.dtype != symbols.dtype:
-        res = res.astype(symbols.dtype)
-
-    return normalize(res, "symbol_power", sps=int(sps), axis=-1)
-
-
 def matched_filter(
     samples: ArrayType | Signal,
     pulse_taps: ArrayType | None = None,
@@ -1028,7 +921,7 @@ def matched_filter(
 
 
 # -----------------------------------------------------------------------------
-# CHROMATIC DISPERSION
+# CHROMATIC DISPERSION (Signal-aware)
 # -----------------------------------------------------------------------------
 
 

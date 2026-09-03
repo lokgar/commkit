@@ -32,6 +32,13 @@ _BARKER_SEQUENCES = {
 }
 
 
+# -----------------------------------------------------------------------------
+# SYNC SEQUENCE GENERATORS (array-only)
+# -----------------------------------------------------------------------------
+# barker_sequence / zadoff_chu_sequence build a reference sequence from
+# parameters - there is no Signal yet to unwrap.
+
+
 def barker_sequence(length: int) -> ArrayType:
     """
     Generates a Barker sequence of the specified length.
@@ -130,6 +137,14 @@ def zadoff_chu_sequence(length: int, root: int = 1) -> ArrayType:
 
     logger.debug("Generated ZC sequence: length=%s, root=%s.", length, root)
     return seq
+
+
+# -----------------------------------------------------------------------------
+# CORRELATION-DOMAIN ESTIMATION (array-only)
+# -----------------------------------------------------------------------------
+# estimate_fractional_delay operates on a correlation array (e.g. from
+# cross_correlate_fft), not on raw IQ samples or any Signal field, so it is
+# not Signal-aware (see CLAUDE.md, "Signal-Awareness").
 
 
 def estimate_fractional_delay(
@@ -298,6 +313,14 @@ def estimate_fractional_delay(
     if scalar_input:
         return mu[0]
     return mu
+
+
+# -----------------------------------------------------------------------------
+# TIMING SYNCHRONIZATION (Signal-aware)
+# -----------------------------------------------------------------------------
+# fft_fractional_delay / correct_timing rewrap to a Signal (pass-through);
+# estimate_timing unwraps the input but returns raw (integer, fractional)
+# offset arrays.
 
 
 @overload

@@ -182,7 +182,7 @@ class Preamble(BaseModel):
         Signal
             A `Signal` object with the shaped preamble.
         """
-        from ..filtering import shape_pulse
+        from .generation import shape_pulse
 
         if sps != int(sps) or sps < 1:
             logger.warning(
@@ -869,7 +869,7 @@ class SingleCarrierFrame(BaseModel):
         """
         xp = cp if is_cupy_available() else np
         from .. import mapping
-        from ..filtering import shape_pulse
+        from .generation import shape_pulse
 
         if sps != int(sps) or sps < 1:
             logger.warning(

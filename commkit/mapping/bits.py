@@ -17,6 +17,10 @@ from .shaping import constellation_power
 
 __all__ = ["demap_symbols_hard", "map_bits"]
 
+# map_bits takes a bit sequence, not a signal - Signal-awareness does not
+# apply (bits aren't a field a Signal carries).  demap_symbols_hard below
+# reads .resolved_symbols and writes .resolved_bits.
+
 
 def map_bits(
     bits: ArrayType,

@@ -154,6 +154,14 @@ def _get_numba_mm_bootstrap():
     return _NUMBA_MM["mm"]
 
 
+# -----------------------------------------------------------------------------
+# FREQUENCY OFFSET ESTIMATION (Signal-aware)
+# -----------------------------------------------------------------------------
+# estimate_frequency_offset_mth_power / mengali_morelli / pilot_symbols and
+# find_bias_tone unwrap the input but return a float/ndarray estimate, never
+# a Signal (see CLAUDE.md, "Signal-Awareness", rule R5).
+
+
 def estimate_frequency_offset_mth_power(
     samples: ArrayType | Signal,
     sampling_rate: float | None = None,
@@ -1017,6 +1025,13 @@ def _refine_tones_from_spectrum(
         refined.append((kb.astype(xp.float64) + delta) * df)
 
     return to_device(xp.stack(refined), "cpu")
+
+
+# -----------------------------------------------------------------------------
+# FREQUENCY OFFSET CORRECTION (Signal-aware)
+# -----------------------------------------------------------------------------
+# Both apply a correction and return corrected samples in the same domain, so
+# unlike the estimators above they rewrap to a Signal when given one.
 
 
 def correct_frequency_offset_blockwise(

@@ -12,7 +12,7 @@ from ..logger import logger
 from ._common import _build_padded_samples, _normalize_inputs
 
 # -----------------------------------------------------------------------------
-# BLOCK equalization
+# BLOCK EQUALIZATION (Signal-aware)
 # -----------------------------------------------------------------------------
 
 
@@ -283,7 +283,7 @@ def apply_taps(
 
 
 # -----------------------------------------------------------------------------
-# DATA-AIDED CHANNEL ESTIMATION (Welch H1 transfer function)
+# DATA-AIDED CHANNEL ESTIMATION (Welch H1 transfer function; Signal-aware)
 # -----------------------------------------------------------------------------
 
 

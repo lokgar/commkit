@@ -13,6 +13,10 @@ from ._block import _block_fdaf_blind
 from ._common import _godard_radius, _rde_ring_radii
 from .result import EqualizerResult
 
+# -----------------------------------------------------------------------------
+# BLOCK BLIND EQUALIZERS (Signal-aware)
+# -----------------------------------------------------------------------------
+
 
 def block_cma(
     samples: ArrayType | Signal,
@@ -217,6 +221,14 @@ def block_rde(
         plot_smoothing=plot_smoothing,
         name="Block-RDE" if pilot_ref is None else "Block-RDE(PA)",
     )
+
+
+# -----------------------------------------------------------------------------
+# PILOT REFERENCE BUILDER (array-only)
+# -----------------------------------------------------------------------------
+# build_pilot_ref packs sparse pilot symbols into a dense reference array for
+# cma/rde's pilot_ref/pilot_mask - a construction helper for equalizer input
+# parameters, not a transform on a Signal, so it takes plain arrays only.
 
 
 def build_pilot_ref(

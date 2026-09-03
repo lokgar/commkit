@@ -137,52 +137,6 @@ def decimate_to_symbol_rate(
     return out
 
 
-def expand(samples: ArrayType, factor: int, axis: int = -1) -> ArrayType:
-    """
-    Inserts zeros between samples (up-sampling by zero-stuffing).
-
-    This operation increases the sampling rate by an integer factor by
-    inserting `factor - 1` zeros between each original sample. This is the
-    first step in traditional interpolation but requires subsequent
-    filtering to remove spectral images.
-
-    Parameters
-    ----------
-    samples : array_like
-        Input signal samples. Shape: (..., N_samples).
-    factor : int
-        The expansion factor (number of output samples per input sample).
-    axis : int, default -1
-        The axis along which to perform expansion.
-
-    Returns
-    -------
-    array_like
-        The expanded sample array with zeros inserted.
-        Shape: (..., N_samples * factor).
-    """
-    logger.debug("Inserting zeros (expansion factor=%s).", factor)
-    samples, xp, _ = dispatch(samples)
-
-    n_in = samples.shape[axis]
-    n_out = n_in * factor
-
-    # Construct output shape
-    out_shape = list(samples.shape)
-    out_shape[axis] = n_out
-
-    out = xp.zeros(out_shape, dtype=samples.dtype)
-
-    # Slice logic to insert
-    # We want out[..., ::factor, ...] = samples
-    # Construct slices dynamically
-    slices = [slice(None)] * samples.ndim
-    slices[axis] = slice(None, None, factor)
-    out[tuple(slices)] = samples
-
-    return out
-
-
 def upsample(
     samples: ArrayType | Signal,
     factor: int,

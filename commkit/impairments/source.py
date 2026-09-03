@@ -11,6 +11,12 @@ from ..logger import logger
 
 __all__ = ["apply_phase_noise", "generate_phase_noise"]
 
+# -----------------------------------------------------------------------------
+# PHASE-NOISE SYNTHESIS (array-only)
+# -----------------------------------------------------------------------------
+# generate_phase_noise: builds a phase trajectory from parameters - there is
+# no Signal yet to unwrap (same category as the other generate_* factories).
+
 
 def _phase_trajectory(
     shape: tuple[int, int],
@@ -134,6 +140,11 @@ def generate_phase_noise(
     if is_cupy_available():
         phi = to_device(phi, "gpu")
     return phi
+
+
+# -----------------------------------------------------------------------------
+# PHASE-NOISE APPLICATION (Signal-aware)
+# -----------------------------------------------------------------------------
 
 
 def apply_phase_noise(

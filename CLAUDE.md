@@ -346,9 +346,14 @@ forcing Signal-awareness there is backwards, since there is no `Signal` yet
 in `plotting/{analysis,equalizer,sync}.py` are examples: they take arrays a
 `Signal` would never hold as `.samples`, so they stay plain-array functions.
 Likewise, a function whose only job is to build the data a `Signal` gets
-constructed *from* (`filtering.shape_pulse`, `multirate.expand`,
-`equalization.build_pilot_ref`) is a synthesis primitive, not a transform on
-existing `Signal` data - same exclusion as `generate_*`.
+constructed *from* is a synthesis primitive, not a transform on existing
+`Signal` data - same exclusion as `generate_*`.  `core/generation.py`'s
+`shape_pulse`/`expand` (TX symbol -> waveform) and
+`equalization.build_pilot_ref` (sparse pilots -> dense equalizer reference)
+are the current examples; note that `shape_pulse`/`expand` live in
+`core/generation.py` rather than `filtering.py`/`multirate.py` for exactly
+this reason - they build the samples a `Signal` gets constructed from, not
+transform an existing one.
 
 ### Naming Conventions
 
