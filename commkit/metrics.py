@@ -21,6 +21,33 @@ from .logger import logger
 # matching the previous ``Signal.evm``/``snr``/``ber``/``ser`` behaviour.
 
 
+def _is_normalized(arr, ax, xp):
+    """True if ``arr`` has ~unit average power along ``ax`` (within 1e-3)."""
+    pwr = xp.mean(xp.abs(arr) ** 2, axis=ax)
+    return xp.allclose(pwr, 1.0, atol=1e-3)
+
+
+def _log_per_channel(fmt: str, *arrays: ArrayType, extra: tuple = ()) -> None:
+    """Gate per-channel INFO logging behind one D2H transfer per array.
+
+    Emits, per channel index ``ch``: ``logger.info(fmt, ch, *values, *extra)``
+    where ``values`` are each array's per-channel scalar (Python ``int`` for
+    integer dtypes, ``float`` otherwise) and ``extra`` are constants appended
+    after the per-channel values (e.g. a fixed ``total`` symbol/bit count).
+    No device transfer happens at all when INFO logging is disabled.
+    """
+    if not logger.isEnabledFor(logging.INFO):
+        return
+    arrays_np = [to_device(a, "cpu") for a in arrays]
+    n_ch = arrays_np[0].shape[0]
+    for ch in range(n_ch):
+        values = [
+            int(a[ch]) if np.issubdtype(a.dtype, np.integer) else float(a[ch])
+            for a in arrays_np
+        ]
+        logger.info(fmt, ch, *values, *extra)
+
+
 def _ps_unit_power_rescale(rx, xp, modulation, order, pmf, noise_var):
     """Rescale unit-avg-power PS-QAM symbols and the matching noise_var.
 
@@ -198,10 +225,6 @@ def evm(
             rx = rx[..., trim:n]
             tx_symbols = tx_symbols[..., trim:n]
 
-    def _is_normalized(arr, ax):
-        pwr = xp.mean(xp.abs(arr) ** 2, axis=ax)
-        return xp.allclose(pwr, 1.0, atol=1e-3)
-
     # --- Build reference ---
     if mode == "data_aided":
         if tx_symbols is None:
@@ -213,9 +236,9 @@ def evm(
         if rx.shape != tx.shape:
             raise ValueError(f"Shape mismatch: rx {rx.shape} != tx {tx.shape}")
 
-        if not _is_normalized(rx, axis):
+        if not _is_normalized(rx, axis, xp):
             rx = helpers.normalize(rx, axis=axis, mode="average_power")
-        if not _is_normalized(tx, axis):
+        if not _is_normalized(tx, axis, xp):
             tx = helpers.normalize(tx, axis=axis, mode="average_power")
 
     else:  # blind
@@ -240,10 +263,14 @@ def evm(
 
         rx = rescale_ps_symbols(rx, xp, modulation, order, pmf)
 
-        # ML hard decision: nearest constellation point per symbol.
-        # rx shape (..., N) -> (..., N, 1) vs (M,) -> (..., N, M)
-        dist = xp.abs(rx[..., None] - constellation) ** 2
-        tx = constellation[xp.argmin(dist, axis=-1)]  # same shape as rx
+        # ML hard decision: nearest constellation point per symbol.  Chunked
+        # over the flattened N axis to bound peak memory of the (N, M)
+        # distance matrix (see CLAUDE.md's "bound large broadcast
+        # intermediates" rule).
+        from .mapping.gray import nearest_constellation_index
+
+        idx = nearest_constellation_index(rx.reshape(-1), constellation)
+        tx = constellation[idx].reshape(rx.shape)  # same shape as rx
 
     # --- EVM computation (shared) ---
     ref_pwr = xp.mean(xp.abs(tx) ** 2, axis=axis)
@@ -273,18 +300,7 @@ def evm(
     evm_percent[low_pwr_mask] = float("inf")
     evm_db[low_pwr_mask] = float("inf")
 
-    if logger.isEnabledFor(logging.INFO):
-        # One batched D2H per array (and none at all when INFO is off).
-        evm_pct_np = to_device(evm_percent, "cpu")
-        evm_db_np = to_device(evm_db, "cpu")
-        for ch in range(evm_pct_np.shape[0]):
-            logger.info(
-                "EVM [%s] Ch%s: %.2f%% (%.2f dB)",
-                mode,
-                ch,
-                float(evm_pct_np[ch]),
-                float(evm_db_np[ch]),
-            )
+    _log_per_channel(f"EVM [{mode}] Ch%s: %.2f%% (%.2f dB)", evm_percent, evm_db)
 
     return evm_percent, evm_db
 
@@ -361,15 +377,11 @@ def snr(
     if rx.shape != tx.shape:
         raise ValueError(f"Shape mismatch: rx {rx.shape} != tx {tx.shape}")
 
-    def _is_normalized(arr, ax):
-        pwr = xp.mean(xp.abs(arr) ** 2, axis=ax)
-        return xp.allclose(pwr, 1.0, atol=1e-3)
-
     # Normalize per channel if needed
-    if not _is_normalized(rx, axis):
+    if not _is_normalized(rx, axis, xp):
         rx = helpers.normalize(rx, axis=axis, mode="average_power")
 
-    if not _is_normalized(tx, axis):
+    if not _is_normalized(tx, axis, xp):
         tx = helpers.normalize(tx, axis=axis, mode="average_power")
 
     # Check for zero power ref for SNR too
@@ -409,10 +421,7 @@ def snr(
     mask_to_neg_inf = low_pwr_mask & (~zero_noise_mask)
     snr_db[mask_to_neg_inf] = float("-inf")
 
-    if logger.isEnabledFor(logging.INFO):
-        snr_db_np = to_device(snr_db, "cpu")
-        for ch in range(snr_db_np.shape[0]):
-            logger.info("SNR Ch%s: %.2f dB", ch, float(snr_db_np[ch]))
+    _log_per_channel("SNR Ch%s: %.2f dB", snr_db)
 
     return snr_db
 
@@ -503,17 +512,9 @@ def ber(
         logger.info("BER: %.2e (%s/%s errors)", ber_value, int(errors), total)
         return ber_value
 
-    if logger.isEnabledFor(logging.INFO):
-        ber_np = to_device(ber_values, "cpu")
-        errors_np = to_device(errors, "cpu")
-        for ch in range(ber_np.shape[0]):
-            logger.info(
-                "BER Ch%s: %.2e (%s/%s errors)",
-                ch,
-                float(ber_np[ch]),
-                int(errors_np[ch]),
-                total,
-            )
+    _log_per_channel(
+        "BER Ch%s: %.2e (%s/%s errors)", ber_values, errors, extra=(total,)
+    )
     return ber_values
 
 
@@ -664,12 +665,16 @@ def ser(
 
     rx = rescale_ps_symbols(rx, xp, modulation, order, pmf)
 
-    # Broadcast: rx/tx (..., N) -> (..., N, 1) vs constellation (M,) -> (..., N, M)
-    dist_rx = xp.abs(rx[..., None] - constellation) ** 2  # (..., N, M)
-    dist_tx = xp.abs(tx[..., None] - constellation) ** 2  # (..., N, M)
+    # Nearest constellation point per symbol, chunked over the flattened N
+    # axis to bound peak memory of the (N, M) distance matrix.
+    from .mapping.gray import nearest_constellation_index
 
-    dec_rx = xp.argmin(dist_rx, axis=-1)  # (..., N) - index into constellation
-    dec_tx = xp.argmin(dist_tx, axis=-1)  # (..., N)
+    dec_rx = nearest_constellation_index(rx.reshape(-1), constellation).reshape(
+        rx.shape
+    )  # (..., N) - index into constellation
+    dec_tx = nearest_constellation_index(tx.reshape(-1), constellation).reshape(
+        tx.shape
+    )
 
     errors = xp.sum(dec_rx != dec_tx, axis=-1)
     total = rx.shape[-1]
@@ -680,17 +685,9 @@ def ser(
         logger.info("SER: %.2e (%s/%s errors)", ser_val, int(errors), total)
         return ser_val
 
-    if logger.isEnabledFor(logging.INFO):
-        ser_np = to_device(ser_values, "cpu")
-        errors_np = to_device(errors, "cpu")
-        for ch in range(ser_np.shape[0]):
-            logger.info(
-                "SER Ch%s: %.2e (%s/%s errors)",
-                ch,
-                float(ser_np[ch]),
-                int(errors_np[ch]),
-                total,
-            )
+    _log_per_channel(
+        "SER Ch%s: %.2e (%s/%s errors)", ser_values, errors, extra=(total,)
+    )
     return ser_values
 
 
