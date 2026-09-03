@@ -22,7 +22,7 @@ import numpy as np
 
 from ..backend import ArrayType
 from .bits import demap_symbols_hard, map_bits
-from .gray import gray_constellation
+from .gray import gray_constellation, unpack_bits
 from .llr import compute_llr
 from .shaping import constellation_power
 
@@ -136,13 +136,7 @@ def _gray_base(
         modulation, order, normalize=normalize, unipolar=unipolar
     )
     k = int(np.log2(order))
-    bit_labels = (
-        (
-            np.arange(order, dtype="int32")[:, None]
-            >> np.arange(k - 1, -1, -1, dtype="int32")
-        )
-        & 1
-    ).astype(np.int8)
+    bit_labels = unpack_bits(np.arange(order, dtype="int32"), k)
     return Constellation(
         points=points,
         bit_labels=bit_labels,

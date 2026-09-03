@@ -8,10 +8,12 @@ from commkit.backend import to_device
 from commkit.impairments import apply_awgn
 from commkit.mapping import (
     compute_llr,
+    constellation_power,
     gray_constellation,
     maxwell_boltzmann,
     optimal_nu,
     ps_entropy,
+    rescale_ps_symbols,
     sample_ps_symbols,
 )
 
@@ -312,3 +314,32 @@ def test_compute_llr_ps_shifts_toward_inner_points():
 
     # The magnitudes of PS LLRs should be >= uniform (higher confidence for inner pts)
     assert np.mean(np.abs(llr_ps)) >= np.mean(np.abs(llr_none)) * 0.95
+
+
+# ---------------------------------------------------------------------------
+# rescale_ps_symbols - shared PS-QAM rescale core (metrics/mapping.bits)
+# ---------------------------------------------------------------------------
+
+
+def test_rescale_ps_symbols_uniform_is_noop():
+    """pmf=None must return rx unchanged (identity, not just equal)."""
+    rx = np.array([1 + 1j, -1 - 1j], dtype=np.complex64)
+    result = rescale_ps_symbols(rx, np, "qam", 16, None)
+    assert result is rx
+
+
+def test_rescale_ps_symbols_matches_manual_sqrt_e_ps():
+    """The shared helper must match the sqrt(E_PS) rescale it replaced inline."""
+    order = 16
+    nu = 1.0
+    pmf = maxwell_boltzmann(order, nu)
+    const = gray_constellation("qam", order)
+    e_ps = constellation_power(const, pmf)
+    assert e_ps < 1.0 - 1e-6  # shaping must actually lower the average power
+
+    rng = np.random.default_rng(1)
+    rx = (const / np.sqrt(e_ps))[rng.integers(0, order, size=50)].astype(np.complex64)
+
+    result = rescale_ps_symbols(rx, np, "qam", order, pmf)
+    expected = rx * np.sqrt(e_ps).astype(np.float32)
+    np.testing.assert_allclose(result, expected, rtol=1e-5)

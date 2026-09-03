@@ -12,8 +12,14 @@ from ..backend import ArrayType, dispatch
 from ..core.signal import Signal
 from ..helpers import unwrap_signal
 from ..logger import logger
-from .gray import gray_code, gray_constellation
-from .shaping import constellation_power
+from .gray import (
+    _is_square_qam,
+    gray_code,
+    gray_constellation,
+    nearest_constellation_index,
+    unpack_bits,
+)
+from .shaping import rescale_ps_symbols
 
 __all__ = ["demap_symbols_hard", "map_bits"]
 
@@ -215,18 +221,13 @@ def demap_symbols_hard(
     # ``{s_m/sqrt(E_PS)}`` grid.  Rescale by ``sqrt(E_PS)`` to bring them back
     # to the ``{s_m}`` grid that ``gray_constellation`` returns, so the
     # nearest-neighbour search is exact.  No-op for uniform modulations.
-    if pmf is not None:
-        e_ps = constellation_power(constellation, pmf)
-        if e_ps < 1.0 - 1e-6:
-            symbols_flat = symbols_flat * xp.asarray(
-                np.sqrt(e_ps), dtype=symbols_flat.real.dtype
-            )
+    symbols_flat = rescale_ps_symbols(symbols_flat, xp, modulation, order, pmf)
 
     constellation = xp.asarray(constellation)
 
     # 1. Find nearest constellation point (Hard Decision)
     k = int(np.log2(order))
-    is_sq_qam = (modulation == "qam") and (order != 8) and (k % 2 == 0)
+    is_sq_qam = _is_square_qam(modulation, order)
 
     if is_sq_qam:
         # O(1) component-wise rounding - no (N, M) distance matrix.
@@ -251,18 +252,10 @@ def demap_symbols_hard(
         indices = (gray_lut[g_i] << n_ax) | gray_lut[g_q]  # (N_flat,)
     else:
         # General path: chunk N to bound peak memory at (CHUNK_N, M_const).
-        CHUNK_N = 4096
-        indices = xp.empty(len(symbols_flat), dtype=xp.int64)
-        for n0 in range(0, len(symbols_flat), CHUNK_N):
-            n1 = min(n0 + CHUNK_N, len(symbols_flat))
-            d = xp.abs(symbols_flat[n0:n1, xp.newaxis] - constellation[xp.newaxis, :])
-            indices[n0:n1] = xp.argmin(d, axis=1)
+        indices = nearest_constellation_index(symbols_flat, constellation)
 
-    # 2. Convert indices to bits
-    # Extract bits from indices: (N, k)
-    # We use bit shifting: (index >> shift) & 1
-    shifts = xp.arange(k - 1, -1, -1, dtype="int32")
-    bits = ((indices[:, xp.newaxis] >> shifts) & 1).astype(xp.int8)
+    # 2. Convert indices to bits: (N, k)
+    bits = unpack_bits(indices, k)
 
     # 3. Reshape to restore original structure
     # bits is currently (Total_Symbols, k)

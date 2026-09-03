@@ -18,6 +18,7 @@ __all__ = [
     "maxwell_boltzmann",
     "optimal_nu",
     "ps_entropy",
+    "rescale_ps_symbols",
     "sample_ps_symbols",
 ]
 
@@ -74,6 +75,44 @@ def constellation_power(
             f"length {energies.shape[0]}."
         )
     return float(np.dot(pmf_arr, energies))
+
+
+def rescale_ps_symbols(
+    rx: ArrayType, xp, modulation: str, order: int, pmf: ArrayType | None
+) -> ArrayType:
+    r"""Rescale unit-avg-power PS-QAM symbols ``{c·s_m}`` back to ``{s_m}``.
+
+    Receive-path symbols normalised to unit average power (e.g. via
+    ``resolve_symbols``) place PS-QAM symbols on the ``{s_m / sqrt(E_PS)}``
+    grid (``c = 1/sqrt(E_PS)``).  Nearest-neighbour searches against
+    :func:`gray_constellation` (hard demapping, EVM, SER, MI/LLR) expect
+    symbols on the ``{s_m}`` grid instead.  This applies the exact
+    deterministic correction ``rx -> rx·sqrt(E_PS)``.  No-op for uniform
+    modulations (``pmf is None``) or when ``E_PS ≈ 1``.
+
+    Parameters
+    ----------
+    rx : array_like
+        Received symbols, any backend.
+    xp : module
+        ``rx``'s array module (NumPy/CuPy), used to build the dtype-matched
+        scale factor.
+    modulation, order : constellation spec, as accepted by
+        :func:`gray_constellation`.
+    pmf : array_like or None
+        Symbol PMF of shape ``(order,)``.  ``None`` is a no-op.
+
+    Returns
+    -------
+    array_like
+        ``rx``, rescaled (or unchanged), same shape/backend as ``rx``.
+    """
+    if pmf is None:
+        return rx
+    e_ps = constellation_power(gray_constellation(modulation, order), pmf)
+    if e_ps < 1.0 - 1e-6:
+        rx = rx * xp.asarray(np.sqrt(e_ps), dtype=rx.real.dtype)
+    return rx
 
 
 @lru_cache(maxsize=256)

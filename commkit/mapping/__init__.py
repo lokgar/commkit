@@ -24,7 +24,9 @@ from .gray import (
     gray_code,
     gray_constellation,
     gray_to_binary,
+    nearest_constellation_index,
     square_qam_slicer_params,
+    unpack_bits,
 )
 from .llr import compute_llr
 from .shaping import (
@@ -32,6 +34,7 @@ from .shaping import (
     maxwell_boltzmann,
     optimal_nu,
     ps_entropy,
+    rescale_ps_symbols,
     sample_ps_symbols,
 )
 
@@ -45,8 +48,11 @@ __all__ = [
     "gray_to_binary",
     "map_bits",
     "maxwell_boltzmann",
+    "nearest_constellation_index",
     "optimal_nu",
     "ps_entropy",
+    "rescale_ps_symbols",
     "sample_ps_symbols",
     "square_qam_slicer_params",
+    "unpack_bits",
 ]

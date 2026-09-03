@@ -13,7 +13,7 @@ from ..backend import ArrayType, _get_jax, dispatch, is_jax_array, to_jax
 from ..core.signal import Signal
 from ..helpers import unwrap_signal
 from ..logger import logger
-from .gray import gray_constellation
+from .gray import gray_constellation, unpack_bits
 
 __all__ = ["compute_llr"]
 
@@ -229,17 +229,7 @@ def compute_llr(
     const = gray_constellation(modulation, order, unipolar=unipolar).astype(
         "complex64" if is_complex else "float32"
     )
-    bits_table_np = (
-        (
-            (
-                np.arange(order, dtype="int32")[:, None]
-                >> np.arange(k - 1, -1, -1, dtype="int32")
-            )
-            & 1
-        )
-        .astype("int32")
-        .T
-    )
+    bits_table_np = unpack_bits(np.arange(order, dtype="int32"), k).astype("int32").T
     sigma_np = np.float32(max(noise_var, 1e-20))
 
     # Build log_pmf: zeros = uniform (constant offset cancels in LLR difference).

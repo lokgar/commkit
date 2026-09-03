@@ -133,6 +133,37 @@ def test_square_qam_slicer_params_non_square():
     assert side == 0
 
 
+def test_unpack_bits_matches_manual_shift():
+    """unpack_bits(indices, k) must match the direct bit-shift idiom it replaced."""
+    from commkit.mapping.gray import unpack_bits
+
+    k = 4
+    indices = np.arange(2**k, dtype="int32")
+    expected = (
+        (indices[:, None] >> np.arange(k - 1, -1, -1, dtype="int32")) & 1
+    ).astype(np.int8)
+    result = unpack_bits(indices, k)
+    assert result.dtype == np.int8
+    assert result.shape == (2**k, k)
+    np.testing.assert_array_equal(np.asarray(result), expected)
+
+
+def test_nearest_constellation_index_matches_unchunked_argmin():
+    """Chunked search must agree with a plain unchunked argmin, incl. chunk boundaries."""
+    from commkit.mapping.gray import nearest_constellation_index
+
+    const = mapping.gray_constellation("qam", 16)
+    rng = np.random.default_rng(0)
+    x = const[rng.integers(0, 16, size=10000)] + (
+        0.01 * rng.standard_normal(10000) + 0.01j * rng.standard_normal(10000)
+    )
+    x = x.astype(np.complex64)
+
+    result = nearest_constellation_index(x, const, chunk=7)  # deliberately odd/small
+    expected = np.argmin(np.abs(x[:, None] - const[None, :]), axis=1)
+    np.testing.assert_array_equal(np.asarray(result), expected)
+
+
 def test_square_qam_slicer_params_non_uniform_grid():
     """A hand-built 16-point constellation whose real axis collapses to
     fewer than sqrt(M) unique levels must be rejected (side=0), even

@@ -13,13 +13,16 @@ from functools import lru_cache
 
 import numpy as np
 
+from ..backend import dispatch
 from ..logger import logger
 
 __all__ = [
     "gray_code",
     "gray_constellation",
     "gray_to_binary",
+    "nearest_constellation_index",
     "square_qam_slicer_params",
+    "unpack_bits",
 ]
 
 
@@ -94,6 +97,21 @@ def gray_to_binary(n: int) -> np.ndarray:
     return inverse
 
 
+def _is_square_qam(modulation: str, order: int) -> bool:
+    """True if ``(modulation, order)`` builds a square (not cross/8-rect) QAM grid.
+
+    Square QAM (order a perfect square, e.g. 4/16/64/256/1024) is a uniform
+    per-axis grid; 8-QAM and cross-QAM (odd bits-per-symbol orders, e.g.
+    32/128/512) are not.
+    """
+    if "qam" not in modulation.lower():
+        return False
+    if order == 8:
+        return False
+    k = int(np.log2(order))
+    return k % 2 == 0
+
+
 @lru_cache(maxsize=128)
 def gray_constellation(
     modulation: str,
@@ -163,7 +181,7 @@ def gray_constellation(
         # Check for 8-QAM
         if order == 8:
             result = _gray_qam_8_rect()
-        elif k % 2 == 0:
+        elif _is_square_qam(modulation, order):
             result = _gray_qam_square(order)
         else:
             result = _gray_qam_cross(order)
@@ -216,6 +234,61 @@ def square_qam_slicer_params(
     lev_min = np.float32(levels[0])
     d_grid = np.float32(levels[1] - levels[0]) if side > 1 else np.float32(1.0)
     return side, lev_min, d_grid
+
+
+def unpack_bits(indices, k: int):
+    """Unpack integer indices into their k-bit binary representation (MSB-first).
+
+    Backend-dispatched via ``indices``' own array module, so a GPU-resident
+    index array (e.g. from hard-decision demapping on CuPy) unpacks without
+    a host round trip.
+
+    Parameters
+    ----------
+    indices : array_like, shape (N,), integer dtype
+    k : int
+        Number of bits per index.
+
+    Returns
+    -------
+    array_like, shape (N, k), int8
+        MSB-first bit pattern per index. Same backend as ``indices``.
+    """
+    indices, xp, _ = dispatch(indices)
+    shifts = xp.arange(k - 1, -1, -1, dtype="int32")
+    return ((indices[:, xp.newaxis] >> shifts) & 1).astype(xp.int8)
+
+
+def nearest_constellation_index(x, constellation, chunk: int = 4096):
+    """Nearest-constellation-point index for each element of ``x`` (chunked).
+
+    Bounds peak memory of the ``(N, M)`` distance matrix by chunking over
+    the ``N`` axis - see CLAUDE.md's "bound large broadcast intermediates"
+    rule.
+
+    Parameters
+    ----------
+    x : array_like, shape (N,)
+        Flat query points, any backend.
+    constellation : array_like, shape (M,)
+        Reference constellation points.  Cast to ``x``'s backend.
+    chunk : int, default 4096
+        ``N``-axis chunk size.
+
+    Returns
+    -------
+    array_like, shape (N,), int64
+        Index into ``constellation`` of the nearest point, per element.
+        Same backend as ``x``.
+    """
+    x, xp, _ = dispatch(x)
+    constellation = xp.asarray(constellation)
+    indices = xp.empty(len(x), dtype=xp.int64)
+    for n0 in range(0, len(x), chunk):
+        n1 = min(n0 + chunk, len(x))
+        d = xp.abs(x[n0:n1, xp.newaxis] - constellation[xp.newaxis, :])
+        indices[n0:n1] = xp.argmin(d, axis=1)
+    return indices
 
 
 def _gray_psk(order: int) -> np.ndarray:
