@@ -8,6 +8,7 @@ import numpy as np
 from ..backend import dispatch, to_device
 from ..core.signal import Signal
 from ..logger import logger
+from ..smoothing import smooth_density_2d
 from .theme import _grid_figsize
 
 
@@ -40,7 +41,7 @@ def _plot_eye_traces(
     **kwargs : Any
         Additional plotting parameters.
     """
-    samples, xp, sp = dispatch(samples)
+    samples, xp, _ = dispatch(samples)
 
     # Normalize to max amplitude 1.0
     from ..helpers import normalize
@@ -149,7 +150,7 @@ def _plot_eye_traces(
         )
 
         h = h.T
-        h = sp.ndimage.gaussian_filter(h, sigma=1)
+        h = smooth_density_2d(h, sigma=1.0)
 
         # Normalize
         h_max = xp.max(h)

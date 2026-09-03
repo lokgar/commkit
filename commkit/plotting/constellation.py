@@ -9,6 +9,7 @@ from .. import helpers
 from ..backend import dispatch, to_device
 from ..core.signal import Signal
 from ..logger import logger
+from ..smoothing import smooth_density_2d
 from .theme import (
     _create_subplot_grid,
     _grid_figsize,
@@ -302,7 +303,7 @@ def plot_constellation(
 
     logger.debug("Generating constellation density plot.")
 
-    samples, xp, sp = dispatch(samples)
+    samples, xp, _ = dispatch(samples)
 
     # Handle Multichannel (e.g. Dual-Pol)
     # Convention: (Channels, Time)
@@ -396,9 +397,7 @@ def plot_constellation(
     h = h.T
 
     # Apply Gaussian smoothing for nicer visuals
-    from scipy.ndimage import gaussian_filter
-
-    h = gaussian_filter(h, sigma=1)
+    h = smooth_density_2d(h, sigma=1.0)
 
     # Normalize histogram to [0, 1] for consistent colormap scaling
     h_max = np.max(h)

@@ -61,6 +61,7 @@ from ..helpers import (
     unwrap_signal,
 )
 from ..logger import logger
+from ..smoothing import moving_average
 from ..spectral import welch_psd
 from ._common import (
     _floor_levels,
@@ -865,8 +866,6 @@ def linewidth_dsh(
         P2 = P_cpu[None, :] if P_cpu.ndim == 1 else P_cpu
         c = P2.shape[0]
 
-        from scipy.ndimage import uniform_filter1d
-
         r_deep = 10.0 ** (float(level_db) / 10.0)
         dnu_deep = np.full(c, np.nan)
         dnu_3db = np.full(c, np.nan)
@@ -884,7 +883,7 @@ def linewidth_dsh(
             if np.isfinite(w3_rough):
                 w_bins = min(int(w3_rough / (5.0 * bin_hz)) | 1, 101)
                 if w_bins >= 3:
-                    p = uniform_filter1d(p, w_bins, mode="nearest")
+                    p = moving_average(p, w_bins, mode="same")
 
             i_pk = int(np.argmax(p))
             f_peak[ch] = f_cpu[i_pk]
