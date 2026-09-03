@@ -27,13 +27,13 @@ from .analysis import (
 from .constellation import plot_constellation, plot_ideal_constellation
 from .equalizer import (
     plot_equalizer_result,
-    plot_filter_response,
     plot_zf_equalizer_response,
 )
 
 # Private helpers re-exported for tests that reach package internals through
 # this namespace. F401 is silenced for this re-export hub in pyproject.toml.
 from .eye import _plot_eye_traces, plot_eye_diagram
+from .filter_response import plot_filter_response
 from .spectral import plot_psd, plot_spectrogram
 from .sync import (
     plot_carrier_phase_decomposition,

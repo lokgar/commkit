@@ -5,119 +5,9 @@ from typing import Any
 import matplotlib.pyplot as plt
 import numpy as np
 
-from ..backend import dispatch, to_device
-from ..logger import logger
+from ..backend import to_device
+from ..smoothing import moving_average
 from .theme import _grid_figsize
-
-
-def plot_filter_response(
-    taps: Any, sps: float = 1.0, ax: Any | None = None, show: bool = False
-) -> tuple[Any, tuple[Any, Any, Any]] | None:
-    """
-    Plots the impulse and frequency response of a filter.
-
-    Provides a 3-panel analysis showing the filter taps in the time domain,
-    the magnitude response in dB, and the unwrapped phase response.
-
-    Parameters
-    ----------
-    taps : array_like
-        Filter taps (impulse response).
-    sps : float, default 1.0
-        Samples per symbol for time-axis normalization.
-    ax : array_like, optional
-        A list or tuple of 3 axes to plot on.
-    show : bool, default False
-        If True, calls `plt.show()`.
-
-    Returns
-    -------
-    fig : matplotlib.figure.Figure
-        The figure object.
-    axes : tuple of matplotlib.axes.Axes
-        The (impulse, magnitude, phase) axes.
-    """
-
-    import matplotlib.ticker as ticker
-
-    # Dispatch
-    taps, xp, sp = dispatch(taps)
-
-    if ax is None:
-        logger.debug("Generating filter response plot.")
-        fig, (ax1, ax2, ax3) = plt.subplots(3, 1, figsize=_grid_figsize(3, 1))
-    elif isinstance(ax, (list, tuple, np.ndarray)) and len(ax) == 3:
-        fig = ax[0].figure
-        ax1, ax2, ax3 = ax
-    else:
-        logger.warning("filter_response requires 3 axes. Creating new figure.")
-        fig, (ax1, ax2, ax3) = plt.subplots(1, 3, figsize=_grid_figsize(1, 3))
-
-    # 1. Impulse Response
-    num_taps = len(taps)
-
-    t = (xp.arange(num_taps) - (num_taps - 1) / 2) / sps
-
-    # Move to cpu for plotting
-    t_cpu = to_device(t, "cpu")
-    taps_cpu = to_device(taps, "cpu")
-
-    if xp.iscomplexobj(taps):
-        ax1.plot(t_cpu, taps_cpu.real, label="Real", color="C0")
-        ax1.plot(t_cpu, taps_cpu.imag, label="Imag", color="C1")
-        ax1.legend()
-    else:
-        ax1.plot(t_cpu, taps_cpu, color="C0")
-
-    ax1.set_title("Impulse Response")
-    ax1.set_xlabel("Time [Symbol Periods]")
-    ax1.set_ylabel("Amplitude")
-
-    # Set ticks at integer intervals (1T, 2T, etc.)
-    ax1.xaxis.set_major_locator(ticker.MultipleLocator(1))
-
-    def t_formatter(x, pos):
-        if np.isclose(x, 0):
-            return "0"
-        return f"{int(x)}T" if float(x).is_integer() else f"{x}T"
-
-    ax1.xaxis.set_major_formatter(ticker.FuncFormatter(t_formatter))
-
-    # 2. Frequency Response
-    # Compute frequency response using backend sp
-    w, h = sp.signal.freqz(taps, worN=2048)
-
-    # Normalize to Nyquist (0 to 1)
-    # w is in radians/sample (0 to pi)
-    freqs = w / (2 * xp.pi)
-
-    # Avoid log(0)
-    mag = 20 * xp.log10(xp.abs(h) + 1e-12)
-    angles = xp.unwrap(xp.angle(h))
-
-    # Move to cpu
-    freqs = to_device(freqs, "cpu")
-    mag = to_device(mag, "cpu")
-    angles = to_device(angles, "cpu")
-
-    # Magnitude
-    ax2.plot(freqs, mag, color="C2")
-    ax2.set_ylabel("Magnitude [dB]")
-    ax2.set_title("Frequency Response (Magnitude)")
-    ax2.set_xlabel("Frequency [Cycles/Sample]")
-    ax2.set_xlim(0, 0.5)
-
-    # Phase
-    ax3.plot(freqs, angles, color="C3")
-    ax3.set_ylabel("Phase [rad]")
-    ax3.set_title("Frequency Response (Phase)")
-    ax3.set_xlabel("Frequency [Cycles/Sample]")
-    ax3.set_xlim(0, 0.5)
-
-    if show:
-        plt.show()
-        return None
-    return fig, (ax1, ax2, ax3)
 
 
 def plot_equalizer_result(
@@ -176,8 +66,7 @@ def plot_equalizer_result(
         n = len(mse)
         effective = max(1, min(smoothing, n // 3))
         if effective > 1 and n > effective:
-            kernel = np.ones(effective) / effective
-            mse_smooth = np.convolve(mse, kernel, mode="valid")
+            mse_smooth = moving_average(mse, effective, mode="valid")
             # Element k of mode="valid" output averages mse[k : k+effective].
             # Place it at the centre of that window so the x-axis is in
             # actual symbol-index space, not smoothed-bin-index space.

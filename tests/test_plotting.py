@@ -91,11 +91,32 @@ def test_psd(backend_device, xp):
 
 
 def test_filter_response(backend_device, xp):
-    """Verify filter response plotting (Impulse, Mag, Phase)."""
+    """Verify filter response plotting (Impulse, Mag, Phase, Group Delay)."""
     taps = xp.array([1, 0.5, 0.25])
     fig, axes = plot_filter_response(taps, sps=1.0, show=False)
     assert fig is not None
-    assert len(axes) == 3
+    assert len(axes) == 4
+    plt.close("all")
+
+
+def test_filter_response_ba(backend_device, xp):
+    """Verify filter response plotting accepts a general (b, a) IIR system."""
+    b = xp.array([0.1, 0.2, 0.1])
+    a = xp.array([1.0, -0.5, 0.1])
+    fig, axes = plot_filter_response((b, a), sps=1.0, show=False)
+    assert fig is not None
+    assert len(axes) == 4
+    plt.close("all")
+
+
+def test_filter_response_sos(backend_device, xp):
+    """Verify filter response plotting accepts SOS input, with sampling_rate."""
+    import scipy.signal
+
+    sos = xp.asarray(scipy.signal.butter(4, 0.1, btype="low", output="sos"))
+    fig, axes = plot_filter_response(sos, sampling_rate=1e9, n_impulse=200, show=False)
+    assert fig is not None
+    assert len(axes) == 4
     plt.close("all")
 
 
@@ -231,12 +252,18 @@ def test_filter_response_axis_error(backend_device, xp):
     """Verify behavior when wrong number of axes are provided for filter response."""
     taps = xp.array([1, 0, 0, 1])
     fig, ax = plt.subplots(1)
-    # Should warn and create new figure
+    # Should warn and create a new 2x2 figure
     plot_filter_response(taps, ax=ax, show=False)
 
-    # Should accept list of 3 axes
-    fig, axes = plt.subplots(3, 1)
-    plot_filter_response(taps, ax=axes, show=False)
+    # 3 axes is also no longer the right count (now 4) - should warn + recreate
+    fig, axes3 = plt.subplots(3, 1)
+    plot_filter_response(taps, ax=axes3, show=False)
+
+    # Should accept exactly 4 axes (flat or 2x2)
+    fig, axes4 = plt.subplots(2, 2)
+    fig2, axes = plot_filter_response(taps, ax=axes4, show=False)
+    assert fig2 is fig
+    assert len(axes) == 4
     plt.close("all")
 
 
