@@ -26,23 +26,24 @@ CommKit is a Python library for digital communications research that treats hard
 
 | Module | Key Capabilities & Features |
 | --- | --- |
-| [`commkit.core`](commkit/core) | `Signal` container (IQ samples + metadata), `SingleCarrierFrame`, `Preamble`, and symbol/frame factories (PAM, PSK, QAM). |
+| [`commkit.core`](commkit/core) | `Signal` container (IQ samples + metadata), `SingleCarrierFrame`, `Preamble`, and symbol/frame factories (PAM, PSK, QAM, PS-QAM). |
 | [`commkit.backend`](commkit/backend.py) | Hardware abstraction layer (`dispatch`, `to_device`, `to_jax`, `from_jax`), placement management, and backend execution (NumPy, CuPy, JAX). |
-| [`commkit.mapping`](commkit/mapping) | Gray-coded constellations, symbol mapping, hard demapping, soft LLR computation (max-log and exact log-sum-exp via JAX JIT), and GMI. |
-| [`commkit.filtering`](commkit/filtering.py) | Pulse shaping (RRC, RC, Gaussian, Smooth-Rectangle), tap generators, matched filtering, Overlap-Save, and polyphase multirate filtering. |
+| [`commkit.mapping`](commkit/mapping) | Gray-coded constellations, symbol mapping, hard demapping, soft LLR computation (max-log and exact log-sum-exp via JAX JIT), and probabilistic shaping (Maxwell-Boltzmann). |
+| [`commkit.filtering`](commkit/filtering.py) | Pulse shaping (RRC, RC, Gaussian, Smooth-Rectangle), FIR tap generators, IIR SOS filter design (Butterworth, Chebyshev I/II, elliptic, Bessel) and application, matched filtering, and Overlap-Save. |
 | [`commkit.multirate`](commkit/multirate.py) | Fractional and integer sample rate conversion (`resample`, `decimate`, `upsample`, `decimate_to_symbol_rate`). |
 | [`commkit.timing`](commkit/timing.py) | Preamble generation (Barker, Zadoff-Chu), cross-correlation timing delay estimation, and frame alignment. |
-| [`commkit.frequency`](commkit/frequency.py) | Carrier frequency offset estimation (FOE via M-th power, Mengali-Morelli, Jacobsen) and phase-locked FOE correction. |
-| [`commkit.recovery`](commkit/recovery) | Carrier phase recovery (CPR via Viterbi-Viterbi, BPS, DD-PLL) and cycle-slip detection/correction. |
-| [`commkit.equalization`](commkit/equalization) | Adaptive equalizers (`lms`, `rls`, `cma`, `rde`, `zf`), butterfly MIMO topology support, with Numba JIT and JAX execution backends. |
-| [`commkit.impairments`](commkit/impairments) | Channel impairments simulation: AWGN (with SPS correction), PMD (differential group delay, Jones matrix), phase noise, IQ imbalance, and chromatic dispersion. |
-| [`commkit.coding`](commkit/coding) | Channel coding and FEC primitives (BCH, Convolutional, CRC, Galois field arithmetic, Hamming, Interleaving, LDPC, Polar, Rate matching, Reed-Solomon, Turbo codes). |
-| [`commkit.metrics`](commkit/metrics.py) | System performance evaluation: EVM (%, dB), data-aided SNR, and BER estimation. |
+| [`commkit.frequency`](commkit/frequency.py) | Carrier frequency offset estimation (FOE via M-th power, Mengali-Morelli, pilot-symbol, bias-tone) and static/blockwise time-varying FOE correction. |
+| [`commkit.recovery`](commkit/recovery) | Carrier phase recovery (CPR via Viterbi-Viterbi, BPS, DD-PLL, MAP Tikhonov-RTS, pilot-symbol/pilot-tone), cycle-slip detection/correction, and phase/channel-permutation ambiguity resolution. |
+| [`commkit.equalization`](commkit/equalization) | Sequential (`lms`, `rls`, `cma`, `rde`) and frequency-domain block (`block_lms`, `block_cma`, `block_rde`) adaptive equalizers, `zf_equalizer`, butterfly MIMO topology support, and polarization-tone demultiplexing, with Numba JIT and JAX execution backends. |
+| [`commkit.impairments`](commkit/impairments) | Channel impairments simulation: AWGN (with SPS correction), PMD (differential group delay, Jones matrix), phase noise, IQ imbalance (application + Löwdin/Gram-Schmidt compensation), and chromatic dispersion. |
+| [`commkit.coding`](commkit/coding) | **Planned, not yet implemented** - scaffold-only placeholders reserving the layout for channel coding / FEC primitives (BCH, Convolutional, CRC, Galois field arithmetic, Hamming, Interleaving, LDPC, Polar, Rate matching, Reed-Solomon, Turbo codes). |
+| [`commkit.metrics`](commkit/metrics.py) | System performance evaluation: EVM, SNR, BER, SER, and capacity metrics (GMI, MI) with PS-QAM support. |
 | [`commkit.analysis`](commkit/analysis) | Laser phase and linewidth characterization: DSH, homodyne IQ, zero-phase drift detrending, AWGN-free lag-slope linewidth fit, Di Domenico $\beta$-separation line FWHM, and Allan deviation. |
-| [`commkit.spectral`](commkit/spectral.py) | Welch PSD estimation and frequency shifting with bin-quantized mixing. |
+| [`commkit.spectral`](commkit/spectral.py) | Welch PSD estimation, spectrograms, and frequency shifting with bin-quantized mixing. |
+| [`commkit.smoothing`](commkit/smoothing.py) | Diagnostic/plotting-only smoothers (moving average, Savitzky-Golay, 2-D density smoothing) - not signal-chain filters; see `commkit.filtering` for those. |
 | [`commkit.io`](commkit/io.py) | Signal persistence and disk serialization (`load_npz`, `save_npz`). |
-| [`commkit.plotting`](commkit/plotting) | Visualization tools for constellations, eye diagrams, PSDs, time-domain signals, filter responses, and equalizer convergence. |
-| [`commkit.helpers`](commkit/helpers.py) | General DSP helpers: random bit/symbol generators, array normalization, RMS calculation, and SI prefix formatting. |
+| [`commkit.plotting`](commkit/plotting) | Visualization tools for constellations, eye diagrams, PSDs/spectrograms, time-domain signals, filter responses, equalizer convergence, and sync/CPR diagnostics (timing correlation, FOE spectra, carrier-phase trajectories). |
+| [`commkit.helpers`](commkit/helpers.py) | General DSP helpers: random bit/symbol generators, array normalization, RMS calculation, dB<->linear conversion, and SI prefix formatting. |
 
 ---
 

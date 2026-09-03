@@ -441,6 +441,35 @@ transform an existing one.
   modules and `plotting`. Never add a bare-noun plot function that shadows a
   compute function.
 
+### Design-vs-Apply Separation
+
+For any DSP building block with distinct "design" and "apply" phases - a
+coefficient/parameter generator, and a step that consumes those coefficients
+against data - keep the two as separate functions rather than one function
+that does both internally.  This lets a caller design once and apply many
+times (e.g. reuse the same filter across a batch of signals) and keeps each
+function's signature focused.  Established examples in `filtering.py`:
+
+* FIR taps generators (`rrc_taps`, `rc_taps`, `gaussian_taps`, `lowpass_taps`,
+  `highpass_taps`, `bandpass_taps`, `bandstop_taps`, ...) produce coefficient
+  arrays; `fir_filter(samples, taps)` applies them.
+* IIR SOS generators (`butterworth_sos`, `chebyshev1_sos`, `chebyshev2_sos`,
+  `elliptic_sos`, `bessel_sos`) produce second-order-section coefficients;
+  `iir_filter(samples, sos)` applies them.
+
+New DSP building blocks with a design/apply split should follow this same
+two-function pattern rather than folding both steps into one.
+
+`filtering.py` vs. `smoothing.py`: `filtering.py` holds real signal-chain
+filters (the design/apply pairs above, matched filtering, Overlap-Save) with
+an actual frequency response and causality claim.  `smoothing.py` holds
+diagnostic/plotting-only smoothers (`moving_average`, `savgol_smooth`,
+`smooth_density_2d`) - non-causal, no frequency-response meaning, used only
+to make a plotted curve or a robust estimate less noisy.  A routine that
+removes/passes a frequency band as part of the signal chain itself belongs in
+`filtering.py`; a routine that only exists to smooth something for display or
+a peak search belongs in `smoothing.py`.
+
 ---
 
 ## 5. Testing Conventions
@@ -463,10 +492,19 @@ transform an existing one.
     `test_winit.py`, `test_linear.py` (zf/MMSE), `test_polarization.py`,
     `test_blind.py` + `test_block_update.py` (block_cma/block_rde),
     `test_block.py` (block_lms / FDAF), `test_cpr.py`, and the CUDA-kernel tests
-    `test_bps_kernel.py` / `test_cs_kernel.py`.
+    `test_bps_kernel.py` / `test_cs_kernel.py`.  `sequential.py` and `_block.py`
+    are themselves subpackages internally (`sequential/_dd.py` + `_blind.py`;
+    `_block/_seqmode.py` + `_dd.py` + `_blind.py`) per the module-splitting
+    trigger below - the test files above are unaffected since they exercise
+    the public `commkit.equalization` surface, not these internal module
+    paths (a handful of `patch()`/`monkeypatch` targets in `test_block.py` /
+    `test_sequential_jax.py` do reach into the internal paths and were
+    updated when the split landed).
   * `tests/recovery/` <-> `commkit/recovery/` - `test_viterbi_viterbi.py`,
     `test_bps.py`, `test_pilots.py`, `test_tikhonov.py`, `test_pll.py`,
-    `test_corrections.py`, plus `test_joint.py` for the cross-algorithm
+    `test_corrections.py` (also covers `recovery/_common.py`'s shared
+    `_vv_block_phase` block-phase estimator and `_log_phase_summary` CPR
+    diagnostic logger), plus `test_joint.py` for the cross-algorithm
     joint-channel consistency checks.
   * `tests/core/` <-> `commkit/core/` - `test_signal.py`, `test_signal_mimo.py`,
     `test_frame.py` (`Preamble`/`SingleCarrierFrame`), `test_psqam.py` (generation).
@@ -481,8 +519,8 @@ transform an existing one.
   * `tests/mapping/` <-> `commkit/mapping/` - `test_gray.py`, `test_bits.py`,
     `test_llr.py`, `test_constellation.py` (the `Constellation` value object).
     Probabilistic-shaping tests live in `tests/core/test_psqam.py`.
-  * Flat modules (`filtering`, `metrics`, `spectral`, `timing`, `frequency`, ...)
-    keep a single top-level `tests/test_<module>.py`.
+  * Flat modules (`filtering`, `metrics`, `spectral`, `timing`, `frequency`,
+    `smoothing`, ...) keep a single top-level `tests/test_<module>.py`.
 
   When a single module's test file grows unwieldy, split it by *concern* within
   the same subpackage (e.g. sequential vs. JAX vs. MIMO) rather than letting one
