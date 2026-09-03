@@ -68,9 +68,9 @@ def _freq_response(taps, nfft=1024):
     return freqs, H
 
 
-def test_lowpass_taps():
+def test_fir_taps_lowpass():
     """Verify lowpass FIR: correct tap count, passband gain, and Nyquist attenuation."""
-    taps = filtering.lowpass_taps(num_taps=63, cutoff=0.2, sampling_rate=1.0)
+    taps = filtering.fir_taps(num_taps=63, cutoff=0.2, sampling_rate=1.0, btype="low")
     assert len(taps) == 63
 
     freqs, H = _freq_response(taps)
@@ -81,9 +81,9 @@ def test_lowpass_taps():
     assert H[nyquist_idx] < 0.05, f"Nyquist not attenuated: {H[nyquist_idx]:.4f}"
 
 
-def test_highpass_taps():
+def test_fir_taps_highpass():
     """Verify highpass FIR: correct tap count, DC attenuation, and passband gain."""
-    taps = filtering.highpass_taps(num_taps=63, cutoff=0.2, sampling_rate=1.0)
+    taps = filtering.fir_taps(num_taps=63, cutoff=0.2, sampling_rate=1.0, btype="high")
     assert len(taps) == 63
 
     freqs, H = _freq_response(taps)
@@ -94,11 +94,11 @@ def test_highpass_taps():
     assert H[nyquist_idx] > 0.95, f"Nyquist gain too low: {H[nyquist_idx]:.4f}"
 
 
-def test_bandpass_taps():
+def test_fir_taps_bandpass():
     """Verify bandpass FIR: correct tap count, centre gain, and out-of-band attenuation."""
     low, high = 0.15, 0.35
-    taps = filtering.bandpass_taps(
-        num_taps=63, low_cutoff=low, high_cutoff=high, sampling_rate=1.0
+    taps = filtering.fir_taps(
+        num_taps=63, cutoff=(low, high), sampling_rate=1.0, btype="band"
     )
     assert len(taps) == 63
 
@@ -113,11 +113,11 @@ def test_bandpass_taps():
     assert H[nyquist_idx] < 0.05, f"Nyquist not attenuated: {H[nyquist_idx]:.4f}"
 
 
-def test_bandstop_taps():
+def test_fir_taps_bandstop():
     """Verify bandstop FIR: correct tap count, notch rejection, and passband preservation."""
     low, high = 0.15, 0.35
-    taps = filtering.bandstop_taps(
-        num_taps=63, low_cutoff=low, high_cutoff=high, sampling_rate=1.0
+    taps = filtering.fir_taps(
+        num_taps=63, cutoff=(low, high), sampling_rate=1.0, btype="bandstop"
     )
     assert len(taps) == 63
 

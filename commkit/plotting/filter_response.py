@@ -3,10 +3,10 @@ Filter design visualization.
 
 Plots the impulse/frequency/group-delay response of a filter, in any of the
 representations produced elsewhere in the package: FIR taps
-(:mod:`commkit.filtering`'s ``rrc_taps``/``lowpass_taps``/...), an ``(b, a)``
+(:mod:`commkit.filtering`'s ``rrc_taps``/``fir_taps``/...), an ``(b, a)``
 IIR transfer function, or the second-order-sections (``sos``) form produced
-by :func:`commkit.filtering.iir_zero_phase_filter`. This module visualizes
-filter-design artifacts only - it has nothing to do with
+by :func:`commkit.filtering.butterworth_sos` and its IIR SOS siblings. This
+module visualizes filter-design artifacts only - it has nothing to do with
 :mod:`commkit.smoothing`'s diagnostic smoothers, which have no meaningful
 frequency response to plot.
 """

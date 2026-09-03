@@ -9,7 +9,7 @@ import numpy as np
 
 from ..backend import ArrayType, dispatch, to_device
 from ..core.signal import Signal
-from ..filtering import fir_filter, lowpass_taps
+from ..filtering import fir_filter, fir_taps
 from ..helpers import rewrap_signal, unwrap_signal
 from ..logger import logger
 
@@ -759,7 +759,7 @@ def demultiplex_polarization_tones_dynamic(
         num_taps += 1 - (num_taps % 2)  # nearest odd >= value
         num_taps = max(num_taps, 3)
     num_taps = min(int(num_taps), (N // 2) * 2 - 1)
-    h = lowpass_taps(sampling_rate, num_taps, track_bandwidth)
+    h = fir_taps(sampling_rate, num_taps, track_bandwidth, btype="low")
 
     # Edge guard: 'same' convolution corrupts num_taps//2 samples at each end.
     # num_taps is clipped < N above, so the retained interior is always non-empty.

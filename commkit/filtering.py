@@ -30,7 +30,7 @@ from .logger import logger
 # smoothrect_taps: Gaussian-smoothed rectangular pulse taps
 # rrc_taps:      Root Raised Cosine filter taps
 # rc_taps:       Raised Cosine filter taps
-# lowpass_taps, highpass_taps, bandpass_taps, bandstop_taps: FIR filters
+# fir_taps:      Lowpass/highpass/bandpass/bandstop FIR filters (btype=)
 #
 # All build taps from parameters alone - no signal input, so none are
 # Signal-aware (same category as gray_code/barker_sequence).
@@ -360,23 +360,29 @@ def rc_taps(sps: float, rolloff: float = 0.35, span: int = 8) -> ArrayType:
     return normalize(h, "unit_energy")
 
 
-def lowpass_taps(
+def fir_taps(
     sampling_rate: float,
     num_taps: int,
-    cutoff: float,
+    cutoff: float | tuple[float, float],
+    btype: str = "low",
     window: str = "hamming",
 ) -> ArrayType:
     """
-    Design Lowpass FIR filter using the window method.
+    Design an FIR filter using the window method.
 
     Parameters
     ----------
     sampling_rate : float
         The sampling rate of the signal in Hz.
     num_taps : int
-        Number of filter coefficients.
-    cutoff : float
-        Cutoff frequency in Hz.
+        Number of filter coefficients.  For ``btype in {"high", "bandstop"}``
+        this should typically be odd to avoid a zero at the Nyquist frequency.
+    cutoff : float or (float, float)
+        Cutoff frequency in Hz.  A scalar for ``btype in {"low", "high"}``;
+        a ``(low, high)`` pair for ``btype in {"band", "bandstop"}``.
+    btype : {"low", "high", "band", "bandstop"}, default "low"
+        Filter shape - same convention as :func:`butterworth_sos` and the
+        other IIR SOS generators below.
     window : str, default "hamming"
         Type of window function to apply (e.g., 'hamming', 'blackman').
 
@@ -386,136 +392,12 @@ def lowpass_taps(
         Filter taps with 0 dB passband gain.
         Shape: (num_taps,).
     """
-    logger.debug("Designing Lowpass FIR: cutoff=%s Hz, taps=%s", cutoff, num_taps)
-    h = scipy.signal.firwin(
-        num_taps, cutoff, window=window, fs=sampling_rate, pass_zero=True
-    )
-    return h
-
-
-def highpass_taps(
-    sampling_rate: float,
-    num_taps: int,
-    cutoff: float,
-    window: str = "hamming",
-) -> ArrayType:
-    """
-    Design Highpass FIR filter using the window method.
-
-    Parameters
-    ----------
-    sampling_rate : float
-        The sampling rate of the signal in Hz.
-    num_taps : int
-        Number of filter coefficients. For highpass filters, this should
-        typically be an odd integer to avoid a zero at the Nyquist frequency.
-    cutoff : float
-        Cutoff frequency in Hz.
-    window : str, default "hamming"
-        Type of window function to apply.
-
-    Returns
-    -------
-    ndarray
-        Filter taps with 0 dB passband gain.
-        Shape: (num_taps,).
-    """
-    logger.debug("Designing Highpass FIR: cutoff=%s Hz, taps=%s", cutoff, num_taps)
-    # pass_zero=False for highpass
-    h = scipy.signal.firwin(
-        num_taps, cutoff, window=window, fs=sampling_rate, pass_zero=False
-    )
-    return h
-
-
-def bandpass_taps(
-    sampling_rate: float,
-    num_taps: int,
-    low_cutoff: float,
-    high_cutoff: float,
-    window: str = "hamming",
-) -> ArrayType:
-    """
-    Design Bandpass FIR filter using the window method.
-
-    Parameters
-    ----------
-    sampling_rate : float
-        The sampling rate of the signal in Hz.
-    num_taps : int
-        Number of filter coefficients.
-    low_cutoff : float
-        Lower cutoff frequency in Hz.
-    high_cutoff : float
-        Upper cutoff frequency in Hz.
-    window : str, default "hamming"
-        Type of window function to apply.
-
-    Returns
-    -------
-    ndarray
-        Filter taps with 0 dB passband gain.
-        Shape: (num_taps,).
-    """
+    pass_zero = btype in ("low", "bandstop")
     logger.debug(
-        "Designing Bandpass FIR: range=[%s, %s] Hz, taps=%s",
-        low_cutoff,
-        high_cutoff,
-        num_taps,
+        "Designing FIR: btype=%s, cutoff=%s Hz, taps=%s.", btype, cutoff, num_taps
     )
-    # pass_zero=False for bandpass
     h = scipy.signal.firwin(
-        num_taps,
-        [low_cutoff, high_cutoff],
-        window=window,
-        fs=sampling_rate,
-        pass_zero=False,
-    )
-    return h
-
-
-def bandstop_taps(
-    sampling_rate: float,
-    num_taps: int,
-    low_cutoff: float,
-    high_cutoff: float,
-    window: str = "hamming",
-) -> ArrayType:
-    """
-    Design Bandstop FIR filter using the window method.
-
-    Parameters
-    ----------
-    sampling_rate : float
-        The sampling rate of the signal in Hz.
-    num_taps : int
-        Number of filter coefficients. Should typically be odd.
-    low_cutoff : float
-        Lower cutoff frequency in Hz.
-    high_cutoff : float
-        Upper cutoff frequency in Hz.
-    window : str, default "hamming"
-        Type of window function to apply.
-
-    Returns
-    -------
-    ndarray
-        Filter taps with 0 dB passband gain.
-        Shape: (num_taps,).
-    """
-    logger.debug(
-        "Designing Bandstop FIR: range=[%s, %s] Hz, taps=%s",
-        low_cutoff,
-        high_cutoff,
-        num_taps,
-    )
-    # pass_zero=True for bandstop
-    h = scipy.signal.firwin(
-        num_taps,
-        [low_cutoff, high_cutoff],
-        window=window,
-        fs=sampling_rate,
-        pass_zero=True,
+        num_taps, cutoff, window=window, fs=sampling_rate, pass_zero=pass_zero
     )
     return h
 
@@ -525,10 +407,12 @@ def bandstop_taps(
 # -----------------------------------------------------------------------------
 # butterworth_sos, chebyshev1_sos, chebyshev2_sos, elliptic_sos, bessel_sos:
 #   Classic IIR filter families in second-order-sections (SOS) form - the
-#   IIR-design counterpart to lowpass_taps/highpass_taps/bandpass_taps/
-#   bandstop_taps above.  ``btype`` selects the shape (as in scipy's own
-#   butter/cheby1/cheby2/ellip/bessel), matching how these designs are
-#   parameterized in practice rather than splitting one function per shape.
+#   IIR-design counterpart to fir_taps() above, one function per filter
+#   *family* (since each is a genuinely different algorithm) rather than
+#   per shape.  ``btype`` selects the shape (as in scipy's own
+#   butter/cheby1/cheby2/ellip/bessel and fir_taps() above), matching how
+#   these designs are parameterized in practice rather than splitting one
+#   function per shape.
 #
 # Like the FIR tap generators, these build coefficients from parameters
 # alone - no signal input, so none are Signal-aware.  Apply the resulting
