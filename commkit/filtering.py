@@ -514,6 +514,250 @@ def bandstop_taps(
 
 
 # -----------------------------------------------------------------------------
+# FILTER DESIGN - IIR SOS GENERATORS (array-only)
+# -----------------------------------------------------------------------------
+# butterworth_sos, chebyshev1_sos, chebyshev2_sos, elliptic_sos, bessel_sos:
+#   Classic IIR filter families in second-order-sections (SOS) form - the
+#   IIR-design counterpart to lowpass_taps/highpass_taps/bandpass_taps/
+#   bandstop_taps above.  ``btype`` selects the shape (as in scipy's own
+#   butter/cheby1/cheby2/ellip/bessel), matching how these designs are
+#   parameterized in practice rather than splitting one function per shape.
+#
+# Like the FIR tap generators, these build coefficients from parameters
+# alone - no signal input, so none are Signal-aware.  Apply the resulting
+# ``sos`` array to a signal with the generic iir_filter() below, the same
+# way fir_filter() applies any of the FIR tap generators above.
+
+
+def _iir_wn(
+    cutoff: float | tuple[float, float], btype: str, nyq: float
+) -> float | tuple[float, float]:
+    """Normalize cutoff(s) in Hz to scipy's ``Wn`` convention (frac. of Nyquist)."""
+    if btype in ("band", "bandstop"):
+        low, high = cutoff  # type: ignore[misc]
+        return (float(low) / nyq, float(high) / nyq)
+    return float(cutoff) / nyq  # type: ignore[arg-type]
+
+
+def butterworth_sos(
+    sampling_rate: float,
+    cutoff: float | tuple[float, float],
+    order: int = 4,
+    btype: str = "low",
+) -> np.ndarray:
+    """
+    Design a Butterworth IIR filter in second-order-sections (SOS) form.
+
+    Maximally flat passband, monotonic roll-off - the standard general-purpose
+    IIR design.
+
+    Parameters
+    ----------
+    sampling_rate : float
+        Sampling rate of the signal in Hz.
+    cutoff : float or (float, float)
+        Cutoff frequency in Hz.  A scalar for ``btype in {"low", "high"}``;
+        a ``(low, high)`` pair for ``btype in {"band", "bandstop"}``.
+    order : int, default 4
+        Filter order.
+    btype : {"low", "high", "band", "bandstop"}, default "low"
+        Filter shape.
+
+    Returns
+    -------
+    ndarray
+        SOS coefficients. Shape: ``(n_sections, 6)``.
+    """
+    nyq = 0.5 * float(sampling_rate)
+    Wn = _iir_wn(cutoff, btype, nyq)
+    logger.debug(
+        "Designing Butterworth SOS: btype=%s, cutoff=%s Hz, order=%s.",
+        btype,
+        cutoff,
+        order,
+    )
+    return scipy.signal.butter(order, Wn, btype=btype, output="sos")
+
+
+def chebyshev1_sos(
+    sampling_rate: float,
+    cutoff: float | tuple[float, float],
+    order: int = 4,
+    btype: str = "low",
+    ripple: float = 1.0,
+) -> np.ndarray:
+    """
+    Design a Chebyshev Type I IIR filter in SOS form.
+
+    Sharper roll-off than Butterworth for the same order, at the cost of
+    passband ripple.
+
+    Parameters
+    ----------
+    sampling_rate : float
+        Sampling rate of the signal in Hz.
+    cutoff : float or (float, float)
+        Cutoff frequency in Hz, see :func:`butterworth_sos`.
+    order : int, default 4
+        Filter order.
+    btype : {"low", "high", "band", "bandstop"}, default "low"
+        Filter shape.
+    ripple : float, default 1.0
+        Maximum passband ripple, in dB.
+
+    Returns
+    -------
+    ndarray
+        SOS coefficients. Shape: ``(n_sections, 6)``.
+    """
+    nyq = 0.5 * float(sampling_rate)
+    Wn = _iir_wn(cutoff, btype, nyq)
+    logger.debug(
+        "Designing Chebyshev-I SOS: btype=%s, cutoff=%s Hz, order=%s, ripple=%s dB.",
+        btype,
+        cutoff,
+        order,
+        ripple,
+    )
+    return scipy.signal.cheby1(order, ripple, Wn, btype=btype, output="sos")
+
+
+def chebyshev2_sos(
+    sampling_rate: float,
+    cutoff: float | tuple[float, float],
+    order: int = 4,
+    btype: str = "low",
+    attenuation: float = 40.0,
+) -> np.ndarray:
+    """
+    Design a Chebyshev Type II (inverse Chebyshev) IIR filter in SOS form.
+
+    Monotonic passband (no ripple), equiripple stopband - trades a Type I's
+    passband ripple for stopband ripple instead.
+
+    Parameters
+    ----------
+    sampling_rate : float
+        Sampling rate of the signal in Hz.
+    cutoff : float or (float, float)
+        Cutoff frequency in Hz, see :func:`butterworth_sos`.
+    order : int, default 4
+        Filter order.
+    btype : {"low", "high", "band", "bandstop"}, default "low"
+        Filter shape.
+    attenuation : float, default 40.0
+        Minimum stopband attenuation, in dB.
+
+    Returns
+    -------
+    ndarray
+        SOS coefficients. Shape: ``(n_sections, 6)``.
+    """
+    nyq = 0.5 * float(sampling_rate)
+    Wn = _iir_wn(cutoff, btype, nyq)
+    logger.debug(
+        "Designing Chebyshev-II SOS: btype=%s, cutoff=%s Hz, order=%s, attenuation=%s dB.",
+        btype,
+        cutoff,
+        order,
+        attenuation,
+    )
+    return scipy.signal.cheby2(order, attenuation, Wn, btype=btype, output="sos")
+
+
+def elliptic_sos(
+    sampling_rate: float,
+    cutoff: float | tuple[float, float],
+    order: int = 4,
+    btype: str = "low",
+    ripple: float = 1.0,
+    attenuation: float = 40.0,
+) -> np.ndarray:
+    """
+    Design an Elliptic (Cauer) IIR filter in SOS form.
+
+    Sharpest roll-off per order of the classic families, at the cost of
+    ripple in both passband and stopband.
+
+    Parameters
+    ----------
+    sampling_rate : float
+        Sampling rate of the signal in Hz.
+    cutoff : float or (float, float)
+        Cutoff frequency in Hz, see :func:`butterworth_sos`.
+    order : int, default 4
+        Filter order.
+    btype : {"low", "high", "band", "bandstop"}, default "low"
+        Filter shape.
+    ripple : float, default 1.0
+        Maximum passband ripple, in dB.
+    attenuation : float, default 40.0
+        Minimum stopband attenuation, in dB.
+
+    Returns
+    -------
+    ndarray
+        SOS coefficients. Shape: ``(n_sections, 6)``.
+    """
+    nyq = 0.5 * float(sampling_rate)
+    Wn = _iir_wn(cutoff, btype, nyq)
+    logger.debug(
+        "Designing Elliptic SOS: btype=%s, cutoff=%s Hz, order=%s, ripple=%s dB, "
+        "attenuation=%s dB.",
+        btype,
+        cutoff,
+        order,
+        ripple,
+        attenuation,
+    )
+    return scipy.signal.ellip(order, ripple, attenuation, Wn, btype=btype, output="sos")
+
+
+def bessel_sos(
+    sampling_rate: float,
+    cutoff: float | tuple[float, float],
+    order: int = 4,
+    btype: str = "low",
+    norm: str = "phase",
+) -> np.ndarray:
+    """
+    Design a Bessel/Thomson IIR filter in SOS form.
+
+    Maximally flat group delay (linear phase in the passband) rather than a
+    sharp magnitude roll-off - the IIR analogue of a linear-phase FIR design,
+    useful when waveform shape (not stopband rejection) matters most.
+
+    Parameters
+    ----------
+    sampling_rate : float
+        Sampling rate of the signal in Hz.
+    cutoff : float or (float, float)
+        Cutoff frequency in Hz, see :func:`butterworth_sos`.
+    order : int, default 4
+        Filter order.
+    btype : {"low", "high", "band", "bandstop"}, default "low"
+        Filter shape.
+    norm : {"phase", "delay", "mag"}, default "phase"
+        Critical frequency normalization, passed to ``scipy.signal.bessel``.
+
+    Returns
+    -------
+    ndarray
+        SOS coefficients. Shape: ``(n_sections, 6)``.
+    """
+    nyq = 0.5 * float(sampling_rate)
+    Wn = _iir_wn(cutoff, btype, nyq)
+    logger.debug(
+        "Designing Bessel SOS: btype=%s, cutoff=%s Hz, order=%s, norm=%s.",
+        btype,
+        cutoff,
+        order,
+        norm,
+    )
+    return scipy.signal.bessel(order, Wn, btype=btype, output="sos", norm=norm)
+
+
+# -----------------------------------------------------------------------------
 # FILTERING OPERATIONS (Signal-aware)
 # -----------------------------------------------------------------------------
 # _ols_forward:  OLS block windowing + batch FFT (shared scaffold)
@@ -522,8 +766,12 @@ def bandstop_taps(
 # shaping_filter_taps: Reconstruct pulse-shaping taps from a Signal's own
 #   metadata (pulse_shape/sps/rolloff) - takes a Signal, returns taps, used
 #   by matched_filter below to derive default taps for Signal input.
-# fir_filter: Generic FIR filtering operation (short-to-medium taps)
+# fir_filter: Generic FIR filtering operation (short-to-medium taps) - applies
+#   any of the FIR tap generators above.
 # matched_filter: Apply matched filter (time-reversed conjugate of pulse shape)
+# iir_filter: Generic IIR filtering operation (SOS form, causal or zero-phase)
+#   - applies any of the IIR SOS generators above, the IIR sibling of
+#   fir_filter().
 #
 # shape_pulse (TX symbol -> waveform synthesis) lives in core/generation.py,
 # not here: it is a signal-construction primitive, not a transform on an
@@ -918,6 +1166,76 @@ def matched_filter(
         )
 
     return fir_filter(samples, matched_taps, axis=axis)
+
+
+def iir_filter(
+    samples: ArrayType | Signal,
+    sos: ArrayType,
+    *,
+    axis: int = -1,
+    zero_phase: bool = True,
+) -> ArrayType | Signal:
+    """
+    Apply an Infinite Impulse Response (IIR) filter, in SOS form, to signal samples.
+
+    The IIR sibling of :func:`fir_filter`: takes coefficients designed
+    separately (:func:`butterworth_sos`, :func:`chebyshev1_sos`,
+    :func:`chebyshev2_sos`, :func:`elliptic_sos`, :func:`bessel_sos`, or any
+    other second-order-sections design) and applies them, rather than coupling
+    a specific filter family to the application step.
+
+    Parameters
+    ----------
+    samples : array_like or Signal
+        Input signal samples. Shape: ``(N,)`` or ``(C, N)``.  A
+        :class:`Signal` returns a new filtered :class:`Signal`.
+    sos : array_like
+        Second-order-sections filter coefficients. Shape: ``(n_sections, 6)``.
+    axis : int, default -1
+        The axis along which the filter is applied.
+    zero_phase : bool, default True
+        ``True`` - forward-backward (``sosfiltfilt``): zero phase distortion
+        (no group delay), at the cost of needing the whole record up front
+        (non-causal, offline use).
+        ``False`` - causal (``sosfilt``): the filter's real, frequency-
+        dependent group delay is present in the output, as it would be in a
+        streamed/real-time application.
+
+    Returns
+    -------
+    array_like or Signal
+        Filtered samples, same shape as ``samples``.
+
+    Notes
+    -----
+    Internally promotes to ``float64``/``complex128`` for the filtering call
+    and casts back to the input dtype on return: at very low normalized
+    cutoffs (e.g. phase-drift extraction), SOS poles bunch near ``z=1`` and
+    single precision is not numerically safe (see ``CLAUDE.md``, "Phase
+    Unwrapping & Kalman Smoothers").
+    """
+    x, sig = unwrap_signal(samples)
+    if sig is not None:
+        return rewrap_signal(sig, iir_filter(x, sos, axis=axis, zero_phase=zero_phase))
+
+    samples, xp, sp = dispatch(samples)
+    sos = xp.asarray(sos)
+
+    logger.debug(
+        "Applying IIR filter (%s SOS sections, zero_phase=%s, axis=%s).",
+        sos.shape[0],
+        zero_phase,
+        axis,
+    )
+
+    in_dtype = samples.dtype
+    work_dtype = xp.complex128 if xp.iscomplexobj(samples) else xp.float64
+    x_work = samples.astype(work_dtype)
+    if zero_phase:
+        result = sp.signal.sosfiltfilt(sos, x_work, axis=axis)
+    else:
+        result = sp.signal.sosfilt(sos, x_work, axis=axis)
+    return result.astype(in_dtype, copy=False)
 
 
 # -----------------------------------------------------------------------------

@@ -3,7 +3,9 @@
 import numpy as np
 
 from ..backend import ArrayType, dispatch, to_device
+from ..filtering import butterworth_sos, iir_filter
 from ..helpers import as_2d, restore_1d, to_report_scalar
+from ..smoothing import moving_average, savgol_smooth
 
 __all__ = ["frequency_drift_metrics", "separate_drift_phase_noise"]
 
@@ -80,7 +82,7 @@ def separate_drift_phase_noise(
       trim them via ``edge_trim`` in the downstream metric functions
       (``edge_trim ≈ 0.5·symbol_rate/cutoff``).
     """
-    phi_arr, xp, sp = dispatch(phi)
+    phi_arr, xp, _ = dispatch(phi)
     fs = float(symbol_rate)
     nyq = 0.5 * fs
     if not (0.0 < cutoff < nyq):
@@ -93,27 +95,29 @@ def separate_drift_phase_noise(
     in_dtype = phi2.dtype
 
     if method == "butterworth":
-        # SOS form is numerically stable at the very low normalized cutoffs
-        # typical here (cutoff ≪ symbol_rate => poles bunch near z=1).
-        sos = sp.signal.butter(order, cutoff / nyq, btype="low", output="sos")
-        if xp.__name__ == "cupy":
-            sos = xp.asarray(sos)
-        drift = sp.signal.sosfiltfilt(sos, phi2.astype(xp.float64), axis=-1)
+        # SOS form (via butterworth_sos + iir_filter) is numerically stable at
+        # the very low normalized cutoffs typical here (cutoff ≪ symbol_rate
+        # => poles bunch near z=1).
+        # Explicit float64 cast (rather than relying on iir_filter's own
+        # internal upcast) keeps drift in double precision here, so the
+        # pn = phi2 - drift residual below is computed via numpy/cupy's usual
+        # float64 promotion, not float32 - avoiding cancellation error when a
+        # caller passes float32 phi (see CLAUDE.md, dtype-precision rules).
+        sos = butterworth_sos(fs, cutoff, order=order, btype="low")
+        drift = iir_filter(phi2.astype(xp.float64), sos, axis=-1, zero_phase=True)
     elif method == "savgol":
         # Window ≈ one cutoff period (odd, > polyorder).
         win = int(round(fs / cutoff)) | 1
         win = max(win, order + 2 + (order % 2 == 0))
         win = min(win, phi2.shape[-1] - (1 - phi2.shape[-1] % 2))
-        drift = sp.signal.savgol_filter(phi2.astype(xp.float64), win, order, axis=-1)
+        drift = savgol_smooth(phi2.astype(xp.float64), win, order, axis=-1)
     elif method == "boxcar":
-        # uniform_filter1d is vectorized over channels on both backends and
-        # its "nearest" edge mode avoids the zero-padding bias of
+        # moving_average's "same" mode is edge-aware (uniform_filter1d,
+        # "nearest" edges) and avoids the zero-padding bias of
         # convolve(mode="same"), which drags the drift estimate toward zero
         # over the first/last window.
         w = max(1, int(round(fs / cutoff)))
-        drift = sp.ndimage.uniform_filter1d(
-            phi2.astype(xp.float64), w, axis=-1, mode="nearest"
-        )
+        drift = moving_average(phi2.astype(xp.float64), w, mode="same", axis=-1)
     else:
         raise ValueError(f"Unknown method {method!r}.")
 

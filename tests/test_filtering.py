@@ -426,3 +426,117 @@ class TestCompensateChromaticDispersion:
 
         assert isinstance(out_sig, Signal)
         xpt.assert_allclose(out_sig.samples, out_arr)
+
+
+# -----------------------------------------------------------------------------
+# IIR SOS DESIGN TESTS - design functions always return NumPy, like the FIR
+# tap generators, so no backend parametrisation is needed.
+# -----------------------------------------------------------------------------
+
+
+@pytest.mark.parametrize(
+    "design_fn,kwargs",
+    [
+        (filtering.butterworth_sos, {}),
+        (filtering.chebyshev1_sos, {"ripple": 1.0}),
+        (filtering.chebyshev2_sos, {"attenuation": 40.0}),
+        (filtering.elliptic_sos, {"ripple": 1.0, "attenuation": 40.0}),
+        (filtering.bessel_sos, {}),
+    ],
+)
+def test_iir_sos_design_shape(design_fn, kwargs):
+    """Every IIR family returns a valid (n_sections, 6) SOS array for order=4."""
+    sos = design_fn(1000.0, cutoff=50.0, order=4, **kwargs)
+    assert isinstance(sos, np.ndarray)
+    assert sos.ndim == 2
+    assert sos.shape[1] == 6
+
+
+@pytest.mark.parametrize(
+    "design_fn",
+    [
+        filtering.butterworth_sos,
+        filtering.chebyshev1_sos,
+        filtering.chebyshev2_sos,
+        filtering.elliptic_sos,
+        filtering.bessel_sos,
+    ],
+)
+def test_iir_sos_design_band_cutoff_pair(design_fn):
+    """btype='band' accepts a (low, high) cutoff pair for every family."""
+    sos = design_fn(1000.0, cutoff=(50.0, 150.0), order=4, btype="band")
+    assert sos.shape[1] == 6
+
+
+# -----------------------------------------------------------------------------
+# IIR_FILTER (apply) TESTS
+# -----------------------------------------------------------------------------
+
+
+def test_iir_filter_lowpass_extracts_drift(backend_device, xp):
+    """A slow sinusoid buried in fast jitter is recovered by a lowpass cutoff."""
+    n = 1 << 14
+    fs = 1000.0
+    t = np.arange(n) / fs
+    slow = np.sin(2 * np.pi * 2.0 * t)  # 2 Hz tone
+    rng = np.random.default_rng(7)
+    fast = rng.normal(0, 0.05, n)  # broadband jitter
+    x = xp.asarray(slow + fast)
+
+    sos = filtering.butterworth_sos(fs, cutoff=20.0, order=4, btype="low")
+    drift = filtering.iir_filter(x, sos, zero_phase=True)
+    drift_cpu = np.asarray(drift.get() if hasattr(drift, "get") else drift)
+    # Zero-phase: no lag, so a direct correlation with the injected tone is tight.
+    assert np.corrcoef(drift_cpu, slow)[0, 1] > 0.99
+
+
+def test_iir_filter_band(backend_device, xp):
+    """A band-pass SOS filter applies without error."""
+    n = 1 << 12
+    fs = 1000.0
+    rng = np.random.default_rng(8)
+    x = xp.asarray(rng.standard_normal(n))
+    sos = filtering.butterworth_sos(fs, cutoff=(50.0, 150.0), order=4, btype="band")
+    out = filtering.iir_filter(x, sos)
+    assert out.shape == x.shape
+
+
+def test_iir_filter_causal_has_group_delay(backend_device, xp):
+    """zero_phase=False (sosfilt) lags zero_phase=True (sosfiltfilt) on a step."""
+    n = 2000
+    fs = 1000.0
+    x = xp.concatenate([xp.zeros(n // 2), xp.ones(n // 2)])
+    sos = filtering.butterworth_sos(fs, cutoff=20.0, order=4, btype="low")
+
+    causal = filtering.iir_filter(x, sos, zero_phase=False)
+    zero_phase = filtering.iir_filter(x, sos, zero_phase=True)
+    causal_cpu = np.asarray(causal.get() if hasattr(causal, "get") else causal)
+    zp_cpu = np.asarray(zero_phase.get() if hasattr(zero_phase, "get") else zero_phase)
+
+    # At the step's midpoint, the causal (lagged) output must still be well
+    # below the zero-phase output, which is already tracking the step.
+    mid = n // 2
+    assert causal_cpu[mid] < zp_cpu[mid]
+
+
+def test_iir_filter_preserves_dtype(backend_device, xp):
+    """float32 input stays float32 (internal float64 promotion, cast back)."""
+    x = xp.ones(512, dtype=xp.float32)
+    sos = filtering.butterworth_sos(1000.0, cutoff=50.0)
+    out = filtering.iir_filter(x, sos)
+    assert out.dtype == xp.float32
+
+
+def test_iir_filter_signal_input_returns_signal(backend_device, xp, xpt):
+    """Signal input returns a Signal with the filtered samples."""
+    fs = 1000.0
+    rng = np.random.default_rng(9)
+    data = xp.asarray(rng.standard_normal(1024))
+    sig = Signal(samples=data, sampling_rate=fs, symbol_rate=fs / 2)
+    sos = filtering.butterworth_sos(fs, cutoff=50.0)
+
+    out_sig = filtering.iir_filter(sig, sos)
+    out_arr = filtering.iir_filter(data, sos)
+
+    assert isinstance(out_sig, Signal)
+    xpt.assert_allclose(out_sig.samples, out_arr)
