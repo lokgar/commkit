@@ -69,6 +69,34 @@ def apply_default_theme() -> None:
     plt.rcParams["mathtext.bf"] = f"{font_name}:bold"
 
 
+def _get_axis(ax):
+    """Get-or-create a single ``Axes``: returns ``(fig, axi)``.
+
+    If ``ax`` is ``None``, creates a new 1x1 figure/axes pair (theme default
+    figsize). Otherwise reuses the given ``Axes`` and its parent ``Figure``.
+    For the single-``Axes`` case only - multi-panel functions build their
+    own subplot grid via :func:`_create_subplot_grid`/:func:`_grid_figsize`.
+    """
+    if ax is None:
+        fig, axi = plt.subplots(1, 1)
+    else:
+        axi = ax
+        fig = axi.figure
+    return fig, axi
+
+
+def _finish(result, show: bool):
+    """Show-or-return: call ``plt.show()`` and return ``None``, or return ``result``.
+
+    ``result`` is whatever the caller wants returned when ``show=False``
+    (typically ``(fig, axi)`` or ``(fig, axes)``).
+    """
+    if show:
+        plt.show()
+        return None
+    return result
+
+
 def _create_subplot_grid(num_axes: int, max_cols: int = 2) -> tuple[int, int]:
     """
     Computes a grid layout (rows, cols) for a given number of axes.

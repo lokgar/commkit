@@ -9,6 +9,8 @@ from ..backend import to_device
 from .sync import plot_carrier_phase_decomposition
 from .theme import (
     _as_channels,
+    _finish,
+    _get_axis,
     _grid_figsize,
     _set_eng_formatter,
 )
@@ -50,11 +52,7 @@ def plot_frequency_drift(
     df_c = _as_channels(df)
     C, M = df_c.shape
 
-    if ax is None:
-        fig, axi = plt.subplots(1, 1)
-    else:
-        axi = ax
-        fig = axi.figure
+    fig, axi = _get_axis(ax)
 
     t = np.arange(M) / float(symbol_rate)
     for i in range(C):
@@ -72,10 +70,7 @@ def plot_frequency_drift(
     if C > 1 or amp_ref is not None:
         axi.legend(loc="best")
 
-    if show:
-        plt.show()
-        return None
-    return fig, axi
+    return _finish((fig, axi), show)
 
 
 def _log_cell_median(f_pos, s, sel, points_per_octave=24):
@@ -176,11 +171,7 @@ def plot_frequency_noise_psd(
     # top - the same reduction the plateau detector runs on.
     dense = int(pos.sum()) > 4000
 
-    if ax is None:
-        fig, axi = plt.subplots(1, 1)
-    else:
-        axi = ax
-        fig = axi.figure
+    fig, axi = _get_axis(ax)
 
     for i in range(C):
         s_i = S_c[i, pos]
@@ -271,10 +262,7 @@ def plot_frequency_noise_psd(
     axi.legend(loc="best")
     axi.grid(True, which="both")
 
-    if show:
-        plt.show()
-        return None
-    return fig, axi
+    return _finish((fig, axi), show)
 
 
 def plot_allan_deviation(
@@ -313,11 +301,7 @@ def plot_allan_deviation(
     adv = _as_channels(adev)
     C = adv.shape[0]
 
-    if ax is None:
-        fig, axi = plt.subplots(1, 1)
-    else:
-        axi = ax
-        fig = axi.figure
+    fig, axi = _get_axis(ax)
 
     for i in range(C):
         axi.loglog(
@@ -350,10 +334,7 @@ def plot_allan_deviation(
     axi.legend(loc="best")
     axi.grid(True, which="both")
 
-    if show:
-        plt.show()
-        return None
-    return fig, axi
+    return _finish((fig, axi), show)
 
 
 def plot_increment_variance(
@@ -396,11 +377,7 @@ def plot_increment_variance(
     v = _as_channels(var)
     C = v.shape[0]
 
-    if ax is None:
-        fig, axi = plt.subplots(1, 1)
-    else:
-        axi = ax
-        fig = axi.figure
+    fig, axi = _get_axis(ax)
 
     for i in range(C):
         axi.plot(
@@ -436,10 +413,7 @@ def plot_increment_variance(
     axi.set_title(title)
     axi.legend(loc="best")
 
-    if show:
-        plt.show()
-        return None
-    return fig, axi
+    return _finish((fig, axi), show)
 
 
 def plot_dsh_beat_psd(
@@ -491,11 +465,7 @@ def plot_dsh_beat_psd(
     if f_peak is not None:
         f0 = float(np.mean(np.atleast_1d(np.asarray(f_peak, dtype=np.float64))))
 
-    if ax is None:
-        fig, axi = plt.subplots(1, 1)
-    else:
-        axi = ax
-        fig = axi.figure
+    fig, axi = _get_axis(ax)
 
     for i in range(C):
         p_db = 10.0 * np.log10(p[i] / p[i].max())
@@ -534,10 +504,7 @@ def plot_dsh_beat_psd(
     axi.set_title(title)
     axi.legend(loc="best")
 
-    if show:
-        plt.show()
-        return None
-    return fig, axi
+    return _finish((fig, axi), show)
 
 
 def plot_carrier_phase_characterization(
@@ -621,7 +588,4 @@ def plot_carrier_phase_characterization(
 
     if title:
         fig.suptitle(title)
-    if show:
-        plt.show()
-        return None
-    return fig, axes
+    return _finish((fig, axes), show)

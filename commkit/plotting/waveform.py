@@ -10,6 +10,8 @@ from ..core.signal import Signal
 from ..logger import logger
 from .theme import (
     _create_subplot_grid,
+    _finish,
+    _get_axis,
     _grid_figsize,
     _set_eng_formatter,
 )
@@ -121,17 +123,11 @@ def plot_time_domain(
                 **kwargs,
             )
 
-        if show:
-            plt.show()
-            return None
-        return fig, axes
+        return _finish((fig, axes), show)
 
     # --- 1D Logic ---
 
-    if ax is None:
-        fig, ax = plt.subplots()
-    else:
-        fig = ax.figure
+    fig, ax = _get_axis(ax)
 
     samples = to_device(samples, "cpu")
 
@@ -176,7 +172,4 @@ def plot_time_domain(
     if title is not None:
         ax.set_title(title)
 
-    if show:
-        plt.show()
-        return None
-    return fig, ax
+    return _finish((fig, ax), show)

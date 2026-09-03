@@ -10,6 +10,8 @@ from ..backend import to_device
 from .theme import (
     _as_channels,
     _decimate_minmax,
+    _finish,
+    _get_axis,
     _grid_figsize,
     _set_eng_formatter,
 )
@@ -106,10 +108,7 @@ def plot_timing_correlation(
         ax2.set_ylabel("|R|")
         ax2.legend(loc="upper right")
 
-    if show:
-        plt.show()
-        return None
-    return fig, axes
+    return _finish((fig, axes), show)
 
 
 def plot_mm_autocorrelation(
@@ -219,10 +218,7 @@ def plot_mm_autocorrelation(
         ax_phase.set_ylim(-np.pi - 0.3, np.pi + 0.3)
         ax_phase.legend()
 
-    if show:
-        plt.show()
-        return None
-    return fig, (axes_per_ch[0] if C == 1 else axes_per_ch)
+    return _finish((fig, axes_per_ch[0] if C == 1 else axes_per_ch), show)
 
 
 def plot_frequency_offset_spectrum(
@@ -314,10 +310,7 @@ def plot_frequency_offset_spectrum(
         axi.set_ylabel(f"|X^{M}(f)|")
         axi.legend()
 
-    if show:
-        plt.show()
-        return None
-    return fig, (axes_list[0] if C == 1 else axes_list)
+    return _finish((fig, axes_list[0] if C == 1 else axes_list), show)
 
 
 def plot_carrier_phase_trajectory(
@@ -362,11 +355,7 @@ def plot_carrier_phase_trajectory(
         phi_full = phi_full[None, :]
     C, N = phi_full.shape
 
-    if ax is None:
-        fig, axi = plt.subplots(1, 1)
-    else:
-        axi = ax
-        fig = axi.figure
+    fig, axi = _get_axis(ax)
 
     sym_idx = np.arange(N)
     for i in range(C):
@@ -396,10 +385,7 @@ def plot_carrier_phase_trajectory(
     if C > 1 or n_train > 0:
         axi.legend(loc="upper right")
 
-    if show:
-        plt.show()
-        return None
-    return fig, axi
+    return _finish((fig, axi), show)
 
 
 def plot_frequency_offset_blockwise_result(
@@ -486,10 +472,7 @@ def plot_frequency_offset_blockwise_result(
     ax_p.set_ylabel("Phase [deg]")
     ax_p.set_title(f"{title} - Integrated Phase")
 
-    if show:
-        plt.show()
-        return None
-    return fig, axes
+    return _finish((fig, axes), show)
 
 
 def plot_pilot_phase_estimate(
@@ -626,10 +609,7 @@ def plot_pilot_phase_estimate(
             ax2.set_ylabel("Phase [deg]")
             ax2.legend()
 
-    if show:
-        plt.show()
-        return None
-    return fig, axes
+    return _finish((fig, axes), show)
 
 
 def plot_pilot_tone_phase_estimate(
@@ -764,10 +744,7 @@ def plot_pilot_tone_phase_estimate(
     if C > 1:
         ax_phase.legend(loc="upper right")
 
-    if show:
-        plt.show()
-        return None
-    return fig, (ax_spec, ax_phase)
+    return _finish((fig, (ax_spec, ax_phase)), show)
 
 
 def plot_pilot_tones_phase_estimate(
@@ -861,10 +838,7 @@ def plot_pilot_tones_phase_estimate(
     ax_phase.set_xlabel("Sample Index")
     ax_phase.set_ylabel("Phase [deg]")
 
-    if show:
-        plt.show()
-        return None
-    return fig, (ax_delta, ax_phase)
+    return _finish((fig, (ax_delta, ax_phase)), show)
 
 
 def plot_carrier_phase_decomposition(
@@ -909,11 +883,7 @@ def plot_carrier_phase_decomposition(
     C, N = phi_c.shape
     drift_c = _as_channels(drift) if drift is not None else None
 
-    if ax is None:
-        fig, axi = plt.subplots(1, 1)
-    else:
-        axi = ax
-        fig = axi.figure
+    fig, axi = _get_axis(ax)
 
     t = np.arange(N) / float(symbol_rate)
     for i in range(C):
@@ -947,7 +917,4 @@ def plot_carrier_phase_decomposition(
     axi.set_title(title)
     axi.legend(loc="best")
 
-    if show:
-        plt.show()
-        return None
-    return fig, axi
+    return _finish((fig, axi), show)
