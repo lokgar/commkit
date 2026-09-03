@@ -19,18 +19,7 @@ import numpy as np
 
 from ..backend import dispatch, to_device
 from ..logger import logger
-from .theme import _grid_figsize
-
-
-def _si_freq_scale(max_f: float) -> tuple[float, str]:
-    """Pick a Hz/kHz/MHz/GHz scale + unit label for a frequency axis."""
-    if max_f >= 1e9:
-        return 1e9, "GHz"
-    elif max_f >= 1e6:
-        return 1e6, "MHz"
-    elif max_f >= 1e3:
-        return 1e3, "kHz"
-    return 1.0, "Hz"
+from .theme import _grid_figsize, _set_eng_formatter
 
 
 def plot_filter_response(
@@ -175,10 +164,8 @@ def plot_filter_response(
 
     if sampling_rate is not None:
         freqs = w / (2 * xp.pi) * float(sampling_rate)
-        freqs_cpu = to_device(freqs, "cpu")
-        scale, unit = _si_freq_scale(float(np.max(np.abs(freqs_cpu))))
-        freqs_disp = freqs_cpu / scale
-        freq_label = f"Frequency [{unit}]"
+        freqs_disp = to_device(freqs, "cpu")
+        freq_label = "Frequency [Hz]"
     else:
         freqs_disp = to_device(w / (2 * xp.pi), "cpu")  # cycles/sample
         freq_label = "Frequency [Cycles/Sample]"
@@ -191,12 +178,16 @@ def plot_filter_response(
     ax2.set_title("Frequency Response (Magnitude)")
     ax2.set_xlabel(freq_label)
     ax2.set_xlim(freqs_disp[0], freqs_disp[-1])
+    if sampling_rate is not None:
+        _set_eng_formatter(ax2, "x", "Hz")
 
     ax3.plot(freqs_disp, angles_cpu, color="C3")
     ax3.set_ylabel("Phase [rad]")
     ax3.set_title("Frequency Response (Phase)")
     ax3.set_xlabel(freq_label)
     ax3.set_xlim(freqs_disp[0], freqs_disp[-1])
+    if sampling_rate is not None:
+        _set_eng_formatter(ax3, "x", "Hz")
 
     # --- 4. Group delay ---
     if kind == "fir":
@@ -219,6 +210,8 @@ def plot_filter_response(
     ax4.set_title("Group Delay")
     ax4.set_xlabel(freq_label)
     ax4.set_xlim(freqs_disp[0], freqs_disp[-1])
+    if sampling_rate is not None:
+        _set_eng_formatter(ax4, "x", "Hz")
 
     if show:
         plt.show()

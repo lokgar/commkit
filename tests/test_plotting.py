@@ -4,6 +4,7 @@ import logging
 from unittest.mock import MagicMock, patch
 
 import matplotlib.pyplot as plt
+import matplotlib.ticker as mticker
 import numpy as np
 import pytest
 
@@ -221,17 +222,20 @@ def test_psd_wavelength(backend_device, xp):
 
 
 def test_psd_auto_scale(backend_device, xp):
-    """Verify PSD auto-scaling for different frequency ranges."""
+    """Verify PSD frequency axis uses an SI-prefixed engineering tick formatter."""
     samples = xp.random.randn(256)
 
-    # THz
+    # THz-range: xlabel stays the bare unit; the tick formatter adds the prefix.
     fig, ax = plot_psd(samples, sampling_rate=2e12, show=False)
-    assert "THz" in ax.get_xlabel()
+    assert ax.get_xlabel() == "Frequency [Hz]"
+    fmt = ax.xaxis.get_major_formatter()
+    assert isinstance(fmt, mticker.EngFormatter)
+    assert "T" in fmt(2e12)
     plt.close("all")
 
-    # MHz
+    # MHz-range
     fig, ax = plot_psd(samples, sampling_rate=2e6, show=False)
-    assert "MHz" in ax.get_xlabel()
+    assert "M" in ax.xaxis.get_major_formatter()(2e6)
     plt.close("all")
 
 
@@ -343,27 +347,22 @@ def test_time_domain_limits(caplog, backend_device, xp):
 
 
 def test_time_domain_auto_scale(backend_device, xp):
-    """Verify time axis auto-scaling."""
+    """Verify time axis uses an SI-prefixed engineering tick formatter."""
     sig = xp.ones(100)
 
-    # ns
     _, ax = plot_time_domain(sig, sampling_rate=1e10)
-    assert "ns" in ax.get_xlabel()
-    plt.close("all")
+    assert ax.get_xlabel() == "Time [s]"
+    fmt = ax.xaxis.get_major_formatter()
+    assert isinstance(fmt, mticker.EngFormatter)
 
+    # ns
+    assert "n" in fmt(3e-9)
     # ps
-    _, ax = plot_time_domain(sig, sampling_rate=1e13)
-    assert "ps" in ax.get_xlabel()
-    plt.close("all")
-
+    assert "p" in fmt(3e-12)
     # us
-    _, ax = plot_time_domain(sig, sampling_rate=1e7)
-    assert "µs" in ax.get_xlabel()
-    plt.close("all")
-
+    assert "µ" in fmt(3e-6)
     # ms
-    _, ax = plot_time_domain(sig, sampling_rate=1e4)
-    assert "ms" in ax.get_xlabel()
+    assert "m" in fmt(3e-3)
     plt.close("all")
 
 

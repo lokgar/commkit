@@ -7,7 +7,7 @@ import numpy as np
 
 from ..backend import to_device
 from ..smoothing import moving_average
-from .theme import _grid_figsize
+from .theme import _grid_figsize, _set_eng_formatter
 
 
 def plot_equalizer_result(
@@ -205,17 +205,6 @@ def plot_zf_equalizer_response(
     sort_idx = np.argsort(freqs)
     f_sorted = freqs[sort_idx]
 
-    max_f = float(np.max(np.abs(f_sorted)))
-    if max_f >= 1e9:
-        scale, unit = 1e9, "GHz"
-    elif max_f >= 1e6:
-        scale, unit = 1e6, "MHz"
-    elif max_f >= 1e3:
-        scale, unit = 1e3, "kHz"
-    else:
-        scale, unit = 1.0, "Hz"
-    f_disp = f_sorted / scale
-
     def _draw_triplet(H_f, ax_row, row_label=""):
         H_s = H_f[sort_idx]
         W_s = np.conj(H_s) / (np.abs(H_s) ** 2 + reg)
@@ -226,10 +215,11 @@ def plot_zf_equalizer_response(
             ["Channel |H(f)|", "Equalizer |W(f)|", "Combined |H·W(f)|"],
             ["C0", "C1", "C2"],
         ):
-            axi.plot(f_disp, 20 * np.log10(np.abs(data) + 1e-12), color=col)
+            axi.plot(f_sorted, 20 * np.log10(np.abs(data) + 1e-12), color=col)
             prefix = f"{row_label} " if row_label else ""
             axi.set_title(f"{prefix}{lbl}")
-            axi.set_xlabel(f"Frequency [{unit}]")
+            _set_eng_formatter(axi, "x", "Hz")
+            axi.set_xlabel("Frequency [Hz]")
             axi.set_ylabel("Magnitude [dB]")
 
     if siso:

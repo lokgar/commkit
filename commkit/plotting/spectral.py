@@ -11,6 +11,7 @@ from ..logger import logger
 from .theme import (
     _create_subplot_grid,
     _grid_figsize,
+    _set_eng_formatter,
 )
 
 
@@ -229,26 +230,7 @@ def plot_psd(
 
         xlabel = "Wavelength [nm]"
     else:
-        # Auto-scale frequency axis
-        max_f = np.max(np.abs(f))
-        if max_f >= 1e12:
-            scale_factor = 1e12
-            unit = "THz"
-        elif max_f >= 1e9:
-            scale_factor = 1e9
-            unit = "GHz"
-        elif max_f >= 1e6:
-            scale_factor = 1e6
-            unit = "MHz"
-        elif max_f >= 1e3:
-            scale_factor = 1e3
-            unit = "kHz"
-        else:
-            scale_factor = 1.0
-            unit = "Hz"
-
-        x_values = f / scale_factor
-        xlabel = f"Frequency [{unit}]"
+        xlabel = "Frequency [Hz]"
 
     if xlim is not None:
         ax.set_xlim(xlim)
@@ -259,6 +241,8 @@ def plot_psd(
     ax.plot(x_values, 10 * np.log10(Pxx + 1e-20), **kwargs)
     ax.set_xlabel(xlabel)
     ax.set_ylabel("PSD [dB/Hz]")
+    if x_axis != "wavelength":
+        _set_eng_formatter(ax, "x", "Hz")
     if title is not None:
         ax.set_title(title)
 
@@ -511,56 +495,16 @@ def plot_spectrogram(
         # Angle, phase, etc., plot linearly
         Sxx_plot = Sxx_slice
 
-    # Auto-scale frequency axis (x-axis)
-    max_f = np.max(np.abs(f_plot)) if len(f_plot) > 0 else 0
-    if max_f >= 1e12:
-        f_scale = 1e12
-        f_unit = "THz"
-    elif max_f >= 1e9:
-        f_scale = 1e9
-        f_unit = "GHz"
-    elif max_f >= 1e6:
-        f_scale = 1e6
-        f_unit = "MHz"
-    elif max_f >= 1e3:
-        f_scale = 1e3
-        f_unit = "kHz"
-    else:
-        f_scale = 1.0
-        f_unit = "Hz"
-
-    x_values = f_plot / f_scale
-    xlabel = f"Frequency [{f_unit}]"
-
-    # Auto-scale time axis (y-axis)
-    max_t = t_plot[-1] if len(t_plot) > 0 else 0
-    if max_t < 1e-9:
-        t_scale = 1e12
-        t_unit = "ps"
-    elif max_t < 1e-6:
-        t_scale = 1e9
-        t_unit = "ns"
-    elif max_t < 1e-3:
-        t_scale = 1e6
-        t_unit = "µs"
-    elif max_t < 1:
-        t_scale = 1e3
-        t_unit = "ms"
-    else:
-        t_scale = 1.0
-        t_unit = "s"
-
-    y_values = t_plot * t_scale
-    ylabel = f"Time [{t_unit}]"
-
     # Plot spectrogram with frequency on x-axis and time on y-axis
     # Sxx_plot has shape (len(f_plot), len(t_plot)).
     # Transposing Sxx_plot to (len(t_plot), len(f_plot)) matches y-axis (time) and x-axis (frequency).
     mesh = ax.pcolormesh(
-        x_values, y_values, Sxx_plot.T, cmap=cmap, shading="auto", **kwargs
+        f_plot, t_plot, Sxx_plot.T, cmap=cmap, shading="auto", **kwargs
     )
-    ax.set_xlabel(xlabel)
-    ax.set_ylabel(ylabel)
+    ax.set_xlabel("Frequency [Hz]")
+    ax.set_ylabel("Time [s]")
+    _set_eng_formatter(ax, "x", "Hz")
+    _set_eng_formatter(ax, "y", "s")
     if title is not None:
         ax.set_title(title)
 

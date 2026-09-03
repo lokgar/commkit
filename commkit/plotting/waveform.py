@@ -11,6 +11,7 @@ from ..logger import logger
 from .theme import (
     _create_subplot_grid,
     _grid_figsize,
+    _set_eng_formatter,
 )
 
 
@@ -149,27 +150,6 @@ def plot_time_domain(
 
     time_axis = np.arange(len(plot_samples)) / sampling_rate
 
-    # Auto-scale time axis
-    max_time = time_axis[-1] if len(time_axis) > 0 else 0
-    if max_time < 1e-9:
-        scale_factor = 1e12
-        unit = "ps"
-    elif max_time < 1e-6:
-        scale_factor = 1e9
-        unit = "ns"
-    elif max_time < 1e-3:
-        scale_factor = 1e6
-        unit = "µs"
-    elif max_time < 1:
-        scale_factor = 1e3
-        unit = "ms"
-    else:
-        scale_factor = 1.0
-        unit = "s"
-
-    time_axis = time_axis * scale_factor
-    xlabel = f"Time [{unit}]"
-
     if np.iscomplexobj(plot_samples):
         ax.plot(
             time_axis,
@@ -190,8 +170,9 @@ def plot_time_domain(
             plot_samples,
             **kwargs,
         )
-    ax.set_xlabel(xlabel)
+    ax.set_xlabel("Time [s]")
     ax.set_ylabel("Amplitude")
+    _set_eng_formatter(ax, "x", "s")
     if title is not None:
         ax.set_title(title)
 
