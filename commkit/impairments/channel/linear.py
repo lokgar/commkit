@@ -23,6 +23,21 @@ __all__ = [
 ]
 
 
+def _jones_rotation(theta: float, xp, dtype) -> ArrayType:
+    """Static 2x2 Jones rotation matrix ``R(theta) = [[cos, -sin], [sin, cos]]``.
+
+    Shared builder for ``apply_pmd``'s PSP-frame rotation (``R(+theta)`` and
+    ``R(-theta) = R(theta)`` evaluated at ``-theta``) and
+    ``apply_polarization_mixing``'s static-``theta`` path.  The time-varying
+    path in ``apply_polarization_mixing`` doesn't build an explicit matrix -
+    a distinct 2x2 matrix per sample isn't worth materialising - so it
+    applies the same rotation via direct per-sample broadcasting instead.
+    """
+    c = math.cos(theta)
+    s = math.sin(theta)
+    return xp.array([[c, -s], [s, c]], dtype=dtype)
+
+
 def apply_pmd(
     samples: ArrayType | Signal,
     sampling_rate: float | None = None,
@@ -117,13 +132,11 @@ def apply_pmd(
     N = samples.shape[1]
     freqs = xp.fft.fftfreq(N, d=1.0 / sampling_rate)
 
-    c = math.cos(theta)
-    s = math.sin(theta)
     # H(f) = R(+θ) · diag(D) · R(-θ)
     # R(-θ): rotate INTO the principal-state-of-polarisation (PSP) frame
-    Rfwd = xp.array([[c, s], [-s, c]], dtype=samples.dtype)
+    Rfwd = _jones_rotation(-theta, xp, samples.dtype)
     # R(+θ): rotate back to the lab frame
-    Rinv = xp.array([[c, -s], [s, c]], dtype=samples.dtype)
+    Rinv = _jones_rotation(theta, xp, samples.dtype)
 
     phase = xp.pi * freqs * dgd
     D = xp.stack([xp.exp(-1j * phase), xp.exp(1j * phase)])  # (2, N)
@@ -226,9 +239,7 @@ def apply_polarization_mixing(
             )
         else:
             # Static: scalar path - avoid building (N,) array
-            c = math.cos(scalar_theta)
-            s = math.sin(scalar_theta)
-            R = xp.array([[c, -s], [s, c]], dtype=samples.dtype)
+            R = _jones_rotation(scalar_theta, xp, samples.dtype)
             result = R @ samples
             if result.dtype != samples.dtype:
                 result = result.astype(samples.dtype)

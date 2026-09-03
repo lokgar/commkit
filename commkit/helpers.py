@@ -136,7 +136,7 @@ def normalize(
     ----------
     x : array_like
         Input signal or filter taps.
-    mode : {"unity_gain", "unit_energy", "peak", "average_power", "symbol_power"}, default "unity_gain"
+    mode : {"unity_gain", "unit_energy", "peak", "average_power", "symbol_power", "dac_peak"}, default "unity_gain"
         Normalization strategy:
         - "unity_gain": Sum of elements is 1.0 (DC gain normalization).
           Preserves signal levels (e.g., 5V -> 5V). Used for general filters.
@@ -163,6 +163,14 @@ def normalize(
           and ``apply_awgn`` can use ``Es = signal_power * sps = 1`` directly.
           Requires ``sps`` parameter. At ``sps=1`` it is identical to
           ``"average_power"``.
+        - "dac_peak": Per-channel ``max(peak_|Re|, peak_|Im|)`` is 1.0.
+          Brings the dominant I/Q component to 1.0 while preserving the I/Q
+          ratio - unlike ``"peak"`` (complex-envelope ``max(|x[n]|)``), which
+          leaves components at ``<= 1/sqrt(2)`` for square QAM/PSK whose
+          envelope peak sits at 45°.  Maximises DAC range utilisation for a
+          signal section independent of modulation format or constellation
+          phase geometry (e.g. a frame's preamble and body, normalised
+          separately so each uses the full DAC range).
     axis : int, optional
         The axis along which to compute the normalization factor.
         If `None`, normalizes the entire array globally.
@@ -214,6 +222,14 @@ def normalize(
         #   sym_rms = global_rms * √sps
         norm_factor = rms(x, axis=axis, keepdims=keepdims) * xp.asarray(
             sps**0.5, dtype=x.real.dtype
+        )
+
+    elif mode == "dac_peak":
+        # Per-channel max(peak_|Re|, peak_|Im|) = 1: brings the dominant I/Q
+        # component to 1.0, preserving the I/Q ratio.
+        norm_factor = xp.maximum(
+            xp.max(xp.abs(x.real), axis=axis, keepdims=keepdims),
+            xp.max(xp.abs(x.imag), axis=axis, keepdims=keepdims),
         )
 
     else:

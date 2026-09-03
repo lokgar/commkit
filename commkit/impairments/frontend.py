@@ -87,6 +87,38 @@ def apply_iq_imbalance(
     return result
 
 
+def _apply_iq_correction(samples, xp, correct_fn):
+    """Shared per-channel scaffold for the blind IQ-imbalance compensators.
+
+    ``correct_fn(r, xp) -> (comp0, comp1)`` computes one channel's corrected
+    real I/Q-like components (algorithm-specific: Löwdin symmetric whitening
+    or Gram-Schmidt orthogonalisation) from the complex channel ``r`` (shape
+    ``(N,)``).  Shares the per-channel input-power measurement, power
+    restoration, dtype cast, and channel loop between the two compensators -
+    the correction math itself stays in ``correct_fn``.
+    """
+    samples, was_1d = as_2d(samples, name="samples")
+
+    C, N = samples.shape
+    result = xp.empty_like(samples)
+
+    for ch in range(C):
+        r = samples[ch]  # (N,)
+        P_in = xp.mean(xp.abs(r) ** 2)
+
+        comp0, comp1 = correct_fn(r, xp)
+
+        # Restore input power: E[|s_hat|^2] = P_in
+        s_corr = (comp0 + 1j * comp1) * xp.sqrt(P_in / 2.0)
+
+        if s_corr.dtype != samples.dtype:
+            s_corr = s_corr.astype(samples.dtype)
+
+        result[ch] = s_corr
+
+    return restore_1d(was_1d, result)
+
+
 def compensate_iq_imbalance_lowdin(samples: ArrayType | Signal) -> ArrayType | Signal:
     """
     Blind IQ imbalance compensation via Löwdin symmetric orthogonalisation.
@@ -128,15 +160,8 @@ def compensate_iq_imbalance_lowdin(samples: ArrayType | Signal) -> ArrayType | S
 
     samples, xp, _ = dispatch(samples)
 
-    samples, was_1d = as_2d(samples, name="samples")
-
-    C, N = samples.shape
-    result = xp.empty_like(samples)
-
-    for ch in range(C):
-        r = samples[ch]  # (N,)
-        P_in = xp.mean(xp.abs(r) ** 2)
-
+    def _correct(r, xp):
+        N = r.shape[0]
         # 2xN real data matrix: rows = [I, Q]
         X = xp.stack([r.real, r.imag])  # (2, N)
 
@@ -149,16 +174,9 @@ def compensate_iq_imbalance_lowdin(samples: ArrayType | Signal) -> ArrayType | S
 
         # Apply whitening - X_corr has identity second-moment matrix
         X_corr = W @ X  # (2, N)
+        return X_corr[0], X_corr[1]
 
-        # Restore input power: E[|s_hat|^2] = P_in
-        s_corr = (X_corr[0] + 1j * X_corr[1]) * xp.sqrt(P_in / 2.0)
-
-        if s_corr.dtype != samples.dtype:
-            s_corr = s_corr.astype(samples.dtype)
-
-        result[ch] = s_corr
-
-    return restore_1d(was_1d, result)
+    return _apply_iq_correction(samples, xp, _correct)
 
 
 def compensate_iq_imbalance_gram_schmidt(
@@ -206,15 +224,7 @@ def compensate_iq_imbalance_gram_schmidt(
 
     samples, xp, _ = dispatch(samples)
 
-    samples, was_1d = as_2d(samples, name="samples")
-
-    C, N = samples.shape
-    result = xp.empty_like(samples)
-
-    for ch in range(C):
-        r = samples[ch]  # (N,)
-        P_in = xp.mean(xp.abs(r) ** 2)
-
+    def _correct(r, xp):
         I = r.real  # noqa: E741
         Q = r.imag
 
@@ -230,12 +240,7 @@ def compensate_iq_imbalance_gram_schmidt(
         sigma_Q = xp.sqrt(xp.mean(Q_orth**2))
         Q_norm = Q_orth / sigma_Q
 
-        # Step 4: Recombine and restore input power
-        s_corr = (I_norm + 1j * Q_norm) * xp.sqrt(P_in / 2.0)
+        # Step 4: Recombine (power restoration happens in the shared scaffold)
+        return I_norm, Q_norm
 
-        if s_corr.dtype != samples.dtype:
-            s_corr = s_corr.astype(samples.dtype)
-
-        result[ch] = s_corr
-
-    return restore_1d(was_1d, result)
+    return _apply_iq_correction(samples, xp, _correct)

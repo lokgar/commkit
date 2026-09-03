@@ -83,6 +83,30 @@ def test_normalize_peak_complex_envelope(backend_device, xp):
     assert float(xp.max(xp.abs(rotated.imag))) <= 1.0 + 1e-6
 
 
+def test_normalize_dac_peak(backend_device, xp):
+    """dac_peak mode normalizes by max(peak_|Re|, peak_|Im|), not the complex envelope.
+
+    Unlike "peak", this brings the dominant I/Q *component* to 1.0 rather
+    than the complex envelope, so it maximises DAC range utilisation - the
+    envelope may exceed 1.0 for points off the I/Q axes (e.g. sqrt(2) for a
+    45-degree QAM point).
+    """
+    # Dominant component is imaginary: peak_|Re|=0.6, peak_|Im|=0.8
+    data = xp.array([0.6 + 0.8j, -0.3 + 0.4j, 0.1 - 0.2j])
+    norm = helpers.normalize(data, mode="dac_peak")
+
+    assert xp.isclose(xp.max(xp.abs(norm.real)), 0.6 / 0.8)
+    assert xp.isclose(xp.max(xp.abs(norm.imag)), 1.0)
+
+    # Per-channel (axis=-1): each row normalized independently.
+    data_2d = xp.array([[1.0 + 2.0j, 0.5 + 0.5j], [4.0 + 1.0j, 1.0 + 1.0j]])
+    norm_2d = helpers.normalize(data_2d, mode="dac_peak", axis=-1)
+    row_max = xp.maximum(
+        xp.max(xp.abs(norm_2d.real), axis=-1), xp.max(xp.abs(norm_2d.imag), axis=-1)
+    )
+    assert xp.allclose(row_max, 1.0)
+
+
 def test_normalize_unity_gain(backend_device, xp):
     """Verify unity-gain normalization (sum of elements = 1)."""
     data = xp.array([1.0, 2.0, 3.0, 4.0])
