@@ -434,3 +434,101 @@ class TestResolveChannelPermutation:
         ref, swapped = self._dual_pol(xp, n=64)
         with pytest.raises(ValueError, match="metric"):
             recovery.resolve_channel_permutation(swapped, ref, metric="nonsense")
+
+
+class TestLogPhaseSummary:
+    """Shared "phase mean/std in degrees" INFO summary (recovery._common)."""
+
+    def test_logs_formatted_mean_and_std(self, backend_device, xp, caplog):
+        """Emits the prefix/mean/std/suffix in the expected combined format."""
+        import logging
+
+        from commkit.recovery.corrections import _log_phase_summary
+
+        phi = xp.full(4, np.pi / 2)  # constant -> mean=90 deg, std=0 deg
+        with caplog.at_level(logging.INFO, logger="commkit"):
+            _log_phase_summary(
+                phi, "CPR (test, %s)", ("alg",), "[C=%s]", (1,), debug_plot=False
+            )
+        assert len(caplog.records) == 1
+        msg = caplog.records[0].message
+        assert "CPR (test, alg)" in msg
+        assert "[C=1]" in msg
+        assert "mean=90.00" in msg
+        assert "std=0.00" in msg
+
+    def test_no_op_when_info_disabled_and_no_debug_plot(
+        self, backend_device, xp, caplog
+    ):
+        """No log line and no host transfer signal (returns None) when INFO is off."""
+        import logging
+
+        from commkit.recovery.corrections import _log_phase_summary
+
+        phi = xp.asarray([0.0, 1.0, 2.0])
+        with caplog.at_level(logging.WARNING, logger="commkit"):
+            result = _log_phase_summary(
+                phi, "CPR (test)", (), "[]", (), debug_plot=False
+            )
+        assert len(caplog.records) == 0
+        assert result is None
+
+    def test_returns_host_array_when_debug_plot_even_if_info_disabled(
+        self, backend_device, xp, caplog
+    ):
+        """debug_plot=True forces the host transfer even without INFO logging."""
+        import logging
+
+        from commkit.recovery.corrections import _log_phase_summary
+
+        phi = xp.asarray([0.0, 1.0, 2.0])
+        with caplog.at_level(logging.WARNING, logger="commkit"):
+            result = _log_phase_summary(
+                phi, "CPR (test)", (), "[]", (), debug_plot=True
+            )
+        assert len(caplog.records) == 0  # still no log line - INFO is off
+        assert result is not None
+        np.testing.assert_array_equal(np.asarray(result), np.asarray([0.0, 1.0, 2.0]))
+
+
+class TestVvBlockPhase:
+    """Shared Viterbi-Viterbi block-phase estimator (recovery._common)."""
+
+    def test_matches_qpsk_no_noise(self, backend_device, xp):
+        """Noiseless QPSK at a fixed phase offset must recover that offset exactly."""
+        from commkit.backend import to_device
+        from commkit.recovery._common import _vv_block_phase
+
+        offset = 0.3  # radians
+        symbols = xp.asarray(
+            [np.exp(1j * (k * np.pi / 2 + offset)) for k in range(64)],
+            dtype=xp.complex64,
+        )[None, :]  # (1, 64)
+
+        phi_u, block_centers, all_positions = _vv_block_phase(
+            symbols, xp, M=4, modulation="psk", block_size=16, joint_channels=False
+        )
+        assert phi_u.shape == (1, 4)
+        assert block_centers.shape == (4,)
+        assert all_positions.shape == (64,)
+        np.testing.assert_allclose(to_device(phi_u, "cpu"), offset, atol=1e-4)
+
+    def test_joint_channels_broadcasts_identical_rows(self, backend_device, xp):
+        """joint_channels=True must return broadcast-identical rows across C."""
+        from commkit.backend import to_device
+        from commkit.recovery._common import _vv_block_phase
+
+        offset = -0.2
+        base = xp.asarray(
+            [np.exp(1j * (k * np.pi / 2 + offset)) for k in range(32)],
+            dtype=xp.complex64,
+        )
+        symbols = xp.stack([base, base])  # (2, 32) - identical channels
+
+        phi_u, _, _ = _vv_block_phase(
+            symbols, xp, M=4, modulation="psk", block_size=16, joint_channels=True
+        )
+        assert phi_u.shape == (2, 2)
+        np.testing.assert_array_equal(
+            to_device(phi_u[0], "cpu"), to_device(phi_u[1], "cpu")
+        )

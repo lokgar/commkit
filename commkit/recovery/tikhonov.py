@@ -1,7 +1,5 @@
 """MAP Tikhonov carrier phase recovery with RTS/SSKF smoothers."""
 
-import logging
-
 import numpy as np
 
 from ..backend import ArrayType, dispatch, to_device
@@ -9,7 +7,8 @@ from ..core.signal import Signal
 from ..frequency import _modulation_power_m
 from ..helpers import as_2d, restore_1d, unwrap_signal
 from ..logger import logger
-from .corrections import correct_cycle_slips
+from ._common import _vv_block_phase
+from .corrections import _log_phase_summary, correct_cycle_slips
 
 _NUMBA_RTS: dict = {}
 
@@ -347,27 +346,14 @@ def recover_carrier_phase_tikhonov(
     sigma_v2 = float(1.0 / (M**2 * snr_lin * block_size))
 
     # VV block phase estimation with unit-circle normalisation for QAM
-    blocks = symbols[:, :N_trunc].reshape(C, N_blocks, block_size)
-    blocks_c = blocks.astype(
-        xp.complex128 if blocks.dtype == xp.complex64 else blocks.dtype
+    phi_u_shared, block_centers, all_positions = _vv_block_phase(
+        symbols, xp, M, modulation, block_size, joint_channels
     )
-    if "qam" in modulation.lower():
-        mag = xp.abs(blocks_c)
-        blocks_c = blocks_c / xp.maximum(mag, 1e-15 * xp.max(mag))
-
-    S_b = xp.sum(blocks_c**M, axis=-1)  # (C, N_blocks)
-
-    block_centers = xp.arange(N_blocks, dtype=xp.float64) * block_size + block_size / 2
-    all_positions = xp.arange(N, dtype=xp.float64)
     phi_full = xp.zeros((C, N), dtype=xp.float64)
 
     if joint_channels and C > 1:
-        # Sum M-th-power phasors -> single VV estimate -> single Kalman pass
-        S_b_joint = xp.sum(S_b, axis=0)  # (N_blocks,)
-        phi_raw_joint = xp.angle(S_b_joint) / M
-        phi_u_joint = xp.unwrap((phi_raw_joint * M).astype(xp.float64)) / M
-        if "qam" in modulation.lower():
-            phi_u_joint = phi_u_joint - (np.pi / M)
+        # phi_u_shared's rows are broadcast-identical copies of the joint trajectory.
+        phi_u_joint = phi_u_shared[0]
 
         # Kalman smoother on the joint trajectory
         if method == "exact":
@@ -394,20 +380,7 @@ def recover_carrier_phase_tikhonov(
             phi_full[ch] = phi_interp
         phi_smooth_np = np.tile(to_device(phi_smooth_joint, "cpu"), (C, 1))
     else:
-        phi_raw = xp.angle(S_b) / M
-        phi_u = (
-            xp.unwrap((phi_raw * M).astype(xp.float64), axis=-1) / M
-        )  # (C, N_blocks)
-
-        if "qam" in modulation.lower():
-            phi_u = phi_u - (np.pi / M)
-
-        if C > 1:
-            # All per-channel means on device, one batched D2H, vectorized shift
-            # (instead of one float() sync + one rounding per channel).
-            diffs_np = to_device(xp.mean(phi_u[1:] - phi_u[0:1], axis=-1), "cpu")
-            k_np = np.round(diffs_np * M / (2 * np.pi))
-            phi_u[1:] = phi_u[1:] - xp.asarray(k_np)[:, None] * (2 * np.pi / M)
+        phi_u = phi_u_shared
 
         # Kalman smoother - dispatch on method
         if method == "exact":
@@ -437,32 +410,15 @@ def recover_carrier_phase_tikhonov(
                 phi_smooth_np[ch] = to_device(phi_s_ch, "cpu")
             phi_full[ch] = xp.interp(all_positions, block_centers, phi_s_ch)
 
-    # Host copy of the trajectory is needed only for the INFO summary and the
-    # optional debug plot; skip the transfer + reductions otherwise (the device
-    # phi_full drives the actual correction and is what gets returned).
-    _want_log = logger.isEnabledFor(logging.INFO)
-    if _want_log or debug_plot:
-        phi_full_np = to_device(phi_full, "cpu")
-    if _want_log:
-        phi_mean_deg = float(np.mean(phi_full_np)) * 180.0 / np.pi
-        phi_std_deg = float(np.std(phi_full_np)) * 180.0 / np.pi
-        mode_str = "joint" if (joint_channels and C > 1) else "independent"
-        logger.info(
-            "CPR (Tikhonov-%s, M=%s, %s): phase mean=%.2f°, std=%.2f° "
-            "[%s blocks x %s, σ_p²=%.2e, σ_v²=%.2e, C=%s, "
-            "cycle_slip_correction=%s]",
-            method.upper(),
-            M,
-            mode_str,
-            phi_mean_deg,
-            phi_std_deg,
-            N_blocks,
-            block_size,
-            sigma_p2,
-            sigma_v2,
-            C,
-            cycle_slip_correction,
-        )
+    mode_str = "joint" if (joint_channels and C > 1) else "independent"
+    phi_full_np = _log_phase_summary(
+        phi_full,
+        "CPR (Tikhonov-%s, M=%s, %s)",
+        (method.upper(), M, mode_str),
+        "[%s blocks x %s, σ_p²=%.2e, σ_v²=%.2e, C=%s, cycle_slip_correction=%s]",
+        (N_blocks, block_size, sigma_p2, sigma_v2, C, cycle_slip_correction),
+        debug_plot=debug_plot,
+    )
 
     if debug_plot:
         from .. import plotting as _plotting

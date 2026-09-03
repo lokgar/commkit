@@ -1,14 +1,12 @@
 """Blind Phase Search (BPS) carrier phase recovery."""
 
-import logging
-
 import numpy as np
 
 from ..backend import ArrayType, dispatch, to_device
 from ..core.signal import Signal
 from ..helpers import as_2d, restore_1d, unwrap_signal
 from ..logger import logger
-from .corrections import correct_cycle_slips
+from .corrections import _log_phase_summary, correct_cycle_slips
 
 
 def recover_carrier_phase_bps(
@@ -356,28 +354,15 @@ def recover_carrier_phase_bps(
             )
             phi_blocks[ch] = phi_u
 
-    # Host copy of the full phase trajectory is needed only for the INFO summary
-    # below and the optional debug plot - skip the transfer + reductions when
-    # neither is active (the device phi_full drives the actual correction).
-    _want_log = logger.isEnabledFor(logging.INFO)
-    if _want_log or debug_plot:
-        phi_full_np = to_device(phi_full, "cpu")
-    if _want_log:
-        phi_mean_deg = float(np.mean(phi_full_np)) * 180.0 / np.pi
-        phi_std_deg = float(np.std(phi_full_np)) * 180.0 / np.pi
-        mode_str = "joint" if (joint_channels and C > 1) else "independent"
-        logger.info(
-            "CPR (BPS, B=%s, %s): phase mean=%.2f°, std=%.2f° [%s blocks "
-            "x %s symbols, C=%s, cycle_slip_correction=%s]",
-            B,
-            mode_str,
-            phi_mean_deg,
-            phi_std_deg,
-            N_blocks,
-            block_size,
-            C,
-            cycle_slip_correction,
-        )
+    mode_str = "joint" if (joint_channels and C > 1) else "independent"
+    phi_full_np = _log_phase_summary(
+        phi_full,
+        "CPR (BPS, B=%s, %s)",
+        (B, mode_str),
+        "[%s blocks x %s symbols, C=%s, cycle_slip_correction=%s]",
+        (N_blocks, block_size, C, cycle_slip_correction),
+        debug_plot=debug_plot,
+    )
 
     if debug_plot:
         from .. import plotting as _plotting

@@ -16,6 +16,65 @@ from ..helpers import (
 )
 from ..logger import logger
 
+
+def _log_phase_summary(
+    phi,
+    prefix_fmt: str,
+    prefix_args: tuple,
+    suffix_fmt: str,
+    suffix_args: tuple,
+    *,
+    debug_plot: bool = False,
+):
+    r"""Gate a CPR algorithm's "phase mean/std in degrees" INFO summary.
+
+    Every CPR estimator (``bps``, ``viterbi_viterbi``, ``tikhonov``, ``pll``,
+    ``pilots``' pilot-aided/pilot-tone estimators) ends with the same
+    diagnostic: one host transfer of the phase trajectory (needed only for
+    this summary and an optional debug plot - skipped entirely when neither
+    is active), then a mean/std reduction converted to degrees and logged as
+
+        prefix_fmt + ": phase mean=%.2f°, std=%.2f° " + suffix_fmt
+
+    with ``prefix_args``/``suffix_args`` supplying each caller's own
+    parameters (algorithm name, block/pilot counts, channel count, ...) -
+    only the prefix and suffix differ per caller; the transfer-gate and the
+    mean/std/format core stays here.
+
+    Parameters
+    ----------
+    phi : array_like
+        Phase trajectory in radians, any shape/backend.
+    prefix_fmt, suffix_fmt : str
+        ``%``-style format strings, joined around the fixed
+        ``phase mean=%.2f°, std=%.2f°`` core.
+    prefix_args, suffix_args : tuple
+        Positional args for ``prefix_fmt``/``suffix_fmt`` respectively.
+    debug_plot : bool, default False
+        If True, forces the host transfer even when INFO logging is
+        disabled (callers that also feed the returned array to a debug
+        plot pass their own ``debug_plot`` flag through here).
+
+    Returns
+    -------
+    array_like or None
+        ``to_device(phi, "cpu")`` - reusable by the caller's own debug-plot
+        call - or ``None`` when neither INFO logging nor ``debug_plot`` is
+        active (no transfer performed).
+    """
+    want_log = logger.isEnabledFor(logging.INFO)
+    phi_np = None
+    if want_log or debug_plot:
+        phi_np = to_device(phi, "cpu")
+    if want_log:
+        assert phi_np is not None  # guaranteed by the `want_log or debug_plot` branch
+        mean_deg = float(np.mean(phi_np)) * 180.0 / np.pi
+        std_deg = float(np.std(phi_np)) * 180.0 / np.pi
+        fmt = prefix_fmt + ": phase mean=%.2f°, std=%.2f° " + suffix_fmt
+        logger.info(fmt, *prefix_args, mean_deg, std_deg, *suffix_args)
+    return phi_np
+
+
 # -----------------------------------------------------------------------------
 # PHASE-TRACK UTILITIES (array-only)
 # -----------------------------------------------------------------------------

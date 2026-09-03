@@ -15,7 +15,7 @@ from ..helpers import (
     unwrap_signal,
 )
 from ..logger import logger
-from .corrections import correct_cycle_slips
+from .corrections import _log_phase_summary, correct_cycle_slips
 
 
 def recover_carrier_phase_pilot_symbols(
@@ -187,23 +187,14 @@ def recover_carrier_phase_pilot_symbols(
             "Choose 'linear' or 'cubic'."
         )
 
-    # Host copy of the trajectory is needed only for the INFO summary and the
-    # optional debug plot; skip the transfer + reductions otherwise (the device
-    # phi_full drives the actual correction and is what gets returned).
-    _want_log = logger.isEnabledFor(logging.INFO)
-    if _want_log or debug_plot:
-        phi_full_np = to_device(phi_full, "cpu")
-    if _want_log:
-        phi_mean_deg = float(np.mean(phi_full_np)) * 180.0 / np.pi
-        phi_std_deg = float(np.std(phi_full_np)) * 180.0 / np.pi
-        logger.info(
-            "CPR (pilot-aided, %s): phase mean=%.2f°, std=%.2f° [P=%s pilots, C=%s]",
-            interpolation,
-            phi_mean_deg,
-            phi_std_deg,
-            P,
-            C,
-        )
+    phi_full_np = _log_phase_summary(
+        phi_full,
+        "CPR (pilot-aided, %s)",
+        (interpolation,),
+        "[P=%s pilots, C=%s]",
+        (P, C),
+        debug_plot=debug_plot,
+    )
 
     if debug_plot:
         from .. import plotting as _plotting
@@ -560,29 +551,15 @@ def recover_carrier_phase_pilot_tone(
         # preserving the mean phase; leaves only the phase-noise fluctuation.
         theta, _ = remove_linear_trend(theta)
 
-    # Host copy of theta is needed only for the INFO summary and the optional
-    # debug plot; skip the transfer + reductions otherwise (the device theta is
-    # what gets returned and applied).
-    _want_log = logger.isEnabledFor(logging.INFO)
-    if _want_log or debug_plot:
-        theta_np = to_device(theta, "cpu")
-    if _want_log:
-        phi_mean_deg = float(np.mean(theta_np)) * 180.0 / np.pi
-        phi_std_deg = float(np.std(theta_np)) * 180.0 / np.pi
-        mode_str = "joint" if (joint_channels and C > 1) else "independent"
-        logger.info(
-            "CPR (pilot-tone, %s, %s): phase mean=%.2f°, std=%.2f° "
-            "[f_p=%.3g Hz, B=%.3g Hz, refine=%s, remove_foe=%s, C=%s]",
-            window,
-            mode_str,
-            phi_mean_deg,
-            phi_std_deg,
-            tone_frequency,
-            bandwidth,
-            refine_tone,
-            remove_frequency_offset,
-            C,
-        )
+    mode_str = "joint" if (joint_channels and C > 1) else "independent"
+    theta_np = _log_phase_summary(
+        theta,
+        "CPR (pilot-tone, %s, %s)",
+        (window, mode_str),
+        "[f_p=%.3g Hz, B=%.3g Hz, refine=%s, remove_foe=%s, C=%s]",
+        (tone_frequency, bandwidth, refine_tone, remove_frequency_offset, C),
+        debug_plot=debug_plot,
+    )
 
     if debug_plot:
         from .. import plotting as _plotting
