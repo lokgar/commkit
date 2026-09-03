@@ -12,7 +12,14 @@ import scipy
 
 from .backend import ArrayType, dispatch, to_device
 from .core.signal import Signal
-from .helpers import as_2d, normalize, restore_1d, rewrap_signal, unwrap_signal
+from .helpers import (
+    _cd_beta2_length,
+    as_2d,
+    normalize,
+    restore_1d,
+    rewrap_signal,
+    unwrap_signal,
+)
 from .logger import logger
 
 # -----------------------------------------------------------------------------
@@ -1344,12 +1351,9 @@ def compensate_chromatic_dispersion(
     samples, was_1d = as_2d(samples, name="samples")
     C, N = samples.shape
 
-    # Convert to SI
-    D = dispersion_ps_nm_km * 1e-12 / (1e-9 * 1e3)  # s / m²
-    lam = center_wavelength_nm * 1e-9  # m
-    c = 2.998e8  # m/s
-    L = fiber_length_km * 1e3  # m
-    beta2 = -(D * lam**2) / (2.0 * np.pi * c) * L  # s²  (β₂·L product)
+    beta2 = _cd_beta2_length(
+        dispersion_ps_nm_km, fiber_length_km, center_wavelength_nm
+    )  # s²  (β₂·L product)
 
     omega = 2.0 * np.pi * xp.fft.fftfreq(N, d=1.0 / sampling_rate)
     H = xp.exp(1j * (beta2 / 2.0) * omega**2)
