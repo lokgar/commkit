@@ -14,6 +14,7 @@ import numpy as np
 from .backend import ArrayType, dispatch, to_device
 from .core.signal import Signal
 from .helpers import (
+    _parabolic_peak_offset,
     as_2d,
     broadcast_channels,
     linear_trend_slope,
@@ -399,14 +400,7 @@ def estimate_frequency_offset_mth_power(
         a_vec = mag[:, k_prev]  # (C,) float
         b_vec = mag[:, k_peak]
         cc_vec = mag[:, k_next]
-        d_vec = a_vec - 2.0 * b_vec + cc_vec
-        safe_d = xp.where(xp.abs(d_vec) > 1e-15, d_vec, xp.ones_like(d_vec))
-        mu_raw = 0.5 * (a_vec - cc_vec) / safe_d
-        mu_vec = xp.clip(
-            xp.where(xp.abs(d_vec) > 1e-15, mu_raw, xp.zeros_like(mu_raw)),
-            -0.5,
-            0.5,
-        )
+        mu_vec = _parabolic_peak_offset(a_vec, b_vec, cc_vec, xp, log=False)
 
     mu_np = to_device(mu_vec, "cpu")  # one transfer: (C,) floats
     f_per_ch = [
@@ -1021,14 +1015,11 @@ def find_bias_tone(
     k_next = (k + 1) % nfft
 
     # Transfer 3 neighbourhood magnitudes to CPU - scalars, negligible transfer cost
-    eps = 1e-300
-    ym = np.log(max(float(mag[k_prev]), eps))
-    y0 = np.log(max(float(mag[k]), eps))
-    yp = np.log(max(float(mag[k_next]), eps))
-
-    denom = ym - 2.0 * y0 + yp
-    delta = 0.5 * (ym - yp) / denom if abs(denom) > 1e-30 else 0.0
-    delta = max(-0.5, min(0.5, delta))  # clamp to ±½ bin
+    delta = float(
+        _parabolic_peak_offset(
+            float(mag[k_prev]), float(mag[k]), float(mag[k_next]), np, log=True
+        )
+    )
 
     f_refined = float(freqs_np[k]) + delta * (sampling_rate / nfft)
 
@@ -1105,13 +1096,9 @@ def _refine_tones_from_spectrum(
         spec_row = X[int(row)]
         mag2 = xp.abs(spec_row[cand % N]) ** 2
         kb = cand[xp.argmax(mag2)]  # 0-d signed peak bin, stays on device
-        # Three-bin log-parabolic fit (|X|²: the x2 in log cancels in the ratio).
-        y = xp.log(
-            xp.maximum(xp.abs(spec_row[(kb + neigh) % N]).astype(xp.float64), 1e-300)
-        )
-        d = y[0] - 2.0 * y[1] + y[2]
-        delta = xp.where(xp.abs(d) > 1e-30, 0.5 * (y[0] - y[2]) / d, 0.0)
-        delta = xp.clip(delta, -0.5, 0.5)
+        # Three-bin log-parabolic fit.
+        mags = xp.abs(spec_row[(kb + neigh) % N]).astype(xp.float64)
+        delta = _parabolic_peak_offset(mags[0], mags[1], mags[2], xp, log=True)
         refined.append((kb.astype(xp.float64) + delta) * df)
 
     return to_device(xp.stack(refined), "cpu")

@@ -14,7 +14,13 @@ import numpy as np
 
 from .backend import ArrayType, dispatch, is_cupy_available, to_device
 from .core import Preamble, Signal
-from .helpers import as_2d, restore_1d, rewrap_signal, unwrap_signal
+from .helpers import (
+    _parabolic_peak_offset,
+    as_2d,
+    restore_1d,
+    rewrap_signal,
+    unwrap_signal,
+)
 from .logger import logger
 
 # Window length for DFT-upsampling in estimate_fractional_delay()
@@ -218,21 +224,21 @@ def estimate_fractional_delay(
             beta = r_curr
             gamma = r_next
 
-        if method == "log-parabolic":
-            eps = 1e-12
-            alpha = xp.maximum(alpha, eps)
-            beta = xp.maximum(beta, eps)
-            gamma = xp.maximum(gamma, eps)
-            alpha, beta, gamma = xp.log(alpha), xp.log(beta), xp.log(gamma)
-
-        denom = 2.0 * (alpha - 2.0 * beta + gamma)
-        safe_denom = xp.where(xp.abs(denom) > 1e-12, denom, xp.ones_like(denom))
-        mu_val = (alpha - gamma) / safe_denom
-
-        # Mask invalid fits
-        valid = xp.abs(denom) > 1e-12
-        mu_val = xp.where(valid, mu_val, xp.zeros_like(mu_val))
-        return xp.clip(mu_val, -0.5, 0.5)
+        # Same three-point (log-)parabolic fit as frequency.py's peak
+        # estimators (helpers._parabolic_peak_offset), just in the
+        # phase-rotated-to-real-axis coordinate used here.  denom_eps=5e-13
+        # exactly reproduces this function's original degeneracy threshold,
+        # which was checked against 2*(alpha - 2*beta + gamma) rather than
+        # (alpha - 2*beta + gamma) directly.
+        return _parabolic_peak_offset(
+            alpha,
+            beta,
+            gamma,
+            xp,
+            log=(method == "log-parabolic"),
+            log_eps=1e-12,
+            denom_eps=5e-13,
+        )
 
     half_W = _DFT_WINDOW // 2
     interior_mask = (k >= half_W) & (k < N - half_W)
