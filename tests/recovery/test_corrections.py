@@ -361,9 +361,17 @@ class TestCorrectPhaseRotation:
         sig.resolved_symbols = sig.samples * xp.array(
             np.exp(1j * 0.7), dtype=sig.samples.dtype
         )
+        sig.resolved_bits = xp.zeros(self.N, dtype=xp.int8)
+        old_samples = sig.samples
+        old_source = sig.source_symbols
 
         out_sig = recovery.correct_phase_rotation(sig)
 
+        assert out_sig is not sig
+        assert out_sig.samples is old_samples
+        assert out_sig.source_symbols is old_source
+        assert out_sig.resolved_bits is None
+        assert sig.resolved_bits is not None
         assert out_sig.resolved_symbols is not None
         assert float(ser(out_sig.resolved_symbols, ref, "qam", 16)) < 0.05
 

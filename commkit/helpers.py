@@ -1074,12 +1074,12 @@ def rewrap_signal(
     -------
     array_like or Signal
         ``array`` unchanged when ``sig`` is ``None``; otherwise a shallow
-        :meth:`Signal.with_samples` update with ``**metadata`` applied. Derived
-        ``resolved_symbols`` and ``resolved_bits`` caches are invalidated.
+        :meth:`Signal.replace_samples` update with ``**metadata`` applied.
+        Derived ``resolved_symbols`` and ``resolved_bits`` caches are invalidated.
     """
     if sig is None:
         return array
-    return sig.with_samples(array, **metadata)
+    return sig.replace_samples(array, **metadata)
 
 
 def _cd_beta2_length(

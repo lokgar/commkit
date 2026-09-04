@@ -412,7 +412,7 @@ def resolve_symbols(
                 "via frame.get_structure_map(), build a plain Signal, then call "
                 "resolve_symbols() on that."
             )
-            return sig.clone()
+            return sig._shallow_clone()
         s = sig.sps
         if s is None:
             raise ValueError("Symbol rate or sampling rate missing.")
@@ -423,8 +423,9 @@ def resolve_symbols(
         # Output field (resolved_symbols) differs from the input field
         # (samples), so this can't go through rewrap_signal (which always
         # sets .samples) - copy and assign the target field by hand.
-        new = sig.clone()
+        new = sig._shallow_clone()
         new.resolved_symbols = resolve_symbols(x, sps=int(s), offset=offset)
+        new.resolved_bits = None
         return new
 
     if sps is None:

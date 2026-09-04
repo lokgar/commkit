@@ -208,8 +208,8 @@ def test_signal_clone(backend_device, xp, xpt):
     assert s_copy.backend == s.backend
 
 
-def test_signal_clone_can_be_explicitly_shallow(backend_device, xp):
-    """Signal.clone(deep=False) shares array metadata intentionally."""
+def test_signal_internal_shallow_clone_shares_metadata(backend_device, xp):
+    """The internal shallow clone shares arrays for non-waveform updates."""
     s = Signal(
         samples=xp.arange(8),
         sampling_rate=2.0,
@@ -217,14 +217,14 @@ def test_signal_clone_can_be_explicitly_shallow(backend_device, xp):
         source_bits=xp.arange(4),
     )
 
-    shallow = s.clone(deep=False)
+    shallow = s._shallow_clone()
 
     assert shallow is not s
     assert shallow.samples is s.samples
     assert shallow.source_bits is s.source_bits
 
 
-def test_signal_with_samples_shares_provenance_and_invalidates_caches(
+def test_signal_replace_samples_shares_provenance_and_invalidates_caches(
     backend_device, xp, xpt
 ):
     """Functional sample replacement avoids copying old samples or provenance."""
@@ -242,7 +242,7 @@ def test_signal_with_samples_shares_provenance_and_invalidates_caches(
     old_samples = s.samples
     replacement = xp.arange(4, dtype=xp.float32) + 10
 
-    result = s.with_samples(replacement, sampling_rate=1.0)
+    result = s.replace_samples(replacement, sampling_rate=1.0)
 
     assert result is not s
     assert result.samples is replacement
@@ -259,28 +259,28 @@ def test_signal_with_samples_shares_provenance_and_invalidates_caches(
     xpt.assert_array_equal(result.samples, replacement)
 
 
-def test_signal_with_samples_can_preserve_resolved_caches(backend_device, xp):
+def test_signal_replace_samples_can_preserve_resolved_caches(backend_device, xp):
     """Proven-safe internal transforms can explicitly retain resolved caches."""
     s = Signal(samples=xp.arange(8), sampling_rate=2.0, symbol_rate=1.0)
     s.resolved_symbols = xp.asarray([1.0, -1.0])
     s.resolved_bits = xp.asarray([0, 1])
 
-    result = s.with_samples(s.samples.copy(), _preserve_resolved=True)
+    result = s.replace_samples(s.samples.copy(), _preserve_resolved=True)
 
     assert result.resolved_symbols is s.resolved_symbols
     assert result.resolved_bits is s.resolved_bits
 
 
-def test_signal_with_samples_validates_replacement_and_metadata(backend_device, xp):
+def test_signal_replace_samples_validates_replacement_and_metadata(backend_device, xp):
     """Replacement samples and metadata pass through assignment validation."""
     from pydantic import ValidationError
 
     s = Signal(samples=xp.arange(8), sampling_rate=2.0, symbol_rate=1.0)
 
     with pytest.raises(ValidationError, match="greater than 0"):
-        s.with_samples(s.samples.copy(), sampling_rate=0.0)
+        s.replace_samples(s.samples.copy(), sampling_rate=0.0)
     with pytest.raises((ValueError, ValidationError), match="Only 1D"):
-        s.with_samples(xp.zeros((2, 2, 2)))
+        s.replace_samples(xp.zeros((2, 2, 2)))
 
 
 def test_signal_shift_frequency(backend_device, xp, xpt):
@@ -334,14 +334,24 @@ def test_signal_resolution_and_demap(backend_device, xp, xpt):
     with pytest.raises(ValueError, match="No resolved symbols available"):
         sig = mapping.demap_symbols_hard(sig)
 
-    # Resolve symbols with offset
-    sig = multirate.resolve_symbols(sig, offset=0)
+    # Resolve symbols with offset. Unchanged waveform/provenance arrays are shared.
+    original = sig
+    sig = multirate.resolve_symbols(original, offset=0)
+    assert sig is not original
+    assert sig.samples is original.samples
+    assert sig.source_bits is original.source_bits
+    assert sig.source_symbols is original.source_symbols
     assert sig.resolved_symbols is not None
+    assert sig.resolved_bits is None
     assert len(sig.resolved_symbols) == num_symbols
     assert isinstance(sig.resolved_symbols, xp.ndarray)
 
-    # Demap
-    sig = mapping.demap_symbols_hard(sig)
+    # Demapping also shares unchanged waveform and resolved-symbol arrays.
+    resolved = sig
+    sig = mapping.demap_symbols_hard(resolved)
+    assert sig is not resolved
+    assert sig.samples is resolved.samples
+    assert sig.resolved_symbols is resolved.resolved_symbols
     assert sig.resolved_bits is not None
     assert len(sig.resolved_bits) == num_symbols
 
@@ -363,6 +373,27 @@ def test_signal_resolution_and_demap(backend_device, xp, xpt):
     sig.resolved_bits = None
     with pytest.raises(ValueError, match="No resolved bits available"):
         metrics.ber(sig, bits_tx=ref_bits)
+
+
+def test_signal_noop_paths_shallow_clone(backend_device, xp):
+    """Skipped Signal operations return a new container without copying metadata."""
+    frame = {"cached": xp.arange(4)}
+    sig = Signal(
+        samples=xp.ones(16, dtype=xp.complex64),
+        sampling_rate=1.0,
+        symbol_rate=1.0,
+        signal_type="Preamble",
+        frame=frame,
+    )
+
+    unresolved = multirate.resolve_symbols(sig)
+    undemapped = mapping.demap_symbols_hard(sig)
+    unfiltered = filtering.matched_filter(sig)
+
+    for result in (unresolved, undemapped, unfiltered):
+        assert result is not sig
+        assert result.samples is sig.samples
+        assert result.frame is frame
 
 
 def test_signal_decimate_to_symbol_rate(backend_device, xp):

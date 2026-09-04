@@ -532,26 +532,31 @@ class Signal(BaseModel):
             text = "\n".join(f"{prop.ljust(width)}  {val}" for prop, val in rows)
             logger.info("\n%s", text)
 
-    def clone(self, *, deep: bool = True) -> "Signal":
+    def clone(self) -> "Signal":
         """
-        Creates an explicit copy of the `Signal` instance.
+        Create a fully independent copy of the `Signal` instance.
 
-        Parameters
-        ----------
-        deep : bool, default True
-            Deep-copy samples, provenance arrays, cached results, and the
-            attached frame. Set to ``False`` only when shared metadata is
-            intentional; ordinary DSP transforms should use
-            :meth:`with_samples` instead.
+        Samples, provenance arrays, resolved caches, and the attached frame
+        are all deep-copied. Ordinary DSP transforms should use
+        :meth:`replace_samples` instead.
 
         Returns
         -------
         Signal
             A new signal object with identical data and metadata.
         """
-        return self.model_copy(deep=deep)
+        return self.model_copy(deep=True)
 
-    def with_samples(
+    def _shallow_clone(self) -> "Signal":
+        """Return a new container sharing all array and frame references.
+
+        This is an internal building block for operations that replace a
+        non-waveform field. Public callers should normally choose between
+        :meth:`clone` and :meth:`replace_samples`.
+        """
+        return self.model_copy(deep=False)
+
+    def replace_samples(
         self,
         samples: Any,
         *,
@@ -585,7 +590,7 @@ class Signal(BaseModel):
         Signal
             A new Signal sharing unchanged metadata with this instance.
         """
-        new = self.model_copy(deep=False)
+        new = self._shallow_clone()
         new.samples = samples
         if not _preserve_resolved:
             new.resolved_symbols = None

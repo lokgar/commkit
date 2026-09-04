@@ -1037,7 +1037,7 @@ def matched_filter(
                 taps = shaping_filter_taps(sig)
             except ValueError as e:
                 logger.error("Cannot apply matched filter: %s", e)
-                return sig.clone()
+                return sig._shallow_clone()
         return rewrap_signal(
             sig, matched_filter(x, taps, taps_normalization=taps_normalization, axis=-1)
         )

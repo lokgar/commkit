@@ -118,11 +118,11 @@ def _profile_rewrap_copy_cost(sig, backend_device, xp, sync):
         return result
 
     optimized_peak = _allocator_peak(
-        lambda: sig.with_samples(replacement), backend_device, xp, sync
+        lambda: sig.replace_samples(replacement), backend_device, xp, sync
     )
     legacy_peak = _allocator_peak(legacy_rewrap, backend_device, xp, sync)
     assert optimized_peak < legacy_peak, (
-        "Signal.with_samples() no longer improves on legacy deep-copy rewrapping"
+        "Signal.replace_samples() no longer improves on legacy deep-copy rewrapping"
     )
     return {
         "rewrap_peak_bytes": optimized_peak,
