@@ -153,7 +153,7 @@ def demap_symbols_hard(
                 "Extract the payload segment via frame.get_structure_map() and build "
                 "a plain Signal before demapping."
             )
-            return sig.copy()
+            return sig.clone()
         mod = sig.mod_scheme
         if mod is None:
             mod = modulation
@@ -190,7 +190,7 @@ def demap_symbols_hard(
         # (resolved_symbols), so this is assigned by hand rather than via
         # rewrap_signal (which always sets .samples).
         resolved_symbols, _ = unwrap_signal(sig, field="resolved_symbols")
-        new = sig.copy()
+        new = sig.clone()
         new.resolved_bits = demap_symbols_hard(
             resolved_symbols,
             mod,

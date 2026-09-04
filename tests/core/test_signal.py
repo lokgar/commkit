@@ -189,15 +189,98 @@ def test_shaping_filter_taps_error(backend_device, xp):
         filtering.shaping_filter_taps(s)
 
 
-def test_signal_copy(backend_device, xp, xpt):
-    """Verify Signal.copy() performs a deep copy of samples and preserves device context."""
+def test_signal_clone(backend_device, xp, xpt):
+    """Verify Signal.clone() deep-copies arrays and preserves device context."""
     data = xp.array([1, 2, 3])
-    s = Signal(samples=data, sampling_rate=1.0, symbol_rate=1.0)
-    s_copy = s.copy()
+    source_bits = xp.array([0, 1, 0])
+    s = Signal(
+        samples=data,
+        sampling_rate=1.0,
+        symbol_rate=1.0,
+        source_bits=source_bits,
+    )
+    s_copy = s.clone()
 
     assert s_copy is not s
     xpt.assert_allclose(s.samples, s_copy.samples)
+    assert s_copy.samples is not s.samples
+    assert s_copy.source_bits is not s.source_bits
     assert s_copy.backend == s.backend
+
+
+def test_signal_clone_can_be_explicitly_shallow(backend_device, xp):
+    """Signal.clone(deep=False) shares array metadata intentionally."""
+    s = Signal(
+        samples=xp.arange(8),
+        sampling_rate=2.0,
+        symbol_rate=1.0,
+        source_bits=xp.arange(4),
+    )
+
+    shallow = s.clone(deep=False)
+
+    assert shallow is not s
+    assert shallow.samples is s.samples
+    assert shallow.source_bits is s.source_bits
+
+
+def test_signal_with_samples_shares_provenance_and_invalidates_caches(
+    backend_device, xp, xpt
+):
+    """Functional sample replacement avoids copying old samples or provenance."""
+    frame = {"cached": xp.arange(4)}
+    s = Signal(
+        samples=xp.arange(8, dtype=xp.float32),
+        sampling_rate=2.0,
+        symbol_rate=1.0,
+        source_bits=xp.arange(4),
+        source_symbols=xp.asarray([1.0, -1.0]),
+        frame=frame,
+    )
+    s.resolved_symbols = xp.asarray([1.0, -1.0])
+    s.resolved_bits = xp.asarray([0, 1])
+    old_samples = s.samples
+    replacement = xp.arange(4, dtype=xp.float32) + 10
+
+    result = s.with_samples(replacement, sampling_rate=1.0)
+
+    assert result is not s
+    assert result.samples is replacement
+    assert result.samples is not old_samples
+    assert result.source_bits is s.source_bits
+    assert result.source_symbols is s.source_symbols
+    assert result.frame is frame
+    assert result.resolved_symbols is None
+    assert result.resolved_bits is None
+    assert s.samples is old_samples
+    assert s.resolved_symbols is not None
+    assert s.resolved_bits is not None
+    assert result.sampling_rate == 1.0
+    xpt.assert_array_equal(result.samples, replacement)
+
+
+def test_signal_with_samples_can_preserve_resolved_caches(backend_device, xp):
+    """Proven-safe internal transforms can explicitly retain resolved caches."""
+    s = Signal(samples=xp.arange(8), sampling_rate=2.0, symbol_rate=1.0)
+    s.resolved_symbols = xp.asarray([1.0, -1.0])
+    s.resolved_bits = xp.asarray([0, 1])
+
+    result = s.with_samples(s.samples.copy(), _preserve_resolved=True)
+
+    assert result.resolved_symbols is s.resolved_symbols
+    assert result.resolved_bits is s.resolved_bits
+
+
+def test_signal_with_samples_validates_replacement_and_metadata(backend_device, xp):
+    """Replacement samples and metadata pass through assignment validation."""
+    from pydantic import ValidationError
+
+    s = Signal(samples=xp.arange(8), sampling_rate=2.0, symbol_rate=1.0)
+
+    with pytest.raises(ValidationError, match="greater than 0"):
+        s.with_samples(s.samples.copy(), sampling_rate=0.0)
+    with pytest.raises((ValueError, ValidationError), match="Only 1D"):
+        s.with_samples(xp.zeros((2, 2, 2)))
 
 
 def test_signal_shift_frequency(backend_device, xp, xpt):

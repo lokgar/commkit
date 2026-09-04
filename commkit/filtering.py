@@ -14,6 +14,7 @@ from .backend import ArrayType, dispatch, to_device
 from .core.signal import Signal
 from .helpers import (
     _cd_beta2_length,
+    _coerce_integer_sps,
     as_2d,
     normalize,
     restore_1d,
@@ -74,6 +75,7 @@ def rect_taps(sps: int, duty_cycle: float = 1.0, rise_time: float = 0.0) -> np.n
             "ramps would overlap with no flat top."
         )
 
+    sps = _coerce_integer_sps(sps, caller="rect_taps()")
     n_total = int(round(sps * duty_cycle))
     if n_total < 1:
         n_total = 1
@@ -195,6 +197,7 @@ def smoothrect_taps(
         duty_cycle,
     )
     # Ensure odd number of taps to have a center peak
+    sps = _coerce_integer_sps(sps, caller="smoothrect_taps()")
     num_taps = int(span * sps)
     if num_taps % 2 == 0:
         num_taps += 1
@@ -904,10 +907,14 @@ def shaping_filter_taps(sig: Signal) -> ArrayType:
     duty_cycle = sig.duty_cycle if sig.mod_rz else 1.0
 
     if sig.pulse_shape == "rect":
-        taps = rect_taps(int(sig.sps), duty_cycle=duty_cycle, rise_time=sig.rise_time)
+        taps = rect_taps(
+            _coerce_integer_sps(sig.sps, caller="shaping_filter_taps()"),
+            duty_cycle=duty_cycle,
+            rise_time=sig.rise_time,
+        )
     elif sig.pulse_shape == "smoothrect":
         taps = smoothrect_taps(
-            sps=int(sig.sps),
+            sps=_coerce_integer_sps(sig.sps, caller="shaping_filter_taps()"),
             span=sig.filter_span,
             rise_time=sig.rise_time,
             duty_cycle=duty_cycle,
@@ -1030,7 +1037,7 @@ def matched_filter(
                 taps = shaping_filter_taps(sig)
             except ValueError as e:
                 logger.error("Cannot apply matched filter: %s", e)
-                return sig.copy()
+                return sig.clone()
         return rewrap_signal(
             sig, matched_filter(x, taps, taps_normalization=taps_normalization, axis=-1)
         )

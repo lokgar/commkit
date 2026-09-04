@@ -542,7 +542,7 @@ def correct_phase_rotation(
                 "source_symbols is set on the Signal."
             )
         resolved_symbols, _ = unwrap_signal(sig, field="resolved_symbols")
-        new = sig.copy()
+        new = sig.clone()
         new.resolved_symbols = correct_phase_rotation(
             resolved_symbols, ref, num_skip_symbols=num_skip_symbols
         )
@@ -697,7 +697,7 @@ def resolve_channel_permutation(
         # always targets .samples, and here input and output share a field
         # name that isn't it.
         resolved_symbols, _ = unwrap_signal(sig, field="resolved_symbols")
-        new = sig.copy()
+        new = sig.clone()
         new.resolved_symbols = resolve_channel_permutation(
             resolved_symbols,
             sig.source_symbols,
@@ -875,7 +875,7 @@ def resolve_phase_ambiguity(
                     "falling back to supplied pmf."
                 )
         resolved_symbols, _ = unwrap_signal(sig, field="resolved_symbols")
-        new = sig.copy()
+        new = sig.clone()
         new.resolved_symbols = resolve_phase_ambiguity(
             resolved_symbols,
             sig.source_symbols,

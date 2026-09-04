@@ -9,7 +9,7 @@ import numpy as np
 
 from ...backend import ArrayType, dispatch, to_device
 from ...core.signal import Signal
-from ...helpers import as_2d, rewrap_signal, unwrap_signal
+from ...helpers import _coerce_integer_sps, as_2d, rewrap_signal, unwrap_signal
 from ...logger import logger
 from ...mapping.gray import square_qam_slicer_params
 from .._common import (
@@ -322,7 +322,7 @@ def block_lms(
             x,
             training_symbols=training_symbols,
             num_taps=num_taps,
-            sps=int(sig.sps),
+            sps=_coerce_integer_sps(sig.sps, caller="block_lms()"),
             step_size=step_size,
             block_size=block_size,
             modulation=modulation,
@@ -359,10 +359,10 @@ def block_lms(
         )
 
     num_taps = int(num_taps)
-    sps = int(sps)
     block_size = int(block_size)
 
     _validate_sps(sps, num_taps)
+    sps = int(sps)
 
     samples, xp, _ = dispatch(samples)
     if xp is np:

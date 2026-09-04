@@ -109,7 +109,9 @@ def decimate_to_symbol_rate(
     x, sig = helpers.unwrap_signal(samples)
     if sig is not None:
         do_norm = True if normalize is None else normalize
-        sps_int = int(sig.sps)
+        sps_int = helpers._coerce_integer_sps(
+            sig.sps, caller="decimate_to_symbol_rate()"
+        )
         meta: dict[str, Any] = {}
         if sps_int <= 1:
             logger.info("Signal already at 1 sps, no downsampling needed.")
@@ -410,7 +412,7 @@ def resolve_symbols(
                 "via frame.get_structure_map(), build a plain Signal, then call "
                 "resolve_symbols() on that."
             )
-            return sig.copy()
+            return sig.clone()
         s = sig.sps
         if s is None:
             raise ValueError("Symbol rate or sampling rate missing.")
@@ -421,14 +423,15 @@ def resolve_symbols(
         # Output field (resolved_symbols) differs from the input field
         # (samples), so this can't go through rewrap_signal (which always
         # sets .samples) - copy and assign the target field by hand.
-        new = sig.copy()
+        new = sig.clone()
         new.resolved_symbols = resolve_symbols(x, sps=int(s), offset=offset)
         return new
 
     if sps is None:
         raise ValueError("resolve_symbols() requires sps for array input.")
+    sps_int = helpers._coerce_integer_sps(sps, caller="resolve_symbols()")
     # decimate_to_symbol_rate slices [offset::sps] (identity when sps==1) then
     # normalizes to unit average power.
     return decimate_to_symbol_rate(
-        samples, sps=int(sps), offset=int(offset), normalize=True
+        samples, sps=sps_int, offset=int(offset), normalize=True
     )

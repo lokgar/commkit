@@ -291,9 +291,10 @@ def fir_filter(samples, taps, axis=-1):
   Most functions read `.samples`; a few (hard-decision demapping, phase-rotation
   correction on `resolved_symbols`) pass `field=` to read a different attribute.
 * `rewrap_signal(sig, array, **metadata)` - `sig=None` passes `array` through
-  unchanged; otherwise returns `sig.copy()` with `.samples = array` and any
-  `**metadata` kwargs applied via `setattr` (e.g. `sampling_rate=sig.symbol_rate`
-  after decimating to symbol rate).
+  unchanged; otherwise delegates to `sig.with_samples()`, which shallow-copies
+  metadata, replaces `.samples`, invalidates resolved caches, and applies any
+  `**metadata` kwargs via assignment validation (e.g.
+  `sampling_rate=sig.symbol_rate` after decimating to symbol rate).
 
 **Metadata priority: the `Signal`'s own value always wins.** When a function
 takes both a `Signal` and a scalar metadata parameter that duplicates one of
@@ -357,7 +358,7 @@ signature ends up harder to read at the call site than the few extra lines.
 | Decimates to one sample/symbol (equalizers) | `sampling_rate=sig.symbol_rate` |
 | Upsamples by an integer factor | `sampling_rate=sig.sampling_rate * factor` |
 | Resamples to an explicit target rate | `sampling_rate=<the target rate param>` |
-| Output field differs from the input field (`resolve_symbols`, `demap_symbols_hard`) | Skip `rewrap_signal`; `sig.copy()` + `setattr` by hand - the one sanctioned exception |
+| Output field differs from the input field (`resolve_symbols`, `demap_symbols_hard`) | Skip `rewrap_signal`; `sig.clone()` + `setattr` by hand - the one sanctioned exception |
 | Returns a scalar/dict/tuple in a different domain (frequency/tau/PSD bins, phase or frequency *estimates*) | `unwrap_signal` only, on the input - never wrap the output |
 
 **Not every array parameter is signal-representable.** A function that

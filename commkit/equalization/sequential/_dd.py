@@ -8,7 +8,13 @@ import numpy as np
 
 from ...backend import ArrayType, _get_jax, dispatch, from_jax, to_device, to_jax
 from ...core.signal import Signal
-from ...helpers import resolve_pll_gains, restore_1d, rewrap_signal, unwrap_signal
+from ...helpers import (
+    _coerce_integer_sps,
+    resolve_pll_gains,
+    restore_1d,
+    rewrap_signal,
+    unwrap_signal,
+)
 from ...logger import logger
 from ...mapping.gray import square_qam_slicer_params
 from .._block import (
@@ -472,7 +478,7 @@ def lms(
             x,
             training_symbols=training_symbols,
             num_taps=num_taps,
-            sps=int(sig.sps),
+            sps=_coerce_integer_sps(sig.sps, caller="lms()"),
             step_size=step_size,
             modulation=modulation,
             order=order,
@@ -535,8 +541,8 @@ def lms(
         )
 
     samples, xp, _ = dispatch(samples)
-    stride = int(sps)
     _validate_sps(sps, num_taps)
+    stride = int(sps)
 
     if training_symbols is not None:
         training_symbols, _, _ = dispatch(training_symbols)
@@ -1374,7 +1380,7 @@ def rls(
             x,
             training_symbols=training_symbols,
             num_taps=num_taps,
-            sps=int(sig.sps),
+            sps=_coerce_integer_sps(sig.sps, caller="rls()"),
             forgetting_factor=forgetting_factor,
             delta=delta,
             leakage=leakage,
@@ -1443,6 +1449,7 @@ def rls(
         )
 
     samples, xp, _ = dispatch(samples)
+    _validate_sps(sps, num_taps)
     stride = int(sps)
 
     if training_symbols is not None:

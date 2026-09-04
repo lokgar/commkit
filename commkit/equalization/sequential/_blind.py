@@ -8,7 +8,7 @@ import numpy as np
 
 from ...backend import ArrayType, _get_jax, dispatch, to_device, to_jax
 from ...core.signal import Signal
-from ...helpers import rewrap_signal, unwrap_signal
+from ...helpers import _coerce_integer_sps, rewrap_signal, unwrap_signal
 from ...logger import logger
 from .._block import (
     _prep_blind_block_inputs,
@@ -257,7 +257,7 @@ def cma(
         result = cma(
             x,
             num_taps=num_taps,
-            sps=int(sig.sps),
+            sps=_coerce_integer_sps(sig.sps, caller="cma()"),
             step_size=step_size,
             modulation=modulation,
             order=order,
@@ -304,8 +304,8 @@ def cma(
         )
 
     samples, xp, _ = dispatch(samples)
-    stride = int(sps)
     _validate_sps(sps, num_taps)
+    stride = int(sps)
 
     was_1d = samples.ndim == 1
     if was_1d:
@@ -776,7 +776,7 @@ def rde(
         result = rde(
             x,
             num_taps=num_taps,
-            sps=int(sig.sps),
+            sps=_coerce_integer_sps(sig.sps, caller="rde()"),
             step_size=step_size,
             modulation=modulation,
             order=order,
@@ -823,8 +823,8 @@ def rde(
         )
 
     samples, xp, _ = dispatch(samples)
-    stride = int(sps)
     _validate_sps(sps, num_taps)
+    stride = int(sps)
 
     was_1d = samples.ndim == 1
     if was_1d:

@@ -532,16 +532,67 @@ class Signal(BaseModel):
             text = "\n".join(f"{prop.ljust(width)}  {val}" for prop, val in rows)
             logger.info("\n%s", text)
 
-    def copy(self) -> "Signal":  # type: ignore[override]
+    def clone(self, *, deep: bool = True) -> "Signal":
         """
-        Creates a deep copy of the `Signal` instance.
+        Creates an explicit copy of the `Signal` instance.
+
+        Parameters
+        ----------
+        deep : bool, default True
+            Deep-copy samples, provenance arrays, cached results, and the
+            attached frame. Set to ``False`` only when shared metadata is
+            intentional; ordinary DSP transforms should use
+            :meth:`with_samples` instead.
 
         Returns
         -------
         Signal
             A new signal object with identical data and metadata.
         """
-        return self.model_copy(deep=True)
+        return self.model_copy(deep=deep)
+
+    def with_samples(
+        self,
+        samples: Any,
+        *,
+        _preserve_resolved: bool = False,
+        **metadata: Any,
+    ) -> "Signal":
+        """Return a shallow metadata copy with a replacement sample buffer.
+
+        This is the functional update operation for waveform transforms. The
+        old sample buffer is never copied: provenance arrays and the attached
+        frame remain shared with the input unless explicitly replaced through
+        ``metadata``. Assignment validation is applied to both the replacement
+        samples and every metadata override.
+
+        Resolved symbols and bits are derived caches and are invalidated by
+        default because changing waveform samples can make them stale. Internal
+        transforms that can prove the caches remain valid may pass
+        ``_preserve_resolved=True``.
+
+        Parameters
+        ----------
+        samples : array_like
+            Replacement waveform samples.
+        _preserve_resolved : bool, default False
+            Internal opt-in to retain ``resolved_symbols`` and ``resolved_bits``.
+        **metadata
+            Explicit Signal field updates such as ``sampling_rate``.
+
+        Returns
+        -------
+        Signal
+            A new Signal sharing unchanged metadata with this instance.
+        """
+        new = self.model_copy(deep=False)
+        new.samples = samples
+        if not _preserve_resolved:
+            new.resolved_symbols = None
+            new.resolved_bits = None
+        for key, value in metadata.items():
+            setattr(new, key, value)
+        return new
 
     def to(self, device: str) -> "Signal":
         """

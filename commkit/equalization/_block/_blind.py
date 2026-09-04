@@ -101,9 +101,9 @@ def _block_fdaf_blind(
     (CMA) and ``radii_np`` the unique ring radii (RDE).
     """
     num_taps = int(num_taps)
-    sps = int(sps)
     block_size = int(block_size)
     _validate_sps(sps, num_taps)
+    sps = int(sps)
 
     samples, xp, _ = dispatch(samples)
     if xp is np:

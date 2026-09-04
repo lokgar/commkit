@@ -8,7 +8,12 @@ import numpy as np
 
 from ..backend import ArrayType
 from ..core.signal import Signal
-from ..helpers import broadcast_channels, rewrap_signal, unwrap_signal
+from ..helpers import (
+    _coerce_integer_sps,
+    broadcast_channels,
+    rewrap_signal,
+    unwrap_signal,
+)
 from ..logger import logger
 from ._block import _block_fdaf_blind
 from ._common import _godard_radius, _rde_ring_radii
@@ -87,7 +92,7 @@ def block_cma(
         result = block_cma(
             x,
             num_taps=num_taps,
-            sps=int(sig.sps),
+            sps=_coerce_integer_sps(sig.sps, caller="block_cma()"),
             step_size=step_size,
             block_size=block_size,
             modulation=modulation,
@@ -196,7 +201,7 @@ def block_rde(
         result = block_rde(
             x,
             num_taps=num_taps,
-            sps=int(sig.sps),
+            sps=_coerce_integer_sps(sig.sps, caller="block_rde()"),
             step_size=step_size,
             block_size=block_size,
             modulation=modulation,

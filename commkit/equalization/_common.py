@@ -527,6 +527,8 @@ def _cpr_symmetry(modulation: str | None, order: int | None) -> int:
 
 def _validate_sps(sps, num_taps):
     """Validate sps; warn about unusual values, check tap count minimum."""
+    if not np.isfinite(sps) or sps % 1 != 0:
+        raise ValueError(f"sps must be a positive integer. Got sps={sps!r}.")
     if sps < 1:
         raise ValueError(f"sps must be >= 1. Got sps={sps}.")
     if sps == 1:

@@ -989,6 +989,19 @@ def remove_linear_trend(y: ArrayType, *, x: Any = None) -> tuple[ArrayType, Arra
 # ---------------------------------------------------------------------------
 
 
+def _coerce_integer_sps(sps: float, *, caller: str) -> int:
+    """Validate and convert SPS for algorithms that require integer spacing.
+
+    Keeping this check ahead of ``int()`` prevents fractional metadata such as
+    1.5 SPS from being silently interpreted as 1 SPS.
+    """
+    if not np.isfinite(sps) or sps < 1 or sps % 1 != 0:
+        raise ValueError(
+            f"{caller} requires sps to be a positive integer; got {sps!r}."
+        )
+    return int(sps)
+
+
 def unwrap_signal(
     x: "ArrayType | Signal", *, field: str = "samples"
 ) -> tuple[ArrayType, "Signal | None"]:
@@ -1060,17 +1073,13 @@ def rewrap_signal(
     Returns
     -------
     array_like or Signal
-        ``array`` unchanged when ``sig`` is ``None``; otherwise a
-        :meth:`Signal.copy` with ``.samples = array`` and ``**metadata``
-        applied.
+        ``array`` unchanged when ``sig`` is ``None``; otherwise a shallow
+        :meth:`Signal.with_samples` update with ``**metadata`` applied. Derived
+        ``resolved_symbols`` and ``resolved_bits`` caches are invalidated.
     """
     if sig is None:
         return array
-    new = sig.copy()
-    new.samples = array
-    for key, value in metadata.items():
-        setattr(new, key, value)
-    return new
+    return sig.with_samples(array, **metadata)
 
 
 def _cd_beta2_length(

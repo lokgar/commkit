@@ -741,6 +741,8 @@ class SingleCarrierFrame(BaseModel):
             - 'guard' (only if include_preamble=True OR guard_type='zero')
         """
         xp = cp if is_cupy_available() else np
+        if unit == "samples":
+            sps = helpers._coerce_integer_sps(sps, caller="get_structure_map()")
         mask, body_length = self._generate_pilot_mask()
 
         preamble_len = self.preamble.num_symbols if self.preamble else 0
@@ -810,7 +812,7 @@ class SingleCarrierFrame(BaseModel):
 
         if unit == "samples":
             for k in res:
-                res[k] = xp.repeat(res[k], int(sps))
+                res[k] = xp.repeat(res[k], sps)
 
         return res
 

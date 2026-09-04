@@ -143,6 +143,7 @@ def shape_pulse(
     ``normalize(..., "peak")`` after.
     """
     logger.debug("Applying pulse shaping: %s", pulse_shape)
+    sps = helpers._coerce_integer_sps(sps, caller="shape_pulse()")
 
     if rz:
         duty_cycle = 0.5
@@ -156,17 +157,17 @@ def shape_pulse(
         else:
             logger.debug("Pulse shaping disabled, expanding symbols by sps")
             return helpers.normalize(
-                expand(symbols, int(sps), axis=-1),
+                expand(symbols, sps, axis=-1),
                 "symbol_power",
-                sps=int(sps),
+                sps=sps,
                 axis=-1,
             )
 
     if pulse_shape == "rect":
-        h = filtering.rect_taps(int(sps), duty_cycle=duty_cycle, rise_time=rise_time)
+        h = filtering.rect_taps(sps, duty_cycle=duty_cycle, rise_time=rise_time)
     elif pulse_shape == "smoothrect":
         h = filtering.smoothrect_taps(
-            int(sps), span=filter_span, rise_time=rise_time, duty_cycle=duty_cycle
+            sps, span=filter_span, rise_time=rise_time, duty_cycle=duty_cycle
         )
     elif pulse_shape == "gaussian":
         h = filtering.gaussian_taps(sps, span=filter_span, duty_cycle=duty_cycle)
@@ -186,11 +187,11 @@ def shape_pulse(
     h = xp.asarray(h).astype(symbols.real.dtype)
 
     # Apply Pulse Shaping via Polyphase Resampling
-    res = sp.signal.resample_poly(symbols, int(sps), 1, window=h, axis=-1)
+    res = sp.signal.resample_poly(symbols, sps, 1, window=h, axis=-1)
     if res.dtype != symbols.dtype:
         res = res.astype(symbols.dtype)
 
-    return helpers.normalize(res, "symbol_power", sps=int(sps), axis=-1)
+    return helpers.normalize(res, "symbol_power", sps=sps, axis=-1)
 
 
 # -----------------------------------------------------------------------------

@@ -7,7 +7,13 @@ import numpy as np
 from ..backend import ArrayType, dispatch, to_device
 from ..core.signal import Signal
 from ..filtering import _ols_backward, _ols_forward
-from ..helpers import as_2d, restore_1d, rewrap_signal, unwrap_signal
+from ..helpers import (
+    _coerce_integer_sps,
+    as_2d,
+    restore_1d,
+    rewrap_signal,
+    unwrap_signal,
+)
 from ..logger import logger
 from ._common import _build_padded_samples, _normalize_inputs
 
@@ -222,10 +228,11 @@ def apply_taps(
                 sps,
                 sig.sps,
             )
+        signal_sps = _coerce_integer_sps(sig.sps, caller="apply_taps()")
         result = apply_taps(
             x,
             weights,
-            sps=int(sig.sps),
+            sps=signal_sps,
             normalize=normalize,
             input_norm_factor=input_norm_factor,
             samples_prefix=samples_prefix,

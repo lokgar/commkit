@@ -38,7 +38,7 @@ def test_matched_filter_auto_taps(backend_device, xp):
     )
 
     # Copy signal to compare
-    sig_before = sig.copy()
+    sig_before = sig.clone()
 
     # Apply matched filter (should auto-generate taps)
     sig = filtering.matched_filter(sig)
