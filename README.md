@@ -99,6 +99,10 @@ Extras can be combined, e.g. `commkit[gpu,notebook]`, or install everything at o
 
 ### Development Installation
 
+Contributor guidance, including the [Signal adapter pattern](CLAUDE.md#signal-awareness),
+is maintained in [CLAUDE.md](CLAUDE.md). It covers implementation conventions and
+validation commands for human contributors as well as coding agents.
+
 ```bash
 git clone https://github.com/lokgar/commkit.git
 cd commkit

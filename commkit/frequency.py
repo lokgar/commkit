@@ -12,7 +12,7 @@ from collections.abc import Callable
 import numpy as np
 
 from .backend import ArrayType, dispatch, to_device
-from .core._signal_adapter import prepare_signal_input
+from .core._signal_adapter import adapt_signal
 from .core.signal import Signal
 from .helpers import (
     _parabolic_peak_offset,
@@ -254,13 +254,13 @@ def estimate_frequency_offset_mth_power(
     and has a sinc-function bias for small NFFT), the Jacobsen estimator
     is unbiased for a rectangular window.
     """
-    context = prepare_signal_input(
+    signal_adapter = adapt_signal(
         samples, function_name="estimate_frequency_offset_mth_power()"
     )
-    samples = context.array
-    sampling_rate = context.required("sampling_rate", sampling_rate)
-    modulation = context.optional("mod_scheme", modulation)
-    order = context.optional("mod_order", order)
+    samples = signal_adapter.array
+    sampling_rate = signal_adapter.resolve_required("sampling_rate", sampling_rate)
+    modulation = signal_adapter.resolve_optional("mod_scheme", modulation)
+    order = signal_adapter.resolve_optional("mod_order", order)
     if modulation is None or order is None:
         raise ValueError(
             "estimate_frequency_offset_mth_power() requires modulation and order "
@@ -489,13 +489,13 @@ def estimate_frequency_offset_mengali_morelli(
     Lock range: [-fs/(2M), fs/(2M)] for blind M-th power mode;
     [-fs/2, fs/2] for data-aided or generic blind mode.
     """
-    context = prepare_signal_input(
+    signal_adapter = adapt_signal(
         samples, function_name="estimate_frequency_offset_mengali_morelli()"
     )
-    samples = context.array
-    sampling_rate = context.required("sampling_rate", sampling_rate)
-    modulation = context.optional("mod_scheme", modulation)
-    order = context.optional("mod_order", order)
+    samples = signal_adapter.array
+    sampling_rate = signal_adapter.resolve_required("sampling_rate", sampling_rate)
+    modulation = signal_adapter.resolve_optional("mod_scheme", modulation)
+    order = signal_adapter.resolve_optional("mod_order", order)
 
     samples, xp, _ = dispatch(samples)
     samples, was_1d = as_2d(samples, name="samples")
@@ -678,11 +678,11 @@ def estimate_frequency_offset_pilot_symbols(
     where ``max_gap`` is the maximum spacing (in samples) between any two
     consecutive entries of ``pilot_indices``.
     """
-    context = prepare_signal_input(
+    signal_adapter = adapt_signal(
         samples, function_name="estimate_frequency_offset_pilot_symbols()"
     )
-    samples = context.array
-    sampling_rate = context.required("sampling_rate", sampling_rate)
+    samples = signal_adapter.array
+    sampling_rate = signal_adapter.resolve_required("sampling_rate", sampling_rate)
     if pilot_indices is None or pilot_values is None:
         raise ValueError(
             "estimate_frequency_offset_pilot_symbols() requires pilot_indices and "
@@ -845,9 +845,9 @@ def find_bias_tone(
     windowed spectral peak than standard parabolic (magnitude-domain) fits,
     reducing estimation bias for non-integer tone frequencies.
     """
-    context = prepare_signal_input(seg, function_name="find_bias_tone()")
-    seg = context.array
-    sampling_rate = context.required("sampling_rate", sampling_rate)
+    signal_adapter = adapt_signal(seg, function_name="find_bias_tone()")
+    seg = signal_adapter.array
+    sampling_rate = signal_adapter.resolve_required("sampling_rate", sampling_rate)
     if (target_frequency is None) != (search_band is None):
         raise ValueError(
             "target_frequency and search_band must both be provided or both omitted."
@@ -1061,11 +1061,11 @@ def correct_frequency_offset_blockwise(
     4. Integrate: theta(n) = (2 * pi / fs) * cumsum(delta_f).
     5. Apply: y[n] = x[n] * exp(-j * theta[n]).
     """
-    context = prepare_signal_input(
+    signal_adapter = adapt_signal(
         samples, function_name="correct_frequency_offset_blockwise()"
     )
-    samples = context.array
-    sampling_rate = context.required("sampling_rate", sampling_rate)
+    samples = signal_adapter.array
+    sampling_rate = signal_adapter.resolve_required("sampling_rate", sampling_rate)
     if block_size is None or overlap is None or estimator is None:
         raise ValueError(
             "correct_frequency_offset_blockwise() requires block_size, overlap, "
@@ -1178,7 +1178,7 @@ def correct_frequency_offset_blockwise(
             title=title,
         )
 
-    return context.return_value(restore_1d(was_1d, corrected_2d))
+    return signal_adapter.wrap_samples(restore_1d(was_1d, corrected_2d))
 
 
 def correct_static_frequency_offset(
@@ -1224,11 +1224,11 @@ def correct_static_frequency_offset(
         Frequency-corrected samples, same shape and dtype as input.  A
         :class:`Signal` returns a new corrected :class:`Signal`.
     """
-    context = prepare_signal_input(
+    signal_adapter = adapt_signal(
         samples, function_name="correct_static_frequency_offset()"
     )
-    samples = context.array
-    sampling_rate = context.required("sampling_rate", sampling_rate)
+    samples = signal_adapter.array
+    sampling_rate = signal_adapter.resolve_required("sampling_rate", sampling_rate)
     if offset is None:
         raise ValueError("correct_static_frequency_offset() requires offset.")
 
@@ -1286,4 +1286,4 @@ def correct_static_frequency_offset(
         if samples.ndim > 1:
             mixer = mixer.reshape((1,) * (samples.ndim - 1) + (-1,))
 
-    return context.return_value(samples * mixer)
+    return signal_adapter.wrap_samples(samples * mixer)

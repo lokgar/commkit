@@ -9,7 +9,7 @@ most-likely bits from received symbols via minimum-distance decoding
 import numpy as np
 
 from ..backend import ArrayType, dispatch
-from ..core._signal_adapter import prepare_signal_input
+from ..core._signal_adapter import adapt_signal
 from ..core.signal import Signal
 from ..logger import logger
 from .gray import (
@@ -145,11 +145,11 @@ def demap_symbols_hard(
         Sequence of bits (0s and 1s). Shape: (..., N_symbols * log2(order)).
         The backend (NumPy/CuPy) matches the input `symbols`.
     """
-    context = prepare_signal_input(
+    signal_adapter = adapt_signal(
         symbols, function_name="demap_symbols_hard()", field="resolved_symbols"
     )
-    if context.signal is not None:
-        sig = context.signal
+    if signal_adapter.signal is not None:
+        sig = signal_adapter.signal
         if sig.signal_type is not None:
             logger.warning(
                 "demap_symbols_hard() called on a frame-generated signal - skipping. "
@@ -157,25 +157,25 @@ def demap_symbols_hard(
                 "a plain Signal before demapping."
             )
             return sig._shallow_clone()
-        mod = context.optional("mod_scheme", modulation)
-        ord_ = context.optional("mod_order", order)
+        mod = signal_adapter.resolve_optional("mod_scheme", modulation)
+        ord_ = signal_adapter.resolve_optional("mod_order", order)
         if mod is None or ord_ is None:
             raise ValueError("Modulation scheme and order required for demapping.")
         if sig.resolved_symbols is None:
             raise ValueError(
                 "No resolved symbols available. Call resolve_symbols(sig) first."
             )
-        eff_pmf = context.optional("ps_pmf", pmf)
+        eff_pmf = signal_adapter.resolve_optional("ps_pmf", pmf)
         # Output and input use different derived fields, so replace the target
         # field explicitly.
         resolved_bits = _demap_symbols_hard_array(
-            context.array,
+            signal_adapter.array,
             mod,
             ord_,
-            unipolar=context.optional("mod_unipolar", unipolar),
+            unipolar=signal_adapter.resolve_optional("mod_unipolar", unipolar),
             pmf=eff_pmf,
         )
-        return context.replace_field("resolved_bits", resolved_bits)
+        return signal_adapter.replace_signal_field("resolved_bits", resolved_bits)
 
     if modulation is None or order is None:
         raise ValueError("demap_symbols_hard() requires modulation and order.")

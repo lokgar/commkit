@@ -5,7 +5,7 @@ import logging
 import numpy as np
 
 from ..backend import ArrayType, dispatch, to_device
-from ..core._signal_adapter import prepare_signal_input
+from ..core._signal_adapter import adapt_signal
 from ..core.signal import Signal
 from ..helpers import (
     as_2d,
@@ -464,8 +464,8 @@ def correct_carrier_phase(
         Phase-corrected symbols, same shape and dtype as ``symbols``.  A
         :class:`Signal` returns a new phase-corrected :class:`Signal`.
     """
-    context = prepare_signal_input(symbols, function_name="correct_carrier_phase()")
-    symbols = context.array
+    signal_adapter = adapt_signal(symbols, function_name="correct_carrier_phase()")
+    symbols = signal_adapter.array
     symbols, xp, _ = dispatch(symbols)
     logger.debug("Applying carrier phase correction: shape=%s", symbols.shape)
     # Wrap to [-π, π] in float64 (handles unbounded phase trajectories from
@@ -473,7 +473,7 @@ def correct_carrier_phase(
     phase_f64 = xp.asarray(phase_vector, dtype=xp.float64)
     if xp is not np and symbols.dtype == xp.complex64:
         # GPU fast path: single fused kernel (broadcasts (N,) phase over (C, N)).
-        return context.return_value(_get_cupy_phase_rotate()(symbols, phase_f64))
+        return signal_adapter.wrap_samples(_get_cupy_phase_rotate()(symbols, phase_f64))
     two_pi = 2.0 * xp.pi
     phase_wrapped = (phase_f64 - xp.round(phase_f64 / two_pi) * two_pi).astype(
         xp.float32
@@ -481,7 +481,7 @@ def correct_carrier_phase(
     phasor = xp.exp(-1j * phase_wrapped)
     if phasor.dtype != symbols.dtype:
         phasor = phasor.astype(symbols.dtype)
-    return context.return_value(symbols * phasor)
+    return signal_adapter.wrap_samples(symbols * phasor)
 
 
 def correct_phase_rotation(
@@ -525,11 +525,11 @@ def correct_phase_rotation(
         :class:`Signal` returns a new :class:`Signal` with ``resolved_symbols``
         corrected.
     """
-    context = prepare_signal_input(
+    signal_adapter = adapt_signal(
         symbols, function_name="correct_phase_rotation()", field="resolved_symbols"
     )
-    if context.signal is not None:
-        sig = context.signal
+    if signal_adapter.signal is not None:
+        sig = signal_adapter.signal
         if sig.resolved_symbols is None:
             raise ValueError(
                 "resolved_symbols is not set. Call resolve_symbols(sig) or assign "
@@ -542,9 +542,9 @@ def correct_phase_rotation(
                 "source_symbols is set on the Signal."
             )
         resolved = _correct_phase_rotation_array(
-            context.array, ref, num_skip_symbols=num_skip_symbols
+            signal_adapter.array, ref, num_skip_symbols=num_skip_symbols
         )
-        return context.replace_field("resolved_symbols", resolved)
+        return signal_adapter.replace_signal_field("resolved_symbols", resolved)
 
     if ref_symbols is None:
         raise ValueError(
@@ -688,11 +688,11 @@ def resolve_channel_permutation(
     When ``symbols`` is a :class:`Signal`, ``resolved_symbols`` is reordered
     against ``source_symbols`` and a new :class:`Signal` is returned.
     """
-    context = prepare_signal_input(
+    signal_adapter = adapt_signal(
         symbols, function_name="resolve_channel_permutation()", field="resolved_symbols"
     )
-    if context.signal is not None:
-        sig = context.signal
+    if signal_adapter.signal is not None:
+        sig = signal_adapter.signal
         if sig.resolved_symbols is None:
             raise ValueError(
                 "resolved_symbols is not set. Call resolve_symbols(sig) or assign "
@@ -705,12 +705,12 @@ def resolve_channel_permutation(
             )
         # Input and output share the resolved_symbols derived field.
         resolved = _resolve_channel_permutation_array(
-            context.array,
+            signal_adapter.array,
             sig.source_symbols,
             num_skip_symbols=num_skip_symbols,
             metric=metric,
         )
-        return context.replace_field("resolved_symbols", resolved)
+        return signal_adapter.replace_signal_field("resolved_symbols", resolved)
 
     if ref_symbols is None:
         raise ValueError("resolve_channel_permutation() requires ref_symbols.")
@@ -853,11 +853,11 @@ def resolve_phase_ambiguity(
     against ``source_symbols`` (using the signal's modulation/order/pmf) and a
     new :class:`Signal` is returned.
     """
-    context = prepare_signal_input(
+    signal_adapter = adapt_signal(
         symbols, function_name="resolve_phase_ambiguity()", field="resolved_symbols"
     )
-    if context.signal is not None:
-        sig = context.signal
+    if signal_adapter.signal is not None:
+        sig = signal_adapter.signal
         if sig.resolved_symbols is None:
             raise ValueError(
                 "resolved_symbols is not set. Call resolve_symbols(sig) or assign "
@@ -868,13 +868,13 @@ def resolve_phase_ambiguity(
                 "source_symbols is not set. Populate source_symbols (the known TX "
                 "symbol sequence) before calling resolve_phase_ambiguity()."
             )
-        mod = context.optional("mod_scheme", modulation)
-        ord_ = context.optional("mod_order", order)
+        mod = signal_adapter.resolve_optional("mod_scheme", modulation)
+        ord_ = signal_adapter.resolve_optional("mod_order", order)
         if mod is None or ord_ is None:
             raise ValueError("mod_scheme and mod_order must be set.")
-        eff_pmf = context.optional("ps_pmf", pmf)
+        eff_pmf = signal_adapter.resolve_optional("ps_pmf", pmf)
         resolved = _resolve_phase_ambiguity_array(
-            context.array,
+            signal_adapter.array,
             sig.source_symbols,
             mod,
             ord_,
@@ -882,7 +882,7 @@ def resolve_phase_ambiguity(
             num_skip_symbols=num_skip_symbols,
             pmf=eff_pmf,
         )
-        return context.replace_field("resolved_symbols", resolved)
+        return signal_adapter.replace_signal_field("resolved_symbols", resolved)
 
     if ref_symbols is None or modulation is None or order is None:
         raise ValueError(

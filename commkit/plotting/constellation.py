@@ -7,7 +7,7 @@ import numpy as np
 
 from .. import helpers
 from ..backend import dispatch, to_device
-from ..core._signal_adapter import prepare_signal_input
+from ..core._signal_adapter import adapt_signal
 from ..logger import logger
 from ..smoothing import smooth_density_2d
 from .theme import (
@@ -238,18 +238,18 @@ def plot_constellation(
     ax : matplotlib.axes.Axes or ndarray
         The axis or array of axes used.
     """
-    context = prepare_signal_input(samples, function_name="plot_constellation()")
-    sig = context.signal
+    signal_adapter = adapt_signal(samples, function_name="plot_constellation()")
+    sig = signal_adapter.signal
     result = _plot_constellation_array(
-        context.array,
+        signal_adapter.array,
         bins=bins,
         cmap=cmap,
         ax=ax,
         overlay_ideal=overlay_ideal,
-        modulation=context.optional("mod_scheme", modulation),
-        order=context.optional("mod_order", order),
-        unipolar=context.optional("mod_unipolar", unipolar),
-        pmf=context.optional("ps_pmf", pmf),
+        modulation=signal_adapter.resolve_optional("mod_scheme", modulation),
+        order=signal_adapter.resolve_optional("mod_order", order),
+        unipolar=signal_adapter.resolve_optional("mod_unipolar", unipolar),
+        pmf=signal_adapter.resolve_optional("ps_pmf", pmf),
         title=title,
         vmin=vmin,
         vmax=vmax,

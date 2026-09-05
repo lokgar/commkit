@@ -3,7 +3,7 @@
 import numpy as np
 
 from ..backend import ArrayType, dispatch, to_device
-from ..core._signal_adapter import prepare_signal_input
+from ..core._signal_adapter import adapt_signal
 from ..core.signal import Signal
 from ..helpers import as_2d, restore_1d
 from ..logger import logger
@@ -106,11 +106,11 @@ def recover_carrier_phase_bps(
     from ..mapping import constellation_power, gray_constellation
     from ..mapping.gray import square_qam_slicer_params
 
-    context = prepare_signal_input(symbols, function_name="recover_carrier_phase_bps()")
-    symbols = context.array
-    modulation = context.optional("mod_scheme", modulation)
-    order = context.optional("mod_order", order)
-    pmf = context.optional("ps_pmf", pmf)
+    signal_adapter = adapt_signal(symbols, function_name="recover_carrier_phase_bps()")
+    symbols = signal_adapter.array
+    modulation = signal_adapter.resolve_optional("mod_scheme", modulation)
+    order = signal_adapter.resolve_optional("mod_order", order)
+    pmf = signal_adapter.resolve_optional("ps_pmf", pmf)
 
     if modulation is None or order is None:
         raise ValueError(

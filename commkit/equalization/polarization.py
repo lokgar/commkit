@@ -8,7 +8,7 @@ from typing import Any, cast, overload
 import numpy as np
 
 from ..backend import ArrayType, dispatch, to_device
-from ..core._signal_adapter import prepare_signal_input
+from ..core._signal_adapter import adapt_signal
 from ..core.signal import Signal
 from ..filtering import fir_filter, fir_taps
 from ..logger import logger
@@ -68,8 +68,8 @@ def apply_interpolated_matrix(
     (K, N) array
         ``M(n) · samples[:, n]``, same dtype as ``samples``.
     """
-    context = prepare_signal_input(samples, function_name="apply_interpolated_matrix()")
-    samples = context.array
+    signal_adapter = adapt_signal(samples, function_name="apply_interpolated_matrix()")
+    samples = signal_adapter.array
 
     samples, xp, _ = dispatch(samples)
     C, N = samples.shape
@@ -102,7 +102,7 @@ def apply_interpolated_matrix(
         frac = ((nn - gp[lo]) / (gp[lo + 1] - gp[lo])).astype(xp.complex64)
         M_full = M[lo] + (M[lo + 1] - M[lo]) * frac[:, None, None]  # (L, K, C)
         out[:, bulk:] = xp.einsum("lkc,cl->kl", M_full, xc[:, bulk:])
-    return context.return_value(out.astype(samples.dtype, copy=False))
+    return signal_adapter.wrap_samples(out.astype(samples.dtype, copy=False))
 
 
 # -----------------------------------------------------------------------------
@@ -402,11 +402,11 @@ def demultiplex_polarization_tones_static(
     add_pilot_tone : Add the per-stream tones at the transmitter.
     demultiplex_polarization_tones_dynamic : Time-varying (drifting-SOP) demux.
     """
-    context = prepare_signal_input(
+    signal_adapter = adapt_signal(
         samples, function_name="demultiplex_polarization_tones_static()"
     )
-    samples = context.array
-    sampling_rate = context.required("sampling_rate", sampling_rate)
+    samples = signal_adapter.array
+    sampling_rate = signal_adapter.resolve_required("sampling_rate", sampling_rate)
     if tone_frequencies is None:
         raise ValueError(
             "demultiplex_polarization_tones_static() requires tone_frequencies."
@@ -486,9 +486,9 @@ def demultiplex_polarization_tones_static(
     )
 
     if return_matrix:
-        wrapped = context.return_value(demuxed)
+        wrapped = signal_adapter.wrap_samples(demuxed)
         return wrapped, W
-    return context.return_value(demuxed)
+    return signal_adapter.wrap_samples(demuxed)
 
 
 def demultiplex_polarization_tones_dynamic(
@@ -644,11 +644,11 @@ def demultiplex_polarization_tones_dynamic(
     demultiplex_polarization_tones_static : One-shot static-SOP demux (faster).
     add_pilot_tone : Add the per-stream tones at the transmitter.
     """
-    context = prepare_signal_input(
+    signal_adapter = adapt_signal(
         samples, function_name="demultiplex_polarization_tones_dynamic()"
     )
-    samples = context.array
-    sampling_rate = context.required("sampling_rate", sampling_rate)
+    samples = signal_adapter.array
+    sampling_rate = signal_adapter.resolve_required("sampling_rate", sampling_rate)
     if tone_frequencies is None:
         raise ValueError(
             "demultiplex_polarization_tones_dynamic() requires tone_frequencies."
@@ -837,6 +837,6 @@ def demultiplex_polarization_tones_dynamic(
         out = out + (valid,)
     if return_matrix:
         out = out + (Wg, grid_positions)
-    if context.signal is not None:
-        out = (context.return_value(out[0]), *out[1:])
+    if signal_adapter.signal is not None:
+        out = (signal_adapter.wrap_samples(out[0]), *out[1:])
     return out[0] if len(out) == 1 else out

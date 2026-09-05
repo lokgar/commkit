@@ -12,7 +12,7 @@ from typing import Any, cast
 import numpy as np
 
 from .backend import ArrayType, dispatch
-from .core._signal_adapter import prepare_signal_input
+from .core._signal_adapter import adapt_signal
 from .core.signal import Signal
 from .helpers import as_2d, restore_1d
 from .logger import logger
@@ -110,9 +110,9 @@ def shift_frequency(
     with the shift applied and ``digital_frequency_offset`` accumulated;
     ``sampling_rate`` is taken from the signal.
     """
-    context = prepare_signal_input(samples, function_name="shift_frequency()")
-    samples = context.array
-    sampling_rate = context.required("sampling_rate", sampling_rate)
+    signal_adapter = adapt_signal(samples, function_name="shift_frequency()")
+    samples = signal_adapter.array
+    sampling_rate = signal_adapter.resolve_required("sampling_rate", sampling_rate)
 
     samples, xp, _ = dispatch(samples)
 
@@ -157,9 +157,9 @@ def shift_frequency(
 
     shifted = samples * mixer
     actual = float(actual_offset)
-    if context.signal is not None:
-        dfo = (context.signal.digital_frequency_offset or 0.0) + actual
-        return context.return_value(shifted, digital_frequency_offset=dfo)
+    if signal_adapter.signal is not None:
+        dfo = (signal_adapter.signal.digital_frequency_offset or 0.0) + actual
+        return signal_adapter.wrap_samples(shifted, digital_frequency_offset=dfo)
     return shifted, actual
 
 
@@ -244,10 +244,10 @@ def add_pilot_tone(
     ``add_pilot_tone(sig, freq, ...)``).  A new :class:`Signal` is returned with
     ``pilot_tone_frequency`` / ``pilot_tone_power_ratio_db`` recorded.
     """
-    context = prepare_signal_input(samples, function_name="add_pilot_tone()")
-    samples = context.array
-    if context.signal is not None:
-        sig = context.signal
+    signal_adapter = adapt_signal(samples, function_name="add_pilot_tone()")
+    samples = signal_adapter.array
+    if signal_adapter.signal is not None:
+        sig = signal_adapter.signal
         # Signal rate is implicit; the second positional carries the frequency.
         freq = frequency if frequency is not None else sampling_rate
         if freq is None:
@@ -354,10 +354,10 @@ def add_pilot_tone(
 
     samples_out = restore_1d(was_1d, out)
     actual_frequency: float | list[float] = actual[0] if scalar_input else actual
-    if context.signal is not None:
+    if signal_adapter.signal is not None:
         return cast(
             Signal,
-            context.return_value(
+            signal_adapter.wrap_samples(
                 samples_out,
                 pilot_tone_frequency=actual_frequency,
                 pilot_tone_power_ratio_db=power_ratio_db,
@@ -431,10 +431,10 @@ def welch_psd(
     ValueError
         If `return_onesided` set to True for complex-valued inputs.
     """
-    context = prepare_signal_input(samples, function_name="welch_psd()")
-    samples = context.array
-    sampling_rate = context.required("sampling_rate", sampling_rate)
-    if context.signal is not None:
+    signal_adapter = adapt_signal(samples, function_name="welch_psd()")
+    samples = signal_adapter.array
+    sampling_rate = signal_adapter.resolve_required("sampling_rate", sampling_rate)
+    if signal_adapter.signal is not None:
         axis = -1
 
     samples, xp, sp = dispatch(samples)
@@ -529,10 +529,10 @@ def spectrogram(
     ValueError
         If `return_onesided` set to True for complex-valued inputs.
     """
-    context = prepare_signal_input(samples, function_name="spectrogram()")
-    samples = context.array
-    sampling_rate = context.required("sampling_rate", sampling_rate)
-    if context.signal is not None:
+    signal_adapter = adapt_signal(samples, function_name="spectrogram()")
+    samples = signal_adapter.array
+    sampling_rate = signal_adapter.resolve_required("sampling_rate", sampling_rate)
+    if signal_adapter.signal is not None:
         axis = -1
 
     samples, xp, sp = dispatch(samples)

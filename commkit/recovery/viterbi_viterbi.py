@@ -3,7 +3,7 @@
 import numpy as np
 
 from ..backend import ArrayType, dispatch, to_device
-from ..core._signal_adapter import prepare_signal_input
+from ..core._signal_adapter import adapt_signal
 from ..core.signal import Signal
 from ..frequency import _modulation_power_m
 from ..helpers import as_2d, restore_1d
@@ -82,12 +82,12 @@ def recover_carrier_phase_viterbi_viterbi(
     minimum reliable block_size scales as ~4*ceil(sqrt(order)).  For high phase
     noise prefer ``recover_carrier_phase_bps`` (no unwrap required).
     """
-    context = prepare_signal_input(
+    signal_adapter = adapt_signal(
         symbols, function_name="recover_carrier_phase_viterbi_viterbi()"
     )
-    symbols = context.array
-    modulation = context.optional("mod_scheme", modulation)
-    order = context.optional("mod_order", order)
+    symbols = signal_adapter.array
+    modulation = signal_adapter.resolve_optional("mod_scheme", modulation)
+    order = signal_adapter.resolve_optional("mod_order", order)
 
     if modulation is None or order is None:
         raise ValueError(

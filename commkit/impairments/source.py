@@ -5,7 +5,7 @@ import math
 import numpy as np
 
 from ..backend import ArrayType, dispatch, is_cupy_available, to_device
-from ..core._signal_adapter import prepare_signal_input
+from ..core._signal_adapter import adapt_signal
 from ..core.signal import Signal
 from ..helpers import as_2d, restore_1d
 from ..logger import logger
@@ -202,9 +202,9 @@ def apply_phase_noise(
     ...                           sampling_rate=sig.sampling_rate)
     >>> noisy = apply_phase_noise(sig, linewidth=100e3)  # Signal input
     """
-    context = prepare_signal_input(samples, function_name="apply_phase_noise()")
-    samples = context.array
-    sampling_rate = context.required("sampling_rate", sampling_rate)
+    signal_adapter = adapt_signal(samples, function_name="apply_phase_noise()")
+    samples = signal_adapter.array
+    sampling_rate = signal_adapter.resolve_required("sampling_rate", sampling_rate)
     if linewidth is None:
         raise ValueError("apply_phase_noise() requires linewidth.")
 
@@ -236,4 +236,4 @@ def apply_phase_noise(
     if result.dtype != samples.dtype:
         result = result.astype(samples.dtype)
 
-    return context.return_value(restore_1d(was_1d, result))
+    return signal_adapter.wrap_samples(restore_1d(was_1d, result))

@@ -271,6 +271,14 @@ silently pull a JAX array to the host.
 
 ### Signal-Awareness
 
+**Why this pattern:** DSP algorithms should operate on arrays and resolved
+parameters. `SignalAdapter` keeps container handling at the public boundary,
+centralizes metadata precedence, and wraps results without deep-copying the old
+waveform. This avoids recursive wrappers that can drop arguments and ensures
+consistent rate updates and derived-cache invalidation across algorithms.
+The adapter is an internal contributor tool; package users continue calling
+ordinary DSP functions with arrays or Signals.
+
 Any new DSP function whose primary argument is genuinely **signal-representable
 data** (raw IQ samples, or a field a `Signal` actually carries, like
 `resolved_symbols`) should accept a `Signal` alongside a raw array, transparently:
@@ -279,14 +287,14 @@ input. Estimates, metrics, and plots retain their documented return types. Use
 `commkit/core/_signal_adapter.py` to unwrap once at the public boundary:
 
 ```python
-from commkit.core._signal_adapter import prepare_signal_input
+from commkit.core._signal_adapter import adapt_signal
 
 def fir_filter(samples, taps, axis=-1):
-    context = prepare_signal_input(samples, function_name="fir_filter()")
-    if context.signal is not None:
+    signal_adapter = adapt_signal(samples, function_name="fir_filter()")
+    if signal_adapter.signal is not None:
         axis = -1
-    result = _fir_filter_array(context.array, taps, axis=axis)
-    return context.return_value(result)
+    result = _fir_filter_array(signal_adapter.array, taps, axis=axis)
+    return signal_adapter.wrap_samples(result)
 ```
 
 Keep short array processing inline where readable; extract an array-only helper
@@ -294,24 +302,29 @@ when it enables reuse or clearer control flow. Do not recursively re-enter the
 public function to adapt Signal input. Array-channel iteration in plotting is
 separate from Signal dispatch and may remain recursive.
 
-- `prepare_signal_input(value, function_name=..., field="samples")` returns a
-  context with `.array` and `.signal`. Use `field="resolved_symbols"` or
+- `adapt_signal(value, function_name=..., field="samples")` returns a
+  `SignalAdapter` with `.array` and `.signal`. Name the local variable `signal_adapter`
+  (or use `reference_adapter`/`received_adapter` when roles need distinguishing).
+  Use `field="resolved_symbols"` or
   `field="resolved_bits"` when those are the actual input data.
-- `context.required(field, supplied)` resolves required metadata. For arrays it
-  rejects a missing argument; for Signals the field wins and supplied duplicates
-  produce a warning under the current policy.
-- `context.optional(field, supplied)` uses populated Signal metadata, falling back
-  to the argument only when absent (with a warning when a fallback is supplied).
+- `signal_adapter.resolve_required(field, supplied)` resolves required metadata.
+  For arrays it rejects a missing argument; for Signals the field wins and
+  supplied duplicates produce a warning under the current policy.
+- `signal_adapter.resolve_optional(field, supplied)` uses populated Signal metadata,
+  falling back to the argument only when absent (with a warning when a fallback
+  is supplied).
   `False` and zero are populated values, not missing values.
 - `require_integer_sps(value, function_name)` validates finite, positive, exactly
   integral SPS before conversion. Apply it to both array and Signal entry paths
   for integer-only algorithms. Do not impose it on fractional-SPS-capable paths,
   such as raw-reference timing correlation or general rate conversion.
-- `context.return_value(array, **metadata)` passes array input results through;
+- `signal_adapter.wrap_samples(array, **metadata)` passes array input results through;
   for Signal input it calls `replace_samples()`, applies validated metadata
-  updates, and invalidates resolved caches.
-- `context.replace_field("resolved_symbols", array)` returns a new Signal with
-  the derived field replaced and dependent bits cleared. Replacing
+  updates, and invalidates resolved caches. Its return annotation is
+  `SamplesT | Signal`, retaining the supplied sample type while explicitly
+  representing Signal output. None passes through only for array input.
+- `signal_adapter.replace_signal_field("resolved_symbols", array)` returns a new
+  Signal with the derived field replaced and dependent bits cleared. Replacing
   `"resolved_bits"` retains resolved symbols.
 
 Use these shared methods instead of implementing precedence or SPS validation
@@ -332,11 +345,11 @@ cache validity; avoid reusing derived caches after those mutations.
 
 | Situation | Boundary operation |
 | --- | --- |
-| Shape/rate unchanged (most `apply_*`/`correct_*`) | `context.return_value(result)` |
-| Decimates to one sample/symbol | `context.return_value(result, sampling_rate=context.signal.symbol_rate)` on the Signal path |
+| Shape/rate unchanged (most `apply_*`/`correct_*`) | `signal_adapter.wrap_samples(result)` |
+| Decimates to one sample/symbol | `signal_adapter.wrap_samples(result, sampling_rate=signal_adapter.signal.symbol_rate)` on the Signal path |
 | Upsamples by an integer factor | Update `sampling_rate` by the same factor |
 | Resamples to an explicit target rate | Update `sampling_rate` to the target rate |
-| Writes resolved symbols/bits | `context.replace_field(...)` |
+| Writes resolved symbols/bits | `signal_adapter.replace_signal_field(...)` |
 | Equalizer result containing an output waveform | Use `_attach_equalized_signal()` |
 | Scalar/dict/tuple estimates or plots | Unwrap input and return the documented result directly |
 

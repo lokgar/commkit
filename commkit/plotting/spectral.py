@@ -6,7 +6,7 @@ import matplotlib.pyplot as plt
 import numpy as np
 
 from ..backend import dispatch, to_device
-from ..core._signal_adapter import prepare_signal_input
+from ..core._signal_adapter import adapt_signal
 from ..logger import logger
 from .theme import (
     _create_subplot_grid,
@@ -92,12 +92,12 @@ def plot_psd(
     ax : matplotlib.axes.Axes or ndarray
         The axis or array of axes used for the plot.
     """
-    context = prepare_signal_input(samples, function_name="plot_psd()")
-    samples = context.array
-    if context.signal is not None:
-        sampling_rate = context.required("sampling_rate")
-        center_frequency = context.signal.center_frequency
-        domain = context.signal.physical_domain or "RF"
+    signal_adapter = adapt_signal(samples, function_name="plot_psd()")
+    samples = signal_adapter.array
+    if signal_adapter.signal is not None:
+        sampling_rate = signal_adapter.resolve_required("sampling_rate")
+        center_frequency = signal_adapter.signal.center_frequency
+        domain = signal_adapter.signal.physical_domain or "RF"
 
     logger.debug("Generating PSD plot (sampling_rate=%s Hz).", sampling_rate)
 
@@ -317,12 +317,12 @@ def plot_spectrogram(
     ax : matplotlib.axes.Axes or ndarray
         The axis or array of axes used for the plot.
     """
-    context = prepare_signal_input(samples, function_name="plot_spectrogram()")
-    samples = context.array
-    if context.signal is not None:
-        sampling_rate = context.required("sampling_rate")
-        center_frequency = context.signal.center_frequency
-        domain = context.signal.physical_domain or "RF"
+    signal_adapter = adapt_signal(samples, function_name="plot_spectrogram()")
+    samples = signal_adapter.array
+    if signal_adapter.signal is not None:
+        sampling_rate = signal_adapter.resolve_required("sampling_rate")
+        center_frequency = signal_adapter.signal.center_frequency
+        domain = signal_adapter.signal.physical_domain or "RF"
         axis = -1
 
     logger.debug("Generating spectrogram plot (sampling_rate=%s Hz).", sampling_rate)

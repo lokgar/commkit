@@ -10,7 +10,7 @@ import logging
 import numpy as np
 
 from .backend import ArrayType, dispatch, to_device
-from .core._signal_adapter import prepare_signal_input
+from .core._signal_adapter import adapt_signal
 from .core.signal import Signal
 from .helpers import linear_to_db
 from .logger import logger
@@ -149,11 +149,11 @@ def evm(
     ``num_train_symbols`` leading symbols are discarded.  Frame-generated
     signals return ``None`` with a warning.
     """
-    context = prepare_signal_input(
+    signal_adapter = adapt_signal(
         rx_symbols, function_name="evm()", field="resolved_symbols"
     )
-    if context.signal is not None:
-        sig = context.signal
+    if signal_adapter.signal is not None:
+        sig = signal_adapter.signal
         if sig.signal_type is not None:
             logger.warning(
                 "evm() called on a frame-generated signal. Extract the payload "
@@ -166,9 +166,9 @@ def evm(
                 "No resolved symbols available. Call resolve_symbols(sig) first."
             )
         if mode == "blind":
-            modulation = context.optional("mod_scheme", modulation)
-            order = context.optional("mod_order", order)
-            pmf = context.optional("ps_pmf", pmf)
+            modulation = signal_adapter.resolve_optional("mod_scheme", modulation)
+            order = signal_adapter.resolve_optional("mod_order", order)
+            pmf = signal_adapter.resolve_optional("ps_pmf", pmf)
         else:
             ref = tx_symbols if tx_symbols is not None else sig.source_symbols
             if ref is None:
@@ -177,7 +177,7 @@ def evm(
                     "source_symbols is set on the Signal."
                 )
             tx_symbols = ref
-        rx_symbols = context.array
+        rx_symbols = signal_adapter.array
 
     from . import helpers
 
@@ -311,11 +311,11 @@ def snr(
     reference falls back to ``source_symbols``, and ``num_train_symbols`` leading
     symbols are discarded.  Frame-generated signals return ``None``.
     """
-    context = prepare_signal_input(
+    signal_adapter = adapt_signal(
         rx_symbols, function_name="snr()", field="resolved_symbols"
     )
-    if context.signal is not None:
-        sig = context.signal
+    if signal_adapter.signal is not None:
+        sig = signal_adapter.signal
         if sig.signal_type is not None:
             logger.warning(
                 "snr() called on a frame-generated signal. Extract the payload "
@@ -332,7 +332,7 @@ def snr(
             raise ValueError(
                 "No resolved symbols available. Call resolve_symbols(sig) first."
             )
-        rx_symbols = context.array
+        rx_symbols = signal_adapter.array
         tx_symbols = ref
 
     from . import helpers
@@ -438,11 +438,9 @@ def ber(
     *symbols*, converted to bits via ``bits_per_symbol``) leading bits are
     discarded.  Frame-generated signals return ``None``.
     """
-    context = prepare_signal_input(
-        bits_rx, function_name="ber()", field="resolved_bits"
-    )
-    if context.signal is not None:
-        sig = context.signal
+    signal_adapter = adapt_signal(bits_rx, function_name="ber()", field="resolved_bits")
+    if signal_adapter.signal is not None:
+        sig = signal_adapter.signal
         if sig.signal_type is not None:
             logger.warning(
                 "ber() called on a frame-generated signal. Extract the payload "
@@ -459,7 +457,7 @@ def ber(
             raise ValueError(
                 "No resolved bits available. Call demap_symbols_hard(sig) first."
             )
-        y = context.array
+        y = signal_adapter.array
         assert y is not None
         r = ref
         trim = num_train_symbols or 0
@@ -556,11 +554,11 @@ def ser(
     fall back to the signal's metadata, and ``num_train_symbols`` leading
     symbols are discarded.  Frame-generated signals return ``None``.
     """
-    context = prepare_signal_input(
+    signal_adapter = adapt_signal(
         rx_symbols, function_name="ser()", field="resolved_symbols"
     )
-    if context.signal is not None:
-        sig = context.signal
+    if signal_adapter.signal is not None:
+        sig = signal_adapter.signal
         if sig.signal_type is not None:
             logger.warning(
                 "ser() called on a frame-generated signal. Extract the payload "
@@ -577,18 +575,18 @@ def ser(
             raise ValueError(
                 "No resolved symbols available. Call resolve_symbols(sig) first."
             )
-        mod = context.optional("mod_scheme", modulation)
-        ord_ = context.optional("mod_order", order)
+        mod = signal_adapter.resolve_optional("mod_scheme", modulation)
+        ord_ = signal_adapter.resolve_optional("mod_order", order)
         if mod is None or ord_ is None:
             raise ValueError(
                 "SER requires modulation and order. Pass them explicitly or ensure "
                 "mod_scheme/mod_order are set on the Signal."
             )
-        rx_symbols = context.array
+        rx_symbols = signal_adapter.array
         tx_symbols = ref
         modulation = mod
         order = ord_
-        pmf = context.optional("ps_pmf", pmf)
+        pmf = signal_adapter.resolve_optional("ps_pmf", pmf)
 
     if modulation is None or order is None:
         raise ValueError("ser() requires modulation and order for array input.")
@@ -710,11 +708,9 @@ def gmi(
     :func:`_ps_unit_power_rescale`) via ``compute_llr`` with ``noise_var``/
     ``method``/``pmf``, and GMI is evaluated against ``source_bits``.
     """
-    context = prepare_signal_input(
-        llrs, function_name="gmi()", field="resolved_symbols"
-    )
-    if context.signal is not None:
-        sig = context.signal
+    signal_adapter = adapt_signal(llrs, function_name="gmi()", field="resolved_symbols")
+    if signal_adapter.signal is not None:
+        sig = signal_adapter.signal
         if sig.resolved_symbols is None:
             raise ValueError(
                 "No resolved symbols available. Call resolve_symbols(sig) first."
@@ -724,8 +720,8 @@ def gmi(
                 "GMI requires source_bits. Ensure the Signal was created via a "
                 "factory (e.g. generate_qam(), generate_psqam())."
             )
-        mod = context.optional("mod_scheme", modulation)
-        ord_ = context.optional("mod_order", order)
+        mod = signal_adapter.resolve_optional("mod_scheme", modulation)
+        ord_ = signal_adapter.resolve_optional("mod_order", order)
         if mod is None or ord_ is None:
             raise ValueError(
                 "GMI requires modulation and order. Ensure mod_scheme/mod_order "
@@ -736,8 +732,8 @@ def gmi(
 
         from .mapping import compute_llr
 
-        eff_pmf = context.optional("ps_pmf", pmf)
-        rx, xp_, _ = dispatch(context.array)
+        eff_pmf = signal_adapter.resolve_optional("ps_pmf", pmf)
+        rx, xp_, _ = dispatch(signal_adapter.array)
         resolved, adj_noise_var = _ps_unit_power_rescale(
             rx, xp_, mod, ord_, eff_pmf, noise_var
         )
@@ -870,17 +866,17 @@ def mi(
     >>> mi_value = mi(rx_symbols, "qam", 64, noise_var=0.05)
     >>> mi_value = mi(sig, noise_var=0.05)              # Signal input
     """
-    context = prepare_signal_input(
+    signal_adapter = adapt_signal(
         symbols_rx, function_name="mi()", field="resolved_symbols"
     )
-    if context.signal is not None:
-        sig = context.signal
+    if signal_adapter.signal is not None:
+        sig = signal_adapter.signal
         if sig.resolved_symbols is None:
             raise ValueError(
                 "No resolved symbols available. Call resolve_symbols(sig) first."
             )
-        mod = context.optional("mod_scheme", modulation)
-        ord_ = context.optional("mod_order", order)
+        mod = signal_adapter.resolve_optional("mod_scheme", modulation)
+        ord_ = signal_adapter.resolve_optional("mod_order", order)
         if mod is None or ord_ is None:
             raise ValueError(
                 "MI requires modulation and order. Ensure mod_scheme/mod_order "
@@ -888,10 +884,10 @@ def mi(
             )
         if noise_var is None:
             raise ValueError("mi() requires noise_var.")
-        symbols_rx = context.array
+        symbols_rx = signal_adapter.array
         modulation = mod
         order = ord_
-        pmf = context.optional("ps_pmf", pmf)
+        pmf = signal_adapter.resolve_optional("ps_pmf", pmf)
         rescale_unit_power = True
 
     if modulation is None or order is None:

@@ -5,7 +5,7 @@ from __future__ import annotations
 import numpy as np
 
 from ..backend import ArrayType, dispatch, to_device
-from ..core._signal_adapter import prepare_signal_input, require_integer_sps
+from ..core._signal_adapter import adapt_signal, require_integer_sps
 from ..core.signal import Signal
 from ..filtering import _ols_backward, _ols_forward
 from ..helpers import as_2d, restore_1d
@@ -51,8 +51,8 @@ def zf_equalizer(
     array_like or Signal
         Equalized samples. Same shape and backend as input.
     """
-    context = prepare_signal_input(samples, function_name="zf_equalizer()")
-    samples = context.array
+    signal_adapter = adapt_signal(samples, function_name="zf_equalizer()")
+    samples = signal_adapter.array
 
     logger.info("ZF/MMSE equalizer: noise_variance=%.2e", noise_variance)
     samples, xp, _ = dispatch(samples)
@@ -133,7 +133,7 @@ def zf_equalizer(
             show=True,
         )
 
-    return context.return_value(restore_1d(was_1d, out))
+    return signal_adapter.wrap_samples(restore_1d(was_1d, out))
 
 
 def apply_taps(
@@ -207,12 +207,12 @@ def apply_taps(
         y = equalization.apply_taps(new_signal, result.weights,
                                     input_norm_factor=result.input_norm_factor)
     """
-    context = prepare_signal_input(samples, function_name="apply_taps()")
-    samples = context.array
+    signal_adapter = adapt_signal(samples, function_name="apply_taps()")
+    samples = signal_adapter.array
     metadata = {}
-    if context.signal is not None:
-        sps = context.required("sps", sps)
-        metadata["sampling_rate"] = context.signal.symbol_rate
+    if signal_adapter.signal is not None:
+        sps = signal_adapter.resolve_required("sps", sps)
+        metadata["sampling_rate"] = signal_adapter.signal.symbol_rate
 
     if sps is None:
         sps = 2
@@ -271,7 +271,7 @@ def apply_taps(
     # y[i, n] = Σ_j Σ_t conj(W[i,j,t]) * windows[j, n, t]
     y = xp.einsum("ijt,jnt->in", xp.conj(weights), windows)  # (C, N_sym)
 
-    return context.return_value(restore_1d(was_1d, y), **metadata)
+    return signal_adapter.wrap_samples(restore_1d(was_1d, y), **metadata)
 
 
 # -----------------------------------------------------------------------------
@@ -331,10 +331,10 @@ def estimate_transfer_function(
     array_like
         Frequency response or impulse response (see ``num_taps``).
     """
-    reference = prepare_signal_input(
+    reference = adapt_signal(
         reference, function_name="estimate_transfer_function(reference)"
     ).array
-    received = prepare_signal_input(
+    received = adapt_signal(
         received, function_name="estimate_transfer_function(received)"
     ).array
     x, xp, _ = dispatch(reference)

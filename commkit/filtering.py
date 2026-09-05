@@ -11,7 +11,7 @@ import numpy as np
 import scipy
 
 from .backend import ArrayType, dispatch, to_device
-from .core._signal_adapter import prepare_signal_input, require_integer_sps
+from .core._signal_adapter import adapt_signal, require_integer_sps
 from .core.signal import Signal
 from .helpers import (
     _cd_beta2_length,
@@ -812,8 +812,8 @@ def ols_fir_filter(
     before OLS processing and trims the same number of leading output
     samples - a zero-copy shift that costs one extra OLS block at most.
     """
-    context = prepare_signal_input(samples, function_name="ols_fir_filter()")
-    samples = context.array
+    signal_adapter = adapt_signal(samples, function_name="ols_fir_filter()")
+    samples = signal_adapter.array
 
     samples, xp, _ = dispatch(samples)
     taps = xp.asarray(taps)
@@ -869,7 +869,7 @@ def ols_fir_filter(
         out = out.astype(
             out_dtype
         )  # guard complex inputs (e.g. complex64 -> complex128)
-    return context.return_value(restore_1d(was_1d, out))
+    return signal_adapter.wrap_samples(restore_1d(was_1d, out))
 
 
 def shaping_filter_taps(sig: Signal) -> ArrayType:
@@ -954,9 +954,9 @@ def fir_filter(
     array_like or Signal
         Filtered samples with the same shape as `samples` (mode='same').
     """
-    context = prepare_signal_input(samples, function_name="fir_filter()")
-    samples = context.array
-    if context.signal is not None:
+    signal_adapter = adapt_signal(samples, function_name="fir_filter()")
+    samples = signal_adapter.array
+    if signal_adapter.signal is not None:
         axis = -1
 
     logger.debug(
@@ -991,7 +991,7 @@ def fir_filter(
     # Belt-and-suspenders: scipy may still promote internally (version-dependent)
     if result.dtype != samples.dtype:
         result = result.astype(samples.dtype)
-    return context.return_value(result)
+    return signal_adapter.wrap_samples(result)
 
 
 def matched_filter(
@@ -1027,10 +1027,10 @@ def matched_filter(
     array_like or Signal
         Matched filtered samples. Shape: (..., N_samples).
     """
-    context = prepare_signal_input(samples, function_name="matched_filter()")
-    samples = context.array
-    if context.signal is not None:
-        sig = context.signal
+    signal_adapter = adapt_signal(samples, function_name="matched_filter()")
+    samples = signal_adapter.array
+    if signal_adapter.signal is not None:
+        sig = signal_adapter.signal
         taps = pulse_taps
         if taps is None:
             try:
@@ -1062,7 +1062,7 @@ def matched_filter(
             "Use 'unity_gain' or 'unit_energy'."
         )
 
-    return context.return_value(fir_filter(samples, matched_taps, axis=axis))
+    return signal_adapter.wrap_samples(fir_filter(samples, matched_taps, axis=axis))
 
 
 def iir_filter(
@@ -1111,8 +1111,8 @@ def iir_filter(
     single precision is not numerically safe (see ``CLAUDE.md``, "Phase
     Unwrapping & Kalman Smoothers").
     """
-    context = prepare_signal_input(samples, function_name="iir_filter()")
-    samples = context.array
+    signal_adapter = adapt_signal(samples, function_name="iir_filter()")
+    samples = signal_adapter.array
 
     samples, xp, sp = dispatch(samples)
     sos = xp.asarray(sos)
@@ -1131,7 +1131,7 @@ def iir_filter(
         result = sp.signal.sosfiltfilt(sos, x_work, axis=axis)
     else:
         result = sp.signal.sosfilt(sos, x_work, axis=axis)
-    return context.return_value(result.astype(in_dtype, copy=False))
+    return signal_adapter.wrap_samples(result.astype(in_dtype, copy=False))
 
 
 # -----------------------------------------------------------------------------
@@ -1194,11 +1194,11 @@ def compensate_chromatic_dispersion(
     ...     received, dispersion_ps_nm_km=17.0, fiber_length_km=80.0,
     ...     center_wavelength_nm=1550.0, sampling_rate=fs)
     """
-    context = prepare_signal_input(
+    signal_adapter = adapt_signal(
         samples, function_name="compensate_chromatic_dispersion()"
     )
-    samples = context.array
-    sampling_rate = context.required("sampling_rate", sampling_rate)
+    samples = signal_adapter.array
+    sampling_rate = signal_adapter.resolve_required("sampling_rate", sampling_rate)
     if (
         dispersion_ps_nm_km is None
         or fiber_length_km is None
@@ -1234,4 +1234,4 @@ def compensate_chromatic_dispersion(
     if result.dtype != samples.dtype:
         result = result.astype(samples.dtype)
 
-    return context.return_value(restore_1d(was_1d, result))
+    return signal_adapter.wrap_samples(restore_1d(was_1d, result))

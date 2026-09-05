@@ -10,7 +10,7 @@ from typing import Any
 import numpy as np
 
 from ..backend import ArrayType, _get_jax, dispatch, is_jax_array, to_jax
-from ..core._signal_adapter import prepare_signal_input
+from ..core._signal_adapter import adapt_signal
 from ..core.signal import Signal
 from ..logger import logger
 from .gray import gray_constellation, unpack_bits
@@ -152,18 +152,18 @@ def compute_llr(
     ``resolve_symbols`` the receiver renormalises;
     use ``gmi`` instead for correct scale.
     """
-    context = prepare_signal_input(
+    signal_adapter = adapt_signal(
         symbols, function_name="compute_llr()", field="resolved_symbols"
     )
-    symbols = context.array
-    if context.signal is not None:
+    symbols = signal_adapter.array
+    if signal_adapter.signal is not None:
         if symbols is None:
             raise ValueError(
                 "No resolved symbols available. Call resolve_symbols(sig) first."
             )
-        modulation = context.optional("mod_scheme", modulation)
-        order = context.optional("mod_order", order)
-        pmf = context.optional("ps_pmf", pmf)
+        modulation = signal_adapter.resolve_optional("mod_scheme", modulation)
+        order = signal_adapter.resolve_optional("mod_order", order)
+        pmf = signal_adapter.resolve_optional("ps_pmf", pmf)
 
     if modulation is None or order is None:
         raise ValueError("compute_llr() requires modulation and order for array input.")

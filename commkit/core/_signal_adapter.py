@@ -7,7 +7,7 @@ implementations should receive arrays and fully resolved scalar metadata.
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import TYPE_CHECKING, Any, Literal, overload
+from typing import TYPE_CHECKING, Any, Literal
 
 import numpy as np
 
@@ -19,14 +19,20 @@ if TYPE_CHECKING:
 
 
 @dataclass(frozen=True)
-class SignalInput:
-    """An unwrapped input together with its optional container context."""
+class SignalAdapter:
+    """Unwrapped array data and the original Signal, if the caller supplied one.
+
+    Use ``signal_adapter = adapt_signal(...)`` at DSP boundaries. Resolve
+    metadata through this object, process ``signal_adapter.array``, then wrap
+    waveform results with ``signal_adapter.wrap_samples(...)``. Estimates and
+    plots return their own result types without wrapping.
+    """
 
     array: ArrayType | None
     signal: Signal | None
     function_name: str
 
-    def required(self, field: str, supplied: Any = None) -> Any:
+    def resolve_required(self, field: str, supplied: Any = None) -> Any:
         """Resolve required metadata, with Signal metadata taking precedence."""
         if self.signal is None:
             if supplied is None:
@@ -50,7 +56,7 @@ class SignalInput:
             )
         return value
 
-    def optional(self, field: str, supplied: Any = None) -> Any:
+    def resolve_optional(self, field: str, supplied: Any = None) -> Any:
         """Resolve optional metadata, falling back only when Signal lacks it."""
         if self.signal is None:
             return supplied
@@ -67,30 +73,38 @@ class SignalInput:
             )
         return supplied
 
-    @overload
-    def return_value(self, array: ArrayType, /, **metadata: Any) -> ArrayType: ...
+    def wrap_samples[SamplesT](
+        self, samples: SamplesT, /, **metadata: Any
+    ) -> SamplesT | Signal:
+        """Return samples directly for array input, or a new Signal for Signal input.
 
-    @overload
-    def return_value(self, array: None, /, **metadata: Any) -> None: ...
+        A new Signal shares unchanged metadata and provenance with the input,
+        applies validated metadata overrides, and invalidates resolved symbols
+        and bits. The input Signal is not modified. Replacement sample buffers
+        are not unconditionally copied; see ``Signal.replace_samples()``.
 
-    def return_value(
-        self, array: ArrayType | None, /, **metadata: Any
-    ) -> ArrayType | Signal | None:
-        """Rewrap a transformed sample array when the input was a Signal."""
+        For array input, samples (including None) pass through unchanged and
+        metadata overrides are unused. None is invalid for Signal output.
+        """
         if self.signal is None:
-            return array
-        if array is None:
+            return samples
+        if samples is None:
             raise ValueError(f"{self.function_name}: input Signal field is empty.")
-        return self.signal.replace_samples(array, **metadata)
+        return self.signal.replace_samples(samples, **metadata)
 
-    def replace_field(
+    def replace_signal_field(
         self,
         field: Literal["resolved_symbols", "resolved_bits"],
         value: ArrayType,
     ) -> Signal:
-        """Return a Signal with an explicitly replaced derived-data field."""
+        """Return a new Signal with resolved symbols or bits replaced.
+
+        Requires Signal input and leaves its waveform unchanged. Replacing
+        resolved symbols invalidates resolved bits; replacing bits preserves
+        resolved symbols. The original Signal is not modified.
+        """
         if self.signal is None:
-            raise TypeError("replace_field() requires Signal input.")
+            raise TypeError("replace_signal_field() requires Signal input.")
         result = self.signal._shallow_clone()
         setattr(result, field, value)
         if field == "resolved_symbols":
@@ -98,18 +112,18 @@ class SignalInput:
         return result
 
 
-def prepare_signal_input(
+def adapt_signal(
     value: ArrayType | Signal,
     *,
     function_name: str,
     field: str = "samples",
-) -> SignalInput:
+) -> SignalAdapter:
     """Unwrap an array/Signal input once at the public API boundary."""
     from .signal import Signal
 
     if isinstance(value, Signal):
-        return SignalInput(getattr(value, field), value, function_name)
-    return SignalInput(value, None, function_name)
+        return SignalAdapter(getattr(value, field), value, function_name)
+    return SignalAdapter(value, None, function_name)
 
 
 def require_integer_sps(value: float, function_name: str) -> int:

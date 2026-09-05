@@ -62,7 +62,7 @@ from typing import Any
 
 from . import helpers
 from .backend import ArrayType, dispatch
-from .core._signal_adapter import prepare_signal_input, require_integer_sps
+from .core._signal_adapter import adapt_signal, require_integer_sps
 from .core.signal import Signal
 from .logger import logger
 
@@ -107,14 +107,14 @@ def decimate_to_symbol_rate(
     array_like or Signal
         Symbols at 1 sps. Shape: (..., N_samples / sps).
     """
-    context = prepare_signal_input(samples, function_name="decimate_to_symbol_rate()")
-    samples = context.array
+    signal_adapter = adapt_signal(samples, function_name="decimate_to_symbol_rate()")
+    samples = signal_adapter.array
     sps_int = require_integer_sps(
-        context.required("sps", sps), "decimate_to_symbol_rate()"
+        signal_adapter.resolve_required("sps", sps), "decimate_to_symbol_rate()"
     )
     meta: dict[str, Any] = {}
-    if context.signal is not None:
-        sig = context.signal
+    if signal_adapter.signal is not None:
+        sig = signal_adapter.signal
         do_norm = True if normalize is None else normalize
         if sps_int <= 1:
             logger.info("Signal already at 1 sps, no downsampling needed.")
@@ -124,7 +124,7 @@ def decimate_to_symbol_rate(
             meta["sampling_rate"] = sig.symbol_rate
         if do_norm:
             result = helpers.normalize(result, "average_power", axis=-1)
-        return context.return_value(result, **meta)
+        return signal_adapter.wrap_samples(result, **meta)
 
     return _decimate_to_symbol_rate_array(samples, sps_int, offset, normalize, axis)
 
@@ -181,20 +181,20 @@ def upsample(
     array_like or Signal
         The upsampled signal. Shape: (..., N_samples * factor).
     """
-    context = prepare_signal_input(samples, function_name="upsample()")
-    samples = context.array
+    signal_adapter = adapt_signal(samples, function_name="upsample()")
+    samples = signal_adapter.array
     metadata: dict[str, Any] = {}
-    if context.signal is not None:
+    if signal_adapter.signal is not None:
         correct_power = True if correct_power is None else correct_power
         axis = -1
-        metadata["sampling_rate"] = context.signal.sampling_rate * factor
+        metadata["sampling_rate"] = signal_adapter.signal.sampling_rate * factor
 
     logger.debug("Upsampling by factor %s (polyphase, axis=%s).", factor, axis)
     arr, xp, sp = dispatch(samples)
     out = sp.signal.resample_poly(arr, factor, 1, axis=axis)
     if correct_power:
         out = out * (factor**-0.5)
-    return context.return_value(out, **metadata)
+    return signal_adapter.wrap_samples(out, **metadata)
 
 
 def decimate(
@@ -244,13 +244,13 @@ def decimate(
     anti-aliasing; adding an extra decimation filter will degrade the
     signal. Use `decimate_to_symbol_rate` instead.
     """
-    context = prepare_signal_input(samples, function_name="decimate()")
-    samples = context.array
+    signal_adapter = adapt_signal(samples, function_name="decimate()")
+    samples = signal_adapter.array
     metadata: dict[str, Any] = {}
-    if context.signal is not None:
+    if signal_adapter.signal is not None:
         correct_power = True if correct_power is None else correct_power
         axis = -1
-        metadata["sampling_rate"] = context.signal.sampling_rate / factor
+        metadata["sampling_rate"] = signal_adapter.signal.sampling_rate / factor
 
     logger.debug("Decimating by factor %s (method: %s).", factor, method)
     arr, _, sp = dispatch(samples)
@@ -270,7 +270,7 @@ def decimate(
 
     if correct_power:
         out = out * (factor**0.5)
-    return context.return_value(out, **metadata)
+    return signal_adapter.wrap_samples(out, **metadata)
 
 
 def resample(
@@ -321,11 +321,11 @@ def resample(
     ValueError
         If parameters are insufficient or contradictory.
     """
-    context = prepare_signal_input(samples, function_name="resample()")
-    samples = context.array
+    signal_adapter = adapt_signal(samples, function_name="resample()")
+    samples = signal_adapter.array
     metadata: dict[str, Any] = {}
-    if context.signal is not None:
-        sig = context.signal
+    if signal_adapter.signal is not None:
+        sig = signal_adapter.signal
         # When sps_out is given, the input sps comes from the signal itself.
         sps_in = sig.sps if sps_out is not None else None
         correct_power = True if correct_power is None else correct_power
@@ -355,7 +355,7 @@ def resample(
     if correct_power:
         # sps_after / sps_before = up / down  ->  gain = sqrt(down/up).
         out = out * (down / up) ** 0.5
-    return context.return_value(out, **metadata)
+    return signal_adapter.wrap_samples(out, **metadata)
 
 
 def resolve_symbols(
@@ -396,10 +396,10 @@ def resolve_symbols(
         If ``sps`` is missing/invalid (array), or the signal's ``sps`` is not a
         positive integer.
     """
-    context = prepare_signal_input(samples, function_name="resolve_symbols()")
-    samples = context.array
-    if context.signal is not None:
-        sig = context.signal
+    signal_adapter = adapt_signal(samples, function_name="resolve_symbols()")
+    samples = signal_adapter.array
+    if signal_adapter.signal is not None:
+        sig = signal_adapter.signal
         if sig.signal_type is not None:
             logger.warning(
                 "resolve_symbols() called on a frame-generated signal - skipping. "
@@ -409,11 +409,13 @@ def resolve_symbols(
                 "resolve_symbols() on that."
             )
             return sig._shallow_clone()
-        s = require_integer_sps(context.required("sps", sps), "resolve_symbols()")
+        s = require_integer_sps(
+            signal_adapter.resolve_required("sps", sps), "resolve_symbols()"
+        )
         # Output field (resolved_symbols) differs from the input field
         # (samples), so replace the derived field explicitly.
         resolved = _decimate_to_symbol_rate_array(samples, s, offset, True, -1)
-        return context.replace_field("resolved_symbols", resolved)
+        return signal_adapter.replace_signal_field("resolved_symbols", resolved)
 
     if sps is None:
         raise ValueError("resolve_symbols() requires sps for array input.")

@@ -51,7 +51,7 @@ Estimators (see ``linewidth_dsh``):
 import numpy as np
 
 from ..backend import ArrayType, dispatch, to_device
-from ..core._signal_adapter import prepare_signal_input
+from ..core._signal_adapter import adapt_signal
 from ..core.signal import Signal
 from ..frequency import correct_static_frequency_offset
 from ..helpers import (
@@ -235,9 +235,9 @@ def dsh_phase(
       the delay arm, AOM RF-synthesizer phase noise - is indistinguishable
       from laser phase noise here and adds to the low-frequency PSD.
     """
-    context = prepare_signal_input(samples, function_name="dsh_phase()")
-    samples = context.array
-    sampling_rate = context.required("sampling_rate", sampling_rate)
+    signal_adapter = adapt_signal(samples, function_name="dsh_phase()")
+    samples = signal_adapter.array
+    sampling_rate = signal_adapter.resolve_required("sampling_rate", sampling_rate)
 
     z, xp, _ = dispatch(samples)
     fs = float(sampling_rate)
@@ -631,9 +631,9 @@ def linewidth_dsh(
       plotted log-binned median curve is *not* corrected, so at small
       ``K`` the ``Δν/π`` floor guide sits visibly above it.
     """
-    context = prepare_signal_input(samples, function_name="linewidth_dsh()")
-    samples = context.array
-    sampling_rate = context.required("sampling_rate", sampling_rate)
+    signal_adapter = adapt_signal(samples, function_name="linewidth_dsh()")
+    samples = signal_adapter.array
+    sampling_rate = signal_adapter.resolve_required("sampling_rate", sampling_rate)
     if delay is None:
         raise ValueError("linewidth_dsh() requires delay.")
 

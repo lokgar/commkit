@@ -7,7 +7,7 @@ from typing import Any
 import numpy as np
 
 from ...backend import ArrayType, _get_jax, dispatch, from_jax, to_device, to_jax
-from ...core._signal_adapter import prepare_signal_input, require_integer_sps
+from ...core._signal_adapter import adapt_signal, require_integer_sps
 from ...core.signal import Signal
 from ...helpers import (
     resolve_pll_gains,
@@ -465,11 +465,11 @@ def lms(
     independent signals externally.  For CPU-optimal throughput use
     ``backend='numba'`` (the default).
     """
-    context = prepare_signal_input(samples, function_name="lms()")
-    samples = context.array
-    sig = context.signal
+    signal_adapter = adapt_signal(samples, function_name="lms()")
+    samples = signal_adapter.array
+    sig = signal_adapter.signal
     if sig is not None:
-        sps = require_integer_sps(context.required("sps", sps), "lms()")
+        sps = require_integer_sps(signal_adapter.resolve_required("sps", sps), "lms()")
 
     def finish(result: EqualizerResult) -> EqualizerResult:
         return _attach_equalized_signal(result, sig)
@@ -1334,11 +1334,11 @@ def rls(
     ``w_init`` warms-start the tap weights; the inverse correlation matrix ``P``
     always begins at ``(1/delta) · I`` regardless of ``w_init``.
     """
-    context = prepare_signal_input(samples, function_name="rls()")
-    samples = context.array
-    sig = context.signal
+    signal_adapter = adapt_signal(samples, function_name="rls()")
+    samples = signal_adapter.array
+    sig = signal_adapter.signal
     if sig is not None:
-        sps = require_integer_sps(context.required("sps", sps), "rls()")
+        sps = require_integer_sps(signal_adapter.resolve_required("sps", sps), "rls()")
 
     if sps is None:
         sps = 1

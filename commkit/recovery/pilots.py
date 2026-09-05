@@ -6,7 +6,7 @@ from collections.abc import Sequence
 import numpy as np
 
 from ..backend import ArrayType, dispatch, to_device
-from ..core._signal_adapter import prepare_signal_input
+from ..core._signal_adapter import adapt_signal
 from ..core.signal import Signal
 from ..helpers import (
     as_2d,
@@ -86,10 +86,10 @@ def recover_carrier_phase_pilot_symbols(
     interpolation constant-holds at the boundaries; cubic uses natural spline
     with constant-hold extrapolation.  Single-carrier only.
     """
-    context = prepare_signal_input(
+    signal_adapter = adapt_signal(
         symbols, function_name="recover_carrier_phase_pilot_symbols()"
     )
-    symbols = context.array
+    symbols = signal_adapter.array
 
     symbols, xp, _ = dispatch(symbols)
     symbols, was_1d = as_2d(symbols, name="symbols")
@@ -464,11 +464,11 @@ def recover_carrier_phase_pilot_tone(
     Upper bound: B below the guard between the tone and the signal band edge.
     Place the tone at |f_p| > (1+beta)*R_s/2 + B and keep |f_p| + B < f_s/2.
     """
-    context = prepare_signal_input(
+    signal_adapter = adapt_signal(
         samples, function_name="recover_carrier_phase_pilot_tone()"
     )
-    samples = context.array
-    sampling_rate = context.required("sampling_rate", sampling_rate)
+    samples = signal_adapter.array
+    sampling_rate = signal_adapter.resolve_required("sampling_rate", sampling_rate)
     if tone_frequency is None:
         raise ValueError("recover_carrier_phase_pilot_tone() requires tone_frequency.")
     if bandwidth is None:
@@ -649,11 +649,11 @@ def recover_carrier_phase_pilot_tones(
         ``correct_carrier_phase``.  If ``return_diagnostics``, returns
         ``(phi, diagnostics)``.
     """
-    context = prepare_signal_input(
+    signal_adapter = adapt_signal(
         samples, function_name="recover_carrier_phase_pilot_tones()"
     )
-    samples = context.array
-    sampling_rate = context.required("sampling_rate", sampling_rate)
+    samples = signal_adapter.array
+    sampling_rate = signal_adapter.resolve_required("sampling_rate", sampling_rate)
     if bandwidth is None:
         raise ValueError("recover_carrier_phase_pilot_tones() requires bandwidth.")
     if bandwidth <= 0.0:

@@ -1,7 +1,7 @@
 """Additive measurement noise (ASE / thermal) impairments."""
 
 from ..backend import ArrayType, dispatch
-from ..core._signal_adapter import prepare_signal_input
+from ..core._signal_adapter import adapt_signal
 from ..core.signal import Signal
 from ..helpers import db_to_linear
 from ..logger import logger
@@ -61,9 +61,9 @@ def apply_awgn(
     >>> noisy = apply_awgn(sig.samples, esn0_db=20, sps=sig.sps)
     >>> noisy = apply_awgn(sig, esn0_db=20)  # Signal input: sps taken from sig
     """
-    context = prepare_signal_input(samples, function_name="apply_awgn()")
-    samples = context.array
-    sps = context.required("sps", sps)
+    signal_adapter = adapt_signal(samples, function_name="apply_awgn()")
+    samples = signal_adapter.array
+    sps = signal_adapter.resolve_required("sps", sps)
     if esn0_db is None:
         raise ValueError("apply_awgn() requires esn0_db.")
 
@@ -114,4 +114,4 @@ def apply_awgn(
 
     noisy_samples = samples + noise
 
-    return context.return_value(noisy_samples)
+    return signal_adapter.wrap_samples(noisy_samples)

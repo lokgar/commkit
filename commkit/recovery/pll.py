@@ -3,7 +3,7 @@
 import numpy as np
 
 from ..backend import ArrayType, dispatch, to_device
-from ..core._signal_adapter import prepare_signal_input
+from ..core._signal_adapter import adapt_signal
 from ..core.signal import Signal
 from ..helpers import as_2d, restore_1d
 from .corrections import _log_phase_summary, correct_cycle_slips
@@ -338,10 +338,10 @@ def recover_carrier_phase_pll(
     from ..helpers import normalize, resolve_pll_gains
     from ..mapping import gray_constellation
 
-    context = prepare_signal_input(symbols, function_name="recover_carrier_phase_pll()")
-    symbols = context.array
-    modulation = context.optional("mod_scheme", modulation)
-    order = context.optional("mod_order", order)
+    signal_adapter = adapt_signal(symbols, function_name="recover_carrier_phase_pll()")
+    symbols = signal_adapter.array
+    modulation = signal_adapter.resolve_optional("mod_scheme", modulation)
+    order = signal_adapter.resolve_optional("mod_order", order)
 
     if modulation is None or order is None:
         raise ValueError(

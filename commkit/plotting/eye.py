@@ -6,7 +6,7 @@ import matplotlib.pyplot as plt
 import numpy as np
 
 from ..backend import dispatch, to_device
-from ..core._signal_adapter import prepare_signal_input, require_integer_sps
+from ..core._signal_adapter import adapt_signal, require_integer_sps
 from ..logger import logger
 from ..smoothing import smooth_density_2d
 from .theme import _grid_figsize
@@ -238,10 +238,10 @@ def plot_eye_diagram(
     The signal should typically be synchronized (no CFO or timing offset)
     and matched-filtered before plotting to produce a clear "eye".
     """
-    context = prepare_signal_input(samples, function_name="plot_eye_diagram()")
-    samples = context.array
-    if context.signal is not None:
-        sps = context.required("sps", sps)
+    signal_adapter = adapt_signal(samples, function_name="plot_eye_diagram()")
+    samples = signal_adapter.array
+    if signal_adapter.signal is not None:
+        sps = signal_adapter.resolve_required("sps", sps)
 
     if sps is None:
         raise ValueError("plot_eye_diagram() requires sps for array input.")

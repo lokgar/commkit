@@ -8,7 +8,7 @@ from typing import Any
 import numpy as np
 
 from ...backend import ArrayType, dispatch, to_device
-from ...core._signal_adapter import prepare_signal_input, require_integer_sps
+from ...core._signal_adapter import adapt_signal, require_integer_sps
 from ...core.signal import Signal
 from ...helpers import as_2d
 from ...logger import logger
@@ -312,11 +312,13 @@ def block_lms(
     do **not** routinely divide by ``block_size`` (that under-adapts the
     filter by the same factor).
     """
-    context = prepare_signal_input(samples, function_name="block_lms()")
-    samples = context.array
-    sig = context.signal
+    signal_adapter = adapt_signal(samples, function_name="block_lms()")
+    samples = signal_adapter.array
+    sig = signal_adapter.signal
     if sig is not None:
-        sps = require_integer_sps(context.required("sps", sps), "block_lms()")
+        sps = require_integer_sps(
+            signal_adapter.resolve_required("sps", sps), "block_lms()"
+        )
 
     if sps is None:
         sps = 2
@@ -999,7 +1001,7 @@ def block_lms(
     # All loop work - eager blocks, input fills, output copies, and graph
     # capture/replay - runs on a single stream so the shared state buffers
     # (h, bps_*, cs_*) stay ordered across the eager<->replay boundary.  On the
-    # eager (CPU or graph-disabled) path this is a no-op context.
+    # eager (CPU or graph-disabled) path this is a no-op signal_adapter.
     _loop_stream_ctx: Any
     if _use_graph:
         assert _graph_stream is not None  # set together with _use_graph above

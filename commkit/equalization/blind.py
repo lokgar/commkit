@@ -7,7 +7,7 @@ from typing import Any
 import numpy as np
 
 from ..backend import ArrayType
-from ..core._signal_adapter import prepare_signal_input, require_integer_sps
+from ..core._signal_adapter import adapt_signal, require_integer_sps
 from ..core.signal import Signal
 from ..helpers import (
     broadcast_channels,
@@ -74,10 +74,12 @@ def block_cma(
     ``sps`` is ignored for :class:`Signal` input, which always uses the
     signal's own ``sps``.
     """
-    context = prepare_signal_input(samples, function_name="block_cma()")
-    samples = context.array
-    if context.signal is not None:
-        sps = require_integer_sps(context.required("sps", sps), "block_cma()")
+    signal_adapter = adapt_signal(samples, function_name="block_cma()")
+    samples = signal_adapter.array
+    if signal_adapter.signal is not None:
+        sps = require_integer_sps(
+            signal_adapter.resolve_required("sps", sps), "block_cma()"
+        )
 
     if sps is None:
         sps = 2
@@ -105,9 +107,9 @@ def block_cma(
         plot_smoothing=plot_smoothing,
         name="Block-CMA" if pilot_ref is None else "Block-CMA(PA)",
     )
-    if context.signal is not None:
-        result.y_hat = context.return_value(
-            result.y_hat, sampling_rate=context.signal.symbol_rate
+    if signal_adapter.signal is not None:
+        result.y_hat = signal_adapter.wrap_samples(
+            result.y_hat, sampling_rate=signal_adapter.signal.symbol_rate
         )
     return result
 
@@ -157,10 +159,12 @@ def block_rde(
     symbol_rate``); ``sps`` is ignored for :class:`Signal` input, which
     always uses the signal's own ``sps``.
     """
-    context = prepare_signal_input(samples, function_name="block_rde()")
-    samples = context.array
-    if context.signal is not None:
-        sps = require_integer_sps(context.required("sps", sps), "block_rde()")
+    signal_adapter = adapt_signal(samples, function_name="block_rde()")
+    samples = signal_adapter.array
+    if signal_adapter.signal is not None:
+        sps = require_integer_sps(
+            signal_adapter.resolve_required("sps", sps), "block_rde()"
+        )
 
     if sps is None:
         sps = 2
@@ -188,9 +192,9 @@ def block_rde(
         plot_smoothing=plot_smoothing,
         name="Block-RDE" if pilot_ref is None else "Block-RDE(PA)",
     )
-    if context.signal is not None:
-        result.y_hat = context.return_value(
-            result.y_hat, sampling_rate=context.signal.symbol_rate
+    if signal_adapter.signal is not None:
+        result.y_hat = signal_adapter.wrap_samples(
+            result.y_hat, sampling_rate=signal_adapter.signal.symbol_rate
         )
     return result
 

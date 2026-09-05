@@ -6,7 +6,7 @@ Allan deviation) consumes.
 """
 
 from ..backend import ArrayType, dispatch
-from ..core._signal_adapter import prepare_signal_input
+from ..core._signal_adapter import adapt_signal
 from ..core.signal import Signal
 from ..helpers import as_2d, broadcast_channels, restore_1d
 from ..recovery.corrections import resolve_channel_permutation
@@ -73,7 +73,7 @@ def carrier_phase_trajectory(
       ``linewidth_increment(method="slope")`` fits it into the intercept
       instead of requiring an explicit noise estimate.
     """
-    y_eq = prepare_signal_input(y_eq, function_name="carrier_phase_trajectory()").array
+    y_eq = adapt_signal(y_eq, function_name="carrier_phase_trajectory()").array
     y, xp, _ = dispatch(y_eq)
 
     y2, was_1d = as_2d(y, name="y_eq")

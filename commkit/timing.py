@@ -14,7 +14,7 @@ import numpy as np
 
 from .backend import ArrayType, dispatch, is_cupy_available, to_device
 from .core import Preamble, Signal
-from .core._signal_adapter import prepare_signal_input, require_integer_sps
+from .core._signal_adapter import adapt_signal, require_integer_sps
 from .helpers import (
     _parabolic_peak_offset,
     as_2d,
@@ -369,8 +369,8 @@ def fft_fractional_delay(
     Applies Y(f) = X(f) * exp(-j * 2*pi * f * delay / N) - equivalent to
     ideal sinc interpolation with perfect power preservation.
     """
-    context = prepare_signal_input(samples, function_name="fft_fractional_delay()")
-    samples = context.array
+    signal_adapter = adapt_signal(samples, function_name="fft_fractional_delay()")
+    samples = signal_adapter.array
     samples, xp, _ = dispatch(samples)
     samples, was_1d = as_2d(samples, name="samples")
 
@@ -411,7 +411,7 @@ def fft_fractional_delay(
         # Complex input: ifft may return complex128 from complex64 input
         result = result.astype(samples.dtype)
 
-    return context.return_value(restore_1d(was_1d, result))
+    return signal_adapter.wrap_samples(restore_1d(was_1d, result))
 
 
 def estimate_timing(
@@ -489,11 +489,11 @@ def estimate_timing(
     """
     from .helpers import cross_correlate_fft
 
-    context = prepare_signal_input(samples, function_name="estimate_timing()")
-    samples = context.array
-    if context.signal is not None:
-        sps = context.required("sps", sps)
-        pulse_shape = context.optional("pulse_shape", pulse_shape)
+    signal_adapter = adapt_signal(samples, function_name="estimate_timing()")
+    samples = signal_adapter.array
+    if signal_adapter.signal is not None:
+        sps = signal_adapter.resolve_required("sps", sps)
+        pulse_shape = signal_adapter.resolve_optional("pulse_shape", pulse_shape)
 
     # 1. Resolve Inputs & Metadata
     if filter_params is None:
@@ -791,8 +791,8 @@ def correct_timing(
     fractional delay is applied to the full buffer before slicing so the
     wrap-around stays at the buffer ends.
     """
-    context = prepare_signal_input(samples, function_name="correct_timing()")
-    samples = context.array
+    signal_adapter = adapt_signal(samples, function_name="correct_timing()")
+    samples = signal_adapter.array
     samples, xp, _ = dispatch(samples)
     samples, was_1d = as_2d(samples, name="samples")
 
@@ -889,4 +889,4 @@ def correct_timing(
         mode,
     )
 
-    return context.return_value(restore_1d(was_1d, samples))
+    return signal_adapter.wrap_samples(restore_1d(was_1d, samples))

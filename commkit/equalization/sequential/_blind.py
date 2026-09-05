@@ -7,7 +7,7 @@ from typing import Any
 import numpy as np
 
 from ...backend import ArrayType, _get_jax, dispatch, to_device, to_jax
-from ...core._signal_adapter import prepare_signal_input, require_integer_sps
+from ...core._signal_adapter import adapt_signal, require_integer_sps
 from ...core.signal import Signal
 from ...logger import logger
 from .._block import (
@@ -242,11 +242,11 @@ def cma(
     ``device='cpu'`` for typical SISO sequences, or ``backend='numba'`` for
     CPU-optimal throughput.
     """
-    context = prepare_signal_input(samples, function_name="cma()")
-    samples = context.array
-    sig = context.signal
+    signal_adapter = adapt_signal(samples, function_name="cma()")
+    samples = signal_adapter.array
+    sig = signal_adapter.signal
     if sig is not None:
-        sps = require_integer_sps(context.required("sps", sps), "cma()")
+        sps = require_integer_sps(signal_adapter.resolve_required("sps", sps), "cma()")
 
     def finish(result: EqualizerResult) -> EqualizerResult:
         return _attach_equalized_signal(result, sig)
@@ -736,11 +736,11 @@ def rde(
     Use ``device='cpu'`` for typical SISO sequences, or ``backend='numba'``
     for CPU-optimal throughput.
     """
-    context = prepare_signal_input(samples, function_name="rde()")
-    samples = context.array
-    sig = context.signal
+    signal_adapter = adapt_signal(samples, function_name="rde()")
+    samples = signal_adapter.array
+    sig = signal_adapter.signal
     if sig is not None:
-        sps = require_integer_sps(context.required("sps", sps), "rde()")
+        sps = require_integer_sps(signal_adapter.resolve_required("sps", sps), "rde()")
 
     def finish(result: EqualizerResult) -> EqualizerResult:
         return _attach_equalized_signal(result, sig)
