@@ -172,7 +172,7 @@ def demap_symbols_hard(
             context.array,
             mod,
             ord_,
-            unipolar=sig.mod_unipolar or False,
+            unipolar=context.optional("mod_unipolar", unipolar),
             pmf=eff_pmf,
         )
         return context.replace_field("resolved_bits", resolved_bits)

@@ -6,7 +6,7 @@ import matplotlib.pyplot as plt
 import numpy as np
 
 from ..backend import dispatch, to_device
-from ..core.signal import Signal
+from ..core._signal_adapter import prepare_signal_input
 from ..logger import logger
 from .theme import (
     _create_subplot_grid,
@@ -62,19 +62,11 @@ def plot_time_domain(
     ax : matplotlib.axes.Axes or ndarray
         The axis or array of axes used for the plot.
     """
-    if isinstance(samples, Signal):
-        sig = samples
-        return plot_time_domain(
-            sig.samples,
-            sampling_rate=sig.sampling_rate,
-            start_symbol=start_symbol,
-            num_symbols=num_symbols,
-            sps=sig.sps,
-            ax=ax,
-            title=title,
-            show=show,
-            **kwargs,
-        )
+    context = prepare_signal_input(samples, function_name="plot_time_domain()")
+    samples = context.array
+    if context.signal is not None:
+        sampling_rate = context.required("sampling_rate")
+        sps = context.required("sps", sps)
 
     logger.debug("Generating time-domain plot.")
 

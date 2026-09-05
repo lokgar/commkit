@@ -368,7 +368,7 @@ def test_time_domain_auto_scale(backend_device, xp):
 
 def test_eye_diagram_sps_error(backend_device, xp):
     """Verify error for non-integer sps."""
-    with pytest.raises(ValueError, match="sps must be an integer"):
+    with pytest.raises(ValueError, match="sps to be a positive integer"):
         plot_eye_diagram(xp.ones(10), sps=2.5)
         plt.close("all")
 
@@ -922,3 +922,48 @@ def test_signal_spectrogram_convenience(backend_device, xp):
     assert fig is not None
     assert ax is not None
     plt.close("all")
+
+
+@pytest.mark.parametrize("channels", [1, 2])
+def test_eye_signal_preserves_window_length(backend_device, xp, channels):
+    from commkit.core import Signal
+
+    samples = xp.sin(xp.arange(100) * 0.4)
+    if channels == 2:
+        samples = xp.stack([samples, samples])
+    sig = Signal(samples=samples, sampling_rate=4e6, symbol_rate=1e6)
+    fig, axes = plot_eye_diagram(sig, num_symbols=3, type="line", show=False)
+    try:
+        for ax in np.asarray(axes).flat:
+            assert ax.lines
+            assert len(ax.lines[0].get_xdata()) == 3 * 4 + 1
+    finally:
+        plt.close(fig)
+
+
+@pytest.mark.parametrize("sps", [0, -1, float("nan"), float("inf")])
+def test_eye_rejects_invalid_sps(backend_device, xp, sps):
+    with pytest.raises(ValueError, match="sps to be a positive integer"):
+        plot_eye_diagram(xp.ones(100), sps=sps)
+
+
+@pytest.mark.parametrize("channels", [1, 2])
+def test_constellation_signal_optional_metadata_fallback(backend_device, xp, channels):
+    from commkit.core import Signal
+
+    samples = xp.asarray([0.0, 1.0] * 50, dtype=xp.complex64)
+    if channels == 2:
+        samples = xp.stack([samples, samples])
+    sig = Signal(samples=samples, sampling_rate=1e6, symbol_rate=1e6)
+    fig, axes = plot_constellation(
+        sig, modulation="PAM", order=2, unipolar=True, overlay_ideal=True
+    )
+    try:
+        for ax in np.asarray(axes).flat:
+            assert len(ax.collections) == 1
+            points = ax.collections[0].get_offsets()
+            assert points.shape == (2, 2)
+            assert np.min(points[:, 0]) == 0.0
+            assert np.max(points[:, 0]) > 0.0
+    finally:
+        plt.close(fig)

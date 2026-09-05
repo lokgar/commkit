@@ -274,92 +274,71 @@ silently pull a JAX array to the host.
 Any new DSP function whose primary argument is genuinely **signal-representable
 data** (raw IQ samples, or a field a `Signal` actually carries, like
 `resolved_symbols`) should accept a `Signal` alongside a raw array, transparently:
-array in → array out, `Signal` in → `Signal` out.  Use the same idiom
-everywhere, defined once in `commkit/helpers.py`:
+Waveform transforms return arrays for array input and a new Signal for Signal
+input. Estimates, metrics, and plots retain their documented return types. Use
+`commkit/core/_signal_adapter.py` to unwrap once at the public boundary:
 
 ```python
-from commkit.helpers import unwrap_signal, rewrap_signal
+from commkit.core._signal_adapter import prepare_signal_input
 
 def fir_filter(samples, taps, axis=-1):
-    x, sig = unwrap_signal(samples)          # x: array; sig: Signal | None
-    if sig is not None:
-        return rewrap_signal(sig, fir_filter(x, taps, axis=-1))
-    ... existing array-only body, unchanged ...
+    context = prepare_signal_input(samples, function_name="fir_filter()")
+    if context.signal is not None:
+        axis = -1
+    result = _fir_filter_array(context.array, taps, axis=axis)
+    return context.return_value(result)
 ```
 
-* `unwrap_signal(x, *, field="samples")` - returns `(array, signal_or_None)`.
-  Most functions read `.samples`; a few (hard-decision demapping, phase-rotation
-  correction on `resolved_symbols`) pass `field=` to read a different attribute.
-* `rewrap_signal(sig, array, **metadata)` - `sig=None` passes `array` through
-  unchanged; otherwise delegates to `sig.replace_samples()`, which shallow-copies
-  metadata, replaces `.samples`, invalidates resolved caches, and applies any
-  `**metadata` kwargs via assignment validation (e.g.
-  `sampling_rate=sig.symbol_rate` after decimating to symbol rate).
+Keep short array processing inline where readable; extract an array-only helper
+when it enables reuse or clearer control flow. Do not recursively re-enter the
+public function to adapt Signal input. Array-channel iteration in plotting is
+separate from Signal dispatch and may remain recursive.
 
-**Metadata priority: the `Signal`'s own value always wins.** When a function
-takes both a `Signal` and a scalar metadata parameter that duplicates one of
-its fields (`sampling_rate`, `sps`, `mod_scheme`, `mod_order`, `ps_pmf`,
-...), the `Signal`'s field - never the supplied argument - is what the
-Signal-branch call actually uses. A caller passing a conflicting value on a
-`Signal` is a bug to catch, not a request to honor: silently letting the
-supplied value win would let a signal at 2 GSa/s be equalized with a stale
-`sps=2` nobody meant to apply to it.
+- `prepare_signal_input(value, function_name=..., field="samples")` returns a
+  context with `.array` and `.signal`. Use `field="resolved_symbols"` or
+  `field="resolved_bits"` when those are the actual input data.
+- `context.required(field, supplied)` resolves required metadata. For arrays it
+  rejects a missing argument; for Signals the field wins and supplied duplicates
+  produce a warning under the current policy.
+- `context.optional(field, supplied)` uses populated Signal metadata, falling back
+  to the argument only when absent (with a warning when a fallback is supplied).
+  `False` and zero are populated values, not missing values.
+- `require_integer_sps(value, function_name)` validates finite, positive, exactly
+  integral SPS before conversion. Apply it to both array and Signal entry paths
+  for integer-only algorithms. Do not impose it on fractional-SPS-capable paths,
+  such as raw-reference timing correlation or general rate conversion.
+- `context.return_value(array, **metadata)` passes array input results through;
+  for Signal input it calls `replace_samples()`, applies validated metadata
+  updates, and invalidates resolved caches.
+- `context.replace_field("resolved_symbols", array)` returns a new Signal with
+  the derived field replaced and dependent bits cleared. Replacing
+  `"resolved_bits"` retains resolved symbols.
 
-There is no shared helper for this - both cases are short enough to write
-inline in the `if sig is not None:` branch, and a generic helper covering
-both the "always wins" and "falls back with a warning" behaviors in one call
-signature ends up harder to read at the call site than the few extra lines.
+Use these shared methods instead of implementing precedence or SPS validation
+again in each domain. A proposed change to warning/conflict or floating-point
+rounding policy must update central tests and documentation separately.
 
-* **Required fields** (`sampling_rate`, `symbol_rate`, and the derived `sps`)
-  are never `None` on a `Signal` - pydantic enforces it - so the Signal
-  branch references `sig.sampling_rate`/`sig.sps` directly and drops the
-  supplied argument entirely.  There is no case where the Signal is missing
-  the field, but the caller can still pass a stale/conflicting value by
-  mistake, so warn whenever one was supplied at all:
-
-  ```python
-  x, sig = unwrap_signal(samples)
-  if sig is not None:
-      # sig.sampling_rate is required, so it always wins over a supplied
-      # sampling_rate - see CLAUDE.md, "Signal-Awareness".
-      if sampling_rate is not None:
-          logger.warning(
-              "my_dsp_function(): ignoring supplied sampling_rate=%r for "
-              "Signal input; using the signal's own sampling_rate=%r instead.",
-              sampling_rate,
-              sig.sampling_rate,
-          )
-      return my_dsp_function(x, sig.sampling_rate, ...)
-  ```
-
-* **Optional fields** (`mod_scheme`, `mod_order`, `ps_pmf`, ...) can
-  legitimately be unset on a `Signal` (e.g. an unshaped QAM signal has
-  `ps_pmf=None`). Read the Signal's field first; fall back to the supplied
-  argument - logging a `logger.warning` - only when the Signal genuinely
-  lacks it *and* a fallback was supplied. Passing neither stays silent (the
-  common case), so the log isn't spammed on every call to an unshaped signal:
-
-  ```python
-  mod = sig.mod_scheme
-  if mod is None:
-      mod = modulation
-      if mod is not None:
-          logger.warning(
-              "my_dsp_function(): Signal has no mod_scheme set; falling "
-              "back to supplied modulation=%r.", mod,
-          )
-  ```
+**Ownership:** `replace_samples()` shares provenance arrays and the attached
+frame; they are not guaranteed immutable. A supplied replacement view can also
+alias the original samples. A transform leaves its input unchanged while running,
+but a new container does not imply isolation from later mutations. Use `clone()`
+for independent data. `_shallow_clone()` is reserved for internal unchanged-data
+or skipped-operation paths. JAX waveform updates invalidate resolved caches;
+explicit device conversion preserves them because sample values are unchanged.
+Direct user assignments and in-place array mutations do not automatically track
+cache validity; avoid reusing derived caches after those mutations.
 
 **Metadata rules for functions that change rate or domain:**
 
-| Situation | What to pass `rewrap_signal` |
+| Situation | Boundary operation |
 | --- | --- |
-| Shape/rate unchanged (most `apply_*`/`correct_*`) | `rewrap_signal(sig, result)` - no metadata |
-| Decimates to one sample/symbol (equalizers) | `sampling_rate=sig.symbol_rate` |
-| Upsamples by an integer factor | `sampling_rate=sig.sampling_rate * factor` |
-| Resamples to an explicit target rate | `sampling_rate=<the target rate param>` |
-| Output field differs from the input field (`resolve_symbols`, `demap_symbols_hard`) | Skip `rewrap_signal`; `sig._shallow_clone()` + validated assignment, invalidating any dependent cache |
-| Returns a scalar/dict/tuple in a different domain (frequency/tau/PSD bins, phase or frequency *estimates*) | `unwrap_signal` only, on the input - never wrap the output |
+| Shape/rate unchanged (most `apply_*`/`correct_*`) | `context.return_value(result)` |
+| Decimates to one sample/symbol | `context.return_value(result, sampling_rate=context.signal.symbol_rate)` on the Signal path |
+| Upsamples by an integer factor | Update `sampling_rate` by the same factor |
+| Resamples to an explicit target rate | Update `sampling_rate` to the target rate |
+| Writes resolved symbols/bits | `context.replace_field(...)` |
+| Equalizer result containing an output waveform | Use `_attach_equalized_signal()` |
+| Scalar/dict/tuple estimates or plots | Unwrap input and return the documented result directly |
 
 **Not every array parameter is signal-representable.** A function that
 consumes a *derived* quantity - a phase or frequency trajectory, a

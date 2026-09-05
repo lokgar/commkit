@@ -454,8 +454,12 @@ def test_signal_jax_interop(backend_device, xp, xpt):
 
     # Update from JAX
     jax_arr = jax_arr * 2.0
-    s.update_samples_from_jax(jax_arr)
+    s.resolved_symbols = xp.ones(10)
+    s.resolved_bits = xp.ones(10, dtype=xp.uint8)
+    assert s.update_samples_from_jax(jax_arr) is s
     xpt.assert_allclose(s.samples, 2.0)
+    assert s.resolved_symbols is None
+    assert s.resolved_bits is None
 
 
 def test_signal_properties_coverage(backend_device, xp):
@@ -612,7 +616,7 @@ def test_rzpam_multi_stream(backend_device, xp):
 )
 def test_noninteger_sps_raises(backend_device, factory, kwargs):
     """Non-integer sps must raise at generation time, before any samples are produced."""
-    with pytest.raises(ValueError, match="sps must be a positive integer"):
+    with pytest.raises(ValueError, match="sps to be a positive integer"):
         factory(**kwargs)
 
 
@@ -629,14 +633,14 @@ def test_resolve_symbols_sps_errors(backend_device, xp):
     s = Signal(
         samples=xp.ones(10, dtype="complex64"), sampling_rate=1.0, symbol_rate=2.0
     )
-    with pytest.raises(ValueError, match="Symbol rate must be >= 1"):
+    with pytest.raises(ValueError, match="sps to be a positive integer"):
         s = multirate.resolve_symbols(s)
 
     # Non-integer SPS
     s2 = Signal(
         samples=xp.ones(10, dtype="complex64"), sampling_rate=3.0, symbol_rate=2.0
     )
-    with pytest.raises(ValueError, match="Symbol rate must be an integer"):
+    with pytest.raises(ValueError, match="sps to be a positive integer"):
         s2 = multirate.resolve_symbols(s2)
 
 

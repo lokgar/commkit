@@ -629,6 +629,24 @@ def test_estimate_timing_signal_derives_sps_for_preamble(backend_device, xp):
     assert abs(int(integer[0]) - 40) <= 1
 
 
+def test_estimate_timing_fractional_sps_with_raw_reference(backend_device, xp, xpt):
+    """Raw waveform correlation does not require integer samples per symbol."""
+    from commkit.core import Preamble, Signal
+
+    reference = xp.asarray(timing.barker_sequence(7))
+    samples = xp.zeros(100, dtype=xp.complex64)
+    samples[30:37] = reference
+    sig = Signal(samples=samples, sampling_rate=1.5e6, symbol_rate=1e6)
+    actual = timing.estimate_timing(sig, reference, threshold=2.0)
+    expected = timing.estimate_timing(samples, reference, threshold=2.0)
+    for result, baseline in zip(actual, expected):
+        xpt.assert_allclose(result, baseline)
+    assert int(actual[0][0]) == 30
+
+    with pytest.raises(ValueError, match="sps to be a positive integer"):
+        timing.estimate_timing(sig, Preamble(sequence_type="barker", length=7))
+
+
 def test_estimate_timing_skew_detection(backend_device, xp):
     """Verify skew warning is emitted when MIMO channels have different preamble positions."""
 

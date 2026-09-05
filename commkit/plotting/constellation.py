@@ -7,7 +7,7 @@ import numpy as np
 
 from .. import helpers
 from ..backend import dispatch, to_device
-from ..core.signal import Signal
+from ..core._signal_adapter import prepare_signal_input
 from ..logger import logger
 from ..smoothing import smooth_density_2d
 from .theme import (
@@ -238,69 +238,92 @@ def plot_constellation(
     ax : matplotlib.axes.Axes or ndarray
         The axis or array of axes used.
     """
-    if isinstance(samples, Signal):
-        sig = samples
-        result = plot_constellation(
-            sig.samples,
-            bins=bins,
-            cmap=cmap,
-            ax=ax,
-            overlay_ideal=overlay_ideal,
-            modulation=sig.mod_scheme,
-            order=sig.mod_order,
-            unipolar=sig.mod_unipolar,
-            pmf=sig.ps_pmf,
-            title=title,
-            vmin=vmin,
-            vmax=vmax,
-            show=False,
-            **kwargs,
-        )
+    context = prepare_signal_input(samples, function_name="plot_constellation()")
+    sig = context.signal
+    result = _plot_constellation_array(
+        context.array,
+        bins=bins,
+        cmap=cmap,
+        ax=ax,
+        overlay_ideal=overlay_ideal,
+        modulation=context.optional("mod_scheme", modulation),
+        order=context.optional("mod_order", order),
+        unipolar=context.optional("mod_unipolar", unipolar),
+        pmf=context.optional("ps_pmf", pmf),
+        title=title,
+        vmin=vmin,
+        vmax=vmax,
+        show=False,
+        **kwargs,
+    )
 
-        if overlay_source and sig.source_symbols is not None and result is not None:
-            _, axes = result
-            src = to_device(sig.source_symbols, "cpu")
+    if (
+        sig is not None
+        and overlay_source
+        and sig.source_symbols is not None
+        and result is not None
+    ):
+        _, axes = result
+        src = to_device(sig.source_symbols, "cpu")
 
-            # PS-QAM: source_symbols are on the {s_m} grid (avg power E_PS < 1)
-            # but received samples normalise to unit power ({s_m/sqrt(E_PS)}).
-            # Scale source symbols to match the received symbol scale.
-            if (
-                sig.ps_pmf is not None
-                and sig.mod_scheme is not None
-                and sig.mod_order is not None
-            ):
-                from ..mapping import gray_constellation as _gc_src
+        # PS-QAM: source_symbols are on the {s_m} grid (avg power E_PS < 1)
+        # but received samples normalise to unit power ({s_m/sqrt(E_PS)}).
+        # Scale source symbols to match the received symbol scale.
+        if (
+            sig.ps_pmf is not None
+            and sig.mod_scheme is not None
+            and sig.mod_order is not None
+        ):
+            from ..mapping import gray_constellation as _gc_src
 
-                _const_src = _gc_src(sig.mod_scheme, sig.mod_order)
-                _pmf_src = np.asarray(sig.ps_pmf, dtype=np.float64)
-                _e_ps = float(np.dot(_pmf_src, np.abs(_const_src) ** 2))
-                if 0 < _e_ps < 1.0 - 1e-6:
-                    src = src / np.sqrt(_e_ps)
+            _const_src = _gc_src(sig.mod_scheme, sig.mod_order)
+            _pmf_src = np.asarray(sig.ps_pmf, dtype=np.float64)
+            _e_ps = float(np.dot(_pmf_src, np.abs(_const_src) ** 2))
+            if 0 < _e_ps < 1.0 - 1e-6:
+                src = src / np.sqrt(_e_ps)
 
-            def _scatter_source(axis, symbols):
-                axis.scatter(
-                    symbols.real,
-                    symbols.imag,
-                    c="lime",
-                    edgecolors="dimgray",
-                    linewidths=1.5,
-                    s=30,
-                    zorder=10,
-                    marker="o",
-                )
+        def _scatter_source(axis, symbols):
+            axis.scatter(
+                symbols.real,
+                symbols.imag,
+                c="lime",
+                edgecolors="dimgray",
+                linewidths=1.5,
+                s=30,
+                zorder=10,
+                marker="o",
+            )
 
-            if src.ndim > 1:
-                ax_list = list(np.asarray(axes).flat)
-                for ch in range(min(src.shape[0], len(ax_list))):
-                    _scatter_source(ax_list[ch], src[ch])
-            else:
-                _scatter_source(axes, src)
+        if src.ndim > 1:
+            ax_list = list(np.asarray(axes).flat)
+            for ch in range(min(src.shape[0], len(ax_list))):
+                _scatter_source(ax_list[ch], src[ch])
+        else:
+            _scatter_source(axes, src)
 
-        if show:
-            plt.show()
-            return None
-        return result
+    if show:
+        plt.show()
+        return None
+    return result
 
+
+def _plot_constellation_array(
+    samples: Any,
+    bins: int = 100,
+    cmap: str = "inferno",
+    ax: Any | None = None,
+    overlay_ideal: bool = False,
+    modulation: str | None = None,
+    order: int | None = None,
+    unipolar: bool | None = None,
+    pmf: Any | None = None,
+    title: str | None = "Constellation",
+    vmin: float | None = None,
+    vmax: float | None = None,
+    show: bool = False,
+    **kwargs: Any,
+) -> tuple[Any, Any] | None:
+    """Render array data; the public boundary handles Signal source overlays."""
     logger.debug("Generating constellation density plot.")
 
     samples, xp, _ = dispatch(samples)
@@ -339,7 +362,7 @@ def plot_constellation(
 
             ch_title = f"{title} (Ch {i})" if title else f"Channel {i}"
 
-            plot_constellation(
+            _plot_constellation_array(
                 channel_samples,
                 bins=bins,
                 cmap=cmap,
@@ -347,6 +370,7 @@ def plot_constellation(
                 overlay_ideal=overlay_ideal,
                 modulation=modulation,
                 order=order,
+                unipolar=unipolar,
                 pmf=pmf,
                 title=ch_title,
                 vmin=vmin,

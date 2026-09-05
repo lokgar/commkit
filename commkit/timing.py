@@ -492,7 +492,7 @@ def estimate_timing(
     context = prepare_signal_input(samples, function_name="estimate_timing()")
     samples = context.array
     if context.signal is not None:
-        sps = require_integer_sps(context.signal.sps, "estimate_timing()")
+        sps = context.required("sps", sps)
         pulse_shape = context.optional("pulse_shape", pulse_shape)
 
     # 1. Resolve Inputs & Metadata
@@ -513,6 +513,7 @@ def estimate_timing(
         # Preamble object: reconstruct the shaped waveform at the target SPS.
         if sps is None:
             raise ValueError("SPS must be provided when using a Preamble object.")
+        sps = require_integer_sps(sps, "estimate_timing()")
 
         ref_waveform = xp.asarray(
             reference.to_signal(

@@ -211,11 +211,12 @@ def apply_taps(
     samples = context.array
     metadata = {}
     if context.signal is not None:
-        sps = require_integer_sps(context.required("sps", sps), "apply_taps()")
+        sps = context.required("sps", sps)
         metadata["sampling_rate"] = context.signal.symbol_rate
 
     if sps is None:
         sps = 2
+    sps = require_integer_sps(sps, "apply_taps()")
 
     samples, xp, _ = dispatch(samples)
     weights = xp.asarray(weights)

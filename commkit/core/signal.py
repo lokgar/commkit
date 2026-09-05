@@ -571,6 +571,11 @@ class Signal(BaseModel):
         ``metadata``. Assignment validation is applied to both the replacement
         samples and every metadata override.
 
+        Shared provenance arrays and frame objects are not guaranteed immutable:
+        later mutation through either container can affect the other. A supplied
+        sample view may also share memory with the old waveform. Use `clone()`
+        when independent backing data is required.
+
         Resolved symbols and bits are derived caches and are invalidated by
         default because changing waveform samples can make them stale. Internal
         transforms that can prove the caches remain valid may pass
@@ -649,7 +654,8 @@ class Signal(BaseModel):
         Updates signal samples from a JAX array.
 
         Converts the JAX array back to the signal's original backend (NumPy
-        or CuPy) to maintain consistent state.
+        or CuPy) to maintain consistent state. Invalidates resolved symbols and
+        bits because they were derived from the previous waveform.
 
         Parameters
         ----------
@@ -669,6 +675,8 @@ class Signal(BaseModel):
         # Ensure we move the data back to the original backend if it differs
         # (e.g., if signal was GPU but jax_array was on CPU/TPU)
         self.samples = to_device(new_samples, original_backend)
+        self.resolved_symbols = None
+        self.resolved_bits = None
 
         return self
 

@@ -6,7 +6,7 @@ import matplotlib.pyplot as plt
 import numpy as np
 
 from ..backend import dispatch, to_device
-from ..core.signal import Signal
+from ..core._signal_adapter import prepare_signal_input
 from ..logger import logger
 from .theme import (
     _create_subplot_grid,
@@ -92,28 +92,12 @@ def plot_psd(
     ax : matplotlib.axes.Axes or ndarray
         The axis or array of axes used for the plot.
     """
-    if isinstance(samples, Signal):
-        sig = samples
-        return plot_psd(
-            sig.samples,
-            sampling_rate=sig.sampling_rate,
-            nperseg=nperseg,
-            detrend=detrend,
-            average=average,
-            window=window,
-            noverlap=noverlap,
-            nfft=nfft,
-            scaling=scaling,
-            center_frequency=sig.center_frequency,
-            domain=sig.physical_domain or "RF",
-            x_axis=x_axis,
-            ax=ax,
-            xlim=xlim,
-            ylim=ylim,
-            title=title,
-            show=show,
-            **kwargs,
-        )
+    context = prepare_signal_input(samples, function_name="plot_psd()")
+    samples = context.array
+    if context.signal is not None:
+        sampling_rate = context.required("sampling_rate")
+        center_frequency = context.signal.center_frequency
+        domain = context.signal.physical_domain or "RF"
 
     logger.debug("Generating PSD plot (sampling_rate=%s Hz).", sampling_rate)
 
@@ -333,30 +317,13 @@ def plot_spectrogram(
     ax : matplotlib.axes.Axes or ndarray
         The axis or array of axes used for the plot.
     """
-    if isinstance(samples, Signal):
-        sig = samples
-        return plot_spectrogram(
-            sig.samples,
-            sampling_rate=sig.sampling_rate,
-            window=window,
-            nperseg=nperseg,
-            noverlap=noverlap,
-            nfft=nfft,
-            detrend=detrend,
-            return_onesided=return_onesided,
-            scaling=scaling,
-            axis=-1,
-            mode=mode,
-            center_frequency=sig.center_frequency,
-            domain=sig.physical_domain or "RF",
-            ax=ax,
-            xlim=xlim,
-            ylim=ylim,
-            title=title,
-            cmap=cmap,
-            show=show,
-            **kwargs,
-        )
+    context = prepare_signal_input(samples, function_name="plot_spectrogram()")
+    samples = context.array
+    if context.signal is not None:
+        sampling_rate = context.required("sampling_rate")
+        center_frequency = context.signal.center_frequency
+        domain = context.signal.physical_domain or "RF"
+        axis = -1
 
     logger.debug("Generating spectrogram plot (sampling_rate=%s Hz).", sampling_rate)
 

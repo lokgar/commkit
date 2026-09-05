@@ -5,6 +5,7 @@ from __future__ import annotations
 import numpy as np
 
 from ..backend import dispatch, from_jax, to_device
+from ..core._signal_adapter import require_integer_sps
 from ..helpers import restore_1d
 from ..logger import logger
 from .result import CPRState, EqualizerResult
@@ -527,10 +528,7 @@ def _cpr_symmetry(modulation: str | None, order: int | None) -> int:
 
 def _validate_sps(sps, num_taps):
     """Validate sps; warn about unusual values, check tap count minimum."""
-    if not np.isfinite(sps) or sps % 1 != 0:
-        raise ValueError(f"sps must be a positive integer. Got sps={sps!r}.")
-    if sps < 1:
-        raise ValueError(f"sps must be >= 1. Got sps={sps}.")
+    sps = require_integer_sps(sps, "equalizer")
     if sps == 1:
         logger.info(
             "sps=1: symbol-spaced equalizer mode. "

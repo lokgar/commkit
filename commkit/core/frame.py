@@ -186,16 +186,7 @@ class Preamble(BaseModel):
         """
         from .generation import shape_pulse
 
-        if sps != int(sps) or sps < 1:
-            logger.warning(
-                "sps=%r is not a positive integer. Non-integer sps causes "
-                "sample buffer / sampling_rate metadata mismatch.",
-                sps,
-            )
-            raise ValueError(
-                f"sps must be a positive integer for signal generation, got {sps!r}."
-            )
-        sps = int(sps)
+        sps = require_integer_sps(sps, "Preamble.to_signal()")
 
         samples = shape_pulse(
             self.symbols,
@@ -879,16 +870,7 @@ class SingleCarrierFrame(BaseModel):
         from .. import mapping
         from .generation import shape_pulse
 
-        if sps != int(sps) or sps < 1:
-            logger.warning(
-                "sps=%r is not a positive integer. Non-integer sps causes "
-                "sample buffer / sampling_rate metadata mismatch.",
-                sps,
-            )
-            raise ValueError(
-                f"sps must be a positive integer for signal generation, got {sps!r}."
-            )
-        sps = int(sps)
+        sps = require_integer_sps(sps, "SingleCarrierFrame.to_signal()")
 
         # 1. Shape Body (Payload + Pilots)
         body_symbols = self.body_symbols

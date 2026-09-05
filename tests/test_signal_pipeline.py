@@ -10,6 +10,7 @@ import pytest
 from commkit import equalization, filtering, frequency, multirate
 from commkit.core import Preamble, Signal, SingleCarrierFrame, generation
 from commkit.impairments import apply_awgn
+from commkit.mapping import demap_symbols_hard, map_bits
 
 
 def _signal(xp, *, sps: float = 2.0) -> Signal:
@@ -243,6 +244,68 @@ def test_frame_sample_map_rejects_fractional_sps(backend_device):
 
     with pytest.raises(ValueError, match=r"sps.*positive integer"):
         frame.get_structure_map(unit="samples", sps=1.5)
+
+
+@pytest.mark.parametrize("sps", [0, -1, 1.5, float("nan"), float("inf")])
+@pytest.mark.parametrize("operation", ["decimate", "apply_taps", "resolve"])
+def test_array_symbol_operations_validate_sps(backend_device, xp, sps, operation):
+    samples = xp.ones(16, dtype=xp.complex64)
+    with pytest.raises(ValueError, match="sps to be a positive integer"):
+        if operation == "decimate":
+            multirate.decimate_to_symbol_rate(samples, sps=sps)
+        elif operation == "apply_taps":
+            equalization.apply_taps(samples, _identity_taps(xp), sps=sps)
+        else:
+            multirate.resolve_symbols(samples, sps=sps)
+
+
+def test_array_symbol_operations_accept_integral_float_sps(backend_device, xp, xpt):
+    samples = xp.arange(16, dtype=xp.float32).astype(xp.complex64)
+    xpt.assert_array_equal(
+        multirate.decimate_to_symbol_rate(samples, sps=2.0), samples[::2]
+    )
+    actual = equalization.apply_taps(
+        samples, _identity_taps(xp), sps=2.0, normalize=False
+    )
+    expected = equalization.apply_taps(
+        samples, _identity_taps(xp), sps=2, normalize=False
+    )
+    xpt.assert_array_equal(actual, expected)
+
+
+@pytest.mark.parametrize("sps", [0, -1, 1.5, float("nan"), float("inf")])
+@pytest.mark.parametrize("factory", ["qam", "psqam", "preamble", "frame"])
+def test_generation_boundaries_validate_sps(backend_device, sps, factory):
+    with pytest.raises(ValueError, match="sps to be a positive integer"):
+        if factory == "qam":
+            generation.generate_qam(16, sps=sps, symbol_rate=1e6, order=4)
+        elif factory == "psqam":
+            generation.generate_psqam(16, sps=sps, symbol_rate=1e6, order=16, nu=0.3)
+        elif factory == "preamble":
+            Preamble(sequence_type="barker", length=7).to_signal(
+                sps=sps, symbol_rate=1e6
+            )
+        else:
+            SingleCarrierFrame(payload_len=16).to_signal(sps=sps)
+
+
+@pytest.mark.parametrize("stored_unipolar", [None, False, True])
+def test_demap_optional_unipolar_metadata(backend_device, xp, xpt, stored_unipolar):
+    bits = xp.asarray([0, 0, 0, 1, 1, 1, 1, 0], dtype=xp.uint8)
+    effective = True if stored_unipolar is None else stored_unipolar
+    symbols = map_bits(bits, "PAM", 4, unipolar=effective)
+    sig = Signal(
+        samples=symbols,
+        sampling_rate=1e6,
+        symbol_rate=1e6,
+        mod_scheme="PAM",
+        mod_order=4,
+        mod_unipolar=stored_unipolar,
+        resolved_symbols=symbols,
+    )
+    result = demap_symbols_hard(sig, unipolar=True)
+    xpt.assert_array_equal(result.resolved_bits, bits)
+    assert sig.resolved_bits is None
 
 
 def test_frame_relationship_survives_pipeline(backend_device, xp):

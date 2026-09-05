@@ -271,20 +271,7 @@ def generate(
     Call ``resolve_symbols()`` before demapping or computing metrics.
     """
 
-    if sps != int(sps) or sps < 1:
-        logger.warning(
-            "sps=%r is not a positive integer. Non-integer sps is valid for "
-            "captured/resampled signals but not for generation: "
-            "resample_poly requires an integer upsampling factor, so the "
-            "sample buffer would not match the stored sampling_rate "
-            "metadata. To generate at a fractional sps, generate at an "
-            "integer sps then call Signal.resample(up=..., down=...).",
-            sps,
-        )
-        raise ValueError(
-            f"sps must be a positive integer for signal generation, got {sps!r}."
-        )
-    sps = int(sps)
+    sps = require_integer_sps(sps, "generate()")
 
     # When rz=True and the caller hasn't specified a custom duty_cycle,
     # default to 50% (canonical RZ). Explicit duty_cycle values are preserved.
@@ -684,20 +671,7 @@ def generate_psqam(
     >>> sig = generate_psqam(10000, sps=4, symbol_rate=32e9, order=64, nu=0.3)
     """
 
-    if sps != int(sps) or sps < 1:
-        logger.warning(
-            "sps=%r is not a positive integer. Non-integer sps is valid for "
-            "captured/resampled signals but not for generation: "
-            "resample_poly requires an integer upsampling factor, so the "
-            "sample buffer would not match the stored sampling_rate "
-            "metadata. To generate at a fractional sps, generate at an "
-            "integer sps then call Signal.resample(up=..., down=...).",
-            sps,
-        )
-        raise ValueError(
-            f"sps must be a positive integer for signal generation, got {sps!r}."
-        )
-    sps = int(sps)
+    sps = require_integer_sps(sps, "generate_psqam()")
 
     if (nu is None) == (entropy is None):
         raise ValueError("Exactly one of `nu` or `entropy` must be specified.")

@@ -109,11 +109,13 @@ def decimate_to_symbol_rate(
     """
     context = prepare_signal_input(samples, function_name="decimate_to_symbol_rate()")
     samples = context.array
+    sps_int = require_integer_sps(
+        context.required("sps", sps), "decimate_to_symbol_rate()"
+    )
     meta: dict[str, Any] = {}
     if context.signal is not None:
         sig = context.signal
         do_norm = True if normalize is None else normalize
-        sps_int = require_integer_sps(sig.sps, "decimate_to_symbol_rate()")
         if sps_int <= 1:
             logger.info("Signal already at 1 sps, no downsampling needed.")
             result = samples
@@ -124,9 +126,7 @@ def decimate_to_symbol_rate(
             result = helpers.normalize(result, "average_power", axis=-1)
         return context.return_value(result, **meta)
 
-    if sps is None:
-        raise ValueError("decimate_to_symbol_rate() requires sps for array input.")
-    return _decimate_to_symbol_rate_array(samples, sps, offset, normalize, axis)
+    return _decimate_to_symbol_rate_array(samples, sps_int, offset, normalize, axis)
 
 
 def _decimate_to_symbol_rate_array(
@@ -409,18 +409,10 @@ def resolve_symbols(
                 "resolve_symbols() on that."
             )
             return sig._shallow_clone()
-        s = sig.sps
-        if s is None:
-            raise ValueError("Symbol rate or sampling rate missing.")
-        if s < 1:
-            raise ValueError("Symbol rate must be >= 1.")
-        if s % 1 != 0:
-            raise ValueError("Symbol rate must be an integer.")
+        s = require_integer_sps(context.required("sps", sps), "resolve_symbols()")
         # Output field (resolved_symbols) differs from the input field
         # (samples), so replace the derived field explicitly.
-        resolved = _decimate_to_symbol_rate_array(
-            samples, require_integer_sps(s, "resolve_symbols()"), offset, True, -1
-        )
+        resolved = _decimate_to_symbol_rate_array(samples, s, offset, True, -1)
         return context.replace_field("resolved_symbols", resolved)
 
     if sps is None:
