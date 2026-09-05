@@ -3,8 +3,9 @@
 import numpy as np
 
 from ..backend import ArrayType, dispatch, to_device
+from ..core._signal_adapter import prepare_signal_input
 from ..core.signal import Signal
-from ..helpers import as_2d, restore_1d, unwrap_signal
+from ..helpers import as_2d, restore_1d
 from ..logger import logger
 from .corrections import _log_phase_summary, correct_cycle_slips
 
@@ -105,47 +106,11 @@ def recover_carrier_phase_bps(
     from ..mapping import constellation_power, gray_constellation
     from ..mapping.gray import square_qam_slicer_params
 
-    x, sig = unwrap_signal(symbols)
-    if sig is not None:
-        mod = sig.mod_scheme
-        if mod is None:
-            mod = modulation
-            if mod is not None:
-                logger.warning(
-                    "recover_carrier_phase_bps(): Signal has no mod_scheme "
-                    "set; falling back to supplied modulation=%r.",
-                    mod,
-                )
-        ord_ = sig.mod_order
-        if ord_ is None:
-            ord_ = order
-            if ord_ is not None:
-                logger.warning(
-                    "recover_carrier_phase_bps(): Signal has no mod_order "
-                    "set; falling back to supplied order=%r.",
-                    ord_,
-                )
-        eff_pmf = sig.ps_pmf
-        if eff_pmf is None:
-            eff_pmf = pmf
-            if eff_pmf is not None:
-                logger.warning(
-                    "recover_carrier_phase_bps(): Signal has no ps_pmf set; "
-                    "falling back to supplied pmf."
-                )
-        return recover_carrier_phase_bps(
-            x,
-            mod,
-            ord_,
-            num_test_phases=num_test_phases,
-            block_size=block_size,
-            joint_channels=joint_channels,
-            cycle_slip_correction=cycle_slip_correction,
-            cycle_slip_history=cycle_slip_history,
-            cycle_slip_threshold=cycle_slip_threshold,
-            pmf=eff_pmf,
-            debug_plot=debug_plot,
-        )
+    context = prepare_signal_input(symbols, function_name="recover_carrier_phase_bps()")
+    symbols = context.array
+    modulation = context.optional("mod_scheme", modulation)
+    order = context.optional("mod_order", order)
+    pmf = context.optional("ps_pmf", pmf)
 
     if modulation is None or order is None:
         raise ValueError(

@@ -7,13 +7,11 @@ from typing import Any
 import numpy as np
 
 from ...backend import ArrayType, _get_jax, dispatch, from_jax, to_device, to_jax
+from ...core._signal_adapter import prepare_signal_input, require_integer_sps
 from ...core.signal import Signal
 from ...helpers import (
-    _coerce_integer_sps,
     resolve_pll_gains,
     restore_1d,
-    rewrap_signal,
-    unwrap_signal,
 )
 from ...logger import logger
 from ...mapping.gray import square_qam_slicer_params
@@ -49,7 +47,12 @@ from .._kernels_numba import (
     _get_numba_rls,
     _get_numba_rls_cpr,
 )
-from ..result import CPRState, EqualizerResult, _log_equalizer_exit
+from ..result import (
+    CPRState,
+    EqualizerResult,
+    _attach_equalized_signal,
+    _log_equalizer_exit,
+)
 
 # -----------------------------------------------------------------------------
 # ADAPTIVE equalization
@@ -462,54 +465,14 @@ def lms(
     independent signals externally.  For CPU-optimal throughput use
     ``backend='numba'`` (the default).
     """
-    x, sig = unwrap_signal(samples)
+    context = prepare_signal_input(samples, function_name="lms()")
+    samples = context.array
+    sig = context.signal
     if sig is not None:
-        # sig.sps is always populated (derived from the required sampling_rate
-        # / symbol_rate fields), so the Signal's own value always wins over a
-        # supplied sps - see CLAUDE.md, "Signal-Awareness".
-        if sps is not None:
-            logger.warning(
-                "lms(): ignoring supplied sps=%r for Signal input; using the "
-                "signal's own sps=%r instead.",
-                sps,
-                sig.sps,
-            )
-        result = lms(
-            x,
-            training_symbols=training_symbols,
-            num_taps=num_taps,
-            sps=_coerce_integer_sps(sig.sps, caller="lms()"),
-            step_size=step_size,
-            modulation=modulation,
-            order=order,
-            unipolar=unipolar,
-            store_weights=store_weights,
-            device=device,
-            center_tap=center_tap,
-            backend=backend,
-            w_init=w_init,
-            pmf=pmf,
-            cpr_type=cpr_type,
-            cpr_pll_bandwidth=cpr_pll_bandwidth,
-            cpr_pll_mu=cpr_pll_mu,
-            cpr_pll_beta=cpr_pll_beta,
-            cpr_bps_test_phases=cpr_bps_test_phases,
-            cpr_bps_block_size=cpr_bps_block_size,
-            cpr_joint_channels=cpr_joint_channels,
-            cpr_cycle_slip_correction=cpr_cycle_slip_correction,
-            cpr_cycle_slip_history=cpr_cycle_slip_history,
-            cpr_cycle_slip_threshold=cpr_cycle_slip_threshold,
-            debug_plot=debug_plot,
-            plot_smoothing=plot_smoothing,
-            cpr_state=cpr_state,
-            input_norm_factor=input_norm_factor,
-            samples_prefix=samples_prefix,
-            pad_mode=pad_mode,
-            update_mode=update_mode,
-            block_len=block_len,
-        )
-        result.y_hat = rewrap_signal(sig, result.y_hat, sampling_rate=sig.symbol_rate)
-        return result
+        sps = require_integer_sps(context.required("sps", sps), "lms()")
+
+    def finish(result: EqualizerResult) -> EqualizerResult:
+        return _attach_equalized_signal(result, sig)
 
     if sps is None:
         sps = 2
@@ -596,30 +559,32 @@ def lms(
             w_arr = _init_butterfly_weights_numpy(
                 num_ch, num_taps, center_tap=center_tap
             )
-        return _run_block_equalizer(
-            "lms",
-            samples_padded_np=samples_padded_np,
-            w_arr=w_arr,
-            num_ch=num_ch,
-            num_taps=num_taps,
-            n_sym=n_sym,
-            stride=stride,
-            block_len=block_len,
-            step_size=step_size,
-            backend=backend,
-            device=device,
-            was_1d=was_1d,
-            xp=xp,
-            eq_norm=eq_norm,
-            name="LMS(block)",
-            debug_plot=debug_plot,
-            plot_smoothing=plot_smoothing,
-            constellation_np=constellation_np,
-            train_full=train_full,
-            n_train_aligned=n_train_aligned,
-            sq_side=_sq_side,
-            sq_lev_min=_sq_lev_min,
-            sq_d_grid=_sq_d_grid,
+        return finish(
+            _run_block_equalizer(
+                "lms",
+                samples_padded_np=samples_padded_np,
+                w_arr=w_arr,
+                num_ch=num_ch,
+                num_taps=num_taps,
+                n_sym=n_sym,
+                stride=stride,
+                block_len=block_len,
+                step_size=step_size,
+                backend=backend,
+                device=device,
+                was_1d=was_1d,
+                xp=xp,
+                eq_norm=eq_norm,
+                name="LMS(block)",
+                debug_plot=debug_plot,
+                plot_smoothing=plot_smoothing,
+                constellation_np=constellation_np,
+                train_full=train_full,
+                n_train_aligned=n_train_aligned,
+                sq_side=_sq_side,
+                sq_lev_min=_sq_lev_min,
+                sq_d_grid=_sq_d_grid,
+            )
         )
 
     if backend == "numba":
@@ -827,8 +792,13 @@ def lms(
                 bps_K=int(cpr_bps_block_size),
                 cs_H=H,
             )
-        return _log_equalizer_exit(
-            result, name="LMS", debug_plot=debug_plot, plot_smoothing=plot_smoothing
+        return finish(
+            _log_equalizer_exit(
+                result,
+                name="LMS",
+                debug_plot=debug_plot,
+                plot_smoothing=plot_smoothing,
+            )
         )
 
     # JAX backend
@@ -1065,7 +1035,7 @@ def lms(
             bps_K=KB,
             cs_H=H,
         )
-    return _log_equalizer_exit(result, name="LMS", debug_plot=debug_plot)
+    return finish(_log_equalizer_exit(result, name="LMS", debug_plot=debug_plot))
 
 
 def _check_rls_divergence(weights, xp, forgetting_factor, delta):
@@ -1364,54 +1334,11 @@ def rls(
     ``w_init`` warms-start the tap weights; the inverse correlation matrix ``P``
     always begins at ``(1/delta) · I`` regardless of ``w_init``.
     """
-    x, sig = unwrap_signal(samples)
+    context = prepare_signal_input(samples, function_name="rls()")
+    samples = context.array
+    sig = context.signal
     if sig is not None:
-        # sig.sps is always populated (derived from the required sampling_rate
-        # / symbol_rate fields), so the Signal's own value always wins over a
-        # supplied sps - see CLAUDE.md, "Signal-Awareness".
-        if sps is not None:
-            logger.warning(
-                "rls(): ignoring supplied sps=%r for Signal input; using the "
-                "signal's own sps=%r instead.",
-                sps,
-                sig.sps,
-            )
-        result = rls(
-            x,
-            training_symbols=training_symbols,
-            num_taps=num_taps,
-            sps=_coerce_integer_sps(sig.sps, caller="rls()"),
-            forgetting_factor=forgetting_factor,
-            delta=delta,
-            leakage=leakage,
-            modulation=modulation,
-            order=order,
-            unipolar=unipolar,
-            store_weights=store_weights,
-            device=device,
-            center_tap=center_tap,
-            backend=backend,
-            w_init=w_init,
-            pmf=pmf,
-            cpr_type=cpr_type,
-            cpr_pll_bandwidth=cpr_pll_bandwidth,
-            cpr_pll_mu=cpr_pll_mu,
-            cpr_pll_beta=cpr_pll_beta,
-            cpr_bps_test_phases=cpr_bps_test_phases,
-            cpr_bps_block_size=cpr_bps_block_size,
-            cpr_joint_channels=cpr_joint_channels,
-            cpr_cycle_slip_correction=cpr_cycle_slip_correction,
-            cpr_cycle_slip_history=cpr_cycle_slip_history,
-            cpr_cycle_slip_threshold=cpr_cycle_slip_threshold,
-            debug_plot=debug_plot,
-            plot_smoothing=plot_smoothing,
-            cpr_state=cpr_state,
-            input_norm_factor=input_norm_factor,
-            samples_prefix=samples_prefix,
-            pad_mode=pad_mode,
-        )
-        result.y_hat = rewrap_signal(sig, result.y_hat, sampling_rate=sig.symbol_rate)
-        return result
+        sps = require_integer_sps(context.required("sps", sps), "rls()")
 
     if sps is None:
         sps = 1
@@ -1715,7 +1642,7 @@ def rls(
         )
         result.tail_trim = tail_trim
         _check_rls_divergence(result.weights, xp, forgetting_factor, delta)
-        return result
+        return _attach_equalized_signal(result, sig)
 
     # JAX backend
     jax, jnp, _ = _get_jax()
@@ -1984,4 +1911,4 @@ def rls(
     result = _log_equalizer_exit(result, name="RLS", debug_plot=debug_plot)
     result.tail_trim = tail_trim
     _check_rls_divergence(result.weights, xp, forgetting_factor, delta)
-    return result
+    return _attach_equalized_signal(result, sig)

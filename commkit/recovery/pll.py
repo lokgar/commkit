@@ -3,9 +3,9 @@
 import numpy as np
 
 from ..backend import ArrayType, dispatch, to_device
+from ..core._signal_adapter import prepare_signal_input
 from ..core.signal import Signal
-from ..helpers import as_2d, restore_1d, unwrap_signal
-from ..logger import logger
+from ..helpers import as_2d, restore_1d
 from .corrections import _log_phase_summary, correct_cycle_slips
 
 _NUMBA_PLL: dict = {}
@@ -338,40 +338,10 @@ def recover_carrier_phase_pll(
     from ..helpers import normalize, resolve_pll_gains
     from ..mapping import gray_constellation
 
-    x, sig = unwrap_signal(symbols)
-    if sig is not None:
-        mod = sig.mod_scheme
-        if mod is None:
-            mod = modulation
-            if mod is not None:
-                logger.warning(
-                    "recover_carrier_phase_pll(): Signal has no mod_scheme "
-                    "set; falling back to supplied modulation=%r.",
-                    mod,
-                )
-        ord_ = sig.mod_order
-        if ord_ is None:
-            ord_ = order
-            if ord_ is not None:
-                logger.warning(
-                    "recover_carrier_phase_pll(): Signal has no mod_order "
-                    "set; falling back to supplied order=%r.",
-                    ord_,
-                )
-        return recover_carrier_phase_pll(
-            x,
-            mod,
-            ord_,
-            mu=mu,
-            beta=beta,
-            phase_init=phase_init,
-            loop_bandwidth_normalized=loop_bandwidth_normalized,
-            joint_channels=joint_channels,
-            cycle_slip_correction=cycle_slip_correction,
-            cycle_slip_history=cycle_slip_history,
-            cycle_slip_threshold=cycle_slip_threshold,
-            debug_plot=debug_plot,
-        )
+    context = prepare_signal_input(symbols, function_name="recover_carrier_phase_pll()")
+    symbols = context.array
+    modulation = context.optional("mod_scheme", modulation)
+    order = context.optional("mod_order", order)
 
     if modulation is None or order is None:
         raise ValueError(

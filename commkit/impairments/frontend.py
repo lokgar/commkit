@@ -7,8 +7,9 @@ device model (the widely-linear I/Q mixing) and are read as a pair.
 import math
 
 from ..backend import ArrayType, dispatch
+from ..core._signal_adapter import prepare_signal_input
 from ..core.signal import Signal
-from ..helpers import as_2d, db_to_linear, restore_1d, rewrap_signal, unwrap_signal
+from ..helpers import as_2d, db_to_linear, restore_1d
 from ..logger import logger
 
 __all__ = [
@@ -59,10 +60,8 @@ def apply_iq_imbalance(
     --------
     >>> r = apply_iq_imbalance(s, amplitude_imbalance_db=1.0, phase_imbalance_deg=3.0)
     """
-    x, sig = unwrap_signal(samples)
-    if sig is not None:
-        result = apply_iq_imbalance(x, amplitude_imbalance_db, phase_imbalance_deg)
-        return rewrap_signal(sig, result)
+    context = prepare_signal_input(samples, function_name="apply_iq_imbalance()")
+    samples = context.array
 
     logger.info(
         "Applying IQ imbalance (amplitude=%.2f dB, phase=%.2f deg).",
@@ -84,7 +83,7 @@ def apply_iq_imbalance(
     if result.dtype != samples.dtype:
         result = result.astype(samples.dtype)
 
-    return result
+    return context.return_value(result)
 
 
 def _apply_iq_correction(samples, xp, correct_fn):
@@ -152,9 +151,10 @@ def compensate_iq_imbalance_lowdin(samples: ArrayType | Signal) -> ArrayType | S
     >>> r = apply_iq_imbalance(s, amplitude_imbalance_db=1.5, phase_imbalance_deg=4.0)
     >>> s_hat = compensate_iq_imbalance_lowdin(r)
     """
-    x, sig = unwrap_signal(samples)
-    if sig is not None:
-        return rewrap_signal(sig, compensate_iq_imbalance_lowdin(x))
+    context = prepare_signal_input(
+        samples, function_name="compensate_iq_imbalance_lowdin()"
+    )
+    samples = context.array
 
     logger.info("Applying Löwdin IQ imbalance compensation.")
 
@@ -176,7 +176,7 @@ def compensate_iq_imbalance_lowdin(samples: ArrayType | Signal) -> ArrayType | S
         X_corr = W @ X  # (2, N)
         return X_corr[0], X_corr[1]
 
-    return _apply_iq_correction(samples, xp, _correct)
+    return context.return_value(_apply_iq_correction(samples, xp, _correct))
 
 
 def compensate_iq_imbalance_gram_schmidt(
@@ -216,9 +216,10 @@ def compensate_iq_imbalance_gram_schmidt(
     >>> r = apply_iq_imbalance(s, amplitude_imbalance_db=1.5, phase_imbalance_deg=4.0)
     >>> s_hat = compensate_iq_imbalance_gram_schmidt(r)
     """
-    x, sig = unwrap_signal(samples)
-    if sig is not None:
-        return rewrap_signal(sig, compensate_iq_imbalance_gram_schmidt(x))
+    context = prepare_signal_input(
+        samples, function_name="compensate_iq_imbalance_gram_schmidt()"
+    )
+    samples = context.array
 
     logger.info("Applying Gram-Schmidt IQ imbalance compensation.")
 
@@ -243,4 +244,4 @@ def compensate_iq_imbalance_gram_schmidt(
         # Step 4: Recombine (power restoration happens in the shared scaffold)
         return I_norm, Q_norm
 
-    return _apply_iq_correction(samples, xp, _correct)
+    return context.return_value(_apply_iq_correction(samples, xp, _correct))

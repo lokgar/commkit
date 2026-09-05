@@ -7,8 +7,8 @@ from typing import Any
 import numpy as np
 
 from ...backend import ArrayType, _get_jax, dispatch, to_device, to_jax
+from ...core._signal_adapter import prepare_signal_input, require_integer_sps
 from ...core.signal import Signal
-from ...helpers import _coerce_integer_sps, rewrap_signal, unwrap_signal
 from ...logger import logger
 from .._block import (
     _prep_blind_block_inputs,
@@ -33,7 +33,7 @@ from .._kernels_numba import (
     _get_numba_pa_rde,
     _get_numba_rde,
 )
-from ..result import EqualizerResult, _log_equalizer_exit
+from ..result import EqualizerResult, _attach_equalized_signal, _log_equalizer_exit
 
 # -----------------------------------------------------------------------------
 # BLIND equalization
@@ -242,45 +242,14 @@ def cma(
     ``device='cpu'`` for typical SISO sequences, or ``backend='numba'`` for
     CPU-optimal throughput.
     """
-    x, sig = unwrap_signal(samples)
+    context = prepare_signal_input(samples, function_name="cma()")
+    samples = context.array
+    sig = context.signal
     if sig is not None:
-        # sig.sps is always populated (derived from the required sampling_rate
-        # / symbol_rate fields), so the Signal's own value always wins over a
-        # supplied sps - see CLAUDE.md, "Signal-Awareness".
-        if sps is not None:
-            logger.warning(
-                "cma(): ignoring supplied sps=%r for Signal input; using the "
-                "signal's own sps=%r instead.",
-                sps,
-                sig.sps,
-            )
-        result = cma(
-            x,
-            num_taps=num_taps,
-            sps=_coerce_integer_sps(sig.sps, caller="cma()"),
-            step_size=step_size,
-            modulation=modulation,
-            order=order,
-            unipolar=unipolar,
-            store_weights=store_weights,
-            device=device,
-            center_tap=center_tap,
-            backend=backend,
-            w_init=w_init,
-            pilot_ref=pilot_ref,
-            pilot_mask=pilot_mask,
-            pilot_gain_db=pilot_gain_db,
-            pmf=pmf,
-            debug_plot=debug_plot,
-            plot_smoothing=plot_smoothing,
-            input_norm_factor=input_norm_factor,
-            samples_prefix=samples_prefix,
-            pad_mode=pad_mode,
-            update_mode=update_mode,
-            block_len=block_len,
-        )
-        result.y_hat = rewrap_signal(sig, result.y_hat, sampling_rate=sig.symbol_rate)
-        return result
+        sps = require_integer_sps(context.required("sps", sps), "cma()")
+
+    def finish(result: EqualizerResult) -> EqualizerResult:
+        return _attach_equalized_signal(result, sig)
 
     if sps is None:
         sps = 2
@@ -370,28 +339,30 @@ def cma(
             center_tap=center_tap,
             w_init=w_init,
         )
-        return _run_block_equalizer(
-            "cma",
-            samples_padded_np=samples_padded_np,
-            w_arr=w_arr,
-            num_ch=num_ch,
-            num_taps=num_taps,
-            n_sym=n_sym,
-            stride=stride,
-            block_len=block_len,
-            step_size=step_size,
-            backend=backend,
-            device=device,
-            was_1d=was_1d,
-            xp=xp,
-            eq_norm=eq_norm,
-            name="CMA(block)" if not use_pilots else "CMA(PA,block)",
-            debug_plot=debug_plot,
-            plot_smoothing=plot_smoothing,
-            check_convergence=True,
-            r2=r2,
-            pref_np=pref_np,
-            pmask_np=pmask_np,
+        return finish(
+            _run_block_equalizer(
+                "cma",
+                samples_padded_np=samples_padded_np,
+                w_arr=w_arr,
+                num_ch=num_ch,
+                num_taps=num_taps,
+                n_sym=n_sym,
+                stride=stride,
+                block_len=block_len,
+                step_size=step_size,
+                backend=backend,
+                device=device,
+                was_1d=was_1d,
+                xp=xp,
+                eq_norm=eq_norm,
+                name="CMA(block)" if not use_pilots else "CMA(PA,block)",
+                debug_plot=debug_plot,
+                plot_smoothing=plot_smoothing,
+                check_convergence=True,
+                r2=r2,
+                pref_np=pref_np,
+                pmask_np=pmask_np,
+            )
         )
 
     if backend == "numba":
@@ -460,22 +431,24 @@ def cma(
                 e_out,
                 w_hist_buf,
             )
-        return _log_equalizer_exit(
-            _unpack_result_numpy(
-                y_out,
-                e_out,
-                W,
-                w_hist_buf,
-                was_1d,
-                store_weights,
-                n_sym=None,
-                xp=xp,
-                input_norm_factor=eq_norm,
-            ),
-            name="CMA" if not use_pilots else "CMA(PA)",
-            debug_plot=debug_plot,
-            check_convergence=True,
-            plot_smoothing=plot_smoothing,
+        return finish(
+            _log_equalizer_exit(
+                _unpack_result_numpy(
+                    y_out,
+                    e_out,
+                    W,
+                    w_hist_buf,
+                    was_1d,
+                    store_weights,
+                    n_sym=None,
+                    xp=xp,
+                    input_norm_factor=eq_norm,
+                ),
+                name="CMA" if not use_pilots else "CMA(PA)",
+                debug_plot=debug_plot,
+                check_convergence=True,
+                plot_smoothing=plot_smoothing,
+            )
         )
 
     # JAX backend
@@ -550,21 +523,23 @@ def cma(
     else:
         scan_fn = _get_jax_cma(num_taps, stride, num_ch)
         y_jax, e_jax, W_jax, wh_jax = scan_fn(x_jax, W_jax, mu_jax, r2_jax, n_sym)
-    return _log_equalizer_exit(
-        _unpack_result_jax(
-            y_jax,
-            e_jax,
-            W_jax,
-            wh_jax,
-            was_1d,
-            store_weights,
-            n_sym=None,
-            xp=xp,
-            input_norm_factor=eq_norm,
-        ),
-        name="CMA" if not use_pilots else "CMA(PA)",
-        debug_plot=debug_plot,
-        check_convergence=True,
+    return finish(
+        _log_equalizer_exit(
+            _unpack_result_jax(
+                y_jax,
+                e_jax,
+                W_jax,
+                wh_jax,
+                was_1d,
+                store_weights,
+                n_sym=None,
+                xp=xp,
+                input_norm_factor=eq_norm,
+            ),
+            name="CMA" if not use_pilots else "CMA(PA)",
+            debug_plot=debug_plot,
+            check_convergence=True,
+        )
     )
 
 
@@ -761,45 +736,14 @@ def rde(
     Use ``device='cpu'`` for typical SISO sequences, or ``backend='numba'``
     for CPU-optimal throughput.
     """
-    x, sig = unwrap_signal(samples)
+    context = prepare_signal_input(samples, function_name="rde()")
+    samples = context.array
+    sig = context.signal
     if sig is not None:
-        # sig.sps is always populated (derived from the required sampling_rate
-        # / symbol_rate fields), so the Signal's own value always wins over a
-        # supplied sps - see CLAUDE.md, "Signal-Awareness".
-        if sps is not None:
-            logger.warning(
-                "rde(): ignoring supplied sps=%r for Signal input; using the "
-                "signal's own sps=%r instead.",
-                sps,
-                sig.sps,
-            )
-        result = rde(
-            x,
-            num_taps=num_taps,
-            sps=_coerce_integer_sps(sig.sps, caller="rde()"),
-            step_size=step_size,
-            modulation=modulation,
-            order=order,
-            unipolar=unipolar,
-            store_weights=store_weights,
-            device=device,
-            center_tap=center_tap,
-            backend=backend,
-            w_init=w_init,
-            pilot_ref=pilot_ref,
-            pilot_mask=pilot_mask,
-            pilot_gain_db=pilot_gain_db,
-            pmf=pmf,
-            debug_plot=debug_plot,
-            plot_smoothing=plot_smoothing,
-            input_norm_factor=input_norm_factor,
-            samples_prefix=samples_prefix,
-            pad_mode=pad_mode,
-            update_mode=update_mode,
-            block_len=block_len,
-        )
-        result.y_hat = rewrap_signal(sig, result.y_hat, sampling_rate=sig.symbol_rate)
-        return result
+        sps = require_integer_sps(context.required("sps", sps), "rde()")
+
+    def finish(result: EqualizerResult) -> EqualizerResult:
+        return _attach_equalized_signal(result, sig)
 
     if sps is None:
         sps = 2
@@ -889,28 +833,30 @@ def rde(
             center_tap=center_tap,
             w_init=w_init,
         )
-        return _run_block_equalizer(
-            "rde",
-            samples_padded_np=samples_padded_np,
-            w_arr=w_arr,
-            num_ch=num_ch,
-            num_taps=num_taps,
-            n_sym=n_sym,
-            stride=stride,
-            block_len=block_len,
-            step_size=step_size,
-            backend=backend,
-            device=device,
-            was_1d=was_1d,
-            xp=xp,
-            eq_norm=eq_norm,
-            name="RDE(block)" if not use_pilots else "RDE(PA,block)",
-            debug_plot=debug_plot,
-            plot_smoothing=plot_smoothing,
-            check_convergence=True,
-            radii_np=radii,
-            pref_np=pref_np,
-            pmask_np=pmask_np,
+        return finish(
+            _run_block_equalizer(
+                "rde",
+                samples_padded_np=samples_padded_np,
+                w_arr=w_arr,
+                num_ch=num_ch,
+                num_taps=num_taps,
+                n_sym=n_sym,
+                stride=stride,
+                block_len=block_len,
+                step_size=step_size,
+                backend=backend,
+                device=device,
+                was_1d=was_1d,
+                xp=xp,
+                eq_norm=eq_norm,
+                name="RDE(block)" if not use_pilots else "RDE(PA,block)",
+                debug_plot=debug_plot,
+                plot_smoothing=plot_smoothing,
+                check_convergence=True,
+                radii_np=radii,
+                pref_np=pref_np,
+                pmask_np=pmask_np,
+            )
         )
 
     if backend == "numba":
@@ -982,22 +928,24 @@ def rde(
                 e_out,
                 w_hist_buf,
             )
-        return _log_equalizer_exit(
-            _unpack_result_numpy(
-                y_out,
-                e_out,
-                W,
-                w_hist_buf,
-                was_1d,
-                store_weights,
-                n_sym=None,
-                xp=xp,
-                input_norm_factor=eq_norm,
-            ),
-            name="RDE" if not use_pilots else "RDE(PA)",
-            debug_plot=debug_plot,
-            check_convergence=True,
-            plot_smoothing=plot_smoothing,
+        return finish(
+            _log_equalizer_exit(
+                _unpack_result_numpy(
+                    y_out,
+                    e_out,
+                    W,
+                    w_hist_buf,
+                    was_1d,
+                    store_weights,
+                    n_sym=None,
+                    xp=xp,
+                    input_norm_factor=eq_norm,
+                ),
+                name="RDE" if not use_pilots else "RDE(PA)",
+                debug_plot=debug_plot,
+                check_convergence=True,
+                plot_smoothing=plot_smoothing,
+            )
         )
 
     # JAX backend
@@ -1071,19 +1019,21 @@ def rde(
     else:
         scan_fn = _get_jax_rde(num_taps, stride, num_radii, num_ch)
         y_jax, e_jax, W_jax, wh_jax = scan_fn(x_jax, W_jax, mu_jax, radii_jax, n_sym)
-    return _log_equalizer_exit(
-        _unpack_result_jax(
-            y_jax,
-            e_jax,
-            W_jax,
-            wh_jax,
-            was_1d,
-            store_weights,
-            n_sym=None,
-            xp=xp,
-            input_norm_factor=eq_norm,
-        ),
-        name="RDE" if not use_pilots else "RDE(PA)",
-        debug_plot=debug_plot,
-        check_convergence=True,
+    return finish(
+        _log_equalizer_exit(
+            _unpack_result_jax(
+                y_jax,
+                e_jax,
+                W_jax,
+                wh_jax,
+                was_1d,
+                store_weights,
+                n_sym=None,
+                xp=xp,
+                input_norm_factor=eq_norm,
+            ),
+            name="RDE" if not use_pilots else "RDE(PA)",
+            debug_plot=debug_plot,
+            check_convergence=True,
+        )
     )

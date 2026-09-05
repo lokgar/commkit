@@ -51,6 +51,7 @@ Estimators (see ``linewidth_dsh``):
 import numpy as np
 
 from ..backend import ArrayType, dispatch, to_device
+from ..core._signal_adapter import prepare_signal_input
 from ..core.signal import Signal
 from ..frequency import correct_static_frequency_offset
 from ..helpers import (
@@ -58,7 +59,6 @@ from ..helpers import (
     remove_linear_trend,
     restore_1d,
     to_report_scalar,
-    unwrap_signal,
 )
 from ..logger import logger
 from ..smoothing import moving_average
@@ -235,25 +235,9 @@ def dsh_phase(
       the delay arm, AOM RF-synthesizer phase noise - is indistinguishable
       from laser phase noise here and adds to the low-frequency PSD.
     """
-    samples, sig = unwrap_signal(samples)
-    if sig is not None:
-        # sig.sampling_rate is a required field, so it always wins over a
-        # supplied sampling_rate - see CLAUDE.md, "Signal-Awareness".
-        if sampling_rate is not None:
-            logger.warning(
-                "dsh_phase(): ignoring supplied sampling_rate=%r for Signal "
-                "input; using the signal's own sampling_rate=%r instead.",
-                sampling_rate,
-                sig.sampling_rate,
-            )
-        return dsh_phase(
-            samples,
-            sig.sampling_rate,
-            f_shift=f_shift,
-        )
-
-    if sampling_rate is None:
-        raise ValueError("dsh_phase() requires sampling_rate for array input.")
+    context = prepare_signal_input(samples, function_name="dsh_phase()")
+    samples = context.array
+    sampling_rate = context.required("sampling_rate", sampling_rate)
 
     z, xp, _ = dispatch(samples)
     fs = float(sampling_rate)
@@ -647,35 +631,9 @@ def linewidth_dsh(
       plotted log-binned median curve is *not* corrected, so at small
       ``K`` the ``Δν/π`` floor guide sits visibly above it.
     """
-    samples, sig = unwrap_signal(samples)
-    if sig is not None:
-        # sig.sampling_rate is a required field, so it always wins over a
-        # supplied sampling_rate - see CLAUDE.md, "Signal-Awareness".
-        if sampling_rate is not None:
-            logger.warning(
-                "linewidth_dsh(): ignoring supplied sampling_rate=%r for "
-                "Signal input; using the signal's own sampling_rate=%r "
-                "instead.",
-                sampling_rate,
-                sig.sampling_rate,
-            )
-        return linewidth_dsh(
-            samples,
-            sig.sampling_rate,
-            delay,
-            f_shift=f_shift,
-            method=method,
-            lags=lags,
-            nperseg=nperseg,
-            f_min=f_min,
-            f_max=f_max,
-            notch_guard=notch_guard,
-            level_db=level_db,
-            debug_plot=debug_plot,
-        )
-
-    if sampling_rate is None:
-        raise ValueError("linewidth_dsh() requires sampling_rate for array input.")
+    context = prepare_signal_input(samples, function_name="linewidth_dsh()")
+    samples = context.array
+    sampling_rate = context.required("sampling_rate", sampling_rate)
     if delay is None:
         raise ValueError("linewidth_dsh() requires delay.")
 

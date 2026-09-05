@@ -11,15 +11,13 @@ import numpy as np
 import scipy
 
 from .backend import ArrayType, dispatch, to_device
+from .core._signal_adapter import prepare_signal_input, require_integer_sps
 from .core.signal import Signal
 from .helpers import (
     _cd_beta2_length,
-    _coerce_integer_sps,
     as_2d,
     normalize,
     restore_1d,
-    rewrap_signal,
-    unwrap_signal,
 )
 from .logger import logger
 
@@ -75,7 +73,7 @@ def rect_taps(sps: int, duty_cycle: float = 1.0, rise_time: float = 0.0) -> np.n
             "ramps would overlap with no flat top."
         )
 
-    sps = _coerce_integer_sps(sps, caller="rect_taps()")
+    sps = require_integer_sps(sps, "rect_taps()")
     n_total = int(round(sps * duty_cycle))
     if n_total < 1:
         n_total = 1
@@ -197,7 +195,7 @@ def smoothrect_taps(
         duty_cycle,
     )
     # Ensure odd number of taps to have a center peak
-    sps = _coerce_integer_sps(sps, caller="smoothrect_taps()")
+    sps = require_integer_sps(sps, "smoothrect_taps()")
     num_taps = int(span * sps)
     if num_taps % 2 == 0:
         num_taps += 1
@@ -814,9 +812,8 @@ def ols_fir_filter(
     before OLS processing and trims the same number of leading output
     samples - a zero-copy shift that costs one extra OLS block at most.
     """
-    x, sig = unwrap_signal(samples)
-    if sig is not None:
-        return rewrap_signal(sig, ols_fir_filter(x, taps, N_fft=N_fft, center=center))
+    context = prepare_signal_input(samples, function_name="ols_fir_filter()")
+    samples = context.array
 
     samples, xp, _ = dispatch(samples)
     taps = xp.asarray(taps)
@@ -872,7 +869,7 @@ def ols_fir_filter(
         out = out.astype(
             out_dtype
         )  # guard complex inputs (e.g. complex64 -> complex128)
-    return restore_1d(was_1d, out)
+    return context.return_value(restore_1d(was_1d, out))
 
 
 def shaping_filter_taps(sig: Signal) -> ArrayType:
@@ -908,13 +905,13 @@ def shaping_filter_taps(sig: Signal) -> ArrayType:
 
     if sig.pulse_shape == "rect":
         taps = rect_taps(
-            _coerce_integer_sps(sig.sps, caller="shaping_filter_taps()"),
+            require_integer_sps(sig.sps, "shaping_filter_taps()"),
             duty_cycle=duty_cycle,
             rise_time=sig.rise_time,
         )
     elif sig.pulse_shape == "smoothrect":
         taps = smoothrect_taps(
-            sps=_coerce_integer_sps(sig.sps, caller="shaping_filter_taps()"),
+            sps=require_integer_sps(sig.sps, "shaping_filter_taps()"),
             span=sig.filter_span,
             rise_time=sig.rise_time,
             duty_cycle=duty_cycle,
@@ -957,9 +954,10 @@ def fir_filter(
     array_like or Signal
         Filtered samples with the same shape as `samples` (mode='same').
     """
-    x, sig = unwrap_signal(samples)
-    if sig is not None:
-        return rewrap_signal(sig, fir_filter(x, taps, axis=-1))
+    context = prepare_signal_input(samples, function_name="fir_filter()")
+    samples = context.array
+    if context.signal is not None:
+        axis = -1
 
     logger.debug(
         "Applying FIR filter via convolution (%s taps, axis=%s).", len(taps), axis
@@ -993,7 +991,7 @@ def fir_filter(
     # Belt-and-suspenders: scipy may still promote internally (version-dependent)
     if result.dtype != samples.dtype:
         result = result.astype(samples.dtype)
-    return result
+    return context.return_value(result)
 
 
 def matched_filter(
@@ -1029,8 +1027,10 @@ def matched_filter(
     array_like or Signal
         Matched filtered samples. Shape: (..., N_samples).
     """
-    x, sig = unwrap_signal(samples)
-    if sig is not None:
+    context = prepare_signal_input(samples, function_name="matched_filter()")
+    samples = context.array
+    if context.signal is not None:
+        sig = context.signal
         taps = pulse_taps
         if taps is None:
             try:
@@ -1038,9 +1038,8 @@ def matched_filter(
             except ValueError as e:
                 logger.error("Cannot apply matched filter: %s", e)
                 return sig._shallow_clone()
-        return rewrap_signal(
-            sig, matched_filter(x, taps, taps_normalization=taps_normalization, axis=-1)
-        )
+        pulse_taps = taps
+        axis = -1
 
     if pulse_taps is None:
         raise ValueError("matched_filter() requires pulse_taps for array input.")
@@ -1063,7 +1062,7 @@ def matched_filter(
             "Use 'unity_gain' or 'unit_energy'."
         )
 
-    return fir_filter(samples, matched_taps, axis=axis)
+    return context.return_value(fir_filter(samples, matched_taps, axis=axis))
 
 
 def iir_filter(
@@ -1112,9 +1111,8 @@ def iir_filter(
     single precision is not numerically safe (see ``CLAUDE.md``, "Phase
     Unwrapping & Kalman Smoothers").
     """
-    x, sig = unwrap_signal(samples)
-    if sig is not None:
-        return rewrap_signal(sig, iir_filter(x, sos, axis=axis, zero_phase=zero_phase))
+    context = prepare_signal_input(samples, function_name="iir_filter()")
+    samples = context.array
 
     samples, xp, sp = dispatch(samples)
     sos = xp.asarray(sos)
@@ -1133,7 +1131,7 @@ def iir_filter(
         result = sp.signal.sosfiltfilt(sos, x_work, axis=axis)
     else:
         result = sp.signal.sosfilt(sos, x_work, axis=axis)
-    return result.astype(in_dtype, copy=False)
+    return context.return_value(result.astype(in_dtype, copy=False))
 
 
 # -----------------------------------------------------------------------------
@@ -1196,31 +1194,11 @@ def compensate_chromatic_dispersion(
     ...     received, dispersion_ps_nm_km=17.0, fiber_length_km=80.0,
     ...     center_wavelength_nm=1550.0, sampling_rate=fs)
     """
-    x, sig = unwrap_signal(samples)
-    if sig is not None:
-        # sig.sampling_rate is a required field, so it always wins over a
-        # supplied sampling_rate - see CLAUDE.md, "Signal-Awareness".
-        if sampling_rate is not None:
-            logger.warning(
-                "compensate_chromatic_dispersion(): ignoring supplied "
-                "sampling_rate=%r for Signal input; using the signal's own "
-                "sampling_rate=%r instead.",
-                sampling_rate,
-                sig.sampling_rate,
-            )
-        result = compensate_chromatic_dispersion(
-            x,
-            sig.sampling_rate,
-            dispersion_ps_nm_km,
-            fiber_length_km,
-            center_wavelength_nm,
-        )
-        return rewrap_signal(sig, result)
-
-    if sampling_rate is None:
-        raise ValueError(
-            "compensate_chromatic_dispersion() requires sampling_rate for array input."
-        )
+    context = prepare_signal_input(
+        samples, function_name="compensate_chromatic_dispersion()"
+    )
+    samples = context.array
+    sampling_rate = context.required("sampling_rate", sampling_rate)
     if (
         dispersion_ps_nm_km is None
         or fiber_length_km is None
@@ -1256,4 +1234,4 @@ def compensate_chromatic_dispersion(
     if result.dtype != samples.dtype:
         result = result.astype(samples.dtype)
 
-    return restore_1d(was_1d, result)
+    return context.return_value(restore_1d(was_1d, result))

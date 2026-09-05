@@ -12,6 +12,7 @@ from collections.abc import Callable
 import numpy as np
 
 from .backend import ArrayType, dispatch, to_device
+from .core._signal_adapter import prepare_signal_input
 from .core.signal import Signal
 from .helpers import (
     _parabolic_peak_offset,
@@ -19,8 +20,6 @@ from .helpers import (
     broadcast_channels,
     linear_trend_slope,
     restore_1d,
-    rewrap_signal,
-    unwrap_signal,
 )
 from .logger import logger
 
@@ -255,55 +254,13 @@ def estimate_frequency_offset_mth_power(
     and has a sinc-function bias for small NFFT), the Jacobsen estimator
     is unbiased for a rectangular window.
     """
-    x, sig = unwrap_signal(samples)
-    if sig is not None:
-        # sig.sampling_rate is required, so it always wins over a supplied
-        # value; mod_scheme/mod_order are optional, so they win only when
-        # set, falling back to the supplied value (with a warning) otherwise
-        # - see CLAUDE.md, "Signal-Awareness".
-        if sampling_rate is not None:
-            logger.warning(
-                "estimate_frequency_offset_mth_power(): ignoring supplied "
-                "sampling_rate=%r for Signal input; using the signal's own "
-                "sampling_rate=%r instead.",
-                sampling_rate,
-                sig.sampling_rate,
-            )
-        mod = sig.mod_scheme
-        if mod is None:
-            mod = modulation
-            if mod is not None:
-                logger.warning(
-                    "estimate_frequency_offset_mth_power(): Signal has no "
-                    "mod_scheme set; falling back to supplied modulation=%r.",
-                    mod,
-                )
-        ord_ = sig.mod_order
-        if ord_ is None:
-            ord_ = order
-            if ord_ is not None:
-                logger.warning(
-                    "estimate_frequency_offset_mth_power(): Signal has no "
-                    "mod_order set; falling back to supplied order=%r.",
-                    ord_,
-                )
-        return estimate_frequency_offset_mth_power(
-            x,
-            sig.sampling_rate,
-            mod,
-            ord_,
-            search_range=search_range,
-            nfft=nfft,
-            interpolation=interpolation,
-            combine_channels=combine_channels,
-            debug_plot=debug_plot,
-        )
-
-    if sampling_rate is None:
-        raise ValueError(
-            "estimate_frequency_offset_mth_power() requires sampling_rate for "
-            "array input."
-        )
+    context = prepare_signal_input(
+        samples, function_name="estimate_frequency_offset_mth_power()"
+    )
+    samples = context.array
+    sampling_rate = context.required("sampling_rate", sampling_rate)
+    modulation = context.optional("mod_scheme", modulation)
+    order = context.optional("mod_order", order)
     if modulation is None or order is None:
         raise ValueError(
             "estimate_frequency_offset_mth_power() requires modulation and order "
@@ -532,55 +489,13 @@ def estimate_frequency_offset_mengali_morelli(
     Lock range: [-fs/(2M), fs/(2M)] for blind M-th power mode;
     [-fs/2, fs/2] for data-aided or generic blind mode.
     """
-    x, sig = unwrap_signal(samples)
-    if sig is not None:
-        # sig.sampling_rate is required, so it always wins; mod_scheme/
-        # mod_order are optional, so they win only when set (fallback to the
-        # supplied value, with a warning, otherwise) - see CLAUDE.md,
-        # "Signal-Awareness".
-        if sampling_rate is not None:
-            logger.warning(
-                "estimate_frequency_offset_mengali_morelli(): ignoring "
-                "supplied sampling_rate=%r for Signal input; using the "
-                "signal's own sampling_rate=%r instead.",
-                sampling_rate,
-                sig.sampling_rate,
-            )
-        mod = sig.mod_scheme
-        if mod is None:
-            mod = modulation
-            if mod is not None:
-                logger.warning(
-                    "estimate_frequency_offset_mengali_morelli(): Signal has "
-                    "no mod_scheme set; falling back to supplied "
-                    "modulation=%r.",
-                    mod,
-                )
-        ord_ = sig.mod_order
-        if ord_ is None:
-            ord_ = order
-            if ord_ is not None:
-                logger.warning(
-                    "estimate_frequency_offset_mengali_morelli(): Signal has "
-                    "no mod_order set; falling back to supplied order=%r.",
-                    ord_,
-                )
-        return estimate_frequency_offset_mengali_morelli(
-            x,
-            sig.sampling_rate,
-            modulation=mod,
-            order=ord_,
-            ref_signal=ref_signal,
-            max_lag=max_lag,
-            combine_channels=combine_channels,
-            debug_plot=debug_plot,
-        )
-
-    if sampling_rate is None:
-        raise ValueError(
-            "estimate_frequency_offset_mengali_morelli() requires sampling_rate "
-            "for array input."
-        )
+    context = prepare_signal_input(
+        samples, function_name="estimate_frequency_offset_mengali_morelli()"
+    )
+    samples = context.array
+    sampling_rate = context.required("sampling_rate", sampling_rate)
+    modulation = context.optional("mod_scheme", modulation)
+    order = context.optional("mod_order", order)
 
     samples, xp, _ = dispatch(samples)
     samples, was_1d = as_2d(samples, name="samples")
@@ -763,33 +678,11 @@ def estimate_frequency_offset_pilot_symbols(
     where ``max_gap`` is the maximum spacing (in samples) between any two
     consecutive entries of ``pilot_indices``.
     """
-    x, sig = unwrap_signal(samples)
-    if sig is not None:
-        # sig.sampling_rate is a required field, so it always wins over a
-        # supplied sampling_rate - see CLAUDE.md, "Signal-Awareness".
-        if sampling_rate is not None:
-            logger.warning(
-                "estimate_frequency_offset_pilot_symbols(): ignoring supplied "
-                "sampling_rate=%r for Signal input; using the signal's own "
-                "sampling_rate=%r instead.",
-                sampling_rate,
-                sig.sampling_rate,
-            )
-        return estimate_frequency_offset_pilot_symbols(
-            x,
-            sig.sampling_rate,
-            pilot_indices,
-            pilot_values,
-            snr_weighted=snr_weighted,
-            combine_channels=combine_channels,
-            debug_plot=debug_plot,
-        )
-
-    if sampling_rate is None:
-        raise ValueError(
-            "estimate_frequency_offset_pilot_symbols() requires sampling_rate for "
-            "array input."
-        )
+    context = prepare_signal_input(
+        samples, function_name="estimate_frequency_offset_pilot_symbols()"
+    )
+    samples = context.array
+    sampling_rate = context.required("sampling_rate", sampling_rate)
     if pilot_indices is None or pilot_values is None:
         raise ValueError(
             "estimate_frequency_offset_pilot_symbols() requires pilot_indices and "
@@ -952,27 +845,9 @@ def find_bias_tone(
     windowed spectral peak than standard parabolic (magnitude-domain) fits,
     reducing estimation bias for non-integer tone frequencies.
     """
-    x, sig = unwrap_signal(seg)
-    if sig is not None:
-        # sig.sampling_rate is a required field, so it always wins over a
-        # supplied sampling_rate - see CLAUDE.md, "Signal-Awareness".
-        if sampling_rate is not None:
-            logger.warning(
-                "find_bias_tone(): ignoring supplied sampling_rate=%r for "
-                "Signal input; using the signal's own sampling_rate=%r "
-                "instead.",
-                sampling_rate,
-                sig.sampling_rate,
-            )
-        return find_bias_tone(
-            x,
-            sig.sampling_rate,
-            target_frequency=target_frequency,
-            search_band=search_band,
-        )
-
-    if sampling_rate is None:
-        raise ValueError("find_bias_tone() requires sampling_rate for array input.")
+    context = prepare_signal_input(seg, function_name="find_bias_tone()")
+    seg = context.array
+    sampling_rate = context.required("sampling_rate", sampling_rate)
     if (target_frequency is None) != (search_band is None):
         raise ValueError(
             "target_frequency and search_band must both be provided or both omitted."
@@ -1186,34 +1061,11 @@ def correct_frequency_offset_blockwise(
     4. Integrate: theta(n) = (2 * pi / fs) * cumsum(delta_f).
     5. Apply: y[n] = x[n] * exp(-j * theta[n]).
     """
-    x, sig = unwrap_signal(samples)
-    if sig is not None:
-        # sig.sampling_rate is a required field, so it always wins over a
-        # supplied sampling_rate - see CLAUDE.md, "Signal-Awareness".
-        if sampling_rate is not None:
-            logger.warning(
-                "correct_frequency_offset_blockwise(): ignoring supplied "
-                "sampling_rate=%r for Signal input; using the signal's own "
-                "sampling_rate=%r instead.",
-                sampling_rate,
-                sig.sampling_rate,
-            )
-        result = correct_frequency_offset_blockwise(
-            x,
-            sig.sampling_rate,
-            block_size,
-            overlap,
-            estimator,
-            combine_channels=combine_channels,
-            debug_plot=debug_plot,
-        )
-        return rewrap_signal(sig, result)
-
-    if sampling_rate is None:
-        raise ValueError(
-            "correct_frequency_offset_blockwise() requires sampling_rate for "
-            "array input."
-        )
+    context = prepare_signal_input(
+        samples, function_name="correct_frequency_offset_blockwise()"
+    )
+    samples = context.array
+    sampling_rate = context.required("sampling_rate", sampling_rate)
     if block_size is None or overlap is None or estimator is None:
         raise ValueError(
             "correct_frequency_offset_blockwise() requires block_size, overlap, "
@@ -1326,7 +1178,7 @@ def correct_frequency_offset_blockwise(
             title=title,
         )
 
-    return restore_1d(was_1d, corrected_2d)
+    return context.return_value(restore_1d(was_1d, corrected_2d))
 
 
 def correct_static_frequency_offset(
@@ -1372,25 +1224,11 @@ def correct_static_frequency_offset(
         Frequency-corrected samples, same shape and dtype as input.  A
         :class:`Signal` returns a new corrected :class:`Signal`.
     """
-    x, sig = unwrap_signal(samples)
-    if sig is not None:
-        # sig.sampling_rate is a required field, so it always wins over a
-        # supplied sampling_rate - see CLAUDE.md, "Signal-Awareness".
-        if sampling_rate is not None:
-            logger.warning(
-                "correct_static_frequency_offset(): ignoring supplied "
-                "sampling_rate=%r for Signal input; using the signal's own "
-                "sampling_rate=%r instead.",
-                sampling_rate,
-                sig.sampling_rate,
-            )
-        result = correct_static_frequency_offset(x, sig.sampling_rate, offset)
-        return rewrap_signal(sig, result)
-
-    if sampling_rate is None:
-        raise ValueError(
-            "correct_static_frequency_offset() requires sampling_rate for array input."
-        )
+    context = prepare_signal_input(
+        samples, function_name="correct_static_frequency_offset()"
+    )
+    samples = context.array
+    sampling_rate = context.required("sampling_rate", sampling_rate)
     if offset is None:
         raise ValueError("correct_static_frequency_offset() requires offset.")
 
@@ -1448,4 +1286,4 @@ def correct_static_frequency_offset(
         if samples.ndim > 1:
             mixer = mixer.reshape((1,) * (samples.ndim - 1) + (-1,))
 
-    return samples * mixer
+    return context.return_value(samples * mixer)

@@ -4,11 +4,15 @@ from __future__ import annotations
 
 import logging
 from dataclasses import dataclass
+from typing import TYPE_CHECKING
 
 import numpy as np
 
 from ..backend import ArrayType, to_device
 from ..logger import logger
+
+if TYPE_CHECKING:
+    from ..core.signal import Signal
 
 # -----------------------------------------------------------------------------
 # RESULT CONTAINER
@@ -190,4 +194,15 @@ def _log_equalizer_exit(
 
         _plotting.plot_equalizer_result(result, smoothing=plot_smoothing)
 
+    return result
+
+
+def _attach_equalized_signal(
+    result: EqualizerResult, signal: Signal | None
+) -> EqualizerResult:
+    """Attach an array result to its originating Signal at symbol rate."""
+    if signal is not None:
+        result.y_hat = signal.replace_samples(
+            result.y_hat, sampling_rate=signal.symbol_rate
+        )
     return result

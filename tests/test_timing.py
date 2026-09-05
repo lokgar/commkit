@@ -608,6 +608,27 @@ def test_estimate_timing_with_preamble_object_explicit(backend_device, xp):
     assert abs(int(integer[0]) - 40) <= 1
 
 
+def test_estimate_timing_signal_derives_sps_for_preamble(backend_device, xp):
+    """A Signal provides the SPS required to reconstruct a Preamble."""
+    from commkit.core import Preamble, Signal
+
+    barker = timing.barker_sequence(7)
+    samples = xp.zeros(200, dtype="complex64")
+    samples[40:47] = barker
+    sig = Signal(
+        samples=samples,
+        sampling_rate=1.0,
+        symbol_rate=1.0,
+        pulse_shape="none",
+    )
+
+    integer, _ = timing.estimate_timing(
+        sig, Preamble(sequence_type="barker", length=7), threshold=2.0
+    )
+
+    assert abs(int(integer[0]) - 40) <= 1
+
+
 def test_estimate_timing_skew_detection(backend_device, xp):
     """Verify skew warning is emitted when MIMO channels have different preamble positions."""
 

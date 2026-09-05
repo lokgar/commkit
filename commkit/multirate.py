@@ -62,6 +62,7 @@ from typing import Any
 
 from . import helpers
 from .backend import ArrayType, dispatch
+from .core._signal_adapter import prepare_signal_input, require_integer_sps
 from .core.signal import Signal
 from .logger import logger
 
@@ -106,27 +107,36 @@ def decimate_to_symbol_rate(
     array_like or Signal
         Symbols at 1 sps. Shape: (..., N_samples / sps).
     """
-    x, sig = helpers.unwrap_signal(samples)
-    if sig is not None:
+    context = prepare_signal_input(samples, function_name="decimate_to_symbol_rate()")
+    samples = context.array
+    meta: dict[str, Any] = {}
+    if context.signal is not None:
+        sig = context.signal
         do_norm = True if normalize is None else normalize
-        sps_int = helpers._coerce_integer_sps(
-            sig.sps, caller="decimate_to_symbol_rate()"
-        )
-        meta: dict[str, Any] = {}
+        sps_int = require_integer_sps(sig.sps, "decimate_to_symbol_rate()")
         if sps_int <= 1:
             logger.info("Signal already at 1 sps, no downsampling needed.")
-            result = x
+            result = samples
         else:
-            result = decimate_to_symbol_rate(
-                x, sps=sps_int, offset=offset, normalize=False, axis=-1
-            )
+            result = _decimate_to_symbol_rate_array(samples, sps_int, offset, False, -1)
             meta["sampling_rate"] = sig.symbol_rate
         if do_norm:
             result = helpers.normalize(result, "average_power", axis=-1)
-        return helpers.rewrap_signal(sig, result, **meta)
+        return context.return_value(result, **meta)
 
     if sps is None:
         raise ValueError("decimate_to_symbol_rate() requires sps for array input.")
+    return _decimate_to_symbol_rate_array(samples, sps, offset, normalize, axis)
+
+
+def _decimate_to_symbol_rate_array(
+    samples: ArrayType,
+    sps: int,
+    offset: int,
+    normalize: bool | None,
+    axis: int,
+) -> ArrayType:
+    """Array-only direct symbol-rate decimation."""
     logger.debug("Downsampling to symbols: sps=%s, offset=%s", sps, offset)
     arr, xp, _ = dispatch(samples)
 
@@ -171,24 +181,20 @@ def upsample(
     array_like or Signal
         The upsampled signal. Shape: (..., N_samples * factor).
     """
-    x, sig = helpers.unwrap_signal(samples)
-    if sig is not None:
-        result = upsample(
-            x,
-            factor,
-            correct_power=True if correct_power is None else correct_power,
-            axis=-1,
-        )
-        return helpers.rewrap_signal(
-            sig, result, sampling_rate=sig.sampling_rate * factor
-        )
+    context = prepare_signal_input(samples, function_name="upsample()")
+    samples = context.array
+    metadata: dict[str, Any] = {}
+    if context.signal is not None:
+        correct_power = True if correct_power is None else correct_power
+        axis = -1
+        metadata["sampling_rate"] = context.signal.sampling_rate * factor
 
     logger.debug("Upsampling by factor %s (polyphase, axis=%s).", factor, axis)
     arr, xp, sp = dispatch(samples)
     out = sp.signal.resample_poly(arr, factor, 1, axis=axis)
     if correct_power:
         out = out * (factor**-0.5)
-    return out
+    return context.return_value(out, **metadata)
 
 
 def decimate(
@@ -238,19 +244,13 @@ def decimate(
     anti-aliasing; adding an extra decimation filter will degrade the
     signal. Use `decimate_to_symbol_rate` instead.
     """
-    x, sig = helpers.unwrap_signal(samples)
-    if sig is not None:
-        result = decimate(
-            x,
-            factor,
-            method=method,
-            correct_power=True if correct_power is None else correct_power,
-            axis=-1,
-            **kwargs,
-        )
-        return helpers.rewrap_signal(
-            sig, result, sampling_rate=sig.sampling_rate / factor
-        )
+    context = prepare_signal_input(samples, function_name="decimate()")
+    samples = context.array
+    metadata: dict[str, Any] = {}
+    if context.signal is not None:
+        correct_power = True if correct_power is None else correct_power
+        axis = -1
+        metadata["sampling_rate"] = context.signal.sampling_rate / factor
 
     logger.debug("Decimating by factor %s (method: %s).", factor, method)
     arr, _, sp = dispatch(samples)
@@ -270,7 +270,7 @@ def decimate(
 
     if correct_power:
         out = out * (factor**0.5)
-    return out
+    return context.return_value(out, **metadata)
 
 
 def resample(
@@ -321,25 +321,19 @@ def resample(
     ValueError
         If parameters are insufficient or contradictory.
     """
-    x, sig = helpers.unwrap_signal(samples)
-    if sig is not None:
+    context = prepare_signal_input(samples, function_name="resample()")
+    samples = context.array
+    metadata: dict[str, Any] = {}
+    if context.signal is not None:
+        sig = context.signal
         # When sps_out is given, the input sps comes from the signal itself.
-        sig_sps_in = sig.sps if sps_out is not None else None
-        result = resample(
-            x,
-            up=up,
-            down=down,
-            sps_in=sig_sps_in,
-            sps_out=sps_out,
-            correct_power=True if correct_power is None else correct_power,
-            axis=-1,
-        )
-        meta: dict[str, Any] = {}
+        sps_in = sig.sps if sps_out is not None else None
+        correct_power = True if correct_power is None else correct_power
+        axis = -1
         if sps_out is not None:
-            meta["sampling_rate"] = sps_out * sig.symbol_rate
+            metadata["sampling_rate"] = sps_out * sig.symbol_rate
         elif up is not None and down is not None:
-            meta["sampling_rate"] = sig.sampling_rate * up / down
-        return helpers.rewrap_signal(sig, result, **meta)
+            metadata["sampling_rate"] = sig.sampling_rate * up / down
 
     if (up is not None or down is not None) and (
         sps_in is not None or sps_out is not None
@@ -361,7 +355,7 @@ def resample(
     if correct_power:
         # sps_after / sps_before = up / down  ->  gain = sqrt(down/up).
         out = out * (down / up) ** 0.5
-    return out
+    return context.return_value(out, **metadata)
 
 
 def resolve_symbols(
@@ -402,8 +396,10 @@ def resolve_symbols(
         If ``sps`` is missing/invalid (array), or the signal's ``sps`` is not a
         positive integer.
     """
-    x, sig = helpers.unwrap_signal(samples)
-    if sig is not None:
+    context = prepare_signal_input(samples, function_name="resolve_symbols()")
+    samples = context.array
+    if context.signal is not None:
+        sig = context.signal
         if sig.signal_type is not None:
             logger.warning(
                 "resolve_symbols() called on a frame-generated signal - skipping. "
@@ -421,18 +417,15 @@ def resolve_symbols(
         if s % 1 != 0:
             raise ValueError("Symbol rate must be an integer.")
         # Output field (resolved_symbols) differs from the input field
-        # (samples), so this can't go through rewrap_signal (which always
-        # sets .samples) - copy and assign the target field by hand.
-        new = sig._shallow_clone()
-        new.resolved_symbols = resolve_symbols(x, sps=int(s), offset=offset)
-        new.resolved_bits = None
-        return new
+        # (samples), so replace the derived field explicitly.
+        resolved = _decimate_to_symbol_rate_array(
+            samples, require_integer_sps(s, "resolve_symbols()"), offset, True, -1
+        )
+        return context.replace_field("resolved_symbols", resolved)
 
     if sps is None:
         raise ValueError("resolve_symbols() requires sps for array input.")
-    sps_int = helpers._coerce_integer_sps(sps, caller="resolve_symbols()")
+    sps_int = require_integer_sps(sps, "resolve_symbols()")
     # decimate_to_symbol_rate slices [offset::sps] (identity when sps==1) then
     # normalizes to unit average power.
-    return decimate_to_symbol_rate(
-        samples, sps=sps_int, offset=int(offset), normalize=True
-    )
+    return _decimate_to_symbol_rate_array(samples, sps_int, int(offset), True, -1)

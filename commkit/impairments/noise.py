@@ -1,8 +1,9 @@
 """Additive measurement noise (ASE / thermal) impairments."""
 
 from ..backend import ArrayType, dispatch
+from ..core._signal_adapter import prepare_signal_input
 from ..core.signal import Signal
-from ..helpers import db_to_linear, rewrap_signal, unwrap_signal
+from ..helpers import db_to_linear
 from ..logger import logger
 
 __all__ = ["apply_awgn"]
@@ -60,29 +61,9 @@ def apply_awgn(
     >>> noisy = apply_awgn(sig.samples, esn0_db=20, sps=sig.sps)
     >>> noisy = apply_awgn(sig, esn0_db=20)  # Signal input: sps taken from sig
     """
-    x, sig = unwrap_signal(samples)
-    if sig is not None:
-        # sig.sps is always populated (derived from the required sampling_rate
-        # / symbol_rate fields), so the Signal's own value always wins over a
-        # supplied sps - see CLAUDE.md, "Signal-Awareness".
-        if sps is not None:
-            logger.warning(
-                "apply_awgn(): ignoring supplied sps=%r for Signal input; "
-                "using the signal's own sps=%r instead.",
-                sps,
-                sig.sps,
-            )
-        result = apply_awgn(
-            x,
-            sig.sps,
-            esn0_db,
-            seed=seed,
-            signal_power=signal_power,
-        )
-        return rewrap_signal(sig, result)
-
-    if sps is None:
-        raise ValueError("apply_awgn() requires sps for array input.")
+    context = prepare_signal_input(samples, function_name="apply_awgn()")
+    samples = context.array
+    sps = context.required("sps", sps)
     if esn0_db is None:
         raise ValueError("apply_awgn() requires esn0_db.")
 
@@ -133,4 +114,4 @@ def apply_awgn(
 
     noisy_samples = samples + noise
 
-    return noisy_samples
+    return context.return_value(noisy_samples)

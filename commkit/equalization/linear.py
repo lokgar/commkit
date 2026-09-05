@@ -5,15 +5,10 @@ from __future__ import annotations
 import numpy as np
 
 from ..backend import ArrayType, dispatch, to_device
+from ..core._signal_adapter import prepare_signal_input, require_integer_sps
 from ..core.signal import Signal
 from ..filtering import _ols_backward, _ols_forward
-from ..helpers import (
-    _coerce_integer_sps,
-    as_2d,
-    restore_1d,
-    rewrap_signal,
-    unwrap_signal,
-)
+from ..helpers import as_2d, restore_1d
 from ..logger import logger
 from ._common import _build_padded_samples, _normalize_inputs
 
@@ -56,12 +51,8 @@ def zf_equalizer(
     array_like or Signal
         Equalized samples. Same shape and backend as input.
     """
-    x, sig = unwrap_signal(samples)
-    if sig is not None:
-        result = zf_equalizer(
-            x, channel_estimate, noise_variance=noise_variance, debug_plot=debug_plot
-        )
-        return rewrap_signal(sig, result)
+    context = prepare_signal_input(samples, function_name="zf_equalizer()")
+    samples = context.array
 
     logger.info("ZF/MMSE equalizer: noise_variance=%.2e", noise_variance)
     samples, xp, _ = dispatch(samples)
@@ -142,7 +133,7 @@ def zf_equalizer(
             show=True,
         )
 
-    return restore_1d(was_1d, out)
+    return context.return_value(restore_1d(was_1d, out))
 
 
 def apply_taps(
@@ -216,29 +207,12 @@ def apply_taps(
         y = equalization.apply_taps(new_signal, result.weights,
                                     input_norm_factor=result.input_norm_factor)
     """
-    x, sig = unwrap_signal(samples)
-    if sig is not None:
-        # sig.sps is always populated (derived from the required sampling_rate
-        # / symbol_rate fields), so the Signal's own value always wins over a
-        # supplied sps - see CLAUDE.md, "Signal-Awareness".
-        if sps is not None:
-            logger.warning(
-                "apply_taps(): ignoring supplied sps=%r for Signal input; "
-                "using the signal's own sps=%r instead.",
-                sps,
-                sig.sps,
-            )
-        signal_sps = _coerce_integer_sps(sig.sps, caller="apply_taps()")
-        result = apply_taps(
-            x,
-            weights,
-            sps=signal_sps,
-            normalize=normalize,
-            input_norm_factor=input_norm_factor,
-            samples_prefix=samples_prefix,
-            pad_mode=pad_mode,
-        )
-        return rewrap_signal(sig, result, sampling_rate=sig.symbol_rate)
+    context = prepare_signal_input(samples, function_name="apply_taps()")
+    samples = context.array
+    metadata = {}
+    if context.signal is not None:
+        sps = require_integer_sps(context.required("sps", sps), "apply_taps()")
+        metadata["sampling_rate"] = context.signal.symbol_rate
 
     if sps is None:
         sps = 2
@@ -296,7 +270,7 @@ def apply_taps(
     # y[i, n] = Σ_j Σ_t conj(W[i,j,t]) * windows[j, n, t]
     y = xp.einsum("ijt,jnt->in", xp.conj(weights), windows)  # (C, N_sym)
 
-    return restore_1d(was_1d, y)
+    return context.return_value(restore_1d(was_1d, y), **metadata)
 
 
 # -----------------------------------------------------------------------------
@@ -356,8 +330,12 @@ def estimate_transfer_function(
     array_like
         Frequency response or impulse response (see ``num_taps``).
     """
-    reference, _ = unwrap_signal(reference)
-    received, _ = unwrap_signal(received)
+    reference = prepare_signal_input(
+        reference, function_name="estimate_transfer_function(reference)"
+    ).array
+    received = prepare_signal_input(
+        received, function_name="estimate_transfer_function(received)"
+    ).array
     x, xp, _ = dispatch(reference)
     y = xp.asarray(received)
     single = x.ndim == 1

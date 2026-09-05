@@ -8,9 +8,9 @@ from typing import Any, cast, overload
 import numpy as np
 
 from ..backend import ArrayType, dispatch, to_device
+from ..core._signal_adapter import prepare_signal_input
 from ..core.signal import Signal
 from ..filtering import fir_filter, fir_taps
-from ..helpers import rewrap_signal, unwrap_signal
 from ..logger import logger
 
 # -----------------------------------------------------------------------------
@@ -68,11 +68,8 @@ def apply_interpolated_matrix(
     (K, N) array
         ``M(n) · samples[:, n]``, same dtype as ``samples``.
     """
-    x, sig = unwrap_signal(samples)
-    if sig is not None:
-        return rewrap_signal(
-            sig, apply_interpolated_matrix(x, matrix_grid, grid_positions)
-        )
+    context = prepare_signal_input(samples, function_name="apply_interpolated_matrix()")
+    samples = context.array
 
     samples, xp, _ = dispatch(samples)
     C, N = samples.shape
@@ -105,7 +102,7 @@ def apply_interpolated_matrix(
         frac = ((nn - gp[lo]) / (gp[lo + 1] - gp[lo])).astype(xp.complex64)
         M_full = M[lo] + (M[lo + 1] - M[lo]) * frac[:, None, None]  # (L, K, C)
         out[:, bulk:] = xp.einsum("lkc,cl->kl", M_full, xc[:, bulk:])
-    return out.astype(samples.dtype, copy=False)
+    return context.return_value(out.astype(samples.dtype, copy=False))
 
 
 # -----------------------------------------------------------------------------
@@ -405,37 +402,11 @@ def demultiplex_polarization_tones_static(
     add_pilot_tone : Add the per-stream tones at the transmitter.
     demultiplex_polarization_tones_dynamic : Time-varying (drifting-SOP) demux.
     """
-    x, sig = unwrap_signal(samples)
-    if sig is not None:
-        # sig.sampling_rate is a required field, so it always wins over a
-        # supplied sampling_rate - see CLAUDE.md, "Signal-Awareness".
-        if sampling_rate is not None:
-            logger.warning(
-                "demultiplex_polarization_tones_static(): ignoring supplied "
-                "sampling_rate=%r for Signal input; using the signal's own "
-                "sampling_rate=%r instead.",
-                sampling_rate,
-                sig.sampling_rate,
-            )
-        result = demultiplex_polarization_tones_static(
-            x,
-            sig.sampling_rate,
-            tone_frequencies,
-            refine_tones=refine_tones,
-            search_band=search_band,
-            normalize=normalize,
-            return_matrix=return_matrix,
-        )
-        if isinstance(result, tuple):
-            demuxed, W = result
-            return rewrap_signal(sig, demuxed), W
-        return rewrap_signal(sig, result)
-
-    if sampling_rate is None:
-        raise ValueError(
-            "demultiplex_polarization_tones_static() requires sampling_rate for "
-            "array input."
-        )
+    context = prepare_signal_input(
+        samples, function_name="demultiplex_polarization_tones_static()"
+    )
+    samples = context.array
+    sampling_rate = context.required("sampling_rate", sampling_rate)
     if tone_frequencies is None:
         raise ValueError(
             "demultiplex_polarization_tones_static() requires tone_frequencies."
@@ -515,8 +486,9 @@ def demultiplex_polarization_tones_static(
     )
 
     if return_matrix:
-        return demuxed, W
-    return demuxed
+        wrapped = context.return_value(demuxed)
+        return wrapped, W
+    return context.return_value(demuxed)
 
 
 def demultiplex_polarization_tones_dynamic(
@@ -672,44 +644,11 @@ def demultiplex_polarization_tones_dynamic(
     demultiplex_polarization_tones_static : One-shot static-SOP demux (faster).
     add_pilot_tone : Add the per-stream tones at the transmitter.
     """
-    x, sig = unwrap_signal(samples)
-    if sig is not None:
-        # sig.sampling_rate is a required field, so it always wins over a
-        # supplied sampling_rate - see CLAUDE.md, "Signal-Awareness".
-        if sampling_rate is not None:
-            logger.warning(
-                "demultiplex_polarization_tones_dynamic(): ignoring supplied "
-                "sampling_rate=%r for Signal input; using the signal's own "
-                "sampling_rate=%r instead.",
-                sampling_rate,
-                sig.sampling_rate,
-            )
-        result = demultiplex_polarization_tones_dynamic(
-            x,
-            sig.sampling_rate,
-            tone_frequencies,
-            track_bandwidth=track_bandwidth,
-            num_taps=num_taps,
-            grid_step=grid_step,
-            refine_tones=refine_tones,
-            search_band=search_band,
-            normalize=normalize,
-            trim_edges=trim_edges,
-            return_matrix=return_matrix,
-            apply=apply,
-        )
-        if not apply:
-            return result  # (W_grid, grid_positions) - no signal-shaped output
-        if isinstance(result, tuple):
-            demuxed, *rest = result
-            return (rewrap_signal(sig, demuxed), *rest)
-        return rewrap_signal(sig, result)
-
-    if sampling_rate is None:
-        raise ValueError(
-            "demultiplex_polarization_tones_dynamic() requires sampling_rate for "
-            "array input."
-        )
+    context = prepare_signal_input(
+        samples, function_name="demultiplex_polarization_tones_dynamic()"
+    )
+    samples = context.array
+    sampling_rate = context.required("sampling_rate", sampling_rate)
     if tone_frequencies is None:
         raise ValueError(
             "demultiplex_polarization_tones_dynamic() requires tone_frequencies."
@@ -898,4 +837,6 @@ def demultiplex_polarization_tones_dynamic(
         out = out + (valid,)
     if return_matrix:
         out = out + (Wg, grid_positions)
+    if context.signal is not None:
+        out = (context.return_value(out[0]), *out[1:])
     return out[0] if len(out) == 1 else out

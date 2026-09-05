@@ -6,13 +6,13 @@ from collections.abc import Sequence
 import numpy as np
 
 from ..backend import ArrayType, dispatch, to_device
+from ..core._signal_adapter import prepare_signal_input
 from ..core.signal import Signal
 from ..helpers import (
     as_2d,
     broadcast_channels,
     remove_linear_trend,
     restore_1d,
-    unwrap_signal,
 )
 from ..logger import logger
 from .corrections import _log_phase_summary, correct_cycle_slips
@@ -86,19 +86,10 @@ def recover_carrier_phase_pilot_symbols(
     interpolation constant-holds at the boundaries; cubic uses natural spline
     with constant-hold extrapolation.  Single-carrier only.
     """
-    x, sig = unwrap_signal(symbols)
-    if sig is not None:
-        return recover_carrier_phase_pilot_symbols(
-            x,
-            pilot_indices,
-            pilot_values,
-            interpolation=interpolation,
-            joint_channels=joint_channels,
-            cycle_slip_correction=cycle_slip_correction,
-            cycle_slip_history=cycle_slip_history,
-            cycle_slip_threshold=cycle_slip_threshold,
-            debug_plot=debug_plot,
-        )
+    context = prepare_signal_input(
+        symbols, function_name="recover_carrier_phase_pilot_symbols()"
+    )
+    symbols = context.array
 
     symbols, xp, _ = dispatch(symbols)
     symbols, was_1d = as_2d(symbols, name="symbols")
@@ -473,35 +464,11 @@ def recover_carrier_phase_pilot_tone(
     Upper bound: B below the guard between the tone and the signal band edge.
     Place the tone at |f_p| > (1+beta)*R_s/2 + B and keep |f_p| + B < f_s/2.
     """
-    x, sig = unwrap_signal(samples)
-    if sig is not None:
-        # sig.sampling_rate is a required field, so it always wins over a
-        # supplied sampling_rate - see CLAUDE.md, "Signal-Awareness".
-        if sampling_rate is not None:
-            logger.warning(
-                "recover_carrier_phase_pilot_tone(): ignoring supplied "
-                "sampling_rate=%r for Signal input; using the signal's own "
-                "sampling_rate=%r instead.",
-                sampling_rate,
-                sig.sampling_rate,
-            )
-        return recover_carrier_phase_pilot_tone(
-            x,
-            sig.sampling_rate,
-            tone_frequency,
-            bandwidth,
-            search_band=search_band,
-            refine_tone=refine_tone,
-            window=window,
-            remove_frequency_offset=remove_frequency_offset,
-            joint_channels=joint_channels,
-            debug_plot=debug_plot,
-        )
-
-    if sampling_rate is None:
-        raise ValueError(
-            "recover_carrier_phase_pilot_tone() requires sampling_rate for array input."
-        )
+    context = prepare_signal_input(
+        samples, function_name="recover_carrier_phase_pilot_tone()"
+    )
+    samples = context.array
+    sampling_rate = context.required("sampling_rate", sampling_rate)
     if tone_frequency is None:
         raise ValueError("recover_carrier_phase_pilot_tone() requires tone_frequency.")
     if bandwidth is None:
@@ -682,38 +649,11 @@ def recover_carrier_phase_pilot_tones(
         ``correct_carrier_phase``.  If ``return_diagnostics``, returns
         ``(phi, diagnostics)``.
     """
-    x, sig_obj = unwrap_signal(samples)
-    if sig_obj is not None:
-        # sig_obj.sampling_rate is a required field, so it always wins over a
-        # supplied sampling_rate - see CLAUDE.md, "Signal-Awareness".
-        if sampling_rate is not None:
-            logger.warning(
-                "recover_carrier_phase_pilot_tones(): ignoring supplied "
-                "sampling_rate=%r for Signal input; using the signal's own "
-                "sampling_rate=%r instead.",
-                sampling_rate,
-                sig_obj.sampling_rate,
-            )
-        return recover_carrier_phase_pilot_tones(
-            x,
-            sig_obj.sampling_rate,
-            tone_frequencies,
-            bandwidth,
-            differential_bandwidth=differential_bandwidth,
-            search_band=search_band,
-            per_tone_channel=per_tone_channel,
-            snr_gate_db=snr_gate_db,
-            coherence_gate=coherence_gate,
-            refine_tone=refine_tone,
-            window=window,
-            return_diagnostics=return_diagnostics,
-            debug_plot=debug_plot,
-        )
-
-    if sampling_rate is None:
-        raise ValueError(
-            "recover_carrier_phase_pilot_tones() requires sampling_rate for array input."
-        )
+    context = prepare_signal_input(
+        samples, function_name="recover_carrier_phase_pilot_tones()"
+    )
+    samples = context.array
+    sampling_rate = context.required("sampling_rate", sampling_rate)
     if bandwidth is None:
         raise ValueError("recover_carrier_phase_pilot_tones() requires bandwidth.")
     if bandwidth <= 0.0:

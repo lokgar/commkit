@@ -9,8 +9,8 @@ most-likely bits from received symbols via minimum-distance decoding
 import numpy as np
 
 from ..backend import ArrayType, dispatch
+from ..core._signal_adapter import prepare_signal_input
 from ..core.signal import Signal
-from ..helpers import unwrap_signal
 from ..logger import logger
 from .gray import (
     _is_square_qam,
@@ -145,8 +145,11 @@ def demap_symbols_hard(
         Sequence of bits (0s and 1s). Shape: (..., N_symbols * log2(order)).
         The backend (NumPy/CuPy) matches the input `symbols`.
     """
-    if isinstance(symbols, Signal):
-        sig = symbols
+    context = prepare_signal_input(
+        symbols, function_name="demap_symbols_hard()", field="resolved_symbols"
+    )
+    if context.signal is not None:
+        sig = context.signal
         if sig.signal_type is not None:
             logger.warning(
                 "demap_symbols_hard() called on a frame-generated signal - skipping. "
@@ -154,54 +157,39 @@ def demap_symbols_hard(
                 "a plain Signal before demapping."
             )
             return sig._shallow_clone()
-        mod = sig.mod_scheme
-        if mod is None:
-            mod = modulation
-            if mod is not None:
-                logger.warning(
-                    "demap_symbols_hard(): Signal has no mod_scheme set; "
-                    "falling back to supplied modulation=%r.",
-                    mod,
-                )
-        ord_ = sig.mod_order
-        if ord_ is None:
-            ord_ = order
-            if ord_ is not None:
-                logger.warning(
-                    "demap_symbols_hard(): Signal has no mod_order set; "
-                    "falling back to supplied order=%r.",
-                    ord_,
-                )
+        mod = context.optional("mod_scheme", modulation)
+        ord_ = context.optional("mod_order", order)
         if mod is None or ord_ is None:
             raise ValueError("Modulation scheme and order required for demapping.")
         if sig.resolved_symbols is None:
             raise ValueError(
                 "No resolved symbols available. Call resolve_symbols(sig) first."
             )
-        eff_pmf = sig.ps_pmf
-        if eff_pmf is None:
-            eff_pmf = pmf
-            if eff_pmf is not None:
-                logger.warning(
-                    "demap_symbols_hard(): Signal has no ps_pmf set; falling "
-                    "back to supplied pmf."
-                )
-        # Output field (resolved_bits) differs from the input field
-        # (resolved_symbols), so this is assigned by hand rather than via
-        # rewrap_signal (which always sets .samples).
-        resolved_symbols, _ = unwrap_signal(sig, field="resolved_symbols")
-        new = sig._shallow_clone()
-        new.resolved_bits = demap_symbols_hard(
-            resolved_symbols,
+        eff_pmf = context.optional("ps_pmf", pmf)
+        # Output and input use different derived fields, so replace the target
+        # field explicitly.
+        resolved_bits = _demap_symbols_hard_array(
+            context.array,
             mod,
             ord_,
             unipolar=sig.mod_unipolar or False,
             pmf=eff_pmf,
         )
-        return new
+        return context.replace_field("resolved_bits", resolved_bits)
 
     if modulation is None or order is None:
         raise ValueError("demap_symbols_hard() requires modulation and order.")
+    return _demap_symbols_hard_array(symbols, modulation, order, unipolar, pmf)
+
+
+def _demap_symbols_hard_array(
+    symbols: ArrayType,
+    modulation: str,
+    order: int,
+    unipolar: bool = False,
+    pmf: np.ndarray | None = None,
+) -> ArrayType:
+    """Array-only hard-decision implementation."""
 
     logger.debug("Demapping %s %s-level symbols to bits.", modulation.upper(), order)
     symbols, xp, _ = dispatch(symbols)

@@ -8,8 +8,9 @@ from typing import Any
 import numpy as np
 
 from ...backend import ArrayType, dispatch, to_device
+from ...core._signal_adapter import prepare_signal_input, require_integer_sps
 from ...core.signal import Signal
-from ...helpers import _coerce_integer_sps, as_2d, rewrap_signal, unwrap_signal
+from ...helpers import as_2d
 from ...logger import logger
 from ...mapping.gray import square_qam_slicer_params
 from .._common import (
@@ -21,7 +22,12 @@ from .._common import (
     _validate_w_init,
 )
 from .._kernels_numba import _get_numba_cs_block
-from ..result import CPRState, EqualizerResult, _log_equalizer_exit
+from ..result import (
+    CPRState,
+    EqualizerResult,
+    _attach_equalized_signal,
+    _log_equalizer_exit,
+)
 
 
 def block_lms(
@@ -306,48 +312,11 @@ def block_lms(
     do **not** routinely divide by ``block_size`` (that under-adapts the
     filter by the same factor).
     """
-    x, sig = unwrap_signal(samples)
+    context = prepare_signal_input(samples, function_name="block_lms()")
+    samples = context.array
+    sig = context.signal
     if sig is not None:
-        # sig.sps is always populated (derived from the required sampling_rate
-        # / symbol_rate fields), so the Signal's own value always wins over a
-        # supplied sps - see CLAUDE.md, "Signal-Awareness".
-        if sps is not None:
-            logger.warning(
-                "block_lms(): ignoring supplied sps=%r for Signal input; "
-                "using the signal's own sps=%r instead.",
-                sps,
-                sig.sps,
-            )
-        result = block_lms(
-            x,
-            training_symbols=training_symbols,
-            num_taps=num_taps,
-            sps=_coerce_integer_sps(sig.sps, caller="block_lms()"),
-            step_size=step_size,
-            block_size=block_size,
-            modulation=modulation,
-            order=order,
-            unipolar=unipolar,
-            store_weights=store_weights,
-            w_init=w_init,
-            pmf=pmf,
-            cpr_type=cpr_type,
-            cpr_bps_test_phases=cpr_bps_test_phases,
-            cpr_bps_block_size=cpr_bps_block_size,
-            cpr_joint_channels=cpr_joint_channels,
-            cpr_cycle_slip_correction=cpr_cycle_slip_correction,
-            cpr_cycle_slip_history=cpr_cycle_slip_history,
-            cpr_cycle_slip_threshold=cpr_cycle_slip_threshold,
-            debug_plot=debug_plot,
-            plot_smoothing=plot_smoothing,
-            cpr_state=cpr_state,
-            input_norm_factor=input_norm_factor,
-            samples_prefix=samples_prefix,
-            pad_mode=pad_mode,
-            cuda_graph=cuda_graph,
-        )
-        result.y_hat = rewrap_signal(sig, result.y_hat, sampling_rate=sig.symbol_rate)
-        return result
+        sps = require_integer_sps(context.required("sps", sps), "block_lms()")
 
     if sps is None:
         sps = 2
@@ -1157,6 +1126,12 @@ def block_lms(
             bps_K=_bps_K,
             cs_H=_cs_H,
         )
-    return _log_equalizer_exit(
-        result, name="Block-LMS", debug_plot=debug_plot, plot_smoothing=plot_smoothing
+    return _attach_equalized_signal(
+        _log_equalizer_exit(
+            result,
+            name="Block-LMS",
+            debug_plot=debug_plot,
+            plot_smoothing=plot_smoothing,
+        ),
+        sig,
     )

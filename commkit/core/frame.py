@@ -13,6 +13,8 @@ from pydantic import (
     model_validator,
 )
 
+from ._signal_adapter import require_integer_sps
+
 try:
     import cupy as cp
 
@@ -742,7 +744,7 @@ class SingleCarrierFrame(BaseModel):
         """
         xp = cp if is_cupy_available() else np
         if unit == "samples":
-            sps = helpers._coerce_integer_sps(sps, caller="get_structure_map()")
+            sps = require_integer_sps(sps, "get_structure_map()")
         mask, body_length = self._generate_pilot_mask()
 
         preamble_len = self.preamble.num_symbols if self.preamble else 0

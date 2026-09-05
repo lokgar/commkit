@@ -5,8 +5,9 @@ import math
 import numpy as np
 
 from ..backend import ArrayType, dispatch, is_cupy_available, to_device
+from ..core._signal_adapter import prepare_signal_input
 from ..core.signal import Signal
-from ..helpers import as_2d, restore_1d, rewrap_signal, unwrap_signal
+from ..helpers import as_2d, restore_1d
 from ..logger import logger
 
 __all__ = ["apply_phase_noise", "generate_phase_noise"]
@@ -201,30 +202,9 @@ def apply_phase_noise(
     ...                           sampling_rate=sig.sampling_rate)
     >>> noisy = apply_phase_noise(sig, linewidth=100e3)  # Signal input
     """
-    x, sig = unwrap_signal(samples)
-    if sig is not None:
-        # sig.sampling_rate is a required field, so it always wins over a
-        # supplied sampling_rate - see CLAUDE.md, "Signal-Awareness".
-        if sampling_rate is not None:
-            logger.warning(
-                "apply_phase_noise(): ignoring supplied sampling_rate=%r for "
-                "Signal input; using the signal's own sampling_rate=%r instead.",
-                sampling_rate,
-                sig.sampling_rate,
-            )
-        result = apply_phase_noise(
-            x,
-            sig.sampling_rate,
-            linewidth,
-            flicker=flicker,
-            flicker_f_min=flicker_f_min,
-            seed=seed,
-            shared_lo=shared_lo,
-        )
-        return rewrap_signal(sig, result)
-
-    if sampling_rate is None:
-        raise ValueError("apply_phase_noise() requires sampling_rate for array input.")
+    context = prepare_signal_input(samples, function_name="apply_phase_noise()")
+    samples = context.array
+    sampling_rate = context.required("sampling_rate", sampling_rate)
     if linewidth is None:
         raise ValueError("apply_phase_noise() requires linewidth.")
 
@@ -256,4 +236,4 @@ def apply_phase_noise(
     if result.dtype != samples.dtype:
         result = result.astype(samples.dtype)
 
-    return restore_1d(was_1d, result)
+    return context.return_value(restore_1d(was_1d, result))

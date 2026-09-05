@@ -12,8 +12,9 @@ from typing import Any, cast
 import numpy as np
 
 from .backend import ArrayType, dispatch
+from .core._signal_adapter import prepare_signal_input
 from .core.signal import Signal
-from .helpers import as_2d, restore_1d, rewrap_signal, unwrap_signal
+from .helpers import as_2d, restore_1d
 from .logger import logger
 
 
@@ -109,16 +110,9 @@ def shift_frequency(
     with the shift applied and ``digital_frequency_offset`` accumulated;
     ``sampling_rate`` is taken from the signal.
     """
-    x, sig = unwrap_signal(samples)
-    if sig is not None:
-        out = shift_frequency(x, offset, sig.sampling_rate)
-        assert isinstance(out, tuple)  # array input -> (samples, actual_offset)
-        shifted, actual = out
-        dfo = (sig.digital_frequency_offset or 0.0) + actual
-        return rewrap_signal(sig, shifted, digital_frequency_offset=dfo)
-
-    if sampling_rate is None:
-        raise ValueError("shift_frequency() requires sampling_rate for array input.")
+    context = prepare_signal_input(samples, function_name="shift_frequency()")
+    samples = context.array
+    sampling_rate = context.required("sampling_rate", sampling_rate)
 
     samples, xp, _ = dispatch(samples)
 
@@ -161,7 +155,12 @@ def shift_frequency(
     if samples.ndim > 1:
         mixer = mixer.reshape((1,) * (samples.ndim - 1) + (-1,))
 
-    return samples * mixer, float(actual_offset)
+    shifted = samples * mixer
+    actual = float(actual_offset)
+    if context.signal is not None:
+        dfo = (context.signal.digital_frequency_offset or 0.0) + actual
+        return context.return_value(shifted, digital_frequency_offset=dfo)
+    return shifted, actual
 
 
 def add_pilot_tone(
@@ -245,28 +244,16 @@ def add_pilot_tone(
     ``add_pilot_tone(sig, freq, ...)``).  A new :class:`Signal` is returned with
     ``pilot_tone_frequency`` / ``pilot_tone_power_ratio_db`` recorded.
     """
-    x, sig = unwrap_signal(samples)
-    if sig is not None:
+    context = prepare_signal_input(samples, function_name="add_pilot_tone()")
+    samples = context.array
+    if context.signal is not None:
+        sig = context.signal
         # Signal rate is implicit; the second positional carries the frequency.
         freq = frequency if frequency is not None else sampling_rate
         if freq is None:
             raise ValueError("add_pilot_tone() requires a frequency.")
-        out = add_pilot_tone(
-            x,
-            sig.sampling_rate,
-            freq,
-            power_ratio_db=power_ratio_db,
-            phase_init=phase_init,
-            renormalize=renormalize,
-        )
-        assert isinstance(out, tuple)  # array input -> (samples, actual_frequency)
-        shifted, actual_freq = out
-        return rewrap_signal(
-            sig,
-            shifted,
-            pilot_tone_frequency=actual_freq,
-            pilot_tone_power_ratio_db=power_ratio_db,
-        )
+        sampling_rate = sig.sampling_rate
+        frequency = freq
 
     if sampling_rate is None or frequency is None:
         raise ValueError(
@@ -367,6 +354,15 @@ def add_pilot_tone(
 
     samples_out = restore_1d(was_1d, out)
     actual_frequency: float | list[float] = actual[0] if scalar_input else actual
+    if context.signal is not None:
+        return cast(
+            Signal,
+            context.return_value(
+                samples_out,
+                pilot_tone_frequency=actual_frequency,
+                pilot_tone_power_ratio_db=power_ratio_db,
+            ),
+        )
     return samples_out, actual_frequency
 
 
@@ -435,24 +431,11 @@ def welch_psd(
     ValueError
         If `return_onesided` set to True for complex-valued inputs.
     """
-    x, sig = unwrap_signal(samples)
-    if sig is not None:
-        return welch_psd(
-            x,
-            sig.sampling_rate,
-            nperseg=nperseg,
-            detrend=detrend,
-            average=average,
-            window=window,
-            noverlap=noverlap,
-            nfft=nfft,
-            scaling=scaling,
-            return_onesided=return_onesided,
-            axis=-1,
-        )
-
-    if sampling_rate is None:
-        raise ValueError("welch_psd() requires sampling_rate for array input.")
+    context = prepare_signal_input(samples, function_name="welch_psd()")
+    samples = context.array
+    sampling_rate = context.required("sampling_rate", sampling_rate)
+    if context.signal is not None:
+        axis = -1
 
     samples, xp, sp = dispatch(samples)
     is_complex = xp.iscomplexobj(samples)
@@ -546,24 +529,11 @@ def spectrogram(
     ValueError
         If `return_onesided` set to True for complex-valued inputs.
     """
-    x, sig = unwrap_signal(samples)
-    if sig is not None:
-        return spectrogram(
-            x,
-            sig.sampling_rate,
-            window=window,
-            nperseg=nperseg,
-            noverlap=noverlap,
-            nfft=nfft,
-            detrend=detrend,
-            return_onesided=return_onesided,
-            scaling=scaling,
-            axis=-1,
-            mode=mode,
-        )
-
-    if sampling_rate is None:
-        raise ValueError("spectrogram() requires sampling_rate for array input.")
+    context = prepare_signal_input(samples, function_name="spectrogram()")
+    samples = context.array
+    sampling_rate = context.required("sampling_rate", sampling_rate)
+    if context.signal is not None:
+        axis = -1
 
     samples, xp, sp = dispatch(samples)
     is_complex = xp.iscomplexobj(samples)

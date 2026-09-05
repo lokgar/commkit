@@ -10,8 +10,8 @@ from typing import Any
 import numpy as np
 
 from ..backend import ArrayType, _get_jax, dispatch, is_jax_array, to_jax
+from ..core._signal_adapter import prepare_signal_input
 from ..core.signal import Signal
-from ..helpers import unwrap_signal
 from ..logger import logger
 from .gray import gray_constellation, unpack_bits
 
@@ -152,55 +152,25 @@ def compute_llr(
     ``resolve_symbols`` the receiver renormalises;
     use ``gmi`` instead for correct scale.
     """
-    x, sig = unwrap_signal(symbols, field="resolved_symbols")
-    if sig is not None:
-        if x is None:
+    context = prepare_signal_input(
+        symbols, function_name="compute_llr()", field="resolved_symbols"
+    )
+    symbols = context.array
+    if context.signal is not None:
+        if symbols is None:
             raise ValueError(
                 "No resolved symbols available. Call resolve_symbols(sig) first."
             )
-        mod = sig.mod_scheme
-        if mod is None:
-            mod = modulation
-            if mod is not None:
-                logger.warning(
-                    "compute_llr(): Signal has no mod_scheme set; falling "
-                    "back to supplied modulation=%r.",
-                    mod,
-                )
-        ord_ = sig.mod_order
-        if ord_ is None:
-            ord_ = order
-            if ord_ is not None:
-                logger.warning(
-                    "compute_llr(): Signal has no mod_order set; falling "
-                    "back to supplied order=%r.",
-                    ord_,
-                )
-        eff_pmf = sig.ps_pmf
-        if eff_pmf is None:
-            eff_pmf = pmf
-            if eff_pmf is not None:
-                logger.warning(
-                    "compute_llr(): Signal has no ps_pmf set; falling back "
-                    "to supplied pmf."
-                )
-        return compute_llr(
-            x,
-            mod,
-            ord_,
-            noise_var,
-            method=method,
-            unipolar=unipolar,
-            output=output,
-            pmf=eff_pmf,
-        )
+        modulation = context.optional("mod_scheme", modulation)
+        order = context.optional("mod_order", order)
+        pmf = context.optional("ps_pmf", pmf)
 
     if modulation is None or order is None:
         raise ValueError("compute_llr() requires modulation and order for array input.")
     if noise_var is None:
         raise ValueError("compute_llr() requires noise_var.")
-    symbols = x
-
+    if symbols is None:
+        raise ValueError("compute_llr() requires resolved symbols.")
     logger.debug(
         "Computing LLRs for %s %s-level (method=%s, output=%s).",
         modulation.upper(),

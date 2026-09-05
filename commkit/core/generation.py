@@ -18,6 +18,7 @@ import numpy as np
 from .. import filtering, helpers, mapping
 from ..backend import ArrayType, dispatch, is_cupy_available, to_device
 from ..logger import logger
+from ._signal_adapter import require_integer_sps
 from .signal import Signal
 
 # -----------------------------------------------------------------------------
@@ -143,7 +144,7 @@ def shape_pulse(
     ``normalize(..., "peak")`` after.
     """
     logger.debug("Applying pulse shaping: %s", pulse_shape)
-    sps = helpers._coerce_integer_sps(sps, caller="shape_pulse()")
+    sps = require_integer_sps(sps, "shape_pulse()")
 
     if rz:
         duty_cycle = 0.5

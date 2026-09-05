@@ -1,14 +1,11 @@
 """General library utility functions."""
 
-from typing import TYPE_CHECKING, Any, overload
+from typing import Any, overload
 
 import numpy as np
 
 from .backend import ArrayType, dispatch, get_array_module, is_cupy_available, to_device
 from .logger import logger
-
-if TYPE_CHECKING:
-    from .core import Signal
 
 try:
     import cupy as cp
@@ -982,104 +979,6 @@ def remove_linear_trend(y: ArrayType, *, x: Any = None) -> tuple[ArrayType, Arra
     yc = y - xp.mean(y, axis=-1, keepdims=True)
     slope = xp.sum(yc * xc, axis=-1) / denom
     return y - slope[..., None] * xc[None, :], slope
-
-
-# ---------------------------------------------------------------------------
-# Signal unwrap/rewrap helpers
-# ---------------------------------------------------------------------------
-
-
-def _coerce_integer_sps(sps: float, *, caller: str) -> int:
-    """Validate and convert SPS for algorithms that require integer spacing.
-
-    Keeping this check ahead of ``int()`` prevents fractional metadata such as
-    1.5 SPS from being silently interpreted as 1 SPS.
-    """
-    if not np.isfinite(sps) or sps < 1 or sps % 1 != 0:
-        raise ValueError(
-            f"{caller} requires sps to be a positive integer; got {sps!r}."
-        )
-    return int(sps)
-
-
-def unwrap_signal(
-    x: "ArrayType | Signal", *, field: str = "samples"
-) -> tuple[ArrayType, "Signal | None"]:
-    """
-    Extracts the working array from a :class:`~commkit.core.Signal`, or
-    passes a raw array through unchanged.
-
-    The canonical entry half of the library's Signal-awareness idiom; pair it
-    with :func:`rewrap_signal` so a function transparently returns an array
-    for array input and a :class:`Signal` for :class:`Signal` input.
-
-    Parameters
-    ----------
-    x : array_like or Signal
-        Input samples, or a :class:`Signal` wrapping them.
-    field : str, default "samples"
-        Attribute to read off ``x`` when it is a :class:`Signal`. Most DSP
-        functions operate on ``.samples``; a few (e.g. hard-decision mapping)
-        instead read ``.resolved_symbols``.
-
-    Returns
-    -------
-    array : array_like
-        ``getattr(x, field)`` for :class:`Signal` input, or ``x`` itself for
-        array input. Not yet passed through :func:`~commkit.backend.dispatch`.
-    signal : Signal or None
-        The originating :class:`Signal`, or ``None`` for array input - pass
-        this straight to :func:`rewrap_signal`.
-    """
-    # Local import: commkit.core.signal imports this module, so importing
-    # Signal at module scope here would be circular (see io.py for the same
-    # pattern).
-    from .core import Signal
-
-    if isinstance(x, Signal):
-        return getattr(x, field), x
-    return x, None
-
-
-@overload
-def rewrap_signal(sig: None, array: ArrayType, /, **metadata: Any) -> ArrayType: ...
-
-
-@overload
-def rewrap_signal(sig: "Signal", array: ArrayType, /, **metadata: Any) -> "Signal": ...
-
-
-def rewrap_signal(
-    sig: "Signal | None", array: ArrayType, /, **metadata: Any
-) -> "ArrayType | Signal":
-    """
-    Rebuilds a :class:`~commkit.core.Signal` around a result array, or
-    passes the array through unchanged.
-
-    The inverse of :func:`unwrap_signal`. ``sig`` is normally the value
-    :func:`unwrap_signal` returned alongside the array being processed.
-
-    Parameters
-    ----------
-    sig : Signal or None
-        The originating :class:`Signal` from :func:`unwrap_signal`, or
-        ``None`` to pass ``array`` through unchanged (the array-input case).
-    array : array_like
-        The result to store on the copy's ``.samples``.
-    **metadata
-        Additional fields to set on the copy via ``setattr`` (e.g.
-        ``sampling_rate=sig.symbol_rate`` after decimating to symbol rate).
-
-    Returns
-    -------
-    array_like or Signal
-        ``array`` unchanged when ``sig`` is ``None``; otherwise a shallow
-        :meth:`Signal.replace_samples` update with ``**metadata`` applied.
-        Derived ``resolved_symbols`` and ``resolved_bits`` caches are invalidated.
-    """
-    if sig is None:
-        return array
-    return sig.replace_samples(array, **metadata)
 
 
 def _cd_beta2_length(

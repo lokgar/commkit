@@ -3,9 +3,10 @@
 import numpy as np
 
 from ..backend import ArrayType, dispatch, to_device
+from ..core._signal_adapter import prepare_signal_input
 from ..core.signal import Signal
 from ..frequency import _modulation_power_m
-from ..helpers import as_2d, restore_1d, unwrap_signal
+from ..helpers import as_2d, restore_1d
 from ..logger import logger
 from ._common import _vv_block_phase
 from .corrections import _log_phase_summary, correct_cycle_slips
@@ -251,40 +252,12 @@ def recover_carrier_phase_tikhonov(
     and sigma_v^2 ≈ 1/(M^2 * SNR * N_b), then interpolated to per-symbol
     resolution.  A residual 2*pi/M ambiguity always remains.
     """
-    x, sig = unwrap_signal(symbols)
-    if sig is not None:
-        mod = sig.mod_scheme
-        if mod is None:
-            mod = modulation
-            if mod is not None:
-                logger.warning(
-                    "recover_carrier_phase_tikhonov(): Signal has no "
-                    "mod_scheme set; falling back to supplied modulation=%r.",
-                    mod,
-                )
-        ord_ = sig.mod_order
-        if ord_ is None:
-            ord_ = order
-            if ord_ is not None:
-                logger.warning(
-                    "recover_carrier_phase_tikhonov(): Signal has no "
-                    "mod_order set; falling back to supplied order=%r.",
-                    ord_,
-                )
-        return recover_carrier_phase_tikhonov(
-            x,
-            mod,
-            ord_,
-            linewidth_symbol_periods,
-            block_size=block_size,
-            snr_db=snr_db,
-            method=method,
-            joint_channels=joint_channels,
-            cycle_slip_correction=cycle_slip_correction,
-            cycle_slip_history=cycle_slip_history,
-            cycle_slip_threshold=cycle_slip_threshold,
-            debug_plot=debug_plot,
-        )
+    context = prepare_signal_input(
+        symbols, function_name="recover_carrier_phase_tikhonov()"
+    )
+    symbols = context.array
+    modulation = context.optional("mod_scheme", modulation)
+    order = context.optional("mod_order", order)
 
     if modulation is None or order is None:
         raise ValueError(

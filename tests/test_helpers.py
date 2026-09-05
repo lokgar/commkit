@@ -4,7 +4,6 @@ import numpy as np
 import pytest
 
 from commkit import helpers
-from commkit.core import Signal
 
 
 class Unconvertible:
@@ -504,84 +503,3 @@ def test_remove_linear_trend_degenerate_length(backend_device, xp):
     detrended, slope = helpers.remove_linear_trend(y)
     assert np.isfinite(float(slope[0]))
     assert float(detrended[0, 0]) == 4.0
-
-
-# -----------------------------------------------------------------------------
-# SIGNAL UNWRAP/REWRAP
-# -----------------------------------------------------------------------------
-
-
-def test_unwrap_signal_passes_raw_array_through(backend_device, xp):
-    """unwrap_signal: array input is returned unchanged with signal=None."""
-    x = xp.asarray(np.arange(8.0))
-    arr, sig = helpers.unwrap_signal(x)
-    assert arr is x
-    assert sig is None
-
-
-def test_unwrap_signal_extracts_samples(backend_device, xp):
-    """unwrap_signal: Signal input yields .samples and the originating Signal."""
-    data = xp.asarray(np.arange(8, dtype=np.complex64))
-    s = Signal(samples=data, sampling_rate=8e9, symbol_rate=1e9)
-    arr, sig = helpers.unwrap_signal(s)
-    assert arr is s.samples
-    assert sig is s
-
-
-def test_unwrap_signal_alternate_field(backend_device, xp):
-    """unwrap_signal: field= reads an attribute other than .samples."""
-    data = xp.asarray(np.arange(4, dtype=np.complex64))
-    s = Signal(samples=data, sampling_rate=8e9, symbol_rate=1e9)
-    s.resolved_symbols = xp.asarray(np.arange(4, dtype=np.complex64) + 1)
-    arr, sig = helpers.unwrap_signal(s, field="resolved_symbols")
-    assert arr is s.resolved_symbols
-    assert sig is s
-
-
-def test_rewrap_signal_passes_raw_array_through(backend_device, xp):
-    """rewrap_signal: sig=None returns the array unchanged."""
-    x = xp.asarray(np.arange(8.0))
-    out = helpers.rewrap_signal(None, x)
-    assert out is x
-
-
-def test_rewrap_signal_builds_a_copy_with_new_samples(backend_device, xp, xpt):
-    """rewrap_signal: returns a Signal copy with .samples replaced, original untouched."""
-    data = xp.asarray(np.arange(8, dtype=np.complex64))
-    s = Signal(samples=data, sampling_rate=8e9, symbol_rate=1e9)
-    result = data * 2
-
-    out = helpers.rewrap_signal(s, result)
-
-    assert isinstance(out, Signal)
-    assert out is not s
-    xpt.assert_allclose(out.samples, result)
-    xpt.assert_allclose(s.samples, data)  # original Signal is untouched
-
-
-def test_rewrap_signal_applies_metadata_kwargs(backend_device, xp):
-    """rewrap_signal: keyword args are set on the returned copy via setattr."""
-    data = xp.asarray(np.arange(8, dtype=np.complex64))
-    s = Signal(samples=data, sampling_rate=8e9, symbol_rate=1e9)
-
-    out = helpers.rewrap_signal(s, data[::2], sampling_rate=s.symbol_rate)
-
-    assert out.sampling_rate == 1e9
-    assert s.sampling_rate == 8e9  # original unaffected
-
-
-def test_unwrap_rewrap_signal_round_trip(backend_device, xp, xpt):
-    """unwrap_signal + rewrap_signal reproduces the array-in/array-out,
-    Signal-in/Signal-out contract for both input kinds."""
-    data = xp.asarray(np.arange(8, dtype=np.complex64))
-
-    arr, sig = helpers.unwrap_signal(data)
-    out = helpers.rewrap_signal(sig, arr * 2)
-    assert not isinstance(out, Signal)
-    xpt.assert_allclose(out, data * 2)
-
-    s = Signal(samples=data, sampling_rate=8e9, symbol_rate=1e9)
-    arr2, sig2 = helpers.unwrap_signal(s)
-    out2 = helpers.rewrap_signal(sig2, arr2 * 2)
-    assert isinstance(out2, Signal)
-    xpt.assert_allclose(out2.samples, data * 2)

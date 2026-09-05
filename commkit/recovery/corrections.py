@@ -5,14 +5,13 @@ import logging
 import numpy as np
 
 from ..backend import ArrayType, dispatch, to_device
+from ..core._signal_adapter import prepare_signal_input
 from ..core.signal import Signal
 from ..helpers import (
     as_2d,
     broadcast_channels,
     remove_linear_trend,
     restore_1d,
-    rewrap_signal,
-    unwrap_signal,
 )
 from ..logger import logger
 
@@ -465,10 +464,8 @@ def correct_carrier_phase(
         Phase-corrected symbols, same shape and dtype as ``symbols``.  A
         :class:`Signal` returns a new phase-corrected :class:`Signal`.
     """
-    x, sig = unwrap_signal(symbols)
-    if sig is not None:
-        return rewrap_signal(sig, correct_carrier_phase(x, phase_vector))
-
+    context = prepare_signal_input(symbols, function_name="correct_carrier_phase()")
+    symbols = context.array
     symbols, xp, _ = dispatch(symbols)
     logger.debug("Applying carrier phase correction: shape=%s", symbols.shape)
     # Wrap to [-π, π] in float64 (handles unbounded phase trajectories from
@@ -476,7 +473,7 @@ def correct_carrier_phase(
     phase_f64 = xp.asarray(phase_vector, dtype=xp.float64)
     if xp is not np and symbols.dtype == xp.complex64:
         # GPU fast path: single fused kernel (broadcasts (N,) phase over (C, N)).
-        return _get_cupy_phase_rotate()(symbols, phase_f64)
+        return context.return_value(_get_cupy_phase_rotate()(symbols, phase_f64))
     two_pi = 2.0 * xp.pi
     phase_wrapped = (phase_f64 - xp.round(phase_f64 / two_pi) * two_pi).astype(
         xp.float32
@@ -484,7 +481,7 @@ def correct_carrier_phase(
     phasor = xp.exp(-1j * phase_wrapped)
     if phasor.dtype != symbols.dtype:
         phasor = phasor.astype(symbols.dtype)
-    return symbols * phasor
+    return context.return_value(symbols * phasor)
 
 
 def correct_phase_rotation(
@@ -528,8 +525,11 @@ def correct_phase_rotation(
         :class:`Signal` returns a new :class:`Signal` with ``resolved_symbols``
         corrected.
     """
-    if isinstance(symbols, Signal):
-        sig = symbols
+    context = prepare_signal_input(
+        symbols, function_name="correct_phase_rotation()", field="resolved_symbols"
+    )
+    if context.signal is not None:
+        sig = context.signal
         if sig.resolved_symbols is None:
             raise ValueError(
                 "resolved_symbols is not set. Call resolve_symbols(sig) or assign "
@@ -541,19 +541,25 @@ def correct_phase_rotation(
                 "No reference available. Provide ref_symbols or ensure "
                 "source_symbols is set on the Signal."
             )
-        resolved_symbols, _ = unwrap_signal(sig, field="resolved_symbols")
-        new = sig._shallow_clone()
-        new.resolved_symbols = correct_phase_rotation(
-            resolved_symbols, ref, num_skip_symbols=num_skip_symbols
+        resolved = _correct_phase_rotation_array(
+            context.array, ref, num_skip_symbols=num_skip_symbols
         )
-        new.resolved_bits = None
-        return new
+        return context.replace_field("resolved_symbols", resolved)
 
     if ref_symbols is None:
         raise ValueError(
             "correct_phase_rotation() requires ref_symbols for array input."
         )
 
+    return _correct_phase_rotation_array(symbols, ref_symbols, num_skip_symbols)
+
+
+def _correct_phase_rotation_array(
+    symbols: ArrayType,
+    ref_symbols: ArrayType,
+    num_skip_symbols: int = 0,
+) -> ArrayType:
+    """Array-only static phase-rotation correction."""
     symbols, xp, _ = dispatch(symbols)
     symbols, was_1d = as_2d(symbols, name="symbols")
     C, N = symbols.shape
@@ -682,8 +688,11 @@ def resolve_channel_permutation(
     When ``symbols`` is a :class:`Signal`, ``resolved_symbols`` is reordered
     against ``source_symbols`` and a new :class:`Signal` is returned.
     """
-    if isinstance(symbols, Signal):
-        sig = symbols
+    context = prepare_signal_input(
+        symbols, function_name="resolve_channel_permutation()", field="resolved_symbols"
+    )
+    if context.signal is not None:
+        sig = context.signal
         if sig.resolved_symbols is None:
             raise ValueError(
                 "resolved_symbols is not set. Call resolve_symbols(sig) or assign "
@@ -694,22 +703,30 @@ def resolve_channel_permutation(
                 "source_symbols is not set. Populate source_symbols (the known TX "
                 "symbol sequence) before calling resolve_channel_permutation()."
             )
-        # Output field (resolved_symbols) is written by hand: rewrap_signal
-        # always targets .samples, and here input and output share a field
-        # name that isn't it.
-        resolved_symbols, _ = unwrap_signal(sig, field="resolved_symbols")
-        new = sig._shallow_clone()
-        new.resolved_symbols = resolve_channel_permutation(
-            resolved_symbols,
+        # Input and output share the resolved_symbols derived field.
+        resolved = _resolve_channel_permutation_array(
+            context.array,
             sig.source_symbols,
             num_skip_symbols=num_skip_symbols,
             metric=metric,
         )
-        new.resolved_bits = None
-        return new
+        return context.replace_field("resolved_symbols", resolved)
 
     if ref_symbols is None:
         raise ValueError("resolve_channel_permutation() requires ref_symbols.")
+    return _resolve_channel_permutation_array(
+        symbols, ref_symbols, num_skip_symbols=num_skip_symbols, metric=metric
+    )
+
+
+def _resolve_channel_permutation_array(
+    symbols: ArrayType,
+    ref_symbols: ArrayType,
+    *,
+    num_skip_symbols: int = 0,
+    metric: str = "coherence",
+) -> ArrayType:
+    """Array-only channel assignment implementation."""
 
     from scipy.optimize import linear_sum_assignment
 
@@ -836,8 +853,11 @@ def resolve_phase_ambiguity(
     against ``source_symbols`` (using the signal's modulation/order/pmf) and a
     new :class:`Signal` is returned.
     """
-    if isinstance(symbols, Signal):
-        sig = symbols
+    context = prepare_signal_input(
+        symbols, function_name="resolve_phase_ambiguity()", field="resolved_symbols"
+    )
+    if context.signal is not None:
+        sig = context.signal
         if sig.resolved_symbols is None:
             raise ValueError(
                 "resolved_symbols is not set. Call resolve_symbols(sig) or assign "
@@ -848,38 +868,13 @@ def resolve_phase_ambiguity(
                 "source_symbols is not set. Populate source_symbols (the known TX "
                 "symbol sequence) before calling resolve_phase_ambiguity()."
             )
-        mod = sig.mod_scheme
-        if mod is None:
-            mod = modulation
-            if mod is not None:
-                logger.warning(
-                    "resolve_phase_ambiguity(): Signal has no mod_scheme "
-                    "set; falling back to supplied modulation=%r.",
-                    mod,
-                )
-        ord_ = sig.mod_order
-        if ord_ is None:
-            ord_ = order
-            if ord_ is not None:
-                logger.warning(
-                    "resolve_phase_ambiguity(): Signal has no mod_order set; "
-                    "falling back to supplied order=%r.",
-                    ord_,
-                )
+        mod = context.optional("mod_scheme", modulation)
+        ord_ = context.optional("mod_order", order)
         if mod is None or ord_ is None:
             raise ValueError("mod_scheme and mod_order must be set.")
-        eff_pmf = sig.ps_pmf
-        if eff_pmf is None:
-            eff_pmf = pmf
-            if eff_pmf is not None:
-                logger.warning(
-                    "resolve_phase_ambiguity(): Signal has no ps_pmf set; "
-                    "falling back to supplied pmf."
-                )
-        resolved_symbols, _ = unwrap_signal(sig, field="resolved_symbols")
-        new = sig._shallow_clone()
-        new.resolved_symbols = resolve_phase_ambiguity(
-            resolved_symbols,
+        eff_pmf = context.optional("ps_pmf", pmf)
+        resolved = _resolve_phase_ambiguity_array(
+            context.array,
             sig.source_symbols,
             mod,
             ord_,
@@ -887,14 +882,34 @@ def resolve_phase_ambiguity(
             num_skip_symbols=num_skip_symbols,
             pmf=eff_pmf,
         )
-        new.resolved_bits = None
-        return new
+        return context.replace_field("resolved_symbols", resolved)
 
     if ref_symbols is None or modulation is None or order is None:
         raise ValueError(
             "resolve_phase_ambiguity() requires ref_symbols, modulation, and order."
         )
 
+    return _resolve_phase_ambiguity_array(
+        symbols,
+        ref_symbols,
+        modulation,
+        order,
+        symmetry_order=symmetry_order,
+        num_skip_symbols=num_skip_symbols,
+        pmf=pmf,
+    )
+
+
+def _resolve_phase_ambiguity_array(
+    symbols: ArrayType,
+    ref_symbols: ArrayType,
+    modulation: str,
+    order: int,
+    symmetry_order: int | None = None,
+    num_skip_symbols: int = 0,
+    pmf: np.ndarray | None = None,
+) -> ArrayType:
+    """Array-only rotational-ambiguity resolution."""
     from ..metrics import ser as _ser
 
     symbols, xp, _ = dispatch(symbols)

@@ -5,14 +5,13 @@ import math
 import numpy as np
 
 from ...backend import ArrayType, dispatch
+from ...core._signal_adapter import prepare_signal_input
 from ...core.signal import Signal
 from ...helpers import (
     _cd_beta2_length,
     as_2d,
     require_channels,
     restore_1d,
-    rewrap_signal,
-    unwrap_signal,
 )
 from ...logger import logger
 
@@ -102,22 +101,9 @@ def apply_pmd(
     >>> distorted = apply_pmd(samples, sig.sampling_rate, dgd=5e-12, theta=np.pi/5)
     >>> distorted = apply_pmd(sig, dgd=5e-12, theta=np.pi / 5)  # Signal input
     """
-    x, sig = unwrap_signal(samples)
-    if sig is not None:
-        # sig.sampling_rate is a required field, so it always wins over a
-        # supplied sampling_rate - see CLAUDE.md, "Signal-Awareness".
-        if sampling_rate is not None:
-            logger.warning(
-                "apply_pmd(): ignoring supplied sampling_rate=%r for Signal "
-                "input; using the signal's own sampling_rate=%r instead.",
-                sampling_rate,
-                sig.sampling_rate,
-            )
-        result = apply_pmd(x, sig.sampling_rate, dgd, theta)
-        return rewrap_signal(sig, result)
-
-    if sampling_rate is None:
-        raise ValueError("apply_pmd() requires sampling_rate for array input.")
+    context = prepare_signal_input(samples, function_name="apply_pmd()")
+    samples = context.array
+    sampling_rate = context.required("sampling_rate", sampling_rate)
     if dgd is None:
         raise ValueError("apply_pmd() requires dgd.")
 
@@ -152,7 +138,7 @@ def apply_pmd(
     if result.dtype != samples.dtype:
         result = result.astype(samples.dtype)
 
-    return result
+    return context.return_value(result)
 
 
 def apply_polarization_mixing(
@@ -211,10 +197,8 @@ def apply_polarization_mixing(
     >>> drifted = apply_polarization_mixing(samples, theta=0.0,
     ...                                     drift_rate_rad_per_sym=1e-3)
     """
-    x, sig = unwrap_signal(samples)
-    if sig is not None:
-        result = apply_polarization_mixing(x, theta, drift_rate_rad_per_sym)
-        return rewrap_signal(sig, result)
+    context = prepare_signal_input(samples, function_name="apply_polarization_mixing()")
+    samples = context.array
 
     logger.info(
         "Applying polarization mixing (theta=%s, drift=%.3g rad/sym).",
@@ -243,7 +227,7 @@ def apply_polarization_mixing(
             result = R @ samples
             if result.dtype != samples.dtype:
                 result = result.astype(samples.dtype)
-            return result
+            return context.return_value(result)
     else:
         angles = xp.asarray(theta, dtype=xp.float64)
         if angles.shape != (N,):
@@ -265,7 +249,7 @@ def apply_polarization_mixing(
     if result.dtype != samples.dtype:
         result = result.astype(samples.dtype)
 
-    return result
+    return context.return_value(result)
 
 
 def apply_chromatic_dispersion(
@@ -325,31 +309,11 @@ def apply_chromatic_dispersion(
     ...     sig, dispersion_ps_nm_km=17.0, fiber_length_km=80.0,
     ...     center_wavelength_nm=1550.0)
     """
-    x, sig = unwrap_signal(samples)
-    if sig is not None:
-        # sig.sampling_rate is a required field, so it always wins over a
-        # supplied sampling_rate - see CLAUDE.md, "Signal-Awareness".
-        if sampling_rate is not None:
-            logger.warning(
-                "apply_chromatic_dispersion(): ignoring supplied "
-                "sampling_rate=%r for Signal input; using the signal's own "
-                "sampling_rate=%r instead.",
-                sampling_rate,
-                sig.sampling_rate,
-            )
-        result = apply_chromatic_dispersion(
-            x,
-            sig.sampling_rate,
-            dispersion_ps_nm_km,
-            fiber_length_km,
-            center_wavelength_nm,
-        )
-        return rewrap_signal(sig, result)
-
-    if sampling_rate is None:
-        raise ValueError(
-            "apply_chromatic_dispersion() requires sampling_rate for array input."
-        )
+    context = prepare_signal_input(
+        samples, function_name="apply_chromatic_dispersion()"
+    )
+    samples = context.array
+    sampling_rate = context.required("sampling_rate", sampling_rate)
     if (
         dispersion_ps_nm_km is None
         or fiber_length_km is None
@@ -385,4 +349,4 @@ def apply_chromatic_dispersion(
     if result.dtype != samples.dtype:
         result = result.astype(samples.dtype)
 
-    return restore_1d(was_1d, result)
+    return context.return_value(restore_1d(was_1d, result))

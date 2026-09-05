@@ -7,14 +7,11 @@ from typing import Any
 import numpy as np
 
 from ..backend import ArrayType
+from ..core._signal_adapter import prepare_signal_input, require_integer_sps
 from ..core.signal import Signal
 from ..helpers import (
-    _coerce_integer_sps,
     broadcast_channels,
-    rewrap_signal,
-    unwrap_signal,
 )
-from ..logger import logger
 from ._block import _block_fdaf_blind
 from ._common import _godard_radius, _rde_ring_radii
 from .result import EqualizerResult
@@ -77,47 +74,16 @@ def block_cma(
     ``sps`` is ignored for :class:`Signal` input, which always uses the
     signal's own ``sps``.
     """
-    x, sig = unwrap_signal(samples)
-    if sig is not None:
-        # sig.sps is always populated (derived from the required sampling_rate
-        # / symbol_rate fields), so the Signal's own value always wins over a
-        # supplied sps - see CLAUDE.md, "Signal-Awareness".
-        if sps is not None:
-            logger.warning(
-                "block_cma(): ignoring supplied sps=%r for Signal input; "
-                "using the signal's own sps=%r instead.",
-                sps,
-                sig.sps,
-            )
-        result = block_cma(
-            x,
-            num_taps=num_taps,
-            sps=_coerce_integer_sps(sig.sps, caller="block_cma()"),
-            step_size=step_size,
-            block_size=block_size,
-            modulation=modulation,
-            order=order,
-            unipolar=unipolar,
-            w_init=w_init,
-            pilot_ref=pilot_ref,
-            pilot_mask=pilot_mask,
-            pilot_gain_db=pilot_gain_db,
-            pmf=pmf,
-            input_norm_factor=input_norm_factor,
-            samples_prefix=samples_prefix,
-            pad_mode=pad_mode,
-            cuda_graph=cuda_graph,
-            debug_plot=debug_plot,
-            plot_smoothing=plot_smoothing,
-        )
-        result.y_hat = rewrap_signal(sig, result.y_hat, sampling_rate=sig.symbol_rate)
-        return result
+    context = prepare_signal_input(samples, function_name="block_cma()")
+    samples = context.array
+    if context.signal is not None:
+        sps = require_integer_sps(context.required("sps", sps), "block_cma()")
 
     if sps is None:
         sps = 2
 
     r2, c_ps = _godard_radius(modulation, order, unipolar, pmf)
-    return _block_fdaf_blind(
+    result = _block_fdaf_blind(
         "cma",
         samples,
         num_taps=num_taps,
@@ -139,6 +105,11 @@ def block_cma(
         plot_smoothing=plot_smoothing,
         name="Block-CMA" if pilot_ref is None else "Block-CMA(PA)",
     )
+    if context.signal is not None:
+        result.y_hat = context.return_value(
+            result.y_hat, sampling_rate=context.signal.symbol_rate
+        )
+    return result
 
 
 def block_rde(
@@ -186,47 +157,16 @@ def block_rde(
     symbol_rate``); ``sps`` is ignored for :class:`Signal` input, which
     always uses the signal's own ``sps``.
     """
-    x, sig = unwrap_signal(samples)
-    if sig is not None:
-        # sig.sps is always populated (derived from the required sampling_rate
-        # / symbol_rate fields), so the Signal's own value always wins over a
-        # supplied sps - see CLAUDE.md, "Signal-Awareness".
-        if sps is not None:
-            logger.warning(
-                "block_rde(): ignoring supplied sps=%r for Signal input; "
-                "using the signal's own sps=%r instead.",
-                sps,
-                sig.sps,
-            )
-        result = block_rde(
-            x,
-            num_taps=num_taps,
-            sps=_coerce_integer_sps(sig.sps, caller="block_rde()"),
-            step_size=step_size,
-            block_size=block_size,
-            modulation=modulation,
-            order=order,
-            unipolar=unipolar,
-            w_init=w_init,
-            pilot_ref=pilot_ref,
-            pilot_mask=pilot_mask,
-            pilot_gain_db=pilot_gain_db,
-            pmf=pmf,
-            input_norm_factor=input_norm_factor,
-            samples_prefix=samples_prefix,
-            pad_mode=pad_mode,
-            cuda_graph=cuda_graph,
-            debug_plot=debug_plot,
-            plot_smoothing=plot_smoothing,
-        )
-        result.y_hat = rewrap_signal(sig, result.y_hat, sampling_rate=sig.symbol_rate)
-        return result
+    context = prepare_signal_input(samples, function_name="block_rde()")
+    samples = context.array
+    if context.signal is not None:
+        sps = require_integer_sps(context.required("sps", sps), "block_rde()")
 
     if sps is None:
         sps = 2
 
     radii_np, c_ps = _rde_ring_radii(modulation, order, unipolar, pmf)
-    return _block_fdaf_blind(
+    result = _block_fdaf_blind(
         "rde",
         samples,
         num_taps=num_taps,
@@ -248,6 +188,11 @@ def block_rde(
         plot_smoothing=plot_smoothing,
         name="Block-RDE" if pilot_ref is None else "Block-RDE(PA)",
     )
+    if context.signal is not None:
+        result.y_hat = context.return_value(
+            result.y_hat, sampling_rate=context.signal.symbol_rate
+        )
+    return result
 
 
 # -----------------------------------------------------------------------------
