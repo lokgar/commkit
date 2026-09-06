@@ -6,48 +6,25 @@ import pytest
 from commkit import equalization, generate_qam
 from commkit.equalization import EqualizerResult
 from commkit.mapping import gray_constellation
+from tests.common.conversions import to_numpy
+from tests.common.signals import make_test_psk_samples, make_test_qam_signal
 
-
-@pytest.fixture(autouse=True)
-def _enable_jax_x64():
-    """Enable JAX x64 mode for all tests in this module.
-
-    JAX RLS requires complex128 for P-matrix stability; LMS CPR requires float64
-    for phase accumulation. Enabling x64 globally is safe - it only affects
-    precision when 64-bit dtypes are explicitly requested.
-    """
-    try:
-        import jax
-
-        jax.config.update("jax_enable_x64", True)
-    except ImportError:
-        pass
-
-
-def _to_np(arr):
-    """Convert a NumPy or CuPy array to plain NumPy (no-op for NumPy)."""
-    if hasattr(arr, "get"):  # CuPy
-        return arr.get()
-    return np.asarray(arr)
-
-
-jax = pytest.importorskip("jax", reason="JAX not installed")
+# -----------------------------------------------------------------------------
+# Helpers
+# -----------------------------------------------------------------------------
 
 
 def _make_qam16_rx(xp, n_symbols=2000, seed=0):
     """Generate a simple AWGN-impaired 16-QAM signal at 2 SPS."""
-    from commkit.impairments import apply_awgn
-
-    sig = generate_qam(
-        symbol_rate=1e6,
-        num_symbols=n_symbols,
-        order=16,
-        pulse_shape="rrc",
-        sps=2,
-        seed=seed,
+    sig = make_test_qam_signal(
+        order=16, num_symbols=n_symbols, sps=2, snr_db=20.0, seed=seed, xp=xp
     )
-    rx = apply_awgn(sig.samples, esn0_db=20.0, sps=2)
-    return xp.ascontiguousarray(xp.asarray(rx))
+    return xp.ascontiguousarray(sig.samples)
+
+
+# -----------------------------------------------------------------------------
+# Test Classes
+# -----------------------------------------------------------------------------
 
 
 class TestWInit:
@@ -143,7 +120,7 @@ class TestWInit:
             num_taps=21,
             step_size=0.05,
         )
-        w0 = _to_np(pre.weights)
+        w0 = to_numpy(pre.weights)
         if w0.ndim == 1:
             w0 = w0[np.newaxis, np.newaxis, :]
 
@@ -186,7 +163,7 @@ class TestWInit:
             num_taps=21,
         )
         _w = pre.weights
-        w0 = _to_np(pre.weights)
+        w0 = to_numpy(pre.weights)
         if w0.ndim == 1:
             w0 = w0[np.newaxis, np.newaxis, :]
 
@@ -196,9 +173,9 @@ class TestWInit:
         )
 
         tail = slice(-500, None)
-        ref = _to_np(sig.source_symbols)
-        cold_hat = _to_np(cold.y_hat)
-        warm_hat = _to_np(warm.y_hat)
+        ref = to_numpy(sig.source_symbols)
+        cold_hat = to_numpy(cold.y_hat)
+        warm_hat = to_numpy(warm.y_hat)
         evm_cold = float(np.mean(np.abs(cold_hat[tail] - ref[tail]) ** 2))
         evm_warm = float(np.mean(np.abs(warm_hat[tail] - ref[tail]) ** 2))
         # Warm start must not be significantly worse
@@ -210,9 +187,8 @@ class TestWInit:
 class TestEqualizerWInitBackend:
     """Verify w_init works correctly on both numba and jax backends."""
 
-    def test_cma_jax_w_init(self, backend_device, xp):
+    def test_cma_jax_w_init(self, backend_device, xp, jax):
         """CMA JAX backend accepts w_init without error."""
-        pytest.importorskip("jax")
         rx = _make_qam16_rx(xp)
         num_taps = 21
         w0 = np.zeros((1, 1, num_taps), dtype=np.complex64)
@@ -228,9 +204,8 @@ class TestEqualizerWInitBackend:
         )
         assert isinstance(result, EqualizerResult)
 
-    def test_rde_jax_w_init(self, backend_device, xp):
+    def test_rde_jax_w_init(self, backend_device, xp, jax):
         """RDE JAX backend accepts w_init without error."""
-        pytest.importorskip("jax")
         rx = _make_qam16_rx(xp)
         num_taps = 21
         w0 = np.zeros((1, 1, num_taps), dtype=np.complex64)
@@ -257,7 +232,6 @@ class TestNormalizationLengthIndependence:
         import numpy as np
 
         from commkit.equalization import lms, rls
-        from commkit.mapping import gray_constellation
 
         rng = np.random.default_rng(42)
         n_train = 200
@@ -286,15 +260,9 @@ class TestNormalizationLengthIndependence:
 
 def _make_qpsk(xp, n_sym=2000, snr_db=20.0, seed=77):
     """Build a QPSK signal using the given array module (numpy or cupy)."""
-    rng = np.random.default_rng(seed)
-    const = gray_constellation("psk", 4).astype(np.complex64)
-    syms_np = const[rng.integers(0, 4, n_sym)]
-    noise_std = np.sqrt(10 ** (-snr_db / 10) / 2)
-    samples_np = (
-        syms_np
-        + noise_std * (rng.standard_normal(n_sym) + 1j * rng.standard_normal(n_sym))
-    ).astype(np.complex64)
-    return xp.asarray(samples_np), xp.asarray(syms_np)
+    return make_test_psk_samples(
+        order=4, num_symbols=n_sym, sps=1, snr_db=snr_db, seed=seed, xp=xp
+    )
 
 
 def _algo_kw(algo, num_taps):

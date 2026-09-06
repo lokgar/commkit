@@ -7,37 +7,39 @@ from commkit import generate_qam, recovery, spectral
 from commkit.backend import to_device
 from commkit.core import Signal
 from commkit.impairments import apply_awgn
+from tests.common.metrics import calc_rms_phase_error
+from tests.common.signals import apply_phase_ramp
 
 FS = 1e6  # 1 MHz sampling rate, common to all tests
-
-
 SNR_DB = 30  # generous SNR so numerical algorithms converge reliably
+
+# -----------------------------------------------------------------------------
+# Helpers
+# -----------------------------------------------------------------------------
 
 
 def _apply_phase_ramp(xp, samples, phase_per_sample):
-    """Apply a linear phase ramp: samples[n] *= exp(j * n * phase_per_sample)."""
-    n = xp.arange(samples.shape[-1], dtype=xp.float64)
-    ramp = xp.exp(1j * n * phase_per_sample).astype(samples.dtype)
-    return samples * ramp
+    return apply_phase_ramp(samples, phase_per_sample, xp=xp)
 
 
 def _rms_phase_error(xp, phase_est, phase_true):
-    """RMS of the phase error, after removing any constant offset (M-fold ambiguity)."""
-    err = phase_est - phase_true
-    # Remove the mean bias (accounts for the irreducible global ambiguity)
-    err = err - float(xp.mean(err))
-    return float(xp.sqrt(xp.mean(err**2)))
+    return calc_rms_phase_error(phase_est, phase_true, xp=xp)
+
+
+# -----------------------------------------------------------------------------
+# Test Classes
+# -----------------------------------------------------------------------------
 
 
 class TestCprPilots:
-    def _pilot_setup(self, xp, n_symbols=512, pilot_period=16, phase_per_sym=0.001):
+    def _pilot_setup(self, xp, n_symbols=512, pilot_period=16, phase_per_sym=0.001, seed=0):
         """Return (noisy+rotated samples, pilot_indices, pilot_values, true_phase)."""
-        sig = generate_qam(order=16, num_symbols=n_symbols, sps=1, symbol_rate=FS)
+        sig = generate_qam(order=16, num_symbols=n_symbols, sps=1, symbol_rate=FS, seed=seed)
         # Save ideal symbols before adding noise
         ideal_symbols = xp.asarray(sig.samples.copy())
-        sig.samples = apply_awgn(sig.samples, esn0_db=SNR_DB, sps=1)
+        sig.samples = apply_awgn(sig.samples, esn0_db=SNR_DB, sps=1, seed=seed)
         # Apply a slow linear phase ramp on top of noise
-        sig.samples = _apply_phase_ramp(xp, sig.samples, phase_per_sym)
+        sig.samples = apply_phase_ramp(sig.samples, phase_per_sym, xp=xp)
 
         pilot_indices = np.arange(0, n_symbols, pilot_period)
         # Known pilot values = noiseless, unrotated symbols at pilot positions
@@ -55,7 +57,7 @@ class TestCprPilots:
         phase_est = recovery.recover_carrier_phase_pilot_symbols(
             samples, pilot_indices=pilot_indices, pilot_values=pilot_values
         )
-        err = _rms_phase_error(xp, phase_est, true_phase)
+        err = calc_rms_phase_error(phase_est, true_phase, xp=xp)
         assert err < 0.05
 
     def test_output_shape_siso(self, backend_device, xp):
@@ -525,7 +527,7 @@ class TestPilotsCPREnhancements:
         pilot_values = ideal[pilot_indices]
         return sig.samples, pilot_indices, pilot_values
 
-    def test_joint_rows_identical(self, backend_device, xp):
+    def test_joint_rows_identical(self, backend_device, xp, xpt):
         """joint_channels=True: both phi_full rows are bitwise identical."""
         samples_a, pilot_indices, pilot_values = self._pilot_setup(xp, seed=1)
         samples_b, _, _ = self._pilot_setup(xp, seed=2)
@@ -538,10 +540,9 @@ class TestPilotsCPREnhancements:
             cycle_slip_correction=False,
         )
         assert phi.shape == (2, mimo.shape[-1])
-        phi_np = phi if xp is np else phi.get()
-        np.testing.assert_array_equal(phi_np[0], phi_np[1])
+        xpt.assert_array_equal(phi[0], phi[1])
 
-    def test_joint_siso_noop(self, backend_device, xp):
+    def test_joint_siso_noop(self, backend_device, xp, xpt):
         """joint_channels=True on SISO returns identical result to False."""
         samples, pilot_indices, pilot_values = self._pilot_setup(xp, seed=3)
         phi_a = recovery.recover_carrier_phase_pilot_symbols(
@@ -558,9 +559,7 @@ class TestPilotsCPREnhancements:
             joint_channels=True,
             cycle_slip_correction=False,
         )
-        phi_a_np = phi_a if xp is np else phi_a.get()
-        phi_b_np = phi_b if xp is np else phi_b.get()
-        np.testing.assert_allclose(phi_a_np, phi_b_np, atol=1e-10)
+        xpt.assert_allclose(phi_a, phi_b, atol=1e-10)
 
     def test_cycle_slip_shape(self, backend_device, xp):
         """cycle_slip_correction=True returns correct shape."""
@@ -573,7 +572,7 @@ class TestPilotsCPREnhancements:
         )
         assert phi.shape == samples.shape
 
-    def test_cycle_slip_standalone_symmetry_1(self, backend_device, xp):
+    def test_cycle_slip_standalone_symmetry_1(self, backend_device, xp, xpt):
         """correct_cycle_slips with symmetry=1 corrects an injected 2π slip."""
         B = 200
         phi_u = np.linspace(0.0, 3.0, B)
@@ -582,9 +581,9 @@ class TestPilotsCPREnhancements:
         phi_out = recovery.correct_cycle_slips(
             phi_slipped, symmetry=1, history_length=50
         )
-        np.testing.assert_allclose(phi_out, phi_u, atol=0.1)
+        xpt.assert_allclose(phi_out, phi_u, atol=0.1)
 
-    def test_joint_cycle_slip_mimo_rows_identical(self, backend_device, xp):
+    def test_joint_cycle_slip_mimo_rows_identical(self, backend_device, xp, xpt):
         """joint_channels=True + cycle_slip_correction=True: rows remain identical."""
         samples_a, pilot_indices, pilot_values = self._pilot_setup(xp, seed=4)
         samples_b, _, _ = self._pilot_setup(xp, seed=5)
@@ -597,8 +596,7 @@ class TestPilotsCPREnhancements:
             cycle_slip_correction=True,
         )
         assert phi.shape == (2, mimo.shape[-1])
-        phi_np = phi if xp is np else phi.get()
-        np.testing.assert_array_equal(phi_np[0], phi_np[1])
+        xpt.assert_array_equal(phi[0], phi[1])
 
 
 class TestSignalInputPilotFunctions:

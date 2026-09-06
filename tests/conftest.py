@@ -25,6 +25,13 @@ except ImportError:
     _CUPY_AVAILABLE = False
 
 
+def pytest_configure(config):
+    """Register custom markers."""
+    config.addinivalue_line("markers", "gpu_only: mark test as requiring a GPU backend")
+    config.addinivalue_line("markers", "cpu_only: mark test as CPU-only")
+    config.addinivalue_line("markers", "requires_kernel(name): mark test as requiring a specific CUDA kernel")
+
+
 def pytest_addoption(parser):
     """Add custom CLI options for device selection."""
     parser.addoption(
@@ -36,10 +43,17 @@ def pytest_addoption(parser):
 
 
 def pytest_generate_tests(metafunc):
-    """Parametrize the backend_device fixture based on the --device option."""
+    """Parametrize the backend_device fixture based on the --device option and markers."""
     if "backend_device" in metafunc.fixturenames:
         device_opt = metafunc.config.getoption("--device")
-        if device_opt == "all":
+        is_gpu_only = bool(metafunc.definition.get_closest_marker("gpu_only"))
+        is_cpu_only = bool(metafunc.definition.get_closest_marker("cpu_only"))
+
+        if is_gpu_only:
+            params = ["gpu"]
+        elif is_cpu_only:
+            params = ["cpu"]
+        elif device_opt == "all":
             params = ["cpu", "gpu"]
         elif device_opt == "gpu":
             params = ["gpu"]
@@ -47,6 +61,38 @@ def pytest_generate_tests(metafunc):
             params = ["cpu"]
 
         metafunc.parametrize("backend_device", params, indirect=True)
+
+
+def pytest_collection_modifyitems(config, items):
+    """Filter items based on --device selection so incompatible tests are deselected rather than skipped."""
+    device_opt = config.getoption("--device")
+    if device_opt == "cpu":
+        items[:] = [
+            item
+            for item in items
+            if not (
+                item.get_closest_marker("gpu_only")
+                or item.get_closest_marker("requires_kernel")
+            )
+        ]
+    elif device_opt == "gpu":
+        items[:] = [
+            item for item in items if not item.get_closest_marker("cpu_only")
+        ]
+
+
+@pytest.fixture(autouse=True)
+def _ensure_jax_precision():
+    """Ensure JAX uses float64/complex128 precision across the entire test suite."""
+    from tests.common.conversions import ensure_jax_x64
+
+    ensure_jax_x64()
+
+
+@pytest.fixture
+def jax():
+    """Fixture providing the JAX module, cleanly skipping if not installed."""
+    return pytest.importorskip("jax", reason="JAX not installed")
 
 
 @pytest.fixture
@@ -68,7 +114,10 @@ def backend_device(request):
         One of {"cpu", "gpu"}.
     """
     device = request.param
+    device_opt = request.config.getoption("--device")
     if device == "gpu":
+        if device_opt == "cpu":
+            pytest.skip("Test requires GPU, but --device=cpu was selected")
         backend.use_cpu_only(False)
         if not _CUPY_AVAILABLE:
             pytest.skip("CuPy not installed, skipping GPU tests")
@@ -85,6 +134,13 @@ def backend_device(request):
     elif device == "cpu":
         # Force CPU to prevent accidental GPU usage in "cpu" tests
         backend.use_cpu_only(True)
+
+    marker = request.node.get_closest_marker("requires_kernel")
+    if marker:
+        kernel_name = marker.args[0] if marker.args else None
+        from tests.common.kernel_utils import skip_unless_kernel_available
+
+        skip_unless_kernel_available(kernel_name, backend_device=device)
 
     try:
         yield device
@@ -133,3 +189,5 @@ def xpt(backend_device):
     import numpy.testing as npt
 
     return npt
+
+

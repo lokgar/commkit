@@ -3,37 +3,17 @@
 import numpy as np
 import pytest
 
-from commkit import generate_psk, generate_qam, recovery, spectral
+from commkit import recovery
 from commkit.core import Signal
-from commkit.impairments import apply_awgn
-from commkit.mapping import gray_constellation
+from tests.common.signals import (
+    make_test_mimo_samples,
+    make_test_psk_signal,
+    make_test_qam_signal,
+    make_test_symbols,
+)
 
 FS = 1e6  # 1 MHz sampling rate, common to all tests
-
-
 SNR_DB = 30  # generous SNR so numerical algorithms converge reliably
-
-
-def _qam_signal(xp, order, n_symbols, fo_hz=0.0, snr_db=SNR_DB, fs=FS, seed=42):
-    """Generate a 1-SPS QAM signal with optional frequency offset and AWGN."""
-    sig = generate_qam(
-        order=order, num_symbols=n_symbols, sps=1, symbol_rate=fs, seed=seed
-    )
-    sig.samples = apply_awgn(sig.samples, esn0_db=snr_db, sps=1, seed=seed)
-    if fo_hz != 0.0:
-        sig.samples, _ = spectral.shift_frequency(sig.samples, fo_hz, fs)
-    return sig
-
-
-def _psk_signal(xp, order, n_symbols, fo_hz=0.0, snr_db=SNR_DB, fs=FS, seed=42):
-    """Generate a 1-SPS PSK signal with optional frequency offset and AWGN."""
-    sig = generate_psk(
-        order=order, num_symbols=n_symbols, sps=1, symbol_rate=fs, seed=seed
-    )
-    sig.samples = apply_awgn(sig.samples, esn0_db=snr_db, sps=1, seed=seed)
-    if fo_hz != 0.0:
-        sig.samples, _ = spectral.shift_frequency(sig.samples, fo_hz, fs)
-    return sig
 
 
 class TestCprViterbiViterbi:
@@ -52,11 +32,10 @@ class TestCprViterbiViterbi:
     )
     def test_phase_residual(self, backend_device, xp, order, modulation, block_size):
         """VV CPR: mean phase estimate within 0.1 rad of true carrier phase (mod M-fold)."""
-        sig = (
-            _qam_signal(xp, order, 2048)
-            if modulation == "qam"
-            else _psk_signal(xp, order, 2048)
-        )
+        if modulation == "qam":
+            sig = make_test_qam_signal(order=order, num_symbols=2048, sps=1, symbol_rate=FS, xp=xp)
+        else:
+            sig = make_test_psk_signal(order=order, num_symbols=2048, sps=1, symbol_rate=FS, xp=xp)
         phi_true = 0.3  # radians
         sig.samples = sig.samples * xp.exp(1j * phi_true)
 
@@ -72,7 +51,7 @@ class TestCprViterbiViterbi:
 
     def test_output_shape_siso(self, backend_device, xp):
         """VV CPR: 1D input -> 1D phase output of same length."""
-        sig = _qam_signal(xp, 16, 512)
+        sig = make_test_qam_signal(order=16, num_symbols=512, sps=1, symbol_rate=FS, xp=xp)
         phase = recovery.recover_carrier_phase_viterbi_viterbi(
             sig.samples, modulation="qam", order=16
         )
@@ -80,9 +59,9 @@ class TestCprViterbiViterbi:
 
     def test_output_shape_mimo(self, backend_device, xp):
         """VV CPR: 2D input (C, N) -> 2D phase output (C, N)."""
-        sig_a = _qam_signal(xp, 4, 512)
-        sig_b = _qam_signal(xp, 4, 512)
-        mimo = xp.stack([sig_a.samples, sig_b.samples])  # (2, 512)
+        mimo, _ = make_test_mimo_samples(
+            num_channels=2, order=4, num_symbols=512, sps=1, xp=xp
+        )
         phase = recovery.recover_carrier_phase_viterbi_viterbi(
             mimo, modulation="qam", order=4
         )
@@ -90,7 +69,7 @@ class TestCprViterbiViterbi:
 
     def test_too_short_raises(self, backend_device, xp):
         """VV CPR: signal shorter than block_size raises ValueError."""
-        sig = _qam_signal(xp, 4, 20)
+        sig = make_test_qam_signal(order=4, num_symbols=20, sps=1, symbol_rate=FS, xp=xp)
         with pytest.raises(ValueError, match="shorter than block_size"):
             recovery.recover_carrier_phase_viterbi_viterbi(
                 sig.samples[:10], modulation="qam", order=4, block_size=32
@@ -101,20 +80,10 @@ class TestViterbiViterbi:
     """Tests for recover_carrier_phase_viterbi_viterbi."""
 
     def _qpsk_symbols(self, xp, N=512, seed=0):
-        import numpy as np
-
-        rng = np.random.default_rng(seed)
-        bits = rng.integers(0, 4, N)
-        angles = (2 * np.pi / 4) * bits + np.pi / 4
-        return xp.asarray(np.exp(1j * angles).astype(np.complex64))
+        return make_test_symbols(scheme="psk", order=4, num_symbols=N, seed=seed, xp=xp)
 
     def _qam16_symbols(self, xp, N=512, seed=1):
-        import numpy as np
-
-        rng = np.random.default_rng(seed)
-        const = gray_constellation("qam", 16)
-        idx = rng.integers(0, 16, N)
-        return xp.asarray(const[idx].astype(np.complex64))
+        return make_test_symbols(scheme="qam", order=16, num_symbols=N, seed=seed, xp=xp)
 
     def test_siso_qpsk_output_shape(self, backend_device, xp):
         """SISO QPSK: output is (N,) float64."""
@@ -191,7 +160,7 @@ class TestSignalInputViterbiViterbi:
 
     def test_signal_input_uses_metadata(self, backend_device, xp, xpt):
         """Signal input: modulation/order come from the signal's metadata."""
-        sig = _qam_signal(xp, 16, 512)
+        sig = make_test_qam_signal(order=16, num_symbols=512, sps=1, symbol_rate=FS, xp=xp)
 
         phi_sig = recovery.recover_carrier_phase_viterbi_viterbi(sig)
         phi_arr = recovery.recover_carrier_phase_viterbi_viterbi(

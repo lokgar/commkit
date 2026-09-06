@@ -7,24 +7,6 @@ from commkit import equalization
 from commkit.core import Signal
 
 
-@pytest.fixture(autouse=True)
-def _enable_jax_x64():
-    """Enable JAX x64 mode for all tests in this module.
-
-    JAX RLS requires complex128 for P-matrix stability; LMS CPR requires float64
-    for phase accumulation. Enabling x64 globally is safe - it only affects
-    precision when 64-bit dtypes are explicitly requested.
-    """
-    try:
-        import jax
-
-        jax.config.update("jax_enable_x64", True)
-    except ImportError:
-        pass
-
-
-jax = pytest.importorskip("jax", reason="JAX not installed")
-
 
 class TestDemultiplexPolarizationTones:
     """Tests for equalization.demultiplex_polarization_tones_static."""

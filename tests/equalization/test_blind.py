@@ -8,7 +8,6 @@ driven by the Godard / ring-radius error instead of a trained/DD slicer.
 import numpy as np
 import pytest
 
-from commkit import generate_psk, generate_qam
 from commkit.core import Signal
 from commkit.equalization import (
     block_cma,
@@ -16,40 +15,11 @@ from commkit.equalization import (
     block_rde,
     build_pilot_ref,
 )
-from commkit.mapping import gray_constellation
+from tests.common.conversions import to_numpy
+from tests.common.metrics import calc_dispersion
+from tests.common.signals import make_isi_distorted_signal
 
-
-def _to_np(arr):
-    return arr.get() if hasattr(arr, "get") else np.asarray(arr)
-
-
-def _isi_signal(xp, mod, order, n_symbols, seed, channel, noise=0.02):
-    factory = generate_qam if mod == "qam" else generate_psk
-    sig = factory(
-        symbol_rate=1e6,
-        num_symbols=n_symbols,
-        order=order,
-        pulse_shape="rrc",
-        sps=2,
-        seed=seed,
-    )
-    # Signal may default to GPU when CuPy is present; coerce to host then to xp
-    # so an explicit xp=np reference works regardless of the global default.
-    tx = xp.asarray(_to_np(sig.source_symbols))
-    rx = xp.convolve(xp.asarray(_to_np(sig.samples)), xp.asarray(channel), mode="same")
-    rng = xp.random.RandomState(seed)
-    rx = rx + noise * (rng.randn(len(rx)) + 1j * rng.randn(len(rx))).astype(
-        xp.complex64
-    )
-    return tx, rx.astype(xp.complex64)
-
-
-def _dispersion(y, order, mod):
-    const = gray_constellation(mod, order)
-    const = const / np.sqrt(np.mean(np.abs(const) ** 2))
-    r2 = np.abs(const) ** 2
-    a2 = np.abs(_to_np(y)) ** 2
-    return float(np.mean(np.min((a2[:, None] - r2[None, :]) ** 2, axis=1)))
+_isi_signal = make_isi_distorted_signal
 
 
 class TestBlockFDAFEngine:
@@ -61,7 +31,7 @@ class TestBlockFDAFEngine:
         tx, rx = _isi_signal(xp, "qam", 16, 8000, 6, channel)
         n = 8000
         pmask = np.ones(n, bool)
-        pref, pu8 = build_pilot_ref(_to_np(tx), pmask, n, 1)
+        pref, pu8 = build_pilot_ref(to_numpy(tx), pmask, n, 1)
         r_cma = block_cma(
             rx,
             modulation="qam",
@@ -111,7 +81,7 @@ class TestBlockCMA:
             block_size=256,
         )
         assert r.y_hat.shape[-1] == 40000
-        assert _dispersion(r.y_hat[20000:], 4, "psk") < 0.02
+        assert calc_dispersion(r.y_hat[20000:], 4, "psk") < 0.02
 
     def test_cpu_gpu_consistent(self, backend_device, xp):
         """block_cma output is consistent across CPU/GPU (within float32)."""
@@ -128,7 +98,7 @@ class TestBlockCMA:
             step_size=1e-3,
             block_size=256,
         )
-        assert np.max(np.abs(_to_np(cur.y_hat) - ref.y_hat)) < 1e-3
+        assert np.max(np.abs(to_numpy(cur.y_hat) - ref.y_hat)) < 1e-3
 
     def test_pilot_aided_resolves_phase(self, backend_device, xp):
         channel = np.array([0.06, 1.0, -0.25, 0.08], np.complex64)
@@ -136,7 +106,7 @@ class TestBlockCMA:
         tx, rx = _isi_signal(xp, "psk", 4, n, 5, channel)
         pmask = np.zeros(n, bool)
         pmask[::8] = True
-        pref, pu8 = build_pilot_ref(_to_np(tx)[pmask], pmask, n, 1)
+        pref, pu8 = build_pilot_ref(to_numpy(tx)[pmask], pmask, n, 1)
         r = block_cma(
             rx,
             modulation="psk",
@@ -148,7 +118,7 @@ class TestBlockCMA:
             pilot_mask=pu8,
         )
         # Phase resolved by pilots => low MSE vs the true symbols (no ambiguity).
-        e = _to_np(r.y_hat)[10000:] - _to_np(tx)[10000 : r.y_hat.shape[-1]]
+        e = to_numpy(r.y_hat)[10000:] - to_numpy(tx)[10000 : r.y_hat.shape[-1]]
         mse_db = 10 * np.log10(float(np.mean(np.abs(e) ** 2)) + 1e-30)
         assert mse_db < -10.0, f"PA block_cma did not resolve phase: {mse_db:.1f} dB"
 
@@ -184,7 +154,7 @@ class TestBlockRDE:
         )
         assert r.y_hat.shape[-1] == 16000
         # Multi-ring 16-QAM: RDE drives |y| onto the rings (blind, phase-ambiguous).
-        assert _dispersion(r.y_hat[8000:], 16, "qam") < 0.05
+        assert calc_dispersion(r.y_hat[8000:], 16, "qam") < 0.05
 
     def test_remainder_block_size(self, backend_device, xp):
         """n_sym not divisible by block_size yields full-length output."""
@@ -234,4 +204,4 @@ class TestBlockBlindMIMO:
         )
         assert r.y_hat.shape == (2, 20000)
         for ch in range(2):
-            assert _dispersion(r.y_hat[ch, 10000:], 4, "psk") < 0.05
+            assert calc_dispersion(r.y_hat[ch, 10000:], 4, "psk") < 0.05

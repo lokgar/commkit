@@ -9,59 +9,16 @@ remainder handling, and floor parity vs. the per-symbol reference.
 import numpy as np
 import pytest
 
-from commkit import equalization, generate_psk, generate_qam
+from commkit import equalization
 from commkit.equalization import build_pilot_ref
 from commkit.mapping import gray_constellation
+from tests.common.conversions import to_numpy
+from tests.common.metrics import calc_dispersion, calc_tail_mse_db
+from tests.common.signals import make_isi_distorted_signal
 
-
-@pytest.fixture(autouse=True)
-def _enable_jax_x64():
-    try:
-        import jax
-
-        jax.config.update("jax_enable_x64", True)
-    except ImportError:
-        pass
-
-
-def _to_np(arr):
-    return arr.get() if hasattr(arr, "get") else np.asarray(arr)
-
-
-def _isi_signal(xp, mod, order, n_symbols, seed, channel, noise=0.02):
-    """Build a pulse-shaped, ISI-distorted, noisy signal on the ``xp`` device."""
-    factory = generate_qam if mod == "qam" else generate_psk
-    sig = factory(
-        symbol_rate=1e6,
-        num_symbols=n_symbols,
-        order=order,
-        pulse_shape="rrc",
-        sps=2,
-        seed=seed,
-    )
-    tx = xp.asarray(sig.source_symbols)
-    rx = xp.convolve(xp.asarray(sig.samples), xp.asarray(channel), mode="same")
-    rng = xp.random.RandomState(seed)
-    rx = rx + noise * (rng.randn(len(rx)) + 1j * rng.randn(len(rx))).astype(
-        xp.complex64
-    )
-    return tx, rx.astype(xp.complex64)
-
-
-def _tail_mse_db(error, n=400):
-    e = _to_np(error)[-n:]
-    return 10.0 * np.log10(float(np.mean(np.abs(e) ** 2)) + 1e-30)
-
-
-def _dispersion(y, order, mod="qam"):
-    """Phase-blind radial dispersion: mean squared distance of |y|^2 to the
-    nearest constellation ring power.  A fair convergence metric for blind
-    equalizers (CMA/RDE) that carry a residual phase ambiguity."""
-    const = gray_constellation(mod, order)
-    const = const / np.sqrt(np.mean(np.abs(const) ** 2))
-    r2 = np.abs(const) ** 2
-    a2 = np.abs(_to_np(y)) ** 2
-    return float(np.mean(np.min((a2[:, None] - r2[None, :]) ** 2, axis=1)))
+_isi_signal = make_isi_distorted_signal
+_tail_mse_db = calc_tail_mse_db
+_dispersion = calc_dispersion
 
 
 _BACKENDS = ["xp", "jax"]
@@ -104,14 +61,10 @@ class TestBlockUpdateValidation:
         with pytest.raises(ValueError, match="update_mode"):
             equalization.lms(rx, modulation="qam", order=16, update_mode="delayed")
 
-    def test_numpy_input_jax_gpu_returns_numpy(self):
+    @pytest.mark.gpu_only
+    def test_numpy_input_jax_gpu_returns_numpy(self, backend_device, jax):
         """NumPy input + JAX ``device='gpu'`` must return NumPy (output on the
         input's device), not raise on the from_jax -> CuPy mismatch."""
-        pytest.importorskip("jax")
-        from commkit.backend import is_cupy_available
-
-        if not is_cupy_available():
-            pytest.skip("requires a CUDA device for device='gpu'")
         rng = np.random.RandomState(0)
         const = gray_constellation("qam", 16)
         tx = const[rng.randint(0, 16, 2000)].astype(np.complex64)
@@ -141,8 +94,8 @@ class TestBlockUpdateLMS:
         channel = np.array([0.1, 0.9, 0.9, 0.1], np.complex64)
         tx, rx = _isi_signal(xp, "qam", 16, 6000, 7, channel)
         seq = equalization.lms(
-            _to_np(rx),
-            training_symbols=_to_np(tx)[:2000],
+            to_numpy(rx),
+            training_symbols=to_numpy(tx)[:2000],
             modulation="qam",
             order=16,
             num_taps=15,
@@ -192,8 +145,8 @@ class TestBlockUpdateLMS:
         channel = np.array([0.2, 1.0, 0.3], np.complex64)
         tx, rx = _isi_signal(xp, "qam", 16, 2000, 5, channel, noise=0.01)
         seq = equalization.lms(
-            _to_np(rx),
-            training_symbols=_to_np(tx)[:10],
+            to_numpy(rx),
+            training_symbols=to_numpy(tx)[:10],
             modulation="qam",
             order=16,
             num_taps=15,
@@ -259,7 +212,7 @@ class TestBlockUpdateCMA:
         channel = np.array([0.08, 1.0, -0.3, 0.1], np.complex64)
         _, rx = _isi_signal(xp, "psk", 4, 8000, 2, channel)
         seq = equalization.cma(
-            _to_np(rx),
+            to_numpy(rx),
             modulation="psk",
             order=4,
             num_taps=15,
@@ -288,9 +241,9 @@ class TestBlockUpdateCMA:
         tx, rx = _isi_signal(xp, "psk", 4, n, 2, channel)
         pmask = np.zeros(n, bool)
         pmask[::8] = True
-        pref, pu8 = build_pilot_ref(_to_np(tx)[pmask], pmask, n, 1)
+        pref, pu8 = build_pilot_ref(to_numpy(tx)[pmask], pmask, n, 1)
         seq = equalization.cma(
-            _to_np(rx),
+            to_numpy(rx),
             modulation="psk",
             order=4,
             num_taps=15,
@@ -325,7 +278,7 @@ class TestBlockUpdateRDE:
         channel = np.array([0.08, 1.0, -0.3, 0.1], np.complex64)
         _, rx = _isi_signal(xp, "qam", 16, 12000, 2, channel)
         seq = equalization.rde(
-            _to_np(rx),
+            to_numpy(rx),
             modulation="qam",
             order=16,
             num_taps=15,

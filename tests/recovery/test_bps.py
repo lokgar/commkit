@@ -3,33 +3,23 @@
 import numpy as np
 import pytest
 
-from commkit import generate_qam, recovery, spectral
+from commkit import recovery
 from commkit.core import Signal
-from commkit.impairments import apply_awgn
-from commkit.mapping import gray_constellation
+from tests.common.signals import (
+    make_test_mimo_samples,
+    make_test_qam_signal,
+    make_test_symbols,
+)
 
 FS = 1e6  # 1 MHz sampling rate, common to all tests
-
-
 SNR_DB = 30  # generous SNR so numerical algorithms converge reliably
-
-
-def _qam_signal(xp, order, n_symbols, fo_hz=0.0, snr_db=SNR_DB, fs=FS, seed=42):
-    """Generate a 1-SPS QAM signal with optional frequency offset and AWGN."""
-    sig = generate_qam(
-        order=order, num_symbols=n_symbols, sps=1, symbol_rate=fs, seed=seed
-    )
-    sig.samples = apply_awgn(sig.samples, esn0_db=snr_db, sps=1, seed=seed)
-    if fo_hz != 0.0:
-        sig.samples, _ = spectral.shift_frequency(sig.samples, fo_hz, fs)
-    return sig
 
 
 class TestCprBps:
     @pytest.mark.parametrize("order", [16, 64])
     def test_phase_residual(self, backend_device, xp, order):
         """BPS CPR: RMS phase residual < 0.05 rad for constant phase offset."""
-        sig = _qam_signal(xp, order, 1024)
+        sig = make_test_qam_signal(order=order, num_symbols=1024, sps=1, symbol_rate=FS, xp=xp)
         phi_true = 0.2  # radians
         sig.samples = sig.samples * xp.exp(1j * phi_true)
 
@@ -45,7 +35,7 @@ class TestCprBps:
 
     def test_output_shape_siso(self, backend_device, xp):
         """BPS CPR: 1D input -> 1D phase output of same length."""
-        sig = _qam_signal(xp, 16, 512)
+        sig = make_test_qam_signal(order=16, num_symbols=512, sps=1, symbol_rate=FS, xp=xp)
         phase = recovery.recover_carrier_phase_bps(
             sig.samples, modulation="qam", order=16
         )
@@ -53,15 +43,15 @@ class TestCprBps:
 
     def test_output_shape_mimo(self, backend_device, xp):
         """BPS CPR: 2D input (C, N) -> 2D phase output (C, N)."""
-        sig_a = _qam_signal(xp, 16, 512)
-        sig_b = _qam_signal(xp, 16, 512)
-        mimo = xp.stack([sig_a.samples, sig_b.samples])
+        mimo, _ = make_test_mimo_samples(
+            num_channels=2, order=16, num_symbols=512, sps=1, xp=xp
+        )
         phase = recovery.recover_carrier_phase_bps(mimo, modulation="qam", order=16)
         assert phase.shape == mimo.shape
 
     def test_too_short_raises(self, backend_device, xp):
         """BPS CPR: signal shorter than block_size raises ValueError."""
-        sig = _qam_signal(xp, 16, 20)
+        sig = make_test_qam_signal(order=16, num_symbols=20, sps=1, symbol_rate=FS, xp=xp)
         with pytest.raises(ValueError, match="shorter than block_size"):
             recovery.recover_carrier_phase_bps(
                 sig.samples[:10], modulation="qam", order=16, block_size=32
@@ -72,18 +62,10 @@ class TestBPS:
     """Tests for recover_carrier_phase_bps."""
 
     def _qam16_symbols(self, xp, N=512, seed=2):
-
-        rng = np.random.default_rng(seed)
-        const = gray_constellation("qam", 16)
-        idx = rng.integers(0, 16, N)
-        return xp.asarray(const[idx].astype(np.complex64))
+        return make_test_symbols(scheme="qam", order=16, num_symbols=N, seed=seed, xp=xp)
 
     def _qpsk_symbols(self, xp, N=512, seed=3):
-
-        rng = np.random.default_rng(seed)
-        const = gray_constellation("qpsk", 4)
-        idx = rng.integers(0, 4, N)
-        return xp.asarray(const[idx].astype(np.complex64))
+        return make_test_symbols(scheme="psk", order=4, num_symbols=N, seed=seed, xp=xp)
 
     def test_siso_qam16_output_shape(self, backend_device, xp):
         """SISO QAM16 (square QAM fast path): output is (N,) float64."""
@@ -145,7 +127,7 @@ class TestSignalInputBpsAndCorrectCarrierPhase:
 
     def test_bps_signal_input_uses_metadata(self, backend_device, xp, xpt):
         """Signal input: modulation/order come from the signal's metadata."""
-        sig = _qam_signal(xp, 16, 512)
+        sig = make_test_qam_signal(order=16, num_symbols=512, sps=1, symbol_rate=FS, xp=xp)
 
         phi_sig = recovery.recover_carrier_phase_bps(sig)
         phi_arr = recovery.recover_carrier_phase_bps(
@@ -159,7 +141,7 @@ class TestSignalInputBpsAndCorrectCarrierPhase:
         self, backend_device, xp, xpt
     ):
         """Signal input returns a Signal with the phase-corrected samples."""
-        sig = _qam_signal(xp, 16, 256)
+        sig = make_test_qam_signal(order=16, num_symbols=256, sps=1, symbol_rate=FS, xp=xp)
         phase = xp.full(256, 0.3)
 
         out_sig = recovery.correct_carrier_phase(sig, phase)

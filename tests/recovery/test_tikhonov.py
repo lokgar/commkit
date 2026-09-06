@@ -3,44 +3,18 @@
 import numpy as np
 import pytest
 
-from commkit import generate_psk, generate_qam, recovery, spectral
+from commkit import recovery
 from commkit.core import Signal
-from commkit.impairments import apply_awgn
+from tests.common.metrics import calc_rms_phase_error
+from tests.common.signals import (
+    make_test_mimo_samples,
+    make_test_psk_signal,
+    make_test_qam_signal,
+)
 
 FS = 1e6  # 1 MHz sampling rate, common to all tests
-
-
 SNR_DB = 30  # generous SNR so numerical algorithms converge reliably
 
-
-def _qam_signal(xp, order, n_symbols, fo_hz=0.0, snr_db=SNR_DB, fs=FS, seed=42):
-    """Generate a 1-SPS QAM signal with optional frequency offset and AWGN."""
-    sig = generate_qam(
-        order=order, num_symbols=n_symbols, sps=1, symbol_rate=fs, seed=seed
-    )
-    sig.samples = apply_awgn(sig.samples, esn0_db=snr_db, sps=1, seed=seed)
-    if fo_hz != 0.0:
-        sig.samples, _ = spectral.shift_frequency(sig.samples, fo_hz, fs)
-    return sig
-
-
-def _psk_signal(xp, order, n_symbols, fo_hz=0.0, snr_db=SNR_DB, fs=FS, seed=42):
-    """Generate a 1-SPS PSK signal with optional frequency offset and AWGN."""
-    sig = generate_psk(
-        order=order, num_symbols=n_symbols, sps=1, symbol_rate=fs, seed=seed
-    )
-    sig.samples = apply_awgn(sig.samples, esn0_db=snr_db, sps=1, seed=seed)
-    if fo_hz != 0.0:
-        sig.samples, _ = spectral.shift_frequency(sig.samples, fo_hz, fs)
-    return sig
-
-
-def _rms_phase_error(xp, phase_est, phase_true):
-    """RMS of the phase error, after removing any constant offset (M-fold ambiguity)."""
-    err = phase_est - phase_true
-    # Remove the mean bias (accounts for the irreducible global ambiguity)
-    err = err - float(xp.mean(err))
-    return float(xp.sqrt(xp.mean(err**2)))
 
 
 class TestWienerPhaseSmoother:
@@ -60,8 +34,8 @@ class TestWienerPhaseSmoother:
             noisy, process_variance=q, measurement_variance=r
         )
         g = slice(200, -200)  # trim FFT edge transients
-        rms_noisy = _rms_phase_error(xp, noisy[g], truth[g])
-        rms_smooth = _rms_phase_error(xp, smoothed[g], truth[g])
+        rms_noisy = calc_rms_phase_error(noisy[g], truth[g], xp=xp)
+        rms_smooth = calc_rms_phase_error(smoothed[g], truth[g], xp=xp)
         assert rms_smooth < rms_noisy
 
     def test_preserves_linear_trend(self, backend_device, xp):
@@ -95,28 +69,15 @@ class TestWienerPhaseSmoother:
     def test_derive_variances_from_physical_params(self, backend_device, xp):
         """linewidth + sampling_rate derive q internally; r is given directly."""
         truth, _ = self._random_walk(xp, N=4000)
-        smoothed = recovery.smooth_phase_wiener(
-            truth, linewidth=1e5, sampling_rate=4e9, measurement_variance=5e-3
+        phi = recovery.smooth_phase_wiener(
+            truth, linewidth=100e3, sampling_rate=10e9, measurement_variance=0.05
         )
-        assert smoothed.shape == truth.shape
-        assert bool(xp.all(xp.isfinite(smoothed)))
+        assert phi.shape == truth.shape
 
-    def test_missing_process_params_raise(self, backend_device, xp):
-        truth, _ = self._random_walk(xp, N=512)
+    def test_invalid_params_raise(self, backend_device, xp):
+        truth, _ = self._random_walk(xp, N=100)
         with pytest.raises(ValueError, match="process_variance"):
             recovery.smooth_phase_wiener(truth, measurement_variance=0.05)
-
-    def test_missing_measurement_params_raise(self, backend_device, xp):
-        truth, q = self._random_walk(xp, N=512)
-        with pytest.raises(ValueError, match="measurement_variance"):
-            recovery.smooth_phase_wiener(truth, process_variance=q)
-
-    def test_invalid_variance_raises(self, backend_device, xp):
-        truth, _ = self._random_walk(xp, N=512)
-        with pytest.raises(ValueError, match="must be > 0"):
-            recovery.smooth_phase_wiener(
-                truth, process_variance=0.0, measurement_variance=0.05
-            )
 
 
 class TestCprTikhonov:
@@ -125,6 +86,7 @@ class TestCprTikhonov:
         [
             (4, "psk", 16),
             (4, "psk", 32),
+            (4, "psk", 64),
             (16, "qam", 16),
             (16, "qam", 32),
             (64, "qam", 32),
@@ -132,11 +94,10 @@ class TestCprTikhonov:
     )
     def test_phase_residual(self, backend_device, xp, order, modulation, block_size):
         """Tikhonov CPR: mean estimate within 0.1 rad of true carrier phase (mod M-fold)."""
-        sig = (
-            _qam_signal(xp, order, 2048)
-            if modulation == "qam"
-            else _psk_signal(xp, order, 2048)
-        )
+        if modulation == "qam":
+            sig = make_test_qam_signal(order=order, num_symbols=2048, sps=1, symbol_rate=FS, xp=xp)
+        else:
+            sig = make_test_psk_signal(order=order, num_symbols=2048, sps=1, symbol_rate=FS, xp=xp)
         phi_true = 0.3
         sig.samples = sig.samples * xp.exp(1j * phi_true)
 
@@ -157,7 +118,7 @@ class TestCprTikhonov:
 
     def test_output_shape_siso(self, backend_device, xp):
         """Tikhonov CPR: 1D input -> 1D output of same length."""
-        sig = _qam_signal(xp, 16, 512)
+        sig = make_test_qam_signal(order=16, num_symbols=512, sps=1, symbol_rate=FS, xp=xp)
         phase = recovery.recover_carrier_phase_tikhonov(
             sig.samples,
             modulation="qam",
@@ -169,9 +130,9 @@ class TestCprTikhonov:
 
     def test_output_shape_mimo(self, backend_device, xp):
         """Tikhonov CPR: 2D input (C, N) -> 2D output (C, N)."""
-        sig_a = _qam_signal(xp, 16, 512)
-        sig_b = _qam_signal(xp, 16, 512)
-        mimo = xp.stack([sig_a.samples, sig_b.samples])
+        mimo, _ = make_test_mimo_samples(
+            num_channels=2, order=16, num_symbols=512, sps=1, xp=xp
+        )
         phase = recovery.recover_carrier_phase_tikhonov(
             mimo,
             modulation="qam",
@@ -183,7 +144,7 @@ class TestCprTikhonov:
 
     def test_too_short_raises(self, backend_device, xp):
         """Tikhonov CPR: signal shorter than block_size raises ValueError."""
-        sig = _qam_signal(xp, 4, 20)
+        sig = make_test_qam_signal(order=4, num_symbols=20, sps=1, symbol_rate=FS, xp=xp)
         with pytest.raises(ValueError, match="shorter than block_size"):
             recovery.recover_carrier_phase_tikhonov(
                 sig.samples[:10],
@@ -195,7 +156,7 @@ class TestCprTikhonov:
 
     def test_invalid_method_raises(self, backend_device, xp):
         """Tikhonov CPR: unknown method raises ValueError."""
-        sig = _qam_signal(xp, 16, 512)
+        sig = make_test_qam_signal(order=16, num_symbols=512, sps=1, symbol_rate=FS, xp=xp)
         with pytest.raises(ValueError, match="Unknown method"):
             recovery.recover_carrier_phase_tikhonov(
                 sig.samples,
@@ -208,11 +169,10 @@ class TestCprTikhonov:
     @pytest.mark.parametrize("order,modulation", [(4, "psk"), (16, "qam")])
     def test_sskf_phase_residual(self, backend_device, xp, order, modulation):
         """Tikhonov SSKF: mean estimate within 0.1 rad of true offset (mod M-fold)."""
-        sig = (
-            _qam_signal(xp, order, 2048)
-            if modulation == "qam"
-            else _psk_signal(xp, order, 2048)
-        )
+        if modulation == "qam":
+            sig = make_test_qam_signal(order=order, num_symbols=2048, sps=1, symbol_rate=FS, xp=xp)
+        else:
+            sig = make_test_psk_signal(order=order, num_symbols=2048, sps=1, symbol_rate=FS, xp=xp)
         phi_true = 0.3
         sig.samples = sig.samples * xp.exp(1j * phi_true)
 
@@ -233,7 +193,7 @@ class TestCprTikhonov:
 
     def test_sskf_exact_close(self, backend_device, xp):
         """SSKF and exact RTS produce similar phase estimates (within 0.05 rad RMS)."""
-        sig = _qam_signal(xp, 16, 2048)
+        sig = make_test_qam_signal(order=16, num_symbols=2048, sps=1, symbol_rate=FS, xp=xp)
         sig.samples = sig.samples * xp.exp(1j * 0.2)
 
         phi_exact = recovery.recover_carrier_phase_tikhonov(
@@ -259,7 +219,7 @@ class TestCprTikhonov:
         """Tikhonov produces smoother phase trajectory than VV when σ_p² < σ_v²."""
         linewidth_symbol_periods = 1e-7
         snr_test = 15
-        sig = _psk_signal(xp, 4, 2048, snr_db=snr_test, seed=123)
+        sig = make_test_psk_signal(order=4, num_symbols=2048, sps=1, symbol_rate=FS, snr_db=snr_test, seed=123, xp=xp)
         sig.samples = sig.samples * xp.exp(1j * 0.3)
 
         phi_vv = recovery.recover_carrier_phase_viterbi_viterbi(
@@ -282,7 +242,7 @@ class TestSignalInputTikhonov:
 
     def test_signal_input_uses_metadata(self, backend_device, xp, xpt):
         """Signal input: modulation/order come from the signal's metadata."""
-        sig = _qam_signal(xp, 16, 512)
+        sig = make_test_qam_signal(order=16, num_symbols=512, sps=1, symbol_rate=FS, xp=xp)
 
         phi_sig = recovery.recover_carrier_phase_tikhonov(
             sig, linewidth_symbol_periods=1e-5

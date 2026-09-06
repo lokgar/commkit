@@ -7,29 +7,7 @@ from commkit import equalization, generate_psk, generate_qam
 from commkit.core import Signal
 from commkit.equalization import EqualizerResult
 from commkit.mapping import gray_constellation
-
-
-@pytest.fixture(autouse=True)
-def _enable_jax_x64():
-    """Enable JAX x64 mode for all tests in this module.
-
-    JAX RLS requires complex128 for P-matrix stability; LMS CPR requires float64
-    for phase accumulation. Enabling x64 globally is safe - it only affects
-    precision when 64-bit dtypes are explicitly requested.
-    """
-    try:
-        import jax
-
-        jax.config.update("jax_enable_x64", True)
-    except ImportError:
-        pass
-
-
-def _to_np(arr):
-    """Convert a NumPy or CuPy array to plain NumPy (no-op for NumPy)."""
-    if hasattr(arr, "get"):  # CuPy
-        return arr.get()
-    return np.asarray(arr)
+from tests.common.conversions import to_numpy
 
 
 class TestLMS:
@@ -529,11 +507,6 @@ class TestRDE:
 
         assert result.y_hat.ndim == 1
         assert result.weights.shape == (11,)
-
-
-jax = pytest.importorskip("jax", reason="JAX not installed")
-
-
 class TestStoreWeights:
     """Tests that store_weights=True produces correct weight history shapes."""
 
@@ -685,9 +658,8 @@ class TestEdgeCases:
         with pytest.raises(ValueError, match="modulation and order must be provided"):
             equalization.lms(rx, num_taps=7, backend="numba")
 
-    def test_lms_raises_no_constellation_jax(self, backend_device, xp):
+    def test_lms_raises_no_constellation_jax(self, backend_device, xp, jax):
         """LMS JAX: same ValueError for missing constellation."""
-        pytest.importorskip("jax")
         rx, _ = self._qpsk_rx(xp)
         with pytest.raises(ValueError, match="modulation and order must be provided"):
             equalization.lms(rx, num_taps=7, backend="jax")
@@ -1079,9 +1051,8 @@ class TestCmaPilotAided:
         assert isinstance(result, EqualizerResult)
         assert result.y_hat.shape[-1] == n_body
 
-    def test_cma_pilot_aided_jax_output_shape(self, backend_device, xp):
+    def test_cma_pilot_aided_jax_output_shape(self, backend_device, xp, jax):
         """cma() with pilot_ref/pilot_mask and jax backend runs without error."""
-        pytest.importorskip("jax")
         from commkit.equalization import build_pilot_ref
 
         frame, samples_cpu, pilot_syms_cpu, pilot_mask_bool, n_body = (
@@ -1125,7 +1096,7 @@ class TestCmaPilotAided:
         # Pre-converge on preamble
         pre = equalization.lms(
             preamble_samples,
-            training_symbols=_to_np(frame.preamble.symbols),
+            training_symbols=to_numpy(frame.preamble.symbols),
             num_taps=11,
             step_size=0.01,
             sps=2,

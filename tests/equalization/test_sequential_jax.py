@@ -8,23 +8,6 @@ import pytest
 from commkit import equalization, generate_psk, generate_qam
 from commkit.equalization import EqualizerResult
 
-
-@pytest.fixture(autouse=True)
-def _enable_jax_x64():
-    """Enable JAX x64 mode for all tests in this module.
-
-    JAX RLS requires complex128 for P-matrix stability; LMS CPR requires float64
-    for phase accumulation. Enabling x64 globally is safe - it only affects
-    precision when 64-bit dtypes are explicitly requested.
-    """
-    try:
-        import jax
-
-        jax.config.update("jax_enable_x64", True)
-    except ImportError:
-        pass
-
-
 jax = pytest.importorskip("jax", reason="JAX not installed")
 
 
@@ -398,16 +381,11 @@ class TestJAXBackend:
         assert len(new_keys) == 0, f"Unexpected new cache entries: {new_keys}"
 
 
-@pytest.mark.skipif(
-    "jax" not in sys.modules and not pytest.importorskip("jax", reason="skip"),
-    reason="JAX required",
-)
 class TestRLSJAXConstellationFromTraining:
     """RLS JAX derives constellation from training symbols when no modulation is given."""
 
     def test_rls_jax_constellation_from_training(self, backend_device, xp):
         """RLS JAX with training only (no modulation) infers constellation from training."""
-        pytest.importorskip("jax")
 
         n_symbols = 800
         sig = generate_psk(
@@ -538,7 +516,6 @@ class TestLMSJAXPureDD:
 
     def test_lms_jax_pure_dd_no_training(self, backend_device, xp):
         """LMS JAX with modulation but no training_symbols runs in pure decision-directed mode from the start."""
-        pytest.importorskip("jax")
 
         sig = generate_psk(
             symbol_rate=1e6, num_symbols=800, order=4, pulse_shape="rrc", sps=2, seed=42

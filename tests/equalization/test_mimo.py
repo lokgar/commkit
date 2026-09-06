@@ -5,22 +5,6 @@ import pytest
 from commkit import equalization, generate_psk, generate_qam
 
 
-@pytest.fixture(autouse=True)
-def _enable_jax_x64():
-    """Enable JAX x64 mode for all tests in this module.
-
-    JAX RLS requires complex128 for P-matrix stability; LMS CPR requires float64
-    for phase accumulation. Enabling x64 globally is safe - it only affects
-    precision when 64-bit dtypes are explicitly requested.
-    """
-    try:
-        import jax
-
-        jax.config.update("jax_enable_x64", True)
-    except ImportError:
-        pass
-
-
 class TestButterflyMIMO:
     """Tests for butterfly MIMO equalization structure."""
 
@@ -163,9 +147,6 @@ class TestButterflyMIMO:
         xpt.assert_allclose(equalized, tx, atol=1e-3)
 
 
-jax = pytest.importorskip("jax", reason="JAX not installed")
-
-
 class TestButterflyMIMOExtended:
     """Additional MIMO butterfly tests for RDE and JAX backends."""
 
@@ -206,10 +187,8 @@ class TestButterflyMIMOExtended:
         assert result.weights.shape == (2, 2, 11)
         assert result.error.shape == (2, n_symbols)
 
-    def test_lms_jax_2x2_cross_channel(self, backend_device, xp):
+    def test_lms_jax_2x2_cross_channel(self, backend_device, xp, jax):
         """LMS JAX butterfly should cancel cross-channel interference."""
-
-        pytest.importorskip("jax")
 
         n_symbols = 2000
         sig = generate_psk(
