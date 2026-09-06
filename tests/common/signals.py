@@ -33,7 +33,8 @@ def make_test_qam_samples(
     if snr_db is not None:
         noise_std = np.sqrt(10 ** (-snr_db / 10) / 2)
         noise = noise_std * (
-            rng.standard_normal(len(samples_np)) + 1j * rng.standard_normal(len(samples_np))
+            rng.standard_normal(len(samples_np))
+            + 1j * rng.standard_normal(len(samples_np))
         ).astype(np.complex64)
         samples_np = samples_np + noise
 
@@ -64,7 +65,8 @@ def make_test_psk_samples(
     if snr_db is not None:
         noise_std = np.sqrt(10 ** (-snr_db / 10) / 2)
         noise = noise_std * (
-            rng.standard_normal(len(samples_np)) + 1j * rng.standard_normal(len(samples_np))
+            rng.standard_normal(len(samples_np))
+            + 1j * rng.standard_normal(len(samples_np))
         ).astype(np.complex64)
         samples_np = samples_np + noise
 
@@ -120,14 +122,16 @@ def make_test_qam_signal(
     from commkit.impairments import apply_awgn
 
     sig = generate_qam(
-        order=order, num_symbols=num_symbols, sps=sps, symbol_rate=symbol_rate, seed=seed
+        order=order,
+        num_symbols=num_symbols,
+        sps=sps,
+        symbol_rate=symbol_rate,
+        seed=seed,
     )
     if snr_db is not None:
         sig.samples = apply_awgn(sig.samples, esn0_db=snr_db, sps=sps, seed=seed)
     if fo_hz != 0.0:
-        sig.samples, _ = spectral.shift_frequency(
-            sig.samples, fo_hz, symbol_rate * sps
-        )
+        sig.samples, _ = spectral.shift_frequency(sig.samples, fo_hz, symbol_rate * sps)
     if xp is not None:
         sig.samples = xp.asarray(sig.samples)
         if sig.source_symbols is not None:
@@ -152,14 +156,16 @@ def make_test_psk_signal(
     from commkit.impairments import apply_awgn
 
     sig = generate_psk(
-        order=order, num_symbols=num_symbols, sps=sps, symbol_rate=symbol_rate, seed=seed
+        order=order,
+        num_symbols=num_symbols,
+        sps=sps,
+        symbol_rate=symbol_rate,
+        seed=seed,
     )
     if snr_db is not None:
         sig.samples = apply_awgn(sig.samples, esn0_db=snr_db, sps=sps, seed=seed)
     if fo_hz != 0.0:
-        sig.samples, _ = spectral.shift_frequency(
-            sig.samples, fo_hz, symbol_rate * sps
-        )
+        sig.samples, _ = spectral.shift_frequency(sig.samples, fo_hz, symbol_rate * sps)
     if xp is not None:
         sig.samples = xp.asarray(sig.samples)
         if sig.source_symbols is not None:
@@ -244,8 +250,6 @@ def make_wiener_phase(
     return phase
 
 
-
-
 def make_isi_distorted_signal(
     xp: Any,
     mod: str,
@@ -289,7 +293,9 @@ def make_ambiguous_qam16(
     ref = const[rng.integers(0, 16, n_sym)]
     rot1 = np.exp(1j * np.pi / 2).astype(np.complex64)
     symbols = ref * rot1
-    symbols[:corrupt_head] = ref[:corrupt_head] * np.exp(1j * np.pi).astype(np.complex64)
+    symbols[:corrupt_head] = ref[:corrupt_head] * np.exp(1j * np.pi).astype(
+        np.complex64
+    )
     return symbols, ref
 
 
@@ -333,8 +339,6 @@ def make_dsh_beat(
     if xp is not None:
         return xp.asarray(z), xp.asarray(dphi)
     return z, dphi
-
-
 
 
 def make_adapter_test_signal(xp: Any = None, **metadata: Any) -> Signal:

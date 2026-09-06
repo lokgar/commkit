@@ -21,7 +21,6 @@ from tests.common.signals import make_dsh_beat
 FS = 500e6  # beat sampling rate (Hz)
 
 
-
 class TestDSHBeatForwardModel:
     """Forward model synthesis and validation for DSH beats."""
 

@@ -92,6 +92,7 @@ class TestSignalCreation:
 
         assert sig.bits_per_symbol is None
 
+
 class TestSignalProperties:
     """Tests for TestSignalProperties."""
 
@@ -129,10 +130,14 @@ class TestSignalProperties:
 
     def test_signal_bits_per_symbol_set(self, backend_device, xp):
         """Verify bits_per_symbol property when mod_order is set."""
-        s = Signal(samples=xp.zeros(10), sampling_rate=1.0, symbol_rate=1.0, mod_order=16)
+        s = Signal(
+            samples=xp.zeros(10), sampling_rate=1.0, symbol_rate=1.0, mod_order=16
+        )
         assert s.bits_per_symbol == 4
 
-        s2 = Signal(samples=xp.zeros(10), sampling_rate=1.0, symbol_rate=1.0, mod_order=64)
+        s2 = Signal(
+            samples=xp.zeros(10), sampling_rate=1.0, symbol_rate=1.0, mod_order=64
+        )
         assert s2.bits_per_symbol == 6
 
     def test_signal_print_info(self, backend_device, xp, capsys):
@@ -150,7 +155,9 @@ class TestSignalProperties:
         """
 
         sig = Signal(
-            samples=xp.zeros(100, dtype="complex64"), sampling_rate=100.0, symbol_rate=10.0
+            samples=xp.zeros(100, dtype="complex64"),
+            sampling_rate=100.0,
+            symbol_rate=10.0,
         )
 
         # Print info
@@ -186,6 +193,7 @@ class TestSignalProperties:
 
         # Clean up figures to avoid RuntimeWarning
         plt.close("all")
+
 
 class TestSignalCloningAndProvenance:
     """Tests for TestSignalCloningAndProvenance."""
@@ -223,8 +231,8 @@ class TestSignalCloningAndProvenance:
         assert shallow.samples is s.samples
         assert shallow.source_bits is s.source_bits
 
-    def test_signal_replace_samples_shares_provenance_and_invalidates_caches(self, 
-        backend_device, xp, xpt
+    def test_signal_replace_samples_shares_provenance_and_invalidates_caches(
+        self, backend_device, xp, xpt
     ):
         """Functional sample replacement avoids copying old samples or provenance."""
         frame = {"cached": xp.arange(4)}
@@ -257,7 +265,9 @@ class TestSignalCloningAndProvenance:
         assert result.sampling_rate == 1.0
         xpt.assert_array_equal(result.samples, replacement)
 
-    def test_signal_replace_samples_can_preserve_resolved_caches(self, backend_device, xp):
+    def test_signal_replace_samples_can_preserve_resolved_caches(
+        self, backend_device, xp
+    ):
         """Proven-safe internal transforms can explicitly retain resolved caches."""
         s = Signal(samples=xp.arange(8), sampling_rate=2.0, symbol_rate=1.0)
         s.resolved_symbols = xp.asarray([1.0, -1.0])
@@ -268,7 +278,9 @@ class TestSignalCloningAndProvenance:
         assert result.resolved_symbols is s.resolved_symbols
         assert result.resolved_bits is s.resolved_bits
 
-    def test_signal_replace_samples_validates_replacement_and_metadata(self, backend_device, xp):
+    def test_signal_replace_samples_validates_replacement_and_metadata(
+        self, backend_device, xp
+    ):
         """Replacement samples and metadata pass through assignment validation."""
         from pydantic import ValidationError
 
@@ -298,6 +310,7 @@ class TestSignalCloningAndProvenance:
             assert result is not sig
             assert result.samples is sig.samples
             assert result.frame is frame
+
 
 class TestSignalDSPOperations:
     """Tests for TestSignalDSPOperations."""
@@ -440,6 +453,7 @@ class TestSignalDSPOperations:
         assert s.pulse_shape == "gaussian"
         assert s.duty_cycle == 0.5
 
+
 class TestSignalWaveformsAndModulation:
     """Tests for TestSignalWaveformsAndModulation."""
 
@@ -544,7 +558,9 @@ class TestSignalWaveformsAndModulation:
 
     def test_pam_waveform(self, backend_device, xp):
         """Verify basic PAM signal generation produces samples on the active device."""
-        sig = generate_pam(order=2, unipolar=False, num_symbols=10, sps=4, symbol_rate=1e3)
+        sig = generate_pam(
+            order=2, unipolar=False, num_symbols=10, sps=4, symbol_rate=1e3
+        )
         assert sig.samples.size > 0
         assert isinstance(sig.samples, xp.ndarray)
         assert sig.mod_scheme is not None
@@ -611,6 +627,7 @@ class TestSignalWaveformsAndModulation:
         assert sig.mod_order == 16
         assert sig.source_bits is not None
         assert sig.source_symbols is not None
+
 
 class TestSignalResolutionAndMetrics:
     """Tests for TestSignalResolutionAndMetrics."""
@@ -892,6 +909,7 @@ class TestSignalResolutionAndMetrics:
         assert result.tail_trim == num_taps // 2
         assert result.y_hat.shape[-1] == n_symbols - result.tail_trim
 
+
 class TestSignalDeviceAndPlotting:
     """Tests for TestSignalDeviceAndPlotting."""
 
@@ -973,4 +991,3 @@ class TestSignalDeviceAndPlotting:
         result = plotting.plot_constellation(sig, overlay_source=True, show=False)
         assert result is not None
         plt.close("all")
-

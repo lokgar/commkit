@@ -7,7 +7,6 @@ from commkit import equalization
 from commkit.core import Signal
 
 
-
 class TestDemultiplexPolarizationTones:
     """Tests for equalization.demultiplex_polarization_tones_static."""
 

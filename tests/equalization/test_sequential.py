@@ -507,6 +507,8 @@ class TestRDE:
 
         assert result.y_hat.ndim == 1
         assert result.weights.shape == (11,)
+
+
 class TestStoreWeights:
     """Tests that store_weights=True produces correct weight history shapes."""
 

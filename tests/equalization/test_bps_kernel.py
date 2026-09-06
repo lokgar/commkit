@@ -166,7 +166,9 @@ class TestBPSKernelEndToEnd:
         phi_fall = recovery.recover_carrier_phase_bps(
             x, "qam", order, num_test_phases=64, block_size=32
         )
-        xpt.assert_allclose(to_numpy(phi_kern), to_numpy(phi_fall), rtol=1e-6, atol=1e-9)
+        xpt.assert_allclose(
+            to_numpy(phi_kern), to_numpy(phi_fall), rtol=1e-6, atol=1e-9
+        )
 
     @pytest.mark.parametrize(
         "order,cpr_kwargs",
@@ -230,7 +232,9 @@ class TestBPSKernelFallback:
         skip_unless_kernel_available("bps_min_d2", backend_device=backend_device)
 
         def _fail(*a, **k):
-            raise AssertionError("get_kernel must not be consulted for complex128 input")
+            raise AssertionError(
+                "get_kernel must not be consulted for complex128 input"
+            )
 
         monkeypatch.setattr(_cuda, "get_kernel", _fail)
         x = xp.asarray(_phase_noise_symbols(16).astype(np.complex128))

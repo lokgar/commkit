@@ -18,7 +18,9 @@ class TestMIMOSignalStructure:
 
     def test_signal_generate_mimo(self, backend_device: str, xp: Any) -> None:
         """Verify MIMO signal generation via high-level factories."""
-        sig = generate_qam(order=4, num_symbols=100, sps=4, symbol_rate=1e6, num_streams=2)
+        sig = generate_qam(
+            order=4, num_symbols=100, sps=4, symbol_rate=1e6, num_streams=2
+        )
 
         expected_samples = 100 * 4
         assert sig.samples.shape == (2, expected_samples)

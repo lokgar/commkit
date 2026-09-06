@@ -25,9 +25,7 @@ THRESHOLD = float(np.pi / 4.0)
 class TestCSBlockKernel:
     """Cycle-slip correction kernel validation against float64 reference."""
 
-    def test_cs_block_matches_reference_across_blocks(
-        self, backend_device, xp, xpt
-    ):
+    def test_cs_block_matches_reference_across_blocks(self, backend_device, xp, xpt):
         """Kernel output and state match the reference through fill/wrap/slips."""
         skip_unless_kernel_available("cs_block", backend_device=backend_device)
         kern = _cuda.get_kernel("cs_block")
@@ -74,7 +72,9 @@ class TestCSBlockKernel:
 
         corr_full_ref = np.concatenate(out_ref, axis=1)
         corr_full_dev = np.concatenate(out_dev, axis=1)
-        xpt.assert_allclose(xp.asarray(corr_full_dev), xp.asarray(corr_full_ref), rtol=1e-9, atol=1e-9)
+        xpt.assert_allclose(
+            xp.asarray(corr_full_dev), xp.asarray(corr_full_ref), rtol=1e-9, atol=1e-9
+        )
         xpt.assert_allclose(buf_y_dev, xp.asarray(buf_y_ref), rtol=1e-9, atol=1e-9)
         xpt.assert_allclose(st_dev, xp.asarray(st_ref), rtol=1e-8, atol=1e-8)
         xpt.assert_array_equal(ptr_dev, xp.asarray(ptr_ref))
@@ -99,9 +99,7 @@ class TestCSBlockKernel:
         st = xp.zeros((C, 4))
 
         with pytest.raises(TypeError, match="phi_blk"):
-            kern(
-                phi.astype(xp.float32), corr, buf_y, ptr, n, st, QUANTUM, THRESHOLD, H
-            )
+            kern(phi.astype(xp.float32), corr, buf_y, ptr, n, st, QUANTUM, THRESHOLD, H)
         with pytest.raises(ValueError, match="cs_buf_y"):
             kern(phi, corr, buf_y[:, : H // 2], ptr, n, st, QUANTUM, THRESHOLD, H)
         with pytest.raises(ValueError, match="C-contiguous"):

@@ -46,7 +46,9 @@ class TestUpsampleAndDecimate:
     ) -> None:
         """Verify downsampling (picking) symbols from an upsampled stream."""
         sps = 4
-        data = xp.array([1, 1, 1, 1, 2, 2, 2, 2, 3, 3, 3, 3, 4, 4, 4, 4], dtype="float32")
+        data = xp.array(
+            [1, 1, 1, 1, 2, 2, 2, 2, 3, 3, 3, 3, 4, 4, 4, 4], dtype="float32"
+        )
 
         syms = multirate.decimate_to_symbol_rate(data, sps=sps, offset=0)
         xpt.assert_array_equal(syms, xp.array([1, 2, 3, 4]))

@@ -47,9 +47,7 @@ class TestShapingFilterTaps:
         taps = filtering.shaping_filter_taps(sig)
         assert len(taps) > 0
 
-    def test_rz_rect_taps_length(
-        self, backend_device: str, xp: Any, xpt: Any
-    ) -> None:
+    def test_rz_rect_taps_length(self, backend_device: str, xp: Any, xpt: Any) -> None:
         """Verify that RZ rectangular pulse taps have the correct half-symbol length."""
         sig = generate_pam(
             order=2,
@@ -64,9 +62,7 @@ class TestShapingFilterTaps:
         assert len(taps) == 2
         xpt.assert_allclose(taps, xp.ones(2))
 
-    def test_rect_pulse_taps(
-        self, backend_device: str, xp: Any, xpt: Any
-    ) -> None:
+    def test_rect_pulse_taps(self, backend_device: str, xp: Any, xpt: Any) -> None:
         """Verify that standard rectangular pulse shaping produces all-ones taps."""
         sig = generate_pam(
             order=2,
@@ -79,9 +75,7 @@ class TestShapingFilterTaps:
         taps = filtering.shaping_filter_taps(sig)
         xpt.assert_allclose(taps, xp.ones(4))
 
-    def test_gaussian_shaping_filter_taps(
-        self, backend_device: str, xp: Any
-    ) -> None:
+    def test_gaussian_shaping_filter_taps(self, backend_device: str, xp: Any) -> None:
         """shaping_filter_taps for gaussian pulse shape returns valid taps."""
         sig = Signal(
             samples=xp.ones(40, dtype="complex64"),
@@ -123,9 +117,7 @@ class TestShapingFilterTaps:
 class TestMatchedFilterAuto:
     """Tests for matched filtering with auto-derived taps."""
 
-    def test_matched_filter_auto_taps(
-        self, backend_device: str, xp: Any
-    ) -> None:
+    def test_matched_filter_auto_taps(self, backend_device: str, xp: Any) -> None:
         """Verify that matched_filter correctly auto-generates and applies taps."""
         sig = generate_pam(
             order=2,
@@ -143,7 +135,9 @@ class TestMatchedFilterAuto:
         self, backend_device: str, xp: Any
     ) -> None:
         """matched_filter() with no pulse_shape returns an unchanged copy."""
-        sig = Signal(samples=xp.ones(10, dtype="complex64"), sampling_rate=4e3, symbol_rate=1e3)
+        sig = Signal(
+            samples=xp.ones(10, dtype="complex64"), sampling_rate=4e3, symbol_rate=1e3
+        )
         result = filtering.matched_filter(sig)
         assert result is not sig
         assert bool(xp.all(result.samples == sig.samples))

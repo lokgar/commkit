@@ -19,9 +19,7 @@ from commkit.mapping.gray import (
 class TestGrayCode:
     """Tests for Gray code generation and binary conversion properties."""
 
-    def test_gray_code_edge_cases(
-        self, backend_device: str, xp: Any, xpt: Any
-    ) -> None:
+    def test_gray_code_edge_cases(self, backend_device: str, xp: Any, xpt: Any) -> None:
         """Verify Gray code generation for boundary bit depths."""
         # n = 0
         xpt.assert_array_equal(mapping.gray_code(0), xp.array([0]))
@@ -63,9 +61,7 @@ class TestGrayCode:
 class TestGrayConstellation:
     """Tests for Gray-coded constellation generation across modulation schemes."""
 
-    def test_gray_constellation_advanced(
-        self, backend_device: str, xp: Any
-    ) -> None:
+    def test_gray_constellation_advanced(self, backend_device: str, xp: Any) -> None:
         """Verify constellation generation edge cases."""
         # 1. Unipolar via argument
         const_unipol = mapping.gray_constellation("pam", 4, unipolar=True)
@@ -113,7 +109,9 @@ class TestGrayConstellation:
 
     def test_constellation_unsupported_string(self) -> None:
         """Test that unsupported strings raise ValueError."""
-        with pytest.raises(ValueError, match="Unsupported modulation type: custom-unknown"):
+        with pytest.raises(
+            ValueError, match="Unsupported modulation type: custom-unknown"
+        ):
             mapping.gray_constellation("custom-unknown", 4)
 
 

@@ -44,19 +44,27 @@ from tests.common.signals import (
 def _qpsk_signal(n_sym=4000, snr_db=20.0, rng=None):
     """Return (samples_2sps, symbols) for a QPSK signal with AWGN."""
     seed = 0 if rng is None else int(rng.integers(0, 100000))
-    return make_test_psk_samples(order=4, num_symbols=n_sym, sps=2, snr_db=snr_db, seed=seed)
+    return make_test_psk_samples(
+        order=4, num_symbols=n_sym, sps=2, snr_db=snr_db, seed=seed
+    )
 
 
 def _qam16_signal(n_sym=4000, snr_db=25.0, rng=None):
     """Return (samples_1sps, symbols) for 16-QAM at 1 SPS."""
     seed = 1 if rng is None else int(rng.integers(0, 100000))
-    return make_test_qam_samples(order=16, num_symbols=n_sym, sps=1, snr_db=snr_db, seed=seed)
+    return make_test_qam_samples(
+        order=16, num_symbols=n_sym, sps=1, snr_db=snr_db, seed=seed
+    )
 
 
 def _wiener_phase_signal(n_sym=4000, snr_db=20.0, linewidth=1e4, fs=1.0, seed=42):
     """Return (samples_1sps, symbols) for QPSK under Wiener phase noise at 1 SPS."""
-    samples, syms = make_test_psk_samples(order=4, num_symbols=n_sym, sps=1, snr_db=None, seed=seed)
-    phase = make_wiener_phase(num_symbols=n_sym, linewidth=linewidth, sample_rate=fs, seed=seed)
+    samples, syms = make_test_psk_samples(
+        order=4, num_symbols=n_sym, sps=1, snr_db=None, seed=seed
+    )
+    phase = make_wiener_phase(
+        num_symbols=n_sym, linewidth=linewidth, sample_rate=fs, seed=seed
+    )
     samples = (samples * np.exp(1j * phase)).astype(np.complex64)
     if snr_db is not None:
         noise_std = np.sqrt(10 ** (-snr_db / 10) / 2)
@@ -102,9 +110,7 @@ class TestCPREqualizerBaseline:
         ), f"{algo}/{backend}: cpr_type=None must be deterministic"
         assert res_cpr_none.phase_trajectory is None
 
-    def test_baseline_cpr_none_matches_unwrapped(
-        self, backend_device, xp, xpt
-    ):
+    def test_baseline_cpr_none_matches_unwrapped(self, backend_device, xp, xpt):
         """cpr_type=None baseline is identical to a standalone un-equalized slice."""
         samples, syms = _qpsk_signal(n_sym=500)
         kw = dict(
@@ -715,9 +721,9 @@ class TestCPRStatePersistence:
             cpr_bps_block_size=16,
             cpr_bps_test_phases=32,
         )
-        assert (
-            r1.cpr_state is not None
-        ), "cpr_state must be populated when cpr_type is set"
+        assert r1.cpr_state is not None, (
+            "cpr_state must be populated when cpr_type is set"
+        )
         assert r1.cpr_state.cpr_type == cpr_mode
         assert r1.cpr_state.num_ch == 1
 

@@ -64,7 +64,9 @@ class TestCudaKernelExecution:
         assert y.shape == x.shape
         xpt.assert_allclose(y, 2.5 * x, rtol=1e-6)
 
-    def test_selftest_kernel_rejects_wrong_dtype(self, backend_device: str, xp: Any) -> None:
+    def test_selftest_kernel_rejects_wrong_dtype(
+        self, backend_device: str, xp: Any
+    ) -> None:
         """Kernel launcher raises TypeError if array dtype does not match template."""
         skip_unless_kernel_available(backend_device)
 

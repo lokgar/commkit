@@ -22,7 +22,9 @@ class TestConstellationCreation:
         assert c.bits_per_symbol == 4
 
         # Natural-binary labels: row i is the MSB-first bits of i.
-        expected = ((np.arange(16)[:, None] >> np.arange(3, -1, -1)) & 1).astype(np.int8)
+        expected = ((np.arange(16)[:, None] >> np.arange(3, -1, -1)) & 1).astype(
+            np.int8
+        )
         xpt.assert_array_equal(c.bit_labels, expected)
 
     def test_gray_base_is_cached(self) -> None:
@@ -45,9 +47,7 @@ class TestConstellationCreation:
 class TestConstellationMapping:
     """Tests for mapping, demapping, and LLR calculation through Constellation."""
 
-    def test_map_demap_roundtrip(
-        self, backend_device: str, xp: Any, xpt: Any
-    ) -> None:
+    def test_map_demap_roundtrip(self, backend_device: str, xp: Any, xpt: Any) -> None:
         """map() then demap() recovers bits matching the free functions."""
         c = Constellation.gray("qam", 16)
         bits = xp.array([0, 0, 0, 0, 1, 1, 1, 1], dtype="int8")
@@ -56,9 +56,7 @@ class TestConstellationMapping:
         bits_out = c.demap(syms)
         xpt.assert_array_equal(bits_out, bits)
 
-    def test_unipolar_carried_through(
-        self, backend_device: str, xp: Any
-    ) -> None:
+    def test_unipolar_carried_through(self, backend_device: str, xp: Any) -> None:
         """A unipolar Constellation maps to a strictly non-negative grid."""
         c = Constellation.gray("ask", 4, unipolar=True)
         assert c.unipolar is True

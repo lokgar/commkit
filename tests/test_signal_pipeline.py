@@ -200,7 +200,9 @@ class TestPipelineMetadataPropagation:
         n = 256
         sampling_rate = 1e6
         tone = xp.exp(1j * 2 * xp.pi * 25e3 * xp.arange(n) / sampling_rate)
-        without_mod = Signal(samples=tone, sampling_rate=sampling_rate, symbol_rate=0.5e6)
+        without_mod = Signal(
+            samples=tone, sampling_rate=sampling_rate, symbol_rate=0.5e6
+        )
         with_mod = without_mod.model_copy(update={"mod_scheme": "PSK", "mod_order": 4})
 
         fallback = frequency.estimate_frequency_offset_mth_power(
@@ -227,9 +229,9 @@ class TestPipelineMetadataPropagation:
         assert isinstance(result, Signal) is case.output_is_signal
         assert result.sampling_rate == pytest.approx(case.expected_rate)
         assert (result.spectral_domain, result.physical_domain) == case.expected_domains
-        assert (result.source_bits is not None and result.source_symbols is not None) is (
-            case.source_fields_valid
-        )
+        assert (
+            result.source_bits is not None and result.source_symbols is not None
+        ) is (case.source_fields_valid)
         assert (
             result.resolved_symbols is not None and result.resolved_bits is not None
         ) is case.resolved_fields_valid
@@ -315,9 +317,7 @@ class TestPipelineSPSValidation:
         with pytest.raises(ValueError, match=r"sps.*positive integer"):
             generation.shape_pulse(symbols, sps=1.5, pulse_shape="rrc")
 
-    def test_frame_sample_map_rejects_fractional_sps(
-        self, backend_device: str
-    ) -> None:
+    def test_frame_sample_map_rejects_fractional_sps(self, backend_device: str) -> None:
         """A sample-domain frame mask requires an integral repeat count."""
         frame = SingleCarrierFrame(payload_len=16)
         with pytest.raises(ValueError, match=r"sps.*positive integer"):
@@ -364,7 +364,9 @@ class TestPipelineSPSValidation:
             if factory == "qam":
                 generation.generate_qam(16, sps=sps, symbol_rate=1e6, order=4)
             elif factory == "psqam":
-                generation.generate_psqam(16, sps=sps, symbol_rate=1e6, order=16, nu=0.3)
+                generation.generate_psqam(
+                    16, sps=sps, symbol_rate=1e6, order=16, nu=0.3
+                )
             elif factory == "preamble":
                 Preamble(sequence_type="barker", length=7).to_signal(
                     sps=sps, symbol_rate=1e6

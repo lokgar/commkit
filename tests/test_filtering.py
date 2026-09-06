@@ -59,7 +59,9 @@ class TestFilterTapGenerators:
 
     def test_fir_taps_lowpass(self) -> None:
         """Verify lowpass FIR: correct tap count, passband gain, and Nyquist attenuation."""
-        taps = filtering.fir_taps(num_taps=63, cutoff=0.2, sampling_rate=1.0, btype="low")
+        taps = filtering.fir_taps(
+            num_taps=63, cutoff=0.2, sampling_rate=1.0, btype="low"
+        )
         assert len(taps) == 63
 
         freqs, h = calc_freq_response(taps)
@@ -69,7 +71,9 @@ class TestFilterTapGenerators:
 
     def test_fir_taps_highpass(self) -> None:
         """Verify highpass FIR: correct tap count, DC attenuation, and passband gain."""
-        taps = filtering.fir_taps(num_taps=63, cutoff=0.2, sampling_rate=1.0, btype="high")
+        taps = filtering.fir_taps(
+            num_taps=63, cutoff=0.2, sampling_rate=1.0, btype="high"
+        )
         assert len(taps) == 63
 
         freqs, h = calc_freq_response(taps)
@@ -111,9 +115,7 @@ class TestFilterTapGenerators:
 class TestFilterApplication:
     """Tests for fir_filter, matched_filter, and dtype preservation."""
 
-    def test_fir_filter(
-        self, backend_device: str, xp: Any, xpt: Any
-    ) -> None:
+    def test_fir_filter(self, backend_device: str, xp: Any, xpt: Any) -> None:
         """Verify FIR filtering output device, shape, and moving-average correctness."""
         data = xp.ones(100)
         taps = xp.ones(5) / 5.0
@@ -124,14 +126,14 @@ class TestFilterApplication:
         assert len(filtered) == len(data)
         xpt.assert_allclose(filtered[5:-5], xp.ones(90))
 
-    def test_matched_filter_normalization(
-        self, backend_device: str, xp: Any
-    ) -> None:
+    def test_matched_filter_normalization(self, backend_device: str, xp: Any) -> None:
         """Verify matched_filter respects taps_normalization."""
         samples = xp.ones(100)
         pulse = xp.ones(10)
 
-        out_gain = filtering.matched_filter(samples, pulse, taps_normalization="unity_gain")
+        out_gain = filtering.matched_filter(
+            samples, pulse, taps_normalization="unity_gain"
+        )
         assert out_gain.shape == (100,)
         assert isinstance(out_gain, xp.ndarray)
 
@@ -153,19 +155,21 @@ class TestFilterApplication:
         """fir_filter: complex64 signal + float64 taps -> complex64 output."""
         rng = np.random.default_rng(10)
         x = xp.asarray(
-            (rng.standard_normal(512) + 1j * rng.standard_normal(512)).astype(np.complex64)
+            (rng.standard_normal(512) + 1j * rng.standard_normal(512)).astype(
+                np.complex64
+            )
         )
         taps = np.hanning(32)
         out = filtering.fir_filter(x, taps)
         assert out.dtype == xp.complex64
 
-    def test_matched_filter_preserves_dtype(
-        self, backend_device: str, xp: Any
-    ) -> None:
+    def test_matched_filter_preserves_dtype(self, backend_device: str, xp: Any) -> None:
         """matched_filter with rrc_taps (float64) on complex64 signal -> complex64."""
         rng = np.random.default_rng(11)
         sig = xp.asarray(
-            (rng.standard_normal(1000) + 1j * rng.standard_normal(1000)).astype(np.complex64)
+            (rng.standard_normal(1000) + 1j * rng.standard_normal(1000)).astype(
+                np.complex64
+            )
         )
         taps = filtering.rrc_taps(4)
         out = filtering.matched_filter(sig, taps)
@@ -236,9 +240,7 @@ class TestOverlapSaveFiltering:
         assert out.ndim == 1
         assert out.shape == x.shape
 
-    def test_ols_fir_filter_explicit_N_fft(
-        self, backend_device: str, xp: Any
-    ) -> None:
+    def test_ols_fir_filter_explicit_N_fft(self, backend_device: str, xp: Any) -> None:
         """ols_fir_filter accepts an explicit N_fft without error."""
         rng = np.random.default_rng(2)
         x = xp.asarray(rng.standard_normal(256).astype(np.float32))
@@ -262,7 +264,9 @@ class TestOverlapSaveFiltering:
         """ols_fir_filter returns complex when input is complex."""
         rng = np.random.default_rng(4)
         x = xp.asarray(
-            (rng.standard_normal(512) + 1j * rng.standard_normal(512)).astype(np.complex128)
+            (rng.standard_normal(512) + 1j * rng.standard_normal(512)).astype(
+                np.complex128
+            )
         )
         taps = xp.asarray(np.hanning(32).astype(np.float64))
         out = filtering.ols_fir_filter(x, taps)
@@ -274,7 +278,9 @@ class TestOverlapSaveFiltering:
         """Signal input returns a Signal with the filtered samples."""
         rng = np.random.default_rng(5)
         data = xp.asarray(
-            (rng.standard_normal(512) + 1j * rng.standard_normal(512)).astype(np.complex64)
+            (rng.standard_normal(512) + 1j * rng.standard_normal(512)).astype(
+                np.complex64
+            )
         )
         taps = xp.asarray(np.hanning(32).astype(np.float32))
         sig = Signal(samples=data, sampling_rate=1.0, symbol_rate=1.0)
@@ -291,7 +297,9 @@ class TestOverlapSaveFiltering:
         """ols_fir_filter: complex64 signal + float64 taps -> complex64 output."""
         rng = np.random.default_rng(13)
         x = xp.asarray(
-            (rng.standard_normal(1024) + 1j * rng.standard_normal(1024)).astype(np.complex64)
+            (rng.standard_normal(1024) + 1j * rng.standard_normal(1024)).astype(
+                np.complex64
+            )
         )
         taps = np.hanning(64)
         out = filtering.ols_fir_filter(x, taps)
@@ -301,9 +309,7 @@ class TestOverlapSaveFiltering:
 class TestCompensateChromaticDispersion:
     """Tests for compensate_chromatic_dispersion (electronic dispersion compensation)."""
 
-    def test_round_trip_siso(
-        self, backend_device: str, xp: Any, xpt: Any
-    ) -> None:
+    def test_round_trip_siso(self, backend_device: str, xp: Any, xpt: Any) -> None:
         """Apply CD then compensate: SISO output should recover input."""
         from commkit.impairments import apply_chromatic_dispersion
 
@@ -320,9 +326,7 @@ class TestCompensateChromaticDispersion:
 
         xpt.assert_allclose(recovered, samples, atol=1e-3)
 
-    def test_round_trip_mimo(
-        self, backend_device: str, xp: Any, xpt: Any
-    ) -> None:
+    def test_round_trip_mimo(self, backend_device: str, xp: Any, xpt: Any) -> None:
         """Apply CD then compensate: MIMO output should recover input."""
         from commkit.impairments import apply_chromatic_dispersion
 

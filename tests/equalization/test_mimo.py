@@ -1,7 +1,5 @@
 """Butterfly (2x2 / 3x3) MIMO sequential equalization."""
 
-import pytest
-
 from commkit import equalization, generate_psk, generate_qam
 
 

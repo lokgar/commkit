@@ -17,7 +17,9 @@ class TestComputeLLRCore:
         modulation = "qam"
         order = 16
 
-        bits = xp.array([0, 0, 0, 0, 1, 1, 1, 1, 0, 1, 0, 1, 1, 0, 1, 0], dtype=xp.int32)
+        bits = xp.array(
+            [0, 0, 0, 0, 1, 1, 1, 1, 0, 1, 0, 1, 1, 0, 1, 0], dtype=xp.int32
+        )
         symbols = mapping.map_bits(bits, modulation, order)
 
         llrs = mapping.compute_llr(
@@ -34,7 +36,9 @@ class TestComputeLLRCore:
         bits = xp.array([0, 1, 0, 1, 1, 0, 0, 0, 1, 1, 1, 0], dtype=xp.int32)
         symbols = mapping.map_bits(bits, modulation, order)
 
-        llrs = mapping.compute_llr(symbols, modulation, order, noise_var=1e-6, output="numpy")
+        llrs = mapping.compute_llr(
+            symbols, modulation, order, noise_var=1e-6, output="numpy"
+        )
         hard_from_llr = (np.asarray(llrs) < 0).astype("int32")
         hard_direct = mapping.demap_symbols_hard(symbols, modulation, order)
 
@@ -49,10 +53,24 @@ class TestComputeLLRCore:
         symbols = mapping.map_bits(bits, modulation, order)
 
         llrs_maxlog = np.asarray(
-            mapping.compute_llr(symbols, modulation, order, noise_var=0.01, method="maxlog", output="numpy")
+            mapping.compute_llr(
+                symbols,
+                modulation,
+                order,
+                noise_var=0.01,
+                method="maxlog",
+                output="numpy",
+            )
         )
         llrs_exact = np.asarray(
-            mapping.compute_llr(symbols, modulation, order, noise_var=0.01, method="exact", output="numpy")
+            mapping.compute_llr(
+                symbols,
+                modulation,
+                order,
+                noise_var=0.01,
+                method="exact",
+                output="numpy",
+            )
         )
 
         assert np.array_equal(np.sign(llrs_maxlog), np.sign(llrs_exact))
@@ -79,10 +97,14 @@ class TestComputeLLRCore:
         noise_var = 0.1
 
         llrs_maxlog = np.asarray(
-            mapping.compute_llr(symbols, modulation, order, noise_var, method="maxlog", output="numpy")
+            mapping.compute_llr(
+                symbols, modulation, order, noise_var, method="maxlog", output="numpy"
+            )
         )
         llrs_exact = np.asarray(
-            mapping.compute_llr(symbols, modulation, order, noise_var, method="exact", output="numpy")
+            mapping.compute_llr(
+                symbols, modulation, order, noise_var, method="exact", output="numpy"
+            )
         )
         assert np.array_equal(np.sign(llrs_exact), np.sign(llrs_maxlog))
 
@@ -137,7 +159,9 @@ class TestComputeLLRDifferentiability:
         symbols_np = mapping.map_bits(bits, "psk", 8)
 
         for method in ("maxlog", "exact"):
-            llrs_from_np = mapping.compute_llr(symbols_np, "psk", 8, 0.05, method=method)
+            llrs_from_np = mapping.compute_llr(
+                symbols_np, "psk", 8, 0.05, method=method
+            )
             llrs_from_jax = mapping.compute_llr(
                 jnp.asarray(symbols_np), "psk", 8, 0.05, method=method
             )
@@ -188,7 +212,9 @@ class TestComputeLLROutputModes:
 
         # JAX in -> JAX out
         syms_jax = jnp.asarray(syms_np)
-        out_jax = mapping.compute_llr(syms_jax, "qam", 16, noise_var=0.1, output="input")
+        out_jax = mapping.compute_llr(
+            syms_jax, "qam", 16, noise_var=0.1, output="input"
+        )
         assert isinstance(out_jax, jax.Array)
 
     def test_compute_llr_output_invalid_raises(self) -> None:
@@ -227,7 +253,9 @@ class TestComputeLLRSignalIntegration:
         sig.resolved_symbols = symbols
 
         llrs_sig = mapping.compute_llr(sig, noise_var=1e-6, output="numpy")
-        llrs_arr = mapping.compute_llr(symbols, "qam", 16, noise_var=1e-6, output="numpy")
+        llrs_arr = mapping.compute_llr(
+            symbols, "qam", 16, noise_var=1e-6, output="numpy"
+        )
         xpt.assert_allclose(llrs_sig, llrs_arr)
 
     def test_compute_llr_signal_input_raises_without_resolved(self) -> None:

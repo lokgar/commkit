@@ -1,7 +1,5 @@
 """Linear equalizers: zero-forcing / MMSE (zf_equalizer, apply_taps)."""
 
-import pytest
-
 from commkit import equalization
 from commkit.core import Signal
 

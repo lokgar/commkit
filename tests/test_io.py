@@ -47,9 +47,11 @@ def _frame_signal() -> Signal:
         payload_len=200, preamble_len=13, sps=4, symbol_rate=1e9, payload_mod_order=16
     )
 
+
 # -----------------------------------------------------------------------------
 # Test Classes
 # -----------------------------------------------------------------------------
+
 
 class TestNPZSaveLoadSISO:
     """Tests for saving and loading SISO signals and their metadata."""
@@ -96,9 +98,7 @@ class TestNPZSaveLoadSISO:
         assert isinstance(sig2.pilot_tone_frequency, np.ndarray)
         xpt.assert_array_equal(sig2.pilot_tone_frequency, [2.5e9])
 
-    def test_roundtrip_pilot_tone_power_ratio_db(
-        self, tmp_path: Any, xpt: Any
-    ) -> None:
+    def test_roundtrip_pilot_tone_power_ratio_db(self, tmp_path: Any, xpt: Any) -> None:
         """pilot_tone_power_ratio_db round-trips correctly."""
         sig = _siso_signal()
         assert sig.pilot_tone_power_ratio_db is None
@@ -129,9 +129,7 @@ class TestNPZSaveLoadSISO:
             to_numpy(sig.source_symbols), to_numpy(sig2.source_symbols), atol=1e-7
         )
 
-    def test_extension_appended_automatically(
-        self, tmp_path: Any, xpt: Any
-    ) -> None:
+    def test_extension_appended_automatically(self, tmp_path: Any, xpt: Any) -> None:
         """Saving/loading without extension appends .npz automatically."""
         sig = _siso_signal()
         p_no_ext = tmp_path / "capture"
@@ -347,7 +345,9 @@ class TestNPZDeviceHandling:
         xpt.assert_allclose(
             to_numpy(sig.resolved_symbols), to_numpy(loaded.resolved_symbols), atol=1e-7
         )
-        xpt.assert_array_equal(to_numpy(sig.resolved_bits), to_numpy(loaded.resolved_bits))
+        xpt.assert_array_equal(
+            to_numpy(sig.resolved_bits), to_numpy(loaded.resolved_bits)
+        )
         xpt.assert_array_equal(to_numpy(sig.source_bits), to_numpy(loaded.source_bits))
 
         assert metrics.evm(loaded) is not None

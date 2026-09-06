@@ -12,7 +12,9 @@ class TestSingleCarrierFrameBasics:
 
     def test_sc_frame_none(self, backend_device: str, xp: Any) -> None:
         """Verify basic frame generation with no pilots or guard intervals."""
-        frame = SingleCarrierFrame(payload_len=100, symbol_rate=1e6, pilot_pattern="none")
+        frame = SingleCarrierFrame(
+            payload_len=100, symbol_rate=1e6, pilot_pattern="none"
+        )
         sig = frame.to_signal(sps=1, pulse_shape="none")
         assert len(sig.samples) == 100
         assert sig.symbol_rate == 1e6
@@ -59,9 +61,7 @@ class TestSingleCarrierFrameBasics:
         assert sig.frame.guard_len == 20
         assert sig.frame.guard_type == "zero"
 
-    def test_sc_frame_guard_cp(
-        self, backend_device: str, xp: Any, xpt: Any
-    ) -> None:
+    def test_sc_frame_guard_cp(self, backend_device: str, xp: Any, xpt: Any) -> None:
         """Verify cyclic prefix (CP) guard interval generation."""
         frame = SingleCarrierFrame(
             payload_len=100, symbol_rate=1e6, guard_type="cp", guard_len=20
@@ -71,9 +71,7 @@ class TestSingleCarrierFrameBasics:
         xpt.assert_allclose(sig.samples[:20], sig.samples[-20:])
         assert sig.frame.guard_type == "cp"
 
-    def test_sc_frame_preamble(
-        self, backend_device: str, xp: Any, xpt: Any
-    ) -> None:
+    def test_sc_frame_preamble(self, backend_device: str, xp: Any, xpt: Any) -> None:
         """Verify that auto-generated preambles are prepended to the frame."""
         preamble = Preamble(sequence_type="barker", length=13)
         frame = SingleCarrierFrame(payload_len=100, symbol_rate=1e6, preamble=preamble)
@@ -157,7 +155,9 @@ class TestSingleCarrierFrameStructureMap:
         assert xp.sum(struct["guard"]) == 5
 
         sps = 4
-        struct_s = frame.get_structure_map(unit="samples", sps=sps, include_preamble=True)
+        struct_s = frame.get_structure_map(
+            unit="samples", sps=sps, include_preamble=True
+        )
         assert len(struct_s["preamble"]) == total_len * sps
         assert xp.sum(struct_s["preamble"]) == 2 * sps
 
@@ -266,18 +266,20 @@ class TestSingleCarrierFramePilots:
         with pytest.raises(ValueError, match="pilot_period must be > pilot_block_len"):
             frame._generate_pilot_mask()
 
-    def test_pilot_bits_none_when_no_pilots(
-        self, backend_device: str, xp: Any
-    ) -> None:
+    def test_pilot_bits_none_when_no_pilots(self, backend_device: str, xp: Any) -> None:
         """pilot_bits returns None when pilot_pattern='none'."""
-        frame = SingleCarrierFrame(payload_len=20, symbol_rate=1e6, pilot_pattern="none")
+        frame = SingleCarrierFrame(
+            payload_len=20, symbol_rate=1e6, pilot_pattern="none"
+        )
         assert frame.pilot_bits is None
 
     def test_pilot_symbols_none_when_no_pilots(
         self, backend_device: str, xp: Any
     ) -> None:
         """pilot_symbols returns None when pilot_pattern='none'."""
-        frame = SingleCarrierFrame(payload_len=20, symbol_rate=1e6, pilot_pattern="none")
+        frame = SingleCarrierFrame(
+            payload_len=20, symbol_rate=1e6, pilot_pattern="none"
+        )
         assert frame.pilot_symbols is None
 
     def test_pilot_gain_db_siso(self, backend_device: str, xp: Any) -> None:

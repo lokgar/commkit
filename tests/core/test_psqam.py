@@ -183,7 +183,9 @@ class TestGeneratePSQAM:
         avg_energy_ps = float(np.mean(np.abs(src) ** 2))
         assert avg_energy_ps < 1.0
 
-    def test_psqam_source_bits_match_symbols(self, backend_device: str, xp: Any, xpt: Any) -> None:
+    def test_psqam_source_bits_match_symbols(
+        self, backend_device: str, xp: Any, xpt: Any
+    ) -> None:
         """Hard-demapping source_symbols recovers source_bits across backends."""
         from commkit.mapping import demap_symbols_hard
 
@@ -214,7 +216,9 @@ class TestPSQAMMetricsAndDemapping:
     def test_mi_uniform_pmf_matches_none(self) -> None:
         """Passing explicit uniform PMF gives identical mutual information to pmf=None."""
         order = 16
-        sig = generate_qam(5000, sps=1, symbol_rate=32e9, order=order, pulse_shape="none")
+        sig = generate_qam(
+            5000, sps=1, symbol_rate=32e9, order=order, pulse_shape="none"
+        )
         noisy = apply_awgn(sig.samples, esn0_db=15.0, sps=1)
 
         mi_none = metrics.mi(noisy, "qam", order, noise_var=10 ** (-15.0 / 10))
@@ -244,7 +248,9 @@ class TestPSQAMMetricsAndDemapping:
     def test_compute_llr_uniform_pmf_matches_none(self, xpt: Any) -> None:
         """Uniform PMF produces identical LLRs to pmf=None."""
         order = 16
-        sig = generate_qam(200, sps=1, symbol_rate=32e9, order=order, pulse_shape="none")
+        sig = generate_qam(
+            200, sps=1, symbol_rate=32e9, order=order, pulse_shape="none"
+        )
         noisy = apply_awgn(sig.samples, esn0_db=12.0, sps=1)
         noise_var = 10 ** (-12.0 / 10)
 
@@ -253,7 +259,13 @@ class TestPSQAMMetricsAndDemapping:
         )
         pmf_uniform = np.full(order, 1.0 / order)
         llr_uniform = compute_llr(
-            noisy, "qam", order, noise_var, method="exact", pmf=pmf_uniform, output="numpy"
+            noisy,
+            "qam",
+            order,
+            noise_var,
+            method="exact",
+            pmf=pmf_uniform,
+            output="numpy",
         )
         xpt.assert_allclose(llr_none, llr_uniform, atol=1e-4)
 
@@ -276,7 +288,9 @@ class TestPSQAMMetricsAndDemapping:
             .ravel()
         )
 
-        llr_none = compute_llr(rx, "qam", order, noise_var, method="exact", output="numpy")
+        llr_none = compute_llr(
+            rx, "qam", order, noise_var, method="exact", output="numpy"
+        )
         llr_ps = compute_llr(
             rx, "qam", order, noise_var, method="exact", pmf=pmf, output="numpy"
         )
@@ -298,7 +312,9 @@ class TestPSQAMMetricsAndDemapping:
         assert e_ps < 1.0 - 1e-6
 
         rng = np.random.default_rng(1)
-        rx = (const / np.sqrt(e_ps))[rng.integers(0, order, size=50)].astype(np.complex64)
+        rx = (const / np.sqrt(e_ps))[rng.integers(0, order, size=50)].astype(
+            np.complex64
+        )
 
         result = rescale_ps_symbols(rx, np, "qam", order, pmf)
         expected = rx * np.sqrt(e_ps).astype(np.float32)

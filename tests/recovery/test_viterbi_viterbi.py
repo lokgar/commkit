@@ -33,9 +33,13 @@ class TestCprViterbiViterbi:
     def test_phase_residual(self, backend_device, xp, order, modulation, block_size):
         """VV CPR: mean phase estimate within 0.1 rad of true carrier phase (mod M-fold)."""
         if modulation == "qam":
-            sig = make_test_qam_signal(order=order, num_symbols=2048, sps=1, symbol_rate=FS, xp=xp)
+            sig = make_test_qam_signal(
+                order=order, num_symbols=2048, sps=1, symbol_rate=FS, xp=xp
+            )
         else:
-            sig = make_test_psk_signal(order=order, num_symbols=2048, sps=1, symbol_rate=FS, xp=xp)
+            sig = make_test_psk_signal(
+                order=order, num_symbols=2048, sps=1, symbol_rate=FS, xp=xp
+            )
         phi_true = 0.3  # radians
         sig.samples = sig.samples * xp.exp(1j * phi_true)
 
@@ -51,7 +55,9 @@ class TestCprViterbiViterbi:
 
     def test_output_shape_siso(self, backend_device, xp):
         """VV CPR: 1D input -> 1D phase output of same length."""
-        sig = make_test_qam_signal(order=16, num_symbols=512, sps=1, symbol_rate=FS, xp=xp)
+        sig = make_test_qam_signal(
+            order=16, num_symbols=512, sps=1, symbol_rate=FS, xp=xp
+        )
         phase = recovery.recover_carrier_phase_viterbi_viterbi(
             sig.samples, modulation="qam", order=16
         )
@@ -69,7 +75,9 @@ class TestCprViterbiViterbi:
 
     def test_too_short_raises(self, backend_device, xp):
         """VV CPR: signal shorter than block_size raises ValueError."""
-        sig = make_test_qam_signal(order=4, num_symbols=20, sps=1, symbol_rate=FS, xp=xp)
+        sig = make_test_qam_signal(
+            order=4, num_symbols=20, sps=1, symbol_rate=FS, xp=xp
+        )
         with pytest.raises(ValueError, match="shorter than block_size"):
             recovery.recover_carrier_phase_viterbi_viterbi(
                 sig.samples[:10], modulation="qam", order=4, block_size=32
@@ -83,7 +91,9 @@ class TestViterbiViterbi:
         return make_test_symbols(scheme="psk", order=4, num_symbols=N, seed=seed, xp=xp)
 
     def _qam16_symbols(self, xp, N=512, seed=1):
-        return make_test_symbols(scheme="qam", order=16, num_symbols=N, seed=seed, xp=xp)
+        return make_test_symbols(
+            scheme="qam", order=16, num_symbols=N, seed=seed, xp=xp
+        )
 
     def test_siso_qpsk_output_shape(self, backend_device, xp):
         """SISO QPSK: output is (N,) float64."""
@@ -160,7 +170,9 @@ class TestSignalInputViterbiViterbi:
 
     def test_signal_input_uses_metadata(self, backend_device, xp, xpt):
         """Signal input: modulation/order come from the signal's metadata."""
-        sig = make_test_qam_signal(order=16, num_symbols=512, sps=1, symbol_rate=FS, xp=xp)
+        sig = make_test_qam_signal(
+            order=16, num_symbols=512, sps=1, symbol_rate=FS, xp=xp
+        )
 
         phi_sig = recovery.recover_carrier_phase_viterbi_viterbi(sig)
         phi_arr = recovery.recover_carrier_phase_viterbi_viterbi(

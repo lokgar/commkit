@@ -40,13 +40,23 @@ from tests.common.signals import (
 def _qam16(n_sym=4096, snr_db=25.0, sps=2, rng=None):
     """Return (samples_sps, symbols) for 16-QAM with AWGN, repeat upsampling."""
     seed = 42 if rng is None else int(rng.integers(0, 100000))
-    return make_test_qam_samples(order=16, num_symbols=n_sym, sps=sps, snr_db=snr_db, seed=seed)
+    return make_test_qam_samples(
+        order=16, num_symbols=n_sym, sps=sps, snr_db=snr_db, seed=seed
+    )
 
 
 def _wiener_qam16_block(n_sym=4096, snr_db=25.0, linewidth=5e3, seed=11):
     """Return (samples, symbols) for 16-QAM under Wiener phase noise."""
-    samples, syms = make_test_qam_samples(order=16, num_symbols=n_sym, sps=1, snr_db=snr_db, seed=seed)
-    phase = make_wiener_phase(num_symbols=n_sym, linewidth=linewidth, sample_rate=1.0, seed=seed, dtype=np.float64)
+    samples, syms = make_test_qam_samples(
+        order=16, num_symbols=n_sym, sps=1, snr_db=snr_db, seed=seed
+    )
+    phase = make_wiener_phase(
+        num_symbols=n_sym,
+        linewidth=linewidth,
+        sample_rate=1.0,
+        seed=seed,
+        dtype=np.float64,
+    )
     return (syms * np.exp(1j * phase)).astype(np.complex64), syms
 
 
@@ -94,7 +104,13 @@ class TestBlockLMSShapes:
 
     def test_output_shape_mimo(self, backend_device, xp):
         samples, training = make_test_mimo_samples(
-            num_channels=2, order=16, num_symbols=1024, sps=2, snr_db=25.0, seed=1, xp=xp
+            num_channels=2,
+            order=16,
+            num_symbols=1024,
+            sps=2,
+            snr_db=25.0,
+            seed=1,
+            xp=xp,
         )
         r = block_lms(
             samples,
@@ -131,7 +147,13 @@ class TestBlockLMSShapes:
 
     def test_output_shape_bps_mimo(self, backend_device, xp):
         samples, training = make_test_mimo_samples(
-            num_channels=2, order=16, num_symbols=1024, sps=2, snr_db=25.0, seed=2, xp=xp
+            num_channels=2,
+            order=16,
+            num_symbols=1024,
+            sps=2,
+            snr_db=25.0,
+            seed=2,
+            xp=xp,
         )
         r = block_lms(
             samples,
@@ -220,7 +242,9 @@ class TestBlockLMSConvergence:
         y_eval = r.y_hat[n_train:]
         s_eval = syms_xp[n_train:]
         evm = float(
-            xp.sqrt(xp.mean(xp.abs(y_eval - s_eval) ** 2) / xp.mean(xp.abs(s_eval) ** 2))
+            xp.sqrt(
+                xp.mean(xp.abs(y_eval - s_eval) ** 2) / xp.mean(xp.abs(s_eval) ** 2)
+            )
         )
         assert evm < 0.15, f"EVM {evm:.3f} too high - equalizer did not converge"
 
@@ -229,7 +253,13 @@ class TestBlockLMSConvergence:
         n_sym = 4096
         sps = 1
         samples, training = make_test_mimo_samples(
-            num_channels=2, order=16, num_symbols=n_sym, sps=sps, snr_db=26.0, seed=5, xp=xp
+            num_channels=2,
+            order=16,
+            num_symbols=n_sym,
+            sps=sps,
+            snr_db=26.0,
+            seed=5,
+            xp=xp,
         )
 
         r = block_lms(
@@ -414,9 +444,9 @@ class TestBlockLMSCPRIntegration:
         samples_pn = (
             np.repeat(syms * np.exp(1j * phase_noise), sps)
             + 0.1
-            * (rng.standard_normal(2 * n_sym) + 1j * rng.standard_normal(2 * n_sym)).astype(
-                np.complex64
-            )
+            * (
+                rng.standard_normal(2 * n_sym) + 1j * rng.standard_normal(2 * n_sym)
+            ).astype(np.complex64)
         ).astype(np.complex64)
 
         n_eval = n_sym // 2

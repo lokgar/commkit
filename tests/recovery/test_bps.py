@@ -19,7 +19,9 @@ class TestCprBps:
     @pytest.mark.parametrize("order", [16, 64])
     def test_phase_residual(self, backend_device, xp, order):
         """BPS CPR: RMS phase residual < 0.05 rad for constant phase offset."""
-        sig = make_test_qam_signal(order=order, num_symbols=1024, sps=1, symbol_rate=FS, xp=xp)
+        sig = make_test_qam_signal(
+            order=order, num_symbols=1024, sps=1, symbol_rate=FS, xp=xp
+        )
         phi_true = 0.2  # radians
         sig.samples = sig.samples * xp.exp(1j * phi_true)
 
@@ -35,7 +37,9 @@ class TestCprBps:
 
     def test_output_shape_siso(self, backend_device, xp):
         """BPS CPR: 1D input -> 1D phase output of same length."""
-        sig = make_test_qam_signal(order=16, num_symbols=512, sps=1, symbol_rate=FS, xp=xp)
+        sig = make_test_qam_signal(
+            order=16, num_symbols=512, sps=1, symbol_rate=FS, xp=xp
+        )
         phase = recovery.recover_carrier_phase_bps(
             sig.samples, modulation="qam", order=16
         )
@@ -51,7 +55,9 @@ class TestCprBps:
 
     def test_too_short_raises(self, backend_device, xp):
         """BPS CPR: signal shorter than block_size raises ValueError."""
-        sig = make_test_qam_signal(order=16, num_symbols=20, sps=1, symbol_rate=FS, xp=xp)
+        sig = make_test_qam_signal(
+            order=16, num_symbols=20, sps=1, symbol_rate=FS, xp=xp
+        )
         with pytest.raises(ValueError, match="shorter than block_size"):
             recovery.recover_carrier_phase_bps(
                 sig.samples[:10], modulation="qam", order=16, block_size=32
@@ -62,7 +68,9 @@ class TestBPS:
     """Tests for recover_carrier_phase_bps."""
 
     def _qam16_symbols(self, xp, N=512, seed=2):
-        return make_test_symbols(scheme="qam", order=16, num_symbols=N, seed=seed, xp=xp)
+        return make_test_symbols(
+            scheme="qam", order=16, num_symbols=N, seed=seed, xp=xp
+        )
 
     def _qpsk_symbols(self, xp, N=512, seed=3):
         return make_test_symbols(scheme="psk", order=4, num_symbols=N, seed=seed, xp=xp)
@@ -127,7 +135,9 @@ class TestSignalInputBpsAndCorrectCarrierPhase:
 
     def test_bps_signal_input_uses_metadata(self, backend_device, xp, xpt):
         """Signal input: modulation/order come from the signal's metadata."""
-        sig = make_test_qam_signal(order=16, num_symbols=512, sps=1, symbol_rate=FS, xp=xp)
+        sig = make_test_qam_signal(
+            order=16, num_symbols=512, sps=1, symbol_rate=FS, xp=xp
+        )
 
         phi_sig = recovery.recover_carrier_phase_bps(sig)
         phi_arr = recovery.recover_carrier_phase_bps(
@@ -141,7 +151,9 @@ class TestSignalInputBpsAndCorrectCarrierPhase:
         self, backend_device, xp, xpt
     ):
         """Signal input returns a Signal with the phase-corrected samples."""
-        sig = make_test_qam_signal(order=16, num_symbols=256, sps=1, symbol_rate=FS, xp=xp)
+        sig = make_test_qam_signal(
+            order=16, num_symbols=256, sps=1, symbol_rate=FS, xp=xp
+        )
         phase = xp.full(256, 0.3)
 
         out_sig = recovery.correct_carrier_phase(sig, phase)

@@ -29,7 +29,10 @@ def pytest_configure(config):
     """Register custom markers."""
     config.addinivalue_line("markers", "gpu_only: mark test as requiring a GPU backend")
     config.addinivalue_line("markers", "cpu_only: mark test as CPU-only")
-    config.addinivalue_line("markers", "requires_kernel(name): mark test as requiring a specific CUDA kernel")
+    config.addinivalue_line(
+        "markers",
+        "requires_kernel(name): mark test as requiring a specific CUDA kernel",
+    )
 
 
 def pytest_addoption(parser):
@@ -76,9 +79,7 @@ def pytest_collection_modifyitems(config, items):
             )
         ]
     elif device_opt == "gpu":
-        items[:] = [
-            item for item in items if not item.get_closest_marker("cpu_only")
-        ]
+        items[:] = [item for item in items if not item.get_closest_marker("cpu_only")]
 
 
 @pytest.fixture(autouse=True)
@@ -189,5 +190,3 @@ def xpt(backend_device):
     import numpy.testing as npt
 
     return npt
-
-

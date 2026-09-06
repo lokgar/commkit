@@ -1,6 +1,5 @@
 """Joint-channel (MIMO) phase-recovery consistency across algorithms."""
 
-
 from commkit import recovery
 from tests.common.signals import make_test_mimo_samples, make_test_qam_signal
 

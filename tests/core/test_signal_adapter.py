@@ -4,7 +4,6 @@ from typing import Any
 
 import pytest
 
-from commkit.core import Signal
 from commkit.core._signal_adapter import adapt_signal, require_integer_sps
 from tests.common.signals import make_adapter_test_signal
 

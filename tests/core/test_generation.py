@@ -11,9 +11,7 @@ from commkit.core import generation
 class TestWaveformSynthesis:
     """Tests for zero-stuffing upsampler and pulse-shaping filters."""
 
-    def test_expand_zero_stuffing(
-        self, backend_device: str, xp: Any, xpt: Any
-    ) -> None:
+    def test_expand_zero_stuffing(self, backend_device: str, xp: Any, xpt: Any) -> None:
         """Verify up-sampling by zero-stuffing correctly inserts zeros."""
         data = xp.array([1, 2, 3], dtype="float32")
         factor = 3
@@ -56,7 +54,9 @@ class TestWaveformSynthesis:
         """shape_pulse: complex64 symbols -> complex64 waveform."""
         rng = np.random.default_rng(12)
         syms = xp.asarray(
-            (rng.standard_normal(100) + 1j * rng.standard_normal(100)).astype(np.complex64)
+            (rng.standard_normal(100) + 1j * rng.standard_normal(100)).astype(
+                np.complex64
+            )
         )
         out = generation.shape_pulse(syms, sps=4, pulse_shape="rrc")
         assert out.dtype == xp.complex64, f"Expected complex64, got {out.dtype}"

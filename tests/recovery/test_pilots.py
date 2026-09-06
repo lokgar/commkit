@@ -32,9 +32,13 @@ def _rms_phase_error(xp, phase_est, phase_true):
 
 
 class TestCprPilots:
-    def _pilot_setup(self, xp, n_symbols=512, pilot_period=16, phase_per_sym=0.001, seed=0):
+    def _pilot_setup(
+        self, xp, n_symbols=512, pilot_period=16, phase_per_sym=0.001, seed=0
+    ):
         """Return (noisy+rotated samples, pilot_indices, pilot_values, true_phase)."""
-        sig = generate_qam(order=16, num_symbols=n_symbols, sps=1, symbol_rate=FS, seed=seed)
+        sig = generate_qam(
+            order=16, num_symbols=n_symbols, sps=1, symbol_rate=FS, seed=seed
+        )
         # Save ideal symbols before adding noise
         ideal_symbols = xp.asarray(sig.samples.copy())
         sig.samples = apply_awgn(sig.samples, esn0_db=SNR_DB, sps=1, seed=seed)

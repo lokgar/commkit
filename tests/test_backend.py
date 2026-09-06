@@ -31,7 +31,7 @@ class TestGetArrayModule:
         """
         original_force = backend._FORCE_CPU
         backend.use_cpu_only(False)
-        
+
         import cupy as cp
 
         arr = cp.arange(4)
@@ -148,7 +148,9 @@ class TestCpuOnlyToggle:
 class TestJaxInterop:
     """Tests for interoperability between CommKit backends and JAX."""
 
-    def test_jax_interop_roundtrip(self, backend_device: str, xp: Any, xpt: Any, jax: Any) -> None:
+    def test_jax_interop_roundtrip(
+        self, backend_device: str, xp: Any, xpt: Any, jax: Any
+    ) -> None:
         """Verify interoperability between core backends and JAX using DLPack."""
         import jax.numpy as jnp
 
@@ -172,7 +174,9 @@ class TestJaxInterop:
         finally:
             backend.use_cpu_only(False)
 
-    def test_jax_conversions(self, backend_device: str, xp: Any, xpt: Any, jax: Any) -> None:
+    def test_jax_conversions(
+        self, backend_device: str, xp: Any, xpt: Any, jax: Any
+    ) -> None:
         """Test JAX conversion utilities with real JAX if available."""
         import jax.numpy as jnp
 

@@ -586,18 +586,14 @@ class TestFractionalDelay:
         truth = np.exp(2j * np.pi * f * (n - 0.3)).astype("complex64")
         xpt.assert_allclose(out, truth, atol=1e-5)
 
-    def test_fft_fractional_delay_preserves_complex64_dtype(
-        self, backend_device, xp
-    ):
+    def test_fft_fractional_delay_preserves_complex64_dtype(self, backend_device, xp):
         """fft_fractional_delay: complex64 signal -> complex64 output."""
         n = np.arange(200)
         sig = xp.asarray(np.exp(2j * np.pi * 0.05 * n).astype(np.complex64))
         out = timing.fft_fractional_delay(sig, 0.3)
         assert out.dtype == xp.complex64
 
-    def test_fft_fractional_delay_preserves_float32_dtype(
-        self, backend_device, xp
-    ):
+    def test_fft_fractional_delay_preserves_float32_dtype(self, backend_device, xp):
         """fft_fractional_delay: float32 signal -> float32 output."""
         n = np.arange(200, dtype=np.float32)
         sig = xp.asarray(np.sin(2 * np.pi * 0.05 * n))

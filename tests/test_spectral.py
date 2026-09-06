@@ -115,7 +115,9 @@ class TestFrequencyShift:
         """shift_frequency: complex64 signal -> complex64 output."""
         rng = np.random.default_rng(20)
         s = xp.asarray(
-            (rng.standard_normal(512) + 1j * rng.standard_normal(512)).astype(np.complex64)
+            (rng.standard_normal(512) + 1j * rng.standard_normal(512)).astype(
+                np.complex64
+            )
         )
         out, _ = spectral.shift_frequency(s, offset=100.0, sampling_rate=1000.0)
         assert out.dtype == xp.complex64

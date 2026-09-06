@@ -29,9 +29,7 @@ class TestPlotEyeDiagram:
     """Tests for eye diagram plotting (line, hist, multichannel, and validation)."""
 
     @pytest.mark.parametrize("type", ["line", "hist"])
-    def test_eye_diagram_real(
-        self, backend_device: str, xp: Any, type: str
-    ) -> None:
+    def test_eye_diagram_real(self, backend_device: str, xp: Any, type: str) -> None:
         """Verify eye diagram generation for real-valued signals."""
         samples = xp.random.randn(1000)
         sps = 4
@@ -88,7 +86,12 @@ class TestPlotEyeDiagram:
             ValueError, match="Signal is shorter than the required trace length"
         ):
             _plot_eye_traces(
-                xp.ones(5), sps=10, num_symbols=2, ax=MagicMock(), type="line", title=None
+                xp.ones(5),
+                sps=10,
+                num_symbols=2,
+                ax=MagicMock(),
+                type="line",
+                title=None,
             )
             plt.close("all")
 
@@ -96,7 +99,12 @@ class TestPlotEyeDiagram:
         """Verify error for unknown eye type."""
         with pytest.raises(ValueError, match="Unknown type"):
             _plot_eye_traces(
-                xp.ones(100), sps=4, num_symbols=2, ax=MagicMock(), type="magic", title=None
+                xp.ones(100),
+                sps=4,
+                num_symbols=2,
+                ax=MagicMock(),
+                type="magic",
+                title=None,
             )
             plt.close("all")
 
@@ -110,9 +118,7 @@ class TestPlotEyeDiagram:
         assert fig is not None
         plt.close("all")
 
-    def test_eye_diagram_multichannel_show(
-        self, backend_device: str, xp: Any
-    ) -> None:
+    def test_eye_diagram_multichannel_show(self, backend_device: str, xp: Any) -> None:
         """Eye diagram multichannel with show=True calls plt.show() and returns None."""
         samples = xp.random.randn(2, 1000).astype(xp.float32)
         with patch("matplotlib.pyplot.show"):
@@ -140,7 +146,9 @@ class TestPlotEyeDiagram:
         self, backend_device: str, xp: Any
     ) -> None:
         """plot_eye_diagram() with complex signal and single ax raises ValueError requiring two axes."""
-        samples = (xp.random.randn(500) + 1j * xp.random.randn(500)).astype(xp.complex64)
+        samples = (xp.random.randn(500) + 1j * xp.random.randn(500)).astype(
+            xp.complex64
+        )
         fig0, ax0 = plt.subplots()
         with pytest.raises(ValueError, match="complex"):
             plot_eye_diagram(samples, sps=4, ax=ax0, show=False)
@@ -149,14 +157,18 @@ class TestPlotEyeDiagram:
     def test_eye_diagram_dense_line(self, backend_device: str, xp: Any) -> None:
         """plot_eye_diagram() 'line' type with num_traces>5000 triggers downsampling skip path."""
         samples = xp.random.randn(10200).astype(xp.float32)
-        fig, ax = plot_eye_diagram(samples, sps=2, type="line", num_symbols=2, show=False)
+        fig, ax = plot_eye_diagram(
+            samples, sps=2, type="line", num_symbols=2, show=False
+        )
         assert fig is not None
         plt.close("all")
 
     def test_eye_diagram_dense_hist(self, backend_device: str, xp: Any) -> None:
         """plot_eye_diagram() 'hist' type with num_traces>20000 triggers downsampling skip path."""
         samples = xp.random.randn(40100).astype(xp.float32)
-        fig, ax = plot_eye_diagram(samples, sps=2, type="hist", num_symbols=2, show=False)
+        fig, ax = plot_eye_diagram(
+            samples, sps=2, type="hist", num_symbols=2, show=False
+        )
         assert fig is not None
         plt.close("all")
 
@@ -230,7 +242,12 @@ class TestPlotConstellation:
         """Verify warning when overlaying ideal on histogram constellation with bad mod."""
         samples = xp.random.randn(100) + 1j * xp.random.randn(100)
         plot_constellation(
-            samples, bins=10, overlay_ideal=True, modulation="invalid", order=4, show=False
+            samples,
+            bins=10,
+            overlay_ideal=True,
+            modulation="invalid",
+            order=4,
+            show=False,
         )
         plt.close("all")
 
@@ -239,13 +256,13 @@ class TestPlotConstellation:
     ) -> None:
         """Verify warning when overlaying ideal on histogram."""
         caplog.set_level(logging.WARNING)
-        plot_constellation(xp.ones(10) + 1j, bins=10, overlay_ideal=True, modulation=None)
+        plot_constellation(
+            xp.ones(10) + 1j, bins=10, overlay_ideal=True, modulation=None
+        )
         assert "Modulation and order must be provided" in caplog.text
         plt.close("all")
 
-    def test_constellation_real_samples(
-        self, backend_device: str, xp: Any
-    ) -> None:
+    def test_constellation_real_samples(self, backend_device: str, xp: Any) -> None:
         """Constellation with real (non-complex) samples warns and converts to complex."""
         samples = xp.ones(100, dtype=xp.float32)
         with patch("commkit.plotting.logger.warning"):
@@ -293,9 +310,7 @@ class TestPlotConstellation:
         assert result is None
         plt.close("all")
 
-    def test_ideal_constellation_custom_ax(
-        self, backend_device: str, xp: Any
-    ) -> None:
+    def test_ideal_constellation_custom_ax(self, backend_device: str, xp: Any) -> None:
         """plot_ideal_constellation() with provided ax uses that axis's figure."""
         fig0, ax0 = plt.subplots()
         result = plot_ideal_constellation(modulation="psk", order=4, ax=ax0, show=False)
@@ -311,7 +326,9 @@ class TestPlotConstellation:
 
     def test_constellation_vmin_vmax(self, backend_device: str, xp: Any) -> None:
         """plot_constellation() with vmin/vmax sets color scale bounds on histogram."""
-        samples = (xp.random.randn(500) + 1j * xp.random.randn(500)).astype(xp.complex64)
+        samples = (xp.random.randn(500) + 1j * xp.random.randn(500)).astype(
+            xp.complex64
+        )
         result = plot_constellation(samples, vmin=0.0, vmax=1.0, show=False)
         assert result is not None
         plt.close("all")
@@ -420,7 +437,9 @@ class TestPlotSpectralAndPSD:
         sig = xp.ones(256)
         with patch("matplotlib.pyplot.show"):
             plot_psd(sig, x_axis="wavelength", domain="RF")
-        assert "Wavelength plotting is typically used for optical signals" in caplog.text
+        assert (
+            "Wavelength plotting is typically used for optical signals" in caplog.text
+        )
         plt.close("all")
 
     def test_psd_auto_scale_small(self, backend_device: str, xp: Any) -> None:
@@ -487,9 +506,7 @@ class TestPlotSpectralAndPSD:
         assert "Overlaying plots" in caplog.text
         plt.close("all")
 
-    def test_psd_multichannel_axes_array(
-        self, backend_device: str, xp: Any
-    ) -> None:
+    def test_psd_multichannel_axes_array(self, backend_device: str, xp: Any) -> None:
         """PSD multichannel with axes ndarray normalizes axes to 2D layout."""
         samples = xp.random.randn(2, 256).astype(xp.float32)
         fig0, axes0 = plt.subplots(1, 2)
@@ -560,9 +577,7 @@ class TestPlotTimeDomainAndSpectrogram:
         assert result is not None
         plt.close("all")
 
-    def test_time_domain_multichannel_show(
-        self, backend_device: str, xp: Any
-    ) -> None:
+    def test_time_domain_multichannel_show(self, backend_device: str, xp: Any) -> None:
         """plot_time_domain() multichannel with show=True calls plt.show() and returns None."""
         samples = xp.random.randn(2, 1000).astype(xp.float32)
         with patch("matplotlib.pyplot.show"):
@@ -617,9 +632,7 @@ class TestPlotTimeDomainAndSpectrogram:
         assert axes.size == 2
         plt.close("all")
 
-    def test_signal_spectrogram_convenience(
-        self, backend_device: str, xp: Any
-    ) -> None:
+    def test_signal_spectrogram_convenience(self, backend_device: str, xp: Any) -> None:
         """Verify core.Signal.spectrogram and plot_spectrogram convenience methods."""
         fs = 100.0
         sig = generate_psk(
@@ -669,14 +682,14 @@ class TestPlotFilterAndEqualizer:
         import scipy.signal
 
         sos = xp.asarray(scipy.signal.butter(4, 0.1, btype="low", output="sos"))
-        fig, axes = plot_filter_response(sos, sampling_rate=1e9, n_impulse=200, show=False)
+        fig, axes = plot_filter_response(
+            sos, sampling_rate=1e9, n_impulse=200, show=False
+        )
         assert fig is not None
         assert len(axes) == 4
         plt.close("all")
 
-    def test_filter_response_axis_error(
-        self, backend_device: str, xp: Any
-    ) -> None:
+    def test_filter_response_axis_error(self, backend_device: str, xp: Any) -> None:
         """Verify behavior when wrong number of axes are provided for filter response."""
         taps = xp.array([1, 0, 0, 1])
         fig, ax = plt.subplots(1)
@@ -696,9 +709,7 @@ class TestPlotFilterAndEqualizer:
         plot_filter_response(xp.ones(10))
         plt.close("all")
 
-    def test_filter_response_complex_taps(
-        self, backend_device: str, xp: Any
-    ) -> None:
+    def test_filter_response_complex_taps(self, backend_device: str, xp: Any) -> None:
         """plot_filter_response() with complex taps plots I/Q components separately."""
         taps = filtering.rrc_taps(sps=4, span=4, rolloff=0.35)
         complex_taps = taps.astype(complex)
@@ -714,9 +725,7 @@ class TestPlotFilterAndEqualizer:
         assert result is None
         plt.close("all")
 
-    def test_equalizer_result_mimo_weights(
-        self, backend_device: str, xp: Any
-    ) -> None:
+    def test_equalizer_result_mimo_weights(self, backend_device: str, xp: Any) -> None:
         """equalizer_result with MIMO error/weights plots per-channel error and weights."""
         from commkit import equalization
         from commkit.plotting import plot_equalizer_result
@@ -749,9 +758,7 @@ class TestPlotFilterAndEqualizer:
         assert len(axes) == 2
         plt.close("all")
 
-    def test_equalizer_result_custom_axes(
-        self, backend_device: str, xp: Any
-    ) -> None:
+    def test_equalizer_result_custom_axes(self, backend_device: str, xp: Any) -> None:
         """equalizer_result with pre-existing axes uses them rather than creating new figures."""
         from commkit import equalization
         from commkit.plotting import plot_equalizer_result

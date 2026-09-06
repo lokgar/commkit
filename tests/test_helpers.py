@@ -98,7 +98,9 @@ class TestNormalization:
         x = xp.asarray(np.array([1.0, 2.0, 3.0], dtype=np.float32))
         for mode in ("unity_gain", "unit_energy", "peak", "average_power"):
             out = helpers.normalize(x, mode=mode)
-            assert out.dtype == xp.float32, f"mode={mode!r}: expected float32, got {out.dtype}"
+            assert out.dtype == xp.float32, (
+                f"mode={mode!r}: expected float32, got {out.dtype}"
+            )
 
     def test_rms_preserves_float32_dtype(self, backend_device, xp):
         """rms: float32 input -> float32 output."""
@@ -111,7 +113,9 @@ class TestNormalization:
         x = xp.asarray(np.array([1 + 1j, 2 + 2j], dtype=np.complex64))
         for mode in ("unit_energy", "peak", "average_power"):
             out = helpers.normalize(x, mode=mode)
-            assert out.dtype == xp.complex64, f"mode={mode!r}: expected complex64, got {out.dtype}"
+            assert out.dtype == xp.complex64, (
+                f"mode={mode!r}: expected complex64, got {out.dtype}"
+            )
 
     def test_rms_axis(self, backend_device, xp, xpt):
         """Verify RMS over all elements and per-row."""
@@ -138,7 +142,9 @@ class TestParabolicAndMath:
         )
         assert float(delta) == pytest.approx(offset_true, abs=1e-9)
 
-    def test_parabolic_peak_offset_degenerate_denom_returns_zero(self, backend_device, xp):
+    def test_parabolic_peak_offset_degenerate_denom_returns_zero(
+        self, backend_device, xp
+    ):
         """A flat triplet must return delta=0, not NaN/Inf."""
         y_prev = xp.asarray(1.0)
         y_curr = xp.asarray(1.0)
@@ -160,8 +166,12 @@ class TestParabolicAndMath:
     def test_linear_to_db_is_inverse_of_db_to_linear(self, backend_device, xp):
         """linear_to_db and db_to_linear are inverses of each other."""
         val = 15.5
-        assert helpers.linear_to_db(helpers.db_to_linear(val, power=True), power=True) == pytest.approx(val)
-        assert helpers.linear_to_db(helpers.db_to_linear(val, power=False), power=False) == pytest.approx(val)
+        assert helpers.linear_to_db(
+            helpers.db_to_linear(val, power=True), power=True
+        ) == pytest.approx(val)
+        assert helpers.linear_to_db(
+            helpers.db_to_linear(val, power=False), power=False
+        ) == pytest.approx(val)
 
     def test_linear_to_db_zero_is_negative_inf_no_warning(self, backend_device, xp):
         """linear_to_db(0) returns -inf cleanly without warning."""
@@ -363,7 +373,9 @@ class TestLinearTrend:
         y = xp.asarray(np.random.default_rng(1).normal(size=(2, 64)))
         assert isinstance(helpers.linear_trend_slope(y), xp.ndarray)
 
-    def test_remove_linear_trend_strips_ramp_and_keeps_mean(self, backend_device, xp, xpt):
+    def test_remove_linear_trend_strips_ramp_and_keeps_mean(
+        self, backend_device, xp, xpt
+    ):
         """remove_linear_trend: ramp removed, mean preserved, slope reported."""
         n = 1024
         idx = np.arange(n, dtype=np.float64)
@@ -376,7 +388,9 @@ class TestLinearTrend:
         xpt.assert_allclose(slope, xp.asarray(np.array([0.05])), atol=1e-4)
         assert float(xp.mean(detrended)) == pytest.approx(float(np.mean(y)), abs=1e-9)
         xpt.assert_allclose(
-            detrended[0] - float(np.mean(y)), xp.asarray(fluct - fluct.mean()), atol=5e-3
+            detrended[0] - float(np.mean(y)),
+            xp.asarray(fluct - fluct.mean()),
+            atol=5e-3,
         )
 
     def test_remove_linear_trend_degenerate_length(self, backend_device, xp):

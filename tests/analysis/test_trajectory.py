@@ -25,7 +25,6 @@ def _qpsk(n, seed=1):
     return make_test_symbols(scheme="psk", order=4, num_symbols=n, seed=seed)
 
 
-
 class TestCarrierPhaseTrajectory:
     """Carrier-phase trajectory extraction, auto channel pairing, and signal container support."""
 

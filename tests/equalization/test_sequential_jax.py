@@ -1,6 +1,5 @@
 """Sequential equalizers on the JAX backend (incl. import-error branches)."""
 
-import sys
 from unittest.mock import patch
 
 import pytest
