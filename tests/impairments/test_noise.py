@@ -7,7 +7,7 @@ from commkit.impairments import apply_awgn
 class TestAddAWGN:
     """Tests for apply_awgn."""
 
-    def test_awgn_adds_noise(self, backend_device, xp):
+    def test_awgn_adds_noise(self, xp):
         """Output should differ from input."""
         samples = xp.ones(1000, dtype=xp.complex64)
         noisy = apply_awgn(samples, esn0_db=10, sps=1)
@@ -15,14 +15,14 @@ class TestAddAWGN:
         diff = float(xp.max(xp.abs(noisy - samples)))
         assert diff > 0.001
 
-    def test_awgn_preserves_shape(self, backend_device, xp):
+    def test_awgn_preserves_shape(self, xp):
         """Output shape should match input."""
         samples = xp.ones((2, 500), dtype=xp.complex64)
         noisy = apply_awgn(samples, esn0_db=20, sps=2)
 
         assert noisy.shape == samples.shape
 
-    def test_awgn_noise_power(self, backend_device, xp):
+    def test_awgn_noise_power(self, xp):
         """Noise power should match 10^(-SNR/10) for a unit-power signal."""
         data = xp.ones(1000, dtype=complex)
         noisy = apply_awgn(data, esn0_db=10.0, sps=1)
@@ -33,7 +33,7 @@ class TestAddAWGN:
             f"Noise power {measured:.4f} outside expected range"
         )
 
-    def test_awgn_signal_power_override(self, backend_device, xp):
+    def test_awgn_signal_power_override(self, xp):
         """Explicit signal_power sets an absolute noise level (dark capture)."""
         dark = xp.zeros(20000, dtype=xp.complex128)
         noisy = apply_awgn(dark, esn0_db=10.0, sps=1, signal_power=1.0, seed=3)
@@ -43,7 +43,7 @@ class TestAddAWGN:
             f"Noise power {measured:.4f} outside expected range"
         )
 
-    def test_awgn_real_data(self, backend_device, xp):
+    def test_awgn_real_data(self, xp):
         """apply_awgn should handle real-valued input and return a real output."""
         data = xp.ones(1000, dtype="float32")
         noisy = apply_awgn(data, esn0_db=10, sps=1)
@@ -51,14 +51,14 @@ class TestAddAWGN:
         assert xp.isrealobj(noisy)
         assert not xp.allclose(noisy, data)
 
-    def test_awgn_low_snr(self, backend_device, xp):
+    def test_awgn_low_snr(self, xp):
         """Extremely low SNR should produce very high noise power."""
         data = xp.ones(100, dtype=complex)
         noisy = apply_awgn(data, esn0_db=-300, sps=1)
         measured_power = float(xp.mean(xp.abs(noisy) ** 2))
         assert measured_power > 1e15
 
-    def test_awgn_signal_input_returns_signal(self, backend_device, xp, xpt):
+    def test_awgn_signal_input_returns_signal(self, xp, xpt):
         """Signal input: sps is taken from the signal and a Signal is returned."""
         data = xp.ones(1000, dtype=xp.complex64)
         sig = Signal(samples=data, sampling_rate=4e9, symbol_rate=1e9)  # sps=4

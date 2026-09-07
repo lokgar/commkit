@@ -7,7 +7,6 @@ fixture.
 
 from unittest.mock import patch
 
-import matplotlib.pyplot as plt
 import numpy as np
 import pytest
 
@@ -131,4 +130,3 @@ class TestLinewidthEstimation:
             analysis.linewidth_increment(
                 xp.asarray(phi), R, method="subtract", noise_var=0.0, debug_plot=True
             )
-        plt.close("all")

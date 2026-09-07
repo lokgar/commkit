@@ -110,7 +110,7 @@ class TestPipelineComposition:
         ids=["awgn", "matched-filter", "fractional-resample", "equalizer"],
     )
     def test_array_pipeline_operations_return_arrays(
-        self, backend_device: str, xp: Any, operation: Any
+        self, xp: Any, operation: Any
     ) -> None:
         """Array input remains array output across representative pipeline stages."""
         samples = xp.ones(128, dtype=xp.complex64)
@@ -128,7 +128,7 @@ class TestPipelineComposition:
         ids=["awgn", "matched-filter", "fractional-resample", "equalizer"],
     )
     def test_signal_pipeline_operations_are_functional(
-        self, backend_device: str, xp: Any, xpt: Any, operation: Any
+        self, xp: Any, xpt: Any, operation: Any
     ) -> None:
         """Signal transforms return a new container and leave their input untouched."""
         sig = _signal(xp)
@@ -142,9 +142,7 @@ class TestPipelineComposition:
         xpt.assert_array_equal(sig.samples, original_samples)
         assert sig.sampling_rate == original_rate
 
-    def test_frame_relationship_survives_pipeline(
-        self, backend_device: str, xp: Any
-    ) -> None:
+    def test_frame_relationship_survives_pipeline(self, xp: Any) -> None:
         """Frame-backed Signals keep frame data and populated private caches attached."""
         frame = SingleCarrierFrame(
             payload_len=60,
@@ -184,9 +182,7 @@ class TestPipelineComposition:
 class TestPipelineMetadataPropagation:
     """Tests for metadata preservation, precedence, and domain tracking."""
 
-    def test_required_signal_metadata_takes_precedence(
-        self, backend_device: str, xp: Any, xpt: Any
-    ) -> None:
+    def test_required_signal_metadata_takes_precedence(self, xp: Any, xpt: Any) -> None:
         """A required Signal field wins over a contradictory duplicate argument."""
         sig = _signal(xp, sps=2.0)
         actual = apply_awgn(sig, sps=99.0, esn0_db=20, seed=11)
@@ -194,7 +190,7 @@ class TestPipelineMetadataPropagation:
         xpt.assert_allclose(actual.samples, expected)
 
     def test_optional_metadata_falls_back_only_when_signal_field_absent(
-        self, backend_device: str, xp: Any
+        self, xp: Any
     ) -> None:
         """Optional modulation metadata uses arguments only when Signal lacks it."""
         n = 256
@@ -219,9 +215,7 @@ class TestPipelineMetadataPropagation:
         assert signal_wins == pytest.approx(explicit)
 
     @pytest.mark.parametrize("case", METADATA_PROPAGATION_TABLE, ids=lambda c: c.name)
-    def test_metadata_propagation_table(
-        self, backend_device: str, xp: Any, case: MetadataCase
-    ) -> None:
+    def test_metadata_propagation_table(self, xp: Any, case: MetadataCase) -> None:
         """Executable table defining rate, domain, and provenance propagation."""
         sig = _signal(xp)
         result = case.transform(sig, xp)
@@ -236,9 +230,7 @@ class TestPipelineMetadataPropagation:
             result.resolved_symbols is not None and result.resolved_bits is not None
         ) is case.resolved_fields_valid
 
-    def test_fractional_sps_is_preserved_exactly_by_resampling(
-        self, backend_device: str, xp: Any
-    ) -> None:
+    def test_fractional_sps_is_preserved_exactly_by_resampling(self, xp: Any) -> None:
         """Fractional-SPS-capable paths retain the requested ratio in metadata."""
         sig = _signal(xp, sps=1.5)
         result = multirate.resample(sig, sps_out=2.5)
@@ -247,7 +239,7 @@ class TestPipelineMetadataPropagation:
 
     @pytest.mark.parametrize("stored_unipolar", [None, False, True])
     def test_demap_optional_unipolar_metadata(
-        self, backend_device: str, xp: Any, xpt: Any, stored_unipolar: Any
+        self, xp: Any, xpt: Any, stored_unipolar: Any
     ) -> None:
         """demap_symbols_hard handles stored vs explicit unipolar flag."""
         bits = xp.asarray([0, 0, 0, 1, 1, 1, 1, 0], dtype=xp.uint8)
@@ -302,7 +294,7 @@ class TestPipelineSPSValidation:
         ],
     )
     def test_integer_sps_only_paths_reject_fractional_signal_sps(
-        self, backend_device: str, xp: Any, operation: Any
+        self, xp: Any, operation: Any
     ) -> None:
         """Integer-only operations reject 1.5 SPS rather than truncating it to 1."""
         sig = _signal(xp, sps=1.5)
@@ -310,7 +302,7 @@ class TestPipelineSPSValidation:
             operation(sig, xp)
 
     def test_pulse_shaping_rejects_fractional_sps_before_resample(
-        self, backend_device: str, xp: Any
+        self, xp: Any
     ) -> None:
         """Direct pulse shaping cannot truncate a fractional resampling factor."""
         symbols = xp.asarray([1.0, -1.0], dtype=xp.complex64)
@@ -326,7 +318,7 @@ class TestPipelineSPSValidation:
     @pytest.mark.parametrize("sps", [0, -1, 1.5, float("nan"), float("inf")])
     @pytest.mark.parametrize("operation", ["decimate", "apply_taps", "resolve"])
     def test_array_symbol_operations_validate_sps(
-        self, backend_device: str, xp: Any, sps: Any, operation: str
+        self, xp: Any, sps: Any, operation: str
     ) -> None:
         """Array operations validate that SPS is a positive integer."""
         samples = xp.ones(16, dtype=xp.complex64)
@@ -339,7 +331,7 @@ class TestPipelineSPSValidation:
                 multirate.resolve_symbols(samples, sps=sps)
 
     def test_array_symbol_operations_accept_integral_float_sps(
-        self, backend_device: str, xp: Any, xpt: Any
+        self, xp: Any, xpt: Any
     ) -> None:
         """Array operations accept 2.0 as equivalent to integer 2."""
         samples = xp.arange(16, dtype=xp.float32).astype(xp.complex64)

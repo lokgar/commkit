@@ -13,7 +13,7 @@ from tests.common.conversions import to_numpy
 class TestLMS:
     """Tests for the LMS adaptive equalizer."""
 
-    def test_convergence_known_channel(self, backend_device, xp):
+    def test_convergence_known_channel(self, xp):
         """LMS should converge and recover QPSK through a known ISI channel."""
         n_symbols = 1000
         # Create channel on device
@@ -67,7 +67,7 @@ class TestLMS:
 
         assert mse_tail < 0.1, f"LMS did not converge: tail MSE = {mse_tail:.4f}"
 
-    def test_decision_directed_after_training(self, backend_device, xp):
+    def test_decision_directed_after_training(self, xp):
         """LMS should maintain performance in DD mode after training."""
         n_symbols = 1000
         n_train = 300
@@ -104,7 +104,7 @@ class TestLMS:
 
         assert mse_dd < 0.2, f"LMS DD mode failed: MSE = {mse_dd:.4f}"
 
-    def test_output_shape_siso(self, backend_device, xp):
+    def test_output_shape_siso(self, xp):
         """LMS SISO output shapes should be correct."""
         n = 500
 
@@ -127,7 +127,7 @@ class TestLMS:
         assert result.error.ndim == 1
         assert result.y_hat.shape == result.error.shape
 
-    def test_store_weights(self, backend_device, xp):
+    def test_store_weights(self, xp):
         """Weight history should be stored when requested."""
         n = 200
         num_taps = 7
@@ -151,7 +151,7 @@ class TestLMS:
         assert result.weights_history.ndim == 2
         assert result.weights_history.shape[1] == num_taps
 
-    def test_no_weights_by_default(self, backend_device, xp):
+    def test_no_weights_by_default(self, xp):
         """Weight history should be None by default."""
 
         sig = generate_psk(
@@ -170,7 +170,7 @@ class TestLMS:
 
         assert result.weights_history is None
 
-    def test_requires_constellation_or_training(self, backend_device, xp):
+    def test_requires_constellation_or_training(self, xp):
         """LMS should raise if neither training nor constellation is given."""
 
         sig = generate_psk(
@@ -184,7 +184,7 @@ class TestLMS:
 class TestRLS:
     """Tests for the RLS adaptive equalizer."""
 
-    def test_convergence(self, backend_device, xp):
+    def test_convergence(self, xp):
         """RLS should converge on a known ISI channel."""
         n_symbols = 500
         channel = xp.array([0.2, 1.0, 0.3], dtype=xp.complex64)
@@ -216,7 +216,7 @@ class TestRLS:
 
         assert mse_tail < 0.1, f"RLS did not converge: tail MSE = {mse_tail:.4f}"
 
-    def test_faster_convergence_than_lms(self, backend_device, xp):
+    def test_faster_convergence_than_lms(self, xp):
         """RLS should converge faster than LMS (lower MSE in early symbols)."""
         n_symbols = 300
         channel = xp.array([0.3, 1.0, 0.2], dtype=xp.complex64)
@@ -262,7 +262,7 @@ class TestRLS:
             f"RLS ({rls_early:.4f}) not faster than LMS ({lms_early:.4f})"
         )
 
-    def test_output_shape_siso(self, backend_device, xp):
+    def test_output_shape_siso(self, xp):
         """RLS SISO output shapes should match LMS convention."""
 
         sig = generate_psk(
@@ -286,7 +286,7 @@ class TestRLS:
 class TestAPIRegression:
     """Verify that removed parameters no longer exist on the public API."""
 
-    def test_lms_has_no_normalize_param(self, backend_device, xp):
+    def test_lms_has_no_normalize_param(self, xp):
         """lms() must not accept a 'normalize' keyword - always NLMS."""
 
         sig = generate_psk(
@@ -304,7 +304,7 @@ class TestAPIRegression:
                 normalize=True,
             )
 
-    def test_cma_has_no_normalize_param(self, backend_device, xp):
+    def test_cma_has_no_normalize_param(self, xp):
         """cma() must not accept a 'normalize' keyword."""
 
         sig = generate_psk(
@@ -318,7 +318,7 @@ class TestAPIRegression:
 class TestCMA:
     """Tests for the CMA blind equalizer."""
 
-    def test_convergence_qpsk(self, backend_device, xp):
+    def test_convergence_qpsk(self, xp):
         """CMA should converge for QPSK (constant modulus) through ISI channel."""
         n_symbols = 2000
         channel = xp.array([0.2, 1.0, 0.3], dtype=xp.complex64)
@@ -354,7 +354,7 @@ class TestCMA:
             f"CMA output modulus not constant: std = {modulus_std:.4f}"
         )
 
-    def test_r2_from_modulation(self, backend_device, xp, xpt):
+    def test_r2_from_modulation(self, xp, xpt):
         """R2 should be correctly auto-computed from constellation."""
         # QPSK: all points on unit circle -> R2 = 1.0
         # This test checks the logic inside CMA, but here we can just verify the property
@@ -368,7 +368,7 @@ class TestCMA:
 
         xpt.assert_allclose(r2, 1.0, atol=1e-6)
 
-    def test_r2_default(self, backend_device, xp):
+    def test_r2_default(self, xp):
         """CMA should work with default R2=1.0."""
 
         sig = generate_psk(
@@ -381,7 +381,7 @@ class TestCMA:
         assert isinstance(result, EqualizerResult)
         assert result.y_hat.shape[0] > 0
 
-    def test_output_shape_siso(self, backend_device, xp):
+    def test_output_shape_siso(self, xp):
         """CMA SISO output should be 1D."""
 
         sig = generate_psk(
@@ -398,7 +398,7 @@ class TestCMA:
 class TestRDE:
     """Tests for the Radius Directed Equalizer."""
 
-    def test_convergence_qpsk(self, backend_device, xp):
+    def test_convergence_qpsk(self, xp):
         """RDE should converge for QPSK (single-ring) just like CMA."""
         n_symbols = 2000
         channel = xp.array([0.2, 1.0, 0.3], dtype=xp.complex64)
@@ -431,7 +431,7 @@ class TestRDE:
             f"RDE QPSK modulus not converged: std = {modulus_std:.4f}"
         )
 
-    def test_steady_state_error_16qam(self, backend_device, xp):
+    def test_steady_state_error_16qam(self, xp):
         """RDE steady-state error should be much lower than CMA on 16-QAM.
 
         CMA and RDE are both phase-ambiguous, so EVM vs the reference symbol
@@ -481,7 +481,7 @@ class TestRDE:
             f"residual from using a single Godard radius on a multi-ring constellation"
         )
 
-    def test_radii_extraction(self, backend_device, xp):
+    def test_radii_extraction(self, xp):
         """Unique radii should match known 16-QAM ring structure."""
         import numpy as _np
 
@@ -495,7 +495,7 @@ class TestRDE:
         # All radii must be positive
         assert _np.all(radii > 0)
 
-    def test_output_shape_siso(self, backend_device, xp):
+    def test_output_shape_siso(self, xp):
         """RDE SISO output should be 1D with correct length."""
 
         sig = generate_qam(
@@ -524,7 +524,7 @@ class TestStoreWeights:
         )
         return xp.ascontiguousarray(xp.asarray(sig.samples)), sig
 
-    def test_lms_store_weights_numba(self, backend_device, xp):
+    def test_lms_store_weights_numba(self, xp):
         """LMS Numba: weights_history has shape (N_sym, num_taps) for SISO."""
         rx, sig = self._qpsk_rx(xp)
         n_sym = rx.shape[0] // 2
@@ -543,7 +543,7 @@ class TestStoreWeights:
         assert result.weights_history is not None
         assert result.weights_history.shape == (n_sym, 9)
 
-    def test_rls_store_weights_numba(self, backend_device, xp):
+    def test_rls_store_weights_numba(self, xp):
         """RLS Numba: weights_history has shape (N_sym_truncated, num_taps) for SISO."""
         rx, sig = self._qpsk_rx(xp)
 
@@ -563,7 +563,7 @@ class TestStoreWeights:
         assert result.weights_history.ndim == 2
         assert result.weights_history.shape[1] == 7
 
-    def test_cma_store_weights_numba(self, backend_device, xp):
+    def test_cma_store_weights_numba(self, xp):
         """CMA Numba: weights_history has shape (N_sym, num_taps) for SISO."""
         rx, _ = self._qpsk_rx(xp)
         n_sym = rx.shape[0] // 2
@@ -581,7 +581,7 @@ class TestStoreWeights:
         assert result.weights_history is not None
         assert result.weights_history.shape == (n_sym, 9)
 
-    def test_rde_store_weights_numba(self, backend_device, xp):
+    def test_rde_store_weights_numba(self, xp):
         """RDE Numba: weights_history has shape (N_sym, num_taps) for SISO."""
         rx, _ = self._qpsk_rx(xp)
         n_sym = rx.shape[0] // 2
@@ -599,7 +599,7 @@ class TestStoreWeights:
         assert result.weights_history is not None
         assert result.weights_history.shape == (n_sym, 9)
 
-    def test_mimo_store_weights_numba(self, backend_device, xp):
+    def test_mimo_store_weights_numba(self, xp):
         """LMS Numba MIMO: weights_history has shape (N_sym, C, C, num_taps)."""
 
         sig = generate_psk(
@@ -623,7 +623,7 @@ class TestStoreWeights:
         assert result.weights_history is not None
         assert result.weights_history.shape == (n_sym, 2, 2, 5)
 
-    def test_no_weights_by_default_all_algorithms(self, backend_device, xp):
+    def test_no_weights_by_default_all_algorithms(self, xp):
         """All algorithms should return weights_history=None by default."""
         rx, sig = self._qpsk_rx(xp, n_symbols=300)
         train = xp.asarray(sig.source_symbols)
@@ -654,19 +654,19 @@ class TestEdgeCases:
         )
         return xp.ascontiguousarray(xp.asarray(sig.samples)), sig
 
-    def test_lms_raises_no_constellation_numba(self, backend_device, xp):
+    def test_lms_raises_no_constellation_numba(self, xp):
         """LMS Numba: ValueError when no modulation and no training symbols (DD impossible)."""
         rx, _ = self._qpsk_rx(xp)
         with pytest.raises(ValueError, match="modulation and order must be provided"):
             equalization.lms(rx, num_taps=7, backend="numba")
 
-    def test_lms_raises_no_constellation_jax(self, backend_device, xp, jax):
+    def test_lms_raises_no_constellation_jax(self, xp, jax):
         """LMS JAX: same ValueError for missing constellation."""
         rx, _ = self._qpsk_rx(xp)
         with pytest.raises(ValueError, match="modulation and order must be provided"):
             equalization.lms(rx, num_taps=7, backend="jax")
 
-    def test_rls_warns_fractional_spacing(self, backend_device, xp):
+    def test_rls_warns_fractional_spacing(self, xp):
         """RLS should warn when sps > 1 (ill-conditioned correlation matrix)."""
         rx, sig = self._qpsk_rx(xp, n_symbols=400)
         result = equalization.rls(
@@ -681,7 +681,7 @@ class TestEdgeCases:
         # Should complete and return valid output (even if warned)
         assert isinstance(result, EqualizerResult)
 
-    def test_validate_sps_small_num_taps(self, backend_device, xp, caplog):
+    def test_validate_sps_small_num_taps(self, xp, caplog):
         """_validate_sps should log a warning when num_taps < 4*sps."""
         import logging
 
@@ -697,7 +697,7 @@ class TestEdgeCases:
             )
         assert any("small" in r.message.lower() for r in caplog.records)
 
-    def test_rde_no_modulation_falls_back_to_cma(self, backend_device, xp):
+    def test_rde_no_modulation_falls_back_to_cma(self, xp):
         """RDE with no modulation should use unit radius (same gradient as CMA R²=1)."""
         rx, _ = self._qpsk_rx(xp)
 
@@ -706,7 +706,7 @@ class TestEdgeCases:
         assert isinstance(result, EqualizerResult)
         assert result.y_hat.shape[0] > 0
 
-    def test_rde_mimo_no_modulation(self, backend_device, xp):
+    def test_rde_mimo_no_modulation(self, xp):
         """RDE MIMO path with no modulation should run (unit radius, 2-ch)."""
 
         sig = generate_psk(
@@ -719,7 +719,7 @@ class TestEdgeCases:
 
         assert result.y_hat.shape == (2, rx.shape[0] // 2)
 
-    def test_lms_num_train_symbols_clamps_numba(self, backend_device, xp):
+    def test_lms_num_train_symbols_clamps_numba(self, xp):
         """LMS Numba: pre-sliced training_symbols limits DA phase length."""
         rx, sig = self._qpsk_rx(xp, n_symbols=1000)
         train = xp.asarray(sig.source_symbols[:30])
@@ -736,7 +736,7 @@ class TestEdgeCases:
 
         assert result.num_train_symbols <= 30
 
-    def test_lms_constellation_from_training_only_numba(self, backend_device, xp):
+    def test_lms_constellation_from_training_only_numba(self, xp):
         """LMS Numba: constellation inferred from training_symbols alone (no modulation)."""
         rx, sig = self._qpsk_rx(xp)
         train = xp.asarray(sig.source_symbols)
@@ -753,7 +753,7 @@ class TestEdgeCases:
         assert isinstance(result, EqualizerResult)
         assert result.y_hat.shape[0] > 0
 
-    def test_center_tap_override(self, backend_device, xp):
+    def test_center_tap_override(self, xp):
         """Custom center_tap should shift the decision delay without error."""
         rx, sig = self._qpsk_rx(xp)
         train = xp.asarray(sig.source_symbols)
@@ -790,7 +790,7 @@ class TestNumbaBackendCoverage:
         rx = xp.convolve(xp.asarray(sig.samples), channel, mode="same")
         return xp.ascontiguousarray(rx), sig
 
-    def test_lms_numba_pure_dd_no_training(self, backend_device, xp):
+    def test_lms_numba_pure_dd_no_training(self, xp):
         """LMS numba with no training symbols (pure DD from start) covers _prepare_training_numpy else branch."""
         rx, _ = self._make_qpsk_rx(xp, n_symbols=600)
 
@@ -807,7 +807,7 @@ class TestNumbaBackendCoverage:
         assert isinstance(result, EqualizerResult)
         assert result.y_hat.ndim == 1
 
-    def test_rls_numba_siso(self, backend_device, xp):
+    def test_rls_numba_siso(self, xp):
         """RLS with numba backend on SISO input."""
         rx, sig = self._make_qpsk_rx(xp, n_symbols=800)
         train = xp.asarray(sig.source_symbols)
@@ -826,7 +826,7 @@ class TestNumbaBackendCoverage:
         assert result.y_hat.ndim == 1
         assert result.weights.shape == (9,)
 
-    def test_rls_divergence_guard(self, backend_device, xp):
+    def test_rls_divergence_guard(self, xp):
         """Non-finite RLS weights raise an actionable error instead of silently
         returning garbage taps (mirrors the block_lms divergence safeguard)."""
         good = xp.ones((2, 2, 5), dtype=xp.complex64)
@@ -838,7 +838,7 @@ class TestNumbaBackendCoverage:
         with pytest.raises(RuntimeError, match="RLS equalizer diverged"):
             equalization._check_rls_divergence(bad, xp, 0.99, 0.01)
 
-    def test_rls_numba_mimo(self, backend_device, xp):
+    def test_rls_numba_mimo(self, xp):
         """RLS numba MIMO path correctly handles (num_channels, n_samples) input shape."""
 
         n_symbols = 600
@@ -869,7 +869,7 @@ class TestNumbaBackendCoverage:
         assert result.y_hat.shape == (2, n_symbols - tail_trim)
         assert result.weights.shape == (2, 2, 7)
 
-    def test_rls_numba_num_train_symbols(self, backend_device, xp):
+    def test_rls_numba_num_train_symbols(self, xp):
         """RLS numba: pre-sliced training_symbols limits DA phase length."""
         rx, sig = self._make_qpsk_rx(xp, n_symbols=800)
         train = xp.asarray(sig.source_symbols[:50])
@@ -887,7 +887,7 @@ class TestNumbaBackendCoverage:
         assert isinstance(result, EqualizerResult)
         assert result.num_train_symbols <= 50
 
-    def test_rls_numba_constellation_from_training(self, backend_device, xp):
+    def test_rls_numba_constellation_from_training(self, xp):
         """RLS numba derives constellation from training when no modulation is given."""
         rx, sig = self._make_qpsk_rx(xp, n_symbols=800)
         train = xp.asarray(sig.source_symbols)
@@ -904,7 +904,7 @@ class TestNumbaBackendCoverage:
         assert isinstance(result, EqualizerResult)
         assert result.y_hat.shape[0] > 0
 
-    def test_rls_numba_store_weights(self, backend_device, xp):
+    def test_rls_numba_store_weights(self, xp):
         """RLS numba with store_weights=True should populate weight history."""
         rx, sig = self._make_qpsk_rx(xp, n_symbols=400)
         train = xp.asarray(sig.source_symbols)
@@ -922,7 +922,7 @@ class TestNumbaBackendCoverage:
 
         assert result.weights_history is not None
 
-    def test_cma_numba_store_weights(self, backend_device, xp):
+    def test_cma_numba_store_weights(self, xp):
         """CMA numba backend with store_weights=True."""
 
         sig = generate_psk(
@@ -942,7 +942,7 @@ class TestNumbaBackendCoverage:
 
         assert result.weights_history is not None
 
-    def test_rde_numba_store_weights(self, backend_device, xp):
+    def test_rde_numba_store_weights(self, xp):
         """RDE numba backend with store_weights=True."""
 
         sig = generate_qam(
@@ -990,7 +990,7 @@ class TestCmaPilotAided:
         n_body = int(pilot_mask_bool.size)
         return frame, samples_cpu, pilot_syms_cpu, pilot_mask_bool, n_body
 
-    def test_cma_pilot_aided_numba_output_shape(self, backend_device, xp):
+    def test_cma_pilot_aided_numba_output_shape(self, xp):
         """cma() with pilot_ref/pilot_mask returns correct body length."""
         from commkit.equalization import build_pilot_ref
 
@@ -1022,7 +1022,7 @@ class TestCmaPilotAided:
         assert isinstance(result, EqualizerResult)
         assert result.y_hat.shape[-1] == n_body
 
-    def test_rde_pilot_aided_numba_output_shape(self, backend_device, xp):
+    def test_rde_pilot_aided_numba_output_shape(self, xp):
         """rde() with pilot_ref/pilot_mask returns correct body length."""
         from commkit.equalization import build_pilot_ref
 
@@ -1053,7 +1053,7 @@ class TestCmaPilotAided:
         assert isinstance(result, EqualizerResult)
         assert result.y_hat.shape[-1] == n_body
 
-    def test_cma_pilot_aided_jax_output_shape(self, backend_device, xp, jax):
+    def test_cma_pilot_aided_jax_output_shape(self, xp, jax):
         """cma() with pilot_ref/pilot_mask and jax backend runs without error."""
         from commkit.equalization import build_pilot_ref
 
@@ -1084,7 +1084,7 @@ class TestCmaPilotAided:
         assert isinstance(result, EqualizerResult)
         assert result.y_hat.shape[-1] == n_body
 
-    def test_rde_pilot_aided_w_init_warm_start(self, backend_device, xp):
+    def test_rde_pilot_aided_w_init_warm_start(self, xp):
         """rde() PA accepts w_init from a prior lms() call."""
         from commkit.equalization import build_pilot_ref
 
@@ -1124,7 +1124,7 @@ class TestCmaPilotAided:
         assert isinstance(result, EqualizerResult)
         assert result.y_hat.shape[-1] == n_body
 
-    def test_build_pilot_ref_shape(self, backend_device, xp):
+    def test_build_pilot_ref_shape(self, xp):
         """build_pilot_ref returns correct shapes."""
         from commkit.equalization import build_pilot_ref
 
@@ -1155,7 +1155,7 @@ class TestSignalInputSequentialEqualizers:
         )
         return sig
 
-    def test_lms_signal_input(self, backend_device, xp, xpt):
+    def test_lms_signal_input(self, xp, xpt):
         sig = self._rx_signal(xp)
         data = xp.asarray(sig.samples)
 
@@ -1168,7 +1168,7 @@ class TestSignalInputSequentialEqualizers:
         assert result_sig.y_hat.sampling_rate == 1e6
         xpt.assert_allclose(result_sig.y_hat.samples, result_arr.y_hat)
 
-    def test_rls_signal_input(self, backend_device, xp, xpt):
+    def test_rls_signal_input(self, xp, xpt):
         sig = self._rx_signal(xp, sps=1, n_symbols=500)
         data = xp.asarray(sig.samples)
 
@@ -1181,7 +1181,7 @@ class TestSignalInputSequentialEqualizers:
         assert result_sig.y_hat.sampling_rate == 1e6
         xpt.assert_allclose(result_sig.y_hat.samples, result_arr.y_hat)
 
-    def test_cma_signal_input(self, backend_device, xp, xpt):
+    def test_cma_signal_input(self, xp, xpt):
         sig = self._rx_signal(xp)
         data = xp.asarray(sig.samples)
 
@@ -1194,7 +1194,7 @@ class TestSignalInputSequentialEqualizers:
         assert result_sig.y_hat.sampling_rate == 1e6
         xpt.assert_allclose(result_sig.y_hat.samples, result_arr.y_hat)
 
-    def test_rde_signal_input(self, backend_device, xp, xpt):
+    def test_rde_signal_input(self, xp, xpt):
         sig = self._rx_signal(xp)
         data = xp.asarray(sig.samples)
 

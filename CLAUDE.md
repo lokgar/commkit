@@ -438,13 +438,13 @@ a peak search belongs in `smoothing.py`.
 ## 4. Testing Conventions
 
 * **Parametrization**: Test cases must utilize `backend_device` and `xp` fixtures from `conftest.py` to automatically validate code correctness on both CPU and GPU backends.
-* **Assertions**: Standard `numpy.testing` assertions raise `TypeError` when evaluated on GPU arrays. Always use the `xpt` helper assertion module. Use `xp.asarray(expected)` to cast expectation variables to the active backend, and cast reductions to standard Python scalars before comparison:
+* **Assertions**: Standard `numpy.testing` assertions raise `TypeError` when evaluated on GPU arrays. Always use the `xpt` assertion fixture provided by `conftest.py` (which yields `numpy.testing` on CPU and `cupy.testing` on GPU). Use `xp.asarray(expected)` to cast expectation variables to the active backend, and cast reductions to standard Python scalars before comparison:
 
   ```python
-  from commkit.testing import xpt
-  # ...
-  xpt.assert_allclose(result, expected, rtol=1e-5)
-  assert float(xp.mean(xp.abs(result))) > 0.0
+  def test_example(xp, xpt):
+      # ...
+      xpt.assert_allclose(result, expected, rtol=1e-5)
+      assert float(xp.mean(xp.abs(result))) > 0.0
   ```
 
 * **Layout mirrors the source tree.** Tests for a subpackage live in the

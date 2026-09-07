@@ -156,7 +156,7 @@ def plot_mm_autocorrelation(
         Single channel: ``axes`` is ``[ax_amp, ax_phase]``.
         Multi-channel: ``axes`` is a list of ``[ax_amp_c, ax_phase_c]`` pairs.
     """
-    R_np = np.asarray(R_np)
+    R_np = np.asarray(to_device(R_np, "cpu"))
     if R_np.ndim == 1:
         R_np = R_np[None, :]  # (1, L)
     C, L = R_np.shape
@@ -433,11 +433,11 @@ def plot_frequency_offset_blockwise_result(
     -------
     (fig, axes) or None
     """
-    t_centers = np.asarray(t_centers, dtype=np.float64)
-    df_estimates = np.asarray(df_estimates, dtype=np.float64)
-    n_grid = np.asarray(n_grid, dtype=np.float64)
-    df_dense = np.asarray(df_dense, dtype=np.float64)
-    phase_trajectory = np.asarray(phase_trajectory, dtype=np.float64)
+    t_centers = np.asarray(to_device(t_centers, "cpu"), dtype=np.float64)
+    df_estimates = np.asarray(to_device(df_estimates, "cpu"), dtype=np.float64)
+    n_grid = np.asarray(to_device(n_grid, "cpu"), dtype=np.float64)
+    df_dense = np.asarray(to_device(df_dense, "cpu"), dtype=np.float64)
+    phase_trajectory = np.asarray(to_device(phase_trajectory, "cpu"), dtype=np.float64)
 
     if ax is None:
         fig, axes = plt.subplots(1, 2, figsize=_grid_figsize(1, 2))
@@ -728,7 +728,7 @@ def plot_pilot_tone_phase_estimate(
     ax_spec.legend(loc="upper left")
 
     # Panel 2 - recovered phase trajectory.
-    sample_idx = np.arange(N)
+    sample_idx = np.arange(theta.shape[1])
     for i in range(C):
         ph_label = f"Ch {i}" if C > 1 else None
         n_d, th_d = _decimate_minmax(sample_idx, np.degrees(theta[i]), max_points)

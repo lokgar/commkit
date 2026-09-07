@@ -174,9 +174,7 @@ class TestJaxInterop:
         finally:
             backend.use_cpu_only(False)
 
-    def test_jax_conversions(
-        self, backend_device: str, xp: Any, xpt: Any, jax: Any
-    ) -> None:
+    def test_jax_conversions(self, xp: Any, xpt: Any, jax: Any) -> None:
         """Test JAX conversion utilities with real JAX if available."""
         import jax.numpy as jnp
 

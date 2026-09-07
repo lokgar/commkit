@@ -244,7 +244,7 @@ class TestBPSKernelFallback:
         assert bool(xp.all(xp.isfinite(phi)))
 
     @pytest.mark.cpu_only
-    def test_recovery_bps_runs_on_cpu_without_kernel(self, backend_device, xp):
+    def test_recovery_bps_runs_on_cpu_without_kernel(self, xp):
         x = xp.asarray(_phase_noise_symbols(128, N=4000))
         phi = recovery.recover_carrier_phase_bps(
             x, "qam", 128, num_test_phases=32, block_size=32

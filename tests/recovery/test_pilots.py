@@ -53,7 +53,7 @@ class TestCprPilots:
         return sig.samples, pilot_indices, pilot_values, true_phase
 
     @pytest.mark.parametrize("pilot_period", [8, 16, 32])
-    def test_phase_residual(self, backend_device, xp, pilot_period):
+    def test_phase_residual(self, xp, pilot_period):
         """Pilot CPR: RMS residual < 0.05 rad for a linear phase ramp."""
         samples, pilot_indices, pilot_values, true_phase = self._pilot_setup(
             xp, n_symbols=512, pilot_period=pilot_period, phase_per_sym=0.001
@@ -64,7 +64,7 @@ class TestCprPilots:
         err = calc_rms_phase_error(phase_est, true_phase, xp=xp)
         assert err < 0.05
 
-    def test_output_shape_siso(self, backend_device, xp):
+    def test_output_shape_siso(self, xp):
         """Pilot CPR: 1D input -> 1D phase output."""
         samples, pilot_indices, pilot_values, _ = self._pilot_setup(xp)
         phase = recovery.recover_carrier_phase_pilot_symbols(
@@ -72,7 +72,7 @@ class TestCprPilots:
         )
         assert phase.shape == samples.shape
 
-    def test_output_shape_mimo(self, backend_device, xp):
+    def test_output_shape_mimo(self, xp):
         """Pilot CPR: 2D input (C, N) -> 2D phase output (C, N)."""
         samples_a, pilot_indices, pilot_values, _ = self._pilot_setup(xp, n_symbols=256)
         samples_b, _, _, _ = self._pilot_setup(xp, n_symbols=256)
@@ -82,7 +82,7 @@ class TestCprPilots:
         )
         assert phase.shape == mimo.shape
 
-    def test_large_phase_unwrap(self, backend_device, xp):
+    def test_large_phase_unwrap(self, xp):
         """Pilot CPR: unwrapping handles cumulative phase > 2π correctly."""
         n_symbols = 512
         # Phase ramp of 4π total (spans two full cycles)
@@ -96,7 +96,7 @@ class TestCprPilots:
         err = _rms_phase_error(xp, phase_est, true_phase)
         assert err < 0.1  # relaxed tolerance for large phase
 
-    def test_cubic_interpolation(self, backend_device, xp):
+    def test_cubic_interpolation(self, xp):
         """Cubic interpolation works on both CPU and GPU."""
         samples, pilot_indices, pilot_values, _ = self._pilot_setup(xp)
         phase = recovery.recover_carrier_phase_pilot_symbols(
@@ -107,7 +107,7 @@ class TestCprPilots:
         )
         assert phase.shape == samples.shape
 
-    def test_invalid_interpolation_raises(self, backend_device, xp):
+    def test_invalid_interpolation_raises(self, xp):
         """Unknown interpolation method raises ValueError."""
         samples, pilot_indices, pilot_values, _ = self._pilot_setup(xp)
         with pytest.raises(ValueError, match="Unknown interpolation method"):
@@ -175,7 +175,7 @@ class TestCprPilotTone:
         return _rms_phase_error(xp, phase_est[..., g], common[..., g])
 
     @pytest.mark.parametrize("df", [0.0, 0.05e6, 0.1e6])
-    def test_phase_residual_foe(self, backend_device, xp, df):
+    def test_phase_residual_foe(self, xp, df):
         """Recovers a frequency-offset ramp (< B) to < 0.1 rad RMS."""
         samples, fs, common = self._setup(xp, df=df)
         theta = recovery.recover_carrier_phase_pilot_tone(
@@ -183,7 +183,7 @@ class TestCprPilotTone:
         )
         assert self._interior_rms(xp, theta, common) < 0.1
 
-    def test_phase_residual_foe_and_phase_noise(self, backend_device, xp):
+    def test_phase_residual_foe_and_phase_noise(self, xp):
         """Recovers joint frequency offset + Wiener phase noise."""
         samples, fs, common = self._setup(xp, df=0.05e6, linewidth=5e3)
         theta = recovery.recover_carrier_phase_pilot_tone(
@@ -194,7 +194,7 @@ class TestCprPilotTone:
     @pytest.mark.parametrize(
         "window", ["tukey", ("tukey", 0.3), "boxcar", ("gaussian", 250), "hann"]
     )
-    def test_window_options(self, backend_device, xp, window):
+    def test_window_options(self, xp, window):
         """Any scipy.get_window spec tracks the common phase to < 0.12 rad RMS."""
         samples, fs, common = self._setup(xp, df=0.05e6)
         theta = recovery.recover_carrier_phase_pilot_tone(
@@ -202,7 +202,7 @@ class TestCprPilotTone:
         )
         assert self._interior_rms(xp, theta, common) < 0.12
 
-    def test_output_shape_siso(self, backend_device, xp):
+    def test_output_shape_siso(self, xp):
         """1D input -> 1D phase output of matching length."""
         samples, fs, _ = self._setup(xp)
         theta = recovery.recover_carrier_phase_pilot_tone(
@@ -210,7 +210,7 @@ class TestCprPilotTone:
         )
         assert theta.shape == samples.shape
 
-    def test_output_shape_mimo(self, backend_device, xp):
+    def test_output_shape_mimo(self, xp):
         """2D input (C, N) -> 2D phase output (C, N)."""
         samples, fs, _ = self._setup(xp, num_streams=2)
         theta = recovery.recover_carrier_phase_pilot_tone(
@@ -218,7 +218,7 @@ class TestCprPilotTone:
         )
         assert theta.shape == samples.shape
 
-    def test_joint_rows_identical(self, backend_device, xp):
+    def test_joint_rows_identical(self, xp):
         """joint_channels broadcasts a single trajectory to all rows."""
         samples, fs, _ = self._setup(xp, num_streams=2, df=0.05e6)
         theta = recovery.recover_carrier_phase_pilot_tone(
@@ -226,7 +226,7 @@ class TestCprPilotTone:
         )
         assert bool(xp.allclose(theta[0], theta[1]))
 
-    def test_remove_frequency_offset_false_leaves_pure_pn(self, backend_device, xp):
+    def test_remove_frequency_offset_false_leaves_pure_pn(self, xp):
         """With FOE removal off, the estimate matches the detrended common phase."""
         samples, fs, common = self._setup(xp, df=0.08e6, linewidth=5e3)
         theta = recovery.recover_carrier_phase_pilot_tone(
@@ -246,7 +246,7 @@ class TestCprPilotTone:
         err -= err.mean()
         assert float(np.sqrt(np.mean(err**2))) < 0.15
 
-    def test_refine_relocates_large_offset(self, backend_device, xp):
+    def test_refine_relocates_large_offset(self, xp):
         """An offset > B is tracked when the search band covers the shifted tone."""
         # df = 0.6 MHz exceeds B = 0.3 MHz: a window centred at nominal would miss
         # the tone, but refine + a wide search band relocates it.
@@ -256,7 +256,7 @@ class TestCprPilotTone:
         )
         assert self._interior_rms(xp, theta, common) < 0.1
 
-    def test_refine_off_fails_when_tone_leaves_window(self, backend_device, xp):
+    def test_refine_off_fails_when_tone_leaves_window(self, xp):
         """Without refinement, an offset > B drags the tone out of the window."""
         samples, fs, common = self._setup(xp, df=0.6e6)
         theta = recovery.recover_carrier_phase_pilot_tone(
@@ -265,21 +265,21 @@ class TestCprPilotTone:
         # The tone is outside the nominal window -> estimate is garbage, not tracking.
         assert self._interior_rms(xp, theta, common) > 1.0
 
-    def test_invalid_window_raises(self, backend_device, xp):
+    def test_invalid_window_raises(self, xp):
         samples, fs, _ = self._setup(xp, n_symbols=256)
         with pytest.raises(ValueError, match="Invalid window"):
             recovery.recover_carrier_phase_pilot_tone(
                 samples, fs, self.F_TONE, bandwidth=self.BW, window="brick"
             )
 
-    def test_invalid_bandwidth_raises(self, backend_device, xp):
+    def test_invalid_bandwidth_raises(self, xp):
         samples, fs, _ = self._setup(xp, n_symbols=256)
         with pytest.raises(ValueError, match="bandwidth must be > 0"):
             recovery.recover_carrier_phase_pilot_tone(
                 samples, fs, self.F_TONE, bandwidth=0.0
             )
 
-    def test_tone_frequency_out_of_range_raises(self, backend_device, xp):
+    def test_tone_frequency_out_of_range_raises(self, xp):
         samples, fs, _ = self._setup(xp, n_symbols=256)
         with pytest.raises(ValueError, match=r"must lie in \(-fs/2, fs/2\)"):
             recovery.recover_carrier_phase_pilot_tone(
@@ -359,7 +359,7 @@ class TestCprPilotTones:
         return _rms_phase_error(xp, phase_est[..., g], common[..., g])
 
     @pytest.mark.parametrize("df", [0.0, 0.05e6])
-    def test_recovers_common_phase(self, backend_device, xp, df):
+    def test_recovers_common_phase(self, xp, df):
         """Two-pilot MRC tracks the shared FOE + phase noise to < 0.15 rad RMS."""
         samples, fs, common = self._setup(xp, df=df, linewidth=5e3)
         phi = recovery.recover_carrier_phase_pilot_tones(
@@ -372,7 +372,7 @@ class TestCprPilotTones:
         )
         assert self._interior_rms(xp, phi[0], common) < 0.15
 
-    def test_mrc_beats_single_tone(self, backend_device, xp):
+    def test_mrc_beats_single_tone(self, xp):
         """Combining two equal-SNR pilots lowers the residual vs a single tone.
 
         Run in a noise-limited regime (low tone SNR) where the √2 of the combine
@@ -408,7 +408,7 @@ class TestCprPilotTones:
         rms_both = self._interior_rms(xp, both[0], common)
         assert rms_both < rms_single
 
-    def test_output_shape_and_common_broadcast(self, backend_device, xp):
+    def test_output_shape_and_common_broadcast(self, xp):
         """(C, N) input -> (C, N) output; the common track is identical on all rows."""
         samples, fs, _ = self._setup(xp, df=0.05e6)
         phi = recovery.recover_carrier_phase_pilot_tones(
@@ -422,7 +422,7 @@ class TestCprPilotTones:
         assert phi.shape == samples.shape
         assert bool(xp.allclose(phi[0], phi[1]))
 
-    def test_gating_drops_faded_tone(self, backend_device, xp):
+    def test_gating_drops_faded_tone(self, xp):
         """A weak pilot (low tone-to-noise) is gated out -> single-tone fallback.
 
         Fade tone 1 by lowering its PSR (not by scaling the whole channel, which
@@ -442,7 +442,7 @@ class TestCprPilotTones:
         assert diag["used"] == [diag["ref"]]
         assert diag["ref"] == 0  # the strong tone
 
-    def test_single_tone_K1_tracks(self, backend_device, xp):
+    def test_single_tone_K1_tracks(self, xp):
         """K=1 reduces to a single-tone tracker and still recovers the phase."""
         samples, fs, common = self._setup(xp, df=0.05e6)
         phi = recovery.recover_carrier_phase_pilot_tones(
@@ -455,7 +455,7 @@ class TestCprPilotTones:
         )
         assert self._interior_rms(xp, phi[0], common) < 0.15
 
-    def test_joint_pre_demux_combine(self, backend_device, xp):
+    def test_joint_pre_demux_combine(self, xp):
         """per_tone_channel=None coherently sums each tone across channels."""
         samples, fs, common = self._setup(xp, df=0.05e6)
         phi = recovery.recover_carrier_phase_pilot_tones(
@@ -468,7 +468,7 @@ class TestCprPilotTones:
         )
         assert self._interior_rms(xp, phi[0], common) < 0.15
 
-    def test_diagnostics_keys(self, backend_device, xp):
+    def test_diagnostics_keys(self, xp):
         samples, fs, _ = self._setup(xp)
         _, diag = recovery.recover_carrier_phase_pilot_tones(
             samples,
@@ -482,7 +482,7 @@ class TestCprPilotTones:
         assert set(diag) == {"delta", "snr_db", "ref", "used", "f_centers"}
         assert len(diag["snr_db"]) == 2
 
-    def test_per_tone_channel_length_mismatch_raises(self, backend_device, xp):
+    def test_per_tone_channel_length_mismatch_raises(self, xp):
         samples, fs, _ = self._setup(xp, n_symbols=256)
         with pytest.raises(ValueError, match="per_tone_channel must have one entry"):
             recovery.recover_carrier_phase_pilot_tones(
@@ -493,7 +493,7 @@ class TestCprPilotTones:
                 per_tone_channel=[0],
             )
 
-    def test_invalid_bandwidth_raises(self, backend_device, xp):
+    def test_invalid_bandwidth_raises(self, xp):
         samples, fs, _ = self._setup(xp, n_symbols=256)
         with pytest.raises(ValueError, match="bandwidth must be > 0"):
             recovery.recover_carrier_phase_pilot_tones(
@@ -503,7 +503,7 @@ class TestCprPilotTones:
                 bandwidth=0.0,
             )
 
-    def test_empty_tone_list_raises(self, backend_device, xp):
+    def test_empty_tone_list_raises(self, xp):
         samples, fs, _ = self._setup(xp, n_symbols=256)
         with pytest.raises(ValueError, match="at least one frequency"):
             recovery.recover_carrier_phase_pilot_tones(
@@ -531,7 +531,7 @@ class TestPilotsCPREnhancements:
         pilot_values = ideal[pilot_indices]
         return sig.samples, pilot_indices, pilot_values
 
-    def test_joint_rows_identical(self, backend_device, xp, xpt):
+    def test_joint_rows_identical(self, xp, xpt):
         """joint_channels=True: both phi_full rows are bitwise identical."""
         samples_a, pilot_indices, pilot_values = self._pilot_setup(xp, seed=1)
         samples_b, _, _ = self._pilot_setup(xp, seed=2)
@@ -546,7 +546,7 @@ class TestPilotsCPREnhancements:
         assert phi.shape == (2, mimo.shape[-1])
         xpt.assert_array_equal(phi[0], phi[1])
 
-    def test_joint_siso_noop(self, backend_device, xp, xpt):
+    def test_joint_siso_noop(self, xp, xpt):
         """joint_channels=True on SISO returns identical result to False."""
         samples, pilot_indices, pilot_values = self._pilot_setup(xp, seed=3)
         phi_a = recovery.recover_carrier_phase_pilot_symbols(
@@ -565,7 +565,7 @@ class TestPilotsCPREnhancements:
         )
         xpt.assert_allclose(phi_a, phi_b, atol=1e-10)
 
-    def test_cycle_slip_shape(self, backend_device, xp):
+    def test_cycle_slip_shape(self, xp):
         """cycle_slip_correction=True returns correct shape."""
         samples, pilot_indices, pilot_values = self._pilot_setup(xp)
         phi = recovery.recover_carrier_phase_pilot_symbols(
@@ -576,7 +576,7 @@ class TestPilotsCPREnhancements:
         )
         assert phi.shape == samples.shape
 
-    def test_cycle_slip_standalone_symmetry_1(self, backend_device, xp, xpt):
+    def test_cycle_slip_standalone_symmetry_1(self, xp, xpt):
         """correct_cycle_slips with symmetry=1 corrects an injected 2π slip."""
         B = 200
         phi_u = np.linspace(0.0, 3.0, B)
@@ -587,7 +587,7 @@ class TestPilotsCPREnhancements:
         )
         xpt.assert_allclose(phi_out, phi_u, atol=0.1)
 
-    def test_joint_cycle_slip_mimo_rows_identical(self, backend_device, xp, xpt):
+    def test_joint_cycle_slip_mimo_rows_identical(self, xp, xpt):
         """joint_channels=True + cycle_slip_correction=True: rows remain identical."""
         samples_a, pilot_indices, pilot_values = self._pilot_setup(xp, seed=4)
         samples_b, _, _ = self._pilot_setup(xp, seed=5)
@@ -606,7 +606,7 @@ class TestPilotsCPREnhancements:
 class TestSignalInputPilotFunctions:
     """Signal-awareness for pilot-symbol and pilot-tone CPR."""
 
-    def test_pilot_symbols_signal_input(self, backend_device, xp, xpt):
+    def test_pilot_symbols_signal_input(self, xp, xpt):
         """Signal input: symbols come from .samples, output stays a raw array."""
         samples, pilot_indices, pilot_values, _ = TestCprPilots()._pilot_setup(xp)
         sig = Signal(samples=samples, sampling_rate=FS, symbol_rate=FS)
@@ -621,7 +621,7 @@ class TestSignalInputPilotFunctions:
         assert not isinstance(phi_sig, Signal)
         xpt.assert_allclose(phi_sig, phi_arr)
 
-    def test_pilot_tone_signal_input_uses_sampling_rate(self, backend_device, xp, xpt):
+    def test_pilot_tone_signal_input_uses_sampling_rate(self, xp, xpt):
         """Signal input: sampling_rate is taken from the signal."""
         cpr = TestCprPilotTone()
         samples, fs, _ = cpr._setup(xp, df=0.05e6)
@@ -637,7 +637,7 @@ class TestSignalInputPilotFunctions:
         assert not isinstance(theta_sig, Signal)
         xpt.assert_allclose(theta_sig, theta_arr)
 
-    def test_pilot_tones_signal_input_uses_sampling_rate(self, backend_device, xp, xpt):
+    def test_pilot_tones_signal_input_uses_sampling_rate(self, xp, xpt):
         """Signal input: sampling_rate is taken from the signal."""
         cpr = TestCprPilotTones()
         samples, fs, _ = cpr._setup(xp, df=0.05e6, linewidth=5e3)

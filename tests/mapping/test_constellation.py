@@ -12,9 +12,7 @@ from commkit.mapping import Constellation
 class TestConstellationCreation:
     """Tests for Constellation factory methods, caching, and power metrics."""
 
-    def test_gray_constructor_matches_free_functions(
-        self, backend_device: str, xp: Any, xpt: Any
-    ) -> None:
+    def test_gray_constructor_matches_free_functions(self, xp: Any, xpt: Any) -> None:
         """Constellation.gray points/labels match gray_constellation + bit table."""
         c = Constellation.gray("qam", 16)
         xpt.assert_array_equal(c.points, mapping.gray_constellation("qam", 16))
@@ -47,7 +45,7 @@ class TestConstellationCreation:
 class TestConstellationMapping:
     """Tests for mapping, demapping, and LLR calculation through Constellation."""
 
-    def test_map_demap_roundtrip(self, backend_device: str, xp: Any, xpt: Any) -> None:
+    def test_map_demap_roundtrip(self, xp: Any, xpt: Any) -> None:
         """map() then demap() recovers bits matching the free functions."""
         c = Constellation.gray("qam", 16)
         bits = xp.array([0, 0, 0, 0, 1, 1, 1, 1], dtype="int8")
@@ -56,7 +54,7 @@ class TestConstellationMapping:
         bits_out = c.demap(syms)
         xpt.assert_array_equal(bits_out, bits)
 
-    def test_unipolar_carried_through(self, backend_device: str, xp: Any) -> None:
+    def test_unipolar_carried_through(self, xp: Any) -> None:
         """A unipolar Constellation maps to a strictly non-negative grid."""
         c = Constellation.gray("ask", 4, unipolar=True)
         assert c.unipolar is True
@@ -64,9 +62,7 @@ class TestConstellationMapping:
         syms = c.map(bits)
         assert bool(xp.all(syms >= 0))
 
-    def test_llr_matches_free_function(
-        self, backend_device: str, xp: Any, xpt: Any
-    ) -> None:
+    def test_llr_matches_free_function(self, xp: Any, xpt: Any) -> None:
         """llr() delegates to compute_llr with this constellation's settings."""
         c = Constellation.gray("qam", 16)
         bits = xp.array([0, 0, 0, 0, 1, 1, 1, 1], dtype="int32")

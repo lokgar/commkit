@@ -294,9 +294,7 @@ class TestNPZDeviceHandling:
         assert hasattr(commkit, "load_npz")
 
     @pytest.mark.gpu_only
-    def test_roundtrip_device_gpu(
-        self, backend_device: str, tmp_path: Any, xpt: Any
-    ) -> None:
+    def test_roundtrip_device_gpu(self, tmp_path: Any, xpt: Any) -> None:
         """GPU signal round-trips to GPU device placement."""
         sig = _siso_signal()
         p = tmp_path / "sig_gpu.npz"

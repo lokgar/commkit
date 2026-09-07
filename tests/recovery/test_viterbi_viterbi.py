@@ -30,7 +30,7 @@ class TestCprViterbiViterbi:
             (64, "qam", 64),
         ],
     )
-    def test_phase_residual(self, backend_device, xp, order, modulation, block_size):
+    def test_phase_residual(self, xp, order, modulation, block_size):
         """VV CPR: mean phase estimate within 0.1 rad of true carrier phase (mod M-fold)."""
         if modulation == "qam":
             sig = make_test_qam_signal(
@@ -53,7 +53,7 @@ class TestCprViterbiViterbi:
         err = err - step * round(err / step)  # wrap to [-step/2, step/2)
         assert abs(err) < 0.1
 
-    def test_output_shape_siso(self, backend_device, xp):
+    def test_output_shape_siso(self, xp):
         """VV CPR: 1D input -> 1D phase output of same length."""
         sig = make_test_qam_signal(
             order=16, num_symbols=512, sps=1, symbol_rate=FS, xp=xp
@@ -63,7 +63,7 @@ class TestCprViterbiViterbi:
         )
         assert phase.shape == sig.samples.shape
 
-    def test_output_shape_mimo(self, backend_device, xp):
+    def test_output_shape_mimo(self, xp):
         """VV CPR: 2D input (C, N) -> 2D phase output (C, N)."""
         mimo, _ = make_test_mimo_samples(
             num_channels=2, order=4, num_symbols=512, sps=1, xp=xp
@@ -73,7 +73,7 @@ class TestCprViterbiViterbi:
         )
         assert phase.shape == mimo.shape
 
-    def test_too_short_raises(self, backend_device, xp):
+    def test_too_short_raises(self, xp):
         """VV CPR: signal shorter than block_size raises ValueError."""
         sig = make_test_qam_signal(
             order=4, num_symbols=20, sps=1, symbol_rate=FS, xp=xp
@@ -95,7 +95,7 @@ class TestViterbiViterbi:
             scheme="qam", order=16, num_symbols=N, seed=seed, xp=xp
         )
 
-    def test_siso_qpsk_output_shape(self, backend_device, xp):
+    def test_siso_qpsk_output_shape(self, xp):
         """SISO QPSK: output is (N,) float64."""
         syms = self._qpsk_symbols(xp)
         phi_est = recovery.recover_carrier_phase_viterbi_viterbi(
@@ -104,7 +104,7 @@ class TestViterbiViterbi:
         assert phi_est.shape == syms.shape
         assert phi_est.dtype == xp.float64
 
-    def test_siso_qpsk_recovers_static_phase(self, backend_device, xp):
+    def test_siso_qpsk_recovers_static_phase(self, xp):
         """VV tracks applied phase: difference between rotated and unrotated estimate equals phi_true mod π/2."""
         import numpy as np
 
@@ -134,7 +134,7 @@ class TestViterbiViterbi:
             f"Phase tracking error too large: {residual:.3f} rad"
         )
 
-    def test_siso_qam16_output_shape(self, backend_device, xp):
+    def test_siso_qam16_output_shape(self, xp):
         """SISO QAM16: output shape matches input."""
         syms = self._qam16_symbols(xp)
         phi_est = recovery.recover_carrier_phase_viterbi_viterbi(
@@ -142,7 +142,7 @@ class TestViterbiViterbi:
         )
         assert phi_est.shape == syms.shape
 
-    def test_mimo_output_shape(self, backend_device, xp):
+    def test_mimo_output_shape(self, xp):
         """MIMO input (C, N): output shape is (C, N)."""
         import numpy as np
 
@@ -156,7 +156,7 @@ class TestViterbiViterbi:
         )
         assert phi_est.shape == (C, N)
 
-    def test_block_size_too_large_raises(self, backend_device, xp):
+    def test_block_size_too_large_raises(self, xp):
         """block_size > N should raise ValueError."""
         syms = self._qpsk_symbols(xp, N=16)
         with pytest.raises(ValueError, match="block_size"):
@@ -168,7 +168,7 @@ class TestViterbiViterbi:
 class TestSignalInputViterbiViterbi:
     """Signal-awareness for recover_carrier_phase_viterbi_viterbi."""
 
-    def test_signal_input_uses_metadata(self, backend_device, xp, xpt):
+    def test_signal_input_uses_metadata(self, xp, xpt):
         """Signal input: modulation/order come from the signal's metadata."""
         sig = make_test_qam_signal(
             order=16, num_symbols=512, sps=1, symbol_rate=FS, xp=xp

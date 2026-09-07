@@ -2,7 +2,6 @@
 
 from unittest.mock import patch
 
-import matplotlib.pyplot as plt
 import numpy as np
 import pytest
 
@@ -25,7 +24,7 @@ from commkit.core import Signal
 class TestSignalCreation:
     """Tests for TestSignalCreation."""
 
-    def test_signal_initialization(self, backend_device, xp):
+    def test_signal_initialization(self, xp):
         """Verify Signal initialization from basic Python lists and device-aware backend tracking."""
         # Test with list
         data = [1, 2, 3, 4]
@@ -36,7 +35,7 @@ class TestSignalCreation:
         assert s.sampling_rate == 1.0
         assert s.symbol_rate == 1.0
 
-    def test_signal_validation_heuristics(self, backend_device, xp):
+    def test_signal_validation_heuristics(self, xp):
         """Verify Signal validation for higher dimensions and Time-Last heuristic."""
         # 1. Dimension > 2
         from pydantic import ValidationError
@@ -50,7 +49,7 @@ class TestSignalCreation:
         s = Signal(samples=data_wrong, sampling_rate=1.0, symbol_rate=1.0)
         assert s.samples.shape == (2, 100)  # Should be transposed
 
-    def test_signal_auto_symbols(self, backend_device, xp):
+    def test_signal_auto_symbols(self, xp):
         """Verify source_symbols derivation from source_bits in post-init."""
 
         bits = xp.array([0, 1, 0, 0], dtype="int8")
@@ -77,7 +76,7 @@ class TestSignalCreation:
         )
         assert s2.source_symbols is not None
 
-    def test_signal_validate_samples_transposition(self, backend_device, xp):
+    def test_signal_validate_samples_transposition(self, xp):
         """Cover the transposition warning heuristic in Signal."""
         # Create (Time, Channels) where Time >> Channels and Time > 32
         # e.g. (100, 2)
@@ -96,7 +95,7 @@ class TestSignalCreation:
 class TestSignalProperties:
     """Tests for TestSignalProperties."""
 
-    def test_signal_properties(self, backend_device, xp):
+    def test_signal_properties(self, xp):
         """Verify core time-domain and rate properties of the Signal object."""
         # Create data directly on device using xp
         data = xp.zeros(100)
@@ -109,7 +108,7 @@ class TestSignalProperties:
         assert s.sps == 10.0
         assert len(s.time_axis()) == 100
 
-    def test_signal_properties_coverage(self, backend_device, xp):
+    def test_signal_properties_coverage(self, xp):
         """Access Signal properties to ensure coverage."""
         s = Signal(samples=xp.zeros(100), sampling_rate=10.0, symbol_rate=2.0)
 
@@ -122,13 +121,13 @@ class TestSignalProperties:
         # backend
         assert s.backend in ("CPU", "GPU")
 
-    def test_signal_duration_mimo(self, backend_device, xp):
+    def test_signal_duration_mimo(self, xp):
         """Verify duration property for MIMO (2D) signal."""
         data = xp.zeros((2, 200))
         s = Signal(samples=data, sampling_rate=100.0, symbol_rate=10.0)
         assert s.duration == 2.0  # 200 / 100
 
-    def test_signal_bits_per_symbol_set(self, backend_device, xp):
+    def test_signal_bits_per_symbol_set(self, xp):
         """Verify bits_per_symbol property when mod_order is set."""
         s = Signal(
             samples=xp.zeros(10), sampling_rate=1.0, symbol_rate=1.0, mod_order=16
@@ -140,7 +139,7 @@ class TestSignalProperties:
         )
         assert s2.bits_per_symbol == 6
 
-    def test_signal_print_info(self, backend_device, xp, capsys):
+    def test_signal_print_info(self, xp, capsys):
         """Verify print_info() execution and output detection."""
         data = xp.zeros(10)
         s = Signal(samples=data, sampling_rate=100.0, symbol_rate=10.0)
@@ -148,7 +147,7 @@ class TestSignalProperties:
         captured = capsys.readouterr()
         assert "Spectral Domain" in captured.out or captured.out == ""
 
-    def test_signal_wrappers(self, backend_device, xp):
+    def test_signal_wrappers(self, xp):
         """
         Test the wrapper methods on Signal to ensure they call the underlying modules.
         We just check they run without error.
@@ -172,9 +171,6 @@ class TestSignalProperties:
         f, p = spectral.welch_psd(sig, nperseg=32)
         assert len(f) > 0
 
-        # Clean up any existing figures from previous tests
-        plt.close("all")
-
         # Plotting wrappers (just call them, assume plotting logic tested elsewhere)
         # We pass show=False to avoid blocking
         plotting.plot_psd(sig, show=False, nperseg=32)
@@ -191,14 +187,11 @@ class TestSignalProperties:
         plotting.plot_eye_diagram(sig, show=False)
         plotting.plot_constellation(sig, show=False)
 
-        # Clean up figures to avoid RuntimeWarning
-        plt.close("all")
-
 
 class TestSignalCloningAndProvenance:
     """Tests for TestSignalCloningAndProvenance."""
 
-    def test_signal_clone(self, backend_device, xp, xpt):
+    def test_signal_clone(self, xp, xpt):
         """Verify Signal.clone() deep-copies arrays and preserves device context."""
         data = xp.array([1, 2, 3])
         source_bits = xp.array([0, 1, 0])
@@ -216,7 +209,7 @@ class TestSignalCloningAndProvenance:
         assert s_copy.source_bits is not s.source_bits
         assert s_copy.backend == s.backend
 
-    def test_signal_internal_shallow_clone_shares_metadata(self, backend_device, xp):
+    def test_signal_internal_shallow_clone_shares_metadata(self, xp):
         """The internal shallow clone shares arrays for non-waveform updates."""
         s = Signal(
             samples=xp.arange(8),
@@ -232,7 +225,7 @@ class TestSignalCloningAndProvenance:
         assert shallow.source_bits is s.source_bits
 
     def test_signal_replace_samples_shares_provenance_and_invalidates_caches(
-        self, backend_device, xp, xpt
+        self, xp, xpt
     ):
         """Functional sample replacement avoids copying old samples or provenance."""
         frame = {"cached": xp.arange(4)}
@@ -265,9 +258,7 @@ class TestSignalCloningAndProvenance:
         assert result.sampling_rate == 1.0
         xpt.assert_array_equal(result.samples, replacement)
 
-    def test_signal_replace_samples_can_preserve_resolved_caches(
-        self, backend_device, xp
-    ):
+    def test_signal_replace_samples_can_preserve_resolved_caches(self, xp):
         """Proven-safe internal transforms can explicitly retain resolved caches."""
         s = Signal(samples=xp.arange(8), sampling_rate=2.0, symbol_rate=1.0)
         s.resolved_symbols = xp.asarray([1.0, -1.0])
@@ -278,9 +269,7 @@ class TestSignalCloningAndProvenance:
         assert result.resolved_symbols is s.resolved_symbols
         assert result.resolved_bits is s.resolved_bits
 
-    def test_signal_replace_samples_validates_replacement_and_metadata(
-        self, backend_device, xp
-    ):
+    def test_signal_replace_samples_validates_replacement_and_metadata(self, xp):
         """Replacement samples and metadata pass through assignment validation."""
         from pydantic import ValidationError
 
@@ -291,7 +280,7 @@ class TestSignalCloningAndProvenance:
         with pytest.raises((ValueError, ValidationError), match="Only 1D"):
             s.replace_samples(xp.zeros((2, 2, 2)))
 
-    def test_signal_noop_paths_shallow_clone(self, backend_device, xp):
+    def test_signal_noop_paths_shallow_clone(self, xp):
         """Skipped Signal operations return a new container without copying metadata."""
         frame = {"cached": xp.arange(4)}
         sig = Signal(
@@ -315,7 +304,7 @@ class TestSignalCloningAndProvenance:
 class TestSignalDSPOperations:
     """Tests for TestSignalDSPOperations."""
 
-    def test_signal_methods(self, backend_device, xp):
+    def test_signal_methods(self, xp):
         """Verify common Signal methods like upsampling and FIR filtering."""
         # Test upsample
         data = xp.array([1.0 + 0j, -1.0 + 0j])
@@ -329,7 +318,7 @@ class TestSignalDSPOperations:
         taps = xp.array([1.0])
         s = filtering.fir_filter(s, taps)
 
-    def test_signal_resample_sps(self, backend_device, xp):
+    def test_signal_resample_sps(self, xp):
         """Verify Signal resampling using target samples per symbol (SPS)."""
         data = xp.ones(100)
         # create signal with sps=4 (fs=4, sym_rate=1)
@@ -342,7 +331,7 @@ class TestSignalDSPOperations:
         assert s.sampling_rate == 8.0
         assert s.samples.size == 200
 
-    def test_welch_psd(self, backend_device, xp):
+    def test_welch_psd(self, xp):
         """Verify Welch PSD estimation within the Signal object."""
         data = xp.random.randn(1000) + 1j * xp.random.randn(1000)
         s = Signal(samples=data, sampling_rate=100.0, symbol_rate=10.0)
@@ -363,7 +352,7 @@ class TestSignalDSPOperations:
         assert len(f2) == 128
         assert f2.shape == p2.shape
 
-    def test_add_pilot_tone_records_provenance(self, backend_device, xp, xpt):
+    def test_add_pilot_tone_records_provenance(self, xp, xpt):
         """add_pilot_tone on a Signal records frequency and power-ratio provenance."""
         sig = generate_psk(
             symbol_rate=1e6, num_symbols=128, order=4, pulse_shape="rrc", sps=8, seed=0
@@ -386,7 +375,7 @@ class TestSignalDSPOperations:
         # Samples actually changed.
         assert float(xp.max(xp.abs(ret.samples - before))) > 0.0
 
-    def test_signal_shift_frequency(self, backend_device, xp, xpt):
+    def test_signal_shift_frequency(self, xp, xpt):
         """Verify frequency shifting logic and resulting spectral peak positioning."""
         fs = 100.0
         # Simple DC signal (freq 0)
@@ -414,7 +403,7 @@ class TestSignalDSPOperations:
         # 25 Hz expected
         assert abs(peak - 25.0) < (fs / 64)
 
-    def test_signal_decimate_to_symbol_rate(self, backend_device, xp):
+    def test_signal_decimate_to_symbol_rate(self, xp):
         """Verify downsampling Signal to symbols."""
         data = xp.ones(40, dtype="complex128")
         s = Signal(samples=data, sampling_rate=4.0, symbol_rate=1.0)
@@ -422,13 +411,13 @@ class TestSignalDSPOperations:
         assert len(s.samples) == 10
         assert s.sampling_rate == 1.0
 
-    def test_signal_downsample_warning(self, backend_device, xp):
+    def test_signal_downsample_warning(self, xp):
         """Verify warning when downsampling already 1 SPS signal."""
         data = xp.ones(10, dtype="complex128")
         s = Signal(samples=data, sampling_rate=1.0, symbol_rate=1.0)
         multirate.decimate_to_symbol_rate(s)  # Should just warn
 
-    def test_signal_mimo_fir_coverage(self, backend_device, xp):
+    def test_signal_mimo_fir_coverage(self, xp):
         """Verify FIR filtering on multichannel signals."""
         data = xp.ones((2, 100), dtype="complex128")
         s = Signal(samples=data, sampling_rate=1.0, symbol_rate=1.0)
@@ -439,7 +428,7 @@ class TestSignalDSPOperations:
         # y[1] should be 1.5
         assert abs(float(s.samples[0, 1].real) - 1.5) < 1e-10
 
-    def test_signal_gaussian_coverage(self, backend_device, xp):
+    def test_signal_gaussian_coverage(self, xp):
         """Verify Gaussian Signal generation."""
         # Use PSK with Gaussian pulse shaping
         s = generate_psk(
@@ -457,7 +446,7 @@ class TestSignalDSPOperations:
 class TestSignalWaveformsAndModulation:
     """Tests for TestSignalWaveformsAndModulation."""
 
-    def test_shaping_filter_taps_error(self, backend_device, xp):
+    def test_shaping_filter_taps_error(self, xp):
         """Verify that shaping_filter_taps raises errors for unconfigured or unknown shapes."""
         data = xp.zeros(10)
         s = Signal(samples=data, sampling_rate=100.0, symbol_rate=10.0)
@@ -469,7 +458,7 @@ class TestSignalWaveformsAndModulation:
         with pytest.raises(ValueError, match="Unknown pulse shape"):
             filtering.shaping_filter_taps(s)
 
-    def test_rzpam_odd_sps(self, backend_device, xp):
+    def test_rzpam_odd_sps(self, xp):
         """Verify RZ-PAM raises error for odd SPS."""
         with pytest.raises(ValueError, match="sps.*must be even"):
             generate_pam(
@@ -480,7 +469,7 @@ class TestSignalWaveformsAndModulation:
                 rz=True,
             )
 
-    def test_rzpam_multi_stream(self, backend_device, xp):
+    def test_rzpam_multi_stream(self, xp):
         """Verify RZ-PAM multi-stream reshape produces correctly shaped multichannel output."""
         sig = generate_pam(
             order=2,
@@ -539,7 +528,7 @@ class TestSignalWaveformsAndModulation:
         assert sig.samples.shape[-1] == 100 * 4
         assert sig.sps == 4.0
 
-    def test_signal_rz_modscheme_flags(self, backend_device, xp):
+    def test_signal_rz_modscheme_flags(self, xp):
         """Verify RZ modulation flags in __init__."""
         bits = xp.array([0, 1], dtype="int8")
         s = Signal(
@@ -556,7 +545,7 @@ class TestSignalWaveformsAndModulation:
         assert len(s.source_symbols) == 2
         assert s.mod_rz is True
 
-    def test_pam_waveform(self, backend_device, xp):
+    def test_pam_waveform(self, xp):
         """Verify basic PAM signal generation produces samples on the active device."""
         sig = generate_pam(
             order=2, unipolar=False, num_symbols=10, sps=4, symbol_rate=1e3
@@ -565,7 +554,7 @@ class TestSignalWaveformsAndModulation:
         assert isinstance(sig.samples, xp.ndarray)
         assert sig.mod_scheme is not None
 
-    def test_rzpam_waveform(self, backend_device, xp):
+    def test_rzpam_waveform(self, xp):
         """Verify Return-to-Zero PAM signal generation and pulse-shape validation."""
         sig = generate_pam(
             order=2,
@@ -590,14 +579,14 @@ class TestSignalWaveformsAndModulation:
                 pulse_shape="rrc",
             )
 
-    def test_qam_waveform(self, backend_device, xp):
+    def test_qam_waveform(self, xp):
         """Verify QAM signal generation populates samples and modulation metadata."""
         sig = generate_qam(order=16, num_symbols=10, sps=4, symbol_rate=1e3)
         assert sig.samples.size > 0
         assert isinstance(sig.samples, xp.ndarray)
         assert sig.mod_order == 16
 
-    def test_psk_waveform(self, backend_device, xp, xpt):
+    def test_psk_waveform(self, xp, xpt):
         """Verify PSK signal generation, metadata, and unit-magnitude constellation."""
         sig = generate_psk(order=8, num_symbols=50, sps=2, symbol_rate=1e6, seed=0)
         assert sig.samples.size > 0
@@ -610,7 +599,7 @@ class TestSignalWaveformsAndModulation:
             magnitudes = xp.abs(syms)
             xpt.assert_allclose(magnitudes, xp.ones_like(magnitudes), atol=1e-5)
 
-    def test_signal_generate(self, backend_device, xp):
+    def test_signal_generate(self, xp):
         """Verify generate() produces correct metadata for any modulation."""
         sig = generate(
             num_symbols=100,
@@ -632,7 +621,7 @@ class TestSignalWaveformsAndModulation:
 class TestSignalResolutionAndMetrics:
     """Tests for TestSignalResolutionAndMetrics."""
 
-    def test_signal_resolution_and_demap(self, backend_device, xp, xpt):
+    def test_signal_resolution_and_demap(self, xp, xpt):
         """Verify manual symbol resolution and bit demapping with caching."""
         # Generate a simple BPSK signal at 4 SPS
         symbol_rate = 1e6
@@ -694,7 +683,7 @@ class TestSignalResolutionAndMetrics:
         with pytest.raises(ValueError, match="No resolved bits available"):
             metrics.ber(sig, bits_tx=ref_bits)
 
-    def test_resolve_symbols_sps_errors(self, backend_device, xp):
+    def test_resolve_symbols_sps_errors(self, xp):
         """Verify resolve_symbols error paths for invalid SPS values."""
         # SPS < 1 (symbol_rate > sampling_rate)
         s = Signal(
@@ -710,7 +699,7 @@ class TestSignalResolutionAndMetrics:
         with pytest.raises(ValueError, match="sps to be a positive integer"):
             s2 = multirate.resolve_symbols(s2)
 
-    def test_demap_without_modulation(self, backend_device, xp):
+    def test_demap_without_modulation(self, xp):
         """Verify demap_symbols_hard raises error without modulation metadata."""
         s = Signal(
             samples=xp.ones(10, dtype="complex64"), sampling_rate=1.0, symbol_rate=1.0
@@ -719,7 +708,7 @@ class TestSignalResolutionAndMetrics:
         with pytest.raises(ValueError, match="Modulation scheme and order required"):
             s = mapping.demap_symbols_hard(s)
 
-    def test_evm_no_reference(self, backend_device, xp):
+    def test_evm_no_reference(self, xp):
         """Verify evm raises when no reference is available."""
         s = Signal(
             samples=xp.ones(10, dtype="complex64"), sampling_rate=1.0, symbol_rate=1.0
@@ -728,7 +717,7 @@ class TestSignalResolutionAndMetrics:
         with pytest.raises(ValueError, match="No reference available"):
             metrics.evm(s)
 
-    def test_evm_no_resolved(self, backend_device, xp):
+    def test_evm_no_resolved(self, xp):
         """Verify evm raises when no resolved_symbols are present."""
         s = Signal(
             samples=xp.ones(10, dtype="complex64"),
@@ -739,7 +728,7 @@ class TestSignalResolutionAndMetrics:
         with pytest.raises(ValueError, match="No resolved symbols available"):
             metrics.evm(s)
 
-    def test_snr_no_reference(self, backend_device, xp):
+    def test_snr_no_reference(self, xp):
         """Verify snr raises when no reference is available."""
         s = Signal(
             samples=xp.ones(10, dtype="complex64"), sampling_rate=1.0, symbol_rate=1.0
@@ -748,7 +737,7 @@ class TestSignalResolutionAndMetrics:
         with pytest.raises(ValueError, match="No reference available"):
             metrics.snr(s)
 
-    def test_snr_no_resolved(self, backend_device, xp):
+    def test_snr_no_resolved(self, xp):
         """Verify snr raises when no resolved_symbols are present."""
         s = Signal(
             samples=xp.ones(10, dtype="complex64"),
@@ -759,7 +748,7 @@ class TestSignalResolutionAndMetrics:
         with pytest.raises(ValueError, match="No resolved symbols available"):
             metrics.snr(s)
 
-    def test_ber_no_reference(self, backend_device, xp):
+    def test_ber_no_reference(self, xp):
         """Verify ber raises when no reference bits are available."""
         s = Signal(
             samples=xp.ones(10, dtype="complex64"), sampling_rate=1.0, symbol_rate=1.0
@@ -768,7 +757,7 @@ class TestSignalResolutionAndMetrics:
         with pytest.raises(ValueError, match="No reference bits available"):
             metrics.ber(s)
 
-    def test_evm_with_explicit_num_train_symbols(self, backend_device, xp):
+    def test_evm_with_explicit_num_train_symbols(self, xp):
         """evm(num_train_symbols=N) discards leading symbols from resolved_symbols."""
         from commkit import equalization
 
@@ -807,7 +796,7 @@ class TestSignalResolutionAndMetrics:
         evm_pct2, evm_db2 = metrics.evm(rx)
         assert np.isfinite(float(evm_db2))
 
-    def test_snr_with_explicit_num_train_symbols(self, backend_device, xp):
+    def test_snr_with_explicit_num_train_symbols(self, xp):
         """snr(num_train_symbols=N) discards leading symbols before computing SNR."""
         from commkit import equalization
 
@@ -843,7 +832,7 @@ class TestSignalResolutionAndMetrics:
         snr_notrim = metrics.snr(rx)
         assert np.isfinite(snr_notrim)
 
-    def test_ber_with_explicit_num_train_symbols(self, backend_device, xp):
+    def test_ber_with_explicit_num_train_symbols(self, xp):
         """ber(num_train_symbols=N) discards leading bits before computing BER."""
         from commkit import equalization
 
@@ -883,7 +872,7 @@ class TestSignalResolutionAndMetrics:
         assert np.isfinite(float(ber_notrim))
         assert 0.0 <= float(ber_notrim) <= 1.0
 
-    def test_rls_tail_trim_field(self, backend_device, xp):
+    def test_rls_tail_trim_field(self, xp):
         """rls() tail_trim field equals num_taps // 2 and y_hat is shortened accordingly."""
         from commkit import equalization
 
@@ -913,7 +902,7 @@ class TestSignalResolutionAndMetrics:
 class TestSignalDeviceAndPlotting:
     """Tests for TestSignalDeviceAndPlotting."""
 
-    def test_signal_jax_interop(self, backend_device, xp, xpt, jax):
+    def test_signal_jax_interop(self, xp, xpt, jax):
         """Verify JAX interoperability."""
         s = Signal(samples=xp.ones(10), sampling_rate=1.0, symbol_rate=1.0)
 
@@ -930,7 +919,7 @@ class TestSignalDeviceAndPlotting:
         assert s.resolved_symbols is None
         assert s.resolved_bits is None
 
-    def test_plot_constellation_at_symbol_rate(self, backend_device, xp):
+    def test_plot_constellation_at_symbol_rate(self, xp):
         """plot_constellation on a 1-SPS Signal (built from lms y_hat) should succeed."""
         from commkit import equalization
 
@@ -953,9 +942,8 @@ class TestSignalDeviceAndPlotting:
         )
         plot_result = plotting.plot_constellation(rx_1sps, show=False)
         assert plot_result is not None
-        plt.close("all")
 
-    def test_plot_constellation_overlay_source_mimo(self, backend_device, xp):
+    def test_plot_constellation_overlay_source_mimo(self, xp):
         """Signal.plot_constellation with MIMO signal and overlay_source=True."""
         sig = generate_psk(
             symbol_rate=1e6,
@@ -968,9 +956,8 @@ class TestSignalDeviceAndPlotting:
         )
         result = plotting.plot_constellation(sig, overlay_source=True, show=False)
         assert result is not None
-        plt.close("all")
 
-    def test_plot_constellation_show(self, backend_device, xp):
+    def test_plot_constellation_show(self, xp):
         """Signal.plot_constellation(show=True) should call plt.show() and return None."""
         sig = generate_psk(
             symbol_rate=1e6, num_symbols=100, order=4, pulse_shape="rrc", sps=1, seed=0
@@ -978,9 +965,8 @@ class TestSignalDeviceAndPlotting:
         with patch("matplotlib.pyplot.show"):
             result = plotting.plot_constellation(sig, show=True)
         assert result is None
-        plt.close("all")
 
-    def test_plot_constellation_overlay_source_siso(self, backend_device, xp):
+    def test_plot_constellation_overlay_source_siso(self, xp):
         """SISO signal with overlay_source=True uses the single-axes scatter path."""
         sig = generate_psk(
             symbol_rate=1e6, num_symbols=200, order=4, pulse_shape="rrc", sps=1, seed=0
@@ -990,4 +976,3 @@ class TestSignalDeviceAndPlotting:
 
         result = plotting.plot_constellation(sig, overlay_source=True, show=False)
         assert result is not None
-        plt.close("all")

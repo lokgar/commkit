@@ -19,9 +19,7 @@ class TestFilterTapGenerators:
         assert isinstance(taps, np.ndarray)
         assert len(taps) == 10 * 4 + 1
 
-    def test_rrc_taps_rolloff_zero(
-        self, backend_device: str, xp: Any, xpt: Any
-    ) -> None:
+    def test_rrc_taps_rolloff_zero(self, xp: Any, xpt: Any) -> None:
         """Verify zero-rolloff RRC taps match a normalised sinc function."""
         taps = filtering.rrc_taps(sps=4, rolloff=0, span=8)
         assert len(taps) > 0
@@ -115,7 +113,7 @@ class TestFilterTapGenerators:
 class TestFilterApplication:
     """Tests for fir_filter, matched_filter, and dtype preservation."""
 
-    def test_fir_filter(self, backend_device: str, xp: Any, xpt: Any) -> None:
+    def test_fir_filter(self, xp: Any, xpt: Any) -> None:
         """Verify FIR filtering output device, shape, and moving-average correctness."""
         data = xp.ones(100)
         taps = xp.ones(5) / 5.0
@@ -126,7 +124,7 @@ class TestFilterApplication:
         assert len(filtered) == len(data)
         xpt.assert_allclose(filtered[5:-5], xp.ones(90))
 
-    def test_matched_filter_normalization(self, backend_device: str, xp: Any) -> None:
+    def test_matched_filter_normalization(self, xp: Any) -> None:
         """Verify matched_filter respects taps_normalization."""
         samples = xp.ones(100)
         pulse = xp.ones(10)
@@ -140,18 +138,14 @@ class TestFilterApplication:
         with pytest.raises(ValueError, match="Unknown taps_normalization"):
             filtering.matched_filter(samples, pulse, taps_normalization="magic")
 
-    def test_fir_filter_preserves_real_dtype(
-        self, backend_device: str, xp: Any
-    ) -> None:
+    def test_fir_filter_preserves_real_dtype(self, xp: Any) -> None:
         """fir_filter: float32 signal + float64 taps -> float32 output."""
         x = xp.ones(512, dtype=xp.float32)
         taps = np.hanning(32)
         out = filtering.fir_filter(x, taps)
         assert out.dtype == xp.float32
 
-    def test_fir_filter_preserves_complex_dtype(
-        self, backend_device: str, xp: Any
-    ) -> None:
+    def test_fir_filter_preserves_complex_dtype(self, xp: Any) -> None:
         """fir_filter: complex64 signal + float64 taps -> complex64 output."""
         rng = np.random.default_rng(10)
         x = xp.asarray(
@@ -163,7 +157,7 @@ class TestFilterApplication:
         out = filtering.fir_filter(x, taps)
         assert out.dtype == xp.complex64
 
-    def test_matched_filter_preserves_dtype(self, backend_device: str, xp: Any) -> None:
+    def test_matched_filter_preserves_dtype(self, xp: Any) -> None:
         """matched_filter with rrc_taps (float64) on complex64 signal -> complex64."""
         rng = np.random.default_rng(11)
         sig = xp.asarray(
@@ -180,7 +174,7 @@ class TestOverlapSaveFiltering:
     """Tests for overlap-save FFT filtering (ols_fir_filter)."""
 
     def test_ols_fir_filter_center_matches_fir_filter_siso(
-        self, backend_device: str, xp: Any, xpt: Any
+        self, xp: Any, xpt: Any
     ) -> None:
         """ols_fir_filter(center=True, default) matches fir_filter."""
         rng = np.random.default_rng(0)
@@ -197,7 +191,7 @@ class TestOverlapSaveFiltering:
         xpt.assert_allclose(out[L:-L], ref[L:-L], atol=1e-4)
 
     def test_ols_fir_filter_center_matches_fir_filter_multichannel(
-        self, backend_device: str, xp: Any, xpt: Any
+        self, xp: Any, xpt: Any
     ) -> None:
         """ols_fir_filter(center=True) matches fir_filter for 2-channel input."""
         rng = np.random.default_rng(1)
@@ -213,9 +207,7 @@ class TestOverlapSaveFiltering:
         L = len(taps_np)
         xpt.assert_allclose(out[:, L:-L], ref[:, L:-L], atol=1e-4)
 
-    def test_ols_fir_filter_causal_siso(
-        self, backend_device: str, xp: Any, xpt: Any
-    ) -> None:
+    def test_ols_fir_filter_causal_siso(self, xp: Any, xpt: Any) -> None:
         """ols_fir_filter(center=False) returns causal convolution."""
         rng = np.random.default_rng(0)
         x_np = rng.standard_normal(512).astype(np.float32)
@@ -230,9 +222,7 @@ class TestOverlapSaveFiltering:
         L = len(taps_np)
         xpt.assert_allclose(out[L:], ref[L:], atol=1e-4)
 
-    def test_ols_fir_filter_preserves_shape_siso(
-        self, backend_device: str, xp: Any
-    ) -> None:
+    def test_ols_fir_filter_preserves_shape_siso(self, xp: Any) -> None:
         """ols_fir_filter returns 1-D output for 1-D input."""
         x = xp.ones(256, dtype=xp.float32)
         taps = xp.asarray(np.ones(8, dtype=np.float32))
@@ -240,7 +230,7 @@ class TestOverlapSaveFiltering:
         assert out.ndim == 1
         assert out.shape == x.shape
 
-    def test_ols_fir_filter_explicit_N_fft(self, backend_device: str, xp: Any) -> None:
+    def test_ols_fir_filter_explicit_N_fft(self, xp: Any) -> None:
         """ols_fir_filter accepts an explicit N_fft without error."""
         rng = np.random.default_rng(2)
         x = xp.asarray(rng.standard_normal(256).astype(np.float32))
@@ -248,9 +238,7 @@ class TestOverlapSaveFiltering:
         out = filtering.ols_fir_filter(x, taps, N_fft=1024)
         assert out.shape == x.shape
 
-    def test_ols_fir_filter_preserves_real_dtype(
-        self, backend_device: str, xp: Any
-    ) -> None:
+    def test_ols_fir_filter_preserves_real_dtype(self, xp: Any) -> None:
         """ols_fir_filter returns real dtype when both inputs are real."""
         rng = np.random.default_rng(3)
         x = xp.asarray(rng.standard_normal(1024).astype(np.float64))
@@ -258,9 +246,7 @@ class TestOverlapSaveFiltering:
         out = filtering.ols_fir_filter(x, taps)
         assert not xp.iscomplexobj(out)
 
-    def test_ols_fir_filter_complex_input_stays_complex(
-        self, backend_device: str, xp: Any
-    ) -> None:
+    def test_ols_fir_filter_complex_input_stays_complex(self, xp: Any) -> None:
         """ols_fir_filter returns complex when input is complex."""
         rng = np.random.default_rng(4)
         x = xp.asarray(
@@ -273,7 +259,7 @@ class TestOverlapSaveFiltering:
         assert xp.iscomplexobj(out)
 
     def test_ols_fir_filter_signal_input_returns_signal(
-        self, backend_device: str, xp: Any, xpt: Any
+        self, xp: Any, xpt: Any
     ) -> None:
         """Signal input returns a Signal with the filtered samples."""
         rng = np.random.default_rng(5)
@@ -291,9 +277,7 @@ class TestOverlapSaveFiltering:
         assert isinstance(out_sig, Signal)
         xpt.assert_allclose(out_sig.samples, out_arr)
 
-    def test_ols_fir_filter_preserves_complex64_dtype(
-        self, backend_device: str, xp: Any
-    ) -> None:
+    def test_ols_fir_filter_preserves_complex64_dtype(self, xp: Any) -> None:
         """ols_fir_filter: complex64 signal + float64 taps -> complex64 output."""
         rng = np.random.default_rng(13)
         x = xp.asarray(
@@ -309,7 +293,7 @@ class TestOverlapSaveFiltering:
 class TestCompensateChromaticDispersion:
     """Tests for compensate_chromatic_dispersion (electronic dispersion compensation)."""
 
-    def test_round_trip_siso(self, backend_device: str, xp: Any, xpt: Any) -> None:
+    def test_round_trip_siso(self, xp: Any, xpt: Any) -> None:
         """Apply CD then compensate: SISO output should recover input."""
         from commkit.impairments import apply_chromatic_dispersion
 
@@ -326,7 +310,7 @@ class TestCompensateChromaticDispersion:
 
         xpt.assert_allclose(recovered, samples, atol=1e-3)
 
-    def test_round_trip_mimo(self, backend_device: str, xp: Any, xpt: Any) -> None:
+    def test_round_trip_mimo(self, xp: Any, xpt: Any) -> None:
         """Apply CD then compensate: MIMO output should recover input."""
         from commkit.impairments import apply_chromatic_dispersion
 
@@ -345,9 +329,7 @@ class TestCompensateChromaticDispersion:
 
         xpt.assert_allclose(recovered, samples, atol=1e-3)
 
-    def test_zero_dispersion_is_identity(
-        self, backend_device: str, xp: Any, xpt: Any
-    ) -> None:
+    def test_zero_dispersion_is_identity(self, xp: Any, xpt: Any) -> None:
         """length=0 should return identical samples."""
         samples = xp.ones(512, dtype=xp.complex64)
         out = filtering.compensate_chromatic_dispersion(
@@ -359,9 +341,7 @@ class TestCompensateChromaticDispersion:
         )
         xpt.assert_allclose(out, samples, atol=1e-6)
 
-    def test_output_shape_and_dtype_preserved(
-        self, backend_device: str, xp: Any
-    ) -> None:
+    def test_output_shape_and_dtype_preserved(self, xp: Any) -> None:
         """Output shape and dtype match input."""
         samples = xp.ones((2, 256), dtype=xp.complex64)
         out = filtering.compensate_chromatic_dispersion(
@@ -374,9 +354,7 @@ class TestCompensateChromaticDispersion:
         assert out.shape == (2, 256)
         assert out.dtype == xp.complex64
 
-    def test_signal_input_returns_signal(
-        self, backend_device: str, xp: Any, xpt: Any
-    ) -> None:
+    def test_signal_input_returns_signal(self, xp: Any, xpt: Any) -> None:
         """Signal in -> Signal out with sampling_rate preserved."""
         samples = xp.ones(512, dtype=xp.complex64)
         sig = Signal(samples=samples, sampling_rate=56e9, symbol_rate=28e9)
@@ -392,7 +370,7 @@ class TestCompensateChromaticDispersion:
         assert out.symbol_rate == 28e9
         assert out.samples.shape == samples.shape
 
-    def test_signal_missing_fs_raises(self, backend_device: str, xp: Any) -> None:
+    def test_signal_missing_fs_raises(self, xp: Any) -> None:
         """Missing sampling_rate on array input raises ValueError."""
         samples = xp.ones(512, dtype=xp.complex64)
         with pytest.raises(ValueError, match="sampling_rate"):

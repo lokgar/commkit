@@ -20,7 +20,7 @@ SNR_DB = 30  # generous SNR so numerical algorithms converge reliably
 
 
 class TestCorrectionFunctions:
-    def test_correct_carrier_phase_dtype_preserved(self, backend_device, xp):
+    def test_correct_carrier_phase_dtype_preserved(self, xp):
         """correct_carrier_phase: complex64 input -> complex64 output."""
         sig = make_test_qam_signal(
             order=4, num_symbols=512, sps=1, symbol_rate=FS, xp=xp
@@ -29,7 +29,7 @@ class TestCorrectionFunctions:
         corrected = recovery.correct_carrier_phase(sig.samples, phase)
         assert corrected.dtype == xp.complex64
 
-    def test_correct_carrier_phase_zero_phase_identity(self, backend_device, xp):
+    def test_correct_carrier_phase_zero_phase_identity(self, xp):
         """Applying zero phase correction leaves samples unchanged."""
         sig = make_test_qam_signal(
             order=4, num_symbols=512, sps=1, symbol_rate=FS, xp=xp
@@ -42,7 +42,7 @@ class TestCorrectionFunctions:
 class TestCycleSlipCorrection:
     """correct_cycle_slips() detects and corrects injected slips."""
 
-    def test_standalone_no_slip(self, backend_device, xp, xpt):
+    def test_standalone_no_slip(self, xp, xpt):
         """Smooth linear ramp with no slips is returned unchanged."""
         B = 200
         phi_u = np.linspace(0.0, 2.0, B)
@@ -51,7 +51,7 @@ class TestCycleSlipCorrection:
         )
         xpt.assert_allclose(phi_out, phi_u, atol=1e-10)
 
-    def test_standalone_single_slip(self, backend_device, xp, xpt):
+    def test_standalone_single_slip(self, xp, xpt):
         """A single injected pi/2 slip is corrected back to the original ramp."""
         B = 300
         phi_u = np.linspace(0.0, 1.0, B)
@@ -62,7 +62,7 @@ class TestCycleSlipCorrection:
         )
         xpt.assert_allclose(phi_out, phi_u, atol=0.05)
 
-    def test_standalone_multiple_slips(self, backend_device, xp, xpt):
+    def test_standalone_multiple_slips(self, xp, xpt):
         """Multiple +/-pi/2 slips are all corrected."""
         B = 500
         phi_u = np.linspace(0.0, 1.5, B)
@@ -74,7 +74,7 @@ class TestCycleSlipCorrection:
         )
         xpt.assert_allclose(phi_out, phi_u, atol=0.05)
 
-    def test_bps_correction_bounded_output(self, backend_device, xp):
+    def test_bps_correction_bounded_output(self, xp):
         """BPS cycle_slip_correction=True returns phase within reasonable bounds."""
         sig = make_test_qam_signal(
             order=16, num_symbols=2048, sps=1, snr_db=SNR_DB, xp=xp
@@ -86,7 +86,7 @@ class TestCycleSlipCorrection:
         phi_np = to_numpy(phi)
         assert np.max(np.abs(phi_np)) < 10 * np.pi
 
-    def test_vv_correction_shape(self, backend_device, xp):
+    def test_vv_correction_shape(self, xp):
         """VV cycle_slip_correction=True returns correct shape."""
         sig = make_test_qam_signal(
             order=16, num_symbols=2048, sps=1, snr_db=SNR_DB, xp=xp
@@ -96,7 +96,7 @@ class TestCycleSlipCorrection:
         )
         assert phi.shape == sig.samples.shape
 
-    def test_tikhonov_correction_shape(self, backend_device, xp):
+    def test_tikhonov_correction_shape(self, xp):
         """Tikhonov cycle_slip_correction=True returns correct shape."""
         sig = make_test_qam_signal(
             order=16, num_symbols=2048, sps=1, snr_db=SNR_DB, xp=xp
@@ -117,7 +117,7 @@ class TestResolvePhaseAmbiguity:
 
     N = 2048
 
-    def test_best_rotation_is_zero(self, backend_device, xp):
+    def test_best_rotation_is_zero(self, xp):
         """Already-aligned symbols: k=0 chosen and SER is minimal."""
         from commkit.helpers import normalize
         from commkit.metrics import ser
@@ -140,7 +140,7 @@ class TestResolvePhaseAmbiguity:
             )
             assert s0 <= sk + 1e-6
 
-    def test_corrects_pi_half_rotation(self, backend_device, xp):
+    def test_corrects_pi_half_rotation(self, xp):
         """Symbols rotated by pi/2 are corrected; post-resolution SER is low."""
         from commkit.helpers import normalize
         from commkit.metrics import ser
@@ -154,7 +154,7 @@ class TestResolvePhaseAmbiguity:
         resolved = recovery.resolve_phase_ambiguity(rotated, ref, "qam", 16)
         assert float(ser(resolved, ref, "qam", 16)) < 0.05
 
-    def test_mimo_independent_per_channel(self, backend_device, xp):
+    def test_mimo_independent_per_channel(self, xp):
         """MIMO: channels with different rotations are each independently corrected."""
         from commkit.helpers import normalize
         from commkit.metrics import ser
@@ -187,7 +187,7 @@ class TestResolvePhaseAmbiguity:
         assert float(s_np[0]) < 0.05
         assert float(s_np[1]) < 0.05
 
-    def test_signal_method_in_place(self, backend_device, xp):
+    def test_signal_method_in_place(self, xp):
         """Signal.resolve_phase_ambiguity() updates resolved_symbols in place."""
         from commkit.helpers import normalize
         from commkit.metrics import ser
@@ -201,13 +201,13 @@ class TestResolvePhaseAmbiguity:
         ref = normalize(xp.asarray(sig.source_symbols), "average_power")
         assert float(ser(sig.resolved_symbols, ref, "qam", 16)) < 0.1
 
-    def test_signal_method_raises_without_resolved(self, backend_device, xp):
+    def test_signal_method_raises_without_resolved(self, xp):
         """Raises ValueError when resolved_symbols is None."""
         sig = generate_qam(order=16, num_symbols=256, sps=1, symbol_rate=1e6, seed=0)
         with pytest.raises(ValueError, match="resolved_symbols"):
             sig = recovery.resolve_phase_ambiguity(sig)
 
-    def test_signal_method_raises_without_source(self, backend_device, xp):
+    def test_signal_method_raises_without_source(self, xp):
         """Raises ValueError when source_symbols is None."""
         sig = generate_qam(order=16, num_symbols=256, sps=1, symbol_rate=1e6, seed=0)
         sig.resolved_symbols = sig.samples
@@ -215,9 +215,7 @@ class TestResolvePhaseAmbiguity:
         with pytest.raises(ValueError, match="source_symbols"):
             sig = recovery.resolve_phase_ambiguity(sig)
 
-    def test_resolve_phase_ambiguity_skip(
-        self, backend_device: str, xp: Any, xpt: Any
-    ) -> None:
+    def test_resolve_phase_ambiguity_skip(self, xp: Any, xpt: Any) -> None:
         """num_skip_symbols bypasses the corrupt head and picks the correct rotation."""
         n_sym, corrupt_head = 2000, 500
         symbols_np, ref_np = make_ambiguous_qam16(
@@ -244,7 +242,7 @@ class TestResolvePhaseAmbiguity:
         )
 
     def test_resolve_phase_ambiguity_skip_zero_is_baseline(
-        self, backend_device: str, xp: Any, xpt: Any
+        self, xp: Any, xpt: Any
     ) -> None:
         """num_skip_symbols=0 must produce identical output to the default call."""
         symbols_np, ref_np = make_ambiguous_qam16(n_sym=1000, corrupt_head=0)
@@ -257,9 +255,7 @@ class TestResolvePhaseAmbiguity:
 
         assert bool(xp.all(out_default == out_skip0))
 
-    def test_resolve_phase_ambiguity_skip_ge_n_raises(
-        self, backend_device: str, xp: Any
-    ) -> None:
+    def test_resolve_phase_ambiguity_skip_ge_n_raises(self, xp: Any) -> None:
         """num_skip_symbols >= N must raise ValueError."""
         symbols_np, ref_np = make_ambiguous_qam16(n_sym=100, corrupt_head=0)
         symbols, ref = xp.asarray(symbols_np), xp.asarray(ref_np)
@@ -285,7 +281,7 @@ class TestCorrectPhaseRotation:
 
     N = 2048
 
-    def test_arbitrary_rotation_corrected_siso(self, backend_device, xp, xpt):
+    def test_arbitrary_rotation_corrected_siso(self, xp, xpt):
         """Arbitrary non-grid rotation is removed; residual angle is near zero."""
         ref = _clean_qam16(xp, self.N, seed=0)
         theta_true = 0.7  # ~40°, not a π/2 multiple
@@ -294,7 +290,7 @@ class TestCorrectPhaseRotation:
         residual = float(xp.abs(xp.angle(xp.mean(out * xp.conj(ref)))))
         assert residual < 0.02
 
-    def test_short_ref_applies_to_full_sequence(self, backend_device, xp):
+    def test_short_ref_applies_to_full_sequence(self, xp):
         """Estimation from first N_pre symbols; correction spans the full N sequence."""
         N, N_pre = self.N, 256
         ref_full = _clean_qam16(xp, N, seed=1)
@@ -304,7 +300,7 @@ class TestCorrectPhaseRotation:
         residual = float(xp.abs(xp.angle(xp.mean(out * xp.conj(ref_full)))))
         assert residual < 0.02
 
-    def test_mimo_independent_channels(self, backend_device, xp):
+    def test_mimo_independent_channels(self, xp):
         """Each MIMO channel gets its own rotation corrected independently."""
         ref_a = _clean_qam16(xp, self.N, seed=2)
         ref_b = _clean_qam16(xp, self.N, seed=3)
@@ -321,7 +317,7 @@ class TestCorrectPhaseRotation:
             residual = float(xp.abs(xp.angle(xp.mean(out[ch] * xp.conj(ref[ch])))))
             assert residual < 0.02
 
-    def test_num_skip_symbols_excludes_transient(self, backend_device, xp):
+    def test_num_skip_symbols_excludes_transient(self, xp):
         """Corrupted head is excluded; tail correction uses the clean portion only."""
         N, skip = self.N, 200
         ref = _clean_qam16(xp, N, seed=4)
@@ -332,7 +328,7 @@ class TestCorrectPhaseRotation:
         residual = float(xp.abs(xp.angle(xp.mean(out[skip:] * xp.conj(ref[skip:])))))
         assert residual < 0.02
 
-    def test_num_skip_ge_nref_raises(self, backend_device, xp):
+    def test_num_skip_ge_nref_raises(self, xp):
         """num_skip_symbols >= N_ref must raise ValueError."""
         ref = _clean_qam16(xp, 100, seed=0)
         symbols = _clean_qam16(xp, 500, seed=1)
@@ -341,7 +337,7 @@ class TestCorrectPhaseRotation:
         with pytest.raises(ValueError, match="num_skip_symbols"):
             recovery.correct_phase_rotation(symbols, ref, num_skip_symbols=200)
 
-    def test_dtype_preserved(self, backend_device, xp):
+    def test_dtype_preserved(self, xp):
         """complex64 input -> complex64 output."""
         ref = _clean_qam16(xp, 256, seed=0)
         out = recovery.correct_phase_rotation(
@@ -349,7 +345,7 @@ class TestCorrectPhaseRotation:
         )
         assert out.dtype == ref.dtype
 
-    def test_1d_input_returns_1d(self, backend_device, xp):
+    def test_1d_input_returns_1d(self, xp):
         """1-D input returns 1-D output."""
         ref = _clean_qam16(xp, 256, seed=0)
         out = recovery.correct_phase_rotation(
@@ -357,7 +353,7 @@ class TestCorrectPhaseRotation:
         )
         assert out.ndim == 1
 
-    def test_signal_input_corrects_resolved_symbols(self, backend_device, xp):
+    def test_signal_input_corrects_resolved_symbols(self, xp):
         """Signal input: resolved_symbols is corrected, ref defaults to source_symbols."""
         from commkit.metrics import ser
 
@@ -381,13 +377,13 @@ class TestCorrectPhaseRotation:
         assert out_sig.resolved_symbols is not None
         assert float(ser(out_sig.resolved_symbols, ref, "qam", 16)) < 0.05
 
-    def test_signal_input_raises_without_resolved(self, backend_device, xp):
+    def test_signal_input_raises_without_resolved(self, xp):
         """Raises ValueError when resolved_symbols is None."""
         sig = generate_qam(order=16, num_symbols=256, sps=1, symbol_rate=1e6, seed=0)
         with pytest.raises(ValueError, match="resolved_symbols"):
             recovery.correct_phase_rotation(sig)
 
-    def test_signal_input_raises_without_ref(self, backend_device, xp):
+    def test_signal_input_raises_without_ref(self, xp):
         """Raises ValueError when ref_symbols is omitted and source_symbols is None."""
         sig = generate_qam(order=16, num_symbols=256, sps=1, symbol_rate=1e6, seed=0)
         sig.resolved_symbols = sig.samples
@@ -408,20 +404,20 @@ class TestResolveChannelPermutation:
         return s, s[::-1].copy()
 
     @pytest.mark.parametrize("metric", ["coherence", "phase_increment"])
-    def test_resolves_swap(self, backend_device, xp, xpt, metric):
+    def test_resolves_swap(self, xp, xpt, metric):
         """A swapped output is reordered back to reference order."""
         ref, swapped = self._dual_pol(xp)
         out = recovery.resolve_channel_permutation(swapped, ref, metric=metric)
         xpt.assert_allclose(out, ref)
 
     @pytest.mark.parametrize("metric", ["coherence", "phase_increment"])
-    def test_identity_is_a_no_op(self, backend_device, xp, xpt, metric):
+    def test_identity_is_a_no_op(self, xp, xpt, metric):
         """Already-aligned streams are returned in the same order."""
         ref, _ = self._dual_pol(xp)
         out = recovery.resolve_channel_permutation(ref, ref, metric=metric)
         xpt.assert_allclose(out, ref)
 
-    def test_phase_increment_survives_a_frequency_offset(self, backend_device, xp, xpt):
+    def test_phase_increment_survives_a_frequency_offset(self, xp, xpt):
         """The metric that exists for carrier-phase-intact records.
 
         With the carrier left on, ``|Σ y·conj(s)|`` averages a rotating phasor
@@ -445,7 +441,7 @@ class TestResolveChannelPermutation:
         # Correct pairing leaves only the common ramp on each channel.
         xpt.assert_allclose(out * xp.conj(ramp)[None, :], ref, atol=1e-6)
 
-    def test_rejects_unknown_metric(self, backend_device, xp):
+    def test_rejects_unknown_metric(self, xp):
         ref, swapped = self._dual_pol(xp, n=64)
         with pytest.raises(ValueError, match="metric"):
             recovery.resolve_channel_permutation(swapped, ref, metric="nonsense")
@@ -454,7 +450,7 @@ class TestResolveChannelPermutation:
 class TestLogPhaseSummary:
     """Shared "phase mean/std in degrees" INFO summary (recovery._common)."""
 
-    def test_logs_formatted_mean_and_std(self, backend_device, xp, caplog):
+    def test_logs_formatted_mean_and_std(self, xp, caplog):
         """Emits the prefix/mean/std/suffix in the expected combined format."""
         import logging
 
@@ -472,9 +468,7 @@ class TestLogPhaseSummary:
         assert "mean=90.00" in msg
         assert "std=0.00" in msg
 
-    def test_no_op_when_info_disabled_and_no_debug_plot(
-        self, backend_device, xp, caplog
-    ):
+    def test_no_op_when_info_disabled_and_no_debug_plot(self, xp, caplog):
         """No log line and no host transfer signal (returns None) when INFO is off."""
         import logging
 
@@ -488,9 +482,7 @@ class TestLogPhaseSummary:
         assert len(caplog.records) == 0
         assert result is None
 
-    def test_returns_host_array_when_debug_plot_even_if_info_disabled(
-        self, backend_device, xp, caplog
-    ):
+    def test_returns_host_array_when_debug_plot_even_if_info_disabled(self, xp, caplog):
         """debug_plot=True forces the host transfer even without INFO logging."""
         import logging
 
@@ -509,7 +501,7 @@ class TestLogPhaseSummary:
 class TestVvBlockPhase:
     """Shared Viterbi-Viterbi block-phase estimator (recovery._common)."""
 
-    def test_matches_qpsk_no_noise(self, backend_device, xp, xpt):
+    def test_matches_qpsk_no_noise(self, xp, xpt):
         """Noiseless QPSK at a fixed phase offset must recover that offset exactly."""
         from commkit.recovery._common import _vv_block_phase
 
@@ -527,7 +519,7 @@ class TestVvBlockPhase:
         assert all_positions.shape == (64,)
         xpt.assert_allclose(phi_u, offset, atol=1e-4)
 
-    def test_joint_channels_broadcasts_identical_rows(self, backend_device, xp, xpt):
+    def test_joint_channels_broadcasts_identical_rows(self, xp, xpt):
         """joint_channels=True must return broadcast-identical rows across C."""
         from commkit.recovery._common import _vv_block_phase
 

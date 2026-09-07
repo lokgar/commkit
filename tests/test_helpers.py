@@ -16,29 +16,29 @@ class Unconvertible:
 class TestRandomGeneration:
     """Random bits and symbol generation helpers."""
 
-    def test_random_bits(self, backend_device, xp):
+    def test_random_bits(self, xp, xpt):
         """Verify random bit generation produces correct length, binary values, and device."""
         bits = helpers.generate_bits(100, seed=42)
         assert len(bits) == 100
-        assert xp.all((bits == 0) | (bits == 1))
+        xpt.assert_array_equal((bits == 0) | (bits == 1), True)
         assert isinstance(bits, xp.ndarray)
 
-    def test_random_bits_no_seed(self, backend_device, xp):
+    def test_random_bits_no_seed(self, xp):
         """Verify generate_bits without a seed produces a result on the active device."""
         bits = helpers.generate_bits(100)
         assert isinstance(bits, xp.ndarray)
         assert len(bits) == 100
 
-    def test_random_symbols_unipolar(self, backend_device, xp):
+    def test_random_symbols_unipolar(self, xp, xpt):
         """Verify unipolar flag in generate_symbols produces non-negative values."""
         syms = helpers.generate_symbols(10, "ask", 4, unipolar=True)
-        assert xp.all(syms >= 0)
+        xpt.assert_array_equal(syms >= 0, True)
 
 
 class TestNormalization:
     """Normalization modes and RMS computation."""
 
-    def test_normalize(self, backend_device, xp):
+    def test_normalize(self, xp):
         """Verify peak and average-power normalization modes."""
         data = xp.array([1.0, 2.0, 0.5])
         norm = helpers.normalize(data, mode="peak")
@@ -47,7 +47,7 @@ class TestNormalization:
         norm_power = helpers.normalize(data, mode="average_power")
         assert xp.isclose(float(xp.mean(xp.abs(norm_power) ** 2)), 1.0)
 
-    def test_normalize_peak_complex_envelope(self, backend_device, xp):
+    def test_normalize_peak_complex_envelope(self, xp):
         """peak mode normalizes by complex envelope, not per-component I/Q."""
         data = xp.array([0.6 + 0.8j, -0.3 + 0.4j, 0.1 - 0.2j])
         norm = helpers.normalize(data, mode="peak")
@@ -60,7 +60,7 @@ class TestNormalization:
         assert float(xp.max(xp.abs(rotated.real))) <= 1.0 + 1e-6
         assert float(xp.max(xp.abs(rotated.imag))) <= 1.0 + 1e-6
 
-    def test_normalize_dac_peak(self, backend_device, xp, xpt):
+    def test_normalize_dac_peak(self, xp, xpt):
         """dac_peak mode normalizes by max(peak_|Re|, peak_|Im|), not complex envelope."""
         data = xp.array([0.6 + 0.8j, -0.3 + 0.4j, 0.1 - 0.2j])
         norm = helpers.normalize(data, mode="dac_peak")
@@ -75,25 +75,25 @@ class TestNormalization:
         )
         xpt.assert_allclose(row_max, 1.0)
 
-    def test_normalize_unity_gain(self, backend_device, xp):
+    def test_normalize_unity_gain(self, xp):
         """unity_gain normalizes by sum of elements."""
         data = xp.array([1.0, 2.0, 3.0])
         norm = helpers.normalize(data, mode="unity_gain")
         assert xp.isclose(xp.sum(norm), 1.0)
 
-    def test_normalize_zeros(self, backend_device, xp):
+    def test_normalize_zeros(self, xp, xpt):
         """Normalizing an all-zero array returns all zeros without NaN."""
         zeros = xp.zeros(5)
         norm = helpers.normalize(zeros, mode="peak")
-        assert xp.all(norm == 0)
+        xpt.assert_array_equal(norm, 0)
 
-    def test_normalize_invalid_mode(self, backend_device, xp):
+    def test_normalize_invalid_mode(self, xp):
         """Invalid mode raises ValueError."""
         data = xp.array([1.0, 2.0])
         with pytest.raises(ValueError, match="Unknown normalization mode"):
             helpers.normalize(data, mode="invalid_mode")
 
-    def test_normalize_preserves_float32_dtype(self, backend_device, xp):
+    def test_normalize_preserves_float32_dtype(self, xp):
         """normalize: float32 input -> float32 output across all modes."""
         x = xp.asarray(np.array([1.0, 2.0, 3.0], dtype=np.float32))
         for mode in ("unity_gain", "unit_energy", "peak", "average_power"):
@@ -102,13 +102,13 @@ class TestNormalization:
                 f"mode={mode!r}: expected float32, got {out.dtype}"
             )
 
-    def test_rms_preserves_float32_dtype(self, backend_device, xp):
+    def test_rms_preserves_float32_dtype(self, xp):
         """rms: float32 input -> float32 output."""
         x = xp.asarray(np.ones(64, dtype=np.float32))
         out = helpers.rms(x)
         assert out.dtype == xp.float32, f"Expected float32, got {out.dtype}"
 
-    def test_normalize_preserves_complex64_dtype(self, backend_device, xp):
+    def test_normalize_preserves_complex64_dtype(self, xp):
         """normalize: complex64 input -> complex64 output."""
         x = xp.asarray(np.array([1 + 1j, 2 + 2j], dtype=np.complex64))
         for mode in ("unit_energy", "peak", "average_power"):
@@ -117,7 +117,7 @@ class TestNormalization:
                 f"mode={mode!r}: expected complex64, got {out.dtype}"
             )
 
-    def test_rms_axis(self, backend_device, xp, xpt):
+    def test_rms_axis(self, xp, xpt):
         """Verify RMS over all elements and per-row."""
         x = xp.array([[1.0, 1.0], [2.0, 2.0]])
         xpt.assert_allclose(helpers.rms(x), xp.sqrt(2.5))
@@ -127,7 +127,7 @@ class TestNormalization:
 class TestParabolicAndMath:
     """Parabolic peak interpolation and dB / linear conversions."""
 
-    def test_parabolic_peak_offset_recovers_known_offset(self, backend_device, xp):
+    def test_parabolic_peak_offset_recovers_known_offset(self, xp):
         """A synthetic parabola with a known sub-bin peak must be recovered exactly."""
         k_true = 2.3
         nearest = round(k_true)
@@ -142,9 +142,7 @@ class TestParabolicAndMath:
         )
         assert float(delta) == pytest.approx(offset_true, abs=1e-9)
 
-    def test_parabolic_peak_offset_degenerate_denom_returns_zero(
-        self, backend_device, xp
-    ):
+    def test_parabolic_peak_offset_degenerate_denom_returns_zero(self, xp):
         """A flat triplet must return delta=0, not NaN/Inf."""
         y_prev = xp.asarray(1.0)
         y_curr = xp.asarray(1.0)
@@ -158,12 +156,12 @@ class TestParabolicAndMath:
         assert isinstance(float(delta), float)
         assert -0.5 <= float(delta) <= 0.5
 
-    def test_db_to_linear_power_vs_amplitude(self, backend_device, xp):
+    def test_db_to_linear_power_vs_amplitude(self, xp):
         """power=True uses 10x convention; power=False uses 20x."""
         assert helpers.db_to_linear(10.0, power=True) == pytest.approx(10.0)
         assert helpers.db_to_linear(20.0, power=False) == pytest.approx(10.0)
 
-    def test_linear_to_db_is_inverse_of_db_to_linear(self, backend_device, xp):
+    def test_linear_to_db_is_inverse_of_db_to_linear(self, xp):
         """linear_to_db and db_to_linear are inverses of each other."""
         val = 15.5
         assert helpers.linear_to_db(
@@ -173,12 +171,12 @@ class TestParabolicAndMath:
             helpers.db_to_linear(val, power=False), power=False
         ) == pytest.approx(val)
 
-    def test_linear_to_db_zero_is_negative_inf_no_warning(self, backend_device, xp):
+    def test_linear_to_db_zero_is_negative_inf_no_warning(self, xp):
         """linear_to_db(0) returns -inf cleanly without warning."""
         res = helpers.linear_to_db(0.0)
         assert np.isneginf(res)
 
-    def test_format_si(self, backend_device, xp):
+    def test_format_si(self, xp):
         """Verify SI-prefix formatting for common magnitudes."""
         assert helpers.format_si(None) == "None"
         assert helpers.format_si(0) == "0.00 Hz"
@@ -186,7 +184,7 @@ class TestParabolicAndMath:
         assert "500.00 mV" in helpers.format_si(0.5, "V")
         assert "Hz" in helpers.format_si(100)
 
-    def test_zc_mimo_root(self, backend_device, xp):
+    def test_zc_mimo_root(self, xp):
         """zc_mimo_root assigns distinct roots cycling from base_root in [1, length-1]."""
         from commkit.helpers import zc_mimo_root
 
@@ -207,7 +205,7 @@ class TestParabolicAndMath:
 class TestValidationHelpers:
     """Array validation and input coercion helpers."""
 
-    def test_validate_array(self, backend_device, xp):
+    def test_validate_array(self, xp):
         """Verify array validation: None passthrough, list conversion, complex_only, error paths."""
         assert helpers.validate_array(None) is None
 
@@ -223,15 +221,15 @@ class TestValidationHelpers:
         with pytest.raises(ValueError, match="Expected numeric array"):
             helpers.validate_array(np.array(["a", "b"]))
 
-    def test_validate_array_complex_only(self, backend_device, xp):
+    def test_validate_array_complex_only(self, xp, xpt):
         """Verify complex_only flag zero-extends the imaginary part."""
         arr = xp.array([1, 2, 3], dtype=float)
         out = helpers.validate_array(arr, complex_only=True)
         assert xp.iscomplexobj(out)
-        assert xp.all(out.real == arr)
-        assert xp.all(out.imag == 0)
+        xpt.assert_array_equal(out.real, arr)
+        xpt.assert_array_equal(out.imag, 0)
 
-    def test_validate_array_exception(self, backend_device, xp):
+    def test_validate_array_exception(self, xp):
         """Verify the except-block in validate_array raises ValueError for unconvertible input."""
         obj = Unconvertible()
         with pytest.raises(ValueError, match="Could not convert"):
@@ -241,7 +239,7 @@ class TestValidationHelpers:
 class TestShapeHelpers:
     """Dimensional promotion, squeezing, channel broadcasting, and layout round-trips."""
 
-    def test_as_2d_promotes_siso(self, backend_device, xp, xpt):
+    def test_as_2d_promotes_siso(self, xp, xpt):
         """as_2d: (N,) -> (1, N) with was_1d=True."""
         x = xp.asarray(np.arange(8.0))
         x2, was_1d = helpers.as_2d(x)
@@ -249,7 +247,7 @@ class TestShapeHelpers:
         assert x2.shape == (1, 8)
         xpt.assert_allclose(x2[0], x)
 
-    def test_as_2d_passes_mimo_through_without_copy(self, backend_device, xp):
+    def test_as_2d_passes_mimo_through_without_copy(self, xp):
         """as_2d: (C, N) is returned as the same object (no copy, no promotion)."""
         x = xp.asarray(np.arange(12.0).reshape(3, 4))
         x2, was_1d = helpers.as_2d(x)
@@ -257,19 +255,19 @@ class TestShapeHelpers:
         assert x2 is x
 
     @pytest.mark.parametrize("shape", [(), (2, 3, 4)])
-    def test_as_2d_rejects_unsupported_ndim(self, backend_device, xp, shape):
+    def test_as_2d_rejects_unsupported_ndim(self, xp, shape):
         """as_2d: 0-d and 3-D inputs raise instead of silently passing through."""
         x = xp.asarray(np.zeros(shape))
         with pytest.raises(ValueError, match="SISO|MIMO"):
             helpers.as_2d(x, name="samples")
 
-    def test_as_2d_error_message_names_the_variable(self, backend_device, xp):
+    def test_as_2d_error_message_names_the_variable(self, xp):
         """as_2d: the error quotes the caller's variable name."""
         x = xp.asarray(np.zeros((2, 2, 2)))
         with pytest.raises(ValueError, match="ref_symbols"):
             helpers.as_2d(x, name="ref_symbols")
 
-    def test_restore_1d_single_and_multiple(self, backend_device, xp, xpt):
+    def test_restore_1d_single_and_multiple(self, xp, xpt):
         """restore_1d: squeezes one or many outputs, bare return for a single one."""
         a = xp.asarray(np.arange(4.0))[None, :]
         b = xp.asarray(np.arange(4.0, 8.0))[None, :]
@@ -290,13 +288,13 @@ class TestShapeHelpers:
             helpers.restore_1d(True)
 
     @pytest.mark.parametrize("shape", [(8,), (3, 8)])
-    def test_as_2d_restore_1d_round_trip(self, backend_device, xp, xpt, shape):
+    def test_as_2d_restore_1d_round_trip(self, xp, xpt, shape):
         """as_2d + restore_1d is the identity for both layouts."""
         x = xp.asarray(np.random.default_rng(0).normal(size=shape))
         x2, was_1d = helpers.as_2d(x)
         xpt.assert_allclose(helpers.restore_1d(was_1d, x2), x)
 
-    def test_broadcast_channels_shared_and_per_channel(self, backend_device, xp, xpt):
+    def test_broadcast_channels_shared_and_per_channel(self, xp, xpt):
         """broadcast_channels: (L,) and (1, L) expand; (C, L) passes through."""
         ref = xp.asarray(np.arange(5.0))
         out = helpers.broadcast_channels(ref, 3)
@@ -309,7 +307,7 @@ class TestShapeHelpers:
         per_ch = xp.asarray(np.arange(15.0).reshape(3, 5))
         assert helpers.broadcast_channels(per_ch, 3) is per_ch
 
-    def test_broadcast_channels_rejects_mismatch(self, backend_device, xp):
+    def test_broadcast_channels_rejects_mismatch(self, xp):
         """broadcast_channels: a channel count that is neither C nor 1 raises."""
         ref = xp.asarray(np.zeros((2, 5)))
         with pytest.raises(ValueError, match="channels"):
@@ -317,7 +315,7 @@ class TestShapeHelpers:
         with pytest.raises(ValueError, match="1-D|2-D"):
             helpers.broadcast_channels(xp.asarray(np.zeros((2, 2, 5))), 2)
 
-    def test_require_channels(self, backend_device, xp):
+    def test_require_channels(self, xp):
         """require_channels: exact (C, N) passes; SISO and wrong counts raise."""
         x = xp.asarray(np.zeros((2, 16)))
         assert helpers.require_channels(x, 2) is x
@@ -326,7 +324,7 @@ class TestShapeHelpers:
         with pytest.raises(ValueError, match="2-D"):
             helpers.require_channels(xp.asarray(np.zeros((3, 16))), 2, name="samples")
 
-    def test_to_report_scalar(self, backend_device, xp):
+    def test_to_report_scalar(self, xp):
         """to_report_scalar: length-1 -> float, (C,) -> host array, device input OK."""
         single = helpers.to_report_scalar(xp.asarray(np.array([3.5])))
         assert isinstance(single, float) and single == 3.5
@@ -353,7 +351,7 @@ class TestShapeHelpers:
 class TestLinearTrend:
     """Estimation and removal of linear phase/carrier ramps."""
 
-    def test_linear_trend_slope_per_sample(self, backend_device, xp, xpt):
+    def test_linear_trend_slope_per_sample(self, xp, xpt):
         """linear_trend_slope: recovers a known per-channel slope in units/sample."""
         n = 512
         idx = np.arange(n, dtype=np.float64)
@@ -361,21 +359,19 @@ class TestLinearTrend:
         slope = helpers.linear_trend_slope(xp.asarray(y))
         xpt.assert_allclose(slope, xp.asarray(np.array([0.25, -0.75])), rtol=1e-9)
 
-    def test_linear_trend_slope_with_explicit_axis(self, backend_device, xp, xpt):
+    def test_linear_trend_slope_with_explicit_axis(self, xp, xpt):
         """linear_trend_slope: a non-uniform x axis gives a slope per unit x."""
         x = np.array([0.0, 1.0, 4.0, 9.0, 16.0])
         y = (2.0 * x + 5.0)[None, :]
         slope = helpers.linear_trend_slope(xp.asarray(y), x=xp.asarray(x))
         xpt.assert_allclose(slope, xp.asarray(np.array([2.0])), rtol=1e-9)
 
-    def test_linear_trend_slope_stays_on_device(self, backend_device, xp):
+    def test_linear_trend_slope_stays_on_device(self, xp):
         """linear_trend_slope: the result is a device array (no implicit transfer)."""
         y = xp.asarray(np.random.default_rng(1).normal(size=(2, 64)))
         assert isinstance(helpers.linear_trend_slope(y), xp.ndarray)
 
-    def test_remove_linear_trend_strips_ramp_and_keeps_mean(
-        self, backend_device, xp, xpt
-    ):
+    def test_remove_linear_trend_strips_ramp_and_keeps_mean(self, xp, xpt):
         """remove_linear_trend: ramp removed, mean preserved, slope reported."""
         n = 1024
         idx = np.arange(n, dtype=np.float64)
@@ -393,7 +389,7 @@ class TestLinearTrend:
             atol=5e-3,
         )
 
-    def test_remove_linear_trend_degenerate_length(self, backend_device, xp):
+    def test_remove_linear_trend_degenerate_length(self, xp):
         """remove_linear_trend: a single-sample record does not divide by zero."""
         y = xp.asarray(np.array([[4.0]]))
         detrended, slope = helpers.remove_linear_trend(y)

@@ -23,7 +23,7 @@ _isi_signal = make_isi_distorted_signal
 
 
 class TestBlockFDAFEngine:
-    def test_all_pilots_block_cma_matches_block_lms(self, backend_device, xp, xpt):
+    def test_all_pilots_block_cma_matches_block_lms(self, xp, xpt):
         """With a full pilot mask every position uses the LMS residual error, so
         block_cma must reproduce block_lms (training) bit-for-bit - the strongest
         check that the shared FDAF primitives match block_lms's engine."""
@@ -54,7 +54,7 @@ class TestBlockFDAFEngine:
         xpt.assert_allclose(r_cma.y_hat, r_lms.y_hat, atol=1e-4, rtol=1e-4)
 
     @pytest.mark.filterwarnings("ignore::RuntimeWarning")
-    def test_divergence_raises(self, backend_device, xp):
+    def test_divergence_raises(self, xp):
         channel = np.array([0.1, 1.0, 0.2], np.complex64)
         _, rx = _isi_signal(xp, "psk", 4, 4000, 1, channel)
         with pytest.raises(RuntimeError, match="diverged"):
@@ -69,7 +69,7 @@ class TestBlockFDAFEngine:
 
 
 class TestBlockCMA:
-    def test_blind_converges(self, backend_device, xp):
+    def test_blind_converges(self, xp):
         channel = np.array([0.06, 1.0, -0.25, 0.08], np.complex64)
         _, rx = _isi_signal(xp, "psk", 4, 40000, 5, channel)
         r = block_cma(
@@ -83,7 +83,7 @@ class TestBlockCMA:
         assert r.y_hat.shape[-1] == 40000
         assert calc_dispersion(r.y_hat[20000:], 4, "psk") < 0.02
 
-    def test_cpu_gpu_consistent(self, backend_device, xp):
+    def test_cpu_gpu_consistent(self, xp):
         """block_cma output is consistent across CPU/GPU (within float32)."""
         channel = np.array([0.06, 1.0, -0.25, 0.08], np.complex64)
         _, rx = _isi_signal(np, "psk", 4, 8000, 5, channel)
@@ -100,7 +100,7 @@ class TestBlockCMA:
         )
         assert np.max(np.abs(to_numpy(cur.y_hat) - ref.y_hat)) < 1e-3
 
-    def test_pilot_aided_resolves_phase(self, backend_device, xp):
+    def test_pilot_aided_resolves_phase(self, xp):
         channel = np.array([0.06, 1.0, -0.25, 0.08], np.complex64)
         n = 20000
         tx, rx = _isi_signal(xp, "psk", 4, n, 5, channel)
@@ -122,7 +122,7 @@ class TestBlockCMA:
         mse_db = 10 * np.log10(float(np.mean(np.abs(e) ** 2)) + 1e-30)
         assert mse_db < -10.0, f"PA block_cma did not resolve phase: {mse_db:.1f} dB"
 
-    def test_signal_input(self, backend_device, xp, xpt):
+    def test_signal_input(self, xp, xpt):
         """Signal input: sps is taken from the signal, y_hat becomes a Signal
         at the symbol rate."""
         channel = np.array([0.06, 1.0, -0.25, 0.08], np.complex64)
@@ -141,7 +141,7 @@ class TestBlockCMA:
 
 
 class TestBlockRDE:
-    def test_blind_converges_16qam(self, backend_device, xp):
+    def test_blind_converges_16qam(self, xp):
         channel = np.array([0.06, 1.0, -0.25, 0.08], np.complex64)
         _, rx = _isi_signal(xp, "qam", 16, 16000, 5, channel)
         r = block_rde(
@@ -156,7 +156,7 @@ class TestBlockRDE:
         # Multi-ring 16-QAM: RDE drives |y| onto the rings (blind, phase-ambiguous).
         assert calc_dispersion(r.y_hat[8000:], 16, "qam") < 0.05
 
-    def test_remainder_block_size(self, backend_device, xp):
+    def test_remainder_block_size(self, xp):
         """n_sym not divisible by block_size yields full-length output."""
         channel = np.array([0.1, 1.0, 0.2], np.complex64)
         n_odd = 8003
@@ -171,7 +171,7 @@ class TestBlockRDE:
         )
         assert r.y_hat.shape[-1] == n_odd
 
-    def test_signal_input(self, backend_device, xp, xpt):
+    def test_signal_input(self, xp, xpt):
         """Signal input: sps is taken from the signal, y_hat becomes a Signal
         at the symbol rate."""
         channel = np.array([0.06, 1.0, -0.25, 0.08], np.complex64)
@@ -190,7 +190,7 @@ class TestBlockRDE:
 
 
 class TestBlockBlindMIMO:
-    def test_butterfly_runs(self, backend_device, xp):
+    def test_butterfly_runs(self, xp):
         channel = np.array([0.06, 1.0, -0.25], np.complex64)
         _, rx = _isi_signal(xp, "psk", 4, 20000, 3, channel)
         rx2 = xp.stack([rx, xp.roll(rx, 1)])

@@ -50,7 +50,7 @@ class TestJAXBackend:
 
     # ---- LMS JAX ----
 
-    def test_lms_jax_siso_convergence(self, backend_device, xp):
+    def test_lms_jax_siso_convergence(self, xp):
         """LMS JAX backend should converge on QPSK and return EqualizerResult."""
         rx, sig = self._make_qpsk_rx(xp)
         train = xp.asarray(sig.source_symbols)
@@ -70,7 +70,7 @@ class TestJAXBackend:
         assert result.weights.shape == (11,)
         assert result.weights_history is None
 
-    def test_lms_jax_store_weights(self, backend_device, xp):
+    def test_lms_jax_store_weights(self, xp):
         """LMS JAX backend should populate weights_history when requested."""
         rx, sig = self._make_qpsk_rx(xp, n_symbols=500)
         train = xp.asarray(sig.source_symbols)
@@ -90,7 +90,7 @@ class TestJAXBackend:
         assert result.weights_history is not None
         assert result.weights_history.shape == (n_sym, 7)
 
-    def test_lms_jax_constellation_from_training(self, backend_device, xp):
+    def test_lms_jax_constellation_from_training(self, xp):
         """LMS JAX backend should infer constellation from training when no modulation given."""
         rx, sig = self._make_qpsk_rx(xp, n_symbols=500)
         train = xp.asarray(sig.source_symbols)
@@ -108,7 +108,7 @@ class TestJAXBackend:
         assert isinstance(result, EqualizerResult)
         assert result.y_hat.shape[0] > 0
 
-    def test_lms_jax_num_train_symbols(self, backend_device, xp):
+    def test_lms_jax_num_train_symbols(self, xp):
         """LMS JAX: pre-sliced training_symbols limits DA phase length."""
         rx, sig = self._make_qpsk_rx(xp, n_symbols=1000)
         train = xp.asarray(sig.source_symbols[:50])
@@ -126,7 +126,7 @@ class TestJAXBackend:
         assert isinstance(result, EqualizerResult)
         assert result.num_train_symbols <= 50
 
-    def test_lms_jax_mimo(self, backend_device, xp):
+    def test_lms_jax_mimo(self, xp):
         """LMS JAX butterfly should handle 2x2 MIMO input."""
 
         n_symbols = 1000
@@ -158,7 +158,7 @@ class TestJAXBackend:
 
     # ---- RLS JAX ----
 
-    def test_rls_jax_siso_convergence(self, backend_device, xp):
+    def test_rls_jax_siso_convergence(self, xp):
         """RLS JAX backend should converge and return correct shapes."""
         rx, sig = self._make_qpsk_rx(xp)
         train = xp.asarray(sig.source_symbols)
@@ -177,7 +177,7 @@ class TestJAXBackend:
         assert result.y_hat.ndim == 1
         assert result.weights.shape == (7,)
 
-    def test_rls_jax_with_leakage(self, backend_device, xp):
+    def test_rls_jax_with_leakage(self, xp):
         """RLS JAX backend should run without error with leakage > 0."""
         rx, sig = self._make_qpsk_rx(xp)
         train = xp.asarray(sig.source_symbols)
@@ -196,7 +196,7 @@ class TestJAXBackend:
         assert isinstance(result, EqualizerResult)
         assert result.y_hat.shape[0] > 0
 
-    def test_rls_jax_store_weights(self, backend_device, xp):
+    def test_rls_jax_store_weights(self, xp):
         """RLS JAX backend should store weight trajectory when requested."""
         rx, sig = self._make_qpsk_rx(xp, n_symbols=500)
         train = xp.asarray(sig.source_symbols)
@@ -216,7 +216,7 @@ class TestJAXBackend:
 
     # ---- CMA JAX ----
 
-    def test_cma_jax_siso_convergence(self, backend_device, xp):
+    def test_cma_jax_siso_convergence(self, xp):
         """CMA JAX backend should converge for QPSK."""
         rx, _ = self._make_qpsk_rx(xp)
 
@@ -233,7 +233,7 @@ class TestJAXBackend:
         assert result.y_hat.ndim == 1
         assert result.weights.shape == (11,)
 
-    def test_cma_jax_store_weights(self, backend_device, xp):
+    def test_cma_jax_store_weights(self, xp):
         """CMA JAX backend should populate weights_history when requested."""
         rx, _ = self._make_qpsk_rx(xp, n_symbols=400)
         n_sym = rx.shape[0] // 2
@@ -251,7 +251,7 @@ class TestJAXBackend:
         assert result.weights_history is not None
         assert result.weights_history.shape == (n_sym, 7)
 
-    def test_cma_jax_default_r2(self, backend_device, xp):
+    def test_cma_jax_default_r2(self, xp):
         """CMA JAX backend should work with default R²=1.0 (no modulation given)."""
         rx, _ = self._make_qpsk_rx(xp, n_symbols=400)
 
@@ -262,7 +262,7 @@ class TestJAXBackend:
 
     # ---- RDE JAX ----
 
-    def test_rde_jax_siso_convergence(self, backend_device, xp):
+    def test_rde_jax_siso_convergence(self, xp):
         """RDE JAX backend should converge on QPSK."""
         rx, _ = self._make_qpsk_rx(xp)
 
@@ -279,7 +279,7 @@ class TestJAXBackend:
         assert result.y_hat.ndim == 1
         assert result.weights.shape == (11,)
 
-    def test_rde_jax_16qam(self, backend_device, xp):
+    def test_rde_jax_16qam(self, xp):
         """RDE JAX backend should converge on 16-QAM."""
         rx, _ = self._make_qam16_rx(xp)
 
@@ -295,7 +295,7 @@ class TestJAXBackend:
         assert isinstance(result, EqualizerResult)
         assert result.y_hat.ndim == 1
 
-    def test_rde_jax_store_weights(self, backend_device, xp):
+    def test_rde_jax_store_weights(self, xp):
         """RDE JAX backend should populate weights_history when requested."""
         rx, _ = self._make_qpsk_rx(xp, n_symbols=400)
         n_sym = rx.shape[0] // 2
@@ -313,7 +313,7 @@ class TestJAXBackend:
         assert result.weights_history is not None
         assert result.weights_history.shape == (n_sym, 7)
 
-    def test_rde_jax_no_modulation_unit_radius(self, backend_device, xp):
+    def test_rde_jax_no_modulation_unit_radius(self, xp):
         """RDE JAX backend with no modulation should fall back to unit radius (≡ CMA)."""
         rx, _ = self._make_qpsk_rx(xp, n_symbols=400)
 
@@ -322,7 +322,7 @@ class TestJAXBackend:
         assert isinstance(result, EqualizerResult)
         assert result.y_hat.shape[0] > 0
 
-    def test_rde_jax_mimo(self, backend_device, xp):
+    def test_rde_jax_mimo(self, xp):
         """RDE JAX butterfly should handle 2x2 MIMO input."""
 
         n_symbols = 1000
@@ -349,7 +349,7 @@ class TestJAXBackend:
         assert result.y_hat.shape == (2, n_symbols)
         assert result.weights.shape == (2, 2, 7)
 
-    def test_kernel_cache_reuse(self, backend_device, xp):
+    def test_kernel_cache_reuse(self, xp):
         """Calling the same JAX algorithm twice with identical parameters must reuse the cache."""
         from commkit.equalization import _JITTED_EQ
 
@@ -383,7 +383,7 @@ class TestJAXBackend:
 class TestRLSJAXConstellationFromTraining:
     """RLS JAX derives constellation from training symbols when no modulation is given."""
 
-    def test_rls_jax_constellation_from_training(self, backend_device, xp):
+    def test_rls_jax_constellation_from_training(self, xp):
         """RLS JAX with training only (no modulation) infers constellation from training."""
 
         n_symbols = 800
@@ -428,7 +428,7 @@ class TestImportErrorBranches:
         )
         return xp.ascontiguousarray(xp.asarray(sig.samples)), sig
 
-    def test_lms_jax_not_installed(self, backend_device, xp):
+    def test_lms_jax_not_installed(self, xp):
         """LMS raises ImportError when backend='jax' but JAX is not available."""
         rx, _ = self._make_rx(xp)
         with patch(
@@ -438,7 +438,7 @@ class TestImportErrorBranches:
             with pytest.raises(ImportError, match="JAX is required"):
                 equalization.lms(rx, modulation="psk", order=4, backend="jax")
 
-    def test_rls_numba_not_installed(self, backend_device, xp):
+    def test_rls_numba_not_installed(self, xp):
         """RLS raises ImportError when backend='numba' but Numba is not available."""
         rx, sig = self._make_rx(xp)
         train = xp.asarray(sig.source_symbols)
@@ -453,7 +453,7 @@ class TestImportErrorBranches:
                     backend="numba",
                 )
 
-    def test_rls_jax_not_installed(self, backend_device, xp):
+    def test_rls_jax_not_installed(self, xp):
         """RLS raises ImportError when backend='jax' but JAX is not available."""
         rx, sig = self._make_rx(xp)
         train = xp.asarray(sig.source_symbols)
@@ -471,7 +471,7 @@ class TestImportErrorBranches:
                     backend="jax",
                 )
 
-    def test_cma_numba_not_installed(self, backend_device, xp):
+    def test_cma_numba_not_installed(self, xp):
         """CMA raises ImportError when backend='numba' but Numba is not available."""
         rx, _ = self._make_rx(xp)
         with patch(
@@ -480,7 +480,7 @@ class TestImportErrorBranches:
             with pytest.raises(ImportError, match="Numba is required"):
                 equalization.cma(rx, modulation="psk", order=4, backend="numba")
 
-    def test_cma_jax_not_installed(self, backend_device, xp):
+    def test_cma_jax_not_installed(self, xp):
         """CMA raises ImportError when backend='jax' but JAX is not available."""
         rx, _ = self._make_rx(xp)
         with patch(
@@ -490,7 +490,7 @@ class TestImportErrorBranches:
             with pytest.raises(ImportError, match="JAX is required"):
                 equalization.cma(rx, modulation="psk", order=4, backend="jax")
 
-    def test_rde_numba_not_installed(self, backend_device, xp):
+    def test_rde_numba_not_installed(self, xp):
         """RDE raises ImportError when backend='numba' but Numba is not available."""
         rx, _ = self._make_rx(xp)
         with patch(
@@ -499,7 +499,7 @@ class TestImportErrorBranches:
             with pytest.raises(ImportError, match="Numba is required"):
                 equalization.rde(rx, modulation="qam", order=16, backend="numba")
 
-    def test_rde_jax_not_installed(self, backend_device, xp):
+    def test_rde_jax_not_installed(self, xp):
         """RDE raises ImportError when backend='jax' but JAX is not available."""
         rx, _ = self._make_rx(xp)
         with patch(
@@ -513,7 +513,7 @@ class TestImportErrorBranches:
 class TestLMSJAXPureDD:
     """LMS JAX backend without training symbols runs pure decision-directed mode."""
 
-    def test_lms_jax_pure_dd_no_training(self, backend_device, xp):
+    def test_lms_jax_pure_dd_no_training(self, xp):
         """LMS JAX with modulation but no training_symbols runs in pure decision-directed mode from the start."""
 
         sig = generate_psk(

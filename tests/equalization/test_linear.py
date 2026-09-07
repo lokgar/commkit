@@ -7,7 +7,7 @@ from commkit.core import Signal
 class TestZFEqualizer:
     """Tests for the Zero-Forcing / MMSE block equalizer."""
 
-    def test_identity_channel(self, backend_device, xp, xpt):
+    def test_identity_channel(self, xp, xpt):
         """ZF should be a no-op for a unit impulse channel."""
         n = 128
         channel = xp.array([1.0 + 0j], dtype=xp.complex64)
@@ -19,7 +19,7 @@ class TestZFEqualizer:
 
         xpt.assert_allclose(equalized, symbols, atol=1e-5)
 
-    def test_simple_channel_inversion(self, backend_device, xp, xpt):
+    def test_simple_channel_inversion(self, xp, xpt):
         """ZF should invert a simple 2-tap channel."""
         n = 256
         channel = xp.array([1.0, 0.5], dtype=xp.complex64)
@@ -35,7 +35,7 @@ class TestZFEqualizer:
 
         xpt.assert_allclose(equalized, tx, atol=1e-4)
 
-    def test_mmse_better_than_zf_in_noise(self, backend_device, xp):
+    def test_mmse_better_than_zf_in_noise(self, xp):
         """MMSE should have lower MSE than ZF with a noisy spectral null."""
         n = 512
         channel = xp.array([1.0, -0.9, 0.1], dtype=xp.complex64)
@@ -63,7 +63,7 @@ class TestZFEqualizer:
             f"MMSE ({mse_mmse:.4f}) not better than ZF ({mse_zf:.4f})"
         )
 
-    def test_siso_output_shape(self, backend_device, xp):
+    def test_siso_output_shape(self, xp):
         """ZF SISO output should match input shape."""
         n = 64
         rx = xp.ones(n, dtype=xp.complex64)
@@ -72,7 +72,7 @@ class TestZFEqualizer:
         out = equalization.zf_equalizer(rx, h)
         assert out.shape == (n,)
 
-    def test_mimo_per_channel(self, backend_device, xp):
+    def test_mimo_per_channel(self, xp):
         """ZF with SISO channel on MIMO input should equalize per-channel."""
         n = 64
         rx = xp.ones((2, n), dtype=xp.complex64)
@@ -81,7 +81,7 @@ class TestZFEqualizer:
         out = equalization.zf_equalizer(rx, h)
         assert out.shape == (2, n)
 
-    def test_mmse_multi_block_two_sided_channel(self, backend_device, xp):
+    def test_mmse_multi_block_two_sided_channel(self, xp):
         """MMSE must correctly handle IIR two-sided response across multiple blocks.
 
         Channel h=[0.2, 1.0, 0.2] is symmetric with minimum frequency response 0.6
@@ -113,7 +113,7 @@ class TestZFEqualizer:
         # At σ²=0.0025, worst-case MMSE MSE ≈ σ²/min(|H|²) ≈ 0.0025/0.36 ≈ 0.007
         assert mse < 0.05, f"MMSE multi-block IIR test failed: interior MSE={mse:.4f}"
 
-    def test_signal_input_returns_signal(self, backend_device, xp, xpt):
+    def test_signal_input_returns_signal(self, xp, xpt):
         """Signal input returns a Signal with the equalized samples."""
         n = 128
         channel = xp.array([1.0 + 0j], dtype=xp.complex64)
@@ -130,7 +130,7 @@ class TestZFEqualizer:
 class TestApplyTaps:
     """Tests for apply_taps (frozen-weight inference pass)."""
 
-    def test_signal_input_returns_signal_at_symbol_rate(self, backend_device, xp, xpt):
+    def test_signal_input_returns_signal_at_symbol_rate(self, xp, xpt):
         """Signal input: sps is taken from the signal and sampling_rate is
         set to symbol_rate on the returned Signal."""
         n = 256
@@ -150,7 +150,7 @@ class TestApplyTaps:
 class TestZF3x3:
     """Tests for the ZF/MMSE equalizer with 3+ channel MIMO (uses linalg.inv)."""
 
-    def test_zf_3x3_identity(self, backend_device, xp, xpt):
+    def test_zf_3x3_identity(self, xp, xpt):
         """ZF on 3x3 identity channel should be a no-op (linalg.inv path)."""
         n = 256
         rng = xp.random.RandomState(0)
@@ -166,7 +166,7 @@ class TestZF3x3:
         assert equalized.shape == (3, n)
         xpt.assert_allclose(equalized, symbols, atol=1e-4)
 
-    def test_zf_3x3_inversion(self, backend_device, xp, xpt):
+    def test_zf_3x3_inversion(self, xp, xpt):
         """ZF should invert a non-trivial 3x3 single-tap MIMO channel."""
         n = 256
         rng = xp.random.RandomState(42)
@@ -189,7 +189,7 @@ class TestZF3x3:
         assert equalized.shape == (3, n)
         xpt.assert_allclose(equalized, tx, atol=1e-3)
 
-    def test_mmse_3x3_with_noise(self, backend_device, xp):
+    def test_mmse_3x3_with_noise(self, xp):
         """MMSE 3x3 should run without error and return correct shape."""
         n = 128
         channel = xp.zeros((3, 3, 2), dtype=xp.complex64)
@@ -208,7 +208,7 @@ class TestZF3x3:
 class TestEstimateTransferFunction:
     """Welch-H1 data-aided (MIMO) channel estimator."""
 
-    def test_flat_gain_siso(self, backend_device, xp, xpt):
+    def test_flat_gain_siso(self, xp, xpt):
         """A flat complex-gain channel y=g·x -> B(f) ≈ g at every bin."""
         rng = xp.random.RandomState(0)
         n = 1 << 16
@@ -219,7 +219,7 @@ class TestEstimateTransferFunction:
         assert B.shape == (256,)
         xpt.assert_allclose(B, xp.full_like(B, g), rtol=2e-2, atol=2e-2)
 
-    def test_instantaneous_mimo_mix(self, backend_device, xp, xpt):
+    def test_instantaneous_mimo_mix(self, xp, xpt):
         """A memoryless 2x2 mixing matrix -> B(f) ≈ M at every bin (incl. crosstalk)."""
         rng = xp.random.RandomState(1)
         n = 1 << 16
@@ -232,7 +232,7 @@ class TestEstimateTransferFunction:
         assert B.shape == (256, 2, 2)
         xpt.assert_allclose(B[64], M, rtol=3e-2, atol=3e-2)
 
-    def test_siso_memory_frequency_response(self, backend_device, xp, xpt):
+    def test_siso_memory_frequency_response(self, xp, xpt):
         """A short FIR channel -> B(f) ≈ H(f) = fft(h)."""
         rng = xp.random.RandomState(2)
         n = 1 << 16
@@ -243,7 +243,7 @@ class TestEstimateTransferFunction:
         Hf = xp.fft.fft(h, n=256)
         xpt.assert_allclose(B, Hf, rtol=0.1, atol=0.05)
 
-    def test_taps_form_centered_impulse(self, backend_device, xp, xpt):
+    def test_taps_form_centered_impulse(self, xp, xpt):
         """num_taps returns a centred, Hann-tapered impulse response (delta for flat)."""
         rng = xp.random.RandomState(3)
         n = 1 << 16
@@ -257,7 +257,7 @@ class TestEstimateTransferFunction:
         assert peak == 32  # centre of 65 taps
         xpt.assert_allclose(taps[peak], xp.asarray(1.5 + 0j), rtol=0.1, atol=0.1)
 
-    def test_mimo_taps_shape_for_zf_equalizer(self, backend_device, xp):
+    def test_mimo_taps_shape_for_zf_equalizer(self, xp):
         """MIMO taps come back as (C, C, L) - the layout zf_equalizer consumes."""
         rng = xp.random.RandomState(4)
         n = 1 << 14
@@ -272,7 +272,7 @@ class TestEstimateTransferFunction:
         out = equalization.zf_equalizer(y, taps, noise_variance=1e-2)
         assert out.shape == (2, n)
 
-    def test_signal_input_unwraps_both_arguments(self, backend_device, xp, xpt):
+    def test_signal_input_unwraps_both_arguments(self, xp, xpt):
         """Signal input for either/both arguments unwraps to .samples; output
         stays a raw array (frequency response is not signal-domain data)."""
         rng = xp.random.RandomState(0)

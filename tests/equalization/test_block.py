@@ -85,7 +85,7 @@ def _wiener_qam16_trackable(n_sym, snr_db=25.0, sigma_phi=0.005, seed=33):
 class TestBlockLMSShapes:
     """Output array shape validation for SISO, MIMO, CPR, and history tracking."""
 
-    def test_output_shape_siso(self, backend_device, xp):
+    def test_output_shape_siso(self, xp):
         samples, syms = _qam16(n_sym=1024, sps=2)
         r = block_lms(
             xp.asarray(samples),
@@ -102,7 +102,7 @@ class TestBlockLMSShapes:
         assert r.error.shape == (n_sym,)
         assert r.phase_trajectory is None
 
-    def test_output_shape_mimo(self, backend_device, xp):
+    def test_output_shape_mimo(self, xp):
         samples, training = make_test_mimo_samples(
             num_channels=2,
             order=16,
@@ -125,7 +125,7 @@ class TestBlockLMSShapes:
         assert r.weights.shape == (2, 2, 11)
         assert r.error.shape == (2, 1024)
 
-    def test_output_shape_bps(self, backend_device, xp):
+    def test_output_shape_bps(self, xp):
         samples, syms = _qam16(n_sym=1024, sps=2)
         r = block_lms(
             xp.asarray(samples),
@@ -145,7 +145,7 @@ class TestBlockLMSShapes:
             f"phase_trajectory shape {r.phase_trajectory.shape}"
         )
 
-    def test_output_shape_bps_mimo(self, backend_device, xp):
+    def test_output_shape_bps_mimo(self, xp):
         samples, training = make_test_mimo_samples(
             num_channels=2,
             order=16,
@@ -168,7 +168,7 @@ class TestBlockLMSShapes:
         )
         assert r.phase_trajectory.shape == (2, 1024)
 
-    def test_store_weights_shape_siso(self, backend_device, xp):
+    def test_store_weights_shape_siso(self, xp):
         samples, syms = _qam16(n_sym=512, sps=2)
         r = block_lms(
             xp.asarray(samples),
@@ -185,7 +185,7 @@ class TestBlockLMSShapes:
             f"weights_history shape {r.weights_history.shape}"
         )
 
-    def test_store_weights_shape_mimo(self, backend_device, xp):
+    def test_store_weights_shape_mimo(self, xp):
         samples, training = make_test_mimo_samples(
             num_channels=2, order=16, num_symbols=512, sps=2, snr_db=25.0, seed=3, xp=xp
         )
@@ -205,7 +205,7 @@ class TestBlockLMSShapes:
 class TestBlockLMSConvergence:
     """Convergence characteristics under gradient descent, AWGN, and ISI."""
 
-    def test_mse_decreases(self, backend_device, xp):
+    def test_mse_decreases(self, xp):
         """MSE in the last quarter of the signal must be less than in the first quarter."""
         samples, syms = _qam16(n_sym=8192, snr_db=25.0, sps=2)
         r = block_lms(
@@ -224,7 +224,7 @@ class TestBlockLMSConvergence:
             "MSE did not decrease from first to last quarter"
         )
 
-    def test_identity_channel_convergence(self, backend_device, xp):
+    def test_identity_channel_convergence(self, xp):
         """On a near-identity channel, symbols after training should match reference."""
         samples, syms = _qam16(n_sym=4096, snr_db=30.0, sps=2)
         n_train = 1024
@@ -248,7 +248,7 @@ class TestBlockLMSConvergence:
         )
         assert evm < 0.15, f"EVM {evm:.3f} too high - equalizer did not converge"
 
-    def test_mimo_convergence(self, backend_device, xp):
+    def test_mimo_convergence(self, xp):
         """2x2 MIMO: both channels should converge to low EVM."""
         n_sym = 4096
         sps = 1
@@ -282,7 +282,7 @@ class TestBlockLMSConvergence:
             )
             assert evm < 0.15, f"MIMO ch{ch} EVM {evm:.3f} too high"
 
-    def test_isi_channel_convergence(self, backend_device, xp):
+    def test_isi_channel_convergence(self, xp):
         """Known 3-tap ISI channel: equalizer must converge across block boundaries."""
         rng = np.random.default_rng(99)
         n_sym = 2048
@@ -324,7 +324,7 @@ class TestBlockLMSConvergence:
 class TestBlockLMSWeightHandling:
     """Initialization, warm-starting, and normalization parameter handling."""
 
-    def test_w_init_used(self, backend_device, xp):
+    def test_w_init_used(self, xp):
         """Warm-starting from converged weights should give lower initial MSE."""
         samples, syms = _qam16(n_sym=4096, snr_db=25.0, sps=2)
         samples_xp = xp.asarray(samples)
@@ -358,7 +358,7 @@ class TestBlockLMSWeightHandling:
             f"warm-start MSE ({mse_warm_start:.4f}) not better than cold ({mse_cold_start:.4f})"
         )
 
-    def test_num_train_symbols_respected(self, backend_device, xp):
+    def test_num_train_symbols_respected(self, xp):
         """Training length is determined by the length of training_symbols passed in."""
         samples, syms = _qam16(n_sym=2048, snr_db=30.0, sps=2)
         samples_xp = xp.asarray(samples)
@@ -389,7 +389,7 @@ class TestBlockLMSWeightHandling:
         )
         assert r_clip.num_train_symbols == 256
 
-    def test_input_norm_factor_block_lms(self, backend_device, xp, xpt):
+    def test_input_norm_factor_block_lms(self, xp, xpt):
         """Supplying input_norm_factor reproduces the same output as auto-computed."""
         samples_np, syms_np = _wiener_qam16_block(n_sym=2048)
         samples, syms = xp.asarray(samples_np), xp.asarray(syms_np)
@@ -410,7 +410,7 @@ class TestBlockLMSWeightHandling:
 class TestBlockLMSCPRIntegration:
     """BPS carrier phase recovery, cycle slip correction, and CPRState persistence."""
 
-    def test_bps_block_size_independent(self, backend_device, xp):
+    def test_bps_block_size_independent(self, xp):
         """block_size=256 with cpr_bps_block_size=16 must produce per-symbol phi."""
         samples, syms = _qam16(n_sym=1024, sps=2)
         r = block_lms(
@@ -431,7 +431,7 @@ class TestBlockLMSCPRIntegration:
             "All phi identical - expected per-symbol variation with cpr_bps_block_size=16"
         )
 
-    def test_bps_reduces_mse_under_phase_noise(self, backend_device, xp):
+    def test_bps_reduces_mse_under_phase_noise(self, xp):
         """With strong phase noise, BPS should produce lower steady-state MSE."""
         rng = np.random.default_rng(99)
         n_sym = 4096
@@ -481,7 +481,7 @@ class TestBlockLMSCPRIntegration:
             "under phase noise"
         )
 
-    def test_cpr_state_warmstart_block_lms_bps(self, backend_device, xp):
+    def test_cpr_state_warmstart_block_lms_bps(self, xp):
         """block_lms with cpr_state should populate and accept CPRState."""
         n_sym = 4096
         half = n_sym // 2
@@ -529,7 +529,7 @@ class TestBlockLMSCPRIntegration:
         assert r2.cpr_state.cpr_type == "bps"
         assert r2.phase_trajectory is not None
 
-    def test_cpr_state_none_is_baseline_block_lms(self, backend_device, xp):
+    def test_cpr_state_none_is_baseline_block_lms(self, xp):
         """cpr_state=None must be byte-exact with the default (no cpr_state) call."""
         samples_np, syms_np = _wiener_qam16_block(n_sym=2048)
         kw = dict(
@@ -552,9 +552,7 @@ class TestBlockLMSCPRIntegration:
         )
 
     @pytest.mark.parametrize("cs_corr", [False, True])
-    def test_cpr_state_roundtrip_matches_uninterrupted(
-        self, cs_corr, backend_device, xp
-    ):
+    def test_cpr_state_roundtrip_matches_uninterrupted(self, cs_corr, xp):
         """Split run (export CPRState at half, resume) matches one uninterrupted run."""
         n_sym = 2048
         half = n_sym // 2
@@ -609,7 +607,7 @@ class TestBlockLMSCPRIntegration:
         )
         np.testing.assert_allclose(p_split, p_full, rtol=1e-5, atol=1e-5)
 
-    def test_block_lms_cycle_slip_correction(self, backend_device, xp):
+    def test_block_lms_cycle_slip_correction(self, xp):
         """block_lms with cpr_cycle_slip_correction=True recovers through deliberate π/2 phase steps."""
         rng = np.random.default_rng(77)
         n_sym = 4096
@@ -657,7 +655,7 @@ class TestBlockLMSCPRIntegration:
             f"Steady-state MSE too large after cycle-slip correction: {mse:.4f}"
         )
 
-    def test_block_lms_cycle_slip_regression_warmstart(self, backend_device, xp):
+    def test_block_lms_cycle_slip_regression_warmstart(self, xp):
         """Regression buffer is saved into CPRState and correctly restored on warm-start."""
         samples_np, syms_np = _wiener_qam16_block(n_sym=2048)
         half = 1024
@@ -694,7 +692,7 @@ class TestBlockLMSCPRIntegration:
 class TestBlockLMSEdgeCases:
     """Degenerate inputs, non-multiple block sizes, error handling, and Signal containers."""
 
-    def test_non_multiple_block_size(self, backend_device, xp):
+    def test_non_multiple_block_size(self, xp):
         samples, syms = _qam16(n_sym=1000, sps=2)
         r = block_lms(
             xp.asarray(samples),
@@ -708,7 +706,7 @@ class TestBlockLMSEdgeCases:
         assert r.y_hat.shape == (1000,)
         assert r.error.shape == (1000,)
 
-    def test_pll_raises(self, backend_device, xp):
+    def test_pll_raises(self, xp):
         samples, syms = _qam16(n_sym=512, sps=2)
         with pytest.raises(ValueError, match="pll"):
             block_lms(
@@ -721,7 +719,7 @@ class TestBlockLMSEdgeCases:
                 cpr_type="pll",
             )
 
-    def test_single_tap(self, backend_device, xp):
+    def test_single_tap(self, xp):
         """num_taps=1: degenerate equalizer - must not crash, output shape correct."""
         rng = np.random.default_rng(42)
         n_sym = 64
@@ -747,7 +745,7 @@ class TestBlockLMSEdgeCases:
         )
         assert r.y_hat.shape == (n_sym,)
 
-    def test_block_lms_signal_input(self, backend_device, xp, xpt):
+    def test_block_lms_signal_input(self, xp, xpt):
         """Signal input: sps is taken from the signal, y_hat becomes a Signal."""
         samples_np, syms_np = _qam16(n_sym=2048, sps=2)
         samples, syms = xp.asarray(samples_np), xp.asarray(syms_np)
@@ -769,9 +767,7 @@ class TestBlockLMSCUDAGraphAndPerformance:
     @pytest.mark.requires_kernel
     @pytest.mark.parametrize("cs_corr", [False, True])
     @pytest.mark.parametrize("n_sym", [100_000, 100_137])
-    def test_block_lms_cuda_graph_matches_eager(
-        self, cs_corr, n_sym, backend_device, xp, xpt
-    ):
+    def test_block_lms_cuda_graph_matches_eager(self, cs_corr, n_sym, xp, xpt):
         rng = np.random.default_rng(5)
         const = normalize(gray_constellation("qam", 16), "average_power").astype(
             np.complex64
@@ -815,9 +811,7 @@ class TestBlockLMSCUDAGraphAndPerformance:
 
     @pytest.mark.gpu_only
     @pytest.mark.parametrize("cs_corr", [False, True])
-    def test_block_lms_bps_loop_transfer_count_constant(
-        self, cs_corr, backend_device, xp, monkeypatch
-    ):
+    def test_block_lms_bps_loop_transfer_count_constant(self, cs_corr, xp, monkeypatch):
         if cs_corr:
             from commkit import _cuda
 
@@ -864,7 +858,7 @@ class TestBlockLMSCUDAGraphAndPerformance:
     @pytest.mark.gpu_only
     @pytest.mark.requires_kernel("cs_block")
     def test_block_lms_cycle_slip_kernel_matches_cpu_fallback(
-        self, backend_device, xp, xpt, monkeypatch
+        self, xp, xpt, monkeypatch
     ):
         from commkit import _cuda
 

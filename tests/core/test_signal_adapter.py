@@ -11,9 +11,7 @@ from tests.common.signals import make_adapter_test_signal
 class TestSignalAdapterMetadata:
     """Tests for metadata resolution and precedence across Array and Signal inputs."""
 
-    def test_prepare_array_input_is_passed_through(
-        self, backend_device: str, xp: Any
-    ) -> None:
+    def test_prepare_array_input_is_passed_through(self, xp: Any) -> None:
         """Array input is held directly with None signal container."""
         samples = xp.ones(8)
         signal_adapter = adapt_signal(samples, function_name="example()")
@@ -22,9 +20,7 @@ class TestSignalAdapterMetadata:
         assert signal_adapter.signal is None
         assert signal_adapter.resolve_required("sampling_rate", 1e6) == 1e6
 
-    def test_required_signal_metadata_wins(
-        self, backend_device: str, xp: Any, caplog: Any
-    ) -> None:
+    def test_required_signal_metadata_wins(self, xp: Any, caplog: Any) -> None:
         """Metadata on Signal instance overrides conflicting argument with a warning."""
         sig = make_adapter_test_signal(xp)
         signal_adapter = adapt_signal(sig, function_name="example()")
@@ -34,9 +30,7 @@ class TestSignalAdapterMetadata:
         assert value == sig.sampling_rate
         assert "ignoring supplied sampling_rate" in caplog.text
 
-    def test_required_array_metadata_reports_function_name(
-        self, backend_device: str, xp: Any
-    ) -> None:
+    def test_required_array_metadata_reports_function_name(self, xp: Any) -> None:
         """Missing required metadata on array input raises ValueError citing function name."""
         signal_adapter = adapt_signal(xp.ones(8), function_name="example()")
 
@@ -44,7 +38,7 @@ class TestSignalAdapterMetadata:
             signal_adapter.resolve_required("sampling_rate")
 
     def test_optional_signal_metadata_precedence_and_fallback(
-        self, backend_device: str, xp: Any, caplog: Any
+        self, xp: Any, caplog: Any
     ) -> None:
         """Optional metadata uses Signal attribute when present, otherwise fallback value."""
         populated = make_adapter_test_signal(xp, mod_scheme="QAM")
@@ -66,9 +60,7 @@ class TestSignalAdapterTransforms:
         with pytest.raises(ValueError, match=r"example\(\).*positive integer"):
             require_integer_sps(value, "example()")
 
-    def test_signal_adapter_wrap_and_field_replacement(
-        self, backend_device: str, xp: Any
-    ) -> None:
+    def test_signal_adapter_wrap_and_field_replacement(self, xp: Any) -> None:
         """Wrapping samples or replacing fields produces clean cloned Signal instances."""
         sig = make_adapter_test_signal(xp)
         sig.resolved_bits = xp.asarray([1, 0])

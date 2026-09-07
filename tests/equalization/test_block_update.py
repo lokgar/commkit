@@ -90,7 +90,7 @@ class TestBlockUpdateValidation:
 
 
 class TestBlockUpdateLMS:
-    def test_converges_and_matches_sequential_floor(self, backend_device, xp):
+    def test_converges_and_matches_sequential_floor(self, xp):
         channel = np.array([0.1, 0.9, 0.9, 0.1], np.complex64)
         tx, rx = _isi_signal(xp, "qam", 16, 6000, 7, channel)
         seq = equalization.lms(
@@ -123,7 +123,7 @@ class TestBlockUpdateLMS:
                 f"{seq_db:.2f} dB by > 0.5 dB"
             )
 
-    def test_jax_xp_agree(self, backend_device, xp, xpt):
+    def test_jax_xp_agree(self, xp, xpt):
         channel = np.array([0.1, 0.9, 0.9, 0.1], np.complex64)
         tx, rx = _isi_signal(xp, "qam", 16, 4000, 11, channel)
         kw = dict(
@@ -140,7 +140,7 @@ class TestBlockUpdateLMS:
         # XLA vs CuPy/NumPy reductions differ only at float32 rounding.
         xpt.assert_allclose(y_xp, y_jax, atol=1e-4, rtol=1e-4)
 
-    def test_mu0_matches_sequential_forward(self, backend_device, xp, xpt):
+    def test_mu0_matches_sequential_forward(self, xp, xpt):
         """With mu=0 the frozen-identity forward path is bit-exact vs sequential."""
         channel = np.array([0.2, 1.0, 0.3], np.complex64)
         tx, rx = _isi_signal(xp, "qam", 16, 2000, 5, channel, noise=0.01)
@@ -166,7 +166,7 @@ class TestBlockUpdateLMS:
         )
         xpt.assert_allclose(blk.y_hat, xp.asarray(seq.y_hat), atol=1e-5, rtol=1e-5)
 
-    def test_remainder_length_and_tail(self, backend_device, xp, xpt):
+    def test_remainder_length_and_tail(self, xp, xpt):
         """N not divisible by block_len yields full-length output; the tail
         matches a divisible-length run over the shared prefix."""
         channel = np.array([0.2, 1.0, 0.3], np.complex64)
@@ -208,7 +208,7 @@ class TestBlockUpdateLMS:
 
 
 class TestBlockUpdateCMA:
-    def test_blind_converges_and_matches_sequential(self, backend_device, xp):
+    def test_blind_converges_and_matches_sequential(self, xp):
         channel = np.array([0.08, 1.0, -0.3, 0.1], np.complex64)
         _, rx = _isi_signal(xp, "psk", 4, 8000, 2, channel)
         seq = equalization.cma(
@@ -235,7 +235,7 @@ class TestBlockUpdateCMA:
             assert blk_disp < 0.05, f"{be} D={D} CMA blind diverged: {blk_disp:.4f}"
             assert blk_disp < seq_disp * 3 + 0.01
 
-    def test_pilot_aided_resolves_phase(self, backend_device, xp):
+    def test_pilot_aided_resolves_phase(self, xp):
         channel = np.array([0.08, 1.0, -0.3, 0.1], np.complex64)
         n = 8000
         tx, rx = _isi_signal(xp, "psk", 4, n, 2, channel)
@@ -274,7 +274,7 @@ class TestBlockUpdateCMA:
 
 
 class TestBlockUpdateRDE:
-    def test_blind_converges_and_matches_sequential(self, backend_device, xp):
+    def test_blind_converges_and_matches_sequential(self, xp):
         channel = np.array([0.08, 1.0, -0.3, 0.1], np.complex64)
         _, rx = _isi_signal(xp, "qam", 16, 12000, 2, channel)
         seq = equalization.rde(
@@ -304,7 +304,7 @@ class TestBlockUpdateRDE:
 
 
 class TestBlockUpdateMIMO:
-    def test_butterfly_block_runs(self, backend_device, xp):
+    def test_butterfly_block_runs(self, xp):
         """2x2 butterfly block LMS runs and converges on both channels."""
         channel = np.array([0.1, 0.9, 0.2], np.complex64)
         tx, rx = _isi_signal(xp, "qam", 16, 4000, 3, channel)

@@ -25,7 +25,7 @@ class TestJointChannels:
         )
         return mimo * xp.exp(1j * phase).astype(mimo.dtype)
 
-    def test_bps_joint_rows_identical(self, backend_device, xp, xpt):
+    def test_bps_joint_rows_identical(self, xp, xpt):
         """joint_channels=True: both phi_full rows are bitwise identical."""
         mimo = self._make_mimo(xp)
         phi = recovery.recover_carrier_phase_bps(
@@ -34,7 +34,7 @@ class TestJointChannels:
         assert phi.shape == (2, self.N)
         xpt.assert_array_equal(phi[0], phi[1])
 
-    def test_vv_joint_rows_identical(self, backend_device, xp, xpt):
+    def test_vv_joint_rows_identical(self, xp, xpt):
         """VV joint_channels=True: both phi_full rows are bitwise identical."""
         mimo = self._make_mimo(xp)
         phi = recovery.recover_carrier_phase_viterbi_viterbi(
@@ -43,7 +43,7 @@ class TestJointChannels:
         assert phi.shape == (2, self.N)
         xpt.assert_array_equal(phi[0], phi[1])
 
-    def test_tikhonov_joint_rows_identical(self, backend_device, xp, xpt):
+    def test_tikhonov_joint_rows_identical(self, xp, xpt):
         """Tikhonov joint_channels=True: both phi_full rows are bitwise identical."""
         mimo = self._make_mimo(xp)
         phi = recovery.recover_carrier_phase_tikhonov(
@@ -58,7 +58,7 @@ class TestJointChannels:
         assert phi.shape == (2, self.N)
         xpt.assert_array_equal(phi[0], phi[1])
 
-    def test_bps_joint_zero_spread(self, backend_device, xp, xpt):
+    def test_bps_joint_zero_spread(self, xp, xpt):
         """Joint BPS: inter-channel spread is exactly zero."""
         mimo = self._make_mimo(xp, snr_db=20)
         phi_joint = recovery.recover_carrier_phase_bps(
@@ -66,7 +66,7 @@ class TestJointChannels:
         )
         xpt.assert_allclose(phi_joint[0], phi_joint[1], atol=1e-12)
 
-    def test_siso_joint_noop(self, backend_device, xp, xpt):
+    def test_siso_joint_noop(self, xp, xpt):
         """joint_channels=True on SISO returns identical result to False."""
         sig = make_test_qam_signal(
             order=16, num_symbols=self.N, sps=1, snr_db=SNR_DB, seed=7, xp=xp

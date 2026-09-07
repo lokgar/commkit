@@ -85,7 +85,7 @@ class TestCPREqualizerBaseline:
 
     @pytest.mark.parametrize("backend", ["numba", "jax"])
     @pytest.mark.parametrize("algo", ["lms", "rls"])
-    def test_cpr_none_baseline(self, backend, algo, backend_device, xp):
+    def test_cpr_none_baseline(self, backend, algo, xp):
         """cpr_type=None produces bit-exact output vs the unmodified algorithm."""
         if backend == "jax":
             pytest.importorskip("jax")
@@ -110,7 +110,7 @@ class TestCPREqualizerBaseline:
         ), f"{algo}/{backend}: cpr_type=None must be deterministic"
         assert res_cpr_none.phase_trajectory is None
 
-    def test_baseline_cpr_none_matches_unwrapped(self, backend_device, xp, xpt):
+    def test_baseline_cpr_none_matches_unwrapped(self, xp, xpt):
         """cpr_type=None baseline is identical to a standalone un-equalized slice."""
         samples, syms = _qpsk_signal(n_sym=500)
         kw = dict(
@@ -135,7 +135,7 @@ class TestCPRBackendParity:
 
     @pytest.mark.cpu_only
     @pytest.mark.parametrize("cpr_type", ["pll", "bps"])
-    def test_numba_jax_parity_lms(self, cpr_type, backend_device, xp, jax):
+    def test_numba_jax_parity_lms(self, cpr_type, xp, jax):
         """Numba and JAX LMS+CPR produce matching outputs within float32 tolerance."""
         samples, syms = _qpsk_signal(n_sym=1000)
         kwargs = dict(
@@ -162,7 +162,7 @@ class TestCPRBackendParity:
         assert res_jx.phase_trajectory is not None
 
     @pytest.mark.cpu_only
-    def test_numba_jax_parity_bps_nonsquare(self, backend_device, xp, jax):
+    def test_numba_jax_parity_bps_nonsquare(self, xp, jax):
         """Numba/JAX BPS parity on a non-square (32-QAM cross) constellation."""
         rng = np.random.default_rng(7)
         const = gray_constellation("qam", 32).astype(np.complex64)
@@ -201,7 +201,7 @@ class TestCPRBackendParity:
         )
 
     @pytest.mark.gpu_only
-    def test_jax_cpr_gpu_device(self, backend_device, xp, jax):
+    def test_jax_cpr_gpu_device(self, xp, jax):
         """JAX-CPR runs on an explicit GPU device and matches the CPU-JAX result."""
         samples, syms = _qpsk_signal(n_sym=1500)
         kwargs = dict(
@@ -240,7 +240,7 @@ class TestCPRBackendParity:
 class TestCPRPLLConvergence:
     """PLL phase tracking, cycle-slip correction, and gain parameterization."""
 
-    def test_cycle_slip_correction(self, backend_device, xp):
+    def test_cycle_slip_correction(self, xp):
         """LMS+PLL recovers through deliberate π/2 phase steps without diverging."""
         rng = np.random.default_rng(42)
         n_sym = 3000
@@ -280,7 +280,7 @@ class TestCPRPLLConvergence:
         mse = float(xp.mean(xp.abs(y_dd - d) ** 2))
         assert mse < 0.1, f"MSE after cycle slip recovery too large: {mse:.4f}"
 
-    def test_pll_phase_noise_tracking(self, backend_device, xp):
+    def test_pll_phase_noise_tracking(self, xp):
         """LMS+PLL tracks Wiener-process phase noise; phase RMSE within expected bound."""
         rng = np.random.default_rng(7)
         n_sym = 5000
@@ -324,7 +324,7 @@ class TestCPRPLLConvergence:
         assert rmse < bound, f"PLL phase RMSE {rmse:.4f} exceeds bound {bound:.4f}"
 
     @pytest.mark.parametrize("backend", ["numba", "jax"])
-    def test_inline_raw_gains_match_bandwidth(self, backend, backend_device, xp):
+    def test_inline_raw_gains_match_bandwidth(self, backend, xp):
         """cpr_pll_mu/beta set to bandwidth-equivalent gains reproduces bandwidth path."""
         if backend == "jax":
             pytest.importorskip("jax")
@@ -355,7 +355,7 @@ class TestCPRPLLConvergence:
             f"raw vs bandwidth y_hat mismatch (max diff {max_diff:.2e})"
         )
 
-    def test_inline_beta_without_mu_raises(self, backend_device, xp):
+    def test_inline_beta_without_mu_raises(self, xp):
         """cpr_pll_beta with cpr_pll_mu=None is ambiguous and must raise ValueError."""
         samples, syms = _qpsk_signal(n_sym=400)
         with pytest.raises(ValueError, match="beta requires mu"):
@@ -371,7 +371,7 @@ class TestCPRPLLConvergence:
                 backend="numba",
             )
 
-    def test_inline_pll_parity_with_standalone(self, backend_device, xp):
+    def test_inline_pll_parity_with_standalone(self, xp):
         """A frozen 1-tap identity equalizer reduces inline PLL to standalone DD-PLL."""
         rng = np.random.default_rng(3)
         n_sym = 2000
@@ -409,7 +409,7 @@ class TestCPRBPSConvergence:
     """Blind Phase Search unwrapping, convergence, and block sizing."""
 
     @pytest.mark.parametrize("backend", ["numba", "jax"])
-    def test_bps_phase_unwrap(self, backend, backend_device, xp):
+    def test_bps_phase_unwrap(self, backend, xp):
         """phase_trajectory from BPS must not wrap back to [0, π/2) under a ramp."""
         rng = np.random.default_rng(5)
         n_sym = 3000
@@ -446,7 +446,7 @@ class TestCPRBPSConvergence:
             f"BPS phase_trajectory looks wrapped (span={span:.3f} rad < π/2)"
         )
 
-    def test_bps_phase_noise_tracking(self, backend_device, xp):
+    def test_bps_phase_noise_tracking(self, xp):
         """LMS+BPS converges under Wiener phase noise (Numba backend)."""
         rng = np.random.default_rng(11)
         n_sym = 5000
@@ -498,7 +498,7 @@ class TestCPRBPSConvergence:
             "under Wiener phase noise"
         )
 
-    def test_bps_block_size_convergence(self, backend_device, xp):
+    def test_bps_block_size_convergence(self, xp):
         """lms(cpr_type='bps', bps_block_size=32) converges - verifies incremental sum."""
         rng = np.random.default_rng(13)
         n_sym = 4000
@@ -550,7 +550,7 @@ class TestCPRBPSConvergence:
         assert mse_k32 < 0.1, f"BPS K=32 did not converge: MSE={mse_k32:.4f}"
         assert mse_k1 < 0.1, f"BPS K=1 did not converge: MSE={mse_k1:.4f}"
 
-    def test_rls_bps_convergence(self, backend_device, xp):
+    def test_rls_bps_convergence(self, xp):
         """rls(cpr_type='bps') converges under phase noise."""
         rng = np.random.default_rng(17)
         n_sym = 3000
@@ -591,7 +591,7 @@ class TestCPRBPSConvergence:
 class TestCPRMIMOJoint:
     """Multi-channel MIMO CPR and joint carrier phase tracking."""
 
-    def test_mimo_lms_pll(self, backend_device, xp):
+    def test_mimo_lms_pll(self, xp):
         """2x2 butterfly LMS+PLL converges on both output channels."""
         rng = np.random.default_rng(99)
         n_sym = 3000
@@ -644,7 +644,7 @@ class TestCPRMIMOJoint:
             mse = float(xp.mean(xp.abs(y_ss - d) ** 2))
             assert mse < 0.1, f"MIMO channel {ch} MSE too large: {mse:.4f}"
 
-    def test_pll_joint_channels(self, backend_device, xp):
+    def test_pll_joint_channels(self, xp):
         """cpr_joint_channels=True makes both PLL integrators identical (shared LO)."""
         rng = np.random.default_rng(23)
         n_sym = 3000
@@ -701,7 +701,7 @@ class TestCPRStatePersistence:
     """State preservation and warm-start behavior."""
 
     @pytest.mark.parametrize("cpr_mode", ["pll", "bps"])
-    def test_cpr_state_warmstart_lms(self, cpr_mode, backend_device, xp):
+    def test_cpr_state_warmstart_lms(self, cpr_mode, xp):
         """Second lms call with cpr_state should have lower initial MSE than cold restart."""
         n_sym = 4000
         half = n_sym // 2
@@ -767,7 +767,7 @@ class TestCPRStatePersistence:
             f"warm={mse_warm:.1f} dB  cold={mse_cold:.1f} dB"
         )
 
-    def test_cpr_state_warmstart_rls(self, backend_device, xp):
+    def test_cpr_state_warmstart_rls(self, xp):
         """rls with cpr_state warm-start: second call has valid cpr_state output."""
         n_sym = 2000
         half = n_sym // 2
@@ -803,7 +803,7 @@ class TestCPRStatePersistence:
         assert r2.cpr_state is not None
         assert r2.cpr_state.cpr_type == "pll"
 
-    def test_input_norm_factor_lms_skips_rms(self, backend_device, xp, xpt):
+    def test_input_norm_factor_lms_skips_rms(self, xp, xpt):
         """Supplying input_norm_factor should give same result as letting lms compute it."""
         samples_np, syms_np = _wiener_phase_signal(n_sym=1000)
         samples, syms = xp.asarray(samples_np), xp.asarray(syms_np)
@@ -825,7 +825,7 @@ class TestCPRStatePersistence:
 class TestBlockwiseFOE:
     """Frequency offset estimation and blockwise correction."""
 
-    def test_blockwise_foe_chirp(self, backend_device, xp):
+    def test_blockwise_foe_chirp(self, xp):
         """correct_frequency_offset_blockwise recovers a linearly chirping frequency."""
         rng = np.random.default_rng(3)
         fs = 1e9

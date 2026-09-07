@@ -19,7 +19,7 @@ from commkit.mapping.gray import (
 class TestGrayCode:
     """Tests for Gray code generation and binary conversion properties."""
 
-    def test_gray_code_edge_cases(self, backend_device: str, xp: Any, xpt: Any) -> None:
+    def test_gray_code_edge_cases(self, xp: Any, xpt: Any) -> None:
         """Verify Gray code generation for boundary bit depths."""
         # n = 0
         xpt.assert_array_equal(mapping.gray_code(0), xp.array([0]))
@@ -36,14 +36,12 @@ class TestGrayCode:
         with pytest.raises(ValueError, match="n must be non-negative"):
             mapping.gray_to_binary(-1)
 
-    def test_gray_code_zero(self, backend_device: str, xp: Any, xpt: Any) -> None:
+    def test_gray_code_zero(self, xp: Any, xpt: Any) -> None:
         """Verify Gray code for 0 bits returns single-element zero array."""
         xpt.assert_array_equal(mapping.gray_code(0), xp.array([0]))
         xpt.assert_array_equal(mapping.gray_to_binary(0), xp.array([0]))
 
-    def test_unpack_bits_matches_manual_shift(
-        self, backend_device: str, xp: Any, xpt: Any
-    ) -> None:
+    def test_unpack_bits_matches_manual_shift(self, xp: Any, xpt: Any) -> None:
         """unpack_bits(indices, k) must match the direct bit-shift idiom it replaced."""
         k = 4
         indices = xp.arange(2**k, dtype=xp.int32)
@@ -61,7 +59,7 @@ class TestGrayCode:
 class TestGrayConstellation:
     """Tests for Gray-coded constellation generation across modulation schemes."""
 
-    def test_gray_constellation_advanced(self, backend_device: str, xp: Any) -> None:
+    def test_gray_constellation_advanced(self, xp: Any) -> None:
         """Verify constellation generation edge cases."""
         # 1. Unipolar via argument
         const_unipol = mapping.gray_constellation("pam", 4, unipolar=True)
@@ -150,7 +148,7 @@ class TestConstellationSlicing:
         assert d_grid == np.float32(1.0)
 
     def test_nearest_constellation_index_matches_unchunked_argmin(
-        self, backend_device: str, xp: Any, xpt: Any
+        self, xp: Any, xpt: Any
     ) -> None:
         """Chunked search agrees with plain unchunked argmin on active backend."""
         const_np = mapping.gray_constellation("qam", 16)

@@ -11,7 +11,7 @@ from commkit.core import Signal
 class TestShapingFilterTaps:
     """Tests for automatic shaping filter tap generation from Signal metadata."""
 
-    def test_signal_pulse_params(self, backend_device: str, xp: Any) -> None:
+    def test_signal_pulse_params(self, xp: Any) -> None:
         """Verify pulse shaping parameters (e.g. rolloff) are correctly stored and utilized."""
         sig = generate_qam(
             order=4,
@@ -29,7 +29,7 @@ class TestShapingFilterTaps:
         assert taps is not None
         assert len(taps) > 0
 
-    def test_rzpam_pulse_params(self, backend_device: str, xp: Any) -> None:
+    def test_rzpam_pulse_params(self, xp: Any) -> None:
         """Verify pulse parameters for Return-to-Zero (RZ) PAM signals."""
         sig = generate_pam(
             order=2,
@@ -47,7 +47,7 @@ class TestShapingFilterTaps:
         taps = filtering.shaping_filter_taps(sig)
         assert len(taps) > 0
 
-    def test_rz_rect_taps_length(self, backend_device: str, xp: Any, xpt: Any) -> None:
+    def test_rz_rect_taps_length(self, xp: Any, xpt: Any) -> None:
         """Verify that RZ rectangular pulse taps have the correct half-symbol length."""
         sig = generate_pam(
             order=2,
@@ -62,7 +62,7 @@ class TestShapingFilterTaps:
         assert len(taps) == 2
         xpt.assert_allclose(taps, xp.ones(2))
 
-    def test_rect_pulse_taps(self, backend_device: str, xp: Any, xpt: Any) -> None:
+    def test_rect_pulse_taps(self, xp: Any, xpt: Any) -> None:
         """Verify that standard rectangular pulse shaping produces all-ones taps."""
         sig = generate_pam(
             order=2,
@@ -75,7 +75,7 @@ class TestShapingFilterTaps:
         taps = filtering.shaping_filter_taps(sig)
         xpt.assert_allclose(taps, xp.ones(4))
 
-    def test_gaussian_shaping_filter_taps(self, backend_device: str, xp: Any) -> None:
+    def test_gaussian_shaping_filter_taps(self, xp: Any) -> None:
         """shaping_filter_taps for gaussian pulse shape returns valid taps."""
         sig = Signal(
             samples=xp.ones(40, dtype="complex64"),
@@ -89,7 +89,7 @@ class TestShapingFilterTaps:
         assert taps is not None
         assert len(taps) > 0
 
-    def test_rc_shaping_filter_taps(self, backend_device: str, xp: Any) -> None:
+    def test_rc_shaping_filter_taps(self, xp: Any) -> None:
         """shaping_filter_taps for rc pulse shape returns valid taps."""
         sig = Signal(
             samples=xp.ones(40, dtype="complex64"),
@@ -103,7 +103,7 @@ class TestShapingFilterTaps:
         assert taps is not None
         assert len(taps) > 0
 
-    def test_unknown_pulse_shape(self, backend_device: str, xp: Any) -> None:
+    def test_unknown_pulse_shape(self, xp: Any) -> None:
         """Verify unsupported or missing pulse shapes raise ValueError."""
         sig = Signal(samples=[1, 2], sampling_rate=10, symbol_rate=5)
         with pytest.raises(ValueError, match="No pulse shape defined"):
@@ -117,7 +117,7 @@ class TestShapingFilterTaps:
 class TestMatchedFilterAuto:
     """Tests for matched filtering with auto-derived taps."""
 
-    def test_matched_filter_auto_taps(self, backend_device: str, xp: Any) -> None:
+    def test_matched_filter_auto_taps(self, xp: Any) -> None:
         """Verify that matched_filter correctly auto-generates and applies taps."""
         sig = generate_pam(
             order=2,
@@ -131,9 +131,7 @@ class TestMatchedFilterAuto:
         sig = filtering.matched_filter(sig)
         assert not xp.allclose(sig.samples, sig_before.samples)
 
-    def test_matched_filter_logs_error_for_no_pulse_shape(
-        self, backend_device: str, xp: Any
-    ) -> None:
+    def test_matched_filter_logs_error_for_no_pulse_shape(self, xp: Any) -> None:
         """matched_filter() with no pulse_shape returns an unchanged copy."""
         sig = Signal(
             samples=xp.ones(10, dtype="complex64"), sampling_rate=4e3, symbol_rate=1e3

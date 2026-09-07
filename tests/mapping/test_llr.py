@@ -75,7 +75,7 @@ class TestComputeLLRCore:
 
         assert np.array_equal(np.sign(llrs_maxlog), np.sign(llrs_exact))
         ratio = np.abs(llrs_maxlog) / (np.abs(llrs_exact) + 1e-10)
-        assert np.all(ratio > 0.5) and np.all(ratio < 2.0)
+        np.testing.assert_array_equal((ratio > 0.5) & (ratio < 2.0), True)
 
     def test_compute_llr_mimo_shape(self, xp: Any) -> None:
         """compute_llr preserves multi-channel MIMO structure."""

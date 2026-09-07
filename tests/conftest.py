@@ -8,11 +8,10 @@ The default is set to "all" in pyproject.toml [tool.pytest.ini_options] addopts.
 """
 
 import matplotlib
-
-matplotlib.use("Agg")
-
 import numpy as np
 import pytest
+
+matplotlib.use("Agg")
 
 from commkit import backend
 
@@ -82,12 +81,21 @@ def pytest_collection_modifyitems(config, items):
         items[:] = [item for item in items if not item.get_closest_marker("cpu_only")]
 
 
-@pytest.fixture(autouse=True)
+@pytest.fixture(scope="session", autouse=True)
 def _ensure_jax_precision():
     """Ensure JAX uses float64/complex128 precision across the entire test suite."""
     from tests.common.conversions import ensure_jax_x64
 
     ensure_jax_x64()
+
+
+@pytest.fixture(autouse=True)
+def _autoclose_figures():
+    """Ensure all matplotlib figures are closed after each test to prevent resource leaks."""
+    yield
+    import matplotlib.pyplot as plt
+
+    plt.close("all")
 
 
 @pytest.fixture

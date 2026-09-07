@@ -6,7 +6,7 @@ from commkit import equalization, generate_psk, generate_qam
 class TestButterflyMIMO:
     """Tests for butterfly MIMO equalization structure."""
 
-    def test_lms_2x2_cross_channel(self, backend_device, xp):
+    def test_lms_2x2_cross_channel(self, xp):
         """LMS butterfly should recover 2 streams through a 2x2 mixing channel."""
         n_symbols = 3000
 
@@ -56,7 +56,7 @@ class TestButterflyMIMO:
         assert mse_ch0 < 0.1, f"MIMO ch0 MSE = {mse_ch0:.4f}"
         assert mse_ch1 < 0.1, f"MIMO ch1 MSE = {mse_ch1:.4f}"
 
-    def test_cma_2x2_polarization_demux(self, backend_device, xp):
+    def test_cma_2x2_polarization_demux(self, xp):
         """CMA butterfly should demux 2 mixed polarizations."""
         n_symbols = 3000
 
@@ -98,7 +98,7 @@ class TestButterflyMIMO:
 
             assert std_dev < 0.35, f"CMA MIMO ch{ch} modulus std = {std_dev:.4f}"
 
-    def test_zf_mimo_channel_matrix(self, backend_device, xp, xpt):
+    def test_zf_mimo_channel_matrix(self, xp, xpt):
         """ZF with full (C, C, L) channel matrix should invert MIMO channel."""
         n = 128
         rng = xp.random.RandomState(42)
@@ -148,7 +148,7 @@ class TestButterflyMIMO:
 class TestButterflyMIMOExtended:
     """Additional MIMO butterfly tests for RDE and JAX backends."""
 
-    def test_rde_2x2_butterfly_numba(self, backend_device, xp):
+    def test_rde_2x2_butterfly_numba(self, xp):
         """RDE Numba butterfly should handle 2x2 cross-polarization without error."""
 
         n_symbols = 2000
@@ -185,7 +185,7 @@ class TestButterflyMIMOExtended:
         assert result.weights.shape == (2, 2, 11)
         assert result.error.shape == (2, n_symbols)
 
-    def test_lms_jax_2x2_cross_channel(self, backend_device, xp, jax):
+    def test_lms_jax_2x2_cross_channel(self, xp, jax):
         """LMS JAX butterfly should cancel cross-channel interference."""
 
         n_symbols = 2000

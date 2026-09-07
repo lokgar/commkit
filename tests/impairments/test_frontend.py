@@ -11,7 +11,7 @@ from commkit.impairments import (
 class TestApplyIQImbalance:
     """Tests for apply_iq_imbalance."""
 
-    def test_identity_zero_imbalance(self, backend_device, xp, xpt):
+    def test_identity_zero_imbalance(self, xp, xpt):
         """Zero imbalance (0 dB, 0 deg) should leave the signal unchanged."""
         N = 1024
         rng = xp.random.RandomState(42)
@@ -23,7 +23,7 @@ class TestApplyIQImbalance:
 
         xpt.assert_allclose(out, samples, atol=1e-5)
 
-    def test_causes_impropriety(self, backend_device, xp):
+    def test_causes_impropriety(self, xp):
         """Imbalance should make a circular signal improper (κ > 0)."""
         N = 4096
         rng = xp.random.RandomState(7)
@@ -41,7 +41,7 @@ class TestApplyIQImbalance:
 
         assert kappa_after > kappa_before + 0.05
 
-    def test_output_shape_siso(self, backend_device, xp):
+    def test_output_shape_siso(self, xp):
         """Output shape should match SISO input."""
         samples = xp.ones(512, dtype=xp.complex64)
         out = apply_iq_imbalance(
@@ -49,7 +49,7 @@ class TestApplyIQImbalance:
         )
         assert out.shape == (512,)
 
-    def test_output_shape_mimo(self, backend_device, xp):
+    def test_output_shape_mimo(self, xp):
         """Output shape should match MIMO input."""
         samples = xp.ones((4, 512), dtype=xp.complex64)
         out = apply_iq_imbalance(
@@ -57,7 +57,7 @@ class TestApplyIQImbalance:
         )
         assert out.shape == (4, 512)
 
-    def test_output_dtype_preserved(self, backend_device, xp):
+    def test_output_dtype_preserved(self, xp):
         """Output dtype should match input dtype."""
         samples = xp.ones(256, dtype=xp.complex64)
         out = apply_iq_imbalance(
@@ -81,7 +81,7 @@ class TestIQImbalanceCompensation:
 
     # --- Löwdin ---
 
-    def test_lowdin_restores_circularity(self, backend_device, xp):
+    def test_lowdin_restores_circularity(self, xp):
         """Löwdin compensation should drive κ to near zero."""
         _, r = self._make_imbalanced(xp)
         kappa_before = self._kappa(xp, r)
@@ -90,7 +90,7 @@ class TestIQImbalanceCompensation:
         assert kappa_after < 0.03
         assert kappa_after < kappa_before / 5
 
-    def test_lowdin_iq_balance(self, backend_device, xp):
+    def test_lowdin_iq_balance(self, xp):
         """After Löwdin, I and Q should have equal power and be orthogonal."""
         _, r = self._make_imbalanced(xp)
         out = compensate_iq_imbalance_lowdin(r)
@@ -102,7 +102,7 @@ class TestIQImbalanceCompensation:
         assert abs(power_ratio - 1.0) < 0.05
         assert cross_corr < 0.02
 
-    def test_lowdin_preserves_power(self, backend_device, xp):
+    def test_lowdin_preserves_power(self, xp):
         """Löwdin output power should equal input power."""
         _, r = self._make_imbalanced(xp)
         P_in = float(xp.mean(xp.abs(r) ** 2))
@@ -110,7 +110,7 @@ class TestIQImbalanceCompensation:
         P_out = float(xp.mean(xp.abs(out) ** 2))
         assert abs(P_out - P_in) / P_in < 0.01
 
-    def test_lowdin_identity_on_balanced_signal(self, backend_device, xp, xpt):
+    def test_lowdin_identity_on_balanced_signal(self, xp, xpt):
         """Löwdin applied to a balanced signal should return it unchanged."""
         N = 8192
         rng = xp.random.RandomState(0)
@@ -118,20 +118,20 @@ class TestIQImbalanceCompensation:
         out = compensate_iq_imbalance_lowdin(s)
         xpt.assert_allclose(xp.abs(out), xp.abs(s), atol=0.05)
 
-    def test_lowdin_siso_shape(self, backend_device, xp):
+    def test_lowdin_siso_shape(self, xp):
         """Löwdin: SISO (N,) input should return (N,)."""
         _, r = self._make_imbalanced(xp)
         out = compensate_iq_imbalance_lowdin(r)
         assert out.shape == r.shape
 
-    def test_lowdin_mimo_shape(self, backend_device, xp):
+    def test_lowdin_mimo_shape(self, xp):
         """Löwdin: MIMO (C, N) input should return (C, N)."""
         _, r = self._make_imbalanced(xp)
         r_mimo = xp.stack([r, r])  # (2, N)
         out = compensate_iq_imbalance_lowdin(r_mimo)
         assert out.shape == r_mimo.shape
 
-    def test_lowdin_dtype_preserved(self, backend_device, xp):
+    def test_lowdin_dtype_preserved(self, xp):
         """Löwdin output dtype should match input."""
         _, r = self._make_imbalanced(xp)
         out = compensate_iq_imbalance_lowdin(r)
@@ -139,7 +139,7 @@ class TestIQImbalanceCompensation:
 
     # --- Gram-Schmidt ---
 
-    def test_gram_schmidt_restores_circularity(self, backend_device, xp):
+    def test_gram_schmidt_restores_circularity(self, xp):
         """Gram-Schmidt compensation should drive κ to near zero."""
         _, r = self._make_imbalanced(xp)
         kappa_before = self._kappa(xp, r)
@@ -148,7 +148,7 @@ class TestIQImbalanceCompensation:
         assert kappa_after < 0.03
         assert kappa_after < kappa_before / 5
 
-    def test_gram_schmidt_iq_orthogonality(self, backend_device, xp):
+    def test_gram_schmidt_iq_orthogonality(self, xp):
         """After Gram-Schmidt, I and Q should be orthogonal."""
         _, r = self._make_imbalanced(xp)
         out = compensate_iq_imbalance_gram_schmidt(r)
@@ -158,7 +158,7 @@ class TestIQImbalanceCompensation:
         )
         assert cross_corr < 0.02
 
-    def test_gram_schmidt_preserves_power(self, backend_device, xp):
+    def test_gram_schmidt_preserves_power(self, xp):
         """Gram-Schmidt output power should equal input power."""
         _, r = self._make_imbalanced(xp)
         P_in = float(xp.mean(xp.abs(r) ** 2))
@@ -166,20 +166,20 @@ class TestIQImbalanceCompensation:
         P_out = float(xp.mean(xp.abs(out) ** 2))
         assert abs(P_out - P_in) / P_in < 0.01
 
-    def test_gram_schmidt_siso_shape(self, backend_device, xp):
+    def test_gram_schmidt_siso_shape(self, xp):
         """Gram-Schmidt: SISO (N,) input should return (N,)."""
         _, r = self._make_imbalanced(xp)
         out = compensate_iq_imbalance_gram_schmidt(r)
         assert out.shape == r.shape
 
-    def test_gram_schmidt_mimo_shape(self, backend_device, xp):
+    def test_gram_schmidt_mimo_shape(self, xp):
         """Gram-Schmidt: MIMO (C, N) input should return (C, N)."""
         _, r = self._make_imbalanced(xp)
         r_mimo = xp.stack([r, r])  # (2, N)
         out = compensate_iq_imbalance_gram_schmidt(r_mimo)
         assert out.shape == r_mimo.shape
 
-    def test_gram_schmidt_dtype_preserved(self, backend_device, xp):
+    def test_gram_schmidt_dtype_preserved(self, xp):
         """Gram-Schmidt output dtype should match input."""
         _, r = self._make_imbalanced(xp)
         out = compensate_iq_imbalance_gram_schmidt(r)
@@ -189,7 +189,7 @@ class TestIQImbalanceCompensation:
 class TestSignalInputFrontend:
     """Signal-awareness for apply_iq_imbalance and its compensators."""
 
-    def test_apply_iq_imbalance_signal_input(self, backend_device, xp, xpt):
+    def test_apply_iq_imbalance_signal_input(self, xp, xpt):
         """Signal input returns a Signal with the imbalanced samples."""
         rng = xp.random.RandomState(1)
         data = (rng.randn(512) + 1j * rng.randn(512)).astype(xp.complex64)
@@ -205,7 +205,7 @@ class TestSignalInputFrontend:
         assert isinstance(out_sig, Signal)
         xpt.assert_allclose(out_sig.samples, out_arr)
 
-    def test_compensate_lowdin_signal_input(self, backend_device, xp, xpt):
+    def test_compensate_lowdin_signal_input(self, xp, xpt):
         """Signal input returns a Signal with the compensated samples."""
         rng = xp.random.RandomState(2)
         data = (rng.randn(256) + 1j * rng.randn(256)).astype(xp.complex64)
@@ -217,7 +217,7 @@ class TestSignalInputFrontend:
         assert isinstance(out_sig, Signal)
         xpt.assert_allclose(out_sig.samples, out_arr)
 
-    def test_compensate_gram_schmidt_signal_input(self, backend_device, xp, xpt):
+    def test_compensate_gram_schmidt_signal_input(self, xp, xpt):
         """Signal input returns a Signal with the compensated samples."""
         rng = xp.random.RandomState(5)
         data = (rng.randn(256) + 1j * rng.randn(256)).astype(xp.complex64)

@@ -10,7 +10,7 @@ from commkit.core import Preamble, SingleCarrierFrame
 class TestSingleCarrierFrameBasics:
     """Tests for basic frame generation, preambles, guards, and normalization."""
 
-    def test_sc_frame_none(self, backend_device: str, xp: Any) -> None:
+    def test_sc_frame_none(self, xp: Any) -> None:
         """Verify basic frame generation with no pilots or guard intervals."""
         frame = SingleCarrierFrame(
             payload_len=100, symbol_rate=1e6, pilot_pattern="none"
@@ -21,7 +21,7 @@ class TestSingleCarrierFrameBasics:
         assert sig.signal_type == "Single-Carrier Frame"
         assert sig.frame.payload_len == 100
 
-    def test_sc_frame_comb(self, backend_device: str, xp: Any) -> None:
+    def test_sc_frame_comb(self, xp: Any) -> None:
         """Verify 'comb' pilot insertion logic and resulting sequence length."""
         frame = SingleCarrierFrame(
             payload_len=9, symbol_rate=1e6, pilot_pattern="comb", pilot_period=4
@@ -34,7 +34,7 @@ class TestSingleCarrierFrameBasics:
         assert len(sig.samples) == 12
         assert len(sig.frame.pilot_symbols) >= 3
 
-    def test_sc_frame_block(self, backend_device: str, xp: Any) -> None:
+    def test_sc_frame_block(self, xp: Any) -> None:
         """Verify 'block' pilot insertion logic and resulting sequence length."""
         frame = SingleCarrierFrame(
             payload_len=10,
@@ -50,18 +50,18 @@ class TestSingleCarrierFrameBasics:
         sig = frame.to_signal(sps=1, pulse_shape="none")
         assert len(sig.samples) == 20
 
-    def test_sc_frame_guard_zero(self, backend_device: str, xp: Any) -> None:
+    def test_sc_frame_guard_zero(self, xp: Any, xpt: Any) -> None:
         """Verify zero-insertion guard interval (GI) padding."""
         frame = SingleCarrierFrame(
             payload_len=100, symbol_rate=1e6, guard_type="zero", guard_len=20
         )
         sig = frame.to_signal(sps=1, pulse_shape="none")
         assert len(sig.samples) == 120
-        assert xp.all(sig.samples[-20:] == 0)
+        xpt.assert_array_equal(sig.samples[-20:], 0)
         assert sig.frame.guard_len == 20
         assert sig.frame.guard_type == "zero"
 
-    def test_sc_frame_guard_cp(self, backend_device: str, xp: Any, xpt: Any) -> None:
+    def test_sc_frame_guard_cp(self, xp: Any, xpt: Any) -> None:
         """Verify cyclic prefix (CP) guard interval generation."""
         frame = SingleCarrierFrame(
             payload_len=100, symbol_rate=1e6, guard_type="cp", guard_len=20
@@ -71,7 +71,7 @@ class TestSingleCarrierFrameBasics:
         xpt.assert_allclose(sig.samples[:20], sig.samples[-20:])
         assert sig.frame.guard_type == "cp"
 
-    def test_sc_frame_preamble(self, backend_device: str, xp: Any, xpt: Any) -> None:
+    def test_sc_frame_preamble(self, xp: Any, xpt: Any) -> None:
         """Verify that auto-generated preambles are prepended to the frame."""
         preamble = Preamble(sequence_type="barker", length=13)
         frame = SingleCarrierFrame(payload_len=100, symbol_rate=1e6, preamble=preamble)
@@ -80,7 +80,7 @@ class TestSingleCarrierFrameBasics:
         xpt.assert_allclose(sig.samples[:13], preamble.symbols)
         assert sig.frame.preamble.length == 13
 
-    def test_sc_frame_bit_first(self, backend_device: str, xp: Any) -> None:
+    def test_sc_frame_bit_first(self, xp: Any) -> None:
         """Verify Frame preserves source bits (bit-first architecture)."""
         frame = SingleCarrierFrame(
             payload_len=100, symbol_rate=1e6, payload_mod_order=4, payload_seed=42
@@ -92,7 +92,7 @@ class TestSingleCarrierFrameBasics:
         sig = frame.to_signal(sps=1, pulse_shape="none")
         assert sig.source_bits is None
 
-    def test_preamble_to_signal(self, backend_device: str, xp: Any) -> None:
+    def test_preamble_to_signal(self, xp: Any) -> None:
         """Verify Preamble.to_signal() standalone signal generation."""
         preamble = Preamble(sequence_type="barker", length=13)
         sig = preamble.to_signal(sps=4, symbol_rate=1e6, pulse_shape="rrc")
@@ -101,9 +101,7 @@ class TestSingleCarrierFrameBasics:
         assert sig.mod_scheme is None
         assert sig.source_symbols is None
 
-    def test_independent_preamble_normalization(
-        self, backend_device: str, xp: Any
-    ) -> None:
+    def test_independent_preamble_normalization(self, xp: Any) -> None:
         """Verify frame normalization contract for independent section scaling."""
         preamble = Preamble(sequence_type="barker", length=13)
         frame = SingleCarrierFrame(
@@ -131,7 +129,7 @@ class TestSingleCarrierFrameBasics:
 class TestSingleCarrierFrameStructureMap:
     """Tests for get_structure_map segment identification and boundary indexing."""
 
-    def test_sc_frame_structure_map(self, backend_device: str, xp: Any) -> None:
+    def test_sc_frame_structure_map(self, xp: Any) -> None:
         """Verify get_structure_map identifies preamble, body, pilot, and guard boundaries."""
         preamble = Preamble(sequence_type="barker", length=2)
         frame = SingleCarrierFrame(
@@ -161,7 +159,7 @@ class TestSingleCarrierFrameStructureMap:
         assert len(struct_s["preamble"]) == total_len * sps
         assert xp.sum(struct_s["preamble"]) == 2 * sps
 
-    def test_sc_frame_structure_map_cp(self, backend_device: str, xp: Any) -> None:
+    def test_sc_frame_structure_map_cp(self, xp: Any) -> None:
         """Verify get_structure_map with Cyclic Prefix (CP) guard interval."""
         frame = SingleCarrierFrame(
             payload_len=10, symbol_rate=1e6, guard_type="cp", guard_len=5
@@ -171,9 +169,7 @@ class TestSingleCarrierFrameStructureMap:
         assert struct["guard"][4]
         assert not struct["guard"][5]
 
-    def test_structure_map_default_no_preamble_no_guard(
-        self, backend_device: str, xp: Any
-    ) -> None:
+    def test_structure_map_default_no_preamble_no_guard(self, xp: Any) -> None:
         """Verify default behavior: no preamble, zero guard."""
         frame = SingleCarrierFrame(payload_len=100)
         struct = frame.get_structure_map(include_preamble=False)
@@ -184,7 +180,7 @@ class TestSingleCarrierFrameStructureMap:
         assert xp.sum(struct["payload"]) == 100
         assert xp.sum(struct["guard"]) == 0
 
-    def test_structure_map_include_preamble(self, backend_device: str, xp: Any) -> None:
+    def test_structure_map_include_preamble(self, xp: Any) -> None:
         """Verify explicit include_preamble=True in structure map."""
         preamble = Preamble(sequence_type="barker", length=13)
         frame = SingleCarrierFrame(payload_len=100, preamble=preamble)
@@ -195,9 +191,7 @@ class TestSingleCarrierFrameStructureMap:
         assert xp.sum(struct["preamble"]) == 13
         assert xp.sum(struct["payload"]) == 100
 
-    def test_structure_map_no_preamble_with_zero_guard(
-        self, backend_device: str, xp: Any
-    ) -> None:
+    def test_structure_map_no_preamble_with_zero_guard(self, xp: Any) -> None:
         """Verify behavior with zero guard when preamble is excluded."""
         frame = SingleCarrierFrame(payload_len=100, guard_type="zero", guard_len=20)
         struct = frame.get_structure_map(include_preamble=False)
@@ -208,9 +202,7 @@ class TestSingleCarrierFrameStructureMap:
         assert xp.sum(struct["payload"]) == 100
         assert xp.sum(struct["guard"]) == 20
 
-    def test_structure_map_no_preamble_with_cp_guard(
-        self, backend_device: str, xp: Any
-    ) -> None:
+    def test_structure_map_no_preamble_with_cp_guard(self, xp: Any) -> None:
         """Verify behavior with CP guard when preamble is excluded."""
         frame = SingleCarrierFrame(payload_len=100, guard_type="cp", guard_len=20)
         struct = frame.get_structure_map(include_preamble=False)
@@ -220,9 +212,7 @@ class TestSingleCarrierFrameStructureMap:
         assert len(struct["payload"]) == 100
         assert xp.sum(struct["payload"]) == 100
 
-    def test_structure_map_with_pilots_no_preamble(
-        self, backend_device: str, xp: Any
-    ) -> None:
+    def test_structure_map_with_pilots_no_preamble(self, xp: Any) -> None:
         """Verify pilot mask is correct when preamble is excluded."""
         frame = SingleCarrierFrame(payload_len=10, pilot_pattern="comb", pilot_period=2)
         struct = frame.get_structure_map()
@@ -231,7 +221,7 @@ class TestSingleCarrierFrameStructureMap:
         assert xp.sum(struct["pilots"]) == 10
         assert xp.sum(struct["payload"]) == 10
 
-    def test_structure_map_samples_unit(self, backend_device: str, xp: Any) -> None:
+    def test_structure_map_samples_unit(self, xp: Any) -> None:
         """Verify unit='samples' with include_preamble=False."""
         frame = SingleCarrierFrame(payload_len=10)
         sps = 4
@@ -244,7 +234,7 @@ class TestSingleCarrierFrameStructureMap:
 class TestSingleCarrierFramePilots:
     """Tests for pilot generation, validation, caching, and power boost."""
 
-    def test_comb_pilot_period_le1_error(self, backend_device: str, xp: Any) -> None:
+    def test_comb_pilot_period_le1_error(self, xp: Any) -> None:
         """comb pilot_period <= 1 raises ValueError."""
         frame = SingleCarrierFrame(
             payload_len=10, symbol_rate=1e6, pilot_pattern="comb", pilot_period=1
@@ -252,9 +242,7 @@ class TestSingleCarrierFramePilots:
         with pytest.raises(ValueError, match="pilot_period must be > 1"):
             frame._generate_pilot_mask()
 
-    def test_block_pilot_period_le_block_len_error(
-        self, backend_device: str, xp: Any
-    ) -> None:
+    def test_block_pilot_period_le_block_len_error(self, xp: Any) -> None:
         """block pilot_period <= pilot_block_len raises ValueError."""
         frame = SingleCarrierFrame(
             payload_len=10,
@@ -266,23 +254,21 @@ class TestSingleCarrierFramePilots:
         with pytest.raises(ValueError, match="pilot_period must be > pilot_block_len"):
             frame._generate_pilot_mask()
 
-    def test_pilot_bits_none_when_no_pilots(self, backend_device: str, xp: Any) -> None:
+    def test_pilot_bits_none_when_no_pilots(self, xp: Any) -> None:
         """pilot_bits returns None when pilot_pattern='none'."""
         frame = SingleCarrierFrame(
             payload_len=20, symbol_rate=1e6, pilot_pattern="none"
         )
         assert frame.pilot_bits is None
 
-    def test_pilot_symbols_none_when_no_pilots(
-        self, backend_device: str, xp: Any
-    ) -> None:
+    def test_pilot_symbols_none_when_no_pilots(self, xp: Any) -> None:
         """pilot_symbols returns None when pilot_pattern='none'."""
         frame = SingleCarrierFrame(
             payload_len=20, symbol_rate=1e6, pilot_pattern="none"
         )
         assert frame.pilot_symbols is None
 
-    def test_pilot_gain_db_siso(self, backend_device: str, xp: Any) -> None:
+    def test_pilot_gain_db_siso(self, xp: Any) -> None:
         """Non-zero pilot_gain_db boosts pilot symbols for SISO."""
         frame_nogain = SingleCarrierFrame(
             payload_len=20,
@@ -305,7 +291,7 @@ class TestSingleCarrierFramePilots:
         pilot_power_gain = float(xp.mean(xp.abs(xp.asarray(body_gain)[mask]) ** 2))
         assert pilot_power_gain > pilot_power_nogain * 3.5
 
-    def test_pilot_gain_db_mimo(self, backend_device: str, xp: Any) -> None:
+    def test_pilot_gain_db_mimo(self, xp: Any) -> None:
         """Non-zero pilot_gain_db boosts pilot symbols for MIMO."""
         frame = SingleCarrierFrame(
             payload_len=20,
@@ -319,7 +305,7 @@ class TestSingleCarrierFramePilots:
         assert body.shape[0] == 2
         assert body.ndim == 2
 
-    def test_pilot_bits_with_pilots(self, backend_device: str, xp: Any) -> None:
+    def test_pilot_bits_with_pilots(self, xp: Any) -> None:
         """pilot_bits on a frame with comb pilots generates pilot bits."""
         frame = SingleCarrierFrame(
             payload_len=20, symbol_rate=1e6, pilot_pattern="comb", pilot_period=4
@@ -328,7 +314,7 @@ class TestSingleCarrierFramePilots:
         assert bits is not None
         assert len(bits) > 0
 
-    def test_pilot_bits_double_access(self, backend_device: str, xp: Any) -> None:
+    def test_pilot_bits_double_access(self, xp: Any) -> None:
         """Accessing pilot_bits twice returns consistent cached results."""
         frame = SingleCarrierFrame(
             payload_len=20, symbol_rate=1e6, pilot_pattern="comb", pilot_period=4
@@ -339,7 +325,7 @@ class TestSingleCarrierFramePilots:
         assert bits2 is not None
         assert len(bits1) == len(bits2)
 
-    def test_pilot_symbols_with_pilots(self, backend_device: str, xp: Any) -> None:
+    def test_pilot_symbols_with_pilots(self, xp: Any) -> None:
         """pilot_symbols on a frame with block pilots generates pilot symbols."""
         frame = SingleCarrierFrame(
             payload_len=20,
@@ -356,7 +342,7 @@ class TestSingleCarrierFramePilots:
 class TestSingleCarrierFrameDivisibility:
     """Tests for automatic payload length snapping to pilot block boundaries."""
 
-    def test_comb_snaps_payload_len(self, backend_device: str, xp: Any) -> None:
+    def test_comb_snaps_payload_len(self, xp: Any) -> None:
         """payload_len non-divisible by data_per_period is snapped up."""
         frame = SingleCarrierFrame(
             payload_len=10, symbol_rate=1e6, pilot_pattern="comb", pilot_period=4
@@ -366,7 +352,7 @@ class TestSingleCarrierFrameDivisibility:
         assert length == 16
         assert int(xp.sum(mask)) == 4
 
-    def test_block_snaps_payload_len(self, backend_device: str, xp: Any) -> None:
+    def test_block_snaps_payload_len(self, xp: Any) -> None:
         """payload_len non-divisible by data_per_block is snapped up."""
         frame = SingleCarrierFrame(
             payload_len=9,
@@ -380,14 +366,14 @@ class TestSingleCarrierFrameDivisibility:
         assert length == 20
         assert int(xp.sum(mask)) == 10
 
-    def test_comb_no_snap_when_divisible(self, backend_device: str, xp: Any) -> None:
+    def test_comb_no_snap_when_divisible(self, xp: Any) -> None:
         """payload_len already divisible by data_per_period is not modified."""
         frame = SingleCarrierFrame(
             payload_len=9, symbol_rate=1e6, pilot_pattern="comb", pilot_period=4
         )
         assert frame.payload_len == 9
 
-    def test_block_no_snap_when_divisible(self, backend_device: str, xp: Any) -> None:
+    def test_block_no_snap_when_divisible(self, xp: Any) -> None:
         """payload_len already divisible by data_per_block is not modified."""
         frame = SingleCarrierFrame(
             payload_len=10,

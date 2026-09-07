@@ -53,7 +53,7 @@ def _psk_signal(xp, order, n_symbols, fo_hz=0.0, snr_db=SNR_DB, fs=FS, seed=42):
 class TestFoeMthPower:
     @pytest.mark.parametrize("order", [4, 16, 64])
     @pytest.mark.parametrize("fo_hz", [5_000.0, -8_000.0, 15_000.0])
-    def test_accuracy_qam(self, backend_device, xp, order, fo_hz):
+    def test_accuracy_qam(self, xp, order, fo_hz):
         """Estimated offset within 5% of true value for QAM at SNR=30 dB."""
         sig = _qam_signal(xp, order, 4096, fo_hz=fo_hz)
         est = frequency.estimate_frequency_offset_mth_power(
@@ -63,7 +63,7 @@ class TestFoeMthPower:
 
     @pytest.mark.parametrize("order", [4, 8])
     @pytest.mark.parametrize("fo_hz", [3_000.0, -6_000.0])
-    def test_accuracy_psk(self, backend_device, xp, order, fo_hz):
+    def test_accuracy_psk(self, xp, order, fo_hz):
         """Estimated offset within 5% of true value for PSK at SNR=30 dB."""
         sig = _psk_signal(xp, order, 4096, fo_hz=fo_hz)
         est = frequency.estimate_frequency_offset_mth_power(
@@ -71,7 +71,7 @@ class TestFoeMthPower:
         )
         assert abs(est - fo_hz) / abs(fo_hz) < 0.05
 
-    def test_zero_offset_within_lock_range(self, backend_device, xp):
+    def test_zero_offset_within_lock_range(self, xp):
         """With no frequency offset, estimate stays within the lock range [-fs/2M, fs/2M]."""
         sig = _qam_signal(xp, 16, 4096, fo_hz=0.0)
         est = frequency.estimate_frequency_offset_mth_power(
@@ -80,7 +80,7 @@ class TestFoeMthPower:
         # Lock range for QAM with M=4: [-fs/8, fs/8] = ±125 kHz at 1 MHz
         assert abs(est) < FS / (2 * 4)
 
-    def test_search_range_rejects_out_of_range(self, backend_device, xp):
+    def test_search_range_rejects_out_of_range(self, xp):
         """Peak outside search_range returns an estimate outside the true value."""
         # True offset is 20 kHz; search range covers only [-5 kHz, 5 kHz]
         sig = _qam_signal(xp, 4, 8192, fo_hz=20_000.0)
@@ -94,7 +94,7 @@ class TestFoeMthPower:
         # The true offset must not be found - estimate stays within the window
         assert abs(est) <= 5_000.0 + 200.0  # small tolerance for bin quantization
 
-    def test_search_range_empty_raises(self, backend_device, xp):
+    def test_search_range_empty_raises(self, xp):
         """Empty search_range raises ValueError."""
         sig = _qam_signal(xp, 4, 1024, fo_hz=0.0)
         with pytest.raises(ValueError, match="empty search window"):
@@ -106,7 +106,7 @@ class TestFoeMthPower:
                 search_range=(400_000.0, 500_000.0),
             )
 
-    def test_mimo_returns_per_channel(self, backend_device, xp):
+    def test_mimo_returns_per_channel(self, xp):
         """MIMO input (C, N) returns ndarray(C,) by default."""
         sig_a = _qam_signal(xp, 4, 2048, fo_hz=5_000.0)
         sig_b = _qam_signal(xp, 4, 2048, fo_hz=5_000.0)
@@ -118,7 +118,7 @@ class TestFoeMthPower:
         assert est.shape == (2,)
         assert all(abs(e - 5_000.0) / 5_000.0 < 0.05 for e in est)
 
-    def test_mimo_combine_channels_returns_scalar(self, backend_device, xp):
+    def test_mimo_combine_channels_returns_scalar(self, xp):
         """MIMO + combine_channels=True returns a single Python float."""
         sig_a = _qam_signal(xp, 4, 2048, fo_hz=5_000.0)
         sig_b = _qam_signal(xp, 4, 2048, fo_hz=5_000.0)
@@ -129,7 +129,7 @@ class TestFoeMthPower:
         assert isinstance(est, float)
         assert abs(est - 5_000.0) / 5_000.0 < 0.05
 
-    def test_circular_neighbors_near_lock_edge(self, backend_device, xp):
+    def test_circular_neighbors_near_lock_edge(self, xp):
         """Peak near the lock-range boundary uses circular neighbors without clamping bias."""
         # For QPSK (M=4), lock range is ±fs/8. Place tone at 90% of the boundary so
         # the M-th power tone lands near bin nfft-2 (high-frequency edge of spectrum).
@@ -140,7 +140,7 @@ class TestFoeMthPower:
         )
         assert abs(est - fo_hz) / abs(fo_hz) < 0.10
 
-    def test_vectorised_subbin_matches_scalar_c2(self, backend_device, xp):
+    def test_vectorised_subbin_matches_scalar_c2(self, xp):
         """Vectorised sub-bin path: C=2 channels with same offset, both estimated accurately.
 
         MIMO accumulates channels coherently (shared k_safe); the vectorisation changes
@@ -164,7 +164,7 @@ class TestFoeMthPower:
 
 
 class TestCorrectionFunctions:
-    def test_correct_static_frequency_offset_dtype_preserved(self, backend_device, xp):
+    def test_correct_static_frequency_offset_dtype_preserved(self, xp):
         """correct_static_frequency_offset: complex64 input -> complex64 output."""
         sig = _qam_signal(xp, 4, 1024)
         assert sig.samples.dtype == xp.complex64
@@ -173,7 +173,7 @@ class TestCorrectionFunctions:
         )
         assert corrected.dtype == xp.complex64
 
-    def test_correct_static_frequency_offset_roundtrip(self, backend_device, xp):
+    def test_correct_static_frequency_offset_roundtrip(self, xp):
         """Applying +Δf then correcting with -Δf restores the signal."""
         sig = _qam_signal(xp, 4, 1024)
         original = sig.samples.copy()
@@ -185,7 +185,7 @@ class TestCorrectionFunctions:
         )
         assert float(xp.max(xp.abs(restored - original))) < 1e-4
 
-    def test_correct_static_frequency_offset_size_one_array(self, backend_device, xp):
+    def test_correct_static_frequency_offset_size_one_array(self, xp):
         """A size-1 (non-0-d) offset array (e.g. a single-channel per-channel
         estimate, shape (1,)) must not crash the scalar float() cast - every
         size-1 shape is equivalent to a plain scalar offset."""
@@ -246,7 +246,7 @@ class TestFoePilots:
         return samples, pilot_indices, pilot_values
 
     @pytest.mark.parametrize("fo_hz", [1_000.0, 5_000.0, -3_000.0])
-    def test_accuracy(self, backend_device, xp, fo_hz):
+    def test_accuracy(self, xp, fo_hz):
         """Estimated offset within 1 % of true offset at 30 dB SNR."""
         samples, pilot_indices, pilot_values = self._setup(xp, fo_hz)
         est = frequency.estimate_frequency_offset_pilot_symbols(
@@ -257,7 +257,7 @@ class TestFoePilots:
         )
         assert abs(est - fo_hz) < 0.01 * abs(fo_hz) + 1.0
 
-    def test_zero_offset(self, backend_device, xp):
+    def test_zero_offset(self, xp):
         """Zero frequency offset: estimate is within ±20 Hz."""
         samples, pilot_indices, pilot_values = self._setup(xp, fo_hz=0.0)
         est = frequency.estimate_frequency_offset_pilot_symbols(
@@ -268,7 +268,7 @@ class TestFoePilots:
         )
         assert abs(est) < 20.0
 
-    def test_mimo_returns_per_channel(self, backend_device, xp):
+    def test_mimo_returns_per_channel(self, xp):
         """MIMO input returns ndarray(C,) by default."""
         fo_hz = 2_000.0
         s0, pilot_indices, pilot_values = self._setup(xp, fo_hz)
@@ -284,7 +284,7 @@ class TestFoePilots:
         assert est.shape == (2,)
         assert all(abs(e - fo_hz) < 0.01 * fo_hz + 1.0 for e in est)
 
-    def test_mimo_combine_channels_returns_scalar(self, backend_device, xp):
+    def test_mimo_combine_channels_returns_scalar(self, xp):
         """MIMO + combine_channels=True returns a single Python float."""
         fo_hz = 2_000.0
         s0, pilot_indices, pilot_values = self._setup(xp, fo_hz)
@@ -311,7 +311,7 @@ class TestFoeMengaliMorelli:
 
     @pytest.mark.parametrize("fo_hz", [5_000.0, -12_000.0, 30_000.0])
     @pytest.mark.parametrize("order", [4, 16])
-    def test_blind_qam_accuracy(self, backend_device, xp, fo_hz, order):
+    def test_blind_qam_accuracy(self, xp, fo_hz, order):
         """Blind QAM mode: estimate within 2 % of true offset at 30 dB SNR."""
         sig = _qam_signal(xp, order, 4096, fo_hz=0.0)  # generate without offset
         # Apply exact frequency offset via direct complex mixing
@@ -325,7 +325,7 @@ class TestFoeMengaliMorelli:
         assert abs(est - fo_hz) / abs(fo_hz) < 0.02
 
     @pytest.mark.parametrize("fo_hz", [4_000.0, -8_000.0])
-    def test_data_aided_accuracy(self, backend_device, xp, fo_hz):
+    def test_data_aided_accuracy(self, xp, fo_hz):
         """Data-aided mode: estimate within 1 % using known reference (exact mixing)."""
         sig = generate_psk(order=4, num_symbols=4096, sps=1, symbol_rate=FS)
         ideal = sig.samples.copy()
@@ -339,7 +339,7 @@ class TestFoeMengaliMorelli:
         )
         assert abs(est - fo_hz) / abs(fo_hz) < 0.01
 
-    def test_large_offset_near_nyquist(self, backend_device, xp):
+    def test_large_offset_near_nyquist(self, xp):
         """M&M lock range [-fs/2, fs/2]: succeeds at 40 % of Nyquist where Kay wraps."""
         N = 4096
         fo_hz = 0.40 * FS  # 40 % of sampling rate
@@ -351,7 +351,7 @@ class TestFoeMengaliMorelli:
         )
         assert abs(est - fo_hz) < 0.02 * fo_hz
 
-    def test_generic_blind_pure_tone(self, backend_device, xp):
+    def test_generic_blind_pure_tone(self, xp):
         """Generic mode (no modulation): pure tone estimated accurately."""
         N = 2048
         fo_hz = 7_500.0
@@ -362,7 +362,7 @@ class TestFoeMengaliMorelli:
         )
         assert abs(est - fo_hz) < 500.0
 
-    def test_mimo_returns_per_channel(self, backend_device, xp):
+    def test_mimo_returns_per_channel(self, xp):
         """MIMO (C, N) input returns ndarray(C,) by default."""
         fo_hz = 6_000.0
         sig_a = _qam_signal(xp, 4, 2048, fo_hz=0.0)
@@ -377,7 +377,7 @@ class TestFoeMengaliMorelli:
         assert est.shape == (2,)
         assert all(abs(e - fo_hz) / fo_hz < 0.02 for e in est)
 
-    def test_mimo_combine_channels_returns_scalar(self, backend_device, xp):
+    def test_mimo_combine_channels_returns_scalar(self, xp):
         """MIMO + combine_channels=True returns a single Python float."""
         fo_hz = 6_000.0
         sig_a = _qam_signal(xp, 4, 2048, fo_hz=0.0)
@@ -391,7 +391,7 @@ class TestFoeMengaliMorelli:
         assert isinstance(est, float)
         assert abs(est - fo_hz) / fo_hz < 0.02
 
-    def test_custom_max_lag(self, backend_device, xp):
+    def test_custom_max_lag(self, xp):
         """Custom max_lag parameter: still converges to correct estimate (exact mixing)."""
         fo_hz = 3_000.0
         sig = _qam_signal(xp, 4, 2048, fo_hz=0.0)
@@ -411,7 +411,7 @@ class TestFoeMengaliMorelli:
 
 
 class TestFoeRegression:
-    def test_jacobsen_vs_parabolic_accuracy(self, backend_device, xp):
+    def test_jacobsen_vs_parabolic_accuracy(self, xp):
         """Jacobsen interpolation accuracy is at least as good as parabolic for N=256."""
         fo_hz = 7_777.0  # non-round number to stress sub-bin interpolation
         sig = _qam_signal(xp, 4, 256, fo_hz=fo_hz)
@@ -432,7 +432,7 @@ class TestFoeRegression:
         # Jacobsen error must be ≤ parabolic error (with generous 20 % slack for noise)
         assert abs(est_j - fo_hz) <= abs(est_p - fo_hz) * 1.2 + 100.0
 
-    def test_mth_power_short_signal_raises(self, backend_device, xp):
+    def test_mth_power_short_signal_raises(self, xp):
         """M-th power FOE raises ValueError for signals shorter than 8 samples."""
         short = xp.ones(5, dtype=xp.complex64)
         with pytest.raises(ValueError, match="too short"):
@@ -440,7 +440,7 @@ class TestFoeRegression:
                 short, sampling_rate=FS, modulation="qam", order=4
             )
 
-    def test_pilot_wlsq_vs_ols_at_snr(self, backend_device, xp):
+    def test_pilot_wlsq_vs_ols_at_snr(self, xp):
         """WLSQ pilot FOE returns a valid estimate; result within 2% of true offset."""
         fo_hz = 5_000.0
         n_samples = 2048
@@ -479,7 +479,7 @@ class TestFoeRegression:
 class TestCorrectFrequencyOffsetBranches:
     """Branches for real-valued and MIMO input in correct_static_frequency_offset."""
 
-    def test_real_float32_input(self, backend_device, xp):
+    def test_real_float32_input(self, xp):
         """Real float32 input is cast to complex64 and frequency-corrected."""
 
         N = 256
@@ -493,7 +493,7 @@ class TestCorrectFrequencyOffsetBranches:
         assert out.dtype == xp.complex64
         assert out.shape == sig.shape
 
-    def test_mimo_input_broadcasts_mixer(self, backend_device, xp):
+    def test_mimo_input_broadcasts_mixer(self, xp):
         """MIMO (C, N) input: mixer is broadcast over channels without error."""
         import numpy as np
 
@@ -528,7 +528,7 @@ class TestFindBiasTone:
             (2.5e9, -400e6),  # -400 MHz at 2.5 GHz -> bin ~3424 (negative freq)
         ],
     )
-    def test_pure_cw_within_one_bin(self, backend_device, xp, fs, tone_hz):
+    def test_pure_cw_within_one_bin(self, xp, fs, tone_hz):
         """Recovered frequency is within 1 FFT bin of the true tone (N=4096)."""
         N = 4096
         nfft = 1 << int(np.ceil(np.log2(N)))
@@ -538,7 +538,7 @@ class TestFindBiasTone:
         est = frequency.find_bias_tone(seg, sampling_rate=fs)
         assert abs(est - tone_hz) < bin_width
 
-    def test_log_parabolic_beats_argmax(self, backend_device, xp):
+    def test_log_parabolic_beats_argmax(self, xp):
         """Log-parabolic interpolation is more accurate than argmax-only for a mid-bin tone."""
         fs = 1e6
         N = 4096
@@ -560,7 +560,7 @@ class TestFindBiasTone:
 
         assert abs(est_interp - tone_hz) < abs(est_argmax - tone_hz)
 
-    def test_search_window_rejects_stronger_interferer(self, backend_device, xp):
+    def test_search_window_rejects_stronger_interferer(self, xp):
         """target_frequency + search_band rejects a 10x stronger out-of-band tone."""
         fs = 1e9
         N = 4096
@@ -575,7 +575,7 @@ class TestFindBiasTone:
         )
         assert abs(est - 100e6) < 10e6
 
-    def test_returns_python_float(self, backend_device, xp):
+    def test_returns_python_float(self, xp):
         """find_bias_tone always returns a Python float, not an array."""
         N = 512
         n = xp.arange(N, dtype=xp.float64)
@@ -583,7 +583,7 @@ class TestFindBiasTone:
         result = frequency.find_bias_tone(seg, sampling_rate=1e6)
         assert isinstance(result, float)
 
-    def test_partial_search_params_raises(self, backend_device, xp):
+    def test_partial_search_params_raises(self, xp):
         """Providing only one of target_frequency / search_band raises ValueError."""
         N = 256
         n = xp.arange(N, dtype=xp.float64)
@@ -593,7 +593,7 @@ class TestFindBiasTone:
         with pytest.raises(ValueError, match="both be provided or both omitted"):
             frequency.find_bias_tone(seg, sampling_rate=1e6, search_band=10e3)
 
-    def test_empty_search_window_raises(self, backend_device, xp):
+    def test_empty_search_window_raises(self, xp):
         """Search window outside the FFT grid raises ValueError."""
         N = 128
         n = xp.arange(N, dtype=xp.float64)
@@ -607,7 +607,7 @@ class TestFindBiasTone:
             )
 
     @pytest.mark.parametrize("tone_hz", [50e3, 200e3])
-    def test_gpu_matches_cpu_within_1hz(self, backend_device, xp, tone_hz):
+    def test_gpu_matches_cpu_within_1hz(self, xp, tone_hz):
         """GPU and CPU backends agree to within 1 Hz on the same segment."""
         fs = 1e6
         N = 4096
@@ -617,7 +617,7 @@ class TestFindBiasTone:
         est_dev = frequency.find_bias_tone(xp.asarray(seg_np), sampling_rate=fs)
         assert abs(est_cpu - est_dev) < 1.0
 
-    def test_circular_neighbors_at_nyquist_edge(self, backend_device, xp):
+    def test_circular_neighbors_at_nyquist_edge(self, xp):
         """Tone near the Nyquist edge (bin nfft-2) is estimated without clamping bias."""
         fs = 1e6
         N = 512
@@ -643,7 +643,7 @@ class TestCorrectFrequencyOffsetBlockwise:
 
     FS = 1e6
 
-    def test_corrects_constant_offset(self, backend_device, xp):
+    def test_corrects_constant_offset(self, xp):
         """Oracle estimator removes a known constant offset; residual is near zero."""
         fs = self.FS
         fo_hz = 10_000.0
@@ -662,7 +662,7 @@ class TestCorrectFrequencyOffsetBlockwise:
         )
         assert abs(residual) < 500.0
 
-    def test_output_on_same_device(self, backend_device, xp):
+    def test_output_on_same_device(self, xp):
         """Output array is on the same backend as the input."""
         sig = xp.ones(2048, dtype=xp.complex64)
         out = frequency.correct_frequency_offset_blockwise(
@@ -675,7 +675,7 @@ class TestCorrectFrequencyOffsetBlockwise:
         assert type(out) is type(sig)
         assert out.shape == sig.shape
 
-    def test_callable_called_once_per_block_per_channel(self, backend_device, xp):
+    def test_callable_called_once_per_block_per_channel(self, xp):
         """Estimator is called exactly B times for SISO (once per block)."""
         N = 4096
         block_size = 512
@@ -697,7 +697,7 @@ class TestCorrectFrequencyOffsetBlockwise:
         )
         assert len(call_log) == expected_calls
 
-    def test_pchip_no_overshoot_monotone_input(self, backend_device, xp):
+    def test_pchip_no_overshoot_monotone_input(self, xp):
         """Monotone increasing estimates -> output samples are finite (no blow-up from overshoot)."""
         N = 4096
         counter = [0]
@@ -715,9 +715,9 @@ class TestCorrectFrequencyOffsetBlockwise:
             estimator=monotone_estimator,
         )
         out_np = to_numpy(out)
-        assert np.all(np.isfinite(out_np))
+        np.testing.assert_array_equal(np.isfinite(out_np), True)
 
-    def test_overlap_zero(self, backend_device, xp):
+    def test_overlap_zero(self, xp):
         """overlap=0: output has correct shape and is finite."""
         out = frequency.correct_frequency_offset_blockwise(
             xp.ones(4096, dtype=xp.complex64),
@@ -728,9 +728,9 @@ class TestCorrectFrequencyOffsetBlockwise:
         )
         out_np = to_numpy(out)
         assert out.shape == (4096,)
-        assert np.all(np.isfinite(out_np))
+        np.testing.assert_array_equal(np.isfinite(out_np), True)
 
-    def test_single_block_fallback(self, backend_device, xp):
+    def test_single_block_fallback(self, xp):
         """Signal shorter than block_size: single block, output shape matches input."""
         N = 200
         out = frequency.correct_frequency_offset_blockwise(
@@ -742,9 +742,9 @@ class TestCorrectFrequencyOffsetBlockwise:
         )
         out_np = to_numpy(out)
         assert out.shape == (N,)
-        assert np.all(np.isfinite(out_np))
+        np.testing.assert_array_equal(np.isfinite(out_np), True)
 
-    def test_mimo_per_channel_output_shape(self, backend_device, xp):
+    def test_mimo_per_channel_output_shape(self, xp):
         """(C=2, N) input produces (2, N) output with per-channel correction."""
         C, N = 2, 4096
         fo_a, fo_b = 8_000.0, -5_000.0
@@ -762,7 +762,7 @@ class TestCorrectFrequencyOffsetBlockwise:
         )
         assert out.shape == (C, N)
 
-    def test_mimo_combine_channels(self, backend_device, xp, xpt):
+    def test_mimo_combine_channels(self, xp, xpt):
         """combine_channels=True applies a single shared correction to all channels."""
         C, N = 2, 4096
         fo_hz = 7_000.0
@@ -784,7 +784,7 @@ class TestCorrectFrequencyOffsetBlockwise:
         out1_np = to_numpy(out[1])
         xpt.assert_allclose(np.abs(out0_np), np.abs(out1_np), rtol=1e-5)
 
-    def test_functools_partial_with_find_bias_tone(self, backend_device, xp):
+    def test_functools_partial_with_find_bias_tone(self, xp):
         """functools.partial binding of find_bias_tone works as estimator."""
         from functools import partial
 
@@ -805,13 +805,13 @@ class TestCorrectFrequencyOffsetBlockwise:
         )
         out_np = to_numpy(out)
         assert out.shape == sig.shape
-        assert np.all(np.isfinite(out_np))
+        np.testing.assert_array_equal(np.isfinite(out_np), True)
 
 
 class TestSignalInputFrequency:
     """Signal-awareness across all frequency.py estimators/correctors."""
 
-    def test_mth_power_signal_input(self, backend_device, xp):
+    def test_mth_power_signal_input(self, xp):
         """Signal input: sampling_rate/modulation/order come from the signal."""
         sig = _qam_signal(xp, 16, 2048, fo_hz=10_000.0)
         est_sig = frequency.estimate_frequency_offset_mth_power(sig)
@@ -820,7 +820,7 @@ class TestSignalInputFrequency:
         )
         assert est_sig == pytest.approx(est_arr)
 
-    def test_mengali_morelli_signal_input(self, backend_device, xp):
+    def test_mengali_morelli_signal_input(self, xp):
         sig = _qam_signal(xp, 16, 2048, fo_hz=10_000.0)
         est_sig = frequency.estimate_frequency_offset_mengali_morelli(sig)
         est_arr = frequency.estimate_frequency_offset_mengali_morelli(
@@ -828,7 +828,7 @@ class TestSignalInputFrequency:
         )
         assert est_sig == pytest.approx(est_arr)
 
-    def test_pilot_symbols_signal_input(self, backend_device, xp):
+    def test_pilot_symbols_signal_input(self, xp):
         sig = _qam_signal(xp, 16, 512, fo_hz=1_000.0)
         pilot_indices = np.arange(0, 512, 8)
         pilot_values = xp.asarray(sig.source_symbols)[pilot_indices]
@@ -840,7 +840,7 @@ class TestSignalInputFrequency:
         )
         assert est_sig == pytest.approx(est_arr)
 
-    def test_find_bias_tone_signal_input(self, backend_device, xp):
+    def test_find_bias_tone_signal_input(self, xp):
         fs = 1e9
         N = 8192
         tone_hz = 100e6
@@ -852,9 +852,7 @@ class TestSignalInputFrequency:
         est_arr = frequency.find_bias_tone(tone, fs)
         assert est_sig == pytest.approx(est_arr)
 
-    def test_correct_frequency_offset_blockwise_signal_input(
-        self, backend_device, xp, xpt
-    ):
+    def test_correct_frequency_offset_blockwise_signal_input(self, xp, xpt):
         sig = _qam_signal(xp, 16, 2048, fo_hz=5_000.0)
 
         def estimator(block, fs):
@@ -870,9 +868,7 @@ class TestSignalInputFrequency:
         assert isinstance(out_sig, Signal)
         xpt.assert_allclose(out_sig.samples, out_arr, atol=1e-4)
 
-    def test_correct_static_frequency_offset_signal_input(
-        self, backend_device, xp, xpt
-    ):
+    def test_correct_static_frequency_offset_signal_input(self, xp, xpt):
         sig = _qam_signal(xp, 4, 1024)
 
         out_sig = frequency.correct_static_frequency_offset(sig, offset=5_000.0)

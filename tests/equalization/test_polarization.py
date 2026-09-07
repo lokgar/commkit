@@ -5,6 +5,8 @@ import pytest
 
 from commkit import equalization
 from commkit.core import Signal
+from commkit.impairments import apply_polarization_mixing
+from commkit.spectral import add_pilot_tone
 
 
 class TestDemultiplexPolarizationTones:
@@ -17,8 +19,10 @@ class TestDemultiplexPolarizationTones:
     @staticmethod
     def _streams(xp, C=2, N=8192, seed=0, fs=100.0, band_frac=0.3):
         """C independent, band-limited, unit-power complex streams, shape (C, N)."""
-        rng = xp.random.RandomState(seed)
-        s = (rng.randn(C, N) + 1j * rng.randn(C, N)).astype(xp.complex64)
+        rng = xp.random.default_rng(seed)
+        s = (rng.standard_normal((C, N)) + 1j * rng.standard_normal((C, N))).astype(
+            xp.complex64
+        )
         # Brick-wall low-pass so a guard band is left for the pilot tones.
         freqs = xp.fft.fftfreq(N, d=1.0 / fs)
         mask = (xp.abs(freqs) < band_frac * fs)[None, :]
@@ -33,10 +37,8 @@ class TestDemultiplexPolarizationTones:
         den = xp.sqrt(xp.sum(xp.abs(a) ** 2) * xp.sum(xp.abs(b) ** 2))
         return float(num / den)
 
-    def test_demux_recovers_streams_no_permutation(self, backend_device, xp):
+    def test_demux_recovers_streams_no_permutation(self, xp):
         """A static rotation is inverted; row j tracks tone j (no permutation)."""
-        from commkit.impairments import apply_polarization_mixing
-        from commkit.spectral import add_pilot_tone
 
         fs = 100.0
         s = self._streams(xp)
@@ -53,10 +55,8 @@ class TestDemultiplexPolarizationTones:
             # ...and rejects the other stream (cross-talk suppressed).
             assert self._corr(xp, demuxed[j], tx[1 - j]) < 0.05
 
-    def test_demux_robust_to_noise(self, backend_device, xp):
+    def test_demux_robust_to_noise(self, xp):
         """The tone-phasor estimate still locks under moderate AWGN."""
-        from commkit.impairments import apply_polarization_mixing
-        from commkit.spectral import add_pilot_tone
 
         fs = 100.0
         s = self._streams(xp, N=8192)
@@ -72,9 +72,8 @@ class TestDemultiplexPolarizationTones:
         for j in range(2):
             assert self._corr(xp, demuxed[j], tx[j]) > 0.99
 
-    def test_return_matrix_shape(self, backend_device, xp):
+    def test_return_matrix_shape(self, xp):
         """return_matrix yields the (K, C) complex128 unmixing matrix."""
-        from commkit.spectral import add_pilot_tone
 
         fs = 100.0
         s = self._streams(xp)
@@ -85,9 +84,8 @@ class TestDemultiplexPolarizationTones:
         assert W.shape == (2, 2)
         assert W.dtype == xp.complex128
 
-    def test_overdetermined_pinv(self, backend_device, xp):
+    def test_overdetermined_pinv(self, xp):
         """C > K: a (3, 2) mixing is unmixed to 2 streams via the pseudo-inverse."""
-        from commkit.spectral import add_pilot_tone
 
         fs = 100.0
         s = self._streams(xp, C=2, N=8192)
@@ -101,7 +99,7 @@ class TestDemultiplexPolarizationTones:
         for j in range(2):
             assert self._corr(xp, demuxed[j], tx[j]) > 0.999
 
-    def test_more_tones_than_channels_raises(self, backend_device, xp):
+    def test_more_tones_than_channels_raises(self, xp):
         """K > C is rejected (cannot unmix more streams than receive channels)."""
         fs = 100.0
         s = self._streams(xp, C=2)
@@ -110,17 +108,15 @@ class TestDemultiplexPolarizationTones:
                 s, fs, [10.0, 20.0, 30.0]
             )
 
-    def test_requires_2d(self, backend_device, xp):
+    def test_requires_2d(self, xp):
         """A 1-D (SISO) input is rejected - demux is inherently MIMO."""
         fs = 100.0
         s = self._streams(xp, C=1)[0]  # (N,)
         with pytest.raises(ValueError, match=r"2-D \(C, N\)"):
             equalization.demultiplex_polarization_tones_static(s, fs, [10.0])
 
-    def test_signal_input_returns_signal(self, backend_device, xp, xpt):
+    def test_signal_input_returns_signal(self, xp, xpt):
         """Signal input: sampling_rate is taken from the signal."""
-        from commkit.impairments import apply_polarization_mixing
-        from commkit.spectral import add_pilot_tone
 
         fs = 100.0
         s = self._streams(xp)
@@ -136,9 +132,8 @@ class TestDemultiplexPolarizationTones:
         assert isinstance(demuxed_sig, Signal)
         xpt.assert_allclose(demuxed_sig.samples, demuxed_arr)
 
-    def test_signal_input_with_return_matrix(self, backend_device, xp, xpt):
+    def test_signal_input_with_return_matrix(self, xp, xpt):
         """Signal input + return_matrix=True: (Signal, W) tuple."""
-        from commkit.spectral import add_pilot_tone
 
         fs = 100.0
         s = self._streams(xp)
@@ -164,10 +159,8 @@ class TestDemultiplexPolarizationTonesDynamic:
     _streams = staticmethod(TestDemultiplexPolarizationTones._streams)
     _corr = staticmethod(TestDemultiplexPolarizationTones._corr)
 
-    def test_tracks_drifting_sop_where_static_fails(self, backend_device, xp):
+    def test_tracks_drifting_sop_where_static_fails(self, xp):
         """A rotating SOP defeats the static one-shot inverse but is tracked here."""
-        from commkit.impairments import apply_polarization_mixing
-        from commkit.spectral import add_pilot_tone
 
         fs = 100.0
         N = 16384
@@ -197,10 +190,8 @@ class TestDemultiplexPolarizationTonesDynamic:
         assert min_static < 0.95  # static degraded by the drift
         assert min_dynamic > min_static + 0.04
 
-    def test_static_sop_still_recovered(self, backend_device, xp):
+    def test_static_sop_still_recovered(self, xp):
         """With no drift the dynamic path matches the static result (no regression)."""
-        from commkit.impairments import apply_polarization_mixing
-        from commkit.spectral import add_pilot_tone
 
         fs = 100.0
         s = self._streams(xp, N=8192)
@@ -214,9 +205,8 @@ class TestDemultiplexPolarizationTonesDynamic:
             assert self._corr(xp, demuxed[j], tx[j]) > 0.99
             assert self._corr(xp, demuxed[j], tx[1 - j]) < 0.1
 
-    def test_return_matrix_shapes(self, backend_device, xp):
+    def test_return_matrix_shapes(self, xp):
         """return_matrix yields the (G, K, C) stack and (G,) grid positions."""
-        from commkit.spectral import add_pilot_tone
 
         fs = 100.0
         N = 8192
@@ -230,7 +220,7 @@ class TestDemultiplexPolarizationTonesDynamic:
         assert Wg.dtype == xp.complex128
         assert int(grid[-1]) == N - 1  # last sample is pinned on the grid
 
-    def test_invalid_track_bandwidth_raises(self, backend_device, xp):
+    def test_invalid_track_bandwidth_raises(self, xp):
         """A non-positive tracking bandwidth is rejected."""
         fs = 100.0
         s = self._streams(xp, N=4096)
@@ -239,9 +229,8 @@ class TestDemultiplexPolarizationTonesDynamic:
                 s, fs, self.TONES, track_bandwidth=0.0
             )
 
-    def test_trim_edges_returns_valid_interior(self, backend_device, xp):
+    def test_trim_edges_returns_valid_interior(self, xp):
         """trim_edges drops num_taps//2 each side and reports the original range."""
-        from commkit.spectral import add_pilot_tone
 
         fs = 100.0
         N = 8192
@@ -259,9 +248,8 @@ class TestDemultiplexPolarizationTonesDynamic:
         for j in range(2):
             assert self._corr(xp, demuxed[j], tx[j, valid]) > 0.99
 
-    def test_trim_edges_with_return_matrix_order(self, backend_device, xp):
+    def test_trim_edges_with_return_matrix_order(self, xp):
         """Combined flags return (demuxed, valid, W_grid, grid) in that order."""
-        from commkit.spectral import add_pilot_tone
 
         fs = 100.0
         N = 8192
@@ -277,10 +265,8 @@ class TestDemultiplexPolarizationTonesDynamic:
         assert int(grid[-1]) == N - 1
         assert Wg.shape[1:] == (2, 2)
 
-    def test_signal_input_returns_signal(self, backend_device, xp, xpt):
+    def test_signal_input_returns_signal(self, xp, xpt):
         """Signal input: sampling_rate is taken from the signal."""
-        from commkit.impairments import apply_polarization_mixing
-        from commkit.spectral import add_pilot_tone
 
         fs = 100.0
         s = self._streams(xp, N=8192)
@@ -298,9 +284,8 @@ class TestDemultiplexPolarizationTonesDynamic:
         assert isinstance(demuxed_sig, Signal)
         xpt.assert_allclose(demuxed_sig.samples, demuxed_arr)
 
-    def test_signal_input_apply_false_returns_raw_tuple(self, backend_device, xp, xpt):
+    def test_signal_input_apply_false_returns_raw_tuple(self, xp, xpt):
         """apply=False: no signal-shaped output, so the tuple stays raw arrays."""
-        from commkit.spectral import add_pilot_tone
 
         fs = 100.0
         s = self._streams(xp, N=8192)
@@ -318,9 +303,8 @@ class TestDemultiplexPolarizationTonesDynamic:
         xpt.assert_allclose(Wg_sig, Wg_arr)
         xpt.assert_allclose(grid_sig, grid_arr)
 
-    def test_signal_input_trim_edges_with_return_matrix(self, backend_device, xp, xpt):
+    def test_signal_input_trim_edges_with_return_matrix(self, xp, xpt):
         """Signal input + trim_edges + return_matrix: (Signal, valid, W_grid, grid)."""
-        from commkit.spectral import add_pilot_tone
 
         fs = 100.0
         N = 8192
@@ -347,7 +331,7 @@ class TestDemultiplexPolarizationTonesDynamic:
 class TestApplyInterpolatedMatrix:
     """Generic grid-interpolated time-varying matrix apply (the demux apply core)."""
 
-    def test_matches_per_sample_reference(self, backend_device, xp, xpt):
+    def test_matches_per_sample_reference(self, xp, xpt):
         """Block-GEMM apply == per-sample linear-interp einsum (to complex64)."""
         rng = xp.random.RandomState(0)
         N, step = 20000, 4096
@@ -373,7 +357,7 @@ class TestApplyInterpolatedMatrix:
         assert out.shape == (2, N)
         xpt.assert_allclose(out, ref, rtol=1e-4, atol=1e-4)
 
-    def test_constant_grid_is_static_matmul(self, backend_device, xp, xpt):
+    def test_constant_grid_is_static_matmul(self, xp, xpt):
         """A grid of identical matrices applies that one matrix everywhere."""
         N = 10000
         M2 = xp.asarray([[1.0, 0.5j], [0.2, -1.0]], dtype=xp.complex64)
@@ -386,7 +370,7 @@ class TestApplyInterpolatedMatrix:
         out = equalization.apply_interpolated_matrix(x, M, gp)
         xpt.assert_allclose(out, M2 @ x, rtol=1e-4, atol=1e-4)
 
-    def test_signal_input_returns_signal(self, backend_device, xp, xpt):
+    def test_signal_input_returns_signal(self, xp, xpt):
         """Signal input returns a Signal with the interpolated-matrix output."""
         N = 4096
         M2 = xp.asarray([[1.0, 0.5j], [0.2, -1.0]], dtype=xp.complex64)

@@ -15,9 +15,7 @@ T = 1.0 / R
 class TestFrequencyDriftAnalysis:
     """Tests for phase drift vs phase noise separation and wander statistics."""
 
-    def test_frequency_drift_metrics_sinusoid(
-        self, backend_device: str, xp: Any
-    ) -> None:
+    def test_frequency_drift_metrics_sinusoid(self, xp: Any) -> None:
         """Verify frequency drift metrics on a known sinusoidal wander."""
         n = 1 << 16
         amp, periods = 4e6, 10.0
@@ -28,9 +26,7 @@ class TestFrequencyDriftAnalysis:
         assert m["std"] == pytest.approx(amp / np.sqrt(2.0), rel=0.05)
         assert m["pp"] == pytest.approx(2.0 * amp, rel=0.10)
 
-    def test_separate_drift_phase_noise_splits(
-        self, backend_device: str, xp: Any
-    ) -> None:
+    def test_separate_drift_phase_noise_splits(self, xp: Any) -> None:
         """Verify frequency split separates slow wander from fast phase jitter."""
         n = 1 << 16
         t = np.arange(n) * T

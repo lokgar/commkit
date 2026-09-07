@@ -11,7 +11,7 @@ from commkit import spectral
 class TestPowerSpectralDensity:
     """Tests for Welch Power Spectral Density (PSD) estimation."""
 
-    def test_welch_psd_real(self, backend_device: str, xp: Any) -> None:
+    def test_welch_psd_real(self, xp: Any) -> None:
         """Verify Welch PSD estimation for real-valued signals, including one-sided/two-sided modes."""
         fs = 100.0
         t = xp.arange(1000) / fs
@@ -40,7 +40,7 @@ class TestPowerSpectralDensity:
         peak_freq_pos = f2[peak_idx_pos]
         assert xp.abs(peak_freq_pos - freq) < (fs / 256)
 
-    def test_welch_psd_complex(self, backend_device: str, xp: Any) -> None:
+    def test_welch_psd_complex(self, xp: Any) -> None:
         """Verify Welch PSD estimation for complex-valued signals."""
         fs = 100.0
         t = xp.arange(1000) / fs
@@ -60,7 +60,7 @@ class TestPowerSpectralDensity:
         with pytest.raises(ValueError, match="Cannot compute one-sided PSD"):
             spectral.welch_psd(samples, sampling_rate=fs, return_onesided=True)
 
-    def test_welch_psd_parameters(self, backend_device: str, xp: Any) -> None:
+    def test_welch_psd_parameters(self, xp: Any) -> None:
         """Verify Welch PSD estimation with custom window, noverlap, nfft, and scaling."""
         fs = 100.0
         t = xp.arange(1000) / fs
@@ -84,7 +84,7 @@ class TestPowerSpectralDensity:
 class TestFrequencyShift:
     """Tests for complex frequency shifting and phase modulation."""
 
-    def test_shift_frequency(self, backend_device: str, xp: Any) -> None:
+    def test_shift_frequency(self, xp: Any) -> None:
         """Verify complex frequency shifting, bin quantization, and energy preservation."""
         fs = 100.0
         N = 100
@@ -109,9 +109,7 @@ class TestFrequencyShift:
         energy_out = xp.sum(xp.abs(shifted_q) ** 2)
         assert xp.isclose(energy_in, energy_out)
 
-    def test_shift_frequency_preserves_complex64_dtype(
-        self, backend_device: str, xp: Any
-    ) -> None:
+    def test_shift_frequency_preserves_complex64_dtype(self, xp: Any) -> None:
         """shift_frequency: complex64 signal -> complex64 output."""
         rng = np.random.default_rng(20)
         s = xp.asarray(
@@ -122,9 +120,7 @@ class TestFrequencyShift:
         out, _ = spectral.shift_frequency(s, offset=100.0, sampling_rate=1000.0)
         assert out.dtype == xp.complex64
 
-    def test_shift_frequency_preserves_float32_dtype(
-        self, backend_device: str, xp: Any
-    ) -> None:
+    def test_shift_frequency_preserves_float32_dtype(self, xp: Any) -> None:
         """shift_frequency: float32 signal -> complex64 output."""
         rng = np.random.default_rng(21)
         s = xp.asarray(rng.standard_normal(512).astype(np.float32))
@@ -135,7 +131,7 @@ class TestFrequencyShift:
 class TestSpectrogram:
     """Tests for short-time Fourier transform spectrogram estimation."""
 
-    def test_spectrogram_real(self, backend_device: str, xp: Any) -> None:
+    def test_spectrogram_real(self, xp: Any) -> None:
         """Verify spectrogram calculation for real-valued signals."""
         fs = 100.0
         t_vec = xp.arange(1000) / fs
@@ -159,7 +155,7 @@ class TestSpectrogram:
             peak_freq = f[peak_idx]
             assert xp.abs(peak_freq - freq) < (fs / 256)
 
-    def test_spectrogram_complex_mimo(self, backend_device: str, xp: Any) -> None:
+    def test_spectrogram_complex_mimo(self, xp: Any) -> None:
         """Verify spectrogram calculation for complex-valued MIMO signals."""
         fs = 100.0
         t_vec = xp.arange(1000) / fs
@@ -193,7 +189,7 @@ class TestAddPilotTone:
         return x / xp.sqrt(xp.mean(xp.abs(x) ** 2))
 
     @pytest.mark.parametrize("psr_db", [-20.0, -10.0, 0.0])
-    def test_power_ratio(self, backend_device: str, xp: Any, psr_db: float) -> None:
+    def test_power_ratio(self, xp: Any, psr_db: float) -> None:
         """Added tone power matches the requested pilot-to-signal ratio."""
         fs = 100.0
         x = self._signal(xp)
@@ -202,7 +198,7 @@ class TestAddPilotTone:
         p_tone = float(xp.mean(xp.abs(y - x) ** 2))
         assert abs(10 * np.log10(p_tone / p_sig) - psr_db) < 0.05
 
-    def test_peak_location(self, backend_device: str, xp: Any) -> None:
+    def test_peak_location(self, xp: Any) -> None:
         """The injected tone shows up as the dominant spectral peak at the snapped f_p."""
         fs = 100.0
         N = 4096
@@ -213,7 +209,7 @@ class TestAddPilotTone:
         k = int(xp.argmax(xp.abs(xp.fft.fft(y))))
         assert abs(float(freqs[k]) - f_actual) < fs / N
 
-    def test_snaps_to_grid(self, backend_device: str, xp: Any) -> None:
+    def test_snaps_to_grid(self, xp: Any) -> None:
         """Returned frequency lies exactly on the f_s/N grid, near the request."""
         fs = 100.0
         N = 4096
@@ -224,7 +220,7 @@ class TestAddPilotTone:
         assert abs(round(f_actual / df) - f_actual / df) < 1e-9
         assert abs(f_actual - f_req) <= df / 2 + 1e-9
 
-    def test_dtype_and_shape_preserved(self, backend_device: str, xp: Any) -> None:
+    def test_dtype_and_shape_preserved(self, xp: Any) -> None:
         """complex64 stays complex64; SISO/MIMO shapes are preserved."""
         fs = 100.0
         x64 = self._signal(xp).astype(xp.complex64)
@@ -236,7 +232,7 @@ class TestAddPilotTone:
         ym, _ = spectral.add_pilot_tone(mimo, fs, 30.0)
         assert ym.shape == mimo.shape
 
-    def test_renormalize_preserves_power(self, backend_device: str, xp: Any) -> None:
+    def test_renormalize_preserves_power(self, xp: Any) -> None:
         """renormalize=True restores each channel's original mean power."""
         fs = 100.0
         mimo = xp.stack([self._signal(xp), 2 * self._signal(xp, seed=1)])
@@ -247,21 +243,21 @@ class TestAddPilotTone:
         p_out = xp.mean(xp.abs(y) ** 2, axis=-1)
         assert bool(xp.allclose(p_in, p_out, rtol=1e-4))
 
-    def test_invalid_frequency_raises(self, backend_device: str, xp: Any) -> None:
+    def test_invalid_frequency_raises(self, xp: Any) -> None:
         """Tone frequency outside (-fs/2, fs/2) raises ValueError."""
         fs = 100.0
         x = self._signal(xp)
         with pytest.raises(ValueError, match=r"must lie in \(-fs/2, fs/2\)"):
             spectral.add_pilot_tone(x, fs, fs)
 
-    def test_scalar_returns_float(self, backend_device: str, xp: Any) -> None:
+    def test_scalar_returns_float(self, xp: Any) -> None:
         """Scalar frequency returns a plain float (back-compat), even for MIMO."""
         fs = 100.0
         mimo = xp.stack([self._signal(xp), self._signal(xp, seed=1)])
         _, f_actual = spectral.add_pilot_tone(mimo, fs, 30.0)
         assert isinstance(f_actual, float)
 
-    def test_per_channel_frequencies(self, backend_device: str, xp: Any) -> None:
+    def test_per_channel_frequencies(self, xp: Any) -> None:
         """A per-channel list places one distinct tone per channel at its bin."""
         fs = 100.0
         N = 4096
@@ -276,25 +272,21 @@ class TestAddPilotTone:
             assert abs(f_actual[c] - f_req[c]) <= fs / N / 2 + 1e-9
         assert f_actual[0] != f_actual[1]
 
-    def test_per_channel_length_mismatch_raises(
-        self, backend_device: str, xp: Any
-    ) -> None:
+    def test_per_channel_length_mismatch_raises(self, xp: Any) -> None:
         """A per-channel sequence whose length != C raises ValueError."""
         fs = 100.0
         mimo = xp.stack([self._signal(xp), self._signal(xp, seed=1)])
         with pytest.raises(ValueError, match=r"one frequency per channel"):
             spectral.add_pilot_tone(mimo, fs, [20.0, -30.0, 10.0])
 
-    def test_per_channel_invalid_frequency_raises(
-        self, backend_device: str, xp: Any
-    ) -> None:
+    def test_per_channel_invalid_frequency_raises(self, xp: Any) -> None:
         """An out-of-range entry in a per-channel sequence raises ValueError."""
         fs = 100.0
         mimo = xp.stack([self._signal(xp), self._signal(xp, seed=1)])
         with pytest.raises(ValueError, match=r"must lie in \(-fs/2, fs/2\)"):
             spectral.add_pilot_tone(mimo, fs, [20.0, fs])
 
-    def test_per_channel_power_ratio(self, backend_device: str, xp: Any) -> None:
+    def test_per_channel_power_ratio(self, xp: Any) -> None:
         """A per-channel PSR sequence realises a distinct tone power per channel."""
         fs = 100.0
         psr = [-10.0, -20.0]
@@ -305,9 +297,7 @@ class TestAddPilotTone:
             p_tone = float(xp.mean(xp.abs(y[c] - mimo[c]) ** 2))
             assert abs(10 * np.log10(p_tone / p_sig) - psr[c]) < 0.05
 
-    def test_per_channel_power_length_mismatch_raises(
-        self, backend_device: str, xp: Any
-    ) -> None:
+    def test_per_channel_power_length_mismatch_raises(self, xp: Any) -> None:
         """A per-channel PSR sequence whose length != C raises ValueError."""
         fs = 100.0
         mimo = xp.stack([self._signal(xp), self._signal(xp, seed=1)])

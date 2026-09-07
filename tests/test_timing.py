@@ -15,20 +15,20 @@ from tests.common.conversions import to_numpy
 class TestTimingSequences:
     """Generation and mathematical properties of synchronization sequences."""
 
-    def test_barker_sequences(self, backend_device, xp):
+    def test_barker_sequences(self, xp, xpt):
         """Verify all standard Barker sequence lengths and binary properties."""
         valid_lengths = [2, 3, 4, 5, 7, 11, 13]
         for length in valid_lengths:
             seq = timing.barker_sequence(length)
             assert len(seq) == length
-            assert xp.all((seq == 1) | (seq == -1))
+            xpt.assert_array_equal((seq == 1) | (seq == -1), True)
 
-    def test_barker_invalid_length(self, backend_device, xp):
+    def test_barker_invalid_length(self, xp):
         """Verify that unsupported Barker lengths raise ValueError."""
         with pytest.raises(ValueError):
             timing.barker_sequence(6)
 
-    def test_barker_autocorrelation(self, backend_device, xp):
+    def test_barker_autocorrelation(self, xp):
         """Verify that Barker sequences possess optimal autocorrelation properties."""
         seq = timing.barker_sequence(13)
         acorr = cross_correlate_fft(seq, seq, mode="full")
@@ -42,13 +42,13 @@ class TestTimingSequences:
         assert peak_val == pytest.approx(13.0, abs=1e-4)
         assert sidelobes_max <= 1.0 + 1e-5
 
-    def test_zadoff_chu_cazac(self, backend_device, xp, xpt):
+    def test_zadoff_chu_cazac(self, xp, xpt):
         """Verify that ZC sequences have constant amplitude (CAZAC property)."""
         zc = timing.zadoff_chu_sequence(63, root=25)
         magnitudes = xp.abs(zc)
         xpt.assert_allclose(magnitudes, 1.0, atol=1e-5)
 
-    def test_zadoff_chu_length(self, backend_device, xp, xpt):
+    def test_zadoff_chu_length(self, xp, xpt):
         """Verify that ZC sequences are generated with the requested length."""
         for length in [31, 63, 127]:
             zc = timing.zadoff_chu_sequence(length, root=1)
@@ -58,14 +58,14 @@ class TestTimingSequences:
         assert len(zc_even) == 10
         xpt.assert_allclose(xp.abs(zc_even), 1.0)
 
-    def test_zadoff_chu_errors(self, backend_device, xp):
+    def test_zadoff_chu_errors(self, xp):
         """Verify ZC sequence generator input validation."""
         with pytest.raises(ValueError, match="Length must be positive"):
             timing.zadoff_chu_sequence(0)
         with pytest.raises(ValueError, match="Root must be in"):
             timing.zadoff_chu_sequence(10, root=10)
 
-    def test_preamble_auto_generation(self, backend_device, xp):
+    def test_preamble_auto_generation(self, xp):
         """Verify automated preamble bit and symbol generation."""
         preamble = Preamble(sequence_type="barker", length=13)
         assert preamble.symbols is not None
@@ -82,7 +82,7 @@ class TestTimingSequences:
         with pytest.raises(ValidationError):
             Preamble(sequence_type="barker")
 
-    def test_sequences_device(self, backend_device, xp):
+    def test_sequences_device(self, xp):
         """Verify sequence generators return arrays on the active device."""
         barker = timing.barker_sequence(13)
         assert isinstance(barker, xp.ndarray)
@@ -93,7 +93,7 @@ class TestTimingSequences:
 class TestCrossCorrelation:
     """Frequency-domain cross-correlation routines and peak detection."""
 
-    def test_correlate_delta(self, backend_device, xp):
+    def test_correlate_delta(self, xp):
         """Verify correct peak location for delta-like correlation."""
         signal = xp.zeros(100, dtype="float32")
         signal[50] = 1.0
@@ -102,7 +102,7 @@ class TestCrossCorrelation:
         peak_idx = int(xp.argmax(xp.abs(corr)))
         assert peak_idx == 50
 
-    def test_correlate_shift_detection(self, backend_device, xp):
+    def test_correlate_shift_detection(self, xp):
         """Verify that correlation correctly identifies the shift of a template."""
         template = xp.array([1.0, 1.0, 1.0, -1.0, -1.0], dtype="float32")
         signal = xp.zeros(50, dtype="float32")
@@ -111,7 +111,7 @@ class TestCrossCorrelation:
         peak_idx = int(xp.argmax(xp.abs(corr)))
         assert abs(peak_idx - 22) <= 1
 
-    def test_correlate_mimo(self, backend_device, xp):
+    def test_correlate_mimo(self, xp):
         """Verify correlation behavior for multi-stream (MIMO) signals."""
         signal = xp.zeros((2, 50), dtype="float32")
         signal[0, 20] = 1.0
@@ -124,7 +124,7 @@ class TestCrossCorrelation:
         assert peak_0 == 20
         assert peak_1 == 30
 
-    def test_cross_correlate_fft_modes(self, backend_device, xp):
+    def test_cross_correlate_fft_modes(self, xp):
         """Verify cross_correlate_fft output lengths for each mode."""
         signal = xp.ones(100, dtype="float32")
         template = xp.ones(10, dtype="float32")
@@ -139,7 +139,7 @@ class TestCrossCorrelation:
 class TestEstimateTiming:
     """Coarse timing estimation via preamble matched filtering."""
 
-    def test_estimate_timing_advanced_scenarios(self, backend_device, xp):
+    def test_estimate_timing_advanced_scenarios(self, xp):
         """Verify estimate_timing with raw arrays, MIMO, and search ranges."""
         preamble = Preamble(sequence_type="barker", length=7)
         data = xp.zeros(100, dtype="complex64")
@@ -169,7 +169,7 @@ class TestEstimateTiming:
         with pytest.raises(ValueError, match="No correlation peak above threshold"):
             timing.estimate_timing(zero_data, preamble.symbols, threshold=2.0)
 
-    def test_estimate_timing_known_position(self, backend_device, xp):
+    def test_estimate_timing_known_position(self, xp):
         """Verify timing estimation accuracy for a known preamble position."""
         preamble_symbols = timing.barker_sequence(13)
         signal = xp.zeros(200, dtype="complex64")
@@ -179,7 +179,7 @@ class TestEstimateTiming:
         integer, _frac = timing.estimate_timing(signal, preamble_symbols, threshold=2.0)
         assert abs(integer[0] - start_pos) <= 1
 
-    def test_estimate_timing_with_preamble_object(self, backend_device, xp):
+    def test_estimate_timing_with_preamble_object(self, xp):
         """Verify timing estimation using Preamble objects."""
         preamble = Preamble(sequence_type="barker", length=13)
         signal = xp.zeros(200, dtype="complex64")
@@ -193,7 +193,7 @@ class TestEstimateTiming:
         )
         assert abs(integer[0] - start_pos) <= 1
 
-    def test_estimate_timing_returns_tuple(self, backend_device, xp):
+    def test_estimate_timing_returns_tuple(self, xp):
         """Verify that estimate_timing returns (integer_offsets, fractional_offsets)."""
         preamble = timing.barker_sequence(7)
         signal = xp.zeros(100, dtype="complex64")
@@ -204,7 +204,7 @@ class TestEstimateTiming:
         assert len(frac) == 1
         assert abs(float(frac[0])) < 0.5
 
-    def test_estimate_timing_debug_plot(self, backend_device, xp):
+    def test_estimate_timing_debug_plot(self, xp):
         """Trigger the debug plot code path in estimate_timing."""
         preamble = xp.random.randn(10) + 1j * xp.random.randn(10)
         sig = xp.concatenate([xp.zeros(20), preamble, xp.zeros(20)])
@@ -218,14 +218,14 @@ class TestEstimateTiming:
             ):
                 timing.estimate_timing(sig, preamble, debug_plot=True)
 
-    def test_estimate_timing_zero_energy(self, backend_device, xp):
+    def test_estimate_timing_zero_energy(self, xp):
         """Test estimate_timing with zero energy signal."""
         preamble = xp.ones(10)
         sig = xp.zeros(50)
         with pytest.raises(ValueError, match="No correlation peak above threshold"):
             timing.estimate_timing(sig, preamble, threshold=2.0)
 
-    def test_estimate_timing_return_tuple(self, backend_device, xp):
+    def test_estimate_timing_return_tuple(self, xp):
         """Verify return tuple structure."""
         preamble = xp.ones(4)
         sig = xp.concatenate([xp.zeros(4), preamble, xp.zeros(4)])
@@ -236,7 +236,7 @@ class TestEstimateTiming:
         assert len(res[0]) == 1
         assert len(res[1]) == 1
 
-    def test_estimate_timing_search_range(self, backend_device, xp):
+    def test_estimate_timing_search_range(self, xp):
         """Verify estimate_timing with search_range."""
         preamble = xp.random.randn(10) + 1j * xp.random.randn(10)
         sig = xp.concatenate([xp.zeros(50), preamble, xp.zeros(50)])
@@ -246,14 +246,14 @@ class TestEstimateTiming:
         )
         assert integer[0] == 50
 
-    def test_estimate_timing_infer_error(self, backend_device, xp):
+    def test_estimate_timing_infer_error(self, xp):
         """Verify error when Preamble object used without sps."""
         pre = Preamble(sequence_type="barker", length=3)
         sig = xp.zeros(20)
         with pytest.raises(ValueError, match="SPS must be provided"):
             timing.estimate_timing(sig, pre)
 
-    def test_estimate_timing_fractional(self, backend_device, xp):
+    def test_estimate_timing_fractional(self, xp):
         """Verify estimate_timing returns fractional offset."""
         preamble = timing.barker_sequence(13)
         signal = xp.zeros(200, dtype="complex64")
@@ -264,7 +264,7 @@ class TestEstimateTiming:
         assert len(frac) == 1
         assert abs(float(frac[0])) < 0.5
 
-    def test_estimate_timing_no_preamble_error(self, backend_device, xp):
+    def test_estimate_timing_no_preamble_error(self, xp):
         """Verify estimate_timing raises when no reference is given."""
         sig = xp.zeros(100, dtype="complex64")
         with pytest.raises(
@@ -273,7 +273,7 @@ class TestEstimateTiming:
         ):
             timing.estimate_timing(sig)
 
-    def test_estimate_timing_with_preamble_object_explicit(self, backend_device, xp):
+    def test_estimate_timing_with_preamble_object_explicit(self, xp):
         """Verify estimate_timing with explicit Preamble object."""
         barker = timing.barker_sequence(7)
         samples = xp.zeros(200, dtype="complex64")
@@ -285,7 +285,7 @@ class TestEstimateTiming:
         )
         assert abs(int(integer[0]) - 40) <= 1
 
-    def test_estimate_timing_signal_derives_sps_for_preamble(self, backend_device, xp):
+    def test_estimate_timing_signal_derives_sps_for_preamble(self, xp):
         """A Signal provides the SPS required to reconstruct a Preamble."""
         barker = timing.barker_sequence(7)
         samples = xp.zeros(200, dtype="complex64")
@@ -302,9 +302,7 @@ class TestEstimateTiming:
         )
         assert abs(int(integer[0]) - 40) <= 1
 
-    def test_estimate_timing_fractional_sps_with_raw_reference(
-        self, backend_device, xp, xpt
-    ):
+    def test_estimate_timing_fractional_sps_with_raw_reference(self, xp, xpt):
         """Raw waveform correlation does not require integer samples per symbol."""
         reference = xp.asarray(timing.barker_sequence(7))
         samples = xp.zeros(100, dtype=xp.complex64)
@@ -319,7 +317,7 @@ class TestEstimateTiming:
         with pytest.raises(ValueError, match="sps to be a positive integer"):
             timing.estimate_timing(sig, Preamble(sequence_type="barker", length=7))
 
-    def test_estimate_timing_preamble_kwargs_without_sps(self, backend_device, xp):
+    def test_estimate_timing_preamble_kwargs_without_sps(self, xp):
         """Verify estimate_timing raises when preamble is provided but sps is missing."""
         sig = xp.zeros(100, dtype="complex64")
         pre = Preamble(sequence_type="barker", length=7)
@@ -362,7 +360,7 @@ class TestEstimateTimingMIMO:
         preamble = Preamble(sequence_type="zc", length=L, root=1, num_streams=2)
         return rx, preamble, L
 
-    def test_estimate_timing_skew_detection(self, backend_device, xp):
+    def test_estimate_timing_skew_detection(self, xp):
         """Verify skew warning is emitted when MIMO channels have different preamble positions."""
         barker = timing.barker_sequence(7)
         sig = xp.zeros((2, 200), dtype="complex64")
@@ -379,7 +377,7 @@ class TestEstimateTimingMIMO:
         assert abs(int(integer[0]) - 40) <= 1
         assert abs(int(integer[1]) - 42) <= 1
 
-    def test_estimate_timing_mimo_identity(self, backend_device, xp):
+    def test_estimate_timing_mimo_identity(self, xp):
         """MIMO unique-root ZC: identity channel, both channels align to preamble_pos."""
         preamble_pos = 200
         rx, preamble, L = self._make_mimo_signal(
@@ -391,7 +389,7 @@ class TestEstimateTimingMIMO:
         for ch in range(2):
             assert abs(int(integer[ch]) - preamble_pos) <= 1
 
-    def test_estimate_timing_mimo_mixed_channel(self, backend_device, xp):
+    def test_estimate_timing_mimo_mixed_channel(self, xp):
         """MIMO unique-root ZC: mixed channel (both streams present on each RX)."""
         preamble_pos = 150
         angle = np.radians(40)
@@ -404,7 +402,7 @@ class TestEstimateTimingMIMO:
         for ch in range(2):
             assert abs(int(integer[ch]) - preamble_pos) <= 1
 
-    def test_estimate_timing_mimo_channel_skew(self, backend_device, xp):
+    def test_estimate_timing_mimo_channel_skew(self, xp):
         """MIMO: hardware skew of 5 samples on channel 1 is reflected in per-channel integer offsets."""
         preamble_pos = 200
         skew = 5
@@ -420,7 +418,7 @@ class TestEstimateTimingMIMO:
         assert abs(int(integer[1]) - expected_ch1) <= 1
         assert int(integer[0]) != int(integer[1])
 
-    def test_estimate_timing_mimo_permuted_channel(self, backend_device, xp):
+    def test_estimate_timing_mimo_permuted_channel(self, xp):
         """MIMO: pure polarization swap (H = [[0,1],[1,0]]) - RX-0 receives TX-1 and vice versa."""
         preamble_pos = 200
         H = [[0.0, 1.0], [1.0, 0.0]]
@@ -436,7 +434,7 @@ class TestEstimateTimingMIMO:
 class TestFractionalDelay:
     """Fine fractional delay estimation and FFT fractional delay filter."""
 
-    def test_estimate_fractional_delay_known_shift(self, backend_device, xp):
+    def test_estimate_fractional_delay_known_shift(self, xp):
         """Verify parabolic interpolation recovers a known fractional delay."""
         N = 100
         true_mu = 0.3
@@ -448,14 +446,14 @@ class TestFractionalDelay:
         mu = timing.estimate_fractional_delay(corr, peak_idx)
         assert abs(float(mu) - true_mu) < 0.15
 
-    def test_estimate_fractional_delay_edge_peak(self, backend_device, xp):
+    def test_estimate_fractional_delay_edge_peak(self, xp):
         """Verify graceful fallback when peak is at array boundary."""
         corr = xp.zeros(50, dtype="float32")
         corr[0] = 1.0
         mu = timing.estimate_fractional_delay(corr, xp.asarray(0))
         assert float(mu) == 0.0
 
-    def test_estimate_fractional_delay_mimo(self, backend_device, xp):
+    def test_estimate_fractional_delay_mimo(self, xp):
         """Verify per-channel fractional delay estimation."""
         N = 100
         corr = xp.zeros((2, N), dtype="float32")
@@ -473,7 +471,7 @@ class TestFractionalDelay:
         assert abs(float(mu[0]) - 0.2) < 0.15
         assert abs(float(mu[1]) - (-0.1)) < 0.15
 
-    def test_estimate_fractional_delay_methods(self, backend_device, xp):
+    def test_estimate_fractional_delay_methods(self, xp):
         """Verify different fractional delay estimation methods."""
         N = 64
         true_mu = 0.35
@@ -507,7 +505,7 @@ class TestFractionalDelay:
         assert err_sinc_8x < err_sinc_1x
         assert err_sinc_8x < 0.01
 
-    def test_estimate_fractional_delay_dft_edge_fallback(self, backend_device, xp):
+    def test_estimate_fractional_delay_dft_edge_fallback(self, xp):
         """Verify DFT upsample with edge peak falls back to standard parabolic estimation."""
         N = 100
         true_mu = 0.25
@@ -518,14 +516,14 @@ class TestFractionalDelay:
         mu = timing.estimate_fractional_delay(corr, peak_idx, dft_upsample=8)
         assert abs(float(mu)) < 0.5
 
-    def test_fft_fractional_delay_zero_delay(self, backend_device, xp, xpt):
+    def test_fft_fractional_delay_zero_delay(self, xp, xpt):
         """Verify delay=0 is a perfect passthrough (identity operation)."""
         n = np.arange(100, dtype="float32")
         signal = xp.asarray(np.sin(2 * np.pi * 0.05 * n).astype("complex64"))
         out = timing.fft_fractional_delay(signal, 0.0)
         xpt.assert_allclose(out, signal, atol=1e-6)
 
-    def test_fft_fractional_delay_known_sine(self, backend_device, xp, xpt):
+    def test_fft_fractional_delay_known_sine(self, xp, xpt):
         """Verify fractional delay of a sinusoid against ground truth."""
         f = 0.02
         N = 200
@@ -536,7 +534,7 @@ class TestFractionalDelay:
         out = timing.fft_fractional_delay(xp.asarray(original), delay)
         xpt.assert_allclose(out, truth, atol=1e-5)
 
-    def test_fft_fractional_delay_mimo(self, backend_device, xp, xpt):
+    def test_fft_fractional_delay_mimo(self, xp, xpt):
         """Verify per-channel fractional delays for 2-channel signal."""
         f = 0.02
         N = 200
@@ -551,7 +549,7 @@ class TestFractionalDelay:
         xpt.assert_allclose(out[0], truth0, atol=1e-5)
         xpt.assert_allclose(out[1], truth1, atol=1e-5)
 
-    def test_fft_fractional_delay_power_conservation(self, backend_device, xp):
+    def test_fft_fractional_delay_power_conservation(self, xp):
         """Verify FFT-based delay preserves signal power."""
         np.random.seed(42)
         N = 1000
@@ -563,7 +561,7 @@ class TestFractionalDelay:
         power_out = float(xp.mean(xp.abs(delayed) ** 2))
         assert abs(power_out / power_in - 1.0) < 1e-5
 
-    def test_fft_fractional_delay_roundtrip(self, backend_device, xp, xpt):
+    def test_fft_fractional_delay_roundtrip(self, xp, xpt):
         """Verify round-trip (delay + undo) recovers original signal."""
         np.random.seed(42)
         N = 1000
@@ -574,7 +572,7 @@ class TestFractionalDelay:
         recovered = timing.fft_fractional_delay(delayed, -delay)
         xpt.assert_allclose(recovered, signal_xp, atol=1e-5)
 
-    def test_fft_fractional_delay_scalar_ndarray(self, backend_device, xp, xpt):
+    def test_fft_fractional_delay_scalar_ndarray(self, xp, xpt):
         """Verify fft_fractional_delay with 0-d array delay input."""
         f = 0.02
         N = 100
@@ -586,14 +584,14 @@ class TestFractionalDelay:
         truth = np.exp(2j * np.pi * f * (n - 0.3)).astype("complex64")
         xpt.assert_allclose(out, truth, atol=1e-5)
 
-    def test_fft_fractional_delay_preserves_complex64_dtype(self, backend_device, xp):
+    def test_fft_fractional_delay_preserves_complex64_dtype(self, xp):
         """fft_fractional_delay: complex64 signal -> complex64 output."""
         n = np.arange(200)
         sig = xp.asarray(np.exp(2j * np.pi * 0.05 * n).astype(np.complex64))
         out = timing.fft_fractional_delay(sig, 0.3)
         assert out.dtype == xp.complex64
 
-    def test_fft_fractional_delay_preserves_float32_dtype(self, backend_device, xp):
+    def test_fft_fractional_delay_preserves_float32_dtype(self, xp):
         """fft_fractional_delay: float32 signal -> float32 output."""
         n = np.arange(200, dtype=np.float32)
         sig = xp.asarray(np.sin(2 * np.pi * 0.05 * n))
@@ -604,14 +602,14 @@ class TestFractionalDelay:
 class TestCorrectTimingBasic:
     """Basic integer and fractional timing correction applications."""
 
-    def test_correct_timing_integer_only(self, backend_device, xp):
+    def test_correct_timing_integer_only(self, xp):
         """Verify integer-only timing correction via roll."""
         signal = xp.zeros(50, dtype="float32")
         signal[10] = 1.0
         corrected = timing.correct_timing(signal, integer_offset=10)
         assert int(xp.argmax(xp.abs(corrected))) == 0
 
-    def test_correct_timing_combined(self, backend_device, xp, xpt):
+    def test_correct_timing_combined(self, xp, xpt):
         """Verify integer + fractional timing correction."""
         f = 0.02
         N = 200
@@ -624,7 +622,7 @@ class TestCorrectTimingBasic:
         )
         xpt.assert_allclose(corrected[25:-25], original[25:-25], atol=0.02)
 
-    def test_correct_timing_per_channel(self, backend_device, xp):
+    def test_correct_timing_per_channel(self, xp):
         """Verify per-channel integer timing correction using an array of offsets."""
         sig = xp.zeros((2, 50), dtype="complex64")
         sig[0, 10] = 1.0
@@ -635,7 +633,7 @@ class TestCorrectTimingBasic:
         assert int(xp.argmax(xp.abs(corrected[0]))) == 0
         assert int(xp.argmax(xp.abs(corrected[1]))) == 0
 
-    def test_correct_timing_fractional_array(self, backend_device, xp, xpt):
+    def test_correct_timing_fractional_array(self, xp, xpt):
         """Verify fractional offset as array applies per-channel FFT delay and returns 2D output."""
         f = 0.02
         N = 200
@@ -658,7 +656,7 @@ class TestCorrectTimingBasic:
 class TestCorrectTiming:
     """Tests for correct_timing scalar zero/slice modes and per-channel vectorized paths."""
 
-    def test_scalar_zero_mode_positive_shift(self, backend_device, xp):
+    def test_scalar_zero_mode_positive_shift(self, xp):
         """Scalar integer offset with mode='zero': signal shifts left, tail zero-padded."""
         N, shift = 100, 10
         sig = xp.asarray(np.arange(N, dtype=np.complex64))
@@ -667,7 +665,7 @@ class TestCorrectTiming:
         assert float(out[0].real) == pytest.approx(float(sig[shift].real))
         assert float(out[-1].real) == pytest.approx(0.0)
 
-    def test_scalar_zero_mode_negative_shift(self, backend_device, xp):
+    def test_scalar_zero_mode_negative_shift(self, xp):
         """Scalar negative integer offset with mode='zero': signal shifts right, head zero-padded."""
         N, shift = 100, -5
         sig = xp.asarray(np.ones(N, dtype=np.complex64))
@@ -675,14 +673,14 @@ class TestCorrectTiming:
         assert out.shape == sig.shape
         assert float(out[0].real) == pytest.approx(0.0)
 
-    def test_scalar_slice_mode(self, backend_device, xp):
+    def test_scalar_slice_mode(self, xp):
         """Scalar integer offset with mode='slice': output is shorter by offset."""
         N, shift = 100, 15
         sig = xp.asarray(np.ones(N, dtype=np.complex64))
         out = timing.correct_timing(sig, shift, mode="slice")
         assert out.shape[-1] == N - shift
 
-    def test_per_channel_circular_mode(self, backend_device, xp):
+    def test_per_channel_circular_mode(self, xp):
         """Per-channel array offset with mode='circular': each channel rolled independently."""
         C, N = 2, 64
         rng = np.random.default_rng(20)
@@ -695,7 +693,7 @@ class TestCorrectTiming:
         out = timing.correct_timing(sig, offsets, mode="circular")
         assert out.shape == (C, N)
 
-    def test_per_channel_zero_mode(self, backend_device, xp):
+    def test_per_channel_zero_mode(self, xp):
         """Per-channel array offset with mode='zero': output same shape, tail zeroed."""
         C, N = 2, 64
         sig = xp.asarray(np.ones((C, N), dtype=np.complex64))
@@ -703,7 +701,7 @@ class TestCorrectTiming:
         out = timing.correct_timing(sig, offsets, mode="zero")
         assert out.shape == (C, N)
 
-    def test_per_channel_slice_mode(self, backend_device, xp):
+    def test_per_channel_slice_mode(self, xp):
         """Per-channel array offset with mode='slice': output length is N - max(offset)."""
         C, N = 2, 64
         offsets = np.array([3, 10])
@@ -711,7 +709,7 @@ class TestCorrectTiming:
         out = timing.correct_timing(sig, xp.asarray(offsets), mode="slice")
         assert out.shape == (C, N - max(offsets))
 
-    def test_slice_mode_fractional_no_edge_wrap(self, backend_device, xp, xpt):
+    def test_slice_mode_fractional_no_edge_wrap(self, xp, xpt):
         """mode='slice' with fractional offset applies the FFT delay on the
         *full pre-slice buffer*, so the new sample 0 is free of circular
         wrap-around from the buffer's trailing edge.
@@ -728,9 +726,7 @@ class TestCorrectTiming:
         expected = np.exp(1j * 2 * np.pi * f0 * n_out).astype(np.complex64)
         xpt.assert_allclose(xp.asarray(out)[:20], xp.asarray(expected)[:20], atol=1e-4)
 
-    def test_slice_mode_fractional_matches_delay_then_slice(
-        self, backend_device, xp, xpt
-    ):
+    def test_slice_mode_fractional_matches_delay_then_slice(self, xp, xpt):
         """mode='slice' with fractional offset must be algebraically equivalent
         to (fft_fractional_delay on full buffer) followed by (integer slice).
         """
@@ -750,13 +746,13 @@ class TestCorrectTiming:
 class TestCorrectTimingErrors:
     """ValueError for unknown mode - scalar and per-channel paths."""
 
-    def test_scalar_unknown_mode_raises(self, backend_device, xp):
+    def test_scalar_unknown_mode_raises(self, xp):
         """Scalar offset with unsupported mode raises ValueError."""
         sig = xp.asarray(np.ones(64, dtype=np.complex64))
         with pytest.raises(ValueError, match="Unknown mode"):
             timing.correct_timing(sig, 4, mode="wrap")
 
-    def test_per_channel_unknown_mode_raises(self, backend_device, xp):
+    def test_per_channel_unknown_mode_raises(self, xp):
         """Per-channel offset with unsupported mode raises ValueError."""
         sig = xp.asarray(np.ones((2, 64), dtype=np.complex64))
         offsets = xp.asarray(np.array([2, 4], dtype=np.int64))
@@ -767,7 +763,7 @@ class TestCorrectTimingErrors:
 class TestSignalInputTiming:
     """Signal-awareness for fft_fractional_delay, estimate_timing, correct_timing."""
 
-    def test_fft_fractional_delay_signal_input(self, backend_device, xp, xpt):
+    def test_fft_fractional_delay_signal_input(self, xp, xpt):
         """Signal input returns a Signal with the delayed samples."""
         rng = np.random.default_rng(0)
         data = xp.asarray(
@@ -783,7 +779,7 @@ class TestSignalInputTiming:
         assert isinstance(out_sig, Signal)
         xpt.assert_allclose(out_sig.samples, out_arr)
 
-    def test_estimate_timing_signal_input(self, backend_device, xp, xpt):
+    def test_estimate_timing_signal_input(self, xp, xpt):
         """Signal input: estimate_timing still returns a raw (int, frac) tuple."""
         preamble_symbols = timing.barker_sequence(13)
         data = xp.zeros(200, dtype="complex64")
@@ -800,7 +796,7 @@ class TestSignalInputTiming:
         xpt.assert_allclose(int_sig, int_arr)
         xpt.assert_allclose(frac_sig, frac_arr)
 
-    def test_correct_timing_signal_input(self, backend_device, xp, xpt):
+    def test_correct_timing_signal_input(self, xp, xpt):
         """Signal input returns a Signal with the timing-corrected samples."""
         data = xp.asarray(np.ones(64, dtype=np.complex64))
         sig = Signal(samples=data, sampling_rate=1.0, symbol_rate=1.0)

@@ -23,7 +23,7 @@ class TestWienerPhaseSmoother:
         rng = xp.random.RandomState(seed)
         return xp.cumsum(rng.normal(0.0, float(np.sqrt(q)), N)), q
 
-    def test_reduces_random_walk_noise(self, backend_device, xp):
+    def test_reduces_random_walk_noise(self, xp):
         """Smoothing a noisy random-walk phase lowers the RMS error vs truth."""
         truth, q = self._random_walk(xp)
         rng = xp.random.RandomState(11)
@@ -37,7 +37,7 @@ class TestWienerPhaseSmoother:
         rms_smooth = calc_rms_phase_error(smoothed[g], truth[g], xp=xp)
         assert rms_smooth < rms_noisy
 
-    def test_preserves_linear_trend(self, backend_device, xp):
+    def test_preserves_linear_trend(self, xp):
         """A pure FOE ramp (+ tiny noise) survives the detrend/add-back path."""
         N = 8000
         n = xp.arange(N, dtype=xp.float64)
@@ -53,7 +53,7 @@ class TestWienerPhaseSmoother:
         est_slope = float((smoothed[g][-1] - smoothed[g][0]) / (n[g][-1] - n[g][0]))
         assert abs(est_slope - slope) < 0.05 * slope + 1e-5
 
-    def test_shape_siso_and_mimo(self, backend_device, xp):
+    def test_shape_siso_and_mimo(self, xp):
         truth, q = self._random_walk(xp, N=4000)
         phi1d = recovery.smooth_phase_wiener(
             truth, process_variance=q, measurement_variance=0.05
@@ -65,7 +65,7 @@ class TestWienerPhaseSmoother:
         )
         assert phi2d.shape == phi2d_in.shape
 
-    def test_derive_variances_from_physical_params(self, backend_device, xp):
+    def test_derive_variances_from_physical_params(self, xp):
         """linewidth + sampling_rate derive q internally; r is given directly."""
         truth, _ = self._random_walk(xp, N=4000)
         phi = recovery.smooth_phase_wiener(
@@ -73,7 +73,7 @@ class TestWienerPhaseSmoother:
         )
         assert phi.shape == truth.shape
 
-    def test_invalid_params_raise(self, backend_device, xp):
+    def test_invalid_params_raise(self, xp):
         truth, _ = self._random_walk(xp, N=100)
         with pytest.raises(ValueError, match="process_variance"):
             recovery.smooth_phase_wiener(truth, measurement_variance=0.05)
@@ -91,7 +91,7 @@ class TestCprTikhonov:
             (64, "qam", 32),
         ],
     )
-    def test_phase_residual(self, backend_device, xp, order, modulation, block_size):
+    def test_phase_residual(self, xp, order, modulation, block_size):
         """Tikhonov CPR: mean estimate within 0.1 rad of true carrier phase (mod M-fold)."""
         if modulation == "qam":
             sig = make_test_qam_signal(
@@ -119,7 +119,7 @@ class TestCprTikhonov:
         err = err - step * round(err / step)
         assert abs(err) < 0.1
 
-    def test_output_shape_siso(self, backend_device, xp):
+    def test_output_shape_siso(self, xp):
         """Tikhonov CPR: 1D input -> 1D output of same length."""
         sig = make_test_qam_signal(
             order=16, num_symbols=512, sps=1, symbol_rate=FS, xp=xp
@@ -133,7 +133,7 @@ class TestCprTikhonov:
         )
         assert phase.shape == sig.samples.shape
 
-    def test_output_shape_mimo(self, backend_device, xp):
+    def test_output_shape_mimo(self, xp):
         """Tikhonov CPR: 2D input (C, N) -> 2D output (C, N)."""
         mimo, _ = make_test_mimo_samples(
             num_channels=2, order=16, num_symbols=512, sps=1, xp=xp
@@ -147,7 +147,7 @@ class TestCprTikhonov:
         )
         assert phase.shape == mimo.shape
 
-    def test_too_short_raises(self, backend_device, xp):
+    def test_too_short_raises(self, xp):
         """Tikhonov CPR: signal shorter than block_size raises ValueError."""
         sig = make_test_qam_signal(
             order=4, num_symbols=20, sps=1, symbol_rate=FS, xp=xp
@@ -161,7 +161,7 @@ class TestCprTikhonov:
                 block_size=32,
             )
 
-    def test_invalid_method_raises(self, backend_device, xp):
+    def test_invalid_method_raises(self, xp):
         """Tikhonov CPR: unknown method raises ValueError."""
         sig = make_test_qam_signal(
             order=16, num_symbols=512, sps=1, symbol_rate=FS, xp=xp
@@ -176,7 +176,7 @@ class TestCprTikhonov:
             )
 
     @pytest.mark.parametrize("order,modulation", [(4, "psk"), (16, "qam")])
-    def test_sskf_phase_residual(self, backend_device, xp, order, modulation):
+    def test_sskf_phase_residual(self, xp, order, modulation):
         """Tikhonov SSKF: mean estimate within 0.1 rad of true offset (mod M-fold)."""
         if modulation == "qam":
             sig = make_test_qam_signal(
@@ -204,7 +204,7 @@ class TestCprTikhonov:
         err = err - step * round(err / step)
         assert abs(err) < 0.1
 
-    def test_sskf_exact_close(self, backend_device, xp):
+    def test_sskf_exact_close(self, xp):
         """SSKF and exact RTS produce similar phase estimates (within 0.05 rad RMS)."""
         sig = make_test_qam_signal(
             order=16, num_symbols=2048, sps=1, symbol_rate=FS, xp=xp
@@ -230,7 +230,7 @@ class TestCprTikhonov:
         rms_diff = float(xp.sqrt(xp.mean((phi_exact - phi_sskf) ** 2)))
         assert rms_diff < 0.05
 
-    def test_smoother_reduces_noise_vs_vv(self, backend_device, xp):
+    def test_smoother_reduces_noise_vs_vv(self, xp):
         """Tikhonov produces smoother phase trajectory than VV when σ_p² < σ_v²."""
         linewidth_symbol_periods = 1e-7
         snr_test = 15
@@ -263,7 +263,7 @@ class TestCprTikhonov:
 class TestSignalInputTikhonov:
     """Signal-awareness for recover_carrier_phase_tikhonov."""
 
-    def test_signal_input_uses_metadata(self, backend_device, xp, xpt):
+    def test_signal_input_uses_metadata(self, xp, xpt):
         """Signal input: modulation/order come from the signal's metadata."""
         sig = make_test_qam_signal(
             order=16, num_symbols=512, sps=1, symbol_rate=FS, xp=xp

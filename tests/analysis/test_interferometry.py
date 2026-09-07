@@ -8,7 +8,6 @@ backend via the ``xp`` fixture.
 
 from unittest.mock import patch
 
-import matplotlib.pyplot as plt
 import numpy as np
 import pytest
 
@@ -243,7 +242,6 @@ class TestDSHLinewidthEstimator:
                 analysis.linewidth_dsh(z, FS, m / FS, method=method, debug_plot=True)
             dp, _ = analysis.dsh_phase(z, FS, f_shift=80e6)
             analysis.dsh_fm_noise_psd(dp, FS, m / FS, debug_plot=True)
-        plt.close("all")
 
 
 class TestSignalInputInterferometry:

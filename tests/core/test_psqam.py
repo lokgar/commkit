@@ -29,7 +29,7 @@ class TestMaxwellBoltzmann:
         pmf = maxwell_boltzmann(order, nu)
         assert pmf.shape == (order,)
         assert np.isclose(pmf.sum(), 1.0, atol=1e-12)
-        assert np.all(pmf >= 0)
+        np.testing.assert_array_equal(pmf >= 0, True)
 
     @pytest.mark.parametrize("order", [16, 64, 256])
     def test_uniform_at_zero(self, order: int, xpt: Any) -> None:
@@ -183,9 +183,7 @@ class TestGeneratePSQAM:
         avg_energy_ps = float(np.mean(np.abs(src) ** 2))
         assert avg_energy_ps < 1.0
 
-    def test_psqam_source_bits_match_symbols(
-        self, backend_device: str, xp: Any, xpt: Any
-    ) -> None:
+    def test_psqam_source_bits_match_symbols(self, xp: Any, xpt: Any) -> None:
         """Hard-demapping source_symbols recovers source_bits across backends."""
         from commkit.mapping import demap_symbols_hard
 
@@ -197,7 +195,7 @@ class TestGeneratePSQAM:
         recovered_bits = demap_symbols_hard(src_sym, "qam", 16)
         xpt.assert_array_equal(src_bits, recovered_bits)
 
-    def test_psqam_ber_computable(self, backend_device: str, xp: Any) -> None:
+    def test_psqam_ber_computable(self, xp: Any) -> None:
         """BER is computable end-to-end with resolved symbols and bits."""
         sig = generate_psqam(
             5000, sps=1, symbol_rate=32e9, order=16, nu=0.5, pulse_shape="none"

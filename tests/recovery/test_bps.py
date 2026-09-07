@@ -17,7 +17,7 @@ SNR_DB = 30  # generous SNR so numerical algorithms converge reliably
 
 class TestCprBps:
     @pytest.mark.parametrize("order", [16, 64])
-    def test_phase_residual(self, backend_device, xp, order):
+    def test_phase_residual(self, xp, order):
         """BPS CPR: RMS phase residual < 0.05 rad for constant phase offset."""
         sig = make_test_qam_signal(
             order=order, num_symbols=1024, sps=1, symbol_rate=FS, xp=xp
@@ -35,7 +35,7 @@ class TestCprBps:
         )
         assert float(xp.sqrt(xp.mean(phase_resid**2))) < 0.05
 
-    def test_output_shape_siso(self, backend_device, xp):
+    def test_output_shape_siso(self, xp):
         """BPS CPR: 1D input -> 1D phase output of same length."""
         sig = make_test_qam_signal(
             order=16, num_symbols=512, sps=1, symbol_rate=FS, xp=xp
@@ -45,7 +45,7 @@ class TestCprBps:
         )
         assert phase.shape == sig.samples.shape
 
-    def test_output_shape_mimo(self, backend_device, xp):
+    def test_output_shape_mimo(self, xp):
         """BPS CPR: 2D input (C, N) -> 2D phase output (C, N)."""
         mimo, _ = make_test_mimo_samples(
             num_channels=2, order=16, num_symbols=512, sps=1, xp=xp
@@ -53,7 +53,7 @@ class TestCprBps:
         phase = recovery.recover_carrier_phase_bps(mimo, modulation="qam", order=16)
         assert phase.shape == mimo.shape
 
-    def test_too_short_raises(self, backend_device, xp):
+    def test_too_short_raises(self, xp):
         """BPS CPR: signal shorter than block_size raises ValueError."""
         sig = make_test_qam_signal(
             order=16, num_symbols=20, sps=1, symbol_rate=FS, xp=xp
@@ -75,7 +75,7 @@ class TestBPS:
     def _qpsk_symbols(self, xp, N=512, seed=3):
         return make_test_symbols(scheme="psk", order=4, num_symbols=N, seed=seed, xp=xp)
 
-    def test_siso_qam16_output_shape(self, backend_device, xp):
+    def test_siso_qam16_output_shape(self, xp):
         """SISO QAM16 (square QAM fast path): output is (N,) float64."""
         syms = self._qam16_symbols(xp)
         phi_est = recovery.recover_carrier_phase_bps(
@@ -84,7 +84,7 @@ class TestBPS:
         assert phi_est.shape == syms.shape
         assert phi_est.dtype == xp.float64
 
-    def test_siso_qam16_recovers_static_phase(self, backend_device, xp):
+    def test_siso_qam16_recovers_static_phase(self, xp):
         """BPS should estimate a static QAM16 phase offset to within π/8 tolerance."""
 
         phi_true = 0.25
@@ -100,7 +100,7 @@ class TestBPS:
             f"Residual phase error too large: {residual:.3f} rad"
         )
 
-    def test_siso_qpsk_general_path(self, backend_device, xp):
+    def test_siso_qpsk_general_path(self, xp):
         """SISO QPSK (non-square: triggers general distance path): output shape correct."""
         syms = self._qpsk_symbols(xp, N=256)
         phi_est = recovery.recover_carrier_phase_bps(
@@ -108,7 +108,7 @@ class TestBPS:
         )
         assert phi_est.shape == syms.shape
 
-    def test_mimo_output_shape(self, backend_device, xp):
+    def test_mimo_output_shape(self, xp):
         """MIMO input (C, N): output shape is (C, N)."""
 
         C, N = 2, 256
@@ -123,7 +123,7 @@ class TestBPS:
         )
         assert phi_est.shape == (C, N)
 
-    def test_block_size_too_large_raises(self, backend_device, xp):
+    def test_block_size_too_large_raises(self, xp):
         """block_size > N should raise ValueError."""
         syms = self._qam16_symbols(xp, N=16)
         with pytest.raises(ValueError, match="block_size"):
@@ -133,7 +133,7 @@ class TestBPS:
 class TestSignalInputBpsAndCorrectCarrierPhase:
     """Signal-awareness for recover_carrier_phase_bps and correct_carrier_phase."""
 
-    def test_bps_signal_input_uses_metadata(self, backend_device, xp, xpt):
+    def test_bps_signal_input_uses_metadata(self, xp, xpt):
         """Signal input: modulation/order come from the signal's metadata."""
         sig = make_test_qam_signal(
             order=16, num_symbols=512, sps=1, symbol_rate=FS, xp=xp
@@ -147,9 +147,7 @@ class TestSignalInputBpsAndCorrectCarrierPhase:
         assert not isinstance(phi_sig, Signal)  # phase estimate stays a raw array
         xpt.assert_allclose(phi_sig, phi_arr)
 
-    def test_correct_carrier_phase_signal_input_returns_signal(
-        self, backend_device, xp, xpt
-    ):
+    def test_correct_carrier_phase_signal_input_returns_signal(self, xp, xpt):
         """Signal input returns a Signal with the phase-corrected samples."""
         sig = make_test_qam_signal(
             order=16, num_symbols=256, sps=1, symbol_rate=FS, xp=xp

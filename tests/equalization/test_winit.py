@@ -30,7 +30,7 @@ def _make_qam16_rx(xp, n_symbols=2000, seed=0):
 class TestWInit:
     """w_init parameter: warm-start from prior equalizer weights."""
 
-    def test_lms_accepts_w_init(self, backend_device, xp):
+    def test_lms_accepts_w_init(self, xp):
         """lms() accepts w_init array with correct shape and returns EqualizerResult."""
         rx = _make_qam16_rx(xp)
         num_taps, num_ch = 21, 1
@@ -48,7 +48,7 @@ class TestWInit:
         assert isinstance(result, EqualizerResult)
         assert result.weights.shape == (num_taps,)  # SISO squeeze
 
-    def test_rls_accepts_w_init(self, backend_device, xp):
+    def test_rls_accepts_w_init(self, xp):
         """rls() accepts w_init array with correct shape."""
 
         sig = generate_qam(
@@ -70,7 +70,7 @@ class TestWInit:
         )
         assert isinstance(result, EqualizerResult)
 
-    def test_cma_accepts_w_init(self, backend_device, xp):
+    def test_cma_accepts_w_init(self, xp):
         """cma() accepts w_init array with correct shape."""
         rx = _make_qam16_rx(xp)
         num_taps, num_ch = 21, 1
@@ -82,7 +82,7 @@ class TestWInit:
         )
         assert isinstance(result, EqualizerResult)
 
-    def test_rde_accepts_w_init(self, backend_device, xp):
+    def test_rde_accepts_w_init(self, xp):
         """rde() accepts w_init array with correct shape."""
         rx = _make_qam16_rx(xp)
         num_taps, num_ch = 21, 1
@@ -94,7 +94,7 @@ class TestWInit:
         )
         assert isinstance(result, EqualizerResult)
 
-    def test_w_init_shape_mismatch_raises(self, backend_device, xp):
+    def test_w_init_shape_mismatch_raises(self, xp):
         """Wrong w_init shape raises ValueError before kernel is called."""
         rx = _make_qam16_rx(xp)
         bad_w = np.zeros((1, 1, 99), dtype=np.complex64)  # wrong num_taps
@@ -105,7 +105,7 @@ class TestWInit:
         with pytest.raises(ValueError, match="w_init shape"):
             equalization.rde(rx, modulation="qam", order=16, num_taps=21, w_init=bad_w)
 
-    def test_lms_to_rde_handoff_output_shape(self, backend_device, xp):
+    def test_lms_to_rde_handoff_output_shape(self, xp):
         """LMS weights can be handed off to RDE via w_init; output shape is correct."""
         rx = _make_qam16_rx(xp, n_symbols=3000)
         half = rx.shape[-1] // 2
@@ -135,7 +135,7 @@ class TestWInit:
         expected_syms = payload_rx.shape[-1] // 2
         assert result.y_hat.shape[-1] == expected_syms
 
-    def test_warm_start_rde_same_or_better_evm(self, backend_device, xp):
+    def test_warm_start_rde_same_or_better_evm(self, xp):
         """RDE warm-started from LMS achieves same or better EVM than cold-start."""
         from commkit.impairments import apply_awgn
 
@@ -187,7 +187,7 @@ class TestWInit:
 class TestEqualizerWInitBackend:
     """Verify w_init works correctly on both numba and jax backends."""
 
-    def test_cma_jax_w_init(self, backend_device, xp, jax):
+    def test_cma_jax_w_init(self, xp, jax):
         """CMA JAX backend accepts w_init without error."""
         rx = _make_qam16_rx(xp)
         num_taps = 21
@@ -204,7 +204,7 @@ class TestEqualizerWInitBackend:
         )
         assert isinstance(result, EqualizerResult)
 
-    def test_rde_jax_w_init(self, backend_device, xp, jax):
+    def test_rde_jax_w_init(self, xp, jax):
         """RDE JAX backend accepts w_init without error."""
         rx = _make_qam16_rx(xp)
         num_taps = 21
@@ -227,7 +227,7 @@ class TestNormalizationLengthIndependence:
 
     @pytest.mark.parametrize("algo", ["lms", "rls"])
     @pytest.mark.parametrize("backend", ["numba"])
-    def test_training_output_finite(self, algo, backend, backend_device, xp):
+    def test_training_output_finite(self, algo, backend, xp):
         """y_hat training region is finite and non-trivial."""
         import numpy as np
 
@@ -255,7 +255,9 @@ class TestNormalizationLengthIndependence:
             backend=backend,
         )
 
-        assert np.all(np.isfinite(np.asarray(res.y_hat[:n_train])))
+        np.testing.assert_array_equal(
+            np.isfinite(np.asarray(res.y_hat[:n_train])), True
+        )
 
 
 def _make_qpsk(xp, n_sym=2000, snr_db=20.0, seed=77):
@@ -279,7 +281,7 @@ class TestPrefixPadNormPhase4:
     """Tests for samples_prefix / pad_mode / input_norm_factor added in Phase 4."""
 
     @pytest.mark.parametrize("algo", ["lms", "rls"])
-    def test_pad_mode_zeros_is_baseline(self, algo, backend_device, xp, xpt):
+    def test_pad_mode_zeros_is_baseline(self, algo, xp, xpt):
         """Explicit pad_mode='zeros' with no prefix must be byte-exact with default."""
         samples, syms = _make_qpsk(xp)
         fn = getattr(equalization, algo)
@@ -292,9 +294,7 @@ class TestPrefixPadNormPhase4:
         )
 
     @pytest.mark.parametrize("algo", ["lms", "rls"])
-    def test_samples_prefix_does_not_worsen_leading_error(
-        self, algo, backend_device, xp
-    ):
+    def test_samples_prefix_does_not_worsen_leading_error(self, algo, xp):
         """Warm prefix must not increase MSE on the first num_taps output symbols."""
         n_total, half, num_taps = 4000, 2000, 11
         samples, syms = _make_qpsk(xp, n_sym=n_total, snr_db=30.0)
@@ -328,7 +328,7 @@ class TestPrefixPadNormPhase4:
             f"{algo}: prefix raised leading MSE ({e_prefix:.4f} > {e_cold:.4f})"
         )
 
-    def test_samples_prefix_shape_validation_lms(self, backend_device, xp):
+    def test_samples_prefix_shape_validation_lms(self, xp):
         """Undersized samples_prefix must raise ValueError mentioning 'pad_left'."""
         samples, syms = _make_qpsk(xp, n_sym=500)
         # pad_left = min(num_taps//2, ...) = min(5, ...) - prefix of 1 is too short
@@ -344,7 +344,7 @@ class TestPrefixPadNormPhase4:
                 samples_prefix=xp.zeros(1, dtype=xp.complex64),
             )
 
-    def test_pad_mode_edge_lms(self, backend_device, xp):
+    def test_pad_mode_edge_lms(self, xp):
         """pad_mode='edge' must not raise and must produce finite output."""
         samples, syms = _make_qpsk(xp, n_sym=500)
         r = equalization.lms(
@@ -359,7 +359,7 @@ class TestPrefixPadNormPhase4:
         )
         assert bool(xp.all(xp.isfinite(xp.asarray(r.y_hat))))
 
-    def test_input_norm_factor_stored_in_result_lms(self, backend_device, xp):
+    def test_input_norm_factor_stored_in_result_lms(self, xp):
         """EqualizerResult.input_norm_factor must be a positive scalar for SISO."""
         samples, syms = _make_qpsk(xp, n_sym=500)
         r = equalization.lms(

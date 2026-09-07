@@ -11,7 +11,7 @@ from commkit.core import generation
 class TestWaveformSynthesis:
     """Tests for zero-stuffing upsampler and pulse-shaping filters."""
 
-    def test_expand_zero_stuffing(self, backend_device: str, xp: Any, xpt: Any) -> None:
+    def test_expand_zero_stuffing(self, xp: Any, xpt: Any) -> None:
         """Verify up-sampling by zero-stuffing correctly inserts zeros."""
         data = xp.array([1, 2, 3], dtype="float32")
         factor = 3
@@ -20,7 +20,7 @@ class TestWaveformSynthesis:
         expected = xp.array([1, 0, 0, 2, 0, 0, 3, 0, 0], dtype="float32")
         xpt.assert_array_equal(expanded, expected)
 
-    def test_shape_pulse_variants(self, backend_device: str, xp: Any) -> None:
+    def test_shape_pulse_variants(self, xp: Any) -> None:
         """Verify shape_pulse produces correct lengths for RC and sinc shapes."""
         symbols = xp.array([1, -1, 1, -1], dtype=xp.float32)
 
@@ -33,7 +33,7 @@ class TestWaveformSynthesis:
         with pytest.raises(ValueError, match="Not implemented pulse shape"):
             generation.shape_pulse(symbols, sps=4, pulse_shape="magic")
 
-    def test_smoothrect_pulse(self, backend_device: str, xp: Any) -> None:
+    def test_smoothrect_pulse(self, xp: Any) -> None:
         """Verify smoothrect pulse shaping output length."""
         symbols = xp.array([1, 1], dtype=xp.float32)
         res = generation.shape_pulse(
@@ -41,16 +41,14 @@ class TestWaveformSynthesis:
         )
         assert len(res) == 16
 
-    def test_shape_pulse_none_with_rz(self, backend_device: str, xp: Any) -> None:
+    def test_shape_pulse_none_with_rz(self, xp: Any) -> None:
         """Verify shape_pulse with pulse_shape='none' and rz=True expands using rect."""
         symbols = xp.array([1, -1, 1], dtype=xp.complex64)
         result = generation.shape_pulse(symbols, sps=4, pulse_shape="none", rz=True)
         assert result is not None
         assert len(result) == 12
 
-    def test_shape_pulse_preserves_complex64_dtype(
-        self, backend_device: str, xp: Any
-    ) -> None:
+    def test_shape_pulse_preserves_complex64_dtype(self, xp: Any) -> None:
         """shape_pulse: complex64 symbols -> complex64 waveform."""
         rng = np.random.default_rng(12)
         syms = xp.asarray(

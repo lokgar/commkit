@@ -56,16 +56,19 @@ dev = [
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
-addopts = "--device=all"
+addopts = "--device=all --strict-markers"
 # bench_* patterns exist for the explicit-only benchmarks/ suite;
 # the default run still collects tests/ only via testpaths.
 python_files = ["test_*.py", "bench_*.py"]
 python_functions = ["test_*", "bench_*"]
 filterwarnings = [
     "ignore::FutureWarning:cupyx",
+    "ignore:.*cupyx.jit.rawkernel is experimental.*:UserWarning",
 ]
 markers = [
-    "gpu: marks tests as requiring a GPU (skipped automatically when CuPy is unavailable)",
+    "gpu_only: mark test as requiring a GPU backend",
+    "cpu_only: mark test as CPU-only",
+    "requires_kernel(name): mark test as requiring a specific CUDA kernel",
 ]
 
 [tool.bumpversion]
