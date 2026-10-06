@@ -357,38 +357,3 @@ def remove_linear_trend(y: ArrayType, *, x: Any = None) -> tuple[ArrayType, Arra
     yc = y - xp.mean(y, axis=-1, keepdims=True)
     slope = xp.sum(yc * xc, axis=-1) / denom
     return y - slope[..., None] * xc[None, :], slope
-
-
-def _cd_beta2_length(
-    dispersion_ps_nm_km: float, fiber_length_km: float, center_wavelength_nm: float
-) -> float:
-    """Chromatic-dispersion SI-unit conversion: the beta_2 * L product.
-
-    Shared physics conversion between ``filtering.compensate_chromatic_dispersion``
-    (the inverse EDC transfer function) and
-    ``impairments.channel.linear.apply_chromatic_dispersion`` (the forward
-    impairment) - both build their own signed transfer function ``H`` from
-    this value; only the sign of the frequency-domain exponent differs
-    between them.
-
-        beta_2 = -D * lambda^2 / (2*pi*c)
-
-    Parameters
-    ----------
-    dispersion_ps_nm_km : float
-        Fiber dispersion parameter D in ps / (nm * km).
-    fiber_length_km : float
-        Fiber span length in km.
-    center_wavelength_nm : float
-        Center wavelength in nm (e.g. 1550 for C-band).
-
-    Returns
-    -------
-    float
-        The ``beta_2 * L`` product in s² (SI units).
-    """
-    D = dispersion_ps_nm_km * 1e-12 / (1e-9 * 1e3)  # s / m²
-    lam = center_wavelength_nm * 1e-9  # m
-    c = 2.998e8  # m/s
-    L = fiber_length_km * 1e3  # m
-    return -(D * lam**2) / (2.0 * np.pi * c) * L  # s²  (β₂·L product)

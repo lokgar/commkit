@@ -4,11 +4,11 @@ import math
 
 import numpy as np
 
-from ..._array import as_2d, require_channels, restore_1d
+from ..._array import require_channels
+from ..._dispersion import apply_dispersion
 from ...backend import ArrayType, dispatch
 from ...core._signal_adapter import adapt_signal
 from ...core.signal import Signal
-from ...helpers import _cd_beta2_length
 from ...logger import logger
 
 __all__ = [
@@ -325,22 +325,12 @@ def apply_chromatic_dispersion(
         center_wavelength_nm,
     )
 
-    samples, xp, _ = dispatch(samples)
-    samples, was_1d = as_2d(samples, name="samples")
-    _, N = samples.shape
-
-    beta2 = _cd_beta2_length(
-        dispersion_ps_nm_km, fiber_length_km, center_wavelength_nm
-    )  # s²  (β₂·L product)
-
-    omega = 2.0 * np.pi * xp.fft.fftfreq(N, d=1.0 / sampling_rate)
-    H = xp.exp(-1j * (beta2 / 2.0) * omega**2)
-
-    S_F = xp.fft.fft(samples, axis=-1)
-    out_F = S_F * H[None, :]
-    result = xp.fft.ifft(out_F, axis=-1)
-
-    if result.dtype != samples.dtype:
-        result = result.astype(samples.dtype)
-
-    return signal_adapter.wrap_samples(restore_1d(was_1d, result))
+    result = apply_dispersion(
+        samples,
+        sampling_rate=sampling_rate,
+        dispersion_ps_nm_km=dispersion_ps_nm_km,
+        fiber_length_km=fiber_length_km,
+        center_wavelength_nm=center_wavelength_nm,
+        inverse=False,
+    )
+    return signal_adapter.wrap_samples(result)

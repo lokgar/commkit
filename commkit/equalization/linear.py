@@ -5,10 +5,10 @@ from __future__ import annotations
 import numpy as np
 
 from .._array import as_2d, restore_1d
+from .._overlap_save import ols_backward, ols_forward
 from ..backend import ArrayType, dispatch
 from ..core._signal_adapter import adapt_signal, require_integer_sps
 from ..core.signal import Signal
-from ..filtering import _ols_backward, _ols_forward
 from ..logger import logger
 from ._common import _build_padded_samples, _normalize_inputs
 
@@ -78,7 +78,7 @@ def zf_equalizer(
     )
 
     # --- Shared OLS forward pass: pad -> stride_tricks -> batch FFT ---
-    Y, meta = _ols_forward(samples, N_fft)  # Y: (num_ch, num_blocks, N_fft)
+    Y, meta = ols_forward(samples, N_fft)  # Y: (num_ch, num_blocks, N_fft)
 
     if siso_channel:
         # SISO: scalar frequency-domain ZF/MMSE inversion.
@@ -121,7 +121,7 @@ def zf_equalizer(
         X_hat_f = xp.transpose(X_hat_k, (1, 2, 0))  # (num_ch, num_blocks, N_fft)
 
     # --- Shared OLS backward pass: batch IFFT -> symmetric discard -> reshape ---
-    out = _ols_backward(X_hat_f, meta)
+    out = ols_backward(X_hat_f, meta)
 
     return signal_adapter.wrap_samples(restore_1d(was_1d, out))
 

@@ -13,10 +13,11 @@ import numpy as np
 import scipy
 
 from ._array import as_2d, restore_1d
+from ._dispersion import apply_dispersion
+from ._overlap_save import ols_backward, ols_forward
 from .backend import ArrayType, dispatch, to_device
 from .core._signal_adapter import adapt_signal, require_integer_sps
 from .core.signal import Signal
-from .helpers import _cd_beta2_length
 from .logger import logger
 from .math import normalize
 
@@ -827,8 +828,6 @@ def bessel_sos(
 # -----------------------------------------------------------------------------
 # FILTERING OPERATIONS (Signal-aware)
 # -----------------------------------------------------------------------------
-# _ols_forward:  OLS block windowing + batch FFT (shared scaffold)
-# _ols_backward: OLS batch IFFT + symmetric discard + reshape (shared scaffold)
 # ols_fir_filter: Public OLS FIR convolution (long-tap / memory-bounded)
 # shaping_filter_taps: Reconstruct pulse-shaping taps from a Signal's own
 #   metadata (pulse_shape/sps/rolloff) - takes a Signal, returns taps, used
@@ -843,89 +842,6 @@ def bessel_sos(
 # shape_pulse (TX symbol -> waveform synthesis) lives in core/generation.py,
 # not here: it is a signal-construction primitive, not a transform on an
 # existing Signal's samples (see CLAUDE.md, "Signal-Awareness").
-
-
-def _ols_forward(samples: ArrayType, N_fft: int):
-    """
-    Overlap-and-save forward pass: block windowing and batch FFT.
-
-    This is the shared OLS scaffolding used by both ``ols_fir_filter`` (SISO
-    scalar convolution) and ``zf_equalizer`` (MIMO per-bin matrix multiply).
-    It should be called on samples that have already been dispatched to the
-    correct backend and shaped as ``(num_ch, N)``.
-
-    Parameters
-    ----------
-    samples : array_like
-        Input samples. Shape: ``(num_ch, N)``. Must be 2-D.
-    N_fft : int
-        FFT block size. Must be a power of 2 and satisfy
-        ``N_fft // 4 >= filter_length`` so the causal/anti-causal guard
-        regions fully contain the filter transients.
-
-    Returns
-    -------
-    Y : array_like
-        Batch FFT of all OLS windows. Shape: ``(num_ch, num_blocks, N_fft)``.
-    meta : dict
-        Scaffold parameters required by ``_ols_backward``:
-        ``{'N': int, 'B': int, 'discard': int, 'num_blocks': int}``.
-    """
-    _, xp, _ = dispatch(samples)
-    num_ch, N = samples.shape
-    B = N_fft // 2  # 50 % hop - maximises block reuse
-    discard = N_fft // 4  # symmetric guard: absorbs causal & anti-causal transients
-    num_blocks = (N + B - 1) // B
-
-    # Pre-pad by discard so the first valid output aligns with sample 0.
-    # Post-pad to fill the last block window completely.
-    pad_left = discard
-    pad_right = num_blocks * B - N + discard
-    samples_padded = xp.pad(samples, ((0, 0), (pad_left, pad_right)))
-
-    # Zero-copy window extraction via as_strided (view, not copy).
-    stride = samples_padded.strides
-    windows = xp.lib.stride_tricks.as_strided(
-        samples_padded,
-        shape=(num_ch, num_blocks, N_fft),
-        strides=(stride[0], B * stride[1], stride[1]),
-    )
-
-    Y = xp.fft.fft(windows, n=N_fft, axis=-1)  # (num_ch, num_blocks, N_fft)
-    meta = {"N": N, "B": B, "discard": discard, "num_blocks": num_blocks}
-    return Y, meta
-
-
-def _ols_backward(X_hat_f: ArrayType, meta: dict) -> ArrayType:
-    """
-    Overlap-and-save backward pass: batch IFFT, symmetric discard, reshape.
-
-    Parameters
-    ----------
-    X_hat_f : array_like
-        Frequency-domain blocks after per-bin processing.
-        Shape: ``(num_ch, num_blocks, N_fft)``.
-    meta : dict
-        Scaffold parameters returned by ``_ols_forward``.
-
-    Returns
-    -------
-    array_like
-        Time-domain output trimmed to the original signal length ``N``.
-        Shape: ``(num_ch, N)``.
-    """
-    _, xp, _ = dispatch(X_hat_f)
-    N = meta["N"]
-    B = meta["B"]
-    discard = meta["discard"]
-    N_fft = X_hat_f.shape[-1]
-    num_ch = X_hat_f.shape[0]
-
-    x_hat = xp.fft.ifft(X_hat_f, n=N_fft, axis=-1)
-    # Keep the center B samples of each block (symmetric discard of guard regions).
-    valid = x_hat[:, :, discard : discard + B]
-    out = valid.reshape(num_ch, -1)[:, :N]
-    return out
 
 
 def ols_fir_filter(
@@ -1029,14 +945,14 @@ def ols_fir_filter(
         # This matches scipy's mode='same' (center-aligned, group-delay compensated),
         # which is required for correct eye-opening after pulse-shaped filtering.
         samples_ext = xp.pad(samples, ((0, 0), (0, half)))
-        Y, meta = _ols_forward(samples_ext, N_fft)
+        Y, meta = ols_forward(samples_ext, N_fft)
         X_hat_f = Y * H
-        out_ext = _ols_backward(X_hat_f, meta)  # shape: (num_ch, N + half)
+        out_ext = ols_backward(X_hat_f, meta)  # shape: (num_ch, N + half)
         out = out_ext[:, half:]  # trim leading half -> shape: (num_ch, N)
     else:
-        Y, meta = _ols_forward(samples, N_fft)
+        Y, meta = ols_forward(samples, N_fft)
         X_hat_f = Y * H
-        out = _ols_backward(X_hat_f, meta)
+        out = ols_backward(X_hat_f, meta)
 
     if is_real:
         out = out.real  # strip IFFT imaginary noise for real inputs
@@ -1350,22 +1266,12 @@ def compensate_chromatic_dispersion(
         center_wavelength_nm,
     )
 
-    samples, xp, _ = dispatch(samples)
-    samples, was_1d = as_2d(samples, name="samples")
-    C, N = samples.shape
-
-    beta2 = _cd_beta2_length(
-        dispersion_ps_nm_km, fiber_length_km, center_wavelength_nm
-    )  # s²  (β₂·L product)
-
-    omega = 2.0 * np.pi * xp.fft.fftfreq(N, d=1.0 / sampling_rate)
-    H = xp.exp(1j * (beta2 / 2.0) * omega**2)
-
-    S_F = xp.fft.fft(samples, axis=-1)
-    out_F = S_F * H[None, :]
-    result = xp.fft.ifft(out_F, axis=-1)
-
-    if result.dtype != samples.dtype:
-        result = result.astype(samples.dtype)
-
-    return signal_adapter.wrap_samples(restore_1d(was_1d, result))
+    result = apply_dispersion(
+        samples,
+        sampling_rate=sampling_rate,
+        dispersion_ps_nm_km=dispersion_ps_nm_km,
+        fiber_length_km=fiber_length_km,
+        center_wavelength_nm=center_wavelength_nm,
+        inverse=True,
+    )
+    return signal_adapter.wrap_samples(result)

@@ -667,7 +667,7 @@ The equalization pass (3.7) gets more commits:
 | --- | --- | --- | --- |
 | 3.1 | `backend`, array helpers | `_array.py` (`as_2d`, `restore_1d`, `broadcast_channels`, ...), `rms` / `normalize` / dB helpers into `commkit.math`, `format_si` into a small display module. No `utils/` package and no one-function files. Array helpers import nothing from `core`, plotting or DSP modules, which breaks the `core -> helpers -> core` cycle. | S |
 | 3.2 | `mapping` | gray, bits, llr, shaping all take `Constellation` | M |
-| 3.3 | `filtering`, `multirate`, `spectral`, `smoothing` | Pulses (add a definition-level check that the Gaussian `duty_cycle` equals the FWHM); overlap-save into private `_overlap_save.py`; `resolve_symbols` merges into `decimate_to_symbol_rate`; `compensate_chromatic_dispersion` becomes `correct_chromatic_dispersion` (D16). Chromatic dispersion moves into private `_dispersion.py`, which owns the D/wavelength/length to beta2·L conversion, the frequency grid, and both forward and inverse transfer functions, with an explicit sign. It gets independent sign and unit tests, because a round trip alone hides errors shared by both directions. | M |
+| 3.3 | `filtering`, `multirate`, `spectral`, `smoothing` | Pulses (add a definition-level check that the Gaussian `duty_cycle` equals the FWHM; done in 2.2); overlap-save into private `_overlap_save.py`; `resolve_symbols` merges into `decimate_to_symbol_rate` (moved to 3.8, see below); `compensate_chromatic_dispersion` becomes `correct_chromatic_dispersion` (D16). Chromatic dispersion moves into private `_dispersion.py`, which owns the D/wavelength/length to beta2·L conversion, the frequency grid, and both forward and inverse transfer functions, with an explicit sign. It gets independent sign and unit tests, because a round trip alone hides errors shared by both directions. | M |
 | 3.4 | `impairments` | `rng`; uses `_dispersion.py`; `compensate_iq_imbalance_*` become `correct_iq_imbalance` with `Lowdin()` / `GramSchmidt()` (D16) | S |
 | 3.5 | `timing`, `frequency` | `cross_correlate_fft`, peak interpolation and `zc_mimo_root` move here; timing correction slices `reference`. Give the orphaned diagnostic plots (commit 1.4) a public data source: `plot_timing_correlation`, `plot_frequency_offset_spectrum`, `plot_mm_autocorrelation`, `plot_frequency_offset_blockwise_result` and the FOE `plot_pilot_phase_estimate` draw data that only exists inside the estimator, so return it in the estimator's result dataclass (§2.6). Apply the D16 verbs: `estimate_frequency_offset` / `correct_frequency_offset` with method objects, `TimingEstimate` | M |
 | 3.6 | `recovery` | `PLL` / `BPS` / `CycleSlip` objects; PLL gain resolution moves into `recovery/_common.py`. Decide two oracle findings (commit 0.6): the PLL's square-QAM slicer builds decisions from float32 grid constants inside its float64 loop (up to about 3e-7 rad deviation; make it float64 or document it), and joint Viterbi-Viterbi weights channels by amplitude^M because, unlike BPS and the PLL, it does not power-normalize (document it, or normalize like the others). Give the orphaned pilot plots (commit 1.4: `plot_pilot_phase_estimate`, `plot_pilot_tone_phase_estimate`, `plot_pilot_tones_phase_estimate`) a public data source the same way; CPR block phases (`plot_carrier_phase_trajectory`'s optional inputs) likewise. Apply the D16 verbs: `estimate_carrier_phase` / `correct_carrier_phase` with one object per method; `correct_phase_rotation` becomes `DataAided()` | M |
@@ -731,6 +731,44 @@ The equalization pass (3.7) gets more commits:
     resolved symbols with the unit-power shaped points; 1.x compared them
     with the uniform grid without rescaling (its docstring pointed to `gmi`
     instead). Hard decisions are unchanged.
+
+**Pass 3.3 commits:**
+
+- [x] **3.3a `refactor: overlap-save and dispersion move into private modules`.**
+  A pure move. `_overlap_save.py` holds the OLS forward and backward passes
+  (used by `ols_fir_filter` and `zf_equalizer`). `_dispersion.py` owns the
+  D/wavelength/length to beta2·L conversion, the frequency grid and the
+  transfer function `exp(∓j beta2 L omega^2 / 2)` with an explicit
+  `inverse=` flag, used by `apply_chromatic_dispersion` and the receiver
+  compensation.
+- [ ] **3.3b `test(dispersion): independent sign and unit checks`.** beta2
+  against the textbook value (D = 17 ps/(nm km) at 1550 nm gives about
+  -21.7 ps²/km), and the sign through the group delay: a tone at +f0 (shorter
+  wavelength) arrives earlier by `D L Δλ` in anomalous fiber, computed from D,
+  L and λ without beta2.
+- [ ] **3.3c `refactor(filtering)!: 2.0 signatures`.**
+  - Tap and SOS designers take keyword-only parameters
+    (`rrc_taps(sps=, rolloff=, span=)`); `gaussian_taps(duty_cycle=)` becomes
+    `fwhm=` like `Gaussian`.
+  - `fir_filter(samples, taps)`, `ols_fir_filter(samples, taps, *,
+    fft_size=, center=)`, `iir_filter(samples, sos, *, zero_phase=)`: time is
+    the last axis, so the `axis` parameters go.
+  - `matched_filter(samples, *, pulse=None, taps_normalization=)`: `pulse`
+    is a `Pulse` or a taps array, a choice that defaults to `sig.pulse`.
+    `shaping_filter_taps` is deleted (`sig.pulse.taps(sig.sps)`).
+  - `compensate_chromatic_dispersion` becomes `correct_chromatic_dispersion`
+    (D16) with `sampling_rate` resolved as a fact.
+- [ ] **3.3d `refactor(multirate)!: 2.0 signatures`.** Keyword-only
+  parameters, no `axis`; `sps` / `sps_in` are facts (a conflicting value
+  raises). `decimate` takes `zero_phase=` / `ftype=` explicitly instead of
+  `**kwargs`. `resolve_symbols` only becomes keyword-only: it fills the
+  `resolved_*` cache that metrics and demapping still read, so its merge into
+  `decimate_to_symbol_rate` moves to 3.8 together with that cache.
+- [ ] **3.3e `refactor(spectral, smoothing)!: 2.0 signatures`.** Keyword-only
+  parameters; `sampling_rate` is a fact. `shift_frequency(samples, *,
+  frequency=)` matches `add_pilot_tone(frequency=)`. `spectrogram` returns a
+  frozen `Spectrogram(frequencies, times, power)` instead of a 3-tuple;
+  `welch_psd` keeps its `(f, Pxx)` pair.
 
 **Equalizer safety rules (3.7):**
 
