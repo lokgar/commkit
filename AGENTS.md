@@ -48,6 +48,8 @@ uv run pytest                            # CPU + GPU tests (default --device=all
 uv run pytest --device=cpu               # what CI runs
 uv run pytest tests/equalization/ -k lms # subset
 uv run pytest --cov=commkit              # coverage
+NUMBA_DISABLE_JIT=1 uv run pytest tests/equalization tests/recovery \
+    tests/test_frequency.py --device=cpu --cov=commkit   # real kernel coverage
 ```
 
 **Commit gate.** CI fails on any of these, so run all of them before every

@@ -416,7 +416,7 @@ benchmarks and CI.
     N ≈ 300 symbols. It checks outputs, final weights and errors at rtol 1e-5.
 - [x] **0.6 `test: add reference oracles for PLL, BPS, Viterbi-Viterbi and cycle-slip correction`.**
   Same pattern, in `tests/recovery/test_recovery_oracles.py` (test basenames must be globally unique).
-- [ ] **0.7 `ci: measure Numba kernel coverage and add a coverage floor`.**
+- [x] **0.7 `ci: measure Numba kernel coverage and add a coverage floor`.**
   - A new CI job runs `tests/equalization tests/recovery` with
     `NUMBA_DISABLE_JIT=1 --cov`. Kernels that cannot run without JIT are
     listed in `AGENTS.md`, not forced.

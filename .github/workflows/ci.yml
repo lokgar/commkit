@@ -68,7 +68,38 @@ jobs:
         run: uv sync --python ${{ matrix.python-version }} --resolution lowest-direct
         
       - name: Run tests (CPU) with coverage
-        run: uv run pytest --device=cpu --cov=commkit --cov-report=term-missing
+        # Floor = total at the start of the 2.0 work; raise it, never lower it.
+        run: uv run pytest --device=cpu --cov=commkit --cov-report=term-missing --cov-fail-under=78
+
+  kernel-coverage:
+    name: Numba kernel coverage (JIT disabled)
+    # Compiled Numba code is invisible to coverage, so the main job reports the
+    # kernels as almost untested. Here the same tests run the kernels as plain
+    # Python, measuring their real line coverage.
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v5
+        with:
+          enable-cache: true
+
+      - name: Set up Python
+        run: uv python install 3.12
+
+      - name: Sync environment
+        run: uv sync
+
+      - name: Run kernel tests with JIT disabled
+        env:
+          NUMBA_DISABLE_JIT: "1"
+        run: uv run pytest tests/equalization tests/recovery tests/test_frequency.py --device=cpu --cov=commkit --cov-report=
+
+      - name: Kernel coverage report
+        run: >-
+          uv run coverage report --show-missing --fail-under=85
+          --include="commkit/equalization/_kernels_numba.py,commkit/equalization/sequential/*,commkit/frequency.py,commkit/recovery/*"
 
 # GPU legs (--device=gpu / --device=all) require CuPy + CUDA and are run
 # manually or on a self-hosted runner; they are intentionally not part of
