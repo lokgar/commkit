@@ -61,7 +61,15 @@ uv run pytest
 uv run ruff format .
 ```
 
-**Benchmarks** are explicit-only; `uv run pytest` never collects them.
+**Benchmarks** are explicit-only; `uv run pytest` never collects them. A
+commit that changes a public signature also smoke-runs them once, without
+timing, so their call sites cannot rot unnoticed:
+
+```bash
+uv run pytest benchmarks/ --benchmark-disable --device=all
+```
+
+Timed runs:
 
 ```bash
 uv run pytest benchmarks/bench_bps.py --benchmark-only --device=all

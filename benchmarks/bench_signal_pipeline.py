@@ -29,7 +29,9 @@ def _plain_signal():
 
 def _frame_signal():
     frame = SingleCarrierFrame(
-        payload_len=32_768,
+        # 1057 pilot periods of 31 payload symbols: the length the 1.x frame
+        # snapped 32_768 up to, so the workload matches the 0002 baseline.
+        payload_len=32_798,
         payload_constellation=Constellation.qam(16),
         payload_seed=42,
         preamble=Preamble(sequence_type="barker", length=13),
