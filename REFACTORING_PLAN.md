@@ -404,7 +404,7 @@ benchmarks and CI.
     workload goes in `workloads.py`.
   - `benchmarks/bench_import.py` measures `import commkit` in a fresh
     subprocess: wall time and the number of modules in `sys.modules`.
-- [ ] **0.4 `bench: record 0002_pre_v2 baseline`.** Run
+- [x] **0.4 `bench: record 0002_pre_v2 baseline`.** Run
   `uv run pytest benchmarks/ --benchmark-only --device=all --benchmark-save=pre_v2 --benchmark-storage=file://benchmarks/baselines`
   on the reference machine, then delete `0001`. The commit message records the
   hardware and the commit hash.
