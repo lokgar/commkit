@@ -540,9 +540,11 @@ class TestFractionalDelay:
 
     def test_fft_fractional_delay_power_conservation(self, xp):
         """Verify FFT-based delay preserves signal power."""
-        np.random.seed(42)
+        rng = np.random.default_rng(42)
         N = 1000
-        signal = (np.random.randn(N) + 1j * np.random.randn(N)).astype("complex64")
+        signal = (rng.standard_normal(N) + 1j * rng.standard_normal(N)).astype(
+            "complex64"
+        )
         signal_xp = xp.asarray(signal)
         delay = 0.3
         delayed = timing.fft_fractional_delay(signal_xp, delay=delay)
@@ -552,9 +554,11 @@ class TestFractionalDelay:
 
     def test_fft_fractional_delay_roundtrip(self, xp, xpt):
         """Verify round-trip (delay + undo) recovers original signal."""
-        np.random.seed(42)
+        rng = np.random.default_rng(42)
         N = 1000
-        signal = (np.random.randn(N) + 1j * np.random.randn(N)).astype("complex64")
+        signal = (rng.standard_normal(N) + 1j * rng.standard_normal(N)).astype(
+            "complex64"
+        )
         signal_xp = xp.asarray(signal)
         delay = 0.37
         delayed = timing.fft_fractional_delay(signal_xp, delay=delay)
