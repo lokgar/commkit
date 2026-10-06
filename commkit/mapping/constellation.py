@@ -28,9 +28,9 @@ from functools import cache, lru_cache
 import numpy as np
 
 from ..backend import ArrayType, dispatch
-from .gray import gray_constellation, nearest_constellation_index, unpack_bits
+from .gray import _gray_points, _nearest_index, _unpack_bits
 from .llr import _llr
-from .shaping import constellation_power
+from .shaping import _constellation_power
 
 __all__ = ["Constellation"]
 
@@ -94,7 +94,7 @@ class Constellation:
         if 2**k != order:
             raise ValueError(f"The number of points must be a power of 2, got {order}.")
         if self.bit_labels is None:
-            labels = unpack_bits(np.arange(order, dtype=np.int32), k)
+            labels = _unpack_bits(np.arange(order, dtype=np.int32), k)
         else:
             labels = _host_array(self.bit_labels, "bit_labels")
             if labels.shape != (order, k):
@@ -237,7 +237,7 @@ class Constellation:
 
     def power(self) -> float:
         """Average symbol power ``E[|s|^2]`` under the pmf (uniform if none)."""
-        return constellation_power(self.points, self.pmf)
+        return _constellation_power(self.points, self.pmf)
 
     def map(self, bits: ArrayType) -> ArrayType:
         """Map bits to symbols on the bits' device.
@@ -267,7 +267,7 @@ class Constellation:
         they must be on the constellation's scale.
         """
         symbols, xp, _ = dispatch(symbols)
-        idx = nearest_constellation_index(
+        idx = _nearest_index(
             symbols.reshape(-1), self.points.astype(self._storage_dtype())
         )
         bits = xp.asarray(self.bit_labels)[idx]
@@ -375,7 +375,7 @@ def _nu_for_entropy(energies: np.ndarray, entropy: float) -> float:
 def _named(family: str, order: int, unipolar: bool) -> Constellation:
     if not isinstance(order, int | np.integer) or order < 2:
         raise ValueError(f"order must be an integer >= 2, got {order!r}.")
-    points = gray_constellation(family, int(order), unipolar=unipolar)
+    points = _gray_points(family, int(order), unipolar=unipolar)
     return Constellation(points, family=family)
 
 
@@ -384,9 +384,7 @@ def _gray_base(
     modulation: str, order: int, normalize: bool, unipolar: bool
 ) -> Constellation:
     """Cached 1.x Gray constellation for :meth:`Constellation.gray`."""
-    points = gray_constellation(
-        modulation, order, normalize=normalize, unipolar=unipolar
-    )
+    points = _gray_points(modulation, order, normalize=normalize, unipolar=unipolar)
     mod = modulation.lower()
     family = next(
         (f for f in ("qam", "psk") if f in mod),

@@ -98,8 +98,8 @@ def recover_carrier_phase_bps(
     Memory: the distance tensor scales as N * B * M * 8 bytes; reduce
     ``num_test_phases`` or segment length for high-order constellations.
     """
-    from ..mapping import constellation_power, gray_constellation
-    from ..mapping.gray import square_qam_slicer_params
+    from ..mapping.gray import _gray_points, _square_qam_slicer_params
+    from ..mapping.shaping import _constellation_power
     from ..math import normalize
 
     signal_adapter = adapt_signal(symbols, function_name="recover_carrier_phase_bps()")
@@ -124,13 +124,13 @@ def recover_carrier_phase_bps(
     symbols = normalize(symbols, mode="average_power", axis=-1)
 
     # Reference constellation on the same device
-    const_np = gray_constellation(modulation, order)
+    const_np = _gray_points(modulation, order)
 
     # PS-QAM: unit-avg-power input lives on the ``{s_m/sqrt(E_PS)}`` grid.
     # Rescale the comparison constellation to the same grid so the nearest-
     # neighbour distance metric is correct.  Skip on uniform PMF.
     if pmf is not None:
-        e_ps = constellation_power(const_np, pmf)
+        e_ps = _constellation_power(const_np, pmf)
         if e_ps < 1.0 - 1e-6:
             const_np = const_np / np.sqrt(e_ps)
 
@@ -187,7 +187,7 @@ def recover_carrier_phase_bps(
     # For square QAM (order a perfect square): the nearest constellation point
     # can be found in O(1) per symbol via per-component rounding, eliminating
     # the (CHUNK, B, M_const) distance tensor entirely.
-    side, lev_min_f32, d_grid_f32 = square_qam_slicer_params(const_np)
+    side, lev_min_f32, d_grid_f32 = _square_qam_slicer_params(const_np)
     is_sq_qam = side > 0
     lev_min = float(lev_min_f32)
     d_grid = float(d_grid_f32)

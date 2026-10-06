@@ -11,7 +11,7 @@ import pytest
 
 from commkit import _cuda, recovery
 from commkit.equalization import block_lms
-from commkit.mapping import gray_constellation
+from commkit.mapping import Constellation
 from tests.common.conversions import to_numpy
 from tests.common.kernel_utils import reference_bps_d2, skip_unless_kernel_available
 
@@ -32,7 +32,7 @@ def no_kernel(monkeypatch):
 
 def _phase_noise_symbols(order, C=2, N=20_000, seed=7):
     rng = np.random.RandomState(seed)
-    const = gray_constellation("qam", order)
+    const = Constellation.qam(order).points
     syms = const[rng.randint(0, order, (C, N))].astype(np.complex64)
     phase = np.cumsum(rng.randn(C, N) * 0.01, axis=1)
     x = syms * np.exp(1j * phase).astype(np.complex64)
@@ -42,7 +42,7 @@ def _phase_noise_symbols(order, C=2, N=20_000, seed=7):
 
 def _equalizer_input(order, C=2, n_sym=6000, n_train=1500, seed=3):
     rng = np.random.RandomState(seed)
-    const = gray_constellation("qam", order)
+    const = Constellation.qam(order).points
     syms = const[rng.randint(0, order, (C, n_sym))].astype(np.complex64)
     x = np.stack(
         [np.convolve(syms[c], [0.05, 1.0, -0.08], mode="same") for c in range(C)]
@@ -70,7 +70,7 @@ class TestBPSKernelCorrectness:
         x = (rng.randn(C, N) + 1j * rng.randn(C, N)).astype(np.complex64)
         angles = np.linspace(0.0, np.pi / 2.0, P, endpoint=False)
         phasor = np.exp(-1j * angles).astype(np.complex64)
-        const = gray_constellation("qam", 128).astype(np.complex64)
+        const = Constellation.qam(128).points.astype(np.complex64)
 
         ref = reference_bps_d2(x, phasor, const).min(axis=-1)
 
@@ -89,7 +89,7 @@ class TestBPSKernelCorrectness:
         phasor = np.exp(-1j * np.linspace(0.0, np.pi / 2.0, P, endpoint=False)).astype(
             np.complex64
         )
-        const = gray_constellation("qam", 128).astype(np.complex64)
+        const = Constellation.qam(128).points.astype(np.complex64)
 
         d2 = reference_bps_d2(x, phasor, const)
         ref_idx = d2.argmin(axis=-1)
@@ -116,7 +116,7 @@ class TestBPSKernelCorrectness:
             np.complex64
         )
 
-        const = gray_constellation("qam", 64)
+        const = Constellation.qam(64).points
         levels = np.sort(np.unique(const.real))
         lev_min = float(levels[0])
         d_grid = float(levels[1] - levels[0])

@@ -335,7 +335,7 @@ def recover_carrier_phase_pll(
     preamble reference after CPR.
     """
     from ..helpers import resolve_pll_gains
-    from ..mapping import gray_constellation
+    from ..mapping.gray import _gray_points
     from ..math import normalize
 
     signal_adapter = adapt_signal(symbols, function_name="recover_carrier_phase_pll()")
@@ -367,16 +367,16 @@ def recover_carrier_phase_pll(
     symbols = normalize(symbols, mode="average_power", axis=-1)
 
     # Constellation on CPU (decisions are scalar operations in the loop)
-    const_np = gray_constellation(modulation, order).astype(np.complex128)
+    const_np = _gray_points(modulation, order).astype(np.complex128)
     const_r = const_np.real.copy()
     const_i = const_np.imag.copy()
 
     # Square-QAM O(1) decision parameters.  For square QAM (order a perfect
     # square, e.g. 4/16/64/256/1024) the constellation is a uniform grid and
     # the nearest point can be found by rounding to the closest axis level.
-    from ..mapping.gray import square_qam_slicer_params
+    from ..mapping.gray import _square_qam_slicer_params
 
-    _side, _lev_min_f32, _d_grid_f32 = square_qam_slicer_params(const_np)
+    _side, _lev_min_f32, _d_grid_f32 = _square_qam_slicer_params(const_np)
     _is_sq_qam = _side > 0
     _lev_min = float(_lev_min_f32)
     _d_grid = float(_d_grid_f32)

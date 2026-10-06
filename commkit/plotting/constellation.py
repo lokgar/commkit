@@ -82,7 +82,8 @@ def plot_ideal_constellation(
         raise ValueError("Provide at most one of `pmf` or `nu`, not both.")
 
     logger.debug("Generating ideal constellation for %s (%s-level).", modulation, order)
-    from ..mapping import gray_constellation, maxwell_boltzmann
+    from ..mapping import maxwell_boltzmann
+    from ..mapping.gray import _gray_points
 
     if nu is not None:
         pmf = maxwell_boltzmann(order, nu)
@@ -95,7 +96,7 @@ def plot_ideal_constellation(
 
     try:
         # Generate constellation on backend (returns NumPy)
-        const = gray_constellation(modulation, order, unipolar=unipolar)
+        const = _gray_points(modulation, order, unipolar=unipolar)
     except ValueError as e:
         logger.error("Error generating constellation: %s", e)
         return None
@@ -274,7 +275,7 @@ def plot_constellation(
             and sig.mod_scheme is not None
             and sig.mod_order is not None
         ):
-            from ..mapping import gray_constellation as _gc_src
+            from ..mapping.gray import _gray_points as _gc_src
 
             _const_src = _gc_src(sig.mod_scheme, sig.mod_order)
             _pmf_src = np.asarray(sig.ps_pmf, dtype=np.float64)
@@ -451,10 +452,11 @@ def _plot_constellation_array(
                 "Modulation and order must be provided to overlay ideal constellation."
             )
         else:
-            from ..mapping import constellation_power, gray_constellation
+            from ..mapping.gray import _gray_points
+            from ..mapping.shaping import _constellation_power
 
             try:
-                const = gray_constellation(modulation, order, unipolar=unipolar)
+                const = _gray_points(modulation, order, unipolar=unipolar)
                 const = to_device(const, "cpu")
 
                 # Scale constellation to match signal amplitude.
@@ -462,7 +464,7 @@ def _plot_constellation_array(
                 # {s_m / sqrt(E_PS)}, matching where the received clusters
                 # sit after shape_pulse normalises to E_s = 1.
                 if pmf is not None:
-                    e_ps = constellation_power(const, pmf)
+                    e_ps = _constellation_power(const, pmf)
                     const_rms = float(np.sqrt(e_ps)) if e_ps > 0 else rms(const)
                 else:
                     const_rms = rms(const)

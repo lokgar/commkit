@@ -23,7 +23,7 @@ import pytest
 from commkit.backend import to_device
 from commkit.core import Signal
 from commkit.equalization import CPRState, block_lms
-from commkit.mapping import gray_constellation
+from commkit.mapping import Constellation
 from commkit.math import normalize
 from tests.common.conversions import to_numpy
 from tests.common.signals import (
@@ -63,7 +63,7 @@ def _wiener_qam16_block(n_sym=4096, snr_db=25.0, linewidth=5e3, seed=11):
 def _wiener_qam16_trackable(n_sym, snr_db=25.0, sigma_phi=0.005, seed=33):
     """16-QAM under slow Wiener phase noise that BPS can track."""
     rng = np.random.default_rng(seed)
-    const = gray_constellation("qam", 16).astype(np.complex64)
+    const = Constellation.qam(16).points.astype(np.complex64)
     const = normalize(const, mode="average_power").astype(np.complex64)
     half = n_sym // 2
     syms_h = const[rng.integers(0, 16, half)]
@@ -290,7 +290,7 @@ class TestBlockLMSConvergence:
         block_size = 32
 
         channel = np.array([0.1, 1.0, 0.1], dtype=np.complex64)
-        const = gray_constellation("qam", 4).astype(np.complex64)
+        const = Constellation.qam(4).points.astype(np.complex64)
         const = normalize(const, mode="average_power").astype(np.complex64)
         syms_np = const[rng.integers(0, 4, n_sym)].astype(np.complex64)
         received_np = np.convolve(syms_np, channel, mode="full")[:n_sym].astype(
@@ -436,7 +436,7 @@ class TestBlockLMSCPRIntegration:
         rng = np.random.default_rng(99)
         n_sym = 4096
         sps = 2
-        const = gray_constellation("psk", 4).astype(np.complex64)
+        const = Constellation.psk(4).points.astype(np.complex64)
         syms = const[rng.integers(0, 4, n_sym)]
 
         # Add random-walk phase noise
@@ -611,7 +611,7 @@ class TestBlockLMSCPRIntegration:
         """block_lms with cpr_cycle_slip_correction=True recovers through deliberate π/2 phase steps."""
         rng = np.random.default_rng(77)
         n_sym = 4096
-        const = gray_constellation("qam", 16).astype(np.complex64)
+        const = Constellation.qam(16).points.astype(np.complex64)
         const = normalize(const, mode="average_power").astype(np.complex64)
         syms = const[rng.integers(0, 16, n_sym)]
 
@@ -723,7 +723,7 @@ class TestBlockLMSEdgeCases:
         """num_taps=1: degenerate equalizer - must not crash, output shape correct."""
         rng = np.random.default_rng(42)
         n_sym = 64
-        const = gray_constellation("qam", 4).astype(np.complex64)
+        const = Constellation.qam(4).points.astype(np.complex64)
         const = normalize(const, mode="average_power").astype(np.complex64)
         syms = xp.asarray(const[rng.integers(0, 4, n_sym)].astype(np.complex64))
         noise = 0.05 * xp.asarray(
@@ -769,7 +769,7 @@ class TestBlockLMSCUDAGraphAndPerformance:
     @pytest.mark.parametrize("n_sym", [100_000, 100_137])
     def test_block_lms_cuda_graph_matches_eager(self, cs_corr, n_sym, xp, xpt):
         rng = np.random.default_rng(5)
-        const = normalize(gray_constellation("qam", 16), mode="average_power").astype(
+        const = normalize(Constellation.qam(16).points, mode="average_power").astype(
             np.complex64
         )
         syms = const[rng.integers(0, 16, n_sym)]

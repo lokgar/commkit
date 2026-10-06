@@ -16,14 +16,7 @@ import numpy as np
 from ..backend import dispatch
 from ..logger import logger
 
-__all__ = [
-    "gray_code",
-    "gray_constellation",
-    "gray_to_binary",
-    "nearest_constellation_index",
-    "square_qam_slicer_params",
-    "unpack_bits",
-]
+__all__ = ["gray_code", "gray_to_binary"]
 
 
 @lru_cache(maxsize=128)
@@ -113,7 +106,7 @@ def _is_square_qam(modulation: str, order: int) -> bool:
 
 
 @lru_cache(maxsize=128)
-def gray_constellation(
+def _gray_points(
     modulation: str,
     order: int,
     normalize: bool = True,
@@ -200,7 +193,7 @@ def gray_constellation(
     return result
 
 
-def square_qam_slicer_params(
+def _square_qam_slicer_params(
     constellation: np.ndarray,
 ) -> tuple[int, np.float32, np.float32]:
     """Return (side, lev_min, d_grid) for O(1) square-QAM slicing.
@@ -236,7 +229,7 @@ def square_qam_slicer_params(
     return side, lev_min, d_grid
 
 
-def unpack_bits(indices, k: int):
+def _unpack_bits(indices, k: int):
     """Unpack integer indices into their k-bit binary representation (MSB-first).
 
     Backend-dispatched via ``indices``' own array module, so a GPU-resident
@@ -259,7 +252,7 @@ def unpack_bits(indices, k: int):
     return ((indices[:, xp.newaxis] >> shifts) & 1).astype(xp.int8)
 
 
-def nearest_constellation_index(x, constellation, chunk: int = 4096):
+def _nearest_index(x, constellation, chunk: int = 4096):
     """Nearest-constellation-point index for each element of ``x`` (chunked).
 
     Bounds peak memory of the ``(N, M)`` distance matrix by chunking over

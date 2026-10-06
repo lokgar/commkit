@@ -31,7 +31,7 @@ class TestFactories:
     def test_points_labels_and_unit_power(self, factory, family, order) -> None:
         c = factory(order)
         np.testing.assert_array_equal(
-            c.points, mapping.gray_constellation(family, order)
+            c.points, mapping.gray._gray_points(family, order)
         )
         np.testing.assert_array_equal(c.bit_labels, _natural_labels(order))
         assert c.family == family
@@ -286,5 +286,7 @@ class TestGrayBridge:
     def test_gray_pmf_is_not_rescaled(self) -> None:
         pmf = mapping.maxwell_boltzmann(16, 0.05)
         c = Constellation.gray("qam", 16, pmf=pmf)
-        assert c.power() == pytest.approx(mapping.constellation_power(c.points, pmf))
+        assert c.power() == pytest.approx(
+            mapping.shaping._constellation_power(c.points, pmf)
+        )
         assert c.power() < 1.0

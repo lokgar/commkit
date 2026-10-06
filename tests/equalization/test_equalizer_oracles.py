@@ -12,7 +12,7 @@ import numpy as np
 import pytest
 
 from commkit.equalization import cma, lms, rde, rls
-from commkit.mapping import gray_constellation
+from commkit.mapping import Constellation
 from tests.common.reference_impl import (
     cma_reference,
     lms_reference,
@@ -34,7 +34,7 @@ def _isi_input(order: int, num_ch: int, seed: int = 7):
     symbols (C, N_SYM))``.
     """
     rng = np.random.default_rng(seed)
-    const = gray_constellation("qam", order)
+    const = Constellation.qam(order).points
     syms = const[rng.integers(0, order, (num_ch, N_SYM))]
     x = np.repeat(syms, SPS, axis=-1)
     h = np.array([0.08, 1.0, 0.15j])
@@ -79,7 +79,7 @@ def test_lms_matches_oracle(num_ch, n_train):
     ref = lms_reference(
         samples,
         training,
-        gray_constellation("qam", 16),
+        Constellation.qam(16).points,
         num_taps=NUM_TAPS,
         sps=SPS,
         step_size=1e-2,
@@ -106,7 +106,7 @@ def test_rls_matches_oracle(num_ch, leakage):
     ref = rls_reference(
         samples,
         training,
-        gray_constellation("qam", 16),
+        Constellation.qam(16).points,
         num_taps=NUM_TAPS,
         sps=SPS,
         forgetting_factor=0.99,
@@ -120,7 +120,7 @@ def test_rls_matches_oracle(num_ch, leakage):
 @pytest.mark.parametrize("num_ch", [1, 2])
 def test_cma_matches_oracle(num_ch):
     samples, _ = _isi_input(4, num_ch)
-    const = gray_constellation("qam", 4)
+    const = Constellation.qam(4).points
     r2 = float(np.mean(np.abs(const) ** 4) / np.mean(np.abs(const) ** 2))
     res = cma(
         samples, num_taps=NUM_TAPS, sps=SPS, step_size=1e-3, modulation="qam", order=4
@@ -132,7 +132,7 @@ def test_cma_matches_oracle(num_ch):
 @pytest.mark.parametrize("num_ch", [1, 2])
 def test_rde_matches_oracle(num_ch):
     samples, _ = _isi_input(16, num_ch)
-    radii = np.unique(np.round(np.abs(gray_constellation("qam", 16)), 6))
+    radii = np.unique(np.round(np.abs(Constellation.qam(16).points), 6))
     res = rde(
         samples, num_taps=NUM_TAPS, sps=SPS, step_size=1e-3, modulation="qam", order=16
     )

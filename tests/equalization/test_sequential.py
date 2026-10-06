@@ -7,7 +7,7 @@ from commkit import equalization, generate
 from commkit.core import Signal
 from commkit.equalization import EqualizerResult
 from commkit.filtering import RRC
-from commkit.mapping import Constellation, gray_constellation
+from commkit.mapping import Constellation
 from tests.common.conversions import to_numpy
 
 
@@ -362,7 +362,7 @@ class TestCMA:
         # using the public API if exposed, or just run a dummy CMA and check it doesn't crash?
         # The original test verified calculation logic.
 
-        const = xp.asarray(gray_constellation("psk", 4))
+        const = xp.asarray(Constellation.psk(4).points)
         r2 = xp.mean(xp.abs(const) ** 4) / xp.mean(xp.abs(const) ** 2)
 
         r2 = float(r2)
@@ -486,9 +486,7 @@ class TestRDE:
         """Unique radii should match known 16-QAM ring structure."""
         import numpy as _np
 
-        from commkit.mapping import gray_constellation
-
-        const = gray_constellation("qam", 16)
+        const = Constellation.qam(16).points
         radii = _np.unique(_np.round(_np.abs(const).astype(_np.float32), 6))
 
         # Standard normalized 16-QAM has 3 unique radii

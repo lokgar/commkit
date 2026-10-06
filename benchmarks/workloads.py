@@ -9,7 +9,7 @@ benchmark parametrization, e.g. ``bps/128cross/N1e6/C2``.
 import numpy as np
 
 from commkit.impairments import apply_awgn, apply_phase_noise
-from commkit.mapping import gray_constellation, map_bits
+from commkit.mapping import Constellation, map_bits
 from commkit.math import normalize
 
 FS = 1e6  # nominal symbol rate / sampling rate at 1 SPS [Hz]
@@ -19,7 +19,7 @@ def qam_symbols(order: int, n_sym: int, num_ch: int = 1, seed: int = 0) -> np.nd
     """Random unit-average-power QAM symbols. Shape (num_ch, n_sym) complex64
     (or (n_sym,) when num_ch == 1)."""
     rng = np.random.default_rng(seed)
-    const = normalize(gray_constellation("qam", order), mode="average_power").astype(
+    const = normalize(Constellation.qam(order).points, mode="average_power").astype(
         np.complex64
     )
     syms = const[rng.integers(0, order, (num_ch, n_sym))].astype(np.complex64)

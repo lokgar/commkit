@@ -52,21 +52,21 @@ def _log_per_channel(fmt: str, *arrays: ArrayType, extra: tuple = ()) -> None:
 def _ps_unit_power_rescale(rx, xp, modulation, order, pmf, noise_var):
     """Rescale unit-avg-power PS-QAM symbols and the matching noise_var.
 
-    Thin wrapper over :func:`mapping.shaping.rescale_ps_symbols` for the
+    Thin wrapper over :func:`mapping.shaping._rescale_ps_symbols` for the
     symbol part; additionally scales ``noise_var`` by the same ``E_PS``
     factor (needed by ``gmi``/``mi``, unlike the EVM/SER call sites of
-    ``rescale_ps_symbols``).  No-op for uniform modulations (``pmf is
+    ``_rescale_ps_symbols``).  No-op for uniform modulations (``pmf is
     None``) or when ``E_PS ≈ 1``.
 
     Returns ``(rx_scaled, noise_var_scaled)``.
     """
     if pmf is None:
         return rx, noise_var
-    from .mapping.gray import gray_constellation
-    from .mapping.shaping import constellation_power, rescale_ps_symbols
+    from .mapping.gray import _gray_points
+    from .mapping.shaping import _constellation_power, _rescale_ps_symbols
 
-    e_ps = constellation_power(gray_constellation(modulation, order), pmf)
-    rx = rescale_ps_symbols(rx, xp, modulation, order, pmf)
+    e_ps = _constellation_power(_gray_points(modulation, order), pmf)
+    rx = _rescale_ps_symbols(rx, xp, modulation, order, pmf)
     if e_ps < 1.0 - 1e-6:
         noise_var = noise_var * e_ps
     return rx, noise_var
@@ -232,17 +232,17 @@ def evm(
         # PS-QAM: receive-path symbols at unit average power live on the
         # ``{s_m/sqrt(E_PS)}`` grid.  Rescale rx by ``sqrt(E_PS)`` so the
         # nearest-neighbour decision against ``{s_m}`` is exact.
-        from .mapping.shaping import rescale_ps_symbols
+        from .mapping.shaping import _rescale_ps_symbols
 
-        rx = rescale_ps_symbols(rx, xp, modulation, order, pmf)
+        rx = _rescale_ps_symbols(rx, xp, modulation, order, pmf)
 
         # ML hard decision: nearest constellation point per symbol.  Chunked
         # over the flattened N axis to bound peak memory of the (N, M)
         # distance matrix (see CLAUDE.md's "bound large broadcast
         # intermediates" rule).
-        from .mapping.gray import nearest_constellation_index
+        from .mapping.gray import _nearest_index
 
-        idx = nearest_constellation_index(rx.reshape(-1), constellation)
+        idx = _nearest_index(rx.reshape(-1), constellation)
         tx = constellation[idx].reshape(rx.shape)  # same shape as rx
 
     # --- EVM computation (shared) ---
@@ -614,20 +614,18 @@ def ser(
     # Rescale ``rx`` by ``sqrt(E_PS)`` so the nearest-neighbour search against
     # ``gray_constellation`` is correct for both rx and tx.  Has no effect on
     # uniform modulations.
-    from .mapping.shaping import rescale_ps_symbols
+    from .mapping.shaping import _rescale_ps_symbols
 
-    rx = rescale_ps_symbols(rx, xp, modulation, order, pmf)
+    rx = _rescale_ps_symbols(rx, xp, modulation, order, pmf)
 
     # Nearest constellation point per symbol, chunked over the flattened N
     # axis to bound peak memory of the (N, M) distance matrix.
-    from .mapping.gray import nearest_constellation_index
+    from .mapping.gray import _nearest_index
 
-    dec_rx = nearest_constellation_index(rx.reshape(-1), constellation).reshape(
+    dec_rx = _nearest_index(rx.reshape(-1), constellation).reshape(
         rx.shape
     )  # (..., N) - index into constellation
-    dec_tx = nearest_constellation_index(tx.reshape(-1), constellation).reshape(
-        tx.shape
-    )
+    dec_tx = _nearest_index(tx.reshape(-1), constellation).reshape(tx.shape)
 
     errors = xp.sum(dec_rx != dec_tx, axis=-1)
     total = rx.shape[-1]
@@ -888,7 +886,7 @@ def mi(
     if noise_var is None:
         raise ValueError("mi() requires noise_var.")
 
-    from .mapping import gray_constellation
+    from .mapping.gray import _gray_points
 
     rx, xp, _ = dispatch(symbols_rx)
     rx = rx.ravel().astype(xp.complex128)  # (N,)
@@ -897,7 +895,7 @@ def mi(
             rx, xp, modulation, order, pmf, noise_var
         )
     constellation = xp.asarray(
-        gray_constellation(modulation, order), dtype=xp.complex128
+        _gray_points(modulation, order), dtype=xp.complex128
     )  # (M,)
     M = len(constellation)
     ln2 = float(xp.log(xp.asarray(2.0, dtype=xp.float64)))

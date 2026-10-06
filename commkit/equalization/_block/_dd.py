@@ -12,7 +12,7 @@ from ...backend import ArrayType, dispatch, to_device
 from ...core._signal_adapter import adapt_signal, require_integer_sps
 from ...core.signal import Signal
 from ...logger import logger
-from ...mapping.gray import square_qam_slicer_params
+from ...mapping.gray import _square_qam_slicer_params
 from .._common import (
     _build_padded_samples,
     _cpr_symmetry,
@@ -353,11 +353,9 @@ def block_lms(
 
     # -- Constellation ---------------------------------------------------------
     if modulation is not None and order is not None:
-        from ...mapping import gray_constellation
+        from ...mapping.gray import _gray_points
 
-        reference_constellation = gray_constellation(
-            modulation, order, unipolar=unipolar
-        )
+        reference_constellation = _gray_points(modulation, order, unipolar=unipolar)
         constellation_np = (
             to_device(reference_constellation, "cpu").flatten().astype(np.complex64)
         )
@@ -378,7 +376,7 @@ def block_lms(
             constellation_np = (constellation_np / np.sqrt(_e_ps)).astype(np.complex64)
 
     constellation = xp.asarray(constellation_np)  # (M,) on device
-    _sq_side, _sq_lev_min_f, _sq_d_grid_f = square_qam_slicer_params(constellation_np)
+    _sq_side, _sq_lev_min_f, _sq_d_grid_f = _square_qam_slicer_params(constellation_np)
     _sq_lev_min = float(_sq_lev_min_f)
     _sq_d_grid = float(_sq_d_grid_f)
     _sq_m1 = _sq_side - 1  # clip upper bound (0 when sq_side==0 - never used)

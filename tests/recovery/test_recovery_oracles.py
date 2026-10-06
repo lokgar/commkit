@@ -9,7 +9,7 @@ computed in float64, like the oracles: arg-min ties then resolve identically.
 import numpy as np
 import pytest
 
-from commkit.mapping import gray_constellation
+from commkit.mapping import Constellation
 from commkit.recovery import (
     correct_cycle_slips,
     recover_carrier_phase_bps,
@@ -38,7 +38,7 @@ def _phase_noise_input(modulation: str, order: int, num_ch: int, seed: int = 3):
     Returns ``(C, N_SYM)`` complex128, or ``(N_SYM,)`` for ``num_ch == 1``.
     """
     rng = np.random.default_rng(seed)
-    const = gray_constellation(modulation, order)
+    const = getattr(Constellation, modulation)(order).points
     syms = const[rng.integers(0, order, (num_ch, N_SYM))]
     walk = np.cumsum(rng.normal(0.0, 0.02, (num_ch, N_SYM)), axis=-1) + 0.3
     noise_std = np.sqrt(10 ** (-25 / 10) / 2)
@@ -85,7 +85,7 @@ def test_bps_matches_oracle(num_ch, joint, order):
     )
     ref = bps_reference(
         x,
-        gray_constellation("qam", order),
+        Constellation.qam(order).points,
         num_test_phases=32,
         block_size=16,
         joint_channels=joint,
@@ -99,7 +99,7 @@ def test_bps_matches_oracle(num_ch, joint, order):
 def test_pll_matches_oracle(num_ch, beta, order):
     x = _phase_noise_input("qam", order, num_ch)
     phi = recover_carrier_phase_pll(x, "qam", order, mu=2e-2, beta=beta)
-    ref = pll_reference(x, gray_constellation("qam", order), mu=2e-2, beta=beta)
+    ref = pll_reference(x, Constellation.qam(order).points, mu=2e-2, beta=beta)
     np.testing.assert_allclose(np.atleast_2d(phi), ref, rtol=0, atol=PLL_ATOL)
 
 

@@ -6,7 +6,7 @@ import pytest
 from commkit import equalization, generate
 from commkit.equalization import EqualizerResult
 from commkit.filtering import RRC
-from commkit.mapping import Constellation, gray_constellation
+from commkit.mapping import Constellation
 from tests.common.conversions import to_numpy
 from tests.common.signals import make_test_psk_samples, make_test_qam_signal
 
@@ -194,7 +194,7 @@ class TestNormalizationLengthIndependence:
         n_train = 200
         n_sym = 500
 
-        const = gray_constellation("qam", 16).astype(np.complex64)
+        const = Constellation.qam(16).points.astype(np.complex64)
         syms = const[rng.integers(0, 16, n_sym)]
         noise = (
             0.05 * (rng.standard_normal(n_sym) + 1j * rng.standard_normal(n_sym))

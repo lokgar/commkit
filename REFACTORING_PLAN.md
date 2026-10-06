@@ -693,6 +693,38 @@ The equalization pass (3.7) gets more commits:
   after the data, and strict mypy for `backend`, `logger`, `_array` and
   `math`.
 
+**Pass 3.2 commits:**
+
+- [x] **3.2a `refactor(mapping)!: Constellation replaces gray_constellation`.**
+  - `gray_constellation` leaves the public API; its geometry becomes the
+    private `gray._gray_points`, which unmigrated modules call until their
+    pass. Tests build points with `Constellation.qam(M).points` and so on.
+  - Internals become private in their owning module: `unpack_bits`,
+    `nearest_constellation_index`, `square_qam_slicer_params`,
+    `constellation_power` (use `Constellation.power()`).
+  - `sample_ps_symbols` is deleted (`generate` draws PS symbols).
+    `rescale_ps_symbols` becomes private; 3.2b moves it into `metrics` as a
+    1.x-scale bridge until 3.8.
+- [ ] **3.2b `refactor(mapping)!: functions take a Constellation`.**
+  - `map_bits(bits, *, constellation)`, `demap_symbols_hard(symbols, *,
+    constellation=None)` and `compute_llr(symbols, *, noise_var,
+    constellation=None, method="maxlog")`. The constellation is a choice that
+    defaults to `sig.constellation`. Symbols are compared with the points as
+    they are; a shaped constellation already has unit power, so there is no
+    PS rescaling.
+  - `maxwell_boltzmann(constellation, *, nu)` and `optimal_nu(constellation,
+    *, entropy)` keep the literature nu scale (minimum distance 2) for any
+    constellation; `ps_entropy` is deleted (`Constellation.entropy`).
+  - `Constellation.demap` keeps the O(1) per-axis slicer for Gray square-QAM
+    grids, detected from the points and labels (never from `family`).
+  - `Constellation.gray()` leaves the value object; the 1.x bridge becomes
+    the private `mapping._legacy_constellation()` for unmigrated modules.
+- [ ] **3.2c `refactor(core)!: remove generate_psqam`.** PS signals come from
+  `generate(Constellation.qam(M).shaped(nu=...), ...)` at the 2.0 scale.
+  Tests that asserted the 1.x scale (`E_PS < 1`) are rewritten against the
+  2.0 definition; this is a numerical change validated on its own (MI/GMI
+  agree with the 1.x path after resolve, as checked for CV-QKD in 2.6b).
+
 **Equalizer safety rules (3.7):**
 
 - Keep the dtype rules: complex128 accumulation in LMS/CMA, and float64 for all

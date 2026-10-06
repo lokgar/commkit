@@ -148,7 +148,7 @@ class TestComputeLLRDevice:
         from commkit.mapping import llr as llr_module
 
         rng = np.random.default_rng(4)
-        const = mapping.gray_constellation("qam", 64)
+        const = mapping.Constellation.qam(64).points
         y = xp.asarray(const[rng.integers(0, 64, 3000)].astype(np.complex64))
         full = mapping.compute_llr(y, "qam", 64, 0.05, method="exact")
         original = llr_module._CHUNK_ELEMENTS

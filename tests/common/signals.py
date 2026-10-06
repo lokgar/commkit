@@ -7,7 +7,7 @@ import numpy as np
 from commkit import backend, generate
 from commkit.core import Preamble, Signal, SingleCarrierFrame
 from commkit.filtering import RRC
-from commkit.mapping import Constellation, gray_constellation
+from commkit.mapping import Constellation
 from commkit.math import normalize
 
 from .conversions import device_of
@@ -23,7 +23,7 @@ def make_test_qam_samples(
 ) -> tuple[Any, Any]:
     """Generate QAM symbol sequence and oversampled sample array with optional AWGN."""
     rng = np.random.default_rng(seed)
-    const = gray_constellation("qam", order).astype(np.complex64)
+    const = Constellation.qam(order).points.astype(np.complex64)
     const = normalize(const, mode="average_power").astype(np.complex64)
     sym_indices = rng.integers(0, order, num_symbols)
     syms_np = const[sym_indices]
@@ -56,7 +56,7 @@ def make_test_psk_samples(
 ) -> tuple[Any, Any]:
     """Generate PSK symbol sequence and oversampled sample array with optional AWGN."""
     rng = np.random.default_rng(seed)
-    const = gray_constellation("psk", order).astype(np.complex64)
+    const = Constellation.psk(order).points.astype(np.complex64)
     sym_indices = rng.integers(0, order, num_symbols)
     syms_np = const[sym_indices]
 
@@ -286,7 +286,7 @@ def make_ambiguous_qam16(
 ) -> tuple[np.ndarray, np.ndarray]:
     """Return (symbols, ref) where the first corrupt_head symbols are rotated by pi/2."""
     rng = np.random.default_rng(seed)
-    const = gray_constellation("qam", 16).astype(np.complex64)
+    const = Constellation.qam(16).points.astype(np.complex64)
     const /= np.sqrt(np.mean(np.abs(const) ** 2))
     ref = const[rng.integers(0, 16, n_sym)]
     rot1 = np.exp(1j * np.pi / 2).astype(np.complex64)
@@ -360,7 +360,7 @@ def make_test_symbols(
 ) -> Any:
     """Generate normalized constellation symbols (QAM or PSK)."""
     rng = np.random.default_rng(seed)
-    const = gray_constellation(scheme, order).astype(np.complex64)
+    const = getattr(Constellation, scheme)(order).points.astype(np.complex64)
     const = normalize(const, mode="average_power").astype(np.complex64)
     syms = const[rng.integers(0, order, num_symbols)]
     if xp is not None:

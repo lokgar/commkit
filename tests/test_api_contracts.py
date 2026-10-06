@@ -50,7 +50,7 @@ import commkit
 from commkit.backend import to_device
 from commkit.core import Signal
 from commkit.equalization import EqualizerResult
-from commkit.mapping import Constellation, gray_constellation
+from commkit.mapping import Constellation
 
 # -----------------------------------------------------------------------------
 # Kinds and checks
@@ -130,7 +130,7 @@ class Inputs:
 
     def __init__(self, xp: Any):
         rng = np.random.default_rng(0)
-        const = gray_constellation("qam", 16).astype(np.complex64)
+        const = Constellation.qam(16).points.astype(np.complex64)
         sym = const[rng.integers(0, 16, (2, N_SYM))]
         wave = np.repeat(sym, SPS, axis=-1)
         noise = rng.standard_normal(wave.shape) + 1j * rng.standard_normal(wave.shape)
@@ -474,23 +474,16 @@ ROWS: list[Row] = [
     Row("commkit.mapping.bits.map_bits", DESIGN),
     Row("commkit.mapping.constellation.Constellation", VALUE),
     Row("commkit.mapping.gray.gray_code", DESIGN),
-    Row("commkit.mapping.gray.gray_constellation", REMOVE),
     Row("commkit.mapping.gray.gray_to_binary", DESIGN),
-    Row("commkit.mapping.gray.nearest_constellation_index", DESIGN, data=2),
-    Row("commkit.mapping.gray.square_qam_slicer_params", HELPER),
-    Row("commkit.mapping.gray.unpack_bits", DESIGN),
     Row(
         "commkit.mapping.llr.compute_llr",
         MULTI,
         call=lambda c, x: _a(x, noise_var=0.1, **QAM16),
         symbols=True,
     ),
-    Row("commkit.mapping.shaping.constellation_power", HELPER),
     Row("commkit.mapping.shaping.maxwell_boltzmann", DESIGN),
     Row("commkit.mapping.shaping.optimal_nu", DESIGN),
     Row("commkit.mapping.shaping.ps_entropy", DESIGN),
-    Row("commkit.mapping.shaping.rescale_ps_symbols", REMOVE),
-    Row("commkit.mapping.shaping.sample_ps_symbols", REMOVE),
     # --- metrics (Signal semantics are redefined in pass 3.8) ----------------
     Row(
         "commkit.metrics.ber",
@@ -1008,10 +1001,7 @@ LEGACY: dict[str, frozenset[str]] = {
     "commkit.impairments.source.generate_phase_noise": L(SIG),
     "commkit.mapping.bits.demap_symbols_hard": L(SIG),
     "commkit.mapping.bits.map_bits": L(SIG),
-    "commkit.mapping.gray.nearest_constellation_index": L(SIG),
-    "commkit.mapping.gray.unpack_bits": L(SIG),
     "commkit.mapping.llr.compute_llr": L(SIG),
-    "commkit.mapping.shaping.constellation_power": L(SIG),
     "commkit.mapping.shaping.optimal_nu": L(SIG),
     "commkit.mapping.shaping.ps_entropy": L(SIG),
     "commkit.metrics.ber": L(f"{MET}@gpu"),

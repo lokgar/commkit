@@ -12,7 +12,7 @@ from ...core._signal_adapter import adapt_signal, require_integer_sps
 from ...core.signal import Signal
 from ...helpers import resolve_pll_gains
 from ...logger import logger
-from ...mapping.gray import square_qam_slicer_params
+from ...mapping.gray import _square_qam_slicer_params
 from .._common import (
     _build_padded_samples,
     _cpr_symmetry,
@@ -445,11 +445,9 @@ def lms(
     )
     # Constellation (NumPy)
     if modulation is not None and order is not None:
-        from ...mapping import gray_constellation
+        from ...mapping.gray import _gray_points
 
-        reference_constellation = gray_constellation(
-            modulation, order, unipolar=unipolar
-        )
+        reference_constellation = _gray_points(modulation, order, unipolar=unipolar)
         constellation_np = (
             to_device(reference_constellation, "cpu").flatten().astype(np.complex64)
         )
@@ -474,7 +472,7 @@ def lms(
         num_ch,
         n_sym,
     )
-    _sq_side, _sq_lev_min, _sq_d_grid = square_qam_slicer_params(constellation_np)
+    _sq_side, _sq_lev_min, _sq_d_grid = _square_qam_slicer_params(constellation_np)
     if w_init is not None:
         w_arr = np.ascontiguousarray(to_device(w_init, "cpu"), dtype=np.complex64)
         w_arr = _validate_w_init(w_arr, num_ch, num_taps)
@@ -1025,11 +1023,9 @@ def rls(
     x_np = np.ascontiguousarray(x_np)
 
     if modulation is not None and order is not None:
-        from ...mapping import gray_constellation
+        from ...mapping.gray import _gray_points
 
-        reference_constellation = gray_constellation(
-            modulation, order, unipolar=unipolar
-        )
+        reference_constellation = _gray_points(modulation, order, unipolar=unipolar)
         constellation_np = (
             to_device(reference_constellation, "cpu").flatten().astype(np.complex64)
         )
@@ -1055,7 +1051,7 @@ def rls(
         num_ch,
         n_sym,
     )
-    _sq_side, _sq_lev_min, _sq_d_grid = square_qam_slicer_params(constellation_np)
+    _sq_side, _sq_lev_min, _sq_d_grid = _square_qam_slicer_params(constellation_np)
     if w_init is not None:
         w_arr = np.ascontiguousarray(to_device(w_init, "cpu"), dtype=np.complex64)
         w_arr = _validate_w_init(w_arr, num_ch, num_taps)

@@ -11,19 +11,12 @@ from functools import lru_cache
 import numpy as np
 
 from ..backend import ArrayType, to_device
-from .gray import gray_constellation
+from .gray import _gray_points
 
-__all__ = [
-    "constellation_power",
-    "maxwell_boltzmann",
-    "optimal_nu",
-    "ps_entropy",
-    "rescale_ps_symbols",
-    "sample_ps_symbols",
-]
+__all__ = ["maxwell_boltzmann", "optimal_nu", "ps_entropy"]
 
 
-def constellation_power(
+def _constellation_power(
     constellation: ArrayType, pmf: ArrayType | None = None
 ) -> float:
     r"""Average symbol power ``E[|s|^2]`` of a constellation.
@@ -77,7 +70,7 @@ def constellation_power(
     return float(np.dot(pmf_arr, energies))
 
 
-def rescale_ps_symbols(
+def _rescale_ps_symbols(
     rx: ArrayType, xp, modulation: str, order: int, pmf: ArrayType | None
 ) -> ArrayType:
     r"""Rescale unit-avg-power PS-QAM symbols ``{c·s_m}`` back to ``{s_m}``.
@@ -85,7 +78,7 @@ def rescale_ps_symbols(
     Receive-path symbols normalised to unit average power (e.g. via
     ``resolve_symbols``) place PS-QAM symbols on the ``{s_m / sqrt(E_PS)}``
     grid (``c = 1/sqrt(E_PS)``).  Nearest-neighbour searches against
-    :func:`gray_constellation` (hard demapping, EVM, SER, MI/LLR) expect
+    :func:`_gray_points` (hard demapping, EVM, SER, MI/LLR) expect
     symbols on the ``{s_m}`` grid instead.  This applies the exact
     deterministic correction ``rx -> rx·sqrt(E_PS)``.  No-op for uniform
     modulations (``pmf is None``) or when ``E_PS ≈ 1``.
@@ -98,7 +91,7 @@ def rescale_ps_symbols(
         ``rx``'s array module (NumPy/CuPy), used to build the dtype-matched
         scale factor.
     modulation, order : constellation spec, as accepted by
-        :func:`gray_constellation`.
+        :func:`_gray_points`.
     pmf : array_like or None
         Symbol PMF of shape ``(order,)``.  ``None`` is a no-op.
 
@@ -109,7 +102,7 @@ def rescale_ps_symbols(
     """
     if pmf is None:
         return rx
-    e_ps = constellation_power(gray_constellation(modulation, order), pmf)
+    e_ps = _constellation_power(_gray_points(modulation, order), pmf)
     if e_ps < 1.0 - 1e-6:
         rx = rx * xp.asarray(np.sqrt(e_ps), dtype=rx.real.dtype)
     return rx
@@ -122,7 +115,7 @@ def maxwell_boltzmann(order: int, nu: float) -> np.ndarray:
 
     P(s_m) = exp(-nu * |s_m|^2) / Z(nu), where |s_m|^2 is on the unnormalized
     integer grid (literature-compatible nu scale).  Indexed consistently with
-    ``gray_constellation``.
+    ``_gray_points``.
 
     Parameters
     ----------
@@ -139,9 +132,9 @@ def maxwell_boltzmann(order: int, nu: float) -> np.ndarray:
         Cached by ``(order, nu)``.
     """
     # Energies computed on the unnormalized integer grid for literature-compatible ν.
-    # The PMF index ordering matches gray_constellation (normalized), since both
+    # The PMF index ordering matches _gray_points (normalized), since both
     # use the same Gray-code index assignment.
-    unnorm_constellation = gray_constellation("qam", order, normalize=False)
+    unnorm_constellation = _gray_points("qam", order, normalize=False)
     if nu == 0.0:
         return np.full(order, 1.0 / order, dtype=np.float64)
     energies = np.abs(unnorm_constellation) ** 2  # (M,) unnormalized energies
@@ -221,37 +214,3 @@ def optimal_nu(order: int, entropy_bits: float) -> tuple:
 
     nu_opt = float(brentq(_obj, 0.0, nu_hi, xtol=1e-9, rtol=1e-9))
     return nu_opt, ps_entropy(order, nu_opt)
-
-
-def sample_ps_symbols(
-    num_symbols: int,
-    order: int,
-    pmf: np.ndarray,
-    seed: int | None = None,
-) -> np.ndarray:
-    """
-    Draws QAM symbols from a Maxwell-Boltzmann distribution.
-
-    Parameters
-    ----------
-    num_symbols : int
-        Number of symbols to generate.
-    order : int
-        QAM modulation order.
-    pmf : np.ndarray
-        Symbol PMF of shape ``(order,)``. Typically from
-        ``maxwell_boltzmann``.
-    seed : int, optional
-        Random seed for reproducibility.
-
-    Returns
-    -------
-    np.ndarray
-        Complex-valued symbols drawn from the MB distribution.
-        Shape: ``(num_symbols,)``, dtype ``complex64``.
-        All values lie exactly on the normalized QAM constellation grid.
-    """
-    rng = np.random.default_rng(seed)
-    constellation = gray_constellation("qam", order).astype(np.complex64)
-    indices = rng.choice(order, size=num_symbols, p=np.asarray(pmf, dtype=np.float64))
-    return constellation[indices]

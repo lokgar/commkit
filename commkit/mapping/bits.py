@@ -13,13 +13,13 @@ from ..core._signal_adapter import adapt_signal
 from ..core.signal import Signal
 from ..logger import logger
 from .gray import (
+    _gray_points,
     _is_square_qam,
+    _nearest_index,
+    _unpack_bits,
     gray_code,
-    gray_constellation,
-    nearest_constellation_index,
-    unpack_bits,
 )
-from .shaping import rescale_ps_symbols
+from .shaping import _rescale_ps_symbols
 
 __all__ = ["demap_symbols_hard", "map_bits"]
 
@@ -84,7 +84,7 @@ def map_bits(
     indices = xp.sum(bits_reshaped * powers, axis=1)
 
     # Get constellation (returns NumPy)
-    constellation = gray_constellation(modulation, order, unipolar=unipolar)
+    constellation = _gray_points(modulation, order, unipolar=unipolar)
 
     # Ensure constellation is on the same backend and dtype
     constellation = xp.asarray(constellation)
@@ -133,7 +133,7 @@ def demap_symbols_hard(
         input symbols are scaled by ``sqrt(E_PS)`` (where
         ``E_PS = Σ P(s_m) |s_m|²`` on the normalised grid) before the
         nearest-neighbour search, mapping unit-avg-power resolved symbols
-        back to the ``{s_m}`` grid used by ``gray_constellation``.
+        back to the ``{s_m}`` grid used by ``_gray_points``.
         Use this when ``symbols`` comes from
         ``resolved_symbols`` of a PS-QAM signal.
         Has no effect for uniform modulations.  For :class:`Signal` input,
@@ -203,13 +203,13 @@ def _demap_symbols_hard_array(
     symbols_flat = symbols.flatten()
 
     # Get constellation
-    constellation = gray_constellation(modulation, order, unipolar=unipolar)
+    constellation = _gray_points(modulation, order, unipolar=unipolar)
 
     # PS-QAM: receive-path symbols at unit average power live on the
     # ``{s_m/sqrt(E_PS)}`` grid.  Rescale by ``sqrt(E_PS)`` to bring them back
-    # to the ``{s_m}`` grid that ``gray_constellation`` returns, so the
+    # to the ``{s_m}`` grid that ``_gray_points`` returns, so the
     # nearest-neighbour search is exact.  No-op for uniform modulations.
-    symbols_flat = rescale_ps_symbols(symbols_flat, xp, modulation, order, pmf)
+    symbols_flat = _rescale_ps_symbols(symbols_flat, xp, modulation, order, pmf)
 
     constellation = xp.asarray(constellation)
 
@@ -240,10 +240,10 @@ def _demap_symbols_hard_array(
         indices = (gray_lut[g_i] << n_ax) | gray_lut[g_q]  # (N_flat,)
     else:
         # General path: chunk N to bound peak memory at (CHUNK_N, M_const).
-        indices = nearest_constellation_index(symbols_flat, constellation)
+        indices = _nearest_index(symbols_flat, constellation)
 
     # 2. Convert indices to bits: (N, k)
-    bits = unpack_bits(indices, k)
+    bits = _unpack_bits(indices, k)
 
     # 3. Reshape to restore original structure
     # bits is currently (Total_Symbols, k)

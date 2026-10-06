@@ -12,7 +12,7 @@ from ..backend import ArrayType, dispatch
 from ..core._signal_adapter import adapt_signal
 from ..core.signal import Signal
 from ..logger import logger
-from .gray import gray_constellation, unpack_bits
+from .gray import _gray_points, _unpack_bits
 
 __all__ = ["compute_llr"]
 
@@ -79,7 +79,7 @@ def compute_llr(
     Exact: LLR_k = log sum_{S_0^k} exp(-|r-s|^2/sigma^2) - log sum_{S_1^k} ...
 
     For PS-QAM, ``symbols`` must be on the same scale as
-    ``gray_constellation`` (unit avg power).  After
+    ``_gray_points`` (unit avg power).  After
     ``resolve_symbols`` the receiver renormalises;
     use ``gmi`` instead for correct scale.
     """
@@ -109,8 +109,8 @@ def compute_llr(
     k = int(np.log2(order))
     if 2**k != order:
         raise ValueError(f"Order must be a power of 2, got {order}")
-    const = gray_constellation(modulation, order, unipolar=unipolar)
-    labels = unpack_bits(np.arange(order, dtype="int32"), k)  # (M, k), MSB first
+    const = _gray_points(modulation, order, unipolar=unipolar)
+    labels = _unpack_bits(np.arange(order, dtype="int32"), k)  # (M, k), MSB first
     return _llr(symbols, const, labels, pmf, noise_var, method)
 
 

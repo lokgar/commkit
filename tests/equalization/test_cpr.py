@@ -24,7 +24,7 @@ from commkit.frequency import (
     correct_frequency_offset_blockwise,
     estimate_frequency_offset_mth_power,
 )
-from commkit.mapping import gray_constellation
+from commkit.mapping import Constellation
 from commkit.recovery import recover_carrier_phase_pll
 from tests.common.conversions import to_numpy
 from tests.common.metrics import calc_mse_db
@@ -131,7 +131,7 @@ class TestCPRPLLConvergence:
         """LMS+PLL recovers through deliberate π/2 phase steps without diverging."""
         rng = np.random.default_rng(42)
         n_sym = 3000
-        const = gray_constellation("psk", 4).astype(np.complex64)
+        const = Constellation.psk(4).points.astype(np.complex64)
         idxs = rng.integers(0, 4, n_sym)
         syms = const[idxs]
 
@@ -171,7 +171,7 @@ class TestCPRPLLConvergence:
         rng = np.random.default_rng(7)
         n_sym = 5000
         linewidth_ts = 1e-4
-        const = gray_constellation("qam", 16).astype(np.complex64)
+        const = Constellation.qam(16).points.astype(np.complex64)
         idxs = rng.integers(0, 16, n_sym)
         syms = const[idxs]
 
@@ -255,7 +255,7 @@ class TestCPRPLLConvergence:
         """A frozen 1-tap identity equalizer reduces inline PLL to standalone DD-PLL."""
         rng = np.random.default_rng(3)
         n_sym = 2000
-        const = gray_constellation("psk", 4).astype(np.complex64)
+        const = Constellation.psk(4).points.astype(np.complex64)
         syms = const[rng.integers(0, 4, n_sym)]
         samples = (syms * np.exp(1j * 0.3).astype(np.complex64)).astype(np.complex64)
 
@@ -291,7 +291,7 @@ class TestCPRBPSConvergence:
         """phase_trajectory from BPS must not wrap back to [0, π/2) under a ramp."""
         rng = np.random.default_rng(5)
         n_sym = 3000
-        const = gray_constellation("qam", 16).astype(np.complex64)
+        const = Constellation.qam(16).points.astype(np.complex64)
         syms = const[rng.integers(0, 16, n_sym)]
 
         phase_true = np.linspace(0.0, 3.0, n_sym, dtype=np.float64)
@@ -328,7 +328,7 @@ class TestCPRBPSConvergence:
         rng = np.random.default_rng(11)
         n_sym = 5000
         linewidth_ts = 5e-5
-        const = gray_constellation("qam", 16).astype(np.complex64)
+        const = Constellation.qam(16).points.astype(np.complex64)
         syms = const[rng.integers(0, 16, n_sym)]
 
         phase_noise = np.cumsum(
@@ -377,7 +377,7 @@ class TestCPRBPSConvergence:
         """lms(cpr_type='bps', bps_block_size=32) converges - verifies incremental sum."""
         rng = np.random.default_rng(13)
         n_sym = 4000
-        const = gray_constellation("qam", 16).astype(np.complex64)
+        const = Constellation.qam(16).points.astype(np.complex64)
         syms = const[rng.integers(0, 16, n_sym)]
 
         phase_noise = np.cumsum(
@@ -427,7 +427,7 @@ class TestCPRBPSConvergence:
         """rls(cpr_type='bps') converges under phase noise."""
         rng = np.random.default_rng(17)
         n_sym = 3000
-        const = gray_constellation("qam", 16).astype(np.complex64)
+        const = Constellation.qam(16).points.astype(np.complex64)
         syms = const[rng.integers(0, 16, n_sym)]
 
         phase_noise = np.cumsum(
@@ -467,7 +467,7 @@ class TestCPRMIMOJoint:
         """2x2 butterfly LMS+PLL converges on both output channels."""
         rng = np.random.default_rng(99)
         n_sym = 3000
-        const = gray_constellation("qam", 16).astype(np.complex64)
+        const = Constellation.qam(16).points.astype(np.complex64)
         const_xp = xp.asarray(const)
 
         syms_a = const[rng.integers(0, 16, n_sym)]
@@ -519,7 +519,7 @@ class TestCPRMIMOJoint:
         """cpr_joint_channels=True makes both PLL integrators identical (shared LO)."""
         rng = np.random.default_rng(23)
         n_sym = 3000
-        const = gray_constellation("qam", 16).astype(np.complex64)
+        const = Constellation.qam(16).points.astype(np.complex64)
         syms_a = const[rng.integers(0, 16, n_sym)]
         syms_b = const[rng.integers(0, 16, n_sym)]
 
@@ -707,7 +707,7 @@ class TestBlockwiseFOE:
         phase_chirp = 2 * np.pi * np.cumsum(f_t) / fs
         carrier = np.exp(1j * phase_chirp).astype(np.complex64)
 
-        const = gray_constellation("qam", 16).astype(np.complex64)
+        const = Constellation.qam(16).points.astype(np.complex64)
         idxs = rng.integers(0, 16, n // sps)
         syms = const[idxs]
         base_np = np.repeat(syms, sps).astype(np.complex64)

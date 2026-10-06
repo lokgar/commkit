@@ -239,9 +239,9 @@ def cma(
     # Compute R2 and PS-QAM scale factor from the Godard constellation.
     _c_ps = None  # 1/sqrt(E_PS) scale factor; None for uniform modulation
     if modulation is not None and order is not None:
-        from ...mapping import gray_constellation
+        from ...mapping.gray import _gray_points
 
-        const = gray_constellation(modulation, order, unipolar=unipolar)
+        const = _gray_points(modulation, order, unipolar=unipolar)
         if pmf is not None:
             # PS-QAM: R2 for the unit-power distribution {s_m/sqrt(E_PS)}:
             #   R2 = E_PS[|s_m/sqrt(E_PS)|^4] / E_PS[|s_m/sqrt(E_PS)|^2]
@@ -560,9 +560,9 @@ def rde(
     # making RDE identical to CMA.
     _c_ps = None  # 1/sqrt(E_PS) scale factor; None for uniform modulation
     if modulation is not None and order is not None:
-        from ...mapping import gray_constellation
+        from ...mapping.gray import _gray_points
 
-        const = gray_constellation(modulation, order, unipolar=unipolar)
+        const = _gray_points(modulation, order, unipolar=unipolar)
         raw_radii = np.abs(const).astype(np.float32)
         if pmf is not None:
             # PS-QAM: scale radii to unit-power targets {|s_m|/sqrt(E_PS)}

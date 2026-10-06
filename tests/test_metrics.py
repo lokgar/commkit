@@ -7,7 +7,7 @@ import pytest
 
 from commkit import generate, mapping, metrics, multirate
 from commkit.impairments import apply_awgn
-from commkit.mapping import Constellation, compute_llr, gray_constellation, map_bits
+from commkit.mapping import Constellation, compute_llr, map_bits
 
 
 class TestBitErrorRate:
@@ -111,14 +111,14 @@ class TestErrorVectorMagnitude:
 
     def test_evm_blind_perfect_signal(self, xp: Any) -> None:
         """Blind EVM should be near 0% when rx sits exactly on constellation points."""
-        const = xp.asarray(gray_constellation("qam", 16))
+        const = xp.asarray(Constellation.qam(16).points)
         rx = xp.tile(const, 32)
         pct, db = metrics.evm(rx, mode="blind", modulation="qam", order=16)
         assert pct < 1e-6
 
     def test_evm_blind_decreases_with_snr(self, xp: Any) -> None:
         """Blind EVM at high SNR should be lower than at low SNR."""
-        const = np.asarray(gray_constellation("qam", 16))
+        const = np.asarray(Constellation.qam(16).points)
         rng = np.random.default_rng(7)
         tx = const[rng.integers(0, 16, 2000)]
 
@@ -142,7 +142,7 @@ class TestErrorVectorMagnitude:
 
     def test_evm_blind_multichannel(self, xp: Any, xpt: Any) -> None:
         """Blind EVM returns array of shape (N_ch,) for MIMO input."""
-        const = xp.asarray(gray_constellation("qam", 4))
+        const = xp.asarray(Constellation.qam(4).points)
         rng = np.random.default_rng(1)
         rx = xp.stack([const[rng.integers(0, 4, 200)] for _ in range(3)])
 
@@ -321,7 +321,7 @@ class TestInformationMetrics:
     def test_mi_high_snr_approaches_log2m(self, xp: Any) -> None:
         """At high SNR, MI -> log2(M)."""
         M = 16
-        const = gray_constellation("qam", M)
+        const = Constellation.qam(M).points
         rng = np.random.default_rng(42)
         symbols = const[rng.integers(0, M, 500)]
 
@@ -331,7 +331,7 @@ class TestInformationMetrics:
     def test_mi_never_exceeds_log2m(self, xp: Any) -> None:
         """MI <= log2(M) always (capacity bound)."""
         M = 4
-        const = gray_constellation("qam", M)
+        const = Constellation.qam(M).points
         rng = np.random.default_rng(7)
         symbols = const[rng.integers(0, M, 200)]
 
@@ -342,7 +342,7 @@ class TestInformationMetrics:
     def test_mi_returns_scalar_float(self, xp: Any) -> None:
         """mi() must return a Python float."""
         M = 4
-        const = gray_constellation("qam", M)
+        const = Constellation.qam(M).points
         symbols = const[:10]
         mi_val = metrics.mi(xp.asarray(symbols), "qam", M, noise_var=0.1)
         assert isinstance(mi_val, float)
@@ -350,7 +350,7 @@ class TestInformationMetrics:
     def test_mi_decreases_with_noise(self, xp: Any) -> None:
         """MI should decrease as noise increases."""
         M = 16
-        const = gray_constellation("qam", M)
+        const = Constellation.qam(M).points
         rng = np.random.default_rng(99)
         symbols = const[rng.integers(0, M, 500)]
 

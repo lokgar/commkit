@@ -158,6 +158,15 @@ class Signal:
         return new
 
     # -------------------------------------------------------------------------
+    # Convenience
+    # -------------------------------------------------------------------------
+
+    def time_axis(self) -> ArrayType:
+        """Time of each sample in seconds, starting at 0, shape ``(N,)``."""
+        n_samples = self.samples.shape[-1]
+        return self.xp.arange(0, n_samples) / self.sampling_rate
+
+    # -------------------------------------------------------------------------
     # Summary
     # -------------------------------------------------------------------------
 
@@ -292,11 +301,6 @@ class Signal:
         if self.reference is not None:
             moved["reference"] = self.reference.to(device)
         return self.replace(samples=to_device(self.samples, device), **moved)
-
-    def time_axis(self) -> ArrayType:
-        """Time of each sample in seconds, starting at 0, shape ``(N,)``."""
-        n_samples = self.samples.shape[-1]
-        return self.xp.arange(0, n_samples) / self.sampling_rate
 
     # -------------------------------------------------------------------------
     # Properties

@@ -10,14 +10,11 @@ from commkit.impairments import apply_awgn
 from commkit.mapping import (
     Constellation,
     compute_llr,
-    constellation_power,
-    gray_constellation,
     maxwell_boltzmann,
     optimal_nu,
     ps_entropy,
-    rescale_ps_symbols,
-    sample_ps_symbols,
 )
+from commkit.mapping.shaping import _constellation_power, _rescale_ps_symbols
 from tests.common.conversions import to_numpy
 
 
@@ -43,7 +40,7 @@ class TestMaxwellBoltzmann:
     def test_inner_higher_probability(self, order: int) -> None:
         """Inner constellation points must have higher probability than outer ones."""
         pmf = maxwell_boltzmann(order, nu=0.5)
-        const = gray_constellation("qam", order)
+        const = Constellation.qam(order).points
         energies = np.abs(const) ** 2
         for i in range(order):
             for j in range(order):
@@ -104,45 +101,6 @@ class TestOptimalNu:
             optimal_nu(16, 0.0)
         with pytest.raises(ValueError):
             optimal_nu(16, 5.0)
-
-
-class TestSamplePSSymbols:
-    """Tests for sampling symbols according to a shaped PMF."""
-
-    def test_sample_symbols_all_on_constellation(self) -> None:
-        """Sampled symbols must all match constellation grid points."""
-        order = 16
-        pmf = maxwell_boltzmann(order, nu=0.5)
-        const = gray_constellation("qam", order).astype(np.complex64)
-        symbols = sample_ps_symbols(5000, order, pmf, seed=0)
-
-        assert symbols.shape == (5000,)
-        for sym in symbols:
-            dists = np.abs(const - sym)
-            assert dists.min() < 1e-5, f"Symbol {sym} not on constellation"
-
-    def test_sample_symbols_empirical_distribution(self, xpt: Any) -> None:
-        """Empirical frequencies must approximate the target PMF."""
-        order = 16
-        nu = 0.8
-        pmf = maxwell_boltzmann(order, nu)
-        const = gray_constellation("qam", order).astype(np.complex64)
-        n = 100_000
-        symbols = sample_ps_symbols(n, order, pmf, seed=42)
-
-        counts = np.zeros(order)
-        for m, point in enumerate(const):
-            counts[m] = np.sum(np.abs(symbols - point) < 1e-5)
-        empirical = counts / n
-
-        xpt.assert_allclose(empirical, pmf, atol=0.01)
-
-    def test_sample_symbols_seed_reproducibility(self, xpt: Any) -> None:
-        """Deterministic sampling with identical seed."""
-        pmf = maxwell_boltzmann(64, nu=0.3)
-        s1 = sample_ps_symbols(1000, 64, pmf, seed=7)
-        s2 = sample_ps_symbols(1000, 64, pmf, seed=7)
-        xpt.assert_array_equal(s1, s2)
 
 
 class TestGeneratePSQAM:
@@ -266,7 +224,7 @@ class TestPSQAMMetricsAndDemapping:
         order = 16
         nu = 1.0
         pmf = maxwell_boltzmann(order, nu)
-        const = gray_constellation("qam", order).astype(np.complex64)
+        const = Constellation.qam(order).points.astype(np.complex64)
 
         inner_idx = int(np.argmin(np.abs(const)))
         tx_sym = np.array([const[inner_idx]] * 100, dtype=np.complex64)
@@ -287,7 +245,7 @@ class TestPSQAMMetricsAndDemapping:
     def test_rescale_ps_symbols_uniform_is_noop(self) -> None:
         """pmf=None returns symbol array unchanged (identity)."""
         rx = np.array([1 + 1j, -1 - 1j], dtype=np.complex64)
-        result = rescale_ps_symbols(rx, np, "qam", 16, None)
+        result = _rescale_ps_symbols(rx, np, "qam", 16, None)
         assert result is rx
 
     def test_rescale_ps_symbols_matches_manual_sqrt_e_ps(self, xpt: Any) -> None:
@@ -295,8 +253,8 @@ class TestPSQAMMetricsAndDemapping:
         order = 16
         nu = 1.0
         pmf = maxwell_boltzmann(order, nu)
-        const = gray_constellation("qam", order)
-        e_ps = constellation_power(const, pmf)
+        const = Constellation.qam(order).points
+        e_ps = _constellation_power(const, pmf)
         assert e_ps < 1.0 - 1e-6
 
         rng = np.random.default_rng(1)
@@ -304,6 +262,6 @@ class TestPSQAMMetricsAndDemapping:
             np.complex64
         )
 
-        result = rescale_ps_symbols(rx, np, "qam", order, pmf)
+        result = _rescale_ps_symbols(rx, np, "qam", order, pmf)
         expected = rx * np.sqrt(e_ps).astype(np.float32)
         xpt.assert_allclose(result, expected, rtol=1e-5)
