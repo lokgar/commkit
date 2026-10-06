@@ -75,7 +75,9 @@ else:
     from commkit.impairments import apply_awgn, generate_phase_noise
 
     m = int(round(TAU_D * FS))
-    phi_demo = generate_phase_noise((1 << 21) + m, FS, linewidth=200e3, seed=42)
+    phi_demo = xp.asarray(
+        generate_phase_noise((1 << 21) + m, FS, linewidth=200e3, seed=42)
+    )
     z_demo, _ = analysis.dsh_beat(phi_demo, FS, TAU_D, f_shift=F_AOM)
     beat = apply_awgn(z_demo, sps=1, esn0_db=25, seed=1).real  # single PD -> real
 

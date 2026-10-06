@@ -125,7 +125,7 @@ SNR_DB = 25  # beat SNR in the full Nyquist band
 M_DELAY = int(round(122.5e-6 * FS))  # 25 km SMF
 TAU_D = M_DELAY / FS
 
-phi = generate_phase_noise(N + M_DELAY, FS, linewidth=DNU_TRUE, seed=42)
+phi = xp.asarray(generate_phase_noise(N + M_DELAY, FS, linewidth=DNU_TRUE, seed=42))
 z_dsh, dphi_true = analysis.dsh_beat(phi, FS, TAU_D, f_shift=F_AOM)
 z_dsh = apply_awgn(z_dsh, sps=1, esn0_db=SNR_DB, seed=1)
 
@@ -284,11 +284,17 @@ print(f"increment: Δν = {res_inc['linewidth'] / 1e3:.1f} kHz")
 # `linewidth_dsh(method="lorentzian")` measures both and reports their ratio
 # as a lineshape diagnostic: `W₂₀/W₃ ≈ 9.95` for a Lorentzian, `≈ 2.6` for a
 # Gaussian - anything in between says "mixed", trust the deep width.
-# `debug_plot=True` draws the beat line with both width contours.
+# The result carries the beat spectrum, so the line with both width contours
+# plots directly.
 
 # %%
-res_lor = analysis.linewidth_dsh(
-    z_dsh, FS, TAU_D, method="lorentzian", nperseg=1 << 15, debug_plot=True
+res_lor = analysis.linewidth_dsh(z_dsh, FS, TAU_D, method="lorentzian", nperseg=1 << 15)
+plotting.plot_dsh_beat_psd(
+    res_lor["f"],
+    res_lor["psd"],
+    f_peak=res_lor["f_peak"],
+    linewidth=res_lor["linewidth"],
+    linewidth_3db=res_lor["linewidth_3db"],
 )
 print(
     f"lorentzian: Δν(-20 dB) = {res_lor['linewidth'] / 1e3:.1f} kHz, "
@@ -320,7 +326,9 @@ print(
 M_SHORT = int(round(4.9e-6 * FS))  # 1 km spool
 TAU_SHORT = M_SHORT / FS
 
-phi_short = generate_phase_noise(N + M_SHORT, FS, linewidth=DNU_TRUE, seed=44)
+phi_short = xp.asarray(
+    generate_phase_noise(N + M_SHORT, FS, linewidth=DNU_TRUE, seed=44)
+)
 z_short, _ = analysis.dsh_beat(phi_short, FS, TAU_SHORT, f_shift=F_AOM)
 z_short = apply_awgn(z_short, sps=1, esn0_db=SNR_DB, seed=3)
 
@@ -375,8 +383,10 @@ print(f"fm_psd on the same capture         : {res_good['linewidth'] / 1e3:.1f} k
 
 # %%
 H_M1 = 4e9
-phi_mix = generate_phase_noise(
-    N + M_SHORT, FS, linewidth=DNU_TRUE, flicker=H_M1, flicker_f_min=1e3, seed=45
+phi_mix = xp.asarray(
+    generate_phase_noise(
+        N + M_SHORT, FS, linewidth=DNU_TRUE, flicker=H_M1, flicker_f_min=1e3, seed=45
+    )
 )
 z_mix, _ = analysis.dsh_beat(phi_mix, FS, TAU_SHORT, f_shift=F_AOM)
 z_mix = apply_awgn(z_mix, sps=1, esn0_db=SNR_DB, seed=4)

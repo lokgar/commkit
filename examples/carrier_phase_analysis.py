@@ -98,10 +98,12 @@ WANDER_FREQ = 100e3  # wander rate [Hz]
 t = xp.arange(N) * T
 
 # Known QPSK sequence (the data-aided reference), unit symbol energy:
-d = generate_psk(N, sps=1, symbol_rate=R, order=4, pulse_shape="none", seed=7).samples
+d = xp.asarray(
+    generate_psk(N, sps=1, symbol_rate=R, order=4, pulse_shape="none", seed=7).samples
+)
 
 # Carrier phase = laser random walk (ground truth in hand) + injected wander:
-phi_pn = generate_phase_noise(N, R, linewidth=DNU_TRUE, seed=17)
+phi_pn = xp.asarray(generate_phase_noise(N, R, linewidth=DNU_TRUE, seed=17))
 df_wander = WANDER_AMP * xp.sin(2.0 * np.pi * WANDER_FREQ * t)
 phi_drift = 2.0 * np.pi * xp.cumsum(df_wander) * T
 phi_true = phi_pn + phi_drift
@@ -218,7 +220,7 @@ for K in (32, 64, 128):
 # single-lag textbook version: it needs the noise variance explicitly and
 # over-subtracts if you hand it a total-residual SNR - kept for comparison.
 #
-# `debug_plot=True` draws the measured points with the fitted line - the
+# The result carries the measured points and the fit, plotted below - the
 # intercept should sit at `σ_n²` for unit-power QPSK at this SNR.
 #
 # **Assumption**: white-FM (Wiener) noise.  Flicker bends `Var(k)` upward and
@@ -226,8 +228,12 @@ for K in (32, 64, 128):
 # the FM PSD in §5 for a clean plateau before quoting it.
 
 # %%
-lw_inc = analysis.linewidth_increment(
-    pn, R, method="slope", edge_trim=edge, debug_plot=True
+lw_inc = analysis.linewidth_increment(pn, R, method="slope", edge_trim=edge)
+plotting.plot_increment_variance(
+    lw_inc["lag_s"],
+    lw_inc["var"],
+    slope=lw_inc["slope"],
+    intercept=lw_inc["intercept"],
 )
 print(
     f"linewidth (slope)   = {lw_inc['linewidth'] / 1e6:.3f} MHz  "

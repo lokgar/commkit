@@ -128,7 +128,7 @@ print(
 )
 
 # Step 1: laser phase trajectory (long enough to cover the delayed copy too).
-phi = generate_phase_noise(N + M_DELAY, FS, linewidth=DNU_TRUE, seed=42)
+phi = xp.asarray(generate_phase_noise(N + M_DELAY, FS, linewidth=DNU_TRUE, seed=42))
 
 # Step 2: the two interferometer arms beat in the hybrid - complex field
 # product of the direct and delayed copies (I + jQ from the balanced pairs).
@@ -249,7 +249,14 @@ res_fm = analysis.linewidth_dsh(
     z, FS, TAU_D, f_shift=0.0, method="fm_psd", nperseg=1 << 16
 )
 res_inc = analysis.linewidth_dsh(z, FS, TAU_D, f_shift=0.0, method="increment")
-res_lor = analysis.linewidth_dsh(z, FS, TAU_D, method="lorentzian", debug_plot=True)
+res_lor = analysis.linewidth_dsh(z, FS, TAU_D, method="lorentzian")
+plotting.plot_dsh_beat_psd(
+    res_lor["f"],
+    res_lor["psd"],
+    f_peak=res_lor["f_peak"],
+    linewidth=res_lor["linewidth"],
+    linewidth_3db=res_lor["linewidth_3db"],
+)
 
 fig, ax = plotting.plot_frequency_noise_psd(
     res_fm["f"],
