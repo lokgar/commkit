@@ -199,3 +199,147 @@ def _blind_reference(samples, *, num_taps, sps, step_size, radii, r2):
             w[i] = w[i] - step_size * np.conj(e) * win
             y_out[i, n], e_out[i, n] = y[i], e
     return {"y": y_out, "e": e_out, "w": w}
+
+
+# -----------------------------------------------------------------------------
+# Carrier-phase recovery
+# -----------------------------------------------------------------------------
+#
+# Shared contract: symbols are 1-SPS; BPS and the PLL normalize each channel to
+# unit average power before estimation (Viterbi-Viterbi does not); the result is
+# a per-symbol phase trajectory in radians, shape (C, N).
+
+
+def _unit_power(symbols: np.ndarray) -> np.ndarray:
+    s = np.atleast_2d(np.asarray(symbols)).astype(np.complex128)
+    return s / np.sqrt(np.mean(np.abs(s) ** 2, axis=-1, keepdims=True))
+
+
+def _block_interp(phi_blocks: np.ndarray, n: int, block_size: int) -> np.ndarray:
+    """Linear interpolation between block centres, held flat at the edges."""
+    centers = np.arange(phi_blocks.shape[-1]) * block_size + block_size / 2
+    return np.interp(np.arange(n, dtype=np.float64), centers, phi_blocks)
+
+
+def cycle_slip_reference(
+    phi: np.ndarray, *, symmetry: int, history_length: int, threshold: float
+) -> np.ndarray:
+    """Sequential cycle-slip removal by linear extrapolation.
+
+    For block ``b`` the expected phase is extrapolated from the last
+    ``min(b, history_length)`` *corrected* blocks: the previous value while
+    fewer than ``min(10, history_length)`` are available, otherwise a
+    least-squares line evaluated one step past the newest block.  A deviation
+    larger than ``threshold`` is removed in whole quanta of ``2*pi/symmetry``.
+    """
+    quantum = 2 * np.pi / symmetry
+    out = np.array(phi, dtype=np.float64)
+    for b in range(1, out.size):
+        hist = out[max(0, b - history_length) : b]
+        if hist.size < min(10, history_length):
+            pred = hist[-1]
+        else:
+            slope, intercept = np.polyfit(np.arange(hist.size), hist, 1)
+            pred = slope * hist.size + intercept
+        diff = out[b] - pred
+        k = round(diff / quantum)
+        if abs(diff) > threshold and k != 0:
+            out[b] -= k * quantum
+    return out
+
+
+def viterbi_viterbi_reference(
+    symbols: np.ndarray,
+    *,
+    modulation: str,
+    order: int,
+    block_size: int,
+    joint_channels: bool = False,
+) -> np.ndarray:
+    """M-th power block phase estimator (normalized Viterbi-Viterbi).
+
+    QAM symbols are projected onto the unit circle and raised to the 4th
+    power, M-PSK to the M-th.  Per block, ``angle(sum s^M) / M`` is unwrapped
+    M-fold; QAM is bias-corrected by ``-pi/M``.  Independent MIMO channels are
+    moved to channel 0's M-fold branch.
+
+    Unlike BPS and the PLL, the input is *not* power-normalized: in joint mode
+    each channel's M-th-power phasors are weighted by its amplitude^M.
+    """
+    s = np.atleast_2d(np.asarray(symbols)).astype(np.complex128)
+    num_ch, n = s.shape
+    m = order if modulation == "psk" else 4
+    n_blocks = n // block_size
+    blocks = s[:, : n_blocks * block_size].reshape(num_ch, n_blocks, block_size)
+    if modulation == "qam":
+        blocks = blocks / np.abs(blocks)
+    sums = np.sum(blocks**m, axis=-1)
+    if joint_channels and num_ch > 1:
+        sums = np.repeat(np.sum(sums, axis=0, keepdims=True), num_ch, axis=0)
+    phi = np.unwrap(np.angle(sums), axis=-1) / m
+    if modulation == "qam":
+        phi = phi - np.pi / m
+    if not joint_channels:
+        for c in range(1, num_ch):
+            k = np.round(np.mean(phi[c] - phi[0]) * m / (2 * np.pi))
+            phi[c] -= k * 2 * np.pi / m
+    return np.stack([_block_interp(p, n, block_size) for p in phi])
+
+
+def bps_reference(
+    symbols: np.ndarray,
+    constellation: np.ndarray,
+    *,
+    num_test_phases: int,
+    block_size: int,
+    joint_channels: bool = False,
+) -> np.ndarray:
+    """Blind phase search over ``[0, pi/2)``.
+
+    Candidate ``b`` is ``b * pi / (2B)``.  Per block the candidate minimizing
+    ``sum_n min_m |s_n exp(-j phi_b) - c_m|^2`` wins (summed over channels in
+    joint mode); block phases are 4-fold unwrapped and interpolated.
+    """
+    s = _unit_power(symbols)
+    num_ch, n = s.shape
+    candidates = np.arange(num_test_phases) * (np.pi / 2 / num_test_phases)
+    n_blocks = n // block_size
+    metric = np.zeros((num_ch, n_blocks, num_test_phases))
+    for c in range(num_ch):
+        for blk in range(n_blocks):
+            seg = s[c, blk * block_size : (blk + 1) * block_size]
+            for k, phi_k in enumerate(candidates):
+                rot = seg * np.exp(-1j * phi_k)
+                d2 = np.abs(rot[:, None] - constellation[None, :]) ** 2
+                metric[c, blk, k] = np.sum(np.min(d2, axis=-1))
+    if joint_channels and num_ch > 1:
+        metric = np.repeat(np.sum(metric, axis=0, keepdims=True), num_ch, axis=0)
+    phi = np.unwrap(4 * candidates[np.argmin(metric, axis=-1)], axis=-1) / 4
+    return np.stack([_block_interp(p, n, block_size) for p in phi])
+
+
+def pll_reference(
+    symbols: np.ndarray,
+    constellation: np.ndarray,
+    *,
+    mu: float,
+    beta: float,
+    phase_init: float = 0.0,
+) -> np.ndarray:
+    """Decision-directed 2nd-order PLL, one loop per channel.
+
+    ``y = s exp(-j phi)``, ``d = nearest(y)``, ``e = Im(y conj(d))``; the
+    phase used for symbol ``n`` is recorded before
+    ``phi += mu e + nu``, ``nu += beta e``.
+    """
+    s = _unit_power(symbols)
+    out = np.zeros(s.shape)
+    for c in range(s.shape[0]):
+        phi, nu = phase_init, 0.0
+        for n in range(s.shape[1]):
+            y = s[c, n] * np.exp(-1j * phi)
+            e = np.imag(y * np.conj(_nearest(y, constellation)))
+            out[c, n] = phi
+            phi = phi + mu * e + nu
+            nu = nu + beta * e
+    return out

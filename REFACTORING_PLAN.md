@@ -414,7 +414,7 @@ benchmarks and CI.
     float64/complex128 throughout.
   - `tests/equalization/test_equalizer_oracles.py` compares the Numba kernels to them on
     N ≈ 300 symbols. It checks outputs, final weights and errors at rtol 1e-5.
-- [ ] **0.6 `test: add reference oracles for PLL, BPS, Viterbi-Viterbi and cycle-slip correction`.**
+- [x] **0.6 `test: add reference oracles for PLL, BPS, Viterbi-Viterbi and cycle-slip correction`.**
   Same pattern, in `tests/recovery/test_recovery_oracles.py` (test basenames must be globally unique).
 - [ ] **0.7 `ci: measure Numba kernel coverage and add a coverage floor`.**
   - A new CI job runs `tests/equalization tests/recovery` with
@@ -582,7 +582,7 @@ The equalization pass (3.7) gets more commits:
 | 3.3 | `filtering`, `multirate`, `spectral`, `smoothing` | Pulses (add a definition-level check that the Gaussian `duty_cycle` equals the FWHM); overlap-save into private `_overlap_save.py`; `resolve_symbols` becomes plain decimation to a 1-SPS Signal. Chromatic dispersion moves into private `_dispersion.py`, which owns the D/wavelength/length to beta2·L conversion, the frequency grid, and both forward and inverse transfer functions, with an explicit sign. It gets independent sign and unit tests, because a round trip alone hides errors shared by both directions. | M |
 | 3.4 | `impairments` | `rng`; uses `_dispersion.py` | S |
 | 3.5 | `timing`, `frequency` | `cross_correlate_fft`, peak interpolation and `zc_mimo_root` move here; timing correction slices `reference` | M |
-| 3.6 | `recovery` | `PLL` / `BPS` / `CycleSlip` objects; PLL gain resolution moves into `recovery/_common.py` | M |
+| 3.6 | `recovery` | `PLL` / `BPS` / `CycleSlip` objects; PLL gain resolution moves into `recovery/_common.py`. Decide two oracle findings (commit 0.6): the PLL's square-QAM slicer builds decisions from float32 grid constants inside its float64 loop (up to about 3e-7 rad deviation; make it float64 or document it), and joint Viterbi-Viterbi weights channels by amplitude^M because, unlike BPS and the PLL, it does not power-normalize (document it, or normalize like the others) | M |
 | 3.7 | `equalization` | API plus the internal decomposition (old Phase 3), done once: validate, then `_prepare()`, then Numba or NumPy/CuPy runner, then `_assemble_result()`. Adds `state=`, `cpr=` and `result.signal`. Includes chunked-versus-uninterrupted equivalence tests for `state=`. See the equalizer safety rules below. | L |
 | 3.8 | `metrics` | Host return values, raise on empty input, `reference`-based Signal path, payload extraction (`extract_payload(sig)` using `frame`), a units and scaling table. See the metrics contract below. | M |
 | 3.9 | `analysis` | Typed result dataclasses instead of dicts; trend fitting lives here | S |
