@@ -185,7 +185,7 @@ class TestButterflyMIMOExtended:
         assert result.error.shape == (2, n_symbols)
 
     def test_lms_2x2_mixed_input(self, xp):
-        """LMS JAX butterfly should cancel cross-channel interference."""
+        """LMS butterfly should cancel cross-channel interference."""
 
         n_symbols = 2000
         sig = generate_psk(

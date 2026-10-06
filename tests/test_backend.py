@@ -86,69 +86,32 @@ class TestBackendDispatch:
         assert x in (np, getattr(multirate, "cp", None))
 
 
-class TestJaxInterop:
-    """Tests for interoperability between CommKit backends and JAX."""
+class _ForeignArray:
+    """Stand-in for a JAX/PyTorch array: DLPack-capable, but not NumPy/CuPy."""
 
-    def test_jax_interop_roundtrip(
-        self, backend_device: str, xp: Any, xpt: Any, jax: Any
-    ) -> None:
-        """Verify interoperability between core backends and JAX using DLPack."""
-        import jax.numpy as jnp
+    def __init__(self, data):
+        self._a = np.asarray(data)
 
-        data = xp.array([1.0, 2.0, 3.0])
+    def __dlpack__(self, **kwargs):
+        return self._a.__dlpack__(**kwargs)
 
-        jax_arr = backend.to_jax(data)
-        assert isinstance(jax_arr, jnp.ndarray)
+    def __dlpack_device__(self):
+        return self._a.__dlpack_device__()
 
-        back_arr = backend.from_jax(jax_arr)
-        if backend_device == "cpu":
-            assert isinstance(back_arr, np.ndarray)
-        elif backend_device == "gpu":
-            assert isinstance(back_arr, (np.ndarray, xp.ndarray))
 
-        xpt.assert_allclose(backend.to_device(back_arr, "cpu"), [1.0, 2.0, 3.0])
+class TestForeignArrays:
+    """Arrays from other frameworks are rejected, never silently copied."""
 
-    def test_jax_conversions(self, xp: Any, xpt: Any, jax: Any) -> None:
-        """Test JAX conversion utilities with real JAX if available."""
-        import jax.numpy as jnp
+    def test_dispatch_rejects_foreign_array(self) -> None:
+        with pytest.raises(TypeError, match="from_dlpack"):
+            backend.dispatch(_ForeignArray([1.0, 2.0]))
 
-        from commkit import Signal
+    def test_dispatch_accepts_python_and_numpy_scalars(self) -> None:
+        for value in ([1, 2, 3], (1.0, 2.0), 3.0, np.float32(2.0)):
+            data, xp, _ = backend.dispatch(value)
+            assert xp is np and isinstance(data, np.ndarray)
 
-        arr_np = np.array([1, 2, 3])
-        arr_jax = backend.to_jax(arr_np)
-        assert isinstance(arr_jax, jnp.ndarray)
-
-        arr_back = backend.from_jax(arr_jax)
-        assert isinstance(arr_back, np.ndarray)
-        xpt.assert_array_equal(arr_back, arr_np)
-
-        sig = Signal(samples=xp.asarray(arr_np), sampling_rate=1.0, symbol_rate=1.0)
-        jax_sig = sig.export_samples_to_jax()
-        assert isinstance(jax_sig, jnp.ndarray)
-
-        sig.update_samples_from_jax(jax_sig)
-        assert isinstance(sig.samples, xp.ndarray)
-        xpt.assert_allclose(sig.samples, xp.asarray(arr_np))
-
-    def test_to_jax_list_and_scalar(self, jax: Any) -> None:
-        """Verify to_jax handles list and scalar inputs by converting via jnp.asarray."""
-        import jax.numpy as jnp
-
-        result = backend.to_jax([1.0, 2.0, 3.0])
-        assert isinstance(result, jnp.ndarray)
-        np.testing.assert_allclose(np.asarray(result), [1.0, 2.0, 3.0])
-
-        result_scalar = backend.to_jax(42.0)
-        assert isinstance(result_scalar, jnp.ndarray)
-        assert float(result_scalar) == 42.0
-
-    def test_to_jax_explicit_device(self, jax: Any) -> None:
-        """Verify to_jax with explicit device placement places the array on requested device."""
-        import jax.numpy as jnp
-
-        result = backend.to_jax(np.array([1.0, 2.0]), device="cpu")
-        assert isinstance(result, jnp.ndarray)
-        assert result.device.platform == "cpu"
-
-        with pytest.raises(ValueError, match="not available"):
-            backend.to_jax(np.array([1.0]), device="tpu")
+    def test_explicit_dlpack_conversion_works(self) -> None:
+        data, xp, _ = backend.dispatch(np.from_dlpack(_ForeignArray([1.0, 2.0])))
+        assert xp is np
+        np.testing.assert_array_equal(data, [1.0, 2.0])

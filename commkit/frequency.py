@@ -1184,7 +1184,7 @@ def correct_static_frequency_offset(
         target_dtype = xp.complex64 if samples.dtype == xp.float32 else xp.complex128
 
     # For complex64 targets: wrap to [-π, π] in float64, then cast to float32 before exp -
-    # matching the correct_carrier_phase / JAX BPS pattern in recovery.py / equalization.py.
+    # matching the correct_carrier_phase pattern in recovery/corrections.py.
     # Wrapping is essential: casting a large unbounded ramp (e.g. 6000 rad) directly to
     # float32 causes trig argument-reduction error (~|phase|·2⁻²³); wrapping first bounds
     # the mantissa range to [-π, π] so float32 error is only ~3.7x10⁻⁷ rad.

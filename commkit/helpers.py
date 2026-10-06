@@ -4,7 +4,14 @@ from typing import Any, overload
 
 import numpy as np
 
-from .backend import ArrayType, _is_cupy_array, dispatch, get_array_module, to_device
+from .backend import (
+    ArrayType,
+    _is_cupy_array,
+    _reject_foreign_array,
+    dispatch,
+    get_array_module,
+    to_device,
+)
 from .logger import logger
 
 # ---------------------------------------------------------------------------
@@ -384,8 +391,10 @@ def validate_array(
     if v is None:
         return None
 
-    # Coerce lists/tuples or other array-likes to numpy arrays initially
+    # Coerce lists/tuples and scalars to NumPy; arrays from other frameworks
+    # (JAX, PyTorch, ...) are rejected rather than silently copied.
     if not (isinstance(v, np.ndarray) or _is_cupy_array(v)):
+        _reject_foreign_array(v)
         try:
             v = np.asarray(v)
         except Exception as err:
@@ -596,7 +605,7 @@ def resolve_pll_gains(bandwidth: float, mu: float | None, beta: float | None):
 # confusing downstream broadcast error.
 #
 # They are pure indexing/broadcast operations and therefore correct on every
-# array type the library sees - NumPy, CuPy, and JAX - without dispatching.
+# array type the library sees - NumPy and CuPy - without dispatching.
 
 
 def as_2d(arr: ArrayType, *, name: str = "array") -> tuple[ArrayType, bool]:
@@ -629,7 +638,7 @@ def as_2d(arr: ArrayType, *, name: str = "array") -> tuple[ArrayType, bool]:
         carry at most a channel axis and a time axis; a 3-D input is a caller
         error, not a batch dimension.
     """
-    ndim = np.ndim(arr)  # reads ``arr.ndim``; never converts CuPy/JAX to host
+    ndim = np.ndim(arr)  # reads ``arr.ndim``; never converts CuPy to host
     if ndim == 1:
         return arr[None, :], True
     if ndim == 2:

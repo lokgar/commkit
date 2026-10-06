@@ -915,22 +915,21 @@ class TestSignalResolutionAndMetrics:
 class TestSignalDeviceAndPlotting:
     """Tests for TestSignalDeviceAndPlotting."""
 
-    def test_signal_jax_interop(self, xp, xpt, jax):
-        """Verify JAX interoperability."""
-        s = Signal(samples=xp.ones(10), sampling_rate=1.0, symbol_rate=1.0)
+    def test_signal_rejects_foreign_arrays(self):
+        """Samples from another framework raise TypeError instead of being copied."""
 
-        # Export to JAX
-        jax_arr = s.export_samples_to_jax()
-        assert isinstance(jax_arr, jax.Array)
+        class _Foreign:
+            def __init__(self):
+                self._a = np.ones(10)
 
-        # Update from JAX
-        jax_arr = jax_arr * 2.0
-        s.resolved_symbols = xp.ones(10)
-        s.resolved_bits = xp.ones(10, dtype=xp.uint8)
-        assert s.update_samples_from_jax(jax_arr) is s
-        xpt.assert_allclose(s.samples, 2.0)
-        assert s.resolved_symbols is None
-        assert s.resolved_bits is None
+            def __dlpack__(self, **kwargs):
+                return self._a.__dlpack__(**kwargs)
+
+            def __dlpack_device__(self):
+                return self._a.__dlpack_device__()
+
+        with pytest.raises(TypeError, match="from_dlpack"):
+            Signal(samples=_Foreign(), sampling_rate=1.0, symbol_rate=1.0)
 
     def test_plot_constellation_at_symbol_rate(self, xp):
         """plot_constellation on a 1-SPS Signal (built from lms y_hat) should succeed."""

@@ -2,7 +2,6 @@
 
 Verification plan:
   1. Zero-Deviation Baseline   - cpr_type=None must produce bit-exact output
-  2. Numba/JAX Backend Parity  - pll and bps modes match within float32 tolerance
   3. Cycle Slip Stress Test    - π/2 steps are corrected, weights converge
   4. PLL Convergence / Phase Noise - RMSE within PLL jitter bound
   5. Blockwise Phase Coherence - chirp FOE recovers EVM within 0.5 dB of ideal

@@ -1,18 +1,16 @@
 """
 Computational backend management and device orchestration.
 
-This module provides the infrastructure for backend-agnostic execution across
-CPU (NumPy), GPU (CuPy), and JAX. It implements a data-driven dispatch mechanism
-that allows the library to automatically adjust its internal logic based on where
-the input data resides.
-
-The backend system is designed to be stateless and transparent, requiring
-minimal explicit device management from the user.
+This module provides backend-agnostic execution on CPU (NumPy) and GPU (CuPy).
+The device follows the data: :func:`dispatch` returns the array module of the
+input, and data moves only through an explicit :func:`to_device` (or
+``Signal.to``).  Arrays from other frameworks are rejected with ``TypeError``;
+exchange data with them explicitly through DLPack.
 """
 
 import types
 import warnings
-from functools import cache, lru_cache
+from functools import cache
 from typing import Any
 
 import numpy as np
@@ -52,65 +50,6 @@ def _is_cupy_array(data: Any) -> bool:
 
 # Any for CuPy array to avoid a hard dependency in the type hint if not installed
 ArrayType = np.ndarray | Any
-
-# JAX lazy loading cache
-_JAX_CACHE: dict[str, Any] = {}
-
-
-def _get_jax() -> tuple[types.ModuleType | None, types.ModuleType | None, Any | None]:
-    """
-    Lazy loader for JAX modules and its DLPack interface.
-
-    Returns
-    -------
-    jax : module or None
-        The base `jax` module if installed, else None.
-    jnp : module or None
-        The `jax.numpy` namespace if installed, else None.
-    dlpack : module or None
-        The `jax.dlpack` interface for zero-copy transfers, else None.
-    """
-    if "jax" not in _JAX_CACHE:
-        try:
-            import jax
-            import jax.numpy as jnp
-            from jax import dlpack
-
-            _JAX_CACHE["jax"] = jax
-            _JAX_CACHE["jnp"] = jnp
-            _JAX_CACHE["dlpack"] = dlpack
-        except ImportError:
-            _JAX_CACHE["jax"] = None
-
-    return _JAX_CACHE.get("jax"), _JAX_CACHE.get("jnp"), _JAX_CACHE.get("dlpack")
-
-
-@lru_cache(maxsize=8)
-def _get_jax_device(platform: str) -> Any | None:
-    """
-    Retrieves a specific JAX device by platform name.
-
-    Parameters
-    ----------
-    platform : {"cpu", "gpu", "tpu"}
-        The target hardware platform identifier.
-
-    Returns
-    -------
-    device : Device or None
-        The first discovered device for the specified platform, or None
-        if JAX is missing or the platform is unsupported.
-    """
-    jax, _, _ = _get_jax()
-    if jax is None:
-        return None
-    try:
-        # Map our common names to JAX platform names
-        platform_map = {"cpu": "cpu", "gpu": "cuda", "tpu": "tpu"}
-        jax_platform = platform_map.get(platform, platform)
-        return jax.devices(jax_platform)[0]
-    except (RuntimeError, IndexError):
-        return None
 
 
 def is_cupy_available() -> bool:
@@ -270,15 +209,20 @@ def dispatch(
     sp : module
         The signal processing module (`scipy` or `cupyx.scipy`).
 
+    Raises
+    ------
+    TypeError
+        If ``data`` is an array from another framework (JAX, PyTorch, ...).
+
     Notes
     -----
-    Dispatch recognizes **NumPy and CuPy only**.  A JAX array reports ``numpy``
-    (see :func:`get_array_module`) and is then materialized on the host by
-    ``np.asarray`` - a silent device-to-host transfer.  JAX is a *boundary*
-    backend in CommKit: convert explicitly with :func:`to_jax` /
-    :func:`from_jax` around the JAX kernel instead of passing JAX arrays into
-    dispatch-based functions.
+    Dispatch accepts NumPy arrays and scalars, CuPy arrays, and plain Python
+    numbers and sequences (converted with ``np.asarray``).  Arrays from other
+    frameworks are rejected rather than silently copied: convert them
+    explicitly, e.g. ``np.from_dlpack(x)`` or ``cupy.from_dlpack(x)``.
     """
+    if not (isinstance(data, np.ndarray | np.generic) or _is_cupy_array(data)):
+        _reject_foreign_array(data)
     xp = get_array_module(data)
     sp = get_scipy_module(xp)
 
@@ -288,221 +232,20 @@ def dispatch(
     return data, xp, sp
 
 
-def to_jax(data: Any, device: str | None = None, dtype: Any | None = None) -> Any:
-    """
-    Converts data to a JAX array with optimized device placement.
-
-    This function supports zero-copy transfers from CuPy using DLPack
-    when moving data between CUDA-managed memories.
-
-    Parameters
-    ----------
-    data : array_like
-        Input data (NumPy array, CuPy array, list, or scalar).
-    device : {"CPU", "GPU", "TPU"}, optional
-        Target JAX device platform. If None, the function attempts to
-        preserve the device of the original data.
-    dtype : dtype, optional
-        Target data type. If None (default), implicit casting logic is applied:
-        complex128 -> complex64 and float64 -> float32 are enforced to avoid
-        backend bottlenecks, unless JAX x64 mode is explicitly enabled.
-
-    Returns
-    -------
-    jax_array : jax.Array
-        A JAX array residing on the specified or inferred device.
-
-    Raises
-    ------
-    ImportError
-        If the `jax` library is not installed.
-    ValueError
-        If the requested `device` platform is not available in the
-        local JAX environment.
-    """
-    jax, jnp, jax_dlpack = _get_jax()
-    if jax is None or jnp is None:
-        raise ImportError("JAX is not installed.")
-
-    # Check for JAX x64 mode
-    try:
-        from jax import config
-
-        x64_enabled = config.read("jax_enable_x64")
-    except (ImportError, AttributeError):
-        x64_enabled = False
-
-    # Resolution of target dtype
-    # If explicit dtype is None, we apply the "DSP Design" heuristic:
-    # Downgrade 64-bit to 32-bit for performance unless x64 is strictly requested.
-    target_dtype = None
-    if dtype is not None:
-        target_dtype = dtype
-    elif not x64_enabled:
-        # Auto-cast logic
-        if hasattr(data, "dtype"):
-            dt = data.dtype
-            if dt == "complex128":
-                target_dtype = "complex64"
-            elif dt == "float64":
-                target_dtype = "float32"
-
-    # Apply cast if needed (before transfer if possible/efficient)
-    # For NumPy: cast on CPU before transfer/conversion
-    if (
-        isinstance(data, np.ndarray)
-        and target_dtype is not None
-        and data.dtype != target_dtype
-    ):
-        data = data.astype(target_dtype)
-
-    # For CuPy: cast on GPU before DLPack
-    if _is_cupy_array(data) and target_dtype is not None and data.dtype != target_dtype:
-        data = data.astype(target_dtype)
-
-    target_device = None
-    if device is not None:
-        target_device = _get_jax_device(device.lower())
-        if target_device is None:
-            raise ValueError(f"Requested JAX device '{device}' is not available.")
-
-    # --- Conversion paths (all funnel to `result`) ---
-    result = None
-
-    # 1. Handle CuPy -> JAX (GPU)
-    if _is_cupy_array(data):
-        cp = _cupy()
-        assert cp is not None  # a CuPy array exists, so CuPy is loaded
-        try:
-            # DLPack requires contiguous memory and proper alignment.
-            # Enforce contiguous layout and 16-byte alignment (JAX/XLA requirement).
-            needs_copy = not data.flags.c_contiguous
-            if not needs_copy:
-                # Check for 16-byte alignment (common requirement for vectorized loads)
-                if data.data.ptr % 16 != 0:
-                    needs_copy = True
-
-            if needs_copy:
-                data = cp.array(data, copy=True, order="C")
-
-            if jax_dlpack is not None:
-                jax_arr = jax_dlpack.from_dlpack(data)
-                if target_device and jax_arr.device != target_device:
-                    result = jax.device_put(jax_arr, target_device)
-                else:
-                    result = jax_arr
-
-        except Exception as e:
-            logger.debug(
-                "DLPack transfer from CuPy to JAX failed: %s. "
-                "Falling back to explicit conversion.",
-                e,
-            )
-
-    # 2. Optimized Placement
-    # If a target device is specified, use device_put directly.
-    # This is more efficient than jnp.asarray(data) + device_put because it avoids
-    # an intermediate placement on the JAX default device.
-    if result is None and target_device:
-        result = jax.device_put(data, target_device)
-
-    # 3. Preservation Logic (No target device specified)
-    if result is None and isinstance(data, np.ndarray):
-        # Default for NumPy is CPU; ensure it stays there to preserve device origin.
-        # JAX might otherwise default to placing it on GPU if available.
-        cpu_dev = _get_jax_device("cpu")
-        if cpu_dev:
-            result = jax.device_put(data, cpu_dev)
-
-    # 4. General case (lists, scalars, or existing JAX arrays)
-    if result is None:
-        result = jnp.asarray(data)
-
-    # --- Post-conversion dtype guard ---
-    # Ensures the returned array matches the requested dtype, catching edge cases
-    # where DLPack, device_put, or JAX x64 mode silently preserve the original precision.
-    if target_dtype is not None and hasattr(result, "dtype"):
-        jax_target = jnp.dtype(target_dtype)
-        if result.dtype != jax_target:
-            logger.debug(
-                "to_jax: post-conversion dtype mismatch (%s != %s), casting.",
-                result.dtype,
-                jax_target,
-            )
-            result = result.astype(jax_target)
-
-    return result
+_ARRAY_PROTOCOLS = (
+    "__array__",
+    "__array_interface__",
+    "__dlpack__",
+    "__cuda_array_interface__",
+)
 
 
-def from_jax(data: Any) -> ArrayType:
-    """
-    Converts a JAX array to a backend-compatible array (NumPy or CuPy).
-
-    Standardizes on NumPy for CPU/TPU arrays and CuPy for GPU arrays
-    to maintain compatibility with the rest of the library. Uses zero-copy
-    DLPack transfers for GPU arrays when available.
-
-    Parameters
-    ----------
-    data : jax.Array
-        Input JAX array to convert.
-
-    Returns
-    -------
-    array : array_like
-        A NumPy array (if on CPU/TPU) or a CuPy array (if on GPU).
-    """
-    # Detect platform
-    platform = "cpu"
-    try:
-        # Standard JAX 0.4.x+ device inspection
-        if hasattr(data, "device"):
-            platform = data.device.platform
-        elif hasattr(data, "devices"):
-            platform = list(data.devices())[0].platform
-    except Exception:
-        pass
-
-    is_gpu = platform in ("cuda", "gpu")
-
-    if is_gpu and is_cupy_available():
-        # Try zero-copy via DLPack to CuPy
-        try:
-            cp = _cupy()
-            assert cp is not None
-            return cp.from_dlpack(data)
-        except Exception as e:
-            logger.debug(
-                "DLPack transfer from JAX to CuPy failed: %s. "
-                "Falling back to NumPy conversion.",
-                e,
-            )
-
-    if is_gpu and not is_cupy_available():
-        logger.warning(
-            "JAX array is on GPU, but CuPy is not available. "
-            "Falling back to NumPy (CPU)."
+def _reject_foreign_array(data: Any) -> None:
+    """Raise ``TypeError`` for array objects that are not NumPy or CuPy."""
+    if any(hasattr(data, attr) for attr in _ARRAY_PROTOCOLS):
+        kind = f"{type(data).__module__}.{type(data).__qualname__}"
+        raise TypeError(
+            f"Unsupported array type {kind}: commkit works on NumPy and CuPy "
+            "arrays. Convert explicitly, e.g. np.from_dlpack(x) for host data "
+            "or cupy.from_dlpack(x) for GPU data."
         )
-
-    # Convert to numpy (will copy from GPU/TPU if needed)
-    return np.asarray(data)
-
-
-def is_jax_array(data: Any) -> bool:
-    """
-    Checks if the given data is a JAX array without eagerly importing JAX.
-
-    Parameters
-    ----------
-    data : any
-        The object to check.
-
-    Returns
-    -------
-    bool
-        True if `data` is a `jax.Array` instance.
-    """
-    jax, _, _ = _get_jax()
-    if jax is None:
-        return False
-    return isinstance(data, jax.Array)

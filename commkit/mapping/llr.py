@@ -41,7 +41,7 @@ def compute_llr(
     Parameters
     ----------
     symbols : array_like or Signal
-        Received noisy symbols. Shape: (..., N_symbols). NumPy, CuPy, or JAX.
+        Received noisy symbols. Shape: (..., N_symbols). NumPy or CuPy.
         A :class:`Signal` supplies ``resolved_symbols`` and defaults
         ``modulation``/``order``/``pmf`` from its metadata when not given
         explicitly.

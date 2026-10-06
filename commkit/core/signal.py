@@ -23,11 +23,9 @@ from pydantic import (
 from .. import helpers
 from ..backend import (
     ArrayType,
-    from_jax,
     get_array_module,
     get_scipy_module,
     to_device,
-    to_jax,
 )
 from ..logger import logger
 
@@ -230,7 +228,8 @@ class Signal(BaseModel):
         Parameters
         ----------
         v : array_like
-            Input samples (list, tuple, NumPy array, CuPy array, or JAX array).
+            Input samples (list, tuple, NumPy array, or CuPy array). Arrays from
+            other frameworks raise ``TypeError``.
 
         Returns
         -------
@@ -629,60 +628,6 @@ class Signal(BaseModel):
         return self.replace_samples(
             to_device(self.samples, device), _preserve_resolved=True, **moved
         )
-
-    def export_samples_to_jax(self, device: str | None = None) -> Any:
-        """
-        Exports the signal samples to a JAX array.
-
-        Ensures zero-copy transfer to JAX when possible, preserving the
-        device affinity of the underlying samples unless otherwise specified.
-
-        Parameters
-        ----------
-        device : {"CPU", "GPU", "TPU"}, optional
-            Target JAX device. If None, it targets the device matching the
-            signal's current backend (CPU or GPU).
-
-        Returns
-        -------
-        jax.Array
-            JAX array containing signal samples.
-            Shape: (N_channels, N_samples) or (N_samples,).
-        """
-        # If device is not explicitly requested, use the signal's backend
-        target_device = device if device is not None else self.backend
-        return to_jax(self.samples, device=target_device)
-
-    def update_samples_from_jax(self, jax_array: Any) -> "Signal":
-        """
-        Updates signal samples from a JAX array.
-
-        Converts the JAX array back to the signal's original backend (NumPy
-        or CuPy) to maintain consistent state. Invalidates resolved symbols and
-        bits because they were derived from the previous waveform.
-
-        Parameters
-        ----------
-        jax_array : jax.Array
-            Input JAX array. Shape must match signal's expected shape.
-
-        Returns
-        -------
-        Signal
-            Returns self for method chaining.
-        """
-        original_backend = self.backend
-        # Convert JAX array to backend-compatible array
-        # from_jax will return NumPy (for CPU/TPU) or CuPy (for GPU)
-        new_samples = from_jax(jax_array)
-
-        # Ensure we move the data back to the original backend if it differs
-        # (e.g., if signal was GPU but jax_array was on CPU/TPU)
-        self.samples = to_device(new_samples, original_backend)
-        self.resolved_symbols = None
-        self.resolved_bits = None
-
-        return self
 
     def time_axis(self) -> ArrayType:
         """

@@ -3,13 +3,13 @@
 **High-performance digital communications research kit for Python.**
 
 ![Python 3.12+](https://img.shields.io/badge/python-3.12%2B-blue)
-![Backends](https://img.shields.io/badge/backend-NumPy%20%7C%20CuPy%20%7C%20JAX-orange)
+![Backends](https://img.shields.io/badge/backend-NumPy%20%7C%20CuPy-orange)
 ![License](https://img.shields.io/badge/license-MIT-green)
 ![CUDA](https://img.shields.io/badge/CUDA-13.x-76B900?logo=nvidia)
 
 ---
 
-CommKit is a Python library for digital communications research that treats hardware as a first-class concern. A single `Signal` object carries IQ samples, physical metadata, and modulation context - with DSP operations dispatching automatically to NumPy, CuPy, or JAX based on data location.
+CommKit is a Python library for digital communications research that treats hardware as a first-class concern. A single `Signal` object carries IQ samples, physical metadata, and modulation context - with DSP operations running on NumPy or CuPy, wherever the data lives.
 
 ---
 
@@ -18,7 +18,7 @@ CommKit is a Python library for digital communications research that treats hard
 - **One object, complete context:** Sampling rate, symbol rate, modulation format, and pulse shape travel with the signal through the processing pipeline.
 - **Backend-transparent DSP:** `dispatch()` resolves NumPy, CuPy, or SciPy modules at runtime. The same code executes seamlessly on CPU or GPU.
 - **Functional pipelines:** DSP functions accept and return a `Signal` directly (`sig = fir_filter(sig, taps)`; `sig = resample(sig, sps_out=2)`), so pipelines compose without a monolithic `Signal` wrapper API - `sig.to("gpu")` moves data across backends, the rest is plain function composition.
-- **JAX escape hatch:** Zero-copy DLPack export on GPU allows direct application of JAX transforms (gradients, `vmap`, `scan`) without leaving the research loop.
+- **Interoperability through DLPack:** arrays from other frameworks (JAX, PyTorch) are exchanged explicitly with `np.from_dlpack` / `cupy.from_dlpack`; commkit never copies them silently.
 
 ---
 
@@ -27,14 +27,14 @@ CommKit is a Python library for digital communications research that treats hard
 | Module | Key Capabilities & Features |
 | --- | --- |
 | [`commkit.core`](commkit/core) | `Signal` container (IQ samples + metadata), `SingleCarrierFrame`, `Preamble`, and symbol/frame factories (PAM, PSK, QAM, PS-QAM). |
-| [`commkit.backend`](commkit/backend.py) | Hardware abstraction layer (`dispatch`, `to_device`, `to_jax`, `from_jax`), placement management, and backend execution (NumPy, CuPy, JAX). |
-| [`commkit.mapping`](commkit/mapping) | Gray-coded constellations, symbol mapping, hard demapping, soft LLR computation (max-log and exact log-sum-exp via JAX JIT), and probabilistic shaping (Maxwell-Boltzmann). |
+| [`commkit.backend`](commkit/backend.py) | Hardware abstraction layer (`dispatch`, `to_device`): the device follows the data (NumPy or CuPy). |
+| [`commkit.mapping`](commkit/mapping) | Gray-coded constellations, symbol mapping, hard demapping, soft LLR computation (max-log and exact log-sum-exp on NumPy/CuPy), and probabilistic shaping (Maxwell-Boltzmann). |
 | [`commkit.filtering`](commkit/filtering.py) | Pulse shaping (RRC, RC, Gaussian, Smooth-Rectangle), FIR tap generators, IIR SOS filter design (Butterworth, Chebyshev I/II, elliptic, Bessel) and application, matched filtering, and Overlap-Save. |
 | [`commkit.multirate`](commkit/multirate.py) | Fractional and integer sample rate conversion (`resample`, `decimate`, `upsample`, `decimate_to_symbol_rate`). |
 | [`commkit.timing`](commkit/timing.py) | Preamble generation (Barker, Zadoff-Chu), cross-correlation timing delay estimation, and frame alignment. |
 | [`commkit.frequency`](commkit/frequency.py) | Carrier frequency offset estimation (FOE via M-th power, Mengali-Morelli, pilot-symbol, bias-tone) and static/blockwise time-varying FOE correction. |
 | [`commkit.recovery`](commkit/recovery) | Carrier phase recovery (CPR via Viterbi-Viterbi, BPS, DD-PLL, MAP Tikhonov-RTS, pilot-symbol/pilot-tone), cycle-slip detection/correction, and phase/channel-permutation ambiguity resolution. |
-| [`commkit.equalization`](commkit/equalization) | Sequential (`lms`, `rls`, `cma`, `rde`) and frequency-domain block (`block_lms`, `block_cma`, `block_rde`) adaptive equalizers, `zf_equalizer`, butterfly MIMO topology support, and polarization-tone demultiplexing, with Numba JIT and JAX execution backends. |
+| [`commkit.equalization`](commkit/equalization) | Sequential (`lms`, `rls`, `cma`, `rde`) and frequency-domain block (`block_lms`, `block_cma`, `block_rde`) adaptive equalizers, `zf_equalizer`, butterfly MIMO topology support, and polarization-tone demultiplexing; sequential equalizers run as Numba loops. |
 | [`commkit.impairments`](commkit/impairments) | Channel impairments simulation: AWGN (with SPS correction), PMD (differential group delay, Jones matrix), phase noise, IQ imbalance (application + Löwdin/Gram-Schmidt compensation), and chromatic dispersion. Nonlinear channel models (`impairments.channel.nonlinear`): **planned, not yet implemented** (placeholder). |
 | [`commkit.coding`](commkit/coding) | **Planned, not yet implemented** - scaffold-only placeholders reserving the layout for channel coding / FEC primitives (BCH, Convolutional, CRC, Galois field arithmetic, Hamming, Interleaving, LDPC, Polar, Rate matching, Reed-Solomon, Turbo codes). |
 | [`commkit.metrics`](commkit/metrics.py) | System performance evaluation: EVM, SNR, BER, SER, and capacity metrics (GMI, MI) with PS-QAM support. |
@@ -63,7 +63,7 @@ pip install commkit
 
 ### GPU Support
 
-To install with CUDA acceleration (includes JAX CUDA 13 and CuPy stacks):
+To install with CUDA acceleration (CuPy with its CUDA 13 toolkit libraries):
 
 ```bash
 # Using uv

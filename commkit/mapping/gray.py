@@ -216,7 +216,7 @@ def square_qam_slicer_params(
     constellation : np.ndarray
         Host NumPy constellation array, shape (M,).  This is a one-time
         O(M) setup call, not a per-symbol operation, so a host array is
-        correct even when the caller's decision loop runs on GPU/JAX.
+        correct even when the caller's decision loop runs on the GPU.
 
     Returns
     -------

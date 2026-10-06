@@ -80,14 +80,6 @@ def pytest_collection_modifyitems(config, items):
         items[:] = [item for item in items if not item.get_closest_marker("cpu_only")]
 
 
-@pytest.fixture(scope="session", autouse=True)
-def _ensure_jax_precision():
-    """Ensure JAX uses float64/complex128 precision across the entire test suite."""
-    from tests.common.conversions import ensure_jax_x64
-
-    ensure_jax_x64()
-
-
 @pytest.fixture(autouse=True)
 def _autoclose_figures():
     """Ensure all matplotlib figures are closed after each test to prevent resource leaks."""
@@ -95,12 +87,6 @@ def _autoclose_figures():
     import matplotlib.pyplot as plt
 
     plt.close("all")
-
-
-@pytest.fixture
-def jax():
-    """Fixture providing the JAX module, cleanly skipping if not installed."""
-    return pytest.importorskip("jax", reason="JAX not installed")
 
 
 @pytest.fixture

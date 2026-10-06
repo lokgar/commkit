@@ -333,7 +333,7 @@ class TestCMA:
         )
         rx_up = xp.asarray(sig.samples)
         rx = xp.convolve(rx_up, channel, mode="same")
-        rx = xp.ascontiguousarray(rx)  # Ensure contiguous for JAX
+        rx = xp.ascontiguousarray(rx)  # Ensure a contiguous layout
 
         result = equalization.cma(
             rx,

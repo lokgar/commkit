@@ -1,6 +1,6 @@
 """Shared test fixtures, signal generators, metrics, and conversion utilities."""
 
-from tests.common.conversions import device_of, ensure_jax_x64, to_numpy
+from tests.common.conversions import device_of, to_numpy
 from tests.common.kernel_utils import (
     reference_bps_d2,
     reference_cs_block,
@@ -40,7 +40,6 @@ __all__ = [
     "calc_rms_phase_error",
     "calc_tail_mse_db",
     "device_of",
-    "ensure_jax_x64",
     "make_adapter_test_signal",
     "make_ambiguous_qam16",
     "make_dsh_beat",

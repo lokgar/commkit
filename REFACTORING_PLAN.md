@@ -491,7 +491,7 @@ sites. The order avoids conflicts, because 1.4-1.6 all edit
     arguments are dropped.
   - Compare against `bench_llr` in 0002. If the GPU is more than 2x slower than
     the old JAX path, the follow-up fused kernel becomes the next commit.
-- [ ] **1.8 `refactor!: remove JAX`.**
+- [x] **1.8 `refactor!: remove JAX`.**
   - Removes `backend._get_jax`, `to_jax` / `from_jax` / `is_jax_array`,
     `Signal.export_samples_to_jax` / `update_samples_from_jax`, and the JAX
     note in `analysis/__init__`.

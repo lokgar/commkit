@@ -7,7 +7,7 @@ from commkit import helpers
 
 
 class Unconvertible:
-    """Object that raises an exception during np.asarray conversion."""
+    """A foreign array-like: exposes ``__array__`` but is not NumPy/CuPy."""
 
     def __array__(self):
         raise TypeError("Cannot convert to array")
@@ -230,10 +230,14 @@ class TestValidationHelpers:
         xpt.assert_array_equal(out.imag, 0)
 
     def test_validate_array_exception(self, xp):
-        """Verify the except-block in validate_array raises ValueError for unconvertible input."""
-        obj = Unconvertible()
+        """Input NumPy cannot convert (a ragged list) raises ValueError."""
         with pytest.raises(ValueError, match="Could not convert"):
-            helpers.validate_array(obj)
+            helpers.validate_array([[1.0], [1.0, 2.0]])
+
+    def test_validate_array_rejects_foreign_arrays(self, xp):
+        """Objects exposing an array protocol but not NumPy/CuPy raise TypeError."""
+        with pytest.raises(TypeError, match="from_dlpack"):
+            helpers.validate_array(Unconvertible())
 
 
 class TestShapeHelpers:
@@ -336,16 +340,6 @@ class TestShapeHelpers:
 
         assert helpers.to_report_scalar(xp.asarray(np.float64(2.0))) == 2.0
         assert helpers.to_report_scalar(7) == 7.0
-
-    def test_shape_helpers_work_on_jax_arrays(self, jax):
-        """as_2d/restore_1d are pure indexing: valid on JAX arrays as well."""
-        import jax.numpy as jnp
-
-        x = jnp.arange(6.0)
-        x2, was_1d = helpers.as_2d(x)
-        assert was_1d is True and x2.shape == (1, 6)
-        assert helpers.restore_1d(was_1d, x2).shape == (6,)
-        assert helpers.broadcast_channels(x, 2, jnp).shape == (2, 6)
 
 
 class TestLinearTrend:
