@@ -26,11 +26,6 @@ from tests.common.reference_impl import (
 
 N_SYM = 2048
 ATOL = 1e-9
-# The PLL's square-QAM fast slicer builds decided points from float32 grid
-# constants (``square_qam_slicer_params``), so its trajectory differs from the
-# float64 oracle by up to ~3e-7 rad; cross-QAM uses the exact table and stays
-# within ATOL.
-PLL_ATOL = 1e-6
 
 
 def _phase_noise_input(modulation: str, order: int, num_ch: int, seed: int = 3):
@@ -107,7 +102,7 @@ def test_pll_matches_oracle(num_ch, beta, order):
         x, PLL(mu=2e-2, beta=beta), constellation=Constellation.qam(order)
     ).value
     ref = pll_reference(x, Constellation.qam(order).points, mu=2e-2, beta=beta)
-    np.testing.assert_allclose(np.atleast_2d(phi), ref, rtol=0, atol=PLL_ATOL)
+    np.testing.assert_allclose(np.atleast_2d(phi), ref, rtol=0, atol=ATOL)
 
 
 @pytest.mark.parametrize("history_length", [5, 50])

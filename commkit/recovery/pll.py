@@ -294,7 +294,6 @@ class PLL:
 
 def _pll(symbols: ArrayType, method: PLL, ctx: _Context) -> _Phase:
     """Decision-directed PLL phase of ``(C, N)`` symbols."""
-    from ..mapping.gray import _square_qam_slicer_params
     from ..math import normalize
 
     constellation = ctx.need_constellation(method)
@@ -315,16 +314,17 @@ def _pll(symbols: ArrayType, method: PLL, ctx: _Context) -> _Phase:
     const_r = const_np.real.copy()
     const_i = const_np.imag.copy()
 
-    # Square-QAM O(1) decision parameters.  For square QAM (order a perfect
-    # square, e.g. 4/16/64/256/1024) the constellation is a uniform grid and
-    # the nearest point can be found by rounding to the closest axis level.
-    _side, _lev_min_f32, _d_grid_f32 = _square_qam_slicer_params(const_np)
-    _is_sq_qam = _side > 0
-    _lev_min = float(_lev_min_f32)
-    _d_grid = float(_d_grid_f32)
-    if _is_sq_qam:
-        _levels = (_lev_min + np.arange(_side) * _d_grid).astype(np.float64)
+    # Square-QAM O(1) decision parameters.  For a square lattice the nearest
+    # point is found by rounding to the closest level per axis.  The levels
+    # are float64, like the loop: the decided point is exactly a
+    # constellation point.
+    grid = constellation._square_grid
+    _is_sq_qam = grid is not None
+    if grid is not None:
+        _lev_min, _d_grid, _side, _ = grid
+        _levels = _lev_min + np.arange(_side) * _d_grid
     else:
+        _lev_min, _d_grid, _side = 0.0, 1.0, 0
         _levels = np.empty(0, dtype=np.float64)
 
     # Move to CPU for sequential processing
