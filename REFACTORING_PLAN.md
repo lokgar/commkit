@@ -589,9 +589,10 @@ sites. The order avoids conflicts, because 1.4-1.6 all edit
   - `shift_frequency` / `add_pilot_tone` return `(data, applied_frequency)`
     for Signal input too (see 3.3).
   - `resolved_*` stays, marked bridge-only, until 3.8.
-- [ ] **2.5 `refactor(core): facts/choices metadata resolution and SPS tolerance`.**
+- [x] **2.5 `refactor(core): facts/choices metadata resolution and SPS tolerance`.**
   - Adds `resolve_fact()` and `resolve_choice()` to the adapter, plus the
-    near-integer SPS rule.
+    near-integer SPS rule (relative 1e-9; the same tolerance decides whether
+    a supplied fact agrees with the Signal).
   - The old `resolve_required` / `resolve_optional` stay until the last module
     pass.
 - [ ] **2.6 `refactor(core)!: single generate()`.**

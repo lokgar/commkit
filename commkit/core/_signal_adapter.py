@@ -32,6 +32,40 @@ class SignalAdapter:
     signal: Signal | None
     function_name: str
 
+    def resolve_fact(self, field: str, supplied: Any = None) -> Any:
+        """Resolve a fact about the samples (``sampling_rate``, ``sps``, ...).
+
+        For Signal input the Signal's value is used; a supplied value must
+        agree with it (to a relative 1e-9) or ``ValueError`` is raised.  For
+        array input the supplied value is required.
+        """
+        if self.signal is None:
+            if supplied is None:
+                raise ValueError(
+                    f"{self.function_name} requires {field} for array input."
+                )
+            return supplied
+        value = getattr(self.signal, field)
+        if value is None:
+            raise ValueError(f"{self.function_name}: Signal has no {field}.")
+        if supplied is not None and not _same_fact(supplied, value):
+            raise ValueError(
+                f"{self.function_name}: {field}={supplied!r} conflicts with the "
+                f"Signal's {field}={value!r}. Omit the argument for Signal input."
+            )
+        return value
+
+    def resolve_choice(self, field: str, supplied: Any = None) -> Any:
+        """Resolve a processing choice (``constellation``, ``pulse``, ...).
+
+        An explicit argument wins; otherwise the Signal's value (or ``None``
+        for array input) is used.  The caller decides whether ``None`` is
+        acceptable.
+        """
+        if supplied is not None or self.signal is None:
+            return supplied
+        return getattr(self.signal, field)
+
     def resolve_required(self, field: str, supplied: Any = None) -> Any:
         """Resolve required metadata, with Signal metadata taking precedence."""
         if self.signal is None:
@@ -125,10 +159,32 @@ def adapt_signal(
     return SignalAdapter(value, None, function_name)
 
 
+# Relative tolerance for facts derived by floating-point arithmetic, e.g.
+# sps = sampling_rate / symbol_rate = 3.0000000000000004.
+_FACT_RTOL = 1e-9
+
+
+def _same_fact(a: Any, b: Any) -> bool:
+    try:
+        return bool(np.isclose(float(a), float(b), rtol=_FACT_RTOL, atol=0.0))
+    except (TypeError, ValueError):
+        return bool(a == b)
+
+
 def require_integer_sps(value: float, function_name: str) -> int:
-    """Validate positive integral SPS before converting it to ``int``."""
-    if not np.isfinite(value) or value < 1 or value % 1 != 0:
+    """Validate a positive integral SPS and return it as ``int``.
+
+    Values within a relative 1e-9 of an integer are accepted, since an SPS
+    computed as ``sampling_rate / symbol_rate`` carries rounding error.  A
+    genuinely fractional SPS (1.5) raises; it is never truncated.
+    """
+    if not np.isfinite(value) or value < 1:
         raise ValueError(
             f"{function_name} requires sps to be a positive integer; got {value!r}."
         )
-    return int(value)
+    nearest = round(float(value))
+    if abs(value - nearest) > _FACT_RTOL * nearest:
+        raise ValueError(
+            f"{function_name} requires sps to be a positive integer; got {value!r}."
+        )
+    return int(nearest)

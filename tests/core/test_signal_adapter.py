@@ -76,3 +76,55 @@ class TestSignalAdapterTransforms:
         assert transformed.sampling_rate == 1e6
         assert resolved.resolved_symbols is replacement
         assert resolved.resolved_bits is None
+
+
+class TestFactsAndChoices:
+    """resolve_fact / resolve_choice (plan §2.5)."""
+
+    def test_fact_from_signal(self, xp: Any) -> None:
+        a = adapt_signal(make_adapter_test_signal(xp), function_name="f()")
+        assert a.resolve_fact("sampling_rate") == 2e6
+        assert a.resolve_fact("sampling_rate", 2e6) == 2e6
+        assert a.resolve_fact("sps", 2.0 * (1 + 1e-12)) == 2.0
+
+    def test_conflicting_fact_raises(self, xp: Any) -> None:
+        a = adapt_signal(make_adapter_test_signal(xp), function_name="f()")
+        with pytest.raises(
+            ValueError, match=r"f\(\): sampling_rate=1000000.0 conflicts"
+        ):
+            a.resolve_fact("sampling_rate", 1e6)
+
+    def test_fact_required_for_array_input(self, xp: Any) -> None:
+        a = adapt_signal(xp.ones(4), function_name="f()")
+        assert a.resolve_fact("sampling_rate", 5.0) == 5.0
+        with pytest.raises(ValueError, match="requires sampling_rate"):
+            a.resolve_fact("sampling_rate")
+
+    def test_choice_explicit_wins_silently(self, xp: Any, caplog: Any) -> None:
+        sig = make_adapter_test_signal(xp, constellation=Constellation.qam(16))
+        a = adapt_signal(sig, function_name="f()")
+        assert a.resolve_choice("constellation") == Constellation.qam(16)
+        assert a.resolve_choice("constellation", Constellation.psk(4)) == (
+            Constellation.psk(4)
+        )
+        assert caplog.text == ""
+
+    def test_choice_for_array_input(self, xp: Any) -> None:
+        a = adapt_signal(xp.ones(4), function_name="f()")
+        assert a.resolve_choice("constellation") is None
+        assert a.resolve_choice("constellation", Constellation.qam(4)) == (
+            Constellation.qam(4)
+        )
+
+    @pytest.mark.parametrize("sps", [3.0000000000000004, 2.9999999999999996, 4.0, 1])
+    def test_near_integer_sps_accepted(self, sps: float) -> None:
+        assert require_integer_sps(sps, "f()") == round(sps)
+
+    def test_sps_from_rates_is_accepted(self) -> None:
+        sps = 3e9 / 1e9 * (1 + 2e-16)
+        assert require_integer_sps(sps, "f()") == 3
+
+    @pytest.mark.parametrize("sps", [1.5, 2.000001, 0.9999])
+    def test_fractional_sps_never_truncated(self, sps: float) -> None:
+        with pytest.raises(ValueError, match="positive integer"):
+            require_integer_sps(sps, "f()")
