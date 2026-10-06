@@ -233,11 +233,9 @@ ROWS: list[Row] = [
     Row("commkit.core.signal.Signal", VALUE),
     Row("commkit.core.generation.expand", DESIGN),
     Row("commkit.core.generation.shape_pulse", DESIGN),
-    Row("commkit.core.generation.generate", SYNTHESIS, data=0),
-    Row("commkit.core.generation.generate_pam", REMOVE),
-    Row("commkit.core.generation.generate_psk", REMOVE),
+    # constellation and num_symbols are positional (plan 2.6).
+    Row("commkit.core.generation.generate", SYNTHESIS, data=2),
     Row("commkit.core.generation.generate_psqam", REMOVE),
-    Row("commkit.core.generation.generate_qam", REMOVE),
     # --- equalization -------------------------------------------------------
     Row(
         "commkit.equalization.sequential._dd.lms",
@@ -413,8 +411,6 @@ ROWS: list[Row] = [
     Row("commkit.helpers.cross_correlate_fft", HELPER, data=2),
     Row("commkit.helpers.db_to_linear", HELPER),
     Row("commkit.helpers.format_si", HELPER),
-    Row("commkit.helpers.generate_bits", REMOVE),
-    Row("commkit.helpers.generate_symbols", REMOVE),
     Row("commkit.helpers.linear_to_db", HELPER),
     Row("commkit.helpers.linear_trend_slope", HELPER),
     Row("commkit.helpers.normalize", HELPER),
@@ -973,7 +969,6 @@ LEGACY: dict[str, frozenset[str]] = {
     "commkit.analysis.linewidth.linewidth_beta_separation": L(SIG),
     "commkit.analysis.linewidth.linewidth_increment": L(SIG),
     "commkit.core.generation.expand": L(SIG),
-    "commkit.core.generation.generate": L(SIG),
     "commkit.core.generation.shape_pulse": L(SIG),
     "commkit.equalization._block._dd.block_lms": L(SIG, FCT, EQR),
     "commkit.equalization.blind.block_cma": L(SIG, FCT, EQR),

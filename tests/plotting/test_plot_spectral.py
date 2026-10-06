@@ -8,7 +8,9 @@ import matplotlib.pyplot as plt
 import matplotlib.ticker as mticker
 import numpy as np
 
-from commkit import generate_psk, plotting, spectral
+from commkit import generate, plotting, spectral
+from commkit.filtering import RRC
+from commkit.mapping import Constellation
 from commkit.plotting import plot_psd, plot_spectrogram
 
 
@@ -181,12 +183,13 @@ class TestPlotSpectrogram:
     def test_signal_spectrogram_convenience(self, xp: Any) -> None:
         """Verify core.Signal.spectrogram and plot_spectrogram convenience methods."""
         fs = 100.0
-        sig = generate_psk(
+        sig = generate(
+            Constellation.psk(4),
+            100,
             symbol_rate=10.0,
-            num_symbols=100,
-            order=4,
             sps=int(fs / 10.0),
-            seed=42,
+            pulse=RRC(0.35),
+            rng=42,
         )
         sig = sig.replace(samples=xp.asarray(sig.samples))
 

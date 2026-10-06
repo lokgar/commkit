@@ -3,9 +3,10 @@
 import numpy as np
 import pytest
 
-from commkit import equalization, generate_qam
+from commkit import equalization, generate
 from commkit.equalization import EqualizerResult
-from commkit.mapping import gray_constellation
+from commkit.filtering import RRC
+from commkit.mapping import Constellation, gray_constellation
 from tests.common.conversions import to_numpy
 from tests.common.signals import make_test_psk_samples, make_test_qam_signal
 
@@ -51,8 +52,8 @@ class TestWInit:
     def test_rls_accepts_w_init(self, xp):
         """rls() accepts w_init array with correct shape."""
 
-        sig = generate_qam(
-            symbol_rate=1e6, num_symbols=1000, order=4, pulse_shape="rrc", sps=2, seed=1
+        sig = generate(
+            Constellation.qam(4), 1000, symbol_rate=1e6, sps=2, pulse=RRC(0.35), rng=1
         )
         rx = xp.asarray(sig.samples)
         num_taps, num_ch = 11, 1
@@ -139,13 +140,8 @@ class TestWInit:
         """RDE warm-started from LMS achieves same or better EVM than cold-start."""
         from commkit.impairments import apply_awgn
 
-        sig = generate_qam(
-            symbol_rate=1e6,
-            num_symbols=4000,
-            order=16,
-            pulse_shape="rrc",
-            sps=2,
-            seed=42,
+        sig = generate(
+            Constellation.qam(16), 4000, symbol_rate=1e6, sps=2, pulse=RRC(0.35), rng=42
         )
         rx_np = apply_awgn(sig.samples, esn0_db=25.0, sps=2)
         rx = xp.asarray(rx_np)

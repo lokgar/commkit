@@ -459,119 +459,67 @@ class SingleCarrierFrame:
         return xp.zeros(self.payload_len, dtype=bool), self.payload_len
 
     def _ensure_payload_generated(self) -> None:
-        """
-        Generates and caches payload bits and symbols via the appropriate Signal factory.
-
-        Dispatches to ``generate_psqam``, ``generate_qam``, ``generate_psk``,
-        or ``generate_pam`` based on ``payload_mod_scheme`` and the PS
-        parameters.  Using the factories as the single source of generation
-        logic avoids duplicating bit/symbol generation code here.
-        """
+        """Generate and cache the payload bits and symbols with ``generate()``."""
         if self._cache.get("payload_bits") is not None:
             return
+        from .. import mapping
 
-        scheme = self.payload_mod_scheme.lower()
-        is_ps = self.payload_nu is not None or self.payload_entropy is not None
-
-        common: dict[str, Any] = dict(
-            num_symbols=self.payload_len,
-            sps=1,
-            symbol_rate=1.0,
-            pulse_shape="none",
-            num_streams=self.num_streams,
-            seed=self.payload_seed,
+        pmf = None
+        if self.payload_nu is not None or self.payload_entropy is not None:
+            nu = self.payload_nu
+            if nu is None:
+                assert self.payload_entropy is not None
+                nu, _ = mapping.optimal_nu(self.payload_mod_order, self.payload_entropy)
+            pmf = mapping.maxwell_boltzmann(self.payload_mod_order, nu)
+            self._cache["payload_ps_pmf"] = pmf
+        constellation = mapping.Constellation.gray(
+            self.payload_mod_scheme,
+            self.payload_mod_order,
+            unipolar=self.payload_mod_unipolar,
+            pmf=pmf,
         )
-
-        if is_ps:
-            sig = generation.generate_psqam(
-                order=self.payload_mod_order,
-                nu=self.payload_nu,
-                entropy=self.payload_entropy,
-                **common,
-            )
-            self._cache["payload_ps_pmf"] = sig.ps_pmf
-        elif "qam" in scheme:
-            sig = generation.generate_qam(
-                order=self.payload_mod_order,
-                unipolar=self.payload_mod_unipolar,
-                **common,
-            )
-        elif "psk" in scheme:
-            sig = generation.generate_psk(
-                order=self.payload_mod_order,
-                **common,
-            )
-        elif "pam" in scheme or "ask" in scheme:
-            sig = generation.generate_pam(
-                order=self.payload_mod_order,
-                unipolar=self.payload_mod_unipolar,
-                **common,
-            )
-        else:
-            sig = generation.generate(
-                modulation=self.payload_mod_scheme,
-                order=self.payload_mod_order,
-                unipolar=self.payload_mod_unipolar,
-                **common,
-            )
-
-        self._cache["payload_bits"] = sig.source_bits
-        self._cache["payload_symbols"] = sig.source_symbols
+        sig = generation.generate(
+            constellation,
+            self.payload_len,
+            symbol_rate=1.0,
+            num_channels=self.num_streams,
+            rng=self.payload_seed,
+        )
+        ref = sig.reference
+        assert ref is not None
+        self._cache["payload_bits"] = ref.bits
+        self._cache["payload_symbols"] = ref.symbols
 
     def _ensure_pilot_generated(self) -> None:
         """
-        Generates and caches pilot bits and symbols via the appropriate Signal factory.
+        Generate and cache the pilot bits and symbols with ``generate()``.
 
-        Pilots are always generated with a uniform distribution - PS on pilots
-        would destroy the known-reference property required for channel estimation.
+        Pilots are always uniform: shaping would destroy the known-reference
+        property required for channel estimation.
         """
         if self._cache.get("pilot_bits") is not None or self.pilot_pattern == "none":
             return
+        from .. import mapping
 
-        xp = np
         mask, _ = self._generate_pilot_mask()
-        pilot_count = int(xp.sum(mask))
+        pilot_count = int(np.sum(mask))
         if pilot_count == 0:
             return
-
-        scheme = self.pilot_mod_scheme.lower()
-
-        common: dict[str, Any] = dict(
-            num_symbols=pilot_count,
-            sps=1,
+        sig = generation.generate(
+            mapping.Constellation.gray(
+                self.pilot_mod_scheme,
+                self.pilot_mod_order,
+                unipolar=self.pilot_mod_unipolar,
+            ),
+            pilot_count,
             symbol_rate=1.0,
-            pulse_shape="none",
-            num_streams=self.num_streams,
-            seed=self.pilot_seed,
+            num_channels=self.num_streams,
+            rng=self.pilot_seed,
         )
-
-        if "qam" in scheme:
-            sig = generation.generate_qam(
-                order=self.pilot_mod_order,
-                unipolar=self.pilot_mod_unipolar,
-                **common,
-            )
-        elif "psk" in scheme:
-            sig = generation.generate_psk(
-                order=self.pilot_mod_order,
-                **common,
-            )
-        elif "pam" in scheme or "ask" in scheme:
-            sig = generation.generate_pam(
-                order=self.pilot_mod_order,
-                unipolar=self.pilot_mod_unipolar,
-                **common,
-            )
-        else:
-            sig = generation.generate(
-                modulation=self.pilot_mod_scheme,
-                order=self.pilot_mod_order,
-                unipolar=self.pilot_mod_unipolar,
-                **common,
-            )
-
-        self._cache["pilot_bits"] = sig.source_bits
-        self._cache["pilot_symbols"] = sig.source_symbols
+        ref = sig.reference
+        assert ref is not None
+        self._cache["pilot_bits"] = ref.bits
+        self._cache["pilot_symbols"] = ref.symbols
 
     # -------------------------------------------------------------------------
     # Properties for Accessing Payload and Pilot Data

@@ -350,7 +350,9 @@ class TestPipelineSPSValidation:
         """Waveform generators reject non-positive or non-integral SPS."""
         with pytest.raises(ValueError, match="sps to be a positive integer"):
             if factory == "qam":
-                generation.generate_qam(16, sps=sps, symbol_rate=1e6, order=4)
+                generation.generate(
+                    Constellation.qam(4), 16, symbol_rate=1e6, sps=sps, pulse=RRC(0.35)
+                )
             elif factory == "psqam":
                 generation.generate_psqam(
                     16, sps=sps, symbol_rate=1e6, order=16, nu=0.3

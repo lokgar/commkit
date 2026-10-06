@@ -487,6 +487,19 @@ class Rect(Pulse):
             )
 
     def taps(self, sps: float) -> np.ndarray:
+        """Taps at integer ``sps``; ``duty_cycle * sps`` and ``rise_time * sps``
+        must be whole samples, so the pulse is never silently rounded."""
+        sps = require_integer_sps(sps, "Rect.taps()")
+        for name, value in (
+            ("duty_cycle", self.duty_cycle),
+            ("rise_time", self.rise_time),
+        ):
+            n = value * sps
+            if abs(n - round(n)) > 1e-9:
+                raise ValueError(
+                    f"Rect: {name} * sps = {value} * {sps} = {n:g} is not a whole "
+                    "number of samples; choose sps accordingly."
+                )
         return rect_taps(sps, duty_cycle=self.duty_cycle, rise_time=self.rise_time)  # type: ignore[arg-type]
 
 

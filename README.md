@@ -26,7 +26,7 @@ CommKit is a Python library for digital communications research that treats hard
 
 | Module | Key Capabilities & Features |
 | --- | --- |
-| [`commkit.core`](commkit/core) | `Signal` container (IQ samples + metadata), `SingleCarrierFrame`, `Preamble`, and symbol/frame factories (PAM, PSK, QAM, PS-QAM). |
+| [`commkit.core`](commkit/core) | `Signal` container (samples, rates, constellation, pulse, reference), `SingleCarrierFrame`, `Preamble`, and `generate(constellation, ...)`. |
 | [`commkit.backend`](commkit/backend.py) | Hardware abstraction layer (`dispatch`, `to_device`): the device follows the data (NumPy or CuPy). |
 | [`commkit.mapping`](commkit/mapping) | Gray-coded constellations, symbol mapping, hard demapping, soft LLR computation (max-log and exact log-sum-exp on NumPy/CuPy), and probabilistic shaping (Maxwell-Boltzmann). |
 | [`commkit.filtering`](commkit/filtering.py) | Pulse shaping (RRC, RC, Gaussian, Smooth-Rectangle), FIR tap generators, IIR SOS filter design (Butterworth, Chebyshev I/II, elliptic, Bessel) and application, matched filtering, and Overlap-Save. |

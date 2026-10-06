@@ -8,8 +8,10 @@ from typing import Any
 
 import pytest
 
-from commkit import filtering, generate_qam, multirate, spectral
+from commkit import filtering, generate, multirate, spectral
 from commkit.core import Preamble, Signal, SingleCarrierFrame
+from commkit.filtering import RRC
+from commkit.mapping import Constellation
 
 
 class TestMIMOSignalStructure:
@@ -17,8 +19,13 @@ class TestMIMOSignalStructure:
 
     def test_signal_generate_mimo(self, xp: Any) -> None:
         """Verify MIMO signal generation via high-level factories."""
-        sig = generate_qam(
-            order=4, num_symbols=100, sps=4, symbol_rate=1e6, num_streams=2
+        sig = generate(
+            Constellation.qam(4),
+            100,
+            symbol_rate=1e6,
+            sps=4,
+            pulse=RRC(0.35),
+            num_channels=2,
         )
 
         expected_samples = 100 * 4

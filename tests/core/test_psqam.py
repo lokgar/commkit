@@ -5,9 +5,10 @@ from typing import Any
 import numpy as np
 import pytest
 
-from commkit import generate_psqam, generate_qam, mapping, metrics, multirate
+from commkit import generate, generate_psqam, mapping, metrics, multirate
 from commkit.impairments import apply_awgn
 from commkit.mapping import (
+    Constellation,
     compute_llr,
     constellation_power,
     gray_constellation,
@@ -214,9 +215,7 @@ class TestPSQAMMetricsAndDemapping:
     def test_mi_uniform_pmf_matches_none(self) -> None:
         """Passing explicit uniform PMF gives identical mutual information to pmf=None."""
         order = 16
-        sig = generate_qam(
-            5000, sps=1, symbol_rate=32e9, order=order, pulse_shape="none"
-        )
+        sig = generate(Constellation.qam(order), 5000, symbol_rate=32e9, sps=1)
         noisy = apply_awgn(sig.samples, esn0_db=15.0, sps=1)
 
         mi_none = metrics.mi(noisy, "qam", order, noise_var=10 ** (-15.0 / 10))
@@ -246,9 +245,7 @@ class TestPSQAMMetricsAndDemapping:
     def test_compute_llr_uniform_pmf_matches_none(self, xpt: Any) -> None:
         """Uniform PMF produces identical LLRs to pmf=None."""
         order = 16
-        sig = generate_qam(
-            200, sps=1, symbol_rate=32e9, order=order, pulse_shape="none"
-        )
+        sig = generate(Constellation.qam(order), 200, symbol_rate=32e9, sps=1)
         noisy = apply_awgn(sig.samples, esn0_db=12.0, sps=1)
         noise_var = 10 ** (-12.0 / 10)
 

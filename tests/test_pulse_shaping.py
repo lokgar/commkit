@@ -6,8 +6,10 @@ from typing import Any
 import numpy as np
 import pytest
 
-from commkit import filtering, generate_pam, generate_qam
+from commkit import filtering, generate
 from commkit.core import Signal
+from commkit.filtering import RRC, Rect, SmoothRect
+from commkit.mapping import Constellation
 
 
 class TestShapingFilterTaps:
@@ -15,14 +17,7 @@ class TestShapingFilterTaps:
 
     def test_signal_pulse_params(self, xp: Any) -> None:
         """Verify pulse shaping parameters (e.g. rolloff) are correctly stored and utilized."""
-        sig = generate_qam(
-            order=4,
-            num_symbols=10,
-            sps=4,
-            symbol_rate=1e3,
-            pulse_shape="rrc",
-            rrc_rolloff=0.5,
-        )
+        sig = generate(Constellation.qam(4), 10, symbol_rate=1e3, sps=4, pulse=RRC(0.5))
         assert sig.pulse_shape == "rrc"
         assert getattr(sig, "pulse_params", None) is None
         assert sig.rrc_rolloff == 0.5
@@ -33,15 +28,8 @@ class TestShapingFilterTaps:
 
     def test_rzpam_pulse_params(self, xp: Any) -> None:
         """Verify pulse parameters for Return-to-Zero (RZ) PAM signals."""
-        sig = generate_pam(
-            order=2,
-            unipolar=False,
-            num_symbols=10,
-            sps=4,
-            symbol_rate=1e3,
-            rz=True,
-            pulse_shape="smoothrect",
-            rise_time=0.1,
+        sig = generate(
+            Constellation.pam(2), 10, symbol_rate=1e3, sps=4, pulse=SmoothRect(0.1, 0.5)
         )
         assert sig.pulse_shape == "smoothrect"
         assert sig.rise_time == 0.1
@@ -51,14 +39,8 @@ class TestShapingFilterTaps:
 
     def test_rz_rect_taps_length(self, xp: Any, xpt: Any) -> None:
         """Verify that RZ rectangular pulse taps have the correct half-symbol length."""
-        sig = generate_pam(
-            order=2,
-            unipolar=False,
-            num_symbols=10,
-            sps=4,
-            symbol_rate=1e3,
-            rz=True,
-            pulse_shape="rect",
+        sig = generate(
+            Constellation.pam(2), 10, symbol_rate=1e3, sps=4, pulse=Rect(0.5)
         )
         taps = filtering.shaping_filter_taps(sig)
         assert len(taps) == 2
@@ -66,14 +48,7 @@ class TestShapingFilterTaps:
 
     def test_rect_pulse_taps(self, xp: Any, xpt: Any) -> None:
         """Verify that standard rectangular pulse shaping produces all-ones taps."""
-        sig = generate_pam(
-            order=2,
-            unipolar=False,
-            num_symbols=10,
-            sps=4,
-            symbol_rate=1e3,
-            pulse_shape="rect",
-        )
+        sig = generate(Constellation.pam(2), 10, symbol_rate=1e3, sps=4, pulse=Rect())
         taps = filtering.shaping_filter_taps(sig)
         xpt.assert_allclose(taps, xp.ones(4))
 
@@ -113,13 +88,8 @@ class TestMatchedFilterAuto:
 
     def test_matched_filter_auto_taps(self, xp: Any) -> None:
         """Verify that matched_filter correctly auto-generates and applies taps."""
-        sig = generate_pam(
-            order=2,
-            unipolar=False,
-            num_symbols=100,
-            sps=4,
-            symbol_rate=1e3,
-            pulse_shape="rrc",
+        sig = generate(
+            Constellation.pam(2), 100, symbol_rate=1e3, sps=4, pulse=RRC(0.35)
         )
         sig_before = sig.clone()
         sig = filtering.matched_filter(sig)
@@ -147,7 +117,7 @@ class TestPulseObjects:
                 filtering.Gaussian(0.8),
                 lambda: filtering.gaussian_taps(4, span=10, duty_cycle=0.8),
             ),
-            (filtering.Rect(0.5, 0.1), lambda: filtering.rect_taps(4, 0.5, 0.1)),
+            (filtering.Rect(0.5, 0.25), lambda: filtering.rect_taps(4, 0.5, 0.25)),
             (
                 filtering.SmoothRect(0.3, 0.5),
                 lambda: filtering.smoothrect_taps(4, 10, 0.3, 0.5),
@@ -222,3 +192,15 @@ class TestPulseObjects:
         with pytest.raises(dataclasses.FrozenInstanceError):
             filtering.RRC(0.1).rolloff = 0.2  # type: ignore[misc]
         assert isinstance(filtering.SmoothRect(), filtering.Pulse)
+
+
+class TestRectWholeSamples:
+    @pytest.mark.parametrize(
+        "pulse, sps", [(filtering.Rect(0.5), 3), (filtering.Rect(1.0, 0.3), 4)]
+    )
+    def test_fractional_samples_raise(self, pulse, sps) -> None:
+        with pytest.raises(ValueError, match="whole number of samples"):
+            pulse.taps(sps)
+
+    def test_whole_samples_ok(self) -> None:
+        assert len(filtering.Rect(0.5, 0.25).taps(8)) == 4

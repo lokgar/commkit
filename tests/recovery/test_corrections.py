@@ -5,8 +5,10 @@ from typing import Any
 import numpy as np
 import pytest
 
-from commkit import generate_qam, recovery
+from commkit import generate, recovery
+from commkit.filtering import RRC
 from commkit.impairments import apply_awgn
+from commkit.mapping import Constellation
 from tests.common.conversions import device_of, to_numpy
 from tests.common.signals import (
     make_ambiguous_qam16,
@@ -192,8 +194,13 @@ class TestResolvePhaseAmbiguity:
         from commkit.helpers import normalize
         from commkit.metrics import ser
 
-        sig = generate_qam(
-            order=16, num_symbols=self.N, sps=1, symbol_rate=1e6, seed=9
+        sig = generate(
+            Constellation.qam(16),
+            self.N,
+            symbol_rate=1e6,
+            sps=1,
+            pulse=RRC(0.35),
+            rng=9,
         ).to(device_of(xp))
         sig = sig.replace(samples=apply_awgn(sig.samples, esn0_db=30, sps=1, seed=9))
         sym = normalize(sig.samples, "average_power")
@@ -207,13 +214,17 @@ class TestResolvePhaseAmbiguity:
 
     def test_signal_method_raises_without_resolved(self, xp):
         """Raises ValueError when resolved_symbols is None."""
-        sig = generate_qam(order=16, num_symbols=256, sps=1, symbol_rate=1e6, seed=0)
+        sig = generate(
+            Constellation.qam(16), 256, symbol_rate=1e6, sps=1, pulse=RRC(0.35), rng=0
+        )
         with pytest.raises(ValueError, match="resolved_symbols"):
             sig = recovery.resolve_phase_ambiguity(sig)
 
     def test_signal_method_raises_without_source(self, xp):
         """Raises ValueError when source_symbols is None."""
-        sig = generate_qam(order=16, num_symbols=256, sps=1, symbol_rate=1e6, seed=0)
+        sig = generate(
+            Constellation.qam(16), 256, symbol_rate=1e6, sps=1, pulse=RRC(0.35), rng=0
+        )
         sig = sig.replace(resolved_symbols=sig.samples)
         sig = sig.replace(reference=None)
         with pytest.raises(ValueError, match="source_symbols"):
@@ -361,8 +372,13 @@ class TestCorrectPhaseRotation:
         """Signal input: resolved_symbols is corrected, ref defaults to source_symbols."""
         from commkit.metrics import ser
 
-        sig = generate_qam(
-            order=16, num_symbols=self.N, sps=1, symbol_rate=1e6, seed=9
+        sig = generate(
+            Constellation.qam(16),
+            self.N,
+            symbol_rate=1e6,
+            sps=1,
+            pulse=RRC(0.35),
+            rng=9,
         ).to(device_of(xp))
         sig = sig.replace(samples=apply_awgn(sig.samples, esn0_db=30, sps=1, seed=9))
         ref = xp.asarray(sig.source_symbols)
@@ -386,13 +402,17 @@ class TestCorrectPhaseRotation:
 
     def test_signal_input_raises_without_resolved(self, xp):
         """Raises ValueError when resolved_symbols is None."""
-        sig = generate_qam(order=16, num_symbols=256, sps=1, symbol_rate=1e6, seed=0)
+        sig = generate(
+            Constellation.qam(16), 256, symbol_rate=1e6, sps=1, pulse=RRC(0.35), rng=0
+        )
         with pytest.raises(ValueError, match="resolved_symbols"):
             recovery.correct_phase_rotation(sig)
 
     def test_signal_input_raises_without_ref(self, xp):
         """Raises ValueError when ref_symbols is omitted and source_symbols is None."""
-        sig = generate_qam(order=16, num_symbols=256, sps=1, symbol_rate=1e6, seed=0)
+        sig = generate(
+            Constellation.qam(16), 256, symbol_rate=1e6, sps=1, pulse=RRC(0.35), rng=0
+        )
         sig = sig.replace(resolved_symbols=sig.samples)
         sig = sig.replace(reference=None)
         with pytest.raises(ValueError, match="source_symbols"):

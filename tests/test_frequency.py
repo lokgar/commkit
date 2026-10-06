@@ -3,9 +3,11 @@
 import numpy as np
 import pytest
 
-from commkit import frequency, generate_psk, spectral
+from commkit import frequency, generate, spectral
 from commkit.core import Signal
+from commkit.filtering import RRC
 from commkit.impairments import apply_awgn
+from commkit.mapping import Constellation
 from tests.common.conversions import device_of, to_numpy
 from tests.common.signals import make_test_psk_signal, make_test_qam_signal
 
@@ -329,9 +331,9 @@ class TestFoeMengaliMorelli:
     @pytest.mark.parametrize("fo_hz", [4_000.0, -8_000.0])
     def test_data_aided_accuracy(self, xp, fo_hz):
         """Data-aided mode: estimate within 1 % using known reference (exact mixing)."""
-        sig = generate_psk(order=4, num_symbols=4096, sps=1, symbol_rate=FS).to(
-            device_of(xp)
-        )
+        sig = generate(
+            Constellation.psk(4), 4096, symbol_rate=FS, sps=1, pulse=RRC(0.35)
+        ).to(device_of(xp))
         ideal = sig.samples.copy()
         sig = sig.replace(samples=apply_awgn(sig.samples, esn0_db=25, sps=1))
         n = xp.arange(sig.samples.shape[-1], dtype=xp.float64)

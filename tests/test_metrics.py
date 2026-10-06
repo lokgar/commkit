@@ -5,10 +5,9 @@ from typing import Any
 import numpy as np
 import pytest
 
-from commkit import generate_qam, mapping, metrics, multirate
-from commkit.helpers import generate_symbols
+from commkit import generate, mapping, metrics, multirate
 from commkit.impairments import apply_awgn
-from commkit.mapping import compute_llr, gray_constellation, map_bits
+from commkit.mapping import Constellation, compute_llr, gray_constellation, map_bits
 
 
 class TestBitErrorRate:
@@ -172,7 +171,8 @@ class TestSignalToNoiseRatio:
 
     def test_snr_matches_applied(self, xp: Any) -> None:
         """SNR estimate should approximately match applied AWGN level."""
-        symbols = generate_symbols(10000, "qam", 4, seed=42)
+        bits = np.random.default_rng(42).integers(0, 2, 20000, dtype="int8")
+        symbols = Constellation.qam(4).map(bits)
         target_snr_db = 20.0
         noisy = apply_awgn(symbols, esn0_db=target_snr_db, sps=1)
 
@@ -364,18 +364,14 @@ class TestSignalMetricsIntegration:
 
     def test_signal_evm_method(self, xp: Any) -> None:
         """Test Signal.evm() method using source_symbols as reference."""
-        sig = generate_qam(
-            order=4, num_symbols=100, sps=1, symbol_rate=1e6, pulse_shape="none"
-        )
+        sig = generate(Constellation.qam(4), 100, symbol_rate=1e6, sps=1)
         sig = multirate.resolve_symbols(sig)
         evm_pct, evm_db = metrics.evm(sig)
         assert evm_pct < 1e-4
 
     def test_signal_ber_method(self, xp: Any) -> None:
         """Test Signal.ber() method using source_bits as reference."""
-        sig = generate_qam(
-            order=4, num_symbols=100, sps=1, symbol_rate=1e6, pulse_shape="none"
-        )
+        sig = generate(Constellation.qam(4), 100, symbol_rate=1e6, sps=1)
         sig = multirate.resolve_symbols(sig)
         sig = mapping.demap_symbols_hard(sig)
         ber_val = metrics.ber(sig)
@@ -383,26 +379,20 @@ class TestSignalMetricsIntegration:
 
     def test_signal_demap_hard(self, xp: Any, xpt: Any) -> None:
         """Test Signal.demap_symbols_hard() hard decision matches source_bits."""
-        sig = generate_qam(
-            order=4, num_symbols=50, sps=1, symbol_rate=1e6, pulse_shape="none"
-        )
+        sig = generate(Constellation.qam(4), 50, symbol_rate=1e6, sps=1)
         sig = multirate.resolve_symbols(sig)
         sig = mapping.demap_symbols_hard(sig)
         xpt.assert_array_equal(sig.resolved_bits.flatten(), sig.source_bits.flatten())
 
     def test_signal_evm_blind(self, xp: Any) -> None:
         """Signal.evm(mode='blind') returns near-zero EVM for a clean signal."""
-        sig = generate_qam(
-            order=16, num_symbols=2000, sps=1, symbol_rate=1e6, pulse_shape="none"
-        )
+        sig = generate(Constellation.qam(16), 2000, symbol_rate=1e6, sps=1)
         sig = multirate.resolve_symbols(sig)
         pct, db = metrics.evm(sig, mode="blind")
         assert pct < 3.0
 
     def test_signal_ser_method(self, xp: Any) -> None:
         """Signal.ser() returns 0 for a clean signal."""
-        sig = generate_qam(
-            order=16, num_symbols=200, sps=1, symbol_rate=1e6, pulse_shape="none"
-        )
+        sig = generate(Constellation.qam(16), 200, symbol_rate=1e6, sps=1)
         sig = multirate.resolve_symbols(sig)
         assert metrics.ser(sig) == 0.0

@@ -1,6 +1,8 @@
 """Butterfly (2x2 / 3x3) MIMO sequential equalization."""
 
-from commkit import equalization, generate_psk, generate_qam
+from commkit import equalization, generate
+from commkit.filtering import RRC
+from commkit.mapping import Constellation
 
 
 class TestButterflyMIMO:
@@ -13,14 +15,14 @@ class TestButterflyMIMO:
         # 2x2 channel mixing matrix
         H = xp.array([[1.0, 0.3], [0.2, 1.0]], dtype=xp.complex64)
 
-        sig = generate_psk(
+        sig = generate(
+            Constellation.psk(4),
+            n_symbols,
             symbol_rate=1e6,
-            num_symbols=n_symbols,
-            order=4,
-            pulse_shape="rrc",
             sps=2,
-            num_streams=2,
-            seed=10,
+            pulse=RRC(0.35),
+            num_channels=2,
+            rng=10,
         )
         tx_mimo = xp.asarray(sig.source_symbols)
         rx_up = xp.asarray(sig.samples)
@@ -60,14 +62,14 @@ class TestButterflyMIMO:
         """CMA butterfly should demux 2 mixed polarizations."""
         n_symbols = 3000
 
-        sig = generate_psk(
+        sig = generate(
+            Constellation.psk(4),
+            n_symbols,
             symbol_rate=1e6,
-            num_symbols=n_symbols,
-            order=4,
-            pulse_shape="rrc",
             sps=2,
-            num_streams=2,
-            seed=30,
+            pulse=RRC(0.35),
+            num_channels=2,
+            rng=30,
         )
         rx_up = xp.asarray(sig.samples)
 
@@ -152,13 +154,13 @@ class TestButterflyMIMOExtended:
         """RDE Numba butterfly should handle 2x2 cross-polarization without error."""
 
         n_symbols = 2000
-        sig = generate_qam(
+        sig = generate(
+            Constellation.qam(16),
+            n_symbols,
             symbol_rate=1e6,
-            num_symbols=n_symbols,
-            order=16,
-            pulse_shape="rrc",
             sps=2,
-            seed=11,
+            pulse=RRC(0.35),
+            rng=11,
         )
         rx = xp.asarray(sig.samples)
 
@@ -188,13 +190,13 @@ class TestButterflyMIMOExtended:
         """LMS butterfly should cancel cross-channel interference."""
 
         n_symbols = 2000
-        sig = generate_psk(
+        sig = generate(
+            Constellation.psk(4),
+            n_symbols,
             symbol_rate=1e6,
-            num_symbols=n_symbols,
-            order=4,
-            pulse_shape="rrc",
             sps=2,
-            seed=7,
+            pulse=RRC(0.35),
+            rng=7,
         )
         rx = xp.asarray(sig.samples)
         train = xp.asarray(sig.source_symbols)

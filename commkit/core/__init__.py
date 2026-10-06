@@ -7,17 +7,11 @@ working after the split of the former monolithic ``core.py`` into a package.
 
 ``signal`` is the thin container (no leaf-module dependencies); ``frame`` and
 ``generation`` build on it.  The generation factories are also re-exported at
-the package top level (``commkit.generate_qam(...)`` etc.).
+the package top level (``commkit.generate(...)``).
 """
 
 from .frame import Preamble, SingleCarrierFrame
-from .generation import (
-    generate,
-    generate_pam,
-    generate_psk,
-    generate_psqam,
-    generate_qam,
-)
+from .generation import generate, generate_psqam
 from .signal import Reference, Signal
 
 __all__ = [
@@ -26,8 +20,5 @@ __all__ = [
     "Signal",
     "SingleCarrierFrame",
     "generate",
-    "generate_pam",
-    "generate_psk",
     "generate_psqam",
-    "generate_qam",
 ]

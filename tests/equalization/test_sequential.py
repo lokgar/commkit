@@ -3,10 +3,11 @@
 import numpy as np
 import pytest
 
-from commkit import equalization, generate_psk, generate_qam
+from commkit import equalization, generate
 from commkit.core import Signal
 from commkit.equalization import EqualizerResult
-from commkit.mapping import gray_constellation
+from commkit.filtering import RRC
+from commkit.mapping import Constellation, gray_constellation
 from tests.common.conversions import to_numpy
 
 
@@ -22,13 +23,13 @@ class TestLMS:
         # Generate bits and symbols on device
         # Generate symbols and RRC pulse-shaped waveform
 
-        sig = generate_psk(
+        sig = generate(
+            Constellation.psk(4),
+            n_symbols,
             symbol_rate=1e6,
-            num_symbols=n_symbols,
-            order=4,
-            pulse_shape="rrc",
             sps=2,
-            seed=42,
+            pulse=RRC(0.35),
+            rng=42,
         )
 
         tx = xp.asarray(sig.source_symbols)
@@ -75,13 +76,13 @@ class TestLMS:
 
         # Generate symbols and RRC pulse-shaped waveform
 
-        sig = generate_psk(
+        sig = generate(
+            Constellation.psk(4),
+            n_symbols,
             symbol_rate=1e6,
-            num_symbols=n_symbols,
-            order=4,
-            pulse_shape="rrc",
             sps=2,
-            seed=123,
+            pulse=RRC(0.35),
+            rng=123,
         )
 
         tx = xp.asarray(sig.source_symbols)
@@ -108,8 +109,8 @@ class TestLMS:
         """LMS SISO output shapes should be correct."""
         n = 500
 
-        sig = generate_psk(
-            symbol_rate=1e6, num_symbols=n, order=4, pulse_shape="rrc", sps=2, seed=0
+        sig = generate(
+            Constellation.psk(4), n, symbol_rate=1e6, sps=2, pulse=RRC(0.35), rng=0
         )
         tx = xp.asarray(sig.source_symbols)
         rx = xp.asarray(sig.samples)
@@ -132,8 +133,8 @@ class TestLMS:
         n = 200
         num_taps = 7
 
-        sig = generate_psk(
-            symbol_rate=1e6, num_symbols=n, order=4, pulse_shape="rrc", sps=2, seed=0
+        sig = generate(
+            Constellation.psk(4), n, symbol_rate=1e6, sps=2, pulse=RRC(0.35), rng=0
         )
         tx = xp.asarray(sig.source_symbols)
         rx = xp.asarray(sig.samples)
@@ -154,8 +155,8 @@ class TestLMS:
     def test_no_weights_by_default(self, xp):
         """Weight history should be None by default."""
 
-        sig = generate_psk(
-            symbol_rate=1e6, num_symbols=100, order=4, pulse_shape="rrc", sps=2, seed=0
+        sig = generate(
+            Constellation.psk(4), 100, symbol_rate=1e6, sps=2, pulse=RRC(0.35), rng=0
         )
         tx = xp.asarray(sig.source_symbols)
         rx = xp.asarray(sig.samples)
@@ -173,8 +174,8 @@ class TestLMS:
     def test_requires_constellation_or_training(self, xp):
         """LMS should raise if neither training nor constellation is given."""
 
-        sig = generate_psk(
-            symbol_rate=1e6, num_symbols=100, order=4, pulse_shape="rrc", sps=2, seed=0
+        sig = generate(
+            Constellation.psk(4), 100, symbol_rate=1e6, sps=2, pulse=RRC(0.35), rng=0
         )
         rx = xp.asarray(sig.samples)
         with pytest.raises(ValueError):
@@ -189,13 +190,13 @@ class TestRLS:
         n_symbols = 500
         channel = xp.array([0.2, 1.0, 0.3], dtype=xp.complex64)
 
-        sig = generate_psk(
+        sig = generate(
+            Constellation.psk(4),
+            n_symbols,
             symbol_rate=1e6,
-            num_symbols=n_symbols,
-            order=4,
-            pulse_shape="rrc",
             sps=1,
-            seed=42,
+            pulse=RRC(0.35),
+            rng=42,
         )
         tx = xp.asarray(sig.source_symbols)
         rx_up = xp.asarray(sig.samples)
@@ -221,13 +222,13 @@ class TestRLS:
         n_symbols = 300
         channel = xp.array([0.3, 1.0, 0.2], dtype=xp.complex64)
 
-        sig = generate_psk(
+        sig = generate(
+            Constellation.psk(4),
+            n_symbols,
             symbol_rate=1e6,
-            num_symbols=n_symbols,
-            order=4,
-            pulse_shape="rrc",
             sps=1,
-            seed=77,
+            pulse=RRC(0.35),
+            rng=77,
         )
         tx = xp.asarray(sig.source_symbols)
         rx_up = xp.asarray(sig.samples)
@@ -265,8 +266,8 @@ class TestRLS:
     def test_output_shape_siso(self, xp):
         """RLS SISO output shapes should match LMS convention."""
 
-        sig = generate_psk(
-            symbol_rate=1e6, num_symbols=200, order=4, pulse_shape="rrc", sps=2, seed=0
+        sig = generate(
+            Constellation.psk(4), 200, symbol_rate=1e6, sps=2, pulse=RRC(0.35), rng=0
         )
         tx = xp.asarray(sig.source_symbols)
         rx = xp.asarray(sig.samples)
@@ -289,8 +290,8 @@ class TestAPIRegression:
     def test_lms_has_no_normalize_param(self, xp):
         """lms() must not accept a 'normalize' keyword - always NLMS."""
 
-        sig = generate_psk(
-            symbol_rate=1e6, num_symbols=100, order=4, pulse_shape="rrc", sps=2, seed=0
+        sig = generate(
+            Constellation.psk(4), 100, symbol_rate=1e6, sps=2, pulse=RRC(0.35), rng=0
         )
         rx = xp.asarray(sig.samples)
         tx = xp.asarray(sig.source_symbols)
@@ -307,8 +308,8 @@ class TestAPIRegression:
     def test_cma_has_no_normalize_param(self, xp):
         """cma() must not accept a 'normalize' keyword."""
 
-        sig = generate_psk(
-            symbol_rate=1e6, num_symbols=100, order=4, pulse_shape="rrc", sps=2, seed=0
+        sig = generate(
+            Constellation.psk(4), 100, symbol_rate=1e6, sps=2, pulse=RRC(0.35), rng=0
         )
         rx = xp.asarray(sig.samples)
         with pytest.raises(TypeError, match="normalize"):
@@ -323,13 +324,13 @@ class TestCMA:
         n_symbols = 2000
         channel = xp.array([0.2, 1.0, 0.3], dtype=xp.complex64)
 
-        sig = generate_psk(
+        sig = generate(
+            Constellation.psk(4),
+            n_symbols,
             symbol_rate=1e6,
-            num_symbols=n_symbols,
-            order=4,
-            pulse_shape="rrc",
             sps=2,
-            seed=42,
+            pulse=RRC(0.35),
+            rng=42,
         )
         rx_up = xp.asarray(sig.samples)
         rx = xp.convolve(rx_up, channel, mode="same")
@@ -371,8 +372,8 @@ class TestCMA:
     def test_r2_default(self, xp):
         """CMA should work with default R2=1.0."""
 
-        sig = generate_psk(
-            symbol_rate=1e6, num_symbols=500, order=4, pulse_shape="rrc", sps=2, seed=0
+        sig = generate(
+            Constellation.psk(4), 500, symbol_rate=1e6, sps=2, pulse=RRC(0.35), rng=0
         )
         rx = xp.asarray(sig.samples)
 
@@ -384,8 +385,8 @@ class TestCMA:
     def test_output_shape_siso(self, xp):
         """CMA SISO output should be 1D."""
 
-        sig = generate_psk(
-            symbol_rate=1e6, num_symbols=200, order=4, pulse_shape="rrc", sps=2, seed=0
+        sig = generate(
+            Constellation.psk(4), 200, symbol_rate=1e6, sps=2, pulse=RRC(0.35), rng=0
         )
         rx = xp.asarray(sig.samples)
 
@@ -403,13 +404,13 @@ class TestRDE:
         n_symbols = 2000
         channel = xp.array([0.2, 1.0, 0.3], dtype=xp.complex64)
 
-        sig = generate_psk(
+        sig = generate(
+            Constellation.psk(4),
+            n_symbols,
             symbol_rate=1e6,
-            num_symbols=n_symbols,
-            order=4,
-            pulse_shape="rrc",
             sps=2,
-            seed=42,
+            pulse=RRC(0.35),
+            rng=42,
         )
         rx = xp.convolve(xp.asarray(sig.samples), channel, mode="same")
         rx = xp.ascontiguousarray(rx)
@@ -451,13 +452,13 @@ class TestRDE:
         n_symbols = 5000
         channel = xp.array([0.15, 1.0, 0.25], dtype=xp.complex64)
 
-        sig = generate_qam(
+        sig = generate(
+            Constellation.qam(16),
+            n_symbols,
             symbol_rate=1e6,
-            num_symbols=n_symbols,
-            order=16,
-            pulse_shape="rrc",
             sps=2,
-            seed=7,
+            pulse=RRC(0.35),
+            rng=7,
         )
         rx = xp.convolve(xp.asarray(sig.samples), channel, mode="same")
         rx = xp.ascontiguousarray(rx)
@@ -498,8 +499,8 @@ class TestRDE:
     def test_output_shape_siso(self, xp):
         """RDE SISO output should be 1D with correct length."""
 
-        sig = generate_qam(
-            symbol_rate=1e6, num_symbols=300, order=16, pulse_shape="rrc", sps=2, seed=0
+        sig = generate(
+            Constellation.qam(16), 300, symbol_rate=1e6, sps=2, pulse=RRC(0.35), rng=0
         )
         rx = xp.asarray(sig.samples)
 
@@ -514,13 +515,13 @@ class TestStoreWeights:
 
     def _qpsk_rx(self, xp, n_symbols=600, seed=0):
 
-        sig = generate_psk(
+        sig = generate(
+            Constellation.psk(4),
+            n_symbols,
             symbol_rate=1e6,
-            num_symbols=n_symbols,
-            order=4,
-            pulse_shape="rrc",
             sps=2,
-            seed=seed,
+            pulse=RRC(0.35),
+            rng=seed,
         )
         return xp.ascontiguousarray(xp.asarray(sig.samples)), sig
 
@@ -598,8 +599,8 @@ class TestStoreWeights:
     def test_mimo_store_weights_numba(self, xp):
         """LMS Numba MIMO: weights_history has shape (N_sym, C, C, num_taps)."""
 
-        sig = generate_psk(
-            symbol_rate=1e6, num_symbols=600, order=4, pulse_shape="rrc", sps=2, seed=0
+        sig = generate(
+            Constellation.psk(4), 600, symbol_rate=1e6, sps=2, pulse=RRC(0.35), rng=0
         )
         rx = xp.asarray(sig.samples)
         rx_mimo = xp.stack([rx, xp.roll(rx, 1)], axis=0)
@@ -639,13 +640,13 @@ class TestEdgeCases:
 
     def _qpsk_rx(self, xp, n_symbols=500, seed=0):
 
-        sig = generate_psk(
+        sig = generate(
+            Constellation.psk(4),
+            n_symbols,
             symbol_rate=1e6,
-            num_symbols=n_symbols,
-            order=4,
-            pulse_shape="rrc",
             sps=2,
-            seed=seed,
+            pulse=RRC(0.35),
+            rng=seed,
         )
         return xp.ascontiguousarray(xp.asarray(sig.samples)), sig
 
@@ -696,8 +697,8 @@ class TestEdgeCases:
     def test_rde_mimo_no_modulation(self, xp):
         """RDE MIMO path with no modulation should run (unit radius, 2-ch)."""
 
-        sig = generate_psk(
-            symbol_rate=1e6, num_symbols=600, order=4, pulse_shape="rrc", sps=2, seed=0
+        sig = generate(
+            Constellation.psk(4), 600, symbol_rate=1e6, sps=2, pulse=RRC(0.35), rng=0
         )
         rx = xp.asarray(sig.samples)
         rx_mimo = xp.stack([rx, xp.roll(rx, 1)], axis=0)
@@ -763,13 +764,13 @@ class TestNumbaBackendCoverage:
     def _make_qpsk_rx(self, xp, n_symbols=1000, seed=0):
 
         channel = xp.array([0.1, 1.0, 0.15], dtype=xp.complex64)
-        sig = generate_psk(
+        sig = generate(
+            Constellation.psk(4),
+            n_symbols,
             symbol_rate=1e6,
-            num_symbols=n_symbols,
-            order=4,
-            pulse_shape="rrc",
             sps=2,
-            seed=seed,
+            pulse=RRC(0.35),
+            rng=seed,
         )
         rx = xp.convolve(xp.asarray(sig.samples), channel, mode="same")
         return xp.ascontiguousarray(rx), sig
@@ -824,13 +825,13 @@ class TestNumbaBackendCoverage:
         """RLS numba MIMO path correctly handles (num_channels, n_samples) input shape."""
 
         n_symbols = 600
-        sig = generate_psk(
+        sig = generate(
+            Constellation.psk(4),
+            n_symbols,
             symbol_rate=1e6,
-            num_symbols=n_symbols,
-            order=4,
-            pulse_shape="rrc",
             sps=2,
-            seed=5,
+            pulse=RRC(0.35),
+            rng=5,
         )
         rx1 = xp.asarray(sig.samples)
         rx_mimo = xp.stack([rx1, xp.roll(rx1, 2)], axis=0)  # (2, N)
@@ -903,8 +904,8 @@ class TestNumbaBackendCoverage:
     def test_cma_numba_store_weights(self, xp):
         """CMA numba backend with store_weights=True."""
 
-        sig = generate_psk(
-            symbol_rate=1e6, num_symbols=400, order=4, pulse_shape="rrc", sps=2, seed=0
+        sig = generate(
+            Constellation.psk(4), 400, symbol_rate=1e6, sps=2, pulse=RRC(0.35), rng=0
         )
         rx = xp.asarray(sig.samples)
 
@@ -922,8 +923,8 @@ class TestNumbaBackendCoverage:
     def test_rde_numba_store_weights(self, xp):
         """RDE numba backend with store_weights=True."""
 
-        sig = generate_qam(
-            symbol_rate=1e6, num_symbols=400, order=16, pulse_shape="rrc", sps=2, seed=0
+        sig = generate(
+            Constellation.qam(16), 400, symbol_rate=1e6, sps=2, pulse=RRC(0.35), rng=0
         )
         rx = xp.asarray(sig.samples)
 
@@ -1081,13 +1082,13 @@ class TestSignalInputSequentialEqualizers:
     a new Signal at the symbol rate."""
 
     def _rx_signal(self, xp, order=16, n_symbols=2000, sps=2, seed=0):
-        sig = generate_qam(
+        sig = generate(
+            Constellation.qam(order),
+            n_symbols,
             symbol_rate=1e6,
-            num_symbols=n_symbols,
-            order=order,
-            pulse_shape="rrc",
             sps=sps,
-            seed=seed,
+            pulse=RRC(0.35),
+            rng=seed,
         )
         return sig
 

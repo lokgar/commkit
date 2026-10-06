@@ -3,10 +3,12 @@
 import numpy as np
 import pytest
 
-from commkit import generate_qam, recovery, spectral
+from commkit import generate, recovery, spectral
 from commkit.backend import to_device
 from commkit.core import Signal
+from commkit.filtering import RRC
 from commkit.impairments import apply_awgn
+from commkit.mapping import Constellation
 from tests.common.conversions import device_of
 from tests.common.metrics import calc_rms_phase_error
 from tests.common.signals import apply_phase_ramp
@@ -37,8 +39,13 @@ class TestCprPilots:
         self, xp, n_symbols=512, pilot_period=16, phase_per_sym=0.001, seed=0
     ):
         """Return (noisy+rotated samples, pilot_indices, pilot_values, true_phase)."""
-        sig = generate_qam(
-            order=16, num_symbols=n_symbols, sps=1, symbol_rate=FS, seed=seed
+        sig = generate(
+            Constellation.qam(16),
+            n_symbols,
+            symbol_rate=FS,
+            sps=1,
+            pulse=RRC(0.35),
+            rng=seed,
         ).to(device_of(xp))
         # Save ideal symbols before adding noise
         ideal_symbols = xp.asarray(sig.samples.copy())
@@ -147,14 +154,14 @@ class TestCprPilotTone:
         *after* the tone, so the tone carries exactly the phase to be recovered.
         """
         fs = self.SPS * FS  # symbol rate = FS
-        sig = generate_qam(
-            order=16,
-            num_symbols=n_symbols,
-            sps=self.SPS,
+        sig = generate(
+            Constellation.qam(16),
+            n_symbols,
             symbol_rate=FS,
-            rrc_rolloff=self.BETA,
-            num_streams=num_streams,
-            seed=seed,
+            sps=self.SPS,
+            pulse=RRC(self.BETA),
+            num_channels=num_streams,
+            rng=seed,
         )
         samples = xp.asarray(sig.samples)
         samples, _ = spectral.add_pilot_tone(
@@ -321,14 +328,14 @@ class TestCprPilotTones:
         ``(samples, fs, common)``.
         """
         fs = self.SPS * FS
-        sig = generate_qam(
-            order=16,
-            num_symbols=n_symbols,
-            sps=self.SPS,
+        sig = generate(
+            Constellation.qam(16),
+            n_symbols,
             symbol_rate=FS,
-            rrc_rolloff=self.BETA,
-            num_streams=2,
-            seed=seed,
+            sps=self.SPS,
+            pulse=RRC(self.BETA),
+            num_channels=2,
+            rng=seed,
         )
         samples = apply_awgn(
             xp.asarray(sig.samples), esn0_db=snr_db, sps=self.SPS, seed=seed
@@ -524,8 +531,13 @@ class TestPilotsCPREnhancements:
         self, xp, n_symbols=512, pilot_period=8, phase_per_sym=0.001, seed=42
     ):
         """Return (samples, pilot_indices, pilot_values) for a 16-QAM signal."""
-        sig = generate_qam(
-            order=16, num_symbols=n_symbols, sps=1, symbol_rate=FS, seed=seed
+        sig = generate(
+            Constellation.qam(16),
+            n_symbols,
+            symbol_rate=FS,
+            sps=1,
+            pulse=RRC(0.35),
+            rng=seed,
         ).to(device_of(xp))
         ideal = xp.asarray(sig.samples.copy())
         sig = sig.replace(

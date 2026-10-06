@@ -11,13 +11,15 @@ from commkit import (
     Signal,
     SingleCarrierFrame,
     filtering,
+    generate,
     generate_psqam,
-    generate_qam,
     mapping,
     metrics,
     multirate,
 )
+from commkit.filtering import RRC
 from commkit.io import load_npz, save_npz
+from commkit.mapping import Constellation
 from tests.common.conversions import to_numpy
 from tests.common.signals import (
     make_test_frame_signal,
@@ -326,7 +328,9 @@ class TestNPZDeviceHandling:
         self, tmp_path: Any, xpt: Any
     ) -> None:
         """Signal processed via free functions preserves reproducible metrics."""
-        sig = generate_qam(num_symbols=2000, sps=4, symbol_rate=10e9, order=16, seed=7)
+        sig = generate(
+            Constellation.qam(16), 2000, symbol_rate=10e9, sps=4, pulse=RRC(0.35), rng=7
+        )
         sig = filtering.matched_filter(sig)
         sig = multirate.resolve_symbols(sig)
         sig = mapping.demap_symbols_hard(sig)

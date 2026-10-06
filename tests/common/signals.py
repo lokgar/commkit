@@ -4,10 +4,11 @@ from typing import Any
 
 import numpy as np
 
-from commkit import backend
+from commkit import backend, generate
 from commkit.core import Preamble, Signal, SingleCarrierFrame
+from commkit.filtering import RRC
 from commkit.helpers import normalize
-from commkit.mapping import gray_constellation
+from commkit.mapping import Constellation, gray_constellation
 
 from .conversions import device_of
 
@@ -120,15 +121,16 @@ def make_test_qam_signal(
     xp: Any = None,
 ) -> Signal:
     """Generate a Signal container populated with QAM samples, optional frequency offset and AWGN."""
-    from commkit import generate_qam, spectral
+    from commkit import spectral
     from commkit.impairments import apply_awgn
 
-    sig = generate_qam(
-        order=order,
-        num_symbols=num_symbols,
-        sps=sps,
+    sig = generate(
+        Constellation.qam(order),
+        num_symbols,
         symbol_rate=symbol_rate,
-        seed=seed,
+        sps=sps,
+        pulse=RRC(0.35),
+        rng=seed,
     )
     if snr_db is not None:
         sig = sig.replace(
@@ -153,15 +155,16 @@ def make_test_psk_signal(
     xp: Any = None,
 ) -> Signal:
     """Generate a Signal container populated with PSK samples, optional frequency offset and AWGN."""
-    from commkit import generate_psk, spectral
+    from commkit import spectral
     from commkit.impairments import apply_awgn
 
-    sig = generate_psk(
-        order=order,
-        num_symbols=num_symbols,
-        sps=sps,
+    sig = generate(
+        Constellation.psk(order),
+        num_symbols,
         symbol_rate=symbol_rate,
-        seed=seed,
+        sps=sps,
+        pulse=RRC(0.35),
+        rng=seed,
     )
     if snr_db is not None:
         sig = sig.replace(
@@ -185,15 +188,15 @@ def make_test_mimo_signal(
     xp: Any = None,
 ) -> Signal:
     """Generate a 2x2 or NxN MIMO Signal."""
-    from commkit import generate_qam
 
-    sig = generate_qam(
-        order=order,
-        num_symbols=num_symbols,
-        sps=sps,
+    sig = generate(
+        Constellation.qam(order),
+        num_symbols,
         symbol_rate=symbol_rate,
-        num_streams=num_channels,
-        seed=seed,
+        sps=sps,
+        pulse=RRC(0.35),
+        num_channels=num_channels,
+        rng=seed,
     )
     if xp is not None:
         sig = sig.to(device_of(xp))
@@ -256,17 +259,15 @@ def make_isi_distorted_signal(
     noise: float = 0.02,
 ) -> tuple[Any, Any]:
     """Build a pulse-shaped, ISI-distorted, noisy signal on the xp device."""
-    from commkit import generate_psk, generate_qam
+    from commkit import RRC, generate
+    from commkit.mapping import Constellation
     from tests.common.conversions import to_numpy
 
-    factory = generate_qam if mod == "qam" else generate_psk
-    sig = factory(
-        symbol_rate=1e6,
-        num_symbols=n_symbols,
-        order=order,
-        pulse_shape="rrc",
-        sps=2,
-        seed=seed,
+    constellation = (
+        Constellation.qam(order) if mod == "qam" else Constellation.psk(order)
+    )
+    sig = generate(
+        constellation, n_symbols, symbol_rate=1e6, sps=2, pulse=RRC(0.35), rng=seed
     )
     tx = xp.asarray(to_numpy(sig.source_symbols))
     rx = xp.convolve(

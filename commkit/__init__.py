@@ -27,10 +27,7 @@ from .core import (
     Signal,
     SingleCarrierFrame,
     generate,
-    generate_pam,
-    generate_psk,
     generate_psqam,
-    generate_qam,
 )
 from .io import load_npz, save_npz
 from .logger import set_log_level
@@ -98,10 +95,7 @@ __all__ = [
     "equalization",
     "frequency",
     "generate",
-    "generate_pam",
-    "generate_psk",
     "generate_psqam",
-    "generate_qam",
     "impairments",
     "load_npz",
     "metrics",

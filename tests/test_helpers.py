@@ -13,28 +13,6 @@ class Unconvertible:
         raise TypeError("Cannot convert to array")
 
 
-class TestRandomGeneration:
-    """Random bits and symbol generation helpers."""
-
-    def test_random_bits(self):
-        """Random bits: correct length, binary values, generated on the host."""
-        bits = helpers.generate_bits(100, seed=42)
-        assert len(bits) == 100
-        np.testing.assert_array_equal((bits == 0) | (bits == 1), True)
-        assert isinstance(bits, np.ndarray)
-
-    def test_random_bits_no_seed(self):
-        """generate_bits without a seed still returns a host array."""
-        bits = helpers.generate_bits(100)
-        assert isinstance(bits, np.ndarray)
-        assert len(bits) == 100
-
-    def test_random_symbols_unipolar(self, xp, xpt):
-        """Verify unipolar flag in generate_symbols produces non-negative values."""
-        syms = helpers.generate_symbols(10, "ask", 4, unipolar=True)
-        xpt.assert_array_equal(syms >= 0, True)
-
-
 class TestNormalization:
     """Normalization modes and RMS computation."""
 

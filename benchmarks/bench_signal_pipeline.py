@@ -7,22 +7,23 @@ import tracemalloc
 
 import pytest
 
-from commkit import equalization, filtering, multirate
-from commkit.core import Preamble, Reference, SingleCarrierFrame, generate_qam
+from commkit import equalization, filtering, generate, multirate
+from commkit.core import Preamble, Reference, SingleCarrierFrame
+from commkit.filtering import RRC
 from commkit.impairments import apply_awgn
+from commkit.mapping import Constellation
 
 ROUNDS = dict(rounds=3, warmup_rounds=1, iterations=1)
 
 
 def _plain_signal():
-    return generate_qam(
-        order=16,
-        num_symbols=32_768,
-        sps=4,
+    return generate(
+        Constellation.qam(16),
+        32_768,
         symbol_rate=1e6,
-        pulse_shape="rrc",
-        filter_span=8,
-        seed=42,
+        sps=4,
+        pulse=RRC(0.35, span=8),
+        rng=42,
     )
 
 

@@ -595,14 +595,30 @@ sites. The order avoids conflicts, because 1.4-1.6 all edit
     a supplied fact agrees with the Signal).
   - The old `resolve_required` / `resolve_optional` stay until the last module
     pass.
-- [ ] **2.6 `refactor(core)!: single generate()`.**
-  - `generate(constellation, num_symbols, *, symbol_rate, sps, pulse, num_channels, rng)`
-    always generates on the CPU.
-  - Absorbs `generate_qam/psk/pam/psqam` and the generation helpers from
-    `helpers.py`.
-  - `SingleCarrierFrame` layout methods are testable without generating data,
-    and the effective `payload_len` is explicit.
-  - `tests/common/signals.py` builders move onto `generate`.
+- [x] **2.6 `refactor(core)!: single generate()`.**
+  - `generate(constellation, num_symbols, *, symbol_rate, sps=1, pulse=None,
+    num_channels=1, rng=None)` always generates on the CPU. An int `rng`
+    draws exactly the bits (and PS indices) the 1.x factories drew for the
+    same seed, so migrating ~120 call sites changed no test data.
+  - Absorbs `generate_qam/psk/pam`, the string `generate` and
+    `helpers.generate_bits/generate_symbols`. `generate_psqam` stays as the
+    1.x PS-scale bridge until 3.2, so its call sites are touched once.
+  - Call sites that relied on the 1.x default `pulse_shape="rrc"` get an
+    explicit `pulse=RRC(0.35)`, also at sps=1.
+  - `Rect.taps(sps)` raises when `duty_cycle * sps` or `rise_time * sps` is
+    not a whole number of samples (it replaces the RZ-PAM "even sps" check).
+- [ ] **2.6b `fix(core)!: the reference holds exact constellation points`.**
+  - `generate` stops normalizing uniform reference symbols to unit
+    sample-average power (a 1.x leftover that puts the reference off the
+    constellation by a factor of about 1 + O(1/sqrt(N))). Numerical change,
+    validated on its own.
+- [ ] **2.7 `refactor(core)!: frame takes constellations; explicit layout`.**
+  - `SingleCarrierFrame` takes `payload=` / `pilots=` constellations instead
+    of `*_mod_scheme` / `*_mod_order` / `*_mod_unipolar` / `payload_nu` /
+    `payload_entropy` strings and numbers.
+  - Layout methods are testable without generating data, and the effective
+    `payload_len` is explicit (no silent snapping).
+  - `Signal.frame` holds the layout snapshot.
 
 ### Step 3: module passes (bottom-up)
 

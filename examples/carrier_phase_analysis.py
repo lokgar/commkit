@@ -34,7 +34,7 @@
 # an explicit device->host transfer (`to_device(x, "cpu")`); the library plot
 # functions handle that internally.
 #
-# All randomness flows through *seeded library generators* (`generate_psk`,
+# All randomness flows through *seeded library generators* (`generate`,
 # `generate_phase_noise`, `apply_awgn`) - no module-level RNG.  Every cell is
 # individually re-runnable with identical results, and CPU and GPU runs
 # produce bit-identical data (generation happens on the CPU and transfers).
@@ -48,9 +48,10 @@ try:
 except ImportError:
     xp = np  # CPU fallback - everything below is backend-agnostic
 
-from commkit import analysis, generate_psk, plotting
+from commkit import analysis, generate, plotting
 from commkit.backend import to_device
 from commkit.impairments import apply_awgn, generate_phase_noise
+from commkit.mapping import Constellation
 
 
 def cpu(a):
@@ -66,7 +67,7 @@ plotting.apply_default_theme()
 # 32 GBaud QPSK with three impairments on top of the (assumed perfectly
 # equalized) symbols:
 #
-# * **QPSK reference sequence** `d` - `generate_psk` at 1 sample/symbol with
+# * **QPSK reference sequence** `d` - `generate` at 1 sample/symbol with
 #   pulse shaping off yields the unit-energy symbols directly;
 # * **Wiener phase noise** - combined beat linewidth `Δν = 1 MHz` (TX + LO
 #   DFB pair): `generate_phase_noise` draws the per-symbol random walk with
@@ -98,9 +99,7 @@ WANDER_FREQ = 100e3  # wander rate [Hz]
 t = xp.arange(N) * T
 
 # Known QPSK sequence (the data-aided reference), unit symbol energy:
-d = xp.asarray(
-    generate_psk(N, sps=1, symbol_rate=R, order=4, pulse_shape="none", seed=7).samples
-)
+d = xp.asarray(generate(Constellation.psk(4), N, symbol_rate=R, sps=1, rng=7).samples)
 
 # Carrier phase = laser random walk (ground truth in hand) + injected wander:
 phi_pn = xp.asarray(generate_phase_noise(N, R, linewidth=DNU_TRUE, seed=17))
