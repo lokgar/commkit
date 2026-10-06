@@ -133,8 +133,11 @@ on construction, and plain NumPy inside, so commax can produce them.
 
 - **`Constellation`** (`commkit.mapping`, re-exported at top level). Built with
   `Constellation(points, bit_labels=None, pmf=None)` for arbitrary or learned
-  constellations, or with `.qam(M)`, `.psk(M)`, `.pam(M, unipolar=)`, `.ask(M)`.
-  Shaping uses `.qam(64).shaped(nu=...)` or `.shaped(entropy=...)`. Functions
+  constellations, or with `.qam(M)`, `.psk(M)`, `.pam(M, unipolar=)` (M-ASK is
+  `.pam(M, unipolar=True)`; there is no second name). Shaping uses
+  `.qam(64).shaped(nu=...)` or `.shaped(entropy=...)`, which rescales the points
+  to unit pmf-weighted power, so the §5 normalization invariant holds for PS
+  too and `rescale_ps_symbols` disappears in 3.2. Functions
   accept **objects only, no strings**. It replaces `modulation` / `order` /
   `unipolar` / `pmf` across all 24 modules.
 - **Pulses** (`commkit.filtering`, re-exported): `RRC(rolloff, span)`,
@@ -543,11 +546,13 @@ sites. The order avoids conflicts, because 1.4-1.6 all edit
 
 ### Step 2: core foundations
 
-- [ ] **2.1 `feat(mapping): Constellation value object for 2.0`.** This is
+- [x] **2.1 `feat(mapping): Constellation value object for 2.0`.** This is
   additive; the old functions keep working.
   - Read-only arrays, plus the constructor `Constellation(points,
-    bit_labels=None, pmf=None)`.
-  - `.qam/.psk/.pam/.ask` factories and `.shaped(nu=...|entropy=...)`.
+    bit_labels=None, pmf=None)`; value equality and hashing.
+  - `.qam/.psk/.pam` factories and `.shaped(nu=...|entropy=...)`.
+  - `map` / `demap` / `llr` work from points and labels, so arbitrary
+    constellations work. `.gray()` stays as a bridge until 3.2.
 - [ ] **2.2 `feat(filtering): pulse value objects`.** This is additive.
   - `RRC`, `RC`, `Gaussian`, `Rect` and `SmoothRect` with `.taps(sps)`. They
     delegate to the existing `*_taps` functions, and tests compare them to

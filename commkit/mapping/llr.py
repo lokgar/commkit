@@ -109,19 +109,39 @@ def compute_llr(
     k = int(np.log2(order))
     if 2**k != order:
         raise ValueError(f"Order must be a power of 2, got {order}")
+    const = gray_constellation(modulation, order, unipolar=unipolar)
+    labels = unpack_bits(np.arange(order, dtype="int32"), k)  # (M, k), MSB first
+    return _llr(symbols, const, labels, pmf, noise_var, method)
+
+
+def _llr(
+    symbols: ArrayType,
+    points: np.ndarray,
+    bit_labels: np.ndarray,
+    pmf: np.ndarray | None,
+    noise_var: float,
+    method: str,
+) -> ArrayType:
+    """LLRs of ``symbols`` against host ``points`` labelled by ``bit_labels``.
+
+    Shared by :func:`compute_llr` and :meth:`Constellation.llr`.  Returns
+    float32 LLRs of shape ``(..., N * k)`` on the input's device.
+    """
     if method not in ("maxlog", "exact"):
         raise ValueError(f"Unknown method: {method}. Use 'maxlog' or 'exact'.")
-
+    order, k = bit_labels.shape
     symbols, xp, _ = dispatch(symbols)
     is_complex = symbols.dtype.kind == "c"
     sym_flat = symbols.reshape(-1).astype(xp.complex64 if is_complex else xp.float32)
 
-    const = gray_constellation(modulation, order, unipolar=unipolar)
-    const = xp.asarray(const.astype(np.complex64 if is_complex else np.float32))
+    const = xp.asarray(points.astype(np.complex64 if is_complex else np.float32))
     # Column indices of the M/2 points whose bit b is 0 (resp. 1): (k, M/2).
-    bits = unpack_bits(np.arange(order, dtype="int32"), k)  # (M, k), MSB first
-    idx0 = xp.asarray(np.stack([np.flatnonzero(bits[:, b] == 0) for b in range(k)]))
-    idx1 = xp.asarray(np.stack([np.flatnonzero(bits[:, b] == 1) for b in range(k)]))
+    idx0 = xp.asarray(
+        np.stack([np.flatnonzero(bit_labels[:, b] == 0) for b in range(k)])
+    )
+    idx1 = xp.asarray(
+        np.stack([np.flatnonzero(bit_labels[:, b] == 1) for b in range(k)])
+    )
 
     inv_sigma2 = np.float32(1.0 / max(noise_var, 1e-20))
     if pmf is not None:

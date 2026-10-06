@@ -149,8 +149,9 @@ Dependencies point downward only:
 - Integer-SPS algorithms validate with `require_integer_sps()` before any cast.
   Never truncate 1.5 SPS to 1.
 - **Value objects are frozen dataclasses** with read-only NumPy arrays:
-  - `Constellation`: `.qam(M)`, `.psk(M)`, `.pam(M)`, `.ask(M)`, or arbitrary
-    `points`. Functions accept the object only, never strings.
+  - `Constellation`: `.qam(M)`, `.psk(M)`, `.pam(M, unipolar=)`, or arbitrary
+    `points`; `.shaped(nu=|entropy=)` keeps unit power. Functions accept the
+    object only, never strings.
   - Pulses: `RRC`, `RC`, `Gaussian`, `Rect`, `SmoothRect`. A raw taps array is
     accepted wherever a pulse is.
   - Algorithm objects, one per estimation method (`BPS`, `PLL`,

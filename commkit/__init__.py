@@ -33,6 +33,7 @@ from .core import (
 )
 from .io import load_npz, save_npz
 from .logger import set_log_level
+from .mapping import Constellation
 
 # Loaded on first attribute access (PEP 562), so ``import commkit`` stays cheap
 # and does not import Matplotlib, SciPy-heavy modules, or CuPy until needed.
@@ -68,6 +69,7 @@ def __dir__() -> list[str]:
 
 
 __all__ = [
+    "Constellation",
     "Preamble",
     "Signal",
     "SingleCarrierFrame",

@@ -9,11 +9,12 @@ digital bits and physical IQ symbols.  It is organised by mathematical concern:
 - :mod:`~commkit.mapping.llr` - soft-decision (LLR) demapping.
 - :mod:`~commkit.mapping.shaping` - probabilistic shaping (PS-QAM).
 - :mod:`~commkit.mapping.constellation` - the :class:`Constellation` value
-  object bundling points + Gray labels + optional shaping pmf.
+  object (points, bit labels, optional shaping pmf), the 2.0 way to describe a
+  modulation.
 
 The public import surface is stable: every name previously importable from the
-flat ``commkit.mapping`` module is re-exported here.  ``Constellation`` is an
-additive convenience over the existing loose-array free functions.
+flat ``commkit.mapping`` module is re-exported here.  The string-based free
+functions take a ``Constellation`` from module pass 3.2 on.
 
 Note: codes and constellations are generated using NumPy (host-side).
 """
