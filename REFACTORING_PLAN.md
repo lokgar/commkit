@@ -630,7 +630,7 @@ The equalization pass (3.7) gets more commits:
 | --- | --- |
 | 4.1 Delete the compatibility bridge and `helpers.py`; check that no module imports a removed name. | S |
 | 4.2 Final `AGENTS.md` pass (drop the migration-status section); README rewritten around §2.1. | S |
-| 4.3 Examples: the new `qam_receiver_quickstart.py` plus the five existing examples migrated; all run as a CI smoke test at small sizes. | M |
+| 4.3 Examples: the new `qam_receiver_quickstart.py` plus the five existing examples migrated. (The smoke test running every example, `tests/test_examples.py`, was pulled forward after commit 1.4, so each commit keeps them working.) | M |
 | 4.4 Full GPU suite and full benchmark run; save `0003_v2_0`; CHANGELOG entry; bump to 2.0.0. | S |
 
 ### Step 5: performance follow-ups (independent, any time after step 3.6)
