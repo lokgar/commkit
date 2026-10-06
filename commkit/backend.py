@@ -11,6 +11,7 @@ minimal explicit device management from the user.
 """
 
 import types
+import warnings
 from functools import cache, lru_cache
 from typing import Any
 
@@ -172,10 +173,17 @@ def get_scipy_module(xp: types.ModuleType) -> types.ModuleType:
     # Match sp to the actual array module so dispatch() returns a consistent
     # (xp, sp) pair.
     if xp.__name__ == "cupy":
-        import cupyx.scipy
-        import cupyx.scipy.ndimage
-        import cupyx.scipy.signal
-        import cupyx.scipy.special
+        # cupyx.scipy.signal imports CuPy's experimental JIT, which emits a
+        # FutureWarning on import; it is CuPy-internal and not actionable for
+        # users, so it is silenced here only (no global warning filter).
+        with warnings.catch_warnings():
+            warnings.filterwarnings(
+                "ignore", message=".*cupyx.jit.rawkernel is experimental.*"
+            )
+            import cupyx.scipy
+            import cupyx.scipy.ndimage
+            import cupyx.scipy.signal
+            import cupyx.scipy.special
 
         return cupyx.scipy
 

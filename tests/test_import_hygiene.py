@@ -96,3 +96,18 @@ def test_subpackages_load_on_attribute_access():
         "print(loaded, 'commkit.plotting' in sys.modules)"
     )
     assert result == "False True"
+
+
+@pytest.mark.gpu_only
+def test_gpu_dispatch_emits_no_cupy_jit_warning(backend_device):
+    """CuPy's experimental-JIT FutureWarning (raised when cupyx.scipy.signal is
+    imported) must not reach users on their first GPU call."""
+    result = _run(
+        "import warnings\n"
+        "warnings.simplefilter('error', FutureWarning)\n"
+        "import cupy as cp\n"
+        "from commkit.backend import dispatch\n"
+        "dispatch(cp.zeros(4))\n"
+        "print('ok')"
+    )
+    assert result == "ok"
