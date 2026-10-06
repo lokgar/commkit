@@ -408,14 +408,14 @@ benchmarks and CI.
   `uv run pytest benchmarks/ --benchmark-only --device=all --benchmark-save=pre_v2 --benchmark-storage=file://benchmarks/baselines`
   on the reference machine, then delete `0001`. The commit message records the
   hardware and the commit hash.
-- [ ] **0.5 `test: add pure-Python reference oracles for sequential equalizers`.**
+- [x] **0.5 `test: add pure-Python reference oracles for sequential equalizers`.**
   - `tests/common/reference_impl.py` gets plain-loop LMS, RLS, CMA and RDE in
     SISO and 2x2 butterfly form, written from the textbook equations with
     float64/complex128 throughout.
-  - `tests/equalization/test_oracles.py` compares the Numba kernels to them on
+  - `tests/equalization/test_equalizer_oracles.py` compares the Numba kernels to them on
     N ≈ 300 symbols. It checks outputs, final weights and errors at rtol 1e-5.
 - [ ] **0.6 `test: add reference oracles for PLL, BPS, Viterbi-Viterbi and cycle-slip correction`.**
-  Same pattern, in `tests/recovery/test_oracles.py`.
+  Same pattern, in `tests/recovery/test_recovery_oracles.py` (test basenames must be globally unique).
 - [ ] **0.7 `ci: measure Numba kernel coverage and add a coverage floor`.**
   - A new CI job runs `tests/equalization tests/recovery` with
     `NUMBA_DISABLE_JIT=1 --cov`. Kernels that cannot run without JIT are
