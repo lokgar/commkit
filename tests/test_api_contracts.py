@@ -50,7 +50,7 @@ import commkit
 from commkit.backend import to_device
 from commkit.core import Signal
 from commkit.equalization import EqualizerResult
-from commkit.mapping import gray_constellation
+from commkit.mapping import Constellation, gray_constellation
 
 # -----------------------------------------------------------------------------
 # Kinds and checks
@@ -156,8 +156,7 @@ class Inputs:
             samples=self.primary(row, ndim),
             sampling_rate=RS * sps,
             symbol_rate=RS,
-            mod_scheme="qam",
-            mod_order=16,
+            constellation=Constellation.qam(16),
         )
 
 
@@ -229,6 +228,7 @@ ROWS: list[Row] = [
     Row("commkit.io.save_npz", INFRA, data=2),
     # --- core ---------------------------------------------------------------
     Row("commkit.core.frame.Preamble", VALUE),
+    Row("commkit.core.signal.Reference", VALUE),
     Row("commkit.core.frame.SingleCarrierFrame", VALUE),
     Row("commkit.core.signal.Signal", VALUE),
     Row("commkit.core.generation.expand", DESIGN),
@@ -1072,8 +1072,8 @@ LEGACY: dict[str, frozenset[str]] = {
     "commkit.smoothing.moving_average": L(SIG),
     "commkit.smoothing.savgol_smooth": L(SIG),
     "commkit.smoothing.smooth_density_2d": L(SIG),
-    "commkit.spectral.add_pilot_tone": L(SIG, ARR, FCT),
-    "commkit.spectral.shift_frequency": L(SIG, ARR, FCT),
+    "commkit.spectral.add_pilot_tone": L(SIG, ARR, SGN, FCT),
+    "commkit.spectral.shift_frequency": L(SIG, ARR, SGN, FCT),
     "commkit.spectral.spectrogram": L(SIG),
     "commkit.spectral.welch_psd": L(SIG),
     "commkit.timing.correct_timing": L(SIG),

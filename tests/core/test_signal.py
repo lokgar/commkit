@@ -18,7 +18,9 @@ from commkit import (
     plotting,
     spectral,
 )
-from commkit.core import Signal
+from commkit.core import Reference, Signal
+from commkit.filtering import RRC, Rect
+from commkit.mapping import Constellation
 from tests.common.conversions import device_of, to_numpy
 
 
@@ -53,53 +55,64 @@ class TestSignalCreation:
         with pytest.raises(ValueError, match="Only 1D"):
             Signal(samples=xp.zeros((2, 2, 10)), sampling_rate=1.0, symbol_rate=1.0)
 
-        # 2. Time-Last heuristic (Time, Channels) -> (Channels, Time)
-        # Heuristic: s0 > s1 and s0 > 32
-        data_wrong = xp.zeros((100, 2))
-        s = Signal(samples=data_wrong, sampling_rate=1.0, symbol_rate=1.0)
-        assert s.samples.shape == (2, 100)  # Should be transposed
+        # 2. (N, C)-looking input raises instead of being transposed.
+        with pytest.raises(ValueError, match="looks like"):
+            Signal(samples=xp.zeros((100, 2)), sampling_rate=1.0, symbol_rate=1.0)
+        assert Signal(
+            samples=xp.zeros((2, 100)), sampling_rate=1.0, symbol_rate=1.0
+        ).samples.shape == (2, 100)
 
-    def test_signal_auto_symbols(self, xp):
-        """Verify source_symbols derivation from source_bits in post-init."""
-
-        bits = xp.array([0, 1, 0, 0], dtype="int8")
-        # BPSK mapping: 0 -> -1, 1 -> 1
+    def test_construction_does_no_hidden_work(self, xp, xpt):
+        """The reference is stored as given: no mapping, no normalization."""
+        symbols = xp.asarray([2.0, -2.0, 2.0, 2.0])
+        bits = xp.asarray([1, 0, 1, 1], dtype="int8")
         s = Signal(
-            samples=xp.ones(10),
-            sampling_rate=1.0,
+            samples=xp.ones(8),
+            sampling_rate=2.0,
             symbol_rate=1.0,
-            source_bits=bits,
-            mod_scheme="PSK",
-            mod_order=2,
+            constellation=Constellation.pam(2),
+            reference=Reference(symbols=symbols, bits=bits),
         )
-        assert s.source_symbols is not None
-        assert len(s.source_symbols) == 4
-
-        # 262: hyphenated mod
-        s2 = Signal(
-            samples=xp.ones(10),
-            sampling_rate=1.0,
-            symbol_rate=1.0,
-            source_bits=bits,
-            mod_scheme="PSK-MY",
-            mod_order=2,
+        assert s.reference.symbols is symbols
+        assert s.reference.bits is bits
+        xpt.assert_array_equal(s.reference.symbols, symbols)
+        assert s.bits_per_symbol == 1
+        assert (
+            Signal(
+                samples=xp.ones(4), sampling_rate=1.0, symbol_rate=1.0
+            ).bits_per_symbol
+            is None
         )
-        assert s2.source_symbols is not None
 
-    def test_signal_validate_samples_transposition(self, xp):
-        """Cover the transposition warning heuristic in Signal."""
-        # Create (Time, Channels) where Time >> Channels and Time > 32
-        # e.g. (100, 2)
-        data = xp.zeros((100, 2))
+    def test_reference_validation(self, xp):
+        with pytest.raises(ValueError, match="symbols"):
+            Reference(symbols=xp.zeros((2, 2, 2)))
+        with pytest.raises(ValueError, match="channel axis"):
+            Reference(symbols=xp.zeros((2, 4)), bits=xp.zeros((3, 8)))
+        with pytest.raises(ValueError, match="channel axis"):
+            Reference(symbols=xp.zeros((2, 4)), bits=xp.zeros(8))
+        assert Reference(symbols=[1.0, -1.0]).bits is None
 
-        # Signal expects (Channels, Time) usually, but logic detects (Time, Channels)
-        # and transposes it, logging a warning.
-        # We verify the shape is flipped to (2, 100).
-        sig = Signal(samples=data, sampling_rate=1.0, symbol_rate=1.0)
+    @pytest.mark.gpu_only
+    def test_reference_rejects_mixed_devices(self, xp):
+        with pytest.raises(ValueError, match="same device"):
+            Reference(symbols=xp.zeros(4), bits=np.zeros(4))
 
-        assert sig.samples.shape == (2, 100)
-
-        assert sig.bits_per_symbol is None
+    def test_bridge_properties(self, xp):
+        """1.x attributes are derived read-only from the 2.0 fields."""
+        sig = generate_qam(
+            order=16, num_symbols=8, sps=2, symbol_rate=1e3, pulse_shape="rrc"
+        )
+        assert sig.constellation == Constellation.qam(16)
+        assert sig.pulse == RRC(0.35, span=10)
+        assert (sig.mod_scheme, sig.mod_order, sig.pulse_shape) == ("QAM", 16, "rrc")
+        assert (sig.filter_span, sig.rrc_rolloff, sig.mod_rz) == (10, 0.35, False)
+        assert sig.source_symbols is sig.reference.symbols
+        assert sig.source_bits is sig.reference.bits
+        assert sig.signal_type is None
+        rz = generate_pam(order=2, num_symbols=8, sps=4, symbol_rate=1e3, rz=True)
+        assert rz.pulse == Rect(0.5)
+        assert rz.mod_rz is True
 
 
 class TestSignalProperties:
@@ -140,14 +153,13 @@ class TestSignalProperties:
     def test_signal_bits_per_symbol_set(self, xp):
         """Verify bits_per_symbol property when mod_order is set."""
         s = Signal(
-            samples=xp.zeros(10), sampling_rate=1.0, symbol_rate=1.0, mod_order=16
+            samples=xp.zeros(10),
+            sampling_rate=1.0,
+            symbol_rate=1.0,
+            constellation=Constellation.qam(16),
         )
         assert s.bits_per_symbol == 4
-
-        s2 = Signal(
-            samples=xp.zeros(10), sampling_rate=1.0, symbol_rate=1.0, mod_order=64
-        )
-        assert s2.bits_per_symbol == 6
+        assert s.replace(constellation=Constellation.qam(64)).bits_per_symbol == 6
 
     def test_signal_summary(self, xp):
         """str() gives a plain-text summary; _repr_html_ the notebook table."""
@@ -203,19 +215,19 @@ class TestSignalCloningAndProvenance:
     def test_signal_clone(self, xp, xpt):
         """Verify Signal.clone() deep-copies arrays and preserves device context."""
         data = xp.array([1, 2, 3])
-        source_bits = xp.array([0, 1, 0])
         s = Signal(
             samples=data,
             sampling_rate=1.0,
             symbol_rate=1.0,
-            source_bits=source_bits,
+            reference=Reference(symbols=xp.ones(3), bits=xp.array([0, 1, 0])),
         )
         s_copy = s.clone()
 
         assert s_copy is not s
         xpt.assert_allclose(s.samples, s_copy.samples)
         assert s_copy.samples is not s.samples
-        assert s_copy.source_bits is not s.source_bits
+        assert s_copy.reference.bits is not s.reference.bits
+        xpt.assert_array_equal(s_copy.reference.bits, s.reference.bits)
         assert s_copy.backend == s.backend
 
     def test_signal_replace_shares_unchanged_fields(self, xp):
@@ -224,15 +236,14 @@ class TestSignalCloningAndProvenance:
             samples=xp.arange(8),
             sampling_rate=2.0,
             symbol_rate=1.0,
-            source_bits=xp.arange(4),
+            reference=Reference(symbols=xp.arange(4) * 1.0),
         )
 
         new = s.replace(sampling_rate=4.0)
 
         assert new is not s
         assert new.samples is s.samples
-        assert new.source_bits is s.source_bits
-        assert new.source_symbols is s.source_symbols  # not re-normalized
+        assert new.reference is s.reference
         assert s.sampling_rate == 2.0
 
     def test_signal_is_frozen(self, xp):
@@ -251,19 +262,11 @@ class TestSignalCloningAndProvenance:
         "field, value",
         [
             ("symbol_rate", -1.0),
-            ("filter_span", 0),
-            ("filter_span", 2.5),
-            ("rrc_rolloff", 1.5),
-            ("duty_cycle", 0.0),
-            ("rise_time", -0.1),
             ("center_frequency", -1.0),
-            ("spectral_domain", "baseband"),
-            ("physical_domain", "X"),
-            ("signal_type", "Frame"),
-            ("mod_order", 0),
-            ("mod_rz", "yes"),
-            ("mod_scheme", 16),
             ("sampling_rate", "1e6"),
+            ("constellation", "qam"),
+            ("pulse", "rrc"),
+            ("reference", np.ones(4)),
         ],
     )
     def test_signal_field_validation(self, xp, field, value):
@@ -278,7 +281,12 @@ class TestSignalCloningAndProvenance:
         s = Signal(samples=xp.arange(8), sampling_rate=2, symbol_rate=np.float32(1))
         assert type(s.sampling_rate) is float
         assert type(s.symbol_rate) is float
-        assert type(s.replace(mod_order=np.int64(16)).mod_order) is int
+
+    @pytest.mark.parametrize("name", ["mod_scheme", "source_symbols", "pulse_shape"])
+    def test_bridge_fields_are_read_only(self, xp, name):
+        s = Signal(samples=xp.arange(8), sampling_rate=2.0, symbol_rate=1.0)
+        with pytest.raises(TypeError, match=name):
+            s.replace(**{name: None})
 
     def test_signal_replace_samples_shares_provenance_and_invalidates_caches(
         self, xp, xpt
@@ -289,8 +297,7 @@ class TestSignalCloningAndProvenance:
             samples=xp.arange(8, dtype=xp.float32),
             sampling_rate=2.0,
             symbol_rate=1.0,
-            source_bits=xp.arange(4),
-            source_symbols=xp.asarray([1.0, -1.0]),
+            reference=Reference(symbols=xp.asarray([1.0, -1.0]), bits=xp.arange(4)),
             frame=frame,
         )
         s = s.replace(resolved_symbols=xp.asarray([1.0, -1.0]))
@@ -303,8 +310,7 @@ class TestSignalCloningAndProvenance:
         assert result is not s
         assert result.samples is replacement
         assert result.samples is not old_samples
-        assert result.source_bits is s.source_bits
-        assert result.source_symbols is s.source_symbols
+        assert result.reference is s.reference
         assert result.frame is frame
         assert result.resolved_symbols is None
         assert result.resolved_bits is None
@@ -341,7 +347,6 @@ class TestSignalCloningAndProvenance:
             samples=xp.ones(16, dtype=xp.complex64),
             sampling_rate=1.0,
             symbol_rate=1.0,
-            signal_type="Preamble",
             frame=frame,
         )
 
@@ -406,24 +411,19 @@ class TestSignalDSPOperations:
         assert len(f2) == 128
         assert f2.shape == p2.shape
 
-    def test_add_pilot_tone_records_provenance(self, xp, xpt):
-        """add_pilot_tone on a Signal records frequency and power-ratio provenance."""
+    def test_add_pilot_tone_returns_applied_frequency(self, xp, xpt):
+        """add_pilot_tone on a Signal returns a new Signal and the applied frequency."""
         sig = generate_psk(
             symbol_rate=1e6, num_symbols=128, order=4, pulse_shape="rrc", sps=8, seed=0
         ).to(device_of(xp))
         before = xp.asarray(sig.samples.copy())
         df = sig.sampling_rate / sig.samples.shape[-1]
 
-        ret = spectral.add_pilot_tone(sig, 2.0e6, power_ratio_db=-12.0)
+        ret, f_p = spectral.add_pilot_tone(sig, 2.0e6, power_ratio_db=-12.0)
 
+        assert isinstance(ret, Signal)
         assert ret is not sig  # pure: a new Signal is returned
-        assert ret.pilot_tone_frequency is not None
-        # Frequency and power are recorded as 1-D per-channel arrays (SISO -> len 1).
-        assert isinstance(ret.pilot_tone_frequency, np.ndarray)
-        assert ret.pilot_tone_frequency.shape == (1,)
-        xpt.assert_array_equal(ret.pilot_tone_power_ratio_db, [-12.0])
-        f_p = float(ret.pilot_tone_frequency[0])
-        # Recorded frequency is on the FFT grid and near the request.
+        # The applied frequency is on the FFT grid and near the request.
         assert abs(round(f_p / df) - f_p / df) < 1e-9
         assert abs(f_p - 2.0e6) <= df / 2 + 1.0
         # Samples actually changed.
@@ -437,19 +437,15 @@ class TestSignalDSPOperations:
         s = Signal(samples=data, sampling_rate=fs, symbol_rate=10.0)
 
         # Offset by 20 Hz
-        s = spectral.shift_frequency(s, 20.0)
+        s, actual = spectral.shift_frequency(s, 20.0)
+        assert isinstance(s, Signal)
+        assert actual == 20.0
 
-        # 1. Check metadata
-        assert s.digital_frequency_offset == 20.0
-
-        # 2. Check signal content
         t = xp.arange(100) / fs
         expected = xp.exp(1j * 2 * xp.pi * 20.0 * t)
         xpt.assert_allclose(s.samples, expected)
 
-        # 3. Check accumulation
-        s = spectral.shift_frequency(s, 5.0)
-        assert s.digital_frequency_offset == 25.0
+        s, _ = spectral.shift_frequency(s, 5.0)
 
         # Check approximate freq
         f, p = spectral.welch_psd(s, nperseg=64)
@@ -493,8 +489,7 @@ class TestSignalDSPOperations:
             sps=8,
             duty_cycle=0.5,
         )
-        assert s.pulse_shape == "gaussian"
-        assert s.duty_cycle == 0.5
+        assert s.pulse == filtering.Gaussian(fwhm=0.5)
 
 
 class TestSignalWaveformsAndModulation:
@@ -508,9 +503,8 @@ class TestSignalWaveformsAndModulation:
         with pytest.raises(ValueError, match="No pulse shape defined"):
             filtering.shaping_filter_taps(s)
 
-        s = s.replace(pulse_shape="invalid_shape")
-        with pytest.raises(ValueError, match="Unknown pulse shape"):
-            filtering.shaping_filter_taps(s)
+        with pytest.raises(ValueError, match="pulse must be a Pulse"):
+            s.replace(pulse="invalid_shape")
 
     def test_rzpam_odd_sps(self, xp):
         """Verify RZ-PAM raises error for odd SPS."""
@@ -581,23 +575,6 @@ class TestSignalWaveformsAndModulation:
         sig = generate_qam(num_symbols=100, sps=4.0, symbol_rate=1e6, order=16)
         assert sig.samples.shape[-1] == 100 * 4
         assert sig.sps == 4.0
-
-    def test_signal_rz_modscheme_flags(self, xp):
-        """Verify RZ modulation flags in __init__."""
-        bits = xp.array([0, 1], dtype="int8")
-        s = Signal(
-            samples=xp.ones(10),
-            sampling_rate=1.0,
-            symbol_rate=1.0,
-            source_bits=bits,
-            mod_scheme="PAM",
-            mod_order=2,
-            mod_rz=True,
-        )
-        # source_symbols should be derived from bits using "PAM" mapping
-        assert s.source_symbols is not None
-        assert len(s.source_symbols) == 2
-        assert s.mod_rz is True
 
     def test_pam_waveform(self, xp):
         """PAM generation returns a host Signal; .to() moves it explicitly."""
@@ -782,7 +759,7 @@ class TestSignalResolutionAndMetrics:
             samples=xp.ones(10, dtype="complex64"),
             sampling_rate=1.0,
             symbol_rate=1.0,
-            source_symbols=xp.ones(10, dtype="complex64"),
+            reference=Reference(symbols=xp.ones(10, dtype="complex64")),
         )
         with pytest.raises(ValueError, match="No resolved symbols available"):
             metrics.evm(s)
@@ -802,7 +779,7 @@ class TestSignalResolutionAndMetrics:
             samples=xp.ones(10, dtype="complex64"),
             sampling_rate=1.0,
             symbol_rate=1.0,
-            source_symbols=xp.ones(10, dtype="complex64"),
+            reference=Reference(symbols=xp.ones(10, dtype="complex64")),
         )
         with pytest.raises(ValueError, match="No resolved symbols available"):
             metrics.snr(s)
@@ -841,9 +818,10 @@ class TestSignalResolutionAndMetrics:
             samples=result.y_hat,
             sampling_rate=orig.symbol_rate,
             symbol_rate=orig.symbol_rate,
-            mod_scheme="psk",
-            mod_order=4,
-            source_symbols=orig.source_symbols[..., : result.y_hat.shape[-1]],
+            constellation=Constellation.psk(4),
+            reference=Reference(
+                symbols=orig.source_symbols[..., : result.y_hat.shape[-1]]
+            ),
         )
         rx = multirate.resolve_symbols(rx)
 
@@ -877,9 +855,10 @@ class TestSignalResolutionAndMetrics:
             samples=result.y_hat,
             sampling_rate=orig.symbol_rate,
             symbol_rate=orig.symbol_rate,
-            mod_scheme="psk",
-            mod_order=4,
-            source_symbols=orig.source_symbols[..., : result.y_hat.shape[-1]],
+            constellation=Constellation.psk(4),
+            reference=Reference(
+                symbols=orig.source_symbols[..., : result.y_hat.shape[-1]]
+            ),
         )
         rx = multirate.resolve_symbols(rx)
 
@@ -912,10 +891,11 @@ class TestSignalResolutionAndMetrics:
             samples=result.y_hat,
             sampling_rate=orig.symbol_rate,
             symbol_rate=orig.symbol_rate,
-            mod_scheme="psk",
-            mod_order=4,
-            source_symbols=orig.source_symbols[..., : result.y_hat.shape[-1]],
-            source_bits=orig.source_bits[..., : result.y_hat.shape[-1] * 2],
+            constellation=Constellation.psk(4),
+            reference=Reference(
+                symbols=orig.source_symbols[..., : result.y_hat.shape[-1]],
+                bits=orig.source_bits[..., : result.y_hat.shape[-1] * 2],
+            ),
         )
         rx = multirate.resolve_symbols(rx)
         rx = mapping.demap_symbols_hard(rx)
@@ -990,8 +970,7 @@ class TestSignalDeviceAndPlotting:
             samples=result.y_hat,
             sampling_rate=sig.symbol_rate,
             symbol_rate=sig.symbol_rate,
-            mod_scheme="psk",
-            mod_order=4,
+            constellation=Constellation.psk(4),
         )
         plot_result = plotting.plot_constellation(rx_1sps, show=False)
         assert plot_result is not None

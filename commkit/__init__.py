@@ -23,6 +23,7 @@ __version__ = "1.1.0"
 
 from .core import (
     Preamble,
+    Reference,
     Signal,
     SingleCarrierFrame,
     generate,
@@ -86,6 +87,7 @@ __all__ = [
     "Gaussian",
     "RC",
     "RRC",
+    "Reference",
     "Rect",
     "SmoothRect",
     "Preamble",

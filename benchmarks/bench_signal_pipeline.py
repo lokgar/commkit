@@ -8,7 +8,7 @@ import tracemalloc
 import pytest
 
 from commkit import equalization, filtering, multirate
-from commkit.core import Preamble, SingleCarrierFrame, generate_qam
+from commkit.core import Preamble, Reference, SingleCarrierFrame, generate_qam
 from commkit.impairments import apply_awgn
 
 ROUNDS = dict(rounds=3, warmup_rounds=1, iterations=1)
@@ -41,8 +41,7 @@ def _frame_signal():
     payload_symbols = frame.payload_symbols
     _ = frame.pilot_bits, frame.pilot_symbols
     sig = frame.to_signal(sps=4, symbol_rate=1e6, filter_span=8)
-    sig = sig.replace(source_bits=payload_bits)
-    sig = sig.replace(source_symbols=payload_symbols)
+    sig = sig.replace(reference=Reference(symbols=payload_symbols, bits=payload_bits))
     sig = sig.replace(resolved_symbols=payload_symbols)
     sig = sig.replace(resolved_bits=payload_bits)
     return sig

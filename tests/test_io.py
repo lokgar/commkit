@@ -73,41 +73,35 @@ class TestNPZSaveLoadSISO:
 
         assert sig2.sampling_rate == sig.sampling_rate
         assert sig2.symbol_rate == sig.symbol_rate
-        assert sig2.mod_scheme == sig.mod_scheme
-        assert sig2.mod_order == sig.mod_order
-        assert sig2.mod_unipolar == sig.mod_unipolar
-        assert sig2.pulse_shape == sig.pulse_shape
-        assert sig2.rrc_rolloff == sig.rrc_rolloff
-        assert sig2.filter_span == sig.filter_span
-        assert sig2.spectral_domain == sig.spectral_domain
-        assert sig2.physical_domain == sig.physical_domain
         assert sig2.center_frequency == sig.center_frequency
-        assert sig2.digital_frequency_offset == sig.digital_frequency_offset
-        assert sig2.pilot_tone_frequency == sig.pilot_tone_frequency
+        assert sig2.constellation == sig.constellation
+        assert sig2.constellation.family == sig.constellation.family
 
-    def test_roundtrip_pilot_tone_frequency(self, tmp_path: Any, xpt: Any) -> None:
-        """pilot_tone_frequency round-trips: None when absent, 1-D array when set."""
-        sig = _siso_signal()
-        assert sig.pilot_tone_frequency is None
+    @pytest.mark.parametrize(
+        "pulse",
+        [
+            filtering.RRC(0.2, span=6),
+            filtering.RC(0.5),
+            filtering.Gaussian(0.7, span=4),
+            filtering.Rect(0.5, 0.1),
+            filtering.SmoothRect(0.3, 0.5, 8),
+            None,
+        ],
+    )
+    def test_roundtrip_pulse(self, tmp_path: Any, pulse: Any) -> None:
+        sig = _siso_signal().replace(pulse=pulse)
+        save_npz(sig, tmp_path / "pulse.npz")
+        assert load_npz(tmp_path / "pulse.npz").pulse == pulse
 
-        sig = sig.replace(pilot_tone_frequency=2.5e9)
-        assert isinstance(sig.pilot_tone_frequency, np.ndarray)
-        p = tmp_path / "tone.npz"
-        save_npz(sig, p)
-        sig2 = load_npz(p)
-        assert isinstance(sig2.pilot_tone_frequency, np.ndarray)
-        xpt.assert_array_equal(sig2.pilot_tone_frequency, [2.5e9])
-
-    def test_roundtrip_pilot_tone_power_ratio_db(self, tmp_path: Any, xpt: Any) -> None:
-        """pilot_tone_power_ratio_db round-trips correctly."""
-        sig = _siso_signal()
-        assert sig.pilot_tone_power_ratio_db is None
-
-        sig = sig.replace(pilot_tone_power_ratio_db=-12.0)
-        p = tmp_path / "psr.npz"
-        save_npz(sig, p)
-        sig2 = load_npz(p)
-        xpt.assert_array_equal(sig2.pilot_tone_power_ratio_db, [-12.0])
+    def test_roundtrip_custom_constellation(self, tmp_path: Any) -> None:
+        c = mapping.Constellation(
+            [-3.0, -1.0, 1.0, 3.0], bit_labels=[[0, 0], [0, 1], [1, 1], [1, 0]]
+        ).shaped(nu=0.1)
+        sig = _siso_signal().replace(constellation=c)
+        save_npz(sig, tmp_path / "custom.npz")
+        loaded = load_npz(tmp_path / "custom.npz").constellation
+        assert loaded == c
+        assert loaded.family is None
 
     def test_roundtrip_source_bits(self, tmp_path: Any, xpt: Any) -> None:
         """Source bits round-trip identically."""
@@ -139,15 +133,6 @@ class TestNPZSaveLoadSISO:
         sig2 = load_npz(p_no_ext)
         xpt.assert_array_equal(to_numpy(sig.samples), to_numpy(sig2.samples))
 
-    def test_roundtrip_signal_type_none(self, tmp_path: Any) -> None:
-        """Signal without signal_type should load with signal_type=None."""
-        sig = _siso_signal()
-        assert sig.signal_type is None
-        p = tmp_path / "plain.npz"
-        save_npz(sig, p)
-        sig2 = load_npz(p)
-        assert sig2.signal_type is None
-
     def test_no_source_arrays_when_none(self, tmp_path: Any) -> None:
         """Signal with no source_bits/source_symbols should load without them."""
         sig = Signal(
@@ -178,30 +163,6 @@ class TestNPZSaveLoadMIMO:
         assert sig2.samples.shape == sig.samples.shape
         xpt.assert_array_equal(to_numpy(sig.samples), to_numpy(sig2.samples))
 
-    def test_roundtrip_pilot_tone_frequency_per_channel(
-        self, tmp_path: Any, xpt: Any
-    ) -> None:
-        """Per-channel pilot frequencies round-trip as an array."""
-        sig = _mimo_signal()
-        sig = sig.replace(pilot_tone_frequency=[2.5e9, -3.0e9])
-        assert isinstance(sig.pilot_tone_frequency, np.ndarray)
-        p = tmp_path / "tones.npz"
-        save_npz(sig, p)
-        sig2 = load_npz(p)
-        assert isinstance(sig2.pilot_tone_frequency, np.ndarray)
-        xpt.assert_array_equal(sig2.pilot_tone_frequency, [2.5e9, -3.0e9])
-
-    def test_roundtrip_pilot_tone_power_ratio_db_mimo(
-        self, tmp_path: Any, xpt: Any
-    ) -> None:
-        """Per-channel pilot power ratios round-trip."""
-        mimo = _mimo_signal()
-        mimo = mimo.replace(pilot_tone_power_ratio_db=[-10.0, -8.0])
-        assert isinstance(mimo.pilot_tone_power_ratio_db, np.ndarray)
-        save_npz(mimo, tmp_path / "psr_mimo.npz")
-        mimo2 = load_npz(tmp_path / "psr_mimo.npz")
-        xpt.assert_array_equal(mimo2.pilot_tone_power_ratio_db, [-10.0, -8.0])
-
 
 class TestNPZSaveLoadFrame:
     """Tests for saving and loading frame signals and structural metadata."""
@@ -209,14 +170,12 @@ class TestNPZSaveLoadFrame:
     def test_roundtrip_frame_metadata(self, tmp_path: Any) -> None:
         """Single-Carrier Frame geometry and slots survive round-trip."""
         sig = _frame_signal()
-        assert sig.signal_type == "Single-Carrier Frame"
         assert sig.frame is not None
 
         p = tmp_path / "frame.npz"
         save_npz(sig, p)
         sig2 = load_npz(p)
 
-        assert sig2.signal_type == "Single-Carrier Frame"
         assert sig2.frame is not None
         assert sig2.frame.payload_len == sig.frame.payload_len
         assert sig2.frame.payload_mod_scheme == sig.frame.payload_mod_scheme

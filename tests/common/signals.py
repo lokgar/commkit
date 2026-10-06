@@ -9,6 +9,8 @@ from commkit.core import Preamble, Signal, SingleCarrierFrame
 from commkit.helpers import normalize
 from commkit.mapping import gray_constellation
 
+from .conversions import device_of
+
 
 def make_test_qam_samples(
     order: int = 16,
@@ -136,11 +138,7 @@ def make_test_qam_signal(
         shifted, _ = spectral.shift_frequency(sig.samples, fo_hz, symbol_rate * sps)
         sig = sig.replace(samples=shifted)
     if xp is not None:
-        sig = sig.replace(samples=xp.asarray(sig.samples))
-        if sig.source_symbols is not None:
-            sig = sig.replace(source_symbols=xp.asarray(sig.source_symbols))
-        if sig.source_bits is not None:
-            sig = sig.replace(source_bits=xp.asarray(sig.source_bits))
+        sig = sig.to(device_of(xp))
     return sig
 
 
@@ -173,11 +171,7 @@ def make_test_psk_signal(
         shifted, _ = spectral.shift_frequency(sig.samples, fo_hz, symbol_rate * sps)
         sig = sig.replace(samples=shifted)
     if xp is not None:
-        sig = sig.replace(samples=xp.asarray(sig.samples))
-        if sig.source_symbols is not None:
-            sig = sig.replace(source_symbols=xp.asarray(sig.source_symbols))
-        if sig.source_bits is not None:
-            sig = sig.replace(source_bits=xp.asarray(sig.source_bits))
+        sig = sig.to(device_of(xp))
     return sig
 
 
@@ -202,11 +196,7 @@ def make_test_mimo_signal(
         seed=seed,
     )
     if xp is not None:
-        sig = sig.replace(samples=xp.asarray(sig.samples))
-        if sig.source_symbols is not None:
-            sig = sig.replace(source_symbols=xp.asarray(sig.source_symbols))
-        if sig.source_bits is not None:
-            sig = sig.replace(source_bits=xp.asarray(sig.source_bits))
+        sig = sig.to(device_of(xp))
     return sig
 
 
@@ -234,7 +224,7 @@ def make_test_frame_signal(
     )
     sig = frame.to_signal(sps=sps, symbol_rate=symbol_rate)
     if xp is not None:
-        sig = sig.replace(samples=xp.asarray(sig.samples))
+        sig = sig.to(device_of(xp))
     return sig
 
 

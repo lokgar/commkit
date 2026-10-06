@@ -83,9 +83,7 @@ class TestShapingFilterTaps:
             samples=xp.ones(40, dtype="complex64"),
             sampling_rate=4e3,
             symbol_rate=1e3,
-            pulse_shape="gaussian",
-            filter_span=4,
-            duty_cycle=0.5,
+            pulse=filtering.Gaussian(fwhm=0.5, span=4),
         )
         taps = filtering.shaping_filter_taps(sig)
         assert taps is not None
@@ -97,9 +95,7 @@ class TestShapingFilterTaps:
             samples=xp.ones(40, dtype="complex64"),
             sampling_rate=4e3,
             symbol_rate=1e3,
-            pulse_shape="rc",
-            filter_span=4,
-            rc_rolloff=0.5,
+            pulse=filtering.RC(0.5, span=4),
         )
         taps = filtering.shaping_filter_taps(sig)
         assert taps is not None
@@ -109,10 +105,6 @@ class TestShapingFilterTaps:
         """Verify unsupported or missing pulse shapes raise ValueError."""
         sig = Signal(samples=[1, 2], sampling_rate=10, symbol_rate=5)
         with pytest.raises(ValueError, match="No pulse shape defined"):
-            filtering.shaping_filter_taps(sig)
-
-        sig = sig.replace(pulse_shape="unknown_shape")
-        with pytest.raises(ValueError, match="Unknown pulse shape"):
             filtering.shaping_filter_taps(sig)
 
 

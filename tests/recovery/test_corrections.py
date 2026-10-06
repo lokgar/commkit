@@ -215,7 +215,7 @@ class TestResolvePhaseAmbiguity:
         """Raises ValueError when source_symbols is None."""
         sig = generate_qam(order=16, num_symbols=256, sps=1, symbol_rate=1e6, seed=0)
         sig = sig.replace(resolved_symbols=sig.samples)
-        sig = sig.replace(source_symbols=None)
+        sig = sig.replace(reference=None)
         with pytest.raises(ValueError, match="source_symbols"):
             sig = recovery.resolve_phase_ambiguity(sig)
 
@@ -394,7 +394,7 @@ class TestCorrectPhaseRotation:
         """Raises ValueError when ref_symbols is omitted and source_symbols is None."""
         sig = generate_qam(order=16, num_symbols=256, sps=1, symbol_rate=1e6, seed=0)
         sig = sig.replace(resolved_symbols=sig.samples)
-        sig = sig.replace(source_symbols=None)
+        sig = sig.replace(reference=None)
         with pytest.raises(ValueError, match="source_symbols"):
             recovery.correct_phase_rotation(sig)
 

@@ -277,7 +277,6 @@ class TestEstimateTiming:
             samples=samples,
             sampling_rate=1.0,
             symbol_rate=1.0,
-            pulse_shape="none",
         )
 
         integer, _ = timing.estimate_timing(

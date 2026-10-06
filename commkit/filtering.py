@@ -371,6 +371,7 @@ def rc_taps(sps: float, rolloff: float = 0.35, span: int = 8) -> ArrayType:
 # taps array is accepted too.
 
 
+@dataclass(frozen=True)
 class Pulse:
     """Base class of the pulse value objects (``RRC``, ``RC``, ``Gaussian``,
     ``Rect``, ``SmoothRect``)."""
@@ -1038,60 +1039,19 @@ def ols_fir_filter(
 
 def shaping_filter_taps(sig: Signal) -> ArrayType:
     """
-    Compute pulse-shaping filter taps from a :class:`Signal`'s metadata.
+    Transmit pulse taps of a :class:`Signal`, on the signal's device.
 
-    Reconstructs the transmit pulse-shaping taps from ``pulse_shape`` and the
-    associated parameters (``sps``, ``filter_span``, roll-offs, ``duty_cycle``,
-    ``rise_time``) stored on the signal.  The taps are returned on the signal's
-    current backend.
-
-    Parameters
-    ----------
-    sig : Signal
-        Signal carrying valid ``pulse_shape`` metadata.
-
-    Returns
-    -------
-    array_like
-        Generated filter taps on the signal's device.
+    Equivalent to ``sig.pulse.taps(sig.sps)``; removed in module pass 3.3.
 
     Raises
     ------
     ValueError
-        If ``pulse_shape`` is missing or unsupported.
+        If the signal has no pulse.
     """
-    if not sig.pulse_shape or sig.pulse_shape == "none":
+    if sig.pulse is None:
         raise ValueError("No pulse shape defined for this signal.")
-    logger.info("Generating shaping filter taps (shape: %s).", sig.pulse_shape)
-
-    # Use stored duty_cycle for RZ; NRZ always uses the full symbol period.
-    duty_cycle = sig.duty_cycle if sig.mod_rz else 1.0
-
-    if sig.pulse_shape == "rect":
-        taps = rect_taps(
-            require_integer_sps(sig.sps, "shaping_filter_taps()"),
-            duty_cycle=duty_cycle,
-            rise_time=sig.rise_time,
-        )
-    elif sig.pulse_shape == "smoothrect":
-        taps = smoothrect_taps(
-            sps=require_integer_sps(sig.sps, "shaping_filter_taps()"),
-            span=sig.filter_span,
-            rise_time=sig.rise_time,
-            duty_cycle=duty_cycle,
-        )
-    elif sig.pulse_shape == "gaussian":
-        taps = gaussian_taps(
-            sps=sig.sps, span=sig.filter_span, duty_cycle=sig.duty_cycle
-        )
-    elif sig.pulse_shape == "rrc":
-        taps = rrc_taps(sps=sig.sps, span=sig.filter_span, rolloff=sig.rrc_rolloff)
-    elif sig.pulse_shape == "rc":
-        taps = rc_taps(sps=sig.sps, span=sig.filter_span, rolloff=sig.rc_rolloff)
-    else:
-        raise ValueError(f"Unknown pulse shape: {sig.pulse_shape}")
-
-    return to_device(taps, sig.backend)
+    logger.info("Generating shaping filter taps (pulse: %r).", sig.pulse)
+    return to_device(sig.pulse.taps(sig.sps), sig.backend)
 
 
 def fir_filter(

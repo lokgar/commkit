@@ -27,11 +27,10 @@ class TestMIMOSignalStructure:
         assert sig.sps == 4.0
         assert not xp.allclose(sig.samples[0], sig.samples[1])
 
-    def test_signal_mimo_transpose(self, xp: Any) -> None:
-        """Transposition heuristic: shape (100, 2) is transposed to (2, 100)."""
-        data = xp.zeros((100, 2))
-        sig = Signal(samples=data, sampling_rate=1.0, symbol_rate=1.0)
-        assert sig.samples.shape == (2, 100)
+    def test_signal_rejects_time_first_layout(self, xp: Any) -> None:
+        """A (100, 2) array looks like (N, C) and raises instead of being transposed."""
+        with pytest.raises(ValueError, match="looks like"):
+            Signal(samples=xp.zeros((100, 2)), sampling_rate=1.0, symbol_rate=1.0)
 
     def test_signal_invalid_ndim(self, xp: Any) -> None:
         """Arrays with >2 dimensions raise ValueError."""
@@ -143,7 +142,7 @@ class TestMIMODSPOperations:
         samples = xp.ones((2, 100), dtype=complex)
         sig = Signal(samples=samples, sampling_rate=100.0, symbol_rate=100.0)
 
-        sig = spectral.shift_frequency(sig, 25.0)
+        sig, _ = spectral.shift_frequency(sig, 25.0)
         expected_sample_1 = xp.exp(1j * xp.pi / 2)
 
         xpt.assert_allclose(sig.samples[0, 0], 1.0, atol=1e-6)

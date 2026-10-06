@@ -6,12 +6,15 @@ File layout
 The .npz file contains the following named entries:
 
   ``samples``              - IQ sample array  (always present)
-  ``source_bits``          - source bit array  (omitted if None)
-  ``source_symbols``       - source symbol array  (omitted if None)
+  ``reference_symbols``    - reference symbols  (omitted without a reference)
+  ``reference_bits``       - reference bits     (omitted if None)
+  ``constellation_points``, ``constellation_bit_labels``, ``constellation_pmf``
+                           - the constellation (omitted if None; pmf if shaped)
   ``resolved_symbols``     - cached symbol array  (only with include_cache=True)
   ``resolved_bits``        - cached bit array     (only with include_cache=True)
-  ``__metadata__``         - zero-d unicode array holding a JSON string with all
-                             scalar fields.
+  ``__metadata__``         - zero-d unicode array holding a JSON string with the
+                             rates, the center frequency, the constellation
+                             family and the pulse (type name and fields).
   ``__frame_metadata__``   - zero-d unicode array holding a JSON string with the
                              serialised SingleCarrierFrame fields (omitted when
                              the signal was not generated from a frame).
@@ -21,6 +24,7 @@ The archive contains only numeric and unicode arrays, so it is read with
   ``frame_payload_symbols`` - frame payload symbols array  (omitted if no frame)
   ``frame_pilot_symbols``   - frame pilot symbols array    (omitted if no frame/pilots)
   ``frame_payload_bits``    - frame payload bits array     (omitted if no frame)
+  ``frame_payload_ps_pmf``  - frame payload PS pmf         (omitted unless shaped)
 """
 
 from __future__ import annotations
@@ -41,38 +45,11 @@ if TYPE_CHECKING:
 # Internal constants
 # -----------------------------------------------------------------------------
 
-# Scalar / primitive metadata fields to round-trip through JSON
-_META_FIELDS: tuple[str, ...] = (
-    "sampling_rate",
-    "symbol_rate",
-    "signal_type",
-    "mod_scheme",
-    "mod_order",
-    "mod_unipolar",
-    "mod_rz",
-    "pulse_shape",
-    "filter_span",
-    "rrc_rolloff",
-    "rc_rolloff",
-    "duty_cycle",
-    "rise_time",
-    "spectral_domain",
-    "physical_domain",
-    "center_frequency",
-    "digital_frequency_offset",
-    "ps_nu",
-)
+# Scalar metadata fields round-tripped through JSON.
+_META_FIELDS: tuple[str, ...] = ("sampling_rate", "symbol_rate", "center_frequency")
 
-# Optional array fields (not always present).  Pilot metadata is stored here -
-# as native npz arrays, exactly like the sample/symbol arrays - rather than in
-# the JSON meta block, so no array-to-list conversion is ever needed.
-_OPTIONAL_ARRAY_FIELDS: tuple[str, ...] = (
-    "source_bits",
-    "source_symbols",
-    "ps_pmf",
-    "pilot_tone_frequency",
-    "pilot_tone_power_ratio_db",
-)
+# Pulse classes that may be reconstructed from an archive.
+_PULSE_TYPES: tuple[str, ...] = ("RRC", "RC", "Gaussian", "Rect", "SmoothRect")
 
 # Derived / cached array fields (only written when include_cache=True)
 _CACHE_FIELDS: tuple[str, ...] = ("resolved_symbols", "resolved_bits")
@@ -131,10 +108,28 @@ def save_npz(
     # -------------------------------------------------------------------------
     arrays: dict[str, Any] = {"samples": _backend.to_device(signal.samples, "CPU")}
 
-    for field in _OPTIONAL_ARRAY_FIELDS:
-        arr = getattr(signal, field, None)
-        if arr is not None:
-            arrays[field] = _backend.to_device(arr, "CPU")
+    meta: dict = {f: getattr(signal, f) for f in _META_FIELDS}
+
+    ref = signal.reference
+    if ref is not None:
+        arrays["reference_symbols"] = _backend.to_device(ref.symbols, "CPU")
+        if ref.bits is not None:
+            arrays["reference_bits"] = _backend.to_device(ref.bits, "CPU")
+
+    c = signal.constellation
+    meta["constellation_family"] = None if c is None else c.family
+    if c is not None:
+        arrays["constellation_points"] = c.points
+        arrays["constellation_bit_labels"] = c.bit_labels
+        if c.pmf is not None:
+            arrays["constellation_pmf"] = c.pmf
+
+    pulse = signal.pulse
+    meta["pulse"] = (
+        None
+        if pulse is None
+        else {"type": type(pulse).__name__, **dataclasses.asdict(pulse)}
+    )
 
     if include_cache:
         for field in _CACHE_FIELDS:
@@ -170,6 +165,7 @@ def save_npz(
             ("frame_payload_symbols", "payload_symbols"),
             ("frame_pilot_symbols", "pilot_symbols"),
             ("frame_payload_bits", "payload_bits"),
+            ("frame_payload_ps_pmf", "payload_ps_pmf"),
         ):
             arr = getattr(frame, frame_attr, None)
             if arr is not None:
@@ -178,7 +174,6 @@ def save_npz(
     # -------------------------------------------------------------------------
     # Build metadata dict and serialise to JSON
     # -------------------------------------------------------------------------
-    meta: dict = {f: getattr(signal, f) for f in _META_FIELDS}
     arrays["__metadata__"] = _json_array(meta)
 
     # -------------------------------------------------------------------------
@@ -246,12 +241,31 @@ def load_npz(
 
     # Build Signal constructor kwargs
     # -------------------------------------------------------------------------
-    kwargs: dict = {f: meta.get(f) for f in _META_FIELDS}
+    from . import filtering
+    from .core import Reference
+    from .mapping import Constellation
+
+    kwargs: dict = {f: meta[f] for f in _META_FIELDS}
     kwargs["samples"] = data["samples"]
 
-    for field in _OPTIONAL_ARRAY_FIELDS:
-        if field in data:
-            kwargs[field] = data[field]
+    if "reference_symbols" in data:
+        kwargs["reference"] = Reference(
+            symbols=data["reference_symbols"],
+            bits=data["reference_bits"] if "reference_bits" in data else None,
+        )
+    if "constellation_points" in data:
+        kwargs["constellation"] = Constellation(
+            data["constellation_points"],
+            bit_labels=data["constellation_bit_labels"],
+            pmf=data["constellation_pmf"] if "constellation_pmf" in data else None,
+            family=meta["constellation_family"],
+        )
+    if meta["pulse"] is not None:
+        pulse_fields = dict(meta["pulse"])
+        pulse_type = pulse_fields.pop("type")
+        if pulse_type not in _PULSE_TYPES:
+            raise ValueError(f"Unknown pulse type {pulse_type!r} in {path}.")
+        kwargs["pulse"] = getattr(filtering, pulse_type)(**pulse_fields)
 
     sig = Signal(**kwargs)
 
@@ -290,14 +304,10 @@ def load_npz(
             ("frame_payload_symbols", "payload_symbols"),
             ("frame_pilot_symbols", "pilot_symbols"),
             ("frame_payload_bits", "payload_bits"),
+            ("frame_payload_ps_pmf", "payload_ps_pmf"),
         ):
             if npz_key in data:
                 frame._cache[cache_key] = data[npz_key]
-
-        # With the payload bits restored, _ensure_payload_generated() returns
-        # early and never sets the PS pmf; sig.ps_pmf was saved, so use it.
-        if sig.ps_pmf is not None:
-            frame._cache["payload_ps_pmf"] = sig.ps_pmf
 
         sig = sig.replace(frame=frame)
 

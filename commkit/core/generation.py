@@ -19,7 +19,7 @@ from .. import filtering, helpers, mapping
 from ..backend import ArrayType, dispatch
 from ..logger import logger
 from ._signal_adapter import require_integer_sps
-from .signal import Signal
+from .signal import Reference, Signal
 
 # -----------------------------------------------------------------------------
 # WAVEFORM SYNTHESIS PRIMITIVES
@@ -195,6 +195,41 @@ def shape_pulse(
     return helpers.normalize(res, "symbol_power", sps=sps, axis=-1)
 
 
+def _legacy_pulse(
+    pulse_shape: str,
+    *,
+    rz: bool = False,
+    duty_cycle: float = 1.0,
+    rise_time: float = 0.0,
+    filter_span: int = 10,
+    rrc_rolloff: float = 0.35,
+    rc_rolloff: float = 0.35,
+) -> filtering.Pulse | None:
+    """The pulse object for 1.x ``pulse_shape`` arguments (as ``shape_pulse``).
+
+    Bridge for the string-based factories; removed with them in 2.6.
+    """
+    if rz:
+        duty_cycle = 0.5
+        if pulse_shape == "none":
+            pulse_shape = "rect"
+    if pulse_shape == "none":
+        return None
+    if pulse_shape == "rect":
+        return filtering.Rect(duty_cycle, rise_time)
+    if pulse_shape == "smoothrect":
+        return filtering.SmoothRect(rise_time, duty_cycle, filter_span)
+    if pulse_shape == "gaussian":
+        return filtering.Gaussian(duty_cycle, filter_span)
+    if pulse_shape == "rrc":
+        return filtering.RRC(rrc_rolloff, filter_span)
+    if pulse_shape == "rc":
+        return filtering.RC(rc_rolloff, filter_span)
+    if pulse_shape == "sinc":
+        return filtering.RRC(0.0, filter_span)
+    raise ValueError(f"Not implemented pulse shape: {pulse_shape}")
+
+
 # -----------------------------------------------------------------------------
 # SIGNAL FACTORIES
 # -----------------------------------------------------------------------------
@@ -327,18 +362,22 @@ def generate(
         samples=samples,
         sampling_rate=symbol_rate * sps,
         symbol_rate=symbol_rate,
-        mod_scheme=modulation.upper(),
-        mod_order=order,
-        mod_unipolar=unipolar,
-        mod_rz=rz,
-        source_bits=bits,
-        source_symbols=symbols,
-        pulse_shape=pulse_shape,
-        filter_span=filter_span,
-        rrc_rolloff=rrc_rolloff,
-        rc_rolloff=rc_rolloff,
-        rise_time=rise_time,
-        duty_cycle=duty_cycle,
+        constellation=mapping.Constellation.gray(modulation, order, unipolar=unipolar),
+        pulse=_legacy_pulse(
+            pulse_shape,
+            rz=rz,
+            duty_cycle=duty_cycle,
+            rise_time=rise_time,
+            filter_span=filter_span,
+            rrc_rolloff=rrc_rolloff,
+            rc_rolloff=rc_rolloff,
+        ),
+        # 1.x convention, kept until 2.6: reference symbols are normalized to
+        # unit sample-average power per stream.
+        reference=Reference(
+            symbols=helpers.normalize(symbols, mode="average_power", axis=-1),
+            bits=bits,
+        ),
     )
 
 
@@ -726,13 +765,15 @@ def generate_psqam(
         samples=samples,
         sampling_rate=symbol_rate * sps,
         symbol_rate=symbol_rate,
-        mod_scheme="PS-QAM",
-        mod_order=order,
-        source_bits=bits,
-        source_symbols=symbols,
-        pulse_shape=pulse_shape,
-        ps_pmf=pmf,
-        ps_nu=nu_val,
-        filter_span=filter_span,
-        rrc_rolloff=rrc_rolloff,
+        # 1.x PS convention, kept until 3.2: the pmf is attached without
+        # rescaling, so the reference symbols have average power E_PS < 1.
+        constellation=mapping.Constellation.gray("qam", order, pmf=pmf),
+        pulse=_legacy_pulse(
+            pulse_shape,
+            duty_cycle=duty_cycle,
+            filter_span=filter_span,
+            rrc_rolloff=rrc_rolloff,
+            rc_rolloff=rc_rolloff,
+        ),
+        reference=Reference(symbols=symbols, bits=bits),
     )

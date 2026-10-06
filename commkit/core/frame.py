@@ -184,16 +184,14 @@ class Preamble:
             samples=samples,
             sampling_rate=symbol_rate * sps,
             symbol_rate=symbol_rate,
-            mod_scheme=None,
-            mod_order=None,
-            source_symbols=None,
-            pulse_shape=pulse_shape,
-            duty_cycle=duty_cycle,
-            filter_span=filter_span,
-            rrc_rolloff=rrc_rolloff,
-            rc_rolloff=rc_rolloff,
-            rise_time=rise_time,
-            signal_type="Preamble",
+            pulse=generation._legacy_pulse(
+                pulse_shape,
+                duty_cycle=duty_cycle,
+                rise_time=rise_time,
+                filter_span=filter_span,
+                rrc_rolloff=rrc_rolloff,
+                rc_rolloff=rc_rolloff,
+            ),
         )
 
 
@@ -868,7 +866,6 @@ class SingleCarrierFrame:
         Pilot/payload power ratios set by `pilot_gain_db` are preserved throughout.
         """
         xp = np
-        from .. import mapping
         from .generation import shape_pulse
 
         sps = require_integer_sps(sps, "SingleCarrierFrame.to_signal()")
@@ -949,37 +946,20 @@ class SingleCarrierFrame:
         # same factor.  Guard zeros remain zero after scaling.
         samples = helpers.normalize(samples, "symbol_power", sps=sps, axis=-1)
 
-        # Resolve ν: payload_nu is set directly; for entropy-specified frames call optimal_nu.
-        # payload_ps_pmf is already computed above (body_symbols triggers _ensure_payload_generated).
-        if self.payload_nu is not None:
-            ps_nu_val: float | None = self.payload_nu
-        elif self.payload_entropy is not None:
-            ps_nu_val, _ = mapping.optimal_nu(
-                self.payload_mod_order, self.payload_entropy
-            )
-        else:
-            ps_nu_val = None
-
+        # The payload modulation lives on the frame; the PS pmf is reachable
+        # through the Signal's ps_pmf bridge property (frame.payload_ps_pmf).
         return Signal(
             samples=samples,
             sampling_rate=symbol_rate * sps,
             symbol_rate=symbol_rate,
-            mod_scheme=None,
-            mod_order=None,
-            mod_unipolar=None,
-            mod_rz=None,
-            source_bits=None,  # extract via frame.get_structure_map() after equalization
-            source_symbols=None,  # samples include full frame (preamble + body);
-            # extract payload segment via frame.get_structure_map() explicitly.
-            ps_pmf=self.payload_ps_pmf,
-            ps_nu=ps_nu_val,
-            pulse_shape=pulse_shape,
-            duty_cycle=duty_cycle,
-            filter_span=filter_span,
-            rrc_rolloff=rrc_rolloff,
-            rc_rolloff=rc_rolloff,
-            rise_time=rise_time,
-            signal_type="Single-Carrier Frame",
+            pulse=generation._legacy_pulse(
+                pulse_shape,
+                duty_cycle=duty_cycle,
+                rise_time=rise_time,
+                filter_span=filter_span,
+                rrc_rolloff=rrc_rolloff,
+                rc_rolloff=rc_rolloff,
+            ),
             frame=self,
         )
 

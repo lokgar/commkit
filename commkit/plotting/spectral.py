@@ -97,7 +97,6 @@ def plot_psd(
     if signal_adapter.signal is not None:
         sampling_rate = signal_adapter.resolve_required("sampling_rate")
         center_frequency = signal_adapter.signal.center_frequency
-        domain = signal_adapter.signal.physical_domain or "RF"
 
     logger.debug("Generating PSD plot (sampling_rate=%s Hz).", sampling_rate)
 
@@ -322,7 +321,6 @@ def plot_spectrogram(
     if signal_adapter.signal is not None:
         sampling_rate = signal_adapter.resolve_required("sampling_rate")
         center_frequency = signal_adapter.signal.center_frequency
-        domain = signal_adapter.signal.physical_domain or "RF"
         axis = -1
 
     logger.debug("Generating spectrogram plot (sampling_rate=%s Hz).", sampling_rate)

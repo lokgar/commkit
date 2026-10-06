@@ -9,9 +9,10 @@ from typing import Any
 import pytest
 
 from commkit import equalization, filtering, frequency, multirate
-from commkit.core import Preamble, Signal, SingleCarrierFrame, generation
+from commkit.core import Preamble, Reference, Signal, SingleCarrierFrame, generation
+from commkit.filtering import RRC, Rect
 from commkit.impairments import apply_awgn
-from commkit.mapping import demap_symbols_hard, map_bits
+from commkit.mapping import Constellation, demap_symbols_hard, map_bits
 from tests.common.conversions import device_of
 
 # -----------------------------------------------------------------------------
@@ -25,15 +26,12 @@ def _signal(xp: Any, *, sps: float = 2.0) -> Signal:
         samples=samples,
         sampling_rate=sps * 1e6,
         symbol_rate=1e6,
-        mod_scheme="PSK",
-        mod_order=2,
-        source_bits=xp.asarray([0, 1] * 32),
-        source_symbols=xp.asarray([1.0, -1.0] * 32, dtype=xp.complex64),
-        pulse_shape="rrc",
-        filter_span=4,
-        rrc_rolloff=0.25,
-        spectral_domain="INTERMEDIATE",
-        physical_domain="RF",
+        constellation=Constellation.psk(2),
+        pulse=RRC(0.25, span=4),
+        reference=Reference(
+            symbols=xp.asarray([1.0, -1.0] * 32, dtype=xp.complex64),
+            bits=xp.asarray([0, 1] * 32),
+        ),
     )
     sig = sig.replace(resolved_symbols=xp.asarray([1.0, -1.0], dtype=xp.complex64))
     sig = sig.replace(resolved_bits=xp.asarray([0, 1]))
@@ -51,7 +49,6 @@ class MetadataCase:
     transform: Callable
     expected_rate: float
     output_is_signal: bool = True
-    expected_domains: tuple[str, str] = ("INTERMEDIATE", "RF")
     source_fields_valid: bool = True
     resolved_fields_valid: bool = False
 
@@ -65,7 +62,7 @@ METADATA_PROPAGATION_TABLE = (
     ),
     MetadataCase(
         "matched_filter",
-        ("pulse_shape", "sps", "filter_span", "rrc_rolloff"),
+        ("pulse", "sps"),
         lambda sig, xp: filtering.matched_filter(sig),
         2e6,
     ),
@@ -158,8 +155,9 @@ class TestPipelineComposition:
         assert frame.pilot_bits is not None
         assert frame.pilot_symbols is not None
         sig = frame.to_signal(sps=4, symbol_rate=1e6, filter_span=4)
-        sig = sig.replace(source_bits=payload_bits)
-        sig = sig.replace(source_symbols=payload_symbols)
+        sig = sig.replace(
+            reference=Reference(symbols=payload_symbols, bits=payload_bits)
+        )
         sig = sig.to(device_of(xp))
 
         transformed = apply_awgn(sig, esn0_db=25, seed=5)
@@ -201,7 +199,7 @@ class TestPipelineMetadataPropagation:
         without_mod = Signal(
             samples=tone, sampling_rate=sampling_rate, symbol_rate=0.5e6
         )
-        with_mod = without_mod.replace(mod_scheme="PSK", mod_order=4)
+        with_mod = without_mod.replace(constellation=Constellation.psk(4))
 
         fallback = frequency.estimate_frequency_offset_mth_power(
             without_mod, modulation="PSK", order=4
@@ -224,7 +222,8 @@ class TestPipelineMetadataPropagation:
 
         assert isinstance(result, Signal) is case.output_is_signal
         assert result.sampling_rate == pytest.approx(case.expected_rate)
-        assert (result.spectral_domain, result.physical_domain) == case.expected_domains
+        assert result.constellation is sig.constellation
+        assert result.pulse is sig.pulse
         assert (
             result.source_bits is not None and result.source_symbols is not None
         ) is (case.source_fields_valid)
@@ -239,21 +238,18 @@ class TestPipelineMetadataPropagation:
         assert result.sps == 2.5
         assert result.sampling_rate == 2.5 * sig.symbol_rate
 
-    @pytest.mark.parametrize("stored_unipolar", [None, False, True])
+    @pytest.mark.parametrize("stored_unipolar", [False, True])
     def test_demap_optional_unipolar_metadata(
         self, xp: Any, xpt: Any, stored_unipolar: Any
     ) -> None:
-        """demap_symbols_hard handles stored vs explicit unipolar flag."""
+        """demap_symbols_hard uses the Signal's constellation over the argument."""
         bits = xp.asarray([0, 0, 0, 1, 1, 1, 1, 0], dtype=xp.uint8)
-        effective = True if stored_unipolar is None else stored_unipolar
-        symbols = map_bits(bits, "PAM", 4, unipolar=effective)
+        symbols = map_bits(bits, "PAM", 4, unipolar=stored_unipolar)
         sig = Signal(
             samples=symbols,
             sampling_rate=1e6,
             symbol_rate=1e6,
-            mod_scheme="PAM",
-            mod_order=4,
-            mod_unipolar=stored_unipolar,
+            constellation=Constellation.pam(4, unipolar=stored_unipolar),
             resolved_symbols=symbols,
         )
         result = demap_symbols_hard(sig, unipolar=True)
@@ -268,9 +264,7 @@ class TestPipelineSPSValidation:
         "operation",
         [
             lambda sig, xp: multirate.decimate_to_symbol_rate(sig),
-            lambda sig, xp: filtering.shaping_filter_taps(
-                sig.replace(pulse_shape="rect")
-            ),
+            lambda sig, xp: filtering.shaping_filter_taps(sig.replace(pulse=Rect())),
             lambda sig, xp: equalization.apply_taps(
                 sig, _identity_taps(xp), normalize=False
             ),

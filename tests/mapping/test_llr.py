@@ -171,8 +171,7 @@ class TestComputeLLRSignalIntegration:
             samples=symbols,
             sampling_rate=1.0,
             symbol_rate=1.0,
-            mod_scheme="qam",
-            mod_order=16,
+            constellation=mapping.Constellation.qam(16),
         )
         sig = sig.replace(resolved_symbols=symbols)
 

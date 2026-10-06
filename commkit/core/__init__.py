@@ -18,10 +18,11 @@ from .generation import (
     generate_psqam,
     generate_qam,
 )
-from .signal import Signal
+from .signal import Reference, Signal
 
 __all__ = [
     "Preamble",
+    "Reference",
     "Signal",
     "SingleCarrierFrame",
     "generate",

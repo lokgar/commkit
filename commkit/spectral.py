@@ -70,7 +70,7 @@ def shift_frequency(
     samples: ArrayType | Signal,
     offset: float,
     sampling_rate: float | None = None,
-) -> tuple[ArrayType, float] | Signal:
+) -> tuple[ArrayType | Signal, float]:
     """
     Applies a frequency offset (complex mixing) to a signal.
 
@@ -106,9 +106,8 @@ def shift_frequency(
     integer number of cycles over the signal duration, which is critical
     for preserving the circularity of the signal's phase.
 
-    When ``samples`` is a :class:`Signal`, a new :class:`Signal` is returned
-    with the shift applied and ``digital_frequency_offset`` accumulated;
-    ``sampling_rate`` is taken from the signal.
+    When ``samples`` is a :class:`Signal`, ``sampling_rate`` is taken from the
+    signal and the first returned value is a new :class:`Signal`.
     """
     signal_adapter = adapt_signal(samples, function_name="shift_frequency()")
     samples = signal_adapter.array
@@ -157,10 +156,7 @@ def shift_frequency(
 
     shifted = samples * mixer
     actual = float(actual_offset)
-    if signal_adapter.signal is not None:
-        dfo = (signal_adapter.signal.digital_frequency_offset or 0.0) + actual
-        return signal_adapter.wrap_samples(shifted, digital_frequency_offset=dfo)
-    return shifted, actual
+    return signal_adapter.wrap_samples(shifted), actual
 
 
 def add_pilot_tone(
@@ -170,7 +166,7 @@ def add_pilot_tone(
     power_ratio_db: float | Sequence[float] = -15.0,
     phase_init: float = 0.0,
     renormalize: bool = False,
-) -> tuple[ArrayType, float | list[float]] | Signal:
+) -> tuple[ArrayType | Signal, float | list[float]]:
     r"""
     Add a continuous-wave (CW) pilot tone to a baseband waveform.
 
@@ -222,7 +218,7 @@ def add_pilot_tone(
         The grid-quantized tone frequency(ies) in Hz actually applied (see
         Notes).  A **scalar** ``frequency`` returns a single ``float``; a
         per-channel **sequence** returns a ``list`` of ``C`` floats.  Store
-        this (e.g. in ``pilot_tone_frequency``) and pass it to the receiver,
+        this and pass it to the receiver,
         since it - not the requested value - is where the tone(s) sit.
 
     Raises
@@ -241,8 +237,8 @@ def add_pilot_tone(
 
     When ``samples`` is a :class:`Signal`, the sampling rate is taken from the
     signal, so the **second positional argument is the frequency** (i.e. call
-    ``add_pilot_tone(sig, freq, ...)``).  A new :class:`Signal` is returned with
-    ``pilot_tone_frequency`` / ``pilot_tone_power_ratio_db`` recorded.
+    ``add_pilot_tone(sig, freq, ...)``) and the first returned value is a new
+    :class:`Signal`.
     """
     signal_adapter = adapt_signal(samples, function_name="add_pilot_tone()")
     samples = signal_adapter.array
@@ -354,16 +350,7 @@ def add_pilot_tone(
 
     samples_out = restore_1d(was_1d, out)
     actual_frequency: float | list[float] = actual[0] if scalar_input else actual
-    if signal_adapter.signal is not None:
-        return cast(
-            Signal,
-            signal_adapter.wrap_samples(
-                samples_out,
-                pilot_tone_frequency=actual_frequency,
-                pilot_tone_power_ratio_db=power_ratio_db,
-            ),
-        )
-    return samples_out, actual_frequency
+    return signal_adapter.wrap_samples(samples_out), actual_frequency
 
 
 def welch_psd(

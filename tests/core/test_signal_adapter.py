@@ -5,6 +5,7 @@ from typing import Any
 import pytest
 
 from commkit.core._signal_adapter import adapt_signal, require_integer_sps
+from commkit.mapping import Constellation
 from tests.common.signals import make_adapter_test_signal
 
 
@@ -41,7 +42,7 @@ class TestSignalAdapterMetadata:
         self, xp: Any, caplog: Any
     ) -> None:
         """Optional metadata uses Signal attribute when present, otherwise fallback value."""
-        populated = make_adapter_test_signal(xp, mod_scheme="QAM")
+        populated = make_adapter_test_signal(xp, constellation=Constellation.qam(16))
         absent = make_adapter_test_signal(xp)
         populated_adapter = adapt_signal(populated, function_name="example()")
         absent_adapter = adapt_signal(absent, function_name="example()")
