@@ -73,6 +73,16 @@ class Reference:
         bits = None if self.bits is None else to_device(self.bits, device)
         return Reference(symbols=to_device(self.symbols, device), bits=bits)
 
+    def head(self, num_symbols: int) -> Reference:
+        """The first ``num_symbols`` symbols and their bits."""
+        if num_symbols >= self.symbols.shape[-1]:
+            return self
+        bits = self.bits
+        if bits is not None:
+            k = bits.shape[-1] // self.symbols.shape[-1]
+            bits = bits[..., : num_symbols * k]
+        return Reference(symbols=self.symbols[..., :num_symbols], bits=bits)
+
 
 @dataclass(frozen=True, eq=False, kw_only=True)
 class Signal:

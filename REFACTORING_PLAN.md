@@ -831,7 +831,7 @@ The equalization pass (3.7) gets more commits:
   module `timing` (it did, lazily); `timing` re-exports the public
   generators. `cross_correlate_fft` and the three-point peak fit move into
   `timing`, which `frequency` imports. A pure move.
-- [ ] **3.5c `refactor(timing)!: TimingEstimate and 2.0 signatures`.**
+- [x] **3.5c `refactor(timing)!: TimingEstimate and 2.0 signatures`.**
   - `estimate_timing(samples, *, template=None, ...) -> TimingEstimate`
     (`integer`, `fractional`, `metric`, `coherence`, `correlation`,
     `search_start`; rank rule). `template` is a `Preamble` or an array; it

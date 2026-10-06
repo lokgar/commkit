@@ -8,7 +8,8 @@ fractional timing offset estimation and correction.
 """
 
 import logging
-from typing import Any, Union, overload
+from dataclasses import dataclass
+from typing import Any
 
 import numpy as np
 
@@ -16,7 +17,7 @@ from ._array import as_2d, restore_1d
 from ._sequences import barker_sequence, zadoff_chu_sequence
 from .backend import ArrayType, dispatch, to_device
 from .core import Preamble, Signal
-from .core._signal_adapter import adapt_signal, require_integer_sps
+from .core._signal_adapter import S, adapt_signal, require_integer_sps
 from .filtering import Pulse
 from .logger import logger
 
@@ -41,6 +42,7 @@ _DFT_WINDOW = 33
 def cross_correlate_fft(
     samples: ArrayType,
     template: ArrayType,
+    *,
     mode: str = "full",
 ) -> ArrayType:
     """
@@ -205,8 +207,9 @@ def _parabolic_peak_offset(
 def estimate_fractional_delay(
     correlation: ArrayType,
     peak_indices: ArrayType,
+    *,
     dft_upsample: int = 1,
-    method: str = "log-parabolic",
+    fit: str = "log-parabolic",
 ) -> ArrayType:
     """
     Estimates sub-sample timing offset via parabolic interpolation.
@@ -235,8 +238,8 @@ def estimate_fractional_delay(
         Upsampling factor for DFT-based interpolation.
         Values > 1 perform zero-padded FFT interpolation on a window
         around the peak (typically 33 samples).
-    method : {'parabolic', 'log-parabolic'}, default 'log-parabolic'
-        Fitting method:
+    fit : {'parabolic', 'log-parabolic'}, default 'log-parabolic'
+        Peak fit:
         - 'parabolic': Standard parabolic fit. Good for general peaks.
         - 'log-parabolic': Fits a parabola to log(y), equivalent to a
           Gaussian fit. Often more accurate for bandlimited pulses.
@@ -246,6 +249,8 @@ def estimate_fractional_delay(
     array_like
         Fractional offset per channel, in [-0.5, 0.5). Shape: ``(C,)`` or scalar.
     """
+    if fit not in ("parabolic", "log-parabolic"):
+        raise ValueError(f"fit must be 'parabolic' or 'log-parabolic', got {fit!r}.")
     correlation, xp, _ = dispatch(correlation)
     peak_indices = xp.asarray(peak_indices)
     scalar_input = peak_indices.ndim == 0
@@ -262,7 +267,9 @@ def estimate_fractional_delay(
     k = peak_indices.astype(int)
     mu = xp.zeros(C, dtype=correlation.real.dtype)
 
-    def _calculate_mu(r_prev, r_curr, r_next, xp, method):
+    def _calculate_mu(
+        r_prev: ArrayType, r_curr: ArrayType, r_next: ArrayType, xp: Any, fit: str
+    ) -> ArrayType:
         if xp.iscomplexobj(r_curr):
             phase = xp.exp(-1j * xp.angle(r_curr))
             alpha = (r_prev * phase).real
@@ -284,7 +291,7 @@ def estimate_fractional_delay(
             beta,
             gamma,
             xp,
-            log=(method == "log-parabolic"),
+            log=(fit == "log-parabolic"),
             log_eps=1e-12,
             denom_eps=5e-13,
         )
@@ -322,7 +329,7 @@ def estimate_fractional_delay(
             r_curr = upsampled[row_idx, k_up_safe]
             r_next = upsampled[row_idx, k_up_safe + 1]
 
-            mu_up = _calculate_mu(r_prev, r_curr, r_next, xp, method)
+            mu_up = _calculate_mu(r_prev, r_curr, r_next, xp, fit)
 
             # Position relative to window start: k_up + mu_up
             # Center of window is at index (half_W * dft_upsample)?
@@ -356,7 +363,7 @@ def estimate_fractional_delay(
         r_curr = correlation[ch_idx, k_all_safe]
         r_next = correlation[ch_idx, k_all_safe + 1]
 
-        mu_std = _calculate_mu(r_prev, r_curr, r_next, xp, method)
+        mu_std = _calculate_mu(r_prev, r_curr, r_next, xp, fit)
         mu_std = xp.where(interior_all, mu_std, xp.zeros_like(mu_std))
 
         if dft_upsample == 1:
@@ -378,18 +385,7 @@ def estimate_fractional_delay(
 # offset arrays.
 
 
-@overload
-def fft_fractional_delay(samples: ArrayType, delay: float | ArrayType) -> ArrayType: ...
-
-
-@overload
-def fft_fractional_delay(samples: Signal, delay: float | ArrayType) -> Signal: ...
-
-
-def fft_fractional_delay(
-    samples: ArrayType | Signal,
-    delay: float | ArrayType,
-) -> ArrayType | Signal:
+def fft_fractional_delay(samples: S, *, delay: float | ArrayType) -> S:
     """
     Applies fractional sample delay using FFT-based frequency-domain method.
 
@@ -420,22 +416,21 @@ def fft_fractional_delay(
     ideal sinc interpolation with perfect power preservation.
     """
     signal_adapter = adapt_signal(samples, function_name="fft_fractional_delay()")
-    samples = signal_adapter.array
-    samples, xp, _ = dispatch(samples)
-    samples, was_1d = as_2d(samples, name="samples")
+    x, xp, _ = dispatch(signal_adapter.array)
+    x, was_1d = as_2d(x, name="samples")
 
-    C, N = samples.shape
+    C, N = x.shape
 
     # Convert delay to array
     if isinstance(delay, (int, float)):
-        delay_arr = xp.full(C, delay, dtype=samples.real.dtype)
+        delay_arr = xp.full(C, delay, dtype=x.real.dtype)
     else:
-        delay_arr = xp.asarray(delay, dtype=samples.real.dtype)
+        delay_arr = xp.asarray(delay, dtype=x.real.dtype)
         if delay_arr.ndim == 0:
             delay_arr = delay_arr[None]
 
     # FFT
-    spec = xp.fft.fft(samples, axis=-1)
+    spec = xp.fft.fft(x, axis=-1)
 
     # Frequency axis: normalized frequencies in cycles/sample
     freqs = xp.fft.fftfreq(N, d=1.0)
@@ -454,133 +449,136 @@ def fft_fractional_delay(
     result = xp.fft.ifft(spec_delayed, axis=-1)
 
     # Dtype restoration: mirrors the impairments.py pattern.
-    if not xp.iscomplexobj(samples):
+    if not xp.iscomplexobj(x):
         # Real input: fractional delay is a real-valued operation
         result = result.real
-    elif result.dtype != samples.dtype:
+    elif result.dtype != x.dtype:
         # Complex input: ifft may return complex128 from complex64 input
-        result = result.astype(samples.dtype)
+        result = result.astype(x.dtype)
 
     return signal_adapter.wrap_samples(restore_1d(was_1d, result))
 
 
+@dataclass(frozen=True)
+class TimingEstimate:
+    """Result of :func:`estimate_timing`.
+
+    Per-channel fields follow the rank rule: 0-d for ``(N,)`` input and
+    ``(C,)`` for ``(C, N)`` input, on the input's device.
+
+    Attributes
+    ----------
+    integer : array_like
+        Sample index where the template starts (``int64``).
+    fractional : array_like
+        Sub-sample offset of the correlation peak, in ``[-0.5, 0.5]``.
+    metric : array_like
+        Peak-to-mean ratio of ``|correlation|`` (the detection metric).
+    coherence : array_like
+        Peak ``|correlation|`` over the template and local signal energy, in
+        ``[0, 1]``; low values with a high ``metric`` point to a frequency
+        offset or dispersion.
+    correlation : array_like
+        Complex correlation at non-negative lags ``0 .. N_search - 1`` of the
+        searched window, ``(L,)`` or ``(C, L)``; the data
+        ``plot_timing_correlation`` draws.
+    search_start : int
+        First sample of the searched window: lag ``k`` is sample
+        ``search_start + k``.
+    """
+
+    integer: ArrayType
+    fractional: ArrayType
+    metric: ArrayType
+    coherence: ArrayType
+    correlation: ArrayType
+    search_start: int = 0
+
+    @property
+    def value(self) -> ArrayType:
+        """Total offset in samples, ``integer + fractional``."""
+        return self.integer + self.fractional
+
+
 def estimate_timing(
     samples: ArrayType | Signal,
-    reference: Union[ArrayType, "Preamble"] | None = None,
+    *,
+    template: ArrayType | Preamble | None = None,
     threshold: float = 3.0,
-    sps: int | None = None,
+    sps: float | None = None,
     pulse: Pulse | ArrayType | None = None,
     search_range: tuple[int, int] | None = None,
     dft_upsample: int = 1,
-    fractional_method: str = "log-parabolic",
-) -> tuple[ArrayType, ArrayType]:
+    fit: str = "log-parabolic",
+) -> TimingEstimate:
     """
-    Estimates integer and fractional timing offsets via cross-correlation.
+    Integer and fractional timing offset by cross-correlation with a template.
 
-    Slides a cross-correlation between the received signal and a known reference
-    to find the integer-sample timing offset per channel, then estimates the
-    fractional offset via parabolic interpolation on the correlation peak.
-
-    For MIMO references with shape ``(C_tx, L)``, every template is correlated
-    against every RX channel; each channel takes the strongest peak across all
-    (template, lag) pairs.  This preserves per-channel hardware skew and is
-    robust to polarization swap or mixing.
+    For a multi-stream template ``(C_tx, L)`` every stream is correlated with
+    every receive channel and each channel takes its strongest peak, which
+    keeps per-channel skew and tolerates swapped or mixed polarizations.
 
     Parameters
     ----------
     samples : array_like or Signal
-        Received signal samples. Shape: ``(N,)`` or ``(C, N)``.
-    reference : array_like or Preamble
-        Reference for correlation.  A Preamble object is reconstructed via
-        ``Preamble.to_signal()`` using ``sps`` and ``pulse``; a raw
-        array (shape ``(L,)`` or ``(C_tx, L)``) is used directly.
+        Received samples, ``(N,)`` or ``(C, N)``.
+    template : array_like or Preamble, optional
+        Known sequence to find.  An array (``(L,)`` or ``(C_tx, L)``) is used
+        as is; a :class:`Preamble` is shaped at ``sps`` with ``pulse``.
+        Defaults to the preamble of the Signal's frame.
     threshold : float, default 3.0
-        Peak-to-average power ratio threshold for peak detection.
-    sps : int, optional
-        Samples per symbol.  Required when ``reference`` is a Preamble.
+        Minimum peak-to-mean ratio of ``|correlation|``.
+    sps : float, optional
+        Samples per symbol, needed to shape a Preamble.  Taken from the
+        Signal; a value that disagrees with it raises.
     pulse : Pulse or array_like, optional
-        Pulse that shapes a Preamble ``reference``.  Defaults to the Signal's
-        ``pulse``; ``None`` leaves the preamble unshaped (zero-stuffed).
-    search_range : tuple of int, optional
-        ``(start, end)`` sample range to restrict the search.
+        Pulse that shapes a Preamble template.  Defaults to the Signal's
+        ``pulse``; ``None`` leaves it unshaped (zero-stuffed).
+    search_range : (int, int), optional
+        ``(start, stop)`` samples to search.
     dft_upsample : int, default 1
-        DFT-based upsampling factor for high-precision fractional estimation.
-    fractional_method : {'parabolic', 'log-parabolic'}, default 'log-parabolic'
-        Fitting method for fractional delay estimation.
+        DFT interpolation factor for the fractional fit.
+    fit : {'parabolic', 'log-parabolic'}, default 'log-parabolic'
+        Peak fit for the fractional offset.
 
     Returns
     -------
-    integer_offsets : ArrayType
-        Integer sample offsets where the reference sequence begins,
-        per RX channel.  Shape: ``(N_channels,)``.  Each channel's
-        offset is estimated independently so hardware skew between
-        channels is preserved.
-    fractional_offsets : ArrayType
-        Sub-sample timing offsets in [-0.5, 0.5) per channel.
-        Shape: ``(N_channels,)``.
+    TimingEstimate
+        ``integer`` is the sample where the template starts.
 
     Raises
     ------
     ValueError
-        If no correlation peak is found that satisfies the threshold
-        criteria, or if ``reference`` is not provided.
-
-    Notes
-    -----
-    The returned integer offset is the sample index of the first reference
-    sample.  For oversampled signals, pass a shaped reference at the same sps
-    for best timing SNR.
+        If no template is available or no channel's peak reaches
+        ``threshold``.
     """
     signal_adapter = adapt_signal(samples, function_name="estimate_timing()")
-    samples = signal_adapter.array
-    if signal_adapter.signal is not None:
-        sps = signal_adapter.resolve_required("sps", sps)
-    pulse = signal_adapter.resolve_choice("pulse", pulse)
-
-    if not hasattr(samples, "ndim"):
-        raise TypeError(
-            f"estimate_timing() expects an array of samples, got {type(samples).__name__}."
-        )
-
-    sig_array, xp, _ = dispatch(samples)
-
-    # 2. Build reference waveform
-    ref_waveform = None
-
-    if isinstance(reference, Preamble):
-        # Preamble object: reconstruct the shaped waveform at the target SPS.
-        if sps is None:
-            raise ValueError("SPS must be provided when using a Preamble object.")
-        sps = require_integer_sps(sps, "estimate_timing()")
-
-        ref_waveform = xp.asarray(
-            reference.to_signal(sps=sps, symbol_rate=1.0, pulse=pulse).samples
-        )
-        # ensure 2-D (C_tx, L*sps) for the correlation engine
-        if ref_waveform.ndim == 1:
-            ref_waveform = ref_waveform[None, :]
-
-    elif reference is not None:
-        # Raw array: use directly as the correlation template (e.g. the known
-        # TX waveform or a slice of the payload itself).
-        ref_waveform = xp.asarray(reference)
-    else:
+    sig = signal_adapter.signal
+    if template is None and sig is not None and sig.frame is not None:
+        template = getattr(sig.frame, "preamble", None)
+    if template is None:
         raise ValueError(
-            "A 'reference' sequence must be provided (Preamble object or raw array)."
+            "estimate_timing() needs a template: pass template= (array or "
+            "Preamble) or a Signal whose frame has a preamble."
         )
+    sig_array, xp, _ = dispatch(signal_adapter.array)
+    sig_array, was_1d = as_2d(sig_array, name="samples")
 
-    # 3. Correlation Strategy
-    # Signal: (C, N) or (N,)
-    # Reference: (C, L) or (L,) or (1, L)
-
-    # Ensure dimensions match for broadcast/multichannel correlation
-    if sig_array.ndim == 1:
-        sig_array = sig_array[None, :]  # Treat as 1 channel
-
+    if isinstance(template, Preamble):
+        if sig is None and sps is None:
+            raise ValueError("SPS must be provided when using a Preamble template.")
+        sps_int = require_integer_sps(
+            signal_adapter.resolve_fact("sps", sps), "estimate_timing()"
+        )
+        pulse = signal_adapter.resolve_choice("pulse", pulse)
+        ref_waveform = xp.asarray(
+            template.to_signal(sps=sps_int, symbol_rate=1.0, pulse=pulse).samples
+        )
+    else:
+        ref_waveform = xp.asarray(template)
     if ref_waveform.ndim == 1:
-        ref_waveform = ref_waveform[None, :]  # Treat as 1 template
-
-    # Ensure reference is on the same device as the signal.
+        ref_waveform = ref_waveform[None, :]
+    # Ensure the template is on the same device as the signal.
     ref_waveform = to_device(ref_waveform, "cpu" if xp is np else "gpu")
 
     num_sig_ch = sig_array.shape[0]
@@ -590,7 +588,7 @@ def estimate_timing(
     if search_range is not None:
         start, end = search_range
         sig_processing = sig_array[:, start:end]
-        offset = start
+        offset = int(start)
     else:
         sig_processing = sig_array
 
@@ -742,7 +740,7 @@ def estimate_timing(
 
     # === Fractional Timing (Parabolic Interpolation) ===
     fractional_offsets = estimate_fractional_delay(
-        corr, peak_indices, dft_upsample=dft_upsample, method=fractional_method
+        corr, peak_indices, dft_upsample=dft_upsample, fit=fit
     )
 
     if logger.isEnabledFor(logging.INFO):
@@ -754,80 +752,80 @@ def estimate_timing(
             metrics.tolist(),
         )
 
-    return integer_offsets, fractional_offsets
+    integer_offsets, fractional_offsets, metrics, coherence, corr = restore_1d(
+        was_1d, integer_offsets, fractional_offsets, metrics, coherence, corr
+    )
+    return TimingEstimate(
+        integer=integer_offsets.astype(xp.int64),
+        fractional=fractional_offsets,
+        metric=metrics,
+        coherence=coherence,
+        correlation=corr,
+        search_start=offset,
+    )
 
 
 def correct_timing(
-    samples: ArrayType | Signal,
-    integer_offset: int | ArrayType,
-    fractional_offset: float | ArrayType = 0.0,
+    samples: S,
+    how: TimingEstimate | float | ArrayType,
+    *,
     mode: str = "circular",
-) -> ArrayType | Signal:
+) -> S:
     """
-    Combined integer and fractional timing correction.
-
-    Applies an integer sample shift followed by fractional sample
-    interpolation using FFT-based frequency-domain delay.
+    Remove a timing offset: integer shift, then FFT fractional delay.
 
     Parameters
     ----------
     samples : array_like or Signal
-        Input signal. Shape: (N,) or (C, N).  A :class:`Signal` returns a
-        new timing-corrected :class:`Signal`.
-    integer_offset : int or array_like
-        Integer sample offset(s) to correct. Positive values shift
-        the signal left (i.e., remove leading samples).
-        Scalar or shape (C,) for per-channel offsets.
-    fractional_offset : float or array_like, default 0.0
-        Fractional sample delay(s) in [-0.5, 0.5) to correct via
-        FFT-based interpolation. Scalar or shape (C,).
+        Input samples, ``(N,)`` or ``(C, N)``.
+    how : TimingEstimate, float or array_like
+        A :class:`TimingEstimate`, or the offset in samples (scalar or
+        ``(C,)``), which is split into its nearest integer and a fraction
+        in ``[-0.5, 0.5)``.  Sample ``offset`` of the input becomes sample 0.
     mode : {'circular', 'zero', 'slice'}, default 'circular'
         How to handle boundary samples after the integer shift:
 
-        - ``'circular'``: Wrap-around (``xp.roll``). Output has the
-          same length as input.  Correct for periodic signals or
-          unit tests; **not** suitable for burst frames.
-        - ``'zero'``: Shift left, fill trailing samples with zeros.
-          Same output shape as input.  Correct for burst reception
-          where tail wrapping would corrupt the payload.
-        - ``'slice'``: Discard leading samples; no tail artifact.
-          For a scalar offset the output length is ``N - offset``.
-          For per-channel offsets the output length is
-          ``N - max(offset)`` so all channels are aligned to the
-          same common overlap region - the correct approach for
-          offline MIMO timing-skew correction.
+        - ``'circular'``: wrap around (``roll``); same length.  For periodic
+          signals; not for bursts.
+        - ``'zero'``: shift left and zero-fill the tail; same length.
+        - ``'slice'``: drop the leading samples.  With per-channel offsets
+          the output has ``N - max(offset)`` samples so all channels share the
+          overlap.  A Signal's reference keeps the symbol periods left.
 
     Returns
     -------
     array_like or Signal
-        Timing-corrected signal.  Same shape as input for
-        ``'circular'`` and ``'zero'``; shorter for ``'slice'``.  A
-        :class:`Signal` returns a new corrected :class:`Signal`.
+        Corrected samples; shorter for ``'slice'``.
 
     Notes
     -----
-    The reference sequence is not stripped from the output; sample 0 is the
-    first reference sample.  Fractional delay uses FFT-based phase shift
-    (ideal for bandlimited signals; no power loss).  For ``mode='slice'``,
-    fractional delay is applied to the full buffer before slicing so the
-    wrap-around stays at the buffer ends.
+    The template is not stripped: sample 0 is its first sample.  For
+    ``mode='slice'`` the fractional delay is applied to the full buffer
+    before slicing, so the FFT wrap-around falls in the discarded part.
     """
-    signal_adapter = adapt_signal(samples, function_name="correct_timing()")
-    samples = signal_adapter.array
-    samples, xp, _ = dispatch(samples)
-    samples, was_1d = as_2d(samples, name="samples")
 
-    num_ch = samples.shape[0]
-    N = samples.shape[-1]
+    if mode not in ("circular", "zero", "slice"):
+        raise ValueError(
+            f"Unknown mode {mode!r}. Choose 'circular', 'zero', or 'slice'."
+        )
+    signal_adapter = adapt_signal(samples, function_name="correct_timing()")
+    x, xp, _ = dispatch(signal_adapter.array)
+    x, was_1d = as_2d(x, name="samples")
+    if isinstance(how, TimingEstimate):
+        integer_offset = xp.asarray(how.integer)
+        fractional_offset = xp.asarray(how.fractional)
+    else:
+        total = xp.asarray(how, dtype=xp.float64)
+        integer_offset = xp.floor(total + 0.5).astype(xp.int64)
+        fractional_offset = total - integer_offset
+
+    num_ch = x.shape[0]
+    N = x.shape[-1]
 
     # Pre-evaluate the fractional-correction flag so mode='slice' can apply the
     # delay before the slice. Same logic that used to live just before the
     # post-integer fractional call below - relocated, not changed.
-    if isinstance(fractional_offset, (int, float)):
-        apply_frac = abs(fractional_offset) > 1e-9
-    else:
-        fractional_offset = xp.asarray(fractional_offset)
-        apply_frac = bool(xp.any(xp.abs(fractional_offset) > 1e-9))
+    apply_frac = bool(xp.any(xp.abs(fractional_offset) > 1e-9))
 
     # mode='slice': apply fractional delay on the *full* pre-slice buffer.
     # fft_fractional_delay treats its input as circular; applying it after the
@@ -837,29 +835,24 @@ def correct_timing(
     # discarded by the slice; only the tail of the slice carries any residual
     # ~sinc-tail artefact, well away from the equalizer training start.
     if mode == "slice" and apply_frac:
-        samples = fft_fractional_delay(samples, -fractional_offset)
+        x = fft_fractional_delay(x, delay=-fractional_offset)
 
     # === Integer correction (integer shift) ===
-    integer_offset = xp.asarray(integer_offset)
 
     if integer_offset.ndim == 0:
         # --- Scalar: same shift for all channels ---
         shift = int(integer_offset)
         if mode == "circular":
-            samples = xp.roll(samples, -shift, axis=-1)
+            x = xp.roll(x, -shift, axis=-1)
         elif mode == "zero":
-            result = xp.zeros_like(samples)
+            result = xp.zeros_like(x)
             if shift > 0:
-                result[..., : N - shift] = samples[..., shift:]
+                result[..., : N - shift] = x[..., shift:]
             elif shift < 0:
-                result[..., -shift:] = samples[..., : N + shift]
-            samples = result
+                result[..., -shift:] = x[..., : N + shift]
+            x = result
         elif mode == "slice":
-            samples = samples[..., shift:]
-        else:
-            raise ValueError(
-                f"Unknown mode {mode!r}. Choose 'circular', 'zero', or 'slice'."
-            )
+            x = x[..., shift:]
 
     else:
         # --- Per-channel: vectorized gather (avoids one GPU->CPU sync per channel) ---
@@ -869,12 +862,12 @@ def correct_timing(
 
         if mode == "circular":
             col_idx = (col_base + integer_shift[:, None]) % N  # (C, N)
-            samples = samples[row_idx, col_idx]
+            x = x[row_idx, col_idx]
 
         elif mode == "zero":
             col_raw = col_base + integer_shift[:, None]  # (C, N)
-            gathered = samples[row_idx, xp.clip(col_raw, 0, N - 1)]
-            samples = xp.where(col_raw < N, gathered, xp.zeros_like(gathered))
+            gathered = x[row_idx, xp.clip(col_raw, 0, N - 1)]
+            x = xp.where(col_raw < N, gathered, xp.zeros_like(gathered))
 
         elif mode == "slice":
             # Align all channels to common overlap: N - max(offset) samples
@@ -883,19 +876,14 @@ def correct_timing(
             col_idx_s = (
                 xp.arange(common_len, dtype=xp.int64)[None, :] + integer_shift[:, None]
             )  # (C, common_len)
-            samples = samples[row_idx, col_idx_s]
-
-        else:
-            raise ValueError(
-                f"Unknown mode {mode!r}. Choose 'circular', 'zero', or 'slice'."
-            )
+            x = x[row_idx, col_idx_s]
 
     # === Fractional correction (via FFT) ===
     # For mode='slice' this was already applied above on the full pre-slice
     # buffer; here we only handle 'circular' / 'zero', whose output length
     # equals the input length so the wrap location is unchanged either way.
     if apply_frac and mode != "slice":
-        samples = fft_fractional_delay(samples, -fractional_offset)
+        x = fft_fractional_delay(x, delay=-fractional_offset)
 
     if mode == "slice":
         logger.warning(
@@ -910,4 +898,12 @@ def correct_timing(
         mode,
     )
 
-    return signal_adapter.wrap_samples(restore_1d(was_1d, samples))
+    out = restore_1d(was_1d, x)
+    sig = signal_adapter.signal
+    if mode == "slice" and sig is not None and sig.reference is not None:
+        # Alignment invariant: keep only the symbol periods still present.
+        num_symbols = int(out.shape[-1] // sig.sps)
+        return signal_adapter.wrap_samples(
+            out, reference=sig.reference.head(num_symbols)
+        )
+    return signal_adapter.wrap_samples(out)

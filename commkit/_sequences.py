@@ -60,7 +60,7 @@ def barker_sequence(length: int) -> np.ndarray:
     return seq
 
 
-def zadoff_chu_sequence(length: int, root: int = 1) -> np.ndarray:
+def zadoff_chu_sequence(length: int, *, root: int = 1) -> np.ndarray:
     r"""
     Generates a Zadoff-Chu (ZC) synchronization sequence.
 

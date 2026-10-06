@@ -679,15 +679,20 @@ ROWS: list[Row] = [
     Row(
         "commkit.timing.correct_timing",
         RATE_CHANGE,
-        call=lambda c, x: _a(x, integer_offset=3),
+        data=2,
+        call=lambda c, x: _a(x, 3),
     ),
     Row("commkit.timing.estimate_fractional_delay", ESTIMATE, data=2),
-    Row("commkit.timing.estimate_timing", MULTI, data=2),
+    Row("commkit.timing.TimingEstimate", VALUE),
+    Row(
+        "commkit.timing.estimate_timing",
+        MULTI,
+        call=lambda c, x: _a(x, template=c.wave2[0, :64], threshold=1.0),
+    ),
     Row(
         "commkit.timing.fft_fractional_delay",
         TRANSFORM,
-        data=2,
-        call=lambda c, x: _a(x, 0.25),
+        call=lambda c, x: _a(x, delay=0.25),
     ),
 ]
 
@@ -989,7 +994,6 @@ LEGACY: dict[str, frozenset[str]] = {
     "commkit.frequency.estimate_frequency_offset_mth_power": L(SIG, FCT, RNK),
     "commkit.frequency.estimate_frequency_offset_pilot_symbols": L(SIG, FCT, RNK),
     "commkit.frequency.find_bias_tone": L(SIG),
-    "commkit.timing.cross_correlate_fft": L(SIG),
     "commkit.metrics.ber": L(f"{MET}@gpu"),
     "commkit.metrics.evm": L(MET),
     "commkit.metrics.mi": L(SIG, MET),
@@ -1024,8 +1028,4 @@ LEGACY: dict[str, frozenset[str]] = {
     "commkit.recovery.pll.recover_carrier_phase_pll": L(SIG),
     "commkit.recovery.tikhonov.recover_carrier_phase_tikhonov": L(SIG),
     "commkit.recovery.viterbi_viterbi.recover_carrier_phase_viterbi_viterbi": L(SIG),
-    "commkit.timing.correct_timing": L(SIG),
-    "commkit.timing.estimate_fractional_delay": L(SIG),
-    "commkit.timing.estimate_timing": L(SIG),
-    "commkit._sequences.zadoff_chu_sequence": L(SIG),
 }
