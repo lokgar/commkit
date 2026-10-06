@@ -9,7 +9,7 @@ import numpy as np
 import pytest
 from workloads import llr_workload
 
-from commkit.mapping import compute_llr
+from commkit.mapping import Constellation, compute_llr
 from commkit.metrics import gmi
 
 ROUNDS = dict(rounds=3, warmup_rounds=1, iterations=1)
@@ -23,7 +23,12 @@ def bench_compute_llr(benchmark, backend_device, xp, sync, order, method):
     rx = xp.asarray(rx_np)
 
     def run():
-        out = compute_llr(rx, "qam", order, noise_var, method=method)
+        out = compute_llr(
+            rx,
+            noise_var=noise_var,
+            constellation=Constellation.qam(order),
+            method=method,
+        )
         sync()
         return out
 
@@ -34,7 +39,9 @@ def bench_compute_llr(benchmark, backend_device, xp, sync, order, method):
 def bench_gmi(benchmark, backend_device, xp, sync, order):
     rx_np, bits_np, noise_var = llr_workload(order=order, n_sym=N_SYM)
     k = int(np.log2(order))
-    llrs_np = np.asarray(compute_llr(rx_np, "qam", order, noise_var)).reshape(-1, k)
+    llrs_np = np.asarray(
+        compute_llr(rx_np, noise_var=noise_var, constellation=Constellation.qam(order))
+    ).reshape(-1, k)
     llrs = xp.asarray(llrs_np)
     bits = xp.asarray(bits_np.reshape(-1, k))
 

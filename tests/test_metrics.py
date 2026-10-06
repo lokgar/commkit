@@ -133,7 +133,7 @@ class TestErrorVectorMagnitude:
         """At high SNR blind and data-aided EVM should agree closely."""
         rng = np.random.default_rng(42)
         bits = rng.integers(0, 2, 4000).astype("int32")
-        tx = map_bits(xp.asarray(bits), "qam", 16)
+        tx = map_bits(xp.asarray(bits), constellation=Constellation.qam(16))
         rx = apply_awgn(tx, esn0_db=30.0, sps=1)
 
         pct_da, _ = metrics.evm(rx, tx)
@@ -223,14 +223,14 @@ class TestSymbolErrorRate:
         """SER = 0 when rx equals tx exactly."""
         rng = np.random.default_rng(0)
         bits = rng.integers(0, 2, 800).astype("int32")
-        tx = map_bits(xp.asarray(bits), "qam", 16)
+        tx = map_bits(xp.asarray(bits), constellation=Constellation.qam(16))
         assert metrics.ser(tx, tx, "qam", 16) == 0.0
 
     def test_ser_high_snr_near_zero(self, xp: Any) -> None:
         """SER should be negligible at very high SNR."""
         rng = np.random.default_rng(1)
         bits = rng.integers(0, 2, 2000).astype("int32")
-        tx = map_bits(xp.asarray(bits), "qam", 4)
+        tx = map_bits(xp.asarray(bits), constellation=Constellation.qam(4))
         rx = apply_awgn(tx, esn0_db=40.0, sps=1)
         assert metrics.ser(rx, tx, "qam", 4) < 1e-3
 
@@ -238,7 +238,7 @@ class TestSymbolErrorRate:
         """SER returns array (N_ch,) for 2D input."""
         rng = np.random.default_rng(2)
         bits = rng.integers(0, 2, 400).astype("int32")
-        tx_row = map_bits(xp.asarray(bits), "qam", 4)
+        tx_row = map_bits(xp.asarray(bits), constellation=Constellation.qam(4))
         tx = xp.stack([tx_row, tx_row])
 
         result = metrics.ser(tx, tx, "qam", 4)
@@ -262,9 +262,11 @@ class TestInformationMetrics:
         N = 200
         rng = np.random.default_rng(42)
         bits = rng.integers(0, 2, N * k).astype("int32")
-        symbols = map_bits(xp.asarray(bits), "qam", M)
+        symbols = map_bits(xp.asarray(bits), constellation=Constellation.qam(M))
 
-        llrs = compute_llr(symbols, "qam", M, noise_var=1e-6).reshape(N, k)
+        llrs = compute_llr(
+            symbols, noise_var=1e-6, constellation=Constellation.qam(M)
+        ).reshape(N, k)
         gmi_val = metrics.gmi(llrs, bits.reshape(N, k))
         assert gmi_val > np.log2(M) - 0.05
 
@@ -275,17 +277,19 @@ class TestInformationMetrics:
         N = 500
         rng = np.random.default_rng(7)
         bits = rng.integers(0, 2, N * k).astype("int32")
-        symbols = map_bits(xp.asarray(bits), "qam", M)
+        symbols = map_bits(xp.asarray(bits), constellation=Constellation.qam(M))
 
-        llrs = compute_llr(symbols, "qam", M, noise_var=1e6).reshape(N, k)
+        llrs = compute_llr(
+            symbols, noise_var=1e6, constellation=Constellation.qam(M)
+        ).reshape(N, k)
         gmi_val = metrics.gmi(llrs, bits.reshape(N, k))
         assert gmi_val < 0.2
 
     def test_gmi_flat_input_returns_per_bit(self, xp: Any) -> None:
         """Flat 1D input: gmi() treats k=1 and returns per-bit GMI in [0, 1]."""
         bits = np.array([0, 1, 1, 0, 0, 1, 1, 0], dtype="int32")
-        symbols = map_bits(xp.asarray(bits), "qam", 4)
-        llrs = compute_llr(symbols, "qam", 4, noise_var=0.1)
+        symbols = map_bits(xp.asarray(bits), constellation=Constellation.qam(4))
+        llrs = compute_llr(symbols, noise_var=0.1, constellation=Constellation.qam(4))
         gmi_val = metrics.gmi(llrs, bits)
         assert 0.0 <= gmi_val <= 1.0
 
@@ -294,8 +298,10 @@ class TestInformationMetrics:
         k = 2
         N = 4
         bits = np.array([0, 1, 1, 0, 0, 1, 1, 0], dtype="int32")
-        symbols = map_bits(xp.asarray(bits), "qam", 4)
-        llrs = compute_llr(symbols, "qam", 4, noise_var=0.1).reshape(N, k)
+        symbols = map_bits(xp.asarray(bits), constellation=Constellation.qam(4))
+        llrs = compute_llr(
+            symbols, noise_var=0.1, constellation=Constellation.qam(4)
+        ).reshape(N, k)
         gmi_val = metrics.gmi(llrs, bits.reshape(N, k))
         assert isinstance(gmi_val, float)
 
@@ -312,8 +318,10 @@ class TestInformationMetrics:
         N = 100
         rng = np.random.default_rng(55)
         bits = rng.integers(0, 2, N * k).astype("int32")
-        symbols = map_bits(xp.asarray(bits), "qam", 4)
-        llrs = compute_llr(symbols, "qam", 4, noise_var=0.1).reshape(N, k)
+        symbols = map_bits(xp.asarray(bits), constellation=Constellation.qam(4))
+        llrs = compute_llr(
+            symbols, noise_var=0.1, constellation=Constellation.qam(4)
+        ).reshape(N, k)
         bits_2d = bits.reshape(N, k)
         gmi_val = metrics.gmi(llrs, bits_2d)
         assert 0.0 <= gmi_val <= np.log2(4)

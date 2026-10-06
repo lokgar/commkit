@@ -13,9 +13,9 @@ from commkit.mapping import (
     compute_llr,
     maxwell_boltzmann,
     optimal_nu,
-    ps_entropy,
 )
-from commkit.mapping.shaping import _constellation_power, _rescale_ps_symbols
+from commkit.mapping.shaping import _constellation_power
+from commkit.metrics import _rescale_ps_symbols
 from tests.common.conversions import to_numpy
 
 
@@ -25,7 +25,7 @@ class TestMaxwellBoltzmann:
     @pytest.mark.parametrize("order,nu", [(16, 0.5), (64, 0.2), (256, 0.1), (16, 2.0)])
     def test_sums_to_one(self, order: int, nu: float) -> None:
         """Verify PMF sums to 1 and has non-negative probabilities."""
-        pmf = maxwell_boltzmann(order, nu)
+        pmf = maxwell_boltzmann(Constellation.qam(order), nu=nu)
         assert pmf.shape == (order,)
         assert np.isclose(pmf.sum(), 1.0, atol=1e-12)
         np.testing.assert_array_equal(pmf >= 0, True)
@@ -33,14 +33,14 @@ class TestMaxwellBoltzmann:
     @pytest.mark.parametrize("order", [16, 64, 256])
     def test_uniform_at_zero(self, order: int, xpt: Any) -> None:
         """Zero temperature factor (nu=0) yields a discrete uniform distribution."""
-        pmf = maxwell_boltzmann(order, 0.0)
+        pmf = maxwell_boltzmann(Constellation.qam(order), nu=0.0)
         expected = np.full(order, 1.0 / order)
         xpt.assert_allclose(pmf, expected, atol=1e-14)
 
     @pytest.mark.parametrize("order", [16, 64])
     def test_inner_higher_probability(self, order: int) -> None:
         """Inner constellation points must have higher probability than outer ones."""
-        pmf = maxwell_boltzmann(order, nu=0.5)
+        pmf = maxwell_boltzmann(Constellation.qam(order), nu=0.5)
         const = Constellation.qam(order).points
         energies = np.abs(const) ** 2
         for i in range(order):
@@ -53,19 +53,19 @@ class TestMaxwellBoltzmann:
 
 
 class TestPSEntropy:
-    """Tests for constellation entropy under probabilistic shaping."""
+    """Entropy of a shaped constellation (``Constellation.entropy``)."""
 
     @pytest.mark.parametrize("order", [16, 64, 256])
     def test_entropy_uniform(self, order: int) -> None:
         """nu=0 must achieve theoretical maximum entropy log2(M)."""
-        h = ps_entropy(order, nu=0.0)
+        h = Constellation.qam(order).shaped(nu=0.0).entropy
         assert np.isclose(h, np.log2(order), atol=1e-10)
 
     @pytest.mark.parametrize("order", [16, 64])
     def test_entropy_decreasing_with_nu(self, order: int) -> None:
         """Entropy must monotonically decrease with increasing shaping parameter nu."""
         nus = [0.0, 0.1, 0.5, 1.0, 2.0]
-        entropies = [ps_entropy(order, nu) for nu in nus]
+        entropies = [Constellation.qam(order).shaped(nu=nu).entropy for nu in nus]
         for a, b in zip(entropies, entropies[1:], strict=False):
             assert a >= b, f"Entropy should decrease with nu: {entropies}"
 
@@ -85,23 +85,24 @@ class TestOptimalNu:
     )
     def test_optimal_nu_recovers_entropy(self, order: int, target: float) -> None:
         """optimal_nu must find a parameter achieving target entropy within 1e-6."""
-        nu, achieved = optimal_nu(order, target)
+        nu = optimal_nu(Constellation.qam(order), entropy=target)
         assert nu >= 0
+        achieved = Constellation.qam(order).shaped(nu=nu).entropy
         assert abs(achieved - target) < 1e-6
 
     def test_optimal_nu_at_max_entropy_returns_zero(self) -> None:
         """Targeting maximum entropy log2(M) returns nu=0."""
         order = 16
-        nu, achieved = optimal_nu(order, np.log2(order))
-        assert nu == 0.0
-        assert np.isclose(achieved, np.log2(order), atol=1e-8)
+        assert optimal_nu(Constellation.qam(order), entropy=np.log2(order)) == 0.0
 
     def test_optimal_nu_invalid_entropy(self) -> None:
         """Out-of-range target entropy raises ValueError."""
         with pytest.raises(ValueError):
-            optimal_nu(16, 0.0)
+            optimal_nu(Constellation.qam(16), entropy=0.0)
         with pytest.raises(ValueError):
-            optimal_nu(16, 5.0)
+            optimal_nu(Constellation.qam(16), entropy=5.0)
+        with pytest.raises(ValueError, match="same energy"):
+            optimal_nu(Constellation.psk(8), entropy=2.0)
 
 
 class TestGeneratePSQAM:
@@ -159,7 +160,9 @@ class TestGeneratePSQAM:
         assert abs(float(np.mean(np.abs(src) ** 2)) - 1.0) < 5 * std_err
 
         uniform = Constellation.qam(order).points
-        e_ps = _constellation_power(uniform, maxwell_boltzmann(order, nu))
+        e_ps = _constellation_power(
+            uniform, maxwell_boltzmann(Constellation.qam(order), nu=nu)
+        )
         np.testing.assert_allclose(
             sig.constellation.points, uniform / np.sqrt(e_ps), rtol=1e-12
         )
@@ -203,7 +206,7 @@ class TestPSQAMMetricsAndDemapping:
         """PS-QAM mutual information must not exceed constellation entropy H(X)."""
         order = 64
         nu = 0.4
-        pmf = maxwell_boltzmann(order, nu)
+        pmf = maxwell_boltzmann(Constellation.qam(order), nu=nu)
         nz = pmf > 0
         h_x = float(-np.sum(pmf[nz] * np.log2(pmf[nz])))
 
@@ -221,15 +224,20 @@ class TestPSQAMMetricsAndDemapping:
         noisy = apply_awgn(sig.samples, esn0_db=12.0, sps=1)
         noise_var = 10 ** (-12.0 / 10)
 
-        llr_none = compute_llr(noisy, "qam", order, noise_var, method="exact")
+        llr_none = compute_llr(
+            noisy,
+            noise_var=noise_var,
+            constellation=Constellation.qam(order),
+            method="exact",
+        )
         pmf_uniform = np.full(order, 1.0 / order)
         llr_uniform = compute_llr(
             noisy,
-            "qam",
-            order,
-            noise_var,
+            noise_var=noise_var,
+            constellation=Constellation(
+                Constellation.qam(order).points, pmf=pmf_uniform
+            ),
             method="exact",
-            pmf=pmf_uniform,
         )
         xpt.assert_allclose(llr_none, llr_uniform, atol=1e-4)
 
@@ -237,8 +245,9 @@ class TestPSQAMMetricsAndDemapping:
         """Shaped PMF gives higher confidence magnitudes to inner points."""
         order = 16
         nu = 1.0
-        pmf = maxwell_boltzmann(order, nu)
-        const = Constellation.qam(order).points.astype(np.complex64)
+        shaped = Constellation.qam(order).shaped(nu=nu)
+        uniform = Constellation(shaped.points)  # same points, no prior
+        const = shaped.points.astype(np.complex64)
 
         inner_idx = int(np.argmin(np.abs(const)))
         tx_sym = np.array([const[inner_idx]] * 100, dtype=np.complex64)
@@ -252,8 +261,12 @@ class TestPSQAMMetricsAndDemapping:
             .ravel()
         )
 
-        llr_none = compute_llr(rx, "qam", order, noise_var, method="exact")
-        llr_ps = compute_llr(rx, "qam", order, noise_var, method="exact", pmf=pmf)
+        llr_none = compute_llr(
+            rx, noise_var=noise_var, constellation=uniform, method="exact"
+        )
+        llr_ps = compute_llr(
+            rx, noise_var=noise_var, constellation=shaped, method="exact"
+        )
         assert np.mean(np.abs(llr_ps)) >= np.mean(np.abs(llr_none)) * 0.95
 
     def test_rescale_ps_symbols_uniform_is_noop(self) -> None:
@@ -266,7 +279,7 @@ class TestPSQAMMetricsAndDemapping:
         """Shared rescale helper matches manual sqrt(E_PS) normalisation."""
         order = 16
         nu = 1.0
-        pmf = maxwell_boltzmann(order, nu)
+        pmf = maxwell_boltzmann(Constellation.qam(order), nu=nu)
         const = Constellation.qam(order).points
         e_ps = _constellation_power(const, pmf)
         assert e_ps < 1.0 - 1e-6

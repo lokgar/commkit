@@ -704,7 +704,7 @@ class TestSignalResolutionAndMetrics:
             samples=xp.ones(10, dtype="complex64"), sampling_rate=1.0, symbol_rate=1.0
         )
         s = s.replace(resolved_symbols=xp.ones(10, dtype="complex64"))
-        with pytest.raises(ValueError, match="Modulation scheme and order required"):
+        with pytest.raises(ValueError, match="needs a constellation"):
             s = mapping.demap_symbols_hard(s)
 
     def test_evm_no_reference(self, xp):

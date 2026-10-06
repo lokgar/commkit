@@ -49,10 +49,51 @@ def _log_per_channel(fmt: str, *arrays: ArrayType, extra: tuple = ()) -> None:
         logger.info(fmt, ch, *values, *extra)
 
 
+def _rescale_ps_symbols(
+    rx: ArrayType, xp, modulation: str, order: int, pmf: ArrayType | None
+) -> ArrayType:
+    r"""Rescale unit-avg-power PS-QAM symbols ``{c·s_m}`` back to ``{s_m}``.
+
+    Receive-path symbols normalised to unit average power (e.g. via
+    ``resolve_symbols``) place PS-QAM symbols on the ``{s_m / sqrt(E_PS)}``
+    grid (``c = 1/sqrt(E_PS)``).  Nearest-neighbour searches against
+    :func:`_gray_points` (hard demapping, EVM, SER, MI/LLR) expect
+    symbols on the ``{s_m}`` grid instead.  This applies the exact
+    deterministic correction ``rx -> rx·sqrt(E_PS)``.  No-op for uniform
+    modulations (``pmf is None``) or when ``E_PS ≈ 1``.
+
+    Parameters
+    ----------
+    rx : array_like
+        Received symbols, any backend.
+    xp : module
+        ``rx``'s array module (NumPy/CuPy), used to build the dtype-matched
+        scale factor.
+    modulation, order : constellation spec, as accepted by
+        :func:`_gray_points`.
+    pmf : array_like or None
+        Symbol PMF of shape ``(order,)``.  ``None`` is a no-op.
+
+    Returns
+    -------
+    array_like
+        ``rx``, rescaled (or unchanged), same shape/backend as ``rx``.
+    """
+    if pmf is None:
+        return rx
+    from .mapping.gray import _gray_points
+    from .mapping.shaping import _constellation_power
+
+    e_ps = _constellation_power(_gray_points(modulation, order), pmf)
+    if e_ps < 1.0 - 1e-6:
+        rx = rx * xp.asarray(np.sqrt(e_ps), dtype=rx.real.dtype)
+    return rx
+
+
 def _ps_unit_power_rescale(rx, xp, modulation, order, pmf, noise_var):
     """Rescale unit-avg-power PS-QAM symbols and the matching noise_var.
 
-    Thin wrapper over :func:`mapping.shaping._rescale_ps_symbols` for the
+    Thin wrapper over :func:`_rescale_ps_symbols` for the
     symbol part; additionally scales ``noise_var`` by the same ``E_PS``
     factor (needed by ``gmi``/``mi``, unlike the EVM/SER call sites of
     ``_rescale_ps_symbols``).  No-op for uniform modulations (``pmf is
@@ -63,7 +104,7 @@ def _ps_unit_power_rescale(rx, xp, modulation, order, pmf, noise_var):
     if pmf is None:
         return rx, noise_var
     from .mapping.gray import _gray_points
-    from .mapping.shaping import _constellation_power, _rescale_ps_symbols
+    from .mapping.shaping import _constellation_power
 
     e_ps = _constellation_power(_gray_points(modulation, order), pmf)
     rx = _rescale_ps_symbols(rx, xp, modulation, order, pmf)
@@ -220,20 +261,18 @@ def evm(
                 "mode='blind' requires modulation and order. "
                 "Example: evm(rx, mode='blind', modulation='qam', order=16)."
             )
-        from .mapping import Constellation
+        from .mapping.constellation import _legacy_constellation
 
         # gray_constellation always returns unit-average-power constellations.
         # No gain correction of rx is applied here - the caller is responsible
         # for passing a gain-corrected signal at the expected constellation power.
-        c = Constellation.gray(modulation, order, pmf=pmf)
+        c = _legacy_constellation(modulation, order, pmf=pmf)
         constellation_np = c.points
         constellation = xp.asarray(constellation_np)  # (M,) unit-avg-power
 
         # PS-QAM: receive-path symbols at unit average power live on the
         # ``{s_m/sqrt(E_PS)}`` grid.  Rescale rx by ``sqrt(E_PS)`` so the
         # nearest-neighbour decision against ``{s_m}`` is exact.
-        from .mapping.shaping import _rescale_ps_symbols
-
         rx = _rescale_ps_symbols(rx, xp, modulation, order, pmf)
 
         # ML hard decision: nearest constellation point per symbol.  Chunked
@@ -589,7 +628,7 @@ def ser(
     if tx_symbols is None:
         raise ValueError("ser() requires tx_symbols for array input.")
 
-    from .mapping import Constellation
+    from .mapping.constellation import _legacy_constellation
 
     rx, xp, _ = dispatch(rx_symbols)
     tx = xp.asarray(tx_symbols)
@@ -603,7 +642,7 @@ def ser(
     if rx.shape != tx.shape:
         raise ValueError(f"Shape mismatch: rx {rx.shape} != tx {tx.shape}")
 
-    c = Constellation.gray(modulation, order, pmf=pmf)
+    c = _legacy_constellation(modulation, order, pmf=pmf)
     constellation_np = c.points
     constellation = xp.asarray(constellation_np)  # (M,)
 
@@ -614,8 +653,6 @@ def ser(
     # Rescale ``rx`` by ``sqrt(E_PS)`` so the nearest-neighbour search against
     # ``gray_constellation`` is correct for both rx and tx.  Has no effect on
     # uniform modulations.
-    from .mapping.shaping import _rescale_ps_symbols
-
     rx = _rescale_ps_symbols(rx, xp, modulation, order, pmf)
 
     # Nearest constellation point per symbol, chunked over the flattened N
@@ -725,6 +762,7 @@ def gmi(
             raise ValueError("gmi() requires noise_var.")
 
         from .mapping import compute_llr
+        from .mapping.constellation import _legacy_constellation
 
         eff_pmf = signal_adapter.resolve_optional("ps_pmf", pmf)
         rx, xp_, _ = dispatch(signal_adapter.array)
@@ -733,11 +771,9 @@ def gmi(
         )
         computed = compute_llr(
             resolved,
-            mod,
-            ord_,
-            adj_noise_var,
+            noise_var=adj_noise_var,
+            constellation=_legacy_constellation(mod, ord_, pmf=eff_pmf),
             method=method,
-            pmf=eff_pmf,
         )
         # compute_llr outputs (N*k,) / (C, N*k) on the input's device; reshape
         # to (N_total, k) so the array core infers bits-per-symbol from the

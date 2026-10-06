@@ -712,7 +712,7 @@ The equalization pass (3.7) gets more commits:
   are identical to the 1.x path for the same seeds (64-QAM nu=0.075 at 0 dB,
   256-QAM at 10 dB, 16-QAM at 20 dB). This comes before the signature change
   so that `demap`/`llr` can compare with `sig.constellation` directly.
-- [ ] **3.2c `refactor(mapping)!: functions take a Constellation`.**
+- [x] **3.2c `refactor(mapping)!: functions take a Constellation`.**
   - `map_bits(bits, *, constellation)`, `demap_symbols_hard(symbols, *,
     constellation=None)` and `compute_llr(symbols, *, noise_var,
     constellation=None, method="maxlog")`. The constellation is a choice that
@@ -727,6 +727,10 @@ The equalization pass (3.7) gets more commits:
   - `Constellation.gray()` leaves the value object; the 1.x bridge becomes
     the private `mapping._legacy_constellation()` for unmigrated modules.
   - `rescale_ps_symbols` moves into `metrics` (private) until 3.8.
+  - Signal-path `compute_llr` on a PS signal now compares the unit-power
+    resolved symbols with the unit-power shaped points; 1.x compared them
+    with the uniform grid without rescaling (its docstring pointed to `gmi`
+    instead). Hard decisions are unchanged.
 
 **Equalizer safety rules (3.7):**
 

@@ -23,14 +23,20 @@ data's device.
 """
 
 from dataclasses import dataclass, replace
-from functools import cache, lru_cache
+from functools import cache, cached_property, lru_cache
 
 import numpy as np
 
 from ..backend import ArrayType, dispatch
 from .gray import _gray_points, _nearest_index, _unpack_bits
 from .llr import _llr
-from .shaping import _constellation_power
+from .shaping import (
+    _constellation_power,
+    _entropy_bits,
+    _grid_energies,
+    _mb_pmf,
+    _nu_for_entropy,
+)
 
 __all__ = ["Constellation"]
 
@@ -168,7 +174,7 @@ class Constellation:
         """
         if (nu is None) == (entropy is None):
             raise ValueError("shaped() takes exactly one of nu or entropy.")
-        energies = self._grid_energies()
+        energies = _grid_energies(self.points)
         if np.ptp(energies) < 1e-9:
             raise ValueError(
                 "shaped() needs points of different energy; every point of "
@@ -179,29 +185,9 @@ class Constellation:
         assert nu is not None
         if nu < 0:
             raise ValueError(f"nu must be >= 0, got {nu}.")
-        pmf = _mb_pmf(energies, float(nu))
+        pmf = _mb_pmf(energies, float(nu)).copy()
         scale = 1.0 / np.sqrt(np.dot(pmf, np.abs(self.points) ** 2))
         return replace(self, points=self.points * scale, pmf=pmf)
-
-    @classmethod
-    def gray(
-        cls,
-        modulation: str,
-        order: int,
-        *,
-        normalize: bool = True,
-        unipolar: bool = False,
-        pmf: np.ndarray | None = None,
-    ) -> "Constellation":
-        """Bridge for unmigrated modules; removed in 3.2.
-
-        Unlike :meth:`shaped`, a ``pmf`` is attached *without* rescaling, which
-        is the 1.x PS convention (``E[|s|^2] < 1`` under the pmf).
-        """
-        base = _gray_base(modulation, order, normalize, unipolar)
-        if pmf is None:
-            return base
-        return replace(base, pmf=np.asarray(pmf, dtype=np.float64))
 
     # -- properties ----------------------------------------------------------
 
@@ -230,8 +216,7 @@ class Constellation:
         """Entropy of the prior in bits per symbol (``log2(M)`` if uniform)."""
         if self.pmf is None:
             return float(self.bits_per_symbol)
-        p = self.pmf[self.pmf > 0]
-        return float(-np.sum(p * np.log2(p)))
+        return _entropy_bits(self.pmf)
 
     # -- operations ----------------------------------------------------------
 
@@ -267,9 +252,21 @@ class Constellation:
         they must be on the constellation's scale.
         """
         symbols, xp, _ = dispatch(symbols)
-        idx = _nearest_index(
-            symbols.reshape(-1), self.points.astype(self._storage_dtype())
-        )
+        flat = symbols.reshape(-1)
+        grid = self._square_grid
+        if grid is None:
+            idx = _nearest_index(flat, self.points.astype(self._storage_dtype()))
+        else:
+            # Square lattice: the nearest point is found per axis, O(N) with
+            # no (N, M) distance matrix.
+            lev_min, step, side, lut = grid
+            dtype = flat.real.dtype
+
+            def level(v: ArrayType) -> ArrayType:
+                g = xp.round((v - dtype.type(lev_min)) / dtype.type(step))
+                return xp.clip(g, 0, side - 1).astype(xp.int64)
+
+            idx = xp.asarray(lut)[level(flat.real) * side + level(flat.imag)]
         bits = xp.asarray(self.bit_labels)[idx]
         return bits.reshape(*symbols.shape[:-1], -1)
 
@@ -319,20 +316,44 @@ class Constellation:
     def _storage_dtype(self) -> type:
         return np.complex64 if self.is_complex else np.float32
 
+    @cached_property
+    def _square_grid(self) -> tuple[float, float, int, np.ndarray] | None:
+        """``(lev_min, step, side, lut)`` if the points form a full square lattice.
+
+        ``lut[i * side + q]`` is the index of the point at level ``i`` on the
+        real axis and ``q`` on the imaginary axis.  ``None`` otherwise (PSK,
+        PAM, cross and 8-QAM, arbitrary points).
+        """
+        side = int(round(self.order**0.5))
+        if not self.is_complex or side * side != self.order or side < 2:
+            return None
+        re, im = self.points.real, self.points.imag
+        lev_min = float(re.min())
+        step = (float(re.max()) - lev_min) / (side - 1)
+        if step <= 0 or abs(float(im.min()) - lev_min) > 1e-9 * step:
+            return None
+        gi, gq = (re - lev_min) / step, (im - lev_min) / step
+        ri, rq = np.round(gi), np.round(gq)
+        if max(np.abs(gi - ri).max(), np.abs(gq - rq).max()) > 1e-9:
+            return None
+        cell = ri.astype(np.int64) * side + rq.astype(np.int64)
+        if cell.min() < 0 or cell.max() >= self.order:
+            return None
+        if np.unique(cell).size != self.order:
+            return None
+        lut = np.empty(self.order, dtype=np.int64)
+        lut[cell] = np.arange(self.order)
+        lut.setflags(write=False)
+        return lev_min, step, side, lut
+
     def _index_of_label(self) -> np.ndarray:
         """Point index for each packed label value, shape ``(M,)``."""
         index = np.empty(self.order, dtype=np.int64)
         index[_pack(self.bit_labels)] = np.arange(self.order)
         return index
 
-    def _grid_energies(self) -> np.ndarray:
-        """Point energies on the grid scaled to a minimum distance of 2."""
-        d = np.abs(self.points[:, None] - self.points[None, :])
-        d_min = d[~np.eye(self.order, dtype=bool)].min()
-        return np.abs(self.points * (2.0 / d_min)) ** 2
 
-
-def _host_array(value, name: str) -> np.ndarray:
+def _host_array(value: object, name: str) -> np.ndarray:
     """``value`` as a NumPy array; device arrays are rejected by name."""
     if type(value).__module__.split(".")[0] == "cupy":
         raise TypeError(f"{name} must be a host (NumPy) array; use .get() first.")
@@ -345,32 +366,6 @@ def _pack(labels: np.ndarray) -> np.ndarray:
     return labels.astype(np.int64) @ (1 << np.arange(k - 1, -1, -1, dtype=np.int64))
 
 
-def _mb_pmf(energies: np.ndarray, nu: float) -> np.ndarray:
-    log_p = -nu * energies
-    p = np.exp(log_p - log_p.max())
-    return p / p.sum()
-
-
-def _nu_for_entropy(energies: np.ndarray, entropy: float) -> float:
-    from scipy.optimize import brentq
-
-    max_h = np.log2(energies.size)
-    if not 0 < entropy <= max_h:
-        raise ValueError(f"entropy must be in (0, {max_h:g}] bits, got {entropy}.")
-    if np.isclose(entropy, max_h, atol=1e-8):
-        return 0.0
-
-    def gap(nu: float) -> float:
-        p = _mb_pmf(energies, nu)
-        p = p[p > 0]
-        return float(-np.sum(p * np.log2(p))) - entropy
-
-    nu_hi = 0.01
-    while gap(nu_hi) > 0:
-        nu_hi *= 10.0
-    return float(brentq(gap, 0.0, nu_hi, xtol=1e-12, rtol=1e-12))
-
-
 @cache
 def _named(family: str, order: int, unipolar: bool) -> Constellation:
     if not isinstance(order, int | np.integer) or order < 2:
@@ -379,11 +374,30 @@ def _named(family: str, order: int, unipolar: bool) -> Constellation:
     return Constellation(points, family=family)
 
 
+def _legacy_constellation(
+    modulation: str,
+    order: int,
+    *,
+    normalize: bool = True,
+    unipolar: bool = False,
+    pmf: np.ndarray | None = None,
+) -> Constellation:
+    """1.x ``(modulation, order, pmf)`` bridge for unmigrated modules.
+
+    Unlike :meth:`Constellation.shaped`, a ``pmf`` is attached *without*
+    rescaling, which is the 1.x PS convention (``E[|s|^2] < 1`` under the
+    pmf).  Removed when the last caller migrates (3.7, 3.8).
+    """
+    base = _legacy_base(modulation, order, normalize, unipolar)
+    if pmf is None:
+        return base
+    return replace(base, pmf=np.asarray(pmf, dtype=np.float64))
+
+
 @lru_cache(maxsize=128)
-def _gray_base(
+def _legacy_base(
     modulation: str, order: int, normalize: bool, unipolar: bool
 ) -> Constellation:
-    """Cached 1.x Gray constellation for :meth:`Constellation.gray`."""
     points = _gray_points(modulation, order, normalize=normalize, unipolar=unipolar)
     mod = modulation.lower()
     family = next(

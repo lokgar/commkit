@@ -1,19 +1,30 @@
 """
-Probabilistic shaping (PS-QAM).
+Probabilistic shaping.
 
-Maxwell-Boltzmann symbol distributions over a QAM constellation, the entropy /
-shaping-parameter inversion, MB sampling, and the pmf-weighted constellation
-power that ties the PS scale conventions together.
+Maxwell-Boltzmann priors over any constellation, the shaping parameter that
+reaches a target entropy, and the pmf-weighted constellation power.  Shaped
+constellations are built with :meth:`Constellation.shaped`, which uses these
+functions.
+
+The shaping parameter ``nu`` is defined on the points scaled to a minimum
+distance of 2, which is the odd-integer grid for QAM and PAM, so ``nu``
+matches the literature (``P(s) ∝ exp(-nu |s|^2)`` on that grid) for every
+scale of the same geometry.
 """
 
+from __future__ import annotations
+
 from functools import lru_cache
+from typing import TYPE_CHECKING
 
 import numpy as np
 
 from ..backend import ArrayType, to_device
-from .gray import _gray_points
 
-__all__ = ["maxwell_boltzmann", "optimal_nu", "ps_entropy"]
+if TYPE_CHECKING:
+    from .constellation import Constellation
+
+__all__ = ["maxwell_boltzmann", "optimal_nu"]
 
 
 def _constellation_power(
@@ -70,147 +81,105 @@ def _constellation_power(
     return float(np.dot(pmf_arr, energies))
 
 
-def _rescale_ps_symbols(
-    rx: ArrayType, xp, modulation: str, order: int, pmf: ArrayType | None
-) -> ArrayType:
-    r"""Rescale unit-avg-power PS-QAM symbols ``{c·s_m}`` back to ``{s_m}``.
+def maxwell_boltzmann(constellation: Constellation, *, nu: float) -> np.ndarray:
+    r"""Maxwell-Boltzmann prior over the points of a constellation.
 
-    Receive-path symbols normalised to unit average power (e.g. via
-    ``resolve_symbols``) place PS-QAM symbols on the ``{s_m / sqrt(E_PS)}``
-    grid (``c = 1/sqrt(E_PS)``).  Nearest-neighbour searches against
-    :func:`_gray_points` (hard demapping, EVM, SER, MI/LLR) expect
-    symbols on the ``{s_m}`` grid instead.  This applies the exact
-    deterministic correction ``rx -> rx·sqrt(E_PS)``.  No-op for uniform
-    modulations (``pmf is None``) or when ``E_PS ≈ 1``.
+    ``P(s_m) = exp(-nu |s'_m|^2) / Z``, where ``s'`` are the points scaled to
+    a minimum distance of 2 (the odd-integer grid for QAM and PAM), so ``nu``
+    is the literature value and does not depend on the constellation's scale.
 
     Parameters
     ----------
-    rx : array_like
-        Received symbols, any backend.
-    xp : module
-        ``rx``'s array module (NumPy/CuPy), used to build the dtype-matched
-        scale factor.
-    modulation, order : constellation spec, as accepted by
-        :func:`_gray_points`.
-    pmf : array_like or None
-        Symbol PMF of shape ``(order,)``.  ``None`` is a no-op.
-
-    Returns
-    -------
-    array_like
-        ``rx``, rescaled (or unchanged), same shape/backend as ``rx``.
-    """
-    if pmf is None:
-        return rx
-    e_ps = _constellation_power(_gray_points(modulation, order), pmf)
-    if e_ps < 1.0 - 1e-6:
-        rx = rx * xp.asarray(np.sqrt(e_ps), dtype=rx.real.dtype)
-    return rx
-
-
-@lru_cache(maxsize=256)
-def maxwell_boltzmann(order: int, nu: float) -> np.ndarray:
-    """
-    Computes the Maxwell-Boltzmann PMF over a QAM constellation.
-
-    P(s_m) = exp(-nu * |s_m|^2) / Z(nu), where |s_m|^2 is on the unnormalized
-    integer grid (literature-compatible nu scale).  Indexed consistently with
-    ``_gray_points``.
-
-    Parameters
-    ----------
-    order : int
-        QAM modulation order (must be a power of 2, e.g. 16, 64, 256).
+    constellation : Constellation
+        Points to shape; any existing pmf is ignored.
     nu : float
-        Shaping parameter nu >= 0.  nu = 0 returns the uniform distribution.
-        Larger nu concentrates probability on lower-energy points.
+        Shaping parameter, ``nu >= 0``.  ``nu = 0`` gives the uniform prior;
+        larger values favour low-energy points.
 
     Returns
     -------
     np.ndarray
-        PMF array of shape ``(order,)``, dtype float64, summing to 1.
-        Cached by ``(order, nu)``.
+        pmf of shape ``(M,)``, float64, aligned with ``constellation.points``
+        and summing to 1.
     """
-    # Energies computed on the unnormalized integer grid for literature-compatible ν.
-    # The PMF index ordering matches _gray_points (normalized), since both
-    # use the same Gray-code index assignment.
-    unnorm_constellation = _gray_points("qam", order, normalize=False)
-    if nu == 0.0:
-        return np.full(order, 1.0 / order, dtype=np.float64)
-    energies = np.abs(unnorm_constellation) ** 2  # (M,) unnormalized energies
-    log_p = -nu * energies
-    log_p -= log_p.max()  # shift for numerical stability before exp
-    p = np.exp(log_p)
-    return p / p.sum()
+    if nu < 0:
+        raise ValueError(f"nu must be >= 0, got {nu}.")
+    return _mb_pmf(_grid_energies(constellation.points), float(nu)).copy()
 
 
-def ps_entropy(order: int, nu: float) -> float:
-    r"""
-    Computes the per-symbol Shannon entropy under a Maxwell-Boltzmann distribution.
+def optimal_nu(constellation: Constellation, *, entropy: float) -> float:
+    r"""Shaping parameter ``nu`` whose Maxwell-Boltzmann prior has ``entropy``.
 
-    H(X) = -sum_m P(s_m) * log2(P(s_m)) [bits/symbol]
+    Solves ``H(maxwell_boltzmann(constellation, nu=nu)) = entropy`` by
+    bracketing and Brent's method (tolerance 1e-12).
 
     Parameters
     ----------
-    order : int
-        QAM modulation order.
-    nu : float
-        MB shaping parameter nu >= 0. nu = 0 returns log2(order).
+    constellation : Constellation
+        Points to shape; any existing pmf is ignored.
+    entropy : float
+        Target entropy in bits per symbol, in ``(0, log2(M)]``.
 
     Returns
     -------
     float
-        Entropy in bits per symbol. In the range (0, log2(order)].
+        ``nu >= 0``; ``0.0`` when ``entropy = log2(M)``.
     """
-    pmf = maxwell_boltzmann(order, nu)
-    nonzero = pmf > 0
-    return float(-np.sum(pmf[nonzero] * np.log2(pmf[nonzero])))
+    energies = _grid_energies(constellation.points)
+    if np.ptp(energies) < 1e-9:
+        raise ValueError(
+            "constellation: every point has the same energy, so shaping cannot "
+            "change the entropy."
+        )
+    return _nu_for_entropy(energies, float(entropy))
 
 
-def optimal_nu(order: int, entropy_bits: float) -> tuple:
-    r"""
-    Finds the MB shaping parameter ``ν`` that achieves a target per-symbol entropy.
+# -----------------------------------------------------------------------------
+# Internals (shared with Constellation.shaped)
+# -----------------------------------------------------------------------------
 
-    Uses ``scipy.optimize.brentq`` to bisect on
-    ``ps_entropy(order, ν) - entropy_bits = 0``.
 
-    Parameters
-    ----------
-    order : int
-        QAM modulation order.
-    entropy_bits : float
-        Target per-symbol entropy in bits. Must be in ``(0, log₂(order)]``.
+def _grid_energies(points: np.ndarray) -> np.ndarray:
+    """Point energies on the grid scaled to a minimum distance of 2."""
+    d = np.abs(points[:, None] - points[None, :])
+    d_min = d[~np.eye(points.size, dtype=bool)].min()
+    energies: np.ndarray = np.abs(points * (2.0 / d_min)) ** 2
+    return energies
 
-    Returns
-    -------
-    nu : float
-        Shaping parameter achieving the target entropy.
-    achieved_entropy : float
-        Actual entropy at the returned ``nu`` (may differ by ``< 1e-6`` bits).
 
-    Raises
-    ------
-    ValueError
-        If ``entropy_bits`` is outside ``(0, log₂(order)]``.
-    """
+@lru_cache(maxsize=256)
+def _mb_pmf_cached(energies: bytes, nu: float) -> np.ndarray:
+    e = np.frombuffer(energies, dtype=np.float64)
+    log_p = -nu * e
+    p: np.ndarray = np.exp(log_p - log_p.max())
+    p = p / p.sum()
+    p.setflags(write=False)
+    return p
+
+
+def _mb_pmf(energies: np.ndarray, nu: float) -> np.ndarray:
+    """Read-only MB pmf for ``energies`` (cached by value)."""
+    return _mb_pmf_cached(np.ascontiguousarray(energies, np.float64).tobytes(), nu)
+
+
+def _entropy_bits(pmf: np.ndarray) -> float:
+    p = pmf[pmf > 0]
+    return float(-np.sum(p * np.log2(p)))
+
+
+def _nu_for_entropy(energies: np.ndarray, entropy: float) -> float:
     from scipy.optimize import brentq
 
-    max_h = np.log2(order)
-    if not (0 < entropy_bits <= max_h):
-        raise ValueError(
-            f"entropy_bits must be in (0, {max_h:.3f}] for {order}-QAM, "
-            f"got {entropy_bits:.4f}"
-        )
-    if np.isclose(entropy_bits, max_h, atol=1e-8):
-        return 0.0, float(max_h)
+    max_h = np.log2(energies.size)
+    if not 0 < entropy <= max_h:
+        raise ValueError(f"entropy must be in (0, {max_h:g}] bits, got {entropy}.")
+    if np.isclose(entropy, max_h, atol=1e-8):
+        return 0.0
 
-    def _obj(nu):
-        return ps_entropy(order, nu) - entropy_bits
+    def gap(nu: float) -> float:
+        return _entropy_bits(_mb_pmf(energies, nu)) - entropy
 
-    # Grow upper bound until entropy drops below target
     nu_hi = 0.01
-    while ps_entropy(order, nu_hi) > entropy_bits:
+    while gap(nu_hi) > 0:
         nu_hi *= 10.0
-
-    nu_opt = float(brentq(_obj, 0.0, nu_hi, xtol=1e-9, rtol=1e-9))
-    return nu_opt, ps_entropy(order, nu_opt)
+    return float(brentq(gap, 0.0, nu_hi, xtol=1e-12, rtol=1e-12))

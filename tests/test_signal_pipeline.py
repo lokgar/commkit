@@ -237,23 +237,26 @@ class TestPipelineMetadataPropagation:
         assert result.sps == 2.5
         assert result.sampling_rate == 2.5 * sig.symbol_rate
 
-    @pytest.mark.parametrize("stored_unipolar", [False, True])
-    def test_demap_optional_unipolar_metadata(
-        self, xp: Any, xpt: Any, stored_unipolar: Any
-    ) -> None:
-        """demap_symbols_hard uses the Signal's constellation over the argument."""
+    def test_demap_constellation_is_a_choice(self, xp: Any, xpt: Any) -> None:
+        """demap_symbols_hard defaults to the Signal's constellation; an
+        explicit argument wins."""
         bits = xp.asarray([0, 0, 0, 1, 1, 1, 1, 0], dtype=xp.uint8)
-        symbols = map_bits(bits, "PAM", 4, unipolar=stored_unipolar)
+        bipolar = Constellation.pam(4)
+        symbols = map_bits(bits, constellation=bipolar)
         sig = Signal(
             samples=symbols,
             sampling_rate=1e6,
             symbol_rate=1e6,
-            constellation=Constellation.pam(4, unipolar=stored_unipolar),
+            constellation=bipolar,
             resolved_symbols=symbols,
         )
-        result = demap_symbols_hard(sig, unipolar=True)
+        result = demap_symbols_hard(sig)
         xpt.assert_array_equal(result.resolved_bits, bits)
         assert sig.resolved_bits is None
+
+        unipolar = Constellation.pam(4, unipolar=True)
+        explicit = demap_symbols_hard(sig, constellation=unipolar)
+        xpt.assert_array_equal(explicit.resolved_bits, unipolar.demap(symbols))
 
 
 class TestPipelineSPSValidation:

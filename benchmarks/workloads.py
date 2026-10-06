@@ -102,6 +102,8 @@ def llr_workload(
     k = int(np.log2(order))
     rng = np.random.default_rng(seed)
     bits = rng.integers(0, 2, n_sym * k, dtype=np.int8)
-    syms = np.asarray(map_bits(bits, "qam", order), dtype=np.complex64)
+    syms = np.asarray(
+        map_bits(bits, constellation=Constellation.qam(order)), dtype=np.complex64
+    )
     rx = apply_awgn(syms, esn0_db=esn0_db, sps=1, seed=seed + 1)
     return np.asarray(rx, dtype=np.complex64), bits, 10 ** (-esn0_db / 10)

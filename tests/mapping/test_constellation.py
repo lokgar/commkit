@@ -8,6 +8,8 @@ import pytest
 
 from commkit import mapping
 from commkit.mapping import Constellation
+from commkit.mapping.constellation import _legacy_constellation
+from commkit.mapping.gray import _gray_points
 
 
 def _natural_labels(order: int) -> np.ndarray:
@@ -150,9 +152,19 @@ class TestValueSemantics:
 
 class TestShaping:
     @pytest.mark.parametrize("order", [16, 32, 64, 256])
-    def test_nu_matches_maxwell_boltzmann(self, order) -> None:
-        c = Constellation.qam(order).shaped(nu=0.03)
-        np.testing.assert_allclose(c.pmf, mapping.maxwell_boltzmann(order, 0.03))
+    def test_nu_is_defined_on_the_odd_integer_grid(self, order) -> None:
+        """P(s) ∝ exp(-nu |s|^2) with s on the odd-integer QAM grid."""
+        nu = 0.03
+        grid = _gray_points("qam", order, normalize=False)
+        expected = np.exp(-nu * np.abs(grid) ** 2)
+        expected /= expected.sum()
+        c = Constellation.qam(order).shaped(nu=nu)
+        np.testing.assert_allclose(c.pmf, expected, rtol=1e-12)
+        np.testing.assert_allclose(
+            mapping.maxwell_boltzmann(Constellation.qam(order), nu=nu),
+            expected,
+            rtol=1e-12,
+        )
 
     def test_unit_power_and_unchanged_geometry(self) -> None:
         q = Constellation.qam(64)
@@ -167,8 +179,10 @@ class TestShaping:
     def test_entropy_target(self) -> None:
         s = Constellation.qam(64).shaped(entropy=5.2)
         assert s.entropy == pytest.approx(5.2, abs=1e-9)
-        nu, _ = mapping.optimal_nu(64, 5.2)
-        np.testing.assert_allclose(s.pmf, mapping.maxwell_boltzmann(64, nu), atol=1e-8)
+        nu = mapping.optimal_nu(Constellation.qam(64), entropy=5.2)
+        np.testing.assert_allclose(
+            s.pmf, mapping.maxwell_boltzmann(Constellation.qam(64), nu=nu), atol=1e-12
+        )
 
     def test_full_entropy_and_zero_nu_are_uniform(self) -> None:
         for s in (
@@ -205,7 +219,9 @@ class TestOperations:
         assert syms.shape == (2, 100)
         assert syms.dtype == xp.complex64
         assert isinstance(syms, type(bits))
-        xpt.assert_array_equal(syms[0], mapping.map_bits(bits[0], "qam", 16))
+        xpt.assert_array_equal(
+            syms[0], mapping.map_bits(bits[0], constellation=Constellation.qam(16))
+        )
         xpt.assert_array_equal(c.demap(syms), bits)
 
     def test_real_constellation_maps_to_float32(self, xp: Any) -> None:
@@ -238,7 +254,12 @@ class TestOperations:
         for method in ("maxlog", "exact"):
             xpt.assert_allclose(
                 c.llr(syms, noise_var=0.1, method=method),
-                mapping.compute_llr(syms, "qam", 16, noise_var=0.1, method=method),
+                mapping.compute_llr(
+                    syms,
+                    noise_var=0.1,
+                    constellation=Constellation.qam(16),
+                    method=method,
+                ),
                 atol=1e-5,
             )
 
@@ -249,8 +270,8 @@ class TestOperations:
         xpt.assert_array_equal(llr.reshape(4, 2) < 0, xp.asarray(labels.astype(bool)))
 
     def test_shaped_llr_is_scale_consistent(self, xp: Any, xpt: Any) -> None:
-        """Shaped LLRs equal the 1.x PS LLRs on the un-rescaled grid."""
-        pmf = mapping.maxwell_boltzmann(16, 0.1)
+        """Shaped LLRs equal the LLRs of the same prior on the unit-power grid."""
+        pmf = mapping.maxwell_boltzmann(Constellation.qam(16), nu=0.1)
         s = Constellation.qam(16).shaped(nu=0.1)
         a = float(abs(s.points[0] / Constellation.qam(16).points[0]))
         rng = np.random.default_rng(2)
@@ -260,7 +281,10 @@ class TestOperations:
         xpt.assert_allclose(
             s.llr(xp.asarray(y * a), noise_var=0.05 * a**2, method="exact"),
             mapping.compute_llr(
-                xp.asarray(y), "qam", 16, noise_var=0.05, method="exact", pmf=pmf
+                xp.asarray(y),
+                noise_var=0.05,
+                constellation=Constellation(Constellation.qam(16).points, pmf=pmf),
+                method="exact",
             ),
             rtol=1e-4,
             atol=1e-4,
@@ -273,19 +297,19 @@ class TestOperations:
             )
 
 
-class TestGrayBridge:
-    """``Constellation.gray`` stays until module pass 3.2."""
+class TestLegacyBridge:
+    """``_legacy_constellation`` serves unmigrated modules until 3.7/3.8."""
 
-    def test_gray_matches_factory(self) -> None:
-        assert Constellation.gray("qam", 16) == Constellation.qam(16)
-        assert Constellation.gray("ask", 4, unipolar=True) == Constellation.pam(
+    def test_legacy_matches_factory(self) -> None:
+        assert _legacy_constellation("qam", 16) == Constellation.qam(16)
+        assert _legacy_constellation("ask", 4, unipolar=True) == Constellation.pam(
             4, unipolar=True
         )
-        assert Constellation.gray("qam", 16) is Constellation.gray("qam", 16)
+        assert _legacy_constellation("qam", 16) is _legacy_constellation("qam", 16)
 
-    def test_gray_pmf_is_not_rescaled(self) -> None:
-        pmf = mapping.maxwell_boltzmann(16, 0.05)
-        c = Constellation.gray("qam", 16, pmf=pmf)
+    def test_legacy_pmf_is_not_rescaled(self) -> None:
+        pmf = mapping.maxwell_boltzmann(Constellation.qam(16), nu=0.05)
+        c = _legacy_constellation("qam", 16, pmf=pmf)
         assert c.power() == pytest.approx(
             mapping.shaping._constellation_power(c.points, pmf)
         )

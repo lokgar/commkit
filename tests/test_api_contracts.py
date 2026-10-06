@@ -123,6 +123,7 @@ N_SYM = 512
 RS = 1e9
 FS = RS * SPS
 QAM16 = {"modulation": "qam", "order": 16}
+C16 = Constellation.qam(16)
 
 
 class Inputs:
@@ -467,7 +468,7 @@ ROWS: list[Row] = [
     Row(
         "commkit.mapping.bits.demap_symbols_hard",
         MULTI,
-        call=lambda c, x: _a(x, **QAM16),
+        call=lambda c, x: _a(x, constellation=C16),
         symbols=True,
     ),
     Row("commkit.mapping.bits.map_bits", DESIGN),
@@ -477,12 +478,11 @@ ROWS: list[Row] = [
     Row(
         "commkit.mapping.llr.compute_llr",
         MULTI,
-        call=lambda c, x: _a(x, noise_var=0.1, **QAM16),
+        call=lambda c, x: _a(x, noise_var=0.1, constellation=C16),
         symbols=True,
     ),
     Row("commkit.mapping.shaping.maxwell_boltzmann", DESIGN),
     Row("commkit.mapping.shaping.optimal_nu", DESIGN),
-    Row("commkit.mapping.shaping.ps_entropy", DESIGN),
     # --- metrics (Signal semantics are redefined in pass 3.8) ----------------
     Row(
         "commkit.metrics.ber",
@@ -998,11 +998,6 @@ LEGACY: dict[str, frozenset[str]] = {
     "commkit.impairments.noise.apply_awgn": L(SIG, FCT),
     "commkit.impairments.source.apply_phase_noise": L(SIG, FCT),
     "commkit.impairments.source.generate_phase_noise": L(SIG),
-    "commkit.mapping.bits.demap_symbols_hard": L(SIG),
-    "commkit.mapping.bits.map_bits": L(SIG),
-    "commkit.mapping.llr.compute_llr": L(SIG),
-    "commkit.mapping.shaping.optimal_nu": L(SIG),
-    "commkit.mapping.shaping.ps_entropy": L(SIG),
     "commkit.metrics.ber": L(f"{MET}@gpu"),
     "commkit.metrics.evm": L(MET),
     "commkit.metrics.mi": L(SIG, MET),

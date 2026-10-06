@@ -6,13 +6,20 @@ prior, computed with NumPy or CuPy on the input's device.  Sign convention:
 positive LLR -> bit 0 more likely.
 """
 
+from __future__ import annotations
+
+from types import ModuleType
+from typing import TYPE_CHECKING
+
 import numpy as np
 
 from ..backend import ArrayType, dispatch
 from ..core._signal_adapter import adapt_signal
 from ..core.signal import Signal
 from ..logger import logger
-from .gray import _gray_points, _unpack_bits
+
+if TYPE_CHECKING:
+    from .constellation import Constellation
 
 __all__ = ["compute_llr"]
 
@@ -23,95 +30,69 @@ _CHUNK_ELEMENTS = 1 << 23
 
 def compute_llr(
     symbols: ArrayType | Signal,
-    modulation: str | None = None,
-    order: int | None = None,
-    noise_var: float | None = None,
+    *,
+    noise_var: float,
+    constellation: Constellation | None = None,
     method: str = "maxlog",
-    unipolar: bool = False,
-    pmf: np.ndarray | None = None,
 ) -> ArrayType:
     """
-    Compute Log-Likelihood Ratios (LLRs) for soft-decision decoding.
+    Bit log-likelihood ratios for soft-decision decoding.
 
-    Positive LLR -> bit 0 more likely; negative -> bit 1; magnitude = confidence.
-    Computed on the input's device (NumPy or CuPy) in float32, chunked over
-    symbols so memory stays bounded for any record length.  Differentiable
-    LLRs belong to commax.
+    Positive LLR means bit 0 is more likely; the magnitude is the confidence.
+    The constellation's ``pmf`` (if any) enters as the symbol prior.
+    Computed on the input's device in float32, chunked over symbols so memory
+    stays bounded for any record length.  Differentiable LLRs belong to
+    commax.
 
     Parameters
     ----------
     symbols : array_like or Signal
-        Received noisy symbols. Shape: (..., N_symbols). NumPy or CuPy.
-        A :class:`Signal` supplies ``resolved_symbols`` and defaults
-        ``modulation``/``order``/``pmf`` from its metadata when not given
-        explicitly.
-    modulation : {"psk", "qam", "ask"}, optional
-        Modulation type.  Required for array input; for :class:`Signal`
-        input, used only as a fallback when the signal's ``mod_scheme`` is
-        unset.
-    order : int, optional
-        Modulation order.  Required for array input; for :class:`Signal`
-        input, used only as a fallback when the signal's ``mod_order`` is
-        unset.
+        Received symbols at one sample per symbol, shape ``(..., N)``, on the
+        constellation's scale.  A :class:`Signal` supplies its
+        ``resolved_symbols``.
     noise_var : float
-        Complex noise variance sigma^2 referenced to the normalised
-        constellation (unit avg power).  sigma^2 = 10^(-EsN0_dB / 10).
+        Complex noise variance ``sigma^2 = E[|n|^2]`` on the constellation's
+        scale.  For unit-power constellations, ``sigma^2 = 10^(-EsN0_dB/10)``.
+    constellation : Constellation, optional
+        Points, bit labels and prior.  Defaults to the Signal's
+        ``constellation``; required for array input.
     method : {"maxlog", "exact"}, default "maxlog"
-        LLR algorithm. ``"maxlog"`` is faster; ``"exact"`` uses log-sum-exp.
-    unipolar : bool, default False
-        Use unipolar constellation for ASK/PAM.
-    pmf : np.ndarray, optional
-        Symbol PMF of shape ``(order,)`` for PS-QAM.  Pass
-        ``maxwell_boltzmann(order, nu)`` to incorporate the non-uniform prior.
-        ``None`` assumes uniform prior.  For :class:`Signal` input, used
-        only as a fallback when the signal's ``ps_pmf`` is unset.
+        ``"maxlog"`` keeps the largest term; ``"exact"`` uses log-sum-exp.
 
     Returns
     -------
     array_like
-        LLR values, float32, on the input's device.
-        Shape: (..., N_symbols * log2(order)); the ``log2(order)`` bits of
-        each symbol are adjacent (MSB first).
+        float32 LLRs of shape ``(..., N * k)`` on the input's device; the
+        ``k`` bits of each symbol are adjacent (MSB first).
 
     Notes
     -----
-    Max-Log: LLR_k ≈ (1/sigma^2) * (min_{S_1^k} |r-s|^2 - min_{S_0^k} |r-s|^2).
-    Exact: LLR_k = log sum_{S_0^k} exp(-|r-s|^2/sigma^2) - log sum_{S_1^k} ...
-
-    For PS-QAM, ``symbols`` must be on the same scale as
-    ``_gray_points`` (unit avg power).  After
-    ``resolve_symbols`` the receiver renormalises;
-    use ``gmi`` instead for correct scale.
+    Max-log: ``LLR_b = max_{s: b=0} m(s) - max_{s: b=1} m(s)``; exact:
+    ``LLR_b = log sum_{s: b=0} e^{m(s)} - log sum_{s: b=1} e^{m(s)}``, with
+    ``m(s) = -|r - s|^2 / sigma^2 + log P(s)``.
     """
+    from .constellation import Constellation
+
     signal_adapter = adapt_signal(
         symbols, function_name="compute_llr()", field="resolved_symbols"
     )
-    symbols = signal_adapter.array
-    if signal_adapter.signal is not None:
-        if symbols is None:
-            raise ValueError(
-                "No resolved symbols available. Call resolve_symbols(sig) first."
-            )
-        modulation = signal_adapter.resolve_optional("mod_scheme", modulation)
-        order = signal_adapter.resolve_optional("mod_order", order)
-        pmf = signal_adapter.resolve_optional("ps_pmf", pmf)
-
-    if modulation is None or order is None:
-        raise ValueError("compute_llr() requires modulation and order for array input.")
-    if noise_var is None:
-        raise ValueError("compute_llr() requires noise_var.")
-    if symbols is None:
-        raise ValueError("compute_llr() requires resolved symbols.")
-    logger.debug(
-        "Computing LLRs for %s %s-level (method=%s).", modulation.upper(), order, method
-    )
-
-    k = int(np.log2(order))
-    if 2**k != order:
-        raise ValueError(f"Order must be a power of 2, got {order}")
-    const = _gray_points(modulation, order, unipolar=unipolar)
-    labels = _unpack_bits(np.arange(order, dtype="int32"), k)  # (M, k), MSB first
-    return _llr(symbols, const, labels, pmf, noise_var, method)
+    constellation = signal_adapter.resolve_choice("constellation", constellation)
+    if constellation is None:
+        raise ValueError(
+            "compute_llr() needs a constellation: pass constellation= or a "
+            "Signal that has one."
+        )
+    if not isinstance(constellation, Constellation):
+        raise TypeError(
+            "compute_llr(): constellation must be a Constellation, got "
+            f"{type(constellation).__name__}; use e.g. Constellation.qam(16)."
+        )
+    if signal_adapter.array is None:
+        raise ValueError(
+            "No resolved symbols available. Call resolve_symbols(sig) first."
+        )
+    logger.debug("Computing LLRs for %r (method=%s).", constellation, method)
+    return constellation.llr(signal_adapter.array, noise_var=noise_var, method=method)
 
 
 def _llr(
@@ -175,7 +156,7 @@ def _llr(
     return llrs.reshape(out_shape)
 
 
-def _logsumexp(a: ArrayType, xp) -> ArrayType:
+def _logsumexp(a: ArrayType, xp: ModuleType) -> ArrayType:
     """Stable log-sum-exp over the last axis."""
     peak = a.max(axis=-1, keepdims=True)
     return xp.log(xp.exp(a - peak).sum(axis=-1)) + peak[..., 0]

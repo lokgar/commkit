@@ -135,7 +135,13 @@ ignore_missing_imports = true
 # cleaned up; the default stays lenient so the whole tree type-checks today.
 
 [[tool.mypy.overrides]]
-module = ["commkit._array", "commkit.backend", "commkit.logger", "commkit.math"]
+module = [
+    "commkit._array",
+    "commkit.backend",
+    "commkit.logger",
+    "commkit.mapping.*",
+    "commkit.math",
+]
 # `strict` is global-only in mypy; these are its per-module flags.
 disallow_untyped_defs = true
 disallow_incomplete_defs = true

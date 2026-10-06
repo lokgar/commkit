@@ -369,9 +369,9 @@ def _godard_radius(modulation, order, unipolar, pmf):
     """Godard dispersion radius R2 and PS-QAM pilot scale (mirrors ``cma``)."""
     if modulation is None or order is None:
         return 1.0, None
-    from ..mapping import Constellation
+    from ..mapping.constellation import _legacy_constellation
 
-    c = Constellation.gray(modulation, order, unipolar=unipolar, pmf=pmf)
+    c = _legacy_constellation(modulation, order, unipolar=unipolar, pmf=pmf)
     const = c.points
     if pmf is not None:
         _pmf = np.asarray(pmf, dtype=np.float64)
@@ -387,9 +387,9 @@ def _rde_ring_radii(modulation, order, unipolar, pmf):
     """Unique constellation ring radii and PS-QAM pilot scale (mirrors ``rde``)."""
     if modulation is None or order is None:
         return np.array([1.0], dtype=np.float32), None
-    from ..mapping import Constellation
+    from ..mapping.constellation import _legacy_constellation
 
-    c = Constellation.gray(modulation, order, unipolar=unipolar, pmf=pmf)
+    c = _legacy_constellation(modulation, order, unipolar=unipolar, pmf=pmf)
     raw = np.abs(c.points).astype(np.float32)
     c_ps = None
     if pmf is not None:

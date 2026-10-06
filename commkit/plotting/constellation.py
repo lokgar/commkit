@@ -82,11 +82,11 @@ def plot_ideal_constellation(
         raise ValueError("Provide at most one of `pmf` or `nu`, not both.")
 
     logger.debug("Generating ideal constellation for %s (%s-level).", modulation, order)
-    from ..mapping import maxwell_boltzmann
+    from ..mapping import Constellation, maxwell_boltzmann
     from ..mapping.gray import _gray_points
 
     if nu is not None:
-        pmf = maxwell_boltzmann(order, nu)
+        pmf = maxwell_boltzmann(Constellation.qam(order), nu=nu)
 
     if ax is None:
         figsize = (size, size) if size is not None else _square_figsize()
