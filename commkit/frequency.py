@@ -24,66 +24,6 @@ from .helpers import linear_trend_slope
 from .logger import logger
 from .timing import _parabolic_peak_offset
 
-
-def _modulation_power_m(modulation: str, order: int) -> int:
-    """
-    Return the exponent M for M-th power spectral methods.
-
-    Parameters
-    ----------
-    modulation : str
-        Modulation type string (case-insensitive).
-    order : int
-        Modulation order.
-
-    Returns
-    -------
-    int
-        M = ``order`` for PSK; M = 4 for QAM and other schemes.
-
-    Notes
-    -----
-    M=4 is exact only for **square** QAM constellations (4, 16, 64, 256, ...)
-    which have perfect 4-fold rotational symmetry.  For cross-QAM (32, 128,
-    512-QAM) the 4th power leaves residual modulation spurs; a warning is
-    emitted.  For PAM/ASK the M-th power law does not apply; prefer
-    pilot-aided or data-aided estimators.
-    """
-    mod = modulation.lower()
-    if "psk" in mod:
-        if order > 4:
-            logger.warning(
-                "%s-PSK: M=%sth-power raises noise variance by M² - "
-                "VV/FOE reliability degrades severely for order > 4. "
-                "Prefer BPS or pilot-aided CPR for 8-PSK and higher.",
-                order,
-                order,
-            )
-        return order  # M-th power exactly removes M-PSK modulation
-
-    if "qam" in mod:
-        side = int(order**0.5)
-        if side * side == order:
-            return 4  # Square QAM: 4-fold rotational symmetry, 4th power is exact
-        # Cross-QAM (32, 128, 512-QAM): 4-fold symmetry is only approximate
-        logger.warning(
-            "%s-QAM is not square - 4th-power FOE/CPR will have residual "
-            "modulation spurs. Prefer pilot-aided or data-aided estimation.",
-            order,
-        )
-        return 4
-
-    # PAM, ASK, or unrecognised scheme
-    logger.warning(
-        "Modulation '%s' (order %s): M=4 is a heuristic. 4th-power methods "
-        "are unreliable for non-QAM/PSK formats. Prefer pilot-aided or "
-        "data-aided estimation.",
-        modulation,
-        order,
-    )
-    return 4
-
-
 # Lazy-compiled Numba kernel for the M&M iterative bootstrap.
 _NUMBA_MM: dict[str, Callable[..., float]] = {}
 

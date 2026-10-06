@@ -1,12 +1,13 @@
 """Decision-directed PLL carrier phase recovery."""
 
+from dataclasses import dataclass
+from typing import Any
+
 import numpy as np
 
-from .._array import as_2d, restore_1d
 from ..backend import ArrayType, dispatch, to_device
-from ..core._signal_adapter import adapt_signal
-from ..core.signal import Signal
-from .corrections import _log_phase_summary, correct_cycle_slips
+from ._common import _Context, _Phase, _resolve_pll_gains
+from .corrections import CycleSlip, _log_phase_summary, _repair_slips
 
 _NUMBA_PLL: dict = {}
 
@@ -234,130 +235,73 @@ def _get_numba_dd_pll_joint():
     return _NUMBA_PLL["dd_pll_joint"]
 
 
-def recover_carrier_phase_pll(
-    symbols: ArrayType | Signal,
-    modulation: str | None = None,
-    order: int | None = None,
-    mu: float | None = 1e-2,
-    beta: float | None = None,
-    phase_init: float = 0.0,
-    loop_bandwidth_normalized: float = 1e-3,
-    joint_channels: bool = False,
-    cycle_slip_correction: bool = False,
-    cycle_slip_history: int = 100,
-    cycle_slip_threshold: float = np.pi / 4,
-) -> ArrayType:
+@dataclass(frozen=True)
+class PLL:
     r"""
-    Carrier phase recovery via a Decision-Directed Phase-Locked Loop (DD-PLL).
+    Decision-directed phase-locked loop.
 
-    Tracks the carrier phase symbol-by-symbol using hard decisions as phase
-    references.  A 1st-order loop (``beta=0``) corrects static or slowly
-    varying phase noise; a 2nd-order loop (``beta > 0``) additionally tracks
-    a residual frequency offset left over after coarse FOE.
-
-    This is the standard streaming CPR for hardware implementations: it is
-    modulation-format agnostic (works for any QAM/PSK order) and converges
-    much faster than block-based methods (VV, BPS) after equalizer pull-in.
-
-    Note: the DD-PLL requires reliable decisions at the input.  For a cold
-    start the first ~1/mu symbols may show slow convergence; a common strategy
-    is to pre-converge with BPS or a short preamble and pass the phase as
-    ``phase_init``.
+    Tracks the carrier phase symbol by symbol from hard decisions:
+    derotate by ``φ̂[n]``, decide, take the cross-product error
+    ``e[n] = Im(y[n]·d̂*[n])``, then ``φ̂[n+1] = φ̂[n] + μ·e[n] + ν[n]`` and
+    ``ν[n+1] = ν[n] + β·e[n]``.  A 1st-order loop (``β = 0``) tracks phase;
+    ``β > 0`` also tracks a residual frequency offset.  The same object sets
+    the inline PLL of the equalizers.
 
     Parameters
     ----------
-    symbols : array_like or Signal
-        1-SPS complex symbols after matched filtering and FOE.
-        Shape: ``(N,)`` or ``(C, N)``.  A :class:`Signal` supplies
-        ``modulation``/``order`` from its metadata when not given explicitly.
-    modulation : str, optional
-        Modulation scheme (case-insensitive): ``'qam'``, ``'psk'``, etc.
-        Used to fetch the reference constellation via
-        ``gray_constellation``.  Required for array input; for :class:`Signal`
-        input, used only as a fallback when the signal's ``mod_scheme`` is
-        unset.
-    order : int, optional
-        Modulation order (4, 16, 64, ...).  Required for array input; for
-        :class:`Signal` input, used only as a fallback when the signal's
-        ``mod_order`` is unset.
-    mu : float or None, default 1e-2
-        Proportional gain - controls convergence speed and steady-state
-        jitter.  Larger ``mu`` converges faster but amplifies noise.
-        Typical range: ``1e-3`` (high-SNR, high-order QAM) to ``5e-2``
-        (QPSK, low latency).  Set ``mu=None`` to opt into the
-        ``loop_bandwidth_normalized`` shortcut instead (see below).  These
-        gains are interchangeable with the inline equalizer PLL's
-        ``cpr_pll_mu``/``cpr_pll_beta`` (``lms``/``rls``, ``cpr_type='pll'``).
-    beta : float or None, default None
-        Integral gain - enables 2nd-order frequency tracking.  ``None`` (or
-        ``0.0``) gives a 1st-order loop; set ``beta > 0`` when a residual
-        frequency offset remains after FOE (e.g. ``beta ≈ mu² / 4``).
-        Requires ``mu`` to be set (passing ``beta`` with ``mu=None`` raises
-        ``ValueError``).
+    bandwidth : float, default 1e-3
+        Normalised one-sided loop bandwidth in ``(0, 0.5)``, as a fraction of
+        the symbol rate.  Gives critically damped gains ``μ = 4B``,
+        ``β = 4B²``.  Used when ``mu`` is not given.
+    mu : float, optional
+        Raw proportional gain; overrides ``bandwidth``.  Typical values
+        ``1e-3`` (high-order QAM, high SNR) to ``5e-2`` (QPSK).
+    beta : float, optional
+        Raw integral gain (``β ≈ μ²/4`` is critically damped); requires
+        ``mu``.  Defaults to 0 (1st-order) with ``mu``.
     phase_init : float, default 0.0
-        Initial phase state in radians.  Use the last sample of a
-        preceding BPS or pilot-aided estimate to warm-start the loop.
-    loop_bandwidth_normalized : float, default 1e-3
-        Critically-damped (ζ=1) loop bandwidth shortcut, used only when
-        ``mu is None``.  Normalized one-sided bandwidth in ``(0, 0.5)``;
-        gains are derived as mu = 4*B_L, beta = 4*B_L^2.
+        Initial phase in radians, e.g. the last value of a BPS estimate.
     joint_channels : bool, default False
-        For MIMO inputs (C > 1): if ``True``, average the cross-product
-        phase error across all channels at each symbol before updating the
-        shared loop state.  Both polarisations drive a single phase/frequency
-        trajectory, giving ~√C variance reduction for shared-LO systems.
-        The output ``phi_full[ch]`` rows are all identical.
-        Has no effect for SISO (C = 1).
-    cycle_slip_correction : bool, default False
-        If ``True``, apply ``correct_cycle_slips`` to the per-symbol
-        phase trajectory after the loop, to detect and fix sudden ``π/2``
-        jumps caused by incorrect hard decisions near the branch boundary.
-    cycle_slip_history : int, default 100
-        ``history_length`` passed to ``correct_cycle_slips``.
-        Default is higher than for block-phase methods because the trajectory
-        is per-symbol (not per-block).
-    cycle_slip_threshold : float, default π/4
-        ``threshold`` passed to ``correct_cycle_slips`` (radians).
-
-    Returns
-    -------
-    array_like
-        Per-symbol phase estimate φ[n] in radians.
-        Shape matches ``symbols``.  Same backend as input.
+        MIMO: average the phase error across channels at each symbol and
+        drive one shared loop (shared LO).
+    cycle_slip : CycleSlip, optional
+        Repair ``π/2`` slips in the per-symbol trajectory after the loop.
 
     Notes
     -----
-    Inner loop: derotate by phi_hat, hard-decide, compute cross-product error
-    e[n] = Im(y[n] * d_hat*[n]), update phi_hat[n+1] = phi_hat[n] + mu*e + nu,
-    nu += beta*e.  Numba-compiled on CPU; GPU inputs are offloaded transparently.
-
-    A global M-fold phase ambiguity always remains - resolve via a pilot or
-    preamble reference after CPR.
+    The loop needs reliable decisions; a cold start converges over about
+    ``1/μ`` symbols.  Numba-compiled on the CPU; GPU input makes one host
+    round trip.  A global M-fold ambiguity remains.
     """
-    from ..mapping.gray import _gray_points
+
+    bandwidth: float = 1e-3
+    mu: float | None = None
+    beta: float | None = None
+    phase_init: float = 0.0
+    joint_channels: bool = False
+    cycle_slip: CycleSlip | None = None
+
+    def __post_init__(self) -> None:
+        if not (0.0 < self.bandwidth < 0.5):
+            raise ValueError(f"bandwidth must be in (0, 0.5), got {self.bandwidth}.")
+        _resolve_pll_gains(self.bandwidth, self.mu, self.beta)  # validates beta
+
+    @property
+    def gains(self) -> tuple[Any, Any]:
+        """The loop gains ``(mu, beta)``."""
+        return _resolve_pll_gains(self.bandwidth, self.mu, self.beta)
+
+
+def _pll(symbols: ArrayType, method: PLL, ctx: _Context) -> _Phase:
+    """Decision-directed PLL phase of ``(C, N)`` symbols."""
+    from ..mapping.gray import _square_qam_slicer_params
     from ..math import normalize
-    from ._common import _resolve_pll_gains
 
-    signal_adapter = adapt_signal(symbols, function_name="recover_carrier_phase_pll()")
-    symbols = signal_adapter.array
-    modulation = signal_adapter.resolve_optional("mod_scheme", modulation)
-    order = signal_adapter.resolve_optional("mod_order", order)
-
-    if modulation is None or order is None:
-        raise ValueError(
-            "recover_carrier_phase_pll() requires modulation and order for array input."
-        )
-
-    # Resolve PI gains: raw mu/beta if given, else the critically-damped
-    # bandwidth shortcut (mu=None).  Validate the bandwidth only on that path.
-    if mu is None and not (0.0 < loop_bandwidth_normalized < 0.5):
-        raise ValueError(
-            f"loop_bandwidth_normalized must be in (0, 0.5), got {loop_bandwidth_normalized}."
-        )
-    mu, beta = _resolve_pll_gains(loop_bandwidth_normalized, mu, beta)
+    constellation = ctx.need_constellation(method)
+    mu, beta = method.gains
+    phase_init = method.phase_init
 
     symbols, xp, _ = dispatch(symbols)
-    symbols, was_1d = as_2d(symbols, name="symbols")
     C, N = symbols.shape
 
     # Normalise to unit average power so the effective loop gain is mu regardless
@@ -367,15 +311,13 @@ def recover_carrier_phase_pll(
     symbols = normalize(symbols, mode="average_power", axis=-1)
 
     # Constellation on CPU (decisions are scalar operations in the loop)
-    const_np = _gray_points(modulation, order).astype(np.complex128)
+    const_np = np.asarray(constellation.points, dtype=np.complex128)
     const_r = const_np.real.copy()
     const_i = const_np.imag.copy()
 
     # Square-QAM O(1) decision parameters.  For square QAM (order a perfect
     # square, e.g. 4/16/64/256/1024) the constellation is a uniform grid and
     # the nearest point can be found by rounding to the closest axis level.
-    from ..mapping.gray import _square_qam_slicer_params
-
     _side, _lev_min_f32, _d_grid_f32 = _square_qam_slicer_params(const_np)
     _is_sq_qam = _side > 0
     _lev_min = float(_lev_min_f32)
@@ -386,91 +328,46 @@ def recover_carrier_phase_pll(
         _levels = np.empty(0, dtype=np.float64)
 
     # Move to CPU for sequential processing
-    if xp is not np:
-        symbols_cpu = to_device(symbols, "cpu")
+    symbols_cpu = to_device(symbols, "cpu").astype(np.complex128)
+    loop_args = (
+        const_r,
+        const_i,
+        float(mu),
+        float(beta),
+        float(phase_init),
+        0.0,
+        _is_sq_qam,
+        _levels,
+        _d_grid,
+        _lev_min,
+        _side,
+    )
+
+    joint = method.joint_channels and C > 1
+    if joint:
+        sym_r_all = np.ascontiguousarray(symbols_cpu.real)  # (C, N) float64
+        sym_i_all = np.ascontiguousarray(symbols_cpu.imag)
+        phi = _get_numba_dd_pll_joint()(sym_r_all, sym_i_all, *loop_args)[None, :]
     else:
-        symbols_cpu = symbols
-
-    phi_full = np.zeros((C, N), dtype=np.float64)
-    use_joint = joint_channels and C > 1
-
-    # Pre-build (C, N) float64 views used by joint kernels
-    if use_joint:
-        symbols_np = symbols_cpu.astype(np.complex128)
-        sym_r_all = np.ascontiguousarray(symbols_np.real)  # (C, N) float64
-        sym_i_all = np.ascontiguousarray(symbols_np.imag)
-
-    if use_joint:
-        j_kernel = _get_numba_dd_pll_joint()
-        phi_joint = j_kernel(
-            sym_r_all,
-            sym_i_all,
-            const_r,
-            const_i,
-            float(mu),
-            float(beta),
-            float(phase_init),
-            0.0,
-            _is_sq_qam,
-            _levels,
-            _d_grid,
-            _lev_min,
-            _side,
-        )
-        for ch in range(C):
-            phi_full[ch] = phi_joint
-    else:
-        pi_kernel = _get_numba_dd_pll()
-        for ch in range(C):
-            sym = symbols_cpu[ch].astype(np.complex128)
-            phi_full[ch] = pi_kernel(
-                sym.real.copy(),
-                sym.imag.copy(),
-                const_r,
-                const_i,
-                float(mu),
-                float(beta),
-                float(phase_init),
-                0.0,
-                _is_sq_qam,
-                _levels,
-                _d_grid,
-                _lev_min,
-                _side,
-            )
-    loop_order = "2nd" if beta > 0.0 else "1st"
-    loop_desc = f"PI {loop_order}-order, mu={mu}, beta={beta}"
-
-    if cycle_slip_correction:
-        if use_joint:
-            # All rows are identical - correct once and broadcast
-            phi_full[0] = correct_cycle_slips(
-                phi_full[0],
-                symmetry=4,
-                history_length=cycle_slip_history,
-                threshold=cycle_slip_threshold,
-            )
-            for ch in range(1, C):
-                phi_full[ch] = phi_full[0]
-        else:
-            for ch in range(C):
-                phi_full[ch] = correct_cycle_slips(
-                    phi_full[ch],
-                    symmetry=4,
-                    history_length=cycle_slip_history,
-                    threshold=cycle_slip_threshold,
+        kernel = _get_numba_dd_pll()
+        phi = np.stack(
+            [
+                kernel(
+                    symbols_cpu[ch].real.copy(), symbols_cpu[ch].imag.copy(), *loop_args
                 )
-
-    # Move result back to original device
-    if xp is not np:
-        phi_full = xp.asarray(phi_full)
+                for ch in range(C)
+            ]
+        )
+    phi = _repair_slips(phi, np, method.cycle_slip, 4)
+    if joint:
+        phi = np.broadcast_to(phi, (C, N)).copy()
+    phi_full = xp.asarray(phi)
 
     _log_phase_summary(
         phi_full,
         "CPR (DD-PLL, %s)",
-        (loop_desc,),
+        (f"PI {'2nd' if beta > 0.0 else '1st'}-order, mu={mu}, beta={beta}",),
         "[C=%s]",
         (C,),
     )
-
-    return restore_1d(was_1d, phi_full)
+    return _Phase(phase=phi_full)

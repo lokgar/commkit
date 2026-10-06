@@ -5,6 +5,7 @@ import pytest
 
 from commkit import recovery
 from commkit.core import Signal
+from commkit.mapping import Constellation
 from tests.common.signals import (
     make_test_mimo_samples,
     make_test_qam_signal,
@@ -25,14 +26,14 @@ class TestCprBps:
         phi_true = 0.2  # radians
         sig = sig.replace(samples=sig.samples * xp.exp(1j * phi_true))
 
-        phase_est = recovery.recover_carrier_phase_bps(
-            sig.samples, modulation="qam", order=order
-        )
+        phase_est = recovery.estimate_carrier_phase(
+            sig.samples, recovery.BPS(), constellation=Constellation.qam(order)
+        ).value
         corrected = recovery.correct_carrier_phase(sig.samples, phase_est)
 
-        phase_resid = recovery.recover_carrier_phase_bps(
-            corrected, modulation="qam", order=order
-        )
+        phase_resid = recovery.estimate_carrier_phase(
+            corrected, recovery.BPS(), constellation=Constellation.qam(order)
+        ).value
         assert float(xp.sqrt(xp.mean(phase_resid**2))) < 0.05
 
     def test_output_shape_siso(self, xp):
@@ -40,9 +41,9 @@ class TestCprBps:
         sig = make_test_qam_signal(
             order=16, num_symbols=512, sps=1, symbol_rate=FS, xp=xp
         )
-        phase = recovery.recover_carrier_phase_bps(
-            sig.samples, modulation="qam", order=16
-        )
+        phase = recovery.estimate_carrier_phase(
+            sig.samples, recovery.BPS(), constellation=Constellation.qam(16)
+        ).value
         assert phase.shape == sig.samples.shape
 
     def test_output_shape_mimo(self, xp):
@@ -50,7 +51,9 @@ class TestCprBps:
         mimo, _ = make_test_mimo_samples(
             num_channels=2, order=16, num_symbols=512, sps=1, xp=xp
         )
-        phase = recovery.recover_carrier_phase_bps(mimo, modulation="qam", order=16)
+        phase = recovery.estimate_carrier_phase(
+            mimo, recovery.BPS(), constellation=Constellation.qam(16)
+        ).value
         assert phase.shape == mimo.shape
 
     def test_too_short_raises(self, xp):
@@ -59,8 +62,10 @@ class TestCprBps:
             order=16, num_symbols=20, sps=1, symbol_rate=FS, xp=xp
         )
         with pytest.raises(ValueError, match="shorter than block_size"):
-            recovery.recover_carrier_phase_bps(
-                sig.samples[:10], modulation="qam", order=16, block_size=32
+            recovery.estimate_carrier_phase(
+                sig.samples[:10],
+                recovery.BPS(block_size=32),
+                constellation=Constellation.qam(16),
             )
 
 
@@ -78,9 +83,11 @@ class TestBPS:
     def test_siso_qam16_output_shape(self, xp):
         """SISO QAM16 (square QAM fast path): output is (N,) float64."""
         syms = self._qam16_symbols(xp)
-        phi_est = recovery.recover_carrier_phase_bps(
-            syms, "qam", 16, num_test_phases=32, block_size=32
-        )
+        phi_est = recovery.estimate_carrier_phase(
+            syms,
+            recovery.BPS(test_phases=32, block_size=32),
+            constellation=Constellation.qam(16),
+        ).value
         assert phi_est.shape == syms.shape
         assert phi_est.dtype == xp.float64
 
@@ -90,9 +97,11 @@ class TestBPS:
         phi_true = 0.25
         syms = self._qam16_symbols(xp, N=512)
         rotated = syms * xp.asarray(np.complex64(np.exp(1j * phi_true)))
-        phi_est = recovery.recover_carrier_phase_bps(
-            rotated, "qam", 16, num_test_phases=64, block_size=32
-        )
+        phi_est = recovery.estimate_carrier_phase(
+            rotated,
+            recovery.BPS(test_phases=64, block_size=32),
+            constellation=Constellation.qam(16),
+        ).value
         phi_mean = float(xp.mean(phi_est))
         # 4-fold ambiguity: allow ±π/8 residual
         residual = (phi_mean - phi_true + np.pi / 4) % (np.pi / 2) - np.pi / 4
@@ -103,9 +112,11 @@ class TestBPS:
     def test_siso_qpsk_general_path(self, xp):
         """SISO QPSK (non-square: triggers general distance path): output shape correct."""
         syms = self._qpsk_symbols(xp, N=256)
-        phi_est = recovery.recover_carrier_phase_bps(
-            syms, "psk", 4, num_test_phases=16, block_size=32
-        )
+        phi_est = recovery.estimate_carrier_phase(
+            syms,
+            recovery.BPS(test_phases=16, block_size=32),
+            constellation=Constellation.psk(4),
+        ).value
         assert phi_est.shape == syms.shape
 
     def test_mimo_output_shape(self, xp):
@@ -118,16 +129,20 @@ class TestBPS:
                 np.complex64
             )
         )
-        phi_est = recovery.recover_carrier_phase_bps(
-            syms, "qam", 16, num_test_phases=16, block_size=32
-        )
+        phi_est = recovery.estimate_carrier_phase(
+            syms,
+            recovery.BPS(test_phases=16, block_size=32),
+            constellation=Constellation.qam(16),
+        ).value
         assert phi_est.shape == (C, N)
 
     def test_block_size_too_large_raises(self, xp):
         """block_size > N should raise ValueError."""
         syms = self._qam16_symbols(xp, N=16)
         with pytest.raises(ValueError, match="block_size"):
-            recovery.recover_carrier_phase_bps(syms, "qam", 16, block_size=64)
+            recovery.estimate_carrier_phase(
+                syms, recovery.BPS(block_size=64), constellation=Constellation.qam(16)
+            )
 
 
 class TestSignalInputBpsAndCorrectCarrierPhase:
@@ -139,10 +154,10 @@ class TestSignalInputBpsAndCorrectCarrierPhase:
             order=16, num_symbols=512, sps=1, symbol_rate=FS, xp=xp
         )
 
-        phi_sig = recovery.recover_carrier_phase_bps(sig)
-        phi_arr = recovery.recover_carrier_phase_bps(
-            sig.samples, modulation="qam", order=16
-        )
+        phi_sig = recovery.estimate_carrier_phase(sig, recovery.BPS()).value
+        phi_arr = recovery.estimate_carrier_phase(
+            sig.samples, recovery.BPS(), constellation=Constellation.qam(16)
+        ).value
 
         assert not isinstance(phi_sig, Signal)  # phase estimate stays a raw array
         xpt.assert_allclose(phi_sig, phi_arr)

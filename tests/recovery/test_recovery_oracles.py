@@ -11,10 +11,11 @@ import pytest
 
 from commkit.mapping import Constellation
 from commkit.recovery import (
+    BPS,
+    PLL,
+    ViterbiViterbi,
     correct_cycle_slips,
-    recover_carrier_phase_bps,
-    recover_carrier_phase_pll,
-    recover_carrier_phase_viterbi_viterbi,
+    estimate_carrier_phase,
 )
 from tests.common.reference_impl import (
     bps_reference,
@@ -59,9 +60,11 @@ def _phase_noise_input(modulation: str, order: int, num_ch: int, seed: int = 3):
 )
 def test_viterbi_viterbi_matches_oracle(modulation, order, block_size, num_ch, joint):
     x = _phase_noise_input(modulation, order, num_ch)
-    phi = recover_carrier_phase_viterbi_viterbi(
-        x, modulation, order, block_size=block_size, joint_channels=joint
-    )
+    phi = estimate_carrier_phase(
+        x,
+        ViterbiViterbi(block_size=block_size, joint_channels=joint),
+        constellation=getattr(Constellation, modulation)(order),
+    ).value
     ref = viterbi_viterbi_reference(
         x,
         modulation=modulation,
@@ -80,9 +83,11 @@ def test_viterbi_viterbi_matches_oracle(modulation, order, block_size, num_ch, j
 @pytest.mark.parametrize("order", [16, 32], ids=["square", "cross"])
 def test_bps_matches_oracle(num_ch, joint, order):
     x = _phase_noise_input("qam", order, num_ch)
-    phi = recover_carrier_phase_bps(
-        x, "qam", order, num_test_phases=32, block_size=16, joint_channels=joint
-    )
+    phi = estimate_carrier_phase(
+        x,
+        BPS(test_phases=32, block_size=16, joint_channels=joint),
+        constellation=Constellation.qam(order),
+    ).value
     ref = bps_reference(
         x,
         Constellation.qam(order).points,
@@ -98,7 +103,9 @@ def test_bps_matches_oracle(num_ch, joint, order):
 @pytest.mark.parametrize("order", [16, 32], ids=["square", "cross"])
 def test_pll_matches_oracle(num_ch, beta, order):
     x = _phase_noise_input("qam", order, num_ch)
-    phi = recover_carrier_phase_pll(x, "qam", order, mu=2e-2, beta=beta)
+    phi = estimate_carrier_phase(
+        x, PLL(mu=2e-2, beta=beta), constellation=Constellation.qam(order)
+    ).value
     ref = pll_reference(x, Constellation.qam(order).points, mu=2e-2, beta=beta)
     np.testing.assert_allclose(np.atleast_2d(phi), ref, rtol=0, atol=PLL_ATOL)
 

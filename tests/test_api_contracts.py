@@ -53,6 +53,7 @@ from commkit.equalization import EqualizerResult
 from commkit.frequency import MthPower
 from commkit.impairments import Lowdin
 from commkit.mapping import Constellation
+from commkit.recovery import BPS
 
 # -----------------------------------------------------------------------------
 # Kinds and checks
@@ -559,53 +560,32 @@ ROWS: list[Row] = [
     Row("commkit.plotting.theme.apply_default_theme", PLOT, data=0),
     Row("commkit.plotting.waveform.plot_time_domain", PLOT),
     # --- recovery -----------------------------------------------------------
+    Row("commkit.recovery.bps.BPS", VALUE),
+    Row("commkit.recovery.carrier_phase.CarrierPhaseEstimate", VALUE),
     Row(
-        "commkit.recovery.bps.recover_carrier_phase_bps",
-        TRAJECTORY,
-        call=lambda c, x: _a(x, **QAM16),
-        symbols=True,
-    ),
-    Row(
-        "commkit.recovery.pll.recover_carrier_phase_pll",
-        TRAJECTORY,
-        call=lambda c, x: _a(x, **QAM16),
-        symbols=True,
-    ),
-    Row(
-        "commkit.recovery.tikhonov.recover_carrier_phase_tikhonov",
-        TRAJECTORY,
-        call=lambda c, x: _a(x, linewidth_symbol_periods=1e-4, snr_db=20, **QAM16),
-        symbols=True,
-    ),
-    Row(
-        "commkit.recovery.viterbi_viterbi.recover_carrier_phase_viterbi_viterbi",
-        TRAJECTORY,
-        call=lambda c, x: _a(x, **QAM16),
-        symbols=True,
-    ),
-    Row(
-        "commkit.recovery.pilots.recover_carrier_phase_pilot_symbols",
-        TRAJECTORY,
-        call=lambda c, x: _a(x, **_pilots(x)),
-        symbols=True,
-    ),
-    Row("commkit.recovery.pilots.recover_carrier_phase_pilot_tone", TRAJECTORY),
-    Row("commkit.recovery.pilots.recover_carrier_phase_pilot_tones", TRAJECTORY),
-    Row(
-        "commkit.recovery.corrections.correct_carrier_phase",
+        "commkit.recovery.carrier_phase.correct_carrier_phase",
         TRANSFORM,
         data=2,
         call=lambda c, x: _a(x, 0.1),
         symbols=True,
     ),
-    Row("commkit.recovery.corrections.correct_cycle_slips", DESIGN),
     Row(
-        "commkit.recovery.corrections.correct_phase_rotation",
-        TRANSFORM,
+        "commkit.recovery.carrier_phase.estimate_carrier_phase",
+        TRAJECTORY,
         data=2,
-        call=lambda c, x: _a(x, _ref(c, x)),
+        call=lambda c, x: _a(x, BPS(), constellation=C16),
+        fact=("sampling_rate", 3 * RS),
         symbols=True,
     ),
+    Row("commkit.recovery.corrections.CycleSlip", VALUE),
+    Row("commkit.recovery.corrections.DataAided", VALUE),
+    Row("commkit.recovery.pilots.PilotAided", VALUE),
+    Row("commkit.recovery.pilots.PilotTone", VALUE),
+    Row("commkit.recovery.pilots.PilotTones", VALUE),
+    Row("commkit.recovery.pll.PLL", VALUE),
+    Row("commkit.recovery.tikhonov.Tikhonov", VALUE),
+    Row("commkit.recovery.viterbi_viterbi.ViterbiViterbi", VALUE),
+    Row("commkit.recovery.corrections.correct_cycle_slips", DESIGN),
     Row(
         "commkit.recovery.corrections.resolve_channel_permutation",
         TRANSFORM,
@@ -851,6 +831,7 @@ def test_signal_roundtrip(row: Row, xp, backend_device, request):
     before = to_device(sig.samples, "cpu").copy()
     out = _call(row, c, sig)
     if row.kind == TRAJECTORY:
+        out = getattr(out, "value", out)  # CarrierPhaseEstimate
         assert _module(out) == xp.__name__, f"returned {type(out)}"
     else:
         assert isinstance(out, Signal), f"returned {type(out)}"
@@ -902,6 +883,7 @@ def test_trajectory_shape_and_device(row: Row, xp, backend_device, request):
     for ndim in row.dims:
         x = c.primary(row, ndim)
         out = _call(row, c, x)
+        out = getattr(out, "value", out)  # CarrierPhaseEstimate
         assert _module(out) == xp.__name__, f"returned {type(out)}"
         assert out.shape == x.shape
 
@@ -991,16 +973,8 @@ LEGACY: dict[str, frozenset[str]] = {
     "commkit.plotting.sync.plot_pilot_tones_phase_estimate": L(SIG),
     "commkit.plotting.sync.plot_timing_correlation": L(SIG),
     "commkit.plotting.waveform.plot_time_domain": L(SIG),
-    "commkit.recovery.bps.recover_carrier_phase_bps": L(SIG),
     "commkit.recovery.corrections.correct_cycle_slips": L(SIG),
-    "commkit.recovery.corrections.correct_phase_rotation": L(SIG, SGN),
     "commkit.recovery.corrections.resolve_channel_permutation": L(SGN),
     "commkit.recovery.corrections.resolve_phase_ambiguity": L(SIG, SGN),
     "commkit.recovery.corrections.smooth_phase_wiener": L(SIG),
-    "commkit.recovery.pilots.recover_carrier_phase_pilot_symbols": L(SIG),
-    "commkit.recovery.pilots.recover_carrier_phase_pilot_tone": L(SIG),
-    "commkit.recovery.pilots.recover_carrier_phase_pilot_tones": L(SIG),
-    "commkit.recovery.pll.recover_carrier_phase_pll": L(SIG),
-    "commkit.recovery.tikhonov.recover_carrier_phase_tikhonov": L(SIG),
-    "commkit.recovery.viterbi_viterbi.recover_carrier_phase_viterbi_viterbi": L(SIG),
 }

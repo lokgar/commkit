@@ -1,153 +1,89 @@
 """Blind Phase Search (BPS) carrier phase recovery."""
 
+from dataclasses import dataclass
+
 import numpy as np
 
-from .._array import as_2d, restore_1d
-from ..backend import ArrayType, dispatch, to_device
-from ..core._signal_adapter import adapt_signal
-from ..core.signal import Signal
+from ..backend import ArrayType, dispatch
 from ..logger import logger
-from .corrections import _log_phase_summary, correct_cycle_slips
+from ._common import _check_blocks, _Context, _Phase
+from .corrections import CycleSlip, _log_phase_summary, _repair_slips
 
 
-def recover_carrier_phase_bps(
-    symbols: ArrayType | Signal,
-    modulation: str | None = None,
-    order: int | None = None,
-    num_test_phases: int = 64,
-    block_size: int = 32,
-    joint_channels: bool = False,
-    cycle_slip_correction: bool = False,
-    cycle_slip_history: int = 100,
-    cycle_slip_threshold: float = np.pi / 4,
-    pmf: np.ndarray | None = None,
-) -> ArrayType:
+@dataclass(frozen=True)
+class BPS:
     """
-    Carrier phase recovery via Blind Phase Search (BPS).
+    Blind Phase Search.
 
-    Tests ``num_test_phases`` candidate rotation angles over ``[0, π/2)``
-    (exploiting 4-fold QAM symmetry), selects the candidate that minimises
-    the block-averaged sum of minimum squared distances to the reference
-    constellation, and interpolates to per-symbol resolution.
+    Tests ``test_phases`` candidate rotations over ``[0, π/2)`` (exploiting
+    4-fold QAM symmetry), selects per block the candidate that minimises the
+    summed minimum squared distance to the constellation, 4-fold-unwraps the
+    block phases and interpolates linearly to per-symbol resolution.
 
     Parameters
     ----------
-    symbols : array_like or Signal
-        1-SPS complex symbols after matched filter. Shape: (N,) or (C, N).
-        A :class:`Signal` supplies ``modulation``/``order``/``pmf`` from its
-        metadata when not given explicitly.
-    modulation : str, optional
-        Modulation scheme (case-insensitive). Used to fetch the reference
-        constellation via
-        ``gray_constellation``.  Required for array input; for :class:`Signal`
-        input, used only as a fallback when the signal's ``mod_scheme`` is
-        unset.
-    order : int, optional
-        Modulation order.  Required for array input; for :class:`Signal`
-        input, used only as a fallback when the signal's ``mod_order`` is
-        unset.
-    num_test_phases : int, default 64
-        Number of candidate phase offsets B. Resolution is ``π/(2B)``
-        rad per step. More candidates improve accuracy at higher compute cost.
+    test_phases : int, default 64
+        Number of candidate phases B.  Resolution is ``π/(2B)`` rad.
     block_size : int, default 32
-        Number of symbols per block for error-metric averaging.
-        Very small values (< 4) make the 4-fold phase unwrap unreliable
-        because noise on a single-symbol metric causes the best-candidate
-        index to jump between non-adjacent phase bins between consecutive
-        blocks, triggering false unwrap corrections.  Recommended
-        minimum: ``block_size ≥ 4``.
+        Symbols per block for metric averaging.  Values below 4 make the
+        4-fold unwrap unreliable (a noisy argmin jumps between non-adjacent
+        candidates).
     joint_channels : bool, default False
-        For MIMO inputs (C > 1): if ``True``, sum the distance metrics
-        across all channels before selecting the best phase candidate.
-        The resulting single phase trajectory is broadcast to all C rows
-        of the output (all channels identical before ambiguity resolution).
-        Reduces phase estimation variance by ~√C for shared-LO systems.
-        Has no effect for SISO (C = 1).
-    cycle_slip_correction : bool, default False
-        If ``True``, apply cycle-slip detection and correction
-        (``correct_cycle_slips``) to the block-phase trajectory
-        after 4-fold unwrap, before interpolation.
-    cycle_slip_history : int, default 100
-        ``history_length`` passed to ``correct_cycle_slips``.
-        Number of past corrected blocks used for linear extrapolation.
-    cycle_slip_threshold : float, default π/4
-        ``threshold`` passed to ``correct_cycle_slips`` (radians).
-    pmf : np.ndarray, optional
-        Symbol PMF of shape ``(order,)`` for PS-QAM.  When provided, the
-        reference constellation is scaled by ``1/sqrt(E_PS)`` (where
-        ``E_PS = Σ P(s_m) |s_m|²`` on the normalised grid) so the
-        nearest-neighbour distance metric matches the scale of the
-        unit-avg-power input.  Without this, mid-shell PS points cross
-        decision boundaries in the BPS metric and bias the phase estimate.
-        No-op for uniform modulations.  For :class:`Signal` input, used
-        only as a fallback when the signal's ``ps_pmf`` is unset.
-
-    Returns
-    -------
-    array_like
-        Per-symbol phase estimate in radians. Shape matches ``symbols``.
-        Same backend as input.  Always a raw array, even for :class:`Signal`
-        input (a phase trajectory is not itself a signal).
+        MIMO: sum the distance metrics across channels before the argmin and
+        give every channel the one trajectory (shared LO, ~√C lower
+        variance).
+    cycle_slip : CycleSlip, optional
+        Repair cycle slips in the block phases before interpolation.
 
     Notes
     -----
-    Tests B candidate rotations over [0, pi/2), selects the one minimising
-    block-averaged minimum Euclidean distance, then 4-fold unwraps.  A global
-    pi/2 ambiguity remains - resolve via a pilot or preamble reference.
+    A global ``π/2`` ambiguity remains; resolve it against a reference.
 
-    Memory: the distance tensor scales as N * B * M * 8 bytes; reduce
-    ``num_test_phases`` or segment length for high-order constellations.
+    Memory: the general (non-square) path builds a ``(1024, B, M)``
+    distance tensor per chunk; square QAM uses an O(1) per-axis slicer.
     """
-    from ..mapping.gray import _gray_points, _square_qam_slicer_params
-    from ..mapping.shaping import _constellation_power
+
+    test_phases: int = 64
+    block_size: int = 32
+    joint_channels: bool = False
+    cycle_slip: CycleSlip | None = None
+
+    def __post_init__(self) -> None:
+        if self.test_phases < 1:
+            raise ValueError(f"test_phases must be >= 1, got {self.test_phases}.")
+        if self.block_size < 1:
+            raise ValueError(f"block_size must be >= 1, got {self.block_size}.")
+
+
+def _bps(symbols: ArrayType, method: BPS, ctx: _Context) -> _Phase:
+    """BPS phase of ``(C, N)`` symbols."""
+    from ..mapping.gray import _square_qam_slicer_params
     from ..math import normalize
 
-    signal_adapter = adapt_signal(symbols, function_name="recover_carrier_phase_bps()")
-    symbols = signal_adapter.array
-    modulation = signal_adapter.resolve_optional("mod_scheme", modulation)
-    order = signal_adapter.resolve_optional("mod_order", order)
-    pmf = signal_adapter.resolve_optional("ps_pmf", pmf)
-
-    if modulation is None or order is None:
-        raise ValueError(
-            "recover_carrier_phase_bps() requires modulation and order for array input."
-        )
+    constellation = ctx.need_constellation(method)
+    num_test_phases = method.test_phases
+    block_size = method.block_size
+    joint_channels = method.joint_channels
 
     symbols, xp, _ = dispatch(symbols)
-    symbols, was_1d = as_2d(symbols, name="symbols")
     C, N = symbols.shape
 
     # Normalise each channel to unit average power so the metric is computed at
-    # the same scale as the reference constellation (gray_constellation returns
-    # unit-average-power points).  BPS is a phase estimator; it must be
+    # the same scale as the (unit-power) constellation.  BPS is a phase estimator; it must be
     # amplitude-agnostic.
     symbols = normalize(symbols, mode="average_power", axis=-1)
 
-    # Reference constellation on the same device
-    const_np = _gray_points(modulation, order)
-
-    # PS-QAM: unit-avg-power input lives on the ``{s_m/sqrt(E_PS)}`` grid.
-    # Rescale the comparison constellation to the same grid so the nearest-
-    # neighbour distance metric is correct.  Skip on uniform PMF.
-    if pmf is not None:
-        e_ps = _constellation_power(const_np, pmf)
-        if e_ps < 1.0 - 1e-6:
-            const_np = const_np / np.sqrt(e_ps)
-
+    # Reference constellation (unit power; a shaped constellation is already
+    # on the {s_m/sqrt(E_PS)} grid of the unit-power input).
+    const_np = np.asarray(constellation.points, dtype=np.complex128)
     const_xp = xp.asarray(const_np)  # (M_const,)
 
     # Candidate test phases over [0, π/2)
     B = num_test_phases
     candidates = xp.arange(B, dtype=symbols.real.dtype) * (np.pi / 2.0 / B)  # (B,)
 
-    N_trunc = (N // block_size) * block_size
-    N_blocks = N_trunc // block_size
-
-    if N_blocks == 0:
-        raise ValueError(
-            f"Signal length {N} is shorter than block_size={block_size}. "
-            "Reduce block_size or use a longer symbol sequence."
-        )
+    N_blocks = _check_blocks(N, block_size)
+    N_trunc = N_blocks * block_size
 
     # Very small block_size makes the 4-fold phase unwrap unreliable: with only
     # one or two symbols per block the noise on the distance-metric argmin causes
@@ -211,9 +147,6 @@ def recover_carrier_phase_bps(
     # Always a multiple of block_size so each chunk covers a whole number of
     # blocks exactly.  Rounded up to the nearest multiple ≥ 1024.
     CHUNK_N = max(block_size, ((1024 + block_size - 1) // block_size) * block_size)
-
-    phi_full = xp.zeros((C, N), dtype=xp.float64)
-    phi_blocks = xp.zeros((C, N_blocks), dtype=xp.float64)
 
     # Accumulate per-channel distance metrics (N_blocks, B) for all channels.
     metrics_all = xp.zeros((C, N_blocks, B), dtype=float_dtype)
@@ -281,47 +214,31 @@ def recover_carrier_phase_bps(
 
     # Phase estimation: joint (sum metrics across channels) or independent per channel.
     if joint_channels and C > 1:
-        metric_joint = xp.sum(metrics_all, axis=0)  # (N_blocks, B)
-        best_k_joint = xp.argmin(metric_joint, axis=-1)  # (N_blocks,)
-        phi_b_joint = candidates[best_k_joint]  # (N_blocks,)
-        phi_u_joint = xp.unwrap(phi_b_joint.astype(xp.float64) * 4, axis=-1) / 4
-        if cycle_slip_correction:
-            phi_u_joint_np = correct_cycle_slips(
-                to_device(phi_u_joint, "cpu"),
-                4,
-                cycle_slip_history,
-                cycle_slip_threshold,
-            )
-            phi_u_joint = xp.asarray(phi_u_joint_np)
-        for ch in range(C):
-            phi_full[ch] = (
-                phi_u_joint[idx_left] * (1.0 - t_interp)
-                + phi_u_joint[idx_right] * t_interp
-            )
-            phi_blocks[ch] = phi_u_joint
-    else:
-        for ch in range(C):
-            metric = metrics_all[ch]  # (N_blocks, B)
-            best_k = xp.argmin(metric, axis=-1)  # (N_blocks,)
-            phi_b = candidates[best_k]  # (N_blocks,)
-            phi_u = xp.unwrap(phi_b.astype(xp.float64) * 4, axis=-1) / 4
-            if cycle_slip_correction:
-                phi_u_np = correct_cycle_slips(
-                    to_device(phi_u, "cpu"), 4, cycle_slip_history, cycle_slip_threshold
-                )
-                phi_u = xp.asarray(phi_u_np)
-            phi_full[ch] = (
-                phi_u[idx_left] * (1.0 - t_interp) + phi_u[idx_right] * t_interp
-            )
-            phi_blocks[ch] = phi_u
+        metrics_all = xp.sum(metrics_all, axis=0, keepdims=True)  # (1, N_blocks, B)
+    best_k = xp.argmin(metrics_all, axis=-1)  # (R, N_blocks)
+    phi_b = candidates[best_k]
+    phi_u = xp.unwrap(phi_b.astype(xp.float64) * 4, axis=-1) / 4
+    phi_u = _repair_slips(phi_u, xp, method.cycle_slip, 4)
+    # Per row: a 1-D gather is about twice as fast as the 2-D fancy index.
+    phi_full = xp.empty((phi_u.shape[0], N), dtype=xp.float64)
+    for r, row in enumerate(phi_u):
+        phi_full[r] = row[idx_left] * (1.0 - t_interp) + row[idx_right] * t_interp
+    if phi_u.shape[0] != C:  # joint: one trajectory for every channel
+        phi_full = xp.broadcast_to(phi_full, (C, N)).copy()
+        phi_u = xp.broadcast_to(phi_u, (C, N_blocks)).copy()
 
     mode_str = "joint" if (joint_channels and C > 1) else "independent"
     _log_phase_summary(
         phi_full,
         "CPR (BPS, B=%s, %s)",
         (B, mode_str),
-        "[%s blocks x %s symbols, C=%s, cycle_slip_correction=%s]",
-        (N_blocks, block_size, C, cycle_slip_correction),
+        "[%s blocks x %s symbols, C=%s, cycle_slip=%s]",
+        (N_blocks, block_size, C, method.cycle_slip is not None),
     )
 
-    return restore_1d(was_1d, phi_full)
+    return _Phase(
+        phase=phi_full,
+        block_centers=np.arange(N_blocks, dtype=np.float64) * block_size
+        + block_size / 2,
+        block_phase=phi_u,
+    )

@@ -5,6 +5,7 @@ import pytest
 
 from commkit import recovery
 from commkit.core import Signal
+from commkit.mapping import Constellation
 from tests.common.metrics import calc_rms_phase_error
 from tests.common.signals import (
     make_test_mimo_samples,
@@ -104,14 +105,13 @@ class TestCprTikhonov:
         phi_true = 0.3
         sig = sig.replace(samples=sig.samples * xp.exp(1j * phi_true))
 
-        phase_est = recovery.recover_carrier_phase_tikhonov(
+        phase_est = recovery.estimate_carrier_phase(
             sig.samples,
-            modulation=modulation,
-            order=order,
-            linewidth_symbol_periods=1e-4,
-            block_size=block_size,
-            snr_db=SNR_DB,
-        )
+            recovery.Tikhonov(
+                linewidth_symbol_periods=1e-4, snr_db=SNR_DB, block_size=block_size
+            ),
+            constellation=getattr(Constellation, modulation)(order),
+        ).value
 
         M = 4 if modulation == "qam" else order
         step = 2 * np.pi / M
@@ -124,13 +124,11 @@ class TestCprTikhonov:
         sig = make_test_qam_signal(
             order=16, num_symbols=512, sps=1, symbol_rate=FS, xp=xp
         )
-        phase = recovery.recover_carrier_phase_tikhonov(
+        phase = recovery.estimate_carrier_phase(
             sig.samples,
-            modulation="qam",
-            order=16,
-            linewidth_symbol_periods=1e-4,
-            snr_db=SNR_DB,
-        )
+            recovery.Tikhonov(linewidth_symbol_periods=1e-4, snr_db=SNR_DB),
+            constellation=Constellation.qam(16),
+        ).value
         assert phase.shape == sig.samples.shape
 
     def test_output_shape_mimo(self, xp):
@@ -138,13 +136,11 @@ class TestCprTikhonov:
         mimo, _ = make_test_mimo_samples(
             num_channels=2, order=16, num_symbols=512, sps=1, xp=xp
         )
-        phase = recovery.recover_carrier_phase_tikhonov(
+        phase = recovery.estimate_carrier_phase(
             mimo,
-            modulation="qam",
-            order=16,
-            linewidth_symbol_periods=1e-4,
-            snr_db=SNR_DB,
-        )
+            recovery.Tikhonov(linewidth_symbol_periods=1e-4, snr_db=SNR_DB),
+            constellation=Constellation.qam(16),
+        ).value
         assert phase.shape == mimo.shape
 
     def test_too_short_raises(self, xp):
@@ -153,27 +149,18 @@ class TestCprTikhonov:
             order=4, num_symbols=20, sps=1, symbol_rate=FS, xp=xp
         )
         with pytest.raises(ValueError, match="shorter than block_size"):
-            recovery.recover_carrier_phase_tikhonov(
+            recovery.estimate_carrier_phase(
                 sig.samples[:10],
-                modulation="qam",
-                order=4,
-                linewidth_symbol_periods=1e-4,
-                block_size=32,
+                recovery.Tikhonov(
+                    linewidth_symbol_periods=1e-4, snr_db=20, block_size=32
+                ),
+                constellation=Constellation.qam(4),
             )
 
-    def test_invalid_method_raises(self, xp):
-        """Tikhonov CPR: unknown method raises ValueError."""
-        sig = make_test_qam_signal(
-            order=16, num_symbols=512, sps=1, symbol_rate=FS, xp=xp
-        )
-        with pytest.raises(ValueError, match="Unknown method"):
-            recovery.recover_carrier_phase_tikhonov(
-                sig.samples,
-                modulation="qam",
-                order=16,
-                linewidth_symbol_periods=1e-4,
-                method="bad",
-            )
+    def test_invalid_smoother_raises(self):
+        """Tikhonov CPR: an unknown smoother raises on construction."""
+        with pytest.raises(ValueError, match="smoother"):
+            recovery.Tikhonov(linewidth_symbol_periods=1e-4, snr_db=20, smoother="bad")
 
     @pytest.mark.parametrize("order,modulation", [(4, "psk"), (16, "qam")])
     def test_sskf_phase_residual(self, xp, order, modulation):
@@ -189,14 +176,13 @@ class TestCprTikhonov:
         phi_true = 0.3
         sig = sig.replace(samples=sig.samples * xp.exp(1j * phi_true))
 
-        phase_est = recovery.recover_carrier_phase_tikhonov(
+        phase_est = recovery.estimate_carrier_phase(
             sig.samples,
-            modulation=modulation,
-            order=order,
-            linewidth_symbol_periods=1e-4,
-            snr_db=SNR_DB,
-            method="sskf",
-        )
+            recovery.Tikhonov(
+                linewidth_symbol_periods=1e-4, snr_db=SNR_DB, smoother="steady_state"
+            ),
+            constellation=getattr(Constellation, modulation)(order),
+        ).value
 
         M = 4 if modulation == "qam" else order
         step = 2 * np.pi / M
@@ -211,22 +197,20 @@ class TestCprTikhonov:
         )
         sig = sig.replace(samples=sig.samples * xp.exp(1j * 0.2))
 
-        phi_exact = recovery.recover_carrier_phase_tikhonov(
+        phi_exact = recovery.estimate_carrier_phase(
             sig.samples,
-            modulation="qam",
-            order=16,
-            linewidth_symbol_periods=1e-4,
-            snr_db=SNR_DB,
-            method="exact",
-        )
-        phi_sskf = recovery.recover_carrier_phase_tikhonov(
+            recovery.Tikhonov(
+                linewidth_symbol_periods=1e-4, snr_db=SNR_DB, smoother="rts"
+            ),
+            constellation=Constellation.qam(16),
+        ).value
+        phi_sskf = recovery.estimate_carrier_phase(
             sig.samples,
-            modulation="qam",
-            order=16,
-            linewidth_symbol_periods=1e-4,
-            snr_db=SNR_DB,
-            method="sskf",
-        )
+            recovery.Tikhonov(
+                linewidth_symbol_periods=1e-4, snr_db=SNR_DB, smoother="steady_state"
+            ),
+            constellation=Constellation.qam(16),
+        ).value
         rms_diff = float(xp.sqrt(xp.mean((phi_exact - phi_sskf) ** 2)))
         assert rms_diff < 0.05
 
@@ -245,17 +229,20 @@ class TestCprTikhonov:
         )
         sig = sig.replace(samples=sig.samples * xp.exp(1j * 0.3))
 
-        phi_vv = recovery.recover_carrier_phase_viterbi_viterbi(
-            sig.samples, modulation="psk", order=4, block_size=32
-        )
-        phi_tik = recovery.recover_carrier_phase_tikhonov(
+        phi_vv = recovery.estimate_carrier_phase(
             sig.samples,
-            modulation="psk",
-            order=4,
-            linewidth_symbol_periods=linewidth_symbol_periods,
-            block_size=32,
-            snr_db=snr_test,
-        )
+            recovery.ViterbiViterbi(block_size=32),
+            constellation=Constellation.psk(4),
+        ).value
+        phi_tik = recovery.estimate_carrier_phase(
+            sig.samples,
+            recovery.Tikhonov(
+                linewidth_symbol_periods=linewidth_symbol_periods,
+                snr_db=snr_test,
+                block_size=32,
+            ),
+            constellation=Constellation.psk(4),
+        ).value
 
         assert float(xp.std(phi_tik)) < float(xp.std(phi_vv))
 
@@ -269,12 +256,14 @@ class TestSignalInputTikhonov:
             order=16, num_symbols=512, sps=1, symbol_rate=FS, xp=xp
         )
 
-        phi_sig = recovery.recover_carrier_phase_tikhonov(
-            sig, linewidth_symbol_periods=1e-5
-        )
-        phi_arr = recovery.recover_carrier_phase_tikhonov(
-            sig.samples, modulation="qam", order=16, linewidth_symbol_periods=1e-5
-        )
+        phi_sig = recovery.estimate_carrier_phase(
+            sig, recovery.Tikhonov(linewidth_symbol_periods=1e-5, snr_db=20)
+        ).value
+        phi_arr = recovery.estimate_carrier_phase(
+            sig.samples,
+            recovery.Tikhonov(linewidth_symbol_periods=1e-5, snr_db=20),
+            constellation=Constellation.qam(16),
+        ).value
 
         assert not isinstance(phi_sig, Signal)  # phase estimate stays a raw array
         xpt.assert_allclose(phi_sig, phi_arr)

@@ -241,7 +241,7 @@ def lms(
         ``cpr_pll_bandwidth`` and uses raw PI gains directly; ``cpr_pll_beta``
         then defaults to ``0.0`` (a 1st-order loop).  Leave ``None`` to derive
         critically-damped gains from ``cpr_pll_bandwidth``.  Interchangeable
-        with the ``mu`` of ``recover_carrier_phase_pll``.
+        with the ``mu`` of ``recovery.PLL``.
     cpr_pll_beta : float, optional
         Raw integral PLL gain ``β``.  ``β=0`` => 1st-order loop (no frequency
         integrator); ``β>0`` => 2nd-order loop.  Requires ``cpr_pll_mu`` to be
@@ -828,7 +828,7 @@ def rls(
         ``cpr_pll_bandwidth``; ``cpr_pll_beta`` then defaults to ``0.0``
         (1st-order).  Leave ``None`` for critically-damped gains from
         ``cpr_pll_bandwidth``.  Interchangeable with the ``mu`` of
-        ``recover_carrier_phase_pll``.
+        ``recovery.PLL``.
     cpr_pll_beta : float, optional
         Raw integral PLL gain ``β``.  ``β=0`` => 1st-order, ``β>0`` => 2nd-order.
         Requires ``cpr_pll_mu`` to be set.  Mapping: ``ωₙT = √β``,

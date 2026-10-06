@@ -159,13 +159,17 @@ class TestBPSKernelEndToEnd:
         skip_unless_kernel_available("bps_min_d2", backend_device=backend_device)
         x = xp.asarray(_phase_noise_symbols(order))
 
-        phi_kern = recovery.recover_carrier_phase_bps(
-            x, "qam", order, num_test_phases=64, block_size=32
-        )
+        phi_kern = recovery.estimate_carrier_phase(
+            x,
+            recovery.BPS(test_phases=64, block_size=32),
+            constellation=Constellation.qam(order),
+        ).value
         no_kernel()
-        phi_fall = recovery.recover_carrier_phase_bps(
-            x, "qam", order, num_test_phases=64, block_size=32
-        )
+        phi_fall = recovery.estimate_carrier_phase(
+            x,
+            recovery.BPS(test_phases=64, block_size=32),
+            constellation=Constellation.qam(order),
+        ).value
         xpt.assert_allclose(
             to_numpy(phi_kern), to_numpy(phi_fall), rtol=1e-6, atol=1e-9
         )
@@ -238,17 +242,21 @@ class TestBPSKernelFallback:
 
         monkeypatch.setattr(_cuda, "get_kernel", _fail)
         x = xp.asarray(_phase_noise_symbols(16).astype(np.complex128))
-        phi = recovery.recover_carrier_phase_bps(
-            x, "qam", 16, num_test_phases=32, block_size=32
-        )
+        phi = recovery.estimate_carrier_phase(
+            x,
+            recovery.BPS(test_phases=32, block_size=32),
+            constellation=Constellation.qam(16),
+        ).value
         assert bool(xp.all(xp.isfinite(phi)))
 
     @pytest.mark.cpu_only
     def test_recovery_bps_runs_on_cpu_without_kernel(self, xp):
         x = xp.asarray(_phase_noise_symbols(128, N=4000))
-        phi = recovery.recover_carrier_phase_bps(
-            x, "qam", 128, num_test_phases=32, block_size=32
-        )
+        phi = recovery.estimate_carrier_phase(
+            x,
+            recovery.BPS(test_phases=32, block_size=32),
+            constellation=Constellation.qam(128),
+        ).value
         assert phi.shape == x.shape
         assert bool(np.all(np.isfinite(phi)))
         assert bool(np.all(np.isfinite(phi)))

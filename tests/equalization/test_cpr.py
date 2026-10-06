@@ -26,7 +26,7 @@ from commkit.frequency import (
     estimate_frequency_offset,
 )
 from commkit.mapping import Constellation
-from commkit.recovery import recover_carrier_phase_pll
+from commkit.recovery import PLL, estimate_carrier_phase
 from tests.common.conversions import to_numpy
 from tests.common.metrics import calc_mse_db
 from tests.common.signals import (
@@ -277,7 +277,11 @@ class TestCPRPLLConvergence:
         )
         phi_inline = to_numpy(res.phase_trajectory)
         phi_std = to_numpy(
-            recover_carrier_phase_pll(xp.asarray(samples), "psk", 4, mu=m, beta=b)
+            estimate_carrier_phase(
+                xp.asarray(samples),
+                PLL(mu=m, beta=b),
+                constellation=Constellation.psk(4),
+            ).value
         )
 
         tail = slice(n_sym // 4, n_sym)

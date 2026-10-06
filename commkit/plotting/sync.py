@@ -490,7 +490,7 @@ def plot_pilot_phase_estimate(
 
     Used as a diagnostic for both pilot-based frequency offset estimation
     (``estimate_frequency_offset`` with ``PilotSymbols``) and pilot-aided carrier phase
-    recovery (``recover_carrier_phase_pilot_symbols``).
+    recovery (``estimate_carrier_phase`` with ``PilotAided``).
 
     Parameters
     ----------
@@ -626,7 +626,7 @@ def plot_pilot_tone_phase_estimate(
     max_points: int = 4000,
 ) -> tuple[Any, Any] | None:
     """
-    Diagnostic for ``recover_carrier_phase_pilot_tone``.
+    Diagnostic for ``estimate_carrier_phase`` with ``PilotTone``.
 
     Two panels:
 
@@ -758,7 +758,7 @@ def plot_pilot_tones_phase_estimate(
     max_points: int = 4000,
 ) -> tuple[Any, Any] | None:
     """
-    Diagnostic for ``recover_carrier_phase_pilot_tones``.
+    Diagnostic for ``estimate_carrier_phase`` with ``PilotTones``.
 
     Two panels:
 

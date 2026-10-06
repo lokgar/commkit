@@ -875,7 +875,7 @@ The equalization pass (3.7) gets more commits:
   `resolve_pll_gains` leave `helpers` for the private
   `recovery/_common.py` (`_pll_gains`, `_resolve_pll_gains`); the inline
   equalizer PLL imports them from there. A pure move.
-- [ ] **3.6b `refactor(recovery)!: estimate_/correct_carrier_phase (D16)`.**
+- [x] **3.6b `refactor(recovery)!: estimate_/correct_carrier_phase (D16)`.**
   - `estimate_carrier_phase(samples, method, *, sampling_rate=,
     constellation=) -> CarrierPhaseEstimate` and `correct_carrier_phase(
     samples, how, *, sampling_rate=, constellation=)`, where `how` is an
@@ -901,7 +901,13 @@ The equalization pass (3.7) gets more commits:
     bias is the angle of the pmf-weighted mean of `(c/|c|)^M`, which equals
     the 1.x `π/M` for every square QAM, uniform and shaped. A shaped
     constellation gives the PLL its rescaled points (1.x used the uniform
-    grid).
+    grid). 4-QAM has the QPSK points, so it is no longer projected (1.x
+    projected every "qam"); `frequency._modulation_power_m` is deleted.
+  - Validation: all seven estimators give bit-identical trajectories to the
+    1.x functions on CPU and GPU (QAM, PSK, joint, cycle slips, both
+    smoothers, both interpolations, tone and MRC tones) except 4-QAM
+    Viterbi-Viterbi/Tikhonov, as above. BPS on the CPU is at parity; the
+    per-row interpolation gather stays (a 2-D fancy index doubled it).
   - The estimate carries the data the orphaned plots draw: block centres
     and block phases (BPS, Viterbi-Viterbi, Tikhonov), unwrapped pilot
     phases (`PilotAided`), refined tone frequencies, tone SNRs, the

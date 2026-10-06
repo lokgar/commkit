@@ -1,161 +1,131 @@
 """Pilot-symbol and pilot-tone aided carrier phase recovery."""
 
 import logging
-from collections.abc import Sequence
+from dataclasses import dataclass
+from typing import Literal
 
 import numpy as np
 
-from .._array import as_2d, broadcast_channels, restore_1d
+from .._array import broadcast_channels
 from ..backend import ArrayType, dispatch, to_device
-from ..core._signal_adapter import adapt_signal
-from ..core.signal import Signal
 from ..helpers import remove_linear_trend
 from ..logger import logger
-from .corrections import _log_phase_summary, correct_cycle_slips
+from ._common import _Context, _Phase
+from .corrections import CycleSlip, _log_phase_summary, _repair_slips
 
 
-def recover_carrier_phase_pilot_symbols(
-    symbols: ArrayType | Signal,
-    pilot_indices: ArrayType,
-    pilot_values: ArrayType,
-    interpolation: str = "linear",
-    joint_channels: bool = False,
-    cycle_slip_correction: bool = False,
-    cycle_slip_history: int = 100,
-    cycle_slip_threshold: float = np.pi / 4,
-) -> ArrayType:
+@dataclass(frozen=True, eq=False)
+class PilotAided:
     """
-    Carrier phase recovery using known pilot symbols.
+    Phase from known pilot symbols, interpolated between pilots.
 
-    Computes the phase error at each pilot position, unwraps the pilot
-    phase sequence, and interpolates across the full symbol grid.
+    The phase at each pilot is ``∠(r_k·s_k*)``; the pilot phases are
+    unwrapped and interpolated over the whole record.  Single-carrier only.
 
     Parameters
     ----------
-    symbols : array_like or Signal
-        Received 1-SPS complex symbols. Shape: (N,) or (C, N).
-    pilot_indices : array_like of int
-        Indices of pilot symbols within the frame, in increasing order.
-        Shape: (P,).
-    pilot_values : array_like
-        Known transmitted pilot constellation points.
-        Shape: (P,) for shared pilots (broadcast to all MIMO channels),
-        or (C, P) for per-channel pilots.
-    interpolation : {'linear', 'cubic'}, default 'linear'
-        Interpolation method between pilot positions.  Both modes loop over
-        MIMO channels (``xp.interp`` and ``CubicSpline`` are 1D-only);
-        C is typically 1-4 so the overhead is negligible.  ``'cubic'`` uses
-        ``CubicSpline`` (CPU) or
-        ``CubicSpline`` (GPU) with natural
-        boundary conditions (zero second derivative at endpoints) and
-        constant-hold extrapolation outside the pilot span.
+    indices : array_like of int
+        Symbol indices of the pilots, strictly increasing, ``(P,)``.
+    values : array_like
+        Transmitted pilot symbols, ``(P,)`` shared or ``(C, P)`` per channel.
+    interpolation : {"linear", "cubic"}, default "linear"
+        ``"linear"`` holds the first and last pilot phase outside the pilot
+        span; ``"cubic"`` is a natural cubic spline inside the span with the
+        same constant hold outside.
     joint_channels : bool, default False
-        For MIMO inputs (C > 1): if ``True``, perform coherent complex
-        averaging of ``r_pilot * conj(s_pilot)`` across all channels before
-        calling ``angle()``.  This avoids wrap-around artefacts that arise
-        when averaging phases directly, and reduces variance by ~√C for
-        shared-LO systems.  The resulting single phase trajectory is broadcast
-        to all C output rows.  Has no effect for SISO (C = 1).
-    cycle_slip_correction : bool, default False
-        If ``True``, apply ``correct_cycle_slips`` to the unwrapped pilot
-        phase sequence before interpolation, with ``symmetry=1`` (correction
-        quantum ``2π``) to detect and fix wrap-around errors introduced by
-        ``xp.unwrap`` at large inter-pilot gaps.
-    cycle_slip_history : int, default 100
-        ``history_length`` passed to ``correct_cycle_slips``.
-    cycle_slip_threshold : float, default π/4
-        ``threshold`` passed to ``correct_cycle_slips`` (radians).
-
-    Returns
-    -------
-    array_like
-        Per-symbol phase estimate in radians. Shape matches ``symbols``.
-        Same backend as input.
-
-    Notes
-    -----
-    Phase at each pilot: phi_hat[k] = angle(r[k] * conj(s[k])).  Linear
-    interpolation constant-holds at the boundaries; cubic uses natural spline
-    with constant-hold extrapolation.  Single-carrier only.
+        MIMO: average ``r·s*`` coherently across channels before the angle
+        (no wrap-around artefacts) and give every channel the one trajectory.
+    cycle_slip : CycleSlip, optional
+        Repair ``2π`` wraps in the unwrapped pilot phases (large pilot gaps)
+        before interpolation.
     """
-    signal_adapter = adapt_signal(
-        symbols, function_name="recover_carrier_phase_pilot_symbols()"
-    )
-    symbols = signal_adapter.array
 
+    indices: np.ndarray
+    values: np.ndarray
+    interpolation: Literal["linear", "cubic"] = "linear"
+    joint_channels: bool = False
+    cycle_slip: CycleSlip | None = None
+
+    def __post_init__(self) -> None:
+        indices = np.array(to_device(self.indices, "cpu")).astype(np.intp)
+        values = np.array(to_device(self.values, "cpu"))
+        if indices.ndim != 1 or indices.size < 1:
+            raise ValueError("indices must be 1-D with at least one pilot.")
+        if np.any(np.diff(indices) <= 0):
+            raise ValueError("indices must be strictly increasing.")
+        if values.shape[-1] != indices.size or values.ndim not in (1, 2):
+            raise ValueError(
+                f"values must have shape (P,) or (C, P) with P={indices.size}, "
+                f"got {values.shape}."
+            )
+        if self.interpolation not in ("linear", "cubic"):
+            raise ValueError(
+                f"Unknown interpolation method: {self.interpolation!r}. "
+                "Choose 'linear' or 'cubic'."
+            )
+        for name, arr in (("indices", indices), ("values", values)):
+            arr.setflags(write=False)
+            object.__setattr__(self, name, arr)
+
+
+def _pilot_aided(symbols: ArrayType, method: PilotAided, ctx: _Context) -> _Phase:
+    """Pilot-aided phase of ``(C, N)`` symbols."""
     symbols, xp, _ = dispatch(symbols)
-    symbols, was_1d = as_2d(symbols, name="symbols")
     C, N = symbols.shape
+    interpolation = method.interpolation
 
-    pilot_indices_np = to_device(pilot_indices, "cpu").astype(np.intp)
-    pilot_indices_xp = xp.asarray(pilot_indices, dtype=xp.float64)
-    pilot_values_xp = xp.asarray(pilot_values)
+    pilot_indices_np = method.indices
+    pilot_indices_xp = xp.asarray(pilot_indices_np, dtype=xp.float64)
     P = len(pilot_indices_np)
+    if pilot_indices_np[-1] >= N:
+        raise ValueError(
+            f"Pilot index {int(pilot_indices_np[-1])} is outside the {N} symbols."
+        )
 
     # Broadcast shared pilots (P,) -> (C, P) for all channels
-    pilot_values_xp = broadcast_channels(pilot_values_xp, C, xp, name="pilot_values")
+    pilot_values_xp = broadcast_channels(
+        xp.asarray(method.values), C, xp, name="pilot_values"
+    )
 
     # Phase at each pilot position: angle(r_pilot · conj(s_pilot))
     r_pilots = symbols[:, pilot_indices_np]  # (C, P)
 
-    if joint_channels and C > 1:
+    joint = method.joint_channels and C > 1
+    if joint:
         # Coherent complex averaging before angle() - avoids wrap-around artefacts
         # that arise from averaging phases directly (e.g. antipodal channels).
         z_joint = xp.mean(r_pilots * xp.conj(pilot_values_xp), axis=0)  # (P,)
-        phi_joint_u = xp.unwrap(xp.angle(z_joint).astype(xp.float64))  # (P,)
-        if cycle_slip_correction:
-            phi_joint_np = to_device(phi_joint_u, "cpu")
-            phi_joint_np = correct_cycle_slips(
-                phi_joint_np,
-                symmetry=1,
-                history_length=cycle_slip_history,
-                threshold=cycle_slip_threshold,
-            )
-            phi_joint_u = xp.asarray(phi_joint_np)
-        # Broadcast to (C, P) - read-only, downstream code only reads phi_pilots_u[ch]
-        phi_pilots_u = xp.broadcast_to(phi_joint_u[None, :], (C, P))
+        phi_pilots_u = xp.unwrap(xp.angle(z_joint).astype(xp.float64))[None, :]
     else:
         phi_pilots = xp.angle(r_pilots * xp.conj(pilot_values_xp))  # (C, P)
         # Unwrap along the pilot axis in float64 (cp.unwrap preserves input dtype;
         # casting before avoids precision loss in the discontinuity test for float32 input)
         phi_pilots_u = xp.unwrap(phi_pilots.astype(xp.float64), axis=-1)  # (C, P)
-        if cycle_slip_correction:
-            phi_pilots_u_np = to_device(phi_pilots_u, "cpu")
-            for ch in range(C):
-                phi_pilots_u_np[ch] = correct_cycle_slips(
-                    phi_pilots_u_np[ch],
-                    symmetry=1,
-                    history_length=cycle_slip_history,
-                    threshold=cycle_slip_threshold,
-                )
-            phi_pilots_u = xp.asarray(phi_pilots_u_np)
+    # Correction quantum 2π: wrap-around errors of the unwrap at large gaps.
+    phi_pilots_u = _repair_slips(phi_pilots_u, xp, method.cycle_slip, 1)
+    R = phi_pilots_u.shape[0]
 
     all_positions = xp.arange(N, dtype=xp.float64)
-
+    phi_full = xp.empty((R, N), dtype=xp.float64)
     if interpolation == "linear":
-        # xp.interp handles non-uniform pilot spacing natively, is boundary-safe
-        # (extrapolates with first/last pilot value), and avoids the divide-by-zero
-        # guards that the searchsorted form required.  Loop over C channels because
-        # xp.interp is 1D-only; overhead is negligible for typical C = 1-4.
-        phi_full = xp.empty((C, N), dtype=xp.float64)
-        for ch in range(C):
+        # xp.interp handles non-uniform pilot spacing natively and holds the
+        # first/last pilot value outside the span.  1D-only: loop over rows.
+        for ch in range(R):
             phi_full[ch] = xp.interp(all_positions, pilot_indices_xp, phi_pilots_u[ch])
-
-    elif interpolation == "cubic":
+    else:
         # CubicSpline is inherently per-channel (1D y input); loop is unavoidable.
         # Both scipy (CPU) and cupyx.scipy (GPU) share the same API.
-        phi_full = xp.empty((C, N), dtype=xp.float64)
         if xp is not np:
             from cupyx.scipy.interpolate import CubicSpline
         else:
             from scipy.interpolate import CubicSpline
 
-        for ch in range(C):
+        first_idx = int(pilot_indices_np[0])
+        last_idx = int(pilot_indices_np[-1])
+        for ch in range(R):
             phi_ch = phi_pilots_u[ch]  # already float64
             cs = CubicSpline(pilot_indices_xp, phi_ch, bc_type="natural")
             # Evaluate the spline only within the pilot span; constant-hold outside.
-            first_idx = int(pilot_indices_np[0])
-            last_idx = int(pilot_indices_np[-1])
             phi_full[ch, first_idx : last_idx + 1] = cs(
                 all_positions[first_idx : last_idx + 1]
             )
@@ -163,12 +133,9 @@ def recover_carrier_phase_pilot_symbols(
                 phi_full[ch, :first_idx] = phi_ch[0]
             if last_idx < N - 1:
                 phi_full[ch, last_idx + 1 :] = phi_ch[-1]
-
-    else:
-        raise ValueError(
-            f"Unknown interpolation method: {interpolation!r}. "
-            "Choose 'linear' or 'cubic'."
-        )
+    if joint:
+        phi_full = xp.broadcast_to(phi_full, (C, N)).copy()
+        phi_pilots_u = xp.broadcast_to(phi_pilots_u, (C, P)).copy()
 
     _log_phase_summary(
         phi_full,
@@ -177,8 +144,9 @@ def recover_carrier_phase_pilot_symbols(
         "[P=%s pilots, C=%s]",
         (P, C),
     )
-
-    return restore_1d(was_1d, phi_full)
+    return _Phase(
+        phase=phi_full, pilot_indices=pilot_indices_np, pilot_phase=phi_pilots_u
+    )
 
 
 def _extract_pilot_phasor(
@@ -195,8 +163,7 @@ def _extract_pilot_phasor(
 ) -> tuple[ArrayType, np.ndarray, np.ndarray, np.ndarray, ArrayType | None, ArrayType]:
     """Isolate a CW pilot tone and return its carrier-stripped complex phasor.
 
-    Shared core of the pilot-tone CPR functions
-    (``recover_carrier_phase_pilot_tone``, ``recover_carrier_phase_pilot_tones``):
+    Shared core of the ``PilotTone`` and ``PilotTones`` estimators:
     refine the per-channel tone centre, extract it with a zero-phase spectral
     window (FFT -> window -> IFFT, sample-aligned), and strip the nominal carrier
     so a residual frequency offset survives as a slow phase ramp.
@@ -219,11 +186,11 @@ def _extract_pilot_phasor(
     X : (C, N) array, optional
         Precomputed ``xp.fft.fft(samples, axis=-1)`` in working precision.
         Pass it when extracting several tones from the same record so the
-        record is transformed once (``recover_carrier_phase_pilot_tones``).
+        record is transformed once (``PilotTones``).
     return_window : bool, default False
         Build and return the dense (C, N) extraction window ``W`` (diagnostics
         only); when ``False`` the ``W`` slot in the return tuple is ``None``.
-    (others) : see ``recover_carrier_phase_pilot_tone``.
+    (others) : see ``PilotTone``.
 
     Returns
     -------
@@ -338,124 +305,76 @@ def _extract_pilot_phasor(
     return phasor, f_centers, sig_power, noise_power, W, X
 
 
-def recover_carrier_phase_pilot_tone(
-    samples: ArrayType | Signal,
-    sampling_rate: float | None = None,
-    tone_frequency: float | None = None,
-    bandwidth: float | None = None,
-    search_band: float | None = None,
-    refine_tone: bool = True,
-    window: str | tuple = "tukey",
-    remove_frequency_offset: bool = True,
-    joint_channels: bool = False,
-) -> ArrayType:
+@dataclass(frozen=True)
+class PilotTone:
     r"""
-    Carrier phase recovery from a continuous-wave (CW) pilot tone.
+    Common carrier phase from a continuous-wave pilot tone.
 
-    Reads the common carrier phase straight off a pilot tone added at the
-    transmitter (see ``add_pilot_tone``).  Because
-    the tone shares the data's local oscillator and channel, its phase equals
-    the common phase theta[n] = 2*pi*delta_f*n/f_s + phi_PN[n]
-    + phi_0 - the carrier **frequency offset and phase noise jointly**.  No
-    symbol decisions are required, so there is no M-th-power noise enhancement
-    and the estimate tracks fast phase noise sample-by-sample.
+    The tone (see ``spectral.add_pilot_tone``) shares the data's oscillator
+    and channel, so its phase is the common phase
+    ``θ[n] = 2π·Δf·n/f_s + φ_PN[n] + φ_0``: frequency offset and phase noise
+    together, with no decisions and no M-th power noise enhancement.  It is
+    isolated with a zero-phase spectral window (FFT, window, IFFT), so the
+    phase is not delayed against the samples.
 
-    The tone is isolated with a **zero-phase** spectral window (FFT -> window ->
-    IFFT), so there is no group-delay misalignment between the recovered phase
-    and the samples.
-
-    Note: operates on the **oversampled waveform, before matched filtering and
-    decimation**.  The tone lives in a guard band that the matched filter would
-    otherwise remove.  Apply the returned phase to the same oversampled
-    ``samples`` with ``correct_carrier_phase``, then run matched filtering /
-    decimation and any residual 1-sps CPR.
+    Works on the oversampled waveform before matched filtering (the tone
+    sits in a guard band the matched filter removes).  Correct the same
+    samples, then matched-filter, decimate and run any residual 1-SPS CPR.
 
     Parameters
     ----------
-    samples : array_like or Signal
-        Oversampled complex samples (``sps > 1``). Shape: ``(N,)`` or
-        ``(C, N)``.  Same rate as used for ``add_pilot_tone``.
-    sampling_rate : float, optional
-        Sampling rate f_s in Hz.  Required for array input; ignored for
-        :class:`Signal` input, which always uses the signal's own
-        ``sampling_rate``.
-    tone_frequency : float
-        Nominal pilot-tone frequency f_p in Hz (as added at the TX).
-        The recovered phase is referenced to **this** carrier, so any carrier
-        frequency offset remains in the phase ramp when
-        ``remove_frequency_offset=False`` is *not* set (see below).
+    frequency : float
+        Nominal tone frequency f_p in Hz, in ``(-f_s/2, f_s/2)``.  The phase
+        is referenced to this carrier.
     bandwidth : float
-        Half-width B of the spectral extraction window in Hz - the
-        **tracking bandwidth**.  Must be wide enough to pass the phase-noise
-        sidebands (``B ≳ a few x linewidth``) yet narrow enough to reject the
-        data band (``B`` smaller than the tone-to-signal-edge guard).  See the
-        guide at the end of this docstring.
+        Half-width B of the extraction window in Hz, the tracking
+        bandwidth: above a few linewidths, below the tone-to-data guard.
     search_band : float, optional
-        Half-width in Hz of the peak-search window handed to
-        the ``BiasTone`` estimator when ``refine_tone=True``.
-        The actual tone peak is sought within
-        ``[f_p - search_band, f_p + search_band]``; this bounds how far
-        a frequency offset may have dragged the tone from nominal.  Defaults
-        to ``bandwidth``.  Enlarge it (independently of ``bandwidth``)
-        when the offset can exceed ``B`` but keep it inside the guard so the
-        data band never wins the argmax.
-    refine_tone : bool, default True
-        If ``True``, locate the actual per-channel tone frequency with
-        the ``BiasTone`` estimator and centre the extraction
-        window there.  Essential when a frequency offset may shift the tone by
-        more than ``B`` (otherwise the tone falls outside a window centred at
-        nominal).  If ``False``, the window is centred at ``tone_frequency``.
-    window : str or tuple, default 'tukey'
-        Spectral window applied over the passband |f - f_centre| <= B.
-        Any spec accepted by ``get_window`` (e.g. ``'tukey'``,
-        ``'boxcar'``, ``('gaussian', std)``).  Tukey (default) gives a flat top
-        with tapered edges for suppressed ringing.
+        Half-width in Hz of the peak search when ``refine=True``; defaults
+        to ``bandwidth``.  Keep it inside the guard so the data band never
+        wins the search.
+    refine : bool, default True
+        Centre the window on the measured per-channel tone peak (needed when
+        a frequency offset can move the tone by more than B).
+    window : str or tuple, default "tukey"
+        Window over the passband, any ``scipy.signal.get_window`` spec.
     remove_frequency_offset : bool, default True
-        If ``True`` (default), the recovered phase **retains** the linear ramp
-        from any residual carrier frequency offset, so applying it corrects
-        frequency offset and phase noise together.  If ``False``, the
-        least-squares linear trend is subtracted per channel, leaving only the
-        phase-noise fluctuation (use when the frequency offset is handled by a
-        separate stage).
+        Keep the linear phase ramp of a residual frequency offset in the
+        estimate, so that correcting removes offset and phase noise
+        together.  ``False`` subtracts the per-channel least-squares trend
+        and leaves only the phase-noise fluctuation.
     joint_channels : bool, default False
-        For MIMO inputs (C > 1): if ``True``, coherently sum the extracted
-        tone phasors across channels before taking the angle (shared-LO,
-        ~√C variance reduction).  The single trajectory is broadcast to all
-        rows.  No effect for SISO.
-
-    Returns
-    -------
-    array_like
-        Per-sample phase estimate theta_hat[n] in radians.  Shape
-        matches ``samples``; same backend.  Apply with
-        ``correct_carrier_phase``.
+        MIMO: sum the tone phasors across channels before the angle (shared
+        LO) and give every channel the one trajectory.
 
     Notes
     -----
-    Pipeline: FFT -> (optional) refine tone centre -> zero-phase window extraction
-    -> strip nominal carrier -> unwrap(angle) in float64.
-
-    ``bandwidth`` B trades phase-noise tracking bandwidth against tone SNR.
-    Lower bound: B ≳ 3-5 * linewidth (pass all phase-noise sidebands).
-    Upper bound: B below the guard between the tone and the signal band edge.
-    Place the tone at |f_p| > (1+beta)*R_s/2 + B and keep |f_p| + B < f_s/2.
+    Place the tone at ``|f_p| > (1+β)·R_s/2 + B`` and keep
+    ``|f_p| + B < f_s/2``; choose ``B ≳ 3-5 × linewidth``.
     """
-    signal_adapter = adapt_signal(
-        samples, function_name="recover_carrier_phase_pilot_tone()"
-    )
-    samples = signal_adapter.array
-    sampling_rate = signal_adapter.resolve_required("sampling_rate", sampling_rate)
-    if tone_frequency is None:
-        raise ValueError("recover_carrier_phase_pilot_tone() requires tone_frequency.")
-    if bandwidth is None:
-        raise ValueError("recover_carrier_phase_pilot_tone() requires bandwidth.")
-    if bandwidth <= 0.0:
-        raise ValueError(f"bandwidth must be > 0, got {bandwidth}.")
+
+    frequency: float
+    bandwidth: float
+    search_band: float | None = None
+    refine: bool = True
+    window: str | tuple = "tukey"
+    remove_frequency_offset: bool = True
+    joint_channels: bool = False
+
+    def __post_init__(self) -> None:
+        if not self.bandwidth > 0.0:
+            raise ValueError(f"bandwidth must be > 0, got {self.bandwidth}.")
+
+
+def _pilot_tone(samples: ArrayType, method: PilotTone, ctx: _Context) -> _Phase:
+    """Pilot-tone phase of ``(C, N)`` samples."""
+    sampling_rate = ctx.need_sampling_rate(method)
+    tone_frequency = method.frequency
+    bandwidth = method.bandwidth
     if not (-sampling_rate / 2.0 < tone_frequency < sampling_rate / 2.0):
-        raise ValueError(f"tone_frequency={tone_frequency} must lie in (-fs/2, fs/2).")
+        raise ValueError(f"tone frequency {tone_frequency} must lie in (-fs/2, fs/2).")
 
     samples, xp, _ = dispatch(samples)
-    samples, was_1d = as_2d(samples, name="samples")
     C, N = samples.shape
 
     df = sampling_rate / N
@@ -469,41 +388,39 @@ def recover_carrier_phase_pilot_tone(
         )
 
     # Isolate the tone and strip the nominal carrier (shared core).
-    phasor, f_centers, _, _, W, X = _extract_pilot_phasor(
+    phasor, f_centers, _, _, _, _ = _extract_pilot_phasor(
         samples,
         sampling_rate,
         tone_frequency,
         bandwidth,
         xp,
-        search_band=search_band,
-        refine_tone=refine_tone,
-        window=window,
-        return_window=False,
+        search_band=method.search_band,
+        refine_tone=method.refine,
+        window=method.window,
     )
 
-    # 5) Phase extraction + unwrap in float64.
-    if joint_channels and C > 1:
+    # Phase extraction + unwrap in float64.
+    joint = method.joint_channels and C > 1
+    if joint:
         z_joint = xp.sum(phasor, axis=0)  # (N,) coherent sum
         theta_joint = xp.unwrap(xp.angle(z_joint).astype(xp.float64))  # (N,)
         theta = xp.broadcast_to(theta_joint[None, :], (C, N)).copy()
     else:
         theta = xp.unwrap(xp.angle(phasor).astype(xp.float64), axis=-1)  # (C, N)
 
-    if not remove_frequency_offset:
+    if not method.remove_frequency_offset:
         # Subtract the per-channel least-squares linear trend (residual FOE),
         # preserving the mean phase; leaves only the phase-noise fluctuation.
         theta, _ = remove_linear_trend(theta)
 
-    mode_str = "joint" if (joint_channels and C > 1) else "independent"
     _log_phase_summary(
         theta,
         "CPR (pilot-tone, %s, %s)",
-        (window, mode_str),
+        (method.window, "joint" if joint else "independent"),
         "[f_p=%.3g Hz, B=%.3g Hz, refine=%s, remove_foe=%s, C=%s]",
-        (tone_frequency, bandwidth, refine_tone, remove_frequency_offset, C),
+        (tone_frequency, bandwidth, method.refine, method.remove_frequency_offset, C),
     )
-
-    return restore_1d(was_1d, theta)
+    return _Phase(phase=theta, tone_frequencies=np.asarray(f_centers))
 
 
 def _lowpass_fft(z: ArrayType, sampling_rate: float, cutoff: float, xp) -> ArrayType:
@@ -518,121 +435,89 @@ def _lowpass_fft(z: ArrayType, sampling_rate: float, cutoff: float, xp) -> Array
     return xp.fft.ifft(xp.fft.fft(z, axis=-1) * mask, axis=-1)
 
 
-def recover_carrier_phase_pilot_tones(
-    samples: ArrayType | Signal,
-    sampling_rate: float | None = None,
-    tone_frequencies: Sequence[float] | None = None,
-    bandwidth: float | None = None,
-    differential_bandwidth: float = 5e3,
-    search_band: float | None = None,
-    per_tone_channel: list | None = None,
-    snr_gate_db: float = 3.0,
-    coherence_gate: float = 0.3,
-    refine_tone: bool = True,
-    window: str | tuple = "tukey",
-    return_diagnostics: bool = False,
-):
+@dataclass(frozen=True)
+class PilotTones:
     r"""
-    Common carrier-phase recovery from two (or more) CW pilot tones via
-    SNR-weighted maximal-ratio combining with slow inter-tone tracking.
+    Common carrier phase from two or more pilot tones, combined by MRC.
 
-    For a shared-laser/shared-LO dual-pol link the carrier (beat) phase phi[n]
-    is common-mode across both polarizations, and every pilot rides the same
-    phi[n].  Combining K tones lowers the residual phase noise by up to sqrt(K)
-    over a single tone, directly reducing the excess noise it converts into
-    (xi_phi ~ V_A * Var(d_phi)).  The static inter-tone offset theta_k - theta_0
-    is constant back-to-back but drifts over fiber (SOP rotation acting on the
-    orthogonally-launched pilots), so it is tracked, not calibrated: the product
-    z_k * conj(z_0) cancels the common phi[n] exactly, leaving only the slow
-    differential, which a narrow low-pass isolates.
+    For a shared-laser dual-polarization link every pilot rides the same
+    common phase φ[n]; combining K tones lowers the residual phase noise by
+    up to √K over one tone.  The static inter-tone offset drifts over fiber
+    (SOP rotation), so it is tracked: ``z_k·conj(z_0)`` cancels φ[n] and a
+    narrow low-pass keeps the slow differential.  The combine is
 
-    The whole combine collapses to one expression,
+        z_comb[n] = Σ_k z_k[n]·conj(c_k[n]) / σ_k²,
+        c_k[n]    = LPF(z_k[n]·conj(z_0[n])),
 
-        z_comb[n] = sum_k  z_k[n] * conj(c_k[n]) / sigma_k^2,
-        c_k[n]    = LPF( z_k[n] * conj(z_0[n]) ),
+    where ``conj(c_k)`` carries the magnitude weight and the de-rotation and
+    ``σ_k²`` is the tone's noise power.  The reference is the strongest
+    tone; a tone below the SNR or coherence gate is dropped, so a deep fade
+    degrades gracefully to one tone.
 
-    where conj(c_k) carries both the magnitude weight |A_k||A_0| (so fades are
-    down-weighted per-sample) and the de-rotation exp(-j*delta_k); dividing by
-    the additive-noise power sigma_k^2 makes it true MRC.  A tone whose SNR or
-    differential coherence falls below the gates is dropped, so the combine
-    degrades gracefully to single-tone in a deep fade.
-
-    Operates on the oversampled waveform, before matched filtering, exactly like
-    ``recover_carrier_phase_pilot_tone``.  Best run *after* the polarization
-    demux (each pilot isolated on its own output, ``per_tone_channel=[0, 1]``);
-    pre-demux it falls back to a joint-across-channels sum per tone.
+    Like :class:`PilotTone`, works on the oversampled waveform before
+    matched filtering, best after polarization demultiplexing.
 
     Parameters
     ----------
-    samples : (N,) or (C, N) array, or Signal
-        Oversampled complex samples (``sps > 1``).
-    sampling_rate : float, optional
-        Sampling rate in Hz (of *these* samples - pass the post-resample rate if
-        the demux/resample ran first).  Required for array input; ignored for
-        :class:`Signal` input, which always uses the signal's own
-        ``sampling_rate``.
-    tone_frequencies : sequence of float
-        Nominal pilot-tone frequencies in Hz (length ``K``).
+    frequencies : sequence of float
+        Nominal tone frequencies in Hz (K values).
     bandwidth : float
-        Half-width of the per-tone extraction window in Hz (the common-phase
-        tracking bandwidth); see ``recover_carrier_phase_pilot_tone``.
+        Half-width of each tone's extraction window in Hz.
     differential_bandwidth : float, default 5e3
-        Low-pass cut-off in Hz for the slow inter-tone differential delta_k[n].
-        Choose above the SOP drift rate (so delta is not lagged) and far below
-        the phase-noise band (kHz-scale is typical).  Set it from the knee of the
-        ``angle(z_k·conj(z_0))`` spectrum.
+        Low-pass cut-off in Hz for the inter-tone differential: above the
+        SOP drift rate, far below the phase-noise band.
     search_band : float, optional
-        Peak-search half-width handed to the ``BiasTone`` estimator; defaults to
-        ``bandwidth``.
-    per_tone_channel : list of int, optional
-        Channel each tone is read from (post-demux isolation, e.g. ``[0, 1]``).
-        If ``None``, each tone's phasor is the coherent sum across all channels
-        (pre-demux joint combine).
+        Peak-search half-width in Hz; defaults to ``bandwidth``.
+    per_tone_channel : sequence of int, optional
+        Channel each tone is read from after demultiplexing (e.g.
+        ``(0, 1)``).  ``None`` sums each tone across channels.
     snr_gate_db : float, default 3.0
-        A non-reference tone is dropped if its in-band SNR is below this.
+        A non-reference tone below this in-band SNR is dropped.
     coherence_gate : float, default 0.3
-        A non-reference tone is dropped if its differential coherence
-        ``mean|c_k| / sqrt(S_k·S_ref)`` is below this (deep fade / lost lock).
-    refine_tone, window : see ``recover_carrier_phase_pilot_tone``.
-    return_diagnostics : bool, default False
-        If ``True``, also return a dict with ``delta`` (per-tone delta_k[n]),
-        ``snr_db``, ``ref`` (reference-tone index) and ``used`` (combined tone
-        indices).
-
-    Returns
-    -------
-    array_like
-        Per-sample common phase estimate phi_hat[n], shape matching ``samples``
-        (one track broadcast to all rows).  Apply with
-        ``correct_carrier_phase``.  If ``return_diagnostics``, returns
-        ``(phi, diagnostics)``.
+        A non-reference tone whose differential coherence
+        ``mean|c_k| / √(S_k·S_ref)`` is below this is dropped.
+    refine, window
+        As for :class:`PilotTone`.
     """
-    signal_adapter = adapt_signal(
-        samples, function_name="recover_carrier_phase_pilot_tones()"
-    )
-    samples = signal_adapter.array
-    sampling_rate = signal_adapter.resolve_required("sampling_rate", sampling_rate)
-    if bandwidth is None:
-        raise ValueError("recover_carrier_phase_pilot_tones() requires bandwidth.")
-    if bandwidth <= 0.0:
-        raise ValueError(f"bandwidth must be > 0, got {bandwidth}.")
-    if tone_frequencies is None:
-        raise ValueError(
-            "recover_carrier_phase_pilot_tones() requires tone_frequencies."
-        )
-    tone_frequencies = list(tone_frequencies)
+
+    frequencies: tuple[float, ...]
+    bandwidth: float
+    differential_bandwidth: float = 5e3
+    search_band: float | None = None
+    per_tone_channel: tuple[int, ...] | None = None
+    snr_gate_db: float = 3.0
+    coherence_gate: float = 0.3
+    refine: bool = True
+    window: str | tuple = "tukey"
+
+    def __post_init__(self) -> None:
+        frequencies = tuple(float(f) for f in self.frequencies)
+        object.__setattr__(self, "frequencies", frequencies)
+        if len(frequencies) < 1:
+            raise ValueError("frequencies must contain at least one frequency.")
+        if not self.bandwidth > 0.0:
+            raise ValueError(f"bandwidth must be > 0, got {self.bandwidth}.")
+        if self.per_tone_channel is not None:
+            channels = tuple(int(c) for c in self.per_tone_channel)
+            object.__setattr__(self, "per_tone_channel", channels)
+            if len(channels) != len(frequencies):
+                raise ValueError(
+                    "per_tone_channel must have one entry per tone (len "
+                    f"{len(frequencies)}), got {len(channels)}."
+                )
+
+
+def _pilot_tones(samples: ArrayType, method: PilotTones, ctx: _Context) -> _Phase:
+    """MRC pilot-tones phase of ``(C, N)`` samples."""
+    sampling_rate = ctx.need_sampling_rate(method)
+    tone_frequencies = list(method.frequencies)
+    bandwidth = method.bandwidth
+    differential_bandwidth = method.differential_bandwidth
+    per_tone_channel = method.per_tone_channel
     K = len(tone_frequencies)
-    if K < 1:
-        raise ValueError("tone_frequencies must contain at least one frequency.")
 
     samples, xp, _ = dispatch(samples)
-    samples, was_1d = as_2d(samples, name="samples")
     C, N = samples.shape
-    if per_tone_channel is not None and len(per_tone_channel) != K:
-        raise ValueError(
-            f"per_tone_channel must have one entry per tone (len {K}), "
-            f"got {len(per_tone_channel)}."
-        )
 
     # 1) Extract each tone's scalar phasor stream z_k(n) and its (S_k, σ_k²).
     # One shared working-precision FFT of the record serves every tone's
@@ -652,9 +537,9 @@ def recover_carrier_phase_pilot_tones(
             f_k,
             bandwidth,
             xp,
-            search_band=search_band,
-            refine_tone=refine_tone,
-            window=window,
+            search_band=method.search_band,
+            refine_tone=method.refine,
+            window=method.window,
             X=X,
         )
         if per_tone_channel is None:
@@ -672,11 +557,10 @@ def recover_carrier_phase_pilot_tones(
     snr = np.array([s / nz for s, nz in zip(sig, noise)], dtype=np.float64)
     ref = int(np.argmax(snr))
     z_ref = z_tones[ref]
-    snr_gate = 10.0 ** (snr_gate_db / 10.0)
+    snr_gate = 10.0 ** (method.snr_gate_db / 10.0)
 
     z_comb = xp.zeros(N, dtype=z_ref.dtype)
-    delta_diag, used = [], []
-    want_diag = return_diagnostics  # per-tone δ_k are only kept on request
+    delta, used = [], []
     for k in range(K):
         if k == ref:
             # Self-product: LPF(|z|²) ≈ |A|² + σ²; subtract the floor so the
@@ -699,24 +583,20 @@ def recover_carrier_phase_pilot_tones(
                 xp,
             )
             coh = float(xp.mean(xp.abs(c_k))) / np.sqrt(max(sig[k] * sig[ref], 1e-30))
-            if snr[k] < snr_gate or coh < coherence_gate:
+            if snr[k] < snr_gate or coh < method.coherence_gate:
                 logger.info(
                     "CPR (pilot-tones): tone %s dropped (SNR=%.1f dB, coherence=%.2f).",
                     k,
                     10 * np.log10(snr[k]),
                     coh,
                 )
-                if want_diag:
-                    delta_diag.append(
-                        to_device(xp.angle(c_k).astype(xp.float64), "cpu")
-                    )
+                delta.append(xp.angle(c_k).astype(xp.float64))
                 continue
         contrib = z_tones[k] * xp.conj(c_k)
         contrib /= noise[k]
         z_comb += contrib
         used.append(k)
-        if want_diag:
-            delta_diag.append(to_device(xp.angle(c_k).astype(xp.float64), "cpu"))
+        delta.append(xp.angle(c_k).astype(xp.float64))
 
     # 3) Common phase = angle of the combined phasor, unwrapped in float64.
     phi = xp.unwrap(xp.angle(z_comb).astype(xp.float64))  # (N,)
@@ -738,14 +618,11 @@ def recover_carrier_phase_pilot_tones(
             C,
         )
 
-    phi_out = restore_1d(was_1d, phi_full)
-    if return_diagnostics:
-        diagnostics = {
-            "delta": delta_diag,
-            "snr_db": 10.0 * np.log10(snr),
-            "ref": ref,
-            "used": used,
-            "f_centers": [np.asarray(fc) for fc in f_centers],
-        }
-        return phi_out, diagnostics
-    return phi_out
+    return _Phase(
+        phase=phi_full,
+        tone_frequencies=np.stack([np.asarray(fc) for fc in f_centers], axis=-1),
+        tone_snr_db=10.0 * np.log10(snr),
+        differential_phase=xp.stack(delta),
+        reference_tone=ref,
+        used_tones=tuple(used),
+    )

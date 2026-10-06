@@ -217,7 +217,7 @@ def add_pilot_tone(
     Superimposes a * exp(j*(2*pi*f_p*n/f_s + phi_0)) on the oversampled samples.
     The tone acquires the same carrier frequency offset and phase noise as the
     data; at the receiver its phase directly recovers both - see
-    ``recover_carrier_phase_pilot_tone``.
+    ``recovery.PilotTone``.
 
     Apply to a pulse-shaped oversampled waveform before channel impairments.
     Place the tone in a guard band: (1+beta)/2 * R_s < |f_p| < f_s/2.

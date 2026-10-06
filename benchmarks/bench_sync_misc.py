@@ -3,6 +3,7 @@
 from workloads import bps_workload, rotated_symbols_workload
 
 from commkit import recovery
+from commkit.mapping import Constellation
 from commkit.metrics import evm
 
 ROUNDS = dict(rounds=3, warmup_rounds=1, iterations=1)
@@ -13,9 +14,11 @@ def bench_viterbi_viterbi_cs(benchmark, backend_device, xp, sync):
     x = xp.asarray(bps_workload(order=4, n_sym=N_SYM, num_ch=2, linewidth_hz=1e4))
 
     def run():
-        out = recovery.recover_carrier_phase_viterbi_viterbi(
-            x, "qam", 4, block_size=64, cycle_slip_correction=True
-        )
+        out = recovery.estimate_carrier_phase(
+            x,
+            recovery.ViterbiViterbi(block_size=64, cycle_slip=recovery.CycleSlip()),
+            constellation=Constellation.qam(4),
+        ).value
         sync()
         return out
 
