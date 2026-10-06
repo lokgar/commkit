@@ -135,11 +135,9 @@ class EqualizerResult:
 def _log_equalizer_exit(
     result: EqualizerResult,
     name: str,
-    debug_plot: bool = False,
     check_convergence: bool = False,
-    plot_smoothing: int = 50,
 ) -> EqualizerResult:
-    """Log exit MSE and optionally show a debug plot for an EqualizerResult."""
+    """Log the exit MSE of an EqualizerResult (INFO level)."""
     if result.error is not None:
         n_sym = result.error.shape[-1]  # time axis; (N_sym,) or (C, N_sym)
         _want_log = logger.isEnabledFor(logging.INFO)
@@ -188,11 +186,6 @@ def _log_equalizer_exit(
                         mse_db,
                         10.0 * np.log10(mse_init + 1e-30),
                     )
-
-    if debug_plot:
-        from .. import plotting as _plotting  # lazy import avoids circular dep
-
-        _plotting.plot_equalizer_result(result, smoothing=plot_smoothing)
 
     return result
 

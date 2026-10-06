@@ -466,7 +466,7 @@ sites. The order avoids conflicts, because 1.4-1.6 all edit
   - Subpackages are loaded lazily through module `__getattr__`.
   - Process-level tests (§5.4) are added. The commit quotes `bench_import`
     before and after.
-- [ ] **1.4 `refactor!: remove debug_plot`.**
+- [x] **1.4 `refactor!: remove debug_plot`.**
   - Covers all 20 modules and the 4 test files that use it.
   - For each plot that needed internal data, check that a public compute
     function provides it (for example timing correlation, the FOE spectrum);
@@ -583,8 +583,8 @@ The equalization pass (3.7) gets more commits:
 | 3.2 | `mapping` | gray, bits, llr, shaping all take `Constellation` | M |
 | 3.3 | `filtering`, `multirate`, `spectral`, `smoothing` | Pulses (add a definition-level check that the Gaussian `duty_cycle` equals the FWHM); overlap-save into private `_overlap_save.py`; `resolve_symbols` becomes plain decimation to a 1-SPS Signal. Chromatic dispersion moves into private `_dispersion.py`, which owns the D/wavelength/length to beta2·L conversion, the frequency grid, and both forward and inverse transfer functions, with an explicit sign. It gets independent sign and unit tests, because a round trip alone hides errors shared by both directions. | M |
 | 3.4 | `impairments` | `rng`; uses `_dispersion.py` | S |
-| 3.5 | `timing`, `frequency` | `cross_correlate_fft`, peak interpolation and `zc_mimo_root` move here; timing correction slices `reference` | M |
-| 3.6 | `recovery` | `PLL` / `BPS` / `CycleSlip` objects; PLL gain resolution moves into `recovery/_common.py`. Decide two oracle findings (commit 0.6): the PLL's square-QAM slicer builds decisions from float32 grid constants inside its float64 loop (up to about 3e-7 rad deviation; make it float64 or document it), and joint Viterbi-Viterbi weights channels by amplitude^M because, unlike BPS and the PLL, it does not power-normalize (document it, or normalize like the others) | M |
+| 3.5 | `timing`, `frequency` | `cross_correlate_fft`, peak interpolation and `zc_mimo_root` move here; timing correction slices `reference`. Give the orphaned diagnostic plots (commit 1.4) a public data source: `plot_timing_correlation`, `plot_frequency_offset_spectrum`, `plot_mm_autocorrelation`, `plot_frequency_offset_blockwise_result` and the FOE `plot_pilot_phase_estimate` draw data that only exists inside the estimator, so return it in the estimator's result dataclass (§2.6) | M |
+| 3.6 | `recovery` | `PLL` / `BPS` / `CycleSlip` objects; PLL gain resolution moves into `recovery/_common.py`. Decide two oracle findings (commit 0.6): the PLL's square-QAM slicer builds decisions from float32 grid constants inside its float64 loop (up to about 3e-7 rad deviation; make it float64 or document it), and joint Viterbi-Viterbi weights channels by amplitude^M because, unlike BPS and the PLL, it does not power-normalize (document it, or normalize like the others). Give the orphaned pilot plots (commit 1.4: `plot_pilot_phase_estimate`, `plot_pilot_tone_phase_estimate`, `plot_pilot_tones_phase_estimate`) a public data source the same way; CPR block phases (`plot_carrier_phase_trajectory`'s optional inputs) likewise | M |
 | 3.7 | `equalization` | API plus the internal decomposition (old Phase 3), done once: validate, then `_prepare()`, then Numba or NumPy/CuPy runner, then `_assemble_result()`. Adds `state=`, `cpr=` and `result.signal`. Includes chunked-versus-uninterrupted equivalence tests for `state=`. See the equalizer safety rules below. | L |
 | 3.8 | `metrics` | Host return values, raise on empty input, `reference`-based Signal path, payload extraction (`extract_payload(sig)` using `frame`), a units and scaling table. See the metrics contract below. | M |
 | 3.9 | `analysis` | Typed result dataclasses instead of dicts; trend fitting lives here | S |

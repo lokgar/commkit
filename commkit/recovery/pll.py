@@ -246,7 +246,6 @@ def recover_carrier_phase_pll(
     cycle_slip_correction: bool = False,
     cycle_slip_history: int = 100,
     cycle_slip_threshold: float = np.pi / 4,
-    debug_plot: bool = False,
 ) -> ArrayType:
     r"""
     Carrier phase recovery via a Decision-Directed Phase-Locked Loop (DD-PLL).
@@ -465,22 +464,12 @@ def recover_carrier_phase_pll(
     if xp is not np:
         phi_full = xp.asarray(phi_full)
 
-    phi_full_np = _log_phase_summary(
+    _log_phase_summary(
         phi_full,
         "CPR (DD-PLL, %s)",
         (loop_desc,),
         "[C=%s]",
         (C,),
-        debug_plot=debug_plot,
     )
-
-    if debug_plot:
-        from .. import plotting as _plotting
-
-        _plotting.plot_carrier_phase_trajectory(
-            phi_full=phi_full_np,
-            show=True,
-            title=f"CPR - DD-PLL ({loop_desc})",
-        )
 
     return restore_1d(was_1d, phi_full)

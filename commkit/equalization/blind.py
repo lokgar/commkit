@@ -39,8 +39,6 @@ def block_cma(
     samples_prefix: ArrayType | None = None,
     pad_mode: str = "zeros",
     cuda_graph: bool = True,
-    debug_plot: bool = False,
-    plot_smoothing: int = 50,
 ) -> EqualizerResult:
     """Blind frequency-domain CMA equalizer (overlap-save FDAF).
 
@@ -103,8 +101,6 @@ def block_cma(
         pilot_gain_db=pilot_gain_db,
         c_ps=c_ps,
         cuda_graph=cuda_graph,
-        debug_plot=debug_plot,
-        plot_smoothing=plot_smoothing,
         name="Block-CMA" if pilot_ref is None else "Block-CMA(PA)",
     )
     if signal_adapter.signal is not None:
@@ -132,8 +128,6 @@ def block_rde(
     samples_prefix: ArrayType | None = None,
     pad_mode: str = "zeros",
     cuda_graph: bool = True,
-    debug_plot: bool = False,
-    plot_smoothing: int = 50,
 ) -> EqualizerResult:
     """Blind frequency-domain radius-directed equalizer (overlap-save FDAF).
 
@@ -188,8 +182,6 @@ def block_rde(
         pilot_gain_db=pilot_gain_db,
         c_ps=c_ps,
         cuda_graph=cuda_graph,
-        debug_plot=debug_plot,
-        plot_smoothing=plot_smoothing,
         name="Block-RDE" if pilot_ref is None else "Block-RDE(PA)",
     )
     if signal_adapter.signal is not None:

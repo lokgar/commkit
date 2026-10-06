@@ -50,8 +50,6 @@ def block_lms(
     cpr_cycle_slip_correction: bool = False,
     cpr_cycle_slip_history: int = 100,
     cpr_cycle_slip_threshold: float = np.pi / 4,
-    debug_plot: bool = False,
-    plot_smoothing: int = 50,
     cpr_state: CPRState | None = None,
     input_norm_factor: float | np.ndarray | None = None,
     samples_prefix: ArrayType | None = None,
@@ -228,10 +226,6 @@ def block_lms(
         cycle slip is declared.  Set to half the constellation's angular
         symmetry quantum (``π/4`` for QPSK/QAM).  Ignored when
         ``cpr_cycle_slip_correction=False``.
-    debug_plot : bool, default False
-        Show a convergence + phase diagnostic plot on exit.
-    plot_smoothing : int, default 50
-        Moving-average window for the MSE curve in the debug plot.
     cpr_state : CPRState, optional
         Warm-start BPS CPR state from a previous ``block_lms()`` call.
         When provided, the BPS 4-fold unwrap accumulators (``bps_prev4``,
@@ -1132,8 +1126,6 @@ def block_lms(
         _log_equalizer_exit(
             result,
             name="Block-LMS",
-            debug_plot=debug_plot,
-            plot_smoothing=plot_smoothing,
         ),
         sig,
     )

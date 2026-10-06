@@ -6,8 +6,6 @@ is checked against analytic ground truth. Inputs are built on the active
 backend via the ``xp`` fixture.
 """
 
-from unittest.mock import patch
-
 import numpy as np
 import pytest
 
@@ -232,16 +230,29 @@ class TestDSHLinewidthEstimator:
         with pytest.raises(ValueError, match="Unknown method"):
             analysis.linewidth_dsh(z, FS, 100 / FS, method="nope")
 
-    def test_linewidth_dsh_debug_plots(self, xp):
-        """debug_plot paths render (and close) without error for every method."""
+    def test_linewidth_dsh_results_plot_directly(self, xp):
+        """Every method returns the data its diagnostic plot needs."""
+        from commkit import plotting
+
         n, m = 1 << 16, 200
         z, _ = make_dsh_beat(2e6, n, m, 80e6, snr_db=25, seed=12)
         z = xp.asarray(z)
-        with patch("matplotlib.pyplot.show"):
-            for method in ("fm_psd", "increment", "lorentzian"):
-                analysis.linewidth_dsh(z, FS, m / FS, method=method, debug_plot=True)
-            dp, _ = analysis.dsh_phase(z, FS, f_shift=80e6)
-            analysis.dsh_fm_noise_psd(dp, FS, m / FS, debug_plot=True)
+        fm = analysis.linewidth_dsh(z, FS, m / FS, method="fm_psd")
+        plotting.plot_frequency_noise_psd(
+            fm["f"], fm["S_f"], floor=fm["linewidth"], band=fm["band"], used=fm["used"]
+        )
+        inc = analysis.linewidth_dsh(z, FS, m / FS, method="increment")
+        plotting.plot_increment_variance(
+            inc["lag_s"], inc["var"], slope=inc["slope"], intercept=inc["intercept"]
+        )
+        lor = analysis.linewidth_dsh(z, FS, m / FS, method="lorentzian")
+        plotting.plot_dsh_beat_psd(
+            lor["f"],
+            lor["psd"],
+            f_peak=lor["f_peak"],
+            linewidth=lor["linewidth"],
+            linewidth_3db=lor["linewidth_3db"],
+        )
 
 
 class TestSignalInputInterferometry:

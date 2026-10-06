@@ -27,7 +27,6 @@ def recover_carrier_phase_pilot_symbols(
     cycle_slip_correction: bool = False,
     cycle_slip_history: int = 100,
     cycle_slip_threshold: float = np.pi / 4,
-    debug_plot: bool = False,
 ) -> ArrayType:
     """
     Carrier phase recovery using known pilot symbols.
@@ -70,9 +69,6 @@ def recover_carrier_phase_pilot_symbols(
         ``history_length`` passed to ``correct_cycle_slips``.
     cycle_slip_threshold : float, default π/4
         ``threshold`` passed to ``correct_cycle_slips`` (radians).
-    debug_plot : bool, default False
-        If ``True``, opens a diagnostic figure showing the unwrapped pilot
-        phase sequence and the interpolated phase trajectory.
 
     Returns
     -------
@@ -178,26 +174,13 @@ def recover_carrier_phase_pilot_symbols(
             "Choose 'linear' or 'cubic'."
         )
 
-    phi_full_np = _log_phase_summary(
+    _log_phase_summary(
         phi_full,
         "CPR (pilot-aided, %s)",
         (interpolation,),
         "[P=%s pilots, C=%s]",
         (P, C),
-        debug_plot=debug_plot,
     )
-
-    if debug_plot:
-        from .. import plotting as _plotting
-
-        phi_pilots_u_np = to_device(phi_pilots_u, "cpu")
-        _plotting.plot_pilot_phase_estimate(
-            pilot_indices=pilot_indices_np,
-            phi_pilots_u=phi_pilots_u_np,
-            phi_full=phi_full_np,
-            show=True,
-            title="CPR - Pilot-Aided Phase",
-        )
 
     return restore_1d(was_1d, phi_full)
 
@@ -367,7 +350,6 @@ def recover_carrier_phase_pilot_tone(
     window: str | tuple = "tukey",
     remove_frequency_offset: bool = True,
     joint_channels: bool = False,
-    debug_plot: bool = False,
 ) -> ArrayType:
     r"""
     Carrier phase recovery from a continuous-wave (CW) pilot tone.
@@ -442,10 +424,6 @@ def recover_carrier_phase_pilot_tone(
         tone phasors across channels before taking the angle (shared-LO,
         ~√C variance reduction).  The single trajectory is broadcast to all
         rows.  No effect for SISO.
-    debug_plot : bool, default False
-        If ``True``, open the dedicated diagnostic figure
-        (``pilot_tone_phase_estimate``): the tone
-        spectrum with the extraction window overlaid, and the recovered phase.
 
     Returns
     -------
@@ -502,7 +480,7 @@ def recover_carrier_phase_pilot_tone(
         search_band=search_band,
         refine_tone=refine_tone,
         window=window,
-        return_window=debug_plot,
+        return_window=False,
     )
 
     # 5) Phase extraction + unwrap in float64.
@@ -519,28 +497,13 @@ def recover_carrier_phase_pilot_tone(
         theta, _ = remove_linear_trend(theta)
 
     mode_str = "joint" if (joint_channels and C > 1) else "independent"
-    theta_np = _log_phase_summary(
+    _log_phase_summary(
         theta,
         "CPR (pilot-tone, %s, %s)",
         (window, mode_str),
         "[f_p=%.3g Hz, B=%.3g Hz, refine=%s, remove_foe=%s, C=%s]",
         (tone_frequency, bandwidth, refine_tone, remove_frequency_offset, C),
-        debug_plot=debug_plot,
     )
-
-    if debug_plot:
-        from .. import plotting as _plotting
-
-        _plotting.plot_pilot_tone_phase_estimate(
-            freqs=np.fft.fftfreq(N, d=1.0 / sampling_rate),
-            mag_spectrum=to_device(xp.abs(X), "cpu"),
-            window=to_device(W, "cpu"),
-            f_tones=f_centers,
-            theta=theta_np,
-            tone_frequency=float(tone_frequency),
-            bandwidth=float(bandwidth),
-            show=True,
-        )
 
     return restore_1d(was_1d, theta)
 
@@ -570,7 +533,6 @@ def recover_carrier_phase_pilot_tones(
     refine_tone: bool = True,
     window: str | tuple = "tukey",
     return_diagnostics: bool = False,
-    debug_plot: bool = False,
 ):
     r"""
     Common carrier-phase recovery from two (or more) CW pilot tones via
@@ -638,8 +600,6 @@ def recover_carrier_phase_pilot_tones(
         If ``True``, also return a dict with ``delta`` (per-tone delta_k[n]),
         ``snr_db``, ``ref`` (reference-tone index) and ``used`` (combined tone
         indices).
-    debug_plot : bool, default False
-        If ``True``, plot the per-tone differential phase and the combined track.
 
     Returns
     -------
@@ -718,7 +678,7 @@ def recover_carrier_phase_pilot_tones(
 
     z_comb = xp.zeros(N, dtype=z_ref.dtype)
     delta_diag, used = [], []
-    want_diag = return_diagnostics or debug_plot  # per-tone δ_k needed either way
+    want_diag = return_diagnostics  # per-tone δ_k are only kept on request
     for k in range(K):
         if k == ref:
             # Self-product: LPF(|z|²) ≈ |A|² + σ²; subtract the floor so the
@@ -764,12 +724,10 @@ def recover_carrier_phase_pilot_tones(
     phi = xp.unwrap(xp.angle(z_comb).astype(xp.float64))  # (N,)
     phi_full = xp.broadcast_to(phi[None, :], (C, N)).copy()
 
-    # Host copy of phi is needed only for the INFO summary and the optional
-    # debug plot; skip the transfer otherwise (phi_full drives the correction).
-    _want_log = logger.isEnabledFor(logging.INFO)
-    if _want_log or debug_plot:
+    # Host copy of phi is needed only for the INFO summary; skip the transfer
+    # otherwise (phi_full drives the correction).
+    if logger.isEnabledFor(logging.INFO):
         phi_np = to_device(phi, "cpu")
-    if _want_log:
         logger.info(
             "CPR (pilot-tones, MRC): phase std=%.2f°, [K=%s, used=%s, "
             "ref=%s, B=%.3g Hz, diff_B=%.3g Hz, C=%s]",
@@ -780,17 +738,6 @@ def recover_carrier_phase_pilot_tones(
             bandwidth,
             differential_bandwidth,
             C,
-        )
-
-    if debug_plot:
-        from .. import plotting as _plotting
-
-        _plotting.plot_pilot_tones_phase_estimate(
-            delta=delta_diag,
-            phi=phi_np,
-            ref=ref,
-            used=used,
-            show=True,
         )
 
     phi_out = restore_1d(was_1d, phi_full)

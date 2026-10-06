@@ -462,9 +462,7 @@ class TestLogPhaseSummary:
 
         phi = xp.full(4, np.pi / 2)  # constant -> mean=90 deg, std=0 deg
         with caplog.at_level(logging.INFO, logger="commkit"):
-            _log_phase_summary(
-                phi, "CPR (test, %s)", ("alg",), "[C=%s]", (1,), debug_plot=False
-            )
+            _log_phase_summary(phi, "CPR (test, %s)", ("alg",), "[C=%s]", (1,))
         assert len(caplog.records) == 1
         msg = caplog.records[0].message
         assert "CPR (test, alg)" in msg
@@ -472,34 +470,21 @@ class TestLogPhaseSummary:
         assert "mean=90.00" in msg
         assert "std=0.00" in msg
 
-    def test_no_op_when_info_disabled_and_no_debug_plot(self, xp, caplog):
-        """No log line and no host transfer signal (returns None) when INFO is off."""
+    def test_no_op_when_info_disabled(self, xp, caplog):
+        """No log line and no host transfer when INFO is off."""
         import logging
+        from unittest.mock import patch
 
-        from commkit.recovery.corrections import _log_phase_summary
+        from commkit.recovery import corrections
 
         phi = xp.asarray([0.0, 1.0, 2.0])
-        with caplog.at_level(logging.WARNING, logger="commkit"):
-            result = _log_phase_summary(
-                phi, "CPR (test)", (), "[]", (), debug_plot=False
-            )
+        with (
+            caplog.at_level(logging.WARNING, logger="commkit"),
+            patch.object(corrections, "to_device") as transfer,
+        ):
+            corrections._log_phase_summary(phi, "CPR (test)", (), "[]", ())
         assert len(caplog.records) == 0
-        assert result is None
-
-    def test_returns_host_array_when_debug_plot_even_if_info_disabled(self, xp, caplog):
-        """debug_plot=True forces the host transfer even without INFO logging."""
-        import logging
-
-        from commkit.recovery.corrections import _log_phase_summary
-
-        phi = xp.asarray([0.0, 1.0, 2.0])
-        with caplog.at_level(logging.WARNING, logger="commkit"):
-            result = _log_phase_summary(
-                phi, "CPR (test)", (), "[]", (), debug_plot=True
-            )
-        assert len(caplog.records) == 0  # still no log line - INFO is off
-        assert result is not None
-        np.testing.assert_array_equal(np.asarray(result), np.asarray([0.0, 1.0, 2.0]))
+        transfer.assert_not_called()
 
 
 class TestVvBlockPhase:

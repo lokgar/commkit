@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import numpy as np
 
-from ..backend import ArrayType, dispatch, to_device
+from ..backend import ArrayType, dispatch
 from ..core._signal_adapter import adapt_signal, require_integer_sps
 from ..core.signal import Signal
 from ..filtering import _ols_backward, _ols_forward
@@ -21,7 +21,6 @@ def zf_equalizer(
     samples: ArrayType | Signal,
     channel_estimate: ArrayType,
     noise_variance: float = 0.0,
-    debug_plot: bool = False,
 ) -> ArrayType | Signal:
     """
     Zero-Forcing / MMSE frequency-domain block equalizer.
@@ -123,15 +122,6 @@ def zf_equalizer(
 
     # --- Shared OLS backward pass: batch IFFT -> symmetric discard -> reshape ---
     out = _ols_backward(X_hat_f, meta)
-
-    if debug_plot:
-        from .. import plotting as _plotting  # lazy import avoids circular dep
-
-        _plotting.plot_zf_equalizer_response(
-            channel_estimate=to_device(channel_estimate, "cpu"),
-            noise_variance=noise_variance,
-            show=True,
-        )
 
     return signal_adapter.wrap_samples(restore_1d(was_1d, out))
 

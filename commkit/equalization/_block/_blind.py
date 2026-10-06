@@ -89,8 +89,6 @@ def _block_fdaf_blind(
     pilot_gain_db,
     c_ps,
     cuda_graph,
-    debug_plot,
-    plot_smoothing,
     name,
 ):
     """Shared overlap-save FDAF engine for ``block_cma``/``block_rde``.
@@ -365,7 +363,5 @@ def _block_fdaf_blind(
     return _log_equalizer_exit(
         result,
         name=name,
-        debug_plot=debug_plot,
         check_convergence=True,
-        plot_smoothing=plot_smoothing,
     )

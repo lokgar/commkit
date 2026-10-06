@@ -1,6 +1,6 @@
 """Tests for timing synchronization (Barker and Zadoff-Chu sequences, frame detection)."""
 
-from unittest.mock import MagicMock, patch
+from unittest.mock import patch
 
 import numpy as np
 import pytest
@@ -201,20 +201,6 @@ class TestEstimateTiming:
         assert len(integer) == 1
         assert len(frac) == 1
         assert abs(float(frac[0])) < 0.5
-
-    def test_estimate_timing_debug_plot(self, xp):
-        """Trigger the debug plot code path in estimate_timing."""
-        preamble = xp.random.randn(10) + 1j * xp.random.randn(10)
-        sig = xp.concatenate([xp.zeros(20), preamble, xp.zeros(20)])
-
-        with patch("matplotlib.pyplot.show"):
-            mock_ax = MagicMock()
-            mock_fig = MagicMock()
-            with patch(
-                "matplotlib.pyplot.subplots",
-                return_value=(mock_fig, [[mock_ax, mock_ax]]),
-            ):
-                timing.estimate_timing(sig, preamble, debug_plot=True)
 
     def test_estimate_timing_zero_energy(self, xp):
         """Test estimate_timing with zero energy signal."""

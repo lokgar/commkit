@@ -14,7 +14,6 @@ def allan_deviation(
     *,
     taus: np.ndarray | None = None,
     n_taus: int = 30,
-    debug_plot: bool = False,
 ) -> dict[str, np.ndarray]:
     r"""Overlapping Allan deviation of an instantaneous-frequency series.
 
@@ -35,9 +34,6 @@ def allan_deviation(
         geometrically spaced from ``τ_0`` to ``N//4·τ_0``.
     n_taus : int, default 30
         Number of log-spaced averaging times when ``taus`` is None.
-    debug_plot : bool, default False
-        If True, plot the Allan deviation
-        (``allan_deviation``).
 
     Returns
     -------
@@ -99,10 +95,5 @@ def allan_deviation(
     tau_s_cpu = np.asarray(tau_s, dtype=np.float64)
     adev_cpu = to_device(adev, "cpu")
     adev_out = restore_1d(was_1d, adev_cpu)
-
-    if debug_plot:
-        from .. import plotting as _plotting
-
-        _plotting.plot_allan_deviation(tau_s_cpu, adev_out, show=True)
 
     return {"tau_s": tau_s_cpu, "adev": adev_out}

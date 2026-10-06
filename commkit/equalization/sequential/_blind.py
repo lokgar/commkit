@@ -57,8 +57,6 @@ def cma(
     pilot_mask: np.ndarray | None = None,
     pilot_gain_db: float = 0.0,
     pmf: Any | None = None,
-    debug_plot: bool = False,
-    plot_smoothing: int = 50,
     input_norm_factor: float | np.ndarray | None = None,
     samples_prefix: ArrayType | None = None,
     pad_mode: str = "zeros",
@@ -356,8 +354,6 @@ def cma(
                 xp=xp,
                 eq_norm=eq_norm,
                 name="CMA(block)" if not use_pilots else "CMA(PA,block)",
-                debug_plot=debug_plot,
-                plot_smoothing=plot_smoothing,
                 check_convergence=True,
                 r2=r2,
                 pref_np=pref_np,
@@ -445,9 +441,7 @@ def cma(
                     input_norm_factor=eq_norm,
                 ),
                 name="CMA" if not use_pilots else "CMA(PA)",
-                debug_plot=debug_plot,
                 check_convergence=True,
-                plot_smoothing=plot_smoothing,
             )
         )
 
@@ -537,7 +531,6 @@ def cma(
                 input_norm_factor=eq_norm,
             ),
             name="CMA" if not use_pilots else "CMA(PA)",
-            debug_plot=debug_plot,
             check_convergence=True,
         )
     )
@@ -560,8 +553,6 @@ def rde(
     pilot_mask: np.ndarray | None = None,
     pilot_gain_db: float = 0.0,
     pmf: Any | None = None,
-    debug_plot: bool = False,
-    plot_smoothing: int = 50,
     input_norm_factor: float | np.ndarray | None = None,
     samples_prefix: ArrayType | None = None,
     pad_mode: str = "zeros",
@@ -850,8 +841,6 @@ def rde(
                 xp=xp,
                 eq_norm=eq_norm,
                 name="RDE(block)" if not use_pilots else "RDE(PA,block)",
-                debug_plot=debug_plot,
-                plot_smoothing=plot_smoothing,
                 check_convergence=True,
                 radii_np=radii,
                 pref_np=pref_np,
@@ -942,9 +931,7 @@ def rde(
                     input_norm_factor=eq_norm,
                 ),
                 name="RDE" if not use_pilots else "RDE(PA)",
-                debug_plot=debug_plot,
                 check_convergence=True,
-                plot_smoothing=plot_smoothing,
             )
         )
 
@@ -1033,7 +1020,6 @@ def rde(
                 input_norm_factor=eq_norm,
             ),
             name="RDE" if not use_pilots else "RDE(PA)",
-            debug_plot=debug_plot,
             check_convergence=True,
         )
     )

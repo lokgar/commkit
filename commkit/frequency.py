@@ -171,7 +171,6 @@ def estimate_frequency_offset_mth_power(
     nfft: int | None = None,
     interpolation: str = "jacobsen",
     combine_channels: bool = False,
-    debug_plot: bool = False,
 ) -> float | np.ndarray:
     """
     Estimates frequency offset using the M-th power law (nonlinear spectral method).
@@ -220,9 +219,6 @@ def estimate_frequency_offset_mth_power(
         magnitude-weighted mean estimate as ``float``; if ``False``
         (default), return per-channel estimates as ``np.ndarray`` of
         shape ``(C,)``.  SISO inputs always return ``float``.
-    debug_plot : bool, default False
-        If ``True``, opens a diagnostic figure showing the M-th power
-        spectrum per channel with the detected peak and sub-bin result.
 
     Returns
     -------
@@ -374,19 +370,6 @@ def estimate_frequency_offset_mth_power(
         search_range,
     )
 
-    if debug_plot:
-        from . import plotting as _plotting
-
-        _plotting.plot_frequency_offset_spectrum(
-            mag_spectrum=to_device(mag, "cpu"),
-            freqs=freqs_np,
-            M=M,
-            k_peaks=np.array([k_peak] * C),
-            f_estimates=f_per_ch,
-            search_range=search_range,
-            show=True,
-        )
-
     if was_1d:
         return float(f_per_ch[0])
     if combine_channels:
@@ -411,7 +394,6 @@ def estimate_frequency_offset_mengali_morelli(
     ref_signal: ArrayType | None = None,
     max_lag: int | None = None,
     combine_channels: bool = False,
-    debug_plot: bool = False,
 ) -> float | np.ndarray:
     """
     Estimates frequency offset via the Mengali-Morelli multi-lag autocorrelation.
@@ -466,10 +448,6 @@ def estimate_frequency_offset_mengali_morelli(
         ``False`` (default), return per-channel estimates as
         ``np.ndarray`` of shape ``(C,)``.
         SISO inputs always return ``float``.
-    debug_plot : bool, default False
-        If ``True``, opens a diagnostic figure showing per-channel
-        autocorrelation magnitude ``|R[m]|`` and wrapped phase ``∠R[m]``
-        vs lag, with the expected phase ramp overlaid.
 
     Returns
     -------
@@ -555,17 +533,6 @@ def estimate_frequency_offset_mengali_morelli(
         N,
     )
 
-    if debug_plot:
-        from . import plotting as _plotting
-
-        _plotting.plot_mm_autocorrelation(
-            R_np=R_per_ch_np,
-            f_est=f_per_ch,
-            sampling_rate=sampling_rate,
-            M=M,
-            show=True,
-        )
-
     if was_1d:
         return float(f_per_ch[0])
     if combine_channels:
@@ -590,7 +557,6 @@ def estimate_frequency_offset_pilot_symbols(
     pilot_values: ArrayType | None = None,
     snr_weighted: bool = True,
     combine_channels: bool = False,
-    debug_plot: bool = False,
 ) -> float | np.ndarray:
     """
     Estimates frequency offset from pilot symbols via phase slope fitting.
@@ -637,9 +603,6 @@ def estimate_frequency_offset_pilot_symbols(
         (default), return per-channel estimates as ``np.ndarray`` of
         shape ``(C,)``.
         SISO inputs always return ``float``.
-    debug_plot : bool, default False
-        If ``True``, opens a diagnostic figure showing the unwrapped pilot
-        phase sequence and the fitted frequency-slope line.
 
     Returns
     -------
@@ -750,17 +713,6 @@ def estimate_frequency_offset_pilot_symbols(
         max_gap,
         lock_range,
     )
-
-    if debug_plot:
-        from . import plotting as _plotting
-
-        _plotting.plot_pilot_phase_estimate(
-            pilot_indices=pilot_indices_np,
-            phi_pilots_u=to_device(phi_pilots_u, "cpu"),
-            f_est=f_per_ch,
-            sampling_rate=sampling_rate,
-            show=True,
-        )
 
     if was_1d:
         return float(f_per_ch[0])
@@ -993,7 +945,6 @@ def correct_frequency_offset_blockwise(
     overlap: float | None = None,
     estimator: Callable[[np.ndarray, float], float] | None = None,
     combine_channels: bool = False,
-    debug_plot: bool = False,
 ) -> ArrayType | Signal:
     """
     Estimate and correct a time-varying frequency offset in one call.
@@ -1038,10 +989,6 @@ def correct_frequency_offset_blockwise(
           Use this for coherent MIMO (e.g. polarisation diversity) where all
           channels share the same laser / frequency offset.
 
-    debug_plot : bool, default False
-        If ``True``, opens a diagnostic figure showing the per-block frequency
-        estimates, PCHIP-interpolated trajectory, and integrated phase
-        trajectory.  For MIMO with ``combine_channels=False``, shows channel 0.
 
     Returns
     -------
@@ -1113,7 +1060,6 @@ def correct_frequency_offset_blockwise(
 
     # PCHIP interpolation + cumulative integration -> (C_interp, N) phase array
     theta_np = np.empty((C_interp, N), dtype=np.float64)
-    df_dense_plot: np.ndarray | None = None
     for c in range(C_interp):
         df_est = df_for_interp[c]
         if B == 1:
@@ -1121,9 +1067,6 @@ def correct_frequency_offset_blockwise(
         else:
             df_dense = PchipInterpolator(t_centers, df_est)(n_clamped)
         theta_np[c] = (2.0 * np.pi / sampling_rate) * np.cumsum(df_dense)
-        if debug_plot and c == 0:
-            df_dense_plot = df_dense
-
     # Broadcast averaged trajectory to all channels if needed
     if combine_channels and C > 1:
         theta_np_full = np.broadcast_to(theta_np, (C, N)).copy()
@@ -1159,24 +1102,6 @@ def correct_frequency_offset_blockwise(
         df_all.max(),
         len(starts),
     )
-
-    if debug_plot and df_dense_plot is not None:
-        from . import plotting as _plotting
-
-        title = (
-            f"correct_frequency_offset_blockwise - channel 0 of {C}"
-            if C > 1 and not combine_channels
-            else "correct_frequency_offset_blockwise"
-        )
-        _plotting.plot_frequency_offset_blockwise_result(
-            t_centers=t_centers,
-            df_estimates=df_for_interp[0],
-            n_grid=n_grid,
-            df_dense=df_dense_plot,
-            phase_trajectory=theta_np_full[0],
-            show=True,
-            title=title,
-        )
 
     return signal_adapter.wrap_samples(restore_1d(was_1d, corrected_2d))
 

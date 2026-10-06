@@ -27,7 +27,6 @@ def linewidth_increment(
     snr_db: float | np.ndarray | None = None,
     ref_symbols: ArrayType | None = None,
     edge_trim: int = 0,
-    debug_plot: bool = False,
 ) -> dict[str, float | np.ndarray | str]:
     r"""Wiener linewidth from the phase-increment variance.
 
@@ -72,17 +71,18 @@ def linewidth_increment(
         AWGN-correction inputs for ``method="subtract"`` (see above).
     edge_trim : int, default 0
         Samples discarded from each end before differencing.
-    debug_plot : bool, default False
-        If True, plot ``Var(Δφ_k)`` vs lag with the fitted line
-        (``increment_variance``); points only for ``method="subtract"``.
 
     Returns
     -------
     dict
-        ``{'linewidth', 'dphi_var', 'awgn_var', 'method'}`` - linewidth /
-        variances are floats (SISO) or per-channel arrays.  ``dphi_var`` is the
-        lag-1 increment variance; ``awgn_var`` is the fitted intercept
-        (``slope``) or the subtracted AWGN term (``subtract``).
+        ``{'linewidth', 'dphi_var', 'awgn_var', 'method', 'lag_s', 'var'}`` -
+        linewidth / variances are floats (SISO) or per-channel arrays.
+        ``dphi_var`` is the lag-1 increment variance; ``awgn_var`` is the
+        fitted intercept (``slope``) or the subtracted AWGN term
+        (``subtract``).  ``lag_s`` (s) and ``var`` (rad², shape
+        ``(C, n_lags)``) are the measured increment variances, plus ``slope``
+        and ``intercept`` of the fit for ``method="slope"``; pass them to
+        ``plotting.plot_increment_variance``.
 
     Notes
     -----
@@ -129,6 +129,12 @@ def linewidth_increment(
         )
         linewidth_cpu = np.maximum(slope, 0.0) / (2.0 * np.pi)
         awgn_var_cpu = intercept
+        fit = {
+            "lag_s": lag_sec,
+            "var": var_k_cpu.T,
+            "slope": slope,
+            "intercept": intercept,
+        }
     elif method == "subtract":
         # The AWGN inputs are caller-supplied host scalars, so resolve them
         # host-side and upload once: building them on device would force a
@@ -166,28 +172,15 @@ def linewidth_increment(
         raise ValueError(f"Unknown method {method!r} (use 'slope' or 'subtract').")
 
     var1_cpu = to_device(var1, "cpu")
-
-    if debug_plot:
-        from .. import plotting as _plotting
-
-        if method == "slope":
-            _plotting.plot_increment_variance(
-                lag_sec,
-                var_k_cpu.T,
-                slope=slope,
-                intercept=intercept,
-                show=True,
-            )
-        else:
-            _plotting.plot_increment_variance(
-                np.array([t_sym]), np.atleast_1d(var1_cpu)[:, None], show=True
-            )
+    if method == "subtract":
+        fit = {"lag_s": np.array([t_sym]), "var": np.atleast_1d(var1_cpu)[:, None]}
 
     return {
         "linewidth": to_report_scalar(linewidth_cpu),
         "dphi_var": to_report_scalar(var1_cpu),
         "awgn_var": to_report_scalar(awgn_var_cpu),
         "method": method,
+        **fit,
     }
 
 
@@ -198,7 +191,6 @@ def fm_noise_psd(
     nperseg: int | None = None,
     detrend: str | bool = "constant",
     bias_correction: bool = True,
-    debug_plot: bool = False,
 ) -> tuple[ArrayType, ArrayType]:
     r"""One-sided frequency-noise PSD S_f(f) [Hz²/Hz] from the phase.
 
@@ -224,8 +216,6 @@ def fm_noise_psd(
         residual frequency offset.
     bias_correction : bool, default True
         Undo the first-difference roll-off (see Notes).
-    debug_plot : bool, default False
-        If True, plot the PSD (``frequency_noise_psd``).
 
     Returns
     -------
@@ -279,11 +269,6 @@ def fm_noise_psd(
         S_f = S_f / (xp.sinc(f * t_sym) ** 2)
     S_out = restore_1d(was_1d, S_f)
 
-    if debug_plot:
-        from .. import plotting as _plotting
-
-        _plotting.plot_frequency_noise_psd(f, S_out, show=True)
-
     return f, S_out
 
 
@@ -294,7 +279,6 @@ def linewidth_beta_separation(
     nperseg: int | None = None,
     f_min: float | None = None,
     f_max: float | None = None,
-    debug_plot: bool = False,
 ) -> dict[str, float | np.ndarray]:
     r"""Linewidth via the Di Domenico β-separation line (canonical method).
 
@@ -340,9 +324,6 @@ def linewidth_beta_separation(
         Upper fence of the analysis window in Hz.  **Set this below the AWGN
         ``f²`` knee** - the tail crosses back above the β-line and would be
         integrated as fake linewidth; defaults to the Nyquist bin.
-    debug_plot : bool, default False
-        If True, plot the PSD with the β-line, white-FM floor, and the actual
-        integration region shaded (``plot_frequency_noise_psd``).
 
     Returns
     -------
@@ -374,7 +355,8 @@ def linewidth_beta_separation(
     * The AWGN ``f²`` tail eventually crosses back above the β-line and would
       be integrated as *fake* linewidth: set ``f_max`` below the knee where
       the plateau ``Δν/π`` meets the tail ``2σ_φ²T_sym·f²``, i.e.
-      ``f_knee = (Δν/(2π σ_φ² T_sym))^{1/2}``.  Check ``debug_plot=True``.
+      ``f_knee = (Δν/(2π σ_φ² T_sym))^{1/2}``.  Inspect the knee with
+      ``plotting.plot_frequency_noise_psd``.
     * ``linewidth_floor`` (π·median of in-band ``S_f``) is the more robust
       estimate when a clean white-FM plateau exists in the band; the two
       should agree within tens of percent, otherwise inspect the PSD.
@@ -454,19 +436,5 @@ def linewidth_beta_separation(
         "used": used_cpu,
         "band": (fmin, fmax),
     }
-
-    if debug_plot:
-        from .. import plotting as _plotting
-
-        _plotting.plot_frequency_noise_psd(
-            f_cpu,
-            S_cpu,
-            beta_line=beta_cpu,
-            floor=result["linewidth_floor"],
-            band=(fmin, fmax),
-            above=above_cpu,
-            used=used_cpu,
-            show=True,
-        )
 
     return result

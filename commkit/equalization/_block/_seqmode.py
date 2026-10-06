@@ -285,8 +285,6 @@ def _run_block_equalizer(
     xp,
     eq_norm,
     name,
-    debug_plot=False,
-    plot_smoothing=50,
     check_convergence=False,
     constellation_np=None,
     train_full=None,
@@ -346,9 +344,7 @@ def _run_block_equalizer(
         return _log_equalizer_exit(
             result,
             name=name,
-            debug_plot=debug_plot,
             check_convergence=check_convergence,
-            plot_smoothing=plot_smoothing,
         )
 
     # backend == "jax"
@@ -415,7 +411,5 @@ def _run_block_equalizer(
     return _log_equalizer_exit(
         result,
         name=name,
-        debug_plot=debug_plot,
         check_convergence=check_convergence,
-        plot_smoothing=plot_smoothing,
     )

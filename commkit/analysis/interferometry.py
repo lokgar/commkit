@@ -294,7 +294,6 @@ def dsh_fm_noise_psd(
     nperseg: int | None = None,
     notch_guard: float = 0.1,
     bias_correction: bool = True,
-    debug_plot: bool = False,
 ) -> tuple[ArrayType, ArrayType, ArrayType]:
     r"""Laser FM-noise PSD from the differential phase (notch-guarded deconvolution).
 
@@ -331,9 +330,6 @@ def dsh_fm_noise_psd(
         default keeps ≈ 80 % of every response lobe.
     bias_correction : bool, default True
         Forwarded to ``fm_noise_psd`` (first-difference droop).
-    debug_plot : bool, default False
-        If True, plot the deconvolved PSD (``frequency_noise_psd``; masked
-        bins appear as gaps).
 
     Returns
     -------
@@ -412,13 +408,6 @@ def dsh_fm_noise_psd(
     valid = s2 >= float(notch_guard)
     S_laser = xp.where(valid, S_beat / xp.maximum(4.0 * s2, 1e-300), xp.nan)
 
-    if debug_plot:
-        from .. import plotting as _plotting
-
-        _plotting.plot_frequency_noise_psd(
-            f, S_laser, show=True, title="DSH laser FM-noise PSD (deconvolved)"
-        )
-
     return f, S_laser, valid
 
 
@@ -464,7 +453,6 @@ def linewidth_dsh(
     f_max: float | None = None,
     notch_guard: float = 0.1,
     level_db: float = 20.0,
-    debug_plot: bool = False,
 ) -> dict[str, object]:
     r"""Laser linewidth from a delayed self-heterodyne / self-homodyne beat.
 
@@ -530,11 +518,6 @@ def linewidth_dsh(
         Notch mask threshold for ``method="fm_psd"`` (``dsh_fm_noise_psd``).
     level_db : float, default 20.0
         Depth below the peak at which the ``lorentzian`` width is measured.
-    debug_plot : bool, default False
-        Per-method diagnostic plot: the deconvolved FM-noise PSD with the
-        fitted white-FM floor (``fm_psd``), the increment-variance fit
-        (``increment``), or the beat spectrum with the measured width
-        contours (``lorentzian``).
 
     Returns
     -------
@@ -553,7 +536,9 @@ def linewidth_dsh(
           angle-noise ``2σ_w²`` only when read with *small* lags - at the
           large default lags the phase-noise term dominates every point and
           the intercept is a noisy extrapolation), ``dphi_var`` (total
-          ``Var[Δφ] ≈ 2πΔν·τ_d + σ_w²``), ``lags``, ``f_shift``.
+          ``Var[Δφ] ≈ 2πΔν·τ_d + σ_w²``), ``lags``, ``f_shift``, and the
+          fit data ``lag_s``, ``var``, ``slope``, ``intercept`` for
+          ``plotting.plot_increment_variance``.
         * ``lorentzian`` - ``linewidth_3db`` (half-power width / 2, the
           *effective* linewidth incl. 1/f broadening), ``lineshape_ratio``
           (``W₂₀/W₃``: ≈ 9.95 pure Lorentzian, ≈ 2.6 pure Gaussian),
@@ -730,18 +715,6 @@ def linewidth_dsh(
             "f_shift": f_hat,
             "method": method,
         }
-        if debug_plot:
-            from .. import plotting as _plotting
-
-            _plotting.plot_frequency_noise_psd(
-                f_cpu,
-                S_cpu,
-                floor=result["linewidth"],
-                band=band_used,
-                used=used_cpu,
-                show=True,
-                title="DSH laser FM-noise PSD (deconvolved)",
-            )
         return result
 
     if method == "increment":
@@ -789,23 +762,15 @@ def linewidth_dsh(
         slope, intercept, var_cpu, a_sec = _increment_variance_fit(d2, ls, 1.0 / fs, xp)
         lw_cpu = np.maximum(slope, 0.0) / (4.0 * np.pi)
 
-        if debug_plot:
-            from .. import plotting as _plotting
-
-            _plotting.plot_increment_variance(
-                a_sec,
-                var_cpu.T,
-                slope=slope,
-                intercept=intercept,
-                show=True,
-                title="DSH differential-phase increment variance",
-            )
-
         return {
             "linewidth": to_report_scalar(lw_cpu),
             "awgn_var": to_report_scalar(intercept),
             "dphi_var": to_report_scalar(to_device(dphi_var, "cpu")),
             "lags": ls,
+            "lag_s": a_sec,
+            "var": var_cpu.T,
+            "slope": slope,
+            "intercept": intercept,
             "f_shift": f_hat,
             "method": method,
         }
@@ -875,19 +840,6 @@ def linewidth_dsh(
                 "Lorentzian width is unreliable. Use method='fm_psd' or "
                 "'increment'.",
                 np.array2string(coh, precision=2),
-            )
-
-        if debug_plot:
-            from .. import plotting as _plotting
-
-            _plotting.plot_dsh_beat_psd(
-                f_cpu,
-                restore_1d(was_1d, P2),
-                f_peak=f_peak,
-                linewidth=dnu_deep,
-                linewidth_3db=dnu_3db,
-                level_db=level_db,
-                show=True,
             )
 
         return {

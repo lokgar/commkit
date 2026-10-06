@@ -84,8 +84,6 @@ def lms(
     cpr_cycle_slip_correction: bool = False,
     cpr_cycle_slip_history: int = 100,
     cpr_cycle_slip_threshold: float = np.pi / 4,
-    debug_plot: bool = False,
-    plot_smoothing: int = 50,
     cpr_state: CPRState | None = None,
     input_norm_factor: float | np.ndarray | None = None,
     samples_prefix: ArrayType | None = None,
@@ -354,11 +352,6 @@ def lms(
         observed phase before a slip is declared.  Should be set to half
         the constellation's angular symmetry quantum (``π/4`` for
         QPSK/QAM).  Ignored when ``cpr_cycle_slip_correction=False``.
-    debug_plot : bool, default False
-        If True, display a convergence + tap-weight diagnostic plot on exit.
-    plot_smoothing : int, default 50
-        Moving-average window (symbols) for the MSE convergence curve in the
-        debug plot.
     cpr_state : CPRState, optional
         Warm-start CPR state from a previous ``lms()`` call (obtained via
         ``EqualizerResult.cpr_state``).  When provided and the CPR type and
@@ -576,8 +569,6 @@ def lms(
                 xp=xp,
                 eq_norm=eq_norm,
                 name="LMS(block)",
-                debug_plot=debug_plot,
-                plot_smoothing=plot_smoothing,
                 constellation_np=constellation_np,
                 train_full=train_full,
                 n_train_aligned=n_train_aligned,
@@ -796,8 +787,6 @@ def lms(
             _log_equalizer_exit(
                 result,
                 name="LMS",
-                debug_plot=debug_plot,
-                plot_smoothing=plot_smoothing,
             )
         )
 
@@ -1035,7 +1024,7 @@ def lms(
             bps_K=KB,
             cs_H=H,
         )
-    return finish(_log_equalizer_exit(result, name="LMS", debug_plot=debug_plot))
+    return finish(_log_equalizer_exit(result, name="LMS"))
 
 
 def _check_rls_divergence(weights, xp, forgetting_factor, delta):
@@ -1082,8 +1071,6 @@ def rls(
     cpr_cycle_slip_correction: bool = False,
     cpr_cycle_slip_history: int = 100,
     cpr_cycle_slip_threshold: float = np.pi / 4,
-    debug_plot: bool = False,
-    plot_smoothing: int = 50,
     cpr_state: CPRState | None = None,
     input_norm_factor: float | np.ndarray | None = None,
     samples_prefix: ArrayType | None = None,
@@ -1279,10 +1266,6 @@ def rls(
         Maximum tolerated deviation (radians) before a slip is declared.
         Set to half the constellation's angular quantum (``π/4`` for
         QPSK/QAM).  Ignored when ``cpr_cycle_slip_correction=False``.
-    debug_plot : bool, default False
-        Display convergence + tap-weight diagnostic plot on exit.
-    plot_smoothing : int, default 50
-        MSE moving-average window for the debug plot.
     cpr_state : CPRState, optional
         Warm-start CPR state from a previous ``rls()`` call.  See
         ``lms()`` for the full description; behaviour is identical.
@@ -1637,9 +1620,7 @@ def rls(
                 cs_H=H,
             )
         # Truncate last num_taps//2 symbols (zero-padding contamination).
-        result = _log_equalizer_exit(
-            result, name="RLS", debug_plot=debug_plot, plot_smoothing=plot_smoothing
-        )
+        result = _log_equalizer_exit(result, name="RLS")
         result.tail_trim = tail_trim
         _check_rls_divergence(result.weights, xp, forgetting_factor, delta)
         return _attach_equalized_signal(result, sig)
@@ -1908,7 +1889,7 @@ def rls(
             cs_H=H,
         )
     # Truncate last num_taps//2 symbols (zero-padding contamination).
-    result = _log_equalizer_exit(result, name="RLS", debug_plot=debug_plot)
+    result = _log_equalizer_exit(result, name="RLS")
     result.tail_trim = tail_trim
     _check_rls_divergence(result.weights, xp, forgetting_factor, delta)
     return _attach_equalized_signal(result, sig)

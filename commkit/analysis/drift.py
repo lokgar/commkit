@@ -17,7 +17,6 @@ def separate_drift_phase_noise(
     cutoff: float,
     method: str = "butterworth",
     order: int = 4,
-    debug_plot: bool = False,
 ) -> tuple[ArrayType, ArrayType]:
     r"""Split a phase trajectory into slow drift and fast phase-noise residual.
 
@@ -53,9 +52,6 @@ def separate_drift_phase_noise(
     order : int, default 4
         Butterworth order, Savitzky-Golay polynomial order, or - reinterpreted
         - ignored for the boxcar.
-    debug_plot : bool, default False
-        If True, plot the phase trajectory with the drift overlaid
-        (``carrier_phase_decomposition``).
 
     Returns
     -------
@@ -127,13 +123,6 @@ def separate_drift_phase_noise(
     drift = drift.astype(in_dtype, copy=False)
     pn = pn.astype(in_dtype, copy=False)
 
-    if debug_plot:
-        from .. import plotting as _plotting
-
-        _plotting.plot_carrier_phase_decomposition(
-            phi, drift, symbol_rate=symbol_rate, show=True
-        )
-
     return drift, pn
 
 
@@ -142,8 +131,6 @@ def frequency_drift_metrics(
     symbol_rate: float,
     *,
     edge_trim: int = 0,
-    amp_ref: float | None = None,
-    debug_plot: bool = False,
 ) -> dict[str, float | np.ndarray]:
     r"""Residual frequency-wander statistics from a smoothed phase ramp.
 
@@ -165,12 +152,6 @@ def frequency_drift_metrics(
     edge_trim : int, default 0
         Number of samples to discard from each end before differencing
         (removes low-pass filter transients).
-    amp_ref : float, optional
-        Reference wander amplitude (Hz) drawn as ``±amp_ref`` guides when
-        ``debug_plot=True`` (e.g. an injected amplitude in a simulation).
-    debug_plot : bool, default False
-        If True, plot the residual frequency vs time
-        (``frequency_drift``).
 
     Returns
     -------
@@ -209,13 +190,6 @@ def frequency_drift_metrics(
     std, pp, max_abs = stats[0], stats[1], stats[2]
 
     df_out = restore_1d(was_1d, df)
-
-    if debug_plot:
-        from .. import plotting as _plotting
-
-        _plotting.plot_frequency_drift(
-            df_out, symbol_rate=symbol_rate, amp_ref=amp_ref, show=True
-        )
 
     return {
         "df": df_out,

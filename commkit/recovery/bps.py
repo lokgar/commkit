@@ -21,7 +21,6 @@ def recover_carrier_phase_bps(
     cycle_slip_history: int = 100,
     cycle_slip_threshold: float = np.pi / 4,
     pmf: np.ndarray | None = None,
-    debug_plot: bool = False,
 ) -> ArrayType:
     """
     Carrier phase recovery via Blind Phase Search (BPS).
@@ -82,9 +81,6 @@ def recover_carrier_phase_bps(
         decision boundaries in the BPS metric and bias the phase estimate.
         No-op for uniform modulations.  For :class:`Signal` input, used
         only as a fallback when the signal's ``ps_pmf`` is unset.
-    debug_plot : bool, default False
-        If ``True``, opens a diagnostic figure showing the per-symbol phase
-        trajectory alongside the block-phase estimates.
 
     Returns
     -------
@@ -320,22 +316,12 @@ def recover_carrier_phase_bps(
             phi_blocks[ch] = phi_u
 
     mode_str = "joint" if (joint_channels and C > 1) else "independent"
-    phi_full_np = _log_phase_summary(
+    _log_phase_summary(
         phi_full,
         "CPR (BPS, B=%s, %s)",
         (B, mode_str),
         "[%s blocks x %s symbols, C=%s, cycle_slip_correction=%s]",
         (N_blocks, block_size, C, cycle_slip_correction),
-        debug_plot=debug_plot,
     )
-
-    if debug_plot:
-        from .. import plotting as _plotting
-
-        _plotting.plot_carrier_phase_trajectory(
-            phi_full=phi_full_np,
-            show=True,
-            title="CPR - Blind Phase Search",
-        )
 
     return restore_1d(was_1d, phi_full)

@@ -167,7 +167,6 @@ def recover_carrier_phase_tikhonov(
     cycle_slip_correction: bool = False,
     cycle_slip_history: int = 100,
     cycle_slip_threshold: float = np.pi / 4,
-    debug_plot: bool = False,
 ) -> ArrayType:
     r"""
     Carrier phase recovery via MAP estimation with a Tikhonov/Wiener phase
@@ -236,9 +235,6 @@ def recover_carrier_phase_tikhonov(
         ``history_length`` passed to ``correct_cycle_slips``.
     cycle_slip_threshold : float, default π/4
         ``threshold`` passed to ``correct_cycle_slips`` (radians).
-    debug_plot : bool, default False
-        If ``True``, opens a diagnostic figure showing the per-symbol phase
-        trajectory with the Kalman-smoothed block phases.
 
     Returns
     -------
@@ -384,24 +380,12 @@ def recover_carrier_phase_tikhonov(
             phi_full[ch] = xp.interp(all_positions, block_centers, phi_s_ch)
 
     mode_str = "joint" if (joint_channels and C > 1) else "independent"
-    phi_full_np = _log_phase_summary(
+    _log_phase_summary(
         phi_full,
         "CPR (Tikhonov-%s, M=%s, %s)",
         (method.upper(), M, mode_str),
         "[%s blocks x %s, σ_p²=%.2e, σ_v²=%.2e, C=%s, cycle_slip_correction=%s]",
         (N_blocks, block_size, sigma_p2, sigma_v2, C, cycle_slip_correction),
-        debug_plot=debug_plot,
     )
-
-    if debug_plot:
-        from .. import plotting as _plotting
-
-        _plotting.plot_carrier_phase_trajectory(
-            phi_full=phi_full_np,
-            block_centers=to_device(block_centers, "cpu"),
-            phi_blocks=phi_smooth_np,
-            show=True,
-            title=f"CPR - Tikhonov-{method.upper()}",
-        )
 
     return restore_1d(was_1d, phi_full)

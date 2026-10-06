@@ -346,7 +346,6 @@ rule without deleting its entry fails the suite.
 
 | Legacy pattern still in the code | Removed by |
 | --- | --- |
-| `debug_plot=` parameters (20 modules) | 1.4 |
 | `update_mode` / `block_len` time-domain block equalizers | 1.5 |
 | JAX: `backend=` / `device=` on equalizers, `_kernels_jax.py`, `compute_llr(output=)`, `to_jax` / `from_jax`, `Signal.*_jax`; the test suite forces JAX x64 | 1.6-1.8 |
 | `Signal` / `Preamble` / `SingleCarrierFrame` are Pydantic models | 2.3 |

@@ -21,7 +21,6 @@ def recover_carrier_phase_viterbi_viterbi(
     cycle_slip_correction: bool = False,
     cycle_slip_history: int = 100,
     cycle_slip_threshold: float = np.pi / 4,
-    debug_plot: bool = False,
 ) -> ArrayType:
     """
     Carrier phase recovery via the Viterbi-Viterbi (M-th power) algorithm.
@@ -63,9 +62,6 @@ def recover_carrier_phase_viterbi_viterbi(
         ``history_length`` passed to ``correct_cycle_slips``.
     cycle_slip_threshold : float, default π/4
         ``threshold`` passed to ``correct_cycle_slips`` (radians).
-    debug_plot : bool, default False
-        If ``True``, opens a diagnostic figure showing the per-symbol phase
-        trajectory alongside the block-phase estimates.
 
     Returns
     -------
@@ -168,24 +164,12 @@ def recover_carrier_phase_viterbi_viterbi(
             phi_blocks_out[ch] = phi_u_ch
 
     mode_str = "joint" if (joint_channels and C > 1) else "independent"
-    phi_full_np = _log_phase_summary(
+    _log_phase_summary(
         phi_full,
         "CPR (Viterbi-Viterbi, M=%s, %s)",
         (M, mode_str),
         "[%s blocks x %s symbols, C=%s, cycle_slip_correction=%s]",
         (N_blocks, block_size, C, cycle_slip_correction),
-        debug_plot=debug_plot,
     )
-
-    if debug_plot:
-        from .. import plotting as _plotting
-
-        _plotting.plot_carrier_phase_trajectory(
-            phi_full=phi_full_np,
-            block_centers=to_device(block_centers, "cpu"),
-            phi_blocks=to_device(phi_blocks_out, "cpu"),
-            show=True,
-            title="CPR - Viterbi-Viterbi",
-        )
 
     return restore_1d(was_1d, phi_full)

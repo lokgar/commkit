@@ -415,7 +415,6 @@ def estimate_timing(
     search_range: tuple[int, int] | None = None,
     dft_upsample: int = 1,
     fractional_method: str = "log-parabolic",
-    debug_plot: bool = False,
 ) -> tuple[ArrayType, ArrayType]:
     """
     Estimates integer and fractional timing offsets via cross-correlation.
@@ -452,8 +451,6 @@ def estimate_timing(
         DFT-based upsampling factor for high-precision fractional estimation.
     fractional_method : {'parabolic', 'log-parabolic'}, default 'log-parabolic'
         Fitting method for fractional delay estimation.
-    debug_plot : bool, default False
-        If ``True``, plots the correlation magnitude for debugging.
 
     Returns
     -------
@@ -697,18 +694,6 @@ def estimate_timing(
 
     # Each channel's peak is found independently so hardware skew is preserved.
     integer_offsets = xp.maximum(0, peak_indices + offset)
-
-    if debug_plot:
-        from . import plotting as _plotting
-
-        _plotting.plot_timing_correlation(
-            corr_mag=to_device(corr_mag, "cpu"),
-            peak_indices=to_device(peak_indices, "cpu"),
-            norm_factors=to_device(mean_vals, "cpu"),
-            threshold=threshold,
-            offset=offset,
-            show=True,
-        )
 
     # === Fractional Timing (Parabolic Interpolation) ===
     fractional_offsets = estimate_fractional_delay(

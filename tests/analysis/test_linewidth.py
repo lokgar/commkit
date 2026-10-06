@@ -5,8 +5,6 @@ with calibrated AWGN. Inputs are built on the active backend via the ``xp``
 fixture.
 """
 
-from unittest.mock import patch
-
 import numpy as np
 import pytest
 
@@ -120,13 +118,15 @@ class TestLinewidthEstimation:
         f_used = out["f"][out["used"]]
         assert float(f_used[-1]) < 0.5 * R / 2
 
-    def test_linewidth_increment_debug_plot(self, xp):
-        """debug_plot renders the Var(k) fit (slope) and the point (subtract)."""
-        phi = _wiener_phase(2e6, 1 << 14, seed=17)
-        with patch("matplotlib.pyplot.show"):
-            analysis.linewidth_increment(
-                xp.asarray(phi), R, method="slope", debug_plot=True
-            )
-            analysis.linewidth_increment(
-                xp.asarray(phi), R, method="subtract", noise_var=0.0, debug_plot=True
-            )
+    def test_linewidth_increment_returns_plot_data(self, xp):
+        """The returned fit data plots directly: Var(k) fit (slope), point (subtract)."""
+        from commkit import plotting
+
+        phi = xp.asarray(_wiener_phase(2e6, 1 << 14, seed=17))
+        res = analysis.linewidth_increment(phi, R, method="slope")
+        assert res["var"].shape == (1, res["lag_s"].size)
+        plotting.plot_increment_variance(
+            res["lag_s"], res["var"], slope=res["slope"], intercept=res["intercept"]
+        )
+        res = analysis.linewidth_increment(phi, R, method="subtract", noise_var=0.0)
+        plotting.plot_increment_variance(res["lag_s"], res["var"])
