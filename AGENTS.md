@@ -130,7 +130,10 @@ Dependencies point downward only:
 ### Function signatures
 
 - `f(data, other_data, *, params)`: everything after the data arguments is
-  keyword-only.
+  keyword-only. A function without data arguments may keep its single primary
+  parameter positional (`barker_sequence(13)`, `gray_code(5)`); with several
+  parameters, all are keyword-only (`rrc_taps(sps=2, rolloff=0.1, span=10)`).
+  The data-argument count is recorded per function in the contract registry.
 - **Signal awareness.** A function whose main argument is waveform data (or a
   field a Signal really carries) accepts an array or a Signal. It unwraps once
   with `adapt_signal()` (in `core/_signal_adapter.py`), works on arrays, and
@@ -337,6 +340,10 @@ recorded in plan commit 0.4) on the reference machine: RTX 4070 Ti, Ryzen 7
 These are the legacy patterns that remain. Each line names the commit in
 `REFACTORING_PLAN.md` that removes it. Delete a line when its commit lands, and
 delete this section in commit 4.2.
+
+The machine-checked, per-function version of this list is the `LEGACY` table in
+`tests/test_api_contracts.py`. Its entries run as strict xfails, so fixing a
+rule without deleting its entry fails the suite.
 
 | Legacy pattern still in the code | Removed by |
 | --- | --- |

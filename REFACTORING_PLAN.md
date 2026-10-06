@@ -422,7 +422,7 @@ benchmarks and CI.
     listed in `AGENTS.md`, not forced.
   - The main job gets `--cov-fail-under=78`.
   - Placeholder modules are omitted from coverage (`[tool.coverage.run] omit`).
-- [ ] **0.8 `test: add API contract registry`.**
+- [x] **0.8 `test: add API contract registry`.**
   - `tests/test_api_contracts.py` holds one row per public function (§5.2).
   - Checks that hold today must pass.
   - Rules that only hold in 2.0 (keyword-only parameters, `TypeError` on
