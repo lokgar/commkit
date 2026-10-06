@@ -419,11 +419,9 @@ ROWS: list[Row] = [
     Row("commkit.math.rms", HELPER),
     # --- helpers (dissolved into owning modules in the module passes) -------
     Row("commkit.helpers.cpr_pll_gains", REMOVE),
-    Row("commkit.helpers.cross_correlate_fft", HELPER, data=2),
     Row("commkit.helpers.linear_trend_slope", HELPER),
     Row("commkit.helpers.remove_linear_trend", HELPER),
     Row("commkit.helpers.resolve_pll_gains", REMOVE),
-    Row("commkit.helpers.zc_mimo_root", REMOVE),
     # --- impairments --------------------------------------------------------
     Row(
         "commkit.impairments.channel.linear.apply_chromatic_dispersion",
@@ -675,8 +673,9 @@ ROWS: list[Row] = [
         fact=FS_CONFLICT,
     ),
     # --- timing -------------------------------------------------------------
-    Row("commkit.timing.barker_sequence", DESIGN),
-    Row("commkit.timing.zadoff_chu_sequence", DESIGN),
+    Row("commkit._sequences.barker_sequence", DESIGN),
+    Row("commkit._sequences.zadoff_chu_sequence", DESIGN),
+    Row("commkit.timing.cross_correlate_fft", HELPER, data=2),
     Row(
         "commkit.timing.correct_timing",
         RATE_CHANGE,
@@ -990,7 +989,7 @@ LEGACY: dict[str, frozenset[str]] = {
     "commkit.frequency.estimate_frequency_offset_mth_power": L(SIG, FCT, RNK),
     "commkit.frequency.estimate_frequency_offset_pilot_symbols": L(SIG, FCT, RNK),
     "commkit.frequency.find_bias_tone": L(SIG),
-    "commkit.helpers.cross_correlate_fft": L(SIG),
+    "commkit.timing.cross_correlate_fft": L(SIG),
     "commkit.metrics.ber": L(f"{MET}@gpu"),
     "commkit.metrics.evm": L(MET),
     "commkit.metrics.mi": L(SIG, MET),
@@ -1028,5 +1027,5 @@ LEGACY: dict[str, frozenset[str]] = {
     "commkit.timing.correct_timing": L(SIG),
     "commkit.timing.estimate_fractional_delay": L(SIG),
     "commkit.timing.estimate_timing": L(SIG),
-    "commkit.timing.zadoff_chu_sequence": L(SIG),
+    "commkit._sequences.zadoff_chu_sequence": L(SIG),
 }

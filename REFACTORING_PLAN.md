@@ -825,7 +825,7 @@ The equalization pass (3.7) gets more commits:
   `expand(samples, *, factor)` loses `axis`. `estimate_timing` shapes a
   Preamble with `pulse=` (default `sig.pulse`, `None` unshaped) instead of
   `pulse_shape=` / `filter_params=`.
-- [ ] **3.5b `refactor: sequences and peak helpers move to their owners`.**
+- [x] **3.5b `refactor: sequences and peak helpers move to their owners`.**
   Barker/ZC generation and the MIMO ZC root move into a private
   `_sequences.py` below `core`, so `core.frame` no longer imports the DSP
   module `timing` (it did, lazily); `timing` re-exports the public

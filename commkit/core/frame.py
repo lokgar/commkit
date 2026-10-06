@@ -7,7 +7,7 @@ from typing import Any, Literal
 
 import numpy as np
 
-from .. import helpers
+from .._sequences import barker_sequence, zadoff_chu_sequence, zc_mimo_root
 from ..backend import ArrayType
 from ..filtering import Pulse
 from ..mapping import Constellation
@@ -44,7 +44,7 @@ class Preamble:
     # ZC root index, 1 <= root < length; ignored for Barker sequences.
     root: int = 1
     # Number of TX streams.  ZC preambles get a unique root per stream
-    # (helpers.zc_mimo_root); Barker broadcasts the same sequence.
+    # (zc_mimo_root); Barker broadcasts the same sequence.
     num_streams: int = 1
 
     # Generated in __post_init__ from the fields above.
@@ -63,11 +63,9 @@ class Preamble:
 
         For ``num_streams == 1`` the internal ``_symbols`` shape is ``(length,)``.
         For ``num_streams > 1`` it becomes ``(num_streams, length)``:
-        - ZC: each row uses the unique root from ``helpers.zc_mimo_root``.
+        - ZC: each row uses the unique root from ``zc_mimo_root``.
         - Barker: the same sequence is tiled across all streams.
         """
-        from .. import timing
-
         if self.sequence_type not in ("barker", "zc"):
             raise ValueError(
                 f"sequence_type must be 'barker' or 'zc', got {self.sequence_type!r}."
@@ -81,19 +79,19 @@ class Preamble:
 
         if stype == "barker":
             # Barker symbols (-1, +1)
-            base = timing.barker_sequence(self.length)
+            base = barker_sequence(self.length)
         elif stype in ("zc", "zadoff_chu"):
             # ZC complex symbols - use the named 'root' field directly.
-            base = timing.zadoff_chu_sequence(self.length, root=self.root)
+            base = zadoff_chu_sequence(self.length, root=self.root)
         else:
             base = None
 
         if base is not None and self.num_streams > 1:
             if stype in ("zc", "zadoff_chu"):
                 rows = [
-                    timing.zadoff_chu_sequence(
+                    zadoff_chu_sequence(
                         self.length,
-                        root=helpers.zc_mimo_root(k, self.root, self.length),
+                        root=zc_mimo_root(k, self.root, self.length),
                     )
                     for k in range(self.num_streams)
                 ]
@@ -189,7 +187,7 @@ class SingleCarrierFrame:
     preamble : Preamble, optional
         Structured preamble for synchronization.  For MIMO with ZC sequences,
         each TX stream automatically receives a unique root via
-        ``helpers.zc_mimo_root``.
+        ``zc_mimo_root``.
     pilot_pattern : {"none", "block", "comb"}, default "none"
         "none": No pilots.
         "block": A block of symbols at the start of the frame body.

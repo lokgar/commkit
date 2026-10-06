@@ -4,6 +4,8 @@ import numpy as np
 import pytest
 
 from commkit import helpers
+from commkit._sequences import zc_mimo_root
+from commkit.timing import _parabolic_peak_offset
 
 
 class TestParabolicAndSequences:
@@ -19,7 +21,7 @@ class TestParabolicAndSequences:
             return -((k - k_true) ** 2) + 10.0
 
         y_prev, y_curr, y_next = y(nearest - 1), y(nearest), y(nearest + 1)
-        delta = helpers._parabolic_peak_offset(
+        delta = _parabolic_peak_offset(
             xp.asarray(y_prev), xp.asarray(y_curr), xp.asarray(y_next), xp, log=False
         )
         assert float(delta) == pytest.approx(offset_true, abs=1e-9)
@@ -29,19 +31,17 @@ class TestParabolicAndSequences:
         y_prev = xp.asarray(1.0)
         y_curr = xp.asarray(1.0)
         y_next = xp.asarray(1.0)
-        delta = helpers._parabolic_peak_offset(y_prev, y_curr, y_next, xp, log=False)
+        delta = _parabolic_peak_offset(y_prev, y_curr, y_next, xp, log=False)
         assert float(delta) == 0.0
 
     def test_parabolic_peak_offset_log_mode_host_scalars(self):
         """log=True must work on plain host scalars with xp=numpy."""
-        delta = helpers._parabolic_peak_offset(0.5, 1.0, 0.6, np, log=True)
+        delta = _parabolic_peak_offset(0.5, 1.0, 0.6, np, log=True)
         assert isinstance(float(delta), float)
         assert -0.5 <= float(delta) <= 0.5
 
     def test_zc_mimo_root(self, xp):
         """zc_mimo_root assigns distinct roots cycling from base_root in [1, length-1]."""
-        from commkit.helpers import zc_mimo_root
-
         assert zc_mimo_root(0, 1, 13) == 1
         assert zc_mimo_root(1, 1, 13) == 2
         assert zc_mimo_root(2, 1, 13) == 3

@@ -8,129 +8,190 @@ fractional timing offset estimation and correction.
 """
 
 import logging
-from typing import Union, overload
+from typing import Any, Union, overload
 
 import numpy as np
 
 from ._array import as_2d, restore_1d
+from ._sequences import barker_sequence, zadoff_chu_sequence
 from .backend import ArrayType, dispatch, to_device
 from .core import Preamble, Signal
 from .core._signal_adapter import adapt_signal, require_integer_sps
 from .filtering import Pulse
-from .helpers import _parabolic_peak_offset
 from .logger import logger
+
+__all__ = [
+    "barker_sequence",
+    "correct_timing",
+    "cross_correlate_fft",
+    "estimate_fractional_delay",
+    "estimate_timing",
+    "fft_fractional_delay",
+    "zadoff_chu_sequence",
+]
 
 # Window length for DFT-upsampling in estimate_fractional_delay()
 _DFT_WINDOW = 33
 
-# Standard Barker codes
-_BARKER_SEQUENCES = {
-    2: [1, -1],
-    3: [1, 1, -1],
-    4: [1, 1, -1, 1],
-    5: [1, 1, 1, -1, 1],
-    7: [1, 1, 1, -1, -1, 1, -1],
-    11: [1, 1, 1, -1, -1, -1, 1, -1, -1, 1, -1],
-    13: [1, 1, 1, 1, 1, -1, -1, 1, 1, -1, 1, -1, 1],
-}
-
-
 # -----------------------------------------------------------------------------
-# SYNC SEQUENCE GENERATORS (array-only)
+# CORRELATION AND PEAK INTERPOLATION (array-only)
 # -----------------------------------------------------------------------------
-# barker_sequence / zadoff_chu_sequence build a reference sequence from
-# parameters - there is no Signal yet to unwrap.
 
 
-def barker_sequence(length: int) -> ArrayType:
+def cross_correlate_fft(
+    samples: ArrayType,
+    template: ArrayType,
+    mode: str = "full",
+) -> ArrayType:
     """
-    Generates a Barker sequence of the specified length.
+    Vectorized FFT-based cross-correlation.
 
-    Barker sequences are binary sequences (+1, -1) with optimal cyclic
-    auto-correlation properties, where the sidelobes are at most 1. They are
-    widely used for frame synchronization and pulse compression.
+    Computes the cross-correlation of ``samples`` with ``template`` using
+    the frequency-domain multiplication approach. Handles 1D and 2D
+    (multichannel) inputs natively via ``axis=-1`` broadcasting - no
+    Python loops over channels.
 
     Parameters
     ----------
-    length : {2, 3, 4, 5, 7, 11, 13}
-        Total length of the Barker sequence.
+    samples : array_like
+        Input samples. Shape: ``(N,)`` or ``(C, N)``.
+    template : array_like
+        Reference sequence. Shape: ``(L,)`` or ``(C, L)``.
+        If ``(1, L)`` and samples is ``(C, N)``, the template is
+        broadcast across all channels.
+    mode : {"full", "same", "valid", "positive_lags"}, default "full"
+        Output size:
+        - ``"full"``: length ``N + L - 1``.
+        - ``"same"``: length ``N`` (centered).
+        - ``"valid"``: length ``max(N, L) - min(N, L) + 1``.
+        - ``"positive_lags"``: length ``N`` (lags 0 ... N-1 only). Returns a
+          zero-copy view of the raw circular-correlation output - no
+          ``concatenate`` and no reordering. Use this when negative lags are
+          not needed (e.g. frame timing search within a bounded window).
 
     Returns
     -------
     array_like
-        BPSK symbols (+1.0, -1.0). Shape: (length,).
-        NumPy array; move it with ``to_device`` if needed.
-
-    Raises
-    ------
-    ValueError
-        If the requested length is not a valid Barker length.
-
-    Examples
-    --------
-    >>> barker_sequence(7)
-    array([ 1.,  1.,  1., -1., -1.,  1., -1.], dtype=float32)
+        Complex cross-correlation with shape matching the input
+        dimensionality and the selected ``mode``.
     """
-    if length not in _BARKER_SEQUENCES:
-        valid = sorted(_BARKER_SEQUENCES.keys())
-        raise ValueError(f"No Barker sequence of length {length}. Valid: {valid}")
+    samples, xp, _ = dispatch(samples)
+    template = xp.asarray(template)
 
-    seq = np.array(_BARKER_SEQUENCES[length], dtype="float32")
+    samples, was_1d = as_2d(samples, name="samples")
+    if template.ndim == 1:
+        template = template[None, :]
 
-    logger.debug("Generated Barker-%s sequence.", length)
-    return seq
+    N = samples.shape[-1]
+    L = template.shape[-1]
+    full_len = N + L - 1
+
+    # Smallest power-of-2 >= full_len for FFT efficiency.
+    # `(full_len - 1).bit_length()` is the canonical integer-only formula;
+    # `full_len.bit_length()` would round up even when full_len is already a power of 2.
+    n_fft = 1 << (full_len - 1).bit_length()
+
+    # FFT-based correlation: R[k] = IFFT(FFT(samples) * conj(FFT(template)))
+    # Circular correlation places positive lags at 0..N-1 and negative lags
+    # wrap to n_fft-(L-1)..n_fft-1.  Rearrange to match scipy layout:
+    # lags [-(L-1), ..., -1, 0, 1, ..., N-1]  (total = N + L - 1).
+    SIG = xp.fft.fft(samples, n_fft, axis=-1)
+    TPL = xp.fft.fft(template, n_fft, axis=-1)
+    corr_circ = xp.fft.ifft(SIG * xp.conj(TPL), axis=-1)
+
+    # Gather negative lags (indices n_fft-(L-1) .. n_fft-1) then positive (0 .. N-1)
+    neg_lags = corr_circ[..., n_fft - L + 1 :]  # length L-1
+    pos_lags = corr_circ[..., :N]  # length N
+    corr = xp.concatenate([neg_lags, pos_lags], axis=-1)  # length N+L-1
+
+    # Apply mode trimming
+    if mode == "positive_lags":
+        corr = corr_circ[..., :N]  # zero-copy view; lags 0 ... N-1
+    elif mode == "same":
+        start = (L - 1) // 2
+        corr = corr[..., start : start + N]
+    elif mode == "valid":
+        valid_len = max(N, L) - min(N, L) + 1
+        start = min(N, L) - 1
+        corr = corr[..., start : start + valid_len]
+    # mode == "full": no trimming needed
+
+    if was_1d:
+        return corr[0]
+    return corr
 
 
-def zadoff_chu_sequence(length: int, root: int = 1) -> ArrayType:
-    r"""
-    Generates a Zadoff-Chu (ZC) synchronization sequence.
+def _parabolic_peak_offset(
+    y_prev: ArrayType,
+    y_curr: ArrayType,
+    y_next: ArrayType,
+    xp: Any,
+    *,
+    log: bool = False,
+    log_eps: float = 1e-300,
+    denom_eps: float | None = None,
+) -> ArrayType:
+    r"""Three-point (log-)parabolic sub-bin/sub-sample peak-offset fit.
 
-    ZC sequences are Complex-valued, Constant Amplitude Zero
-    Auto-Correlation (CAZAC) sequences. They possess the unique property
-    that their periodic auto-correlation is zero at all non-zero lags,
-    and their DFT is also a ZC sequence. This makes them ideal for
-    timing and frequency synchronization in systems like LTE and 5G NR.
+    Fits a parabola through three samples straddling a peak (bins/samples
+    k-1, k, k+1) - or through their logs, for the standard log-parabolic
+    (Gaussian-equivalent) fit - and returns the offset of the true peak
+    relative to the center sample, clipped to ``[-0.5, 0.5]``:
+
+        delta = 0.5 * (y_prev - y_next) / (y_prev - 2*y_curr + y_next)
+
+    Shared by every three-point peak-interpolation site in the library:
+    the FOE M-th-power estimator's magnitude-domain fit
+    (``frequency.estimate_frequency_offset_mth_power``, ``log=False``), the
+    two log-parabolic tone-refinement estimators
+    (``frequency.find_bias_tone``, ``frequency._refine_tones_from_spectrum``,
+    ``log=True``), and the fractional-delay estimator
+    (``timing.estimate_fractional_delay``, either fit) - which first
+    phase-rotates a complex peak onto the real axis (a preprocessing step
+    outside this function's scope) before calling this with its own
+    ``log_eps``/``denom_eps`` tuning.  Inputs may be plain Python floats
+    with ``xp=numpy`` (host scalars) or device arrays (NumPy/CuPy) - the
+    arithmetic is expressed purely through ``xp``, so both execution models
+    are supported by the same implementation.
 
     Parameters
     ----------
-    length : int
-        The sequence length (N_ZC). For optimal cross-correlation
-        properties, this should be a prime number.
-    root : int, default 1
-        The root index (u). Must be relatively prime to `length`.
+    y_prev, y_curr, y_next : array_like or float
+        Samples at bins/positions k-1, k, k+1.
+    xp : module
+        Array module (``numpy``/``cupy``) providing ``log``, ``maximum``,
+        ``abs``, ``where``, ``ones_like``, ``zeros_like``, ``clip``.
+    log : bool, default False
+        If True, fits to ``log(max(y, log_eps))`` (log-parabolic / Gaussian
+        fit - standard for spectral-magnitude tone estimation). If False,
+        fits directly to ``y`` (magnitude-domain fit).
+    log_eps : float, default 1e-300
+        Clamp floor before taking the log. Only used when ``log=True``.
+    denom_eps : float, optional
+        Threshold below which the fit denominator is treated as degenerate
+        (returns ``delta=0`` instead of dividing). Defaults to ``1e-30`` when
+        ``log=True``, ``1e-15`` when ``log=False`` - the values already in
+        use at every call site except ``timing.estimate_fractional_delay``,
+        which passes its own tuning explicitly.
 
     Returns
     -------
-    array_like
-        Complex Zadoff-Chu symbols of unit magnitude.
-        Shape: (length,). Data type: `complex64`.
-
-    Notes
-    -----
-    - For odd lengths: x[n] = exp(-j * pi * u * n * (n + 1) / N_ZC)
-    - For even lengths: x[n] = exp(-j * pi * u * n^2 / N_ZC)
-    - ZC sequences have exceptionally low Peak-to-Average Power Ratio (PAPR).
+    delta : same type as inputs
+        Sub-bin/sub-sample offset in ``[-0.5, 0.5]``.
     """
-    if length < 1:
-        raise ValueError("Length must be positive.")
-    if root < 1 or root >= length:
-        raise ValueError(f"Root must be in [1, {length - 1}].")
+    if denom_eps is None:
+        denom_eps = 1e-30 if log else 1e-15
+    if log:
+        y_prev = xp.log(xp.maximum(y_prev, log_eps))
+        y_curr = xp.log(xp.maximum(y_curr, log_eps))
+        y_next = xp.log(xp.maximum(y_next, log_eps))
 
-    xp = np
-
-    # ZC formula: x[n] = exp(-j * pi * u * n * (n+1) / N)
-    n = xp.arange(length)
-    if length % 2 == 0:
-        # Even length: x[n] = exp(-j * pi * u * n^2 / N)
-        seq = xp.exp(-1j * xp.pi * root * n * n / length)
-    else:
-        # Odd length: x[n] = exp(-j * pi * u * n * (n+1) / N)
-        seq = xp.exp(-1j * xp.pi * root * n * (n + 1) / length)
-
-    seq = seq.astype(xp.complex64)
-
-    logger.debug("Generated ZC sequence: length=%s, root=%s.", length, root)
-    return seq
+    denom = y_prev - 2.0 * y_curr + y_next
+    valid = xp.abs(denom) > denom_eps
+    safe_denom = xp.where(valid, denom, xp.ones_like(denom))
+    raw = 0.5 * (y_prev - y_next) / safe_denom
+    delta = xp.where(valid, raw, xp.zeros_like(raw))
+    return xp.clip(delta, -0.5, 0.5)
 
 
 # -----------------------------------------------------------------------------
@@ -470,8 +531,6 @@ def estimate_timing(
     sample.  For oversampled signals, pass a shaped reference at the same sps
     for best timing SNR.
     """
-    from .helpers import cross_correlate_fft
-
     signal_adapter = adapt_signal(samples, function_name="estimate_timing()")
     samples = signal_adapter.array
     if signal_adapter.signal is not None:

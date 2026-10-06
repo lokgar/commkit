@@ -15,8 +15,9 @@ from ._array import as_2d, broadcast_channels, restore_1d
 from .backend import ArrayType, dispatch, to_device
 from .core._signal_adapter import adapt_signal
 from .core.signal import Signal
-from .helpers import _parabolic_peak_offset, linear_trend_slope
+from .helpers import linear_trend_slope
 from .logger import logger
+from .timing import _parabolic_peak_offset
 
 
 def _modulation_power_m(modulation: str, order: int) -> int:

@@ -142,6 +142,7 @@ module = [
     "commkit._dispersion",
     "commkit._overlap_save",
     "commkit._random",
+    "commkit._sequences",
     "commkit.backend",
     "commkit.filtering",
     "commkit.impairments.*",

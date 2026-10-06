@@ -6,8 +6,9 @@ import numpy as np
 import pytest
 
 from commkit import timing
+from commkit._sequences import zc_mimo_root
 from commkit.core import Preamble, Signal
-from commkit.helpers import cross_correlate_fft, zc_mimo_root
+from commkit.timing import cross_correlate_fft
 from tests.common.conversions import to_numpy
 
 
