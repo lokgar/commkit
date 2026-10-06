@@ -770,7 +770,7 @@ The equalization pass (3.7) gets more commits:
   `offset` must be in `[0, sps)` and factors must be positive integers
   (both used to pass silently). `multirate` type-checks under the strict
   flags.
-- [ ] **3.3e `refactor(spectral, smoothing)!: 2.0 signatures`.** Keyword-only
+- [x] **3.3e `refactor(spectral, smoothing)!: 2.0 signatures`.** Keyword-only
   parameters; `sampling_rate` is a fact. `shift_frequency(samples, *,
   frequency=)` matches `add_pilot_tone(frequency=)`. `spectrogram` returns a
   frozen `Spectrogram(frequencies, times, power)` instead of a 3-tuple;

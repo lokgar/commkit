@@ -66,7 +66,7 @@ def plot_equalizer_result(
         n = len(mse)
         effective = max(1, min(smoothing, n // 3))
         if effective > 1 and n > effective:
-            mse_smooth = moving_average(mse, effective, mode="valid")
+            mse_smooth = moving_average(mse, window=effective, mode="valid")
             # Element k of mode="valid" output averages mse[k : k+effective].
             # Place it at the centre of that window so the x-axis is in
             # actual symbol-index space, not smoothed-bin-index space.

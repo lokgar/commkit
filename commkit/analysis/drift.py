@@ -106,14 +106,16 @@ def separate_drift_phase_noise(
         win = int(round(fs / cutoff)) | 1
         win = max(win, order + 2 + (order % 2 == 0))
         win = min(win, phi2.shape[-1] - (1 - phi2.shape[-1] % 2))
-        drift = savgol_smooth(phi2.astype(xp.float64), win, order, axis=-1)
+        drift = savgol_smooth(
+            phi2.astype(xp.float64), window=win, polyorder=order, axis=-1
+        )
     elif method == "boxcar":
         # moving_average's "same" mode is edge-aware (uniform_filter1d,
         # "nearest" edges) and avoids the zero-padding bias of
         # convolve(mode="same"), which drags the drift estimate toward zero
         # over the first/last window.
         w = max(1, int(round(fs / cutoff)))
-        drift = moving_average(phi2.astype(xp.float64), w, mode="same", axis=-1)
+        drift = moving_average(phi2.astype(xp.float64), window=w, mode="same", axis=-1)
     else:
         raise ValueError(f"Unknown method {method!r}.")
 

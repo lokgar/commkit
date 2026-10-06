@@ -42,7 +42,9 @@ class TestDemultiplexPolarizationTones:
 
         fs = 100.0
         s = self._streams(xp)
-        tx = add_pilot_tone(s, fs, self.TONES, power_ratio_db=-10.0)
+        tx = add_pilot_tone(
+            s, sampling_rate=fs, frequency=self.TONES, power_ratio_db=-10.0
+        )
         f_used = grid_frequency(self.TONES, sampling_rate=fs, num_samples=s.shape[-1])
         rx = apply_polarization_mixing(tx, theta=0.6)  # frequency-flat Jones mix
 
@@ -61,7 +63,9 @@ class TestDemultiplexPolarizationTones:
 
         fs = 100.0
         s = self._streams(xp, N=8192)
-        tx = add_pilot_tone(s, fs, self.TONES, power_ratio_db=-8.0)
+        tx = add_pilot_tone(
+            s, sampling_rate=fs, frequency=self.TONES, power_ratio_db=-8.0
+        )
         f_used = grid_frequency(self.TONES, sampling_rate=fs, num_samples=s.shape[-1])
         rx = apply_polarization_mixing(tx, theta=-0.9)
         rng = xp.random.RandomState(123)
@@ -79,7 +83,9 @@ class TestDemultiplexPolarizationTones:
 
         fs = 100.0
         s = self._streams(xp)
-        tx = add_pilot_tone(s, fs, self.TONES, power_ratio_db=-10.0)
+        tx = add_pilot_tone(
+            s, sampling_rate=fs, frequency=self.TONES, power_ratio_db=-10.0
+        )
         f_used = grid_frequency(self.TONES, sampling_rate=fs, num_samples=s.shape[-1])
         demuxed, W = equalization.demultiplex_polarization_tones_static(
             tx, fs, f_used, return_matrix=True
@@ -92,7 +98,9 @@ class TestDemultiplexPolarizationTones:
 
         fs = 100.0
         s = self._streams(xp, C=2, N=8192)
-        tx = add_pilot_tone(s, fs, self.TONES, power_ratio_db=-10.0)
+        tx = add_pilot_tone(
+            s, sampling_rate=fs, frequency=self.TONES, power_ratio_db=-10.0
+        )
         f_used = grid_frequency(self.TONES, sampling_rate=fs, num_samples=s.shape[-1])
         rng = xp.random.RandomState(7)
         J = (rng.randn(3, 2) + 1j * rng.randn(3, 2)).astype(xp.complex64)  # (3, 2)
@@ -124,7 +132,9 @@ class TestDemultiplexPolarizationTones:
 
         fs = 100.0
         s = self._streams(xp)
-        tx = add_pilot_tone(s, fs, self.TONES, power_ratio_db=-10.0)
+        tx = add_pilot_tone(
+            s, sampling_rate=fs, frequency=self.TONES, power_ratio_db=-10.0
+        )
         f_used = grid_frequency(self.TONES, sampling_rate=fs, num_samples=s.shape[-1])
         rx = apply_polarization_mixing(tx, theta=0.6)
         sig = Signal(samples=rx, sampling_rate=fs, symbol_rate=fs)
@@ -142,7 +152,9 @@ class TestDemultiplexPolarizationTones:
 
         fs = 100.0
         s = self._streams(xp)
-        tx = add_pilot_tone(s, fs, self.TONES, power_ratio_db=-10.0)
+        tx = add_pilot_tone(
+            s, sampling_rate=fs, frequency=self.TONES, power_ratio_db=-10.0
+        )
         f_used = grid_frequency(self.TONES, sampling_rate=fs, num_samples=s.shape[-1])
         sig = Signal(samples=tx, sampling_rate=fs, symbol_rate=fs)
 
@@ -171,7 +183,9 @@ class TestDemultiplexPolarizationTonesDynamic:
         fs = 100.0
         N = 16384
         s = self._streams(xp, N=N)
-        tx = add_pilot_tone(s, fs, self.TONES, power_ratio_db=-8.0)
+        tx = add_pilot_tone(
+            s, sampling_rate=fs, frequency=self.TONES, power_ratio_db=-8.0
+        )
         f_used = grid_frequency(self.TONES, sampling_rate=fs, num_samples=s.shape[-1])
         # SOP sweeps a full ~pi/2 across the capture - the static average Jones
         # matrix matches no instant, so its cross-talk rejection collapses.
@@ -202,7 +216,9 @@ class TestDemultiplexPolarizationTonesDynamic:
 
         fs = 100.0
         s = self._streams(xp, N=8192)
-        tx = add_pilot_tone(s, fs, self.TONES, power_ratio_db=-10.0)
+        tx = add_pilot_tone(
+            s, sampling_rate=fs, frequency=self.TONES, power_ratio_db=-10.0
+        )
         f_used = grid_frequency(self.TONES, sampling_rate=fs, num_samples=s.shape[-1])
         rx = apply_polarization_mixing(tx, theta=0.6)
 
@@ -219,7 +235,9 @@ class TestDemultiplexPolarizationTonesDynamic:
         fs = 100.0
         N = 8192
         s = self._streams(xp, N=N)
-        tx = add_pilot_tone(s, fs, self.TONES, power_ratio_db=-10.0)
+        tx = add_pilot_tone(
+            s, sampling_rate=fs, frequency=self.TONES, power_ratio_db=-10.0
+        )
         f_used = grid_frequency(self.TONES, sampling_rate=fs, num_samples=s.shape[-1])
         demuxed, Wg, grid = equalization.demultiplex_polarization_tones_dynamic(
             tx, fs, f_used, track_bandwidth=2.0, return_matrix=True
@@ -245,7 +263,9 @@ class TestDemultiplexPolarizationTonesDynamic:
         N = 8192
         num_taps = 165
         s = self._streams(xp, N=N)
-        tx = add_pilot_tone(s, fs, self.TONES, power_ratio_db=-10.0)
+        tx = add_pilot_tone(
+            s, sampling_rate=fs, frequency=self.TONES, power_ratio_db=-10.0
+        )
         f_used = grid_frequency(self.TONES, sampling_rate=fs, num_samples=s.shape[-1])
         demuxed, valid = equalization.demultiplex_polarization_tones_dynamic(
             tx, fs, f_used, track_bandwidth=2.0, num_taps=num_taps, trim_edges=True
@@ -264,7 +284,9 @@ class TestDemultiplexPolarizationTonesDynamic:
         fs = 100.0
         N = 8192
         s = self._streams(xp, N=N)
-        tx = add_pilot_tone(s, fs, self.TONES, power_ratio_db=-10.0)
+        tx = add_pilot_tone(
+            s, sampling_rate=fs, frequency=self.TONES, power_ratio_db=-10.0
+        )
         f_used = grid_frequency(self.TONES, sampling_rate=fs, num_samples=s.shape[-1])
         result = equalization.demultiplex_polarization_tones_dynamic(
             tx, fs, f_used, track_bandwidth=2.0, trim_edges=True, return_matrix=True
@@ -281,7 +303,9 @@ class TestDemultiplexPolarizationTonesDynamic:
 
         fs = 100.0
         s = self._streams(xp, N=8192)
-        tx = add_pilot_tone(s, fs, self.TONES, power_ratio_db=-10.0)
+        tx = add_pilot_tone(
+            s, sampling_rate=fs, frequency=self.TONES, power_ratio_db=-10.0
+        )
         f_used = grid_frequency(self.TONES, sampling_rate=fs, num_samples=s.shape[-1])
         rx = apply_polarization_mixing(tx, theta=0.6)
         sig = Signal(samples=rx, sampling_rate=fs, symbol_rate=fs)
@@ -301,7 +325,9 @@ class TestDemultiplexPolarizationTonesDynamic:
 
         fs = 100.0
         s = self._streams(xp, N=8192)
-        tx = add_pilot_tone(s, fs, self.TONES, power_ratio_db=-10.0)
+        tx = add_pilot_tone(
+            s, sampling_rate=fs, frequency=self.TONES, power_ratio_db=-10.0
+        )
         f_used = grid_frequency(self.TONES, sampling_rate=fs, num_samples=s.shape[-1])
         sig = Signal(samples=tx, sampling_rate=fs, symbol_rate=fs)
 
@@ -322,7 +348,9 @@ class TestDemultiplexPolarizationTonesDynamic:
         fs = 100.0
         N = 8192
         s = self._streams(xp, N=N)
-        tx = add_pilot_tone(s, fs, self.TONES, power_ratio_db=-10.0)
+        tx = add_pilot_tone(
+            s, sampling_rate=fs, frequency=self.TONES, power_ratio_db=-10.0
+        )
         f_used = grid_frequency(self.TONES, sampling_rate=fs, num_samples=s.shape[-1])
         sig = Signal(samples=tx, sampling_rate=fs, symbol_rate=fs)
 

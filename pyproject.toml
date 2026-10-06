@@ -145,6 +145,8 @@ module = [
     "commkit.mapping.*",
     "commkit.math",
     "commkit.multirate",
+    "commkit.smoothing",
+    "commkit.spectral",
 ]
 # `strict` is global-only in mypy; these are its per-module flags.
 disallow_untyped_defs = true

@@ -392,7 +392,7 @@ def plot_spectrogram(
     from .. import spectral
 
     # Calculate spectrogram
-    f, t, Sxx = spectral.spectrogram(
+    spec = spectral.spectrogram(
         samples,
         sampling_rate=sampling_rate,
         window=window,
@@ -402,14 +402,13 @@ def plot_spectrogram(
         detrend=detrend,
         return_onesided=return_onesided,
         scaling=scaling,
-        axis=axis,
         mode=mode,
     )
 
     # Move to CPU for plotting
-    f = to_device(f, "cpu")
-    t = to_device(t, "cpu")
-    Sxx = to_device(Sxx, "cpu")
+    f = to_device(spec.frequencies, "cpu")
+    t = to_device(spec.times, "cpu")
+    Sxx = to_device(spec.values, "cpu")
 
     # Shift frequency axis first
     f_shifted = f + center_frequency

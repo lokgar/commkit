@@ -165,7 +165,7 @@ class TestCprPilotTone:
         )
         samples = xp.asarray(sig.samples)
         samples = spectral.add_pilot_tone(
-            samples, fs, self.F_TONE, power_ratio_db=psr_db
+            samples, sampling_rate=fs, frequency=self.F_TONE, power_ratio_db=psr_db
         )
 
         N = samples.shape[-1]
@@ -344,8 +344,8 @@ class TestCprPilotTones:
         # phase offset δ so the inter-tone differential is non-trivial.
         samples = spectral.add_pilot_tone(
             samples,
-            fs,
-            [self.F0, self.F1],
+            sampling_rate=fs,
+            frequency=[self.F0, self.F1],
             power_ratio_db=list(psr_db),
             phase_init=0.0,
         )

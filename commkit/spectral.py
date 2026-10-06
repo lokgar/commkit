@@ -6,7 +6,8 @@ manipulation, optimized for both CPU and GPU backends. It supports Welch's
 Power Spectral Density (PSD) method and phase-continuous frequency shifting.
 """
 
-from collections.abc import Sequence
+from collections.abc import Callable, Sequence
+from dataclasses import dataclass
 from typing import Any, cast
 
 import numpy as np
@@ -20,7 +21,7 @@ from .logger import logger
 
 def _validate_and_shift(
     xp: Any, is_complex: bool, return_onesided: bool | None, label: str
-):
+) -> tuple[bool, Callable[..., tuple[ArrayType, ...]]]:
     """Resolve/validate ``return_onesided`` and build the matching post-shift closure.
 
     Shared by :func:`welch_psd` and :func:`spectrogram`, which both: default
@@ -56,7 +57,9 @@ def _validate_and_shift(
     if is_complex and return_onesided:
         raise ValueError(f"Cannot compute one-sided {label} for complex data.")
 
-    def shift(f, *arrays_with_axis):
+    def shift(
+        f: ArrayType, *arrays_with_axis: tuple[ArrayType, int]
+    ) -> tuple[ArrayType, ...]:
         if return_onesided:
             return (f, *(a for a, _ in arrays_with_axis))
         f_shifted = xp.fft.fftshift(f)
@@ -110,7 +113,8 @@ def grid_frequency(
 
 def shift_frequency(
     samples: ArrayType | Signal,
-    offset: float,
+    *,
+    frequency: float,
     sampling_rate: float | None = None,
 ) -> ArrayType | Signal:
     """
@@ -129,31 +133,29 @@ def shift_frequency(
     ----------
     samples : array_like or Signal
         Input signal samples. Shape: (..., N_samples).
-    offset : float
-        Target frequency shift in Hz. Positive values shift the spectrum
-        towards higher frequencies.
-    sampling_rate : float
-        Sampling rate in Hz.
+    frequency : float
+        Requested frequency shift in Hz; positive values move the spectrum
+        up.
+    sampling_rate : float, optional
+        Sampling rate in Hz.  Taken from the Signal; required for array
+        input.  A value that disagrees with the Signal raises.
 
     Returns
     -------
     array_like or Signal
         The frequency-shifted samples on the input's device (a new Signal for
         Signal input).  The applied shift is
-        ``grid_frequency(offset, sampling_rate=fs, num_samples=N)``.
+        ``grid_frequency(frequency, sampling_rate=fs, num_samples=N)``.
 
     Notes
     -----
     The quantization ensures that the applied shift corresponds to an
     integer number of cycles over the signal duration, which is critical
     for preserving the circularity of the signal's phase.
-
-    When ``samples`` is a :class:`Signal`, ``sampling_rate`` is taken from the
-    signal.
     """
     signal_adapter = adapt_signal(samples, function_name="shift_frequency()")
     samples = signal_adapter.array
-    sampling_rate = signal_adapter.resolve_required("sampling_rate", sampling_rate)
+    sampling_rate = signal_adapter.resolve_fact("sampling_rate", sampling_rate)
 
     samples, xp, _ = dispatch(samples)
 
@@ -162,13 +164,15 @@ def shift_frequency(
     df = sampling_rate / n
 
     # Quantize offset to nearest bin to ensure phase continuity
-    actual_offset = grid_frequency(offset, sampling_rate=sampling_rate, num_samples=n)
+    actual_offset = grid_frequency(
+        frequency, sampling_rate=sampling_rate, num_samples=n
+    )
 
-    if not xp.isclose(offset, actual_offset):
+    if not xp.isclose(frequency, actual_offset):
         logger.warning(
             "Requested offset %.3f Hz quantized to %.3f Hz (step %.3f Hz) "
             "to maintain phase continuity.",
-            offset,
+            frequency,
             actual_offset,
             df,
         )
@@ -200,8 +204,9 @@ def shift_frequency(
 
 def add_pilot_tone(
     samples: ArrayType | Signal,
+    *,
+    frequency: float | Sequence[float],
     sampling_rate: float | None = None,
-    frequency: float | Sequence[float] | None = None,
     power_ratio_db: float | Sequence[float] = -15.0,
     phase_init: float = 0.0,
     renormalize: bool = False,
@@ -231,8 +236,9 @@ def add_pilot_tone(
         (``demultiplex_polarization_tones``).  Each value is quantized to the
         nearest FFT bin ``f_s/N`` (see Notes); the **actual** applied
         frequency(ies) are returned.
-    sampling_rate : float
-        Sampling rate fs in Hz.
+    sampling_rate : float, optional
+        Sampling rate fs in Hz.  Taken from the Signal; required for array
+        input.  A value that disagrees with the Signal raises.
     power_ratio_db : float or sequence of float, default -15.0
         Pilot-to-signal power ratio (PSR) in dB: 10*log10(P_tone / P_signal).
         Typical range -20 to -10 dB.  A **scalar** applies the same PSR to every
@@ -269,26 +275,10 @@ def add_pilot_tone(
     playback on an AWG/DAC.  The quantization error is at most fs/(2N).
     The phase ramp is accumulated in float64 to avoid trig argument-reduction
     error for large N.
-
-    When ``samples`` is a :class:`Signal`, the sampling rate is taken from the
-    signal, so the **second positional argument is the frequency** (i.e. call
-    ``add_pilot_tone(sig, freq, ...)``).
     """
     signal_adapter = adapt_signal(samples, function_name="add_pilot_tone()")
     samples = signal_adapter.array
-    if signal_adapter.signal is not None:
-        sig = signal_adapter.signal
-        # Signal rate is implicit; the second positional carries the frequency.
-        freq = frequency if frequency is not None else sampling_rate
-        if freq is None:
-            raise ValueError("add_pilot_tone() requires a frequency.")
-        sampling_rate = sig.sampling_rate
-        frequency = freq
-
-    if sampling_rate is None or frequency is None:
-        raise ValueError(
-            "add_pilot_tone() requires sampling_rate and frequency for array input."
-        )
+    sampling_rate = signal_adapter.resolve_fact("sampling_rate", sampling_rate)
 
     samples, xp, _ = dispatch(samples)
     samples, was_1d = as_2d(samples, name="samples")
@@ -391,6 +381,7 @@ def add_pilot_tone(
 
 def welch_psd(
     samples: ArrayType | Signal,
+    *,
     sampling_rate: float | None = None,
     nperseg: int = 256,
     detrend: str | bool | None = False,
@@ -400,7 +391,6 @@ def welch_psd(
     nfft: int | None = None,
     scaling: str = "density",
     return_onesided: bool | None = None,
-    axis: int = -1,
 ) -> tuple[ArrayType, ArrayType]:
     """
     Estimates the Power Spectral Density (PSD) using Welch's method.
@@ -413,8 +403,9 @@ def welch_psd(
     ----------
     samples : array_like or Signal
         Input signal samples. Shape: (..., N_samples).
-    sampling_rate : float
-        Sampling rate in Hz.
+    sampling_rate : float, optional
+        Sampling rate in Hz.  Taken from the Signal; required for array
+        input.  A value that disagrees with the Signal raises.
     nperseg : int, default 256
         Length of each segment. A longer segment increases frequency
         resolution but also increases the variance of the estimate.
@@ -440,14 +431,13 @@ def welch_psd(
         If True, returns a one-sided spectrum (frequencies 0 to f_s/2)
         for real-valued data. For complex data, only two-sided spectra
         (frequencies -f_s/2 to f_s/2) are supported.
-        Axis along which to compute the PSD.
 
     Returns
     -------
     f : array_like
-        Array of sample frequencies.
+        Frequencies in Hz, ``(F,)``.
     Pxx : array_like
-        Power spectral density (linear scale, units: V^2/Hz).
+        Power spectral density (linear, V²/Hz), ``(F,)`` or ``(C, F)``.
 
     Raises
     ------
@@ -456,9 +446,8 @@ def welch_psd(
     """
     signal_adapter = adapt_signal(samples, function_name="welch_psd()")
     samples = signal_adapter.array
-    sampling_rate = signal_adapter.resolve_required("sampling_rate", sampling_rate)
-    if signal_adapter.signal is not None:
-        axis = -1
+    sampling_rate = signal_adapter.resolve_fact("sampling_rate", sampling_rate)
+    axis = -1
 
     samples, xp, sp = dispatch(samples)
     is_complex = xp.iscomplexobj(samples)
@@ -488,8 +477,30 @@ def welch_psd(
     return f, Pxx
 
 
+@dataclass(frozen=True)
+class Spectrogram:
+    """Result of :func:`spectrogram`.
+
+    Attributes
+    ----------
+    frequencies : array_like
+        Frequencies in Hz, ``(F,)``, ascending (two-sided spectra are
+        fftshifted).
+    times : array_like
+        Segment centre times in seconds, ``(T,)``.
+    values : array_like
+        ``(F, T)`` or ``(C, F, T)``; power density, power, complex, magnitude
+        or phase depending on ``mode``.
+    """
+
+    frequencies: ArrayType
+    times: ArrayType
+    values: ArrayType
+
+
 def spectrogram(
     samples: ArrayType | Signal,
+    *,
     sampling_rate: float | None = None,
     window: str | tuple[Any, ...] | Any = "hann",
     nperseg: int = 256,
@@ -498,9 +509,8 @@ def spectrogram(
     detrend: str | bool | None = False,
     return_onesided: bool | None = None,
     scaling: str = "density",
-    axis: int = -1,
     mode: str = "psd",
-) -> tuple[ArrayType, ArrayType, ArrayType]:
+) -> Spectrogram:
     """
     Computes a spectrogram with consecutive Fourier transforms.
 
@@ -508,8 +518,9 @@ def spectrogram(
     ----------
     samples : array_like or Signal
         Input signal samples. Shape: (..., N_samples).
-    sampling_rate : float
-        Sampling rate in Hz.
+    sampling_rate : float, optional
+        Sampling rate in Hz.  Taken from the Signal; required for array
+        input.  A value that disagrees with the Signal raises.
     window : str or tuple or array_like, default "hann"
         Desired window to use. If `window` is a string or tuple, it is
         passed to `scipy.signal.get_window` to generate the window values.
@@ -532,20 +543,14 @@ def spectrogram(
         Selects between computing the power spectral density ('density')
         where Sxx has units of V**2/Hz and computing the power spectrum
         ('spectrum') where Sxx has units of V**2.
-    axis : int, default -1
-        The axis along which to compute the spectrogram.
     mode : {"psd", "complex", "magnitude", "angle", "phase"}, default "psd"
         Type of spectrogram to return. Options are 'psd', 'complex',
         'magnitude', 'angle', 'phase'.
 
     Returns
     -------
-    f : array_like
-        Array of sample frequencies.
-    t : array_like
-        Array of segment times.
-    Sxx : array_like
-        Spectrogram of the signal.
+    Spectrogram
+        ``frequencies``, ``times`` and ``values``.
 
     Raises
     ------
@@ -554,9 +559,8 @@ def spectrogram(
     """
     signal_adapter = adapt_signal(samples, function_name="spectrogram()")
     samples = signal_adapter.array
-    sampling_rate = signal_adapter.resolve_required("sampling_rate", sampling_rate)
-    if signal_adapter.signal is not None:
-        axis = -1
+    sampling_rate = signal_adapter.resolve_fact("sampling_rate", sampling_rate)
+    axis = -1
 
     samples, xp, sp = dispatch(samples)
     is_complex = xp.iscomplexobj(samples)
@@ -582,4 +586,4 @@ def spectrogram(
     # Sxx frequency axis is at position axis_pos in output
     axis_pos = axis % samples.ndim
     f, Sxx = shift(f, (Sxx, axis_pos))
-    return f, t, Sxx
+    return Spectrogram(frequencies=f, times=t, values=Sxx)

@@ -149,7 +149,7 @@ class TestMIMODSPOperations:
         samples = xp.ones((2, 100), dtype=complex)
         sig = Signal(samples=samples, sampling_rate=100.0, symbol_rate=100.0)
 
-        sig = spectral.shift_frequency(sig, 25.0)
+        sig = spectral.shift_frequency(sig, frequency=25.0)
         expected_sample_1 = xp.exp(1j * xp.pi / 2)
 
         xpt.assert_allclose(sig.samples[0, 0], 1.0, atol=1e-6)

@@ -262,7 +262,6 @@ def fm_noise_psd(
         nperseg=nperseg,
         detrend=detrend,
         return_onesided=True,
-        axis=-1,
     )
     if bias_correction:
         # S_f,est = S_f,true · sinc²(fT); undo the diff-differentiator droop.

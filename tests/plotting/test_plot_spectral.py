@@ -193,12 +193,12 @@ class TestPlotSpectrogram:
         )
         sig = sig.replace(samples=xp.asarray(sig.samples))
 
-        f, t, Sxx = spectral.spectrogram(sig, nperseg=64, noverlap=32)
-        assert isinstance(f, xp.ndarray)
-        assert isinstance(t, xp.ndarray)
-        assert isinstance(Sxx, xp.ndarray)
-        assert len(f) == 64
-        assert Sxx.shape[-1] == len(t)
+        spec = spectral.spectrogram(sig, nperseg=64, noverlap=32)
+        assert isinstance(spec.frequencies, xp.ndarray)
+        assert isinstance(spec.times, xp.ndarray)
+        assert isinstance(spec.values, xp.ndarray)
+        assert len(spec.frequencies) == 64
+        assert spec.values.shape[-1] == len(spec.times)
 
         fig, ax = plotting.plot_spectrogram(sig, nperseg=64, show=False)
         assert fig is not None

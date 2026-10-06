@@ -26,7 +26,7 @@ from .logger import logger
 
 
 def moving_average(
-    x: ArrayType, window: int, *, mode: str = "same", axis: int = -1
+    x: ArrayType, *, window: int, mode: str = "same", axis: int = -1
 ) -> ArrayType:
     """
     Boxcar moving average.
@@ -74,7 +74,7 @@ def moving_average(
 
 
 def savgol_smooth(
-    x: ArrayType, window: int, polyorder: int, *, axis: int = -1
+    x: ArrayType, *, window: int, polyorder: int, axis: int = -1
 ) -> ArrayType:
     """
     Savitzky-Golay smoothing: local polynomial regression over a sliding window.
@@ -106,7 +106,7 @@ def savgol_smooth(
     return sp.signal.savgol_filter(x, window, polyorder, axis=axis)
 
 
-def smooth_density_2d(hist: ArrayType, sigma: float = 1.0) -> ArrayType:
+def smooth_density_2d(hist: ArrayType, *, sigma: float = 1.0) -> ArrayType:
     """
     Gaussian-blur a 2-D histogram/density image for nicer visual contours.
 

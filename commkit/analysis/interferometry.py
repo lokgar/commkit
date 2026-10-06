@@ -775,9 +775,7 @@ def linewidth_dsh(
         z2, was_1d, xp = _analytic_beat(samples)
         n = z2.shape[-1]
         npseg = _resolve_nperseg(n, nperseg, cap=1 << 14)
-        f, P = welch_psd(
-            z2, sampling_rate=fs, nperseg=npseg, return_onesided=False, axis=-1
-        )
+        f, P = welch_psd(z2, sampling_rate=fs, nperseg=npseg, return_onesided=False)
         # From here on the work is scalar peak/width searching on an
         # nperseg-sized spectrum - host-side NumPy on purpose.
         f_cpu = np.asarray(to_device(f, "cpu"), dtype=np.float64)
@@ -802,7 +800,7 @@ def linewidth_dsh(
             if np.isfinite(w3_rough):
                 w_bins = min(int(w3_rough / (5.0 * bin_hz)) | 1, 101)
                 if w_bins >= 3:
-                    p = moving_average(p, w_bins, mode="same")
+                    p = moving_average(p, window=w_bins, mode="same")
 
             i_pk = int(np.argmax(p))
             f_peak[ch] = f_cpu[i_pk]
