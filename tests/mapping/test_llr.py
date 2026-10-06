@@ -7,6 +7,7 @@ import pytest
 
 from commkit import mapping
 from commkit.core import Signal
+from tests.common.conversions import to_numpy
 
 
 class TestComputeLLRCore:
@@ -23,9 +24,9 @@ class TestComputeLLRCore:
         symbols = mapping.map_bits(bits, modulation, order)
 
         llrs = mapping.compute_llr(
-            symbols, modulation, order, noise_var=1e-6, method="maxlog", output="numpy"
+            symbols, modulation, order, noise_var=1e-6, method="maxlog"
         )
-        hard_from_llr = (np.asarray(llrs) < 0).astype("int32")
+        hard_from_llr = (to_numpy(llrs) < 0).astype("int32")
         xpt.assert_array_equal(xp.asarray(hard_from_llr), bits)
 
     def test_compute_llr_roundtrip(self, xp: Any, xpt: Any) -> None:
@@ -36,10 +37,8 @@ class TestComputeLLRCore:
         bits = xp.array([0, 1, 0, 1, 1, 0, 0, 0, 1, 1, 1, 0], dtype=xp.int32)
         symbols = mapping.map_bits(bits, modulation, order)
 
-        llrs = mapping.compute_llr(
-            symbols, modulation, order, noise_var=1e-6, output="numpy"
-        )
-        hard_from_llr = (np.asarray(llrs) < 0).astype("int32")
+        llrs = mapping.compute_llr(symbols, modulation, order, noise_var=1e-6)
+        hard_from_llr = (to_numpy(llrs) < 0).astype("int32")
         hard_direct = mapping.demap_symbols_hard(symbols, modulation, order)
 
         xpt.assert_array_equal(xp.asarray(hard_from_llr), hard_direct)
@@ -52,24 +51,14 @@ class TestComputeLLRCore:
         bits = xp.array([0, 0, 0, 1, 1, 0, 1, 1], dtype=xp.int32)
         symbols = mapping.map_bits(bits, modulation, order)
 
-        llrs_maxlog = np.asarray(
+        llrs_maxlog = to_numpy(
             mapping.compute_llr(
-                symbols,
-                modulation,
-                order,
-                noise_var=0.01,
-                method="maxlog",
-                output="numpy",
+                symbols, modulation, order, noise_var=0.01, method="maxlog"
             )
         )
-        llrs_exact = np.asarray(
+        llrs_exact = to_numpy(
             mapping.compute_llr(
-                symbols,
-                modulation,
-                order,
-                noise_var=0.01,
-                method="exact",
-                output="numpy",
+                symbols, modulation, order, noise_var=0.01, method="exact"
             )
         )
 
@@ -96,31 +85,43 @@ class TestComputeLLRCore:
         symbols = mapping.map_bits(bits, modulation, order)
         noise_var = 0.1
 
-        llrs_maxlog = np.asarray(
-            mapping.compute_llr(
-                symbols, modulation, order, noise_var, method="maxlog", output="numpy"
-            )
+        llrs_maxlog = to_numpy(
+            mapping.compute_llr(symbols, modulation, order, noise_var, method="maxlog")
         )
-        llrs_exact = np.asarray(
-            mapping.compute_llr(
-                symbols, modulation, order, noise_var, method="exact", output="numpy"
-            )
+        llrs_exact = to_numpy(
+            mapping.compute_llr(symbols, modulation, order, noise_var, method="exact")
         )
         assert np.array_equal(np.sign(llrs_exact), np.sign(llrs_maxlog))
 
-    def test_compute_llr_real_jax_symbols(self) -> None:
-        """compute_llr with real-valued JAX symbols (PAM) casts constellation to float32."""
-        jax = pytest.importorskip("jax")
-        import jax.numpy as jnp
-
+    def test_compute_llr_real_symbols(self, xp: Any) -> None:
+        """Real-valued (PAM) symbols give float32 LLRs on the input's device."""
         bits = np.array([0, 0, 0, 1, 1, 0, 1, 1], dtype="int32")
-        symbols_np = mapping.map_bits(bits, "pam", 4)
-        symbols_jax = jnp.asarray(symbols_np)
-        assert not jnp.iscomplexobj(symbols_jax)
+        symbols = xp.asarray(mapping.map_bits(bits, "pam", 4))
+        assert not xp.iscomplexobj(symbols)
 
-        llrs = mapping.compute_llr(symbols_jax, "pam", 4, noise_var=0.1)
-        assert isinstance(llrs, jax.Array)
+        llrs = mapping.compute_llr(symbols, "pam", 4, noise_var=0.1)
+        assert isinstance(llrs, xp.ndarray)
+        assert llrs.dtype == xp.float32
         assert llrs.shape == (len(bits),)
+
+    def test_qpsk_llr_matches_closed_form(self, xp: Any, xpt: Any) -> None:
+        """Gray QPSK: each bit depends on one quadrature only, so exact and
+        max-log coincide and |LLR| = 2*sqrt(2)*|y_I or y_Q| / sigma^2."""
+        rng = np.random.default_rng(3)
+        y = (rng.standard_normal(64) + 1j * rng.standard_normal(64)).astype(
+            np.complex64
+        )
+        sigma2 = 0.3
+        exact = mapping.compute_llr(xp.asarray(y), "qam", 4, sigma2, method="exact")
+        maxlog = mapping.compute_llr(xp.asarray(y), "qam", 4, sigma2, method="maxlog")
+        xpt.assert_allclose(exact, maxlog, rtol=1e-4, atol=1e-4)
+        llr = to_numpy(exact).reshape(-1, 2)
+        expected = (
+            2 * np.sqrt(2) / sigma2 * np.stack([np.abs(y.real), np.abs(y.imag)], 1)
+        )
+        np.testing.assert_allclose(
+            np.sort(np.abs(llr), axis=1), np.sort(expected, axis=1), rtol=1e-4
+        )
 
     def test_compute_llr_validation(self, xp: Any) -> None:
         """Invalid modulation order or method raises ValueError."""
@@ -131,108 +132,32 @@ class TestComputeLLRCore:
             mapping.compute_llr(xp.ones(1), "qam", 4, 0.1, method="magic")
 
 
-class TestComputeLLRDifferentiability:
-    """Tests for autodiff gradients and JAX evaluation consistency."""
+class TestComputeLLRDevice:
+    """LLRs are float32 and stay on the input's device."""
 
-    def test_compute_llr_gradient(self) -> None:
-        """jax.grad through LLRs w.r.t. input symbols produces finite gradients."""
-        jax = pytest.importorskip("jax")
-        import jax.numpy as jnp
-
-        symbols_jax = jnp.array([0.7 + 0.7j, -0.7 - 0.7j], dtype="complex64")
-
-        def loss_fn(syms: Any) -> Any:
-            llrs = mapping.compute_llr(syms, "qam", 4, 0.1, method="maxlog")
-            return jnp.sum(llrs**2)
-
-        grad = jax.grad(loss_fn)(symbols_jax)
-        assert grad.shape == symbols_jax.shape
-        assert jnp.all(jnp.isfinite(grad))
-        assert not jnp.all(grad == 0)
-
-    def test_compute_llr_numpy_vs_jax_input_agree(self, xpt: Any) -> None:
-        """NumPy and JAX inputs produce numerically identical LLRs."""
-        pytest.importorskip("jax")
-        import jax.numpy as jnp
-
-        bits = np.array([0, 0, 0, 0, 1, 1, 1, 1, 0, 1, 0, 1], dtype="int32")
-        symbols_np = mapping.map_bits(bits, "psk", 8)
-
+    def test_output_on_input_device(self, xp: Any) -> None:
+        bits = np.array([0, 0, 1, 1, 0, 1, 0, 1], dtype="int32")
+        symbols = xp.asarray(mapping.map_bits(bits, "qam", 16))
         for method in ("maxlog", "exact"):
-            llrs_from_np = mapping.compute_llr(
-                symbols_np, "psk", 8, 0.05, method=method
-            )
-            llrs_from_jax = mapping.compute_llr(
-                jnp.asarray(symbols_np), "psk", 8, 0.05, method=method
-            )
-            xpt.assert_allclose(
-                np.asarray(llrs_from_np), np.asarray(llrs_from_jax), atol=1e-5
-            )
+            llrs = mapping.compute_llr(symbols, "qam", 16, 0.1, method=method)
+            assert isinstance(llrs, xp.ndarray)
+            assert llrs.dtype == xp.float32
 
+    def test_long_records_are_chunked_consistently(self, xp: Any, xpt: Any) -> None:
+        """Results do not depend on how the record is split into chunks."""
+        from commkit.mapping import llr as llr_module
 
-class TestComputeLLROutputModes:
-    """Tests for output argument handling: 'jax', 'numpy', 'input'."""
-
-    def test_compute_llr_output_jax_is_default(self) -> None:
-        """output='jax' (default) returns jax.Array."""
-        jax = pytest.importorskip("jax")
-        bits = np.array([0, 0, 1, 1, 0, 1, 0, 1], dtype="int32")
-        symbols = mapping.map_bits(bits, "qam", 16)
-        llrs = mapping.compute_llr(symbols, "qam", 16, noise_var=0.1, output="jax")
-        assert isinstance(llrs, jax.Array)
-
-    def test_compute_llr_output_numpy_returns_numpy(self) -> None:
-        """output='numpy' returns numpy.ndarray regardless of input backend."""
-        pytest.importorskip("jax")
-        bits = np.array([0, 0, 1, 1, 0, 1, 0, 1], dtype="int32")
-        symbols = mapping.map_bits(bits, "qam", 16)
-        llrs = mapping.compute_llr(symbols, "qam", 16, noise_var=0.1, output="numpy")
-        assert isinstance(llrs, np.ndarray)
-
-    def test_compute_llr_output_numpy_from_jax_input(self) -> None:
-        """output='numpy' from JAX input returns numpy.ndarray."""
-        pytest.importorskip("jax")
-        import jax.numpy as jnp
-
-        bits = np.array([0, 1, 0, 1], dtype="int32")
-        symbols_jax = jnp.asarray(mapping.map_bits(bits, "qam", 4))
-        llrs = mapping.compute_llr(symbols_jax, "qam", 4, noise_var=0.1, output="numpy")
-        assert isinstance(llrs, np.ndarray)
-
-    def test_compute_llr_output_input_preserves_type(self) -> None:
-        """output='input' returns same container type as input."""
-        jax = pytest.importorskip("jax")
-        import jax.numpy as jnp
-
-        # NumPy in -> NumPy out
-        bits = np.array([0, 0, 1, 1, 0, 1, 0, 1], dtype="int32")
-        syms_np = mapping.map_bits(bits, "qam", 16)
-        out_np = mapping.compute_llr(syms_np, "qam", 16, noise_var=0.1, output="input")
-        assert isinstance(out_np, np.ndarray)
-
-        # JAX in -> JAX out
-        syms_jax = jnp.asarray(syms_np)
-        out_jax = mapping.compute_llr(
-            syms_jax, "qam", 16, noise_var=0.1, output="input"
-        )
-        assert isinstance(out_jax, jax.Array)
-
-    def test_compute_llr_output_invalid_raises(self) -> None:
-        """Invalid output destination raises ValueError."""
-        pytest.importorskip("jax")
-        bits = np.array([0, 1], dtype="int32")
-        symbols = mapping.map_bits(bits, "qam", 4)
-        with pytest.raises(ValueError, match="output"):
-            mapping.compute_llr(symbols, "qam", 4, noise_var=0.1, output="cuda")
-
-    def test_compute_llr_output_numpy_values_match_jax(self, xpt: Any) -> None:
-        """output='numpy' produces identical values to output='jax'."""
-        pytest.importorskip("jax")
-        bits = np.array([0, 0, 1, 1, 0, 1, 0, 1, 1, 0, 1, 0, 0, 1, 1, 0], dtype="int32")
-        symbols = mapping.map_bits(bits, "qam", 16)
-        llrs_jax = mapping.compute_llr(symbols, "qam", 16, noise_var=0.1, output="jax")
-        llrs_np = mapping.compute_llr(symbols, "qam", 16, noise_var=0.1, output="numpy")
-        xpt.assert_allclose(np.asarray(llrs_jax), llrs_np, atol=1e-6)
+        rng = np.random.default_rng(4)
+        const = mapping.gray_constellation("qam", 64)
+        y = xp.asarray(const[rng.integers(0, 64, 3000)].astype(np.complex64))
+        full = mapping.compute_llr(y, "qam", 64, 0.05, method="exact")
+        original = llr_module._CHUNK_ELEMENTS
+        try:
+            llr_module._CHUNK_ELEMENTS = 6 * 64 * 7  # 7 symbols per chunk
+            chunked = mapping.compute_llr(y, "qam", 64, 0.05, method="exact")
+        finally:
+            llr_module._CHUNK_ELEMENTS = original
+        xpt.assert_array_equal(full, chunked)
 
 
 class TestComputeLLRSignalIntegration:
@@ -240,7 +165,6 @@ class TestComputeLLRSignalIntegration:
 
     def test_compute_llr_signal_input_uses_metadata(self, xpt: Any) -> None:
         """Signal input resolves symbols and modulation parameters from metadata."""
-        pytest.importorskip("jax")
         bits = np.array([0, 0, 0, 0, 1, 1, 1, 1, 0, 1, 0, 1, 1, 0, 1, 0], dtype="int32")
         symbols = mapping.map_bits(bits, "qam", 16)
         sig = Signal(
@@ -252,15 +176,12 @@ class TestComputeLLRSignalIntegration:
         )
         sig.resolved_symbols = symbols
 
-        llrs_sig = mapping.compute_llr(sig, noise_var=1e-6, output="numpy")
-        llrs_arr = mapping.compute_llr(
-            symbols, "qam", 16, noise_var=1e-6, output="numpy"
-        )
+        llrs_sig = mapping.compute_llr(sig, noise_var=1e-6)
+        llrs_arr = mapping.compute_llr(symbols, "qam", 16, noise_var=1e-6)
         xpt.assert_allclose(llrs_sig, llrs_arr)
 
     def test_compute_llr_signal_input_raises_without_resolved(self) -> None:
         """Signal input missing resolved_symbols raises ValueError."""
-        pytest.importorskip("jax")
         bits = np.array([0, 1, 0, 1], dtype="int32")
         symbols = mapping.map_bits(bits, "qam", 4)
         sig = Signal(samples=symbols, sampling_rate=1.0, symbol_rate=1.0)

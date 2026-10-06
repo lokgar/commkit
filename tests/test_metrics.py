@@ -264,9 +264,7 @@ class TestInformationMetrics:
         bits = rng.integers(0, 2, N * k).astype("int32")
         symbols = map_bits(xp.asarray(bits), "qam", M)
 
-        llrs = compute_llr(symbols, "qam", M, noise_var=1e-6, output="numpy").reshape(
-            N, k
-        )
+        llrs = compute_llr(symbols, "qam", M, noise_var=1e-6).reshape(N, k)
         gmi_val = metrics.gmi(llrs, bits.reshape(N, k))
         assert gmi_val > np.log2(M) - 0.05
 
@@ -279,9 +277,7 @@ class TestInformationMetrics:
         bits = rng.integers(0, 2, N * k).astype("int32")
         symbols = map_bits(xp.asarray(bits), "qam", M)
 
-        llrs = compute_llr(symbols, "qam", M, noise_var=1e6, output="numpy").reshape(
-            N, k
-        )
+        llrs = compute_llr(symbols, "qam", M, noise_var=1e6).reshape(N, k)
         gmi_val = metrics.gmi(llrs, bits.reshape(N, k))
         assert gmi_val < 0.2
 
@@ -289,7 +285,7 @@ class TestInformationMetrics:
         """Flat 1D input: gmi() treats k=1 and returns per-bit GMI in [0, 1]."""
         bits = np.array([0, 1, 1, 0, 0, 1, 1, 0], dtype="int32")
         symbols = map_bits(xp.asarray(bits), "qam", 4)
-        llrs = compute_llr(symbols, "qam", 4, noise_var=0.1, output="numpy")
+        llrs = compute_llr(symbols, "qam", 4, noise_var=0.1)
         gmi_val = metrics.gmi(llrs, bits)
         assert 0.0 <= gmi_val <= 1.0
 
@@ -299,9 +295,7 @@ class TestInformationMetrics:
         N = 4
         bits = np.array([0, 1, 1, 0, 0, 1, 1, 0], dtype="int32")
         symbols = map_bits(xp.asarray(bits), "qam", 4)
-        llrs = compute_llr(symbols, "qam", 4, noise_var=0.1, output="numpy").reshape(
-            N, k
-        )
+        llrs = compute_llr(symbols, "qam", 4, noise_var=0.1).reshape(N, k)
         gmi_val = metrics.gmi(llrs, bits.reshape(N, k))
         assert isinstance(gmi_val, float)
 
@@ -319,9 +313,7 @@ class TestInformationMetrics:
         rng = np.random.default_rng(55)
         bits = rng.integers(0, 2, N * k).astype("int32")
         symbols = map_bits(xp.asarray(bits), "qam", 4)
-        llrs = compute_llr(symbols, "qam", 4, noise_var=0.1, output="numpy").reshape(
-            N, k
-        )
+        llrs = compute_llr(symbols, "qam", 4, noise_var=0.1).reshape(N, k)
         bits_2d = bits.reshape(N, k)
         gmi_val = metrics.gmi(llrs, bits_2d)
         assert 0.0 <= gmi_val <= np.log2(4)

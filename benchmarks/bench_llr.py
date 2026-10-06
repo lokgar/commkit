@@ -1,9 +1,8 @@
 """Benchmarks: soft demapping (``compute_llr``) and GMI from LLRs.
 
-Recorded before the JAX -> NumPy/CuPy rewrite of ``compute_llr`` so the new
-implementation has a bar to meet.  ``output="input"`` returns the LLRs on the
-input device - the contract the rewrite keeps - so before/after numbers are
-comparable.
+LLRs are returned on the input's device.  The 0002 baseline was recorded with
+the former JAX implementation (``output="input"``, which on the GPU included a
+device-to-host-to-device copy); later baselines measure the NumPy/CuPy one.
 """
 
 import numpy as np
@@ -24,7 +23,7 @@ def bench_compute_llr(benchmark, backend_device, xp, sync, order, method):
     rx = xp.asarray(rx_np)
 
     def run():
-        out = compute_llr(rx, "qam", order, noise_var, method=method, output="input")
+        out = compute_llr(rx, "qam", order, noise_var, method=method)
         sync()
         return out
 
@@ -35,9 +34,7 @@ def bench_compute_llr(benchmark, backend_device, xp, sync, order, method):
 def bench_gmi(benchmark, backend_device, xp, sync, order):
     rx_np, bits_np, noise_var = llr_workload(order=order, n_sym=N_SYM)
     k = int(np.log2(order))
-    llrs_np = np.asarray(
-        compute_llr(rx_np, "qam", order, noise_var, output="numpy")
-    ).reshape(-1, k)
+    llrs_np = np.asarray(compute_llr(rx_np, "qam", order, noise_var)).reshape(-1, k)
     llrs = xp.asarray(llrs_np)
     bits = xp.asarray(bits_np.reshape(-1, k))
 

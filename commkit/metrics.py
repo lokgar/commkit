@@ -699,7 +699,7 @@ def gmi(
 
     Examples
     --------
-    >>> llrs = compute_llr(rx_symbols, "qam", 16, noise_var=0.1, output='numpy')
+    >>> llrs = compute_llr(rx_symbols, "qam", 16, noise_var=0.1)
     >>> gmi_value = gmi(llrs, tx_bits)
     >>> gmi_value = gmi(sig, noise_var=0.1)        # Signal input: LLRs computed
 
@@ -744,17 +744,14 @@ def gmi(
             adj_noise_var,
             method=method,
             pmf=eff_pmf,
-            output="numpy",
         )
-        src_bits = to_device(sig.source_bits, "cpu")
-        # compute_llr outputs (N*k,) / (C, N*k); reshape to (N_total, k) so the
-        # array core infers bits-per-symbol from the trailing axis.
+        # compute_llr outputs (N*k,) / (C, N*k) on the input's device; reshape
+        # to (N_total, k) so the array core infers bits-per-symbol from the
+        # trailing axis.  Source bits join the LLRs on that device.
         k_bits = int(np.log2(ord_))
-        llrs_arr = np.asarray(computed)
-        bits_arr = np.asarray(src_bits)
-        n_bits = llrs_arr.size
-        llrs = llrs_arr.reshape(n_bits // k_bits, k_bits)
-        tx_bits = bits_arr.reshape(n_bits // k_bits, k_bits)
+        n_bits = computed.size
+        llrs = computed.reshape(n_bits // k_bits, k_bits)
+        tx_bits = xp_.asarray(sig.source_bits).reshape(n_bits // k_bits, k_bits)
 
     if tx_bits is None:
         raise ValueError("gmi() requires tx_bits for array (LLR) input.")

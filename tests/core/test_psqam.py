@@ -252,9 +252,7 @@ class TestPSQAMMetricsAndDemapping:
         noisy = apply_awgn(sig.samples, esn0_db=12.0, sps=1)
         noise_var = 10 ** (-12.0 / 10)
 
-        llr_none = compute_llr(
-            noisy, "qam", order, noise_var, method="exact", output="numpy"
-        )
+        llr_none = compute_llr(noisy, "qam", order, noise_var, method="exact")
         pmf_uniform = np.full(order, 1.0 / order)
         llr_uniform = compute_llr(
             noisy,
@@ -263,7 +261,6 @@ class TestPSQAMMetricsAndDemapping:
             noise_var,
             method="exact",
             pmf=pmf_uniform,
-            output="numpy",
         )
         xpt.assert_allclose(llr_none, llr_uniform, atol=1e-4)
 
@@ -286,12 +283,8 @@ class TestPSQAMMetricsAndDemapping:
             .ravel()
         )
 
-        llr_none = compute_llr(
-            rx, "qam", order, noise_var, method="exact", output="numpy"
-        )
-        llr_ps = compute_llr(
-            rx, "qam", order, noise_var, method="exact", pmf=pmf, output="numpy"
-        )
+        llr_none = compute_llr(rx, "qam", order, noise_var, method="exact")
+        llr_ps = compute_llr(rx, "qam", order, noise_var, method="exact", pmf=pmf)
         assert np.mean(np.abs(llr_ps)) >= np.mean(np.abs(llr_none)) * 0.95
 
     def test_rescale_ps_symbols_uniform_is_noop(self) -> None:

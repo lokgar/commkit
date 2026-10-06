@@ -68,6 +68,6 @@ class TestConstellationMapping:
         bits = xp.array([0, 0, 0, 0, 1, 1, 1, 1], dtype="int32")
         syms = mapping.map_bits(bits, "qam", 16)
 
-        llr_obj = c.llr(syms, noise_var=0.1, output="numpy")
-        llr_ref = mapping.compute_llr(syms, "qam", 16, noise_var=0.1, output="numpy")
+        llr_obj = c.llr(syms, noise_var=0.1)
+        llr_ref = mapping.compute_llr(syms, "qam", 16, noise_var=0.1)
         xpt.assert_allclose(llr_obj, llr_ref, atol=1e-6)

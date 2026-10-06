@@ -345,7 +345,7 @@ rule without deleting its entry fails the suite.
 
 | Legacy pattern still in the code | Removed by |
 | --- | --- |
-| JAX: `compute_llr(output=)`, `to_jax` / `from_jax`, `Signal.*_jax`; the test suite forces JAX x64 | 1.7, 1.8 |
+| JAX: `to_jax` / `from_jax`, `Signal.*_jax`; the test suite forces JAX x64 | 1.8 |
 | `Signal` / `Preamble` / `SingleCarrierFrame` are Pydantic models | 2.3 |
 | `mod_*`, `ps_*`, pulse fields, `source_*`, `resolved_*`, and descriptive tags on `Signal`; implicit mapping, normalization and transposition in the constructor | 2.4, removed fully in 4.1 |
 | `resolve_required` / `resolve_optional` (Signal wins, with a warning) | 2.5, then each module pass |

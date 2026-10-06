@@ -112,7 +112,6 @@ class Constellation:
         noise_var: float,
         *,
         method: str = "maxlog",
-        output: str = "jax",
     ) -> ArrayType:
         """Soft-decision LLRs (see :func:`compute_llr`), carrying this ``pmf``."""
         return compute_llr(
@@ -122,7 +121,6 @@ class Constellation:
             noise_var,
             method=method,
             unipolar=self.unipolar,
-            output=output,
             pmf=self.pmf,
         )
 

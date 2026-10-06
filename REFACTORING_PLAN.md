@@ -483,7 +483,7 @@ sites. The order avoids conflicts, because 1.4-1.6 all edit
     `bench_equalizers.py`.
   - Removes `CPRState.jax_bps_*`.
   - The 0.5 oracles must still pass unchanged.
-- [ ] **1.7 `refactor(mapping)!: NumPy/CuPy LLR`.**
+- [x] **1.7 `refactor(mapping)!: NumPy/CuPy LLR`.**
   - `compute_llr` is rewritten as maxlog/exact over chunks of N with an
     on-device accumulator, following `metrics.mi`. The `output=` parameter is
     removed.
@@ -637,6 +637,10 @@ The equalization pass (3.7) gets more commits:
 
 - A Numba CPU path for non-square BPS (1256 ms on CPU against 26 ms on GPU in
   the baseline).
+- A Numba CPU kernel for `compute_llr`: the NumPy implementation (commit 1.7)
+  is about 1.4x slower on the CPU than the former JAX code for 16- and
+  256-QAM (256-QAM max-log 1016 ms against 728 ms); the GPU is faster than
+  before.
 - Per-kernel `--use_fast_math` with accuracy tests.
 - `block_lms` at small block sizes on GPU (242 ms on GPU against 47 ms on CPU):
   profile the launch overhead.

@@ -2,7 +2,6 @@
 
 from typing import Any
 
-import numpy as np
 import pytest
 
 from commkit import mapping
@@ -55,7 +54,7 @@ class TestBitMapping:
         xpt.assert_array_equal(bits, bits_rx)
 
         llrs = mapping.compute_llr(syms, "ask", 4, noise_var=0.1, unipolar=True)
-        bits_soft = (np.asarray(llrs) < 0).astype("int32")
+        bits_soft = (llrs < 0).astype("int32")
         xpt.assert_array_equal(bits_soft, bits)
 
     def test_map_bits_fixed_dtypes(self, xp: Any) -> None:
