@@ -60,19 +60,28 @@ def _pipeline(sig, xp, sync):
     return out
 
 
+def _gpu_peak(call, xp, sync):
+    """Bytes a fresh, private CuPy pool holds after ``call()``: its high-water mark.
+
+    The default pool cannot measure this: an allocation that fits in a
+    partially used chunk left by earlier work adds nothing to its
+    ``total_bytes()``, so the result depended on what ran before.
+    """
+    pool = xp.cuda.MemoryPool()
+    with xp.cuda.using_allocator(pool.malloc):
+        result = call()
+        sync()
+        peak = pool.total_bytes()
+        del result
+    pool.free_all_blocks()
+    return peak
+
+
 def _profile_peak_memory(run, backend_device, xp, sync):
     """Return incremental allocator high-water memory for one pipeline run."""
     gc.collect()
     if backend_device == "gpu":
-        pool = xp.get_default_memory_pool()
-        pool.free_all_blocks()
-        sync()
-        baseline = pool.total_bytes()
-        result = run()
-        sync()
-        peak = pool.total_bytes() - baseline
-        del result
-        return {"peak_gpu_pool_bytes": peak}
+        return {"peak_gpu_pool_bytes": _gpu_peak(run, xp, sync)}
 
     tracemalloc.start()
     try:
@@ -88,16 +97,7 @@ def _allocator_peak(call, backend_device, xp, sync):
     """Measure incremental allocator peak for one container replacement."""
     gc.collect()
     if backend_device == "gpu":
-        pool = xp.get_default_memory_pool()
-        pool.free_all_blocks()
-        sync()
-        baseline = pool.total_bytes()
-        result = call()
-        sync()
-        peak = pool.total_bytes() - baseline
-        del result
-        pool.free_all_blocks()
-        return peak
+        return _gpu_peak(call, xp, sync)
 
     tracemalloc.start()
     try:
