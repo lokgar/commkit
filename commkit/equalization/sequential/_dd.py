@@ -10,9 +10,9 @@ from ..._array import restore_1d
 from ...backend import ArrayType, dispatch, to_device
 from ...core._signal_adapter import adapt_signal, require_integer_sps
 from ...core.signal import Signal
-from ...helpers import resolve_pll_gains
 from ...logger import logger
 from ...mapping.gray import _square_qam_slicer_params
+from ...recovery._common import _resolve_pll_gains
 from .._common import (
     _build_padded_samples,
     _cpr_symmetry,
@@ -516,7 +516,7 @@ def lms(
             input_norm_factor=eq_norm,
         )
     else:
-        pll_mu, pll_beta = resolve_pll_gains(
+        pll_mu, pll_beta = _resolve_pll_gains(
             cpr_pll_bandwidth, cpr_pll_mu, cpr_pll_beta
         )
         symmetry = _cpr_symmetry(modulation, order)
@@ -1100,7 +1100,7 @@ def rls(
             input_norm_factor=eq_norm,
         )
     else:
-        pll_mu, pll_beta = resolve_pll_gains(
+        pll_mu, pll_beta = _resolve_pll_gains(
             cpr_pll_bandwidth, cpr_pll_mu, cpr_pll_beta
         )
         symmetry = _cpr_symmetry(modulation, order)

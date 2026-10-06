@@ -400,10 +400,8 @@ ROWS: list[Row] = [
     Row("commkit.math.normalize", HELPER),
     Row("commkit.math.rms", HELPER),
     # --- helpers (dissolved into owning modules in the module passes) -------
-    Row("commkit.helpers.cpr_pll_gains", REMOVE),
     Row("commkit.helpers.linear_trend_slope", HELPER),
     Row("commkit.helpers.remove_linear_trend", HELPER),
-    Row("commkit.helpers.resolve_pll_gains", REMOVE),
     # --- impairments --------------------------------------------------------
     Row(
         "commkit.impairments.channel.linear.apply_chromatic_dispersion",

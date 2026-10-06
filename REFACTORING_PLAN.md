@@ -869,6 +869,66 @@ The equalization pass (3.7) gets more commits:
     and generic), pilots, bias tone and the static correction give
     bit-identical results to the 1.x functions on the same data.
 
+**Pass 3.6 commits:**
+
+- [x] **3.6a `refactor: PLL gains move into recovery`.** `cpr_pll_gains` and
+  `resolve_pll_gains` leave `helpers` for the private
+  `recovery/_common.py` (`_pll_gains`, `_resolve_pll_gains`); the inline
+  equalizer PLL imports them from there. A pure move.
+- [ ] **3.6b `refactor(recovery)!: estimate_/correct_carrier_phase (D16)`.**
+  - `estimate_carrier_phase(samples, method, *, sampling_rate=,
+    constellation=) -> CarrierPhaseEstimate` and `correct_carrier_phase(
+    samples, how, *, sampling_rate=, constellation=)`, where `how` is an
+    estimate, a phase (scalar, trajectory or anything broadcastable) or a
+    method. They replace the seven `recover_carrier_phase_*` functions and
+    `correct_phase_rotation`.
+  - Methods, each next to its kernel: `BPS(test_phases, block_size,
+    joint_channels, cycle_slip)`, `ViterbiViterbi(block_size, ...)`,
+    `Tikhonov(linewidth_symbol_periods, snr_db, block_size, smoother=
+    "rts" | "steady_state", ...)`, `PLL(bandwidth=1e-3, mu=None, beta=None,
+    phase_init, ...)`, `PilotAided(indices, values, interpolation, ...)`,
+    `PilotTone(frequency, bandwidth, ...)`, `PilotTones(frequencies,
+    bandwidth, ...)` and `DataAided(symbols=None, num_skip_symbols=0)` (the
+    Signal's `reference` by default). Cycle-slip repair is the nested
+    `cycle_slip=CycleSlip(history, threshold)` field.
+  - `PLL()` takes the equalizer's default (bandwidth 1e-3); the 1.x
+    standalone default `mu=1e-2` is now written explicitly where tests used
+    it. `Tikhonov` requires `snr_db` (the 1.x default was 20 dB with a
+    warning).
+  - The constellation is a choice (default `sig.constellation`). The M-th
+    power exponent is its `rotational_symmetry`; Viterbi-Viterbi projects
+    onto the unit circle when the points are not constant-modulus, and its
+    bias is the angle of the pmf-weighted mean of `(c/|c|)^M`, which equals
+    the 1.x `π/M` for every square QAM, uniform and shaped. A shaped
+    constellation gives the PLL its rescaled points (1.x used the uniform
+    grid).
+  - The estimate carries the data the orphaned plots draw: block centres
+    and block phases (BPS, Viterbi-Viterbi, Tikhonov), unwrapped pilot
+    phases (`PilotAided`), refined tone frequencies, tone SNRs, the
+    inter-tone differential phases, the reference and the combined tones
+    (`PilotTones`, replacing `return_diagnostics=`).
+- [ ] **3.6c `refactor(recovery)!: 2.0 signatures for corrections`.**
+  `resolve_phase_ambiguity(symbols, ref_symbols, *, constellation=,
+  symmetry=, num_skip_symbols=)` (symmetry from the constellation; `pmf=`
+  only fed a log line). `correct_cycle_slips(phase, *, symmetry, history,
+  threshold)` returns a copy instead of repairing its input in place.
+  `smooth_phase_wiener` is keyword-only. Both `resolve_*` keep reading
+  `resolved_symbols` until 3.8.
+- [ ] **3.6d `fix(recovery): float64 slicer grid in the PLL`.** Oracle
+  finding (commit 0.6): the square-QAM levels came from float32 constants.
+  The oracle tolerance tightens to float64 rounding.
+- [ ] **3.6e `fix(recovery): joint Viterbi-Viterbi normalizes channel
+  power`.** Oracle finding (commit 0.6): constant-modulus constellations
+  skip the unit-circle projection, so the joint sum weighted each channel
+  by amplitude^M. Each channel is scaled to unit power first, as BPS and
+  the PLL do. Validated by invariance to a per-channel gain.
+- [ ] **3.6f `fix(recovery): rotational symmetry sets the BPS range and the
+  slip quantum`.** BPS searched `[0, π/2)` and every block method repaired
+  slips in `π/2` steps, which is right only for 4-fold constellations: BPSK
+  phases beyond `π/2` were unreachable, and 8-PSK slips of `π/4` were never
+  repaired. Both now follow `rotational_symmetry`; 4-fold constellations
+  are unchanged.
+
 **Equalizer safety rules (3.7):**
 
 - Keep the dtype rules: complex128 accumulation in LMS/CMA, and float64 for all

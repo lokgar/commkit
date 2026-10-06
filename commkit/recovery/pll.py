@@ -334,9 +334,9 @@ def recover_carrier_phase_pll(
     A global M-fold phase ambiguity always remains - resolve via a pilot or
     preamble reference after CPR.
     """
-    from ..helpers import resolve_pll_gains
     from ..mapping.gray import _gray_points
     from ..math import normalize
+    from ._common import _resolve_pll_gains
 
     signal_adapter = adapt_signal(symbols, function_name="recover_carrier_phase_pll()")
     symbols = signal_adapter.array
@@ -354,7 +354,7 @@ def recover_carrier_phase_pll(
         raise ValueError(
             f"loop_bandwidth_normalized must be in (0, 0.5), got {loop_bandwidth_normalized}."
         )
-    mu, beta = resolve_pll_gains(loop_bandwidth_normalized, mu, beta)
+    mu, beta = _resolve_pll_gains(loop_bandwidth_normalized, mu, beta)
 
     symbols, xp, _ = dispatch(symbols)
     symbols, was_1d = as_2d(symbols, name="symbols")

@@ -1,10 +1,62 @@
-"""Shared helpers for the recovery package (block-phase estimation, logging)."""
+"""Shared helpers for the recovery package (PLL gains, block-phase estimation)."""
 
 from __future__ import annotations
+
+from typing import Any
 
 import numpy as np
 
 from ..backend import to_device
+
+
+def _pll_gains(bandwidth: float) -> tuple[np.float32, np.float32]:
+    """Convert normalised loop bandwidth to PI gains (mu, beta).
+
+    Uses the standard 2nd-order loop approximation for a critically-damped
+    (ζ = 1) PI loop:  μ ≈ 4·B_L,  β ≈ 4·B_L².  (With ``ωₙT = √β = 2B`` and
+    ``ζ = μ/(2√β) = 1``.)
+
+    Parameters
+    ----------
+    bandwidth : float
+        Normalised one-sided loop bandwidth as a fraction of the symbol rate,
+        e.g. ``1e-3`` for a narrow loop.
+
+    Returns
+    -------
+    mu, beta : float32
+    """
+    mu = np.float32(4.0 * bandwidth)
+    beta = np.float32(4.0 * bandwidth**2)
+    return mu, beta
+
+
+def _resolve_pll_gains(
+    bandwidth: float, mu: float | None, beta: float | None
+) -> tuple[Any, Any]:
+    """Resolve decision-directed PLL PI gains from a raw/bandwidth parameterization.
+
+    Shared by the inline equalizer PLL (``lms``/``rls`` with ``cpr_type='pll'``)
+    and the standalone PLL, so the bandwidth->gain mapping is defined in
+    exactly one place.
+
+    Precedence
+    ----------
+    * ``mu`` given -> raw PI gains; ``beta`` defaults to ``0.0`` (1st-order loop).
+    * ``mu`` is ``None`` -> derive critically-damped (ζ=1) gains ``μ=4B, β=4B²``
+      from ``bandwidth`` via ``_pll_gains``.
+
+    ``beta`` without ``mu`` is ambiguous and raises ``ValueError``.
+
+    Returns
+    -------
+    mu, beta : float, or float32 from the bandwidth
+    """
+    if mu is not None:
+        return float(mu), float(beta if beta is not None else 0.0)
+    if beta is not None:  # beta without mu is ambiguous
+        raise ValueError("beta requires mu to be set (or use the bandwidth shortcut).")
+    return _pll_gains(bandwidth)
 
 
 def _vv_block_phase(

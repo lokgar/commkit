@@ -1,70 +1,15 @@
 """Domain helpers awaiting their owning modules (removed in 4.1).
 
-What is left: PLL loop gains (moving to ``recovery`` in 3.6) and the
-least-squares linear trend (``analysis``, 3.9).  Shape helpers live in
-``commkit._array``, power and dB conversions in ``commkit.math``,
-correlation and peak interpolation in ``commkit.timing``, and the
-synchronization sequences in ``commkit._sequences``.
+What is left: the least-squares linear trend (moving to ``analysis`` in
+3.9).  Shape helpers live in ``commkit._array``, power and dB conversions in
+``commkit.math``, correlation and peak interpolation in ``commkit.timing``,
+the synchronization sequences in ``commkit._sequences`` and the PLL loop
+gains in ``commkit.recovery._common``.
 """
 
 from typing import Any
 
-import numpy as np
-
 from .backend import ArrayType, dispatch
-
-# ---------------------------------------------------------------------------
-# CPR / PLL loop gains
-# ---------------------------------------------------------------------------
-
-
-def cpr_pll_gains(bandwidth: float):
-    """Convert normalised loop bandwidth to PI gains (mu, beta).
-
-    Uses the standard 2nd-order loop approximation for a critically-damped
-    (ζ = 1) PI loop:  μ ≈ 4·B_L,  β ≈ 4·B_L².  (With ``ωₙT = √β = 2B`` and
-    ``ζ = μ/(2√β) = 1``.)
-
-    Parameters
-    ----------
-    bandwidth : float
-        Normalised one-sided loop bandwidth as a fraction of the symbol rate,
-        e.g. ``1e-3`` for a narrow loop.
-
-    Returns
-    -------
-    mu, beta : float32
-    """
-    mu = np.float32(4.0 * bandwidth)
-    beta = np.float32(4.0 * bandwidth**2)
-    return mu, beta
-
-
-def resolve_pll_gains(bandwidth: float, mu: float | None, beta: float | None):
-    """Resolve decision-directed PLL PI gains from a raw/bandwidth parameterization.
-
-    Shared by the inline equalizer PLL (``lms``/``rls`` with ``cpr_type='pll'``)
-    and the standalone ``recover_carrier_phase_pll``, so
-    the bandwidth->gain mapping is defined in exactly one place.
-
-    Precedence
-    ----------
-    * ``mu`` given -> raw PI gains; ``beta`` defaults to ``0.0`` (1st-order loop).
-    * ``mu`` is ``None`` -> derive critically-damped (ζ=1) gains ``μ=4B, β=4B²``
-      from ``bandwidth`` via ``cpr_pll_gains``.
-
-    ``beta`` without ``mu`` is ambiguous and raises ``ValueError``.
-
-    Returns
-    -------
-    mu, beta : float
-    """
-    if mu is not None:
-        return float(mu), float(beta if beta is not None else 0.0)
-    if beta is not None:  # beta without mu is ambiguous
-        raise ValueError("beta requires mu to be set (or use the bandwidth shortcut).")
-    return cpr_pll_gains(bandwidth)
-
 
 # ---------------------------------------------------------------------------
 # Linear-trend (least-squares slope) helpers
