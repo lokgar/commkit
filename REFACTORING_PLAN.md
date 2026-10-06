@@ -741,7 +741,7 @@ The equalization pass (3.7) gets more commits:
   transfer function `exp(∓j beta2 L omega^2 / 2)` with an explicit
   `inverse=` flag, used by `apply_chromatic_dispersion` and the receiver
   compensation.
-- [ ] **3.3b `test(dispersion): independent sign and unit checks`.** beta2
+- [x] **3.3b `test(dispersion): independent sign and unit checks`.** beta2
   against the textbook value (D = 17 ps/(nm km) at 1550 nm gives about
   -21.7 ps²/km), and the sign through the group delay: a tone at +f0 (shorter
   wavelength) arrives earlier by `D L Δλ` in anomalous fiber, computed from D,
