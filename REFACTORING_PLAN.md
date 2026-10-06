@@ -44,7 +44,7 @@ plain arrays (NumPy / CuPy)          value objects (frozen, inline, no I/O)
        Signal  = samples + facts + description + reference truth
           |
           v
-   functions (estimate_* / correct_* / recover_* / apply_* / generate ...)
+   functions (estimate_* / correct_* / resolve_* / apply_* / generate ...)
           |                \
           v                 v
    Signal or array      typed result dataclasses (EqualizerResult, ...)
@@ -141,13 +141,15 @@ on construction, and plain NumPy inside, so commax can produce them.
   `RC(...)`, `Gaussian(...)`, `Rect(duty_cycle, rise_time)`, `SmoothRect(...)`,
   each with `.taps(sps)`. Wherever a pulse is accepted, a raw taps array is
   accepted too.
-- **CPR sub-algorithms** (`commkit.recovery`): `PLL(bandwidth, mu=None,
-  beta=None)`, `BPS(test_phases=64, block_size=32, joint_channels=False,
-  cycle_slip=None)`, `CycleSlip(history=100, threshold=pi/4)`.
-  - Equalizers take `cpr=`.
-  - The standalone `recover_carrier_phase_*` functions keep their own parameters
-    flat and take only the nested `cycle_slip=` object.
-  - There is no generic `recover_carrier_phase(symbols, cpr)` dispatcher.
+- **Algorithm objects** (D16, §2.4): one frozen dataclass per estimation
+  method, holding that method's parameters and documentation. Examples:
+  `PLL(bandwidth, mu=None, beta=None)`, `BPS(test_phases=64, block_size=32,
+  joint_channels=False, cycle_slip=None)`, `CycleSlip(history=100,
+  threshold=pi/4)`, `ViterbiViterbi(...)`, `MthPower(...)`.
+  - The same object is used standalone (`correct_carrier_phase(y, BPS())`) and
+    nested (`lms(..., cpr=BPS())`).
+  - Each object lives next to its kernel (`recovery/bps.py`) and validates its
+    parameters on construction.
 - **`EqualizerState`**. One `state=` argument (taken from `result.state`) replaces
   the four continuation parameters `w_init`, `samples_prefix`,
   `input_norm_factor` and `cpr_state` (about 250 references). User-supplied
@@ -160,8 +162,43 @@ removes PyYAML and `allow_pickle=True`.
 
 - `def f(data, other_data, *, params...)`: everything after the data arguments
   is **keyword-only**.
-- Verb prefixes stay as they are (`estimate_` / `correct_` / `recover_` /
-  `resolve_` / `apply_`; `generate` for synthesis; `plot_` in plotting).
+- **Four verbs** (D16), plus `generate` for synthesis and `plot_` in
+  plotting:
+  - `apply_<impairment>(x, *, ...)` adds an impairment or applies a model.
+  - `estimate_<quantity>(x, method, *, ...)` measures and never changes the
+    data. `method` is an algorithm object and is required, so the algorithm is
+    always visible at the call site. It returns a frozen
+    `<Quantity>Estimate` dataclass: the value (rank rule, §2.6) plus the
+    method's diagnostics (block phases, correlation, spectrum), which are what
+    the plot functions consume.
+  - `correct_<quantity>(x, how, *, ...)` removes the impairment and returns
+    only the corrected data (the transform return rule). `how` is an estimate
+    (the dataclass or its bare value) or an algorithm object; with an object it
+    estimates first. A caller who wants both calls `estimate_` and then
+    `correct_`.
+  - `resolve_<ambiguity>(x, *, ...)` picks among a discrete set of
+    candidates (π/2 rotations, channel permutations) against the reference.
+  - `recover_` and `compensate_` are removed, and `resolve_` is used for
+    nothing else.
+  - The verb function picks the implementation by the object's type through a
+    private table in its own module. No strings and no registry.
+  - Algorithm class names are unique across the package. When one principle
+    serves two quantities (pilot symbols for phase and for frequency), the
+    module pass decides between one shared object and two distinct names.
+
+  | Today | 2.0 |
+  | --- | --- |
+  | `recover_carrier_phase_{viterbi_viterbi,bps,pll,tikhonov,pilot_symbols,pilot_tone,pilot_tones}` | `estimate_carrier_phase` / `correct_carrier_phase` with `ViterbiViterbi`, `BPS`, `PLL`, `Tikhonov` and pilot objects |
+  | `correct_phase_rotation(y, ref)` | `correct_carrier_phase(y, DataAided())`, using `reference` |
+  | `correct_carrier_phase(y, phi)` | unchanged (an estimate as `how`) |
+  | `estimate_frequency_offset_{mth_power,mengali_morelli,pilot_symbols}`, `find_bias_tone` | `estimate_frequency_offset` with `MthPower`, `MengaliMorelli`, pilot and bias-tone objects |
+  | `correct_static_frequency_offset`, `correct_frequency_offset_blockwise` | `correct_frequency_offset`; blockwise tracking is a `block_size=` field of the method object |
+  | `estimate_timing` / `correct_timing` | same names, `TimingEstimate` result |
+  | `compensate_iq_imbalance_{lowdin,gram_schmidt}` | `correct_iq_imbalance` with `Lowdin()` / `GramSchmidt()` |
+  | `compensate_chromatic_dispersion` | `correct_chromatic_dispersion(x, *, dispersion, length, wavelength)` |
+  | `resolve_symbols` (multirate) | merged into `decimate_to_symbol_rate` (it is not an ambiguity) |
+  | `resolve_pll_gains` (helpers) | private, `recovery/_common.py` |
+  | `correct_cycle_slips(phase, ...)`, `smooth_phase_wiener` | unchanged: they act on phase trajectories, not waveforms |
 - Randomness uses `rng: int | np.random.Generator | None` (SciPy SPEC 7)
   everywhere. A CuPy generator for large on-device noise is seeded from it.
 - No `backend=`, `device=`, `update_mode=` or `debug_plot=` arguments, and no
@@ -334,6 +371,7 @@ README must label them "planned, not implemented".
 | D13 | Lazy subpackage loading at top level | Decided |
 | D14 | `AGENTS.md` is the only agent guide; there is no `CLAUDE.md` | Decided |
 | D15 | Placeholder modules (`coding`, `channel.nonlinear`) are kept as reminders; never delete them | Decided |
+| D16 | Four verbs (`apply_` / `estimate_` / `correct_` / `resolve_`) with algorithm objects; `recover_*` and per-algorithm function names removed (§2.4) | Decided |
 
 All decisions were confirmed on 2026-10-06. Reopening one requires a recorded
 reason in this table.
@@ -581,10 +619,10 @@ The equalization pass (3.7) gets more commits:
 | --- | --- | --- | --- |
 | 3.1 | `backend`, array helpers | `_array.py` (`as_2d`, `restore_1d`, `broadcast_channels`, ...), `rms` / `normalize` / dB helpers into `commkit.math`, `format_si` into a small display module. No `utils/` package and no one-function files. Array helpers import nothing from `core`, plotting or DSP modules, which breaks the `core -> helpers -> core` cycle. | S |
 | 3.2 | `mapping` | gray, bits, llr, shaping all take `Constellation` | M |
-| 3.3 | `filtering`, `multirate`, `spectral`, `smoothing` | Pulses (add a definition-level check that the Gaussian `duty_cycle` equals the FWHM); overlap-save into private `_overlap_save.py`; `resolve_symbols` becomes plain decimation to a 1-SPS Signal. Chromatic dispersion moves into private `_dispersion.py`, which owns the D/wavelength/length to beta2·L conversion, the frequency grid, and both forward and inverse transfer functions, with an explicit sign. It gets independent sign and unit tests, because a round trip alone hides errors shared by both directions. | M |
-| 3.4 | `impairments` | `rng`; uses `_dispersion.py` | S |
-| 3.5 | `timing`, `frequency` | `cross_correlate_fft`, peak interpolation and `zc_mimo_root` move here; timing correction slices `reference`. Give the orphaned diagnostic plots (commit 1.4) a public data source: `plot_timing_correlation`, `plot_frequency_offset_spectrum`, `plot_mm_autocorrelation`, `plot_frequency_offset_blockwise_result` and the FOE `plot_pilot_phase_estimate` draw data that only exists inside the estimator, so return it in the estimator's result dataclass (§2.6) | M |
-| 3.6 | `recovery` | `PLL` / `BPS` / `CycleSlip` objects; PLL gain resolution moves into `recovery/_common.py`. Decide two oracle findings (commit 0.6): the PLL's square-QAM slicer builds decisions from float32 grid constants inside its float64 loop (up to about 3e-7 rad deviation; make it float64 or document it), and joint Viterbi-Viterbi weights channels by amplitude^M because, unlike BPS and the PLL, it does not power-normalize (document it, or normalize like the others). Give the orphaned pilot plots (commit 1.4: `plot_pilot_phase_estimate`, `plot_pilot_tone_phase_estimate`, `plot_pilot_tones_phase_estimate`) a public data source the same way; CPR block phases (`plot_carrier_phase_trajectory`'s optional inputs) likewise | M |
+| 3.3 | `filtering`, `multirate`, `spectral`, `smoothing` | Pulses (add a definition-level check that the Gaussian `duty_cycle` equals the FWHM); overlap-save into private `_overlap_save.py`; `resolve_symbols` merges into `decimate_to_symbol_rate`; `compensate_chromatic_dispersion` becomes `correct_chromatic_dispersion` (D16). Chromatic dispersion moves into private `_dispersion.py`, which owns the D/wavelength/length to beta2·L conversion, the frequency grid, and both forward and inverse transfer functions, with an explicit sign. It gets independent sign and unit tests, because a round trip alone hides errors shared by both directions. | M |
+| 3.4 | `impairments` | `rng`; uses `_dispersion.py`; `compensate_iq_imbalance_*` become `correct_iq_imbalance` with `Lowdin()` / `GramSchmidt()` (D16) | S |
+| 3.5 | `timing`, `frequency` | `cross_correlate_fft`, peak interpolation and `zc_mimo_root` move here; timing correction slices `reference`. Give the orphaned diagnostic plots (commit 1.4) a public data source: `plot_timing_correlation`, `plot_frequency_offset_spectrum`, `plot_mm_autocorrelation`, `plot_frequency_offset_blockwise_result` and the FOE `plot_pilot_phase_estimate` draw data that only exists inside the estimator, so return it in the estimator's result dataclass (§2.6). Apply the D16 verbs: `estimate_frequency_offset` / `correct_frequency_offset` with method objects, `TimingEstimate` | M |
+| 3.6 | `recovery` | `PLL` / `BPS` / `CycleSlip` objects; PLL gain resolution moves into `recovery/_common.py`. Decide two oracle findings (commit 0.6): the PLL's square-QAM slicer builds decisions from float32 grid constants inside its float64 loop (up to about 3e-7 rad deviation; make it float64 or document it), and joint Viterbi-Viterbi weights channels by amplitude^M because, unlike BPS and the PLL, it does not power-normalize (document it, or normalize like the others). Give the orphaned pilot plots (commit 1.4: `plot_pilot_phase_estimate`, `plot_pilot_tone_phase_estimate`, `plot_pilot_tones_phase_estimate`) a public data source the same way; CPR block phases (`plot_carrier_phase_trajectory`'s optional inputs) likewise. Apply the D16 verbs: `estimate_carrier_phase` / `correct_carrier_phase` with one object per method; `correct_phase_rotation` becomes `DataAided()` | M |
 | 3.7 | `equalization` | API plus the internal decomposition (old Phase 3), done once: validate, then `_prepare()`, then Numba or NumPy/CuPy runner, then `_assemble_result()`. Adds `state=`, `cpr=` and `result.signal`. Includes chunked-versus-uninterrupted equivalence tests for `state=`. Add a plain-Python oracle for the inline CPR kernels (LMS/RLS with PLL and BPS in the loop): commit 1.6 removed the Numba-vs-JAX parity tests that were their only independent cross-check. See the equalizer safety rules below. | L |
 | 3.8 | `metrics` | Host return values, raise on empty input, `reference`-based Signal path, payload extraction (`extract_payload(sig)` using `frame`), a units and scaling table. See the metrics contract below. | M |
 | 3.9 | `analysis` | Typed result dataclasses instead of dicts; trend fitting lives here | S |
@@ -779,7 +817,6 @@ the old `CLAUDE.md`.
 | `commkit/dsp/` and `commkit/physics/` packages | Modularity plan 5, 7 | One private module each is enough |
 | Phase 4B as its own phase | Modularity plan 4 | Part of 2.2 |
 | `update=Sequential() \| Block() \| FrequencyDomain()` | Roadmap 4.3 | Block mode has no fast backend; FDAF stays separate (D2) |
-| `recover_carrier_phase(symbols, cpr)` dispatcher | Roadmap 4.2 | Named functions are clearer; objects are used only when nested |
 | "Explicit argument always wins" | Roadmap 4.5 | Replaced by facts/choices (D3) |
 | "Per-channel results always `(C,)`" | Roadmap 4.6 | Replaced by the rank rule plus host metrics (D12) |
 | `Generator`-only randomness | Roadmap 4.7 | SPEC 7 `rng` also accepts an int seed |

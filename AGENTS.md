@@ -153,9 +153,11 @@ Dependencies point downward only:
     `points`. Functions accept the object only, never strings.
   - Pulses: `RRC`, `RC`, `Gaussian`, `Rect`, `SmoothRect`. A raw taps array is
     accepted wherever a pulse is.
-  - CPR sub-algorithms: `PLL`, `BPS`, `CycleSlip`. They are used only where
-    nested (`cpr=`, `cycle_slip=`). Standalone functions keep their own
-    parameters flat.
+  - Algorithm objects, one per estimation method (`BPS`, `PLL`,
+    `ViterbiViterbi`, `MthPower`, `CycleSlip`, ...). The same object is used
+    standalone (`correct_carrier_phase(y, BPS())`) and nested
+    (`lms(..., cpr=BPS())`). It lives next to its kernel and validates its
+    parameters on construction. Class names are unique across the package.
   - Equalizer continuation uses `state=result.state`.
 - **Randomness:** `rng: int | np.random.Generator | None` (SciPy SPEC 7).
   - Small data (bits, symbols, trajectories): generate on the host with the
@@ -191,14 +193,18 @@ Dependencies point downward only:
 
 | Prefix | Meaning |
 | --- | --- |
-| `estimate_*` | measure, no change |
-| `correct_*` | apply a correction |
-| `recover_*` | estimate, then correct |
-| `resolve_*` | discrete ambiguity |
-| `apply_*` | impairment or model |
+| `apply_*` | add an impairment or apply a model |
+| `estimate_<quantity>(x, method)` | measure, never change the data; returns a frozen `<Quantity>Estimate` (value plus diagnostics) |
+| `correct_<quantity>(x, how)` | remove the impairment; returns only the corrected data. `how` is an estimate or an algorithm object (which estimates first) |
+| `resolve_*` | pick among discrete candidates (π/2 rotation, channel permutation); nothing else |
 | `generate` | synthesis from parameters, takes `rng` |
 | `plot_*` | every public plotting function (only `apply_default_theme` is exempt) |
 
+- The algorithm is chosen by an object, never by the function name or a
+  string: `estimate_carrier_phase(y, BPS())`, not
+  `recover_carrier_phase_bps(y)`. The verb function dispatches on the object's
+  type through a private table in its module. There is no `recover_*` or
+  `compensate_*`.
 - Computations use plain nouns (`allan_deviation`).
 - **Glossary**, one name each:
   - `num_taps`, `step_size`, `sps`, `constellation`, `pulse`, `rng`,
@@ -350,6 +356,7 @@ rule without deleting its entry fails the suite.
 | `resolve_required` / `resolve_optional` (Signal wins, with a warning) | 2.5, then each module pass |
 | `generate_qam/psk/pam/psqam`, `seed=` with `RandomState` | 2.6, then each module pass |
 | `modulation=` / `order=` / `unipolar=` / `pmf=` parameters; positional parameters; `float \| ndarray` and dict returns; metrics returning `None` | Module passes 3.1-3.10 |
+| `recover_*`, `compensate_*`, per-algorithm `estimate_*_<method>` names, `correct_phase_rotation`, `resolve_symbols` | 3.3, 3.4, 3.5, 3.6 |
 | `cpr_*` flat parameters, `w_init` / `samples_prefix` / `input_norm_factor` / `cpr_state` | 3.6, 3.7 |
 | `helpers.py` | Module passes, deleted in 4.1 |
 | Test-only private exports in `equalization` / `plotting` `__init__` | 3.7, 3.10 |
