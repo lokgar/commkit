@@ -16,6 +16,7 @@ from ._array import as_2d, restore_1d
 from .backend import ArrayType, dispatch, to_device
 from .core import Preamble, Signal
 from .core._signal_adapter import adapt_signal, require_integer_sps
+from .filtering import Pulse
 from .helpers import _parabolic_peak_offset
 from .logger import logger
 
@@ -407,8 +408,7 @@ def estimate_timing(
     reference: Union[ArrayType, "Preamble"] | None = None,
     threshold: float = 3.0,
     sps: int | None = None,
-    pulse_shape: str | None = None,
-    filter_params: dict | None = None,
+    pulse: Pulse | ArrayType | None = None,
     search_range: tuple[int, int] | None = None,
     dft_upsample: int = 1,
     fractional_method: str = "log-parabolic",
@@ -431,17 +431,15 @@ def estimate_timing(
         Received signal samples. Shape: ``(N,)`` or ``(C, N)``.
     reference : array_like or Preamble
         Reference for correlation.  A Preamble object is reconstructed via
-        ``Preamble.to_signal()`` using ``sps`` and ``pulse_shape``; a raw
+        ``Preamble.to_signal()`` using ``sps`` and ``pulse``; a raw
         array (shape ``(L,)`` or ``(C_tx, L)``) is used directly.
     threshold : float, default 3.0
         Peak-to-average power ratio threshold for peak detection.
     sps : int, optional
         Samples per symbol.  Required when ``reference`` is a Preamble.
-    pulse_shape : str, optional
-        Pulse shaping filter type used when ``reference`` is a Preamble.
-        Defaults to ``'rrc'``.
-    filter_params : dict, optional
-        Extra pulse shaper parameters when ``reference`` is a Preamble.
+    pulse : Pulse or array_like, optional
+        Pulse that shapes a Preamble ``reference``.  Defaults to the Signal's
+        ``pulse``; ``None`` leaves the preamble unshaped (zero-stuffed).
     search_range : tuple of int, optional
         ``(start, end)`` sample range to restrict the search.
     dft_upsample : int, default 1
@@ -478,11 +476,7 @@ def estimate_timing(
     samples = signal_adapter.array
     if signal_adapter.signal is not None:
         sps = signal_adapter.resolve_required("sps", sps)
-        pulse_shape = signal_adapter.resolve_optional("pulse_shape", pulse_shape)
-
-    # 1. Resolve Inputs & Metadata
-    if filter_params is None:
-        filter_params = {}
+    pulse = signal_adapter.resolve_choice("pulse", pulse)
 
     if not hasattr(samples, "ndim"):
         raise TypeError(
@@ -501,12 +495,7 @@ def estimate_timing(
         sps = require_integer_sps(sps, "estimate_timing()")
 
         ref_waveform = xp.asarray(
-            reference.to_signal(
-                sps=sps,
-                symbol_rate=1.0,
-                pulse_shape=pulse_shape or "rrc",
-                **filter_params,
-            ).samples
+            reference.to_signal(sps=sps, symbol_rate=1.0, pulse=pulse).samples
         )
         # ensure 2-D (C_tx, L*sps) for the correlation engine
         if ref_waveform.ndim == 1:

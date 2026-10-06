@@ -6,6 +6,7 @@ import numpy as np
 import pytest
 
 from commkit.core import Preamble, SingleCarrierFrame
+from commkit.filtering import RRC
 from commkit.mapping import Constellation
 from tests.common.conversions import device_of
 
@@ -16,7 +17,7 @@ class TestSingleCarrierFrameBasics:
     def test_sc_frame_none(self, xp: Any) -> None:
         """Verify basic frame generation with no pilots or guard intervals."""
         frame = SingleCarrierFrame(payload_len=100, pilot_pattern="none")
-        sig = frame.to_signal(sps=1, pulse_shape="none")
+        sig = frame.to_signal(sps=1)
         assert len(sig.samples) == 100
         assert sig.symbol_rate == 1e6
         assert sig.signal_type == "Single-Carrier Frame"
@@ -29,7 +30,7 @@ class TestSingleCarrierFrameBasics:
         assert length == 12
         assert xp.sum(mask) == 3
 
-        sig = frame.to_signal(sps=1, pulse_shape="none")
+        sig = frame.to_signal(sps=1)
         assert len(sig.samples) == 12
         assert len(sig.frame.pilot_symbols) >= 3
 
@@ -45,13 +46,13 @@ class TestSingleCarrierFrameBasics:
         assert length == 20
         assert xp.sum(mask) == 10
 
-        sig = frame.to_signal(sps=1, pulse_shape="none")
+        sig = frame.to_signal(sps=1)
         assert len(sig.samples) == 20
 
     def test_sc_frame_guard_zero(self, xp: Any, xpt: Any) -> None:
         """Verify zero-insertion guard interval (GI) padding."""
         frame = SingleCarrierFrame(payload_len=100, guard_type="zero", guard_len=20)
-        sig = frame.to_signal(sps=1, pulse_shape="none")
+        sig = frame.to_signal(sps=1)
         assert len(sig.samples) == 120
         xpt.assert_array_equal(sig.samples[-20:], 0)
         assert sig.frame.guard_len == 20
@@ -60,7 +61,7 @@ class TestSingleCarrierFrameBasics:
     def test_sc_frame_guard_cp(self, xp: Any, xpt: Any) -> None:
         """Verify cyclic prefix (CP) guard interval generation."""
         frame = SingleCarrierFrame(payload_len=100, guard_type="cp", guard_len=20)
-        sig = frame.to_signal(sps=1, pulse_shape="none")
+        sig = frame.to_signal(sps=1)
         assert len(sig.samples) == 120
         xpt.assert_allclose(sig.samples[:20], sig.samples[-20:])
         assert sig.frame.guard_type == "cp"
@@ -69,7 +70,7 @@ class TestSingleCarrierFrameBasics:
         """Verify that auto-generated preambles are prepended to the frame."""
         preamble = Preamble(sequence_type="barker", length=13)
         frame = SingleCarrierFrame(payload_len=100, preamble=preamble)
-        sig = frame.to_signal(sps=1, pulse_shape="none")
+        sig = frame.to_signal(sps=1)
         assert len(sig.samples) == 113
         xpt.assert_allclose(sig.samples[:13], preamble.symbols)
         assert sig.frame.preamble.length == 13
@@ -81,13 +82,13 @@ class TestSingleCarrierFrameBasics:
         assert bits is not None
         assert bits.size == 200
 
-        sig = frame.to_signal(sps=1, pulse_shape="none")
+        sig = frame.to_signal(sps=1)
         assert sig.source_bits is None
 
     def test_preamble_to_signal(self, xp: Any) -> None:
         """Verify Preamble.to_signal() standalone signal generation."""
         preamble = Preamble(sequence_type="barker", length=13)
-        sig = preamble.to_signal(sps=4, symbol_rate=1e6, pulse_shape="rrc")
+        sig = preamble.to_signal(sps=4, symbol_rate=1e6, pulse=RRC(0.35))
 
         assert len(sig.samples) == 13 * 4
         assert sig.mod_scheme is None
@@ -101,9 +102,7 @@ class TestSingleCarrierFrameBasics:
         )
 
         sps = 4
-        sig = frame.to_signal(sps=sps, pulse_shape="rrc", rrc_rolloff=0.5).to(
-            device_of(xp)
-        )
+        sig = frame.to_signal(sps=sps, pulse=RRC(0.5)).to(device_of(xp))
         preamble_len_samples = 13 * sps
         preamble_section = sig.samples[:preamble_len_samples]
         body_section = sig.samples[preamble_len_samples:]
@@ -380,7 +379,7 @@ class TestFrameConstellations:
         c = Constellation.qam(64).shaped(entropy=5.0)
         frame = SingleCarrierFrame(payload_len=2000, payload_constellation=c)
         np.testing.assert_array_equal(c.map(frame.payload_bits), frame.payload_symbols)
-        sig = frame.to_signal(sps=2, symbol_rate=1e6)
+        sig = frame.to_signal(sps=2, symbol_rate=1e6, pulse=RRC(0.35))
         np.testing.assert_array_equal(sig.ps_pmf, c.pmf)
 
     def test_invalid_constellations(self) -> None:

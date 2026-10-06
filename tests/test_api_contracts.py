@@ -972,8 +972,6 @@ LEGACY: dict[str, frozenset[str]] = {
     "commkit.analysis.linewidth.fm_noise_psd": L(SIG),
     "commkit.analysis.linewidth.linewidth_beta_separation": L(SIG),
     "commkit.analysis.linewidth.linewidth_increment": L(SIG),
-    "commkit.core.generation.expand": L(SIG),
-    "commkit.core.generation.shape_pulse": L(SIG),
     "commkit.equalization._block._dd.block_lms": L(SIG, FCT, EQR),
     "commkit.equalization.blind.block_cma": L(SIG, FCT, EQR),
     "commkit.equalization.blind.block_rde": L(SIG, FCT, EQR),

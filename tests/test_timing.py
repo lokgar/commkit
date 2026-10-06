@@ -185,9 +185,7 @@ class TestEstimateTiming:
         preamble_syms = xp.asarray(to_numpy(preamble.symbols))
         signal[start_pos : start_pos + 13] = preamble_syms
 
-        integer, _frac = timing.estimate_timing(
-            signal, preamble, sps=1, pulse_shape="none", threshold=2.0
-        )
+        integer, _frac = timing.estimate_timing(signal, preamble, sps=1, threshold=2.0)
         assert abs(integer[0] - start_pos) <= 1
 
     def test_estimate_timing_returns_tuple(self, xp):
@@ -263,9 +261,7 @@ class TestEstimateTiming:
         samples[40:47] = barker
 
         preamble = Preamble(sequence_type="barker", length=7)
-        integer, frac = timing.estimate_timing(
-            samples, preamble, sps=1, pulse_shape="none", threshold=2.0
-        )
+        integer, frac = timing.estimate_timing(samples, preamble, sps=1, threshold=2.0)
         assert abs(int(integer[0]) - 40) <= 1
 
     def test_estimate_timing_signal_derives_sps_for_preamble(self, xp):
@@ -365,9 +361,7 @@ class TestEstimateTimingMIMO:
         rx, preamble, L = self._make_mimo_signal(
             xp, [[1.0, 0.0], [0.0, 1.0]], preamble_pos
         )
-        integer, frac = timing.estimate_timing(
-            rx, preamble, sps=1, pulse_shape="none", threshold=2.0
-        )
+        integer, frac = timing.estimate_timing(rx, preamble, sps=1, threshold=2.0)
         for ch in range(2):
             assert abs(int(integer[ch]) - preamble_pos) <= 1
 
@@ -378,9 +372,7 @@ class TestEstimateTimingMIMO:
         H = [[np.cos(angle), -np.sin(angle)], [np.sin(angle), np.cos(angle)]]
         rx, preamble, L = self._make_mimo_signal(xp, H, preamble_pos)
 
-        integer, frac = timing.estimate_timing(
-            rx, preamble, sps=1, pulse_shape="none", threshold=2.0
-        )
+        integer, frac = timing.estimate_timing(rx, preamble, sps=1, threshold=2.0)
         for ch in range(2):
             assert abs(int(integer[ch]) - preamble_pos) <= 1
 
@@ -392,9 +384,7 @@ class TestEstimateTimingMIMO:
             xp, [[1.0, 0.0], [0.0, 1.0]], preamble_pos, skew=skew
         )
 
-        integer, frac = timing.estimate_timing(
-            rx, preamble, sps=1, pulse_shape="none", threshold=2.0
-        )
+        integer, frac = timing.estimate_timing(rx, preamble, sps=1, threshold=2.0)
         assert abs(int(integer[0]) - preamble_pos) <= 1
         expected_ch1 = preamble_pos + skew
         assert abs(int(integer[1]) - expected_ch1) <= 1
@@ -406,9 +396,7 @@ class TestEstimateTimingMIMO:
         H = [[0.0, 1.0], [1.0, 0.0]]
         rx, preamble, L = self._make_mimo_signal(xp, H, preamble_pos)
 
-        integer, frac = timing.estimate_timing(
-            rx, preamble, sps=1, pulse_shape="none", threshold=2.0
-        )
+        integer, frac = timing.estimate_timing(rx, preamble, sps=1, threshold=2.0)
         for ch in range(2):
             assert abs(int(integer[ch]) - preamble_pos) <= 1
 

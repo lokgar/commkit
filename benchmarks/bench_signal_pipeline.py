@@ -42,7 +42,7 @@ def _frame_signal():
     payload_bits = frame.payload_bits
     payload_symbols = frame.payload_symbols
     _ = frame.pilot_bits, frame.pilot_symbols
-    sig = frame.to_signal(sps=4, symbol_rate=1e6, filter_span=8)
+    sig = frame.to_signal(sps=4, symbol_rate=1e6, pulse=RRC(0.35, span=8))
     sig = sig.replace(reference=Reference(symbols=payload_symbols, bits=payload_bits))
     sig = sig.replace(resolved_symbols=payload_symbols)
     sig = sig.replace(resolved_bits=payload_bits)

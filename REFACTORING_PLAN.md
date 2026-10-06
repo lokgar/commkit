@@ -813,6 +813,56 @@ The equalization pass (3.7) gets more commits:
   complex64: CPU 0.99 → 0.52 ms (N = 16k) and 59 → 34 ms (N = 1M); GPU
   1.04 → 0.33 ms and 1.65 → 0.47 ms.
 
+**Pass 3.5 commits:**
+
+- [x] **3.5a `refactor(core)!: preamble and frame waveforms take a pulse`.**
+  `Preamble.to_signal` / `SingleCarrierFrame.to_signal` take `pulse: Pulse
+  | taps | None` instead of `pulse_shape=` / `filter_span=` / `*_rolloff=` /
+  `rise_time=` / `duty_cycle=`, like `generate` (`None` is unshaped). Call
+  sites that relied on the 1.x default get an explicit `RRC(0.35)`.
+  `shape_pulse(symbols, *, sps, pulse=None)` becomes the one shaping path
+  (`generate` and both `to_signal` use it; `_legacy_pulse` is gone) and
+  `expand(samples, *, factor)` loses `axis`. `estimate_timing` shapes a
+  Preamble with `pulse=` (default `sig.pulse`, `None` unshaped) instead of
+  `pulse_shape=` / `filter_params=`.
+- [ ] **3.5b `refactor: sequences and peak helpers move to their owners`.**
+  Barker/ZC generation and the MIMO ZC root move into a private
+  `_sequences.py` below `core`, so `core.frame` no longer imports the DSP
+  module `timing` (it did, lazily); `timing` re-exports the public
+  generators. `cross_correlate_fft` and the three-point peak fit move into
+  `timing`, which `frequency` imports. A pure move.
+- [ ] **3.5c `refactor(timing)!: TimingEstimate and 2.0 signatures`.**
+  - `estimate_timing(samples, *, template=None, ...) -> TimingEstimate`
+    (`integer`, `fractional`, `metric`, `coherence`, `correlation`,
+    `search_start`; rank rule). `template` is a `Preamble` or an array; it
+    defaults to the Signal's frame preamble. A Preamble is shaped with the
+    `pulse` choice (default `sig.pulse`); `sps` is a fact. The correlation is
+    the public data source for `plot_timing_correlation` (rewired in 3.10).
+  - `correct_timing(samples, how, *, mode=)`: `how` is a `TimingEstimate`
+    or the total offset in samples (integer plus fraction). With
+    `mode="slice"` a Signal's reference keeps only the symbol periods left.
+  - `fft_fractional_delay(samples, *, delay)`, `estimate_fractional_delay(
+    correlation, peak_indices, *, dft_upsample=, fit=)` (was `method=`, a
+    name D16 reserves for algorithm objects).
+- [ ] **3.5d `refactor(frequency)!: estimate_/correct_frequency_offset (D16)`.**
+  - `estimate_frequency_offset(samples, method, *, sampling_rate=,
+    constellation=) -> FrequencyOffsetEstimate` with `MthPower`,
+    `MengaliMorelli`, `PilotSymbols` and `BiasTone`; `correct_frequency_offset
+    (samples, how, *, sampling_rate=)` with an estimate, Hz values or a
+    method. Replaces the four estimators, `find_bias_tone`,
+    `correct_static_frequency_offset` and `correct_frequency_offset_blockwise`.
+  - The M-th power exponent comes from the constellation's rotational
+    symmetry (`Constellation.rotational_symmetry`, from the points), not from
+    the family string.
+  - Blockwise tracking is the method's `block_size=` / `overlap=` fields: all
+    blocks of all channels are estimated in one batched call, then PCHIP and
+    integration as before; the estimate carries `block_centers` and
+    `block_values`.
+  - Results follow the rank rule; `combine_channels=` becomes
+    `estimate.combined()`, the weighted mean, which `correct_` accepts.
+  - The estimate carries what the orphaned plots draw (M-th power spectrum,
+    M&M autocorrelation, unwrapped pilot phases, block trajectory).
+
 **Equalizer safety rules (3.7):**
 
 - Keep the dtype rules: complex128 accumulation in LMS/CMA, and float64 for all

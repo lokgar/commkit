@@ -6,8 +6,9 @@ import numpy as np
 import pytest
 
 from commkit.core import generate, generation
-from commkit.filtering import RRC
+from commkit.filtering import RC, RRC, Rect, SmoothRect
 from commkit.mapping import Constellation
+from tests.common.conversions import to_numpy
 
 
 class TestWaveformSynthesis:
@@ -17,7 +18,7 @@ class TestWaveformSynthesis:
         """Verify up-sampling by zero-stuffing correctly inserts zeros."""
         data = xp.array([1, 2, 3], dtype="float32")
         factor = 3
-        expanded = generation.expand(data, factor)
+        expanded = generation.expand(data, factor=factor)
 
         expected = xp.array([1, 0, 0, 2, 0, 0, 3, 0, 0], dtype="float32")
         xpt.assert_array_equal(expanded, expected)
@@ -26,29 +27,32 @@ class TestWaveformSynthesis:
         """Verify shape_pulse produces correct lengths for RC and sinc shapes."""
         symbols = xp.array([1, -1, 1, -1], dtype=xp.float32)
 
-        res_rc = generation.shape_pulse(symbols, sps=4, pulse_shape="rc")
+        res_rc = generation.shape_pulse(symbols, sps=4, pulse=RC(0.35))
         assert len(res_rc) == 16
 
-        res_sinc = generation.shape_pulse(symbols, sps=4, pulse_shape="sinc")
+        res_sinc = generation.shape_pulse(symbols, sps=4, pulse=RRC(0.0))
         assert len(res_sinc) == 16
 
-        with pytest.raises(ValueError, match="Not implemented pulse shape"):
-            generation.shape_pulse(symbols, sps=4, pulse_shape="magic")
+        taps = RRC(0.35).taps(4)
+        np.testing.assert_allclose(
+            to_numpy(generation.shape_pulse(symbols, sps=4, pulse=xp.asarray(taps))),
+            to_numpy(generation.shape_pulse(symbols, sps=4, pulse=RRC(0.35))),
+        )
 
     def test_smoothrect_pulse(self, xp: Any) -> None:
         """Verify smoothrect pulse shaping output length."""
         symbols = xp.array([1, 1], dtype=xp.float32)
         res = generation.shape_pulse(
-            symbols, sps=8, pulse_shape="smoothrect", filter_span=4, rise_time=0.05
+            symbols, sps=8, pulse=SmoothRect(rise_time=0.05, span=4)
         )
         assert len(res) == 16
 
-    def test_shape_pulse_none_with_rz(self, xp: Any) -> None:
-        """Verify shape_pulse with pulse_shape='none' and rz=True expands using rect."""
+    def test_shape_pulse_rz_rect(self, xp: Any, xpt: Any) -> None:
+        """An RZ rect pulse is on for half of each symbol period."""
         symbols = xp.array([1, -1, 1], dtype=xp.complex64)
-        result = generation.shape_pulse(symbols, sps=4, pulse_shape="none", rz=True)
-        assert result is not None
+        result = generation.shape_pulse(symbols, sps=4, pulse=Rect(0.5))
         assert len(result) == 12
+        assert int(xp.sum(xp.abs(result) > 1e-6)) == 6
 
     def test_shape_pulse_preserves_complex64_dtype(self, xp: Any) -> None:
         """shape_pulse: complex64 symbols -> complex64 waveform."""
@@ -58,7 +62,7 @@ class TestWaveformSynthesis:
                 np.complex64
             )
         )
-        out = generation.shape_pulse(syms, sps=4, pulse_shape="rrc")
+        out = generation.shape_pulse(syms, sps=4, pulse=RRC(0.35))
         assert out.dtype == xp.complex64, f"Expected complex64, got {out.dtype}"
 
 

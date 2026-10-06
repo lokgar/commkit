@@ -952,7 +952,7 @@ class TestCmaPilotAided:
             pilot_period=10,
             preamble=preamble,
         )
-        sig = frame.to_signal(sps=2, symbol_rate=1e6)
+        sig = frame.to_signal(sps=2, symbol_rate=1e6, pulse=RRC(0.35))
         struct = frame.get_structure_map(unit="symbols", sps=1, include_preamble=False)
         samples_cpu = to_device(sig.samples, "cpu")
         pilot_syms_cpu = to_device(frame.pilot_symbols, "cpu")

@@ -9,6 +9,7 @@ import numpy as np
 
 from .. import helpers
 from ..backend import ArrayType
+from ..filtering import Pulse
 from ..mapping import Constellation
 from ..math import db_to_linear, normalize
 from . import generation
@@ -130,15 +131,11 @@ class Preamble:
         self,
         sps: int,
         symbol_rate: float,
-        pulse_shape: str = "rrc",
-        filter_span: int = 10,
-        rrc_rolloff: float = 0.35,
-        rc_rolloff: float = 0.35,
-        rise_time: float = 0.0,
-        duty_cycle: float = 1.0,
+        *,
+        pulse: Pulse | ArrayType | None = None,
     ) -> Signal:
         """
-        Generates a shaped waveform from the preamble sequence.
+        Pulse-shaped waveform of the preamble sequence.
 
         Parameters
         ----------
@@ -146,53 +143,21 @@ class Preamble:
             Samples per symbol.
         symbol_rate : float
             Symbol rate in Hz.
-        pulse_shape : str, default "rrc"
-            The pulse shaping type to apply.
-        filter_span : int, default 10
-            Filter span in symbols.
-        rrc_rolloff : float, default 0.35
-            Roll-off factor for RRC filter.
-        rc_rolloff : float, default 0.35
-            Roll-off factor for RC filter.
-        rise_time : float, default 0.22
-            10%-90% edge transition duration in symbol periods (smoothrect only).
-        duty_cycle : float, default 1.0
-            FWHM of the Gaussian pulse in symbol periods (gaussian only).
-        duty_cycle : float, default 1.0
-            Fraction of the symbol period occupied by the pulse (rect/smoothrect).
+        pulse : Pulse or array_like, optional
+            Pulse object or taps; ``None`` zero-stuffs without shaping (as
+            :func:`commkit.generate`).
 
         Returns
         -------
         Signal
-            A `Signal` object with the shaped preamble.
+            The shaped preamble at unit symbol power.
         """
-        from .generation import shape_pulse
-
         sps = require_integer_sps(sps, "Preamble.to_signal()")
-
-        samples = shape_pulse(
-            self.symbols,
-            sps=sps,
-            pulse_shape=pulse_shape,
-            filter_span=filter_span,
-            rrc_rolloff=rrc_rolloff,
-            rc_rolloff=rc_rolloff,
-            rise_time=rise_time,
-            duty_cycle=duty_cycle,
-        )
-
         return Signal(
-            samples=samples,
+            samples=generation.shape_pulse(self.symbols, sps=sps, pulse=pulse),
             sampling_rate=symbol_rate * sps,
             symbol_rate=symbol_rate,
-            pulse=generation._legacy_pulse(
-                pulse_shape,
-                duty_cycle=duty_cycle,
-                rise_time=rise_time,
-                filter_span=filter_span,
-                rrc_rolloff=rrc_rolloff,
-                rc_rolloff=rc_rolloff,
-            ),
+            pulse=pulse if isinstance(pulse, Pulse) else None,
         )
 
 
@@ -659,12 +624,8 @@ class SingleCarrierFrame:
         self,
         sps: int = 4,
         symbol_rate: float = 1e6,
-        pulse_shape: str = "rrc",
-        filter_span: int = 10,
-        rrc_rolloff: float = 0.35,
-        rc_rolloff: float = 0.35,
-        rise_time: float = 0.0,
-        duty_cycle: float = 1.0,
+        *,
+        pulse: Pulse | ArrayType | None = None,
     ) -> Signal:
         """
         Generates a shaped, oversampled waveform from the frame description.
@@ -679,20 +640,9 @@ class SingleCarrierFrame:
             Samples per symbol (oversampling factor).
         symbol_rate : float, default 1e6
             Symbol rate in Hz.
-        pulse_shape : str, default "rrc"
-            Pulse shaping filter type.
-        filter_span : int, default 10
-            Filter span in symbols.
-        rrc_rolloff : float, default 0.35
-            Roll-off factor for RRC filter.
-        rc_rolloff : float, default 0.35
-            Roll-off factor for RC filter.
-        rise_time : float, default 0.22
-            10%-90% edge transition duration in symbol periods (smoothrect only).
-        duty_cycle : float, default 1.0
-            FWHM of the Gaussian pulse in symbol periods (gaussian only).
-        duty_cycle : float, default 1.0
-            Fraction of the symbol period occupied by the pulse (rect/smoothrect).
+        pulse : Pulse or array_like, optional
+            Pulse object or taps for both preamble and body; ``None``
+            zero-stuffs without shaping (as :func:`commkit.generate`).
 
         Returns
         -------
@@ -709,22 +659,10 @@ class SingleCarrierFrame:
         Pilot/payload power ratios set by `pilot_gain_db` are preserved throughout.
         """
         xp = np
-        from .generation import shape_pulse
-
         sps = require_integer_sps(sps, "SingleCarrierFrame.to_signal()")
 
         # 1. Shape Body (Payload + Pilots)
-        body_symbols = self.body_symbols
-        body_samples = shape_pulse(
-            symbols=body_symbols,
-            sps=sps,
-            pulse_shape=pulse_shape,
-            filter_span=filter_span,
-            rrc_rolloff=rrc_rolloff,
-            rc_rolloff=rc_rolloff,
-            rise_time=rise_time,
-            duty_cycle=duty_cycle,
-        )
+        body_samples = generation.shape_pulse(self.body_symbols, sps=sps, pulse=pulse)
 
         # Normalise body per-channel via normalize's "dac_peak" mode:
         # max(peak_|I|, peak_|Q|) - a single scale factor that brings the
@@ -743,14 +681,7 @@ class SingleCarrierFrame:
             # but we only need the samples.
             # CRITICAL: Must use EXACT same shaping parameters as body.
             preamble_signal = self.preamble.to_signal(
-                sps=sps,
-                symbol_rate=symbol_rate,
-                pulse_shape=pulse_shape,
-                filter_span=filter_span,
-                rrc_rolloff=rrc_rolloff,
-                rc_rolloff=rc_rolloff,
-                rise_time=rise_time,
-                duty_cycle=duty_cycle,
+                sps=sps, symbol_rate=symbol_rate, pulse=pulse
             )
             preamble_samples = xp.asarray(preamble_signal.samples)
             # (L*sps,) for SISO  or  (num_streams, L*sps) for MIMO - shape driven by preamble.num_streams
@@ -795,14 +726,7 @@ class SingleCarrierFrame:
             samples=samples,
             sampling_rate=symbol_rate * sps,
             symbol_rate=symbol_rate,
-            pulse=generation._legacy_pulse(
-                pulse_shape,
-                duty_cycle=duty_cycle,
-                rise_time=rise_time,
-                filter_span=filter_span,
-                rrc_rolloff=rrc_rolloff,
-                rc_rolloff=rc_rolloff,
-            ),
+            pulse=pulse if isinstance(pulse, Pulse) else None,
             frame=self,
         )
 

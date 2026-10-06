@@ -10,7 +10,7 @@ import pytest
 
 from commkit import filtering, generate, multirate, spectral
 from commkit.core import Preamble, Signal, SingleCarrierFrame
-from commkit.filtering import RRC
+from commkit.filtering import RRC, Rect
 from commkit.mapping import Constellation
 
 
@@ -74,7 +74,7 @@ class TestMIMOFrameIntegration:
             guard_len=10,
         )
 
-        sig = frame.to_signal(sps=1, pulse_shape="none")
+        sig = frame.to_signal(sps=1)
         assert sig.samples.shape == (2, 110)
         assert sig.num_streams == 2
         xpt.assert_array_equal(sig.samples[:, -10:], 0)
@@ -87,7 +87,7 @@ class TestMIMOFrameIntegration:
             pilot_pattern="comb",
             pilot_period=2,
         )
-        sig = frame.to_signal(sps=1, pulse_shape="none")
+        sig = frame.to_signal(sps=1)
         assert sig.samples.shape == (2, 20)
 
         mask, _ = frame._generate_pilot_mask()
@@ -99,7 +99,7 @@ class TestMIMOFrameIntegration:
         preamble = Preamble(sequence_type="barker", length=13, num_streams=2)
         frame = SingleCarrierFrame(payload_len=20, num_streams=2, preamble=preamble)
 
-        sig = frame.to_signal(sps=1, pulse_shape="none")
+        sig = frame.to_signal(sps=1)
         assert sig.samples.shape == (2, 33)
 
         xpt.assert_allclose(sig.samples[0, :13], preamble.symbols[0])
@@ -109,7 +109,7 @@ class TestMIMOFrameIntegration:
         """Verify MIMO waveform generation with pulse shaping."""
         frame = SingleCarrierFrame(payload_len=10, num_streams=2)
 
-        sig = frame.to_signal(sps=4, pulse_shape="rect")
+        sig = frame.to_signal(sps=4, pulse=Rect())
         assert sig.samples.shape == (2, 40)
         assert sig.sps == 4.0
 

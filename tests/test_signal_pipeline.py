@@ -153,7 +153,7 @@ class TestPipelineComposition:
         payload_symbols = frame.payload_symbols
         assert frame.pilot_bits is not None
         assert frame.pilot_symbols is not None
-        sig = frame.to_signal(sps=4, symbol_rate=1e6, filter_span=4)
+        sig = frame.to_signal(sps=4, symbol_rate=1e6, pulse=RRC(0.35, span=4))
         sig = sig.replace(
             reference=Reference(symbols=payload_symbols, bits=payload_bits)
         )
@@ -298,7 +298,7 @@ class TestPipelineSPSValidation:
         """Direct pulse shaping cannot truncate a fractional resampling factor."""
         symbols = xp.asarray([1.0, -1.0], dtype=xp.complex64)
         with pytest.raises(ValueError, match=r"sps.*positive integer"):
-            generation.shape_pulse(symbols, sps=1.5, pulse_shape="rrc")
+            generation.shape_pulse(symbols, sps=1.5, pulse=RRC(0.35))
 
     def test_frame_sample_map_rejects_fractional_sps(self, backend_device: str) -> None:
         """A sample-domain frame mask requires an integral repeat count."""
@@ -350,7 +350,7 @@ class TestPipelineSPSValidation:
                 )
             elif factory == "preamble":
                 Preamble(sequence_type="barker", length=7).to_signal(
-                    sps=sps, symbol_rate=1e6
+                    sps=sps, symbol_rate=1e6, pulse=RRC(0.35)
                 )
             else:
-                SingleCarrierFrame(payload_len=16).to_signal(sps=sps)
+                SingleCarrierFrame(payload_len=16).to_signal(sps=sps, pulse=RRC(0.35))

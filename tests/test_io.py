@@ -187,7 +187,7 @@ class TestNPZSaveLoadFrame:
             payload_len=100,
             preamble=Preamble(sequence_type="zc", length=31, root=7),
         )
-        sig = frame.to_signal(sps=4, symbol_rate=1e9)
+        sig = frame.to_signal(sps=4, symbol_rate=1e9, pulse=RRC(0.35))
         assert sig.frame.preamble.root == 7
 
         p = tmp_path / "zc.npz"
@@ -367,7 +367,7 @@ def test_frame_constellations_roundtrip(tmp_path: Any) -> None:
         pilot_period=4,
         pilot_constellation=mapping.Constellation.psk(8),
     )
-    sig = frame.to_signal(sps=2, symbol_rate=1e6)
+    sig = frame.to_signal(sps=2, symbol_rate=1e6, pulse=RRC(0.35))
     save_npz(sig, tmp_path / "f.npz")
     loaded = load_npz(tmp_path / "f.npz")
     assert loaded.frame == frame

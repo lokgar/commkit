@@ -7,8 +7,6 @@ symbol power (Es = 1, average sample power = 1/sps).  PS-QAM is a shaped
 constellation: ``generate(Constellation.qam(64).shaped(nu=0.1), ...)``.
 """
 
-from typing import Any
-
 import numpy as np
 
 from .. import filtering, mapping
@@ -22,7 +20,7 @@ from .signal import Reference, Signal
 # WAVEFORM SYNTHESIS PRIMITIVES
 # -----------------------------------------------------------------------------
 # expand:      Zero-stuffing upsample (pre-shaping primitive for shape_pulse)
-# shape_pulse: Symbol sequence -> pulse-shaped waveform (used by generate*
+# shape_pulse: Symbol sequence -> pulse-shaped waveform (used by generate
 #              below and by Preamble/SingleCarrierFrame.to_signal())
 #
 # Both operate on the raw symbol array a Signal gets *built from*, not on an
@@ -30,201 +28,72 @@ from .signal import Reference, Signal
 # multirate.py (see CLAUDE.md, "Signal-Awareness").
 
 
-def expand(samples: ArrayType, factor: int, axis: int = -1) -> ArrayType:
+def expand(samples: ArrayType, *, factor: int) -> ArrayType:
     """
-    Inserts zeros between samples (up-sampling by zero-stuffing).
+    Insert ``factor - 1`` zeros after every sample (zero-stuffing upsample).
 
-    This operation increases the sampling rate by an integer factor by
-    inserting `factor - 1` zeros between each original sample. This is the
-    first step in traditional interpolation but requires subsequent
-    filtering to remove spectral images.
+    The first step of interpolation; the spectral images it creates are
+    removed by a following filter.
 
     Parameters
     ----------
     samples : array_like
-        Input signal samples. Shape: (..., N_samples).
+        Input samples, time on the last axis.
     factor : int
-        The expansion factor (number of output samples per input sample).
-    axis : int, default -1
-        The axis along which to perform expansion.
+        Output samples per input sample.
 
     Returns
     -------
     array_like
-        The expanded sample array with zeros inserted.
-        Shape: (..., N_samples * factor).
+        Expanded samples, ``(..., N * factor)``, same dtype and device.
     """
     logger.debug("Inserting zeros (expansion factor=%s).", factor)
     samples, xp, _ = dispatch(samples)
-
-    n_in = samples.shape[axis]
-    n_out = n_in * factor
-
-    # Construct output shape
-    out_shape = list(samples.shape)
-    out_shape[axis] = n_out
-
-    out = xp.zeros(out_shape, dtype=samples.dtype)
-
-    # Slice logic to insert
-    # We want out[..., ::factor, ...] = samples
-    # Construct slices dynamically
-    slices = [slice(None)] * samples.ndim
-    slices[axis] = slice(None, None, factor)
-    out[tuple(slices)] = samples
-
+    out = xp.zeros((*samples.shape[:-1], samples.shape[-1] * factor), samples.dtype)
+    out[..., ::factor] = samples
     return out
 
 
 def shape_pulse(
     symbols: ArrayType,
-    sps: float,
-    pulse_shape: str = "none",
     *,
-    duty_cycle: float = 1.0,
-    rise_time: float = 0.0,
-    filter_span: int = 10,
-    rrc_rolloff: float = 0.35,
-    rc_rolloff: float = 0.35,
-    rz: bool = False,
+    sps: int,
+    pulse: filtering.Pulse | ArrayType | None = None,
 ) -> ArrayType:
     """
-    Applies pulse shaping to a symbol sequence.
+    Pulse-shape a symbol sequence to unit symbol power.
+
+    Polyphase interpolation by ``sps`` with the pulse taps
+    (``scipy.signal.resample_poly``), then ``E[|x|²] = 1/sps``.
 
     Parameters
     ----------
     symbols : array_like
-        Input symbol sequence. Shape: (..., N_symbols).
-    sps : float
-        Samples per symbol (upsampling factor).
-    pulse_shape : {"none", "rect", "smoothrect", "gaussian", "rrc", "rc", "sinc"}, default "none"
-        Identifier for the pulse shaping filter type.
-    duty_cycle : float, default 1.0
-        Pulse width in symbol periods, in the range ``(0, 1]``.
-
-        - ``"rect"``, ``"smoothrect"``: total on-time of the pulse (including
-          ramps for rect, underlying rect width for smoothrect).
-        - ``"gaussian"``: Full-Width at Half-Maximum (FWHM) of the Gaussian.
-        - NRZ signals always use 1.0; use 0.5 for canonical RZ.
-    rise_time : float, default 0.0
-        Edge transition duration in symbol periods. Applies to ``"rect"`` and
-        ``"smoothrect"`` only; ignored for all other pulse types.
-
-        - ``"rect"``: duration of each linear ramp. The flat top width is
-          ``duty_cycle - 2 * rise_time``. Must satisfy
-          ``rise_time <= duty_cycle / 2``.
-        - ``"smoothrect"``: 10%-90% erf-edge duration. Smaller values give
-          sharper edges; larger values give softer Gaussian-like transitions.
-        - ``0.0`` (default): hard rectangular edges for ``"rect"``.
-    filter_span : int, default 10
-        Filter span in symbols for FIR tap generators
-        (``"smoothrect"``, ``"gaussian"``, ``"rrc"``, ``"rc"``, ``"sinc"``).
-    rrc_rolloff : float, default 0.35
-        Roll-off factor for the Root-Raised-Cosine filter (``"rrc"``). Range [0, 1].
-    rc_rolloff : float, default 0.35
-        Roll-off factor for the Raised-Cosine filter (``"rc"``). Range [0, 1].
-    rz : bool, default False
-        Convenience flag for Return-to-Zero signaling. When ``True``, overrides
-        ``duty_cycle`` to 0.5 (if not already set below 1.0) and converts
-        ``pulse_shape="none"`` to ``"rect"`` automatically.
+        Symbols, ``(N,)`` or ``(C, N)``.
+    sps : int
+        Samples per symbol (integer).
+    pulse : Pulse or array_like, optional
+        Pulse object or taps.  ``None`` zero-stuffs without shaping.
 
     Returns
     -------
     array_like
-        The pulse-shaped waveform at rate ``sps * symbol_rate``, normalized to
-        **unit symbol power** (Es = 1). Average sample power = 1/sps.
-
-    Notes
-    -----
-    All pulse types produce output satisfying E[|x|²] * sps = 1 (symbol-power
-    convention). For peak-normalized samples (e.g. eye diagrams), apply
-    ``normalize(..., mode="peak")`` after.
+        Waveform ``(..., N * sps)``, same dtype and device as ``symbols``.
     """
-    logger.debug("Applying pulse shaping: %s", pulse_shape)
     sps = require_integer_sps(sps, "shape_pulse()")
-
-    if rz:
-        duty_cycle = 0.5
-
-    symbols, xp, sp = dispatch(symbols)
-
-    if pulse_shape == "none":
-        if rz:
-            logger.debug("RZ signaling requested, using rect pulse shape")
-            pulse_shape = "rect"
-        else:
-            logger.debug("Pulse shaping disabled, expanding symbols by sps")
-            return normalize(
-                expand(symbols, sps, axis=-1),
-                mode="symbol_power",
-                sps=sps,
-                axis=-1,
-            )
-
-    if pulse_shape == "rect":
-        h = filtering.rect_taps(sps=sps, duty_cycle=duty_cycle, rise_time=rise_time)
-    elif pulse_shape == "smoothrect":
-        h = filtering.smoothrect_taps(
-            sps=sps, span=filter_span, rise_time=rise_time, duty_cycle=duty_cycle
+    if pulse is None:
+        return normalize(
+            expand(symbols, factor=sps), mode="symbol_power", sps=sps, axis=-1
         )
-    elif pulse_shape == "gaussian":
-        h = filtering.gaussian_taps(sps=sps, span=filter_span, fwhm=duty_cycle)
-    elif pulse_shape == "rrc":
-        h = filtering.rrc_taps(sps=sps, span=filter_span, rolloff=rrc_rolloff)
-    elif pulse_shape == "rc":
-        h = filtering.rc_taps(sps=sps, span=filter_span, rolloff=rc_rolloff)
-    elif pulse_shape == "sinc":
-        # Sinc pulse shaping is equivalent to RRC with rolloff=0
-        h = filtering.rrc_taps(sps=sps, span=filter_span, rolloff=0.0)
-    else:
-        raise ValueError(f"Not implemented pulse shape: {pulse_shape}")
-
-    # Ensure h is on the correct backend and matches symbol precision.
-    # Tap generators return float64; casting here prevents scipy's resample_poly
-    # from promoting complex64 symbols to complex128.
-    h = xp.asarray(h).astype(symbols.real.dtype)
-
-    # Apply Pulse Shaping via Polyphase Resampling
+    taps = pulse.taps(sps) if isinstance(pulse, filtering.Pulse) else pulse
+    symbols, xp, sp = dispatch(symbols)
+    # Cast the float64 taps to the symbol precision so resample_poly does not
+    # promote complex64 symbols to complex128.
+    h = xp.asarray(taps).astype(symbols.real.dtype)
     res = sp.signal.resample_poly(symbols, sps, 1, window=h, axis=-1)
     if res.dtype != symbols.dtype:
         res = res.astype(symbols.dtype)
-
     return normalize(res, mode="symbol_power", sps=sps, axis=-1)
-
-
-def _legacy_pulse(
-    pulse_shape: str,
-    *,
-    rz: bool = False,
-    duty_cycle: float = 1.0,
-    rise_time: float = 0.0,
-    filter_span: int = 10,
-    rrc_rolloff: float = 0.35,
-    rc_rolloff: float = 0.35,
-) -> filtering.Pulse | None:
-    """The pulse object for 1.x ``pulse_shape`` arguments (as ``shape_pulse``).
-
-    Bridge for the string-based factories; removed with them in 2.6.
-    """
-    if rz:
-        duty_cycle = 0.5
-        if pulse_shape == "none":
-            pulse_shape = "rect"
-    if pulse_shape == "none":
-        return None
-    if pulse_shape == "rect":
-        return filtering.Rect(duty_cycle, rise_time)
-    if pulse_shape == "smoothrect":
-        return filtering.SmoothRect(rise_time, duty_cycle, filter_span)
-    if pulse_shape == "gaussian":
-        return filtering.Gaussian(duty_cycle, filter_span)
-    if pulse_shape == "rrc":
-        return filtering.RRC(rrc_rolloff, filter_span)
-    if pulse_shape == "rc":
-        return filtering.RC(rc_rolloff, filter_span)
-    if pulse_shape == "sinc":
-        return filtering.RRC(0.0, filter_span)
-    raise ValueError(f"Not implemented pulse shape: {pulse_shape}")
 
 
 # -----------------------------------------------------------------------------
@@ -307,7 +176,7 @@ def generate(
         symbols = symbols.reshape(num_channels, num_symbols)
         bits = bits.reshape(num_channels, num_symbols * k)
 
-    samples = _shape(symbols, sps, pulse)
+    samples = shape_pulse(symbols, sps=sps, pulse=pulse)
 
     logger.info(
         "Generated %r: %s symbols x %s channel(s), sps=%s, pulse=%r.",
@@ -325,18 +194,3 @@ def generate(
         pulse=pulse if isinstance(pulse, filtering.Pulse) else None,
         reference=Reference(symbols=symbols, bits=bits),
     )
-
-
-def _shape(symbols: ArrayType, sps: int, pulse: Any) -> ArrayType:
-    """Pulse-shape ``symbols`` to unit symbol power (see :func:`shape_pulse`)."""
-    if pulse is None:
-        return normalize(
-            expand(symbols, sps, axis=-1), mode="symbol_power", sps=sps, axis=-1
-        )
-    taps = pulse.taps(sps) if isinstance(pulse, filtering.Pulse) else pulse
-    symbols, xp, sp = dispatch(symbols)
-    h = xp.asarray(taps).astype(symbols.real.dtype)
-    res = sp.signal.resample_poly(symbols, sps, 1, window=h, axis=-1)
-    if res.dtype != symbols.dtype:
-        res = res.astype(symbols.dtype)
-    return normalize(res, mode="symbol_power", sps=sps, axis=-1)

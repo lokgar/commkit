@@ -227,7 +227,7 @@ def make_test_frame_signal(
         guard_type="zero",
         guard_len=4,
     )
-    sig = frame.to_signal(sps=sps, symbol_rate=symbol_rate)
+    sig = frame.to_signal(sps=sps, symbol_rate=symbol_rate, pulse=RRC(0.35))
     if xp is not None:
         sig = sig.to(device_of(xp))
     return sig
