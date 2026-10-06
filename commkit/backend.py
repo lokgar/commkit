@@ -11,7 +11,7 @@ exchange data with them explicitly through DLPack.
 import types
 import warnings
 from functools import cache
-from typing import Any
+from typing import Any, cast
 
 import numpy as np
 
@@ -36,7 +36,7 @@ def _cupy() -> types.ModuleType | None:
     except Exception as exc:
         logger.warning("CuPy is installed but not functional (%s); GPU disabled.", exc)
         return None
-    return cupy
+    return cast(types.ModuleType, cupy)
 
 
 def _is_cupy_array(data: Any) -> bool:
@@ -90,7 +90,7 @@ def get_array_module(data: Any) -> types.ModuleType:
     if _is_cupy_array(data):
         import cupy
 
-        return cupy
+        return cast(types.ModuleType, cupy)
     return np
 
 
@@ -124,14 +124,14 @@ def get_scipy_module(xp: types.ModuleType) -> types.ModuleType:
             import cupyx.scipy.signal
             import cupyx.scipy.special
 
-        return cupyx.scipy
+        return cast(types.ModuleType, cupyx.scipy)
 
     import scipy
     import scipy.ndimage
     import scipy.signal
     import scipy.special
 
-    return scipy
+    return cast(types.ModuleType, scipy)
 
 
 def to_device(data: Any, device: str) -> ArrayType:

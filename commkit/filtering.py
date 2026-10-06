@@ -152,7 +152,7 @@ def gaussian_taps(sps: float, span: int = 4, duty_cycle: float = 1.0) -> np.ndar
     alpha = np.sqrt(np.log(2) / 2) / bt
     h = (np.sqrt(np.pi) / alpha) * np.exp(-((np.pi * t / alpha) ** 2))
 
-    return normalize(h, "unit_energy")
+    return normalize(h, mode="unit_energy")
 
 
 def smoothrect_taps(
@@ -214,7 +214,7 @@ def smoothrect_taps(
         - scipy.special.erf((t - w_half) / (sigma * np.sqrt(2)))
     )
 
-    return normalize(h, "unit_energy")
+    return normalize(h, mode="unit_energy")
 
 
 def rrc_taps(sps: float, rolloff: float = 0.35, span: int = 8) -> np.ndarray:
@@ -285,7 +285,7 @@ def rrc_taps(sps: float, rolloff: float = 0.35, span: int = 8) -> np.ndarray:
     denom_safe = np.where(idx_general, denom, 1.0)
     h = np.where(idx_general, numer / denom_safe, h)
 
-    return normalize(h, "unit_energy")
+    return normalize(h, mode="unit_energy")
 
 
 def rc_taps(sps: float, rolloff: float = 0.35, span: int = 8) -> ArrayType:
@@ -357,7 +357,7 @@ def rc_taps(sps: float, rolloff: float = 0.35, span: int = 8) -> ArrayType:
     res = sinc_t * cos_t / denom_safe
     h = np.where(idx_general, res, h)
 
-    return normalize(h, "unit_energy")
+    return normalize(h, mode="unit_energy")
 
 
 # -----------------------------------------------------------------------------

@@ -68,7 +68,9 @@ def _normalize_inputs(samples, training_symbols, sps, input_norm_factor=None):
         if training_symbols is not None:
             from commkit.math import normalize as c_normalize
 
-            training_symbols = c_normalize(training_symbols, "average_power", axis=-1)
+            training_symbols = c_normalize(
+                training_symbols, mode="average_power", axis=-1
+            )
         return samples, training_symbols, input_norm_factor
 
     from commkit.math import rms as _rms
@@ -88,7 +90,7 @@ def _normalize_inputs(samples, training_symbols, sps, input_norm_factor=None):
         from commkit.math import normalize as c_normalize
 
         # Training symbols are at 1 sps; "average_power" == "symbol_power" at sps=1.
-        training_symbols = c_normalize(training_symbols, "average_power", axis=-1)
+        training_symbols = c_normalize(training_symbols, mode="average_power", axis=-1)
 
     return samples, training_symbols, input_norm_factor
 

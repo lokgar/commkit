@@ -24,7 +24,7 @@ def make_test_qam_samples(
     """Generate QAM symbol sequence and oversampled sample array with optional AWGN."""
     rng = np.random.default_rng(seed)
     const = gray_constellation("qam", order).astype(np.complex64)
-    const = normalize(const, "average_power").astype(np.complex64)
+    const = normalize(const, mode="average_power").astype(np.complex64)
     sym_indices = rng.integers(0, order, num_symbols)
     syms_np = const[sym_indices]
 
@@ -270,7 +270,7 @@ def make_isi_distorted_signal(
     # Unit sample-average power, as the 1.x reference was: the FDAF equivalence
     # tests need it because block_lms normalizes its training symbols and the
     # blind engines' pilot path does not (plan 3.7).
-    tx = xp.asarray(normalize(to_numpy(sig.source_symbols), "average_power"))
+    tx = xp.asarray(normalize(to_numpy(sig.source_symbols), mode="average_power"))
     rx = xp.convolve(
         xp.asarray(to_numpy(sig.samples)), xp.asarray(channel), mode="same"
     )
@@ -361,7 +361,7 @@ def make_test_symbols(
     """Generate normalized constellation symbols (QAM or PSK)."""
     rng = np.random.default_rng(seed)
     const = gray_constellation(scheme, order).astype(np.complex64)
-    const = normalize(const, "average_power").astype(np.complex64)
+    const = normalize(const, mode="average_power").astype(np.complex64)
     syms = const[rng.integers(0, order, num_symbols)]
     if xp is not None:
         return xp.asarray(syms)

@@ -12,7 +12,7 @@ __all__ = ["db_to_linear", "linear_to_db", "normalize", "rms"]
 # ---------------------------------------------------------------------------
 
 
-def rms(x: ArrayType, axis: int | None = None, keepdims: bool = False) -> ArrayType:
+def rms(x: ArrayType, *, axis: int | None = None, keepdims: bool = False) -> ArrayType:
     """
     Computes the Root-Mean-Square (RMS) value of an array.
 
@@ -44,7 +44,11 @@ def rms(x: ArrayType, axis: int | None = None, keepdims: bool = False) -> ArrayT
 
 
 def normalize(
-    x: ArrayType, mode: str = "unity_gain", axis: int | None = None, sps: int = 1
+    x: ArrayType,
+    *,
+    mode: str = "unity_gain",
+    axis: int | None = None,
+    sps: float = 1,
 ) -> ArrayType:
     """
     Normalizes an array according to the specified strategy.
@@ -91,7 +95,7 @@ def normalize(
     axis : int, optional
         The axis along which to compute the normalization factor.
         If `None`, normalizes the entire array globally.
-    sps : int, default 1
+    sps : float, default 1
         Samples per symbol. Only used by the ``"symbol_power"`` mode.
 
     Returns

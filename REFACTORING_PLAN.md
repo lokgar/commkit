@@ -689,7 +689,7 @@ The equalization pass (3.7) gets more commits:
   - `helpers.py` keeps only domain helpers that wait for their owner:
     `cross_correlate_fft`, `_parabolic_peak_offset`, `zc_mimo_root` (3.5),
     `_cd_beta2_length` (3.3), PLL gains (3.6), linear trend (3.9).
-- [ ] **3.1b `refactor(math)!: 2.0 signatures`.** Keyword-only parameters
+- [x] **3.1b `refactor(math)!: 2.0 signatures`.** Keyword-only parameters
   after the data, and strict mypy for `backend`, `logger`, `_array` and
   `math`.
 

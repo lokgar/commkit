@@ -1014,8 +1014,6 @@ LEGACY: dict[str, frozenset[str]] = {
     "commkit.mapping.shaping.constellation_power": L(SIG),
     "commkit.mapping.shaping.optimal_nu": L(SIG),
     "commkit.mapping.shaping.ps_entropy": L(SIG),
-    "commkit.math.normalize": L(SIG),
-    "commkit.math.rms": L(SIG),
     "commkit.metrics.ber": L(f"{MET}@gpu"),
     "commkit.metrics.evm": L(MET),
     "commkit.metrics.mi": L(SIG, MET),

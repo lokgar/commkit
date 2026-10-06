@@ -123,7 +123,7 @@ def decimate_to_symbol_rate(
             result = _decimate_to_symbol_rate_array(samples, sps_int, offset, False, -1)
             meta["sampling_rate"] = sig.symbol_rate
         if do_norm:
-            result = _normalize(result, "average_power", axis=-1)
+            result = _normalize(result, mode="average_power", axis=-1)
         return signal_adapter.wrap_samples(result, **meta)
 
     return _decimate_to_symbol_rate_array(samples, sps_int, offset, normalize, axis)
@@ -145,7 +145,7 @@ def _decimate_to_symbol_rate_array(
     slices[axis] = slice(offset, None, sps)
     out = arr[tuple(slices)]
     if normalize:
-        out = _normalize(out, "average_power", axis=axis)
+        out = _normalize(out, mode="average_power", axis=axis)
     return out
 
 

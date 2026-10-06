@@ -127,8 +127,8 @@ class TestResolvePhaseAmbiguity:
         sig = make_test_qam_signal(
             order=16, num_symbols=self.N, sps=1, snr_db=30, seed=5, xp=xp
         )
-        sym = normalize(sig.samples, "average_power")
-        ref = normalize(xp.asarray(sig.source_symbols), "average_power")
+        sym = normalize(sig.samples, mode="average_power")
+        ref = normalize(xp.asarray(sig.source_symbols), mode="average_power")
         resolved = recovery.resolve_phase_ambiguity(sym, ref, "qam", 16)
         s0 = float(ser(resolved, ref, "qam", 16))
         for k in range(1, 4):
@@ -150,8 +150,8 @@ class TestResolvePhaseAmbiguity:
         sig = make_test_qam_signal(
             order=16, num_symbols=self.N, sps=1, snr_db=30, seed=5, xp=xp
         )
-        sym = normalize(sig.samples, "average_power")
-        ref = normalize(xp.asarray(sig.source_symbols), "average_power")
+        sym = normalize(sig.samples, mode="average_power")
+        ref = normalize(xp.asarray(sig.source_symbols), mode="average_power")
         rotated = sym * xp.exp(1j * np.pi / 2).astype(sym.dtype)
         resolved = recovery.resolve_phase_ambiguity(rotated, ref, "qam", 16)
         assert float(ser(resolved, ref, "qam", 16)) < 0.05
@@ -170,10 +170,10 @@ class TestResolvePhaseAmbiguity:
             seed=1,
             xp=xp,
         )
-        sym_a = normalize(mimo[0], "average_power")
-        sym_b = normalize(mimo[1], "average_power")
-        ref_a = normalize(ref_mimo[0], "average_power")
-        ref_b = normalize(ref_mimo[1], "average_power")
+        sym_a = normalize(mimo[0], mode="average_power")
+        sym_b = normalize(mimo[1], mode="average_power")
+        ref_a = normalize(ref_mimo[0], mode="average_power")
+        ref_b = normalize(ref_mimo[1], mode="average_power")
         mimo_rot = xp.stack(
             [
                 sym_a * xp.exp(1j * np.pi / 2).astype(sym_a.dtype),
@@ -203,13 +203,13 @@ class TestResolvePhaseAmbiguity:
             rng=9,
         ).to(device_of(xp))
         sig = sig.replace(samples=apply_awgn(sig.samples, esn0_db=30, sps=1, seed=9))
-        sym = normalize(sig.samples, "average_power")
+        sym = normalize(sig.samples, mode="average_power")
         sig = sig.replace(
             resolved_symbols=sym * xp.exp(1j * np.pi / 2).astype(sym.dtype)
         )
         sig = recovery.resolve_phase_ambiguity(sig)
         assert sig.resolved_symbols is not None
-        ref = normalize(xp.asarray(sig.source_symbols), "average_power")
+        ref = normalize(xp.asarray(sig.source_symbols), mode="average_power")
         assert float(ser(sig.resolved_symbols, ref, "qam", 16)) < 0.1
 
     def test_signal_method_raises_without_resolved(self, xp):

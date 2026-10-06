@@ -138,7 +138,7 @@ def shape_pulse(
     -----
     All pulse types produce output satisfying E[|x|²] * sps = 1 (symbol-power
     convention). For peak-normalized samples (e.g. eye diagrams), apply
-    ``normalize(..., "peak")`` after.
+    ``normalize(..., mode="peak")`` after.
     """
     logger.debug("Applying pulse shaping: %s", pulse_shape)
     sps = require_integer_sps(sps, "shape_pulse()")
@@ -156,7 +156,7 @@ def shape_pulse(
             logger.debug("Pulse shaping disabled, expanding symbols by sps")
             return normalize(
                 expand(symbols, sps, axis=-1),
-                "symbol_power",
+                mode="symbol_power",
                 sps=sps,
                 axis=-1,
             )
@@ -189,7 +189,7 @@ def shape_pulse(
     if res.dtype != symbols.dtype:
         res = res.astype(symbols.dtype)
 
-    return normalize(res, "symbol_power", sps=sps, axis=-1)
+    return normalize(res, mode="symbol_power", sps=sps, axis=-1)
 
 
 def _legacy_pulse(
@@ -331,7 +331,7 @@ def _shape(symbols: ArrayType, sps: int, pulse: Any) -> ArrayType:
     """Pulse-shape ``symbols`` to unit symbol power (see :func:`shape_pulse`)."""
     if pulse is None:
         return normalize(
-            expand(symbols, sps, axis=-1), "symbol_power", sps=sps, axis=-1
+            expand(symbols, sps, axis=-1), mode="symbol_power", sps=sps, axis=-1
         )
     taps = pulse.taps(sps) if isinstance(pulse, filtering.Pulse) else pulse
     symbols, xp, sp = dispatch(symbols)
@@ -339,7 +339,7 @@ def _shape(symbols: ArrayType, sps: int, pulse: Any) -> ArrayType:
     res = sp.signal.resample_poly(symbols, sps, 1, window=h, axis=-1)
     if res.dtype != symbols.dtype:
         res = res.astype(symbols.dtype)
-    return normalize(res, "symbol_power", sps=sps, axis=-1)
+    return normalize(res, mode="symbol_power", sps=sps, axis=-1)
 
 
 def generate_psqam(
