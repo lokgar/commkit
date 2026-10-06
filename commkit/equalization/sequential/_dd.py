@@ -6,25 +6,14 @@ from typing import Any
 
 import numpy as np
 
-from ..._array import restore_1d
-from ...backend import ArrayType, dispatch, to_device
+from ...backend import ArrayType
 from ...core._signal_adapter import adapt_signal, require_integer_sps
 from ...core.signal import Signal
 from ...logger import logger
 from ...mapping.gray import _square_qam_slicer_params
 from ...recovery._common import _resolve_pll_gains
-from .._common import (
-    _build_padded_samples,
-    _cpr_symmetry,
-    _init_butterfly_weights_numpy,
-    _normalize_inputs,
-    _prepare_training_numpy,
-    _unpack_result_numpy,
-    _validate_sps,
-    _validate_w_init,
-)
+from .._common import _cpr_symmetry
 from .._kernels_numba import (
-    _get_numba,
     _get_numba_lms,
     _get_numba_lms_cpr,
     _get_numba_rls,
@@ -35,6 +24,14 @@ from ..result import (
     EqualizerResult,
     _attach_equalized_signal,
     _log_equalizer_exit,
+)
+from ._setup import (
+    _assemble_sequential,
+    _bps_phases,
+    _carrier_args,
+    _carrier_arrays,
+    _dd_constellation,
+    _prepare_sequential,
 )
 
 # -----------------------------------------------------------------------------
@@ -378,10 +375,6 @@ def lms(
     sig = signal_adapter.signal
     if sig is not None:
         sps = require_integer_sps(signal_adapter.resolve_required("sps", sps), "lms()")
-
-    def finish(result: EqualizerResult) -> EqualizerResult:
-        return _attach_equalized_signal(result, sig)
-
     if sps is None:
         sps = 2
 
@@ -403,240 +396,88 @@ def lms(
             "Update sampling_rate = symbol_rate after applying this equalizer."
         )
 
-    samples, xp, _ = dispatch(samples)
-    _validate_sps(sps, num_taps)
-    stride = int(sps)
-
-    if training_symbols is not None:
-        training_symbols, _, _ = dispatch(training_symbols)
-
-    # Shape calcs - independent of normalization
-    was_1d = samples.ndim == 1
-    num_ch = 1 if was_1d else samples.shape[0]
-    n_samples = samples.shape[0] if was_1d else samples.shape[1]
-    n_sym = n_samples // stride
-
-    if training_symbols is not None and training_symbols.shape[-1] > n_sym:
-        logger.warning(
-            "training_symbols length (%s) exceeds available symbol count "
-            "(%s); excess training symbols will be ignored.",
-            training_symbols.shape[-1],
-            n_sym,
-        )
-
-    c_tap = center_tap if center_tap is not None else num_taps // 2
-    pad_total = max(0, n_sym * stride - n_samples + num_taps - 1)
-    pad_left = min(c_tap, pad_total)
-    pad_right = pad_total - pad_left
-
-    # Convert to plain NumPy (no-op for CPU NumPy; downloads for CuPy)
-    samples_np = np.ascontiguousarray(to_device(samples, "cpu"), dtype=np.complex64)
-    training_np = (
-        to_device(training_symbols, "cpu").astype(np.complex64)
-        if training_symbols is not None
-        else None
+    run = _prepare_sequential(
+        samples,
+        sps=sps,
+        num_taps=num_taps,
+        center_tap=center_tap,
+        w_init=w_init,
+        store_weights=store_weights,
+        input_norm_factor=input_norm_factor,
+        samples_prefix=samples_prefix,
+        pad_mode=pad_mode,
+        training_symbols=training_symbols,
     )
-    samples_np, training_np, eq_norm = _normalize_inputs(
-        samples_np, training_np, sps, input_norm_factor=input_norm_factor
-    )
-    # Pad (NumPy)
-    samples_padded = _build_padded_samples(
-        samples_np, pad_left, pad_right, samples_prefix, pad_mode, eq_norm, sps
-    )
-    # Constellation (NumPy)
-    if modulation is not None and order is not None:
-        from ...mapping.gray import _gray_points
+    constellation_np = _dd_constellation(modulation, order, unipolar, pmf, run.training)
+    sq_side, sq_lev_min, sq_d_grid = _square_qam_slicer_params(constellation_np)
+    slicer = (sq_lev_min, sq_d_grid, np.int32(sq_side))
 
-        reference_constellation = _gray_points(modulation, order, unipolar=unipolar)
-        constellation_np = (
-            to_device(reference_constellation, "cpu").flatten().astype(np.complex64)
-        )
-    elif training_np is not None:
-        train_flat = training_np.reshape(-1)
-        constellation_np = np.unique(np.round(train_flat, decimals=8))
-    else:
-        raise ValueError("modulation and order must be provided for DD mode.")
-    # PS-QAM: scale slicer constellation to unit-power {s_m/sqrt(E_PS)} so it
-    # matches the normalised equaliser input.  Training is already at unit power
-    # after _normalize_inputs - only the constellation reference needs scaling.
-    if pmf is not None and modulation is not None and order is not None:
-        _pmf_arr = np.asarray(pmf, dtype=np.float64)
-        _e_ps = float(
-            np.dot(_pmf_arr, np.abs(constellation_np).astype(np.float64) ** 2)
-        )
-        if _e_ps < 1.0 - 1e-6:
-            _c_ps = np.float32(1.0 / np.sqrt(_e_ps))
-            constellation_np = (constellation_np * _c_ps).astype(np.complex64)
-    train_full, n_train_aligned = _prepare_training_numpy(
-        training_np,
-        num_ch,
-        n_sym,
-    )
-    _sq_side, _sq_lev_min, _sq_d_grid = _square_qam_slicer_params(constellation_np)
-    if w_init is not None:
-        w_arr = np.ascontiguousarray(to_device(w_init, "cpu"), dtype=np.complex64)
-        w_arr = _validate_w_init(w_arr, num_ch, num_taps)
-        W = w_arr.copy()
-    else:
-        W = _init_butterfly_weights_numpy(num_ch, num_taps, center_tap=center_tap)
-    y_out = np.empty((n_sym, num_ch), dtype=np.complex64)
-    e_out = np.empty((n_sym, num_ch), dtype=np.complex64)
-    w_hist_buf = (
-        np.empty((n_sym, num_ch, num_ch, num_taps), dtype=np.complex64)
-        if store_weights
-        else np.empty((1, num_ch, num_ch, num_taps), dtype=np.complex64)
-    )
     if cpr_type is None:
         _get_numba_lms()(
-            samples_padded,
-            train_full,
+            run.x,
+            run.train_full,
             constellation_np,
-            W,
+            run.W,
             np.float32(step_size),
-            np.int32(n_train_aligned),
-            stride,
+            np.int32(run.n_train),
+            run.stride,
             store_weights,
-            y_out,
-            e_out,
-            w_hist_buf,
-            _sq_lev_min,
-            _sq_d_grid,
-            np.int32(_sq_side),
+            run.y_out,
+            run.e_out,
+            run.w_hist,
+            *slicer,
         )
-        result = _unpack_result_numpy(
-            y_out,
-            e_out,
-            W,
-            w_hist_buf,
-            was_1d,
-            store_weights,
-            n_sym=None,
-            xp=xp,
-            num_train_symbols=int(n_train_aligned),
-            input_norm_factor=eq_norm,
-        )
+        result = _assemble_sequential(run)
     else:
         pll_mu, pll_beta = _resolve_pll_gains(
             cpr_pll_bandwidth, cpr_pll_mu, cpr_pll_beta
         )
         symmetry = _cpr_symmetry(modulation, order)
-        B = int(cpr_bps_test_phases)
-        bps_angles_np = np.linspace(
-            0.0, np.pi / 2.0, B, endpoint=False, dtype=np.float32
-        )
-        bps_phases_neg_np = np.exp(-1j * bps_angles_np).astype(np.complex64)
-        H = int(cpr_cycle_slip_history)
-        _st = cpr_state
-        _st_ok = (
-            _st is not None
-            and _st.cpr_type == cpr_type
-            and _st.num_ch == num_ch
-            and _st.cs_H == H
-            and _st.pll_phi is not None
-        )
-        if _st_ok:
-            assert _st is not None
-            assert _st.pll_phi is not None
-            assert _st.pll_freq is not None
-            assert _st.cs_buf_x is not None
-            assert _st.cs_buf_y is not None
-            assert _st.cs_buf_ptr is not None
-            assert _st.cs_buf_n is not None
-            assert _st.cs_stats is not None
-            pll_phi = _st.pll_phi.copy()
-            pll_freq = _st.pll_freq.copy()
-            cs_buf_x = _st.cs_buf_x.copy()
-            cs_buf_y = _st.cs_buf_y.copy()
-            cs_buf_ptr = _st.cs_buf_ptr.copy()
-            cs_buf_n = _st.cs_buf_n.copy()
-            cs_stats = _st.cs_stats.copy()
-            bps_prev4 = (
-                _st.bps_prev4.copy()
-                if _st.bps_prev4 is not None
-                else np.zeros(num_ch, dtype=np.float64)
-            )
-        else:
-            pll_phi = np.zeros(num_ch, dtype=np.float64)
-            pll_freq = np.zeros(num_ch, dtype=np.float64)
-            cs_buf_x = np.zeros((num_ch, H), dtype=np.float64)
-            cs_buf_y = np.zeros((num_ch, H), dtype=np.float64)
-            cs_buf_ptr = np.zeros(num_ch, dtype=np.int64)
-            cs_buf_n = np.zeros(num_ch, dtype=np.int64)
-            cs_stats = np.zeros((num_ch, 4), dtype=np.float64)
-            bps_prev4 = np.zeros(num_ch, dtype=np.float64)
-        phase_out = np.empty((n_sym, num_ch), dtype=np.float64)
-        cpr_mode_int = np.int32(1 if cpr_type == "pll" else 2)
+        bps_angles, bps_phases_neg = _bps_phases(cpr_bps_test_phases)
+        history = int(cpr_cycle_slip_history)
+        carrier = _carrier_arrays(cpr_state, cpr_type, run.num_ch, history)
+        phase_out = np.empty((run.n_sym, run.num_ch), dtype=np.float64)
         _get_numba_lms_cpr()(
-            samples_padded,
-            train_full,
+            run.x,
+            run.train_full,
             constellation_np,
-            bps_phases_neg_np,
-            bps_angles_np,
+            bps_phases_neg,
+            bps_angles,
             np.int32(cpr_bps_block_size),
             bool(cpr_joint_channels),
-            W,
+            run.W,
             np.float32(step_size),
-            np.int32(n_train_aligned),
-            stride,
+            np.int32(run.n_train),
+            run.stride,
             store_weights,
-            cpr_mode_int,
+            np.int32(1 if cpr_type == "pll" else 2),
             pll_mu,
             pll_beta,
             np.int32(symmetry),
             bool(cpr_cycle_slip_correction),
             np.float32(cpr_cycle_slip_threshold),
-            pll_phi,
-            pll_freq,
-            cs_buf_x,
-            cs_buf_y,
-            cs_buf_ptr,
-            cs_buf_n,
-            cs_stats,
-            bps_prev4,
-            y_out,
-            e_out,
+            *_carrier_args(carrier),
+            run.y_out,
+            run.e_out,
             phase_out,
-            w_hist_buf,
-            _sq_lev_min,
-            _sq_d_grid,
-            np.int32(_sq_side),
+            run.w_hist,
+            *slicer,
         )
-        result = _unpack_result_numpy(
-            y_out,
-            e_out,
-            W,
-            w_hist_buf,
-            was_1d,
-            store_weights,
-            n_sym=None,
-            xp=xp,
-            num_train_symbols=int(n_train_aligned),
-            input_norm_factor=eq_norm,
+        result = _assemble_sequential(
+            run,
+            phase_out=phase_out,
+            carrier=carrier,
+            cpr_state_tags=dict(
+                cpr_type=cpr_type,
+                num_ch=run.num_ch,
+                symmetry=symmetry,
+                bps_P=len(bps_angles),
+                bps_K=int(cpr_bps_block_size),
+                cs_H=history,
+            ),
         )
-        phi_t = xp.asarray(phase_out.T)  # (C, N_sym)
-        result.phase_trajectory = restore_1d(was_1d, phi_t)
-        result.cpr_state = CPRState(
-            pll_phi=pll_phi.copy(),
-            pll_freq=pll_freq.copy(),
-            bps_prev4=bps_prev4.copy(),
-            cs_buf_x=cs_buf_x.copy(),
-            cs_buf_y=cs_buf_y.copy(),
-            cs_buf_ptr=cs_buf_ptr.copy(),
-            cs_buf_n=cs_buf_n.copy(),
-            cs_stats=cs_stats.copy(),
-            cpr_type=cpr_type,
-            num_ch=num_ch,
-            symmetry=symmetry,
-            bps_P=B,
-            bps_K=int(cpr_bps_block_size),
-            cs_H=H,
-        )
-    return finish(
-        _log_equalizer_exit(
-            result,
-            name="LMS",
-        )
-    )
+    result = _log_equalizer_exit(result, name="LMS")
+    return _attach_equalized_signal(result, sig)
 
 
 def _check_rls_divergence(weights, xp, forgetting_factor, delta):
@@ -925,10 +766,8 @@ def rls(
     sig = signal_adapter.signal
     if sig is not None:
         sps = require_integer_sps(signal_adapter.resolve_required("sps", sps), "rls()")
-
     if sps is None:
         sps = 1
-
     if sps > 1:
         logger.warning(
             "RLS is mathematically ill-conditioned for fractionally-spaced "
@@ -960,33 +799,21 @@ def rls(
             "Update sampling_rate = symbol_rate after applying this equalizer."
         )
 
-    samples, xp, _ = dispatch(samples)
-    _validate_sps(sps, num_taps)
-    stride = int(sps)
-
-    if training_symbols is not None:
-        training_symbols, _, _ = dispatch(training_symbols)
-
-    was_1d = samples.ndim == 1
-    if was_1d:
-        num_ch = 1
-        n_samples = samples.shape[0]
-    else:
-        num_ch, n_samples = samples.shape
-
-    n_sym = n_samples // stride
-
-    if training_symbols is not None and training_symbols.shape[-1] > n_sym:
-        logger.warning(
-            "training_symbols length (%s) exceeds available symbol count "
-            "(%s); excess training symbols will be ignored.",
-            training_symbols.shape[-1],
-            n_sym,
-        )
-
+    run = _prepare_sequential(
+        samples,
+        sps=sps,
+        num_taps=num_taps,
+        center_tap=center_tap,
+        w_init=w_init,
+        store_weights=store_weights,
+        input_norm_factor=input_norm_factor,
+        samples_prefix=samples_prefix,
+        pad_mode=pad_mode,
+        training_symbols=training_symbols,
+    )
     # Early-halt boundary: freeze W and P once the sliding window reaches the
     # right zero-padding (last num_taps//2 symbols have contaminated windows).
-    n_update_halt = max(0, n_sym - num_taps // 2)
+    n_update_halt = max(0, run.n_sym - num_taps // 2)
     tail_trim = num_taps // 2
     if tail_trim > 0:
         logger.warning(
@@ -997,229 +824,85 @@ def rls(
             ":-result.tail_trim * bits_per_symbol].",
             tail_trim,
         )
+    constellation_np = _dd_constellation(modulation, order, unipolar, pmf, run.training)
+    sq_side, sq_lev_min, sq_d_grid = _square_qam_slicer_params(constellation_np)
+    slicer = (sq_lev_min, sq_d_grid, np.int32(sq_side))
+    # Inverse correlation matrix: complex128 throughout (single precision loses
+    # the Hermitian positive-definite property and the filter diverges).
+    P = np.eye(run.num_ch * num_taps, dtype=np.complex128) / np.float64(delta)
 
-    c_tap = center_tap if center_tap is not None else num_taps // 2
-    pad_total = max(0, n_sym * stride - n_samples + num_taps - 1)
-    pad_left = min(c_tap, pad_total)
-    pad_right = pad_total - pad_left
-
-    numba = _get_numba()
-    if numba is None:
-        raise ImportError("Numba is required for the sequential equalizers.")
-
-    samples_np = np.ascontiguousarray(to_device(samples, "cpu"), dtype=np.complex64)
-    training_np = (
-        to_device(training_symbols, "cpu").astype(np.complex64)
-        if training_symbols is not None
-        else None
-    )
-    samples_np, training_np, eq_norm = _normalize_inputs(
-        samples_np, training_np, sps, input_norm_factor=input_norm_factor
-    )
-
-    x_np = _build_padded_samples(
-        samples_np, pad_left, pad_right, samples_prefix, pad_mode, eq_norm, sps
-    )
-    x_np = np.ascontiguousarray(x_np)
-
-    if modulation is not None and order is not None:
-        from ...mapping.gray import _gray_points
-
-        reference_constellation = _gray_points(modulation, order, unipolar=unipolar)
-        constellation_np = (
-            to_device(reference_constellation, "cpu").flatten().astype(np.complex64)
-        )
-    elif training_np is not None:
-        train_flat = training_np.reshape(-1)
-        constellation_np = np.unique(np.round(train_flat, decimals=8)).astype(
-            "complex64"
-        )
-    else:
-        raise ValueError("modulation and order must be provided for DD mode.")
-    # PS-QAM: scale slicer constellation to unit-power {s_m/sqrt(E_PS)}.
-    if pmf is not None and modulation is not None and order is not None:
-        _pmf_arr = np.asarray(pmf, dtype=np.float64)
-        _e_ps = float(
-            np.dot(_pmf_arr, np.abs(constellation_np).astype(np.float64) ** 2)
-        )
-        if _e_ps < 1.0 - 1e-6:
-            _c_ps = np.float32(1.0 / np.sqrt(_e_ps))
-            constellation_np = (constellation_np * _c_ps).astype(np.complex64)
-
-    train_full, n_train_aligned = _prepare_training_numpy(
-        training_np,
-        num_ch,
-        n_sym,
-    )
-    _sq_side, _sq_lev_min, _sq_d_grid = _square_qam_slicer_params(constellation_np)
-    if w_init is not None:
-        w_arr = np.ascontiguousarray(to_device(w_init, "cpu"), dtype=np.complex64)
-        w_arr = _validate_w_init(w_arr, num_ch, num_taps)
-        W = w_arr.copy()
-    else:
-        W = _init_butterfly_weights_numpy(num_ch, num_taps, center_tap=center_tap)
-    regressor_dim = num_ch * num_taps
-    P = np.eye(regressor_dim, dtype=np.complex128) / np.float64(delta)
-    y_out = np.empty((n_sym, num_ch), dtype=np.complex64)
-    e_out = np.empty((n_sym, num_ch), dtype=np.complex64)
-    w_hist_buf = (
-        np.empty((n_sym, num_ch, num_ch, num_taps), dtype=np.complex64)
-        if store_weights
-        else np.empty((1, num_ch, num_ch, num_taps), dtype=np.complex64)
-    )
     if cpr_type is None:
         _get_numba_rls()(
-            x_np,
-            train_full,
+            run.x,
+            run.train_full,
             constellation_np,
-            W,
+            run.W,
             P,
             np.float32(forgetting_factor),
             np.float32(leakage),
-            np.int32(n_train_aligned),
+            np.int32(run.n_train),
             np.int32(n_update_halt),
-            stride,
+            run.stride,
             store_weights,
-            y_out,
-            e_out,
-            w_hist_buf,
-            _sq_lev_min,
-            _sq_d_grid,
-            np.int32(_sq_side),
+            run.y_out,
+            run.e_out,
+            run.w_hist,
+            *slicer,
         )
-        result = _unpack_result_numpy(
-            y_out,
-            e_out,
-            W,
-            w_hist_buf,
-            was_1d,
-            store_weights,
-            n_sym=n_update_halt,
-            xp=xp,
-            num_train_symbols=int(n_train_aligned),
-            input_norm_factor=eq_norm,
-        )
+        result = _assemble_sequential(run, n_sym=n_update_halt)
     else:
         pll_mu, pll_beta = _resolve_pll_gains(
             cpr_pll_bandwidth, cpr_pll_mu, cpr_pll_beta
         )
         symmetry = _cpr_symmetry(modulation, order)
-        B = int(cpr_bps_test_phases)
-        bps_angles_np = np.linspace(
-            0.0, np.pi / 2.0, B, endpoint=False, dtype=np.float32
-        )
-        bps_phases_neg_np = np.exp(-1j * bps_angles_np).astype(np.complex64)
-        H = int(cpr_cycle_slip_history)
-        _st = cpr_state
-        _st_ok = (
-            _st is not None
-            and _st.cpr_type == cpr_type
-            and _st.num_ch == num_ch
-            and _st.cs_H == H
-            and _st.pll_phi is not None
-        )
-        if _st_ok:
-            assert _st is not None
-            assert _st.pll_phi is not None
-            assert _st.pll_freq is not None
-            assert _st.cs_buf_x is not None
-            assert _st.cs_buf_y is not None
-            assert _st.cs_buf_ptr is not None
-            assert _st.cs_buf_n is not None
-            assert _st.cs_stats is not None
-            pll_phi = _st.pll_phi.copy()
-            pll_freq = _st.pll_freq.copy()
-            cs_buf_x = _st.cs_buf_x.copy()
-            cs_buf_y = _st.cs_buf_y.copy()
-            cs_buf_ptr = _st.cs_buf_ptr.copy()
-            cs_buf_n = _st.cs_buf_n.copy()
-            cs_stats = _st.cs_stats.copy()
-            bps_prev4 = (
-                _st.bps_prev4.copy()
-                if _st.bps_prev4 is not None
-                else np.zeros(num_ch, dtype=np.float64)
-            )
-        else:
-            pll_phi = np.zeros(num_ch, dtype=np.float64)
-            pll_freq = np.zeros(num_ch, dtype=np.float64)
-            cs_buf_x = np.zeros((num_ch, H), dtype=np.float64)
-            cs_buf_y = np.zeros((num_ch, H), dtype=np.float64)
-            cs_buf_ptr = np.zeros(num_ch, dtype=np.int64)
-            cs_buf_n = np.zeros(num_ch, dtype=np.int64)
-            cs_stats = np.zeros((num_ch, 4), dtype=np.float64)
-            bps_prev4 = np.zeros(num_ch, dtype=np.float64)
-        phase_out = np.empty((n_sym, num_ch), dtype=np.float64)
-        cpr_mode_int = np.int32(1 if cpr_type == "pll" else 2)
+        bps_angles, bps_phases_neg = _bps_phases(cpr_bps_test_phases)
+        history = int(cpr_cycle_slip_history)
+        carrier = _carrier_arrays(cpr_state, cpr_type, run.num_ch, history)
+        phase_out = np.empty((run.n_sym, run.num_ch), dtype=np.float64)
         _get_numba_rls_cpr()(
-            x_np,
-            train_full,
+            run.x,
+            run.train_full,
             constellation_np,
-            bps_phases_neg_np,
-            bps_angles_np,
+            bps_phases_neg,
+            bps_angles,
             np.int32(cpr_bps_block_size),
             bool(cpr_joint_channels),
-            W,
+            run.W,
             P,
             np.float32(forgetting_factor),
             np.float32(leakage),
-            np.int32(n_train_aligned),
+            np.int32(run.n_train),
             np.int32(n_update_halt),
-            stride,
+            run.stride,
             store_weights,
-            cpr_mode_int,
+            np.int32(1 if cpr_type == "pll" else 2),
             pll_mu,
             pll_beta,
             np.int32(symmetry),
             bool(cpr_cycle_slip_correction),
             np.float32(cpr_cycle_slip_threshold),
-            pll_phi,
-            pll_freq,
-            cs_buf_x,
-            cs_buf_y,
-            cs_buf_ptr,
-            cs_buf_n,
-            cs_stats,
-            bps_prev4,
-            y_out,
-            e_out,
+            *_carrier_args(carrier),
+            run.y_out,
+            run.e_out,
             phase_out,
-            w_hist_buf,
-            _sq_lev_min,
-            _sq_d_grid,
-            np.int32(_sq_side),
+            run.w_hist,
+            *slicer,
         )
-        result = _unpack_result_numpy(
-            y_out,
-            e_out,
-            W,
-            w_hist_buf,
-            was_1d,
-            store_weights,
+        result = _assemble_sequential(
+            run,
             n_sym=n_update_halt,
-            xp=xp,
-            num_train_symbols=int(n_train_aligned),
-            input_norm_factor=eq_norm,
+            phase_out=phase_out,
+            carrier=carrier,
+            cpr_state_tags=dict(
+                cpr_type=cpr_type,
+                num_ch=run.num_ch,
+                symmetry=symmetry,
+                bps_P=len(bps_angles),
+                bps_K=int(cpr_bps_block_size),
+                cs_H=history,
+            ),
         )
-        phi_t = xp.asarray(phase_out[:n_update_halt].T)  # (C, n_update_halt)
-        result.phase_trajectory = restore_1d(was_1d, phi_t)
-        result.cpr_state = CPRState(
-            pll_phi=pll_phi.copy(),
-            pll_freq=pll_freq.copy(),
-            bps_prev4=bps_prev4.copy(),
-            cs_buf_x=cs_buf_x.copy(),
-            cs_buf_y=cs_buf_y.copy(),
-            cs_buf_ptr=cs_buf_ptr.copy(),
-            cs_buf_n=cs_buf_n.copy(),
-            cs_stats=cs_stats.copy(),
-            cpr_type=cpr_type,
-            num_ch=num_ch,
-            symmetry=symmetry,
-            bps_P=B,
-            bps_K=int(cpr_bps_block_size),
-            cs_H=H,
-        )
-    # Truncate last num_taps//2 symbols (zero-padding contamination).
     result = _log_equalizer_exit(result, name="RLS")
     result.tail_trim = tail_trim
-    _check_rls_divergence(result.weights, xp, forgetting_factor, delta)
+    _check_rls_divergence(result.weights, run.xp, forgetting_factor, delta)
     return _attach_equalized_signal(result, sig)

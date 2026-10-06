@@ -372,5 +372,5 @@ rule without deleting its entry fails the suite.
 | `modulation=` / `order=` / `unipolar=` / `pmf=` parameters; positional parameters; `float \| ndarray` and dict returns; metrics returning `None` | Module passes 3.1-3.10 |
 | `cpr_*` flat parameters, `w_init` / `samples_prefix` / `input_norm_factor` / `cpr_state` | 3.7 |
 | `helpers.py` | Module passes, deleted in 4.1 |
-| Test-only private exports in `equalization` / `plotting` `__init__` | 3.7, 3.10 |
+| Test-only private exports in the `plotting` `__init__` | 3.10 |
 | `--use_fast_math` as the global CUDA default | Step 5 |

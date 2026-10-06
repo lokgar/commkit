@@ -937,6 +937,63 @@ The equalization pass (3.7) gets more commits:
   phase, BPS went from 2.5 rad RMS error (17.8 rad with slip repair) to
   0.021 rad.
 
+**Pass 3.7 commits:**
+
+- [x] **3.7a `refactor(equalization): one front end for the sequential
+  equalizers`.** `lms`, `rls`, `cma` and `rde` repeat about 100 lines each
+  of setup (dispatch, geometry, host copy, normalization, padding, slicer,
+  training, initial weights, output buffers) and result assembly. These
+  move into `_prepare_sequential()` and `_assemble_sequential()`; each
+  function keeps only its validation and its kernel call. The test-only
+  re-exports leave `equalization/__init__.py`. Bit-identical outputs,
+  weights, weight histories, phase trajectories and CPR state. Found on the
+  way: with `pilot_gain_db` the CPU path of `cma` / `rde` divided the
+  pilots of the caller's complex64 array in place; it now works on a copy.
+- [ ] **3.7b `refactor(equalization): block equalizers share the FDAF
+  loop`.** `block_lms` duplicates the FDAF forward pass, the gradient update
+  and the CUDA-graph block loop of the blind engine; all three get one
+  implementation, and the block front end mirrors 3.7a. Bit-identical on
+  CPU and GPU.
+- [ ] **3.7c `refactor(equalization)!: 2.0 signatures`.** Keyword-only
+  parameters after the data. `constellation=` (a choice, default
+  `sig.constellation`) replaces `modulation` / `order` / `unipolar` /
+  `pmf`: the slicer, the Godard radius and the RDE rings come from its
+  points and pmf, so the `_legacy_constellation` users in equalization are
+  gone. Decision-directed operation needs a constellation (1.x guessed one
+  from the unique training symbols). `sps` is a fact; array input must
+  give it. The linear, polarization and pilot helpers follow the same
+  rules.
+- [ ] **3.7d `refactor(equalization)!: cpr= takes PLL or BPS`.** The nine
+  `cpr_*` parameters of `lms`, `rls` and `block_lms` become one `cpr=`
+  object from `recovery` (`block_lms` takes `BPS` only), with cycle-slip
+  repair as its nested `CycleSlip`.
+- [ ] **3.7e `refactor(equalization)!: state= continues an equalizer`.**
+  `EqualizerState` (frozen) replaces `w_init`, `samples_prefix`,
+  `input_norm_factor` and `cpr_state`; user taps are `initial_taps=`.
+  - The state is taken after the last symbol whose filter window lies
+    inside the data (a block boundary for the block equalizers). It holds
+    the weights, the normalization, the input from that point on, the CPR
+    state including the BPS window that 1.x kept local to the kernel, and
+    for RLS the inverse correlation matrix (complex128; LMS has none).
+  - The next call recomputes the provisional tail of the previous result,
+    whose length is `state.overlap`, so chunked output equals an
+    uninterrupted run exactly. Tests check this for every equalizer,
+    with and without CPR, on CPU and GPU.
+  - A state from another equalizer or configuration raises (1.x silently
+    cold-started).
+- [ ] **3.7f `refactor(equalization)!: result.signal`.** `y_hat` is always
+  an array; `result.signal` is the 1-SPS Signal for Signal input, with the
+  reference cut to the output symbols (RLS drops its tail).
+- [ ] **3.7g `fix(equalization): known symbols on the constellation's
+  scale`.** Training symbols were renormalized to unit sample-average
+  power, which moves exact constellation points off the grid, while the
+  blind engines used pilot references as given (scaled for PS). Both now
+  take known symbols as given, on the scale of the unit-power
+  constellation.
+- [ ] **3.7h `test(equalization): oracle for the inline CPR kernels`.**
+  Plain-Python LMS and RLS with PLL and BPS in the loop, compared with the
+  Numba kernels: outputs, weights, phase and CPR state.
+
 **Equalizer safety rules (3.7):**
 
 - Keep the dtype rules: complex128 accumulation in LMS/CMA, and float64 for all

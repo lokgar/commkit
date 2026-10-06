@@ -6,6 +6,7 @@ import pytest
 from commkit import equalization, generate
 from commkit.core import Signal
 from commkit.equalization import EqualizerResult
+from commkit.equalization.sequential._dd import _check_rls_divergence
 from commkit.filtering import RRC
 from commkit.mapping import Constellation
 from tests.common.conversions import to_numpy
@@ -812,12 +813,12 @@ class TestNumbaBackendCoverage:
         returning garbage taps (mirrors the block_lms divergence safeguard)."""
         good = xp.ones((2, 2, 5), dtype=xp.complex64)
         # Finite weights pass through untouched.
-        equalization._check_rls_divergence(good, xp, 0.99, 0.01)
+        _check_rls_divergence(good, xp, 0.99, 0.01)
 
         bad = good.copy()
         bad[0, 0, 0] = float("nan")
         with pytest.raises(RuntimeError, match="RLS equalizer diverged"):
-            equalization._check_rls_divergence(bad, xp, 0.99, 0.01)
+            _check_rls_divergence(bad, xp, 0.99, 0.01)
 
     def test_rls_numba_mimo(self, xp):
         """RLS numba MIMO path correctly handles (num_channels, n_samples) input shape."""
@@ -959,6 +960,27 @@ class TestCmaPilotAided:
         pilot_mask_bool = to_device(struct["pilots"], "cpu")
         n_body = int(pilot_mask_bool.size)
         return frame, samples_cpu, pilot_syms_cpu, pilot_mask_bool, n_body
+
+    @pytest.mark.parametrize("name", ["cma", "rde"])
+    def test_pilot_deboost_leaves_input_alone(self, name):
+        """De-boosting the pilots works on a copy of a NumPy complex64 input."""
+        rng = np.random.default_rng(0)
+        x = (rng.standard_normal(400) + 1j * rng.standard_normal(400)).astype(
+            np.complex64
+        )
+        before = x.copy()
+        mask = np.zeros(200, dtype=np.uint8)
+        mask[::10] = 1
+        ref = np.where(mask, 1 + 1j, 0).astype(np.complex64)[None, :]
+        getattr(equalization, name)(
+            x,
+            sps=2,
+            num_taps=5,
+            pilot_ref=ref,
+            pilot_mask=mask,
+            pilot_gain_db=3.0,
+        )
+        np.testing.assert_array_equal(x, before)
 
     def test_cma_pilot_aided_numba_output_shape(self, xp):
         """cma() with pilot_ref/pilot_mask returns correct body length."""

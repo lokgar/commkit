@@ -275,7 +275,6 @@ ROWS: list[Row] = [
         call=lambda c, x: _a(x, num_taps=5, sps=SPS, **QAM16),
         fact=SPS_CONFLICT,
     ),
-    Row("commkit.equalization.sequential._dd._check_rls_divergence", REMOVE),
     Row(
         "commkit.equalization._block._dd.block_lms",
         EQUALIZER,

@@ -13,11 +13,7 @@ The public API is unchanged from when this was a single module:
 
 from __future__ import annotations
 
-# ``_get_numba`` and ``_check_rls_divergence`` are re-exported for tests that
-# reach package internals through this namespace (removed in the equalization
-# module pass). F401 is silenced for this re-export hub in pyproject.toml.
 from ._block import block_lms
-from ._kernels_numba import _get_numba
 from .blind import block_cma, block_rde, build_pilot_ref
 from .linear import apply_taps, estimate_transfer_function, zf_equalizer
 from .polarization import (
@@ -26,7 +22,7 @@ from .polarization import (
     demultiplex_polarization_tones_static,
 )
 from .result import CPRState, EqualizerResult
-from .sequential import _check_rls_divergence, cma, lms, rde, rls
+from .sequential import cma, lms, rde, rls
 
 __all__ = [
     "CPRState",

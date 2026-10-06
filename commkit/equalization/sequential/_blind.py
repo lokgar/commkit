@@ -6,26 +6,18 @@ from typing import Any
 
 import numpy as np
 
-from ...backend import ArrayType, dispatch, to_device
+from ...backend import ArrayType, to_device
 from ...core._signal_adapter import adapt_signal, require_integer_sps
 from ...core.signal import Signal
 from ...logger import logger
-from .._common import (
-    _build_padded_samples,
-    _init_butterfly_weights_numpy,
-    _normalize_inputs,
-    _unpack_result_numpy,
-    _validate_sps,
-    _validate_w_init,
-)
 from .._kernels_numba import (
-    _get_numba,
     _get_numba_cma,
     _get_numba_pa_cma,
     _get_numba_pa_rde,
     _get_numba_rde,
 )
 from ..result import EqualizerResult, _attach_equalized_signal, _log_equalizer_exit
+from ._setup import _assemble_sequential, _prepare_sequential
 
 # -----------------------------------------------------------------------------
 # BLIND equalization
@@ -203,10 +195,6 @@ def cma(
     sig = signal_adapter.signal
     if sig is not None:
         sps = require_integer_sps(signal_adapter.resolve_required("sps", sps), "cma()")
-
-    def finish(result: EqualizerResult) -> EqualizerResult:
-        return _attach_equalized_signal(result, sig)
-
     if sps is None:
         sps = 2
 
@@ -224,17 +212,6 @@ def cma(
             "CMA output y_hat is at 1 SPS (symbol rate). "
             "Update sampling_rate = symbol_rate after applying this equalizer."
         )
-
-    samples, xp, _ = dispatch(samples)
-    _validate_sps(sps, num_taps)
-    stride = int(sps)
-
-    was_1d = samples.ndim == 1
-    if was_1d:
-        num_ch = 1
-        n_samples = samples.shape[0]
-    else:
-        num_ch, n_samples = samples.shape
 
     # Compute R2 and PS-QAM scale factor from the Godard constellation.
     _c_ps = None  # 1/sqrt(E_PS) scale factor; None for uniform modulation
@@ -265,95 +242,45 @@ def cma(
     else:
         r2 = 1.0
 
-    n_sym = n_samples // stride
-
-    c_tap = center_tap if center_tap is not None else num_taps // 2
-    pad_total = max(0, n_sym * stride - n_samples + num_taps - 1)
-    pad_left = min(c_tap, pad_total)
-    pad_right = pad_total - pad_left
-
-    numba = _get_numba()
-    if numba is None:
-        raise ImportError("Numba is required for the sequential equalizers.")
-
-    samples_np = np.ascontiguousarray(to_device(samples, "cpu"), dtype=np.complex64)
-    # Deboost pilot positions before global normalisation so boosted pilots
-    # don't inflate the RMS estimate and bias the Godard convergence target.
-    if use_pilots and pilot_gain_db != 0.0:
-        assert pilot_mask is not None
-        _amp = np.float32(10.0 ** (pilot_gain_db / 20.0))
-        _smask = np.repeat(pilot_mask.astype(bool), stride)  # (N_samples,)
-        samples_np[..., _smask] /= _amp
     # RMS-normalize samples to unit symbol-rate power (CMA has no training)
-    samples_np, _, eq_norm = _normalize_inputs(
-        samples_np, None, sps, input_norm_factor=input_norm_factor
+    run = _prepare_sequential(
+        samples,
+        sps=sps,
+        num_taps=num_taps,
+        center_tap=center_tap,
+        w_init=w_init,
+        store_weights=store_weights,
+        input_norm_factor=input_norm_factor,
+        samples_prefix=samples_prefix,
+        pad_mode=pad_mode,
+        pilot_mask=pilot_mask if use_pilots else None,
+        pilot_gain_db=pilot_gain_db,
     )
-
-    x_np = _build_padded_samples(
-        samples_np, pad_left, pad_right, samples_prefix, pad_mode, eq_norm, sps
-    )
-    x_np = np.ascontiguousarray(x_np)
-
-    if w_init is not None:
-        w_arr = np.ascontiguousarray(to_device(w_init, "cpu"), dtype=np.complex64)
-        w_arr = _validate_w_init(w_arr, num_ch, num_taps)
-        W = w_arr.copy()
-    else:
-        W = _init_butterfly_weights_numpy(num_ch, num_taps, center_tap=center_tap)
-    y_out = np.empty((n_sym, num_ch), dtype=np.complex64)
-    e_out = np.empty((n_sym, num_ch), dtype=np.complex64)
-    w_hist_buf = (
-        np.empty((n_sym, num_ch, num_ch, num_taps), dtype=np.complex64)
-        if store_weights
-        else np.empty((1, num_ch, num_ch, num_taps), dtype=np.complex64)
+    args = (
+        run.x,
+        run.W,
+        np.float32(step_size),
+        np.float32(r2),
+        run.stride,
+        store_weights,
+        run.y_out,
+        run.e_out,
+        run.w_hist,
     )
     if use_pilots:
         pref = np.ascontiguousarray(to_device(pilot_ref, "cpu"), dtype=np.complex64)
         if _c_ps is not None:
             pref = (pref * _c_ps).astype(np.complex64)
         pmask = np.ascontiguousarray(pilot_mask, dtype=np.uint8)
-        _get_numba_pa_cma()(
-            x_np,
-            W,
-            np.float32(step_size),
-            np.float32(r2),
-            stride,
-            store_weights,
-            y_out,
-            e_out,
-            w_hist_buf,
-            pref,
-            pmask,
-        )
+        _get_numba_pa_cma()(*args, pref, pmask)
     else:
-        _get_numba_cma()(
-            x_np,
-            W,
-            np.float32(step_size),
-            np.float32(r2),
-            stride,
-            store_weights,
-            y_out,
-            e_out,
-            w_hist_buf,
-        )
-    return finish(
-        _log_equalizer_exit(
-            _unpack_result_numpy(
-                y_out,
-                e_out,
-                W,
-                w_hist_buf,
-                was_1d,
-                store_weights,
-                n_sym=None,
-                xp=xp,
-                input_norm_factor=eq_norm,
-            ),
-            name="CMA" if not use_pilots else "CMA(PA)",
-            check_convergence=True,
-        )
+        _get_numba_cma()(*args)
+    result = _log_equalizer_exit(
+        _assemble_sequential(run),
+        name="CMA" if not use_pilots else "CMA(PA)",
+        check_convergence=True,
     )
+    return _attach_equalized_signal(result, sig)
 
 
 def rde(
@@ -522,10 +449,6 @@ def rde(
     sig = signal_adapter.signal
     if sig is not None:
         sps = require_integer_sps(signal_adapter.resolve_required("sps", sps), "rde()")
-
-    def finish(result: EqualizerResult) -> EqualizerResult:
-        return _attach_equalized_signal(result, sig)
-
     if sps is None:
         sps = 2
 
@@ -543,17 +466,6 @@ def rde(
             "RDE output y_hat is at 1 SPS (symbol rate). "
             "Update sampling_rate = symbol_rate after applying this equalizer."
         )
-
-    samples, xp, _ = dispatch(samples)
-    _validate_sps(sps, num_taps)
-    stride = int(sps)
-
-    was_1d = samples.ndim == 1
-    if was_1d:
-        num_ch = 1
-        n_samples = samples.shape[0]
-    else:
-        num_ch, n_samples = samples.shape
 
     # Compute unique ring radii from constellation.
     # For constant-modulus signals (PSK) this degenerates to a single radius,
@@ -583,95 +495,42 @@ def rde(
         radii = np.array([1.0], dtype=np.float32)
         logger.debug("RDE: no modulation provided, using single unit radius (≡ CMA)")
 
-    n_sym = n_samples // stride
-
-    c_tap = center_tap if center_tap is not None else num_taps // 2
-    pad_total = max(0, n_sym * stride - n_samples + num_taps - 1)
-    pad_left = min(c_tap, pad_total)
-    pad_right = pad_total - pad_left
-
-    numba = _get_numba()
-    if numba is None:
-        raise ImportError("Numba is required for the sequential equalizers.")
-
-    samples_np = np.ascontiguousarray(to_device(samples, "cpu"), dtype=np.complex64)
-    # Deboost pilot positions before global normalisation so boosted pilots
-    # don't inflate the RMS estimate and bias the ring-radius convergence targets.
-    if use_pilots and pilot_gain_db != 0.0:
-        assert pilot_mask is not None
-        _amp = np.float32(10.0 ** (pilot_gain_db / 20.0))
-        _smask = np.repeat(pilot_mask.astype(bool), stride)  # (N_samples,)
-        samples_np[..., _smask] /= _amp
-    samples_np, _, eq_norm = _normalize_inputs(
-        samples_np, None, sps, input_norm_factor=input_norm_factor
+    # RMS-normalize samples to unit symbol-rate power (RDE has no training)
+    run = _prepare_sequential(
+        samples,
+        sps=sps,
+        num_taps=num_taps,
+        center_tap=center_tap,
+        w_init=w_init,
+        store_weights=store_weights,
+        input_norm_factor=input_norm_factor,
+        samples_prefix=samples_prefix,
+        pad_mode=pad_mode,
+        pilot_mask=pilot_mask if use_pilots else None,
+        pilot_gain_db=pilot_gain_db,
     )
-
-    x_np = _build_padded_samples(
-        samples_np, pad_left, pad_right, samples_prefix, pad_mode, eq_norm, sps
-    )
-    x_np = np.ascontiguousarray(x_np)
-
-    # Normalize radii to match the unit-power-normalized samples
-    # (constellation is unit-average-power after gray_constellation)
-    radii_np = np.ascontiguousarray(radii, dtype=np.float32)
-
-    if w_init is not None:
-        w_arr = np.ascontiguousarray(to_device(w_init, "cpu"), dtype=np.complex64)
-        w_arr = _validate_w_init(w_arr, num_ch, num_taps)
-        W = w_arr.copy()
-    else:
-        W = _init_butterfly_weights_numpy(num_ch, num_taps, center_tap=center_tap)
-    y_out = np.empty((n_sym, num_ch), dtype=np.complex64)
-    e_out = np.empty((n_sym, num_ch), dtype=np.complex64)
-    w_hist_buf = (
-        np.empty((n_sym, num_ch, num_ch, num_taps), dtype=np.complex64)
-        if store_weights
-        else np.empty((1, num_ch, num_ch, num_taps), dtype=np.complex64)
+    args = (
+        run.x,
+        run.W,
+        np.float32(step_size),
+        np.ascontiguousarray(radii, dtype=np.float32),
+        run.stride,
+        store_weights,
+        run.y_out,
+        run.e_out,
+        run.w_hist,
     )
     if use_pilots:
         pref = np.ascontiguousarray(to_device(pilot_ref, "cpu"), dtype=np.complex64)
         if _c_ps is not None:
             pref = (pref * _c_ps).astype(np.complex64)
         pmask = np.ascontiguousarray(pilot_mask, dtype=np.uint8)
-        _get_numba_pa_rde()(
-            x_np,
-            W,
-            np.float32(step_size),
-            radii_np,
-            stride,
-            store_weights,
-            y_out,
-            e_out,
-            w_hist_buf,
-            pref,
-            pmask,
-        )
+        _get_numba_pa_rde()(*args, pref, pmask)
     else:
-        _get_numba_rde()(
-            x_np,
-            W,
-            np.float32(step_size),
-            radii_np,
-            stride,
-            store_weights,
-            y_out,
-            e_out,
-            w_hist_buf,
-        )
-    return finish(
-        _log_equalizer_exit(
-            _unpack_result_numpy(
-                y_out,
-                e_out,
-                W,
-                w_hist_buf,
-                was_1d,
-                store_weights,
-                n_sym=None,
-                xp=xp,
-                input_norm_factor=eq_norm,
-            ),
-            name="RDE" if not use_pilots else "RDE(PA)",
-            check_convergence=True,
-        )
+        _get_numba_rde()(*args)
+    result = _log_equalizer_exit(
+        _assemble_sequential(run),
+        name="RDE" if not use_pilots else "RDE(PA)",
+        check_convergence=True,
     )
+    return _attach_equalized_signal(result, sig)
