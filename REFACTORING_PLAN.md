@@ -439,7 +439,7 @@ Tests for removed features are deleted; the remaining tests change only at call
 sites. The order avoids conflicts, because 1.4-1.6 all edit
 `equalization/sequential/_dd.py`.
 
-- [ ] **1.1 `refactor(io)!: store metadata as JSON, load without pickle`.**
+- [x] **1.1 `refactor(io)!: store metadata as JSON, load without pickle`.**
   - `save_npz` writes the metadata as a 0-d unicode array of JSON text;
     `load_npz` uses `allow_pickle=False`.
   - PyYAML is removed from the dependencies.

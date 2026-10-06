@@ -347,7 +347,6 @@ rule without deleting its entry fails the suite.
 
 | Legacy pattern still in the code | Removed by |
 | --- | --- |
-| `save_npz` / `load_npz` use YAML and `allow_pickle=True` | 1.1 |
 | `use_cpu_only()`; `Signal(...)` moves data to the GPU automatically; `load_npz(device="auto")`; `Signal.to()` modifies in place | 1.2 |
 | `import commkit` applies the plot theme, adds a stdout log handler, sets global warning filters, and probes the GPU | 1.3 |
 | `debug_plot=` parameters (20 modules) | 1.4 |

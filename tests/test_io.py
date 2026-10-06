@@ -237,6 +237,50 @@ class TestNPZSaveLoadFrame:
         assert sig2.frame.preamble.root == 7
 
 
+class TestNPZNoPickle:
+    """Archives hold only numeric and unicode arrays and load without pickle."""
+
+    def test_archive_has_no_object_arrays(self, tmp_path: Any) -> None:
+        save_npz(_siso_signal(), tmp_path / "sig.npz")
+        with np.load(tmp_path / "sig.npz", allow_pickle=False) as data:
+            for key in data.files:
+                assert data[key].dtype != object, key
+
+    def test_frame_archive_has_no_object_arrays(self, tmp_path: Any) -> None:
+        save_npz(make_test_frame_signal(), tmp_path / "frame.npz")
+        with np.load(tmp_path / "frame.npz", allow_pickle=False) as data:
+            assert "__frame_metadata__" in data.files
+            for key in data.files:
+                assert data[key].dtype != object, key
+
+    def test_pickled_metadata_is_rejected_without_unpickling(
+        self, tmp_path: Any
+    ) -> None:
+        """An object array (old YAML format, or a crafted file) is never unpickled."""
+
+        class _Payload:
+            def __reduce__(self):
+                return (_mark_unpickled, ())
+
+        np.savez(
+            tmp_path / "evil.npz",
+            samples=np.zeros(8, np.complex64),
+            __metadata__=np.array(_Payload(), dtype=object),
+        )
+        _UNPICKLED.clear()
+        with pytest.raises(ValueError, match="not JSON"):
+            load_npz(tmp_path / "evil.npz")
+        assert not _UNPICKLED
+
+
+_UNPICKLED: list[bool] = []
+
+
+def _mark_unpickled() -> bool:
+    _UNPICKLED.append(True)
+    return True
+
+
 class TestNPZCompressionAndCaches:
     """Tests for compression options and symbol/bit cache preservation."""
 
@@ -249,7 +293,7 @@ class TestNPZCompressionAndCaches:
         p = tmp_path / "sig.npz"
         save_npz(sig, p)
 
-        data = np.load(p, allow_pickle=True)
+        data = np.load(p, allow_pickle=False)
         assert "resolved_symbols" not in data.files
         assert "resolved_bits" not in data.files
 

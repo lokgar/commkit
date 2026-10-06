@@ -10,11 +10,14 @@ The .npz file contains the following named entries:
   ``source_symbols``       - source symbol array  (omitted if None)
   ``resolved_symbols``     - cached symbol array  (only with include_cache=True)
   ``resolved_bits``        - cached bit array     (only with include_cache=True)
-  ``__metadata__``         - zero-d object array holding a YAML string with all
+  ``__metadata__``         - zero-d unicode array holding a JSON string with all
                              scalar fields.
-  ``__frame_metadata__``   - zero-d object array holding a YAML string with the
+  ``__frame_metadata__``   - zero-d unicode array holding a JSON string with the
                              serialised SingleCarrierFrame fields (omitted when
                              the signal was not generated from a frame).
+
+The archive contains only numeric and unicode arrays, so it is read with
+``allow_pickle=False``: loading a file never executes code from it.
   ``frame_payload_symbols`` - frame payload symbols array  (omitted if no frame)
   ``frame_pilot_symbols``   - frame pilot symbols array    (omitted if no frame/pilots)
   ``frame_payload_bits``    - frame payload bits array     (omitted if no frame)
@@ -22,11 +25,11 @@ The .npz file contains the following named entries:
 
 from __future__ import annotations
 
+import json
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
 import numpy as np
-import yaml
 
 from . import backend as _backend
 
@@ -37,7 +40,7 @@ if TYPE_CHECKING:
 # Internal constants
 # -----------------------------------------------------------------------------
 
-# Scalar / primitive metadata fields to round-trip through YAML
+# Scalar / primitive metadata fields to round-trip through JSON
 _META_FIELDS: tuple[str, ...] = (
     "sampling_rate",
     "symbol_rate",
@@ -61,7 +64,7 @@ _META_FIELDS: tuple[str, ...] = (
 
 # Optional array fields (not always present).  Pilot metadata is stored here -
 # as native npz arrays, exactly like the sample/symbol arrays - rather than in
-# the YAML meta block, so no array-to-list conversion is ever needed.
+# the JSON meta block, so no array-to-list conversion is ever needed.
 _OPTIONAL_ARRAY_FIELDS: tuple[str, ...] = (
     "source_bits",
     "source_symbols",
@@ -155,8 +158,7 @@ def save_npz(
         # future OFDMFrame, etc.) without hardcoding the class.
         frame_dict = frame.model_dump(mode="json")
         frame_dict["_frame_type"] = type(frame).__name__
-        yaml_frame = yaml.dump(frame_dict, default_flow_style=False, allow_unicode=True)
-        arrays["__frame_metadata__"] = np.array(yaml_frame, dtype=object)
+        arrays["__frame_metadata__"] = _json_array(frame_dict)
 
         # Save the generated symbol/bit arrays that live in PrivateAttrs and
         # are NOT reproduced by model_dump().  Payload symbols and bits are
@@ -171,13 +173,10 @@ def save_npz(
                 arrays[npz_key] = _backend.to_device(arr, "CPU")
 
     # -------------------------------------------------------------------------
-    # Build metadata dict and serialise to YAML
+    # Build metadata dict and serialise to JSON
     # -------------------------------------------------------------------------
     meta: dict = {f: getattr(signal, f) for f in _META_FIELDS}
-    yaml_str = yaml.dump(meta, default_flow_style=False, allow_unicode=True)
-
-    # Store as a zero-d object array so np.savez treats it as a single entry
-    arrays["__metadata__"] = np.array(yaml_str, dtype=object)
+    arrays["__metadata__"] = _json_array(meta)
 
     # -------------------------------------------------------------------------
     # Write
@@ -230,15 +229,14 @@ def load_npz(
     if path.suffix != ".npz":
         path = path.with_suffix(".npz")
 
-    # allow_pickle=True is required to read the zero-d object array that
-    # holds the YAML string; no arbitrary Python objects are loaded.
-    data = np.load(path, allow_pickle=True)
+    # Metadata is stored as plain unicode arrays, so pickle is never needed:
+    # loading an untrusted archive cannot execute code.
+    data = np.load(path, allow_pickle=False)
 
     # -------------------------------------------------------------------------
-    # Parse YAML metadata
+    # Parse JSON metadata
     # -------------------------------------------------------------------------
-    yaml_str = str(data["__metadata__"])
-    meta: dict = yaml.safe_load(yaml_str)
+    meta: dict = _read_json(data, "__metadata__")
 
     # Build Signal constructor kwargs
     # -------------------------------------------------------------------------
@@ -264,7 +262,7 @@ def load_npz(
     if "__frame_metadata__" in data:
         from . import core as _core
 
-        frame_dict = yaml.safe_load(str(data["__frame_metadata__"]))
+        frame_dict = _read_json(data, "__frame_metadata__")
         frame_type_name = frame_dict.pop("_frame_type", "SingleCarrierFrame")
 
         # Registry of known frame classes - extend here as new frame types land.
@@ -306,3 +304,31 @@ def load_npz(
         target = "gpu" if _backend.is_cupy_available() else "cpu"
     sig = sig.to(target)
     return sig
+
+
+# -----------------------------------------------------------------------------
+# JSON metadata helpers
+# -----------------------------------------------------------------------------
+
+
+def _json_default(value: Any) -> Any:
+    """Convert NumPy scalars (e.g. ``np.float64``) to Python values for JSON."""
+    if isinstance(value, np.generic):
+        return value.item()
+    raise TypeError(f"Cannot store {type(value).__name__} in npz metadata.")
+
+
+def _json_array(obj: dict) -> np.ndarray:
+    """A zero-d unicode array holding ``obj`` as JSON (no pickling needed)."""
+    return np.array(json.dumps(obj, default=_json_default))
+
+
+def _read_json(data: Any, key: str) -> dict:
+    try:
+        return json.loads(str(data[key]))
+    except ValueError as exc:
+        raise ValueError(
+            f"{key!r} in this archive is not JSON. It was probably written by "
+            "commkit < 2.0, which stored YAML in a pickled object array; such "
+            "files are not loaded because unpickling can execute code."
+        ) from exc
