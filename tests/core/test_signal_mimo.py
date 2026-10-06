@@ -122,7 +122,7 @@ class TestMIMODSPOperations:
         samples = xp.ones((2, 100), dtype=complex)
         sig = Signal(samples=samples, sampling_rate=1.0, symbol_rate=1.0)
 
-        sig = multirate.upsample(sig, 2)
+        sig = multirate.upsample(sig, factor=2)
         assert sig.samples.shape == (2, 200)
         assert sig.sampling_rate == 2.0
 
@@ -131,7 +131,7 @@ class TestMIMODSPOperations:
         samples = xp.ones((2, 200), dtype=complex)
         sig = Signal(samples=samples, sampling_rate=2.0, symbol_rate=1.0)
 
-        sig = multirate.decimate(sig, 2)
+        sig = multirate.decimate(sig, factor=2)
         assert sig.samples.shape == (2, 100)
         assert sig.sampling_rate == 1.0
 

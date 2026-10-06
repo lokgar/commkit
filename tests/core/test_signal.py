@@ -376,7 +376,7 @@ class TestSignalDSPOperations:
         data = xp.array([1.0 + 0j, -1.0 + 0j])
         s = Signal(samples=data, sampling_rate=1.0, symbol_rate=1.0)
 
-        s = multirate.upsample(s, 2)
+        s = multirate.upsample(s, factor=2)
         assert s.sampling_rate == 2.0
         assert s.samples.shape[0] == 4
 

@@ -761,12 +761,15 @@ The equalization pass (3.7) gets more commits:
   - Wrong input raises: `matched_filter` on a Signal without a pulse used to
     log an error and return the input; `ols_fir_filter` validates
     `fft_size`. `filtering` type-checks under the strict flags.
-- [ ] **3.3d `refactor(multirate)!: 2.0 signatures`.** Keyword-only
+- [x] **3.3d `refactor(multirate)!: 2.0 signatures`.** Keyword-only
   parameters, no `axis`; `sps` / `sps_in` are facts (a conflicting value
   raises). `decimate` takes `zero_phase=` / `ftype=` explicitly instead of
   `**kwargs`. `resolve_symbols` only becomes keyword-only: it fills the
   `resolved_*` cache that metrics and demapping still read, so its merge into
   `decimate_to_symbol_rate` moves to 3.8 together with that cache.
+  `offset` must be in `[0, sps)` and factors must be positive integers
+  (both used to pass silently). `multirate` type-checks under the strict
+  flags.
 - [ ] **3.3e `refactor(spectral, smoothing)!: 2.0 signatures`.** Keyword-only
   parameters; `sampling_rate` is a fact. `shift_frequency(samples, *,
   frequency=)` matches `add_pilot_tone(frequency=)`. `spectrogram` returns a

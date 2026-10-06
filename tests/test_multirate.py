@@ -14,7 +14,7 @@ class TestUpsampleAndDecimate:
         """Verify integer upsampling increases signal length correctly."""
         data = xp.array([1.0, 2.0, 3.0])
         factor = 2
-        out = multirate.upsample(data, factor)
+        out = multirate.upsample(data, factor=factor)
 
         assert isinstance(out, xp.ndarray)
         assert out.size >= data.size * factor - factor
@@ -24,7 +24,7 @@ class TestUpsampleAndDecimate:
         data = xp.zeros(100)
         data[::2] = 1.0
         factor = 2
-        out = multirate.decimate(data, factor)
+        out = multirate.decimate(data, factor=factor)
 
         assert isinstance(out, xp.ndarray)
         assert out.size <= data.size // factor + 1
@@ -33,13 +33,13 @@ class TestUpsampleAndDecimate:
         """Verify decimation using the polyphase method."""
         data = xp.ones(100)
         factor = 2
-        out = multirate.decimate(data, factor, method="polyphase")
+        out = multirate.decimate(data, factor=factor, method="polyphase")
 
         assert isinstance(out, xp.ndarray)
         assert out.size == 50
 
         with pytest.raises(ValueError, match="Unknown decimation method"):
-            multirate.decimate(data, factor, method="unknown")
+            multirate.decimate(data, factor=factor, method="unknown")
 
     def test_decimate_to_symbol_rate(self, xp: Any, xpt: Any) -> None:
         """Verify downsampling (picking) symbols from an upsampled stream."""
@@ -52,7 +52,7 @@ class TestUpsampleAndDecimate:
         xpt.assert_array_equal(syms, xp.array([1, 2, 3, 4]))
 
         data_mimo = xp.stack([data, data * 10])
-        syms_mimo = multirate.decimate_to_symbol_rate(data_mimo, sps=sps, axis=-1)
+        syms_mimo = multirate.decimate_to_symbol_rate(data_mimo, sps=sps)
         assert syms_mimo.shape == (2, 4)
         xpt.assert_array_equal(syms_mimo[1], xp.array([10, 20, 30, 40]))
 
@@ -64,7 +64,7 @@ class TestResample:
         """Verify rational resampling produce expected output size."""
         data = xp.ones(100)
         up, down = 3, 2
-        out = multirate.resample(data, up, down)
+        out = multirate.resample(data, up=up, down=down)
 
         assert isinstance(out, xp.ndarray)
         expected_size = int(data.size * up / down)
@@ -82,7 +82,7 @@ class TestResample:
     def test_resample_multidim(self, xp: Any) -> None:
         """Verify resample handles multi-dimensional input correctly."""
         samples = xp.ones((2, 10))
-        res = multirate.resample(samples, up=2, down=1, axis=-1)
+        res = multirate.resample(samples, up=2, down=1)
 
         assert res.shape == (2, 20)
         assert isinstance(res, xp.ndarray)
@@ -91,8 +91,15 @@ class TestResample:
     def test_resample_errors(self, xp: Any) -> None:
         """Verify inconsistent resampling parameters raise ValueError."""
         data = xp.zeros(10)
-        with pytest.raises(ValueError, match="Cannot specify both"):
-            multirate.resample(data, up=2, sps_in=4)
-
-        with pytest.raises(ValueError, match="Must specify either"):
+        with pytest.raises(ValueError, match="not both"):
+            multirate.resample(data, up=2, down=1, sps_out=4)
+        with pytest.raises(ValueError, match="give either"):
             multirate.resample(data)
+        with pytest.raises(ValueError, match="together"):
+            multirate.resample(data, up=2)
+        with pytest.raises(ValueError, match="requires sps_in"):
+            multirate.resample(data, sps_out=4)
+        with pytest.raises(ValueError, match="positive integers"):
+            multirate.upsample(data, factor=1.5)
+        with pytest.raises(ValueError, match="offset"):
+            multirate.decimate_to_symbol_rate(data, sps=2, offset=2)
