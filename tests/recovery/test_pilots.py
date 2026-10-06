@@ -645,9 +645,7 @@ class TestPilotsCPREnhancements:
         phi_u = np.linspace(0.0, 3.0, B)
         phi_slipped = phi_u.copy()
         phi_slipped[100:] += 2.0 * np.pi
-        phi_out = recovery.correct_cycle_slips(
-            phi_slipped, symmetry=1, history_length=50
-        )
+        phi_out = recovery.correct_cycle_slips(phi_slipped, symmetry=1, history=50)
         xpt.assert_allclose(phi_out, phi_u, atol=0.1)
 
     def test_joint_cycle_slip_mimo_rows_identical(self, xp, xpt):

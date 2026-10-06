@@ -48,9 +48,7 @@ class TestCycleSlipCorrection:
         """Smooth linear ramp with no slips is returned unchanged."""
         B = 200
         phi_u = np.linspace(0.0, 2.0, B)
-        phi_out = recovery.correct_cycle_slips(
-            phi_u.copy(), symmetry=4, history_length=50
-        )
+        phi_out = recovery.correct_cycle_slips(phi_u.copy(), symmetry=4, history=50)
         xpt.assert_allclose(phi_out, phi_u, atol=1e-10)
 
     def test_standalone_single_slip(self, xp, xpt):
@@ -59,9 +57,7 @@ class TestCycleSlipCorrection:
         phi_u = np.linspace(0.0, 1.0, B)
         phi_slipped = phi_u.copy()
         phi_slipped[150:] += np.pi / 2
-        phi_out = recovery.correct_cycle_slips(
-            phi_slipped, symmetry=4, history_length=100
-        )
+        phi_out = recovery.correct_cycle_slips(phi_slipped, symmetry=4, history=100)
         xpt.assert_allclose(phi_out, phi_u, atol=0.05)
 
     def test_standalone_multiple_slips(self, xp, xpt):
@@ -71,10 +67,18 @@ class TestCycleSlipCorrection:
         phi_slipped = phi_u.copy()
         phi_slipped[100:] += np.pi / 2
         phi_slipped[300:] -= np.pi / 2
-        phi_out = recovery.correct_cycle_slips(
-            phi_slipped, symmetry=4, history_length=80
-        )
+        phi_out = recovery.correct_cycle_slips(phi_slipped, symmetry=4, history=80)
         xpt.assert_allclose(phi_out, phi_u, atol=0.05)
+
+    def test_returns_new_array_on_input_device(self, xp, xpt):
+        """The input is left as it was; the result stays on its device."""
+        phi_slipped = np.linspace(0.0, 1.0, 300)
+        phi_slipped[150:] += np.pi / 2
+        x = xp.asarray(phi_slipped)
+        phi_out = recovery.correct_cycle_slips(x, symmetry=4, history=100)
+        xpt.assert_array_equal(x, xp.asarray(phi_slipped))
+        assert type(phi_out) is type(x)
+        assert float(xp.max(xp.abs(phi_out - x))) == pytest.approx(np.pi / 2)
 
     def test_bps_correction_bounded_output(self, xp):
         """BPS cycle_slip_correction=True returns phase within reasonable bounds."""
@@ -134,7 +138,9 @@ class TestResolvePhaseAmbiguity:
         )
         sym = normalize(sig.samples, mode="average_power")
         ref = normalize(xp.asarray(sig.source_symbols), mode="average_power")
-        resolved = recovery.resolve_phase_ambiguity(sym, ref, "qam", 16)
+        resolved = recovery.resolve_phase_ambiguity(
+            sym, ref, constellation=Constellation.qam(16)
+        )
         s0 = float(ser(resolved, ref, "qam", 16))
         for k in range(1, 4):
             sk = float(
@@ -158,7 +164,9 @@ class TestResolvePhaseAmbiguity:
         sym = normalize(sig.samples, mode="average_power")
         ref = normalize(xp.asarray(sig.source_symbols), mode="average_power")
         rotated = sym * xp.exp(1j * np.pi / 2).astype(sym.dtype)
-        resolved = recovery.resolve_phase_ambiguity(rotated, ref, "qam", 16)
+        resolved = recovery.resolve_phase_ambiguity(
+            rotated, ref, constellation=Constellation.qam(16)
+        )
         assert float(ser(resolved, ref, "qam", 16)) < 0.05
 
     def test_mimo_independent_per_channel(self, xp):
@@ -187,7 +195,9 @@ class TestResolvePhaseAmbiguity:
             axis=0,
         )
         ref_mimo_norm = xp.stack([ref_a, ref_b], axis=0)
-        resolved = recovery.resolve_phase_ambiguity(mimo_rot, ref_mimo_norm, "qam", 16)
+        resolved = recovery.resolve_phase_ambiguity(
+            mimo_rot, ref_mimo_norm, constellation=Constellation.qam(16)
+        )
         assert resolved.shape == (2, self.N)
         s = ser(resolved, ref_mimo_norm, "qam", 16)
         s_np = to_numpy(s)
@@ -244,10 +254,13 @@ class TestResolvePhaseAmbiguity:
         symbols, ref = xp.asarray(symbols_np), xp.asarray(ref_np)
 
         out_no_skip = recovery.resolve_phase_ambiguity(
-            symbols, ref, "qam", 16, num_skip_symbols=0
+            symbols, ref, constellation=Constellation.qam(16), num_skip_symbols=0
         )
         out_skip = recovery.resolve_phase_ambiguity(
-            symbols, ref, "qam", 16, num_skip_symbols=corrupt_head
+            symbols,
+            ref,
+            constellation=Constellation.qam(16),
+            num_skip_symbols=corrupt_head,
         )
 
         from commkit.metrics import ser as _ser_fn
@@ -268,9 +281,11 @@ class TestResolvePhaseAmbiguity:
         symbols_np, ref_np = make_ambiguous_qam16(n_sym=1000, corrupt_head=0)
         symbols, ref = xp.asarray(symbols_np), xp.asarray(ref_np)
 
-        out_default = recovery.resolve_phase_ambiguity(symbols, ref, "qam", 16)
+        out_default = recovery.resolve_phase_ambiguity(
+            symbols, ref, constellation=Constellation.qam(16)
+        )
         out_skip0 = recovery.resolve_phase_ambiguity(
-            symbols, ref, "qam", 16, num_skip_symbols=0
+            symbols, ref, constellation=Constellation.qam(16), num_skip_symbols=0
         )
 
         assert bool(xp.all(out_default == out_skip0))
@@ -282,12 +297,12 @@ class TestResolvePhaseAmbiguity:
 
         with pytest.raises(ValueError, match="num_skip_symbols"):
             recovery.resolve_phase_ambiguity(
-                symbols, ref, "qam", 16, num_skip_symbols=100
+                symbols, ref, constellation=Constellation.qam(16), num_skip_symbols=100
             )
 
         with pytest.raises(ValueError, match="num_skip_symbols"):
             recovery.resolve_phase_ambiguity(
-                symbols, ref, "qam", 16, num_skip_symbols=200
+                symbols, ref, constellation=Constellation.qam(16), num_skip_symbols=200
             )
 
 

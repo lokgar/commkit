@@ -121,7 +121,9 @@ def test_cycle_slips_match_oracle(history_length):
     ref = cycle_slip_reference(
         phi, symmetry=4, history_length=history_length, threshold=np.pi / 4
     )
-    out = correct_cycle_slips(phi.copy(), 4, history_length, np.pi / 4)
+    out = correct_cycle_slips(
+        phi, symmetry=4, history=history_length, threshold=np.pi / 4
+    )
     np.testing.assert_allclose(out, ref, rtol=0, atol=ATOL)
     # The oracle itself must remove the injected slips (sanity check on the
     # test signal, independent of the library).

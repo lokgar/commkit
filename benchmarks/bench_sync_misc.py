@@ -31,7 +31,9 @@ def bench_resolve_phase_ambiguity(benchmark, backend_device, xp, sync):
     ref = xp.asarray(ref_np)
 
     def run():
-        out = recovery.resolve_phase_ambiguity(y, ref, "qam", 16)
+        out = recovery.resolve_phase_ambiguity(
+            y, ref, constellation=Constellation.qam(16)
+        )
         sync()
         return out
 

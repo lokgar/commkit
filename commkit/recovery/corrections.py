@@ -58,15 +58,15 @@ def _log_phase_summary(
 # PHASE-TRACK UTILITIES (array-only)
 # -----------------------------------------------------------------------------
 # smooth_phase_wiener: Zero-phase Wiener smoother on a phase trajectory.
-# correct_cycle_slips: Cycle-slip detection/correction on a block-phase trajectory.
+# correct_cycle_slips: Cycle-slip detection/correction on a phase trajectory.
 #
 # Both operate on a phase trajectory - a derived quantity, not raw IQ samples
-# or any field a Signal carries - so neither is Signal-aware
-# (see CLAUDE.md, "Signal-Awareness").
+# or any field a Signal carries - so neither is Signal-aware (AGENTS.md).
 
 
 def smooth_phase_wiener(
     phase: ArrayType,
+    *,
     process_variance: float | None = None,
     measurement_variance: float | None = None,
     linewidth: float | None = None,
@@ -332,56 +332,53 @@ def _get_numba_cycle_slip():
 
 
 def correct_cycle_slips(
-    phi_u: np.ndarray,
+    phase: np.ndarray,
+    *,
     symmetry: int = 4,
-    history_length: int = 1000,
+    history: int = 1000,
     threshold: float = np.pi / 4,
 ) -> np.ndarray:
     """
-    Detects and corrects cycle slips in a block-phase trajectory.
+    Detects and corrects cycle slips in a phase trajectory.
 
-    After ``xp.unwrap`` resolves the M-fold ambiguity, residual cycle slips
-    may remain where the unwrapper chose the wrong quadrant.  This function
-    scans the trajectory sequentially: for each block it extrapolates the
-    expected phase from up to ``history_length`` past corrected blocks using
-    a linear fit.  When the deviation exceeds ``threshold``, the block is
+    After ``unwrap`` resolves the M-fold ambiguity, residual cycle slips may
+    remain where the unwrapper chose the wrong branch.  The trajectory is
+    scanned sequentially: each value is predicted by a linear fit through up
+    to ``history`` past corrected values (the previous value while fewer than
+    ``min(10, history)`` are available).  A deviation beyond ``threshold`` is
     corrected by the nearest integer multiple of ``2π/symmetry``.
-
-    Algorithm: linear extrapolation from the previous
-    ``history_length`` corrected phases; correction quantum = ``π/2`` for
-    4-fold QAM symmetry; threshold = ``π/4``.
 
     Parameters
     ----------
-    phi_u : (B,) float64
-        Block-phase trajectory on CPU after M-fold unwrap (e.g. output of
-        ``xp.unwrap(phi_raw * M) / M``).  **Modified in place.**
+    phase : (B,) array_like
+        Phase trajectory in radians after the M-fold unwrap, e.g. block
+        phases.
     symmetry : int, default 4
-        Rotational symmetry order of the constellation.  Correction quantum
-        is ``2π/symmetry``.  Use 4 for all square QAM constellations and BPS
-        (which always searches over ``[0, π/2)``).  For M-PSK use ``symmetry = M``.
-    history_length : int, default 1000
-        Number of past corrected blocks used for linear extrapolation.
-        Reduce for short bursts.
+        Rotational symmetry of the constellation; the correction quantum is
+        ``2π/symmetry`` (4 for square QAM and BPS, M for M-PSK, 1 for pilot
+        phases).
+    history : int, default 1000
+        Past corrected values in the linear fit.  Reduce for short bursts.
     threshold : float, default π/4
-        Deviation from the extrapolated phase that triggers a correction.
-        ``π/4`` is the midpoint between adjacent correction quanta for 4-fold
-        symmetry.
+        Deviation from the prediction that declares a slip; ``π/4`` is half
+        the quantum for 4-fold symmetry.
 
     Returns
     -------
-    (B,) float64
-        Corrected block-phase trajectory (same NumPy array).
+    (B,) float64 array
+        Corrected trajectory, a new array on the input's device.
 
     Notes
     -----
-    Runs on CPU only (sequential scan; Numba-compiled).
-    The caller should transfer ``phi_u`` to CPU before calling and move
-    the result back to the device if needed.
+    A sequential scan, Numba-compiled on the CPU; GPU input makes one host
+    round trip.
     """
-    phi_u = np.asarray(phi_u, dtype=np.float64)
-    kernel = _get_numba_cycle_slip()
-    return kernel(phi_u, int(symmetry), int(history_length), float(threshold))
+    phase, xp, _ = dispatch(phase)
+    if phase.ndim != 1:
+        raise ValueError(f"phase must be 1-D, got shape {phase.shape}.")
+    host = np.array(to_device(phase, "cpu"), dtype=np.float64)  # a copy
+    out = _get_numba_cycle_slip()(host, int(symmetry), int(history), float(threshold))
+    return xp.asarray(out)
 
 
 @dataclass(frozen=True)
@@ -423,13 +420,11 @@ def _repair_slips(
         return phase
     out = xp.empty_like(phase)
     for r in range(phase.shape[0]):
-        out[r] = xp.asarray(
-            correct_cycle_slips(
-                to_device(phase[r], "cpu"),
-                symmetry,
-                cycle_slip.history,
-                cycle_slip.threshold,
-            )
+        out[r] = correct_cycle_slips(
+            phase[r],
+            symmetry=symmetry,
+            history=cycle_slip.history,
+            threshold=cycle_slip.threshold,
         )
     return out
 
@@ -710,70 +705,57 @@ def _resolve_channel_permutation_array(
 def resolve_phase_ambiguity(
     symbols: ArrayType | Signal,
     ref_symbols: ArrayType | None = None,
-    modulation: str | None = None,
-    order: int | None = None,
-    symmetry_order: int | None = None,
+    *,
+    constellation: Any = None,
+    symmetry: int | None = None,
     num_skip_symbols: int = 0,
-    pmf: np.ndarray | None = None,
 ) -> ArrayType | Signal:
     """
-    Resolves rotational phase ambiguity after blind carrier phase recovery.
+    Resolves the rotational phase ambiguity left by blind carrier recovery.
 
-    Blind CPR methods (VV, BPS, Tikhonov) cannot distinguish between
-    ``symmetry_order`` rotational copies of the constellation.  This function
-    tests all candidate rotations, scores each by Symbol Error Rate (SER)
-    against the known transmitted symbols, and returns the symbols rotated by
-    the best candidate.
+    Blind CPR (Viterbi-Viterbi, BPS, Tikhonov, PLL) cannot tell the
+    ``symmetry`` rotated copies of the constellation apart.  The ML choice
+    of rotation ``k·2π/symmetry`` is the one closest to ``-∠ Σ y·s*`` against
+    the known symbols, and the symbols are returned rotated by it.
 
     For MIMO inputs each channel is resolved independently - after MIMO
     equalisation the output streams may land on different ambiguity branches.
 
     Parameters
     ----------
-    symbols : array_like
-        Received complex symbols after CPR and ``correct_carrier_phase``.
-        Shape: ``(N,)`` or ``(C, N)``.
-    ref_symbols : array_like
-        Known transmitted symbols (unit-average-power normalised).
-        Shape: ``(N,)`` or ``(C, N)``.
-    modulation : str
-        Modulation scheme (case-insensitive): ``'qam'``, ``'psk'``, etc.
-        Required for array input; for :class:`Signal` input, used only as a
-        fallback when the signal's ``mod_scheme`` is unset.
-    order : int
-        Modulation order.  Required for array input; for :class:`Signal`
-        input, used only as a fallback when the signal's ``mod_order`` is
-        unset.
-    symmetry_order : int, optional
-        Number of rotationally equivalent constellation copies to test.
-        Defaults to 4 for QAM (4-fold ``π/2`` symmetry) and ``order`` for
-        PSK.  Override for non-standard constellations.
+    symbols : array_like or Signal
+        Received symbols after carrier phase correction, ``(N,)`` or
+        ``(C, N)``.
+    ref_symbols : array_like, optional
+        Known transmitted symbols, ``(N,)`` or ``(C, N)``.  Required for
+        array input.
+    constellation : Constellation, optional
+        Its ``rotational_symmetry`` is the default ``symmetry``; with it the
+        log reports the symbol error rate of the choice.  Defaults to the
+        Signal's ``constellation``.
+    symmetry : int, optional
+        Number of rotations tested; overrides the constellation's.  One of
+        the two is required.
     num_skip_symbols : int, default 0
-        Number of leading symbols to exclude from SER scoring.  The applied
-        rotation still covers the full input - only the scoring window is
-        trimmed.  Useful when the first ``num_skip_symbols`` symbols have not
-        yet converged and would bias the rotation choice.  Must be strictly
-        less than the total symbol count.
-    pmf : np.ndarray, optional
-        Symbol PMF of shape ``(order,)`` for PS-QAM.  Forwarded to
-        ``ser`` so the diagnostic SER reported in
-        the log is unbiased for shaped constellations.  The phase-rotation
-        choice itself uses a scale-invariant inner product and does not
-        depend on ``pmf``.  For :class:`Signal` input, used only as a
-        fallback when the signal's ``ps_pmf`` is unset.
+        Leading symbols excluded from the estimate (an unconverged
+        transient); the rotation still covers the full input.  Must be less
+        than the symbol count.
 
     Returns
     -------
-    array_like
-        Phase-ambiguity-resolved symbols, same shape and dtype as ``symbols``.
-
-    When ``symbols`` is a :class:`Signal`, ``resolved_symbols`` is resolved
-    against ``source_symbols`` (using the signal's modulation/order/pmf) and a
-    new :class:`Signal` is returned.
+    array_like or Signal
+        Rotated symbols, same shape and dtype.  A :class:`Signal` has its
+        ``resolved_symbols`` resolved against ``source_symbols`` (until the
+        resolved fields leave ``Signal`` in 3.8).
     """
     signal_adapter = adapt_signal(
         symbols, function_name="resolve_phase_ambiguity()", field="resolved_symbols"
     )
+    constellation = signal_adapter.resolve_choice("constellation", constellation)
+    if symmetry is None and constellation is None:
+        raise ValueError(
+            "resolve_phase_ambiguity() requires constellation or symmetry."
+        )
     if signal_adapter.signal is not None:
         sig = signal_adapter.signal
         if sig.resolved_symbols is None:
@@ -786,50 +768,36 @@ def resolve_phase_ambiguity(
                 "source_symbols is not set. Populate source_symbols (the known TX "
                 "symbol sequence) before calling resolve_phase_ambiguity()."
             )
-        mod = signal_adapter.resolve_optional("mod_scheme", modulation)
-        ord_ = signal_adapter.resolve_optional("mod_order", order)
-        if mod is None or ord_ is None:
-            raise ValueError("mod_scheme and mod_order must be set.")
-        eff_pmf = signal_adapter.resolve_optional("ps_pmf", pmf)
         resolved = _resolve_phase_ambiguity_array(
             signal_adapter.array,
             sig.source_symbols,
-            mod,
-            ord_,
-            symmetry_order=symmetry_order,
+            constellation,
+            symmetry=symmetry,
             num_skip_symbols=num_skip_symbols,
-            pmf=eff_pmf,
         )
         return signal_adapter.replace_signal_field("resolved_symbols", resolved)
 
-    if ref_symbols is None or modulation is None or order is None:
-        raise ValueError(
-            "resolve_phase_ambiguity() requires ref_symbols, modulation, and order."
-        )
+    if ref_symbols is None:
+        raise ValueError("resolve_phase_ambiguity() requires ref_symbols.")
 
     return _resolve_phase_ambiguity_array(
         symbols,
         ref_symbols,
-        modulation,
-        order,
-        symmetry_order=symmetry_order,
+        constellation,
+        symmetry=symmetry,
         num_skip_symbols=num_skip_symbols,
-        pmf=pmf,
     )
 
 
 def _resolve_phase_ambiguity_array(
     symbols: ArrayType,
     ref_symbols: ArrayType,
-    modulation: str,
-    order: int,
-    symmetry_order: int | None = None,
+    constellation: Any,
+    *,
+    symmetry: int | None,
     num_skip_symbols: int = 0,
-    pmf: np.ndarray | None = None,
 ) -> ArrayType:
     """Array-only rotational-ambiguity resolution."""
-    from ..metrics import ser as _ser
-
     symbols, xp, _ = dispatch(symbols)
     symbols, was_1d = as_2d(symbols, name="symbols")
     C, N = symbols.shape
@@ -842,50 +810,44 @@ def _resolve_phase_ambiguity_array(
 
     ref = broadcast_channels(xp.asarray(ref_symbols), C, xp, name="ref_symbols")
 
-    if symmetry_order is None:
-        symmetry_order = 4 if "qam" in modulation.lower() else order
+    if symmetry is None:
+        symmetry = int(constellation.rotational_symmetry)
 
-    step = 2.0 * np.pi / symmetry_order
+    step = 2.0 * np.pi / symmetry
 
     # ML phase ambiguity estimator: the optimal rotation maximises
     # Re(e^{jkθ} · Σ y_n s_n*), which equals choosing k closest to
-    # -∠(Σ y_n s_n*) / step.  Single inner product replaces symmetry_order
+    # -∠(Σ y_n s_n*) / step.  Single inner product replaces symmetry
     # full SER passes.  All channels batched: one D2H of the (C,) angles
     # instead of one float() sync per channel.
     seg_y = symbols[:, num_skip_symbols:]
     seg_r = ref[:, num_skip_symbols:]
     corr = xp.sum(seg_y * xp.conj(seg_r), axis=-1)  # (C,)
     theta_np = -to_device(xp.angle(corr), "cpu")  # (C,) float64, one transfer
-    best_k_np = np.round(theta_np / step).astype(np.int64) % symmetry_order
+    best_k_np = np.round(theta_np / step).astype(np.int64) % symmetry
     phasors = xp.asarray(
         np.exp(1j * best_k_np * step).astype(symbols.dtype)
     )  # (C,) - built on host from host indices, single H2D
     out = symbols * phasors[:, None]
 
-    # SER is diagnostic-only: skip the per-channel reduction syncs entirely
-    # when INFO logging is disabled.
-    if logger.isEnabledFor(logging.INFO):
+    # SER is diagnostic-only: skip the decisions entirely when INFO logging is
+    # disabled (or there is no constellation to decide on).
+    if constellation is not None and logger.isEnabledFor(logging.INFO):
+        k = constellation.bits_per_symbol
+        n = seg_r.shape[-1]
+        bits_out = constellation.demap(out[:, num_skip_symbols:]).reshape(C, n, k)
+        bits_ref = constellation.demap(seg_r).reshape(C, n, k)
+        ser_np = to_device(
+            xp.mean(xp.any(bits_out != bits_ref, axis=-1), axis=-1), "cpu"
+        )
         for ch in range(C):
-            best_ser = float(
-                xp.mean(
-                    xp.asarray(
-                        _ser(
-                            out[ch, num_skip_symbols:],
-                            seg_r[ch],
-                            modulation,
-                            order,
-                            pmf=pmf,
-                        )
-                    )
-                )
-            )
             logger.info(
                 "Phase ambiguity resolution: ch=%s, best_k=%s, "
                 "rotation=%.1f°, SER=%.4f",
                 ch,
                 int(best_k_np[ch]),
                 best_k_np[ch] * step * 180.0 / np.pi,
-                best_ser,
+                float(ser_np[ch]),
             )
 
     return restore_1d(was_1d, out)

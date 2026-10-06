@@ -913,7 +913,7 @@ The equalization pass (3.7) gets more commits:
     phases (`PilotAided`), refined tone frequencies, tone SNRs, the
     inter-tone differential phases, the reference and the combined tones
     (`PilotTones`, replacing `return_diagnostics=`).
-- [ ] **3.6c `refactor(recovery)!: 2.0 signatures for corrections`.**
+- [x] **3.6c `refactor(recovery)!: 2.0 signatures for corrections`.**
   `resolve_phase_ambiguity(symbols, ref_symbols, *, constellation=,
   symmetry=, num_skip_symbols=)` (symmetry from the constellation; `pmf=`
   only fed a log line). `correct_cycle_slips(phase, *, symmetry, history,

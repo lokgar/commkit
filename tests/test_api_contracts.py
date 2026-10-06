@@ -597,7 +597,7 @@ ROWS: list[Row] = [
         "commkit.recovery.corrections.resolve_phase_ambiguity",
         TRANSFORM,
         data=2,
-        call=lambda c, x: _a(x, _ref(c, x), **QAM16),
+        call=lambda c, x: _a(x, _ref(c, x), constellation=C16),
         symbols=True,
     ),
     Row("commkit.recovery.corrections.smooth_phase_wiener", TRAJECTORY),
@@ -973,8 +973,6 @@ LEGACY: dict[str, frozenset[str]] = {
     "commkit.plotting.sync.plot_pilot_tones_phase_estimate": L(SIG),
     "commkit.plotting.sync.plot_timing_correlation": L(SIG),
     "commkit.plotting.waveform.plot_time_domain": L(SIG),
-    "commkit.recovery.corrections.correct_cycle_slips": L(SIG),
     "commkit.recovery.corrections.resolve_channel_permutation": L(SGN),
-    "commkit.recovery.corrections.resolve_phase_ambiguity": L(SIG, SGN),
-    "commkit.recovery.corrections.smooth_phase_wiener": L(SIG),
+    "commkit.recovery.corrections.resolve_phase_ambiguity": L(SGN),
 }
