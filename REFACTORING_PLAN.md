@@ -803,11 +803,15 @@ The equalization pass (3.7) gets more commits:
     `Lowdin()` / `GramSchmidt()` (D16), dispatched through a private table.
   - `apply_polarization_mixing(drift_rate_rad_per_sym=)` becomes
     `drift_rad_per_sample=`: the ramp has always advanced per sample.
-- [ ] **3.4b `refactor(impairments)!: apply_awgn takes rng`.** `rng: int |
+- [x] **3.4b `refactor(impairments)!: apply_awgn takes rng`.** `rng: int |
   Generator | None` replaces `seed=`, and `None` no longer draws from the
   global NumPy/CuPy RNG. CPU noise comes from the Generator; GPU noise from a
   CuPy Generator seeded from it (private `_random.py`), drawn directly in the
   sample precision. Noise realizations change; tests assert statistics only.
+  The GPU uses the counter-based Philox bit generator (XORWOW's per-call
+  state setup costs about 0.8 ms). Interleaved A/B, 7 rounds, (2, N)
+  complex64: CPU 0.99 → 0.52 ms (N = 16k) and 59 → 34 ms (N = 1M); GPU
+  1.04 → 0.33 ms and 1.65 → 0.47 ms.
 
 **Equalizer safety rules (3.7):**
 

@@ -50,7 +50,7 @@ def _frame_signal():
 
 
 def _pipeline(sig, xp, sync):
-    out = apply_awgn(sig, esn0_db=20, seed=7)
+    out = apply_awgn(sig, esn0_db=20, rng=7)
     out = filtering.matched_filter(out)
     out = multirate.resample(out, sps_out=2)
     out = equalization.apply_taps(

@@ -202,7 +202,7 @@ class TestResolvePhaseAmbiguity:
             pulse=RRC(0.35),
             rng=9,
         ).to(device_of(xp))
-        sig = sig.replace(samples=apply_awgn(sig.samples, esn0_db=30, sps=1, seed=9))
+        sig = sig.replace(samples=apply_awgn(sig.samples, esn0_db=30, sps=1, rng=9))
         sym = normalize(sig.samples, mode="average_power")
         sig = sig.replace(
             resolved_symbols=sym * xp.exp(1j * np.pi / 2).astype(sym.dtype)
@@ -380,7 +380,7 @@ class TestCorrectPhaseRotation:
             pulse=RRC(0.35),
             rng=9,
         ).to(device_of(xp))
-        sig = sig.replace(samples=apply_awgn(sig.samples, esn0_db=30, sps=1, seed=9))
+        sig = sig.replace(samples=apply_awgn(sig.samples, esn0_db=30, sps=1, rng=9))
         ref = xp.asarray(sig.source_symbols)
         sig = sig.replace(
             resolved_symbols=sig.samples

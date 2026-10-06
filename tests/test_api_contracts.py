@@ -460,7 +460,7 @@ ROWS: list[Row] = [
     Row(
         "commkit.impairments.noise.apply_awgn",
         TRANSFORM,
-        call=lambda c, x: _a(x, sps=SPS, esn0_db=20, seed=1),
+        call=lambda c, x: _a(x, sps=SPS, esn0_db=20, rng=1),
         fact=SPS_CONFLICT,
     ),
     Row(

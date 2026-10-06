@@ -131,7 +131,7 @@ phi = xp.asarray(
     )
 )
 z_dsh, dphi_true = analysis.dsh_beat(phi, FS, TAU_D, f_shift=F_AOM)
-z_dsh = apply_awgn(z_dsh, sps=1, esn0_db=SNR_DB, seed=1)
+z_dsh = apply_awgn(z_dsh, sps=1, esn0_db=SNR_DB, rng=1)
 
 print(
     f"τ_d = {TAU_D * 1e6:.1f} µs,  τ_c = 1/(πΔν) = {1e6 / (np.pi * DNU_TRUE):.2f} µs, "
@@ -336,7 +336,7 @@ phi_short = xp.asarray(
     )
 )
 z_short, _ = analysis.dsh_beat(phi_short, FS, TAU_SHORT, f_shift=F_AOM)
-z_short = apply_awgn(z_short, sps=1, esn0_db=SNR_DB, seed=3)
+z_short = apply_awgn(z_short, sps=1, esn0_db=SNR_DB, rng=3)
 
 plotting.plot_psd(
     z_short,
@@ -400,7 +400,7 @@ phi_mix = xp.asarray(
     )
 )
 z_mix, _ = analysis.dsh_beat(phi_mix, FS, TAU_SHORT, f_shift=F_AOM)
-z_mix = apply_awgn(z_mix, sps=1, esn0_db=SNR_DB, seed=4)
+z_mix = apply_awgn(z_mix, sps=1, esn0_db=SNR_DB, rng=4)
 
 res_mix = analysis.linewidth_dsh(
     z_mix, FS, TAU_SHORT, f_shift=F_AOM, method="fm_psd", nperseg=1 << 15

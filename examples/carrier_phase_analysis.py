@@ -110,7 +110,7 @@ phi_drift = 2.0 * np.pi * xp.cumsum(df_wander) * T
 phi_true = phi_pn + phi_drift
 
 # Rotate the symbols by the carrier phase, then add detection noise:
-y = apply_awgn(d * xp.exp(1j * phi_true), sps=1, esn0_db=SNR_DB, seed=8)
+y = apply_awgn(d * xp.exp(1j * phi_true), sps=1, esn0_db=SNR_DB, rng=8)
 
 # %% [markdown]
 # ## 2. Data-aided phase trajectory

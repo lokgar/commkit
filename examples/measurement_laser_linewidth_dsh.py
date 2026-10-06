@@ -81,7 +81,7 @@ else:
         )
     )
     z_demo, _ = analysis.dsh_beat(phi_demo, FS, TAU_D, f_shift=F_AOM)
-    beat = apply_awgn(z_demo, sps=1, esn0_db=25, seed=1).real  # single PD -> real
+    beat = apply_awgn(z_demo, sps=1, esn0_db=25, rng=1).real  # single PD -> real
 
 T_REC = beat.shape[-1] / FS
 K_WELCH = max((beat.shape[-1] - 1 - NPERSEG) // (NPERSEG // 2) + 1, 1)

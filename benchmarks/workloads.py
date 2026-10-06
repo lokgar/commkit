@@ -37,7 +37,7 @@ def bps_workload(
     """1-SPS QAM with Wiener laser phase noise + AWGN (CPR benchmark input)."""
     syms = qam_symbols(order, n_sym, num_ch, seed)
     x = apply_phase_noise(syms, sampling_rate=FS, linewidth=linewidth_hz, rng=seed)
-    x = apply_awgn(x, esn0_db=snr_db, sps=1, seed=seed + 1)
+    x = apply_awgn(x, esn0_db=snr_db, sps=1, rng=seed + 1)
     return np.asarray(x, dtype=np.complex64)
 
 
@@ -67,7 +67,7 @@ def mimo_equalizer_workload(
         x = apply_phase_noise(
             x, sampling_rate=FS * sps, linewidth=linewidth_hz, rng=seed
         )
-    x = apply_awgn(x, esn0_db=snr_db, sps=sps, seed=seed + 1)
+    x = apply_awgn(x, esn0_db=snr_db, sps=sps, rng=seed + 1)
     return np.asarray(x, dtype=np.complex64), syms
 
 
@@ -83,7 +83,7 @@ def rotated_symbols_workload(
     reference - input for ``resolve_phase_ambiguity`` / EVM benches."""
     ref = qam_symbols(order, n_sym, num_ch, seed)
     rot = np.exp(1j * rot_quadrants * np.pi / 2).astype(np.complex64)
-    y = apply_awgn(ref * rot, esn0_db=snr_db, sps=1, seed=seed + 1)
+    y = apply_awgn(ref * rot, esn0_db=snr_db, sps=1, rng=seed + 1)
     return np.asarray(y, dtype=np.complex64), ref
 
 
@@ -105,5 +105,5 @@ def llr_workload(
     syms = np.asarray(
         map_bits(bits, constellation=Constellation.qam(order)), dtype=np.complex64
     )
-    rx = apply_awgn(syms, esn0_db=esn0_db, sps=1, seed=seed + 1)
+    rx = apply_awgn(syms, esn0_db=esn0_db, sps=1, rng=seed + 1)
     return np.asarray(rx, dtype=np.complex64), bits, 10 ** (-esn0_db / 10)

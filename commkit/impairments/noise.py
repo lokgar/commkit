@@ -1,5 +1,6 @@
 """Additive measurement noise (ASE / thermal) impairments."""
 
+from .._random import RNG, as_generator, standard_normal
 from ..backend import dispatch
 from ..core._signal_adapter import S, adapt_signal
 from ..logger import logger
@@ -14,7 +15,7 @@ def apply_awgn(
     esn0_db: float,
     sps: float | None = None,
     signal_power: float | None = None,
-    seed: int | None = None,
+    rng: RNG = None,
 ) -> S:
     """
     Adds Additive White Gaussian Noise (AWGN) to a signal based on Es/N0.
@@ -32,9 +33,10 @@ def apply_awgn(
     sps : float, optional
         Samples per symbol.  Taken from the Signal; required for array input.
         A value that disagrees with the Signal raises.
-    seed : int, optional
-        Random seed for reproducible noise generation. When ``None`` (default),
-        the global RNG state is used.
+    rng : int, numpy.random.Generator or None
+        Random source.  The noise is drawn on the data's device: from this
+        Generator on the CPU, and on the GPU from a CuPy Generator seeded from
+        it, so a seed is reproducible per device.
     signal_power : float, optional
         Reference signal power for the noise scaling.  Defaults to the
         measured mean power of ``samples``.  Pass an explicit value to add
@@ -95,19 +97,16 @@ def apply_awgn(
     else:
         noise_power = signal_power * sps / esn0_linear
 
-    # Handle complex signals (split power between I and Q)
-    is_complex = xp.iscomplexobj(x)
-
-    rng = xp.random.RandomState(seed) if seed is not None else xp.random
-    if is_complex:
-        noise_std_component = xp.sqrt(noise_power / 2)
-        real_dtype = x.real.dtype
-        noise = rng.normal(0, noise_std_component, x.shape).astype(
-            real_dtype
-        ) + 1j * rng.normal(0, noise_std_component, x.shape).astype(real_dtype)
+    # Complex noise splits its power equally between I and Q.
+    gen = as_generator(rng)
+    real_dtype = x.real.dtype if x.real.dtype.kind == "f" else xp.dtype(xp.float64)
+    if xp.iscomplexobj(x):
+        std = xp.sqrt(noise_power / 2).astype(real_dtype)
+        n = standard_normal(gen, (2, *x.shape), dtype=real_dtype, xp=xp)
+        noise = std * (n[0] + 1j * n[1])
     else:
-        noise_std = xp.sqrt(noise_power)
-        noise = rng.normal(0, noise_std, x.shape).astype(x.dtype)
+        std = xp.sqrt(noise_power).astype(real_dtype)
+        noise = std * standard_normal(gen, x.shape, dtype=real_dtype, xp=xp)
 
     noisy_samples = x + noise
 

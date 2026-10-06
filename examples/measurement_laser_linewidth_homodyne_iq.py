@@ -88,7 +88,7 @@ else:
     )
     z_demo, _ = analysis.dsh_beat(phi_demo, FS, TAU_D)  # f_shift=0: homodyne
     z_meas = apply_iq_imbalance(
-        apply_awgn(z_demo, sps=1, esn0_db=25, seed=1),
+        apply_awgn(z_demo, sps=1, esn0_db=25, rng=1),
         amplitude_imbalance_db=1.0,
         phase_imbalance_deg=5.0,
     ) + (0.18 - 0.12j)

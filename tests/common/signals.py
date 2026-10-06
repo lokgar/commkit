@@ -134,7 +134,7 @@ def make_test_qam_signal(
     )
     if snr_db is not None:
         sig = sig.replace(
-            samples=apply_awgn(sig.samples, esn0_db=snr_db, sps=sps, seed=seed)
+            samples=apply_awgn(sig.samples, esn0_db=snr_db, sps=sps, rng=seed)
         )
     if fo_hz != 0.0:
         shifted = spectral.shift_frequency(
@@ -170,7 +170,7 @@ def make_test_psk_signal(
     )
     if snr_db is not None:
         sig = sig.replace(
-            samples=apply_awgn(sig.samples, esn0_db=snr_db, sps=sps, seed=seed)
+            samples=apply_awgn(sig.samples, esn0_db=snr_db, sps=sps, rng=seed)
         )
     if fo_hz != 0.0:
         shifted = spectral.shift_frequency(
@@ -340,7 +340,7 @@ def make_dsh_beat(
         phi, sample_rate, delay_samples / sample_rate, f_shift=f_shift
     )
     if snr_db is not None:
-        z = apply_awgn(z, sps=1, esn0_db=snr_db, seed=seed + 100)
+        z = apply_awgn(z, sps=1, esn0_db=snr_db, rng=seed + 100)
     if xp is not None:
         return xp.asarray(z), xp.asarray(dphi)
     return z, dphi

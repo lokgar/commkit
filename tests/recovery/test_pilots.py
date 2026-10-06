@@ -50,7 +50,7 @@ class TestCprPilots:
         # Save ideal symbols before adding noise
         ideal_symbols = xp.asarray(sig.samples.copy())
         sig = sig.replace(
-            samples=apply_awgn(sig.samples, esn0_db=SNR_DB, sps=1, seed=seed)
+            samples=apply_awgn(sig.samples, esn0_db=SNR_DB, sps=1, rng=seed)
         )
         # Apply a slow linear phase ramp on top of noise
         sig = sig.replace(samples=apply_phase_ramp(sig.samples, phase_per_sym, xp=xp))
@@ -338,7 +338,7 @@ class TestCprPilotTones:
             rng=seed,
         )
         samples = apply_awgn(
-            xp.asarray(sig.samples), esn0_db=snr_db, sps=self.SPS, seed=seed
+            xp.asarray(sig.samples), esn0_db=snr_db, sps=self.SPS, rng=seed
         )
         # One tone per channel (channel c gets frequency[c]); tone 1 gets a static
         # phase offset δ so the inter-tone differential is non-trivial.
@@ -541,7 +541,7 @@ class TestPilotsCPREnhancements:
         ).to(device_of(xp))
         ideal = xp.asarray(sig.samples.copy())
         sig = sig.replace(
-            samples=apply_awgn(sig.samples, esn0_db=SNR_DB, sps=1, seed=seed)
+            samples=apply_awgn(sig.samples, esn0_db=SNR_DB, sps=1, rng=seed)
         )
         sig = sig.replace(samples=_apply_phase_ramp(xp, sig.samples, phase_per_sym))
         pilot_indices = np.arange(0, n_symbols, pilot_period)

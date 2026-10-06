@@ -127,7 +127,7 @@ class TestDSHLinewidthEstimator:
             "cpu",
         )
         z, _ = analysis.dsh_beat(phi, FS, m / FS, f_shift=80e6)
-        z = apply_awgn(z, sps=1, esn0_db=25, seed=145)
+        z = apply_awgn(z, sps=1, esn0_db=25, rng=145)
         auto = analysis.linewidth_dsh(
             xp.asarray(z), FS, m / FS, f_shift=80e6, method="fm_psd", nperseg=1 << 15
         )
@@ -162,7 +162,7 @@ class TestDSHLinewidthEstimator:
             "cpu",
         )
         z, _ = analysis.dsh_beat(phi, FS, m / FS, f_shift=f_aom)
-        beat = apply_awgn(z, sps=1, esn0_db=25, seed=1).real
+        beat = apply_awgn(z, sps=1, esn0_db=25, rng=1).real
         tau_cal = 4.8978e-6  # -0.05 % delay-calibration error
         res = analysis.linewidth_dsh(
             xp.asarray(beat),

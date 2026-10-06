@@ -82,7 +82,7 @@ def test_host_signal_never_touches_cupy():
         "from commkit.impairments import apply_awgn\n"
         "sig = commkit.Signal(samples=np.ones(64, np.complex64),"
         " sampling_rate=2.0, symbol_rate=1.0)\n"
-        "apply_awgn(sig, esn0_db=20, seed=1)\n"
+        "apply_awgn(sig, esn0_db=20, rng=1)\n"
         "print('cupy' in sys.modules)"
     )
     assert result == "False"

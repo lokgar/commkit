@@ -141,7 +141,7 @@ E = xp.exp(1j * phi)  # laser field, unit amplitude
 z_beat = E[M_DELAY:] * xp.conj(E[:-M_DELAY])  # = exp(jΔφ), the 0 Hz beat
 
 # Step 3: detection (shot/thermal) noise.
-z_ideal = apply_awgn(z_beat, sps=1, esn0_db=SNR_DB, seed=1)
+z_ideal = apply_awgn(z_beat, sps=1, esn0_db=SNR_DB, rng=1)
 
 # Step 4: receiver imperfections.
 DC_TRUE = 0.18 - 0.12j  # per-quadrature offsets, relative to |z| = 1
@@ -174,7 +174,7 @@ z_dark = apply_awgn(
     sps=1,
     esn0_db=SNR_DB,
     signal_power=1.0,
-    seed=2,
+    rng=2,
 )
 dc_cal = complex(xp.mean(z_dark))
 print(f"calibrated DC = {dc_cal:.4f}   (true {DC_TRUE})")
