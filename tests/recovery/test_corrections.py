@@ -7,7 +7,7 @@ import pytest
 
 from commkit import generate_qam, recovery
 from commkit.impairments import apply_awgn
-from tests.common.conversions import to_numpy
+from tests.common.conversions import device_of, to_numpy
 from tests.common.signals import (
     make_ambiguous_qam16,
     make_test_mimo_samples,
@@ -192,7 +192,9 @@ class TestResolvePhaseAmbiguity:
         from commkit.helpers import normalize
         from commkit.metrics import ser
 
-        sig = generate_qam(order=16, num_symbols=self.N, sps=1, symbol_rate=1e6, seed=9)
+        sig = generate_qam(
+            order=16, num_symbols=self.N, sps=1, symbol_rate=1e6, seed=9
+        ).to(device_of(xp))
         sig.samples = apply_awgn(sig.samples, esn0_db=30, sps=1, seed=9)
         sym = normalize(sig.samples, "average_power")
         sig.resolved_symbols = sym * xp.exp(1j * np.pi / 2).astype(sym.dtype)
@@ -357,7 +359,9 @@ class TestCorrectPhaseRotation:
         """Signal input: resolved_symbols is corrected, ref defaults to source_symbols."""
         from commkit.metrics import ser
 
-        sig = generate_qam(order=16, num_symbols=self.N, sps=1, symbol_rate=1e6, seed=9)
+        sig = generate_qam(
+            order=16, num_symbols=self.N, sps=1, symbol_rate=1e6, seed=9
+        ).to(device_of(xp))
         sig.samples = apply_awgn(sig.samples, esn0_db=30, sps=1, seed=9)
         ref = xp.asarray(sig.source_symbols)
         sig.resolved_symbols = sig.samples * xp.array(

@@ -59,12 +59,9 @@ def is_available() -> bool:
     Returns
     -------
     bool
-        True if CuPy is installed and functional (and not disabled via
-        ``backend.use_cpu_only``), at least one CUDA device is present,
-        and the current device has compute capability >= 7.0.
+        True if CuPy is installed and functional, at least one CUDA device is
+        present, and the current device has compute capability >= 7.0.
     """
-    # The CuPy check is evaluated fresh on every call so that
-    # backend.use_cpu_only() is honored; only the hardware probe is cached.
     if not is_cupy_available():
         return False
     return _device_supported()

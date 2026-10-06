@@ -7,6 +7,7 @@ from commkit import generate_qam, recovery, spectral
 from commkit.backend import to_device
 from commkit.core import Signal
 from commkit.impairments import apply_awgn
+from tests.common.conversions import device_of
 from tests.common.metrics import calc_rms_phase_error
 from tests.common.signals import apply_phase_ramp
 
@@ -38,7 +39,7 @@ class TestCprPilots:
         """Return (noisy+rotated samples, pilot_indices, pilot_values, true_phase)."""
         sig = generate_qam(
             order=16, num_symbols=n_symbols, sps=1, symbol_rate=FS, seed=seed
-        )
+        ).to(device_of(xp))
         # Save ideal symbols before adding noise
         ideal_symbols = xp.asarray(sig.samples.copy())
         sig.samples = apply_awgn(sig.samples, esn0_db=SNR_DB, sps=1, seed=seed)
@@ -523,7 +524,7 @@ class TestPilotsCPREnhancements:
         """Return (samples, pilot_indices, pilot_values) for a 16-QAM signal."""
         sig = generate_qam(
             order=16, num_symbols=n_symbols, sps=1, symbol_rate=FS, seed=seed
-        )
+        ).to(device_of(xp))
         ideal = xp.asarray(sig.samples.copy())
         sig.samples = apply_awgn(sig.samples, esn0_db=SNR_DB, sps=1, seed=seed)
         sig.samples = _apply_phase_ramp(xp, sig.samples, phase_per_sym)

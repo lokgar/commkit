@@ -27,7 +27,7 @@ try:
     try:
         cp.arange(1)
         _CUPY_AVAILABLE = True
-        logger.info("CuPy is available and functional, defaulting Signals to GPU.")
+        logger.debug("CuPy is available and functional.")
     except Exception:
         # Fallback if functional check fails
         _CUPY_AVAILABLE = False
@@ -104,37 +104,19 @@ def _get_jax_device(platform: str) -> Any | None:
         return None
 
 
-_FORCE_CPU = False
-
-
-def use_cpu_only(force: bool = True) -> None:
-    """
-    Enforces a CPU-only execution path, disabling GPU discovery.
-
-    This function effectively hides CuPy from the library, even if a
-    functional NVIDIA GPU and CuPy installation are present.
-
-    Parameters
-    ----------
-    force : bool, default True
-        If True, blocks all CUDA-accelerated operations.
-    """
-    global _FORCE_CPU
-    _FORCE_CPU = force
-
-
 def is_cupy_available() -> bool:
     """
     Checks if NVIDIA GPU acceleration is functional via CuPy.
 
+    Data placement never depends on this: arrays stay where the caller put
+    them, and only an explicit ``to_device(x, "gpu")`` or ``Signal.to("gpu")``
+    moves data to the GPU.
+
     Returns
     -------
     bool
-        True if CuPy is installed, functional, and not explicitly disabled
-        via `use_cpu_only`.
+        True if CuPy is installed and functional.
     """
-    if _FORCE_CPU:
-        return False
     return _CUPY_AVAILABLE
 
 
@@ -142,12 +124,8 @@ def get_array_module(data: Any) -> types.ModuleType:
     """
     Infers the array module (NumPy or CuPy) for the given data.
 
-    The decision is made by inspecting the **actual type of the data**, not the
-    global availability/force flags.  A CuPy array is therefore always reported
-    as CuPy - even under :func:`use_cpu_only` - because that flag governs the
-    default *placement of new* arrays, not the module of data that already lives
-    on the GPU.  Reporting NumPy for a CuPy array would route GPU data into
-    NumPy code paths and raise ``TypeError`` (or silently mis-dispatch).
+    The decision is made by inspecting the **actual type of the data**: the
+    device follows the data.
 
     Parameters
     ----------
@@ -162,8 +140,7 @@ def get_array_module(data: Any) -> types.ModuleType:
     """
     # `cp is not None` <=> CuPy imported and passed the functional check at import
     # time (it is set to None otherwise), so no CuPy array can exist when it is
-    # None.  This is intentionally independent of `is_cupy_available()`, which
-    # also returns False under `use_cpu_only()`.
+    # None.
     if cp is not None and isinstance(data, cp.ndarray):
         return cp
     return np
@@ -184,9 +161,8 @@ def get_scipy_module(xp: types.ModuleType) -> types.ModuleType:
     sp : module
         The corresponding signal processing module (`scipy` or `cupyx.scipy`).
     """
-    # Match sp to the actual array module, independent of the force-CPU flag:
-    # if xp is CuPy we must return cupyx.scipy so dispatch() stays internally
-    # consistent (xp/sp paired) for GPU arrays passed under use_cpu_only().
+    # Match sp to the actual array module so dispatch() returns a consistent
+    # (xp, sp) pair.
     if cp is not None and xp is cp:
         import cupyx.scipy
         import cupyx.scipy.ndimage
@@ -235,11 +211,8 @@ def to_device(data: Any, device: str) -> ArrayType:
     logger.debug("Moving data to %s.", device.upper())
     device = device.lower()
     if device == "cpu":
-        # Dispatch by the *actual array type*, independent of the force-CPU flag
-        # (mirrors get_array_module/get_scipy_module). An array that already lives
-        # on the GPU must always be brought to host; gating the ``.get()`` on
-        # is_cupy_available() means use_cpu_only() leaves a CuPy array unfetchable
-        # and the np.asarray() fallback raises "Implicit conversion ... use .get()".
+        # Dispatch by the *actual array type* (mirrors get_array_module): an
+        # array already on the GPU is always brought to the host.
         if cp is not None and isinstance(data, cp.ndarray):
             return data.get()
         if isinstance(data, np.ndarray):

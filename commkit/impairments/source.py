@@ -4,7 +4,7 @@ import math
 
 import numpy as np
 
-from ..backend import ArrayType, dispatch, is_cupy_available, to_device
+from ..backend import ArrayType, dispatch
 from ..core._signal_adapter import adapt_signal
 from ..core.signal import Signal
 from ..helpers import as_2d, restore_1d
@@ -138,8 +138,6 @@ def generate_phase_noise(
     )
     if num_streams == 1:
         phi = phi[0]
-    if is_cupy_available():
-        phi = to_device(phi, "gpu")
     return phi
 
 

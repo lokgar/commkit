@@ -347,16 +347,11 @@ class TestNPZDeviceHandling:
         assert sig_gpu.backend == "GPU"
         xpt.assert_array_equal(to_numpy(sig.samples), to_numpy(sig_gpu.samples))
 
-    @pytest.mark.gpu_only
-    def test_auto_device_uses_gpu_when_available(
-        self, backend_device: str, tmp_path: Any
-    ) -> None:
-        """device='auto' chooses GPU if CuPy is available."""
-        sig = _siso_signal()
-        p = tmp_path / "auto.npz"
-        save_npz(sig, p)
-        sig2 = load_npz(p)
-        assert sig2.backend == "GPU"
+    def test_default_device_is_cpu(self, tmp_path: Any) -> None:
+        """load_npz loads to the CPU unless a device is requested, GPU or not."""
+        p = tmp_path / "default.npz"
+        save_npz(_siso_signal(), p)
+        assert load_npz(p).backend == "CPU"
 
     def test_psqam_pmf_roundtrip(self, tmp_path: Any, xpt: Any) -> None:
         """PS-QAM signal PMF, mod_scheme, and order round-trip."""

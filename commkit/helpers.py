@@ -4,7 +4,7 @@ from typing import Any, overload
 
 import numpy as np
 
-from .backend import ArrayType, dispatch, get_array_module, is_cupy_available, to_device
+from .backend import ArrayType, dispatch, get_array_module, to_device
 from .logger import logger
 
 try:
@@ -40,12 +40,7 @@ def generate_bits(length: int, seed: int | None = None) -> ArrayType:
     """
     logger.debug("Generating %s random bits (seed=%s).", length, seed)
     rng = np.random.default_rng(seed)
-    bits = rng.integers(0, 2, size=length, dtype="int8")
-
-    if is_cupy_available():
-        bits = to_device(bits, "gpu")
-
-    return bits
+    return rng.integers(0, 2, size=length, dtype="int8")
 
 
 def generate_symbols(

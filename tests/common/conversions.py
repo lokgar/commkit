@@ -46,3 +46,12 @@ def ensure_jax_x64() -> None:
         jax.config.update("jax_enable_x64", True)
     except ImportError:
         pass
+
+
+def device_of(xp: Any) -> str:
+    """Device name for an array module: ``"gpu"`` for CuPy, else ``"cpu"``.
+
+    Library generators return host arrays; tests move them explicitly with
+    ``sig.to(device_of(xp))`` or ``to_device(arr, device_of(xp))``.
+    """
+    return "gpu" if xp is not np else "cpu"

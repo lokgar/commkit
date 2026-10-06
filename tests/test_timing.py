@@ -30,7 +30,7 @@ class TestTimingSequences:
 
     def test_barker_autocorrelation(self, xp):
         """Verify that Barker sequences possess optimal autocorrelation properties."""
-        seq = timing.barker_sequence(13)
+        seq = xp.asarray(timing.barker_sequence(13))
         acorr = cross_correlate_fft(seq, seq, mode="full")
         peak_idx = len(acorr) // 2
         peak_val = float(xp.abs(acorr[peak_idx]))
@@ -44,7 +44,7 @@ class TestTimingSequences:
 
     def test_zadoff_chu_cazac(self, xp, xpt):
         """Verify that ZC sequences have constant amplitude (CAZAC property)."""
-        zc = timing.zadoff_chu_sequence(63, root=25)
+        zc = xp.asarray(timing.zadoff_chu_sequence(63, root=25))
         magnitudes = xp.abs(zc)
         xpt.assert_allclose(magnitudes, 1.0, atol=1e-5)
 
@@ -54,7 +54,7 @@ class TestTimingSequences:
             zc = timing.zadoff_chu_sequence(length, root=1)
             assert len(zc) == length
 
-        zc_even = timing.zadoff_chu_sequence(10, root=1)
+        zc_even = xp.asarray(timing.zadoff_chu_sequence(10, root=1))
         assert len(zc_even) == 10
         xpt.assert_allclose(xp.abs(zc_even), 1.0)
 
@@ -70,7 +70,8 @@ class TestTimingSequences:
         preamble = Preamble(sequence_type="barker", length=13)
         assert preamble.symbols is not None
         assert len(preamble.symbols) == 13
-        assert isinstance(preamble.symbols, xp.ndarray)
+        # Generated on the host; nothing is moved to the GPU implicitly.
+        assert isinstance(preamble.symbols, np.ndarray)
 
         preamble_zc = Preamble(sequence_type="zc", length=63, root=1)
         assert preamble_zc.symbols is not None
@@ -82,12 +83,10 @@ class TestTimingSequences:
         with pytest.raises(ValidationError):
             Preamble(sequence_type="barker")
 
-    def test_sequences_device(self, xp):
-        """Verify sequence generators return arrays on the active device."""
-        barker = timing.barker_sequence(13)
-        assert isinstance(barker, xp.ndarray)
-        zc = timing.zadoff_chu_sequence(13, root=1)
-        assert isinstance(zc, xp.ndarray)
+    def test_sequences_are_host_arrays(self):
+        """Sequence generators return NumPy arrays even when a GPU is present."""
+        assert isinstance(timing.barker_sequence(13), np.ndarray)
+        assert isinstance(timing.zadoff_chu_sequence(13, root=1), np.ndarray)
 
 
 class TestCrossCorrelation:
@@ -142,36 +141,35 @@ class TestEstimateTiming:
     def test_estimate_timing_advanced_scenarios(self, xp):
         """Verify estimate_timing with raw arrays, MIMO, and search ranges."""
         preamble = Preamble(sequence_type="barker", length=7)
+        ref = xp.asarray(preamble.symbols)
         data = xp.zeros(100, dtype="complex64")
-        data[20 : 20 + 7] = preamble.symbols
+        data[20 : 20 + 7] = ref
 
         integer, _frac = timing.estimate_timing(data, preamble, threshold=2.0, sps=1)
         assert 18 <= integer[0] <= 22
 
         mimo_data = xp.zeros((2, 100), dtype="complex64")
-        mimo_data[0, 30:37] = preamble.symbols
-        mimo_data[1, 30:37] = preamble.symbols
-        integer_mimo, _frac = timing.estimate_timing(
-            mimo_data, preamble.symbols, threshold=2.0
-        )
+        mimo_data[0, 30:37] = ref
+        mimo_data[1, 30:37] = ref
+        integer_mimo, _frac = timing.estimate_timing(mimo_data, ref, threshold=2.0)
         assert 28 <= integer_mimo[0] <= 32
         assert len(integer_mimo) == 2
 
         integer_range, _frac = timing.estimate_timing(
-            data, preamble.symbols, threshold=2.0, search_range=(10, 50)
+            data, ref, threshold=2.0, search_range=(10, 50)
         )
         assert 18 <= integer_range[0] <= 22
 
         with pytest.raises(ValueError, match="No correlation peak above threshold"):
-            timing.estimate_timing(data, preamble.symbols, threshold=100.0)
+            timing.estimate_timing(data, ref, threshold=100.0)
 
         zero_data = xp.zeros(100)
         with pytest.raises(ValueError, match="No correlation peak above threshold"):
-            timing.estimate_timing(zero_data, preamble.symbols, threshold=2.0)
+            timing.estimate_timing(zero_data, ref, threshold=2.0)
 
     def test_estimate_timing_known_position(self, xp):
         """Verify timing estimation accuracy for a known preamble position."""
-        preamble_symbols = timing.barker_sequence(13)
+        preamble_symbols = xp.asarray(timing.barker_sequence(13))
         signal = xp.zeros(200, dtype="complex64")
         start_pos = 50
         signal[start_pos : start_pos + 13] = preamble_symbols
@@ -195,7 +193,7 @@ class TestEstimateTiming:
 
     def test_estimate_timing_returns_tuple(self, xp):
         """Verify that estimate_timing returns (integer_offsets, fractional_offsets)."""
-        preamble = timing.barker_sequence(7)
+        preamble = xp.asarray(timing.barker_sequence(7))
         signal = xp.zeros(100, dtype="complex64")
         signal[30:37] = preamble
 
@@ -255,7 +253,7 @@ class TestEstimateTiming:
 
     def test_estimate_timing_fractional(self, xp):
         """Verify estimate_timing returns fractional offset."""
-        preamble = timing.barker_sequence(13)
+        preamble = xp.asarray(timing.barker_sequence(13))
         signal = xp.zeros(200, dtype="complex64")
         signal[50:63] = preamble
 
@@ -275,7 +273,7 @@ class TestEstimateTiming:
 
     def test_estimate_timing_with_preamble_object_explicit(self, xp):
         """Verify estimate_timing with explicit Preamble object."""
-        barker = timing.barker_sequence(7)
+        barker = xp.asarray(timing.barker_sequence(7))
         samples = xp.zeros(200, dtype="complex64")
         samples[40:47] = barker
 
@@ -287,7 +285,7 @@ class TestEstimateTiming:
 
     def test_estimate_timing_signal_derives_sps_for_preamble(self, xp):
         """A Signal provides the SPS required to reconstruct a Preamble."""
-        barker = timing.barker_sequence(7)
+        barker = xp.asarray(timing.barker_sequence(7))
         samples = xp.zeros(200, dtype="complex64")
         samples[40:47] = barker
         sig = Signal(
@@ -362,7 +360,7 @@ class TestEstimateTimingMIMO:
 
     def test_estimate_timing_skew_detection(self, xp):
         """Verify skew warning is emitted when MIMO channels have different preamble positions."""
-        barker = timing.barker_sequence(7)
+        barker = xp.asarray(timing.barker_sequence(7))
         sig = xp.zeros((2, 200), dtype="complex64")
         sig[0, 40:47] = barker
         sig[1, 42:49] = barker
@@ -781,7 +779,7 @@ class TestSignalInputTiming:
 
     def test_estimate_timing_signal_input(self, xp, xpt):
         """Signal input: estimate_timing still returns a raw (int, frac) tuple."""
-        preamble_symbols = timing.barker_sequence(13)
+        preamble_symbols = xp.asarray(timing.barker_sequence(13))
         data = xp.zeros(200, dtype="complex64")
         start_pos = 50
         data[start_pos : start_pos + 13] = preamble_symbols

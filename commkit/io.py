@@ -190,7 +190,7 @@ def save_npz(
 def load_npz(
     path: str | Path,
     *,
-    device: str = "auto",
+    device: str = "cpu",
 ) -> Signal:
     """
     Load a ``Signal`` from a .npz archive.
@@ -200,9 +200,8 @@ def load_npz(
     path : str or Path
         Path to the ``.npz`` file.  A ``.npz`` extension is appended
         automatically if absent.
-    device : {"auto", "cpu", "gpu"}, default "auto"
-        Target device after loading.  ``"auto"`` moves to GPU when CuPy is
-        available, otherwise stays on CPU.
+    device : {"cpu", "gpu"}, default "cpu"
+        Target device after loading.
 
     Returns
     -------
@@ -219,8 +218,7 @@ def load_npz(
 
     Examples
     --------
-    >>> sig = load_npz("capture.npz")           # auto: GPU if available
-    >>> sig_cpu = load_npz("capture.npz", device="cpu")
+    >>> sig = load_npz("capture.npz")                   # on the CPU
     >>> sig_gpu = load_npz("capture.npz", device="gpu")
     """
     from .core import Signal
@@ -299,11 +297,7 @@ def load_npz(
     # -------------------------------------------------------------------------
     # Move to target device
     # -------------------------------------------------------------------------
-    target = device.lower()
-    if target == "auto":
-        target = "gpu" if _backend.is_cupy_available() else "cpu"
-    sig = sig.to(target)
-    return sig
+    return sig.to(device)
 
 
 # -----------------------------------------------------------------------------

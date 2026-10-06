@@ -16,7 +16,7 @@ from typing import Literal, cast
 import numpy as np
 
 from .. import filtering, helpers, mapping
-from ..backend import ArrayType, dispatch, is_cupy_available, to_device
+from ..backend import ArrayType, dispatch
 from ..logger import logger
 from ._signal_adapter import require_integer_sps
 from .signal import Signal
@@ -295,10 +295,6 @@ def generate(
         bits = bits.reshape(num_streams, num_symbols * k)
     else:
         symbols = symbols_flat
-
-    if is_cupy_available():
-        symbols = to_device(symbols, "gpu")
-        bits = to_device(bits, "gpu")
 
     # Apply pulse shaping
     # shape_pulse defaults to axis=-1 (Time) which is correct for (C, T)
@@ -701,10 +697,6 @@ def generate_psqam(
     else:
         symbols = symbols_flat
         bits = bits_flat
-
-    if is_cupy_available():
-        symbols = to_device(symbols, "gpu")
-        bits = to_device(bits, "gpu")
 
     samples = shape_pulse(
         symbols=symbols,

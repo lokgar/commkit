@@ -19,21 +19,33 @@ from commkit import (
     spectral,
 )
 from commkit.core import Signal
+from tests.common.conversions import device_of, to_numpy
 
 
 class TestSignalCreation:
     """Tests for TestSignalCreation."""
 
     def test_signal_initialization(self, xp):
-        """Verify Signal initialization from basic Python lists and device-aware backend tracking."""
-        # Test with list
-        data = [1, 2, 3, 4]
-        # Signal automatically moves to GPU if available (controlled by backend_device fixture)
-        s = Signal(samples=data, sampling_rate=1.0, symbol_rate=1.0)
-        assert isinstance(s.samples, xp.ndarray)
+        """Signal keeps samples on the device they were given on."""
+        s = Signal(samples=[1, 2, 3, 4], sampling_rate=1.0, symbol_rate=1.0)
+        assert isinstance(s.samples, np.ndarray)  # lists become host arrays
+
+        s_dev = Signal(samples=xp.arange(4), sampling_rate=1.0, symbol_rate=1.0)
+        assert isinstance(s_dev.samples, xp.ndarray)
 
         assert s.sampling_rate == 1.0
         assert s.symbol_rate == 1.0
+
+    def test_to_returns_new_signal_with_all_arrays_moved(self, xp):
+        """Signal.to() leaves the input untouched and moves reference arrays too."""
+        sig = generate_qam(order=16, num_symbols=64, sps=2, symbol_rate=1e6, seed=1)
+        moved = sig.to(device_of(xp))
+        assert moved is not sig
+        assert isinstance(sig.samples, np.ndarray)
+        assert isinstance(sig.source_symbols, np.ndarray)
+        for arr in (moved.samples, moved.source_symbols, moved.source_bits):
+            assert isinstance(arr, xp.ndarray)
+        np.testing.assert_array_equal(to_numpy(moved.samples), sig.samples)
 
     def test_signal_validation_heuristics(self, xp):
         """Verify Signal validation for higher dimensions and Time-Last heuristic."""
@@ -356,7 +368,7 @@ class TestSignalDSPOperations:
         """add_pilot_tone on a Signal records frequency and power-ratio provenance."""
         sig = generate_psk(
             symbol_rate=1e6, num_symbols=128, order=4, pulse_shape="rrc", sps=8, seed=0
-        )
+        ).to(device_of(xp))
         before = xp.asarray(sig.samples.copy())
         df = sig.sampling_rate / sig.samples.shape[-1]
 
@@ -546,12 +558,13 @@ class TestSignalWaveformsAndModulation:
         assert s.mod_rz is True
 
     def test_pam_waveform(self, xp):
-        """Verify basic PAM signal generation produces samples on the active device."""
+        """PAM generation returns a host Signal; .to() moves it explicitly."""
         sig = generate_pam(
             order=2, unipolar=False, num_symbols=10, sps=4, symbol_rate=1e3
         )
         assert sig.samples.size > 0
-        assert isinstance(sig.samples, xp.ndarray)
+        assert isinstance(sig.samples, np.ndarray)
+        assert isinstance(sig.to(device_of(xp)).samples, xp.ndarray)
         assert sig.mod_scheme is not None
 
     def test_rzpam_waveform(self, xp):
@@ -564,7 +577,7 @@ class TestSignalWaveformsAndModulation:
             symbol_rate=1e3,
             rz=True,
             pulse_shape="rect",
-        )
+        ).to(device_of(xp))
         assert sig.samples.size > 0
         assert isinstance(sig.samples, xp.ndarray)
 
@@ -577,18 +590,22 @@ class TestSignalWaveformsAndModulation:
                 symbol_rate=1e3,
                 rz=True,
                 pulse_shape="rrc",
-            )
+            ).to(device_of(xp))
 
     def test_qam_waveform(self, xp):
         """Verify QAM signal generation populates samples and modulation metadata."""
-        sig = generate_qam(order=16, num_symbols=10, sps=4, symbol_rate=1e3)
+        sig = generate_qam(order=16, num_symbols=10, sps=4, symbol_rate=1e3).to(
+            device_of(xp)
+        )
         assert sig.samples.size > 0
         assert isinstance(sig.samples, xp.ndarray)
         assert sig.mod_order == 16
 
     def test_psk_waveform(self, xp, xpt):
         """Verify PSK signal generation, metadata, and unit-magnitude constellation."""
-        sig = generate_psk(order=8, num_symbols=50, sps=2, symbol_rate=1e6, seed=0)
+        sig = generate_psk(order=8, num_symbols=50, sps=2, symbol_rate=1e6, seed=0).to(
+            device_of(xp)
+        )
         assert sig.samples.size > 0
         assert isinstance(sig.samples, xp.ndarray)
         assert sig.mod_order == 8
@@ -600,7 +617,7 @@ class TestSignalWaveformsAndModulation:
             xpt.assert_allclose(magnitudes, xp.ones_like(magnitudes), atol=1e-5)
 
     def test_signal_generate(self, xp):
-        """Verify generate() produces correct metadata for any modulation."""
+        """Verify generate().to(device_of(xp)) produces correct metadata for any modulation."""
         sig = generate(
             num_symbols=100,
             sps=4,
@@ -609,7 +626,7 @@ class TestSignalWaveformsAndModulation:
             order=16,
             pulse_shape="rrc",
             seed=1,
-        )
+        ).to(device_of(xp))
         assert sig.samples.size > 0
         assert isinstance(sig.samples, xp.ndarray)
         assert sig.symbol_rate == 1e6
@@ -633,7 +650,7 @@ class TestSignalResolutionAndMetrics:
             sps=sps,
             symbol_rate=symbol_rate,
             seed=42,
-        )
+        ).to(device_of(xp))
 
         # Initially resolved attributes should be None
         assert sig.resolved_symbols is None

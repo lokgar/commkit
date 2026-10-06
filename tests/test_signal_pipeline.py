@@ -12,6 +12,7 @@ from commkit import equalization, filtering, frequency, multirate
 from commkit.core import Preamble, Signal, SingleCarrierFrame, generation
 from commkit.impairments import apply_awgn
 from commkit.mapping import demap_symbols_hard, map_bits
+from tests.common.conversions import device_of
 
 # -----------------------------------------------------------------------------
 # Helpers
@@ -159,6 +160,7 @@ class TestPipelineComposition:
         sig = frame.to_signal(sps=4, symbol_rate=1e6, filter_span=4)
         sig.source_bits = payload_bits
         sig.source_symbols = payload_symbols
+        sig = sig.to(device_of(xp))
 
         transformed = apply_awgn(sig, esn0_db=25, seed=5)
         transformed = filtering.matched_filter(transformed)

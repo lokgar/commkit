@@ -12,7 +12,7 @@ from typing import Union, overload
 
 import numpy as np
 
-from .backend import ArrayType, dispatch, is_cupy_available, to_device
+from .backend import ArrayType, dispatch, to_device
 from .core import Preamble, Signal
 from .core._signal_adapter import adapt_signal, require_integer_sps
 from .helpers import (
@@ -61,7 +61,7 @@ def barker_sequence(length: int) -> ArrayType:
     -------
     array_like
         BPSK symbols (+1.0, -1.0). Shape: (length,).
-        Backend depends on system availability (CuPy if available, else NumPy).
+        NumPy array; move it with ``to_device`` if needed.
 
     Raises
     ------
@@ -78,9 +78,6 @@ def barker_sequence(length: int) -> ArrayType:
         raise ValueError(f"No Barker sequence of length {length}. Valid: {valid}")
 
     seq = np.array(_BARKER_SEQUENCES[length], dtype="float32")
-
-    if is_cupy_available():
-        seq = to_device(seq, "gpu")
 
     logger.debug("Generated Barker-%s sequence.", length)
     return seq
@@ -121,13 +118,7 @@ def zadoff_chu_sequence(length: int, root: int = 1) -> ArrayType:
     if root < 1 or root >= length:
         raise ValueError(f"Root must be in [1, {length - 1}].")
 
-    # Determine backend
-    if is_cupy_available():
-        import cupy as cp
-
-        xp = cp
-    else:
-        xp = np
+    xp = np
 
     # ZC formula: x[n] = exp(-j * pi * u * n * (n+1) / N)
     n = xp.arange(length)

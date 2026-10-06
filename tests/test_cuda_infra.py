@@ -25,9 +25,9 @@ def _isolate_warned_kernels(monkeypatch: Any) -> None:
 class TestCudaAvailability:
     """Tests for CUDA kernel availability detection and source loading."""
 
-    @pytest.mark.cpu_only
-    def test_get_kernel_returns_none_on_cpu(self, backend_device: str) -> None:
-        """The CPU leg forces use_cpu_only(True); get_kernel must fall back cleanly."""
+    def test_get_kernel_returns_none_without_cuda(self, monkeypatch: Any) -> None:
+        """Without usable CUDA, get_kernel returns None so callers fall back."""
+        monkeypatch.setattr(_cuda, "is_cupy_available", lambda: False)
         assert _cuda.is_available() is False
         assert _cuda.get_kernel("selftest_scale") is None
 

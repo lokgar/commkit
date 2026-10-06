@@ -13,7 +13,6 @@ import pytest
 
 matplotlib.use("Agg")
 
-from commkit import backend
 
 try:
     import cupy as cp
@@ -109,8 +108,9 @@ def backend_device(request):
     """
     Fixture that returns the current backend device name.
 
-    Skips GPU tests if CuPy is not available or functional.
-    Forces CPU mode when device is 'cpu' to ensure isolation.
+    Skips GPU tests if CuPy is not available or functional.  The device only
+    selects where tests build their inputs (via ``xp``); the library never
+    moves data on its own.
 
     Parameters
     ----------
@@ -127,7 +127,6 @@ def backend_device(request):
     if device == "gpu":
         if device_opt == "cpu":
             pytest.skip("Test requires GPU, but --device=cpu was selected")
-        backend.use_cpu_only(False)
         if not _CUPY_AVAILABLE:
             pytest.skip("CuPy not installed, skipping GPU tests")
         try:
@@ -140,10 +139,6 @@ def backend_device(request):
         except Exception as e:
             pytest.skip(f"CuPy installed but not functional (missing libs?): {e}")
 
-    elif device == "cpu":
-        # Force CPU to prevent accidental GPU usage in "cpu" tests
-        backend.use_cpu_only(True)
-
     marker = request.node.get_closest_marker("requires_kernel")
     if marker:
         kernel_name = marker.args[0] if marker.args else None
@@ -151,11 +146,7 @@ def backend_device(request):
 
         skip_unless_kernel_available(kernel_name, backend_device=device)
 
-    try:
-        yield device
-    finally:
-        # Always restore default state so later tests are not affected
-        backend.use_cpu_only(False)
+    yield device
 
 
 @pytest.fixture

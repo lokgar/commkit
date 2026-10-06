@@ -23,29 +23,6 @@ class TestGetArrayModule:
         """Verify that a Python list defaults to NumPy."""
         assert backend.get_array_module([1, 2, 3]) == np
 
-    @pytest.mark.gpu_only
-    def test_force_cpu_does_not_break_dispatched_cupy_array(self) -> None:
-        """A CuPy array that was already formed still dispatches to cupy even if
-        FORCE_CPU is toggled on after the fact (the array object itself carries
-        its module).
-        """
-        original_force = backend._FORCE_CPU
-        backend.use_cpu_only(False)
-
-        import cupy as cp
-
-        arr = cp.arange(4)
-        try:
-            backend.use_cpu_only(True)
-            assert backend.is_cupy_available() is False
-            assert backend.get_array_module(arr) is cp
-            assert backend.get_scipy_module(cp).__name__.startswith("cupyx")
-            _, out_xp, out_sp = backend.dispatch(arr)
-            assert out_xp is cp
-            assert hasattr(out_sp, "signal")
-        finally:
-            backend.use_cpu_only(original_force)
-
 
 class TestToDevice:
     """Tests for explicit device transfer via to_device."""
@@ -66,21 +43,13 @@ class TestToDevice:
             assert backend.get_array_module(device_data) == cp
 
     @pytest.mark.gpu_only
-    def test_to_device_cpu_fetches_gpu_array_under_force(self) -> None:
-        """to_device(x, "cpu") must bring a CuPy array to host even under force."""
-        original_force = backend._FORCE_CPU
-        backend.use_cpu_only(False)
+    def test_to_device_cpu_fetches_gpu_array(self) -> None:
+        """to_device(x, "cpu") brings a CuPy array to the host."""
         import cupy as cp
 
-        arr = cp.arange(5)
-        try:
-            backend.use_cpu_only(True)
-            assert backend.is_cupy_available() is False
-            host = backend.to_device(arr, "cpu")
-            assert isinstance(host, np.ndarray)
-            assert np.array_equal(host, [0, 1, 2, 3, 4])
-        finally:
-            backend.use_cpu_only(original_force)
+        host = backend.to_device(cp.arange(5), "cpu")
+        assert isinstance(host, np.ndarray)
+        assert np.array_equal(host, [0, 1, 2, 3, 4])
 
     def test_to_device_list_input(self) -> None:
         """Verify to_device handles plain list input by converting to ndarray."""
@@ -117,34 +86,6 @@ class TestBackendDispatch:
         assert x in (np, getattr(multirate, "cp", None))
 
 
-class TestCpuOnlyToggle:
-    """Tests for toggling CPU-only mode and restoring state."""
-
-    def test_cpu_only_toggle(self) -> None:
-        """Verify that forcing CPU mode correctly disables GPU detection."""
-        original_force = backend._FORCE_CPU
-        try:
-            backend.use_cpu_only(False)
-            backend.use_cpu_only(True)
-            assert backend.is_cupy_available() is False
-            backend.use_cpu_only(False)
-        finally:
-            backend.use_cpu_only(original_force)
-
-    def test_use_cpu_only_forces_cpu(self) -> None:
-        """Test use_cpu_only forces CPU backend and blocks GPU allocation."""
-        original_force = backend._FORCE_CPU
-        try:
-            backend.use_cpu_only(True)
-            assert backend.is_cupy_available() is False
-            assert backend.get_array_module(np.array([1])) == np
-
-            with pytest.raises(ImportError):
-                backend.to_device(np.array([1]), "gpu")
-        finally:
-            backend.use_cpu_only(original_force)
-
-
 class TestJaxInterop:
     """Tests for interoperability between CommKit backends and JAX."""
 
@@ -156,23 +97,16 @@ class TestJaxInterop:
 
         data = xp.array([1.0, 2.0, 3.0])
 
+        jax_arr = backend.to_jax(data)
+        assert isinstance(jax_arr, jnp.ndarray)
+
+        back_arr = backend.from_jax(jax_arr)
         if backend_device == "cpu":
-            backend.use_cpu_only(True)
+            assert isinstance(back_arr, np.ndarray)
+        elif backend_device == "gpu":
+            assert isinstance(back_arr, (np.ndarray, xp.ndarray))
 
-        try:
-            jax_arr = backend.to_jax(data)
-            assert isinstance(jax_arr, jnp.ndarray)
-
-            back_arr = backend.from_jax(jax_arr)
-
-            if backend_device == "cpu":
-                assert isinstance(back_arr, np.ndarray)
-            elif backend_device == "gpu":
-                assert isinstance(back_arr, (np.ndarray, xp.ndarray))
-
-            xpt.assert_allclose(backend.to_device(back_arr, "cpu"), [1.0, 2.0, 3.0])
-        finally:
-            backend.use_cpu_only(False)
+        xpt.assert_allclose(backend.to_device(back_arr, "cpu"), [1.0, 2.0, 3.0])
 
     def test_jax_conversions(self, xp: Any, xpt: Any, jax: Any) -> None:
         """Test JAX conversion utilities with real JAX if available."""
@@ -188,7 +122,7 @@ class TestJaxInterop:
         assert isinstance(arr_back, np.ndarray)
         xpt.assert_array_equal(arr_back, arr_np)
 
-        sig = Signal(samples=arr_np, sampling_rate=1.0, symbol_rate=1.0)
+        sig = Signal(samples=xp.asarray(arr_np), sampling_rate=1.0, symbol_rate=1.0)
         jax_sig = sig.export_samples_to_jax()
         assert isinstance(jax_sig, jnp.ndarray)
 

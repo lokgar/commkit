@@ -20,22 +20,12 @@ from pydantic import (
     field_validator,
 )
 
-try:
-    import cupy as cp
-
-    _CUPY_AVAILABLE = True
-except ImportError:
-    cp = None
-    _CUPY_AVAILABLE = False
-
-
 from .. import helpers
 from ..backend import (
     ArrayType,
     from_jax,
     get_array_module,
     get_scipy_module,
-    is_cupy_available,
     to_device,
     to_jax,
 )
@@ -298,8 +288,8 @@ class Signal(BaseModel):
         Post-initialization hook to handle metadata derivation and device placement.
 
         This method automatically derives `source_symbols` from `source_bits` if
-        modulation parameters are present, and moves the signal samples to
-        the GPU if a compatible device is available.
+        modulation parameters are present. It never moves data between devices:
+        samples stay where the caller put them.
         """
         # Bit-first: derive symbols from bits if not provided
         if self.source_bits is not None and self.source_symbols is None:
@@ -323,10 +313,6 @@ class Signal(BaseModel):
             self.source_symbols = helpers.normalize(
                 self.source_symbols, mode="average_power", axis=-1
             )
-
-        # Default to GPU if available and supported
-        if is_cupy_available():
-            self.to("gpu")
 
     # -------------------------------------------------------------------------
     # Utilities
@@ -606,25 +592,43 @@ class Signal(BaseModel):
 
     def to(self, device: str) -> "Signal":
         """
-        Transfers signal data to the target device (CPU or GPU).
+        Return a copy of this signal with its arrays on ``device``.
+
+        Moves the samples and the waveform-sized reference and cache arrays
+        (``source_bits``, ``source_symbols``, ``resolved_symbols``,
+        ``resolved_bits``); small host metadata such as ``ps_pmf`` stays on
+        the CPU.  The original signal is unchanged, and resolved caches stay
+        valid because sample values do not change.  Arrays already on
+        ``device`` are shared, not copied.
 
         Parameters
         ----------
-        device : {"CPU", "GPU"}
+        device : {"cpu", "gpu"}
             The target device. Case-insensitive.
 
         Returns
         -------
         Signal
-            Returns self for method chaining.
+            A new Signal on ``device``.
 
         Raises
         ------
         ImportError
             If GPU is requested but CuPy is not installed/functional.
         """
-        self.samples = to_device(self.samples, device)
-        return self
+        moved = {
+            field: to_device(value, device)
+            for field in (
+                "source_bits",
+                "source_symbols",
+                "resolved_symbols",
+                "resolved_bits",
+            )
+            if (value := getattr(self, field)) is not None
+        }
+        return self.replace_samples(
+            to_device(self.samples, device), _preserve_resolved=True, **moved
+        )
 
     def export_samples_to_jax(self, device: str | None = None) -> Any:
         """
@@ -734,7 +738,7 @@ class Signal(BaseModel):
         {"CPU", "GPU"}
             A string indicating the device location of samples.
         """
-        return "GPU" if self.xp == cp else "CPU"
+        return "CPU" if self.xp is np else "GPU"
 
     @property
     def num_streams(self) -> int:

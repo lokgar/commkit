@@ -444,7 +444,7 @@ sites. The order avoids conflicts, because 1.4-1.6 all edit
     `load_npz` uses `allow_pickle=False`.
   - PyYAML is removed from the dependencies.
   - The test checks that loading a file containing an object array raises.
-- [ ] **1.2 `refactor!: explicit device placement`.**
+- [x] **1.2 `refactor!: explicit device placement`.**
   - Remove `use_cpu_only`, the automatic GPU move in `Signal.model_post_init`,
     and `load_npz(device="auto")`, which now defaults to `"cpu"`.
   - `Signal.to()` returns a new Signal instead of modifying itself.

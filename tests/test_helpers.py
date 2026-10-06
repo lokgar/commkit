@@ -16,17 +16,17 @@ class Unconvertible:
 class TestRandomGeneration:
     """Random bits and symbol generation helpers."""
 
-    def test_random_bits(self, xp, xpt):
-        """Verify random bit generation produces correct length, binary values, and device."""
+    def test_random_bits(self):
+        """Random bits: correct length, binary values, generated on the host."""
         bits = helpers.generate_bits(100, seed=42)
         assert len(bits) == 100
-        xpt.assert_array_equal((bits == 0) | (bits == 1), True)
-        assert isinstance(bits, xp.ndarray)
+        np.testing.assert_array_equal((bits == 0) | (bits == 1), True)
+        assert isinstance(bits, np.ndarray)
 
-    def test_random_bits_no_seed(self, xp):
-        """Verify generate_bits without a seed produces a result on the active device."""
+    def test_random_bits_no_seed(self):
+        """generate_bits without a seed still returns a host array."""
         bits = helpers.generate_bits(100)
-        assert isinstance(bits, xp.ndarray)
+        assert isinstance(bits, np.ndarray)
         assert len(bits) == 100
 
     def test_random_symbols_unipolar(self, xp, xpt):

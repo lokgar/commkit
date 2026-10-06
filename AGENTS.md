@@ -1,7 +1,6 @@
 # AGENTS.md
 
 Guide for anyone, human or coding agent, changing the **CommKit** repository.
-It is the only agent guide; there is no `CLAUDE.md`.
 
 The code is being migrated to 2.0 on the `v2` branch following
 [`REFACTORING_PLAN.md`](REFACTORING_PLAN.md). The rules below describe the 2.0
@@ -347,7 +346,6 @@ rule without deleting its entry fails the suite.
 
 | Legacy pattern still in the code | Removed by |
 | --- | --- |
-| `use_cpu_only()`; `Signal(...)` moves data to the GPU automatically; `load_npz(device="auto")`; `Signal.to()` modifies in place | 1.2 |
 | `import commkit` applies the plot theme, adds a stdout log handler, sets global warning filters, and probes the GPU | 1.3 |
 | `debug_plot=` parameters (20 modules) | 1.4 |
 | `update_mode` / `block_len` time-domain block equalizers | 1.5 |

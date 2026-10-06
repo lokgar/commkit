@@ -134,7 +134,7 @@ def _profile_rewrap_copy_cost(sig, backend_device, xp, sync):
 @pytest.mark.parametrize("case", ["plain", "frame"], ids=["plain", "frame-backed"])
 def bench_signal_pipeline(benchmark, backend_device, xp, sync, case):
     """Track wall time and peak CPU/GPU allocation for representative composition."""
-    sig = _plain_signal() if case == "plain" else _frame_signal()
+    sig = (_plain_signal() if case == "plain" else _frame_signal()).to(backend_device)
 
     def run():
         return _pipeline(sig, xp, sync)

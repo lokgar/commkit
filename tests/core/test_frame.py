@@ -5,6 +5,7 @@ from typing import Any
 import pytest
 
 from commkit.core import Preamble, SingleCarrierFrame
+from tests.common.conversions import device_of
 
 
 class TestSingleCarrierFrameBasics:
@@ -109,7 +110,9 @@ class TestSingleCarrierFrameBasics:
         )
 
         sps = 4
-        sig = frame.to_signal(sps=sps, pulse_shape="rrc", rrc_rolloff=0.5)
+        sig = frame.to_signal(sps=sps, pulse_shape="rrc", rrc_rolloff=0.5).to(
+            device_of(xp)
+        )
         preamble_len_samples = 13 * sps
         preamble_section = sig.samples[:preamble_len_samples]
         body_section = sig.samples[preamble_len_samples:]

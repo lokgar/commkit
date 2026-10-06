@@ -112,27 +112,27 @@ class TestApplyPhaseNoise:
 class TestGeneratePhaseNoise:
     """Tests for generate_phase_noise."""
 
-    def test_shapes_and_dtype(self, xp):
-        """SISO (N,) for one stream, (C, N) for several; float64 on device."""
+    def test_shapes_and_dtype(self):
+        """SISO (N,) for one stream, (C, N) for several; float64 on the host."""
         phi = generate_phase_noise(256, 64e9, linewidth=1e6, seed=1)
-        assert isinstance(phi, xp.ndarray)
+        assert isinstance(phi, np.ndarray)
         assert phi.shape == (256,)
-        assert phi.dtype == xp.float64
+        assert phi.dtype == np.float64
         phi2 = generate_phase_noise(256, 64e9, linewidth=1e6, num_streams=3, seed=1)
         assert phi2.shape == (3, 256)
 
-    def test_seed_reproducible(self, xp):
+    def test_seed_reproducible(self):
         """Same seed yields the identical trajectory."""
         a = generate_phase_noise(1024, 64e9, linewidth=1e6, flicker=1e9, seed=42)
         b = generate_phase_noise(1024, 64e9, linewidth=1e6, flicker=1e9, seed=42)
-        assert float(xp.max(xp.abs(a - b))) == 0.0
+        assert float(np.max(np.abs(a - b))) == 0.0
 
     def test_wiener_increment_variance(self, xp):
         """White-FM increments have variance 2π·Δν/fs."""
         fs, dnu = 64e9, 100e3
         phi = generate_phase_noise(200_000, fs, linewidth=dnu, seed=7)
         expected = 2.0 * math.pi * dnu / fs
-        measured = float(xp.var(xp.diff(phi)))
+        measured = float(np.var(np.diff(phi)))
         assert abs(measured - expected) / expected < 0.05
 
     def test_flicker_fm_psd_level(self, xp):
@@ -150,7 +150,7 @@ class TestGeneratePhaseNoise:
     def test_matches_apply_phase_noise_trajectory(self, xp):
         """apply_phase_noise(ones) reproduces the generate_phase_noise walk."""
         fs, dnu, n = 64e9, 100e3, 8192
-        phi = generate_phase_noise(n, fs, linewidth=dnu, seed=11)
+        phi = xp.asarray(generate_phase_noise(n, fs, linewidth=dnu, seed=11))
         out = apply_phase_noise(
             xp.ones(n, dtype=xp.complex128), sampling_rate=fs, linewidth=dnu, seed=11
         )

@@ -13,20 +13,11 @@ from pydantic import (
     model_validator,
 )
 
-from ._signal_adapter import require_integer_sps
-
-try:
-    import cupy as cp
-
-    _CUPY_AVAILABLE = True
-except ImportError:
-    cp = None
-    _CUPY_AVAILABLE = False
-
 from .. import helpers
-from ..backend import ArrayType, is_cupy_available, to_device
+from ..backend import ArrayType
 from ..logger import logger
 from . import generation
+from ._signal_adapter import require_integer_sps
 from .signal import Signal
 
 
@@ -117,14 +108,10 @@ class Preamble(BaseModel):
         else:
             self._symbols = base
 
-        # Move to GPU if available
-        if is_cupy_available():
-            if self._symbols is not None:
-                self._symbols = to_device(self._symbols, "gpu")
-
-            # Ensure consistent internal dtype (complex64)
-            if self._symbols is not None:
-                self._symbols = self._symbols.astype("complex64")
+        # Consistent internal dtype; sequences stay on the CPU (no hidden
+        # device placement).
+        if self._symbols is not None:
+            self._symbols = self._symbols.astype("complex64")
 
     # -------------------------------------------------------------------------
     # Properties
@@ -411,7 +398,7 @@ class SingleCarrierFrame(BaseModel):
         body_length : int
             Total number of symbols in the frame body (payload + pilots).
         """
-        xp = cp if is_cupy_available() else np
+        xp = np
 
         # No pilots: simple payload mapping
         if self.pilot_pattern == "none":
@@ -530,7 +517,7 @@ class SingleCarrierFrame(BaseModel):
         if self._pilot_bits is not None or self.pilot_pattern == "none":
             return
 
-        xp = cp if is_cupy_available() else np
+        xp = np
         mask, _ = self._generate_pilot_mask()
         pilot_count = int(xp.sum(mask))
         if pilot_count == 0:
@@ -665,9 +652,10 @@ class SingleCarrierFrame(BaseModel):
         array_like
             Determined by `pilot_pattern` and `pilot_period`.
         """
-        xp = cp if is_cupy_available() else np
+        xp = np
         mask, body_length = self._generate_pilot_mask()
 
+        body: np.ndarray
         if self.num_streams > 1:
             # Shape: (Channels, Time)
             body = xp.zeros((self.num_streams, body_length), dtype="complex64")
@@ -733,7 +721,7 @@ class SingleCarrierFrame(BaseModel):
             - 'payload'
             - 'guard' (only if include_preamble=True OR guard_type='zero')
         """
-        xp = cp if is_cupy_available() else np
+        xp = np
         if unit == "samples":
             sps = require_integer_sps(sps, "get_structure_map()")
         mask, body_length = self._generate_pilot_mask()
@@ -866,7 +854,7 @@ class SingleCarrierFrame(BaseModel):
         convention used by ``shape_pulse`` and ``apply_awgn``.
         Pilot/payload power ratios set by `pilot_gain_db` are preserved throughout.
         """
-        xp = cp if is_cupy_available() else np
+        xp = np
         from .. import mapping
         from .generation import shape_pulse
 
@@ -926,6 +914,7 @@ class SingleCarrierFrame(BaseModel):
         if self.guard_len > 0:
             guard_len_samples = int(self.guard_len * sps)
             if self.guard_type == "zero":
+                zeros: np.ndarray
                 if self.num_streams > 1:
                     zeros = xp.zeros(
                         (self.num_streams, guard_len_samples), dtype="complex64"
