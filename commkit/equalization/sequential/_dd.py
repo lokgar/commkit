@@ -15,11 +15,6 @@ from ...helpers import (
 )
 from ...logger import logger
 from ...mapping.gray import square_qam_slicer_params
-from .._block import (
-    _build_slicer_constellation,
-    _run_block_equalizer,
-    _validate_block_mode,
-)
 from .._common import (
     _build_padded_samples,
     _cpr_state_to_jax_inits,
@@ -88,42 +83,13 @@ def lms(
     input_norm_factor: float | np.ndarray | None = None,
     samples_prefix: ArrayType | None = None,
     pad_mode: str = "zeros",
-    update_mode: str = "sequential",
-    block_len: int = 16,
 ) -> EqualizerResult:
     """
     Least Mean Squares adaptive equalizer with butterfly MIMO support.
 
-    Update modes
-    ------------
-    The weight-update cadence is selected by ``update_mode`` - the equalizer
-    math, regressor windows, slicer, and error are otherwise identical:
-
-    +-----------------------+--------+----------------+----------------------+
-    | Mode                  | Domain | Adaptation lag | Use case             |
-    +=======================+========+================+======================+
-    | ``'sequential'``      | time   | 1 symbol       | fastest dynamics,    |
-    | (default)             |        |                | CPU (Numba)          |
-    +-----------------------+--------+----------------+----------------------+
-    | ``'block'``,          | time   | ``block_len``  | fast dynamics on GPU |
-    | ``block_len`` 8-32    |        | symbols        | (JAX/CuPy)           |
-    +-----------------------+--------+----------------+----------------------+
-    | ``block_lms``         | freq.  | ``block_size`` | throughput king,     |
-    | (separate function)   |        | (~256)         | slow/static channels |
-    +-----------------------+--------+----------------+----------------------+
-
-    With ``update_mode='block'`` the weights are frozen over ``block_len``
-    symbols and one aggregated gradient - exactly the sum of what a
-    frozen-weight per-symbol LMS would accumulate over those symbols - is
-    applied per chunk, turning ``block_len`` rank-1 updates into a single matrix
-    product the GPU can occupy.  ``step_size`` is therefore on the **same scale
-    as** ``update_mode='sequential'``: the same ``mu`` yields the same
-    convergence and steady-state floor (do **not** divide by ``block_len``).
-    Only the *stability ceiling* is ~``block_len``x lower (the weights are
-    frozen across the chunk); reduce ``mu`` below your sequential value only if
-    the run diverges.  Block mode requires ``backend='jax'`` (chunked
-    ``lax.scan``) or ``backend='xp'`` (array-native NumPy/CuPy loop);
-    ``backend='numba'`` and ``cpr_type``/``store_weights`` are not supported.
+    The weights adapt every symbol (CPU, Numba).  For high throughput on slow
+    or static channels, the frequency-domain :func:`block_lms` adapts once per
+    block instead.
 
     Supports data-aided (training) and decision-directed (DD) modes.
     When ``training_symbols`` are provided, the equalizer uses them for the
@@ -247,8 +213,6 @@ def lms(
         SISO/small-MIMO signals (no scan serialization overhead).
         ``'jax'`` uses ``jax.lax.scan`` and supports GPU placement and
         automatic differentiation through the equalizer.
-        ``'xp'`` is valid only with ``update_mode='block'``: it runs the
-        array-native NumPy/CuPy block loop on the input's device (no JAX).
     w_init : array_like, optional
         Initial tap weights. Shape: ``(C, C, num_taps)`` complex64, or the
         SISO short-hand ``(num_taps,)`` / ``(1, num_taps)`` as returned by
@@ -393,22 +357,6 @@ def lms(
         replicates the first sample of the current block, which can reduce
         the initial amplitude jump at cold start.  Has no effect when
         ``samples_prefix`` is provided.
-    update_mode : {'sequential', 'block'}, default 'sequential'
-        Weight-update cadence (see the *Update modes* section above).
-        ``'sequential'`` updates the weights every symbol (the default; the
-        only mode supported by ``backend='numba'``).  ``'block'`` freezes the
-        weights over ``block_len`` symbols and applies one aggregated gradient
-        per chunk - a matrix product that occupies the GPU - and requires
-        ``backend='jax'`` (chunked ``lax.scan``) or ``backend='xp'``
-        (array-native NumPy/CuPy loop).  ``cpr_type`` and ``store_weights`` are
-        not supported with ``'block'`` (both raise).
-    block_len : int, default 16
-        Number of symbols per frozen-weight update chunk when
-        ``update_mode='block'`` (typically 8-32; ignored otherwise).  Larger
-        values amortise launch overhead further but reduce the tracking
-        bandwidth proportionally.  ``step_size`` stays on the same scale as
-        sequential mode (same ``mu`` => same steady-state floor); only the
-        stability ceiling is ~``block_len``x lower.
 
     Returns
     -------
@@ -472,13 +420,6 @@ def lms(
 
     if cpr_type is not None and cpr_type not in ("pll", "bps"):
         raise ValueError(f"cpr_type must be 'pll', 'bps', or None. Got {cpr_type!r}.")
-    _validate_block_mode(
-        update_mode,
-        block_len,
-        backend,
-        cpr_type=cpr_type,
-        store_weights=store_weights,
-    )
 
     n_train_log = training_symbols.shape[-1] if training_symbols is not None else 0
     logger.info(
@@ -521,62 +462,6 @@ def lms(
     pad_total = max(0, n_sym * stride - n_samples + num_taps - 1)
     pad_left = min(c_tap, pad_total)
     pad_right = pad_total - pad_left
-
-    if update_mode == "block":
-        samples_np = np.ascontiguousarray(to_device(samples, "cpu"), dtype=np.complex64)
-        training_np = (
-            to_device(training_symbols, "cpu").astype(np.complex64)
-            if training_symbols is not None
-            else None
-        )
-        samples_np, training_np, eq_norm = _normalize_inputs(
-            samples_np, training_np, sps, input_norm_factor=input_norm_factor
-        )
-        samples_padded_np = _build_padded_samples(
-            samples_np, pad_left, pad_right, samples_prefix, pad_mode, eq_norm, sps
-        )
-        constellation_np = _build_slicer_constellation(
-            modulation, order, unipolar, training_np, pmf
-        )
-        train_full, n_train_aligned = _prepare_training_numpy(
-            training_np, num_ch, n_sym
-        )
-        _sq_side, _sq_lev_min, _sq_d_grid = square_qam_slicer_params(constellation_np)
-        if w_init is not None:
-            w_arr = _validate_w_init(
-                np.ascontiguousarray(to_device(w_init, "cpu"), dtype=np.complex64),
-                num_ch,
-                num_taps,
-            )
-        else:
-            w_arr = _init_butterfly_weights_numpy(
-                num_ch, num_taps, center_tap=center_tap
-            )
-        return finish(
-            _run_block_equalizer(
-                "lms",
-                samples_padded_np=samples_padded_np,
-                w_arr=w_arr,
-                num_ch=num_ch,
-                num_taps=num_taps,
-                n_sym=n_sym,
-                stride=stride,
-                block_len=block_len,
-                step_size=step_size,
-                backend=backend,
-                device=device,
-                was_1d=was_1d,
-                xp=xp,
-                eq_norm=eq_norm,
-                name="LMS(block)",
-                constellation_np=constellation_np,
-                train_full=train_full,
-                n_train_aligned=n_train_aligned,
-                sq_side=_sq_side,
-                sq_lev_min=_sq_lev_min,
-                sq_d_grid=_sq_d_grid,
-            )
-        )
 
     if backend == "numba":
         # Convert to plain NumPy (no-op for CPU NumPy; downloads for CuPy)

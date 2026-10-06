@@ -1,8 +1,7 @@
 """Benchmarks: sequential adaptive equalizers.
 
 ``backend='numba'`` with GPU input measures the documented D2H round-trip +
-CPU-loop case; ``backend='jax'`` measures the per-symbol ``lax.scan`` that
-block-update mode is gated against (≥ 10x at D=16).
+CPU-loop case; ``backend='jax'`` measures the per-symbol ``lax.scan``.
 """
 
 import pytest
@@ -31,37 +30,6 @@ def bench_lms(benchmark, backend_device, xp, sync, eq_backend):
             order=16,
             backend=eq_backend,
             device=device,
-        )
-        sync()
-        return r
-
-    benchmark.pedantic(run, **ROUNDS)
-
-
-@pytest.mark.parametrize("eq_backend", ["jax", "xp"])
-@pytest.mark.parametrize("block_len", [16])
-def bench_lms_block(benchmark, backend_device, xp, sync, eq_backend, block_len):
-    """Block-update LMS.  The gate: ``[gpu-jax]`` here vs. the
-    per-symbol ``bench_lms[gpu-jax]`` scan should be >= 10x faster at D=16.
-    ``[*-xp]`` is the array-native NumPy/CuPy path (no JAX)."""
-    samples, syms = mimo_equalizer_workload(n_sym=50_000, order=16, sps=2)
-    x = xp.asarray(samples)
-    t = xp.asarray(syms)
-    device = backend_device if eq_backend == "jax" else "cpu"
-
-    def run():
-        r = lms(
-            x,
-            t,
-            num_taps=21,
-            sps=2,
-            step_size=1e-3,
-            modulation="qam",
-            order=16,
-            backend=eq_backend,
-            device=device,
-            update_mode="block",
-            block_len=block_len,
         )
         sync()
         return r

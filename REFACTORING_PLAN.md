@@ -471,7 +471,7 @@ sites. The order avoids conflicts, because 1.4-1.6 all edit
   - For each plot that needed internal data, check that a public compute
     function provides it (for example timing correlation, the FOE spectrum);
     add such a function only if none exists.
-- [ ] **1.5 `refactor(equalization)!: remove time-domain block update mode`.**
+- [x] **1.5 `refactor(equalization)!: remove time-domain block update mode`.**
   - Removes `update_mode`, `block_len`, `_block/_seqmode.py`'s `xp` and JAX
     block runners, `tests/equalization/test_block_update.py`, and the
     `bench_lms_block` legs.

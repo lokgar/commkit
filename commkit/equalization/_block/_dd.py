@@ -73,9 +73,8 @@ def block_lms(
     ``block_lms`` is the **trained / decision-directed** frequency-domain
     equalizer.  Its blind siblings share the same overlap-save engine but use a
     phase-blind error: :func:`block_cma` (Godard constant-modulus) and
-    :func:`block_rde` (ring-directed, for multi-ring QAM).  For a time-domain
-    block update with shorter adaptation lag (fast dynamics) use
-    ``lms(..., update_mode='block')``.
+    :func:`block_rde` (ring-directed, for multi-ring QAM).  For fast channel
+    dynamics, the per-symbol :func:`lms` adapts with a one-symbol lag.
 
     Algorithm (per block b)
     -----------------------

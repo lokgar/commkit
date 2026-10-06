@@ -10,11 +10,6 @@ from ...backend import ArrayType, _get_jax, dispatch, to_device, to_jax
 from ...core._signal_adapter import adapt_signal, require_integer_sps
 from ...core.signal import Signal
 from ...logger import logger
-from .._block import (
-    _prep_blind_block_inputs,
-    _run_block_equalizer,
-    _validate_block_mode,
-)
 from .._common import (
     _build_padded_samples,
     _init_butterfly_weights_jax,
@@ -60,21 +55,9 @@ def cma(
     input_norm_factor: float | np.ndarray | None = None,
     samples_prefix: ArrayType | None = None,
     pad_mode: str = "zeros",
-    update_mode: str = "sequential",
-    block_len: int = 16,
 ) -> EqualizerResult:
     """
     Constant Modulus Algorithm blind equalizer with butterfly MIMO support.
-
-    ``update_mode='block'`` (``block_len`` 8-32) freezes the weights over
-    ``block_len`` symbols and applies one aggregated Godard gradient per chunk,
-    turning the per-symbol update into a matrix product the GPU can occupy.  It
-    requires ``backend='jax'`` (chunked ``lax.scan``) or ``backend='xp'``
-    (array-native NumPy/CuPy); ``backend='numba'`` and ``store_weights`` are not
-    supported.  ``step_size`` is on the **same scale as** sequential mode (the
-    aggregated gradient is the sum over the chunk): the same ``mu`` gives the
-    same floor - only the stability ceiling is ~``block_len``x lower, so reduce
-    ``mu`` only if the run diverges.  Pilot-aided masking carries over unchanged.
 
     CMA minimizes the Godard dispersion criterion and requires no training
     symbols. It is the standard blind equalizer for constant-modulus signals
@@ -172,8 +155,7 @@ def cma(
     backend : str, default 'numba'
         Execution backend. ``'numba'`` uses Numba ``@njit``; LLVM-compiled,
         typically fastest on CPU. ``'jax'`` uses ``jax.lax.scan``
-        (XLA-compiled, GPU-capable).  ``'xp'`` is valid only with
-        ``update_mode='block'`` - the array-native NumPy/CuPy block loop.
+        (XLA-compiled, GPU-capable).
     w_init : array_like, optional
         Initial tap weights. Shape: ``(C, C, num_taps)`` complex64, or the
         SISO short-hand ``(num_taps,)`` / ``(1, num_taps)`` as returned by
@@ -212,17 +194,6 @@ def cma(
     pad_mode : {'zeros', 'edge'}, default 'zeros'
         Padding strategy when ``samples_prefix`` is ``None``.  See
         ``lms()`` for the full description; behaviour is identical.
-    update_mode : {'sequential', 'block'}, default 'sequential'
-        Weight-update cadence.  ``'sequential'`` updates every symbol (the
-        default; the only mode for ``backend='numba'``).  ``'block'`` freezes
-        the weights over ``block_len`` symbols and applies one aggregated Godard
-        gradient per chunk (a GPU-occupying matrix product); requires
-        ``backend='jax'`` or ``backend='xp'`` and is incompatible with
-        ``store_weights``.  Pilot-aided masking carries over unchanged.
-    block_len : int, default 16
-        Symbols per frozen-weight chunk when ``update_mode='block'`` (typically
-        8-32; ignored otherwise).  ``step_size`` stays on the same scale as
-        sequential mode; only the stability ceiling is ~``block_len``x lower.
 
     Returns
     -------
@@ -253,7 +224,6 @@ def cma(
         sps = 2
 
     use_pilots = pilot_ref is not None and pilot_mask is not None
-    _validate_block_mode(update_mode, block_len, backend, store_weights=store_weights)
     logger.info(
         "CMA equalizer: num_taps=%s, mu=%s, sps=%s, backend=%s, "
         "pilot_aided=%s, pilot_gain_db=%s",
@@ -316,50 +286,6 @@ def cma(
     pad_total = max(0, n_sym * stride - n_samples + num_taps - 1)
     pad_left = min(c_tap, pad_total)
     pad_right = pad_total - pad_left
-
-    if update_mode == "block":
-        samples_padded_np, w_arr, eq_norm, pref_np, pmask_np = _prep_blind_block_inputs(
-            samples,
-            sps=sps,
-            stride=stride,
-            pad_left=pad_left,
-            pad_right=pad_right,
-            samples_prefix=samples_prefix,
-            pad_mode=pad_mode,
-            input_norm_factor=input_norm_factor,
-            use_pilots=use_pilots,
-            pilot_gain_db=pilot_gain_db,
-            pilot_mask=pilot_mask,
-            pilot_ref=pilot_ref,
-            c_ps=_c_ps,
-            num_ch=num_ch,
-            num_taps=num_taps,
-            center_tap=center_tap,
-            w_init=w_init,
-        )
-        return finish(
-            _run_block_equalizer(
-                "cma",
-                samples_padded_np=samples_padded_np,
-                w_arr=w_arr,
-                num_ch=num_ch,
-                num_taps=num_taps,
-                n_sym=n_sym,
-                stride=stride,
-                block_len=block_len,
-                step_size=step_size,
-                backend=backend,
-                device=device,
-                was_1d=was_1d,
-                xp=xp,
-                eq_norm=eq_norm,
-                name="CMA(block)" if not use_pilots else "CMA(PA,block)",
-                check_convergence=True,
-                r2=r2,
-                pref_np=pref_np,
-                pmask_np=pmask_np,
-            )
-        )
 
     if backend == "numba":
         numba = _get_numba()
@@ -556,21 +482,9 @@ def rde(
     input_norm_factor: float | np.ndarray | None = None,
     samples_prefix: ArrayType | None = None,
     pad_mode: str = "zeros",
-    update_mode: str = "sequential",
-    block_len: int = 16,
 ) -> EqualizerResult:
     """
     Radius Directed Equalizer (RDE) - blind equalizer for multi-ring constellations.
-
-    ``update_mode='block'`` (``block_len`` 8-32) freezes the weights over
-    ``block_len`` symbols and applies one aggregated ring-directed gradient per
-    chunk.  It requires ``backend='jax'`` (chunked ``lax.scan``) or
-    ``backend='xp'`` (array-native NumPy/CuPy); ``backend='numba'`` and
-    ``store_weights`` are not supported.  ``step_size`` is on the **same scale
-    as** sequential mode (the aggregated gradient is the sum over the chunk):
-    the same ``mu`` gives the same floor - only the stability ceiling is
-    ~``block_len``x lower, so reduce ``mu`` only if the run diverges.
-    Pilot-aided masking carries over to block mode unchanged.
 
     RDE is a CMA variant that replaces the single Godard dispersion radius with
     per-symbol radius selection from the set of unique constellation ring radii.
@@ -649,8 +563,6 @@ def rde(
         Index of the center tap. Defaults to ``num_taps // 2``.
     backend : str, default 'numba'
         ``'numba'`` uses Numba ``@njit``; ``'jax'`` uses ``jax.lax.scan``.
-        ``'xp'`` is valid only with ``update_mode='block'`` - the array-native
-        NumPy/CuPy block loop.
     w_init : array_like, optional
         Initial tap weights. Shape: ``(C, C, num_taps)`` complex64, or the
         SISO short-hand ``(num_taps,)`` / ``(1, num_taps)`` as returned by
@@ -687,17 +599,6 @@ def rde(
     pad_mode : {'zeros', 'edge'}, default 'zeros'
         Padding strategy when ``samples_prefix`` is ``None``.  See
         ``lms()`` for the full description; behaviour is identical.
-    update_mode : {'sequential', 'block'}, default 'sequential'
-        Weight-update cadence.  ``'sequential'`` updates every symbol (the
-        default; the only mode for ``backend='numba'``).  ``'block'`` freezes
-        the weights over ``block_len`` symbols and applies one aggregated
-        ring-directed gradient per chunk (a GPU-occupying matrix product);
-        requires ``backend='jax'`` or ``backend='xp'`` and is incompatible with
-        ``store_weights``.  Pilot-aided masking carries over unchanged.
-    block_len : int, default 16
-        Symbols per frozen-weight chunk when ``update_mode='block'`` (typically
-        8-32; ignored otherwise).  ``step_size`` stays on the same scale as
-        sequential mode; only the stability ceiling is ~``block_len``x lower.
 
     Returns
     -------
@@ -740,7 +641,6 @@ def rde(
         sps = 2
 
     use_pilots = pilot_ref is not None and pilot_mask is not None
-    _validate_block_mode(update_mode, block_len, backend, store_weights=store_weights)
     logger.info(
         "RDE equalizer: num_taps=%s, mu=%s, sps=%s, backend=%s, "
         "pilot_aided=%s, pilot_gain_db=%s",
@@ -803,50 +703,6 @@ def rde(
     pad_total = max(0, n_sym * stride - n_samples + num_taps - 1)
     pad_left = min(c_tap, pad_total)
     pad_right = pad_total - pad_left
-
-    if update_mode == "block":
-        samples_padded_np, w_arr, eq_norm, pref_np, pmask_np = _prep_blind_block_inputs(
-            samples,
-            sps=sps,
-            stride=stride,
-            pad_left=pad_left,
-            pad_right=pad_right,
-            samples_prefix=samples_prefix,
-            pad_mode=pad_mode,
-            input_norm_factor=input_norm_factor,
-            use_pilots=use_pilots,
-            pilot_gain_db=pilot_gain_db,
-            pilot_mask=pilot_mask,
-            pilot_ref=pilot_ref,
-            c_ps=_c_ps,
-            num_ch=num_ch,
-            num_taps=num_taps,
-            center_tap=center_tap,
-            w_init=w_init,
-        )
-        return finish(
-            _run_block_equalizer(
-                "rde",
-                samples_padded_np=samples_padded_np,
-                w_arr=w_arr,
-                num_ch=num_ch,
-                num_taps=num_taps,
-                n_sym=n_sym,
-                stride=stride,
-                block_len=block_len,
-                step_size=step_size,
-                backend=backend,
-                device=device,
-                was_1d=was_1d,
-                xp=xp,
-                eq_norm=eq_norm,
-                name="RDE(block)" if not use_pilots else "RDE(PA,block)",
-                check_convergence=True,
-                radii_np=radii,
-                pref_np=pref_np,
-                pmask_np=pmask_np,
-            )
-        )
 
     if backend == "numba":
         numba = _get_numba()
