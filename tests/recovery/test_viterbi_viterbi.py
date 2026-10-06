@@ -182,6 +182,35 @@ class TestViterbiViterbi:
             )
 
 
+class TestJointChannelWeighting:
+    """Joint channels weigh equally, whatever their power (3.6e)."""
+
+    @pytest.mark.parametrize("method", ["vv", "tikhonov"])
+    def test_joint_estimate_ignores_channel_gain(self, xp, xpt, method):
+        """Scaling one channel leaves the joint trajectory unchanged.
+
+        With amplitude^M weighting a 10x stronger channel would carry 10^4
+        times the weight of the other for QPSK, and the joint estimate would
+        follow it alone.
+        """
+        rng = np.random.default_rng(5)
+        n = 4096
+        pts = Constellation.psk(4).points
+        walk = np.cumsum(rng.normal(0.0, 0.01, n)) + 0.2
+        sym = pts[rng.integers(0, 4, (2, n))] * np.exp(1j * walk)
+        noise = 0.2 * (rng.standard_normal((2, n)) + 1j * rng.standard_normal((2, n)))
+        x = xp.asarray((sym + noise).astype(np.complex64))
+        scaled = x * xp.asarray(np.array([[1.0], [10.0]], dtype=np.float32))
+        if method == "vv":
+            m = recovery.ViterbiViterbi(block_size=32, joint_channels=True)
+        else:
+            m = recovery.Tikhonov(1e-4, 10, block_size=32, joint_channels=True)
+        c = Constellation.psk(4)
+        a = recovery.estimate_carrier_phase(x, m, constellation=c).value
+        b = recovery.estimate_carrier_phase(scaled, m, constellation=c).value
+        xpt.assert_allclose(a, b, atol=1e-6)  # float32 rounding of the gain
+
+
 class TestSignalInputViterbiViterbi:
     """Signal-awareness for recover_carrier_phase_viterbi_viterbi."""
 

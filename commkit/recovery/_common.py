@@ -152,7 +152,8 @@ def _vv_block_phase(
     """Viterbi-Viterbi (M-th power) block-phase estimator.
 
     Reshapes into blocks, projects onto the unit circle (``project``, see
-    ``_mth_power_geometry``), sums the M-th power per block, M-fold-unwraps
+    ``_mth_power_geometry``) or else scales each channel to unit power, sums
+    the M-th power per block, M-fold-unwraps
     the block-phase trajectory, removes the constellation ``bias``, and - for
     MIMO in non-joint mode - aligns every channel's M-fold branch to channel
     0's.
@@ -209,6 +210,11 @@ def _vv_block_phase(
     if project:
         mag = xp.abs(blocks_c)
         blocks_c = blocks_c / xp.maximum(mag, 1e-15 * xp.max(mag))
+    else:
+        # Unit average power per channel, as BPS and the PLL: joint channels
+        # then weigh equally instead of by their amplitude^M.
+        power = xp.mean(xp.abs(blocks_c) ** 2, axis=(-2, -1), keepdims=True)
+        blocks_c = blocks_c / xp.sqrt(xp.maximum(power, 1e-30))
 
     S_b = xp.sum(blocks_c**M, axis=-1)  # (C, N_blocks)
 

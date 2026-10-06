@@ -259,12 +259,11 @@ def viterbi_viterbi_reference(
     """M-th power block phase estimator (normalized Viterbi-Viterbi).
 
     QAM symbols are projected onto the unit circle and raised to the 4th
-    power, M-PSK to the M-th.  Per block, ``angle(sum s^M) / M`` is unwrapped
-    M-fold; QAM is bias-corrected by ``-pi/M``.  Independent MIMO channels are
-    moved to channel 0's M-fold branch.
-
-    Unlike BPS and the PLL, the input is *not* power-normalized: in joint mode
-    each channel's M-th-power phasors are weighted by its amplitude^M.
+    power, M-PSK to the M-th.  PSK channels are first scaled to unit average
+    power over the whole blocks, so that in joint mode every channel weighs
+    the same.  Per block, ``angle(sum s^M) / M`` is unwrapped M-fold; QAM is
+    bias-corrected by ``-pi/M``.  Independent MIMO channels are moved to
+    channel 0's M-fold branch.
     """
     s = np.atleast_2d(np.asarray(symbols)).astype(np.complex128)
     num_ch, n = s.shape
@@ -273,6 +272,9 @@ def viterbi_viterbi_reference(
     blocks = s[:, : n_blocks * block_size].reshape(num_ch, n_blocks, block_size)
     if modulation == "qam":
         blocks = blocks / np.abs(blocks)
+    else:
+        power = np.mean(np.abs(blocks) ** 2, axis=(1, 2), keepdims=True)
+        blocks = blocks / np.sqrt(power)
     sums = np.sum(blocks**m, axis=-1)
     if joint_channels and num_ch > 1:
         sums = np.repeat(np.sum(sums, axis=0, keepdims=True), num_ch, axis=0)

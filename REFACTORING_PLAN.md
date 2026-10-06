@@ -923,7 +923,7 @@ The equalization pass (3.7) gets more commits:
 - [x] **3.6d `fix(recovery): float64 slicer grid in the PLL`.** Oracle
   finding (commit 0.6): the square-QAM levels came from float32 constants.
   The oracle tolerance tightens to float64 rounding.
-- [ ] **3.6e `fix(recovery): joint Viterbi-Viterbi normalizes channel
+- [x] **3.6e `fix(recovery): joint Viterbi-Viterbi normalizes channel
   power`.** Oracle finding (commit 0.6): constant-modulus constellations
   skip the unit-circle projection, so the joint sum weighted each channel
   by amplitude^M. Each channel is scaled to unit power first, as BPS and
