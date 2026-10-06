@@ -776,6 +776,18 @@ The equalization pass (3.7) gets more commits:
   frozen `Spectrogram(frequencies, times, power)` instead of a 3-tuple;
   `welch_psd` keeps its `(f, Pxx)` pair.
 
+**Between 3.3 and 3.4:**
+
+- [x] **`refactor(core): transforms are typed with S`.** `SignalAdapter` is
+  generic, `adapt_signal(x: S) -> SignalAdapter[S]` and `wrap_samples` returns
+  `S`, so `def fir_filter(samples: S, taps) -> S` checks without casts. `S` is
+  *bound* to `np.ndarray | Signal` rather than constrained (§2.4): a bound
+  also accepts the `ArrayType | Signal` unions of unmigrated modules, and a
+  CuPy array (untyped, `Any`) gives `Any` back. The 3.3 transforms are
+  annotated; later passes annotate theirs. The registry recognizes `S` as
+  Signal-aware (it matched the string "Signal" and silently dropped 32
+  Signal round-trip and fact checks until fixed).
+
 **Equalizer safety rules (3.7):**
 
 - Keep the dtype rules: complex128 accumulation in LMS/CMA, and float64 for all

@@ -7,7 +7,7 @@ implementations should receive arrays and fully resolved scalar metadata.
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import TYPE_CHECKING, Any, Literal
+from typing import TYPE_CHECKING, Any, Generic, Literal, TypeVar, cast
 
 import numpy as np
 
@@ -17,9 +17,14 @@ if TYPE_CHECKING:
     from ..backend import ArrayType
     from .signal import Signal
 
+#: Type of a transform's waveform argument and result: ``def f(x: S) -> S``
+#: returns a Signal for a Signal and an array for an array.  CuPy has no type
+#: stubs, so a CuPy array is ``Any`` to the checker and gives ``Any`` back.
+S = TypeVar("S", bound="np.ndarray | Signal")
+
 
 @dataclass(frozen=True)
-class SignalAdapter:
+class SignalAdapter(Generic[S]):
     """Unwrapped array data and the original Signal, if the caller supplied one.
 
     Use ``signal_adapter = adapt_signal(...)`` at DSP boundaries. Resolve
@@ -107,9 +112,7 @@ class SignalAdapter:
             )
         return supplied
 
-    def wrap_samples[SamplesT](
-        self, samples: SamplesT, /, **metadata: Any
-    ) -> SamplesT | Signal:
+    def wrap_samples(self, samples: Any, /, **metadata: Any) -> S:
         """Return samples directly for array input, or a new Signal for Signal input.
 
         A new Signal shares unchanged metadata and provenance with the input,
@@ -121,10 +124,10 @@ class SignalAdapter:
         metadata overrides are unused. None is invalid for Signal output.
         """
         if self.signal is None:
-            return samples
+            return cast(S, samples)
         if samples is None:
             raise ValueError(f"{self.function_name}: input Signal field is empty.")
-        return self.signal.replace_samples(samples, **metadata)
+        return cast(S, self.signal.replace_samples(samples, **metadata))
 
     def replace_signal_field(
         self,
@@ -146,11 +149,11 @@ class SignalAdapter:
 
 
 def adapt_signal(
-    value: ArrayType | Signal,
+    value: S,
     *,
     function_name: str,
     field: str = "samples",
-) -> SignalAdapter:
+) -> SignalAdapter[S]:
     """Unwrap an array/Signal input once at the public API boundary."""
     from .signal import Signal
 

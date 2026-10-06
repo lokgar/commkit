@@ -14,7 +14,7 @@ import numpy as np
 
 from ._array import as_2d, restore_1d
 from .backend import ArrayType, dispatch
-from .core._signal_adapter import adapt_signal
+from .core._signal_adapter import S, adapt_signal
 from .core.signal import Signal
 from .logger import logger
 
@@ -112,11 +112,11 @@ def grid_frequency(
 
 
 def shift_frequency(
-    samples: ArrayType | Signal,
+    samples: S,
     *,
     frequency: float,
     sampling_rate: float | None = None,
-) -> ArrayType | Signal:
+) -> S:
     """
     Applies a frequency offset (complex mixing) to a signal.
 
@@ -154,13 +154,13 @@ def shift_frequency(
     for preserving the circularity of the signal's phase.
     """
     signal_adapter = adapt_signal(samples, function_name="shift_frequency()")
-    samples = signal_adapter.array
+    x = signal_adapter.array
     sampling_rate = signal_adapter.resolve_fact("sampling_rate", sampling_rate)
 
-    samples, xp, _ = dispatch(samples)
+    x, xp, _ = dispatch(x)
 
     # Axis -1 is time
-    n = samples.shape[-1]
+    n = x.shape[-1]
     df = sampling_rate / n
 
     # Quantize offset to nearest bin to ensure phase continuity
@@ -189,28 +189,28 @@ def shift_frequency(
     # complex64/float32 signals to complex128/float64.
     phase = 2 * xp.pi * actual_offset * t
     mixer = xp.exp(1j * phase)  # complex128
-    if xp.iscomplexobj(samples):
-        target_cdtype = samples.dtype
+    if xp.iscomplexobj(x):
+        target_cdtype = x.dtype
     else:
-        target_cdtype = xp.complex64 if samples.dtype == xp.float32 else xp.complex128
+        target_cdtype = xp.complex64 if x.dtype == xp.float32 else xp.complex128
     mixer = mixer.astype(target_cdtype)
 
-    # Broadcast mixer to match samples shape: (1, ..., 1, N)
-    if samples.ndim > 1:
-        mixer = mixer.reshape((1,) * (samples.ndim - 1) + (-1,))
+    # Broadcast mixer to match x shape: (1, ..., 1, N)
+    if x.ndim > 1:
+        mixer = mixer.reshape((1,) * (x.ndim - 1) + (-1,))
 
-    return signal_adapter.wrap_samples(samples * mixer)
+    return signal_adapter.wrap_samples(x * mixer)
 
 
 def add_pilot_tone(
-    samples: ArrayType | Signal,
+    samples: S,
     *,
     frequency: float | Sequence[float],
     sampling_rate: float | None = None,
     power_ratio_db: float | Sequence[float] = -15.0,
     phase_init: float = 0.0,
     renormalize: bool = False,
-) -> ArrayType | Signal:
+) -> S:
     r"""
     Add a continuous-wave (CW) pilot tone to a baseband waveform.
 
@@ -277,12 +277,12 @@ def add_pilot_tone(
     error for large N.
     """
     signal_adapter = adapt_signal(samples, function_name="add_pilot_tone()")
-    samples = signal_adapter.array
+    x = signal_adapter.array
     sampling_rate = signal_adapter.resolve_fact("sampling_rate", sampling_rate)
 
-    samples, xp, _ = dispatch(samples)
-    samples, was_1d = as_2d(samples, name="samples")
-    C, N = samples.shape
+    x, xp, _ = dispatch(x)
+    x, was_1d = as_2d(x, name="samples")
+    C, N = x.shape
 
     # Normalise ``frequency`` to a per-channel (C,) host array.  A scalar is
     # broadcast to every channel (and returns a scalar for back-compat); a
@@ -338,7 +338,7 @@ def add_pilot_tone(
             )
 
     # Per-channel signal power and the tone amplitude that realises the PSR.
-    p_signal = xp.mean(xp.abs(samples) ** 2, axis=-1, keepdims=True)  # (C, 1) float
+    p_signal = xp.mean(xp.abs(x) ** 2, axis=-1, keepdims=True)  # (C, 1) float
     psr_lin = (10.0 ** (xp.asarray(psr_req, dtype=xp.float64) / 10.0)).reshape(
         C, 1
     )  # (C, 1)
@@ -353,14 +353,14 @@ def add_pilot_tone(
     phase = two_pi * f_ch * n[None, :] / sampling_rate + phase_init  # (C, N) float64
     phase = phase - xp.round(phase / two_pi) * two_pi
 
-    dtype_real = xp.float32 if samples.dtype == xp.complex64 else xp.float64
-    tone = xp.exp(1j * phase.astype(dtype_real)).astype(samples.dtype)  # (C, N)
-    out = samples + amp.astype(samples.dtype) * tone  # (C, N)
+    dtype_real = xp.float32 if x.dtype == xp.complex64 else xp.float64
+    tone = xp.exp(1j * phase.astype(dtype_real)).astype(x.dtype)  # (C, N)
+    out = x + amp.astype(x.dtype) * tone  # (C, N)
 
     if renormalize:
         # Restore each channel to its original mean power.
         p_out = xp.mean(xp.abs(out) ** 2, axis=-1, keepdims=True)  # (C, 1)
-        out = out * xp.sqrt(p_signal / p_out).astype(samples.dtype)
+        out = out * xp.sqrt(p_signal / p_out).astype(x.dtype)
 
     f_log = f"{actual[0]:.3g} Hz" if scalar_input else f"{actual} Hz"
     psr_log = f"{psr_req[0]:.1f} dB" if scalar_power else f"{psr_req} dB"
@@ -445,12 +445,12 @@ def welch_psd(
         If `return_onesided` set to True for complex-valued inputs.
     """
     signal_adapter = adapt_signal(samples, function_name="welch_psd()")
-    samples = signal_adapter.array
+    x = signal_adapter.array
     sampling_rate = signal_adapter.resolve_fact("sampling_rate", sampling_rate)
     axis = -1
 
-    samples, xp, sp = dispatch(samples)
-    is_complex = xp.iscomplexobj(samples)
+    x, xp, sp = dispatch(x)
+    is_complex = xp.iscomplexobj(x)
 
     # scipy.signal.welch returns onesided by default for real, two-sided for complex
     # unless return_onesided is explicitly set.
@@ -460,7 +460,7 @@ def welch_psd(
     return_onesided, shift = _validate_and_shift(xp, is_complex, return_onesided, "PSD")
 
     f, Pxx = sp.signal.welch(
-        samples,
+        x,
         fs=sampling_rate,
         window=window,
         nperseg=nperseg,
@@ -558,19 +558,19 @@ def spectrogram(
         If `return_onesided` set to True for complex-valued inputs.
     """
     signal_adapter = adapt_signal(samples, function_name="spectrogram()")
-    samples = signal_adapter.array
+    x = signal_adapter.array
     sampling_rate = signal_adapter.resolve_fact("sampling_rate", sampling_rate)
     axis = -1
 
-    samples, xp, sp = dispatch(samples)
-    is_complex = xp.iscomplexobj(samples)
+    x, xp, sp = dispatch(x)
+    is_complex = xp.iscomplexobj(x)
 
     return_onesided, shift = _validate_and_shift(
         xp, is_complex, return_onesided, "spectrogram"
     )
 
     f, t, Sxx = sp.signal.spectrogram(
-        samples,
+        x,
         fs=sampling_rate,
         window=window,
         nperseg=nperseg,
@@ -584,6 +584,6 @@ def spectrogram(
     )
 
     # Sxx frequency axis is at position axis_pos in output
-    axis_pos = axis % samples.ndim
+    axis_pos = axis % x.ndim
     f, Sxx = shift(f, (Sxx, axis_pos))
     return Spectrogram(frequencies=f, times=t, values=Sxx)

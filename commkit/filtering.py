@@ -16,8 +16,7 @@ from ._array import as_2d, restore_1d
 from ._dispersion import apply_dispersion
 from ._overlap_save import ols_backward, ols_forward
 from .backend import ArrayType, dispatch
-from .core._signal_adapter import adapt_signal, require_integer_sps
-from .core.signal import Signal
+from .core._signal_adapter import S, adapt_signal, require_integer_sps
 from .logger import logger
 from .math import normalize
 
@@ -849,12 +848,12 @@ def bessel_sos(
 
 
 def ols_fir_filter(
-    samples: ArrayType | Signal,
+    samples: S,
     taps: ArrayType,
     *,
     fft_size: int | None = None,
     center: bool = True,
-) -> ArrayType | Signal:
+) -> S:
     """
     Overlap-and-save FIR filter for long-tap or large-signal convolution.
 
@@ -909,27 +908,25 @@ def ols_fir_filter(
     samples - a zero-copy shift that costs one extra OLS block at most.
     """
     signal_adapter = adapt_signal(samples, function_name="ols_fir_filter()")
-    samples = signal_adapter.array
+    x = signal_adapter.array
 
-    samples, xp, _ = dispatch(samples)
+    x, xp, _ = dispatch(x)
     taps = xp.asarray(taps)
-    is_real = not xp.iscomplexobj(samples) and not xp.iscomplexobj(taps)
-    out_dtype = samples.dtype  # capture before any reshape
+    is_real = not xp.iscomplexobj(x) and not xp.iscomplexobj(taps)
+    out_dtype = x.dtype  # capture before any reshape
 
     # Signal drives precision: cast taps to match signal so float64 tap
     # generators do not silently upcast complex64 signals via FFT multiply.
-    target_tap_dtype = (
-        samples.real.dtype if not xp.iscomplexobj(taps) else samples.dtype
-    )
+    target_tap_dtype = x.real.dtype if not xp.iscomplexobj(taps) else x.dtype
     if taps.dtype != target_tap_dtype:
         taps = taps.astype(target_tap_dtype)
 
     L = len(taps)
     half = L // 2
 
-    samples, was_1d = as_2d(samples, name="samples")
+    x, was_1d = as_2d(x, name="samples")
 
-    N = samples.shape[-1]
+    N = x.shape[-1]
 
     N_fft = fft_size
     if N_fft is None:
@@ -945,7 +942,7 @@ def ols_fir_filter(
         L,
         N,
         N_fft,
-        samples.shape[0],
+        x.shape[0],
         center,
     )
 
@@ -955,13 +952,13 @@ def ols_fir_filter(
         # Post-pad by half so the OLS can compute full_conv[half : half+N].
         # This matches scipy's mode='same' (center-aligned, group-delay compensated),
         # which is required for correct eye-opening after pulse-shaped filtering.
-        samples_ext = xp.pad(samples, ((0, 0), (0, half)))
+        samples_ext = xp.pad(x, ((0, 0), (0, half)))
         Y, meta = ols_forward(samples_ext, N_fft)
         X_hat_f = Y * H
         out_ext = ols_backward(X_hat_f, meta)  # shape: (num_ch, N + half)
         out = out_ext[:, half:]  # trim leading half -> shape: (num_ch, N)
     else:
-        Y, meta = ols_forward(samples, N_fft)
+        Y, meta = ols_forward(x, N_fft)
         X_hat_f = Y * H
         out = ols_backward(X_hat_f, meta)
 
@@ -974,7 +971,7 @@ def ols_fir_filter(
     return signal_adapter.wrap_samples(restore_1d(was_1d, out))
 
 
-def fir_filter(samples: ArrayType | Signal, taps: ArrayType) -> ArrayType | Signal:
+def fir_filter(samples: S, taps: ArrayType) -> S:
     """
     Apply an FIR filter along the time (last) axis.
 
@@ -996,7 +993,7 @@ def fir_filter(samples: ArrayType | Signal, taps: ArrayType) -> ArrayType | Sign
         Filtered samples, same shape and dtype as ``samples``.
     """
     signal_adapter = adapt_signal(samples, function_name="fir_filter()")
-    samples, xp, sp = dispatch(signal_adapter.array)
+    x, xp, sp = dispatch(signal_adapter.array)
     taps = xp.asarray(taps)
     if taps.ndim != 1:
         raise ValueError(f"taps must be 1-D, got shape {taps.shape}.")
@@ -1004,27 +1001,25 @@ def fir_filter(samples: ArrayType | Signal, taps: ArrayType) -> ArrayType | Sign
 
     # Signal drives precision: cast taps to match signal dtype so numpy/scipy
     # type-promotion rules do not silently upcast float32/complex64 signals.
-    target_tap_dtype = (
-        samples.real.dtype if not xp.iscomplexobj(taps) else samples.dtype
-    )
+    target_tap_dtype = x.real.dtype if not xp.iscomplexobj(taps) else x.dtype
     if taps.dtype != target_tap_dtype:
         taps = taps.astype(target_tap_dtype)
 
-    taps_nd = taps.reshape((1,) * (samples.ndim - 1) + (-1,))
-    result = sp.signal.convolve(samples, taps_nd, mode="same", method="fft")
+    taps_nd = taps.reshape((1,) * (x.ndim - 1) + (-1,))
+    result = sp.signal.convolve(x, taps_nd, mode="same", method="fft")
 
     # Belt-and-suspenders: scipy may still promote internally (version-dependent)
-    if result.dtype != samples.dtype:
-        result = result.astype(samples.dtype)
+    if result.dtype != x.dtype:
+        result = result.astype(x.dtype)
     return signal_adapter.wrap_samples(result)
 
 
 def matched_filter(
-    samples: ArrayType | Signal,
+    samples: S,
     *,
     pulse: Pulse | ArrayType | None = None,
     taps_normalization: str = "unit_energy",
-) -> ArrayType | Signal:
+) -> S:
     """
     Matched filter: convolve with the time-reversed conjugate of the pulse.
 
@@ -1058,7 +1053,7 @@ def matched_filter(
         sig = signal_adapter.signal
         if sig is None:
             raise ValueError(
-                "matched_filter(): a Pulse needs the samples per symbol; pass "
+                "matched_filter(): a Pulse needs the x per symbol; pass "
                 "pulse.taps(sps) for array input."
             )
         pulse = pulse.taps(sig.sps)
@@ -1068,19 +1063,19 @@ def matched_filter(
             "Use 'unity_gain' or 'unit_energy'."
         )
 
-    samples, xp, _ = dispatch(signal_adapter.array)
+    x, xp, _ = dispatch(signal_adapter.array)
     pulse_taps = xp.asarray(pulse)
     logger.debug("Applying matched filter (%s taps).", pulse_taps.size)
     matched_taps = normalize(xp.conj(pulse_taps[::-1]), mode=taps_normalization)
-    return signal_adapter.wrap_samples(fir_filter(samples, matched_taps))
+    return signal_adapter.wrap_samples(fir_filter(x, matched_taps))
 
 
 def iir_filter(
-    samples: ArrayType | Signal,
+    samples: S,
     sos: ArrayType,
     *,
     zero_phase: bool = True,
-) -> ArrayType | Signal:
+) -> S:
     """
     Apply an Infinite Impulse Response (IIR) filter, in SOS form, to signal samples.
 
@@ -1119,9 +1114,9 @@ def iir_filter(
     Unwrapping & Kalman Smoothers").
     """
     signal_adapter = adapt_signal(samples, function_name="iir_filter()")
-    samples = signal_adapter.array
+    x = signal_adapter.array
 
-    samples, xp, sp = dispatch(samples)
+    x, xp, sp = dispatch(x)
     sos = xp.asarray(sos)
 
     logger.debug(
@@ -1130,9 +1125,9 @@ def iir_filter(
         zero_phase,
     )
 
-    in_dtype = samples.dtype
-    work_dtype = xp.complex128 if xp.iscomplexobj(samples) else xp.float64
-    x_work = samples.astype(work_dtype)
+    in_dtype = x.dtype
+    work_dtype = xp.complex128 if xp.iscomplexobj(x) else xp.float64
+    x_work = x.astype(work_dtype)
     if zero_phase:
         result = sp.signal.sosfiltfilt(sos, x_work, axis=-1)
     else:
@@ -1146,13 +1141,13 @@ def iir_filter(
 
 
 def correct_chromatic_dispersion(
-    samples: ArrayType | Signal,
+    samples: S,
     *,
     dispersion_ps_nm_km: float,
     fiber_length_km: float,
     center_wavelength_nm: float,
     sampling_rate: float | None = None,
-) -> ArrayType | Signal:
+) -> S:
     """
     Electronic dispersion compensation: the inverse fiber response.
 

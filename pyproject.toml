@@ -116,6 +116,8 @@ ignore = [
     "E501",  # line length is handled by the formatter; long strings/URLs are fine
     "B008",  # function calls in argument defaults (common in DSP signatures)
     "B905",  # zip() strict= is opinionated; lengths are invariant-guaranteed here
+    "UP046", # one shared TypeVar S (core._signal_adapter) types every transform,
+    "UP047", # so PEP 695 per-function type parameters would repeat its bound
 ]
 logger-objects = ["commkit.logger.logger"]
 

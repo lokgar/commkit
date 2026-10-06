@@ -174,6 +174,10 @@ Dependencies point downward only:
   - Signal-sized noise: generate on the device with a CuPy generator seeded
     from it.
   - Never use a global RNG.
+- **Types:** a transform is written `def f(samples: S, ...) -> S` with the
+  TypeVar `S` from `core/_signal_adapter.py` (bound to `np.ndarray | Signal`),
+  so a Signal gives a Signal and an array an array. Do not reassign the
+  `samples` parameter; name the unwrapped array `x`.
 - **Device follows the data.** There are no `backend=` or `device=` arguments
   and no global switches. Unsupported array types (JAX, PyTorch) raise
   `TypeError`.

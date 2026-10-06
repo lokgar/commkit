@@ -41,7 +41,7 @@ import inspect
 import pkgutil
 from collections.abc import Callable
 from dataclasses import dataclass
-from typing import Any
+from typing import Any, TypeVar
 
 import numpy as np
 import pytest
@@ -107,8 +107,17 @@ class Row:
 
     @property
     def signal_aware(self) -> bool:
+        """The first parameter accepts a Signal: ``ArrayType | Signal`` or the
+        transform TypeVar ``S`` (bound to ``np.ndarray | Signal``)."""
         params = list(inspect.signature(self.obj).parameters.values())
-        return bool(params) and "Signal" in str(params[0].annotation)
+        if not params:
+            return False
+        annotation = params[0].annotation
+        if annotation == "S":  # postponed annotations
+            return True
+        if isinstance(annotation, TypeVar):
+            annotation = annotation.__bound__
+        return "Signal" in str(annotation)
 
     def __str__(self) -> str:
         return self.target.removeprefix("commkit.")

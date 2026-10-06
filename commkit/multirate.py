@@ -60,19 +60,19 @@ from fractions import Fraction
 from typing import Any
 
 from .backend import ArrayType, dispatch
-from .core._signal_adapter import adapt_signal, require_integer_sps
+from .core._signal_adapter import S, adapt_signal, require_integer_sps
 from .core.signal import Signal
 from .logger import logger
 from .math import normalize as _normalize
 
 
 def decimate_to_symbol_rate(
-    samples: ArrayType | Signal,
+    samples: S,
     *,
     sps: int | None = None,
     offset: int = 0,
     normalize: bool | None = None,
-) -> ArrayType | Signal:
+) -> S:
     """
     Decimate an oversampled signal to the symbol rate by direct slicing.
 
@@ -107,8 +107,10 @@ def decimate_to_symbol_rate(
     )
     _check_offset(offset, sps_int, "decimate_to_symbol_rate()")
     if signal_adapter.signal is None:
-        return _decimate_to_symbol_rate_array(
-            signal_adapter.array, sps_int, offset, bool(normalize)
+        return signal_adapter.wrap_samples(
+            _decimate_to_symbol_rate_array(
+                signal_adapter.array, sps_int, offset, bool(normalize)
+            )
         )
     do_norm = True if normalize is None else normalize
     result = _decimate_to_symbol_rate_array(
@@ -139,11 +141,11 @@ def _decimate_to_symbol_rate_array(
 
 
 def upsample(
-    samples: ArrayType | Signal,
+    samples: S,
     *,
     factor: int,
     correct_power: bool | None = None,
-) -> ArrayType | Signal:
+) -> S:
     """
     Increase the sampling rate by an integer factor (polyphase interpolation).
 
@@ -182,14 +184,14 @@ def upsample(
 
 
 def decimate(
-    samples: ArrayType | Signal,
+    samples: S,
     *,
     factor: int,
     method: str = "decimate",
     correct_power: bool | None = None,
     zero_phase: bool = True,
     ftype: str = "fir",
-) -> ArrayType | Signal:
+) -> S:
     """
     Reduce the sampling rate by an integer factor with anti-aliasing.
 
@@ -249,14 +251,14 @@ def decimate(
 
 
 def resample(
-    samples: ArrayType | Signal,
+    samples: S,
     *,
     up: int | None = None,
     down: int | None = None,
     sps_in: float | None = None,
     sps_out: float | None = None,
     correct_power: bool | None = None,
-) -> ArrayType | Signal:
+) -> S:
     """
     Rational resampling by ``up / down`` (polyphase).
 
