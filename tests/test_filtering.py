@@ -43,7 +43,7 @@ class TestFilterTapGenerators:
 
     def test_gaussian_taps(self) -> None:
         """Verify Gaussian filter tap length and unit-energy normalisation."""
-        taps = filtering.gaussian_taps(sps=4, duty_cycle=0.5, span=4)
+        taps = filtering.gaussian_taps(sps=4, fwhm=0.5, span=4)
         assert isinstance(taps, np.ndarray)
         assert len(taps) == 4 * 4 + 1
         assert np.isclose(np.sum(np.abs(taps) ** 2), 1.0)
@@ -130,13 +130,13 @@ class TestFilterApplication:
         pulse = xp.ones(10)
 
         out_gain = filtering.matched_filter(
-            samples, pulse, taps_normalization="unity_gain"
+            samples, pulse=pulse, taps_normalization="unity_gain"
         )
         assert out_gain.shape == (100,)
         assert isinstance(out_gain, xp.ndarray)
 
         with pytest.raises(ValueError, match="Unknown taps_normalization"):
-            filtering.matched_filter(samples, pulse, taps_normalization="magic")
+            filtering.matched_filter(samples, pulse=pulse, taps_normalization="magic")
 
     def test_fir_filter_preserves_real_dtype(self, xp: Any) -> None:
         """fir_filter: float32 signal + float64 taps -> float32 output."""
@@ -165,8 +165,8 @@ class TestFilterApplication:
                 np.complex64
             )
         )
-        taps = filtering.rrc_taps(4)
-        out = filtering.matched_filter(sig, taps)
+        taps = filtering.rrc_taps(sps=4)
+        out = filtering.matched_filter(sig, pulse=taps)
         assert out.dtype == xp.complex64
 
 
@@ -176,7 +176,7 @@ class TestOverlapSaveFiltering:
     def test_ols_fir_filter_center_matches_fir_filter_siso(
         self, xp: Any, xpt: Any
     ) -> None:
-        """ols_fir_filter(center=True, default) matches fir_filter."""
+        """ols_fir_filter(default, center=True) matches fir_filter."""
         rng = np.random.default_rng(0)
         x_np = rng.standard_normal(512).astype(np.float32)
         taps_np = filtering.rrc_taps(sps=4, span=6, rolloff=0.35).astype(np.float32)
@@ -235,7 +235,7 @@ class TestOverlapSaveFiltering:
         rng = np.random.default_rng(2)
         x = xp.asarray(rng.standard_normal(256).astype(np.float32))
         taps = xp.asarray(np.ones(4, dtype=np.float32) / 4)
-        out = filtering.ols_fir_filter(x, taps, N_fft=1024)
+        out = filtering.ols_fir_filter(x, taps, fft_size=1024)
         assert out.shape == x.shape
 
     def test_ols_fir_filter_preserves_real_dtype(self, xp: Any) -> None:
@@ -290,8 +290,8 @@ class TestOverlapSaveFiltering:
         assert out.dtype == xp.complex64
 
 
-class TestCompensateChromaticDispersion:
-    """Tests for compensate_chromatic_dispersion (electronic dispersion compensation)."""
+class TestCorrectChromaticDispersion:
+    """Tests for correct_chromatic_dispersion (electronic dispersion compensation)."""
 
     def test_round_trip_siso(self, xp: Any, xpt: Any) -> None:
         """Apply CD then compensate: SISO output should recover input."""
@@ -306,7 +306,13 @@ class TestCompensateChromaticDispersion:
         d, l, lam = 17.0, 80.0, 1550.0
 
         distorted = apply_chromatic_dispersion(samples, d, l, lam, fs)
-        recovered = filtering.compensate_chromatic_dispersion(distorted, d, l, lam, fs)
+        recovered = filtering.correct_chromatic_dispersion(
+            distorted,
+            sampling_rate=d,
+            dispersion_ps_nm_km=l,
+            fiber_length_km=lam,
+            center_wavelength_nm=fs,
+        )
 
         xpt.assert_allclose(recovered, samples, atol=1e-3)
 
@@ -325,14 +331,20 @@ class TestCompensateChromaticDispersion:
         d, l, lam = 17.0, 40.0, 1550.0
 
         distorted = apply_chromatic_dispersion(samples, d, l, lam, fs)
-        recovered = filtering.compensate_chromatic_dispersion(distorted, d, l, lam, fs)
+        recovered = filtering.correct_chromatic_dispersion(
+            distorted,
+            sampling_rate=d,
+            dispersion_ps_nm_km=l,
+            fiber_length_km=lam,
+            center_wavelength_nm=fs,
+        )
 
         xpt.assert_allclose(recovered, samples, atol=1e-3)
 
     def test_zero_dispersion_is_identity(self, xp: Any, xpt: Any) -> None:
         """length=0 should return identical samples."""
         samples = xp.ones(512, dtype=xp.complex64)
-        out = filtering.compensate_chromatic_dispersion(
+        out = filtering.correct_chromatic_dispersion(
             samples,
             dispersion_ps_nm_km=17.0,
             fiber_length_km=0.0,
@@ -344,7 +356,7 @@ class TestCompensateChromaticDispersion:
     def test_output_shape_and_dtype_preserved(self, xp: Any) -> None:
         """Output shape and dtype match input."""
         samples = xp.ones((2, 256), dtype=xp.complex64)
-        out = filtering.compensate_chromatic_dispersion(
+        out = filtering.correct_chromatic_dispersion(
             samples,
             dispersion_ps_nm_km=17.0,
             fiber_length_km=10.0,
@@ -359,7 +371,7 @@ class TestCompensateChromaticDispersion:
         samples = xp.ones(512, dtype=xp.complex64)
         sig = Signal(samples=samples, sampling_rate=56e9, symbol_rate=28e9)
 
-        out = filtering.compensate_chromatic_dispersion(
+        out = filtering.correct_chromatic_dispersion(
             sig,
             dispersion_ps_nm_km=17.0,
             fiber_length_km=20.0,
@@ -374,6 +386,20 @@ class TestCompensateChromaticDispersion:
         """Missing sampling_rate on array input raises ValueError."""
         samples = xp.ones(512, dtype=xp.complex64)
         with pytest.raises(ValueError, match="sampling_rate"):
-            filtering.compensate_chromatic_dispersion(
-                samples, dispersion_ps_nm_km=17.0, fiber_length_km=20.0
+            filtering.correct_chromatic_dispersion(
+                samples,
+                dispersion_ps_nm_km=17.0,
+                fiber_length_km=20.0,
+                center_wavelength_nm=1550.0,
             )
+
+
+class TestOlsFftSize:
+    def test_invalid_fft_size_raises(self, xp: Any) -> None:
+        """fft_size must be a power of 2 with a guard of at least len(taps)."""
+        x = xp.ones(256, dtype=xp.complex64)
+        taps = xp.ones(65)
+        with pytest.raises(ValueError, match="fft_size"):
+            filtering.ols_fir_filter(x, taps, fft_size=200)
+        with pytest.raises(ValueError, match="fft_size"):
+            filtering.ols_fir_filter(x, taps, fft_size=256)

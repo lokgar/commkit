@@ -162,20 +162,20 @@ def shape_pulse(
             )
 
     if pulse_shape == "rect":
-        h = filtering.rect_taps(sps, duty_cycle=duty_cycle, rise_time=rise_time)
+        h = filtering.rect_taps(sps=sps, duty_cycle=duty_cycle, rise_time=rise_time)
     elif pulse_shape == "smoothrect":
         h = filtering.smoothrect_taps(
-            sps, span=filter_span, rise_time=rise_time, duty_cycle=duty_cycle
+            sps=sps, span=filter_span, rise_time=rise_time, duty_cycle=duty_cycle
         )
     elif pulse_shape == "gaussian":
-        h = filtering.gaussian_taps(sps, span=filter_span, duty_cycle=duty_cycle)
+        h = filtering.gaussian_taps(sps=sps, span=filter_span, fwhm=duty_cycle)
     elif pulse_shape == "rrc":
-        h = filtering.rrc_taps(sps, span=filter_span, rolloff=rrc_rolloff)
+        h = filtering.rrc_taps(sps=sps, span=filter_span, rolloff=rrc_rolloff)
     elif pulse_shape == "rc":
-        h = filtering.rc_taps(sps, span=filter_span, rolloff=rc_rolloff)
+        h = filtering.rc_taps(sps=sps, span=filter_span, rolloff=rc_rolloff)
     elif pulse_shape == "sinc":
         # Sinc pulse shaping is equivalent to RRC with rolloff=0
-        h = filtering.rrc_taps(sps, span=filter_span, rolloff=0.0)
+        h = filtering.rrc_taps(sps=sps, span=filter_span, rolloff=0.0)
     else:
         raise ValueError(f"Not implemented pulse shape: {pulse_shape}")
 

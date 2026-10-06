@@ -140,6 +140,7 @@ module = [
     "commkit._dispersion",
     "commkit._overlap_save",
     "commkit.backend",
+    "commkit.filtering",
     "commkit.logger",
     "commkit.mapping.*",
     "commkit.math",

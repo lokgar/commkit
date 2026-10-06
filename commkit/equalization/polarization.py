@@ -698,7 +698,12 @@ def demultiplex_polarization_tones_dynamic(
         num_taps += 1 - (num_taps % 2)  # nearest odd >= value
         num_taps = max(num_taps, 3)
     num_taps = min(int(num_taps), (N // 2) * 2 - 1)
-    h = fir_taps(sampling_rate, num_taps, track_bandwidth, btype="low")
+    h = fir_taps(
+        sampling_rate=sampling_rate,
+        num_taps=num_taps,
+        cutoff=track_bandwidth,
+        btype="low",
+    )
 
     # Edge guard: 'same' convolution corrupts num_taps//2 samples at each end.
     # num_taps is clipped < N above, so the retained interior is always non-empty.
@@ -768,9 +773,7 @@ def demultiplex_polarization_tones_dynamic(
         carrier = xp.exp(-1j * ph.astype(real_dtype))  # (K, N) working precision
         mixed = xw[:, None, :] * carrier[None, :, :]  # (C, K, N)
         # One batched linear-phase FIR over (C·K) rows instead of K calls.
-        T_t = cast(ArrayType, fir_filter(mixed.reshape(C * K, N), h, axis=-1)).reshape(
-            C, K, N
-        )
+        T_t = cast(ArrayType, fir_filter(mixed.reshape(C * K, N), h)).reshape(C, K, N)
         idx = xp.asarray(grid_np)
         Tg = xp.moveaxis(T_t[:, :, idx], 2, 0).astype(xp.complex128)  # (G, C, K)
     Th = xp.conj(xp.swapaxes(Tg, -1, -2))  # (G, K, C)

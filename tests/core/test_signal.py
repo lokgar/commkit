@@ -360,9 +360,8 @@ class TestSignalCloningAndProvenance:
 
         unresolved = multirate.resolve_symbols(sig)
         undemapped = mapping.demap_symbols_hard(sig)
-        unfiltered = filtering.matched_filter(sig)
 
-        for result in (unresolved, undemapped, unfiltered):
+        for result in (unresolved, undemapped):
             assert result is not sig
             assert result.samples is sig.samples
             assert result.frame is frame
@@ -504,13 +503,10 @@ class TestSignalDSPOperations:
 class TestSignalWaveformsAndModulation:
     """Tests for TestSignalWaveformsAndModulation."""
 
-    def test_shaping_filter_taps_error(self, xp):
-        """Verify that shaping_filter_taps raises errors for unconfigured or unknown shapes."""
+    def test_invalid_pulse_raises(self, xp):
+        """A pulse that is not a Pulse object is rejected on replace."""
         data = xp.zeros(10)
         s = Signal(samples=data, sampling_rate=100.0, symbol_rate=10.0)
-
-        with pytest.raises(ValueError, match="No pulse shape defined"):
-            filtering.shaping_filter_taps(s)
 
         with pytest.raises(ValueError, match="pulse must be a Pulse"):
             s.replace(pulse="invalid_shape")

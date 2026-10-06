@@ -746,7 +746,7 @@ The equalization pass (3.7) gets more commits:
   -21.7 ps²/km), and the sign through the group delay: a tone at +f0 (shorter
   wavelength) arrives earlier by `D L Δλ` in anomalous fiber, computed from D,
   L and λ without beta2.
-- [ ] **3.3c `refactor(filtering)!: 2.0 signatures`.**
+- [x] **3.3c `refactor(filtering)!: 2.0 signatures`.**
   - Tap and SOS designers take keyword-only parameters
     (`rrc_taps(sps=, rolloff=, span=)`); `gaussian_taps(duty_cycle=)` becomes
     `fwhm=` like `Gaussian`.
@@ -758,6 +758,9 @@ The equalization pass (3.7) gets more commits:
     `shaping_filter_taps` is deleted (`sig.pulse.taps(sig.sps)`).
   - `compensate_chromatic_dispersion` becomes `correct_chromatic_dispersion`
     (D16) with `sampling_rate` resolved as a fact.
+  - Wrong input raises: `matched_filter` on a Signal without a pulse used to
+    log an error and return the input; `ols_fir_filter` validates
+    `fft_size`. `filtering` type-checks under the strict flags.
 - [ ] **3.3d `refactor(multirate)!: 2.0 signatures`.** Keyword-only
   parameters, no `axis`; `sps` / `sps_in` are facts (a conflicting value
   raises). `decimate` takes `zero_phase=` / `ftype=` explicitly instead of

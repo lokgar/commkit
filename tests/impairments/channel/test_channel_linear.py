@@ -204,11 +204,11 @@ class TestApplyPolarizationMixing:
 
 
 class TestApplyChomaticDispersion:
-    """Tests for apply_chromatic_dispersion and round-trip with compensate_chromatic_dispersion."""
+    """Tests for apply_chromatic_dispersion and round-trip with correct_chromatic_dispersion."""
 
     def test_round_trip_siso(self, xp, xpt):
         """Apply CD then compensate: output should be ~equal to input."""
-        from commkit.filtering import compensate_chromatic_dispersion
+        from commkit.filtering import correct_chromatic_dispersion
 
         N = 1024
         rng = xp.random.RandomState(42)
@@ -217,13 +217,19 @@ class TestApplyChomaticDispersion:
         D, L, lam = 17.0, 80.0, 1550.0
 
         distorted = apply_chromatic_dispersion(samples, fs, D, L, lam)
-        recovered = compensate_chromatic_dispersion(distorted, fs, D, L, lam)
+        recovered = correct_chromatic_dispersion(
+            distorted,
+            sampling_rate=fs,
+            dispersion_ps_nm_km=D,
+            fiber_length_km=L,
+            center_wavelength_nm=lam,
+        )
 
         xpt.assert_allclose(recovered, samples, atol=1e-3)
 
     def test_round_trip_mimo(self, xp, xpt):
         """Round-trip (MIMO): each channel should recover to input."""
-        from commkit.filtering import compensate_chromatic_dispersion
+        from commkit.filtering import correct_chromatic_dispersion
 
         C, N = 2, 512
         rng = xp.random.RandomState(7)
@@ -232,7 +238,13 @@ class TestApplyChomaticDispersion:
         D, L, lam = 17.0, 80.0, 1550.0
 
         distorted = apply_chromatic_dispersion(samples, D, L, lam, fs)
-        recovered = compensate_chromatic_dispersion(distorted, D, L, lam, fs)
+        recovered = correct_chromatic_dispersion(
+            distorted,
+            sampling_rate=D,
+            dispersion_ps_nm_km=L,
+            fiber_length_km=lam,
+            center_wavelength_nm=fs,
+        )
 
         xpt.assert_allclose(recovered, samples, atol=1e-3)
 

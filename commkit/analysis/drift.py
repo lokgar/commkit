@@ -99,8 +99,8 @@ def separate_drift_phase_noise(
         # pn = phi2 - drift residual below is computed via numpy/cupy's usual
         # float64 promotion, not float32 - avoiding cancellation error when a
         # caller passes float32 phi (see CLAUDE.md, dtype-precision rules).
-        sos = butterworth_sos(fs, cutoff, order=order, btype="low")
-        drift = iir_filter(phi2.astype(xp.float64), sos, axis=-1, zero_phase=True)
+        sos = butterworth_sos(sampling_rate=fs, cutoff=cutoff, order=order, btype="low")
+        drift = iir_filter(phi2.astype(xp.float64), sos, zero_phase=True)
     elif method == "savgol":
         # Window ≈ one cutoff period (odd, > polyorder).
         win = int(round(fs / cutoff)) | 1

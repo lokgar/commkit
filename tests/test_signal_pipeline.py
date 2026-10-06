@@ -101,7 +101,7 @@ class TestPipelineComposition:
         "operation",
         [
             lambda x, xp: apply_awgn(x, sps=2, esn0_db=30, seed=7),
-            lambda x, xp: filtering.matched_filter(x, _identity_taps(xp)),
+            lambda x, xp: filtering.matched_filter(x, pulse=_identity_taps(xp)),
             lambda x, xp: multirate.resample(x, sps_in=2, sps_out=1.5),
             lambda x, xp: equalization.zf_equalizer(x, _identity_taps(xp)),
         ],
@@ -119,7 +119,7 @@ class TestPipelineComposition:
         "operation",
         [
             lambda sig, xp: apply_awgn(sig, esn0_db=30, seed=7),
-            lambda sig, xp: filtering.matched_filter(sig, _identity_taps(xp)),
+            lambda sig, xp: filtering.matched_filter(sig, pulse=_identity_taps(xp)),
             lambda sig, xp: multirate.resample(sig, sps_out=1.5),
             lambda sig, xp: equalization.zf_equalizer(sig, _identity_taps(xp)),
         ],
@@ -266,7 +266,7 @@ class TestPipelineSPSValidation:
         "operation",
         [
             lambda sig, xp: multirate.decimate_to_symbol_rate(sig),
-            lambda sig, xp: filtering.shaping_filter_taps(sig.replace(pulse=Rect())),
+            lambda sig, xp: Rect().taps(sig.sps),
             lambda sig, xp: equalization.apply_taps(
                 sig, _identity_taps(xp), normalize=False
             ),

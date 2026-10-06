@@ -293,7 +293,7 @@ def apply_chromatic_dispersion(
 
     See Also
     --------
-    commkit.filtering.compensate_chromatic_dispersion :
+    commkit.filtering.correct_chromatic_dispersion :
         Remove CD in the receiver (electronic dispersion compensation).
 
     Examples

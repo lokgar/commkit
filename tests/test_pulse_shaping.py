@@ -12,8 +12,8 @@ from commkit.filtering import RRC, Rect, SmoothRect
 from commkit.mapping import Constellation
 
 
-class TestShapingFilterTaps:
-    """Tests for automatic shaping filter tap generation from Signal metadata."""
+class TestSignalPulseTaps:
+    """Pulse taps built from a Signal's pulse and sps."""
 
     def test_signal_pulse_params(self, xp: Any) -> None:
         """Verify pulse shaping parameters (e.g. rolloff) are correctly stored and utilized."""
@@ -22,7 +22,7 @@ class TestShapingFilterTaps:
         assert getattr(sig, "pulse_params", None) is None
         assert sig.rrc_rolloff == 0.5
 
-        taps = filtering.shaping_filter_taps(sig)
+        taps = xp.asarray(sig.pulse.taps(sig.sps))
         assert taps is not None
         assert len(taps) > 0
 
@@ -34,7 +34,7 @@ class TestShapingFilterTaps:
         assert sig.pulse_shape == "smoothrect"
         assert sig.rise_time == 0.1
 
-        taps = filtering.shaping_filter_taps(sig)
+        taps = xp.asarray(sig.pulse.taps(sig.sps))
         assert len(taps) > 0
 
     def test_rz_rect_taps_length(self, xp: Any, xpt: Any) -> None:
@@ -42,45 +42,45 @@ class TestShapingFilterTaps:
         sig = generate(
             Constellation.pam(2), 10, symbol_rate=1e3, sps=4, pulse=Rect(0.5)
         )
-        taps = filtering.shaping_filter_taps(sig)
+        taps = xp.asarray(sig.pulse.taps(sig.sps))
         assert len(taps) == 2
         xpt.assert_allclose(taps, xp.ones(2))
 
     def test_rect_pulse_taps(self, xp: Any, xpt: Any) -> None:
         """Verify that standard rectangular pulse shaping produces all-ones taps."""
         sig = generate(Constellation.pam(2), 10, symbol_rate=1e3, sps=4, pulse=Rect())
-        taps = filtering.shaping_filter_taps(sig)
+        taps = xp.asarray(sig.pulse.taps(sig.sps))
         xpt.assert_allclose(taps, xp.ones(4))
 
-    def test_gaussian_shaping_filter_taps(self, xp: Any) -> None:
-        """shaping_filter_taps for gaussian pulse shape returns valid taps."""
+    def test_gaussian_pulse_taps(self, xp: Any) -> None:
+        """Gaussian pulse taps from a Signal are valid."""
         sig = Signal(
             samples=xp.ones(40, dtype="complex64"),
             sampling_rate=4e3,
             symbol_rate=1e3,
             pulse=filtering.Gaussian(fwhm=0.5, span=4),
         )
-        taps = filtering.shaping_filter_taps(sig)
+        taps = xp.asarray(sig.pulse.taps(sig.sps))
         assert taps is not None
         assert len(taps) > 0
 
-    def test_rc_shaping_filter_taps(self, xp: Any) -> None:
-        """shaping_filter_taps for rc pulse shape returns valid taps."""
+    def test_rc_pulse_taps(self, xp: Any) -> None:
+        """RC pulse taps from a Signal are valid."""
         sig = Signal(
             samples=xp.ones(40, dtype="complex64"),
             sampling_rate=4e3,
             symbol_rate=1e3,
             pulse=filtering.RC(0.5, span=4),
         )
-        taps = filtering.shaping_filter_taps(sig)
+        taps = xp.asarray(sig.pulse.taps(sig.sps))
         assert taps is not None
         assert len(taps) > 0
 
-    def test_unknown_pulse_shape(self, xp: Any) -> None:
-        """Verify unsupported or missing pulse shapes raise ValueError."""
-        sig = Signal(samples=[1, 2], sampling_rate=10, symbol_rate=5)
-        with pytest.raises(ValueError, match="No pulse shape defined"):
-            filtering.shaping_filter_taps(sig)
+    def test_matched_filter_needs_a_pulse(self, xp: Any) -> None:
+        """matched_filter raises for a Signal without a pulse and no pulse=."""
+        sig = Signal(samples=xp.ones(2), sampling_rate=10, symbol_rate=5)
+        with pytest.raises(ValueError, match="needs a pulse"):
+            filtering.matched_filter(sig)
 
 
 class TestMatchedFilterAuto:
@@ -95,14 +95,25 @@ class TestMatchedFilterAuto:
         sig = filtering.matched_filter(sig)
         assert not xp.allclose(sig.samples, sig_before.samples)
 
-    def test_matched_filter_logs_error_for_no_pulse_shape(self, xp: Any) -> None:
-        """matched_filter() with no pulse_shape returns an unchanged copy."""
-        sig = Signal(
-            samples=xp.ones(10, dtype="complex64"), sampling_rate=4e3, symbol_rate=1e3
+    def test_pulse_is_a_choice(self, xp: Any, xpt: Any, backend_device: str) -> None:
+        """pulse= defaults to sig.pulse; a Pulse or its taps give the same output;
+        an explicit pulse wins over the Signal's."""
+        sig = generate(
+            Constellation.qam(4), 64, symbol_rate=1e3, sps=4, pulse=RRC(0.35)
+        ).to(backend_device)
+        default = filtering.matched_filter(sig).samples
+        xpt.assert_allclose(
+            filtering.matched_filter(sig, pulse=RRC(0.35)).samples, default
         )
-        result = filtering.matched_filter(sig)
-        assert result is not sig
-        assert bool(xp.all(result.samples == sig.samples))
+        taps = xp.asarray(RRC(0.35).taps(4))
+        xpt.assert_allclose(filtering.matched_filter(sig.samples, pulse=taps), default)
+        other = filtering.matched_filter(sig, pulse=RRC(0.9)).samples
+        assert not bool(xp.allclose(other, default))
+
+    def test_pulse_object_needs_a_signal(self, xp: Any) -> None:
+        """For array input a Pulse has no sps, so taps are required."""
+        with pytest.raises(ValueError, match="pulse.taps"):
+            filtering.matched_filter(xp.ones(8, dtype="complex64"), pulse=RRC(0.35))
 
 
 class TestPulseObjects:
@@ -111,16 +122,27 @@ class TestPulseObjects:
     @pytest.mark.parametrize(
         "pulse, expected",
         [
-            (filtering.RRC(0.2), lambda: filtering.rrc_taps(4, rolloff=0.2, span=10)),
-            (filtering.RC(0.3, span=6), lambda: filtering.rc_taps(4, 0.3, 6)),
+            (
+                filtering.RRC(0.2),
+                lambda: filtering.rrc_taps(sps=4, rolloff=0.2, span=10),
+            ),
+            (
+                filtering.RC(0.3, span=6),
+                lambda: filtering.rc_taps(sps=4, rolloff=0.3, span=6),
+            ),
             (
                 filtering.Gaussian(0.8),
-                lambda: filtering.gaussian_taps(4, span=10, duty_cycle=0.8),
+                lambda: filtering.gaussian_taps(sps=4, span=10, fwhm=0.8),
             ),
-            (filtering.Rect(0.5, 0.25), lambda: filtering.rect_taps(4, 0.5, 0.25)),
+            (
+                filtering.Rect(0.5, 0.25),
+                lambda: filtering.rect_taps(sps=4, duty_cycle=0.5, rise_time=0.25),
+            ),
             (
                 filtering.SmoothRect(0.3, 0.5),
-                lambda: filtering.smoothrect_taps(4, 10, 0.3, 0.5),
+                lambda: filtering.smoothrect_taps(
+                    sps=4, span=10, rise_time=0.3, duty_cycle=0.5
+                ),
             ),
         ],
     )
