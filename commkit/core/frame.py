@@ -9,7 +9,7 @@ import numpy as np
 
 from .. import helpers
 from ..backend import ArrayType
-from ..logger import logger
+from ..mapping import Constellation
 from . import generation
 from ._signal_adapter import require_integer_sps
 from .signal import Signal
@@ -195,6 +195,10 @@ class Preamble:
         )
 
 
+def _qpsk() -> Constellation:
+    return Constellation.psk(4)
+
+
 @dataclass(frozen=True, kw_only=True)
 class SingleCarrierFrame:
     """
@@ -208,22 +212,14 @@ class SingleCarrierFrame:
     Attributes
     ----------
     payload_len : int, default 1000
-        Number of data symbols per spatial stream.
-    payload_mod_scheme : str, default "PSK"
-        Modulation for payload data (e.g., 'QAM').
-    payload_mod_order : int, default 4
-        Modulation order for payload (e.g., 16 for 16-QAM).
+        Number of payload symbols per stream.  With pilots it must fill whole
+        pilot periods (comb: a multiple of ``pilot_period - 1``; block: of
+        ``pilot_period - pilot_block_len``); otherwise construction raises.
+    payload_constellation : Constellation, default ``Constellation.psk(4)``
+        Payload constellation.  A shaped one
+        (``Constellation.qam(64).shaped(entropy=5)``) gives a PS payload.
     payload_seed : int, default 42
         Seed for reproducible payload data generation.
-    payload_nu : float, optional
-        Maxwell-Boltzmann shaping parameter nu >= 0 for a
-        probabilistically shaped QAM payload.  Mutually exclusive with
-        ``payload_entropy``.  Requires ``payload_mod_scheme`` to contain
-        ``"qam"`` (case-insensitive).  nu = 0 -> uniform QAM.
-    payload_entropy : float, optional
-        Target entropy in bits per symbol for a PS-QAM payload.  The
-        optimal nu is solved numerically via ``mapping.optimal_nu``.
-        Mutually exclusive with ``payload_nu``.  Same QAM-only constraint.
     preamble : Preamble, optional
         Structured preamble for synchronization.  For MIMO with ZC sequences,
         each TX stream automatically receives a unique root via
@@ -238,10 +234,8 @@ class SingleCarrierFrame:
         Length of the pilot block (mode="block") in symbols.
     pilot_seed : int, default 1337
         Seed for pilot symbol generation.
-    pilot_mod_scheme : str, default "PSK"
-        Modulation for pilots.
-    pilot_mod_order : int, default 4
-        Modulation order for pilots.
+    pilot_constellation : Constellation, default ``Constellation.psk(4)``
+        Pilot constellation; must be unshaped.
     pilot_gain_db : float, default 0.0
         Pilot boosting in dB relative to the payload power.
     guard_type : {"zero", "cp"}, default "zero"
@@ -254,29 +248,22 @@ class SingleCarrierFrame:
 
     Notes
     -----
-    **PS-QAM payload**: set either ``payload_nu`` or ``payload_entropy`` (not
-    both) together with a QAM ``payload_mod_scheme``.  The MB distribution is
-    solved once and cached; access the resulting PMF via the read-only
-    ``payload_ps_pmf`` property after the frame has been generated.
+    The layout (``get_structure_map``, the pilot mask) depends only on the
+    fields and never generates data.  Payload and pilot symbols are generated
+    on first access and cached.
     """
 
     payload_len: int = 1000
+    payload_constellation: Constellation = field(default_factory=_qpsk)
     payload_seed: int = 42
-    payload_mod_scheme: str = "PSK"
-    payload_mod_order: int = 4
-    payload_mod_unipolar: bool = False
-    payload_nu: float | None = None
-    payload_entropy: float | None = None
 
     preamble: Preamble | None = None
 
     pilot_pattern: str = "none"
     pilot_period: int = 0
     pilot_block_len: int = 0
+    pilot_constellation: Constellation = field(default_factory=_qpsk)
     pilot_seed: int = 1337
-    pilot_mod_scheme: str = "PSK"
-    pilot_mod_order: int = 4
-    pilot_mod_unipolar: bool = False
     pilot_gain_db: float = 0.0
 
     guard_type: str = "zero"
@@ -293,25 +280,19 @@ class SingleCarrierFrame:
     # -------------------------------------------------------------------------
 
     def __post_init__(self) -> None:
-        """
-        Validate the fields and snap ``payload_len``.
-
-        Validates that payload_len is evenly divisible by the per-period or
-        per-block data count implied by the pilot parameters.  If not, snaps
-        payload_len up to the next valid multiple and emits a warning so the
-        frame structure always satisfies:
-            num_pilot_periods == num_data_periods  (comb)
-            num_pilot_blocks  == num_data_blocks   (block)
-        """
-        import math
-
+        """Validate the fields, including that the payload fills whole periods."""
         _check_int("payload_len", self.payload_len, 1)
-        _check_int("payload_mod_order", self.payload_mod_order, 1)
-        _check_int("pilot_mod_order", self.pilot_mod_order, 1)
         _check_int("pilot_period", self.pilot_period, 0)
         _check_int("pilot_block_len", self.pilot_block_len, 0)
         _check_int("guard_len", self.guard_len, 0)
         _check_int("num_streams", self.num_streams, 1)
+        for name in ("payload_constellation", "pilot_constellation"):
+            if not isinstance(getattr(self, name), Constellation):
+                raise ValueError(
+                    f"{name} must be a Constellation, e.g. Constellation.qam(16)."
+                )
+        if self.pilot_constellation.pmf is not None:
+            raise ValueError("pilot_constellation must not be shaped.")
         if self.pilot_pattern not in ("none", "block", "comb"):
             raise ValueError(
                 "pilot_pattern must be 'none', 'block' or 'comb', "
@@ -321,78 +302,30 @@ class SingleCarrierFrame:
             raise ValueError(
                 f"guard_type must be 'zero' or 'cp', got {self.guard_type!r}."
             )
-        if self.payload_nu is not None and self.payload_nu < 0:
-            raise ValueError(f"payload_nu must be >= 0, got {self.payload_nu}.")
-        if self.payload_entropy is not None and self.payload_entropy <= 0:
-            raise ValueError(
-                f"payload_entropy must be > 0, got {self.payload_entropy}."
-            )
         if self.preamble is not None and not isinstance(self.preamble, Preamble):
             raise ValueError("preamble must be a Preamble or None.")
-        self._check_psqam_fields()
-        self._check_preamble_streams()
+        if self.preamble is not None and self.preamble.num_streams > 1:
+            if self.preamble.num_streams != self.num_streams:
+                raise ValueError(
+                    f"preamble.num_streams={self.preamble.num_streams} does not "
+                    f"match frame.num_streams={self.num_streams}"
+                )
 
+        per_period = None
         if self.pilot_pattern == "comb" and self.pilot_period > 1:
-            data_per_period = self.pilot_period - 1
-            if self.payload_len % data_per_period != 0:
-                snapped = (
-                    math.ceil(self.payload_len / data_per_period) * data_per_period
-                )
-                logger.warning(
-                    "SingleCarrierFrame (comb): payload_len=%s is not "
-                    "divisible by data_per_period=%s (pilot_period=%s). "
-                    "Snapping payload_len %s -> %s so that "
-                    "num_pilot_periods == num_data_periods == %s.",
-                    self.payload_len,
-                    data_per_period,
-                    self.pilot_period,
-                    self.payload_len,
-                    snapped,
-                    snapped // data_per_period,
-                )
-                object.__setattr__(self, "payload_len", snapped)
-
+            per_period = self.pilot_period - 1
         elif (
             self.pilot_pattern == "block"
             and self.pilot_period > self.pilot_block_len > 0
         ):
-            data_per_block = self.pilot_period - self.pilot_block_len
-            if self.payload_len % data_per_block != 0:
-                snapped = math.ceil(self.payload_len / data_per_block) * data_per_block
-                logger.warning(
-                    "SingleCarrierFrame (block): payload_len=%s is not "
-                    "divisible by data_per_block=%s (pilot_period=%s, "
-                    "pilot_block_len=%s). Snapping payload_len %s -> %s so "
-                    "that num_pilot_blocks == num_data_blocks == %s.",
-                    self.payload_len,
-                    data_per_block,
-                    self.pilot_period,
-                    self.pilot_block_len,
-                    self.payload_len,
-                    snapped,
-                    snapped // data_per_block,
-                )
-                object.__setattr__(self, "payload_len", snapped)
-
-    def _check_psqam_fields(self) -> None:
-        if self.payload_nu is not None and self.payload_entropy is not None:
+            per_period = self.pilot_period - self.pilot_block_len
+        if per_period is not None and self.payload_len % per_period:
+            low = self.payload_len // per_period * per_period
+            valid = f"{low} or {low + per_period}" if low else f"{per_period}"
             raise ValueError(
-                "payload_nu and payload_entropy are mutually exclusive - specify one or neither."
+                f"payload_len={self.payload_len} does not fill whole pilot periods "
+                f"({per_period} payload symbols each); use {valid}."
             )
-        if self.payload_nu is not None or self.payload_entropy is not None:
-            if "qam" not in self.payload_mod_scheme.lower():
-                raise ValueError(
-                    f"payload_nu / payload_entropy require a QAM payload modulation, "
-                    f"got payload_mod_scheme='{self.payload_mod_scheme}'."
-                )
-
-    def _check_preamble_streams(self) -> None:
-        if self.preamble is not None and self.preamble.num_streams > 1:
-            if self.preamble.num_streams != self.num_streams:
-                raise ValueError(
-                    f"preamble.num_streams={self.preamble.num_streams} does not match "
-                    f"frame.num_streams={self.num_streams}"
-                )
 
     # -------------------------------------------------------------------------
     # Mask Generation and Internal Data Preparation Methods
@@ -462,24 +395,8 @@ class SingleCarrierFrame:
         """Generate and cache the payload bits and symbols with ``generate()``."""
         if self._cache.get("payload_bits") is not None:
             return
-        from .. import mapping
-
-        pmf = None
-        if self.payload_nu is not None or self.payload_entropy is not None:
-            nu = self.payload_nu
-            if nu is None:
-                assert self.payload_entropy is not None
-                nu, _ = mapping.optimal_nu(self.payload_mod_order, self.payload_entropy)
-            pmf = mapping.maxwell_boltzmann(self.payload_mod_order, nu)
-            self._cache["payload_ps_pmf"] = pmf
-        constellation = mapping.Constellation.gray(
-            self.payload_mod_scheme,
-            self.payload_mod_order,
-            unipolar=self.payload_mod_unipolar,
-            pmf=pmf,
-        )
         sig = generation.generate(
-            constellation,
+            self.payload_constellation,
             self.payload_len,
             symbol_rate=1.0,
             num_channels=self.num_streams,
@@ -499,18 +416,12 @@ class SingleCarrierFrame:
         """
         if self._cache.get("pilot_bits") is not None or self.pilot_pattern == "none":
             return
-        from .. import mapping
-
         mask, _ = self._generate_pilot_mask()
         pilot_count = int(np.sum(mask))
         if pilot_count == 0:
             return
         sig = generation.generate(
-            mapping.Constellation.gray(
-                self.pilot_mod_scheme,
-                self.pilot_mod_order,
-                unipolar=self.pilot_mod_unipolar,
-            ),
+            self.pilot_constellation,
             pilot_count,
             symbol_rate=1.0,
             num_channels=self.num_streams,
@@ -550,23 +461,6 @@ class SingleCarrierFrame:
         """
         self._ensure_payload_generated()
         return self._cache.get("payload_symbols")
-
-    @property
-    def payload_ps_pmf(self) -> Any | None:
-        """
-        Returns the Maxwell-Boltzmann PMF used for PS-QAM payload generation.
-
-        ``None`` for uniform (non-PS) payloads.  Pass this to
-        ``metrics.mi`` and ``compute_llr`` after frame equalization
-        to compute PS-aware capacity and soft-decision metrics.
-
-        Returns
-        -------
-        np.ndarray or None
-            PMF array of shape ``(payload_mod_order,)`` summing to 1, or ``None``.
-        """
-        self._ensure_payload_generated()
-        return self._cache.get("payload_ps_pmf")
 
     @property
     def pilot_bits(self) -> ArrayType | None:

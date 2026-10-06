@@ -30,8 +30,7 @@ def _plain_signal():
 def _frame_signal():
     frame = SingleCarrierFrame(
         payload_len=32_768,
-        payload_mod_scheme="QAM",
-        payload_mod_order=16,
+        payload_constellation=Constellation.qam(16),
         payload_seed=42,
         preamble=Preamble(sequence_type="barker", length=13),
         pilot_pattern="comb",

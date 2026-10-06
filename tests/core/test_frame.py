@@ -2,9 +2,11 @@
 
 from typing import Any
 
+import numpy as np
 import pytest
 
 from commkit.core import Preamble, SingleCarrierFrame
+from commkit.mapping import Constellation
 from tests.common.conversions import device_of
 
 
@@ -74,9 +76,7 @@ class TestSingleCarrierFrameBasics:
 
     def test_sc_frame_bit_first(self, xp: Any) -> None:
         """Verify Frame preserves source bits (bit-first architecture)."""
-        frame = SingleCarrierFrame(
-            payload_len=100, payload_mod_order=4, payload_seed=42
-        )
+        frame = SingleCarrierFrame(payload_len=100, payload_seed=42)
         bits = frame.payload_bits
         assert bits is not None
         assert bits.size == 200
@@ -288,14 +288,14 @@ class TestSingleCarrierFramePilots:
 
     def test_pilot_bits_with_pilots(self, xp: Any) -> None:
         """pilot_bits on a frame with comb pilots generates pilot bits."""
-        frame = SingleCarrierFrame(payload_len=20, pilot_pattern="comb", pilot_period=4)
+        frame = SingleCarrierFrame(payload_len=21, pilot_pattern="comb", pilot_period=4)
         bits = frame.pilot_bits
         assert bits is not None
         assert len(bits) > 0
 
     def test_pilot_bits_double_access(self, xp: Any) -> None:
         """Accessing pilot_bits twice returns consistent cached results."""
-        frame = SingleCarrierFrame(payload_len=20, pilot_pattern="comb", pilot_period=4)
+        frame = SingleCarrierFrame(payload_len=21, pilot_pattern="comb", pilot_period=4)
         bits1 = frame.pilot_bits
         bits2 = frame.pilot_bits
         assert bits1 is not None
@@ -316,28 +316,31 @@ class TestSingleCarrierFramePilots:
 
 
 class TestSingleCarrierFrameDivisibility:
-    """Tests for automatic payload length snapping to pilot block boundaries."""
+    """payload_len must fill whole pilot periods; it is never changed silently."""
 
-    def test_comb_snaps_payload_len(self, xp: Any) -> None:
-        """payload_len non-divisible by data_per_period is snapped up."""
-        frame = SingleCarrierFrame(payload_len=10, pilot_pattern="comb", pilot_period=4)
-        assert frame.payload_len == 12
+    def test_comb_rejects_partial_period(self, xp: Any) -> None:
+        with pytest.raises(ValueError, match="use 9 or 12"):
+            SingleCarrierFrame(payload_len=10, pilot_pattern="comb", pilot_period=4)
+        frame = SingleCarrierFrame(payload_len=12, pilot_pattern="comb", pilot_period=4)
         mask, length = frame._generate_pilot_mask()
         assert length == 16
         assert int(xp.sum(mask)) == 4
 
-    def test_block_snaps_payload_len(self, xp: Any) -> None:
-        """payload_len non-divisible by data_per_block is snapped up."""
+    def test_block_rejects_partial_period(self, xp: Any) -> None:
+        with pytest.raises(ValueError, match="use 8 or 10"):
+            SingleCarrierFrame(
+                payload_len=9, pilot_pattern="block", pilot_period=4, pilot_block_len=2
+            )
         frame = SingleCarrierFrame(
-            payload_len=9,
-            pilot_pattern="block",
-            pilot_period=4,
-            pilot_block_len=2,
+            payload_len=10, pilot_pattern="block", pilot_period=4, pilot_block_len=2
         )
-        assert frame.payload_len == 10
         mask, length = frame._generate_pilot_mask()
         assert length == 20
         assert int(xp.sum(mask)) == 10
+
+    def test_short_payload_suggests_one_period(self, xp: Any) -> None:
+        with pytest.raises(ValueError, match=r"use 3\."):
+            SingleCarrierFrame(payload_len=2, pilot_pattern="comb", pilot_period=4)
 
     def test_comb_no_snap_when_divisible(self, xp: Any) -> None:
         """payload_len already divisible by data_per_period is not modified."""
@@ -353,3 +356,40 @@ class TestSingleCarrierFrameDivisibility:
             pilot_block_len=2,
         )
         assert frame.payload_len == 10
+
+
+class TestFrameConstellations:
+    """payload_constellation / pilot_constellation (plan 2.7)."""
+
+    def test_payload_and_pilots_use_their_constellations(self) -> None:
+        frame = SingleCarrierFrame(
+            payload_len=21,
+            payload_constellation=Constellation.qam(16),
+            pilot_pattern="comb",
+            pilot_period=4,
+            pilot_constellation=Constellation.psk(2),
+        )
+        assert np.isin(
+            frame.payload_symbols, Constellation.qam(16).points.astype("complex64")
+        ).all()
+        assert np.isin(
+            frame.pilot_symbols, Constellation.psk(2).points.astype("complex64")
+        ).all()
+
+    def test_shaped_payload(self) -> None:
+        c = Constellation.qam(64).shaped(entropy=5.0)
+        frame = SingleCarrierFrame(payload_len=2000, payload_constellation=c)
+        np.testing.assert_array_equal(c.map(frame.payload_bits), frame.payload_symbols)
+        sig = frame.to_signal(sps=2, symbol_rate=1e6)
+        np.testing.assert_array_equal(sig.ps_pmf, c.pmf)
+
+    def test_invalid_constellations(self) -> None:
+        with pytest.raises(ValueError, match="payload_constellation"):
+            SingleCarrierFrame(payload_constellation="qam")
+        with pytest.raises(ValueError, match="must not be shaped"):
+            SingleCarrierFrame(pilot_constellation=Constellation.qam(16).shaped(nu=0.1))
+
+    def test_layout_needs_no_data(self) -> None:
+        frame = SingleCarrierFrame(payload_len=21, pilot_pattern="comb", pilot_period=4)
+        frame.get_structure_map()
+        assert frame._cache == {}

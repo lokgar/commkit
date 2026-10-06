@@ -144,8 +144,7 @@ class TestPipelineComposition:
         """Frame-backed Signals keep frame data and populated private caches attached."""
         frame = SingleCarrierFrame(
             payload_len=60,
-            payload_mod_scheme="QAM",
-            payload_mod_order=16,
+            payload_constellation=Constellation.qam(16),
             preamble=Preamble(sequence_type="barker", length=13),
             pilot_pattern="comb",
             pilot_period=4,

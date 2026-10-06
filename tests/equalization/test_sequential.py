@@ -949,6 +949,7 @@ class TestCmaPilotAided:
 
         preamble = Preamble(sequence_type="barker", length=13)
         frame = SingleCarrierFrame(
+            payload_len=1008,
             pilot_pattern="comb",
             pilot_period=10,
             preamble=preamble,

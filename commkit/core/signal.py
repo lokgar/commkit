@@ -373,7 +373,7 @@ class Signal:
         if self.constellation is not None:
             return self.constellation.pmf
         if self.frame is not None:
-            return self.frame.payload_ps_pmf
+            return self.frame.payload_constellation.pmf
         return None
 
     @property

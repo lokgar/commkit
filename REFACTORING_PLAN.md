@@ -612,13 +612,21 @@ sites. The order avoids conflicts, because 1.4-1.6 all edit
     sample-average power (a 1.x leftover that puts the reference off the
     constellation by a factor of about 1 + O(1/sqrt(N))). Numerical change,
     validated on its own.
-- [ ] **2.7 `refactor(core)!: frame takes constellations; explicit layout`.**
-  - `SingleCarrierFrame` takes `payload=` / `pilots=` constellations instead
-    of `*_mod_scheme` / `*_mod_order` / `*_mod_unipolar` / `payload_nu` /
-    `payload_entropy` strings and numbers.
-  - Layout methods are testable without generating data, and the effective
-    `payload_len` is explicit (no silent snapping).
-  - `Signal.frame` holds the layout snapshot.
+- [x] **2.7 `refactor(core)!: frame takes constellations; explicit layout`.**
+  - `SingleCarrierFrame` takes `payload_constellation=` /
+    `pilot_constellation=` (default QPSK) instead of `*_mod_scheme` /
+    `*_mod_order` / `*_mod_unipolar` / `payload_nu` / `payload_entropy`. A PS
+    payload is a shaped constellation (2.0 scale; no test used the 1.x PS
+    frame fields). `payload_ps_pmf` is gone; use
+    `frame.payload_constellation.pmf`.
+  - A `payload_len` that does not fill whole pilot periods raises with the
+    nearest valid lengths instead of being snapped up with a warning.
+    Affected test frames pass the length they used to be snapped to, so
+    their data is unchanged.
+  - The layout (`get_structure_map`, the pilot mask) depends only on the
+    fields and never generates data (tested). `Signal.frame` keeps the frozen
+    `SingleCarrierFrame`, which is that layout description; frame Signals
+    get a full-frame `reference` with `extract_payload` in 3.8.
 
 ### Step 3: module passes (bottom-up)
 

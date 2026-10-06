@@ -46,7 +46,7 @@ def _mimo_signal() -> Signal:
 
 def _frame_signal() -> Signal:
     return make_test_frame_signal(
-        payload_len=200, preamble_len=13, sps=4, symbol_rate=1e9, payload_mod_order=16
+        payload_len=203, preamble_len=13, sps=4, symbol_rate=1e9, payload_mod_order=16
     )
 
 
@@ -180,8 +180,7 @@ class TestNPZSaveLoadFrame:
 
         assert sig2.frame is not None
         assert sig2.frame.payload_len == sig.frame.payload_len
-        assert sig2.frame.payload_mod_scheme == sig.frame.payload_mod_scheme
-        assert sig2.frame.payload_mod_order == sig.frame.payload_mod_order
+        assert sig2.frame == sig.frame
 
     def test_roundtrip_zc_preamble_kwargs(self, tmp_path: Any) -> None:
         """Zadoff-Chu preamble root and length kwargs round-trip."""
@@ -353,3 +352,18 @@ class TestNPZDeviceHandling:
         assert metrics.evm(loaded) is not None
         xpt.assert_allclose(metrics.evm(loaded)[0], evm_before[0], rtol=1e-5)
         xpt.assert_allclose(float(metrics.ber(loaded)), float(ber_before), rtol=1e-9)
+
+
+def test_frame_constellations_roundtrip(tmp_path: Any) -> None:
+    frame = SingleCarrierFrame(
+        payload_len=21,
+        payload_constellation=mapping.Constellation.qam(64).shaped(nu=0.05),
+        pilot_pattern="comb",
+        pilot_period=4,
+        pilot_constellation=mapping.Constellation.psk(8),
+    )
+    sig = frame.to_signal(sps=2, symbol_rate=1e6)
+    save_npz(sig, tmp_path / "f.npz")
+    loaded = load_npz(tmp_path / "f.npz")
+    assert loaded.frame == frame
+    np.testing.assert_array_equal(loaded.frame.payload_symbols, frame.payload_symbols)

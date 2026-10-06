@@ -24,7 +24,8 @@ The archive contains only numeric and unicode arrays, so it is read with
   ``frame_payload_symbols`` - frame payload symbols array  (omitted if no frame)
   ``frame_pilot_symbols``   - frame pilot symbols array    (omitted if no frame/pilots)
   ``frame_payload_bits``    - frame payload bits array     (omitted if no frame)
-  ``frame_payload_ps_pmf``  - frame payload PS pmf         (omitted unless shaped)
+  ``frame_payload_constellation_*``, ``frame_pilot_constellation_*``
+                            - the frame's constellations (as for the Signal's)
 """
 
 from __future__ import annotations
@@ -116,13 +117,7 @@ def save_npz(
         if ref.bits is not None:
             arrays["reference_bits"] = _backend.to_device(ref.bits, "CPU")
 
-    c = signal.constellation
-    meta["constellation_family"] = None if c is None else c.family
-    if c is not None:
-        arrays["constellation_points"] = c.points
-        arrays["constellation_bit_labels"] = c.bit_labels
-        if c.pmf is not None:
-            arrays["constellation_pmf"] = c.pmf
+    _put_constellation(signal.constellation, "constellation", arrays, meta)
 
     pulse = signal.pulse
     meta["pulse"] = (
@@ -153,6 +148,10 @@ def save_npz(
         # correct type when multiple frame classes exist (SingleCarrierFrame,
         # future OFDMFrame, etc.) without hardcoding the class.
         frame_dict = _init_fields(frame)
+        for name in ("payload_constellation", "pilot_constellation"):
+            _put_constellation(
+                frame_dict.pop(name), f"frame_{name}", arrays, frame_dict
+            )
         if frame_dict.get("preamble") is not None:
             frame_dict["preamble"] = _init_fields(frame_dict["preamble"])
         frame_dict["_frame_type"] = type(frame).__name__
@@ -165,7 +164,6 @@ def save_npz(
             ("frame_payload_symbols", "payload_symbols"),
             ("frame_pilot_symbols", "pilot_symbols"),
             ("frame_payload_bits", "payload_bits"),
-            ("frame_payload_ps_pmf", "payload_ps_pmf"),
         ):
             arr = getattr(frame, frame_attr, None)
             if arr is not None:
@@ -183,6 +181,30 @@ def save_npz(
         np.savez_compressed(path, **arrays)  # type: ignore[arg-type]
     else:
         np.savez(path, **arrays)  # type: ignore[arg-type]
+
+
+def _put_constellation(c: Any, key: str, arrays: dict, meta: dict) -> None:
+    """Store constellation ``c`` (or ``None``) under ``key``."""
+    meta[f"{key}_family"] = None if c is None else c.family
+    if c is not None:
+        arrays[f"{key}_points"] = c.points
+        arrays[f"{key}_bit_labels"] = c.bit_labels
+        if c.pmf is not None:
+            arrays[f"{key}_pmf"] = c.pmf
+
+
+def _get_constellation(key: str, data: Any, meta: dict) -> Any:
+    """The constellation stored under ``key``, or ``None``."""
+    from .mapping import Constellation
+
+    if f"{key}_points" not in data:
+        return None
+    return Constellation(
+        data[f"{key}_points"],
+        bit_labels=data[f"{key}_bit_labels"],
+        pmf=data[f"{key}_pmf"] if f"{key}_pmf" in data else None,
+        family=meta[f"{key}_family"],
+    )
 
 
 def _init_fields(obj: Any) -> dict:
@@ -243,7 +265,6 @@ def load_npz(
     # -------------------------------------------------------------------------
     from . import filtering
     from .core import Reference
-    from .mapping import Constellation
 
     kwargs: dict = {f: meta[f] for f in _META_FIELDS}
     kwargs["samples"] = data["samples"]
@@ -253,13 +274,7 @@ def load_npz(
             symbols=data["reference_symbols"],
             bits=data["reference_bits"] if "reference_bits" in data else None,
         )
-    if "constellation_points" in data:
-        kwargs["constellation"] = Constellation(
-            data["constellation_points"],
-            bit_labels=data["constellation_bit_labels"],
-            pmf=data["constellation_pmf"] if "constellation_pmf" in data else None,
-            family=meta["constellation_family"],
-        )
+    kwargs["constellation"] = _get_constellation("constellation", data, meta)
     if meta["pulse"] is not None:
         pulse_fields = dict(meta["pulse"])
         pulse_type = pulse_fields.pop("type")
@@ -293,6 +308,9 @@ def load_npz(
                 f"Cannot reconstruct frame of type {frame_type_name!r}: "
                 "unknown frame class. Extend _FRAME_CLASSES in io.py."
             )
+        for name in ("payload_constellation", "pilot_constellation"):
+            frame_dict[name] = _get_constellation(f"frame_{name}", data, frame_dict)
+            frame_dict.pop(f"frame_{name}_family")
         if frame_dict.get("preamble") is not None:
             frame_dict["preamble"] = _core.Preamble(**frame_dict["preamble"])
         frame = frame_cls(**frame_dict)
@@ -304,7 +322,6 @@ def load_npz(
             ("frame_payload_symbols", "payload_symbols"),
             ("frame_pilot_symbols", "pilot_symbols"),
             ("frame_payload_bits", "payload_bits"),
-            ("frame_payload_ps_pmf", "payload_ps_pmf"),
         ):
             if npz_key in data:
                 frame._cache[cache_key] = data[npz_key]
