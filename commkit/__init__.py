@@ -1,8 +1,7 @@
 """
 `commkit` is a high-performance library for simulating and analyzing
 digital communication systems. It provides a unified API for generating,
-transforming, and assessing signals across diverse computational backends
-(CPU, GPU, and JAX).
+transforming, and assessing signals on NumPy (CPU) and CuPy (GPU) data.
 
 Main Features
 -------------
@@ -10,27 +9,18 @@ Main Features
 - **Modulation**: Support for PAM, PSK, and QAM (NRZ/RZ) with Gray coding.
 - **Impairments**: Simulation of AWGN, Phase Noise, and Frequency Offset.
 - **Synchronization**: Time and frequency synchronization algorithms.
-- **Execution backends**: Transparent NumPy, CuPy, and JAX support.
+- **Execution backends**: the device follows the data (NumPy or CuPy).
+
+Importing commkit has no side effects: it does not configure logging or
+Matplotlib, change warning filters, or touch the GPU.  Subpackages such as
+``commkit.plotting`` are loaded on first access.
 """
 
-import warnings
+import importlib
+from typing import Any
 
 __version__ = "1.1.0"
 
-# Leaf modules import ``Signal`` from ``.core.signal`` at top level for
-# Signal/array dispatch.  ``core.signal`` is a leaf (it imports no sibling
-# domain modules), so the first leaf module imported below pulls ``core`` in
-# without a cycle, regardless of statement order here.
-from . import (
-    analysis,
-    equalization,
-    frequency,
-    impairments,
-    metrics,
-    recovery,
-    spectral,
-    timing,
-)
 from .core import (
     Preamble,
     Signal,
@@ -43,10 +33,39 @@ from .core import (
 )
 from .io import load_npz, save_npz
 from .logger import set_log_level
-from .plotting import apply_default_theme
 
-# Filter the specific warning message using a regular expression match
-warnings.filterwarnings("ignore", message=".*cupyx.jit.rawkernel is experimental.*")
+# Loaded on first attribute access (PEP 562), so ``import commkit`` stays cheap
+# and does not import Matplotlib, SciPy-heavy modules, or CuPy until needed.
+_SUBMODULES = frozenset(
+    {
+        "analysis",
+        "backend",
+        "coding",
+        "equalization",
+        "filtering",
+        "frequency",
+        "impairments",
+        "mapping",
+        "metrics",
+        "multirate",
+        "plotting",
+        "recovery",
+        "smoothing",
+        "spectral",
+        "timing",
+    }
+)
+
+
+def __getattr__(name: str) -> Any:
+    if name in _SUBMODULES:
+        return importlib.import_module(f".{name}", __name__)
+    raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
+
+
+def __dir__() -> list[str]:
+    return sorted(set(globals()) | _SUBMODULES)
+
 
 __all__ = [
     "Preamble",
@@ -70,5 +89,3 @@ __all__ = [
     "spectral",
     "timing",
 ]
-
-apply_default_theme()

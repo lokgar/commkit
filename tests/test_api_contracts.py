@@ -227,8 +227,6 @@ ROWS: list[Row] = [
     Row("commkit.backend.from_jax", REMOVE),
     Row("commkit.backend.is_jax_array", REMOVE),
     Row("commkit.backend.to_jax", REMOVE),
-    Row("commkit.logger.ColorFormatter", REMOVE),
-    Row("commkit.logger.get_logger", REMOVE),
     Row("commkit.logger.set_log_level", INFRA),
     Row("commkit.io.load_npz", INFRA),
     Row("commkit.io.save_npz", INFRA, data=2),

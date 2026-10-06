@@ -4,14 +4,8 @@ from typing import Any, overload
 
 import numpy as np
 
-from .backend import ArrayType, dispatch, get_array_module, to_device
+from .backend import ArrayType, _is_cupy_array, dispatch, get_array_module, to_device
 from .logger import logger
-
-try:
-    import cupy as cp
-except ImportError:
-    cp = None
-
 
 # ---------------------------------------------------------------------------
 # Random generation
@@ -391,7 +385,7 @@ def validate_array(
         return None
 
     # Coerce lists/tuples or other array-likes to numpy arrays initially
-    if not isinstance(v, (np.ndarray, getattr(cp, "ndarray", type(None)))):
+    if not (isinstance(v, np.ndarray) or _is_cupy_array(v)):
         try:
             v = np.asarray(v)
         except Exception as err:

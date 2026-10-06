@@ -453,12 +453,14 @@ sites. The order avoids conflicts, because 1.4-1.6 all edit
   - GPU tests build their inputs with `xp` or call `.to("gpu")` explicitly.
   - These three must land together: without the flag, CPU tests would
     otherwise move Signals to the GPU.
-- [ ] **1.3 `refactor!: no side effects on import`.**
+- [x] **1.3 `refactor!: no side effects on import`.**
   - No `apply_default_theme()` call on import.
-  - The logger gets a `NullHandler`. `set_log_level()` keeps working and
-    attaches the colour handler on request.
-  - The global `warnings.filterwarnings` call becomes a local
-    `catch_warnings` where CuPy JIT is used.
+  - The logger has no handler at all (changed from the original `NullHandler`
+    idea, which would also silence warnings). Python's last-resort handler
+    keeps warnings visible on stderr when nothing is configured.
+    `set_log_level()` attaches the colour handler on request.
+  - The global `warnings.filterwarnings` call is removed. It targeted
+    `cupyx.jit` warnings, and no commkit code imports `cupyx.jit` any more.
   - The CuPy functional probe (`cp.arange(1)`) runs lazily on first GPU use
     and is cached.
   - Subpackages are loaded lazily through module `__getattr__`.

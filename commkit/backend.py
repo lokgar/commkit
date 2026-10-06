@@ -18,28 +18,36 @@ import numpy as np
 
 from .logger import logger
 
-# Try to import CuPy and verify functionality
-try:
-    import cupy as cp
 
-    # Aggressive check: try to allocate and run a simple operation.
-    # This catches cases where CuPy is installed but shared libraries (nvrtc, cublas) are missing.
+@cache
+def _cupy() -> types.ModuleType | None:
+    """Import CuPy and check it works, once, on the first GPU-related call.
+
+    Importing ``commkit`` never imports CuPy or touches the GPU.  The probe
+    allocates and runs one kernel, which catches installations whose CUDA
+    libraries (nvrtc, cublas, driver) are missing or broken.
+    """
     try:
-        cp.arange(1)
-        _CUPY_AVAILABLE = True
-        logger.debug("CuPy is available and functional.")
-    except Exception:
-        # Fallback if functional check fails
-        _CUPY_AVAILABLE = False
-        cp = None
-        logger.warning(
-            "CuPy has problems with shared libraries, falling back to NumPy."
-        )
+        import cupy
+    except ImportError:
+        logger.debug("CuPy is not installed; GPU support is unavailable.")
+        return None
+    try:
+        cupy.arange(1)
+    except Exception as exc:
+        logger.warning("CuPy is installed but not functional (%s); GPU disabled.", exc)
+        return None
+    return cupy
 
-except ImportError:
-    _CUPY_AVAILABLE = False
-    cp = None
-    logger.debug("CuPy is not available, falling back to NumPy.")
+
+def _is_cupy_array(data: Any) -> bool:
+    """True for a CuPy array.
+
+    Checks the type's module, so it never imports CuPy: a CuPy array can only
+    exist if CuPy is already loaded.
+    """
+    return type(data).__module__ == "cupy"
+
 
 # Any for CuPy array to avoid a hard dependency in the type hint if not installed
 ArrayType = np.ndarray | Any
@@ -115,9 +123,10 @@ def is_cupy_available() -> bool:
     Returns
     -------
     bool
-        True if CuPy is installed and functional.
+        True if CuPy is installed and functional.  The first call imports CuPy
+        and runs a small probe kernel; the result is cached.
     """
-    return _CUPY_AVAILABLE
+    return _cupy() is not None
 
 
 def get_array_module(data: Any) -> types.ModuleType:
@@ -138,11 +147,10 @@ def get_array_module(data: Any) -> types.ModuleType:
         `cupy` if the data is a CuPy device array, otherwise `numpy`
         (CPU arrays, lists, and scalars).
     """
-    # `cp is not None` <=> CuPy imported and passed the functional check at import
-    # time (it is set to None otherwise), so no CuPy array can exist when it is
-    # None.
-    if cp is not None and isinstance(data, cp.ndarray):
-        return cp
+    if _is_cupy_array(data):
+        import cupy
+
+        return cupy
     return np
 
 
@@ -163,7 +171,7 @@ def get_scipy_module(xp: types.ModuleType) -> types.ModuleType:
     """
     # Match sp to the actual array module so dispatch() returns a consistent
     # (xp, sp) pair.
-    if cp is not None and xp is cp:
+    if xp.__name__ == "cupy":
         import cupyx.scipy
         import cupyx.scipy.ndimage
         import cupyx.scipy.signal
@@ -213,14 +221,15 @@ def to_device(data: Any, device: str) -> ArrayType:
     if device == "cpu":
         # Dispatch by the *actual array type* (mirrors get_array_module): an
         # array already on the GPU is always brought to the host.
-        if cp is not None and isinstance(data, cp.ndarray):
+        if _is_cupy_array(data):
             return data.get()
         if isinstance(data, np.ndarray):
             return data
         return np.asarray(data)
 
     elif device == "gpu":
-        if not is_cupy_available():
+        cp = _cupy()
+        if cp is None:
             raise ImportError("CuPy is not available.")
         if isinstance(data, cp.ndarray):
             return data
@@ -265,7 +274,7 @@ def dispatch(
     xp = get_array_module(data)
     sp = get_scipy_module(xp)
 
-    if not isinstance(data, (np.ndarray, getattr(cp, "ndarray", type(None)))):
+    if not (isinstance(data, np.ndarray) or _is_cupy_array(data)):
         data = xp.asarray(data)
 
     return data, xp, sp
@@ -340,12 +349,7 @@ def to_jax(data: Any, device: str | None = None, dtype: Any | None = None) -> An
         data = data.astype(target_dtype)
 
     # For CuPy: cast on GPU before DLPack
-    if (
-        is_cupy_available()
-        and isinstance(data, cp.ndarray)
-        and target_dtype is not None
-        and data.dtype != target_dtype
-    ):
+    if _is_cupy_array(data) and target_dtype is not None and data.dtype != target_dtype:
         data = data.astype(target_dtype)
 
     target_device = None
@@ -358,7 +362,9 @@ def to_jax(data: Any, device: str | None = None, dtype: Any | None = None) -> An
     result = None
 
     # 1. Handle CuPy -> JAX (GPU)
-    if is_cupy_available() and isinstance(data, cp.ndarray):
+    if _is_cupy_array(data):
+        cp = _cupy()
+        assert cp is not None  # a CuPy array exists, so CuPy is loaded
         try:
             # DLPack requires contiguous memory and proper alignment.
             # Enforce contiguous layout and 16-byte alignment (JAX/XLA requirement).
@@ -454,6 +460,8 @@ def from_jax(data: Any) -> ArrayType:
     if is_gpu and is_cupy_available():
         # Try zero-copy via DLPack to CuPy
         try:
+            cp = _cupy()
+            assert cp is not None
             return cp.from_dlpack(data)
         except Exception as e:
             logger.debug(
