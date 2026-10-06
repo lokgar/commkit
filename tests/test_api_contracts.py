@@ -50,6 +50,7 @@ import commkit
 from commkit.backend import to_device
 from commkit.core import Signal
 from commkit.equalization import EqualizerResult
+from commkit.impairments import Lowdin
 from commkit.mapping import Constellation
 
 # -----------------------------------------------------------------------------
@@ -448,15 +449,13 @@ ROWS: list[Row] = [
         TRANSFORM,
         call=lambda c, x: _a(x, amplitude_imbalance_db=0.5, phase_imbalance_deg=3),
     ),
+    Row("commkit.impairments.frontend.GramSchmidt", VALUE),
+    Row("commkit.impairments.frontend.Lowdin", VALUE),
     Row(
-        "commkit.impairments.frontend.compensate_iq_imbalance_gram_schmidt",
+        "commkit.impairments.frontend.correct_iq_imbalance",
         TRANSFORM,
-        call=lambda c, x: _a(x),
-    ),
-    Row(
-        "commkit.impairments.frontend.compensate_iq_imbalance_lowdin",
-        TRANSFORM,
-        call=lambda c, x: _a(x),
+        data=2,
+        call=lambda c, x: _a(x, Lowdin()),
     ),
     Row(
         "commkit.impairments.noise.apply_awgn",
@@ -467,7 +466,7 @@ ROWS: list[Row] = [
     Row(
         "commkit.impairments.source.apply_phase_noise",
         TRANSFORM,
-        call=lambda c, x: _a(x, sampling_rate=FS, linewidth=1e5, seed=1),
+        call=lambda c, x: _a(x, sampling_rate=FS, linewidth=1e5, rng=1),
         fact=FS_CONFLICT,
     ),
     Row("commkit.impairments.source.generate_phase_noise", SYNTHESIS, data=0),
@@ -994,13 +993,6 @@ LEGACY: dict[str, frozenset[str]] = {
     "commkit.frequency.estimate_frequency_offset_pilot_symbols": L(SIG, FCT, RNK),
     "commkit.frequency.find_bias_tone": L(SIG),
     "commkit.helpers.cross_correlate_fft": L(SIG),
-    "commkit.impairments.channel.linear.apply_chromatic_dispersion": L(SIG, FCT),
-    "commkit.impairments.channel.linear.apply_pmd": L(SIG, FCT),
-    "commkit.impairments.channel.linear.apply_polarization_mixing": L(SIG),
-    "commkit.impairments.frontend.apply_iq_imbalance": L(SIG),
-    "commkit.impairments.noise.apply_awgn": L(SIG, FCT),
-    "commkit.impairments.source.apply_phase_noise": L(SIG, FCT),
-    "commkit.impairments.source.generate_phase_noise": L(SIG),
     "commkit.metrics.ber": L(f"{MET}@gpu"),
     "commkit.metrics.evm": L(MET),
     "commkit.metrics.mi": L(SIG, MET),

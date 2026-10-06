@@ -561,8 +561,8 @@ def linewidth_dsh(
     (arms blocked) *especially* before ``lorentzian``, where a DC spur
     mid-line hijacks the peak and narrows the measured widths; and hybrid
     amplitude/phase imbalance, which creates a conjugate image of the beat -
-    correct it first (``impairments.compensate_iq_imbalance_gram_schmidt`` /
-    ``..._lowdin``).  An AOM shift moves the line ``f_shift`` away from the
+    correct it first (``impairments.correct_iq_imbalance`` with ``Lowdin()``
+    or ``GramSchmidt()``).  An AOM shift moves the line ``f_shift`` away from the
     DC spur and ``2·f_shift`` away from its own image, so heterodyne IQ
     captures are considerably more forgiving of both.
 

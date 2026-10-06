@@ -125,7 +125,11 @@ SNR_DB = 25  # beat SNR in the full Nyquist band
 M_DELAY = int(round(122.5e-6 * FS))  # 25 km SMF
 TAU_D = M_DELAY / FS
 
-phi = xp.asarray(generate_phase_noise(N + M_DELAY, FS, linewidth=DNU_TRUE, seed=42))
+phi = xp.asarray(
+    generate_phase_noise(
+        num_samples=N + M_DELAY, sampling_rate=FS, linewidth=DNU_TRUE, rng=42
+    )
+)
 z_dsh, dphi_true = analysis.dsh_beat(phi, FS, TAU_D, f_shift=F_AOM)
 z_dsh = apply_awgn(z_dsh, sps=1, esn0_db=SNR_DB, seed=1)
 
@@ -327,7 +331,9 @@ M_SHORT = int(round(4.9e-6 * FS))  # 1 km spool
 TAU_SHORT = M_SHORT / FS
 
 phi_short = xp.asarray(
-    generate_phase_noise(N + M_SHORT, FS, linewidth=DNU_TRUE, seed=44)
+    generate_phase_noise(
+        num_samples=N + M_SHORT, sampling_rate=FS, linewidth=DNU_TRUE, rng=44
+    )
 )
 z_short, _ = analysis.dsh_beat(phi_short, FS, TAU_SHORT, f_shift=F_AOM)
 z_short = apply_awgn(z_short, sps=1, esn0_db=SNR_DB, seed=3)
@@ -385,7 +391,12 @@ print(f"fm_psd on the same capture         : {res_good['linewidth'] / 1e3:.1f} k
 H_M1 = 4e9
 phi_mix = xp.asarray(
     generate_phase_noise(
-        N + M_SHORT, FS, linewidth=DNU_TRUE, flicker=H_M1, flicker_f_min=1e3, seed=45
+        num_samples=N + M_SHORT,
+        sampling_rate=FS,
+        linewidth=DNU_TRUE,
+        flicker=H_M1,
+        flicker_f_min=1e3,
+        rng=45,
     )
 )
 z_mix, _ = analysis.dsh_beat(phi_mix, FS, TAU_SHORT, f_shift=F_AOM)

@@ -181,13 +181,6 @@ class TestPipelineComposition:
 class TestPipelineMetadataPropagation:
     """Tests for metadata preservation, precedence, and domain tracking."""
 
-    def test_required_signal_metadata_takes_precedence(self, xp: Any, xpt: Any) -> None:
-        """A required Signal field wins over a contradictory duplicate argument."""
-        sig = _signal(xp, sps=2.0)
-        actual = apply_awgn(sig, sps=99.0, esn0_db=20, seed=11)
-        expected = apply_awgn(sig.samples, sps=sig.sps, esn0_db=20, seed=11)
-        xpt.assert_allclose(actual.samples, expected)
-
     def test_optional_metadata_falls_back_only_when_signal_field_absent(
         self, xp: Any
     ) -> None:

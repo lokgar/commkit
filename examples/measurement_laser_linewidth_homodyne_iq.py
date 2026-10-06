@@ -28,7 +28,7 @@ except ImportError:
 
 from commkit import analysis, plotting
 from commkit.backend import to_device
-from commkit.impairments import compensate_iq_imbalance_gram_schmidt
+from commkit.impairments import GramSchmidt, correct_iq_imbalance
 from commkit.spectral import welch_psd
 
 plotting.apply_default_theme()
@@ -82,11 +82,15 @@ else:
 
     m = int(round(TAU_D * FS))
     phi_demo = xp.asarray(
-        generate_phase_noise((1 << 21) + m, FS, linewidth=100e3, seed=42)
+        generate_phase_noise(
+            num_samples=(1 << 21) + m, sampling_rate=FS, linewidth=100e3, rng=42
+        )
     )
     z_demo, _ = analysis.dsh_beat(phi_demo, FS, TAU_D)  # f_shift=0: homodyne
     z_meas = apply_iq_imbalance(
-        apply_awgn(z_demo, sps=1, esn0_db=25, seed=1), 1.0, 5.0
+        apply_awgn(z_demo, sps=1, esn0_db=25, seed=1),
+        amplitude_imbalance_db=1.0,
+        phase_imbalance_deg=5.0,
     ) + (0.18 - 0.12j)
 
 if not xp.iscomplexobj(z_meas):
@@ -114,7 +118,7 @@ else:
         f"DC from record mean  : {dc_cal:.4f}  (no dark capture - decoherence-regime fallback)"
     )
 
-z = compensate_iq_imbalance_gram_schmidt(z_meas - dc_cal)
+z = correct_iq_imbalance(z_meas - dc_cal, GramSchmidt())
 
 # %% [markdown]
 # ## 4. Sanity views before any number: beat spectrum and |z| dropouts

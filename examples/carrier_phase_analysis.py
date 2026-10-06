@@ -102,7 +102,9 @@ t = xp.arange(N) * T
 d = xp.asarray(generate(Constellation.psk(4), N, symbol_rate=R, sps=1, rng=7).samples)
 
 # Carrier phase = laser random walk (ground truth in hand) + injected wander:
-phi_pn = xp.asarray(generate_phase_noise(N, R, linewidth=DNU_TRUE, seed=17))
+phi_pn = xp.asarray(
+    generate_phase_noise(num_samples=N, sampling_rate=R, linewidth=DNU_TRUE, rng=17)
+)
 df_wander = WANDER_AMP * xp.sin(2.0 * np.pi * WANDER_FREQ * t)
 phi_drift = 2.0 * np.pi * xp.cumsum(df_wander) * T
 phi_true = phi_pn + phi_drift

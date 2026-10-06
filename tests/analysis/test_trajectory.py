@@ -18,7 +18,12 @@ T = 1.0 / R
 
 def _wiener_phase(linewidth, n, seed=0):
     """Discrete Wiener phase walk at the symbol rate (NumPy, float64)."""
-    return to_device(generate_phase_noise(n, R, linewidth=linewidth, seed=seed), "cpu")
+    return to_device(
+        generate_phase_noise(
+            num_samples=n, sampling_rate=R, linewidth=linewidth, rng=seed
+        ),
+        "cpu",
+    )
 
 
 def _qpsk(n, seed=1):

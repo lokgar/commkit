@@ -788,6 +788,27 @@ The equalization pass (3.7) gets more commits:
   Signal-aware (it matched the string "Signal" and silently dropped 32
   Signal round-trip and fact checks until fixed).
 
+**Pass 3.4 commits:**
+
+- [x] **3.4a `refactor(impairments)!: 2.0 signatures`.**
+  - Keyword-only parameters, `S`-typed transforms; `sampling_rate` / `sps`
+    are facts.
+  - `apply_phase_noise(..., rng=)` and `generate_phase_noise(*, num_samples,
+    sampling_rate, ..., num_channels=, rng=)` (was `num_streams=` / `seed=`):
+    the trajectory is drawn on the host from `default_rng(rng)`, which is what
+    `seed=` did, so realizations are unchanged. `generate_phase_noise`
+    returns a NumPy array (the docstring claimed the GPU).
+  - `compensate_iq_imbalance_{lowdin,gram_schmidt}` become
+    `correct_iq_imbalance(samples, how)` with the algorithm objects
+    `Lowdin()` / `GramSchmidt()` (D16), dispatched through a private table.
+  - `apply_polarization_mixing(drift_rate_rad_per_sym=)` becomes
+    `drift_rad_per_sample=`: the ramp has always advanced per sample.
+- [ ] **3.4b `refactor(impairments)!: apply_awgn takes rng`.** `rng: int |
+  Generator | None` replaces `seed=`, and `None` no longer draws from the
+  global NumPy/CuPy RNG. CPU noise comes from the Generator; GPU noise from a
+  CuPy Generator seeded from it (private `_random.py`), drawn directly in the
+  sample precision. Noise realizations change; tests assert statistics only.
+
 **Equalizer safety rules (3.7):**
 
 - Keep the dtype rules: complex128 accumulation in LMS/CMA, and float64 for all

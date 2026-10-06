@@ -61,9 +61,10 @@ except ImportError:
 from commkit import analysis, plotting
 from commkit.backend import to_device
 from commkit.impairments import (
+    GramSchmidt,
     apply_awgn,
     apply_iq_imbalance,
-    compensate_iq_imbalance_gram_schmidt,
+    correct_iq_imbalance,
     generate_phase_noise,
 )
 from commkit.spectral import welch_psd
@@ -128,7 +129,11 @@ print(
 )
 
 # Step 1: laser phase trajectory (long enough to cover the delayed copy too).
-phi = xp.asarray(generate_phase_noise(N + M_DELAY, FS, linewidth=DNU_TRUE, seed=42))
+phi = xp.asarray(
+    generate_phase_noise(
+        num_samples=N + M_DELAY, sampling_rate=FS, linewidth=DNU_TRUE, rng=42
+    )
+)
 
 # Step 2: the two interferometer arms beat in the hybrid - complex field
 # product of the direct and delayed copies (I + jQ from the balanced pairs).
@@ -140,7 +145,10 @@ z_ideal = apply_awgn(z_beat, sps=1, esn0_db=SNR_DB, seed=1)
 
 # Step 4: receiver imperfections.
 DC_TRUE = 0.18 - 0.12j  # per-quadrature offsets, relative to |z| = 1
-z_meas = apply_iq_imbalance(z_ideal, 1.0, 5.0) + DC_TRUE
+z_meas = (
+    apply_iq_imbalance(z_ideal, amplitude_imbalance_db=1.0, phase_imbalance_deg=5.0)
+    + DC_TRUE
+)
 
 # %% [markdown]
 # ## 2. Front-end calibration - the step this receiver cannot skip
@@ -171,7 +179,7 @@ z_dark = apply_awgn(
 dc_cal = complex(xp.mean(z_dark))
 print(f"calibrated DC = {dc_cal:.4f}   (true {DC_TRUE})")
 
-z = compensate_iq_imbalance_gram_schmidt(z_meas - dc_cal)
+z = correct_iq_imbalance(z_meas - dc_cal, GramSchmidt())
 
 # %% [markdown]
 # ## 3. Look at the beat spectrum

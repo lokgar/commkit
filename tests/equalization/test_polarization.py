@@ -190,7 +190,7 @@ class TestDemultiplexPolarizationTonesDynamic:
         # SOP sweeps a full ~pi/2 across the capture - the static average Jones
         # matrix matches no instant, so its cross-talk rejection collapses.
         drift = (np.pi / 2) / N
-        rx = apply_polarization_mixing(tx, theta=0.2, drift_rate_rad_per_sym=drift)
+        rx = apply_polarization_mixing(tx, theta=0.2, drift_rad_per_sample=drift)
 
         static = equalization.demultiplex_polarization_tones_static(rx, fs, f_used)
         dynamic = equalization.demultiplex_polarization_tones_dynamic(

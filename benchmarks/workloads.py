@@ -36,7 +36,7 @@ def bps_workload(
 ) -> np.ndarray:
     """1-SPS QAM with Wiener laser phase noise + AWGN (CPR benchmark input)."""
     syms = qam_symbols(order, n_sym, num_ch, seed)
-    x = apply_phase_noise(syms, sampling_rate=FS, linewidth=linewidth_hz, seed=seed)
+    x = apply_phase_noise(syms, sampling_rate=FS, linewidth=linewidth_hz, rng=seed)
     x = apply_awgn(x, esn0_db=snr_db, sps=1, seed=seed + 1)
     return np.asarray(x, dtype=np.complex64)
 
@@ -65,7 +65,7 @@ def mimo_equalizer_workload(
     x = (R @ x).astype(np.complex64)
     if linewidth_hz > 0:
         x = apply_phase_noise(
-            x, sampling_rate=FS * sps, linewidth=linewidth_hz, seed=seed
+            x, sampling_rate=FS * sps, linewidth=linewidth_hz, rng=seed
         )
     x = apply_awgn(x, esn0_db=snr_db, sps=sps, seed=seed + 1)
     return np.asarray(x, dtype=np.complex64), syms

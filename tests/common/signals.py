@@ -329,7 +329,10 @@ def make_dsh_beat(
 
     phi = to_device(
         generate_phase_noise(
-            num_samples + delay_samples, sample_rate, linewidth=linewidth, seed=seed
+            num_samples=num_samples + delay_samples,
+            sampling_rate=sample_rate,
+            linewidth=linewidth,
+            rng=seed,
         ),
         "cpu",
     )

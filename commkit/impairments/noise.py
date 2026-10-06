@@ -1,8 +1,7 @@
 """Additive measurement noise (ASE / thermal) impairments."""
 
-from ..backend import ArrayType, dispatch
-from ..core._signal_adapter import adapt_signal
-from ..core.signal import Signal
+from ..backend import dispatch
+from ..core._signal_adapter import S, adapt_signal
 from ..logger import logger
 from ..math import db_to_linear
 
@@ -10,12 +9,13 @@ __all__ = ["apply_awgn"]
 
 
 def apply_awgn(
-    samples: ArrayType | Signal,
+    samples: S,
+    *,
+    esn0_db: float,
     sps: float | None = None,
-    esn0_db: float | None = None,
-    seed: int | None = None,
     signal_power: float | None = None,
-) -> ArrayType | Signal:
+    seed: int | None = None,
+) -> S:
     """
     Adds Additive White Gaussian Noise (AWGN) to a signal based on Es/N0.
 
@@ -27,11 +27,11 @@ def apply_awgn(
     ----------
     samples : array_like or Signal
         The input signal samples. Shape: (..., N_samples)
-    sps : float, optional
-        Samples per symbol.  Required for array input; ignored for
-        :class:`Signal` input, which always uses the signal's own ``sps``.
     esn0_db : float
         Symbol energy to noise spectral density ratio (Es/N0) in dB.
+    sps : float, optional
+        Samples per symbol.  Taken from the Signal; required for array input.
+        A value that disagrees with the Signal raises.
     seed : int, optional
         Random seed for reproducible noise generation. When ``None`` (default),
         the global RNG state is used.
@@ -57,19 +57,16 @@ def apply_awgn(
 
     Examples
     --------
-    >>> sig = generate_pam(order=4, num_symbols=1000, sps=4, symbol_rate=1e6)
-    >>> noisy = apply_awgn(sig.samples, esn0_db=20, sps=sig.sps)
+    >>> sig = generate(Constellation.pam(4), 1000, symbol_rate=1e6, sps=4)
+    >>> noisy = apply_awgn(sig.samples, esn0_db=20, sps=4)
     >>> noisy = apply_awgn(sig, esn0_db=20)  # Signal input: sps taken from sig
     """
     signal_adapter = adapt_signal(samples, function_name="apply_awgn()")
-    samples = signal_adapter.array
-    sps = signal_adapter.resolve_required("sps", sps)
-    if esn0_db is None:
-        raise ValueError("apply_awgn() requires esn0_db.")
+    sps = signal_adapter.resolve_fact("sps", sps)
 
     logger.info("Adding AWGN (Es/N0 target: %.2f dB).", esn0_db)
 
-    samples, xp, _ = dispatch(samples)
+    x, xp, _ = dispatch(signal_adapter.array)
 
     # === Es/N0 to sample-level SNR conversion ===
     #
@@ -89,7 +86,7 @@ def apply_awgn(
     # Or equivalently: P_noise = P_signal * sps / Es_N0_linear
 
     if signal_power is None:
-        signal_power = xp.mean(xp.abs(samples) ** 2)
+        signal_power = xp.mean(xp.abs(x) ** 2)
     esn0_linear = db_to_linear(esn0_db, power=True)
 
     # Noise power accounting for oversampling
@@ -99,19 +96,19 @@ def apply_awgn(
         noise_power = signal_power * sps / esn0_linear
 
     # Handle complex signals (split power between I and Q)
-    is_complex = xp.iscomplexobj(samples)
+    is_complex = xp.iscomplexobj(x)
 
     rng = xp.random.RandomState(seed) if seed is not None else xp.random
     if is_complex:
         noise_std_component = xp.sqrt(noise_power / 2)
-        real_dtype = samples.real.dtype
-        noise = rng.normal(0, noise_std_component, samples.shape).astype(
+        real_dtype = x.real.dtype
+        noise = rng.normal(0, noise_std_component, x.shape).astype(
             real_dtype
-        ) + 1j * rng.normal(0, noise_std_component, samples.shape).astype(real_dtype)
+        ) + 1j * rng.normal(0, noise_std_component, x.shape).astype(real_dtype)
     else:
         noise_std = xp.sqrt(noise_power)
-        noise = rng.normal(0, noise_std, samples.shape).astype(samples.dtype)
+        noise = rng.normal(0, noise_std, x.shape).astype(x.dtype)
 
-    noisy_samples = samples + noise
+    noisy_samples = x + noise
 
     return signal_adapter.wrap_samples(noisy_samples)

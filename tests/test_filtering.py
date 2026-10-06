@@ -305,7 +305,13 @@ class TestCorrectChromaticDispersion:
         fs = 64e9
         d, l, lam = 17.0, 80.0, 1550.0
 
-        distorted = apply_chromatic_dispersion(samples, d, l, lam, fs)
+        distorted = apply_chromatic_dispersion(
+            samples,
+            sampling_rate=d,
+            dispersion_ps_nm_km=l,
+            fiber_length_km=lam,
+            center_wavelength_nm=fs,
+        )
         recovered = filtering.correct_chromatic_dispersion(
             distorted,
             sampling_rate=d,
@@ -330,7 +336,13 @@ class TestCorrectChromaticDispersion:
         fs = 64e9
         d, l, lam = 17.0, 40.0, 1550.0
 
-        distorted = apply_chromatic_dispersion(samples, d, l, lam, fs)
+        distorted = apply_chromatic_dispersion(
+            samples,
+            sampling_rate=d,
+            dispersion_ps_nm_km=l,
+            fiber_length_km=lam,
+            center_wavelength_nm=fs,
+        )
         recovered = filtering.correct_chromatic_dispersion(
             distorted,
             sampling_rate=d,

@@ -67,7 +67,12 @@ class TestLinewidthEstimation:
         enough that f_c spans many Welch bins.
         """
         fs, dnu, n = 100e6, 2e5, 1 << 20  # f_c ≈ 113 kHz, bin ≈ 6.1 kHz
-        phi = to_device(generate_phase_noise(n, fs, linewidth=dnu, seed=19), "cpu")
+        phi = to_device(
+            generate_phase_noise(
+                num_samples=n, sampling_rate=fs, linewidth=dnu, rng=19
+            ),
+            "cpu",
+        )
         out = analysis.linewidth_beta_separation(
             xp.asarray(phi), fs, nperseg=1 << 14, f_max=5e6
         )
@@ -82,7 +87,12 @@ class TestLinewidthEstimation:
         fs, n = 100e6, 1 << 19
         phi = to_device(
             generate_phase_noise(
-                n, fs, linewidth=1e5, flicker=4e9, flicker_f_min=1e3, seed=23
+                num_samples=n,
+                sampling_rate=fs,
+                linewidth=1e5,
+                flicker=4e9,
+                flicker_f_min=1e3,
+                rng=23,
             ),
             "cpu",
         )

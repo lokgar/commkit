@@ -25,7 +25,12 @@ class TestDSHBeatForwardModel:
         """dsh_beat: unit amplitude, exact differential phase, homodyne case."""
         n, m = 1 << 14, 250
         phi = xp.asarray(
-            to_device(generate_phase_noise(n + m, FS, linewidth=1e6, seed=42), "cpu")
+            to_device(
+                generate_phase_noise(
+                    num_samples=n + m, sampling_rate=FS, linewidth=1e6, rng=42
+                ),
+                "cpu",
+            )
         )
         z, dphi = analysis.dsh_beat(phi, FS, m / FS, f_shift=80e6)
         assert z.shape == (n,)
@@ -112,7 +117,12 @@ class TestDSHLinewidthEstimator:
         dnu, n, m = 2e5, 1 << 21, 2450  # τ_d = 4.9 µs, corner ≈ 63 kHz
         phi = to_device(
             generate_phase_noise(
-                n + m, FS, linewidth=dnu, flicker=4e9, flicker_f_min=1e3, seed=45
+                num_samples=n + m,
+                sampling_rate=FS,
+                linewidth=dnu,
+                flicker=4e9,
+                flicker_f_min=1e3,
+                rng=45,
             ),
             "cpu",
         )
@@ -146,7 +156,10 @@ class TestDSHLinewidthEstimator:
         """
         dnu, m, f_aom = 2e5, 2450, 80e6  # τ_d = 4.9 µs true
         phi = to_device(
-            generate_phase_noise((1 << 20) + m, FS, linewidth=dnu, seed=42), "cpu"
+            generate_phase_noise(
+                num_samples=(1 << 20) + m, sampling_rate=FS, linewidth=dnu, rng=42
+            ),
+            "cpu",
         )
         z, _ = analysis.dsh_beat(phi, FS, m / FS, f_shift=f_aom)
         beat = apply_awgn(z, sps=1, esn0_db=25, seed=1).real

@@ -5,9 +5,8 @@ import math
 import numpy as np
 
 from .._array import as_2d, restore_1d
-from ..backend import ArrayType, dispatch
-from ..core._signal_adapter import adapt_signal
-from ..core.signal import Signal
+from ..backend import dispatch
+from ..core._signal_adapter import S, adapt_signal
 from ..logger import logger
 
 __all__ = ["apply_phase_noise", "generate_phase_noise"]
@@ -60,14 +59,15 @@ def _phase_trajectory(
 
 
 def generate_phase_noise(
+    *,
     num_samples: int,
     sampling_rate: float,
     linewidth: float = 0.0,
     flicker: float = 0.0,
     flicker_f_min: float | None = None,
-    num_streams: int = 1,
-    seed: int | None = None,
-) -> ArrayType:
+    num_channels: int = 1,
+    rng: int | np.random.Generator | None = None,
+) -> np.ndarray:
     """
     Generates laser/oscillator phase-noise trajectories phi[n] in radians.
 
@@ -102,41 +102,39 @@ def generate_phase_noise(
         Frequency below which the flicker shaping is held flat (the 1/f
         divergence must be capped).  Defaults to the record resolution
         ``sampling_rate / num_samples``.
-    num_streams : int, default 1
+    num_channels : int, default 1
         Number of independent trajectories.
-    seed : int, optional
-        Random seed for reproducible trajectories.
+    rng : int, numpy.random.Generator or None
+        Random source (an int seeds ``numpy.random.default_rng``).
 
     Returns
     -------
-    array_like
-        Phase in radians, ``float64``, on the active device (GPU when CuPy
-        is available).  Shape ``(num_samples,)`` for ``num_streams=1``,
-        else ``(num_streams, num_samples)``.
+    numpy.ndarray
+        Phase in radians, ``float64``, on the host (move it with
+        ``to_device``).  Shape ``(num_samples,)`` for ``num_channels=1``,
+        else ``(num_channels, num_samples)``.
 
     Notes
     -----
-    The trajectory is always generated with NumPy's ``default_rng`` and then
-    transferred, so a given seed produces the identical trajectory on CPU
-    and GPU (same convention as :func:`~commkit.generate`).
+    The trajectory is generated on the host with a NumPy Generator, so a
+    given seed gives the same trajectory whichever device it is used on.
     """
     logger.info(
         "Generating phase noise (linewidth=%.3g Hz, flicker=%.3g Hz², %s stream(s)).",
         linewidth,
         flicker,
-        num_streams,
+        num_channels,
     )
 
-    rng = np.random.default_rng(seed)
     phi = _phase_trajectory(
-        (num_streams, num_samples),
+        (num_channels, num_samples),
         sampling_rate,
         linewidth,
         flicker,
         flicker_f_min,
-        rng,
+        np.random.default_rng(rng),
     )
-    if num_streams == 1:
+    if num_channels == 1:
         phi = phi[0]
     return phi
 
@@ -147,14 +145,15 @@ def generate_phase_noise(
 
 
 def apply_phase_noise(
-    samples: ArrayType | Signal,
+    samples: S,
+    *,
+    linewidth: float,
     sampling_rate: float | None = None,
-    linewidth: float | None = None,
     flicker: float = 0.0,
     flicker_f_min: float | None = None,
-    seed: int | None = None,
     shared_lo: bool = False,
-) -> ArrayType | Signal:
+    rng: int | np.random.Generator | None = None,
+) -> S:
     """
     Adds laser / oscillator phase noise to a signal.
 
@@ -168,25 +167,24 @@ def apply_phase_noise(
     ----------
     samples : array_like or Signal
         Complex baseband signal. Shape: ``(N,)`` (SISO) or ``(C, N)`` (MIMO).
-    sampling_rate : float, optional
-        Sampling rate in Hz.  Required for array input; ignored for
-        :class:`Signal` input, which always uses the signal's own
-        ``sampling_rate``.
     linewidth : float
         Combined transmitter + receiver laser linewidth delta_nu in Hz.
         Typical values: 100 kHz (narrow-linewidth laser) to 10 MHz (DFB).
+    sampling_rate : float, optional
+        Sampling rate in Hz.  Taken from the Signal; required for array
+        input.  A value that disagrees with the Signal raises.
     flicker : float, default 0.0
         Flicker-FM coefficient h_-1 in Hz^2 (one-sided ``S_f = h_-1 / f``).
     flicker_f_min : float, optional
         Low-frequency cap for the flicker shaping; see
         :func:`generate_phase_noise`.
-    seed : int, optional
-        Random seed for reproducible noise.
     shared_lo : bool, default False
         When ``False`` (default), each channel receives independent phase noise
         (separate oscillators / lasers per TX-RX path).
         When ``True``, a single phase noise trajectory is shared across all
         channels (common local oscillator in a coherent system).
+    rng : int, numpy.random.Generator or None
+        Random source for the trajectories (drawn on the host).
 
     Returns
     -------
@@ -196,15 +194,11 @@ def apply_phase_noise(
 
     Examples
     --------
-    >>> noisy = apply_phase_noise(sig.samples, linewidth=100e3,
-    ...                           sampling_rate=sig.sampling_rate)
+    >>> noisy = apply_phase_noise(x, linewidth=100e3, sampling_rate=fs, rng=0)
     >>> noisy = apply_phase_noise(sig, linewidth=100e3)  # Signal input
     """
     signal_adapter = adapt_signal(samples, function_name="apply_phase_noise()")
-    samples = signal_adapter.array
-    sampling_rate = signal_adapter.resolve_required("sampling_rate", sampling_rate)
-    if linewidth is None:
-        raise ValueError("apply_phase_noise() requires linewidth.")
+    sampling_rate = signal_adapter.resolve_fact("sampling_rate", sampling_rate)
 
     logger.info(
         "Applying phase noise (linewidth=%.3g Hz, flicker=%.3g Hz², shared_lo=%s).",
@@ -213,11 +207,10 @@ def apply_phase_noise(
         shared_lo,
     )
 
-    samples, xp, _ = dispatch(samples)
-    samples, was_1d = as_2d(samples, name="samples")
-    C, N = samples.shape
+    x, xp, _ = dispatch(signal_adapter.array)
+    x, was_1d = as_2d(x, name="samples")
+    C, N = x.shape
 
-    rng = np.random.default_rng(seed)
     num_trajectories = 1 if shared_lo else C
     phase = xp.asarray(
         _phase_trajectory(
@@ -226,12 +219,12 @@ def apply_phase_noise(
             linewidth,
             flicker,
             flicker_f_min,
-            rng,
+            np.random.default_rng(rng),
         )
     )
-    result = samples * xp.exp(1j * phase)  # (1, N) broadcasts across channels
+    result = x * xp.exp(1j * phase)  # (1, N) broadcasts across channels
 
-    if result.dtype != samples.dtype:
-        result = result.astype(samples.dtype)
+    if result.dtype != x.dtype:
+        result = result.astype(x.dtype)
 
     return signal_adapter.wrap_samples(restore_1d(was_1d, result))
