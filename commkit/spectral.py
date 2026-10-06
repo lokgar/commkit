@@ -66,11 +66,53 @@ def _validate_and_shift(
     return return_onesided, shift
 
 
+def grid_frequency(
+    frequency: float | Sequence[float],
+    *,
+    sampling_rate: float,
+    num_samples: int,
+) -> float | np.ndarray:
+    """
+    The FFT-bin frequency that ``shift_frequency`` / ``add_pilot_tone`` apply.
+
+    Both functions snap a requested frequency to the nearest multiple of the
+    bin spacing ``sampling_rate / num_samples`` (ties to even), so the tone or
+    shift completes a whole number of cycles over the record.  This returns
+    that applied value, e.g. to tell a receiver where a pilot tone sits.
+
+    Parameters
+    ----------
+    frequency : float or sequence of float
+        Requested frequency (or one per channel) in Hz.
+    sampling_rate : float
+        Sampling rate in Hz.
+    num_samples : int
+        Record length ``N`` along the time axis (``samples.shape[-1]``).
+
+    Returns
+    -------
+    float or numpy.ndarray
+        The applied frequency in Hz; an array for sequence input.
+
+    Examples
+    --------
+    >>> grid_frequency(1.03e6, sampling_rate=8e6, num_samples=1000)
+    1032000.0
+    >>> tone = grid_frequency(f, sampling_rate=sig.sampling_rate,
+    ...                       num_samples=sig.samples.shape[-1])
+    """
+    if num_samples < 1:
+        raise ValueError(f"num_samples must be >= 1, got {num_samples}.")
+    df = sampling_rate / num_samples
+    snapped = np.round(np.asarray(frequency, dtype=np.float64) / df) * df
+    return float(snapped) if snapped.ndim == 0 else snapped
+
+
 def shift_frequency(
     samples: ArrayType | Signal,
     offset: float,
     sampling_rate: float | None = None,
-) -> tuple[ArrayType | Signal, float]:
+) -> ArrayType | Signal:
     """
     Applies a frequency offset (complex mixing) to a signal.
 
@@ -95,10 +137,10 @@ def shift_frequency(
 
     Returns
     -------
-    shifted_samples : array_like
-        The frequency-shifted signal on the same backend as the input.
-    actual_offset : float
-        The actual quantized frequency shift applied to the signal.
+    array_like or Signal
+        The frequency-shifted samples on the input's device (a new Signal for
+        Signal input).  The applied shift is
+        ``grid_frequency(offset, sampling_rate=fs, num_samples=N)``.
 
     Notes
     -----
@@ -107,7 +149,7 @@ def shift_frequency(
     for preserving the circularity of the signal's phase.
 
     When ``samples`` is a :class:`Signal`, ``sampling_rate`` is taken from the
-    signal and the first returned value is a new :class:`Signal`.
+    signal.
     """
     signal_adapter = adapt_signal(samples, function_name="shift_frequency()")
     samples = signal_adapter.array
@@ -120,8 +162,7 @@ def shift_frequency(
     df = sampling_rate / n
 
     # Quantize offset to nearest bin to ensure phase continuity
-    k = xp.round(offset / df)
-    actual_offset = k * df
+    actual_offset = grid_frequency(offset, sampling_rate=sampling_rate, num_samples=n)
 
     if not xp.isclose(offset, actual_offset):
         logger.warning(
@@ -154,9 +195,7 @@ def shift_frequency(
     if samples.ndim > 1:
         mixer = mixer.reshape((1,) * (samples.ndim - 1) + (-1,))
 
-    shifted = samples * mixer
-    actual = float(actual_offset)
-    return signal_adapter.wrap_samples(shifted), actual
+    return signal_adapter.wrap_samples(samples * mixer)
 
 
 def add_pilot_tone(
@@ -166,7 +205,7 @@ def add_pilot_tone(
     power_ratio_db: float | Sequence[float] = -15.0,
     phase_init: float = 0.0,
     renormalize: bool = False,
-) -> tuple[ArrayType | Signal, float | list[float]]:
+) -> ArrayType | Signal:
     r"""
     Add a continuous-wave (CW) pilot tone to a baseband waveform.
 
@@ -211,15 +250,11 @@ def add_pilot_tone(
 
     Returns
     -------
-    samples : array_like
-        Samples with the pilot tone added, same shape, dtype, and backend as
-        the input.
-    actual_frequency : float or list of float
-        The grid-quantized tone frequency(ies) in Hz actually applied (see
-        Notes).  A **scalar** ``frequency`` returns a single ``float``; a
-        per-channel **sequence** returns a ``list`` of ``C`` floats.  Store
-        this and pass it to the receiver,
-        since it - not the requested value - is where the tone(s) sit.
+    array_like or Signal
+        Samples with the pilot tone added, same shape, dtype, and device as
+        the input (a new Signal for Signal input).  The tones sit at
+        ``grid_frequency(frequency, sampling_rate=fs, num_samples=N)``, not at
+        the requested values; pass that to the receiver.
 
     Raises
     ------
@@ -237,8 +272,7 @@ def add_pilot_tone(
 
     When ``samples`` is a :class:`Signal`, the sampling rate is taken from the
     signal, so the **second positional argument is the frequency** (i.e. call
-    ``add_pilot_tone(sig, freq, ...)``) and the first returned value is a new
-    :class:`Signal`.
+    ``add_pilot_tone(sig, freq, ...)``).
     """
     signal_adapter = adapt_signal(samples, function_name="add_pilot_tone()")
     samples = signal_adapter.array
@@ -284,7 +318,10 @@ def add_pilot_tone(
     # Snap each tone to the FFT bin grid so it is buffer-periodic (loop-seamless
     # on an AWG/DAC), mirroring shift_frequency's quantization.
     df = sampling_rate / N
-    actual = [float(round(f / df) * df) for f in f_req]
+    actual = [
+        float(grid_frequency(f, sampling_rate=sampling_rate, num_samples=N))
+        for f in f_req
+    ]
     for f_in, f_out in zip(f_req, actual):
         if abs(f_out - f_in) > 1e-12 * max(1.0, abs(f_in)):
             logger.warning(
@@ -349,8 +386,7 @@ def add_pilot_tone(
     )
 
     samples_out = restore_1d(was_1d, out)
-    actual_frequency: float | list[float] = actual[0] if scalar_input else actual
-    return signal_adapter.wrap_samples(samples_out), actual_frequency
+    return signal_adapter.wrap_samples(samples_out)
 
 
 def welch_psd(

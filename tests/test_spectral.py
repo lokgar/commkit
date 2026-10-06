@@ -91,7 +91,10 @@ class TestFrequencyShift:
         t = xp.arange(N) / fs
         s = xp.exp(1j * 2 * xp.pi * 20 * t)
 
-        shifted, actual = spectral.shift_frequency(s, offset=10.0, sampling_rate=fs)
+        shifted = spectral.shift_frequency(s, offset=10.0, sampling_rate=fs)
+        actual = spectral.grid_frequency(
+            10.0, sampling_rate=fs, num_samples=s.shape[-1]
+        )
         assert actual == 10.0
 
         f_axis = xp.fft.fftfreq(N, 1 / fs)
@@ -100,7 +103,10 @@ class TestFrequencyShift:
         assert xp.isclose(peak_freq, 30.0)
 
         # Quantized shift
-        shifted_q, actual_q = spectral.shift_frequency(s, offset=10.5, sampling_rate=fs)
+        shifted_q = spectral.shift_frequency(s, offset=10.5, sampling_rate=fs)
+        actual_q = spectral.grid_frequency(
+            10.5, sampling_rate=fs, num_samples=s.shape[-1]
+        )
         assert actual_q % 1.0 == 0.0
         assert abs(actual_q - 10.5) <= 0.5
 
@@ -117,14 +123,14 @@ class TestFrequencyShift:
                 np.complex64
             )
         )
-        out, _ = spectral.shift_frequency(s, offset=100.0, sampling_rate=1000.0)
+        out = spectral.shift_frequency(s, offset=100.0, sampling_rate=1000.0)
         assert out.dtype == xp.complex64
 
     def test_shift_frequency_preserves_float32_dtype(self, xp: Any) -> None:
         """shift_frequency: float32 signal -> complex64 output."""
         rng = np.random.default_rng(21)
         s = xp.asarray(rng.standard_normal(512).astype(np.float32))
-        out, _ = spectral.shift_frequency(s, offset=100.0, sampling_rate=1000.0)
+        out = spectral.shift_frequency(s, offset=100.0, sampling_rate=1000.0)
         assert out.dtype == xp.complex64
 
 
@@ -194,7 +200,7 @@ class TestAddPilotTone:
         fs = 100.0
         x = self._signal(xp)
         p_sig = float(xp.mean(xp.abs(x) ** 2))
-        y, _ = spectral.add_pilot_tone(x, fs, 30.0, power_ratio_db=psr_db)
+        y = spectral.add_pilot_tone(x, fs, 30.0, power_ratio_db=psr_db)
         p_tone = float(xp.mean(xp.abs(y - x) ** 2))
         assert abs(10 * np.log10(p_tone / p_sig) - psr_db) < 0.05
 
@@ -204,7 +210,10 @@ class TestAddPilotTone:
         N = 4096
         f_p = 30.0
         x = self._signal(xp, N=N)
-        y, f_actual = spectral.add_pilot_tone(x, fs, f_p, power_ratio_db=10.0)
+        y = spectral.add_pilot_tone(x, fs, f_p, power_ratio_db=10.0)
+        f_actual = spectral.grid_frequency(
+            f_p, sampling_rate=fs, num_samples=x.shape[-1]
+        )
         freqs = xp.fft.fftfreq(N, d=1.0 / fs)
         k = int(xp.argmax(xp.abs(xp.fft.fft(y))))
         assert abs(float(freqs[k]) - f_actual) < fs / N
@@ -216,7 +225,10 @@ class TestAddPilotTone:
         df = fs / N
         x = self._signal(xp, N=N)
         f_req = 30.0 + 0.4 * df
-        _, f_actual = spectral.add_pilot_tone(x, fs, f_req)
+        spectral.add_pilot_tone(x, fs, f_req)
+        f_actual = spectral.grid_frequency(
+            f_req, sampling_rate=fs, num_samples=x.shape[-1]
+        )
         assert abs(round(f_actual / df) - f_actual / df) < 1e-9
         assert abs(f_actual - f_req) <= df / 2 + 1e-9
 
@@ -224,12 +236,12 @@ class TestAddPilotTone:
         """complex64 stays complex64; SISO/MIMO shapes are preserved."""
         fs = 100.0
         x64 = self._signal(xp).astype(xp.complex64)
-        y, _ = spectral.add_pilot_tone(x64, fs, 30.0)
+        y = spectral.add_pilot_tone(x64, fs, 30.0)
         assert y.dtype == xp.complex64
         assert y.shape == x64.shape
 
         mimo = xp.stack([self._signal(xp), 2 * self._signal(xp, seed=1)])
-        ym, _ = spectral.add_pilot_tone(mimo, fs, 30.0)
+        ym = spectral.add_pilot_tone(mimo, fs, 30.0)
         assert ym.shape == mimo.shape
 
     def test_renormalize_preserves_power(self, xp: Any) -> None:
@@ -237,7 +249,7 @@ class TestAddPilotTone:
         fs = 100.0
         mimo = xp.stack([self._signal(xp), 2 * self._signal(xp, seed=1)])
         p_in = xp.mean(xp.abs(mimo) ** 2, axis=-1)
-        y, _ = spectral.add_pilot_tone(
+        y = spectral.add_pilot_tone(
             mimo, fs, 30.0, power_ratio_db=-6.0, renormalize=True
         )
         p_out = xp.mean(xp.abs(y) ** 2, axis=-1)
@@ -254,7 +266,10 @@ class TestAddPilotTone:
         """Scalar frequency returns a plain float (back-compat), even for MIMO."""
         fs = 100.0
         mimo = xp.stack([self._signal(xp), self._signal(xp, seed=1)])
-        _, f_actual = spectral.add_pilot_tone(mimo, fs, 30.0)
+        spectral.add_pilot_tone(mimo, fs, 30.0)
+        f_actual = spectral.grid_frequency(
+            30.0, sampling_rate=fs, num_samples=mimo.shape[-1]
+        )
         assert isinstance(f_actual, float)
 
     def test_per_channel_frequencies(self, xp: Any) -> None:
@@ -263,8 +278,11 @@ class TestAddPilotTone:
         N = 4096
         f_req = [20.0, -35.0]
         mimo = xp.stack([self._signal(xp, N=N), self._signal(xp, N=N, seed=1)])
-        y, f_actual = spectral.add_pilot_tone(mimo, fs, f_req, power_ratio_db=10.0)
-        assert isinstance(f_actual, list) and len(f_actual) == 2
+        y = spectral.add_pilot_tone(mimo, fs, f_req, power_ratio_db=10.0)
+        f_actual = spectral.grid_frequency(
+            f_req, sampling_rate=fs, num_samples=mimo.shape[-1]
+        )
+        assert isinstance(f_actual, np.ndarray) and len(f_actual) == 2
         freqs = xp.fft.fftfreq(N, d=1.0 / fs)
         for c in range(2):
             k = int(xp.argmax(xp.abs(xp.fft.fft(y[c]))))
@@ -291,7 +309,7 @@ class TestAddPilotTone:
         fs = 100.0
         psr = [-10.0, -20.0]
         mimo = xp.stack([self._signal(xp), self._signal(xp, seed=1)])
-        y, _ = spectral.add_pilot_tone(mimo, fs, [20.0, -35.0], power_ratio_db=psr)
+        y = spectral.add_pilot_tone(mimo, fs, [20.0, -35.0], power_ratio_db=psr)
         for c in range(2):
             p_sig = float(xp.mean(xp.abs(mimo[c]) ** 2))
             p_tone = float(xp.mean(xp.abs(y[c] - mimo[c]) ** 2))
@@ -303,3 +321,37 @@ class TestAddPilotTone:
         mimo = xp.stack([self._signal(xp), self._signal(xp, seed=1)])
         with pytest.raises(ValueError, match=r"one PSR per channel"):
             spectral.add_pilot_tone(mimo, fs, [20.0, -30.0], power_ratio_db=[-10.0])
+
+
+class TestGridFrequency:
+    """grid_frequency is the quantization shift_frequency/add_pilot_tone apply."""
+
+    def test_values(self) -> None:
+        assert (
+            spectral.grid_frequency(1.03e6, sampling_rate=8e6, num_samples=1000)
+            == 1.032e6
+        )
+        np.testing.assert_allclose(
+            spectral.grid_frequency(
+                [10.4, -10.6], sampling_rate=100.0, num_samples=100
+            ),
+            [10.0, -11.0],
+        )
+        with pytest.raises(ValueError, match="num_samples"):
+            spectral.grid_frequency(1.0, sampling_rate=1.0, num_samples=0)
+
+    def test_shift_lands_on_grid_frequency(self, xp: Any) -> None:
+        fs, n, f = 1000.0, 1000, 123.4
+        out = spectral.shift_frequency(xp.ones(n, dtype=xp.complex64), f, fs)
+        expected = spectral.grid_frequency(f, sampling_rate=fs, num_samples=n)
+        peak = int(xp.argmax(xp.abs(xp.fft.fft(out))))
+        assert peak * fs / n == pytest.approx(expected)
+
+    def test_pilot_tone_lands_on_grid_frequency(self, xp: Any) -> None:
+        fs, n, f = 1000.0, 1000, -201.6
+        y = spectral.add_pilot_tone(xp.zeros(n, dtype=xp.complex64) + 1e-3, fs, f)
+        expected = spectral.grid_frequency(f, sampling_rate=fs, num_samples=n)
+        spec = xp.abs(xp.fft.fft(y))
+        spec[0] = 0
+        peak = int(xp.argmax(spec))
+        assert (peak - n if peak > n // 2 else peak) * fs / n == pytest.approx(expected)

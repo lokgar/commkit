@@ -668,6 +668,7 @@ ROWS: list[Row] = [
         call=lambda c, x: _a(x, offset=1e7, sampling_rate=FS),
         fact=FS_CONFLICT,
     ),
+    Row("commkit.spectral.grid_frequency", DESIGN, data=1),
     Row("commkit.spectral.spectrogram", MULTI),
     Row("commkit.spectral.welch_psd", MULTI),
     # --- timing -------------------------------------------------------------
@@ -1067,8 +1068,8 @@ LEGACY: dict[str, frozenset[str]] = {
     "commkit.smoothing.moving_average": L(SIG),
     "commkit.smoothing.savgol_smooth": L(SIG),
     "commkit.smoothing.smooth_density_2d": L(SIG),
-    "commkit.spectral.add_pilot_tone": L(SIG, ARR, SGN, FCT),
-    "commkit.spectral.shift_frequency": L(SIG, ARR, SGN, FCT),
+    "commkit.spectral.add_pilot_tone": L(SIG, FCT),
+    "commkit.spectral.shift_frequency": L(SIG, FCT),
     "commkit.spectral.spectrogram": L(SIG),
     "commkit.spectral.welch_psd": L(SIG),
     "commkit.timing.correct_timing": L(SIG),

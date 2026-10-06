@@ -137,7 +137,7 @@ def make_test_qam_signal(
             samples=apply_awgn(sig.samples, esn0_db=snr_db, sps=sps, seed=seed)
         )
     if fo_hz != 0.0:
-        shifted, _ = spectral.shift_frequency(sig.samples, fo_hz, symbol_rate * sps)
+        shifted = spectral.shift_frequency(sig.samples, fo_hz, symbol_rate * sps)
         sig = sig.replace(samples=shifted)
     if xp is not None:
         sig = sig.to(device_of(xp))
@@ -171,7 +171,7 @@ def make_test_psk_signal(
             samples=apply_awgn(sig.samples, esn0_db=snr_db, sps=sps, seed=seed)
         )
     if fo_hz != 0.0:
-        shifted, _ = spectral.shift_frequency(sig.samples, fo_hz, symbol_rate * sps)
+        shifted = spectral.shift_frequency(sig.samples, fo_hz, symbol_rate * sps)
         sig = sig.replace(samples=shifted)
     if xp is not None:
         sig = sig.to(device_of(xp))

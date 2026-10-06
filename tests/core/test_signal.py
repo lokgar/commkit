@@ -418,7 +418,10 @@ class TestSignalDSPOperations:
         before = xp.asarray(sig.samples.copy())
         df = sig.sampling_rate / sig.samples.shape[-1]
 
-        ret, f_p = spectral.add_pilot_tone(sig, 2.0e6, power_ratio_db=-12.0)
+        ret = spectral.add_pilot_tone(sig, 2.0e6, power_ratio_db=-12.0)
+        f_p = spectral.grid_frequency(
+            2.0e6, sampling_rate=sig.sampling_rate, num_samples=sig.samples.shape[-1]
+        )
 
         assert isinstance(ret, Signal)
         assert ret is not sig  # pure: a new Signal is returned
@@ -436,7 +439,10 @@ class TestSignalDSPOperations:
         s = Signal(samples=data, sampling_rate=fs, symbol_rate=10.0)
 
         # Offset by 20 Hz
-        s, actual = spectral.shift_frequency(s, 20.0)
+        s = spectral.shift_frequency(s, 20.0)
+        actual = spectral.grid_frequency(
+            20.0, sampling_rate=s.sampling_rate, num_samples=s.samples.shape[-1]
+        )
         assert isinstance(s, Signal)
         assert actual == 20.0
 
@@ -444,7 +450,7 @@ class TestSignalDSPOperations:
         expected = xp.exp(1j * 2 * xp.pi * 20.0 * t)
         xpt.assert_allclose(s.samples, expected)
 
-        s, _ = spectral.shift_frequency(s, 5.0)
+        s = spectral.shift_frequency(s, 5.0)
 
         # Check approximate freq
         f, p = spectral.welch_psd(s, nperseg=64)

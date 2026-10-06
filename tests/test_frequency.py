@@ -181,7 +181,10 @@ class TestCorrectionFunctions:
         original = sig.samples.copy()
         # shift_frequency quantizes to the nearest bin; capture actual offset so
         # the correction can cancel it exactly (no residual due to quantization)
-        shifted, actual_fo = spectral.shift_frequency(sig.samples, 10_000.0, FS)
+        shifted = spectral.shift_frequency(sig.samples, 10_000.0, FS)
+        actual_fo = spectral.grid_frequency(
+            10_000.0, sampling_rate=FS, num_samples=sig.samples.shape[-1]
+        )
         restored = frequency.correct_static_frequency_offset(
             shifted, offset=actual_fo, sampling_rate=FS
         )
