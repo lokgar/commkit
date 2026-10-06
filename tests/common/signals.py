@@ -269,7 +269,10 @@ def make_isi_distorted_signal(
     sig = generate(
         constellation, n_symbols, symbol_rate=1e6, sps=2, pulse=RRC(0.35), rng=seed
     )
-    tx = xp.asarray(to_numpy(sig.source_symbols))
+    # Unit sample-average power, as the 1.x reference was: the FDAF equivalence
+    # tests need it because block_lms normalizes its training symbols and the
+    # blind engines' pilot path does not (plan 3.7).
+    tx = xp.asarray(normalize(to_numpy(sig.source_symbols), "average_power"))
     rx = xp.convolve(
         xp.asarray(to_numpy(sig.samples)), xp.asarray(channel), mode="same"
     )

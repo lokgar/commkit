@@ -308,14 +308,6 @@ def generate(
 
     samples = _shape(symbols, sps, pulse)
 
-    # 1.x convention, removed in the next commit: a uniform reference is
-    # normalized to unit sample-average power per channel.
-    ref_symbols = (
-        helpers.normalize(symbols, mode="average_power", axis=-1)
-        if c.pmf is None
-        else symbols
-    )
-
     logger.info(
         "Generated %r: %s symbols x %s channel(s), sps=%s, pulse=%r.",
         c,
@@ -330,7 +322,7 @@ def generate(
         symbol_rate=symbol_rate,
         constellation=c,
         pulse=pulse if isinstance(pulse, filtering.Pulse) else None,
-        reference=Reference(symbols=ref_symbols, bits=bits),
+        reference=Reference(symbols=symbols, bits=bits),
     )
 
 

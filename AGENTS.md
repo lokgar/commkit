@@ -354,7 +354,6 @@ rule without deleting its entry fails the suite.
 | --- | --- |
 | Read-only `Signal` bridge properties (`mod_*`, `ps_pmf`, `source_*`, pulse fields, `signal_type`) used by unmigrated modules | Module passes, deleted in 4.1 |
 | `Signal.resolved_*` caches and `replace_samples` | 3.8 |
-| `generate` normalizing a uniform reference to unit sample power | 2.6b |
 | `generate_psqam` and the 1.x PS scale via `Constellation.gray(..., pmf=)` | 3.2 |
 | `SingleCarrierFrame` string modulation fields and `payload_len` snapping | 2.7 |
 | `resolve_required` / `resolve_optional` (Signal wins, with a warning) | 2.5, then each module pass |
