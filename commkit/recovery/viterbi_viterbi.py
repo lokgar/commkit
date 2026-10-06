@@ -99,7 +99,7 @@ def _viterbi_viterbi(
     )
     if joint:  # rows are copies of the joint trajectory
         phi_u = phi_u[:1]
-    phi_u = _repair_slips(phi_u, xp, method.cycle_slip, 4)
+    phi_u = _repair_slips(phi_u, xp, method.cycle_slip, M)
     # xp.interp is 1D-only; loop over the rows.
     phi_full = xp.stack([xp.interp(all_positions, block_centers, row) for row in phi_u])
     if joint:

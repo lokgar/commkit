@@ -6,6 +6,7 @@ import pytest
 from commkit import recovery
 from commkit.core import Signal
 from commkit.mapping import Constellation
+from tests.common.conversions import to_numpy
 from tests.common.signals import (
     make_test_mimo_samples,
     make_test_qam_signal,
@@ -143,6 +144,46 @@ class TestBPS:
             recovery.estimate_carrier_phase(
                 syms, recovery.BPS(block_size=64), constellation=Constellation.qam(16)
             )
+
+
+class TestRotationalSymmetry:
+    """BPS searches one ambiguity interval 2π/M of the constellation (3.6f)."""
+
+    @staticmethod
+    def _ambiguity_free_error(phi, truth, quantum):
+        err = phi - truth
+        return err - np.round(np.median(err) / quantum) * quantum
+
+    def test_8psk_tracks_wiener_phase(self, xp):
+        """8-PSK's metric has period π/4; a π/2 search held two minima."""
+        rng = np.random.default_rng(1)
+        n = 8192
+        pts = Constellation.psk(8).points
+        walk = np.cumsum(rng.normal(0.0, 0.01, n)) + 0.2
+        noise = 0.03 * (rng.standard_normal(n) + 1j * rng.standard_normal(n))
+        x = pts[rng.integers(0, 8, n)] * np.exp(1j * walk) + noise
+        for cycle_slip in (None, recovery.CycleSlip()):
+            phi = recovery.estimate_carrier_phase(
+                xp.asarray(x.astype(np.complex64)),
+                recovery.BPS(cycle_slip=cycle_slip),
+                constellation=Constellation.psk(8),
+            ).value
+            err = self._ambiguity_free_error(np.asarray(to_numpy(phi)), walk, np.pi / 4)
+            assert np.sqrt(np.mean(err**2)) < 0.05
+
+    def test_bpsk_reaches_phases_beyond_half_pi(self, xp):
+        """BPSK is 2-fold: a phase of 2.0 rad lies outside [0, π/2)."""
+        rng = np.random.default_rng(2)
+        n = 2048
+        x = np.sign(rng.standard_normal(n)) * np.exp(1j * 2.0)
+        x = x + 0.05 * (rng.standard_normal(n) + 1j * rng.standard_normal(n))
+        est = recovery.estimate_carrier_phase(
+            xp.asarray(x.astype(np.complex64)),
+            recovery.BPS(),
+            constellation=Constellation.psk(2),
+        )
+        err = self._ambiguity_free_error(np.asarray(to_numpy(est.value)), 2.0, np.pi)
+        assert np.max(np.abs(err)) < 0.05
 
 
 class TestSignalInputBpsAndCorrectCarrierPhase:

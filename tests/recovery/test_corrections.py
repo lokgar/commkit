@@ -311,6 +311,37 @@ def _clean_qam16(xp, n, seed=0):
     return make_test_symbols(scheme="qam", order=16, num_symbols=n, seed=seed, xp=xp)
 
 
+class TestSlipQuantum:
+    """Cycle slips are repaired in steps of 2π/M, M the rotational symmetry."""
+
+    @pytest.mark.parametrize(
+        "method",
+        [
+            recovery.BPS(cycle_slip=recovery.CycleSlip()),
+            recovery.ViterbiViterbi(cycle_slip=recovery.CycleSlip()),
+            recovery.Tikhonov(1e-4, 20, cycle_slip=recovery.CycleSlip()),
+            recovery.PLL(mu=1e-2, cycle_slip=recovery.CycleSlip()),
+        ],
+        ids=["bps", "vv", "tikhonov", "pll"],
+    )
+    def test_methods_pass_the_constellation_symmetry(self, xp, method, monkeypatch):
+        from commkit.recovery import corrections
+
+        seen = []
+        repair = corrections.correct_cycle_slips
+
+        def spy(phase, **kwargs):
+            seen.append(kwargs["symmetry"])
+            return repair(phase, **kwargs)
+
+        monkeypatch.setattr(corrections, "correct_cycle_slips", spy)
+        c = Constellation.psk(8)
+        rng = np.random.default_rng(0)
+        x = xp.asarray(c.points[rng.integers(0, 8, 512)].astype(np.complex64))
+        recovery.estimate_carrier_phase(x, method, constellation=c)
+        assert seen == [8]
+
+
 class TestDataAided:
     """DataAided corrects an arbitrary constant per-channel rotation."""
 

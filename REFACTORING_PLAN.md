@@ -928,12 +928,14 @@ The equalization pass (3.7) gets more commits:
   skip the unit-circle projection, so the joint sum weighted each channel
   by amplitude^M. Each channel is scaled to unit power first, as BPS and
   the PLL do. Validated by invariance to a per-channel gain.
-- [ ] **3.6f `fix(recovery): rotational symmetry sets the BPS range and the
+- [x] **3.6f `fix(recovery): rotational symmetry sets the BPS range and the
   slip quantum`.** BPS searched `[0, π/2)` and every block method repaired
   slips in `π/2` steps, which is right only for 4-fold constellations: BPSK
   phases beyond `π/2` were unreachable, and 8-PSK slips of `π/4` were never
   repaired. Both now follow `rotational_symmetry`; 4-fold constellations
-  are unchanged.
+  are unchanged (bit-identical on CPU and GPU). On 8-PSK with a Wiener
+  phase, BPS went from 2.5 rad RMS error (17.8 rad with slip repair) to
+  0.021 rad.
 
 **Equalizer safety rules (3.7):**
 

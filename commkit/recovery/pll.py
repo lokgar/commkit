@@ -265,7 +265,8 @@ class PLL:
         MIMO: average the phase error across channels at each symbol and
         drive one shared loop (shared LO).
     cycle_slip : CycleSlip, optional
-        Repair ``π/2`` slips in the per-symbol trajectory after the loop.
+        Repair ``2π/M`` slips (M the rotational symmetry, ``π/2`` for QAM)
+        in the per-symbol trajectory after the loop.
 
     Notes
     -----
@@ -358,7 +359,9 @@ def _pll(symbols: ArrayType, method: PLL, ctx: _Context) -> _Phase:
                 for ch in range(C)
             ]
         )
-    phi = _repair_slips(phi, np, method.cycle_slip, 4)
+    phi = _repair_slips(
+        phi, np, method.cycle_slip, int(constellation.rotational_symmetry)
+    )
     if joint:
         phi = np.broadcast_to(phi, (C, N)).copy()
     phi_full = xp.asarray(phi)

@@ -205,8 +205,8 @@ def _get_numba_cycle_slip():
 
             Scans the block-phase trajectory ``phi_u`` sequentially.  For each
             block, linearly extrapolates from up to ``history_length`` past
-            *corrected* blocks.  When the deviation exceeds ``threshold``, a
-            ``π/2`` step correction is applied.
+            *corrected* blocks.  When the deviation exceeds ``threshold``, it
+            is corrected by a multiple of ``2π/symmetry``.
 
             The linear regression uses relative coordinates [0, W-1] so that
             ``Sx`` and ``Sxx`` are exact compile-time constants.  Only ``Sy``
@@ -219,7 +219,6 @@ def _get_numba_cycle_slip():
                 Block-phase trajectory after M-fold unwrap (modified in place).
             symmetry : int
                 Rotational symmetry order; correction quantum = ``2π/symmetry``.
-                Pass 4 for QAM (all BPS, VV, Tikhonov use 4-fold symmetry).
             history_length : int
                 Maximum number of past corrected blocks used for extrapolation.
                 Use ``min(b, history_length)`` at each step.

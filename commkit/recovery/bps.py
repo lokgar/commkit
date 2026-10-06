@@ -15,18 +15,19 @@ class BPS:
     """
     Blind Phase Search.
 
-    Tests ``test_phases`` candidate rotations over ``[0, π/2)`` (exploiting
-    4-fold QAM symmetry), selects per block the candidate that minimises the
-    summed minimum squared distance to the constellation, 4-fold-unwraps the
-    block phases and interpolates linearly to per-symbol resolution.
+    Tests ``test_phases`` candidate rotations over one ambiguity interval
+    ``[0, 2π/M)``, ``M`` the constellation's rotational symmetry (``π/2``
+    for QAM), selects per block the candidate that minimises the summed
+    minimum squared distance to the constellation, M-fold-unwraps the block
+    phases and interpolates linearly to per-symbol resolution.
 
     Parameters
     ----------
     test_phases : int, default 64
-        Number of candidate phases B.  Resolution is ``π/(2B)`` rad.
+        Number of candidate phases B.  Resolution is ``2π/(M·B)`` rad.
     block_size : int, default 32
         Symbols per block for metric averaging.  Values below 4 make the
-        4-fold unwrap unreliable (a noisy argmin jumps between non-adjacent
+        M-fold unwrap unreliable (a noisy argmin jumps between non-adjacent
         candidates).
     joint_channels : bool, default False
         MIMO: sum the distance metrics across channels before the argmin and
@@ -37,7 +38,7 @@ class BPS:
 
     Notes
     -----
-    A global ``π/2`` ambiguity remains; resolve it against a reference.
+    A global ``2π/M`` ambiguity remains; resolve it against a reference.
 
     Memory: the general (non-square) path builds a ``(1024, B, M)``
     distance tensor per chunk; square QAM uses an O(1) per-axis slicer.
@@ -78,21 +79,22 @@ def _bps(symbols: ArrayType, method: BPS, ctx: _Context) -> _Phase:
     const_np = np.asarray(constellation.points, dtype=np.complex128)
     const_xp = xp.asarray(const_np)  # (M_const,)
 
-    # Candidate test phases over [0, π/2)
+    # Candidate test phases over one ambiguity interval [0, 2π/M).
+    M = int(constellation.rotational_symmetry)
     B = num_test_phases
-    candidates = xp.arange(B, dtype=symbols.real.dtype) * (np.pi / 2.0 / B)  # (B,)
+    candidates = xp.arange(B, dtype=symbols.real.dtype) * (2.0 * np.pi / M / B)
 
     N_blocks = _check_blocks(N, block_size)
     N_trunc = N_blocks * block_size
 
-    # Very small block_size makes the 4-fold phase unwrap unreliable: with only
+    # Very small block_size makes the M-fold phase unwrap unreliable: with only
     # one or two symbols per block the noise on the distance-metric argmin causes
     # large candidate-index jumps between consecutive blocks, triggering false
-    # 4-fold unwrap corrections.  Warn early so users diagnose this easily.
+    # M-fold unwrap corrections.  Warn early so users diagnose this easily.
     if block_size < 4:
         logger.warning(
             "CPR (BPS): block_size=%s is very small. Averaging the distance "
-            "metric over only %s symbol(s) per block makes the 4-fold "
+            "metric over only %s symbol(s) per block makes the M-fold "
             "phase unwrap unreliable. Recommended minimum: block_size ≥ 4.",
             block_size,
             block_size,
@@ -217,8 +219,8 @@ def _bps(symbols: ArrayType, method: BPS, ctx: _Context) -> _Phase:
         metrics_all = xp.sum(metrics_all, axis=0, keepdims=True)  # (1, N_blocks, B)
     best_k = xp.argmin(metrics_all, axis=-1)  # (R, N_blocks)
     phi_b = candidates[best_k]
-    phi_u = xp.unwrap(phi_b.astype(xp.float64) * 4, axis=-1) / 4
-    phi_u = _repair_slips(phi_u, xp, method.cycle_slip, 4)
+    phi_u = xp.unwrap(phi_b.astype(xp.float64) * M, axis=-1) / M
+    phi_u = _repair_slips(phi_u, xp, method.cycle_slip, M)
     # Per row: a 1-D gather is about twice as fast as the 2-D fancy index.
     phi_full = xp.empty((phi_u.shape[0], N), dtype=xp.float64)
     for r, row in enumerate(phi_u):
