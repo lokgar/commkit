@@ -146,7 +146,7 @@ def apply_taps(
 
         y[i, n] = sum_j sum_t conj(W[i,j,t]) * x[j, n*sps + t]
 
-    which is the same inner computation as the Numba/JAX adaptive-equalizer
+    which is the same inner computation as the Numba adaptive-equalizer
     kernels, fully vectorized over ``n`` via a single batched ``einsum``.
 
     Parameters

@@ -476,7 +476,7 @@ sites. The order avoids conflicts, because 1.4-1.6 all edit
     block runners, `tests/equalization/test_block_update.py`, and the
     `bench_lms_block` legs.
   - `block_lms`, `block_cma` and `block_rde` (frequency-domain) are untouched.
-- [ ] **1.6 `refactor(equalization)!: Numba-only sequential equalizers`.**
+- [x] **1.6 `refactor(equalization)!: Numba-only sequential equalizers`.**
   - Removes the `backend=` and `device=` parameters, the JAX branches in
     `sequential/_dd.py`, `sequential/_blind.py` and `_common.py`,
     `_kernels_jax.py`, `test_sequential_jax.py`, and the JAX legs in
@@ -585,7 +585,7 @@ The equalization pass (3.7) gets more commits:
 | 3.4 | `impairments` | `rng`; uses `_dispersion.py` | S |
 | 3.5 | `timing`, `frequency` | `cross_correlate_fft`, peak interpolation and `zc_mimo_root` move here; timing correction slices `reference`. Give the orphaned diagnostic plots (commit 1.4) a public data source: `plot_timing_correlation`, `plot_frequency_offset_spectrum`, `plot_mm_autocorrelation`, `plot_frequency_offset_blockwise_result` and the FOE `plot_pilot_phase_estimate` draw data that only exists inside the estimator, so return it in the estimator's result dataclass (§2.6) | M |
 | 3.6 | `recovery` | `PLL` / `BPS` / `CycleSlip` objects; PLL gain resolution moves into `recovery/_common.py`. Decide two oracle findings (commit 0.6): the PLL's square-QAM slicer builds decisions from float32 grid constants inside its float64 loop (up to about 3e-7 rad deviation; make it float64 or document it), and joint Viterbi-Viterbi weights channels by amplitude^M because, unlike BPS and the PLL, it does not power-normalize (document it, or normalize like the others). Give the orphaned pilot plots (commit 1.4: `plot_pilot_phase_estimate`, `plot_pilot_tone_phase_estimate`, `plot_pilot_tones_phase_estimate`) a public data source the same way; CPR block phases (`plot_carrier_phase_trajectory`'s optional inputs) likewise | M |
-| 3.7 | `equalization` | API plus the internal decomposition (old Phase 3), done once: validate, then `_prepare()`, then Numba or NumPy/CuPy runner, then `_assemble_result()`. Adds `state=`, `cpr=` and `result.signal`. Includes chunked-versus-uninterrupted equivalence tests for `state=`. See the equalizer safety rules below. | L |
+| 3.7 | `equalization` | API plus the internal decomposition (old Phase 3), done once: validate, then `_prepare()`, then Numba or NumPy/CuPy runner, then `_assemble_result()`. Adds `state=`, `cpr=` and `result.signal`. Includes chunked-versus-uninterrupted equivalence tests for `state=`. Add a plain-Python oracle for the inline CPR kernels (LMS/RLS with PLL and BPS in the loop): commit 1.6 removed the Numba-vs-JAX parity tests that were their only independent cross-check. See the equalizer safety rules below. | L |
 | 3.8 | `metrics` | Host return values, raise on empty input, `reference`-based Signal path, payload extraction (`extract_payload(sig)` using `frame`), a units and scaling table. See the metrics contract below. | M |
 | 3.9 | `analysis` | Typed result dataclasses instead of dicts; trend fitting lives here | S |
 | 3.10 | `plotting` | Consumes the new results and Signals; recomputes through public functions; no numerical module imports matplotlib (tested) | M |

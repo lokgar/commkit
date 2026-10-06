@@ -314,8 +314,7 @@ Dependencies point downward only:
 recorded in plan commit 0.4) on the reference machine: RTX 4070 Ti, Ryzen 7
 7800X3D, WSL2.
 
-- **IDs** are `[cpu]` or `[gpu]`, meaning the input device. Legacy
-  `-numba` and `-jax` suffixes disappear with commit 1.6.
+- **IDs** are `[cpu]` or `[gpu]`, meaning the input device.
 - **Timing:**
   - Timed bodies end with the `sync` fixture; otherwise GPU timings measure
     launches, not execution.
@@ -346,7 +345,7 @@ rule without deleting its entry fails the suite.
 
 | Legacy pattern still in the code | Removed by |
 | --- | --- |
-| JAX: `backend=` / `device=` on equalizers, `_kernels_jax.py`, `compute_llr(output=)`, `to_jax` / `from_jax`, `Signal.*_jax`; the test suite forces JAX x64 | 1.6-1.8 |
+| JAX: `compute_llr(output=)`, `to_jax` / `from_jax`, `Signal.*_jax`; the test suite forces JAX x64 | 1.7, 1.8 |
 | `Signal` / `Preamble` / `SingleCarrierFrame` are Pydantic models | 2.3 |
 | `mod_*`, `ps_*`, pulse fields, `source_*`, `resolved_*`, and descriptive tags on `Signal`; implicit mapping, normalization and transposition in the constructor | 2.4, removed fully in 4.1 |
 | `resolve_required` / `resolve_optional` (Signal wins, with a warning) | 2.5, then each module pass |
@@ -355,5 +354,4 @@ rule without deleting its entry fails the suite.
 | `cpr_*` flat parameters, `w_init` / `samples_prefix` / `input_norm_factor` / `cpr_state` | 3.6, 3.7 |
 | `helpers.py` | Module passes, deleted in 4.1 |
 | Test-only private exports in `equalization` / `plotting` `__init__` | 3.7, 3.10 |
-| Benchmark IDs with `-numba` / `-jax` legs | 1.6 |
 | `--use_fast_math` as the global CUDA default | Step 5 |

@@ -793,7 +793,6 @@ class TestSignalResolutionAndMetrics:
             training_symbols=orig.source_symbols[:n_train],
             sps=2,
             num_taps=7,
-            backend="numba",
         )
         n_train = result.num_train_symbols
         rx = Signal(
@@ -831,7 +830,6 @@ class TestSignalResolutionAndMetrics:
             training_symbols=orig.source_symbols[:100],
             sps=2,
             num_taps=7,
-            backend="numba",
         )
         rx = Signal(
             samples=result.y_hat,
@@ -867,7 +865,6 @@ class TestSignalResolutionAndMetrics:
             training_symbols=orig.source_symbols[:100],
             sps=2,
             num_taps=7,
-            backend="numba",
         )
         rx = Signal(
             samples=result.y_hat,
@@ -910,7 +907,6 @@ class TestSignalResolutionAndMetrics:
             num_taps=num_taps,
             modulation="psk",
             order=4,
-            backend="numba",
         )
         assert result.tail_trim == num_taps // 2
         assert result.y_hat.shape[-1] == n_symbols - result.tail_trim
@@ -948,7 +944,6 @@ class TestSignalDeviceAndPlotting:
             training_symbols=sig.source_symbols,
             sps=2,
             num_taps=7,
-            backend="numba",
         )
         rx_1sps = Signal(
             samples=result.y_hat,

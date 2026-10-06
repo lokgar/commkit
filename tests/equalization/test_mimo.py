@@ -146,7 +146,7 @@ class TestButterflyMIMO:
 
 
 class TestButterflyMIMOExtended:
-    """Additional MIMO butterfly tests for RDE and JAX backends."""
+    """Additional MIMO butterfly tests for RDE and LMS."""
 
     def test_rde_2x2_butterfly_numba(self, xp):
         """RDE Numba butterfly should handle 2x2 cross-polarization without error."""
@@ -178,14 +178,13 @@ class TestButterflyMIMOExtended:
             step_size=5e-4,
             modulation="qam",
             order=16,
-            backend="numba",
         )
 
         assert result.y_hat.shape == (2, n_symbols)
         assert result.weights.shape == (2, 2, 11)
         assert result.error.shape == (2, n_symbols)
 
-    def test_lms_jax_2x2_cross_channel(self, xp, jax):
+    def test_lms_2x2_mixed_input(self, xp):
         """LMS JAX butterfly should cancel cross-channel interference."""
 
         n_symbols = 2000
@@ -211,7 +210,6 @@ class TestButterflyMIMOExtended:
             step_size=0.05,
             modulation="psk",
             order=4,
-            backend="jax",
         )
 
         assert result.y_hat.shape == (2, n_symbols)

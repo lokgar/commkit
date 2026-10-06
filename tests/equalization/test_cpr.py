@@ -20,7 +20,6 @@ Verification plan:
 import numpy as np
 import pytest
 
-from commkit.backend import to_device
 from commkit.equalization import CPRState, lms, rls
 from commkit.frequency import (
     correct_frequency_offset_blockwise,
@@ -83,12 +82,9 @@ def _wiener_phase_signal(n_sym=4000, snr_db=20.0, linewidth=1e4, fs=1.0, seed=42
 class TestCPREqualizerBaseline:
     """Baseline equivalence and zero-deviation tests."""
 
-    @pytest.mark.parametrize("backend", ["numba", "jax"])
     @pytest.mark.parametrize("algo", ["lms", "rls"])
-    def test_cpr_none_baseline(self, backend, algo, xp):
+    def test_cpr_none_baseline(self, algo, xp):
         """cpr_type=None produces bit-exact output vs the unmodified algorithm."""
-        if backend == "jax":
-            pytest.importorskip("jax")
         samples, syms = _qpsk_signal(n_sym=2000)
         kwargs = dict(
             training_symbols=syms[:500],
@@ -96,7 +92,6 @@ class TestCPREqualizerBaseline:
             sps=2,
             modulation="psk",
             order=4,
-            backend=backend,
         )
         fn = lms if algo == "lms" else rls
         extra = {} if algo == "lms" else {"sps": 2}
@@ -107,7 +102,7 @@ class TestCPREqualizerBaseline:
 
         assert bool(
             xp.all(xp.asarray(res_base.y_hat) == xp.asarray(res_cpr_none.y_hat))
-        ), f"{algo}/{backend}: cpr_type=None must be deterministic"
+        ), f"{algo}: cpr_type=None must be deterministic"
         assert res_cpr_none.phase_trajectory is None
 
     def test_baseline_cpr_none_matches_unwrapped(self, xp, xpt):
@@ -128,113 +123,6 @@ class TestCPREqualizerBaseline:
             to_numpy(r_default.y_hat),
             to_numpy(r_explicit_none.y_hat),
         )
-
-
-class TestCPRBackendParity:
-    """Numba, JAX CPU, and JAX GPU backend equivalence."""
-
-    @pytest.mark.cpu_only
-    @pytest.mark.parametrize("cpr_type", ["pll", "bps"])
-    def test_numba_jax_parity_lms(self, cpr_type, xp, jax):
-        """Numba and JAX LMS+CPR produce matching outputs within float32 tolerance."""
-        samples, syms = _qpsk_signal(n_sym=1000)
-        kwargs = dict(
-            training_symbols=syms[:300],
-            num_taps=11,
-            sps=2,
-            modulation="psk",
-            order=4,
-            cpr_type=cpr_type,
-            cpr_pll_bandwidth=5e-3,
-            cpr_bps_test_phases=32,
-            cpr_cycle_slip_correction=False,
-        )
-        res_nb = lms(xp.asarray(samples), **kwargs, backend="numba")
-        res_jx = lms(xp.asarray(samples), **kwargs, backend="jax")
-
-        max_diff = float(
-            xp.max(xp.abs(xp.asarray(res_nb.y_hat) - xp.asarray(res_jx.y_hat)))
-        )
-        assert max_diff < 1e-4, (
-            f"LMS cpr={cpr_type}: Numba vs JAX y_hat mismatch (max diff {max_diff:.2e})"
-        )
-        assert res_nb.phase_trajectory is not None
-        assert res_jx.phase_trajectory is not None
-
-    @pytest.mark.cpu_only
-    def test_numba_jax_parity_bps_nonsquare(self, xp, jax):
-        """Numba/JAX BPS parity on a non-square (32-QAM cross) constellation."""
-        rng = np.random.default_rng(7)
-        const = gray_constellation("qam", 32).astype(np.complex64)
-        idxs = rng.integers(0, 32, 1200)
-        syms = const[idxs]
-        samples = np.repeat(syms, 2)
-        noise_pwr = 10 ** (-30.0 / 10)
-        samples = (
-            samples
-            + np.sqrt(noise_pwr / 2)
-            * (
-                rng.standard_normal(len(samples))
-                + 1j * rng.standard_normal(len(samples))
-            )
-        ).astype(np.complex64)
-
-        kwargs = dict(
-            training_symbols=syms[:400],
-            num_taps=11,
-            sps=2,
-            modulation="qam",
-            order=32,
-            cpr_type="bps",
-            cpr_bps_test_phases=32,
-            cpr_bps_block_size=16,
-            cpr_cycle_slip_correction=False,
-        )
-        res_nb = lms(xp.asarray(samples), **kwargs, backend="numba")
-        res_jx = lms(xp.asarray(samples), **kwargs, backend="jax")
-
-        max_diff = float(
-            xp.max(xp.abs(xp.asarray(res_nb.y_hat) - xp.asarray(res_jx.y_hat)))
-        )
-        assert max_diff < 1e-4, (
-            f"32-QAM BPS: Numba vs JAX y_hat mismatch (max diff {max_diff:.2e})"
-        )
-
-    @pytest.mark.gpu_only
-    def test_jax_cpr_gpu_device(self, xp, jax):
-        """JAX-CPR runs on an explicit GPU device and matches the CPU-JAX result."""
-        samples, syms = _qpsk_signal(n_sym=1500)
-        kwargs = dict(
-            training_symbols=syms[:400],
-            num_taps=11,
-            sps=2,
-            modulation="psk",
-            order=4,
-            cpr_type="bps",
-            cpr_bps_test_phases=32,
-            cpr_bps_block_size=16,
-        )
-        r_cpu = lms(np.asarray(samples), **kwargs, backend="jax", device="cpu")
-        r_gpu = lms(xp.asarray(samples), **kwargs, backend="jax", device="gpu")
-
-        assert isinstance(r_gpu.cpr_state.bps_prev4, np.ndarray)
-        assert isinstance(r_gpu.cpr_state.jax_bps_buf, np.ndarray)
-
-        max_diff = float(
-            np.max(np.abs(np.asarray(r_cpu.y_hat) - to_device(r_gpu.y_hat, "cpu")))
-        )
-        assert max_diff < 1e-4, (
-            f"GPU vs CPU JAX-CPR y_hat mismatch (max diff {max_diff:.2e})"
-        )
-
-        r_gpu2 = lms(
-            xp.asarray(samples),
-            **kwargs,
-            backend="jax",
-            device="gpu",
-            cpr_state=r_gpu.cpr_state,
-        )
-        assert r_gpu2.y_hat is not None
 
 
 class TestCPRPLLConvergence:
@@ -267,7 +155,6 @@ class TestCPRPLLConvergence:
             cpr_pll_bandwidth=5e-3,
             cpr_cycle_slip_correction=True,
             cpr_cycle_slip_history=200,
-            backend="numba",
         )
 
         assert res.phase_trajectory is not None
@@ -312,7 +199,6 @@ class TestCPRPLLConvergence:
             cpr_type="pll",
             cpr_pll_bandwidth=bw,
             cpr_cycle_slip_correction=False,
-            backend="numba",
         )
 
         assert res.phase_trajectory is not None
@@ -323,11 +209,8 @@ class TestCPRPLLConvergence:
         bound = np.sqrt(bw / linewidth_ts)
         assert rmse < bound, f"PLL phase RMSE {rmse:.4f} exceeds bound {bound:.4f}"
 
-    @pytest.mark.parametrize("backend", ["numba", "jax"])
-    def test_inline_raw_gains_match_bandwidth(self, backend, xp):
+    def test_inline_raw_gains_match_bandwidth(self, xp):
         """cpr_pll_mu/beta set to bandwidth-equivalent gains reproduces bandwidth path."""
-        if backend == "jax":
-            pytest.importorskip("jax")
         samples, syms = _qpsk_signal(n_sym=1500)
         samples = (samples * np.exp(1j * 0.2)).astype(np.complex64)
         bw = 5e-3
@@ -339,7 +222,6 @@ class TestCPRPLLConvergence:
             order=4,
             cpr_type="pll",
             cpr_cycle_slip_correction=False,
-            backend=backend,
         )
         res_bw = lms(xp.asarray(samples), **kw, cpr_pll_bandwidth=bw)
         res_raw = lms(
@@ -368,7 +250,6 @@ class TestCPRPLLConvergence:
                 order=4,
                 cpr_type="pll",
                 cpr_pll_beta=1e-3,
-                backend="numba",
             )
 
     def test_inline_pll_parity_with_standalone(self, xp):
@@ -393,7 +274,6 @@ class TestCPRPLLConvergence:
             cpr_pll_mu=m,
             cpr_pll_beta=b,
             cpr_cycle_slip_correction=False,
-            backend="numba",
         )
         phi_inline = to_numpy(res.phase_trajectory)
         phi_std = to_numpy(
@@ -408,8 +288,7 @@ class TestCPRPLLConvergence:
 class TestCPRBPSConvergence:
     """Blind Phase Search unwrapping, convergence, and block sizing."""
 
-    @pytest.mark.parametrize("backend", ["numba", "jax"])
-    def test_bps_phase_unwrap(self, backend, xp):
+    def test_bps_phase_unwrap(self, xp):
         """phase_trajectory from BPS must not wrap back to [0, π/2) under a ramp."""
         rng = np.random.default_rng(5)
         n_sym = 3000
@@ -436,7 +315,6 @@ class TestCPRBPSConvergence:
             cpr_bps_test_phases=64,
             cpr_bps_block_size=32,
             cpr_cycle_slip_correction=False,
-            backend=backend,
         )
 
         phi = xp.asarray(res.phase_trajectory).astype(xp.float64)
@@ -478,7 +356,6 @@ class TestCPRBPSConvergence:
             cpr_bps_test_phases=64,
             cpr_bps_block_size=32,
             cpr_cycle_slip_correction=False,
-            backend="numba",
         )
         res_none = lms(
             samples,
@@ -488,7 +365,6 @@ class TestCPRBPSConvergence:
             modulation="qam",
             order=16,
             cpr_type=None,
-            backend="numba",
         )
 
         mse_bps = float(xp.mean(xp.abs(xp.asarray(res_bps.error[-2000:])) ** 2))
@@ -529,7 +405,6 @@ class TestCPRBPSConvergence:
             cpr_bps_test_phases=32,
             cpr_bps_block_size=1,
             cpr_cycle_slip_correction=False,
-            backend="numba",
         )
         res_k32 = lms(
             samples,
@@ -542,7 +417,6 @@ class TestCPRBPSConvergence:
             cpr_bps_test_phases=32,
             cpr_bps_block_size=32,
             cpr_cycle_slip_correction=False,
-            backend="numba",
         )
 
         mse_k1 = float(xp.mean(xp.abs(xp.asarray(res_k1.error[-1000:])) ** 2))
@@ -579,7 +453,6 @@ class TestCPRBPSConvergence:
             cpr_bps_test_phases=64,
             cpr_bps_block_size=32,
             cpr_cycle_slip_correction=False,
-            backend="numba",
         )
 
         assert res.phase_trajectory is not None
@@ -628,7 +501,6 @@ class TestCPRMIMOJoint:
             cpr_type="pll",
             cpr_pll_bandwidth=5e-3,
             cpr_cycle_slip_correction=False,
-            backend="numba",
         )
 
         assert res.phase_trajectory is not None
@@ -685,7 +557,6 @@ class TestCPRMIMOJoint:
             cpr_pll_bandwidth=5e-3,
             cpr_joint_channels=True,
             cpr_cycle_slip_correction=False,
-            backend="numba",
         )
 
         assert res.phase_trajectory is not None

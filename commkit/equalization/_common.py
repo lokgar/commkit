@@ -4,52 +4,11 @@ from __future__ import annotations
 
 import numpy as np
 
-from ..backend import dispatch, from_jax, to_device
+from ..backend import dispatch, to_device
 from ..core._signal_adapter import require_integer_sps
 from ..helpers import restore_1d
 from ..logger import logger
-from .result import CPRState, EqualizerResult
-
-
-def _cpr_state_to_jax_inits(state: CPRState, num_ch: int, KB: int, H: int):
-    """Extract CPR carry init arrays from a CPRState for JAX warm-start.
-
-    Returns CPU NumPy arrays with correct dtypes/shapes for the JAX carry.
-    Missing fields are zero-initialised.  Caller converts to JAX arrays via
-    ``to_jax(..., device=platform)``.
-
-    Returns (pll_phi, pll_freq, bps_buf, bps_buf_ptr, bps_prev4,
-             cs_buf_x, cs_buf_y, cs_buf_ptr) - all NumPy.
-    """
-
-    def _get(val, shape, dtype):
-        return (
-            np.asarray(val, dtype=dtype)
-            if val is not None
-            else np.zeros(shape, dtype=dtype)
-        )
-
-    pll_phi = _get(state.pll_phi, (num_ch,), np.float64)
-    pll_freq = _get(state.pll_freq, (num_ch,), np.float64)
-    bps_buf = _get(state.jax_bps_buf, (KB, num_ch), np.complex64)
-    bps_buf_ptr = np.int32(
-        state.jax_bps_buf_ptr if state.jax_bps_buf_ptr is not None else 0
-    )
-    bps_prev4 = _get(state.bps_prev4, (num_ch,), np.float64)
-    cs_buf_x = _get(state.cs_buf_x, (num_ch, H), np.float64)
-    cs_buf_y = _get(state.cs_buf_y, (num_ch, H), np.float64)
-    cs_buf_ptr = _get(state.cs_buf_ptr, (num_ch,), np.int32)
-    return (
-        pll_phi,
-        pll_freq,
-        bps_buf,
-        bps_buf_ptr,
-        bps_prev4,
-        cs_buf_x,
-        cs_buf_y,
-        cs_buf_ptr,
-    )
-
+from .result import EqualizerResult
 
 # -----------------------------------------------------------------------------
 # SHARED HELPERS
@@ -188,39 +147,11 @@ def _build_padded_samples(
     )
 
 
-def _init_butterfly_weights_jax(num_ch, num_taps, jnp, center_tap=None):
-    """Build center-tap identity butterfly weight matrix as a JAX array.
-
-    Initializes a ``(C, C, num_taps)`` complex64 array where
-    ``W[i, i, center] = 1+0j`` for each channel ``i`` and all other entries
-    are zero.  This is the canonical identity starting point: at time 0 the
-    equalizer passes each channel straight through with unit gain and zero
-    delay relative to the center tap.
-
-    Parameters
-    ----------
-    num_ch     : int - number of input/output channels C
-    num_taps   : int - FIR filter length T
-    jnp        : JAX numpy module (passed as argument to avoid importing at
-                 module level when JAX is unavailable)
-    center_tap : int or None - tap index for unit initialization;
-                 defaults to ``num_taps // 2``
-
-    Returns
-    -------
-    W : (C, C, num_taps) complex64 JAX array
-    """
-    W = jnp.zeros((num_ch, num_ch, num_taps), dtype="complex64")
-    center = center_tap if center_tap is not None else num_taps // 2
-    W = W.at[jnp.arange(num_ch), jnp.arange(num_ch), center].set(1.0 + 0j)
-    return W
-
-
 def _init_butterfly_weights_numpy(num_ch, num_taps, center_tap=None):
     """Build center-tap identity butterfly weight matrix as a NumPy array.
 
-    NumPy counterpart of ``_init_butterfly_weights_jax`` for use with the
-    Numba backend.  Same semantics and output shape; no JAX dependency.
+    ``W[i, i, center] = 1+0j`` for each channel ``i``, all other entries zero:
+    at time 0 the equalizer passes each channel straight through.
 
     Parameters
     ----------
@@ -276,56 +207,6 @@ def _validate_w_init(w: np.ndarray, num_ch: int, num_taps: int) -> np.ndarray:
     )
 
 
-def _prepare_training_jax(
-    training_symbols,
-    num_ch,
-    n_sym,
-):
-    """Build the zero-padded training array expected by the JAX scan kernels.
-
-    The kernels index ``training_padded[:, sym_idx]`` at every symbol,
-    conditioned on ``sym_idx < n_train``.  Symbols beyond ``n_train_aligned``
-    are zero - the kernel ignores them (DD slicer is used instead).
-
-    If ``training_symbols`` is 1-D it is broadcast to all ``num_ch`` channels.
-    Any extra training symbols beyond ``n_sym`` are silently clamped.
-    The array is kept on the same device as ``training_symbols`` to avoid
-    unnecessary CPU round-trips before the ``to_jax()`` transfer.
-
-    Parameters
-    ----------
-    training_symbols : array or None - (K,) or (C, K), any backend
-    num_ch           : int - C
-    n_sym            : int - padded symbol count (columns of output array)
-
-    Returns
-    -------
-    train_full      : (C, n_sym) complex64 on same backend as input (or NumPy)
-    n_train_aligned : int - effective number of data-aided symbols
-    """
-    if training_symbols is not None:
-        # Keep training data on its original device
-        train_arr, xp, _ = dispatch(training_symbols)
-        train_arr = train_arr.astype("complex64")
-        if train_arr.ndim == 1:
-            train_arr = (
-                xp.tile(train_arr[None, :], (num_ch, 1))
-                if num_ch > 1
-                else train_arr[None, :]
-            )
-        n_raw = train_arr.shape[1]
-        n_train_aligned = max(0, min(n_raw, n_sym))
-
-        train_full = xp.zeros((num_ch, n_sym), dtype="complex64")
-        if n_train_aligned > 0:
-            train_full[:, :n_train_aligned] = train_arr[:, :n_train_aligned]
-    else:
-        n_train_aligned = 0
-        train_full = np.zeros((num_ch, n_sym), dtype="complex64")
-
-    return train_full, n_train_aligned
-
-
 def _prepare_training_numpy(
     training_symbols,
     num_ch,
@@ -333,7 +214,7 @@ def _prepare_training_numpy(
 ):
     """Build the zero-padded training array for the Numba scan kernels.
 
-    Pure NumPy implementation - no JAX, CuPy, or ``dispatch`` dependencies.
+    Pure NumPy implementation - no CuPy or ``dispatch`` dependencies.
     The caller must ensure ``training_symbols`` is already a NumPy array
     (use ``to_device(training_symbols, "cpu")`` before calling).
 
@@ -369,76 +250,6 @@ def _prepare_training_numpy(
     return train_full, n_train_aligned
 
 
-def _unpack_result_jax(
-    y_hat_jax,
-    errors_jax,
-    W_final_jax,
-    w_hist_jax,
-    was_1d,
-    store_weights,
-    n_sym=None,
-    xp=np,
-    num_train_symbols=0,
-    input_norm_factor=1.0,
-):
-    """Convert JAX scan outputs into an ``EqualizerResult``.
-
-    Transfers JAX device arrays back to NumPy/CuPy via ``from_jax``, then:
-      1. Transposes from ``(N_sym, C)`` scan layout to ``(C, N_sym)`` convention.
-      2. Truncates to ``n_sym`` when provided (e.g. RLS early-halt boundary).
-      3. Squeezes the channel dimension for 1-D SISO inputs (``was_1d=True``).
-      4. Optionally keeps the weight-trajectory array.
-
-    Parameters
-    ----------
-    y_hat_jax       : (N_sym, C) JAX array - equalized symbols
-    errors_jax      : (N_sym, C) JAX array - complex errors
-    W_final_jax     : (C, C, num_taps) JAX array - final weights
-    w_hist_jax      : (N_sym, C, C, num_taps) JAX array - weight history
-    was_1d          : bool - squeeze C=1 dimension for SISO inputs
-    store_weights   : bool - if False, ``weights_history`` is None
-    n_sym           : int or None - truncation length (None = no truncation)
-    xp              : output array module (np or cp)
-    num_train_symbols: int - stored in the result for caller reference
-
-    Returns
-    -------
-    EqualizerResult
-    """
-    # ``from_jax`` follows the JAX *compute* device (CuPy if the scan ran on
-    # GPU, NumPy on CPU), which may differ from the input's module ``xp`` - e.g.
-    # NumPy input with ``device='gpu'``.  Coerce to the input's device so the
-    # result honours the "output on the input's device" convention (same
-    # pattern as the Point 8 CPR-state unpacking).
-    _tgt = "cpu" if xp is np else "gpu"
-    y_hat = xp.asarray(to_device(from_jax(y_hat_jax), _tgt).T)  # (N,C) -> (C,N)
-    errors = xp.asarray(to_device(from_jax(errors_jax), _tgt).T)
-    W_final = xp.asarray(to_device(from_jax(W_final_jax), _tgt))
-
-    if n_sym is not None:
-        y_hat = y_hat[..., :n_sym]
-        errors = errors[..., :n_sym]
-
-    if was_1d:
-        y_hat, errors = restore_1d(was_1d, y_hat, errors)
-        W_final = W_final[0, 0]
-
-    w_history = None
-    if store_weights:
-        w_history = xp.asarray(to_device(from_jax(w_hist_jax), _tgt))
-        if was_1d:
-            w_history = w_history[:, 0, 0, :]
-
-    return EqualizerResult(
-        y_hat=y_hat,
-        weights=W_final,
-        error=errors,
-        weights_history=w_history,
-        num_train_symbols=num_train_symbols,
-        input_norm_factor=input_norm_factor,
-    )
-
-
 def _unpack_result_numpy(
     y_out,
     e_out,
@@ -453,9 +264,8 @@ def _unpack_result_numpy(
 ):
     """Convert Numba kernel outputs (plain NumPy) into an ``EqualizerResult``.
 
-    No ``from_jax`` calls - all inputs are already NumPy arrays produced by
-    the Numba kernels.  Same post-processing as ``_unpack_result_jax`` but
-    operates directly on NumPy memory without any device transfer overhead.
+    All inputs are NumPy arrays produced by the Numba kernels; outputs are
+    placed on ``xp`` (the input's array module).
 
     Parameters
     ----------

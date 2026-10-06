@@ -184,50 +184,11 @@ class TestWInit:
         )
 
 
-class TestEqualizerWInitBackend:
-    """Verify w_init works correctly on both numba and jax backends."""
-
-    def test_cma_jax_w_init(self, xp, jax):
-        """CMA JAX backend accepts w_init without error."""
-        rx = _make_qam16_rx(xp)
-        num_taps = 21
-        w0 = np.zeros((1, 1, num_taps), dtype=np.complex64)
-        w0[0, 0, num_taps // 2] = 1.0 + 0j
-
-        result = equalization.cma(
-            rx,
-            modulation="qam",
-            order=16,
-            num_taps=num_taps,
-            w_init=w0,
-            backend="jax",
-        )
-        assert isinstance(result, EqualizerResult)
-
-    def test_rde_jax_w_init(self, xp, jax):
-        """RDE JAX backend accepts w_init without error."""
-        rx = _make_qam16_rx(xp)
-        num_taps = 21
-        w0 = np.zeros((1, 1, num_taps), dtype=np.complex64)
-        w0[0, 0, num_taps // 2] = 1.0 + 0j
-
-        result = equalization.rde(
-            rx,
-            modulation="qam",
-            order=16,
-            num_taps=num_taps,
-            w_init=w0,
-            backend="jax",
-        )
-        assert isinstance(result, EqualizerResult)
-
-
 class TestNormalizationLengthIndependence:
     """Normalization uses full-signal RMS - training output scales with signal power."""
 
     @pytest.mark.parametrize("algo", ["lms", "rls"])
-    @pytest.mark.parametrize("backend", ["numba"])
-    def test_training_output_finite(self, algo, backend, xp):
+    def test_training_output_finite(self, algo, xp):
         """y_hat training region is finite and non-trivial."""
         import numpy as np
 
@@ -252,7 +213,6 @@ class TestNormalizationLengthIndependence:
             sps=1,
             modulation="qam",
             order=16,
-            backend=backend,
         )
 
         np.testing.assert_array_equal(

@@ -6,7 +6,7 @@ from typing import Any
 
 import numpy as np
 
-from ...backend import ArrayType, _get_jax, dispatch, from_jax, to_device, to_jax
+from ...backend import ArrayType, dispatch, to_device
 from ...core._signal_adapter import adapt_signal, require_integer_sps
 from ...core.signal import Signal
 from ...helpers import (
@@ -17,23 +17,13 @@ from ...logger import logger
 from ...mapping.gray import square_qam_slicer_params
 from .._common import (
     _build_padded_samples,
-    _cpr_state_to_jax_inits,
     _cpr_symmetry,
-    _init_butterfly_weights_jax,
     _init_butterfly_weights_numpy,
     _normalize_inputs,
-    _prepare_training_jax,
     _prepare_training_numpy,
-    _unpack_result_jax,
     _unpack_result_numpy,
     _validate_sps,
     _validate_w_init,
-)
-from .._kernels_jax import (
-    _get_jax_lms,
-    _get_jax_lms_cpr,
-    _get_jax_rls,
-    _get_jax_rls_cpr,
 )
 from .._kernels_numba import (
     _get_numba,
@@ -64,9 +54,7 @@ def lms(
     order: int | None = None,
     unipolar: bool = False,
     store_weights: bool = False,
-    device: str | None = "cpu",
     center_tap: int | None = None,
-    backend: str = "numba",
     w_init: ArrayType | None = None,
     pmf: Any | None = None,
     cpr_type: str | None = None,
@@ -202,17 +190,8 @@ def lms(
         If True, indicates the modulation is unipolar (e.g., unipolar PAM).
     store_weights : bool, default False
         If True, stores weight trajectory in ``weights_history``.
-    device : str, optional
-        Target device for JAX computations (e.g., 'cpu', 'gpu', 'tpu').
-        Default is 'cpu'. Ignored when ``backend='numba'``.
     center_tap : int, optional
         Index of the center tap. If None, defaults to ``num_taps // 2``.
-    backend : str, default 'numba'
-        Execution backend. ``'numba'`` compiles the sequential loop with LLVM
-        via Numba ``@njit``; typically 2-5x faster than JAX on CPU for
-        SISO/small-MIMO signals (no scan serialization overhead).
-        ``'jax'`` uses ``jax.lax.scan`` and supports GPU placement and
-        automatic differentiation through the equalizer.
     w_init : array_like, optional
         Initial tap weights. Shape: ``(C, C, num_taps)`` complex64, or the
         SISO short-hand ``(num_taps,)`` / ``(1, num_taps)`` as returned by
@@ -327,9 +306,6 @@ def lms(
         ``cpr_type=None`` or when the stored state is incompatible (mismatched
         ``cpr_type``, channel count, or history depth), in which case the
         equalizer falls back to cold-start silently.
-
-        Note: JAX backend: ``cpr_state`` warm-start is not yet supported;
-            passing a non-``None`` value raises ``NotImplementedError``.
     input_norm_factor : float or ndarray, optional
         Pre-computed RMS normalization factor from a previous call (obtained
         via ``EqualizerResult.input_norm_factor``).  When provided, the
@@ -392,19 +368,12 @@ def lms(
         Arrays reside on the same device as the input (NumPy CPU or CuPy
         GPU).
 
-    Warnings
-    --------
-    **JAX GPU mode is typically slower than CPU for adaptive equalization.**
-    LMS is inherently sequential: each symbol's weight update depends on the
-    previous weights, so ``lax.scan`` serializes execution even on GPU.
-    The per-step arithmetic (a ``num_taps``-length dot product) is far too
-    small to saturate GPU compute units, while kernel-launch and
-    device-memory-transfer overhead dominate.  In practice, ``device='cpu'``
-    is 2-10x faster for typical SISO sequences up to ~100 k symbols.  Use
-    ``device='gpu'`` only when the number of MIMO channels (``num_ch``) is
-    large enough to amortize GPU launch costs, or when batching many
-    independent signals externally.  For CPU-optimal throughput use
-    ``backend='numba'`` (the default).
+    Notes
+    -----
+    The adaptation is inherently sequential (each update depends on the
+    previous weights), so it always runs as a compiled Numba loop on the CPU.
+    CuPy input is copied to the host once and the outputs are copied back
+    once; the result arrays live on the input's device.
     """
     signal_adapter = adapt_signal(samples, function_name="lms()")
     samples = signal_adapter.array
@@ -423,11 +392,10 @@ def lms(
 
     n_train_log = training_symbols.shape[-1] if training_symbols is not None else 0
     logger.info(
-        "LMS equalizer: num_taps=%s, mu=%s, sps=%s, backend=%s, n_train=%s%s",
+        "LMS equalizer: num_taps=%s, mu=%s, sps=%s, n_train=%s%s",
         num_taps,
         step_size,
         sps,
-        backend,
         n_train_log,
         f", cpr={cpr_type}" if cpr_type else "",
     )
@@ -463,319 +431,87 @@ def lms(
     pad_left = min(c_tap, pad_total)
     pad_right = pad_total - pad_left
 
-    if backend == "numba":
-        # Convert to plain NumPy (no-op for CPU NumPy; downloads for CuPy)
-        samples_np = np.ascontiguousarray(to_device(samples, "cpu"), dtype=np.complex64)
-        training_np = (
-            to_device(training_symbols, "cpu").astype(np.complex64)
-            if training_symbols is not None
-            else None
-        )
-        samples_np, training_np, eq_norm = _normalize_inputs(
-            samples_np, training_np, sps, input_norm_factor=input_norm_factor
-        )
-        # Pad (NumPy)
-        samples_padded = _build_padded_samples(
-            samples_np, pad_left, pad_right, samples_prefix, pad_mode, eq_norm, sps
-        )
-        # Constellation (NumPy)
-        if modulation is not None and order is not None:
-            from ...mapping import gray_constellation
-
-            reference_constellation = gray_constellation(
-                modulation, order, unipolar=unipolar
-            )
-            constellation_np = (
-                to_device(reference_constellation, "cpu").flatten().astype(np.complex64)
-            )
-        elif training_np is not None:
-            train_flat = training_np.reshape(-1)
-            constellation_np = np.unique(np.round(train_flat, decimals=8))
-        else:
-            raise ValueError("modulation and order must be provided for DD mode.")
-        # PS-QAM: scale slicer constellation to unit-power {s_m/sqrt(E_PS)} so it
-        # matches the normalised equaliser input.  Training is already at unit power
-        # after _normalize_inputs - only the constellation reference needs scaling.
-        if pmf is not None and modulation is not None and order is not None:
-            _pmf_arr = np.asarray(pmf, dtype=np.float64)
-            _e_ps = float(
-                np.dot(_pmf_arr, np.abs(constellation_np).astype(np.float64) ** 2)
-            )
-            if _e_ps < 1.0 - 1e-6:
-                _c_ps = np.float32(1.0 / np.sqrt(_e_ps))
-                constellation_np = (constellation_np * _c_ps).astype(np.complex64)
-        train_full, n_train_aligned = _prepare_training_numpy(
-            training_np,
-            num_ch,
-            n_sym,
-        )
-        _sq_side, _sq_lev_min, _sq_d_grid = square_qam_slicer_params(constellation_np)
-        if w_init is not None:
-            w_arr = np.ascontiguousarray(to_device(w_init, "cpu"), dtype=np.complex64)
-            w_arr = _validate_w_init(w_arr, num_ch, num_taps)
-            W = w_arr.copy()
-        else:
-            W = _init_butterfly_weights_numpy(num_ch, num_taps, center_tap=center_tap)
-        y_out = np.empty((n_sym, num_ch), dtype=np.complex64)
-        e_out = np.empty((n_sym, num_ch), dtype=np.complex64)
-        w_hist_buf = (
-            np.empty((n_sym, num_ch, num_ch, num_taps), dtype=np.complex64)
-            if store_weights
-            else np.empty((1, num_ch, num_ch, num_taps), dtype=np.complex64)
-        )
-        if cpr_type is None:
-            _get_numba_lms()(
-                samples_padded,
-                train_full,
-                constellation_np,
-                W,
-                np.float32(step_size),
-                np.int32(n_train_aligned),
-                stride,
-                store_weights,
-                y_out,
-                e_out,
-                w_hist_buf,
-                _sq_lev_min,
-                _sq_d_grid,
-                np.int32(_sq_side),
-            )
-            result = _unpack_result_numpy(
-                y_out,
-                e_out,
-                W,
-                w_hist_buf,
-                was_1d,
-                store_weights,
-                n_sym=None,
-                xp=xp,
-                num_train_symbols=int(n_train_aligned),
-                input_norm_factor=eq_norm,
-            )
-        else:
-            pll_mu, pll_beta = resolve_pll_gains(
-                cpr_pll_bandwidth, cpr_pll_mu, cpr_pll_beta
-            )
-            symmetry = _cpr_symmetry(modulation, order)
-            B = int(cpr_bps_test_phases)
-            bps_angles_np = np.linspace(
-                0.0, np.pi / 2.0, B, endpoint=False, dtype=np.float32
-            )
-            bps_phases_neg_np = np.exp(-1j * bps_angles_np).astype(np.complex64)
-            H = int(cpr_cycle_slip_history)
-            _st = cpr_state
-            _st_ok = (
-                _st is not None
-                and _st.cpr_type == cpr_type
-                and _st.num_ch == num_ch
-                and _st.cs_H == H
-                and _st.pll_phi is not None
-            )
-            if _st_ok:
-                assert _st is not None
-                assert _st.pll_phi is not None
-                assert _st.pll_freq is not None
-                assert _st.cs_buf_x is not None
-                assert _st.cs_buf_y is not None
-                assert _st.cs_buf_ptr is not None
-                assert _st.cs_buf_n is not None
-                assert _st.cs_stats is not None
-                pll_phi = _st.pll_phi.copy()
-                pll_freq = _st.pll_freq.copy()
-                cs_buf_x = _st.cs_buf_x.copy()
-                cs_buf_y = _st.cs_buf_y.copy()
-                cs_buf_ptr = _st.cs_buf_ptr.copy()
-                cs_buf_n = _st.cs_buf_n.copy()
-                cs_stats = _st.cs_stats.copy()
-                bps_prev4 = (
-                    _st.bps_prev4.copy()
-                    if _st.bps_prev4 is not None
-                    else np.zeros(num_ch, dtype=np.float64)
-                )
-            else:
-                pll_phi = np.zeros(num_ch, dtype=np.float64)
-                pll_freq = np.zeros(num_ch, dtype=np.float64)
-                cs_buf_x = np.zeros((num_ch, H), dtype=np.float64)
-                cs_buf_y = np.zeros((num_ch, H), dtype=np.float64)
-                cs_buf_ptr = np.zeros(num_ch, dtype=np.int64)
-                cs_buf_n = np.zeros(num_ch, dtype=np.int64)
-                cs_stats = np.zeros((num_ch, 4), dtype=np.float64)
-                bps_prev4 = np.zeros(num_ch, dtype=np.float64)
-            phase_out = np.empty((n_sym, num_ch), dtype=np.float64)
-            cpr_mode_int = np.int32(1 if cpr_type == "pll" else 2)
-            _get_numba_lms_cpr()(
-                samples_padded,
-                train_full,
-                constellation_np,
-                bps_phases_neg_np,
-                bps_angles_np,
-                np.int32(cpr_bps_block_size),
-                bool(cpr_joint_channels),
-                W,
-                np.float32(step_size),
-                np.int32(n_train_aligned),
-                stride,
-                store_weights,
-                cpr_mode_int,
-                pll_mu,
-                pll_beta,
-                np.int32(symmetry),
-                bool(cpr_cycle_slip_correction),
-                np.float32(cpr_cycle_slip_threshold),
-                pll_phi,
-                pll_freq,
-                cs_buf_x,
-                cs_buf_y,
-                cs_buf_ptr,
-                cs_buf_n,
-                cs_stats,
-                bps_prev4,
-                y_out,
-                e_out,
-                phase_out,
-                w_hist_buf,
-                _sq_lev_min,
-                _sq_d_grid,
-                np.int32(_sq_side),
-            )
-            result = _unpack_result_numpy(
-                y_out,
-                e_out,
-                W,
-                w_hist_buf,
-                was_1d,
-                store_weights,
-                n_sym=None,
-                xp=xp,
-                num_train_symbols=int(n_train_aligned),
-                input_norm_factor=eq_norm,
-            )
-            phi_t = xp.asarray(phase_out.T)  # (C, N_sym)
-            result.phase_trajectory = restore_1d(was_1d, phi_t)
-            result.cpr_state = CPRState(
-                pll_phi=pll_phi.copy(),
-                pll_freq=pll_freq.copy(),
-                bps_prev4=bps_prev4.copy(),
-                cs_buf_x=cs_buf_x.copy(),
-                cs_buf_y=cs_buf_y.copy(),
-                cs_buf_ptr=cs_buf_ptr.copy(),
-                cs_buf_n=cs_buf_n.copy(),
-                cs_stats=cs_stats.copy(),
-                cpr_type=cpr_type,
-                num_ch=num_ch,
-                symmetry=symmetry,
-                bps_P=B,
-                bps_K=int(cpr_bps_block_size),
-                cs_H=H,
-            )
-        return finish(
-            _log_equalizer_exit(
-                result,
-                name="LMS",
-            )
-        )
-
-    # JAX backend
-    jax, jnp, _ = _get_jax()
-    if jax is None or jnp is None:
-        raise ImportError("JAX is required for backend='jax'.")
-
-    samples, training_symbols, eq_norm = _normalize_inputs(
-        samples, training_symbols, sps, input_norm_factor=input_norm_factor
+    # Convert to plain NumPy (no-op for CPU NumPy; downloads for CuPy)
+    samples_np = np.ascontiguousarray(to_device(samples, "cpu"), dtype=np.complex64)
+    training_np = (
+        to_device(training_symbols, "cpu").astype(np.complex64)
+        if training_symbols is not None
+        else None
     )
-    # Pad - use _build_padded_samples (returns CPU NumPy); convert to xp array after
-    _samp_cpu = to_device(samples, "cpu").astype(np.complex64)
-    samples_padded_np = _build_padded_samples(
-        _samp_cpu, pad_left, pad_right, samples_prefix, pad_mode, eq_norm, sps
+    samples_np, training_np, eq_norm = _normalize_inputs(
+        samples_np, training_np, sps, input_norm_factor=input_norm_factor
     )
-    samples_padded = (
-        xp.asarray(samples_padded_np)
-        if not was_1d
-        else xp.asarray(samples_padded_np[0])
+    # Pad (NumPy)
+    samples_padded = _build_padded_samples(
+        samples_np, pad_left, pad_right, samples_prefix, pad_mode, eq_norm, sps
     )
-    # Constellation
+    # Constellation (NumPy)
     if modulation is not None and order is not None:
         from ...mapping import gray_constellation
 
         reference_constellation = gray_constellation(
             modulation, order, unipolar=unipolar
         )
-    elif training_symbols is not None:
-        _, _xp, _ = dispatch(training_symbols)
-        train_flat = _xp.reshape(training_symbols, (-1,))
-        reference_constellation = _xp.unique(_xp.round(train_flat, decimals=8))
+        constellation_np = (
+            to_device(reference_constellation, "cpu").flatten().astype(np.complex64)
+        )
+    elif training_np is not None:
+        train_flat = training_np.reshape(-1)
+        constellation_np = np.unique(np.round(train_flat, decimals=8))
     else:
         raise ValueError("modulation and order must be provided for DD mode.")
-    constellation_np = (
-        to_device(reference_constellation, "cpu").flatten().astype("complex64")
-    )
-    # PS-QAM: scale slicer constellation to unit-power {s_m/sqrt(E_PS)}.
+    # PS-QAM: scale slicer constellation to unit-power {s_m/sqrt(E_PS)} so it
+    # matches the normalised equaliser input.  Training is already at unit power
+    # after _normalize_inputs - only the constellation reference needs scaling.
     if pmf is not None and modulation is not None and order is not None:
         _pmf_arr = np.asarray(pmf, dtype=np.float64)
         _e_ps = float(
             np.dot(_pmf_arr, np.abs(constellation_np).astype(np.float64) ** 2)
         )
         if _e_ps < 1.0 - 1e-6:
-            constellation_np = (
-                constellation_np * np.float32(1.0 / np.sqrt(_e_ps))
-            ).astype(np.complex64)
-    train_full, n_train_aligned = _prepare_training_jax(
-        training_symbols,
+            _c_ps = np.float32(1.0 / np.sqrt(_e_ps))
+            constellation_np = (constellation_np * _c_ps).astype(np.complex64)
+    train_full, n_train_aligned = _prepare_training_numpy(
+        training_np,
         num_ch,
         n_sym,
     )
-    x_jax = to_jax(samples_padded, device=device)
-    if was_1d:
-        x_jax = x_jax[None, :]
-
-    try:
-        platform = (
-            device.lower()
-            if device is not None
-            else (
-                x_jax.device.platform
-                if hasattr(x_jax, "device")
-                else list(x_jax.devices())[0].platform
-            )
-        )
-    except Exception:
-        platform = "cpu"
-
-    train_jax = to_jax(train_full, device=platform)
-    const_jax = to_jax(constellation_np, device=platform)
+    _sq_side, _sq_lev_min, _sq_d_grid = square_qam_slicer_params(constellation_np)
     if w_init is not None:
         w_arr = np.ascontiguousarray(to_device(w_init, "cpu"), dtype=np.complex64)
         w_arr = _validate_w_init(w_arr, num_ch, num_taps)
-        W_jax = to_jax(w_arr, device=platform)
+        W = w_arr.copy()
     else:
-        W_jax = _init_butterfly_weights_jax(
-            num_ch, num_taps, jnp, center_tap=center_tap
-        )
-        W_jax = to_jax(W_jax, device=platform)
-    mu_jax = to_jax(jnp.float32(step_size), device=platform)
-    n_train_jax = to_jax(jnp.int32(n_train_aligned), device=platform)
-
+        W = _init_butterfly_weights_numpy(num_ch, num_taps, center_tap=center_tap)
+    y_out = np.empty((n_sym, num_ch), dtype=np.complex64)
+    e_out = np.empty((n_sym, num_ch), dtype=np.complex64)
+    w_hist_buf = (
+        np.empty((n_sym, num_ch, num_ch, num_taps), dtype=np.complex64)
+        if store_weights
+        else np.empty((1, num_ch, num_ch, num_taps), dtype=np.complex64)
+    )
     if cpr_type is None:
-        _sq_side_j, _sq_lev_min_j, _sq_d_grid_j = square_qam_slicer_params(
-            constellation_np
-        )
-        scan_fn = _get_jax_lms(
-            num_taps,
+        _get_numba_lms()(
+            samples_padded,
+            train_full,
+            constellation_np,
+            W,
+            np.float32(step_size),
+            np.int32(n_train_aligned),
             stride,
-            len(constellation_np),
-            num_ch,
-            int(_sq_side_j),
-            float(_sq_lev_min_j),
-            float(_sq_d_grid_j),
+            store_weights,
+            y_out,
+            e_out,
+            w_hist_buf,
+            _sq_lev_min,
+            _sq_d_grid,
+            np.int32(_sq_side),
         )
-        y_jax, e_jax, W_jax, wh_jax = scan_fn(
-            x_jax, train_jax, const_jax, W_jax, mu_jax, n_train_jax
-        )
-        result = _unpack_result_jax(
-            y_jax,
-            e_jax,
-            W_jax,
-            wh_jax,
+        result = _unpack_result_numpy(
+            y_out,
+            e_out,
+            W,
+            w_hist_buf,
             was_1d,
             store_weights,
             n_sym=None,
@@ -784,102 +520,96 @@ def lms(
             input_norm_factor=eq_norm,
         )
     else:
-        x64_enabled = (
-            jax.config.jax_enable_x64
-            if hasattr(jax.config, "jax_enable_x64")
-            else jax.config.read("jax_enable_x64")
-        )
-        if not x64_enabled:
-            raise RuntimeError(
-                "JAX x64 mode must be enabled for CPR phase tracking: "
-                "call jax.config.update('jax_enable_x64', True) before using "
-                "backend='jax' with cpr_type set."
-            )
         pll_mu, pll_beta = resolve_pll_gains(
             cpr_pll_bandwidth, cpr_pll_mu, cpr_pll_beta
         )
         symmetry = _cpr_symmetry(modulation, order)
         B = int(cpr_bps_test_phases)
-        H = int(cpr_cycle_slip_history)
         bps_angles_np = np.linspace(
             0.0, np.pi / 2.0, B, endpoint=False, dtype=np.float32
         )
         bps_phases_neg_np = np.exp(-1j * bps_angles_np).astype(np.complex64)
-        bps_pn_jax = to_jax(bps_phases_neg_np, device=platform)
-        bps_ang_jax = to_jax(bps_angles_np, device=platform)
-        _sq_side_j, _sq_lev_min_j, _sq_d_grid_j = square_qam_slicer_params(
-            constellation_np
+        H = int(cpr_cycle_slip_history)
+        _st = cpr_state
+        _st_ok = (
+            _st is not None
+            and _st.cpr_type == cpr_type
+            and _st.num_ch == num_ch
+            and _st.cs_H == H
+            and _st.pll_phi is not None
         )
-        scan_fn = _get_jax_lms_cpr(
-            num_taps,
-            stride,
-            len(constellation_np),
-            num_ch,
-            cpr_type,
-            B,
-            int(cpr_bps_block_size),
-            bool(cpr_joint_channels),
-            H,
-            int(symmetry),
-            int(_sq_side_j),
-            float(_sq_lev_min_j),
-            float(_sq_d_grid_j),
-        )
-        KB = int(cpr_bps_block_size)
-        if cpr_state is not None:
-            _pi, _pf, _bb, _bbp, _bp4, _cx, _cy, _cp = _cpr_state_to_jax_inits(
-                cpr_state, num_ch, KB, H
+        if _st_ok:
+            assert _st is not None
+            assert _st.pll_phi is not None
+            assert _st.pll_freq is not None
+            assert _st.cs_buf_x is not None
+            assert _st.cs_buf_y is not None
+            assert _st.cs_buf_ptr is not None
+            assert _st.cs_buf_n is not None
+            assert _st.cs_stats is not None
+            pll_phi = _st.pll_phi.copy()
+            pll_freq = _st.pll_freq.copy()
+            cs_buf_x = _st.cs_buf_x.copy()
+            cs_buf_y = _st.cs_buf_y.copy()
+            cs_buf_ptr = _st.cs_buf_ptr.copy()
+            cs_buf_n = _st.cs_buf_n.copy()
+            cs_stats = _st.cs_stats.copy()
+            bps_prev4 = (
+                _st.bps_prev4.copy()
+                if _st.bps_prev4 is not None
+                else np.zeros(num_ch, dtype=np.float64)
             )
         else:
-            _pi = np.zeros(num_ch, dtype=np.float64)
-            _pf = np.zeros(num_ch, dtype=np.float64)
-            _bb = np.zeros((KB, num_ch), dtype=np.complex64)
-            _bbp = np.int32(0)
-            _bp4 = np.zeros(num_ch, dtype=np.float64)
-            _cx = np.zeros((num_ch, H), dtype=np.float64)
-            _cy = np.zeros((num_ch, H), dtype=np.float64)
-            _cp = np.zeros(num_ch, dtype=np.int32)
-        (
-            y_jax,
-            e_jax,
-            W_jax,
-            wh_jax,
-            phi_jax,
-            pll_phi_f,
-            pll_freq_f,
-            bps_buf_f,
-            bps_buf_ptr_f,
-            bps_prev4_f,
-            cs_buf_x_f,
-            cs_buf_y_f,
-            cs_buf_ptr_f,
-        ) = scan_fn(
-            x_jax,
-            train_jax,
-            const_jax,
-            bps_pn_jax,
-            bps_ang_jax,
-            W_jax,
-            mu_jax,
-            n_train_jax,
-            to_jax(jnp.float64(pll_mu), device=platform),
-            to_jax(jnp.float64(pll_beta), device=platform),
-            to_jax(jnp.float64(cpr_cycle_slip_threshold), device=platform),
-            to_jax(jnp.bool_(cpr_cycle_slip_correction), device=platform),
-            to_jax(_pi, device=platform),
-            to_jax(_pf, device=platform),
-            to_jax(_bb, device=platform),
-            to_jax(_bbp, device=platform),
-            to_jax(_bp4, device=platform),
-            to_jax(_cx, device=platform),
-            to_jax(_cy, device=platform),
-            to_jax(_cp, device=platform),
+            pll_phi = np.zeros(num_ch, dtype=np.float64)
+            pll_freq = np.zeros(num_ch, dtype=np.float64)
+            cs_buf_x = np.zeros((num_ch, H), dtype=np.float64)
+            cs_buf_y = np.zeros((num_ch, H), dtype=np.float64)
+            cs_buf_ptr = np.zeros(num_ch, dtype=np.int64)
+            cs_buf_n = np.zeros(num_ch, dtype=np.int64)
+            cs_stats = np.zeros((num_ch, 4), dtype=np.float64)
+            bps_prev4 = np.zeros(num_ch, dtype=np.float64)
+        phase_out = np.empty((n_sym, num_ch), dtype=np.float64)
+        cpr_mode_int = np.int32(1 if cpr_type == "pll" else 2)
+        _get_numba_lms_cpr()(
+            samples_padded,
+            train_full,
+            constellation_np,
+            bps_phases_neg_np,
+            bps_angles_np,
+            np.int32(cpr_bps_block_size),
+            bool(cpr_joint_channels),
+            W,
+            np.float32(step_size),
+            np.int32(n_train_aligned),
+            stride,
+            store_weights,
+            cpr_mode_int,
+            pll_mu,
+            pll_beta,
+            np.int32(symmetry),
+            bool(cpr_cycle_slip_correction),
+            np.float32(cpr_cycle_slip_threshold),
+            pll_phi,
+            pll_freq,
+            cs_buf_x,
+            cs_buf_y,
+            cs_buf_ptr,
+            cs_buf_n,
+            cs_stats,
+            bps_prev4,
+            y_out,
+            e_out,
+            phase_out,
+            w_hist_buf,
+            _sq_lev_min,
+            _sq_d_grid,
+            np.int32(_sq_side),
         )
-        result = _unpack_result_jax(
-            y_jax,
-            e_jax,
-            W_jax,
-            wh_jax,
+        result = _unpack_result_numpy(
+            y_out,
+            e_out,
+            W,
+            w_hist_buf,
             was_1d,
             store_weights,
             n_sym=None,
@@ -887,29 +617,30 @@ def lms(
             num_train_symbols=int(n_train_aligned),
             input_norm_factor=eq_norm,
         )
-        # from_jax returns CuPy for a GPU-resident JAX array; coerce to host
-        # NumPy via to_device (CuPy.get / NumPy passthrough) so CPRState stays
-        # host-side and np.asarray never sees a CuPy array.
-        phi_np = to_device(from_jax(phi_jax), "cpu")  # (N_sym, C)
-        phi_t = xp.asarray(phi_np.T)  # (C, N_sym)
+        phi_t = xp.asarray(phase_out.T)  # (C, N_sym)
         result.phase_trajectory = restore_1d(was_1d, phi_t)
         result.cpr_state = CPRState(
-            pll_phi=to_device(from_jax(pll_phi_f), "cpu"),
-            pll_freq=to_device(from_jax(pll_freq_f), "cpu"),
-            bps_prev4=to_device(from_jax(bps_prev4_f), "cpu"),
-            jax_bps_buf=to_device(from_jax(bps_buf_f), "cpu"),
-            jax_bps_buf_ptr=int(to_device(from_jax(bps_buf_ptr_f), "cpu")),
-            cs_buf_x=to_device(from_jax(cs_buf_x_f), "cpu"),
-            cs_buf_y=to_device(from_jax(cs_buf_y_f), "cpu"),
-            cs_buf_ptr=to_device(from_jax(cs_buf_ptr_f), "cpu"),
+            pll_phi=pll_phi.copy(),
+            pll_freq=pll_freq.copy(),
+            bps_prev4=bps_prev4.copy(),
+            cs_buf_x=cs_buf_x.copy(),
+            cs_buf_y=cs_buf_y.copy(),
+            cs_buf_ptr=cs_buf_ptr.copy(),
+            cs_buf_n=cs_buf_n.copy(),
+            cs_stats=cs_stats.copy(),
             cpr_type=cpr_type,
             num_ch=num_ch,
             symmetry=symmetry,
             bps_P=B,
-            bps_K=KB,
+            bps_K=int(cpr_bps_block_size),
             cs_H=H,
         )
-    return finish(_log_equalizer_exit(result, name="LMS"))
+    return finish(
+        _log_equalizer_exit(
+            result,
+            name="LMS",
+        )
+    )
 
 
 def _check_rls_divergence(weights, xp, forgetting_factor, delta):
@@ -941,9 +672,7 @@ def rls(
     order: int | None = None,
     unipolar: bool = False,
     store_weights: bool = False,
-    device: str | None = "cpu",
     center_tap: int | None = None,
-    backend: str = "numba",
     w_init: ArrayType | None = None,
     pmf: Any | None = None,
     cpr_type: str | None = None,
@@ -1073,15 +802,8 @@ def rls(
         If True, indicates the modulation is unipolar (e.g., unipolar PAM).
     store_weights : bool, default False
         If True, stores weight trajectory.
-    device : str, optional
-        Target device for JAX computations (e.g., 'cpu', 'gpu', 'tpu').
-        Default is 'cpu'. Ignored when ``backend='numba'``.
     center_tap : int, optional
         Index of the center tap. If None, defaults to ``num_taps // 2``.
-    backend : str, default 'numba'
-        Execution backend. ``'numba'`` uses Numba ``@njit``; LLVM-compiled,
-        typically fastest on CPU, particularly for the O(num_taps²) Riccati
-        update. ``'jax'`` uses ``jax.lax.scan`` (XLA-compiled, GPU-capable).
     pmf : array_like of float, optional
         Probability mass function for PS-QAM.  Scales the DD slicer
         constellation by ``1/sqrt(E_PS)`` to match the unit-power normalised
@@ -1227,13 +949,12 @@ def rls(
     n_train_log = training_symbols.shape[-1] if training_symbols is not None else 0
     logger.info(
         "RLS equalizer: num_taps=%s, forgetting_factor=%s, delta=%.2e, "
-        "leakage=%.2e, sps=%s, backend=%s, n_train=%s%s",
+        "leakage=%.2e, sps=%s, n_train=%s%s",
         num_taps,
         forgetting_factor,
         delta,
         leakage,
         sps,
-        backend,
         n_train_log,
         f", cpr={cpr_type}" if cpr_type else "",
     )
@@ -1286,259 +1007,24 @@ def rls(
     pad_left = min(c_tap, pad_total)
     pad_right = pad_total - pad_left
 
-    if backend == "numba":
-        numba = _get_numba()
-        if numba is None:
-            raise ImportError("Numba is required for backend='numba'.")
+    numba = _get_numba()
+    if numba is None:
+        raise ImportError("Numba is required for the sequential equalizers.")
 
-        samples_np = np.ascontiguousarray(to_device(samples, "cpu"), dtype=np.complex64)
-        training_np = (
-            to_device(training_symbols, "cpu").astype(np.complex64)
-            if training_symbols is not None
-            else None
-        )
-        samples_np, training_np, eq_norm = _normalize_inputs(
-            samples_np, training_np, sps, input_norm_factor=input_norm_factor
-        )
-
-        x_np = _build_padded_samples(
-            samples_np, pad_left, pad_right, samples_prefix, pad_mode, eq_norm, sps
-        )
-        x_np = np.ascontiguousarray(x_np)
-
-        if modulation is not None and order is not None:
-            from ...mapping import gray_constellation
-
-            reference_constellation = gray_constellation(
-                modulation, order, unipolar=unipolar
-            )
-            constellation_np = (
-                to_device(reference_constellation, "cpu").flatten().astype(np.complex64)
-            )
-        elif training_np is not None:
-            train_flat = training_np.reshape(-1)
-            constellation_np = np.unique(np.round(train_flat, decimals=8)).astype(
-                "complex64"
-            )
-        else:
-            raise ValueError("modulation and order must be provided for DD mode.")
-        # PS-QAM: scale slicer constellation to unit-power {s_m/sqrt(E_PS)}.
-        if pmf is not None and modulation is not None and order is not None:
-            _pmf_arr = np.asarray(pmf, dtype=np.float64)
-            _e_ps = float(
-                np.dot(_pmf_arr, np.abs(constellation_np).astype(np.float64) ** 2)
-            )
-            if _e_ps < 1.0 - 1e-6:
-                _c_ps = np.float32(1.0 / np.sqrt(_e_ps))
-                constellation_np = (constellation_np * _c_ps).astype(np.complex64)
-
-        train_full, n_train_aligned = _prepare_training_numpy(
-            training_np,
-            num_ch,
-            n_sym,
-        )
-        _sq_side, _sq_lev_min, _sq_d_grid = square_qam_slicer_params(constellation_np)
-        if w_init is not None:
-            w_arr = np.ascontiguousarray(to_device(w_init, "cpu"), dtype=np.complex64)
-            w_arr = _validate_w_init(w_arr, num_ch, num_taps)
-            W = w_arr.copy()
-        else:
-            W = _init_butterfly_weights_numpy(num_ch, num_taps, center_tap=center_tap)
-        regressor_dim = num_ch * num_taps
-        P = np.eye(regressor_dim, dtype=np.complex128) / np.float64(delta)
-        y_out = np.empty((n_sym, num_ch), dtype=np.complex64)
-        e_out = np.empty((n_sym, num_ch), dtype=np.complex64)
-        w_hist_buf = (
-            np.empty((n_sym, num_ch, num_ch, num_taps), dtype=np.complex64)
-            if store_weights
-            else np.empty((1, num_ch, num_ch, num_taps), dtype=np.complex64)
-        )
-        if cpr_type is None:
-            _get_numba_rls()(
-                x_np,
-                train_full,
-                constellation_np,
-                W,
-                P,
-                np.float32(forgetting_factor),
-                np.float32(leakage),
-                np.int32(n_train_aligned),
-                np.int32(n_update_halt),
-                stride,
-                store_weights,
-                y_out,
-                e_out,
-                w_hist_buf,
-                _sq_lev_min,
-                _sq_d_grid,
-                np.int32(_sq_side),
-            )
-            result = _unpack_result_numpy(
-                y_out,
-                e_out,
-                W,
-                w_hist_buf,
-                was_1d,
-                store_weights,
-                n_sym=n_update_halt,
-                xp=xp,
-                num_train_symbols=int(n_train_aligned),
-                input_norm_factor=eq_norm,
-            )
-        else:
-            pll_mu, pll_beta = resolve_pll_gains(
-                cpr_pll_bandwidth, cpr_pll_mu, cpr_pll_beta
-            )
-            symmetry = _cpr_symmetry(modulation, order)
-            B = int(cpr_bps_test_phases)
-            bps_angles_np = np.linspace(
-                0.0, np.pi / 2.0, B, endpoint=False, dtype=np.float32
-            )
-            bps_phases_neg_np = np.exp(-1j * bps_angles_np).astype(np.complex64)
-            H = int(cpr_cycle_slip_history)
-            _st = cpr_state
-            _st_ok = (
-                _st is not None
-                and _st.cpr_type == cpr_type
-                and _st.num_ch == num_ch
-                and _st.cs_H == H
-                and _st.pll_phi is not None
-            )
-            if _st_ok:
-                assert _st is not None
-                assert _st.pll_phi is not None
-                assert _st.pll_freq is not None
-                assert _st.cs_buf_x is not None
-                assert _st.cs_buf_y is not None
-                assert _st.cs_buf_ptr is not None
-                assert _st.cs_buf_n is not None
-                assert _st.cs_stats is not None
-                pll_phi = _st.pll_phi.copy()
-                pll_freq = _st.pll_freq.copy()
-                cs_buf_x = _st.cs_buf_x.copy()
-                cs_buf_y = _st.cs_buf_y.copy()
-                cs_buf_ptr = _st.cs_buf_ptr.copy()
-                cs_buf_n = _st.cs_buf_n.copy()
-                cs_stats = _st.cs_stats.copy()
-                bps_prev4 = (
-                    _st.bps_prev4.copy()
-                    if _st.bps_prev4 is not None
-                    else np.zeros(num_ch, dtype=np.float64)
-                )
-            else:
-                pll_phi = np.zeros(num_ch, dtype=np.float64)
-                pll_freq = np.zeros(num_ch, dtype=np.float64)
-                cs_buf_x = np.zeros((num_ch, H), dtype=np.float64)
-                cs_buf_y = np.zeros((num_ch, H), dtype=np.float64)
-                cs_buf_ptr = np.zeros(num_ch, dtype=np.int64)
-                cs_buf_n = np.zeros(num_ch, dtype=np.int64)
-                cs_stats = np.zeros((num_ch, 4), dtype=np.float64)
-                bps_prev4 = np.zeros(num_ch, dtype=np.float64)
-            phase_out = np.empty((n_sym, num_ch), dtype=np.float64)
-            cpr_mode_int = np.int32(1 if cpr_type == "pll" else 2)
-            _get_numba_rls_cpr()(
-                x_np,
-                train_full,
-                constellation_np,
-                bps_phases_neg_np,
-                bps_angles_np,
-                np.int32(cpr_bps_block_size),
-                bool(cpr_joint_channels),
-                W,
-                P,
-                np.float32(forgetting_factor),
-                np.float32(leakage),
-                np.int32(n_train_aligned),
-                np.int32(n_update_halt),
-                stride,
-                store_weights,
-                cpr_mode_int,
-                pll_mu,
-                pll_beta,
-                np.int32(symmetry),
-                bool(cpr_cycle_slip_correction),
-                np.float32(cpr_cycle_slip_threshold),
-                pll_phi,
-                pll_freq,
-                cs_buf_x,
-                cs_buf_y,
-                cs_buf_ptr,
-                cs_buf_n,
-                cs_stats,
-                bps_prev4,
-                y_out,
-                e_out,
-                phase_out,
-                w_hist_buf,
-                _sq_lev_min,
-                _sq_d_grid,
-                np.int32(_sq_side),
-            )
-            result = _unpack_result_numpy(
-                y_out,
-                e_out,
-                W,
-                w_hist_buf,
-                was_1d,
-                store_weights,
-                n_sym=n_update_halt,
-                xp=xp,
-                num_train_symbols=int(n_train_aligned),
-                input_norm_factor=eq_norm,
-            )
-            phi_t = xp.asarray(phase_out[:n_update_halt].T)  # (C, n_update_halt)
-            result.phase_trajectory = restore_1d(was_1d, phi_t)
-            result.cpr_state = CPRState(
-                pll_phi=pll_phi.copy(),
-                pll_freq=pll_freq.copy(),
-                bps_prev4=bps_prev4.copy(),
-                cs_buf_x=cs_buf_x.copy(),
-                cs_buf_y=cs_buf_y.copy(),
-                cs_buf_ptr=cs_buf_ptr.copy(),
-                cs_buf_n=cs_buf_n.copy(),
-                cs_stats=cs_stats.copy(),
-                cpr_type=cpr_type,
-                num_ch=num_ch,
-                symmetry=symmetry,
-                bps_P=B,
-                bps_K=int(cpr_bps_block_size),
-                cs_H=H,
-            )
-        # Truncate last num_taps//2 symbols (zero-padding contamination).
-        result = _log_equalizer_exit(result, name="RLS")
-        result.tail_trim = tail_trim
-        _check_rls_divergence(result.weights, xp, forgetting_factor, delta)
-        return _attach_equalized_signal(result, sig)
-
-    # JAX backend
-    jax, jnp, _ = _get_jax()
-    if jax is None or jnp is None:
-        raise ImportError("JAX is required for backend='jax'.")
-    x64_enabled = (
-        jax.config.jax_enable_x64
-        if hasattr(jax.config, "jax_enable_x64")
-        else jax.config.read("jax_enable_x64")
+    samples_np = np.ascontiguousarray(to_device(samples, "cpu"), dtype=np.complex64)
+    training_np = (
+        to_device(training_symbols, "cpu").astype(np.complex64)
+        if training_symbols is not None
+        else None
     )
-    if not x64_enabled:
-        raise RuntimeError(
-            "JAX x64 mode must be enabled for RLS: the P (Riccati) matrix requires "
-            "complex128 precision to remain positive-definite. "
-            "Call jax.config.update('jax_enable_x64', True) before using backend='jax'."
-        )
-
-    samples, training_symbols, eq_norm = _normalize_inputs(
-        samples, training_symbols, sps, input_norm_factor=input_norm_factor
+    samples_np, training_np, eq_norm = _normalize_inputs(
+        samples_np, training_np, sps, input_norm_factor=input_norm_factor
     )
 
-    _samp_cpu_rls = to_device(samples, "cpu").astype(np.complex64)
-    samples_padded_np_rls = _build_padded_samples(
-        _samp_cpu_rls, pad_left, pad_right, samples_prefix, pad_mode, eq_norm, sps
+    x_np = _build_padded_samples(
+        samples_np, pad_left, pad_right, samples_prefix, pad_mode, eq_norm, sps
     )
-    samples_padded = (
-        xp.asarray(samples_padded_np_rls)
-        if not was_1d
-        else xp.asarray(samples_padded_np_rls[0])
-    )
+    x_np = np.ascontiguousarray(x_np)
 
     if modulation is not None and order is not None:
         from ...mapping import gray_constellation
@@ -1546,16 +1032,16 @@ def rls(
         reference_constellation = gray_constellation(
             modulation, order, unipolar=unipolar
         )
-    elif training_symbols is not None:
-        _, _xp, _ = dispatch(training_symbols)
-        train_flat = _xp.reshape(training_symbols, (-1,))
-        reference_constellation = _xp.unique(_xp.round(train_flat, decimals=8))
+        constellation_np = (
+            to_device(reference_constellation, "cpu").flatten().astype(np.complex64)
+        )
+    elif training_np is not None:
+        train_flat = training_np.reshape(-1)
+        constellation_np = np.unique(np.round(train_flat, decimals=8)).astype(
+            "complex64"
+        )
     else:
         raise ValueError("modulation and order must be provided for DD mode.")
-
-    constellation_np = (
-        to_device(reference_constellation, "cpu").flatten().astype("complex64")
-    )
     # PS-QAM: scale slicer constellation to unit-power {s_m/sqrt(E_PS)}.
     if pmf is not None and modulation is not None and order is not None:
         _pmf_arr = np.asarray(pmf, dtype=np.float64)
@@ -1563,91 +1049,55 @@ def rls(
             np.dot(_pmf_arr, np.abs(constellation_np).astype(np.float64) ** 2)
         )
         if _e_ps < 1.0 - 1e-6:
-            constellation_np = (
-                constellation_np * np.float32(1.0 / np.sqrt(_e_ps))
-            ).astype(np.complex64)
+            _c_ps = np.float32(1.0 / np.sqrt(_e_ps))
+            constellation_np = (constellation_np * _c_ps).astype(np.complex64)
 
-    logger.debug(
-        "RLS internals: n_sym=%s, n_train=%s, n_update_halt=%s, "
-        "leakage=%.2e, delta=%.2e",
-        n_sym,
-        n_train_log,
-        n_update_halt,
-        leakage,
-        delta,
-    )
-
-    train_full, n_train_aligned = _prepare_training_jax(
-        training_symbols,
+    train_full, n_train_aligned = _prepare_training_numpy(
+        training_np,
         num_ch,
         n_sym,
     )
-    x_jax = to_jax(samples_padded, device=device)
-    if was_1d:
-        x_jax = x_jax[None, :]
-
-    try:
-        platform = (
-            device.lower()
-            if device is not None
-            else (
-                x_jax.device.platform
-                if hasattr(x_jax, "device")
-                else list(x_jax.devices())[0].platform
-            )
-        )
-    except Exception:
-        platform = "cpu"
-
-    train_jax = to_jax(train_full, device=platform)
-    const_jax = to_jax(constellation_np, device=platform)
+    _sq_side, _sq_lev_min, _sq_d_grid = square_qam_slicer_params(constellation_np)
     if w_init is not None:
         w_arr = np.ascontiguousarray(to_device(w_init, "cpu"), dtype=np.complex64)
         w_arr = _validate_w_init(w_arr, num_ch, num_taps)
-        W_jax = to_jax(w_arr, device=platform)
+        W = w_arr.copy()
     else:
-        W_jax = _init_butterfly_weights_jax(
-            num_ch, num_taps, jnp, center_tap=center_tap
-        )
-        W_jax = to_jax(W_jax, device=platform)
-
+        W = _init_butterfly_weights_numpy(num_ch, num_taps, center_tap=center_tap)
     regressor_dim = num_ch * num_taps
-    P_init = jnp.eye(regressor_dim, dtype="complex128") / delta
-    P_init = to_jax(P_init, device=platform)
-    lam_jax = to_jax(jnp.float32(forgetting_factor), device=platform)
-    n_train_jax = to_jax(jnp.int32(n_train_aligned), device=platform)
-    leakage_jax = to_jax(jnp.float32(leakage), device=platform)
-    n_update_halt_jax = to_jax(jnp.int32(n_update_halt), device=platform)
-
+    P = np.eye(regressor_dim, dtype=np.complex128) / np.float64(delta)
+    y_out = np.empty((n_sym, num_ch), dtype=np.complex64)
+    e_out = np.empty((n_sym, num_ch), dtype=np.complex64)
+    w_hist_buf = (
+        np.empty((n_sym, num_ch, num_ch, num_taps), dtype=np.complex64)
+        if store_weights
+        else np.empty((1, num_ch, num_ch, num_taps), dtype=np.complex64)
+    )
     if cpr_type is None:
-        _sq_side_j, _sq_lev_min_j, _sq_d_grid_j = square_qam_slicer_params(
-            constellation_np
-        )
-        scan_fn = _get_jax_rls(
-            num_taps,
+        _get_numba_rls()(
+            x_np,
+            train_full,
+            constellation_np,
+            W,
+            P,
+            np.float32(forgetting_factor),
+            np.float32(leakage),
+            np.int32(n_train_aligned),
+            np.int32(n_update_halt),
             stride,
-            len(constellation_np),
-            num_ch,
-            int(_sq_side_j),
-            float(_sq_lev_min_j),
-            float(_sq_d_grid_j),
+            store_weights,
+            y_out,
+            e_out,
+            w_hist_buf,
+            _sq_lev_min,
+            _sq_d_grid,
+            np.int32(_sq_side),
         )
-        y_jax, e_jax, W_jax, wh_jax = scan_fn(
-            x_jax,
-            train_jax,
-            const_jax,
-            W_jax,
-            P_init,
-            lam_jax,
-            n_train_jax,
-            leakage_jax,
-            n_update_halt_jax,
-        )
-        result = _unpack_result_jax(
-            y_jax,
-            e_jax,
-            W_jax,
-            wh_jax,
+        result = _unpack_result_numpy(
+            y_out,
+            e_out,
+            W,
+            w_hist_buf,
             was_1d,
             store_weights,
             n_sym=n_update_halt,
@@ -1661,89 +1111,94 @@ def rls(
         )
         symmetry = _cpr_symmetry(modulation, order)
         B = int(cpr_bps_test_phases)
-        H = int(cpr_cycle_slip_history)
         bps_angles_np = np.linspace(
             0.0, np.pi / 2.0, B, endpoint=False, dtype=np.float32
         )
         bps_phases_neg_np = np.exp(-1j * bps_angles_np).astype(np.complex64)
-        bps_pn_jax = to_jax(bps_phases_neg_np, device=platform)
-        bps_ang_jax = to_jax(bps_angles_np, device=platform)
-        _sq_side_j, _sq_lev_min_j, _sq_d_grid_j = square_qam_slicer_params(
-            constellation_np
+        H = int(cpr_cycle_slip_history)
+        _st = cpr_state
+        _st_ok = (
+            _st is not None
+            and _st.cpr_type == cpr_type
+            and _st.num_ch == num_ch
+            and _st.cs_H == H
+            and _st.pll_phi is not None
         )
-        scan_fn = _get_jax_rls_cpr(
-            num_taps,
-            stride,
-            len(constellation_np),
-            num_ch,
-            cpr_type,
-            B,
-            int(cpr_bps_block_size),
-            bool(cpr_joint_channels),
-            H,
-            int(symmetry),
-            int(_sq_side_j),
-            float(_sq_lev_min_j),
-            float(_sq_d_grid_j),
-        )
-        KB = int(cpr_bps_block_size)
-        if cpr_state is not None:
-            _pi, _pf, _bb, _bbp, _bp4, _cx, _cy, _cp = _cpr_state_to_jax_inits(
-                cpr_state, num_ch, KB, H
+        if _st_ok:
+            assert _st is not None
+            assert _st.pll_phi is not None
+            assert _st.pll_freq is not None
+            assert _st.cs_buf_x is not None
+            assert _st.cs_buf_y is not None
+            assert _st.cs_buf_ptr is not None
+            assert _st.cs_buf_n is not None
+            assert _st.cs_stats is not None
+            pll_phi = _st.pll_phi.copy()
+            pll_freq = _st.pll_freq.copy()
+            cs_buf_x = _st.cs_buf_x.copy()
+            cs_buf_y = _st.cs_buf_y.copy()
+            cs_buf_ptr = _st.cs_buf_ptr.copy()
+            cs_buf_n = _st.cs_buf_n.copy()
+            cs_stats = _st.cs_stats.copy()
+            bps_prev4 = (
+                _st.bps_prev4.copy()
+                if _st.bps_prev4 is not None
+                else np.zeros(num_ch, dtype=np.float64)
             )
         else:
-            _pi = np.zeros(num_ch, dtype=np.float64)
-            _pf = np.zeros(num_ch, dtype=np.float64)
-            _bb = np.zeros((KB, num_ch), dtype=np.complex64)
-            _bbp = np.int32(0)
-            _bp4 = np.zeros(num_ch, dtype=np.float64)
-            _cx = np.zeros((num_ch, H), dtype=np.float64)
-            _cy = np.zeros((num_ch, H), dtype=np.float64)
-            _cp = np.zeros(num_ch, dtype=np.int32)
-        (
-            y_jax,
-            e_jax,
-            W_jax,
-            wh_jax,
-            phi_jax,
-            pll_phi_f,
-            pll_freq_f,
-            bps_buf_f,
-            bps_buf_ptr_f,
-            bps_prev4_f,
-            cs_buf_x_f,
-            cs_buf_y_f,
-            cs_buf_ptr_f,
-        ) = scan_fn(
-            x_jax,
-            train_jax,
-            const_jax,
-            bps_pn_jax,
-            bps_ang_jax,
-            W_jax,
-            P_init,
-            lam_jax,
-            n_train_jax,
-            leakage_jax,
-            n_update_halt_jax,
-            to_jax(jnp.float64(pll_mu), device=platform),
-            to_jax(jnp.float64(pll_beta), device=platform),
-            to_jax(jnp.float64(cpr_cycle_slip_threshold), device=platform),
-            to_jax(jnp.bool_(cpr_cycle_slip_correction), device=platform),
-            to_jax(_pi, device=platform),
-            to_jax(_pf, device=platform),
-            to_jax(_bb, device=platform),
-            to_jax(_bbp, device=platform),
-            to_jax(_bp4, device=platform),
-            to_jax(_cx, device=platform),
-            to_jax(_cy, device=platform),
-            to_jax(_cp, device=platform),
+            pll_phi = np.zeros(num_ch, dtype=np.float64)
+            pll_freq = np.zeros(num_ch, dtype=np.float64)
+            cs_buf_x = np.zeros((num_ch, H), dtype=np.float64)
+            cs_buf_y = np.zeros((num_ch, H), dtype=np.float64)
+            cs_buf_ptr = np.zeros(num_ch, dtype=np.int64)
+            cs_buf_n = np.zeros(num_ch, dtype=np.int64)
+            cs_stats = np.zeros((num_ch, 4), dtype=np.float64)
+            bps_prev4 = np.zeros(num_ch, dtype=np.float64)
+        phase_out = np.empty((n_sym, num_ch), dtype=np.float64)
+        cpr_mode_int = np.int32(1 if cpr_type == "pll" else 2)
+        _get_numba_rls_cpr()(
+            x_np,
+            train_full,
+            constellation_np,
+            bps_phases_neg_np,
+            bps_angles_np,
+            np.int32(cpr_bps_block_size),
+            bool(cpr_joint_channels),
+            W,
+            P,
+            np.float32(forgetting_factor),
+            np.float32(leakage),
+            np.int32(n_train_aligned),
+            np.int32(n_update_halt),
+            stride,
+            store_weights,
+            cpr_mode_int,
+            pll_mu,
+            pll_beta,
+            np.int32(symmetry),
+            bool(cpr_cycle_slip_correction),
+            np.float32(cpr_cycle_slip_threshold),
+            pll_phi,
+            pll_freq,
+            cs_buf_x,
+            cs_buf_y,
+            cs_buf_ptr,
+            cs_buf_n,
+            cs_stats,
+            bps_prev4,
+            y_out,
+            e_out,
+            phase_out,
+            w_hist_buf,
+            _sq_lev_min,
+            _sq_d_grid,
+            np.int32(_sq_side),
         )
-        result = _unpack_result_jax(
-            y_jax,
-            e_jax,
-            W_jax,
-            wh_jax,
+        result = _unpack_result_numpy(
+            y_out,
+            e_out,
+            W,
+            w_hist_buf,
             was_1d,
             store_weights,
             n_sym=n_update_halt,
@@ -1751,26 +1206,22 @@ def rls(
             num_train_symbols=int(n_train_aligned),
             input_norm_factor=eq_norm,
         )
-        # from_jax returns CuPy for a GPU-resident JAX array; coerce to host
-        # NumPy via to_device (CuPy.get / NumPy passthrough) so CPRState stays
-        # host-side and np.asarray never sees a CuPy array.
-        phi_np = to_device(from_jax(phi_jax), "cpu")  # (N_sym, C)
-        phi_t = xp.asarray(phi_np[:n_update_halt].T)  # (C, n_update_halt)
+        phi_t = xp.asarray(phase_out[:n_update_halt].T)  # (C, n_update_halt)
         result.phase_trajectory = restore_1d(was_1d, phi_t)
         result.cpr_state = CPRState(
-            pll_phi=to_device(from_jax(pll_phi_f), "cpu"),
-            pll_freq=to_device(from_jax(pll_freq_f), "cpu"),
-            bps_prev4=to_device(from_jax(bps_prev4_f), "cpu"),
-            jax_bps_buf=to_device(from_jax(bps_buf_f), "cpu"),
-            jax_bps_buf_ptr=int(to_device(from_jax(bps_buf_ptr_f), "cpu")),
-            cs_buf_x=to_device(from_jax(cs_buf_x_f), "cpu"),
-            cs_buf_y=to_device(from_jax(cs_buf_y_f), "cpu"),
-            cs_buf_ptr=to_device(from_jax(cs_buf_ptr_f), "cpu"),
+            pll_phi=pll_phi.copy(),
+            pll_freq=pll_freq.copy(),
+            bps_prev4=bps_prev4.copy(),
+            cs_buf_x=cs_buf_x.copy(),
+            cs_buf_y=cs_buf_y.copy(),
+            cs_buf_ptr=cs_buf_ptr.copy(),
+            cs_buf_n=cs_buf_n.copy(),
+            cs_stats=cs_stats.copy(),
             cpr_type=cpr_type,
             num_ch=num_ch,
             symmetry=symmetry,
             bps_P=B,
-            bps_K=KB,
+            bps_K=int(cpr_bps_block_size),
             cs_H=H,
         )
     # Truncate last num_taps//2 symbols (zero-padding contamination).

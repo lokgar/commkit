@@ -6,21 +6,18 @@ from typing import Any
 
 import numpy as np
 
-from ...backend import ArrayType, _get_jax, dispatch, to_device, to_jax
+from ...backend import ArrayType, dispatch, to_device
 from ...core._signal_adapter import adapt_signal, require_integer_sps
 from ...core.signal import Signal
 from ...logger import logger
 from .._common import (
     _build_padded_samples,
-    _init_butterfly_weights_jax,
     _init_butterfly_weights_numpy,
     _normalize_inputs,
-    _unpack_result_jax,
     _unpack_result_numpy,
     _validate_sps,
     _validate_w_init,
 )
-from .._kernels_jax import _get_jax_cma, _get_jax_pa_cma, _get_jax_pa_rde, _get_jax_rde
 from .._kernels_numba import (
     _get_numba,
     _get_numba_cma,
@@ -44,9 +41,7 @@ def cma(
     order: int | None = None,
     unipolar: bool = False,
     store_weights: bool = False,
-    device: str | None = "cpu",
     center_tap: int | None = None,
-    backend: str = "numba",
     w_init: ArrayType | None = None,
     pilot_ref: ArrayType | None = None,
     pilot_mask: np.ndarray | None = None,
@@ -147,15 +142,8 @@ def cma(
         Use unipolar constellation for auto-computing R2.
     store_weights : bool, default False
         If True, stores weight trajectory.
-    device : str, optional
-        Target device for JAX computations (e.g., 'cpu', 'gpu', 'tpu').
-        Default is 'cpu'. Ignored when ``backend='numba'``.
     center_tap : int, optional
         Index of the center tap. If None, defaults to ``num_taps // 2``.
-    backend : str, default 'numba'
-        Execution backend. ``'numba'`` uses Numba ``@njit``; LLVM-compiled,
-        typically fastest on CPU. ``'jax'`` uses ``jax.lax.scan``
-        (XLA-compiled, GPU-capable).
     w_init : array_like, optional
         Initial tap weights. Shape: ``(C, C, num_taps)`` complex64, or the
         SISO short-hand ``(num_taps,)`` / ``(1, num_taps)`` as returned by
@@ -203,13 +191,12 @@ def cma(
         ``samples`` is a :class:`Signal`, ``y_hat`` is a new :class:`Signal`
         at the symbol rate (``sampling_rate = symbol_rate``).
 
-    Warnings
-    --------
-    **JAX GPU mode is typically slower than CPU for adaptive equalization.**
-    CMA is inherently sequential: each weight update depends on the previous
-    weights, so ``lax.scan`` serializes execution even on GPU.  Use
-    ``device='cpu'`` for typical SISO sequences, or ``backend='numba'`` for
-    CPU-optimal throughput.
+    Notes
+    -----
+    The adaptation is inherently sequential (each update depends on the
+    previous weights), so it always runs as a compiled Numba loop on the CPU.
+    CuPy input is copied to the host once and the outputs are copied back
+    once; the result arrays live on the input's device.
     """
     signal_adapter = adapt_signal(samples, function_name="cma()")
     samples = signal_adapter.array
@@ -225,12 +212,10 @@ def cma(
 
     use_pilots = pilot_ref is not None and pilot_mask is not None
     logger.info(
-        "CMA equalizer: num_taps=%s, mu=%s, sps=%s, backend=%s, "
-        "pilot_aided=%s, pilot_gain_db=%s",
+        "CMA equalizer: num_taps=%s, mu=%s, sps=%s, pilot_aided=%s, pilot_gain_db=%s",
         num_taps,
         step_size,
         sps,
-        backend,
         use_pilots,
         pilot_gain_db,
     )
@@ -287,169 +272,78 @@ def cma(
     pad_left = min(c_tap, pad_total)
     pad_right = pad_total - pad_left
 
-    if backend == "numba":
-        numba = _get_numba()
-        if numba is None:
-            raise ImportError("Numba is required for backend='numba'.")
+    numba = _get_numba()
+    if numba is None:
+        raise ImportError("Numba is required for the sequential equalizers.")
 
-        samples_np = np.ascontiguousarray(to_device(samples, "cpu"), dtype=np.complex64)
-        # Deboost pilot positions before global normalisation so boosted pilots
-        # don't inflate the RMS estimate and bias the Godard convergence target.
-        if use_pilots and pilot_gain_db != 0.0:
-            assert pilot_mask is not None
-            _amp = np.float32(10.0 ** (pilot_gain_db / 20.0))
-            _smask = np.repeat(pilot_mask.astype(bool), stride)  # (N_samples,)
-            samples_np[..., _smask] /= _amp
-        # RMS-normalize samples to unit symbol-rate power (CMA has no training)
-        samples_np, _, eq_norm = _normalize_inputs(
-            samples_np, None, sps, input_norm_factor=input_norm_factor
-        )
-
-        x_np = _build_padded_samples(
-            samples_np, pad_left, pad_right, samples_prefix, pad_mode, eq_norm, sps
-        )
-        x_np = np.ascontiguousarray(x_np)
-
-        if w_init is not None:
-            w_arr = np.ascontiguousarray(to_device(w_init, "cpu"), dtype=np.complex64)
-            w_arr = _validate_w_init(w_arr, num_ch, num_taps)
-            W = w_arr.copy()
-        else:
-            W = _init_butterfly_weights_numpy(num_ch, num_taps, center_tap=center_tap)
-        y_out = np.empty((n_sym, num_ch), dtype=np.complex64)
-        e_out = np.empty((n_sym, num_ch), dtype=np.complex64)
-        w_hist_buf = (
-            np.empty((n_sym, num_ch, num_ch, num_taps), dtype=np.complex64)
-            if store_weights
-            else np.empty((1, num_ch, num_ch, num_taps), dtype=np.complex64)
-        )
-        if use_pilots:
-            pref = np.ascontiguousarray(to_device(pilot_ref, "cpu"), dtype=np.complex64)
-            if _c_ps is not None:
-                pref = (pref * _c_ps).astype(np.complex64)
-            pmask = np.ascontiguousarray(pilot_mask, dtype=np.uint8)
-            _get_numba_pa_cma()(
-                x_np,
-                W,
-                np.float32(step_size),
-                np.float32(r2),
-                stride,
-                store_weights,
-                y_out,
-                e_out,
-                w_hist_buf,
-                pref,
-                pmask,
-            )
-        else:
-            _get_numba_cma()(
-                x_np,
-                W,
-                np.float32(step_size),
-                np.float32(r2),
-                stride,
-                store_weights,
-                y_out,
-                e_out,
-                w_hist_buf,
-            )
-        return finish(
-            _log_equalizer_exit(
-                _unpack_result_numpy(
-                    y_out,
-                    e_out,
-                    W,
-                    w_hist_buf,
-                    was_1d,
-                    store_weights,
-                    n_sym=None,
-                    xp=xp,
-                    input_norm_factor=eq_norm,
-                ),
-                name="CMA" if not use_pilots else "CMA(PA)",
-                check_convergence=True,
-            )
-        )
-
-    # JAX backend
-    jax, jnp, _ = _get_jax()
-    if jax is None or jnp is None:
-        raise ImportError("JAX is required for backend='jax'.")
-
+    samples_np = np.ascontiguousarray(to_device(samples, "cpu"), dtype=np.complex64)
     # Deboost pilot positions before global normalisation so boosted pilots
     # don't inflate the RMS estimate and bias the Godard convergence target.
     if use_pilots and pilot_gain_db != 0.0:
         assert pilot_mask is not None
-        _amp_jax = float(10.0 ** (pilot_gain_db / 20.0))
-        _smask_jax = xp.asarray(np.repeat(pilot_mask.astype(bool), stride))
-        samples = samples.copy()
-        samples[..., _smask_jax] /= xp.float32(_amp_jax)
+        _amp = np.float32(10.0 ** (pilot_gain_db / 20.0))
+        _smask = np.repeat(pilot_mask.astype(bool), stride)  # (N_samples,)
+        samples_np[..., _smask] /= _amp
     # RMS-normalize samples to unit symbol-rate power (CMA has no training)
-    samples, _, eq_norm = _normalize_inputs(
-        samples, None, sps, input_norm_factor=input_norm_factor
+    samples_np, _, eq_norm = _normalize_inputs(
+        samples_np, None, sps, input_norm_factor=input_norm_factor
     )
 
-    _samp_cpu_cma = to_device(samples, "cpu").astype(np.complex64)
-    samples_padded_np_cma = _build_padded_samples(
-        _samp_cpu_cma, pad_left, pad_right, samples_prefix, pad_mode, eq_norm, sps
+    x_np = _build_padded_samples(
+        samples_np, pad_left, pad_right, samples_prefix, pad_mode, eq_norm, sps
     )
-    samples_padded = (
-        xp.asarray(samples_padded_np_cma)
-        if not was_1d
-        else xp.asarray(samples_padded_np_cma[0])
-    )
-
-    x_jax = to_jax(samples_padded, device=device)
-    if was_1d:
-        x_jax = x_jax[None, :]
-
-    try:
-        platform = (
-            device.lower()
-            if device is not None
-            else (
-                x_jax.device.platform
-                if hasattr(x_jax, "device")
-                else list(x_jax.devices())[0].platform
-            )
-        )
-    except Exception:
-        platform = "cpu"
+    x_np = np.ascontiguousarray(x_np)
 
     if w_init is not None:
         w_arr = np.ascontiguousarray(to_device(w_init, "cpu"), dtype=np.complex64)
         w_arr = _validate_w_init(w_arr, num_ch, num_taps)
-        W_jax = to_jax(w_arr, device=platform)
+        W = w_arr.copy()
     else:
-        W_jax = _init_butterfly_weights_jax(
-            num_ch, num_taps, jnp, center_tap=center_tap
-        )
-        W_jax = to_jax(W_jax, device=platform)
-    mu_jax = to_jax(jnp.float32(step_size), device=platform)
-    r2_jax = to_jax(jnp.float32(r2), device=platform)
-
+        W = _init_butterfly_weights_numpy(num_ch, num_taps, center_tap=center_tap)
+    y_out = np.empty((n_sym, num_ch), dtype=np.complex64)
+    e_out = np.empty((n_sym, num_ch), dtype=np.complex64)
+    w_hist_buf = (
+        np.empty((n_sym, num_ch, num_ch, num_taps), dtype=np.complex64)
+        if store_weights
+        else np.empty((1, num_ch, num_ch, num_taps), dtype=np.complex64)
+    )
     if use_pilots:
-        pref_np = np.ascontiguousarray(to_device(pilot_ref, "cpu"), dtype=np.complex64)
+        pref = np.ascontiguousarray(to_device(pilot_ref, "cpu"), dtype=np.complex64)
         if _c_ps is not None:
-            pref_np = (pref_np * _c_ps).astype(np.complex64)
-        pmask_np = np.ascontiguousarray(pilot_mask, dtype=np.uint8)
-        # pilot_ref: (C, n_sym) -> (n_sym, C) for scan xs
-        pref_jax = to_jax(pref_np.T, device=platform)
-        pmask_jax = to_jax(pmask_np.astype(bool), device=platform)
-        scan_fn = _get_jax_pa_cma(num_taps, stride, num_ch)
-        y_jax, e_jax, W_jax, wh_jax = scan_fn(
-            x_jax, W_jax, mu_jax, r2_jax, pref_jax, pmask_jax, n_sym
+            pref = (pref * _c_ps).astype(np.complex64)
+        pmask = np.ascontiguousarray(pilot_mask, dtype=np.uint8)
+        _get_numba_pa_cma()(
+            x_np,
+            W,
+            np.float32(step_size),
+            np.float32(r2),
+            stride,
+            store_weights,
+            y_out,
+            e_out,
+            w_hist_buf,
+            pref,
+            pmask,
         )
     else:
-        scan_fn = _get_jax_cma(num_taps, stride, num_ch)
-        y_jax, e_jax, W_jax, wh_jax = scan_fn(x_jax, W_jax, mu_jax, r2_jax, n_sym)
+        _get_numba_cma()(
+            x_np,
+            W,
+            np.float32(step_size),
+            np.float32(r2),
+            stride,
+            store_weights,
+            y_out,
+            e_out,
+            w_hist_buf,
+        )
     return finish(
         _log_equalizer_exit(
-            _unpack_result_jax(
-                y_jax,
-                e_jax,
-                W_jax,
-                wh_jax,
+            _unpack_result_numpy(
+                y_out,
+                e_out,
+                W,
+                w_hist_buf,
                 was_1d,
                 store_weights,
                 n_sym=None,
@@ -471,9 +365,7 @@ def rde(
     order: int | None = None,
     unipolar: bool = False,
     store_weights: bool = False,
-    device: str | None = "cpu",
     center_tap: int | None = None,
-    backend: str = "numba",
     w_init: ArrayType | None = None,
     pilot_ref: ArrayType | None = None,
     pilot_mask: np.ndarray | None = None,
@@ -557,12 +449,8 @@ def rde(
         Use unipolar constellation for radius extraction.
     store_weights : bool, default False
         If True, stores weight trajectory in ``result.weights_history``.
-    device : str, optional
-        Target JAX device (``'cpu'``, ``'gpu'``). Ignored for ``backend='numba'``.
     center_tap : int, optional
         Index of the center tap. Defaults to ``num_taps // 2``.
-    backend : str, default 'numba'
-        ``'numba'`` uses Numba ``@njit``; ``'jax'`` uses ``jax.lax.scan``.
     w_init : array_like, optional
         Initial tap weights. Shape: ``(C, C, num_taps)`` complex64, or the
         SISO short-hand ``(num_taps,)`` / ``(1, num_taps)`` as returned by
@@ -623,10 +511,11 @@ def rde(
     **Phase ambiguity:** Both CMA and RDE share the same 90°-symmetric cost
     surface for QAM/PSK.  Use a phase recovery algorithm after blind equalization.
 
-    **GPU note:** RDE is inherently sequential (each weight update depends on
-    previous weights), so ``lax.scan`` serializes execution even on GPU.
-    Use ``device='cpu'`` for typical SISO sequences, or ``backend='numba'``
-    for CPU-optimal throughput.
+    **Execution:** the adaptation is inherently sequential (each update
+    depends on the previous weights), so it always runs as a compiled Numba
+    loop on the CPU.
+    CuPy input is copied to the host once and the outputs are copied back
+    once; the result arrays live on the input's device.
     """
     signal_adapter = adapt_signal(samples, function_name="rde()")
     samples = signal_adapter.array
@@ -642,12 +531,10 @@ def rde(
 
     use_pilots = pilot_ref is not None and pilot_mask is not None
     logger.info(
-        "RDE equalizer: num_taps=%s, mu=%s, sps=%s, backend=%s, "
-        "pilot_aided=%s, pilot_gain_db=%s",
+        "RDE equalizer: num_taps=%s, mu=%s, sps=%s, pilot_aided=%s, pilot_gain_db=%s",
         num_taps,
         step_size,
         sps,
-        backend,
         use_pilots,
         pilot_gain_db,
     )
@@ -697,178 +584,87 @@ def rde(
         logger.debug("RDE: no modulation provided, using single unit radius (≡ CMA)")
 
     n_sym = n_samples // stride
-    num_radii = len(radii)
 
     c_tap = center_tap if center_tap is not None else num_taps // 2
     pad_total = max(0, n_sym * stride - n_samples + num_taps - 1)
     pad_left = min(c_tap, pad_total)
     pad_right = pad_total - pad_left
 
-    if backend == "numba":
-        numba = _get_numba()
-        if numba is None:
-            raise ImportError("Numba is required for backend='numba'.")
+    numba = _get_numba()
+    if numba is None:
+        raise ImportError("Numba is required for the sequential equalizers.")
 
-        samples_np = np.ascontiguousarray(to_device(samples, "cpu"), dtype=np.complex64)
-        # Deboost pilot positions before global normalisation so boosted pilots
-        # don't inflate the RMS estimate and bias the ring-radius convergence targets.
-        if use_pilots and pilot_gain_db != 0.0:
-            assert pilot_mask is not None
-            _amp = np.float32(10.0 ** (pilot_gain_db / 20.0))
-            _smask = np.repeat(pilot_mask.astype(bool), stride)  # (N_samples,)
-            samples_np[..., _smask] /= _amp
-        samples_np, _, eq_norm = _normalize_inputs(
-            samples_np, None, sps, input_norm_factor=input_norm_factor
-        )
-
-        x_np = _build_padded_samples(
-            samples_np, pad_left, pad_right, samples_prefix, pad_mode, eq_norm, sps
-        )
-        x_np = np.ascontiguousarray(x_np)
-
-        # Normalize radii to match the unit-power-normalized samples
-        # (constellation is unit-average-power after gray_constellation)
-        radii_np = np.ascontiguousarray(radii, dtype=np.float32)
-
-        if w_init is not None:
-            w_arr = np.ascontiguousarray(to_device(w_init, "cpu"), dtype=np.complex64)
-            w_arr = _validate_w_init(w_arr, num_ch, num_taps)
-            W = w_arr.copy()
-        else:
-            W = _init_butterfly_weights_numpy(num_ch, num_taps, center_tap=center_tap)
-        y_out = np.empty((n_sym, num_ch), dtype=np.complex64)
-        e_out = np.empty((n_sym, num_ch), dtype=np.complex64)
-        w_hist_buf = (
-            np.empty((n_sym, num_ch, num_ch, num_taps), dtype=np.complex64)
-            if store_weights
-            else np.empty((1, num_ch, num_ch, num_taps), dtype=np.complex64)
-        )
-        if use_pilots:
-            pref = np.ascontiguousarray(to_device(pilot_ref, "cpu"), dtype=np.complex64)
-            if _c_ps is not None:
-                pref = (pref * _c_ps).astype(np.complex64)
-            pmask = np.ascontiguousarray(pilot_mask, dtype=np.uint8)
-            _get_numba_pa_rde()(
-                x_np,
-                W,
-                np.float32(step_size),
-                radii_np,
-                stride,
-                store_weights,
-                y_out,
-                e_out,
-                w_hist_buf,
-                pref,
-                pmask,
-            )
-        else:
-            _get_numba_rde()(
-                x_np,
-                W,
-                np.float32(step_size),
-                radii_np,
-                stride,
-                store_weights,
-                y_out,
-                e_out,
-                w_hist_buf,
-            )
-        return finish(
-            _log_equalizer_exit(
-                _unpack_result_numpy(
-                    y_out,
-                    e_out,
-                    W,
-                    w_hist_buf,
-                    was_1d,
-                    store_weights,
-                    n_sym=None,
-                    xp=xp,
-                    input_norm_factor=eq_norm,
-                ),
-                name="RDE" if not use_pilots else "RDE(PA)",
-                check_convergence=True,
-            )
-        )
-
-    # JAX backend
-    jax, jnp, _ = _get_jax()
-    if jax is None or jnp is None:
-        raise ImportError("JAX is required for backend='jax'.")
-
+    samples_np = np.ascontiguousarray(to_device(samples, "cpu"), dtype=np.complex64)
     # Deboost pilot positions before global normalisation so boosted pilots
     # don't inflate the RMS estimate and bias the ring-radius convergence targets.
     if use_pilots and pilot_gain_db != 0.0:
         assert pilot_mask is not None
-        _amp_jax = float(10.0 ** (pilot_gain_db / 20.0))
-        _smask_jax = xp.asarray(np.repeat(pilot_mask.astype(bool), stride))
-        samples = samples.copy()
-        samples[..., _smask_jax] /= xp.float32(_amp_jax)
-    samples, _, eq_norm = _normalize_inputs(
-        samples, None, sps, input_norm_factor=input_norm_factor
+        _amp = np.float32(10.0 ** (pilot_gain_db / 20.0))
+        _smask = np.repeat(pilot_mask.astype(bool), stride)  # (N_samples,)
+        samples_np[..., _smask] /= _amp
+    samples_np, _, eq_norm = _normalize_inputs(
+        samples_np, None, sps, input_norm_factor=input_norm_factor
     )
 
-    _samp_cpu_rde = to_device(samples, "cpu").astype(np.complex64)
-    samples_padded_np_rde = _build_padded_samples(
-        _samp_cpu_rde, pad_left, pad_right, samples_prefix, pad_mode, eq_norm, sps
+    x_np = _build_padded_samples(
+        samples_np, pad_left, pad_right, samples_prefix, pad_mode, eq_norm, sps
     )
-    samples_padded = (
-        xp.asarray(samples_padded_np_rde)
-        if not was_1d
-        else xp.asarray(samples_padded_np_rde[0])
-    )
+    x_np = np.ascontiguousarray(x_np)
 
-    x_jax = to_jax(samples_padded, device=device)
-    if was_1d:
-        x_jax = x_jax[None, :]
-
-    try:
-        platform = (
-            device.lower()
-            if device is not None
-            else (
-                x_jax.device.platform
-                if hasattr(x_jax, "device")
-                else list(x_jax.devices())[0].platform
-            )
-        )
-    except Exception:
-        platform = "cpu"
+    # Normalize radii to match the unit-power-normalized samples
+    # (constellation is unit-average-power after gray_constellation)
+    radii_np = np.ascontiguousarray(radii, dtype=np.float32)
 
     if w_init is not None:
         w_arr = np.ascontiguousarray(to_device(w_init, "cpu"), dtype=np.complex64)
         w_arr = _validate_w_init(w_arr, num_ch, num_taps)
-        W_jax = to_jax(w_arr, device=platform)
+        W = w_arr.copy()
     else:
-        W_jax = _init_butterfly_weights_jax(
-            num_ch, num_taps, jnp, center_tap=center_tap
-        )
-        W_jax = to_jax(W_jax, device=platform)
-    mu_jax = to_jax(jnp.float32(step_size), device=platform)
-    radii_jax = to_jax(jnp.asarray(radii, dtype=jnp.float32), device=platform)
-
+        W = _init_butterfly_weights_numpy(num_ch, num_taps, center_tap=center_tap)
+    y_out = np.empty((n_sym, num_ch), dtype=np.complex64)
+    e_out = np.empty((n_sym, num_ch), dtype=np.complex64)
+    w_hist_buf = (
+        np.empty((n_sym, num_ch, num_ch, num_taps), dtype=np.complex64)
+        if store_weights
+        else np.empty((1, num_ch, num_ch, num_taps), dtype=np.complex64)
+    )
     if use_pilots:
-        pref_np = np.ascontiguousarray(to_device(pilot_ref, "cpu"), dtype=np.complex64)
+        pref = np.ascontiguousarray(to_device(pilot_ref, "cpu"), dtype=np.complex64)
         if _c_ps is not None:
-            pref_np = (pref_np * _c_ps).astype(np.complex64)
-        pmask_np = np.ascontiguousarray(pilot_mask, dtype=np.uint8)
-        # pilot_ref: (C, n_sym) -> (n_sym, C) for scan xs
-        pref_jax = to_jax(pref_np.T, device=platform)
-        pmask_jax = to_jax(pmask_np.astype(bool), device=platform)
-        scan_fn = _get_jax_pa_rde(num_taps, stride, num_radii, num_ch)
-        y_jax, e_jax, W_jax, wh_jax = scan_fn(
-            x_jax, W_jax, mu_jax, radii_jax, pref_jax, pmask_jax, n_sym
+            pref = (pref * _c_ps).astype(np.complex64)
+        pmask = np.ascontiguousarray(pilot_mask, dtype=np.uint8)
+        _get_numba_pa_rde()(
+            x_np,
+            W,
+            np.float32(step_size),
+            radii_np,
+            stride,
+            store_weights,
+            y_out,
+            e_out,
+            w_hist_buf,
+            pref,
+            pmask,
         )
     else:
-        scan_fn = _get_jax_rde(num_taps, stride, num_radii, num_ch)
-        y_jax, e_jax, W_jax, wh_jax = scan_fn(x_jax, W_jax, mu_jax, radii_jax, n_sym)
+        _get_numba_rde()(
+            x_np,
+            W,
+            np.float32(step_size),
+            radii_np,
+            stride,
+            store_weights,
+            y_out,
+            e_out,
+            w_hist_buf,
+        )
     return finish(
         _log_equalizer_exit(
-            _unpack_result_jax(
-                y_jax,
-                e_jax,
-                W_jax,
-                wh_jax,
+            _unpack_result_numpy(
+                y_out,
+                e_out,
+                W,
+                w_hist_buf,
                 was_1d,
                 store_weights,
                 n_sym=None,

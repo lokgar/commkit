@@ -35,7 +35,6 @@ class TestPlotEqualizer:
             step_size=0.05,
             modulation="psk",
             order=4,
-            backend="numba",
         )
 
         fig, axes = plot_equalizer_result(result, smoothing=10)
@@ -54,7 +53,6 @@ class TestPlotEqualizer:
             step_size=0.05,
             modulation="psk",
             order=4,
-            backend="numba",
         )
 
         fig0, axes0 = plt.subplots(1, 2)
@@ -73,7 +71,6 @@ class TestPlotEqualizer:
             step_size=0.05,
             modulation="psk",
             order=4,
-            backend="numba",
         )
 
         with patch("matplotlib.pyplot.show"):
@@ -92,7 +89,6 @@ class TestPlotEqualizer:
             step_size=0.05,
             modulation="psk",
             order=4,
-            backend="numba",
         )
         fig, axes = plot_equalizer_result(result, smoothing=1000)
         assert fig is not None
@@ -115,7 +111,6 @@ class TestPlotEqualizer:
             step_size=0.05,
             modulation="psk",
             order=4,
-            backend="numba",
         )
         fig, axes = plot_equalizer_result(result, smoothing=1000)
         assert fig is not None
@@ -132,7 +127,6 @@ class TestPlotEqualizer:
             step_size=0.05,
             modulation="psk",
             order=4,
-            backend="numba",
         )
         phase_1d = xp.linspace(0, 0.5, 100)
         result.phase_trajectory = phase_1d

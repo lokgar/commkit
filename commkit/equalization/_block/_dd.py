@@ -290,8 +290,8 @@ def block_lms(
     detector, which serialises the GPU pipeline.
 
     **CPU (NumPy) backend:** even slower than GPU because the Python loop
-    dominates at any practical block size.  Use ``lms(backend='numba')``
-    or ``lms(backend='jax')`` for CPU workloads instead.
+    dominates at any practical block size.  Use the per-symbol :func:`lms`
+    (Numba) for CPU workloads instead.
 
     **Stability / overflow:** ``step_size`` is applied to the **summed**
     gradient over all ``block_size`` symbols (not averaged).  This keeps μ on

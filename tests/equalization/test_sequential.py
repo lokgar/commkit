@@ -536,7 +536,6 @@ class TestStoreWeights:
             step_size=0.05,
             modulation="psk",
             order=4,
-            backend="numba",
             store_weights=True,
         )
 
@@ -554,7 +553,6 @@ class TestStoreWeights:
             num_taps=7,
             modulation="psk",
             order=4,
-            backend="numba",
             store_weights=True,
         )
 
@@ -574,7 +572,6 @@ class TestStoreWeights:
             step_size=0.005,
             modulation="psk",
             order=4,
-            backend="numba",
             store_weights=True,
         )
 
@@ -592,7 +589,6 @@ class TestStoreWeights:
             step_size=0.005,
             modulation="psk",
             order=4,
-            backend="numba",
             store_weights=True,
         )
 
@@ -615,7 +611,6 @@ class TestStoreWeights:
             num_taps=5,
             modulation="psk",
             order=4,
-            backend="numba",
             store_weights=True,
         )
 
@@ -658,13 +653,7 @@ class TestEdgeCases:
         """LMS Numba: ValueError when no modulation and no training symbols (DD impossible)."""
         rx, _ = self._qpsk_rx(xp)
         with pytest.raises(ValueError, match="modulation and order must be provided"):
-            equalization.lms(rx, num_taps=7, backend="numba")
-
-    def test_lms_raises_no_constellation_jax(self, xp, jax):
-        """LMS JAX: same ValueError for missing constellation."""
-        rx, _ = self._qpsk_rx(xp)
-        with pytest.raises(ValueError, match="modulation and order must be provided"):
-            equalization.lms(rx, num_taps=7, backend="jax")
+            equalization.lms(rx, num_taps=7)
 
     def test_rls_warns_fractional_spacing(self, xp):
         """RLS should warn when sps > 1 (ill-conditioned correlation matrix)."""
@@ -676,7 +665,6 @@ class TestEdgeCases:
             num_taps=7,
             modulation="psk",
             order=4,
-            backend="numba",
         )
         # Should complete and return valid output (even if warned)
         assert isinstance(result, EqualizerResult)
@@ -693,7 +681,6 @@ class TestEdgeCases:
                 num_taps=3,  # < 4*sps=8 -> should warn
                 modulation="psk",
                 order=4,
-                backend="numba",
             )
         assert any("small" in r.message.lower() for r in caplog.records)
 
@@ -701,7 +688,7 @@ class TestEdgeCases:
         """RDE with no modulation should use unit radius (same gradient as CMA R²=1)."""
         rx, _ = self._qpsk_rx(xp)
 
-        result = equalization.rde(rx, num_taps=7, step_size=0.005, backend="numba")
+        result = equalization.rde(rx, num_taps=7, step_size=0.005)
 
         assert isinstance(result, EqualizerResult)
         assert result.y_hat.shape[0] > 0
@@ -715,7 +702,7 @@ class TestEdgeCases:
         rx = xp.asarray(sig.samples)
         rx_mimo = xp.stack([rx, xp.roll(rx, 1)], axis=0)
 
-        result = equalization.rde(rx_mimo, num_taps=7, step_size=5e-4, backend="numba")
+        result = equalization.rde(rx_mimo, num_taps=7, step_size=5e-4)
 
         assert result.y_hat.shape == (2, rx.shape[0] // 2)
 
@@ -731,7 +718,6 @@ class TestEdgeCases:
             step_size=0.05,
             modulation="psk",
             order=4,
-            backend="numba",
         )
 
         assert result.num_train_symbols <= 30
@@ -746,7 +732,6 @@ class TestEdgeCases:
             training_symbols=train,
             num_taps=7,
             step_size=0.05,
-            backend="numba",
             # deliberately no modulation/order
         )
 
@@ -765,7 +750,6 @@ class TestEdgeCases:
             step_size=0.05,
             modulation="psk",
             order=4,
-            backend="numba",
             center_tap=8,
         )
 
@@ -801,7 +785,6 @@ class TestNumbaBackendCoverage:
             step_size=0.01,
             modulation="psk",
             order=4,
-            backend="numba",
         )
 
         assert isinstance(result, EqualizerResult)
@@ -819,7 +802,6 @@ class TestNumbaBackendCoverage:
             num_taps=9,
             modulation="psk",
             order=4,
-            backend="numba",
         )
 
         assert isinstance(result, EqualizerResult)
@@ -861,7 +843,6 @@ class TestNumbaBackendCoverage:
             num_taps=7,
             modulation="psk",
             order=4,
-            backend="numba",
         )
 
         # RLS truncates the last num_taps//2 symbols from y_hat
@@ -881,7 +862,6 @@ class TestNumbaBackendCoverage:
             num_taps=7,
             modulation="psk",
             order=4,
-            backend="numba",
         )
 
         assert isinstance(result, EqualizerResult)
@@ -898,7 +878,6 @@ class TestNumbaBackendCoverage:
             training_symbols=train,
             sps=2,
             num_taps=7,
-            backend="numba",
         )
 
         assert isinstance(result, EqualizerResult)
@@ -916,7 +895,6 @@ class TestNumbaBackendCoverage:
             num_taps=5,
             modulation="psk",
             order=4,
-            backend="numba",
             store_weights=True,
         )
 
@@ -936,7 +914,6 @@ class TestNumbaBackendCoverage:
             step_size=0.005,
             modulation="psk",
             order=4,
-            backend="numba",
             store_weights=True,
         )
 
@@ -956,7 +933,6 @@ class TestNumbaBackendCoverage:
             step_size=5e-4,
             modulation="qam",
             order=16,
-            backend="numba",
             store_weights=True,
         )
 
@@ -1015,7 +991,6 @@ class TestCmaPilotAided:
             num_taps=11,
             step_size=1e-4,
             sps=2,
-            backend="numba",
             pilot_ref=pilot_ref,
             pilot_mask=pilot_mask_u8,
         )
@@ -1046,38 +1021,6 @@ class TestCmaPilotAided:
             num_taps=11,
             step_size=1e-4,
             sps=2,
-            backend="numba",
-            pilot_ref=pilot_ref,
-            pilot_mask=pilot_mask_u8,
-        )
-        assert isinstance(result, EqualizerResult)
-        assert result.y_hat.shape[-1] == n_body
-
-    def test_cma_pilot_aided_jax_output_shape(self, xp, jax):
-        """cma() with pilot_ref/pilot_mask and jax backend runs without error."""
-        from commkit.equalization import build_pilot_ref
-
-        frame, samples_cpu, pilot_syms_cpu, pilot_mask_bool, n_body = (
-            self._make_comb_frame_and_samples(xp)
-        )
-        sps = 2
-        n_pre = frame.preamble.num_symbols * sps
-        body_samples = samples_cpu[n_pre:]
-
-        pilot_ref, pilot_mask_u8 = build_pilot_ref(
-            pilot_symbols=pilot_syms_cpu,
-            pilot_mask=pilot_mask_bool,
-            n_sym=n_body,
-            num_ch=1,
-        )
-        result = equalization.cma(
-            body_samples,
-            modulation="qam",
-            order=16,
-            num_taps=11,
-            step_size=1e-4,
-            sps=2,
-            backend="jax",
             pilot_ref=pilot_ref,
             pilot_mask=pilot_mask_u8,
         )
@@ -1116,7 +1059,6 @@ class TestCmaPilotAided:
             num_taps=11,
             step_size=1e-4,
             sps=2,
-            backend="numba",
             w_init=pre.weights,
             pilot_ref=pilot_ref,
             pilot_mask=pilot_mask_u8,

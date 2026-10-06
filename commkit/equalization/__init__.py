@@ -3,8 +3,9 @@ Adaptive and block channel equalization.
 
 This package provides sequential (LMS, RLS, CMA, RDE) and block / frequency-domain
 equalizers with optional carrier-phase recovery, plus linear (zero-forcing) and
-pilot-tone polarization-demultiplexing routines. Numba (CPU) and JAX (GPU) kernel
-backends dispatch automatically based on where the input data resides.
+pilot-tone polarization-demultiplexing routines. Sequential equalizers run as
+Numba loops on the CPU; block / frequency-domain equalizers run on the device
+the input lives on (NumPy or CuPy).
 
 The public API is unchanged from when this was a single module:
 ``from commkit.equalization import lms, rls, cma, rde, ...`` continues to work.
@@ -12,12 +13,10 @@ The public API is unchanged from when this was a single module:
 
 from __future__ import annotations
 
-# Re-exported for tests/benchmarks that reach package internals through this
-# namespace (historically ``equalization._get_jax`` etc.). F401 is silenced for
-# this re-export hub in pyproject.toml.
-from ..backend import _get_jax
+# ``_get_numba`` and ``_check_rls_divergence`` are re-exported for tests that
+# reach package internals through this namespace (removed in the equalization
+# module pass). F401 is silenced for this re-export hub in pyproject.toml.
 from ._block import block_lms
-from ._kernels_jax import _JITTED_EQ
 from ._kernels_numba import _get_numba
 from .blind import block_cma, block_rde, build_pilot_ref
 from .linear import apply_taps, estimate_transfer_function, zf_equalizer

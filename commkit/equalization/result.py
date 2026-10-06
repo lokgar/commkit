@@ -47,10 +47,6 @@ class CPRState:
     cs_buf_n: np.ndarray | None = None  # (C,) int64
     cs_stats: np.ndarray | None = None  # (C, 4) float64
 
-    # JAX-specific BPS buffer state (JAX backend only; None for Numba)
-    jax_bps_buf: np.ndarray | None = None  # (KB, C) complex64
-    jax_bps_buf_ptr: int | None = None  # scalar int32
-
     # Identity tags - used to validate shape compatibility on warm-start
     cpr_type: str | None = None
     num_ch: int = 0
