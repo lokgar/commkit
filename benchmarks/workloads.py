@@ -10,7 +10,7 @@ import numpy as np
 
 from commkit.helpers import normalize
 from commkit.impairments import apply_awgn, apply_phase_noise
-from commkit.mapping import gray_constellation
+from commkit.mapping import gray_constellation, map_bits
 
 FS = 1e6  # nominal symbol rate / sampling rate at 1 SPS [Hz]
 
@@ -85,3 +85,23 @@ def rotated_symbols_workload(
     rot = np.exp(1j * rot_quadrants * np.pi / 2).astype(np.complex64)
     y = apply_awgn(ref * rot, esn0_db=snr_db, sps=1, seed=seed + 1)
     return np.asarray(y, dtype=np.complex64), ref
+
+
+def llr_workload(
+    order: int,
+    n_sym: int,
+    esn0_db: float = 15.0,
+    seed: int = 0,
+):
+    """Gray-mapped unit-power QAM after AWGN, for soft-demapping benches.
+
+    Returns ``(rx (n_sym,) complex64, bits (n_sym * log2(order),) int8,
+    noise_var float)`` with ``noise_var = 10**(-esn0_db / 10)`` - the complex
+    noise variance referenced to the unit-power constellation.
+    """
+    k = int(np.log2(order))
+    rng = np.random.default_rng(seed)
+    bits = rng.integers(0, 2, n_sym * k, dtype=np.int8)
+    syms = np.asarray(map_bits(bits, "qam", order), dtype=np.complex64)
+    rx = apply_awgn(syms, esn0_db=esn0_db, sps=1, seed=seed + 1)
+    return np.asarray(rx, dtype=np.complex64), bits, 10 ** (-esn0_db / 10)

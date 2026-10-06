@@ -1,0 +1,49 @@
+"""Benchmarks: soft demapping (``compute_llr``) and GMI from LLRs.
+
+Recorded before the JAX -> NumPy/CuPy rewrite of ``compute_llr`` so the new
+implementation has a bar to meet.  ``output="input"`` returns the LLRs on the
+input device - the contract the rewrite keeps - so before/after numbers are
+comparable.
+"""
+
+import numpy as np
+import pytest
+from workloads import llr_workload
+
+from commkit.mapping import compute_llr
+from commkit.metrics import gmi
+
+ROUNDS = dict(rounds=3, warmup_rounds=1, iterations=1)
+N_SYM = 2**18
+
+
+@pytest.mark.parametrize("method", ["maxlog", "exact"])
+@pytest.mark.parametrize("order", [16, 64, 256])
+def bench_compute_llr(benchmark, backend_device, xp, sync, order, method):
+    rx_np, _, noise_var = llr_workload(order=order, n_sym=N_SYM)
+    rx = xp.asarray(rx_np)
+
+    def run():
+        out = compute_llr(rx, "qam", order, noise_var, method=method, output="input")
+        sync()
+        return out
+
+    benchmark.pedantic(run, **ROUNDS)
+
+
+@pytest.mark.parametrize("order", [16, 256])
+def bench_gmi(benchmark, backend_device, xp, sync, order):
+    rx_np, bits_np, noise_var = llr_workload(order=order, n_sym=N_SYM)
+    k = int(np.log2(order))
+    llrs_np = np.asarray(
+        compute_llr(rx_np, "qam", order, noise_var, output="numpy")
+    ).reshape(-1, k)
+    llrs = xp.asarray(llrs_np)
+    bits = xp.asarray(bits_np.reshape(-1, k))
+
+    def run():
+        out = gmi(llrs, bits)
+        sync()
+        return out
+
+    benchmark.pedantic(run, **ROUNDS)

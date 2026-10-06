@@ -391,14 +391,14 @@ Sizes: S = under a day, M = 1-3 days, L = more than 3 days.
 There are no library changes in this step, only documentation, tests,
 benchmarks and CI.
 
-- [ ] **0.1 `docs: add 2.0 refactoring plan`.** Commit `REFACTORING_PLAN.md` and
+- [x] **0.1 `docs: add 2.0 refactoring plan`.** Commit `REFACTORING_PLAN.md` and
   open the draft pull request.
-- [ ] **0.2 `docs: rewrite AGENTS.md for 2.0; drop CLAUDE.md`.** Write it to the
+- [x] **0.2 `docs: rewrite AGENTS.md for 2.0; drop CLAUDE.md`.** Write it to the
   §7 outline. The "migration status" section lists every 2.0 rule the code
   does not follow yet, each pointing to the commit that will fix it. Done when
   no section describes JAX, and no section contradicts §2 except as a
   migration-status item.
-- [ ] **0.3 `bench: add LLR and import-time benchmarks`.**
+- [x] **0.3 `bench: add LLR and import-time benchmarks`.**
   - `benchmarks/bench_llr.py` covers `compute_llr` (maxlog and exact) and `gmi`
     on 16-, 64- and 256-QAM with N = 1e6 symbols, on `[cpu]` and `[gpu]`. Its
     workload goes in `workloads.py`.
