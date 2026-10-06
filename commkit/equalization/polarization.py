@@ -152,7 +152,7 @@ def _refine_tone_frequencies(
 ) -> list[float]:
     """Sub-bin refine each tone on the receive channel where it is strongest.
 
-    Two stages, replacing the per-tone ``find_bias_tone`` calls (each of which
+    Two stages, replacing the per-tone the ``BiasTone`` estimator calls (each of which
     ran its own full-record, power-of-two zero-padded FFT):
 
     1. **Coarse**: one batched FFT (working precision) of only the *unique*
@@ -360,7 +360,7 @@ def demultiplex_polarization_tones_static(
         TX, in transmitted-stream order).  Require ``K <= C``.  Output row ``j``
         corresponds to ``tone_frequencies[j]``.
     refine_tones : bool, default True
-        If ``True``, sub-bin-refine each tone centre with ``find_bias_tone``
+        If ``True``, sub-bin-refine each tone centre with the ``BiasTone`` estimator
         (on the receive channel where that tone is strongest) before extraction,
         absorbing a residual carrier frequency offset that has dragged the tone
         off its nominal bin.  If ``False``, extract exactly at
@@ -577,7 +577,7 @@ def demultiplex_polarization_tones_dynamic(
         the tracked process ~4x.  ``W`` is linearly interpolated between grid
         points, so a finer grid costs more inverses but tracks marginally better.
     refine_tones : bool, default True
-        If ``True``, sub-bin-refine each tone centre with ``find_bias_tone`` (on
+        If ``True``, sub-bin-refine each tone centre with the ``BiasTone`` estimator (on
         the receive channel where it is strongest) before mixing down, absorbing
         a residual carrier frequency offset.
     search_band : float, optional

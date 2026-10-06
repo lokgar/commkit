@@ -400,7 +400,7 @@ def plot_frequency_offset_blockwise_result(
     max_points: int = 4000,
 ) -> tuple[Any, Any] | None:
     """
-    Diagnostic plot for ``frequency.correct_frequency_offset_blockwise``.
+    Diagnostic plot for blockwise ``frequency.correct_frequency_offset``.
 
     Shows three panels:
 
@@ -489,7 +489,7 @@ def plot_pilot_phase_estimate(
     Plots pilot phase scatter, linear fit, and the full interpolated trajectory.
 
     Used as a diagnostic for both pilot-based frequency offset estimation
-    (``estimate_frequency_offset_pilot_symbols``) and pilot-aided carrier phase
+    (``estimate_frequency_offset`` with ``PilotSymbols``) and pilot-aided carrier phase
     recovery (``recover_carrier_phase_pilot_symbols``).
 
     Parameters

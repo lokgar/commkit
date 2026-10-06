@@ -844,7 +844,7 @@ The equalization pass (3.7) gets more commits:
   - `fft_fractional_delay(samples, *, delay)`, `estimate_fractional_delay(
     correlation, peak_indices, *, dft_upsample=, fit=)` (was `method=`, a
     name D16 reserves for algorithm objects).
-- [ ] **3.5d `refactor(frequency)!: estimate_/correct_frequency_offset (D16)`.**
+- [x] **3.5d `refactor(frequency)!: estimate_/correct_frequency_offset (D16)`.**
   - `estimate_frequency_offset(samples, method, *, sampling_rate=,
     constellation=) -> FrequencyOffsetEstimate` with `MthPower`,
     `MengaliMorelli`, `PilotSymbols` and `BiasTone`; `correct_frequency_offset
@@ -862,6 +862,12 @@ The equalization pass (3.7) gets more commits:
     `estimate.combined()`, the weighted mean, which `correct_` accepts.
   - The estimate carries what the orphaned plots draw (M-th power spectrum,
     M&M autocorrelation, unwrapped pilot phases, block trajectory).
+  - The data-aided M&M form is `x * conj(known)` with `power=1` (what
+    `ref_signal=` did). The registry's rank check reads `.value` of an
+    estimate dataclass, so `estimate_timing` and `estimate_frequency_offset`
+    are checked. Validation: M-th power (Jacobsen and parabolic), M&M (blind
+    and generic), pilots, bias tone and the static correction give
+    bit-identical results to the 1.x functions on the same data.
 
 **Equalizer safety rules (3.7):**
 

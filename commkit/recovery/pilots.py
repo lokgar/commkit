@@ -241,7 +241,7 @@ def _extract_pilot_phasor(
     X : (C, N) complex, working precision
         The full FFT (reusable for further tones / diagnostics).
     """
-    from ..frequency import _refine_tones_from_spectrum, correct_static_frequency_offset
+    from ..frequency import _refine_tones_from_spectrum, correct_frequency_offset
 
     C, N = samples.shape
     df = sampling_rate / N
@@ -327,7 +327,9 @@ def _extract_pilot_phasor(
     #    a phase ramp - exact (non-quantized) complex mixing, same primitive
     #    the FOE correctors use (float64 phase ramp, wrapped, then cast to
     #    tone_t's working precision).
-    phasor = correct_static_frequency_offset(tone_t, sampling_rate, tone_frequency)
+    phasor = correct_frequency_offset(
+        tone_t, tone_frequency, sampling_rate=sampling_rate
+    )
 
     W = None
     if return_window:  # dense window for diagnostics/plots only
@@ -390,7 +392,7 @@ def recover_carrier_phase_pilot_tone(
         guide at the end of this docstring.
     search_band : float, optional
         Half-width in Hz of the peak-search window handed to
-        ``find_bias_tone`` when ``refine_tone=True``.
+        the ``BiasTone`` estimator when ``refine_tone=True``.
         The actual tone peak is sought within
         ``[f_p - search_band, f_p + search_band]``; this bounds how far
         a frequency offset may have dragged the tone from nominal.  Defaults
@@ -399,7 +401,7 @@ def recover_carrier_phase_pilot_tone(
         data band never wins the argmax.
     refine_tone : bool, default True
         If ``True``, locate the actual per-channel tone frequency with
-        ``find_bias_tone`` and centre the extraction
+        the ``BiasTone`` estimator and centre the extraction
         window there.  Essential when a frequency offset may shift the tone by
         more than ``B`` (otherwise the tone falls outside a window centred at
         nominal).  If ``False``, the window is centred at ``tone_frequency``.
@@ -580,7 +582,7 @@ def recover_carrier_phase_pilot_tones(
         the phase-noise band (kHz-scale is typical).  Set it from the knee of the
         ``angle(z_k·conj(z_0))`` spectrum.
     search_band : float, optional
-        Peak-search half-width handed to ``find_bias_tone``; defaults to
+        Peak-search half-width handed to the ``BiasTone`` estimator; defaults to
         ``bandwidth``.
     per_tone_channel : list of int, optional
         Channel each tone is read from (post-demux isolation, e.g. ``[0, 1]``).

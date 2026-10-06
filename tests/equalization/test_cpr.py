@@ -21,8 +21,9 @@ import pytest
 
 from commkit.equalization import CPRState, lms, rls
 from commkit.frequency import (
-    correct_frequency_offset_blockwise,
-    estimate_frequency_offset_mth_power,
+    MthPower,
+    correct_frequency_offset,
+    estimate_frequency_offset,
 )
 from commkit.mapping import Constellation
 from commkit.recovery import recover_carrier_phase_pll
@@ -696,7 +697,7 @@ class TestBlockwiseFOE:
     """Frequency offset estimation and blockwise correction."""
 
     def test_blockwise_foe_chirp(self, xp):
-        """correct_frequency_offset_blockwise recovers a linearly chirping frequency."""
+        """A blockwise M-th power estimate removes a linearly chirping frequency."""
         rng = np.random.default_rng(3)
         fs = 1e9
         n = 65536
@@ -714,15 +715,13 @@ class TestBlockwiseFOE:
         samples = xp.asarray((base_np * carrier).astype(np.complex64))
         base = xp.asarray(base_np)
 
-        corrected = correct_frequency_offset_blockwise(
+        est = estimate_frequency_offset(
             samples,
-            fs,
-            block_size=4096,
-            overlap=0.5,
-            estimator=lambda b, f: estimate_frequency_offset_mth_power(
-                b, sampling_rate=f, modulation="qam", order=16
-            ),
+            MthPower(block_size=4096, overlap=0.5),
+            sampling_rate=fs,
+            constellation=Constellation.qam(16),
         )
+        corrected = correct_frequency_offset(samples, est, sampling_rate=fs)
 
         ratio_corr = float(
             xp.mean(xp.abs(corrected - base) ** 2) / xp.mean(xp.abs(base) ** 2)

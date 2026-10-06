@@ -211,6 +211,25 @@ class Constellation:
         """Whether the constellation is real with non-negative points."""
         return not self.is_complex and bool(np.all(self.points >= 0))
 
+    @cached_property
+    def rotational_symmetry(self) -> int:
+        """Largest ``n`` such that rotating the points by ``2π/n`` maps them
+        onto themselves: ``M`` for M-PSK, 4 for square and cross QAM, 2 for
+        bipolar PAM, 1 for unipolar PAM.
+
+        Raising symbols to this power removes the modulation phase, which is
+        what M-th power frequency and phase estimators rely on.
+        """
+        pts = self.points.astype(np.complex128)
+        scale = float(np.max(np.abs(pts))) or 1.0
+        tol = 1e-6 * scale
+        for n in range(self.order, 1, -1):
+            rotated = pts * np.exp(2j * np.pi / n)
+            dist = np.abs(rotated[:, None] - pts[None, :]).min(axis=1)
+            if float(dist.max()) < tol:
+                return n
+        return 1
+
     @property
     def entropy(self) -> float:
         """Entropy of the prior in bits per symbol (``log2(M)`` if uniform)."""

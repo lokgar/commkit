@@ -58,9 +58,12 @@ class TestFoeMthPower:
     def test_accuracy_qam(self, xp, order, fo_hz):
         """Estimated offset within 5% of true value for QAM at SNR=30 dB."""
         sig = _qam_signal(xp, order, 4096, fo_hz=fo_hz)
-        est = frequency.estimate_frequency_offset_mth_power(
-            sig.samples, sampling_rate=FS, modulation="qam", order=order
-        )
+        est = frequency.estimate_frequency_offset(
+            sig.samples,
+            frequency.MthPower(),
+            sampling_rate=FS,
+            constellation=Constellation.qam(order),
+        ).value
         assert abs(est - fo_hz) / abs(fo_hz) < 0.05
 
     @pytest.mark.parametrize("order", [4, 8])
@@ -68,17 +71,23 @@ class TestFoeMthPower:
     def test_accuracy_psk(self, xp, order, fo_hz):
         """Estimated offset within 5% of true value for PSK at SNR=30 dB."""
         sig = _psk_signal(xp, order, 4096, fo_hz=fo_hz)
-        est = frequency.estimate_frequency_offset_mth_power(
-            sig.samples, sampling_rate=FS, modulation="psk", order=order
-        )
+        est = frequency.estimate_frequency_offset(
+            sig.samples,
+            frequency.MthPower(),
+            sampling_rate=FS,
+            constellation=Constellation.psk(order),
+        ).value
         assert abs(est - fo_hz) / abs(fo_hz) < 0.05
 
     def test_zero_offset_within_lock_range(self, xp):
         """With no frequency offset, estimate stays within the lock range [-fs/2M, fs/2M]."""
         sig = _qam_signal(xp, 16, 4096, fo_hz=0.0)
-        est = frequency.estimate_frequency_offset_mth_power(
-            sig.samples, sampling_rate=FS, modulation="qam", order=16
-        )
+        est = frequency.estimate_frequency_offset(
+            sig.samples,
+            frequency.MthPower(),
+            sampling_rate=FS,
+            constellation=Constellation.qam(16),
+        ).value
         # Lock range for QAM with M=4: [-fs/8, fs/8] = ±125 kHz at 1 MHz
         assert abs(est) < FS / (2 * 4)
 
@@ -86,13 +95,12 @@ class TestFoeMthPower:
         """Peak outside search_range returns an estimate outside the true value."""
         # True offset is 20 kHz; search range covers only [-5 kHz, 5 kHz]
         sig = _qam_signal(xp, 4, 8192, fo_hz=20_000.0)
-        est = frequency.estimate_frequency_offset_mth_power(
+        est = frequency.estimate_frequency_offset(
             sig.samples,
+            frequency.MthPower(search_range=(-5_000.0, 5_000.0)),
             sampling_rate=FS,
-            modulation="qam",
-            order=4,
-            search_range=(-5_000.0, 5_000.0),
-        )
+            constellation=Constellation.qam(4),
+        ).value
         # The true offset must not be found - estimate stays within the window
         assert abs(est) <= 5_000.0 + 200.0  # small tolerance for bin quantization
 
@@ -100,35 +108,44 @@ class TestFoeMthPower:
         """Empty search_range raises ValueError."""
         sig = _qam_signal(xp, 4, 1024, fo_hz=0.0)
         with pytest.raises(ValueError, match="empty search window"):
-            frequency.estimate_frequency_offset_mth_power(
+            frequency.estimate_frequency_offset(
                 sig.samples,
+                frequency.MthPower(search_range=(400_000.0, 500_000.0)),
                 sampling_rate=FS,
-                modulation="qam",
-                order=4,
-                search_range=(400_000.0, 500_000.0),
+                constellation=Constellation.qam(4),
             )
 
     def test_mimo_returns_per_channel(self, xp):
-        """MIMO input (C, N) returns ndarray(C,) by default."""
+        """MIMO input (C, N) gives one estimate per channel."""
         sig_a = _qam_signal(xp, 4, 2048, fo_hz=5_000.0)
         sig_b = _qam_signal(xp, 4, 2048, fo_hz=5_000.0)
         mimo = xp.stack([sig_a.samples, sig_b.samples], axis=0)  # (2, N)
-        est = frequency.estimate_frequency_offset_mth_power(
-            mimo, sampling_rate=FS, modulation="qam", order=4
-        )
-        assert isinstance(est, np.ndarray)
+        est = frequency.estimate_frequency_offset(
+            mimo,
+            frequency.MthPower(),
+            sampling_rate=FS,
+            constellation=Constellation.qam(4),
+        ).value
+        assert est.ndim == 1
         assert est.shape == (2,)
         assert all(abs(e - 5_000.0) / 5_000.0 < 0.05 for e in est)
 
     def test_mimo_combine_channels_returns_scalar(self, xp):
-        """MIMO + combine_channels=True returns a single Python float."""
+        """MIMO + combined() gives one 0-d estimate."""
         sig_a = _qam_signal(xp, 4, 2048, fo_hz=5_000.0)
         sig_b = _qam_signal(xp, 4, 2048, fo_hz=5_000.0)
         mimo = xp.stack([sig_a.samples, sig_b.samples], axis=0)
-        est = frequency.estimate_frequency_offset_mth_power(
-            mimo, sampling_rate=FS, modulation="qam", order=4, combine_channels=True
+        est = (
+            frequency.estimate_frequency_offset(
+                mimo,
+                frequency.MthPower(),
+                sampling_rate=FS,
+                constellation=Constellation.qam(4),
+            )
+            .combined()
+            .value
         )
-        assert isinstance(est, float)
+        assert est.ndim == 0
         assert abs(est - 5_000.0) / 5_000.0 < 0.05
 
     def test_circular_neighbors_near_lock_edge(self, xp):
@@ -137,9 +154,12 @@ class TestFoeMthPower:
         # the M-th power tone lands near bin nfft-2 (high-frequency edge of spectrum).
         fo_hz = 0.90 * (FS / 8)
         sig = _qam_signal(xp, 4, 4096, fo_hz=fo_hz, snr_db=40)
-        est = frequency.estimate_frequency_offset_mth_power(
-            sig.samples, sampling_rate=FS, modulation="qam", order=4
-        )
+        est = frequency.estimate_frequency_offset(
+            sig.samples,
+            frequency.MthPower(),
+            sampling_rate=FS,
+            constellation=Constellation.qam(4),
+        ).value
         assert abs(est - fo_hz) / abs(fo_hz) < 0.10
 
     def test_vectorised_subbin_matches_scalar_c2(self, xp):
@@ -153,9 +173,12 @@ class TestFoeMthPower:
         sig_a = _qam_signal(xp, 4, 4096, fo_hz=fo_hz, seed=42)
         sig_b = _qam_signal(xp, 4, 4096, fo_hz=fo_hz, seed=99)
         mimo = xp.stack([sig_a.samples, sig_b.samples], axis=0)
-        est = frequency.estimate_frequency_offset_mth_power(
-            mimo, sampling_rate=FS, modulation="qam", order=4
-        )
+        est = frequency.estimate_frequency_offset(
+            mimo,
+            frequency.MthPower(),
+            sampling_rate=FS,
+            constellation=Constellation.qam(4),
+        ).value
         assert abs(est[0] - fo_hz) / abs(fo_hz) < 0.05
         assert abs(est[1] - fo_hz) / abs(fo_hz) < 0.05
 
@@ -170,8 +193,8 @@ class TestCorrectionFunctions:
         """correct_static_frequency_offset: complex64 input -> complex64 output."""
         sig = _qam_signal(xp, 4, 1024)
         assert sig.samples.dtype == xp.complex64
-        corrected = frequency.correct_static_frequency_offset(
-            sig.samples, offset=5_000.0, sampling_rate=FS
+        corrected = frequency.correct_frequency_offset(
+            sig.samples, 5_000.0, sampling_rate=FS
         )
         assert corrected.dtype == xp.complex64
 
@@ -187,8 +210,8 @@ class TestCorrectionFunctions:
         actual_fo = spectral.grid_frequency(
             10_000.0, sampling_rate=FS, num_samples=sig.samples.shape[-1]
         )
-        restored = frequency.correct_static_frequency_offset(
-            shifted, offset=actual_fo, sampling_rate=FS
+        restored = frequency.correct_frequency_offset(
+            shifted, actual_fo, sampling_rate=FS
         )
         assert float(xp.max(xp.abs(restored - original))) < 1e-4
 
@@ -197,14 +220,14 @@ class TestCorrectionFunctions:
         estimate, shape (1,)) must not crash the scalar float() cast - every
         size-1 shape is equivalent to a plain scalar offset."""
         sig = _qam_signal(xp, 4, 1024)
-        scalar = frequency.correct_static_frequency_offset(
-            sig.samples, offset=5_000.0, sampling_rate=FS
+        scalar = frequency.correct_frequency_offset(
+            sig.samples, 5_000.0, sampling_rate=FS
         )
-        one_d = frequency.correct_static_frequency_offset(
-            sig.samples, offset=xp.asarray([5_000.0]), sampling_rate=FS
+        one_d = frequency.correct_frequency_offset(
+            sig.samples, xp.asarray([5_000.0]), sampling_rate=FS
         )
-        zero_d = frequency.correct_static_frequency_offset(
-            sig.samples, offset=xp.asarray(5_000.0), sampling_rate=FS
+        zero_d = frequency.correct_frequency_offset(
+            sig.samples, xp.asarray(5_000.0), sampling_rate=FS
         )
         assert float(xp.max(xp.abs(one_d - scalar))) < 1e-9
         assert float(xp.max(xp.abs(zero_d - scalar))) < 1e-9
@@ -256,23 +279,21 @@ class TestFoePilots:
     def test_accuracy(self, xp, fo_hz):
         """Estimated offset within 1 % of true offset at 30 dB SNR."""
         samples, pilot_indices, pilot_values = self._setup(xp, fo_hz)
-        est = frequency.estimate_frequency_offset_pilot_symbols(
+        est = frequency.estimate_frequency_offset(
             samples,
-            pilot_indices=pilot_indices,
-            pilot_values=pilot_values,
+            frequency.PilotSymbols(pilot_indices, pilot_values),
             sampling_rate=FS,
-        )
+        ).value
         assert abs(est - fo_hz) < 0.01 * abs(fo_hz) + 1.0
 
     def test_zero_offset(self, xp):
         """Zero frequency offset: estimate is within ±20 Hz."""
         samples, pilot_indices, pilot_values = self._setup(xp, fo_hz=0.0)
-        est = frequency.estimate_frequency_offset_pilot_symbols(
+        est = frequency.estimate_frequency_offset(
             samples,
-            pilot_indices=pilot_indices,
-            pilot_values=pilot_values,
+            frequency.PilotSymbols(pilot_indices, pilot_values),
             sampling_rate=FS,
-        )
+        ).value
         assert abs(est) < 20.0
 
     def test_mimo_returns_per_channel(self, xp):
@@ -281,30 +302,31 @@ class TestFoePilots:
         s0, pilot_indices, pilot_values = self._setup(xp, fo_hz)
         s1, _, _ = self._setup(xp, fo_hz)
         samples_mimo = xp.stack([s0, s1], axis=0)  # (2, N)
-        est = frequency.estimate_frequency_offset_pilot_symbols(
+        est = frequency.estimate_frequency_offset(
             samples_mimo,
-            pilot_indices=pilot_indices,
-            pilot_values=pilot_values,
+            frequency.PilotSymbols(pilot_indices, pilot_values),
             sampling_rate=FS,
-        )
-        assert isinstance(est, np.ndarray)
+        ).value
+        assert est.ndim == 1
         assert est.shape == (2,)
         assert all(abs(e - fo_hz) < 0.01 * fo_hz + 1.0 for e in est)
 
     def test_mimo_combine_channels_returns_scalar(self, xp):
-        """MIMO + combine_channels=True returns a single Python float."""
+        """MIMO + combined() gives one 0-d estimate."""
         fo_hz = 2_000.0
         s0, pilot_indices, pilot_values = self._setup(xp, fo_hz)
         s1, _, _ = self._setup(xp, fo_hz)
         samples_mimo = xp.stack([s0, s1], axis=0)
-        est = frequency.estimate_frequency_offset_pilot_symbols(
-            samples_mimo,
-            pilot_indices=pilot_indices,
-            pilot_values=pilot_values,
-            sampling_rate=FS,
-            combine_channels=True,
+        est = (
+            frequency.estimate_frequency_offset(
+                samples_mimo,
+                frequency.PilotSymbols(pilot_indices, pilot_values),
+                sampling_rate=FS,
+            )
+            .combined()
+            .value
         )
-        assert isinstance(est, float)
+        assert est.ndim == 0
         assert abs(est - fo_hz) < 0.01 * fo_hz + 1.0
 
 
@@ -328,9 +350,12 @@ class TestFoeMengaliMorelli:
                 sig.samples.dtype
             )
         )
-        est = frequency.estimate_frequency_offset_mengali_morelli(
-            sig.samples, sampling_rate=FS, modulation="qam", order=order
-        )
+        est = frequency.estimate_frequency_offset(
+            sig.samples,
+            frequency.MengaliMorelli(),
+            sampling_rate=FS,
+            constellation=Constellation.qam(order),
+        ).value
         assert abs(est - fo_hz) / abs(fo_hz) < 0.02
 
     @pytest.mark.parametrize("fo_hz", [4_000.0, -8_000.0])
@@ -347,9 +372,11 @@ class TestFoeMengaliMorelli:
                 sig.samples.dtype
             )
         )
-        est = frequency.estimate_frequency_offset_mengali_morelli(
-            sig.samples, sampling_rate=FS, ref_signal=ideal
-        )
+        est = frequency.estimate_frequency_offset(
+            sig.samples * xp.conj(ideal),
+            frequency.MengaliMorelli(power=1),
+            sampling_rate=FS,
+        ).value
         assert abs(est - fo_hz) / abs(fo_hz) < 0.01
 
     def test_large_offset_near_nyquist(self, xp):
@@ -359,9 +386,9 @@ class TestFoeMengaliMorelli:
         n = xp.arange(N, dtype=xp.float64)
         tone = xp.exp(1j * 2 * np.pi * fo_hz / FS * n).astype(xp.complex64)
         # Generic blind mode (no modulation - pure tone)
-        est = frequency.estimate_frequency_offset_mengali_morelli(
-            tone, sampling_rate=FS
-        )
+        est = frequency.estimate_frequency_offset(
+            tone, frequency.MengaliMorelli(), sampling_rate=FS
+        ).value
         assert abs(est - fo_hz) < 0.02 * fo_hz
 
     def test_generic_blind_pure_tone(self, xp):
@@ -370,9 +397,9 @@ class TestFoeMengaliMorelli:
         fo_hz = 7_500.0
         n = xp.arange(N, dtype=xp.float64)
         tone = xp.exp(1j * 2 * np.pi * fo_hz / FS * n).astype(xp.complex64)
-        est = frequency.estimate_frequency_offset_mengali_morelli(
-            tone, sampling_rate=FS
-        )
+        est = frequency.estimate_frequency_offset(
+            tone, frequency.MengaliMorelli(), sampling_rate=FS
+        ).value
         assert abs(est - fo_hz) < 500.0
 
     def test_mimo_returns_per_channel(self, xp):
@@ -383,25 +410,35 @@ class TestFoeMengaliMorelli:
         n = xp.arange(2048, dtype=xp.float64)
         mixer = xp.exp(1j * 2 * np.pi * fo_hz / FS * n).astype(xp.complex64)
         mimo = xp.stack([sig_a.samples * mixer, sig_b.samples * mixer], axis=0)
-        est = frequency.estimate_frequency_offset_mengali_morelli(
-            mimo, sampling_rate=FS, modulation="qam", order=4
-        )
-        assert isinstance(est, np.ndarray)
+        est = frequency.estimate_frequency_offset(
+            mimo,
+            frequency.MengaliMorelli(),
+            sampling_rate=FS,
+            constellation=Constellation.qam(4),
+        ).value
+        assert est.ndim == 1
         assert est.shape == (2,)
         assert all(abs(e - fo_hz) / fo_hz < 0.02 for e in est)
 
     def test_mimo_combine_channels_returns_scalar(self, xp):
-        """MIMO + combine_channels=True returns a single Python float."""
+        """MIMO + combined() gives one 0-d estimate."""
         fo_hz = 6_000.0
         sig_a = _qam_signal(xp, 4, 2048, fo_hz=0.0)
         sig_b = _qam_signal(xp, 4, 2048, fo_hz=0.0)
         n = xp.arange(2048, dtype=xp.float64)
         mixer = xp.exp(1j * 2 * np.pi * fo_hz / FS * n).astype(xp.complex64)
         mimo = xp.stack([sig_a.samples * mixer, sig_b.samples * mixer], axis=0)
-        est = frequency.estimate_frequency_offset_mengali_morelli(
-            mimo, sampling_rate=FS, modulation="qam", order=4, combine_channels=True
+        est = (
+            frequency.estimate_frequency_offset(
+                mimo,
+                frequency.MengaliMorelli(),
+                sampling_rate=FS,
+                constellation=Constellation.qam(4),
+            )
+            .combined()
+            .value
         )
-        assert isinstance(est, float)
+        assert est.ndim == 0
         assert abs(est - fo_hz) / fo_hz < 0.02
 
     def test_custom_max_lag(self, xp):
@@ -414,9 +451,12 @@ class TestFoeMengaliMorelli:
                 sig.samples.dtype
             )
         )
-        est = frequency.estimate_frequency_offset_mengali_morelli(
-            sig.samples, sampling_rate=FS, modulation="qam", order=4, max_lag=16
-        )
+        est = frequency.estimate_frequency_offset(
+            sig.samples,
+            frequency.MengaliMorelli(max_lag=16),
+            sampling_rate=FS,
+            constellation=Constellation.qam(4),
+        ).value
         assert abs(est - fo_hz) / fo_hz < 0.05
 
 
@@ -430,20 +470,18 @@ class TestFoeRegression:
         """Jacobsen interpolation accuracy is at least as good as parabolic for N=256."""
         fo_hz = 7_777.0  # non-round number to stress sub-bin interpolation
         sig = _qam_signal(xp, 4, 256, fo_hz=fo_hz)
-        est_j = frequency.estimate_frequency_offset_mth_power(
+        est_j = frequency.estimate_frequency_offset(
             sig.samples,
+            frequency.MthPower(interpolation="jacobsen"),
             sampling_rate=FS,
-            modulation="qam",
-            order=4,
-            interpolation="jacobsen",
-        )
-        est_p = frequency.estimate_frequency_offset_mth_power(
+            constellation=Constellation.qam(4),
+        ).value
+        est_p = frequency.estimate_frequency_offset(
             sig.samples,
+            frequency.MthPower(interpolation="parabolic"),
             sampling_rate=FS,
-            modulation="qam",
-            order=4,
-            interpolation="parabolic",
-        )
+            constellation=Constellation.qam(4),
+        ).value
         # Jacobsen error must be ≤ parabolic error (with generous 20 % slack for noise)
         assert abs(est_j - fo_hz) <= abs(est_p - fo_hz) * 1.2 + 100.0
 
@@ -451,8 +489,11 @@ class TestFoeRegression:
         """M-th power FOE raises ValueError for signals shorter than 8 samples."""
         short = xp.ones(5, dtype=xp.complex64)
         with pytest.raises(ValueError, match="too short"):
-            frequency.estimate_frequency_offset_mth_power(
-                short, sampling_rate=FS, modulation="qam", order=4
+            frequency.estimate_frequency_offset(
+                short,
+                frequency.MthPower(),
+                sampling_rate=FS,
+                constellation=Constellation.qam(4),
             )
 
     def test_pilot_wlsq_vs_ols_at_snr(self, xp):
@@ -476,13 +517,11 @@ class TestFoeRegression:
         samples = xp.asarray(
             symbols * np.exp(1j * 2 * np.pi * fo_hz * t).astype(np.complex64)
         )
-        est = frequency.estimate_frequency_offset_pilot_symbols(
+        est = frequency.estimate_frequency_offset(
             samples,
-            pilot_indices=pilot_indices,
-            pilot_values=pilot_values,
+            frequency.PilotSymbols(pilot_indices, pilot_values, snr_weighted=True),
             sampling_rate=FS,
-            snr_weighted=True,
-        )
+        ).value
         assert abs(est - fo_hz) / fo_hz < 0.02
 
 
@@ -502,9 +541,7 @@ class TestCorrectFrequencyOffsetBranches:
         # Simple real cosine as stand-in for a real-baseband signal
         sig = xp.cos(t)
         sig = sig.astype(xp.float32)
-        out = frequency.correct_static_frequency_offset(
-            sig, offset=5000.0, sampling_rate=1e6
-        )
+        out = frequency.correct_frequency_offset(sig, 5000.0, sampling_rate=1e6)
         assert out.dtype == xp.complex64
         assert out.shape == sig.shape
 
@@ -519,9 +556,7 @@ class TestCorrectFrequencyOffsetBranches:
                 np.complex64
             )
         )
-        out = frequency.correct_static_frequency_offset(
-            sig, offset=3000.0, sampling_rate=1e6
-        )
+        out = frequency.correct_frequency_offset(sig, 3000.0, sampling_rate=1e6)
         assert out.shape == (C, N)
         assert out.dtype == xp.complex64
 
@@ -550,7 +585,9 @@ class TestFindBiasTone:
         bin_width = fs / nfft
         n = xp.arange(N, dtype=xp.float64)
         seg = xp.exp(1j * 2 * np.pi * tone_hz / fs * n).astype(xp.complex64)
-        est = frequency.find_bias_tone(seg, sampling_rate=fs)
+        est = frequency.estimate_frequency_offset(
+            seg, frequency.BiasTone(), sampling_rate=fs
+        ).value
         assert abs(est - tone_hz) < bin_width
 
     def test_log_parabolic_beats_argmax(self, xp):
@@ -571,7 +608,9 @@ class TestFindBiasTone:
         est_argmax = float(freqs_np[k_peak])
 
         seg_xp = xp.asarray(seg_np)
-        est_interp = frequency.find_bias_tone(seg_xp, sampling_rate=fs)
+        est_interp = frequency.estimate_frequency_offset(
+            seg_xp, frequency.BiasTone(), sampling_rate=fs
+        ).value
 
         assert abs(est_interp - tone_hz) < abs(est_argmax - tone_hz)
 
@@ -585,28 +624,36 @@ class TestFindBiasTone:
             xp.complex128
         )
         seg = (target + interferer).astype(xp.complex64)
-        est = frequency.find_bias_tone(
-            seg, sampling_rate=fs, target_frequency=100e6, search_band=50e6
-        )
+        est = frequency.estimate_frequency_offset(
+            seg,
+            frequency.BiasTone(target_frequency=100e6, search_band=50e6),
+            sampling_rate=fs,
+        ).value
         assert abs(est - 100e6) < 10e6
 
-    def test_returns_python_float(self, xp):
-        """find_bias_tone always returns a Python float, not an array."""
+    def test_returns_0d_for_siso(self, xp):
+        """A 1-D segment gives a 0-d estimate (rank rule)."""
         N = 512
         n = xp.arange(N, dtype=xp.float64)
         seg = xp.exp(1j * 2 * np.pi * 1e5 / 1e6 * n).astype(xp.complex64)
-        result = frequency.find_bias_tone(seg, sampling_rate=1e6)
-        assert isinstance(result, float)
+        result = frequency.estimate_frequency_offset(
+            seg, frequency.BiasTone(), sampling_rate=1e6
+        ).value
+        assert result.ndim == 0
 
     def test_partial_search_params_raises(self, xp):
         """Providing only one of target_frequency / search_band raises ValueError."""
         N = 256
         n = xp.arange(N, dtype=xp.float64)
         seg = xp.exp(1j * 2 * np.pi * 1e5 / 1e6 * n).astype(xp.complex64)
-        with pytest.raises(ValueError, match="both be provided or both omitted"):
-            frequency.find_bias_tone(seg, sampling_rate=1e6, target_frequency=1e5)
-        with pytest.raises(ValueError, match="both be provided or both omitted"):
-            frequency.find_bias_tone(seg, sampling_rate=1e6, search_band=10e3)
+        with pytest.raises(ValueError, match="both be given or both omitted"):
+            frequency.estimate_frequency_offset(
+                seg, frequency.BiasTone(target_frequency=1e5), sampling_rate=1e6
+            )
+        with pytest.raises(ValueError, match="both be given or both omitted"):
+            frequency.estimate_frequency_offset(
+                seg, frequency.BiasTone(search_band=10e3), sampling_rate=1e6
+            )
 
     def test_empty_search_window_raises(self, xp):
         """Search window outside the FFT grid raises ValueError."""
@@ -614,11 +661,11 @@ class TestFindBiasTone:
         n = xp.arange(N, dtype=xp.float64)
         seg = xp.exp(1j * 2 * np.pi * 1e5 / 1e6 * n).astype(xp.complex64)
         with pytest.raises(ValueError, match="empty search window"):
-            frequency.find_bias_tone(
+            # beyond Nyquist for fs=1 MHz
+            frequency.estimate_frequency_offset(
                 seg,
+                frequency.BiasTone(target_frequency=2e6, search_band=100.0),
                 sampling_rate=1e6,
-                target_frequency=2e6,  # beyond Nyquist for fs=1 MHz
-                search_band=100.0,
             )
 
     @pytest.mark.parametrize("tone_hz", [50e3, 200e3])
@@ -628,8 +675,12 @@ class TestFindBiasTone:
         N = 4096
         n_np = np.arange(N, dtype=np.float64)
         seg_np = np.exp(1j * 2 * np.pi * tone_hz / fs * n_np).astype(np.complex64)
-        est_cpu = frequency.find_bias_tone(seg_np, sampling_rate=fs)
-        est_dev = frequency.find_bias_tone(xp.asarray(seg_np), sampling_rate=fs)
+        est_cpu = frequency.estimate_frequency_offset(
+            seg_np, frequency.BiasTone(), sampling_rate=fs
+        ).value
+        est_dev = frequency.estimate_frequency_offset(
+            xp.asarray(seg_np), frequency.BiasTone(), sampling_rate=fs
+        ).value
         assert abs(est_cpu - est_dev) < 1.0
 
     def test_circular_neighbors_at_nyquist_edge(self, xp):
@@ -644,7 +695,9 @@ class TestFindBiasTone:
         seg = xp.asarray(
             np.exp(1j * 2 * np.pi * tone_hz / fs * n_np).astype(np.complex64)
         )
-        est = frequency.find_bias_tone(seg, sampling_rate=fs)
+        est = frequency.estimate_frequency_offset(
+            seg, frequency.BiasTone(), sampling_rate=fs
+        ).value
         assert abs(est - tone_hz) < 2 * bin_width
 
 
@@ -653,174 +706,147 @@ class TestFindBiasTone:
 # -----------------------------------------------------------------------------
 
 
+def _block_estimate(n, block_size, overlap, values):
+    """A blockwise FrequencyOffsetEstimate with given per-block values."""
+    starts, length = frequency._block_starts(n, block_size, overlap)
+    centers = np.array([st + length / 2.0 for st in starts])
+    block_values = np.asarray(values(len(starts)), dtype=np.float64)
+    return frequency.FrequencyOffsetEstimate(
+        value=np.asarray(block_values.mean(axis=-1)),
+        weights=np.ones(block_values.shape[:-1]),
+        block_centers=centers,
+        block_values=block_values,
+    )
+
+
 class TestCorrectFrequencyOffsetBlockwise:
-    """Tests for correct_frequency_offset_blockwise."""
+    """Blockwise estimation (block_size=) and its PCHIP correction."""
 
     FS = 1e6
 
     def test_corrects_constant_offset(self, xp):
-        """Oracle estimator removes a known constant offset; residual is near zero."""
+        """Known constant block estimates remove the offset; residual is small."""
         fs = self.FS
         fo_hz = 10_000.0
         N = 4096
         sig = _qam_signal(xp, 4, N, fo_hz=fo_hz)
-        corrected = frequency.correct_frequency_offset_blockwise(
-            sig.samples,
-            fs,
-            block_size=512,
-            overlap=0.5,
-            estimator=lambda block, _fs: fo_hz,
+        est = _block_estimate(N, 512, 0.5, lambda b: np.full(b, fo_hz))
+        corrected = frequency.correct_frequency_offset(
+            sig.samples, est, sampling_rate=fs
         )
-        # Residual FOE on corrected signal should be within 500 Hz
-        residual = frequency.estimate_frequency_offset_mth_power(
-            corrected, sampling_rate=fs, modulation="qam", order=4
-        )
-        assert abs(residual) < 500.0
+        residual = frequency.estimate_frequency_offset(
+            corrected,
+            frequency.MthPower(),
+            sampling_rate=fs,
+            constellation=Constellation.qam(4),
+        ).value
+        assert abs(float(residual)) < 500.0
 
     def test_output_on_same_device(self, xp):
         """Output array is on the same backend as the input."""
         sig = xp.ones(2048, dtype=xp.complex64)
-        out = frequency.correct_frequency_offset_blockwise(
-            sig,
-            self.FS,
-            block_size=512,
-            overlap=0.5,
-            estimator=lambda b, f: 0.0,
-        )
+        est = _block_estimate(2048, 512, 0.5, lambda b: np.zeros(b))
+        out = frequency.correct_frequency_offset(sig, est, sampling_rate=self.FS)
         assert type(out) is type(sig)
         assert out.shape == sig.shape
 
-    def test_callable_called_once_per_block_per_channel(self, xp):
-        """Estimator is called exactly B times for SISO (once per block)."""
-        N = 4096
-        block_size = 512
-        overlap = 0.5
+    def test_one_estimate_per_block(self, xp):
+        """A blockwise method gives one value per block, centred in the block."""
+        N, block_size, overlap = 4096, 512, 0.5
         step = max(1, round(block_size * (1.0 - overlap)))
-        expected_calls = len(list(range(0, N - block_size + 1, step)))
-        call_log = []
-
-        def counting_estimator(block, _fs):
-            call_log.append(1)
-            return 0.0
-
-        frequency.correct_frequency_offset_blockwise(
-            xp.zeros(N, dtype=xp.complex64),
-            self.FS,
-            block_size=block_size,
-            overlap=overlap,
-            estimator=counting_estimator,
+        starts = list(range(0, N - block_size + 1, step))
+        sig = _qam_signal(xp, 4, N, fo_hz=6_000.0)
+        est = frequency.estimate_frequency_offset(
+            sig.samples,
+            frequency.MthPower(block_size=block_size, overlap=overlap),
+            sampling_rate=self.FS,
+            constellation=Constellation.qam(4),
         )
-        assert len(call_log) == expected_calls
+        assert est.block_values.shape == (len(starts),)
+        np.testing.assert_allclose(est.block_centers, np.array(starts) + block_size / 2)
+        values = to_numpy(est.block_values)
+        assert np.all(np.abs(values - 6_000.0) < 600.0)
 
     def test_pchip_no_overshoot_monotone_input(self, xp):
-        """Monotone increasing estimates -> output samples are finite (no blow-up from overshoot)."""
+        """Monotone block estimates -> finite output (no blow-up from overshoot)."""
         N = 4096
-        counter = [0]
-
-        def monotone_estimator(block, _fs):
-            v = float(counter[0]) * 500.0
-            counter[0] += 1
-            return v
-
-        out = frequency.correct_frequency_offset_blockwise(
-            xp.ones(N, dtype=xp.complex64),
-            self.FS,
-            block_size=512,
-            overlap=0.5,
-            estimator=monotone_estimator,
+        est = _block_estimate(N, 512, 0.5, lambda b: np.arange(b) * 500.0)
+        out = frequency.correct_frequency_offset(
+            xp.ones(N, dtype=xp.complex64), est, sampling_rate=self.FS
         )
-        out_np = to_numpy(out)
-        np.testing.assert_array_equal(np.isfinite(out_np), True)
+        np.testing.assert_array_equal(np.isfinite(to_numpy(out)), True)
 
     def test_overlap_zero(self, xp):
         """overlap=0: output has correct shape and is finite."""
-        out = frequency.correct_frequency_offset_blockwise(
-            xp.ones(4096, dtype=xp.complex64),
-            self.FS,
-            block_size=512,
-            overlap=0.0,
-            estimator=lambda b, f: 1000.0,
+        est = _block_estimate(4096, 512, 0.0, lambda b: np.full(b, 1000.0))
+        out = frequency.correct_frequency_offset(
+            xp.ones(4096, dtype=xp.complex64), est, sampling_rate=self.FS
         )
-        out_np = to_numpy(out)
         assert out.shape == (4096,)
-        np.testing.assert_array_equal(np.isfinite(out_np), True)
+        np.testing.assert_array_equal(np.isfinite(to_numpy(out)), True)
 
     def test_single_block_fallback(self, xp):
-        """Signal shorter than block_size: single block, output shape matches input."""
+        """Record shorter than block_size: one block, output shape matches input."""
         N = 200
-        out = frequency.correct_frequency_offset_blockwise(
-            xp.ones(N, dtype=xp.complex64),
-            self.FS,
-            block_size=512,
-            overlap=0.5,
-            estimator=lambda b, _f: 3_000.0,
+        sig = _qam_signal(xp, 4, N, fo_hz=3_000.0)
+        est = frequency.estimate_frequency_offset(
+            sig.samples,
+            frequency.MthPower(block_size=512),
+            sampling_rate=self.FS,
+            constellation=Constellation.qam(4),
         )
-        out_np = to_numpy(out)
+        assert est.block_values.shape == (1,)
+        out = frequency.correct_frequency_offset(
+            sig.samples, est, sampling_rate=self.FS
+        )
         assert out.shape == (N,)
-        np.testing.assert_array_equal(np.isfinite(out_np), True)
+        np.testing.assert_array_equal(np.isfinite(to_numpy(out)), True)
 
     def test_mimo_per_channel_output_shape(self, xp):
         """(C=2, N) input produces (2, N) output with per-channel correction."""
         C, N = 2, 4096
-        fo_a, fo_b = 8_000.0, -5_000.0
-        sig_a = _qam_signal(xp, 4, N, fo_hz=fo_a)
-        sig_b = _qam_signal(xp, 4, N, fo_hz=fo_b)
+        sig_a = _qam_signal(xp, 4, N, fo_hz=8_000.0)
+        sig_b = _qam_signal(xp, 4, N, fo_hz=-5_000.0)
         mimo = xp.stack([sig_a.samples, sig_b.samples], axis=0)
-        out = frequency.correct_frequency_offset_blockwise(
-            mimo,
-            self.FS,
-            block_size=512,
-            overlap=0.5,
-            estimator=lambda b, _f: frequency.estimate_frequency_offset_mth_power(
-                b, sampling_rate=self.FS, modulation="qam", order=4
-            ),
-        )
+        method = frequency.MthPower(power=4, block_size=512)
+        est = frequency.estimate_frequency_offset(mimo, method, sampling_rate=self.FS)
+        assert est.block_values.shape[0] == C
+        out = frequency.correct_frequency_offset(mimo, method, sampling_rate=self.FS)
         assert out.shape == (C, N)
 
-    def test_mimo_combine_channels(self, xp, xpt):
-        """combine_channels=True applies a single shared correction to all channels."""
+    def test_mimo_combined_is_shared(self, xp, xpt):
+        """combined() applies one shared correction to every channel."""
         C, N = 2, 4096
         fo_hz = 7_000.0
         sig_a = _qam_signal(xp, 4, N, fo_hz=fo_hz)
         sig_b = _qam_signal(xp, 4, N, fo_hz=fo_hz)
         mimo = xp.stack([sig_a.samples, sig_b.samples], axis=0)
-        out = frequency.correct_frequency_offset_blockwise(
-            mimo,
-            self.FS,
-            block_size=512,
-            overlap=0.5,
-            estimator=lambda b, _f: fo_hz,
-            combine_channels=True,
-        )
+        est = frequency.estimate_frequency_offset(
+            mimo, frequency.MthPower(power=4, block_size=512), sampling_rate=self.FS
+        ).combined()
+        assert est.block_values.ndim == 1
+        out = frequency.correct_frequency_offset(mimo, est, sampling_rate=self.FS)
         assert out.shape == (C, N)
-        # Both channels receive identical correction; magnitudes must match because the
-        # underlying signal is identical (same seed) and the correction is shared.
-        out0_np = to_numpy(out[0])
-        out1_np = to_numpy(out[1])
-        xpt.assert_allclose(np.abs(out0_np), np.abs(out1_np), rtol=1e-5)
+        xpt.assert_allclose(
+            np.abs(to_numpy(out[0])), np.abs(to_numpy(out[1])), rtol=1e-5
+        )
 
-    def test_functools_partial_with_find_bias_tone(self, xp):
-        """functools.partial binding of find_bias_tone works as estimator."""
-        from functools import partial
-
+    def test_bias_tone_tracking(self, xp):
+        """A BiasTone method with block_size tracks a CW tone."""
         fs = 1e9
         N = 8192
         tone_hz = 100e6
         t = np.arange(N) / fs
-        tone = (np.exp(2j * np.pi * tone_hz * t)).astype(np.complex64)
-        sig = xp.asarray(tone)
-
-        track = partial(
-            frequency.find_bias_tone,
-            target_frequency=tone_hz,
-            search_band=20e6,
+        sig = xp.asarray(np.exp(2j * np.pi * tone_hz * t).astype(np.complex64))
+        method = frequency.BiasTone(
+            target_frequency=tone_hz, search_band=20e6, block_size=1024
         )
-        out = frequency.correct_frequency_offset_blockwise(
-            sig, fs, block_size=1024, overlap=0.5, estimator=track
-        )
-        out_np = to_numpy(out)
+        est = frequency.estimate_frequency_offset(sig, method, sampling_rate=fs)
+        quarter_bin = fs / 1024 / 4  # three-bin fit bias stays below this
+        assert np.all(np.abs(to_numpy(est.block_values) - tone_hz) < quarter_bin)
+        out = frequency.correct_frequency_offset(sig, est, sampling_rate=fs)
         assert out.shape == sig.shape
-        np.testing.assert_array_equal(np.isfinite(out_np), True)
+        np.testing.assert_array_equal(np.isfinite(to_numpy(out)), True)
 
 
 class TestSignalInputFrequency:
@@ -829,31 +855,41 @@ class TestSignalInputFrequency:
     def test_mth_power_signal_input(self, xp):
         """Signal input: sampling_rate/modulation/order come from the signal."""
         sig = _qam_signal(xp, 16, 2048, fo_hz=10_000.0)
-        est_sig = frequency.estimate_frequency_offset_mth_power(sig)
-        est_arr = frequency.estimate_frequency_offset_mth_power(
-            sig.samples, FS, "qam", 16
-        )
-        assert est_sig == pytest.approx(est_arr)
+        est_sig = frequency.estimate_frequency_offset(sig, frequency.MthPower()).value
+        est_arr = frequency.estimate_frequency_offset(
+            sig.samples,
+            frequency.MthPower(),
+            sampling_rate=FS,
+            constellation=Constellation.qam(16),
+        ).value
+        assert float(est_sig) == pytest.approx(float(est_arr))
 
     def test_mengali_morelli_signal_input(self, xp):
         sig = _qam_signal(xp, 16, 2048, fo_hz=10_000.0)
-        est_sig = frequency.estimate_frequency_offset_mengali_morelli(sig)
-        est_arr = frequency.estimate_frequency_offset_mengali_morelli(
-            sig.samples, FS, modulation="qam", order=16
-        )
-        assert est_sig == pytest.approx(est_arr)
+        est_sig = frequency.estimate_frequency_offset(
+            sig, frequency.MengaliMorelli()
+        ).value
+        est_arr = frequency.estimate_frequency_offset(
+            sig.samples,
+            frequency.MengaliMorelli(),
+            sampling_rate=FS,
+            constellation=Constellation.qam(16),
+        ).value
+        assert float(est_sig) == pytest.approx(float(est_arr))
 
     def test_pilot_symbols_signal_input(self, xp):
         sig = _qam_signal(xp, 16, 512, fo_hz=1_000.0)
         pilot_indices = np.arange(0, 512, 8)
         pilot_values = xp.asarray(sig.source_symbols)[pilot_indices]
-        est_sig = frequency.estimate_frequency_offset_pilot_symbols(
-            sig, pilot_indices=pilot_indices, pilot_values=pilot_values
-        )
-        est_arr = frequency.estimate_frequency_offset_pilot_symbols(
-            sig.samples, FS, pilot_indices, pilot_values
-        )
-        assert est_sig == pytest.approx(est_arr)
+        est_sig = frequency.estimate_frequency_offset(
+            sig, frequency.PilotSymbols(pilot_indices, pilot_values)
+        ).value
+        est_arr = frequency.estimate_frequency_offset(
+            sig.samples,
+            frequency.PilotSymbols(pilot_indices, pilot_values),
+            sampling_rate=FS,
+        ).value
+        assert float(est_sig) == pytest.approx(float(est_arr))
 
     def test_find_bias_tone_signal_input(self, xp):
         fs = 1e9
@@ -863,22 +899,20 @@ class TestSignalInputFrequency:
         tone = xp.asarray((np.exp(2j * np.pi * tone_hz * t)).astype(np.complex64))
         sig = Signal(samples=tone, sampling_rate=fs, symbol_rate=fs / 2)
 
-        est_sig = frequency.find_bias_tone(sig)
-        est_arr = frequency.find_bias_tone(tone, fs)
-        assert est_sig == pytest.approx(est_arr)
+        est_sig = frequency.estimate_frequency_offset(sig, frequency.BiasTone()).value
+        est_arr = frequency.estimate_frequency_offset(
+            tone, frequency.BiasTone(), sampling_rate=fs
+        ).value
+        assert float(est_sig) == pytest.approx(float(est_arr))
 
     def test_correct_frequency_offset_blockwise_signal_input(self, xp, xpt):
         sig = _qam_signal(xp, 16, 2048, fo_hz=5_000.0)
-
-        def estimator(block, fs):
-            return frequency.estimate_frequency_offset_mth_power(block, fs, "qam", 16)
-
-        out_sig = frequency.correct_frequency_offset_blockwise(
-            sig, block_size=256, overlap=0.5, estimator=estimator
+        method = frequency.MthPower(block_size=256)
+        out_sig = frequency.correct_frequency_offset(sig, method)
+        est = frequency.estimate_frequency_offset(
+            sig.samples, method, sampling_rate=FS, constellation=Constellation.qam(16)
         )
-        out_arr = frequency.correct_frequency_offset_blockwise(
-            sig.samples, FS, block_size=256, overlap=0.5, estimator=estimator
-        )
+        out_arr = frequency.correct_frequency_offset(sig.samples, est, sampling_rate=FS)
 
         assert isinstance(out_sig, Signal)
         xpt.assert_allclose(out_sig.samples, out_arr, atol=1e-4)
@@ -886,9 +920,9 @@ class TestSignalInputFrequency:
     def test_correct_static_frequency_offset_signal_input(self, xp, xpt):
         sig = _qam_signal(xp, 4, 1024)
 
-        out_sig = frequency.correct_static_frequency_offset(sig, offset=5_000.0)
-        out_arr = frequency.correct_static_frequency_offset(
-            sig.samples, FS, offset=5_000.0
+        out_sig = frequency.correct_frequency_offset(sig, 5_000.0)
+        out_arr = frequency.correct_frequency_offset(
+            sig.samples, 5_000.0, sampling_rate=FS
         )
 
         assert isinstance(out_sig, Signal)

@@ -181,30 +181,24 @@ class TestPipelineComposition:
 class TestPipelineMetadataPropagation:
     """Tests for metadata preservation, precedence, and domain tracking."""
 
-    def test_optional_metadata_falls_back_only_when_signal_field_absent(
-        self, xp: Any
-    ) -> None:
-        """Optional modulation metadata uses arguments only when Signal lacks it."""
+    def test_constellation_is_a_choice(self, xp: Any) -> None:
+        """The Signal's constellation is the default; an explicit one wins."""
         n = 256
         sampling_rate = 1e6
         tone = xp.exp(1j * 2 * xp.pi * 25e3 * xp.arange(n) / sampling_rate)
-        without_mod = Signal(
-            samples=tone, sampling_rate=sampling_rate, symbol_rate=0.5e6
+        sig = Signal(
+            samples=tone,
+            sampling_rate=sampling_rate,
+            symbol_rate=0.5e6,
+            constellation=Constellation.psk(4),
         )
-        with_mod = without_mod.replace(constellation=Constellation.psk(4))
-
-        fallback = frequency.estimate_frequency_offset_mth_power(
-            without_mod, modulation="PSK", order=4
+        default = frequency.estimate_frequency_offset(sig, frequency.MthPower())
+        explicit = frequency.estimate_frequency_offset(
+            sig, frequency.MthPower(), constellation=Constellation.psk(2)
         )
-        explicit = frequency.estimate_frequency_offset_mth_power(
-            tone, sampling_rate=sampling_rate, modulation="PSK", order=4
-        )
-        signal_wins = frequency.estimate_frequency_offset_mth_power(
-            with_mod, modulation="PSK", order=2
-        )
-
-        assert fallback == pytest.approx(explicit)
-        assert signal_wins == pytest.approx(explicit)
+        assert default.power == 4
+        assert explicit.power == 2
+        assert float(default.value) == pytest.approx(25e3, abs=50)
 
     @pytest.mark.parametrize("case", METADATA_PROPAGATION_TABLE, ids=lambda c: c.name)
     def test_metadata_propagation_table(self, xp: Any, case: MetadataCase) -> None:

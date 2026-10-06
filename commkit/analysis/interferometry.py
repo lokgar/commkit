@@ -54,7 +54,7 @@ from .._array import as_2d, restore_1d, to_report_scalar
 from ..backend import ArrayType, dispatch, to_device
 from ..core._signal_adapter import adapt_signal
 from ..core.signal import Signal
-from ..frequency import correct_static_frequency_offset
+from ..frequency import correct_frequency_offset
 from ..helpers import remove_linear_trend
 from ..logger import logger
 from ..smoothing import moving_average
@@ -251,7 +251,7 @@ def dsh_phase(
         # Coarse stage - Kay estimator: phase of the lag-1 autocorrelation,
         # wrap-immune, one reduction per channel.  (This is the M=1
         # "generic blind" special case of
-        # ``frequency.estimate_frequency_offset_mengali_morelli``, which
+        # ``frequency.MengaliMorelli``, which
         # generalizes it to a multi-lag MVUE combination for lower coarse-
         # stage variance.  Not used here: with the fine LS-slope stage below
         # already fitting the *entire* unwrapped record - the classic
@@ -267,7 +267,7 @@ def dsh_phase(
     else:
         f_hat = xp.full(z2.shape[0], float(f_shift), dtype=xp.float64)
 
-    z_bb = correct_static_frequency_offset(z2, fs, f_hat)
+    z_bb = correct_frequency_offset(z2, f_hat, sampling_rate=fs)
     dphi = xp.unwrap(xp.angle(z_bb), axis=-1)
 
     if estimate:

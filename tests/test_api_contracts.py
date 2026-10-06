@@ -50,6 +50,7 @@ import commkit
 from commkit.backend import to_device
 from commkit.core import Signal
 from commkit.equalization import EqualizerResult
+from commkit.frequency import MthPower
 from commkit.impairments import Lowdin
 from commkit.mapping import Constellation
 
@@ -60,7 +61,7 @@ from commkit.mapping import Constellation
 TRANSFORM = "transform"  # waveform/symbols in, same-length out
 RATE_CHANGE = "rate_change"  # waveform in, resampled or trimmed waveform out
 TRAJECTORY = "trajectory"  # per-symbol estimate (e.g. carrier phase)
-ESTIMATE = "estimate"  # per-channel scalar estimate
+ESTIMATE = "estimate"  # per-channel estimate (array, or an Estimate with .value)
 METRIC = "metric"  # reporting-layer figure of merit
 EQUALIZER = "equalizer"  # returns EqualizerResult
 MULTI = "multi"  # returns several values (2.0: a frozen dataclass)
@@ -374,44 +375,25 @@ ROWS: list[Row] = [
         fact=FS_CONFLICT,
     ),
     # --- frequency ----------------------------------------------------------
+    Row("commkit.frequency.BiasTone", VALUE),
+    Row("commkit.frequency.FrequencyOffsetEstimate", VALUE),
+    Row("commkit.frequency.MengaliMorelli", VALUE),
+    Row("commkit.frequency.MthPower", VALUE),
+    Row("commkit.frequency.PilotSymbols", VALUE),
     Row(
-        "commkit.frequency.correct_frequency_offset_blockwise",
+        "commkit.frequency.correct_frequency_offset",
         TRANSFORM,
-        call=lambda c, x: _a(
-            x,
-            sampling_rate=FS,
-            block_size=256,
-            overlap=0.5,
-            estimator=lambda b, fs: 0.0,
-        ),
+        data=2,
+        call=lambda c, x: _a(x, 1e6, sampling_rate=FS),
         fact=FS_CONFLICT,
     ),
     Row(
-        "commkit.frequency.correct_static_frequency_offset",
-        TRANSFORM,
-        call=lambda c, x: _a(x, sampling_rate=FS, offset=1e6),
-        fact=FS_CONFLICT,
-    ),
-    Row(
-        "commkit.frequency.estimate_frequency_offset_mengali_morelli",
+        "commkit.frequency.estimate_frequency_offset",
         ESTIMATE,
-        call=lambda c, x: _a(x, sampling_rate=FS, **QAM16),
+        data=2,
+        call=lambda c, x: _a(x, MthPower(), sampling_rate=FS, constellation=C16),
         fact=FS_CONFLICT,
     ),
-    Row(
-        "commkit.frequency.estimate_frequency_offset_mth_power",
-        ESTIMATE,
-        call=lambda c, x: _a(x, sampling_rate=FS, **QAM16),
-        fact=FS_CONFLICT,
-    ),
-    Row(
-        "commkit.frequency.estimate_frequency_offset_pilot_symbols",
-        ESTIMATE,
-        call=lambda c, x: _a(x, sampling_rate=RS, **_pilots(x)),
-        fact=("sampling_rate", 3 * RS),
-        symbols=True,
-    ),
-    Row("commkit.frequency.find_bias_tone", ESTIMATE),
     # --- math -------------------------------------------------------------
     Row("commkit.math.db_to_linear", HELPER),
     Row("commkit.math.linear_to_db", HELPER),
@@ -686,7 +668,7 @@ ROWS: list[Row] = [
     Row("commkit.timing.TimingEstimate", VALUE),
     Row(
         "commkit.timing.estimate_timing",
-        MULTI,
+        ESTIMATE,
         call=lambda c, x: _a(x, template=c.wave2[0, :64], threshold=1.0),
     ),
     Row(
@@ -932,6 +914,7 @@ def test_estimate_rank_rule(row: Row, xp, backend_device, request):
     c = Inputs(xp)
     for ndim in row.dims:
         out = _call(row, c, c.primary(row, ndim))
+        out = getattr(out, "value", out)  # <Quantity>Estimate dataclasses
         assert _module(out) == xp.__name__, f"returned {type(out)}"
         assert out.shape == (() if ndim == 1 else (2,))
 
@@ -988,12 +971,6 @@ LEGACY: dict[str, frozenset[str]] = {
     "commkit.equalization.sequential._blind.rde": L(SIG, FCT, EQR),
     "commkit.equalization.sequential._dd.lms": L(SIG, FCT, EQR),
     "commkit.equalization.sequential._dd.rls": L(SIG, FCT, EQR),
-    "commkit.frequency.correct_frequency_offset_blockwise": L(SIG, FCT),
-    "commkit.frequency.correct_static_frequency_offset": L(SIG, FCT),
-    "commkit.frequency.estimate_frequency_offset_mengali_morelli": L(SIG, FCT, RNK),
-    "commkit.frequency.estimate_frequency_offset_mth_power": L(SIG, FCT, RNK),
-    "commkit.frequency.estimate_frequency_offset_pilot_symbols": L(SIG, FCT, RNK),
-    "commkit.frequency.find_bias_tone": L(SIG),
     "commkit.metrics.ber": L(f"{MET}@gpu"),
     "commkit.metrics.evm": L(MET),
     "commkit.metrics.mi": L(SIG, MET),

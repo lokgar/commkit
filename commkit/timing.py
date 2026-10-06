@@ -144,9 +144,9 @@ def _parabolic_peak_offset(
 
     Shared by every three-point peak-interpolation site in the library:
     the FOE M-th-power estimator's magnitude-domain fit
-    (``frequency.estimate_frequency_offset_mth_power``, ``log=False``), the
+    (``frequency.MthPower``, ``log=False``), the
     two log-parabolic tone-refinement estimators
-    (``frequency.find_bias_tone``, ``frequency._refine_tones_from_spectrum``,
+    (``frequency.BiasTone``, ``frequency._refine_tones_from_spectrum``,
     ``log=True``), and the fractional-delay estimator
     (``timing.estimate_fractional_delay``, either fit) - which first
     phase-rotates a complex peak onto the real axis (a preprocessing step

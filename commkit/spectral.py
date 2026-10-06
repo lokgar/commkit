@@ -346,7 +346,7 @@ def add_pilot_tone(
 
     # Per-channel phase ramp (C, N) in float64; wrap to [-π, π) before exp so
     # complex64 targets avoid argument-reduction error on long ramps
-    # (cf. correct_static_frequency_offset).
+    # (cf. frequency.correct_frequency_offset).
     two_pi = 2.0 * xp.pi
     n = xp.arange(N, dtype=xp.float64)  # (N,)
     f_ch = xp.asarray(actual, dtype=xp.float64).reshape(C, 1)  # (C, 1)

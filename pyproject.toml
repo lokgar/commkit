@@ -147,6 +147,7 @@ module = [
     "commkit.filtering",
     "commkit.impairments.*",
     "commkit.logger",
+    "commkit.frequency",
     "commkit.mapping.*",
     "commkit.math",
     "commkit.multirate",

@@ -61,7 +61,7 @@ def _vv_block_phase(
     N_blocks = N_trunc // block_size
 
     # Reshape for block processing: (C, N_blocks, block_size).
-    # Promote to complex128 for the M-th power - identical to estimate_frequency_offset_mth_power.
+    # Promote to complex128 for the M-th power - identical to frequency.MthPower.
     # On GPU, complex64^4 loses precision near the ±π/M unwrap boundary, causing
     # spurious branch flips for high-order QAM with small block sizes.
     blocks = symbols2d[:, :N_trunc].reshape(C, N_blocks, block_size)
