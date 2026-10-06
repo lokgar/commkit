@@ -201,7 +201,7 @@ class TestGeneratePSQAM:
             5000, sps=1, symbol_rate=32e9, order=16, nu=0.5, pulse_shape="none"
         )
         noisy = apply_awgn(xp.asarray(sig.samples), esn0_db=20.0, sps=1)
-        sig.samples = noisy
+        sig = sig.replace(samples=noisy)
         sig = multirate.resolve_symbols(sig)
         sig = mapping.demap_symbols_hard(sig)
         ber_val = metrics.ber(sig.resolved_bits, sig.source_bits)

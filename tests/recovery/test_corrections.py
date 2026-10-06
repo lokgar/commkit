@@ -195,9 +195,11 @@ class TestResolvePhaseAmbiguity:
         sig = generate_qam(
             order=16, num_symbols=self.N, sps=1, symbol_rate=1e6, seed=9
         ).to(device_of(xp))
-        sig.samples = apply_awgn(sig.samples, esn0_db=30, sps=1, seed=9)
+        sig = sig.replace(samples=apply_awgn(sig.samples, esn0_db=30, sps=1, seed=9))
         sym = normalize(sig.samples, "average_power")
-        sig.resolved_symbols = sym * xp.exp(1j * np.pi / 2).astype(sym.dtype)
+        sig = sig.replace(
+            resolved_symbols=sym * xp.exp(1j * np.pi / 2).astype(sym.dtype)
+        )
         sig = recovery.resolve_phase_ambiguity(sig)
         assert sig.resolved_symbols is not None
         ref = normalize(xp.asarray(sig.source_symbols), "average_power")
@@ -212,8 +214,8 @@ class TestResolvePhaseAmbiguity:
     def test_signal_method_raises_without_source(self, xp):
         """Raises ValueError when source_symbols is None."""
         sig = generate_qam(order=16, num_symbols=256, sps=1, symbol_rate=1e6, seed=0)
-        sig.resolved_symbols = sig.samples
-        sig.source_symbols = None
+        sig = sig.replace(resolved_symbols=sig.samples)
+        sig = sig.replace(source_symbols=None)
         with pytest.raises(ValueError, match="source_symbols"):
             sig = recovery.resolve_phase_ambiguity(sig)
 
@@ -362,12 +364,13 @@ class TestCorrectPhaseRotation:
         sig = generate_qam(
             order=16, num_symbols=self.N, sps=1, symbol_rate=1e6, seed=9
         ).to(device_of(xp))
-        sig.samples = apply_awgn(sig.samples, esn0_db=30, sps=1, seed=9)
+        sig = sig.replace(samples=apply_awgn(sig.samples, esn0_db=30, sps=1, seed=9))
         ref = xp.asarray(sig.source_symbols)
-        sig.resolved_symbols = sig.samples * xp.array(
-            np.exp(1j * 0.7), dtype=sig.samples.dtype
+        sig = sig.replace(
+            resolved_symbols=sig.samples
+            * xp.array(np.exp(1j * 0.7), dtype=sig.samples.dtype)
         )
-        sig.resolved_bits = xp.zeros(self.N, dtype=xp.int8)
+        sig = sig.replace(resolved_bits=xp.zeros(self.N, dtype=xp.int8))
         old_samples = sig.samples
         old_source = sig.source_symbols
 
@@ -390,8 +393,8 @@ class TestCorrectPhaseRotation:
     def test_signal_input_raises_without_ref(self, xp):
         """Raises ValueError when ref_symbols is omitted and source_symbols is None."""
         sig = generate_qam(order=16, num_symbols=256, sps=1, symbol_rate=1e6, seed=0)
-        sig.resolved_symbols = sig.samples
-        sig.source_symbols = None
+        sig = sig.replace(resolved_symbols=sig.samples)
+        sig = sig.replace(source_symbols=None)
         with pytest.raises(ValueError, match="source_symbols"):
             recovery.correct_phase_rotation(sig)
 

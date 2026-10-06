@@ -85,7 +85,7 @@ pip install "commkit[gpu]"
 
 ### Notebook Support
 
-To run the example notebooks and enable the rich HTML `Signal.print_info()` table (falls back to plain text without it):
+To run the example notebooks:
 
 ```bash
 # Using uv

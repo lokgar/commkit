@@ -50,9 +50,7 @@ class TestSignalCreation:
     def test_signal_validation_heuristics(self, xp):
         """Verify Signal validation for higher dimensions and Time-Last heuristic."""
         # 1. Dimension > 2
-        from pydantic import ValidationError
-
-        with pytest.raises(ValidationError, match="Only 1D"):
+        with pytest.raises(ValueError, match="Only 1D"):
             Signal(samples=xp.zeros((2, 2, 10)), sampling_rate=1.0, symbol_rate=1.0)
 
         # 2. Time-Last heuristic (Time, Channels) -> (Channels, Time)
@@ -151,13 +149,15 @@ class TestSignalProperties:
         )
         assert s2.bits_per_symbol == 6
 
-    def test_signal_print_info(self, xp, capsys):
-        """Verify print_info() execution and output detection."""
-        data = xp.zeros(10)
-        s = Signal(samples=data, sampling_rate=100.0, symbol_rate=10.0)
-        s.print_info()
-        captured = capsys.readouterr()
-        assert "Spectral Domain" in captured.out or captured.out == ""
+    def test_signal_summary(self, xp):
+        """str() gives a plain-text summary; _repr_html_ the notebook table."""
+        s = Signal(samples=xp.zeros(10), sampling_rate=100.0, symbol_rate=10.0)
+        text = str(s)
+        assert "Sampling rate" in text
+        assert "Samples per symbol  10.00" in text
+        html = s._repr_html_()
+        assert html.startswith("<table>")
+        assert "<b>Sampling rate</b>" in html
 
     def test_signal_wrappers(self, xp):
         """
@@ -170,9 +170,6 @@ class TestSignalProperties:
             sampling_rate=100.0,
             symbol_rate=10.0,
         )
-
-        # Print info
-        sig.print_info()
 
         # Properties
         assert sig.duration == 1.0
@@ -221,8 +218,8 @@ class TestSignalCloningAndProvenance:
         assert s_copy.source_bits is not s.source_bits
         assert s_copy.backend == s.backend
 
-    def test_signal_internal_shallow_clone_shares_metadata(self, xp):
-        """The internal shallow clone shares arrays for non-waveform updates."""
+    def test_signal_replace_shares_unchanged_fields(self, xp):
+        """replace() shares unchanged arrays and leaves the original untouched."""
         s = Signal(
             samples=xp.arange(8),
             sampling_rate=2.0,
@@ -230,11 +227,58 @@ class TestSignalCloningAndProvenance:
             source_bits=xp.arange(4),
         )
 
-        shallow = s._shallow_clone()
+        new = s.replace(sampling_rate=4.0)
 
-        assert shallow is not s
-        assert shallow.samples is s.samples
-        assert shallow.source_bits is s.source_bits
+        assert new is not s
+        assert new.samples is s.samples
+        assert new.source_bits is s.source_bits
+        assert new.source_symbols is s.source_symbols  # not re-normalized
+        assert s.sampling_rate == 2.0
+
+    def test_signal_is_frozen(self, xp):
+        import dataclasses
+
+        s = Signal(samples=xp.arange(8), sampling_rate=2.0, symbol_rate=1.0)
+        with pytest.raises(dataclasses.FrozenInstanceError):
+            s.sampling_rate = 4.0  # type: ignore[misc]
+
+    def test_signal_replace_rejects_unknown_fields(self, xp):
+        s = Signal(samples=xp.arange(8), sampling_rate=2.0, symbol_rate=1.0)
+        with pytest.raises(TypeError, match="sample_rate"):
+            s.replace(sample_rate=4.0)
+
+    @pytest.mark.parametrize(
+        "field, value",
+        [
+            ("symbol_rate", -1.0),
+            ("filter_span", 0),
+            ("filter_span", 2.5),
+            ("rrc_rolloff", 1.5),
+            ("duty_cycle", 0.0),
+            ("rise_time", -0.1),
+            ("center_frequency", -1.0),
+            ("spectral_domain", "baseband"),
+            ("physical_domain", "X"),
+            ("signal_type", "Frame"),
+            ("mod_order", 0),
+            ("mod_rz", "yes"),
+            ("mod_scheme", 16),
+            ("sampling_rate", "1e6"),
+        ],
+    )
+    def test_signal_field_validation(self, xp, field, value):
+        s = Signal(samples=xp.arange(8), sampling_rate=2.0, symbol_rate=1.0)
+        with pytest.raises(ValueError, match=field):
+            s.replace(**{field: value})
+        kwargs = dict(samples=xp.arange(8), sampling_rate=2.0, symbol_rate=1.0)
+        with pytest.raises(ValueError, match=field):
+            Signal(**{**kwargs, field: value})
+
+    def test_signal_numeric_fields_are_coerced(self, xp):
+        s = Signal(samples=xp.arange(8), sampling_rate=2, symbol_rate=np.float32(1))
+        assert type(s.sampling_rate) is float
+        assert type(s.symbol_rate) is float
+        assert type(s.replace(mod_order=np.int64(16)).mod_order) is int
 
     def test_signal_replace_samples_shares_provenance_and_invalidates_caches(
         self, xp, xpt
@@ -249,8 +293,8 @@ class TestSignalCloningAndProvenance:
             source_symbols=xp.asarray([1.0, -1.0]),
             frame=frame,
         )
-        s.resolved_symbols = xp.asarray([1.0, -1.0])
-        s.resolved_bits = xp.asarray([0, 1])
+        s = s.replace(resolved_symbols=xp.asarray([1.0, -1.0]))
+        s = s.replace(resolved_bits=xp.asarray([0, 1]))
         old_samples = s.samples
         replacement = xp.arange(4, dtype=xp.float32) + 10
 
@@ -273,8 +317,8 @@ class TestSignalCloningAndProvenance:
     def test_signal_replace_samples_can_preserve_resolved_caches(self, xp):
         """Proven-safe internal transforms can explicitly retain resolved caches."""
         s = Signal(samples=xp.arange(8), sampling_rate=2.0, symbol_rate=1.0)
-        s.resolved_symbols = xp.asarray([1.0, -1.0])
-        s.resolved_bits = xp.asarray([0, 1])
+        s = s.replace(resolved_symbols=xp.asarray([1.0, -1.0]))
+        s = s.replace(resolved_bits=xp.asarray([0, 1]))
 
         result = s.replace_samples(s.samples.copy(), _preserve_resolved=True)
 
@@ -283,13 +327,11 @@ class TestSignalCloningAndProvenance:
 
     def test_signal_replace_samples_validates_replacement_and_metadata(self, xp):
         """Replacement samples and metadata pass through assignment validation."""
-        from pydantic import ValidationError
-
         s = Signal(samples=xp.arange(8), sampling_rate=2.0, symbol_rate=1.0)
 
-        with pytest.raises(ValidationError, match="greater than 0"):
+        with pytest.raises(ValueError, match="sampling_rate must be > 0"):
             s.replace_samples(s.samples.copy(), sampling_rate=0.0)
-        with pytest.raises((ValueError, ValidationError), match="Only 1D"):
+        with pytest.raises(ValueError, match="Only 1D"):
             s.replace_samples(xp.zeros((2, 2, 2)))
 
     def test_signal_noop_paths_shallow_clone(self, xp):
@@ -466,7 +508,7 @@ class TestSignalWaveformsAndModulation:
         with pytest.raises(ValueError, match="No pulse shape defined"):
             filtering.shaping_filter_taps(s)
 
-        s.pulse_shape = "invalid_shape"
+        s = s.replace(pulse_shape="invalid_shape")
         with pytest.raises(ValueError, match="Unknown pulse shape"):
             filtering.shaping_filter_taps(s)
 
@@ -696,7 +738,7 @@ class TestSignalResolutionAndMetrics:
             assert 0 <= ber <= 1
 
         # Test that BER raises if resolved_bits is missing
-        sig.resolved_bits = None
+        sig = sig.replace(resolved_bits=None)
         with pytest.raises(ValueError, match="No resolved bits available"):
             metrics.ber(sig, bits_tx=ref_bits)
 
@@ -721,7 +763,7 @@ class TestSignalResolutionAndMetrics:
         s = Signal(
             samples=xp.ones(10, dtype="complex64"), sampling_rate=1.0, symbol_rate=1.0
         )
-        s.resolved_symbols = xp.ones(10, dtype="complex64")
+        s = s.replace(resolved_symbols=xp.ones(10, dtype="complex64"))
         with pytest.raises(ValueError, match="Modulation scheme and order required"):
             s = mapping.demap_symbols_hard(s)
 
@@ -730,7 +772,7 @@ class TestSignalResolutionAndMetrics:
         s = Signal(
             samples=xp.ones(10, dtype="complex64"), sampling_rate=1.0, symbol_rate=1.0
         )
-        s.resolved_symbols = xp.ones(10, dtype="complex64")
+        s = s.replace(resolved_symbols=xp.ones(10, dtype="complex64"))
         with pytest.raises(ValueError, match="No reference available"):
             metrics.evm(s)
 
@@ -750,7 +792,7 @@ class TestSignalResolutionAndMetrics:
         s = Signal(
             samples=xp.ones(10, dtype="complex64"), sampling_rate=1.0, symbol_rate=1.0
         )
-        s.resolved_symbols = xp.ones(10, dtype="complex64")
+        s = s.replace(resolved_symbols=xp.ones(10, dtype="complex64"))
         with pytest.raises(ValueError, match="No reference available"):
             metrics.snr(s)
 
@@ -770,7 +812,7 @@ class TestSignalResolutionAndMetrics:
         s = Signal(
             samples=xp.ones(10, dtype="complex64"), sampling_rate=1.0, symbol_rate=1.0
         )
-        s.resolved_bits = xp.array([0, 1, 0, 1])
+        s = s.replace(resolved_bits=xp.array([0, 1, 0, 1]))
         with pytest.raises(ValueError, match="No reference bits available"):
             metrics.ber(s)
 

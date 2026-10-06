@@ -90,7 +90,7 @@ class TestNPZSaveLoadSISO:
         sig = _siso_signal()
         assert sig.pilot_tone_frequency is None
 
-        sig.pilot_tone_frequency = 2.5e9
+        sig = sig.replace(pilot_tone_frequency=2.5e9)
         assert isinstance(sig.pilot_tone_frequency, np.ndarray)
         p = tmp_path / "tone.npz"
         save_npz(sig, p)
@@ -103,7 +103,7 @@ class TestNPZSaveLoadSISO:
         sig = _siso_signal()
         assert sig.pilot_tone_power_ratio_db is None
 
-        sig.pilot_tone_power_ratio_db = -12.0
+        sig = sig.replace(pilot_tone_power_ratio_db=-12.0)
         p = tmp_path / "psr.npz"
         save_npz(sig, p)
         sig2 = load_npz(p)
@@ -183,7 +183,7 @@ class TestNPZSaveLoadMIMO:
     ) -> None:
         """Per-channel pilot frequencies round-trip as an array."""
         sig = _mimo_signal()
-        sig.pilot_tone_frequency = [2.5e9, -3.0e9]
+        sig = sig.replace(pilot_tone_frequency=[2.5e9, -3.0e9])
         assert isinstance(sig.pilot_tone_frequency, np.ndarray)
         p = tmp_path / "tones.npz"
         save_npz(sig, p)
@@ -196,7 +196,7 @@ class TestNPZSaveLoadMIMO:
     ) -> None:
         """Per-channel pilot power ratios round-trip."""
         mimo = _mimo_signal()
-        mimo.pilot_tone_power_ratio_db = [-10.0, -8.0]
+        mimo = mimo.replace(pilot_tone_power_ratio_db=[-10.0, -8.0])
         assert isinstance(mimo.pilot_tone_power_ratio_db, np.ndarray)
         save_npz(mimo, tmp_path / "psr_mimo.npz")
         mimo2 = load_npz(tmp_path / "psr_mimo.npz")

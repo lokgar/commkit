@@ -5,20 +5,17 @@ This module defines the primary data structures used throughout the library.
 It provides high-level abstractions for handling raw IQ samples, physical
 layer metadata, and complex frame structures.
 
-All core classes are built on Pydantic for robust validation and support
-transparent backend switching between CPU (NumPy) and GPU (CuPy).
+Core containers are frozen dataclasses: every update returns a new object
+through :meth:`Signal.replace`, which validates the changed fields.
 """
 
+import copy
+import dataclasses
 import types
-from typing import Any, Literal
+from dataclasses import dataclass, field
+from typing import Any
 
 import numpy as np
-from pydantic import (
-    BaseModel,
-    ConfigDict,
-    Field,
-    field_validator,
-)
 
 from .. import helpers
 from ..backend import (
@@ -30,7 +27,8 @@ from ..backend import (
 from ..logger import logger
 
 
-class Signal(BaseModel):
+@dataclass(frozen=True, eq=False, kw_only=True)
+class Signal:
     """
     Primary container for digital baseband or RF signals.
 
@@ -151,13 +149,9 @@ class Signal(BaseModel):
        ``evm()``, ``ber()``, etc.
     """
 
-    model_config = ConfigDict(
-        arbitrary_types_allowed=True, validate_assignment=True, extra="forbid"
-    )
-
     samples: Any
-    sampling_rate: float = Field(..., gt=0)
-    symbol_rate: float = Field(..., gt=0)
+    sampling_rate: float
+    symbol_rate: float
 
     mod_scheme: str | None = None
     mod_order: int | None = None
@@ -170,159 +164,100 @@ class Signal(BaseModel):
     ps_nu: float | None = None  # MB shaping parameter ν; set only for PS-QAM
 
     pulse_shape: str | None = None
-    filter_span: int = Field(default=10, ge=1)
-    rrc_rolloff: float = Field(default=0.35, ge=0, le=1)
-    rc_rolloff: float = Field(default=0.35, ge=0, le=1)
-    duty_cycle: float = Field(default=1.0, gt=0, le=1)
-    rise_time: float = Field(default=0.0, ge=0)
+    filter_span: int = 10
+    rrc_rolloff: float = 0.35
+    rc_rolloff: float = 0.35
+    duty_cycle: float = 1.0
+    rise_time: float = 0.0
 
-    spectral_domain: Literal["BASEBAND", "PASSBAND", "INTERMEDIATE"] = "BASEBAND"
-    physical_domain: Literal["DIG", "RF", "OPT"] = "DIG"
+    spectral_domain: str = "BASEBAND"
+    physical_domain: str = "DIG"
 
-    center_frequency: float = Field(default=0, ge=0)
+    center_frequency: float = 0.0
     digital_frequency_offset: float | None = None
     pilot_tone_frequency: Any | None = None
     pilot_tone_power_ratio_db: Any | None = None
 
     # Human-readable label for the signal structure
-    signal_type: Literal["Single-Carrier Frame", "OFDM Frame", "Preamble"] | None = None
+    signal_type: str | None = None
 
     # Back-reference to the SingleCarrierFrame that generated this signal (set by
-    # SingleCarrierFrame.to_signal()). Enables frame-aware convenience methods
-    # (correct_timing, frame-aware equalizers) without requiring the caller to re-supply
-    # the frame object.  Excluded from serialisation (numpy arrays inside frame
-    # duplicate samples data and are not JSON-serialisable).
-    frame: Any | None = Field(default=None, exclude=True, repr=False)
+    # SingleCarrierFrame.to_signal()).
+    frame: Any | None = field(default=None, repr=False)
 
     # Resolved data from processing (1 SPS, normalized - populated by resolve_symbols())
-    resolved_symbols: Any | None = Field(default=None, repr=False)
-    resolved_bits: Any | None = Field(default=None, repr=False)
+    resolved_symbols: Any | None = field(default=None, repr=False)
+    resolved_bits: Any | None = field(default=None, repr=False)
 
-    # -------------------------------------------------------------------------
-    # Validators and Post-Initialization Hooks
-    # -------------------------------------------------------------------------
+    def __post_init__(self) -> None:
+        """Validate every field, then derive and normalize the reference symbols.
 
-    @field_validator("pilot_tone_frequency", "pilot_tone_power_ratio_db", mode="before")
-    @classmethod
-    def _coerce_pilot_field(cls, v: Any) -> Any:
-        """Coerce pilot metadata to a 1-D per-channel ``float64`` array.
-
-        ``None`` passes through; anything else (scalar, sequence, or array)
-        becomes a 1-D ``float64`` ``np.ndarray`` - one value per channel - so the
-        field is handled uniformly like the other array fields (always an array,
-        never a scalar or list).  A scalar becomes a length-1 array.
+        Derivation (``source_symbols`` from ``source_bits``) and normalization
+        happen at construction only, never in :meth:`replace`.  Samples stay on
+        the device the caller put them on.
         """
-        if v is None:
-            return None
-        return np.asarray(v, dtype=np.float64).reshape(-1)
+        for f in dataclasses.fields(self):
+            value = getattr(self, f.name)
+            object.__setattr__(self, f.name, _validate_field(f.name, value))
 
-    @field_validator("samples", mode="before")
-    @classmethod
-    def validate_samples(cls, v: Any) -> Any:
-        """
-        Validates and coerces the samples input into a backend-compatible array.
-
-        This validator ensures that the input is converted to a NumPy or CuPy array
-        and enforces a (Channels, Time) shape convention for multidimensional inputs.
-
-        Parameters
-        ----------
-        v : array_like
-            Input samples (list, tuple, NumPy array, or CuPy array). Arrays from
-            other frameworks raise ``TypeError``.
-
-        Returns
-        -------
-        array_like
-            The validated samples as a NumPy or CuPy array.
-
-        Raises
-        ------
-        ValueError
-            If the input cannot be converted to a supported array type or has
-            unsupported dimensions (> 2).
-
-        Notes
-        -----
-        The library enforces a **Time-Last** convention: (N_channels, N_samples)
-        or simply (N_samples,) for 1D signals. This aligns with C-contiguous
-        memory layout which is generally more performant for time-axis operations.
-        """
-        arr = helpers.validate_array(v, name="samples")
-
-        # Check shape conventions
-        # We enforce Time-Last convention: (Channels, Time) or (Time,) for 1D.
-        # This aligns better with C-contiguous operations on the time axis (last axis)
-        # which is critical for CuPy performance/stability.
-
-        if arr.ndim > 2:
-            raise ValueError(
-                f"Samples array has {arr.ndim} dimensions. "
-                "Only 1D (SISO) or 2D (MIMO/Dual-Pol) arrays are supported."
-            )
-
-        if arr.ndim == 2:
-            # Check dimensions to guess orientation
-            s0, s1 = arr.shape
-            # If dim0 (rows) > dim1 (cols) and dim0 >> 10, it's likely (Time, Channels)
-            # We want (Channels, Time).
-            if s0 > s1 and s0 > 32:  # Heuristic: Time dim usually > 32
-                logger.warning(
-                    "Samples shape is %s. Converting to Time-Last convention "
-                    "(N_channels=%s, N_samples=%s). Please provide input as "
-                    "(N_channels, N_samples) for MIMO signals.",
-                    arr.shape,
-                    s1,
-                    s0,
-                )
-                arr = arr.T  # Transpose to (Channels, Time)
-
-            # If shape is (2, 2), ambiguous but assumes (Channels, Time)
-            # If s1 > s0, likely already correct.
-
-        return arr
-
-    def model_post_init(self, __context: Any) -> None:
-        """
-        Post-initialization hook to handle metadata derivation and device placement.
-
-        This method automatically derives `source_symbols` from `source_bits` if
-        modulation parameters are present. It never moves data between devices:
-        samples stay where the caller put them.
-        """
         # Bit-first: derive symbols from bits if not provided
         if self.source_bits is not None and self.source_symbols is None:
             if self.mod_scheme and self.mod_order:
                 from .. import mapping
 
-                self.source_symbols = mapping.map_bits(
-                    self.source_bits,
-                    self.mod_scheme,
-                    self.mod_order,
-                    unipolar=self.mod_unipolar or False,
+                object.__setattr__(
+                    self,
+                    "source_symbols",
+                    mapping.map_bits(
+                        self.source_bits,
+                        self.mod_scheme,
+                        self.mod_order,
+                        unipolar=self.mod_unipolar or False,
+                    ),
                 )
 
-        # Ensure source_symbols are normalized to unit average power for consistent metrics.
-        # For MIMO (multichannel), we normalize per-stream (axis=-1) to ensure each stream
-        # independently adheres to E_s=1, facilitating per-stream metric calculation.
-        # Skip for PS-QAM: symbols are exact constellation points whose sample average
-        # power is intentionally < 1 (MB weights inner points more). Scaling them would
-        # break the correspondence with ps_pmf.
+        # Normalize source_symbols per stream to unit average power, except for
+        # PS-QAM, whose exact constellation points intentionally have average
+        # power < 1 (scaling them would break the correspondence with ps_pmf).
         if self.source_symbols is not None and self.ps_pmf is None:
-            self.source_symbols = helpers.normalize(
-                self.source_symbols, mode="average_power", axis=-1
+            object.__setattr__(
+                self,
+                "source_symbols",
+                helpers.normalize(self.source_symbols, mode="average_power", axis=-1),
             )
+
+    def replace(self, **changes: Any) -> "Signal":
+        """Return a new Signal with ``changes`` applied.
+
+        Changed fields are validated; unchanged arrays and the frame are shared
+        with this Signal, not copied (use :meth:`clone` for that).  No hidden
+        work happens: references are not re-derived or re-normalized.
+
+        Raises
+        ------
+        TypeError
+            If a name is not a Signal field.
+        ValueError
+            If a value is invalid.
+        """
+        unknown = set(changes) - _FIELD_NAMES
+        if unknown:
+            raise TypeError(f"Signal has no field(s) {sorted(unknown)}.")
+        new = copy.copy(self)
+        for name, value in changes.items():
+            object.__setattr__(new, name, _validate_field(name, value))
+        return new
 
     # -------------------------------------------------------------------------
     # Utilities
     # -------------------------------------------------------------------------
 
-    def print_info(self) -> None:
+    def _info_rows(self) -> list[tuple[str, str]]:
         """
-        Prints a formatted summary of the signal's physical and digital properties.
+        Summary rows of the signal's physical and digital properties.
 
-        In Jupyter/IPython environments, this renders as an HTML table. In standard
-        shells, it outputs a plain-text table via the logger.
+        Rendered by ``str(sig)`` as a plain-text table and by ``_repr_html_`` as
+        an HTML table in notebooks.
 
         Sections
         --------
@@ -494,28 +429,19 @@ class Signal(BaseModel):
         rows.append(("resolved_symbols", _yn(self.resolved_symbols)))
         rows.append(("resolved_bits", _yn(self.resolved_bits)))
 
-        # -- Render --------------------------------------------------------
-        # Rich HTML table in Jupyter; plain-text table everywhere else. IPython
-        # is an optional dependency (the ``notebook`` extra) - degrade
-        # gracefully to the plain-text path when it is not installed.
-        try:
-            from IPython import get_ipython
-            from IPython.display import HTML, display
+        return rows
 
-            ipy = get_ipython()
-            in_kernel = ipy is not None and "IPKernelApp" in ipy.config
-        except ImportError:
-            in_kernel = False
+    def __str__(self) -> str:
+        rows = self._info_rows()
+        width = max(len(prop) for prop, _ in rows)
+        return "\n".join(f"{prop.ljust(width)}  {val}" for prop, val in rows)
 
-        if in_kernel:
-            body = "".join(
-                f"<tr><td><b>{prop}</b></td><td>{val}</td></tr>" for prop, val in rows
-            )
-            display(HTML(f"<table>{body}</table>"))
-        else:
-            width = max(len(prop) for prop, _ in rows)
-            text = "\n".join(f"{prop.ljust(width)}  {val}" for prop, val in rows)
-            logger.info("\n%s", text)
+    def _repr_html_(self) -> str:
+        body = "".join(
+            f"<tr><td><b>{prop}</b></td><td>{val}</td></tr>"
+            for prop, val in self._info_rows()
+        )
+        return f"<table>{body}</table>"
 
     def clone(self) -> "Signal":
         """
@@ -530,16 +456,7 @@ class Signal(BaseModel):
         Signal
             A new signal object with identical data and metadata.
         """
-        return self.model_copy(deep=True)
-
-    def _shallow_clone(self) -> "Signal":
-        """Return a new container sharing all array and frame references.
-
-        This is an internal building block for operations that replace a
-        non-waveform field. Public callers should normally choose between
-        :meth:`clone` and :meth:`replace_samples`.
-        """
-        return self.model_copy(deep=False)
+        return copy.deepcopy(self)
 
     def replace_samples(
         self,
@@ -580,14 +497,9 @@ class Signal(BaseModel):
         Signal
             A new Signal sharing unchanged metadata with this instance.
         """
-        new = self._shallow_clone()
-        new.samples = samples
         if not _preserve_resolved:
-            new.resolved_symbols = None
-            new.resolved_bits = None
-        for key, value in metadata.items():
-            setattr(new, key, value)
-        return new
+            metadata = {"resolved_symbols": None, "resolved_bits": None, **metadata}
+        return self.replace(samples=samples, **metadata)
 
     def to(self, device: str) -> "Signal":
         """
@@ -738,3 +650,102 @@ class Signal(BaseModel):
         if self.mod_order:
             return int(np.log2(self.mod_order))
         return None
+
+
+# -----------------------------------------------------------------------------
+# Field validation (shared by construction and Signal.replace)
+# -----------------------------------------------------------------------------
+
+_FIELD_NAMES = frozenset(f.name for f in dataclasses.fields(Signal))
+
+_CHOICES = {
+    "spectral_domain": ("BASEBAND", "PASSBAND", "INTERMEDIATE"),
+    "physical_domain": ("DIG", "RF", "OPT"),
+    "signal_type": (None, "Single-Carrier Frame", "OFDM Frame", "Preamble"),
+}
+
+
+def _validate_samples(v: Any) -> Any:
+    """Coerce samples to a NumPy/CuPy array with time on the last axis."""
+    arr = helpers.validate_array(v, name="samples")
+    if arr.ndim > 2:
+        raise ValueError(
+            f"Samples array has {arr.ndim} dimensions. "
+            "Only 1D (SISO) or 2D (MIMO/Dual-Pol) arrays are supported."
+        )
+    if arr.ndim == 2:
+        s0, s1 = arr.shape
+        # (Time, Channels) input is transposed to (Channels, Time); removed in 2.4.
+        if s0 > s1 and s0 > 32:
+            logger.warning(
+                "Samples shape is %s. Converting to Time-Last convention "
+                "(N_channels=%s, N_samples=%s). Please provide input as "
+                "(N_channels, N_samples) for MIMO signals.",
+                arr.shape,
+                s1,
+                s0,
+            )
+            arr = arr.T
+    return arr
+
+
+def _number(
+    name: str,
+    value: Any,
+    kind: type,
+    *,
+    low: float | None = None,
+    high: float | None = None,
+    low_open: bool = False,
+) -> Any:
+    if isinstance(value, bool) or not isinstance(value, int | float | np.number):
+        raise ValueError(f"{name} must be a number, got {value!r}.")
+    if kind is int and float(value) % 1 != 0:
+        raise ValueError(f"{name} must be an integer, got {value!r}.")
+    value = kind(value)
+    if low is not None and (value <= low if low_open else value < low):
+        bound = ">" if low_open else ">="
+        raise ValueError(f"{name} must be {bound} {low}, got {value}.")
+    if high is not None and value > high:
+        raise ValueError(f"{name} must be <= {high}, got {value}.")
+    return value
+
+
+def _validate_field(name: str, value: Any) -> Any:
+    """Validate and coerce one Signal field."""
+    if name == "samples":
+        return _validate_samples(value)
+    if name in ("sampling_rate", "symbol_rate"):
+        return _number(name, value, float, low=0, low_open=True)
+    if name == "filter_span":
+        return _number(name, value, int, low=1)
+    if name in ("rrc_rolloff", "rc_rolloff"):
+        return _number(name, value, float, low=0, high=1)
+    if name == "duty_cycle":
+        return _number(name, value, float, low=0, high=1, low_open=True)
+    if name == "rise_time":
+        return _number(name, value, float, low=0)
+    if name == "center_frequency":
+        return _number(name, value, float, low=0)
+    if name in _CHOICES:
+        if value not in _CHOICES[name]:
+            raise ValueError(f"{name} must be one of {_CHOICES[name]}, got {value!r}.")
+        return value
+    if value is None:
+        return None
+    if name in ("digital_frequency_offset", "ps_nu"):
+        return _number(name, value, float)
+    if name == "mod_order":
+        return _number(name, value, int, low=1)
+    if name in ("mod_unipolar", "mod_rz"):
+        if not isinstance(value, bool | np.bool_):
+            raise ValueError(f"{name} must be a bool, got {value!r}.")
+        return bool(value)
+    if name in ("mod_scheme", "pulse_shape"):
+        if not isinstance(value, str):
+            raise ValueError(f"{name} must be a string, got {value!r}.")
+        return value
+    if name in ("pilot_tone_frequency", "pilot_tone_power_ratio_db"):
+        # One float64 value per channel; a scalar becomes a length-1 array.
+        return np.asarray(value, dtype=np.float64).reshape(-1)
+    return value

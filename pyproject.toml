@@ -9,7 +9,6 @@ dependencies = [
     "matplotlib>=3.11",
     "numpy>=2.4",
     "scipy>=1.17",
-    "pydantic>=2.13",
     "numba>=0.65",
 ]
 
@@ -19,8 +18,7 @@ dependencies = [
 gpu = [
     "cupy-cuda13x[ctk]>=14.1",
 ]
-# Running the example notebooks and the rich HTML `Signal.print_info()` table.
-# Not required for the library itself (print_info falls back to plain text).
+# Running the example notebooks. Not required for the library itself.
 notebook = [
     "jupyter>=1.1.1",
 ]

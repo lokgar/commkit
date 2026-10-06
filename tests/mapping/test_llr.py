@@ -174,7 +174,7 @@ class TestComputeLLRSignalIntegration:
             mod_scheme="qam",
             mod_order=16,
         )
-        sig.resolved_symbols = symbols
+        sig = sig.replace(resolved_symbols=symbols)
 
         llrs_sig = mapping.compute_llr(sig, noise_var=1e-6)
         llrs_arr = mapping.compute_llr(symbols, "qam", 16, noise_var=1e-6)

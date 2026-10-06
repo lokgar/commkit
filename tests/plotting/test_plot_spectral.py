@@ -188,7 +188,7 @@ class TestPlotSpectrogram:
             sps=int(fs / 10.0),
             seed=42,
         )
-        sig.samples = xp.asarray(sig.samples)
+        sig = sig.replace(samples=xp.asarray(sig.samples))
 
         f, t, Sxx = spectral.spectrogram(sig, nperseg=64, noverlap=32)
         assert isinstance(f, xp.ndarray)

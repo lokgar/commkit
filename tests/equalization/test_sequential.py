@@ -948,14 +948,8 @@ class TestCmaPilotAided:
 
         preamble = Preamble(sequence_type="barker", length=13)
         frame = SingleCarrierFrame(
-            num_symbols=200,
-            symbol_rate=1e6,
-            modulation_scheme="qam",
-            modulation_order=16,
             pilot_pattern="comb",
             pilot_period=10,
-            pilot_modulation_scheme="psk",
-            pilot_modulation_order=4,
             preamble=preamble,
         )
         sig = frame.to_signal(sps=2, symbol_rate=1e6)

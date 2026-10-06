@@ -23,7 +23,7 @@ class TestCprBps:
             order=order, num_symbols=1024, sps=1, symbol_rate=FS, xp=xp
         )
         phi_true = 0.2  # radians
-        sig.samples = sig.samples * xp.exp(1j * phi_true)
+        sig = sig.replace(samples=sig.samples * xp.exp(1j * phi_true))
 
         phase_est = recovery.recover_carrier_phase_bps(
             sig.samples, modulation="qam", order=order

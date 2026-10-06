@@ -111,7 +111,7 @@ class TestShapingFilterTaps:
         with pytest.raises(ValueError, match="No pulse shape defined"):
             filtering.shaping_filter_taps(sig)
 
-        sig.pulse_shape = "unknown_shape"
+        sig = sig.replace(pulse_shape="unknown_shape")
         with pytest.raises(ValueError, match="Unknown pulse shape"):
             filtering.shaping_filter_taps(sig)
 

@@ -42,9 +42,11 @@ class TestCprPilots:
         ).to(device_of(xp))
         # Save ideal symbols before adding noise
         ideal_symbols = xp.asarray(sig.samples.copy())
-        sig.samples = apply_awgn(sig.samples, esn0_db=SNR_DB, sps=1, seed=seed)
+        sig = sig.replace(
+            samples=apply_awgn(sig.samples, esn0_db=SNR_DB, sps=1, seed=seed)
+        )
         # Apply a slow linear phase ramp on top of noise
-        sig.samples = apply_phase_ramp(sig.samples, phase_per_sym, xp=xp)
+        sig = sig.replace(samples=apply_phase_ramp(sig.samples, phase_per_sym, xp=xp))
 
         pilot_indices = np.arange(0, n_symbols, pilot_period)
         # Known pilot values = noiseless, unrotated symbols at pilot positions
@@ -526,8 +528,10 @@ class TestPilotsCPREnhancements:
             order=16, num_symbols=n_symbols, sps=1, symbol_rate=FS, seed=seed
         ).to(device_of(xp))
         ideal = xp.asarray(sig.samples.copy())
-        sig.samples = apply_awgn(sig.samples, esn0_db=SNR_DB, sps=1, seed=seed)
-        sig.samples = _apply_phase_ramp(xp, sig.samples, phase_per_sym)
+        sig = sig.replace(
+            samples=apply_awgn(sig.samples, esn0_db=SNR_DB, sps=1, seed=seed)
+        )
+        sig = sig.replace(samples=_apply_phase_ramp(xp, sig.samples, phase_per_sym))
         pilot_indices = np.arange(0, n_symbols, pilot_period)
         pilot_values = ideal[pilot_indices]
         return sig.samples, pilot_indices, pilot_values

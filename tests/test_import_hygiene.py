@@ -25,7 +25,7 @@ def test_import_configures_nothing_global():
     """
     result = _run(
         "import logging, warnings\n"
-        "import numpy, scipy.signal, scipy.special, scipy.ndimage, pydantic\n"
+        "import numpy, scipy.signal, scipy.special, scipy.ndimage\n"
         "before = list(warnings.filters)\n"
         "import commkit\n"
         "print(logging.getLogger('commkit').handlers == [],"

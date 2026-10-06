@@ -102,7 +102,7 @@ class TestCprTikhonov:
                 order=order, num_symbols=2048, sps=1, symbol_rate=FS, xp=xp
             )
         phi_true = 0.3
-        sig.samples = sig.samples * xp.exp(1j * phi_true)
+        sig = sig.replace(samples=sig.samples * xp.exp(1j * phi_true))
 
         phase_est = recovery.recover_carrier_phase_tikhonov(
             sig.samples,
@@ -187,7 +187,7 @@ class TestCprTikhonov:
                 order=order, num_symbols=2048, sps=1, symbol_rate=FS, xp=xp
             )
         phi_true = 0.3
-        sig.samples = sig.samples * xp.exp(1j * phi_true)
+        sig = sig.replace(samples=sig.samples * xp.exp(1j * phi_true))
 
         phase_est = recovery.recover_carrier_phase_tikhonov(
             sig.samples,
@@ -209,7 +209,7 @@ class TestCprTikhonov:
         sig = make_test_qam_signal(
             order=16, num_symbols=2048, sps=1, symbol_rate=FS, xp=xp
         )
-        sig.samples = sig.samples * xp.exp(1j * 0.2)
+        sig = sig.replace(samples=sig.samples * xp.exp(1j * 0.2))
 
         phi_exact = recovery.recover_carrier_phase_tikhonov(
             sig.samples,
@@ -243,7 +243,7 @@ class TestCprTikhonov:
             seed=123,
             xp=xp,
         )
-        sig.samples = sig.samples * xp.exp(1j * 0.3)
+        sig = sig.replace(samples=sig.samples * xp.exp(1j * 0.3))
 
         phi_vv = recovery.recover_carrier_phase_viterbi_viterbi(
             sig.samples, modulation="psk", order=4, block_size=32

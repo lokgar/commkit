@@ -408,7 +408,7 @@ def resolve_symbols(
                 "via frame.get_structure_map(), build a plain Signal, then call "
                 "resolve_symbols() on that."
             )
-            return sig._shallow_clone()
+            return sig.replace()
         s = require_integer_sps(
             signal_adapter.resolve_required("sps", sps), "resolve_symbols()"
         )

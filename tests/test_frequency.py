@@ -316,8 +316,10 @@ class TestFoeMengaliMorelli:
         sig = _qam_signal(xp, order, 4096, fo_hz=0.0)  # generate without offset
         # Apply exact frequency offset via direct complex mixing
         n = xp.arange(sig.samples.shape[-1], dtype=xp.float64)
-        sig.samples = (sig.samples * xp.exp(1j * 2 * np.pi * fo_hz / FS * n)).astype(
-            sig.samples.dtype
+        sig = sig.replace(
+            samples=(sig.samples * xp.exp(1j * 2 * np.pi * fo_hz / FS * n)).astype(
+                sig.samples.dtype
+            )
         )
         est = frequency.estimate_frequency_offset_mengali_morelli(
             sig.samples, sampling_rate=FS, modulation="qam", order=order
@@ -331,10 +333,12 @@ class TestFoeMengaliMorelli:
             device_of(xp)
         )
         ideal = sig.samples.copy()
-        sig.samples = apply_awgn(sig.samples, esn0_db=25, sps=1)
+        sig = sig.replace(samples=apply_awgn(sig.samples, esn0_db=25, sps=1))
         n = xp.arange(sig.samples.shape[-1], dtype=xp.float64)
-        sig.samples = (sig.samples * xp.exp(1j * 2 * np.pi * fo_hz / FS * n)).astype(
-            sig.samples.dtype
+        sig = sig.replace(
+            samples=(sig.samples * xp.exp(1j * 2 * np.pi * fo_hz / FS * n)).astype(
+                sig.samples.dtype
+            )
         )
         est = frequency.estimate_frequency_offset_mengali_morelli(
             sig.samples, sampling_rate=FS, ref_signal=ideal
@@ -398,8 +402,10 @@ class TestFoeMengaliMorelli:
         fo_hz = 3_000.0
         sig = _qam_signal(xp, 4, 2048, fo_hz=0.0)
         n = xp.arange(sig.samples.shape[-1], dtype=xp.float64)
-        sig.samples = (sig.samples * xp.exp(1j * 2 * np.pi * fo_hz / FS * n)).astype(
-            sig.samples.dtype
+        sig = sig.replace(
+            samples=(sig.samples * xp.exp(1j * 2 * np.pi * fo_hz / FS * n)).astype(
+                sig.samples.dtype
+            )
         )
         est = frequency.estimate_frequency_offset_mengali_morelli(
             sig.samples, sampling_rate=FS, modulation="qam", order=4, max_lag=16

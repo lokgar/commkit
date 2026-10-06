@@ -7,7 +7,6 @@ Covers factory generation, frame structure, validation, and DSP operations
 from typing import Any
 
 import pytest
-from pydantic import ValidationError
 
 from commkit import filtering, generate_qam, multirate, spectral
 from commkit.core import Preamble, Signal, SingleCarrierFrame
@@ -35,9 +34,9 @@ class TestMIMOSignalStructure:
         assert sig.samples.shape == (2, 100)
 
     def test_signal_invalid_ndim(self, xp: Any) -> None:
-        """Arrays with >2 dimensions raise ValidationError."""
+        """Arrays with >2 dimensions raise ValueError."""
         data = xp.zeros((2, 2, 2))
-        with pytest.raises(ValidationError) as excparams:
+        with pytest.raises(ValueError) as excparams:
             Signal(samples=data, sampling_rate=1.0, symbol_rate=1.0)
         assert "3 dimensions" in str(excparams.value)
 
@@ -64,7 +63,6 @@ class TestMIMOFrameIntegration:
         """Verify multi-channel zero-insertion guard interval padding."""
         frame = SingleCarrierFrame(
             payload_len=100,
-            symbol_rate=1e6,
             num_streams=2,
             guard_type="zero",
             guard_len=10,
@@ -79,7 +77,6 @@ class TestMIMOFrameIntegration:
         """Verify that pilot patterns are correctly applied across all MIMO streams."""
         frame = SingleCarrierFrame(
             payload_len=10,
-            symbol_rate=1e6,
             num_streams=2,
             pilot_pattern="comb",
             pilot_period=2,
@@ -94,9 +91,7 @@ class TestMIMOFrameIntegration:
     def test_frame_mimo_preamble_broadcasting(self, xp: Any, xpt: Any) -> None:
         """Verify that a multi-stream Barker preamble tiles across all MIMO streams."""
         preamble = Preamble(sequence_type="barker", length=13, num_streams=2)
-        frame = SingleCarrierFrame(
-            payload_len=20, symbol_rate=1e6, num_streams=2, preamble=preamble
-        )
+        frame = SingleCarrierFrame(payload_len=20, num_streams=2, preamble=preamble)
 
         sig = frame.to_signal(sps=1, pulse_shape="none")
         assert sig.samples.shape == (2, 33)
@@ -106,7 +101,7 @@ class TestMIMOFrameIntegration:
 
     def test_frame_mimo_waveform(self, xp: Any) -> None:
         """Verify MIMO waveform generation with pulse shaping."""
-        frame = SingleCarrierFrame(payload_len=10, symbol_rate=1e6, num_streams=2)
+        frame = SingleCarrierFrame(payload_len=10, num_streams=2)
 
         sig = frame.to_signal(sps=4, pulse_shape="rect")
         assert sig.samples.shape == (2, 40)

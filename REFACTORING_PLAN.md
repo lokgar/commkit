@@ -85,9 +85,10 @@ res2 = ck.equalization.lms(rx_next, num_taps=21, step_size=1e-3,
 
 ### 2.2 `Signal`: waveform plus description, no pipeline state
 
-`Signal` becomes a `@dataclass(frozen=True, slots=True)`. Validation happens in
-`__post_init__`, and updates go through a validating `sig.replace(...)` that is
-built on `dataclasses.replace`. This replaces Pydantic. Pydantic adds nothing for
+`Signal` becomes a `@dataclass(frozen=True, kw_only=True)`. Validation happens in
+`__post_init__`, and updates go through `sig.replace(...)`, which validates only
+the changed fields and, unlike `dataclasses.replace`, never re-runs construction
+work. This replaces Pydantic. Pydantic adds nothing for
 `Any`-typed array fields, and it is the reason the type checker sees `Any`
 everywhere.
 
@@ -118,8 +119,8 @@ Construction does **no hidden work**:
 - no shape guessing (a `(N, C)`-looking input raises instead of being
   transposed).
 
-`print_info()` becomes `_repr_html_` and `__repr__`, so notebooks display a
-Signal automatically.
+`print_info()` becomes `_repr_html_` and `__str__`, so notebooks display a
+Signal automatically and `print(sig)` shows the summary.
 
 **Alignment invariant:** `reference` symbol *k* corresponds to symbol period *k*
 of `samples`. The few functions that drop or shift symbol periods (equalizer
@@ -560,13 +561,18 @@ sites. The order avoids conflicts, because 1.4-1.6 all edit
   - Definition tests: RC zero ISI, RRC matched pair, Gaussian width equals
     `fwhm` (the field replaces the old `duty_cycle` name), SmoothRect 10-90%
     rise time. Spanned pulses default to `span=10`, the 1.x Signal default.
-- [ ] **2.3 `refactor(core)!: Signal, Preamble and SingleCarrierFrame become frozen dataclasses`.**
+- [x] **2.3 `refactor(core)!: Signal, Preamble and SingleCarrierFrame become frozen dataclasses`.**
   - A container swap with the *same fields*; Pydantic is removed.
-  - Validation moves to `__post_init__`, and `sig.replace(**changes)`
-    replaces `replace_samples`.
-  - The 8 in-place assignments in the library and 59 in tests are rewritten
-    to use `replace`.
-  - `_repr_html_` replaces `print_info`.
+  - Validation moves to `__post_init__`; `sig.replace(**changes)` validates the
+    changed fields and rejects unknown names. `replace_samples` stays as the
+    bridge that invalidates `resolved_*` until 2.4.
+  - In-place assignments in the library and tests are rewritten to use
+    `replace`. The frame's generated payload/pilot data lives in a private
+    cache that is filled once.
+  - Unknown frame keyword arguments now raise; Pydantic silently ignored them,
+    and 29 test constructions passed dead `symbol_rate=` / `num_symbols=` /
+    `modulation_*=` arguments, now removed (behaviour unchanged).
+  - `_repr_html_` and `__str__` replace `print_info`.
 - [ ] **2.4 `refactor(core)!: Signal 2.0 fields with compatibility bridge`.**
   - Adds `constellation`, `pulse`, `reference` and `frame` (a layout
     snapshot) and removes the dead fields (§2.2).

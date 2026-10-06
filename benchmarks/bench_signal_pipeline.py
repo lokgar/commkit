@@ -41,10 +41,10 @@ def _frame_signal():
     payload_symbols = frame.payload_symbols
     _ = frame.pilot_bits, frame.pilot_symbols
     sig = frame.to_signal(sps=4, symbol_rate=1e6, filter_span=8)
-    sig.source_bits = payload_bits
-    sig.source_symbols = payload_symbols
-    sig.resolved_symbols = payload_symbols
-    sig.resolved_bits = payload_bits
+    sig = sig.replace(source_bits=payload_bits)
+    sig = sig.replace(source_symbols=payload_symbols)
+    sig = sig.replace(resolved_symbols=payload_symbols)
+    sig = sig.replace(resolved_bits=payload_bits)
     return sig
 
 
@@ -114,7 +114,7 @@ def _profile_rewrap_copy_cost(sig, backend_device, xp, sync):
 
     def legacy_rewrap():
         result = sig.clone()
-        result.samples = replacement
+        result = result.replace(samples=replacement)
         return result
 
     optimized_peak = _allocator_peak(

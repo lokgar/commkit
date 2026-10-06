@@ -4,7 +4,6 @@ from unittest.mock import patch
 
 import numpy as np
 import pytest
-from pydantic import ValidationError
 
 from commkit import timing
 from commkit.core import Preamble, Signal
@@ -77,10 +76,10 @@ class TestTimingSequences:
         assert preamble_zc.symbols is not None
         assert len(preamble_zc.symbols) == 63
 
-        with pytest.raises(ValidationError):
+        with pytest.raises(ValueError, match="sequence_type"):
             Preamble(sequence_type="invalid", length=13)
 
-        with pytest.raises(ValidationError):
+        with pytest.raises(TypeError, match="length"):
             Preamble(sequence_type="barker")
 
     def test_sequences_are_host_arrays(self):

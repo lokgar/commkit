@@ -35,8 +35,8 @@ def _signal(xp: Any, *, sps: float = 2.0) -> Signal:
         spectral_domain="INTERMEDIATE",
         physical_domain="RF",
     )
-    sig.resolved_symbols = xp.asarray([1.0, -1.0], dtype=xp.complex64)
-    sig.resolved_bits = xp.asarray([0, 1])
+    sig = sig.replace(resolved_symbols=xp.asarray([1.0, -1.0], dtype=xp.complex64))
+    sig = sig.replace(resolved_bits=xp.asarray([0, 1]))
     return sig
 
 
@@ -158,8 +158,8 @@ class TestPipelineComposition:
         assert frame.pilot_bits is not None
         assert frame.pilot_symbols is not None
         sig = frame.to_signal(sps=4, symbol_rate=1e6, filter_span=4)
-        sig.source_bits = payload_bits
-        sig.source_symbols = payload_symbols
+        sig = sig.replace(source_bits=payload_bits)
+        sig = sig.replace(source_symbols=payload_symbols)
         sig = sig.to(device_of(xp))
 
         transformed = apply_awgn(sig, esn0_db=25, seed=5)
@@ -201,7 +201,7 @@ class TestPipelineMetadataPropagation:
         without_mod = Signal(
             samples=tone, sampling_rate=sampling_rate, symbol_rate=0.5e6
         )
-        with_mod = without_mod.model_copy(update={"mod_scheme": "PSK", "mod_order": 4})
+        with_mod = without_mod.replace(mod_scheme="PSK", mod_order=4)
 
         fallback = frequency.estimate_frequency_offset_mth_power(
             without_mod, modulation="PSK", order=4
@@ -269,7 +269,7 @@ class TestPipelineSPSValidation:
         [
             lambda sig, xp: multirate.decimate_to_symbol_rate(sig),
             lambda sig, xp: filtering.shaping_filter_taps(
-                sig.model_copy(update={"pulse_shape": "rect"})
+                sig.replace(pulse_shape="rect")
             ),
             lambda sig, xp: equalization.apply_taps(
                 sig, _identity_taps(xp), normalize=False

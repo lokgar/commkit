@@ -25,6 +25,7 @@ The archive contains only numeric and unicode arrays, so it is read with
 
 from __future__ import annotations
 
+import dataclasses
 import json
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
@@ -151,17 +152,19 @@ def save_npz(
     # reference to the original frame object.
     frame = signal.frame
     if frame is not None:
-        # All public fields are JSON-serializable primitives; nested Preamble
-        # is a Pydantic model and is also captured by model_dump().
+        # All public fields are JSON-serializable primitives; the nested
+        # Preamble dataclass becomes a dict.
         # _frame_type stores the class name so load_npz can reconstruct the
         # correct type when multiple frame classes exist (SingleCarrierFrame,
         # future OFDMFrame, etc.) without hardcoding the class.
-        frame_dict = frame.model_dump(mode="json")
+        frame_dict = _init_fields(frame)
+        if frame_dict.get("preamble") is not None:
+            frame_dict["preamble"] = _init_fields(frame_dict["preamble"])
         frame_dict["_frame_type"] = type(frame).__name__
         arrays["__frame_metadata__"] = _json_array(frame_dict)
 
-        # Save the generated symbol/bit arrays that live in PrivateAttrs and
-        # are NOT reproduced by model_dump().  Payload symbols and bits are
+        # Save the generated symbol/bit arrays from the frame's cache, which the
+        # field dict above does not include.  Payload symbols and bits are
         # random; pilot symbols are deterministic but cheap to cache anyway.
         for npz_key, frame_attr in (
             ("frame_payload_symbols", "payload_symbols"),
@@ -185,6 +188,11 @@ def save_npz(
         np.savez_compressed(path, **arrays)  # type: ignore[arg-type]
     else:
         np.savez(path, **arrays)  # type: ignore[arg-type]
+
+
+def _init_fields(obj: Any) -> dict:
+    """The constructor arguments of a dataclass instance (no derived fields)."""
+    return {f.name: getattr(obj, f.name) for f in dataclasses.fields(obj) if f.init}
 
 
 def load_npz(
@@ -250,9 +258,7 @@ def load_npz(
     # -------------------------------------------------------------------------
     # Restore cached arrays (bypass re-computation if present in file)
     # -------------------------------------------------------------------------
-    for field in _CACHE_FIELDS:
-        if field in data:
-            setattr(sig, field, data[field])
+    sig = sig.replace(**{f: data[f] for f in _CACHE_FIELDS if f in data})
 
     # -------------------------------------------------------------------------
     # Reconstruct originating frame (if serialised)
@@ -273,26 +279,27 @@ def load_npz(
                 f"Cannot reconstruct frame of type {frame_type_name!r}: "
                 "unknown frame class. Extend _FRAME_CLASSES in io.py."
             )
+        if frame_dict.get("preamble") is not None:
+            frame_dict["preamble"] = _core.Preamble(**frame_dict["preamble"])
         frame = frame_cls(**frame_dict)
 
-        # Inject the cached symbol/bit arrays back into the frame's PrivateAttrs
-        # so that frame.payload_symbols, frame.pilot_symbols, frame.payload_bits
-        # return the original generated data without re-randomising.
-        if "frame_payload_symbols" in data:
-            frame._payload_symbols = data["frame_payload_symbols"]
-        if "frame_pilot_symbols" in data:
-            frame._pilot_symbols = data["frame_pilot_symbols"]
-        if "frame_payload_bits" in data:
-            frame._payload_bits = data["frame_payload_bits"]
+        # Refill the frame's cache so that frame.payload_symbols,
+        # frame.pilot_symbols and frame.payload_bits return the original
+        # generated data without re-randomising.
+        for npz_key, cache_key in (
+            ("frame_payload_symbols", "payload_symbols"),
+            ("frame_pilot_symbols", "pilot_symbols"),
+            ("frame_payload_bits", "payload_bits"),
+        ):
+            if npz_key in data:
+                frame._cache[cache_key] = data[npz_key]
 
-        sig.frame = frame
-
-        # _payload_ps_pmf is a PrivateAttr set during _ensure_payload_generated().
-        # When _payload_bits is restored above, that method returns early and never
-        # sets _payload_ps_pmf.  sig.ps_pmf was saved via _OPTIONAL_ARRAY_FIELDS and
-        # is already loaded, so restore from it directly.
+        # With the payload bits restored, _ensure_payload_generated() returns
+        # early and never sets the PS pmf; sig.ps_pmf was saved, so use it.
         if sig.ps_pmf is not None:
-            frame._payload_ps_pmf = sig.ps_pmf
+            frame._cache["payload_ps_pmf"] = sig.ps_pmf
+
+        sig = sig.replace(frame=frame)
 
     # -------------------------------------------------------------------------
     # Move to target device

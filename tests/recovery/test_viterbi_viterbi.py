@@ -41,7 +41,7 @@ class TestCprViterbiViterbi:
                 order=order, num_symbols=2048, sps=1, symbol_rate=FS, xp=xp
             )
         phi_true = 0.3  # radians
-        sig.samples = sig.samples * xp.exp(1j * phi_true)
+        sig = sig.replace(samples=sig.samples * xp.exp(1j * phi_true))
 
         phase_est = recovery.recover_carrier_phase_viterbi_viterbi(
             sig.samples, modulation=modulation, order=order, block_size=block_size

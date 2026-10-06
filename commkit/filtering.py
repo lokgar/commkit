@@ -1201,7 +1201,7 @@ def matched_filter(
                 taps = shaping_filter_taps(sig)
             except ValueError as e:
                 logger.error("Cannot apply matched filter: %s", e)
-                return sig._shallow_clone()
+                return sig.replace()
         pulse_taps = taps
         axis = -1
 

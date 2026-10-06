@@ -2,16 +2,10 @@
 Frame containers: structured preamble and single-carrier frame models.
 """
 
+from dataclasses import dataclass, field
 from typing import Any, Literal
 
 import numpy as np
-from pydantic import (
-    BaseModel,
-    ConfigDict,
-    Field,
-    PrivateAttr,
-    model_validator,
-)
 
 from .. import helpers
 from ..backend import ArrayType
@@ -21,7 +15,8 @@ from ._signal_adapter import require_integer_sps
 from .signal import Signal
 
 
-class Preamble(BaseModel):
+@dataclass(frozen=True, kw_only=True)
+class Preamble:
     """
     Structured container for frame synchronization sequences (preambles).
 
@@ -42,35 +37,24 @@ class Preamble(BaseModel):
         Must satisfy ``1 <= root < length``.
     """
 
-    model_config = ConfigDict(arbitrary_types_allowed=True, validate_assignment=True)
-
-    sequence_type: Literal["barker", "zc"] = "barker"
+    sequence_type: str = "barker"
     length: int
-    root: int = Field(
-        default=1,
-        ge=1,
-        description="ZC root index.  Only meaningful for ``sequence_type='zc'``; "
-        "ignored for Barker sequences.  Must satisfy ``1 <= root < length``; "
-        "for prime ``length`` every root in this range yields a valid CAZAC sequence.",
-    )
-    num_streams: int = Field(
-        default=1,
-        ge=1,
-        description="Number of TX streams.  For ZC preambles each stream gets a "
-        "unique root derived via ``helpers.zc_mimo_root``.  "
-        "For Barker the same sequence is broadcast to all streams.",
-    )
+    # ZC root index, 1 <= root < length; ignored for Barker sequences.
+    root: int = 1
+    # Number of TX streams.  ZC preambles get a unique root per stream
+    # (helpers.zc_mimo_root); Barker broadcasts the same sequence.
+    num_streams: int = 1
 
-    # Internal state managed during post-init
-    _symbols: Any = PrivateAttr(default=None)
+    # Generated in __post_init__ from the fields above.
+    _symbols: Any = field(default=None, init=False, repr=False, compare=False)
 
     # -------------------------------------------------------------------------
     # Validators and Post-Initialization Hooks
     # -------------------------------------------------------------------------
 
-    def model_post_init(self, __context: Any) -> None:
+    def __post_init__(self) -> None:
         """
-        Post-initialization hook to automate symbol generation and device placement.
+        Validate the fields and generate the preamble symbols.
 
         This ensures that standard sequences are generated correctly according
         to the requested sequence properties.
@@ -82,7 +66,16 @@ class Preamble(BaseModel):
         """
         from .. import timing
 
+        if self.sequence_type not in ("barker", "zc"):
+            raise ValueError(
+                f"sequence_type must be 'barker' or 'zc', got {self.sequence_type!r}."
+            )
+        _check_int("length", self.length, 1)
+        _check_int("root", self.root, 1)
+        _check_int("num_streams", self.num_streams, 1)
+
         stype = self.sequence_type.lower()
+        symbols: Any
 
         if stype == "barker":
             # Barker symbols (-1, +1)
@@ -102,16 +95,17 @@ class Preamble(BaseModel):
                     )
                     for k in range(self.num_streams)
                 ]
-                self._symbols = np.stack(rows, axis=0)  # (num_streams, length)
+                symbols = np.stack(rows, axis=0)  # (num_streams, length)
             else:
-                self._symbols = np.tile(base[None, :], (self.num_streams, 1))
+                symbols = np.tile(base[None, :], (self.num_streams, 1))
         else:
-            self._symbols = base
+            symbols = base
 
         # Consistent internal dtype; sequences stay on the CPU (no hidden
         # device placement).
-        if self._symbols is not None:
-            self._symbols = self._symbols.astype("complex64")
+        if symbols is not None:
+            symbols = symbols.astype("complex64")
+        object.__setattr__(self, "_symbols", symbols)
 
     # -------------------------------------------------------------------------
     # Properties
@@ -203,7 +197,8 @@ class Preamble(BaseModel):
         )
 
 
-class SingleCarrierFrame(BaseModel):
+@dataclass(frozen=True, kw_only=True)
+class SingleCarrierFrame:
     """
     Represents a structured single-carrier frame with Preamble, Pilots, Payload, and Guard Interval.
 
@@ -267,46 +262,41 @@ class SingleCarrierFrame(BaseModel):
     ``payload_ps_pmf`` property after the frame has been generated.
     """
 
-    model_config = ConfigDict(arbitrary_types_allowed=True, validate_assignment=True)
-
-    payload_len: int = Field(default=1000, gt=0)
+    payload_len: int = 1000
     payload_seed: int = 42
     payload_mod_scheme: str = "PSK"
-    payload_mod_order: int = Field(default=4, ge=1)
+    payload_mod_order: int = 4
     payload_mod_unipolar: bool = False
-    payload_nu: float | None = Field(default=None, ge=0)
-    payload_entropy: float | None = Field(default=None, gt=0)
+    payload_nu: float | None = None
+    payload_entropy: float | None = None
 
     preamble: Preamble | None = None
 
-    pilot_pattern: Literal["none", "block", "comb"] = "none"
-    pilot_period: int = Field(default=0, ge=0)
-    pilot_block_len: int = Field(default=0, ge=0)
+    pilot_pattern: str = "none"
+    pilot_period: int = 0
+    pilot_block_len: int = 0
     pilot_seed: int = 1337
     pilot_mod_scheme: str = "PSK"
-    pilot_mod_order: int = Field(default=4, ge=1)
+    pilot_mod_order: int = 4
     pilot_mod_unipolar: bool = False
     pilot_gain_db: float = 0.0
 
-    guard_type: Literal["zero", "cp"] = "zero"
-    guard_len: int = Field(default=0, ge=0)
+    guard_type: str = "zero"
+    guard_len: int = 0
 
-    num_streams: int = Field(default=1, ge=1)
+    num_streams: int = 1
 
-    # Internal cache
-    _payload_bits: Any | None = PrivateAttr(default=None)
-    _payload_symbols: Any | None = PrivateAttr(default=None)
-    _payload_ps_pmf: Any | None = PrivateAttr(default=None)
-    _pilot_bits: Any | None = PrivateAttr(default=None)
-    _pilot_symbols: Any | None = PrivateAttr(default=None)
+    # Lazily generated payload and pilot data.  The frame's fields are frozen;
+    # this cache is filled on first access and never changes afterwards.
+    _cache: dict = field(default_factory=dict, init=False, repr=False, compare=False)
 
     # -------------------------------------------------------------------------
     # Validators and Post-Initialization Hooks
     # -------------------------------------------------------------------------
 
-    def model_post_init(self, __context: Any) -> None:
+    def __post_init__(self) -> None:
         """
-        Post-initialization hook.
+        Validate the fields and snap ``payload_len``.
 
         Validates that payload_len is evenly divisible by the per-period or
         per-block data count implied by the pilot parameters.  If not, snaps
@@ -316,6 +306,33 @@ class SingleCarrierFrame(BaseModel):
             num_pilot_blocks  == num_data_blocks   (block)
         """
         import math
+
+        _check_int("payload_len", self.payload_len, 1)
+        _check_int("payload_mod_order", self.payload_mod_order, 1)
+        _check_int("pilot_mod_order", self.pilot_mod_order, 1)
+        _check_int("pilot_period", self.pilot_period, 0)
+        _check_int("pilot_block_len", self.pilot_block_len, 0)
+        _check_int("guard_len", self.guard_len, 0)
+        _check_int("num_streams", self.num_streams, 1)
+        if self.pilot_pattern not in ("none", "block", "comb"):
+            raise ValueError(
+                "pilot_pattern must be 'none', 'block' or 'comb', "
+                f"got {self.pilot_pattern!r}."
+            )
+        if self.guard_type not in ("zero", "cp"):
+            raise ValueError(
+                f"guard_type must be 'zero' or 'cp', got {self.guard_type!r}."
+            )
+        if self.payload_nu is not None and self.payload_nu < 0:
+            raise ValueError(f"payload_nu must be >= 0, got {self.payload_nu}.")
+        if self.payload_entropy is not None and self.payload_entropy <= 0:
+            raise ValueError(
+                f"payload_entropy must be > 0, got {self.payload_entropy}."
+            )
+        if self.preamble is not None and not isinstance(self.preamble, Preamble):
+            raise ValueError("preamble must be a Preamble or None.")
+        self._check_psqam_fields()
+        self._check_preamble_streams()
 
         if self.pilot_pattern == "comb" and self.pilot_period > 1:
             data_per_period = self.pilot_period - 1
@@ -335,7 +352,7 @@ class SingleCarrierFrame(BaseModel):
                     snapped,
                     snapped // data_per_period,
                 )
-                self.payload_len = snapped
+                object.__setattr__(self, "payload_len", snapped)
 
         elif (
             self.pilot_pattern == "block"
@@ -357,10 +374,9 @@ class SingleCarrierFrame(BaseModel):
                     snapped,
                     snapped // data_per_block,
                 )
-                self.payload_len = snapped
+                object.__setattr__(self, "payload_len", snapped)
 
-    @model_validator(mode="after")
-    def _check_psqam_fields(self) -> "SingleCarrierFrame":
+    def _check_psqam_fields(self) -> None:
         if self.payload_nu is not None and self.payload_entropy is not None:
             raise ValueError(
                 "payload_nu and payload_entropy are mutually exclusive - specify one or neither."
@@ -371,17 +387,14 @@ class SingleCarrierFrame(BaseModel):
                     f"payload_nu / payload_entropy require a QAM payload modulation, "
                     f"got payload_mod_scheme='{self.payload_mod_scheme}'."
                 )
-        return self
 
-    @model_validator(mode="after")
-    def _check_preamble_streams(self) -> "SingleCarrierFrame":
+    def _check_preamble_streams(self) -> None:
         if self.preamble is not None and self.preamble.num_streams > 1:
             if self.preamble.num_streams != self.num_streams:
                 raise ValueError(
                     f"preamble.num_streams={self.preamble.num_streams} does not match "
                     f"frame.num_streams={self.num_streams}"
                 )
-        return self
 
     # -------------------------------------------------------------------------
     # Mask Generation and Internal Data Preparation Methods
@@ -456,7 +469,7 @@ class SingleCarrierFrame(BaseModel):
         parameters.  Using the factories as the single source of generation
         logic avoids duplicating bit/symbol generation code here.
         """
-        if self._payload_bits is not None:
+        if self._cache.get("payload_bits") is not None:
             return
 
         scheme = self.payload_mod_scheme.lower()
@@ -478,7 +491,7 @@ class SingleCarrierFrame(BaseModel):
                 entropy=self.payload_entropy,
                 **common,
             )
-            self._payload_ps_pmf = sig.ps_pmf
+            self._cache["payload_ps_pmf"] = sig.ps_pmf
         elif "qam" in scheme:
             sig = generation.generate_qam(
                 order=self.payload_mod_order,
@@ -504,8 +517,8 @@ class SingleCarrierFrame(BaseModel):
                 **common,
             )
 
-        self._payload_bits = sig.source_bits
-        self._payload_symbols = sig.source_symbols
+        self._cache["payload_bits"] = sig.source_bits
+        self._cache["payload_symbols"] = sig.source_symbols
 
     def _ensure_pilot_generated(self) -> None:
         """
@@ -514,7 +527,7 @@ class SingleCarrierFrame(BaseModel):
         Pilots are always generated with a uniform distribution - PS on pilots
         would destroy the known-reference property required for channel estimation.
         """
-        if self._pilot_bits is not None or self.pilot_pattern == "none":
+        if self._cache.get("pilot_bits") is not None or self.pilot_pattern == "none":
             return
 
         xp = np
@@ -559,8 +572,8 @@ class SingleCarrierFrame(BaseModel):
                 **common,
             )
 
-        self._pilot_bits = sig.source_bits
-        self._pilot_symbols = sig.source_symbols
+        self._cache["pilot_bits"] = sig.source_bits
+        self._cache["pilot_symbols"] = sig.source_symbols
 
     # -------------------------------------------------------------------------
     # Properties for Accessing Payload and Pilot Data
@@ -577,7 +590,7 @@ class SingleCarrierFrame(BaseModel):
             Binary bits (0s and 1s).
         """
         self._ensure_payload_generated()
-        return self._payload_bits
+        return self._cache.get("payload_bits")
 
     @property
     def payload_symbols(self) -> ArrayType:
@@ -590,7 +603,7 @@ class SingleCarrierFrame(BaseModel):
             IQ symbols.
         """
         self._ensure_payload_generated()
-        return self._payload_symbols
+        return self._cache.get("payload_symbols")
 
     @property
     def payload_ps_pmf(self) -> Any | None:
@@ -607,7 +620,7 @@ class SingleCarrierFrame(BaseModel):
             PMF array of shape ``(payload_mod_order,)`` summing to 1, or ``None``.
         """
         self._ensure_payload_generated()
-        return self._payload_ps_pmf
+        return self._cache.get("payload_ps_pmf")
 
     @property
     def pilot_bits(self) -> ArrayType | None:
@@ -622,7 +635,7 @@ class SingleCarrierFrame(BaseModel):
         if self.pilot_pattern == "none":
             return None
         self._ensure_pilot_generated()
-        return self._pilot_bits
+        return self._cache.get("pilot_bits")
 
     @property
     def pilot_symbols(self) -> ArrayType | None:
@@ -637,7 +650,7 @@ class SingleCarrierFrame(BaseModel):
         if self.pilot_pattern == "none":
             return None
         self._ensure_pilot_generated()
-        return self._pilot_symbols
+        return self._cache.get("pilot_symbols")
 
     @property
     def body_symbols(self) -> ArrayType:
@@ -969,3 +982,10 @@ class SingleCarrierFrame(BaseModel):
             signal_type="Single-Carrier Frame",
             frame=self,
         )
+
+
+def _check_int(name: str, value: Any, low: int) -> None:
+    if isinstance(value, bool) or not isinstance(value, int | np.integer):
+        raise ValueError(f"{name} must be an integer, got {value!r}.")
+    if value < low:
+        raise ValueError(f"{name} must be >= {low}, got {value}.")

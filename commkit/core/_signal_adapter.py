@@ -105,11 +105,10 @@ class SignalAdapter:
         """
         if self.signal is None:
             raise TypeError("replace_signal_field() requires Signal input.")
-        result = self.signal._shallow_clone()
-        setattr(result, field, value)
+        changes: dict[str, Any] = {field: value}
         if field == "resolved_symbols":
-            result.resolved_bits = None
-        return result
+            changes["resolved_bits"] = None
+        return self.signal.replace(**changes)
 
 
 def adapt_signal(

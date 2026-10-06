@@ -156,7 +156,7 @@ def demap_symbols_hard(
                 "Extract the payload segment via frame.get_structure_map() and build "
                 "a plain Signal before demapping."
             )
-            return sig._shallow_clone()
+            return sig.replace()
         mod = signal_adapter.resolve_optional("mod_scheme", modulation)
         ord_ = signal_adapter.resolve_optional("mod_order", order)
         if mod is None or ord_ is None:

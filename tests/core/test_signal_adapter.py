@@ -63,7 +63,7 @@ class TestSignalAdapterTransforms:
     def test_signal_adapter_wrap_and_field_replacement(self, xp: Any) -> None:
         """Wrapping samples or replacing fields produces clean cloned Signal instances."""
         sig = make_adapter_test_signal(xp)
-        sig.resolved_bits = xp.asarray([1, 0])
+        sig = sig.replace(resolved_bits=xp.asarray([1, 0]))
         signal_adapter = adapt_signal(sig, function_name="example()")
         replacement = xp.zeros(8, dtype=xp.complex64)
 
