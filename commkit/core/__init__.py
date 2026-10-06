@@ -11,7 +11,7 @@ the package top level (``commkit.generate(...)``).
 """
 
 from .frame import Preamble, SingleCarrierFrame
-from .generation import generate, generate_psqam
+from .generation import generate
 from .signal import Reference, Signal
 
 __all__ = [
@@ -20,5 +20,4 @@ __all__ = [
     "Signal",
     "SingleCarrierFrame",
     "generate",
-    "generate_psqam",
 ]

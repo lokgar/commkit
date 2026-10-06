@@ -672,7 +672,7 @@ The equalization pass (3.7) gets more commits:
 | 3.5 | `timing`, `frequency` | `cross_correlate_fft`, peak interpolation and `zc_mimo_root` move here; timing correction slices `reference`. Give the orphaned diagnostic plots (commit 1.4) a public data source: `plot_timing_correlation`, `plot_frequency_offset_spectrum`, `plot_mm_autocorrelation`, `plot_frequency_offset_blockwise_result` and the FOE `plot_pilot_phase_estimate` draw data that only exists inside the estimator, so return it in the estimator's result dataclass (§2.6). Apply the D16 verbs: `estimate_frequency_offset` / `correct_frequency_offset` with method objects, `TimingEstimate` | M |
 | 3.6 | `recovery` | `PLL` / `BPS` / `CycleSlip` objects; PLL gain resolution moves into `recovery/_common.py`. Decide two oracle findings (commit 0.6): the PLL's square-QAM slicer builds decisions from float32 grid constants inside its float64 loop (up to about 3e-7 rad deviation; make it float64 or document it), and joint Viterbi-Viterbi weights channels by amplitude^M because, unlike BPS and the PLL, it does not power-normalize (document it, or normalize like the others). Give the orphaned pilot plots (commit 1.4: `plot_pilot_phase_estimate`, `plot_pilot_tone_phase_estimate`, `plot_pilot_tones_phase_estimate`) a public data source the same way; CPR block phases (`plot_carrier_phase_trajectory`'s optional inputs) likewise. Apply the D16 verbs: `estimate_carrier_phase` / `correct_carrier_phase` with one object per method; `correct_phase_rotation` becomes `DataAided()` | M |
 | 3.7 | `equalization` | API plus the internal decomposition (old Phase 3), done once: validate, then `_prepare()`, then Numba or NumPy/CuPy runner, then `_assemble_result()`. Adds `state=`, `cpr=` and `result.signal`. Includes chunked-versus-uninterrupted equivalence tests for `state=`. Settle the known-symbol scale: `_normalize_inputs` rescales `training_symbols` to unit sample-average power (which moves an exact reference off the constellation), while the blind engines' `pilot_ref` path uses the symbols as given; `test_all_pilots_block_cma_matches_block_lms` only agrees because its builder pre-normalizes (commit 2.6b). Add a plain-Python oracle for the inline CPR kernels (LMS/RLS with PLL and BPS in the loop): commit 1.6 removed the Numba-vs-JAX parity tests that were their only independent cross-check. See the equalizer safety rules below. | L |
-| 3.8 | `metrics` | **Low-SNR scale bias (numerical fix, own commit):** `resolve_symbols` normalizes received symbols to unit *total* power, so the signal component is scaled by 1/sqrt(1 + 1/SNR) while `mi`/`gmi`/LLRs assume the signal scale with the caller's `noise_var`. Measured on shaped 256-QAM (H = 7 bits): MI is 11% low at -10 dB, 7% at -5 dB, 2.6% at 0 dB, for uniform and shaped constellations and for both PS conventions; this breaks CV-QKD (I_AB enters the key rate as a small difference). Fix: scale by a data-aided gain estimate (`<r s*>/<|s|^2>` against `reference`, which is also the transmittance estimate) or by signal power = total - noise, never by total power; add an oracle test at -10 dB. Host return values, raise on empty input, `reference`-based Signal path, payload extraction (`extract_payload(sig)` using `frame`), a units and scaling table. See the metrics contract below. | M |
+| 3.8 | `metrics` | **Low-SNR scale bias (numerical fix, own commit):** `resolve_symbols` normalizes received symbols to unit *total* power, so the signal component is scaled by 1/sqrt(1 + 1/SNR) while `mi`/`gmi`/LLRs assume the signal scale with the caller's `noise_var`. Measured on shaped 256-QAM (H = 7 bits): MI is 11% low at -10 dB, 7% at -5 dB, 2.6% at 0 dB, for uniform and shaped constellations and for both PS conventions; this breaks CV-QKD (I_AB enters the key rate as a small difference). Fix: scale by a data-aided gain estimate (`<r s*>/<|s|^2>` against `reference`, which is also the transmittance estimate) or by signal power = total - noise, never by total power; add an oracle test at -10 dB. **PS GMI overstates the rate by k - H(X)** (found in 3.2b): `gmi` sums `1 - E[log2(1 + exp(...))]` over the k bits, which assumes uniform bits; with a shaped prior the bit-metric decoding rate is `H(X) - sum_b E[log2(1 + exp(-(1-2c_b) LLR_b))]`. Measured: shaped 16-QAM (H = 3.306) at 20 dB gives GMI = 4.000 > H; shaped 64-QAM nu=0.075 at 0 dB gives 1.784 > MI = 0.987. Fix in its own numerical commit with an oracle (GMI <= MI <= H on shaped constellations). Host return values, raise on empty input, `reference`-based Signal path, payload extraction (`extract_payload(sig)` using `frame`), a units and scaling table. See the metrics contract below. | M |
 | 3.9 | `analysis` | Typed result dataclasses instead of dicts; trend fitting lives here | S |
 | 3.10 | `plotting` | Consumes the new results and Signals; recomputes through public functions; no numerical module imports matplotlib (tested) | M |
 
@@ -703,9 +703,16 @@ The equalization pass (3.7) gets more commits:
     `nearest_constellation_index`, `square_qam_slicer_params`,
     `constellation_power` (use `Constellation.power()`).
   - `sample_ps_symbols` is deleted (`generate` draws PS symbols).
-    `rescale_ps_symbols` becomes private; 3.2b moves it into `metrics` as a
+    `rescale_ps_symbols` becomes private; 3.2c moves it into `metrics` as a
     1.x-scale bridge until 3.8.
-- [ ] **3.2b `refactor(mapping)!: functions take a Constellation`.**
+- [x] **3.2b `refactor(core)!: remove generate_psqam`.** PS signals come from
+  `generate(Constellation.qam(M).shaped(nu=...), ...)` at the 2.0 scale (unit
+  power under the pmf). The test that asserted the 1.x scale (`E_PS < 1`) now
+  checks the 2.0 definition. Validation: MI and GMI after `resolve_symbols`
+  are identical to the 1.x path for the same seeds (64-QAM nu=0.075 at 0 dB,
+  256-QAM at 10 dB, 16-QAM at 20 dB). This comes before the signature change
+  so that `demap`/`llr` can compare with `sig.constellation` directly.
+- [ ] **3.2c `refactor(mapping)!: functions take a Constellation`.**
   - `map_bits(bits, *, constellation)`, `demap_symbols_hard(symbols, *,
     constellation=None)` and `compute_llr(symbols, *, noise_var,
     constellation=None, method="maxlog")`. The constellation is a choice that
@@ -719,11 +726,7 @@ The equalization pass (3.7) gets more commits:
     grids, detected from the points and labels (never from `family`).
   - `Constellation.gray()` leaves the value object; the 1.x bridge becomes
     the private `mapping._legacy_constellation()` for unmigrated modules.
-- [ ] **3.2c `refactor(core)!: remove generate_psqam`.** PS signals come from
-  `generate(Constellation.qam(M).shaped(nu=...), ...)` at the 2.0 scale.
-  Tests that asserted the 1.x scale (`E_PS < 1`) are rewritten against the
-  2.0 definition; this is a numerical change validated on its own (MI/GMI
-  agree with the 1.x path after resolve, as checked for CV-QKD in 2.6b).
+  - `rescale_ps_symbols` moves into `metrics` (private) until 3.8.
 
 **Equalizer safety rules (3.7):**
 

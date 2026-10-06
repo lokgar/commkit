@@ -8,7 +8,6 @@ import pytest
 from commkit import (
     filtering,
     generate,
-    generate_psqam,
     mapping,
     metrics,
     multirate,
@@ -548,10 +547,6 @@ class TestSignalWaveformsAndModulation:
                     sps=3.5,
                     symbol_rate=1e6,
                 ),
-            ),
-            (
-                generate_psqam,
-                dict(num_symbols=10, sps=3.5, symbol_rate=1e6, order=64, nu=0.3),
             ),
         ],
     )

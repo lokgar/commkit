@@ -5,7 +5,8 @@ from typing import Any
 import numpy as np
 import pytest
 
-from commkit import generate, generate_psqam, mapping, metrics, multirate
+from commkit import generate, mapping, metrics, multirate
+from commkit.filtering import RRC
 from commkit.impairments import apply_awgn
 from commkit.mapping import (
     Constellation,
@@ -104,11 +105,17 @@ class TestOptimalNu:
 
 
 class TestGeneratePSQAM:
-    """Tests for the high-level generate_psqam waveform factory."""
+    """PS-QAM signals from generate() with a shaped constellation."""
 
     def test_psqam_source_fields_set(self) -> None:
         """Signal container fields and metadata are correctly populated."""
-        sig = generate_psqam(500, sps=2, symbol_rate=32e9, order=16, nu=0.5)
+        sig = generate(
+            Constellation.qam(16).shaped(nu=0.5),
+            500,
+            symbol_rate=32e9,
+            sps=2,
+            pulse=RRC(0.35),
+        )
         assert sig.source_bits is not None
         assert sig.source_symbols is not None
         assert sig.ps_pmf is not None
@@ -118,47 +125,56 @@ class TestGeneratePSQAM:
     def test_psqam_via_entropy(self) -> None:
         """Specifying target entropy produces matching PMF."""
         target = 3.5
-        sig = generate_psqam(1000, sps=2, symbol_rate=32e9, order=16, entropy=target)
+        sig = generate(
+            Constellation.qam(16).shaped(entropy=target),
+            1000,
+            symbol_rate=32e9,
+            sps=2,
+            pulse=RRC(0.35),
+        )
         pmf = np.asarray(sig.ps_pmf)
         nz = pmf > 0
         achieved = float(-np.sum(pmf[nz] * np.log2(pmf[nz])))
         assert abs(achieved - target) < 1e-5
 
-    def test_psqam_validation_nu_entropy(self) -> None:
-        """generate_psqam requires exactly one of nu or entropy."""
-        with pytest.raises(ValueError):
-            generate_psqam(100, sps=2, symbol_rate=1e9, order=16)
-        with pytest.raises(ValueError):
-            generate_psqam(100, sps=2, symbol_rate=1e9, order=16, nu=0.3, entropy=3.5)
+    def test_psqam_reference_has_unit_average_energy(self) -> None:
+        """PS-QAM reference symbols have unit average energy (2.0 scale).
 
-    def test_psqam_lower_average_energy_than_uniform(self) -> None:
-        """PS-QAM symbols must have lower average energy than uniform constellation."""
+        The shaped points are the uniform grid scaled up by 1/sqrt(E_PS), where
+        E_PS is the pmf-weighted power of the unit-power uniform grid.
+        """
         order = 64
         nu = 0.3
-        sig = generate_psqam(
-            10_000, sps=1, symbol_rate=32e9, order=order, nu=nu, pulse_shape="none"
+        n = 10_000
+        sig = generate(
+            Constellation.qam(order).shaped(nu=nu), n, symbol_rate=32e9, rng=0
         )
+        c = sig.constellation
+        assert c.power() == pytest.approx(1.0, rel=1e-12)
+
+        # Sample mean of |s|^2 within 5 standard errors of E[|s|^2] = 1.
+        energy = np.abs(c.points) ** 2
+        std_err = np.sqrt(np.dot(c.pmf, (energy - 1.0) ** 2) / n)
         src = to_numpy(sig.source_symbols)
-        avg_energy_ps = float(np.mean(np.abs(src) ** 2))
-        assert avg_energy_ps < 1.0
+        assert abs(float(np.mean(np.abs(src) ** 2)) - 1.0) < 5 * std_err
+
+        uniform = Constellation.qam(order).points
+        e_ps = _constellation_power(uniform, maxwell_boltzmann(order, nu))
+        np.testing.assert_allclose(
+            sig.constellation.points, uniform / np.sqrt(e_ps), rtol=1e-12
+        )
 
     def test_psqam_source_bits_match_symbols(self, xp: Any, xpt: Any) -> None:
         """Hard-demapping source_symbols recovers source_bits across backends."""
-        from commkit.mapping import demap_symbols_hard
-
-        sig = generate_psqam(
-            2000, sps=1, symbol_rate=32e9, order=16, nu=0.5, pulse_shape="none"
-        )
+        sig = generate(Constellation.qam(16).shaped(nu=0.5), 2000, symbol_rate=32e9)
         src_sym = xp.asarray(sig.source_symbols)
         src_bits = xp.asarray(sig.source_bits)
-        recovered_bits = demap_symbols_hard(src_sym, "qam", 16)
+        recovered_bits = sig.constellation.demap(src_sym)
         xpt.assert_array_equal(src_bits, recovered_bits)
 
     def test_psqam_ber_computable(self, xp: Any) -> None:
         """BER is computable end-to-end with resolved symbols and bits."""
-        sig = generate_psqam(
-            5000, sps=1, symbol_rate=32e9, order=16, nu=0.5, pulse_shape="none"
-        )
+        sig = generate(Constellation.qam(16).shaped(nu=0.5), 5000, symbol_rate=32e9)
         noisy = apply_awgn(xp.asarray(sig.samples), esn0_db=20.0, sps=1)
         sig = sig.replace(samples=noisy)
         sig = multirate.resolve_symbols(sig)
@@ -191,9 +207,7 @@ class TestPSQAMMetricsAndDemapping:
         nz = pmf > 0
         h_x = float(-np.sum(pmf[nz] * np.log2(pmf[nz])))
 
-        sig = generate_psqam(
-            10_000, sps=1, symbol_rate=32e9, order=order, nu=nu, pulse_shape="none"
-        )
+        sig = generate(Constellation.qam(order).shaped(nu=nu), 10_000, symbol_rate=32e9)
         noisy = apply_awgn(sig.samples, esn0_db=25.0, sps=1)
         mi_val = metrics.mi(noisy, "qam", order, noise_var=10 ** (-25.0 / 10), pmf=pmf)
 

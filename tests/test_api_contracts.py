@@ -235,7 +235,6 @@ ROWS: list[Row] = [
     Row("commkit.core.generation.shape_pulse", DESIGN),
     # constellation and num_symbols are positional (plan 2.6).
     Row("commkit.core.generation.generate", SYNTHESIS, data=2),
-    Row("commkit.core.generation.generate_psqam", REMOVE),
     # --- equalization -------------------------------------------------------
     Row(
         "commkit.equalization.sequential._dd.lms",

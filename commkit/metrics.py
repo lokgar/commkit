@@ -712,7 +712,7 @@ def gmi(
         if sig.source_bits is None:
             raise ValueError(
                 "GMI requires source_bits. Ensure the Signal was created via a "
-                "factory (e.g. generate_qam(), generate_psqam())."
+                "factory (e.g. generate())."
             )
         mod = signal_adapter.resolve_optional("mod_scheme", modulation)
         ord_ = signal_adapter.resolve_optional("mod_order", order)

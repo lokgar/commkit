@@ -342,7 +342,7 @@ class TestPipelineSPSValidation:
         xpt.assert_array_equal(actual, expected)
 
     @pytest.mark.parametrize("sps", [0, -1, 1.5, float("nan"), float("inf")])
-    @pytest.mark.parametrize("factory", ["qam", "psqam", "preamble", "frame"])
+    @pytest.mark.parametrize("factory", ["qam", "preamble", "frame"])
     def test_generation_boundaries_validate_sps(
         self, backend_device: str, sps: Any, factory: str
     ) -> None:
@@ -351,10 +351,6 @@ class TestPipelineSPSValidation:
             if factory == "qam":
                 generation.generate(
                     Constellation.qam(4), 16, symbol_rate=1e6, sps=sps, pulse=RRC(0.35)
-                )
-            elif factory == "psqam":
-                generation.generate_psqam(
-                    16, sps=sps, symbol_rate=1e6, order=16, nu=0.3
                 )
             elif factory == "preamble":
                 Preamble(sequence_type="barker", length=7).to_signal(

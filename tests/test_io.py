@@ -12,7 +12,6 @@ from commkit import (
     SingleCarrierFrame,
     filtering,
     generate,
-    generate_psqam,
     mapping,
     metrics,
     multirate,
@@ -315,7 +314,13 @@ class TestNPZDeviceHandling:
 
     def test_psqam_pmf_roundtrip(self, tmp_path: Any, xpt: Any) -> None:
         """PS-QAM signal PMF, mod_scheme, and order round-trip."""
-        sig = generate_psqam(1000, sps=4, symbol_rate=10e9, order=64, entropy=5.0)
+        sig = generate(
+            Constellation.qam(64).shaped(entropy=5.0),
+            1000,
+            symbol_rate=10e9,
+            sps=4,
+            pulse=RRC(0.35),
+        )
         save_npz(sig, tmp_path / "psqam")
         loaded = load_npz(tmp_path / "psqam.npz", device="cpu")
         assert loaded.ps_pmf is not None

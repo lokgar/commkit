@@ -3,8 +3,8 @@ Signal generation.
 
 :func:`generate` draws random symbols from a :class:`Constellation` and
 pulse-shapes them into a :class:`Signal`, with samples normalized to unit
-symbol power (Es = 1, average sample power = 1/sps).  ``generate_psqam`` is a
-bridge for the 1.x PS-QAM scale until module pass 3.2.
+symbol power (Es = 1, average sample power = 1/sps).  PS-QAM is a shaped
+constellation: ``generate(Constellation.qam(64).shaped(nu=0.1), ...)``.
 """
 
 from typing import Any
@@ -340,56 +340,3 @@ def _shape(symbols: ArrayType, sps: int, pulse: Any) -> ArrayType:
     if res.dtype != symbols.dtype:
         res = res.astype(symbols.dtype)
     return normalize(res, mode="symbol_power", sps=sps, axis=-1)
-
-
-def generate_psqam(
-    num_symbols: int,
-    sps: int,
-    symbol_rate: float,
-    order: int,
-    *,
-    nu: float | None = None,
-    entropy: float | None = None,
-    pulse_shape: str = "rrc",
-    num_streams: int = 1,
-    seed: int | None = None,
-    filter_span: int = 10,
-    rrc_rolloff: float = 0.35,
-    rc_rolloff: float = 0.35,
-    duty_cycle: float = 1.0,
-) -> Signal:
-    """
-    PS-QAM bridge with the 1.x scale; removed in module pass 3.2.
-
-    Equivalent to ``generate(Constellation.gray("qam", order, pmf=pmf), ...)``
-    with a Maxwell-Boltzmann ``pmf`` for ``nu`` (or the ``nu`` reaching
-    ``entropy``).  The pmf is attached without rescaling, so the reference
-    symbols have average power below 1.  In 2.0 use
-    ``generate(Constellation.qam(order).shaped(nu=...), ...)``.
-    """
-    sps = require_integer_sps(sps, "generate_psqam()")
-    if (nu is None) == (entropy is None):
-        raise ValueError("Exactly one of `nu` or `entropy` must be specified.")
-    if entropy is not None:
-        nu_val, _ = mapping.optimal_nu(order, entropy)
-    else:
-        assert nu is not None
-        nu_val = float(nu)
-        if nu_val < 0:
-            raise ValueError("`nu` must be non-negative.")
-    pmf = mapping.maxwell_boltzmann(order, nu_val)
-    return generate(
-        mapping.Constellation.gray("qam", order, pmf=pmf),
-        num_symbols,
-        symbol_rate=symbol_rate,
-        sps=sps,
-        pulse=_legacy_pulse(
-            pulse_shape,
-            duty_cycle=duty_cycle,
-            filter_span=filter_span,
-            rrc_rolloff=rrc_rolloff,
-            rc_rolloff=rc_rolloff,
-        ),
-        num_channels=num_streams,
-        rng=seed,
-    )
