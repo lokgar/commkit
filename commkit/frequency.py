@@ -11,16 +11,11 @@ from collections.abc import Callable
 
 import numpy as np
 
+from ._array import as_2d, broadcast_channels, restore_1d
 from .backend import ArrayType, dispatch, to_device
 from .core._signal_adapter import adapt_signal
 from .core.signal import Signal
-from .helpers import (
-    _parabolic_peak_offset,
-    as_2d,
-    broadcast_channels,
-    linear_trend_slope,
-    restore_1d,
-)
+from .helpers import _parabolic_peak_offset, linear_trend_slope
 from .logger import logger
 
 

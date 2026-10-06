@@ -7,8 +7,8 @@ import numpy as np
 from commkit import backend, generate
 from commkit.core import Preamble, Signal, SingleCarrierFrame
 from commkit.filtering import RRC
-from commkit.helpers import normalize
 from commkit.mapping import Constellation, gray_constellation
+from commkit.math import normalize
 
 from .conversions import device_of
 

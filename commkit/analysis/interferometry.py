@@ -50,16 +50,12 @@ Estimators (see ``linewidth_dsh``):
 
 import numpy as np
 
+from .._array import as_2d, restore_1d, to_report_scalar
 from ..backend import ArrayType, dispatch, to_device
 from ..core._signal_adapter import adapt_signal
 from ..core.signal import Signal
 from ..frequency import correct_static_frequency_offset
-from ..helpers import (
-    as_2d,
-    remove_linear_trend,
-    restore_1d,
-    to_report_scalar,
-)
+from ..helpers import remove_linear_trend
 from ..logger import logger
 from ..smoothing import moving_average
 from ..spectral import welch_psd

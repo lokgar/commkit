@@ -4,15 +4,11 @@ import math
 
 import numpy as np
 
+from ..._array import as_2d, require_channels, restore_1d
 from ...backend import ArrayType, dispatch
 from ...core._signal_adapter import adapt_signal
 from ...core.signal import Signal
-from ...helpers import (
-    _cd_beta2_length,
-    as_2d,
-    require_channels,
-    restore_1d,
-)
+from ...helpers import _cd_beta2_length
 from ...logger import logger
 
 __all__ = [

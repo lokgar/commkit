@@ -2,9 +2,9 @@
 
 import numpy as np
 
+from .._array import as_2d, restore_1d, to_report_scalar
 from ..backend import ArrayType, dispatch, to_device
 from ..filtering import butterworth_sos, iir_filter
-from ..helpers import as_2d, restore_1d, to_report_scalar
 from ..smoothing import moving_average, savgol_smooth
 
 __all__ = ["frequency_drift_metrics", "separate_drift_phase_noise"]

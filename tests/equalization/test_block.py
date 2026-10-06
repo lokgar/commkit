@@ -23,8 +23,8 @@ import pytest
 from commkit.backend import to_device
 from commkit.core import Signal
 from commkit.equalization import CPRState, block_lms
-from commkit.helpers import normalize
 from commkit.mapping import gray_constellation
+from commkit.math import normalize
 from tests.common.conversions import to_numpy
 from tests.common.signals import (
     make_test_mimo_samples,

@@ -5,15 +5,11 @@ from collections.abc import Sequence
 
 import numpy as np
 
+from .._array import as_2d, broadcast_channels, restore_1d
 from ..backend import ArrayType, dispatch, to_device
 from ..core._signal_adapter import adapt_signal
 from ..core.signal import Signal
-from ..helpers import (
-    as_2d,
-    broadcast_channels,
-    remove_linear_trend,
-    restore_1d,
-)
+from ..helpers import remove_linear_trend
 from ..logger import logger
 from .corrections import _log_phase_summary, correct_cycle_slips
 

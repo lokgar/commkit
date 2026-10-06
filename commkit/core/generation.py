@@ -11,9 +11,10 @@ from typing import Any
 
 import numpy as np
 
-from .. import filtering, helpers, mapping
+from .. import filtering, mapping
 from ..backend import ArrayType, dispatch
 from ..logger import logger
+from ..math import normalize
 from ._signal_adapter import require_integer_sps
 from .signal import Reference, Signal
 
@@ -153,7 +154,7 @@ def shape_pulse(
             pulse_shape = "rect"
         else:
             logger.debug("Pulse shaping disabled, expanding symbols by sps")
-            return helpers.normalize(
+            return normalize(
                 expand(symbols, sps, axis=-1),
                 "symbol_power",
                 sps=sps,
@@ -188,7 +189,7 @@ def shape_pulse(
     if res.dtype != symbols.dtype:
         res = res.astype(symbols.dtype)
 
-    return helpers.normalize(res, "symbol_power", sps=sps, axis=-1)
+    return normalize(res, "symbol_power", sps=sps, axis=-1)
 
 
 def _legacy_pulse(
@@ -329,7 +330,7 @@ def generate(
 def _shape(symbols: ArrayType, sps: int, pulse: Any) -> ArrayType:
     """Pulse-shape ``symbols`` to unit symbol power (see :func:`shape_pulse`)."""
     if pulse is None:
-        return helpers.normalize(
+        return normalize(
             expand(symbols, sps, axis=-1), "symbol_power", sps=sps, axis=-1
         )
     taps = pulse.taps(sps) if isinstance(pulse, filtering.Pulse) else pulse
@@ -338,7 +339,7 @@ def _shape(symbols: ArrayType, sps: int, pulse: Any) -> ArrayType:
     res = sp.signal.resample_poly(symbols, sps, 1, window=h, axis=-1)
     if res.dtype != symbols.dtype:
         res = res.astype(symbols.dtype)
-    return helpers.normalize(res, "symbol_power", sps=sps, axis=-1)
+    return normalize(res, "symbol_power", sps=sps, axis=-1)
 
 
 def generate_psqam(

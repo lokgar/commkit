@@ -9,8 +9,8 @@ from typing import Any
 
 import numpy as np
 
+from ..._array import as_2d
 from ...backend import dispatch, to_device
-from ...helpers import as_2d
 from ...logger import logger
 from .._common import (
     _build_padded_samples,

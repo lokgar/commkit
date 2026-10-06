@@ -54,17 +54,17 @@ Upsampling preserves sample power for non-bandlimited signals too
 If you are passing raw noise or an unfiltered wideband array through
 these functions and need to maintain a specific power level, apply
 ``correct_power=False`` in the ``Signal`` methods and rescale manually,
-or use ``helpers.normalize`` after the fact.
+or use ``commkit.math.normalize`` after the fact.
 """
 
 from fractions import Fraction
 from typing import Any
 
-from . import helpers
 from .backend import ArrayType, dispatch
 from .core._signal_adapter import adapt_signal, require_integer_sps
 from .core.signal import Signal
 from .logger import logger
+from .math import normalize as _normalize
 
 
 def decimate_to_symbol_rate(
@@ -123,7 +123,7 @@ def decimate_to_symbol_rate(
             result = _decimate_to_symbol_rate_array(samples, sps_int, offset, False, -1)
             meta["sampling_rate"] = sig.symbol_rate
         if do_norm:
-            result = helpers.normalize(result, "average_power", axis=-1)
+            result = _normalize(result, "average_power", axis=-1)
         return signal_adapter.wrap_samples(result, **meta)
 
     return _decimate_to_symbol_rate_array(samples, sps_int, offset, normalize, axis)
@@ -145,7 +145,7 @@ def _decimate_to_symbol_rate_array(
     slices[axis] = slice(offset, None, sps)
     out = arr[tuple(slices)]
     if normalize:
-        out = helpers.normalize(out, "average_power", axis=axis)
+        out = _normalize(out, "average_power", axis=axis)
     return out
 
 

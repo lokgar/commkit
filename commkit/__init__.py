@@ -45,6 +45,7 @@ _SUBMODULES = frozenset(
         "frequency",
         "impairments",
         "mapping",
+        "math",
         "metrics",
         "multirate",
         "plotting",

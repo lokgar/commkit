@@ -2,8 +2,8 @@
 
 import numpy as np
 
+from .._array import as_2d, broadcast_channels, restore_1d, to_report_scalar
 from ..backend import ArrayType, dispatch, to_device
-from ..helpers import as_2d, broadcast_channels, restore_1d, to_report_scalar
 from ..spectral import welch_psd
 from ._common import (
     _BETA_SLOPE,
@@ -153,7 +153,7 @@ def linewidth_increment(
         sigma_n2 = xp.asarray(sigma_host)
 
         if ref_symbols is not None and bool(np.any(sigma_host)):
-            from ..helpers import normalize
+            from ..math import normalize
 
             d2 = broadcast_channels(xp.asarray(ref_symbols), c, xp, name="ref_symbols")
             d2 = d2[:, :n_full][:, sl]

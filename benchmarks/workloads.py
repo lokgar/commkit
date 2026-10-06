@@ -8,9 +8,9 @@ benchmark parametrization, e.g. ``bps/128cross/N1e6/C2``.
 
 import numpy as np
 
-from commkit.helpers import normalize
 from commkit.impairments import apply_awgn, apply_phase_noise
 from commkit.mapping import gray_constellation, map_bits
+from commkit.math import normalize
 
 FS = 1e6  # nominal symbol rate / sampling rate at 1 SPS [Hz]
 

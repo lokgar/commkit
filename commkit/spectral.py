@@ -11,10 +11,10 @@ from typing import Any, cast
 
 import numpy as np
 
+from ._array import as_2d, restore_1d
 from .backend import ArrayType, dispatch
 from .core._signal_adapter import adapt_signal
 from .core.signal import Signal
-from .helpers import as_2d, restore_1d
 from .logger import logger
 
 

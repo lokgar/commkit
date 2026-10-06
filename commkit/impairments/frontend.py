@@ -6,11 +6,12 @@ device model (the widely-linear I/Q mixing) and are read as a pair.
 
 import math
 
+from .._array import as_2d, restore_1d
 from ..backend import ArrayType, dispatch
 from ..core._signal_adapter import adapt_signal
 from ..core.signal import Signal
-from ..helpers import as_2d, db_to_linear, restore_1d
 from ..logger import logger
+from ..math import db_to_linear
 
 __all__ = [
     "apply_iq_imbalance",

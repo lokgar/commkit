@@ -4,9 +4,9 @@ from __future__ import annotations
 
 import numpy as np
 
+from .._array import restore_1d
 from ..backend import dispatch, to_device
 from ..core._signal_adapter import require_integer_sps
-from ..helpers import restore_1d
 from ..logger import logger
 from .result import EqualizerResult
 
@@ -66,12 +66,12 @@ def _normalize_inputs(samples, training_symbols, sps, input_norm_factor=None):
             nf_dev = xp_loc.asarray(nf_arr)[..., None]  # (C, 1) on same device
             samples = samples / nf_dev
         if training_symbols is not None:
-            from commkit.helpers import normalize as c_normalize
+            from commkit.math import normalize as c_normalize
 
             training_symbols = c_normalize(training_symbols, "average_power", axis=-1)
         return samples, training_symbols, input_norm_factor
 
-    from commkit.helpers import rms as _rms
+    from commkit.math import rms as _rms
 
     ref_samples = samples
 
@@ -85,7 +85,7 @@ def _normalize_inputs(samples, training_symbols, sps, input_norm_factor=None):
         samples = samples / norm_vec[..., None]
 
     if training_symbols is not None:
-        from commkit.helpers import normalize as c_normalize
+        from commkit.math import normalize as c_normalize
 
         # Training symbols are at 1 sps; "average_power" == "symbol_power" at sps=1.
         training_symbols = c_normalize(training_symbols, "average_power", axis=-1)

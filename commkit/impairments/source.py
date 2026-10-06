@@ -4,10 +4,10 @@ import math
 
 import numpy as np
 
+from .._array import as_2d, restore_1d
 from ..backend import ArrayType, dispatch
 from ..core._signal_adapter import adapt_signal
 from ..core.signal import Signal
-from ..helpers import as_2d, restore_1d
 from ..logger import logger
 
 __all__ = ["apply_phase_noise", "generate_phase_noise"]
@@ -118,7 +118,7 @@ def generate_phase_noise(
     -----
     The trajectory is always generated with NumPy's ``default_rng`` and then
     transferred, so a given seed produces the identical trajectory on CPU
-    and GPU (same convention as :func:`~commkit.helpers.generate_bits`).
+    and GPU (same convention as :func:`~commkit.generate`).
     """
     logger.info(
         "Generating phase noise (linewidth=%.3g Hz, flicker=%.3g Hz², %s stream(s)).",

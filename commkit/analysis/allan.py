@@ -2,8 +2,8 @@
 
 import numpy as np
 
+from .._array import as_2d, restore_1d
 from ..backend import ArrayType, dispatch, to_device
-from ..helpers import as_2d, restore_1d
 
 __all__ = ["allan_deviation"]
 

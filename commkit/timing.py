@@ -12,14 +12,11 @@ from typing import Union, overload
 
 import numpy as np
 
+from ._array import as_2d, restore_1d
 from .backend import ArrayType, dispatch, to_device
 from .core import Preamble, Signal
 from .core._signal_adapter import adapt_signal, require_integer_sps
-from .helpers import (
-    _parabolic_peak_offset,
-    as_2d,
-    restore_1d,
-)
+from .helpers import _parabolic_peak_offset
 from .logger import logger
 
 # Window length for DFT-upsampling in estimate_fractional_delay()

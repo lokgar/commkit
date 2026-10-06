@@ -10,6 +10,7 @@ import numpy as np
 from .. import helpers
 from ..backend import ArrayType
 from ..mapping import Constellation
+from ..math import db_to_linear, normalize
 from . import generation
 from ._signal_adapter import require_integer_sps
 from .signal import Signal
@@ -518,7 +519,7 @@ class SingleCarrierFrame:
                 assert pilot_symbols is not None
                 # Apply pilot boosting/gain (dB to linear)
                 if self.pilot_gain_db != 0.0:
-                    pilot_symbols = pilot_symbols * helpers.db_to_linear(
+                    pilot_symbols = pilot_symbols * db_to_linear(
                         self.pilot_gain_db, power=False
                     )
 
@@ -532,7 +533,7 @@ class SingleCarrierFrame:
                 assert pilot_symbols is not None
                 # Apply pilot boosting/gain (dB to linear)
                 if self.pilot_gain_db != 0.0:
-                    pilot_symbols = pilot_symbols * helpers.db_to_linear(
+                    pilot_symbols = pilot_symbols * db_to_linear(
                         self.pilot_gain_db, power=False
                     )
 
@@ -725,7 +726,7 @@ class SingleCarrierFrame:
             duty_cycle=duty_cycle,
         )
 
-        # Normalise body per-channel via helpers.normalize's "dac_peak" mode:
+        # Normalise body per-channel via normalize's "dac_peak" mode:
         # max(peak_|I|, peak_|Q|) - a single scale factor that brings the
         # dominant component to 1.0 while preserving the I/Q ratio.
         # Complex-envelope peak normalisation (used in the DSP chain) divides
@@ -734,7 +735,7 @@ class SingleCarrierFrame:
         # per-section (body and preamble separately) so each segment uses
         # the full DAC range regardless of modulation type or constellation
         # phase geometry.
-        body_samples = helpers.normalize(body_samples, "dac_peak", axis=-1)
+        body_samples = normalize(body_samples, "dac_peak", axis=-1)
 
         # 2. Shape Preamble (if present)
         if self.preamble is not None:
@@ -755,7 +756,7 @@ class SingleCarrierFrame:
             # (L*sps,) for SISO  or  (num_streams, L*sps) for MIMO - shape driven by preamble.num_streams
 
             # I/Q peak normalisation - axis=-1 works for both 1-D and 2-D
-            preamble_samples = helpers.normalize(preamble_samples, "dac_peak", axis=-1)
+            preamble_samples = normalize(preamble_samples, "dac_peak", axis=-1)
 
             # Concatenate Preamble + Body
             samples = xp.concatenate([preamble_samples, body_samples], axis=-1)
@@ -786,7 +787,7 @@ class SingleCarrierFrame:
         # i.e. average sample power = 1/sps.  Pilot/payload power ratios within
         # the body are preserved because every section's samples are scaled by the
         # same factor.  Guard zeros remain zero after scaling.
-        samples = helpers.normalize(samples, "symbol_power", sps=sps, axis=-1)
+        samples = normalize(samples, "symbol_power", sps=sps, axis=-1)
 
         # The payload modulation lives on the frame; the PS pmf is reachable
         # through the Signal's ps_pmf bridge property (frame.payload_ps_pmf).

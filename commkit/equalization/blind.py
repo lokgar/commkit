@@ -6,12 +6,10 @@ from typing import Any
 
 import numpy as np
 
+from .._array import broadcast_channels
 from ..backend import ArrayType
 from ..core._signal_adapter import adapt_signal, require_integer_sps
 from ..core.signal import Signal
-from ..helpers import (
-    broadcast_channels,
-)
 from ._block import _block_fdaf_blind
 from ._common import _godard_radius, _rde_ring_radii
 from .result import EqualizerResult

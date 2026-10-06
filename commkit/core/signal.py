@@ -19,7 +19,7 @@ from typing import TYPE_CHECKING, Any
 
 import numpy as np
 
-from .. import helpers
+from .._array import validate_array
 from ..backend import (
     ArrayType,
     get_array_module,
@@ -51,14 +51,14 @@ class Reference:
     bits: Any | None = None
 
     def __post_init__(self) -> None:
-        symbols = helpers.validate_array(self.symbols, name="symbols")
+        symbols = validate_array(self.symbols, name="symbols")
         if symbols.ndim not in (1, 2):
             raise ValueError(
                 f"symbols must have shape (N,) or (C, N), got {symbols.shape}."
             )
         object.__setattr__(self, "symbols", symbols)
         if self.bits is not None:
-            bits = helpers.validate_array(self.bits, name="bits")
+            bits = validate_array(self.bits, name="bits")
             if bits.ndim != symbols.ndim or bits.shape[:-1] != symbols.shape[:-1]:
                 raise ValueError(
                     f"bits shape {bits.shape} does not match symbols shape "
@@ -173,22 +173,22 @@ class Signal:
                 repr(self.constellation) if self.constellation else "None",
             ),
             ("Pulse", repr(self.pulse) if self.pulse else "None"),
-            ("Symbol rate", helpers.format_si(self.symbol_rate, "Baud")),
+            ("Symbol rate", _format_si(self.symbol_rate, "Baud")),
         ]
         if self.constellation is not None:
             rows.append(
                 (
                     "Bit rate",
-                    helpers.format_si(
+                    _format_si(
                         self.symbol_rate * self.constellation.bits_per_symbol, "bps"
                     ),
                 )
             )
         rows += [
-            ("Sampling rate", helpers.format_si(self.sampling_rate, "Hz")),
+            ("Sampling rate", _format_si(self.sampling_rate, "Hz")),
             ("Samples per symbol", f"{self.sps:.2f}"),
-            ("Duration", helpers.format_si(self.duration, "s")),
-            ("Center frequency", helpers.format_si(self.center_frequency, "Hz")),
+            ("Duration", _format_si(self.duration, "s")),
+            ("Center frequency", _format_si(self.center_frequency, "Hz")),
             ("Backend", self.backend.upper()),
             (
                 "Configuration",
@@ -429,7 +429,7 @@ _FIELD_NAMES = frozenset(f.name for f in dataclasses.fields(Signal))
 
 def _validate_samples(v: Any) -> Any:
     """Coerce samples to a NumPy/CuPy array with time on the last axis."""
-    arr = helpers.validate_array(v, name="samples")
+    arr = validate_array(v, name="samples")
     if arr.ndim > 2:
         raise ValueError(
             f"Samples array has {arr.ndim} dimensions. "
@@ -490,3 +490,57 @@ def _validate_field(name: str, value: Any) -> Any:
                 f"reference must be a Reference, got {type(value).__name__}."
             )
     return value
+
+
+# -----------------------------------------------------------------------------
+# Display
+# -----------------------------------------------------------------------------
+
+
+def _format_si(value: float | None, unit: str = "Hz") -> str:
+    """
+    Formats a numeric value into a human-readable string with SI prefixes.
+
+    Automatically selects the appropriate SI prefix (e.g., k, M, G, m, u, n)
+    based on the magnitude of the value. Supports a wide range from
+    femto (10^-15) to Peta (10^15).
+
+    Parameters
+    ----------
+    value : float or None
+        The numeric value to format. If `None`, returns "None".
+    unit : str, default "Hz"
+        The unit suffix to append (e.g., 'Hz', 'Baud', 's', 'W').
+
+    Returns
+    -------
+    str
+        The formatted string (e.g., '10.00 MHz', '50.00 ns').
+    """
+    if value is None:
+        return "None"
+
+    if abs(value) == 0:
+        return f"0.00 {unit}"
+
+    # Standard SI prefixes
+    si_units = {
+        -5: "f",
+        -4: "p",
+        -3: "n",
+        -2: "µ",
+        -1: "m",
+        0: "",
+        1: "k",
+        2: "M",
+        3: "G",
+        4: "T",
+        5: "P",
+    }
+
+    rank = int(np.floor(np.log10(abs(value)) / 3))
+    # clamp to supported range
+    rank = max(min(si_units.keys()), min(rank, max(si_units.keys())))
+
+    scaled = value / (1000.0**rank)
+    return f"{scaled:.2f} {si_units[rank]}{unit}"

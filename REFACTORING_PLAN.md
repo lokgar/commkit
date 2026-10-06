@@ -676,6 +676,23 @@ The equalization pass (3.7) gets more commits:
 | 3.9 | `analysis` | Typed result dataclasses instead of dicts; trend fitting lives here | S |
 | 3.10 | `plotting` | Consumes the new results and Signals; recomputes through public functions; no numerical module imports matplotlib (tested) | M |
 
+**Pass 3.1 commits:**
+
+- [x] **3.1a `refactor: split helpers into _array and math`.** A pure move.
+  - `commkit/_array.py` (private): `as_2d`, `restore_1d`,
+    `broadcast_channels`, `require_channels`, `validate_array`,
+    `to_report_scalar`. It imports only `backend`.
+  - `commkit.math` (public): `rms`, `normalize`, `db_to_linear`,
+    `linear_to_db`.
+  - `format_si` becomes the private `_format_si` in `core/signal.py`, its only
+    user (a separate display module would be a one-function file).
+  - `helpers.py` keeps only domain helpers that wait for their owner:
+    `cross_correlate_fft`, `_parabolic_peak_offset`, `zc_mimo_root` (3.5),
+    `_cd_beta2_length` (3.3), PLL gains (3.6), linear trend (3.9).
+- [ ] **3.1b `refactor(math)!: 2.0 signatures`.** Keyword-only parameters
+  after the data, and strict mypy for `backend`, `logger`, `_array` and
+  `math`.
+
 **Equalizer safety rules (3.7):**
 
 - Keep the dtype rules: complex128 accumulation in LMS/CMA, and float64 for all

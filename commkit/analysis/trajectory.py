@@ -5,10 +5,10 @@ data-aided unwrapped phase that every downstream estimator (drift, linewidth,
 Allan deviation) consumes.
 """
 
+from .._array import as_2d, broadcast_channels, restore_1d
 from ..backend import ArrayType, dispatch
 from ..core._signal_adapter import adapt_signal
 from ..core.signal import Signal
-from ..helpers import as_2d, broadcast_channels, restore_1d
 from ..recovery.corrections import resolve_channel_permutation
 
 __all__ = ["carrier_phase_trajectory"]

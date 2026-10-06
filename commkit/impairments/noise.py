@@ -3,8 +3,8 @@
 from ..backend import ArrayType, dispatch
 from ..core._signal_adapter import adapt_signal
 from ..core.signal import Signal
-from ..helpers import db_to_linear
 from ..logger import logger
+from ..math import db_to_linear
 
 __all__ = ["apply_awgn"]
 

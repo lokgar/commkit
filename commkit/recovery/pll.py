@@ -2,10 +2,10 @@
 
 import numpy as np
 
+from .._array import as_2d, restore_1d
 from ..backend import ArrayType, dispatch, to_device
 from ..core._signal_adapter import adapt_signal
 from ..core.signal import Signal
-from ..helpers import as_2d, restore_1d
 from .corrections import _log_phase_summary, correct_cycle_slips
 
 _NUMBA_PLL: dict = {}
@@ -334,8 +334,9 @@ def recover_carrier_phase_pll(
     A global M-fold phase ambiguity always remains - resolve via a pilot or
     preamble reference after CPR.
     """
-    from ..helpers import normalize, resolve_pll_gains
+    from ..helpers import resolve_pll_gains
     from ..mapping import gray_constellation
+    from ..math import normalize
 
     signal_adapter = adapt_signal(symbols, function_name="recover_carrier_phase_pll()")
     symbols = signal_adapter.array

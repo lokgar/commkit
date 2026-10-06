@@ -4,11 +4,11 @@ from __future__ import annotations
 
 import numpy as np
 
+from .._array import as_2d, restore_1d
 from ..backend import ArrayType, dispatch
 from ..core._signal_adapter import adapt_signal, require_integer_sps
 from ..core.signal import Signal
 from ..filtering import _ols_backward, _ols_forward
-from ..helpers import as_2d, restore_1d
 from ..logger import logger
 from ._common import _build_padded_samples, _normalize_inputs
 

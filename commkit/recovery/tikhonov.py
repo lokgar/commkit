@@ -2,11 +2,11 @@
 
 import numpy as np
 
+from .._array import as_2d, restore_1d
 from ..backend import ArrayType, dispatch, to_device
 from ..core._signal_adapter import adapt_signal
 from ..core.signal import Signal
 from ..frequency import _modulation_power_m
-from ..helpers import as_2d, restore_1d
 from ..logger import logger
 from ._common import _vv_block_phase
 from .corrections import _log_phase_summary, correct_cycle_slips

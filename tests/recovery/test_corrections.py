@@ -121,7 +121,7 @@ class TestResolvePhaseAmbiguity:
 
     def test_best_rotation_is_zero(self, xp):
         """Already-aligned symbols: k=0 chosen and SER is minimal."""
-        from commkit.helpers import normalize
+        from commkit.math import normalize
         from commkit.metrics import ser
 
         sig = make_test_qam_signal(
@@ -144,7 +144,7 @@ class TestResolvePhaseAmbiguity:
 
     def test_corrects_pi_half_rotation(self, xp):
         """Symbols rotated by pi/2 are corrected; post-resolution SER is low."""
-        from commkit.helpers import normalize
+        from commkit.math import normalize
         from commkit.metrics import ser
 
         sig = make_test_qam_signal(
@@ -158,7 +158,7 @@ class TestResolvePhaseAmbiguity:
 
     def test_mimo_independent_per_channel(self, xp):
         """MIMO: channels with different rotations are each independently corrected."""
-        from commkit.helpers import normalize
+        from commkit.math import normalize
         from commkit.metrics import ser
 
         mimo, ref_mimo = make_test_mimo_samples(
@@ -191,7 +191,7 @@ class TestResolvePhaseAmbiguity:
 
     def test_signal_method_in_place(self, xp):
         """Signal.resolve_phase_ambiguity() updates resolved_symbols in place."""
-        from commkit.helpers import normalize
+        from commkit.math import normalize
         from commkit.metrics import ser
 
         sig = generate(

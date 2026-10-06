@@ -6,13 +6,11 @@ from typing import Any
 
 import numpy as np
 
+from ..._array import restore_1d
 from ...backend import ArrayType, dispatch, to_device
 from ...core._signal_adapter import adapt_signal, require_integer_sps
 from ...core.signal import Signal
-from ...helpers import (
-    resolve_pll_gains,
-    restore_1d,
-)
+from ...helpers import resolve_pll_gains
 from ...logger import logger
 from ...mapping.gray import square_qam_slicer_params
 from .._common import (

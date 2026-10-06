@@ -12,16 +12,13 @@ from dataclasses import dataclass
 import numpy as np
 import scipy
 
+from ._array import as_2d, restore_1d
 from .backend import ArrayType, dispatch, to_device
 from .core._signal_adapter import adapt_signal, require_integer_sps
 from .core.signal import Signal
-from .helpers import (
-    _cd_beta2_length,
-    as_2d,
-    normalize,
-    restore_1d,
-)
+from .helpers import _cd_beta2_length
 from .logger import logger
+from .math import normalize
 
 # -----------------------------------------------------------------------------
 # FILTER DESIGN - TAP GENERATORS (array-only)

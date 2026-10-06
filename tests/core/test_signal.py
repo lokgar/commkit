@@ -170,6 +170,16 @@ class TestSignalProperties:
         assert html.startswith("<table>")
         assert "<b>Sampling rate</b>" in html
 
+    def test_format_si(self):
+        """SI-prefix formatting used by the summary, for common magnitudes."""
+        from commkit.core.signal import _format_si
+
+        assert _format_si(None) == "None"
+        assert _format_si(0) == "0.00 Hz"
+        assert "1.00 MHz" in _format_si(1e6, "Hz")
+        assert "500.00 mV" in _format_si(0.5, "V")
+        assert "Hz" in _format_si(100)
+
     def test_signal_wrappers(self, xp):
         """
         Test the wrapper methods on Signal to ensure they call the underlying modules.

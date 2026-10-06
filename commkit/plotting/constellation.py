@@ -5,10 +5,10 @@ from typing import Any
 import matplotlib.pyplot as plt
 import numpy as np
 
-from .. import helpers
 from ..backend import dispatch, to_device
 from ..core._signal_adapter import adapt_signal
 from ..logger import logger
+from ..math import rms
 from ..smoothing import smooth_density_2d
 from .theme import (
     _create_subplot_grid,
@@ -407,7 +407,7 @@ def _plot_constellation_array(
     # Compute 2D histogram
     # Determine range based on RMS (robust to noise outliers)
     # Using np.sqrt(np.mean(|I|² + |Q|²)) is equivalent to rms(complex_signal)
-    signal_rms = float(helpers.rms(i_data + 1j * q_data))
+    signal_rms = float(rms(i_data + 1j * q_data))
     # Use ~3x RMS as limit (covers most constellation points + noise spread)
     limit = signal_rms * 2.0
     if limit == 0:
@@ -463,9 +463,9 @@ def _plot_constellation_array(
                 # sit after shape_pulse normalises to E_s = 1.
                 if pmf is not None:
                     e_ps = constellation_power(const, pmf)
-                    const_rms = float(np.sqrt(e_ps)) if e_ps > 0 else helpers.rms(const)
+                    const_rms = float(np.sqrt(e_ps)) if e_ps > 0 else rms(const)
                 else:
-                    const_rms = helpers.rms(const)
+                    const_rms = rms(const)
                 if const_rms > 0:
                     scale_factor = signal_rms / const_rms
                     const = const * scale_factor

@@ -44,7 +44,7 @@ def _plot_eye_traces(
     samples, xp, _ = dispatch(samples)
 
     # Normalize to max amplitude 1.0
-    from ..helpers import normalize
+    from ..math import normalize
 
     samples = normalize(samples, mode="peak")
 
