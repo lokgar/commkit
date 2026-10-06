@@ -141,7 +141,7 @@ on construction, and plain NumPy inside, so commax can produce them.
   accept **objects only, no strings**. It replaces `modulation` / `order` /
   `unipolar` / `pmf` across all 24 modules.
 - **Pulses** (`commkit.filtering`, re-exported): `RRC(rolloff, span)`,
-  `RC(...)`, `Gaussian(...)`, `Rect(duty_cycle, rise_time)`, `SmoothRect(...)`,
+  `RC(...)`, `Gaussian(fwhm, span)`, `Rect(duty_cycle, rise_time)`, `SmoothRect(...)`,
   each with `.taps(sps)`. Wherever a pulse is accepted, a raw taps array is
   accepted too.
 - **Algorithm objects** (D16, §2.4): one frozen dataclass per estimation
@@ -553,10 +553,13 @@ sites. The order avoids conflicts, because 1.4-1.6 all edit
   - `.qam/.psk/.pam` factories and `.shaped(nu=...|entropy=...)`.
   - `map` / `demap` / `llr` work from points and labels, so arbitrary
     constellations work. `.gray()` stays as a bridge until 3.2.
-- [ ] **2.2 `feat(filtering): pulse value objects`.** This is additive.
+- [x] **2.2 `feat(filtering): pulse value objects`.** This is additive.
   - `RRC`, `RC`, `Gaussian`, `Rect` and `SmoothRect` with `.taps(sps)`. They
     delegate to the existing `*_taps` functions, and tests compare them to
     those functions.
+  - Definition tests: RC zero ISI, RRC matched pair, Gaussian width equals
+    `fwhm` (the field replaces the old `duty_cycle` name), SmoothRect 10-90%
+    rise time. Spanned pulses default to `span=10`, the 1.x Signal default.
 - [ ] **2.3 `refactor(core)!: Signal, Preamble and SingleCarrierFrame become frozen dataclasses`.**
   - A container swap with the *same fields*; Pydantic is removed.
   - Validation moves to `__post_init__`, and `sig.replace(**changes)`

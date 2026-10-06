@@ -7,6 +7,8 @@ and specialized pulse-shaping filters, with high-performance execution on
 both CPU and GPU backends.
 """
 
+from dataclasses import dataclass
+
 import numpy as np
 import scipy
 
@@ -359,6 +361,168 @@ def rc_taps(sps: float, rolloff: float = 0.35, span: int = 8) -> ArrayType:
     h = np.where(idx_general, res, h)
 
     return normalize(h, "unit_energy")
+
+
+# -----------------------------------------------------------------------------
+# PULSE VALUE OBJECTS
+# -----------------------------------------------------------------------------
+# A pulse describes a transmit pulse shape independently of the sampling rate;
+# ``pulse.taps(sps)`` builds the taps.  Wherever a pulse is accepted, a raw
+# taps array is accepted too.
+
+
+class Pulse:
+    """Base class of the pulse value objects (``RRC``, ``RC``, ``Gaussian``,
+    ``Rect``, ``SmoothRect``)."""
+
+    def taps(self, sps: float) -> np.ndarray:
+        """Pulse taps at ``sps`` samples per symbol (host ``float64``)."""
+        raise NotImplementedError
+
+
+def _check_span(span: int) -> None:
+    if not isinstance(span, int | np.integer) or span < 1:
+        raise ValueError(f"span must be a positive integer, got {span!r}.")
+
+
+def _check_rolloff(rolloff: float) -> None:
+    if not 0.0 <= rolloff <= 1.0:
+        raise ValueError(f"rolloff must be in [0, 1], got {rolloff}.")
+
+
+def _check_duty_cycle(duty_cycle: float) -> None:
+    if not 0.0 < duty_cycle <= 1.0:
+        raise ValueError(f"duty_cycle must be in (0, 1], got {duty_cycle}.")
+
+
+@dataclass(frozen=True)
+class RRC(Pulse):
+    """Root-raised-cosine pulse.
+
+    Parameters
+    ----------
+    rolloff : float
+        Roll-off factor in ``[0, 1]``.
+    span : int, default 10
+        Length in symbols; the taps have ``span * sps`` samples, rounded up to
+        an odd count.  Unit energy.
+    """
+
+    rolloff: float
+    span: int = 10
+
+    def __post_init__(self) -> None:
+        _check_rolloff(self.rolloff)
+        _check_span(self.span)
+
+    def taps(self, sps: float) -> np.ndarray:
+        return rrc_taps(sps, rolloff=self.rolloff, span=self.span)
+
+
+@dataclass(frozen=True)
+class RC(Pulse):
+    """Raised-cosine (Nyquist) pulse; zero ISI at the symbol instants.
+
+    Parameters are those of :class:`RRC`.
+    """
+
+    rolloff: float
+    span: int = 10
+
+    def __post_init__(self) -> None:
+        _check_rolloff(self.rolloff)
+        _check_span(self.span)
+
+    def taps(self, sps: float) -> np.ndarray:
+        return np.asarray(rc_taps(sps, rolloff=self.rolloff, span=self.span))
+
+
+@dataclass(frozen=True)
+class Gaussian(Pulse):
+    """Gaussian pulse.
+
+    Parameters
+    ----------
+    fwhm : float, default 1.0
+        Full width at half maximum in symbol periods.  The bandwidth-time
+        product is ``BT = sqrt(2) ln(2) / (pi fwhm)``.
+    span : int, default 10
+        Length in symbols.  Unit energy.
+    """
+
+    fwhm: float = 1.0
+    span: int = 10
+
+    def __post_init__(self) -> None:
+        if not self.fwhm > 0:
+            raise ValueError(f"fwhm must be > 0, got {self.fwhm}.")
+        _check_span(self.span)
+
+    def taps(self, sps: float) -> np.ndarray:
+        return gaussian_taps(sps, span=self.span, duty_cycle=self.fwhm)
+
+
+@dataclass(frozen=True)
+class Rect(Pulse):
+    """Rectangular or trapezoidal pulse (integer ``sps`` only).
+
+    Parameters
+    ----------
+    duty_cycle : float, default 1.0
+        Total width in symbol periods, in ``(0, 1]``: 1.0 is NRZ, 0.5 is RZ.
+    rise_time : float, default 0.0
+        Length of each linear edge in symbol periods, at most
+        ``duty_cycle / 2``.  The taps are not normalized (unit height).
+    """
+
+    duty_cycle: float = 1.0
+    rise_time: float = 0.0
+
+    def __post_init__(self) -> None:
+        _check_duty_cycle(self.duty_cycle)
+        if not 0.0 <= self.rise_time <= self.duty_cycle / 2:
+            raise ValueError(
+                f"rise_time must be in [0, duty_cycle / 2], got {self.rise_time}."
+            )
+
+    def taps(self, sps: float) -> np.ndarray:
+        return rect_taps(sps, duty_cycle=self.duty_cycle, rise_time=self.rise_time)  # type: ignore[arg-type]
+
+
+@dataclass(frozen=True)
+class SmoothRect(Pulse):
+    """Rectangle convolved with a Gaussian (integer ``sps`` only).
+
+    Parameters
+    ----------
+    rise_time : float, default 0.22
+        10%-90% edge time in symbol periods.
+    duty_cycle : float, default 1.0
+        Width of the underlying rectangle in symbol periods: 1.0 is NRZ,
+        0.5 is RZ.
+    span : int, default 10
+        Length in symbols.  Unit energy.
+    """
+
+    rise_time: float = 0.22
+    duty_cycle: float = 1.0
+    span: int = 10
+
+    def __post_init__(self) -> None:
+        if not self.rise_time > 0:
+            raise ValueError(f"rise_time must be > 0, got {self.rise_time}.")
+        _check_duty_cycle(self.duty_cycle)
+        _check_span(self.span)
+
+    def taps(self, sps: float) -> np.ndarray:
+        return np.asarray(
+            smoothrect_taps(
+                sps,  # type: ignore[arg-type]
+                span=self.span,
+                rise_time=self.rise_time,
+                duty_cycle=self.duty_cycle,
+            )
+        )
 
 
 def fir_taps(

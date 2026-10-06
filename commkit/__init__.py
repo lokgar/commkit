@@ -58,18 +58,36 @@ _SUBMODULES = frozenset(
 )
 
 
+# Value objects re-exported at top level from modules that are loaded lazily.
+_LAZY_NAMES = {
+    "RRC": "filtering",
+    "RC": "filtering",
+    "Gaussian": "filtering",
+    "Rect": "filtering",
+    "SmoothRect": "filtering",
+}
+
+
 def __getattr__(name: str) -> Any:
     if name in _SUBMODULES:
         return importlib.import_module(f".{name}", __name__)
+    if name in _LAZY_NAMES:
+        module = importlib.import_module(f".{_LAZY_NAMES[name]}", __name__)
+        return getattr(module, name)
     raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
 
 
 def __dir__() -> list[str]:
-    return sorted(set(globals()) | _SUBMODULES)
+    return sorted(set(globals()) | _SUBMODULES | set(_LAZY_NAMES))
 
 
 __all__ = [
     "Constellation",
+    "Gaussian",
+    "RC",
+    "RRC",
+    "Rect",
+    "SmoothRect",
     "Preamble",
     "Signal",
     "SingleCarrierFrame",

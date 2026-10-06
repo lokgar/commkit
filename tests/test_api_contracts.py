@@ -317,6 +317,12 @@ ROWS: list[Row] = [
     Row("commkit.equalization.result.CPRState", VALUE),
     Row("commkit.equalization.result.EqualizerResult", VALUE),
     # --- filtering ----------------------------------------------------------
+    Row("commkit.filtering.Gaussian", VALUE),
+    Row("commkit.filtering.Pulse", VALUE),
+    Row("commkit.filtering.RC", VALUE),
+    Row("commkit.filtering.RRC", VALUE),
+    Row("commkit.filtering.Rect", VALUE),
+    Row("commkit.filtering.SmoothRect", VALUE),
     Row("commkit.filtering.bessel_sos", DESIGN, data=0),
     Row("commkit.filtering.butterworth_sos", DESIGN, data=0),
     Row("commkit.filtering.chebyshev1_sos", DESIGN, data=0),
