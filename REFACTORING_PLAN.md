@@ -1007,9 +1007,15 @@ The equalization pass (3.7) gets more commits:
   blind engines used pilot references as given (scaled for PS). Both now
   take known symbols as given, on the scale of the unit-power
   constellation.
-- [ ] **3.7h `test(equalization): oracle for the inline CPR kernels`.**
+- [x] **3.7h `test(equalization): oracle for the inline CPR kernels`.**
   Plain-Python LMS and RLS with PLL and BPS in the loop, compared with the
-  Numba kernels: outputs, weights, phase and CPR state.
+  Numba kernels: outputs, errors, final weights and phase trajectories, SISO
+  and MIMO, joint and per channel, with and without cycle-slip repair. (The
+  CPR state itself is covered by the exact chunking tests of 3.7e.) The
+  oracle's BPS candidates are the kernel's float32 grid: an argmin jump of
+  exactly B/2 candidates is a 4x difference of exactly ±π, which the causal
+  unwrap resolves by rounding, so float64 angles would pick the other
+  branch.
 
 **Equalizer safety rules (3.7):**
 

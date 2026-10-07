@@ -11,8 +11,8 @@ documented definition rather than calling library helpers.
 Conventions shared with the library's documented contract:
 
 - Input normalization: each channel is divided by ``rms(x_ch) * sqrt(sps)`` so
-  the symbol-rate power is 1.  Training symbols are scaled to unit average power
-  per channel.
+  the symbol-rate power is 1.  Training symbols are used as given, on the
+  scale of the unit-power constellation.
 - Regressor for output symbol ``n``: samples ``[n*sps, n*sps + T)`` of the input
   padded with ``min(T // 2, pad_total)`` leading zeros, where
   ``pad_total = n_sym*sps - n_samples + T - 1``.
@@ -150,6 +150,179 @@ def rls_reference(
     return {
         "y": y_out[:, :n_halt],
         "e": e_out[:, :n_halt],
+        "w": w.reshape(num_ch, num_ch, num_taps),
+    }
+
+
+class _InlineCpr:
+    """Carrier phase recovery inside the equalizer loop, per symbol.
+
+    ``estimate(y_raw)`` returns the phase applied to symbol ``n`` (state
+    before its update); ``update(y, d)`` runs the PLL after the decision.
+
+    - PLL: ``phi`` is the integrator; ``e = Im(y conj(d))`` (averaged over
+      channels when joint); ``phi += mu e + nu``, ``nu += beta e``.
+    - BPS: the min-distance metric of each candidate ``theta_k = k pi/(2B)``
+      (float32)
+      is summed over a causal window of the last ``K`` symbols (and over
+      channels when joint); the argmin is unwrapped causally in the 4x
+      domain.
+    - Cycle slips: the phase is predicted from the last ``min(n, H)``
+      corrected values (the previous one while fewer than 10, else a
+      least-squares line one step ahead) and a deviation beyond the
+      threshold is removed in quanta of ``2 pi / symmetry``.
+    """
+
+    def __init__(
+        self,
+        kind,
+        num_ch,
+        constellation,
+        *,
+        mu=0.0,
+        beta=0.0,
+        test_phases=64,
+        window=32,
+        joint=False,
+        symmetry=4,
+        history=None,
+        threshold=np.pi / 4,
+    ):
+        self.kind, self.num_ch, self.const = kind, num_ch, constellation
+        self.mu, self.beta, self.joint = mu, beta, joint and num_ch > 1
+        # The candidates are a float32 grid: an argmin jump of exactly B/2
+        # candidates is a 4x difference of exactly +-pi, which the unwrap
+        # resolves by rounding - float64 angles would round the other way.
+        self.theta = np.linspace(
+            0.0, np.pi / 2, test_phases, endpoint=False, dtype=np.float32
+        ).astype(np.float64)
+        self.window = window
+        self.metrics = [[] for _ in range(num_ch)]  # per channel: (B,) per symbol
+        self.prev4 = np.zeros(num_ch)
+        self.phi = np.zeros(num_ch)
+        self.nu = np.zeros(num_ch)
+        self.history, self.threshold = history, threshold
+        self.quantum = 2 * np.pi / symmetry
+        self.hist = [[] for _ in range(num_ch)]
+
+    def estimate(self, y_raw):
+        if self.kind == "pll":
+            phi = self.phi.copy()
+        else:
+            for i in range(self.num_ch):
+                rot = y_raw[i] * np.exp(-1j * self.theta)
+                d2 = np.min(np.abs(rot[:, None] - self.const[None, :]) ** 2, axis=1)
+                self.metrics[i].append(d2)
+            sums = np.array([np.sum(m[-self.window :], axis=0) for m in self.metrics])
+            if self.joint:
+                sums = np.repeat(np.sum(sums, axis=0, keepdims=True), self.num_ch, 0)
+            for i in range(self.num_ch):
+                raw4 = 4 * self.theta[int(np.argmin(sums[i]))]
+                diff = raw4 - self.prev4[i]
+                self.prev4[i] += diff - 2 * np.pi * np.round(diff / (2 * np.pi))
+            phi = self.prev4 / 4
+        if self.history is not None:
+            phi = np.array([self._slip(i, phi[i]) for i in range(self.num_ch)])
+        return phi
+
+    def _slip(self, i, phi):
+        hist = self.hist[i][-self.history :]
+        if hist:
+            if len(hist) < 10:
+                pred = hist[-1]
+            else:
+                slope, icpt = np.polyfit(np.arange(len(hist)), hist, 1)
+                pred = slope * len(hist) + icpt
+            diff = phi - pred
+            k = round(diff / self.quantum)
+            if abs(diff) > self.threshold and k != 0:
+                phi -= k * self.quantum
+        self.hist[i].append(phi)
+        return phi
+
+    def update(self, y, d):
+        if self.kind != "pll":
+            return
+        e = np.imag(y * np.conj(d))
+        if self.joint:
+            e = np.full(self.num_ch, np.mean(e))
+        self.phi = self.phi + self.mu * e + self.nu
+        self.nu = self.nu + self.beta * e
+
+
+def lms_cpr_reference(
+    samples, training, constellation, *, num_taps, sps, step_size, cpr
+) -> dict[str, np.ndarray]:
+    """LMS with inline CPR: ``y = y_raw e^{-j phi}``, the error ``d - y`` is
+    rotated back by ``e^{+j phi}`` for the tap update (``cpr``: an
+    ``_InlineCpr``).  Returns ``y``, ``e``, ``phi`` ``(C, n_sym)`` and ``w``."""
+    x, n_sym, _ = prepare_input(samples, sps, num_taps)
+    num_ch = x.shape[0]
+    d_train = None if training is None else prepare_training(training, num_ch)
+    n_train = 0 if d_train is None else min(d_train.shape[-1], n_sym)
+    w = identity_taps(num_ch, num_taps)
+    out = {k: np.zeros((num_ch, n_sym), np.complex128) for k in ("y", "e")}
+    phis = np.zeros((num_ch, n_sym))
+    for n in range(n_sym):
+        win = _window(x, n, sps, num_taps)
+        y_raw = _filter(w, win)
+        phi = cpr.estimate(y_raw)
+        y = y_raw * np.exp(-1j * phi)
+        d = np.array(
+            [
+                d_train[i, n] if n < n_train else _nearest(y[i], constellation)
+                for i in range(num_ch)
+            ]
+        )
+        e = d - y
+        cpr.update(y, d)
+        e_taps = e * np.exp(1j * phi)
+        for i in range(num_ch):
+            w[i] = w[i] + step_size * np.conj(e_taps[i]) * win
+        out["y"][:, n], out["e"][:, n], phis[:, n] = y, e, phi
+    return {"y": out["y"], "e": out["e"], "phi": phis, "w": w}
+
+
+def rls_cpr_reference(
+    samples, training, constellation, *, num_taps, sps, forgetting_factor, delta, cpr
+) -> dict[str, np.ndarray]:
+    """RLS with inline CPR, as :func:`lms_cpr_reference` with the RLS update
+    of :func:`rls_reference` (updates and output stop ``T // 2`` early)."""
+    x, n_sym, _ = prepare_input(samples, sps, num_taps)
+    num_ch = x.shape[0]
+    d_train = None if training is None else prepare_training(training, num_ch)
+    n_train = 0 if d_train is None else min(d_train.shape[-1], n_sym)
+    n_halt = max(0, n_sym - num_taps // 2)
+    dim = num_ch * num_taps
+    w = identity_taps(num_ch, num_taps).reshape(num_ch, dim)
+    p = np.eye(dim, dtype=np.complex128) / delta
+    lam = forgetting_factor
+    out = {k: np.zeros((num_ch, n_sym), np.complex128) for k in ("y", "e")}
+    phis = np.zeros((num_ch, n_sym))
+    for n in range(n_sym):
+        xr = _window(x, n, sps, num_taps).reshape(dim)
+        y_raw = np.conj(w) @ xr
+        phi = cpr.estimate(y_raw)
+        y = y_raw * np.exp(-1j * phi)
+        d = np.array(
+            [
+                d_train[i, n] if n < n_train else _nearest(y[i], constellation)
+                for i in range(num_ch)
+            ]
+        )
+        e = d - y
+        cpr.update(y, d)
+        e_taps = e * np.exp(1j * phi)
+        px = p @ xr
+        k = px / (lam + np.real(np.conj(xr) @ px))
+        if n < n_halt:
+            w = w + np.outer(np.conj(e_taps), k)
+            p = (p - np.outer(k, np.conj(xr) @ p)) / lam
+        out["y"][:, n], out["e"][:, n], phis[:, n] = y, e, phi
+    return {
+        "y": out["y"][:, :n_halt],
+        "e": out["e"][:, :n_halt],
+        "phi": phis[:, :n_halt],
         "w": w.reshape(num_ch, num_ch, num_taps),
     }
 

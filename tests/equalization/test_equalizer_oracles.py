@@ -146,3 +146,124 @@ def test_rde_matches_oracle(num_ch):
         samples, num_taps=NUM_TAPS, sps=SPS, step_size=1e-3, radii=radii
     )
     _assert_matches(res, ref, num_ch)
+
+
+# -----------------------------------------------------------------------------
+# Inline carrier phase recovery (commit 3.7h)
+# -----------------------------------------------------------------------------
+
+CPR_CASES = [
+    ("pll", False, False),
+    ("pll", True, False),
+    ("pll", False, True),
+    ("bps", False, False),
+    ("bps", True, False),
+    ("bps", False, True),
+]
+
+
+def _phase_rotated(samples, rate=2e-3, offset=0.4):
+    """A phase ramp the inline CPR has to track (the taps alone cannot)."""
+    n = np.arange(samples.shape[-1])
+    return (samples * np.exp(1j * (offset + rate * n / SPS))).astype(np.complex64)
+
+
+def _cpr_objects(kind, joint, slips, num_ch):
+    from commkit.recovery import BPS, PLL, CycleSlip
+    from tests.common.reference_impl import _InlineCpr
+
+    cycle_slip = CycleSlip(history=20) if slips else None
+    const = Constellation.qam(16).points
+    if kind == "pll":
+        obj = PLL(mu=2e-2, beta=2e-4, joint_channels=joint, cycle_slip=cycle_slip)
+        ref = _InlineCpr(
+            "pll",
+            num_ch,
+            const,
+            mu=np.float32(2e-2),
+            beta=np.float32(2e-4),
+            joint=joint,
+            history=20 if slips else None,
+        )
+    else:
+        obj = BPS(
+            test_phases=16, block_size=8, joint_channels=joint, cycle_slip=cycle_slip
+        )
+        ref = _InlineCpr(
+            "bps",
+            num_ch,
+            const,
+            test_phases=16,
+            window=8,
+            joint=joint,
+            history=20 if slips else None,
+        )
+    return obj, ref
+
+
+def _assert_cpr_matches(result, ref, num_ch):
+    _assert_matches(result, ref, num_ch)
+    phi = np.atleast_2d(np.asarray(result.phase_trajectory))
+    np.testing.assert_allclose(phi, ref["phi"], rtol=0, atol=1e-5)
+
+
+@pytest.mark.parametrize("num_ch", [1, 2])
+@pytest.mark.parametrize(("kind", "joint", "slips"), CPR_CASES)
+def test_lms_inline_cpr_matches_oracle(num_ch, kind, joint, slips):
+    from tests.common.reference_impl import lms_cpr_reference
+
+    samples, syms = _isi_input(16, num_ch)
+    samples = _phase_rotated(samples)
+    training = syms[..., :100] if num_ch == 2 else syms[0, :100]
+    obj, ref_cpr = _cpr_objects(kind, joint, slips, num_ch)
+    res = lms(
+        samples,
+        training,
+        num_taps=NUM_TAPS,
+        sps=SPS,
+        step_size=1e-2,
+        constellation=Constellation.qam(16),
+        cpr=obj,
+    )
+    ref = lms_cpr_reference(
+        samples,
+        training,
+        Constellation.qam(16).points,
+        num_taps=NUM_TAPS,
+        sps=SPS,
+        step_size=1e-2,
+        cpr=ref_cpr,
+    )
+    _assert_cpr_matches(res, ref, num_ch)
+
+
+@pytest.mark.parametrize("num_ch", [1, 2])
+@pytest.mark.parametrize(("kind", "joint", "slips"), CPR_CASES)
+def test_rls_inline_cpr_matches_oracle(num_ch, kind, joint, slips):
+    from tests.common.reference_impl import rls_cpr_reference
+
+    samples, syms = _isi_input(16, num_ch)
+    samples = _phase_rotated(samples)
+    training = syms[..., :100] if num_ch == 2 else syms[0, :100]
+    obj, ref_cpr = _cpr_objects(kind, joint, slips, num_ch)
+    res = rls(
+        samples,
+        training,
+        num_taps=NUM_TAPS,
+        sps=SPS,
+        forgetting_factor=0.99,
+        delta=0.01,
+        constellation=Constellation.qam(16),
+        cpr=obj,
+    )
+    ref = rls_cpr_reference(
+        samples,
+        training,
+        Constellation.qam(16).points,
+        num_taps=NUM_TAPS,
+        sps=SPS,
+        forgetting_factor=0.99,
+        delta=0.01,
+        cpr=ref_cpr,
+    )
+    _assert_cpr_matches(res, ref, num_ch)
