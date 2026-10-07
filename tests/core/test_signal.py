@@ -296,10 +296,8 @@ class TestSignalCloningAndProvenance:
         with pytest.raises(TypeError, match=name):
             s.replace(**{name: None})
 
-    def test_signal_replace_samples_shares_provenance_and_invalidates_caches(
-        self, xp, xpt
-    ):
-        """Functional sample replacement avoids copying old samples or provenance."""
+    def test_signal_replace_samples_shares_provenance(self, xp, xpt):
+        """Replacing the samples copies neither the old samples nor provenance."""
         frame = {"cached": xp.arange(4)}
         s = Signal(
             samples=xp.arange(8, dtype=xp.float32),
@@ -308,63 +306,35 @@ class TestSignalCloningAndProvenance:
             reference=Reference(symbols=xp.asarray([1.0, -1.0]), bits=xp.arange(4)),
             frame=frame,
         )
-        s = s.replace(resolved_symbols=xp.asarray([1.0, -1.0]))
-        s = s.replace(resolved_bits=xp.asarray([0, 1]))
         old_samples = s.samples
         replacement = xp.arange(4, dtype=xp.float32) + 10
 
-        result = s.replace_samples(replacement, sampling_rate=1.0)
+        result = s.replace(samples=replacement, sampling_rate=1.0)
 
         assert result is not s
         assert result.samples is replacement
-        assert result.samples is not old_samples
         assert result.reference is s.reference
         assert result.frame is frame
-        assert result.resolved_symbols is None
-        assert result.resolved_bits is None
         assert s.samples is old_samples
-        assert s.resolved_symbols is not None
-        assert s.resolved_bits is not None
         assert result.sampling_rate == 1.0
         xpt.assert_array_equal(result.samples, replacement)
-
-    def test_signal_replace_samples_can_preserve_resolved_caches(self, xp):
-        """Proven-safe internal transforms can explicitly retain resolved caches."""
-        s = Signal(samples=xp.arange(8), sampling_rate=2.0, symbol_rate=1.0)
-        s = s.replace(resolved_symbols=xp.asarray([1.0, -1.0]))
-        s = s.replace(resolved_bits=xp.asarray([0, 1]))
-
-        result = s.replace_samples(s.samples.copy(), _preserve_resolved=True)
-
-        assert result.resolved_symbols is s.resolved_symbols
-        assert result.resolved_bits is s.resolved_bits
 
     def test_signal_replace_samples_validates_replacement_and_metadata(self, xp):
         """Replacement samples and metadata pass through assignment validation."""
         s = Signal(samples=xp.arange(8), sampling_rate=2.0, symbol_rate=1.0)
 
         with pytest.raises(ValueError, match="sampling_rate must be > 0"):
-            s.replace_samples(s.samples.copy(), sampling_rate=0.0)
+            s.replace(samples=s.samples.copy(), sampling_rate=0.0)
         with pytest.raises(ValueError, match="Only 1D"):
-            s.replace_samples(xp.zeros((2, 2, 2)))
+            s.replace(samples=xp.zeros((2, 2, 2)))
 
-    def test_signal_noop_paths_shallow_clone(self, xp):
-        """Skipped Signal operations return a new container without copying metadata."""
-        frame = {"cached": xp.arange(4)}
-        sig = Signal(
-            samples=xp.ones(16, dtype=xp.complex64),
-            sampling_rate=1.0,
-            symbol_rate=1.0,
-            frame=frame,
-        )
+    def test_symbol_operations_on_a_frame_signal_raise(self, xp):
+        """A frame mixes segments: demapping it raises instead of skipping."""
+        from commkit.core import SingleCarrierFrame
 
-        unresolved = multirate.resolve_symbols(sig)
-        undemapped = mapping.demap_symbols_hard(sig)
-
-        for result in (unresolved, undemapped):
-            assert result is not sig
-            assert result.samples is sig.samples
-            assert result.frame is frame
+        sig = SingleCarrierFrame(payload_len=16).to_signal(sps=1, symbol_rate=1.0)
+        with pytest.raises(ValueError, match="extract_payload"):
+            mapping.demap_symbols_hard(sig)
 
 
 class TestSignalDSPOperations:
@@ -616,8 +586,7 @@ class TestSignalResolutionAndMetrics:
     """Tests for TestSignalResolutionAndMetrics."""
 
     def test_signal_resolution_and_demap(self, xp, xpt):
-        """Verify manual symbol resolution and bit demapping with caching."""
-        # Generate a simple BPSK signal at 4 SPS
+        """Decimate to the symbol rate, then demap and measure: no caches."""
         symbol_rate = 1e6
         sps = 4
         num_symbols = 100
@@ -630,65 +599,47 @@ class TestSignalResolutionAndMetrics:
             rng=42,
         ).to(device_of(xp))
 
-        # Initially resolved attributes should be None
-        assert sig.resolved_symbols is None
-        assert sig.resolved_bits is None
+        # Symbol operations need one sample per symbol.
+        with pytest.raises(ValueError, match="one sample per symbol"):
+            mapping.demap_symbols_hard(sig)
 
-        # Calling demap_symbols_hard before resolve_symbols should raise ValueError
-        with pytest.raises(ValueError, match="No resolved symbols available"):
-            sig = mapping.demap_symbols_hard(sig)
+        sym = multirate.decimate_to_symbol_rate(sig, offset=0)
+        assert sym is not sig
+        assert sym.reference is sig.reference
+        assert sym.samples.shape == (num_symbols,)
+        assert isinstance(sym.samples, xp.ndarray)
 
-        # Resolve symbols with offset. Unchanged waveform/provenance arrays are shared.
-        original = sig
-        sig = multirate.resolve_symbols(original, offset=0)
-        assert sig is not original
-        assert sig.samples is original.samples
-        assert sig.source_bits is original.source_bits
-        assert sig.source_symbols is original.source_symbols
-        assert sig.resolved_symbols is not None
-        assert sig.resolved_bits is None
-        assert len(sig.resolved_symbols) == num_symbols
-        assert isinstance(sig.resolved_symbols, xp.ndarray)
+        bits = mapping.demap_symbols_hard(sym)
+        assert isinstance(bits, xp.ndarray)
+        assert bits.shape == (num_symbols,)
 
-        # Demapping also shares unchanged waveform and resolved-symbol arrays.
-        resolved = sig
-        sig = mapping.demap_symbols_hard(resolved)
-        assert sig is not resolved
-        assert sig.samples is resolved.samples
-        assert sig.resolved_symbols is resolved.resolved_symbols
-        assert sig.resolved_bits is not None
-        assert len(sig.resolved_bits) == num_symbols
-
-        # Metrics measure the 1-SPS Signal against its reference.
-        sym = multirate.decimate_to_symbol_rate(original)
         assert metrics.evm(sym) >= 0
         assert metrics.snr(sym) > 0
-        assert 0 <= metrics.ber(sym, sym.reference.bits) <= 1
+        assert 0 <= metrics.ber(bits, sym.reference.bits) <= 1
 
-    def test_resolve_symbols_sps_errors(self, xp):
-        """Verify resolve_symbols error paths for invalid SPS values."""
+    def test_decimate_to_symbol_rate_sps_errors(self, xp):
+        """Fractional or sub-unity SPS cannot be decimated to the symbol rate."""
         # SPS < 1 (symbol_rate > sampling_rate)
         s = Signal(
             samples=xp.ones(10, dtype="complex64"), sampling_rate=1.0, symbol_rate=2.0
         )
         with pytest.raises(ValueError, match="sps to be a positive integer"):
-            s = multirate.resolve_symbols(s)
+            multirate.decimate_to_symbol_rate(s)
 
         # Non-integer SPS
         s2 = Signal(
             samples=xp.ones(10, dtype="complex64"), sampling_rate=3.0, symbol_rate=2.0
         )
         with pytest.raises(ValueError, match="sps to be a positive integer"):
-            s2 = multirate.resolve_symbols(s2)
+            multirate.decimate_to_symbol_rate(s2)
 
     def test_demap_without_modulation(self, xp):
-        """Verify demap_symbols_hard raises error without modulation metadata."""
+        """Verify demap_symbols_hard raises error without a constellation."""
         s = Signal(
             samples=xp.ones(10, dtype="complex64"), sampling_rate=1.0, symbol_rate=1.0
         )
-        s = s.replace(resolved_symbols=xp.ones(10, dtype="complex64"))
         with pytest.raises(ValueError, match="needs a constellation"):
-            s = mapping.demap_symbols_hard(s)
+            mapping.demap_symbols_hard(s)
 
     def test_evm_no_reference(self, xp):
         """Verify evm raises when no reference is available."""

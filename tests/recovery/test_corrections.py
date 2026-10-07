@@ -203,9 +203,8 @@ class TestResolvePhaseAmbiguity:
         assert float(s_np[0]) < 0.05
         assert float(s_np[1]) < 0.05
 
-    def test_signal_method_in_place(self, xp):
-        """Signal.resolve_phase_ambiguity() updates resolved_symbols in place."""
-        from commkit.math import normalize
+    def test_signal_input(self, xp):
+        """A 1-SPS Signal's samples are rotated against reference.symbols."""
         from commkit.metrics import ser
 
         sig = generate(
@@ -216,36 +215,29 @@ class TestResolvePhaseAmbiguity:
             pulse=RRC(0.35),
             rng=9,
         ).to(device_of(xp))
-        sig = sig.replace(samples=apply_awgn(sig.samples, esn0_db=30, sps=1, rng=9))
-        sym = normalize(sig.samples, mode="average_power")
-        sig = sig.replace(
-            resolved_symbols=sym * xp.exp(1j * np.pi / 2).astype(sym.dtype)
-        )
-        sig = recovery.resolve_phase_ambiguity(sig)
-        assert sig.resolved_symbols is not None
-        ref = normalize(xp.asarray(sig.source_symbols), mode="average_power")
-        assert (
-            float(ser(sig.resolved_symbols, ref, constellation=Constellation.qam(16)))
-            < 0.1
-        )
+        rx = apply_awgn(sig.samples, esn0_db=30, sps=1, rng=9)
+        sig = sig.replace(samples=rx * xp.exp(1j * np.pi / 2).astype(rx.dtype))
+        out = recovery.resolve_phase_ambiguity(sig)
+        assert out is not sig
+        assert out.reference is sig.reference
+        assert ser(out) < 0.1
 
-    def test_signal_method_raises_without_resolved(self, xp):
-        """Raises ValueError when resolved_symbols is None."""
+    def test_signal_without_reference_raises(self, xp):
+        """A Signal without a reference needs reference=."""
         sig = generate(
             Constellation.qam(16), 256, symbol_rate=1e6, sps=1, pulse=RRC(0.35), rng=0
         )
-        with pytest.raises(ValueError, match="resolved_symbols"):
-            sig = recovery.resolve_phase_ambiguity(sig)
-
-    def test_signal_method_raises_without_source(self, xp):
-        """Raises ValueError when source_symbols is None."""
-        sig = generate(
-            Constellation.qam(16), 256, symbol_rate=1e6, sps=1, pulse=RRC(0.35), rng=0
-        )
-        sig = sig.replace(resolved_symbols=sig.samples)
         sig = sig.replace(reference=None)
-        with pytest.raises(ValueError, match="source_symbols"):
-            sig = recovery.resolve_phase_ambiguity(sig)
+        with pytest.raises(ValueError, match="reference"):
+            recovery.resolve_phase_ambiguity(sig)
+
+    def test_oversampled_signal_raises(self, xp):
+        """Symbol operations need one sample per symbol."""
+        sig = generate(
+            Constellation.qam(16), 256, symbol_rate=1e6, sps=2, pulse=RRC(0.35), rng=0
+        )
+        with pytest.raises(ValueError, match="one sample per symbol"):
+            recovery.resolve_phase_ambiguity(sig)
 
     def test_resolve_phase_ambiguity_skip(self, xp: Any, xpt: Any) -> None:
         """num_skip_symbols bypasses the corrupt head and picks the correct rotation."""
@@ -487,6 +479,22 @@ class TestResolveChannelPermutation:
         ref, swapped = self._dual_pol(xp)
         out = recovery.resolve_channel_permutation(swapped, ref, metric=metric)
         xpt.assert_allclose(out, ref)
+
+    def test_signal_input(self, xp, xpt):
+        """A Signal's samples are reordered to its reference."""
+        from commkit.core import Reference, Signal
+
+        ref, swapped = self._dual_pol(xp)
+        sig = Signal(
+            samples=swapped,
+            sampling_rate=1e6,
+            symbol_rate=1e6,
+            reference=Reference(symbols=ref),
+        )
+        out = recovery.resolve_channel_permutation(sig)
+        assert isinstance(out, Signal)
+        assert out.reference is sig.reference
+        xpt.assert_allclose(out.samples, ref)
 
     @pytest.mark.parametrize("metric", ["coherence", "phase_increment"])
     def test_identity_is_a_no_op(self, xp, xpt, metric):

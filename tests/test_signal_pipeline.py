@@ -33,8 +33,6 @@ def _signal(xp: Any, *, sps: float = 2.0) -> Signal:
             bits=xp.asarray([0, 1] * 32),
         ),
     )
-    sig = sig.replace(resolved_symbols=xp.asarray([1.0, -1.0], dtype=xp.complex64))
-    sig = sig.replace(resolved_bits=xp.asarray([0, 1]))
     return sig
 
 
@@ -50,7 +48,6 @@ class MetadataCase:
     expected_rate: float
     output_is_signal: bool = True
     source_fields_valid: bool = True
-    resolved_fields_valid: bool = False
 
 
 METADATA_PROPAGATION_TABLE = (
@@ -213,9 +210,6 @@ class TestPipelineMetadataPropagation:
         assert (
             result.source_bits is not None and result.source_symbols is not None
         ) is (case.source_fields_valid)
-        assert (
-            result.resolved_symbols is not None and result.resolved_bits is not None
-        ) is case.resolved_fields_valid
 
     def test_fractional_sps_is_preserved_exactly_by_resampling(self, xp: Any) -> None:
         """Fractional-SPS-capable paths retain the requested ratio in metadata."""
@@ -235,15 +229,12 @@ class TestPipelineMetadataPropagation:
             sampling_rate=1e6,
             symbol_rate=1e6,
             constellation=bipolar,
-            resolved_symbols=symbols,
         )
-        result = demap_symbols_hard(sig)
-        xpt.assert_array_equal(result.resolved_bits, bits)
-        assert sig.resolved_bits is None
+        xpt.assert_array_equal(demap_symbols_hard(sig), bits)
 
         unipolar = Constellation.pam(4, unipolar=True)
         explicit = demap_symbols_hard(sig, constellation=unipolar)
-        xpt.assert_array_equal(explicit.resolved_bits, unipolar.demap(symbols))
+        xpt.assert_array_equal(explicit, unipolar.demap(symbols))
 
 
 class TestPipelineSPSValidation:
@@ -301,7 +292,7 @@ class TestPipelineSPSValidation:
             frame.get_structure_map(unit="samples", sps=1.5)
 
     @pytest.mark.parametrize("sps", [0, -1, 1.5, float("nan"), float("inf")])
-    @pytest.mark.parametrize("operation", ["decimate", "apply_taps", "resolve"])
+    @pytest.mark.parametrize("operation", ["decimate", "apply_taps"])
     def test_array_symbol_operations_validate_sps(
         self, xp: Any, sps: Any, operation: str
     ) -> None:
@@ -310,10 +301,8 @@ class TestPipelineSPSValidation:
         with pytest.raises(ValueError, match="sps to be a positive integer"):
             if operation == "decimate":
                 multirate.decimate_to_symbol_rate(samples, sps=sps)
-            elif operation == "apply_taps":
-                equalization.apply_taps(samples, _identity_taps(xp), sps=sps)
             else:
-                multirate.resolve_symbols(samples, sps=sps)
+                equalization.apply_taps(samples, _identity_taps(xp), sps=sps)
 
     def test_array_symbol_operations_accept_integral_float_sps(
         self, xp: Any, xpt: Any

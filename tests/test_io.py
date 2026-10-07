@@ -241,34 +241,23 @@ def _mark_unpickled() -> bool:
 
 
 class TestNPZCompressionAndCaches:
-    """Tests for compression options and symbol/bit cache preservation."""
+    """Tests for compression options and 1.x cache entries."""
 
-    def test_include_cache_false_by_default(self, tmp_path: Any) -> None:
-        """Resolved caches are omitted from archive by default."""
+    def test_1x_cache_entries_are_ignored(self, tmp_path: Any, xpt: Any) -> None:
+        """1.x archives with resolved_symbols/resolved_bits still load; the
+        derived caches are dropped."""
         sig = _siso_signal()
-        sig = multirate.resolve_symbols(sig)
-        assert sig.resolved_symbols is not None
-
         p = tmp_path / "sig.npz"
         save_npz(sig, p)
+        with np.load(p, allow_pickle=False) as data:
+            entries = dict(data)
+        entries["resolved_symbols"] = entries["samples"][::2]
+        entries["resolved_bits"] = np.zeros(4, dtype=np.int8)
+        np.savez(p, **entries)
 
-        data = np.load(p, allow_pickle=False)
-        assert "resolved_symbols" not in data.files
-        assert "resolved_bits" not in data.files
-
-    def test_include_cache_roundtrip(self, tmp_path: Any, xpt: Any) -> None:
-        """Resolved caches round-trip when include_cache=True."""
-        sig = _siso_signal()
-        sig = multirate.resolve_symbols(sig)
-        assert sig.resolved_symbols is not None
-
-        p = tmp_path / "sig_cache.npz"
-        save_npz(sig, p, include_cache=True)
-        sig2 = load_npz(p)
-
-        xpt.assert_allclose(
-            to_numpy(sig.resolved_symbols), to_numpy(sig2.resolved_symbols), atol=1e-7
-        )
+        loaded = load_npz(p)
+        assert not hasattr(loaded, "resolved_symbols")
+        xpt.assert_array_equal(to_numpy(loaded.samples), to_numpy(sig.samples))
 
     def test_uncompressed_roundtrip(self, tmp_path: Any, xpt: Any) -> None:
         """Uncompressed archive round-trips identically."""

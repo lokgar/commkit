@@ -1073,14 +1073,17 @@ The equalization pass (3.7) gets more commits:
     (uniform and shaped, SISO and MIMO, array and Signal paths) identical
     except shaped GMI, 4e-9 relative (float32 LLRs of unscaled instead of
     rescaled symbols).
-- [ ] **3.8d `refactor(core)!: remove the resolved_* caches`.**
+- [x] **3.8d `refactor(core)!: remove the resolved_* caches`.**
   `Signal.resolved_symbols` / `resolved_bits`, `replace_samples`,
   `replace_signal_field` and `multirate.resolve_symbols` go (use
   `decimate_to_symbol_rate`). `demap_symbols_hard` and `compute_llr` read
   a 1-SPS Signal's samples and return arrays; `resolve_phase_ambiguity`
   and `resolve_channel_permutation` correct the samples against
-  `reference.symbols` and return a new Signal. `io` stops saving the
-  caches.
+  `reference.symbols` and return a new Signal, and their `ref_symbols`
+  becomes `reference` as in the metrics (`analysis` follows in 3.9). The
+  shared check (a frame Signal or one not at one sample per symbol raises)
+  is `SignalAdapter.symbol_array()`. `save_npz` loses `include_cache`;
+  `load_npz` ignores the cache entries of 1.x archives.
 - [ ] **3.8e `fix(metrics): GMI of shaped constellations`.** The
   bit-metric decoding rate `H(X) - sum_b E[log2(1 + exp(-(1 - 2 c_b)
   LLR_b))]` replaces `k - ...`, which assumes uniform bits. Oracle:

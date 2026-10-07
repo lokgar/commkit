@@ -43,10 +43,7 @@ def _frame_signal():
     payload_symbols = frame.payload_symbols
     _ = frame.pilot_bits, frame.pilot_symbols
     sig = frame.to_signal(sps=4, symbol_rate=1e6, pulse=RRC(0.35, span=8))
-    sig = sig.replace(reference=Reference(symbols=payload_symbols, bits=payload_bits))
-    sig = sig.replace(resolved_symbols=payload_symbols)
-    sig = sig.replace(resolved_bits=payload_bits)
-    return sig
+    return sig.replace(reference=Reference(symbols=payload_symbols, bits=payload_bits))
 
 
 def _pipeline(sig, xp, sync):
@@ -119,11 +116,11 @@ def _profile_rewrap_copy_cost(sig, backend_device, xp, sync):
         return result
 
     optimized_peak = _allocator_peak(
-        lambda: sig.replace_samples(replacement), backend_device, xp, sync
+        lambda: sig.replace(samples=replacement), backend_device, xp, sync
     )
     legacy_peak = _allocator_peak(legacy_rewrap, backend_device, xp, sync)
     assert optimized_peak < legacy_peak, (
-        "Signal.replace_samples() no longer improves on legacy deep-copy rewrapping"
+        "Signal.replace() no longer improves on legacy deep-copy rewrapping"
     )
     return {
         "rewrap_peak_bytes": optimized_peak,

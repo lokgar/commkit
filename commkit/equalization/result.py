@@ -293,7 +293,7 @@ def _attach_equalized_signal(
     reference = signal.reference
     if reference is not None:
         reference = reference.head(y.shape[-1])
-    result.signal = signal.replace_samples(
-        y, sampling_rate=signal.symbol_rate, reference=reference
+    result.signal = signal.replace(
+        samples=y, sampling_rate=signal.symbol_rate, reference=reference
     )
     return result

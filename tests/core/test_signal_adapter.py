@@ -61,21 +61,28 @@ class TestSignalAdapterTransforms:
         with pytest.raises(ValueError, match=r"example\(\).*positive integer"):
             require_integer_sps(value, "example()")
 
-    def test_signal_adapter_wrap_and_field_replacement(self, xp: Any) -> None:
-        """Wrapping samples or replacing fields produces clean cloned Signal instances."""
+    def test_signal_adapter_wrap_samples(self, xp: Any) -> None:
+        """Wrapping samples produces a new Signal sharing the rest."""
         sig = make_adapter_test_signal(xp)
-        sig = sig.replace(resolved_bits=xp.asarray([1, 0]))
         signal_adapter = adapt_signal(sig, function_name="example()")
         replacement = xp.zeros(8, dtype=xp.complex64)
 
         transformed = signal_adapter.wrap_samples(replacement, sampling_rate=1e6)
-        resolved = signal_adapter.replace_signal_field("resolved_symbols", replacement)
 
         assert transformed is not sig
         assert transformed.samples is replacement
         assert transformed.sampling_rate == 1e6
-        assert resolved.resolved_symbols is replacement
-        assert resolved.resolved_bits is None
+
+    def test_symbol_array_requires_one_sample_per_symbol(self, xp: Any) -> None:
+        """symbol_array() passes arrays and 1-SPS Signals, rejects the rest."""
+        sig = make_adapter_test_signal(xp)  # 2 samples per symbol
+        with pytest.raises(ValueError, match=r"example\(\) needs one sample"):
+            adapt_signal(sig, function_name="example()").symbol_array()
+        one = sig.replace(sampling_rate=sig.symbol_rate)
+        assert adapt_signal(one, function_name="f()").symbol_array() is one.samples
+        assert adapt_signal(sig.samples, function_name="f()").symbol_array() is (
+            sig.samples
+        )
 
 
 class TestFactsAndChoices:

@@ -7,7 +7,7 @@ implementations should receive arrays and fully resolved scalar metadata.
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import TYPE_CHECKING, Any, Generic, Literal, TypeVar, cast
+from typing import TYPE_CHECKING, Any, Generic, TypeVar, cast
 
 import numpy as np
 
@@ -112,13 +112,32 @@ class SignalAdapter(Generic[S]):
             )
         return supplied
 
+    def symbol_array(self) -> ArrayType:
+        """The symbols: the array, or a Signal's samples at one sample per symbol.
+
+        A frame Signal (preamble, pilots and payload) or one not at one sample
+        per symbol raises ``ValueError``.
+        """
+        sig = self.signal
+        if sig is not None:
+            if sig.frame is not None:
+                raise ValueError(
+                    f"{self.function_name}: the Signal is a frame (preamble, pilots "
+                    "and payload); take its payload with extract_payload(sig)."
+                )
+            if not _same_fact(sig.sps, 1):
+                raise ValueError(
+                    f"{self.function_name} needs one sample per symbol, got "
+                    f"sps={sig.sps}; decimate to the symbol rate first."
+                )
+        return self.array
+
     def wrap_samples(self, samples: Any, /, **metadata: Any) -> S:
         """Return samples directly for array input, or a new Signal for Signal input.
 
-        A new Signal shares unchanged metadata and provenance with the input,
-        applies validated metadata overrides, and invalidates resolved symbols
-        and bits. The input Signal is not modified. Replacement sample buffers
-        are not unconditionally copied; see ``Signal.replace_samples()``.
+        A new Signal shares unchanged metadata and provenance with the input
+        and applies validated metadata overrides; the input Signal is not
+        modified.  Replacement sample buffers are not copied.
 
         For array input, samples (including None) pass through unchanged and
         metadata overrides are unused. None is invalid for Signal output.
@@ -127,25 +146,7 @@ class SignalAdapter(Generic[S]):
             return cast(S, samples)
         if samples is None:
             raise ValueError(f"{self.function_name}: input Signal field is empty.")
-        return cast(S, self.signal.replace_samples(samples, **metadata))
-
-    def replace_signal_field(
-        self,
-        field: Literal["resolved_symbols", "resolved_bits"],
-        value: ArrayType,
-    ) -> Signal:
-        """Return a new Signal with resolved symbols or bits replaced.
-
-        Requires Signal input and leaves its waveform unchanged. Replacing
-        resolved symbols invalidates resolved bits; replacing bits preserves
-        resolved symbols. The original Signal is not modified.
-        """
-        if self.signal is None:
-            raise TypeError("replace_signal_field() requires Signal input.")
-        changes: dict[str, Any] = {field: value}
-        if field == "resolved_symbols":
-            changes["resolved_bits"] = None
-        return self.signal.replace(**changes)
+        return cast(S, self.signal.replace(samples=samples, **metadata))
 
 
 def adapt_signal(

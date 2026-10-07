@@ -48,8 +48,8 @@ def compute_llr(
     ----------
     symbols : array_like or Signal
         Received symbols at one sample per symbol, shape ``(..., N)``, on the
-        constellation's scale.  A :class:`Signal` supplies its
-        ``resolved_symbols``.
+        constellation's scale.  A :class:`Signal` must be at one sample per
+        symbol.
     noise_var : float
         Complex noise variance ``sigma^2 = E[|n|^2]`` on the constellation's
         scale.  For unit-power constellations, ``sigma^2 = 10^(-EsN0_dB/10)``.
@@ -73,9 +73,8 @@ def compute_llr(
     """
     from .constellation import Constellation
 
-    signal_adapter = adapt_signal(
-        symbols, function_name="compute_llr()", field="resolved_symbols"
-    )
+    signal_adapter = adapt_signal(symbols, function_name="compute_llr()")
+    x = signal_adapter.symbol_array()
     constellation = signal_adapter.resolve_choice("constellation", constellation)
     if constellation is None:
         raise ValueError(
@@ -87,12 +86,8 @@ def compute_llr(
             "compute_llr(): constellation must be a Constellation, got "
             f"{type(constellation).__name__}; use e.g. Constellation.qam(16)."
         )
-    if signal_adapter.array is None:
-        raise ValueError(
-            "No resolved symbols available. Call resolve_symbols(sig) first."
-        )
     logger.debug("Computing LLRs for %r (method=%s).", constellation, method)
-    return constellation.llr(signal_adapter.array, noise_var=noise_var, method=method)
+    return constellation.llr(x, noise_var=noise_var, method=method)
 
 
 def _llr(

@@ -20,7 +20,7 @@ from typing import Any
 import numpy as np
 
 from .backend import ArrayType, dispatch, to_device
-from .core._signal_adapter import SignalAdapter, _same_fact, adapt_signal
+from .core._signal_adapter import SignalAdapter, adapt_signal
 from .core.signal import Signal
 from .logger import logger
 from .mapping import Constellation
@@ -57,23 +57,6 @@ def _log_per_channel(fmt: str, *arrays: ArrayType, extra: tuple = ()) -> None:
 # -----------------------------------------------------------------------------
 # Input resolution shared by the metrics
 # -----------------------------------------------------------------------------
-
-
-def _received(adapter: SignalAdapter, name: str) -> ArrayType:
-    """The received array; for a Signal, its samples at one sample per symbol."""
-    sig = adapter.signal
-    if sig is not None:
-        if sig.frame is not None:
-            raise ValueError(
-                f"{name}: the Signal is a frame (preamble, pilots and payload); "
-                "measure its payload with extract_payload(sig)."
-            )
-        if not _same_fact(sig.sps, 1):
-            raise ValueError(
-                f"{name} needs one sample per symbol, got sps={sig.sps}; "
-                "decimate to the symbol rate first."
-            )
-    return adapter.array
 
 
 def _reference(
@@ -196,7 +179,7 @@ def evm(
     """
     name = "evm()"
     adapter = adapt_signal(symbols, function_name=name)
-    rx, xp, _ = dispatch(_received(adapter, name))
+    rx, xp, _ = dispatch(adapter.symbol_array())
     axis = -1
 
     if blind:
@@ -275,7 +258,7 @@ def snr(
     """
     name = "snr()"
     adapter = adapt_signal(symbols, function_name=name)
-    rx, xp, _ = dispatch(_received(adapter, name))
+    rx, xp, _ = dispatch(adapter.symbol_array())
     rx, tx = _paired(rx, _reference(adapter, reference, "symbols", name), xp, name)
     rx = _skip(rx, num_skip_symbols, name)
     tx = _skip(tx, num_skip_symbols, name)
@@ -341,7 +324,7 @@ def ber(
     """
     name = "ber()"
     adapter = adapt_signal(bits, function_name=name)
-    received = _received(adapter, name)
+    received = adapter.symbol_array()
     if adapter.signal is not None or num_skip_symbols:
         c = _constellation(adapter, constellation, name)
         k = c.bits_per_symbol
@@ -407,7 +390,7 @@ def ser(
     """
     name = "ser()"
     adapter = adapt_signal(symbols, function_name=name)
-    rx, xp, _ = dispatch(_received(adapter, name))
+    rx, xp, _ = dispatch(adapter.symbol_array())
     points = xp.asarray(_constellation(adapter, constellation, name).points)
     rx, tx = _paired(rx, _reference(adapter, reference, "symbols", name), xp, name)
     rx = _skip(rx, num_skip_symbols, name)
@@ -485,7 +468,7 @@ def gmi(
     """
     name = "gmi()"
     adapter = adapt_signal(llrs, function_name=name)
-    received = _received(adapter, name)
+    received = adapter.symbol_array()
     c = _constellation(adapter, constellation, name)
     k = c.bits_per_symbol
     if adapter.signal is not None:
@@ -569,7 +552,7 @@ def mi(
     """
     name = "mi()"
     adapter = adapt_signal(symbols, function_name=name)
-    rx, xp, _ = dispatch(_received(adapter, name))
+    rx, xp, _ = dispatch(adapter.symbol_array())
     c = _constellation(adapter, constellation, name)
     rx = _skip(rx, num_skip_symbols, name).astype(xp.complex128)
     points = xp.asarray(c.points, dtype=xp.complex128)

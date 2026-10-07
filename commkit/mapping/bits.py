@@ -11,7 +11,6 @@ from typing import Any
 from ..backend import ArrayType
 from ..core._signal_adapter import adapt_signal
 from ..core.signal import Signal
-from ..logger import logger
 from .constellation import Constellation
 
 __all__ = ["demap_symbols_hard", "map_bits"]
@@ -43,7 +42,7 @@ def map_bits(bits: ArrayType, *, constellation: Constellation) -> ArrayType:
 
 def demap_symbols_hard(
     symbols: ArrayType | Signal, *, constellation: Constellation | None = None
-) -> ArrayType | Signal:
+) -> ArrayType:
     """
     Hard decisions: the bits of the nearest constellation point.
 
@@ -55,39 +54,27 @@ def demap_symbols_hard(
     ----------
     symbols : array_like or Signal
         Received symbols at one sample per symbol, shape ``(..., N)``.  A
-        :class:`Signal` supplies its ``resolved_symbols``.
+        :class:`Signal` must be at one sample per symbol.
     constellation : Constellation, optional
         Decision constellation.  Defaults to the Signal's ``constellation``;
         required for array input.
 
     Returns
     -------
-    array_like or Signal
-        ``int8`` bits of shape ``(..., N * k)`` on the symbols' device.  For
-        Signal input, a new Signal with ``resolved_bits`` set (bridge until
-        module pass 3.8).
+    array_like
+        ``int8`` bits of shape ``(..., N * k)`` on the symbols' device.
+
+    Raises
+    ------
+    ValueError
+        Without a constellation, or for a frame Signal or one not at one
+        sample per symbol.
     """
-    signal_adapter = adapt_signal(
-        symbols, function_name="demap_symbols_hard()", field="resolved_symbols"
-    )
-    sig = signal_adapter.signal
-    if sig is not None and sig.signal_type is not None:
-        logger.warning(
-            "demap_symbols_hard() called on a frame-generated signal - skipping. "
-            "Extract the payload segment via frame.get_structure_map() and build "
-            "a plain Signal before demapping."
-        )
-        return sig.replace()
+    signal_adapter = adapt_signal(symbols, function_name="demap_symbols_hard()")
+    x = signal_adapter.symbol_array()
     constellation = signal_adapter.resolve_choice("constellation", constellation)
     _check_constellation(constellation, "demap_symbols_hard()")
-    if sig is None:
-        return constellation.demap(signal_adapter.array)
-    if signal_adapter.array is None:
-        raise ValueError(
-            "No resolved symbols available. Call resolve_symbols(sig) first."
-        )
-    bits = constellation.demap(signal_adapter.array)
-    return signal_adapter.replace_signal_field("resolved_bits", bits)
+    return constellation.demap(x)
 
 
 def _check_constellation(constellation: Any, function_name: str) -> None:

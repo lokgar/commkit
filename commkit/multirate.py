@@ -61,7 +61,6 @@ from typing import Any
 
 from .backend import ArrayType, dispatch
 from .core._signal_adapter import S, adapt_signal, require_integer_sps
-from .core.signal import Signal
 from .logger import logger
 from .math import normalize as _normalize
 
@@ -336,57 +335,3 @@ def _check_factor(factor: int, function_name: str) -> int:
             f"{function_name}: factors must be positive integers, got {factor!r}."
         )
     return int(factor)
-
-
-def resolve_symbols(
-    samples: ArrayType | Signal,
-    *,
-    sps: int | None = None,
-    offset: int = 0,
-) -> ArrayType | Signal:
-    """
-    Decimate to the symbol rate and normalize to unit average power.
-
-    Bridge for the ``resolved_symbols`` cache that metrics and demapping
-    still read; merged into :func:`decimate_to_symbol_rate` in module pass
-    3.8.
-
-    Parameters
-    ----------
-    samples : array_like or Signal
-        Matched-filtered samples, or a :class:`Signal`.  For a Signal, a new
-        Signal with ``resolved_symbols`` set is returned (the samples are
-        unchanged); frame-generated Signals are skipped with a warning.
-    sps : int, optional
-        Samples per symbol.  Taken from the Signal; required for array input.
-        A value that disagrees with the Signal raises.
-    offset : int, default 0
-        Sampling phase in samples, ``0 <= offset < sps``.
-
-    Returns
-    -------
-    array_like or Signal
-        Unit-average-power symbols (array), or a new Signal with
-        ``resolved_symbols`` set.
-    """
-    signal_adapter = adapt_signal(samples, function_name="resolve_symbols()")
-    sig = signal_adapter.signal
-    if sig is not None and sig.signal_type is not None:
-        logger.warning(
-            "resolve_symbols() called on a frame-generated signal - skipping. "
-            "Frame signals mix preamble, pilots, and payload segments that may "
-            "have different modulations or gains. Extract the desired segment "
-            "via frame.get_structure_map(), build a plain Signal, then call "
-            "resolve_symbols() on that."
-        )
-        return sig.replace()
-    sps_int = require_integer_sps(
-        signal_adapter.resolve_fact("sps", sps), "resolve_symbols()"
-    )
-    _check_offset(offset, sps_int, "resolve_symbols()")
-    resolved = _decimate_to_symbol_rate_array(
-        signal_adapter.array, sps_int, offset, True
-    )
-    if sig is None:
-        return resolved
-    return signal_adapter.replace_signal_field("resolved_symbols", resolved)

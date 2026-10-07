@@ -539,12 +539,6 @@ ROWS: list[Row] = [
         fact=("sps_in", 4),
     ),
     Row(
-        "commkit.multirate.resolve_symbols",
-        RATE_CHANGE,
-        call=lambda c, x: _a(x, sps=SPS),
-        fact=SPS_CONFLICT,
-    ),
-    Row(
         "commkit.multirate.upsample",
         RATE_CHANGE,
         call=lambda c, x: _a(x, factor=2),
@@ -972,6 +966,4 @@ LEGACY: dict[str, frozenset[str]] = {
     "commkit.plotting.sync.plot_pilot_tones_phase_estimate": L(SIG),
     "commkit.plotting.sync.plot_timing_correlation": L(SIG),
     "commkit.plotting.waveform.plot_time_domain": L(SIG),
-    "commkit.recovery.corrections.resolve_channel_permutation": L(SGN),
-    "commkit.recovery.corrections.resolve_phase_ambiguity": L(SGN),
 }

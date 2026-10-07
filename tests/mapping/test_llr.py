@@ -209,24 +209,22 @@ class TestComputeLLRSignalIntegration:
             symbol_rate=1.0,
             constellation=mapping.Constellation.qam(16),
         )
-        sig = sig.replace(resolved_symbols=symbols)
-
         llrs_sig = mapping.compute_llr(sig, noise_var=1e-6)
         llrs_arr = mapping.compute_llr(
             symbols, noise_var=1e-6, constellation=Constellation.qam(16)
         )
         xpt.assert_allclose(llrs_sig, llrs_arr)
 
-    def test_compute_llr_signal_input_raises_without_resolved(self) -> None:
-        """Signal input missing resolved_symbols raises ValueError."""
+    def test_compute_llr_oversampled_signal_raises(self) -> None:
+        """Signal input must be at one sample per symbol."""
         bits = np.array([0, 1, 0, 1], dtype="int32")
         symbols = mapping.map_bits(bits, constellation=Constellation.qam(4))
         sig = Signal(
             samples=symbols,
-            sampling_rate=1.0,
+            sampling_rate=2.0,
             symbol_rate=1.0,
             constellation=Constellation.qam(4),
         )
 
-        with pytest.raises(ValueError, match="resolved symbols"):
+        with pytest.raises(ValueError, match="one sample per symbol"):
             mapping.compute_llr(sig, noise_var=0.1)

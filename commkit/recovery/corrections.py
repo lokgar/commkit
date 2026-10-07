@@ -8,7 +8,7 @@ import numpy as np
 
 from .._array import as_2d, broadcast_channels, restore_1d
 from ..backend import ArrayType, dispatch, to_device
-from ..core._signal_adapter import adapt_signal
+from ..core._signal_adapter import S, adapt_signal
 from ..core.signal import Signal
 from ..helpers import remove_linear_trend
 from ..logger import logger
@@ -506,7 +506,20 @@ def _data_aided(x: ArrayType, method: DataAided, ctx: _Context) -> _Phase:
 # -----------------------------------------------------------------------------
 # resolve_channel_permutation: Fix a MIMO polarization/channel-order swap.
 # resolve_phase_ambiguity:     Fix a rotational (k·2π/symmetry_order) ambiguity.
-# Both read/write .resolved_symbols against .source_symbols.
+# Both correct a Signal's samples against reference.symbols.
+
+
+def _reference_symbols(signal_adapter: Any, reference: Any, name: str) -> Any:
+    """The explicit reference, else the Signal's ``reference.symbols``."""
+    if reference is not None:
+        return reference
+    sig = signal_adapter.signal
+    if sig is None or sig.reference is None:
+        raise ValueError(
+            f"{name} needs reference symbols: pass reference= or a Signal that "
+            "has a reference."
+        )
+    return sig.reference.symbols
 
 
 def _pairing_scores(y, s, xp, metric: str):
@@ -547,8 +560,8 @@ def _pairing_scores(y, s, xp, metric: str):
 
 
 def resolve_channel_permutation(
-    symbols: ArrayType | Signal,
-    ref_symbols: ArrayType | None = None,
+    symbols: S,
+    reference: ArrayType | None = None,
     *,
     num_skip_symbols: int = 0,
     metric: str = "coherence",
@@ -561,8 +574,8 @@ def resolve_channel_permutation(
     score as random, since they compare ``output[i]`` with ``ref[i]``.  This
     matches each output stream to the reference stream it actually carries (the
     bijective assignment maximizing the **rotation-invariant** cross-correlation
-    magnitude ``|Σ yᵢ · conj(sⱼ)|``) and reorders ``symbols`` to ``ref_symbols``
-    order.
+    magnitude ``|Σ yᵢ · conj(sⱼ)|``) and reorders ``symbols`` to the
+    reference order.
 
     Run this **before** ``resolve_phase_ambiguity`` (it is rotation
     invariant, so the two compose) and before SER/BER.  For a converged
@@ -573,11 +586,14 @@ def resolve_channel_permutation(
 
     Parameters
     ----------
-    symbols : array_like
+    symbols : array_like or Signal
         Recovered symbols, ``(N,)`` or ``(C, N)``.  Returned unchanged for SISO.
-    ref_symbols : array_like
+        A Signal must be at one sample per symbol; its ``reference.symbols``
+        is the default reference.
+    reference : array_like, optional
         Known transmitted symbols, same layout as ``symbols`` (the full
-        sequence, a pilot subset, or any known reference).
+        sequence, a pilot subset, or any known reference).  Required for
+        arrays.
     num_skip_symbols : int, default 0
         Leading symbols excluded from the correlation scoring (e.g. an
         unconverged transient).  The reorder still covers the full input.
@@ -594,41 +610,21 @@ def resolve_channel_permutation(
 
     Returns
     -------
-    array_like
-        ``symbols`` with channels reordered to match ``ref_symbols``; same
-        shape, dtype, and backend.
-    When ``symbols`` is a :class:`Signal`, ``resolved_symbols`` is reordered
-    against ``source_symbols`` and a new :class:`Signal` is returned.
+    array_like or Signal
+        ``symbols`` with channels reordered to the reference order; same
+        shape, dtype, and backend.  A Signal gives a new Signal with the
+        samples reordered (its reference is already in that order).
     """
-    signal_adapter = adapt_signal(
-        symbols, function_name="resolve_channel_permutation()", field="resolved_symbols"
+    name = "resolve_channel_permutation()"
+    signal_adapter = adapt_signal(symbols, function_name=name)
+    x = signal_adapter.symbol_array()
+    resolved = _resolve_channel_permutation_array(
+        x,
+        _reference_symbols(signal_adapter, reference, name),
+        num_skip_symbols=num_skip_symbols,
+        metric=metric,
     )
-    if signal_adapter.signal is not None:
-        sig = signal_adapter.signal
-        if sig.resolved_symbols is None:
-            raise ValueError(
-                "resolved_symbols is not set. Call resolve_symbols(sig) or assign "
-                "resolved_symbols before calling resolve_channel_permutation()."
-            )
-        if sig.source_symbols is None:
-            raise ValueError(
-                "source_symbols is not set. Populate source_symbols (the known TX "
-                "symbol sequence) before calling resolve_channel_permutation()."
-            )
-        # Input and output share the resolved_symbols derived field.
-        resolved = _resolve_channel_permutation_array(
-            signal_adapter.array,
-            sig.source_symbols,
-            num_skip_symbols=num_skip_symbols,
-            metric=metric,
-        )
-        return signal_adapter.replace_signal_field("resolved_symbols", resolved)
-
-    if ref_symbols is None:
-        raise ValueError("resolve_channel_permutation() requires ref_symbols.")
-    return _resolve_channel_permutation_array(
-        symbols, ref_symbols, num_skip_symbols=num_skip_symbols, metric=metric
-    )
+    return signal_adapter.wrap_samples(resolved)
 
 
 def _resolve_channel_permutation_array(
@@ -702,8 +698,8 @@ def _resolve_channel_permutation_array(
 
 
 def resolve_phase_ambiguity(
-    symbols: ArrayType | Signal,
-    ref_symbols: ArrayType | None = None,
+    symbols: S,
+    reference: ArrayType | None = None,
     *,
     constellation: Any = None,
     symmetry: int | None = None,
@@ -724,10 +720,11 @@ def resolve_phase_ambiguity(
     ----------
     symbols : array_like or Signal
         Received symbols after carrier phase correction, ``(N,)`` or
-        ``(C, N)``.
-    ref_symbols : array_like, optional
+        ``(C, N)``.  A Signal must be at one sample per symbol; its
+        ``reference.symbols`` is the default reference.
+    reference : array_like, optional
         Known transmitted symbols, ``(N,)`` or ``(C, N)``.  Required for
-        array input.
+        arrays.
     constellation : Constellation, optional
         Its ``rotational_symmetry`` is the default ``symmetry``; with it the
         log reports the symbol error rate of the choice.  Defaults to the
@@ -743,49 +740,22 @@ def resolve_phase_ambiguity(
     Returns
     -------
     array_like or Signal
-        Rotated symbols, same shape and dtype.  A :class:`Signal` has its
-        ``resolved_symbols`` resolved against ``source_symbols`` (until the
-        resolved fields leave ``Signal`` in 3.8).
+        Rotated symbols, same shape and dtype; a Signal gives a new Signal.
     """
-    signal_adapter = adapt_signal(
-        symbols, function_name="resolve_phase_ambiguity()", field="resolved_symbols"
-    )
+    name = "resolve_phase_ambiguity()"
+    signal_adapter = adapt_signal(symbols, function_name=name)
+    x = signal_adapter.symbol_array()
     constellation = signal_adapter.resolve_choice("constellation", constellation)
     if symmetry is None and constellation is None:
-        raise ValueError(
-            "resolve_phase_ambiguity() requires constellation or symmetry."
-        )
-    if signal_adapter.signal is not None:
-        sig = signal_adapter.signal
-        if sig.resolved_symbols is None:
-            raise ValueError(
-                "resolved_symbols is not set. Call resolve_symbols(sig) or assign "
-                "resolved_symbols before calling resolve_phase_ambiguity()."
-            )
-        if sig.source_symbols is None:
-            raise ValueError(
-                "source_symbols is not set. Populate source_symbols (the known TX "
-                "symbol sequence) before calling resolve_phase_ambiguity()."
-            )
-        resolved = _resolve_phase_ambiguity_array(
-            signal_adapter.array,
-            sig.source_symbols,
-            constellation,
-            symmetry=symmetry,
-            num_skip_symbols=num_skip_symbols,
-        )
-        return signal_adapter.replace_signal_field("resolved_symbols", resolved)
-
-    if ref_symbols is None:
-        raise ValueError("resolve_phase_ambiguity() requires ref_symbols.")
-
-    return _resolve_phase_ambiguity_array(
-        symbols,
-        ref_symbols,
+        raise ValueError(f"{name} requires constellation or symmetry.")
+    resolved = _resolve_phase_ambiguity_array(
+        x,
+        _reference_symbols(signal_adapter, reference, name),
         constellation,
         symmetry=symmetry,
         num_skip_symbols=num_skip_symbols,
     )
+    return signal_adapter.wrap_samples(resolved)
 
 
 def _resolve_phase_ambiguity_array(

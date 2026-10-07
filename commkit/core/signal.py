@@ -112,9 +112,6 @@ class Signal:
         The frame that generated the samples (a layout snapshot).
     center_frequency : float, default 0.0
         Carrier frequency in Hz (a fact), used to label spectra.
-    resolved_symbols, resolved_bits : array_like, optional
-        Bridge-only caches written by ``resolve_symbols`` and
-        ``demap_symbols_hard``; removed in module pass 3.8.
 
     Notes
     -----
@@ -136,10 +133,6 @@ class Signal:
     reference: Reference | None = None
     frame: Any | None = field(default=None, repr=False)
     center_frequency: float = 0.0
-
-    # Bridge-only pipeline caches (removed in 3.8).
-    resolved_symbols: Any | None = field(default=None, repr=False)
-    resolved_bits: Any | None = field(default=None, repr=False)
 
     def __post_init__(self) -> None:
         for f in dataclasses.fields(self):
@@ -270,26 +263,11 @@ class Signal:
         """Return a fully independent (deep) copy, including all arrays."""
         return copy.deepcopy(self)
 
-    def replace_samples(
-        self,
-        samples: Any,
-        *,
-        _preserve_resolved: bool = False,
-        **metadata: Any,
-    ) -> Signal:
-        """Bridge: :meth:`replace` with new samples that also drops ``resolved_*``.
-
-        Removed with the ``resolved_*`` caches in module pass 3.8.
-        """
-        if not _preserve_resolved:
-            metadata = {"resolved_symbols": None, "resolved_bits": None, **metadata}
-        return self.replace(samples=samples, **metadata)
-
     def to(self, device: str) -> Signal:
         """
         Return a copy of this signal with its arrays on ``device``.
 
-        Moves the samples, the reference and the bridge caches.  Host
+        Moves the samples and the reference.  Host
         metadata (constellation, pulse, frame) stays where it is.  The
         original signal is unchanged; arrays already on ``device`` are shared.
 
@@ -303,11 +281,7 @@ class Signal:
         ImportError
             If GPU is requested but CuPy is not installed/functional.
         """
-        moved: dict[str, Any] = {
-            name: to_device(value, device)
-            for name in ("resolved_symbols", "resolved_bits")
-            if (value := getattr(self, name)) is not None
-        }
+        moved: dict[str, Any] = {}
         if self.reference is not None:
             moved["reference"] = self.reference.to(device)
         return self.replace(samples=to_device(self.samples, device), **moved)

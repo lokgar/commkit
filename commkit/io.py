@@ -10,8 +10,6 @@ The .npz file contains the following named entries:
   ``reference_bits``       - reference bits     (omitted if None)
   ``constellation_points``, ``constellation_bit_labels``, ``constellation_pmf``
                            - the constellation (omitted if None; pmf if shaped)
-  ``resolved_symbols``     - cached symbol array  (only with include_cache=True)
-  ``resolved_bits``        - cached bit array     (only with include_cache=True)
   ``__metadata__``         - zero-d unicode array holding a JSON string with the
                              rates, the center frequency, the constellation
                              family and the pulse (type name and fields).
@@ -52,9 +50,6 @@ _META_FIELDS: tuple[str, ...] = ("sampling_rate", "symbol_rate", "center_frequen
 # Pulse classes that may be reconstructed from an archive.
 _PULSE_TYPES: tuple[str, ...] = ("RRC", "RC", "Gaussian", "Rect", "SmoothRect")
 
-# Derived / cached array fields (only written when include_cache=True)
-_CACHE_FIELDS: tuple[str, ...] = ("resolved_symbols", "resolved_bits")
-
 
 # -----------------------------------------------------------------------------
 # Public API
@@ -66,7 +61,6 @@ def save_npz(
     path: str | Path,
     *,
     compressed: bool = True,
-    include_cache: bool = False,
 ) -> None:
     """
     Save a ``Signal`` to a NumPy archive (.npz).
@@ -81,10 +75,6 @@ def save_npz(
     compressed : bool, default True
         Use ``savez_compressed`` (zlib).  Set to ``False`` to use
         the uncompressed ``savez`` (faster write, larger file).
-    include_cache : bool, default False
-        Also save ``resolved_symbols`` and ``resolved_bits`` if present.
-        These can be recomputed from the signal, so they are omitted by
-        default to keep file sizes small.
 
     Notes
     -----
@@ -98,7 +88,7 @@ def save_npz(
     Examples
     --------
     >>> save_npz(sig, "capture.npz")
-    >>> save_npz(sig, "capture", compressed=False, include_cache=True)
+    >>> save_npz(sig, "capture", compressed=False)
     """
     path = Path(path)
     if path.suffix != ".npz":
@@ -125,12 +115,6 @@ def save_npz(
         if pulse is None
         else {"type": type(pulse).__name__, **dataclasses.asdict(pulse)}
     )
-
-    if include_cache:
-        for field in _CACHE_FIELDS:
-            arr = getattr(signal, field, None)
-            if arr is not None:
-                arrays[field] = _backend.to_device(arr, "CPU")
 
     # -------------------------------------------------------------------------
     # Serialise originating SingleCarrierFrame (if present)
@@ -282,12 +266,9 @@ def load_npz(
             raise ValueError(f"Unknown pulse type {pulse_type!r} in {path}.")
         kwargs["pulse"] = getattr(filtering, pulse_type)(**pulse_fields)
 
+    # 1.x archives may hold resolved_symbols/resolved_bits caches; they are
+    # derived data and not restored.
     sig = Signal(**kwargs)
-
-    # -------------------------------------------------------------------------
-    # Restore cached arrays (bypass re-computation if present in file)
-    # -------------------------------------------------------------------------
-    sig = sig.replace(**{f: data[f] for f in _CACHE_FIELDS if f in data})
 
     # -------------------------------------------------------------------------
     # Reconstruct originating frame (if serialised)
