@@ -3,7 +3,8 @@
 #
 # **Goal**: characterize the phase noise of a CW laser - its FM-noise PSD and
 # its (Lorentzian) linewidth - from a *digitized interferometric beat*, using
-# `commkit.analysis.dsh_phase`, `dsh_fm_noise_psd`, and `linewidth_dsh`.
+# `commkit.analysis.dsh_phase`, `dsh_fm_noise_psd`, and `estimate_linewidth`
+# with the `DshFmPsd`, `DshIncrement` and `DshLorentzian` methods.
 #
 # ## The physical setup
 #
@@ -212,19 +213,16 @@ print(
 # (uncorrected) log-binned median curve in the plot.
 
 # %%
-res_fm = analysis.linewidth_dsh(
+res_fm = analysis.estimate_linewidth(
     z_dsh,
+    analysis.DshFmPsd(delay=TAU_D, f_shift=F_AOM, nperseg=1 << 19),
     sampling_rate=FS,
-    delay=TAU_D,
-    f_shift=F_AOM,
-    method="fm_psd",
-    nperseg=1 << 19,
 )
 
 fig, ax = plotting.plot_frequency_noise_psd(
     res_fm.f,
     res_fm.S_f,
-    floor=res_fm.linewidth,
+    floor=res_fm.value,
     band=res_fm.band,
     used=res_fm.used,
     title="Laser FM-noise PSD - gaps are the interferometer notches k/τ_d",
@@ -234,7 +232,7 @@ ax.legend()
 plt.show()
 
 print(
-    f"fm_psd:    Δν = {res_fm.linewidth / 1e3:.1f} kHz   (truth {DNU_TRUE / 1e3:.0f} kHz, "
+    f"fm_psd:    Δν = {res_fm.value / 1e3:.1f} kHz   (truth {DNU_TRUE / 1e3:.0f} kHz, "
     f"plateau {res_fm.band[0] / 1e3:.1f} kHz - {res_fm.band[1] / 1e6:.1f} MHz)"
 )
 
@@ -274,10 +272,10 @@ print(
 # estimator many more independent averages).
 
 # %%
-res_inc = analysis.linewidth_dsh(
-    z_dsh, sampling_rate=FS, delay=TAU_D, f_shift=F_AOM, method="increment"
+res_inc = analysis.estimate_linewidth(
+    z_dsh, analysis.DshIncrement(delay=TAU_D, f_shift=F_AOM), sampling_rate=FS
 )
-print(f"increment: Δν = {res_inc.linewidth / 1e3:.1f} kHz")
+print(f"increment: Δν = {res_inc.value / 1e3:.1f} kHz")
 
 # %% [markdown]
 # ## 6. Method 3 - the textbook Lorentzian width
@@ -292,25 +290,25 @@ print(f"increment: Δν = {res_inc.linewidth / 1e3:.1f} kHz")
 #   `-20 dB`: for a Lorentzian, `W₋₂₀ = √99 · FWHM`, so
 #   `Δν = W₋₂₀ / (2√99)`.
 #
-# `linewidth_dsh(method="lorentzian")` measures both and reports their ratio
+# `DshLorentzian` measures both and reports their ratio
 # as a lineshape diagnostic: `W₂₀/W₃ ≈ 9.95` for a Lorentzian, `≈ 2.6` for a
 # Gaussian - anything in between says "mixed", trust the deep width.
 # The result carries the beat spectrum, so the line with both width contours
 # plots directly.
 
 # %%
-res_lor = analysis.linewidth_dsh(
-    z_dsh, sampling_rate=FS, delay=TAU_D, method="lorentzian", nperseg=1 << 15
+res_lor = analysis.estimate_linewidth(
+    z_dsh, analysis.DshLorentzian(delay=TAU_D, nperseg=1 << 15), sampling_rate=FS
 )
 plotting.plot_dsh_beat_psd(
     res_lor.f,
     res_lor.psd,
     f_peak=res_lor.f_peak,
-    linewidth=res_lor.linewidth,
+    linewidth=res_lor.value,
     linewidth_3db=res_lor.linewidth_3db,
 )
 print(
-    f"lorentzian: Δν(-20 dB) = {res_lor.linewidth / 1e3:.1f} kHz, "
+    f"lorentzian: Δν(-20 dB) = {res_lor.value / 1e3:.1f} kHz, "
     f"Δν(-3 dB) = {res_lor.linewidth_3db / 1e3:.1f} kHz, "
     f"W₂₀/W₃ = {res_lor.lineshape_ratio:.1f} (Lorentzian ≈ 9.95), "
     f"τ_d/τ_c = {res_lor.coherence_factor:.0f}"
@@ -331,7 +329,7 @@ print(
 #   `1/τ_d` - a Lorentzian fit to *this* is meaningless: most of the power
 #   sits in the un-broadened spike whose width is the Welch **resolution**,
 #   and the estimator warns (`coherence_factor < 6`);
-# * `fm_psd` (and `increment`) on the *same capture* still recover Δν - for
+# * `DshFmPsd` (and `DshIncrement`) on the *same capture* still recover Δν - for
 #   `f ≪ 1/τ_d` the interferometer is a frequency discriminator with known
 #   gain `(2πfτ_d)²`, regime-independent.
 
@@ -358,23 +356,20 @@ plotting.plot_psd(
 )
 plt.show()
 
-res_bad = analysis.linewidth_dsh(
-    z_short, sampling_rate=FS, delay=TAU_SHORT, method="lorentzian", nperseg=1 << 15
+res_bad = analysis.estimate_linewidth(
+    z_short, analysis.DshLorentzian(delay=TAU_SHORT, nperseg=1 << 15), sampling_rate=FS
 )
-res_good = analysis.linewidth_dsh(
+res_good = analysis.estimate_linewidth(
     z_short,
+    analysis.DshFmPsd(delay=TAU_SHORT, f_shift=F_AOM, nperseg=1 << 15),
     sampling_rate=FS,
-    delay=TAU_SHORT,
-    f_shift=F_AOM,
-    method="fm_psd",
-    nperseg=1 << 15,
 )
 print(
-    f"coherent-regime 'lorentzian' answer: {res_bad.linewidth / 1e3:.1f} kHz "
+    f"coherent-regime 'lorentzian' answer: {res_bad.value / 1e3:.1f} kHz "
     f"(truth {DNU_TRUE / 1e3:.0f} kHz) - coherence factor "
     f"{res_bad.coherence_factor:.2f} < 6, do not trust it."
 )
-print(f"fm_psd on the same capture         : {res_good.linewidth / 1e3:.1f} kHz")
+print(f"fm_psd on the same capture         : {res_good.value / 1e3:.1f} kHz")
 
 # %% [markdown]
 # ## 8. What 1/f (flicker) FM noise does
@@ -418,28 +413,24 @@ phi_mix = xp.asarray(
 z_mix, _ = analysis.dsh_beat(phi_mix, sampling_rate=FS, delay=TAU_SHORT, f_shift=F_AOM)
 z_mix = apply_awgn(z_mix, sps=1, esn0_db=SNR_DB, rng=4)
 
-res_mix = analysis.linewidth_dsh(
+res_mix = analysis.estimate_linewidth(
     z_mix,
+    analysis.DshFmPsd(delay=TAU_SHORT, f_shift=F_AOM, nperseg=1 << 15),
     sampling_rate=FS,
-    delay=TAU_SHORT,
-    f_shift=F_AOM,
-    method="fm_psd",
-    nperseg=1 << 15,
 )
-res_naive = analysis.linewidth_dsh(
+# Manual fence: first lobe only (the naive read).
+res_naive = analysis.estimate_linewidth(
     z_mix,
+    analysis.DshFmPsd(
+        delay=TAU_SHORT, f_shift=F_AOM, nperseg=1 << 15, f_max=1.0 / TAU_SHORT
+    ),
     sampling_rate=FS,
-    delay=TAU_SHORT,
-    f_shift=F_AOM,
-    method="fm_psd",
-    nperseg=1 << 15,
-    f_max=1.0 / TAU_SHORT,  # manual fence: first lobe only (the naive read)
 )
 
 fig, ax = plotting.plot_frequency_noise_psd(
     res_mix.f,
     res_mix.S_f,
-    floor=res_mix.linewidth,
+    floor=res_mix.value,
     used=res_mix.used,
     title="Flicker rises above the white plateau at low f - report the PSD, not one number",
 )
@@ -450,11 +441,11 @@ ax.legend()
 plt.show()
 
 print(
-    f"naive first-lobe median      : Δν = {res_naive.linewidth / 1e3:.0f} kHz "
+    f"naive first-lobe median      : Δν = {res_naive.value / 1e3:.0f} kHz "
     "(flicker-inflated)"
 )
 print(
-    f"auto-detected plateau median : Δν = {res_mix.linewidth / 1e3:.0f} kHz "
+    f"auto-detected plateau median : Δν = {res_mix.value / 1e3:.0f} kHz "
     f"(plateau {res_mix.band[0] / 1e3:.0f} kHz - {res_mix.band[1] / 1e6:.1f} MHz)"
 )
 print(f"truth (white-FM part only)   : Δν = {DNU_TRUE / 1e3:.0f} kHz")
@@ -506,9 +497,9 @@ plt.show()
 #
 # | method | validity | needs | robust against |
 # |---|---|---|---|
-# | `fm_psd` | any regime | accurate τ_d, `nperseg ≳ 8·f_s·τ_d` | regime, AWGN + flicker (auto plateau), reveals flicker |
-# | `increment` | any regime, white-FM laser | accurate τ_d | AWGN (intercept) |
-# | `lorentzian` | `τ_d/τ_c ≳ 6` only | resolution + ≳30 dB dynamic range | 1/f core (use deep width) |
+# | `DshFmPsd` | any regime | accurate τ_d, `nperseg ≳ 8·f_s·τ_d` | regime, AWGN + flicker (auto plateau), reveals flicker |
+# | `DshIncrement` | any regime, white-FM laser | accurate τ_d | AWGN (intercept) |
+# | `DshLorentzian` | `τ_d/τ_c ≳ 6` only | resolution + ≳30 dB dynamic range | 1/f core (use deep width) |
 #
 # Practical checklist for a real measurement
 # (`measurement_laser_linewidth_dsh.py` is the fill-in template):
@@ -518,7 +509,7 @@ plt.show()
 #    Lorentzian fit.
 # 2. Choose `τ_d` for the *laser*: 100 kHz-class -> a 25-50 km spool is the
 #    standard incoherent setup; kHz-class -> decoherence is impractical, use a
-#    short delay + `fm_psd`/`increment` (§7).
+#    short delay + `DshFmPsd`/`DshIncrement` (§7).
 # 3. Sample fast enough that the beat (line + wings) fits inside `(0, f_s/2)`
 #    - the AOM must clear the beat half-bandwidth on both sides.  This
 #    constrains the *real* single-PD capture only: an IQ receiver (with or
@@ -535,6 +526,6 @@ plt.show()
 
 # %%
 print("ground truth  :", f"{DNU_TRUE / 1e3:.0f} kHz")
-print("fm_psd        :", f"{res_fm.linewidth / 1e3:.1f} kHz")
-print("increment     :", f"{res_inc.linewidth / 1e3:.1f} kHz")
-print("lorentzian    :", f"{res_lor.linewidth / 1e3:.1f} kHz")
+print("fm_psd        :", f"{res_fm.value / 1e3:.1f} kHz")
+print("increment     :", f"{res_inc.value / 1e3:.1f} kHz")
+print("lorentzian    :", f"{res_lor.value / 1e3:.1f} kHz")

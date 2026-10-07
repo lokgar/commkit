@@ -13,8 +13,8 @@
 #     | carrier_phase_trajectory      -> φ[n]        (data-aided, slip-free)
 #     | separate_drift_phase_noise    -> drift + pn  (spectral split @ cutoff)
 #     + frequency_drift_metrics       -> wander std / peak-to-peak
-#     + linewidth_increment           -> Δν from Var(Δφ_k) slope
-#     + linewidth_beta_separation     -> Δν from the FM-noise PSD
+#     + estimate_linewidth(IncrementSlope)  -> Δν from Var(Δφ_k) slope
+#     + estimate_linewidth(BetaSeparation)  -> Δν from the FM-noise PSD
 #     + allan_deviation               -> noise-type classification
 # ```
 #
@@ -217,7 +217,7 @@ for K in (32, 64, 128):
 # For a Wiener phase, `Var(φ[n] - φ[n-k]) = 2πΔν·T_sym·k + 2σ_φ²`: linear in
 # the lag `k`, with the AWGN angle noise in the intercept.  Fitting the line
 # over a few lags therefore gives an **AWGN-free** linewidth - no SNR estimate
-# needed (`method="slope"`, the default).  `method="subtract"` is the
+# needed (`IncrementSlope`).  `IncrementSubtract` is the
 # single-lag textbook version: it needs the noise variance explicitly and
 # over-subtracts if you hand it a total-residual SNR - kept for comparison.
 #
@@ -229,7 +229,9 @@ for K in (32, 64, 128):
 # the FM PSD in §5 for a clean plateau before quoting it.
 
 # %%
-lw_inc = analysis.linewidth_increment(pn, symbol_rate=R, method="slope", edge_trim=edge)
+lw_inc = analysis.estimate_linewidth(
+    pn, analysis.IncrementSlope(edge_trim=edge), sampling_rate=R
+)
 plotting.plot_increment_variance(
     lw_inc.lag_s,
     lw_inc.var,
@@ -237,8 +239,7 @@ plotting.plot_increment_variance(
     intercept=lw_inc.intercept,
 )
 print(
-    f"linewidth (slope)   = {lw_inc.linewidth / 1e6:.3f} MHz  "
-    f"(truth {DNU_TRUE / 1e6:.1f})"
+    f"linewidth (slope)   = {lw_inc.value / 1e6:.3f} MHz  (truth {DNU_TRUE / 1e6:.1f})"
 )
 print(
     f"fitted intercept    = {lw_inc.awgn_var:.4f} rad²  "
@@ -285,8 +286,10 @@ print(
     f"predicted AWGN knee ≈ {f_knee / 1e9:.2f} GHz -> use f_max ≈ {f_knee / 3e6:.0f} MHz"
 )
 
-lw_beta = analysis.linewidth_beta_separation(
-    phi, symbol_rate=R, nperseg=1 << 15, f_min=20e6, f_max=f_knee / 3.0
+lw_beta = analysis.estimate_linewidth(
+    phi,
+    analysis.BetaSeparation(nperseg=1 << 15, f_min=20e6, f_max=f_knee / 3.0),
+    sampling_rate=R,
 )
 plotting.plot_frequency_noise_psd(
     lw_beta.f,
@@ -299,7 +302,7 @@ plotting.plot_frequency_noise_psd(
 plt.show()
 
 print(
-    f"linewidth (β-area)  = {lw_beta.linewidth / 1e6:.3f} MHz  "
+    f"linewidth (β-area)  = {lw_beta.value / 1e6:.3f} MHz  "
     "(≈0: crossover f_c unresolved, see text)"
 )
 print(
@@ -308,8 +311,10 @@ print(
 )
 
 # What happens if f_max ignores the knee: the f² tail joins the median.
-lw_bad = analysis.linewidth_beta_separation(
-    phi, symbol_rate=R, nperseg=1 << 15, f_min=20e6, f_max=2e9
+lw_bad = analysis.estimate_linewidth(
+    phi,
+    analysis.BetaSeparation(nperseg=1 << 15, f_min=20e6, f_max=2e9),
+    sampling_rate=R,
 )
 print(
     f"floor with f_max=2 GHz (above knee/3): "
@@ -359,7 +364,7 @@ plotting.plot_carrier_phase_characterization(
 )
 plt.show()
 
-print(f"increment linewidth : {lw_inc.linewidth / 1e6:.3f} MHz")
+print(f"increment linewidth : {lw_inc.value / 1e6:.3f} MHz")
 print(f"β-separation floor  : {lw_beta.linewidth_floor / 1e6:.3f} MHz")
 print(f"wander std          : {dm.std / 1e6:.2f} MHz")
 

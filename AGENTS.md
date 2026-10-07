@@ -192,6 +192,11 @@ Dependencies point downward only:
   a new Signal out (update `sampling_rate` when the rate changes).
 - **Estimators** reduce over the time axis by input rank: `(N,)` gives 0-d and
   `(C, N)` gives `(C,)`. Results stay on the input device.
+- **Analysis summaries** (`estimate_linewidth`, `allan_deviation`, the
+  `frequency_drift` statistics) are reporting-layer fits on plot-sized
+  reductions. Like the metrics, they return host floats or `(C,)` arrays.
+  Sample-rate outputs (trajectories, PSDs, `dsh_phase`) stay on the input
+  device.
 - **Metrics** (`evm`, `snr`, `ber`, `ser`, `gmi`, `mi`) return host values: a
   `float` for 1-D input and `np.ndarray (C,)` for 2-D input. They **raise** on
   empty selections; they never return `None` or `0.0` for "nothing measured".

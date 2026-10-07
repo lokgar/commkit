@@ -4,7 +4,12 @@ from typing import Any
 
 import numpy as np
 
-from commkit.analysis import AllanDeviation, BetaSeparationLinewidth, FrequencyDrift
+from commkit.analysis import (
+    AllanDeviation,
+    BetaSeparation,
+    FrequencyDrift,
+    LinewidthEstimate,
+)
 from commkit.plotting.analysis import (
     plot_allan_deviation,
     plot_carrier_phase_characterization,
@@ -94,8 +99,9 @@ class TestPlotAnalysis:
             "drift_metrics": FrequencyDrift(
                 df=xp.linspace(-100, 100, 500), std=0.0, pp=0.0, max_abs=0.0
             ),
-            "linewidth_beta": BetaSeparationLinewidth(
-                linewidth=1e4,
+            "linewidth_beta": LinewidthEstimate(
+                value=1e4,
+                method=BetaSeparation(),
                 linewidth_floor=1e4,
                 n_segments=8,
                 area_hz2=0.0,

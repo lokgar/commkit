@@ -29,7 +29,7 @@
 #
 # In the incoherent regime the beat line at 0 Hz is the self-convolution of
 # the laser line: a **Lorentzian of FWHM 2Δν** (for white FM noise).  All
-# three `linewidth_dsh` estimators apply here; this notebook runs the full
+# three DSH linewidth methods apply here; this notebook runs the full
 # chain including the front-end calibration that this receiver *requires*.
 # (For the AOM/heterodyne variant, the coherent short-delay regime, and
 # flicker-noise effects, see `laser_linewidth_dsh.py`.)
@@ -234,7 +234,7 @@ print(
 # All three estimators are valid in this regime; agreement between them is
 # the real quality check of the measurement.
 #
-# * **`fm_psd`** - deconvolve the interferometer response to get the laser
+# * **`DshFmPsd`** - deconvolve the interferometer response to get the laser
 #   FM-noise PSD; the white-FM plateau at `Δν/π` *is* the linewidth, and any
 #   1/f rise (laser flicker + **fiber acoustics of the 25 km spool**) is
 #   visible instead of silently folded into one number.  Long-delay caveat:
@@ -244,34 +244,36 @@ print(
 #   as many lobes as the detection-noise knee allows, skipping the notch
 #   neighborhoods and any rising low-frequency region; the green markers in
 #   the plot are the bins actually used (`f_min`/`f_max` switch to manual).
-# * **`increment`** - `Var[Δφ(t) - Δφ(t-a)] = 4πΔν·a + 2σ_w²`; slope -> Δν,
+# * **`DshIncrement`** - `Var[Δφ(t) - Δφ(t-a)] = 4πΔν·a + 2σ_w²`; slope -> Δν,
 #   detection noise -> intercept.  Default lags auto-shrink for long delays
 #   (smaller lags give the variance estimator many more independent
 #   averages).
-# * **`lorentzian`** - the line sits at 0 Hz; `f_peak` should come out ≈ 0.
+# * **`DshLorentzian`** - the line sits at 0 Hz; `f_peak` should come out ≈ 0.
 #   Report the deep (-20 dB) width; the `lineshape_ratio` (≈ 9.95 for a pure
 #   Lorentzian) diagnoses 1/f contamination.
 
 # %%
-res_fm = analysis.linewidth_dsh(
-    z, sampling_rate=FS, delay=TAU_D, f_shift=0.0, method="fm_psd", nperseg=1 << 16
+res_fm = analysis.estimate_linewidth(
+    z, analysis.DshFmPsd(delay=TAU_D, f_shift=0.0, nperseg=1 << 16), sampling_rate=FS
 )
-res_inc = analysis.linewidth_dsh(
-    z, sampling_rate=FS, delay=TAU_D, f_shift=0.0, method="increment"
+res_inc = analysis.estimate_linewidth(
+    z, analysis.DshIncrement(delay=TAU_D, f_shift=0.0), sampling_rate=FS
 )
-res_lor = analysis.linewidth_dsh(z, sampling_rate=FS, delay=TAU_D, method="lorentzian")
+res_lor = analysis.estimate_linewidth(
+    z, analysis.DshLorentzian(delay=TAU_D), sampling_rate=FS
+)
 plotting.plot_dsh_beat_psd(
     res_lor.f,
     res_lor.psd,
     f_peak=res_lor.f_peak,
-    linewidth=res_lor.linewidth,
+    linewidth=res_lor.value,
     linewidth_3db=res_lor.linewidth_3db,
 )
 
 fig, ax = plotting.plot_frequency_noise_psd(
     res_fm.f,
     res_fm.S_f,
-    floor=res_fm.linewidth,
+    floor=res_fm.value,
     band=res_fm.band,
     used=res_fm.used,
     title="Deconvolved laser FM-noise PSD (gaps: notch comb at k/τ_d)",
@@ -280,10 +282,10 @@ ax.axhline(DNU_TRUE / np.pi, color="C3", ls="--", label=r"Truth $\Delta\nu/\pi$"
 ax.legend()
 plt.show()
 
-print(f"fm_psd     : Δν = {res_fm.linewidth / 1e3:6.1f} kHz")
-print(f"increment  : Δν = {res_inc.linewidth / 1e3:6.1f} kHz")
+print(f"fm_psd     : Δν = {res_fm.value / 1e3:6.1f} kHz")
+print(f"increment  : Δν = {res_inc.value / 1e3:6.1f} kHz")
 print(
-    f"lorentzian : Δν = {res_lor.linewidth / 1e3:6.1f} kHz   "
+    f"lorentzian : Δν = {res_lor.value / 1e3:6.1f} kHz   "
     f"(f_peak = {res_lor.f_peak / 1e3:.1f} kHz, "
     f"W₂₀/W₃ = {res_lor.lineshape_ratio:.1f}, "
     f"τ_d/τ_c = {res_lor.coherence_factor:.0f})"
@@ -300,14 +302,16 @@ print(f"truth      : Δν = {DNU_TRUE / 1e3:6.1f} kHz")
 # walks over many radians.
 
 # %%
-res_lor_bad = analysis.linewidth_dsh(
-    z_meas, sampling_rate=FS, delay=TAU_D, method="lorentzian"
+res_lor_bad = analysis.estimate_linewidth(
+    z_meas, analysis.DshLorentzian(delay=TAU_D), sampling_rate=FS
 )
-res_fm_bad = analysis.linewidth_dsh(
-    z_meas, sampling_rate=FS, delay=TAU_D, f_shift=0.0, method="fm_psd", nperseg=1 << 16
+res_fm_bad = analysis.estimate_linewidth(
+    z_meas,
+    analysis.DshFmPsd(delay=TAU_D, f_shift=0.0, nperseg=1 << 16),
+    sampling_rate=FS,
 )
-print(f"uncalibrated lorentzian : {res_lor_bad.linewidth / 1e3:6.1f} kHz  <- DC spur")
-print(f"uncalibrated fm_psd     : {res_fm_bad.linewidth / 1e3:6.1f} kHz  (robust)")
+print(f"uncalibrated lorentzian : {res_lor_bad.value / 1e3:6.1f} kHz  <- DC spur")
+print(f"uncalibrated fm_psd     : {res_fm_bad.value / 1e3:6.1f} kHz  (robust)")
 
 # %% [markdown]
 # ## 6. Long-term stability - Allan deviation
@@ -349,9 +353,9 @@ plt.show()
 #    sits exactly mid-line; it is the one error this receiver does not
 #    forgive in spectral estimates.
 # 2. **GSOP the IQ imbalance** - one line, safe in the decoherence regime.
-# 3. **Confirm the regime**: `π·Δν·τ_d ≳ 6`; the `lorentzian` result carries
+# 3. **Confirm the regime**: `π·Δν·τ_d ≳ 6`; the `DshLorentzian` result carries
 #    it as `coherence_factor`, and warnings fire when violated.
-# 4. **Resolve the notch comb for `fm_psd`**: `nperseg ≳ 8·f_s·τ_d`.  The
+# 4. **Resolve the notch comb for `DshFmPsd`**: `nperseg ≳ 8·f_s·τ_d`.  The
 #    plateau auto-detection then spans the lobes and stops below the
 #    detection-noise knee on its own - inspect the used-bin markers
 #    (`res.used`) to confirm what the number was read from.
@@ -366,9 +370,9 @@ plt.show()
 
 # %%
 print("truth      :", f"{DNU_TRUE / 1e3:.0f} kHz")
-print("fm_psd     :", f"{res_fm.linewidth / 1e3:.1f} kHz")
-print("increment  :", f"{res_inc.linewidth / 1e3:.1f} kHz")
-print("lorentzian :", f"{res_lor.linewidth / 1e3:.1f} kHz")
+print("fm_psd     :", f"{res_fm.value / 1e3:.1f} kHz")
+print("increment  :", f"{res_inc.value / 1e3:.1f} kHz")
+print("lorentzian :", f"{res_lor.value / 1e3:.1f} kHz")
 
 
 # f, S_f = res.f, res.S_f

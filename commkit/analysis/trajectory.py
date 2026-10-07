@@ -74,7 +74,7 @@ def carrier_phase_trajectory(
       moderate SNR (≳ 5 dB); beyond that the trajectory itself slips.
     * Residual equalizer ISI appears as extra white angle noise.  It is
       indistinguishable from AWGN here, which is why the downstream
-      ``linewidth_increment(method="slope")`` fits it into the intercept
+      ``IncrementSlope`` linewidth fits it into the intercept
       instead of requiring an explicit noise estimate.
     """
     name = "carrier_phase_trajectory()"

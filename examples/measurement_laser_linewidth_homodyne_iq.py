@@ -150,18 +150,20 @@ print(
 # ## 5. Linewidth, three ways - agreement is the quality check
 
 # %%
-res_fm = analysis.linewidth_dsh(
-    z, sampling_rate=FS, delay=TAU_D, f_shift=0.0, method="fm_psd", nperseg=NPERSEG
+res_fm = analysis.estimate_linewidth(
+    z, analysis.DshFmPsd(delay=TAU_D, f_shift=0.0, nperseg=NPERSEG), sampling_rate=FS
 )
-res_inc = analysis.linewidth_dsh(
-    z, sampling_rate=FS, delay=TAU_D, f_shift=0.0, method="increment"
+res_inc = analysis.estimate_linewidth(
+    z, analysis.DshIncrement(delay=TAU_D, f_shift=0.0), sampling_rate=FS
 )
-res_lor = analysis.linewidth_dsh(z, sampling_rate=FS, delay=TAU_D, method="lorentzian")
+res_lor = analysis.estimate_linewidth(
+    z, analysis.DshLorentzian(delay=TAU_D), sampling_rate=FS
+)
 
 fig, ax = plotting.plot_frequency_noise_psd(
     res_fm.f,
     res_fm.S_f,
-    floor=res_fm.linewidth,
+    floor=res_fm.value,
     band=res_fm.band,
     used=res_fm.used,  # auto-detected plateau: the bins the median ran over
     title="Laser FM-noise PSD (deconvolved; gaps = notch comb at k/τ_d)",
@@ -181,10 +183,10 @@ ax.set_title("SSB phase noise")
 ax.grid(True, which="both")
 plt.show()
 
-print(f"fm_psd     : Δν = {res_fm.linewidth / 1e3:8.2f} kHz")
-print(f"increment  : Δν = {res_inc.linewidth / 1e3:8.2f} kHz")
+print(f"fm_psd     : Δν = {res_fm.value / 1e3:8.2f} kHz")
+print(f"increment  : Δν = {res_inc.value / 1e3:8.2f} kHz")
 print(
-    f"lorentzian : Δν = {res_lor.linewidth / 1e3:8.2f} kHz  "
+    f"lorentzian : Δν = {res_lor.value / 1e3:8.2f} kHz  "
     f"(τ_d/τ_c = {res_lor.coherence_factor:.1f}; trust only if ≳ 6, "
     f"W₂₀/W₃ = {res_lor.lineshape_ratio:.1f}, Lorentzian ≈ 9.95)"
 )
@@ -218,7 +220,7 @@ print(
     f"delay             : τ_d = {TAU_D * 1e6:.2f} µs (1/τ_d = {1 / TAU_D / 1e3:.1f} kHz)"
 )
 print(f"coherence factor  : {res_lor.coherence_factor:.1f}")
-print(f"Δν (fm_psd)       : {res_fm.linewidth / 1e3:.2f} kHz")
-print(f"Δν (increment)    : {res_inc.linewidth / 1e3:.2f} kHz")
-print(f"Δν (lorentzian)   : {res_lor.linewidth / 1e3:.2f} kHz")
+print(f"Δν (fm_psd)       : {res_fm.value / 1e3:.2f} kHz")
+print(f"Δν (increment)    : {res_inc.value / 1e3:.2f} kHz")
+print(f"Δν (lorentzian)   : {res_lor.value / 1e3:.2f} kHz")
 print("spread across estimators ≳ 20 % => inspect the FM PSD before quoting.")

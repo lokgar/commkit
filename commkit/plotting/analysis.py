@@ -124,9 +124,9 @@ def plot_frequency_noise_psd(
     * ``above`` - the **actual β-integration region** ``{f : S_f(f) > β(f)}``
       (in general a union of disjoint intervals): the area between the β-line
       and the PSD is filled wherever the mask is true.  Pass
-      ``linewidth_beta_separation(...).above``.
+      ``estimate_linewidth(phi, BetaSeparation(...)).above``.
 
-    See ``analysis.fm_noise_psd`` and ``analysis.linewidth_beta_separation``.
+    See ``analysis.fm_noise_psd`` and ``analysis.BetaSeparation``.
 
     Parameters
     ----------
@@ -151,8 +151,8 @@ def plot_frequency_noise_psd(
         auto-detected plateau).  Sparse masks (≤ 400 bins) are drawn as
         markers on the PSD trace; dense masks as a highlighted **log-binned
         median curve** over the accepted region (per-bin markers would
-        splatter the figure).  Pass ``linewidth_dsh(...)['used']`` /
-        ``linewidth_beta_separation(...)['used']``.  Channel 0 is drawn.
+        splatter the figure).  Pass the ``used`` of a
+        ``DshFmPsd`` or ``BetaSeparation`` estimate.  Channel 0 is drawn.
     ax : Axes, optional
     show : bool, default False
     title : str
@@ -352,8 +352,8 @@ def plot_increment_variance(
 
     The measured points should follow ``Var = slope·lag + intercept`` for
     white-FM (Wiener) phase noise; curvature signals flicker or drift
-    contamination.  See ``analysis.linewidth_increment`` and
-    ``analysis.linewidth_dsh(method="increment")``.
+    contamination.  See ``analysis.IncrementSlope`` and
+    ``analysis.DshIncrement``.
 
     Parameters
     ----------
@@ -434,7 +434,7 @@ def plot_dsh_beat_psd(
     Overlays the half-power and ``-level_db`` contours and shades the full
     widths implied by the linewidth estimates (``FWHM = 2Δν``,
     ``W_L = 2√(10^{L/10}-1)·Δν``).  See
-    ``analysis.linewidth_dsh(method="lorentzian")``.
+    ``analysis.DshLorentzian``.
 
     Parameters
     ----------
@@ -532,7 +532,8 @@ def plot_carrier_phase_characterization(
         ``{'phi', 'drift', 'drift_metrics', 'linewidth_beta', 'allan'}`` -
         the outputs of ``carrier_phase_trajectory``,
         ``separate_drift_phase_noise``, ``frequency_drift_metrics``,
-        ``linewidth_beta_separation``, and ``allan_deviation``.
+        ``estimate_linewidth(phi, BetaSeparation(...))``, and
+        ``allan_deviation``.
     symbol_rate : float
         Symbol rate in Baud.
     drift_cutoff : float, optional

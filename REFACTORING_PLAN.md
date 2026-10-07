@@ -675,6 +675,7 @@ The equalization pass (3.7) gets more commits:
 | 3.8 | `metrics` | **Low-SNR scale bias (numerical fix, own commit):** `resolve_symbols` normalizes received symbols to unit *total* power, so the signal component is scaled by 1/sqrt(1 + 1/SNR) while `mi`/`gmi`/LLRs assume the signal scale with the caller's `noise_var`. Measured on shaped 256-QAM (H = 7 bits): MI is 11% low at -10 dB, 7% at -5 dB, 2.6% at 0 dB, for uniform and shaped constellations and for both PS conventions; this breaks CV-QKD (I_AB enters the key rate as a small difference). Fix: scale by a data-aided gain estimate (`<r s*>/<|s|^2>` against `reference`, which is also the transmittance estimate) or by signal power = total - noise, never by total power; add an oracle test at -10 dB. **PS GMI overstates the rate by k - H(X)** (found in 3.2b): `gmi` sums `1 - E[log2(1 + exp(...))]` over the k bits, which assumes uniform bits; with a shaped prior the bit-metric decoding rate is `H(X) - sum_b E[log2(1 + exp(-(1-2c_b) LLR_b))]`. Measured: shaped 16-QAM (H = 3.306) at 20 dB gives GMI = 4.000 > H; shaped 64-QAM nu=0.075 at 0 dB gives 1.784 > MI = 0.987. Fix in its own numerical commit with an oracle (GMI <= MI <= H on shaped constellations). Host return values, raise on empty input, `reference`-based Signal path, payload extraction (`extract_payload(sig)` using `frame`), a units and scaling table. See the metrics contract below. | M |
 | 3.9 | `analysis` | Typed result dataclasses instead of dicts; trend fitting lives here | S |
 | 3.10 | `plotting` | Consumes the new results and Signals; recomputes through public functions; no numerical module imports matplotlib (tested) | M |
+| 3.11 | `analysis` | Linewidth on the verb rules: `estimate_linewidth` with method objects and one `LinewidthEstimate`; `sampling_rate` for records; plots take the results | M |
 
 **Pass 3.1 commits:**
 
@@ -1163,6 +1164,33 @@ The equalization pass (3.7) gets more commits:
   (`pkgutil.walk_packages` imports `plotting` itself to list it), and
   names the first one that loads matplotlib; verified by planting an
   import.
+
+**Pass 3.11 commits (analysis on the verb rules):**
+
+- [x] **3.11a `refactor(analysis)!: estimate_linewidth`.** One verb and one
+  result replace `linewidth_increment`, `linewidth_beta_separation`,
+  `linewidth_dsh`, their method strings and their three result classes:
+  `estimate_linewidth(x, method, *, sampling_rate=)` returns a frozen
+  `LinewidthEstimate` (`value` in Hz plus the method's diagnostics, `None`
+  for the others, as `FrequencyOffsetEstimate` does). Method objects:
+  `IncrementSlope`, `IncrementSubtract` (`noise_var=` replaces `snr_db=`),
+  `BetaSeparation` (phase trajectories, real input only), and `DshFmPsd`,
+  `DshIncrement`, `DshLorentzian` (beat records, Signal-aware). Values stay
+  host floats or `(C,)` arrays, like the metrics. `fm_noise_psd` and
+  `dsh_fm_noise_psd` move to `analysis/fm_noise.py`, so `linewidth.py`
+  holds every estimator and imports the DSH front end without a cycle.
+- [ ] **3.11b `refactor(analysis)!: sampling_rate, one drift filter`.** The
+  rate of a phase or frequency record is its `sampling_rate` (1.x called
+  it `symbol_rate`, also for DSH captures). `frequency_drift_metrics`
+  becomes `frequency_drift`. `separate_drift_phase_noise` loses `method=`
+  (`savgol` and `boxcar` duplicated `smoothing.savgol_smooth` and
+  `moving_average`) and keeps the zero-phase Butterworth.
+- [ ] **3.11c `refactor(plotting)!: analysis plots take the results`.** As in
+  3.10b: `plot_frequency_noise_psd`, `plot_increment_variance` and
+  `plot_dsh_beat_psd` take a `LinewidthEstimate`, `plot_allan_deviation` an
+  `AllanDeviation`, `plot_frequency_drift` a `FrequencyDrift`, and
+  `plot_carrier_phase_characterization` takes keyword results instead of
+  a report dict.
 
 **Equalizer safety rules (3.7):**
 
