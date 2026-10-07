@@ -1144,10 +1144,16 @@ The equalization pass (3.7) gets more commits:
   `axis` (time is the last axis). `plot_psd`, `plot_spectrogram`,
   `plot_eye_diagram` and `plot_time_domain` no longer re-enter themselves
   per channel: a private renderer does.
-- [ ] **3.10b `refactor(plotting)!: sync plots take the estimates`.** The
+- [x] **3.10b `refactor(plotting)!: sync plots take the estimates`.** The
   timing, frequency-offset and carrier-phase diagnostics take the
   `TimingEstimate`, `FrequencyOffsetEstimate` or `CarrierPhaseEstimate`
-  whose fields they draw, instead of loose arrays.
+  whose fields they draw, instead of loose arrays (an estimate without the
+  needed fields raises, naming the method that provides them). The
+  blockwise plot recomputes its dense trajectory with
+  `correct_frequency_offset` on a unit record, and the pilot-tone plot its
+  spectrum from the samples (the extraction passband is drawn as `f_p ±
+  B`). Their tests build real estimates. The contract registry has no
+  strict xfails left.
 - [ ] **3.10c `refactor(plotting): no test-only exports`.** The private
   re-exports leave `plotting/__init__`; tests import the owning module.
 - [ ] **3.10d `test: numerical modules never import matplotlib`.** A fresh

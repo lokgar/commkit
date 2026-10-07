@@ -1,6 +1,6 @@
 """Carrier phase: ``estimate_carrier_phase`` and ``correct_carrier_phase``.
 
-The method object selects the algorithm (D16); each lives next to its kernel
+The method object selects the algorithm; each lives next to its kernel
 in this package and is dispatched through ``_ESTIMATORS``.
 """
 

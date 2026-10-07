@@ -1,10 +1,18 @@
-"""Tests for synchronization plotting functions (timing, carrier frequency, carrier phase)."""
+"""Tests for synchronization plotting functions (timing, carrier frequency, carrier phase).
+
+The diagnostics take the estimates of the public estimators, so every test
+builds a real estimate and checks that the plot draws its fields.
+"""
 
 from typing import Any
 from unittest.mock import patch
 
 import numpy as np
+import pytest
 
+from commkit import frequency, recovery, timing
+from commkit.core import Preamble, SingleCarrierFrame
+from commkit.mapping import Constellation
 from commkit.plotting.sync import (
     plot_carrier_phase_decomposition,
     plot_carrier_phase_trajectory,
@@ -13,166 +21,177 @@ from commkit.plotting.sync import (
     plot_mm_autocorrelation,
     plot_pilot_phase_estimate,
     plot_pilot_tone_phase_estimate,
+    plot_pilot_tones_phase_estimate,
     plot_timing_correlation,
 )
+from commkit.spectral import add_pilot_tone
+
+FS = 1e6
+
+
+def _qpsk(xp: Any, n: int = 4096, channels: int = 1, df: float = 0.0, seed: int = 0):
+    """QPSK at 1 sample per symbol with a frequency offset ``df`` (Hz at FS)."""
+    rng = np.random.default_rng(seed)
+    pts = Constellation.psk(4).points
+    s = pts[rng.integers(0, 4, (channels, n))]
+    x = s * np.exp(2j * np.pi * df * np.arange(n) / FS)
+    x = x + 0.05 * (rng.standard_normal(x.shape) + 1j * rng.standard_normal(x.shape))
+    x = x.astype(np.complex64)
+    return xp.asarray(x[0] if channels == 1 else x), s
 
 
 class TestPlotTimingSync:
-    """Tests for timing correlation and synchronization diagnostic plots."""
+    """Timing correlation from a TimingEstimate."""
 
-    def test_timing_correlation_siso(self, xp: Any) -> None:
-        """Verify plot_timing_correlation with SISO input."""
-        corr = xp.zeros(200, dtype=xp.float32)
-        corr[100] = 5.0
-        corr[98:103] = xp.array([1.0, 3.0, 5.0, 3.0, 1.0])
-        fig, axes = plot_timing_correlation(
-            corr_mag=corr,
-            peak_indices=100,
-            norm_factors=1.0,
-            threshold=0.5,
-            offset=10,
-            show=False,
+    def _estimate(self, xp: Any, channels: int = 1):
+        frame = SingleCarrierFrame(
+            payload_len=200,
+            preamble=Preamble(sequence_type="barker", length=13, num_streams=channels),
+            num_streams=channels,
         )
-        assert fig is not None
-        assert axes.shape == (1, 2)
+        sig = frame.to_signal(sps=1, symbol_rate=FS)
+        pad = np.zeros((channels, 37), dtype=np.complex64)
+        x = np.concatenate([pad, np.atleast_2d(sig.samples)], axis=-1)
+        sig = sig.replace(samples=xp.asarray(x[0] if channels == 1 else x))
+        return timing.estimate_timing(sig)
 
-    def test_timing_correlation_mimo(self, xp: Any) -> None:
-        """Verify plot_timing_correlation with multi-channel MIMO input."""
-        corr = xp.zeros((2, 200), dtype=xp.float32)
-        corr[0, 80] = 4.0
-        corr[1, 120] = 4.5
-        fig, axes = plot_timing_correlation(
-            corr_mag=corr,
-            peak_indices=xp.array([80, 120]),
-            norm_factors=xp.array([1.0, 1.0]),
-            threshold=0.4,
-            show=False,
+    @pytest.mark.parametrize("channels", [1, 2])
+    def test_timing_correlation(self, xp: Any, channels: int) -> None:
+        """One overall/zoom row per channel; the marked peak is the start."""
+        est = self._estimate(xp, channels)
+        fig, axes = plot_timing_correlation(est, show=False)
+        assert np.asarray(axes, dtype=object).shape == (channels, 2)
+        starts = np.atleast_1d(
+            np.asarray(est.integer.get() if xp is not np else est.integer)
         )
-        assert fig is not None
-        assert axes.shape == (2, 2)
+        assert int(starts[0]) == 37
+        # The peak line sits at the estimated start.
+        vlines = [
+            ln.get_xdata()[0]
+            for ln in axes[0][0].lines[1:]
+            if len(set(ln.get_xdata())) == 1
+        ]
+        assert 37 in vlines
 
     def test_timing_correlation_show(self, xp: Any) -> None:
-        """Verify plot_timing_correlation with show=True returns None."""
-        corr = xp.ones(50)
         with patch("matplotlib.pyplot.show"):
-            res = plot_timing_correlation(corr, 25, 1.0, 0.5, show=True)
-        assert res is None
+            assert plot_timing_correlation(self._estimate(xp), show=True) is None
 
 
 class TestPlotFrequencySync:
-    """Tests for frequency offset estimation and spectrum diagnostic plots."""
+    """Frequency-offset diagnostics from FrequencyOffsetEstimates."""
 
-    def test_mm_autocorrelation_siso(self, xp: Any) -> None:
-        """Verify plot_mm_autocorrelation for 1D lag autocorrelation."""
-        lags = xp.array([0.9 + 0.1j, 0.8 + 0.2j, 0.7 + 0.3j], dtype=xp.complex64)
-        fig, axes = plot_mm_autocorrelation(
-            lags, f_est=10e3, sampling_rate=1e6, M=4, show=False
+    @pytest.mark.parametrize("channels", [1, 2])
+    def test_mm_autocorrelation(self, xp: Any, channels: int) -> None:
+        x, _ = _qpsk(xp, channels=channels, df=2e3)
+        est = frequency.estimate_frequency_offset(
+            x, frequency.MengaliMorelli(), sampling_rate=FS
         )
+        fig, axes = plot_mm_autocorrelation(est, sampling_rate=FS, show=False)
         assert fig is not None
 
-    def test_mm_autocorrelation_mimo(self, xp: Any) -> None:
-        """Verify plot_mm_autocorrelation for multi-channel input."""
-        lags = xp.ones((2, 4), dtype=xp.complex64)
-        fig, axes = plot_mm_autocorrelation(
-            lags, f_est=[10e3, -5e3], sampling_rate=1e6, M=4, show=False
+    def test_mm_autocorrelation_needs_mm_estimate(self, xp: Any) -> None:
+        x, _ = _qpsk(xp, df=2e3)
+        est = frequency.estimate_frequency_offset(
+            x, frequency.MthPower(power=4), sampling_rate=FS
         )
-        assert fig is not None
+        with pytest.raises(ValueError, match="autocorrelation"):
+            plot_mm_autocorrelation(est, sampling_rate=FS)
 
     def test_frequency_offset_spectrum(self, xp: Any) -> None:
-        """Verify plot_frequency_offset_spectrum with search range overlay."""
-        nfft = 128
-        mag = xp.ones(nfft, dtype=xp.float32)
-        mag[64] = 10.0
-        freqs = xp.fft.fftfreq(nfft, d=1.0 / 1e6)
-        fig, ax = plot_frequency_offset_spectrum(
-            mag_spectrum=mag,
-            freqs=freqs,
-            M=4,
-            k_peaks=64,
-            f_estimates=[15e3],
-            search_range=(-50e3, 50e3),
-            show=False,
+        """The estimate line is drawn at the estimated offset."""
+        x, _ = _qpsk(xp, df=3e3)
+        est = frequency.estimate_frequency_offset(
+            x, frequency.MthPower(power=4), sampling_rate=FS
         )
-        assert fig is not None
+        fig, ax = plot_frequency_offset_spectrum(
+            est, search_range=(-1e4, 1e4), show=False
+        )
+        f_hat = float(est.value)
+        assert f_hat == pytest.approx(3e3, abs=50)
+        assert any(ln.get_xdata()[0] == pytest.approx(f_hat) for ln in ax.lines[1:])
 
     def test_frequency_offset_blockwise_result(self, xp: Any) -> None:
-        """Verify plot_frequency_offset_blockwise_result."""
-        t_centers = xp.array([50.0, 150.0, 250.0])
-        df_estimates = xp.array([24e3, 25e3, 26e3])
-        n_grid = xp.arange(300.0)
-        df_dense = xp.linspace(24e3, 26e3, 300)
-        phase_trajectory = xp.cumsum(df_dense) * (2 * np.pi / 1e6)
-
+        """The recomputed trajectory follows the block estimates."""
+        n = 8192
+        x, _ = _qpsk(xp, n=n, df=2e3)
+        est = frequency.estimate_frequency_offset(
+            x, frequency.MthPower(power=4, block_size=1024), sampling_rate=FS
+        )
         fig, axes = plot_frequency_offset_blockwise_result(
-            t_centers=t_centers,
-            df_estimates=df_estimates,
-            n_grid=n_grid,
-            df_dense=df_dense,
-            phase_trajectory=phase_trajectory,
-            show=False,
+            est, num_samples=n, sampling_rate=FS, max_points=0, show=False
         )
-        assert fig is not None
+        df_line = axes[0].lines[0].get_ydata()  # kHz
+        assert np.median(df_line) == pytest.approx(2.0, abs=0.1)
 
-
-class TestPlotPhaseSync:
-    """Tests for carrier phase trajectory and pilot-aided sync plotting."""
-
-    def test_carrier_phase_trajectory_siso(self, xp: Any) -> None:
-        """Verify plot_carrier_phase_trajectory with SISO phase array."""
-        phi = xp.linspace(0, np.pi, 200)
-        fig, ax = plot_carrier_phase_trajectory(
-            phi, block_centers=[50, 100, 150], n_train=30, show=False
+    def test_pilot_phase_frequency_estimate(self, xp: Any) -> None:
+        """A PilotSymbols estimate labels the fit with its offset."""
+        x, s = _qpsk(xp, df=1e3)
+        idx = np.arange(0, 4096, 64)
+        est = frequency.estimate_frequency_offset(
+            x, frequency.PilotSymbols(idx, s[0, idx]), sampling_rate=FS
         )
-        assert fig is not None
+        fig, axes = plot_pilot_phase_estimate(est, sampling_rate=FS, show=False)
+        assert np.asarray(axes, dtype=object).shape == (1, 1)
 
-    def test_carrier_phase_trajectory_mimo(self, xp: Any) -> None:
-        """Verify plot_carrier_phase_trajectory with MIMO phase array."""
-        phi = xp.stack([xp.linspace(0, 1, 100), xp.linspace(0.5, 1.5, 100)])
+
+class TestPlotCarrierPhase:
+    """Carrier-phase diagnostics from CarrierPhaseEstimates."""
+
+    def test_carrier_phase_trajectory_estimate(self, xp: Any) -> None:
+        """A block estimate marks its block centres."""
+        x, _ = _qpsk(xp, n=1024)
+        est = recovery.estimate_carrier_phase(
+            x,
+            recovery.ViterbiViterbi(block_size=64),
+            constellation=Constellation.psk(4),
+        )
+        fig, ax = plot_carrier_phase_trajectory(est, n_train=100, show=False)
+        assert len(ax.lines) == 1 + len(est.block_centers) + 1
+
+    def test_carrier_phase_trajectory_array(self, xp: Any) -> None:
+        phi = xp.cumsum(xp.ones((2, 100)) * 0.01, axis=1)
         fig, ax = plot_carrier_phase_trajectory(phi, show=False)
-        assert fig is not None
+        assert len(ax.lines) == 2
 
-    def test_pilot_phase_estimate(self, xp: Any) -> None:
-        """Verify plot_pilot_phase_estimate unwrapped/detrended view and full trajectory."""
-        pilot_indices = xp.arange(10, 500, 10)
-        phases = xp.linspace(-1.0, 1.0, len(pilot_indices))
-        fig, ax = plot_pilot_phase_estimate(
-            pilot_indices=pilot_indices,
-            phi_pilots_u=phases,
-            f_est=5e3,
-            sampling_rate=1e6,
-            show=False,
-        )
-        assert fig is not None
-
-        # Exercise with full interpolated trajectory
-        phi_full = xp.zeros((1, 500))
-        fig2, axes2 = plot_pilot_phase_estimate(
-            pilot_indices=pilot_indices,
-            phi_pilots_u=phases,
-            phi_full=phi_full,
-            f_est=5e3,
-            sampling_rate=1e6,
-            show=False,
-        )
-        assert fig2 is not None
+    def test_pilot_phase_carrier_estimate(self, xp: Any) -> None:
+        """PilotAided: pilot panel plus the interpolated trajectory."""
+        x, s = _qpsk(xp, df=1e3)
+        idx = np.arange(0, 4096, 32)
+        est = recovery.estimate_carrier_phase(x, recovery.PilotAided(idx, s[0, idx]))
+        fig, axes = plot_pilot_phase_estimate(est, sampling_rate=FS, show=False)
+        assert np.asarray(axes, dtype=object).shape == (1, 2)
 
     def test_pilot_tone_phase_estimate(self, xp: Any) -> None:
-        """Verify plot_pilot_tone_phase_estimate."""
-        freqs = xp.linspace(-500e3, 500e3, 256)
-        mag = xp.ones(256)
-        window = xp.ones(256)
-        theta = xp.linspace(0.1, 0.9, 128)
-        fig, ax = plot_pilot_tone_phase_estimate(
-            freqs=freqs,
-            mag_spectrum=mag,
-            window=window,
-            f_tones=100e3,
-            theta=theta,
-            tone_frequency=100e3,
-            bandwidth=20e3,
-            show=False,
+        x, _ = _qpsk(xp, n=8192)
+        method = recovery.PilotTone(frequency=3e5, bandwidth=2e4)
+        x = add_pilot_tone(x, frequency=3e5, sampling_rate=FS)
+        est = recovery.estimate_carrier_phase(x, method, sampling_rate=FS)
+        fig, axes = plot_pilot_tone_phase_estimate(
+            est, x, method=method, sampling_rate=FS, show=False
         )
-        assert fig is not None
+        assert len(axes) == 2
+
+    def test_pilot_tones_phase_estimate(self, xp: Any) -> None:
+        x, _ = _qpsk(xp, n=8192)
+        tones = (2.5e5, 3.5e5)
+        for f in tones:
+            x = add_pilot_tone(x, frequency=f, sampling_rate=FS)
+        est = recovery.estimate_carrier_phase(
+            x, recovery.PilotTones(tones, bandwidth=2e4), sampling_rate=FS
+        )
+        fig, axes = plot_pilot_tones_phase_estimate(est, show=False)
+        assert len(axes) == 2
+
+    def test_wrong_estimate_raises(self, xp: Any) -> None:
+        x, _ = _qpsk(xp, n=1024)
+        est = recovery.estimate_carrier_phase(
+            x,
+            recovery.ViterbiViterbi(block_size=64),
+            constellation=Constellation.psk(4),
+        )
+        with pytest.raises(ValueError, match="PilotTones"):
+            plot_pilot_tones_phase_estimate(est)
 
     def test_carrier_phase_decomposition(self, xp: Any) -> None:
         """Verify plot_carrier_phase_decomposition with and without drift, and with n_train."""
@@ -193,19 +212,3 @@ class TestPlotPhaseSync:
             show=False,
         )
         assert fig2 is not None
-
-    def test_pilot_tones_phase_estimate(self, xp: Any) -> None:
-        """Verify plot_pilot_tones_phase_estimate for MRC common-phase tracking."""
-        from commkit.plotting.sync import plot_pilot_tones_phase_estimate
-
-        delta = [xp.zeros(100), xp.linspace(0, 0.1, 100)]
-        phi = xp.linspace(0, 0.5, 100)
-        fig, axes = plot_pilot_tones_phase_estimate(
-            delta=delta,
-            phi=phi,
-            ref=0,
-            used=[0, 1],
-            show=False,
-        )
-        assert fig is not None
-        assert len(axes) == 2

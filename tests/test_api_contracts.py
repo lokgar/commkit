@@ -563,12 +563,12 @@ ROWS: list[Row] = [
     Row("commkit.plotting.spectral.plot_spectrogram", PLOT),
     Row("commkit.plotting.sync.plot_carrier_phase_decomposition", PLOT, data=2),
     Row("commkit.plotting.sync.plot_carrier_phase_trajectory", PLOT),
-    Row("commkit.plotting.sync.plot_frequency_offset_blockwise_result", PLOT, data=2),
-    Row("commkit.plotting.sync.plot_frequency_offset_spectrum", PLOT, data=2),
+    Row("commkit.plotting.sync.plot_frequency_offset_blockwise_result", PLOT),
+    Row("commkit.plotting.sync.plot_frequency_offset_spectrum", PLOT),
     Row("commkit.plotting.sync.plot_mm_autocorrelation", PLOT),
-    Row("commkit.plotting.sync.plot_pilot_phase_estimate", PLOT, data=3),
+    Row("commkit.plotting.sync.plot_pilot_phase_estimate", PLOT),
     Row("commkit.plotting.sync.plot_pilot_tone_phase_estimate", PLOT, data=2),
-    Row("commkit.plotting.sync.plot_pilot_tones_phase_estimate", PLOT, data=2),
+    Row("commkit.plotting.sync.plot_pilot_tones_phase_estimate", PLOT),
     Row("commkit.plotting.sync.plot_timing_correlation", PLOT),
     Row("commkit.plotting.theme.apply_default_theme", PLOT, data=0),
     Row("commkit.plotting.waveform.plot_time_domain", PLOT),
@@ -941,13 +941,4 @@ def test_equalizer_result(row: Row, xp, backend_device, request):
 # Migration checklist: 2.0 rules not met yet (strict xfail)
 # -----------------------------------------------------------------------------
 
-LEGACY: dict[str, frozenset[str]] = {
-    "commkit.plotting.sync.plot_carrier_phase_trajectory": L(SIG),
-    "commkit.plotting.sync.plot_frequency_offset_blockwise_result": L(SIG),
-    "commkit.plotting.sync.plot_frequency_offset_spectrum": L(SIG),
-    "commkit.plotting.sync.plot_mm_autocorrelation": L(SIG),
-    "commkit.plotting.sync.plot_pilot_phase_estimate": L(SIG),
-    "commkit.plotting.sync.plot_pilot_tone_phase_estimate": L(SIG),
-    "commkit.plotting.sync.plot_pilot_tones_phase_estimate": L(SIG),
-    "commkit.plotting.sync.plot_timing_correlation": L(SIG),
-}
+LEGACY: dict[str, frozenset[str]] = {}

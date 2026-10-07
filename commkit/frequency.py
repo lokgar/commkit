@@ -112,7 +112,7 @@ __all__ = [
 # -----------------------------------------------------------------------------
 # METHOD OBJECTS
 # -----------------------------------------------------------------------------
-# One frozen object per estimation method (D16).  ``block_size`` turns any of
+# One frozen object per estimation method.  ``block_size`` turns any of
 # the blind methods into a blockwise tracker: every block of every channel is
 # estimated in one batched call, and ``correct_frequency_offset`` interpolates
 # the block estimates (PCHIP) into a phase trajectory.

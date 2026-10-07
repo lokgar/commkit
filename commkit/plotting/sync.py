@@ -17,7 +17,7 @@ from .theme import (
 )
 
 
-def plot_timing_correlation(
+def _plot_timing_correlation(
     corr_mag,
     peak_indices,
     norm_factors,
@@ -111,7 +111,7 @@ def plot_timing_correlation(
     return _finish((fig, axes), show)
 
 
-def plot_mm_autocorrelation(
+def _plot_mm_autocorrelation(
     R_np,
     f_est,
     sampling_rate: float,
@@ -221,7 +221,7 @@ def plot_mm_autocorrelation(
     return _finish((fig, axes_per_ch[0] if C == 1 else axes_per_ch), show)
 
 
-def plot_frequency_offset_spectrum(
+def _plot_frequency_offset_spectrum(
     mag_spectrum,
     freqs,
     M: int,
@@ -313,10 +313,9 @@ def plot_frequency_offset_spectrum(
     return _finish((fig, axes_list[0] if C == 1 else axes_list), show)
 
 
-def plot_carrier_phase_trajectory(
+def _plot_carrier_phase_trajectory(
     phi_full,
     block_centers=None,
-    phi_blocks=None,
     n_train: int = 0,
     ax=None,
     show: bool = False,
@@ -337,8 +336,6 @@ def plot_carrier_phase_trajectory(
     block_centers : array_like, optional
         Block centre positions in symbols (VV, BPS). Shape: ``(N_blocks,)``.
         If provided, thin vertical lines at each block centre are drawn.
-    phi_blocks : array_like, optional
-        Kept for backwards compatibility - ignored (block markers removed).
     n_train : int, default 0
         Training/DD boundary symbol index. Draws a dashed vertical line.
     ax : Axes, optional
@@ -388,7 +385,7 @@ def plot_carrier_phase_trajectory(
     return _finish((fig, axi), show)
 
 
-def plot_frequency_offset_blockwise_result(
+def _plot_frequency_offset_blockwise_result(
     t_centers,
     df_estimates,
     n_grid,
@@ -475,11 +472,11 @@ def plot_frequency_offset_blockwise_result(
     return _finish((fig, axes), show)
 
 
-def plot_pilot_phase_estimate(
+def _plot_pilot_phase_estimate(
     pilot_indices,
     phi_pilots_u,
     phi_full=None,
-    f_est: float | Sequence[float] | np.ndarray = 0.0,
+    f_est: float | Sequence[float] | np.ndarray | None = 0.0,
     sampling_rate: float = 1.0,
     ax=None,
     show: bool = False,
@@ -523,7 +520,10 @@ def plot_pilot_phase_estimate(
         phi_pilots_u = phi_pilots_u[None, :]
     C, P = phi_pilots_u.shape
 
-    if isinstance(f_est, (np.ndarray, list, tuple)):
+    f_ests: list[float] | None
+    if f_est is None:
+        f_ests = None  # label the fitted slope instead
+    elif isinstance(f_est, (np.ndarray, list, tuple)):
         f_ests = [float(f) for f in f_est]  # type: ignore[union-attr]
     else:
         f_ests = [float(f_est)] * C  # type: ignore[arg-type]
@@ -566,7 +566,9 @@ def plot_pilot_phase_estimate(
             )
             phi_fit = slope * t_pilots + (np.mean(phi_p) - slope * np.mean(t_pilots))
         else:
+            slope = 0.0
             phi_fit = phi_p.copy()
+        f_label = f_ests[i] if f_ests is not None else slope / (2.0 * np.pi)
 
         ax1 = axes[i][0]
         ax1.scatter(
@@ -580,7 +582,7 @@ def plot_pilot_phase_estimate(
             pilot_indices,
             np.degrees(phi_fit),
             "r--",
-            label=f"Fit  $\\Delta f$={f_ests[i]:.3f} Hz",
+            label=f"Fit  $\\Delta f$={f_label:.3f} Hz",
         )
         ax1.set_title(f"{title}{ch_suffix} - Pilots")
         ax1.set_xlabel("Sample Index")
@@ -612,7 +614,7 @@ def plot_pilot_phase_estimate(
     return _finish((fig, axes), show)
 
 
-def plot_pilot_tone_phase_estimate(
+def _plot_pilot_tone_phase_estimate(
     freqs,
     mag_spectrum,
     window,
@@ -747,7 +749,7 @@ def plot_pilot_tone_phase_estimate(
     return _finish((fig, (ax_spec, ax_phase)), show)
 
 
-def plot_pilot_tones_phase_estimate(
+def _plot_pilot_tones_phase_estimate(
     delta,
     phi,
     ref: int,
@@ -918,3 +920,418 @@ def plot_carrier_phase_decomposition(
     axi.legend(loc="best")
 
     return _finish((fig, axi), show)
+
+
+# -----------------------------------------------------------------------------
+# Public diagnostics: each takes the estimate whose fields it draws
+# -----------------------------------------------------------------------------
+
+
+def _host(a: Any) -> np.ndarray:
+    return np.asarray(to_device(a, "cpu"))
+
+
+def _require(estimate: Any, field: str, function_name: str, method: str) -> Any:
+    value = getattr(estimate, field, None)
+    if value is None:
+        raise ValueError(
+            f"{function_name} needs an estimate with {field} (from {method})."
+        )
+    return value
+
+
+def plot_timing_correlation(
+    estimate: Any,
+    *,
+    threshold: float = 3.0,
+    ax=None,
+    show: bool = False,
+    title: str = "Timing Correlation",
+) -> tuple[Any, Any] | None:
+    """
+    Plots the correlation of a :class:`~commkit.timing.TimingEstimate`.
+
+    Per channel, an overall view of ``|correlation|`` and a zoom on the
+    detected start, with the detection threshold ``threshold · mean|R|``
+    (the peak-to-mean ``metric`` the estimator compares with it).
+
+    Parameters
+    ----------
+    estimate : TimingEstimate
+        From :func:`~commkit.timing.estimate_timing`.
+    threshold : float, default 3.0
+        Detection threshold drawn (the ``threshold`` of ``estimate_timing``).
+    ax : array_like of Axes, optional
+        ``(C, 2)`` axes - overall and zoom per channel.
+    show : bool, default False
+    title : str, default "Timing Correlation"
+
+    Returns
+    -------
+    (fig, axes) or None
+    """
+    corr = np.atleast_2d(np.abs(_host(estimate.correlation)))
+    peaks = np.atleast_1d(_host(estimate.integer)) - estimate.search_start
+    return _plot_timing_correlation(
+        corr,
+        peaks,
+        corr.mean(axis=-1),
+        threshold,
+        offset=estimate.search_start,
+        ax=ax,
+        show=show,
+        title=title,
+    )
+
+
+def plot_mm_autocorrelation(
+    estimate: Any,
+    *,
+    sampling_rate: float,
+    ax=None,
+    show: bool = False,
+    title: str = "FOE - Mengali-Morelli",
+) -> tuple[Any, Any] | None:
+    """
+    Plots the autocorrelation of a Mengali-Morelli frequency estimate.
+
+    Per channel: ``|R[m]|`` and the wrapped ``angle(R[m])`` against the lag,
+    with the ramp ``2π·Δf·M·m/f_s`` the estimate implies.
+
+    Parameters
+    ----------
+    estimate : FrequencyOffsetEstimate
+        From ``estimate_frequency_offset(x, MengaliMorelli())``.
+    sampling_rate : float
+        Sampling rate in Hz of the estimated samples.
+    ax : Axes pair or ``(C, 2)`` axes, optional
+    show : bool, default False
+    title : str, default "FOE - Mengali-Morelli"
+
+    Returns
+    -------
+    (fig, axes) or None
+    """
+    r = _require(
+        estimate, "autocorrelation", "plot_mm_autocorrelation()", "MengaliMorelli"
+    )
+    return _plot_mm_autocorrelation(
+        _host(r),
+        np.atleast_1d(_host(estimate.value)).tolist(),
+        sampling_rate,
+        M=estimate.power or 1,
+        ax=ax,
+        show=show,
+        title=title,
+    )
+
+
+def plot_frequency_offset_spectrum(
+    estimate: Any,
+    *,
+    search_range: tuple[float, float] | None = None,
+    ax=None,
+    show: bool = False,
+    title: str = "FOE - M-th Power Spectrum",
+) -> tuple[Any, Any] | None:
+    """
+    Plots the M-th power spectrum of an ``MthPower`` frequency estimate.
+
+    The axis is mapped back from ``M·Δf`` to ``Δf`` so the detected peak
+    lines up with the estimate.
+
+    Parameters
+    ----------
+    estimate : FrequencyOffsetEstimate
+        From ``estimate_frequency_offset(x, MthPower())``.
+    search_range : (float, float), optional
+        The ``MthPower(search_range=)`` used, shaded.
+    ax : Axes or sequence of Axes, optional
+        One per channel.
+    show : bool, default False
+    title : str, default "FOE - M-th Power Spectrum"
+
+    Returns
+    -------
+    (fig, axes) or None
+    """
+    spectrum = _require(
+        estimate, "spectrum", "plot_frequency_offset_spectrum()", "MthPower"
+    )
+    return _plot_frequency_offset_spectrum(
+        _host(spectrum),
+        _host(estimate.spectrum_frequencies),
+        estimate.power or 1,
+        np.zeros(1, dtype=int),
+        np.atleast_1d(_host(estimate.value)).tolist(),
+        search_range=search_range,
+        ax=ax,
+        show=show,
+        title=title,
+    )
+
+
+def plot_frequency_offset_blockwise_result(
+    estimate: Any,
+    *,
+    num_samples: int,
+    sampling_rate: float,
+    ax=None,
+    show: bool = False,
+    title: str = "Block-wise FOE",
+    max_points: int = 4000,
+) -> tuple[Any, Any] | None:
+    """
+    Plots a blockwise frequency estimate and the correction it applies.
+
+    Two panels: the block estimates with the interpolated ``Δf`` trajectory,
+    and the integrated phase.  Both are recomputed with
+    :func:`~commkit.frequency.correct_frequency_offset` on a unit record of
+    ``num_samples`` samples, so they show exactly what correction applies.
+
+    Parameters
+    ----------
+    estimate : FrequencyOffsetEstimate
+        A blockwise estimate (``MthPower(block_size=)`` or
+        ``MengaliMorelli(block_size=)``); the first channel is drawn.
+    num_samples : int
+        Length of the corrected record.
+    sampling_rate : float
+        Sampling rate in Hz.
+    ax : list of 2 Axes, optional
+    show : bool, default False
+    title : str, default "Block-wise FOE"
+    max_points : int, default 4000
+        Per-trace point budget (envelope decimation); ``<= 0`` plots all.
+
+    Returns
+    -------
+    (fig, axes) or None
+    """
+    from ..frequency import correct_frequency_offset
+
+    centers = _require(
+        estimate,
+        "block_centers",
+        "plot_frequency_offset_blockwise_result()",
+        "a blockwise method (block_size=)",
+    )
+    rotation = correct_frequency_offset(
+        np.ones(num_samples, dtype=np.complex128),
+        estimate,
+        sampling_rate=sampling_rate,
+    )
+    phase = -np.unwrap(np.angle(np.atleast_2d(_host(rotation))[0]))
+    df_dense = np.gradient(phase) * sampling_rate / (2.0 * np.pi)
+    block_values = np.atleast_2d(_host(estimate.block_values))[0]
+    return _plot_frequency_offset_blockwise_result(
+        centers,
+        block_values,
+        np.arange(num_samples),
+        df_dense,
+        phase,
+        ax=ax,
+        show=show,
+        title=title,
+        max_points=max_points,
+    )
+
+
+def plot_pilot_phase_estimate(
+    estimate: Any,
+    *,
+    sampling_rate: float = 1.0,
+    ax=None,
+    show: bool = False,
+    title: str = "Pilot Phase Estimate",
+) -> tuple[Any, Any] | None:
+    """
+    Plots the pilot phases of a pilot-based estimate with their linear fit.
+
+    For a :class:`~commkit.recovery.CarrierPhaseEstimate` (``PilotAided``) a
+    second panel shows the interpolated per-symbol trajectory; for a
+    :class:`~commkit.frequency.FrequencyOffsetEstimate` (``PilotSymbols``)
+    the fit is labelled with the estimated offset.
+
+    Parameters
+    ----------
+    estimate : CarrierPhaseEstimate or FrequencyOffsetEstimate
+        With ``pilot_indices`` and ``pilot_phase``.
+    sampling_rate : float, default 1.0
+        Sampling rate in Hz of the pilot indices (labels the fitted slope in
+        Hz; 1.0 gives cycles per sample).
+    ax : array_like of Axes, optional
+    show : bool, default False
+    title : str, default "Pilot Phase Estimate"
+
+    Returns
+    -------
+    (fig, axes) or None
+    """
+    from ..recovery import CarrierPhaseEstimate
+
+    name = "plot_pilot_phase_estimate()"
+    pilot_phase = _require(estimate, "pilot_phase", name, "a pilot method")
+    is_phase = isinstance(estimate, CarrierPhaseEstimate)
+    return _plot_pilot_phase_estimate(
+        _host(estimate.pilot_indices),
+        _host(pilot_phase),
+        phi_full=_host(estimate.value) if is_phase else None,
+        f_est=None if is_phase else np.atleast_1d(_host(estimate.value)),
+        sampling_rate=sampling_rate,
+        ax=ax,
+        show=show,
+        title=title,
+    )
+
+
+def plot_pilot_tone_phase_estimate(
+    estimate: Any,
+    samples: Any,
+    *,
+    method: Any,
+    sampling_rate: float | None = None,
+    ax=None,
+    show: bool = False,
+    title: str = "CPR - Pilot Tone",
+    max_points: int = 4000,
+) -> tuple[Any, Any] | None:
+    """
+    Plots a ``PilotTone`` carrier-phase estimate against the tone spectrum.
+
+    Two panels: ``|FFT(samples)|`` (dB) with the extraction passband
+    ``f_p ± B`` and the measured tone peaks, and the recovered phase.
+
+    Parameters
+    ----------
+    estimate : CarrierPhaseEstimate
+        From ``estimate_carrier_phase(samples, method)``.
+    samples : array_like or Signal
+        The samples the estimate was made from.
+    method : PilotTone
+        The method used (its ``frequency`` and ``bandwidth`` are drawn).
+    sampling_rate : float, optional
+        Sampling rate in Hz (a fact): taken from a Signal, required for
+        arrays.
+    ax : two Axes, optional
+    show : bool, default False
+    title : str, default "CPR - Pilot Tone"
+    max_points : int, default 4000
+        Per-trace point budget (envelope decimation); ``<= 0`` plots all.
+
+    Returns
+    -------
+    (fig, axes) or None
+    """
+    from ..core._signal_adapter import adapt_signal
+
+    name = "plot_pilot_tone_phase_estimate()"
+    tones = _require(estimate, "tone_frequencies", name, "PilotTone")
+    adapter = adapt_signal(samples, function_name=name)
+    fs = float(adapter.resolve_fact("sampling_rate", sampling_rate))
+    x = np.atleast_2d(_host(adapter.array))
+    freqs = np.fft.fftfreq(x.shape[-1], d=1.0 / fs)
+    centers = np.atleast_1d(np.asarray(tones, dtype=float))[:, None]
+    passband = (np.abs(freqs[None, :] - centers) <= method.bandwidth).astype(float)
+    return _plot_pilot_tone_phase_estimate(
+        freqs,
+        np.abs(np.fft.fft(x, axis=-1)),
+        np.broadcast_to(passband, x.shape),
+        tones,
+        _host(estimate.value),
+        method.frequency,
+        method.bandwidth,
+        ax=ax,
+        show=show,
+        title=title,
+        max_points=max_points,
+    )
+
+
+def plot_pilot_tones_phase_estimate(
+    estimate: Any,
+    *,
+    ax=None,
+    show: bool = False,
+    title: str = "CPR - Pilot Tones (MRC)",
+    max_points: int = 4000,
+) -> tuple[Any, Any] | None:
+    """
+    Plots a ``PilotTones`` carrier-phase estimate.
+
+    Two panels: the tracked inter-tone differentials ``δ_k[n]`` (gated
+    tones dashed) and the combined phase (the first channel).
+
+    Parameters
+    ----------
+    estimate : CarrierPhaseEstimate
+        From ``estimate_carrier_phase(x, PilotTones(...))``.
+    ax : two Axes, optional
+    show : bool, default False
+    title : str, default "CPR - Pilot Tones (MRC)"
+    max_points : int, default 4000
+        Per-trace point budget (envelope decimation); ``<= 0`` plots all.
+
+    Returns
+    -------
+    (fig, axes) or None
+    """
+    delta = _require(
+        estimate,
+        "differential_phase",
+        "plot_pilot_tones_phase_estimate()",
+        "PilotTones",
+    )
+    return _plot_pilot_tones_phase_estimate(
+        _host(delta),
+        np.atleast_2d(_host(estimate.value))[0],
+        int(estimate.reference_tone),
+        tuple(estimate.used_tones),
+        ax=ax,
+        show=show,
+        title=title,
+        max_points=max_points,
+    )
+
+
+def plot_carrier_phase_trajectory(
+    phase: Any,
+    *,
+    n_train: int = 0,
+    ax=None,
+    show: bool = False,
+    title: str = "Carrier Phase Trajectory",
+) -> tuple[Any, Any] | None:
+    """
+    Plots a per-symbol carrier phase trajectory (all channels overlaid).
+
+    Parameters
+    ----------
+    phase : CarrierPhaseEstimate or array_like
+        An estimate (its block centres, if any, are marked) or a phase array
+        in radians, ``(N,)`` or ``(C, N)`` - e.g. an equalizer's
+        ``phase_trajectory``.
+    n_train : int, default 0
+        Training/decision-directed boundary, drawn dashed.
+    ax : Axes, optional
+    show : bool, default False
+    title : str, default "Carrier Phase Trajectory"
+
+    Returns
+    -------
+    (fig, ax) or None
+    """
+    from ..recovery import CarrierPhaseEstimate
+
+    if isinstance(phase, CarrierPhaseEstimate):
+        return _plot_carrier_phase_trajectory(
+            phase.value,
+            block_centers=phase.block_centers,
+            n_train=n_train,
+            ax=ax,
+            show=show,
+            title=title,
+        )
+    return _plot_carrier_phase_trajectory(
+        phase, n_train=n_train, ax=ax, show=show, title=title
+    )
