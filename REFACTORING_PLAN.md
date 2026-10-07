@@ -1048,7 +1048,7 @@ The equalization pass (3.7) gets more commits:
   instead of 22.7% at 0 dB). Both now decide at unit power under the pmf.
   Validation: a clean shaped signal has SER 0, and blind EVM equals
   data-aided EVM at 35 dB (both fail before).
-- [ ] **3.8c `refactor(metrics)!: 2.0 signatures`.**
+- [x] **3.8c `refactor(metrics)!: 2.0 signatures`.**
   - `evm(symbols, reference=None, *, constellation=, blind=False,
     num_skip_symbols=0)` returns the RMS EVM in percent only (dB is
     `20 log10(evm / 100)`); `blind=True` decides against the constellation
@@ -1069,7 +1069,10 @@ The equalization pass (3.7) gets more commits:
     choice. Expected values do not change: tests that called
     `resolve_symbols` call `decimate_to_symbol_rate`, which normalizes the
     same way. `_legacy_constellation` and `_rescale_ps_symbols` go (a
-    shaped constellation has unit power).
+    shaped constellation has unit power). A/B against 3.8b: 56 values
+    (uniform and shaped, SISO and MIMO, array and Signal paths) identical
+    except shaped GMI, 4e-9 relative (float32 LLRs of unscaled instead of
+    rescaled symbols).
 - [ ] **3.8d `refactor(core)!: remove the resolved_* caches`.**
   `Signal.resolved_symbols` / `resolved_bits`, `replace_samples`,
   `replace_signal_field` and `multirate.resolve_symbols` go (use

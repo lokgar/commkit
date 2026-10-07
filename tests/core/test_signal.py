@@ -659,24 +659,11 @@ class TestSignalResolutionAndMetrics:
         assert sig.resolved_bits is not None
         assert len(sig.resolved_bits) == num_symbols
 
-        # Metrics should now work
-        evm_pct, evm_db = metrics.evm(sig)
-        assert evm_pct >= 0
-
-        snr_db = metrics.snr(sig)
-        assert snr_db > 0
-
-        # Test BER with manual reference bits
-        ref_bits = sig.source_bits
-        if ref_bits is not None:
-            # ber() requires resolved_bits (populated by demap_symbols_hard above)
-            ber = metrics.ber(sig, bits_tx=ref_bits)
-            assert 0 <= ber <= 1
-
-        # Test that BER raises if resolved_bits is missing
-        sig = sig.replace(resolved_bits=None)
-        with pytest.raises(ValueError, match="No resolved bits available"):
-            metrics.ber(sig, bits_tx=ref_bits)
+        # Metrics measure the 1-SPS Signal against its reference.
+        sym = multirate.decimate_to_symbol_rate(original)
+        assert metrics.evm(sym) >= 0
+        assert metrics.snr(sym) > 0
+        assert 0 <= metrics.ber(sym, sym.reference.bits) <= 1
 
     def test_resolve_symbols_sps_errors(self, xp):
         """Verify resolve_symbols error paths for invalid SPS values."""
@@ -708,19 +695,7 @@ class TestSignalResolutionAndMetrics:
         s = Signal(
             samples=xp.ones(10, dtype="complex64"), sampling_rate=1.0, symbol_rate=1.0
         )
-        s = s.replace(resolved_symbols=xp.ones(10, dtype="complex64"))
-        with pytest.raises(ValueError, match="No reference available"):
-            metrics.evm(s)
-
-    def test_evm_no_resolved(self, xp):
-        """Verify evm raises when no resolved_symbols are present."""
-        s = Signal(
-            samples=xp.ones(10, dtype="complex64"),
-            sampling_rate=1.0,
-            symbol_rate=1.0,
-            reference=Reference(symbols=xp.ones(10, dtype="complex64")),
-        )
-        with pytest.raises(ValueError, match="No resolved symbols available"):
+        with pytest.raises(ValueError, match="needs reference symbols"):
             metrics.evm(s)
 
     def test_snr_no_reference(self, xp):
@@ -728,32 +703,23 @@ class TestSignalResolutionAndMetrics:
         s = Signal(
             samples=xp.ones(10, dtype="complex64"), sampling_rate=1.0, symbol_rate=1.0
         )
-        s = s.replace(resolved_symbols=xp.ones(10, dtype="complex64"))
-        with pytest.raises(ValueError, match="No reference available"):
-            metrics.snr(s)
-
-    def test_snr_no_resolved(self, xp):
-        """Verify snr raises when no resolved_symbols are present."""
-        s = Signal(
-            samples=xp.ones(10, dtype="complex64"),
-            sampling_rate=1.0,
-            symbol_rate=1.0,
-            reference=Reference(symbols=xp.ones(10, dtype="complex64")),
-        )
-        with pytest.raises(ValueError, match="No resolved symbols available"):
+        with pytest.raises(ValueError, match="needs reference symbols"):
             metrics.snr(s)
 
     def test_ber_no_reference(self, xp):
         """Verify ber raises when no reference bits are available."""
         s = Signal(
-            samples=xp.ones(10, dtype="complex64"), sampling_rate=1.0, symbol_rate=1.0
+            samples=xp.ones(10, dtype="complex64"),
+            sampling_rate=1.0,
+            symbol_rate=1.0,
+            constellation=Constellation.qam(4),
+            reference=Reference(symbols=xp.ones(10, dtype="complex64")),
         )
-        s = s.replace(resolved_bits=xp.array([0, 1, 0, 1]))
-        with pytest.raises(ValueError, match="No reference bits available"):
+        with pytest.raises(ValueError, match="needs reference bits"):
             metrics.ber(s)
 
-    def test_evm_with_explicit_num_train_symbols(self, xp):
-        """evm(num_train_symbols=N) discards leading symbols from resolved_symbols."""
+    def test_evm_with_explicit_num_skip_symbols(self, xp):
+        """evm(num_skip_symbols=N) leaves out the leading (training) symbols."""
         from commkit import equalization
 
         n_symbols = 600
@@ -783,17 +749,15 @@ class TestSignalResolutionAndMetrics:
                 symbols=orig.source_symbols[..., : result.y_hat.shape[-1]]
             ),
         )
-        rx = multirate.resolve_symbols(rx)
+        rx = multirate.decimate_to_symbol_rate(rx)
 
-        evm_pct, evm_db = metrics.evm(rx, num_train_symbols=n_train)
-        assert np.isfinite(float(evm_db))
-        assert float(evm_pct) > 0
+        evm_pct = metrics.evm(rx, num_skip_symbols=n_train)
+        assert np.isfinite(evm_pct)
+        assert evm_pct > 0
+        assert np.isfinite(metrics.evm(rx))
 
-        evm_pct2, evm_db2 = metrics.evm(rx)
-        assert np.isfinite(float(evm_db2))
-
-    def test_snr_with_explicit_num_train_symbols(self, xp):
-        """snr(num_train_symbols=N) discards leading symbols before computing SNR."""
+    def test_snr_with_explicit_num_skip_symbols(self, xp):
+        """snr(num_skip_symbols=N) leaves out leading symbols before computing SNR."""
         from commkit import equalization
 
         n_symbols = 600
@@ -821,16 +785,16 @@ class TestSignalResolutionAndMetrics:
                 symbols=orig.source_symbols[..., : result.y_hat.shape[-1]]
             ),
         )
-        rx = multirate.resolve_symbols(rx)
+        rx = multirate.decimate_to_symbol_rate(rx)
 
-        snr_val = metrics.snr(rx, num_train_symbols=result.num_train_symbols)
+        snr_val = metrics.snr(rx, num_skip_symbols=result.num_train_symbols)
         assert np.isfinite(snr_val)
 
         snr_notrim = metrics.snr(rx)
         assert np.isfinite(snr_notrim)
 
-    def test_ber_with_explicit_num_train_symbols(self, xp):
-        """ber(num_train_symbols=N) discards leading bits before computing BER."""
+    def test_ber_with_explicit_num_skip_symbols(self, xp):
+        """ber(num_skip_symbols=N) leaves out k bits per leading symbol."""
         from commkit import equalization
 
         n_symbols = 600
@@ -859,10 +823,9 @@ class TestSignalResolutionAndMetrics:
                 bits=orig.source_bits[..., : result.y_hat.shape[-1] * 2],
             ),
         )
-        rx = multirate.resolve_symbols(rx)
-        rx = mapping.demap_symbols_hard(rx)
+        rx = multirate.decimate_to_symbol_rate(rx)
 
-        ber_val = metrics.ber(rx, num_train_symbols=result.num_train_symbols)
+        ber_val = metrics.ber(rx, num_skip_symbols=result.num_train_symbols)
         assert np.isfinite(float(ber_val))
         assert 0.0 <= float(ber_val) <= 1.0
 

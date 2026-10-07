@@ -8,7 +8,6 @@ import pytest
 
 from commkit import mapping
 from commkit.mapping import Constellation
-from commkit.mapping.constellation import _legacy_constellation
 from commkit.mapping.gray import _gray_points
 
 
@@ -295,22 +294,3 @@ class TestOperations:
             Constellation.qam(4).llr(
                 xp.zeros(2, "complex64"), noise_var=1.0, method="x"
             )
-
-
-class TestLegacyBridge:
-    """``_legacy_constellation`` serves unmigrated modules until 3.7/3.8."""
-
-    def test_legacy_matches_factory(self) -> None:
-        assert _legacy_constellation("qam", 16) == Constellation.qam(16)
-        assert _legacy_constellation("ask", 4, unipolar=True) == Constellation.pam(
-            4, unipolar=True
-        )
-        assert _legacy_constellation("qam", 16) is _legacy_constellation("qam", 16)
-
-    def test_legacy_pmf_is_not_rescaled(self) -> None:
-        pmf = mapping.maxwell_boltzmann(Constellation.qam(16), nu=0.05)
-        c = _legacy_constellation("qam", 16, pmf=pmf)
-        assert c.power() == pytest.approx(
-            mapping.shaping._constellation_power(c.points, pmf)
-        )
-        assert c.power() < 1.0

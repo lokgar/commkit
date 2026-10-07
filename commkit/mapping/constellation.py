@@ -23,7 +23,7 @@ data's device.
 """
 
 from dataclasses import dataclass, replace
-from functools import cache, cached_property, lru_cache
+from functools import cache, cached_property
 
 import numpy as np
 
@@ -390,37 +390,4 @@ def _named(family: str, order: int, unipolar: bool) -> Constellation:
     if not isinstance(order, int | np.integer) or order < 2:
         raise ValueError(f"order must be an integer >= 2, got {order!r}.")
     points = _gray_points(family, int(order), unipolar=unipolar)
-    return Constellation(points, family=family)
-
-
-def _legacy_constellation(
-    modulation: str,
-    order: int,
-    *,
-    normalize: bool = True,
-    unipolar: bool = False,
-    pmf: np.ndarray | None = None,
-) -> Constellation:
-    """1.x ``(modulation, order, pmf)`` bridge for unmigrated modules.
-
-    Unlike :meth:`Constellation.shaped`, a ``pmf`` is attached *without*
-    rescaling, which is the 1.x PS convention (``E[|s|^2] < 1`` under the
-    pmf).  Removed when the last caller migrates (3.7, 3.8).
-    """
-    base = _legacy_base(modulation, order, normalize, unipolar)
-    if pmf is None:
-        return base
-    return replace(base, pmf=np.asarray(pmf, dtype=np.float64))
-
-
-@lru_cache(maxsize=128)
-def _legacy_base(
-    modulation: str, order: int, normalize: bool, unipolar: bool
-) -> Constellation:
-    points = _gray_points(modulation, order, normalize=normalize, unipolar=unipolar)
-    mod = modulation.lower()
-    family = next(
-        (f for f in ("qam", "psk") if f in mod),
-        "pam" if ("ask" in mod or "pam" in mod) else None,
-    )
     return Constellation(points, family=family)

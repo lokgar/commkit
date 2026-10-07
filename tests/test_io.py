@@ -336,27 +336,18 @@ class TestNPZDeviceHandling:
             Constellation.qam(16), 2000, symbol_rate=10e9, sps=4, pulse=RRC(0.35), rng=7
         )
         sig = filtering.matched_filter(sig)
-        sig = multirate.resolve_symbols(sig)
-        sig = mapping.demap_symbols_hard(sig)
+        sig = multirate.decimate_to_symbol_rate(sig)
 
         evm_before = metrics.evm(sig)
         ber_before = metrics.ber(sig)
 
         p = tmp_path / "pipeline.npz"
-        save_npz(sig, p, include_cache=True)
+        save_npz(sig, p)
         loaded = load_npz(p, device="cpu")
 
-        xpt.assert_allclose(
-            to_numpy(sig.resolved_symbols), to_numpy(loaded.resolved_symbols), atol=1e-7
-        )
-        xpt.assert_array_equal(
-            to_numpy(sig.resolved_bits), to_numpy(loaded.resolved_bits)
-        )
         xpt.assert_array_equal(to_numpy(sig.source_bits), to_numpy(loaded.source_bits))
-
-        assert metrics.evm(loaded) is not None
-        xpt.assert_allclose(metrics.evm(loaded)[0], evm_before[0], rtol=1e-5)
-        xpt.assert_allclose(float(metrics.ber(loaded)), float(ber_before), rtol=1e-9)
+        xpt.assert_allclose(metrics.evm(loaded), evm_before, rtol=1e-5)
+        assert metrics.ber(loaded) == ber_before
 
 
 def test_frame_constellations_roundtrip(tmp_path: Any) -> None:

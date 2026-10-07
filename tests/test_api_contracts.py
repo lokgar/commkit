@@ -134,7 +134,6 @@ SPS = 2
 N_SYM = 512
 RS = 1e9
 FS = RS * SPS
-QAM16 = {"modulation": "qam", "order": 16}
 C16 = Constellation.qam(16)
 
 
@@ -479,7 +478,7 @@ ROWS: list[Row] = [
     ),
     Row("commkit.mapping.shaping.maxwell_boltzmann", DESIGN),
     Row("commkit.mapping.shaping.optimal_nu", DESIGN),
-    # --- metrics (Signal semantics are redefined in pass 3.8) ----------------
+    # --- metrics -----------------------------------------------------------
     Row(
         "commkit.metrics.ber",
         METRIC,
@@ -505,14 +504,20 @@ ROWS: list[Row] = [
         "commkit.metrics.ser",
         METRIC,
         data=2,
-        call=lambda c, x: _a(x * 1.01, _ref(c, x), **QAM16),
+        call=lambda c, x: _a(x * 1.01, _ref(c, x), constellation=C16),
         symbols=True,
     ),
-    Row("commkit.metrics.gmi", METRIC, data=2),
+    Row(
+        "commkit.metrics.gmi",
+        METRIC,
+        data=2,
+        call=lambda c, x: _a(C16.llr(x, noise_var=0.1), _bits(c, x), constellation=C16),
+        symbols=True,
+    ),
     Row(
         "commkit.metrics.mi",
         METRIC,
-        call=lambda c, x: _a(x, noise_var=0.1, **QAM16),
+        call=lambda c, x: _a(x, noise_var=0.1, constellation=C16),
         symbols=True,
     ),
     # --- multirate ----------------------------------------------------------
@@ -950,11 +955,6 @@ LEGACY: dict[str, frozenset[str]] = {
     "commkit.analysis.linewidth.fm_noise_psd": L(SIG),
     "commkit.analysis.linewidth.linewidth_beta_separation": L(SIG),
     "commkit.analysis.linewidth.linewidth_increment": L(SIG),
-    "commkit.metrics.ber": L(f"{MET}@gpu"),
-    "commkit.metrics.evm": L(MET),
-    "commkit.metrics.mi": L(SIG, MET),
-    "commkit.metrics.ser": L(SIG, f"{MET}@gpu"),
-    "commkit.metrics.snr": L(f"{MET}@gpu"),
     "commkit.plotting.constellation.plot_constellation": L(SIG),
     "commkit.plotting.constellation.plot_ideal_constellation": L(SIG),
     "commkit.plotting.equalizer.plot_equalizer_result": L(SIG),

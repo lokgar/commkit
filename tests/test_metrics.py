@@ -5,7 +5,7 @@ from typing import Any
 import numpy as np
 import pytest
 
-from commkit import generate, mapping, metrics, multirate
+from commkit import generate, metrics, multirate
 from commkit.impairments import apply_awgn
 from commkit.mapping import Constellation, compute_llr, map_bits
 
@@ -34,13 +34,23 @@ class TestBitErrorRate:
         ber_val = metrics.ber(bits_rx, bits_tx)
         assert ber_val == 1.0
 
-    def test_ber_empty(self, xp: Any) -> None:
-        """Verify BER with empty arrays."""
-        assert metrics.ber(xp.array([]), xp.array([])) == 0.0
+    def test_ber_empty_raises(self, xp: Any) -> None:
+        """Nothing to measure raises; it is never reported as zero errors."""
+        with pytest.raises(ValueError, match="nothing to measure"):
+            metrics.ber(xp.array([]), xp.array([]))
+
+    def test_ber_skip_symbols(self, xp: Any) -> None:
+        """num_skip_symbols drops k bits per symbol (k from the constellation)."""
+        tx = xp.array([0, 1, 0, 1, 1, 0, 0, 1])
+        rx = xp.array([1, 1, 0, 1, 1, 0, 0, 0])  # errors in symbols 0 and 3
+        c = Constellation.qam(4)
+        assert metrics.ber(rx, tx, constellation=c, num_skip_symbols=1) == 1 / 6
+        with pytest.raises(ValueError, match="constellation"):
+            metrics.ber(rx, tx, num_skip_symbols=1)
 
     def test_ber_length_mismatch(self, xp: Any) -> None:
         """Verify error on bit length mismatch."""
-        with pytest.raises(ValueError, match="Shape mismatch"):
+        with pytest.raises(ValueError, match="shape mismatch"):
             metrics.ber(xp.array([1, 0]), xp.array([1, 0, 1]))
 
     def test_ber_multichannel(self, xp: Any) -> None:
@@ -62,28 +72,25 @@ class TestErrorVectorMagnitude:
     def test_evm_perfect_signal(self, xp: Any) -> None:
         """EVM should be 0% for identical tx/rx symbols."""
         symbols = xp.array([1 + 1j, -1 + 1j, -1 - 1j, 1 - 1j])
-        evm_pct, evm_db = metrics.evm(symbols, symbols)
+        evm_pct = metrics.evm(symbols, symbols)
         assert evm_pct < 1e-10
-        assert evm_db < -200
 
     def test_evm_with_known_error(self, xp: Any) -> None:
         """EVM with known error magnitude."""
         tx = xp.array([1.0 + 0j, 0.0 + 1j, -1.0 + 0j, 0.0 - 1j])
         rx = tx + 0.1
-        evm_pct, _ = metrics.evm(rx, tx)
+        evm_pct = metrics.evm(rx, tx)
         assert abs(evm_pct - 10.0) < 1.0
 
     def test_evm_near_zero_ref(self, xp: Any) -> None:
         """Verify EVM behavior when reference signal is near zero."""
         tx = xp.zeros(10)
         rx = xp.ones(10)
-        pct, db = metrics.evm(rx, tx)
-        assert pct == float("inf")
-        assert db == float("inf")
+        assert metrics.evm(rx, tx) == float("inf")
 
     def test_evm_shape_mismatch(self, xp: Any) -> None:
         """Verify error on shape mismatch in evm."""
-        with pytest.raises(ValueError, match="Shape mismatch"):
+        with pytest.raises(ValueError, match="shape mismatch"):
             metrics.evm(xp.zeros(10), xp.zeros(11))
 
     def test_evm_array_handling(self, xp: Any, xpt: Any) -> None:
@@ -91,29 +98,27 @@ class TestErrorVectorMagnitude:
         rx = xp.array([[1.0, 1.0], [1.0, 0.8]])
         tx = xp.array([[1.0, 1.0], [1.1, 1.1]])
 
-        ep, edb = metrics.evm(rx, tx)
+        ep = metrics.evm(rx, tx)
+        assert isinstance(ep, np.ndarray)
         assert ep.shape == (2,)
         assert ep[0] == 0
         assert ep[1] > 0
 
         # Low power mask for array
         tx_zero = xp.zeros((2, 2))
-        ep_z, edb_z = metrics.evm(rx, tx_zero)
-        xpt.assert_array_equal(ep_z, float("inf"))
-        xpt.assert_array_equal(edb_z, float("inf"))
+        np.testing.assert_array_equal(metrics.evm(rx, tx_zero), float("inf"))
 
     def test_evm_normalized_scaling(self, xp: Any) -> None:
         """Identical shape with scalar scale factor normalizes to 0% EVM."""
         ref = xp.array([1.0, 1.0])
         rx = xp.array([1.1, 1.1])
-        evm_pct, _ = metrics.evm(rx, ref)
-        assert evm_pct < 1e-5
+        assert metrics.evm(rx, ref) < 1e-5
 
     def test_evm_blind_perfect_signal(self, xp: Any) -> None:
         """Blind EVM should be near 0% when rx sits exactly on constellation points."""
         const = xp.asarray(Constellation.qam(16).points)
         rx = xp.tile(const, 32)
-        pct, db = metrics.evm(rx, mode="blind", modulation="qam", order=16)
+        pct = metrics.evm(rx, blind=True, constellation=Constellation.qam(16))
         assert pct < 1e-6
 
     def test_evm_blind_decreases_with_snr(self, xp: Any) -> None:
@@ -125,8 +130,9 @@ class TestErrorVectorMagnitude:
         rx_high = apply_awgn(xp.asarray(tx), esn0_db=30.0, sps=1)
         rx_low = apply_awgn(xp.asarray(tx), esn0_db=10.0, sps=1)
 
-        pct_high, _ = metrics.evm(rx_high, mode="blind", modulation="qam", order=16)
-        pct_low, _ = metrics.evm(rx_low, mode="blind", modulation="qam", order=16)
+        c16 = Constellation.qam(16)
+        pct_high = metrics.evm(rx_high, blind=True, constellation=c16)
+        pct_low = metrics.evm(rx_low, blind=True, constellation=c16)
         assert pct_high < pct_low
 
     def test_evm_blind_vs_data_aided_converge(self, xp: Any) -> None:
@@ -136,8 +142,8 @@ class TestErrorVectorMagnitude:
         tx = map_bits(xp.asarray(bits), constellation=Constellation.qam(16))
         rx = apply_awgn(tx, esn0_db=30.0, sps=1)
 
-        pct_da, _ = metrics.evm(rx, tx)
-        pct_bl, _ = metrics.evm(rx, mode="blind", modulation="qam", order=16)
+        pct_da = metrics.evm(rx, tx)
+        pct_bl = metrics.evm(rx, blind=True, constellation=Constellation.qam(16))
         assert abs(pct_da - pct_bl) < 0.5
 
     def test_evm_blind_shaped_matches_data_aided(self, xp: Any) -> None:
@@ -146,9 +152,9 @@ class TestErrorVectorMagnitude:
         c = Constellation.qam(64).shaped(nu=0.075)
         sig = generate(c, 20000, symbol_rate=1e9, rng=2)
         rx = apply_awgn(xp.asarray(sig.samples), esn0_db=35.0, sps=1, rng=3)
-        sig = multirate.resolve_symbols(sig.replace(samples=rx))
-        pct_da, _ = metrics.evm(sig)
-        pct_bl, _ = metrics.evm(sig, mode="blind")
+        sig = multirate.decimate_to_symbol_rate(sig.replace(samples=rx))
+        pct_da = metrics.evm(sig)
+        pct_bl = metrics.evm(sig, blind=True)
         assert pct_bl == pytest.approx(pct_da, rel=0.02)
 
     def test_evm_blind_multichannel(self, xp: Any, xpt: Any) -> None:
@@ -157,24 +163,33 @@ class TestErrorVectorMagnitude:
         rng = np.random.default_rng(1)
         rx = xp.stack([const[rng.integers(0, 4, 200)] for _ in range(3)])
 
-        pct, db = metrics.evm(rx, mode="blind", modulation="qam", order=4)
+        pct = metrics.evm(rx, blind=True, constellation=Constellation.qam(4))
         assert pct.shape == (3,)
-        xpt.assert_allclose(pct, 0.0, atol=1e-6)
+        np.testing.assert_allclose(pct, 0.0, atol=1e-6)
 
-    def test_evm_blind_missing_args_raises(self, xp: Any) -> None:
-        """Blind mode without modulation/order raises ValueError."""
-        with pytest.raises(ValueError, match="modulation and order"):
-            metrics.evm(xp.zeros(10), mode="blind")
+    def test_evm_blind_missing_constellation_raises(self, xp: Any) -> None:
+        """Blind EVM without a constellation raises ValueError."""
+        with pytest.raises(ValueError, match="constellation"):
+            metrics.evm(xp.zeros(10), blind=True)
 
-    def test_evm_data_aided_missing_tx_raises(self, xp: Any) -> None:
-        """data_aided mode without tx_symbols raises ValueError."""
-        with pytest.raises(ValueError, match="tx_symbols"):
+    def test_evm_data_aided_missing_reference_raises(self, xp: Any) -> None:
+        """Data-aided EVM without a reference raises ValueError."""
+        with pytest.raises(ValueError, match="reference"):
             metrics.evm(xp.zeros(10))
 
-    def test_evm_unknown_mode_raises(self, xp: Any) -> None:
-        """Unknown mode string raises ValueError."""
-        with pytest.raises(ValueError, match="Unknown mode"):
-            metrics.evm(xp.zeros(10), xp.zeros(10), mode="magic")
+    def test_evm_blind_with_reference_raises(self, xp: Any) -> None:
+        """blind=True and a reference contradict each other."""
+        with pytest.raises(ValueError, match="blind"):
+            metrics.evm(xp.ones(10), xp.ones(10), blind=True)
+
+    def test_evm_skip_symbols(self, xp: Any) -> None:
+        """num_skip_symbols leaves out leading symbols; skipping all raises."""
+        tx = xp.ones(20, dtype=xp.complex64)
+        rx = tx.copy()
+        rx[:5] = -1  # wrong only during "training"
+        assert metrics.evm(rx, tx, num_skip_symbols=5) < 1e-6
+        with pytest.raises(ValueError, match="nothing to measure"):
+            metrics.evm(rx, tx, num_skip_symbols=20)
 
 
 class TestSignalToNoiseRatio:
@@ -198,7 +213,7 @@ class TestSignalToNoiseRatio:
 
     def test_snr_shape_mismatch(self, xp: Any) -> None:
         """Verify error on shape mismatch in snr."""
-        with pytest.raises(ValueError, match="Shape mismatch"):
+        with pytest.raises(ValueError, match="shape mismatch"):
             metrics.snr(xp.zeros(10), xp.zeros(11))
 
     def test_snr_divide_by_zero(self, xp: Any) -> None:
@@ -218,7 +233,7 @@ class TestSignalToNoiseRatio:
         rx = xp.ones((2, 10))
         tx = xp.zeros((2, 10))
         res = metrics.snr(rx, tx)
-        xpt.assert_array_equal(res, float("-inf"))
+        np.testing.assert_array_equal(res, float("-inf"))
 
         # Mixed case
         tx_mixed = xp.array([xp.ones(10), xp.zeros(10)])
@@ -235,7 +250,7 @@ class TestSymbolErrorRate:
         rng = np.random.default_rng(0)
         bits = rng.integers(0, 2, 800).astype("int32")
         tx = map_bits(xp.asarray(bits), constellation=Constellation.qam(16))
-        assert metrics.ser(tx, tx, "qam", 16) == 0.0
+        assert metrics.ser(tx, tx, constellation=Constellation.qam(16)) == 0.0
 
     def test_ser_high_snr_near_zero(self, xp: Any) -> None:
         """SER should be negligible at very high SNR."""
@@ -243,7 +258,7 @@ class TestSymbolErrorRate:
         bits = rng.integers(0, 2, 2000).astype("int32")
         tx = map_bits(xp.asarray(bits), constellation=Constellation.qam(4))
         rx = apply_awgn(tx, esn0_db=40.0, sps=1)
-        assert metrics.ser(rx, tx, "qam", 4) < 1e-3
+        assert metrics.ser(rx, tx, constellation=Constellation.qam(4)) < 1e-3
 
     def test_ser_multichannel(self, xp: Any) -> None:
         """SER returns array (N_ch,) for 2D input."""
@@ -252,7 +267,7 @@ class TestSymbolErrorRate:
         tx_row = map_bits(xp.asarray(bits), constellation=Constellation.qam(4))
         tx = xp.stack([tx_row, tx_row])
 
-        result = metrics.ser(tx, tx, "qam", 4)
+        result = metrics.ser(tx, tx, constellation=Constellation.qam(4))
         assert result.shape == (2,)
         assert float(result[0]) == 0.0
         assert float(result[1]) == 0.0
@@ -264,12 +279,12 @@ class TestSymbolErrorRate:
         sig = generate(c, 2000, symbol_rate=1e9, rng=1).to(
             "gpu" if xp is not np else "cpu"
         )
-        assert metrics.ser(multirate.resolve_symbols(sig)) == 0.0
+        assert metrics.ser(multirate.decimate_to_symbol_rate(sig)) == 0.0
 
     def test_ser_shape_mismatch_raises(self, xp: Any) -> None:
         """SER raises ValueError on shape mismatch."""
-        with pytest.raises(ValueError, match="Shape mismatch"):
-            metrics.ser(xp.zeros(10), xp.zeros(11), "qam", 4)
+        with pytest.raises(ValueError, match="shape mismatch"):
+            metrics.ser(xp.zeros(10), xp.zeros(11), constellation=Constellation.qam(4))
 
 
 class TestInformationMetrics:
@@ -282,12 +297,11 @@ class TestInformationMetrics:
         N = 200
         rng = np.random.default_rng(42)
         bits = rng.integers(0, 2, N * k).astype("int32")
-        symbols = map_bits(xp.asarray(bits), constellation=Constellation.qam(M))
+        c = Constellation.qam(M)
+        symbols = map_bits(xp.asarray(bits), constellation=c)
 
-        llrs = compute_llr(
-            symbols, noise_var=1e-6, constellation=Constellation.qam(M)
-        ).reshape(N, k)
-        gmi_val = metrics.gmi(llrs, bits.reshape(N, k))
+        llrs = compute_llr(symbols, noise_var=1e-6, constellation=c)
+        gmi_val = metrics.gmi(llrs, bits, constellation=c)
         assert gmi_val > np.log2(M) - 0.05
 
     def test_gmi_low_snr_approaches_zero(self, xp: Any) -> None:
@@ -297,130 +311,200 @@ class TestInformationMetrics:
         N = 500
         rng = np.random.default_rng(7)
         bits = rng.integers(0, 2, N * k).astype("int32")
-        symbols = map_bits(xp.asarray(bits), constellation=Constellation.qam(M))
+        c = Constellation.qam(M)
+        symbols = map_bits(xp.asarray(bits), constellation=c)
 
-        llrs = compute_llr(
-            symbols, noise_var=1e6, constellation=Constellation.qam(M)
-        ).reshape(N, k)
-        gmi_val = metrics.gmi(llrs, bits.reshape(N, k))
+        llrs = compute_llr(symbols, noise_var=1e6, constellation=c)
+        gmi_val = metrics.gmi(llrs, bits, constellation=c)
         assert gmi_val < 0.2
 
-    def test_gmi_flat_input_returns_per_bit(self, xp: Any) -> None:
-        """Flat 1D input: gmi() treats k=1 and returns per-bit GMI in [0, 1]."""
-        bits = np.array([0, 1, 1, 0, 0, 1, 1, 0], dtype="int32")
-        symbols = map_bits(xp.asarray(bits), constellation=Constellation.qam(4))
-        llrs = compute_llr(symbols, noise_var=0.1, constellation=Constellation.qam(4))
-        gmi_val = metrics.gmi(llrs, bits)
-        assert 0.0 <= gmi_val <= 1.0
-
     def test_gmi_returns_scalar_float(self, xp: Any) -> None:
-        """gmi() must return a Python float."""
-        k = 2
-        N = 4
+        """gmi() of 1-D LLRs returns a Python float."""
         bits = np.array([0, 1, 1, 0, 0, 1, 1, 0], dtype="int32")
-        symbols = map_bits(xp.asarray(bits), constellation=Constellation.qam(4))
-        llrs = compute_llr(
-            symbols, noise_var=0.1, constellation=Constellation.qam(4)
-        ).reshape(N, k)
-        gmi_val = metrics.gmi(llrs, bits.reshape(N, k))
+        c = Constellation.qam(4)
+        symbols = map_bits(xp.asarray(bits), constellation=c)
+        llrs = compute_llr(symbols, noise_var=0.1, constellation=c)
+        gmi_val = metrics.gmi(llrs, bits, constellation=c)
         assert isinstance(gmi_val, float)
 
-    def test_gmi_shape_mismatch_raises(self, xp: Any) -> None:
-        """gmi() should raise ValueError when llrs and tx_bits have different sizes."""
-        llrs = np.array([1.0, -1.0, 2.0])
-        bits = np.array([0, 1])
-        with pytest.raises(ValueError, match="same number of elements"):
-            metrics.gmi(llrs, bits)
+    def test_gmi_multichannel(self, xp: Any) -> None:
+        """(C, N k) LLRs give one GMI per channel."""
+        rng = np.random.default_rng(3)
+        bits = rng.integers(0, 2, (2, 200)).astype("int32")
+        c = Constellation.qam(4)
+        llrs = compute_llr(
+            map_bits(xp.asarray(bits), constellation=c), noise_var=0.1, constellation=c
+        )
+        out = metrics.gmi(llrs, bits, constellation=c)
+        assert isinstance(out, np.ndarray)
+        assert out.shape == (2,)
+        assert out[0] == pytest.approx(metrics.gmi(llrs[0], bits[0], constellation=c))
 
-    def test_gmi_2d_bounded_by_log2m(self, xp: Any) -> None:
-        """For (N, k) input, GMI in [0, k]."""
+    def test_gmi_shape_mismatch_raises(self, xp: Any) -> None:
+        """gmi() raises ValueError when llrs and the bits differ in shape."""
+        llrs = np.array([1.0, -1.0, 2.0, 0.5])
+        bits = np.array([0, 1])
+        with pytest.raises(ValueError, match="shape mismatch"):
+            metrics.gmi(llrs, bits, constellation=Constellation.qam(4))
+
+    def test_gmi_requires_constellation(self, xp: Any) -> None:
+        """k comes from the constellation; an LLR array alone does not give it."""
+        with pytest.raises(ValueError, match="constellation"):
+            metrics.gmi(np.zeros(4), np.zeros(4))
+
+    def test_gmi_noise_var_with_llrs_raises(self, xp: Any) -> None:
+        """noise_var is for Signal input; LLRs already contain it."""
+        with pytest.raises(ValueError, match="noise_var"):
+            metrics.gmi(
+                np.zeros(4),
+                np.zeros(4),
+                constellation=Constellation.qam(4),
+                noise_var=0.1,
+            )
+
+    def test_gmi_bounded_by_k(self, xp: Any) -> None:
+        """GMI in [0, k]."""
         k = 2
         N = 100
         rng = np.random.default_rng(55)
         bits = rng.integers(0, 2, N * k).astype("int32")
-        symbols = map_bits(xp.asarray(bits), constellation=Constellation.qam(4))
-        llrs = compute_llr(
-            symbols, noise_var=0.1, constellation=Constellation.qam(4)
-        ).reshape(N, k)
-        bits_2d = bits.reshape(N, k)
-        gmi_val = metrics.gmi(llrs, bits_2d)
+        c = Constellation.qam(4)
+        symbols = map_bits(xp.asarray(bits), constellation=c)
+        llrs = compute_llr(symbols, noise_var=0.1, constellation=c)
+        gmi_val = metrics.gmi(llrs, bits, constellation=c)
         assert 0.0 <= gmi_val <= np.log2(4)
 
     def test_mi_high_snr_approaches_log2m(self, xp: Any) -> None:
         """At high SNR, MI -> log2(M)."""
         M = 16
-        const = Constellation.qam(M).points
+        c = Constellation.qam(M)
         rng = np.random.default_rng(42)
-        symbols = const[rng.integers(0, M, 500)]
+        symbols = c.points[rng.integers(0, M, 500)]
 
-        mi_val = metrics.mi(xp.asarray(symbols), "qam", M, noise_var=1e-8)
+        mi_val = metrics.mi(xp.asarray(symbols), noise_var=1e-8, constellation=c)
         assert mi_val > np.log2(M) - 0.1
 
     def test_mi_never_exceeds_log2m(self, xp: Any) -> None:
         """MI <= log2(M) always (capacity bound)."""
         M = 4
-        const = Constellation.qam(M).points
+        c = Constellation.qam(M)
         rng = np.random.default_rng(7)
-        symbols = const[rng.integers(0, M, 200)]
+        symbols = c.points[rng.integers(0, M, 200)]
 
         for noise_var in [1e-4, 0.1, 1.0, 10.0]:
-            mi_val = metrics.mi(xp.asarray(symbols), "qam", M, noise_var=noise_var)
+            mi_val = metrics.mi(
+                xp.asarray(symbols), noise_var=noise_var, constellation=c
+            )
             assert mi_val <= np.log2(M) + 1e-6
 
     def test_mi_returns_scalar_float(self, xp: Any) -> None:
-        """mi() must return a Python float."""
-        M = 4
-        const = Constellation.qam(M).points
-        symbols = const[:10]
-        mi_val = metrics.mi(xp.asarray(symbols), "qam", M, noise_var=0.1)
+        """mi() of (N,) symbols returns a Python float."""
+        c = Constellation.qam(4)
+        mi_val = metrics.mi(xp.asarray(c.points[:10]), noise_var=0.1, constellation=c)
         assert isinstance(mi_val, float)
+
+    def test_mi_multichannel(self, xp: Any) -> None:
+        """(C, N) symbols give one MI per channel (1.x pooled the channels)."""
+        c = Constellation.qam(16)
+        rng = np.random.default_rng(4)
+        symbols = c.points[rng.integers(0, 16, (2, 300))]
+        symbols[1] += 0.3 * rng.standard_normal(300)
+        out = metrics.mi(xp.asarray(symbols), noise_var=0.05, constellation=c)
+        assert out.shape == (2,)
+        assert out[0] == pytest.approx(
+            metrics.mi(xp.asarray(symbols[0]), noise_var=0.05, constellation=c)
+        )
+        assert out[1] < out[0]
 
     def test_mi_decreases_with_noise(self, xp: Any) -> None:
         """MI should decrease as noise increases."""
         M = 16
-        const = Constellation.qam(M).points
+        c = Constellation.qam(M)
         rng = np.random.default_rng(99)
-        symbols = const[rng.integers(0, M, 500)]
+        symbols = xp.asarray(c.points[rng.integers(0, M, 500)])
 
-        mi_low_noise = metrics.mi(xp.asarray(symbols), "qam", M, noise_var=0.01)
-        mi_high_noise = metrics.mi(xp.asarray(symbols), "qam", M, noise_var=1.0)
+        mi_low_noise = metrics.mi(symbols, noise_var=0.01, constellation=c)
+        mi_high_noise = metrics.mi(symbols, noise_var=1.0, constellation=c)
         assert mi_low_noise > mi_high_noise
 
 
 class TestSignalMetricsIntegration:
-    """Tests for Signal container integration with metrics."""
+    """Metrics of a 1-SPS Signal against its reference."""
 
-    def test_signal_evm_method(self, xp: Any) -> None:
-        """Test Signal.evm() method using source_symbols as reference."""
-        sig = generate(Constellation.qam(4), 100, symbol_rate=1e6, sps=1)
-        sig = multirate.resolve_symbols(sig)
-        evm_pct, evm_db = metrics.evm(sig)
-        assert evm_pct < 1e-4
+    @staticmethod
+    def _sig(c: Constellation, n: int, xp: Any, **kw: Any):
+        sig = generate(c, n, symbol_rate=1e6, **kw)
+        return multirate.decimate_to_symbol_rate(
+            sig.to("gpu" if xp is not np else "cpu")
+        )
 
-    def test_signal_ber_method(self, xp: Any) -> None:
-        """Test Signal.ber() method using source_bits as reference."""
-        sig = generate(Constellation.qam(4), 100, symbol_rate=1e6, sps=1)
-        sig = multirate.resolve_symbols(sig)
-        sig = mapping.demap_symbols_hard(sig)
-        ber_val = metrics.ber(sig)
-        assert ber_val == 0.0
+    def test_signal_evm(self, xp: Any) -> None:
+        """evm(sig) uses reference.symbols."""
+        assert metrics.evm(self._sig(Constellation.qam(4), 100, xp)) < 1e-4
 
-    def test_signal_demap_hard(self, xp: Any, xpt: Any) -> None:
-        """Test Signal.demap_symbols_hard() hard decision matches source_bits."""
-        sig = generate(Constellation.qam(4), 50, symbol_rate=1e6, sps=1)
-        sig = multirate.resolve_symbols(sig)
-        sig = mapping.demap_symbols_hard(sig)
-        xpt.assert_array_equal(sig.resolved_bits.flatten(), sig.source_bits.flatten())
+    def test_signal_ber(self, xp: Any) -> None:
+        """ber(sig) hard-decides the samples against reference.bits."""
+        assert metrics.ber(self._sig(Constellation.qam(4), 100, xp)) == 0.0
 
     def test_signal_evm_blind(self, xp: Any) -> None:
-        """Signal.evm(mode='blind') returns near-zero EVM for a clean signal."""
-        sig = generate(Constellation.qam(16), 2000, symbol_rate=1e6, sps=1)
-        sig = multirate.resolve_symbols(sig)
-        pct, db = metrics.evm(sig, mode="blind")
-        assert pct < 3.0
+        """evm(sig, blind=True) near zero for a clean signal."""
+        sig = self._sig(Constellation.qam(16), 2000, xp)
+        assert metrics.evm(sig, blind=True) < 3.0
 
-    def test_signal_ser_method(self, xp: Any) -> None:
-        """Signal.ser() returns 0 for a clean signal."""
-        sig = generate(Constellation.qam(16), 200, symbol_rate=1e6, sps=1)
-        sig = multirate.resolve_symbols(sig)
-        assert metrics.ser(sig) == 0.0
+    def test_signal_ser(self, xp: Any) -> None:
+        """ser(sig) is 0 for a clean signal."""
+        assert metrics.ser(self._sig(Constellation.qam(16), 200, xp)) == 0.0
+
+    def test_signal_gmi_and_mi(self, xp: Any) -> None:
+        """gmi(sig)/mi(sig) compute from the samples with the Signal's
+        constellation; equal to the array path."""
+        c = Constellation.qam(16)
+        sig = self._sig(c, 500, xp)
+        rx = sig.replace(samples=apply_awgn(sig.samples, esn0_db=10.0, sps=1, rng=1))
+        nv = 0.1
+        llrs = compute_llr(rx.samples, noise_var=nv, constellation=c)
+        assert metrics.gmi(rx, noise_var=nv) == metrics.gmi(
+            llrs, rx.reference.bits, constellation=c
+        )
+        assert metrics.mi(rx, noise_var=nv) == metrics.mi(
+            rx.samples, noise_var=nv, constellation=c
+        )
+
+    def test_signal_multichannel_returns_host_array(self, xp: Any) -> None:
+        """(C, N) Signals give host (C,) arrays."""
+        sig = self._sig(Constellation.qam(4), 100, xp, num_channels=2)
+        for out in (metrics.evm(sig), metrics.ser(sig), metrics.ber(sig)):
+            assert isinstance(out, np.ndarray)
+            assert out.shape == (2,)
+
+    def test_explicit_reference_wins(self, xp: Any) -> None:
+        """An explicit reference replaces the Signal's."""
+        sig = self._sig(Constellation.qam(4), 100, xp)
+        assert metrics.ser(sig, -sig.reference.symbols) == 1.0
+
+    def test_oversampled_signal_raises(self, xp: Any) -> None:
+        """Metrics need one sample per symbol; they never decimate."""
+        sig = generate(Constellation.qam(4), 100, symbol_rate=1e6, sps=2)
+        with pytest.raises(ValueError, match="one sample per symbol"):
+            metrics.evm(sig)
+
+    def test_frame_signal_raises(self, xp: Any) -> None:
+        """A frame Signal mixes segments: extract the payload first."""
+        from commkit.core import SingleCarrierFrame
+
+        sig = SingleCarrierFrame(payload_len=100).to_signal(sps=1, symbol_rate=1e6)
+        with pytest.raises(ValueError, match="extract_payload"):
+            metrics.ser(sig)
+
+    def test_length_mismatch_raises(self, xp: Any) -> None:
+        """The reference is never clamped to the received length."""
+        sig = self._sig(Constellation.qam(4), 100, xp)
+        with pytest.raises(ValueError, match="shape mismatch"):
+            metrics.snr(sig, sig.reference.symbols[:-1])
+
+    def test_missing_reference_raises(self, xp: Any) -> None:
+        """A Signal without a reference needs reference= (or blind=True)."""
+        sig = self._sig(Constellation.qam(4), 100, xp)
+        sig = sig.replace(reference=None)
+        with pytest.raises(ValueError, match="reference"):
+            metrics.evm(sig)

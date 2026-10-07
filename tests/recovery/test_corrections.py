@@ -141,14 +141,13 @@ class TestResolvePhaseAmbiguity:
         resolved = recovery.resolve_phase_ambiguity(
             sym, ref, constellation=Constellation.qam(16)
         )
-        s0 = float(ser(resolved, ref, "qam", 16))
+        s0 = float(ser(resolved, ref, constellation=Constellation.qam(16)))
         for k in range(1, 4):
             sk = float(
                 ser(
                     resolved * xp.exp(1j * k * np.pi / 2).astype(sym.dtype),
                     ref,
-                    "qam",
-                    16,
+                    constellation=Constellation.qam(16),
                 )
             )
             assert s0 <= sk + 1e-6
@@ -167,7 +166,7 @@ class TestResolvePhaseAmbiguity:
         resolved = recovery.resolve_phase_ambiguity(
             rotated, ref, constellation=Constellation.qam(16)
         )
-        assert float(ser(resolved, ref, "qam", 16)) < 0.05
+        assert float(ser(resolved, ref, constellation=Constellation.qam(16))) < 0.05
 
     def test_mimo_independent_per_channel(self, xp):
         """MIMO: channels with different rotations are each independently corrected."""
@@ -199,7 +198,7 @@ class TestResolvePhaseAmbiguity:
             mimo_rot, ref_mimo_norm, constellation=Constellation.qam(16)
         )
         assert resolved.shape == (2, self.N)
-        s = ser(resolved, ref_mimo_norm, "qam", 16)
+        s = ser(resolved, ref_mimo_norm, constellation=Constellation.qam(16))
         s_np = to_numpy(s)
         assert float(s_np[0]) < 0.05
         assert float(s_np[1]) < 0.05
@@ -225,7 +224,10 @@ class TestResolvePhaseAmbiguity:
         sig = recovery.resolve_phase_ambiguity(sig)
         assert sig.resolved_symbols is not None
         ref = normalize(xp.asarray(sig.source_symbols), mode="average_power")
-        assert float(ser(sig.resolved_symbols, ref, "qam", 16)) < 0.1
+        assert (
+            float(ser(sig.resolved_symbols, ref, constellation=Constellation.qam(16)))
+            < 0.1
+        )
 
     def test_signal_method_raises_without_resolved(self, xp):
         """Raises ValueError when resolved_symbols is None."""
@@ -266,7 +268,7 @@ class TestResolvePhaseAmbiguity:
         from commkit.metrics import ser as _ser_fn
 
         def _ser(y, r):
-            return float(xp.mean(xp.asarray(_ser_fn(y, r, "qam", 16))))
+            return float(np.mean(_ser_fn(y, r, constellation=Constellation.qam(16))))
 
         ser_skip_tail = _ser(out_skip[corrupt_head:], ref[corrupt_head:])
         ser_no_skip_tail = _ser(out_no_skip[corrupt_head:], ref[corrupt_head:])

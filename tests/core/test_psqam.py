@@ -1,11 +1,12 @@
 """Tests for Probabilistic Shaping QAM (PS-QAM)."""
 
+import dataclasses
 from typing import Any
 
 import numpy as np
 import pytest
 
-from commkit import generate, mapping, metrics, multirate
+from commkit import generate, metrics, multirate
 from commkit.filtering import RRC
 from commkit.impairments import apply_awgn
 from commkit.mapping import (
@@ -15,7 +16,6 @@ from commkit.mapping import (
     optimal_nu,
 )
 from commkit.mapping.shaping import _constellation_power
-from commkit.metrics import _rescale_ps_symbols
 from tests.common.conversions import to_numpy
 
 
@@ -180,9 +180,7 @@ class TestGeneratePSQAM:
         sig = generate(Constellation.qam(16).shaped(nu=0.5), 5000, symbol_rate=32e9)
         noisy = apply_awgn(xp.asarray(sig.samples), esn0_db=20.0, sps=1)
         sig = sig.replace(samples=noisy)
-        sig = multirate.resolve_symbols(sig)
-        sig = mapping.demap_symbols_hard(sig)
-        ber_val = metrics.ber(sig.resolved_bits, sig.source_bits)
+        ber_val = metrics.ber(multirate.decimate_to_symbol_rate(sig))
         assert 0.0 <= ber_val <= 1.0
 
 
@@ -195,11 +193,11 @@ class TestPSQAMMetricsAndDemapping:
         sig = generate(Constellation.qam(order), 5000, symbol_rate=32e9, sps=1)
         noisy = apply_awgn(sig.samples, esn0_db=15.0, sps=1)
 
-        mi_none = metrics.mi(noisy, "qam", order, noise_var=10 ** (-15.0 / 10))
-        pmf_uniform = np.full(order, 1.0 / order)
-        mi_uniform = metrics.mi(
-            noisy, "qam", order, noise_var=10 ** (-15.0 / 10), pmf=pmf_uniform
-        )
+        c = Constellation.qam(order)
+        nv = 10 ** (-15.0 / 10)
+        mi_none = metrics.mi(noisy, noise_var=nv, constellation=c)
+        c_uniform = dataclasses.replace(c, pmf=np.full(order, 1.0 / order))
+        mi_uniform = metrics.mi(noisy, noise_var=nv, constellation=c_uniform)
         assert abs(mi_none - mi_uniform) < 1e-6
 
     def test_mi_ps_bounded_by_entropy(self) -> None:
@@ -212,7 +210,11 @@ class TestPSQAMMetricsAndDemapping:
 
         sig = generate(Constellation.qam(order).shaped(nu=nu), 10_000, symbol_rate=32e9)
         noisy = apply_awgn(sig.samples, esn0_db=25.0, sps=1)
-        mi_val = metrics.mi(noisy, "qam", order, noise_var=10 ** (-25.0 / 10), pmf=pmf)
+        mi_val = metrics.mi(
+            noisy,
+            noise_var=10 ** (-25.0 / 10),
+            constellation=Constellation.qam(order).shaped(nu=nu),
+        )
 
         assert mi_val <= h_x + 1e-6
         assert mi_val >= 0.0
@@ -268,27 +270,3 @@ class TestPSQAMMetricsAndDemapping:
             rx, noise_var=noise_var, constellation=shaped, method="exact"
         )
         assert np.mean(np.abs(llr_ps)) >= np.mean(np.abs(llr_none)) * 0.95
-
-    def test_rescale_ps_symbols_uniform_is_noop(self) -> None:
-        """pmf=None returns symbol array unchanged (identity)."""
-        rx = np.array([1 + 1j, -1 - 1j], dtype=np.complex64)
-        result = _rescale_ps_symbols(rx, np, "qam", 16, None)
-        assert result is rx
-
-    def test_rescale_ps_symbols_matches_manual_sqrt_e_ps(self, xpt: Any) -> None:
-        """Shared rescale helper matches manual sqrt(E_PS) normalisation."""
-        order = 16
-        nu = 1.0
-        pmf = maxwell_boltzmann(Constellation.qam(order), nu=nu)
-        const = Constellation.qam(order).points
-        e_ps = _constellation_power(const, pmf)
-        assert e_ps < 1.0 - 1e-6
-
-        rng = np.random.default_rng(1)
-        rx = (const / np.sqrt(e_ps))[rng.integers(0, order, size=50)].astype(
-            np.complex64
-        )
-
-        result = _rescale_ps_symbols(rx, np, "qam", order, pmf)
-        expected = rx * np.sqrt(e_ps).astype(np.float32)
-        xpt.assert_allclose(result, expected, rtol=1e-5)

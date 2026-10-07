@@ -366,7 +366,6 @@ rule without deleting its entry fails the suite.
 | --- | --- |
 | Read-only `Signal` bridge properties (`mod_*`, `ps_pmf`, `source_*`, pulse fields, `signal_type`) used by unmigrated modules | Module passes, deleted in 4.1 |
 | `Signal.resolved_*` caches, `replace_samples` and `multirate.resolve_symbols` | 3.8 |
-| The 1.x `(modulation, order, pmf)` bridge `mapping.constellation._legacy_constellation` and `metrics._rescale_ps_symbols` (used by `metrics` only) | 3.8 |
 | `resolve_required` / `resolve_optional` (Signal wins, with a warning) | 2.5, then each module pass |
 | `generate_qam/psk/pam/psqam`, `seed=` with `RandomState` | 2.6, then each module pass |
 | `modulation=` / `order=` / `unipolar=` / `pmf=` parameters; positional parameters; `float \| ndarray` and dict returns; metrics returning `None` | Module passes 3.1-3.10 |

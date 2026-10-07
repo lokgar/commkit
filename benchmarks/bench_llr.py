@@ -38,15 +38,14 @@ def bench_compute_llr(benchmark, backend_device, xp, sync, order, method):
 @pytest.mark.parametrize("order", [16, 256])
 def bench_gmi(benchmark, backend_device, xp, sync, order):
     rx_np, bits_np, noise_var = llr_workload(order=order, n_sym=N_SYM)
-    k = int(np.log2(order))
-    llrs_np = np.asarray(
-        compute_llr(rx_np, noise_var=noise_var, constellation=Constellation.qam(order))
-    ).reshape(-1, k)
-    llrs = xp.asarray(llrs_np)
-    bits = xp.asarray(bits_np.reshape(-1, k))
+    c = Constellation.qam(order)
+    llrs = xp.asarray(
+        np.asarray(compute_llr(rx_np, noise_var=noise_var, constellation=c))
+    )
+    bits = xp.asarray(bits_np.reshape(-1))
 
     def run():
-        out = gmi(llrs, bits)
+        out = gmi(llrs, bits, constellation=c)
         sync()
         return out
 
