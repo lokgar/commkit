@@ -157,6 +157,7 @@ The notebooks are committed without outputs and run in CI.
 git clone https://github.com/lokgar/commkit.git
 cd commkit
 uv sync --all-extras
+uv run nbstripout --install      # once per clone: notebooks are committed without outputs
 
 uv run pytest                    # CPU and GPU tests
 uv run pytest --device=cpu       # what CI runs
