@@ -11,8 +11,6 @@ from typing import TYPE_CHECKING, Any, Generic, TypeVar, cast
 
 import numpy as np
 
-from ..logger import logger
-
 if TYPE_CHECKING:
     from ..backend import ArrayType
     from .signal import Signal
@@ -70,47 +68,6 @@ class SignalAdapter(Generic[S]):
         if supplied is not None or self.signal is None:
             return supplied
         return getattr(self.signal, field)
-
-    def resolve_required(self, field: str, supplied: Any = None) -> Any:
-        """Resolve required metadata, with Signal metadata taking precedence."""
-        if self.signal is None:
-            if supplied is None:
-                raise ValueError(
-                    f"{self.function_name} requires {field} for array input."
-                )
-            return supplied
-
-        value = getattr(self.signal, field)
-        if value is None:
-            raise ValueError(f"{self.function_name}: Signal has no {field} metadata.")
-        if supplied is not None:
-            logger.warning(
-                "%s: ignoring supplied %s=%r for Signal input; using the "
-                "signal's own %s=%r instead.",
-                self.function_name,
-                field,
-                supplied,
-                field,
-                value,
-            )
-        return value
-
-    def resolve_optional(self, field: str, supplied: Any = None) -> Any:
-        """Resolve optional metadata, falling back only when Signal lacks it."""
-        if self.signal is None:
-            return supplied
-        value = getattr(self.signal, field)
-        if value is not None:
-            return value
-        if supplied is not None:
-            logger.warning(
-                "%s: Signal has no %s set; falling back to supplied %s=%r.",
-                self.function_name,
-                field,
-                field,
-                supplied,
-            )
-        return supplied
 
     def symbol_array(self) -> ArrayType:
         """The symbols: the array, or a Signal's samples at one sample per symbol.

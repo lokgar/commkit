@@ -10,7 +10,7 @@ from tests.common.signals import make_adapter_test_signal
 
 
 class TestSignalAdapterMetadata:
-    """Tests for metadata resolution and precedence across Array and Signal inputs."""
+    """Array input passes through the adapter unchanged."""
 
     def test_prepare_array_input_is_passed_through(self, xp: Any) -> None:
         """Array input is held directly with None signal container."""
@@ -19,37 +19,7 @@ class TestSignalAdapterMetadata:
 
         assert signal_adapter.array is samples
         assert signal_adapter.signal is None
-        assert signal_adapter.resolve_required("sampling_rate", 1e6) == 1e6
-
-    def test_required_signal_metadata_wins(self, xp: Any, caplog: Any) -> None:
-        """Metadata on Signal instance overrides conflicting argument with a warning."""
-        sig = make_adapter_test_signal(xp)
-        signal_adapter = adapt_signal(sig, function_name="example()")
-
-        value = signal_adapter.resolve_required("sampling_rate", 99.0)
-
-        assert value == sig.sampling_rate
-        assert "ignoring supplied sampling_rate" in caplog.text
-
-    def test_required_array_metadata_reports_function_name(self, xp: Any) -> None:
-        """Missing required metadata on array input raises ValueError citing function name."""
-        signal_adapter = adapt_signal(xp.ones(8), function_name="example()")
-
-        with pytest.raises(ValueError, match=r"example\(\).*sampling_rate"):
-            signal_adapter.resolve_required("sampling_rate")
-
-    def test_optional_signal_metadata_precedence_and_fallback(
-        self, xp: Any, caplog: Any
-    ) -> None:
-        """Optional metadata uses Signal attribute when present, otherwise fallback value."""
-        populated = make_adapter_test_signal(xp, constellation=Constellation.qam(16))
-        absent = make_adapter_test_signal(xp)
-        populated_adapter = adapt_signal(populated, function_name="example()")
-        absent_adapter = adapt_signal(absent, function_name="example()")
-
-        assert populated_adapter.resolve_optional("mod_scheme", "PSK") == "QAM"
-        assert absent_adapter.resolve_optional("mod_scheme", "PSK") == "PSK"
-        assert "falling back to supplied mod_scheme" in caplog.text
+        assert signal_adapter.resolve_fact("sampling_rate", 1e6) == 1e6
 
 
 class TestSignalAdapterTransforms:
