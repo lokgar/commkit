@@ -228,3 +228,47 @@ class TestComputeLLRSignalIntegration:
 
         with pytest.raises(ValueError, match="one sample per symbol"):
             mapping.compute_llr(sig, noise_var=0.1)
+
+
+class TestLLRBruteForce:
+    """compute_llr against a float64 brute force from points, labels and prior."""
+
+    @pytest.mark.parametrize("method", ["maxlog", "exact"])
+    @pytest.mark.parametrize(
+        "constellation",
+        [
+            Constellation.qam(64).shaped(nu=0.05),
+            Constellation.pam(4),
+            Constellation.psk(8),
+        ],
+        ids=["shaped64qam", "pam4", "8psk"],
+    )
+    def test_matches_brute_force(
+        self, xp: Any, method: str, constellation: Any
+    ) -> None:
+        rng = np.random.default_rng(9)
+        pts = constellation.points
+        x = pts[rng.integers(0, pts.size, 3000)]
+        noise = 0.15 * rng.standard_normal(x.shape)
+        if np.iscomplexobj(pts):
+            x = x + 0.15j * rng.standard_normal(x.shape) + noise
+        else:
+            x = x + noise
+        nv = 0.045
+        got = to_numpy(
+            mapping.compute_llr(
+                xp.asarray(x), noise_var=nv, constellation=constellation, method=method
+            )
+        ).reshape(x.size, -1)
+
+        prior = np.log(constellation.pmf) if constellation.pmf is not None else 0.0
+        metric = -(np.abs(x[:, None] - pts[None, :]) ** 2) / nv + prior  # (N, M)
+        labels = constellation.bit_labels
+        expected = np.empty_like(got, dtype=np.float64)
+        for b in range(labels.shape[1]):
+            m0, m1 = metric[:, labels[:, b] == 0], metric[:, labels[:, b] == 1]
+            if method == "maxlog":
+                expected[:, b] = m0.max(1) - m1.max(1)
+            else:
+                expected[:, b] = np.logaddexp.reduce(m0, 1) - np.logaddexp.reduce(m1, 1)
+        np.testing.assert_allclose(got, expected, rtol=1e-4, atol=1e-3)

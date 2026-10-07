@@ -8,6 +8,7 @@ positive LLR -> bit 0 more likely.
 
 from __future__ import annotations
 
+from collections.abc import Callable
 from types import ModuleType
 from typing import TYPE_CHECKING
 
@@ -90,6 +91,67 @@ def compute_llr(
     return constellation.llr(x, noise_var=noise_var, method=method)
 
 
+_NUMBA_LLR: dict[str, Callable[..., None]] = {}
+
+
+def _get_numba_llr() -> Callable[..., None]:
+    """Numba LLR kernel for the CPU, parallel over symbols.
+
+    Per symbol: the M metrics ``-|x - s_m|^2 / sigma^2 + log P(s_m)`` once,
+    then per bit the max (max-log) or the log-sum-exp (exact) over the
+    points whose bit is 0, minus the same over those whose bit is 1.  float32,
+    as the NumPy path; it replaces that path's (chunk, k, M/2) intermediates.
+    """
+    if "llr" not in _NUMBA_LLR:
+        import numba
+
+        @numba.njit(cache=True, fastmath=True, nogil=True, parallel=True)
+        def llr_kernel(
+            x_re: np.ndarray,
+            x_im: np.ndarray,
+            c_re: np.ndarray,
+            c_im: np.ndarray,
+            log_pmf: np.ndarray,
+            idx0: np.ndarray,
+            idx1: np.ndarray,
+            inv_s2: np.float32,
+            exact: bool,
+            out: np.ndarray,
+        ) -> None:
+            n = x_re.shape[0]
+            M = c_re.shape[0]
+            k, half = idx0.shape
+            for i in numba.prange(n):  # type: ignore[attr-defined,no-untyped-call]
+                metric = np.empty(M, dtype=np.float32)
+                for m in range(M):
+                    dr = x_re[i] - c_re[m]
+                    di = x_im[i] - c_im[m]
+                    metric[m] = -(dr * dr + di * di) * inv_s2 + log_pmf[m]
+                for b in range(k):
+                    p0 = metric[idx0[b, 0]]
+                    p1 = metric[idx1[b, 0]]
+                    for j in range(1, half):
+                        v0 = metric[idx0[b, j]]
+                        v1 = metric[idx1[b, j]]
+                        if v0 > p0:
+                            p0 = v0
+                        if v1 > p1:
+                            p1 = v1
+                    if exact:
+                        s0 = np.float32(0.0)
+                        s1 = np.float32(0.0)
+                        for j in range(half):
+                            s0 += np.exp(metric[idx0[b, j]] - p0)
+                            s1 += np.exp(metric[idx1[b, j]] - p1)
+                        out[i, b] = (np.log(s0) + p0) - (np.log(s1) + p1)
+                    else:
+                        out[i, b] = p0 - p1
+
+        _NUMBA_LLR["llr"] = llr_kernel
+    kernel: Callable[..., None] = _NUMBA_LLR["llr"]
+    return kernel
+
+
 def _llr(
     symbols: ArrayType,
     points: np.ndarray,
@@ -127,8 +189,28 @@ def _llr(
         log_pmf_dev = None  # uniform prior: a constant that cancels
 
     n = sym_flat.shape[0]
-    chunk = max(1, _CHUNK_ELEMENTS // (k * order))
     llrs = xp.empty((n, k), dtype=xp.float32)
+    if xp is np:
+        # CPU: one parallel pass, no (chunk, k, M/2) intermediates.
+        zeros = np.zeros(order, dtype=np.float32)
+        _get_numba_llr()(
+            np.ascontiguousarray(sym_flat.real, dtype=np.float32),
+            np.ascontiguousarray(
+                sym_flat.imag if is_complex else np.zeros(n), dtype=np.float32
+            ),
+            np.ascontiguousarray(np.real(points), dtype=np.float32),
+            np.ascontiguousarray(
+                np.imag(points) if is_complex else zeros, dtype=np.float32
+            ),
+            zeros if log_pmf_dev is None else log_pmf_dev,
+            np.ascontiguousarray(idx0, dtype=np.int64),
+            np.ascontiguousarray(idx1, dtype=np.int64),
+            inv_sigma2,
+            method == "exact",
+            llrs,
+        )
+        return llrs.reshape((*symbols.shape[:-1], symbols.shape[-1] * k))
+    chunk = max(1, _CHUNK_ELEMENTS // (k * order))
     for n0 in range(0, n, chunk):
         x = sym_flat[n0 : n0 + chunk]
         diff = x[:, None] - const[None, :]  # (chunk, M)
