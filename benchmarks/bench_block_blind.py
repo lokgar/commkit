@@ -17,10 +17,11 @@ Two block sizes are tracked, matching ``bench_block_lms``:
   intermediate-tensor growth) that the 256 case would mask.
 
 The blind engine has no CPR and no training prefix, so every full block is
-graph-eligible (unlike ``block_lms``, where only decision-directed blocks are).
+graph-eligible.
 """
 
 import pytest
+from benchutils import assert_converged
 from workloads import mimo_equalizer_workload
 
 from commkit.equalization import block_cma, block_rde
@@ -29,14 +30,25 @@ from commkit.mapping import Constellation
 ROUNDS = dict(rounds=3, warmup_rounds=1, iterations=1)
 N_SYM = 100_000
 
+# Converging step sizes per (equalizer, block_size).  RDE on 16-QAM from a
+# cold start (no CMA pre-convergence) settles at a few percent SER at 2048;
+# its cost does not depend on the data.
+STEP_SIZE = {
+    ("cma", 256): 2e-4,
+    ("cma", 2048): 3e-4,
+    ("rde", 256): 3e-3,
+    ("rde", 2048): 7e-4,
+}
+MAX_SER = {"cma": 1e-2, "rde": 5e-2}
+
 EQUALIZERS = [
     ("cma", block_cma),
     ("rde", block_rde),
 ]
 
 
-def _bench_block_blind(benchmark, xp, sync, eq_fn, block_size):
-    samples, _ = mimo_equalizer_workload(n_sym=N_SYM, order=16, sps=2)
+def _bench_block_blind(benchmark, xp, sync, label, eq_fn, block_size):
+    samples, syms = mimo_equalizer_workload(n_sym=N_SYM, order=16, sps=2)
     x = xp.asarray(samples)
 
     def run():
@@ -46,18 +58,22 @@ def _bench_block_blind(benchmark, xp, sync, eq_fn, block_size):
             sps=2,
             constellation=Constellation.qam(16),
             block_size=block_size,
+            step_size=STEP_SIZE[label, block_size],
         )
         sync()
         return r
 
-    benchmark.pedantic(run, **ROUNDS)
+    r = benchmark.pedantic(run, **ROUNDS)
+    assert_converged(
+        r, syms, Constellation.qam(16), skip=20_000, max_ser=MAX_SER[label], blind=True
+    )
 
 
 @pytest.mark.parametrize("label,eq_fn", EQUALIZERS)
 def bench_block_blind(benchmark, backend_device, xp, sync, label, eq_fn):
-    _bench_block_blind(benchmark, xp, sync, eq_fn, block_size=256)
+    _bench_block_blind(benchmark, xp, sync, label, eq_fn, block_size=256)
 
 
 @pytest.mark.parametrize("label,eq_fn", EQUALIZERS)
 def bench_block_blind_large(benchmark, backend_device, xp, sync, label, eq_fn):
-    _bench_block_blind(benchmark, xp, sync, eq_fn, block_size=2048)
+    _bench_block_blind(benchmark, xp, sync, label, eq_fn, block_size=2048)

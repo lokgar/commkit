@@ -175,9 +175,17 @@ class TestComputeLLRDevice:
             assert isinstance(llrs, xp.ndarray)
             assert llrs.dtype == xp.float32
 
-    def test_long_records_are_chunked_consistently(self, xp: Any, xpt: Any) -> None:
-        """Results do not depend on how the record is split into chunks."""
+    def test_long_records_are_chunked_consistently(
+        self, xp: Any, xpt: Any, monkeypatch: Any
+    ) -> None:
+        """Results do not depend on how the record is split into chunks.
+
+        The chunked path is the GPU fallback when the CUDA kernel is
+        unavailable; the kernel is switched off to exercise it.
+        """
         from commkit.mapping import llr as llr_module
+
+        monkeypatch.setattr(llr_module._cuda, "get_kernel", lambda *a, **k: None)
 
         rng = np.random.default_rng(4)
         const = mapping.Constellation.qam(64).points
@@ -194,6 +202,38 @@ class TestComputeLLRDevice:
         finally:
             llr_module._CHUNK_ELEMENTS = original
         xpt.assert_array_equal(full, chunked)
+
+
+@pytest.mark.gpu_only
+class TestLLRKernel:
+    """The CUDA LLR kernel against its CPU reference (Numba)."""
+
+    @pytest.mark.requires_kernel("llr")
+    @pytest.mark.parametrize("method", ["maxlog", "exact"])
+    @pytest.mark.parametrize(
+        "constellation",
+        [
+            Constellation.qam(16),
+            Constellation.qam(256),
+            Constellation.qam(64).shaped(nu=0.05),
+            Constellation.pam(4),
+        ],
+        ids=["16qam", "256qam", "shaped64qam", "pam4"],
+    )
+    def test_kernel_matches_cpu(
+        self, xp: Any, xpt: Any, method: str, constellation: Any
+    ) -> None:
+        rng = np.random.default_rng(3)
+        pts = constellation.points
+        x = pts[rng.integers(0, pts.size, (2, 5000))]
+        x = x + 0.1 * rng.standard_normal(x.shape)
+        if np.iscomplexobj(pts):
+            x = x + 0.1j * rng.standard_normal(x.shape)
+        kw = dict(noise_var=0.02, constellation=constellation, method=method)
+        cpu = mapping.compute_llr(x, **kw)
+        gpu = mapping.compute_llr(xp.asarray(x), **kw)
+        assert gpu.shape == cpu.shape
+        xpt.assert_allclose(gpu, xp.asarray(cpu), rtol=1e-4, atol=1e-3)
 
 
 class TestComputeLLRSignalIntegration:

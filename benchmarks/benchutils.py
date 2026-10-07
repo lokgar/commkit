@@ -55,3 +55,23 @@ def nvtx_range(name: str):
     finally:
         if pushed:
             cp.cuda.nvtx.RangePop()
+
+
+def assert_converged(result, syms, constellation, *, skip, max_ser, blind=False):
+    """Fail when an equalizer benchmark did not converge.
+
+    A workload that the algorithm cannot handle times a failure mode (slip
+    storms, divergence) instead of the operating point, so every equalizer
+    benchmark checks its symbol error rate after ``skip`` symbols.  Blind
+    equalizers leave a phase ambiguity, which is resolved against the
+    reference first.
+    """
+    from commkit.backend import to_device
+    from commkit.recovery import resolve_phase_ambiguity
+
+    y = to_device(result.y_hat, "cpu")[..., skip:]
+    ref = to_device(syms, "cpu")[..., skip : skip + y.shape[-1]]
+    if blind:
+        y = resolve_phase_ambiguity(y, ref, constellation=constellation)
+    ser = float((constellation.demap(y) != constellation.demap(ref)).mean())
+    assert ser <= max_ser, f"benchmark workload did not converge: SER {ser:.3g}"

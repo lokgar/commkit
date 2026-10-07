@@ -1,12 +1,14 @@
 """Optical/electronic source impairments (laser/oscillator phase noise)."""
 
 import math
+from types import ModuleType
 
 import numpy as np
 
 from .._array import as_2d, restore_1d
-from ..backend import dispatch
-from ..core._signal_adapter import S, adapt_signal
+from .._random import standard_normal
+from ..backend import ArrayType, _module_for, dispatch
+from ..core._signal_adapter import S, adapt_signal, require_device
 from ..logger import logger
 
 __all__ = ["apply_phase_noise", "generate_phase_noise"]
@@ -25,35 +27,38 @@ def _phase_trajectory(
     flicker: float,
     flicker_f_min: float | None,
     rng: np.random.Generator,
-) -> np.ndarray:
+    xp: ModuleType,
+) -> ArrayType:
     """
-    NumPy float64 phase trajectories with one-sided FM-noise PSD
+    float64 phase trajectories on ``xp``'s device with one-sided FM-noise PSD
 
         S_f(f) = linewidth / pi  +  flicker / f      [Hz^2/Hz].
 
     The white-FM part is generated exactly as a discrete Wiener walk
     (per-sample increments N(0, 2*pi*linewidth/f_s)); the flicker part by
-    spectral shaping of white frequency noise.  Generated on the CPU so a
-    given seed yields the identical trajectory on every backend.
+    spectral shaping of white frequency noise.  Like AWGN, the noise is drawn
+    on the device: a seed gives the same statistics on every device, not the
+    same realization.
     """
     num_samples = shape[-1]
-    phi = np.zeros(shape, dtype=np.float64)
+    phi = xp.zeros(shape, dtype=xp.float64)
 
     if linewidth > 0.0:
         std = math.sqrt(2.0 * math.pi * linewidth / sampling_rate)
-        phi += np.cumsum(rng.normal(0.0, std, shape), axis=-1)
+        steps = standard_normal(rng, shape, dtype=np.float64, xp=xp)
+        phi += xp.cumsum(steps * std, axis=-1)
 
     if flicker > 0.0:
-        f = np.fft.rfftfreq(num_samples, 1.0 / sampling_rate)
+        f = xp.fft.rfftfreq(num_samples, 1.0 / sampling_rate)
         f_min = (
             flicker_f_min if flicker_f_min is not None else sampling_rate / num_samples
         )
         # A unit-variance white input has one-sided PSD 2/f_s, so shaping to
         # S_f = flicker/f requires the amplitude gain sqrt(flicker/f * f_s/2).
-        gain = np.sqrt(flicker / np.maximum(f, f_min)) * math.sqrt(sampling_rate / 2.0)
-        spec = np.fft.rfft(rng.normal(0.0, 1.0, shape), axis=-1)
-        df = np.fft.irfft(spec * gain, num_samples, axis=-1)
-        phi += 2.0 * math.pi * np.cumsum(df, axis=-1) / sampling_rate
+        gain = xp.sqrt(flicker / xp.maximum(f, f_min)) * math.sqrt(sampling_rate / 2.0)
+        white = standard_normal(rng, shape, dtype=np.float64, xp=xp)
+        df = xp.fft.irfft(xp.fft.rfft(white, axis=-1) * gain, num_samples, axis=-1)
+        phi += 2.0 * math.pi * xp.cumsum(df, axis=-1) / sampling_rate
 
     return phi
 
@@ -67,7 +72,8 @@ def generate_phase_noise(
     flicker_f_min: float | None = None,
     num_channels: int = 1,
     rng: int | np.random.Generator | None = None,
-) -> np.ndarray:
+    device: str = "cpu",
+) -> ArrayType:
     """
     Generates laser/oscillator phase-noise trajectories phi[n] in radians.
 
@@ -106,19 +112,24 @@ def generate_phase_noise(
         Number of independent trajectories.
     rng : int, numpy.random.Generator or None
         Random source (an int seeds ``numpy.random.default_rng``).
+    device : {"cpu", "gpu"}, default "cpu"
+        Where the trajectory is drawn and returned.
 
     Returns
     -------
-    numpy.ndarray
-        Phase in radians, ``float64``, on the host (move it with
-        ``to_device``).  Shape ``(num_samples,)`` for ``num_channels=1``,
-        else ``(num_channels, num_samples)``.
+    array_like
+        Phase in radians, ``float64``, on ``device``.  Shape
+        ``(num_samples,)`` for ``num_channels=1``, else
+        ``(num_channels, num_samples)``.
 
     Notes
     -----
-    The trajectory is generated on the host with a NumPy Generator, so a
-    given seed gives the same trajectory whichever device it is used on.
+    The noise is drawn on ``device``, like AWGN: a seed gives the same
+    trajectory on every run on one device, but CPU and GPU realizations
+    differ (their statistics agree).  For the identical trajectory on both,
+    generate it on the CPU and move it with ``to_device``.
     """
+    device = require_device(device, "generate_phase_noise()")
     logger.info(
         "Generating phase noise (linewidth=%.3g Hz, flicker=%.3g Hz², %s stream(s)).",
         linewidth,
@@ -133,6 +144,7 @@ def generate_phase_noise(
         flicker,
         flicker_f_min,
         np.random.default_rng(rng),
+        _module_for(device),
     )
     if num_channels == 1:
         phi = phi[0]
@@ -184,7 +196,8 @@ def apply_phase_noise(
         When ``True``, a single phase noise trajectory is shared across all
         channels (common local oscillator in a coherent system).
     rng : int, numpy.random.Generator or None
-        Random source for the trajectories (drawn on the host).
+        Random source for the trajectories, drawn on the input's device
+        (see :func:`generate_phase_noise`).
 
     Returns
     -------
@@ -212,15 +225,14 @@ def apply_phase_noise(
     C, N = x.shape
 
     num_trajectories = 1 if shared_lo else C
-    phase = xp.asarray(
-        _phase_trajectory(
-            (num_trajectories, N),
-            sampling_rate,
-            linewidth,
-            flicker,
-            flicker_f_min,
-            np.random.default_rng(rng),
-        )
+    phase = _phase_trajectory(
+        (num_trajectories, N),
+        sampling_rate,
+        linewidth,
+        flicker,
+        flicker_f_min,
+        np.random.default_rng(rng),
+        xp,
     )
     result = x * xp.exp(1j * phase)  # (1, N) broadcasts across channels
 

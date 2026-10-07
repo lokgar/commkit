@@ -11,7 +11,7 @@ N_SYM = 100_000
 
 
 def bench_viterbi_viterbi_cs(benchmark, backend_device, xp, sync):
-    x = xp.asarray(bps_workload(order=4, n_sym=N_SYM, num_ch=2, linewidth_hz=1e4))
+    x = xp.asarray(bps_workload(order=4, n_sym=N_SYM, num_ch=2, linewidth_hz=1e3))
 
     def run():
         out = recovery.estimate_carrier_phase(

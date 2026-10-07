@@ -129,9 +129,30 @@ class TestGenerate:
             (dict(num_symbols=0), ValueError),
             (dict(num_channels=1.5), ValueError),
             (dict(sps=2.5), ValueError),
+            (dict(device="tpu"), ValueError),
         ],
     )
     def test_invalid_arguments(self, kwargs, error) -> None:
         args = dict(constellation=Constellation.qam(4), num_symbols=10, symbol_rate=1.0)
         with pytest.raises(error):
             generate(**{**args, **kwargs})
+
+
+class TestGenerateDevice:
+    """generate(..., device=): built on the device, same data as on the CPU."""
+
+    @pytest.mark.parametrize(
+        "constellation", [Constellation.qam(16), Constellation.qam(16).shaped(nu=0.1)]
+    )
+    def test_matches_cpu(self, backend_device: str, xp: Any, constellation) -> None:
+        kw = dict(symbol_rate=1e6, sps=2, pulse=RRC(0.1), num_channels=2, rng=5)
+        ref = generate(constellation, 1000, **kw)
+        sig = generate(constellation, 1000, device=backend_device.upper(), **kw)
+        for arr in (sig.samples, sig.reference.symbols, sig.reference.bits):
+            assert isinstance(arr, xp.ndarray)
+        np.testing.assert_array_equal(to_numpy(sig.reference.bits), ref.reference.bits)
+        np.testing.assert_array_equal(
+            to_numpy(sig.reference.symbols), ref.reference.symbols
+        )
+        assert sig.samples.dtype == ref.samples.dtype
+        np.testing.assert_allclose(to_numpy(sig.samples), ref.samples, atol=1e-5)

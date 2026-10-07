@@ -173,18 +173,24 @@ Dependencies point downward only:
     parameters on construction. Class names are unique across the package.
   - Equalizer continuation uses `state=result.state`.
 - **Randomness:** `rng: int | np.random.Generator | None` (SciPy SPEC 7).
-  - Small data (bits, symbols, trajectories): generate on the host with the
-    Generator, then transfer. This gives the same data on CPU and GPU.
-  - Signal-sized noise: generate on the device with a CuPy generator seeded
-    from it.
+  - What is transmitted (bits, symbols, pilots): draw on the host with the
+    Generator, then transfer. A seed gives the same payload on CPU and GPU.
+  - What the channel adds (AWGN, phase noise): draw on the data's device
+    through `_random.standard_normal`. Realizations differ between devices;
+    statistics agree, and tests assert statistics.
   - Never use a global RNG.
 - **Types:** a transform is written `def f(samples: S, ...) -> S` with the
   TypeVar `S` from `core/_signal_adapter.py` (bound to `np.ndarray | Signal`),
   so a Signal gives a Signal and an array an array. Do not reassign the
   `samples` parameter; name the unwrapped array `x`.
-- **Device follows the data.** There are no `backend=` or `device=` arguments
-  and no global switches. Unsupported array types (JAX, PyTorch) raise
-  `TypeError`.
+- **Device follows the data.** There are no `backend=` arguments and no
+  global switches. Unsupported array types (JAX, PyTorch) raise `TypeError`.
+  - Only factories with no input data to follow (`generate`,
+    `generate_phase_noise`, `Preamble`/`SingleCarrierFrame.to_signal`,
+    `load_npz`) take `device: str = "cpu"`, validated with
+    `require_device()`. They draw randomness as the rule above says and do
+    the vectorized work (mapping, shaping) on `device`. The default is never
+    "GPU if available".
 - **No `debug_plot`.** Numerical code never imports plotting. Plot functions
   consume results or recompute through public compute functions.
 - **Design and apply are separate functions**, for example `rrc_taps` and
@@ -347,7 +353,12 @@ Dependencies point downward only:
 `benchmarks/` tracks the GPU-relevant hot paths. Baselines are committed under
 `benchmarks/baselines/`. The current reference is `0003` (`v2_0`) on the
 reference machine: RTX 4070 Ti, Ryzen 7 7800X3D, WSL2; `0002` (`pre_v2`) is
-the 1.x state.
+the 1.x state. `0002` ran the CPR equalizer and Viterbi-Viterbi benchmarks
+on workloads that did not converge, so compare those only from `0003` on.
+- **Workloads must converge.** A workload the algorithm cannot handle times
+  a failure mode (slip storms, divergence), not the operating point. Every
+  equalizer benchmark asserts its symbol error rate with
+  `benchutils.assert_converged`.
 - **Baselines** are recorded with `benchmarks/record_baseline.py`: each file
   in its own process, best of three passes. In one full-suite process, small
   GPU benchmarks after the large equalizer workloads ran 2-12x slower than

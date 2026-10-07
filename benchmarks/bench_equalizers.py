@@ -5,6 +5,7 @@ CuPy input, so the delta against ``[cpu]`` is the documented host round trip
 (one device-to-host copy of the input, one host-to-device copy of the outputs).
 """
 
+from benchutils import assert_converged
 from workloads import mimo_equalizer_workload
 
 from commkit.equalization import cma, lms, rls
@@ -31,7 +32,8 @@ def bench_lms(benchmark, backend_device, xp, sync):
         sync()
         return r
 
-    benchmark.pedantic(run, **ROUNDS)
+    r = benchmark.pedantic(run, **ROUNDS)
+    assert_converged(r, syms, Constellation.qam(16), skip=10_000, max_ser=1e-3)
 
 
 def bench_lms_bps(benchmark, backend_device, xp, sync):
@@ -54,11 +56,12 @@ def bench_lms_bps(benchmark, backend_device, xp, sync):
         sync()
         return r
 
-    benchmark.pedantic(run, **ROUNDS)
+    r = benchmark.pedantic(run, **ROUNDS)
+    assert_converged(r, syms, Constellation.qam(16), skip=5_000, max_ser=1e-3)
 
 
 def bench_cma(benchmark, backend_device, xp, sync):
-    samples, _ = mimo_equalizer_workload(n_sym=50_000, order=4, sps=2)
+    samples, syms = mimo_equalizer_workload(n_sym=50_000, order=4, sps=2)
     x = xp.asarray(samples)
 
     def run():
@@ -68,7 +71,10 @@ def bench_cma(benchmark, backend_device, xp, sync):
         sync()
         return r
 
-    benchmark.pedantic(run, **ROUNDS)
+    r = benchmark.pedantic(run, **ROUNDS)
+    assert_converged(
+        r, syms, Constellation.qam(4), skip=10_000, max_ser=1e-3, blind=True
+    )
 
 
 def bench_rls(benchmark, backend_device, xp, sync):
@@ -83,4 +89,5 @@ def bench_rls(benchmark, backend_device, xp, sync):
         sync()
         return r
 
-    benchmark.pedantic(run, **ROUNDS)
+    r = benchmark.pedantic(run, **ROUNDS)
+    assert_converged(r, syms, Constellation.qam(16), skip=5_000, max_ser=1e-3)

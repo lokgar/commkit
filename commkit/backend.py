@@ -78,6 +78,16 @@ def is_cupy_available() -> bool:
     return _cupy() is not None
 
 
+def _module_for(device: str) -> types.ModuleType:
+    """The array module for a validated ``"cpu"`` or ``"gpu"`` (factories)."""
+    if device == "cpu":
+        return np
+    cp = _cupy()
+    if cp is None:
+        raise ImportError("CuPy is not available.")
+    return cp
+
+
 def get_array_module(data: Any) -> types.ModuleType:
     """
     Infers the array module (NumPy or CuPy) for the given data.

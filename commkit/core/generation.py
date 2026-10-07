@@ -10,10 +10,10 @@ constellation: ``generate(Constellation.qam(64).shaped(nu=0.1), ...)``.
 import numpy as np
 
 from .. import filtering, mapping
-from ..backend import ArrayType, dispatch
+from ..backend import ArrayType, dispatch, to_device
 from ..logger import logger
 from ..math import normalize
-from ._signal_adapter import require_integer_sps
+from ._signal_adapter import require_device, require_integer_sps
 from .signal import Reference, Signal
 
 __all__ = ["expand", "generate", "shape_pulse"]
@@ -112,6 +112,7 @@ def generate(
     pulse: "filtering.Pulse | ArrayType | None" = None,
     num_channels: int = 1,
     rng: int | np.random.Generator | None = None,
+    device: str = "cpu",
 ) -> Signal:
     """
     Random symbols from ``constellation``, pulse-shaped into a Signal.
@@ -135,8 +136,13 @@ def generate(
         Number of independent channels.  Samples are ``(N,)`` for one
         channel and ``(C, N)`` otherwise; the reference has the same layout.
     rng : int, numpy.random.Generator or None
-        Seed or generator (SciPy SPEC 7).  Data is always generated on the
-        CPU; move the Signal with ``.to("gpu")``.
+        Seed or generator (SciPy SPEC 7).
+    device : {"cpu", "gpu"}, default "cpu"
+        Where the samples and the reference are built.  The random bits are
+        always drawn on the host, so a seed gives the same symbols on either
+        device; mapping and pulse shaping run on ``device``.  Prefer
+        ``device="gpu"`` to ``generate(...).to("gpu")`` for long records:
+        shaping on the GPU is an order of magnitude faster.
 
     Returns
     -------
@@ -161,18 +167,23 @@ def generate(
         if value < 1:
             raise ValueError(f"generate(): {name} must be >= 1, got {value}.")
     sps = require_integer_sps(sps, "generate()")
+    device = require_device(device, "generate()")
     gen = np.random.default_rng(rng)
 
     c = constellation
     k = c.bits_per_symbol
     total = int(num_symbols) * int(num_channels)
+    # Draw on the host (same data on every device), move the small draw,
+    # build symbols and samples on the target device.
     if c.pmf is None:
-        bits = gen.integers(0, 2, size=total * k, dtype="int8")
+        bits = to_device(gen.integers(0, 2, size=total * k, dtype="int8"), device)
         symbols = c.map(bits)
     else:
-        idx = gen.choice(c.order, size=total, p=c.pmf)
-        symbols = c.points.astype(c._storage_dtype())[idx]
-        bits = c.bit_labels[idx].reshape(-1)
+        idx, xp, _ = dispatch(
+            to_device(gen.choice(c.order, size=total, p=c.pmf), device)
+        )
+        symbols = xp.asarray(c.points.astype(c._storage_dtype()))[idx]
+        bits = xp.asarray(c.bit_labels)[idx].reshape(-1)
 
     if num_channels > 1:
         symbols = symbols.reshape(num_channels, num_symbols)
@@ -181,12 +192,13 @@ def generate(
     samples = shape_pulse(symbols, sps=sps, pulse=pulse)
 
     logger.info(
-        "Generated %r: %s symbols x %s channel(s), sps=%s, pulse=%r.",
+        "Generated %r: %s symbols x %s channel(s), sps=%s, pulse=%r, on %s.",
         c,
         num_symbols,
         num_channels,
         sps,
         pulse if isinstance(pulse, filtering.Pulse) or pulse is None else "taps",
+        device,
     )
     return Signal(
         samples=samples,

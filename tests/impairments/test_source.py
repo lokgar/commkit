@@ -7,6 +7,7 @@ import numpy as np
 from commkit.backend import to_device
 from commkit.core import Signal
 from commkit.impairments import apply_phase_noise, generate_phase_noise
+from tests.common.conversions import device_of
 
 
 class TestApplyPhaseNoise:
@@ -112,12 +113,16 @@ class TestApplyPhaseNoise:
 class TestGeneratePhaseNoise:
     """Tests for generate_phase_noise."""
 
-    def test_shapes_and_dtype(self):
-        """SISO (N,) for one stream, (C, N) for several; float64 on the host."""
+    def test_shapes_and_dtype(self, xp):
+        """SISO (N,) for one stream, (C, N) for several; float64 on ``device``."""
         phi = generate_phase_noise(
-            num_samples=256, sampling_rate=64e9, linewidth=1e6, rng=1
+            num_samples=256,
+            sampling_rate=64e9,
+            linewidth=1e6,
+            rng=1,
+            device=device_of(xp),
         )
-        assert isinstance(phi, np.ndarray)
+        assert isinstance(phi, xp.ndarray)
         assert phi.shape == (256,)
         assert phi.dtype == np.float64
         phi2 = generate_phase_noise(
@@ -125,24 +130,25 @@ class TestGeneratePhaseNoise:
         )
         assert phi2.shape == (3, 256)
 
-    def test_seed_reproducible(self):
-        """Same seed yields the identical trajectory."""
-        a = generate_phase_noise(
-            num_samples=1024, sampling_rate=64e9, linewidth=1e6, flicker=1e9, rng=42
-        )
-        b = generate_phase_noise(
-            num_samples=1024, sampling_rate=64e9, linewidth=1e6, flicker=1e9, rng=42
-        )
-        assert float(np.max(np.abs(a - b))) == 0.0
+    def test_seed_reproducible(self, xp):
+        """Same seed yields the identical trajectory on one device."""
+        kw = dict(num_samples=1024, sampling_rate=64e9, linewidth=1e6, flicker=1e9)
+        a = generate_phase_noise(**kw, rng=42, device=device_of(xp))
+        b = generate_phase_noise(**kw, rng=42, device=device_of(xp))
+        assert float(xp.max(xp.abs(a - b))) == 0.0
 
     def test_wiener_increment_variance(self, xp):
         """White-FM increments have variance 2π·Δν/fs."""
         fs, dnu = 64e9, 100e3
         phi = generate_phase_noise(
-            num_samples=200_000, sampling_rate=fs, linewidth=dnu, rng=7
+            num_samples=200_000,
+            sampling_rate=fs,
+            linewidth=dnu,
+            rng=7,
+            device=device_of(xp),
         )
         expected = 2.0 * math.pi * dnu / fs
-        measured = float(np.var(np.diff(phi)))
+        measured = float(xp.var(xp.diff(phi)))
         assert abs(measured - expected) / expected < 0.05
 
     def test_flicker_fm_psd_level(self, xp):
@@ -151,7 +157,11 @@ class TestGeneratePhaseNoise:
 
         fs, h_m1 = 500e6, 4e9
         phi = generate_phase_noise(
-            num_samples=1 << 20, sampling_rate=fs, flicker=h_m1, rng=9
+            num_samples=1 << 20,
+            sampling_rate=fs,
+            flicker=h_m1,
+            rng=9,
+            device=device_of(xp),
         )
         df = np.diff(to_device(phi, "cpu")) * fs / (2.0 * np.pi)
         f, s_f = sp_sig.welch(df, fs=fs, nperseg=1 << 15)
@@ -162,8 +172,8 @@ class TestGeneratePhaseNoise:
     def test_matches_apply_phase_noise_trajectory(self, xp):
         """apply_phase_noise(ones) reproduces the generate_phase_noise walk."""
         fs, dnu, n = 64e9, 100e3, 8192
-        phi = xp.asarray(
-            generate_phase_noise(num_samples=n, sampling_rate=fs, linewidth=dnu, rng=11)
+        phi = generate_phase_noise(
+            num_samples=n, sampling_rate=fs, linewidth=dnu, rng=11, device=device_of(xp)
         )
         out = apply_phase_noise(
             xp.ones(n, dtype=xp.complex128), sampling_rate=fs, linewidth=dnu, rng=11

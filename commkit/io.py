@@ -233,7 +233,9 @@ def load_npz(
     >>> sig_gpu = load_npz("capture.npz", device="gpu")
     """
     from .core import Signal
+    from .core._signal_adapter import require_device
 
+    device = require_device(device, "load_npz()")
     path = Path(path)
     if path.suffix != ".npz":
         path = path.with_suffix(".npz")

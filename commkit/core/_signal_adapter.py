@@ -132,6 +132,19 @@ def _same_fact(a: Any, b: Any) -> bool:
         return bool(a == b)
 
 
+def require_device(device: str, function_name: str) -> str:
+    """Validate a factory's ``device`` and return it lower-cased.
+
+    Factories have no input data whose device they could follow, so they are
+    the only functions that take ``device=``.
+    """
+    if isinstance(device, str) and device.lower() in ("cpu", "gpu"):
+        return device.lower()
+    raise ValueError(
+        f'{function_name} requires device to be "cpu" or "gpu"; got {device!r}.'
+    )
+
+
 def require_integer_sps(value: float, function_name: str) -> int:
     """Validate a positive integral SPS and return it as ``int``.
 

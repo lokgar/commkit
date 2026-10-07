@@ -160,27 +160,16 @@ def _prepare_block(
         lead = min(c_tap, pad_total)
         pad_right = pad_total - lead
         real_end = lead + N
-        if xp is np or pad_mode != "zeros":
-            samples_cpu = to_device(samples, "cpu").astype(np.complex64)
-            x_padded = xp.asarray(
-                _build_padded_samples(
-                    samples_cpu, lead, pad_right, None, pad_mode, None, sps
-                )
-            )
-        else:
-            # Zero-pad on the device: no host round trip for GPU input.
-            f32 = (
-                samples
-                if samples.dtype == xp.complex64
-                else samples.astype(xp.complex64)
-            )
-            left = xp.zeros((C, lead), dtype=xp.complex64)
-            right = (
-                xp.zeros((C, pad_right), dtype=xp.complex64)
-                if pad_right > 0
-                else xp.empty((C, 0), dtype=xp.complex64)
-            )
-            x_padded = xp.concatenate([left, f32, right], axis=1)
+        # Padding runs on the samples' device, whatever the pad mode.
+        x_padded = _build_padded_samples(
+            samples.astype(xp.complex64, copy=False),
+            lead,
+            pad_right,
+            None,
+            pad_mode,
+            None,
+            sps,
+        )
     else:
         lead = state.lead
         real_end = state.pending.shape[-1] + N
