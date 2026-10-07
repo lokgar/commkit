@@ -140,6 +140,17 @@ class TestErrorVectorMagnitude:
         pct_bl, _ = metrics.evm(rx, mode="blind", modulation="qam", order=16)
         assert abs(pct_da - pct_bl) < 0.5
 
+    def test_evm_blind_shaped_matches_data_aided(self, xp: Any) -> None:
+        """At high SNR blind EVM equals data-aided EVM on a shaped
+        constellation too: both are relative to its average power."""
+        c = Constellation.qam(64).shaped(nu=0.075)
+        sig = generate(c, 20000, symbol_rate=1e9, rng=2)
+        rx = apply_awgn(xp.asarray(sig.samples), esn0_db=35.0, sps=1, rng=3)
+        sig = multirate.resolve_symbols(sig.replace(samples=rx))
+        pct_da, _ = metrics.evm(sig)
+        pct_bl, _ = metrics.evm(sig, mode="blind")
+        assert pct_bl == pytest.approx(pct_da, rel=0.02)
+
     def test_evm_blind_multichannel(self, xp: Any, xpt: Any) -> None:
         """Blind EVM returns array of shape (N_ch,) for MIMO input."""
         const = xp.asarray(Constellation.qam(4).points)
@@ -245,6 +256,15 @@ class TestSymbolErrorRate:
         assert result.shape == (2,)
         assert float(result[0]) == 0.0
         assert float(result[1]) == 0.0
+
+    def test_ser_shaped_clean_signal_is_zero(self, xp: Any) -> None:
+        """A noiseless shaped signal has no symbol errors: received and
+        reference symbols are both decided at unit power."""
+        c = Constellation.qam(64).shaped(nu=0.075)  # E_PS ~ 0.31 on the 1.x grid
+        sig = generate(c, 2000, symbol_rate=1e9, rng=1).to(
+            "gpu" if xp is not np else "cpu"
+        )
+        assert metrics.ser(multirate.resolve_symbols(sig)) == 0.0
 
     def test_ser_shape_mismatch_raises(self, xp: Any) -> None:
         """SER raises ValueError on shape mismatch."""

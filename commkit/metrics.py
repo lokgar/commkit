@@ -158,13 +158,11 @@ def evm(
     order : int, optional
         Modulation order *M*. Required when ``mode="blind"``.
     pmf : np.ndarray, optional
-        Symbol PMF of shape ``(order,)`` for PS-QAM in ``mode="blind"``.
-        When provided, ``rx_symbols`` are rescaled by ``sqrt(E_PS)`` before
-        the nearest-neighbour search so unit-avg-power resolved symbols
-        line up with the ``{s_m}`` grid returned by
-        ``gray_constellation``.  Has no effect for uniform modulations
-        or for ``mode="data_aided"`` (which is scale-invariant by
-        per-channel power normalisation).
+        Symbol PMF of shape ``(order,)`` for PS-QAM in ``mode="blind"``: the
+        decisions use the constellation scaled to unit power under the pmf,
+        the scale of unit-power received symbols.  Has no effect for
+        ``mode="data_aided"`` (which is scale-invariant by per-channel power
+        normalisation).
 
     Returns
     -------
@@ -267,13 +265,9 @@ def evm(
         # No gain correction of rx is applied here - the caller is responsible
         # for passing a gain-corrected signal at the expected constellation power.
         c = _legacy_constellation(modulation, order, pmf=pmf)
-        constellation_np = c.points
-        constellation = xp.asarray(constellation_np)  # (M,) unit-avg-power
-
-        # PS-QAM: receive-path symbols at unit average power live on the
-        # ``{s_m/sqrt(E_PS)}`` grid.  Rescale rx by ``sqrt(E_PS)`` so the
-        # nearest-neighbour decision against ``{s_m}`` is exact.
-        rx = _rescale_ps_symbols(rx, xp, modulation, order, pmf)
+        # Unit power under the pmf (the 1.x PS grid has E_PS < 1): the EVM is
+        # relative to the constellation's average power.
+        constellation = xp.asarray(c.points / np.sqrt(c.power()))
 
         # ML hard decision: nearest constellation point per symbol.  Chunked
         # over the flattened N axis to bound peak memory of the (N, M)
@@ -565,12 +559,9 @@ def ser(
     order : int
         Modulation order *M*.
     pmf : np.ndarray, optional
-        Symbol PMF of shape ``(order,)`` for PS-QAM.  When provided, the
-        comparison constellation is scaled by ``1/sqrt(E_PS)`` so the
-        nearest-neighbour search matches the scale of unit-avg-power
-        received symbols.  Both ``rx_symbols`` and ``tx_symbols`` are
-        decided against the same scaled constellation.  Has no effect for
-        uniform modulations.
+        Symbol PMF of shape ``(order,)`` for PS-QAM.  Both ``rx_symbols`` and
+        ``tx_symbols`` are decided against the constellation scaled to unit
+        power under the pmf, the scale of unit-power symbols.
 
     Returns
     -------
@@ -643,17 +634,9 @@ def ser(
         raise ValueError(f"Shape mismatch: rx {rx.shape} != tx {tx.shape}")
 
     c = _legacy_constellation(modulation, order, pmf=pmf)
-    constellation_np = c.points
-    constellation = xp.asarray(constellation_np)  # (M,)
-
-    # PS-QAM: ``rx_symbols`` from ``resolved_symbols``
-    # are normalised to unit average power, placing them on the
-    # ``{s_m/sqrt(E_PS)}`` grid.  ``tx_symbols`` (``source_symbols``) live on
-    # the un-rescaled ``{s_m}`` grid (their average power is ``E_PS < 1``).
-    # Rescale ``rx`` by ``sqrt(E_PS)`` so the nearest-neighbour search against
-    # ``gray_constellation`` is correct for both rx and tx.  Has no effect on
-    # uniform modulations.
-    rx = _rescale_ps_symbols(rx, xp, modulation, order, pmf)
+    # Both rx and tx are at unit power, as is a shaped constellation under its
+    # pmf (the 1.x PS grid has E_PS < 1).
+    constellation = xp.asarray(c.points / np.sqrt(c.power()))  # (M,)
 
     # Nearest constellation point per symbol, chunked over the flattened N
     # axis to bound peak memory of the (N, M) distance matrix.

@@ -1036,8 +1036,19 @@ The equalization pass (3.7) gets more commits:
   (the only alignment it can know) and returns the payload as a plain 1-SPS
   Signal: `constellation` is the payload constellation and `reference`
   holds the payload symbols and bits. Any other length, rate or a Signal
-  without a frame raises.
-- [ ] **3.8b `refactor(metrics)!: 2.0 signatures`.**
+  without a frame raises. Its MIMO test found that a one-stream preamble
+  in a multi-stream frame crashed `to_signal`; it is now broadcast (own
+  `fix(core)` commit).
+- [x] **3.8b `fix(metrics): SER and blind EVM of shaped constellations`.**
+  Found by the A/B for 3.8c. Since 3.2b the reference symbols sit at unit
+  power, but `ser` and blind `evm` decided against the 1.x PS grid
+  (`E_PS < 1`) after rescaling only the received symbols: SER decided the
+  reference on the wrong grid (a clean 64-QAM nu=0.075 signal had errors),
+  and blind EVM was relative to `E_PS` instead of the average power (12.7%
+  instead of 22.7% at 0 dB). Both now decide at unit power under the pmf.
+  Validation: a clean shaped signal has SER 0, and blind EVM equals
+  data-aided EVM at 35 dB (both fail before).
+- [ ] **3.8c `refactor(metrics)!: 2.0 signatures`.**
   - `evm(symbols, reference=None, *, constellation=, blind=False,
     num_skip_symbols=0)` returns the RMS EVM in percent only (dB is
     `20 log10(evm / 100)`); `blind=True` decides against the constellation
@@ -1059,7 +1070,7 @@ The equalization pass (3.7) gets more commits:
     `resolve_symbols` call `decimate_to_symbol_rate`, which normalizes the
     same way. `_legacy_constellation` and `_rescale_ps_symbols` go (a
     shaped constellation has unit power).
-- [ ] **3.8c `refactor(core)!: remove the resolved_* caches`.**
+- [ ] **3.8d `refactor(core)!: remove the resolved_* caches`.**
   `Signal.resolved_symbols` / `resolved_bits`, `replace_samples`,
   `replace_signal_field` and `multirate.resolve_symbols` go (use
   `decimate_to_symbol_rate`). `demap_symbols_hard` and `compute_llr` read
@@ -1067,17 +1078,17 @@ The equalization pass (3.7) gets more commits:
   and `resolve_channel_permutation` correct the samples against
   `reference.symbols` and return a new Signal. `io` stops saving the
   caches.
-- [ ] **3.8d `fix(metrics): GMI of shaped constellations`.** The
+- [ ] **3.8e `fix(metrics): GMI of shaped constellations`.** The
   bit-metric decoding rate `H(X) - sum_b E[log2(1 + exp(-(1 - 2 c_b)
   LLR_b))]` replaces `k - ...`, which assumes uniform bits. Oracle:
   `GMI <= MI <= H(X)` on shaped constellations, and the uniform case
   unchanged.
-- [ ] **3.8e `fix(metrics): data-aided gain instead of total power`.**
+- [ ] **3.8f `fix(metrics): data-aided gain instead of total power`.**
   Symbols with a reference are scaled by the real data-aided gain
   `Re<r s*> / <|s|^2>` (no rotation) instead of to unit total power, which
   shrinks the signal by `1/sqrt(1 + 1/SNR)`. Oracle at -10 dB for
   `snr`, `evm`, `mi` and `gmi`.
-- [ ] **3.8f `docs(metrics): units and scaling table`.**
+- [ ] **3.8g `docs(metrics): units and scaling table`.**
 
 **Equalizer safety rules (3.7):**
 
