@@ -222,6 +222,7 @@ Dependencies point downward only:
 ## 8. Benchmarks
 
 `benchmarks/` tracks the GPU-relevant hot paths. Baselines are committed under `benchmarks/baselines/`. The current reference is `0003` (`v2_0`) on the reference machine: RTX 4070 Ti, Ryzen 7 7800X3D, WSL2; `0002` (`pre_v2`) is the 1.x state. `0002` ran the CPR equalizer and Viterbi-Viterbi benchmarks on workloads that did not converge, so compare those only from `0003` on.
+
 - **Workloads must converge.** A workload the algorithm cannot handle times a failure mode (slip storms, divergence), not the operating point. Every equalizer benchmark asserts its symbol error rate with `benchutils.assert_converged`.
 - **Baselines** are recorded with `benchmarks/record_baseline.py`: each file in its own process, best of three passes. In one full-suite process, small GPU benchmarks after the large equalizer workloads ran 2-12x slower than alone, so never record a baseline from a single `pytest benchmarks/` run.
 
