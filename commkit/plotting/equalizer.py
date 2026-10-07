@@ -128,9 +128,8 @@ def plot_equalizer_result(
         # SISO: (num_taps,) - stem plot
         num_taps = weights.shape[0]
         tap_idx = np.arange(num_taps) - (num_taps // 2)
-        markerline, stemlines, _ = ax_taps.stem(tap_idx, np.abs(weights))
-        plt.setp(stemlines)
-        plt.setp(markerline, markersize=4)
+        markerline, _, _ = ax_taps.stem(tap_idx, np.abs(weights))
+        markerline.set_markersize(4)
 
     ax_taps.set_xlabel("Tap Index")
     ax_taps.set_ylabel("|w|")

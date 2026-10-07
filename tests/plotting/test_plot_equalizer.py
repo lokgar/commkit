@@ -95,6 +95,23 @@ class TestPlotEqualizer:
         fig, axes = plot_equalizer_result(result, smoothing=1000)
         assert fig is not None
 
+    def test_equalizer_result_siso_prints_nothing(self, xp: Any, capsys: Any) -> None:
+        """The SISO tap stem plot must not dump Matplotlib's property table
+        (a bare ``plt.setp(lines)`` prints it)."""
+        sig = generate(
+            Constellation.psk(4), 500, symbol_rate=1e3, sps=2, pulse=RRC(0.35)
+        )
+        res = equalization.lms(
+            xp.asarray(sig.samples),
+            xp.asarray(sig.reference.symbols),
+            num_taps=5,
+            sps=2,
+            constellation=Constellation.psk(4),
+            store_weights=True,
+        )
+        plot_equalizer_result(res)
+        assert capsys.readouterr().out == ""
+
     def test_equalizer_result_short_smoothing_mimo(self, xp: Any) -> None:
         """plot_equalizer_result() MIMO where len(mse) <= smoothing uses raw mse."""
         sig = generate(
