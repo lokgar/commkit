@@ -12,6 +12,59 @@ reference: synchronization, phase-ambiguity and channel-permutation
 resolution are explicit receiver steps.  Lengths that disagree, empty
 selections and frame Signals (use :func:`~commkit.core.extract_payload`)
 raise.
+
+Units and scaling
+-----------------
+Units are carried by argument names (``esn0_db``, ``noise_var``); there is
+no units object.
+
+==========================  =================================================
+Quantity                    Definition in commkit
+==========================  =================================================
+Sample power ``P``          ``E[|x|^2]`` per complex sample.  At ``sps``
+                            samples per symbol a normalized waveform has
+                            ``P = 1/sps``; at the symbol rate ``P = 1``.
+Symbol energy ``Es``        ``sps * P``: 1 for normalized waveforms and for
+                            symbols on a constellation's scale.  Every
+                            factory constellation, shaped ones included, has
+                            unit average power under its pmf.
+``Es/N0`` (``esn0_db``)     Symbol energy over noise spectral density.
+                            ``apply_awgn`` adds complex noise of variance
+                            ``sps * P / (Es/N0)`` per sample, which is
+                            ``Es/N0`` per symbol after a matched filter and
+                            decimation.
+Noise variance              ``noise_var = sigma^2 = E[|n|^2]`` per complex
+(``noise_var``)             symbol on the constellation's scale, so
+                            ``sigma^2 = 10 ** (-esn0_db / 10)`` at unit
+                            ``Es``.  Each quadrature (I, Q) carries
+                            ``sigma^2 / 2``.
+SNR (:func:`snr`, dB)       ``Es / E[|r/g - s|^2]`` at the symbol rate, with
+                            ``g`` the data-aided gain (below); equal to
+                            ``Es/N0`` for AWGN after a matched filter.
+EVM (:func:`evm`, %)        ``100 sqrt(E[|r/g - s|^2] / Es)``, RMS, relative
+                            to the reference's average power; ``= 100 *
+                            10 ** (-SNR_dB / 20)``.  Blind EVM is relative
+                            to the constellation's average power.
+MI, GMI (bits/symbol)       At most ``H(X)``: ``log2(M)`` when uniform, the
+                            entropy of the pmf when shaped.  GMI is the
+                            bit-metric decoding rate
+                            ``H(X) - sum_b H(B_b | Y)``.
+==========================  =================================================
+
+Which scale each metric reads:
+
+* ``evm`` and ``snr`` normalize the reference to unit average power and
+  divide the received symbols by the data-aided gain
+  ``g = |<r s*>| / <|s|^2>`` (per channel, after ``num_skip_symbols``).
+  Unlike normalizing to unit total power, which shrinks the symbols by
+  ``1/sqrt(1 + 1/SNR)``, this is unbiased at any SNR.  Only the magnitude
+  is used, so a rotation stays an error.
+* ``mi`` and ``gmi`` of a Signal with a reference divide by the same gain,
+  which puts the symbols on the constellation's scale whatever their
+  normalization; ``noise_var`` is then on that scale.  Arrays are read as
+  given.
+* ``ser`` and ``ber`` decide on the symbols as given, against the
+  constellation's points: decision thresholds are the receiver's.
 """
 
 import logging

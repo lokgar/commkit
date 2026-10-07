@@ -1104,7 +1104,10 @@ The equalization pass (3.7) gets more commits:
   `100 sqrt(nv)`, and MI/GMI equal to those of the transmit-scale samples
   with the transmit noise variance (16-QAM and shaped 256-QAM); a pi
   rotation gives `|2s + n|^2`. All fail before.
-- [ ] **3.8g `docs(metrics): units and scaling table`.**
+- [x] **3.8g `docs(metrics): units and scaling table`.** In the `metrics`
+  module docstring: sample power, symbol energy, Es/N0, complex and
+  per-quadrature noise variance, SNR, EVM, MI/GMI bounds, SPS and shaped
+  scaling, and which scale each metric reads.
 
 **Equalizer safety rules (3.7):**
 
