@@ -262,21 +262,10 @@ res_inc = analysis.estimate_linewidth(
 res_lor = analysis.estimate_linewidth(
     z, analysis.DshLorentzian(delay=TAU_D), sampling_rate=FS
 )
-plotting.plot_dsh_beat_psd(
-    res_lor.f,
-    res_lor.psd,
-    f_peak=res_lor.f_peak,
-    linewidth=res_lor.value,
-    linewidth_3db=res_lor.linewidth_3db,
-)
+plotting.plot_dsh_beat_psd(res_lor)
 
 fig, ax = plotting.plot_frequency_noise_psd(
-    res_fm.f,
-    res_fm.S_f,
-    floor=res_fm.value,
-    band=res_fm.band,
-    used=res_fm.used,
-    title="Deconvolved laser FM-noise PSD (gaps: notch comb at k/τ_d)",
+    res_fm, title="Deconvolved laser FM-noise PSD (gaps: notch comb at k/τ_d)"
 )
 ax.axhline(DNU_TRUE / np.pi, color="C3", ls="--", label=r"Truth $\Delta\nu/\pi$")
 ax.legend()
@@ -327,7 +316,7 @@ print(f"uncalibrated fm_psd     : {res_fm_bad.value / 1e3:6.1f} kHz  (robust)")
 df_disc = dphi / (2.0 * np.pi * TAU_D)  # discriminator output [Hz]
 allan = analysis.allan_deviation(df_disc, sampling_rate=FS, num_taus=40)
 
-fig, ax = plotting.plot_allan_deviation(allan.tau_s, allan.adev)
+fig, ax = plotting.plot_allan_deviation(allan)
 tau_valid = allan.tau_s[allan.tau_s > 5 * TAU_D]
 ax.loglog(
     tau_valid,

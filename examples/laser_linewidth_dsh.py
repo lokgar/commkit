@@ -220,12 +220,7 @@ res_fm = analysis.estimate_linewidth(
 )
 
 fig, ax = plotting.plot_frequency_noise_psd(
-    res_fm.f,
-    res_fm.S_f,
-    floor=res_fm.value,
-    band=res_fm.band,
-    used=res_fm.used,
-    title="Laser FM-noise PSD - gaps are the interferometer notches k/τ_d",
+    res_fm, title="Laser FM-noise PSD - gaps are the interferometer notches k/τ_d"
 )
 ax.axhline(DNU_TRUE / np.pi, color="C3", ls="--", label=r"Truth $\Delta\nu/\pi$")
 ax.legend()
@@ -300,13 +295,7 @@ print(f"increment: Δν = {res_inc.value / 1e3:.1f} kHz")
 res_lor = analysis.estimate_linewidth(
     z_dsh, analysis.DshLorentzian(delay=TAU_D, nperseg=1 << 15), sampling_rate=FS
 )
-plotting.plot_dsh_beat_psd(
-    res_lor.f,
-    res_lor.psd,
-    f_peak=res_lor.f_peak,
-    linewidth=res_lor.value,
-    linewidth_3db=res_lor.linewidth_3db,
-)
+plotting.plot_dsh_beat_psd(res_lor)
 print(
     f"lorentzian: Δν(-20 dB) = {res_lor.value / 1e3:.1f} kHz, "
     f"Δν(-3 dB) = {res_lor.linewidth_3db / 1e3:.1f} kHz, "
@@ -428,10 +417,7 @@ res_naive = analysis.estimate_linewidth(
 )
 
 fig, ax = plotting.plot_frequency_noise_psd(
-    res_mix.f,
-    res_mix.S_f,
-    floor=res_mix.value,
-    used=res_mix.used,
+    res_mix,
     title="Flicker rises above the white plateau at low f - report the PSD, not one number",
 )
 fline = np.geomspace(2e3, 2e5, 50)
@@ -473,7 +459,7 @@ dphi_short, _ = analysis.dsh_phase(z_short, sampling_rate=FS, f_shift=F_AOM)
 df_disc = dphi_short / (2.0 * np.pi * TAU_SHORT)  # discriminator output [Hz]
 allan = analysis.allan_deviation(df_disc, sampling_rate=FS, num_taus=40)
 
-fig, ax = plotting.plot_allan_deviation(allan.tau_s, allan.adev)
+fig, ax = plotting.plot_allan_deviation(allan)
 tau_valid = allan.tau_s[allan.tau_s > 5 * TAU_SHORT]
 ax.loglog(
     tau_valid,

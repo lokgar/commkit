@@ -232,12 +232,7 @@ for K in (32, 64, 128):
 lw_inc = analysis.estimate_linewidth(
     pn, analysis.IncrementSlope(edge_trim=edge), sampling_rate=R
 )
-plotting.plot_increment_variance(
-    lw_inc.lag_s,
-    lw_inc.var,
-    slope=lw_inc.slope,
-    intercept=lw_inc.intercept,
-)
+plotting.plot_increment_variance(lw_inc)
 print(
     f"linewidth (slope)   = {lw_inc.value / 1e6:.3f} MHz  (truth {DNU_TRUE / 1e6:.1f})"
 )
@@ -291,14 +286,7 @@ lw_beta = analysis.estimate_linewidth(
     analysis.BetaSeparation(nperseg=1 << 15, f_min=20e6, f_max=f_knee / 3.0),
     sampling_rate=R,
 )
-plotting.plot_frequency_noise_psd(
-    lw_beta.f,
-    lw_beta.S_f,
-    beta_line=lw_beta.beta_line,
-    floor=lw_beta.linewidth_floor,
-    band=lw_beta.band,
-    above=lw_beta.above,  # the *actual* β-integration region (S_f > β-line)
-)
+plotting.plot_frequency_noise_psd(lw_beta)
 plt.show()
 
 print(
@@ -336,30 +324,26 @@ print(
 
 # %%
 allan = analysis.allan_deviation(dm.df, sampling_rate=R, num_taus=40)
-_, ax = plotting.plot_allan_deviation(allan.tau_s, allan.adev)
+_, ax = plotting.plot_allan_deviation(allan)
 ax.axvline(0.37 / WANDER_FREQ, color="gray", ls=":")
 plt.show()
 
 # %% [markdown]
 # ## 7. The dashboard
 #
-# The pieces above compose into the 2x2 overview figure - assemble the report
-# dict from the individual results (this keeps orchestration in *your* script,
-# where the cutoffs and bands are visible, not hidden in a library wrapper).
+# The pieces above compose into the 2x2 overview figure.  It takes the
+# individual results, so the orchestration stays in *your* script, where the
+# cutoffs and bands are visible, not hidden in a library wrapper.
 
 # %%
-report = {
-    "phi": phi,
-    "drift": drift,
-    "drift_metrics": dm,
-    "linewidth_beta": lw_beta,
-    "allan": allan,
-}
 plotting.plot_carrier_phase_characterization(
-    report,
-    symbol_rate=R,
+    phi,
+    drift=dm,
+    linewidth=lw_beta,
+    allan=allan,
+    sampling_rate=R,
+    drift_phase=drift,
     drift_cutoff=CUTOFF,
-    band=(20e6, f_knee / 3.0),
     amp_ref=WANDER_AMP,
 )
 plt.show()

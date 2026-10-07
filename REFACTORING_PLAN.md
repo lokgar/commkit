@@ -1185,7 +1185,7 @@ The equalization pass (3.7) gets more commits:
   becomes `frequency_drift`. `separate_drift_phase_noise` loses `method=`
   (`savgol` and `boxcar` duplicated `smoothing.savgol_smooth` and
   `moving_average`) and keeps the zero-phase Butterworth.
-- [ ] **3.11c `refactor(plotting)!: analysis plots take the results`.** As in
+- [x] **3.11c `refactor(plotting)!: analysis plots take the results`.** As in
   3.10b: `plot_frequency_noise_psd`, `plot_increment_variance` and
   `plot_dsh_beat_psd` take a `LinewidthEstimate`, `plot_allan_deviation` an
   `AllanDeviation`, `plot_frequency_drift` a `FrequencyDrift`, and

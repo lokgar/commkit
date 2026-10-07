@@ -156,13 +156,11 @@ class TestLinewidthEstimation:
         phi = xp.asarray(_wiener_phase(2e6, 1 << 14, seed=17))
         res = analysis.estimate_linewidth(phi, IncrementSlope(), sampling_rate=R)
         assert res.var.shape == (1, res.lag_s.size)
-        plotting.plot_increment_variance(
-            res.lag_s, res.var, slope=res.slope, intercept=res.intercept
-        )
+        plotting.plot_increment_variance(res)
         res = analysis.estimate_linewidth(
             phi, IncrementSubtract(noise_var=0.0), sampling_rate=R
         )
-        plotting.plot_increment_variance(res.lag_s, res.var)
+        plotting.plot_increment_variance(res)
 
     def test_increment_subtract_known_noise(self, xp):
         """Subtracting the known AWGN term recovers Δν under heavy noise.
@@ -356,25 +354,15 @@ class TestDshLinewidth:
         z, _ = make_dsh_beat(2e6, n, m, 80e6, snr_db=25, seed=12)
         z = xp.asarray(z)
         fm = analysis.estimate_linewidth(z, DshFmPsd(delay=m / FS), sampling_rate=FS)
-        plotting.plot_frequency_noise_psd(
-            fm.f, fm.S_f, floor=fm.value, band=fm.band, used=fm.used
-        )
+        plotting.plot_frequency_noise_psd(fm)
         inc = analysis.estimate_linewidth(
             z, DshIncrement(delay=m / FS), sampling_rate=FS
         )
-        plotting.plot_increment_variance(
-            inc.lag_s, inc.var, slope=inc.slope, intercept=inc.intercept
-        )
+        plotting.plot_increment_variance(inc)
         lor = analysis.estimate_linewidth(
             z, DshLorentzian(delay=m / FS), sampling_rate=FS
         )
-        plotting.plot_dsh_beat_psd(
-            lor.f,
-            lor.psd,
-            f_peak=lor.f_peak,
-            linewidth=lor.value,
-            linewidth_3db=lor.linewidth_3db,
-        )
+        plotting.plot_dsh_beat_psd(lor)
 
     def test_signal_input(self, xp):
         n, m = 1 << 18, 500

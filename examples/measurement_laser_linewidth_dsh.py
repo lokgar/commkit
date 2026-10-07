@@ -154,12 +154,7 @@ res_lor = analysis.estimate_linewidth(
 )
 
 fig, ax = plotting.plot_frequency_noise_psd(
-    res_fm.f,
-    res_fm.S_f,
-    floor=res_fm.value,
-    band=res_fm.band,
-    used=res_fm.used,  # auto-detected plateau: the bins the median ran over
-    title="Laser FM-noise PSD (deconvolved; gaps = notch comb at k/τ_d)",
+    res_fm, title="Laser FM-noise PSD (deconvolved; gaps = notch comb at k/τ_d)"
 )
 plt.show()
 
@@ -191,7 +186,7 @@ print(
 allan = analysis.allan_deviation(
     dphi / (2.0 * np.pi * TAU_D), sampling_rate=FS, num_taus=40
 )
-fig, ax = plotting.plot_allan_deviation(allan.tau_s, allan.adev)
+fig, ax = plotting.plot_allan_deviation(allan)
 ax.axvspan(
     allan.tau_s[0],
     5 * TAU_D,
