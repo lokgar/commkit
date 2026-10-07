@@ -343,10 +343,8 @@ def block_lms(
         Input signal samples.  Shape: ``(N_samples,)`` for SISO or
         ``(C, N_samples)`` for MIMO butterfly equalization.
         Typically at 2 samples/symbol for fractionally-spaced equalization.
-        A :class:`Signal` returns an :class:`EqualizerResult` whose ``y_hat``
-        is a new :class:`Signal` at the symbol rate (``sampling_rate =
-        symbol_rate``); ``sps`` defaults to the signal's ``sps`` when not
-        given explicitly.
+        A :class:`Signal` supplies ``sps`` and ``constellation``; the result
+        then also carries ``signal``, the 1-SPS output Signal.
     training_symbols : array_like, optional
         Known transmitted symbols at 1 SPS.
         Shape: ``(N_train,)`` for SISO or ``(C, N_train)`` for MIMO.
@@ -667,7 +665,9 @@ def block_lms(
     result.state = _block_state(
         run, equalizer="block_lms", cpr=cpr, weights=weights, carrier=carrier
     )
-    return _attach_equalized_signal(_log_equalizer_exit(result, name="Block-LMS"), sig)
+    return _attach_equalized_signal(
+        _log_equalizer_exit(result, name="Block-LMS"), sig, state
+    )
 
 
 def _block_bps(

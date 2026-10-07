@@ -133,10 +133,8 @@ def lms(
         Input signal samples. Shape: ``(N_samples,)`` for SISO or
         ``(C, N_samples)`` for MIMO butterfly equalization.
         Typically at 2 samples/symbol for fractionally-spaced equalization.
-        A :class:`Signal` returns an :class:`EqualizerResult` whose ``y_hat``
-        is a new :class:`Signal` at the symbol rate (``sampling_rate =
-        symbol_rate``); ``sps`` defaults to the signal's ``sps`` when not
-        given explicitly.
+        A :class:`Signal` supplies ``sps`` and ``constellation``; the result
+        then also carries ``signal``, the 1-SPS output Signal.
     training_symbols : array_like, optional
         Known transmitted symbols (at symbol rate, 1 SPS).
         Shape: ``(N_train,)`` for SISO or ``(C, N_train)`` for MIMO.
@@ -213,9 +211,9 @@ def lms(
         Result container with the following fields:
 
         * ``y_hat`` - equalized symbol estimates, shape ``(N_sym,)`` SISO
-          or ``(C, N_sym)`` MIMO, at 1 SPS (symbol rate).  A new
-          :class:`Signal` (``sampling_rate = symbol_rate``) when ``samples``
-          was a :class:`Signal`.
+          or ``(C, N_sym)`` MIMO, at 1 SPS (symbol rate); always an array.
+        * ``signal`` - for Signal input, the output as a 1-SPS Signal with
+          its reference cut to the output symbols.
         * ``weights`` - final tap-weight tensor, shape ``(num_taps,)`` SISO
           or ``(C, C, num_taps)`` MIMO.
         * ``error`` - complex error signal ``e[n] = d[n] - y[n]``, same
@@ -355,7 +353,7 @@ def lms(
         phase_out=phase_out,
     )
     result = _log_equalizer_exit(result, name="LMS")
-    return _attach_equalized_signal(result, sig)
+    return _attach_equalized_signal(result, sig, state)
 
 
 def _check_rls_divergence(weights, xp, forgetting_factor, delta):
@@ -425,10 +423,8 @@ def rls(
     ----------
     samples : array_like or Signal
         Input signal samples. Shape: ``(N_samples,)`` or ``(C, N_samples)``.
-        A :class:`Signal` returns an :class:`EqualizerResult` whose ``y_hat``
-        is a new :class:`Signal` at the symbol rate (``sampling_rate =
-        symbol_rate``); ``sps`` defaults to the signal's ``sps`` when not
-        given explicitly.
+        A :class:`Signal` supplies ``sps`` and ``constellation``; the result
+        then also carries ``signal``, the 1-SPS output Signal.
     training_symbols : array_like, optional
         Known symbols for data-aided adaptation (at symbol rate, 1 SPS).
     num_taps : int, default 21
@@ -550,9 +546,9 @@ def rls(
         Result container with the following fields:
 
         * ``y_hat`` - equalized symbol estimates, shape ``(N_sym,)`` SISO
-          or ``(C, N_sym)`` MIMO, at 1 SPS.  A new :class:`Signal`
-          (``sampling_rate = symbol_rate``) when ``samples`` was a
-          :class:`Signal`.
+          or ``(C, N_sym)`` MIMO, at 1 SPS; always an array.
+        * ``signal`` - for Signal input, the output as a 1-SPS Signal with
+          its reference cut to the output symbols (RLS drops its tail).
         * ``weights`` - final tap-weight tensor, shape ``(num_taps,)`` SISO
           or ``(C, C, num_taps)`` MIMO.
         * ``error`` - complex error signal ``e[n] = d[n] - y[n]``, same
@@ -738,4 +734,4 @@ def rls(
     result = _log_equalizer_exit(result, name="RLS")
     result.tail_trim = tail_trim
     _check_rls_divergence(result.weights, run.xp, forgetting_factor, delta)
-    return _attach_equalized_signal(result, sig)
+    return _attach_equalized_signal(result, sig, state)

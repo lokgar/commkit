@@ -1063,9 +1063,10 @@ class TestSignalInputSequentialEqualizers:
             data, num_taps=11, sps=2, constellation=Constellation.qam(16)
         )
 
-        assert isinstance(result_sig.y_hat, Signal)
-        assert result_sig.y_hat.sampling_rate == 1e6
-        xpt.assert_allclose(result_sig.y_hat.samples, result_arr.y_hat)
+        assert isinstance(result_sig.signal, Signal)
+        assert result_sig.signal.sampling_rate == 1e6
+        xpt.assert_allclose(result_sig.signal.samples, result_arr.y_hat)
+        xpt.assert_allclose(result_sig.y_hat, result_arr.y_hat)
 
     def test_rls_signal_input(self, xp, xpt):
         sig = self._rx_signal(xp, sps=1, n_symbols=500)
@@ -1078,9 +1079,10 @@ class TestSignalInputSequentialEqualizers:
             data, num_taps=11, sps=1, constellation=Constellation.qam(16)
         )
 
-        assert isinstance(result_sig.y_hat, Signal)
-        assert result_sig.y_hat.sampling_rate == 1e6
-        xpt.assert_allclose(result_sig.y_hat.samples, result_arr.y_hat)
+        assert isinstance(result_sig.signal, Signal)
+        assert result_sig.signal.sampling_rate == 1e6
+        xpt.assert_allclose(result_sig.signal.samples, result_arr.y_hat)
+        xpt.assert_allclose(result_sig.y_hat, result_arr.y_hat)
 
     def test_cma_signal_input(self, xp, xpt):
         sig = self._rx_signal(xp)
@@ -1093,9 +1095,10 @@ class TestSignalInputSequentialEqualizers:
             data, num_taps=11, sps=2, constellation=Constellation.qam(16)
         )
 
-        assert isinstance(result_sig.y_hat, Signal)
-        assert result_sig.y_hat.sampling_rate == 1e6
-        xpt.assert_allclose(result_sig.y_hat.samples, result_arr.y_hat)
+        assert isinstance(result_sig.signal, Signal)
+        assert result_sig.signal.sampling_rate == 1e6
+        xpt.assert_allclose(result_sig.signal.samples, result_arr.y_hat)
+        xpt.assert_allclose(result_sig.y_hat, result_arr.y_hat)
 
     def test_rde_signal_input(self, xp, xpt):
         sig = self._rx_signal(xp)
@@ -1108,6 +1111,7 @@ class TestSignalInputSequentialEqualizers:
             data, num_taps=11, sps=2, constellation=Constellation.qam(16)
         )
 
-        assert isinstance(result_sig.y_hat, Signal)
-        assert result_sig.y_hat.sampling_rate == 1e6
-        xpt.assert_allclose(result_sig.y_hat.samples, result_arr.y_hat)
+        assert isinstance(result_sig.signal, Signal)
+        assert result_sig.signal.sampling_rate == 1e6
+        xpt.assert_allclose(result_sig.signal.samples, result_arr.y_hat)
+        xpt.assert_allclose(result_sig.y_hat, result_arr.y_hat)

@@ -188,3 +188,39 @@ class TestValidation:
         x, _ = self._state()
         with pytest.raises(TypeError, match="EqualizerState"):
             E.lms(x, sps=2, num_taps=7, constellation=C16, state={"weights": 1})
+
+
+class TestResultSignal:
+    """result.signal: the 1-SPS output with the reference cut to it."""
+
+    def _sig(self, n_sym=1200):
+        from commkit import generate
+        from commkit.filtering import RRC
+
+        return generate(C16, n_sym, symbol_rate=1e6, sps=2, pulse=RRC(0.2), rng=4)
+
+    def test_rls_reference_is_cut_to_the_output(self):
+        sig = self._sig()
+        res = E.rls(sig, sig.reference.symbols[:200], num_taps=7)
+        n = res.y_hat.shape[-1]
+        assert n == sig.reference.symbols.shape[-1] - 7 // 2
+        assert res.signal.sampling_rate == sig.symbol_rate
+        assert res.signal.reference.symbols.shape[-1] == n
+        np.testing.assert_array_equal(
+            res.signal.reference.symbols, sig.reference.symbols[:n]
+        )
+
+    def test_continued_signal_starts_at_its_own_symbols(self):
+        sig = self._sig()
+        n1 = 600 * 2
+        first = sig.replace(samples=sig.samples[:n1], reference=sig.reference.head(600))
+        tail = sig.reference.symbols[600:]
+        from commkit.core import Reference
+
+        second = sig.replace(samples=sig.samples[n1:], reference=Reference(tail))
+        r1 = E.lms(first, sig.reference.symbols[:200], num_taps=7)
+        r2 = E.lms(second, None, num_taps=7, state=r1.state)
+        ov = r1.state.overlap
+        np.testing.assert_array_equal(r2.signal.samples, r2.y_hat[ov:])
+        np.testing.assert_array_equal(r2.signal.reference.symbols, tail)
+        assert r1.signal.samples.shape[-1] == 600

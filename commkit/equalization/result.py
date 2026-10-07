@@ -187,8 +187,13 @@ class EqualizerResult:
         Per-symbol phase estimates produced by the inline CPR stage, in
         radians.  ``None`` without ``cpr``.
     state : EqualizerState or None
-        Continuation state; pass as ``state=`` to the next call.  ``None``
-        for a run that does not continue (``apply_taps``).
+        Continuation state; pass as ``state=`` to the next call.
+    signal : Signal or None
+        For Signal input, the output as a 1-SPS Signal (``sampling_rate =
+        symbol_rate``) whose reference is cut to the output symbols.  After
+        a continued call it starts at the call's own first symbol, past the
+        ``overlap`` recomputed for the previous chunk.  ``None`` for array
+        input.
 
         Shape: ``(N_sym,)`` for SISO, ``(C, N_sym)`` for MIMO butterfly.
 
@@ -208,6 +213,7 @@ class EqualizerResult:
     tail_trim: int = 0
     phase_trajectory: ArrayType | None = None
     state: EqualizerState | None = None
+    signal: Signal | None = None
 
 
 def _log_equalizer_exit(
@@ -269,11 +275,25 @@ def _log_equalizer_exit(
 
 
 def _attach_equalized_signal(
-    result: EqualizerResult, signal: Signal | None
+    result: EqualizerResult,
+    signal: Signal | None,
+    state: EqualizerState | None = None,
 ) -> EqualizerResult:
-    """Attach an array result to its originating Signal at symbol rate."""
-    if signal is not None:
-        result.y_hat = signal.replace_samples(
-            result.y_hat, sampling_rate=signal.symbol_rate
-        )
+    """Attach the 1-SPS output Signal for Signal input.
+
+    The Signal holds the output symbols that belong to ``signal``'s own
+    samples - after the ``state.overlap`` symbols a continued call recomputes
+    for the previous chunk - with the reference cut to them (RLS drops its
+    tail), at ``sampling_rate = symbol_rate``.  ``y_hat`` stays an array.
+    """
+    if signal is None:
+        return result
+    leading = 0 if state is None else state.overlap
+    y = result.y_hat[..., leading:]
+    reference = signal.reference
+    if reference is not None:
+        reference = reference.head(y.shape[-1])
+    result.signal = signal.replace_samples(
+        y, sampling_rate=signal.symbol_rate, reference=reference
+    )
     return result

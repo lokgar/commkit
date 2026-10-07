@@ -12,7 +12,7 @@ from ..core._signal_adapter import adapt_signal, require_integer_sps
 from ..core.signal import Signal
 from ._block import _block_fdaf_blind
 from ._common import _godard_radius, _rde_ring_radii
-from .result import EqualizerResult, EqualizerState
+from .result import EqualizerResult, EqualizerState, _attach_equalized_signal
 from .sequential._blind import _check_pilots
 
 # -----------------------------------------------------------------------------
@@ -63,10 +63,9 @@ def block_cma(
     launches into a single graph launch (a large win at small ``block_size``);
     it is ignored on CPU and silently disabled for the pilot-aided path.
     Returns an :class:`EqualizerResult` with ``y_hat``, ``weights``, ``error``
-    on the input's device.  A :class:`Signal` returns ``y_hat`` as a new
-    :class:`Signal` at the symbol rate (``sampling_rate = symbol_rate``);
-    ``sps`` and ``constellation`` come from a :class:`Signal`; array input
-    needs ``sps``.
+    on the input's device, and ``signal`` (the 1-SPS output Signal) for
+    Signal input; ``sps`` and ``constellation`` come from a :class:`Signal`;
+    array input needs ``sps``.
     """
     signal_adapter = adapt_signal(samples, function_name="block_cma()")
     samples = signal_adapter.array
@@ -96,11 +95,7 @@ def block_cma(
         cuda_graph=cuda_graph,
         name="Block-CMA" if pilot_ref is None else "Block-CMA(PA)",
     )
-    if signal_adapter.signal is not None:
-        result.y_hat = signal_adapter.wrap_samples(
-            result.y_hat, sampling_rate=signal_adapter.signal.symbol_rate
-        )
-    return result
+    return _attach_equalized_signal(result, signal_adapter.signal, state)
 
 
 def block_rde(
@@ -138,10 +133,9 @@ def block_rde(
     per-block kernel launches into a single graph launch (a large win at small
     ``block_size``); it is ignored on CPU and silently disabled for the
     pilot-aided path.  Returns an :class:`EqualizerResult` with ``y_hat``,
-    ``weights``, ``error`` on the input's device.  A :class:`Signal` returns
-    ``y_hat`` as a new :class:`Signal` at the symbol rate (``sampling_rate =
-    symbol_rate``); ``sps`` is ignored for :class:`Signal` input, which
-    always uses the signal's own ``sps``.
+    ``weights``, ``error`` on the input's device, and ``signal`` (the 1-SPS
+    output Signal) for Signal input; ``sps`` and ``constellation`` come from
+    a :class:`Signal`; array input needs ``sps``.
     """
     signal_adapter = adapt_signal(samples, function_name="block_rde()")
     samples = signal_adapter.array
@@ -171,11 +165,7 @@ def block_rde(
         cuda_graph=cuda_graph,
         name="Block-RDE" if pilot_ref is None else "Block-RDE(PA)",
     )
-    if signal_adapter.signal is not None:
-        result.y_hat = signal_adapter.wrap_samples(
-            result.y_hat, sampling_rate=signal_adapter.signal.symbol_rate
-        )
-    return result
+    return _attach_equalized_signal(result, signal_adapter.signal, state)
 
 
 # -----------------------------------------------------------------------------

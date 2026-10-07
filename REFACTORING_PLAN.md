@@ -998,7 +998,7 @@ The equalization pass (3.7) gets more commits:
     changed the rounding); the window now holds only the `B·sps + T - 1`
     samples the block uses. The sequential equalizers stay bit-identical to
     the A/B baseline; the block ones move by at most 3.7e-6.
-- [ ] **3.7f `refactor(equalization)!: result.signal`.** `y_hat` is always
+- [x] **3.7f `refactor(equalization)!: result.signal`.** `y_hat` is always
   an array; `result.signal` is the 1-SPS Signal for Signal input, with the
   reference cut to the output symbols (RLS drops its tail).
 - [ ] **3.7g `fix(equalization): known symbols on the constellation's

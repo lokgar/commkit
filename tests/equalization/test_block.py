@@ -596,9 +596,10 @@ class TestBlockLMSEdgeCases:
         result_sig = block_lms(sig, syms[:200], **kw)
         result_arr = block_lms(samples, syms[:200], sps=2, **kw)
 
-        assert isinstance(result_sig.y_hat, Signal)
-        assert result_sig.y_hat.sampling_rate == 1e6
-        xpt.assert_allclose(result_sig.y_hat.samples, result_arr.y_hat)
+        assert isinstance(result_sig.signal, Signal)
+        assert result_sig.signal.sampling_rate == 1e6
+        xpt.assert_allclose(result_sig.signal.samples, result_arr.y_hat)
+        xpt.assert_allclose(result_sig.y_hat, result_arr.y_hat)
 
 
 class TestBlockLMSCUDAGraphAndPerformance:

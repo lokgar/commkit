@@ -155,10 +155,8 @@ def cma(
     samples : array_like or Signal
         Input signal samples. Shape: ``(N_samples,)`` or ``(C, N_samples)``.
         Typically at 2 samples/symbol for fractionally-spaced equalization.
-        A :class:`Signal` returns an :class:`EqualizerResult` whose ``y_hat``
-        is a new :class:`Signal` at the symbol rate (``sampling_rate =
-        symbol_rate``); ``sps`` defaults to the signal's ``sps`` when not
-        given explicitly.
+        A :class:`Signal` supplies ``sps`` and ``constellation``; the result
+        then also carries ``signal``, the 1-SPS output Signal.
     num_taps : int, default 21
         Number of equalizer taps per FIR filter.
     sps : int, optional
@@ -289,7 +287,7 @@ def cma(
         name="CMA" if not use_pilots else "CMA(PA)",
         check_convergence=True,
     )
-    return _attach_equalized_signal(result, sig)
+    return _attach_equalized_signal(result, sig, state)
 
 
 def rde(
@@ -359,10 +357,8 @@ def rde(
     samples : array_like or Signal
         Input signal samples. Shape: ``(N_samples,)`` or ``(C, N_samples)``.
         Typically at 2 samples/symbol for fractionally-spaced equalization.
-        A :class:`Signal` returns an :class:`EqualizerResult` whose ``y_hat``
-        is a new :class:`Signal` at the symbol rate (``sampling_rate =
-        symbol_rate``); ``sps`` defaults to the signal's ``sps`` when not
-        given explicitly.
+        A :class:`Signal` supplies ``sps`` and ``constellation``; the result
+        then also carries ``signal``, the 1-SPS output Signal.
     num_taps : int, default 21
         Number of equalizer taps per FIR filter.
     sps : int, optional
@@ -506,4 +502,4 @@ def rde(
         name="RDE" if not use_pilots else "RDE(PA)",
         check_convergence=True,
     )
-    return _attach_equalized_signal(result, sig)
+    return _attach_equalized_signal(result, sig, state)
