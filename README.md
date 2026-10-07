@@ -151,4 +151,4 @@ Contributor and coding-agent guidance (architecture, API rules, numerics, perfor
 
 ## License
 
-[MIT](https://github.com/lokgar/commkit/blob/main/LICENSE).
+[MIT](https://github.com/lokgar/commkit/blob/main/LICENSE)
