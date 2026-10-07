@@ -673,6 +673,46 @@ def _beta_separation(
 # -----------------------------------------------------------------------------
 
 
+def _warn_if_phase_trajectory(x: ArrayType, f_shift: float | None, fs: float) -> None:
+    """Warn when real input to a DSH method looks like a phase trajectory.
+
+    A real beat must sit away from DC for the analytic-signal step, so almost
+    none of its (mean-removed) power lies below half its carrier, or below
+    ``fs/200`` when the carrier is unknown; a phase trajectory is a random
+    walk with nearly all of its power there.  Measured: beats at 2-200 MHz
+    (500 MS/s, -5 dB SNR, DC offsets) put at most 0.12 of their power in the
+    band, Wiener phases and ``dsh_phase`` outputs at least 0.9.  A
+    drift-removed residual is high-passed and passes unnoticed when the
+    carrier is unknown.  Complex input is never a phase trajectory.
+    """
+    _, xp, _ = dispatch(x)
+    if xp.iscomplexobj(x):
+        return
+    # The first 2^16 samples resolve the fs/400 band with ~160 bins and keep
+    # the check at a few percent of an estimate.
+    x2, _ = as_2d(x, name="samples")
+    x2 = x2[:, : 1 << 16].astype(xp.float64)
+    x2 = x2 - xp.mean(x2, axis=-1, keepdims=True)
+    power = xp.abs(xp.fft.rfft(x2, axis=-1)) ** 2
+    f = xp.fft.rfftfreq(x2.shape[-1], d=1.0 / fs)
+    f_lo = abs(float(f_shift)) / 2.0 if f_shift else fs / 400.0
+    low = xp.sum(xp.where(f < f_lo, power, 0.0), axis=-1)
+    with np.errstate(invalid="ignore", divide="ignore"):
+        frac = np.asarray(to_device(low / xp.sum(power, axis=-1), "cpu"))
+    channels = np.flatnonzero(frac > 0.5)
+    if channels.size:
+        logger.warning(
+            "estimate_linewidth: channel(s) %s hold %s of their power below "
+            "%.3g Hz - this looks like a phase trajectory, not a DSH beat "
+            "record. Phase trajectories take IncrementSlope, IncrementSubtract "
+            "or BetaSeparation; a real beat with a carrier that low needs "
+            "f_shift=.",
+            channels.tolist(),
+            np.round(frac[channels], 2).tolist(),
+            f_lo,
+        )
+
+
 def _delay_samples(delay: float, fs: float) -> float:
     """``τ_d·f_s``; a delay below one sample raises."""
     m_samp = float(delay) * fs
@@ -969,7 +1009,10 @@ def estimate_linewidth(
           raises.
         * ``DshFmPsd``, ``DshIncrement``, ``DshLorentzian``: a delayed
           self-heterodyne beat record, real (single photodetector) or complex
-          (IQ front end), as an array or a Signal.
+          (IQ front end), as an array or a Signal.  A phase trajectory is
+          real too, so it cannot be rejected by type: real input whose power
+          sits near DC (below half the carrier, or below
+          ``sampling_rate/200`` without ``f_shift``) logs a warning.
     method : IncrementSlope, IncrementSubtract, BetaSeparation, DshFmPsd, DshIncrement or DshLorentzian
         The estimator and its parameters.
     sampling_rate : float, optional
@@ -1005,6 +1048,7 @@ def estimate_linewidth(
             )
         return _PHASE_METHODS[kind](x, method, fs)
     if kind in _BEAT_METHODS:
+        _warn_if_phase_trajectory(x, getattr(method, "f_shift", None), fs)
         return _BEAT_METHODS[kind](x, method, fs)
     raise TypeError(
         f"{name}: method must be IncrementSlope, IncrementSubtract, "

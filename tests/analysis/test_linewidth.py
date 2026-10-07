@@ -407,6 +407,43 @@ class TestEstimateLinewidthContract:
             with pytest.raises(ValueError, match="real phase trajectory"):
                 analysis.estimate_linewidth(z, method, sampling_rate=R)
 
+    @pytest.mark.parametrize(
+        "method",
+        [DshIncrement(delay=500 / FS, f_shift=80e6), DshLorentzian(delay=500 / FS)],
+    )
+    def test_phase_trajectory_to_dsh_method_warns(self, xp, caplog, method):
+        """A real phase trajectory cannot be told from a beat by type; its
+        power near DC flags it, with and without a known carrier."""
+        phi = to_device(
+            generate_phase_noise(
+                num_samples=1 << 16, sampling_rate=FS, linewidth=2e6, rng=3
+            ),
+            "cpu",
+        )
+        with caplog.at_level("WARNING", logger="commkit"):
+            analysis.estimate_linewidth(xp.asarray(phi), method, sampling_rate=FS)
+        assert "looks like a phase trajectory" in caplog.text
+
+    @pytest.mark.parametrize(
+        ("f_shift", "snr_db", "offset", "real"),
+        [
+            (80e6, 0.0, 0.0, True),  # low SNR
+            (None, 25.0, 3.0, True),  # strong DC offset, carrier unknown
+            (None, 10.0, 0.0, True),
+            (80e6, 25.0, 0.0, False),  # IQ capture
+        ],
+    )
+    def test_beats_do_not_warn(self, xp, caplog, f_shift, snr_db, offset, real):
+        z, _ = make_dsh_beat(2e6, 1 << 16, 500, 80e6, snr_db=snr_db, seed=2)
+        z = (z.real if real else z) + offset
+        with caplog.at_level("WARNING", logger="commkit"):
+            analysis.estimate_linewidth(
+                xp.asarray(z),
+                DshIncrement(delay=500 / FS, f_shift=f_shift),
+                sampling_rate=FS,
+            )
+        assert "phase trajectory" not in caplog.text
+
     def test_array_needs_sampling_rate(self, xp):
         with pytest.raises(ValueError, match="sampling_rate"):
             analysis.estimate_linewidth(xp.zeros(64), IncrementSlope())
