@@ -94,6 +94,17 @@ class TestSingleCarrierFrameBasics:
         assert sig.mod_scheme is None
         assert sig.source_symbols is None
 
+    def test_single_stream_preamble_is_broadcast(self) -> None:
+        """A one-stream Barker preamble starts every stream of a MIMO frame."""
+        frame = SingleCarrierFrame(
+            payload_len=40,
+            preamble=Preamble(sequence_type="barker", length=13),
+            num_streams=2,
+        )
+        x = frame.to_signal(sps=1, symbol_rate=1e6).samples
+        assert x.shape == (2, 13 + 40)
+        np.testing.assert_array_equal(x[0, :13], x[1, :13])
+
     def test_independent_preamble_normalization(self, xp: Any) -> None:
         """Verify frame normalization contract for independent section scaling."""
         preamble = Preamble(sequence_type="barker", length=13)

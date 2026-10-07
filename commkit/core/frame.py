@@ -686,6 +686,9 @@ class SingleCarrierFrame:
 
             # I/Q peak normalisation - axis=-1 works for both 1-D and 2-D
             preamble_samples = normalize(preamble_samples, mode="dac_peak", axis=-1)
+            if self.num_streams > 1 and preamble_samples.ndim == 1:
+                # A one-stream preamble is broadcast to every stream.
+                preamble_samples = xp.tile(preamble_samples, (self.num_streams, 1))
 
             # Concatenate Preamble + Body
             samples = xp.concatenate([preamble_samples, body_samples], axis=-1)
