@@ -425,12 +425,16 @@ def gmi(
 
     .. math::
 
-        \mathrm{GMI} = \sum_{b=0}^{k-1}
-            \Big(1 - \mathbb{E}\big[\log_2(1 + e^{-(1 - 2 c_b) L_b})\big]\Big)
+        \mathrm{GMI} = H(X) - \sum_{b=0}^{k-1}
+            \mathbb{E}\big[\log_2(1 + e^{-(1 - 2 c_b) L_b})\big]
 
-    with the LLR ``L_b`` of bit ``b`` (positive favours 0) and the
-    transmitted bit ``c_b``.  The softplus is evaluated in a numerically
-    stable form.
+    with the entropy ``H(X)`` of the constellation's prior (``k`` bits when
+    uniform), the LLR ``L_b`` of bit ``b`` (positive favours 0) and the
+    transmitted bit ``c_b``.  Each expectation estimates ``H(B_b | Y)``; with
+    a shaped constellation the bits are not uniform, so the rate is not
+    ``k - ...``.  The LLRs must include the prior, as those of
+    :func:`~commkit.mapping.compute_llr` do.  The softplus is evaluated in a
+    numerically stable form.
 
     Parameters
     ----------
@@ -495,7 +499,8 @@ def gmi(
     x = -llr_arr * (1.0 - 2.0 * bits_arr)
     # log2(1 + e^x) = (log1p(e^-|x|) + max(0, x)) / ln 2
     softplus = (xp.log1p(xp.exp(-xp.abs(x))) + xp.maximum(0.0, x)) / np.log(2.0)
-    out = _host(k * (1.0 - xp.mean(softplus, axis=-1)))
+    # H(X) - sum_b E[...], written so that H(X)/k is exactly 1.0 when uniform.
+    out = _host(k * (c.entropy / k - xp.mean(softplus, axis=-1)))
     if isinstance(out, float):
         logger.info("GMI: %.4f b/symbol", out)
     else:

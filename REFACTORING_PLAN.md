@@ -1084,11 +1084,14 @@ The equalization pass (3.7) gets more commits:
   shared check (a frame Signal or one not at one sample per symbol raises)
   is `SignalAdapter.symbol_array()`. `save_npz` loses `include_cache`;
   `load_npz` ignores the cache entries of 1.x archives.
-- [ ] **3.8e `fix(metrics): GMI of shaped constellations`.** The
+- [x] **3.8e `fix(metrics): GMI of shaped constellations`.** The
   bit-metric decoding rate `H(X) - sum_b E[log2(1 + exp(-(1 - 2 c_b)
-  LLR_b))]` replaces `k - ...`, which assumes uniform bits. Oracle:
-  `GMI <= MI <= H(X)` on shaped constellations, and the uniform case
-  unchanged.
+  LLR_b))]` replaces `k - ...`, which assumes uniform bits and overstated
+  the rate by exactly `k - H(X)`. Oracle: exact bitwise posteriors
+  computed independently from the points, labels and prior give the same
+  rate (4 shaped cases, 16- to 256-QAM, 0 to 20 dB), and
+  `GMI <= MI <= H(X)`; uniform constellations are bit-identical
+  (`k (H/k - m)` with `H/k = 1.0` exactly).
 - [ ] **3.8f `fix(metrics): data-aided gain instead of total power`.**
   Symbols with a reference are scaled by the real data-aided gain
   `Re<r s*> / <|s|^2>` (no rotation) instead of to unit total power, which

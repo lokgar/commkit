@@ -6,6 +6,7 @@ import numpy as np
 import pytest
 
 from commkit import generate, metrics, multirate
+from commkit.backend import to_device
 from commkit.impairments import apply_awgn
 from commkit.mapping import Constellation, compute_llr, map_bits
 
@@ -508,3 +509,67 @@ class TestSignalMetricsIntegration:
         sig = sig.replace(reference=None)
         with pytest.raises(ValueError, match="reference"):
             metrics.evm(sig)
+
+
+class TestGMIShaped:
+    """GMI is the bit-metric decoding rate H(X) - sum_b H(B_b | Y) (3.8e)."""
+
+    @staticmethod
+    def _received(c: Constellation, esn0_db: float, n: int = 20000, seed: int = 0):
+        rng = np.random.default_rng(seed)
+        nv = 10 ** (-esn0_db / 10)
+        idx = rng.choice(c.order, n, p=c.pmf)
+        noise = rng.standard_normal(n) + 1j * rng.standard_normal(n)
+        rx = c.points[idx] + np.sqrt(nv / 2) * noise
+        return rx.astype(np.complex64), c.bit_labels[idx].reshape(-1), nv
+
+    @staticmethod
+    def _bmd_rate(c: Constellation, rx, bits, nv) -> float:
+        """Independent oracle: exact bitwise posteriors from the points, the
+        labels and the prior, in float64."""
+        log_joint = np.log(c.pmf) - np.abs(rx[:, None] - c.points) ** 2 / nv
+        log_joint -= log_joint.max(axis=1, keepdims=True)
+        joint = np.exp(log_joint)
+        joint /= joint.sum(axis=1, keepdims=True)  # P(s | y)
+        sent = bits.reshape(rx.size, -1)
+        h_cond = 0.0
+        for b in range(c.bits_per_symbol):
+            p_one = joint[:, c.bit_labels[:, b] == 1].sum(axis=1)
+            p_sent = np.where(sent[:, b] == 1, p_one, 1 - p_one)
+            h_cond += -np.mean(np.log2(np.maximum(p_sent, 1e-300)))
+        return c.entropy - h_cond
+
+    @pytest.mark.parametrize(
+        ("c", "esn0_db"),
+        [
+            (Constellation.qam(16).shaped(entropy=3.3), 20.0),
+            (Constellation.qam(64).shaped(nu=0.075), 0.0),
+            (Constellation.qam(64).shaped(nu=0.075), 10.0),
+            (Constellation.qam(256).shaped(entropy=7.0), 15.0),
+        ],
+        ids=["16qam-20dB", "64qam-0dB", "64qam-10dB", "256qam-15dB"],
+    )
+    def test_shaped_gmi_matches_bmd_oracle_and_bounds(self, c, esn0_db, xp) -> None:
+        """GMI equals the independently computed BMD rate and obeys
+        GMI <= MI <= H(X)."""
+        rx, bits, nv = self._received(c, esn0_db)
+        llrs = compute_llr(
+            xp.asarray(rx), noise_var=nv, constellation=c, method="exact"
+        )
+        g = metrics.gmi(llrs, xp.asarray(bits), constellation=c)
+        m = metrics.mi(xp.asarray(rx), noise_var=nv, constellation=c)
+        assert g == pytest.approx(self._bmd_rate(c, rx, bits, nv), abs=2e-4)
+        assert g <= m + 1e-3
+        assert m <= c.entropy + 1e-9
+
+    def test_uniform_gmi_unchanged(self, xp) -> None:
+        """Uniform: H(X) = k, so the rate is the usual k - sum_b E[...]."""
+        c = Constellation.qam(16)
+        rng = np.random.default_rng(1)
+        bits = rng.integers(0, 2, 4000).astype(np.int8)
+        rx = c.map(bits) + 0.2 * rng.standard_normal(1000)
+        llrs = compute_llr(xp.asarray(rx), noise_var=0.08, constellation=c)
+        x = -np.asarray(to_device(llrs, "cpu"), np.float64) * (1 - 2.0 * bits)
+        sp = (np.log1p(np.exp(-np.abs(x))) + np.maximum(0, x)) / np.log(2)
+        expected = 4 * (1 - np.mean(sp))
+        assert metrics.gmi(llrs, xp.asarray(bits), constellation=c) == expected
