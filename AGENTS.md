@@ -2,11 +2,8 @@
 
 Guide for anyone, human or coding agent, changing the **CommKit** repository.
 
-The code is being migrated to 2.0 on the `v2` branch following
-[`REFACTORING_PLAN.md`](REFACTORING_PLAN.md). The rules below describe the 2.0
-target. Code that does not follow them yet is listed in
-[Migration status](#9-migration-status). Never copy a pattern listed there into
-new code.
+The rules below describe the code as it is. New code follows them; a change
+that breaks one changes this file in the same commit.
 
 ---
 
@@ -292,10 +289,15 @@ Dependencies point downward only:
   `--device=all`.
 - Wrappers check dtype, contiguity, shape and size before launch.
 - `float32` with explicit literals.
-- `--use_fast_math` only per kernel, after an accuracy check.
+- `--use_fast_math` only per kernel, after an accuracy check. Known exception:
+  the compiler default (`commkit/_cuda/compiler.py`) still passes it to every
+  kernel; a new kernel passes its own `options`, as `bps_anchor` does.
 - Short elementwise chains use `ElementwiseKernel` or `cupy.fuse`.
-- Sequential recursions are never ported to the GPU; one record has no
-  parallel work per step.
+- Sequential recursions over a whole record are never ported to the GPU; one
+  record has no parallel work per step. A short per-block scan may be, as one
+  launch, when it replaces a host round trip per block (`cs_block`,
+  `bps_anchor`); keep its parallel part parallel (float64 is 1/64 of float32
+  throughput on consumer GPUs).
 
 ---
 
@@ -332,9 +334,8 @@ Dependencies point downward only:
 ## 8. Benchmarks
 
 `benchmarks/` tracks the GPU-relevant hot paths. Baselines are committed under
-`benchmarks/baselines/`. The reference for the 2.0 work is `0002` (`pre_v2`,
-recorded in plan commit 0.4) on the reference machine: RTX 4070 Ti, Ryzen 7
-7800X3D, WSL2.
+`benchmarks/baselines/`. The current reference is `0002` (`pre_v2`) on the
+reference machine: RTX 4070 Ti, Ryzen 7 7800X3D, WSL2.
 
 - **IDs** are `[cpu]` or `[gpu]`, meaning the input device.
 - **Timing:**
@@ -349,18 +350,8 @@ recorded in plan commit 0.4) on the reference machine: RTX 4070 Ti, Ryzen 7
 - **Logging** is set to WARNING in `benchmarks/conftest.py`.
 - **Trust deltas, not single runs.** A ±20-40% swing has been seen under load.
   Re-run a suspected regression in isolation, or do a controlled A/B with at
-  least 7 repetitions.
+  least 7 repetitions, alternating old and new per repetition and comparing
+  the paired ratios. When even unchanged benchmarks move, time the changed
+  part itself with `CudaEventTimer` and quote it against the step it sits in.
 - A commit touching a hot path quotes its delta against `0002`. Tolerance is
   5% on CPU and 10% on GPU.
-
----
-
-## 9. Migration status
-
-These are the legacy patterns that remain. Each line names the commit in
-`REFACTORING_PLAN.md` that removes it. Delete a line when its commit lands, and
-delete this section in commit 4.2.
-
-| Legacy pattern still in the code | Removed by |
-| --- | --- |
-| `--use_fast_math` as the global CUDA default | Step 5 |

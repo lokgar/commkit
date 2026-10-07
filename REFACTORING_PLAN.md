@@ -1257,7 +1257,7 @@ The equalization pass (3.7) gets more commits:
 - [x] **4.2b `fix(equalization): block CPR slip carry uses the symmetry`.**
   The block engine carried a cycle-slip correction into its unwrap
   accumulator times 4 whatever the constellation's symmetry.
-- [ ] **4.2c `docs: final AGENTS.md pass and README around §2.1`.**
+- [x] **4.2c `docs: final AGENTS.md pass and README around §2.1`.**
 
 ### Step 5: performance follow-ups (independent, any time after step 3.6)
 
