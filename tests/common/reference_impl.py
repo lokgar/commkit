@@ -43,12 +43,13 @@ def prepare_input(
     return x, n_sym, norm
 
 
-def normalize_training(training: np.ndarray, num_ch: int) -> np.ndarray:
-    """Unit average power per channel; a shared 1-D sequence is tiled to C."""
+def prepare_training(training: np.ndarray, num_ch: int) -> np.ndarray:
+    """Known symbols as given (on the constellation's scale); a shared 1-D
+    sequence is tiled to C."""
     t = np.atleast_2d(np.asarray(training)).astype(np.complex128)
     if t.shape[0] == 1 and num_ch > 1:
         t = np.repeat(t, num_ch, axis=0)
-    return t / np.sqrt(np.mean(np.abs(t) ** 2, axis=-1, keepdims=True))
+    return t
 
 
 def identity_taps(num_ch: int, num_taps: int) -> np.ndarray:
@@ -88,7 +89,7 @@ def lms_reference(
     """
     x, n_sym, _ = prepare_input(samples, sps, num_taps)
     num_ch = x.shape[0]
-    d_train = None if training is None else normalize_training(training, num_ch)
+    d_train = None if training is None else prepare_training(training, num_ch)
     n_train = 0 if d_train is None else min(d_train.shape[-1], n_sym)
     w = identity_taps(num_ch, num_taps)
     y_out = np.zeros((num_ch, n_sym), dtype=np.complex128)
@@ -124,7 +125,7 @@ def rls_reference(
     """
     x, n_sym, _ = prepare_input(samples, sps, num_taps)
     num_ch = x.shape[0]
-    d_train = None if training is None else normalize_training(training, num_ch)
+    d_train = None if training is None else prepare_training(training, num_ch)
     n_train = 0 if d_train is None else min(d_train.shape[-1], n_sym)
     n_halt = max(0, n_sym - num_taps // 2)
     dim = num_ch * num_taps

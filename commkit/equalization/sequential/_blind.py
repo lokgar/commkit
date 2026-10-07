@@ -182,7 +182,8 @@ def cma(
         a ``state`` carries its own weights.
     pilot_ref : (C, N_sym) complex64 array, optional
         Dense pilot reference array - zeros at data positions, known symbols
-        at pilot positions.  Build with ``build_pilot_ref``.
+        (on the scale of the unit-power ``constellation``, used as given) at
+        pilot positions.  Build with ``build_pilot_ref``.
         Must be provided together with ``pilot_mask``.
     pilot_mask : (N_sym,) uint8 array, optional
         Pilot position mask - ``1`` at pilot positions, ``0`` elsewhere.
@@ -241,7 +242,7 @@ def cma(
             "Update sampling_rate = symbol_rate after applying this equalizer."
         )
 
-    r2, _c_ps = _godard_radius(constellation)
+    r2 = _godard_radius(constellation)
     logger.debug("CMA R2: %.4f", r2)
 
     # RMS-normalize samples to unit symbol-rate power (CMA has no training)
@@ -262,8 +263,6 @@ def cma(
     mu = np.float32(step_size)
     if use_pilots:
         pref = np.ascontiguousarray(to_device(pilot_ref, "cpu"), dtype=np.complex64)
-        if _c_ps is not None:
-            pref = (pref * _c_ps).astype(np.complex64)
         pmask = np.ascontiguousarray(pilot_mask, dtype=np.uint8)
 
     def segment(start: int, stop: int) -> None:
@@ -383,7 +382,8 @@ def rde(
         a ``state`` carries its own weights.
     pilot_ref : (C, N_sym) complex64 array, optional
         Dense pilot reference array - zeros at data positions, known symbols
-        at pilot positions.  Build with ``build_pilot_ref``.
+        (on the scale of the unit-power ``constellation``, used as given) at
+        pilot positions.  Build with ``build_pilot_ref``.
         Must be provided together with ``pilot_mask``.
     pilot_mask : (N_sym,) uint8 array, optional
         Pilot position mask - ``1`` at pilot positions, ``0`` elsewhere.
@@ -456,7 +456,7 @@ def rde(
             "Update sampling_rate = symbol_rate after applying this equalizer."
         )
 
-    radii, _c_ps = _rde_ring_radii(constellation)
+    radii = _rde_ring_radii(constellation)
     logger.debug("RDE radii: %s", ", ".join(f"{r:.4f}" for r in radii))
 
     # RMS-normalize samples to unit symbol-rate power (RDE has no training)
@@ -477,8 +477,6 @@ def rde(
     mu = np.float32(step_size)
     if use_pilots:
         pref = np.ascontiguousarray(to_device(pilot_ref, "cpu"), dtype=np.complex64)
-        if _c_ps is not None:
-            pref = (pref * _c_ps).astype(np.complex64)
         pmask = np.ascontiguousarray(pilot_mask, dtype=np.uint8)
 
     def segment(start: int, stop: int) -> None:

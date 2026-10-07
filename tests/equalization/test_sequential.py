@@ -1115,3 +1115,48 @@ class TestSignalInputSequentialEqualizers:
         assert result_sig.signal.sampling_rate == 1e6
         xpt.assert_allclose(result_sig.signal.samples, result_arr.y_hat)
         xpt.assert_allclose(result_sig.y_hat, result_arr.y_hat)
+
+
+class TestKnownSymbolScale:
+    """Training symbols and pilots are taken as given, on the scale of the
+    unit-power constellation (plan 3.7g)."""
+
+    @staticmethod
+    def _corner_symbols(n: int = 3000) -> np.ndarray:
+        # Only the four corners of 16-QAM: sample power 1.8, far from 1, so a
+        # renormalized training sequence would land 25% inside the grid.
+        pts = Constellation.qam(16).points
+        corners = pts[np.abs(pts) ** 2 > 1.5]
+        rng = np.random.default_rng(0)
+        return corners[rng.integers(0, 4, n)].astype(np.complex64)
+
+    @pytest.mark.parametrize("name", ["lms", "rls", "block_lms"])
+    def test_training_reproduces_the_points(self, name, xp):
+        """Noiseless identity channel, trained throughout: y_hat -> s."""
+        s = self._corner_symbols()
+        kw = dict(sps=1, num_taps=3, constellation=Constellation.qam(16))
+        if name == "lms":
+            kw["step_size"] = 0.05
+        if name == "block_lms":
+            kw.update(step_size=5e-3, block_size=64)
+        res = getattr(equalization, name)(xp.asarray(s), xp.asarray(s), **kw)
+        y = to_numpy(res.y_hat)[-500:]
+        assert np.max(np.abs(y - s[: res.y_hat.shape[-1]][-500:])) < 1e-3
+
+    @pytest.mark.parametrize("name", ["cma", "block_cma"])
+    def test_pilots_on_a_shaped_constellation(self, name, xp):
+        """All-pilot blind run on a shaped constellation reproduces the points;
+        1.x rescaled the pilots by 1/sqrt(E_PS) off the constellation."""
+        c = Constellation.qam(16).shaped(nu=0.2)
+        rng = np.random.default_rng(1)
+        s = c.points[rng.choice(16, 3000, p=c.pmf)].astype(np.complex64)
+        mask = np.ones(s.size, dtype=bool)
+        ref, pm = equalization.build_pilot_ref(s, mask, n_sym=s.size, num_ch=1)
+        kw = dict(sps=1, num_taps=3, constellation=c, pilot_ref=ref, pilot_mask=pm)
+        if name == "cma":
+            kw["step_size"] = 0.05
+        else:
+            kw.update(step_size=5e-3, block_size=64)
+        res = getattr(equalization, name)(xp.asarray(s), **kw)
+        y = to_numpy(res.y_hat)[-500:]
+        assert np.max(np.abs(y - s[-500:])) < 1e-3

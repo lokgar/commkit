@@ -18,7 +18,7 @@ from .result import EqualizerResult
 
 
 def _normalize_inputs(samples, training_symbols, sps, input_norm_factor=None):
-    """Scale samples and training symbols to a common unit symbol-power reference.
+    """Scale samples to unit symbol power (training symbols pass through).
 
     For fractionally-spaced equalization (sps > 1) the fractional timing phase
     is unknown.  Strided power measurement ``samples[..., ::sps]`` is unsafe
@@ -43,7 +43,7 @@ def _normalize_inputs(samples, training_symbols, sps, input_norm_factor=None):
     Returns
     -------
     samples          : unit symbol-power, same shape/backend
-    training_symbols : unit average-power, same shape/backend (or None)
+    training_symbols : unchanged (known symbols are on the constellation scale)
     input_norm_factor : float or np.ndarray
         Per-channel normalization factor(s) ``rms(ch) * sqrt(sps)`` applied
         to *samples* before this function returned.  ``float`` for SISO,
@@ -69,12 +69,6 @@ def _normalize_inputs(samples, training_symbols, sps, input_norm_factor=None):
             _, xp_loc, _ = dispatch(samples)
             nf_dev = xp_loc.asarray(nf_arr)[..., None]  # (C, 1) on same device
             samples = samples / nf_dev
-        if training_symbols is not None:
-            from commkit.math import normalize as c_normalize
-
-            training_symbols = c_normalize(
-                training_symbols, mode="average_power", axis=-1
-            )
         return samples, training_symbols, input_norm_factor
 
     from commkit.math import rms as _rms
@@ -89,12 +83,6 @@ def _normalize_inputs(samples, training_symbols, sps, input_norm_factor=None):
         input_norm_factor = to_device(norm_vec, "cpu")
         # Broadcast (C,) divisor over last axis
         samples = samples / norm_vec[..., None]
-
-    if training_symbols is not None:
-        from commkit.math import normalize as c_normalize
-
-        # Training symbols are at 1 sps; "average_power" == "symbol_power" at sps=1.
-        training_symbols = c_normalize(training_symbols, mode="average_power", axis=-1)
 
     return samples, training_symbols, input_norm_factor
 
@@ -355,41 +343,26 @@ def _validate_sps(sps, num_taps):
         )
 
 
-def _godard_radius(constellation: Any) -> tuple[float, np.float32 | None]:
-    """Godard dispersion radius R2 and the PS pilot scale.
+def _godard_radius(constellation: Any) -> float:
+    """Godard dispersion radius ``R2 = E[|c|^4] / E[|c|^2]``.
 
-    ``R2 = E[|c|^4] / E[|c|^2]`` over the constellation's prior (the unit
-    circle without one).  The pilot scale is ``1/sqrt(E_PS)``, the factor
-    between a shaped constellation and the uniform grid it was built from
-    (``None`` for a uniform constellation).
+    Over the constellation's prior (pmf-weighted for a shaped one); 1, the
+    unit circle, without a constellation.
     """
     if constellation is None:
-        return 1.0, None
+        return 1.0
     pts = np.asarray(constellation.points)
     if constellation.pmf is None:
-        r2 = float(np.mean(np.abs(pts) ** 4) / np.mean(np.abs(pts) ** 2))
-        return r2, None
+        return float(np.mean(np.abs(pts) ** 4) / np.mean(np.abs(pts) ** 2))
     pmf = np.asarray(constellation.pmf, dtype=np.float64)
     e = float(np.dot(pmf, np.abs(pts) ** 2))
-    r2 = float(np.dot(pmf, np.abs(pts) ** 4)) / (e**2)
-    return r2, _ps_pilot_scale(pts)
+    return float(np.dot(pmf, np.abs(pts) ** 4)) / (e**2)
 
 
-def _ps_pilot_scale(points: np.ndarray) -> np.float32 | None:
-    """``1/sqrt(E_PS)`` of a shaped constellation, from its unit-power points.
-
-    The uniform mean power of the shaped points is ``1/E_PS``.
-    """
-    inv_e = float(np.mean(np.abs(points) ** 2))
-    return np.float32(np.sqrt(inv_e)) if inv_e > 1.0 / (1.0 - 1e-6) else None
-
-
-def _rde_ring_radii(constellation: Any) -> tuple[np.ndarray, np.float32 | None]:
-    """Unique ring radii (float32, unit power) and the PS pilot scale."""
+def _rde_ring_radii(constellation: Any) -> np.ndarray:
+    """Unique ring radii (float32) of the unit-power constellation."""
     if constellation is None:
-        return np.array([1.0], dtype=np.float32), None
-    pts = np.asarray(constellation.points)
-    raw = np.abs(pts).astype(np.float32)
-    c_ps = None if constellation.pmf is None else _ps_pilot_scale(pts)
+        return np.array([1.0], dtype=np.float32)
+    raw = np.abs(np.asarray(constellation.points)).astype(np.float32)
     # Round to 6 decimals to merge numerically identical radii.
-    return np.unique(np.round(raw, 6)), c_ps
+    return np.unique(np.round(raw, 6))

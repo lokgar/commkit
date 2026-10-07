@@ -346,7 +346,8 @@ def block_lms(
         A :class:`Signal` supplies ``sps`` and ``constellation``; the result
         then also carries ``signal``, the 1-SPS output Signal.
     training_symbols : array_like, optional
-        Known transmitted symbols at 1 SPS.
+        Known transmitted symbols at 1 SPS, on the scale of the unit-power
+        ``constellation`` (used as given).
         Shape: ``(N_train,)`` for SISO or ``(C, N_train)`` for MIMO.
     num_taps : int, default 21
         Number of taps per FIR filter (tap count in samples).

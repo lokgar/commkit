@@ -36,7 +36,6 @@ def _block_fdaf_blind(
     pilot_ref: Any,
     pilot_mask: np.ndarray | None,
     pilot_gain_db: float,
-    c_ps: Any,
     cuda_graph: bool,
     name: str,
 ) -> EqualizerResult:
@@ -84,8 +83,6 @@ def _block_fdaf_blind(
         )
         if pref.ndim == 1:
             pref = xp.tile(pref[None, :], (C, 1))
-        if c_ps is not None:
-            pref = (pref * xp.complex64(c_ps)).astype(xp.complex64)
         pmask_dev = xp.asarray(np.asarray(pilot_mask).astype(bool))
     if kind == "rde":
         radii = xp.asarray(np.asarray(radii_np, dtype=np.float64))

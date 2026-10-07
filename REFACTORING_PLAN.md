@@ -1001,7 +1001,7 @@ The equalization pass (3.7) gets more commits:
 - [x] **3.7f `refactor(equalization)!: result.signal`.** `y_hat` is always
   an array; `result.signal` is the 1-SPS Signal for Signal input, with the
   reference cut to the output symbols (RLS drops its tail).
-- [ ] **3.7g `fix(equalization): known symbols on the constellation's
+- [x] **3.7g `fix(equalization): known symbols on the constellation's
   scale`.** Training symbols were renormalized to unit sample-average
   power, which moves exact constellation points off the grid, while the
   blind engines used pilot references as given (scaled for PS). Both now

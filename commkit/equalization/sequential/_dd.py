@@ -136,7 +136,8 @@ def lms(
         A :class:`Signal` supplies ``sps`` and ``constellation``; the result
         then also carries ``signal``, the 1-SPS output Signal.
     training_symbols : array_like, optional
-        Known transmitted symbols (at symbol rate, 1 SPS).
+        Known transmitted symbols (at symbol rate, 1 SPS), on the scale of
+        the unit-power ``constellation`` (used as given, not renormalized).
         Shape: ``(N_train,)`` for SISO or ``(C, N_train)`` for MIMO.
         Without them the equalizer is decision-directed throughout.
     num_taps : int, default 21
@@ -426,7 +427,8 @@ def rls(
         A :class:`Signal` supplies ``sps`` and ``constellation``; the result
         then also carries ``signal``, the 1-SPS output Signal.
     training_symbols : array_like, optional
-        Known symbols for data-aided adaptation (at symbol rate, 1 SPS).
+        Known symbols for data-aided adaptation (at symbol rate, 1 SPS), on
+        the scale of the unit-power ``constellation`` (used as given).
     num_taps : int, default 21
         Number of equalizer taps per FIR filter.
     sps : int, optional

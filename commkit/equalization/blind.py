@@ -75,7 +75,7 @@ def block_cma(
         signal_adapter.array, sps, pilot_ref, pilot_mask, "block_cma()", state
     )
 
-    r2, c_ps = _godard_radius(constellation)
+    r2 = _godard_radius(constellation)
     result = _block_fdaf_blind(
         "cma",
         samples,
@@ -91,7 +91,6 @@ def block_cma(
         pilot_ref=pilot_ref,
         pilot_mask=pilot_mask,
         pilot_gain_db=pilot_gain_db,
-        c_ps=c_ps,
         cuda_graph=cuda_graph,
         name="Block-CMA" if pilot_ref is None else "Block-CMA(PA)",
     )
@@ -145,7 +144,7 @@ def block_rde(
         signal_adapter.array, sps, pilot_ref, pilot_mask, "block_rde()", state
     )
 
-    radii_np, c_ps = _rde_ring_radii(constellation)
+    radii_np = _rde_ring_radii(constellation)
     result = _block_fdaf_blind(
         "rde",
         samples,
@@ -161,7 +160,6 @@ def block_rde(
         pilot_ref=pilot_ref,
         pilot_mask=pilot_mask,
         pilot_gain_db=pilot_gain_db,
-        c_ps=c_ps,
         cuda_graph=cuda_graph,
         name="Block-RDE" if pilot_ref is None else "Block-RDE(PA)",
     )
