@@ -221,7 +221,14 @@ def plot_constellation(
             )
         assert result is not None
         _, axes = result
-        src = to_device(sig.reference.symbols, "cpu")
+        # Each distinct symbol once: a scatter of every reference symbol
+        # draws the same few points thousands of times.
+        ref, xp_ref, _ = dispatch(sig.reference.symbols)
+        src: Any = (
+            [to_device(xp_ref.unique(row), "cpu") for row in ref]
+            if ref.ndim > 1
+            else to_device(xp_ref.unique(ref), "cpu")
+        )
 
         def _scatter_source(axis, symbols):
             axis.scatter(
@@ -235,9 +242,9 @@ def plot_constellation(
                 marker="o",
             )
 
-        if src.ndim > 1:
+        if isinstance(src, list):
             ax_list = list(np.asarray(axes).flat)
-            for ch in range(min(src.shape[0], len(ax_list))):
+            for ch in range(min(len(src), len(ax_list))):
                 _scatter_source(ax_list[ch], src[ch])
         else:
             _scatter_source(axes, src)
@@ -331,26 +338,15 @@ def _plot_constellation_array(
         logger.warning("Constellation plot expects complex samples. Converting.")
         samples = samples.astype(xp.complex64)
 
-    # Extract I and Q
-    i_data = samples.real.flatten()
-    q_data = samples.imag.flatten()
-
-    # Move to CPU for plotting
-    i_data = to_device(i_data, "cpu")
-    q_data = to_device(q_data, "cpu")
-
-    # Compute 2D histogram
-    # Determine range based on RMS (robust to noise outliers)
-    # Using np.sqrt(np.mean(|I|² + |Q|²)) is equivalent to rms(complex_signal)
-    signal_rms = float(rms(i_data + 1j * q_data))
-    # Use ~3x RMS as limit (covers most constellation points + noise spread)
+    # Bin on the device and transfer only the (bins, bins) counts.  The view
+    # spans 2x the RMS (robust to noise outliers).
+    i_data = samples.real.ravel()
+    q_data = samples.imag.ravel()
+    signal_rms = float(rms(samples))
     limit = signal_rms * 2.0
     if limit == 0:
         limit = 1.0  # Default view range for zero signal
-
-    h, xedges, yedges = np.histogram2d(
-        i_data, q_data, bins=bins, range=[[-limit, limit], [-limit, limit]]
-    )
+    h = _density(i_data, q_data, bins, limit, xp)
 
     # Transpose for imshow (rows=y, cols=x)
     h = h.T
@@ -414,6 +410,24 @@ def _plot_constellation_array(
         plt.show()
         return None
     return fig, ax
+
+
+def _density(i_data: Any, q_data: Any, bins: int, limit: float, xp: Any) -> np.ndarray:
+    """2-D histogram over ``[-limit, limit]^2`` as ``(bins, bins)`` host counts.
+
+    ``bincount`` of the flattened bin index on the input's device, with
+    ``numpy.histogram2d``'s edges: equal bins, the last one closed.
+    """
+    scale = bins / (2.0 * limit)
+    ii = xp.floor((i_data + limit) * scale).astype(xp.int64)
+    qq = xp.floor((q_data + limit) * scale).astype(xp.int64)
+    # The upper edge belongs to the last bin, as in numpy.histogram2d.
+    ii = xp.where(i_data == limit, bins - 1, ii)
+    qq = xp.where(q_data == limit, bins - 1, qq)
+    inside = (ii >= 0) & (ii < bins) & (qq >= 0) & (qq < bins)
+    flat = (ii * bins + qq)[inside]
+    counts = xp.bincount(flat, minlength=bins * bins)
+    return np.asarray(to_device(counts, "cpu"), dtype=np.float64).reshape(bins, bins)
 
 
 # -----------------------------------------------------------------------------

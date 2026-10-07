@@ -164,3 +164,32 @@ class TestPlotConstellation:
             assert points.shape == (2, 2)
             assert np.min(points[:, 0]) == 0.0
             assert np.max(points[:, 0]) > 0.0
+
+    def test_density_matches_numpy_histogram2d(self, xp: Any) -> None:
+        """The device bincount reproduces numpy.histogram2d, upper edge
+        included and points outside the view dropped."""
+        from commkit.plotting.constellation import _density
+
+        rng = np.random.default_rng(3)
+        limit, bins = 1.5, 64
+        i = rng.normal(0, 0.8, 20000)
+        q = rng.normal(0, 0.8, 20000)
+        i[:3] = [limit, -limit, 2 * limit]  # edges and an outlier
+        q[:3] = [0.1, limit, 0.0]
+        expected, _, _ = np.histogram2d(
+            i, q, bins=bins, range=[[-limit, limit], [-limit, limit]]
+        )
+        got = _density(xp.asarray(i), xp.asarray(q), bins, limit, xp)
+        np.testing.assert_array_equal(got, expected)
+
+    def test_overlay_reference_draws_each_symbol_once(self, xp: Any) -> None:
+        pts = xp.asarray(Constellation.qam(16).points)
+        ref = xp.tile(pts, 500)  # 8000 symbols, 16 distinct
+        sig = Signal(
+            samples=ref,
+            sampling_rate=1e6,
+            symbol_rate=1e6,
+            reference=Reference(symbols=ref),
+        )
+        _, ax = plot_constellation(sig, overlay_reference=True)
+        assert ax.collections[0].get_offsets().shape == (16, 2)
