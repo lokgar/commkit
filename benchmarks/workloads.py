@@ -31,10 +31,16 @@ def bps_workload(
     n_sym: int,
     num_ch: int = 2,
     snr_db: float = 25.0,
-    linewidth_hz: float = 1e5,
+    linewidth_hz: float = 100.0,
     seed: int = 0,
 ) -> np.ndarray:
-    """1-SPS QAM with Wiener laser phase noise + AWGN (CPR benchmark input)."""
+    """1-SPS QAM with Wiener laser phase noise + AWGN (CPR benchmark input).
+
+    The default linewidth-symbol-time product is 1e-4 (100 Hz at the 1 MBd
+    nominal rate), which BPS tracks up to 64-QAM.  Products near 1e-2 make
+    CPR fail and data-dependent paths (cycle-slip correction) time a
+    failure mode instead of the operating point.
+    """
     syms = qam_symbols(order, n_sym, num_ch, seed)
     x = apply_phase_noise(syms, sampling_rate=FS, linewidth=linewidth_hz, rng=seed)
     x = apply_awgn(x, esn0_db=snr_db, sps=1, rng=seed + 1)
@@ -54,7 +60,7 @@ def mimo_equalizer_workload(
 
     Returns ``(samples (2, n_sym*sps) complex64, syms (2, n_sym) complex64)``.
     ``linewidth_hz > 0`` adds laser phase noise (for CPR-enabled equalizer
-    benches).
+    benches); keep ``linewidth_hz / FS`` near 1e-4 or below.
     """
     syms = qam_symbols(order, n_sym, num_ch=2, seed=seed)
     x = np.repeat(syms, sps, axis=-1)  # (2, n_sym*sps), rectangular upsampling
@@ -65,8 +71,8 @@ def mimo_equalizer_workload(
     x = (R @ x).astype(np.complex64)
     if linewidth_hz > 0:
         x = apply_phase_noise(
-            x, sampling_rate=FS * sps, linewidth=linewidth_hz, rng=seed
-        )
+            x, sampling_rate=FS * sps, linewidth=linewidth_hz, shared_lo=True, rng=seed
+        )  # one laser for both polarizations: the butterfly then CPR can undo it
     x = apply_awgn(x, esn0_db=snr_db, sps=sps, rng=seed + 1)
     return np.asarray(x, dtype=np.complex64), syms
 

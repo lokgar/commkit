@@ -23,6 +23,7 @@ fallback to the eager loop shows up as a several-fold jump.
 """
 
 import pytest
+from benchutils import assert_converged
 from workloads import mimo_equalizer_workload
 
 from commkit.equalization import block_lms
@@ -52,8 +53,13 @@ CPR_CONFIGS = [
 ]
 
 
+# Converging step sizes for the 30-degree mixing of the workload: the block
+# update's stability ceiling falls with block_size.
+STEP_SIZE = {256: 3e-3, 2048: 5e-4}
+
+
 def _bench_block_lms(benchmark, xp, sync, cpr_kwargs, block_size, n_train=None):
-    linewidth = 1e4 if cpr_kwargs else 0.0
+    linewidth = 100.0 if cpr_kwargs else 0.0  # linewidth x symbol time = 1e-4
     samples, syms = mimo_equalizer_workload(
         n_sym=N_SYM, order=16, sps=2, linewidth_hz=linewidth
     )
@@ -68,12 +74,14 @@ def _bench_block_lms(benchmark, xp, sync, cpr_kwargs, block_size, n_train=None):
             sps=2,
             constellation=Constellation.qam(16),
             block_size=block_size,
+            step_size=STEP_SIZE[block_size],
             **cpr_kwargs,
         )
         sync()
         return r
 
-    benchmark.pedantic(run, **ROUNDS)
+    r = benchmark.pedantic(run, **ROUNDS)
+    assert_converged(r, syms, Constellation.qam(16), skip=4096, max_ser=1e-3)
 
 
 @pytest.mark.parametrize("label,cpr_kwargs", CPR_CONFIGS)
