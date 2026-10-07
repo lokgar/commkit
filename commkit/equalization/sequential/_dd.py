@@ -261,11 +261,6 @@ def lms(
         n_train_log,
         f", cpr={type(cpr).__name__}" if cpr is not None else "",
     )
-    if sps > 1:
-        logger.warning(
-            "LMS output y_hat is at 1 SPS (symbol rate). "
-            "Update sampling_rate = symbol_rate after applying this equalizer."
-        )
 
     run = _prepare_sequential(
         samples,
@@ -610,11 +605,6 @@ def rls(
         n_train_log,
         f", cpr={type(cpr).__name__}" if cpr is not None else "",
     )
-    if sps > 1:
-        logger.warning(
-            "RLS output y_hat is at 1 SPS (symbol rate). "
-            "Update sampling_rate = symbol_rate after applying this equalizer."
-        )
 
     run = _prepare_sequential(
         samples,

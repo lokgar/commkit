@@ -237,11 +237,6 @@ def cma(
         use_pilots,
         pilot_gain_db,
     )
-    if sps > 1:
-        logger.warning(
-            "CMA output y_hat is at 1 SPS (symbol rate). "
-            "Update sampling_rate = symbol_rate after applying this equalizer."
-        )
 
     r2 = _godard_radius(constellation)
     logger.debug("CMA R2: %.4f", r2)
@@ -451,11 +446,6 @@ def rde(
         use_pilots,
         pilot_gain_db,
     )
-    if sps > 1:
-        logger.warning(
-            "RDE output y_hat is at 1 SPS (symbol rate). "
-            "Update sampling_rate = symbol_rate after applying this equalizer."
-        )
 
     radii = _rde_ring_radii(constellation)
     logger.debug("RDE radii: %s", ", ".join(f"{r:.4f}" for r in radii))
