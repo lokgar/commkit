@@ -5,12 +5,31 @@ description = "A Python library for high-performance digital communications rese
 readme = "README.md"
 license = { text = "MIT" }
 requires-python = ">=3.12"
+keywords = ["digital communications", "DSP", "coherent optics", "equalization", "CuPy", "GPU"]
+classifiers = [
+    "Development Status :: 4 - Beta",
+    "Intended Audience :: Science/Research",
+    "License :: OSI Approved :: MIT License",
+    "Operating System :: OS Independent",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
+    "Programming Language :: Python :: 3.14",
+    "Topic :: Scientific/Engineering",
+    "Topic :: Communications",
+    "Typing :: Typed",
+]
 dependencies = [
     "matplotlib>=3.11",
     "numpy>=2.4",
     "scipy>=1.17",
     "numba>=0.65",
 ]
+
+[project.urls]
+Homepage = "https://github.com/lokgar/commkit"
+Repository = "https://github.com/lokgar/commkit"
+Issues = "https://github.com/lokgar/commkit/issues"
 
 [project.optional-dependencies]
 # CuPy with its pip-packaged CUDA toolkit libraries (cuBLAS, cuFFT, cuRAND,

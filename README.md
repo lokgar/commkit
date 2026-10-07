@@ -85,23 +85,23 @@ Without CuPy, drop `.to("gpu")`: the same code runs on the CPU.
 
 | Module | Contents |
 | --- | --- |
-| [`commkit.core`](commkit/core) | `Signal`, `Reference`, `generate`, `SingleCarrierFrame` and `Preamble` (pilots, guard intervals, MIMO streams), `extract_payload`. |
-| [`commkit.mapping`](commkit/mapping) | `Constellation` (QAM, PSK, PAM, arbitrary points; Gray labels; probabilistic shaping with `.shaped()`), bit mapping, hard demapping, max-log and exact LLRs. |
-| [`commkit.filtering`](commkit/filtering.py) | Pulses (`RRC`, `RC`, `Gaussian`, `Rect`, `SmoothRect`), FIR and IIR design (Butterworth, Chebyshev I/II, elliptic, Bessel), `fir_filter`, `iir_filter`, `matched_filter`, overlap-save, chromatic-dispersion compensation. |
-| [`commkit.multirate`](commkit/multirate.py) | `resample` (fractional), `decimate`, `upsample`, `decimate_to_symbol_rate`. |
-| [`commkit.spectral`](commkit/spectral.py) | Welch PSD, spectrograms, frequency shifting, pilot tones. |
-| [`commkit.impairments`](commkit/impairments) | AWGN, phase noise, IQ imbalance (with Löwdin and Gram-Schmidt correction), chromatic dispersion, PMD and polarization mixing. Nonlinear channel models: **planned, not implemented**. |
-| [`commkit.timing`](commkit/timing.py) | Barker and Zadoff-Chu sequences, `estimate_timing` / `correct_timing`, fractional delay estimation and correction. |
-| [`commkit.frequency`](commkit/frequency.py) | `estimate_frequency_offset` / `correct_frequency_offset` with `MthPower`, `MengaliMorelli`, `PilotSymbols` and `BiasTone`; static and blockwise. |
-| [`commkit.recovery`](commkit/recovery) | `estimate_carrier_phase` / `correct_carrier_phase` with `ViterbiViterbi`, `BPS`, `PLL`, `Tikhonov`, `DataAided`, `PilotAided`, `PilotTone(s)`; cycle-slip correction; `resolve_phase_ambiguity` and `resolve_channel_permutation`. |
-| [`commkit.equalization`](commkit/equalization) | Sequential `lms`, `rls`, `cma`, `rde` (Numba) and frequency-domain `block_lms`, `block_cma`, `block_rde` (CuPy, CUDA graphs), butterfly MIMO, inline carrier recovery (`cpr=PLL()` / `BPS()`), continuation with `state=`, `zf_equalizer`, polarization-tone demultiplexing. |
-| [`commkit.metrics`](commkit/metrics.py) | `evm`, `snr`, `ber`, `ser`, `gmi`, `mi`, including shaped constellations; host values per channel. |
-| [`commkit.analysis`](commkit/analysis) | Laser and carrier-phase characterization: `estimate_linewidth` (increment slope, β-separation, delayed self-heterodyne FM-PSD / increment / Lorentzian), FM-noise PSDs, drift separation, Allan deviation. |
-| [`commkit.math`](commkit/math.py) | `rms`, `normalize`, dB conversions. |
-| [`commkit.smoothing`](commkit/smoothing.py) | Display and estimation smoothers (moving average, Savitzky-Golay, 2-D density). Signal-chain filters are in `filtering`. |
-| [`commkit.io`](commkit/io.py) | `save_npz` / `load_npz` for Signals. |
-| [`commkit.plotting`](commkit/plotting) | Constellations, eye diagrams, spectra, filter responses, equalizer convergence, and synchronization and laser diagnostics that draw the estimates. Imported on first use. |
-| [`commkit.coding`](commkit/coding) | Channel coding and FEC: **planned, not implemented**. |
+| [`commkit.core`](https://github.com/lokgar/commkit/tree/main/commkit/core) | `Signal`, `Reference`, `generate`, `SingleCarrierFrame` and `Preamble` (pilots, guard intervals, MIMO streams), `extract_payload`. |
+| [`commkit.mapping`](https://github.com/lokgar/commkit/tree/main/commkit/mapping) | `Constellation` (QAM, PSK, PAM, arbitrary points; Gray labels; probabilistic shaping with `.shaped()`), bit mapping, hard demapping, max-log and exact LLRs. |
+| [`commkit.filtering`](https://github.com/lokgar/commkit/blob/main/commkit/filtering.py) | Pulses (`RRC`, `RC`, `Gaussian`, `Rect`, `SmoothRect`), FIR and IIR design (Butterworth, Chebyshev I/II, elliptic, Bessel), `fir_filter`, `iir_filter`, `matched_filter`, overlap-save, chromatic-dispersion compensation. |
+| [`commkit.multirate`](https://github.com/lokgar/commkit/blob/main/commkit/multirate.py) | `resample` (fractional), `decimate`, `upsample`, `decimate_to_symbol_rate`. |
+| [`commkit.spectral`](https://github.com/lokgar/commkit/blob/main/commkit/spectral.py) | Welch PSD, spectrograms, frequency shifting, pilot tones. |
+| [`commkit.impairments`](https://github.com/lokgar/commkit/tree/main/commkit/impairments) | AWGN, phase noise, IQ imbalance (with Löwdin and Gram-Schmidt correction), chromatic dispersion, PMD and polarization mixing. Nonlinear channel models: **planned, not implemented**. |
+| [`commkit.timing`](https://github.com/lokgar/commkit/blob/main/commkit/timing.py) | Barker and Zadoff-Chu sequences, `estimate_timing` / `correct_timing`, fractional delay estimation and correction. |
+| [`commkit.frequency`](https://github.com/lokgar/commkit/blob/main/commkit/frequency.py) | `estimate_frequency_offset` / `correct_frequency_offset` with `MthPower`, `MengaliMorelli`, `PilotSymbols` and `BiasTone`; static and blockwise. |
+| [`commkit.recovery`](https://github.com/lokgar/commkit/tree/main/commkit/recovery) | `estimate_carrier_phase` / `correct_carrier_phase` with `ViterbiViterbi`, `BPS`, `PLL`, `Tikhonov`, `DataAided`, `PilotAided`, `PilotTone(s)`; cycle-slip correction; `resolve_phase_ambiguity` and `resolve_channel_permutation`. |
+| [`commkit.equalization`](https://github.com/lokgar/commkit/tree/main/commkit/equalization) | Sequential `lms`, `rls`, `cma`, `rde` (Numba) and frequency-domain `block_lms`, `block_cma`, `block_rde` (CuPy, CUDA graphs), butterfly MIMO, inline carrier recovery (`cpr=PLL()` / `BPS()`), continuation with `state=`, `zf_equalizer`, polarization-tone demultiplexing. |
+| [`commkit.metrics`](https://github.com/lokgar/commkit/blob/main/commkit/metrics.py) | `evm`, `snr`, `ber`, `ser`, `gmi`, `mi`, including shaped constellations; host values per channel. |
+| [`commkit.analysis`](https://github.com/lokgar/commkit/tree/main/commkit/analysis) | Laser and carrier-phase characterization: `estimate_linewidth` (increment slope, β-separation, delayed self-heterodyne FM-PSD / increment / Lorentzian), FM-noise PSDs, drift separation, Allan deviation. |
+| [`commkit.math`](https://github.com/lokgar/commkit/blob/main/commkit/math.py) | `rms`, `normalize`, dB conversions. |
+| [`commkit.smoothing`](https://github.com/lokgar/commkit/blob/main/commkit/smoothing.py) | Display and estimation smoothers (moving average, Savitzky-Golay, 2-D density). Signal-chain filters are in `filtering`. |
+| [`commkit.io`](https://github.com/lokgar/commkit/blob/main/commkit/io.py) | `save_npz` / `load_npz` for Signals. |
+| [`commkit.plotting`](https://github.com/lokgar/commkit/tree/main/commkit/plotting) | Constellations, eye diagrams, spectra, filter responses, equalizer convergence, and synchronization and laser diagnostics that draw the estimates. Imported on first use. |
+| [`commkit.coding`](https://github.com/lokgar/commkit/tree/main/commkit/coding) | Channel coding and FEC: **planned, not implemented**. |
 
 Importing `commkit` has no side effects: it configures no logging, Matplotlib
 or warning filters, and does not touch the GPU.
@@ -136,16 +136,16 @@ With [`uv`](https://github.com/astral-sh/uv), use `uv pip install` in place of
 
 ## Examples
 
-Jupyter notebooks in [`examples/`](examples) (install the `notebook` extra
+Jupyter notebooks in [`examples/`](https://github.com/lokgar/commkit/tree/main/examples) (install the `notebook` extra
 and run `jupyter lab examples`):
 
-- [`qam_receiver_quickstart`](examples/qam_receiver_quickstart.ipynb) - the
+- [`qam_receiver_quickstart`](https://github.com/lokgar/commkit/blob/main/examples/qam_receiver_quickstart.ipynb) - the
   quickstart above, cell by cell, with the constellation, spectrum and
   equalizer plots;
-- [`carrier_phase_analysis`](examples/carrier_phase_analysis.ipynb) - drift,
+- [`carrier_phase_analysis`](https://github.com/lokgar/commkit/blob/main/examples/carrier_phase_analysis.ipynb) - drift,
   linewidth and Allan deviation of a recovered carrier phase;
-- [`laser_linewidth_dsh`](examples/laser_linewidth_dsh.ipynb) and
-  [`laser_linewidth_homodyne_iq`](examples/laser_linewidth_homodyne_iq.ipynb)
+- [`laser_linewidth_dsh`](https://github.com/lokgar/commkit/blob/main/examples/laser_linewidth_dsh.ipynb) and
+  [`laser_linewidth_homodyne_iq`](https://github.com/lokgar/commkit/blob/main/examples/laser_linewidth_homodyne_iq.ipynb)
   - laser linewidth from delayed self-heterodyne and homodyne IQ captures;
 - `measurement_laser_linewidth_*` - lean templates for real captures.
 
@@ -165,8 +165,8 @@ uv run ruff check . && uv run mypy commkit/
 ```
 
 Contributor and coding-agent guidance (architecture, API rules, numerics,
-performance and test conventions) is in [AGENTS.md](AGENTS.md).
+performance and test conventions) is in [AGENTS.md](https://github.com/lokgar/commkit/blob/main/AGENTS.md).
 
 ## License
 
-[MIT](LICENSE).
+[MIT](https://github.com/lokgar/commkit/blob/main/LICENSE).
