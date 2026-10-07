@@ -428,8 +428,3 @@ def _density(i_data: Any, q_data: Any, bins: int, limit: float, xp: Any) -> np.n
     flat = (ii * bins + qq)[inside]
     counts = xp.bincount(flat, minlength=bins * bins)
     return np.asarray(to_device(counts, "cpu"), dtype=np.float64).reshape(bins, bins)
-
-
-# -----------------------------------------------------------------------------
-# EQUALIZER DIAGNOSTICS
-# -----------------------------------------------------------------------------
