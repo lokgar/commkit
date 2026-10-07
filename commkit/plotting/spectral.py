@@ -355,7 +355,8 @@ def plot_spectrogram(
     show : bool, default False
         If True, calls `plt.show()` immediately.
     **kwargs : Any
-        Additional keyword arguments passed to `ax.pcolormesh`.
+        Additional keyword arguments passed to ``ax.imshow`` (or
+        ``ax.pcolormesh`` for a non-uniform grid).
 
     Returns
     -------
@@ -500,10 +501,11 @@ def _plot_spectrogram(
         mode=mode,
     )
 
-    # Move to CPU for plotting
-    f = to_device(spec.frequencies, "cpu")
-    t = to_device(spec.times, "cpu")
-    Sxx = to_device(spec.values, "cpu")
+    # The axes are small: bring them over to pick the crop; the values are
+    # cropped and converted on the device and transferred once.
+    f = np.asarray(to_device(spec.frequencies, "cpu"))
+    t = np.asarray(to_device(spec.times, "cpu"))
+    Sxx, xp, _ = dispatch(spec.values)
 
     # Shift frequency axis first
     f_shifted = f + center_frequency
@@ -547,19 +549,39 @@ def _plot_spectrogram(
 
     # Convert values based on mode (e.g. dB scale for PSD/magnitude)
     if mode == "psd":
-        Sxx_plot = 10 * np.log10(Sxx_slice + 1e-20)
+        Sxx_plot = 10 * xp.log10(Sxx_slice + 1e-20)
     elif mode in ("complex", "magnitude"):
-        Sxx_plot = 10 * np.log10(np.abs(Sxx_slice) ** 2 + 1e-20)
+        Sxx_plot = 10 * xp.log10(xp.abs(Sxx_slice) ** 2 + 1e-20)
     else:
         # Angle, phase, etc., plot linearly
         Sxx_plot = Sxx_slice
+    # Time on the y-axis: (len(t_plot), len(f_plot)).
+    image = np.asarray(to_device(Sxx_plot.T, "cpu"))
 
-    # Plot spectrogram with frequency on x-axis and time on y-axis
-    # Sxx_plot has shape (len(f_plot), len(t_plot)).
-    # Transposing Sxx_plot to (len(t_plot), len(f_plot)) matches y-axis (time) and x-axis (frequency).
-    mesh = ax.pcolormesh(
-        f_plot, t_plot, Sxx_plot.T, cmap=cmap, shading="auto", **kwargs
-    )
+    # The STFT grids are uniform, so an image with the cell edges as its
+    # extent draws the same picture as pcolormesh, much faster.
+    if _uniform(f_plot) and _uniform(t_plot):
+        df = f_plot[1] - f_plot[0] if f_plot.size > 1 else 1.0
+        dt = t_plot[1] - t_plot[0] if t_plot.size > 1 else 1.0
+        extent = [
+            f_plot[0] - df / 2,
+            f_plot[-1] + df / 2,
+            t_plot[0] - dt / 2,
+            t_plot[-1] + dt / 2,
+        ]
+        imshow_kwargs: dict[str, Any] = {
+            "origin": "lower",
+            "aspect": "auto",
+            "interpolation": "nearest",
+            "extent": extent,
+            "cmap": cmap,
+        }
+        imshow_kwargs.update(kwargs)
+        mesh = ax.imshow(image, **imshow_kwargs)
+    else:
+        mesh = ax.pcolormesh(
+            f_plot, t_plot, image, cmap=cmap, shading="auto", **kwargs
+        )
     ax.set_xlabel("Frequency [Hz]")
     ax.set_ylabel("Time [s]")
     _set_eng_formatter(ax, "x", "Hz")
@@ -580,3 +602,11 @@ def _plot_spectrogram(
         plt.show()
         return None
     return fig, ax
+
+
+def _uniform(axis: np.ndarray) -> bool:
+    """True for an increasing, evenly spaced axis (or one with < 3 points)."""
+    if axis.size < 3:
+        return True
+    step = np.diff(axis)
+    return bool(np.all(step > 0) and np.allclose(step, step[0], rtol=1e-6))

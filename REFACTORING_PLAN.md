@@ -1267,7 +1267,7 @@ The equalization pass (3.7) gets more commits:
   The five `# %%` scripts become Jupyter notebooks (outputs stripped) and
   `qam_receiver_quickstart.ipynb` holds the README workflow;
   `tests/test_examples.py` executes every notebook.
-- [ ] **4.3c-f `perf(plotting)`** (4.3c done) (discussed in another session, not
+- [x] **4.3c-f `perf(plotting)`** (discussed in another session, not
   planned until now):
   - constellation density binned on the device with `bincount`, and only
     the unique reference symbols in the overlay;

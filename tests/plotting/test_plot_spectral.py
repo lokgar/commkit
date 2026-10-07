@@ -13,6 +13,7 @@ from commkit import generate, plotting, spectral
 from commkit.filtering import RRC
 from commkit.mapping import Constellation
 from commkit.plotting import plot_psd, plot_spectrogram
+from tests.common.conversions import to_numpy
 
 
 class TestPlotSpectralAndPSD:
@@ -225,3 +226,39 @@ class TestPlotFacts:
 
         with pytest.raises(ValueError, match="requires sps"):
             plot_eye_diagram(xp.ones(256))
+
+
+class TestSpectrogramImage:
+    """The spectrogram is an image whose cells sit on the STFT grid."""
+
+    def test_image_values_and_extent(self, xp: Any) -> None:
+        from matplotlib.image import AxesImage
+
+        rng = np.random.default_rng(0)
+        x = xp.asarray(
+            (rng.standard_normal(8192) + 1j * rng.standard_normal(8192)).astype(
+                np.complex64
+            )
+        )
+        fs = 1e6
+        _, ax = plot_spectrogram(x, sampling_rate=fs, nperseg=128)
+        (im,) = [a for a in ax.get_images() if isinstance(a, AxesImage)]
+        spec = spectral.spectrogram(x, sampling_rate=fs, nperseg=128)
+        f = to_numpy(spec.frequencies)
+        t = to_numpy(spec.times)
+        expected = 10 * np.log10(to_numpy(spec.values) + 1e-20).T
+        np.testing.assert_allclose(im.get_array(), expected, rtol=1e-6)
+        df, dt = f[1] - f[0], t[1] - t[0]
+        np.testing.assert_allclose(
+            im.get_extent(),
+            [f[0] - df / 2, f[-1] + df / 2, t[0] - dt / 2, t[-1] + dt / 2],
+        )
+
+    def test_crop_happens_before_drawing(self, xp: Any) -> None:
+        x = xp.asarray(np.random.default_rng(1).standard_normal(8192))
+        _, ax = plot_spectrogram(
+            x, sampling_rate=1e6, nperseg=128, xlim=(1e5, 2e5), ylim=(1e-3, 4e-3)
+        )
+        lo, hi, t0, t1 = ax.get_images()[0].get_extent()
+        assert 0.99e5 - 1e6 / 128 <= lo and hi <= 2e5 + 1e6 / 128
+        assert t0 >= 1e-3 - 1e-3 and t1 <= 4e-3 + 1e-3
