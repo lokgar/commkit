@@ -14,6 +14,7 @@ from typing import TYPE_CHECKING
 
 import numpy as np
 
+from .. import _cuda
 from ..backend import ArrayType, dispatch
 from ..core._signal_adapter import adapt_signal
 from ..core.signal import Signal
@@ -24,7 +25,8 @@ if TYPE_CHECKING:
 
 __all__ = ["compute_llr"]
 
-# Upper bound on the (chunk, bits, M/2) intermediate, in elements.  Chunking
+# Upper bound on the (chunk, bits, M/2) intermediate of the CuPy fallback
+# (no CUDA kernel, or more than 16 bits per symbol), in elements.  Chunking
 # over symbols keeps peak memory independent of the record length.
 _CHUNK_ELEMENTS = 1 << 23
 
@@ -41,9 +43,9 @@ def compute_llr(
 
     Positive LLR means bit 0 is more likely; the magnitude is the confidence.
     The constellation's ``pmf`` (if any) enters as the symbol prior.
-    Computed on the input's device in float32, chunked over symbols so memory
-    stays bounded for any record length.  Differentiable LLRs belong to
-    commax.
+    Computed on the input's device in float32 by one compiled pass per
+    symbol (Numba on the CPU, a CUDA kernel on the GPU), so memory stays
+    bounded for any record length.  Differentiable LLRs belong to commax.
 
     Parameters
     ----------
@@ -208,6 +210,20 @@ def _llr(
             inv_sigma2,
             method == "exact",
             llrs,
+        )
+        return llrs.reshape((*symbols.shape[:-1], symbols.shape[-1] * k))
+    kernel = _cuda.get_kernel("llr") if k <= 16 else None
+    if kernel is not None:
+        # GPU: one thread per symbol, no (chunk, k, M/2) intermediates.
+        labels = (bit_labels.astype(np.int64) << np.arange(k - 1, -1, -1)).sum(-1)
+        llrs = kernel(
+            sym_flat.astype(xp.complex64, copy=False),
+            xp.asarray(points.astype(np.complex64)),
+            xp.zeros(order, xp.float32) if log_pmf_dev is None else log_pmf_dev,
+            xp.asarray(labels.astype(np.int32)),
+            k=k,
+            inv_s2=float(inv_sigma2),
+            exact=method == "exact",
         )
         return llrs.reshape((*symbols.shape[:-1], symbols.shape[-1] * k))
     chunk = max(1, _CHUNK_ELEMENTS // (k * order))

@@ -389,6 +389,73 @@ def _bps_anchor_factory() -> Callable:
     return launch
 
 
+def _llr_factory() -> Callable:
+    """Wrapper factory for the bit-LLR kernel (``mapping.llr``).
+
+    One thread per symbol walks the constellation and keeps the per-bit
+    maxima (and, for the exact method, the scaled sums) in registers, so no
+    ``(N, k, M/2)`` intermediate is formed.  Returns ``(n, k)`` float32 LLRs.
+    """
+    import cupy as cp
+
+    from . import compiler
+
+    kern = compiler.get_raw_kernel("llr", "llr")
+    max_k = 16  # LLR_MAX_K in llr.cu
+
+    def launch(
+        x: Any,
+        points: Any,
+        log_pmf: Any,
+        labels: Any,
+        *,
+        k: int,
+        inv_s2: float,
+        exact: bool,
+    ) -> Any:
+        """LLRs of the ``(n,)`` complex64 symbols ``x``, shape ``(n, k)``."""
+        if not 1 <= k <= max_k:
+            raise ValueError(f"bits per symbol must be in [1, {max_k}], got {k}")
+        n = x.shape[0]
+        M = points.shape[0]
+        for label, arr, dtype, shape in (
+            ("x", x, cp.complex64, (n,)),
+            ("points", points, cp.complex64, (M,)),
+            ("log_pmf", log_pmf, cp.float32, (M,)),
+            ("labels", labels, cp.int32, (M,)),
+        ):
+            if arr.dtype != dtype:
+                raise TypeError(f"{label} must be {dtype}, got {arr.dtype}")
+            if arr.shape != shape:
+                raise ValueError(f"{label} must have shape {shape}, got {arr.shape}")
+            if not arr.flags.c_contiguous:
+                raise ValueError(f"{label} must be C-contiguous")
+        out = cp.empty((n, k), dtype=cp.float32)
+        if n == 0:
+            return out
+        threads = 128
+        blocks = min((n + threads - 1) // threads, 65535)
+        kern(
+            (blocks,),
+            (threads,),
+            (
+                x,
+                points,
+                log_pmf,
+                labels,
+                out,
+                cp.int32(n),
+                cp.int32(M),
+                cp.int32(k),
+                cp.float32(inv_s2),
+                cp.int32(1 if exact else 0),
+            ),
+        )
+        return out
+
+    return launch
+
+
 # name -> wrapper factory. Factories may raise; get_kernel translates any
 # failure into the warn-once-and-return-None fallback contract.
 _KERNEL_FACTORIES: dict[str, Callable[..., Callable]] = {
@@ -396,4 +463,5 @@ _KERNEL_FACTORIES: dict[str, Callable[..., Callable]] = {
     "bps_min_d2": _bps_min_d2_factory,
     "cs_block": _cs_block_factory,
     "bps_anchor": _bps_anchor_factory,
+    "llr": _llr_factory,
 }
