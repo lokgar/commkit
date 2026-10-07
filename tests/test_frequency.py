@@ -880,7 +880,7 @@ class TestSignalInputFrequency:
     def test_pilot_symbols_signal_input(self, xp):
         sig = _qam_signal(xp, 16, 512, fo_hz=1_000.0)
         pilot_indices = np.arange(0, 512, 8)
-        pilot_values = xp.asarray(sig.source_symbols)[pilot_indices]
+        pilot_values = xp.asarray(sig.reference.symbols)[pilot_indices]
         est_sig = frequency.estimate_frequency_offset(
             sig, frequency.PilotSymbols(pilot_indices, pilot_values)
         ).value

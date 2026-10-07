@@ -363,5 +363,4 @@ delete this section in commit 4.2.
 
 | Legacy pattern still in the code | Removed by |
 | --- | --- |
-| Read-only `Signal` bridge properties (`mod_*`, `ps_pmf`, `source_*`, pulse fields, `signal_type`); no library code reads them, only tests and examples | 4.1 |
 | `--use_fast_math` as the global CUDA default | Step 5 |

@@ -179,10 +179,11 @@ class EqualizerResult:
     tail_trim : int
         Number of symbols trimmed from the tail of ``y_hat`` to remove the
         zero-padding contamination zone.  Non-zero only for RLS (equals
-        ``num_taps // 2``).  If non-zero, trim reference arrays to match::
+        ``num_taps // 2``).  ``result.signal`` already carries the reference
+        trimmed to match; with array input, trim your reference arrays::
 
-            source_symbols = source_symbols[..., :-result.tail_trim]
-            source_bits    = source_bits[..., :-result.tail_trim * bits_per_symbol]
+            symbols = symbols[..., :-result.tail_trim]
+            bits = bits[..., :-result.tail_trim * bits_per_symbol]
     phase_trajectory : np.ndarray or None
         Per-symbol phase estimates produced by the inline CPR stage, in
         radians.  ``None`` without ``cpr``.

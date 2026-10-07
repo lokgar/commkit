@@ -272,7 +272,7 @@ def make_isi_distorted_signal(
         constellation, n_symbols, symbol_rate=1e6, sps=2, pulse=RRC(0.35), rng=seed
     )
     # Known symbols on the constellation's scale, as the equalizers take them.
-    tx = xp.asarray(to_numpy(sig.source_symbols))
+    tx = xp.asarray(to_numpy(sig.reference.symbols))
     rx = xp.convolve(
         xp.asarray(to_numpy(sig.samples)), xp.asarray(channel), mode="same"
     )

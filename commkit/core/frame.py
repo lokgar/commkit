@@ -721,8 +721,8 @@ class SingleCarrierFrame:
         # same factor.  Guard zeros remain zero after scaling.
         samples = normalize(samples, mode="symbol_power", sps=sps, axis=-1)
 
-        # The payload modulation lives on the frame; the PS pmf is reachable
-        # through the Signal's ps_pmf bridge property (frame.payload_ps_pmf).
+        # The payload modulation (and its pmf) lives on the frame:
+        # sig.frame.payload_constellation.
         return Signal(
             samples=samples,
             sampling_rate=symbol_rate * sps,

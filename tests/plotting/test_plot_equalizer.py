@@ -28,7 +28,7 @@ class TestPlotEqualizer:
             rng=0,
         )
         rx_mimo = xp.asarray(sig.samples)
-        train_mimo = xp.asarray(sig.source_symbols)
+        train_mimo = xp.asarray(sig.reference.symbols)
 
         result = equalization.lms(
             rx_mimo,
@@ -50,7 +50,7 @@ class TestPlotEqualizer:
         )
         result = equalization.lms(
             xp.asarray(sig.samples),
-            xp.asarray(sig.source_symbols),
+            xp.asarray(sig.reference.symbols),
             num_taps=7,
             step_size=0.05,
             constellation=Constellation.psk(4),
@@ -68,7 +68,7 @@ class TestPlotEqualizer:
         )
         result = equalization.lms(
             xp.asarray(sig.samples),
-            xp.asarray(sig.source_symbols),
+            xp.asarray(sig.reference.symbols),
             num_taps=7,
             step_size=0.05,
             constellation=Constellation.psk(4),
@@ -86,7 +86,7 @@ class TestPlotEqualizer:
         )
         result = equalization.lms(
             xp.asarray(sig.samples),
-            xp.asarray(sig.source_symbols),
+            xp.asarray(sig.reference.symbols),
             num_taps=5,
             step_size=0.05,
             constellation=Constellation.psk(4),
@@ -108,7 +108,7 @@ class TestPlotEqualizer:
         )
         result = equalization.lms(
             xp.asarray(sig.samples),
-            xp.asarray(sig.source_symbols),
+            xp.asarray(sig.reference.symbols),
             num_taps=5,
             step_size=0.05,
             constellation=Constellation.psk(4),
@@ -124,7 +124,7 @@ class TestPlotEqualizer:
         )
         result = equalization.lms(
             xp.asarray(sig.samples),
-            xp.asarray(sig.source_symbols),
+            xp.asarray(sig.reference.symbols),
             num_taps=5,
             step_size=0.05,
             constellation=Constellation.psk(4),

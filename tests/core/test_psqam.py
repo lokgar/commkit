@@ -117,11 +117,11 @@ class TestGeneratePSQAM:
             sps=2,
             pulse=RRC(0.35),
         )
-        assert sig.source_bits is not None
-        assert sig.source_symbols is not None
-        assert sig.ps_pmf is not None
-        assert sig.mod_scheme == "PS-QAM"
-        assert sig.mod_order == 16
+        assert sig.reference.bits is not None
+        assert sig.reference.symbols is not None
+        assert sig.constellation.pmf is not None
+        assert sig.constellation.family == "qam"
+        assert sig.constellation.order == 16
 
     def test_psqam_via_entropy(self) -> None:
         """Specifying target entropy produces matching PMF."""
@@ -133,7 +133,7 @@ class TestGeneratePSQAM:
             sps=2,
             pulse=RRC(0.35),
         )
-        pmf = np.asarray(sig.ps_pmf)
+        pmf = np.asarray(sig.constellation.pmf)
         nz = pmf > 0
         achieved = float(-np.sum(pmf[nz] * np.log2(pmf[nz])))
         assert abs(achieved - target) < 1e-5
@@ -156,7 +156,7 @@ class TestGeneratePSQAM:
         # Sample mean of |s|^2 within 5 standard errors of E[|s|^2] = 1.
         energy = np.abs(c.points) ** 2
         std_err = np.sqrt(np.dot(c.pmf, (energy - 1.0) ** 2) / n)
-        src = to_numpy(sig.source_symbols)
+        src = to_numpy(sig.reference.symbols)
         assert abs(float(np.mean(np.abs(src) ** 2)) - 1.0) < 5 * std_err
 
         uniform = Constellation.qam(order).points
@@ -170,8 +170,8 @@ class TestGeneratePSQAM:
     def test_psqam_source_bits_match_symbols(self, xp: Any, xpt: Any) -> None:
         """Hard-demapping source_symbols recovers source_bits across backends."""
         sig = generate(Constellation.qam(16).shaped(nu=0.5), 2000, symbol_rate=32e9)
-        src_sym = xp.asarray(sig.source_symbols)
-        src_bits = xp.asarray(sig.source_bits)
+        src_sym = xp.asarray(sig.reference.symbols)
+        src_bits = xp.asarray(sig.reference.bits)
         recovered_bits = sig.constellation.demap(src_sym)
         xpt.assert_array_equal(src_bits, recovered_bits)
 

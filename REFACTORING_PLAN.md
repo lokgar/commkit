@@ -1235,6 +1235,16 @@ The equalization pass (3.7) gets more commits:
 | 4.3 Examples: the new `qam_receiver_quickstart.py` plus the five existing examples migrated. (The smoke test running every example, `tests/test_examples.py`, was pulled forward after commit 1.4, so each commit keeps them working.) | M |
 | 4.4 Full GPU suite and full benchmark run; save `0003_v2_0`; CHANGELOG entry; bump to 2.0.0. | S |
 
+**Step 4 commits:**
+
+- [x] **4.1 `refactor(core)!: remove the Signal bridge properties`.** The
+  read-only 1.x properties (`source_symbols`, `source_bits`, `mod_scheme`,
+  `mod_order`, `mod_unipolar`, `ps_pmf`, `signal_type`, `pulse_shape`,
+  `filter_span`, `rrc_rolloff`, `rc_rolloff`, `duty_cycle`, `rise_time`,
+  `mod_rz`) are deleted; no library code reads them. Tests read
+  `reference`, `constellation`, `pulse` and `frame` instead, and the
+  bridge's own tests go. `helpers.py` is already gone (3.9a).
+
 ### Step 5: performance follow-ups (independent, any time after step 3.6)
 
 - A Numba CPU path for non-square BPS (1256 ms on CPU against 26 ms on GPU in

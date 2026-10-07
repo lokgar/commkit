@@ -18,9 +18,8 @@ class TestSignalPulseTaps:
     def test_signal_pulse_params(self, xp: Any) -> None:
         """Verify pulse shaping parameters (e.g. rolloff) are correctly stored and utilized."""
         sig = generate(Constellation.qam(4), 10, symbol_rate=1e3, sps=4, pulse=RRC(0.5))
-        assert sig.pulse_shape == "rrc"
-        assert getattr(sig, "pulse_params", None) is None
-        assert sig.rrc_rolloff == 0.5
+        assert sig.pulse == RRC(0.5)
+        assert sig.pulse.rolloff == 0.5
 
         taps = xp.asarray(sig.pulse.taps(sig.sps))
         assert taps is not None
@@ -31,8 +30,8 @@ class TestSignalPulseTaps:
         sig = generate(
             Constellation.pam(2), 10, symbol_rate=1e3, sps=4, pulse=SmoothRect(0.1, 0.5)
         )
-        assert sig.pulse_shape == "smoothrect"
-        assert sig.rise_time == 0.1
+        assert isinstance(sig.pulse, SmoothRect)
+        assert sig.pulse.rise_time == 0.1
 
         taps = xp.asarray(sig.pulse.taps(sig.sps))
         assert len(taps) > 0

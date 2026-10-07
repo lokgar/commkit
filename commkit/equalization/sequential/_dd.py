@@ -636,10 +636,10 @@ def rls(
     if tail_trim > 0:
         logger.warning(
             "RLS tail trim: last %s symbols removed from y_hat "
-            "(zero-padding contamination zone). Trim reference arrays to "
-            "match: source_symbols = source_symbols[..., :-result.tail_trim], "
-            "source_bits = source_bits[..., "
-            ":-result.tail_trim * bits_per_symbol].",
+            "(zero-padding contamination zone). result.signal carries the "
+            "trimmed reference; trim reference arrays to match: "
+            "symbols[..., :-result.tail_trim], "
+            "bits[..., :-result.tail_trim * bits_per_symbol].",
             tail_trim,
         )
     constellation_np = _dd_constellation(

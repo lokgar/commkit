@@ -118,10 +118,6 @@ class Signal:
     Construction does no hidden work: no bit-to-symbol mapping, no
     normalization, no device move and no shape guessing.  The factories
     (``generate``, ``SingleCarrierFrame.to_signal``) do that work.
-
-    The 1.x attributes (``mod_scheme``, ``mod_order``, ``source_symbols``,
-    ``pulse_shape``, ...) remain as read-only properties derived from the new
-    fields until every module is migrated.
     """
 
     samples: Any
@@ -328,84 +324,6 @@ class Signal:
         if self.constellation is None:
             return None
         return self.constellation.bits_per_symbol
-
-    # -------------------------------------------------------------------------
-    # 1.x bridge (read-only; removed as modules migrate, gone in 4.1)
-    # -------------------------------------------------------------------------
-
-    @property
-    def source_symbols(self) -> Any:
-        return None if self.reference is None else self.reference.symbols
-
-    @property
-    def source_bits(self) -> Any:
-        return None if self.reference is None else self.reference.bits
-
-    @property
-    def mod_scheme(self) -> str | None:
-        c = self.constellation
-        if c is None or c.family is None:
-            return None
-        return "PS-QAM" if c.pmf is not None else c.family.upper()
-
-    @property
-    def mod_order(self) -> int | None:
-        return None if self.constellation is None else self.constellation.order
-
-    @property
-    def mod_unipolar(self) -> bool | None:
-        return None if self.constellation is None else self.constellation.unipolar
-
-    @property
-    def ps_pmf(self) -> Any:
-        if self.constellation is not None:
-            return self.constellation.pmf
-        if self.frame is not None:
-            return self.frame.payload_constellation.pmf
-        return None
-
-    @property
-    def signal_type(self) -> str | None:
-        return "Single-Carrier Frame" if self.frame is not None else None
-
-    @property
-    def pulse_shape(self) -> str | None:
-        return None if self.pulse is None else _PULSE_NAMES[type(self.pulse).__name__]
-
-    @property
-    def filter_span(self) -> int:
-        return getattr(self.pulse, "span", 10)
-
-    @property
-    def rrc_rolloff(self) -> float:
-        return self.pulse.rolloff if self.pulse_shape == "rrc" else 0.35  # type: ignore[union-attr]
-
-    @property
-    def rc_rolloff(self) -> float:
-        return self.pulse.rolloff if self.pulse_shape == "rc" else 0.35  # type: ignore[union-attr]
-
-    @property
-    def duty_cycle(self) -> float:
-        if self.pulse_shape == "gaussian":
-            return self.pulse.fwhm  # type: ignore[union-attr]
-        return getattr(self.pulse, "duty_cycle", 1.0)
-
-    @property
-    def rise_time(self) -> float:
-        return getattr(self.pulse, "rise_time", 0.0)
-
-    @property
-    def mod_rz(self) -> bool:
-        return self.pulse_shape in ("rect", "smoothrect") and self.duty_cycle < 1.0
-
-
-_PULSE_NAMES = {
-    "RRC": "rrc",
-    "RC": "rc",
-    "Gaussian": "gaussian",
-    "Rect": "rect",
-    "SmoothRect": "smoothrect",
-}
 
 
 # -----------------------------------------------------------------------------

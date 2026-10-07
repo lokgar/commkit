@@ -33,7 +33,7 @@ class TestLMS:
             rng=42,
         )
 
-        tx = xp.asarray(sig.source_symbols)
+        tx = xp.asarray(sig.reference.symbols)
 
         rx_up = xp.asarray(sig.samples)
 
@@ -86,7 +86,7 @@ class TestLMS:
             rng=123,
         )
 
-        tx = xp.asarray(sig.source_symbols)
+        tx = xp.asarray(sig.reference.symbols)
 
         rx_up = xp.asarray(sig.samples)
         rx = xp.convolve(rx_up, channel, mode="same")
@@ -113,7 +113,7 @@ class TestLMS:
         sig = generate(
             Constellation.psk(4), n, symbol_rate=1e6, sps=2, pulse=RRC(0.35), rng=0
         )
-        tx = xp.asarray(sig.source_symbols)
+        tx = xp.asarray(sig.reference.symbols)
         rx = xp.asarray(sig.samples)
 
         result = equalization.lms(
@@ -133,7 +133,7 @@ class TestLMS:
         sig = generate(
             Constellation.psk(4), n, symbol_rate=1e6, sps=2, pulse=RRC(0.35), rng=0
         )
-        tx = xp.asarray(sig.source_symbols)
+        tx = xp.asarray(sig.reference.symbols)
         rx = xp.asarray(sig.samples)
 
         result = equalization.lms(
@@ -155,7 +155,7 @@ class TestLMS:
         sig = generate(
             Constellation.psk(4), 100, symbol_rate=1e6, sps=2, pulse=RRC(0.35), rng=0
         )
-        tx = xp.asarray(sig.source_symbols)
+        tx = xp.asarray(sig.reference.symbols)
         rx = xp.asarray(sig.samples)
 
         result = equalization.lms(
@@ -191,7 +191,7 @@ class TestRLS:
             pulse=RRC(0.35),
             rng=42,
         )
-        tx = xp.asarray(sig.source_symbols)
+        tx = xp.asarray(sig.reference.symbols)
         rx_up = xp.asarray(sig.samples)
 
         rx = xp.convolve(rx_up, channel, mode="same")
@@ -223,7 +223,7 @@ class TestRLS:
             pulse=RRC(0.35),
             rng=77,
         )
-        tx = xp.asarray(sig.source_symbols)
+        tx = xp.asarray(sig.reference.symbols)
         rx_up = xp.asarray(sig.samples)
 
         rx = xp.convolve(rx_up, channel, mode="same")
@@ -262,7 +262,7 @@ class TestRLS:
         sig = generate(
             Constellation.psk(4), 200, symbol_rate=1e6, sps=2, pulse=RRC(0.35), rng=0
         )
-        tx = xp.asarray(sig.source_symbols)
+        tx = xp.asarray(sig.reference.symbols)
         rx = xp.asarray(sig.samples)
 
         result = equalization.rls(
@@ -283,7 +283,7 @@ class TestAPIRegression:
             Constellation.psk(4), 100, symbol_rate=1e6, sps=2, pulse=RRC(0.35), rng=0
         )
         rx = xp.asarray(sig.samples)
-        tx = xp.asarray(sig.source_symbols)
+        tx = xp.asarray(sig.reference.symbols)
         with pytest.raises(TypeError, match="normalize"):
             equalization.lms(
                 rx,
@@ -513,7 +513,7 @@ class TestStoreWeights:
 
         result = equalization.lms(
             rx,
-            xp.asarray(sig.source_symbols),
+            xp.asarray(sig.reference.symbols),
             num_taps=9,
             step_size=0.05,
             constellation=Constellation.psk(4),
@@ -530,7 +530,7 @@ class TestStoreWeights:
 
         result = equalization.rls(
             rx,
-            xp.asarray(sig.source_symbols),
+            xp.asarray(sig.reference.symbols),
             sps=1,
             num_taps=7,
             constellation=Constellation.psk(4),
@@ -584,7 +584,7 @@ class TestStoreWeights:
         )
         rx = xp.asarray(sig.samples)
         rx_mimo = xp.stack([rx, xp.roll(rx, 1)], axis=0)
-        train = xp.stack([xp.asarray(sig.source_symbols)] * 2, axis=0)
+        train = xp.stack([xp.asarray(sig.reference.symbols)] * 2, axis=0)
 
         result = equalization.lms(
             rx_mimo,
@@ -602,7 +602,7 @@ class TestStoreWeights:
     def test_no_weights_by_default_all_algorithms(self, xp):
         """All algorithms should return weights_history=None by default."""
         rx, sig = self._qpsk_rx(xp, n_symbols=300)
-        train = xp.asarray(sig.source_symbols)
+        train = xp.asarray(sig.reference.symbols)
 
         for algo, kwargs in [
             ("lms", dict(training_symbols=train, constellation=Constellation.psk(4))),
@@ -641,7 +641,7 @@ class TestEdgeCases:
         rx, sig = self._qpsk_rx(xp, n_symbols=400)
         result = equalization.rls(
             xp.asarray(sig.samples),
-            xp.asarray(sig.source_symbols),
+            xp.asarray(sig.reference.symbols),
             sps=2,
             num_taps=7,
             constellation=Constellation.psk(4),
@@ -657,7 +657,7 @@ class TestEdgeCases:
         with caplog.at_level(logging.WARNING, logger="commkit"):
             equalization.lms(
                 rx,
-                xp.asarray(sig.source_symbols),
+                xp.asarray(sig.reference.symbols),
                 num_taps=3,  # < 4*sps=8 -> should warn
                 constellation=Constellation.psk(4),
                 sps=2,
@@ -689,7 +689,7 @@ class TestEdgeCases:
     def test_lms_num_train_symbols_clamps_numba(self, xp):
         """LMS Numba: pre-sliced training_symbols limits DA phase length."""
         rx, sig = self._qpsk_rx(xp, n_symbols=1000)
-        train = xp.asarray(sig.source_symbols[:30])
+        train = xp.asarray(sig.reference.symbols[:30])
 
         result = equalization.lms(
             rx,
@@ -705,21 +705,21 @@ class TestEdgeCases:
     def test_lms_partial_training_needs_constellation(self, xp):
         """Decisions after the training need a constellation; none is guessed."""
         rx, sig = self._qpsk_rx(xp)
-        train = xp.asarray(sig.source_symbols)[..., :50]
+        train = xp.asarray(sig.reference.symbols)[..., :50]
         with pytest.raises(ValueError, match="needs a constellation"):
             equalization.lms(rx, train, num_taps=7, step_size=0.05, sps=2)
 
     def test_lms_full_training_needs_no_constellation(self, xp):
         """With every symbol trained there are no decisions to make."""
         rx, sig = self._qpsk_rx(xp)
-        train = xp.asarray(sig.source_symbols)
+        train = xp.asarray(sig.reference.symbols)
         result = equalization.lms(rx, train, num_taps=7, step_size=0.05, sps=2)
         assert result.num_train_symbols == result.y_hat.shape[-1]
 
     def test_center_tap_override(self, xp):
         """Custom center_tap should shift the decision delay without error."""
         rx, sig = self._qpsk_rx(xp)
-        train = xp.asarray(sig.source_symbols)
+        train = xp.asarray(sig.reference.symbols)
 
         result = equalization.lms(
             rx,
@@ -767,7 +767,7 @@ class TestNumbaBackendCoverage:
     def test_rls_numba_siso(self, xp):
         """RLS with numba backend on SISO input."""
         rx, sig = self._make_qpsk_rx(xp, n_symbols=800)
-        train = xp.asarray(sig.source_symbols)
+        train = xp.asarray(sig.reference.symbols)
 
         result = equalization.rls(
             rx, train, sps=2, num_taps=9, constellation=Constellation.psk(4)
@@ -803,7 +803,7 @@ class TestNumbaBackendCoverage:
         )
         rx1 = xp.asarray(sig.samples)
         rx_mimo = xp.stack([rx1, xp.roll(rx1, 2)], axis=0)  # (2, N)
-        train_mimo = xp.stack([xp.asarray(sig.source_symbols)] * 2, axis=0)
+        train_mimo = xp.stack([xp.asarray(sig.reference.symbols)] * 2, axis=0)
 
         result = equalization.rls(
             rx_mimo, train_mimo, sps=2, num_taps=7, constellation=Constellation.psk(4)
@@ -817,7 +817,7 @@ class TestNumbaBackendCoverage:
     def test_rls_numba_num_train_symbols(self, xp):
         """RLS numba: pre-sliced training_symbols limits DA phase length."""
         rx, sig = self._make_qpsk_rx(xp, n_symbols=800)
-        train = xp.asarray(sig.source_symbols[:50])
+        train = xp.asarray(sig.reference.symbols[:50])
 
         result = equalization.rls(
             rx, train, sps=2, num_taps=7, constellation=Constellation.psk(4)
@@ -829,7 +829,7 @@ class TestNumbaBackendCoverage:
     def test_rls_numba_store_weights(self, xp):
         """RLS numba with store_weights=True should populate weight history."""
         rx, sig = self._make_qpsk_rx(xp, n_symbols=400)
-        train = xp.asarray(sig.source_symbols)
+        train = xp.asarray(sig.reference.symbols)
 
         result = equalization.rls(
             rx,

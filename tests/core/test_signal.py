@@ -42,8 +42,8 @@ class TestSignalCreation:
         moved = sig.to(device_of(xp))
         assert moved is not sig
         assert isinstance(sig.samples, np.ndarray)
-        assert isinstance(sig.source_symbols, np.ndarray)
-        for arr in (moved.samples, moved.source_symbols, moved.source_bits):
+        assert isinstance(sig.reference.symbols, np.ndarray)
+        for arr in (moved.samples, moved.reference.symbols, moved.reference.bits):
             assert isinstance(arr, xp.ndarray)
         np.testing.assert_array_equal(to_numpy(moved.samples), sig.samples)
 
@@ -96,21 +96,16 @@ class TestSignalCreation:
         with pytest.raises(ValueError, match="same device"):
             Reference(symbols=xp.zeros(4), bits=np.zeros(4))
 
-    def test_bridge_properties(self, xp):
-        """1.x attributes are derived read-only from the 2.0 fields."""
+    def test_generate_records_the_description(self, xp):
+        """generate stores its constellation and pulse; there is no frame."""
         sig = generate(
             Constellation.qam(16), 8, symbol_rate=1e3, sps=2, pulse=RRC(0.35)
         )
         assert sig.constellation == Constellation.qam(16)
         assert sig.pulse == RRC(0.35, span=10)
-        assert (sig.mod_scheme, sig.mod_order, sig.pulse_shape) == ("QAM", 16, "rrc")
-        assert (sig.filter_span, sig.rrc_rolloff, sig.mod_rz) == (10, 0.35, False)
-        assert sig.source_symbols is sig.reference.symbols
-        assert sig.source_bits is sig.reference.bits
-        assert sig.signal_type is None
+        assert sig.frame is None
         rz = generate(Constellation.pam(2), 8, symbol_rate=1e3, sps=4, pulse=Rect(0.5))
         assert rz.pulse == Rect(0.5)
-        assert rz.mod_rz is True
 
 
 class TestSignalProperties:
@@ -289,12 +284,6 @@ class TestSignalCloningAndProvenance:
         s = Signal(samples=xp.arange(8), sampling_rate=2, symbol_rate=np.float32(1))
         assert type(s.sampling_rate) is float
         assert type(s.symbol_rate) is float
-
-    @pytest.mark.parametrize("name", ["mod_scheme", "source_symbols", "pulse_shape"])
-    def test_bridge_fields_are_read_only(self, xp, name):
-        s = Signal(samples=xp.arange(8), sampling_rate=2.0, symbol_rate=1.0)
-        with pytest.raises(TypeError, match=name):
-            s.replace(**{name: None})
 
     def test_signal_replace_samples_shares_provenance(self, xp, xpt):
         """Replacing the samples copies neither the old samples nor provenance."""
@@ -499,8 +488,8 @@ class TestSignalWaveformsAndModulation:
         # Should have 2 channels
         assert sig.samples.ndim == 2
         assert sig.samples.shape[0] == 2
-        assert sig.source_bits is not None
-        assert sig.source_symbols is not None
+        assert sig.reference.bits is not None
+        assert sig.reference.symbols is not None
 
     @pytest.mark.parametrize(
         "factory,kwargs",
@@ -535,7 +524,7 @@ class TestSignalWaveformsAndModulation:
         assert sig.samples.size > 0
         assert isinstance(sig.samples, np.ndarray)
         assert isinstance(sig.to(device_of(xp)).samples, xp.ndarray)
-        assert sig.mod_scheme is not None
+        assert sig.constellation is not None
 
     def test_rzpam_waveform(self, xp):
         """Verify Return-to-Zero PAM signal generation and pulse-shape validation."""
@@ -552,7 +541,7 @@ class TestSignalWaveformsAndModulation:
         ).to(device_of(xp))
         assert sig.samples.size > 0
         assert isinstance(sig.samples, xp.ndarray)
-        assert sig.mod_order == 16
+        assert sig.constellation.order == 16
 
     def test_psk_waveform(self, xp, xpt):
         """Verify PSK signal generation, metadata, and unit-magnitude constellation."""
@@ -561,10 +550,10 @@ class TestSignalWaveformsAndModulation:
         ).to(device_of(xp))
         assert sig.samples.size > 0
         assert isinstance(sig.samples, xp.ndarray)
-        assert sig.mod_order == 8
-        assert sig.mod_scheme is not None
+        assert sig.constellation.order == 8
+        assert sig.constellation is not None
         # All PSK symbols should lie on the unit circle
-        syms = sig.source_symbols
+        syms = sig.reference.symbols
         if syms is not None:
             magnitudes = xp.abs(syms)
             xpt.assert_allclose(magnitudes, xp.ones_like(magnitudes), atol=1e-5)
@@ -577,9 +566,9 @@ class TestSignalWaveformsAndModulation:
         assert sig.samples.size > 0
         assert isinstance(sig.samples, xp.ndarray)
         assert sig.symbol_rate == 1e6
-        assert sig.mod_order == 16
-        assert sig.source_bits is not None
-        assert sig.source_symbols is not None
+        assert sig.constellation.order == 16
+        assert sig.reference.bits is not None
+        assert sig.reference.symbols is not None
 
 
 class TestSignalResolutionAndMetrics:
@@ -685,7 +674,7 @@ class TestSignalResolutionAndMetrics:
         )
         result = equalization.lms(
             xp.asarray(orig.samples),
-            training_symbols=orig.source_symbols[:n_train],
+            training_symbols=orig.reference.symbols[:n_train],
             sps=2,
             num_taps=7,
             constellation=Constellation.psk(4),
@@ -697,7 +686,7 @@ class TestSignalResolutionAndMetrics:
             symbol_rate=orig.symbol_rate,
             constellation=Constellation.psk(4),
             reference=Reference(
-                symbols=orig.source_symbols[..., : result.y_hat.shape[-1]]
+                symbols=orig.reference.symbols[..., : result.y_hat.shape[-1]]
             ),
         )
         rx = multirate.decimate_to_symbol_rate(rx)
@@ -722,7 +711,7 @@ class TestSignalResolutionAndMetrics:
         )
         result = equalization.lms(
             xp.asarray(orig.samples),
-            training_symbols=orig.source_symbols[:100],
+            training_symbols=orig.reference.symbols[:100],
             sps=2,
             num_taps=7,
             constellation=Constellation.psk(4),
@@ -733,7 +722,7 @@ class TestSignalResolutionAndMetrics:
             symbol_rate=orig.symbol_rate,
             constellation=Constellation.psk(4),
             reference=Reference(
-                symbols=orig.source_symbols[..., : result.y_hat.shape[-1]]
+                symbols=orig.reference.symbols[..., : result.y_hat.shape[-1]]
             ),
         )
         rx = multirate.decimate_to_symbol_rate(rx)
@@ -759,7 +748,7 @@ class TestSignalResolutionAndMetrics:
         )
         result = equalization.lms(
             xp.asarray(orig.samples),
-            training_symbols=orig.source_symbols[:100],
+            training_symbols=orig.reference.symbols[:100],
             sps=2,
             num_taps=7,
             constellation=Constellation.psk(4),
@@ -770,8 +759,8 @@ class TestSignalResolutionAndMetrics:
             symbol_rate=orig.symbol_rate,
             constellation=Constellation.psk(4),
             reference=Reference(
-                symbols=orig.source_symbols[..., : result.y_hat.shape[-1]],
-                bits=orig.source_bits[..., : result.y_hat.shape[-1] * 2],
+                symbols=orig.reference.symbols[..., : result.y_hat.shape[-1]],
+                bits=orig.reference.bits[..., : result.y_hat.shape[-1] * 2],
             ),
         )
         rx = multirate.decimate_to_symbol_rate(rx)
@@ -800,7 +789,7 @@ class TestSignalResolutionAndMetrics:
         )
         result = equalization.rls(
             xp.asarray(orig.samples),
-            orig.source_symbols,
+            orig.reference.symbols,
             sps=2,
             num_taps=num_taps,
             constellation=Constellation.psk(4),
@@ -837,7 +826,7 @@ class TestSignalDeviceAndPlotting:
         )
         result = equalization.lms(
             xp.asarray(sig.samples),
-            training_symbols=sig.source_symbols,
+            training_symbols=sig.reference.symbols,
             sps=2,
             num_taps=7,
             constellation=Constellation.psk(4),
@@ -880,7 +869,7 @@ class TestSignalDeviceAndPlotting:
             Constellation.psk(4), 200, symbol_rate=1e6, sps=1, pulse=RRC(0.35), rng=0
         )
         assert sig.num_streams == 1
-        assert sig.source_symbols is not None
+        assert sig.reference.symbols is not None
 
         result = plotting.plot_constellation(sig, overlay_reference=True, show=False)
         assert result is not None

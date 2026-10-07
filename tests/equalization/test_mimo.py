@@ -24,7 +24,7 @@ class TestButterflyMIMO:
             num_channels=2,
             rng=10,
         )
-        tx_mimo = xp.asarray(sig.source_symbols)
+        tx_mimo = xp.asarray(sig.reference.symbols)
         rx_up = xp.asarray(sig.samples)
 
         # Mix the streams (multiplying H @ rx_up where rx_up is (2, N_samples))
@@ -199,7 +199,7 @@ class TestButterflyMIMOExtended:
             rng=7,
         )
         rx = xp.asarray(sig.samples)
-        train = xp.asarray(sig.source_symbols)
+        train = xp.asarray(sig.reference.symbols)
 
         # 2x2 mixed input
         rx_mimo = xp.stack([rx, xp.roll(rx, 2)], axis=0)

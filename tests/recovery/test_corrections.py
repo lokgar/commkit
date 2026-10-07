@@ -137,7 +137,7 @@ class TestResolvePhaseAmbiguity:
             order=16, num_symbols=self.N, sps=1, snr_db=30, seed=5, xp=xp
         )
         sym = normalize(sig.samples, mode="average_power")
-        ref = normalize(xp.asarray(sig.source_symbols), mode="average_power")
+        ref = normalize(xp.asarray(sig.reference.symbols), mode="average_power")
         resolved = recovery.resolve_phase_ambiguity(
             sym, ref, constellation=Constellation.qam(16)
         )
@@ -161,7 +161,7 @@ class TestResolvePhaseAmbiguity:
             order=16, num_symbols=self.N, sps=1, snr_db=30, seed=5, xp=xp
         )
         sym = normalize(sig.samples, mode="average_power")
-        ref = normalize(xp.asarray(sig.source_symbols), mode="average_power")
+        ref = normalize(xp.asarray(sig.reference.symbols), mode="average_power")
         rotated = sym * xp.exp(1j * np.pi / 2).astype(sym.dtype)
         resolved = recovery.resolve_phase_ambiguity(
             rotated, ref, constellation=Constellation.qam(16)

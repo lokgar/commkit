@@ -107,21 +107,23 @@ class TestNPZSaveLoadSISO:
     def test_roundtrip_source_bits(self, tmp_path: Any, xpt: Any) -> None:
         """Source bits round-trip identically."""
         sig = _siso_signal()
-        assert sig.source_bits is not None
+        assert sig.reference.bits is not None
         p = tmp_path / "sig.npz"
         save_npz(sig, p)
         sig2 = load_npz(p)
-        xpt.assert_array_equal(to_numpy(sig.source_bits), to_numpy(sig2.source_bits))
+        xpt.assert_array_equal(
+            to_numpy(sig.reference.bits), to_numpy(sig2.reference.bits)
+        )
 
     def test_roundtrip_source_symbols(self, tmp_path: Any, xpt: Any) -> None:
         """Source symbols round-trip identically."""
         sig = _siso_signal()
-        assert sig.source_symbols is not None
+        assert sig.reference.symbols is not None
         p = tmp_path / "sig.npz"
         save_npz(sig, p)
         sig2 = load_npz(p)
         xpt.assert_allclose(
-            to_numpy(sig.source_symbols), to_numpy(sig2.source_symbols), atol=1e-7
+            to_numpy(sig.reference.symbols), to_numpy(sig2.reference.symbols), atol=1e-7
         )
 
     def test_extension_appended_automatically(self, tmp_path: Any, xpt: Any) -> None:
@@ -135,20 +137,18 @@ class TestNPZSaveLoadSISO:
         xpt.assert_array_equal(to_numpy(sig.samples), to_numpy(sig2.samples))
 
     def test_no_source_arrays_when_none(self, tmp_path: Any) -> None:
-        """Signal with no source_bits/source_symbols should load without them."""
+        """A Signal without a reference loads without one."""
         sig = Signal(
             samples=np.random.randn(512) + 1j * np.random.randn(512),
             sampling_rate=1e9,
             symbol_rate=250e6,
         )
-        assert sig.source_bits is None
-        assert sig.source_symbols is None
+        assert sig.reference is None
 
         p = tmp_path / "raw.npz"
         save_npz(sig, p)
         sig2 = load_npz(p)
-        assert sig2.source_bits is None
-        assert sig2.source_symbols is None
+        assert sig2.reference is None
 
 
 class TestNPZSaveLoadMIMO:
@@ -312,10 +312,10 @@ class TestNPZDeviceHandling:
         )
         save_npz(sig, tmp_path / "psqam")
         loaded = load_npz(tmp_path / "psqam.npz", device="cpu")
-        assert loaded.ps_pmf is not None
-        xpt.assert_allclose(to_numpy(loaded.ps_pmf), to_numpy(sig.ps_pmf), rtol=1e-6)
-        assert loaded.mod_scheme == "PS-QAM"
-        assert loaded.mod_order == 64
+        assert loaded.constellation.pmf is not None
+        xpt.assert_allclose(loaded.constellation.pmf, sig.constellation.pmf, rtol=1e-6)
+        assert loaded.constellation.family == "qam"
+        assert loaded.constellation.order == 64
 
     def test_free_function_pipeline_metrics_survive_roundtrip(
         self, tmp_path: Any, xpt: Any
@@ -334,7 +334,9 @@ class TestNPZDeviceHandling:
         save_npz(sig, p)
         loaded = load_npz(p, device="cpu")
 
-        xpt.assert_array_equal(to_numpy(sig.source_bits), to_numpy(loaded.source_bits))
+        xpt.assert_array_equal(
+            to_numpy(sig.reference.bits), to_numpy(loaded.reference.bits)
+        )
         xpt.assert_allclose(metrics.evm(loaded), evm_before, rtol=1e-5)
         assert metrics.ber(loaded) == ber_before
 

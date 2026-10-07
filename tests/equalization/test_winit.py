@@ -62,7 +62,7 @@ class TestInitialTaps:
 
         result = equalization.rls(
             rx,
-            xp.asarray(sig.source_symbols),
+            xp.asarray(sig.reference.symbols),
             constellation=Constellation.qam(4),
             num_taps=num_taps,
             sps=2,
@@ -172,7 +172,7 @@ class TestInitialTaps:
         # LMS pre-convergence
         pre = equalization.lms(
             rx,
-            xp.asarray(sig.source_symbols[:200]),
+            xp.asarray(sig.reference.symbols[:200]),
             constellation=Constellation.qam(16),
             num_taps=21,
             sps=2,
@@ -193,7 +193,7 @@ class TestInitialTaps:
         )
 
         tail = slice(-500, None)
-        ref = to_numpy(sig.source_symbols)
+        ref = to_numpy(sig.reference.symbols)
         cold_hat = to_numpy(cold.y_hat)
         warm_hat = to_numpy(warm.y_hat)
         evm_cold = float(np.mean(np.abs(cold_hat[tail] - ref[tail]) ** 2))

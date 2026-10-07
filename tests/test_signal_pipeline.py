@@ -167,8 +167,8 @@ class TestPipelineComposition:
         assert transformed.frame.payload_symbols is not None
         assert transformed.frame.pilot_bits is not None
         assert transformed.frame.pilot_symbols is not None
-        assert transformed.source_bits is not None
-        assert transformed.source_symbols is not None
+        assert transformed.reference.bits is not None
+        assert transformed.reference.symbols is not None
         assert (
             transformed.frame.get_structure_map().keys()
             == frame.get_structure_map().keys()
@@ -208,7 +208,7 @@ class TestPipelineMetadataPropagation:
         assert result.constellation is sig.constellation
         assert result.pulse is sig.pulse
         assert (
-            result.source_bits is not None and result.source_symbols is not None
+            result.reference.bits is not None and result.reference.symbols is not None
         ) is (case.source_fields_valid)
 
     def test_fractional_sps_is_preserved_exactly_by_resampling(self, xp: Any) -> None:

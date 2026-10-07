@@ -20,7 +20,7 @@ class TestSingleCarrierFrameBasics:
         sig = frame.to_signal(sps=1)
         assert len(sig.samples) == 100
         assert sig.symbol_rate == 1e6
-        assert sig.signal_type == "Single-Carrier Frame"
+        assert sig.frame is frame
         assert sig.frame.payload_len == 100
 
     def test_sc_frame_comb(self, xp: Any) -> None:
@@ -83,7 +83,7 @@ class TestSingleCarrierFrameBasics:
         assert bits.size == 200
 
         sig = frame.to_signal(sps=1)
-        assert sig.source_bits is None
+        assert sig.reference is None
 
     def test_preamble_to_signal(self, xp: Any) -> None:
         """Verify Preamble.to_signal() standalone signal generation."""
@@ -91,8 +91,8 @@ class TestSingleCarrierFrameBasics:
         sig = preamble.to_signal(sps=4, symbol_rate=1e6, pulse=RRC(0.35))
 
         assert len(sig.samples) == 13 * 4
-        assert sig.mod_scheme is None
-        assert sig.source_symbols is None
+        assert sig.constellation is None
+        assert sig.reference is None
 
     def test_single_stream_preamble_is_broadcast(self) -> None:
         """A one-stream Barker preamble starts every stream of a MIMO frame."""
@@ -391,7 +391,7 @@ class TestFrameConstellations:
         frame = SingleCarrierFrame(payload_len=2000, payload_constellation=c)
         np.testing.assert_array_equal(c.map(frame.payload_bits), frame.payload_symbols)
         sig = frame.to_signal(sps=2, symbol_rate=1e6, pulse=RRC(0.35))
-        np.testing.assert_array_equal(sig.ps_pmf, c.pmf)
+        np.testing.assert_array_equal(sig.frame.payload_constellation.pmf, c.pmf)
 
     def test_invalid_constellations(self) -> None:
         with pytest.raises(ValueError, match="payload_constellation"):
