@@ -39,7 +39,9 @@ artifacts = ["commkit/_cuda/src/*.cu", "commkit/py.typed"]
 [dependency-groups]
 dev = [
     "bump-my-version>=1.2.7",
+    "ipykernel>=6.29",
     "mypy>=2.1.0",
+    "nbclient>=0.10",
     "nbstripout>=0.9.1",
     "pytest>=8.3.5",
     "pytest-benchmark>=5.2.3",

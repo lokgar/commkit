@@ -136,9 +136,20 @@ With [`uv`](https://github.com/astral-sh/uv), use `uv pip install` in place of
 
 ## Examples
 
-The [`examples/`](examples) directory holds runnable scripts (also usable as
-notebooks): laser linewidth from delayed self-heterodyne and homodyne IQ
-captures, and carrier-phase analysis of a recovered signal.
+Jupyter notebooks in [`examples/`](examples) (install the `notebook` extra
+and run `jupyter lab examples`):
+
+- [`qam_receiver_quickstart`](examples/qam_receiver_quickstart.ipynb) - the
+  quickstart above, cell by cell, with the constellation, spectrum and
+  equalizer plots;
+- [`carrier_phase_analysis`](examples/carrier_phase_analysis.ipynb) - drift,
+  linewidth and Allan deviation of a recovered carrier phase;
+- [`laser_linewidth_dsh`](examples/laser_linewidth_dsh.ipynb) and
+  [`laser_linewidth_homodyne_iq`](examples/laser_linewidth_homodyne_iq.ipynb)
+  - laser linewidth from delayed self-heterodyne and homodyne IQ captures;
+- `measurement_laser_linewidth_*` - lean templates for real captures.
+
+The notebooks are committed without outputs and run in CI.
 
 ## Development
 

@@ -1263,7 +1263,7 @@ The equalization pass (3.7) gets more commits:
   public modules exported their imported helpers (`np`, `dispatch`,
   `adapt_signal`, ...) as public names. Each lists its own API, and a test
   checks that every public module (placeholders aside) declares `__all__`.
-- [ ] **4.3b `docs: examples as notebooks, plus the receiver quickstart`.**
+- [x] **4.3b `docs: examples as notebooks, plus the receiver quickstart`.**
   The five `# %%` scripts become Jupyter notebooks (outputs stripped) and
   `qam_receiver_quickstart.ipynb` holds the README workflow;
   `tests/test_examples.py` executes every notebook.

@@ -442,7 +442,9 @@ notebook = [
 [package.dev-dependencies]
 dev = [
     { name = "bump-my-version" },
+    { name = "ipykernel" },
     { name = "mypy" },
+    { name = "nbclient" },
     { name = "nbstripout" },
     { name = "pytest" },
     { name = "pytest-benchmark" },
@@ -465,7 +467,9 @@ provides-extras = ["gpu", "notebook", "full"]
 [package.metadata.requires-dev]
 dev = [
     { name = "bump-my-version", specifier = ">=1.2.7" },
+    { name = "ipykernel", specifier = ">=6.29" },
     { name = "mypy", specifier = ">=2.1.0" },
+    { name = "nbclient", specifier = ">=0.10" },
     { name = "nbstripout", specifier = ">=0.9.1" },
     { name = "pytest", specifier = ">=8.3.5" },
     { name = "pytest-benchmark", specifier = ">=5.2.3" },

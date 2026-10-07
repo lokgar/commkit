@@ -326,6 +326,9 @@ Dependencies point downward only:
 - **API changes never change expected values.** A commit that changes a
   signature only changes how tests call the code. Numerical changes land in
   their own commit with independent validation.
+- **Examples** are Jupyter notebooks in `examples/`, committed without outputs
+  (`nbstripout`). `tests/test_examples.py` executes each one, so an API change
+  updates the notebooks in the same commit.
 - **Coverage** must not drop below the CI floor. Numba kernel coverage is
   measured by a separate `NUMBA_DISABLE_JIT=1` job.
 
