@@ -27,16 +27,27 @@ package is deliberate and limited to three cases:
 Inputs are NumPy or CuPy arrays; arrays from other frameworks raise
 ``TypeError`` (convert them explicitly through DLPack).
 
-Sample-rate arrays returned to the caller (``carrier_phase_trajectory``,
-``separate_drift_phase_noise``, ``frequency_drift_metrics['df']``,
+Results with more than one value are frozen dataclasses (``AllanDeviation``,
+``FrequencyDrift``, ...).  Sample-rate arrays returned to the caller
+(``carrier_phase_trajectory``, ``separate_drift_phase_noise``,
+``frequency_drift_metrics(...).df``,
 ``dsh_phase``, ``fm_noise_psd``, ``dsh_fm_noise_psd``) always stay on the
 input backend - chain them without paying transfers.
 """
 
-from .allan import allan_deviation
-from .drift import frequency_drift_metrics, separate_drift_phase_noise
-from .interferometry import dsh_beat, dsh_fm_noise_psd, dsh_phase, linewidth_dsh
+from .allan import AllanDeviation, allan_deviation
+from .drift import FrequencyDrift, frequency_drift_metrics, separate_drift_phase_noise
+from .interferometry import (
+    DshFmNoisePsd,
+    DshLinewidth,
+    dsh_beat,
+    dsh_fm_noise_psd,
+    dsh_phase,
+    linewidth_dsh,
+)
 from .linewidth import (
+    BetaSeparationLinewidth,
+    IncrementLinewidth,
     fm_noise_psd,
     linewidth_beta_separation,
     linewidth_increment,
@@ -44,6 +55,12 @@ from .linewidth import (
 from .trajectory import carrier_phase_trajectory
 
 __all__ = [
+    "AllanDeviation",
+    "BetaSeparationLinewidth",
+    "DshFmNoisePsd",
+    "DshLinewidth",
+    "FrequencyDrift",
+    "IncrementLinewidth",
     "allan_deviation",
     "carrier_phase_trajectory",
     "dsh_beat",

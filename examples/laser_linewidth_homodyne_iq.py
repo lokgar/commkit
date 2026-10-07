@@ -261,32 +261,32 @@ res_inc = analysis.linewidth_dsh(
 )
 res_lor = analysis.linewidth_dsh(z, sampling_rate=FS, delay=TAU_D, method="lorentzian")
 plotting.plot_dsh_beat_psd(
-    res_lor["f"],
-    res_lor["psd"],
-    f_peak=res_lor["f_peak"],
-    linewidth=res_lor["linewidth"],
-    linewidth_3db=res_lor["linewidth_3db"],
+    res_lor.f,
+    res_lor.psd,
+    f_peak=res_lor.f_peak,
+    linewidth=res_lor.linewidth,
+    linewidth_3db=res_lor.linewidth_3db,
 )
 
 fig, ax = plotting.plot_frequency_noise_psd(
-    res_fm["f"],
-    res_fm["S_f"],
-    floor=res_fm["linewidth"],
-    band=res_fm["band"],
-    used=res_fm["used"],
+    res_fm.f,
+    res_fm.S_f,
+    floor=res_fm.linewidth,
+    band=res_fm.band,
+    used=res_fm.used,
     title="Deconvolved laser FM-noise PSD (gaps: notch comb at k/τ_d)",
 )
 ax.axhline(DNU_TRUE / np.pi, color="C3", ls="--", label=r"Truth $\Delta\nu/\pi$")
 ax.legend()
 plt.show()
 
-print(f"fm_psd     : Δν = {res_fm['linewidth'] / 1e3:6.1f} kHz")
-print(f"increment  : Δν = {res_inc['linewidth'] / 1e3:6.1f} kHz")
+print(f"fm_psd     : Δν = {res_fm.linewidth / 1e3:6.1f} kHz")
+print(f"increment  : Δν = {res_inc.linewidth / 1e3:6.1f} kHz")
 print(
-    f"lorentzian : Δν = {res_lor['linewidth'] / 1e3:6.1f} kHz   "
-    f"(f_peak = {res_lor['f_peak'] / 1e3:.1f} kHz, "
-    f"W₂₀/W₃ = {res_lor['lineshape_ratio']:.1f}, "
-    f"τ_d/τ_c = {res_lor['coherence_factor']:.0f})"
+    f"lorentzian : Δν = {res_lor.linewidth / 1e3:6.1f} kHz   "
+    f"(f_peak = {res_lor.f_peak / 1e3:.1f} kHz, "
+    f"W₂₀/W₃ = {res_lor.lineshape_ratio:.1f}, "
+    f"τ_d/τ_c = {res_lor.coherence_factor:.0f})"
 )
 print(f"truth      : Δν = {DNU_TRUE / 1e3:6.1f} kHz")
 
@@ -306,10 +306,8 @@ res_lor_bad = analysis.linewidth_dsh(
 res_fm_bad = analysis.linewidth_dsh(
     z_meas, sampling_rate=FS, delay=TAU_D, f_shift=0.0, method="fm_psd", nperseg=1 << 16
 )
-print(
-    f"uncalibrated lorentzian : {res_lor_bad['linewidth'] / 1e3:6.1f} kHz  <- DC spur"
-)
-print(f"uncalibrated fm_psd     : {res_fm_bad['linewidth'] / 1e3:6.1f} kHz  (robust)")
+print(f"uncalibrated lorentzian : {res_lor_bad.linewidth / 1e3:6.1f} kHz  <- DC spur")
+print(f"uncalibrated fm_psd     : {res_fm_bad.linewidth / 1e3:6.1f} kHz  (robust)")
 
 # %% [markdown]
 # ## 6. Long-term stability - Allan deviation
@@ -325,8 +323,8 @@ print(f"uncalibrated fm_psd     : {res_fm_bad['linewidth'] / 1e3:6.1f} kHz  (rob
 df_disc = dphi / (2.0 * np.pi * TAU_D)  # discriminator output [Hz]
 allan = analysis.allan_deviation(df_disc, symbol_rate=FS, num_taus=40)
 
-fig, ax = plotting.plot_allan_deviation(allan["tau_s"], allan["adev"])
-tau_valid = allan["tau_s"][allan["tau_s"] > 5 * TAU_D]
+fig, ax = plotting.plot_allan_deviation(allan.tau_s, allan.adev)
+tau_valid = allan.tau_s[allan.tau_s > 5 * TAU_D]
 ax.loglog(
     tau_valid,
     np.sqrt(DNU_TRUE / (2.0 * np.pi * tau_valid)),
@@ -335,7 +333,7 @@ ax.loglog(
     label=r"White-FM theory $\sqrt{\Delta\nu/2\pi\tau}$",
 )
 ax.axvspan(
-    allan["tau_s"][0],
+    allan.tau_s[0],
     5 * TAU_D,
     color="gray",
     alpha=0.4,
@@ -356,7 +354,7 @@ plt.show()
 # 4. **Resolve the notch comb for `fm_psd`**: `nperseg ≳ 8·f_s·τ_d`.  The
 #    plateau auto-detection then spans the lobes and stops below the
 #    detection-noise knee on its own - inspect the used-bin markers
-#    (`res['used']`) to confirm what the number was read from.
+#    (`res.used`) to confirm what the number was read from.
 # 5. **Cross-check all three estimators** - they share no assumptions beyond
 #    the setup, so agreement (a few %) is strong evidence the number is the
 #    laser and not the receiver.
@@ -368,10 +366,10 @@ plt.show()
 
 # %%
 print("truth      :", f"{DNU_TRUE / 1e3:.0f} kHz")
-print("fm_psd     :", f"{res_fm['linewidth'] / 1e3:.1f} kHz")
-print("increment  :", f"{res_inc['linewidth'] / 1e3:.1f} kHz")
-print("lorentzian :", f"{res_lor['linewidth'] / 1e3:.1f} kHz")
+print("fm_psd     :", f"{res_fm.linewidth / 1e3:.1f} kHz")
+print("increment  :", f"{res_inc.linewidth / 1e3:.1f} kHz")
+print("lorentzian :", f"{res_lor.linewidth / 1e3:.1f} kHz")
 
 
-# f, S_f = res["f"], res["S_f"]
+# f, S_f = res.f, res.S_f
 # L_dbc = 10 * np.log10(S_f / f**2 / 2.0)   # SSB phase noise, dBc/Hz

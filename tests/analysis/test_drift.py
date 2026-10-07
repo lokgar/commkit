@@ -23,8 +23,8 @@ class TestFrequencyDriftAnalysis:
         fm = periods / (n * T)
         drift_phase = 2.0 * np.pi * np.cumsum(amp * np.sin(2 * np.pi * fm * t)) * T
         m = analysis.frequency_drift_metrics(xp.asarray(drift_phase), symbol_rate=R)
-        assert m["std"] == pytest.approx(amp / np.sqrt(2.0), rel=0.05)
-        assert m["pp"] == pytest.approx(2.0 * amp, rel=0.10)
+        assert m.std == pytest.approx(amp / np.sqrt(2.0), rel=0.05)
+        assert m.pp == pytest.approx(2.0 * amp, rel=0.10)
 
     def test_separate_drift_phase_noise_splits(self, xp: Any) -> None:
         """Verify frequency split separates slow wander from fast phase jitter."""

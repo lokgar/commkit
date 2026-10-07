@@ -175,19 +175,19 @@ dm = analysis.frequency_drift_metrics(drift, symbol_rate=R, edge_trim=edge)
 leak_std = np.sqrt(DNU_TRUE / np.pi * CUTOFF)
 std_pred = np.sqrt(WANDER_AMP**2 / 2.0 + leak_std**2)
 print(
-    f"wander std     = {dm['std'] / 1e6:.2f} MHz   "
+    f"wander std     = {dm.std / 1e6:.2f} MHz   "
     f"(injected A/√2 = {WANDER_AMP / np.sqrt(2) / 1e6:.2f}, "
     f"+ white-FM leakage -> {std_pred / 1e6:.2f})"
 )
 print(
-    f"wander pk-pk   = {dm['pp'] / 1e6:.2f} MHz   "
+    f"wander pk-pk   = {dm.pp / 1e6:.2f} MHz   "
     f"(injected 2A = {2 * WANDER_AMP / 1e6:.2f}; excess = leakage tails)"
 )
-print(f"wander |max|   = {dm['max_abs'] / 1e6:.2f} MHz")
+print(f"wander |max|   = {dm.max_abs / 1e6:.2f} MHz")
 
 fig, ax = plt.subplots()
-tt = (np.arange(cpu(dm["df"]).size) + edge) * T * 1e6
-ax.plot(tt[::step], cpu(dm["df"])[::step] / 1e6, label=r"Recovered $\delta f(t)$")
+tt = (np.arange(cpu(dm.df).size) + edge) * T * 1e6
+ax.plot(tt[::step], cpu(dm.df)[::step] / 1e6, label=r"Recovered $\delta f(t)$")
 ax.plot(t_us[::step], cpu(df_wander)[::step] / 1e6, "--", label="Injected wander")
 ax.set_xlabel("Time [µs]")
 ax.set_ylabel("Residual frequency [MHz]")
@@ -208,7 +208,7 @@ plt.show()
 for K in (32, 64, 128):
     print(
         f"BPS window K = {K:3d}:  δf_max ≈ {1.0 / (8 * K * T) / 1e6:8.1f} MHz   "
-        f"({'OK' if 1.0 / (8 * K * T) > dm['max_abs'] else 'TOO SLOW'} for this wander)"
+        f"({'OK' if 1.0 / (8 * K * T) > dm.max_abs else 'TOO SLOW'} for this wander)"
     )
 
 # %% [markdown]
@@ -231,17 +231,17 @@ for K in (32, 64, 128):
 # %%
 lw_inc = analysis.linewidth_increment(pn, symbol_rate=R, method="slope", edge_trim=edge)
 plotting.plot_increment_variance(
-    lw_inc["lag_s"],
-    lw_inc["var"],
-    slope=lw_inc["slope"],
-    intercept=lw_inc["intercept"],
+    lw_inc.lag_s,
+    lw_inc.var,
+    slope=lw_inc.slope,
+    intercept=lw_inc.intercept,
 )
 print(
-    f"linewidth (slope)   = {lw_inc['linewidth'] / 1e6:.3f} MHz  "
+    f"linewidth (slope)   = {lw_inc.linewidth / 1e6:.3f} MHz  "
     f"(truth {DNU_TRUE / 1e6:.1f})"
 )
 print(
-    f"fitted intercept    = {lw_inc['awgn_var']:.4f} rad²  "
+    f"fitted intercept    = {lw_inc.awgn_var:.4f} rad²  "
     f"(σ_n² = {10.0 ** (-SNR_DB / 10.0):.4f} for unit-power QPSK)"
 )
 
@@ -289,21 +289,21 @@ lw_beta = analysis.linewidth_beta_separation(
     phi, symbol_rate=R, nperseg=1 << 15, f_min=20e6, f_max=f_knee / 3.0
 )
 plotting.plot_frequency_noise_psd(
-    lw_beta["f"],
-    lw_beta["S_f"],
-    beta_line=lw_beta["beta_line"],
-    floor=lw_beta["linewidth_floor"],
-    band=lw_beta["band"],
-    above=lw_beta["above"],  # the *actual* β-integration region (S_f > β-line)
+    lw_beta.f,
+    lw_beta.S_f,
+    beta_line=lw_beta.beta_line,
+    floor=lw_beta.linewidth_floor,
+    band=lw_beta.band,
+    above=lw_beta.above,  # the *actual* β-integration region (S_f > β-line)
 )
 plt.show()
 
 print(
-    f"linewidth (β-area)  = {lw_beta['linewidth'] / 1e6:.3f} MHz  "
+    f"linewidth (β-area)  = {lw_beta.linewidth / 1e6:.3f} MHz  "
     "(≈0: crossover f_c unresolved, see text)"
 )
 print(
-    f"linewidth (floor)   = {lw_beta['linewidth_floor'] / 1e6:.3f} MHz  "
+    f"linewidth (floor)   = {lw_beta.linewidth_floor / 1e6:.3f} MHz  "
     f"(truth {DNU_TRUE / 1e6:.1f})"
 )
 
@@ -313,7 +313,7 @@ lw_bad = analysis.linewidth_beta_separation(
 )
 print(
     f"floor with f_max=2 GHz (above knee/3): "
-    f"{lw_bad['linewidth_floor'] / 1e6:.3f} MHz - AWGN-inflated"
+    f"{lw_bad.linewidth_floor / 1e6:.3f} MHz - AWGN-inflated"
 )
 
 # %% [markdown]
@@ -330,8 +330,8 @@ print(
 # vs flicker-PM cannot be distinguished (needs the modified Allan deviation).
 
 # %%
-allan = analysis.allan_deviation(dm["df"], symbol_rate=R, num_taus=40)
-_, ax = plotting.plot_allan_deviation(allan["tau_s"], allan["adev"])
+allan = analysis.allan_deviation(dm.df, symbol_rate=R, num_taus=40)
+_, ax = plotting.plot_allan_deviation(allan.tau_s, allan.adev)
 ax.axvline(0.37 / WANDER_FREQ, color="gray", ls=":")
 plt.show()
 
@@ -359,9 +359,9 @@ plotting.plot_carrier_phase_characterization(
 )
 plt.show()
 
-print(f"increment linewidth : {lw_inc['linewidth'] / 1e6:.3f} MHz")
-print(f"β-separation floor  : {lw_beta['linewidth_floor'] / 1e6:.3f} MHz")
-print(f"wander std          : {dm['std'] / 1e6:.2f} MHz")
+print(f"increment linewidth : {lw_inc.linewidth / 1e6:.3f} MHz")
+print(f"β-separation floor  : {lw_beta.linewidth_floor / 1e6:.3f} MHz")
+print(f"wander std          : {dm.std / 1e6:.2f} MHz")
 
 # %% [markdown]
 # ## 8. Limitations checklist

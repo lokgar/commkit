@@ -152,21 +152,21 @@ res_lor = analysis.linewidth_dsh(
 )
 
 fig, ax = plotting.plot_frequency_noise_psd(
-    res_fm["f"],
-    res_fm["S_f"],
-    floor=res_fm["linewidth"],
-    band=res_fm["band"],
-    used=res_fm["used"],  # auto-detected plateau: the bins the median ran over
+    res_fm.f,
+    res_fm.S_f,
+    floor=res_fm.linewidth,
+    band=res_fm.band,
+    used=res_fm.used,  # auto-detected plateau: the bins the median ran over
     title="Laser FM-noise PSD (deconvolved; gaps = notch comb at k/τ_d)",
 )
 plt.show()
 
 # Same PSD in the RF convention: SSB phase noise ℒ(f) [dBc/Hz].
-sel = (res_fm["f"] > 0) & np.isfinite(res_fm["S_f"])
+sel = (res_fm.f > 0) & np.isfinite(res_fm.S_f)
 fig, ax = plt.subplots()
 ax.semilogx(
-    res_fm["f"][sel],
-    10 * np.log10(res_fm["S_f"][sel] / res_fm["f"][sel] ** 2 / 2.0),
+    res_fm.f[sel],
+    10 * np.log10(res_fm.S_f[sel] / res_fm.f[sel] ** 2 / 2.0),
 )
 ax.set_xlabel("Offset frequency [Hz]")
 ax.set_ylabel(r"$\mathcal{L}(f)$ [dBc/Hz]")
@@ -174,12 +174,12 @@ ax.set_title("SSB phase noise")
 ax.grid(True, which="both")
 plt.show()
 
-print(f"fm_psd     : Δν = {res_fm['linewidth'] / 1e3:8.2f} kHz")
-print(f"increment  : Δν = {res_inc['linewidth'] / 1e3:8.2f} kHz")
+print(f"fm_psd     : Δν = {res_fm.linewidth / 1e3:8.2f} kHz")
+print(f"increment  : Δν = {res_inc.linewidth / 1e3:8.2f} kHz")
 print(
-    f"lorentzian : Δν = {res_lor['linewidth'] / 1e3:8.2f} kHz  "
-    f"(τ_d/τ_c = {res_lor['coherence_factor']:.1f}; trust only if ≳ 6, "
-    f"W₂₀/W₃ = {res_lor['lineshape_ratio']:.1f}, Lorentzian ≈ 9.95)"
+    f"lorentzian : Δν = {res_lor.linewidth / 1e3:8.2f} kHz  "
+    f"(τ_d/τ_c = {res_lor.coherence_factor:.1f}; trust only if ≳ 6, "
+    f"W₂₀/W₃ = {res_lor.lineshape_ratio:.1f}, Lorentzian ≈ 9.95)"
 )
 
 # %% [markdown]
@@ -189,9 +189,9 @@ print(
 allan = analysis.allan_deviation(
     dphi / (2.0 * np.pi * TAU_D), symbol_rate=FS, num_taus=40
 )
-fig, ax = plotting.plot_allan_deviation(allan["tau_s"], allan["adev"])
+fig, ax = plotting.plot_allan_deviation(allan.tau_s, allan.adev)
 ax.axvspan(
-    allan["tau_s"][0],
+    allan.tau_s[0],
     5 * TAU_D,
     color="gray",
     alpha=0.4,
@@ -211,8 +211,8 @@ print(
 print(
     f"delay             : τ_d = {TAU_D * 1e6:.3f} µs (1/τ_d = {1 / TAU_D / 1e3:.2f} kHz)"
 )
-print(f"coherence factor  : {res_lor['coherence_factor']:.1f}")
-print(f"Δν (fm_psd)       : {res_fm['linewidth'] / 1e3:.2f} kHz")
-print(f"Δν (increment)    : {res_inc['linewidth'] / 1e3:.2f} kHz")
-print(f"Δν (lorentzian)   : {res_lor['linewidth'] / 1e3:.2f} kHz")
+print(f"coherence factor  : {res_lor.coherence_factor:.1f}")
+print(f"Δν (fm_psd)       : {res_fm.linewidth / 1e3:.2f} kHz")
+print(f"Δν (increment)    : {res_inc.linewidth / 1e3:.2f} kHz")
+print(f"Δν (lorentzian)   : {res_lor.linewidth / 1e3:.2f} kHz")
 print("spread across estimators ≳ 20 % => inspect the FM PSD before quoting.")

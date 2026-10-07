@@ -219,6 +219,12 @@ SPS_CONFLICT = ("sps", 4)
 
 ROWS: list[Row] = [
     # --- analysis (array-only: inputs are derived quantities) ---------------
+    Row("commkit.analysis.allan.AllanDeviation", VALUE),
+    Row("commkit.analysis.drift.FrequencyDrift", VALUE),
+    Row("commkit.analysis.interferometry.DshFmNoisePsd", VALUE),
+    Row("commkit.analysis.interferometry.DshLinewidth", VALUE),
+    Row("commkit.analysis.linewidth.BetaSeparationLinewidth", VALUE),
+    Row("commkit.analysis.linewidth.IncrementLinewidth", VALUE),
     Row("commkit.analysis.allan.allan_deviation", MULTI),
     Row("commkit.analysis.drift.frequency_drift_metrics", MULTI),
     Row("commkit.analysis.drift.separate_drift_phase_noise", MULTI),

@@ -206,7 +206,7 @@ print(
 # One statistical subtlety is handled internally: Welch bins are
 # χ²-distributed, so a *median*-read floor sits `≈ 1 - 1/(3K)` below the true
 # level for `K` averaged segments.  The reported linewidth divides that
-# factor back out (`res['n_segments']` is K).  It matters exactly here: the
+# factor back out (`res.n_segments` is K).  It matters exactly here: the
 # comb-resolving `nperseg` leaves this record only K = 7 segments - a ~5 %
 # correction - which is why the `Δν/π` floor guide sits slightly *above* the
 # (uncorrected) log-binned median curve in the plot.
@@ -222,11 +222,11 @@ res_fm = analysis.linewidth_dsh(
 )
 
 fig, ax = plotting.plot_frequency_noise_psd(
-    res_fm["f"],
-    res_fm["S_f"],
-    floor=res_fm["linewidth"],
-    band=res_fm["band"],
-    used=res_fm["used"],
+    res_fm.f,
+    res_fm.S_f,
+    floor=res_fm.linewidth,
+    band=res_fm.band,
+    used=res_fm.used,
     title="Laser FM-noise PSD - gaps are the interferometer notches k/τ_d",
 )
 ax.axhline(DNU_TRUE / np.pi, color="C3", ls="--", label=r"Truth $\Delta\nu/\pi$")
@@ -234,8 +234,8 @@ ax.legend()
 plt.show()
 
 print(
-    f"fm_psd:    Δν = {res_fm['linewidth'] / 1e3:.1f} kHz   (truth {DNU_TRUE / 1e3:.0f} kHz, "
-    f"plateau {res_fm['band'][0] / 1e3:.1f} kHz - {res_fm['band'][1] / 1e6:.1f} MHz)"
+    f"fm_psd:    Δν = {res_fm.linewidth / 1e3:.1f} kHz   (truth {DNU_TRUE / 1e3:.0f} kHz, "
+    f"plateau {res_fm.band[0] / 1e3:.1f} kHz - {res_fm.band[1] / 1e6:.1f} MHz)"
 )
 
 # %% [markdown]
@@ -277,7 +277,7 @@ print(
 res_inc = analysis.linewidth_dsh(
     z_dsh, sampling_rate=FS, delay=TAU_D, f_shift=F_AOM, method="increment"
 )
-print(f"increment: Δν = {res_inc['linewidth'] / 1e3:.1f} kHz")
+print(f"increment: Δν = {res_inc.linewidth / 1e3:.1f} kHz")
 
 # %% [markdown]
 # ## 6. Method 3 - the textbook Lorentzian width
@@ -303,17 +303,17 @@ res_lor = analysis.linewidth_dsh(
     z_dsh, sampling_rate=FS, delay=TAU_D, method="lorentzian", nperseg=1 << 15
 )
 plotting.plot_dsh_beat_psd(
-    res_lor["f"],
-    res_lor["psd"],
-    f_peak=res_lor["f_peak"],
-    linewidth=res_lor["linewidth"],
-    linewidth_3db=res_lor["linewidth_3db"],
+    res_lor.f,
+    res_lor.psd,
+    f_peak=res_lor.f_peak,
+    linewidth=res_lor.linewidth,
+    linewidth_3db=res_lor.linewidth_3db,
 )
 print(
-    f"lorentzian: Δν(-20 dB) = {res_lor['linewidth'] / 1e3:.1f} kHz, "
-    f"Δν(-3 dB) = {res_lor['linewidth_3db'] / 1e3:.1f} kHz, "
-    f"W₂₀/W₃ = {res_lor['lineshape_ratio']:.1f} (Lorentzian ≈ 9.95), "
-    f"τ_d/τ_c = {res_lor['coherence_factor']:.0f}"
+    f"lorentzian: Δν(-20 dB) = {res_lor.linewidth / 1e3:.1f} kHz, "
+    f"Δν(-3 dB) = {res_lor.linewidth_3db / 1e3:.1f} kHz, "
+    f"W₂₀/W₃ = {res_lor.lineshape_ratio:.1f} (Lorentzian ≈ 9.95), "
+    f"τ_d/τ_c = {res_lor.coherence_factor:.0f}"
 )
 
 # %% [markdown]
@@ -370,11 +370,11 @@ res_good = analysis.linewidth_dsh(
     nperseg=1 << 15,
 )
 print(
-    f"coherent-regime 'lorentzian' answer: {res_bad['linewidth'] / 1e3:.1f} kHz "
+    f"coherent-regime 'lorentzian' answer: {res_bad.linewidth / 1e3:.1f} kHz "
     f"(truth {DNU_TRUE / 1e3:.0f} kHz) - coherence factor "
-    f"{res_bad['coherence_factor']:.2f} < 6, do not trust it."
+    f"{res_bad.coherence_factor:.2f} < 6, do not trust it."
 )
-print(f"fm_psd on the same capture         : {res_good['linewidth'] / 1e3:.1f} kHz")
+print(f"fm_psd on the same capture         : {res_good.linewidth / 1e3:.1f} kHz")
 
 # %% [markdown]
 # ## 8. What 1/f (flicker) FM noise does
@@ -437,10 +437,10 @@ res_naive = analysis.linewidth_dsh(
 )
 
 fig, ax = plotting.plot_frequency_noise_psd(
-    res_mix["f"],
-    res_mix["S_f"],
-    floor=res_mix["linewidth"],
-    used=res_mix["used"],
+    res_mix.f,
+    res_mix.S_f,
+    floor=res_mix.linewidth,
+    used=res_mix.used,
     title="Flicker rises above the white plateau at low f - report the PSD, not one number",
 )
 fline = np.geomspace(2e3, 2e5, 50)
@@ -450,12 +450,12 @@ ax.legend()
 plt.show()
 
 print(
-    f"naive first-lobe median      : Δν = {res_naive['linewidth'] / 1e3:.0f} kHz "
+    f"naive first-lobe median      : Δν = {res_naive.linewidth / 1e3:.0f} kHz "
     "(flicker-inflated)"
 )
 print(
-    f"auto-detected plateau median : Δν = {res_mix['linewidth'] / 1e3:.0f} kHz "
-    f"(plateau {res_mix['band'][0] / 1e3:.0f} kHz - {res_mix['band'][1] / 1e6:.1f} MHz)"
+    f"auto-detected plateau median : Δν = {res_mix.linewidth / 1e3:.0f} kHz "
+    f"(plateau {res_mix.band[0] / 1e3:.0f} kHz - {res_mix.band[1] / 1e6:.1f} MHz)"
 )
 print(f"truth (white-FM part only)   : Δν = {DNU_TRUE / 1e3:.0f} kHz")
 
@@ -482,8 +482,8 @@ dphi_short, _ = analysis.dsh_phase(z_short, sampling_rate=FS, f_shift=F_AOM)
 df_disc = dphi_short / (2.0 * np.pi * TAU_SHORT)  # discriminator output [Hz]
 allan = analysis.allan_deviation(df_disc, symbol_rate=FS, num_taus=40)
 
-fig, ax = plotting.plot_allan_deviation(allan["tau_s"], allan["adev"])
-tau_valid = allan["tau_s"][allan["tau_s"] > 5 * TAU_SHORT]
+fig, ax = plotting.plot_allan_deviation(allan.tau_s, allan.adev)
+tau_valid = allan.tau_s[allan.tau_s > 5 * TAU_SHORT]
 ax.loglog(
     tau_valid,
     np.sqrt(DNU_TRUE / (2.0 * np.pi * tau_valid)),
@@ -492,7 +492,7 @@ ax.loglog(
     label=r"White-FM theory $\sqrt{\Delta\nu/2\pi\tau}$",
 )
 ax.axvspan(
-    allan["tau_s"][0],
+    allan.tau_s[0],
     5 * TAU_SHORT,
     color="gray",
     alpha=0.4,
@@ -526,7 +526,7 @@ plt.show()
 #    at all?  See `laser_linewidth_homodyne_iq.py`.)
 # 4. Check `dphi_var` against `2πΔν·τ_d` and the FM-PSD plateau against
 #    `Δν/π` - self-consistency across estimators is the best sanity check.
-# 5. Inspect the auto-detected plateau (green markers / `res['used']`): if it
+# 5. Inspect the auto-detected plateau (green markers / `res.used`): if it
 #    is narrow or sits on a slope, the "linewidth" is not a clean white-FM
 #    number - report the PSD.
 # 6. Everything the interferometer adds (fiber acoustics, AOM driver noise,
@@ -535,6 +535,6 @@ plt.show()
 
 # %%
 print("ground truth  :", f"{DNU_TRUE / 1e3:.0f} kHz")
-print("fm_psd        :", f"{res_fm['linewidth'] / 1e3:.1f} kHz")
-print("increment     :", f"{res_inc['linewidth'] / 1e3:.1f} kHz")
-print("lorentzian    :", f"{res_lor['linewidth'] / 1e3:.1f} kHz")
+print("fm_psd        :", f"{res_fm.linewidth / 1e3:.1f} kHz")
+print("increment     :", f"{res_inc.linewidth / 1e3:.1f} kHz")
+print("lorentzian    :", f"{res_lor.linewidth / 1e3:.1f} kHz")

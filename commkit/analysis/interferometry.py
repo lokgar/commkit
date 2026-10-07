@@ -48,6 +48,9 @@ Estimators (see ``linewidth_dsh``):
   the incoherent regime ``τ_d ≫ τ_c = 1/(πΔν)``.
 """
 
+from dataclasses import dataclass
+from typing import Any
+
 import numpy as np
 
 from .._array import as_2d, restore_1d, to_report_scalar
@@ -67,7 +70,94 @@ from ._common import (
 )
 from .linewidth import fm_noise_psd
 
-__all__ = ["dsh_beat", "dsh_fm_noise_psd", "dsh_phase", "linewidth_dsh"]
+__all__ = [
+    "DshFmNoisePsd",
+    "DshLinewidth",
+    "dsh_beat",
+    "dsh_fm_noise_psd",
+    "dsh_phase",
+    "linewidth_dsh",
+]
+
+
+@dataclass(frozen=True, eq=False)
+class DshFmNoisePsd:
+    """Laser FM-noise PSD recovered from a DSH differential phase.
+
+    All three stay on the input backend.
+
+    Attributes
+    ----------
+    f : array_like
+        One-sided frequency axis in Hz.
+    S_f : array_like
+        Laser FM-noise PSD in Hz²/Hz (NaN at masked bins), ``(nfreq,)`` or
+        ``(C, nfreq)``.
+    valid : array_like
+        Boolean mask ``(nfreq,)`` of trustworthy bins (away from the
+        interferometer's transfer-function notches).
+    """
+
+    f: Any
+    S_f: Any
+    valid: Any
+
+
+@dataclass(frozen=True, eq=False)
+class DshLinewidth:
+    """Linewidth from a delayed self-heterodyne capture (``linewidth_dsh``).
+
+    ``linewidth`` and ``method`` are always set; the other fields belong to
+    one method each and are ``None`` for the others.  Linewidths are floats
+    (SISO) or ``(C,)`` arrays (MIMO); arrays are host NumPy.
+
+    Attributes
+    ----------
+    linewidth : float or np.ndarray
+        Linewidth in Hz.
+    method : str
+        ``"fm_psd"``, ``"increment"`` or ``"lorentzian"``.
+    f_shift : float or np.ndarray or None
+        Removed beat carrier in Hz (``fm_psd``, ``increment``).
+    f : np.ndarray or None
+        Frequency axis in Hz: of ``S_f`` (``fm_psd``) or ``psd``
+        (``lorentzian``).
+    S_f, valid, used, band, n_segments
+        ``fm_psd``: NaN-masked laser FM PSD (Hz²/Hz), trustworthy bins, bins
+        under the accepted plateau, their frequency extent, and the Welch
+        segment count behind every bin.
+    awgn_var, dphi_var, lags, lag_s, var, slope, intercept
+        ``increment``: fitted intercept (rad²), total ``Var[Δφ]``, lags in
+        samples and seconds, measured increment variances ``(C, n_lags)``,
+        and the fit, for ``plotting.plot_increment_variance``.
+    linewidth_3db, lineshape_ratio, coherence_factor, psd, f_peak
+        ``lorentzian``: half-power width / 2 (the effective linewidth),
+        ``W_20/W_3`` (about 9.95 Lorentzian, 2.6 Gaussian), ``τ_d/τ_c``, the
+        beat PSD, and its peak frequency.
+    """
+
+    linewidth: float | np.ndarray
+    method: str
+    f_shift: float | np.ndarray | None = None
+    f: np.ndarray | None = None
+    S_f: np.ndarray | None = None
+    valid: np.ndarray | None = None
+    used: np.ndarray | None = None
+    band: tuple[float, float] | None = None
+    n_segments: int | None = None
+    awgn_var: float | np.ndarray | None = None
+    dphi_var: float | np.ndarray | None = None
+    lags: np.ndarray | None = None
+    lag_s: np.ndarray | None = None
+    var: np.ndarray | None = None
+    slope: np.ndarray | None = None
+    intercept: np.ndarray | None = None
+    linewidth_3db: float | np.ndarray | None = None
+    lineshape_ratio: float | np.ndarray | None = None
+    coherence_factor: float | np.ndarray | None = None
+    psd: np.ndarray | None = None
+    f_peak: float | np.ndarray | None = None
+
 
 # -----------------------------------------------------------------------------
 # Functions stay in *pipeline* order (beat -> phase -> FM-noise PSD -> linewidth
@@ -289,7 +379,7 @@ def dsh_fm_noise_psd(
     nperseg: int | None = None,
     notch_guard: float = 0.1,
     bias_correction: bool = True,
-) -> tuple[ArrayType, ArrayType, ArrayType]:
+) -> DshFmNoisePsd:
     r"""Laser FM-noise PSD from the differential phase (notch-guarded deconvolution).
 
     The interferometer maps the laser phase PSD through
@@ -328,17 +418,10 @@ def dsh_fm_noise_psd(
 
     Returns
     -------
-    f : array_like
-        One-sided frequency axis in Hz.
-    S_f : array_like
-        Laser FM-noise PSD in Hz²/Hz (NaN at masked bins), ``(nfreq,)`` or
-        ``(C, nfreq)``.
-    valid : array_like
-        Boolean mask ``(nfreq,)`` of trustworthy bins.
-
-    All three stay on the input backend (no host transfer) - this is the
-    composable building block; ``linewidth_dsh`` is the summary layer that
-    returns host NumPy for reporting.
+    DshFmNoisePsd
+        ``f``, ``S_f`` and ``valid``, all on the input backend (no host
+        transfer) - this is the composable building block; ``linewidth_dsh``
+        is the summary layer that returns host NumPy for reporting.
 
     See Also
     --------
@@ -403,7 +486,7 @@ def dsh_fm_noise_psd(
     valid = s2 >= float(notch_guard)
     S_laser = xp.where(valid, S_beat / xp.maximum(4.0 * s2, 1e-300), xp.nan)
 
-    return f, S_laser, valid
+    return DshFmNoisePsd(f=f, S_f=S_laser, valid=valid)
 
 
 def _lorentzian_widths(f, p, level_lin):
@@ -448,7 +531,7 @@ def linewidth_dsh(
     f_max: float | None = None,
     notch_guard: float = 0.1,
     level_db: float = 20.0,
-) -> dict[str, object]:
+) -> DshLinewidth:
     r"""Laser linewidth from a delayed self-heterodyne / self-homodyne beat.
 
     Three estimators with complementary validity regions (``τ_c = 1/(πΔν)`` is
@@ -514,34 +597,12 @@ def linewidth_dsh(
 
     Returns
     -------
-    dict
-        Always ``{'linewidth', 'method', ...}`` with linewidths as floats
-        (SISO) or ``(C,)`` arrays.  Extra keys per method:
-
-        * ``fm_psd`` - ``f``, ``S_f`` (NaN-masked laser FM PSD), ``valid``,
-          ``f_shift``, ``used`` (boolean mask of the bins under the accepted
-          plateau region; in auto mode the level is the median of
-          *per-log-cell medians* of these bins - one vote per cell, not per
-          bin - while a manual fence medians the raw bins directly),
-          ``band`` (frequency extent of ``used``), ``n_segments`` (Welch
-          segment count ``K`` behind every PSD bin).
-        * ``increment`` - ``awgn_var`` (fitted intercept; equals the beat
-          angle-noise ``2σ_w²`` only when read with *small* lags - at the
-          large default lags the phase-noise term dominates every point and
-          the intercept is a noisy extrapolation), ``dphi_var`` (total
-          ``Var[Δφ] ≈ 2πΔν·τ_d + σ_w²``), ``lags``, ``f_shift``, and the
-          fit data ``lag_s``, ``var``, ``slope``, ``intercept`` for
-          ``plotting.plot_increment_variance``.
-        * ``lorentzian`` - ``linewidth_3db`` (half-power width / 2, the
-          *effective* linewidth incl. 1/f broadening), ``lineshape_ratio``
-          (``W₂₀/W₃``: ≈ 9.95 pure Lorentzian, ≈ 2.6 pure Gaussian),
-          ``coherence_factor`` (``τ_d/τ_c = π·Δν·τ_d``), ``f``, ``psd``,
-          ``f_peak``.
-
-        As a *summary* function the dict holds host NumPy only - floats plus
-        plot-sized spectra (≤ ``nperseg`` bins, one device->host transfer).
-        To keep sample-rate results on the input backend, use ``dsh_phase``
-        and ``dsh_fm_noise_psd`` directly.
+    DshLinewidth
+        ``linewidth`` and ``method``, plus the fields of that method (see
+        :class:`DshLinewidth`).  As a *summary* function it holds host NumPy
+        only - floats plus plot-sized spectra (≤ ``nperseg`` bins, one
+        device->host transfer).  To keep sample-rate results on the input
+        backend, use ``dsh_phase`` and ``dsh_fm_noise_psd`` directly.
 
     Notes
     -----
@@ -626,9 +687,10 @@ def linewidth_dsh(
 
     if method == "fm_psd":
         dphi, f_hat = dsh_phase(samples, sampling_rate=fs, f_shift=f_shift)
-        f, S_l, valid = dsh_fm_noise_psd(
+        psd = dsh_fm_noise_psd(
             dphi, sampling_rate=fs, delay=td, nperseg=nperseg, notch_guard=notch_guard
         )
+        f, S_l, valid = psd.f, psd.S_f, psd.valid
         # Summary layer: one transfer, host-side plateau search + median
         # (plot-sized spectra - see the package backend policy).
         f_cpu = np.asarray(to_device(f, "cpu"), dtype=np.float64)
@@ -695,18 +757,17 @@ def linewidth_dsh(
         band_used = (float(f_used[0]), float(f_used[-1]))
 
         used_cpu = used2[0] if S_cpu.ndim == 1 else used2
-        result = {
-            "linewidth": to_report_scalar(lw),
-            "f": f_cpu,
-            "S_f": S_cpu,
-            "valid": valid_cpu,
-            "used": used_cpu,
-            "band": band_used,
-            "n_segments": k_seg,
-            "f_shift": f_hat,
-            "method": method,
-        }
-        return result
+        return DshLinewidth(
+            linewidth=to_report_scalar(lw),
+            method=method,
+            f_shift=f_hat,
+            f=f_cpu,
+            S_f=S_cpu,
+            valid=valid_cpu,
+            used=used_cpu,
+            band=band_used,
+            n_segments=k_seg,
+        )
 
     if method == "increment":
         dphi, f_hat = dsh_phase(samples, sampling_rate=fs, f_shift=f_shift)
@@ -753,18 +814,18 @@ def linewidth_dsh(
         slope, intercept, var_cpu, a_sec = _increment_variance_fit(d2, ls, 1.0 / fs, xp)
         lw_cpu = np.maximum(slope, 0.0) / (4.0 * np.pi)
 
-        return {
-            "linewidth": to_report_scalar(lw_cpu),
-            "awgn_var": to_report_scalar(intercept),
-            "dphi_var": to_report_scalar(to_device(dphi_var, "cpu")),
-            "lags": ls,
-            "lag_s": a_sec,
-            "var": var_cpu.T,
-            "slope": slope,
-            "intercept": intercept,
-            "f_shift": f_hat,
-            "method": method,
-        }
+        return DshLinewidth(
+            linewidth=to_report_scalar(lw_cpu),
+            method=method,
+            f_shift=f_hat,
+            awgn_var=to_report_scalar(intercept),
+            dphi_var=to_report_scalar(to_device(dphi_var, "cpu")),
+            lags=ls,
+            lag_s=a_sec,
+            var=var_cpu.T,
+            slope=slope,
+            intercept=intercept,
+        )
 
     if method == "lorentzian":
         z2, was_1d, xp = _analytic_beat(samples)
@@ -831,16 +892,16 @@ def linewidth_dsh(
                 np.array2string(coh, precision=2),
             )
 
-        return {
-            "linewidth": to_report_scalar(dnu_deep),
-            "linewidth_3db": to_report_scalar(dnu_3db),
-            "lineshape_ratio": to_report_scalar(ratio),
-            "coherence_factor": to_report_scalar(coh),
-            "f": f_cpu,
-            "psd": restore_1d(was_1d, P2),
-            "f_peak": to_report_scalar(f_peak),
-            "method": method,
-        }
+        return DshLinewidth(
+            linewidth=to_report_scalar(dnu_deep),
+            method=method,
+            linewidth_3db=to_report_scalar(dnu_3db),
+            lineshape_ratio=to_report_scalar(ratio),
+            coherence_factor=to_report_scalar(coh),
+            f=f_cpu,
+            psd=restore_1d(was_1d, P2),
+            f_peak=to_report_scalar(f_peak),
+        )
 
     raise ValueError(
         f"Unknown method {method!r} (use 'fm_psd', 'increment' or 'lorentzian')."

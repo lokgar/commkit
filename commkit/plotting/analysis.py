@@ -124,7 +124,7 @@ def plot_frequency_noise_psd(
     * ``above`` - the **actual β-integration region** ``{f : S_f(f) > β(f)}``
       (in general a union of disjoint intervals): the area between the β-line
       and the PSD is filled wherever the mask is true.  Pass
-      ``linewidth_beta_separation(...)['above']``.
+      ``linewidth_beta_separation(...).above``.
 
     See ``analysis.fm_noise_psd`` and ``analysis.linewidth_beta_separation``.
 
@@ -561,7 +561,7 @@ def plot_carrier_phase_characterization(
         title=f"Recovered carrier phase{lp}",
     )
     plot_frequency_drift(
-        report["drift_metrics"]["df"],
+        report["drift_metrics"].df,
         symbol_rate=symbol_rate,
         amp_ref=amp_ref,
         ax=axes[0, 1],
@@ -569,20 +569,20 @@ def plot_carrier_phase_characterization(
 
     lw_beta = report["linewidth_beta"]
     if floor is None:
-        floor = lw_beta.get("linewidth_floor")
+        floor = lw_beta.linewidth_floor
     plot_frequency_noise_psd(
-        lw_beta["f"],
-        lw_beta["S_f"],
-        beta_line=lw_beta.get("beta_line"),
+        lw_beta.f,
+        lw_beta.S_f,
+        beta_line=lw_beta.beta_line,
         floor=floor,
         band=band,
-        above=lw_beta.get("above"),
-        used=lw_beta.get("used"),
+        above=lw_beta.above,
+        used=lw_beta.used,
         ax=axes[1, 0],
     )
     plot_allan_deviation(
-        report["allan"]["tau_s"],
-        report["allan"]["adev"],
+        report["allan"].tau_s,
+        report["allan"].adev,
         ax=axes[1, 1],
     )
 

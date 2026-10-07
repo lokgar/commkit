@@ -1,5 +1,8 @@
 """Drift / phase-noise separation and residual frequency-wander metrics."""
 
+from dataclasses import dataclass
+from typing import Any
+
 import numpy as np
 
 from .._array import as_2d, restore_1d, to_report_scalar
@@ -7,7 +10,26 @@ from ..backend import ArrayType, dispatch, to_device
 from ..filtering import butterworth_sos, iir_filter
 from ..smoothing import moving_average, savgol_smooth
 
-__all__ = ["frequency_drift_metrics", "separate_drift_phase_noise"]
+__all__ = ["FrequencyDrift", "frequency_drift_metrics", "separate_drift_phase_noise"]
+
+
+@dataclass(frozen=True, eq=False)
+class FrequencyDrift:
+    """Residual frequency of a drift phase and its summary statistics (Hz).
+
+    Attributes
+    ----------
+    df : array_like
+        Per-symbol residual frequency, on the input backend.
+    std, pp, max_abs : float or np.ndarray
+        Standard deviation, peak-to-peak and largest magnitude of ``df``:
+        floats (SISO) or ``(C,)`` arrays (MIMO).
+    """
+
+    df: Any
+    std: float | np.ndarray
+    pp: float | np.ndarray
+    max_abs: float | np.ndarray
 
 
 def separate_drift_phase_noise(
@@ -133,7 +155,7 @@ def frequency_drift_metrics(
     *,
     symbol_rate: float,
     edge_trim: int = 0,
-) -> dict[str, float | np.ndarray]:
+) -> FrequencyDrift:
     r"""Residual frequency-wander statistics from a smoothed phase ramp.
 
     The instantaneous residual frequency offset is the phase slope
@@ -157,10 +179,9 @@ def frequency_drift_metrics(
 
     Returns
     -------
-    dict
-        ``{'df', 'std', 'pp', 'max_abs'}``.  ``df`` is the
-        per-symbol residual frequency array; the rest are floats (SISO) or
-        per-channel arrays (MIMO).
+    FrequencyDrift
+        ``df``, the per-symbol residual frequency array, and ``std``, ``pp``,
+        ``max_abs``: floats (SISO) or per-channel arrays (MIMO).
 
     Notes
     -----
@@ -193,9 +214,9 @@ def frequency_drift_metrics(
 
     df_out = restore_1d(was_1d, df)
 
-    return {
-        "df": df_out,
-        "std": to_report_scalar(std),
-        "pp": to_report_scalar(pp),
-        "max_abs": to_report_scalar(max_abs),
-    }
+    return FrequencyDrift(
+        df=df_out,
+        std=to_report_scalar(std),
+        pp=to_report_scalar(pp),
+        max_abs=to_report_scalar(max_abs),
+    )

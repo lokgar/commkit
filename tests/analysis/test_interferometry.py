@@ -102,16 +102,16 @@ class TestDSHLinewidthEstimator:
             method="fm_psd",
             nperseg=1 << 14,
         )
-        assert res["linewidth"] == pytest.approx(2e6, rel=0.15)
+        assert res.linewidth == pytest.approx(2e6, rel=0.15)
         # Notch bins are masked and NaN.
-        k1 = int(np.argmin(np.abs(res["f"] - FS / m)))
-        assert not res["valid"][k1]
-        assert np.isnan(res["S_f"][k1])
+        k1 = int(np.argmin(np.abs(res.f - FS / m)))
+        assert not res.valid[k1]
+        assert np.isnan(res.S_f[k1])
         # Auto plateau detection spans lobes: the band extends past the first
         # notch, and the 'used' mask reproduces the reported band extent.
-        assert res["band"][1] > FS / m
-        f_used = res["f"][res["used"]]
-        assert res["band"] == (float(f_used[0]), float(f_used[-1]))
+        assert res.band[1] > FS / m
+        f_used = res.f[res.used]
+        assert res.band == (float(f_used[0]), float(f_used[-1]))
 
     def test_linewidth_dsh_fm_psd_auto_band_dodges_flicker(self, xp):
         """Auto plateau detection excludes a rising low-frequency 1/f region.
@@ -151,11 +151,11 @@ class TestDSHLinewidthEstimator:
             nperseg=1 << 15,
             f_max=FS / m,
         )
-        assert auto["linewidth"] == pytest.approx(dnu, rel=0.25)
-        assert abs(auto["linewidth"] - dnu) < abs(naive["linewidth"] - dnu)
+        assert auto.linewidth == pytest.approx(dnu, rel=0.25)
+        assert abs(auto.linewidth - dnu) < abs(naive.linewidth - dnu)
         # The rising flicker region is excluded: the plateau starts above the
         # first Welch bin.
-        assert auto["band"][0] > FS / (1 << 15)
+        assert auto.band[0] > FS / (1 << 15)
 
     def test_linewidth_dsh_fm_psd_real_capture_band_capped(self, xp):
         """Real (single-PD) captures: auto band stops at min(f_aom, nyq - f_aom).
@@ -183,8 +183,8 @@ class TestDSHLinewidthEstimator:
             method="fm_psd",
             nperseg=1 << 15,
         )
-        assert res["band"][1] <= min(f_aom, FS / 2 - f_aom)
-        assert res["linewidth"] == pytest.approx(dnu, rel=0.2)
+        assert res.band[1] <= min(f_aom, FS / 2 - f_aom)
+        assert res.linewidth == pytest.approx(dnu, rel=0.2)
 
     def test_linewidth_dsh_fm_psd_manual_fence_is_literal(self, xp):
         """Explicit f_min/f_max bypass auto detection: the band is the fence."""
@@ -199,9 +199,9 @@ class TestDSHLinewidthEstimator:
             nperseg=1 << 14,
             f_max=FS / m,
         )
-        f_used = res["f"][res["used"]]
+        f_used = res.f[res.used]
         assert float(f_used[-1]) <= FS / m
-        assert res["linewidth"] == pytest.approx(2e6, rel=0.2)
+        assert res.linewidth == pytest.approx(2e6, rel=0.2)
 
     def test_linewidth_dsh_fm_psd_coherent_regime(self, xp):
         """Short delay (τ_d ≪ τ_c): the discriminator regime, Lorentzian invalid."""
@@ -215,7 +215,7 @@ class TestDSHLinewidthEstimator:
             nperseg=1 << 14,
         )
         assert np.pi * 50e3 * (m / FS) < 1.0  # deeply coherent
-        assert res["linewidth"] == pytest.approx(50e3, rel=0.15)
+        assert res.linewidth == pytest.approx(50e3, rel=0.15)
 
     def test_linewidth_dsh_increment_awgn_immune(self, xp):
         n, m = 1 << 20, 500
@@ -223,8 +223,8 @@ class TestDSHLinewidthEstimator:
         res = analysis.linewidth_dsh(
             xp.asarray(z), sampling_rate=FS, delay=m / FS, method="increment"
         )
-        assert res["linewidth"] == pytest.approx(2e6, rel=0.15)
-        assert res["dphi_var"] == pytest.approx(2.0 * np.pi * 2e6 * m / FS, rel=0.2)
+        assert res.linewidth == pytest.approx(2e6, rel=0.15)
+        assert res.dphi_var == pytest.approx(2.0 * np.pi * 2e6 * m / FS, rel=0.2)
 
     def test_linewidth_dsh_lorentzian_incoherent(self, xp):
         n, m = 1 << 20, 2000  # τ_d = 4 µs, τ_d/τ_c ≈ 63
@@ -233,12 +233,12 @@ class TestDSHLinewidthEstimator:
         res = analysis.linewidth_dsh(
             xp.asarray(z), sampling_rate=FS, delay=m / FS, method="lorentzian"
         )
-        assert res["linewidth"] == pytest.approx(dnu, rel=0.20)
-        assert res["linewidth_3db"] == pytest.approx(dnu, rel=0.20)
+        assert res.linewidth == pytest.approx(dnu, rel=0.20)
+        assert res.linewidth_3db == pytest.approx(dnu, rel=0.20)
         # Pure white FM -> Lorentzian wings: W₂₀/W₃ ≈ √99.
-        assert res["lineshape_ratio"] == pytest.approx(np.sqrt(99.0), rel=0.25)
-        assert res["coherence_factor"] > 6.0
-        assert res["f_peak"] == pytest.approx(80e6, abs=5e5)
+        assert res.lineshape_ratio == pytest.approx(np.sqrt(99.0), rel=0.25)
+        assert res.coherence_factor > 6.0
+        assert res.f_peak == pytest.approx(80e6, abs=5e5)
 
     def test_linewidth_dsh_mimo_channels(self, xp):
         n, m = 1 << 19, 500
@@ -252,9 +252,9 @@ class TestDSHLinewidthEstimator:
             f_shift=80e6,
             method="increment",
         )
-        assert res["linewidth"].shape == (2,)
-        assert res["linewidth"][0] == pytest.approx(1e6, rel=0.2)
-        assert res["linewidth"][1] == pytest.approx(3e6, rel=0.2)
+        assert res.linewidth.shape == (2,)
+        assert res.linewidth[0] == pytest.approx(1e6, rel=0.2)
+        assert res.linewidth[1] == pytest.approx(3e6, rel=0.2)
 
     def test_linewidth_dsh_rejects_bad_args(self, xp):
         z, _ = make_dsh_beat(1e6, 1 << 12, 100, 80e6, seed=10)
@@ -275,23 +275,23 @@ class TestDSHLinewidthEstimator:
         z = xp.asarray(z)
         fm = analysis.linewidth_dsh(z, sampling_rate=FS, delay=m / FS, method="fm_psd")
         plotting.plot_frequency_noise_psd(
-            fm["f"], fm["S_f"], floor=fm["linewidth"], band=fm["band"], used=fm["used"]
+            fm.f, fm.S_f, floor=fm.linewidth, band=fm.band, used=fm.used
         )
         inc = analysis.linewidth_dsh(
             z, sampling_rate=FS, delay=m / FS, method="increment"
         )
         plotting.plot_increment_variance(
-            inc["lag_s"], inc["var"], slope=inc["slope"], intercept=inc["intercept"]
+            inc.lag_s, inc.var, slope=inc.slope, intercept=inc.intercept
         )
         lor = analysis.linewidth_dsh(
             z, sampling_rate=FS, delay=m / FS, method="lorentzian"
         )
         plotting.plot_dsh_beat_psd(
-            lor["f"],
-            lor["psd"],
-            f_peak=lor["f_peak"],
-            linewidth=lor["linewidth"],
-            linewidth_3db=lor["linewidth_3db"],
+            lor.f,
+            lor.psd,
+            f_peak=lor.f_peak,
+            linewidth=lor.linewidth,
+            linewidth_3db=lor.linewidth_3db,
         )
 
 
@@ -328,7 +328,7 @@ class TestSignalInputInterferometry:
             nperseg=1 << 13,
         )
 
-        assert res_sig["linewidth"] == pytest.approx(res_arr["linewidth"])
+        assert res_sig.linewidth == pytest.approx(res_arr.linewidth)
 
     def test_conflicting_sampling_rate_raises(self, xp):
         """sampling_rate is a fact: a value that disagrees with the Signal raises."""

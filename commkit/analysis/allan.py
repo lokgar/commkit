@@ -1,11 +1,30 @@
 """Overlapping Allan deviation of an instantaneous-frequency series."""
 
+from dataclasses import dataclass
+
 import numpy as np
 
 from .._array import as_2d, restore_1d
 from ..backend import ArrayType, dispatch, to_device
 
-__all__ = ["allan_deviation"]
+__all__ = ["AllanDeviation", "allan_deviation"]
+
+
+@dataclass(frozen=True, eq=False)
+class AllanDeviation:
+    """Overlapping Allan deviation of a frequency record.
+
+    Attributes
+    ----------
+    tau_s : np.ndarray
+        Averaging times in seconds, ``(n_tau,)``.
+    adev : np.ndarray
+        Allan deviation in Hz, ``(n_tau,)`` or ``(C, n_tau)``; NaN where a
+        ``tau`` does not fit the record.
+    """
+
+    tau_s: np.ndarray
+    adev: np.ndarray
 
 
 def allan_deviation(
@@ -14,7 +33,7 @@ def allan_deviation(
     symbol_rate: float,
     taus: np.ndarray | None = None,
     num_taus: int = 30,
-) -> dict[str, np.ndarray]:
+) -> AllanDeviation:
     r"""Overlapping Allan deviation of an instantaneous-frequency series.
 
     The log-log slope of sigma_y(tau) classifies the dominant noise
@@ -37,9 +56,9 @@ def allan_deviation(
 
     Returns
     -------
-    dict
-        ``{'tau_s', 'adev'}`` where ``adev`` is ``(n_tau,)`` (SISO) or
-        ``(C, n_tau)`` (MIMO).  NumPy arrays.
+    AllanDeviation
+        ``tau_s`` and ``adev``, ``(n_tau,)`` (SISO) or ``(C, n_tau)`` (MIMO),
+        host NumPy arrays.
 
     Notes
     -----
@@ -96,4 +115,4 @@ def allan_deviation(
     adev_cpu = to_device(adev, "cpu")
     adev_out = restore_1d(was_1d, adev_cpu)
 
-    return {"tau_s": tau_s_cpu, "adev": adev_out}
+    return AllanDeviation(tau_s=tau_s_cpu, adev=adev_out)

@@ -38,9 +38,9 @@ class TestLinewidthEstimation:
         res = analysis.linewidth_increment(
             xp.asarray(phi + awgn), symbol_rate=R, method="slope"
         )
-        assert res["linewidth"] == pytest.approx(dnu, rel=0.10)
+        assert res.linewidth == pytest.approx(dnu, rel=0.10)
         # The fitted intercept ≈ 2σ_φ² ≈ σ_n² for unit-power QPSK.
-        assert res["awgn_var"] == pytest.approx(sigma2, rel=0.30)
+        assert res.awgn_var == pytest.approx(sigma2, rel=0.30)
 
     def test_linewidth_increment_subtract_matches_slope(self, xp):
         n = 1 << 18
@@ -49,7 +49,7 @@ class TestLinewidthEstimation:
         res = analysis.linewidth_increment(
             xp.asarray(phi), symbol_rate=R, method="subtract", noise_var=0.0
         )
-        assert res["linewidth"] == pytest.approx(dnu, rel=0.10)
+        assert res.linewidth == pytest.approx(dnu, rel=0.10)
 
     def test_linewidth_beta_separation_floor(self, xp):
         n = 1 << 19
@@ -59,7 +59,7 @@ class TestLinewidthEstimation:
             xp.asarray(phi), symbol_rate=R, nperseg=1 << 13, f_min=5e6, f_max=2e8
         )
         # White-FM floor Δν = π·S_f is the robust estimator at high baud.
-        assert out["linewidth_floor"] == pytest.approx(dnu, rel=0.10)
+        assert out.linewidth_floor == pytest.approx(dnu, rel=0.10)
 
     def test_linewidth_beta_area_recovers_white_fm(self, xp):
         """β-area is exact for white FM when the line crossing f_c is resolved.
@@ -78,7 +78,7 @@ class TestLinewidthEstimation:
         out = analysis.linewidth_beta_separation(
             xp.asarray(phi), symbol_rate=fs, nperseg=1 << 14, f_max=5e6
         )
-        assert out["linewidth"] == pytest.approx(dnu, rel=0.15)
+        assert out.linewidth == pytest.approx(dnu, rel=0.15)
 
     def test_linewidth_beta_area_region_is_line_gated(self, xp):
         """'above' is the exact integrated region: S_f > β within the band fence.
@@ -101,14 +101,14 @@ class TestLinewidthEstimation:
         out = analysis.linewidth_beta_separation(
             xp.asarray(phi), symbol_rate=fs, nperseg=1 << 14, f_max=5e6
         )
-        f, s_f, beta, above = out["f"], out["S_f"], out["beta_line"], out["above"]
-        fmin, fmax = out["band"]
+        f, s_f, beta, above = out.f, out.S_f, out.beta_line, out.above
+        fmin, fmax = out.band
         assert above.dtype == bool and above.shape == f.shape
         expected = (s_f > beta) & (f >= fmin) & (f <= fmax)
         np.testing.assert_array_equal(above, expected)
         # The reported area is exactly the trapezoid over the masked PSD.
         area = float(np.trapezoid(np.where(above, s_f, 0.0), f))
-        assert out["area_hz2"] == pytest.approx(area, rel=1e-9)
+        assert out.area_hz2 == pytest.approx(area, rel=1e-9)
         # With flicker the plateau crossing is noisy: the gate may open/close
         # several times - the region is a union of intervals, not one band.
         assert above.any()
@@ -127,9 +127,9 @@ class TestLinewidthEstimation:
         out = analysis.linewidth_beta_separation(
             xp.asarray(phi), symbol_rate=R, nperseg=1 << 13
         )
-        assert out["linewidth_floor"] == pytest.approx(dnu, rel=0.15)
+        assert out.linewidth_floor == pytest.approx(dnu, rel=0.15)
         # The tail region is excluded: the used band ends well below Nyquist.
-        f_used = out["f"][out["used"]]
+        f_used = out.f[out.used]
         assert float(f_used[-1]) < 0.5 * R / 2
 
     def test_linewidth_increment_returns_plot_data(self, xp):
@@ -138,11 +138,11 @@ class TestLinewidthEstimation:
 
         phi = xp.asarray(_wiener_phase(2e6, 1 << 14, seed=17))
         res = analysis.linewidth_increment(phi, symbol_rate=R, method="slope")
-        assert res["var"].shape == (1, res["lag_s"].size)
+        assert res.var.shape == (1, res.lag_s.size)
         plotting.plot_increment_variance(
-            res["lag_s"], res["var"], slope=res["slope"], intercept=res["intercept"]
+            res.lag_s, res.var, slope=res.slope, intercept=res.intercept
         )
         res = analysis.linewidth_increment(
             phi, symbol_rate=R, method="subtract", noise_var=0.0
         )
-        plotting.plot_increment_variance(res["lag_s"], res["var"])
+        plotting.plot_increment_variance(res.lag_s, res.var)

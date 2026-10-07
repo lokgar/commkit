@@ -4,6 +4,7 @@ from typing import Any
 
 import numpy as np
 
+from commkit.analysis import AllanDeviation, BetaSeparationLinewidth, FrequencyDrift
 from commkit.plotting.analysis import (
     plot_allan_deviation,
     plot_carrier_phase_characterization,
@@ -90,19 +91,24 @@ class TestPlotAnalysis:
         report = {
             "phi": xp.cumsum(xp.random.randn(500) * 0.05),
             "drift": xp.linspace(0, 1, 500),
-            "drift_metrics": {"df": xp.linspace(-100, 100, 500)},
-            "linewidth_beta": {
-                "f": f,
-                "S_f": S_f,
-                "beta_line": beta,
-                "above": S_f > beta,
-                "used": (f >= 1e4) & (f <= 1e5),
-                "linewidth_floor": 1e4,
-            },
-            "allan": {
-                "tau_s": xp.logspace(-5, -2, 10),
-                "adev": xp.full(10, 1e3),
-            },
+            "drift_metrics": FrequencyDrift(
+                df=xp.linspace(-100, 100, 500), std=0.0, pp=0.0, max_abs=0.0
+            ),
+            "linewidth_beta": BetaSeparationLinewidth(
+                linewidth=1e4,
+                linewidth_floor=1e4,
+                n_segments=8,
+                area_hz2=0.0,
+                f=f,
+                S_f=S_f,
+                beta_line=beta,
+                above=S_f > beta,
+                used=(f >= 1e4) & (f <= 1e5),
+                band=(1e4, 1e5),
+            ),
+            "allan": AllanDeviation(
+                tau_s=xp.logspace(-5, -2, 10), adev=xp.full(10, 1e3)
+            ),
         }
         fig, axes = plot_carrier_phase_characterization(
             report,

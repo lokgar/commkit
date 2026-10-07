@@ -1124,7 +1124,7 @@ The equalization pass (3.7) gets more commits:
   `linewidth_dsh` resolve `sampling_rate` as a fact. `ref_symbols` becomes
   `reference` (`carrier_phase_trajectory` takes it from a 1-SPS Signal),
   `n_taus` becomes `num_taus`.
-- [ ] **3.9c `refactor(analysis)!: typed results`.** Frozen dataclasses
+- [x] **3.9c `refactor(analysis)!: typed results`.** Frozen dataclasses
   replace the dicts and the three-tuple: `AllanDeviation`,
   `FrequencyDrift`, `IncrementLinewidth`, `BetaSeparationLinewidth`,
   `DshFmNoisePsd` and `DshLinewidth` (common fields plus the fields of its

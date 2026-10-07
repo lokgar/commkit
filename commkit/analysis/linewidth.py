@@ -1,5 +1,7 @@
 """Linewidth estimators: phase-increment slope, FM-noise PSD, β-separation."""
 
+from dataclasses import dataclass
+
 import numpy as np
 
 from .._array import as_2d, broadcast_channels, restore_1d, to_report_scalar
@@ -14,7 +16,90 @@ from ._common import (
     _welch_floor_bias,
 )
 
-__all__ = ["fm_noise_psd", "linewidth_beta_separation", "linewidth_increment"]
+__all__ = [
+    "BetaSeparationLinewidth",
+    "IncrementLinewidth",
+    "fm_noise_psd",
+    "linewidth_beta_separation",
+    "linewidth_increment",
+]
+
+
+@dataclass(frozen=True, eq=False)
+class IncrementLinewidth:
+    """Linewidth from phase-increment variances (``linewidth_increment``).
+
+    Linewidths and variances are floats (SISO) or ``(C,)`` arrays (MIMO);
+    arrays are host NumPy.
+
+    Attributes
+    ----------
+    linewidth : float or np.ndarray
+        Lorentzian linewidth in Hz.
+    dphi_var : float or np.ndarray
+        Lag-1 increment variance in rad².
+    awgn_var : float or np.ndarray
+        Fitted intercept (``slope``) or subtracted AWGN term (``subtract``),
+        rad².
+    method : str
+        ``"slope"`` or ``"subtract"``.
+    lag_s : np.ndarray
+        Lags in seconds, ``(n_lags,)``.
+    var : np.ndarray
+        Measured increment variances in rad², ``(C, n_lags)``.
+    slope, intercept : np.ndarray or None
+        The fit ``var = slope * lag_s + intercept`` per channel
+        (``method="slope"``; ``None`` for ``"subtract"``).
+    """
+
+    linewidth: float | np.ndarray
+    dphi_var: float | np.ndarray
+    awgn_var: float | np.ndarray
+    method: str
+    lag_s: np.ndarray
+    var: np.ndarray
+    slope: np.ndarray | None = None
+    intercept: np.ndarray | None = None
+
+
+@dataclass(frozen=True, eq=False)
+class BetaSeparationLinewidth:
+    """Linewidth from the β-separation line (``linewidth_beta_separation``).
+
+    Attributes
+    ----------
+    linewidth : float or np.ndarray
+        β-separation linewidth in Hz (float SISO, ``(C,)`` MIMO).
+    linewidth_floor : float or np.ndarray
+        White-FM floor linewidth ``π·S_f`` in Hz.
+    n_segments : int
+        Welch segment count ``K`` behind every bin.
+    area_hz2 : float or np.ndarray
+        Integrated FM-noise area above the β-line, Hz².
+    f : np.ndarray
+        Frequency axis in Hz.
+    S_f : np.ndarray
+        Frequency-noise PSD in Hz²/Hz.
+    beta_line : np.ndarray
+        The β-line ``8 ln2 f / π²``.
+    above : np.ndarray
+        Boolean mask of the integrated bins (``S_f > β`` within ``band``).
+    used : np.ndarray
+        Boolean mask of the bins the floor median ran over.
+    band : tuple of float
+        The ``(f_min, f_max)`` fence applied.
+    """
+
+    linewidth: float | np.ndarray
+    linewidth_floor: float | np.ndarray
+    n_segments: int
+    area_hz2: float | np.ndarray
+    f: np.ndarray
+    S_f: np.ndarray
+    beta_line: np.ndarray
+    above: np.ndarray
+    used: np.ndarray
+    band: tuple[float, float]
 
 
 def linewidth_increment(
@@ -27,7 +112,7 @@ def linewidth_increment(
     snr_db: float | np.ndarray | None = None,
     reference: ArrayType | None = None,
     edge_trim: int = 0,
-) -> dict[str, float | np.ndarray | str]:
+) -> IncrementLinewidth:
     r"""Wiener linewidth from the phase-increment variance.
 
     For a Wiener phase + AWGN angle noise, the variance of the lag-``k``
@@ -74,14 +159,9 @@ def linewidth_increment(
 
     Returns
     -------
-    dict
-        ``{'linewidth', 'dphi_var', 'awgn_var', 'method', 'lag_s', 'var'}`` -
-        linewidth / variances are floats (SISO) or per-channel arrays.
-        ``dphi_var`` is the lag-1 increment variance; ``awgn_var`` is the
-        fitted intercept (``slope``) or the subtracted AWGN term
-        (``subtract``).  ``lag_s`` (s) and ``var`` (rad², shape
-        ``(C, n_lags)``) are the measured increment variances, plus ``slope``
-        and ``intercept`` of the fit for ``method="slope"``; pass them to
+    IncrementLinewidth
+        The linewidth, the variances, and the fit data ``lag_s``, ``var``
+        (plus ``slope`` and ``intercept`` for ``method="slope"``) for
         ``plotting.plot_increment_variance``.
 
     Notes
@@ -175,13 +255,13 @@ def linewidth_increment(
     if method == "subtract":
         fit = {"lag_s": np.array([t_sym]), "var": np.atleast_1d(var1_cpu)[:, None]}
 
-    return {
-        "linewidth": to_report_scalar(linewidth_cpu),
-        "dphi_var": to_report_scalar(var1_cpu),
-        "awgn_var": to_report_scalar(awgn_var_cpu),
-        "method": method,
+    return IncrementLinewidth(
+        linewidth=to_report_scalar(linewidth_cpu),
+        dphi_var=to_report_scalar(var1_cpu),
+        awgn_var=to_report_scalar(awgn_var_cpu),
+        method=method,
         **fit,
-    }
+    )
 
 
 def fm_noise_psd(
@@ -278,7 +358,7 @@ def linewidth_beta_separation(
     nperseg: int | None = None,
     f_min: float | None = None,
     f_max: float | None = None,
-) -> dict[str, float | np.ndarray]:
+) -> BetaSeparationLinewidth:
     r"""Linewidth via the Di Domenico β-separation line (canonical method).
 
     Integrates the frequency-noise PSD S_f(f) only over the **region where it
@@ -326,16 +406,10 @@ def linewidth_beta_separation(
 
     Returns
     -------
-    dict
-        ``{'linewidth', 'linewidth_floor', 'area_hz2', 'f', 'S_f',
-        'beta_line', 'above', 'used', 'band', 'n_segments'}`` - linewidths
-        are floats (SISO) / arrays (MIMO); ``f``/``S_f``/``beta_line`` are
-        NumPy arrays for plotting.  ``above`` is the boolean mask of the bins
-        actually integrated (``S_f > β``-line within ``band``, generally a
-        **union of disjoint intervals**, not a contiguous band); ``used`` is
-        the mask of bins the floor median ran over (auto-detected plateau, or
-        the fenced band); ``band`` is the ``(f_min, f_max)`` fence applied;
-        ``n_segments`` is the Welch segment count ``K`` behind every bin.
+    BetaSeparationLinewidth
+        Linewidths as floats (SISO) / arrays (MIMO), and the plot-sized
+        spectra and masks, as host NumPy.  ``above`` (the integrated bins) is
+        generally a **union of disjoint intervals**, not a contiguous band.
 
     Notes
     -----
@@ -423,17 +497,15 @@ def linewidth_beta_separation(
     if S_cpu.ndim == 1:
         above_cpu = above_cpu[0]
 
-    result = {
-        "linewidth": to_report_scalar(lw_cpu),
-        "linewidth_floor": to_report_scalar(lw_floor_cpu),
-        "n_segments": k_seg,
-        "area_hz2": to_report_scalar(area_cpu),
-        "f": f_cpu,
-        "S_f": S_cpu,
-        "beta_line": beta_cpu,
-        "above": above_cpu,
-        "used": used_cpu,
-        "band": (fmin, fmax),
-    }
-
-    return result
+    return BetaSeparationLinewidth(
+        linewidth=to_report_scalar(lw_cpu),
+        linewidth_floor=to_report_scalar(lw_floor_cpu),
+        n_segments=k_seg,
+        area_hz2=to_report_scalar(area_cpu),
+        f=f_cpu,
+        S_f=S_cpu,
+        beta_line=beta_cpu,
+        above=above_cpu,
+        used=used_cpu,
+        band=(fmin, fmax),
+    )
