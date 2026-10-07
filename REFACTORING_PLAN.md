@@ -1254,7 +1254,7 @@ The equalization pass (3.7) gets more commits:
   `sum(y_raw conj(d))` over the BPS window (full 2π), and the S-fold unwrap
   continues from it. Sequential kernels, block engine (a `bps_anchor` CUDA
   kernel on the GPU) and the oracle.
-- [ ] **4.2b `fix(equalization): block CPR slip carry uses the symmetry`.**
+- [x] **4.2b `fix(equalization): block CPR slip carry uses the symmetry`.**
   The block engine carried a cycle-slip correction into its unwrap
   accumulator times 4 whatever the constellation's symmetry.
 - [ ] **4.2c `docs: final AGENTS.md pass and README around §2.1`.**

@@ -467,6 +467,43 @@ class TestCPRBPSConvergence:
         assert mse < 0.1, f"RLS+BPS did not converge: MSE={mse:.4f}"
 
 
+class TestBlockSlipCarry:
+    """A slip correction carries into the block unwrap state."""
+
+    def test_trajectory_does_not_depend_on_the_block_size(self, xp):
+        """With frozen taps the CPR must not depend on where the blocks are
+        cut.  A fast 8-PSK phase step makes the slip corrector fire; its
+        correction carried times 4 instead of times S = 8 left every later
+        block start half a slip quantum (pi/8) away."""
+        from commkit.equalization import block_lms
+
+        c = Constellation.psk(8)
+        rng = np.random.default_rng(4)
+        n = 1536
+        syms = c.points[rng.integers(0, 8, n)].astype(np.complex64)
+        phase = np.zeros(n)
+        phase[1000:1004] = np.linspace(0.0, np.pi / 4, 4)
+        phase[1004:] = np.pi / 4
+        noise = 0.01 * (rng.standard_normal(n) + 1j * rng.standard_normal(n))
+        x = xp.asarray((syms * np.exp(1j * phase) + noise).astype(np.complex64))
+        cpr = BPS(test_phases=32, block_size=2, cycle_slip=CycleSlip(threshold=0.3))
+
+        def trajectory(block_size):
+            res = block_lms(
+                x,
+                syms[:200],
+                num_taps=1,
+                sps=1,
+                step_size=0.0,
+                block_size=block_size,
+                constellation=c,
+                cpr=cpr,
+            )
+            return to_numpy(res.phase_trajectory).ravel()
+
+        np.testing.assert_allclose(trajectory(64), trajectory(n), atol=1e-6)
+
+
 class TestBPSTrainingAnchor:
     """Training symbols anchor the inline BPS phase."""
 

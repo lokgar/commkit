@@ -312,7 +312,7 @@ class _BlockBps:
                 )
                 phi_corr = xp.asarray(phi_corr_np)
             # Carry the slip correction into the unwrap accumulator.
-            self.offset4 += (phi_corr[:, -1] - phi_f64[:, -1]) * 4.0
+            self.offset4 += (phi_corr[:, -1] - phi_f64[:, -1]) * S
             phi_f64 = phi_corr
 
         two_pi = xp.float64(2.0 * np.pi)
