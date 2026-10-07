@@ -215,3 +215,38 @@ class TestSignalInputBpsAndCorrectCarrierPhase:
 
         assert isinstance(out_sig, Signal)
         xpt.assert_allclose(out_sig.samples, out_arr)
+
+
+class TestBPSNumbaTable:
+    """The CPU kernel for non-square constellations."""
+
+    @pytest.mark.parametrize("dtype", [np.complex64, np.complex128])
+    def test_block_metric_matches_brute_force(self, dtype):
+        from commkit.recovery.bps import _get_numba_bps_table
+
+        rng = np.random.default_rng(5)
+        points = Constellation.qam(32).points
+        C, n_blocks, K, B = 2, 6, 8, 16
+        x = (points[rng.integers(0, 32, (C, n_blocks * K))] * np.exp(0.3j)).astype(
+            dtype
+        )
+        x += 0.05 * (rng.standard_normal(x.shape) + 1j * rng.standard_normal(x.shape))
+        theta = np.arange(B) * (2 * np.pi / 4 / B)
+        ph = np.exp(-1j * theta)
+        real = np.float32 if dtype == np.complex64 else np.float64
+        out = np.empty((C, n_blocks, B))
+        _get_numba_bps_table()(
+            np.ascontiguousarray(x.real, real),
+            np.ascontiguousarray(x.imag, real),
+            ph.real.astype(real),
+            ph.imag.astype(real),
+            points.real.astype(real),
+            points.imag.astype(real),
+            K,
+            out,
+        )
+        rot = x[:, :, None] * ph  # (C, N, B)
+        d = np.abs(rot[..., None] - points) ** 2  # (C, N, B, M)
+        expected = d.min(axis=-1).reshape(C, n_blocks, K, B).sum(axis=2)
+        rtol = 1e-5 if dtype == np.complex64 else 1e-12
+        np.testing.assert_allclose(out, expected, rtol=rtol)

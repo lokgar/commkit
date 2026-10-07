@@ -58,6 +58,47 @@ class BPS:
             raise ValueError(f"block_size must be >= 1, got {self.block_size}.")
 
 
+_NUMBA_BPS: dict = {}
+
+
+def _get_numba_bps_table():
+    """Numba kernel for the BPS block metric with an arbitrary constellation.
+
+    ``metrics[c, b, k] = sum_{n in block b} min_m |x[c, n] e^{-j theta_k} - s_m|^2``
+    for ``(C, N_blocks, B)``, parallel over channels and blocks.  It replaces
+    the NumPy ``(CHUNK, B, M)`` distance tensor of the non-square CPU path;
+    square QAM has its own O(1) slicer.  Distances are float32 for complex64
+    input (as in the NumPy path), the block sums float64.
+    """
+    if "table" not in _NUMBA_BPS:
+        import numba
+
+        @numba.njit(cache=True, fastmath=True, nogil=True, parallel=True)
+        def bps_table(x_re, x_im, ph_re, ph_im, c_re, c_im, block_size, out):
+            C = x_re.shape[0]
+            n_blocks = out.shape[1]
+            B = ph_re.shape[0]
+            M = c_re.shape[0]
+            for job in numba.prange(C * n_blocks):
+                c = job // n_blocks
+                b = job - c * n_blocks
+                for k in range(B):
+                    acc = 0.0
+                    for n in range(b * block_size, (b + 1) * block_size):
+                        xr = x_re[c, n] * ph_re[k] - x_im[c, n] * ph_im[k]
+                        xi = x_re[c, n] * ph_im[k] + x_im[c, n] * ph_re[k]
+                        best = (xr - c_re[0]) ** 2 + (xi - c_im[0]) ** 2
+                        for m in range(1, M):
+                            d = (xr - c_re[m]) ** 2 + (xi - c_im[m]) ** 2
+                            if d < best:
+                                best = d
+                        acc += best
+                    out[c, b, k] = acc
+
+        _NUMBA_BPS["table"] = bps_table
+    return _NUMBA_BPS["table"]
+
+
 def _bps(symbols: ArrayType, method: BPS, ctx: _Context) -> _Phase:
     """BPS phase of ``(C, N)`` symbols."""
     from ..mapping.gray import _square_qam_slicer_params
@@ -179,6 +220,23 @@ def _bps(symbols: ArrayType, method: BPS, ctx: _Context) -> _Phase:
             metrics_all[:, b0 : b0 + n_b] = (
                 md.reshape(B, C, n_b, block_size).sum(axis=3).transpose(1, 2, 0)
             )
+
+    elif xp is np and not is_sq_qam:
+        # Non-square constellation on the CPU: the Numba kernel streams the
+        # nearest-point search instead of materializing (CHUNK, B, M).
+        real = np.float32 if symbols.dtype == np.complex64 else np.float64
+        metrics_f64 = np.empty((C, N_blocks, B), dtype=np.float64)
+        _get_numba_bps_table()(
+            np.ascontiguousarray(symbols[:, :N_trunc].real, dtype=real),
+            np.ascontiguousarray(symbols[:, :N_trunc].imag, dtype=real),
+            np.ascontiguousarray(phasors.real, dtype=real),
+            np.ascontiguousarray(phasors.imag, dtype=real),
+            np.ascontiguousarray(const_np.real, dtype=real),
+            np.ascontiguousarray(const_np.imag, dtype=real),
+            block_size,
+            metrics_f64,
+        )
+        metrics_all = metrics_f64.astype(float_dtype)
 
     else:
         for ch in range(C):
