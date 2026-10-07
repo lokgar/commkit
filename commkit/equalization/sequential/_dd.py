@@ -353,7 +353,9 @@ def lms(
     return _attach_equalized_signal(result, sig, state)
 
 
-def _check_rls_divergence(weights, xp, forgetting_factor, delta):
+def _check_rls_divergence(
+    weights: Any, xp: Any, forgetting_factor: float, delta: float
+) -> None:
     """Raise if RLS produced non-finite weights (silent divergence guard).
 
     Mirrors the ``_div_flag`` check in ``block_lms``: a single device->host sync on

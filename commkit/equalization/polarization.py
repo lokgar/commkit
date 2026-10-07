@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from collections.abc import Sequence
 from dataclasses import dataclass
-from typing import cast, overload
+from typing import Any, cast, overload
 
 import numpy as np
 
@@ -143,7 +143,7 @@ class JonesTrack:
 _EXTRACT_CHUNK = 1 << 20  # samples per block in the chunked tone-phasor GEMM
 
 
-def _tone_phasor_matrix(xw: ArrayType, freqs, sampling_rate: float) -> ArrayType:
+def _tone_phasor_matrix(xw: ArrayType, freqs: Any, sampling_rate: float) -> ArrayType:
     r"""Tone-phasor matrix ``T[i, j] = (1/N) Σ_n xw[i, n]·exp(-j2π f_j n/fs)``.
 
     The whole-record accumulation is precision-sensitive (it feeds a matrix
@@ -177,7 +177,7 @@ def _tone_phasor_matrix(xw: ArrayType, freqs, sampling_rate: float) -> ArrayType
 def _refine_tone_frequencies(
     xw: ArrayType,
     T: ArrayType,
-    freqs,
+    freqs: Any,
     sampling_rate: float,
     search_band: float,
 ) -> list[float]:
@@ -234,7 +234,7 @@ def _refine_tone_frequencies(
 def _jones_at_grid_points(
     xw: ArrayType,
     h: np.ndarray,
-    freqs,
+    freqs: Any,
     grid_np: np.ndarray,
     sampling_rate: float,
 ) -> ArrayType:

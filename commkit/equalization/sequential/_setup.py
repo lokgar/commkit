@@ -35,7 +35,6 @@ from .._common import (
     _validate_sps,
     _validate_w_init,
 )
-from .._kernels_numba import _get_numba
 from ..result import EqualizerResult, EqualizerState, _check_state
 
 
@@ -153,9 +152,6 @@ def _prepare_sequential(
             training_symbols.shape[-1],
             n_sym,
         )
-
-    if _get_numba() is None:
-        raise ImportError("Numba is required for the sequential equalizers.")
 
     # Plain NumPy (no-op for CPU NumPy; downloads CuPy)
     samples_np = np.ascontiguousarray(to_device(samples, "cpu"), dtype=np.complex64)

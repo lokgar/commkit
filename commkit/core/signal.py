@@ -308,12 +308,12 @@ class Signal:
         """Number of channels: 1 for ``(N,)`` samples, C for ``(C, N)``."""
         if self.samples.ndim == 1:
             return 1
-        return self.samples.shape[0]
+        return int(self.samples.shape[0])
 
     @property
     def duration(self) -> float:
         """Duration in seconds."""
-        return self.samples.shape[-1] / self.sampling_rate
+        return float(self.samples.shape[-1] / self.sampling_rate)
 
     @property
     def sps(self) -> float:

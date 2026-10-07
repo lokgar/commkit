@@ -239,7 +239,9 @@ class SingleCarrierFrame:
 
     # Lazily generated payload and pilot data.  The frame's fields are frozen;
     # this cache is filled on first access and never changes afterwards.
-    _cache: dict = field(default_factory=dict, init=False, repr=False, compare=False)
+    _cache: dict[str, Any] = field(
+        default_factory=dict, init=False, repr=False, compare=False
+    )
 
     # -------------------------------------------------------------------------
     # Validators and Post-Initialization Hooks

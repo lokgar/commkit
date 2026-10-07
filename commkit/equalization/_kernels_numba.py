@@ -2,28 +2,25 @@
 
 from __future__ import annotations
 
+from collections.abc import Callable
+from typing import Any
+
 import numpy as np
 
 # -----------------------------------------------------------------------------
 # NUMBA LAZY LOADER
 # -----------------------------------------------------------------------------
 
-_NUMBA_CACHE: dict = {}
+_NUMBA_CACHE: dict[str, Any] = {}
 
 
-def _get_numba():
-    """Lazy loader for Numba.
-
-    Returns the ``numba`` module if installed, else ``None``.
-    """
+def _get_numba() -> Any:
+    """The ``numba`` module, imported on first use (a required dependency)."""
     if "numba" not in _NUMBA_CACHE:
-        try:
-            import numba
+        import numba
 
-            _NUMBA_CACHE["numba"] = numba
-        except ImportError:
-            _NUMBA_CACHE["numba"] = None
-    return _NUMBA_CACHE.get("numba")
+        _NUMBA_CACHE["numba"] = numba
+    return _NUMBA_CACHE["numba"]
 
 
 # -----------------------------------------------------------------------------
@@ -52,10 +49,10 @@ def _get_numba():
 #   - In-place W update - no copy per step, minimal working-set pressure
 #   - np.conj() on scalars - valid in Numba 0.64+
 
-_NUMBA_KERNELS: dict = {}
+_NUMBA_KERNELS: dict[str, Callable[..., Any]] = {}
 
 
-def _get_numba_lms():
+def _get_numba_lms() -> Callable[..., Any]:
     """JIT-compile and cache the Numba LMS butterfly loop kernel.
 
     Returns
@@ -65,8 +62,6 @@ def _get_numba_lms():
     """
     if "lms" not in _NUMBA_KERNELS:
         numba_mod = _get_numba()
-        if numba_mod is None:
-            raise ImportError("Numba is required for backend='numba'.")
 
         @numba_mod.njit(cache=True, fastmath=True, nogil=True)
         def lms_loop(
@@ -178,7 +173,7 @@ def _get_numba_lms():
     return _NUMBA_KERNELS["lms"]
 
 
-def _get_numba_rls():
+def _get_numba_rls() -> Callable[..., Any]:
     """JIT-compile and cache the Numba Leaky-RLS butterfly loop kernel.
 
     Returns
@@ -188,8 +183,6 @@ def _get_numba_rls():
     """
     if "rls" not in _NUMBA_KERNELS:
         numba_mod = _get_numba()
-        if numba_mod is None:
-            raise ImportError("Numba is required for backend='numba'.")
 
         @numba_mod.njit(cache=True, fastmath=True, nogil=True)
         def rls_loop(
@@ -357,7 +350,7 @@ def _get_numba_rls():
     return _NUMBA_KERNELS["rls"]
 
 
-def _get_numba_lms_cpr():
+def _get_numba_lms_cpr() -> Callable[..., Any]:
     """JIT-compile and cache the Numba LMS+CPR butterfly loop kernel.
 
     Extends the baseline LMS kernel with an inline carrier phase tracker
@@ -372,8 +365,6 @@ def _get_numba_lms_cpr():
     """
     if "lms_cpr" not in _NUMBA_KERNELS:
         numba_mod = _get_numba()
-        if numba_mod is None:
-            raise ImportError("Numba is required for backend='numba'.")
 
         @numba_mod.njit(cache=True, fastmath=False, nogil=True)
         def lms_cpr_loop(
@@ -797,7 +788,7 @@ def _get_numba_lms_cpr():
     return _NUMBA_KERNELS["lms_cpr"]
 
 
-def _get_numba_rls_cpr():
+def _get_numba_rls_cpr() -> Callable[..., Any]:
     """JIT-compile and cache the Numba RLS+CPR butterfly loop kernel.
 
     Combines the Leaky-RLS Riccati update with the same inline CPR tracker
@@ -809,8 +800,6 @@ def _get_numba_rls_cpr():
     """
     if "rls_cpr" not in _NUMBA_KERNELS:
         numba_mod = _get_numba()
-        if numba_mod is None:
-            raise ImportError("Numba is required for backend='numba'.")
 
         @numba_mod.njit(cache=True, fastmath=False, nogil=True)
         def rls_cpr_loop(
@@ -1235,7 +1224,7 @@ def _get_numba_rls_cpr():
     return _NUMBA_KERNELS["rls_cpr"]
 
 
-def _get_numba_cma():
+def _get_numba_cma() -> Callable[..., Any]:
     """JIT-compile and cache the Numba CMA butterfly loop kernel.
 
     Returns
@@ -1245,8 +1234,6 @@ def _get_numba_cma():
     """
     if "cma" not in _NUMBA_KERNELS:
         numba_mod = _get_numba()
-        if numba_mod is None:
-            raise ImportError("Numba is required for backend='numba'.")
 
         @numba_mod.njit(cache=True, fastmath=True, nogil=True)
         def cma_loop(
@@ -1327,7 +1314,7 @@ def _get_numba_cma():
     return _NUMBA_KERNELS["cma"]
 
 
-def _get_numba_rde():
+def _get_numba_rde() -> Callable[..., Any]:
     """JIT-compile and cache the Numba RDE butterfly loop kernel.
 
     RDE (Radius Directed Equalizer) is a CMA variant that selects a
@@ -1342,8 +1329,6 @@ def _get_numba_rde():
     """
     if "rde" not in _NUMBA_KERNELS:
         numba_mod = _get_numba()
-        if numba_mod is None:
-            raise ImportError("Numba is required for backend='numba'.")
 
         @numba_mod.njit(cache=True, fastmath=True, nogil=True)
         def rde_loop(
@@ -1449,7 +1434,7 @@ def _get_numba_rde():
 # correct blind tracking at data positions - all in a single kernel pass.
 
 
-def _get_numba_pa_cma():
+def _get_numba_pa_cma() -> Callable[..., Any]:
     """JIT-compile and cache the Numba pilot-aided CMA butterfly loop kernel.
 
     Hybrid CMA: LMS error at pilot positions (pilot_mask==1), standard
@@ -1462,8 +1447,6 @@ def _get_numba_pa_cma():
     """
     if "pa_cma" not in _NUMBA_KERNELS:
         numba_mod = _get_numba()
-        if numba_mod is None:
-            raise ImportError("Numba is required for backend='numba'.")
 
         @numba_mod.njit(cache=True, fastmath=True, nogil=True)
         def pa_cma_loop(
@@ -1551,7 +1534,7 @@ def _get_numba_pa_cma():
     return _NUMBA_KERNELS["pa_cma"]
 
 
-def _get_numba_pa_rde():
+def _get_numba_pa_rde() -> Callable[..., Any]:
     """JIT-compile and cache the Numba pilot-aided RDE butterfly loop kernel.
 
     Hybrid RDE: LMS error at pilot positions (pilot_mask==1), standard
@@ -1564,8 +1547,6 @@ def _get_numba_pa_rde():
     """
     if "pa_rde" not in _NUMBA_KERNELS:
         numba_mod = _get_numba()
-        if numba_mod is None:
-            raise ImportError("Numba is required for backend='numba'.")
 
         @numba_mod.njit(cache=True, fastmath=True, nogil=True)
         def pa_rde_loop(
@@ -1662,7 +1643,7 @@ def _get_numba_pa_rde():
     return _NUMBA_KERNELS["pa_rde"]
 
 
-def _get_numba_cs_block():
+def _get_numba_cs_block() -> Callable[..., Any]:
     """Lazy-compile a Numba JIT kernel for the block_lms cycle-slip correction loop.
 
     Replaces the Python ``for ci in range(C): for i in range(B)`` loop with
@@ -1672,8 +1653,6 @@ def _get_numba_cs_block():
     """
     if "cs_block" not in _NUMBA_KERNELS:
         numba_mod = _get_numba()
-        if numba_mod is None:
-            return None
 
         @numba_mod.njit(cache=True, fastmath=True, nogil=True)
         def cs_block(

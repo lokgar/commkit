@@ -17,7 +17,9 @@ from .result import EqualizerResult
 # -----------------------------------------------------------------------------
 
 
-def _normalize_inputs(samples, training_symbols, sps, input_norm_factor=None):
+def _normalize_inputs(
+    samples: Any, training_symbols: Any, sps: int, input_norm_factor: Any = None
+) -> tuple[Any, Any, Any]:
     """Scale samples to unit symbol power (training symbols pass through).
 
     For fractionally-spaced equalization (sps > 1) the fractional timing phase
@@ -88,8 +90,14 @@ def _normalize_inputs(samples, training_symbols, sps, input_norm_factor=None):
 
 
 def _build_padded_samples(
-    samples_np, pad_left, pad_right, samples_prefix, pad_mode, eq_norm, sps
-):
+    samples_np: Any,
+    pad_left: int,
+    pad_right: int,
+    samples_prefix: Any,
+    pad_mode: str,
+    eq_norm: Any,
+    sps: int,
+) -> Any:
     """Construct the padded input array for the equalizer.
 
     When ``samples_prefix`` is supplied its last ``pad_left`` samples replace the
@@ -141,7 +149,9 @@ def _build_padded_samples(
     )
 
 
-def _init_butterfly_weights_numpy(num_ch, num_taps, center_tap=None):
+def _init_butterfly_weights_numpy(
+    num_ch: int, num_taps: int, center_tap: int | None = None
+) -> np.ndarray:
     """Build center-tap identity butterfly weight matrix as a NumPy array.
 
     ``W[i, i, center] = 1+0j`` for each channel ``i``, all other entries zero:
@@ -202,10 +212,10 @@ def _validate_w_init(w: np.ndarray, num_ch: int, num_taps: int) -> np.ndarray:
 
 
 def _prepare_training_numpy(
-    training_symbols,
-    num_ch,
-    n_sym,
-):
+    training_symbols: Any,
+    num_ch: int,
+    n_sym: int,
+) -> tuple[np.ndarray, int]:
     """Build the zero-padded training array for the Numba scan kernels.
 
     Pure NumPy implementation - no CuPy or ``dispatch`` dependencies.
@@ -245,17 +255,17 @@ def _prepare_training_numpy(
 
 
 def _unpack_result_numpy(
-    y_out,
-    e_out,
-    W_final,
-    w_hist,
-    was_1d,
-    store_weights,
-    n_sym=None,
-    xp=np,
-    num_train_symbols=0,
-    input_norm_factor=1.0,
-):
+    y_out: np.ndarray,
+    e_out: np.ndarray,
+    W_final: np.ndarray,
+    w_hist: np.ndarray,
+    was_1d: bool,
+    store_weights: bool,
+    n_sym: int | None = None,
+    xp: Any = np,
+    num_train_symbols: int = 0,
+    input_norm_factor: Any = 1.0,
+) -> EqualizerResult:
     """Convert Numba kernel outputs (plain NumPy) into an ``EqualizerResult``.
 
     All inputs are NumPy arrays produced by the Numba kernels; outputs are
@@ -316,7 +326,7 @@ def _cpr_symmetry(constellation: Any) -> int:
     return int(constellation.rotational_symmetry)
 
 
-def _validate_sps(sps, num_taps):
+def _validate_sps(sps: Any, num_taps: int) -> None:
     """Validate sps; warn about unusual values, check tap count minimum."""
     sps = require_integer_sps(sps, "equalizer")
     if sps == 1:

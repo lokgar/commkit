@@ -182,7 +182,7 @@ def build_pilot_ref(
     *,
     n_sym: int,
     num_ch: int,
-) -> tuple:
+) -> tuple[np.ndarray, np.ndarray]:
     """Build dense pilot reference array and uint8 mask for the hybrid PA kernel.
 
     Packs sparse pilot symbols into a dense ``(C, n_sym)`` array suitable for
