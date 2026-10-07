@@ -163,7 +163,7 @@ class _BlockBps:
             # path below is its reference).
             if self.da_hist is None:
                 self.da_hist = xp.zeros((C, max(0, K - 1)), dtype=xp.complex64)
-            phi, self.da_hist = self.anchor_kernel(
+            phi, hist = self.anchor_kernel(
                 xp.ascontiguousarray(y, dtype=xp.complex64),
                 xp.ascontiguousarray(d, dtype=xp.complex64),
                 self.da_hist,
@@ -172,6 +172,8 @@ class _BlockBps:
                 symmetry=self.symmetry,
                 joint=self.joint and C > 1,
             )
+            # In place: a captured graph keeps reading this buffer.
+            self.da_hist[...] = hist
             return phi
         # Host NumPy: a training block's (C, n) products are tiny, so the
         # CuPy fallback brings them over once instead of a dozen launches.
@@ -648,19 +650,31 @@ def block_lms(
     y_rot_ws = xp.empty((C, block_size), dtype=xp.complex64)
     e_clean_ws = xp.empty((C, block_size), dtype=xp.complex64)
     phi_ws = xp.empty((C, block_size), dtype=xp.float32) if bps is not None else None
+    # Training symbols of a fully trained block, staged by prepare() so that
+    # a captured graph reads them from a fixed address.
+    d_ws = xp.empty((C, block_size), dtype=xp.complex64) if n_train else None
     div_flag = xp.zeros(1, dtype=xp.bool_)
+
+    def prepare(B: int, b_start: int) -> None:
+        if d_ws is not None and n_train - b_start >= B:
+            assert training is not None
+            d_ws[:, :B] = training[:, b_start : b_start + B]
 
     def run_block(B: int, b_start: int) -> None:
         """One block: filter, CPR, slicer/training error, update.
 
-        Writes only persistent buffers, so a full decision-directed block can
-        be captured into a CUDA graph.
+        Writes only persistent buffers and reads training symbols from the
+        staged d_ws, so a full decision-directed block and a full training
+        block can each be captured into a CUDA graph.
         """
         nonlocal div_flag
         n_train_blk = max(0, min(n_train - b_start, B))
         y_block, X_fd = _fdaf_forward(run.h, run.x_win, run.fftsize, sps, B, xp)
         d_train = None
-        if n_train_blk > 0:
+        if n_train_blk == B:
+            assert d_ws is not None
+            d_train = d_ws[:, :B]
+        elif n_train_blk > 0:  # the one partially trained block, eager
             assert training is not None
             d_train = training[:, b_start : b_start + n_train_blk]
 
@@ -710,20 +724,35 @@ def block_lms(
 
     first_dd_full = ((n_train + block_size - 1) // block_size) * block_size
     n_dd_full = max(0, (n_sym - first_dd_full) // block_size)
+    n_train_full = min(n_train, n_sym) // block_size
+    # A training block needs the device anchor (the NumPy one syncs).
+    train_graph = bps is None or bps.anchor_kernel is not None
+
+    def capturable(B: int, b_start: int) -> str | None:
+        if B != block_size:
+            return None
+        if n_train - b_start <= 0:
+            return "dd"
+        if train_graph and n_train - b_start >= B:
+            return "train"
+        return None
+
     _block_loop(
         run,
         run_block=run_block,
         store=store,
-        capturable=lambda B, b_start: B == block_size and n_train - b_start <= 0,
+        capturable=capturable,
         use_graph=(
             cuda_graph
             and xp is not np
             and not store_weights
             and (bps is None or not bps.cs or bps.cs_kernel is not None)
-            and n_dd_full >= 2  # need >= 1 warmup block + >= 1 captured block
+            # need >= 1 warmup block + >= 1 captured block of a kind
+            and (n_dd_full >= 2 or (train_graph and n_train_full >= 2))
         ),
         name="block_lms",
         at_resume=at_resume,
+        prepare=prepare,
     )
 
     if bool(div_flag[0]):

@@ -299,17 +299,22 @@ def _block_loop(
     *,
     run_block: Callable[[int, int], None],
     store: Callable[[int, int, int], None],
-    capturable: Callable[[int, int], bool],
+    capturable: Callable[[int, int], Any],
     use_graph: bool,
     name: str,
     at_resume: Callable[[], None] | None = None,
+    prepare: Callable[[int, int], None] | None = None,
 ) -> None:
     """Drive ``run_block(B, b_start)`` over all blocks of ``run``.
 
-    With ``use_graph`` (CuPy only), the first full ``capturable`` block runs
-    eagerly to prime the memory pool, the second is captured into a CUDA
-    graph and every later capturable block replays it: one launch per block
-    instead of dozens.  A failed capture falls back to the eager loop.
+    ``capturable(B, b_start)`` returns a graph key (any hashable; ``True``
+    for a single kind) or ``None``/``False`` for an eager block.  With
+    ``use_graph`` (CuPy only), per key the first block runs eagerly to prime
+    the memory pool, the second is captured into a CUDA graph and every
+    later block of that key replays it: one launch per block instead of
+    dozens.  A failed capture falls back to the eager loop.  ``prepare(B,
+    b_start)`` runs before every block, outside any graph, like
+    ``run.fill_window``: it stages per-block inputs into fixed buffers.
     ``at_resume()`` runs once, before block ``run.resume`` (or after the last
     block), to snapshot the continuation state.
     """
@@ -333,8 +338,8 @@ def _block_loop(
     else:
         stream_ctx = contextlib.nullcontext()
 
-    graph = None  # captured CUDA graph, built lazily on the 2nd full block
-    warmed = False  # True once one full block has primed the memory pool
+    graphs: dict[Any, Any] = {}  # key -> captured graph, built on its 2nd block
+    warmed: set[Any] = set()  # keys whose first block has primed the pool
     n_blocks = (run.n_sym + run.block_size - 1) // run.block_size
     with stream_ctx:
         for b in range(n_blocks):
@@ -343,26 +348,28 @@ def _block_loop(
             B = b_end - b_start  # symbols this block (may be short for the last)
             if at_resume is not None and b_start == run.resume:
                 at_resume()
-            graph_ok = use_graph and capturable(B, b_start)
+            key = capturable(B, b_start) if use_graph else None
             run.fill_window(b_start, B)
-            if not graph_ok:
+            if prepare is not None:
+                prepare(B, b_start)
+            if key is None or key is False:
                 run_block(B, b_start)  # eager
-            elif graph is not None:
-                graph.launch()  # replay (current stream == graph_stream)
-            elif not warmed:
+            elif key in graphs:
+                graphs[key].launch()  # replay (current stream == graph_stream)
+            elif key not in warmed:
                 run_block(B, b_start)  # eager warmup - primes the memory pool
-                warmed = True
+                warmed.add(key)
             else:
                 assert graph_stream is not None
                 try:
                     graph_stream.begin_capture()
                     run_block(B, b_start)
-                    graph = graph_stream.end_capture()
-                    graph.launch()
+                    graphs[key] = graph_stream.end_capture()
+                    graphs[key].launch()
                 except Exception as exc:  # pragma: no cover - hw/version dependent
                     with contextlib.suppress(Exception):
                         graph_stream.end_capture()
-                    graph = None
+                    graphs.clear()
                     use_graph = False
                     logger.warning(
                         "%s CUDA-graph capture failed (%s); continuing with the "

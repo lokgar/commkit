@@ -615,9 +615,12 @@ class TestBlockLMSCUDAGraphAndPerformance:
 
     @pytest.mark.gpu_only
     @pytest.mark.requires_kernel
-    @pytest.mark.parametrize("cs_corr", [False, True])
+    @pytest.mark.parametrize("cpr", ["bps", "bps+cs", None])
     @pytest.mark.parametrize("n_sym", [100_000, 100_137])
-    def test_block_lms_cuda_graph_matches_eager(self, cs_corr, n_sym, xp, xpt):
+    @pytest.mark.parametrize("n_train", [512, 20_000, "all"])
+    def test_block_lms_cuda_graph_matches_eager(self, cpr, n_sym, n_train, xp, xpt):
+        """Replayed decision-directed and training blocks equal the eager
+        loop bit for bit (training blocks read staged symbols)."""
         rng = np.random.default_rng(5)
         const = normalize(Constellation.qam(16).points, mode="average_power").astype(
             np.complex64
@@ -636,10 +639,12 @@ class TestBlockLMSCUDAGraphAndPerformance:
             step_size=5e-4,
             block_size=256,
             constellation=Constellation.qam(16),
-            cpr=BPS(cycle_slip=CycleSlip() if cs_corr else None),
+            cpr=None
+            if cpr is None
+            else BPS(cycle_slip=CycleSlip() if cpr == "bps+cs" else None),
         )
         x = xp.asarray(samples)
-        t = xp.asarray(syms[:512])
+        t = xp.asarray(syms if n_train == "all" else syms[:n_train])
 
         r_graph = block_lms(x, t, **kw, cuda_graph=True)
         r_eager = block_lms(x, t, **kw, cuda_graph=False)
@@ -648,10 +653,11 @@ class TestBlockLMSCUDAGraphAndPerformance:
             to_numpy(r_graph.y_hat),
             to_numpy(r_eager.y_hat),
         )
-        xpt.assert_array_equal(
-            to_numpy(r_graph.phase_trajectory),
-            to_numpy(r_eager.phase_trajectory),
-        )
+        if cpr is not None:
+            xpt.assert_array_equal(
+                to_numpy(r_graph.phase_trajectory),
+                to_numpy(r_eager.phase_trajectory),
+            )
         xpt.assert_array_equal(
             to_numpy(r_graph.weights),
             to_numpy(r_eager.weights),
