@@ -87,7 +87,7 @@ class TestPlotConstellation:
     def test_constellation_real_samples(self, xp: Any) -> None:
         """Constellation with real (non-complex) samples warns and converts to complex."""
         samples = xp.ones(100, dtype=xp.float32)
-        with patch("commkit.plotting.logger.warning"):
+        with patch("commkit.plotting.constellation.logger.warning"):
             result = plot_constellation(samples, show=False)
         assert result is not None
 

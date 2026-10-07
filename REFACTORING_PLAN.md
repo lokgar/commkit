@@ -1154,7 +1154,7 @@ The equalization pass (3.7) gets more commits:
   spectrum from the samples (the extraction passband is drawn as `f_p ±
   B`). Their tests build real estimates. The contract registry has no
   strict xfails left.
-- [ ] **3.10c `refactor(plotting): no test-only exports`.** The private
+- [x] **3.10c `refactor(plotting): no test-only exports`.** The private
   re-exports leave `plotting/__init__`; tests import the owning module.
 - [ ] **3.10d `test: numerical modules never import matplotlib`.** A fresh
   subprocess imports every non-plotting module and checks

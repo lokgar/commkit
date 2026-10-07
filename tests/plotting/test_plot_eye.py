@@ -8,7 +8,8 @@ import numpy as np
 import pytest
 
 from commkit.core import Signal
-from commkit.plotting import _plot_eye_traces, plot_eye_diagram
+from commkit.plotting import plot_eye_diagram
+from commkit.plotting.eye import _plot_eye_traces
 
 
 class TestPlotEyeDiagram:

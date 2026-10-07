@@ -368,5 +368,4 @@ rule without deleting its entry fails the suite.
 | `resolve_required` / `resolve_optional` (Signal wins, with a warning) | 2.5, then each module pass |
 | `generate_qam/psk/pam/psqam`, `seed=` with `RandomState` | 2.6, then each module pass |
 | `modulation=` / `order=` / `unipolar=` / `pmf=` parameters; positional parameters; `float \| ndarray` and dict returns; metrics returning `None` | Module passes 3.1-3.10 |
-| Test-only private exports in the `plotting` `__init__` | 3.10 |
 | `--use_fast_math` as the global CUDA default | Step 5 |
