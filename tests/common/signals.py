@@ -335,7 +335,10 @@ def make_dsh_beat(
         "cpu",
     )
     z, dphi = analysis.dsh_beat(
-        phi, sample_rate, delay_samples / sample_rate, f_shift=f_shift
+        phi,
+        sampling_rate=sample_rate,
+        delay=delay_samples / sample_rate,
+        f_shift=f_shift,
     )
     if snr_db is not None:
         z = apply_awgn(z, sps=1, esn0_db=snr_db, rng=seed + 100)

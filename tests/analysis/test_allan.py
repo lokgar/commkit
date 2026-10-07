@@ -18,7 +18,7 @@ class TestAllanDeviation:
         n = 1 << 16
         rng = np.random.default_rng(31)
         df = rng.normal(0, 1e5, n)
-        out = analysis.allan_deviation(xp.asarray(df), R, n_taus=20)
+        out = analysis.allan_deviation(xp.asarray(df), symbol_rate=R, num_taus=20)
         tau, adev = out["tau_s"], out["adev"]
         good = np.isfinite(adev) & (adev > 0)
         slope = np.polyfit(np.log(tau[good]), np.log(adev[good]), 1)[0]
@@ -27,7 +27,7 @@ class TestAllanDeviation:
     def test_allan_deviation_output_keys(self, xp: Any) -> None:
         """Verify output dictionary structure and shapes."""
         df = xp.zeros(1024)
-        out = analysis.allan_deviation(df, R, n_taus=10)
+        out = analysis.allan_deviation(df, symbol_rate=R, num_taus=10)
         assert "tau_s" in out
         assert "adev" in out
         assert len(out["tau_s"]) == len(out["adev"])

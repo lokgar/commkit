@@ -35,7 +35,9 @@ class TestLinewidthEstimation:
         rng = np.random.default_rng(8)
         sigma2 = 10 ** (-25 / 10)  # heavy AWGN angle noise
         awgn = rng.normal(0, np.sqrt(sigma2 / 2), n)  # small-angle phase error
-        res = analysis.linewidth_increment(xp.asarray(phi + awgn), R, method="slope")
+        res = analysis.linewidth_increment(
+            xp.asarray(phi + awgn), symbol_rate=R, method="slope"
+        )
         assert res["linewidth"] == pytest.approx(dnu, rel=0.10)
         # The fitted intercept ≈ 2σ_φ² ≈ σ_n² for unit-power QPSK.
         assert res["awgn_var"] == pytest.approx(sigma2, rel=0.30)
@@ -45,7 +47,7 @@ class TestLinewidthEstimation:
         dnu = 1.5e6
         phi = _wiener_phase(dnu, n, seed=11)
         res = analysis.linewidth_increment(
-            xp.asarray(phi), R, method="subtract", noise_var=0.0
+            xp.asarray(phi), symbol_rate=R, method="subtract", noise_var=0.0
         )
         assert res["linewidth"] == pytest.approx(dnu, rel=0.10)
 
@@ -54,7 +56,7 @@ class TestLinewidthEstimation:
         dnu = 1.5e6
         phi = _wiener_phase(dnu, n, seed=13)
         out = analysis.linewidth_beta_separation(
-            xp.asarray(phi), R, nperseg=1 << 13, f_min=5e6, f_max=2e8
+            xp.asarray(phi), symbol_rate=R, nperseg=1 << 13, f_min=5e6, f_max=2e8
         )
         # White-FM floor Δν = π·S_f is the robust estimator at high baud.
         assert out["linewidth_floor"] == pytest.approx(dnu, rel=0.10)
@@ -74,7 +76,7 @@ class TestLinewidthEstimation:
             "cpu",
         )
         out = analysis.linewidth_beta_separation(
-            xp.asarray(phi), fs, nperseg=1 << 14, f_max=5e6
+            xp.asarray(phi), symbol_rate=fs, nperseg=1 << 14, f_max=5e6
         )
         assert out["linewidth"] == pytest.approx(dnu, rel=0.15)
 
@@ -97,7 +99,7 @@ class TestLinewidthEstimation:
             "cpu",
         )
         out = analysis.linewidth_beta_separation(
-            xp.asarray(phi), fs, nperseg=1 << 14, f_max=5e6
+            xp.asarray(phi), symbol_rate=fs, nperseg=1 << 14, f_max=5e6
         )
         f, s_f, beta, above = out["f"], out["S_f"], out["beta_line"], out["above"]
         fmin, fmax = out["band"]
@@ -122,7 +124,9 @@ class TestLinewidthEstimation:
         phi = _wiener_phase(dnu, n, seed=13)
         rng = np.random.default_rng(8)
         phi = phi + rng.normal(0, np.sqrt(10 ** (-2.0) / 2), n)  # AWGN angle noise
-        out = analysis.linewidth_beta_separation(xp.asarray(phi), R, nperseg=1 << 13)
+        out = analysis.linewidth_beta_separation(
+            xp.asarray(phi), symbol_rate=R, nperseg=1 << 13
+        )
         assert out["linewidth_floor"] == pytest.approx(dnu, rel=0.15)
         # The tail region is excluded: the used band ends well below Nyquist.
         f_used = out["f"][out["used"]]
@@ -133,10 +137,12 @@ class TestLinewidthEstimation:
         from commkit import plotting
 
         phi = xp.asarray(_wiener_phase(2e6, 1 << 14, seed=17))
-        res = analysis.linewidth_increment(phi, R, method="slope")
+        res = analysis.linewidth_increment(phi, symbol_rate=R, method="slope")
         assert res["var"].shape == (1, res["lag_s"].size)
         plotting.plot_increment_variance(
             res["lag_s"], res["var"], slope=res["slope"], intercept=res["intercept"]
         )
-        res = analysis.linewidth_increment(phi, R, method="subtract", noise_var=0.0)
+        res = analysis.linewidth_increment(
+            phi, symbol_rate=R, method="subtract", noise_var=0.0
+        )
         plotting.plot_increment_variance(res["lag_s"], res["var"])

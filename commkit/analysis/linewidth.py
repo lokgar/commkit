@@ -19,13 +19,13 @@ __all__ = ["fm_noise_psd", "linewidth_beta_separation", "linewidth_increment"]
 
 def linewidth_increment(
     pn_phase: ArrayType,
-    symbol_rate: float,
     *,
+    symbol_rate: float,
     method: str = "slope",
     lags: tuple[int, ...] = (1, 2, 3, 4, 5),
     noise_var: float | None = None,
     snr_db: float | np.ndarray | None = None,
-    ref_symbols: ArrayType | None = None,
+    reference: ArrayType | None = None,
     edge_trim: int = 0,
 ) -> dict[str, float | np.ndarray | str]:
     r"""Wiener linewidth from the phase-increment variance.
@@ -48,7 +48,7 @@ def linewidth_increment(
     * ``method="subtract"``: single-lag (``k=1``) variance minus an explicit
       AWGN term.  With ``d`` at unit power, ``σ_n² = 1/ρ``; the flat correction
       subtracts ``σ_n²`` (exact for QPSK, *under*-corrects QAM), while passing
-      ``ref_symbols`` applies the amplitude-aware ``σ_n²·E[1/|d|²]`` (rigorous
+      ``reference`` applies the amplitude-aware ``σ_n²·E[1/|d|²]`` (rigorous
       for QAM, since inner-ring symbols carry larger angle noise).
 
     Note: ``method="subtract"`` needs the additive-noise variance only.
@@ -67,7 +67,7 @@ def linewidth_increment(
         Estimator, as above.
     lags : tuple of int, default (1, 2, 3, 4, 5)
         Increment lags ``k`` for the slope fit (``method="slope"``).
-    noise_var, snr_db, ref_symbols : optional
+    noise_var, snr_db, reference : optional
         AWGN-correction inputs for ``method="subtract"`` (see above).
     edge_trim : int, default 0
         Samples discarded from each end before differencing.
@@ -152,10 +152,10 @@ def linewidth_increment(
             sigma_host = np.zeros(c, dtype=np.float64)
         sigma_n2 = xp.asarray(sigma_host)
 
-        if ref_symbols is not None and bool(np.any(sigma_host)):
+        if reference is not None and bool(np.any(sigma_host)):
             from ..math import normalize
 
-            d2 = broadcast_channels(xp.asarray(ref_symbols), c, xp, name="ref_symbols")
+            d2 = broadcast_channels(xp.asarray(reference), c, xp, name="reference")
             d2 = d2[:, :n_full][:, sl]
             d2 = normalize(d2, mode="average_power", axis=-1)
             inv = 1.0 / xp.maximum(xp.abs(d2) ** 2, 1e-12)
@@ -186,8 +186,8 @@ def linewidth_increment(
 
 def fm_noise_psd(
     phi: ArrayType,
-    symbol_rate: float,
     *,
+    symbol_rate: float,
     nperseg: int | None = None,
     detrend: str | bool = "constant",
     bias_correction: bool = True,
@@ -273,8 +273,8 @@ def fm_noise_psd(
 
 def linewidth_beta_separation(
     phi: ArrayType,
-    symbol_rate: float,
     *,
+    symbol_rate: float,
     nperseg: int | None = None,
     f_min: float | None = None,
     f_max: float | None = None,
@@ -362,7 +362,7 @@ def linewidth_beta_separation(
     """
     phi_arr, _, _ = dispatch(phi)
     n_phi = phi_arr.shape[-1]
-    f, S_f = fm_noise_psd(phi_arr, symbol_rate, nperseg=nperseg)
+    f, S_f = fm_noise_psd(phi_arr, symbol_rate=symbol_rate, nperseg=nperseg)
     _, xp, _ = dispatch(f)
 
     # Transfer the plot-sized spectrum once, up front: every fence, mask and

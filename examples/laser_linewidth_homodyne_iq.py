@@ -222,7 +222,7 @@ plt.show()
 # First check: `Var[Δφ] = 2πΔν·τ_d` in the incoherent regime.
 
 # %%
-dphi, _ = analysis.dsh_phase(z, FS, f_shift=0.0)
+dphi, _ = analysis.dsh_phase(z, sampling_rate=FS, f_shift=0.0)
 print(
     f"Var[Δφ] = {float(xp.var(dphi)):.1f} rad²   "
     f"(theory 2πΔν·τ_d = {2 * np.pi * DNU_TRUE * TAU_D:.1f} rad²)"
@@ -254,10 +254,12 @@ print(
 
 # %%
 res_fm = analysis.linewidth_dsh(
-    z, FS, TAU_D, f_shift=0.0, method="fm_psd", nperseg=1 << 16
+    z, sampling_rate=FS, delay=TAU_D, f_shift=0.0, method="fm_psd", nperseg=1 << 16
 )
-res_inc = analysis.linewidth_dsh(z, FS, TAU_D, f_shift=0.0, method="increment")
-res_lor = analysis.linewidth_dsh(z, FS, TAU_D, method="lorentzian")
+res_inc = analysis.linewidth_dsh(
+    z, sampling_rate=FS, delay=TAU_D, f_shift=0.0, method="increment"
+)
+res_lor = analysis.linewidth_dsh(z, sampling_rate=FS, delay=TAU_D, method="lorentzian")
 plotting.plot_dsh_beat_psd(
     res_lor["f"],
     res_lor["psd"],
@@ -298,9 +300,11 @@ print(f"truth      : Δν = {DNU_TRUE / 1e3:6.1f} kHz")
 # walks over many radians.
 
 # %%
-res_lor_bad = analysis.linewidth_dsh(z_meas, FS, TAU_D, method="lorentzian")
+res_lor_bad = analysis.linewidth_dsh(
+    z_meas, sampling_rate=FS, delay=TAU_D, method="lorentzian"
+)
 res_fm_bad = analysis.linewidth_dsh(
-    z_meas, FS, TAU_D, f_shift=0.0, method="fm_psd", nperseg=1 << 16
+    z_meas, sampling_rate=FS, delay=TAU_D, f_shift=0.0, method="fm_psd", nperseg=1 << 16
 )
 print(
     f"uncalibrated lorentzian : {res_lor_bad['linewidth'] / 1e3:6.1f} kHz  <- DC spur"
@@ -319,7 +323,7 @@ print(f"uncalibrated fm_psd     : {res_fm_bad['linewidth'] / 1e3:6.1f} kHz  (rob
 
 # %%
 df_disc = dphi / (2.0 * np.pi * TAU_D)  # discriminator output [Hz]
-allan = analysis.allan_deviation(df_disc, FS, n_taus=40)
+allan = analysis.allan_deviation(df_disc, symbol_rate=FS, num_taus=40)
 
 fig, ax = plotting.plot_allan_deviation(allan["tau_s"], allan["adev"])
 tau_valid = allan["tau_s"][allan["tau_s"] > 5 * TAU_D]

@@ -130,7 +130,7 @@ phi = xp.asarray(
         num_samples=N + M_DELAY, sampling_rate=FS, linewidth=DNU_TRUE, rng=42
     )
 )
-z_dsh, dphi_true = analysis.dsh_beat(phi, FS, TAU_D, f_shift=F_AOM)
+z_dsh, dphi_true = analysis.dsh_beat(phi, sampling_rate=FS, delay=TAU_D, f_shift=F_AOM)
 z_dsh = apply_awgn(z_dsh, sps=1, esn0_db=SNR_DB, rng=1)
 
 print(
@@ -174,7 +174,7 @@ plt.show()
 # Sanity check: in the incoherent regime `Var[Δφ] = 2πΔν·τ_d`.
 
 # %%
-dphi_est, f_beat = analysis.dsh_phase(z_dsh, FS, f_shift=F_AOM)
+dphi_est, f_beat = analysis.dsh_phase(z_dsh, sampling_rate=FS, f_shift=F_AOM)
 print(f"removed carrier: {f_beat / 1e6:.3f} MHz")
 print(
     f"Var[Δφ] measured = {float(xp.var(dphi_est)):.1f} rad², "
@@ -213,7 +213,12 @@ print(
 
 # %%
 res_fm = analysis.linewidth_dsh(
-    z_dsh, FS, TAU_D, f_shift=F_AOM, method="fm_psd", nperseg=1 << 19
+    z_dsh,
+    sampling_rate=FS,
+    delay=TAU_D,
+    f_shift=F_AOM,
+    method="fm_psd",
+    nperseg=1 << 19,
 )
 
 fig, ax = plotting.plot_frequency_noise_psd(
@@ -269,7 +274,9 @@ print(
 # estimator many more independent averages).
 
 # %%
-res_inc = analysis.linewidth_dsh(z_dsh, FS, TAU_D, f_shift=F_AOM, method="increment")
+res_inc = analysis.linewidth_dsh(
+    z_dsh, sampling_rate=FS, delay=TAU_D, f_shift=F_AOM, method="increment"
+)
 print(f"increment: Δν = {res_inc['linewidth'] / 1e3:.1f} kHz")
 
 # %% [markdown]
@@ -292,7 +299,9 @@ print(f"increment: Δν = {res_inc['linewidth'] / 1e3:.1f} kHz")
 # plots directly.
 
 # %%
-res_lor = analysis.linewidth_dsh(z_dsh, FS, TAU_D, method="lorentzian", nperseg=1 << 15)
+res_lor = analysis.linewidth_dsh(
+    z_dsh, sampling_rate=FS, delay=TAU_D, method="lorentzian", nperseg=1 << 15
+)
 plotting.plot_dsh_beat_psd(
     res_lor["f"],
     res_lor["psd"],
@@ -335,7 +344,9 @@ phi_short = xp.asarray(
         num_samples=N + M_SHORT, sampling_rate=FS, linewidth=DNU_TRUE, rng=44
     )
 )
-z_short, _ = analysis.dsh_beat(phi_short, FS, TAU_SHORT, f_shift=F_AOM)
+z_short, _ = analysis.dsh_beat(
+    phi_short, sampling_rate=FS, delay=TAU_SHORT, f_shift=F_AOM
+)
 z_short = apply_awgn(z_short, sps=1, esn0_db=SNR_DB, rng=3)
 
 plotting.plot_psd(
@@ -348,10 +359,15 @@ plotting.plot_psd(
 plt.show()
 
 res_bad = analysis.linewidth_dsh(
-    z_short, FS, TAU_SHORT, method="lorentzian", nperseg=1 << 15
+    z_short, sampling_rate=FS, delay=TAU_SHORT, method="lorentzian", nperseg=1 << 15
 )
 res_good = analysis.linewidth_dsh(
-    z_short, FS, TAU_SHORT, f_shift=F_AOM, method="fm_psd", nperseg=1 << 15
+    z_short,
+    sampling_rate=FS,
+    delay=TAU_SHORT,
+    f_shift=F_AOM,
+    method="fm_psd",
+    nperseg=1 << 15,
 )
 print(
     f"coherent-regime 'lorentzian' answer: {res_bad['linewidth'] / 1e3:.1f} kHz "
@@ -399,16 +415,21 @@ phi_mix = xp.asarray(
         rng=45,
     )
 )
-z_mix, _ = analysis.dsh_beat(phi_mix, FS, TAU_SHORT, f_shift=F_AOM)
+z_mix, _ = analysis.dsh_beat(phi_mix, sampling_rate=FS, delay=TAU_SHORT, f_shift=F_AOM)
 z_mix = apply_awgn(z_mix, sps=1, esn0_db=SNR_DB, rng=4)
 
 res_mix = analysis.linewidth_dsh(
-    z_mix, FS, TAU_SHORT, f_shift=F_AOM, method="fm_psd", nperseg=1 << 15
+    z_mix,
+    sampling_rate=FS,
+    delay=TAU_SHORT,
+    f_shift=F_AOM,
+    method="fm_psd",
+    nperseg=1 << 15,
 )
 res_naive = analysis.linewidth_dsh(
     z_mix,
-    FS,
-    TAU_SHORT,
+    sampling_rate=FS,
+    delay=TAU_SHORT,
     f_shift=F_AOM,
     method="fm_psd",
     nperseg=1 << 15,
@@ -457,9 +478,9 @@ print(f"truth (white-FM part only)   : Δν = {DNU_TRUE / 1e3:.0f} kHz")
 # not the sampling rate, to see that region.
 
 # %%
-dphi_short, _ = analysis.dsh_phase(z_short, FS, f_shift=F_AOM)
+dphi_short, _ = analysis.dsh_phase(z_short, sampling_rate=FS, f_shift=F_AOM)
 df_disc = dphi_short / (2.0 * np.pi * TAU_SHORT)  # discriminator output [Hz]
-allan = analysis.allan_deviation(df_disc, FS, n_taus=40)
+allan = analysis.allan_deviation(df_disc, symbol_rate=FS, num_taus=40)
 
 fig, ax = plotting.plot_allan_deviation(allan["tau_s"], allan["adev"])
 tau_valid = allan["tau_s"][allan["tau_s"] > 5 * TAU_SHORT]

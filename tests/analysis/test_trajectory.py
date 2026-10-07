@@ -5,6 +5,7 @@ paths are both exercised.
 """
 
 import numpy as np
+import pytest
 
 from commkit import analysis
 from commkit.backend import to_device
@@ -99,3 +100,13 @@ class TestCarrierPhaseTrajectory:
 
         assert not isinstance(phi_sig, Signal)
         xpt.assert_allclose(phi_sig, phi_arr)
+
+        # The Signal's reference is the default.
+        from commkit.core import Reference
+
+        with_ref = sig.replace(reference=Reference(symbols=xp.asarray(d)))
+        xpt.assert_allclose(analysis.carrier_phase_trajectory(with_ref), phi_arr)
+        with pytest.raises(ValueError, match="reference"):
+            analysis.carrier_phase_trajectory(sig)
+        with pytest.raises(ValueError, match="one sample per symbol"):
+            analysis.carrier_phase_trajectory(sig.replace(sampling_rate=2 * R))

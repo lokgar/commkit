@@ -936,16 +936,6 @@ def test_equalizer_result(row: Row, xp, backend_device, request):
 # -----------------------------------------------------------------------------
 
 LEGACY: dict[str, frozenset[str]] = {
-    "commkit.analysis.allan.allan_deviation": L(SIG),
-    "commkit.analysis.drift.frequency_drift_metrics": L(SIG),
-    "commkit.analysis.drift.separate_drift_phase_noise": L(SIG),
-    "commkit.analysis.interferometry.dsh_beat": L(SIG),
-    "commkit.analysis.interferometry.dsh_fm_noise_psd": L(SIG),
-    "commkit.analysis.interferometry.dsh_phase": L(SIG),
-    "commkit.analysis.interferometry.linewidth_dsh": L(SIG),
-    "commkit.analysis.linewidth.fm_noise_psd": L(SIG),
-    "commkit.analysis.linewidth.linewidth_beta_separation": L(SIG),
-    "commkit.analysis.linewidth.linewidth_increment": L(SIG),
     "commkit.plotting.constellation.plot_constellation": L(SIG),
     "commkit.plotting.constellation.plot_ideal_constellation": L(SIG),
     "commkit.plotting.equalizer.plot_equalizer_result": L(SIG),

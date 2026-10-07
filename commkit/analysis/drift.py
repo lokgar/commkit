@@ -12,8 +12,8 @@ __all__ = ["frequency_drift_metrics", "separate_drift_phase_noise"]
 
 def separate_drift_phase_noise(
     phi: ArrayType,
-    symbol_rate: float,
     *,
+    symbol_rate: float,
     cutoff: float,
     method: str = "butterworth",
     order: int = 4,
@@ -130,8 +130,8 @@ def separate_drift_phase_noise(
 
 def frequency_drift_metrics(
     drift_phase: ArrayType,
-    symbol_rate: float,
     *,
+    symbol_rate: float,
     edge_trim: int = 0,
 ) -> dict[str, float | np.ndarray]:
     r"""Residual frequency-wander statistics from a smoothed phase ramp.

@@ -80,7 +80,9 @@ else:
             num_samples=(1 << 21) + m, sampling_rate=FS, linewidth=200e3, rng=42
         )
     )
-    z_demo, _ = analysis.dsh_beat(phi_demo, FS, TAU_D, f_shift=F_AOM)
+    z_demo, _ = analysis.dsh_beat(
+        phi_demo, sampling_rate=FS, delay=TAU_D, f_shift=F_AOM
+    )
     beat = apply_awgn(z_demo, sps=1, esn0_db=25, rng=1).real  # single PD -> real
 
 T_REC = beat.shape[-1] / FS
@@ -109,7 +111,7 @@ plotting.plot_psd(
 )
 plt.show()
 
-dphi, f_hat = analysis.dsh_phase(beat, FS, f_shift=F_AOM)
+dphi, f_hat = analysis.dsh_phase(beat, sampling_rate=FS, f_shift=F_AOM)
 print(f"beat carrier removed at {f_hat / 1e6:.4f} MHz")
 
 if CALIBRATE_TAU_D:
@@ -118,7 +120,7 @@ if CALIBRATE_TAU_D:
     # then refine to sub-bin accuracy with a 3-point parabola on log(S) -
     # without it the estimate is quantized to the Welch bin (±FS/2·NPERSEG,
     # easily worse than the nominal fiber length).
-    f_c_, S_c_ = analysis.fm_noise_psd(dphi, FS, nperseg=NPERSEG)
+    f_c_, S_c_ = analysis.fm_noise_psd(dphi, symbol_rate=FS, nperseg=NPERSEG)
     f_np, S_np = np.asarray(cpu(f_c_)), np.asarray(cpu(S_c_))
     win = np.flatnonzero((f_np > 0.8 / TAU_D) & (f_np < 1.2 / TAU_D))
     if win.size >= 3:
@@ -140,10 +142,14 @@ if CALIBRATE_TAU_D:
 
 # %%
 res_fm = analysis.linewidth_dsh(
-    beat, FS, TAU_D, f_shift=F_AOM, method="fm_psd", nperseg=NPERSEG
+    beat, sampling_rate=FS, delay=TAU_D, f_shift=F_AOM, method="fm_psd", nperseg=NPERSEG
 )
-res_inc = analysis.linewidth_dsh(beat, FS, TAU_D, f_shift=F_AOM, method="increment")
-res_lor = analysis.linewidth_dsh(beat, FS, TAU_D, method="lorentzian")
+res_inc = analysis.linewidth_dsh(
+    beat, sampling_rate=FS, delay=TAU_D, f_shift=F_AOM, method="increment"
+)
+res_lor = analysis.linewidth_dsh(
+    beat, sampling_rate=FS, delay=TAU_D, method="lorentzian"
+)
 
 fig, ax = plotting.plot_frequency_noise_psd(
     res_fm["f"],
@@ -180,7 +186,9 @@ print(
 # ## 5. Long-term stability - Allan deviation (valid for τ ≳ 5·τ_d)
 
 # %%
-allan = analysis.allan_deviation(dphi / (2.0 * np.pi * TAU_D), FS, n_taus=40)
+allan = analysis.allan_deviation(
+    dphi / (2.0 * np.pi * TAU_D), symbol_rate=FS, num_taus=40
+)
 fig, ax = plotting.plot_allan_deviation(allan["tau_s"], allan["adev"])
 ax.axvspan(
     allan["tau_s"][0],

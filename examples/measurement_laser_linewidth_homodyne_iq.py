@@ -86,7 +86,9 @@ else:
             num_samples=(1 << 21) + m, sampling_rate=FS, linewidth=100e3, rng=42
         )
     )
-    z_demo, _ = analysis.dsh_beat(phi_demo, FS, TAU_D)  # f_shift=0: homodyne
+    z_demo, _ = analysis.dsh_beat(
+        phi_demo, sampling_rate=FS, delay=TAU_D
+    )  # f_shift=0: homodyne
     z_meas = apply_iq_imbalance(
         apply_awgn(z_demo, sps=1, esn0_db=25, rng=1),
         amplitude_imbalance_db=1.0,
@@ -149,10 +151,12 @@ print(
 
 # %%
 res_fm = analysis.linewidth_dsh(
-    z, FS, TAU_D, f_shift=0.0, method="fm_psd", nperseg=NPERSEG
+    z, sampling_rate=FS, delay=TAU_D, f_shift=0.0, method="fm_psd", nperseg=NPERSEG
 )
-res_inc = analysis.linewidth_dsh(z, FS, TAU_D, f_shift=0.0, method="increment")
-res_lor = analysis.linewidth_dsh(z, FS, TAU_D, method="lorentzian")
+res_inc = analysis.linewidth_dsh(
+    z, sampling_rate=FS, delay=TAU_D, f_shift=0.0, method="increment"
+)
+res_lor = analysis.linewidth_dsh(z, sampling_rate=FS, delay=TAU_D, method="lorentzian")
 
 fig, ax = plotting.plot_frequency_noise_psd(
     res_fm["f"],
@@ -189,8 +193,10 @@ print(
 # ## 6. Long-term stability - Allan deviation (valid for τ ≳ 5·τ_d)
 
 # %%
-dphi, _ = analysis.dsh_phase(z, FS, f_shift=0.0)
-allan = analysis.allan_deviation(dphi / (2.0 * np.pi * TAU_D), FS, n_taus=40)
+dphi, _ = analysis.dsh_phase(z, sampling_rate=FS, f_shift=0.0)
+allan = analysis.allan_deviation(
+    dphi / (2.0 * np.pi * TAU_D), symbol_rate=FS, num_taus=40
+)
 fig, ax = plotting.plot_allan_deviation(allan["tau_s"], allan["adev"])
 ax.axvspan(
     allan["tau_s"][0],

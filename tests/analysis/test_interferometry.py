@@ -32,21 +32,21 @@ class TestDSHBeatForwardModel:
                 "cpu",
             )
         )
-        z, dphi = analysis.dsh_beat(phi, FS, m / FS, f_shift=80e6)
+        z, dphi = analysis.dsh_beat(phi, sampling_rate=FS, delay=m / FS, f_shift=80e6)
         assert z.shape == (n,)
         assert dphi.shape == (n,)
         xpt.assert_allclose(xp.abs(z), xp.ones(n), atol=1e-12)
         xpt.assert_allclose(dphi, phi[m:] - phi[:-m], atol=0.0)
         # Homodyne (f_shift = 0): the beat is exp(j·Δφ) exactly.
-        z0, dphi0 = analysis.dsh_beat(phi, FS, m / FS)
+        z0, dphi0 = analysis.dsh_beat(phi, sampling_rate=FS, delay=m / FS)
         xpt.assert_allclose(z0, xp.exp(1j * dphi0), atol=1e-12)
 
     def test_dsh_beat_rejects_bad_delay(self, xp):
         phi = xp.zeros(100, dtype=xp.float64)
         with pytest.raises(ValueError, match="delay"):
-            analysis.dsh_beat(phi, FS, 0.0)
+            analysis.dsh_beat(phi, sampling_rate=FS, delay=0.0)
         with pytest.raises(ValueError, match="delay"):
-            analysis.dsh_beat(phi, FS, 100 / FS)
+            analysis.dsh_beat(phi, sampling_rate=FS, delay=100 / FS)
 
 
 class TestDSHPhaseEstimation:
@@ -55,7 +55,7 @@ class TestDSHPhaseEstimation:
     def test_dsh_phase_recovers_differential_phase(self, xp, xpt):
         n, m = 1 << 18, 500
         z, dphi = make_dsh_beat(2e6, n, m, 80e6, snr_db=None, seed=1)
-        dp, f_used = analysis.dsh_phase(xp.asarray(z), FS, f_shift=80e6)
+        dp, f_used = analysis.dsh_phase(xp.asarray(z), sampling_rate=FS, f_shift=80e6)
         assert f_used == pytest.approx(80e6)
         # Constant offsets are irrelevant; the increments must match exactly.
         xpt.assert_allclose(xp.diff(dp), xp.asarray(np.diff(dphi)), atol=1e-6)
@@ -65,7 +65,7 @@ class TestDSHPhaseEstimation:
         n, m = 1 << 20, 500
         td = m / FS
         z, _ = make_dsh_beat(2e6, n, m, 80e6, snr_db=25, seed=2)
-        dp, f_hat = analysis.dsh_phase(xp.asarray(z), FS)
+        dp, f_hat = analysis.dsh_phase(xp.asarray(z), sampling_rate=FS)
         assert f_hat == pytest.approx(80e6, abs=5e3)
         # A residual carrier ramp would inflate this variance by an order of
         # magnitude (LS detrend regression guard).
@@ -75,7 +75,9 @@ class TestDSHPhaseEstimation:
         # Narrow line vs f_aom so the beat spectrum is one-sided (Hilbert-exact).
         n, m = 1 << 18, 500
         z, dphi = make_dsh_beat(2e5, n, m, 80e6, snr_db=None, seed=3)
-        dp, f_hat = analysis.dsh_phase(xp.asarray(z.real), FS, f_shift=80e6)
+        dp, f_hat = analysis.dsh_phase(
+            xp.asarray(z.real), sampling_rate=FS, f_shift=80e6
+        )
         edge = 1000  # Hilbert edge transients
         resid = (xp.asarray(dphi) - dp)[edge:-edge]
         err = resid - xp.mean(resid)
@@ -84,7 +86,7 @@ class TestDSHPhaseEstimation:
     def test_dsh_phase_real_homodyne_rejected(self, xp):
         x = xp.asarray(np.cos(np.linspace(0.0, 20.0, 1000)))
         with pytest.raises(ValueError, match="cannot be inverted"):
-            analysis.dsh_phase(x, FS, f_shift=0.0)
+            analysis.dsh_phase(x, sampling_rate=FS, f_shift=0.0)
 
 
 class TestDSHLinewidthEstimator:
@@ -94,7 +96,11 @@ class TestDSHLinewidthEstimator:
         n, m = 1 << 20, 500
         z, _ = make_dsh_beat(2e6, n, m, 80e6, snr_db=25, seed=4)
         res = analysis.linewidth_dsh(
-            xp.asarray(z), FS, m / FS, method="fm_psd", nperseg=1 << 14
+            xp.asarray(z),
+            sampling_rate=FS,
+            delay=m / FS,
+            method="fm_psd",
+            nperseg=1 << 14,
         )
         assert res["linewidth"] == pytest.approx(2e6, rel=0.15)
         # Notch bins are masked and NaN.
@@ -126,15 +132,20 @@ class TestDSHLinewidthEstimator:
             ),
             "cpu",
         )
-        z, _ = analysis.dsh_beat(phi, FS, m / FS, f_shift=80e6)
+        z, _ = analysis.dsh_beat(phi, sampling_rate=FS, delay=m / FS, f_shift=80e6)
         z = apply_awgn(z, sps=1, esn0_db=25, rng=145)
         auto = analysis.linewidth_dsh(
-            xp.asarray(z), FS, m / FS, f_shift=80e6, method="fm_psd", nperseg=1 << 15
+            xp.asarray(z),
+            sampling_rate=FS,
+            delay=m / FS,
+            f_shift=80e6,
+            method="fm_psd",
+            nperseg=1 << 15,
         )
         naive = analysis.linewidth_dsh(
             xp.asarray(z),
-            FS,
-            m / FS,
+            sampling_rate=FS,
+            delay=m / FS,
             f_shift=80e6,
             method="fm_psd",
             nperseg=1 << 15,
@@ -161,13 +172,13 @@ class TestDSHLinewidthEstimator:
             ),
             "cpu",
         )
-        z, _ = analysis.dsh_beat(phi, FS, m / FS, f_shift=f_aom)
+        z, _ = analysis.dsh_beat(phi, sampling_rate=FS, delay=m / FS, f_shift=f_aom)
         beat = apply_awgn(z, sps=1, esn0_db=25, rng=1).real
         tau_cal = 4.8978e-6  # -0.05 % delay-calibration error
         res = analysis.linewidth_dsh(
             xp.asarray(beat),
-            FS,
-            tau_cal,
+            sampling_rate=FS,
+            delay=tau_cal,
             f_shift=f_aom,
             method="fm_psd",
             nperseg=1 << 15,
@@ -181,8 +192,8 @@ class TestDSHLinewidthEstimator:
         z, _ = make_dsh_beat(2e6, n, m, 80e6, snr_db=25, seed=4)
         res = analysis.linewidth_dsh(
             xp.asarray(z),
-            FS,
-            m / FS,
+            sampling_rate=FS,
+            delay=m / FS,
             f_shift=80e6,
             method="fm_psd",
             nperseg=1 << 14,
@@ -197,7 +208,11 @@ class TestDSHLinewidthEstimator:
         n, m = 1 << 20, 500
         z, _ = make_dsh_beat(50e3, n, m, 80e6, snr_db=None, seed=5)
         res = analysis.linewidth_dsh(
-            xp.asarray(z), FS, m / FS, method="fm_psd", nperseg=1 << 14
+            xp.asarray(z),
+            sampling_rate=FS,
+            delay=m / FS,
+            method="fm_psd",
+            nperseg=1 << 14,
         )
         assert np.pi * 50e3 * (m / FS) < 1.0  # deeply coherent
         assert res["linewidth"] == pytest.approx(50e3, rel=0.15)
@@ -205,7 +220,9 @@ class TestDSHLinewidthEstimator:
     def test_linewidth_dsh_increment_awgn_immune(self, xp):
         n, m = 1 << 20, 500
         z, _ = make_dsh_beat(2e6, n, m, 80e6, snr_db=20, seed=6)
-        res = analysis.linewidth_dsh(xp.asarray(z), FS, m / FS, method="increment")
+        res = analysis.linewidth_dsh(
+            xp.asarray(z), sampling_rate=FS, delay=m / FS, method="increment"
+        )
         assert res["linewidth"] == pytest.approx(2e6, rel=0.15)
         assert res["dphi_var"] == pytest.approx(2.0 * np.pi * 2e6 * m / FS, rel=0.2)
 
@@ -213,7 +230,9 @@ class TestDSHLinewidthEstimator:
         n, m = 1 << 20, 2000  # τ_d = 4 µs, τ_d/τ_c ≈ 63
         dnu = 5e6
         z, _ = make_dsh_beat(dnu, n, m, 80e6, snr_db=30, seed=7)
-        res = analysis.linewidth_dsh(xp.asarray(z), FS, m / FS, method="lorentzian")
+        res = analysis.linewidth_dsh(
+            xp.asarray(z), sampling_rate=FS, delay=m / FS, method="lorentzian"
+        )
         assert res["linewidth"] == pytest.approx(dnu, rel=0.20)
         assert res["linewidth_3db"] == pytest.approx(dnu, rel=0.20)
         # Pure white FM -> Lorentzian wings: W₂₀/W₃ ≈ √99.
@@ -227,7 +246,11 @@ class TestDSHLinewidthEstimator:
         z1, _ = make_dsh_beat(3e6, n, m, 80e6, snr_db=None, seed=9)
         z = np.stack([z0, z1])
         res = analysis.linewidth_dsh(
-            xp.asarray(z), FS, m / FS, f_shift=80e6, method="increment"
+            xp.asarray(z),
+            sampling_rate=FS,
+            delay=m / FS,
+            f_shift=80e6,
+            method="increment",
         )
         assert res["linewidth"].shape == (2,)
         assert res["linewidth"][0] == pytest.approx(1e6, rel=0.2)
@@ -237,11 +260,11 @@ class TestDSHLinewidthEstimator:
         z, _ = make_dsh_beat(1e6, 1 << 12, 100, 80e6, seed=10)
         z = xp.asarray(z)
         with pytest.raises(ValueError, match="positive"):
-            analysis.linewidth_dsh(z, FS, -1e-6)
+            analysis.linewidth_dsh(z, sampling_rate=FS, delay=-1e-6)
         with pytest.raises(ValueError, match="unresolvable"):
-            analysis.linewidth_dsh(z, FS, 0.1 / FS)
+            analysis.linewidth_dsh(z, sampling_rate=FS, delay=0.1 / FS)
         with pytest.raises(ValueError, match="Unknown method"):
-            analysis.linewidth_dsh(z, FS, 100 / FS, method="nope")
+            analysis.linewidth_dsh(z, sampling_rate=FS, delay=100 / FS, method="nope")
 
     def test_linewidth_dsh_results_plot_directly(self, xp):
         """Every method returns the data its diagnostic plot needs."""
@@ -250,15 +273,19 @@ class TestDSHLinewidthEstimator:
         n, m = 1 << 16, 200
         z, _ = make_dsh_beat(2e6, n, m, 80e6, snr_db=25, seed=12)
         z = xp.asarray(z)
-        fm = analysis.linewidth_dsh(z, FS, m / FS, method="fm_psd")
+        fm = analysis.linewidth_dsh(z, sampling_rate=FS, delay=m / FS, method="fm_psd")
         plotting.plot_frequency_noise_psd(
             fm["f"], fm["S_f"], floor=fm["linewidth"], band=fm["band"], used=fm["used"]
         )
-        inc = analysis.linewidth_dsh(z, FS, m / FS, method="increment")
+        inc = analysis.linewidth_dsh(
+            z, sampling_rate=FS, delay=m / FS, method="increment"
+        )
         plotting.plot_increment_variance(
             inc["lag_s"], inc["var"], slope=inc["slope"], intercept=inc["intercept"]
         )
-        lor = analysis.linewidth_dsh(z, FS, m / FS, method="lorentzian")
+        lor = analysis.linewidth_dsh(
+            z, sampling_rate=FS, delay=m / FS, method="lorentzian"
+        )
         plotting.plot_dsh_beat_psd(
             lor["f"],
             lor["psd"],
@@ -277,7 +304,9 @@ class TestSignalInputInterferometry:
         sig = Signal(samples=xp.asarray(z), sampling_rate=FS, symbol_rate=FS)
 
         dp_sig, f_sig = analysis.dsh_phase(sig, f_shift=80e6)
-        dp_arr, f_arr = analysis.dsh_phase(xp.asarray(z), FS, f_shift=80e6)
+        dp_arr, f_arr = analysis.dsh_phase(
+            xp.asarray(z), sampling_rate=FS, f_shift=80e6
+        )
 
         assert not isinstance(dp_sig, Signal)
         assert f_sig == pytest.approx(f_arr)
@@ -292,7 +321,20 @@ class TestSignalInputInterferometry:
             sig, delay=m / FS, method="fm_psd", nperseg=1 << 13
         )
         res_arr = analysis.linewidth_dsh(
-            xp.asarray(z), FS, m / FS, method="fm_psd", nperseg=1 << 13
+            xp.asarray(z),
+            sampling_rate=FS,
+            delay=m / FS,
+            method="fm_psd",
+            nperseg=1 << 13,
         )
 
         assert res_sig["linewidth"] == pytest.approx(res_arr["linewidth"])
+
+    def test_conflicting_sampling_rate_raises(self, xp):
+        """sampling_rate is a fact: a value that disagrees with the Signal raises."""
+        z, _ = make_dsh_beat(2e6, 1 << 12, 50, 80e6, snr_db=None, seed=1)
+        sig = Signal(samples=xp.asarray(z), sampling_rate=FS, symbol_rate=FS)
+        with pytest.raises(ValueError, match="conflicts"):
+            analysis.dsh_phase(sig, sampling_rate=FS / 2)
+        with pytest.raises(ValueError, match="conflicts"):
+            analysis.linewidth_dsh(sig, sampling_rate=FS / 2, delay=50 / FS)

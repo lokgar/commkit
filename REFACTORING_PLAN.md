@@ -1118,7 +1118,7 @@ The equalization pass (3.7) gets more commits:
   which those modules cannot import. That empties `helpers.py`, deleted
   here instead of in 4.1; its peak-interpolation and ZC-root tests move to
   `test_timing.py`.
-- [ ] **3.9b `refactor(analysis)!: 2.0 signatures`.** Rates after the data
+- [x] **3.9b `refactor(analysis)!: 2.0 signatures`.** Rates after the data
   are keyword-only (`allan_deviation(df, *, symbol_rate=)`,
   `dsh_beat(phi, *, sampling_rate=, delay=)`, ...); `dsh_phase` and
   `linewidth_dsh` resolve `sampling_rate` as a fact. `ref_symbols` becomes

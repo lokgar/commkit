@@ -93,9 +93,9 @@ def _analytic_beat(samples):
 
 def dsh_beat(
     phi: ArrayType,
+    *,
     sampling_rate: float,
     delay: float,
-    *,
     f_shift: float = 0.0,
 ) -> tuple[ArrayType, ArrayType]:
     r"""Ideal interferometer beat for a laser phase trajectory (forward model).
@@ -167,8 +167,8 @@ def dsh_beat(
 
 def dsh_phase(
     samples: ArrayType | Signal,
-    sampling_rate: float | None = None,
     *,
+    sampling_rate: float | None = None,
     f_shift: float | None = None,
 ) -> tuple[ArrayType, float | np.ndarray]:
     r"""Unwrapped differential laser phase Δφ(t) = φ(t) - φ(t-τ_d) from the beat.
@@ -186,11 +186,10 @@ def dsh_phase(
     samples : array_like or Signal
         Beat record, ``(N,)`` or ``(C, N)``.  Real (single photodetector,
         heterodyne) or complex (IQ front-end).  A :class:`Signal` supplies
-        ``sampling_rate`` from its metadata when not given explicitly.
-    sampling_rate : float, optional
-        Sampling rate in Hz.  Required for array input; ignored for
-        :class:`Signal` input, which always uses the signal's own
         ``sampling_rate``.
+    sampling_rate : float, optional
+        Sampling rate in Hz (a fact).  Taken from a Signal; required for array
+        input.  A value that disagrees with the Signal raises.
     f_shift : float, optional
         Known beat carrier in Hz (AOM frequency).  If None, the mean beat
         frequency is estimated per channel in two stages - coarse Kay
@@ -233,7 +232,7 @@ def dsh_phase(
     """
     signal_adapter = adapt_signal(samples, function_name="dsh_phase()")
     samples = signal_adapter.array
-    sampling_rate = signal_adapter.resolve_required("sampling_rate", sampling_rate)
+    sampling_rate = signal_adapter.resolve_fact("sampling_rate", sampling_rate)
 
     z, xp, _ = dispatch(samples)
     fs = float(sampling_rate)
@@ -284,9 +283,9 @@ def dsh_phase(
 
 def dsh_fm_noise_psd(
     delta_phi: ArrayType,
+    *,
     sampling_rate: float,
     delay: float,
-    *,
     nperseg: int | None = None,
     notch_guard: float = 0.1,
     bias_correction: bool = True,
@@ -373,7 +372,7 @@ def dsh_fm_noise_psd(
     dphi_arr, _, _ = dispatch(delta_phi)
     f, S_beat = fm_noise_psd(
         dphi_arr,
-        float(sampling_rate),
+        symbol_rate=float(sampling_rate),
         nperseg=nperseg,
         bias_correction=bias_correction,
     )
@@ -438,9 +437,9 @@ def _lorentzian_widths(f, p, level_lin):
 
 def linewidth_dsh(
     samples: ArrayType | Signal,
-    sampling_rate: float | None = None,
-    delay: float | None = None,
     *,
+    sampling_rate: float | None = None,
+    delay: float,
     f_shift: float | None = None,
     method: str = "fm_psd",
     lags: tuple[int, ...] | None = None,
@@ -479,12 +478,10 @@ def linewidth_dsh(
     ----------
     samples : array_like or Signal
         Beat record, ``(N,)`` or ``(C, N)``, real (heterodyne photocurrent) or
-        complex (IQ).  A :class:`Signal` supplies ``sampling_rate`` from its
-        metadata when not given explicitly.
+        complex (IQ).  A :class:`Signal` supplies ``sampling_rate``.
     sampling_rate : float, optional
-        Sampling rate in Hz.  Required for array input; ignored for
-        :class:`Signal` input, which always uses the signal's own
-        ``sampling_rate``.
+        Sampling rate in Hz (a fact).  Taken from a Signal; required for array
+        input.  A value that disagrees with the Signal raises.
     delay : float
         Interferometer differential delay τ_d in seconds.
     f_shift : float, optional
@@ -614,9 +611,7 @@ def linewidth_dsh(
     """
     signal_adapter = adapt_signal(samples, function_name="linewidth_dsh()")
     samples = signal_adapter.array
-    sampling_rate = signal_adapter.resolve_required("sampling_rate", sampling_rate)
-    if delay is None:
-        raise ValueError("linewidth_dsh() requires delay.")
+    sampling_rate = signal_adapter.resolve_fact("sampling_rate", sampling_rate)
 
     fs = float(sampling_rate)
     td = float(delay)
@@ -630,9 +625,9 @@ def linewidth_dsh(
         )
 
     if method == "fm_psd":
-        dphi, f_hat = dsh_phase(samples, fs, f_shift=f_shift)
+        dphi, f_hat = dsh_phase(samples, sampling_rate=fs, f_shift=f_shift)
         f, S_l, valid = dsh_fm_noise_psd(
-            dphi, fs, td, nperseg=nperseg, notch_guard=notch_guard
+            dphi, sampling_rate=fs, delay=td, nperseg=nperseg, notch_guard=notch_guard
         )
         # Summary layer: one transfer, host-side plateau search + median
         # (plot-sized spectra - see the package backend policy).
@@ -714,7 +709,7 @@ def linewidth_dsh(
         return result
 
     if method == "increment":
-        dphi, f_hat = dsh_phase(samples, fs, f_shift=f_shift)
+        dphi, f_hat = dsh_phase(samples, sampling_rate=fs, f_shift=f_shift)
         d2, _ = as_2d(dphi, name="delta_phi")
         _, xp, _ = dispatch(d2)
 

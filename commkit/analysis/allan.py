@@ -10,10 +10,10 @@ __all__ = ["allan_deviation"]
 
 def allan_deviation(
     df: ArrayType,
-    symbol_rate: float,
     *,
+    symbol_rate: float,
     taus: np.ndarray | None = None,
-    n_taus: int = 30,
+    num_taus: int = 30,
 ) -> dict[str, np.ndarray]:
     r"""Overlapping Allan deviation of an instantaneous-frequency series.
 
@@ -30,9 +30,9 @@ def allan_deviation(
     symbol_rate : float
         Sample rate of ``df`` in Hz (``τ_0 = 1/symbol_rate``).
     taus : array_like, optional
-        Explicit averaging times in seconds.  Default: ``n_taus`` values
+        Explicit averaging times in seconds.  Default: ``num_taus`` values
         geometrically spaced from ``τ_0`` to ``N//4·τ_0``.
-    n_taus : int, default 30
+    num_taus : int, default 30
         Number of log-spaced averaging times when ``taus`` is None.
 
     Returns
@@ -74,7 +74,7 @@ def allan_deviation(
 
     if taus is None:
         m_max = max(1, n // 4)
-        ms = np.unique(np.round(np.geomspace(1, m_max, n_taus)).astype(int))
+        ms = np.unique(np.round(np.geomspace(1, m_max, num_taus)).astype(int))
     else:
         taus_cpu = np.asarray(to_device(taus, "cpu"), dtype=np.float64)
         ms = np.unique(np.maximum(1, np.round(taus_cpu / tau0).astype(int)))

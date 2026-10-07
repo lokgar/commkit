@@ -22,7 +22,7 @@ class TestFrequencyDriftAnalysis:
         t = np.arange(n) * T
         fm = periods / (n * T)
         drift_phase = 2.0 * np.pi * np.cumsum(amp * np.sin(2 * np.pi * fm * t)) * T
-        m = analysis.frequency_drift_metrics(xp.asarray(drift_phase), R)
+        m = analysis.frequency_drift_metrics(xp.asarray(drift_phase), symbol_rate=R)
         assert m["std"] == pytest.approx(amp / np.sqrt(2.0), rel=0.05)
         assert m["pp"] == pytest.approx(2.0 * amp, rel=0.10)
 
@@ -34,7 +34,9 @@ class TestFrequencyDriftAnalysis:
         rng = np.random.default_rng(21)
         fast = rng.normal(0, 0.05, n)
         phi = slow + fast
-        drift, pn = analysis.separate_drift_phase_noise(xp.asarray(phi), R, cutoff=1e6)
+        drift, pn = analysis.separate_drift_phase_noise(
+            xp.asarray(phi), symbol_rate=R, cutoff=1e6
+        )
         assert drift.shape == pn.shape == (n,)
 
         edge = 200

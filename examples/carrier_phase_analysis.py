@@ -164,10 +164,10 @@ plt.show()
 
 # %%
 CUTOFF = 2e6  # Hz
-drift, pn = analysis.separate_drift_phase_noise(phi, R, cutoff=CUTOFF)
+drift, pn = analysis.separate_drift_phase_noise(phi, symbol_rate=R, cutoff=CUTOFF)
 edge = int(round(0.5 * R / CUTOFF))
 
-dm = analysis.frequency_drift_metrics(drift, R, edge_trim=edge)
+dm = analysis.frequency_drift_metrics(drift, symbol_rate=R, edge_trim=edge)
 
 # The drift component also carries the laser's own white-FM content below the
 # cutoff - variance (Δν/π)·cutoff - which adds in quadrature to the injected
@@ -229,7 +229,7 @@ for K in (32, 64, 128):
 # the FM PSD in §5 for a clean plateau before quoting it.
 
 # %%
-lw_inc = analysis.linewidth_increment(pn, R, method="slope", edge_trim=edge)
+lw_inc = analysis.linewidth_increment(pn, symbol_rate=R, method="slope", edge_trim=edge)
 plotting.plot_increment_variance(
     lw_inc["lag_s"],
     lw_inc["var"],
@@ -286,7 +286,7 @@ print(
 )
 
 lw_beta = analysis.linewidth_beta_separation(
-    phi, R, nperseg=1 << 15, f_min=20e6, f_max=f_knee / 3.0
+    phi, symbol_rate=R, nperseg=1 << 15, f_min=20e6, f_max=f_knee / 3.0
 )
 plotting.plot_frequency_noise_psd(
     lw_beta["f"],
@@ -309,7 +309,7 @@ print(
 
 # What happens if f_max ignores the knee: the f² tail joins the median.
 lw_bad = analysis.linewidth_beta_separation(
-    phi, R, nperseg=1 << 15, f_min=20e6, f_max=2e9
+    phi, symbol_rate=R, nperseg=1 << 15, f_min=20e6, f_max=2e9
 )
 print(
     f"floor with f_max=2 GHz (above knee/3): "
@@ -330,7 +330,7 @@ print(
 # vs flicker-PM cannot be distinguished (needs the modified Allan deviation).
 
 # %%
-allan = analysis.allan_deviation(dm["df"], R, n_taus=40)
+allan = analysis.allan_deviation(dm["df"], symbol_rate=R, num_taus=40)
 _, ax = plotting.plot_allan_deviation(allan["tau_s"], allan["adev"])
 ax.axvline(0.37 / WANDER_FREQ, color="gray", ls=":")
 plt.show()
