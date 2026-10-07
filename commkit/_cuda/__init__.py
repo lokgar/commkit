@@ -242,12 +242,13 @@ def _bps_min_d2_factory(mode: str = "table", return_argmin: bool = False) -> Cal
 def _cs_block_factory() -> Callable:
     """Wrapper factory for the block_lms cycle-slip correction kernel.
 
-    Sequential per-channel slip detector (one block, one thread per channel)
-    operating in-place on device-resident state buffers. One launch processes
-    one equalizer block, replacing the per-block D2H -> CPU Numba -> H2D
-    round trip of the fallback path. All state arrays are float64/int64 and
-    are mutated in place - the wrapper therefore rejects non-contiguous
-    inputs instead of silently copying them.
+    Per-channel slip detector (one block of threads per channel, decisions
+    speculated in parallel; see ``cs_block.cu``) operating in place on
+    device-resident state buffers. One launch processes one equalizer block,
+    replacing the per-block D2H -> CPU Numba -> H2D round trip of the
+    fallback path. All state arrays are float64/int64 and are mutated in
+    place - the wrapper therefore rejects non-contiguous inputs instead of
+    silently copying them.
     """
     import cupy as cp
 
@@ -271,8 +272,8 @@ def _cs_block_factory() -> Callable:
         if phi_blk.ndim != 2:
             raise ValueError(f"phi_blk must be 2-D (C, B), got shape {phi_blk.shape}")
         C, B = phi_blk.shape
-        if C > 1024:
-            raise ValueError(f"channel count must be <= 1024, got {C}")
+        if B < 1:
+            raise ValueError("phi_blk must have at least one column")
         cs_H = int(cs_H)
         for label, arr, dtype, shape in (
             ("phi_blk", phi_blk, cp.float64, (C, B)),
@@ -288,9 +289,10 @@ def _cs_block_factory() -> Callable:
                 raise ValueError(f"{label} must have shape {shape}, got {arr.shape}")
             if not arr.flags.c_contiguous:
                 raise ValueError(f"{label} must be C-contiguous (mutated in place)")
+        L = cs_H + B
         kern(
-            (1,),
             (C,),
+            (256,),  # CS_THREADS in cs_block.cu
             (
                 phi_blk,
                 phi_corr,
@@ -298,6 +300,11 @@ def _cs_block_factory() -> Callable:
                 cs_buf_ptr,
                 cs_buf_n,
                 cs_stats,
+                cp.empty((C, L), dtype=cp.float64),
+                cp.empty((C, L + 1), dtype=cp.float64),
+                cp.empty((C, L + 1), dtype=cp.float64),
+                cp.empty((C, B), dtype=cp.int32),
+                cp.empty((C, B), dtype=cp.int32),
                 cp.float64(quantum),
                 cp.float64(threshold),
                 cp.int32(cs_H),
