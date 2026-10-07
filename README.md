@@ -107,8 +107,9 @@ a GPU:
 
   A sample-by-sample recursion has no parallel work per step. For long
   records on the GPU, prefer the block equalizers with `block_size=1024` or
-  more. Each block costs a fixed overhead, so at 256 the GPU is slower than
-  the CPU, and at 2048 it is about 4x faster.
+  more. Each block costs a fixed overhead: at 256 the GPU only ties the CPU
+  without carrier recovery, at 2048 it is 6-9x faster. A larger block also
+  lowers the stable `step_size`.
 - **Short records do not pay off.** Launch overhead dominates below roughly
   10⁴-10⁵ samples, where the CPU is as fast.
 - **Batch channels and records.** Pass `(C, N)` arrays rather than looping
