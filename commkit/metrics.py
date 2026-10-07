@@ -103,6 +103,36 @@ def _paired(
     return rx, ref
 
 
+def _gain(rx: ArrayType, tx: ArrayType, xp: Any) -> ArrayType:
+    """The data-aided gain ``g = |<r s*>| / <|s|^2>`` per channel, ``(..., 1)``.
+
+    ``g`` is the amplitude of the symbols in ``rx`` (the transmittance), so
+    ``rx / g`` is on the scale of ``tx`` whatever the noise; normalizing to
+    unit total power instead shrinks the symbols by ``1/sqrt(1 + 1/SNR)``.
+    Only the magnitude is used: a rotation, ``pi`` included, stays visible.
+    A channel without reference power or correlation gets ``g = 1``.
+    """
+    num = xp.abs(xp.mean(rx * xp.conj(tx), axis=-1, keepdims=True))
+    den = xp.mean(xp.abs(tx) ** 2, axis=-1, keepdims=True)
+    with np.errstate(divide="ignore", invalid="ignore"):
+        g = num / den
+    return xp.where((den > 0) & (g > 0), g, 1.0).astype(rx.real.dtype)
+
+
+def _reference_scaled(
+    adapter: SignalAdapter, rx: ArrayType, xp: Any, name: str, num_skip: int
+) -> ArrayType:
+    """A Signal's symbols divided by the data-aided gain against its reference
+    symbols (estimated after the first ``num_skip``); arrays and Signals
+    without a reference are returned as given."""
+    sig = adapter.signal
+    if sig is None or sig.reference is None:
+        return rx
+    _, ref = _paired(rx, sig.reference.symbols, xp, name)
+    measured = _skip(rx, num_skip, name)
+    return rx / _gain(measured, _skip(ref, num_skip, name), xp)
+
+
 def _skip(x: ArrayType, n: int, name: str) -> ArrayType:
     """Drop the first ``n`` entries of the last axis; nothing left raises."""
     if n < 0:
@@ -174,8 +204,11 @@ def evm(
 
     Notes
     -----
-    Data-aided EVM normalizes the received symbols and the reference to unit
-    average power per channel, so a common gain does not count as error.
+    Data-aided EVM normalizes the reference to unit average power per
+    channel and divides the received symbols by the data-aided gain
+    ``|<r s*>| / <|s|^2>``, so a common gain does not count as error at any
+    SNR (normalizing to unit total power would shrink the symbols by
+    ``1/sqrt(1 + 1/SNR)``).  No rotation is applied.
     """
     name = "evm()"
     adapter = adapt_signal(symbols, function_name=name)
@@ -199,10 +232,9 @@ def evm(
         rx, tx = _paired(rx, ref, xp, name)
         rx = _skip(rx, num_skip_symbols, name)
         tx = _skip(tx, num_skip_symbols, name)
-        if not _is_normalized(rx, axis, xp):
-            rx = normalize(rx, axis=axis, mode="average_power")
         if not _is_normalized(tx, axis, xp):
             tx = normalize(tx, axis=axis, mode="average_power")
+        rx = rx / _gain(rx, tx, xp)
 
     ref_pwr = xp.mean(xp.abs(tx) ** 2, axis=axis)
     low_pwr_mask = ref_pwr < 1e-20
@@ -230,8 +262,10 @@ def snr(
     """
     Data-aided SNR in dB: signal power over error power.
 
-    ``SNR = 1 / E[|r - s|^2]`` with the received symbols ``r`` and the
-    reference ``s`` both normalized to unit average power per channel.
+    ``SNR = 1 / E[|r / g - s|^2]`` with the reference ``s`` normalized to
+    unit average power per channel and the data-aided gain
+    ``g = |<r s*>| / <|s|^2>``, which is unbiased at any SNR (normalizing
+    ``r`` to unit total power is not).  No rotation is applied.
 
     Parameters
     ----------
@@ -264,10 +298,9 @@ def snr(
     tx = _skip(tx, num_skip_symbols, name)
     axis = -1
 
-    if not _is_normalized(rx, axis, xp):
-        rx = normalize(rx, axis=axis, mode="average_power")
     if not _is_normalized(tx, axis, xp):
         tx = normalize(tx, axis=axis, mode="average_power")
+    rx = rx / _gain(rx, tx, xp)
 
     ref_pwr = xp.mean(xp.abs(tx) ** 2, axis=axis)
     noise_power = xp.mean(xp.abs(rx - tx) ** 2, axis=axis)
@@ -441,9 +474,10 @@ def gmi(
     llrs : array_like or Signal
         Bit LLRs in the layout of :func:`~commkit.mapping.compute_llr`,
         ``(N * k,)`` or ``(C, N * k)`` (the ``k`` bits of a symbol adjacent).
-        A Signal holds received *symbols* at one sample per symbol: their LLRs
-        are computed with ``noise_var`` and ``method`` and compared with
-        ``reference.bits``.
+        A Signal holds received *symbols* at one sample per symbol: they are
+        divided by the data-aided gain against ``reference.symbols`` (if
+        present), and their LLRs are computed with ``noise_var`` and
+        ``method`` and compared with ``reference.bits``.
     reference : array_like, optional
         Transmitted bits, same shape as the LLRs.  Required for arrays.
     constellation : Constellation, optional
@@ -478,6 +512,9 @@ def gmi(
     if adapter.signal is not None:
         if noise_var is None:
             raise ValueError(f"{name} needs noise_var to compute LLRs of a Signal.")
+        received = _reference_scaled(
+            adapter, received, dispatch(received)[1], name, num_skip_symbols
+        )
         received = c.llr(received, noise_var=noise_var, method=method)
     elif noise_var is not None:
         raise ValueError(
@@ -533,7 +570,9 @@ def mi(
     symbols : array_like or Signal
         Received symbols at one sample per symbol, ``(N,)`` or ``(C, N)``, on
         the constellation's scale.  A Signal must be at one sample per
-        symbol.
+        symbol; with a reference, its samples are first divided by the
+        data-aided gain ``|<r s*>| / <|s|^2>``, which puts them on the
+        constellation's scale whatever their normalization.
     noise_var : float
         Complex noise variance ``sigma^2 = E[|n|^2]`` on the constellation's
         scale.  For a unit-power constellation at Es/N0 in dB:
@@ -559,6 +598,7 @@ def mi(
     adapter = adapt_signal(symbols, function_name=name)
     rx, xp, _ = dispatch(adapter.symbol_array())
     c = _constellation(adapter, constellation, name)
+    rx = _reference_scaled(adapter, rx, xp, name, num_skip_symbols)
     rx = _skip(rx, num_skip_symbols, name).astype(xp.complex128)
     points = xp.asarray(c.points, dtype=xp.complex128)
     if c.pmf is not None:

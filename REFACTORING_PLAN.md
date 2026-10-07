@@ -1092,11 +1092,18 @@ The equalization pass (3.7) gets more commits:
   rate (4 shaped cases, 16- to 256-QAM, 0 to 20 dB), and
   `GMI <= MI <= H(X)`; uniform constellations are bit-identical
   (`k (H/k - m)` with `H/k = 1.0` exactly).
-- [ ] **3.8f `fix(metrics): data-aided gain instead of total power`.**
-  Symbols with a reference are scaled by the real data-aided gain
-  `Re<r s*> / <|s|^2>` (no rotation) instead of to unit total power, which
-  shrinks the signal by `1/sqrt(1 + 1/SNR)`. Oracle at -10 dB for
-  `snr`, `evm`, `mi` and `gmi`.
+- [x] **3.8f `fix(metrics): data-aided gain instead of total power`.**
+  `evm` and `snr`, and `mi`/`gmi` of a Signal with a reference, divide the
+  received symbols by the data-aided gain `|<r s*>| / <|s|^2>` (estimated
+  after `num_skip_symbols`) instead of normalizing them to unit total
+  power, which shrinks the signal by `1/sqrt(1 + 1/SNR)`. The magnitude,
+  not `Re`, so that a rotation (pi included) stays an error instead of
+  being undone or shrinking the scale. `ser`/`ber` decide on the symbols
+  as given (thresholds are the receiver's). Oracle at -10 dB with symbols
+  normalized to unit total power: SNR -10 dB (1.x read -1.45 dB), EVM
+  `100 sqrt(nv)`, and MI/GMI equal to those of the transmit-scale samples
+  with the transmit noise variance (16-QAM and shaped 256-QAM); a pi
+  rotation gives `|2s + n|^2`. All fail before.
 - [ ] **3.8g `docs(metrics): units and scaling table`.**
 
 **Equalizer safety rules (3.7):**
