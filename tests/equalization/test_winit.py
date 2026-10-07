@@ -4,6 +4,7 @@ import numpy as np
 import pytest
 
 from commkit import equalization, generate
+from commkit.backend import to_device
 from commkit.equalization import EqualizerResult
 from commkit.filtering import RRC
 from commkit.mapping import Constellation
@@ -285,6 +286,23 @@ class TestPadAndNormalization:
             pad_mode="edge",
         )
         assert bool(xp.all(xp.isfinite(xp.asarray(r.y_hat))))
+
+    def test_pad_mode_edge_block_lms_matches_cpu(self, xp, xpt):
+        """Block padding runs on the input's device and matches the CPU."""
+        samples, syms = _make_qpsk(xp, n_sym=500)
+        kw = dict(
+            num_taps=11,
+            sps=1,
+            step_size=1e-2,
+            block_size=64,
+            constellation=Constellation.psk(4),
+            pad_mode="edge",
+        )
+        r = equalization.block_lms(samples, syms[:64], **kw)
+        ref = equalization.block_lms(
+            to_device(samples, "cpu"), to_device(syms[:64], "cpu"), **kw
+        )
+        xpt.assert_allclose(r.y_hat, xp.asarray(ref.y_hat), atol=1e-4)
 
     def test_input_norm_factor_stored_in_result_lms(self, xp):
         """EqualizerResult.input_norm_factor must be a positive scalar for SISO."""

@@ -106,7 +106,9 @@ a GPU:
   | Sequential equalizers `lms`, `rls`, `cma`, `rde`; `PLL`, `Tikhonov`, cycle-slip correction | runs on the CPU (Numba): one copy to the host and back, no speedup |
 
   A sample-by-sample recursion has no parallel work per step. For long
-  records on the GPU, prefer the block equalizers.
+  records on the GPU, prefer the block equalizers with `block_size=1024` or
+  more. Each block costs a fixed overhead, so at 256 the GPU is slower than
+  the CPU, and at 2048 it is about 4x faster.
 - **Short records do not pay off.** Launch overhead dominates below roughly
   10⁴-10⁵ samples, where the CPU is as fast.
 - **Batch channels and records.** Pass `(C, N)` arrays rather than looping

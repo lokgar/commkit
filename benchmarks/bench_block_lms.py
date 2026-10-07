@@ -6,23 +6,20 @@ with per-symbol cycle-slip correction enabled.
 Two block sizes are tracked:
 
 * ``bench_block_lms`` (block_size=256) - the deliberate stress case: on GPU
-  the per-block work is too small to amortize the ~30-50 kernel launches per
-  iteration, so wall time is dominated by fixed launch overhead.
+  the per-block work is too small to amortize the per-block graph replay
+  and the work outside the graph, so wall time is dominated by fixed
+  overhead.
 * ``bench_block_lms_large`` (block_size=2048) - the recommended GPU operating
-  point with launch overhead amortized.  Guards against regressions that
+  point with that overhead amortized.  Guards against regressions that
   scale with block size (per-element work, intermediate-tensor growth) which
-  the overhead-bound 256 case would mask, and provides the throughput ceiling
-  that graph capture at small block sizes is judged against.
+  the overhead-bound 256 case would mask.
 * ``bench_block_lms_dd`` (block_size=256, short training prefix) - the
-  decision-directed steady state, the realistic operating mode and the only
-  one that exercises the CUDA-graph path (graph capture covers
-  full DD blocks only; the fully-trained ``bench_block_lms`` above runs the
-  eager loop because every block is a training block).  This is the headline
-  Point-7 number; a graph regression / silent fallback shows up here as a
-  jump back to the eager ~800 ms.
+  decision-directed steady state, the realistic operating mode.
 
-``bench_block_lms``/``_large`` pass the full symbol sequence as training, so
-they measure the eager loop on both backends regardless of ``cuda_graph``.
+``bench_block_lms``/``_large`` pass the full symbol sequence as training.
+On the GPU, training blocks and decision-directed blocks are each replayed
+from their own CUDA graph, so all three exercise the graph path; a silent
+fallback to the eager loop shows up as a several-fold jump.
 """
 
 import pytest
