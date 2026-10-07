@@ -127,6 +127,8 @@ def _prepare_block(
 
     if training_symbols is not None:
         training_symbols, _, _ = dispatch(training_symbols)
+        # Known symbols are small: they follow the samples' device.
+        training_symbols = to_device(training_symbols, "cpu" if xp is np else "gpu")
         if training_symbols.ndim == 1:
             training_symbols = training_symbols[np.newaxis, :]
 

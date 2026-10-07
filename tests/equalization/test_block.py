@@ -549,6 +549,14 @@ class TestBlockLMSEdgeCases:
         assert r.y_hat.shape == (1000,)
         assert r.error.shape == (1000,)
 
+    def test_host_training_follows_the_samples(self, xp, xpt):
+        """Host training symbols with device samples, like lms and rls."""
+        samples, syms = _qam16(n_sym=1000, sps=2)
+        kw = dict(num_taps=11, sps=2, constellation=Constellation.qam(16))
+        r_host = block_lms(xp.asarray(samples), syms[:300], **kw)
+        r_dev = block_lms(xp.asarray(samples), xp.asarray(syms[:300]), **kw)
+        xpt.assert_array_equal(r_host.y_hat, r_dev.y_hat)
+
     def test_pll_raises(self, xp):
         samples, syms = _qam16(n_sym=512, sps=2)
         with pytest.raises(TypeError, match="BPS"):
