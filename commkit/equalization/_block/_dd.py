@@ -16,14 +16,15 @@ from ...recovery import BPS, CycleSlip
 from .._common import _cpr_symmetry
 from .._kernels_numba import _get_numba_cs_block
 from ..result import (
-    CPRState,
     EqualizerResult,
+    EqualizerState,
     _attach_equalized_signal,
     _log_equalizer_exit,
 )
 from ._engine import (
     _Block,
     _block_loop,
+    _block_state,
     _fdaf_forward,
     _fdaf_gradient_update,
     _prepare_block,
@@ -87,6 +88,21 @@ class _Slicer:
         return xp.min(d2_all, axis=-1).astype(xp.float32)
 
 
+@dataclass(frozen=True)
+class _BlockCarrier:
+    """Host copy of the cross-block BPS state, for ``EqualizerState``."""
+
+    prev4: np.ndarray
+    offset4: np.ndarray
+    d2_hist: np.ndarray
+    cs_buf_x: np.ndarray
+    cs_buf_y: np.ndarray
+    cs_buf_ptr: np.ndarray
+    cs_buf_n: np.ndarray
+    cs_stats: np.ndarray
+    cs_H: int
+
+
 @dataclass
 class _BlockBps:
     """Blind phase search across blocks: candidates, window history, 4-fold
@@ -113,6 +129,20 @@ class _BlockBps:
     cs_stats: Any
     kernel: Any = None  # CUDA min-distance kernel, or None
     cs_kernel: Any = None  # CUDA cycle-slip kernel, or None
+
+    def snapshot(self) -> _BlockCarrier:
+        """Host copies of the state, at a block boundary."""
+        return _BlockCarrier(
+            prev4=to_device(self.prev4, "cpu").copy(),
+            offset4=to_device(self.offset4, "cpu").copy(),
+            d2_hist=to_device(self.d2_hist, "cpu").copy(),
+            cs_buf_x=self.cs_buf_x.copy(),
+            cs_buf_y=to_device(self.cs_buf_y, "cpu").copy(),
+            cs_buf_ptr=to_device(self.cs_buf_ptr, "cpu").copy(),
+            cs_buf_n=to_device(self.cs_buf_n, "cpu").copy(),
+            cs_stats=to_device(self.cs_stats, "cpu").copy(),
+            cs_H=self.cs_H,
+        )
 
     def phase(
         self, y_block: ArrayType, slicer: _Slicer, b_start: int, xp: Any
@@ -231,12 +261,10 @@ def block_lms(
     block_size: int = 256,
     constellation: Any = None,
     store_weights: bool = False,
-    w_init: ArrayType | None = None,
+    initial_taps: ArrayType | None = None,
     cpr: BPS | None = None,
-    cpr_state: CPRState | None = None,
-    input_norm_factor: float | np.ndarray | None = None,
-    samples_prefix: ArrayType | None = None,
     pad_mode: str = "zeros",
+    state: EqualizerState | None = None,
     cuda_graph: bool = True,
 ) -> EqualizerResult:
     """Block LMS equalizer with frequency-domain gradient accumulation.
@@ -355,8 +383,9 @@ def block_lms(
     store_weights : bool, default False
         If ``True``, stores the weight tensor at every block start in
         ``EqualizerResult.weights_history``.
-    w_init : array_like, optional
-        Initial tap weights, shape ``(C, C, T)`` or SISO short-hands.
+    initial_taps : array_like, optional
+        Initial tap weights instead of the center-tap identity, shape
+        ``(C, C, T)`` or the SISO short-hands.  Only for a cold start.
     cpr : BPS, optional
         Inline blind phase search (``commkit.recovery.BPS``): ``test_phases``
         candidates in ``[0, π/2)``, a causal window of the last
@@ -365,25 +394,12 @@ def block_lms(
         across MIMO channels, and an optional nested ``CycleSlip``.  The PLL
         is not available: its per-symbol integration does not fit the block
         gradient.
-    cpr_state : CPRState, optional
-        Warm-start BPS CPR state from a previous ``block_lms()`` call.
-        When provided, the BPS 4-fold unwrap accumulators (``bps_prev4``,
-        ``bps_offset4``) and the block-distance history matrix
-        (``bps_d2_hist``, shape ``(B, C, K-1)``) are restored from the
-        previous block boundary.  This prevents the BPS from re-converging
-        its phase estimate at each block boundary, which otherwise causes
-        a ~``cpr.block_size``-symbol transient of increased phase error.
-        Pass ``None`` (default) to cold-start.  Only BPS state is used;
-        PLL/cycle-slip fields are ignored.
-    input_norm_factor : float or ndarray, optional
-        Pre-computed RMS normalization factor.  See ``lms()`` for the full
-        description; behaviour is identical.
-    samples_prefix : array_like, optional
-        Signal history from the end of the previous block.  See ``lms()``
-        for the full description; behaviour is identical.
     pad_mode : {'zeros', 'edge'}, default 'zeros'
-        Padding strategy when ``samples_prefix`` is ``None``.  See
-        ``lms()`` for the full description; behaviour is identical.
+        Left padding of a cold start; see :func:`lms`.
+    state : EqualizerState, optional
+        Continue from ``result.state`` of a previous call with the same
+        configuration; see :func:`lms`.  The state is taken at the last block
+        boundary before the zero-padded tail.
     cuda_graph : bool, default True
         On the GPU (CuPy) backend, capture the per-block compute into a CUDA
         graph and replay it once per block, collapsing the ~30-50 per-block
@@ -402,8 +418,8 @@ def block_lms(
         Same fields as ``lms``, plus:
 
         * ``input_norm_factor`` - RMS factor used to normalize inputs.
-        * ``cpr_state`` - ``CPRState`` with BPS accumulators after the last
-          block.  ``None`` without ``cpr``.
+        * ``state`` - :class:`EqualizerState` for ``state=`` continuation,
+          including the BPS accumulators.
 
         ``phase_trajectory`` is populated with ``cpr``; shape
         ``(N_sym,)`` SISO or ``(C, N_sym)`` MIMO, one estimate per symbol.
@@ -459,13 +475,14 @@ def block_lms(
 
     run = _prepare_block(
         samples,
+        equalizer="block_lms",
         sps=sps,
         num_taps=num_taps,
         block_size=block_size,
-        w_init=w_init,
-        input_norm_factor=input_norm_factor,
-        samples_prefix=samples_prefix,
+        initial_taps=initial_taps,
+        state=state,
         pad_mode=pad_mode,
+        cpr=cpr,
         name="block_lms",
         cpu_hint="lms()",
         training_symbols=training_symbols,
@@ -504,7 +521,7 @@ def block_lms(
             history=int(slip.history),
             threshold=float(slip.threshold),
             symmetry=_cpr_symmetry(constellation),
-            cpr_state=cpr_state,
+            carrier=None if state is None else state.carrier,
         )
 
     if xp is not np:
@@ -612,6 +629,12 @@ def block_lms(
             assert phi_all is not None and phi_ws is not None
             phi_all[:, b_start:b_end] = phi_ws[:, :B]
 
+    snap: list[tuple[np.ndarray, Any]] = []
+
+    def at_resume() -> None:
+        weights = to_device(run.h, "cpu").copy()
+        snap.append((weights, None if bps is None else bps.snapshot()))
+
     first_dd_full = ((n_train + block_size - 1) // block_size) * block_size
     n_dd_full = max(0, (n_sym - first_dd_full) // block_size)
     _block_loop(
@@ -627,6 +650,7 @@ def block_lms(
             and n_dd_full >= 2  # need >= 1 warmup block + >= 1 captured block
         ),
         name="block_lms",
+        at_resume=at_resume,
     )
 
     if bool(div_flag[0]):
@@ -639,23 +663,10 @@ def block_lms(
             f"block_size, which would under-adapt the filter by that factor."
         )
     result = _assemble_block(run, y_all, e_all, w_hist, phi_all, n_train)
-    if bps is not None:
-        result.cpr_state = CPRState(
-            bps_prev4=to_device(bps.prev4, "cpu").copy(),
-            bps_offset4=to_device(bps.offset4, "cpu").copy(),
-            bps_d2_hist=to_device(bps.d2_hist, "cpu"),
-            cs_buf_x=bps.cs_buf_x.copy(),
-            cs_buf_y=to_device(bps.cs_buf_y, "cpu").copy(),
-            cs_buf_ptr=to_device(bps.cs_buf_ptr, "cpu").copy(),
-            cs_buf_n=to_device(bps.cs_buf_n, "cpu").copy(),
-            cs_stats=to_device(bps.cs_stats, "cpu").copy(),
-            cpr_type="bps",
-            num_ch=C,
-            symmetry=_cpr_symmetry(constellation),
-            bps_P=bps.P,
-            bps_K=bps.K,
-            cs_H=bps.cs_H,
-        )
+    weights, carrier = snap[0]
+    result.state = _block_state(
+        run, equalizer="block_lms", cpr=cpr, weights=weights, carrier=carrier
+    )
     return _attach_equalized_signal(_log_equalizer_exit(result, name="Block-LMS"), sig)
 
 
@@ -671,42 +682,24 @@ def _block_bps(
     history: int,
     threshold: float,
     symmetry: int,
-    cpr_state: CPRState | None,
+    carrier: _BlockCarrier | None,
 ) -> _BlockBps:
-    """BPS state for ``block_lms``: warm start from a compatible ``cpr_state``."""
+    """BPS state for ``block_lms``: continued from ``carrier``, or cold."""
     P = test_phases
     angles_np = np.linspace(0.0, np.pi / 2.0, P, endpoint=False, dtype=np.float32)
-    cs_H = min(history, n_sym)
     hist_len = max(0, window - 1)
-    st = cpr_state
-    if (
-        st is not None
-        and st.cpr_type == "bps"
-        and st.num_ch == C
-        and st.cs_H == cs_H
-        and st.bps_P == P
-        and st.bps_K == window
-        and st.bps_prev4 is not None
-    ):
-        assert st.bps_offset4 is not None
-        assert st.cs_buf_x is not None
-        assert st.cs_buf_y is not None
-        assert st.cs_buf_ptr is not None
-        assert st.cs_buf_n is not None
-        assert st.cs_stats is not None
-        prev4 = st.bps_prev4.copy()
-        offset4 = st.bps_offset4.copy()
-        cs_buf_x = st.cs_buf_x.copy()
-        cs_buf_y = st.cs_buf_y.copy()
-        cs_buf_ptr = st.cs_buf_ptr.copy()
-        cs_buf_n = st.cs_buf_n.copy()
-        cs_stats = st.cs_stats.copy()
-        d2_hist = (
-            xp.array(st.bps_d2_hist, dtype=xp.float32)
-            if st.bps_d2_hist is not None
-            else xp.zeros((P, C, hist_len), dtype=xp.float32)
-        )
+    if carrier is not None:
+        cs_H = carrier.cs_H
+        prev4 = carrier.prev4.copy()
+        offset4 = carrier.offset4.copy()
+        cs_buf_x = carrier.cs_buf_x.copy()
+        cs_buf_y = carrier.cs_buf_y.copy()
+        cs_buf_ptr = carrier.cs_buf_ptr.copy()
+        cs_buf_n = carrier.cs_buf_n.copy()
+        cs_stats = carrier.cs_stats.copy()
+        d2_hist = xp.array(carrier.d2_hist, dtype=xp.float32)
     else:
+        cs_H = min(history, n_sym)
         prev4 = np.zeros(C, dtype=np.float64)
         offset4 = np.zeros(C, dtype=np.float64)
         cs_buf_x = np.zeros((C, cs_H), dtype=np.float64)

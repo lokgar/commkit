@@ -19,18 +19,18 @@ from .._kernels_numba import (
     _get_numba_rls_cpr,
 )
 from ..result import (
-    CPRState,
     EqualizerResult,
+    EqualizerState,
     _attach_equalized_signal,
     _log_equalizer_exit,
 )
 from ._setup import (
     _assemble_sequential,
-    _carrier_args,
-    _carrier_arrays,
     _dd_constellation,
     _inline_cpr,
     _prepare_sequential,
+    _run_resumable,
+    _Snapshot,
 )
 
 # -----------------------------------------------------------------------------
@@ -48,11 +48,9 @@ def lms(
     constellation: Any = None,
     store_weights: bool = False,
     center_tap: int | None = None,
-    w_init: ArrayType | None = None,
+    initial_taps: ArrayType | None = None,
     cpr: PLL | BPS | None = None,
-    cpr_state: CPRState | None = None,
-    input_norm_factor: float | np.ndarray | None = None,
-    samples_prefix: ArrayType | None = None,
+    state: EqualizerState | None = None,
     pad_mode: str = "zeros",
 ) -> EqualizerResult:
     """
@@ -169,14 +167,11 @@ def lms(
         If True, stores weight trajectory in ``weights_history``.
     center_tap : int, optional
         Index of the center tap. If None, defaults to ``num_taps // 2``.
-    w_init : array_like, optional
-        Initial tap weights. Shape: ``(C, C, num_taps)`` complex64, or the
-        SISO short-hand ``(num_taps,)`` / ``(1, num_taps)`` as returned by
-        ``EqualizerResult.weights`` for single-channel equalizers.
-        If provided, the equalizer warm-starts from these weights instead of
-        the default center-tap identity matrix.  Useful for weight handoff from
-        a prior stage (e.g. preamble LMS -> payload LMS).
-        Raises ``ValueError`` if the shape does not match.
+    initial_taps : array_like, optional
+        Initial tap weights instead of the center-tap identity, e.g. the
+        ``weights`` of a previous stage (preamble LMS -> payload RLS).  Shape
+        ``(C, C, num_taps)``, or ``(num_taps,)`` / ``(1, num_taps)`` for SISO.
+        Only for a cold start: a ``state`` carries its own weights.
     cpr : PLL or BPS, optional
         Inline carrier phase recovery (``commkit.recovery``), run jointly
         with the weight updates at every symbol; ``None`` disables it.
@@ -200,44 +195,17 @@ def lms(
         linear fit through the last ``history`` values and snaps a deviation
         beyond ``threshold`` to the nearest ``2π/4`` multiple (``π`` for
         2-fold constellations).
-    cpr_state : CPRState, optional
-        Warm-start CPR state from a previous ``lms()`` call (obtained via
-        ``EqualizerResult.cpr_state``).  When provided and the CPR type and
-        channel count match, the PLL integrators, BPS unwrap accumulators,
-        and cycle-slip buffers are pre-loaded rather than zero-initialized.
-        This eliminates the ~5-10 k symbol CPR convergence transient that
-        occurs at every block boundary in streaming pipelines.  Pass
-        ``None`` (default) to cold-start the CPR from zero.  Ignored when
-        ``cpr=None`` or when the stored state is incompatible (mismatched
-        CPR method, channel count, or history depth), in which case the
-        equalizer falls back to cold-start silently.
-    input_norm_factor : float or ndarray, optional
-        Pre-computed RMS normalization factor from a previous call (obtained
-        via ``EqualizerResult.input_norm_factor``).  When provided, the
-        ``_normalize_inputs`` step is skipped and this value is used directly
-        to scale the input samples and training symbols.  This ensures that
-        warm-started weight vectors see the same amplitude regime as the
-        block on which they were trained, preventing a gradient scale mismatch
-        when signal power drifts slowly between blocks.
-        Pass ``None`` (default) to recompute the RMS from the current block.
-    samples_prefix : array_like, optional
-        Signal history from the end of the previous block, used to eliminate
-        the zero-padded leading transient at each block boundary.  Shape:
-        ``(≥ pad_left,)`` SISO or ``(C, ≥ pad_left)`` MIMO, where
-        ``pad_left = min(center_tap, max(0, num_taps - 1))``.  The last
-        ``pad_left`` samples of ``samples_prefix`` replace the leading zeros
-        in the tap window so that the first output symbol sees a fully
-        populated, real-signal tap vector.  The prefix is normalized by the
-        same ``input_norm_factor`` as the main block before being prepended.
-        Pass ``None`` (default) for standard zero-padding.  Raises
-        ``ValueError`` if the prefix length is less than ``pad_left``.
+    state : EqualizerState, optional
+        Continue from ``result.state`` of a previous call of this equalizer
+        with the same configuration: weights, normalization, inline CPR state
+        and the input from where the previous call left off.  The previous
+        result's last ``state.overlap`` symbols are recomputed here, so the
+        outputs stitch to exactly one uninterrupted run.  Training symbols
+        start at this call's first output symbol.
     pad_mode : {'zeros', 'edge'}, default 'zeros'
-        Padding strategy for the leading tap window when ``samples_prefix``
-        is ``None``.  ``'zeros'`` (default) prepends ``pad_left`` complex
-        zeros, which is the standard causal initialisation.  ``'edge'``
-        replicates the first sample of the current block, which can reduce
-        the initial amplitude jump at cold start.  Has no effect when
-        ``samples_prefix`` is provided.
+        Left padding of a cold start: ``'zeros'`` (default) prepends
+        ``center_tap`` zeros, ``'edge'`` replicates the first sample, which
+        can soften the initial amplitude jump.
 
     Returns
     -------
@@ -262,13 +230,9 @@ def lms(
           when ``cpr=None``.
         * ``num_train_symbols`` - number of training symbols consumed
           (data-aided phase).
-        * ``input_norm_factor`` - the RMS factor used to normalize inputs
-          (float).  Store and pass as ``input_norm_factor`` on the next call
-          to keep weight magnitudes consistent across block boundaries.
-        * ``cpr_state`` - ``CPRState`` snapshot of PLL/BPS/cycle-slip
-          integrators after the last symbol.  Pass as ``cpr_state`` on the
-          next call to resume CPR without a re-convergence transient.
-          ``None`` when ``cpr=None``.
+        * ``input_norm_factor`` - the RMS factor used to normalize inputs.
+        * ``state`` - :class:`EqualizerState`; pass as ``state=`` to the
+          next call to continue without a re-convergence transient.
 
         Arrays reside on the same device as the input (NumPy CPU or CuPy
         GPU).
@@ -305,14 +269,15 @@ def lms(
 
     run = _prepare_sequential(
         samples,
+        equalizer="lms",
         sps=sps,
         num_taps=num_taps,
         center_tap=center_tap,
-        w_init=w_init,
+        initial_taps=initial_taps,
+        state=state,
         store_weights=store_weights,
-        input_norm_factor=input_norm_factor,
-        samples_prefix=samples_prefix,
         pad_mode=pad_mode,
+        cpr=cpr,
         training_symbols=training_symbols,
     )
     constellation_np = _dd_constellation(
@@ -320,50 +285,75 @@ def lms(
     )
     sq_side, sq_lev_min, sq_d_grid = _square_qam_slicer_params(constellation_np)
     slicer = (sq_lev_min, sq_d_grid, np.int32(sq_side))
+    mu = np.float32(step_size)
 
+    phase_out = None
     if inline is None:
-        _get_numba_lms()(
-            run.x,
-            run.train_full,
-            constellation_np,
-            run.W,
-            np.float32(step_size),
-            np.int32(run.n_train),
-            run.stride,
-            store_weights,
-            run.y_out,
-            run.e_out,
-            run.w_hist,
-            *slicer,
-        )
-        result = _assemble_sequential(run)
+
+        def segment(start: int, stop: int) -> None:
+            x, train, n_train, y_out, e_out, w_hist = run.segment(start, stop)
+            _get_numba_lms()(
+                x,
+                train,
+                constellation_np,
+                run.W,
+                mu,
+                n_train,
+                run.stride,
+                store_weights,
+                y_out,
+                e_out,
+                w_hist,
+                *slicer,
+            )
+
+        def snapshot() -> _Snapshot:
+            return _Snapshot(weights=run.W.copy())
+
     else:
-        carrier = _carrier_arrays(cpr_state, inline, run.num_ch)
-        phase_out = np.empty((run.n_sym, run.num_ch), dtype=np.float64)
-        _get_numba_lms_cpr()(
-            run.x,
-            run.train_full,
-            constellation_np,
-            *inline.bps_args(),
-            run.W,
-            np.float32(step_size),
-            np.int32(run.n_train),
-            run.stride,
-            store_weights,
-            *inline.loop_args(),
-            *_carrier_args(carrier),
-            run.y_out,
-            run.e_out,
-            phase_out,
-            run.w_hist,
-            *slicer,
+        cpr_args = inline
+        carrier = (
+            cpr_args.cold_carrier(run.num_ch)
+            if state is None or state.carrier is None
+            else state.carrier.copy()
         )
-        result = _assemble_sequential(
-            run,
-            phase_out=phase_out,
-            carrier=carrier,
-            cpr_state_tags=inline.state_tags(run.num_ch),
-        )
+        phase = np.empty((run.n_sym, run.num_ch), dtype=np.float64)
+        phase_out = phase
+
+        def segment(start: int, stop: int) -> None:
+            x, train, n_train, y_out, e_out, w_hist = run.segment(start, stop)
+            _get_numba_lms_cpr()(
+                x,
+                train,
+                constellation_np,
+                *cpr_args.bps_args(),
+                run.W,
+                mu,
+                n_train,
+                run.stride,
+                store_weights,
+                *cpr_args.loop_args(),
+                *carrier.args(),
+                y_out,
+                e_out,
+                phase[start:stop],
+                w_hist,
+                *slicer,
+            )
+
+        def snapshot() -> _Snapshot:
+            return _Snapshot(weights=run.W.copy(), carrier=carrier.copy())
+
+    resume = run.n_done
+    snap = _run_resumable(run, resume, segment, snapshot)
+    result = _assemble_sequential(
+        run,
+        equalizer="lms",
+        cpr=cpr,
+        resume=resume,
+        snapshot=snap,
+        phase_out=phase_out,
+    )
     result = _log_equalizer_exit(result, name="LMS")
     return _attach_equalized_signal(result, sig)
 
@@ -397,11 +387,9 @@ def rls(
     constellation: Any = None,
     store_weights: bool = False,
     center_tap: int | None = None,
-    w_init: ArrayType | None = None,
+    initial_taps: ArrayType | None = None,
     cpr: PLL | BPS | None = None,
-    cpr_state: CPRState | None = None,
-    input_norm_factor: float | np.ndarray | None = None,
-    samples_prefix: ArrayType | None = None,
+    state: EqualizerState | None = None,
     pad_mode: str = "zeros",
 ) -> EqualizerResult:
     """
@@ -516,6 +504,11 @@ def rls(
         If True, stores weight trajectory.
     center_tap : int, optional
         Index of the center tap. If None, defaults to ``num_taps // 2``.
+    initial_taps : array_like, optional
+        Initial tap weights instead of the center-tap identity, e.g. the
+        ``weights`` of a previous stage (preamble LMS -> payload RLS).  Shape
+        ``(C, C, num_taps)``, or ``(num_taps,)`` / ``(1, num_taps)`` for SISO.
+        Only for a cold start: a ``state`` carries its own weights.
     cpr : PLL or BPS, optional
         Inline carrier phase recovery (``commkit.recovery``), run jointly
         with the weight updates at every symbol; ``None`` disables it.
@@ -539,18 +532,17 @@ def rls(
         linear fit through the last ``history`` values and snaps a deviation
         beyond ``threshold`` to the nearest ``2π/4`` multiple (``π`` for
         2-fold constellations).
-    cpr_state : CPRState, optional
-        Warm-start CPR state from a previous ``rls()`` call.  See
-        ``lms()`` for the full description; behaviour is identical.
-    input_norm_factor : float or ndarray, optional
-        Pre-computed RMS normalization factor from a previous call.  See
-        ``lms()`` for the full description; behaviour is identical.
-    samples_prefix : array_like, optional
-        Signal history from the end of the previous block.  See ``lms()``
-        for the full description; behaviour is identical.
+    state : EqualizerState, optional
+        Continue from ``result.state`` of a previous call of this equalizer
+        with the same configuration: weights, normalization, inline CPR state
+        and the input from where the previous call left off.  The previous
+        result's last ``state.overlap`` symbols are recomputed here, so the
+        outputs stitch to exactly one uninterrupted run.  Training symbols
+        start at this call's first output symbol.
     pad_mode : {'zeros', 'edge'}, default 'zeros'
-        Padding strategy when ``samples_prefix`` is ``None``.  See
-        ``lms()`` for the full description; behaviour is identical.
+        Left padding of a cold start: ``'zeros'`` (default) prepends
+        ``center_tap`` zeros, ``'edge'`` replicates the first sample, which
+        can soften the initial amplitude jump.
 
     Returns
     -------
@@ -573,8 +565,8 @@ def rls(
           when ``cpr=None``.
         * ``num_train_symbols`` - number of data-aided training symbols.
         * ``input_norm_factor`` - RMS factor used to normalize inputs.
-        * ``cpr_state`` - CPRState snapshot after the last symbol; ``None``
-          when ``cpr=None``.
+        * ``state`` - :class:`EqualizerState` for ``state=`` continuation;
+          it also carries the inverse correlation matrix ``P``.
 
     Warnings
     --------
@@ -587,8 +579,8 @@ def rls(
     high-frequency noise and causing severe tap weight bloat.  Normalized LMS
     is the structurally stable alternative.
 
-    ``w_init`` warms-start the tap weights; the inverse correlation matrix ``P``
-    always begins at ``(1/delta) · I`` regardless of ``w_init``.
+    ``initial_taps`` seeds the tap weights only: ``P`` starts at
+    ``(1/delta) · I``.  ``state`` continues both.
     """
     signal_adapter = adapt_signal(samples, function_name="rls()")
     samples = signal_adapter.array
@@ -627,14 +619,15 @@ def rls(
 
     run = _prepare_sequential(
         samples,
+        equalizer="rls",
         sps=sps,
         num_taps=num_taps,
         center_tap=center_tap,
-        w_init=w_init,
+        initial_taps=initial_taps,
+        state=state,
         store_weights=store_weights,
-        input_norm_factor=input_norm_factor,
-        samples_prefix=samples_prefix,
         pad_mode=pad_mode,
+        cpr=cpr,
         training_symbols=training_symbols,
     )
     # Early-halt boundary: freeze W and P once the sliding window reaches the
@@ -657,58 +650,91 @@ def rls(
     slicer = (sq_lev_min, sq_d_grid, np.int32(sq_side))
     # Inverse correlation matrix: complex128 throughout (single precision loses
     # the Hermitian positive-definite property and the filter diverges).
-    P = np.eye(run.num_ch * num_taps, dtype=np.complex128) / np.float64(delta)
-
-    if inline is None:
-        _get_numba_rls()(
-            run.x,
-            run.train_full,
-            constellation_np,
-            run.W,
-            P,
-            np.float32(forgetting_factor),
-            np.float32(leakage),
-            np.int32(run.n_train),
-            np.int32(n_update_halt),
-            run.stride,
-            store_weights,
-            run.y_out,
-            run.e_out,
-            run.w_hist,
-            *slicer,
-        )
-        result = _assemble_sequential(run, n_sym=n_update_halt)
+    if state is not None and state.inverse_correlation is not None:
+        P = state.inverse_correlation.copy()
     else:
-        carrier = _carrier_arrays(cpr_state, inline, run.num_ch)
-        phase_out = np.empty((run.n_sym, run.num_ch), dtype=np.float64)
-        _get_numba_rls_cpr()(
-            run.x,
-            run.train_full,
-            constellation_np,
-            *inline.bps_args(),
-            run.W,
-            P,
-            np.float32(forgetting_factor),
-            np.float32(leakage),
-            np.int32(run.n_train),
-            np.int32(n_update_halt),
-            run.stride,
-            store_weights,
-            *inline.loop_args(),
-            *_carrier_args(carrier),
-            run.y_out,
-            run.e_out,
-            phase_out,
-            run.w_hist,
-            *slicer,
+        P = np.eye(run.num_ch * num_taps, dtype=np.complex128) / np.float64(delta)
+    lam, leak = np.float32(forgetting_factor), np.float32(leakage)
+
+    phase_out = None
+    if inline is None:
+
+        def segment(start: int, stop: int) -> None:
+            x, train, n_train, y_out, e_out, w_hist = run.segment(start, stop)
+            _get_numba_rls()(
+                x,
+                train,
+                constellation_np,
+                run.W,
+                P,
+                lam,
+                leak,
+                n_train,
+                np.int32(n_update_halt - start),
+                run.stride,
+                store_weights,
+                y_out,
+                e_out,
+                w_hist,
+                *slicer,
+            )
+
+        def snapshot() -> _Snapshot:
+            return _Snapshot(weights=run.W.copy(), inverse_correlation=P.copy())
+
+    else:
+        cpr_args = inline
+        carrier = (
+            cpr_args.cold_carrier(run.num_ch)
+            if state is None or state.carrier is None
+            else state.carrier.copy()
         )
-        result = _assemble_sequential(
-            run,
-            n_sym=n_update_halt,
-            phase_out=phase_out,
-            carrier=carrier,
-            cpr_state_tags=inline.state_tags(run.num_ch),
-        )
+        phase = np.empty((run.n_sym, run.num_ch), dtype=np.float64)
+        phase_out = phase
+
+        def segment(start: int, stop: int) -> None:
+            x, train, n_train, y_out, e_out, w_hist = run.segment(start, stop)
+            _get_numba_rls_cpr()(
+                x,
+                train,
+                constellation_np,
+                *cpr_args.bps_args(),
+                run.W,
+                P,
+                lam,
+                leak,
+                n_train,
+                np.int32(n_update_halt - start),
+                run.stride,
+                store_weights,
+                *cpr_args.loop_args(),
+                *carrier.args(),
+                y_out,
+                e_out,
+                phase[start:stop],
+                w_hist,
+                *slicer,
+            )
+
+        def snapshot() -> _Snapshot:
+            return _Snapshot(
+                weights=run.W.copy(),
+                carrier=carrier.copy(),
+                inverse_correlation=P.copy(),
+            )
+
+    # W and P freeze at n_update_halt, so the state resumes there at the latest.
+    resume = min(run.n_done, n_update_halt)
+    snap = _run_resumable(run, resume, segment, snapshot)
+    result = _assemble_sequential(
+        run,
+        equalizer="rls",
+        cpr=cpr,
+        resume=resume,
+        snapshot=snap,
+        n_sym=n_update_halt,
+        phase_out=phase_out,
+    )
     result = _log_equalizer_exit(result, name="RLS")
     result.tail_trim = tail_trim
     _check_rls_divergence(result.weights, run.xp, forgetting_factor, delta)

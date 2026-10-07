@@ -403,6 +403,9 @@ def _get_numba_lms_cpr():
             cs_buf_n,
             cs_stats,
             bps_prev4,
+            bps_dist_buf,
+            bps_running_sum,
+            bps_dist_ptr,
             y_out,
             e_out,
             phase_out,
@@ -437,6 +440,9 @@ def _get_numba_lms_cpr():
             # cs_buf_n      : (C,) int64            - in-place
             # cs_stats      : (C, 4) float64  [Sx,Sy,Sxx,Sxy] - in-place
             # bps_prev4     : (C,) float64    - causal 4-fold unwrap state - in-place
+            # bps_dist_buf  : (C, K, B) float32 - BPS window metrics - in-place
+            # bps_running_sum: (C, B) float64   - their running sum - in-place
+            # bps_dist_ptr  : (1,) int64        - window write position - in-place
             # y_out         : (N_sym, C) complex64
             # e_out         : (N_sym, C) complex64
             # phase_out     : (N_sym, C) float32
@@ -458,11 +464,6 @@ def _get_numba_lms_cpr():
             e_clean = np.empty(C, dtype=np.complex64)
             e_eq = np.empty(C, dtype=np.complex64)
             phi_hat_bps = np.zeros(C, dtype=np.float64)
-            # BPS: incremental running-sum (avoids O(K·B·M) per-symbol rescan)
-            bps_dist_buf = np.zeros((C, bps_block_size, B), dtype=np.float32)
-            bps_running_sum = np.zeros((C, B), dtype=np.float64)
-            bps_dist_ptr = np.int64(0)
-
             for idx in range(n_sym):
                 sample_idx = idx * stride
 
@@ -495,7 +496,7 @@ def _get_numba_lms_cpr():
                 # one - O(B·M·C) per symbol, independent of window size K.
                 # O(1) square-QAM path: snap real/imag to nearest level grid point.
                 if cpr_mode == 2:
-                    slot = bps_dist_ptr % np.int64(bps_block_size)
+                    slot = bps_dist_ptr[0] % np.int64(bps_block_size)
                     for i in range(C):
                         for k in range(B):
                             y_rot = y_raw[i] * bps_phases_neg[k]
@@ -531,7 +532,7 @@ def _get_numba_lms_cpr():
                                 + d2_min
                             )
                             bps_dist_buf[i, slot, k] = d2_min
-                    bps_dist_ptr = bps_dist_ptr + np.int64(1)
+                    bps_dist_ptr[0] = bps_dist_ptr[0] + np.int64(1)
 
                     if bps_joint_channels:
                         best_k_joint = np.int32(0)
@@ -810,6 +811,9 @@ def _get_numba_rls_cpr():
             cs_buf_n,
             cs_stats,
             bps_prev4,
+            bps_dist_buf,
+            bps_running_sum,
+            bps_dist_ptr,
             y_out,
             e_out,
             phase_out,
@@ -840,9 +844,6 @@ def _get_numba_rls_cpr():
             e_clean = np.empty(C, dtype=np.complex64)
             e_eq = np.empty(C, dtype=np.complex64)
             phi_hat_bps = np.zeros(C, dtype=np.float64)
-            bps_dist_buf = np.zeros((C, bps_block_size, B), dtype=np.float32)
-            bps_running_sum = np.zeros((C, B), dtype=np.float64)
-            bps_dist_ptr = np.int64(0)
 
             lam_f64 = np.float64(lam)
             leak_term = np.float32(1.0) - np.float32(leakage)
@@ -875,7 +876,7 @@ def _get_numba_rls_cpr():
                 # BPS: incremental running-sum (O(B·M·C) per symbol, independent of K)
                 # O(1) square-QAM path: snap real/imag to nearest level grid point.
                 if cpr_mode == 2:
-                    slot = bps_dist_ptr % np.int64(bps_block_size)
+                    slot = bps_dist_ptr[0] % np.int64(bps_block_size)
                     for i in range(C):
                         for k in range(B):
                             y_rot = y_raw[i] * bps_phases_neg[k]
@@ -910,7 +911,7 @@ def _get_numba_rls_cpr():
                                 + d2_min
                             )
                             bps_dist_buf[i, slot, k] = d2_min
-                    bps_dist_ptr = bps_dist_ptr + np.int64(1)
+                    bps_dist_ptr[0] = bps_dist_ptr[0] + np.int64(1)
 
                     if bps_joint_channels:
                         best_k_joint = np.int32(0)

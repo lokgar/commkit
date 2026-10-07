@@ -333,7 +333,7 @@ ROWS: list[Row] = [
         MULTI,
     ),
     Row("commkit.equalization.polarization.JonesTrack", VALUE),
-    Row("commkit.equalization.result.CPRState", VALUE),
+    Row("commkit.equalization.result.EqualizerState", VALUE),
     Row("commkit.equalization.result.EqualizerResult", VALUE),
     # --- filtering ----------------------------------------------------------
     Row("commkit.filtering.Gaussian", VALUE),

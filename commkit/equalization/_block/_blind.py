@@ -11,7 +11,13 @@ import numpy as np
 from ...backend import to_device
 from ...logger import logger
 from ..result import EqualizerResult, _log_equalizer_exit
-from ._engine import _block_loop, _fdaf_forward, _fdaf_gradient_update, _prepare_block
+from ._engine import (
+    _block_loop,
+    _block_state,
+    _fdaf_forward,
+    _fdaf_gradient_update,
+    _prepare_block,
+)
 
 
 def _block_fdaf_blind(
@@ -24,9 +30,8 @@ def _block_fdaf_blind(
     block_size: int,
     r2: float,
     radii_np: np.ndarray | None,
-    w_init: Any,
-    input_norm_factor: Any,
-    samples_prefix: Any,
+    initial_taps: Any,
+    state: Any,
     pad_mode: str,
     pilot_ref: Any,
     pilot_mask: np.ndarray | None,
@@ -43,14 +48,15 @@ def _block_fdaf_blind(
     (CMA) and ``radii_np`` the unique ring radii (RDE).
     """
     use_pilots = pilot_ref is not None and pilot_mask is not None
+    equalizer = f"block_{kind}"
     run = _prepare_block(
         samples,
+        equalizer=equalizer,
         sps=sps,
         num_taps=num_taps,
         block_size=block_size,
-        w_init=w_init,
-        input_norm_factor=input_norm_factor,
-        samples_prefix=samples_prefix,
+        initial_taps=initial_taps,
+        state=state,
         pad_mode=pad_mode,
         name=name,
         cpu_hint=f"{kind}()",
@@ -119,6 +125,11 @@ def _block_fdaf_blind(
         y_all[:, b_start:b_end] = y_ws[:, :B]
         e_all[:, b_start:b_end] = e_ws[:, :B]
 
+    snap: list[np.ndarray] = []
+
+    def at_resume() -> None:
+        snap.append(to_device(run.h, "cpu").copy())
+
     _block_loop(
         run,
         run_block=run_block,
@@ -132,6 +143,7 @@ def _block_fdaf_blind(
             and n_sym // run.block_size >= 2  # >= 1 warmup + 1 captured block
         ),
         name=name,
+        at_resume=at_resume,
     )
 
     h = run.h
@@ -153,5 +165,8 @@ def _block_fdaf_blind(
         weights_history=None,
         num_train_symbols=0,
         input_norm_factor=run.eq_norm,
+        state=_block_state(
+            run, equalizer=equalizer, cpr=None, weights=snap[0], carrier=None
+        ),
     )
     return _log_equalizer_exit(result, name=name, check_convergence=True)

@@ -11,15 +11,14 @@ Verification plan:
   9. BPS Block Size > 1        - bps_block_size=32 still converges (incremental sum)
  10. RLS + BPS                 - rls(cpr=BPS()) convergence smoke test
  11. PLL Joint Channels        - joint_channels=True shares phase across MIMO
- 12. CPRState warm-start       - second call resumes phase without re-lock transient
- 13. input_norm_factor         - pre-supplied scale skips RMS, result matches manual scale
+ 12. state= warm-start         - second call resumes phase without re-lock transient
  14. Inline PLL raw gains      - PLL mu and beta validation and parity
 """
 
 import numpy as np
 import pytest
 
-from commkit.equalization import CPRState, lms, rls
+from commkit.equalization import lms, rls
 from commkit.frequency import (
     MthPower,
     correct_frequency_offset,
@@ -103,24 +102,6 @@ class TestCPREqualizerBaseline:
             xp.all(xp.asarray(res_base.y_hat) == xp.asarray(res_cpr_none.y_hat))
         ), f"{algo}: cpr=None must be deterministic"
         assert res_cpr_none.phase_trajectory is None
-
-    def test_baseline_cpr_none_matches_unwrapped(self, xp, xpt):
-        """cpr=None baseline is identical to a standalone un-equalized slice."""
-        samples, syms = _qpsk_signal(n_sym=500)
-        kw = dict(
-            num_taps=11,
-            sps=2,
-            constellation=Constellation.psk(4),
-            cpr=PLL(),
-        )
-        r_default = lms(samples, syms[:50], **kw)
-        r_explicit_none = lms(
-            samples, syms[:50], **kw, cpr_state=None, input_norm_factor=None
-        )
-        xpt.assert_array_equal(
-            to_numpy(r_default.y_hat),
-            to_numpy(r_explicit_none.y_hat),
-        )
 
 
 class TestCPRPLLConvergence:
@@ -267,7 +248,7 @@ class TestCPRPLLConvergence:
             num_taps=1,
             sps=1,
             step_size=0.0,
-            w_init=xp.asarray(np.array([1.0 + 0j], dtype=np.complex64)),
+            initial_taps=xp.asarray(np.array([1.0 + 0j], dtype=np.complex64)),
             constellation=Constellation.psk(4),
             cpr=PLL(mu=m, beta=b),
         )
@@ -539,116 +520,61 @@ class TestCPRMIMOJoint:
         )
 
 
-class TestCPRStatePersistence:
-    """State preservation and warm-start behavior."""
+class TestStatePersistence:
+    """Continuation through state=: CPR resumes without a re-lock transient."""
 
     @pytest.mark.parametrize("cpr_mode", ["pll", "bps"])
-    def test_cpr_state_warmstart_lms(self, cpr_mode, xp):
-        """Second lms call with cpr_state should have lower initial MSE than cold restart."""
+    def test_state_warmstart_lms(self, cpr_mode, xp):
+        """A continued call is not worse than a cold restart with the same taps."""
         n_sym = 4000
         half = n_sym // 2
         samples_np, syms_np = _wiener_phase_signal(n_sym=n_sym)
-        s1, s2 = samples_np[:half], samples_np[half:]
-        t1, t2 = syms_np[:half], syms_np[half:]
-
-        r1 = lms(
-            s1,
-            t1,
+        cpr = PLL() if cpr_mode == "pll" else BPS(block_size=16, test_phases=32)
+        kw = dict(
             num_taps=5,
             sps=1,
             step_size=5e-3,
             constellation=Constellation.psk(4),
-            cpr=PLL() if cpr_mode == "pll" else BPS(block_size=16, test_phases=32),
+            cpr=cpr,
         )
-        assert r1.cpr_state is not None, "cpr_state must be populated when cpr is set"
-        assert r1.cpr_state.cpr_type == cpr_mode
-        assert r1.cpr_state.num_ch == 1
 
+        r1 = lms(samples_np[:half], syms_np[:half], **kw)
+        st = r1.state
+        assert st is not None and st.carrier is not None
+        assert st.cpr == cpr and st.num_channels == 1
+        ov = st.overlap
+        # The continued call starts at symbol half - ov; train 20 symbols.
         r2_warm = lms(
-            s2,
-            t2[:20],
-            num_taps=5,
-            sps=1,
-            step_size=5e-3,
-            constellation=Constellation.psk(4),
-            cpr=PLL() if cpr_mode == "pll" else BPS(block_size=16, test_phases=32),
-            w_init=r1.weights,
-            cpr_state=r1.cpr_state,
-            input_norm_factor=r1.input_norm_factor,
+            samples_np[half:], syms_np[half - ov : half - ov + 20], **kw, state=st
         )
         r2_cold = lms(
-            s2,
-            t2[:20],
-            num_taps=5,
-            sps=1,
-            step_size=5e-3,
-            constellation=Constellation.psk(4),
-            cpr=PLL() if cpr_mode == "pll" else BPS(block_size=16, test_phases=32),
-            w_init=r1.weights,
+            samples_np[half:], syms_np[half : half + 20], **kw, initial_taps=r1.weights
         )
-        n_eval_start, n_eval_end = 20, 50
-        mse_warm = calc_mse_db(
-            r2_warm.y_hat[n_eval_start:n_eval_end], t2[n_eval_start:n_eval_end]
-        )
-        mse_cold = calc_mse_db(
-            r2_cold.y_hat[n_eval_start:n_eval_end], t2[n_eval_start:n_eval_end]
-        )
+        ref = syms_np[half + 20 : half + 50]
+        mse_warm = calc_mse_db(r2_warm.y_hat[ov + 20 : ov + 50], ref)
+        mse_cold = calc_mse_db(r2_cold.y_hat[20:50], ref)
         assert mse_warm < mse_cold + 3.0, (
-            f"Warm CPRState should not be worse than cold by >3 dB: "
+            f"Warm state should not be worse than cold by >3 dB: "
             f"warm={mse_warm:.1f} dB  cold={mse_cold:.1f} dB"
         )
 
-    def test_cpr_state_warmstart_rls(self, xp):
-        """rls with cpr_state warm-start: second call has valid cpr_state output."""
+    def test_state_warmstart_rls(self, xp):
+        """The RLS state carries P and the PLL state, and continues."""
         n_sym = 2000
         half = n_sym // 2
         samples_np, syms_np = _wiener_phase_signal(n_sym=n_sym)
-        s1, s2 = samples_np[:half], samples_np[half:]
-        t1 = syms_np[:half]
+        kw = dict(num_taps=5, sps=1, constellation=Constellation.psk(4), cpr=PLL())
 
-        r1 = rls(
-            s1,
-            t1,
-            num_taps=5,
-            sps=1,
-            constellation=Constellation.psk(4),
-            cpr=PLL(),
-        )
-        assert r1.cpr_state is not None
-        assert isinstance(r1.cpr_state, CPRState)
-        assert r1.cpr_state.pll_phi is not None
+        r1 = rls(samples_np[:half], syms_np[:half], **kw)
+        st = r1.state
+        assert st.inverse_correlation is not None
+        assert st.inverse_correlation.dtype == np.complex128
+        assert st.inverse_correlation.shape == (5, 5)
+        assert st.carrier is not None
 
-        r2 = rls(
-            s2,
-            None,
-            num_taps=5,
-            sps=1,
-            constellation=Constellation.psk(4),
-            cpr=PLL(),
-            w_init=r1.weights,
-            cpr_state=r1.cpr_state,
-            input_norm_factor=r1.input_norm_factor,
-        )
-        assert r2.cpr_state is not None
-        assert r2.cpr_state.cpr_type == "pll"
-
-    def test_input_norm_factor_lms_skips_rms(self, xp, xpt):
-        """Supplying input_norm_factor should give same result as letting lms compute it."""
-        samples_np, syms_np = _wiener_phase_signal(n_sym=1000)
-        samples, syms = xp.asarray(samples_np), xp.asarray(syms_np)
-        kw = dict(num_taps=5, sps=1, step_size=5e-3, constellation=Constellation.psk(4))
-
-        r_auto = lms(samples, syms[:50], **kw)
-        nf = r_auto.input_norm_factor
-
-        r_supplied = lms(samples, syms[:50], **kw, input_norm_factor=nf)
-        xpt.assert_allclose(
-            xp.asarray(r_supplied.y_hat),
-            xp.asarray(r_auto.y_hat),
-            rtol=1e-5,
-            atol=1e-6,
-        )
-        assert r_supplied.input_norm_factor == pytest.approx(float(nf), rel=1e-6)
+        r2 = rls(samples_np[half:], None, **kw, state=st)
+        assert r2.state.equalizer == "rls"
+        assert r2.y_hat.shape[-1] > 0
 
 
 class TestBlockwiseFOE:

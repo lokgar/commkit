@@ -12,7 +12,7 @@ from ..core._signal_adapter import adapt_signal, require_integer_sps
 from ..core.signal import Signal
 from ._block import _block_fdaf_blind
 from ._common import _godard_radius, _rde_ring_radii
-from .result import EqualizerResult
+from .result import EqualizerResult, EqualizerState
 from .sequential._blind import _check_pilots
 
 # -----------------------------------------------------------------------------
@@ -28,13 +28,12 @@ def block_cma(
     step_size: float = 2e-4,
     block_size: int = 256,
     constellation: Any = None,
-    w_init: ArrayType | None = None,
+    initial_taps: ArrayType | None = None,
     pilot_ref: ArrayType | None = None,
     pilot_mask: np.ndarray | None = None,
     pilot_gain_db: float = 0.0,
-    input_norm_factor: float | np.ndarray | None = None,
-    samples_prefix: ArrayType | None = None,
     pad_mode: str = "zeros",
+    state: EqualizerState | None = None,
     cuda_graph: bool = True,
 ) -> EqualizerResult:
     """Blind frequency-domain CMA equalizer (overlap-save FDAF).
@@ -74,7 +73,7 @@ def block_cma(
     sps = require_integer_sps(signal_adapter.resolve_fact("sps", sps), "block_cma()")
     constellation = signal_adapter.resolve_choice("constellation", constellation)
     pilot_ref, pilot_mask = _check_pilots(
-        signal_adapter.array, sps, pilot_ref, pilot_mask, "block_cma()"
+        signal_adapter.array, sps, pilot_ref, pilot_mask, "block_cma()", state
     )
 
     r2, c_ps = _godard_radius(constellation)
@@ -87,9 +86,8 @@ def block_cma(
         block_size=block_size,
         r2=r2,
         radii_np=None,
-        w_init=w_init,
-        input_norm_factor=input_norm_factor,
-        samples_prefix=samples_prefix,
+        initial_taps=initial_taps,
+        state=state,
         pad_mode=pad_mode,
         pilot_ref=pilot_ref,
         pilot_mask=pilot_mask,
@@ -113,13 +111,12 @@ def block_rde(
     step_size: float = 2e-4,
     block_size: int = 256,
     constellation: Any = None,
-    w_init: ArrayType | None = None,
+    initial_taps: ArrayType | None = None,
     pilot_ref: ArrayType | None = None,
     pilot_mask: np.ndarray | None = None,
     pilot_gain_db: float = 0.0,
-    input_norm_factor: float | np.ndarray | None = None,
-    samples_prefix: ArrayType | None = None,
     pad_mode: str = "zeros",
+    state: EqualizerState | None = None,
     cuda_graph: bool = True,
 ) -> EqualizerResult:
     """Blind frequency-domain radius-directed equalizer (overlap-save FDAF).
@@ -151,7 +148,7 @@ def block_rde(
     sps = require_integer_sps(signal_adapter.resolve_fact("sps", sps), "block_rde()")
     constellation = signal_adapter.resolve_choice("constellation", constellation)
     pilot_ref, pilot_mask = _check_pilots(
-        signal_adapter.array, sps, pilot_ref, pilot_mask, "block_rde()"
+        signal_adapter.array, sps, pilot_ref, pilot_mask, "block_rde()", state
     )
 
     radii_np, c_ps = _rde_ring_radii(constellation)
@@ -164,9 +161,8 @@ def block_rde(
         block_size=block_size,
         r2=1.0,
         radii_np=radii_np,
-        w_init=w_init,
-        input_norm_factor=input_norm_factor,
-        samples_prefix=samples_prefix,
+        initial_taps=initial_taps,
+        state=state,
         pad_mode=pad_mode,
         pilot_ref=pilot_ref,
         pilot_mask=pilot_mask,

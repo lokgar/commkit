@@ -22,12 +22,12 @@ from .polarization import (
     demultiplex_polarization_tones_dynamic,
     demultiplex_polarization_tones_static,
 )
-from .result import CPRState, EqualizerResult
+from .result import EqualizerResult, EqualizerState
 from .sequential import cma, lms, rde, rls
 
 __all__ = [
-    "CPRState",
     "EqualizerResult",
+    "EqualizerState",
     "JonesTrack",
     "apply_interpolated_matrix",
     "apply_taps",

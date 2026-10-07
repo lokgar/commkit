@@ -4,7 +4,7 @@ Coverage:
   1. Output shapes - SISO and MIMO, with/without CPR
   2. Gradient descent - MSE decreases over blocks (identity channel, noise)
   3. Identity channel parity - with sufficient training, output ≈ input symbols
-  4. w_init passthrough - warm-start weights are used
+  4. initial_taps passthrough - warm-start weights are used
   5. store_weights shape - weights_history has expected layout
   6. num_train_symbols boundary - DA/DD switch is respected
   7. Last-block edge - n_sym not a multiple of block_size
@@ -12,17 +12,15 @@ Coverage:
   9. BPS + CPR - phase_trajectory shape and MSE better than no CPR under phase noise
  10. BPS block_size vs BPS block_size independence - different values accepted
  11. MIMO butterfly convergence - 2x2, training on both channels
- 12. CPRState warm-start - second block_lms call resumes BPS state seamlessly
- 13. input_norm_factor - supplied norm factor skips RMS recomputation
+ 12. state= warm-start - second block_lms call resumes BPS state seamlessly
  14. CUDA graph and transfer hygiene on GPU
 """
 
 import numpy as np
 import pytest
 
-from commkit.backend import to_device
 from commkit.core import Signal
-from commkit.equalization import CPRState, block_lms
+from commkit.equalization import block_lms
 from commkit.mapping import Constellation
 from commkit.math import normalize
 from commkit.recovery import BPS, PLL, CycleSlip
@@ -312,7 +310,7 @@ class TestBlockLMSConvergence:
 class TestBlockLMSWeightHandling:
     """Initialization, warm-starting, and normalization parameter handling."""
 
-    def test_w_init_used(self, xp):
+    def test_initial_taps_used(self, xp):
         """Warm-starting from converged weights should give lower initial MSE."""
         samples, syms = _qam16(n_sym=4096, snr_db=25.0, sps=2)
         samples_xp = xp.asarray(samples)
@@ -336,7 +334,7 @@ class TestBlockLMSWeightHandling:
             step_size=5e-4,
             constellation=Constellation.qam(16),
             block_size=128,
-            w_init=r1.weights,
+            initial_taps=r1.weights,
         )
         mse_cold_start = float(xp.mean(xp.abs(r1.error[:128]) ** 2))
         mse_warm_start = float(xp.mean(xp.abs(r2.error[:128]) ** 2))
@@ -373,28 +371,9 @@ class TestBlockLMSWeightHandling:
         )
         assert r_clip.num_train_symbols == 256
 
-    def test_input_norm_factor_block_lms(self, xp, xpt):
-        """Supplying input_norm_factor reproduces the same output as auto-computed."""
-        samples_np, syms_np = _wiener_qam16_block(n_sym=2048)
-        samples, syms = xp.asarray(samples_np), xp.asarray(syms_np)
-        kw = dict(
-            num_taps=11, sps=1, step_size=5e-4, constellation=Constellation.qam(16)
-        )
-
-        r_auto = block_lms(samples, syms[:100], **kw)
-        nf = r_auto.input_norm_factor
-
-        r_supplied = block_lms(samples, syms[:100], **kw, input_norm_factor=nf)
-        xpt.assert_allclose(
-            xp.asarray(r_supplied.y_hat),
-            xp.asarray(r_auto.y_hat),
-            rtol=1e-5,
-            atol=1e-6,
-        )
-
 
 class TestBlockLMSCPRIntegration:
-    """BPS carrier phase recovery, cycle slip correction, and CPRState persistence."""
+    """BPS carrier phase recovery, cycle slip correction, and state persistence."""
 
     def test_bps_block_size_independent(self, xp):
         """block_size=256 with BPS(block_size=16) must produce per-symbol phi."""
@@ -460,51 +439,11 @@ class TestBlockLMSCPRIntegration:
             "under phase noise"
         )
 
-    def test_cpr_state_warmstart_block_lms_bps(self, xp):
-        """block_lms with cpr_state should populate and accept CPRState."""
+    def test_state_warmstart_block_lms_bps(self, xp):
+        """block_lms with BPS carries the cross-block BPS state in result.state."""
         n_sym = 4096
         half = n_sym // 2
         samples_np, syms_np = _wiener_qam16_block(n_sym=n_sym)
-        s1, s2 = samples_np[:half], samples_np[half:]
-        t1, t2 = syms_np[:half], syms_np[half:]
-
-        r1 = block_lms(
-            xp.asarray(s1),
-            xp.asarray(t1),
-            num_taps=11,
-            sps=1,
-            step_size=5e-4,
-            constellation=Constellation.qam(16),
-            cpr=BPS(test_phases=32, block_size=16),
-        )
-        assert r1.cpr_state is not None, "cpr_state must be set with cpr=BPS()"
-        assert isinstance(r1.cpr_state, CPRState)
-        assert r1.cpr_state.bps_prev4 is not None
-        assert r1.cpr_state.bps_offset4 is not None
-        assert r1.cpr_state.bps_d2_hist is not None
-        assert isinstance(r1.cpr_state.bps_prev4, np.ndarray)
-        assert isinstance(r1.cpr_state.bps_offset4, np.ndarray)
-        assert isinstance(r1.cpr_state.bps_d2_hist, np.ndarray)
-
-        r2 = block_lms(
-            xp.asarray(s2),
-            xp.asarray(t2[:50]),
-            num_taps=11,
-            sps=1,
-            step_size=5e-4,
-            constellation=Constellation.qam(16),
-            cpr=BPS(test_phases=32, block_size=16),
-            w_init=r1.weights,
-            cpr_state=r1.cpr_state,
-            input_norm_factor=r1.input_norm_factor,
-        )
-        assert r2.cpr_state is not None
-        assert r2.cpr_state.cpr_type == "bps"
-        assert r2.phase_trajectory is not None
-
-    def test_cpr_state_none_is_baseline_block_lms(self, xp):
-        """cpr_state=None must be byte-exact with the default (no cpr_state) call."""
-        samples_np, syms_np = _wiener_qam16_block(n_sym=2048)
         kw = dict(
             num_taps=11,
             sps=1,
@@ -512,70 +451,22 @@ class TestBlockLMSCPRIntegration:
             constellation=Constellation.qam(16),
             cpr=BPS(test_phases=32, block_size=16),
         )
-        r_default = block_lms(samples_np, syms_np[:100], **kw)
-        r_none = block_lms(
-            samples_np, syms_np[:100], **kw, cpr_state=None, input_norm_factor=None
-        )
-        np.testing.assert_array_equal(
-            np.asarray(r_default.y_hat),
-            np.asarray(r_none.y_hat),
-        )
 
-    @pytest.mark.parametrize("cs_corr", [False, True])
-    def test_cpr_state_roundtrip_matches_uninterrupted(self, cs_corr, xp):
-        """Split run (export CPRState at half, resume) matches one uninterrupted run."""
-        n_sym = 2048
-        half = n_sym // 2
-        samples_np, syms_np = _wiener_qam16_trackable(n_sym)
+        r1 = block_lms(xp.asarray(samples_np[:half]), xp.asarray(syms_np[:half]), **kw)
+        carrier = r1.state.carrier
+        for name in ("prev4", "offset4", "d2_hist"):
+            assert isinstance(getattr(carrier, name), np.ndarray), name
+        assert r1.state.overlap % 1 == 0 and r1.state.block_size == 256
 
-        kw = dict(
-            num_taps=1,
-            sps=1,
-            step_size=5e-4,
-            block_size=256,
-            constellation=Constellation.qam(16),
-            cpr=BPS(
-                test_phases=32,
-                block_size=16,
-                cycle_slip=CycleSlip() if cs_corr else None,
-            ),
-        )
-
-        r_full = block_lms(xp.asarray(samples_np), xp.asarray(syms_np), **kw)
-
-        r1 = block_lms(
-            xp.asarray(samples_np[:half]),
-            xp.asarray(syms_np[:half]),
-            **kw,
-            input_norm_factor=r_full.input_norm_factor,
-        )
+        ov = r1.state.overlap
         r2 = block_lms(
             xp.asarray(samples_np[half:]),
-            xp.asarray(syms_np[half:]),
+            xp.asarray(syms_np[half - ov : half - ov + 50]),
             **kw,
-            w_init=r1.weights,
-            cpr_state=r1.cpr_state,
-            input_norm_factor=r_full.input_norm_factor,
+            state=r1.state,
         )
-
-        y_full = np.asarray(to_device(r_full.y_hat, "cpu"))
-        y_split = np.concatenate(
-            [
-                np.asarray(to_device(r1.y_hat, "cpu")),
-                np.asarray(to_device(r2.y_hat, "cpu")),
-            ]
-        )
-        np.testing.assert_allclose(y_split, y_full, rtol=1e-5, atol=1e-5)
-
-        assert r_full.phase_trajectory is not None
-        p_full = np.asarray(to_device(r_full.phase_trajectory, "cpu"))
-        p_split = np.concatenate(
-            [
-                np.asarray(to_device(r1.phase_trajectory, "cpu")),
-                np.asarray(to_device(r2.phase_trajectory, "cpu")),
-            ]
-        )
-        np.testing.assert_allclose(p_split, p_full, rtol=1e-5, atol=1e-5)
+        assert r2.state.equalizer == "block_lms"
+        assert r2.phase_trajectory is not None
 
     def test_block_lms_cycle_slip_correction(self, xp):
         """block_lms with cpr_cycle_slip_correction=True recovers through deliberate π/2 phase steps."""
@@ -610,8 +501,7 @@ class TestBlockLMSCPRIntegration:
         )
 
         assert res.phase_trajectory is not None
-        assert res.cpr_state is not None
-        assert res.cpr_state.cs_buf_y is not None
+        assert res.state.carrier.cs_buf_y is not None
 
         y_tail = res.y_hat[-n_sym // 4 :]
         const_xp = xp.asarray(const)
@@ -623,7 +513,7 @@ class TestBlockLMSCPRIntegration:
         )
 
     def test_block_lms_cycle_slip_regression_warmstart(self, xp):
-        """Regression buffer is saved into CPRState and correctly restored on warm-start."""
+        """The slip regression buffer is carried in the state and restored."""
         samples_np, syms_np = _wiener_qam16_block(n_sym=2048)
         half = 1024
         kw = dict(
@@ -635,20 +525,11 @@ class TestBlockLMSCPRIntegration:
         )
 
         r1 = block_lms(xp.asarray(samples_np[:half]), xp.asarray(syms_np[:50]), **kw)
-        assert r1.cpr_state is not None
-        assert r1.cpr_state.cs_buf_y is not None
-        assert r1.cpr_state.cs_buf_n is not None
+        assert r1.state.carrier.cs_buf_y is not None
+        assert r1.state.carrier.cs_buf_n is not None
 
-        r2 = block_lms(
-            xp.asarray(samples_np[half:]),
-            xp.asarray(syms_np[half : half + 50]),
-            **kw,
-            w_init=r1.weights,
-            cpr_state=r1.cpr_state,
-            input_norm_factor=r1.input_norm_factor,
-        )
-        assert r2.cpr_state is not None
-        assert r2.cpr_state.cs_buf_y is not None
+        r2 = block_lms(xp.asarray(samples_np[half:]), None, **kw, state=r1.state)
+        assert r2.state.carrier.cs_buf_y is not None
         assert bool(xp.all(xp.isfinite(xp.asarray(r2.y_hat))))
 
 
@@ -856,8 +737,8 @@ class TestBlockLMSCUDAGraphAndPerformance:
         )
         for attr in ("cs_buf_y", "cs_buf_ptr", "cs_buf_n", "cs_stats"):
             xpt.assert_allclose(
-                getattr(r_kernel.cpr_state, attr),
-                getattr(r_fallback.cpr_state, attr),
+                getattr(r_kernel.state.carrier, attr),
+                getattr(r_fallback.state.carrier, attr),
                 rtol=1e-8,
                 atol=1e-8,
                 err_msg=attr,

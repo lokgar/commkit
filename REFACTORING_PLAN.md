@@ -975,7 +975,7 @@ The equalization pass (3.7) gets more commits:
   had no way to). The inline BPS keeps its `[0, π/2)` search (the 3.6f
   generalization is a kernel change for later). Bit-identical on the A/B
   harness.
-- [ ] **3.7e `refactor(equalization)!: state= continues an equalizer`.**
+- [x] **3.7e `refactor(equalization)!: state= continues an equalizer`.**
   `EqualizerState` (frozen) replaces `w_init`, `samples_prefix`,
   `input_norm_factor` and `cpr_state`; user taps are `initial_taps=`.
   - The state is taken after the last symbol whose filter window lies
@@ -989,6 +989,15 @@ The equalization pass (3.7) gets more commits:
     with and without CPR, on CPU and GPU.
   - A state from another equalizer or configuration raises (1.x silently
     cold-started).
+  - Done: the kernels run in two segments split at the resume symbol (all
+    loop state lives in the arrays they get, so the split is exact); the
+    block loop snapshots at the resume block. Two rounding-level fixes were
+    needed for bit-exact chunking: a resumed MIMO run divided by a float64
+    copy of the float32 normalization, and each FDAF block loaded up to two
+    blocks of later samples into its FFT window (zero-weighted, but they
+    changed the rounding); the window now holds only the `B·sps + T - 1`
+    samples the block uses. The sequential equalizers stay bit-identical to
+    the A/B baseline; the block ones move by at most 3.7e-6.
 - [ ] **3.7f `refactor(equalization)!: result.signal`.** `y_hat` is always
   an array; `result.signal` is the 1-SPS Signal for Signal input, with the
   reference cut to the output symbols (RLS drops its tail).

@@ -58,7 +58,9 @@ def _normalize_inputs(samples, training_symbols, sps, input_norm_factor=None):
         if samples.ndim == 1:
             samples = samples / float(nf)
         else:
-            nf_arr = np.asarray(nf, dtype=np.float64).ravel()
+            # Keep the stored dtype: a cold start divides by the float32 RMS,
+            # and a resumed run must round identically.
+            nf_arr = np.asarray(nf).ravel()
             if nf_arr.shape[0] != samples.shape[0]:
                 raise ValueError(
                     f"input_norm_factor shape {nf_arr.shape} does not match "
@@ -176,16 +178,16 @@ def _init_butterfly_weights_numpy(num_ch, num_taps, center_tap=None):
 
 
 def _validate_w_init(w: np.ndarray, num_ch: int, num_taps: int) -> np.ndarray:
-    """Validate w_init shape and return it in butterfly layout ``(C, C, T)``.
+    """Validate initial_taps shape and return it in butterfly layout ``(C, C, T)``.
 
     The library's unpack helpers squeeze SISO weights from ``(1, 1, T)`` to
     ``(T,)`` in ``EqualizerResult.weights`` for user convenience.  This means
-    a weight array produced by one SISO equalizer stage and passed as ``w_init``
+    a weight array produced by one SISO equalizer stage and passed as ``initial_taps``
     to the next stage arrives here as ``(T,)``; that shape must be accepted.
 
     Parameters
     ----------
-    w        : np.ndarray - candidate w_init array (already cast to NumPy)
+    w        : np.ndarray - candidate initial_taps array (already cast to NumPy)
     num_ch   : int        - expected number of channels C
     num_taps : int        - expected number of FIR taps T
 
@@ -206,7 +208,7 @@ def _validate_w_init(w: np.ndarray, num_ch: int, num_taps: int) -> np.ndarray:
     if num_ch == 1 and w.shape in ((num_taps,), (1, num_taps)):
         return w.reshape(1, 1, num_taps)
     raise ValueError(
-        f"w_init shape {tuple(w.shape)} does not match expected "
+        f"initial_taps shape {tuple(w.shape)} does not match expected "
         f"(num_ch={num_ch}, num_ch={num_ch}, num_taps={num_taps}) = {expected}."
     )
 

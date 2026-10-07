@@ -17,17 +17,33 @@ from .._kernels_numba import (
     _get_numba_pa_rde,
     _get_numba_rde,
 )
-from ..result import EqualizerResult, _attach_equalized_signal, _log_equalizer_exit
-from ._setup import _assemble_sequential, _prepare_sequential
+from ..result import (
+    EqualizerResult,
+    EqualizerState,
+    _attach_equalized_signal,
+    _log_equalizer_exit,
+)
+from ._setup import (
+    _assemble_sequential,
+    _prepare_sequential,
+    _run_resumable,
+    _Snapshot,
+)
 
 
 def _check_pilots(
-    samples: Any, sps: int, pilot_ref: Any, pilot_mask: Any, function_name: str
+    samples: Any,
+    sps: int,
+    pilot_ref: Any,
+    pilot_mask: Any,
+    function_name: str,
+    state: Any = None,
 ) -> tuple[Any, Any]:
     """Validate the pilot reference and mask before any work is done.
 
     ``pilot_ref`` is ``(C, N_sym)`` (``(N_sym,)`` for SISO), ``pilot_mask``
-    ``(N_sym,)``; one without the other raises.
+    ``(N_sym,)``, for the output symbols of this call (a ``state`` adds its
+    pending input); one without the other raises.
     """
     if (pilot_ref is None) != (pilot_mask is None):
         raise ValueError(
@@ -36,7 +52,8 @@ def _check_pilots(
     if pilot_ref is None:
         return None, None
     num_ch = 1 if samples.ndim == 1 else samples.shape[0]
-    n_sym = samples.shape[-1] // sps
+    offset = 0 if state is None else state.pending.shape[-1] - state.lead
+    n_sym = (offset + samples.shape[-1]) // sps
     if pilot_ref.ndim == 1:
         pilot_ref = pilot_ref[None, :]
     if tuple(pilot_ref.shape) != (num_ch, n_sym):
@@ -66,13 +83,12 @@ def cma(
     constellation: Any = None,
     store_weights: bool = False,
     center_tap: int | None = None,
-    w_init: ArrayType | None = None,
+    initial_taps: ArrayType | None = None,
     pilot_ref: ArrayType | None = None,
     pilot_mask: np.ndarray | None = None,
     pilot_gain_db: float = 0.0,
-    input_norm_factor: float | np.ndarray | None = None,
-    samples_prefix: ArrayType | None = None,
     pad_mode: str = "zeros",
+    state: EqualizerState | None = None,
 ) -> EqualizerResult:
     """
     Constant Modulus Algorithm blind equalizer with butterfly MIMO support.
@@ -161,13 +177,11 @@ def cma(
         If True, stores weight trajectory.
     center_tap : int, optional
         Index of the center tap. If None, defaults to ``num_taps // 2``.
-    w_init : array_like, optional
-        Initial tap weights. Shape: ``(C, C, num_taps)`` complex64, or the
-        SISO short-hand ``(num_taps,)`` / ``(1, num_taps)`` as returned by
-        ``EqualizerResult.weights`` for single-channel equalizers.
-        Warm-starts blind equalization from pre-converged weights (e.g. from
-        a prior ``lms()`` call on the preamble). Raises ``ValueError`` on
-        shape mismatch.
+    initial_taps : array_like, optional
+        Initial tap weights instead of the center-tap identity, e.g. the
+        ``weights`` of a previous stage.  Shape ``(C, C, num_taps)``, or
+        ``(num_taps,)`` / ``(1, num_taps)`` for SISO.  Only for a cold start:
+        a ``state`` carries its own weights.
     pilot_ref : (C, N_sym) complex64 array, optional
         Dense pilot reference array - zeros at data positions, known symbols
         at pilot positions.  Build with ``build_pilot_ref``.
@@ -183,15 +197,12 @@ def cma(
         pilots from inflating the RMS estimate and biasing the Godard
         convergence target at data positions.  Set to ``0.0`` when pilots
         are not boosted.
-    input_norm_factor : float or ndarray, optional
-        Pre-computed RMS normalization factor from a previous call.  See
-        ``lms()`` for the full description; behaviour is identical.
-    samples_prefix : array_like, optional
-        Signal history from the end of the previous block.  See ``lms()``
-        for the full description; behaviour is identical.
     pad_mode : {'zeros', 'edge'}, default 'zeros'
-        Padding strategy when ``samples_prefix`` is ``None``.  See
-        ``lms()`` for the full description; behaviour is identical.
+        Left padding of a cold start; see :func:`lms`.
+    state : EqualizerState, optional
+        Continue from ``result.state`` of a previous call with the same
+        configuration; see :func:`lms`.  Pilots start at this call's first
+        output symbol.
 
     Returns
     -------
@@ -215,7 +226,7 @@ def cma(
     constellation = signal_adapter.resolve_choice("constellation", constellation)
 
     pilot_ref, pilot_mask = _check_pilots(
-        signal_adapter.array, sps, pilot_ref, pilot_mask, "cma()"
+        signal_adapter.array, sps, pilot_ref, pilot_mask, "cma()", state
     )
     use_pilots = pilot_ref is not None
     logger.info(
@@ -238,38 +249,43 @@ def cma(
     # RMS-normalize samples to unit symbol-rate power (CMA has no training)
     run = _prepare_sequential(
         samples,
+        equalizer="cma",
         sps=sps,
         num_taps=num_taps,
         center_tap=center_tap,
-        w_init=w_init,
+        initial_taps=initial_taps,
+        state=state,
         store_weights=store_weights,
-        input_norm_factor=input_norm_factor,
-        samples_prefix=samples_prefix,
         pad_mode=pad_mode,
         pilot_mask=pilot_mask if use_pilots else None,
         pilot_gain_db=pilot_gain_db,
     )
-    args = (
-        run.x,
-        run.W,
-        np.float32(step_size),
-        np.float32(r2),
-        run.stride,
-        store_weights,
-        run.y_out,
-        run.e_out,
-        run.w_hist,
-    )
+    target = np.float32(r2)
+    mu = np.float32(step_size)
     if use_pilots:
         pref = np.ascontiguousarray(to_device(pilot_ref, "cpu"), dtype=np.complex64)
         if _c_ps is not None:
             pref = (pref * _c_ps).astype(np.complex64)
         pmask = np.ascontiguousarray(pilot_mask, dtype=np.uint8)
-        _get_numba_pa_cma()(*args, pref, pmask)
-    else:
-        _get_numba_cma()(*args)
+
+    def segment(start: int, stop: int) -> None:
+        x, _, _, y_out, e_out, w_hist = run.segment(start, stop)
+        args = (x, run.W, mu, target, run.stride, store_weights, y_out, e_out, w_hist)
+        if use_pilots:
+            _get_numba_pa_cma()(
+                *args,
+                np.ascontiguousarray(pref[:, start:]),
+                np.ascontiguousarray(pmask[start:]),
+            )
+        else:
+            _get_numba_cma()(*args)
+
+    resume = run.n_done
+    snap = _run_resumable(run, resume, segment, lambda: _Snapshot(weights=run.W.copy()))
     result = _log_equalizer_exit(
-        _assemble_sequential(run),
+        _assemble_sequential(
+            run, equalizer="cma", cpr=None, resume=resume, snapshot=snap
+        ),
         name="CMA" if not use_pilots else "CMA(PA)",
         check_convergence=True,
     )
@@ -285,13 +301,12 @@ def rde(
     constellation: Any = None,
     store_weights: bool = False,
     center_tap: int | None = None,
-    w_init: ArrayType | None = None,
+    initial_taps: ArrayType | None = None,
     pilot_ref: ArrayType | None = None,
     pilot_mask: np.ndarray | None = None,
     pilot_gain_db: float = 0.0,
-    input_norm_factor: float | np.ndarray | None = None,
-    samples_prefix: ArrayType | None = None,
     pad_mode: str = "zeros",
+    state: EqualizerState | None = None,
 ) -> EqualizerResult:
     """
     Radius Directed Equalizer (RDE) - blind equalizer for multi-ring constellations.
@@ -365,13 +380,11 @@ def rde(
         If True, stores weight trajectory in ``result.weights_history``.
     center_tap : int, optional
         Index of the center tap. Defaults to ``num_taps // 2``.
-    w_init : array_like, optional
-        Initial tap weights. Shape: ``(C, C, num_taps)`` complex64, or the
-        SISO short-hand ``(num_taps,)`` / ``(1, num_taps)`` as returned by
-        ``EqualizerResult.weights`` for single-channel equalizers.
-        Warm-starts blind equalization from pre-converged weights (e.g. from
-        a prior ``lms()`` or ``cma()`` call). Raises ``ValueError`` on shape
-        mismatch.
+    initial_taps : array_like, optional
+        Initial tap weights instead of the center-tap identity, e.g. the
+        ``weights`` of a previous stage.  Shape ``(C, C, num_taps)``, or
+        ``(num_taps,)`` / ``(1, num_taps)`` for SISO.  Only for a cold start:
+        a ``state`` carries its own weights.
     pilot_ref : (C, N_sym) complex64 array, optional
         Dense pilot reference array - zeros at data positions, known symbols
         at pilot positions.  Build with ``build_pilot_ref``.
@@ -387,15 +400,12 @@ def rde(
         pilots from inflating the RMS estimate and biasing the ring-radius
         convergence targets at data positions.  Set to ``0.0`` when pilots
         are not boosted.
-    input_norm_factor : float or ndarray, optional
-        Pre-computed RMS normalization factor from a previous call.  See
-        ``lms()`` for the full description; behaviour is identical.
-    samples_prefix : array_like, optional
-        Signal history from the end of the previous block.  See ``lms()``
-        for the full description; behaviour is identical.
     pad_mode : {'zeros', 'edge'}, default 'zeros'
-        Padding strategy when ``samples_prefix`` is ``None``.  See
-        ``lms()`` for the full description; behaviour is identical.
+        Left padding of a cold start; see :func:`lms`.
+    state : EqualizerState, optional
+        Continue from ``result.state`` of a previous call with the same
+        configuration; see :func:`lms`.  Pilots start at this call's first
+        output symbol.
 
     Returns
     -------
@@ -433,7 +443,7 @@ def rde(
     constellation = signal_adapter.resolve_choice("constellation", constellation)
 
     pilot_ref, pilot_mask = _check_pilots(
-        signal_adapter.array, sps, pilot_ref, pilot_mask, "rde()"
+        signal_adapter.array, sps, pilot_ref, pilot_mask, "rde()", state
     )
     use_pilots = pilot_ref is not None
     logger.info(
@@ -456,38 +466,43 @@ def rde(
     # RMS-normalize samples to unit symbol-rate power (RDE has no training)
     run = _prepare_sequential(
         samples,
+        equalizer="rde",
         sps=sps,
         num_taps=num_taps,
         center_tap=center_tap,
-        w_init=w_init,
+        initial_taps=initial_taps,
+        state=state,
         store_weights=store_weights,
-        input_norm_factor=input_norm_factor,
-        samples_prefix=samples_prefix,
         pad_mode=pad_mode,
         pilot_mask=pilot_mask if use_pilots else None,
         pilot_gain_db=pilot_gain_db,
     )
-    args = (
-        run.x,
-        run.W,
-        np.float32(step_size),
-        np.ascontiguousarray(radii, dtype=np.float32),
-        run.stride,
-        store_weights,
-        run.y_out,
-        run.e_out,
-        run.w_hist,
-    )
+    target = np.ascontiguousarray(radii, dtype=np.float32)
+    mu = np.float32(step_size)
     if use_pilots:
         pref = np.ascontiguousarray(to_device(pilot_ref, "cpu"), dtype=np.complex64)
         if _c_ps is not None:
             pref = (pref * _c_ps).astype(np.complex64)
         pmask = np.ascontiguousarray(pilot_mask, dtype=np.uint8)
-        _get_numba_pa_rde()(*args, pref, pmask)
-    else:
-        _get_numba_rde()(*args)
+
+    def segment(start: int, stop: int) -> None:
+        x, _, _, y_out, e_out, w_hist = run.segment(start, stop)
+        args = (x, run.W, mu, target, run.stride, store_weights, y_out, e_out, w_hist)
+        if use_pilots:
+            _get_numba_pa_rde()(
+                *args,
+                np.ascontiguousarray(pref[:, start:]),
+                np.ascontiguousarray(pmask[start:]),
+            )
+        else:
+            _get_numba_rde()(*args)
+
+    resume = run.n_done
+    snap = _run_resumable(run, resume, segment, lambda: _Snapshot(weights=run.W.copy()))
     result = _log_equalizer_exit(
-        _assemble_sequential(run),
+        _assemble_sequential(
+            run, equalizer="rde", cpr=None, resume=resume, snapshot=snap
+        ),
         name="RDE" if not use_pilots else "RDE(PA)",
         check_convergence=True,
     )

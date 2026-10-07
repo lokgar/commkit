@@ -983,8 +983,8 @@ class TestCmaPilotAided:
         assert isinstance(result, EqualizerResult)
         assert result.y_hat.shape[-1] == n_body
 
-    def test_rde_pilot_aided_w_init_warm_start(self, xp):
-        """rde() PA accepts w_init from a prior lms() call."""
+    def test_rde_pilot_aided_initial_taps_warm_start(self, xp):
+        """rde() PA accepts initial_taps from a prior lms() call."""
         from commkit.equalization import build_pilot_ref
 
         frame, samples_cpu, pilot_syms_cpu, pilot_mask_bool, n_body = (
@@ -1014,7 +1014,7 @@ class TestCmaPilotAided:
             num_taps=11,
             step_size=1e-4,
             sps=2,
-            w_init=pre.weights,
+            initial_taps=pre.weights,
             pilot_ref=pilot_ref,
             pilot_mask=pilot_mask_u8,
         )
