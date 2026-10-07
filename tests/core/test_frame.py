@@ -5,7 +5,7 @@ from typing import Any
 import numpy as np
 import pytest
 
-from commkit.core import Preamble, SingleCarrierFrame
+from commkit.core import Preamble, SingleCarrierFrame, extract_payload
 from commkit.filtering import RRC
 from commkit.mapping import Constellation
 from tests.common.conversions import device_of
@@ -392,3 +392,60 @@ class TestFrameConstellations:
         frame = SingleCarrierFrame(payload_len=21, pilot_pattern="comb", pilot_period=4)
         frame.get_structure_map()
         assert frame._cache == {}
+
+
+class TestExtractPayload:
+    """extract_payload: the payload of a full 1-SPS frame, reference attached."""
+
+    @staticmethod
+    def _frame(num_streams: int = 1, guard_type: str = "cp") -> SingleCarrierFrame:
+        return SingleCarrierFrame(
+            payload_len=90,
+            payload_constellation=Constellation.qam(16),
+            preamble=Preamble(
+                sequence_type="barker", length=13, num_streams=num_streams
+            ),
+            pilot_pattern="comb",
+            pilot_period=10,
+            pilot_gain_db=3.0,
+            guard_type=guard_type,
+            guard_len=7,
+            num_streams=num_streams,
+        )
+
+    @pytest.mark.parametrize("guard_type", ["cp", "zero"])
+    @pytest.mark.parametrize("num_streams", [1, 2])
+    def test_payload_and_reference(self, num_streams, guard_type, xp, xpt):
+        frame = self._frame(num_streams, guard_type)
+        sig = frame.to_signal(sps=1, symbol_rate=1e6).to(
+            "gpu" if xp is not np else "cpu"
+        )
+        out = extract_payload(sig)
+        ref = out.reference.symbols
+        assert out.frame is None
+        assert out.constellation == Constellation.qam(16)
+        assert out.samples.shape == np.shape(frame.payload_symbols)
+        xpt.assert_array_equal(ref, xp.asarray(frame.payload_symbols))
+        xpt.assert_array_equal(out.reference.bits, xp.asarray(frame.payload_bits))
+        # The samples are the payload symbols up to the frame's per-stream scale.
+        num = xp.sum(out.samples * xp.conj(ref), axis=-1, keepdims=True)
+        scale = num / xp.sum(xp.abs(ref) ** 2, axis=-1, keepdims=True)
+        xpt.assert_allclose(out.samples, scale * ref, rtol=1e-5, atol=1e-6)
+
+    def test_without_frame_raises(self):
+        from commkit import generate
+
+        sig = generate(Constellation.qam(16), 100, symbol_rate=1e6)
+        with pytest.raises(ValueError, match="no frame"):
+            extract_payload(sig)
+
+    def test_oversampled_raises(self):
+        sig = self._frame().to_signal(sps=2, symbol_rate=1e6)
+        with pytest.raises(ValueError, match="one sample per symbol"):
+            extract_payload(sig)
+
+    def test_partial_frame_raises(self):
+        sig = self._frame().to_signal(sps=1, symbol_rate=1e6)
+        sig = sig.replace(samples=sig.samples[5:])
+        with pytest.raises(ValueError, match="full frame"):
+            extract_payload(sig)

@@ -10,7 +10,7 @@ working after the split of the former monolithic ``core.py`` into a package.
 the package top level (``commkit.generate(...)``).
 """
 
-from .frame import Preamble, SingleCarrierFrame
+from .frame import Preamble, SingleCarrierFrame, extract_payload
 from .generation import generate
 from .signal import Reference, Signal
 
@@ -19,5 +19,6 @@ __all__ = [
     "Reference",
     "Signal",
     "SingleCarrierFrame",
+    "extract_payload",
     "generate",
 ]

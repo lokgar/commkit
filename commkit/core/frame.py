@@ -13,8 +13,8 @@ from ..filtering import Pulse
 from ..mapping import Constellation
 from ..math import db_to_linear, normalize
 from . import generation
-from ._signal_adapter import require_integer_sps
-from .signal import Signal
+from ._signal_adapter import _same_fact, require_integer_sps
+from .signal import Reference, Signal
 
 
 @dataclass(frozen=True, kw_only=True)
@@ -727,6 +727,73 @@ class SingleCarrierFrame:
             pulse=pulse if isinstance(pulse, Pulse) else None,
             frame=self,
         )
+
+
+def extract_payload(signal: Signal) -> Signal:
+    """The payload of a frame Signal, as a plain Signal at the symbol rate.
+
+    The payload's position is known only in the full frame, so the Signal
+    must hold exactly the frame's symbols, one sample per symbol, aligned
+    with its start (preamble, pilots and guard included).
+
+    Parameters
+    ----------
+    signal : Signal
+        A Signal with a ``frame``, at one sample per symbol, ``(N,)`` or
+        ``(num_streams, N)`` with ``N`` the frame length in symbols.
+
+    Returns
+    -------
+    Signal
+        The payload symbols at one sample per symbol.  ``constellation`` is
+        the payload constellation, ``reference`` holds the payload symbols
+        and bits (on the samples' device) and ``frame`` is ``None``.
+
+    Raises
+    ------
+    ValueError
+        If the Signal has no frame, is not at one sample per symbol, or its
+        length or channel count is not the frame's.
+    """
+    if not isinstance(signal, Signal):
+        raise TypeError(
+            f"extract_payload() takes a Signal, got {type(signal).__name__}."
+        )
+    frame = signal.frame
+    if frame is None:
+        raise ValueError("extract_payload(): the Signal has no frame.")
+    if not _same_fact(signal.sps, 1):
+        raise ValueError(
+            f"extract_payload() needs one sample per symbol, got sps={signal.sps}; "
+            "decimate to the symbol rate first."
+        )
+    payload = frame.get_structure_map()["payload"]
+    x = signal.samples
+    if x.shape[-1] != payload.size:
+        raise ValueError(
+            f"extract_payload(): the Signal has {x.shape[-1]} symbols, the frame "
+            f"{payload.size}. The payload position is known only in the full "
+            "frame."
+        )
+    num_channels = 1 if x.ndim == 1 else x.shape[0]
+    if num_channels != frame.num_streams:
+        raise ValueError(
+            f"extract_payload(): the Signal has {num_channels} channel(s), the "
+            f"frame {frame.num_streams} stream(s)."
+        )
+    device = "cpu" if signal.xp is np else "gpu"
+    reference = Reference(symbols=frame.payload_symbols, bits=frame.payload_bits).to(
+        device
+    )
+    return Signal(
+        samples=x[..., signal.xp.asarray(payload)],
+        sampling_rate=signal.sampling_rate,
+        symbol_rate=signal.symbol_rate,
+        constellation=frame.payload_constellation,
+        pulse=signal.pulse,
+        reference=reference,
+        center_frequency=signal.center_frequency,
+    )
 
 
 def _check_int(name: str, value: Any, low: int) -> None:

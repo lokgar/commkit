@@ -243,6 +243,8 @@ ROWS: list[Row] = [
     Row("commkit.core.frame.Preamble", VALUE),
     Row("commkit.core.signal.Reference", VALUE),
     Row("commkit.core.frame.SingleCarrierFrame", VALUE),
+    # Signal only: the frame layout lives on the Signal.
+    Row("commkit.core.frame.extract_payload", DESIGN),
     Row("commkit.core.signal.Signal", VALUE),
     Row("commkit.core.generation.expand", DESIGN),
     Row("commkit.core.generation.shape_pulse", DESIGN),

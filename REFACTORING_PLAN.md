@@ -1029,6 +1029,56 @@ The equalization pass (3.7) gets more commits:
   old kernels). 4-fold constellations are bit-identical (72 arrays: QAM,
   shaped QAM, QPSK; BPS and PLL); timing at parity.
 
+**Pass 3.8 commits:**
+
+- [x] **3.8a `feat(core): extract_payload`.** `extract_payload(sig)` takes
+  a frame Signal at one sample per symbol whose length is the full frame
+  (the only alignment it can know) and returns the payload as a plain 1-SPS
+  Signal: `constellation` is the payload constellation and `reference`
+  holds the payload symbols and bits. Any other length, rate or a Signal
+  without a frame raises.
+- [ ] **3.8b `refactor(metrics)!: 2.0 signatures`.**
+  - `evm(symbols, reference=None, *, constellation=, blind=False,
+    num_skip_symbols=0)` returns the RMS EVM in percent only (dB is
+    `20 log10(evm / 100)`); `blind=True` decides against the constellation
+    instead of the reference. `snr(symbols, reference=None, *,
+    num_skip_symbols=0)` in dB. `ser(symbols, reference=None, *,
+    constellation=, num_skip_symbols=0)`. `ber(bits, reference=None, *,
+    constellation=, num_skip_symbols=0)`. `gmi(llrs, reference=None, *,
+    constellation=, noise_var=, method=, num_skip_symbols=0)` takes the
+    `compute_llr` layout `(..., N k)` with `k` from the constellation.
+    `mi(symbols, *, noise_var, constellation=, num_skip_symbols=0)`.
+  - Host values: a `float` for 1-D input and `(C,)` for 2-D input (`gmi`
+    and `mi` used to pool the channels). Empty selections, length
+    mismatches (1.x clamped to the shorter sequence) and frame Signals
+    raise; nothing returns `None`.
+  - The Signal path reads the samples of a 1-SPS Signal and its
+    `reference` (symbols, or bits for `ber`/`gmi`, which decide or compute
+    LLRs on demand), with the Signal's constellation as the default
+    choice. Expected values do not change: tests that called
+    `resolve_symbols` call `decimate_to_symbol_rate`, which normalizes the
+    same way. `_legacy_constellation` and `_rescale_ps_symbols` go (a
+    shaped constellation has unit power).
+- [ ] **3.8c `refactor(core)!: remove the resolved_* caches`.**
+  `Signal.resolved_symbols` / `resolved_bits`, `replace_samples`,
+  `replace_signal_field` and `multirate.resolve_symbols` go (use
+  `decimate_to_symbol_rate`). `demap_symbols_hard` and `compute_llr` read
+  a 1-SPS Signal's samples and return arrays; `resolve_phase_ambiguity`
+  and `resolve_channel_permutation` correct the samples against
+  `reference.symbols` and return a new Signal. `io` stops saving the
+  caches.
+- [ ] **3.8d `fix(metrics): GMI of shaped constellations`.** The
+  bit-metric decoding rate `H(X) - sum_b E[log2(1 + exp(-(1 - 2 c_b)
+  LLR_b))]` replaces `k - ...`, which assumes uniform bits. Oracle:
+  `GMI <= MI <= H(X)` on shaped constellations, and the uniform case
+  unchanged.
+- [ ] **3.8e `fix(metrics): data-aided gain instead of total power`.**
+  Symbols with a reference are scaled by the real data-aided gain
+  `Re<r s*> / <|s|^2>` (no rotation) instead of to unit total power, which
+  shrinks the signal by `1/sqrt(1 + 1/SNR)`. Oracle at -10 dB for
+  `snr`, `evm`, `mi` and `gmi`.
+- [ ] **3.8f `docs(metrics): units and scaling table`.**
+
 **Equalizer safety rules (3.7):**
 
 - Keep the dtype rules: complex128 accumulation in LMS/CMA, and float64 for all
