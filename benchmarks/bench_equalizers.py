@@ -9,6 +9,7 @@ from workloads import mimo_equalizer_workload
 
 from commkit.equalization import cma, lms, rls
 from commkit.mapping import Constellation
+from commkit.recovery import BPS
 
 ROUNDS = dict(rounds=3, warmup_rounds=1, iterations=1)
 
@@ -48,9 +49,7 @@ def bench_lms_bps(benchmark, backend_device, xp, sync):
             sps=2,
             step_size=1e-3,
             constellation=Constellation.qam(16),
-            cpr_type="bps",
-            cpr_bps_test_phases=64,
-            cpr_bps_block_size=64,
+            cpr=BPS(test_phases=64, block_size=64),
         )
         sync()
         return r

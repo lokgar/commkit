@@ -58,7 +58,7 @@ def block_cma(
     ~``block_size``x lower (reduce ``mu`` only if the run raises divergence).
     The primary target is GPU (CuPy); on CPU :func:`cma` is usually faster.
 
-    Parameters mirror :func:`cma` (no ``cpr_type`` - CMA is phase-blind, see
+    Parameters mirror :func:`cma` (no ``cpr`` - CMA is phase-blind, see
     :func:`cma` Notes).  On GPU, ``cuda_graph=True`` (default) captures the
     per-block FDAF body once and replays it, collapsing the per-block kernel
     launches into a single graph launch (a large win at small ``block_size``);

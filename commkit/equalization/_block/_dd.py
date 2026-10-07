@@ -12,6 +12,7 @@ from ...core._signal_adapter import adapt_signal, require_integer_sps
 from ...core.signal import Signal
 from ...logger import logger
 from ...mapping.gray import _square_qam_slicer_params
+from ...recovery import BPS, CycleSlip
 from .._common import _cpr_symmetry
 from .._kernels_numba import _get_numba_cs_block
 from ..result import (
@@ -231,13 +232,7 @@ def block_lms(
     constellation: Any = None,
     store_weights: bool = False,
     w_init: ArrayType | None = None,
-    cpr_type: str | None = None,
-    cpr_bps_test_phases: int = 64,
-    cpr_bps_block_size: int = 32,
-    cpr_joint_channels: bool = False,
-    cpr_cycle_slip_correction: bool = False,
-    cpr_cycle_slip_history: int = 100,
-    cpr_cycle_slip_threshold: float = np.pi / 4,
+    cpr: BPS | None = None,
     cpr_state: CPRState | None = None,
     input_norm_factor: float | np.ndarray | None = None,
     samples_prefix: ArrayType | None = None,
@@ -273,22 +268,22 @@ def block_lms(
        where ``H_fd = FFT(h, n=F)`` and ``X_fd = FFT(x_block, n=F)``.
        Output symbols are extracted at decimated positions ``y[n] = y_time[n*sps]``.
 
-    2. **BPS phase recovery** (if ``cpr_type='bps'``) - for each symbol in the
+    2. **BPS phase recovery** (if ``cpr`` is set) - for each symbol in the
        block, averages the min-distance metric over a causal trailing window of
-       ``cpr_bps_block_size`` symbols and picks the minimum-metric candidate
+       ``cpr.block_size`` symbols and picks the minimum-metric candidate
        rotation.  This produces one phase estimate ``phi_n`` per symbol
-       (not one per block), so ``cpr_bps_block_size`` and ``block_size`` are
+       (not one per block), so ``cpr.block_size`` and ``block_size`` are
        independent parameters: ``block_size`` controls FFT/gradient efficiency
-       while ``cpr_bps_block_size`` controls phase noise suppression.  The raw
+       while ``cpr.block_size`` controls phase noise suppression.  The raw
        ``[0, pi/2)`` argmin is converted to full-range radians by a causal 4-fold
        unwrap, and stored in a float64 accumulator in ``phase_trajectory``.
 
-    3. **Cycle-slip correction** (if ``cpr_cycle_slip_correction=True``) - for
+    3. **Cycle-slip correction** (if ``cpr.cycle_slip`` is set) - for
        each symbol of the per-symbol BPS phase tensor ``phi_n`` (shape
        ``(C, B)``) the phase is compared to a linear-regression prediction
-       built from a circular buffer of ``cpr_cycle_slip_history`` past
+       built from a circular buffer of ``history`` past
        corrected phases (identical algorithm to ``lms`` with
-       ``cpr_type='bps'``).  If ``|phi_n - phi_pred| > cpr_cycle_slip_threshold``
+       ``cpr`` set).  If ``|phi_n - phi_pred| > threshold``
        the nearest ``2*pi/symmetry`` quantum is subtracted and the corrected
        value is stored in the history buffer.  On GPU the detector runs as a
        small sequential CUDA kernel on device-resident buffers (no host
@@ -352,7 +347,7 @@ def block_lms(
     block_size : int, default 256
         Number of output symbols per LMS gradient accumulation block.  Larger
         values increase GPU efficiency but reduce adaptation speed.  Independent
-        of the BPS averaging window (see ``cpr_bps_block_size``).
+        of the BPS averaging window (``cpr.block_size``).
     constellation : Constellation, optional
         Decision constellation for the slicer, unit power (a shaped
         constellation carries its pmf).  Defaults to the Signal's
@@ -362,52 +357,14 @@ def block_lms(
         ``EqualizerResult.weights_history``.
     w_init : array_like, optional
         Initial tap weights, shape ``(C, C, T)`` or SISO short-hands.
-    cpr_type : {'bps', None}, default None
-        Inline carrier phase recovery.  Only ``'bps'`` is supported; PLL is
-        not available because its per-symbol PI integration does not fit the
-        block gradient model.
-
-        **BPS dual-path design:** within each equalizer block, the wrapped
-        float32 phase estimate rotates the pre-CPR symbol ``y_raw`` to
-        produce the weight-update error, while the unwrapped float64
-        accumulator is written to ``phase_trajectory``.  This separation
-        prevents float32 rounding errors from accumulating over long signals.
-
-        **4-fold causal unwrap:** the BPS ``argmin`` is in ``[0, π/2)``.
-        A per-symbol causal tracker adds or subtracts ``π/2`` multiples to
-        maintain continuity, then scales to full-range radians.
-    cpr_bps_test_phases : int, default 64
-        Number of BPS candidate angles in ``[0, π/2)``.  32-64 is
-        sufficient for ≤ 16-QAM; use 64-128 for 64-QAM.
-    cpr_bps_block_size : int, default 32
-        Trailing-window length (symbols) summed before the BPS ``argmin``.
-        This is evaluated per symbol (not per equalizer block), so it is
-        independent of ``block_size``.  Larger values reduce phase-noise
-        variance at the cost of increased tracking latency.
-        ``cpr_bps_block_size=1`` gives single-symbol BPS.
-    cpr_joint_channels : bool, default False
-        For MIMO inputs (C > 1): if ``True``, the BPS distance metrics are
-        summed across all C channels before ``argmin``, producing one shared
-        phase estimate broadcast to all channels.  Reduces estimation
-        variance by ~√C for shared-LO transmitters.  When ``False``, each
-        channel estimates its phase independently.  Ignored for SISO inputs.
-    cpr_cycle_slip_correction : bool, default False
-        Enable per-symbol cycle-slip detection and correction using the same
-        algorithm as ``lms``: after each BPS block every symbol phase is
-        compared to a regression prediction, corrected if a slip is detected,
-        and added to the circular history buffer.  On GPU the detector runs
-        on-device (custom CUDA kernel); without it each block costs one
-        ``(C, B)`` float64 D->H + H->D round-trip through the CPU detector.
-    cpr_cycle_slip_history : int, default 100
-        Length of the per-symbol phase history buffer used for the linear
-        regression predictor.  Same semantics as in ``lms``: one entry
-        per symbol, so ``100`` means 100 past corrected symbol phases.
-        Ignored when ``cpr_cycle_slip_correction=False``.
-    cpr_cycle_slip_threshold : float, default π/4
-        Maximum phase step (radians) between adjacent symbols before a
-        cycle slip is declared.  Set to half the constellation's angular
-        symmetry quantum (``π/4`` for QPSK/QAM).  Ignored when
-        ``cpr_cycle_slip_correction=False``.
+    cpr : BPS, optional
+        Inline blind phase search (``commkit.recovery.BPS``): ``test_phases``
+        candidates in ``[0, π/2)``, a causal window of the last
+        ``block_size`` symbols per output symbol (independent of the
+        equalizer's ``block_size``), ``joint_channels`` to sum the metrics
+        across MIMO channels, and an optional nested ``CycleSlip``.  The PLL
+        is not available: its per-symbol integration does not fit the block
+        gradient.
     cpr_state : CPRState, optional
         Warm-start BPS CPR state from a previous ``block_lms()`` call.
         When provided, the BPS 4-fold unwrap accumulators (``bps_prev4``,
@@ -415,7 +372,7 @@ def block_lms(
         (``bps_d2_hist``, shape ``(B, C, K-1)``) are restored from the
         previous block boundary.  This prevents the BPS from re-converging
         its phase estimate at each block boundary, which otherwise causes
-        a ~``cpr_bps_block_size``-symbol transient of increased phase error.
+        a ~``cpr.block_size``-symbol transient of increased phase error.
         Pass ``None`` (default) to cold-start.  Only BPS state is used;
         PLL/cycle-slip fields are ignored.
     input_norm_factor : float or ndarray, optional
@@ -446,9 +403,9 @@ def block_lms(
 
         * ``input_norm_factor`` - RMS factor used to normalize inputs.
         * ``cpr_state`` - ``CPRState`` with BPS accumulators after the last
-          block.  ``None`` when ``cpr_type=None``.
+          block.  ``None`` without ``cpr``.
 
-        ``phase_trajectory`` is populated when ``cpr_type='bps'``; shape
+        ``phase_trajectory`` is populated with ``cpr``; shape
         ``(N_sym,)`` SISO or ``(C, N_sym)`` MIMO, one estimate per symbol.
 
         When ``samples`` is a :class:`Signal`, ``y_hat`` is a new
@@ -464,7 +421,7 @@ def block_lms(
     per block dominates the Python overhead.  On GPU prefer
     ``block_size`` ≥ 512, ideally 1024-4096.
 
-    **BPS cycle-slip correction (``cpr_cycle_slip_correction=True``):**
+    **BPS cycle-slip correction (``cpr.cycle_slip``):**
     On GPU the detector runs as a sequential CUDA kernel on device-resident
     history buffers, so enabling it adds one extra kernel launch per block
     and no host synchronization.  Only when that kernel is unavailable
@@ -494,10 +451,10 @@ def block_lms(
     sps = require_integer_sps(signal_adapter.resolve_fact("sps", sps), "block_lms()")
     constellation = signal_adapter.resolve_choice("constellation", constellation)
 
-    if cpr_type is not None and cpr_type != "bps":
-        raise ValueError(
-            f"block_lms only supports cpr_type='bps' or None. Got {cpr_type!r}. "
-            "PLL is not available for block processing."
+    if cpr is not None and not isinstance(cpr, BPS):
+        raise TypeError(
+            "block_lms(): cpr must be a recovery.BPS (the PLL's per-symbol "
+            f"integration does not fit the block gradient), got {type(cpr).__name__}."
         )
 
     run = _prepare_block(
@@ -534,17 +491,18 @@ def block_lms(
     n_train = min(int(training.shape[-1]), n_sym) if training is not None else 0
 
     bps = None
-    if cpr_type == "bps":
+    if cpr is not None:
+        slip = cpr.cycle_slip if cpr.cycle_slip is not None else CycleSlip()
         bps = _block_bps(
             xp,
             C,
             n_sym,
-            test_phases=int(cpr_bps_test_phases),
-            window=int(cpr_bps_block_size),
-            joint=bool(cpr_joint_channels),
-            cycle_slip=bool(cpr_cycle_slip_correction),
-            history=int(cpr_cycle_slip_history),
-            threshold=float(cpr_cycle_slip_threshold),
+            test_phases=int(cpr.test_phases),
+            window=int(cpr.block_size),
+            joint=bool(cpr.joint_channels),
+            cycle_slip=cpr.cycle_slip is not None,
+            history=int(slip.history),
+            threshold=float(slip.threshold),
             symmetry=_cpr_symmetry(constellation),
             cpr_state=cpr_state,
         )
@@ -575,15 +533,10 @@ def block_lms(
     cpr_info = ""
     if bps is not None:
         cs_info = (
-            f", cs_corr=True(thr={cpr_cycle_slip_threshold:.3f})"
-            if bps.cs
-            else ", cs_corr=False"
+            f", cs_corr=True(thr={bps.threshold:.3f})" if bps.cs else ", cs_corr=False"
         )
-        joint_info = ", joint" if cpr_joint_channels and C > 1 else ""
-        cpr_info = (
-            f", cpr=bps(P={cpr_bps_test_phases}, K={cpr_bps_block_size}"
-            f"{joint_info}{cs_info})"
-        )
+        joint_info = ", joint" if bps.joint and C > 1 else ""
+        cpr_info = f", cpr=bps(P={bps.P}, K={bps.K}{joint_info}{cs_info})"
     logger.info(
         "Block-LMS: C=%s, num_taps=%s, sps=%s, block_size=%s, fftsize=%s, "
         "mu=%s, n_sym=%s%s",
@@ -696,7 +649,7 @@ def block_lms(
             cs_buf_ptr=to_device(bps.cs_buf_ptr, "cpu").copy(),
             cs_buf_n=to_device(bps.cs_buf_n, "cpu").copy(),
             cs_stats=to_device(bps.cs_stats, "cpu").copy(),
-            cpr_type=cpr_type,
+            cpr_type="bps",
             num_ch=C,
             symmetry=_cpr_symmetry(constellation),
             bps_P=bps.P,

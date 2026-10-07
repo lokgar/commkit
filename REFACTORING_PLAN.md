@@ -968,10 +968,13 @@ The equalization pass (3.7) gets more commits:
   of 2- to 4-tuples (`trim_edges` on a Signal raises: it would misalign the
   reference). Pilot references are validated before any work. Bit-identical
   on the A/B harness, CPU and GPU.
-- [ ] **3.7d `refactor(equalization)!: cpr= takes PLL or BPS`.** The nine
+- [x] **3.7d `refactor(equalization)!: cpr= takes PLL or BPS`.** The nine
   `cpr_*` parameters of `lms`, `rls` and `block_lms` become one `cpr=`
   object from `recovery` (`block_lms` takes `BPS` only), with cycle-slip
-  repair as its nested `CycleSlip`.
+  repair as its nested `CycleSlip`. `PLL.phase_init` seeds a cold start (1.x
+  had no way to). The inline BPS keeps its `[0, π/2)` search (the 3.6f
+  generalization is a kernel change for later). Bit-identical on the A/B
+  harness.
 - [ ] **3.7e `refactor(equalization)!: state= continues an equalizer`.**
   `EqualizerState` (frozen) replaces `w_init`, `samples_prefix`,
   `input_norm_factor` and `cpr_state`; user taps are `initial_taps=`.

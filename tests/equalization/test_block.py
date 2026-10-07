@@ -8,9 +8,9 @@ Coverage:
   5. store_weights shape - weights_history has expected layout
   6. num_train_symbols boundary - DA/DD switch is respected
   7. Last-block edge - n_sym not a multiple of block_size
-  8. cpr_type validation - pll raises ValueError
+  8. cpr validation - PLL raises TypeError
   9. BPS + CPR - phase_trajectory shape and MSE better than no CPR under phase noise
- 10. BPS block_size vs cpr_bps_block_size independence - different values accepted
+ 10. BPS block_size vs BPS block_size independence - different values accepted
  11. MIMO butterfly convergence - 2x2, training on both channels
  12. CPRState warm-start - second block_lms call resumes BPS state seamlessly
  13. input_norm_factor - supplied norm factor skips RMS recomputation
@@ -25,6 +25,7 @@ from commkit.core import Signal
 from commkit.equalization import CPRState, block_lms
 from commkit.mapping import Constellation
 from commkit.math import normalize
+from commkit.recovery import BPS, PLL, CycleSlip
 from tests.common.conversions import to_numpy
 from tests.common.signals import (
     make_test_mimo_samples,
@@ -132,9 +133,7 @@ class TestBlockLMSShapes:
             sps=2,
             constellation=Constellation.qam(16),
             block_size=128,
-            cpr_type="bps",
-            cpr_bps_test_phases=16,
-            cpr_bps_block_size=32,
+            cpr=BPS(test_phases=16, block_size=32),
         )
         assert r.y_hat.shape == (1024,)
         assert r.phase_trajectory is not None
@@ -159,8 +158,7 @@ class TestBlockLMSShapes:
             sps=2,
             constellation=Constellation.qam(16),
             block_size=128,
-            cpr_type="bps",
-            cpr_bps_test_phases=16,
+            cpr=BPS(test_phases=16),
         )
         assert r.phase_trajectory.shape == (2, 1024)
 
@@ -399,7 +397,7 @@ class TestBlockLMSCPRIntegration:
     """BPS carrier phase recovery, cycle slip correction, and CPRState persistence."""
 
     def test_bps_block_size_independent(self, xp):
-        """block_size=256 with cpr_bps_block_size=16 must produce per-symbol phi."""
+        """block_size=256 with BPS(block_size=16) must produce per-symbol phi."""
         samples, syms = _qam16(n_sym=1024, sps=2)
         r = block_lms(
             xp.asarray(samples),
@@ -408,14 +406,12 @@ class TestBlockLMSCPRIntegration:
             sps=2,
             constellation=Constellation.qam(16),
             block_size=256,
-            cpr_type="bps",
-            cpr_bps_test_phases=16,
-            cpr_bps_block_size=16,
+            cpr=BPS(test_phases=16, block_size=16),
         )
         assert r.phase_trajectory.shape == (1024,)
         phi = r.phase_trajectory
         assert not bool(xp.all(phi == phi[0])), (
-            "All phi identical - expected per-symbol variation with cpr_bps_block_size=16"
+            "All phi identical - expected per-symbol variation with BPS(block_size=16)"
         )
 
     def test_bps_reduces_mse_under_phase_noise(self, xp):
@@ -454,9 +450,7 @@ class TestBlockLMSCPRIntegration:
             step_size=5e-4,
             block_size=128,
             constellation=Constellation.psk(4),
-            cpr_type="bps",
-            cpr_bps_test_phases=32,
-            cpr_bps_block_size=32,
+            cpr=BPS(test_phases=32, block_size=32),
         )
 
         mse_no_cpr = float(xp.mean(xp.abs(r_no_cpr.error[n_eval:]) ** 2))
@@ -481,11 +475,9 @@ class TestBlockLMSCPRIntegration:
             sps=1,
             step_size=5e-4,
             constellation=Constellation.qam(16),
-            cpr_type="bps",
-            cpr_bps_test_phases=32,
-            cpr_bps_block_size=16,
+            cpr=BPS(test_phases=32, block_size=16),
         )
-        assert r1.cpr_state is not None, "cpr_state must be set when cpr_type='bps'"
+        assert r1.cpr_state is not None, "cpr_state must be set with cpr=BPS()"
         assert isinstance(r1.cpr_state, CPRState)
         assert r1.cpr_state.bps_prev4 is not None
         assert r1.cpr_state.bps_offset4 is not None
@@ -501,9 +493,7 @@ class TestBlockLMSCPRIntegration:
             sps=1,
             step_size=5e-4,
             constellation=Constellation.qam(16),
-            cpr_type="bps",
-            cpr_bps_test_phases=32,
-            cpr_bps_block_size=16,
+            cpr=BPS(test_phases=32, block_size=16),
             w_init=r1.weights,
             cpr_state=r1.cpr_state,
             input_norm_factor=r1.input_norm_factor,
@@ -520,9 +510,7 @@ class TestBlockLMSCPRIntegration:
             sps=1,
             step_size=5e-4,
             constellation=Constellation.qam(16),
-            cpr_type="bps",
-            cpr_bps_test_phases=32,
-            cpr_bps_block_size=16,
+            cpr=BPS(test_phases=32, block_size=16),
         )
         r_default = block_lms(samples_np, syms_np[:100], **kw)
         r_none = block_lms(
@@ -546,10 +534,11 @@ class TestBlockLMSCPRIntegration:
             step_size=5e-4,
             block_size=256,
             constellation=Constellation.qam(16),
-            cpr_type="bps",
-            cpr_bps_test_phases=32,
-            cpr_bps_block_size=16,
-            cpr_cycle_slip_correction=cs_corr,
+            cpr=BPS(
+                test_phases=32,
+                block_size=16,
+                cycle_slip=CycleSlip() if cs_corr else None,
+            ),
         )
 
         r_full = block_lms(xp.asarray(samples_np), xp.asarray(syms_np), **kw)
@@ -615,11 +604,9 @@ class TestBlockLMSCPRIntegration:
             step_size=1e-3,
             constellation=Constellation.qam(16),
             block_size=128,
-            cpr_type="bps",
-            cpr_bps_test_phases=64,
-            cpr_bps_block_size=32,
-            cpr_cycle_slip_correction=True,
-            cpr_cycle_slip_threshold=np.pi / 4,
+            cpr=BPS(
+                test_phases=64, block_size=32, cycle_slip=CycleSlip(threshold=np.pi / 4)
+            ),
         )
 
         assert res.phase_trajectory is not None
@@ -644,10 +631,7 @@ class TestBlockLMSCPRIntegration:
             sps=1,
             step_size=5e-4,
             constellation=Constellation.qam(16),
-            cpr_type="bps",
-            cpr_bps_test_phases=32,
-            cpr_bps_block_size=16,
-            cpr_cycle_slip_correction=True,
+            cpr=BPS(test_phases=32, block_size=16, cycle_slip=CycleSlip()),
         )
 
         r1 = block_lms(xp.asarray(samples_np[:half]), xp.asarray(syms_np[:50]), **kw)
@@ -686,14 +670,14 @@ class TestBlockLMSEdgeCases:
 
     def test_pll_raises(self, xp):
         samples, syms = _qam16(n_sym=512, sps=2)
-        with pytest.raises(ValueError, match="pll"):
+        with pytest.raises(TypeError, match="BPS"):
             block_lms(
                 xp.asarray(samples),
                 xp.asarray(syms),
                 num_taps=11,
                 sps=2,
                 constellation=Constellation.qam(16),
-                cpr_type="pll",
+                cpr=PLL(),
             )
 
     def test_single_tap(self, xp):
@@ -762,8 +746,7 @@ class TestBlockLMSCUDAGraphAndPerformance:
             step_size=5e-4,
             block_size=256,
             constellation=Constellation.qam(16),
-            cpr_type="bps",
-            cpr_cycle_slip_correction=cs_corr,
+            cpr=BPS(cycle_slip=CycleSlip() if cs_corr else None),
         )
         x = xp.asarray(samples)
         t = xp.asarray(syms[:512])
@@ -815,10 +798,11 @@ class TestBlockLMSCUDAGraphAndPerformance:
                 step_size=5e-4,
                 block_size=128,
                 constellation=Constellation.qam(16),
-                cpr_type="bps",
-                cpr_bps_test_phases=32,
-                cpr_bps_block_size=16,
-                cpr_cycle_slip_correction=cs_corr,
+                cpr=BPS(
+                    test_phases=32,
+                    block_size=16,
+                    cycle_slip=CycleSlip() if cs_corr else None,
+                ),
             )
             return counts["n"]
 
@@ -843,10 +827,7 @@ class TestBlockLMSCUDAGraphAndPerformance:
             step_size=5e-4,
             block_size=128,
             constellation=Constellation.qam(16),
-            cpr_type="bps",
-            cpr_bps_test_phases=32,
-            cpr_bps_block_size=16,
-            cpr_cycle_slip_correction=True,
+            cpr=BPS(test_phases=32, block_size=16, cycle_slip=CycleSlip()),
         )
 
         r_kernel = block_lms(xp.asarray(samples_np), xp.asarray(syms_np[:128]), **kw)

@@ -12,6 +12,7 @@ import pytest
 from commkit import _cuda, recovery
 from commkit.equalization import block_lms
 from commkit.mapping import Constellation
+from commkit.recovery import BPS, CycleSlip
 from tests.common.conversions import to_numpy
 from tests.common.kernel_utils import reference_bps_d2, skip_unless_kernel_available
 
@@ -177,10 +178,25 @@ class TestBPSKernelEndToEnd:
     @pytest.mark.parametrize(
         "order,cpr_kwargs",
         [
-            (128, dict(cpr_type="bps")),
-            (16, dict(cpr_type="bps")),
+            (
+                128,
+                dict(
+                    cpr=BPS(),
+                ),
+            ),
+            (
+                16,
+                dict(
+                    cpr=BPS(),
+                ),
+            ),
             (128, dict()),
-            (128, dict(cpr_type="bps", cpr_cycle_slip_correction=True)),
+            (
+                128,
+                dict(
+                    cpr=BPS(cycle_slip=CycleSlip()),
+                ),
+            ),
         ],
     )
     def test_block_lms_kernel_matches_fallback(

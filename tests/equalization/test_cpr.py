@@ -1,19 +1,19 @@
 """Tests for joint LMS/RLS+CPR equalizers and blockwise FOE.
 
 Verification plan:
-  1. Zero-Deviation Baseline   - cpr_type=None must produce bit-exact output
+  1. Zero-Deviation Baseline   - cpr=None must produce bit-exact output
   3. Cycle Slip Stress Test    - π/2 steps are corrected, weights converge
   4. PLL Convergence / Phase Noise - RMSE within PLL jitter bound
   5. Blockwise Phase Coherence - chirp FOE recovers EVM within 0.5 dB of ideal
   6. MIMO Coverage             - 2x2 butterfly LMS+PLL converges on both channels
   7. BPS Phase Unwrap          - phase_trajectory is monotone under linear drift
-  8. BPS Convergence           - lms(cpr_type='bps') converges under Wiener phase noise
+  8. BPS Convergence           - lms(cpr=BPS()) converges under Wiener phase noise
   9. BPS Block Size > 1        - bps_block_size=32 still converges (incremental sum)
- 10. RLS + BPS                 - rls(cpr_type='bps') convergence smoke test
- 11. PLL Joint Channels        - cpr_joint_channels=True shares phase across MIMO
+ 10. RLS + BPS                 - rls(cpr=BPS()) convergence smoke test
+ 11. PLL Joint Channels        - joint_channels=True shares phase across MIMO
  12. CPRState warm-start       - second call resumes phase without re-lock transient
  13. input_norm_factor         - pre-supplied scale skips RMS, result matches manual scale
- 14. Inline PLL raw gains      - cpr_pll_mu and cpr_pll_beta validation and parity
+ 14. Inline PLL raw gains      - PLL mu and beta validation and parity
 """
 
 import numpy as np
@@ -26,7 +26,7 @@ from commkit.frequency import (
     estimate_frequency_offset,
 )
 from commkit.mapping import Constellation
-from commkit.recovery import PLL, estimate_carrier_phase
+from commkit.recovery import BPS, PLL, CycleSlip, estimate_carrier_phase
 from tests.common.conversions import to_numpy
 from tests.common.metrics import calc_mse_db
 from tests.common.signals import (
@@ -84,7 +84,7 @@ class TestCPREqualizerBaseline:
 
     @pytest.mark.parametrize("algo", ["lms", "rls"])
     def test_cpr_none_baseline(self, algo, xp):
-        """cpr_type=None produces bit-exact output vs the unmodified algorithm."""
+        """cpr=None produces bit-exact output vs the unmodified algorithm."""
         samples, syms = _qpsk_signal(n_sym=2000)
         kwargs = dict(
             training_symbols=syms[:500],
@@ -96,22 +96,22 @@ class TestCPREqualizerBaseline:
         extra = {} if algo == "lms" else {"sps": 2}
         kwargs.update(extra)
 
-        res_base = fn(xp.asarray(samples), **kwargs, cpr_type=None)
-        res_cpr_none = fn(xp.asarray(samples), **kwargs, cpr_type=None)
+        res_base = fn(xp.asarray(samples), **kwargs, cpr=None)
+        res_cpr_none = fn(xp.asarray(samples), **kwargs, cpr=None)
 
         assert bool(
             xp.all(xp.asarray(res_base.y_hat) == xp.asarray(res_cpr_none.y_hat))
-        ), f"{algo}: cpr_type=None must be deterministic"
+        ), f"{algo}: cpr=None must be deterministic"
         assert res_cpr_none.phase_trajectory is None
 
     def test_baseline_cpr_none_matches_unwrapped(self, xp, xpt):
-        """cpr_type=None baseline is identical to a standalone un-equalized slice."""
+        """cpr=None baseline is identical to a standalone un-equalized slice."""
         samples, syms = _qpsk_signal(n_sym=500)
         kw = dict(
             num_taps=11,
             sps=2,
             constellation=Constellation.psk(4),
-            cpr_type="pll",
+            cpr=PLL(),
         )
         r_default = lms(samples, syms[:50], **kw)
         r_explicit_none = lms(
@@ -148,10 +148,7 @@ class TestCPRPLLConvergence:
             num_taps=1,
             sps=1,
             constellation=Constellation.psk(4),
-            cpr_type="pll",
-            cpr_pll_bandwidth=5e-3,
-            cpr_cycle_slip_correction=True,
-            cpr_cycle_slip_history=200,
+            cpr=PLL(bandwidth=5e-3, cycle_slip=CycleSlip(history=200)),
         )
 
         assert res.phase_trajectory is not None
@@ -192,9 +189,7 @@ class TestCPRPLLConvergence:
             num_taps=1,
             sps=1,
             constellation=Constellation.qam(16),
-            cpr_type="pll",
-            cpr_pll_bandwidth=bw,
-            cpr_cycle_slip_correction=False,
+            cpr=PLL(bandwidth=bw),
         )
 
         assert res.phase_trajectory is not None
@@ -215,15 +210,14 @@ class TestCPRPLLConvergence:
             num_taps=11,
             sps=2,
             constellation=Constellation.psk(4),
-            cpr_type="pll",
-            cpr_cycle_slip_correction=False,
         )
-        res_bw = lms(xp.asarray(samples), **kw, cpr_pll_bandwidth=bw)
+        res_bw = lms(xp.asarray(samples), **kw, cpr=PLL(bandwidth=bw))
         res_raw = lms(
             xp.asarray(samples),
             **kw,
-            cpr_pll_mu=float(np.float32(4.0 * bw)),
-            cpr_pll_beta=float(np.float32(4.0 * bw**2)),
+            cpr=PLL(
+                mu=float(np.float32(4.0 * bw)), beta=float(np.float32(4.0 * bw**2))
+            ),
         )
         max_diff = float(
             xp.max(xp.abs(xp.asarray(res_bw.y_hat) - xp.asarray(res_raw.y_hat)))
@@ -242,9 +236,21 @@ class TestCPRPLLConvergence:
                 num_taps=11,
                 sps=2,
                 constellation=Constellation.psk(4),
-                cpr_type="pll",
-                cpr_pll_beta=1e-3,
+                cpr=PLL(beta=1e-3),
             )
+
+    def test_inline_pll_phase_init_seeds_cold_start(self, xp):
+        """PLL.phase_init is the first applied phase of a cold start."""
+        samples, syms = _qpsk_signal(n_sym=400)
+        res = lms(
+            xp.asarray(samples),
+            syms[:100],
+            num_taps=11,
+            sps=2,
+            constellation=Constellation.psk(4),
+            cpr=PLL(phase_init=0.3),
+        )
+        assert float(res.phase_trajectory[0]) == pytest.approx(0.3)
 
     def test_inline_pll_parity_with_standalone(self, xp):
         """A frozen 1-tap identity equalizer reduces inline PLL to standalone DD-PLL."""
@@ -263,10 +269,7 @@ class TestCPRPLLConvergence:
             step_size=0.0,
             w_init=xp.asarray(np.array([1.0 + 0j], dtype=np.complex64)),
             constellation=Constellation.psk(4),
-            cpr_type="pll",
-            cpr_pll_mu=m,
-            cpr_pll_beta=b,
-            cpr_cycle_slip_correction=False,
+            cpr=PLL(mu=m, beta=b),
         )
         phi_inline = to_numpy(res.phase_trajectory)
         phi_std = to_numpy(
@@ -307,10 +310,7 @@ class TestCPRBPSConvergence:
             num_taps=1,
             sps=1,
             constellation=Constellation.qam(16),
-            cpr_type="bps",
-            cpr_bps_test_phases=64,
-            cpr_bps_block_size=32,
-            cpr_cycle_slip_correction=False,
+            cpr=BPS(test_phases=64, block_size=32),
         )
 
         phi = xp.asarray(res.phase_trajectory).astype(xp.float64)
@@ -347,10 +347,7 @@ class TestCPRBPSConvergence:
             num_taps=1,
             sps=1,
             constellation=Constellation.qam(16),
-            cpr_type="bps",
-            cpr_bps_test_phases=64,
-            cpr_bps_block_size=32,
-            cpr_cycle_slip_correction=False,
+            cpr=BPS(test_phases=64, block_size=32),
         )
         res_none = lms(
             samples,
@@ -358,7 +355,6 @@ class TestCPRBPSConvergence:
             num_taps=1,
             sps=1,
             constellation=Constellation.qam(16),
-            cpr_type=None,
         )
 
         mse_bps = float(xp.mean(xp.abs(xp.asarray(res_bps.error[-2000:])) ** 2))
@@ -394,10 +390,7 @@ class TestCPRBPSConvergence:
             num_taps=1,
             sps=1,
             constellation=Constellation.qam(16),
-            cpr_type="bps",
-            cpr_bps_test_phases=32,
-            cpr_bps_block_size=1,
-            cpr_cycle_slip_correction=False,
+            cpr=BPS(test_phases=32, block_size=1),
         )
         res_k32 = lms(
             samples,
@@ -405,10 +398,7 @@ class TestCPRBPSConvergence:
             num_taps=1,
             sps=1,
             constellation=Constellation.qam(16),
-            cpr_type="bps",
-            cpr_bps_test_phases=32,
-            cpr_bps_block_size=32,
-            cpr_cycle_slip_correction=False,
+            cpr=BPS(test_phases=32, block_size=32),
         )
 
         mse_k1 = float(xp.mean(xp.abs(xp.asarray(res_k1.error[-1000:])) ** 2))
@@ -417,7 +407,7 @@ class TestCPRBPSConvergence:
         assert mse_k1 < 0.1, f"BPS K=1 did not converge: MSE={mse_k1:.4f}"
 
     def test_rls_bps_convergence(self, xp):
-        """rls(cpr_type='bps') converges under phase noise."""
+        """rls(cpr=BPS()) converges under phase noise."""
         rng = np.random.default_rng(17)
         n_sym = 3000
         const = Constellation.qam(16).points.astype(np.complex64)
@@ -440,10 +430,7 @@ class TestCPRBPSConvergence:
             num_taps=1,
             sps=1,
             constellation=Constellation.qam(16),
-            cpr_type="bps",
-            cpr_bps_test_phases=64,
-            cpr_bps_block_size=32,
-            cpr_cycle_slip_correction=False,
+            cpr=BPS(test_phases=64, block_size=32),
         )
 
         assert res.phase_trajectory is not None
@@ -488,9 +475,7 @@ class TestCPRMIMOJoint:
             num_taps=1,
             sps=1,
             constellation=Constellation.qam(16),
-            cpr_type="pll",
-            cpr_pll_bandwidth=5e-3,
-            cpr_cycle_slip_correction=False,
+            cpr=PLL(bandwidth=5e-3),
         )
 
         assert res.phase_trajectory is not None
@@ -507,7 +492,7 @@ class TestCPRMIMOJoint:
             assert mse < 0.1, f"MIMO channel {ch} MSE too large: {mse:.4f}"
 
     def test_pll_joint_channels(self, xp):
-        """cpr_joint_channels=True makes both PLL integrators identical (shared LO)."""
+        """joint_channels=True makes both PLL integrators identical (shared LO)."""
         rng = np.random.default_rng(23)
         n_sym = 3000
         const = Constellation.qam(16).points.astype(np.complex64)
@@ -542,10 +527,7 @@ class TestCPRMIMOJoint:
             num_taps=1,
             sps=1,
             constellation=Constellation.qam(16),
-            cpr_type="pll",
-            cpr_pll_bandwidth=5e-3,
-            cpr_joint_channels=True,
-            cpr_cycle_slip_correction=False,
+            cpr=PLL(bandwidth=5e-3, joint_channels=True),
         )
 
         assert res.phase_trajectory is not None
@@ -553,7 +535,7 @@ class TestCPRMIMOJoint:
         phi0 = xp.asarray(res.phase_trajectory[0])
         phi1 = xp.asarray(res.phase_trajectory[1])
         assert bool(xp.all(phi0 == phi1)), (
-            "cpr_joint_channels=True: PLL integrators must be identical"
+            "joint_channels=True: PLL integrators must be identical"
         )
 
 
@@ -576,13 +558,9 @@ class TestCPRStatePersistence:
             sps=1,
             step_size=5e-3,
             constellation=Constellation.psk(4),
-            cpr_type=cpr_mode,
-            cpr_bps_block_size=16,
-            cpr_bps_test_phases=32,
+            cpr=PLL() if cpr_mode == "pll" else BPS(block_size=16, test_phases=32),
         )
-        assert r1.cpr_state is not None, (
-            "cpr_state must be populated when cpr_type is set"
-        )
+        assert r1.cpr_state is not None, "cpr_state must be populated when cpr is set"
         assert r1.cpr_state.cpr_type == cpr_mode
         assert r1.cpr_state.num_ch == 1
 
@@ -593,9 +571,7 @@ class TestCPRStatePersistence:
             sps=1,
             step_size=5e-3,
             constellation=Constellation.psk(4),
-            cpr_type=cpr_mode,
-            cpr_bps_block_size=16,
-            cpr_bps_test_phases=32,
+            cpr=PLL() if cpr_mode == "pll" else BPS(block_size=16, test_phases=32),
             w_init=r1.weights,
             cpr_state=r1.cpr_state,
             input_norm_factor=r1.input_norm_factor,
@@ -607,9 +583,7 @@ class TestCPRStatePersistence:
             sps=1,
             step_size=5e-3,
             constellation=Constellation.psk(4),
-            cpr_type=cpr_mode,
-            cpr_bps_block_size=16,
-            cpr_bps_test_phases=32,
+            cpr=PLL() if cpr_mode == "pll" else BPS(block_size=16, test_phases=32),
             w_init=r1.weights,
         )
         n_eval_start, n_eval_end = 20, 50
@@ -638,7 +612,7 @@ class TestCPRStatePersistence:
             num_taps=5,
             sps=1,
             constellation=Constellation.psk(4),
-            cpr_type="pll",
+            cpr=PLL(),
         )
         assert r1.cpr_state is not None
         assert isinstance(r1.cpr_state, CPRState)
@@ -650,7 +624,7 @@ class TestCPRStatePersistence:
             num_taps=5,
             sps=1,
             constellation=Constellation.psk(4),
-            cpr_type="pll",
+            cpr=PLL(),
             w_init=r1.weights,
             cpr_state=r1.cpr_state,
             input_norm_factor=r1.input_norm_factor,

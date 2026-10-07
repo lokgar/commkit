@@ -11,8 +11,7 @@ from ...core._signal_adapter import adapt_signal, require_integer_sps
 from ...core.signal import Signal
 from ...logger import logger
 from ...mapping.gray import _square_qam_slicer_params
-from ...recovery._common import _resolve_pll_gains
-from .._common import _cpr_symmetry
+from ...recovery import BPS, PLL
 from .._kernels_numba import (
     _get_numba_lms,
     _get_numba_lms_cpr,
@@ -27,10 +26,10 @@ from ..result import (
 )
 from ._setup import (
     _assemble_sequential,
-    _bps_phases,
     _carrier_args,
     _carrier_arrays,
     _dd_constellation,
+    _inline_cpr,
     _prepare_sequential,
 )
 
@@ -50,16 +49,7 @@ def lms(
     store_weights: bool = False,
     center_tap: int | None = None,
     w_init: ArrayType | None = None,
-    cpr_type: str | None = None,
-    cpr_pll_bandwidth: float = 1e-3,
-    cpr_pll_mu: float | None = None,
-    cpr_pll_beta: float | None = None,
-    cpr_bps_test_phases: int = 64,
-    cpr_bps_block_size: int = 32,
-    cpr_joint_channels: bool = False,
-    cpr_cycle_slip_correction: bool = False,
-    cpr_cycle_slip_history: int = 100,
-    cpr_cycle_slip_threshold: float = np.pi / 4,
+    cpr: PLL | BPS | None = None,
     cpr_state: CPRState | None = None,
     input_norm_factor: float | np.ndarray | None = None,
     samples_prefix: ArrayType | None = None,
@@ -97,7 +87,7 @@ def lms(
 
            y_c_raw[n] = sum_{c'} w_{c,c'}^H * x_{c',n}
 
-    3. **Carrier phase recovery** (if ``cpr_type`` is set):
+    3. **Carrier phase recovery** (if ``cpr`` is set):
 
        * **PLL** - cross-product phase detector
          ``phi_err = Im(y_raw * conj(d_prev))``
@@ -105,7 +95,7 @@ def lms(
          phase ``phi_n`` is applied as ``y[n] = y_raw * exp(-j*phi_n)``.
        * **BPS** - ``B`` candidate rotations ``exp(-j*k*pi/(2*B))`` are
          tested; the one minimising the summed nearest-constellation distance
-         over the trailing ``K`` = ``cpr_bps_block_size`` symbols is chosen.
+         over the trailing ``K`` = ``cpr.block_size`` symbols is chosen.
          A causal 4-fold unwrap converts the ``[0, pi/2)`` argmin to full-range
          ``phi_n`` stored in a float64 accumulator.
 
@@ -129,11 +119,11 @@ def lms(
        mean per-tap input power.  The equalizer normalises inputs to unit
        symbol-rate power before adaptation, so ``P_x ≈ 1``.
 
-    7. **Cycle-slip correction** (if ``cpr_cycle_slip_correction=True``) - a
-       circular buffer of ``cpr_cycle_slip_history`` past phase values is
+    7. **Cycle-slip correction** (if ``cpr.cycle_slip`` is set) - a
+       circular buffer of ``history`` past phase values is
        maintained per channel.  An online least-squares linear fit over the
        buffer predicts ``phi_pred_n``.  If
-       ``|phi_n - phi_pred_n| > cpr_cycle_slip_threshold``,
+       ``|phi_n - phi_pred_n| > threshold``,
        ``phi_n`` is snapped to the nearest ``2*pi/sym``
        multiple (``sym`` = constellation symmetry order, 4 for QAM/QPSK); the
        corrected value replaces ``phi_n`` in steps 5 and 6 and is written into
@@ -187,93 +177,29 @@ def lms(
         the default center-tap identity matrix.  Useful for weight handoff from
         a prior stage (e.g. preamble LMS -> payload LMS).
         Raises ``ValueError`` if the shape does not match.
-    cpr_type : {'pll', 'bps', None}, default None
-        Inline carrier phase recovery algorithm applied jointly with weight
-        updates at every symbol.  ``None`` disables CPR (default, bit-exact
-        with the legacy behaviour).
+    cpr : PLL or BPS, optional
+        Inline carrier phase recovery (``commkit.recovery``), run jointly
+        with the weight updates at every symbol; ``None`` disables it.
 
-        * ``'pll'`` - 2nd-order decision-directed phase-locked loop.  The
-          cross-product phase detector ``Im(y · conj(d))`` drives a PI loop
-          with gains derived from ``cpr_pll_bandwidth``.  Low noise floor;
-          recommended for QPSK through 64-QAM.
-        * ``'bps'`` - Blind Phase Search over ``cpr_bps_test_phases`` candidate
-          angles in ``[0, π/2)`` (exploiting 4-fold QAM symmetry), averaged
-          over a causal window of ``cpr_bps_block_size`` past y_raw samples.
-          Preferred for burst/packet modes where PLL pull-in is impractical.
+        * ``PLL(bandwidth=, mu=, beta=, phase_init=, joint_channels=)`` -
+          decision-directed loop: the cross-product detector
+          ``Im(y · conj(d))`` drives a PI loop (gains from ``bandwidth`` or
+          raw ``mu`` / ``beta``).  ``phase_init`` seeds a cold start.  Low
+          noise floor; recommended for QPSK through 64-QAM.
+        * ``BPS(test_phases=, block_size=, joint_channels=)`` - blind phase
+          search over ``test_phases`` angles in ``[0, π/2)`` (4-fold QAM
+          symmetry), averaged over a causal window of the last
+          ``block_size`` symbols.  Preferred for bursts where PLL pull-in is
+          impractical.  The wrapped float32 estimate rotates the output; the
+          causally 4-fold-unwrapped float64 accumulator is the
+          ``phase_trajectory``, so float32 rounding never accumulates.
 
-          **Dual-path output:** the wrapped float32 phase estimate rotates
-          ``y_raw`` for the weight update, while the unwrapped float64
-          accumulator is stored in ``phase_trajectory``.  The two paths are
-          kept separate to prevent float32 rounding errors from accumulating
-          in the trajectory over thousands of symbols.
-
-          **4-fold causal unwrap:** the raw BPS ``argmin`` lives in
-          ``[0, π/2)``.  A causal unwrap tracks the argmin evolution symbol
-          by symbol, adding or subtracting ``π/2`` multiples as needed to
-          keep the estimate continuous, then converting to full-range radians.
-    cpr_pll_bandwidth : float, default 1e-3
-        Normalised loop bandwidth ``B_L · T_s`` for the PLL.  Gains are
-        computed as ``K_p = 4 B_L``, ``K_i = 4 B_L²`` (critically-damped
-        approximation, ζ=1).  Typical range: ``5e-4`` (low phase noise) to
-        ``5e-3`` (high phase noise / fast drift).  Used only when
-        ``cpr_pll_mu is None`` (the bandwidth shortcut) and ``cpr_type == 'pll'``.
-    cpr_pll_mu : float, optional
-        Raw proportional PLL gain ``μ``.  If given, overrides
-        ``cpr_pll_bandwidth`` and uses raw PI gains directly; ``cpr_pll_beta``
-        then defaults to ``0.0`` (a 1st-order loop).  Leave ``None`` to derive
-        critically-damped gains from ``cpr_pll_bandwidth``.  Interchangeable
-        with the ``mu`` of ``recovery.PLL``.
-    cpr_pll_beta : float, optional
-        Raw integral PLL gain ``β``.  ``β=0`` => 1st-order loop (no frequency
-        integrator); ``β>0`` => 2nd-order loop.  Requires ``cpr_pll_mu`` to be
-        set (passing ``cpr_pll_beta`` alone raises ``ValueError``).  The
-        ``(μ,β) <-> (B_L,ζ)`` mapping is ``ωₙT = √β``, ``ζ = μ/(2√β)``.
-    cpr_bps_test_phases : int, default 64
-        Number of candidate phase angles for the BPS search in ``[0, π/2)``.
-        Higher values improve phase resolution at the cost of ``B`` extra
-        distance evaluations per symbol.  32-64 is sufficient for ≤ 16-QAM;
-        use 64-128 for 64-QAM.  Ignored when ``cpr_type != 'bps'``.
-    cpr_bps_block_size : int, default 32
-        Number of past y_raw samples whose min-distance metrics are summed
-        before the BPS ``argmin``.  Larger values reduce noise on the phase
-        estimate at the cost of increased latency (``K-1`` symbols).
-        ``cpr_bps_block_size=1`` recovers the degenerate single-symbol BPS.
-        Ignored when ``cpr_type != 'bps'``.
-    cpr_joint_channels : bool, default False
-        For MIMO inputs (C > 1): if ``True``, the per-symbol phase estimate
-        is computed jointly across all C channels before being applied.
-
-        * **BPS** - the per-candidate distance metrics are summed across
-          channels before ``argmin``, giving one shared estimate broadcast
-          to all channels.  Reduces estimation variance by ~√C for
-          shared-LO transmitter setups.
-        * **PLL** - the cross-product phase-error signal
-          ``Im(y · conj(d))`` is averaged across channels before the PI
-          integrator, so all channels share one phase trajectory.
-
-        When ``False``, each channel runs its own independent estimator.
-        Ignored for SISO inputs (C == 1).
-    cpr_cycle_slip_correction : bool, default False
-        Enable causal cycle-slip detection and correction.  A circular
-        buffer of ``cpr_cycle_slip_history`` past phase estimates is
-        maintained per channel.  Before each symbol, an online linear
-        regression over the buffer predicts the current phase; if the new
-        estimate deviates from the prediction by more than
-        ``cpr_cycle_slip_threshold``, the estimate is snapped to the
-        nearest ``2π/symmetry`` quantum (e.g. π/2 for QPSK/QAM) and the
-        buffer is updated with the corrected value.  Disable for
-        deterministic parity checks or when the channel is known to be
-        slip-free.
-    cpr_cycle_slip_history : int, default 100
-        Length of the phase-history buffer used for cycle-slip prediction.
-        Longer buffers produce a more stable linear-trend fit but are
-        slower to adapt when the true carrier frequency drifts.  Ignored
-        when ``cpr_cycle_slip_correction=False``.
-    cpr_cycle_slip_threshold : float, default π/4
-        Maximum tolerated deviation (radians) between the predicted and
-        observed phase before a slip is declared.  Should be set to half
-        the constellation's angular symmetry quantum (``π/4`` for
-        QPSK/QAM).  Ignored when ``cpr_cycle_slip_correction=False``.
+        ``joint_channels`` shares one estimate across MIMO channels (summed
+        BPS metrics, or the PLL error averaged before the integrator).  A
+        nested ``CycleSlip(history=, threshold=)`` predicts each phase from a
+        linear fit through the last ``history`` values and snaps a deviation
+        beyond ``threshold`` to the nearest ``2π/4`` multiple (``π`` for
+        2-fold constellations).
     cpr_state : CPRState, optional
         Warm-start CPR state from a previous ``lms()`` call (obtained via
         ``EqualizerResult.cpr_state``).  When provided and the CPR type and
@@ -282,8 +208,8 @@ def lms(
         This eliminates the ~5-10 k symbol CPR convergence transient that
         occurs at every block boundary in streaming pipelines.  Pass
         ``None`` (default) to cold-start the CPR from zero.  Ignored when
-        ``cpr_type=None`` or when the stored state is incompatible (mismatched
-        ``cpr_type``, channel count, or history depth), in which case the
+        ``cpr=None`` or when the stored state is incompatible (mismatched
+        CPR method, channel count, or history depth), in which case the
         equalizer falls back to cold-start silently.
     input_norm_factor : float or ndarray, optional
         Pre-computed RMS normalization factor from a previous call (obtained
@@ -333,7 +259,7 @@ def lms(
           shape ``(N_sym,)`` SISO or ``(C, N_sym)`` MIMO.  For BPS, this
           is the causal 4-fold-unwrapped float64 phase.  For PLL, it is
           the PI integrator state accumulated over all symbols.  ``None``
-          when ``cpr_type=None``.
+          when ``cpr=None``.
         * ``num_train_symbols`` - number of training symbols consumed
           (data-aided phase).
         * ``input_norm_factor`` - the RMS factor used to normalize inputs
@@ -342,7 +268,7 @@ def lms(
         * ``cpr_state`` - ``CPRState`` snapshot of PLL/BPS/cycle-slip
           integrators after the last symbol.  Pass as ``cpr_state`` on the
           next call to resume CPR without a re-convergence transient.
-          ``None`` when ``cpr_type=None``.
+          ``None`` when ``cpr=None``.
 
         Arrays reside on the same device as the input (NumPy CPU or CuPy
         GPU).
@@ -360,8 +286,7 @@ def lms(
     sps = require_integer_sps(signal_adapter.resolve_fact("sps", sps), "lms()")
     constellation = signal_adapter.resolve_choice("constellation", constellation)
 
-    if cpr_type is not None and cpr_type not in ("pll", "bps"):
-        raise ValueError(f"cpr_type must be 'pll', 'bps', or None. Got {cpr_type!r}.")
+    inline = _inline_cpr(cpr, constellation, "lms()")
 
     n_train_log = training_symbols.shape[-1] if training_symbols is not None else 0
     logger.info(
@@ -370,7 +295,7 @@ def lms(
         step_size,
         sps,
         n_train_log,
-        f", cpr={cpr_type}" if cpr_type else "",
+        f", cpr={type(cpr).__name__}" if cpr is not None else "",
     )
     if sps > 1:
         logger.warning(
@@ -396,7 +321,7 @@ def lms(
     sq_side, sq_lev_min, sq_d_grid = _square_qam_slicer_params(constellation_np)
     slicer = (sq_lev_min, sq_d_grid, np.int32(sq_side))
 
-    if cpr_type is None:
+    if inline is None:
         _get_numba_lms()(
             run.x,
             run.train_full,
@@ -413,33 +338,19 @@ def lms(
         )
         result = _assemble_sequential(run)
     else:
-        pll_mu, pll_beta = _resolve_pll_gains(
-            cpr_pll_bandwidth, cpr_pll_mu, cpr_pll_beta
-        )
-        symmetry = _cpr_symmetry(constellation)
-        bps_angles, bps_phases_neg = _bps_phases(cpr_bps_test_phases)
-        history = int(cpr_cycle_slip_history)
-        carrier = _carrier_arrays(cpr_state, cpr_type, run.num_ch, history)
+        carrier = _carrier_arrays(cpr_state, inline, run.num_ch)
         phase_out = np.empty((run.n_sym, run.num_ch), dtype=np.float64)
         _get_numba_lms_cpr()(
             run.x,
             run.train_full,
             constellation_np,
-            bps_phases_neg,
-            bps_angles,
-            np.int32(cpr_bps_block_size),
-            bool(cpr_joint_channels),
+            *inline.bps_args(),
             run.W,
             np.float32(step_size),
             np.int32(run.n_train),
             run.stride,
             store_weights,
-            np.int32(1 if cpr_type == "pll" else 2),
-            pll_mu,
-            pll_beta,
-            np.int32(symmetry),
-            bool(cpr_cycle_slip_correction),
-            np.float32(cpr_cycle_slip_threshold),
+            *inline.loop_args(),
             *_carrier_args(carrier),
             run.y_out,
             run.e_out,
@@ -451,14 +362,7 @@ def lms(
             run,
             phase_out=phase_out,
             carrier=carrier,
-            cpr_state_tags=dict(
-                cpr_type=cpr_type,
-                num_ch=run.num_ch,
-                symmetry=symmetry,
-                bps_P=len(bps_angles),
-                bps_K=int(cpr_bps_block_size),
-                cs_H=history,
-            ),
+            cpr_state_tags=inline.state_tags(run.num_ch),
         )
     result = _log_equalizer_exit(result, name="LMS")
     return _attach_equalized_signal(result, sig)
@@ -494,16 +398,7 @@ def rls(
     store_weights: bool = False,
     center_tap: int | None = None,
     w_init: ArrayType | None = None,
-    cpr_type: str | None = None,
-    cpr_pll_bandwidth: float = 1e-3,
-    cpr_pll_mu: float | None = None,
-    cpr_pll_beta: float | None = None,
-    cpr_bps_test_phases: int = 64,
-    cpr_bps_block_size: int = 32,
-    cpr_joint_channels: bool = False,
-    cpr_cycle_slip_correction: bool = False,
-    cpr_cycle_slip_history: int = 100,
-    cpr_cycle_slip_threshold: float = np.pi / 4,
+    cpr: PLL | BPS | None = None,
     cpr_state: CPRState | None = None,
     input_norm_factor: float | np.ndarray | None = None,
     samples_prefix: ArrayType | None = None,
@@ -621,71 +516,29 @@ def rls(
         If True, stores weight trajectory.
     center_tap : int, optional
         Index of the center tap. If None, defaults to ``num_taps // 2``.
-    cpr_type : {'pll', 'bps', None}, default None
-        Inline carrier phase recovery applied jointly with weight updates at
-        every symbol.  ``None`` disables CPR (default).
+    cpr : PLL or BPS, optional
+        Inline carrier phase recovery (``commkit.recovery``), run jointly
+        with the weight updates at every symbol; ``None`` disables it.
 
-        * ``'pll'`` - 2nd-order decision-directed PLL.  The cross-product
-          detector ``Im(y · conj(d))`` drives a PI loop with gains from
-          ``cpr_pll_bandwidth``.  Low noise floor; suited to QPSK-64-QAM.
-        * ``'bps'`` - Blind Phase Search over ``cpr_bps_test_phases``
-          candidate angles in ``[0, π/2)``, averaged over a causal window
-          of ``cpr_bps_block_size`` samples.  Uses a **dual-path** design:
-          the wrapped float32 estimate rotates ``y_raw`` for the Riccati
-          update; the unwrapped float64 accumulator populates
-          ``phase_trajectory``.  A **causal 4-fold unwrap** converts the
-          ``[0, π/2)`` argmin to full-range radians symbol by symbol.
-    cpr_pll_bandwidth : float, default 1e-3
-        Normalised loop bandwidth ``B_L · T_s`` for the PLL.  Gains are
-        ``K_p = 4 B_L``, ``K_i = 4 B_L²`` (critically-damped, ζ=1).  Typical
-        range: ``5e-4`` (low phase noise) to ``5e-3`` (high drift).
-        Used only when ``cpr_pll_mu is None`` and ``cpr_type == 'pll'``.
-    cpr_pll_mu : float, optional
-        Raw proportional PLL gain ``μ``.  If given, overrides
-        ``cpr_pll_bandwidth``; ``cpr_pll_beta`` then defaults to ``0.0``
-        (1st-order).  Leave ``None`` for critically-damped gains from
-        ``cpr_pll_bandwidth``.  Interchangeable with the ``mu`` of
-        ``recovery.PLL``.
-    cpr_pll_beta : float, optional
-        Raw integral PLL gain ``β``.  ``β=0`` => 1st-order, ``β>0`` => 2nd-order.
-        Requires ``cpr_pll_mu`` to be set.  Mapping: ``ωₙT = √β``,
-        ``ζ = μ/(2√β)``.
-    cpr_bps_test_phases : int, default 64
-        Number of BPS candidate phase angles in ``[0, π/2)``.  32-64 is
-        sufficient for ≤ 16-QAM; use 64-128 for 64-QAM.  Ignored when
-        ``cpr_type != 'bps'``.
-    cpr_bps_block_size : int, default 32
-        Trailing-window length (symbols) summed before the BPS ``argmin``.
-        Larger values reduce phase-noise variance at the cost of latency.
-        ``cpr_bps_block_size=1`` gives single-symbol BPS.  Ignored when
-        ``cpr_type != 'bps'``.
-    cpr_joint_channels : bool, default False
-        For MIMO inputs (C > 1): share the phase estimate across channels.
+        * ``PLL(bandwidth=, mu=, beta=, phase_init=, joint_channels=)`` -
+          decision-directed loop: the cross-product detector
+          ``Im(y · conj(d))`` drives a PI loop (gains from ``bandwidth`` or
+          raw ``mu`` / ``beta``).  ``phase_init`` seeds a cold start.  Low
+          noise floor; recommended for QPSK through 64-QAM.
+        * ``BPS(test_phases=, block_size=, joint_channels=)`` - blind phase
+          search over ``test_phases`` angles in ``[0, π/2)`` (4-fold QAM
+          symmetry), averaged over a causal window of the last
+          ``block_size`` symbols.  Preferred for bursts where PLL pull-in is
+          impractical.  The wrapped float32 estimate rotates the output; the
+          causally 4-fold-unwrapped float64 accumulator is the
+          ``phase_trajectory``, so float32 rounding never accumulates.
 
-        * **BPS** - distance metrics are summed across channels before
-          ``argmin``.  Reduces estimation variance by ~√C for shared-LO
-          systems.
-        * **PLL** - the phase-error signal is averaged across channels
-          before the PI integrator.
-
-        When ``False``, each channel has an independent estimator.
-        Ignored for SISO inputs.
-    cpr_cycle_slip_correction : bool, default False
-        Enable causal cycle-slip detection and correction.  A circular
-        buffer of ``cpr_cycle_slip_history`` past phase estimates is kept
-        per channel.  An online linear regression predicts the next phase;
-        if the new estimate deviates by more than
-        ``cpr_cycle_slip_threshold``, it is snapped to the nearest
-        ``2π/symmetry`` quantum and the buffer is updated.  Disable for
-        parity checks or slip-free channels.
-    cpr_cycle_slip_history : int, default 100
-        Phase-history buffer length for slip prediction.  Longer buffers
-        give a more stable trend estimate but adapt more slowly to genuine
-        frequency steps.  Ignored when ``cpr_cycle_slip_correction=False``.
-    cpr_cycle_slip_threshold : float, default π/4
-        Maximum tolerated deviation (radians) before a slip is declared.
-        Set to half the constellation's angular quantum (``π/4`` for
-        QPSK/QAM).  Ignored when ``cpr_cycle_slip_correction=False``.
+        ``joint_channels`` shares one estimate across MIMO channels (summed
+        BPS metrics, or the PLL error averaged before the integrator).  A
+        nested ``CycleSlip(history=, threshold=)`` predicts each phase from a
+        linear fit through the last ``history`` values and snaps a deviation
+        beyond ``threshold`` to the nearest ``2π/4`` multiple (``π`` for
+        2-fold constellations).
     cpr_state : CPRState, optional
         Warm-start CPR state from a previous ``rls()`` call.  See
         ``lms()`` for the full description; behaviour is identical.
@@ -717,11 +570,11 @@ def rls(
         * ``phase_trajectory`` - per-symbol phase estimates, shape
           ``(N_sym,)`` SISO or ``(C, N_sym)`` MIMO.  BPS: causal
           4-fold-unwrapped float64.  PLL: PI integrator state.  ``None``
-          when ``cpr_type=None``.
+          when ``cpr=None``.
         * ``num_train_symbols`` - number of data-aided training symbols.
         * ``input_norm_factor`` - RMS factor used to normalize inputs.
         * ``cpr_state`` - CPRState snapshot after the last symbol; ``None``
-          when ``cpr_type=None``.
+          when ``cpr=None``.
 
     Warnings
     --------
@@ -752,8 +605,7 @@ def rls(
             sps,
         )
 
-    if cpr_type is not None and cpr_type not in ("pll", "bps"):
-        raise ValueError(f"cpr_type must be 'pll', 'bps', or None. Got {cpr_type!r}.")
+    inline = _inline_cpr(cpr, constellation, "rls()")
 
     n_train_log = training_symbols.shape[-1] if training_symbols is not None else 0
     logger.info(
@@ -765,7 +617,7 @@ def rls(
         leakage,
         sps,
         n_train_log,
-        f", cpr={cpr_type}" if cpr_type else "",
+        f", cpr={type(cpr).__name__}" if cpr is not None else "",
     )
     if sps > 1:
         logger.warning(
@@ -807,7 +659,7 @@ def rls(
     # the Hermitian positive-definite property and the filter diverges).
     P = np.eye(run.num_ch * num_taps, dtype=np.complex128) / np.float64(delta)
 
-    if cpr_type is None:
+    if inline is None:
         _get_numba_rls()(
             run.x,
             run.train_full,
@@ -827,22 +679,13 @@ def rls(
         )
         result = _assemble_sequential(run, n_sym=n_update_halt)
     else:
-        pll_mu, pll_beta = _resolve_pll_gains(
-            cpr_pll_bandwidth, cpr_pll_mu, cpr_pll_beta
-        )
-        symmetry = _cpr_symmetry(constellation)
-        bps_angles, bps_phases_neg = _bps_phases(cpr_bps_test_phases)
-        history = int(cpr_cycle_slip_history)
-        carrier = _carrier_arrays(cpr_state, cpr_type, run.num_ch, history)
+        carrier = _carrier_arrays(cpr_state, inline, run.num_ch)
         phase_out = np.empty((run.n_sym, run.num_ch), dtype=np.float64)
         _get_numba_rls_cpr()(
             run.x,
             run.train_full,
             constellation_np,
-            bps_phases_neg,
-            bps_angles,
-            np.int32(cpr_bps_block_size),
-            bool(cpr_joint_channels),
+            *inline.bps_args(),
             run.W,
             P,
             np.float32(forgetting_factor),
@@ -851,12 +694,7 @@ def rls(
             np.int32(n_update_halt),
             run.stride,
             store_weights,
-            np.int32(1 if cpr_type == "pll" else 2),
-            pll_mu,
-            pll_beta,
-            np.int32(symmetry),
-            bool(cpr_cycle_slip_correction),
-            np.float32(cpr_cycle_slip_threshold),
+            *inline.loop_args(),
             *_carrier_args(carrier),
             run.y_out,
             run.e_out,
@@ -869,14 +707,7 @@ def rls(
             n_sym=n_update_halt,
             phase_out=phase_out,
             carrier=carrier,
-            cpr_state_tags=dict(
-                cpr_type=cpr_type,
-                num_ch=run.num_ch,
-                symmetry=symmetry,
-                bps_P=len(bps_angles),
-                bps_K=int(cpr_bps_block_size),
-                cs_H=history,
-            ),
+            cpr_state_tags=inline.state_tags(run.num_ch),
         )
     result = _log_equalizer_exit(result, name="RLS")
     result.tail_trim = tail_trim

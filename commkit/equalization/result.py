@@ -27,15 +27,15 @@ class CPRState:
     small and must survive device resets.  Do not convert to CuPy.
 
     Used/produced by ``lms()``, ``rls()``, and ``block_lms()`` when
-    ``cpr_type`` is not None.  Pass as ``cpr_state=result.cpr_state`` to the
+    ``cpr`` is set.  Pass as ``cpr_state=result.cpr_state`` to the
     next call to continue phase tracking without a re-lock transient.
     """
 
-    # PLL state (lms / rls with cpr_type='pll' or 'bps')
+    # PLL state (lms / rls with cpr=PLL or BPS)
     pll_phi: np.ndarray | None = None  # (C,) float64
     pll_freq: np.ndarray | None = None  # (C,) float64
 
-    # BPS cross-block unwrap state (block_lms with cpr_type='bps')
+    # BPS cross-block unwrap state (block_lms with cpr=BPS)
     bps_prev4: np.ndarray | None = None  # (C,) float64
     bps_offset4: np.ndarray | None = None  # (C,) float64
     bps_d2_hist: np.ndarray | None = None  # (P, C, K-1) float32 - CPU copy
@@ -106,7 +106,7 @@ class EqualizerResult:
             source_bits    = source_bits[..., :-result.tail_trim * bits_per_symbol]
     phase_trajectory : np.ndarray or None
         Per-symbol phase estimates produced by the inline CPR stage, in
-        radians.  ``None`` when ``cpr_type=None``.
+        radians.  ``None`` without ``cpr``.
 
         Shape: ``(N_sym,)`` for SISO, ``(C, N_sym)`` for MIMO butterfly.
 

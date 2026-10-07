@@ -17,6 +17,7 @@ from ...backend import ArrayType, dispatch, to_device
 from ...logger import logger
 from .._common import (
     _build_padded_samples,
+    _cpr_symmetry,
     _init_butterfly_weights_numpy,
     _normalize_inputs,
     _prepare_training_numpy,
@@ -183,14 +184,95 @@ class _CarrierArrays:
     bps_prev4: np.ndarray  # (C,) float64
 
 
+@dataclass(frozen=True)
+class _InlineCpr:
+    """Kernel arguments of the inline CPR, resolved from a ``PLL``/``BPS``."""
+
+    kind: str  # "pll" or "bps" (tag of the CPRState)
+    pll_mu: Any
+    pll_beta: Any
+    phase_init: float
+    angles: np.ndarray  # (B,) float32 BPS candidates over [0, π/2)
+    phases_neg: np.ndarray  # (B,) complex64, exp(-j*angle)
+    window: int  # BPS averaging window
+    joint: bool
+    symmetry: int  # cycle-slip quantum 2π/symmetry
+    cycle_slip: bool
+    history: int
+    threshold: float
+
+    def bps_args(self) -> tuple[Any, ...]:
+        return (self.phases_neg, self.angles, np.int32(self.window), bool(self.joint))
+
+    def loop_args(self) -> tuple[Any, ...]:
+        return (
+            np.int32(1 if self.kind == "pll" else 2),
+            self.pll_mu,
+            self.pll_beta,
+            np.int32(self.symmetry),
+            bool(self.cycle_slip),
+            np.float32(self.threshold),
+        )
+
+    def state_tags(self, num_ch: int) -> dict[str, Any]:
+        return dict(
+            cpr_type=self.kind,
+            num_ch=num_ch,
+            symmetry=self.symmetry,
+            bps_P=len(self.angles),
+            bps_K=self.window,
+            cs_H=self.history,
+        )
+
+
+def _inline_cpr(cpr: Any, constellation: Any, function_name: str) -> _InlineCpr | None:
+    """Resolve ``cpr=`` (``PLL``, ``BPS`` or ``None``) for the LMS/RLS kernels."""
+    from ...recovery import BPS, PLL, CycleSlip
+
+    if cpr is None:
+        return None
+    if not isinstance(cpr, PLL | BPS):
+        raise TypeError(
+            f"{function_name}: cpr must be a recovery.PLL or recovery.BPS, got "
+            f"{type(cpr).__name__}."
+        )
+    cycle_slip = cpr.cycle_slip
+    slip = cycle_slip if cycle_slip is not None else CycleSlip()
+    if isinstance(cpr, PLL):
+        mu, beta = cpr.gains
+        test_phases, window, phase_init = 64, 32, float(cpr.phase_init)
+    else:
+        mu, beta = PLL().gains  # unused by the BPS path
+        test_phases, window, phase_init = cpr.test_phases, cpr.block_size, 0.0
+    angles = np.linspace(
+        0.0, np.pi / 2.0, int(test_phases), endpoint=False, dtype=np.float32
+    )
+    return _InlineCpr(
+        kind="pll" if isinstance(cpr, PLL) else "bps",
+        pll_mu=mu,
+        pll_beta=beta,
+        phase_init=phase_init,
+        angles=angles,
+        phases_neg=np.exp(-1j * angles).astype(np.complex64),
+        window=int(window),
+        joint=bool(cpr.joint_channels),
+        symmetry=_cpr_symmetry(constellation),
+        cycle_slip=cycle_slip is not None,
+        history=int(slip.history),
+        threshold=float(slip.threshold),
+    )
+
+
 def _carrier_arrays(
-    cpr_state: CPRState | None, cpr_type: str, num_ch: int, history: int
+    cpr_state: CPRState | None, inline: _InlineCpr, num_ch: int
 ) -> _CarrierArrays:
-    """Warm-start CPR arrays from a compatible ``cpr_state``, else zeros."""
+    """Warm-start CPR arrays from a compatible ``cpr_state``, else a cold start
+    (zeros, the PLL at ``phase_init``)."""
     st = cpr_state
+    history = inline.history
     if (
         st is not None
-        and st.cpr_type == cpr_type
+        and st.cpr_type == inline.kind
         and st.num_ch == num_ch
         and st.cs_H == history
         and st.pll_phi is not None
@@ -216,7 +298,7 @@ def _carrier_arrays(
             ),
         )
     return _CarrierArrays(
-        pll_phi=np.zeros(num_ch, dtype=np.float64),
+        pll_phi=np.full(num_ch, inline.phase_init, dtype=np.float64),
         pll_freq=np.zeros(num_ch, dtype=np.float64),
         cs_buf_x=np.zeros((num_ch, history), dtype=np.float64),
         cs_buf_y=np.zeros((num_ch, history), dtype=np.float64),
@@ -239,14 +321,6 @@ def _carrier_args(c: _CarrierArrays) -> tuple[np.ndarray, ...]:
         c.cs_stats,
         c.bps_prev4,
     )
-
-
-def _bps_phases(test_phases: int) -> tuple[np.ndarray, np.ndarray]:
-    """Inline BPS candidate angles over ``[0, π/2)`` and their ``exp(-jθ)``."""
-    angles = np.linspace(
-        0.0, np.pi / 2.0, int(test_phases), endpoint=False, dtype=np.float32
-    )
-    return angles, np.exp(-1j * angles).astype(np.complex64)
 
 
 def _assemble_sequential(

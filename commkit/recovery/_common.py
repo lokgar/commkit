@@ -37,7 +37,7 @@ def _resolve_pll_gains(
 ) -> tuple[Any, Any]:
     """Resolve decision-directed PLL PI gains from a raw/bandwidth parameterization.
 
-    Shared by the inline equalizer PLL (``lms``/``rls`` with ``cpr_type='pll'``)
+    Shared by the inline equalizer PLL (``lms``/``rls`` with ``cpr=PLL(...)``)
     and the standalone PLL, so the bandwidth->gain mapping is defined in
     exactly one place.
 
