@@ -19,7 +19,7 @@ Matplotlib, change warning filters, or touch the GPU.  Subpackages such as
 import importlib
 from typing import Any
 
-__version__ = "1.1.0"
+__version__ = "2.0.0"
 
 from .core import (
     Preamble,
