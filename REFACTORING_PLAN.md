@@ -1277,6 +1277,11 @@ The equalization pass (3.7) gets more commits:
     a min/max envelope;
   - `imshow` instead of `pcolormesh` for spectrograms.
 
+- [x] **4.4 `docs: CHANGELOG for 2.0.0`, `bench: 0003_v2_0`, version
+  2.0.0.** Full CPU and GPU suites pass; the benchmark comparison with 0002
+  is the paired A/B in the `bench:` commit (only CPU `compute_llr` is beyond
+  tolerance, the known step-5 item).
+
 ### Step 5: performance follow-ups (independent, any time after step 3.6)
 
 - A Numba CPU path for non-square BPS (1256 ms on CPU against 26 ms on GPU in
