@@ -16,6 +16,8 @@ from .theme import (
     _set_eng_formatter,
 )
 
+__all__ = ["plot_time_domain"]
+
 
 def plot_time_domain(
     samples: Any,

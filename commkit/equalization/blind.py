@@ -15,6 +15,8 @@ from ._common import _godard_radius, _rde_ring_radii
 from .result import EqualizerResult, EqualizerState, _attach_equalized_signal
 from .sequential._blind import _check_pilots
 
+__all__ = ["block_cma", "block_rde", "build_pilot_ref"]
+
 # -----------------------------------------------------------------------------
 # BLOCK BLIND EQUALIZERS (Signal-aware)
 # -----------------------------------------------------------------------------

@@ -15,6 +15,8 @@ instead, not here.
 from .backend import ArrayType, dispatch
 from .logger import logger
 
+__all__ = ["moving_average", "savgol_smooth", "smooth_density_2d"]
+
 # -----------------------------------------------------------------------------
 # SMOOTHERS (array-only - operate on derived/plot-only quantities, never on
 # raw Signal samples, so none of these are Signal-aware)

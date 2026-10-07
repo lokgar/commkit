@@ -14,6 +14,15 @@ from ..logger import logger
 from ..math import _remove_linear_trend
 from ._common import _Context, _Phase
 
+__all__ = [
+    "CycleSlip",
+    "DataAided",
+    "correct_cycle_slips",
+    "resolve_channel_permutation",
+    "resolve_phase_ambiguity",
+    "smooth_phase_wiener",
+]
+
 
 def _log_phase_summary(
     phi,

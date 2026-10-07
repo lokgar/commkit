@@ -19,6 +19,15 @@ from .theme import (
     _set_eng_formatter,
 )
 
+__all__ = [
+    "plot_allan_deviation",
+    "plot_carrier_phase_characterization",
+    "plot_dsh_beat_psd",
+    "plot_frequency_drift",
+    "plot_frequency_noise_psd",
+    "plot_increment_variance",
+]
+
 
 def _require(result: Any, field: str, name: str, what: str) -> Any:
     """``result.<field>``; a result without it raises, naming what is needed."""

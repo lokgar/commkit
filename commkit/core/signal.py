@@ -27,6 +27,8 @@ from ..backend import (
     to_device,
 )
 
+__all__ = ["Reference", "Signal"]
+
 if TYPE_CHECKING:
     from ..filtering import Pulse
     from ..mapping import Constellation

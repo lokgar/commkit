@@ -16,6 +16,8 @@ from .theme import (
     _square_figsize,
 )
 
+__all__ = ["plot_constellation", "plot_ideal_constellation"]
+
 
 def plot_ideal_constellation(
     constellation: Any,

@@ -18,6 +18,15 @@ from .core._signal_adapter import S, adapt_signal
 from .core.signal import Signal
 from .logger import logger
 
+__all__ = [
+    "Spectrogram",
+    "add_pilot_tone",
+    "grid_frequency",
+    "shift_frequency",
+    "spectrogram",
+    "welch_psd",
+]
+
 
 def _validate_and_shift(
     xp: Any, is_complex: bool, return_onesided: bool | None, label: str

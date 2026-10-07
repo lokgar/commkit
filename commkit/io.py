@@ -37,6 +37,8 @@ import numpy as np
 
 from . import backend as _backend
 
+__all__ = ["load_npz", "save_npz"]
+
 if TYPE_CHECKING:
     from .core import Signal
 

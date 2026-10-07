@@ -14,6 +14,13 @@ from ..core.signal import Signal
 from ..filtering import fir_filter, fir_taps
 from ..logger import logger
 
+__all__ = [
+    "JonesTrack",
+    "apply_interpolated_matrix",
+    "demultiplex_polarization_tones_dynamic",
+    "demultiplex_polarization_tones_static",
+]
+
 # -----------------------------------------------------------------------------
 # TIME-VARYING MATRIX APPLY (Signal-aware)
 # -----------------------------------------------------------------------------

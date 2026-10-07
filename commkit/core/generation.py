@@ -16,6 +16,8 @@ from ..math import normalize
 from ._signal_adapter import require_integer_sps
 from .signal import Reference, Signal
 
+__all__ = ["expand", "generate", "shape_pulse"]
+
 # -----------------------------------------------------------------------------
 # WAVEFORM SYNTHESIS PRIMITIVES
 # -----------------------------------------------------------------------------

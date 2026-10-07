@@ -1259,6 +1259,24 @@ The equalization pass (3.7) gets more commits:
   accumulator times 4 whatever the constellation's symmetry.
 - [x] **4.2c `docs: final AGENTS.md pass and README around §2.1`.**
 
+- [x] **4.3a `chore: every public module declares __all__`.** Thirty
+  public modules exported their imported helpers (`np`, `dispatch`,
+  `adapt_signal`, ...) as public names. Each lists its own API, and a test
+  checks that every public module (placeholders aside) declares `__all__`.
+- [ ] **4.3b `docs: examples as notebooks, plus the receiver quickstart`.**
+  The five `# %%` scripts become Jupyter notebooks (outputs stripped) and
+  `qam_receiver_quickstart.ipynb` holds the README workflow;
+  `tests/test_examples.py` executes every notebook.
+- [ ] **4.3c-f `perf(plotting)`** (discussed in another session, not
+  planned until now):
+  - constellation density binned on the device with `bincount`, and only
+    the unique reference symbols in the overlay;
+  - `LineCollection` for line-mode eye diagrams, vectorised interpolation
+    for histogram-mode eye diagrams;
+  - `plot_time_domain` slices on the device before the transfer, then draws
+    a min/max envelope;
+  - `imshow` instead of `pcolormesh` for spectrograms.
+
 ### Step 5: performance follow-ups (independent, any time after step 3.6)
 
 - A Numba CPU path for non-square BPS (1256 ms on CPU against 26 ms on GPU in

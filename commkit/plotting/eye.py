@@ -11,6 +11,8 @@ from ..logger import logger
 from ..smoothing import smooth_density_2d
 from .theme import _grid_figsize
 
+__all__ = ["plot_eye_diagram"]
+
 
 def _plot_eye_traces(
     samples: Any,

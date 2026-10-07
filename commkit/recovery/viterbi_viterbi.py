@@ -15,6 +15,8 @@ from ._common import (
 )
 from .corrections import CycleSlip, _log_phase_summary, _repair_slips
 
+__all__ = ["ViterbiViterbi"]
+
 
 @dataclass(frozen=True)
 class ViterbiViterbi:

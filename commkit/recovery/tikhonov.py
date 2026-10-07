@@ -16,6 +16,8 @@ from ._common import (
 from .corrections import CycleSlip, _log_phase_summary, _repair_slips
 from .viterbi_viterbi import _warn_small_qam_block
 
+__all__ = ["Tikhonov"]
+
 _NUMBA_RTS: dict = {}
 
 

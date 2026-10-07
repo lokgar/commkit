@@ -8,6 +8,8 @@ import numpy as np
 from ..backend import to_device
 from ..logger import logger
 
+__all__ = ["apply_default_theme"]
+
 
 def apply_default_theme() -> None:
     """

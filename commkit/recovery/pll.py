@@ -9,6 +9,8 @@ from ..backend import ArrayType, dispatch, to_device
 from ._common import _Context, _Phase, _resolve_pll_gains
 from .corrections import CycleSlip, _log_phase_summary, _repair_slips
 
+__all__ = ["PLL"]
+
 _NUMBA_PLL: dict = {}
 
 

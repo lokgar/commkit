@@ -14,6 +14,8 @@ from .theme import (
     _set_eng_formatter,
 )
 
+__all__ = ["plot_psd", "plot_spectrogram"]
+
 
 def plot_psd(
     samples: Any,

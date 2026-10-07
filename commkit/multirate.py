@@ -64,6 +64,8 @@ from .core._signal_adapter import S, adapt_signal, require_integer_sps
 from .logger import logger
 from .math import normalize as _normalize
 
+__all__ = ["decimate", "decimate_to_symbol_rate", "resample", "upsample"]
+
 
 def decimate_to_symbol_rate(
     samples: S,

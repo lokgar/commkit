@@ -16,6 +16,18 @@ from .theme import (
     _set_eng_formatter,
 )
 
+__all__ = [
+    "plot_carrier_phase_decomposition",
+    "plot_carrier_phase_trajectory",
+    "plot_frequency_offset_blockwise_result",
+    "plot_frequency_offset_spectrum",
+    "plot_mm_autocorrelation",
+    "plot_pilot_phase_estimate",
+    "plot_pilot_tone_phase_estimate",
+    "plot_pilot_tones_phase_estimate",
+    "plot_timing_correlation",
+]
+
 
 def _plot_timing_correlation(
     corr_mag,

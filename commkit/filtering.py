@@ -20,6 +20,31 @@ from .core._signal_adapter import S, adapt_signal, require_integer_sps
 from .logger import logger
 from .math import normalize
 
+__all__ = [
+    "Gaussian",
+    "Pulse",
+    "RC",
+    "RRC",
+    "Rect",
+    "SmoothRect",
+    "bessel_sos",
+    "butterworth_sos",
+    "chebyshev1_sos",
+    "chebyshev2_sos",
+    "correct_chromatic_dispersion",
+    "elliptic_sos",
+    "fir_filter",
+    "fir_taps",
+    "gaussian_taps",
+    "iir_filter",
+    "matched_filter",
+    "ols_fir_filter",
+    "rc_taps",
+    "rect_taps",
+    "rrc_taps",
+    "smoothrect_taps",
+]
+
 # -----------------------------------------------------------------------------
 # FILTER DESIGN - TAP GENERATORS (array-only)
 # -----------------------------------------------------------------------------

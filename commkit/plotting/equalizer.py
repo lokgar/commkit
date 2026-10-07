@@ -9,6 +9,8 @@ from ..backend import to_device
 from ..smoothing import moving_average
 from .theme import _grid_figsize, _set_eng_formatter
 
+__all__ = ["plot_equalizer_result", "plot_zf_equalizer_response"]
+
 
 def plot_equalizer_result(
     result,

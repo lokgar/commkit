@@ -11,6 +11,8 @@ import numpy as np
 from ..backend import ArrayType, to_device
 from ..logger import logger
 
+__all__ = ["EqualizerResult", "EqualizerState"]
+
 if TYPE_CHECKING:
     from ..core.signal import Signal
 

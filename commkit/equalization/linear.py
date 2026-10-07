@@ -12,6 +12,8 @@ from ..core.signal import Signal
 from ..logger import logger
 from ._common import _build_padded_samples, _normalize_inputs
 
+__all__ = ["apply_taps", "estimate_transfer_function", "zf_equalizer"]
+
 # -----------------------------------------------------------------------------
 # BLOCK EQUALIZATION (Signal-aware)
 # -----------------------------------------------------------------------------

@@ -9,6 +9,8 @@ commkit's own diagnostics with a coloured console handler, or configure
 import logging
 import sys
 
+__all__ = ["logger", "set_log_level"]
+
 
 class _ColorFormatter(logging.Formatter):
     """

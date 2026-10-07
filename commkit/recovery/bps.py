@@ -9,6 +9,8 @@ from ..logger import logger
 from ._common import _check_blocks, _Context, _Phase
 from .corrections import CycleSlip, _log_phase_summary, _repair_slips
 
+__all__ = ["BPS"]
+
 
 @dataclass(frozen=True)
 class BPS:

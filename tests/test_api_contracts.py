@@ -234,6 +234,7 @@ ROWS: list[Row] = [
     # --- backend / logging / io --------------------------------------------
     Row("commkit.backend.dispatch", INFRA),
     Row("commkit.backend.get_array_module", INFRA),
+    Row("commkit.backend.get_scipy_module", INFRA),
     Row("commkit.backend.is_cupy_available", INFRA, data=0),
     Row("commkit.backend.to_device", INFRA, data=2),
     Row("commkit.logger.set_log_level", INFRA),
@@ -903,3 +904,30 @@ def test_equalizer_result(row: Row, xp):
     res_sig = _call(row, c, c.primary_signal(row, 1))
     assert _module(res_sig.y_hat) == xp.__name__, f"y_hat is {type(res_sig.y_hat)}"
     assert isinstance(getattr(res_sig, "signal", None), Signal)
+
+
+def test_every_public_module_declares_all():
+    """Each public module lists its API in ``__all__``, so helpers it imports
+    (``np``, ``dispatch``, ...) are not part of it."""
+    import ast
+    from pathlib import Path
+
+    root = Path(commkit.__file__).parent
+    missing = []
+    for path in sorted(root.rglob("*.py")):
+        rel = path.relative_to(root.parent).with_suffix("")
+        parts = rel.parts
+        if any(p.startswith("_") for p in parts if p != "__init__"):
+            continue
+        name = ".".join(p for p in parts if p != "__init__")
+        if name.startswith(PLACEHOLDERS):
+            continue
+        tree = ast.parse(path.read_text())
+        declared = any(
+            isinstance(n, ast.Assign)
+            and any(getattr(t, "id", None) == "__all__" for t in n.targets)
+            for n in tree.body
+        )
+        if not declared:
+            missing.append(name)
+    assert not missing, f"Modules without __all__: {missing}"

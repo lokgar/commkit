@@ -13,6 +13,8 @@ from ..math import _remove_linear_trend
 from ._common import _Context, _Phase
 from .corrections import CycleSlip, _log_phase_summary, _repair_slips
 
+__all__ = ["PilotAided", "PilotTone", "PilotTones"]
+
 
 @dataclass(frozen=True, eq=False)
 class PilotAided:
