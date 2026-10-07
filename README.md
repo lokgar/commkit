@@ -7,50 +7,20 @@
 ![License](https://img.shields.io/badge/license-MIT-green)
 ![CUDA](https://img.shields.io/badge/CUDA-13.x-76B900?logo=nvidia)
 
-CommKit covers the receiver chain of coherent and IM/DD links (waveform
-generation, channel impairments, synchronization, carrier recovery, adaptive
-equalization, metrics, laser characterization and plotting) on NumPy or CuPy
-arrays. Computation runs on the device the data lives on.
+CommKit covers the receiver chain of coherent and IM/DD links (waveform generation, channel impairments, synchronization, carrier recovery, adaptive equalization, metrics, laser characterization and plotting) on NumPy or CuPy arrays. Computation runs on the device the data lives on.
 
 ---
 
 ## The model
 
-```text
-plain arrays (NumPy / CuPy)          value objects (frozen, written inline)
-        \                            Constellation, RRC / RC / Gaussian / Rect,
-         \                           BPS / PLL / CycleSlip, MthPower, ...
-          v                                   |
-       Signal  = samples + facts + description + reference
-          |
-          v
-   functions: generate, apply_*, estimate_*, correct_*, resolve_*, ...
-          |                 \
-          v                  v
-   Signal or array      typed results (EqualizerResult, *Estimate, ...)
-                             |
-                             v
-                   plotting (draws results, never computes them)
-```
+Data is a NumPy or CuPy array, or a `Signal` that wraps the samples together with what is known about them. Algorithms are plain functions that take the data and return a new `Signal` or array, or a typed result such as `EqualizerResult` or an `*Estimate`. Plotting functions draw those results; they never compute them.
 
-- **Algorithms are plain functions.** Data is a `Signal` or an array.
-- **Things that describe** a modulation, a pulse or a sub-algorithm are small
-  frozen objects written in the call: `lms(rx, cpr=BPS(test_phases=64))`.
-  The same object works standalone: `correct_carrier_phase(y, BPS())`.
-- **A `Signal` carries facts and ground truth.** Facts are `sampling_rate`,
-  `symbol_rate` and `center_frequency`. The description is `constellation`
-  and `pulse`. The ground truth is `reference` (transmitted symbols and
-  bits). Functions take facts from the Signal and raise on a conflicting
-  argument. Choices such as the decision constellation default to the
-  Signal's and can be overridden.
-- **Results with several values are frozen dataclasses** with named fields.
-  Metrics return host floats: one per channel for `(C, N)` input.
-- **The device follows the data.** Processing functions have no `backend=`
-  or `device=` argument. Only factories, which have no input data to
-  follow, take `device=`: `generate(..., device="gpu")`. Move existing data
-  with `sig.to("gpu")`.
-- There is no pipeline object, receiver class or configuration file: the
-  orchestration stays in your script.
+- **Things that describe** a modulation, a pulse or a sub-algorithm are small frozen objects written in the call: `lms(rx, cpr=BPS(test_phases=64))`. The same object works standalone: `correct_carrier_phase(y, BPS())`.
+- **A `Signal` carries facts and ground truth.** Facts are `sampling_rate`, `symbol_rate` and `center_frequency`. The description is `constellation` and `pulse`. The ground truth is `reference` (transmitted symbols and bits). Functions take facts from the Signal and raise on a conflicting argument. Choices such as the decision constellation default to the Signal's and can be overridden.
+- **Results with several values are frozen dataclasses** with named fields. Metrics return host floats: one per channel for `(C, N)` input.
+- **The device follows the data.** Processing functions have no `backend=` or `device=` argument. Only factories, which have no input data to follow, take `device=`: `generate(..., device="gpu")`. Move existing data with `sig.to("gpu")`.
+- **Plots draw results.** `plot_*` functions take a Signal, an array or a result object; numerical code never imports plotting.
+- There is no pipeline object, receiver class or configuration file: the orchestration stays in your script.
 
 ## Quickstart
 
@@ -79,24 +49,14 @@ print(f"EVM {ck.metrics.evm(y, num_skip_symbols=2000):.1f} %, "
 res2 = ck.equalization.lms(rx, num_taps=21, step_size=1e-3, cpr=cpr, state=res.state)
 ```
 
-Without CuPy, pass `device="cpu"` (the default): the same code runs on the
-CPU.
+Without CuPy, pass `device="cpu"` (the default): the same code runs on the CPU.
 
 ## CPU and GPU
 
-CommKit never picks a device for you: data stays where you put it, and each
-function runs on the device of its input. A few habits get the speed out of
-a GPU:
+CommKit never picks a device for you: data stays where you put it, and each function runs on the device of its input. A few habits get the speed out of a GPU:
 
-- **Put data on the GPU once, at the source.** Build it there with
-  `generate(..., device="gpu")`, `frame.to_signal(..., device="gpu")` or
-  `load_npz(path, device="gpu")`; move a capture with `sig.to("gpu")`. Do not
-  move data back and forth between stages. Building on the GPU is faster
-  than `generate(...).to("gpu")`: about 26 ms instead of 370 ms for 4M
-  symbols, because mapping and pulse shaping run there.
-- **You do not need to move results back.** Metrics (`evm`, `ber`, ...) and
-  analysis summaries return host floats, and plots reduce on the device and
-  transfer only what they draw.
+- **Put data on the GPU once, at the source.** Build it there with `generate(..., device="gpu")`, `frame.to_signal(..., device="gpu")` or `load_npz(path, device="gpu")`; move a capture with `sig.to("gpu")`. Do not move data back and forth between stages. Building on the GPU is faster than `generate(...).to("gpu")`: about 26 ms instead of 370 ms for 4M symbols, because mapping and pulse shaping run there.
+- **You do not need to move results back.** Metrics (`evm`, `ber`, ...) and analysis summaries return host floats, and plots reduce on the device and transfer only what they draw.
 - **Know what runs where.**
 
   | Work | GPU input |
@@ -105,25 +65,12 @@ a GPU:
   | Frequency-domain equalizers `block_lms`, `block_cma`, `block_rde` | runs on the GPU (CUDA graphs) |
   | Sequential equalizers `lms`, `rls`, `cma`, `rde`; `PLL`, `Tikhonov`, cycle-slip correction | runs on the CPU (Numba): one copy to the host and back, no speedup |
 
-  A sample-by-sample recursion has no parallel work per step. For long
-  records on the GPU, prefer the block equalizers with `block_size=1024` or
-  more. Each block costs a fixed overhead: at 256 the GPU only ties the CPU
-  without carrier recovery, at 2048 it is 6-9x faster. A larger block also
-  lowers the stable `step_size`.
-- **Short records do not pay off.** Launch overhead dominates below roughly
-  10⁴-10⁵ samples, where the CPU is as fast.
-- **Batch channels and records.** Pass `(C, N)` arrays rather than looping
-  over channels in Python: one call does the work of C.
-- **Keep scalars on the device inside loops.** `float(x)`, `x.item()` and
-  `if x > 0:` on a CuPy array wait for the GPU and copy. Collect values in an
-  array and transfer once.
-- **The first call compiles.** Numba and CUDA kernels compile on first use
-  and are cached on disk. Warm up once before timing anything.
-- **Seeds and devices.** The same `rng` gives the same bits and symbols on
-  both devices. Channel noise (AWGN, phase noise) is drawn on the device, so
-  its realization differs between CPU and GPU while its statistics match.
-  For the exact same phase-noise trajectory on both, draw it on the CPU with
-  `generate_phase_noise(...)` and move it.
+  A sample-by-sample recursion has no parallel work per step. For long records on the GPU, prefer the block equalizers with `block_size=1024` or more. Each block costs a fixed overhead: at 256 the GPU only ties the CPU without carrier recovery, at 2048 it is 6-9x faster. A larger block also lowers the stable `step_size`.
+- **Short records do not pay off.** Launch overhead dominates below roughly 10⁴-10⁵ samples, where the CPU is as fast.
+- **Batch channels and records.** Pass `(C, N)` arrays rather than looping over channels in Python: one call does the work of C.
+- **Keep scalars on the device inside loops.** `float(x)`, `x.item()` and `if x > 0:` on a CuPy array wait for the GPU and copy. Collect values in an array and transfer once.
+- **The first call compiles.** Numba and CUDA kernels compile on first use and are cached on disk. Warm up once before timing anything.
+- **Seeds and devices.** The same `rng` gives the same bits and symbols on both devices. Channel noise (AWGN, phase noise) is drawn on the device, so its realization differs between CPU and GPU while its statistics match. For the exact same phase-noise trajectory on both, draw it on the CPU with `generate_phase_noise(...)` and move it.
 
 ---
 
@@ -149,8 +96,7 @@ a GPU:
 | [`commkit.plotting`](https://github.com/lokgar/commkit/tree/main/commkit/plotting) | Constellations, eye diagrams, spectra, filter responses, equalizer convergence, and synchronization and laser diagnostics that draw the estimates. Imported on first use. |
 | [`commkit.coding`](https://github.com/lokgar/commkit/tree/main/commkit/coding) | Channel coding and FEC: **planned, not implemented**. |
 
-Importing `commkit` has no side effects: it configures no logging, Matplotlib
-or warning filters, and does not touch the GPU.
+Importing `commkit` has no side effects: it configures no logging, Matplotlib or warning filters, and does not touch the GPU.
 
 ---
 
@@ -165,33 +111,24 @@ pip install "commkit[notebook]"     # to run the example notebooks
 pip install "commkit[full]"         # everything
 ```
 
-With [`uv`](https://github.com/astral-sh/uv), use `uv pip install` in place of
-`pip install`. Extras combine, e.g. `commkit[gpu,notebook]`.
+With [`uv`](https://github.com/astral-sh/uv), use `uv pip install` in place of `pip install`. Extras combine, e.g. `commkit[gpu,notebook]`.
 
 > [!NOTE]
-> **WSL2 and CUDA.** With NVIDIA drivers and CUDA installed on Windows, there
-> is no need to install CUDA inside WSL2. To let the Python CUDA packages find
-> the bundled NVIDIA libraries, add to `~/.bashrc`:
+> **WSL2 and CUDA.** With NVIDIA drivers and CUDA installed on Windows, there is no need to install CUDA inside WSL2. To let the Python CUDA packages find the bundled NVIDIA libraries, add to `~/.bashrc`:
 >
 > ```bash
 > export LD_LIBRARY_PATH=$LD_LIBRARY_PATH:$(echo $HOME/commkit/.venv/lib/python3.*/site-packages/nvidia/cu13/lib)
 > ```
 >
-> *(This assumes the repository is cloned to `$HOME/commkit`; adjust the path
-> otherwise.)*
+> *(This assumes the repository is cloned to `$HOME/commkit`; adjust the path otherwise.)*
 
 ## Examples
 
-Jupyter notebooks in [`examples/`](https://github.com/lokgar/commkit/tree/main/examples) (install the `notebook` extra
-and run `jupyter lab examples`):
+Jupyter notebooks in [`examples/`](https://github.com/lokgar/commkit/tree/main/examples) (install the `notebook` extra and run `jupyter lab examples`):
 
-- [`qam_receiver_quickstart`](https://github.com/lokgar/commkit/blob/main/examples/qam_receiver_quickstart.ipynb) - the
-  quickstart above, cell by cell, with the constellation, spectrum and
-  equalizer plots;
-- [`carrier_phase_analysis`](https://github.com/lokgar/commkit/blob/main/examples/carrier_phase_analysis.ipynb) - drift,
-  linewidth and Allan deviation of a recovered carrier phase;
-- [`laser_linewidth_dsh`](https://github.com/lokgar/commkit/blob/main/examples/laser_linewidth_dsh.ipynb) and
-  [`laser_linewidth_homodyne_iq`](https://github.com/lokgar/commkit/blob/main/examples/laser_linewidth_homodyne_iq.ipynb)
+- [`qam_receiver_quickstart`](https://github.com/lokgar/commkit/blob/main/examples/qam_receiver_quickstart.ipynb) - the quickstart above, cell by cell, with the constellation, spectrum and equalizer plots;
+- [`carrier_phase_analysis`](https://github.com/lokgar/commkit/blob/main/examples/carrier_phase_analysis.ipynb) - drift, linewidth and Allan deviation of a recovered carrier phase;
+- [`laser_linewidth_dsh`](https://github.com/lokgar/commkit/blob/main/examples/laser_linewidth_dsh.ipynb) and [`laser_linewidth_homodyne_iq`](https://github.com/lokgar/commkit/blob/main/examples/laser_linewidth_homodyne_iq.ipynb)
   - laser linewidth from delayed self-heterodyne and homodyne IQ captures;
 - `measurement_laser_linewidth_*` - lean templates for real captures.
 
@@ -210,8 +147,7 @@ uv run pytest --device=cpu       # what CI runs
 uv run ruff check . && uv run mypy commkit/
 ```
 
-Contributor and coding-agent guidance (architecture, API rules, numerics,
-performance and test conventions) is in [AGENTS.md](https://github.com/lokgar/commkit/blob/main/AGENTS.md).
+Contributor and coding-agent guidance (architecture, API rules, numerics, performance and test conventions) is in [AGENTS.md](https://github.com/lokgar/commkit/blob/main/AGENTS.md).
 
 ## License
 
