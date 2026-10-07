@@ -5,6 +5,7 @@ from unittest.mock import patch
 
 import matplotlib.pyplot as plt
 import matplotlib.ticker as mticker
+import numpy as np
 import pytest
 
 from commkit.plotting import plot_psd, plot_time_domain
@@ -73,3 +74,40 @@ class TestPlotTimeDomain:
         with patch("matplotlib.pyplot.show"):
             result = plot_time_domain(samples, sampling_rate=1e6, show=True)
         assert result is None
+
+
+class TestTimeDomainEnvelope:
+    """Long views are drawn as a min/max envelope reduced on the device."""
+
+    def test_envelope_keeps_every_extreme(self, xp: Any) -> None:
+        from commkit.plotting.waveform import _envelope
+
+        rng = np.random.default_rng(1)
+        y = rng.standard_normal(100_003)
+        y[-1] = 50.0  # a spike in the trailing partial bucket
+        y[12_345] = -40.0
+        t, env = _envelope(xp.asarray(y), 1e3, 1000, xp)
+        assert env.size <= 1000 + 2 and t.shape == env.shape
+        assert env.max() == 50.0 and env.min() == -40.0
+        assert np.all(np.diff(t) >= 0)
+        # Each bucket's pair is its true minimum and maximum.
+        width = int(round(t[2] * 1e3))
+        np.testing.assert_array_equal(env[0:2], [y[:width].min(), y[:width].max()])
+
+    def test_short_view_is_drawn_as_is(self, xp: Any) -> None:
+        from commkit.plotting.waveform import _envelope
+
+        y = np.arange(50.0)
+        t, env = _envelope(xp.asarray(y), 10.0, 1000, xp)
+        np.testing.assert_array_equal(env, y)
+        np.testing.assert_allclose(t, np.arange(50) / 10.0)
+
+    def test_plot_slices_before_reducing(self, xp: Any) -> None:
+        """A symbol window is cut first; max_points=None draws every sample."""
+        x = xp.asarray(np.arange(40_000, dtype=np.float64))
+        _, ax = plot_time_domain(
+            x, sampling_rate=1.0, sps=4, start_symbol=10, num_symbols=100
+        )
+        np.testing.assert_array_equal(ax.lines[0].get_ydata(), np.arange(40, 440))
+        _, ax = plot_time_domain(x, sampling_rate=1.0, max_points=None)
+        assert ax.lines[0].get_ydata().size == 40_000
