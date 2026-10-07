@@ -13,6 +13,7 @@ from ..core.signal import Signal
 from ._block import _block_fdaf_blind
 from ._common import _godard_radius, _rde_ring_radii
 from .result import EqualizerResult
+from .sequential._blind import _check_pilots
 
 # -----------------------------------------------------------------------------
 # BLOCK BLIND EQUALIZERS (Signal-aware)
@@ -21,18 +22,16 @@ from .result import EqualizerResult
 
 def block_cma(
     samples: ArrayType | Signal,
+    *,
     num_taps: int = 21,
     sps: int | None = None,
     step_size: float = 2e-4,
     block_size: int = 256,
-    modulation: str | None = None,
-    order: int | None = None,
-    unipolar: bool = False,
+    constellation: Any = None,
     w_init: ArrayType | None = None,
     pilot_ref: ArrayType | None = None,
     pilot_mask: np.ndarray | None = None,
     pilot_gain_db: float = 0.0,
-    pmf: Any | None = None,
     input_norm_factor: float | np.ndarray | None = None,
     samples_prefix: ArrayType | None = None,
     pad_mode: str = "zeros",
@@ -46,7 +45,7 @@ def block_cma(
     acquisition at the high-throughput frequency-domain operating point (slow or
     static channels, GPU/CuPy input); for the trained/DD case use
     :func:`block_lms`, and for fastest dynamics on a single stream use
-    :func:`cma` with ``backend='numba'``.
+    :func:`cma`.
 
     Like :func:`cma`, it is fully blind and recovers the channel up to a phase
     ambiguity - run a carrier-phase recovery stage afterwards.  Supplying
@@ -67,20 +66,18 @@ def block_cma(
     Returns an :class:`EqualizerResult` with ``y_hat``, ``weights``, ``error``
     on the input's device.  A :class:`Signal` returns ``y_hat`` as a new
     :class:`Signal` at the symbol rate (``sampling_rate = symbol_rate``);
-    ``sps`` is ignored for :class:`Signal` input, which always uses the
-    signal's own ``sps``.
+    ``sps`` and ``constellation`` come from a :class:`Signal`; array input
+    needs ``sps``.
     """
     signal_adapter = adapt_signal(samples, function_name="block_cma()")
     samples = signal_adapter.array
-    if signal_adapter.signal is not None:
-        sps = require_integer_sps(
-            signal_adapter.resolve_required("sps", sps), "block_cma()"
-        )
+    sps = require_integer_sps(signal_adapter.resolve_fact("sps", sps), "block_cma()")
+    constellation = signal_adapter.resolve_choice("constellation", constellation)
+    pilot_ref, pilot_mask = _check_pilots(
+        signal_adapter.array, sps, pilot_ref, pilot_mask, "block_cma()"
+    )
 
-    if sps is None:
-        sps = 2
-
-    r2, c_ps = _godard_radius(modulation, order, unipolar, pmf)
+    r2, c_ps = _godard_radius(constellation)
     result = _block_fdaf_blind(
         "cma",
         samples,
@@ -110,18 +107,16 @@ def block_cma(
 
 def block_rde(
     samples: ArrayType | Signal,
+    *,
     num_taps: int = 21,
     sps: int | None = None,
     step_size: float = 2e-4,
     block_size: int = 256,
-    modulation: str | None = None,
-    order: int | None = None,
-    unipolar: bool = False,
+    constellation: Any = None,
     w_init: ArrayType | None = None,
     pilot_ref: ArrayType | None = None,
     pilot_mask: np.ndarray | None = None,
     pilot_gain_db: float = 0.0,
-    pmf: Any | None = None,
     input_norm_factor: float | np.ndarray | None = None,
     samples_prefix: ArrayType | None = None,
     pad_mode: str = "zeros",
@@ -153,15 +148,13 @@ def block_rde(
     """
     signal_adapter = adapt_signal(samples, function_name="block_rde()")
     samples = signal_adapter.array
-    if signal_adapter.signal is not None:
-        sps = require_integer_sps(
-            signal_adapter.resolve_required("sps", sps), "block_rde()"
-        )
+    sps = require_integer_sps(signal_adapter.resolve_fact("sps", sps), "block_rde()")
+    constellation = signal_adapter.resolve_choice("constellation", constellation)
+    pilot_ref, pilot_mask = _check_pilots(
+        signal_adapter.array, sps, pilot_ref, pilot_mask, "block_rde()"
+    )
 
-    if sps is None:
-        sps = 2
-
-    radii_np, c_ps = _rde_ring_radii(modulation, order, unipolar, pmf)
+    radii_np, c_ps = _rde_ring_radii(constellation)
     result = _block_fdaf_blind(
         "rde",
         samples,
@@ -200,6 +193,7 @@ def block_rde(
 def build_pilot_ref(
     pilot_symbols: np.ndarray,
     pilot_mask: np.ndarray,
+    *,
     n_sym: int,
     num_ch: int,
 ) -> tuple:

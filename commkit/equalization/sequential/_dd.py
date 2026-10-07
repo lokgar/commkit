@@ -42,16 +42,14 @@ from ._setup import (
 def lms(
     samples: ArrayType | Signal,
     training_symbols: ArrayType | None = None,
+    *,
     num_taps: int = 21,
     sps: int | None = None,
     step_size: float = 0.01,
-    modulation: str | None = None,
-    order: int | None = None,
-    unipolar: bool = False,
+    constellation: Any = None,
     store_weights: bool = False,
     center_tap: int | None = None,
     w_init: ArrayType | None = None,
-    pmf: Any | None = None,
     cpr_type: str | None = None,
     cpr_pll_bandwidth: float = 1e-3,
     cpr_pll_mu: float | None = None,
@@ -76,9 +74,8 @@ def lms(
 
     Supports data-aided (training) and decision-directed (DD) modes.
     When ``training_symbols`` are provided, the equalizer uses them for the
-    initial convergence phase, then switches to DD mode using the
-    ``modulation`` and ``order`` parameters, or a constellation auto-inferred
-    from the training symbols for hard-decision slicing.
+    initial convergence phase, then switches to DD mode, slicing to
+    ``constellation``.
 
     For MIMO inputs ``(C, N)``, a butterfly ``(C, C, num_taps)`` filter
     structure is used so each output is a weighted sum of all input streams,
@@ -155,18 +152,16 @@ def lms(
     training_symbols : array_like, optional
         Known transmitted symbols (at symbol rate, 1 SPS).
         Shape: ``(N_train,)`` for SISO or ``(C, N_train)`` for MIMO.
-        If None, pure DD mode (requires ``modulation`` and ``order``).
+        Without them the equalizer is decision-directed throughout.
     num_taps : int, default 21
         Number of equalizer taps per FIR filter. For fractionally-spaced
         equalization (sps > 1), use at least ``4 * sps`` taps.
-    sps : int, optional, default 2
-        Samples per symbol at the input.  Use ``sps=2`` (T/2-spaced, default)
-        for the first equalization stage.  ``sps=1`` is valid for a second
-        symbol-spaced stage after FOE + CPR; use a short filter (3-11 taps)
-        for residual ISI cleanup.  ``sps > 2`` is accepted but uncommon.
-        The equalizer decimates by ``sps`` to produce one output symbol per
-        input stride.  Ignored for :class:`Signal` input, which always uses
-        the signal's own ``sps``.
+    sps : int, optional
+        Samples per symbol at the input, an integer: 2 (T/2-spaced) for a
+        first stage, 1 for a symbol-spaced stage after FOE and CPR (use 3-11
+        taps), more is accepted but uncommon.  The output is one symbol per
+        ``sps`` samples.  Taken from the Signal; required for array input.
+        A value that disagrees with the Signal raises.
     step_size : float, default 0.01
         Plain LMS step size (mu). The gradient is applied directly without
         input-power normalization, matching the convention in Haykin's
@@ -176,13 +171,10 @@ def lms(
         symbol-rate power by default, a safe starting range for typical
         settings is ``1e-4`` to ``1e-2``.  Values closer to the upper bound
         converge faster but produce higher steady-state misadjustment.
-    modulation : str, optional
-        Modulation scheme (e.g., 'psk', 'qam', 'pam') for DD slicing.
-        Required if ``training_symbols`` is None.
-    order : int, optional
-        Modulation order (e.g., 4, 16).
-    unipolar : bool, default False
-        If True, indicates the modulation is unipolar (e.g., unipolar PAM).
+    constellation : Constellation, optional
+        Decision constellation for the slicer, unit power (a shaped
+        constellation carries its pmf).  Defaults to the Signal's
+        ``constellation``; required for array input.
     store_weights : bool, default False
         If True, stores weight trajectory in ``weights_history``.
     center_tap : int, optional
@@ -195,14 +187,6 @@ def lms(
         the default center-tap identity matrix.  Useful for weight handoff from
         a prior stage (e.g. preamble LMS -> payload LMS).
         Raises ``ValueError`` if the shape does not match.
-    pmf : array_like of float, optional
-        Probability mass function over the constellation for probabilistically
-        shaped QAM (PS-QAM).  When provided together with ``modulation`` and
-        ``order``, the DD slicer constellation is scaled by ``1/sqrt(E_PS)``
-        (where ``E_PS = sum_m P(s_m)|s_m|^2`` on the normalised grid) so it
-        matches the unit-power normalised equaliser input.  Training symbols
-        are left untouched - ``_normalize_inputs`` already brings them to unit
-        average power.  Has no effect for uniform modulations.
     cpr_type : {'pll', 'bps', None}, default None
         Inline carrier phase recovery algorithm applied jointly with weight
         updates at every symbol.  ``None`` disables CPR (default, bit-exact
@@ -373,10 +357,8 @@ def lms(
     signal_adapter = adapt_signal(samples, function_name="lms()")
     samples = signal_adapter.array
     sig = signal_adapter.signal
-    if sig is not None:
-        sps = require_integer_sps(signal_adapter.resolve_required("sps", sps), "lms()")
-    if sps is None:
-        sps = 2
+    sps = require_integer_sps(signal_adapter.resolve_fact("sps", sps), "lms()")
+    constellation = signal_adapter.resolve_choice("constellation", constellation)
 
     if cpr_type is not None and cpr_type not in ("pll", "bps"):
         raise ValueError(f"cpr_type must be 'pll', 'bps', or None. Got {cpr_type!r}.")
@@ -408,7 +390,9 @@ def lms(
         pad_mode=pad_mode,
         training_symbols=training_symbols,
     )
-    constellation_np = _dd_constellation(modulation, order, unipolar, pmf, run.training)
+    constellation_np = _dd_constellation(
+        constellation, "lms()", decisions=run.n_train < run.n_sym
+    )
     sq_side, sq_lev_min, sq_d_grid = _square_qam_slicer_params(constellation_np)
     slicer = (sq_lev_min, sq_d_grid, np.int32(sq_side))
 
@@ -432,7 +416,7 @@ def lms(
         pll_mu, pll_beta = _resolve_pll_gains(
             cpr_pll_bandwidth, cpr_pll_mu, cpr_pll_beta
         )
-        symmetry = _cpr_symmetry(modulation, order)
+        symmetry = _cpr_symmetry(constellation)
         bps_angles, bps_phases_neg = _bps_phases(cpr_bps_test_phases)
         history = int(cpr_cycle_slip_history)
         carrier = _carrier_arrays(cpr_state, cpr_type, run.num_ch, history)
@@ -500,18 +484,16 @@ def _check_rls_divergence(weights, xp, forgetting_factor, delta):
 def rls(
     samples: ArrayType | Signal,
     training_symbols: ArrayType | None = None,
+    *,
     num_taps: int = 21,
     sps: int | None = None,
     forgetting_factor: float = 0.99,
     delta: float = 0.01,
     leakage: float = 0.0,
-    modulation: str | None = None,
-    order: int | None = None,
-    unipolar: bool = False,
+    constellation: Any = None,
     store_weights: bool = False,
     center_tap: int | None = None,
     w_init: ArrayType | None = None,
-    pmf: Any | None = None,
     cpr_type: str | None = None,
     cpr_pll_bandwidth: float = 1e-3,
     cpr_pll_mu: float | None = None,
@@ -568,9 +550,10 @@ def rls(
         Known symbols for data-aided adaptation (at symbol rate, 1 SPS).
     num_taps : int, default 21
         Number of equalizer taps per FIR filter.
-    sps : int, optional, default 1
-        Samples per symbol at the input.  Ignored for :class:`Signal` input,
-        which always uses the signal's own ``sps``.
+    sps : int, optional
+        Samples per symbol at the input (1 is the well-conditioned case).
+        Taken from the Signal; required for array input.  A value that
+        disagrees with the Signal raises.
     forgetting_factor : float, default 0.99
         RLS forgetting factor (lambda). Range: (0, 1].
         Values close to 1 give longer memory.
@@ -630,21 +613,14 @@ def rls(
         A value of ``0.0`` (default) gives standard RLS.
         For fractionally-spaced equalization start with ``leakage=1e-4`` and
         increase if steady-state EVM remains high.
-    modulation : str, optional
-        Modulation scheme (e.g., 'psk', 'qam', 'pam') for DD slicing.
-        Required if ``training_symbols`` is None.
-    order : int, optional
-        Modulation order (e.g., 4, 16).
-    unipolar : bool, default False
-        If True, indicates the modulation is unipolar (e.g., unipolar PAM).
+    constellation : Constellation, optional
+        Decision constellation for the slicer, unit power (a shaped
+        constellation carries its pmf).  Defaults to the Signal's
+        ``constellation``; required for array input.
     store_weights : bool, default False
         If True, stores weight trajectory.
     center_tap : int, optional
         Index of the center tap. If None, defaults to ``num_taps // 2``.
-    pmf : array_like of float, optional
-        Probability mass function for PS-QAM.  Scales the DD slicer
-        constellation by ``1/sqrt(E_PS)`` to match the unit-power normalised
-        equaliser input.  Requires ``modulation`` and ``order``.
     cpr_type : {'pll', 'bps', None}, default None
         Inline carrier phase recovery applied jointly with weight updates at
         every symbol.  ``None`` disables CPR (default).
@@ -764,10 +740,8 @@ def rls(
     signal_adapter = adapt_signal(samples, function_name="rls()")
     samples = signal_adapter.array
     sig = signal_adapter.signal
-    if sig is not None:
-        sps = require_integer_sps(signal_adapter.resolve_required("sps", sps), "rls()")
-    if sps is None:
-        sps = 1
+    sps = require_integer_sps(signal_adapter.resolve_fact("sps", sps), "rls()")
+    constellation = signal_adapter.resolve_choice("constellation", constellation)
     if sps > 1:
         logger.warning(
             "RLS is mathematically ill-conditioned for fractionally-spaced "
@@ -824,7 +798,9 @@ def rls(
             ":-result.tail_trim * bits_per_symbol].",
             tail_trim,
         )
-    constellation_np = _dd_constellation(modulation, order, unipolar, pmf, run.training)
+    constellation_np = _dd_constellation(
+        constellation, "rls()", decisions=run.n_train < run.n_sym
+    )
     sq_side, sq_lev_min, sq_d_grid = _square_qam_slicer_params(constellation_np)
     slicer = (sq_lev_min, sq_d_grid, np.int32(sq_side))
     # Inverse correlation matrix: complex128 throughout (single precision loses
@@ -854,7 +830,7 @@ def rls(
         pll_mu, pll_beta = _resolve_pll_gains(
             cpr_pll_bandwidth, cpr_pll_mu, cpr_pll_beta
         )
-        symmetry = _cpr_symmetry(modulation, order)
+        symmetry = _cpr_symmetry(constellation)
         bps_angles, bps_phases_neg = _bps_phases(cpr_bps_test_phases)
         history = int(cpr_cycle_slip_history)
         carrier = _carrier_arrays(cpr_state, cpr_type, run.num_ch, history)

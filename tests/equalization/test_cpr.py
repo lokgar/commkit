@@ -90,8 +90,7 @@ class TestCPREqualizerBaseline:
             training_symbols=syms[:500],
             num_taps=11,
             sps=2,
-            modulation="psk",
-            order=4,
+            constellation=Constellation.psk(4),
         )
         fn = lms if algo == "lms" else rls
         extra = {} if algo == "lms" else {"sps": 2}
@@ -111,8 +110,7 @@ class TestCPREqualizerBaseline:
         kw = dict(
             num_taps=11,
             sps=2,
-            modulation="psk",
-            order=4,
+            constellation=Constellation.psk(4),
             cpr_type="pll",
         )
         r_default = lms(samples, syms[:50], **kw)
@@ -146,11 +144,10 @@ class TestCPRPLLConvergence:
 
         res = lms(
             xp.asarray(samples),
-            training_symbols=syms[:300],
+            syms[:300],
             num_taps=1,
             sps=1,
-            modulation="psk",
-            order=4,
+            constellation=Constellation.psk(4),
             cpr_type="pll",
             cpr_pll_bandwidth=5e-3,
             cpr_cycle_slip_correction=True,
@@ -191,11 +188,10 @@ class TestCPRPLLConvergence:
         bw = 5e-3
         res = lms(
             xp.asarray(samples),
-            training_symbols=syms[:1000],
+            syms[:1000],
             num_taps=1,
             sps=1,
-            modulation="qam",
-            order=16,
+            constellation=Constellation.qam(16),
             cpr_type="pll",
             cpr_pll_bandwidth=bw,
             cpr_cycle_slip_correction=False,
@@ -218,8 +214,7 @@ class TestCPRPLLConvergence:
             training_symbols=syms[:300],
             num_taps=11,
             sps=2,
-            modulation="psk",
-            order=4,
+            constellation=Constellation.psk(4),
             cpr_type="pll",
             cpr_cycle_slip_correction=False,
         )
@@ -243,11 +238,10 @@ class TestCPRPLLConvergence:
         with pytest.raises(ValueError, match="beta requires mu"):
             lms(
                 xp.asarray(samples),
-                training_symbols=syms[:100],
+                syms[:100],
                 num_taps=11,
                 sps=2,
-                modulation="psk",
-                order=4,
+                constellation=Constellation.psk(4),
                 cpr_type="pll",
                 cpr_pll_beta=1e-3,
             )
@@ -263,13 +257,12 @@ class TestCPRPLLConvergence:
         m, b = 0.02, 1e-4
         res = lms(
             xp.asarray(samples),
-            training_symbols=syms[:200],
+            syms[:200],
             num_taps=1,
             sps=1,
             step_size=0.0,
             w_init=xp.asarray(np.array([1.0 + 0j], dtype=np.complex64)),
-            modulation="psk",
-            order=4,
+            constellation=Constellation.psk(4),
             cpr_type="pll",
             cpr_pll_mu=m,
             cpr_pll_beta=b,
@@ -310,11 +303,10 @@ class TestCPRBPSConvergence:
 
         res = lms(
             xp.asarray(samples),
-            training_symbols=syms[:500],
+            syms[:500],
             num_taps=1,
             sps=1,
-            modulation="qam",
-            order=16,
+            constellation=Constellation.qam(16),
             cpr_type="bps",
             cpr_bps_test_phases=64,
             cpr_bps_block_size=32,
@@ -351,11 +343,10 @@ class TestCPRBPSConvergence:
 
         res_bps = lms(
             samples,
-            training_symbols=syms[:1000],
+            syms[:1000],
             num_taps=1,
             sps=1,
-            modulation="qam",
-            order=16,
+            constellation=Constellation.qam(16),
             cpr_type="bps",
             cpr_bps_test_phases=64,
             cpr_bps_block_size=32,
@@ -363,11 +354,10 @@ class TestCPRBPSConvergence:
         )
         res_none = lms(
             samples,
-            training_symbols=syms[:1000],
+            syms[:1000],
             num_taps=1,
             sps=1,
-            modulation="qam",
-            order=16,
+            constellation=Constellation.qam(16),
             cpr_type=None,
         )
 
@@ -400,11 +390,10 @@ class TestCPRBPSConvergence:
 
         res_k1 = lms(
             samples,
-            training_symbols=syms[:1000],
+            syms[:1000],
             num_taps=1,
             sps=1,
-            modulation="qam",
-            order=16,
+            constellation=Constellation.qam(16),
             cpr_type="bps",
             cpr_bps_test_phases=32,
             cpr_bps_block_size=1,
@@ -412,11 +401,10 @@ class TestCPRBPSConvergence:
         )
         res_k32 = lms(
             samples,
-            training_symbols=syms[:1000],
+            syms[:1000],
             num_taps=1,
             sps=1,
-            modulation="qam",
-            order=16,
+            constellation=Constellation.qam(16),
             cpr_type="bps",
             cpr_bps_test_phases=32,
             cpr_bps_block_size=32,
@@ -448,11 +436,10 @@ class TestCPRBPSConvergence:
 
         res = rls(
             xp.asarray(samples),
-            training_symbols=syms[:500],
+            syms[:500],
             num_taps=1,
             sps=1,
-            modulation="qam",
-            order=16,
+            constellation=Constellation.qam(16),
             cpr_type="bps",
             cpr_bps_test_phases=64,
             cpr_bps_block_size=32,
@@ -497,11 +484,10 @@ class TestCPRMIMOJoint:
 
         res = lms(
             samples,
-            training_symbols=training,
+            training,
             num_taps=1,
             sps=1,
-            modulation="qam",
-            order=16,
+            constellation=Constellation.qam(16),
             cpr_type="pll",
             cpr_pll_bandwidth=5e-3,
             cpr_cycle_slip_correction=False,
@@ -552,11 +538,10 @@ class TestCPRMIMOJoint:
 
         res = lms(
             samples,
-            training_symbols=training,
+            training,
             num_taps=1,
             sps=1,
-            modulation="qam",
-            order=16,
+            constellation=Constellation.qam(16),
             cpr_type="pll",
             cpr_pll_bandwidth=5e-3,
             cpr_joint_channels=True,
@@ -590,8 +575,7 @@ class TestCPRStatePersistence:
             num_taps=5,
             sps=1,
             step_size=5e-3,
-            modulation="psk",
-            order=4,
+            constellation=Constellation.psk(4),
             cpr_type=cpr_mode,
             cpr_bps_block_size=16,
             cpr_bps_test_phases=32,
@@ -608,8 +592,7 @@ class TestCPRStatePersistence:
             num_taps=5,
             sps=1,
             step_size=5e-3,
-            modulation="psk",
-            order=4,
+            constellation=Constellation.psk(4),
             cpr_type=cpr_mode,
             cpr_bps_block_size=16,
             cpr_bps_test_phases=32,
@@ -623,8 +606,7 @@ class TestCPRStatePersistence:
             num_taps=5,
             sps=1,
             step_size=5e-3,
-            modulation="psk",
-            order=4,
+            constellation=Constellation.psk(4),
             cpr_type=cpr_mode,
             cpr_bps_block_size=16,
             cpr_bps_test_phases=32,
@@ -655,8 +637,7 @@ class TestCPRStatePersistence:
             t1,
             num_taps=5,
             sps=1,
-            modulation="psk",
-            order=4,
+            constellation=Constellation.psk(4),
             cpr_type="pll",
         )
         assert r1.cpr_state is not None
@@ -668,8 +649,7 @@ class TestCPRStatePersistence:
             None,
             num_taps=5,
             sps=1,
-            modulation="psk",
-            order=4,
+            constellation=Constellation.psk(4),
             cpr_type="pll",
             w_init=r1.weights,
             cpr_state=r1.cpr_state,
@@ -682,7 +662,7 @@ class TestCPRStatePersistence:
         """Supplying input_norm_factor should give same result as letting lms compute it."""
         samples_np, syms_np = _wiener_phase_signal(n_sym=1000)
         samples, syms = xp.asarray(samples_np), xp.asarray(syms_np)
-        kw = dict(num_taps=5, sps=1, step_size=5e-3, modulation="psk", order=4)
+        kw = dict(num_taps=5, sps=1, step_size=5e-3, constellation=Constellation.psk(4))
 
         r_auto = lms(samples, syms[:50], **kw)
         nf = r_auto.input_norm_factor

@@ -20,6 +20,7 @@ from ._common import _build_padded_samples, _normalize_inputs
 def zf_equalizer(
     samples: ArrayType | Signal,
     channel_estimate: ArrayType,
+    *,
     noise_variance: float = 0.0,
 ) -> ArrayType | Signal:
     """
@@ -129,6 +130,7 @@ def zf_equalizer(
 def apply_taps(
     samples: ArrayType | Signal,
     weights: ArrayType,
+    *,
     sps: int | None = None,
     normalize: bool = True,
     input_norm_factor: float | np.ndarray | None = None,
@@ -162,9 +164,8 @@ def apply_taps(
         ``(C, C, num_taps)`` for MIMO butterfly.
     sps : int, optional
         Samples per symbol. Output length is ``N_samples // sps``.
-        Unlike the adaptive equalizers, any ``sps >= 1`` is accepted.
-        Defaults to ``2`` for array input; ignored for :class:`Signal` input,
-        which always uses the signal's own ``sps``.
+        An integer.  Taken from the Signal; required for array input.  A
+        value that disagrees with the Signal raises.
     normalize : bool, default True
         If ``True``, normalize ``samples`` to unit symbol power before
         filtering (same pre-processing as the adaptive equalizers via
@@ -200,13 +201,9 @@ def apply_taps(
     signal_adapter = adapt_signal(samples, function_name="apply_taps()")
     samples = signal_adapter.array
     metadata = {}
+    sps = require_integer_sps(signal_adapter.resolve_fact("sps", sps), "apply_taps()")
     if signal_adapter.signal is not None:
-        sps = signal_adapter.resolve_required("sps", sps)
         metadata["sampling_rate"] = signal_adapter.signal.symbol_rate
-
-    if sps is None:
-        sps = 2
-    sps = require_integer_sps(sps, "apply_taps()")
 
     samples, xp, _ = dispatch(samples)
     weights = xp.asarray(weights)

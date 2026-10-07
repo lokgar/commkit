@@ -17,6 +17,7 @@ from ._block import block_lms
 from .blind import block_cma, block_rde, build_pilot_ref
 from .linear import apply_taps, estimate_transfer_function, zf_equalizer
 from .polarization import (
+    JonesTrack,
     apply_interpolated_matrix,
     demultiplex_polarization_tones_dynamic,
     demultiplex_polarization_tones_static,
@@ -27,6 +28,7 @@ from .sequential import cma, lms, rde, rls
 __all__ = [
     "CPRState",
     "EqualizerResult",
+    "JonesTrack",
     "apply_interpolated_matrix",
     "apply_taps",
     "block_cma",

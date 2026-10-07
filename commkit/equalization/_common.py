@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from typing import Any
+
 import numpy as np
 
 from .._array import restore_1d
@@ -313,29 +315,15 @@ def _unpack_result_numpy(
     )
 
 
-def _cpr_symmetry(modulation: str | None, order: int | None) -> int:
-    """Return the rotational symmetry order used for cycle-slip correction.
+def _cpr_symmetry(constellation: Any) -> int:
+    """Rotational symmetry used for the inline cycle-slip quantum.
 
-    QAM and most practical CPR algorithms exploit 4-fold (π/2) symmetry.
-    BPSK is the only exception (2-fold).
-
-    Parameters
-    ----------
-    modulation : str or None
-    order : int or None
-
-    Returns
-    -------
-    int - 4 (default/QAM/PSK M≥4) or 2 (BPSK/PAM)
+    2 for constellations with at most 2-fold symmetry (BPSK, PAM), else 4:
+    the inline BPS searches ``[0, π/2)``.
     """
-    if modulation is None:
+    if constellation is None:
         return 4
-    m = modulation.lower().strip()
-    if m in ("pam",):
-        return 2
-    if m in ("psk", "bpsk") and order == 2:
-        return 2
-    return 4
+    return 2 if constellation.rotational_symmetry <= 2 else 4
 
 
 def _validate_sps(sps, num_taps):
@@ -365,36 +353,41 @@ def _validate_sps(sps, num_taps):
         )
 
 
-def _godard_radius(modulation, order, unipolar, pmf):
-    """Godard dispersion radius R2 and PS-QAM pilot scale (mirrors ``cma``)."""
-    if modulation is None or order is None:
+def _godard_radius(constellation: Any) -> tuple[float, np.float32 | None]:
+    """Godard dispersion radius R2 and the PS pilot scale.
+
+    ``R2 = E[|c|^4] / E[|c|^2]`` over the constellation's prior (the unit
+    circle without one).  The pilot scale is ``1/sqrt(E_PS)``, the factor
+    between a shaped constellation and the uniform grid it was built from
+    (``None`` for a uniform constellation).
+    """
+    if constellation is None:
         return 1.0, None
-    from ..mapping.constellation import _legacy_constellation
-
-    c = _legacy_constellation(modulation, order, unipolar=unipolar, pmf=pmf)
-    const = c.points
-    if pmf is not None:
-        _pmf = np.asarray(pmf, dtype=np.float64)
-        _e_ps = c.power()  # Σ P(s_m)|s_m|² - single source of truth for E_PS
-        r2 = float(np.dot(_pmf, np.abs(const) ** 4)) / (_e_ps**2)
-        c_ps = np.float32(1.0 / np.sqrt(_e_ps)) if _e_ps < 1.0 - 1e-6 else None
-        return r2, c_ps
-    r2 = float(np.mean(np.abs(const) ** 4) / np.mean(np.abs(const) ** 2))
-    return r2, None
+    pts = np.asarray(constellation.points)
+    if constellation.pmf is None:
+        r2 = float(np.mean(np.abs(pts) ** 4) / np.mean(np.abs(pts) ** 2))
+        return r2, None
+    pmf = np.asarray(constellation.pmf, dtype=np.float64)
+    e = float(np.dot(pmf, np.abs(pts) ** 2))
+    r2 = float(np.dot(pmf, np.abs(pts) ** 4)) / (e**2)
+    return r2, _ps_pilot_scale(pts)
 
 
-def _rde_ring_radii(modulation, order, unipolar, pmf):
-    """Unique constellation ring radii and PS-QAM pilot scale (mirrors ``rde``)."""
-    if modulation is None or order is None:
+def _ps_pilot_scale(points: np.ndarray) -> np.float32 | None:
+    """``1/sqrt(E_PS)`` of a shaped constellation, from its unit-power points.
+
+    The uniform mean power of the shaped points is ``1/E_PS``.
+    """
+    inv_e = float(np.mean(np.abs(points) ** 2))
+    return np.float32(np.sqrt(inv_e)) if inv_e > 1.0 / (1.0 - 1e-6) else None
+
+
+def _rde_ring_radii(constellation: Any) -> tuple[np.ndarray, np.float32 | None]:
+    """Unique ring radii (float32, unit power) and the PS pilot scale."""
+    if constellation is None:
         return np.array([1.0], dtype=np.float32), None
-    from ..mapping.constellation import _legacy_constellation
-
-    c = _legacy_constellation(modulation, order, unipolar=unipolar, pmf=pmf)
-    raw = np.abs(c.points).astype(np.float32)
-    c_ps = None
-    if pmf is not None:
-        _e_ps = c.power()  # Σ P(s_m)|s_m|² - single source of truth for E_PS
-        if _e_ps < 1.0 - 1e-6:
-            c_ps = np.float32(1.0 / np.sqrt(_e_ps))
-            raw = (raw * c_ps).astype(np.float32)
+    pts = np.asarray(constellation.points)
+    raw = np.abs(pts).astype(np.float32)
+    c_ps = None if constellation.pmf is None else _ps_pilot_scale(pts)
+    # Round to 6 decimals to merge numerically identical radii.
     return np.unique(np.round(raw, 6)), c_ps

@@ -50,11 +50,11 @@ class TestLMS:
 
         result = equalization.lms(
             rx,
-            training_symbols=tx,
+            tx,
             num_taps=15,
             step_size=0.01,
-            modulation="psk",
-            order=4,
+            constellation=Constellation.psk(4),
+            sps=2,
         )
 
         assert isinstance(result, EqualizerResult)
@@ -93,11 +93,11 @@ class TestLMS:
 
         result = equalization.lms(
             rx,
-            training_symbols=tx[:n_train],
+            tx[:n_train],
             num_taps=15,
             step_size=0.01,
-            modulation="psk",
-            order=4,
+            constellation=Constellation.psk(4),
+            sps=2,
         )
 
         # Check DD mode MSE
@@ -117,11 +117,7 @@ class TestLMS:
         rx = xp.asarray(sig.samples)
 
         result = equalization.lms(
-            rx,
-            training_symbols=tx,
-            num_taps=11,
-            modulation="psk",
-            order=4,
+            rx, tx, num_taps=11, constellation=Constellation.psk(4), sps=2
         )
 
         assert result.y_hat.ndim == 1
@@ -142,11 +138,11 @@ class TestLMS:
 
         result = equalization.lms(
             rx,
-            training_symbols=tx,
+            tx,
             num_taps=num_taps,
-            modulation="psk",
-            order=4,
+            constellation=Constellation.psk(4),
             store_weights=True,
+            sps=2,
         )
 
         assert result.weights_history is not None
@@ -163,11 +159,7 @@ class TestLMS:
         rx = xp.asarray(sig.samples)
 
         result = equalization.lms(
-            rx,
-            training_symbols=tx,
-            num_taps=5,
-            modulation="psk",
-            order=4,
+            rx, tx, num_taps=5, constellation=Constellation.psk(4), sps=2
         )
 
         assert result.weights_history is None
@@ -180,7 +172,7 @@ class TestLMS:
         )
         rx = xp.asarray(sig.samples)
         with pytest.raises(ValueError):
-            equalization.lms(rx)
+            equalization.lms(rx, sps=2)
 
 
 class TestRLS:
@@ -206,11 +198,11 @@ class TestRLS:
 
         result = equalization.rls(
             rx,
-            training_symbols=tx,
+            tx,
             num_taps=15,
             forgetting_factor=0.99,
-            modulation="psk",
-            order=4,
+            constellation=Constellation.psk(4),
+            sps=1,
         )
 
         mse_tail = xp.mean(xp.abs(result.error[-100:]) ** 2)
@@ -238,19 +230,19 @@ class TestRLS:
 
         lms_result = equalization.lms(
             rx,
-            training_symbols=tx,
+            tx,
             num_taps=15,
             step_size=0.01,
-            modulation="psk",
-            order=4,
+            constellation=Constellation.psk(4),
+            sps=2,
         )
         rls_result = equalization.rls(
             rx,
-            training_symbols=tx,
+            tx,
             num_taps=15,
             forgetting_factor=0.99,
-            modulation="psk",
-            order=4,
+            constellation=Constellation.psk(4),
+            sps=1,
         )
 
         # Compare MSE in the first 50 symbols (convergence speed)
@@ -274,11 +266,7 @@ class TestRLS:
         rx = xp.asarray(sig.samples)
 
         result = equalization.rls(
-            rx,
-            training_symbols=tx,
-            num_taps=11,
-            modulation="psk",
-            order=4,
+            rx, tx, num_taps=11, constellation=Constellation.psk(4), sps=1
         )
 
         assert result.y_hat.ndim == 1
@@ -299,11 +287,11 @@ class TestAPIRegression:
         with pytest.raises(TypeError, match="normalize"):
             equalization.lms(
                 rx,
-                training_symbols=tx,
+                tx,
                 num_taps=5,
-                modulation="psk",
-                order=4,
+                constellation=Constellation.psk(4),
                 normalize=True,
+                sps=2,
             )
 
     def test_cma_has_no_normalize_param(self, xp):
@@ -314,7 +302,7 @@ class TestAPIRegression:
         )
         rx = xp.asarray(sig.samples)
         with pytest.raises(TypeError, match="normalize"):
-            equalization.cma(rx, num_taps=5, normalize=True)
+            equalization.cma(rx, num_taps=5, normalize=True, sps=2)
 
 
 class TestCMA:
@@ -338,11 +326,7 @@ class TestCMA:
         rx = xp.ascontiguousarray(rx)  # Ensure a contiguous layout
 
         result = equalization.cma(
-            rx,
-            num_taps=21,
-            step_size=0.005,
-            modulation="psk",
-            order=4,
+            rx, num_taps=21, step_size=0.005, constellation=Constellation.psk(4), sps=2
         )
 
         # After convergence, output should have roughly constant modulus
@@ -378,7 +362,7 @@ class TestCMA:
         )
         rx = xp.asarray(sig.samples)
 
-        result = equalization.cma(rx, num_taps=11, step_size=0.01)
+        result = equalization.cma(rx, num_taps=11, step_size=0.01, sps=2)
 
         assert isinstance(result, EqualizerResult)
         assert result.y_hat.shape[0] > 0
@@ -391,7 +375,7 @@ class TestCMA:
         )
         rx = xp.asarray(sig.samples)
 
-        result = equalization.cma(rx, num_taps=11)
+        result = equalization.cma(rx, num_taps=11, sps=2)
 
         assert result.y_hat.ndim == 1
         assert result.weights.shape == (11,)
@@ -417,11 +401,7 @@ class TestRDE:
         rx = xp.ascontiguousarray(rx)
 
         result = equalization.rde(
-            rx,
-            num_taps=21,
-            step_size=0.005,
-            modulation="psk",
-            order=4,
+            rx, num_taps=21, step_size=0.005, constellation=Constellation.psk(4), sps=2
         )
 
         y = result.y_hat
@@ -465,10 +445,10 @@ class TestRDE:
         rx = xp.ascontiguousarray(rx)
 
         result_rde = equalization.rde(
-            rx, num_taps=21, step_size=5e-4, modulation="qam", order=16
+            rx, num_taps=21, step_size=5e-4, constellation=Constellation.qam(16), sps=2
         )
         result_cma = equalization.cma(
-            rx, num_taps=21, step_size=5e-4, modulation="qam", order=16
+            rx, num_taps=21, step_size=5e-4, constellation=Constellation.qam(16), sps=2
         )
 
         def late_error(err):
@@ -503,7 +483,9 @@ class TestRDE:
         )
         rx = xp.asarray(sig.samples)
 
-        result = equalization.rde(rx, num_taps=11, modulation="qam", order=16)
+        result = equalization.rde(
+            rx, num_taps=11, constellation=Constellation.qam(16), sps=2
+        )
 
         assert result.y_hat.ndim == 1
         assert result.weights.shape == (11,)
@@ -531,12 +513,12 @@ class TestStoreWeights:
 
         result = equalization.lms(
             rx,
-            training_symbols=xp.asarray(sig.source_symbols),
+            xp.asarray(sig.source_symbols),
             num_taps=9,
             step_size=0.05,
-            modulation="psk",
-            order=4,
+            constellation=Constellation.psk(4),
             store_weights=True,
+            sps=2,
         )
 
         assert result.weights_history is not None
@@ -548,11 +530,10 @@ class TestStoreWeights:
 
         result = equalization.rls(
             rx,
-            training_symbols=xp.asarray(sig.source_symbols),
+            xp.asarray(sig.source_symbols),
             sps=1,
             num_taps=7,
-            modulation="psk",
-            order=4,
+            constellation=Constellation.psk(4),
             store_weights=True,
         )
 
@@ -570,9 +551,9 @@ class TestStoreWeights:
             rx,
             num_taps=9,
             step_size=0.005,
-            modulation="psk",
-            order=4,
+            constellation=Constellation.psk(4),
             store_weights=True,
+            sps=2,
         )
 
         assert result.weights_history is not None
@@ -587,9 +568,9 @@ class TestStoreWeights:
             rx,
             num_taps=9,
             step_size=0.005,
-            modulation="psk",
-            order=4,
+            constellation=Constellation.psk(4),
             store_weights=True,
+            sps=2,
         )
 
         assert result.weights_history is not None
@@ -607,11 +588,11 @@ class TestStoreWeights:
 
         result = equalization.lms(
             rx_mimo,
-            training_symbols=train,
+            train,
             num_taps=5,
-            modulation="psk",
-            order=4,
+            constellation=Constellation.psk(4),
             store_weights=True,
+            sps=2,
         )
 
         n_sym = rx.shape[0] // 2
@@ -624,11 +605,11 @@ class TestStoreWeights:
         train = xp.asarray(sig.source_symbols)
 
         for algo, kwargs in [
-            ("lms", dict(training_symbols=train, modulation="psk", order=4)),
-            ("cma", dict(modulation="psk", order=4)),
-            ("rde", dict(modulation="psk", order=4)),
+            ("lms", dict(training_symbols=train, constellation=Constellation.psk(4))),
+            ("cma", dict(constellation=Constellation.psk(4))),
+            ("rde", dict(constellation=Constellation.psk(4))),
         ]:
-            result = getattr(equalization, algo)(rx, num_taps=7, **kwargs)
+            result = getattr(equalization, algo)(rx, num_taps=7, sps=2, **kwargs)
             assert result.weights_history is None, (
                 f"{algo}: expected weights_history=None by default"
             )
@@ -652,19 +633,18 @@ class TestEdgeCases:
     def test_lms_raises_no_constellation_numba(self, xp):
         """LMS Numba: ValueError when no modulation and no training symbols (DD impossible)."""
         rx, _ = self._qpsk_rx(xp)
-        with pytest.raises(ValueError, match="modulation and order must be provided"):
-            equalization.lms(rx, num_taps=7)
+        with pytest.raises(ValueError, match="needs a constellation"):
+            equalization.lms(rx, num_taps=7, sps=2)
 
     def test_rls_warns_fractional_spacing(self, xp):
         """RLS should warn when sps > 1 (ill-conditioned correlation matrix)."""
         rx, sig = self._qpsk_rx(xp, n_symbols=400)
         result = equalization.rls(
             xp.asarray(sig.samples),
-            training_symbols=xp.asarray(sig.source_symbols),
+            xp.asarray(sig.source_symbols),
             sps=2,
             num_taps=7,
-            modulation="psk",
-            order=4,
+            constellation=Constellation.psk(4),
         )
         # Should complete and return valid output (even if warned)
         assert isinstance(result, EqualizerResult)
@@ -677,10 +657,10 @@ class TestEdgeCases:
         with caplog.at_level(logging.WARNING, logger="commkit"):
             equalization.lms(
                 rx,
-                training_symbols=xp.asarray(sig.source_symbols),
+                xp.asarray(sig.source_symbols),
                 num_taps=3,  # < 4*sps=8 -> should warn
-                modulation="psk",
-                order=4,
+                constellation=Constellation.psk(4),
+                sps=2,
             )
         assert any("small" in r.message.lower() for r in caplog.records)
 
@@ -688,7 +668,7 @@ class TestEdgeCases:
         """RDE with no modulation should use unit radius (same gradient as CMA R²=1)."""
         rx, _ = self._qpsk_rx(xp)
 
-        result = equalization.rde(rx, num_taps=7, step_size=0.005)
+        result = equalization.rde(rx, num_taps=7, step_size=0.005, sps=2)
 
         assert isinstance(result, EqualizerResult)
         assert result.y_hat.shape[0] > 0
@@ -702,7 +682,7 @@ class TestEdgeCases:
         rx = xp.asarray(sig.samples)
         rx_mimo = xp.stack([rx, xp.roll(rx, 1)], axis=0)
 
-        result = equalization.rde(rx_mimo, num_taps=7, step_size=5e-4)
+        result = equalization.rde(rx_mimo, num_taps=7, step_size=5e-4, sps=2)
 
         assert result.y_hat.shape == (2, rx.shape[0] // 2)
 
@@ -713,30 +693,28 @@ class TestEdgeCases:
 
         result = equalization.lms(
             rx,
-            training_symbols=train,
+            train,
             num_taps=7,
             step_size=0.05,
-            modulation="psk",
-            order=4,
+            constellation=Constellation.psk(4),
+            sps=2,
         )
 
         assert result.num_train_symbols <= 30
 
-    def test_lms_constellation_from_training_only_numba(self, xp):
-        """LMS Numba: constellation inferred from training_symbols alone (no modulation)."""
+    def test_lms_partial_training_needs_constellation(self, xp):
+        """Decisions after the training need a constellation; none is guessed."""
+        rx, sig = self._qpsk_rx(xp)
+        train = xp.asarray(sig.source_symbols)[..., :50]
+        with pytest.raises(ValueError, match="needs a constellation"):
+            equalization.lms(rx, train, num_taps=7, step_size=0.05, sps=2)
+
+    def test_lms_full_training_needs_no_constellation(self, xp):
+        """With every symbol trained there are no decisions to make."""
         rx, sig = self._qpsk_rx(xp)
         train = xp.asarray(sig.source_symbols)
-
-        result = equalization.lms(
-            rx,
-            training_symbols=train,
-            num_taps=7,
-            step_size=0.05,
-            # deliberately no modulation/order
-        )
-
-        assert isinstance(result, EqualizerResult)
-        assert result.y_hat.shape[0] > 0
+        result = equalization.lms(rx, train, num_taps=7, step_size=0.05, sps=2)
+        assert result.num_train_symbols == result.y_hat.shape[-1]
 
     def test_center_tap_override(self, xp):
         """Custom center_tap should shift the decision delay without error."""
@@ -745,12 +723,12 @@ class TestEdgeCases:
 
         result = equalization.lms(
             rx,
-            training_symbols=train,
+            train,
             num_taps=11,
             step_size=0.05,
-            modulation="psk",
-            order=4,
+            constellation=Constellation.psk(4),
             center_tap=8,
+            sps=2,
         )
 
         assert isinstance(result, EqualizerResult)
@@ -780,11 +758,7 @@ class TestNumbaBackendCoverage:
 
         # No training_symbols -> _prepare_training_numpy gets None -> n_train_aligned=0
         result = equalization.lms(
-            rx,
-            num_taps=11,
-            step_size=0.01,
-            modulation="psk",
-            order=4,
+            rx, num_taps=11, step_size=0.01, constellation=Constellation.psk(4), sps=2
         )
 
         assert isinstance(result, EqualizerResult)
@@ -796,12 +770,7 @@ class TestNumbaBackendCoverage:
         train = xp.asarray(sig.source_symbols)
 
         result = equalization.rls(
-            rx,
-            training_symbols=train,
-            sps=2,
-            num_taps=9,
-            modulation="psk",
-            order=4,
+            rx, train, sps=2, num_taps=9, constellation=Constellation.psk(4)
         )
 
         assert isinstance(result, EqualizerResult)
@@ -837,12 +806,7 @@ class TestNumbaBackendCoverage:
         train_mimo = xp.stack([xp.asarray(sig.source_symbols)] * 2, axis=0)
 
         result = equalization.rls(
-            rx_mimo,
-            training_symbols=train_mimo,
-            sps=2,
-            num_taps=7,
-            modulation="psk",
-            order=4,
+            rx_mimo, train_mimo, sps=2, num_taps=7, constellation=Constellation.psk(4)
         )
 
         # RLS truncates the last num_taps//2 symbols from y_hat
@@ -856,32 +820,11 @@ class TestNumbaBackendCoverage:
         train = xp.asarray(sig.source_symbols[:50])
 
         result = equalization.rls(
-            rx,
-            training_symbols=train,
-            sps=2,
-            num_taps=7,
-            modulation="psk",
-            order=4,
+            rx, train, sps=2, num_taps=7, constellation=Constellation.psk(4)
         )
 
         assert isinstance(result, EqualizerResult)
         assert result.num_train_symbols <= 50
-
-    def test_rls_numba_constellation_from_training(self, xp):
-        """RLS numba derives constellation from training when no modulation is given."""
-        rx, sig = self._make_qpsk_rx(xp, n_symbols=800)
-        train = xp.asarray(sig.source_symbols)
-
-        # Provide training but NOT modulation/order -> constellation inferred from train
-        result = equalization.rls(
-            rx,
-            training_symbols=train,
-            sps=2,
-            num_taps=7,
-        )
-
-        assert isinstance(result, EqualizerResult)
-        assert result.y_hat.shape[0] > 0
 
     def test_rls_numba_store_weights(self, xp):
         """RLS numba with store_weights=True should populate weight history."""
@@ -890,11 +833,10 @@ class TestNumbaBackendCoverage:
 
         result = equalization.rls(
             rx,
-            training_symbols=train,
+            train,
             sps=2,
             num_taps=5,
-            modulation="psk",
-            order=4,
+            constellation=Constellation.psk(4),
             store_weights=True,
         )
 
@@ -912,9 +854,9 @@ class TestNumbaBackendCoverage:
             rx,
             num_taps=7,
             step_size=0.005,
-            modulation="psk",
-            order=4,
+            constellation=Constellation.psk(4),
             store_weights=True,
+            sps=2,
         )
 
         assert result.weights_history is not None
@@ -931,9 +873,9 @@ class TestNumbaBackendCoverage:
             rx,
             num_taps=7,
             step_size=5e-4,
-            modulation="qam",
-            order=16,
+            constellation=Constellation.qam(16),
             store_weights=True,
+            sps=2,
         )
 
         assert result.weights_history is not None
@@ -1002,8 +944,7 @@ class TestCmaPilotAided:
         )
         result = equalization.cma(
             body_samples,
-            modulation="qam",
-            order=16,
+            constellation=Constellation.qam(16),
             num_taps=11,
             step_size=1e-4,
             sps=2,
@@ -1032,8 +973,7 @@ class TestCmaPilotAided:
         )
         result = equalization.rde(
             body_samples,
-            modulation="qam",
-            order=16,
+            constellation=Constellation.qam(16),
             num_taps=11,
             step_size=1e-4,
             sps=2,
@@ -1070,8 +1010,7 @@ class TestCmaPilotAided:
         )
         result = equalization.rde(
             body_samples,
-            modulation="qam",
-            order=16,
+            constellation=Constellation.qam(16),
             num_taps=11,
             step_size=1e-4,
             sps=2,
@@ -1091,7 +1030,7 @@ class TestCmaPilotAided:
         mask = np.zeros(n_sym, dtype=bool)
         mask[positions] = True
         pilot_syms = np.ones((num_ch, n_pilots), dtype=np.complex64)
-        ref, mask_u8 = build_pilot_ref(pilot_syms, mask, n_sym, num_ch)
+        ref, mask_u8 = build_pilot_ref(pilot_syms, mask, n_sym=n_sym, num_ch=num_ch)
         assert ref.shape == (num_ch, n_sym)
         assert mask_u8.shape == (n_sym,)
         assert mask_u8.dtype == np.uint8
@@ -1117,9 +1056,11 @@ class TestSignalInputSequentialEqualizers:
         sig = self._rx_signal(xp)
         data = xp.asarray(sig.samples)
 
-        result_sig = equalization.lms(sig, num_taps=11, modulation="qam", order=16)
+        result_sig = equalization.lms(
+            sig, num_taps=11, constellation=Constellation.qam(16)
+        )
         result_arr = equalization.lms(
-            data, num_taps=11, sps=2, modulation="qam", order=16
+            data, num_taps=11, sps=2, constellation=Constellation.qam(16)
         )
 
         assert isinstance(result_sig.y_hat, Signal)
@@ -1130,9 +1071,11 @@ class TestSignalInputSequentialEqualizers:
         sig = self._rx_signal(xp, sps=1, n_symbols=500)
         data = xp.asarray(sig.samples)
 
-        result_sig = equalization.rls(sig, num_taps=11, modulation="qam", order=16)
+        result_sig = equalization.rls(
+            sig, num_taps=11, constellation=Constellation.qam(16)
+        )
         result_arr = equalization.rls(
-            data, num_taps=11, sps=1, modulation="qam", order=16
+            data, num_taps=11, sps=1, constellation=Constellation.qam(16)
         )
 
         assert isinstance(result_sig.y_hat, Signal)
@@ -1143,9 +1086,11 @@ class TestSignalInputSequentialEqualizers:
         sig = self._rx_signal(xp)
         data = xp.asarray(sig.samples)
 
-        result_sig = equalization.cma(sig, num_taps=11, modulation="qam", order=16)
+        result_sig = equalization.cma(
+            sig, num_taps=11, constellation=Constellation.qam(16)
+        )
         result_arr = equalization.cma(
-            data, num_taps=11, sps=2, modulation="qam", order=16
+            data, num_taps=11, sps=2, constellation=Constellation.qam(16)
         )
 
         assert isinstance(result_sig.y_hat, Signal)
@@ -1156,9 +1101,11 @@ class TestSignalInputSequentialEqualizers:
         sig = self._rx_signal(xp)
         data = xp.asarray(sig.samples)
 
-        result_sig = equalization.rde(sig, num_taps=11, modulation="qam", order=16)
+        result_sig = equalization.rde(
+            sig, num_taps=11, constellation=Constellation.qam(16)
+        )
         result_arr = equalization.rde(
-            data, num_taps=11, sps=2, modulation="qam", order=16
+            data, num_taps=11, sps=2, constellation=Constellation.qam(16)
         )
 
         assert isinstance(result_sig.y_hat, Signal)

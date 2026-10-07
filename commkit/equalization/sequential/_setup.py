@@ -152,37 +152,21 @@ def _prepare_sequential(
 
 
 def _dd_constellation(
-    modulation: str | None,
-    order: int | None,
-    unipolar: bool,
-    pmf: Any,
-    training: np.ndarray | None,
+    constellation: Any, function_name: str, *, decisions: bool = True
 ) -> np.ndarray:
-    """Decision constellation (complex64, unit power) for the DD slicer."""
-    if modulation is not None and order is not None:
-        from ...mapping.gray import _gray_points
+    """Decision constellation (complex64, unit power) for the DD slicer.
 
-        reference_constellation = _gray_points(modulation, order, unipolar=unipolar)
-        constellation_np = (
-            to_device(reference_constellation, "cpu").flatten().astype(np.complex64)
+    A run without ``decisions`` (training covers every symbol) needs none;
+    the kernel then gets a placeholder point it never reads.
+    """
+    if constellation is None and not decisions:
+        return np.zeros(1, dtype=np.complex64)
+    if constellation is None:
+        raise ValueError(
+            f"{function_name} needs a constellation for its decisions (pass "
+            "constellation= or a Signal that has one)."
         )
-    elif training is not None:
-        train_flat = training.reshape(-1)
-        constellation_np = np.unique(np.round(train_flat, decimals=8)).astype(
-            np.complex64
-        )
-    else:
-        raise ValueError("modulation and order must be provided for DD mode.")
-    # PS-QAM: scale slicer constellation to unit-power {s_m/sqrt(E_PS)} so it
-    # matches the normalised equaliser input.  Training is already at unit power
-    # after _normalize_inputs - only the constellation reference needs scaling.
-    if pmf is not None and modulation is not None and order is not None:
-        pmf_arr = np.asarray(pmf, dtype=np.float64)
-        e_ps = float(np.dot(pmf_arr, np.abs(constellation_np).astype(np.float64) ** 2))
-        if e_ps < 1.0 - 1e-6:
-            c_ps = np.float32(1.0 / np.sqrt(e_ps))
-            constellation_np = (constellation_np * c_ps).astype(np.complex64)
-    return constellation_np
+    return np.ascontiguousarray(constellation.points, dtype=np.complex64)
 
 
 @dataclass

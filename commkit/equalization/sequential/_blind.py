@@ -10,6 +10,7 @@ from ...backend import ArrayType, to_device
 from ...core._signal_adapter import adapt_signal, require_integer_sps
 from ...core.signal import Signal
 from ...logger import logger
+from .._common import _godard_radius, _rde_ring_radii
 from .._kernels_numba import (
     _get_numba_cma,
     _get_numba_pa_cma,
@@ -19,6 +20,38 @@ from .._kernels_numba import (
 from ..result import EqualizerResult, _attach_equalized_signal, _log_equalizer_exit
 from ._setup import _assemble_sequential, _prepare_sequential
 
+
+def _check_pilots(
+    samples: Any, sps: int, pilot_ref: Any, pilot_mask: Any, function_name: str
+) -> tuple[Any, Any]:
+    """Validate the pilot reference and mask before any work is done.
+
+    ``pilot_ref`` is ``(C, N_sym)`` (``(N_sym,)`` for SISO), ``pilot_mask``
+    ``(N_sym,)``; one without the other raises.
+    """
+    if (pilot_ref is None) != (pilot_mask is None):
+        raise ValueError(
+            f"{function_name}: pilot_ref and pilot_mask must be given together."
+        )
+    if pilot_ref is None:
+        return None, None
+    num_ch = 1 if samples.ndim == 1 else samples.shape[0]
+    n_sym = samples.shape[-1] // sps
+    if pilot_ref.ndim == 1:
+        pilot_ref = pilot_ref[None, :]
+    if tuple(pilot_ref.shape) != (num_ch, n_sym):
+        raise ValueError(
+            f"{function_name}: pilot_ref must have shape ({num_ch}, {n_sym}) "
+            f"(channels, symbols), got {tuple(pilot_ref.shape)}."
+        )
+    if tuple(np.shape(pilot_mask)) != (n_sym,):
+        raise ValueError(
+            f"{function_name}: pilot_mask must have shape ({n_sym},), got "
+            f"{tuple(np.shape(pilot_mask))}."
+        )
+    return pilot_ref, pilot_mask
+
+
 # -----------------------------------------------------------------------------
 # BLIND equalization
 # -----------------------------------------------------------------------------
@@ -26,19 +59,17 @@ from ._setup import _assemble_sequential, _prepare_sequential
 
 def cma(
     samples: ArrayType | Signal,
+    *,
     num_taps: int = 21,
     sps: int | None = None,
     step_size: float = 1e-3,
-    modulation: str | None = None,
-    order: int | None = None,
-    unipolar: bool = False,
+    constellation: Any = None,
     store_weights: bool = False,
     center_tap: int | None = None,
     w_init: ArrayType | None = None,
     pilot_ref: ArrayType | None = None,
     pilot_mask: np.ndarray | None = None,
     pilot_gain_db: float = 0.0,
-    pmf: Any | None = None,
     input_norm_factor: float | np.ndarray | None = None,
     samples_prefix: ArrayType | None = None,
     pad_mode: str = "zeros",
@@ -73,8 +104,7 @@ def cma(
            e[n] = (|y[n]|^2 - R^2) * y[n]
 
        The Godard radius ``R^2 = E[|s|^4] / E[|s|^2]`` is computed once
-       from the normalised constellation (defaults to 1 if ``modulation``
-       is not given).  The error is purely radial: any constant phase
+       from the unit-power constellation (1 without a constellation).  The error is purely radial: any constant phase
        rotation of ``y`` leaves ``|y|^2`` and therefore ``e`` unchanged
        up to the same rotation, so CMA cannot resolve the phase ambiguity
        it introduces.
@@ -115,23 +145,18 @@ def cma(
         given explicitly.
     num_taps : int, default 21
         Number of equalizer taps per FIR filter.
-    sps : int, optional, default 2
-        Samples per symbol at the input.  Use ``sps=2`` (T/2-spaced, default)
-        for the standard first-stage blind equalization.  ``sps=1`` enables
-        symbol-spaced CMA, useful when input is already decimated but phase
-        ambiguity resolution is still needed.  Ignored for :class:`Signal`
-        input, which always uses the signal's own ``sps``.
+    sps : int, optional
+        Samples per symbol at the input, an integer.  Taken from the Signal;
+        required for array input.  A value that disagrees with the Signal
+        raises.
     step_size : float, default 1e-3
         CMA step size (mu). Unlike LMS, CMA's cost surface is non-convex and
         higher-order, so input-power normalization distorts the gradient geometry.
         Use a fixed step size in the range 1e-5 to 1e-3 for stability.
-    modulation : str, optional
-        Modulation type for auto-computing Godard radius R2 (e.g. ``"psk"``, ``"qam"``).
-        If None, defaults to R2=1.0.
-    order : int, optional
-        Modulation order for auto-computing R2.
-    unipolar : bool, default False
-        Use unipolar constellation for auto-computing R2.
+    constellation : Constellation, optional
+        Sets the Godard radius ``R2 = E[|c|^4]/E[|c|^2]`` (pmf-weighted for a
+        shaped constellation).  Defaults to the Signal's ``constellation``;
+        without one the target is the unit circle.
     store_weights : bool, default False
         If True, stores weight trajectory.
     center_tap : int, optional
@@ -158,13 +183,6 @@ def cma(
         pilots from inflating the RMS estimate and biasing the Godard
         convergence target at data positions.  Set to ``0.0`` when pilots
         are not boosted.
-    pmf : array_like of float, optional
-        Probability mass function for PS-QAM.  When provided with ``modulation``
-        and ``order``, the Godard R2 is computed for the unit-power PS
-        distribution ``{s_m/sqrt(E_PS)}``:
-        ``R2 = E_PS[|s_m|^4] / E_PS^2``.  Pilot references are also scaled
-        by ``1/sqrt(E_PS)`` so pilot-aided and blind sections converge to the
-        same unit-power target.
     input_norm_factor : float or ndarray, optional
         Pre-computed RMS normalization factor from a previous call.  See
         ``lms()`` for the full description; behaviour is identical.
@@ -193,12 +211,13 @@ def cma(
     signal_adapter = adapt_signal(samples, function_name="cma()")
     samples = signal_adapter.array
     sig = signal_adapter.signal
-    if sig is not None:
-        sps = require_integer_sps(signal_adapter.resolve_required("sps", sps), "cma()")
-    if sps is None:
-        sps = 2
+    sps = require_integer_sps(signal_adapter.resolve_fact("sps", sps), "cma()")
+    constellation = signal_adapter.resolve_choice("constellation", constellation)
 
-    use_pilots = pilot_ref is not None and pilot_mask is not None
+    pilot_ref, pilot_mask = _check_pilots(
+        signal_adapter.array, sps, pilot_ref, pilot_mask, "cma()"
+    )
+    use_pilots = pilot_ref is not None
     logger.info(
         "CMA equalizer: num_taps=%s, mu=%s, sps=%s, pilot_aided=%s, pilot_gain_db=%s",
         num_taps,
@@ -213,34 +232,8 @@ def cma(
             "Update sampling_rate = symbol_rate after applying this equalizer."
         )
 
-    # Compute R2 and PS-QAM scale factor from the Godard constellation.
-    _c_ps = None  # 1/sqrt(E_PS) scale factor; None for uniform modulation
-    if modulation is not None and order is not None:
-        from ...mapping.gray import _gray_points
-
-        const = _gray_points(modulation, order, unipolar=unipolar)
-        if pmf is not None:
-            # PS-QAM: R2 for the unit-power distribution {s_m/sqrt(E_PS)}:
-            #   R2 = E_PS[|s_m/sqrt(E_PS)|^4] / E_PS[|s_m/sqrt(E_PS)|^2]
-            #      = (E_PS[|s_m|^4] / E_PS^2) / 1
-            #      = E_PS[|s_m|^4] / E_PS^2
-            _pmf_arr = np.asarray(pmf, dtype=np.float64)
-            _abs2 = np.abs(const) ** 2
-            _e_ps = float(np.dot(_pmf_arr, _abs2))
-            r2 = float(np.dot(_pmf_arr, np.abs(const) ** 4)) / (_e_ps**2)
-            if _e_ps < 1.0 - 1e-6:
-                _c_ps = np.float32(1.0 / np.sqrt(_e_ps))
-            logger.debug(
-                "CMA R2 (PS-QAM pmf-weighted, %s-%s): %.4f",
-                modulation.upper(),
-                order,
-                r2,
-            )
-        else:
-            r2 = float(np.mean(np.abs(const) ** 4) / np.mean(np.abs(const) ** 2))
-            logger.debug("CMA R2 from %s-%s: %.4f", modulation.upper(), order, r2)
-    else:
-        r2 = 1.0
+    r2, _c_ps = _godard_radius(constellation)
+    logger.debug("CMA R2: %.4f", r2)
 
     # RMS-normalize samples to unit symbol-rate power (CMA has no training)
     run = _prepare_sequential(
@@ -285,19 +278,17 @@ def cma(
 
 def rde(
     samples: ArrayType | Signal,
+    *,
     num_taps: int = 21,
     sps: int | None = None,
     step_size: float = 1e-3,
-    modulation: str | None = None,
-    order: int | None = None,
-    unipolar: bool = False,
+    constellation: Any = None,
     store_weights: bool = False,
     center_tap: int | None = None,
     w_init: ArrayType | None = None,
     pilot_ref: ArrayType | None = None,
     pilot_mask: np.ndarray | None = None,
     pilot_gain_db: float = 0.0,
-    pmf: Any | None = None,
     input_norm_factor: float | np.ndarray | None = None,
     samples_prefix: ArrayType | None = None,
     pad_mode: str = "zeros",
@@ -359,21 +350,17 @@ def rde(
         given explicitly.
     num_taps : int, default 21
         Number of equalizer taps per FIR filter.
-    sps : int, optional, default 2
-        Samples per symbol at the input.  Use ``sps=2`` (T/2-spaced, default)
-        for standard blind equalization.  ``sps=1`` is accepted.  Ignored for
-        :class:`Signal` input, which always uses the signal's own ``sps``.
+    sps : int, optional
+        Samples per symbol at the input, an integer.  Taken from the Signal;
+        required for array input.  A value that disagrees with the Signal
+        raises.
     step_size : float, default 1e-3
         RDE step size (mu). Same non-convex gradient geometry as CMA; use a
         fixed step in the range 1e-5 to 1e-3 for stability.
-    modulation : str, optional
-        Modulation type for constellation construction (``"psk"``, ``"qam"``).
-        Required to extract unique ring radii.  If ``None``, falls back to a
-        single unit radius (identical to CMA with ``R²=1``).
-    order : int, optional
-        Modulation order (e.g. 4, 16, 64).
-    unipolar : bool, default False
-        Use unipolar constellation for radius extraction.
+    constellation : Constellation, optional
+        Sets the ring radii (one ring for PSK, where RDE equals CMA).
+        Defaults to the Signal's ``constellation``; without one the single
+        ring is the unit circle.
     store_weights : bool, default False
         If True, stores weight trajectory in ``result.weights_history``.
     center_tap : int, optional
@@ -400,11 +387,6 @@ def rde(
         pilots from inflating the RMS estimate and biasing the ring-radius
         convergence targets at data positions.  Set to ``0.0`` when pilots
         are not boosted.
-    pmf : array_like of float, optional
-        Probability mass function for PS-QAM.  When provided with ``modulation``
-        and ``order``, the ring radii are scaled by ``1/sqrt(E_PS)`` to target
-        the unit-power constellation ``{|s_m|/sqrt(E_PS)}``.  Pilot references
-        are also scaled accordingly.  Requires ``modulation`` and ``order``.
     input_norm_factor : float or ndarray, optional
         Pre-computed RMS normalization factor from a previous call.  See
         ``lms()`` for the full description; behaviour is identical.
@@ -447,12 +429,13 @@ def rde(
     signal_adapter = adapt_signal(samples, function_name="rde()")
     samples = signal_adapter.array
     sig = signal_adapter.signal
-    if sig is not None:
-        sps = require_integer_sps(signal_adapter.resolve_required("sps", sps), "rde()")
-    if sps is None:
-        sps = 2
+    sps = require_integer_sps(signal_adapter.resolve_fact("sps", sps), "rde()")
+    constellation = signal_adapter.resolve_choice("constellation", constellation)
 
-    use_pilots = pilot_ref is not None and pilot_mask is not None
+    pilot_ref, pilot_mask = _check_pilots(
+        signal_adapter.array, sps, pilot_ref, pilot_mask, "rde()"
+    )
+    use_pilots = pilot_ref is not None
     logger.info(
         "RDE equalizer: num_taps=%s, mu=%s, sps=%s, pilot_aided=%s, pilot_gain_db=%s",
         num_taps,
@@ -467,33 +450,8 @@ def rde(
             "Update sampling_rate = symbol_rate after applying this equalizer."
         )
 
-    # Compute unique ring radii from constellation.
-    # For constant-modulus signals (PSK) this degenerates to a single radius,
-    # making RDE identical to CMA.
-    _c_ps = None  # 1/sqrt(E_PS) scale factor; None for uniform modulation
-    if modulation is not None and order is not None:
-        from ...mapping.gray import _gray_points
-
-        const = _gray_points(modulation, order, unipolar=unipolar)
-        raw_radii = np.abs(const).astype(np.float32)
-        if pmf is not None:
-            # PS-QAM: scale radii to unit-power targets {|s_m|/sqrt(E_PS)}
-            _pmf_arr = np.asarray(pmf, dtype=np.float64)
-            _e_ps = float(np.dot(_pmf_arr, raw_radii.astype(np.float64) ** 2))
-            if _e_ps < 1.0 - 1e-6:
-                _c_ps = np.float32(1.0 / np.sqrt(_e_ps))
-                raw_radii = (raw_radii * _c_ps).astype(np.float32)
-        # Round to 6 significant digits to merge numerically identical radii
-        radii = np.unique(np.round(raw_radii, 6))
-        logger.debug(
-            "RDE radii from %s-%s: %s",
-            modulation.upper(),
-            order,
-            ", ".join(f"{r:.4f}" for r in radii),
-        )
-    else:
-        radii = np.array([1.0], dtype=np.float32)
-        logger.debug("RDE: no modulation provided, using single unit radius (≡ CMA)")
+    radii, _c_ps = _rde_ring_radii(constellation)
+    logger.debug("RDE radii: %s", ", ".join(f"{r:.4f}" for r in radii))
 
     # RMS-normalize samples to unit symbol-rate power (RDE has no training)
     run = _prepare_sequential(

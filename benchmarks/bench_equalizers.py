@@ -8,6 +8,7 @@ CuPy input, so the delta against ``[cpu]`` is the documented host round trip
 from workloads import mimo_equalizer_workload
 
 from commkit.equalization import cma, lms, rls
+from commkit.mapping import Constellation
 
 ROUNDS = dict(rounds=3, warmup_rounds=1, iterations=1)
 
@@ -18,7 +19,14 @@ def bench_lms(benchmark, backend_device, xp, sync):
     t = xp.asarray(syms)
 
     def run():
-        r = lms(x, t, num_taps=21, sps=2, step_size=1e-3, modulation="qam", order=16)
+        r = lms(
+            x,
+            t,
+            num_taps=21,
+            sps=2,
+            step_size=1e-3,
+            constellation=Constellation.qam(16),
+        )
         sync()
         return r
 
@@ -39,8 +47,7 @@ def bench_lms_bps(benchmark, backend_device, xp, sync):
             num_taps=21,
             sps=2,
             step_size=1e-3,
-            modulation="qam",
-            order=16,
+            constellation=Constellation.qam(16),
             cpr_type="bps",
             cpr_bps_test_phases=64,
             cpr_bps_block_size=64,
@@ -56,7 +63,9 @@ def bench_cma(benchmark, backend_device, xp, sync):
     x = xp.asarray(samples)
 
     def run():
-        r = cma(x, num_taps=21, sps=2, step_size=1e-3, modulation="qam", order=4)
+        r = cma(
+            x, num_taps=21, sps=2, step_size=1e-3, constellation=Constellation.qam(4)
+        )
         sync()
         return r
 
@@ -71,7 +80,7 @@ def bench_rls(benchmark, backend_device, xp, sync):
     t = xp.asarray(syms)
 
     def run():
-        r = rls(x, t, num_taps=21, sps=1, modulation="qam", order=16)
+        r = rls(x, t, num_taps=21, sps=1, constellation=Constellation.qam(16))
         sync()
         return r
 

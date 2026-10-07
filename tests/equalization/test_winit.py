@@ -40,11 +40,11 @@ class TestWInit:
 
         result = equalization.lms(
             rx,
-            training_symbols=None,
-            modulation="qam",
-            order=16,
+            None,
+            constellation=Constellation.qam(16),
             num_taps=num_taps,
             w_init=w0,
+            sps=2,
         )
         assert isinstance(result, EqualizerResult)
         assert result.weights.shape == (num_taps,)  # SISO squeeze
@@ -62,9 +62,8 @@ class TestWInit:
 
         result = equalization.rls(
             rx,
-            training_symbols=xp.asarray(sig.source_symbols),
-            modulation="qam",
-            order=4,
+            xp.asarray(sig.source_symbols),
+            constellation=Constellation.qam(4),
             num_taps=num_taps,
             sps=2,
             w_init=w0,
@@ -79,7 +78,7 @@ class TestWInit:
         w0[0, 0, num_taps // 2] = 1.0 + 0j
 
         result = equalization.cma(
-            rx, modulation="qam", order=16, num_taps=num_taps, w_init=w0
+            rx, constellation=Constellation.qam(16), num_taps=num_taps, w_init=w0, sps=2
         )
         assert isinstance(result, EqualizerResult)
 
@@ -91,7 +90,7 @@ class TestWInit:
         w0[0, 0, num_taps // 2] = 1.0 + 0j
 
         result = equalization.rde(
-            rx, modulation="qam", order=16, num_taps=num_taps, w_init=w0
+            rx, constellation=Constellation.qam(16), num_taps=num_taps, w_init=w0, sps=2
         )
         assert isinstance(result, EqualizerResult)
 
@@ -101,10 +100,22 @@ class TestWInit:
         bad_w = np.zeros((1, 1, 99), dtype=np.complex64)  # wrong num_taps
 
         with pytest.raises(ValueError, match="w_init shape"):
-            equalization.cma(rx, modulation="qam", order=16, num_taps=21, w_init=bad_w)
+            equalization.cma(
+                rx,
+                constellation=Constellation.qam(16),
+                num_taps=21,
+                w_init=bad_w,
+                sps=2,
+            )
 
         with pytest.raises(ValueError, match="w_init shape"):
-            equalization.rde(rx, modulation="qam", order=16, num_taps=21, w_init=bad_w)
+            equalization.rde(
+                rx,
+                constellation=Constellation.qam(16),
+                num_taps=21,
+                w_init=bad_w,
+                sps=2,
+            )
 
     def test_lms_to_rde_handoff_output_shape(self, xp):
         """LMS weights can be handed off to RDE via w_init; output shape is correct."""
@@ -116,10 +127,10 @@ class TestWInit:
 
         pre = equalization.lms(
             pre_rx,
-            modulation="qam",
-            order=16,
+            constellation=Constellation.qam(16),
             num_taps=21,
             step_size=0.05,
+            sps=2,
         )
         w0 = to_numpy(pre.weights)
         if w0.ndim == 1:
@@ -127,11 +138,11 @@ class TestWInit:
 
         result = equalization.rde(
             payload_rx,
-            modulation="qam",
-            order=16,
+            constellation=Constellation.qam(16),
             num_taps=21,
             step_size=1e-4,
             w_init=w0,
+            sps=2,
         )
         expected_syms = payload_rx.shape[-1] // 2
         assert result.y_hat.shape[-1] == expected_syms
@@ -148,15 +159,15 @@ class TestWInit:
 
         # Cold-start RDE
         cold = equalization.rde(
-            rx, modulation="qam", order=16, num_taps=21, step_size=5e-4
+            rx, constellation=Constellation.qam(16), num_taps=21, step_size=5e-4, sps=2
         )
         # LMS pre-convergence
         pre = equalization.lms(
             rx,
-            training_symbols=xp.asarray(sig.source_symbols[:200]),
-            modulation="qam",
-            order=16,
+            xp.asarray(sig.source_symbols[:200]),
+            constellation=Constellation.qam(16),
             num_taps=21,
+            sps=2,
         )
         _w = pre.weights
         w0 = to_numpy(pre.weights)
@@ -165,7 +176,12 @@ class TestWInit:
 
         # Warm RDE
         warm = equalization.rde(
-            rx, modulation="qam", order=16, num_taps=21, step_size=5e-4, w_init=w0
+            rx,
+            constellation=Constellation.qam(16),
+            num_taps=21,
+            step_size=5e-4,
+            w_init=w0,
+            sps=2,
         )
 
         tail = slice(-500, None)
@@ -207,8 +223,7 @@ class TestNormalizationLengthIndependence:
             training_symbols=syms[:n_train],
             num_taps=1,
             sps=1,
-            modulation="qam",
-            order=16,
+            constellation=Constellation.qam(16),
         )
 
         np.testing.assert_array_equal(
@@ -225,7 +240,7 @@ def _make_qpsk(xp, n_sym=2000, snr_db=20.0, seed=77):
 
 def _algo_kw(algo, num_taps):
     """Return algorithm-specific kwargs (lms uses step_size, rls uses forgetting_factor)."""
-    base = dict(num_taps=num_taps, sps=1, modulation="psk", order=4)
+    base = dict(num_taps=num_taps, sps=1, constellation=Constellation.psk(4))
     return (
         {**base, "step_size": 1e-2}
         if algo == "lms"
@@ -295,8 +310,7 @@ class TestPrefixPadNormPhase4:
                 num_taps=11,
                 sps=1,
                 step_size=1e-2,
-                modulation="psk",
-                order=4,
+                constellation=Constellation.psk(4),
                 samples_prefix=xp.zeros(1, dtype=xp.complex64),
             )
 
@@ -309,8 +323,7 @@ class TestPrefixPadNormPhase4:
             num_taps=11,
             sps=1,
             step_size=1e-2,
-            modulation="psk",
-            order=4,
+            constellation=Constellation.psk(4),
             pad_mode="edge",
         )
         assert bool(xp.all(xp.isfinite(xp.asarray(r.y_hat))))
@@ -324,8 +337,7 @@ class TestPrefixPadNormPhase4:
             num_taps=5,
             sps=1,
             step_size=1e-2,
-            modulation="psk",
-            order=4,
+            constellation=Constellation.psk(4),
         )
         assert isinstance(r.input_norm_factor, float)
         assert r.input_norm_factor > 0.0

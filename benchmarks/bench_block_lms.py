@@ -29,6 +29,7 @@ import pytest
 from workloads import mimo_equalizer_workload
 
 from commkit.equalization import block_lms
+from commkit.mapping import Constellation
 
 ROUNDS = dict(rounds=3, warmup_rounds=1, iterations=1)
 N_SYM = 100_000
@@ -57,8 +58,7 @@ def _bench_block_lms(benchmark, xp, sync, cpr_kwargs, block_size, n_train=None):
             t,
             num_taps=21,
             sps=2,
-            modulation="qam",
-            order=16,
+            constellation=Constellation.qam(16),
             block_size=block_size,
             **cpr_kwargs,
         )

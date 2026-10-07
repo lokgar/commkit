@@ -54,7 +54,7 @@ def _pipeline(sig, xp, sync):
     out = filtering.matched_filter(out)
     out = multirate.resample(out, sps_out=2)
     out = equalization.apply_taps(
-        out, xp.asarray([1.0 + 0.0j], dtype=xp.complex64), normalize=False
+        out, xp.asarray([1.0 + 0.0j], dtype=xp.complex64), normalize=False, sps=2
     )
     sync()
     return out

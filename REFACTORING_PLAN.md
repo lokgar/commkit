@@ -954,15 +954,20 @@ The equalization pass (3.7) gets more commits:
   and the CUDA-graph block loop of the blind engine; all three get one
   implementation, and the block front end mirrors 3.7a. Bit-identical on
   CPU and GPU.
-- [ ] **3.7c `refactor(equalization)!: 2.0 signatures`.** Keyword-only
+- [x] **3.7c `refactor(equalization)!: 2.0 signatures`.** Keyword-only
   parameters after the data. `constellation=` (a choice, default
   `sig.constellation`) replaces `modulation` / `order` / `unipolar` /
   `pmf`: the slicer, the Godard radius and the RDE rings come from its
   points and pmf, so the `_legacy_constellation` users in equalization are
   gone. Decision-directed operation needs a constellation (1.x guessed one
-  from the unique training symbols). `sps` is a fact; array input must
-  give it. The linear, polarization and pilot helpers follow the same
-  rules.
+  from the unique training symbols; a run trained throughout needs none).
+  `sps` is a fact; array input must give it. The linear, polarization and
+  pilot helpers follow the same rules: `demultiplex_polarization_tones_*`
+  take `tone_frequencies=` / `sampling_rate=` keywords, and the dynamic one
+  returns a frozen `JonesTrack(matrix_grid, grid_positions, valid)` instead
+  of 2- to 4-tuples (`trim_edges` on a Signal raises: it would misalign the
+  reference). Pilot references are validated before any work. Bit-identical
+  on the A/B harness, CPU and GPU.
 - [ ] **3.7d `refactor(equalization)!: cpr= takes PLL or BPS`.** The nine
   `cpr_*` parameters of `lms`, `rls` and `block_lms` become one `cpr=`
   object from `recovery` (`block_lms` takes `BPS` only), with cycle-slip

@@ -223,16 +223,14 @@ class _BlockBps:
 def block_lms(
     samples: ArrayType | Signal,
     training_symbols: ArrayType | None = None,
+    *,
     num_taps: int = 21,
     sps: int | None = None,
     step_size: float = 2e-4,
     block_size: int = 256,
-    modulation: str | None = None,
-    order: int | None = None,
-    unipolar: bool = False,
+    constellation: Any = None,
     store_weights: bool = False,
     w_init: ArrayType | None = None,
-    pmf: Any | None = None,
     cpr_type: str | None = None,
     cpr_bps_test_phases: int = 64,
     cpr_bps_block_size: int = 32,
@@ -331,10 +329,10 @@ def block_lms(
         Shape: ``(N_train,)`` for SISO or ``(C, N_train)`` for MIMO.
     num_taps : int, default 21
         Number of taps per FIR filter (tap count in samples).
-    sps : int, optional, default 2
-        Samples per symbol.  ``sps=2`` (T/2-spaced) is the default.  Ignored
-        for :class:`Signal` input, which always uses the signal's own
-        ``sps``.
+    sps : int, optional
+        Samples per symbol at the input, an integer (2 is T/2-spaced).
+        Taken from the Signal; required for array input.  A value that
+        disagrees with the Signal raises.
     step_size : float, default 2e-4
         LMS step size μ, on the **same scale as** ``lms``.  Use the same
         value you would use for ``lms``: because the block update is the
@@ -355,20 +353,15 @@ def block_lms(
         Number of output symbols per LMS gradient accumulation block.  Larger
         values increase GPU efficiency but reduce adaptation speed.  Independent
         of the BPS averaging window (see ``cpr_bps_block_size``).
-    modulation : str, optional
-        Modulation scheme (e.g., ``'qam'``, ``'psk'``).  Required when
-        ``training_symbols`` is ``None``.
-    order : int, optional
-        Modulation order (e.g., 16, 64).
-    unipolar : bool, default False
-        Unipolar PAM flag.
+    constellation : Constellation, optional
+        Decision constellation for the slicer, unit power (a shaped
+        constellation carries its pmf).  Defaults to the Signal's
+        ``constellation``; required for array input.
     store_weights : bool, default False
         If ``True``, stores the weight tensor at every block start in
         ``EqualizerResult.weights_history``.
     w_init : array_like, optional
         Initial tap weights, shape ``(C, C, T)`` or SISO short-hands.
-    pmf : array_like, optional
-        Probability mass function for PS-QAM constellation scaling.
     cpr_type : {'bps', None}, default None
         Inline carrier phase recovery.  Only ``'bps'`` is supported; PLL is
         not available because its per-symbol PI integration does not fit the
@@ -498,12 +491,8 @@ def block_lms(
     signal_adapter = adapt_signal(samples, function_name="block_lms()")
     samples = signal_adapter.array
     sig = signal_adapter.signal
-    if sig is not None:
-        sps = require_integer_sps(
-            signal_adapter.resolve_required("sps", sps), "block_lms()"
-        )
-    if sps is None:
-        sps = 2
+    sps = require_integer_sps(signal_adapter.resolve_fact("sps", sps), "block_lms()")
+    constellation = signal_adapter.resolve_choice("constellation", constellation)
 
     if cpr_type is not None and cpr_type != "bps":
         raise ValueError(
@@ -528,25 +517,12 @@ def block_lms(
     num_taps = run.num_taps
     training = run.training
 
-    if modulation is not None and order is not None:
-        from ...mapping.gray import _gray_points
-
-        reference_constellation = _gray_points(modulation, order, unipolar=unipolar)
-        constellation_np = (
-            to_device(reference_constellation, "cpu").flatten().astype(np.complex64)
+    if constellation is None:
+        raise ValueError(
+            "block_lms() needs a constellation for its decisions (pass "
+            "constellation= or a Signal that has one)."
         )
-    elif training is not None:
-        train_flat = to_device(training, "cpu").reshape(-1)
-        constellation_np = np.unique(np.round(train_flat, decimals=8)).astype(
-            np.complex64
-        )
-    else:
-        raise ValueError("Provide modulation+order or training_symbols for DD slicer.")
-    if pmf is not None and modulation is not None and order is not None:
-        pmf_arr = np.asarray(pmf, dtype=np.float64)
-        e_ps = float(np.dot(pmf_arr, np.abs(constellation_np).astype(np.float64) ** 2))
-        if e_ps < 1.0 - 1e-6:
-            constellation_np = (constellation_np / np.sqrt(e_ps)).astype(np.complex64)
+    constellation_np = np.ascontiguousarray(constellation.points, dtype=np.complex64)
     sq_side, sq_lev_min, sq_d_grid = _square_qam_slicer_params(constellation_np)
     slicer = _Slicer(
         constellation=xp.asarray(constellation_np),
@@ -569,7 +545,7 @@ def block_lms(
             cycle_slip=bool(cpr_cycle_slip_correction),
             history=int(cpr_cycle_slip_history),
             threshold=float(cpr_cycle_slip_threshold),
-            symmetry=_cpr_symmetry(modulation, order),
+            symmetry=_cpr_symmetry(constellation),
             cpr_state=cpr_state,
         )
 
@@ -722,7 +698,7 @@ def block_lms(
             cs_stats=to_device(bps.cs_stats, "cpu").copy(),
             cpr_type=cpr_type,
             num_ch=C,
-            symmetry=_cpr_symmetry(modulation, order),
+            symmetry=_cpr_symmetry(constellation),
             bps_P=bps.P,
             bps_K=bps.K,
             cs_H=bps.cs_H,

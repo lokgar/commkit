@@ -33,11 +33,11 @@ class TestButterflyMIMO:
 
         result = equalization.lms(
             rx_mimo,
-            training_symbols=tx_mimo,
+            tx_mimo,
             num_taps=21,
             step_size=0.01,
-            modulation="psk",
-            order=4,
+            constellation=Constellation.psk(4),
+            sps=2,
         )
 
         y = result.y_hat
@@ -85,8 +85,8 @@ class TestButterflyMIMO:
             rx_mimo,
             num_taps=11,
             step_size=0.003,
-            modulation="psk",
-            order=4,
+            constellation=Constellation.psk(4),
+            sps=2,
         )
 
         y = result.y_hat
@@ -178,8 +178,8 @@ class TestButterflyMIMOExtended:
             rx_mimo,
             num_taps=11,
             step_size=5e-4,
-            modulation="qam",
-            order=16,
+            constellation=Constellation.qam(16),
+            sps=2,
         )
 
         assert result.y_hat.shape == (2, n_symbols)
@@ -207,11 +207,11 @@ class TestButterflyMIMOExtended:
 
         result = equalization.lms(
             rx_mimo,
-            training_symbols=train_mimo,
+            train_mimo,
             num_taps=7,
             step_size=0.05,
-            modulation="psk",
-            order=4,
+            constellation=Constellation.psk(4),
+            sps=2,
         )
 
         assert result.y_hat.shape == (2, n_symbols)

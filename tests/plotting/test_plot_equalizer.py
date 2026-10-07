@@ -32,11 +32,11 @@ class TestPlotEqualizer:
 
         result = equalization.lms(
             rx_mimo,
-            training_symbols=train_mimo,
+            train_mimo,
             num_taps=7,
             step_size=0.05,
-            modulation="psk",
-            order=4,
+            constellation=Constellation.psk(4),
+            sps=2,
         )
 
         fig, axes = plot_equalizer_result(result, smoothing=10)
@@ -50,11 +50,11 @@ class TestPlotEqualizer:
         )
         result = equalization.lms(
             xp.asarray(sig.samples),
-            training_symbols=xp.asarray(sig.source_symbols),
+            xp.asarray(sig.source_symbols),
             num_taps=7,
             step_size=0.05,
-            modulation="psk",
-            order=4,
+            constellation=Constellation.psk(4),
+            sps=2,
         )
 
         fig0, axes0 = plt.subplots(1, 2)
@@ -68,11 +68,11 @@ class TestPlotEqualizer:
         )
         result = equalization.lms(
             xp.asarray(sig.samples),
-            training_symbols=xp.asarray(sig.source_symbols),
+            xp.asarray(sig.source_symbols),
             num_taps=7,
             step_size=0.05,
-            modulation="psk",
-            order=4,
+            constellation=Constellation.psk(4),
+            sps=2,
         )
 
         with patch("matplotlib.pyplot.show"):
@@ -86,11 +86,11 @@ class TestPlotEqualizer:
         )
         result = equalization.lms(
             xp.asarray(sig.samples),
-            training_symbols=xp.asarray(sig.source_symbols),
+            xp.asarray(sig.source_symbols),
             num_taps=5,
             step_size=0.05,
-            modulation="psk",
-            order=4,
+            constellation=Constellation.psk(4),
+            sps=2,
         )
         fig, axes = plot_equalizer_result(result, smoothing=1000)
         assert fig is not None
@@ -108,11 +108,11 @@ class TestPlotEqualizer:
         )
         result = equalization.lms(
             xp.asarray(sig.samples),
-            training_symbols=xp.asarray(sig.source_symbols),
+            xp.asarray(sig.source_symbols),
             num_taps=5,
             step_size=0.05,
-            modulation="psk",
-            order=4,
+            constellation=Constellation.psk(4),
+            sps=2,
         )
         fig, axes = plot_equalizer_result(result, smoothing=1000)
         assert fig is not None
@@ -124,11 +124,11 @@ class TestPlotEqualizer:
         )
         result = equalization.lms(
             xp.asarray(sig.samples),
-            training_symbols=xp.asarray(sig.source_symbols),
+            xp.asarray(sig.source_symbols),
             num_taps=5,
             step_size=0.05,
-            modulation="psk",
-            order=4,
+            constellation=Constellation.psk(4),
+            sps=2,
         )
         phase_1d = xp.linspace(0, 0.5, 100)
         result.phase_trajectory = phase_1d

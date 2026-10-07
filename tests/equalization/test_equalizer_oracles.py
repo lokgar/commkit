@@ -73,8 +73,7 @@ def test_lms_matches_oracle(num_ch, n_train):
         num_taps=NUM_TAPS,
         sps=SPS,
         step_size=1e-2,
-        modulation="qam",
-        order=16,
+        constellation=Constellation.qam(16),
     )
     ref = lms_reference(
         samples,
@@ -100,8 +99,7 @@ def test_rls_matches_oracle(num_ch, leakage):
         forgetting_factor=0.99,
         delta=0.01,
         leakage=leakage,
-        modulation="qam",
-        order=16,
+        constellation=Constellation.qam(16),
     )
     ref = rls_reference(
         samples,
@@ -123,7 +121,11 @@ def test_cma_matches_oracle(num_ch):
     const = Constellation.qam(4).points
     r2 = float(np.mean(np.abs(const) ** 4) / np.mean(np.abs(const) ** 2))
     res = cma(
-        samples, num_taps=NUM_TAPS, sps=SPS, step_size=1e-3, modulation="qam", order=4
+        samples,
+        num_taps=NUM_TAPS,
+        sps=SPS,
+        step_size=1e-3,
+        constellation=Constellation.qam(4),
     )
     ref = cma_reference(samples, num_taps=NUM_TAPS, sps=SPS, step_size=1e-3, r2=r2)
     _assert_matches(res, ref, num_ch)
@@ -134,7 +136,11 @@ def test_rde_matches_oracle(num_ch):
     samples, _ = _isi_input(16, num_ch)
     radii = np.unique(np.round(np.abs(Constellation.qam(16).points), 6))
     res = rde(
-        samples, num_taps=NUM_TAPS, sps=SPS, step_size=1e-3, modulation="qam", order=16
+        samples,
+        num_taps=NUM_TAPS,
+        sps=SPS,
+        step_size=1e-3,
+        constellation=Constellation.qam(16),
     )
     ref = rde_reference(
         samples, num_taps=NUM_TAPS, sps=SPS, step_size=1e-3, radii=radii

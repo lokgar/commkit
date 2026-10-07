@@ -92,8 +92,7 @@ class TestBlockLMSShapes:
             xp.asarray(syms),
             num_taps=11,
             sps=2,
-            modulation="qam",
-            order=16,
+            constellation=Constellation.qam(16),
             block_size=128,
         )
         n_sym = len(syms)
@@ -117,8 +116,7 @@ class TestBlockLMSShapes:
             training,
             num_taps=11,
             sps=2,
-            modulation="qam",
-            order=16,
+            constellation=Constellation.qam(16),
             block_size=128,
         )
         assert r.y_hat.shape == (2, 1024)
@@ -132,8 +130,7 @@ class TestBlockLMSShapes:
             xp.asarray(syms),
             num_taps=11,
             sps=2,
-            modulation="qam",
-            order=16,
+            constellation=Constellation.qam(16),
             block_size=128,
             cpr_type="bps",
             cpr_bps_test_phases=16,
@@ -160,8 +157,7 @@ class TestBlockLMSShapes:
             training,
             num_taps=11,
             sps=2,
-            modulation="qam",
-            order=16,
+            constellation=Constellation.qam(16),
             block_size=128,
             cpr_type="bps",
             cpr_bps_test_phases=16,
@@ -175,8 +171,7 @@ class TestBlockLMSShapes:
             xp.asarray(syms),
             num_taps=11,
             sps=2,
-            modulation="qam",
-            order=16,
+            constellation=Constellation.qam(16),
             block_size=64,
             store_weights=True,
         )
@@ -194,8 +189,7 @@ class TestBlockLMSShapes:
             training,
             num_taps=11,
             sps=2,
-            modulation="qam",
-            order=16,
+            constellation=Constellation.qam(16),
             block_size=64,
             store_weights=True,
         )
@@ -214,8 +208,7 @@ class TestBlockLMSConvergence:
             num_taps=11,
             sps=2,
             step_size=5e-4,
-            modulation="qam",
-            order=16,
+            constellation=Constellation.qam(16),
             block_size=128,
         )
         err = xp.abs(r.error) ** 2
@@ -235,8 +228,7 @@ class TestBlockLMSConvergence:
             num_taps=11,
             sps=2,
             step_size=5e-4,
-            modulation="qam",
-            order=16,
+            constellation=Constellation.qam(16),
             block_size=128,
         )
         y_eval = r.y_hat[n_train:]
@@ -268,8 +260,7 @@ class TestBlockLMSConvergence:
             num_taps=5,
             sps=sps,
             step_size=2e-3,
-            modulation="qam",
-            order=16,
+            constellation=Constellation.qam(16),
             block_size=64,
         )
         n_eval = n_sym // 2
@@ -305,8 +296,7 @@ class TestBlockLMSConvergence:
             num_taps=5,
             sps=sps,
             step_size=5e-3,
-            modulation="qam",
-            order=4,
+            constellation=Constellation.qam(4),
             block_size=block_size,
         )
         n_eval = n_sym // 2
@@ -336,8 +326,7 @@ class TestBlockLMSWeightHandling:
             num_taps=11,
             sps=2,
             step_size=5e-4,
-            modulation="qam",
-            order=16,
+            constellation=Constellation.qam(16),
             block_size=128,
         )
         # Second pass: warm-start; MSE at start should be low
@@ -347,8 +336,7 @@ class TestBlockLMSWeightHandling:
             num_taps=11,
             sps=2,
             step_size=5e-4,
-            modulation="qam",
-            order=16,
+            constellation=Constellation.qam(16),
             block_size=128,
             w_init=r1.weights,
         )
@@ -370,8 +358,7 @@ class TestBlockLMSWeightHandling:
             num_taps=11,
             sps=2,
             step_size=5e-4,
-            modulation="qam",
-            order=16,
+            constellation=Constellation.qam(16),
             block_size=128,
         )
         assert r_da.num_train_symbols == 2048
@@ -383,8 +370,7 @@ class TestBlockLMSWeightHandling:
             num_taps=11,
             sps=2,
             step_size=5e-4,
-            modulation="qam",
-            order=16,
+            constellation=Constellation.qam(16),
             block_size=128,
         )
         assert r_clip.num_train_symbols == 256
@@ -393,7 +379,9 @@ class TestBlockLMSWeightHandling:
         """Supplying input_norm_factor reproduces the same output as auto-computed."""
         samples_np, syms_np = _wiener_qam16_block(n_sym=2048)
         samples, syms = xp.asarray(samples_np), xp.asarray(syms_np)
-        kw = dict(num_taps=11, sps=1, step_size=5e-4, modulation="qam", order=16)
+        kw = dict(
+            num_taps=11, sps=1, step_size=5e-4, constellation=Constellation.qam(16)
+        )
 
         r_auto = block_lms(samples, syms[:100], **kw)
         nf = r_auto.input_norm_factor
@@ -418,8 +406,7 @@ class TestBlockLMSCPRIntegration:
             xp.asarray(syms),
             num_taps=11,
             sps=2,
-            modulation="qam",
-            order=16,
+            constellation=Constellation.qam(16),
             block_size=256,
             cpr_type="bps",
             cpr_bps_test_phases=16,
@@ -457,8 +444,7 @@ class TestBlockLMSCPRIntegration:
             sps=sps,
             step_size=5e-4,
             block_size=128,
-            modulation="psk",
-            order=4,
+            constellation=Constellation.psk(4),
         )
         r_bps = block_lms(
             xp.asarray(samples_pn),
@@ -467,8 +453,7 @@ class TestBlockLMSCPRIntegration:
             sps=sps,
             step_size=5e-4,
             block_size=128,
-            modulation="psk",
-            order=4,
+            constellation=Constellation.psk(4),
             cpr_type="bps",
             cpr_bps_test_phases=32,
             cpr_bps_block_size=32,
@@ -495,8 +480,7 @@ class TestBlockLMSCPRIntegration:
             num_taps=11,
             sps=1,
             step_size=5e-4,
-            modulation="qam",
-            order=16,
+            constellation=Constellation.qam(16),
             cpr_type="bps",
             cpr_bps_test_phases=32,
             cpr_bps_block_size=16,
@@ -516,8 +500,7 @@ class TestBlockLMSCPRIntegration:
             num_taps=11,
             sps=1,
             step_size=5e-4,
-            modulation="qam",
-            order=16,
+            constellation=Constellation.qam(16),
             cpr_type="bps",
             cpr_bps_test_phases=32,
             cpr_bps_block_size=16,
@@ -536,8 +519,7 @@ class TestBlockLMSCPRIntegration:
             num_taps=11,
             sps=1,
             step_size=5e-4,
-            modulation="qam",
-            order=16,
+            constellation=Constellation.qam(16),
             cpr_type="bps",
             cpr_bps_test_phases=32,
             cpr_bps_block_size=16,
@@ -563,8 +545,7 @@ class TestBlockLMSCPRIntegration:
             sps=1,
             step_size=5e-4,
             block_size=256,
-            modulation="qam",
-            order=16,
+            constellation=Constellation.qam(16),
             cpr_type="bps",
             cpr_bps_test_phases=32,
             cpr_bps_block_size=16,
@@ -628,12 +609,11 @@ class TestBlockLMSCPRIntegration:
 
         res = block_lms(
             xp.asarray(samples),
-            training_symbols=xp.asarray(syms[:256]),
+            xp.asarray(syms[:256]),
             num_taps=1,
             sps=1,
             step_size=1e-3,
-            modulation="qam",
-            order=16,
+            constellation=Constellation.qam(16),
             block_size=128,
             cpr_type="bps",
             cpr_bps_test_phases=64,
@@ -663,8 +643,7 @@ class TestBlockLMSCPRIntegration:
             num_taps=11,
             sps=1,
             step_size=5e-4,
-            modulation="qam",
-            order=16,
+            constellation=Constellation.qam(16),
             cpr_type="bps",
             cpr_bps_test_phases=32,
             cpr_bps_block_size=16,
@@ -699,8 +678,7 @@ class TestBlockLMSEdgeCases:
             xp.asarray(syms),
             num_taps=11,
             sps=2,
-            modulation="qam",
-            order=16,
+            constellation=Constellation.qam(16),
             block_size=128,
         )
         assert r.y_hat.shape == (1000,)
@@ -714,8 +692,7 @@ class TestBlockLMSEdgeCases:
                 xp.asarray(syms),
                 num_taps=11,
                 sps=2,
-                modulation="qam",
-                order=16,
+                constellation=Constellation.qam(16),
                 cpr_type="pll",
             )
 
@@ -739,8 +716,7 @@ class TestBlockLMSEdgeCases:
             num_taps=1,
             sps=1,
             step_size=1e-2,
-            modulation="qam",
-            order=4,
+            constellation=Constellation.qam(4),
             block_size=16,
         )
         assert r.y_hat.shape == (n_sym,)
@@ -750,7 +726,7 @@ class TestBlockLMSEdgeCases:
         samples_np, syms_np = _qam16(n_sym=2048, sps=2)
         samples, syms = xp.asarray(samples_np), xp.asarray(syms_np)
         sig = Signal(samples=samples, sampling_rate=2e6, symbol_rate=1e6)
-        kw = dict(num_taps=11, modulation="qam", order=16, block_size=128)
+        kw = dict(num_taps=11, constellation=Constellation.qam(16), block_size=128)
 
         result_sig = block_lms(sig, syms[:200], **kw)
         result_arr = block_lms(samples, syms[:200], sps=2, **kw)
@@ -785,8 +761,7 @@ class TestBlockLMSCUDAGraphAndPerformance:
             sps=1,
             step_size=5e-4,
             block_size=256,
-            modulation="qam",
-            order=16,
+            constellation=Constellation.qam(16),
             cpr_type="bps",
             cpr_cycle_slip_correction=cs_corr,
         )
@@ -839,8 +814,7 @@ class TestBlockLMSCUDAGraphAndPerformance:
                 sps=1,
                 step_size=5e-4,
                 block_size=128,
-                modulation="qam",
-                order=16,
+                constellation=Constellation.qam(16),
                 cpr_type="bps",
                 cpr_bps_test_phases=32,
                 cpr_bps_block_size=16,
@@ -868,8 +842,7 @@ class TestBlockLMSCUDAGraphAndPerformance:
             sps=1,
             step_size=5e-4,
             block_size=128,
-            modulation="qam",
-            order=16,
+            constellation=Constellation.qam(16),
             cpr_type="bps",
             cpr_bps_test_phases=32,
             cpr_bps_block_size=16,

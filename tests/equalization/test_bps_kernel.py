@@ -195,8 +195,7 @@ class TestBPSKernelEndToEnd:
                 xp.asarray(train),
                 num_taps=11,
                 sps=2,
-                modulation="qam",
-                order=order,
+                constellation=Constellation.qam(order),
                 block_size=128,
                 **cpr_kwargs,
             )
