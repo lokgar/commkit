@@ -71,7 +71,8 @@ Timed runs:
 ```bash
 uv run pytest benchmarks/bench_bps.py --benchmark-only --device=all
 uv run pytest benchmarks/ --benchmark-only --device=all \
-    --benchmark-compare=0002 --benchmark-storage=file://benchmarks/baselines
+    --benchmark-compare=0003 --benchmark-storage=file://benchmarks/baselines
+uv run python benchmarks/record_baseline.py NAME   # record a new baseline
 ```
 
 **Release:**
@@ -337,8 +338,13 @@ Dependencies point downward only:
 ## 8. Benchmarks
 
 `benchmarks/` tracks the GPU-relevant hot paths. Baselines are committed under
-`benchmarks/baselines/`. The current reference is `0002` (`pre_v2`) on the
-reference machine: RTX 4070 Ti, Ryzen 7 7800X3D, WSL2.
+`benchmarks/baselines/`. The current reference is `0003` (`v2_0`) on the
+reference machine: RTX 4070 Ti, Ryzen 7 7800X3D, WSL2; `0002` (`pre_v2`) is
+the 1.x state.
+- **Baselines** are recorded with `benchmarks/record_baseline.py`: each file
+  in its own process, best of three passes. In one full-suite process, small
+  GPU benchmarks after the large equalizer workloads ran 2-12x slower than
+  alone, so never record a baseline from a single `pytest benchmarks/` run.
 
 - **IDs** are `[cpu]` or `[gpu]`, meaning the input device.
 - **Timing:**
@@ -356,5 +362,5 @@ reference machine: RTX 4070 Ti, Ryzen 7 7800X3D, WSL2.
   least 7 repetitions, alternating old and new per repetition and comparing
   the paired ratios. When even unchanged benchmarks move, time the changed
   part itself with `CudaEventTimer` and quote it against the step it sits in.
-- A commit touching a hot path quotes its delta against `0002`. Tolerance is
+- A commit touching a hot path quotes its delta against `0003`. Tolerance is
   5% on CPU and 10% on GPU.
