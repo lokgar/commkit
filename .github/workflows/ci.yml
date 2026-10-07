@@ -38,6 +38,22 @@ jobs:
       - name: Type check
         run: uv run mypy commkit/
 
+  notebooks:
+    name: Notebooks carry no outputs
+    # Outputs (plots are base64 PNGs) would bloat the repository. The
+    # nbstripout git filter strips them on commit once a clone runs
+    # 'uv run nbstripout --install'; this required check catches a clone
+    # without it before anything reaches main.
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v5
+
+      - name: Every committed notebook is stripped
+        run: uvx nbstripout@0.9.1 --verify $(git ls-files '*.ipynb')
+
   test:
     name: Test (Python ${{ matrix.python-version }} | ${{ matrix.resolution }})
     runs-on: ubuntu-latest
