@@ -382,3 +382,58 @@ on workloads that did not converge, so compare those only from `0003` on.
   part itself with `CudaEventTimer` and quote it against the step it sits in.
 - A commit touching a hot path quotes its delta against `0003`. Tolerance is
   5% on CPU and 10% on GPU.
+
+---
+
+## 9. Roadmap and open items
+
+What is not done yet, in suggested order. Unlike the sections above, this
+is a to-do list, not a description of the code: remove an item in the
+commit that resolves it, and add one when a known gap is left open.
+
+### Planned modules
+
+1. **Nonlinear fiber channel** (`impairments.channel.nonlinear`, a
+   placeholder). Split-step Fourier propagation of the Kerr effect together
+   with chromatic dispersion, then digital backpropagation as its
+   compensation counterpart in `filtering`. Comes first because it builds on
+   what exists: the dispersion operator (`_dispersion`), overlap-save and
+   FFT-heavy GPU code. It completes the coherent optical link model.
+2. **Channel coding** (`coding`, a placeholder package). Start with one soft
+   decoder (LDPC) that consumes `compute_llr` output (positive LLR = bit 0)
+   and reports post-FEC BER next to `gmi`, then add encoders. The package
+   stays out of `commkit/__init__.py` until a real encode/decode entry point
+   exists. Decoders are iterative message passing over many codewords:
+   batch codewords on the GPU from the start.
+
+### Usability gaps
+
+- **`block_lms` default `step_size`** (2e-4) converges too slowly under
+  strong polarization mixing (30 degrees needs about 3e-3 at
+  `block_size=256`), and the stable step falls as `block_size` grows
+  (5e-4 at 2048). Consider a default that scales with `block_size`, or at
+  least a clearer warning when the error does not drop.
+- **RDE from a cold start** on 16-QAM settles at a few percent SER at large
+  block sizes. CMA pre-convergence works today in two calls
+  (`initial_taps=` or `state=` from a `cma`/`block_cma` result); a worked
+  example in the docs or notebooks would make it discoverable.
+
+### Performance
+
+- **Exact LLRs on the CPU**: 256-QAM takes about 330 ms per 2^18 symbols
+  (max-log about 18 ms), dominated by one `exp` per point and bit.
+- **Block equalizers at small `block_size` on the GPU**: a fixed cost per
+  block; at 256 the GPU only ties the CPU without carrier recovery.
+- **`cs_block` on phases with frequent slip decisions**: one speculation
+  pass per changed decision (about 1 pass per block on a realistic link,
+  more on pathological input). Outside a CUDA graph the Python wrapper
+  (validation, scratch allocation) costs about 18 us per launch.
+
+### Known limitations
+
+- The DSH-input warning of `estimate_linewidth` misses a drift-removed phase
+  residual when `f_shift` is unknown: a real-valued record is valid input
+  for both kinds of method, so the type alone cannot tell them apart.
+- Blind carrier recovery on 8-PSK near ±π/8 can lock to the wrong rotation.
+  Inherent to blind recovery; training symbols or `resolve_phase_ambiguity`
+  resolve it.

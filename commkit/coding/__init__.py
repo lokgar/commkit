@@ -14,7 +14,7 @@ docstring.  The package is intentionally **absent from the top-level
 point exists; do not add ``from . import coding`` to ``commkit/__init__.py``
 before then.
 
-Promotion path (apply the §7.4 size+cohesion trigger as real code lands):
+Promotion path (apply the module-splitting rule in AGENTS.md as real code lands):
 ``ldpc`` and ``polar`` graduate to ``{construction,decode}`` subpackages, and
 the algebraic block codes (``hamming``/``bch``/``reed_solomon``) collect under a
 ``block/`` subpackage once they share enough ``galois`` machinery.
