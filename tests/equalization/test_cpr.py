@@ -301,6 +301,53 @@ class TestCPRBPSConvergence:
             f"BPS phase_trajectory looks wrapped (span={span:.3f} rad < π/2)"
         )
 
+    @pytest.mark.parametrize("algo", ["lms", "rls", "block_lms"])
+    @pytest.mark.parametrize(
+        "constellation",
+        [Constellation.psk(8), Constellation.psk(2)],
+        ids=["8psk", "bpsk"],
+    )
+    def test_bps_searches_the_constellation_symmetry(self, algo, constellation, xp):
+        """Inline BPS on 8-PSK (π/4 symmetry) and BPSK (π) tracks a ramp
+        itself, without symbol errors: the candidates span ``2π/S``, not
+        ``π/2``."""
+        from commkit.equalization import block_lms
+
+        rng = np.random.default_rng(11)
+        n_sym, n_train = 4000, 500
+        points = constellation.points.astype(np.complex64)
+        syms = points[rng.integers(0, points.size, n_sym)]
+        phase = 0.2 + 1.5e-3 * np.arange(n_sym)  # inside the first branch, ±π/S
+        awgn = 0.05 * (rng.standard_normal(n_sym) + 1j * rng.standard_normal(n_sym))
+        samples = (syms * np.exp(1j * phase) + awgn).astype(np.complex64)
+        cpr = BPS(test_phases=32, block_size=16, cycle_slip=CycleSlip())
+        kw = dict(num_taps=1, sps=1, constellation=constellation, cpr=cpr)
+        if algo == "lms":
+            res = lms(xp.asarray(samples), syms[:n_train], step_size=1e-4, **kw)
+        elif algo == "rls":
+            res = rls(
+                xp.asarray(samples), syms[:n_train], forgetting_factor=0.9999, **kw
+            )
+        else:
+            res = block_lms(
+                xp.asarray(samples),
+                syms[:n_train],
+                step_size=1e-4,
+                block_size=32,
+                **kw,
+            )
+        y = to_numpy(res.y_hat)[n_train:]
+        ref = syms[n_train : n_train + y.size]
+        decided = points[np.argmin(np.abs(y[:, None] - points[None, :]), axis=1)]
+        assert np.count_nonzero(decided != ref) == 0
+        # Slow taps: the CPR, not the taps, follows the ramp (modulo 2π/S).
+        S = constellation.rotational_symmetry
+        phi = to_numpy(res.phase_trajectory)[n_train:]
+        residual = np.angle(
+            np.exp(1j * S * (phase[n_train : n_train + phi.size] - phi))
+        )
+        assert np.std(residual / S) < 0.05
+
     def test_bps_phase_noise_tracking(self, xp):
         """LMS+BPS converges under Wiener phase noise (Numba backend)."""
         rng = np.random.default_rng(11)

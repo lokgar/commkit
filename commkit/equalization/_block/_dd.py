@@ -105,7 +105,7 @@ class _BlockCarrier:
 
 @dataclass
 class _BlockBps:
-    """Blind phase search across blocks: candidates, window history, 4-fold
+    """Blind phase search across blocks: candidates, window history, S-fold
     unwrap and cycle-slip state (device arrays; host for the Numba slip path).
     """
 
@@ -115,11 +115,12 @@ class _BlockBps:
     joint: bool
     angles: ArrayType  # (P,) float32
     phases_neg: ArrayType  # (P,) complex64, exp(-j*angle)
-    prev4: ArrayType  # (C,) float64, last 4x angle
-    offset4: ArrayType  # (C,) float64, accumulated unwrapped 4x phase
+    prev4: ArrayType  # (C,) float64, last S x angle
+    offset4: ArrayType  # (C,) float64, accumulated unwrapped S x phase
     d2_hist: ArrayType  # (P, C, K-1) float32 trailing metrics
     cs: bool
     cs_H: int
+    symmetry: int  # S: candidates over [0, 2π/S), S-fold unwrap
     quantum: float
     threshold: float
     cs_buf_x: np.ndarray
@@ -191,23 +192,24 @@ class _BlockBps:
             combined_hist = xp.concatenate([self.d2_hist, min_d2], axis=2)
             self.d2_hist[...] = combined_hist[:, :, -self.hist_len :]
 
-        # 4-fold unwrap continuing from the previous block.
+        # S-fold unwrap continuing from the previous block.
+        S = float(self.symmetry)
         if xp is np:
-            raw4 = phi_raw.astype(np.float64) * 4.0  # (C, B)
+            raw4 = phi_raw.astype(np.float64) * S  # (C, B)
             extended = np.concatenate([self.prev4[:, np.newaxis], raw4], axis=1)
             unwrapped_ext = np.unwrap(extended, axis=1)  # (C, B+1)
             cumul = unwrapped_ext[:, 1:] - unwrapped_ext[:, 0:1]  # (C, B)
-            phi_f64 = (self.offset4[:, np.newaxis] + cumul) / 4.0  # (C, B)
+            phi_f64 = (self.offset4[:, np.newaxis] + cumul) / S  # (C, B)
             self.prev4[:] = unwrapped_ext[:, -1]
             self.offset4 += cumul[:, -1]
         else:
-            raw4_dev = phi_raw.astype(xp.float64) * xp.float64(4.0)  # (C, B)
+            raw4_dev = phi_raw.astype(xp.float64) * xp.float64(S)  # (C, B)
             ext_dev = xp.concatenate([self.prev4[:, None], raw4_dev], axis=1)
             two_pi = xp.float64(2.0 * np.pi)
             d4 = ext_dev[:, 1:] - ext_dev[:, :-1]  # (C, B)
             d4 -= xp.round(d4 / two_pi) * two_pi  # wrap to [-π, π]
             cumul_dev = xp.cumsum(d4, axis=1)  # (C, B)
-            phi_f64 = (self.offset4[:, None] + cumul_dev) / xp.float64(4.0)
+            phi_f64 = (self.offset4[:, None] + cumul_dev) / xp.float64(S)
             self.prev4 += cumul_dev[:, -1]
             self.offset4 += cumul_dev[:, -1]
 
@@ -303,8 +305,8 @@ def block_lms(
        (not one per block), so ``cpr.block_size`` and ``block_size`` are
        independent parameters: ``block_size`` controls FFT/gradient efficiency
        while ``cpr.block_size`` controls phase noise suppression.  The raw
-       ``[0, pi/2)`` argmin is converted to full-range radians by a causal 4-fold
-       unwrap, and stored in a float64 accumulator in ``phase_trajectory``.
+       ``[0, 2*pi/S)`` argmin (``S`` the constellation's rotational symmetry)
+       is converted to full-range radians by a causal ``S``-fold unwrap, and stored in a float64 accumulator in ``phase_trajectory``.
 
     3. **Cycle-slip correction** (if ``cpr.cycle_slip`` is set) - for
        each symbol of the per-symbol BPS phase tensor ``phi_n`` (shape
@@ -387,7 +389,8 @@ def block_lms(
         ``(C, C, T)`` or the SISO short-hands.  Only for a cold start.
     cpr : BPS, optional
         Inline blind phase search (``commkit.recovery.BPS``): ``test_phases``
-        candidates in ``[0, π/2)``, a causal window of the last
+        candidates in ``[0, 2π/S)`` (``S`` the constellation's rotational
+        symmetry), a causal window of the last
         ``block_size`` symbols per output symbol (independent of the
         equalizer's ``block_size``), ``joint_channels`` to sum the metrics
         across MIMO channels, and an optional nested ``CycleSlip``.  The PLL
@@ -687,7 +690,9 @@ def _block_bps(
 ) -> _BlockBps:
     """BPS state for ``block_lms``: continued from ``carrier``, or cold."""
     P = test_phases
-    angles_np = np.linspace(0.0, np.pi / 2.0, P, endpoint=False, dtype=np.float32)
+    angles_np = np.linspace(
+        0.0, 2.0 * np.pi / symmetry, P, endpoint=False, dtype=np.float32
+    )
     hist_len = max(0, window - 1)
     if carrier is not None:
         cs_H = carrier.cs_H
@@ -721,6 +726,7 @@ def _block_bps(
         d2_hist=d2_hist,
         cs=cycle_slip,
         cs_H=cs_H,
+        symmetry=symmetry,
         quantum=float(np.float64(2.0 * np.pi / symmetry)),
         threshold=threshold,
         cs_buf_x=cs_buf_x,

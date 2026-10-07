@@ -267,3 +267,34 @@ def test_rls_inline_cpr_matches_oracle(num_ch, kind, joint, slips):
         cpr=ref_cpr,
     )
     _assert_cpr_matches(res, ref, num_ch)
+
+
+@pytest.mark.parametrize(
+    "constellation", [Constellation.psk(8), Constellation.psk(2)], ids=["8psk", "bpsk"]
+)
+def test_lms_inline_bps_follows_symmetry(constellation):
+    """The candidates span ``2π/S`` and the unwrap is ``S``-fold, ``S`` the
+    constellation's rotational symmetry (8 for 8-PSK, 2 for BPSK)."""
+    from commkit.recovery import BPS, CycleSlip
+    from tests.common.reference_impl import _InlineCpr, lms_cpr_reference
+
+    points = constellation.points
+    rng = np.random.default_rng(5)
+    syms = points[rng.integers(0, points.size, N_SYM)]
+    x = np.convolve(np.repeat(syms, SPS), [0.08, 1.0, 0.15j], mode="same")
+    x = x + 0.03 * (rng.standard_normal(x.size) + 1j * rng.standard_normal(x.size))
+    samples = _phase_rotated(x.astype(np.complex64))
+    S = int(constellation.rotational_symmetry)
+    kw = dict(num_taps=NUM_TAPS, sps=SPS, step_size=1e-2)
+    res = lms(
+        samples,
+        syms[:100],
+        **kw,
+        constellation=constellation,
+        cpr=BPS(test_phases=16, block_size=8, cycle_slip=CycleSlip(history=20)),
+    )
+    ref_cpr = _InlineCpr(
+        "bps", 1, points, test_phases=16, window=8, symmetry=S, history=20
+    )
+    ref = lms_cpr_reference(samples, syms[:100], points, **kw, cpr=ref_cpr)
+    _assert_cpr_matches(res, ref, 1)

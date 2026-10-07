@@ -429,7 +429,7 @@ def _get_numba_lms_cpr():
             # cpr_mode      : int32  1=pll 2=bps
             # pll_mu        : float32
             # pll_beta      : float32
-            # symmetry      : int32  - cycle-slip quantum = 2π/symmetry
+            # symmetry      : int32  - S: BPS range 2π/S, slip quantum 2π/S
             # cs_enabled    : bool
             # cs_threshold  : float32
             # pll_phi       : (C,) float64          - in-place
@@ -439,7 +439,7 @@ def _get_numba_lms_cpr():
             # cs_buf_ptr    : (C,) int64            - in-place
             # cs_buf_n      : (C,) int64            - in-place
             # cs_stats      : (C, 4) float64  [Sx,Sy,Sxx,Sxy] - in-place
-            # bps_prev4     : (C,) float64    - causal 4-fold unwrap state - in-place
+            # bps_prev4     : (C,) float64    - causal S-fold unwrap state - in-place
             # bps_dist_buf  : (C, K, B) float32 - BPS window metrics - in-place
             # bps_running_sum: (C, B) float64   - their running sum - in-place
             # bps_dist_ptr  : (1,) int64        - window write position - in-place
@@ -544,15 +544,17 @@ def _get_numba_lms_cpr():
                             if metric_k < min_tot_joint:
                                 min_tot_joint = metric_k
                                 best_k_joint = k
-                        # Raw argmin in [0, π/2); apply 4-fold causal unwrap
-                        raw4 = np.float64(bps_angles[best_k_joint]) * np.float64(4.0)
+                        # Raw argmin in [0, 2π/S); apply S-fold causal unwrap (S = symmetry)
+                        raw4 = np.float64(bps_angles[best_k_joint]) * np.float64(
+                            symmetry
+                        )
                         for i in range(C):
                             diff4 = raw4 - bps_prev4[i]
                             diff4 = diff4 - np.float64(2.0 * np.pi) * np.round(
                                 diff4 / (np.float64(2.0 * np.pi))
                             )
                             bps_prev4[i] = bps_prev4[i] + diff4
-                            phi_hat_bps[i] = bps_prev4[i] / np.float64(4.0)
+                            phi_hat_bps[i] = bps_prev4[i] / np.float64(symmetry)
                     else:
                         for i in range(C):
                             best_k = np.int32(0)
@@ -561,14 +563,14 @@ def _get_numba_lms_cpr():
                                 if bps_running_sum[i, k] < min_tot:
                                     min_tot = bps_running_sum[i, k]
                                     best_k = k
-                            # Raw argmin in [0, π/2); apply 4-fold causal unwrap
-                            raw4 = np.float64(bps_angles[best_k]) * np.float64(4.0)
+                            # Raw argmin in [0, 2π/S); apply S-fold causal unwrap (S = symmetry)
+                            raw4 = np.float64(bps_angles[best_k]) * np.float64(symmetry)
                             diff4 = raw4 - bps_prev4[i]
                             diff4 = diff4 - np.float64(2.0 * np.pi) * np.round(
                                 diff4 / (np.float64(2.0 * np.pi))
                             )
                             bps_prev4[i] = bps_prev4[i] + diff4
-                            phi_hat_bps[i] = bps_prev4[i] / np.float64(4.0)
+                            phi_hat_bps[i] = bps_prev4[i] / np.float64(symmetry)
 
                 for i in range(C):
                     if cpr_mode == 1:  # PLL: read current integrator state
@@ -923,14 +925,16 @@ def _get_numba_rls_cpr():
                             if metric_k < min_tot_joint:
                                 min_tot_joint = metric_k
                                 best_k_joint = k
-                        raw4 = np.float64(bps_angles[best_k_joint]) * np.float64(4.0)
+                        raw4 = np.float64(bps_angles[best_k_joint]) * np.float64(
+                            symmetry
+                        )
                         for i in range(C):
                             diff4 = raw4 - bps_prev4[i]
                             diff4 = diff4 - np.float64(2.0 * np.pi) * np.round(
                                 diff4 / (np.float64(2.0 * np.pi))
                             )
                             bps_prev4[i] = bps_prev4[i] + diff4
-                            phi_hat_bps[i] = bps_prev4[i] / np.float64(4.0)
+                            phi_hat_bps[i] = bps_prev4[i] / np.float64(symmetry)
                     else:
                         for i in range(C):
                             best_k = np.int32(0)
@@ -939,13 +943,13 @@ def _get_numba_rls_cpr():
                                 if bps_running_sum[i, k] < min_tot:
                                     min_tot = bps_running_sum[i, k]
                                     best_k = k
-                            raw4 = np.float64(bps_angles[best_k]) * np.float64(4.0)
+                            raw4 = np.float64(bps_angles[best_k]) * np.float64(symmetry)
                             diff4 = raw4 - bps_prev4[i]
                             diff4 = diff4 - np.float64(2.0 * np.pi) * np.round(
                                 diff4 / (np.float64(2.0 * np.pi))
                             )
                             bps_prev4[i] = bps_prev4[i] + diff4
-                            phi_hat_bps[i] = bps_prev4[i] / np.float64(4.0)
+                            phi_hat_bps[i] = bps_prev4[i] / np.float64(symmetry)
 
                 for i in range(C):
                     if cpr_mode == 1:

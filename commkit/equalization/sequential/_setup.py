@@ -322,11 +322,11 @@ class _InlineCpr:
     pll_mu: Any
     pll_beta: Any
     phase_init: float
-    angles: np.ndarray  # (B,) float32 BPS candidates over [0, π/2)
+    angles: np.ndarray  # (B,) float32 BPS candidates over [0, 2π/symmetry)
     phases_neg: np.ndarray  # (B,) complex64, exp(-j*angle)
     window: int  # BPS averaging window
     joint: bool
-    symmetry: int  # cycle-slip quantum 2π/symmetry
+    symmetry: int  # BPS search range and cycle-slip quantum, 2π/symmetry
     cycle_slip: bool
     history: int
     threshold: float
@@ -380,8 +380,9 @@ def _inline_cpr(cpr: Any, constellation: Any, function_name: str) -> _InlineCpr 
     else:
         mu, beta = PLL().gains  # unused by the BPS path
         test_phases, window, phase_init = cpr.test_phases, cpr.block_size, 0.0
+    symmetry = _cpr_symmetry(constellation)
     angles = np.linspace(
-        0.0, np.pi / 2.0, int(test_phases), endpoint=False, dtype=np.float32
+        0.0, 2.0 * np.pi / symmetry, int(test_phases), endpoint=False, dtype=np.float32
     )
     return _InlineCpr(
         kind="pll" if isinstance(cpr, PLL) else "bps",
@@ -392,7 +393,7 @@ def _inline_cpr(cpr: Any, constellation: Any, function_name: str) -> _InlineCpr 
         phases_neg=np.exp(-1j * angles).astype(np.complex64),
         window=int(window),
         joint=bool(cpr.joint_channels),
-        symmetry=_cpr_symmetry(constellation),
+        symmetry=symmetry,
         cycle_slip=cycle_slip is not None,
         history=int(slip.history),
         threshold=float(slip.threshold),

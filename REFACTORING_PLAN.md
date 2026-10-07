@@ -972,9 +972,8 @@ The equalization pass (3.7) gets more commits:
   `cpr_*` parameters of `lms`, `rls` and `block_lms` become one `cpr=`
   object from `recovery` (`block_lms` takes `BPS` only), with cycle-slip
   repair as its nested `CycleSlip`. `PLL.phase_init` seeds a cold start (1.x
-  had no way to). The inline BPS keeps its `[0, π/2)` search (the 3.6f
-  generalization is a kernel change for later). Bit-identical on the A/B
-  harness.
+  had no way to). The inline BPS keeps its `[0, π/2)` search (generalized
+  in 3.7j). Bit-identical on the A/B harness.
 - [x] **3.7e `refactor(equalization)!: state= continues an equalizer`.**
   `EqualizerState` (frozen) replaces `w_init`, `samples_prefix`,
   `input_norm_factor` and `cpr_state`; user taps are `initial_taps=`.
@@ -1016,6 +1015,19 @@ The equalization pass (3.7) gets more commits:
   exactly B/2 candidates is a 4x difference of exactly ±π, which the causal
   unwrap resolves by rounding, so float64 angles would pick the other
   branch.
+- [x] **3.7i `fix(equalization): block_lms training follows the samples'
+  device`.** Host training symbols with GPU samples crashed in the block
+  loop; `lms` and `rls` accept them.
+- [x] **3.7j `fix(equalization): inline BPS searches the constellation's
+  symmetry`.** The 3.6f fix for the kernels of `lms`, `rls` and
+  `block_lms`: the candidates span `[0, 2π/S)` and the causal unwrap is
+  `S`-fold, `S` the constellation's `rotational_symmetry` (it already set
+  the slip quantum, clamped to 2 or 4). 8-PSK had two minima in the old
+  range, so the 4-fold unwrap jumped by π/4; BPSK phases in `[π/2, π)` were
+  out of range. Tests: the oracle with `S` = 8 and 2, and 8-PSK/BPSK
+  ramps tracked by the CPR itself without symbol errors (all fail on the
+  old kernels). 4-fold constellations are bit-identical (72 arrays: QAM,
+  shaped QAM, QPSK; BPS and PLL); timing at parity.
 
 **Equalizer safety rules (3.7):**
 

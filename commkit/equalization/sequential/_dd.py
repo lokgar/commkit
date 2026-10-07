@@ -91,10 +91,11 @@ def lms(
          ``phi_err = Im(y_raw * conj(d_prev))``
          drives a PI integrator with gains ``K_p``, ``K_i``; accumulated
          phase ``phi_n`` is applied as ``y[n] = y_raw * exp(-j*phi_n)``.
-       * **BPS** - ``B`` candidate rotations ``exp(-j*k*pi/(2*B))`` are
-         tested; the one minimising the summed nearest-constellation distance
-         over the trailing ``K`` = ``cpr.block_size`` symbols is chosen.
-         A causal 4-fold unwrap converts the ``[0, pi/2)`` argmin to full-range
+       * **BPS** - ``B`` candidate rotations ``exp(-j*2*pi*k/(S*B))`` are
+         tested, ``S`` the constellation's rotational symmetry; the one
+         minimising the summed nearest-constellation distance over the
+         trailing ``K`` = ``cpr.block_size`` symbols is chosen.  A causal
+         ``S``-fold unwrap converts the ``[0, 2*pi/S)`` argmin to full-range
          ``phi_n`` stored in a float64 accumulator.
 
     4. **Decision** - training symbol ``d[n]`` (DA phase, while
@@ -181,11 +182,11 @@ def lms(
           raw ``mu`` / ``beta``).  ``phase_init`` seeds a cold start.  Low
           noise floor; recommended for QPSK through 64-QAM.
         * ``BPS(test_phases=, block_size=, joint_channels=)`` - blind phase
-          search over ``test_phases`` angles in ``[0, π/2)`` (4-fold QAM
-          symmetry), averaged over a causal window of the last
+          search over ``test_phases`` angles in ``[0, 2π/S)``, ``S`` the
+          constellation's rotational symmetry (π/2 for QAM), averaged over a causal window of the last
           ``block_size`` symbols.  Preferred for bursts where PLL pull-in is
           impractical.  The wrapped float32 estimate rotates the output; the
-          causally 4-fold-unwrapped float64 accumulator is the
+          causally ``S``-fold-unwrapped float64 accumulator is the
           ``phase_trajectory``, so float32 rounding never accumulates.
 
         ``joint_channels`` shares one estimate across MIMO channels (summed
@@ -224,7 +225,7 @@ def lms(
           ``(N_sym, C, C, num_taps)`` MIMO.  ``None`` otherwise.
         * ``phase_trajectory`` - accumulated per-symbol phase estimates,
           shape ``(N_sym,)`` SISO or ``(C, N_sym)`` MIMO.  For BPS, this
-          is the causal 4-fold-unwrapped float64 phase.  For PLL, it is
+          is the causal ``S``-fold-unwrapped float64 phase.  For PLL, it is
           the PI integrator state accumulated over all symbols.  ``None``
           when ``cpr=None``.
         * ``num_train_symbols`` - number of training symbols consumed
@@ -517,11 +518,11 @@ def rls(
           raw ``mu`` / ``beta``).  ``phase_init`` seeds a cold start.  Low
           noise floor; recommended for QPSK through 64-QAM.
         * ``BPS(test_phases=, block_size=, joint_channels=)`` - blind phase
-          search over ``test_phases`` angles in ``[0, π/2)`` (4-fold QAM
-          symmetry), averaged over a causal window of the last
+          search over ``test_phases`` angles in ``[0, 2π/S)``, ``S`` the
+          constellation's rotational symmetry (π/2 for QAM), averaged over a causal window of the last
           ``block_size`` symbols.  Preferred for bursts where PLL pull-in is
           impractical.  The wrapped float32 estimate rotates the output; the
-          causally 4-fold-unwrapped float64 accumulator is the
+          causally ``S``-fold-unwrapped float64 accumulator is the
           ``phase_trajectory``, so float32 rounding never accumulates.
 
         ``joint_channels`` shares one estimate across MIMO channels (summed
@@ -559,7 +560,7 @@ def rls(
           ``store_weights=True``; ``None`` otherwise.
         * ``phase_trajectory`` - per-symbol phase estimates, shape
           ``(N_sym,)`` SISO or ``(C, N_sym)`` MIMO.  BPS: causal
-          4-fold-unwrapped float64.  PLL: PI integrator state.  ``None``
+          ``S``-fold-unwrapped float64.  PLL: PI integrator state.  ``None``
           when ``cpr=None``.
         * ``num_train_symbols`` - number of data-aided training symbols.
         * ``input_norm_factor`` - RMS factor used to normalize inputs.

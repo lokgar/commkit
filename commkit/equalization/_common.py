@@ -306,14 +306,14 @@ def _unpack_result_numpy(
 
 
 def _cpr_symmetry(constellation: Any) -> int:
-    """Rotational symmetry used for the inline cycle-slip quantum.
+    """Rotational symmetry of the inline CPR: the BPS searches
+    ``[0, 2π/symmetry)`` and cycle slips are multiples of ``2π/symmetry``.
 
-    2 for constellations with at most 2-fold symmetry (BPSK, PAM), else 4:
-    the inline BPS searches ``[0, π/2)``.
+    The constellation's own symmetry, as in ``recovery.BPS``; 4 without one.
     """
     if constellation is None:
         return 4
-    return 2 if constellation.rotational_symmetry <= 2 else 4
+    return int(constellation.rotational_symmetry)
 
 
 def _validate_sps(sps, num_taps):

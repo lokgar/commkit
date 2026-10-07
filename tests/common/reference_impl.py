@@ -191,11 +191,12 @@ class _InlineCpr:
         self.kind, self.num_ch, self.const = kind, num_ch, constellation
         self.mu, self.beta, self.joint = mu, beta, joint and num_ch > 1
         # The candidates are a float32 grid: an argmin jump of exactly B/2
-        # candidates is a 4x difference of exactly +-pi, which the unwrap
-        # resolves by rounding - float64 angles would round the other way.
+        # candidates is a symmetry-x difference of exactly +-pi, which the
+        # unwrap resolves by rounding - float64 angles would round the other way.
         self.theta = np.linspace(
-            0.0, np.pi / 2, test_phases, endpoint=False, dtype=np.float32
+            0.0, 2 * np.pi / symmetry, test_phases, endpoint=False, dtype=np.float32
         ).astype(np.float64)
+        self.symmetry = symmetry
         self.window = window
         self.metrics = [[] for _ in range(num_ch)]  # per channel: (B,) per symbol
         self.prev4 = np.zeros(num_ch)
@@ -217,10 +218,10 @@ class _InlineCpr:
             if self.joint:
                 sums = np.repeat(np.sum(sums, axis=0, keepdims=True), self.num_ch, 0)
             for i in range(self.num_ch):
-                raw4 = 4 * self.theta[int(np.argmin(sums[i]))]
+                raw4 = self.symmetry * self.theta[int(np.argmin(sums[i]))]
                 diff = raw4 - self.prev4[i]
                 self.prev4[i] += diff - 2 * np.pi * np.round(diff / (2 * np.pi))
-            phi = self.prev4 / 4
+            phi = self.prev4 / self.symmetry
         if self.history is not None:
             phi = np.array([self._slip(i, phi[i]) for i in range(self.num_ch)])
         return phi
