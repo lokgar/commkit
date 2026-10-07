@@ -8,7 +8,7 @@ import pytest
 from commkit.core import Preamble, SingleCarrierFrame, extract_payload
 from commkit.filtering import RRC
 from commkit.mapping import Constellation
-from tests.common.conversions import device_of
+from tests.common.conversions import device_of, to_numpy
 
 
 class TestSingleCarrierFrameBasics:
@@ -460,3 +460,33 @@ class TestExtractPayload:
         sig = sig.replace(samples=sig.samples[5:])
         with pytest.raises(ValueError, match="full frame"):
             extract_payload(sig)
+
+
+class TestFrameDevice:
+    """to_signal(device=) shapes on the device and matches the CPU waveform."""
+
+    def test_frame_matches_cpu(self, backend_device: str, xp: Any) -> None:
+        frame = SingleCarrierFrame(
+            payload_len=196,
+            num_streams=2,
+            preamble=Preamble(sequence_type="zc", length=31),
+            pilot_pattern="comb",
+            pilot_period=8,
+            guard_type="cp",
+            guard_len=16,
+        )
+        ref = frame.to_signal(sps=2, pulse=RRC(0.2))
+        sig = frame.to_signal(sps=2, pulse=RRC(0.2), device=backend_device)
+        assert isinstance(sig.samples, xp.ndarray)
+        assert sig.samples.dtype == ref.samples.dtype
+        np.testing.assert_allclose(to_numpy(sig.samples), ref.samples, atol=1e-5)
+
+    def test_preamble_device(self, backend_device: str, xp: Any) -> None:
+        sig = Preamble(sequence_type="barker", length=13).to_signal(
+            sps=4, symbol_rate=1e6, device=backend_device
+        )
+        assert isinstance(sig.samples, xp.ndarray)
+
+    def test_invalid_device(self) -> None:
+        with pytest.raises(ValueError, match="device"):
+            SingleCarrierFrame(payload_len=10).to_signal(sps=1, device="tpu")

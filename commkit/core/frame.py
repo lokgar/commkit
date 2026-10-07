@@ -8,12 +8,12 @@ from typing import Any, Literal
 import numpy as np
 
 from .._sequences import barker_sequence, zadoff_chu_sequence, zc_mimo_root
-from ..backend import ArrayType
+from ..backend import ArrayType, dispatch, to_device
 from ..filtering import Pulse
 from ..mapping import Constellation
 from ..math import db_to_linear, normalize
 from . import generation
-from ._signal_adapter import _same_fact, require_integer_sps
+from ._signal_adapter import _same_fact, require_device, require_integer_sps
 from .signal import Reference, Signal
 
 __all__ = ["Preamble", "SingleCarrierFrame", "extract_payload"]
@@ -133,6 +133,7 @@ class Preamble:
         symbol_rate: float,
         *,
         pulse: Pulse | ArrayType | None = None,
+        device: str = "cpu",
     ) -> Signal:
         """
         Pulse-shaped waveform of the preamble sequence.
@@ -146,6 +147,8 @@ class Preamble:
         pulse : Pulse or array_like, optional
             Pulse object or taps; ``None`` zero-stuffs without shaping (as
             :func:`commkit.generate`).
+        device : {"cpu", "gpu"}, default "cpu"
+            Where the waveform is shaped and returned.
 
         Returns
         -------
@@ -153,8 +156,10 @@ class Preamble:
             The shaped preamble at unit symbol power.
         """
         sps = require_integer_sps(sps, "Preamble.to_signal()")
+        device = require_device(device, "Preamble.to_signal()")
+        symbols = to_device(self.symbols, device)
         return Signal(
-            samples=generation.shape_pulse(self.symbols, sps=sps, pulse=pulse),
+            samples=generation.shape_pulse(symbols, sps=sps, pulse=pulse),
             sampling_rate=symbol_rate * sps,
             symbol_rate=symbol_rate,
             pulse=pulse if isinstance(pulse, Pulse) else None,
@@ -628,6 +633,7 @@ class SingleCarrierFrame:
         symbol_rate: float = 1e6,
         *,
         pulse: Pulse | ArrayType | None = None,
+        device: str = "cpu",
     ) -> Signal:
         """
         Generates a shaped, oversampled waveform from the frame description.
@@ -645,6 +651,9 @@ class SingleCarrierFrame:
         pulse : Pulse or array_like, optional
             Pulse object or taps for both preamble and body; ``None``
             zero-stuffs without shaping (as :func:`commkit.generate`).
+        device : {"cpu", "gpu"}, default "cpu"
+            Where the waveform is shaped and returned.  The frame's symbols
+            and bits stay on the host either way.
 
         Returns
         -------
@@ -660,11 +669,12 @@ class SingleCarrierFrame:
         convention used by ``shape_pulse`` and ``apply_awgn``.
         Pilot/payload power ratios set by `pilot_gain_db` are preserved throughout.
         """
-        xp = np
         sps = require_integer_sps(sps, "SingleCarrierFrame.to_signal()")
+        device = require_device(device, "SingleCarrierFrame.to_signal()")
 
         # 1. Shape Body (Payload + Pilots)
-        body_samples = generation.shape_pulse(self.body_symbols, sps=sps, pulse=pulse)
+        body, xp, _ = dispatch(to_device(self.body_symbols, device))
+        body_samples = generation.shape_pulse(body, sps=sps, pulse=pulse)
 
         # Normalise body per-channel via normalize's "dac_peak" mode:
         # max(peak_|I|, peak_|Q|) - a single scale factor that brings the
@@ -683,9 +693,9 @@ class SingleCarrierFrame:
             # but we only need the samples.
             # CRITICAL: Must use EXACT same shaping parameters as body.
             preamble_signal = self.preamble.to_signal(
-                sps=sps, symbol_rate=symbol_rate, pulse=pulse
+                sps=sps, symbol_rate=symbol_rate, pulse=pulse, device=device
             )
-            preamble_samples = xp.asarray(preamble_signal.samples)
+            preamble_samples = preamble_signal.samples
             # (L*sps,) for SISO  or  (num_streams, L*sps) for MIMO - shape driven by preamble.num_streams
 
             # I/Q peak normalisation - axis=-1 works for both 1-D and 2-D
@@ -703,7 +713,7 @@ class SingleCarrierFrame:
         if self.guard_len > 0:
             guard_len_samples = int(self.guard_len * sps)
             if self.guard_type == "zero":
-                zeros: np.ndarray
+                zeros: ArrayType
                 if self.num_streams > 1:
                     zeros = xp.zeros(
                         (self.num_streams, guard_len_samples), dtype="complex64"

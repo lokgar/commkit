@@ -45,8 +45,10 @@ plain arrays (NumPy / CuPy)          value objects (frozen, written inline)
   Signal's and can be overridden.
 - **Results with several values are frozen dataclasses** with named fields.
   Metrics return host floats: one per channel for `(C, N)` input.
-- **The device follows the data.** There are no `backend=` or `device=`
-  arguments; move data explicitly with `sig.to("gpu")`.
+- **The device follows the data.** Processing functions have no `backend=`
+  or `device=` argument. Only factories, which have no input data to
+  follow, take `device=`: `generate(..., device="gpu")`. Move existing data
+  with `sig.to("gpu")`.
 - There is no pipeline object, receiver class or configuration file: the
   orchestration stays in your script.
 
@@ -58,10 +60,10 @@ from commkit import RRC, Constellation
 from commkit.recovery import BPS, CycleSlip
 
 tx = ck.generate(Constellation.qam(16), num_symbols=2**16, symbol_rate=32e9,
-                 sps=2, pulse=RRC(rolloff=0.1), rng=1)
+                 sps=2, pulse=RRC(rolloff=0.1), rng=1, device="gpu")
 rx = ck.impairments.apply_phase_noise(tx, linewidth=100e3, rng=2)
-rx = ck.impairments.apply_awgn(rx, esn0_db=18, rng=3).to("gpu")  # explicit move
-rx = ck.filtering.matched_filter(rx)                              # pulse from rx
+rx = ck.impairments.apply_awgn(rx, esn0_db=18, rng=3)   # on the GPU, like tx
+rx = ck.filtering.matched_filter(rx)                     # pulse from rx
 
 cpr = BPS(test_phases=64, cycle_slip=CycleSlip(history=100))
 res = ck.equalization.lms(
@@ -71,13 +73,53 @@ res = ck.equalization.lms(
 y = res.signal                    # 1-SPS Signal, reference aligned
 print(f"EVM {ck.metrics.evm(y, num_skip_symbols=2000):.1f} %, "
       f"BER {ck.metrics.ber(y, num_skip_symbols=2000):.1e}")
-# EVM 12.9 %, BER 2.6e-04
+# EVM 12.8 %, BER 2.5e-04
 
 # The next record continues from the converged taps and CPR state.
 res2 = ck.equalization.lms(rx, num_taps=21, step_size=1e-3, cpr=cpr, state=res.state)
 ```
 
-Without CuPy, drop `.to("gpu")`: the same code runs on the CPU.
+Without CuPy, pass `device="cpu"` (the default): the same code runs on the
+CPU.
+
+## CPU and GPU
+
+CommKit never picks a device for you: data stays where you put it, and each
+function runs on the device of its input. A few habits get the speed out of
+a GPU:
+
+- **Put data on the GPU once, at the source.** Build it there with
+  `generate(..., device="gpu")`, `frame.to_signal(..., device="gpu")` or
+  `load_npz(path, device="gpu")`; move a capture with `sig.to("gpu")`. Do not
+  move data back and forth between stages. Building on the GPU is faster
+  than `generate(...).to("gpu")`: about 26 ms instead of 370 ms for 4M
+  symbols, because mapping and pulse shaping run there.
+- **You do not need to move results back.** Metrics (`evm`, `ber`, ...) and
+  analysis summaries return host floats, and plots reduce on the device and
+  transfer only what they draw.
+- **Know what runs where.**
+
+  | Work | GPU input |
+  | --- | --- |
+  | Generation, filters, resampling, spectra, impairments, BPS, LLRs, metrics, analysis | runs on the GPU |
+  | Frequency-domain equalizers `block_lms`, `block_cma`, `block_rde` | runs on the GPU (CUDA graphs) |
+  | Sequential equalizers `lms`, `rls`, `cma`, `rde`; `PLL`, `Tikhonov`, cycle-slip correction | runs on the CPU (Numba): one copy to the host and back, no speedup |
+
+  A sample-by-sample recursion has no parallel work per step. For long
+  records on the GPU, prefer the block equalizers.
+- **Short records do not pay off.** Launch overhead dominates below roughly
+  10⁴-10⁵ samples, where the CPU is as fast.
+- **Batch channels and records.** Pass `(C, N)` arrays rather than looping
+  over channels in Python: one call does the work of C.
+- **Keep scalars on the device inside loops.** `float(x)`, `x.item()` and
+  `if x > 0:` on a CuPy array wait for the GPU and copy. Collect values in an
+  array and transfer once.
+- **The first call compiles.** Numba and CUDA kernels compile on first use
+  and are cached on disk. Warm up once before timing anything.
+- **Seeds and devices.** The same `rng` gives the same bits, symbols and
+  phase-noise trajectories on both devices. Signal-sized noise (AWGN) is drawn
+  on the device, so its realization differs between CPU and GPU while its
+  statistics match.
 
 ---
 

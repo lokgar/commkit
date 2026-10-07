@@ -182,9 +182,13 @@ Dependencies point downward only:
   TypeVar `S` from `core/_signal_adapter.py` (bound to `np.ndarray | Signal`),
   so a Signal gives a Signal and an array an array. Do not reassign the
   `samples` parameter; name the unwrapped array `x`.
-- **Device follows the data.** There are no `backend=` or `device=` arguments
-  and no global switches. Unsupported array types (JAX, PyTorch) raise
-  `TypeError`.
+- **Device follows the data.** There are no `backend=` arguments and no
+  global switches. Unsupported array types (JAX, PyTorch) raise `TypeError`.
+  - Only factories with no input data to follow (`generate`,
+    `Preamble`/`SingleCarrierFrame.to_signal`, `load_npz`) take
+    `device: str = "cpu"`, validated with `require_device()`. They draw the
+    random data on the host, move it, and do the vectorized work (mapping,
+    shaping) on `device`. The default is never "GPU if available".
 - **No `debug_plot`.** Numerical code never imports plotting. Plot functions
   consume results or recompute through public compute functions.
 - **Design and apply are separate functions**, for example `rrc_taps` and

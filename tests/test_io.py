@@ -301,6 +301,10 @@ class TestNPZDeviceHandling:
         save_npz(_siso_signal(), p)
         assert load_npz(p).backend == "CPU"
 
+    def test_invalid_device_raises_before_loading(self, tmp_path: Any) -> None:
+        with pytest.raises(ValueError, match="device"):
+            load_npz(tmp_path / "missing.npz", device="tpu")
+
     def test_psqam_pmf_roundtrip(self, tmp_path: Any, xpt: Any) -> None:
         """PS-QAM signal PMF, mod_scheme, and order round-trip."""
         sig = generate(
