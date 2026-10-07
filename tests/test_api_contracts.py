@@ -410,9 +410,6 @@ ROWS: list[Row] = [
     Row("commkit.math.linear_to_db", HELPER),
     Row("commkit.math.normalize", HELPER),
     Row("commkit.math.rms", HELPER),
-    # --- helpers (dissolved into owning modules in the module passes) -------
-    Row("commkit.helpers.linear_trend_slope", HELPER),
-    Row("commkit.helpers.remove_linear_trend", HELPER),
     # --- impairments --------------------------------------------------------
     Row(
         "commkit.impairments.channel.linear.apply_chromatic_dispersion",

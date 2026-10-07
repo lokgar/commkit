@@ -20,8 +20,8 @@ from ._array import as_2d, broadcast_channels, restore_1d
 from .backend import ArrayType, dispatch, to_device
 from .core._signal_adapter import S, adapt_signal
 from .core.signal import Signal
-from .helpers import linear_trend_slope
 from .logger import logger
+from .math import _linear_trend_slope
 from .timing import _parabolic_peak_offset
 
 # Lazy-compiled Numba kernel for the M&M iterative bootstrap.
@@ -535,7 +535,7 @@ def _pilot_symbols(x: ArrayType, fs: float, method: PilotSymbols) -> _Rows:
         safe = xp.where(xp.abs(t_var) > 1e-30, t_var, xp.ones_like(t_var))
         slopes = xp.sum(v * phi_c * t_c, axis=-1) / safe
     else:
-        slopes = linear_trend_slope(phi_u, x=t, xp=xp)  # rad/s, centred OLS
+        slopes = _linear_trend_slope(phi_u, x=t, xp=xp)  # rad/s, centred OLS
 
     max_gap = int(np.max(np.diff(idx_np)))
     logger.debug(

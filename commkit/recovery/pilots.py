@@ -8,8 +8,8 @@ import numpy as np
 
 from .._array import broadcast_channels
 from ..backend import ArrayType, dispatch, to_device
-from ..helpers import remove_linear_trend
 from ..logger import logger
+from ..math import _remove_linear_trend
 from ._common import _Context, _Phase
 from .corrections import CycleSlip, _log_phase_summary, _repair_slips
 
@@ -411,7 +411,7 @@ def _pilot_tone(samples: ArrayType, method: PilotTone, ctx: _Context) -> _Phase:
     if not method.remove_frequency_offset:
         # Subtract the per-channel least-squares linear trend (residual FOE),
         # preserving the mean phase; leaves only the phase-noise fluctuation.
-        theta, _ = remove_linear_trend(theta)
+        theta, _ = _remove_linear_trend(theta)
 
     _log_phase_summary(
         theta,

@@ -10,8 +10,8 @@ from .._array import as_2d, broadcast_channels, restore_1d
 from ..backend import ArrayType, dispatch, to_device
 from ..core._signal_adapter import S, adapt_signal
 from ..core.signal import Signal
-from ..helpers import remove_linear_trend
 from ..logger import logger
+from ..math import _remove_linear_trend
 from ._common import _Context, _Phase
 
 
@@ -147,12 +147,12 @@ def smooth_phase_wiener(
 
     # Detrend per channel so the DC-divergent random-walk PSD does not distort
     # the residual-FOE ramp; restore the slope after filtering.  Only the
-    # slope is removed (helpers.remove_linear_trend keeps the mean) - the
+    # slope is removed (_remove_linear_trend keeps the mean) - the
     # Wiener gain forces H[0] = 1.0 below, so a constant offset passes through
     # filtering unchanged regardless of whether it was present going in.
     xc = xp.arange(N, dtype=xp.float64) - 0.5 * (N - 1)
     if detrend:
-        phi_c, slope = remove_linear_trend(phi)
+        phi_c, slope = _remove_linear_trend(phi)
     else:
         phi_c = phi
         slope = xp.zeros(C, dtype=xp.float64)

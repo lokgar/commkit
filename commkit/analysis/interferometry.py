@@ -55,8 +55,8 @@ from ..backend import ArrayType, dispatch, to_device
 from ..core._signal_adapter import adapt_signal
 from ..core.signal import Signal
 from ..frequency import correct_frequency_offset
-from ..helpers import remove_linear_trend
 from ..logger import logger
+from ..math import _remove_linear_trend
 from ..smoothing import moving_average
 from ..spectral import welch_psd
 from ._common import (
@@ -275,7 +275,7 @@ def dsh_phase(
         # unwrapped phase (the exact linear-ramp / mean-frequency component the
         # Kay stage leaves behind).  Skipped when f_shift is user-supplied so
         # genuine drift stays visible.
-        dphi, slope = remove_linear_trend(dphi)  # slope in rad/sample
+        dphi, slope = _remove_linear_trend(dphi)  # slope in rad/sample
         f_hat = f_hat + slope * (fs / (2.0 * np.pi))
 
     f_used = to_report_scalar(f_hat)

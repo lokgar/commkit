@@ -1109,6 +1109,28 @@ The equalization pass (3.7) gets more commits:
   per-quadrature noise variance, SNR, EVM, MI/GMI bounds, SPS and shaped
   scaling, and which scale each metric reads.
 
+**Pass 3.9 commits:**
+
+- [x] **3.9a `refactor: the linear trend moves into math; helpers.py
+  goes`.** A pure move. The least-squares trend is used by `frequency`,
+  `recovery` and `analysis`, so it lives in `math` (private
+  `_linear_trend_slope`, `_remove_linear_trend`) rather than in `analysis`,
+  which those modules cannot import. That empties `helpers.py`, deleted
+  here instead of in 4.1; its peak-interpolation and ZC-root tests move to
+  `test_timing.py`.
+- [ ] **3.9b `refactor(analysis)!: 2.0 signatures`.** Rates after the data
+  are keyword-only (`allan_deviation(df, *, symbol_rate=)`,
+  `dsh_beat(phi, *, sampling_rate=, delay=)`, ...); `dsh_phase` and
+  `linewidth_dsh` resolve `sampling_rate` as a fact. `ref_symbols` becomes
+  `reference` (`carrier_phase_trajectory` takes it from a 1-SPS Signal),
+  `n_taus` becomes `num_taus`.
+- [ ] **3.9c `refactor(analysis)!: typed results`.** Frozen dataclasses
+  replace the dicts and the three-tuple: `AllanDeviation`,
+  `FrequencyDrift`, `IncrementLinewidth`, `BetaSeparationLinewidth`,
+  `DshFmNoisePsd` and `DshLinewidth` (common fields plus the fields of its
+  `method`, `None` otherwise). `plotting.analysis` and the examples read
+  the fields.
+
 **Equalizer safety rules (3.7):**
 
 - Keep the dtype rules: complex128 accumulation in LMS/CMA, and float64 for all

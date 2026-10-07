@@ -281,7 +281,7 @@ def estimate_fractional_delay(
             gamma = r_next
 
         # Same three-point (log-)parabolic fit as frequency.py's peak
-        # estimators (helpers._parabolic_peak_offset), just in the
+        # estimators (_parabolic_peak_offset), just in the
         # phase-rotated-to-real-axis coordinate used here.  denom_eps=5e-13
         # exactly reproduces this function's original degeneracy threshold,
         # which was checked against 2*(alpha - 2*beta + gamma) rather than
