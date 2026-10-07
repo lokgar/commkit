@@ -116,10 +116,11 @@ a GPU:
   array and transfer once.
 - **The first call compiles.** Numba and CUDA kernels compile on first use
   and are cached on disk. Warm up once before timing anything.
-- **Seeds and devices.** The same `rng` gives the same bits, symbols and
-  phase-noise trajectories on both devices. Signal-sized noise (AWGN) is drawn
-  on the device, so its realization differs between CPU and GPU while its
-  statistics match.
+- **Seeds and devices.** The same `rng` gives the same bits and symbols on
+  both devices. Channel noise (AWGN, phase noise) is drawn on the device, so
+  its realization differs between CPU and GPU while its statistics match.
+  For the exact same phase-noise trajectory on both, draw it on the CPU with
+  `generate_phase_noise(...)` and move it.
 
 ---
 
