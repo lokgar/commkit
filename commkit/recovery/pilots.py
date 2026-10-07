@@ -170,7 +170,7 @@ def _extract_pilot_phasor(
 
     Everything runs in the signal's working precision (complex64 for complex64
     input) - the ±π-safe part of the pipeline is the float64 promotion of the
-    *angle* before unwrap, which the callers already perform (CLAUDE.md), not
+    *angle* before unwrap, which the callers already perform, not
     double-precision spectra.  Tone refinement reuses the extraction FFT
     (device-side log-parabolic fit; one host transfer) instead of running a
     zero-padded full-record FFT per channel, and the window/noise statistics

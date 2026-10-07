@@ -844,7 +844,7 @@ def bessel_sos(
 #
 # shape_pulse (TX symbol -> waveform synthesis) lives in core/generation.py,
 # not here: it is a signal-construction primitive, not a transform on an
-# existing Signal's samples (see CLAUDE.md, "Signal-Awareness").
+# existing Signal's samples.
 
 
 def ols_fir_filter(
@@ -1110,8 +1110,7 @@ def iir_filter(
     Internally promotes to ``float64``/``complex128`` for the filtering call
     and casts back to the input dtype on return: at very low normalized
     cutoffs (e.g. phase-drift extraction), SOS poles bunch near ``z=1`` and
-    single precision is not numerically safe (see ``CLAUDE.md``, "Phase
-    Unwrapping & Kalman Smoothers").
+    single precision is not numerically safe.
     """
     signal_adapter = adapt_signal(samples, function_name="iir_filter()")
     x = signal_adapter.array

@@ -147,7 +147,7 @@ class TestBPS:
 
 
 class TestRotationalSymmetry:
-    """BPS searches one ambiguity interval 2π/M of the constellation (3.6f)."""
+    """BPS searches one ambiguity interval 2π/M of the constellation."""
 
     @staticmethod
     def _ambiguity_free_error(phi, truth, quantum):

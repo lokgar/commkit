@@ -149,7 +149,7 @@ def test_rde_matches_oracle(num_ch):
 
 
 # -----------------------------------------------------------------------------
-# Inline carrier phase recovery (commit 3.7h)
+# Inline carrier phase recovery
 # -----------------------------------------------------------------------------
 
 CPR_CASES = [

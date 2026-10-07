@@ -56,7 +56,7 @@ class TestSignalAdapterTransforms:
 
 
 class TestFactsAndChoices:
-    """resolve_fact / resolve_choice (plan §2.5)."""
+    """resolve_fact / resolve_choice."""
 
     def test_fact_from_signal(self, xp: Any) -> None:
         a = adapt_signal(make_adapter_test_signal(xp), function_name="f()")

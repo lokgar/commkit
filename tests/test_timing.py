@@ -798,7 +798,7 @@ class TestSignalInputTiming:
 
 
 class TestTimingEstimateFlow:
-    """estimate_timing -> correct_timing with the 2.0 conventions."""
+    """estimate_timing -> correct_timing round trip."""
 
     def test_estimate_then_correct_restores_alignment(self, xp, xpt):
         """correct_timing with a TimingEstimate undoes a delay of a band-limited

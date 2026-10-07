@@ -61,7 +61,7 @@ def _log_phase_summary(
 # correct_cycle_slips: Cycle-slip detection/correction on a phase trajectory.
 #
 # Both operate on a phase trajectory - a derived quantity, not raw IQ samples
-# or any field a Signal carries - so neither is Signal-aware (AGENTS.md).
+# or any field a Signal carries - so neither is Signal-aware.
 
 
 def smooth_phase_wiener(

@@ -258,8 +258,7 @@ def _nearest_index(
     """Nearest-constellation-point index for each element of ``x`` (chunked).
 
     Bounds peak memory of the ``(N, M)`` distance matrix by chunking over
-    the ``N`` axis - see CLAUDE.md's "bound large broadcast intermediates"
-    rule.
+    the ``N`` axis.
 
     Parameters
     ----------

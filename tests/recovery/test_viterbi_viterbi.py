@@ -183,7 +183,7 @@ class TestViterbiViterbi:
 
 
 class TestJointChannelWeighting:
-    """Joint channels weigh equally, whatever their power (3.6e)."""
+    """Joint channels weigh equally, whatever their power."""
 
     @pytest.mark.parametrize("method", ["vv", "tikhonov"])
     def test_joint_estimate_ignores_channel_gain(self, xp, xpt, method):

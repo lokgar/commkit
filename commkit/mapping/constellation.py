@@ -3,7 +3,7 @@ The :class:`Constellation` value object.
 
 A constellation is described by its ``points``, the ``bit_labels`` assigned to
 each point, and an optional probabilistic-shaping prior ``pmf``.  It is the
-single way to describe a modulation in CommKit 2.0: functions take a
+single way to describe a modulation in CommKit: functions take a
 ``Constellation``, never a ``modulation`` string plus an ``order``.
 
 Build one with a factory (Gray labelled, unit average power)::

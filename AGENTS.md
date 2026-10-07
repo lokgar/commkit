@@ -314,8 +314,6 @@ Dependencies point downward only:
   has a row. Generic checks run per row: array in/out, Signal in/out, device
   preserved, input not mutated, keyword-only parameters, `TypeError` on
   unsupported arrays, fact-conflict errors, return rules.
-  - Rules a module does not follow yet are marked `xfail(strict=True)`; a
-    module's migration removes its marks.
   - Do not duplicate these checks in per-module tests.
 - **Oracles:** sequential kernels are tested against plain-Python reference
   implementations in `tests/common/reference_impl.py`. CUDA kernels are tested
@@ -362,10 +360,6 @@ recorded in plan commit 0.4) on the reference machine: RTX 4070 Ti, Ryzen 7
 These are the legacy patterns that remain. Each line names the commit in
 `REFACTORING_PLAN.md` that removes it. Delete a line when its commit lands, and
 delete this section in commit 4.2.
-
-The machine-checked, per-function version of this list is the `LEGACY` table in
-`tests/test_api_contracts.py`. Its entries run as strict xfails, so fixing a
-rule without deleting its entry fails the suite.
 
 | Legacy pattern still in the code | Removed by |
 | --- | --- |

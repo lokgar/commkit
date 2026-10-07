@@ -201,7 +201,7 @@ def _parabolic_peak_offset(
 # -----------------------------------------------------------------------------
 # estimate_fractional_delay operates on a correlation array (e.g. from
 # cross_correlate_fft), not on raw IQ samples or any Signal field, so it is
-# not Signal-aware (see CLAUDE.md, "Signal-Awareness").
+# not Signal-aware.
 
 
 def estimate_fractional_delay(

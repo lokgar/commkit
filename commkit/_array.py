@@ -85,7 +85,7 @@ def validate_array(
 # ---------------------------------------------------------------------------
 #
 # CommKit's SISO/MIMO convention is ``(N,)`` / ``(C, N)`` with time on the last
-# axis (CLAUDE.md, "Array Shapes").  Nearly every DSP entry point therefore
+# axis.  Nearly every DSP entry point therefore
 # promotes a 1-D input to ``(1, N)``, runs one vectorized channel-batched
 # implementation, and squeezes the leading axis back off on the way out.  These
 # helpers are that idiom, defined once, so the promotion is validated the same

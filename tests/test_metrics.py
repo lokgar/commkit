@@ -518,7 +518,7 @@ class TestSignalMetricsIntegration:
 
 
 class TestGMIShaped:
-    """GMI is the bit-metric decoding rate H(X) - sum_b H(B_b | Y) (3.8e)."""
+    """GMI is the bit-metric decoding rate H(X) - sum_b H(B_b | Y)."""
 
     @staticmethod
     def _received(c: Constellation, esn0_db: float, n: int = 20000, seed: int = 0):
@@ -583,7 +583,7 @@ class TestGMIShaped:
 
 class TestLowSNRScale:
     """Symbols with a reference are scaled by the data-aided gain, not to unit
-    total power, which shrinks them by 1/sqrt(1 + 1/SNR) (3.8f).
+    total power, which shrinks them by 1/sqrt(1 + 1/SNR).
 
     At -10 dB the gain estimate from 1e5 symbols is good to ~0.5% (1 sigma),
     about 0.04 dB of SNR and 1% of MI; the tolerances are ~3 sigma.  The old

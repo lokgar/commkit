@@ -25,7 +25,7 @@ from .signal import Reference, Signal
 #
 # Both operate on the raw symbol array a Signal gets *built from*, not on an
 # existing Signal's samples, so they live here rather than in filtering.py /
-# multirate.py (see CLAUDE.md, "Signal-Awareness").
+# multirate.py.
 
 
 def expand(samples: ArrayType, *, factor: int) -> ArrayType:

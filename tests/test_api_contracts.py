@@ -5,7 +5,7 @@ kind of API it is and how many leading *data* arguments it takes. Rows for
 processing functions also carry a ``call`` builder, so behavioral checks can
 invoke them.
 
-The checks encode the 2.0 API rules in AGENTS.md section 4:
+The checks encode the API rules in AGENTS.md section 4:
 
 - ``signature``: every parameter after the data arguments is keyword-only.
 - ``array_roundtrip``: a waveform transform returns an array on the input's
@@ -24,14 +24,8 @@ The checks encode the 2.0 API rules in AGENTS.md section 4:
 - ``equalizer_result``: ``EqualizerResult.y_hat`` is an array on the input
   device, and ``result.signal`` is a Signal for Signal input.
 
-``LEGACY`` (at the end of this file) lists, per function, the rules the code
-does not follow yet. Those checks run as ``xfail(strict=True)``, and an entry
-ending in ``@gpu`` or ``@cpu`` applies to one device only. A strict xfail that
-starts passing fails the suite, so the module pass that fixes a rule must
-delete its entry. ``LEGACY`` is the live migration checklist.
-
-Rows of kind ``REMOVE`` are scheduled for deletion and are not checked. Once a
-function is deleted, ``test_rows_resolve`` fails until its row is deleted too.
+Once a function is deleted, ``test_rows_resolve`` fails until its row is
+deleted too.
 """
 
 from __future__ import annotations
@@ -72,7 +66,6 @@ PLOT = "plot"
 VALUE = "value"  # classes / value objects
 HELPER = "helper"  # array/math utilities (moving out of helpers.py)
 INFRA = "infra"  # backend, logging, io
-REMOVE = "remove"  # scheduled for deletion in 2.0
 
 BEHAVIORAL = {TRANSFORM, RATE_CHANGE, TRAJECTORY, ESTIMATE, METRIC, EQUALIZER, MULTI}
 
@@ -255,7 +248,7 @@ ROWS: list[Row] = [
     Row("commkit.core.signal.Signal", VALUE),
     Row("commkit.core.generation.expand", DESIGN),
     Row("commkit.core.generation.shape_pulse", DESIGN),
-    # constellation and num_symbols are positional (plan 2.6).
+    # constellation and num_symbols are positional.
     Row("commkit.core.generation.generate", SYNTHESIS, data=2),
     # --- equalization -------------------------------------------------------
     Row(
@@ -684,15 +677,6 @@ def _rows(kinds: set[str], *, predicate: Callable[[Row], bool] | None = None) ->
     ]
 
 
-def _expect(request: pytest.FixtureRequest, row: Row, check: str, device: str) -> None:
-    """Mark the running check as a strict xfail when ``LEGACY`` lists it."""
-    legacy = LEGACY.get(row.target, frozenset())
-    if check in legacy or f"{check}@{device}" in legacy:
-        request.applymarker(
-            pytest.mark.xfail(strict=True, reason=f"2.0 rule not yet met: {check}")
-        )
-
-
 # -----------------------------------------------------------------------------
 # Registry completeness
 # -----------------------------------------------------------------------------
@@ -746,14 +730,6 @@ def test_rows_are_unique():
     assert len(ROW_BY_TARGET) == len(ROWS)
 
 
-def test_legacy_entries_are_valid():
-    checks = {SIG, ARR, SGN, MUT, FOR, FCT, TRJ, RNK, MET, EQR}
-    for target, entries in LEGACY.items():
-        assert target in ROW_BY_TARGET, f"LEGACY entry for unregistered {target}"
-        for e in entries:
-            assert e.partition("@")[0] in checks, f"{target}: unknown check {e!r}"
-
-
 @pytest.mark.parametrize(
     "row", [pytest.param(r, id=str(r)) for r in ROWS if r.call is not None]
 )
@@ -776,11 +752,10 @@ def test_call_builder_smoke(row: Row, xp):
     [
         pytest.param(r, id=str(r))
         for r in ROWS
-        if r.kind not in (VALUE, REMOVE) and inspect.isfunction(r.obj)
+        if r.kind != VALUE and inspect.isfunction(r.obj)
     ],
 )
-def test_signature_keyword_only(row: Row, request):
-    _expect(request, row, SIG, "any")
+def test_signature_keyword_only(row: Row):
     params = [
         p
         for p in inspect.signature(row.obj).parameters.values()
@@ -825,8 +800,7 @@ def _module(a: Any) -> str:
 
 
 @pytest.mark.parametrize("row", _rows({TRANSFORM, RATE_CHANGE}))
-def test_array_roundtrip(row: Row, xp, backend_device, request):
-    _expect(request, row, ARR, backend_device)
+def test_array_roundtrip(row: Row, xp):
     c = Inputs(xp)
     for ndim in row.dims:
         out = _call(row, c, c.primary(row, ndim))
@@ -838,9 +812,8 @@ def test_array_roundtrip(row: Row, xp, backend_device, request):
     "row",
     _rows({TRANSFORM, RATE_CHANGE, TRAJECTORY}, predicate=lambda r: r.signal_aware),
 )
-def test_signal_roundtrip(row: Row, xp, backend_device, request):
+def test_signal_roundtrip(row: Row, xp):
     """Transforms return a new Signal; estimates return their documented type."""
-    _expect(request, row, SGN, backend_device)
     c = Inputs(xp)
     sig = c.primary_signal(row, row.dims[0])
     before = to_device(sig.samples, "cpu").copy()
@@ -855,8 +828,7 @@ def test_signal_roundtrip(row: Row, xp, backend_device, request):
 
 
 @pytest.mark.parametrize("row", _rows(BEHAVIORAL))
-def test_no_mutation(row: Row, xp, backend_device, request):
-    _expect(request, row, MUT, backend_device)
+def test_no_mutation(row: Row, xp):
     c = Inputs(xp)
     snapshot = {
         k: to_device(v, "cpu").copy() for k, v in vars(c).items() if hasattr(v, "shape")
@@ -868,8 +840,7 @@ def test_no_mutation(row: Row, xp, backend_device, request):
 
 
 @pytest.mark.parametrize("row", _rows(BEHAVIORAL))
-def test_foreign_array_rejected(row: Row, xp, backend_device, request):
-    _expect(request, row, FOR, backend_device)
+def test_foreign_array_rejected(row: Row, xp):
     c = Inputs(xp)
     args, kwargs = row.call(c, c.primary(row, row.dims[0]))
     args = (_ForeignArray(args[0]), *args[1:])
@@ -881,8 +852,7 @@ def test_foreign_array_rejected(row: Row, xp, backend_device, request):
     "row",
     _rows(BEHAVIORAL, predicate=lambda r: r.fact is not None and r.signal_aware),
 )
-def test_fact_conflict_raises(row: Row, xp, backend_device, request):
-    _expect(request, row, FCT, backend_device)
+def test_fact_conflict_raises(row: Row, xp):
     c = Inputs(xp)
     args, kwargs = row.call(c, c.primary_signal(row, row.dims[0]))
     name, wrong = row.fact
@@ -892,8 +862,7 @@ def test_fact_conflict_raises(row: Row, xp, backend_device, request):
 
 
 @pytest.mark.parametrize("row", _rows({TRAJECTORY}))
-def test_trajectory_shape_and_device(row: Row, xp, backend_device, request):
-    _expect(request, row, TRJ, backend_device)
+def test_trajectory_shape_and_device(row: Row, xp):
     c = Inputs(xp)
     for ndim in row.dims:
         x = c.primary(row, ndim)
@@ -904,8 +873,7 @@ def test_trajectory_shape_and_device(row: Row, xp, backend_device, request):
 
 
 @pytest.mark.parametrize("row", _rows({ESTIMATE}))
-def test_estimate_rank_rule(row: Row, xp, backend_device, request):
-    _expect(request, row, RNK, backend_device)
+def test_estimate_rank_rule(row: Row, xp):
     c = Inputs(xp)
     for ndim in row.dims:
         out = _call(row, c, c.primary(row, ndim))
@@ -915,8 +883,7 @@ def test_estimate_rank_rule(row: Row, xp, backend_device, request):
 
 
 @pytest.mark.parametrize("row", _rows({METRIC}))
-def test_metric_host_values(row: Row, xp, backend_device, request):
-    _expect(request, row, MET, backend_device)
+def test_metric_host_values(row: Row, xp):
     c = Inputs(xp)
     for ndim in row.dims:
         out = _call(row, c, c.primary(row, ndim))
@@ -928,8 +895,7 @@ def test_metric_host_values(row: Row, xp, backend_device, request):
 
 
 @pytest.mark.parametrize("row", _rows({EQUALIZER}))
-def test_equalizer_result(row: Row, xp, backend_device, request):
-    _expect(request, row, EQR, backend_device)
+def test_equalizer_result(row: Row, xp):
     c = Inputs(xp)
     res = _call(row, c, c.wave1)
     assert isinstance(res, EqualizerResult)
@@ -937,10 +903,3 @@ def test_equalizer_result(row: Row, xp, backend_device, request):
     res_sig = _call(row, c, c.primary_signal(row, 1))
     assert _module(res_sig.y_hat) == xp.__name__, f"y_hat is {type(res_sig.y_hat)}"
     assert isinstance(getattr(res_sig, "signal", None), Signal)
-
-
-# -----------------------------------------------------------------------------
-# Migration checklist: 2.0 rules not met yet (strict xfail)
-# -----------------------------------------------------------------------------
-
-LEGACY: dict[str, frozenset[str]] = {}

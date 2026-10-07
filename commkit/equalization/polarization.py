@@ -456,7 +456,7 @@ def demultiplex_polarization_tones_static(
                 f"(±{nyq:.3g}) Hz."
             )
 
-    # The KxK inverse is precision-sensitive (CLAUDE.md) and stays in
+    # The KxK inverse is precision-sensitive and stays in
     # complex128, but every O(N) pass runs in the signal's working precision:
     # the tone phasors are accumulated block-wise with complex128 partials
     # (_tone_phasor_matrix), and the unmix is a well-conditioned per-sample

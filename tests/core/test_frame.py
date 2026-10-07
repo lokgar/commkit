@@ -369,7 +369,7 @@ class TestSingleCarrierFrameDivisibility:
 
 
 class TestFrameConstellations:
-    """payload_constellation / pilot_constellation (plan 2.7)."""
+    """payload_constellation / pilot_constellation."""
 
     def test_payload_and_pilots_use_their_constellations(self) -> None:
         frame = SingleCarrierFrame(

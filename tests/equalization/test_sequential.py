@@ -1119,7 +1119,7 @@ class TestSignalInputSequentialEqualizers:
 
 class TestKnownSymbolScale:
     """Training symbols and pilots are taken as given, on the scale of the
-    unit-power constellation (plan 3.7g)."""
+    unit-power constellation."""
 
     @staticmethod
     def _corner_symbols(n: int = 3000) -> np.ndarray:

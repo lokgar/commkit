@@ -17,8 +17,7 @@ from .logger import logger
 
 # -----------------------------------------------------------------------------
 # SMOOTHERS (array-only - operate on derived/plot-only quantities, never on
-# raw Signal samples, so none of these are Signal-aware; see CLAUDE.md,
-# "Signal-Awareness")
+# raw Signal samples, so none of these are Signal-aware)
 # -----------------------------------------------------------------------------
 # moving_average: Boxcar moving average (edge-aware "same", or shrinking "valid")
 # savgol_smooth:  Savitzky-Golay polynomial local-regression smoother
