@@ -24,6 +24,7 @@ from .theme import _grid_figsize, _set_eng_formatter
 
 def plot_filter_response(
     system: Any,
+    *,
     sps: float = 1.0,
     sampling_rate: float | None = None,
     ax: Any | None = None,

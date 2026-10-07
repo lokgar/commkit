@@ -120,7 +120,8 @@ def cma(
            e[n] = (|y[n]|^2 - R^2) * y[n]
 
        The Godard radius ``R^2 = E[|s|^4] / E[|s|^2]`` is computed once
-       from the unit-power constellation (1 without a constellation).  The error is purely radial: any constant phase
+       from the unit-power constellation (1 without a constellation).
+       The error is purely radial: any constant phase
        rotation of ``y`` leaves ``|y|^2`` and therefore ``e`` unchanged
        up to the same rotation, so CMA cannot resolve the phase ambiguity
        it introduces.

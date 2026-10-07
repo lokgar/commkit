@@ -862,7 +862,7 @@ class TestSignalDeviceAndPlotting:
             num_channels=2,
             rng=0,
         )
-        result = plotting.plot_constellation(sig, overlay_source=True, show=False)
+        result = plotting.plot_constellation(sig, overlay_reference=True, show=False)
         assert result is not None
 
     def test_plot_constellation_show(self, xp):
@@ -882,5 +882,5 @@ class TestSignalDeviceAndPlotting:
         assert sig.num_streams == 1
         assert sig.source_symbols is not None
 
-        result = plotting.plot_constellation(sig, overlay_source=True, show=False)
+        result = plotting.plot_constellation(sig, overlay_reference=True, show=False)
         assert result is not None

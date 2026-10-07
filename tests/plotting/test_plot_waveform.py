@@ -38,7 +38,7 @@ class TestPlotTimeDomain:
         """Verify symbol limit warnings in time_domain."""
         sig = xp.ones(100)
         with patch("matplotlib.pyplot.show"):
-            plot_time_domain(sig, num_symbols=200, sps=1.0)
+            plot_time_domain(sig, sampling_rate=1.0, num_symbols=200, sps=1.0)
         assert "Limit exceeds number of symbols" in caplog.text
 
     def test_time_domain_auto_scale(self, xp: Any) -> None:

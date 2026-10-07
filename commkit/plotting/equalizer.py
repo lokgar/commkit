@@ -12,6 +12,7 @@ from .theme import _grid_figsize, _set_eng_formatter
 
 def plot_equalizer_result(
     result,
+    *,
     smoothing: int = 50,
     ax=None,
     show: bool = False,
@@ -160,6 +161,7 @@ def plot_equalizer_result(
 
 def plot_zf_equalizer_response(
     channel_estimate,
+    *,
     noise_variance: float = 0.0,
     nfft: int = 1024,
     sampling_rate: float = 1.0,

@@ -1131,6 +1131,29 @@ The equalization pass (3.7) gets more commits:
   `method`, `None` otherwise). `plotting.analysis` and the examples read
   the fields.
 
+**Pass 3.10 commits:**
+
+- [x] **3.10a `refactor(plotting)!: 2.0 signatures`.** Keyword-only
+  parameters after the data. `sampling_rate`, `sps` and `center_frequency`
+  are facts (taken from a Signal, a conflict raises, arrays must pass
+  `sampling_rate`; 1.x defaulted to 1 Hz). `plot_ideal_constellation(
+  constellation)` and `plot_constellation(..., constellation=)` take a
+  `Constellation` (labels are its `bit_labels`; 1.x printed the point
+  index in binary); `overlay_source` becomes `overlay_reference`.
+  `plot_eye_diagram(type=)` becomes `kind=`, and `plot_spectrogram` loses
+  `axis` (time is the last axis). `plot_psd`, `plot_spectrogram`,
+  `plot_eye_diagram` and `plot_time_domain` no longer re-enter themselves
+  per channel: a private renderer does.
+- [ ] **3.10b `refactor(plotting)!: sync plots take the estimates`.** The
+  timing, frequency-offset and carrier-phase diagnostics take the
+  `TimingEstimate`, `FrequencyOffsetEstimate` or `CarrierPhaseEstimate`
+  whose fields they draw, instead of loose arrays.
+- [ ] **3.10c `refactor(plotting): no test-only exports`.** The private
+  re-exports leave `plotting/__init__`; tests import the owning module.
+- [ ] **3.10d `test: numerical modules never import matplotlib`.** A fresh
+  subprocess imports every non-plotting module and checks
+  `sys.modules`.
+
 **Equalizer safety rules (3.7):**
 
 - Keep the dtype rules: complex128 accumulation in LMS/CMA, and float64 for all

@@ -8,7 +8,8 @@ import matplotlib.pyplot as plt
 import numpy as np
 import pytest
 
-from commkit.core import Signal
+from commkit.core import Reference, Signal
+from commkit.mapping import Constellation
 from commkit.plotting import plot_constellation, plot_ideal_constellation
 
 
@@ -26,7 +27,11 @@ class TestPlotConstellation:
         """Verify constellation plot with theoretical overlay enabled."""
         samples = xp.random.randn(1000) + 1j * xp.random.randn(1000)
         fig, ax = plot_constellation(
-            samples, bins=50, overlay_ideal=True, modulation="qam", order=16, show=False
+            samples,
+            bins=50,
+            overlay_ideal=True,
+            constellation=Constellation.qam(16),
+            show=False,
         )
         assert fig is not None
 
@@ -39,33 +44,45 @@ class TestPlotConstellation:
 
     def test_ideal_constellation_basic(self, xp: Any) -> None:
         """Verify ideal constellation plotting."""
-        fig, ax = plot_ideal_constellation("qam", 16, show=False)
+        fig, ax = plot_ideal_constellation(Constellation.qam(16), show=False)
         assert fig is not None
 
-        ret = plot_ideal_constellation("invalid", 4, show=False)
-        assert ret is None
+        with pytest.raises(TypeError, match="Constellation"):
+            plot_ideal_constellation("qam", show=False)
 
-    def test_constellation_histogram_overlay_error(self, xp: Any) -> None:
-        """Verify warning when overlaying ideal on histogram constellation with bad mod."""
-        samples = xp.random.randn(100) + 1j * xp.random.randn(100)
-        plot_constellation(
-            samples,
-            bins=10,
-            overlay_ideal=True,
-            modulation="invalid",
-            order=4,
-            show=False,
-        )
+    def test_ideal_constellation_labels_are_the_bit_labels(self) -> None:
+        """Each point is annotated with its own bit label."""
+        c = Constellation.qam(16)
+        _, ax = plot_ideal_constellation(c)
+        labels = {t.get_text(): t.xy for t in ax.texts}
+        for point, bits in zip(c.points, c.bit_labels, strict=True):
+            xy = labels["".join(map(str, bits))]
+            assert xy == pytest.approx((point.real, point.imag))
 
-    def test_constellation_histogram_overlay_warning(
-        self, caplog: Any, xp: Any
-    ) -> None:
-        """Verify warning when overlaying ideal on histogram."""
-        caplog.set_level(logging.WARNING)
-        plot_constellation(
-            xp.ones(10) + 1j, bins=10, overlay_ideal=True, modulation=None
+    def test_ideal_constellation_shaped(self) -> None:
+        """A shaped constellation is coloured by its pmf, without labels."""
+        _, ax = plot_ideal_constellation(Constellation.qam(16).shaped(nu=0.1))
+        assert not ax.texts
+        assert len(ax.collections[0].get_array()) == 16
+
+    def test_constellation_overlay_without_constellation_raises(self, xp: Any) -> None:
+        """overlay_ideal needs a constellation (argument or Signal)."""
+        with pytest.raises(ValueError, match="needs a constellation"):
+            plot_constellation(xp.ones(10) + 1j, bins=10, overlay_ideal=True)
+
+    def test_constellation_overlay_reference(self, xp: Any) -> None:
+        """overlay_reference scatters the Signal's reference symbols."""
+        ref = xp.asarray(Constellation.qam(4).points)
+        sig = Signal(
+            samples=ref,
+            sampling_rate=1e6,
+            symbol_rate=1e6,
+            reference=Reference(symbols=ref),
         )
-        assert "Modulation and order must be provided" in caplog.text
+        _, ax = plot_constellation(sig, overlay_reference=True)
+        assert ax.collections[0].get_offsets().shape == (4, 2)
+        with pytest.raises(ValueError, match="reference"):
+            plot_constellation(ref, overlay_reference=True)
 
     def test_constellation_real_samples(self, xp: Any) -> None:
         """Constellation with real (non-complex) samples warns and converts to complex."""
@@ -109,13 +126,13 @@ class TestPlotConstellation:
     def test_ideal_constellation_custom_ax(self, xp: Any) -> None:
         """plot_ideal_constellation() with provided ax uses that axis's figure."""
         fig0, ax0 = plt.subplots()
-        result = plot_ideal_constellation(modulation="psk", order=4, ax=ax0, show=False)
+        result = plot_ideal_constellation(Constellation.psk(4), ax=ax0, show=False)
         assert result is not None
 
     def test_ideal_constellation_show(self, xp: Any) -> None:
         """plot_ideal_constellation() with show=True calls plt.show() and returns None."""
         with patch("matplotlib.pyplot.show"):
-            result = plot_ideal_constellation(modulation="qam", order=16, show=True)
+            result = plot_ideal_constellation(Constellation.qam(16), show=True)
         assert result is None
 
     def test_constellation_vmin_vmax(self, xp: Any) -> None:
@@ -127,17 +144,20 @@ class TestPlotConstellation:
         assert result is not None
 
     @pytest.mark.parametrize("channels", [1, 2])
-    def test_constellation_signal_optional_metadata_fallback(
+    def test_constellation_overlay_uses_signal_constellation(
         self, xp: Any, channels: int
     ) -> None:
-        """Signal container constellation plotting falls back cleanly on optional metadata."""
+        """overlay_ideal uses the Signal's constellation by default."""
         samples = xp.asarray([0.0, 1.0] * 50, dtype=xp.complex64)
         if channels == 2:
             samples = xp.stack([samples, samples])
-        sig = Signal(samples=samples, sampling_rate=1e6, symbol_rate=1e6)
-        fig, axes = plot_constellation(
-            sig, modulation="PAM", order=2, unipolar=True, overlay_ideal=True
+        sig = Signal(
+            samples=samples,
+            sampling_rate=1e6,
+            symbol_rate=1e6,
+            constellation=Constellation.pam(2, unipolar=True),
         )
+        fig, axes = plot_constellation(sig, overlay_ideal=True)
         for ax in np.asarray(axes).flat:
             assert len(ax.collections) == 1
             points = ax.collections[0].get_offsets()

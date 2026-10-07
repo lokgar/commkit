@@ -19,7 +19,8 @@ from .theme import (
 
 def plot_time_domain(
     samples: Any,
-    sampling_rate: float = 1.0,
+    *,
+    sampling_rate: float | None = None,
     start_symbol: int = 0,
     num_symbols: int | None = None,
     sps: float | None = None,
@@ -38,14 +39,15 @@ def plot_time_domain(
     ----------
     samples : array_like or Signal
         Input signal samples. Shape: (..., N_samples).
-    sampling_rate : float, default 1.0
-        Sampling rate in Hz.
+    sampling_rate : float, optional
+        Sampling rate in Hz (a fact): taken from a Signal, required for arrays.
     start_symbol : int, default 0
         The starting symbol to plot.
     num_symbols : int, optional
         Limit plot to a specific number of symbol periods. Requires `sps`.
     sps : float, optional
-        Samples per symbol (required if `num_symbols` is used).
+        Samples per symbol (a fact): taken from a Signal; for arrays, needed
+        to count in symbols, otherwise ``start_symbol`` counts samples.
     ax : matplotlib.axes.Axes, optional
         Existing axis to plot on.
     title : str, optional
@@ -63,11 +65,36 @@ def plot_time_domain(
         The axis or array of axes used for the plot.
     """
     signal_adapter = adapt_signal(samples, function_name="plot_time_domain()")
-    samples = signal_adapter.array
+    x = signal_adapter.array
+    sampling_rate = signal_adapter.resolve_fact("sampling_rate", sampling_rate)
     if signal_adapter.signal is not None:
-        sampling_rate = signal_adapter.resolve_required("sampling_rate")
-        sps = signal_adapter.resolve_required("sps", sps)
+        sps = signal_adapter.resolve_fact("sps", sps)
+    return _plot_time_domain(
+        x,
+        sampling_rate=sampling_rate,
+        start_symbol=start_symbol,
+        num_symbols=num_symbols,
+        sps=sps,
+        ax=ax,
+        title=title,
+        show=show,
+        **kwargs,
+    )
 
+
+def _plot_time_domain(
+    samples: Any,
+    *,
+    sampling_rate: Any,
+    start_symbol: Any,
+    num_symbols: Any,
+    sps: Any,
+    ax: Any,
+    title: Any,
+    show: Any,
+    **kwargs: Any,
+) -> tuple[Any, Any] | None:
+    """Render array data for :func:`plot_time_domain` (the public boundary resolves the Signal)."""
     logger.debug("Generating time-domain plot.")
 
     samples, xp, _ = dispatch(samples)
@@ -103,7 +130,7 @@ def plot_time_domain(
 
             ch_title = f"{title} (Ch {i})" if title else f"Channel {i}"
 
-            plot_time_domain(
+            _plot_time_domain(
                 channel_samples,
                 sampling_rate=sampling_rate,
                 start_symbol=start_symbol,

@@ -7,6 +7,7 @@ from unittest.mock import patch
 import matplotlib.pyplot as plt
 import matplotlib.ticker as mticker
 import numpy as np
+import pytest
 
 from commkit import generate, plotting, spectral
 from commkit.filtering import RRC
@@ -68,14 +69,14 @@ class TestPlotSpectralAndPSD:
         sig = xp.ones((2, 256))
         fig, ax = plt.subplots()
         with patch("matplotlib.pyplot.show"):
-            plot_psd(sig, ax=ax)
+            plot_psd(sig, sampling_rate=1.0, ax=ax)
         assert "Multiple channels detected but single axis provided" in caplog.text
 
     def test_psd_wavelength_warning(self, caplog: Any, xp: Any) -> None:
         """Verify wavelength warning."""
         sig = xp.ones(256)
         with patch("matplotlib.pyplot.show"):
-            plot_psd(sig, x_axis="wavelength", domain="RF")
+            plot_psd(sig, sampling_rate=1.0, x_axis="wavelength", domain="RF")
         assert (
             "Wavelength plotting is typically used for optical signals" in caplog.text
         )
@@ -203,3 +204,24 @@ class TestPlotSpectrogram:
         fig, ax = plotting.plot_spectrogram(sig, nperseg=64, show=False)
         assert fig is not None
         assert ax is not None
+
+
+class TestPlotFacts:
+    """sampling_rate and sps are facts: from a Signal, required for arrays."""
+
+    def test_conflicting_sampling_rate_raises(self, xp: Any) -> None:
+        from commkit.core import Signal
+
+        sig = Signal(samples=xp.ones(256), sampling_rate=2.0, symbol_rate=1.0)
+        with pytest.raises(ValueError, match="conflicts"):
+            plot_psd(sig, sampling_rate=4.0)
+
+    def test_array_without_sampling_rate_raises(self, xp: Any) -> None:
+        with pytest.raises(ValueError, match="requires sampling_rate"):
+            plot_psd(xp.ones(256))
+
+    def test_eye_array_without_sps_raises(self, xp: Any) -> None:
+        from commkit.plotting import plot_eye_diagram
+
+        with pytest.raises(ValueError, match="requires sps"):
+            plot_eye_diagram(xp.ones(256))

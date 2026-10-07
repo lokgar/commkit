@@ -942,14 +942,6 @@ def test_equalizer_result(row: Row, xp, backend_device, request):
 # -----------------------------------------------------------------------------
 
 LEGACY: dict[str, frozenset[str]] = {
-    "commkit.plotting.constellation.plot_constellation": L(SIG),
-    "commkit.plotting.constellation.plot_ideal_constellation": L(SIG),
-    "commkit.plotting.equalizer.plot_equalizer_result": L(SIG),
-    "commkit.plotting.equalizer.plot_zf_equalizer_response": L(SIG),
-    "commkit.plotting.eye.plot_eye_diagram": L(SIG),
-    "commkit.plotting.filter_response.plot_filter_response": L(SIG),
-    "commkit.plotting.spectral.plot_psd": L(SIG),
-    "commkit.plotting.spectral.plot_spectrogram": L(SIG),
     "commkit.plotting.sync.plot_carrier_phase_trajectory": L(SIG),
     "commkit.plotting.sync.plot_frequency_offset_blockwise_result": L(SIG),
     "commkit.plotting.sync.plot_frequency_offset_spectrum": L(SIG),
@@ -958,5 +950,4 @@ LEGACY: dict[str, frozenset[str]] = {
     "commkit.plotting.sync.plot_pilot_tone_phase_estimate": L(SIG),
     "commkit.plotting.sync.plot_pilot_tones_phase_estimate": L(SIG),
     "commkit.plotting.sync.plot_timing_correlation": L(SIG),
-    "commkit.plotting.waveform.plot_time_domain": L(SIG),
 }

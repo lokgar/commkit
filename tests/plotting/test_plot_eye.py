@@ -19,7 +19,7 @@ class TestPlotEyeDiagram:
         """Verify eye diagram generation for real-valued signals."""
         samples = xp.random.randn(1000)
         sps = 4
-        fig, ax = plot_eye_diagram(samples, sps=sps, type=type, show=False)
+        fig, ax = plot_eye_diagram(samples, sps=sps, kind=type, show=False)
         assert fig is not None
         assert ax is not None
 
@@ -69,19 +69,19 @@ class TestPlotEyeDiagram:
                 sps=10,
                 num_symbols=2,
                 ax=MagicMock(),
-                type="line",
+                kind="line",
                 title=None,
             )
 
     def test_eye_diagram_invalid_type(self, xp: Any) -> None:
         """Verify error for unknown eye type."""
-        with pytest.raises(ValueError, match="Unknown type"):
+        with pytest.raises(ValueError, match="Unknown kind"):
             _plot_eye_traces(
                 xp.ones(100),
                 sps=4,
                 num_symbols=2,
                 ax=MagicMock(),
-                type="magic",
+                kind="magic",
                 title=None,
             )
 
@@ -126,7 +126,7 @@ class TestPlotEyeDiagram:
         """plot_eye_diagram() 'line' type with num_traces>5000 triggers downsampling skip path."""
         samples = xp.random.randn(10200).astype(xp.float32)
         fig, ax = plot_eye_diagram(
-            samples, sps=2, type="line", num_symbols=2, show=False
+            samples, sps=2, kind="line", num_symbols=2, show=False
         )
         assert fig is not None
 
@@ -134,7 +134,7 @@ class TestPlotEyeDiagram:
         """plot_eye_diagram() 'hist' type with num_traces>20000 triggers downsampling skip path."""
         samples = xp.random.randn(40100).astype(xp.float32)
         fig, ax = plot_eye_diagram(
-            samples, sps=2, type="hist", num_symbols=2, show=False
+            samples, sps=2, kind="hist", num_symbols=2, show=False
         )
         assert fig is not None
 
@@ -145,7 +145,7 @@ class TestPlotEyeDiagram:
         if channels == 2:
             samples = xp.stack([samples, samples])
         sig = Signal(samples=samples, sampling_rate=4e6, symbol_rate=1e6)
-        fig, axes = plot_eye_diagram(sig, num_symbols=3, type="line", show=False)
+        fig, axes = plot_eye_diagram(sig, num_symbols=3, kind="line", show=False)
         for ax in np.asarray(axes).flat:
             assert ax.lines
             assert len(ax.lines[0].get_xdata()) == 3 * 4 + 1
