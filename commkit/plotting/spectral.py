@@ -579,9 +579,7 @@ def _plot_spectrogram(
         imshow_kwargs.update(kwargs)
         mesh = ax.imshow(image, **imshow_kwargs)
     else:
-        mesh = ax.pcolormesh(
-            f_plot, t_plot, image, cmap=cmap, shading="auto", **kwargs
-        )
+        mesh = ax.pcolormesh(f_plot, t_plot, image, cmap=cmap, shading="auto", **kwargs)
     ax.set_xlabel("Frequency [Hz]")
     ax.set_ylabel("Time [s]")
     _set_eng_formatter(ax, "x", "Hz")

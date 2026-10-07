@@ -15,7 +15,10 @@ cross-process reuse comes from CuPy's on-disk NVRTC cache.
 from importlib import resources
 from typing import Any
 
-DEFAULT_OPTIONS: tuple[str, ...] = ("-std=c++17", "--use_fast_math")
+# No --use_fast_math by default: it changed neither the output nor the speed
+# of bps_min_d2 or cs_block (measured), and a kernel that gains from it
+# opts in through ``options`` after an accuracy check.
+DEFAULT_OPTIONS: tuple[str, ...] = ("-std=c++17",)
 
 _SOURCE_CACHE: dict[str, str] = {}
 # (source_name, options, name_expression) -> (RawModule, RawKernel).

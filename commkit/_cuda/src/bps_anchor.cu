@@ -30,7 +30,6 @@
 //                                 angles between the two phases)
 //
 // Launch contract: grid = (1, 1, 1), block = (256, 1, 1), n >= 1.
-// Compiled without --use_fast_math: the phase feeds an unwrap.
 
 #include <cupy/complex.cuh>
 

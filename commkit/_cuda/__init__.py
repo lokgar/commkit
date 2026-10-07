@@ -317,14 +317,13 @@ def _bps_anchor_factory() -> Callable:
     trip of the NumPy reference (``_BlockBps._anchor``).  ``offset4`` and ``prev4``
     are updated in place; the anchored phase and the new trailing products
     (complex64) are returned.  The window sums are float32 and the unwrap
-    float64.  Compiled without ``--use_fast_math``: the phase feeds an
-    unwrap.
+    float64.
     """
     import cupy as cp
 
     from . import compiler
 
-    kern = compiler.get_raw_kernel("bps_anchor", "bps_anchor", options=("-std=c++17",))
+    kern = compiler.get_raw_kernel("bps_anchor", "bps_anchor")
 
     def launch(
         y: Any,

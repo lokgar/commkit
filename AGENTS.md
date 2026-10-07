@@ -290,9 +290,8 @@ Dependencies point downward only:
   `--device=all`.
 - Wrappers check dtype, contiguity, shape and size before launch.
 - `float32` with explicit literals.
-- `--use_fast_math` only per kernel, after an accuracy check. Known exception:
-  the compiler default (`commkit/_cuda/compiler.py`) still passes it to every
-  kernel; a new kernel passes its own `options`, as `bps_anchor` does.
+- `--use_fast_math` only per kernel (through `options`), after an accuracy
+  check; the compiler default does not pass it.
 - Short elementwise chains use `ElementwiseKernel` or `cupy.fuse`.
 - Sequential recursions over a whole record are never ported to the GPU; one
   record has no parallel work per step. A short per-block scan may be, as one
