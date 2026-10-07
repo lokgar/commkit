@@ -230,7 +230,7 @@ ROWS: list[Row] = [
     Row("commkit.analysis.linewidth.IncrementSubtract", VALUE),
     Row("commkit.analysis.linewidth.LinewidthEstimate", VALUE),
     Row("commkit.analysis.allan.allan_deviation", MULTI),
-    Row("commkit.analysis.drift.frequency_drift_metrics", MULTI),
+    Row("commkit.analysis.drift.frequency_drift", MULTI),
     Row("commkit.analysis.drift.separate_drift_phase_noise", MULTI),
     Row("commkit.analysis.fm_noise.dsh_fm_noise_psd", MULTI),
     Row("commkit.analysis.fm_noise.fm_noise_psd", MULTI),

@@ -594,7 +594,7 @@ def _beta_separation(
     phi: ArrayType, method: BetaSeparation, fs: float
 ) -> LinewidthEstimate:
     n_phi = phi.shape[-1]
-    f, S_f = fm_noise_psd(phi, symbol_rate=fs, nperseg=method.nperseg)
+    f, S_f = fm_noise_psd(phi, sampling_rate=fs, nperseg=method.nperseg)
     _, xp, _ = dispatch(f)
 
     # Transfer the plot-sized spectrum once, up front: every fence, mask and

@@ -1179,7 +1179,7 @@ The equalization pass (3.7) gets more commits:
   host floats or `(C,)` arrays, like the metrics. `fm_noise_psd` and
   `dsh_fm_noise_psd` move to `analysis/fm_noise.py`, so `linewidth.py`
   holds every estimator and imports the DSH front end without a cycle.
-- [ ] **3.11b `refactor(analysis)!: sampling_rate, one drift filter`.** The
+- [x] **3.11b `refactor(analysis)!: sampling_rate, one drift filter`.** The
   rate of a phase or frequency record is its `sampling_rate` (1.x called
   it `symbol_rate`, also for DSH captures). `frequency_drift_metrics`
   becomes `frequency_drift`. `separate_drift_phase_noise` loses `method=`

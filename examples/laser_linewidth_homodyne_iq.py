@@ -325,7 +325,7 @@ print(f"uncalibrated fm_psd     : {res_fm_bad.value / 1e3:6.1f} kHz  (robust)")
 
 # %%
 df_disc = dphi / (2.0 * np.pi * TAU_D)  # discriminator output [Hz]
-allan = analysis.allan_deviation(df_disc, symbol_rate=FS, num_taus=40)
+allan = analysis.allan_deviation(df_disc, sampling_rate=FS, num_taus=40)
 
 fig, ax = plotting.plot_allan_deviation(allan.tau_s, allan.adev)
 tau_valid = allan.tau_s[allan.tau_s > 5 * TAU_D]

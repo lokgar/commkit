@@ -20,7 +20,7 @@ package is deliberate and limited to three cases:
   variance matrix after a single device->host transfer - cheaper than a device
   least-squares launch;
 * **report packaging**: summaries (``estimate_linewidth``,
-  ``allan_deviation``, ``frequency_drift_metrics`` scalars) return Python
+  ``allan_deviation``, ``frequency_drift`` scalars) return Python
   floats and *plot-sized* NumPy arrays (Welch/Allan grids, ≤ ``nperseg``
   bins) after one transfer, because their consumers are prints and plots.
 
@@ -34,13 +34,13 @@ Linewidth follows the verb rules of the rest of the library: one
 with more than one value are frozen dataclasses (``AllanDeviation``,
 ``FrequencyDrift``, ...).  Sample-rate arrays returned to the caller
 (``carrier_phase_trajectory``, ``separate_drift_phase_noise``,
-``frequency_drift_metrics(...).df``,
+``frequency_drift(...).df``,
 ``dsh_phase``, ``fm_noise_psd``, ``dsh_fm_noise_psd``) always stay on the
 input backend - chain them without paying transfers.
 """
 
 from .allan import AllanDeviation, allan_deviation
-from .drift import FrequencyDrift, frequency_drift_metrics, separate_drift_phase_noise
+from .drift import FrequencyDrift, frequency_drift, separate_drift_phase_noise
 from .fm_noise import DshFmNoisePsd, dsh_fm_noise_psd, fm_noise_psd
 from .interferometry import dsh_beat, dsh_phase
 from .linewidth import (
@@ -73,6 +73,6 @@ __all__ = [
     "dsh_phase",
     "estimate_linewidth",
     "fm_noise_psd",
-    "frequency_drift_metrics",
+    "frequency_drift",
     "separate_drift_phase_noise",
 ]

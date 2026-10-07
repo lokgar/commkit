@@ -29,7 +29,7 @@ def plot_frequency_drift(
     Plots the instantaneous residual frequency offset vs time.
 
     ``df`` is the per-symbol frequency wander from
-    ``analysis.frequency_drift_metrics`` - the slope of the smoothed (drift)
+    ``analysis.frequency_drift`` - the slope of the smoothed (drift)
     phase.  This is the spin the carrier-phase recovery must track.
 
     Parameters
@@ -531,7 +531,7 @@ def plot_carrier_phase_characterization(
     report : dict
         ``{'phi', 'drift', 'drift_metrics', 'linewidth_beta', 'allan'}`` -
         the outputs of ``carrier_phase_trajectory``,
-        ``separate_drift_phase_noise``, ``frequency_drift_metrics``,
+        ``separate_drift_phase_noise``, ``frequency_drift``,
         ``estimate_linewidth(phi, BetaSeparation(...))``, and
         ``allan_deviation``.
     symbol_rate : float

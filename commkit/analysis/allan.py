@@ -30,7 +30,7 @@ class AllanDeviation:
 def allan_deviation(
     df: ArrayType,
     *,
-    symbol_rate: float,
+    sampling_rate: float,
     taus: np.ndarray | None = None,
     num_taus: int = 30,
 ) -> AllanDeviation:
@@ -44,10 +44,10 @@ def allan_deviation(
     Parameters
     ----------
     df : array_like
-        Instantaneous frequency samples in Hz (e.g. ``frequency_drift_metrics``
-        ``df``), ``(N,)`` or ``(C, N)``, sampled at ``symbol_rate``.
-    symbol_rate : float
-        Sample rate of ``df`` in Hz (``τ_0 = 1/symbol_rate``).
+        Instantaneous frequency samples in Hz (e.g. ``frequency_drift(...).df``),
+        ``(N,)`` or ``(C, N)``.
+    sampling_rate : float
+        Sampling rate of ``df`` in Hz (``τ_0 = 1/sampling_rate``).
     taus : array_like, optional
         Explicit averaging times in seconds.  Default: ``num_taus`` values
         geometrically spaced from ``τ_0`` to ``N//4·τ_0``.
@@ -83,7 +83,7 @@ def allan_deviation(
     df_arr, xp, _ = dispatch(df)
     y2, was_1d = as_2d(df_arr, name="df")
     c, n = y2.shape
-    tau0 = 1.0 / float(symbol_rate)
+    tau0 = 1.0 / float(sampling_rate)
 
     # Cumulative phase (time error) x_i = Σ y · τ0.
     zeros_col = xp.zeros((c, 1), dtype=xp.float64)

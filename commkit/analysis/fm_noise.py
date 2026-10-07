@@ -47,7 +47,7 @@ class DshFmNoisePsd:
 def fm_noise_psd(
     phi: ArrayType,
     *,
-    symbol_rate: float,
+    sampling_rate: float,
     nperseg: int | None = None,
     detrend: str | bool = "constant",
     bias_correction: bool = True,
@@ -55,7 +55,7 @@ def fm_noise_psd(
     r"""One-sided frequency-noise PSD S_f(f) [Hz²/Hz] from the phase.
 
     Differentiates the phase to the instantaneous frequency
-    ``f_inst = diff(phi)/(2π·T_sym)`` (Hz) and estimates its one-sided PSD via
+    ``f_inst = diff(phi)/(2π·T)`` (Hz, ``T = 1/sampling_rate``) and estimates its one-sided PSD via
     Welch's method (``welch_psd``).  Distinct
     impairments occupy distinct regions of S_f(f):
 
@@ -67,8 +67,9 @@ def fm_noise_psd(
     ----------
     phi : array_like
         Unwrapped carrier phase (radians), ``(N,)`` or ``(C, N)``.
-    symbol_rate : float
-        Symbol rate in Baud (sampling rate of ``phi``).
+    sampling_rate : float
+        Sampling rate of ``phi`` in Hz (the symbol rate for a per-symbol
+        trajectory).
     nperseg : int, optional
         Welch segment length.  Defaults to ``min(N//8, 4096)`` (clipped ≥ 256).
     detrend : str or bool, default "constant"
@@ -91,13 +92,13 @@ def fm_noise_psd(
     The first difference is not an ideal differentiator: its magnitude
     response is ``|2 sin(πfT)|`` versus the ideal ``2πfT``, so the raw
     estimate is ``S_f,true(f) · sinc²(fT)`` - a -3.9 dB droop at Nyquist
-    (``R/2``).  With ``bias_correction=True`` the PSD is divided by
+    (``sampling_rate/2``).  With ``bias_correction=True`` the PSD is divided by
     ``sinc²(fT)`` so the white-FM plateau and the AWGN ``f²`` tail keep their
     analytic levels all the way to Nyquist.
 
     **Limitations.**
 
-    * Frequency resolution is ``R/nperseg``; noise processes slower than the
+    * Frequency resolution is ``sampling_rate/nperseg``; noise processes slower than the
       segment length (drift, flicker below the first bin) alias into the
       lowest bins and are *not* resolved - extend the capture, not
       ``nperseg``, to see them.
@@ -110,22 +111,22 @@ def fm_noise_psd(
     """
     p, xp, _ = dispatch(phi)
     p2, was_1d = as_2d(p, name="phi")
-    t_sym = 1.0 / float(symbol_rate)
+    dt = 1.0 / float(sampling_rate)
 
-    f_inst = xp.diff(p2.astype(xp.float64), axis=-1) / (2.0 * np.pi * t_sym)
+    f_inst = xp.diff(p2.astype(xp.float64), axis=-1) / (2.0 * np.pi * dt)
     n = f_inst.shape[-1]
     nperseg = _resolve_nperseg(n, nperseg, cap=4096)
 
     f, S_f = welch_psd(
         f_inst,
-        sampling_rate=float(symbol_rate),
+        sampling_rate=float(sampling_rate),
         nperseg=nperseg,
         detrend=detrend,
         return_onesided=True,
     )
     if bias_correction:
         # S_f,est = S_f,true · sinc²(fT); undo the diff-differentiator droop.
-        S_f = S_f / (xp.sinc(f * t_sym) ** 2)
+        S_f = S_f / (xp.sinc(f * dt) ** 2)
     S_out = restore_1d(was_1d, S_f)
 
     return f, S_out
@@ -216,7 +217,7 @@ def dsh_fm_noise_psd(
     dphi_arr, _, _ = dispatch(delta_phi)
     f, S_beat = fm_noise_psd(
         dphi_arr,
-        symbol_rate=float(sampling_rate),
+        sampling_rate=float(sampling_rate),
         nperseg=nperseg,
         bias_correction=bias_correction,
     )

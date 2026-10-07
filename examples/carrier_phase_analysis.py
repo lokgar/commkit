@@ -12,7 +12,7 @@
 # y_eq (CPR off), ref symbols
 #     | carrier_phase_trajectory      -> φ[n]        (data-aided, slip-free)
 #     | separate_drift_phase_noise    -> drift + pn  (spectral split @ cutoff)
-#     + frequency_drift_metrics       -> wander std / peak-to-peak
+#     + frequency_drift                     -> wander std / peak-to-peak
 #     + estimate_linewidth(IncrementSlope)  -> Δν from Var(Δφ_k) slope
 #     + estimate_linewidth(BetaSeparation)  -> Δν from the FM-noise PSD
 #     + allan_deviation               -> noise-type classification
@@ -164,10 +164,10 @@ plt.show()
 
 # %%
 CUTOFF = 2e6  # Hz
-drift, pn = analysis.separate_drift_phase_noise(phi, symbol_rate=R, cutoff=CUTOFF)
+drift, pn = analysis.separate_drift_phase_noise(phi, sampling_rate=R, cutoff=CUTOFF)
 edge = int(round(0.5 * R / CUTOFF))
 
-dm = analysis.frequency_drift_metrics(drift, symbol_rate=R, edge_trim=edge)
+dm = analysis.frequency_drift(drift, sampling_rate=R, edge_trim=edge)
 
 # The drift component also carries the laser's own white-FM content below the
 # cutoff - variance (Δν/π)·cutoff - which adds in quadrature to the injected
@@ -335,7 +335,7 @@ print(
 # vs flicker-PM cannot be distinguished (needs the modified Allan deviation).
 
 # %%
-allan = analysis.allan_deviation(dm.df, symbol_rate=R, num_taus=40)
+allan = analysis.allan_deviation(dm.df, sampling_rate=R, num_taus=40)
 _, ax = plotting.plot_allan_deviation(allan.tau_s, allan.adev)
 ax.axvline(0.37 / WANDER_FREQ, color="gray", ls=":")
 plt.show()

@@ -18,7 +18,7 @@ class TestAllanDeviation:
         n = 1 << 16
         rng = np.random.default_rng(31)
         df = rng.normal(0, 1e5, n)
-        out = analysis.allan_deviation(xp.asarray(df), symbol_rate=R, num_taus=20)
+        out = analysis.allan_deviation(xp.asarray(df), sampling_rate=R, num_taus=20)
         tau, adev = out.tau_s, out.adev
         good = np.isfinite(adev) & (adev > 0)
         slope = np.polyfit(np.log(tau[good]), np.log(adev[good]), 1)[0]
@@ -27,7 +27,7 @@ class TestAllanDeviation:
     def test_allan_deviation_output_fields(self, xp: Any) -> None:
         """A frozen AllanDeviation with matching tau and adev lengths."""
         df = xp.zeros(1024)
-        out = analysis.allan_deviation(df, symbol_rate=R, num_taus=10)
+        out = analysis.allan_deviation(df, sampling_rate=R, num_taus=10)
         assert isinstance(out, analysis.AllanDeviation)
         assert len(out.tau_s) == len(out.adev)
         with pytest.raises(AttributeError):

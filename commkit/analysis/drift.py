@@ -8,9 +8,8 @@ import numpy as np
 from .._array import as_2d, restore_1d, to_report_scalar
 from ..backend import ArrayType, dispatch, to_device
 from ..filtering import butterworth_sos, iir_filter
-from ..smoothing import moving_average, savgol_smooth
 
-__all__ = ["FrequencyDrift", "frequency_drift_metrics", "separate_drift_phase_noise"]
+__all__ = ["FrequencyDrift", "frequency_drift", "separate_drift_phase_noise"]
 
 
 @dataclass(frozen=True, eq=False)
@@ -35,17 +34,15 @@ class FrequencyDrift:
 def separate_drift_phase_noise(
     phi: ArrayType,
     *,
-    symbol_rate: float,
+    sampling_rate: float,
     cutoff: float,
-    method: str = "butterworth",
     order: int = 4,
 ) -> tuple[ArrayType, ArrayType]:
     r"""Split a phase trajectory into slow drift and fast phase-noise residual.
 
-    Applies a **zero-phase** low-pass (default 4th-order Butterworth in
-    second-order-sections form via ``sosfiltfilt``, numerically stable at the
-    very low normalized cutoffs typical here) at ``cutoff`` to obtain the
-    drift; the residual
+    Applies a **zero-phase** Butterworth low-pass (second-order sections via
+    ``sosfiltfilt``, numerically stable at the very low normalized cutoffs
+    typical here) at ``cutoff`` to obtain the drift; the residual
     ``pn = phi - drift`` carries the phase noise + AWGN.  Zero-phase filtering
     avoids the group-delay bias of a causal filter and the spectral leakage of
     a boxcar moving average.
@@ -60,20 +57,15 @@ def separate_drift_phase_noise(
     Parameters
     ----------
     phi : array_like
-        Unwrapped carrier phase (radians), ``(N,)`` or ``(C, N)``.  Sampled at
-        the symbol rate (one value per symbol).
-    symbol_rate : float
-        Symbol rate in Baud; the effective sampling rate of ``phi``.
+        Unwrapped carrier phase (radians), ``(N,)`` or ``(C, N)``.
+    sampling_rate : float
+        Sampling rate of ``phi`` in Hz (the symbol rate for a per-symbol
+        trajectory).
     cutoff : float
         Low-pass cutoff in Hz separating drift (below) from phase noise
-        (above).  Must satisfy ``0 < cutoff < symbol_rate / 2``.
-    method : {"butterworth", "savgol", "boxcar"}, default "butterworth"
-        Low-pass implementation.  ``"savgol"`` is a polynomial (Savitzky-Golay)
-        detrend; ``"boxcar"`` is the crude moving average (provided for
-        comparison only).
+        (above).  Must satisfy ``0 < cutoff < sampling_rate / 2``.
     order : int, default 4
-        Butterworth order, Savitzky-Golay polynomial order, or - reinterpreted
-        - ignored for the boxcar.
+        Butterworth order.
 
     Returns
     -------
@@ -90,56 +82,27 @@ def separate_drift_phase_noise(
       1/f (flicker) FM noise straddles any cutoff, so part of it lands in
       ``drift`` and part in ``pn`` no matter where the cutoff is placed.
       Quote the cutoff alongside any derived metric.
-    * ``"savgol"`` sizes its window to ≈ one cutoff period, which is only a
-      rough equivalent-noise-bandwidth match to the Butterworth response -
-      treat its cutoff as approximate.
-    * ``"boxcar"`` has -13 dB sidelobes (sinc response) that leak drift into
-      ``pn``; it is provided for comparison only.
     * ``sosfiltfilt`` extends the signal internally, but the first/last
       ``~0.5·fs/cutoff`` samples of ``drift`` remain transient-contaminated -
       trim them via ``edge_trim`` in the downstream metric functions
-      (``edge_trim ≈ 0.5·symbol_rate/cutoff``).
+      (``edge_trim ≈ 0.5·sampling_rate/cutoff``).
     """
     phi_arr, xp, _ = dispatch(phi)
-    fs = float(symbol_rate)
+    fs = float(sampling_rate)
     nyq = 0.5 * fs
     if not (0.0 < cutoff < nyq):
-        raise ValueError(
-            f"cutoff={cutoff} must lie in (0, symbol_rate/2={nyq}). "
-            "phi is sampled at the symbol rate."
-        )
+        raise ValueError(f"cutoff={cutoff} must lie in (0, sampling_rate/2={nyq}).")
 
     phi2, was_1d = as_2d(phi_arr, name="phi")
     in_dtype = phi2.dtype
 
-    if method == "butterworth":
-        # SOS form (via butterworth_sos + iir_filter) is numerically stable at
-        # the very low normalized cutoffs typical here (cutoff ≪ symbol_rate
-        # => poles bunch near z=1).
-        # Explicit float64 cast (rather than relying on iir_filter's own
-        # internal upcast) keeps drift in double precision here, so the
-        # pn = phi2 - drift residual below is computed via numpy/cupy's usual
-        # float64 promotion, not float32 - avoiding cancellation error when a
-        # caller passes float32 phi (see CLAUDE.md, dtype-precision rules).
-        sos = butterworth_sos(sampling_rate=fs, cutoff=cutoff, order=order, btype="low")
-        drift = iir_filter(phi2.astype(xp.float64), sos, zero_phase=True)
-    elif method == "savgol":
-        # Window ≈ one cutoff period (odd, > polyorder).
-        win = int(round(fs / cutoff)) | 1
-        win = max(win, order + 2 + (order % 2 == 0))
-        win = min(win, phi2.shape[-1] - (1 - phi2.shape[-1] % 2))
-        drift = savgol_smooth(
-            phi2.astype(xp.float64), window=win, polyorder=order, axis=-1
-        )
-    elif method == "boxcar":
-        # moving_average's "same" mode is edge-aware (uniform_filter1d,
-        # "nearest" edges) and avoids the zero-padding bias of
-        # convolve(mode="same"), which drags the drift estimate toward zero
-        # over the first/last window.
-        w = max(1, int(round(fs / cutoff)))
-        drift = moving_average(phi2.astype(xp.float64), window=w, mode="same", axis=-1)
-    else:
-        raise ValueError(f"Unknown method {method!r}.")
+    # SOS form (via butterworth_sos + iir_filter) is numerically stable at the
+    # very low normalized cutoffs typical here (cutoff ≪ sampling_rate => poles
+    # bunch near z=1).  The explicit float64 cast keeps the drift, and so the
+    # residual pn = phi2 - drift, in double precision for float32 phi
+    # (cancellation error otherwise).
+    sos = butterworth_sos(sampling_rate=fs, cutoff=cutoff, order=order, btype="low")
+    drift = iir_filter(phi2.astype(xp.float64), sos, zero_phase=True)
 
     pn = phi2 - drift
     drift, pn = restore_1d(was_1d, drift, pn)
@@ -150,17 +113,18 @@ def separate_drift_phase_noise(
     return drift, pn
 
 
-def frequency_drift_metrics(
+def frequency_drift(
     drift_phase: ArrayType,
     *,
-    symbol_rate: float,
+    sampling_rate: float,
     edge_trim: int = 0,
 ) -> FrequencyDrift:
     r"""Residual frequency-wander statistics from a smoothed phase ramp.
 
     The instantaneous residual frequency offset is the phase slope
-    ``df = diff(drift) / (2π T_sym)`` in Hz.  Report the std (typical wander)
-    and the peak-to-peak (worst-case spin the CPR must follow).
+    ``df = diff(drift) / (2π T)`` in Hz, ``T = 1/sampling_rate``.  Report the
+    std (typical wander) and the peak-to-peak (worst-case spin the CPR must
+    follow).
 
     Relate to the BPS tracking limit: a residual ``δf`` rotates the phase by
     ``2π·δf·T_sym`` per symbol, so over a window of ``K`` symbols the
@@ -171,8 +135,9 @@ def frequency_drift_metrics(
     ----------
     drift_phase : array_like
         Drift phase component (radians), ``(N,)`` or ``(C, N)``.
-    symbol_rate : float
-        Symbol rate in Baud.
+    sampling_rate : float
+        Sampling rate of ``drift_phase`` in Hz (the symbol rate for a
+        per-symbol trajectory).
     edge_trim : int, default 0
         Number of samples to discard from each end before differencing
         (removes low-pass filter transients).
@@ -180,14 +145,14 @@ def frequency_drift_metrics(
     Returns
     -------
     FrequencyDrift
-        ``df``, the per-symbol residual frequency array, and ``std``, ``pp``,
+        ``df``, the per-sample residual frequency array, and ``std``, ``pp``,
         ``max_abs``: floats (SISO) or per-channel arrays (MIMO).
 
     Notes
     -----
     The first difference under-reads a spectral component at ``f`` by
-    ``sinc(f/R)`` relative to a true derivative.  Because ``drift_phase`` is
-    low-passed (``cutoff ≪ R``), this bias is negligible here - it only
+    ``sinc(f·T)`` relative to a true derivative.  Because ``drift_phase`` is
+    low-passed (``cutoff ≪ sampling_rate``), this bias is negligible here - it only
     matters when differencing broadband phase (see ``fm_noise_psd``, which
     corrects for it).
     """
@@ -196,8 +161,8 @@ def frequency_drift_metrics(
     if edge_trim > 0:
         d2 = d2[:, edge_trim:-edge_trim]
 
-    t_sym = 1.0 / float(symbol_rate)
-    df = xp.diff(d2.astype(xp.float64), axis=-1) / (2.0 * np.pi * t_sym)
+    dt = 1.0 / float(sampling_rate)
+    df = xp.diff(d2.astype(xp.float64), axis=-1) / (2.0 * np.pi * dt)
 
     # One D2H transfer for all three summaries instead of three syncs.
     stats = to_device(

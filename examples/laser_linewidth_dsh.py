@@ -471,7 +471,7 @@ print(f"truth (white-FM part only)   : Δν = {DNU_TRUE / 1e3:.0f} kHz")
 # %%
 dphi_short, _ = analysis.dsh_phase(z_short, sampling_rate=FS, f_shift=F_AOM)
 df_disc = dphi_short / (2.0 * np.pi * TAU_SHORT)  # discriminator output [Hz]
-allan = analysis.allan_deviation(df_disc, symbol_rate=FS, num_taus=40)
+allan = analysis.allan_deviation(df_disc, sampling_rate=FS, num_taus=40)
 
 fig, ax = plotting.plot_allan_deviation(allan.tau_s, allan.adev)
 tau_valid = allan.tau_s[allan.tau_s > 5 * TAU_SHORT]

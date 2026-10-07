@@ -120,7 +120,7 @@ if CALIBRATE_TAU_D:
     # then refine to sub-bin accuracy with a 3-point parabola on log(S) -
     # without it the estimate is quantized to the Welch bin (±FS/2·NPERSEG,
     # easily worse than the nominal fiber length).
-    f_c_, S_c_ = analysis.fm_noise_psd(dphi, symbol_rate=FS, nperseg=NPERSEG)
+    f_c_, S_c_ = analysis.fm_noise_psd(dphi, sampling_rate=FS, nperseg=NPERSEG)
     f_np, S_np = np.asarray(cpu(f_c_)), np.asarray(cpu(S_c_))
     win = np.flatnonzero((f_np > 0.8 / TAU_D) & (f_np < 1.2 / TAU_D))
     if win.size >= 3:
@@ -189,7 +189,7 @@ print(
 
 # %%
 allan = analysis.allan_deviation(
-    dphi / (2.0 * np.pi * TAU_D), symbol_rate=FS, num_taus=40
+    dphi / (2.0 * np.pi * TAU_D), sampling_rate=FS, num_taus=40
 )
 fig, ax = plotting.plot_allan_deviation(allan.tau_s, allan.adev)
 ax.axvspan(

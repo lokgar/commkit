@@ -197,7 +197,7 @@ print(
 # %%
 dphi, _ = analysis.dsh_phase(z, sampling_rate=FS, f_shift=0.0)
 allan = analysis.allan_deviation(
-    dphi / (2.0 * np.pi * TAU_D), symbol_rate=FS, num_taus=40
+    dphi / (2.0 * np.pi * TAU_D), sampling_rate=FS, num_taus=40
 )
 fig, ax = plotting.plot_allan_deviation(allan.tau_s, allan.adev)
 ax.axvspan(
