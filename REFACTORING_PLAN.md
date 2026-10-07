@@ -1156,9 +1156,13 @@ The equalization pass (3.7) gets more commits:
   strict xfails left.
 - [x] **3.10c `refactor(plotting): no test-only exports`.** The private
   re-exports leave `plotting/__init__`; tests import the owning module.
-- [ ] **3.10d `test: numerical modules never import matplotlib`.** A fresh
-  subprocess imports every non-plotting module and checks
-  `sys.modules`.
+- [x] **3.10d `test: numerical modules never import matplotlib`.** The
+  existing check listed 11 subpackages by hand (missing `core`, `io`,
+  `smoothing`, `math` and every private module). A fresh subprocess now
+  imports every module outside `plotting`, discovered from the file tree
+  (`pkgutil.walk_packages` imports `plotting` itself to list it), and
+  names the first one that loads matplotlib; verified by planting an
+  import.
 
 **Equalizer safety rules (3.7):**
 

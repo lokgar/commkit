@@ -54,25 +54,28 @@ def test_import_leaves_matplotlib_defaults_unchanged():
     assert result == "True"
 
 
-@pytest.mark.parametrize(
-    "module",
-    [
-        "commkit.analysis",
-        "commkit.equalization",
-        "commkit.filtering",
-        "commkit.frequency",
-        "commkit.impairments",
-        "commkit.mapping",
-        "commkit.metrics",
-        "commkit.multirate",
-        "commkit.recovery",
-        "commkit.spectral",
-        "commkit.timing",
-    ],
-)
-def test_numerical_modules_do_not_import_matplotlib(module):
-    result = _run(f"import sys, {module}\nprint('matplotlib' in sys.modules)")
-    assert result == "False"
+def test_numerical_modules_do_not_import_matplotlib():
+    """Every module outside ``commkit.plotting``, found by walking the
+    package, imports without loading matplotlib (the first offender is
+    named)."""
+    result = _run(
+        # Module names come from the file tree: pkgutil.walk_packages imports
+        # every package to list it, plotting included.
+        "import importlib, pathlib, sys, commkit\n"
+        "root = pathlib.Path(commkit.__file__).parent\n"
+        "names = sorted('.'.join(('commkit',) + p.relative_to(root).with_suffix('')"
+        ".parts).removesuffix('.__init__') for p in root.rglob('*.py')"
+        " if 'plotting' not in p.relative_to(root).parts)\n"
+        "for name in names:\n"
+        "    importlib.import_module(name)\n"
+        "    if 'matplotlib' in sys.modules:\n"
+        "        print(name)\n"
+        "        break\n"
+        "else:\n"
+        "    print(f'none of {len(names)}')\n"
+    )
+    assert result.startswith("none of "), f"{result} imports matplotlib"
+    assert int(result.split()[-1]) > 50  # the walk found the package
 
 
 def test_host_signal_never_touches_cupy():
