@@ -1,26 +1,18 @@
-"""Decision-directed frequency-domain block equalizer: block_lms (FDAF)."""
+"""Decision-directed frequency-domain block equalizer: block_lms."""
 
 from __future__ import annotations
 
-import contextlib
+from dataclasses import dataclass
 from typing import Any
 
 import numpy as np
 
-from ..._array import as_2d
-from ...backend import ArrayType, dispatch, to_device
+from ...backend import ArrayType, to_device
 from ...core._signal_adapter import adapt_signal, require_integer_sps
 from ...core.signal import Signal
 from ...logger import logger
 from ...mapping.gray import _square_qam_slicer_params
-from .._common import (
-    _build_padded_samples,
-    _cpr_symmetry,
-    _init_butterfly_weights_numpy,
-    _normalize_inputs,
-    _validate_sps,
-    _validate_w_init,
-)
+from .._common import _cpr_symmetry
 from .._kernels_numba import _get_numba_cs_block
 from ..result import (
     CPRState,
@@ -28,6 +20,204 @@ from ..result import (
     _attach_equalized_signal,
     _log_equalizer_exit,
 )
+from ._engine import (
+    _Block,
+    _block_loop,
+    _fdaf_forward,
+    _fdaf_gradient_update,
+    _prepare_block,
+)
+
+
+@dataclass
+class _Slicer:
+    """Hard-decision slicer: per-axis rounding for square QAM, else a table."""
+
+    constellation: ArrayType  # (M,) complex64 on the device
+    side: int  # points per axis of a square lattice, 0 otherwise
+    lev_min: float
+    d_grid: float
+    kernel: Any = None  # CUDA argmin kernel for the table path, or None
+    phasor: ArrayType | None = None  # unit rotation fed to that kernel
+
+    def decide(self, y: ArrayType, xp: Any) -> ArrayType:
+        if self.side > 0:
+            m1 = self.side - 1
+            d_r = (
+                self.lev_min
+                + xp.clip(xp.round((y.real - self.lev_min) / self.d_grid), 0, m1)
+                * self.d_grid
+            )
+            d_i = (
+                self.lev_min
+                + xp.clip(xp.round((y.imag - self.lev_min) / self.d_grid), 0, m1)
+                * self.d_grid
+            )
+            d = xp.empty(y.shape, dtype=xp.complex64)
+            d.real[:] = d_r
+            d.imag[:] = d_i
+            return d
+        if self.kernel is not None:
+            _, idx = self.kernel(y, self.phasor, constellation=self.constellation)
+            return self.constellation[idx[0]]
+        d2 = (xp.abs(y[:, :, None] - self.constellation[None, None, :]) ** 2).real
+        return self.constellation[xp.argmin(d2, axis=-1)]
+
+    def min_d2(self, rotated: ArrayType, xp: Any) -> ArrayType:
+        """Squared distance to the nearest point, for rotated ``(P, C, B)``."""
+        if self.side > 0:
+            m1 = self.side - 1
+            nr = (
+                self.lev_min
+                + xp.clip(xp.round((rotated.real - self.lev_min) / self.d_grid), 0, m1)
+                * self.d_grid
+            )
+            ni = (
+                self.lev_min
+                + xp.clip(xp.round((rotated.imag - self.lev_min) / self.d_grid), 0, m1)
+                * self.d_grid
+            )
+            return ((rotated.real - nr) ** 2 + (rotated.imag - ni) ** 2).astype(
+                xp.float32
+            )
+        d2_all = (
+            xp.abs(rotated[..., None] - self.constellation[None, None, None, :]) ** 2
+        ).real
+        return xp.min(d2_all, axis=-1).astype(xp.float32)
+
+
+@dataclass
+class _BlockBps:
+    """Blind phase search across blocks: candidates, window history, 4-fold
+    unwrap and cycle-slip state (device arrays; host for the Numba slip path).
+    """
+
+    P: int
+    K: int  # BPS averaging window
+    hist_len: int
+    joint: bool
+    angles: ArrayType  # (P,) float32
+    phases_neg: ArrayType  # (P,) complex64, exp(-j*angle)
+    prev4: ArrayType  # (C,) float64, last 4x angle
+    offset4: ArrayType  # (C,) float64, accumulated unwrapped 4x phase
+    d2_hist: ArrayType  # (P, C, K-1) float32 trailing metrics
+    cs: bool
+    cs_H: int
+    quantum: float
+    threshold: float
+    cs_buf_x: np.ndarray
+    cs_buf_y: Any
+    cs_buf_ptr: Any
+    cs_buf_n: Any
+    cs_stats: Any
+    kernel: Any = None  # CUDA min-distance kernel, or None
+    cs_kernel: Any = None  # CUDA cycle-slip kernel, or None
+
+    def phase(
+        self, y_block: ArrayType, slicer: _Slicer, b_start: int, xp: Any
+    ) -> tuple[ArrayType, ArrayType]:
+        """Wrapped float32 phase to rotate by, and the unwrapped trajectory."""
+        C, B = y_block.shape
+        P = self.P
+        if self.kernel is not None:
+            if slicer.side > 0:
+                min_d2 = self.kernel(
+                    y_block,
+                    self.phases_neg,
+                    lev_min=slicer.lev_min,
+                    d_grid=slicer.d_grid,
+                    side=slicer.side,
+                )
+            else:
+                min_d2 = self.kernel(
+                    y_block, self.phases_neg, constellation=slicer.constellation
+                )
+        else:
+            rotated = self.phases_neg[:, None, None] * y_block[None, :, :]
+            min_d2 = slicer.min_d2(rotated, xp)
+
+        # Causal K-sample window that continues across blocks: the last K-1
+        # metrics of the previous block are prepended.
+        K = min(self.K, B)
+        hist_prefix = (
+            self.d2_hist[:, :, -(K - 1) :]
+            if K > 1
+            else xp.empty((P, C, 0), dtype=xp.float32)
+        )
+        cat_d2 = xp.concatenate([hist_prefix, min_d2], axis=2)  # (P, C, K-1+B)
+        cs_d2 = xp.concatenate(
+            [xp.zeros((P, C, 1), dtype=xp.float32), cat_d2.cumsum(axis=2)], axis=2
+        )  # (P, C, K+B)
+        win_sum = cs_d2[:, :, K:] - cs_d2[:, :, :-K]  # (P, C, B)
+        metric = win_sum / xp.float32(K)  # (P, C, B) - always full K-sample window
+        if self.joint and C > 1:
+            best_k = xp.argmin(metric.sum(axis=1), axis=0)  # (B,)
+            phi_raw = xp.broadcast_to(self.angles[best_k][None, :], (C, B)).copy()
+        else:
+            best_k = xp.argmin(metric, axis=0)  # (C, B)
+            phi_raw = self.angles[best_k]  # (C, B)
+        if self.hist_len > 0:
+            combined_hist = xp.concatenate([self.d2_hist, min_d2], axis=2)
+            self.d2_hist[...] = combined_hist[:, :, -self.hist_len :]
+
+        # 4-fold unwrap continuing from the previous block.
+        if xp is np:
+            raw4 = phi_raw.astype(np.float64) * 4.0  # (C, B)
+            extended = np.concatenate([self.prev4[:, np.newaxis], raw4], axis=1)
+            unwrapped_ext = np.unwrap(extended, axis=1)  # (C, B+1)
+            cumul = unwrapped_ext[:, 1:] - unwrapped_ext[:, 0:1]  # (C, B)
+            phi_f64 = (self.offset4[:, np.newaxis] + cumul) / 4.0  # (C, B)
+            self.prev4[:] = unwrapped_ext[:, -1]
+            self.offset4 += cumul[:, -1]
+        else:
+            raw4_dev = phi_raw.astype(xp.float64) * xp.float64(4.0)  # (C, B)
+            ext_dev = xp.concatenate([self.prev4[:, None], raw4_dev], axis=1)
+            two_pi = xp.float64(2.0 * np.pi)
+            d4 = ext_dev[:, 1:] - ext_dev[:, :-1]  # (C, B)
+            d4 -= xp.round(d4 / two_pi) * two_pi  # wrap to [-π, π]
+            cumul_dev = xp.cumsum(d4, axis=1)  # (C, B)
+            phi_f64 = (self.offset4[:, None] + cumul_dev) / xp.float64(4.0)
+            self.prev4 += cumul_dev[:, -1]
+            self.offset4 += cumul_dev[:, -1]
+
+        if self.cs:
+            if self.cs_kernel is not None:
+                phi_corr = xp.empty_like(phi_f64)
+                self.cs_kernel(
+                    phi_f64,
+                    phi_corr,
+                    self.cs_buf_y,
+                    self.cs_buf_ptr,
+                    self.cs_buf_n,
+                    self.cs_stats,
+                    float(self.quantum),
+                    float(self.threshold),
+                    self.cs_H,
+                )
+            else:
+                phi_blk_np = to_device(phi_f64, "cpu").astype(np.float64)  # (C, B)
+                phi_corr_np = phi_blk_np.copy()
+                _get_numba_cs_block()(
+                    phi_blk_np,
+                    phi_corr_np,
+                    self.cs_buf_x,
+                    self.cs_buf_y,
+                    self.cs_buf_ptr,
+                    self.cs_buf_n,
+                    self.cs_stats,
+                    b_start,
+                    float(self.quantum),
+                    float(self.threshold),
+                    self.cs_H,
+                )
+                phi_corr = xp.asarray(phi_corr_np)
+            # Carry the slip correction into the unwrap accumulator.
+            self.offset4 += (phi_corr[:, -1] - phi_f64[:, -1]) * 4.0
+            phi_f64 = phi_corr
+
+        two_pi = xp.float64(2.0 * np.pi)
+        phi_wrapped = (phi_f64 - xp.round(phi_f64 / two_pi) * two_pi).astype(xp.float32)
+        return phi_wrapped, phi_f64.astype(xp.float32)
 
 
 def block_lms(
@@ -312,7 +502,6 @@ def block_lms(
         sps = require_integer_sps(
             signal_adapter.resolve_required("sps", sps), "block_lms()"
         )
-
     if sps is None:
         sps = 2
 
@@ -322,36 +511,23 @@ def block_lms(
             "PLL is not available for block processing."
         )
 
-    num_taps = int(num_taps)
-    block_size = int(block_size)
-
-    _validate_sps(sps, num_taps)
-    sps = int(sps)
-
-    samples, xp, _ = dispatch(samples)
-    if xp is np:
-        logger.warning(
-            "block_lms is running on CPU (NumPy). "
-            "For CPU workloads lms(..., backend='numba') is typically 2-10x faster. "
-            "Move samples to GPU (CuPy) to benefit from block-FFT acceleration."
-        )
-
-    samples, was_1d = as_2d(samples, name="samples")
-
-    C = samples.shape[0]
-    N = samples.shape[1]
-    n_sym = N // sps
-
-    if training_symbols is not None:
-        training_symbols, _, _ = dispatch(training_symbols)
-        if training_symbols.ndim == 1:
-            training_symbols = training_symbols[np.newaxis, :]
-
-    samples, training_symbols, eq_norm = _normalize_inputs(
-        samples, training_symbols, sps, input_norm_factor=input_norm_factor
+    run = _prepare_block(
+        samples,
+        sps=sps,
+        num_taps=num_taps,
+        block_size=block_size,
+        w_init=w_init,
+        input_norm_factor=input_norm_factor,
+        samples_prefix=samples_prefix,
+        pad_mode=pad_mode,
+        name="block_lms",
+        cpu_hint="lms()",
+        training_symbols=training_symbols,
     )
+    xp, C, n_sym, sps, block_size = run.xp, run.C, run.n_sym, run.sps, run.block_size
+    num_taps = run.num_taps
+    training = run.training
 
-    # -- Constellation ---------------------------------------------------------
     if modulation is not None and order is not None:
         from ...mapping.gray import _gray_points
 
@@ -359,160 +535,78 @@ def block_lms(
         constellation_np = (
             to_device(reference_constellation, "cpu").flatten().astype(np.complex64)
         )
-    elif training_symbols is not None:
-        train_flat = to_device(training_symbols, "cpu").reshape(-1)
+    elif training is not None:
+        train_flat = to_device(training, "cpu").reshape(-1)
         constellation_np = np.unique(np.round(train_flat, decimals=8)).astype(
             np.complex64
         )
     else:
         raise ValueError("Provide modulation+order or training_symbols for DD slicer.")
-
     if pmf is not None and modulation is not None and order is not None:
-        _pmf_arr = np.asarray(pmf, dtype=np.float64)
-        _e_ps = float(
-            np.dot(_pmf_arr, np.abs(constellation_np).astype(np.float64) ** 2)
-        )
-        if _e_ps < 1.0 - 1e-6:
-            constellation_np = (constellation_np / np.sqrt(_e_ps)).astype(np.complex64)
+        pmf_arr = np.asarray(pmf, dtype=np.float64)
+        e_ps = float(np.dot(pmf_arr, np.abs(constellation_np).astype(np.float64) ** 2))
+        if e_ps < 1.0 - 1e-6:
+            constellation_np = (constellation_np / np.sqrt(e_ps)).astype(np.complex64)
+    sq_side, sq_lev_min, sq_d_grid = _square_qam_slicer_params(constellation_np)
+    slicer = _Slicer(
+        constellation=xp.asarray(constellation_np),
+        side=sq_side,
+        lev_min=float(sq_lev_min),
+        d_grid=float(sq_d_grid),
+    )
 
-    constellation = xp.asarray(constellation_np)  # (M,) on device
-    _sq_side, _sq_lev_min_f, _sq_d_grid_f = _square_qam_slicer_params(constellation_np)
-    _sq_lev_min = float(_sq_lev_min_f)
-    _sq_d_grid = float(_sq_d_grid_f)
-    _sq_m1 = _sq_side - 1  # clip upper bound (0 when sq_side==0 - never used)
+    n_train = min(int(training.shape[-1]), n_sym) if training is not None else 0
 
-    # -- Training alignment ----------------------------------------------------
-    if training_symbols is not None:
-        n_train_aligned = min(int(training_symbols.shape[-1]), n_sym)
-    else:
-        n_train_aligned = 0
-
-    # -- Weight initialisation -------------------------------------------------
-    if w_init is not None:
-        w_arr = np.ascontiguousarray(to_device(w_init, "cpu"), dtype=np.complex64)
-        w_arr = _validate_w_init(w_arr, C, num_taps)
-        h = xp.asarray(w_arr.copy())
-    else:
-        h = xp.asarray(_init_butterfly_weights_numpy(C, num_taps))  # (C, C, T)
-
-    # -- BPS setup -------------------------------------------------------------
+    bps = None
     if cpr_type == "bps":
-        symmetry = _cpr_symmetry(modulation, order)
-        P = int(cpr_bps_test_phases)
-        bps_angles_np = np.linspace(
-            0.0, np.pi / 2.0, P, endpoint=False, dtype=np.float32
+        bps = _block_bps(
+            xp,
+            C,
+            n_sym,
+            test_phases=int(cpr_bps_test_phases),
+            window=int(cpr_bps_block_size),
+            joint=bool(cpr_joint_channels),
+            cycle_slip=bool(cpr_cycle_slip_correction),
+            history=int(cpr_cycle_slip_history),
+            threshold=float(cpr_cycle_slip_threshold),
+            symmetry=_cpr_symmetry(modulation, order),
+            cpr_state=cpr_state,
         )
-        bps_phases_neg = xp.asarray(
-            np.exp(-1j * bps_angles_np).astype(np.complex64)
-        )  # (P,)
-        bps_angles = xp.asarray(bps_angles_np)  # (P,)
-        quantum = np.float64(2.0 * np.pi / symmetry)
-        _two_pi = xp.float64(2.0 * np.pi)
-        # Cross-block 4-fold unwrap state (one float64 per channel)
-        _cs_H = min(int(cpr_cycle_slip_history), n_sym)
-        _bps_K = int(cpr_bps_block_size)
-        _bps_hist_len = max(0, _bps_K - 1)
-        _st = cpr_state
-        _st_ok = (
-            _st is not None
-            and _st.cpr_type == cpr_type
-            and _st.num_ch == C
-            and _st.cs_H == _cs_H
-            and _st.bps_P == P
-            and _st.bps_K == _bps_K
-            and _st.bps_prev4 is not None
-        )
-        if _st_ok:
-            assert _st is not None
-            assert _st.bps_prev4 is not None
-            assert _st.bps_offset4 is not None
-            assert _st.cs_buf_x is not None
-            assert _st.cs_buf_y is not None
-            assert _st.cs_buf_ptr is not None
-            assert _st.cs_buf_n is not None
-            assert _st.cs_stats is not None
-            bps_prev4 = _st.bps_prev4.copy()
-            bps_offset4 = _st.bps_offset4.copy()
-            cs_buf_x = _st.cs_buf_x.copy()
-            cs_buf_y = _st.cs_buf_y.copy()
-            cs_buf_ptr = _st.cs_buf_ptr.copy()
-            cs_buf_n = _st.cs_buf_n.copy()
-            cs_stats = _st.cs_stats.copy()
-            # xp.array (not asarray): the history buffer is updated in place
-            # inside the block loop, so it must never alias the caller's state.
-            bps_d2_hist = (
-                xp.array(_st.bps_d2_hist, dtype=xp.float32)
-                if _st.bps_d2_hist is not None
-                else xp.zeros((P, C, _bps_hist_len), dtype=xp.float32)
-            )
-        else:
-            bps_prev4 = np.zeros(C, dtype=np.float64)
-            bps_offset4 = np.zeros(C, dtype=np.float64)
-            cs_buf_x = np.zeros((C, _cs_H), dtype=np.float64)
-            cs_buf_y = np.zeros((C, _cs_H), dtype=np.float64)
-            cs_buf_ptr = np.zeros(C, dtype=np.int64)
-            cs_buf_n = np.zeros(C, dtype=np.int64)
-            cs_stats = np.zeros((C, 4), dtype=np.float64)
-            bps_d2_hist = xp.zeros((P, C, _bps_hist_len), dtype=xp.float32)
-        # Promote the unwrap carries to the active device once - every
-        # per-block update then runs on-device, with no per-block H2D/D2H
-        # sync.  The CPRState CPU-NumPy contract is honoured at the API
-        # boundary only: ingested above, exported back via to_device() at
-        # state export.  Cycle-slip buffers stay CPU-resident because the
-        # slip kernel itself still runs on the host.
-        bps_prev4 = xp.asarray(bps_prev4)
-        bps_offset4 = xp.asarray(bps_offset4)
 
-    # -- Fused CUDA kernels (CuPy only; None => xp fallback) -------------------
-    # _k_bps: per-block inline-BPS min-distance metric (GRID for square QAM,
-    # TABLE otherwise).  _k_dd: nearest-point search for the non-square DD
-    # slicer (TABLE + argmin, called with a single unit phasor).  _k_cs: the
-    # sequential cycle-slip detector (one thread per channel) operating on
-    # device-resident history buffers.
-    _k_bps = None
-    _k_dd = None
-    _k_cs = None
-    _dd_phasor = None
     if xp is not np:
         from ... import _cuda
 
-        _M_const = int(constellation_np.size)
-        if cpr_type == "bps" and P <= 128:
-            if _sq_side > 0:
-                _k_bps = _cuda.get_kernel("bps_min_d2", mode="grid")
-            elif _M_const <= 1024:
-                _k_bps = _cuda.get_kernel("bps_min_d2", mode="table")
-        if n_train_aligned < n_sym and _sq_side == 0 and _M_const <= 1024:
-            _k_dd = _cuda.get_kernel("bps_min_d2", mode="table", return_argmin=True)
-            if _k_dd is not None:
-                _dd_phasor = xp.ones(1, dtype=xp.complex64)
-        if cpr_type == "bps" and cpr_cycle_slip_correction and C <= 1024:
-            _k_cs = _cuda.get_kernel("cs_block")
-    if _k_cs is not None:
-        # Cycle-slip state lives in device memory for the whole block loop;
-        # the kernel mutates it in place.  Exported back to CPU NumPy at
-        # state export, preserving the CPRState contract.  cs_buf_x is
-        # unused by the detector and stays on CPU.
-        cs_buf_y = xp.asarray(cs_buf_y)
-        cs_buf_ptr = xp.asarray(cs_buf_ptr)
-        cs_buf_n = xp.asarray(cs_buf_n)
-        cs_stats = xp.asarray(cs_stats)
+        M_const = int(constellation_np.size)
+        if bps is not None and bps.P <= 128:
+            if slicer.side > 0:
+                bps.kernel = _cuda.get_kernel("bps_min_d2", mode="grid")
+            elif M_const <= 1024:
+                bps.kernel = _cuda.get_kernel("bps_min_d2", mode="table")
+        if n_train < n_sym and slicer.side == 0 and M_const <= 1024:
+            slicer.kernel = _cuda.get_kernel(
+                "bps_min_d2", mode="table", return_argmin=True
+            )
+            if slicer.kernel is not None:
+                slicer.phasor = xp.ones(1, dtype=xp.complex64)
+        if bps is not None and bps.cs and C <= 1024:
+            bps.cs_kernel = _cuda.get_kernel("cs_block")
+            if bps.cs_kernel is not None:
+                bps.cs_buf_y = xp.asarray(bps.cs_buf_y)
+                bps.cs_buf_ptr = xp.asarray(bps.cs_buf_ptr)
+                bps.cs_buf_n = xp.asarray(bps.cs_buf_n)
+                bps.cs_stats = xp.asarray(bps.cs_stats)
 
-    # -- OLS block size --------------------------------------------------------
-    # fftsize must be >= block_size * sps + num_taps - 1 (linear OLS condition)
-    _ols_min = block_size * sps + num_taps - 1
-    fftsize = 1 << (_ols_min - 1).bit_length()  # next power of 2
-
-    _cpr_info = ""
-    if cpr_type == "bps":
-        _cs = (
+    cpr_info = ""
+    if bps is not None:
+        cs_info = (
             f", cs_corr=True(thr={cpr_cycle_slip_threshold:.3f})"
-            if cpr_cycle_slip_correction
+            if bps.cs
             else ", cs_corr=False"
         )
-        _joint = ", joint" if cpr_joint_channels and C > 1 else ""
-        _cpr_info = (
-            f", cpr=bps(P={cpr_bps_test_phases}, K={cpr_bps_block_size}{_joint}{_cs})"
+        joint_info = ", joint" if cpr_joint_channels and C > 1 else ""
+        cpr_info = (
+            f", cpr=bps(P={cpr_bps_test_phases}, K={cpr_bps_block_size}"
+            f"{joint_info}{cs_info})"
         )
     logger.info(
         "Block-LMS: C=%s, num_taps=%s, sps=%s, block_size=%s, fftsize=%s, "
@@ -521,548 +615,92 @@ def block_lms(
         num_taps,
         sps,
         block_size,
-        fftsize,
+        run.fftsize,
         step_size,
         n_sym,
-        _cpr_info,
+        cpr_info,
     )
 
-    # -- Padding - matches lms() convention -----------------------------------
-    c_tap = num_taps // 2
-    pad_total = max(0, n_sym * sps - N + num_taps - 1)
-    pad_left = min(c_tap, pad_total)
-    pad_right = pad_total - pad_left
-    if samples_prefix is not None or xp is np or pad_mode != "zeros":
-        _samp_cpu_blms = to_device(samples, "cpu").astype(np.complex64)
-        x_padded = xp.asarray(
-            _build_padded_samples(
-                _samp_cpu_blms,
-                pad_left,
-                pad_right,
-                samples_prefix,
-                pad_mode,
-                eq_norm,
-                sps,
-            )
-        )  # (C, N_pad)
-    else:
-        # Fast on-device path: avoid D->H->D round-trip when there is no prefix.
-        # _normalize_inputs already normalized samples; eq_norm is only needed
-        # by _build_padded_samples to normalize the samples_prefix, which is
-        # handled by the branch above.
-        _samp_f32 = (
-            samples if samples.dtype == xp.complex64 else samples.astype(xp.complex64)
-        )
-        _left = xp.zeros((C, pad_left), dtype=xp.complex64)
-        _right = (
-            xp.zeros((C, pad_right), dtype=xp.complex64)
-            if pad_right > 0
-            else xp.empty((C, 0), dtype=xp.complex64)
-        )
-        x_padded = xp.concatenate([_left, _samp_f32, _right], axis=1)  # (C, N_pad)
-    N_padded = x_padded.shape[1]
-
-    # -- Output buffers --------------------------------------------------------
     y_all = xp.empty((C, n_sym), dtype=xp.complex64)
     e_all = xp.empty((C, n_sym), dtype=xp.complex64)
     w_hist = (
         xp.empty((n_sym, C, C, num_taps), dtype=xp.complex64) if store_weights else None
     )
-    phi_all = xp.zeros((C, n_sym), dtype=xp.float32) if cpr_type == "bps" else None
-
-    # Pre-allocate scratch buffers - reused every block to avoid per-block heap
-    # pressure, and (on GPU) to give the CUDA-graph capture stable pointers.
-    x_win = xp.zeros((C, fftsize), dtype=xp.complex64)
-    e_scatter = xp.zeros((C, fftsize), dtype=xp.complex64)
-    # Fixed-width output workspaces (block_size columns).  The block body always
-    # writes its per-symbol outputs here; the driver copies the valid [:, :B]
-    # slice into the full-length result arrays at the right offset.  Routing
-    # through fixed buffers (rather than writing y_all[:, b_start:b_end]
-    # directly) is what lets the body be captured once and replayed: the only
-    # thing that varies per block is the eager input fill and output copy.
+    phi_all = xp.zeros((C, n_sym), dtype=xp.float32) if bps is not None else None
+    e_scatter = xp.zeros((C, run.fftsize), dtype=xp.complex64)
     y_rot_ws = xp.empty((C, block_size), dtype=xp.complex64)
     e_clean_ws = xp.empty((C, block_size), dtype=xp.complex64)
-    phi_ws = xp.empty((C, block_size), dtype=xp.float32) if cpr_type == "bps" else None
+    phi_ws = xp.empty((C, block_size), dtype=xp.float32) if bps is not None else None
+    div_flag = xp.zeros(1, dtype=xp.bool_)
 
-    n_blocks = (n_sym + block_size - 1) // block_size
-    # On-device divergence flag - accumulates with |= inside the loop, zero D->H
-    # syncs during iteration.  Checked once with bool() after the loop exits.
-    _div_flag = xp.zeros(1, dtype=xp.bool_)
+    def run_block(B: int, b_start: int) -> None:
+        """One block: filter, CPR, slicer/training error, update.
 
-    def _run_block(B, b_start, n_train_blk):
-        """Compute one block: forward filter, CPR, error, gradient, weight update.
-
-        Reads the input window from ``x_win`` (filled by the caller), reads and
-        updates the persistent filter/CPR state in place, and writes the
-        per-symbol outputs into the fixed workspaces ``y_rot_ws``/``e_clean_ws``/
-        ``phi_ws`` (columns ``[:, :B]``).  Issues no host synchronization, so on
-        GPU it is safe to capture into a CUDA graph and replay.
+        Writes only persistent buffers, so a full decision-directed block can
+        be captured into a CUDA graph.
         """
-        nonlocal h, bps_prev4, bps_offset4, _div_flag
+        nonlocal div_flag
+        n_train_blk = max(0, min(n_train - b_start, B))
+        y_block, X_fd = _fdaf_forward(run.h, run.x_win, run.fftsize, sps, B, xp)
 
-        # -- Forward pass (frequency-domain butterfly) ---------------------
-        X_fd = xp.fft.fft(x_win, axis=-1)  # (C, F)
-        H_fd = xp.fft.fft(h, n=fftsize, axis=-1)  # (C, C, F)
-        # Butterfly contraction Y[i,k] = Σ_j conj(H[i,j,k]) X[j,k].  Written as a
-        # broadcast-multiply + reduction (not einsum) for two reasons: einsum
-        # dispatches to cuBLAS, which cannot be called inside a CUDA-graph stream
-        # capture; and the reduction is accumulated in complex128 before the
-        # complex64 downcast, per the CLAUDE.md filter-dot-product precision rule.
-        Y_fd = (
-            (xp.conj(H_fd).astype(xp.complex128) * X_fd.astype(xp.complex128)[None])
-            .sum(axis=1)
-            .astype(xp.complex64)
-        )  # (C, F)
-        y_time = xp.fft.ifft(Y_fd, axis=-1)  # (C, F)
-        y_block = y_time[:, : B * sps : sps].astype(xp.complex64)  # (C, B)
-
-        # -- BPS phase recovery --------------------------------------------
-        if cpr_type == "bps":
-            # min_d2: (P, C, B) - min squared distance to constellation over
-            # all candidate rotations of all block symbols.
-            if _k_bps is not None:
-                # Fused kernel: single pass over y_block, no (P, C, B[, M])
-                # rotated/distance intermediates.
-                if _sq_side > 0:
-                    min_d2 = _k_bps(
-                        y_block,
-                        bps_phases_neg,
-                        lev_min=_sq_lev_min,
-                        d_grid=_sq_d_grid,
-                        side=_sq_side,
-                    )
-                else:
-                    min_d2 = _k_bps(
-                        y_block, bps_phases_neg, constellation=constellation
-                    )
-            else:
-                # rotated: (P, C, B) - all candidate rotations for all block symbols
-                rotated = bps_phases_neg[:, None, None] * y_block[None, :, :]
-                # O(1) square-QAM: snap I/Q independently to nearest level grid point.
-                if _sq_side > 0:
-                    _nr = (
-                        _sq_lev_min
-                        + xp.clip(
-                            xp.round((rotated.real - _sq_lev_min) / _sq_d_grid),
-                            0,
-                            _sq_m1,
-                        )
-                        * _sq_d_grid
-                    )
-                    _ni = (
-                        _sq_lev_min
-                        + xp.clip(
-                            xp.round((rotated.imag - _sq_lev_min) / _sq_d_grid),
-                            0,
-                            _sq_m1,
-                        )
-                        * _sq_d_grid
-                    )
-                    min_d2 = (
-                        (rotated.real - _nr) ** 2 + (rotated.imag - _ni) ** 2
-                    ).astype(xp.float32)
-                else:
-                    d2_all = (
-                        xp.abs(rotated[..., None] - constellation[None, None, None, :])
-                        ** 2
-                    ).real
-                    min_d2 = xp.min(d2_all, axis=-1).astype(xp.float32)
-
-            # Causal sliding-window average of width K along the B (symbol) axis.
-            # win_sum[:,:,n] = sum of min_d2[:,:, n-K+1..n] (with K-1 samples from
-            # previous block as prefix so the window is full from symbol 0).
-            K = min(_bps_K, B)
-            hist_prefix = (
-                bps_d2_hist[:, :, -(K - 1) :]
-                if K > 1
-                else xp.empty((P, C, 0), dtype=xp.float32)
-            )
-            cat_d2 = xp.concatenate([hist_prefix, min_d2], axis=2)  # (P, C, K-1+B)
-            cs_d2 = xp.concatenate(
-                [xp.zeros((P, C, 1), dtype=xp.float32), cat_d2.cumsum(axis=2)], axis=2
-            )  # (P, C, K+B)
-            win_sum = cs_d2[:, :, K:] - cs_d2[:, :, :-K]  # (P, C, B)
-            metric = win_sum / xp.float32(K)  # (P, C, B) - always full K-sample window
-
-            # Per-symbol argmin over P phases -> raw (C, B) in [0, π/2)
-            if cpr_joint_channels and C > 1:
-                best_k = xp.argmin(metric.sum(axis=1), axis=0)  # (B,)
-                phi_raw = xp.broadcast_to(
-                    bps_angles[best_k][None, :], (C, B)
-                ).copy()  # (C, B)
-            else:
-                best_k = xp.argmin(metric, axis=0)  # (C, B)
-                phi_raw = bps_angles[best_k]  # (C, B)
-
-            # Slide BPS distance history across block boundary (for next block's
-            # prefix).  In-place write into the persistent buffer (not a rebind)
-            # so the captured graph reads/writes the same address every replay.
-            if _bps_hist_len > 0:
-                combined_hist = xp.concatenate([bps_d2_hist, min_d2], axis=2)
-                bps_d2_hist[...] = combined_hist[:, :, -_bps_hist_len:]
-
-            # 4-fold causal unwrap: equivalent to np.unwrap(phi*4)/4 via
-            # diff->wrap[-π,π]->cumsum.  CPU: np.unwrap directly (no transfer cost).
-            # GPU: fully on-device - the carries are device arrays, so the
-            # block loop issues no host sync for the unwrap state.
-            if xp is np:
-                raw4 = phi_raw.astype(np.float64) * 4.0  # (C, B)
-                extended = np.concatenate(
-                    [bps_prev4[:, np.newaxis], raw4], axis=1
-                )  # (C, B+1)
-                unwrapped_ext = np.unwrap(extended, axis=1)  # (C, B+1)
-                _cumul_cpu = unwrapped_ext[:, 1:] - unwrapped_ext[:, 0:1]  # (C, B)
-                _phi_f64 = (bps_offset4[:, np.newaxis] + _cumul_cpu) / 4.0  # (C, B)
-                bps_prev4[:] = unwrapped_ext[:, -1]
-                bps_offset4 += _cumul_cpu[:, -1]
-            else:
-                raw4_dev = phi_raw.astype(xp.float64) * xp.float64(4.0)  # (C, B)
-                ext_dev = xp.concatenate(
-                    [bps_prev4[:, None], raw4_dev], axis=1
-                )  # (C, B+1)
-                _two_pi_d = xp.float64(2.0 * np.pi)
-                d4 = ext_dev[:, 1:] - ext_dev[:, :-1]  # (C, B)
-                d4 -= xp.round(d4 / _two_pi_d) * _two_pi_d  # wrap to [-π, π]
-                _cumul_dev = xp.cumsum(d4, axis=1)  # (C, B)
-                _phi_f64 = (bps_offset4[:, None] + _cumul_dev) / xp.float64(4.0)
-                bps_prev4 += _cumul_dev[:, -1]
-                bps_offset4 += _cumul_dev[:, -1]
-            # -- Per-symbol cycle-slip correction --------------------------
-            # Identical algorithm to per-symbol lms: for each symbol in the
-            # block, compare its BPS phase to the regression prediction, snap
-            # to the nearest quantum if |diff| > threshold, then add the
-            # corrected (x, y) pair to the circular history buffer.
-            # GPU with the cs_block CUDA kernel: one launch per block on the
-            # device-resident history buffers - zero host syncs.  Fallback
-            # (CPU, or kernel unavailable): D->H transfer of the full (C, B)
-            # float64 phase block, CPU detector (Numba or Python), H->D
-            # write-back; cost is O(C·B) per block.
-            if cpr_cycle_slip_correction:
-                if _k_cs is not None:
-                    _phi_corr_dev = xp.empty_like(_phi_f64)
-                    _k_cs(
-                        _phi_f64,
-                        _phi_corr_dev,
-                        cs_buf_y,
-                        cs_buf_ptr,
-                        cs_buf_n,
-                        cs_stats,
-                        float(quantum),
-                        float(cpr_cycle_slip_threshold),
-                        _cs_H,
-                    )
-                else:
-                    phi_blk_np = to_device(_phi_f64, "cpu").astype(np.float64)  # (C, B)
-                    phi_corr_np = phi_blk_np.copy()
-
-                    _cs_kernel = _get_numba_cs_block()
-                    if _cs_kernel is not None:
-                        _cs_kernel(
-                            phi_blk_np,
-                            phi_corr_np,
-                            cs_buf_x,
-                            cs_buf_y,
-                            cs_buf_ptr,
-                            cs_buf_n,
-                            cs_stats,
-                            b_start,
-                            float(quantum),
-                            float(cpr_cycle_slip_threshold),
-                            _cs_H,
-                        )
-                    else:
-                        _H_f = float(_cs_H)
-                        for ci in range(C):
-                            for i in range(B):
-                                y_b = phi_blk_np[ci, i]
-                                n_b = int(cs_buf_n[ci])
-                                ptr = int(cs_buf_ptr[ci])
-
-                                if n_b == 0:
-                                    phi_expected = y_b
-                                elif n_b < 10:
-                                    last_pos = (ptr - 1 + _cs_H) % _cs_H
-                                    phi_expected = cs_buf_y[ci, last_pos]
-                                else:
-                                    sy = cs_stats[ci, 0]
-                                    sxy = cs_stats[ci, 1]
-                                    n_f = float(n_b)
-                                    if n_b < _cs_H:
-                                        Sx_c = n_f * (n_f - 1.0) / 2.0
-                                        Sxx_c = (
-                                            n_f * (n_f - 1.0) * (2.0 * n_f - 1.0) / 6.0
-                                        )
-                                        denom = n_f * Sxx_c - Sx_c * Sx_c
-                                    else:
-                                        Sx_c = _H_f * (_H_f - 1.0) / 2.0
-                                        Sxx_c = (
-                                            _H_f
-                                            * (_H_f - 1.0)
-                                            * (2.0 * _H_f - 1.0)
-                                            / 6.0
-                                        )
-                                        denom = _H_f * Sxx_c - Sx_c * Sx_c
-                                    if abs(denom) > 1e-30:
-                                        slope = (n_f * sxy - Sx_c * sy) / denom
-                                        intercept = (sy - slope * Sx_c) / n_f
-                                    else:
-                                        slope = 0.0
-                                        intercept = sy / n_f
-                                    phi_expected = slope * n_f + intercept
-
-                                diff = y_b - phi_expected
-                                k_slip = int(round(diff / quantum))
-                                if (
-                                    abs(diff) > float(cpr_cycle_slip_threshold)
-                                    and k_slip != 0
-                                ):
-                                    y_b -= float(k_slip) * quantum
-                                phi_corr_np[ci, i] = y_b
-
-                                # Update circular buffer - relative coords, only y needed
-                                write_pos = ptr % _cs_H
-                                if n_b == _cs_H:
-                                    old_y = cs_buf_y[ci, write_pos]
-                                    old_sy = cs_stats[ci, 0]
-                                    # Sxy_new = Sxy_old - Sy_old + y_old + (H-1)*y_new
-                                    cs_stats[ci, 1] = (
-                                        cs_stats[ci, 1]
-                                        - old_sy
-                                        + old_y
-                                        + (_H_f - 1.0) * y_b
-                                    )
-                                    cs_stats[ci, 0] = old_sy - old_y + y_b
-                                else:
-                                    cs_stats[ci, 1] += float(n_b) * y_b
-                                    cs_stats[ci, 0] += y_b
-                                cs_buf_y[ci, write_pos] = y_b
-                                cs_buf_ptr[ci] = ptr + 1
-                                if n_b < _cs_H:
-                                    cs_buf_n[ci] = n_b + 1
-
-                    _phi_corr_dev = xp.asarray(phi_corr_np)
-
-                # Carry the net slip correction into bps_offset4 so that
-                # subsequent blocks do not re-detect the same slip.
-                # bps_offset4 tracks the 4x-domain accumulated phase; the slip
-                # quantum is π/2 -> 2π in 4x, which is a multiple of 2π and
-                # therefore transparent to the 4-fold unwrap of bps_prev4.
-                # Vectorized on-device op - a zero net slip adds 0.0 for free,
-                # so no per-channel host-side != 0.0 test is needed.
-                bps_offset4 += (_phi_corr_dev[:, -1] - _phi_f64[:, -1]) * 4.0
-                _phi_f64 = _phi_corr_dev
-
-            # Wrap unbounded float64 phase to [-π, π] before float32 cast so that
-            # the GPU exp() argument is bounded (dual-path: wrapped for rotation,
-            # unwrapped for trajectory storage).
-            phi_c_dev = (_phi_f64 - xp.round(_phi_f64 / _two_pi) * _two_pi).astype(
-                xp.float32
-            )
-            phi_c_traj = _phi_f64.astype(xp.float32)  # unwrapped, for output trajectory
-
-            phi_c = phi_c_dev  # wrapped float32, for rotation
+        if bps is not None:
+            phi_c, phi_traj = bps.phase(y_block, slicer, b_start, xp)
             y_rot = y_block * xp.exp(-1j * phi_c.astype(xp.complex64))  # (C, B)
             assert phi_ws is not None
-            phi_ws[:, :B] = phi_c_traj  # unwrapped float32, for trajectory
+            phi_ws[:, :B] = phi_traj  # unwrapped float32, for trajectory
         else:
             y_rot = y_block
 
-        # -- Error computation (training or DD slicer) ---------------------
         e_clean = xp.empty((C, B), dtype=xp.complex64)
-
         if n_train_blk > 0:
-            d_train = training_symbols[:, b_start : b_start + n_train_blk]
+            assert training is not None
+            d_train = training[:, b_start : b_start + n_train_blk]
             e_clean[:, :n_train_blk] = d_train - y_rot[:, :n_train_blk]
-
         if n_train_blk < B:
             y_dd = y_rot[:, n_train_blk:]
-            if _sq_side > 0:
-                _dd_r = (
-                    _sq_lev_min
-                    + xp.clip(
-                        xp.round((y_dd.real - _sq_lev_min) / _sq_d_grid), 0, _sq_m1
-                    )
-                    * _sq_d_grid
-                )
-                _dd_i = (
-                    _sq_lev_min
-                    + xp.clip(
-                        xp.round((y_dd.imag - _sq_lev_min) / _sq_d_grid), 0, _sq_m1
-                    )
-                    * _sq_d_grid
-                )
-                d_dd = xp.empty(y_dd.shape, dtype=xp.complex64)
-                d_dd.real[:] = _dd_r
-                d_dd.imag[:] = _dd_i
-            elif _k_dd is not None:
-                # Fused nearest-point search: (1, C, B_dd) argmin indices with
-                # a unit phasor, replacing the (C, B_dd, M) distance tensor.
-                _, _dd_idx = _k_dd(y_dd, _dd_phasor, constellation=constellation)
-                d_dd = constellation[_dd_idx[0]]
-            else:
-                d2_sl = (
-                    xp.abs(y_dd[:, :, None] - constellation[None, None, :]) ** 2
-                ).real
-                d_dd = constellation[xp.argmin(d2_sl, axis=-1)]
-            e_clean[:, n_train_blk:] = d_dd - y_dd
+            e_clean[:, n_train_blk:] = slicer.decide(y_dd, xp) - y_dd
 
-        # -- Store per-symbol outputs into the fixed workspaces ------------
         y_rot_ws[:, :B] = y_rot
         e_clean_ws[:, :B] = e_clean
         if store_weights:
             assert w_hist is not None
-            w_hist[b_start : b_start + B] = h[None, :, :, :]
+            w_hist[b_start : b_start + B] = run.h[None, :, :, :]
 
-        # -- Back-rotate error to tap plane and compute gradient -----------
-        if cpr_type == "bps":
+        # The update works in the tap plane: undo the CPR rotation.
+        if bps is not None:
             e_taps = e_clean * xp.exp(1j * phi_c.astype(xp.complex64))  # (C, B)
         else:
             e_taps = e_clean
+        _fdaf_gradient_update(
+            run.h, X_fd, e_taps, e_scatter, sps, B, num_taps, step_size, xp
+        )
+        div_flag |= ~xp.isfinite(run.h).all()
 
-        # Scatter e_taps to sample positions within the block window
-        e_scatter.fill(0)
-        e_scatter[:, : B * sps : sps] = e_taps
-
-        # Frequency-domain gradient: dH_fd[i,j,k] = conj(E_fd[i,k]) * X_fd[j,k].
-        # Outer product over the channel axes - no contracted index, hence no
-        # accumulation (complex64 is exact enough) and no cuBLAS, so the
-        # broadcast form is both capture-safe and replaces the einsum directly.
-        E_fd = xp.fft.fft(e_scatter, axis=-1)  # (C, F)
-        dH_fd = xp.conj(E_fd)[:, None, :] * X_fd[None, :, :]  # (C, C, F)
-        dh = xp.fft.ifft(dH_fd, axis=-1)[:, :, :num_taps]  # (C, C, T)
-
-        # In-place weight update so the captured graph reads/writes one buffer.
-        h += xp.float32(step_size) * dh
-
-        # Accumulate divergence flag on-device - no D->H sync here.
-        _div_flag |= ~xp.isfinite(h).all()
-
-    # CUDA-graph invariant: _fill_x_win and _store_outputs run eagerly *between*
-    # graph replays, so they MUST NOT allocate from the device memory pool.  The
-    # captured graph's intermediates were freed back to the pool after capture;
-    # any allocation here could hand those exact blocks out and clobber the
-    # pointers the replay reads/writes (intermittent garbage / divergence).  Both
-    # helpers touch only pre-allocated buffers (x_win, y_all/e_all/phi_all,
-    # *_ws) via fill/slice-assign - keep them allocation-free.
-    def _fill_x_win(b_start):
-        """Eager (per-block, varying offset) load of the input window into x_win.
-
-        Kept outside ``_run_block`` because the source offset changes every
-        block - a varying-pointer copy cannot live inside the captured graph.
-        """
-        x_start = b_start * sps
-        x_win.fill(0)
-        available = min(fftsize, N_padded - x_start)
-        if available > 0:
-            x_win[:, :available] = x_padded[:, x_start : x_start + available]
-
-    def _store_outputs(b_start, b_end, B):
-        """Eager copy of the fixed workspaces into the result arrays."""
+    def store(b_start: int, b_end: int, B: int) -> None:
         y_all[:, b_start:b_end] = y_rot_ws[:, :B]
         e_all[:, b_start:b_end] = e_clean_ws[:, :B]
-        if cpr_type == "bps":
+        if bps is not None:
             assert phi_all is not None and phi_ws is not None
             phi_all[:, b_start:b_end] = phi_ws[:, :B]
 
-    # -- CUDA-graph eligibility ------------------------------------------------
-    # The block-loop body is host-sync-free, so on GPU it can
-    # be captured once and replayed per block, collapsing ~30-50 kernel launches
-    # into one.  Only full blocks (B == block_size) lying entirely in the
-    # decision-directed region (n_train_blk == 0) share one fixed control flow
-    # and shape, so only those are captured; the training/straddle blocks and
-    # the final partial block always run eagerly.  Cycle-slip correction is
-    # capturable only via the cs_block CUDA kernel (the CPU fallback syncs).
-    _first_dd_full = ((n_train_aligned + block_size - 1) // block_size) * block_size
-    _n_dd_full = max(0, (n_sym - _first_dd_full) // block_size)
-    _use_graph = (
-        cuda_graph
-        and xp is not np
-        and not store_weights
-        and (not cpr_cycle_slip_correction or _k_cs is not None)
-        and _n_dd_full >= 2  # need ≥1 warmup block + ≥1 captured block to pay off
+    first_dd_full = ((n_train + block_size - 1) // block_size) * block_size
+    n_dd_full = max(0, (n_sym - first_dd_full) // block_size)
+    _block_loop(
+        run,
+        run_block=run_block,
+        store=store,
+        capturable=lambda B, b_start: B == block_size and n_train - b_start <= 0,
+        use_graph=(
+            cuda_graph
+            and xp is not np
+            and not store_weights
+            and (bps is None or not bps.cs or bps.cs_kernel is not None)
+            and n_dd_full >= 2  # need >= 1 warmup block + >= 1 captured block
+        ),
+        name="block_lms",
     )
-    try:
-        import cupy as _cp_graph
 
-        _graph_stream = _cp_graph.cuda.Stream(non_blocking=True) if _use_graph else None
-    except Exception:
-        _use_graph = False
-        _graph_stream = None
-
-    # All loop work - eager blocks, input fills, output copies, and graph
-    # capture/replay - runs on a single stream so the shared state buffers
-    # (h, bps_*, cs_*) stay ordered across the eager<->replay boundary.  On the
-    # eager (CPU or graph-disabled) path this is a no-op signal_adapter.
-    _loop_stream_ctx: Any
-    if _use_graph:
-        assert _graph_stream is not None  # set together with _use_graph above
-        # _graph_stream is non-blocking, so it does NOT implicitly serialize
-        # with the default stream that produced x_padded, h, the scratch
-        # buffers, and the BPS/cs constants above.  Without an explicit join the
-        # first block (and the graph capture) races those still-in-flight setup
-        # writes - intermittently reading/capturing garbage, which surfaces as
-        # divergence or bad convergence that "fixes itself" on rerun (the race
-        # is timing-dependent).  Make the loop stream wait for that setup work.
-        _setup_done = _cp_graph.cuda.Event()
-        _setup_done.record()  # records on the current (default) stream
-        _graph_stream.wait_event(_setup_done)
-        _loop_stream_ctx = _graph_stream
-    else:
-        _loop_stream_ctx = contextlib.nullcontext()
-
-    # -- Block loop ------------------------------------------------------------
-    _graph = None  # captured CUDA graph, built lazily on the 2nd full DD block
-    _graph_warmed = False  # True once one full DD block has primed the mem pool
-    with _loop_stream_ctx:
-        for b in range(n_blocks):
-            b_start = b * block_size
-            b_end = min(b_start + block_size, n_sym)
-            B = b_end - b_start  # symbols this block (may be < block_size for last)
-            n_train_blk = max(0, min(n_train_aligned - b_start, B))
-            _capturable = _use_graph and block_size == B and n_train_blk == 0
-
-            _fill_x_win(b_start)
-
-            if not _capturable:
-                _run_block(B, b_start, n_train_blk)  # eager
-            elif _graph is not None:
-                _graph.launch()  # replay (current stream == _graph_stream)
-            elif not _graph_warmed:
-                _run_block(B, b_start, 0)  # eager warmup - primes the memory pool
-                _graph_warmed = True
-            else:
-                # Capture the body once.  Stream capture records the kernel
-                # sequence without executing it (pool allocations reuse the
-                # blocks the warmup freed, so no cudaMalloc occurs); launch()
-                # then executes this block.  On any capture failure, fall back
-                # to running the remaining blocks eagerly.
-                assert (
-                    _graph_stream is not None
-                )  # _capturable => _use_graph => stream set
-                try:
-                    _graph_stream.begin_capture()
-                    _run_block(B, b_start, 0)
-                    _graph = _graph_stream.end_capture()
-                    _graph.launch()
-                except Exception as exc:  # pragma: no cover - hw/version dependent
-                    with contextlib.suppress(Exception):
-                        _graph_stream.end_capture()
-                    _graph = None
-                    _use_graph = False
-                    logger.warning(
-                        "block_lms CUDA-graph capture failed (%s); "
-                        "continuing with the eager block loop.",
-                        exc,
-                    )
-                    _run_block(B, b_start, 0)  # ensure this block runs once
-
-            _store_outputs(b_start, b_end, B)
-
-    if _graph_stream is not None:
-        _graph_stream.synchronize()
-
-    # Single D->H sync after the full loop to check for divergence.
-    if bool(_div_flag[0]):
+    if bool(div_flag[0]):
         raise RuntimeError(
             f"block_lms diverged (step_size={step_size}, block_size={block_size}). "
             f"step_size is on the same scale as lms(), but because the weights are "
@@ -1071,58 +709,130 @@ def block_lms(
             f"{step_size / 2:.2e}, then keep halving) rather than dividing by "
             f"block_size, which would under-adapt the filter by that factor."
         )
-
-    # -- Pack result -----------------------------------------------------------
-    if was_1d:
-        y_out = y_all[0]
-        e_out = e_all[0]
-        W_out = h[0, 0]
-        if store_weights and w_hist is not None:
-            w_history = w_hist[:, 0, 0, :]
-        else:
-            w_history = None
-
-        if cpr_type == "bps" and phi_all is not None:
-            phase_traj = phi_all[0]
-        else:
-            phase_traj = None
-    else:
-        y_out = y_all
-        e_out = e_all
-        W_out = h
-        w_history = w_hist if store_weights else None
-        phase_traj = phi_all if cpr_type == "bps" else None
-
-    result = EqualizerResult(
-        y_hat=y_out,
-        weights=W_out,
-        error=e_out,
-        weights_history=w_history,
-        num_train_symbols=n_train_aligned,
-        input_norm_factor=eq_norm,
-        phase_trajectory=phase_traj,
-    )
-    if cpr_type == "bps":
+    result = _assemble_block(run, y_all, e_all, w_hist, phi_all, n_train)
+    if bps is not None:
         result.cpr_state = CPRState(
-            bps_prev4=to_device(bps_prev4, "cpu").copy(),
-            bps_offset4=to_device(bps_offset4, "cpu").copy(),
-            bps_d2_hist=to_device(bps_d2_hist, "cpu"),
-            cs_buf_x=cs_buf_x.copy(),
-            cs_buf_y=to_device(cs_buf_y, "cpu").copy(),
-            cs_buf_ptr=to_device(cs_buf_ptr, "cpu").copy(),
-            cs_buf_n=to_device(cs_buf_n, "cpu").copy(),
-            cs_stats=to_device(cs_stats, "cpu").copy(),
+            bps_prev4=to_device(bps.prev4, "cpu").copy(),
+            bps_offset4=to_device(bps.offset4, "cpu").copy(),
+            bps_d2_hist=to_device(bps.d2_hist, "cpu"),
+            cs_buf_x=bps.cs_buf_x.copy(),
+            cs_buf_y=to_device(bps.cs_buf_y, "cpu").copy(),
+            cs_buf_ptr=to_device(bps.cs_buf_ptr, "cpu").copy(),
+            cs_buf_n=to_device(bps.cs_buf_n, "cpu").copy(),
+            cs_stats=to_device(bps.cs_stats, "cpu").copy(),
             cpr_type=cpr_type,
             num_ch=C,
             symmetry=_cpr_symmetry(modulation, order),
-            bps_P=P,
-            bps_K=_bps_K,
-            cs_H=_cs_H,
+            bps_P=bps.P,
+            bps_K=bps.K,
+            cs_H=bps.cs_H,
         )
-    return _attach_equalized_signal(
-        _log_equalizer_exit(
-            result,
-            name="Block-LMS",
-        ),
-        sig,
+    return _attach_equalized_signal(_log_equalizer_exit(result, name="Block-LMS"), sig)
+
+
+def _block_bps(
+    xp: Any,
+    C: int,
+    n_sym: int,
+    *,
+    test_phases: int,
+    window: int,
+    joint: bool,
+    cycle_slip: bool,
+    history: int,
+    threshold: float,
+    symmetry: int,
+    cpr_state: CPRState | None,
+) -> _BlockBps:
+    """BPS state for ``block_lms``: warm start from a compatible ``cpr_state``."""
+    P = test_phases
+    angles_np = np.linspace(0.0, np.pi / 2.0, P, endpoint=False, dtype=np.float32)
+    cs_H = min(history, n_sym)
+    hist_len = max(0, window - 1)
+    st = cpr_state
+    if (
+        st is not None
+        and st.cpr_type == "bps"
+        and st.num_ch == C
+        and st.cs_H == cs_H
+        and st.bps_P == P
+        and st.bps_K == window
+        and st.bps_prev4 is not None
+    ):
+        assert st.bps_offset4 is not None
+        assert st.cs_buf_x is not None
+        assert st.cs_buf_y is not None
+        assert st.cs_buf_ptr is not None
+        assert st.cs_buf_n is not None
+        assert st.cs_stats is not None
+        prev4 = st.bps_prev4.copy()
+        offset4 = st.bps_offset4.copy()
+        cs_buf_x = st.cs_buf_x.copy()
+        cs_buf_y = st.cs_buf_y.copy()
+        cs_buf_ptr = st.cs_buf_ptr.copy()
+        cs_buf_n = st.cs_buf_n.copy()
+        cs_stats = st.cs_stats.copy()
+        d2_hist = (
+            xp.array(st.bps_d2_hist, dtype=xp.float32)
+            if st.bps_d2_hist is not None
+            else xp.zeros((P, C, hist_len), dtype=xp.float32)
+        )
+    else:
+        prev4 = np.zeros(C, dtype=np.float64)
+        offset4 = np.zeros(C, dtype=np.float64)
+        cs_buf_x = np.zeros((C, cs_H), dtype=np.float64)
+        cs_buf_y = np.zeros((C, cs_H), dtype=np.float64)
+        cs_buf_ptr = np.zeros(C, dtype=np.int64)
+        cs_buf_n = np.zeros(C, dtype=np.int64)
+        cs_stats = np.zeros((C, 4), dtype=np.float64)
+        d2_hist = xp.zeros((P, C, hist_len), dtype=xp.float32)
+    return _BlockBps(
+        P=P,
+        K=window,
+        hist_len=hist_len,
+        joint=joint,
+        angles=xp.asarray(angles_np),
+        phases_neg=xp.asarray(np.exp(-1j * angles_np).astype(np.complex64)),
+        prev4=xp.asarray(prev4),
+        offset4=xp.asarray(offset4),
+        d2_hist=d2_hist,
+        cs=cycle_slip,
+        cs_H=cs_H,
+        quantum=float(np.float64(2.0 * np.pi / symmetry)),
+        threshold=threshold,
+        cs_buf_x=cs_buf_x,
+        cs_buf_y=cs_buf_y,
+        cs_buf_ptr=cs_buf_ptr,
+        cs_buf_n=cs_buf_n,
+        cs_stats=cs_stats,
+    )
+
+
+def _assemble_block(
+    run: _Block,
+    y_all: ArrayType,
+    e_all: ArrayType,
+    w_hist: ArrayType | None,
+    phi_all: ArrayType | None,
+    n_train: int,
+) -> EqualizerResult:
+    """Device buffers -> ``EqualizerResult`` (SISO squeezed)."""
+    if run.was_1d:
+        return EqualizerResult(
+            y_hat=y_all[0],
+            weights=run.h[0, 0],
+            error=e_all[0],
+            weights_history=None if w_hist is None else w_hist[:, 0, 0, :],
+            num_train_symbols=n_train,
+            input_norm_factor=run.eq_norm,
+            phase_trajectory=None if phi_all is None else phi_all[0],
+        )
+    return EqualizerResult(
+        y_hat=y_all,
+        weights=run.h,
+        error=e_all,
+        weights_history=w_hist,
+        num_train_symbols=n_train,
+        input_norm_factor=run.eq_norm,
+        phase_trajectory=phi_all,
     )

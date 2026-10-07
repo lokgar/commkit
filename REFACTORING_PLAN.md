@@ -949,7 +949,7 @@ The equalization pass (3.7) gets more commits:
   weights, weight histories, phase trajectories and CPR state. Found on the
   way: with `pilot_gain_db` the CPU path of `cma` / `rde` divided the
   pilots of the caller's complex64 array in place; it now works on a copy.
-- [ ] **3.7b `refactor(equalization): block equalizers share the FDAF
+- [x] **3.7b `refactor(equalization): block equalizers share the FDAF
   loop`.** `block_lms` duplicates the FDAF forward pass, the gradient update
   and the CUDA-graph block loop of the blind engine; all three get one
   implementation, and the block front end mirrors 3.7a. Bit-identical on
