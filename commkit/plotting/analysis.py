@@ -1,4 +1,8 @@
-"""Laser/carrier characterization plots (drift, Allan, linewidth)."""
+"""Laser/carrier characterization plots (drift, Allan, linewidth).
+
+Each plot takes the result it draws: a ``FrequencyDrift``, an
+``AllanDeviation`` or a ``LinewidthEstimate`` from ``commkit.analysis``.
+"""
 
 from typing import Any
 
@@ -15,11 +19,30 @@ from .theme import (
     _set_eng_formatter,
 )
 
+__all__ = [
+    "plot_allan_deviation",
+    "plot_carrier_phase_characterization",
+    "plot_dsh_beat_psd",
+    "plot_frequency_drift",
+    "plot_frequency_noise_psd",
+    "plot_increment_variance",
+]
+
+
+def _require(result: Any, field: str, name: str, what: str) -> Any:
+    """``result.<field>``; a result without it raises, naming what is needed."""
+    value = getattr(result, field, None)
+    if value is None:
+        raise ValueError(
+            f"{name} needs {what} (got {type(result).__name__} without {field})."
+        )
+    return value
+
 
 def plot_frequency_drift(
-    df,
+    drift,
     *,
-    symbol_rate: float,
+    sampling_rate: float,
     amp_ref: float | None = None,
     ax=None,
     show: bool = False,
@@ -28,16 +51,16 @@ def plot_frequency_drift(
     """
     Plots the instantaneous residual frequency offset vs time.
 
-    ``df`` is the per-symbol frequency wander from
-    ``analysis.frequency_drift_metrics`` - the slope of the smoothed (drift)
-    phase.  This is the spin the carrier-phase recovery must track.
+    Draws the ``df`` of ``analysis.frequency_drift`` - the slope of the
+    smoothed (drift) phase.  This is the spin the carrier-phase recovery must
+    track.
 
     Parameters
     ----------
-    df : array_like
-        Residual frequency in Hz. Shape ``(M,)`` or ``(C, M)``.
-    symbol_rate : float
-        Symbol rate in Baud (time axis).
+    drift : FrequencyDrift
+        From ``analysis.frequency_drift``; ``df`` is ``(M,)`` or ``(C, M)``.
+    sampling_rate : float
+        Sampling rate of ``df`` in Hz (time axis).
     amp_ref : float, optional
         If given, draws dashed ``±amp_ref`` reference lines (e.g. the
         injected wander amplitude in a simulation).
@@ -49,12 +72,14 @@ def plot_frequency_drift(
     -------
     (fig, ax) or None
     """
-    df_c = _as_channels(df)
+    df_c = _as_channels(
+        _require(drift, "df", "plot_frequency_drift()", "a FrequencyDrift")
+    )
     C, M = df_c.shape
 
     fig, axi = _get_axis(ax)
 
-    t = np.arange(M) / float(symbol_rate)
+    t = np.arange(M) / float(sampling_rate)
     for i in range(C):
         axi.plot(t, df_c[i], color=f"C{i}", label=f"Pol {i}" if C > 1 else None)
 
@@ -98,61 +123,37 @@ def _log_cell_median(f_pos, s, sel, points_per_octave=24):
 
 
 def plot_frequency_noise_psd(
-    f,
-    S_f,
+    estimate,
     *,
-    beta_line=None,
-    floor=None,
-    band: tuple[float, float] | None = None,
-    above=None,
-    used=None,
     ax=None,
     show: bool = False,
     title: str = "Frequency-noise PSD",
 ) -> tuple[Any, Any] | None:
     """
-    Plots the frequency-noise PSD S_f(f) on log-log axes.
+    Plots the frequency-noise PSD of a linewidth estimate on log-log axes.
 
-    Overlays the optional Di Domenico β-separation line and the white-FM-noise
-    floor.  Two distinct region annotations, matching the two estimator
-    families:
+    Draws ``S_f`` with the white-FM floor ``Δν/π`` (``linewidth_floor`` for
+    ``BetaSeparation``, the estimate itself for ``DshFmPsd``) and the region
+    annotations the estimate carries:
 
-    * ``band`` - the ``[f_min, f_max]`` **analysis fence** (light span with
-      edge lines): the window the white-FM-floor *median* is read from, or
-      the outer fence of the β-integration.  It is *not* itself the
-      integration region.
-    * ``above`` - the **actual β-integration region** ``{f : S_f(f) > β(f)}``
-      (in general a union of disjoint intervals): the area between the β-line
-      and the PSD is filled wherever the mask is true.  Pass
-      ``linewidth_beta_separation(...)['above']``.
+    * ``band`` - the analysis window: the ``[f_min, f_max]`` fence of
+      ``BetaSeparation`` or the extent of the ``DshFmPsd`` plateau.  It is
+      *not* itself the integration region.
+    * ``above`` (``BetaSeparation``) - the **actual β-integration region**
+      ``{f : S_f(f) > β(f)}`` (in general a union of disjoint intervals): the
+      area between the dashed β-line and the PSD is filled wherever it holds.
+    * ``used`` - the bins the floor median ran over (the auto-detected
+      plateau).  Sparse masks (≤ 400 bins) are drawn as markers on the PSD
+      trace, dense masks as a highlighted log-binned median curve.
 
-    See ``analysis.fm_noise_psd`` and ``analysis.linewidth_beta_separation``.
+    Dense spectra are drawn faint with a log-binned median trace on top.
+    Every channel's PSD is drawn; the masks are those of channel 0.
 
     Parameters
     ----------
-    f : array_like
-        One-sided frequency axis in Hz, shape ``(nfreq,)``.
-    S_f : array_like
-        Frequency-noise PSD in Hz²/Hz, shape ``(nfreq,)`` or ``(C, nfreq)``.
-    beta_line : array_like, optional
-        β-separation line ``(8 ln2/π²)·f``, shape ``(nfreq,)``.  Drawn dashed.
-    floor : float or array_like, optional
-        White-FM linewidth estimate(s) in Hz; a horizontal guide is drawn at the
-        corresponding PSD level ``S_f = Δν/π``.
-    band : (float, float), optional
-        ``(f_min, f_max)`` analysis fence.  The lower edge is clamped to the
-        first positive frequency bin for display (a 0 Hz fence is a
-        resolution statement, not a plottable frequency on a log axis).
-    above : array_like of bool, optional
-        Integration-region mask aligned with ``f``, shape ``(nfreq,)`` or
-        ``(C, nfreq)`` (channel 0 is drawn).  Requires ``beta_line``.
-    used : array_like of bool, optional
-        Mask of the bins a floor *median* actually ran over (the
-        auto-detected plateau).  Sparse masks (≤ 400 bins) are drawn as
-        markers on the PSD trace; dense masks as a highlighted **log-binned
-        median curve** over the accepted region (per-bin markers would
-        splatter the figure).  Pass ``linewidth_dsh(...)['used']`` /
-        ``linewidth_beta_separation(...)['used']``.  Channel 0 is drawn.
+    estimate : LinewidthEstimate
+        From ``analysis.estimate_linewidth`` with ``BetaSeparation`` or
+        ``DshFmPsd``.
     ax : Axes, optional
     show : bool, default False
     title : str
@@ -161,6 +162,13 @@ def plot_frequency_noise_psd(
     -------
     (fig, ax) or None
     """
+    name = "plot_frequency_noise_psd()"
+    S_f = _require(estimate, "S_f", name, "a BetaSeparation or DshFmPsd estimate")
+    f, beta_line, above = estimate.f, estimate.beta_line, estimate.above
+    band, used = estimate.band, estimate.used
+    floor = estimate.linewidth_floor
+    if floor is None:
+        floor = estimate.value
     f_c = np.asarray(to_device(f, "cpu"), dtype=np.float64)
     S_c = _as_channels(S_f)
     C = S_c.shape[0]
@@ -266,8 +274,7 @@ def plot_frequency_noise_psd(
 
 
 def plot_allan_deviation(
-    tau_s,
-    adev,
+    allan,
     *,
     reference_slopes: bool = True,
     ax=None,
@@ -279,14 +286,13 @@ def plot_allan_deviation(
 
     The local slope classifies the dominant frequency-noise process:
     white-FM ~ tau^(-1/2), flicker-FM ~ tau^0 (flat), random-walk-FM ~ tau^(+1/2),
-    linear drift ~ tau^(+1).  See ``analysis.allan_deviation``.
+    linear drift ~ tau^(+1).
 
     Parameters
     ----------
-    tau_s : array_like
-        Averaging times in seconds, shape ``(n_tau,)``.
-    adev : array_like
-        Allan deviation in Hz, shape ``(n_tau,)`` or ``(C, n_tau)``.
+    allan : AllanDeviation
+        From ``analysis.allan_deviation``; ``adev`` in Hz, ``(n_tau,)`` or
+        ``(C, n_tau)``.
     reference_slopes : bool, default True
         If True, overlays a faint ``τ^{-1/2}`` (white-FM) guide line.
     ax : Axes, optional
@@ -297,7 +303,8 @@ def plot_allan_deviation(
     -------
     (fig, ax) or None
     """
-    tau = np.asarray(to_device(tau_s, "cpu"), dtype=np.float64)
+    adev = _require(allan, "adev", "plot_allan_deviation()", "an AllanDeviation")
+    tau = np.asarray(to_device(allan.tau_s, "cpu"), dtype=np.float64)
     adv = _as_channels(adev)
     C = adv.shape[0]
 
@@ -338,11 +345,8 @@ def plot_allan_deviation(
 
 
 def plot_increment_variance(
-    lag_s,
-    var,
+    estimate,
     *,
-    slope=None,
-    intercept=None,
     ax=None,
     show: bool = False,
     title: str = "Phase-increment variance",
@@ -352,19 +356,15 @@ def plot_increment_variance(
 
     The measured points should follow ``Var = slope·lag + intercept`` for
     white-FM (Wiener) phase noise; curvature signals flicker or drift
-    contamination.  See ``analysis.linewidth_increment`` and
-    ``analysis.linewidth_dsh(method="increment")``.
+    contamination.  The fit and its intercept (the additive-noise term
+    ``2σ_φ²``) are drawn when the estimate has one (``IncrementSlope``,
+    ``DshIncrement``); ``IncrementSubtract`` draws its single lag-1 point.
 
     Parameters
     ----------
-    lag_s : array_like
-        Increment lags in seconds, shape ``(n_lag,)``.
-    var : array_like
-        Measured increment variance in rad², ``(n_lag,)`` or ``(C, n_lag)``.
-    slope : float or array_like, optional
-        Fitted slope(s) in rad²/s (per channel).  Drawn with ``intercept``.
-    intercept : float or array_like, optional
-        Fitted intercept(s) in rad² - the additive-noise term ``2σ_φ²``.
+    estimate : LinewidthEstimate
+        From ``analysis.estimate_linewidth`` with ``IncrementSlope``,
+        ``IncrementSubtract`` or ``DshIncrement``.
     ax : Axes, optional
     show : bool, default False
     title : str
@@ -373,7 +373,11 @@ def plot_increment_variance(
     -------
     (fig, ax) or None
     """
-    lag = np.asarray(to_device(lag_s, "cpu"), dtype=np.float64)
+    var = _require(
+        estimate, "var", "plot_increment_variance()", "an increment-method estimate"
+    )
+    slope, intercept = estimate.slope, estimate.intercept
+    lag = np.asarray(to_device(estimate.lag_s, "cpu"), dtype=np.float64)
     v = _as_channels(var)
     C = v.shape[0]
 
@@ -417,13 +421,8 @@ def plot_increment_variance(
 
 
 def plot_dsh_beat_psd(
-    f,
-    psd,
+    estimate,
     *,
-    f_peak=None,
-    linewidth=None,
-    linewidth_3db=None,
-    level_db: float = 20.0,
     ax=None,
     show: bool = False,
     title: str = "DSH beat spectrum",
@@ -431,25 +430,14 @@ def plot_dsh_beat_psd(
     """
     Plots the self-heterodyne beat PSD (dB rel. peak) with width annotations.
 
-    Overlays the half-power and ``-level_db`` contours and shades the full
-    widths implied by the linewidth estimates (``FWHM = 2Δν``,
-    ``W_L = 2√(10^{L/10}-1)·Δν``).  See
-    ``analysis.linewidth_dsh(method="lorentzian")``.
+    Centres the axis on the beat peak, overlays the half-power and
+    ``-level_db`` contours, and shades the full widths implied by the
+    linewidth estimates (``FWHM = 2Δν``, ``W_L = 2√(10^{L/10}-1)·Δν``).
 
     Parameters
     ----------
-    f : array_like
-        Two-sided frequency axis in Hz, shape ``(nfreq,)``.
-    psd : array_like
-        Beat PSD (linear), ``(nfreq,)`` or ``(C, nfreq)``.
-    f_peak : float or array_like, optional
-        Beat carrier location(s) in Hz; the x-axis is centered on the mean.
-    linewidth : float or array_like, optional
-        Deep-width linewidth estimate(s) Δν in Hz.
-    linewidth_3db : float or array_like, optional
-        Half-power linewidth estimate(s) in Hz.
-    level_db : float, default 20.0
-        Depth of the deep-width contour.
+    estimate : LinewidthEstimate
+        From ``analysis.estimate_linewidth`` with ``DshLorentzian``.
     ax : Axes, optional
     show : bool, default False
     title : str
@@ -458,6 +446,10 @@ def plot_dsh_beat_psd(
     -------
     (fig, ax) or None
     """
+    psd = _require(estimate, "psd", "plot_dsh_beat_psd()", "a DshLorentzian estimate")
+    f, f_peak = estimate.f, estimate.f_peak
+    linewidth, linewidth_3db = estimate.value, estimate.linewidth_3db
+    level_db = float(estimate.method.level_db)
     f_c = np.asarray(to_device(f, "cpu"), dtype=np.float64)
     p = _as_channels(psd)
     C = p.shape[0]
@@ -508,12 +500,14 @@ def plot_dsh_beat_psd(
 
 
 def plot_carrier_phase_characterization(
-    report: dict,
+    phi,
     *,
-    symbol_rate: float,
+    drift,
+    linewidth,
+    allan,
+    sampling_rate: float,
+    drift_phase=None,
     drift_cutoff: float | None = None,
-    band: tuple[float, float] | None = None,
-    floor=None,
     amp_ref: float | None = None,
     show: bool = False,
     title: str | None = None,
@@ -521,26 +515,27 @@ def plot_carrier_phase_characterization(
     """
     Full 2x2 carrier-phase characterization dashboard.
 
-    Combines ``carrier_phase_decomposition``, ``frequency_drift``,
-    ``frequency_noise_psd``, and ``allan_deviation`` into one figure from a
-    report dict assembled by the caller (see
-    ``examples/carrier_phase_analysis.py`` for the full chain).
+    Combines ``plot_carrier_phase_decomposition``, ``plot_frequency_drift``,
+    ``plot_frequency_noise_psd`` and ``plot_allan_deviation`` in one figure
+    (see ``examples/carrier_phase_analysis.py`` for the full chain).
 
     Parameters
     ----------
-    report : dict
-        ``{'phi', 'drift', 'drift_metrics', 'linewidth_beta', 'allan'}`` -
-        the outputs of ``carrier_phase_trajectory``,
-        ``separate_drift_phase_noise``, ``frequency_drift_metrics``,
-        ``linewidth_beta_separation``, and ``allan_deviation``.
-    symbol_rate : float
-        Symbol rate in Baud.
+    phi : array_like
+        Carrier phase trajectory in radians (``carrier_phase_trajectory``).
+    drift : FrequencyDrift
+        From ``analysis.frequency_drift``.
+    linewidth : LinewidthEstimate
+        A ``BetaSeparation`` or ``DshFmPsd`` estimate (its PSD is drawn).
+    allan : AllanDeviation
+        From ``analysis.allan_deviation``.
+    sampling_rate : float
+        Sampling rate of ``phi`` in Hz.
+    drift_phase : array_like, optional
+        Smoothed drift phase (``separate_drift_phase_noise``), overlaid on
+        ``phi``.
     drift_cutoff : float, optional
         Annotated in the phase-decomposition panel title.
-    band : (float, float), optional
-        ``(f_min, f_max)`` integration band, shaded on the PSD panel.
-    floor : float or array_like, optional
-        White-FM floor guide; defaults to the report's estimated floor.
     amp_ref : float, optional
         Injected wander amplitude reference for the drift panel.
     show : bool, default False
@@ -554,37 +549,17 @@ def plot_carrier_phase_characterization(
 
     lp = f"  (LP {drift_cutoff / 1e6:.1f} MHz)" if drift_cutoff else ""
     plot_carrier_phase_decomposition(
-        report["phi"],
-        report.get("drift"),
-        symbol_rate=symbol_rate,
+        phi,
+        drift_phase,
+        symbol_rate=sampling_rate,
         ax=axes[0, 0],
         title=f"Recovered carrier phase{lp}",
     )
     plot_frequency_drift(
-        report["drift_metrics"]["df"],
-        symbol_rate=symbol_rate,
-        amp_ref=amp_ref,
-        ax=axes[0, 1],
+        drift, sampling_rate=sampling_rate, amp_ref=amp_ref, ax=axes[0, 1]
     )
-
-    lw_beta = report["linewidth_beta"]
-    if floor is None:
-        floor = lw_beta.get("linewidth_floor")
-    plot_frequency_noise_psd(
-        lw_beta["f"],
-        lw_beta["S_f"],
-        beta_line=lw_beta.get("beta_line"),
-        floor=floor,
-        band=band,
-        above=lw_beta.get("above"),
-        used=lw_beta.get("used"),
-        ax=axes[1, 0],
-    )
-    plot_allan_deviation(
-        report["allan"]["tau_s"],
-        report["allan"]["adev"],
-        ax=axes[1, 1],
-    )
+    plot_frequency_noise_psd(linewidth, ax=axes[1, 0])
+    plot_allan_deviation(allan, ax=axes[1, 1])
 
     if title:
         fig.suptitle(title)

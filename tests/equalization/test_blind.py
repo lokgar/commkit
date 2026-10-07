@@ -15,6 +15,7 @@ from commkit.equalization import (
     block_rde,
     build_pilot_ref,
 )
+from commkit.mapping import Constellation
 from tests.common.conversions import to_numpy
 from tests.common.metrics import calc_dispersion
 from tests.common.signals import make_isi_distorted_signal
@@ -31,25 +32,25 @@ class TestBlockFDAFEngine:
         tx, rx = _isi_signal(xp, "qam", 16, 8000, 6, channel)
         n = 8000
         pmask = np.ones(n, bool)
-        pref, pu8 = build_pilot_ref(to_numpy(tx), pmask, n, 1)
+        pref, pu8 = build_pilot_ref(to_numpy(tx), pmask, n_sym=n, num_ch=1)
         r_cma = block_cma(
             rx,
-            modulation="qam",
-            order=16,
+            constellation=Constellation.qam(16),
             num_taps=15,
             step_size=2e-4,
             block_size=256,
             pilot_ref=pref,
             pilot_mask=pu8,
+            sps=2,
         )
         r_lms = block_lms(
             rx,
-            training_symbols=tx,
-            modulation="qam",
-            order=16,
+            tx,
+            constellation=Constellation.qam(16),
             num_taps=15,
             step_size=2e-4,
             block_size=256,
+            sps=2,
         )
         xpt.assert_allclose(r_cma.y_hat, r_lms.y_hat, atol=1e-4, rtol=1e-4)
 
@@ -60,11 +61,11 @@ class TestBlockFDAFEngine:
         with pytest.raises(RuntimeError, match="diverged"):
             block_cma(
                 rx,
-                modulation="psk",
-                order=4,
+                constellation=Constellation.psk(4),
                 num_taps=15,
-                step_size=5.0,  # far above the stability ceiling
+                step_size=5.0,
                 block_size=256,
+                sps=2,
             )
 
 
@@ -74,11 +75,11 @@ class TestBlockCMA:
         _, rx = _isi_signal(xp, "psk", 4, 40000, 5, channel)
         r = block_cma(
             rx,
-            modulation="psk",
-            order=4,
+            constellation=Constellation.psk(4),
             num_taps=15,
             step_size=1e-3,
             block_size=256,
+            sps=2,
         )
         assert r.y_hat.shape[-1] == 40000
         assert calc_dispersion(r.y_hat[20000:], 4, "psk") < 0.02
@@ -88,15 +89,20 @@ class TestBlockCMA:
         channel = np.array([0.06, 1.0, -0.25, 0.08], np.complex64)
         _, rx = _isi_signal(np, "psk", 4, 8000, 5, channel)
         ref = block_cma(
-            rx, modulation="psk", order=4, num_taps=15, step_size=1e-3, block_size=256
-        )
-        cur = block_cma(
-            xp.asarray(rx),
-            modulation="psk",
-            order=4,
+            rx,
+            constellation=Constellation.psk(4),
             num_taps=15,
             step_size=1e-3,
             block_size=256,
+            sps=2,
+        )
+        cur = block_cma(
+            xp.asarray(rx),
+            constellation=Constellation.psk(4),
+            num_taps=15,
+            step_size=1e-3,
+            block_size=256,
+            sps=2,
         )
         assert np.max(np.abs(to_numpy(cur.y_hat) - ref.y_hat)) < 1e-3
 
@@ -106,16 +112,16 @@ class TestBlockCMA:
         tx, rx = _isi_signal(xp, "psk", 4, n, 5, channel)
         pmask = np.zeros(n, bool)
         pmask[::8] = True
-        pref, pu8 = build_pilot_ref(to_numpy(tx)[pmask], pmask, n, 1)
+        pref, pu8 = build_pilot_ref(to_numpy(tx)[pmask], pmask, n_sym=n, num_ch=1)
         r = block_cma(
             rx,
-            modulation="psk",
-            order=4,
+            constellation=Constellation.psk(4),
             num_taps=15,
             step_size=1e-3,
             block_size=128,
             pilot_ref=pref,
             pilot_mask=pu8,
+            sps=2,
         )
         # Phase resolved by pilots => low MSE vs the true symbols (no ambiguity).
         e = to_numpy(r.y_hat)[10000:] - to_numpy(tx)[10000 : r.y_hat.shape[-1]]
@@ -129,15 +135,19 @@ class TestBlockCMA:
         _, rx = _isi_signal(xp, "psk", 4, 4000, 5, channel)
         sig = Signal(samples=rx, sampling_rate=2e6, symbol_rate=1e6)
         kw = dict(
-            modulation="psk", order=4, num_taps=15, step_size=1e-3, block_size=256
+            constellation=Constellation.psk(4),
+            num_taps=15,
+            step_size=1e-3,
+            block_size=256,
         )
 
         result_sig = block_cma(sig, **kw)
         result_arr = block_cma(rx, sps=2, **kw)
 
-        assert isinstance(result_sig.y_hat, Signal)
-        assert result_sig.y_hat.sampling_rate == 1e6
-        xpt.assert_allclose(result_sig.y_hat.samples, result_arr.y_hat)
+        assert isinstance(result_sig.signal, Signal)
+        assert result_sig.signal.sampling_rate == 1e6
+        xpt.assert_allclose(result_sig.signal.samples, result_arr.y_hat)
+        xpt.assert_allclose(result_sig.y_hat, result_arr.y_hat)
 
 
 class TestBlockRDE:
@@ -146,11 +156,11 @@ class TestBlockRDE:
         _, rx = _isi_signal(xp, "qam", 16, 16000, 5, channel)
         r = block_rde(
             rx,
-            modulation="qam",
-            order=16,
+            constellation=Constellation.qam(16),
             num_taps=15,
             step_size=1e-4,
             block_size=256,
+            sps=2,
         )
         assert r.y_hat.shape[-1] == 16000
         # Multi-ring 16-QAM: RDE drives |y| onto the rings (blind, phase-ambiguous).
@@ -163,11 +173,11 @@ class TestBlockRDE:
         _, rx = _isi_signal(xp, "qam", 16, n_odd, 7, channel)
         r = block_rde(
             rx,
-            modulation="qam",
-            order=16,
+            constellation=Constellation.qam(16),
             num_taps=15,
             step_size=1e-4,
             block_size=256,
+            sps=2,
         )
         assert r.y_hat.shape[-1] == n_odd
 
@@ -178,15 +188,19 @@ class TestBlockRDE:
         _, rx = _isi_signal(xp, "qam", 16, 4000, 5, channel)
         sig = Signal(samples=rx, sampling_rate=2e6, symbol_rate=1e6)
         kw = dict(
-            modulation="qam", order=16, num_taps=15, step_size=1e-4, block_size=256
+            constellation=Constellation.qam(16),
+            num_taps=15,
+            step_size=1e-4,
+            block_size=256,
         )
 
         result_sig = block_rde(sig, **kw)
         result_arr = block_rde(rx, sps=2, **kw)
 
-        assert isinstance(result_sig.y_hat, Signal)
-        assert result_sig.y_hat.sampling_rate == 1e6
-        xpt.assert_allclose(result_sig.y_hat.samples, result_arr.y_hat)
+        assert isinstance(result_sig.signal, Signal)
+        assert result_sig.signal.sampling_rate == 1e6
+        xpt.assert_allclose(result_sig.signal.samples, result_arr.y_hat)
+        xpt.assert_allclose(result_sig.y_hat, result_arr.y_hat)
 
 
 class TestBlockBlindMIMO:
@@ -196,11 +210,11 @@ class TestBlockBlindMIMO:
         rx2 = xp.stack([rx, xp.roll(rx, 1)])
         r = block_cma(
             rx2,
-            modulation="psk",
-            order=4,
+            constellation=Constellation.psk(4),
             num_taps=15,
             step_size=1e-3,
             block_size=128,
+            sps=2,
         )
         assert r.y_hat.shape == (2, 20000)
         for ch in range(2):

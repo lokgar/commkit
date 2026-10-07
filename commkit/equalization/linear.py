@@ -4,13 +4,15 @@ from __future__ import annotations
 
 import numpy as np
 
-from ..backend import ArrayType, dispatch, to_device
+from .._array import as_2d, restore_1d
+from .._overlap_save import ols_backward, ols_forward
+from ..backend import ArrayType, dispatch
 from ..core._signal_adapter import adapt_signal, require_integer_sps
 from ..core.signal import Signal
-from ..filtering import _ols_backward, _ols_forward
-from ..helpers import as_2d, restore_1d
 from ..logger import logger
 from ._common import _build_padded_samples, _normalize_inputs
+
+__all__ = ["apply_taps", "estimate_transfer_function", "zf_equalizer"]
 
 # -----------------------------------------------------------------------------
 # BLOCK EQUALIZATION (Signal-aware)
@@ -20,8 +22,8 @@ from ._common import _build_padded_samples, _normalize_inputs
 def zf_equalizer(
     samples: ArrayType | Signal,
     channel_estimate: ArrayType,
+    *,
     noise_variance: float = 0.0,
-    debug_plot: bool = False,
 ) -> ArrayType | Signal:
     """
     Zero-Forcing / MMSE frequency-domain block equalizer.
@@ -79,7 +81,7 @@ def zf_equalizer(
     )
 
     # --- Shared OLS forward pass: pad -> stride_tricks -> batch FFT ---
-    Y, meta = _ols_forward(samples, N_fft)  # Y: (num_ch, num_blocks, N_fft)
+    Y, meta = ols_forward(samples, N_fft)  # Y: (num_ch, num_blocks, N_fft)
 
     if siso_channel:
         # SISO: scalar frequency-domain ZF/MMSE inversion.
@@ -122,16 +124,7 @@ def zf_equalizer(
         X_hat_f = xp.transpose(X_hat_k, (1, 2, 0))  # (num_ch, num_blocks, N_fft)
 
     # --- Shared OLS backward pass: batch IFFT -> symmetric discard -> reshape ---
-    out = _ols_backward(X_hat_f, meta)
-
-    if debug_plot:
-        from .. import plotting as _plotting  # lazy import avoids circular dep
-
-        _plotting.plot_zf_equalizer_response(
-            channel_estimate=to_device(channel_estimate, "cpu"),
-            noise_variance=noise_variance,
-            show=True,
-        )
+    out = ols_backward(X_hat_f, meta)
 
     return signal_adapter.wrap_samples(restore_1d(was_1d, out))
 
@@ -139,6 +132,7 @@ def zf_equalizer(
 def apply_taps(
     samples: ArrayType | Signal,
     weights: ArrayType,
+    *,
     sps: int | None = None,
     normalize: bool = True,
     input_norm_factor: float | np.ndarray | None = None,
@@ -156,7 +150,7 @@ def apply_taps(
 
         y[i, n] = sum_j sum_t conj(W[i,j,t]) * x[j, n*sps + t]
 
-    which is the same inner computation as the Numba/JAX adaptive-equalizer
+    which is the same inner computation as the Numba adaptive-equalizer
     kernels, fully vectorized over ``n`` via a single batched ``einsum``.
 
     Parameters
@@ -172,9 +166,8 @@ def apply_taps(
         ``(C, C, num_taps)`` for MIMO butterfly.
     sps : int, optional
         Samples per symbol. Output length is ``N_samples // sps``.
-        Unlike the adaptive equalizers, any ``sps >= 1`` is accepted.
-        Defaults to ``2`` for array input; ignored for :class:`Signal` input,
-        which always uses the signal's own ``sps``.
+        An integer.  Taken from the Signal; required for array input.  A
+        value that disagrees with the Signal raises.
     normalize : bool, default True
         If ``True``, normalize ``samples`` to unit symbol power before
         filtering (same pre-processing as the adaptive equalizers via
@@ -210,13 +203,9 @@ def apply_taps(
     signal_adapter = adapt_signal(samples, function_name="apply_taps()")
     samples = signal_adapter.array
     metadata = {}
+    sps = require_integer_sps(signal_adapter.resolve_fact("sps", sps), "apply_taps()")
     if signal_adapter.signal is not None:
-        sps = signal_adapter.resolve_required("sps", sps)
         metadata["sampling_rate"] = signal_adapter.signal.symbol_rate
-
-    if sps is None:
-        sps = 2
-    sps = require_integer_sps(sps, "apply_taps()")
 
     samples, xp, _ = dispatch(samples)
     weights = xp.asarray(weights)

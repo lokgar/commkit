@@ -1,18 +1,15 @@
 """Linear fiber-channel impairments: chromatic dispersion, PMD, SOP mixing."""
 
 import math
+from types import ModuleType
+from typing import Any
 
 import numpy as np
 
+from ..._array import require_channels
+from ..._dispersion import apply_dispersion
 from ...backend import ArrayType, dispatch
-from ...core._signal_adapter import adapt_signal
-from ...core.signal import Signal
-from ...helpers import (
-    _cd_beta2_length,
-    as_2d,
-    require_channels,
-    restore_1d,
-)
+from ...core._signal_adapter import S, adapt_signal
 from ...logger import logger
 
 __all__ = [
@@ -22,7 +19,7 @@ __all__ = [
 ]
 
 
-def _jones_rotation(theta: float, xp, dtype) -> ArrayType:
+def _jones_rotation(theta: float, xp: ModuleType, dtype: Any) -> ArrayType:
     """Static 2x2 Jones rotation matrix ``R(theta) = [[cos, -sin], [sin, cos]]``.
 
     Shared builder for ``apply_pmd``'s PSP-frame rotation (``R(+theta)`` and
@@ -38,11 +35,12 @@ def _jones_rotation(theta: float, xp, dtype) -> ArrayType:
 
 
 def apply_pmd(
-    samples: ArrayType | Signal,
-    sampling_rate: float | None = None,
-    dgd: float | None = None,
+    samples: S,
+    *,
+    dgd: float,
     theta: float = 0.0,
-) -> ArrayType | Signal:
+    sampling_rate: float | None = None,
+) -> S:
     """
     Applies first-order Polarization Mode Dispersion (PMD) to a dual-pol signal.
 
@@ -70,10 +68,6 @@ def apply_pmd(
     ----------
     samples : array_like or Signal
         Dual-polarization signal. Shape: ``(2, N_samples)``.
-    sampling_rate : float, optional
-        Sampling rate in Hz.  Required for array input; ignored for
-        :class:`Signal` input, which always uses the signal's own
-        ``sampling_rate``.
     dgd : float
         Differential group delay tau in seconds.
         Set to ``0`` to apply pure SOP rotation with no delay (equivalent
@@ -83,6 +77,9 @@ def apply_pmd(
         much energy couples between X and Y polarisations.
         theta = 0 -> PSPs aligned with lab axes (no cross-coupling);
         theta = pi/4 -> maximum coupling.
+    sampling_rate : float, optional
+        Sampling rate in Hz.  Taken from the Signal; required for array
+        input.  A value that disagrees with the Signal raises.
 
     Returns
     -------
@@ -97,37 +94,34 @@ def apply_pmd(
 
     Examples
     --------
-    >>> samples = sig.samples  # shape (2, N), dual-pol
-    >>> distorted = apply_pmd(samples, sig.sampling_rate, dgd=5e-12, theta=np.pi/5)
+    >>> x = sig.samples  # shape (2, N), dual-pol
+    >>> distorted = apply_pmd(x, dgd=5e-12, theta=np.pi / 5, sampling_rate=fs)
     >>> distorted = apply_pmd(sig, dgd=5e-12, theta=np.pi / 5)  # Signal input
     """
     signal_adapter = adapt_signal(samples, function_name="apply_pmd()")
-    samples = signal_adapter.array
-    sampling_rate = signal_adapter.resolve_required("sampling_rate", sampling_rate)
-    if dgd is None:
-        raise ValueError("apply_pmd() requires dgd.")
+    sampling_rate = signal_adapter.resolve_fact("sampling_rate", sampling_rate)
 
     logger.info("Applying PMD (DGD=%.2e s, theta=%.3f rad).", dgd, theta)
 
-    samples, xp, _ = dispatch(samples)
+    x, xp, _ = dispatch(signal_adapter.array)
 
     require_channels(
-        samples, 2, name="samples", description="dual-pol input with shape (2, N)"
+        x, 2, name="samples", description="dual-pol input with shape (2, N)"
     )
 
-    N = samples.shape[1]
+    N = x.shape[1]
     freqs = xp.fft.fftfreq(N, d=1.0 / sampling_rate)
 
     # H(f) = R(+θ) · diag(D) · R(-θ)
     # R(-θ): rotate INTO the principal-state-of-polarisation (PSP) frame
-    Rfwd = _jones_rotation(-theta, xp, samples.dtype)
+    Rfwd = _jones_rotation(-theta, xp, x.dtype)
     # R(+θ): rotate back to the lab frame
-    Rinv = _jones_rotation(theta, xp, samples.dtype)
+    Rinv = _jones_rotation(theta, xp, x.dtype)
 
     phase = xp.pi * freqs * dgd
     D = xp.stack([xp.exp(-1j * phase), xp.exp(1j * phase)])  # (2, N)
 
-    S_F = xp.fft.fft(samples, axis=-1)  # (2, N)
+    S_F = xp.fft.fft(x, axis=-1)  # (2, N)
 
     # Apply: rotate to PSP frame -> DGD delay -> rotate back to lab frame
     out_F = Rinv @ (D * (Rfwd @ S_F))
@@ -135,17 +129,18 @@ def apply_pmd(
     result = xp.fft.ifft(out_F, axis=-1)
 
     # Preserve input dtype (ifft may produce complex128 from complex64 input)
-    if result.dtype != samples.dtype:
-        result = result.astype(samples.dtype)
+    if result.dtype != x.dtype:
+        result = result.astype(x.dtype)
 
     return signal_adapter.wrap_samples(result)
 
 
 def apply_polarization_mixing(
-    samples: ArrayType | Signal,
+    samples: S,
+    *,
     theta: float | ArrayType,
-    drift_rate_rad_per_sym: float = 0.0,
-) -> ArrayType | Signal:
+    drift_rad_per_sample: float = 0.0,
+) -> S:
     """
     Applies a static or time-varying polarization rotation (pure SOP mixing).
 
@@ -170,11 +165,11 @@ def apply_polarization_mixing(
         * **Array of shape** ``(N,)`` - time-varying SOP: one angle per sample,
           applied sample-by-sample via vectorised broadcasting.
 
-        When ``theta`` is a scalar and ``drift_rate_rad_per_sym != 0``, the
+        When ``theta`` is a scalar and ``drift_rad_per_sample != 0``, the
         trajectory is extended as a linear ramp:
-        ``theta[n] = theta + drift_rate_rad_per_sym * n``.
-    drift_rate_rad_per_sym : float, default 0.0
-        Linear SOP drift rate in radians per sample.  Only used when ``theta``
+        ``theta[n] = theta + drift_rad_per_sample * n``.
+    drift_rad_per_sample : float, default 0.0
+        Linear SOP drift in radians per sample.  Only used when ``theta``
         is a scalar.  Ignored when ``theta`` is an array.
 
     Returns
@@ -193,40 +188,39 @@ def apply_polarization_mixing(
     >>> # Static 45° rotation
     >>> rotated = apply_polarization_mixing(samples, theta=np.pi / 4)
 
-    >>> # Slow linear SOP drift: 1 mrad per symbol
-    >>> drifted = apply_polarization_mixing(samples, theta=0.0,
-    ...                                     drift_rate_rad_per_sym=1e-3)
+    >>> # Slow linear SOP drift: 1 mrad per sample
+    >>> drifted = apply_polarization_mixing(
+    ...     samples, theta=0.0, drift_rad_per_sample=1e-3)
     """
     signal_adapter = adapt_signal(samples, function_name="apply_polarization_mixing()")
-    samples = signal_adapter.array
 
     logger.info(
         "Applying polarization mixing (theta=%s, drift=%.3g rad/sym).",
         theta if np.ndim(theta) == 0 else "array",
-        drift_rate_rad_per_sym,
+        drift_rad_per_sample,
     )
 
-    samples, xp, _ = dispatch(samples)
+    x, xp, _ = dispatch(signal_adapter.array)
 
     require_channels(
-        samples, 2, name="samples", description="dual-pol input with shape (2, N)"
+        x, 2, name="samples", description="dual-pol input with shape (2, N)"
     )
 
-    N = samples.shape[1]
+    N = x.shape[1]
 
     # Build angle trajectory
     if np.ndim(theta) == 0:
         scalar_theta = float(theta)
-        if drift_rate_rad_per_sym != 0.0:
+        if drift_rad_per_sample != 0.0:
             angles = (
-                xp.arange(N, dtype=xp.float64) * drift_rate_rad_per_sym + scalar_theta
+                xp.arange(N, dtype=xp.float64) * drift_rad_per_sample + scalar_theta
             )
         else:
             # Static: scalar path - avoid building (N,) array
-            R = _jones_rotation(scalar_theta, xp, samples.dtype)
-            result = R @ samples
-            if result.dtype != samples.dtype:
-                result = result.astype(samples.dtype)
+            R = _jones_rotation(scalar_theta, xp, x.dtype)
+            result = R @ x
+            if result.dtype != x.dtype:
+                result = result.astype(x.dtype)
             return signal_adapter.wrap_samples(result)
     else:
         angles = xp.asarray(theta, dtype=xp.float64)
@@ -236,29 +230,30 @@ def apply_polarization_mixing(
             )
 
     # Time-varying: vectorised per-sample rotation via broadcasting
-    # R(θ[n]) applied to each column of samples
+    # R(θ[n]) applied to each column of x
     cos_t = xp.cos(angles)  # (N,)
     sin_t = xp.sin(angles)  # (N,)
 
-    Ex, Ey = samples[0], samples[1]
+    Ex, Ey = x[0], x[1]
     Ex_out = cos_t * Ex - sin_t * Ey
     Ey_out = sin_t * Ex + cos_t * Ey
 
     result = xp.stack([Ex_out, Ey_out])  # (2, N)
 
-    if result.dtype != samples.dtype:
-        result = result.astype(samples.dtype)
+    if result.dtype != x.dtype:
+        result = result.astype(x.dtype)
 
     return signal_adapter.wrap_samples(result)
 
 
 def apply_chromatic_dispersion(
-    samples: ArrayType | Signal,
+    samples: S,
+    *,
+    dispersion_ps_nm_km: float,
+    fiber_length_km: float,
+    center_wavelength_nm: float,
     sampling_rate: float | None = None,
-    dispersion_ps_nm_km: float | None = None,
-    fiber_length_km: float | None = None,
-    center_wavelength_nm: float | None = None,
-) -> ArrayType | Signal:
+) -> S:
     """
     Applies chromatic dispersion (CD) to a signal in the frequency domain.
 
@@ -277,10 +272,6 @@ def apply_chromatic_dispersion(
     ----------
     samples : array_like or Signal
         Complex baseband signal. Shape: ``(N,)`` (SISO) or ``(C, N)`` (MIMO).
-    sampling_rate : float, optional
-        Sampling rate in Hz.  Required for array input; ignored for
-        :class:`Signal` input, which always uses the signal's own
-        ``sampling_rate``.
     dispersion_ps_nm_km : float
         Fiber dispersion parameter D in ps / (nm * km).
         Standard SMF-28: 17 ps/(nm*km) at 1550 nm.
@@ -288,6 +279,9 @@ def apply_chromatic_dispersion(
         Fiber span length in km.
     center_wavelength_nm : float
         Center wavelength in nm (e.g. 1550 for C-band).
+    sampling_rate : float, optional
+        Sampling rate in Hz.  Taken from the Signal; required for array
+        input.  A value that disagrees with the Signal raises.
 
     Returns
     -------
@@ -297,30 +291,20 @@ def apply_chromatic_dispersion(
 
     See Also
     --------
-    commkit.filtering.compensate_chromatic_dispersion :
+    commkit.filtering.correct_chromatic_dispersion :
         Remove CD in the receiver (electronic dispersion compensation).
 
     Examples
     --------
     >>> distorted = apply_chromatic_dispersion(
-    ...     sig.samples, dispersion_ps_nm_km=17.0, fiber_length_km=80.0,
-    ...     center_wavelength_nm=1550.0, sampling_rate=sig.sampling_rate)
+    ...     x, dispersion_ps_nm_km=17.0, fiber_length_km=80.0,
+    ...     center_wavelength_nm=1550.0, sampling_rate=fs)
     >>> distorted = apply_chromatic_dispersion(  # Signal input
     ...     sig, dispersion_ps_nm_km=17.0, fiber_length_km=80.0,
     ...     center_wavelength_nm=1550.0)
     """
     signal_adapter = adapt_signal(samples, function_name="apply_chromatic_dispersion()")
-    samples = signal_adapter.array
-    sampling_rate = signal_adapter.resolve_required("sampling_rate", sampling_rate)
-    if (
-        dispersion_ps_nm_km is None
-        or fiber_length_km is None
-        or center_wavelength_nm is None
-    ):
-        raise ValueError(
-            "apply_chromatic_dispersion() requires dispersion_ps_nm_km, "
-            "fiber_length_km, and center_wavelength_nm."
-        )
+    sampling_rate = signal_adapter.resolve_fact("sampling_rate", sampling_rate)
 
     logger.info(
         "Applying CD (D=%s ps/nm/km, L=%s km, λ=%s nm).",
@@ -329,22 +313,12 @@ def apply_chromatic_dispersion(
         center_wavelength_nm,
     )
 
-    samples, xp, _ = dispatch(samples)
-    samples, was_1d = as_2d(samples, name="samples")
-    _, N = samples.shape
-
-    beta2 = _cd_beta2_length(
-        dispersion_ps_nm_km, fiber_length_km, center_wavelength_nm
-    )  # s²  (β₂·L product)
-
-    omega = 2.0 * np.pi * xp.fft.fftfreq(N, d=1.0 / sampling_rate)
-    H = xp.exp(-1j * (beta2 / 2.0) * omega**2)
-
-    S_F = xp.fft.fft(samples, axis=-1)
-    out_F = S_F * H[None, :]
-    result = xp.fft.ifft(out_F, axis=-1)
-
-    if result.dtype != samples.dtype:
-        result = result.astype(samples.dtype)
-
-    return signal_adapter.wrap_samples(restore_1d(was_1d, result))
+    result = apply_dispersion(
+        signal_adapter.array,
+        sampling_rate=sampling_rate,
+        dispersion_ps_nm_km=dispersion_ps_nm_km,
+        fiber_length_km=fiber_length_km,
+        center_wavelength_nm=center_wavelength_nm,
+        inverse=False,
+    )
+    return signal_adapter.wrap_samples(result)

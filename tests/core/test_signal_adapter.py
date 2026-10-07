@@ -5,11 +5,12 @@ from typing import Any
 import pytest
 
 from commkit.core._signal_adapter import adapt_signal, require_integer_sps
+from commkit.mapping import Constellation
 from tests.common.signals import make_adapter_test_signal
 
 
 class TestSignalAdapterMetadata:
-    """Tests for metadata resolution and precedence across Array and Signal inputs."""
+    """Array input passes through the adapter unchanged."""
 
     def test_prepare_array_input_is_passed_through(self, xp: Any) -> None:
         """Array input is held directly with None signal container."""
@@ -18,37 +19,7 @@ class TestSignalAdapterMetadata:
 
         assert signal_adapter.array is samples
         assert signal_adapter.signal is None
-        assert signal_adapter.resolve_required("sampling_rate", 1e6) == 1e6
-
-    def test_required_signal_metadata_wins(self, xp: Any, caplog: Any) -> None:
-        """Metadata on Signal instance overrides conflicting argument with a warning."""
-        sig = make_adapter_test_signal(xp)
-        signal_adapter = adapt_signal(sig, function_name="example()")
-
-        value = signal_adapter.resolve_required("sampling_rate", 99.0)
-
-        assert value == sig.sampling_rate
-        assert "ignoring supplied sampling_rate" in caplog.text
-
-    def test_required_array_metadata_reports_function_name(self, xp: Any) -> None:
-        """Missing required metadata on array input raises ValueError citing function name."""
-        signal_adapter = adapt_signal(xp.ones(8), function_name="example()")
-
-        with pytest.raises(ValueError, match=r"example\(\).*sampling_rate"):
-            signal_adapter.resolve_required("sampling_rate")
-
-    def test_optional_signal_metadata_precedence_and_fallback(
-        self, xp: Any, caplog: Any
-    ) -> None:
-        """Optional metadata uses Signal attribute when present, otherwise fallback value."""
-        populated = make_adapter_test_signal(xp, mod_scheme="QAM")
-        absent = make_adapter_test_signal(xp)
-        populated_adapter = adapt_signal(populated, function_name="example()")
-        absent_adapter = adapt_signal(absent, function_name="example()")
-
-        assert populated_adapter.resolve_optional("mod_scheme", "PSK") == "QAM"
-        assert absent_adapter.resolve_optional("mod_scheme", "PSK") == "PSK"
-        assert "falling back to supplied mod_scheme" in caplog.text
+        assert signal_adapter.resolve_fact("sampling_rate", 1e6) == 1e6
 
 
 class TestSignalAdapterTransforms:
@@ -60,18 +31,77 @@ class TestSignalAdapterTransforms:
         with pytest.raises(ValueError, match=r"example\(\).*positive integer"):
             require_integer_sps(value, "example()")
 
-    def test_signal_adapter_wrap_and_field_replacement(self, xp: Any) -> None:
-        """Wrapping samples or replacing fields produces clean cloned Signal instances."""
+    def test_signal_adapter_wrap_samples(self, xp: Any) -> None:
+        """Wrapping samples produces a new Signal sharing the rest."""
         sig = make_adapter_test_signal(xp)
-        sig.resolved_bits = xp.asarray([1, 0])
         signal_adapter = adapt_signal(sig, function_name="example()")
         replacement = xp.zeros(8, dtype=xp.complex64)
 
         transformed = signal_adapter.wrap_samples(replacement, sampling_rate=1e6)
-        resolved = signal_adapter.replace_signal_field("resolved_symbols", replacement)
 
         assert transformed is not sig
         assert transformed.samples is replacement
         assert transformed.sampling_rate == 1e6
-        assert resolved.resolved_symbols is replacement
-        assert resolved.resolved_bits is None
+
+    def test_symbol_array_requires_one_sample_per_symbol(self, xp: Any) -> None:
+        """symbol_array() passes arrays and 1-SPS Signals, rejects the rest."""
+        sig = make_adapter_test_signal(xp)  # 2 samples per symbol
+        with pytest.raises(ValueError, match=r"example\(\) needs one sample"):
+            adapt_signal(sig, function_name="example()").symbol_array()
+        one = sig.replace(sampling_rate=sig.symbol_rate)
+        assert adapt_signal(one, function_name="f()").symbol_array() is one.samples
+        assert adapt_signal(sig.samples, function_name="f()").symbol_array() is (
+            sig.samples
+        )
+
+
+class TestFactsAndChoices:
+    """resolve_fact / resolve_choice."""
+
+    def test_fact_from_signal(self, xp: Any) -> None:
+        a = adapt_signal(make_adapter_test_signal(xp), function_name="f()")
+        assert a.resolve_fact("sampling_rate") == 2e6
+        assert a.resolve_fact("sampling_rate", 2e6) == 2e6
+        assert a.resolve_fact("sps", 2.0 * (1 + 1e-12)) == 2.0
+
+    def test_conflicting_fact_raises(self, xp: Any) -> None:
+        a = adapt_signal(make_adapter_test_signal(xp), function_name="f()")
+        with pytest.raises(
+            ValueError, match=r"f\(\): sampling_rate=1000000.0 conflicts"
+        ):
+            a.resolve_fact("sampling_rate", 1e6)
+
+    def test_fact_required_for_array_input(self, xp: Any) -> None:
+        a = adapt_signal(xp.ones(4), function_name="f()")
+        assert a.resolve_fact("sampling_rate", 5.0) == 5.0
+        with pytest.raises(ValueError, match="requires sampling_rate"):
+            a.resolve_fact("sampling_rate")
+
+    def test_choice_explicit_wins_silently(self, xp: Any, caplog: Any) -> None:
+        sig = make_adapter_test_signal(xp, constellation=Constellation.qam(16))
+        a = adapt_signal(sig, function_name="f()")
+        assert a.resolve_choice("constellation") == Constellation.qam(16)
+        assert a.resolve_choice("constellation", Constellation.psk(4)) == (
+            Constellation.psk(4)
+        )
+        assert caplog.text == ""
+
+    def test_choice_for_array_input(self, xp: Any) -> None:
+        a = adapt_signal(xp.ones(4), function_name="f()")
+        assert a.resolve_choice("constellation") is None
+        assert a.resolve_choice("constellation", Constellation.qam(4)) == (
+            Constellation.qam(4)
+        )
+
+    @pytest.mark.parametrize("sps", [3.0000000000000004, 2.9999999999999996, 4.0, 1])
+    def test_near_integer_sps_accepted(self, sps: float) -> None:
+        assert require_integer_sps(sps, "f()") == round(sps)
+
+    def test_sps_from_rates_is_accepted(self) -> None:
+        sps = 3e9 / 1e9 * (1 + 2e-16)
+        assert require_integer_sps(sps, "f()") == 3
+
+    @pytest.mark.parametrize("sps", [1.5, 2.000001, 0.9999])
+    def test_fractional_sps_never_truncated(self, sps: float) -> None:
+        with pytest.raises(ValueError, match="positive integer"):
+            require_integer_sps(sps, "f()")

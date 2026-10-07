@@ -1,58 +1,33 @@
 """
-Symbol mapping, demapping, and constellation management.
+Symbol mapping, demapping and constellations.
 
-This package provides high-performance routines for the transition between
-digital bits and physical IQ symbols.  It is organised by mathematical concern:
+A modulation is described by a :class:`Constellation` (points, bit labels and
+an optional shaping prior); every function here takes one, never a
+``modulation`` string plus an ``order``:
 
-- :mod:`~commkit.mapping.gray` - constellation geometry and Gray labelling.
-- :mod:`~commkit.mapping.bits` - hard bit mapping / demapping.
-- :mod:`~commkit.mapping.llr` - soft-decision (LLR) demapping.
-- :mod:`~commkit.mapping.shaping` - probabilistic shaping (PS-QAM).
-- :mod:`~commkit.mapping.constellation` - the :class:`Constellation` value
-  object bundling points + Gray labels + optional shaping pmf.
+- :class:`Constellation` - factories ``.qam/.psk/.pam``, ``.shaped()``, and
+  the array-level ``map`` / ``demap`` / ``llr``.
+- :func:`map_bits`, :func:`demap_symbols_hard`, :func:`compute_llr` - the same
+  operations as functions; demapping and LLRs also accept a Signal.
+- :func:`maxwell_boltzmann`, :func:`optimal_nu` - probabilistic shaping.
+- :func:`gray_code`, :func:`gray_to_binary` - Gray code sequences.
 
-The public import surface is stable: every name previously importable from the
-flat ``commkit.mapping`` module is re-exported here.  ``Constellation`` is an
-additive convenience over the existing loose-array free functions.
-
-Note: codes and constellations are generated using NumPy (host-side).
+Constellations live on the host; operations run on the data's device.
 """
 
 from .bits import demap_symbols_hard, map_bits
 from .constellation import Constellation
-from .gray import (
-    gray_code,
-    gray_constellation,
-    gray_to_binary,
-    nearest_constellation_index,
-    square_qam_slicer_params,
-    unpack_bits,
-)
+from .gray import gray_code, gray_to_binary
 from .llr import compute_llr
-from .shaping import (
-    constellation_power,
-    maxwell_boltzmann,
-    optimal_nu,
-    ps_entropy,
-    rescale_ps_symbols,
-    sample_ps_symbols,
-)
+from .shaping import maxwell_boltzmann, optimal_nu
 
 __all__ = [
     "Constellation",
     "compute_llr",
-    "constellation_power",
     "demap_symbols_hard",
     "gray_code",
-    "gray_constellation",
     "gray_to_binary",
     "map_bits",
     "maxwell_boltzmann",
-    "nearest_constellation_index",
     "optimal_nu",
-    "ps_entropy",
-    "rescale_ps_symbols",
-    "sample_ps_symbols",
-    "square_qam_slicer_params",
-    "unpack_bits",
 ]

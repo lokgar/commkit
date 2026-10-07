@@ -9,9 +9,12 @@ from ..backend import to_device
 from ..smoothing import moving_average
 from .theme import _grid_figsize, _set_eng_formatter
 
+__all__ = ["plot_equalizer_result", "plot_zf_equalizer_response"]
+
 
 def plot_equalizer_result(
     result,
+    *,
     smoothing: int = 50,
     ax=None,
     show: bool = False,
@@ -66,7 +69,7 @@ def plot_equalizer_result(
         n = len(mse)
         effective = max(1, min(smoothing, n // 3))
         if effective > 1 and n > effective:
-            mse_smooth = moving_average(mse, effective, mode="valid")
+            mse_smooth = moving_average(mse, window=effective, mode="valid")
             # Element k of mode="valid" output averages mse[k : k+effective].
             # Place it at the centre of that window so the x-axis is in
             # actual symbol-index space, not smoothed-bin-index space.
@@ -125,9 +128,8 @@ def plot_equalizer_result(
         # SISO: (num_taps,) - stem plot
         num_taps = weights.shape[0]
         tap_idx = np.arange(num_taps) - (num_taps // 2)
-        markerline, stemlines, _ = ax_taps.stem(tap_idx, np.abs(weights))
-        plt.setp(stemlines)
-        plt.setp(markerline, markersize=4)
+        markerline, _, _ = ax_taps.stem(tap_idx, np.abs(weights))
+        markerline.set_markersize(4)
 
     ax_taps.set_xlabel("Tap Index")
     ax_taps.set_ylabel("|w|")
@@ -160,6 +162,7 @@ def plot_equalizer_result(
 
 def plot_zf_equalizer_response(
     channel_estimate,
+    *,
     noise_variance: float = 0.0,
     nfft: int = 1024,
     sampling_rate: float = 1.0,

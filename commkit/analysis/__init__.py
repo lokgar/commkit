@@ -19,41 +19,60 @@ package is deliberate and limited to three cases:
 * **tiny post-reduction fits**: e.g. ``np.polyfit`` on an ``(n_lag, C)``
   variance matrix after a single device->host transfer - cheaper than a device
   least-squares launch;
-* **report packaging**: summary functions (``linewidth_*``,
-  ``allan_deviation``, ``frequency_drift_metrics`` scalars) return Python
+* **report packaging**: summaries (``estimate_linewidth``,
+  ``allan_deviation``, ``frequency_drift`` scalars) return Python
   floats and *plot-sized* NumPy arrays (Welch/Allan grids, ≤ ``nperseg``
   bins) after one transfer, because their consumers are prints and plots.
 
-JAX arrays are **not** an input backend here (nor anywhere behind
-``backend.dispatch``): they report NumPy and are silently pulled to the host.
-Convert at the boundary with ``backend.from_jax`` before calling in.
+Inputs are NumPy or CuPy arrays; arrays from other frameworks raise
+``TypeError`` (convert them explicitly through DLPack).
 
-Sample-rate arrays returned to the caller (``carrier_phase_trajectory``,
-``separate_drift_phase_noise``, ``frequency_drift_metrics['df']``,
+Linewidth follows the verb rules of the rest of the library: one
+``estimate_linewidth(x, method)`` whose method object (``IncrementSlope``,
+``BetaSeparation``, ``DshFmPsd``, ...) chooses the estimator and returns a
+``LinewidthEstimate``.  The other analyses are plain computations.  Results
+with more than one value are frozen dataclasses (``AllanDeviation``,
+``FrequencyDrift``, ...).  Sample-rate arrays returned to the caller
+(``carrier_phase_trajectory``, ``separate_drift_phase_noise``,
+``frequency_drift(...).df``,
 ``dsh_phase``, ``fm_noise_psd``, ``dsh_fm_noise_psd``) always stay on the
 input backend - chain them without paying transfers.
 """
 
-from .allan import allan_deviation
-from .drift import frequency_drift_metrics, separate_drift_phase_noise
-from .interferometry import dsh_beat, dsh_fm_noise_psd, dsh_phase, linewidth_dsh
+from .allan import AllanDeviation, allan_deviation
+from .drift import FrequencyDrift, frequency_drift, separate_drift_phase_noise
+from .fm_noise import DshFmNoisePsd, dsh_fm_noise_psd, fm_noise_psd
+from .interferometry import dsh_beat, dsh_phase
 from .linewidth import (
-    fm_noise_psd,
-    linewidth_beta_separation,
-    linewidth_increment,
+    BetaSeparation,
+    DshFmPsd,
+    DshIncrement,
+    DshLorentzian,
+    IncrementSlope,
+    IncrementSubtract,
+    LinewidthEstimate,
+    estimate_linewidth,
 )
 from .trajectory import carrier_phase_trajectory
 
 __all__ = [
+    "AllanDeviation",
+    "BetaSeparation",
+    "DshFmNoisePsd",
+    "DshFmPsd",
+    "DshIncrement",
+    "DshLorentzian",
+    "FrequencyDrift",
+    "IncrementSlope",
+    "IncrementSubtract",
+    "LinewidthEstimate",
     "allan_deviation",
     "carrier_phase_trajectory",
     "dsh_beat",
     "dsh_fm_noise_psd",
     "dsh_phase",
+    "estimate_linewidth",
     "fm_noise_psd",
-    "frequency_drift_metrics",
-    "linewidth_beta_separation",
-    "linewidth_dsh",
-    "linewidth_increment",
+    "frequency_drift",
     "separate_drift_phase_noise",
 ]

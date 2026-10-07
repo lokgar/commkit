@@ -1,191 +1,123 @@
 """Viterbi-Viterbi (V&V) carrier phase recovery."""
 
+from dataclasses import dataclass
+
 import numpy as np
 
-from ..backend import ArrayType, dispatch, to_device
-from ..core._signal_adapter import adapt_signal
-from ..core.signal import Signal
-from ..frequency import _modulation_power_m
-from ..helpers import as_2d, restore_1d
+from ..backend import ArrayType, dispatch
 from ..logger import logger
-from ._common import _vv_block_phase
-from .corrections import _log_phase_summary, correct_cycle_slips
+from ._common import (
+    _check_blocks,
+    _Context,
+    _mth_power_geometry,
+    _Phase,
+    _vv_block_phase,
+)
+from .corrections import CycleSlip, _log_phase_summary, _repair_slips
+
+__all__ = ["ViterbiViterbi"]
 
 
-def recover_carrier_phase_viterbi_viterbi(
-    symbols: ArrayType | Signal,
-    modulation: str | None = None,
-    order: int | None = None,
-    block_size: int = 32,
-    joint_channels: bool = False,
-    cycle_slip_correction: bool = False,
-    cycle_slip_history: int = 100,
-    cycle_slip_threshold: float = np.pi / 4,
-    debug_plot: bool = False,
-) -> ArrayType:
+@dataclass(frozen=True)
+class ViterbiViterbi:
     """
-    Carrier phase recovery via the Viterbi-Viterbi (M-th power) algorithm.
+    Viterbi-Viterbi (M-th power) block phase estimation.
 
-    Block-based blind phase estimation for PSK and QAM symbols. Raises each
-    block of symbols to the M-th power to remove modulation, extracts the
-    block phase, resolves the M-fold ambiguity by unwrapping, then
-    interpolates to per-symbol resolution.
+    Each block of symbols is raised to the constellation's rotational
+    symmetry ``M`` to remove the modulation, ``S_b = Σ s[n]^M``,
+    ``φ_b = ∠S_b / M``.  Block phases are M-fold unwrapped, the constellation
+    bias is removed, and the result is interpolated linearly to per-symbol
+    resolution.  Points that are not constant-modulus (QAM) are projected
+    onto the unit circle first.
 
     Parameters
     ----------
-    symbols : array_like or Signal
-        1-SPS complex symbols after matched filter. Shape: (N,) or (C, N).
-        A :class:`Signal` supplies ``modulation``/``order`` from its
-        metadata when not given explicitly.
-    modulation : str, optional
-        Modulation scheme (case-insensitive): 'psk', 'qam', etc.  Required
-        for array input; for :class:`Signal` input, used only as a fallback
-        when the signal's ``mod_scheme`` is unset.
-    order : int, optional
-        Modulation order.  Required for array input; for :class:`Signal`
-        input, used only as a fallback when the signal's ``mod_order`` is
-        unset.
     block_size : int, default 32
-        Number of symbols per estimation block. Larger blocks reduce
-        variance but reduce tracking bandwidth for fast phase noise.
-        Typical range: 16-128 for QAM; as low as 1 for PSK (data cancels
-        exactly in the M-th power for M-PSK constellations).
+        Symbols per block.  Larger blocks reduce variance but slow tracking.
+        PSK cancels exactly per symbol (``block_size`` can be 1); for QAM
+        the minimum reliable size grows as about ``4·ceil(√order)``.
     joint_channels : bool, default False
-        For MIMO inputs (C > 1): if ``True``, sum the M-th-power block
-        phasors ``S_b`` across all channels before phase extraction.
-        The resulting single trajectory is broadcast to all C output rows.
-        Reduces variance by ~√C for shared-LO systems.  SISO-safe.
-    cycle_slip_correction : bool, default False
-        If ``True``, apply cycle-slip detection and correction
-        (``correct_cycle_slips``) after M-fold unwrap, before
-        interpolation.
-    cycle_slip_history : int, default 100
-        ``history_length`` passed to ``correct_cycle_slips``.
-    cycle_slip_threshold : float, default π/4
-        ``threshold`` passed to ``correct_cycle_slips`` (radians).
-    debug_plot : bool, default False
-        If ``True``, opens a diagnostic figure showing the per-symbol phase
-        trajectory alongside the block-phase estimates.
-
-    Returns
-    -------
-    array_like
-        Per-symbol phase estimate in radians. Shape matches ``symbols``.
-        Same backend as input.
+        MIMO: sum the block phasors ``S_b`` across channels before the angle
+        and give every channel the one trajectory (shared LO).
+    cycle_slip : CycleSlip, optional
+        Repair cycle slips in the block phases before interpolation.
 
     Notes
     -----
-    Each block: S_b = sum s[n]^M, phi_hat_b = angle(S_b) / M. Block phases
-    are M-fold unwrapped; a global 2*pi/M ambiguity always remains.
-
-    For QAM with order > 4, block averaging suppresses M-th-power data residuals;
-    minimum reliable block_size scales as ~4*ceil(sqrt(order)).  For high phase
-    noise prefer ``recover_carrier_phase_bps`` (no unwrap required).
+    A global ``2π/M`` ambiguity remains.  For strong phase noise prefer
+    :class:`BPS`, which needs no M-fold unwrap.
     """
-    signal_adapter = adapt_signal(
-        symbols, function_name="recover_carrier_phase_viterbi_viterbi()"
-    )
-    symbols = signal_adapter.array
-    modulation = signal_adapter.resolve_optional("mod_scheme", modulation)
-    order = signal_adapter.resolve_optional("mod_order", order)
 
-    if modulation is None or order is None:
-        raise ValueError(
-            "recover_carrier_phase_viterbi_viterbi() requires modulation and order "
-            "for array input."
+    block_size: int = 32
+    joint_channels: bool = False
+    cycle_slip: CycleSlip | None = None
+
+    def __post_init__(self) -> None:
+        if self.block_size < 1:
+            raise ValueError(f"block_size must be >= 1, got {self.block_size}.")
+
+
+def _warn_small_qam_block(
+    name: str, block_size: int, project: bool, order: int
+) -> None:
+    """Warn when QAM block averaging is too short for the M-fold unwrap.
+
+    For QAM with order > 4 the M-th power of individual symbols does not
+    cancel the data modulation; block-phase variance above the ``π/M``
+    unwrap threshold produces persistent ``2π/M`` slips.
+    """
+    if not project or order <= 4:
+        return
+    min_bs = max(8, 4 * int(np.ceil(order**0.5)))
+    if block_size < min_bs:
+        logger.warning(
+            "CPR (%s): block_size=%s is too small for this %s-point "
+            "constellation. Individual symbols' M-th powers do not cancel the "
+            "data modulation; insufficient averaging causes block-phase "
+            "variance that exceeds the π/M unwrap threshold, producing "
+            "persistent 2π/M phase slips. Recommended minimum: block_size ≥ %s.",
+            name,
+            block_size,
+            order,
+            min_bs,
         )
 
+
+def _viterbi_viterbi(
+    symbols: ArrayType, method: ViterbiViterbi, ctx: _Context
+) -> _Phase:
+    """Viterbi-Viterbi phase of ``(C, N)`` symbols."""
+    constellation = ctx.need_constellation(method)
     symbols, xp, _ = dispatch(symbols)
-    symbols, was_1d = as_2d(symbols, name="symbols")
     C, N = symbols.shape
+    block_size = method.block_size
+    M, project, bias = _mth_power_geometry(constellation)
+    N_blocks = _check_blocks(N, block_size)
+    _warn_small_qam_block("VV", block_size, project, constellation.order)
 
-    M = _modulation_power_m(modulation, order)
-
-    N_trunc = (N // block_size) * block_size
-    N_blocks = N_trunc // block_size
-
-    if N_blocks == 0:
-        raise ValueError(
-            f"Signal length {N} is shorter than block_size={block_size}. "
-            "Reduce block_size or use a longer symbol sequence."
-        )
-
-    # For QAM with order > 4 the M-th power of individual symbols does NOT cancel
-    # the data modulation (unlike PSK, where every M-PSK point gives (c/|c|)^M = 1).
-    # Sufficient block averaging is required so that the block-phase variance stays
-    # below the π/M unwrap threshold.  The practical minimum scales as 4·ceil(√order).
-    if "qam" in modulation.lower() and order > 4:
-        _min_bs = max(8, 4 * int(np.ceil(order**0.5)))
-        if block_size < _min_bs:
-            logger.warning(
-                "CPR (VV): block_size=%s is too small for %s-QAM. "
-                "Individual QAM symbols' M-th powers do not cancel the "
-                "data modulation; insufficient averaging causes "
-                "block-phase variance that exceeds the π/M unwrap "
-                "threshold, producing persistent 2π/M phase slips. "
-                "Recommended minimum for %s-QAM: block_size ≥ %s.",
-                block_size,
-                order,
-                order,
-                _min_bs,
-            )
-
+    joint = method.joint_channels and C > 1
     phi_u, block_centers, all_positions = _vv_block_phase(
-        symbols, xp, M, modulation, block_size, joint_channels
+        symbols, xp, M, project, bias, block_size, method.joint_channels
     )
+    if joint:  # rows are copies of the joint trajectory
+        phi_u = phi_u[:1]
+    phi_u = _repair_slips(phi_u, xp, method.cycle_slip, M)
+    # xp.interp is 1D-only; loop over the rows.
+    phi_full = xp.stack([xp.interp(all_positions, block_centers, row) for row in phi_u])
+    if joint:
+        phi_full = xp.broadcast_to(phi_full, (C, N)).copy()
+        phi_u = xp.broadcast_to(phi_u, (C, N_blocks)).copy()
 
-    phi_full = xp.zeros((C, N), dtype=xp.float64)
-    phi_blocks_out = xp.zeros((C, N_blocks), dtype=xp.float64)
-
-    if joint_channels and C > 1:
-        # phi_u's rows are broadcast-identical copies of the joint trajectory.
-        phi_u_joint = phi_u[0]
-        if cycle_slip_correction:
-            phi_u_joint_np = correct_cycle_slips(
-                to_device(phi_u_joint, "cpu"),
-                4,
-                cycle_slip_history,
-                cycle_slip_threshold,
-            )
-            phi_u_joint = xp.asarray(phi_u_joint_np)
-        phi_interp = xp.interp(all_positions, block_centers, phi_u_joint)
-        for ch in range(C):
-            phi_full[ch] = phi_interp
-            phi_blocks_out[ch] = phi_u_joint
-    else:
-        # xp.interp is 1D-only; loop over C channels.
-        for ch in range(C):
-            phi_u_ch = phi_u[ch]
-            if cycle_slip_correction:
-                phi_u_ch_np = correct_cycle_slips(
-                    to_device(phi_u_ch, "cpu"),
-                    4,
-                    cycle_slip_history,
-                    cycle_slip_threshold,
-                )
-                phi_u_ch = xp.asarray(phi_u_ch_np)
-            phi_full[ch] = xp.interp(all_positions, block_centers, phi_u_ch)
-            phi_blocks_out[ch] = phi_u_ch
-
-    mode_str = "joint" if (joint_channels and C > 1) else "independent"
-    phi_full_np = _log_phase_summary(
+    _log_phase_summary(
         phi_full,
         "CPR (Viterbi-Viterbi, M=%s, %s)",
-        (M, mode_str),
-        "[%s blocks x %s symbols, C=%s, cycle_slip_correction=%s]",
-        (N_blocks, block_size, C, cycle_slip_correction),
-        debug_plot=debug_plot,
+        (M, "joint" if joint else "independent"),
+        "[%s blocks x %s symbols, C=%s, cycle_slip=%s]",
+        (N_blocks, block_size, C, method.cycle_slip is not None),
     )
-
-    if debug_plot:
-        from .. import plotting as _plotting
-
-        _plotting.plot_carrier_phase_trajectory(
-            phi_full=phi_full_np,
-            block_centers=to_device(block_centers, "cpu"),
-            phi_blocks=to_device(phi_blocks_out, "cpu"),
-            show=True,
-            title="CPR - Viterbi-Viterbi",
-        )
-
-    return restore_1d(was_1d, phi_full)
+    return _Phase(
+        phase=phi_full,
+        block_centers=np.arange(N_blocks, dtype=np.float64) * block_size
+        + block_size / 2,
+        block_phase=phi_u,
+    )

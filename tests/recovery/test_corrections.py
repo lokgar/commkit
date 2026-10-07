@@ -5,9 +5,11 @@ from typing import Any
 import numpy as np
 import pytest
 
-from commkit import generate_qam, recovery
+from commkit import generate, recovery
+from commkit.filtering import RRC
 from commkit.impairments import apply_awgn
-from tests.common.conversions import to_numpy
+from commkit.mapping import Constellation
+from tests.common.conversions import device_of, to_numpy
 from tests.common.signals import (
     make_ambiguous_qam16,
     make_test_mimo_samples,
@@ -46,9 +48,7 @@ class TestCycleSlipCorrection:
         """Smooth linear ramp with no slips is returned unchanged."""
         B = 200
         phi_u = np.linspace(0.0, 2.0, B)
-        phi_out = recovery.correct_cycle_slips(
-            phi_u.copy(), symmetry=4, history_length=50
-        )
+        phi_out = recovery.correct_cycle_slips(phi_u.copy(), symmetry=4, history=50)
         xpt.assert_allclose(phi_out, phi_u, atol=1e-10)
 
     def test_standalone_single_slip(self, xp, xpt):
@@ -57,9 +57,7 @@ class TestCycleSlipCorrection:
         phi_u = np.linspace(0.0, 1.0, B)
         phi_slipped = phi_u.copy()
         phi_slipped[150:] += np.pi / 2
-        phi_out = recovery.correct_cycle_slips(
-            phi_slipped, symmetry=4, history_length=100
-        )
+        phi_out = recovery.correct_cycle_slips(phi_slipped, symmetry=4, history=100)
         xpt.assert_allclose(phi_out, phi_u, atol=0.05)
 
     def test_standalone_multiple_slips(self, xp, xpt):
@@ -69,19 +67,29 @@ class TestCycleSlipCorrection:
         phi_slipped = phi_u.copy()
         phi_slipped[100:] += np.pi / 2
         phi_slipped[300:] -= np.pi / 2
-        phi_out = recovery.correct_cycle_slips(
-            phi_slipped, symmetry=4, history_length=80
-        )
+        phi_out = recovery.correct_cycle_slips(phi_slipped, symmetry=4, history=80)
         xpt.assert_allclose(phi_out, phi_u, atol=0.05)
+
+    def test_returns_new_array_on_input_device(self, xp, xpt):
+        """The input is left as it was; the result stays on its device."""
+        phi_slipped = np.linspace(0.0, 1.0, 300)
+        phi_slipped[150:] += np.pi / 2
+        x = xp.asarray(phi_slipped)
+        phi_out = recovery.correct_cycle_slips(x, symmetry=4, history=100)
+        xpt.assert_array_equal(x, xp.asarray(phi_slipped))
+        assert type(phi_out) is type(x)
+        assert float(xp.max(xp.abs(phi_out - x))) == pytest.approx(np.pi / 2)
 
     def test_bps_correction_bounded_output(self, xp):
         """BPS cycle_slip_correction=True returns phase within reasonable bounds."""
         sig = make_test_qam_signal(
             order=16, num_symbols=2048, sps=1, snr_db=SNR_DB, xp=xp
         )
-        phi = recovery.recover_carrier_phase_bps(
-            sig.samples, "qam", 16, cycle_slip_correction=True
-        )
+        phi = recovery.estimate_carrier_phase(
+            sig.samples,
+            recovery.BPS(cycle_slip=recovery.CycleSlip()),
+            constellation=Constellation.qam(16),
+        ).value
         assert phi.shape == sig.samples.shape
         phi_np = to_numpy(phi)
         assert np.max(np.abs(phi_np)) < 10 * np.pi
@@ -91,9 +99,11 @@ class TestCycleSlipCorrection:
         sig = make_test_qam_signal(
             order=16, num_symbols=2048, sps=1, snr_db=SNR_DB, xp=xp
         )
-        phi = recovery.recover_carrier_phase_viterbi_viterbi(
-            sig.samples, "qam", 16, cycle_slip_correction=True
-        )
+        phi = recovery.estimate_carrier_phase(
+            sig.samples,
+            recovery.ViterbiViterbi(cycle_slip=recovery.CycleSlip()),
+            constellation=Constellation.qam(16),
+        ).value
         assert phi.shape == sig.samples.shape
 
     def test_tikhonov_correction_shape(self, xp):
@@ -101,14 +111,15 @@ class TestCycleSlipCorrection:
         sig = make_test_qam_signal(
             order=16, num_symbols=2048, sps=1, snr_db=SNR_DB, xp=xp
         )
-        phi = recovery.recover_carrier_phase_tikhonov(
+        phi = recovery.estimate_carrier_phase(
             sig.samples,
-            "qam",
-            16,
-            linewidth_symbol_periods=1e-4,
-            snr_db=SNR_DB,
-            cycle_slip_correction=True,
-        )
+            recovery.Tikhonov(
+                linewidth_symbol_periods=1e-4,
+                snr_db=SNR_DB,
+                cycle_slip=recovery.CycleSlip(),
+            ),
+            constellation=Constellation.qam(16),
+        ).value
         assert phi.shape == sig.samples.shape
 
 
@@ -119,44 +130,47 @@ class TestResolvePhaseAmbiguity:
 
     def test_best_rotation_is_zero(self, xp):
         """Already-aligned symbols: k=0 chosen and SER is minimal."""
-        from commkit.helpers import normalize
+        from commkit.math import normalize
         from commkit.metrics import ser
 
         sig = make_test_qam_signal(
             order=16, num_symbols=self.N, sps=1, snr_db=30, seed=5, xp=xp
         )
-        sym = normalize(sig.samples, "average_power")
-        ref = normalize(xp.asarray(sig.source_symbols), "average_power")
-        resolved = recovery.resolve_phase_ambiguity(sym, ref, "qam", 16)
-        s0 = float(ser(resolved, ref, "qam", 16))
+        sym = normalize(sig.samples, mode="average_power")
+        ref = normalize(xp.asarray(sig.reference.symbols), mode="average_power")
+        resolved = recovery.resolve_phase_ambiguity(
+            sym, ref, constellation=Constellation.qam(16)
+        )
+        s0 = float(ser(resolved, ref, constellation=Constellation.qam(16)))
         for k in range(1, 4):
             sk = float(
                 ser(
                     resolved * xp.exp(1j * k * np.pi / 2).astype(sym.dtype),
                     ref,
-                    "qam",
-                    16,
+                    constellation=Constellation.qam(16),
                 )
             )
             assert s0 <= sk + 1e-6
 
     def test_corrects_pi_half_rotation(self, xp):
         """Symbols rotated by pi/2 are corrected; post-resolution SER is low."""
-        from commkit.helpers import normalize
+        from commkit.math import normalize
         from commkit.metrics import ser
 
         sig = make_test_qam_signal(
             order=16, num_symbols=self.N, sps=1, snr_db=30, seed=5, xp=xp
         )
-        sym = normalize(sig.samples, "average_power")
-        ref = normalize(xp.asarray(sig.source_symbols), "average_power")
+        sym = normalize(sig.samples, mode="average_power")
+        ref = normalize(xp.asarray(sig.reference.symbols), mode="average_power")
         rotated = sym * xp.exp(1j * np.pi / 2).astype(sym.dtype)
-        resolved = recovery.resolve_phase_ambiguity(rotated, ref, "qam", 16)
-        assert float(ser(resolved, ref, "qam", 16)) < 0.05
+        resolved = recovery.resolve_phase_ambiguity(
+            rotated, ref, constellation=Constellation.qam(16)
+        )
+        assert float(ser(resolved, ref, constellation=Constellation.qam(16))) < 0.05
 
     def test_mimo_independent_per_channel(self, xp):
         """MIMO: channels with different rotations are each independently corrected."""
-        from commkit.helpers import normalize
+        from commkit.math import normalize
         from commkit.metrics import ser
 
         mimo, ref_mimo = make_test_mimo_samples(
@@ -168,10 +182,10 @@ class TestResolvePhaseAmbiguity:
             seed=1,
             xp=xp,
         )
-        sym_a = normalize(mimo[0], "average_power")
-        sym_b = normalize(mimo[1], "average_power")
-        ref_a = normalize(ref_mimo[0], "average_power")
-        ref_b = normalize(ref_mimo[1], "average_power")
+        sym_a = normalize(mimo[0], mode="average_power")
+        sym_b = normalize(mimo[1], mode="average_power")
+        ref_a = normalize(ref_mimo[0], mode="average_power")
+        ref_b = normalize(ref_mimo[1], mode="average_power")
         mimo_rot = xp.stack(
             [
                 sym_a * xp.exp(1j * np.pi / 2).astype(sym_a.dtype),
@@ -180,40 +194,50 @@ class TestResolvePhaseAmbiguity:
             axis=0,
         )
         ref_mimo_norm = xp.stack([ref_a, ref_b], axis=0)
-        resolved = recovery.resolve_phase_ambiguity(mimo_rot, ref_mimo_norm, "qam", 16)
+        resolved = recovery.resolve_phase_ambiguity(
+            mimo_rot, ref_mimo_norm, constellation=Constellation.qam(16)
+        )
         assert resolved.shape == (2, self.N)
-        s = ser(resolved, ref_mimo_norm, "qam", 16)
+        s = ser(resolved, ref_mimo_norm, constellation=Constellation.qam(16))
         s_np = to_numpy(s)
         assert float(s_np[0]) < 0.05
         assert float(s_np[1]) < 0.05
 
-    def test_signal_method_in_place(self, xp):
-        """Signal.resolve_phase_ambiguity() updates resolved_symbols in place."""
-        from commkit.helpers import normalize
+    def test_signal_input(self, xp):
+        """A 1-SPS Signal's samples are rotated against reference.symbols."""
         from commkit.metrics import ser
 
-        sig = generate_qam(order=16, num_symbols=self.N, sps=1, symbol_rate=1e6, seed=9)
-        sig.samples = apply_awgn(sig.samples, esn0_db=30, sps=1, seed=9)
-        sym = normalize(sig.samples, "average_power")
-        sig.resolved_symbols = sym * xp.exp(1j * np.pi / 2).astype(sym.dtype)
-        sig = recovery.resolve_phase_ambiguity(sig)
-        assert sig.resolved_symbols is not None
-        ref = normalize(xp.asarray(sig.source_symbols), "average_power")
-        assert float(ser(sig.resolved_symbols, ref, "qam", 16)) < 0.1
+        sig = generate(
+            Constellation.qam(16),
+            self.N,
+            symbol_rate=1e6,
+            sps=1,
+            pulse=RRC(0.35),
+            rng=9,
+        ).to(device_of(xp))
+        rx = apply_awgn(sig.samples, esn0_db=30, sps=1, rng=9)
+        sig = sig.replace(samples=rx * xp.exp(1j * np.pi / 2).astype(rx.dtype))
+        out = recovery.resolve_phase_ambiguity(sig)
+        assert out is not sig
+        assert out.reference is sig.reference
+        assert ser(out) < 0.1
 
-    def test_signal_method_raises_without_resolved(self, xp):
-        """Raises ValueError when resolved_symbols is None."""
-        sig = generate_qam(order=16, num_symbols=256, sps=1, symbol_rate=1e6, seed=0)
-        with pytest.raises(ValueError, match="resolved_symbols"):
-            sig = recovery.resolve_phase_ambiguity(sig)
+    def test_signal_without_reference_raises(self, xp):
+        """A Signal without a reference needs reference=."""
+        sig = generate(
+            Constellation.qam(16), 256, symbol_rate=1e6, sps=1, pulse=RRC(0.35), rng=0
+        )
+        sig = sig.replace(reference=None)
+        with pytest.raises(ValueError, match="reference"):
+            recovery.resolve_phase_ambiguity(sig)
 
-    def test_signal_method_raises_without_source(self, xp):
-        """Raises ValueError when source_symbols is None."""
-        sig = generate_qam(order=16, num_symbols=256, sps=1, symbol_rate=1e6, seed=0)
-        sig.resolved_symbols = sig.samples
-        sig.source_symbols = None
-        with pytest.raises(ValueError, match="source_symbols"):
-            sig = recovery.resolve_phase_ambiguity(sig)
+    def test_oversampled_signal_raises(self, xp):
+        """Symbol operations need one sample per symbol."""
+        sig = generate(
+            Constellation.qam(16), 256, symbol_rate=1e6, sps=2, pulse=RRC(0.35), rng=0
+        )
+        with pytest.raises(ValueError, match="one sample per symbol"):
+            recovery.resolve_phase_ambiguity(sig)
 
     def test_resolve_phase_ambiguity_skip(self, xp: Any, xpt: Any) -> None:
         """num_skip_symbols bypasses the corrupt head and picks the correct rotation."""
@@ -224,16 +248,19 @@ class TestResolvePhaseAmbiguity:
         symbols, ref = xp.asarray(symbols_np), xp.asarray(ref_np)
 
         out_no_skip = recovery.resolve_phase_ambiguity(
-            symbols, ref, "qam", 16, num_skip_symbols=0
+            symbols, ref, constellation=Constellation.qam(16), num_skip_symbols=0
         )
         out_skip = recovery.resolve_phase_ambiguity(
-            symbols, ref, "qam", 16, num_skip_symbols=corrupt_head
+            symbols,
+            ref,
+            constellation=Constellation.qam(16),
+            num_skip_symbols=corrupt_head,
         )
 
         from commkit.metrics import ser as _ser_fn
 
         def _ser(y, r):
-            return float(xp.mean(xp.asarray(_ser_fn(y, r, "qam", 16))))
+            return float(np.mean(_ser_fn(y, r, constellation=Constellation.qam(16))))
 
         ser_skip_tail = _ser(out_skip[corrupt_head:], ref[corrupt_head:])
         ser_no_skip_tail = _ser(out_no_skip[corrupt_head:], ref[corrupt_head:])
@@ -248,9 +275,11 @@ class TestResolvePhaseAmbiguity:
         symbols_np, ref_np = make_ambiguous_qam16(n_sym=1000, corrupt_head=0)
         symbols, ref = xp.asarray(symbols_np), xp.asarray(ref_np)
 
-        out_default = recovery.resolve_phase_ambiguity(symbols, ref, "qam", 16)
+        out_default = recovery.resolve_phase_ambiguity(
+            symbols, ref, constellation=Constellation.qam(16)
+        )
         out_skip0 = recovery.resolve_phase_ambiguity(
-            symbols, ref, "qam", 16, num_skip_symbols=0
+            symbols, ref, constellation=Constellation.qam(16), num_skip_symbols=0
         )
 
         assert bool(xp.all(out_default == out_skip0))
@@ -262,12 +291,12 @@ class TestResolvePhaseAmbiguity:
 
         with pytest.raises(ValueError, match="num_skip_symbols"):
             recovery.resolve_phase_ambiguity(
-                symbols, ref, "qam", 16, num_skip_symbols=100
+                symbols, ref, constellation=Constellation.qam(16), num_skip_symbols=100
             )
 
         with pytest.raises(ValueError, match="num_skip_symbols"):
             recovery.resolve_phase_ambiguity(
-                symbols, ref, "qam", 16, num_skip_symbols=200
+                symbols, ref, constellation=Constellation.qam(16), num_skip_symbols=200
             )
 
 
@@ -276,8 +305,39 @@ def _clean_qam16(xp, n, seed=0):
     return make_test_symbols(scheme="qam", order=16, num_symbols=n, seed=seed, xp=xp)
 
 
-class TestCorrectPhaseRotation:
-    """correct_phase_rotation corrects arbitrary constant per-channel rotation."""
+class TestSlipQuantum:
+    """Cycle slips are repaired in steps of 2π/M, M the rotational symmetry."""
+
+    @pytest.mark.parametrize(
+        "method",
+        [
+            recovery.BPS(cycle_slip=recovery.CycleSlip()),
+            recovery.ViterbiViterbi(cycle_slip=recovery.CycleSlip()),
+            recovery.Tikhonov(1e-4, 20, cycle_slip=recovery.CycleSlip()),
+            recovery.PLL(mu=1e-2, cycle_slip=recovery.CycleSlip()),
+        ],
+        ids=["bps", "vv", "tikhonov", "pll"],
+    )
+    def test_methods_pass_the_constellation_symmetry(self, xp, method, monkeypatch):
+        from commkit.recovery import corrections
+
+        seen = []
+        repair = corrections.correct_cycle_slips
+
+        def spy(phase, **kwargs):
+            seen.append(kwargs["symmetry"])
+            return repair(phase, **kwargs)
+
+        monkeypatch.setattr(corrections, "correct_cycle_slips", spy)
+        c = Constellation.psk(8)
+        rng = np.random.default_rng(0)
+        x = xp.asarray(c.points[rng.integers(0, 8, 512)].astype(np.complex64))
+        recovery.estimate_carrier_phase(x, method, constellation=c)
+        assert seen == [8]
+
+
+class TestDataAided:
+    """DataAided corrects an arbitrary constant per-channel rotation."""
 
     N = 2048
 
@@ -286,7 +346,7 @@ class TestCorrectPhaseRotation:
         ref = _clean_qam16(xp, self.N, seed=0)
         theta_true = 0.7  # ~40°, not a π/2 multiple
         rotated = ref * xp.array(np.exp(1j * theta_true), dtype=ref.dtype)
-        out = recovery.correct_phase_rotation(rotated, ref)
+        out = recovery.correct_carrier_phase(rotated, recovery.DataAided(symbols=ref))
         residual = float(xp.abs(xp.angle(xp.mean(out * xp.conj(ref)))))
         assert residual < 0.02
 
@@ -295,7 +355,9 @@ class TestCorrectPhaseRotation:
         N, N_pre = self.N, 256
         ref_full = _clean_qam16(xp, N, seed=1)
         rotated = ref_full * xp.array(np.exp(1j * 1.2), dtype=ref_full.dtype)
-        out = recovery.correct_phase_rotation(rotated, ref_full[:N_pre])
+        out = recovery.correct_carrier_phase(
+            rotated, recovery.DataAided(symbols=ref_full[:N_pre])
+        )
         assert out.shape == rotated.shape
         residual = float(xp.abs(xp.angle(xp.mean(out * xp.conj(ref_full)))))
         assert residual < 0.02
@@ -311,7 +373,7 @@ class TestCorrectPhaseRotation:
                 ref_b * xp.array(np.exp(1j * -1.1), dtype=ref_b.dtype),
             ]
         )
-        out = recovery.correct_phase_rotation(rotated, ref)
+        out = recovery.correct_carrier_phase(rotated, recovery.DataAided(symbols=ref))
         assert out.shape == (2, self.N)
         for ch in range(2):
             residual = float(xp.abs(xp.angle(xp.mean(out[ch] * xp.conj(ref[ch])))))
@@ -324,7 +386,9 @@ class TestCorrectPhaseRotation:
         rotated = ref * xp.array(np.exp(1j * 0.9), dtype=ref.dtype)
         corrupted = xp.array(rotated)
         corrupted[:skip] = ref[:skip] * xp.array(np.exp(1j * 2.5), dtype=ref.dtype)
-        out = recovery.correct_phase_rotation(corrupted, ref, num_skip_symbols=skip)
+        out = recovery.correct_carrier_phase(
+            corrupted, recovery.DataAided(symbols=ref, num_skip_symbols=skip)
+        )
         residual = float(xp.abs(xp.angle(xp.mean(out[skip:] * xp.conj(ref[skip:])))))
         assert residual < 0.02
 
@@ -333,63 +397,69 @@ class TestCorrectPhaseRotation:
         ref = _clean_qam16(xp, 100, seed=0)
         symbols = _clean_qam16(xp, 500, seed=1)
         with pytest.raises(ValueError, match="num_skip_symbols"):
-            recovery.correct_phase_rotation(symbols, ref, num_skip_symbols=100)
+            recovery.correct_carrier_phase(
+                symbols, recovery.DataAided(symbols=ref, num_skip_symbols=100)
+            )
         with pytest.raises(ValueError, match="num_skip_symbols"):
-            recovery.correct_phase_rotation(symbols, ref, num_skip_symbols=200)
+            recovery.correct_carrier_phase(
+                symbols, recovery.DataAided(symbols=ref, num_skip_symbols=200)
+            )
 
     def test_dtype_preserved(self, xp):
         """complex64 input -> complex64 output."""
         ref = _clean_qam16(xp, 256, seed=0)
-        out = recovery.correct_phase_rotation(
-            ref * xp.array(np.exp(1j * 0.5), dtype=ref.dtype), ref
+        out = recovery.correct_carrier_phase(
+            ref * xp.array(np.exp(1j * 0.5), dtype=ref.dtype),
+            recovery.DataAided(symbols=ref),
         )
         assert out.dtype == ref.dtype
 
     def test_1d_input_returns_1d(self, xp):
         """1-D input returns 1-D output."""
         ref = _clean_qam16(xp, 256, seed=0)
-        out = recovery.correct_phase_rotation(
-            ref * xp.array(np.exp(1j * 0.3), dtype=ref.dtype), ref
+        out = recovery.correct_carrier_phase(
+            ref * xp.array(np.exp(1j * 0.3), dtype=ref.dtype),
+            recovery.DataAided(symbols=ref),
         )
         assert out.ndim == 1
 
-    def test_signal_input_corrects_resolved_symbols(self, xp):
-        """Signal input: resolved_symbols is corrected, ref defaults to source_symbols."""
-        from commkit.metrics import ser
+    def test_signal_input_uses_reference(self, xp, xpt):
+        """Signal input: the samples are rotated against ``sig.reference``."""
+        sig = generate(
+            Constellation.qam(16),
+            self.N,
+            symbol_rate=1e6,
+            sps=1,
+            pulse=RRC(0.35),
+            rng=9,
+        ).to(device_of(xp))
+        ref = sig.reference.symbols
+        sig = sig.replace(samples=ref * xp.array(np.exp(1j * 0.7), dtype=ref.dtype))
+        sig = apply_awgn(sig, esn0_db=30, rng=9)
 
-        sig = generate_qam(order=16, num_symbols=self.N, sps=1, symbol_rate=1e6, seed=9)
-        sig.samples = apply_awgn(sig.samples, esn0_db=30, sps=1, seed=9)
-        ref = xp.asarray(sig.source_symbols)
-        sig.resolved_symbols = sig.samples * xp.array(
-            np.exp(1j * 0.7), dtype=sig.samples.dtype
-        )
-        sig.resolved_bits = xp.zeros(self.N, dtype=xp.int8)
-        old_samples = sig.samples
-        old_source = sig.source_symbols
-
-        out_sig = recovery.correct_phase_rotation(sig)
+        out_sig = recovery.correct_carrier_phase(sig, recovery.DataAided())
 
         assert out_sig is not sig
-        assert out_sig.samples is old_samples
-        assert out_sig.source_symbols is old_source
-        assert out_sig.resolved_bits is None
-        assert sig.resolved_bits is not None
-        assert out_sig.resolved_symbols is not None
-        assert float(ser(out_sig.resolved_symbols, ref, "qam", 16)) < 0.05
+        assert out_sig.reference is sig.reference
+        residual = float(xp.abs(xp.angle(xp.mean(out_sig.samples * xp.conj(ref)))))
+        assert residual < 0.02
 
-    def test_signal_input_raises_without_resolved(self, xp):
-        """Raises ValueError when resolved_symbols is None."""
-        sig = generate_qam(order=16, num_symbols=256, sps=1, symbol_rate=1e6, seed=0)
-        with pytest.raises(ValueError, match="resolved_symbols"):
-            recovery.correct_phase_rotation(sig)
+    def test_signal_input_needs_one_sample_per_symbol(self, xp):
+        """An oversampled Signal raises instead of misaligning the reference."""
+        sig = generate(
+            Constellation.qam(16), 256, symbol_rate=1e6, sps=2, pulse=RRC(0.35), rng=0
+        )
+        with pytest.raises(ValueError, match="sps=2"):
+            recovery.correct_carrier_phase(sig, recovery.DataAided())
 
-    def test_signal_input_raises_without_ref(self, xp):
-        """Raises ValueError when ref_symbols is omitted and source_symbols is None."""
-        sig = generate_qam(order=16, num_symbols=256, sps=1, symbol_rate=1e6, seed=0)
-        sig.resolved_symbols = sig.samples
-        sig.source_symbols = None
-        with pytest.raises(ValueError, match="source_symbols"):
-            recovery.correct_phase_rotation(sig)
+    def test_signal_input_raises_without_reference(self, xp):
+        """Raises ValueError when neither DataAided nor the Signal has symbols."""
+        sig = generate(
+            Constellation.qam(16), 256, symbol_rate=1e6, sps=1, pulse=RRC(0.35), rng=0
+        )
+        sig = sig.replace(reference=None)
+        with pytest.raises(ValueError, match="known symbols"):
+            recovery.correct_carrier_phase(sig, recovery.DataAided())
 
 
 class TestResolveChannelPermutation:
@@ -409,6 +479,22 @@ class TestResolveChannelPermutation:
         ref, swapped = self._dual_pol(xp)
         out = recovery.resolve_channel_permutation(swapped, ref, metric=metric)
         xpt.assert_allclose(out, ref)
+
+    def test_signal_input(self, xp, xpt):
+        """A Signal's samples are reordered to its reference."""
+        from commkit.core import Reference, Signal
+
+        ref, swapped = self._dual_pol(xp)
+        sig = Signal(
+            samples=swapped,
+            sampling_rate=1e6,
+            symbol_rate=1e6,
+            reference=Reference(symbols=ref),
+        )
+        out = recovery.resolve_channel_permutation(sig)
+        assert isinstance(out, Signal)
+        assert out.reference is sig.reference
+        xpt.assert_allclose(out.samples, ref)
 
     @pytest.mark.parametrize("metric", ["coherence", "phase_increment"])
     def test_identity_is_a_no_op(self, xp, xpt, metric):
@@ -458,9 +544,7 @@ class TestLogPhaseSummary:
 
         phi = xp.full(4, np.pi / 2)  # constant -> mean=90 deg, std=0 deg
         with caplog.at_level(logging.INFO, logger="commkit"):
-            _log_phase_summary(
-                phi, "CPR (test, %s)", ("alg",), "[C=%s]", (1,), debug_plot=False
-            )
+            _log_phase_summary(phi, "CPR (test, %s)", ("alg",), "[C=%s]", (1,))
         assert len(caplog.records) == 1
         msg = caplog.records[0].message
         assert "CPR (test, alg)" in msg
@@ -468,34 +552,21 @@ class TestLogPhaseSummary:
         assert "mean=90.00" in msg
         assert "std=0.00" in msg
 
-    def test_no_op_when_info_disabled_and_no_debug_plot(self, xp, caplog):
-        """No log line and no host transfer signal (returns None) when INFO is off."""
+    def test_no_op_when_info_disabled(self, xp, caplog):
+        """No log line and no host transfer when INFO is off."""
         import logging
+        from unittest.mock import patch
 
-        from commkit.recovery.corrections import _log_phase_summary
+        from commkit.recovery import corrections
 
         phi = xp.asarray([0.0, 1.0, 2.0])
-        with caplog.at_level(logging.WARNING, logger="commkit"):
-            result = _log_phase_summary(
-                phi, "CPR (test)", (), "[]", (), debug_plot=False
-            )
+        with (
+            caplog.at_level(logging.WARNING, logger="commkit"),
+            patch.object(corrections, "to_device") as transfer,
+        ):
+            corrections._log_phase_summary(phi, "CPR (test)", (), "[]", ())
         assert len(caplog.records) == 0
-        assert result is None
-
-    def test_returns_host_array_when_debug_plot_even_if_info_disabled(self, xp, caplog):
-        """debug_plot=True forces the host transfer even without INFO logging."""
-        import logging
-
-        from commkit.recovery.corrections import _log_phase_summary
-
-        phi = xp.asarray([0.0, 1.0, 2.0])
-        with caplog.at_level(logging.WARNING, logger="commkit"):
-            result = _log_phase_summary(
-                phi, "CPR (test)", (), "[]", (), debug_plot=True
-            )
-        assert len(caplog.records) == 0  # still no log line - INFO is off
-        assert result is not None
-        np.testing.assert_array_equal(np.asarray(result), np.asarray([0.0, 1.0, 2.0]))
+        transfer.assert_not_called()
 
 
 class TestVvBlockPhase:
@@ -512,7 +583,13 @@ class TestVvBlockPhase:
         )[None, :]  # (1, 64)
 
         phi_u, block_centers, all_positions = _vv_block_phase(
-            symbols, xp, M=4, modulation="psk", block_size=16, joint_channels=False
+            symbols,
+            xp,
+            M=4,
+            project=False,
+            bias=0.0,
+            block_size=16,
+            joint_channels=False,
         )
         assert phi_u.shape == (1, 4)
         assert block_centers.shape == (4,)
@@ -531,7 +608,13 @@ class TestVvBlockPhase:
         symbols = xp.stack([base, base])  # (2, 32) - identical channels
 
         phi_u, _, _ = _vv_block_phase(
-            symbols, xp, M=4, modulation="psk", block_size=16, joint_channels=True
+            symbols,
+            xp,
+            M=4,
+            project=False,
+            bias=0.0,
+            block_size=16,
+            joint_channels=True,
         )
         assert phi_u.shape == (2, 2)
         xpt.assert_array_equal(phi_u[0], phi_u[1])

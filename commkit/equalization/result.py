@@ -4,12 +4,14 @@ from __future__ import annotations
 
 import logging
 from dataclasses import dataclass
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
 import numpy as np
 
 from ..backend import ArrayType, to_device
 from ..logger import logger
+
+__all__ = ["EqualizerResult", "EqualizerState"]
 
 if TYPE_CHECKING:
     from ..core.signal import Signal
@@ -19,45 +21,120 @@ if TYPE_CHECKING:
 # -----------------------------------------------------------------------------
 
 
-@dataclass
-class CPRState:
-    """Carrier-phase-recovery state for warm-starting across equalizer calls.
+@dataclass(frozen=True, eq=False)
+class EqualizerState:
+    """Where an adaptive equalizer stopped; pass as ``state=`` to continue.
 
-    All arrays are CPU NumPy regardless of the equalizer backend - CPR state is
-    small and must survive device resets.  Do not convert to CuPy.
+    The state is taken after the last output symbol whose filter window lies
+    entirely inside the data seen so far (a block boundary for the block
+    equalizers).  It carries the weights, the input normalization, the input
+    from that point on, the inline CPR state and, for RLS, the inverse
+    correlation matrix.  The last ``overlap`` symbols of the result that
+    produced it were computed with a zero-padded window; the next call
+    recomputes them, so stitching ``y1[..., :-overlap]`` (all of ``y1`` when
+    ``overlap == 0``) with the next output gives exactly the output of one
+    uninterrupted call.
 
-    Used/produced by ``lms()``, ``rls()``, and ``block_lms()`` when
-    ``cpr_type`` is not None.  Pass as ``cpr_state=result.cpr_state`` to the
-    next call to continue phase tracking without a re-lock transient.
+    Training symbols and pilots of a continued call start at its first
+    output symbol.  A state only continues the equalizer and configuration
+    that produced it; anything else raises.
+
+    Attributes
+    ----------
+    equalizer : str
+        Name of the equalizer that produced the state.
+    num_taps, sps, block_size : int
+        Its configuration (``block_size`` is 0 for the sequential ones).
+    cpr : PLL, BPS or None
+        Its inline carrier phase recovery.
+    weights : numpy.ndarray
+        ``(C, C, num_taps)`` complex64 butterfly weights.
+    input_norm_factor : float or numpy.ndarray
+        Normalization applied to the input (``(C,)`` for MIMO).
+    pending : numpy.ndarray
+        ``(C, L)`` complex64 normalized input from the resume point on.
+    lead : int
+        Samples of ``pending`` before the first resumed symbol's position.
+    overlap : int
+        Trailing output symbols of the previous result that the next call
+        recomputes.
+    inverse_correlation : numpy.ndarray or None
+        RLS only: ``(C·T, C·T)`` complex128 inverse correlation matrix.
     """
 
-    # PLL state (lms / rls with cpr_type='pll' or 'bps')
-    pll_phi: np.ndarray | None = None  # (C,) float64
-    pll_freq: np.ndarray | None = None  # (C,) float64
+    equalizer: str
+    num_taps: int
+    sps: int
+    block_size: int
+    cpr: Any
+    weights: np.ndarray
+    input_norm_factor: float | np.ndarray
+    pending: np.ndarray
+    lead: int
+    overlap: int
+    inverse_correlation: np.ndarray | None = None
+    carrier: Any = None  # inline CPR arrays (private layout per engine)
 
-    # BPS cross-block unwrap state (block_lms with cpr_type='bps')
-    bps_prev4: np.ndarray | None = None  # (C,) float64
-    bps_offset4: np.ndarray | None = None  # (C,) float64
-    bps_d2_hist: np.ndarray | None = None  # (P, C, K-1) float32 - CPU copy
+    @property
+    def num_channels(self) -> int:
+        """Number of channels ``C``."""
+        return int(self.weights.shape[0])
 
-    # Cycle-slip regression state (all CPR modes)
-    cs_buf_x: np.ndarray | None = None  # (C, H) float64
-    cs_buf_y: np.ndarray | None = None  # (C, H) float64
-    cs_buf_ptr: np.ndarray | None = None  # (C,) int64
-    cs_buf_n: np.ndarray | None = None  # (C,) int64
-    cs_stats: np.ndarray | None = None  # (C, 4) float64
 
-    # JAX-specific BPS buffer state (JAX backend only; None for Numba)
-    jax_bps_buf: np.ndarray | None = None  # (KB, C) complex64
-    jax_bps_buf_ptr: int | None = None  # scalar int32
-
-    # Identity tags - used to validate shape compatibility on warm-start
-    cpr_type: str | None = None
-    num_ch: int = 0
-    symmetry: int = 4
-    bps_P: int = 0  # number of BPS test phases
-    bps_K: int = 0  # BPS block size
-    cs_H: int = 0  # cycle-slip history length
+def _check_state(
+    state: EqualizerState | None,
+    *,
+    equalizer: str,
+    num_taps: int,
+    sps: int,
+    num_ch: int,
+    block_size: int = 0,
+    cpr: Any = None,
+    initial_taps: Any = None,
+    center_tap: int | None = None,
+) -> None:
+    """Raise unless ``state`` continues this exact equalizer configuration."""
+    if state is None:
+        return
+    if not isinstance(state, EqualizerState):
+        raise TypeError(
+            f"{equalizer}(): state must be an EqualizerState (result.state), got "
+            f"{type(state).__name__}."
+        )
+    if initial_taps is not None:
+        raise ValueError(
+            f"{equalizer}(): give initial_taps or state, not both (the state "
+            "carries the weights)."
+        )
+    if center_tap is not None:
+        raise ValueError(
+            f"{equalizer}(): center_tap is fixed by the state that is continued."
+        )
+    expected = {
+        "equalizer": equalizer,
+        "num_taps": num_taps,
+        "sps": sps,
+        "block_size": block_size,
+        "number of channels": num_ch,
+    }
+    actual = {
+        "equalizer": state.equalizer,
+        "num_taps": state.num_taps,
+        "sps": state.sps,
+        "block_size": state.block_size,
+        "number of channels": state.num_channels,
+    }
+    for key, value in expected.items():
+        if actual[key] != value:
+            raise ValueError(
+                f"{equalizer}(): the state was made with {key}={actual[key]!r}, "
+                f"this call has {value!r}."
+            )
+    if state.cpr != cpr:
+        raise ValueError(
+            f"{equalizer}(): the state was made with cpr={state.cpr!r}, this "
+            f"call has cpr={cpr!r}."
+        )
 
 
 @dataclass
@@ -104,13 +181,22 @@ class EqualizerResult:
     tail_trim : int
         Number of symbols trimmed from the tail of ``y_hat`` to remove the
         zero-padding contamination zone.  Non-zero only for RLS (equals
-        ``num_taps // 2``).  If non-zero, trim reference arrays to match::
+        ``num_taps // 2``).  ``result.signal`` already carries the reference
+        trimmed to match; with array input, trim your reference arrays::
 
-            source_symbols = source_symbols[..., :-result.tail_trim]
-            source_bits    = source_bits[..., :-result.tail_trim * bits_per_symbol]
+            symbols = symbols[..., :-result.tail_trim]
+            bits = bits[..., :-result.tail_trim * bits_per_symbol]
     phase_trajectory : np.ndarray or None
         Per-symbol phase estimates produced by the inline CPR stage, in
-        radians.  ``None`` when ``cpr_type=None``.
+        radians.  ``None`` without ``cpr``.
+    state : EqualizerState or None
+        Continuation state; pass as ``state=`` to the next call.
+    signal : Signal or None
+        For Signal input, the output as a 1-SPS Signal (``sampling_rate =
+        symbol_rate``) whose reference is cut to the output symbols.  After
+        a continued call it starts at the call's own first symbol, past the
+        ``overlap`` recomputed for the previous chunk.  ``None`` for array
+        input.
 
         Shape: ``(N_sym,)`` for SISO, ``(C, N_sym)`` for MIMO butterfly.
 
@@ -129,17 +215,16 @@ class EqualizerResult:
     input_norm_factor: float | np.ndarray = 1.0
     tail_trim: int = 0
     phase_trajectory: ArrayType | None = None
-    cpr_state: CPRState | None = None
+    state: EqualizerState | None = None
+    signal: Signal | None = None
 
 
 def _log_equalizer_exit(
     result: EqualizerResult,
     name: str,
-    debug_plot: bool = False,
     check_convergence: bool = False,
-    plot_smoothing: int = 50,
 ) -> EqualizerResult:
-    """Log exit MSE and optionally show a debug plot for an EqualizerResult."""
+    """Log the exit MSE of an EqualizerResult (INFO level)."""
     if result.error is not None:
         n_sym = result.error.shape[-1]  # time axis; (N_sym,) or (C, N_sym)
         _want_log = logger.isEnabledFor(logging.INFO)
@@ -189,20 +274,29 @@ def _log_equalizer_exit(
                         10.0 * np.log10(mse_init + 1e-30),
                     )
 
-    if debug_plot:
-        from .. import plotting as _plotting  # lazy import avoids circular dep
-
-        _plotting.plot_equalizer_result(result, smoothing=plot_smoothing)
-
     return result
 
 
 def _attach_equalized_signal(
-    result: EqualizerResult, signal: Signal | None
+    result: EqualizerResult,
+    signal: Signal | None,
+    state: EqualizerState | None = None,
 ) -> EqualizerResult:
-    """Attach an array result to its originating Signal at symbol rate."""
-    if signal is not None:
-        result.y_hat = signal.replace_samples(
-            result.y_hat, sampling_rate=signal.symbol_rate
-        )
+    """Attach the 1-SPS output Signal for Signal input.
+
+    The Signal holds the output symbols that belong to ``signal``'s own
+    samples - after the ``state.overlap`` symbols a continued call recomputes
+    for the previous chunk - with the reference cut to them (RLS drops its
+    tail), at ``sampling_rate = symbol_rate``.  ``y_hat`` stays an array.
+    """
+    if signal is None:
+        return result
+    leading = 0 if state is None else state.overlap
+    y = result.y_hat[..., leading:]
+    reference = signal.reference
+    if reference is not None:
+        reference = reference.head(y.shape[-1])
+    result.signal = signal.replace(
+        samples=y, sampling_rate=signal.symbol_rate, reference=reference
+    )
     return result

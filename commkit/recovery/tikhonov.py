@@ -1,15 +1,22 @@
 """MAP Tikhonov carrier phase recovery with RTS/SSKF smoothers."""
 
+from dataclasses import dataclass
+from typing import Literal
+
 import numpy as np
 
 from ..backend import ArrayType, dispatch, to_device
-from ..core._signal_adapter import adapt_signal
-from ..core.signal import Signal
-from ..frequency import _modulation_power_m
-from ..helpers import as_2d, restore_1d
-from ..logger import logger
-from ._common import _vv_block_phase
-from .corrections import _log_phase_summary, correct_cycle_slips
+from ._common import (
+    _check_blocks,
+    _Context,
+    _mth_power_geometry,
+    _Phase,
+    _vv_block_phase,
+)
+from .corrections import CycleSlip, _log_phase_summary, _repair_slips
+from .viterbi_viterbi import _warn_small_qam_block
+
+__all__ = ["Tikhonov"]
 
 _NUMBA_RTS: dict = {}
 
@@ -155,253 +162,113 @@ def _sskf_smoother_1d(
     return sp.signal.filtfilt(b, a, phi_obs)
 
 
-def recover_carrier_phase_tikhonov(
-    symbols: ArrayType | Signal,
-    modulation: str | None = None,
-    order: int | None = None,
-    linewidth_symbol_periods: float | None = None,
-    block_size: int = 32,
-    snr_db: float | None = None,
-    method: str = "exact",
-    joint_channels: bool = False,
-    cycle_slip_correction: bool = False,
-    cycle_slip_history: int = 100,
-    cycle_slip_threshold: float = np.pi / 4,
-    debug_plot: bool = False,
-) -> ArrayType:
+@dataclass(frozen=True)
+class Tikhonov:
     r"""
-    Carrier phase recovery via MAP estimation with a Tikhonov/Wiener phase
-    noise prior.
+    MAP phase estimation with a Wiener (Tikhonov) phase-noise prior.
 
-    Extends the Viterbi-Viterbi block estimator with a Kalman smoother
-    matched to the laser phase noise statistics.  Two smoother backends are
-    available via ``method``:
-
-    * ``'exact'`` - full Rauch-Tung-Striebel (RTS) smoother; Numba-compiled.
-      Exact for all sequence lengths; runs on CPU.
-    * ``'sskf'`` - steady-state Kalman filter approximation via zero-phase
-      IIR (``filtfilt``); backend-aware (stays on GPU when input is on GPU).
-      Approximation holds for ``N_blocks >> 1/K_∞`` (~20+ blocks typical).
+    Viterbi-Viterbi block phases are smoothed by a Kalman smoother matched
+    to the laser phase noise, with process variance
+    ``σ_p² = 2π·Δν·T_s·N_b`` and observation variance
+    ``σ_v² ≈ 1/(M²·SNR·N_b)``, then interpolated to per-symbol resolution.
 
     Parameters
     ----------
-    symbols : array_like or Signal
-        1-SPS complex symbols after matched filter and FOE.
-        Shape: ``(N,)`` or ``(C, N)``.  A :class:`Signal` supplies
-        ``modulation``/``order`` from its metadata when not given explicitly.
-    modulation : str, optional
-        Modulation scheme (case-insensitive): ``'psk'``, ``'qam'``, etc.
-        Required for array input; for :class:`Signal` input, used only as a
-        fallback when the signal's ``mod_scheme`` is unset.
-    order : int, optional
-        Modulation order.  Required for array input; for :class:`Signal`
-        input, used only as a fallback when the signal's ``mod_order`` is
-        unset.
     linewidth_symbol_periods : float
-        Combined linewidth-symbol-time product delta_nu * T_s.
-        Typical values: ``1e-5`` (narrow laser, 32 GBd), ``5e-4`` (wide
-        laser / high baud rate).  Sets the Kalman process noise variance:
-        sigma_p^2 = 2*pi * delta_nu * T_s * N_b.
+        Combined linewidth-symbol-time product ``Δν·T_s``; typical values
+        ``1e-5`` (narrow laser, 32 GBd) to ``5e-4``.
+    snr_db : float
+        Operating SNR per symbol in dB; sets ``σ_v²``.
     block_size : int, default 32
-        Symbols per VV estimation block.  Same trade-off as for
-        ``recover_carrier_phase_viterbi_viterbi``.
-    snr_db : float or None, default None
-        Per-symbol SNR in dB.  Used to compute the VV observation noise
-        variance sigma_v^2 ≈ 1 / (M^2 * SNR * N_b).
-        If ``None``, defaults to 20 dB with a warning - provide the actual
-        operating SNR for the optimal smoother bandwidth.
-    method : {'exact', 'sskf'}, default 'exact'
-        Smoother implementation:
-
-        * ``'exact'``: full RTS smoother (``_rts_smoother_1d``); Numba
-          kernel when available.  Sequential CPU recurrence; exact for any
-          ``N_blocks``.  On GPU inputs this forces a full device-to-host
-          transfer of the block-phase trajectory (and back), stalling the
-          GPU pipeline - prefer ``'sskf'`` for GPU-resident signals.
-        * ``'sskf'``: steady-state approximation via ``filtfilt``
-          (``_sskf_smoother_1d``); runs on the input device (GPU-native
-          when data is on GPU, no host transfer).  Excellent for
-          ``N_blocks ≥ 20``; for ``N_blocks < 7`` silently falls back to
-          ``'exact'``.
+        Symbols per Viterbi-Viterbi block (same trade-off as
+        :class:`ViterbiViterbi`).
+    smoother : {"rts", "steady_state"}, default "rts"
+        ``"rts"``: the exact Rauch-Tung-Striebel smoother (Numba, CPU; GPU
+        input makes one host round trip of the block phases).
+        ``"steady_state"``: the steady-state Kalman gain as a zero-phase IIR
+        (``filtfilt``) on the input's device; accurate for 20 or more blocks,
+        and the exact smoother below 7 blocks.
     joint_channels : bool, default False
-        For MIMO inputs (C > 1): if ``True``, sum the M-th-power block
-        phasors across all channels before the VV phase extraction and
-        Kalman smoother.  The single smoothed trajectory is broadcast to
-        all C output rows.  Reduces variance by ~√C for shared-LO systems.
-    cycle_slip_correction : bool, default False
-        If ``True``, apply cycle-slip detection and correction
-        (``correct_cycle_slips``) after the Kalman smoother, before
-        interpolation.
-    cycle_slip_history : int, default 100
-        ``history_length`` passed to ``correct_cycle_slips``.
-    cycle_slip_threshold : float, default π/4
-        ``threshold`` passed to ``correct_cycle_slips`` (radians).
-    debug_plot : bool, default False
-        If ``True``, opens a diagnostic figure showing the per-symbol phase
-        trajectory with the Kalman-smoothed block phases.
-
-    Returns
-    -------
-    array_like
-        Per-symbol phase estimate in radians.  Shape matches ``symbols``.
-        Same backend as input.
+        MIMO: one joint trajectory from the summed block phasors (shared LO).
+    cycle_slip : CycleSlip, optional
+        Repair cycle slips after smoothing, before interpolation.
 
     Notes
     -----
-    VV block phases are Kalman-smoothed with sigma_p^2 = 2*pi*linewidth*T_s*N_b
-    and sigma_v^2 ≈ 1/(M^2 * SNR * N_b), then interpolated to per-symbol
-    resolution.  A residual 2*pi/M ambiguity always remains.
+    A residual ``2π/M`` ambiguity remains.
     """
-    signal_adapter = adapt_signal(
-        symbols, function_name="recover_carrier_phase_tikhonov()"
-    )
-    symbols = signal_adapter.array
-    modulation = signal_adapter.resolve_optional("mod_scheme", modulation)
-    order = signal_adapter.resolve_optional("mod_order", order)
 
-    if modulation is None or order is None:
-        raise ValueError(
-            "recover_carrier_phase_tikhonov() requires modulation and order for "
-            "array input."
-        )
-    if linewidth_symbol_periods is None:
-        raise ValueError(
-            "recover_carrier_phase_tikhonov() requires linewidth_symbol_periods."
-        )
+    linewidth_symbol_periods: float
+    snr_db: float
+    block_size: int = 32
+    smoother: Literal["rts", "steady_state"] = "rts"
+    joint_channels: bool = False
+    cycle_slip: CycleSlip | None = None
 
-    if method not in ("exact", "sskf"):
-        raise ValueError(f"Unknown method {method!r}. Choose 'exact' or 'sskf'.")
-
-    symbols, xp, sp = dispatch(symbols)
-    symbols, was_1d = as_2d(symbols, name="symbols")
-    C, N = symbols.shape
-
-    M = _modulation_power_m(modulation, order)
-
-    N_trunc = (N // block_size) * block_size
-    N_blocks = N_trunc // block_size
-
-    if N_blocks == 0:
-        raise ValueError(
-            f"Signal length {N} is shorter than block_size={block_size}. "
-            "Reduce block_size or use a longer symbol sequence."
-        )
-
-    # Same data-residual constraint as VV: for QAM with order > 4 the M-th power
-    # does not cancel per symbol.  Block phase variance can exceed π/M before the
-    # Kalman smoother is applied, causing unwrap slips that the smoother cannot fix.
-    if "qam" in modulation.lower() and order > 4:
-        _min_bs = max(8, 4 * int(np.ceil(order**0.5)))
-        if block_size < _min_bs:
-            logger.warning(
-                "CPR (Tikhonov): block_size=%s is too small for %s-QAM. "
-                "Block phases are estimated via Viterbi-Viterbi; the "
-                "data-residual constraint is identical - see "
-                "recover_carrier_phase_viterbi_viterbi. Recommended "
-                "minimum for %s-QAM: block_size ≥ %s.",
-                block_size,
-                order,
-                order,
-                _min_bs,
+    def __post_init__(self) -> None:
+        if self.smoother not in ("rts", "steady_state"):
+            raise ValueError(
+                f"smoother must be 'rts' or 'steady_state', got {self.smoother!r}."
             )
+        if not self.linewidth_symbol_periods > 0:
+            raise ValueError(
+                "linewidth_symbol_periods must be > 0, got "
+                f"{self.linewidth_symbol_periods}."
+            )
+        if self.block_size < 1:
+            raise ValueError(f"block_size must be >= 1, got {self.block_size}.")
 
-    # Smoother noise parameters
-    if snr_db is None:
-        logger.warning(
-            "CPR (Tikhonov): snr_db not provided - defaulting to 20 dB. "
-            "Pass the operating SNR for the optimal smoother bandwidth."
-        )
-        snr_lin = 100.0  # 20 dB default
-    else:
-        snr_lin = 10.0 ** (snr_db / 10.0)
 
-    sigma_p2 = float(2.0 * np.pi * linewidth_symbol_periods * block_size)
+def _tikhonov(symbols: ArrayType, method: Tikhonov, ctx: _Context) -> _Phase:
+    """Tikhonov-smoothed Viterbi-Viterbi phase of ``(C, N)`` symbols."""
+    constellation = ctx.need_constellation(method)
+    symbols, xp, sp = dispatch(symbols)
+    C, N = symbols.shape
+    block_size = method.block_size
+    M, project, bias = _mth_power_geometry(constellation)
+    N_blocks = _check_blocks(N, block_size)
+    # Same data-residual constraint as Viterbi-Viterbi: block phase variance
+    # can exceed π/M before smoothing, causing slips the smoother cannot fix.
+    _warn_small_qam_block("Tikhonov", block_size, project, constellation.order)
+
+    snr_lin = 10.0 ** (method.snr_db / 10.0)
+    sigma_p2 = float(2.0 * np.pi * method.linewidth_symbol_periods * block_size)
     sigma_v2 = float(1.0 / (M**2 * snr_lin * block_size))
 
-    # VV block phase estimation with unit-circle normalisation for QAM
-    phi_u_shared, block_centers, all_positions = _vv_block_phase(
-        symbols, xp, M, modulation, block_size, joint_channels
+    joint = method.joint_channels and C > 1
+    phi_u, block_centers, all_positions = _vv_block_phase(
+        symbols, xp, M, project, bias, block_size, method.joint_channels
     )
-    phi_full = xp.zeros((C, N), dtype=xp.float64)
+    if joint:  # rows are copies of the joint trajectory
+        phi_u = phi_u[:1]
 
-    if joint_channels and C > 1:
-        # phi_u_shared's rows are broadcast-identical copies of the joint trajectory.
-        phi_u_joint = phi_u_shared[0]
-
-        # Kalman smoother on the joint trajectory
-        if method == "exact":
-            phi_u_joint_np = to_device(phi_u_joint, "cpu")
-            phi_smooth_joint_np = _rts_smoother_1d(phi_u_joint_np, sigma_p2, sigma_v2)
-            phi_smooth_joint = xp.asarray(phi_smooth_joint_np)
-        else:
-            phi_smooth_joint = _sskf_smoother_1d(
-                phi_u_joint, sigma_p2, sigma_v2, sp, xp
-            )
-            phi_smooth_joint_np = to_device(phi_smooth_joint, "cpu")
-
-        if cycle_slip_correction:
-            phi_smooth_joint_np = correct_cycle_slips(
-                to_device(phi_smooth_joint, "cpu"),
-                4,
-                cycle_slip_history,
-                cycle_slip_threshold,
-            )
-            phi_smooth_joint = xp.asarray(phi_smooth_joint_np)
-
-        phi_interp = xp.interp(all_positions, block_centers, phi_smooth_joint)
-        for ch in range(C):
-            phi_full[ch] = phi_interp
-        phi_smooth_np = np.tile(to_device(phi_smooth_joint, "cpu"), (C, 1))
+    if method.smoother == "rts":
+        phi_u_np = to_device(phi_u, "cpu")  # (R, N_blocks) float64
+        phi_smooth = xp.asarray(
+            np.stack([_rts_smoother_1d(row, sigma_p2, sigma_v2) for row in phi_u_np])
+        )
     else:
-        phi_u = phi_u_shared
+        phi_smooth = xp.stack(
+            [_sskf_smoother_1d(row, sigma_p2, sigma_v2, sp, xp) for row in phi_u]
+        )
+    phi_smooth = _repair_slips(phi_smooth, xp, method.cycle_slip, M)
+    phi_full = xp.stack(
+        [xp.interp(all_positions, block_centers, row) for row in phi_smooth]
+    )
+    if joint:
+        phi_full = xp.broadcast_to(phi_full, (C, N)).copy()
+        phi_smooth = xp.broadcast_to(phi_smooth, (C, N_blocks)).copy()
 
-        # Kalman smoother - dispatch on method
-        if method == "exact":
-            phi_u_np = to_device(phi_u, "cpu")  # (C, N_blocks) float64
-            phi_smooth_np = np.empty_like(phi_u_np)
-            for ch in range(C):
-                phi_smooth_np[ch] = _rts_smoother_1d(phi_u_np[ch], sigma_p2, sigma_v2)
-            phi_smooth = xp.asarray(phi_smooth_np)
-        else:  # method == "sskf"
-            phi_smooth = xp.empty_like(phi_u)
-            for ch in range(C):
-                phi_smooth[ch] = _sskf_smoother_1d(
-                    phi_u[ch], sigma_p2, sigma_v2, sp, xp
-                )
-            phi_smooth_np = to_device(phi_smooth, "cpu")
-
-        for ch in range(C):
-            phi_s_ch = phi_smooth[ch]
-            if cycle_slip_correction:
-                phi_s_ch_np = correct_cycle_slips(
-                    to_device(phi_s_ch, "cpu"),
-                    4,
-                    cycle_slip_history,
-                    cycle_slip_threshold,
-                )
-                phi_s_ch = xp.asarray(phi_s_ch_np)
-                phi_smooth_np[ch] = to_device(phi_s_ch, "cpu")
-            phi_full[ch] = xp.interp(all_positions, block_centers, phi_s_ch)
-
-    mode_str = "joint" if (joint_channels and C > 1) else "independent"
-    phi_full_np = _log_phase_summary(
+    _log_phase_summary(
         phi_full,
         "CPR (Tikhonov-%s, M=%s, %s)",
-        (method.upper(), M, mode_str),
-        "[%s blocks x %s, σ_p²=%.2e, σ_v²=%.2e, C=%s, cycle_slip_correction=%s]",
-        (N_blocks, block_size, sigma_p2, sigma_v2, C, cycle_slip_correction),
-        debug_plot=debug_plot,
+        (method.smoother, M, "joint" if joint else "independent"),
+        "[%s blocks x %s, σ_p²=%.2e, σ_v²=%.2e, C=%s, cycle_slip=%s]",
+        (N_blocks, block_size, sigma_p2, sigma_v2, C, method.cycle_slip is not None),
     )
-
-    if debug_plot:
-        from .. import plotting as _plotting
-
-        _plotting.plot_carrier_phase_trajectory(
-            phi_full=phi_full_np,
-            block_centers=to_device(block_centers, "cpu"),
-            phi_blocks=phi_smooth_np,
-            show=True,
-            title=f"CPR - Tikhonov-{method.upper()}",
-        )
-
-    return restore_1d(was_1d, phi_full)
+    return _Phase(
+        phase=phi_full,
+        block_centers=np.arange(N_blocks, dtype=np.float64) * block_size
+        + block_size / 2,
+        block_phase=phi_smooth,
+    )

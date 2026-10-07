@@ -1,15 +1,18 @@
 """
-Logging utilities for the CommKit library.
+Logging for the CommKit library.
 
-This module provides a unified, colorized logging interface for monitoring
-signal processing workflows and debugging complex system failures.
+Importing commkit installs no log handler.  Call :func:`set_log_level` to show
+commkit's own diagnostics with a coloured console handler, or configure
+``logging`` in your application as usual.
 """
 
 import logging
 import sys
 
+__all__ = ["logger", "set_log_level"]
 
-class ColorFormatter(logging.Formatter):
+
+class _ColorFormatter(logging.Formatter):
     """
     Custom logging formatter providing ANSI-colored output based on log levels.
 
@@ -56,48 +59,34 @@ class ColorFormatter(logging.Formatter):
         return formatter.format(record)
 
 
-def get_logger(name: str = "commkit") -> logging.Logger:
+# The package logger.  No handler is installed at import: the library never
+# configures logging for the application.  Without any logging configuration,
+# Python's last-resort handler still prints WARNING and above to stderr, so
+# warnings stay visible; INFO/DEBUG diagnostics appear once the application
+# configures logging or calls ``set_log_level``.
+logger = logging.getLogger("commkit")
+
+
+def set_log_level(level: int | str) -> None:
     """
-    Retrieves and configures a logger instance for the library.
+    Show commkit's log messages at ``level`` and above.
 
-    If the requested logger has no handlers, a `StreamHandler` with the
-    `ColorFormatter` is automatically attached to ensure immediate visibility.
-
-    Parameters
-    ----------
-    name : str, default "commkit"
-        The namespace for the logger.
-
-    Returns
-    -------
-    logging.Logger
-        A configured logger instance.
-    """
-    logger = logging.getLogger(name)
-
-    if not logger.handlers:
-        logger.setLevel(logging.INFO)
-        handler = logging.StreamHandler(sys.stdout)
-        handler.setFormatter(ColorFormatter())
-        logger.addHandler(handler)
-
-    return logger
-
-
-# Create a default logger for the package
-logger = get_logger()
-
-
-def set_log_level(level):
-    """
-    Sets the global log level for the CommKit library.
+    Sets the level of the ``commkit`` logger.  On the first call it also
+    attaches a coloured console handler (stdout), unless the logger already
+    has handlers, so calling this function is all a notebook needs to see
+    commkit's diagnostics.  The handler is attached only on request; importing
+    commkit never configures logging.
 
     Parameters
     ----------
     level : int or str
-        The logging level to apply. Accepts standard `logging` constants
-        (e.g., `logging.DEBUG`) or string identifiers (e.g., "DEBUG", "INFO").
+        A standard logging level, e.g. ``logging.DEBUG`` or ``"INFO"``.
     """
     if isinstance(level, str):
         level = getattr(logging, level.upper())
     logger.setLevel(level)
+    if not logger.handlers:
+        handler = logging.StreamHandler(sys.stdout)
+        handler.setFormatter(_ColorFormatter())
+        logger.addHandler(handler)
+        logger.propagate = False  # avoid duplicate lines via the root logger

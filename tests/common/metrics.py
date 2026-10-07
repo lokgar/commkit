@@ -5,7 +5,7 @@ from typing import Any
 import numpy as np
 
 from commkit import backend
-from commkit.mapping import gray_constellation
+from commkit.mapping import Constellation
 from tests.common.conversions import to_numpy
 
 
@@ -101,7 +101,7 @@ def calc_dispersion(y: Any, order: int = 16, mod: str = "qam") -> float:
     float
         Radial dispersion metric value.
     """
-    const = gray_constellation(mod, order)
+    const = getattr(Constellation, mod)(order).points
     const = const / np.sqrt(np.mean(np.abs(const) ** 2))
     r2 = np.abs(const) ** 2
     a2 = np.abs(to_numpy(y)) ** 2

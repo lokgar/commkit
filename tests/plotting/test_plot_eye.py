@@ -8,7 +8,9 @@ import numpy as np
 import pytest
 
 from commkit.core import Signal
-from commkit.plotting import _plot_eye_traces, plot_eye_diagram
+from commkit.plotting import plot_eye_diagram
+from commkit.plotting.eye import _plot_eye_traces
+from tests.common.conversions import to_numpy
 
 
 class TestPlotEyeDiagram:
@@ -19,7 +21,7 @@ class TestPlotEyeDiagram:
         """Verify eye diagram generation for real-valued signals."""
         samples = xp.random.randn(1000)
         sps = 4
-        fig, ax = plot_eye_diagram(samples, sps=sps, type=type, show=False)
+        fig, ax = plot_eye_diagram(samples, sps=sps, kind=type, show=False)
         assert fig is not None
         assert ax is not None
 
@@ -69,19 +71,19 @@ class TestPlotEyeDiagram:
                 sps=10,
                 num_symbols=2,
                 ax=MagicMock(),
-                type="line",
+                kind="line",
                 title=None,
             )
 
     def test_eye_diagram_invalid_type(self, xp: Any) -> None:
         """Verify error for unknown eye type."""
-        with pytest.raises(ValueError, match="Unknown type"):
+        with pytest.raises(ValueError, match="Unknown kind"):
             _plot_eye_traces(
                 xp.ones(100),
                 sps=4,
                 num_symbols=2,
                 ax=MagicMock(),
-                type="magic",
+                kind="magic",
                 title=None,
             )
 
@@ -126,7 +128,7 @@ class TestPlotEyeDiagram:
         """plot_eye_diagram() 'line' type with num_traces>5000 triggers downsampling skip path."""
         samples = xp.random.randn(10200).astype(xp.float32)
         fig, ax = plot_eye_diagram(
-            samples, sps=2, type="line", num_symbols=2, show=False
+            samples, sps=2, kind="line", num_symbols=2, show=False
         )
         assert fig is not None
 
@@ -134,7 +136,7 @@ class TestPlotEyeDiagram:
         """plot_eye_diagram() 'hist' type with num_traces>20000 triggers downsampling skip path."""
         samples = xp.random.randn(40100).astype(xp.float32)
         fig, ax = plot_eye_diagram(
-            samples, sps=2, type="hist", num_symbols=2, show=False
+            samples, sps=2, kind="hist", num_symbols=2, show=False
         )
         assert fig is not None
 
@@ -145,13 +147,35 @@ class TestPlotEyeDiagram:
         if channels == 2:
             samples = xp.stack([samples, samples])
         sig = Signal(samples=samples, sampling_rate=4e6, symbol_rate=1e6)
-        fig, axes = plot_eye_diagram(sig, num_symbols=3, type="line", show=False)
+        fig, axes = plot_eye_diagram(sig, num_symbols=3, kind="line", show=False)
         for ax in np.asarray(axes).flat:
-            assert ax.lines
-            assert len(ax.lines[0].get_xdata()) == 3 * 4 + 1
+            (coll,) = ax.collections
+            assert len(coll.get_segments()[0]) == 3 * 4 + 1
 
     @pytest.mark.parametrize("sps", [0, -1, float("nan"), float("inf")])
     def test_eye_rejects_invalid_sps(self, xp: Any, sps: Any) -> None:
         """plot_eye_diagram rejects non-positive or non-integral SPS."""
         with pytest.raises(ValueError, match="sps to be a positive integer"):
             plot_eye_diagram(xp.ones(100), sps=sps)
+
+    def test_interp_rows_matches_numpy_interp(self, xp: Any) -> None:
+        from commkit.plotting.eye import _interp_rows
+
+        rng = np.random.default_rng(2)
+        traces = rng.standard_normal((40, 17))
+        got = _interp_rows(xp.asarray(traces), 500, xp)
+        x_new = np.linspace(0, 16, 500)
+        expected = np.stack([np.interp(x_new, np.arange(17), row) for row in traces])
+        np.testing.assert_allclose(to_numpy(got), expected, rtol=0, atol=1e-12)
+
+    def test_line_mode_is_one_collection(self, xp: Any) -> None:
+        """Line mode draws all traces as one LineCollection, with the traces'
+        amplitude range in view."""
+        from matplotlib.collections import LineCollection
+
+        x = xp.asarray(np.cos(np.pi * np.arange(800) / 4))
+        _, ax = plot_eye_diagram(x, sps=4, kind="line")
+        (coll,) = [c for c in ax.collections if isinstance(c, LineCollection)]
+        assert len(coll.get_segments()) == (800 - 9) // 4 + 1
+        lo, hi = ax.get_ylim()
+        assert lo < -0.99 and hi > 0.99

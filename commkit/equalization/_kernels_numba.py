@@ -2,28 +2,25 @@
 
 from __future__ import annotations
 
+from collections.abc import Callable
+from typing import Any
+
 import numpy as np
 
 # -----------------------------------------------------------------------------
 # NUMBA LAZY LOADER
 # -----------------------------------------------------------------------------
 
-_NUMBA_CACHE: dict = {}
+_NUMBA_CACHE: dict[str, Any] = {}
 
 
-def _get_numba():
-    """Lazy loader for Numba.
-
-    Returns the ``numba`` module if installed, else ``None``.
-    """
+def _get_numba() -> Any:
+    """The ``numba`` module, imported on first use (a required dependency)."""
     if "numba" not in _NUMBA_CACHE:
-        try:
-            import numba
+        import numba
 
-            _NUMBA_CACHE["numba"] = numba
-        except ImportError:
-            _NUMBA_CACHE["numba"] = None
-    return _NUMBA_CACHE.get("numba")
+        _NUMBA_CACHE["numba"] = numba
+    return _NUMBA_CACHE["numba"]
 
 
 # -----------------------------------------------------------------------------
@@ -52,10 +49,10 @@ def _get_numba():
 #   - In-place W update - no copy per step, minimal working-set pressure
 #   - np.conj() on scalars - valid in Numba 0.64+
 
-_NUMBA_KERNELS: dict = {}
+_NUMBA_KERNELS: dict[str, Callable[..., Any]] = {}
 
 
-def _get_numba_lms():
+def _get_numba_lms() -> Callable[..., Any]:
     """JIT-compile and cache the Numba LMS butterfly loop kernel.
 
     Returns
@@ -65,8 +62,6 @@ def _get_numba_lms():
     """
     if "lms" not in _NUMBA_KERNELS:
         numba_mod = _get_numba()
-        if numba_mod is None:
-            raise ImportError("Numba is required for backend='numba'.")
 
         @numba_mod.njit(cache=True, fastmath=True, nogil=True)
         def lms_loop(
@@ -178,7 +173,7 @@ def _get_numba_lms():
     return _NUMBA_KERNELS["lms"]
 
 
-def _get_numba_rls():
+def _get_numba_rls() -> Callable[..., Any]:
     """JIT-compile and cache the Numba Leaky-RLS butterfly loop kernel.
 
     Returns
@@ -188,8 +183,6 @@ def _get_numba_rls():
     """
     if "rls" not in _NUMBA_KERNELS:
         numba_mod = _get_numba()
-        if numba_mod is None:
-            raise ImportError("Numba is required for backend='numba'.")
 
         @numba_mod.njit(cache=True, fastmath=True, nogil=True)
         def rls_loop(
@@ -357,7 +350,7 @@ def _get_numba_rls():
     return _NUMBA_KERNELS["rls"]
 
 
-def _get_numba_lms_cpr():
+def _get_numba_lms_cpr() -> Callable[..., Any]:
     """JIT-compile and cache the Numba LMS+CPR butterfly loop kernel.
 
     Extends the baseline LMS kernel with an inline carrier phase tracker
@@ -372,8 +365,6 @@ def _get_numba_lms_cpr():
     """
     if "lms_cpr" not in _NUMBA_KERNELS:
         numba_mod = _get_numba()
-        if numba_mod is None:
-            raise ImportError("Numba is required for backend='numba'.")
 
         @numba_mod.njit(cache=True, fastmath=False, nogil=True)
         def lms_cpr_loop(
@@ -403,6 +394,9 @@ def _get_numba_lms_cpr():
             cs_buf_n,
             cs_stats,
             bps_prev4,
+            bps_dist_buf,
+            bps_running_sum,
+            bps_dist_ptr,
             y_out,
             e_out,
             phase_out,
@@ -426,7 +420,7 @@ def _get_numba_lms_cpr():
             # cpr_mode      : int32  1=pll 2=bps
             # pll_mu        : float32
             # pll_beta      : float32
-            # symmetry      : int32  - cycle-slip quantum = 2π/symmetry
+            # symmetry      : int32  - S: BPS range 2π/S, slip quantum 2π/S
             # cs_enabled    : bool
             # cs_threshold  : float32
             # pll_phi       : (C,) float64          - in-place
@@ -436,7 +430,10 @@ def _get_numba_lms_cpr():
             # cs_buf_ptr    : (C,) int64            - in-place
             # cs_buf_n      : (C,) int64            - in-place
             # cs_stats      : (C, 4) float64  [Sx,Sy,Sxx,Sxy] - in-place
-            # bps_prev4     : (C,) float64    - causal 4-fold unwrap state - in-place
+            # bps_prev4     : (C,) float64    - causal S-fold unwrap state - in-place
+            # bps_dist_buf  : (C, K, B) float32 - BPS window metrics - in-place
+            # bps_running_sum: (C, B) float64   - their running sum - in-place
+            # bps_dist_ptr  : (1,) int64        - window write position - in-place
             # y_out         : (N_sym, C) complex64
             # e_out         : (N_sym, C) complex64
             # phase_out     : (N_sym, C) float32
@@ -458,11 +455,8 @@ def _get_numba_lms_cpr():
             e_clean = np.empty(C, dtype=np.complex64)
             e_eq = np.empty(C, dtype=np.complex64)
             phi_hat_bps = np.zeros(C, dtype=np.float64)
-            # BPS: incremental running-sum (avoids O(K·B·M) per-symbol rescan)
-            bps_dist_buf = np.zeros((C, bps_block_size, B), dtype=np.float32)
-            bps_running_sum = np.zeros((C, B), dtype=np.float64)
-            bps_dist_ptr = np.int64(0)
-
+            da_buf = np.zeros((C, bps_block_size), dtype=np.complex128)
+            da_sum = np.zeros(C, dtype=np.complex128)
             for idx in range(n_sym):
                 sample_idx = idx * stride
 
@@ -495,7 +489,7 @@ def _get_numba_lms_cpr():
                 # one - O(B·M·C) per symbol, independent of window size K.
                 # O(1) square-QAM path: snap real/imag to nearest level grid point.
                 if cpr_mode == 2:
-                    slot = bps_dist_ptr % np.int64(bps_block_size)
+                    slot = bps_dist_ptr[0] % np.int64(bps_block_size)
                     for i in range(C):
                         for k in range(B):
                             y_rot = y_raw[i] * bps_phases_neg[k]
@@ -531,7 +525,7 @@ def _get_numba_lms_cpr():
                                 + d2_min
                             )
                             bps_dist_buf[i, slot, k] = d2_min
-                    bps_dist_ptr = bps_dist_ptr + np.int64(1)
+                    bps_dist_ptr[0] = bps_dist_ptr[0] + np.int64(1)
 
                     if bps_joint_channels:
                         best_k_joint = np.int32(0)
@@ -543,15 +537,17 @@ def _get_numba_lms_cpr():
                             if metric_k < min_tot_joint:
                                 min_tot_joint = metric_k
                                 best_k_joint = k
-                        # Raw argmin in [0, π/2); apply 4-fold causal unwrap
-                        raw4 = np.float64(bps_angles[best_k_joint]) * np.float64(4.0)
+                        # Raw argmin in [0, 2π/S); apply S-fold causal unwrap (S = symmetry)
+                        raw4 = np.float64(bps_angles[best_k_joint]) * np.float64(
+                            symmetry
+                        )
                         for i in range(C):
                             diff4 = raw4 - bps_prev4[i]
                             diff4 = diff4 - np.float64(2.0 * np.pi) * np.round(
                                 diff4 / (np.float64(2.0 * np.pi))
                             )
                             bps_prev4[i] = bps_prev4[i] + diff4
-                            phi_hat_bps[i] = bps_prev4[i] / np.float64(4.0)
+                            phi_hat_bps[i] = bps_prev4[i] / np.float64(symmetry)
                     else:
                         for i in range(C):
                             best_k = np.int32(0)
@@ -560,14 +556,42 @@ def _get_numba_lms_cpr():
                                 if bps_running_sum[i, k] < min_tot:
                                     min_tot = bps_running_sum[i, k]
                                     best_k = k
-                            # Raw argmin in [0, π/2); apply 4-fold causal unwrap
-                            raw4 = np.float64(bps_angles[best_k]) * np.float64(4.0)
+                            # Raw argmin in [0, 2π/S); apply S-fold causal unwrap (S = symmetry)
+                            raw4 = np.float64(bps_angles[best_k]) * np.float64(symmetry)
                             diff4 = raw4 - bps_prev4[i]
                             diff4 = diff4 - np.float64(2.0 * np.pi) * np.round(
                                 diff4 / (np.float64(2.0 * np.pi))
                             )
                             bps_prev4[i] = bps_prev4[i] + diff4
-                            phi_hat_bps[i] = bps_prev4[i] / np.float64(4.0)
+                            phi_hat_bps[i] = bps_prev4[i] / np.float64(symmetry)
+
+                # Training symbols anchor the BPS phase: while they last, the
+                # phase is the angle of sum(y_raw conj(d)) over the last K of
+                # them, over the full 2π.  Blind BPS sees only 2π/S, and a
+                # blind estimate here is copied into the taps by the training
+                # error, so nothing would fix the absolute phase.  prev4 follows
+                # the anchor, so the S-fold unwrap continues from its branch
+                # once decisions take over.
+                if cpr_mode == 2 and idx < n_train:
+                    da_slot = idx % bps_block_size
+                    for i in range(C):
+                        p_da = np.complex128(y_raw[i]) * np.conj(
+                            np.complex128(training[i, idx])
+                        )
+                        da_sum[i] = da_sum[i] + p_da - da_buf[i, da_slot]
+                        da_buf[i, da_slot] = p_da
+                    da_tot = np.complex128(0.0)
+                    if bps_joint_channels:
+                        for i in range(C):
+                            da_tot = da_tot + da_sum[i]
+                    for i in range(C):
+                        if not bps_joint_channels:
+                            da_tot = da_sum[i]
+                        ang = np.arctan2(da_tot.imag, da_tot.real)
+                        prev = bps_prev4[i] / np.float64(symmetry)
+                        ang = ang + two_pi * np.round((prev - ang) / two_pi)
+                        bps_prev4[i] = ang * np.float64(symmetry)
+                        phi_hat_bps[i] = ang
 
                 for i in range(C):
                     if cpr_mode == 1:  # PLL: read current integrator state
@@ -764,7 +788,7 @@ def _get_numba_lms_cpr():
     return _NUMBA_KERNELS["lms_cpr"]
 
 
-def _get_numba_rls_cpr():
+def _get_numba_rls_cpr() -> Callable[..., Any]:
     """JIT-compile and cache the Numba RLS+CPR butterfly loop kernel.
 
     Combines the Leaky-RLS Riccati update with the same inline CPR tracker
@@ -776,8 +800,6 @@ def _get_numba_rls_cpr():
     """
     if "rls_cpr" not in _NUMBA_KERNELS:
         numba_mod = _get_numba()
-        if numba_mod is None:
-            raise ImportError("Numba is required for backend='numba'.")
 
         @numba_mod.njit(cache=True, fastmath=False, nogil=True)
         def rls_cpr_loop(
@@ -810,6 +832,9 @@ def _get_numba_rls_cpr():
             cs_buf_n,
             cs_stats,
             bps_prev4,
+            bps_dist_buf,
+            bps_running_sum,
+            bps_dist_ptr,
             y_out,
             e_out,
             phase_out,
@@ -840,9 +865,8 @@ def _get_numba_rls_cpr():
             e_clean = np.empty(C, dtype=np.complex64)
             e_eq = np.empty(C, dtype=np.complex64)
             phi_hat_bps = np.zeros(C, dtype=np.float64)
-            bps_dist_buf = np.zeros((C, bps_block_size, B), dtype=np.float32)
-            bps_running_sum = np.zeros((C, B), dtype=np.float64)
-            bps_dist_ptr = np.int64(0)
+            da_buf = np.zeros((C, bps_block_size), dtype=np.complex128)
+            da_sum = np.zeros(C, dtype=np.complex128)
 
             lam_f64 = np.float64(lam)
             leak_term = np.float32(1.0) - np.float32(leakage)
@@ -875,7 +899,7 @@ def _get_numba_rls_cpr():
                 # BPS: incremental running-sum (O(B·M·C) per symbol, independent of K)
                 # O(1) square-QAM path: snap real/imag to nearest level grid point.
                 if cpr_mode == 2:
-                    slot = bps_dist_ptr % np.int64(bps_block_size)
+                    slot = bps_dist_ptr[0] % np.int64(bps_block_size)
                     for i in range(C):
                         for k in range(B):
                             y_rot = y_raw[i] * bps_phases_neg[k]
@@ -910,7 +934,7 @@ def _get_numba_rls_cpr():
                                 + d2_min
                             )
                             bps_dist_buf[i, slot, k] = d2_min
-                    bps_dist_ptr = bps_dist_ptr + np.int64(1)
+                    bps_dist_ptr[0] = bps_dist_ptr[0] + np.int64(1)
 
                     if bps_joint_channels:
                         best_k_joint = np.int32(0)
@@ -922,14 +946,16 @@ def _get_numba_rls_cpr():
                             if metric_k < min_tot_joint:
                                 min_tot_joint = metric_k
                                 best_k_joint = k
-                        raw4 = np.float64(bps_angles[best_k_joint]) * np.float64(4.0)
+                        raw4 = np.float64(bps_angles[best_k_joint]) * np.float64(
+                            symmetry
+                        )
                         for i in range(C):
                             diff4 = raw4 - bps_prev4[i]
                             diff4 = diff4 - np.float64(2.0 * np.pi) * np.round(
                                 diff4 / (np.float64(2.0 * np.pi))
                             )
                             bps_prev4[i] = bps_prev4[i] + diff4
-                            phi_hat_bps[i] = bps_prev4[i] / np.float64(4.0)
+                            phi_hat_bps[i] = bps_prev4[i] / np.float64(symmetry)
                     else:
                         for i in range(C):
                             best_k = np.int32(0)
@@ -938,13 +964,41 @@ def _get_numba_rls_cpr():
                                 if bps_running_sum[i, k] < min_tot:
                                     min_tot = bps_running_sum[i, k]
                                     best_k = k
-                            raw4 = np.float64(bps_angles[best_k]) * np.float64(4.0)
+                            raw4 = np.float64(bps_angles[best_k]) * np.float64(symmetry)
                             diff4 = raw4 - bps_prev4[i]
                             diff4 = diff4 - np.float64(2.0 * np.pi) * np.round(
                                 diff4 / (np.float64(2.0 * np.pi))
                             )
                             bps_prev4[i] = bps_prev4[i] + diff4
-                            phi_hat_bps[i] = bps_prev4[i] / np.float64(4.0)
+                            phi_hat_bps[i] = bps_prev4[i] / np.float64(symmetry)
+
+                # Training symbols anchor the BPS phase: while they last, the
+                # phase is the angle of sum(y_raw conj(d)) over the last K of
+                # them, over the full 2π.  Blind BPS sees only 2π/S, and a
+                # blind estimate here is copied into the taps by the training
+                # error, so nothing would fix the absolute phase.  prev4 follows
+                # the anchor, so the S-fold unwrap continues from its branch
+                # once decisions take over.
+                if cpr_mode == 2 and idx < n_train:
+                    da_slot = idx % bps_block_size
+                    for i in range(C):
+                        p_da = np.complex128(y_raw[i]) * np.conj(
+                            np.complex128(training[i, idx])
+                        )
+                        da_sum[i] = da_sum[i] + p_da - da_buf[i, da_slot]
+                        da_buf[i, da_slot] = p_da
+                    da_tot = np.complex128(0.0)
+                    if bps_joint_channels:
+                        for i in range(C):
+                            da_tot = da_tot + da_sum[i]
+                    for i in range(C):
+                        if not bps_joint_channels:
+                            da_tot = da_sum[i]
+                        ang = np.arctan2(da_tot.imag, da_tot.real)
+                        prev = bps_prev4[i] / np.float64(symmetry)
+                        ang = ang + two_pi * np.round((prev - ang) / two_pi)
+                        bps_prev4[i] = ang * np.float64(symmetry)
+                        phi_hat_bps[i] = ang
 
                 for i in range(C):
                     if cpr_mode == 1:
@@ -1170,7 +1224,7 @@ def _get_numba_rls_cpr():
     return _NUMBA_KERNELS["rls_cpr"]
 
 
-def _get_numba_cma():
+def _get_numba_cma() -> Callable[..., Any]:
     """JIT-compile and cache the Numba CMA butterfly loop kernel.
 
     Returns
@@ -1180,8 +1234,6 @@ def _get_numba_cma():
     """
     if "cma" not in _NUMBA_KERNELS:
         numba_mod = _get_numba()
-        if numba_mod is None:
-            raise ImportError("Numba is required for backend='numba'.")
 
         @numba_mod.njit(cache=True, fastmath=True, nogil=True)
         def cma_loop(
@@ -1262,7 +1314,7 @@ def _get_numba_cma():
     return _NUMBA_KERNELS["cma"]
 
 
-def _get_numba_rde():
+def _get_numba_rde() -> Callable[..., Any]:
     """JIT-compile and cache the Numba RDE butterfly loop kernel.
 
     RDE (Radius Directed Equalizer) is a CMA variant that selects a
@@ -1277,8 +1329,6 @@ def _get_numba_rde():
     """
     if "rde" not in _NUMBA_KERNELS:
         numba_mod = _get_numba()
-        if numba_mod is None:
-            raise ImportError("Numba is required for backend='numba'.")
 
         @numba_mod.njit(cache=True, fastmath=True, nogil=True)
         def rde_loop(
@@ -1384,7 +1434,7 @@ def _get_numba_rde():
 # correct blind tracking at data positions - all in a single kernel pass.
 
 
-def _get_numba_pa_cma():
+def _get_numba_pa_cma() -> Callable[..., Any]:
     """JIT-compile and cache the Numba pilot-aided CMA butterfly loop kernel.
 
     Hybrid CMA: LMS error at pilot positions (pilot_mask==1), standard
@@ -1397,8 +1447,6 @@ def _get_numba_pa_cma():
     """
     if "pa_cma" not in _NUMBA_KERNELS:
         numba_mod = _get_numba()
-        if numba_mod is None:
-            raise ImportError("Numba is required for backend='numba'.")
 
         @numba_mod.njit(cache=True, fastmath=True, nogil=True)
         def pa_cma_loop(
@@ -1486,7 +1534,7 @@ def _get_numba_pa_cma():
     return _NUMBA_KERNELS["pa_cma"]
 
 
-def _get_numba_pa_rde():
+def _get_numba_pa_rde() -> Callable[..., Any]:
     """JIT-compile and cache the Numba pilot-aided RDE butterfly loop kernel.
 
     Hybrid RDE: LMS error at pilot positions (pilot_mask==1), standard
@@ -1499,8 +1547,6 @@ def _get_numba_pa_rde():
     """
     if "pa_rde" not in _NUMBA_KERNELS:
         numba_mod = _get_numba()
-        if numba_mod is None:
-            raise ImportError("Numba is required for backend='numba'.")
 
         @numba_mod.njit(cache=True, fastmath=True, nogil=True)
         def pa_rde_loop(
@@ -1597,7 +1643,7 @@ def _get_numba_pa_rde():
     return _NUMBA_KERNELS["pa_rde"]
 
 
-def _get_numba_cs_block():
+def _get_numba_cs_block() -> Callable[..., Any]:
     """Lazy-compile a Numba JIT kernel for the block_lms cycle-slip correction loop.
 
     Replaces the Python ``for ci in range(C): for i in range(B)`` loop with
@@ -1607,8 +1653,6 @@ def _get_numba_cs_block():
     """
     if "cs_block" not in _NUMBA_KERNELS:
         numba_mod = _get_numba()
-        if numba_mod is None:
-            return None
 
         @numba_mod.njit(cache=True, fastmath=True, nogil=True)
         def cs_block(

@@ -5,25 +5,30 @@ device model (the widely-linear I/Q mixing) and are read as a pair.
 """
 
 import math
+from collections.abc import Callable
+from dataclasses import dataclass
+from types import ModuleType
 
+from .._array import as_2d, restore_1d
 from ..backend import ArrayType, dispatch
-from ..core._signal_adapter import adapt_signal
-from ..core.signal import Signal
-from ..helpers import as_2d, db_to_linear, restore_1d
+from ..core._signal_adapter import S, adapt_signal
 from ..logger import logger
+from ..math import db_to_linear
 
 __all__ = [
+    "GramSchmidt",
+    "Lowdin",
     "apply_iq_imbalance",
-    "compensate_iq_imbalance_gram_schmidt",
-    "compensate_iq_imbalance_lowdin",
+    "correct_iq_imbalance",
 ]
 
 
 def apply_iq_imbalance(
-    samples: ArrayType | Signal,
+    samples: S,
+    *,
     amplitude_imbalance_db: float,
     phase_imbalance_deg: float,
-) -> ArrayType | Signal:
+) -> S:
     """
     Applies IQ imbalance to a complex baseband signal.
 
@@ -61,7 +66,6 @@ def apply_iq_imbalance(
     >>> r = apply_iq_imbalance(s, amplitude_imbalance_db=1.0, phase_imbalance_deg=3.0)
     """
     signal_adapter = adapt_signal(samples, function_name="apply_iq_imbalance()")
-    samples = signal_adapter.array
 
     logger.info(
         "Applying IQ imbalance (amplitude=%.2f dB, phase=%.2f deg).",
@@ -69,7 +73,7 @@ def apply_iq_imbalance(
         phase_imbalance_deg,
     )
 
-    samples, xp, _ = dispatch(samples)
+    x, xp, _ = dispatch(signal_adapter.array)
 
     g = db_to_linear(amplitude_imbalance_db, power=False)
     phi = math.radians(phase_imbalance_deg)
@@ -78,15 +82,104 @@ def apply_iq_imbalance(
     K1 = complex(0.5 * (1.0 + g * math.cos(phi)), 0.5 * g * math.sin(phi))
     K2 = complex(0.5 * (1.0 - g * math.cos(phi)), -0.5 * g * math.sin(phi))
 
-    result = K1 * samples + K2 * xp.conj(samples)
+    result = K1 * x + K2 * xp.conj(x)
 
-    if result.dtype != samples.dtype:
-        result = result.astype(samples.dtype)
+    if result.dtype != x.dtype:
+        result = result.astype(x.dtype)
 
     return signal_adapter.wrap_samples(result)
 
 
-def _apply_iq_correction(samples, xp, correct_fn):
+# -----------------------------------------------------------------------------
+# BLIND IQ-IMBALANCE CORRECTION
+# -----------------------------------------------------------------------------
+
+
+@dataclass(frozen=True)
+class Lowdin:
+    """Löwdin symmetric orthogonalization of the I and Q branches.
+
+    Whitens ``X = [I; Q]`` with ``W = M^(-1/2)``, ``M = X Xᵀ / N`` (symmetric
+    eigendecomposition), so the corrected branches have equal power and zero
+    correlation.  The transform is symmetric: both branches are adjusted
+    equally, which minimizes the total distortion.
+    """
+
+
+@dataclass(frozen=True)
+class GramSchmidt:
+    """Gram-Schmidt orthogonalization with I as the reference branch.
+
+    Normalizes I to unit RMS, removes its projection from Q, then normalizes
+    Q (the classical GSOP front-end calibration).
+    """
+
+
+def _lowdin(r: ArrayType, xp: ModuleType) -> tuple[ArrayType, ArrayType]:
+    N = r.shape[0]
+    X = xp.stack([r.real, r.imag])  # (2, N), rows = [I, Q]
+    M = (X @ X.T) / N  # 2x2 second-moment matrix
+    lam, V = xp.linalg.eigh(M)
+    W = (V * (1.0 / xp.sqrt(lam))) @ V.T  # M^(-1/2)
+    X_corr = W @ X  # identity second-moment matrix
+    return X_corr[0], X_corr[1]
+
+
+def _gram_schmidt(r: ArrayType, xp: ModuleType) -> tuple[ArrayType, ArrayType]:
+    i_branch, q_branch = r.real, r.imag
+    i_norm = i_branch / xp.sqrt(xp.mean(i_branch**2))
+    q_orth = q_branch - xp.mean(i_norm * q_branch) * i_norm
+    q_norm = q_orth / xp.sqrt(xp.mean(q_orth**2))
+    return i_norm, q_norm
+
+
+_IQ_CORRECTORS: dict[
+    type, Callable[[ArrayType, ModuleType], tuple[ArrayType, ArrayType]]
+] = {Lowdin: _lowdin, GramSchmidt: _gram_schmidt}
+
+
+def correct_iq_imbalance(samples: S, how: Lowdin | GramSchmidt) -> S:
+    """
+    Blind IQ-imbalance correction.
+
+    Orthogonalizes the I and Q branches of each channel with the algorithm
+    ``how`` and restores the channel's input power.  Undoes
+    :func:`apply_iq_imbalance` up to a common gain and rotation.
+
+    Parameters
+    ----------
+    samples : array_like or Signal
+        Complex baseband samples, ``(N,)`` or ``(C, N)``.
+    how : Lowdin or GramSchmidt
+        Orthogonalization algorithm.
+
+    Returns
+    -------
+    array_like or Signal
+        Corrected samples, same shape, dtype and device as the input.
+
+    Examples
+    --------
+    >>> r = apply_iq_imbalance(s, amplitude_imbalance_db=1.5, phase_imbalance_deg=4.0)
+    >>> s_hat = correct_iq_imbalance(r, Lowdin())
+    """
+    correct_fn = _IQ_CORRECTORS.get(type(how))
+    if correct_fn is None:
+        raise TypeError(
+            "correct_iq_imbalance(): how must be Lowdin() or GramSchmidt(), got "
+            f"{type(how).__name__}."
+        )
+    signal_adapter = adapt_signal(samples, function_name="correct_iq_imbalance()")
+    logger.info("Correcting IQ imbalance (%s).", type(how).__name__)
+    x, xp, _ = dispatch(signal_adapter.array)
+    return signal_adapter.wrap_samples(_apply_iq_correction(x, xp, correct_fn))
+
+
+def _apply_iq_correction(
+    samples: ArrayType,
+    xp: ModuleType,
+    correct_fn: Callable[[ArrayType, ModuleType], tuple[ArrayType, ArrayType]],
+) -> ArrayType:
     """Shared per-channel scaffold for the blind IQ-imbalance compensators.
 
     ``correct_fn(r, xp) -> (comp0, comp1)`` computes one channel's corrected
@@ -116,132 +209,3 @@ def _apply_iq_correction(samples, xp, correct_fn):
         result[ch] = s_corr
 
     return restore_1d(was_1d, result)
-
-
-def compensate_iq_imbalance_lowdin(samples: ArrayType | Signal) -> ArrayType | Signal:
-    """
-    Blind IQ imbalance compensation via Löwdin symmetric orthogonalisation.
-
-    Treats the I and Q components as a 2-D real vector and applies the
-    symmetric whitening transform W = M^(-1/2) (where M is the 2x2 second-moment matrix)
-    so that the corrected I and Q channels have equal power and zero cross-correlation.
-    Unlike Gram-Schmidt, the transform is symmetric: both branches are adjusted
-    equally, minimising the total distortion introduced.
-
-    The output power equals the input power.
-
-    Parameters
-    ----------
-    samples : array_like or Signal
-        Complex baseband signal. Shape: ``(N,)`` (SISO) or ``(C, N)`` (MIMO).
-
-    Returns
-    -------
-    array_like or Signal
-        IQ-corrected signal, same shape and dtype as input.  A :class:`Signal`
-        returns a new corrected :class:`Signal`.
-
-    Notes
-    -----
-    Per channel: forms the 2x2 second-moment matrix M = X*X.T/N from X = [I; Q],
-    then applies whitening W = M^(-1/2) via symmetric eigendecomposition.
-
-    Examples
-    --------
-    >>> r = apply_iq_imbalance(s, amplitude_imbalance_db=1.5, phase_imbalance_deg=4.0)
-    >>> s_hat = compensate_iq_imbalance_lowdin(r)
-    """
-    signal_adapter = adapt_signal(
-        samples, function_name="compensate_iq_imbalance_lowdin()"
-    )
-    samples = signal_adapter.array
-
-    logger.info("Applying Löwdin IQ imbalance compensation.")
-
-    samples, xp, _ = dispatch(samples)
-
-    def _correct(r, xp):
-        N = r.shape[0]
-        # 2xN real data matrix: rows = [I, Q]
-        X = xp.stack([r.real, r.imag])  # (2, N)
-
-        # 2x2 second-moment matrix
-        M = (X @ X.T) / N  # (2, 2)
-
-        # Symmetric whitening: W = M^{-1/2} = V @ diag(1/sqrt(lam)) @ V.T
-        lam, V = xp.linalg.eigh(M)  # lam: (2,), V: (2, 2)
-        W = (V * (1.0 / xp.sqrt(lam))) @ V.T  # (2, 2)
-
-        # Apply whitening - X_corr has identity second-moment matrix
-        X_corr = W @ X  # (2, N)
-        return X_corr[0], X_corr[1]
-
-    return signal_adapter.wrap_samples(_apply_iq_correction(samples, xp, _correct))
-
-
-def compensate_iq_imbalance_gram_schmidt(
-    samples: ArrayType | Signal,
-) -> ArrayType | Signal:
-    """
-    Blind IQ imbalance compensation via Gram-Schmidt sequential orthogonalisation.
-
-    Uses the I branch as the reference axis.  The Q branch is orthogonalised
-    against I and both are normalised to unit RMS before being recombined.
-    This is the classical GSOP approach used in analogue front-end calibration.
-
-    The output power equals the input power.
-
-    Parameters
-    ----------
-    samples : array_like or Signal
-        Complex baseband signal. Shape: ``(N,)`` (SISO) or ``(C, N)`` (MIMO).
-
-    Returns
-    -------
-    array_like or Signal
-        IQ-corrected signal, same shape and dtype as input.  A :class:`Signal`
-        returns a new corrected :class:`Signal`.
-
-    Notes
-    -----
-    *Algorithm* (per channel):
-
-    1. Normalize I to unit RMS: I_hat = I / sigma_I.
-    2. Remove I-projection from Q: Q_perp = Q - <I_hat, Q> * I_hat.
-    3. Normalize Q_perp to unit RMS: Q_hat = Q_perp / sigma_Q_perp.
-    4. Recombine and rescale to preserve input power.
-
-    Examples
-    --------
-    >>> r = apply_iq_imbalance(s, amplitude_imbalance_db=1.5, phase_imbalance_deg=4.0)
-    >>> s_hat = compensate_iq_imbalance_gram_schmidt(r)
-    """
-    signal_adapter = adapt_signal(
-        samples, function_name="compensate_iq_imbalance_gram_schmidt()"
-    )
-    samples = signal_adapter.array
-
-    logger.info("Applying Gram-Schmidt IQ imbalance compensation.")
-
-    samples, xp, _ = dispatch(samples)
-
-    def _correct(r, xp):
-        I = r.real  # noqa: E741
-        Q = r.imag
-
-        # Step 1: Normalise I (reference branch)
-        sigma_I = xp.sqrt(xp.mean(I**2))
-        I_norm = I / sigma_I
-
-        # Step 2: Orthogonalise Q against I
-        rho = xp.mean(I_norm * Q)  # scalar projection coefficient
-        Q_orth = Q - rho * I_norm
-
-        # Step 3: Normalise orthogonalised Q
-        sigma_Q = xp.sqrt(xp.mean(Q_orth**2))
-        Q_norm = Q_orth / sigma_Q
-
-        # Step 4: Recombine (power restoration happens in the shared scaffold)
-        return I_norm, Q_norm
-
-    return signal_adapter.wrap_samples(_apply_iq_correction(samples, xp, _correct))

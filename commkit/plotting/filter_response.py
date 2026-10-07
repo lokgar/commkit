@@ -21,9 +21,12 @@ from ..backend import dispatch, to_device
 from ..logger import logger
 from .theme import _grid_figsize, _set_eng_formatter
 
+__all__ = ["plot_filter_response"]
+
 
 def plot_filter_response(
     system: Any,
+    *,
     sps: float = 1.0,
     sampling_rate: float | None = None,
     ax: Any | None = None,

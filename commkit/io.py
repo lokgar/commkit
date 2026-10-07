@@ -6,29 +6,38 @@ File layout
 The .npz file contains the following named entries:
 
   ``samples``              - IQ sample array  (always present)
-  ``source_bits``          - source bit array  (omitted if None)
-  ``source_symbols``       - source symbol array  (omitted if None)
-  ``resolved_symbols``     - cached symbol array  (only with include_cache=True)
-  ``resolved_bits``        - cached bit array     (only with include_cache=True)
-  ``__metadata__``         - zero-d object array holding a YAML string with all
-                             scalar fields.
-  ``__frame_metadata__``   - zero-d object array holding a YAML string with the
+  ``reference_symbols``    - reference symbols  (omitted without a reference)
+  ``reference_bits``       - reference bits     (omitted if None)
+  ``constellation_points``, ``constellation_bit_labels``, ``constellation_pmf``
+                           - the constellation (omitted if None; pmf if shaped)
+  ``__metadata__``         - zero-d unicode array holding a JSON string with the
+                             rates, the center frequency, the constellation
+                             family and the pulse (type name and fields).
+  ``__frame_metadata__``   - zero-d unicode array holding a JSON string with the
                              serialised SingleCarrierFrame fields (omitted when
                              the signal was not generated from a frame).
+
+The archive contains only numeric and unicode arrays, so it is read with
+``allow_pickle=False``: loading a file never executes code from it.
   ``frame_payload_symbols`` - frame payload symbols array  (omitted if no frame)
   ``frame_pilot_symbols``   - frame pilot symbols array    (omitted if no frame/pilots)
   ``frame_payload_bits``    - frame payload bits array     (omitted if no frame)
+  ``frame_payload_constellation_*``, ``frame_pilot_constellation_*``
+                            - the frame's constellations (as for the Signal's)
 """
 
 from __future__ import annotations
 
+import dataclasses
+import json
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
 import numpy as np
-import yaml
 
 from . import backend as _backend
+
+__all__ = ["load_npz", "save_npz"]
 
 if TYPE_CHECKING:
     from .core import Signal
@@ -37,41 +46,11 @@ if TYPE_CHECKING:
 # Internal constants
 # -----------------------------------------------------------------------------
 
-# Scalar / primitive metadata fields to round-trip through YAML
-_META_FIELDS: tuple[str, ...] = (
-    "sampling_rate",
-    "symbol_rate",
-    "signal_type",
-    "mod_scheme",
-    "mod_order",
-    "mod_unipolar",
-    "mod_rz",
-    "pulse_shape",
-    "filter_span",
-    "rrc_rolloff",
-    "rc_rolloff",
-    "duty_cycle",
-    "rise_time",
-    "spectral_domain",
-    "physical_domain",
-    "center_frequency",
-    "digital_frequency_offset",
-    "ps_nu",
-)
+# Scalar metadata fields round-tripped through JSON.
+_META_FIELDS: tuple[str, ...] = ("sampling_rate", "symbol_rate", "center_frequency")
 
-# Optional array fields (not always present).  Pilot metadata is stored here -
-# as native npz arrays, exactly like the sample/symbol arrays - rather than in
-# the YAML meta block, so no array-to-list conversion is ever needed.
-_OPTIONAL_ARRAY_FIELDS: tuple[str, ...] = (
-    "source_bits",
-    "source_symbols",
-    "ps_pmf",
-    "pilot_tone_frequency",
-    "pilot_tone_power_ratio_db",
-)
-
-# Derived / cached array fields (only written when include_cache=True)
-_CACHE_FIELDS: tuple[str, ...] = ("resolved_symbols", "resolved_bits")
+# Pulse classes that may be reconstructed from an archive.
+_PULSE_TYPES: tuple[str, ...] = ("RRC", "RC", "Gaussian", "Rect", "SmoothRect")
 
 
 # -----------------------------------------------------------------------------
@@ -84,7 +63,6 @@ def save_npz(
     path: str | Path,
     *,
     compressed: bool = True,
-    include_cache: bool = False,
 ) -> None:
     """
     Save a ``Signal`` to a NumPy archive (.npz).
@@ -99,10 +77,6 @@ def save_npz(
     compressed : bool, default True
         Use ``savez_compressed`` (zlib).  Set to ``False`` to use
         the uncompressed ``savez`` (faster write, larger file).
-    include_cache : bool, default False
-        Also save ``resolved_symbols`` and ``resolved_bits`` if present.
-        These can be recomputed from the signal, so they are omitted by
-        default to keep file sizes small.
 
     Notes
     -----
@@ -116,7 +90,7 @@ def save_npz(
     Examples
     --------
     >>> save_npz(sig, "capture.npz")
-    >>> save_npz(sig, "capture", compressed=False, include_cache=True)
+    >>> save_npz(sig, "capture", compressed=False)
     """
     path = Path(path)
     if path.suffix != ".npz":
@@ -127,16 +101,22 @@ def save_npz(
     # -------------------------------------------------------------------------
     arrays: dict[str, Any] = {"samples": _backend.to_device(signal.samples, "CPU")}
 
-    for field in _OPTIONAL_ARRAY_FIELDS:
-        arr = getattr(signal, field, None)
-        if arr is not None:
-            arrays[field] = _backend.to_device(arr, "CPU")
+    meta: dict = {f: getattr(signal, f) for f in _META_FIELDS}
 
-    if include_cache:
-        for field in _CACHE_FIELDS:
-            arr = getattr(signal, field, None)
-            if arr is not None:
-                arrays[field] = _backend.to_device(arr, "CPU")
+    ref = signal.reference
+    if ref is not None:
+        arrays["reference_symbols"] = _backend.to_device(ref.symbols, "CPU")
+        if ref.bits is not None:
+            arrays["reference_bits"] = _backend.to_device(ref.bits, "CPU")
+
+    _put_constellation(signal.constellation, "constellation", arrays, meta)
+
+    pulse = signal.pulse
+    meta["pulse"] = (
+        None
+        if pulse is None
+        else {"type": type(pulse).__name__, **dataclasses.asdict(pulse)}
+    )
 
     # -------------------------------------------------------------------------
     # Serialise originating SingleCarrierFrame (if present)
@@ -148,18 +128,23 @@ def save_npz(
     # reference to the original frame object.
     frame = signal.frame
     if frame is not None:
-        # All public fields are JSON-serializable primitives; nested Preamble
-        # is a Pydantic model and is also captured by model_dump().
+        # All public fields are JSON-serializable primitives; the nested
+        # Preamble dataclass becomes a dict.
         # _frame_type stores the class name so load_npz can reconstruct the
         # correct type when multiple frame classes exist (SingleCarrierFrame,
         # future OFDMFrame, etc.) without hardcoding the class.
-        frame_dict = frame.model_dump(mode="json")
+        frame_dict = _init_fields(frame)
+        for name in ("payload_constellation", "pilot_constellation"):
+            _put_constellation(
+                frame_dict.pop(name), f"frame_{name}", arrays, frame_dict
+            )
+        if frame_dict.get("preamble") is not None:
+            frame_dict["preamble"] = _init_fields(frame_dict["preamble"])
         frame_dict["_frame_type"] = type(frame).__name__
-        yaml_frame = yaml.dump(frame_dict, default_flow_style=False, allow_unicode=True)
-        arrays["__frame_metadata__"] = np.array(yaml_frame, dtype=object)
+        arrays["__frame_metadata__"] = _json_array(frame_dict)
 
-        # Save the generated symbol/bit arrays that live in PrivateAttrs and
-        # are NOT reproduced by model_dump().  Payload symbols and bits are
+        # Save the generated symbol/bit arrays from the frame's cache, which the
+        # field dict above does not include.  Payload symbols and bits are
         # random; pilot symbols are deterministic but cheap to cache anyway.
         for npz_key, frame_attr in (
             ("frame_payload_symbols", "payload_symbols"),
@@ -171,13 +156,9 @@ def save_npz(
                 arrays[npz_key] = _backend.to_device(arr, "CPU")
 
     # -------------------------------------------------------------------------
-    # Build metadata dict and serialise to YAML
+    # Build metadata dict and serialise to JSON
     # -------------------------------------------------------------------------
-    meta: dict = {f: getattr(signal, f) for f in _META_FIELDS}
-    yaml_str = yaml.dump(meta, default_flow_style=False, allow_unicode=True)
-
-    # Store as a zero-d object array so np.savez treats it as a single entry
-    arrays["__metadata__"] = np.array(yaml_str, dtype=object)
+    arrays["__metadata__"] = _json_array(meta)
 
     # -------------------------------------------------------------------------
     # Write
@@ -188,10 +169,39 @@ def save_npz(
         np.savez(path, **arrays)  # type: ignore[arg-type]
 
 
+def _put_constellation(c: Any, key: str, arrays: dict, meta: dict) -> None:
+    """Store constellation ``c`` (or ``None``) under ``key``."""
+    meta[f"{key}_family"] = None if c is None else c.family
+    if c is not None:
+        arrays[f"{key}_points"] = c.points
+        arrays[f"{key}_bit_labels"] = c.bit_labels
+        if c.pmf is not None:
+            arrays[f"{key}_pmf"] = c.pmf
+
+
+def _get_constellation(key: str, data: Any, meta: dict) -> Any:
+    """The constellation stored under ``key``, or ``None``."""
+    from .mapping import Constellation
+
+    if f"{key}_points" not in data:
+        return None
+    return Constellation(
+        data[f"{key}_points"],
+        bit_labels=data[f"{key}_bit_labels"],
+        pmf=data[f"{key}_pmf"] if f"{key}_pmf" in data else None,
+        family=meta[f"{key}_family"],
+    )
+
+
+def _init_fields(obj: Any) -> dict:
+    """The constructor arguments of a dataclass instance (no derived fields)."""
+    return {f.name: getattr(obj, f.name) for f in dataclasses.fields(obj) if f.init}
+
+
 def load_npz(
     path: str | Path,
     *,
-    device: str = "auto",
+    device: str = "cpu",
 ) -> Signal:
     """
     Load a ``Signal`` from a .npz archive.
@@ -201,9 +211,8 @@ def load_npz(
     path : str or Path
         Path to the ``.npz`` file.  A ``.npz`` extension is appended
         automatically if absent.
-    device : {"auto", "cpu", "gpu"}, default "auto"
-        Target device after loading.  ``"auto"`` moves to GPU when CuPy is
-        available, otherwise stays on CPU.
+    device : {"cpu", "gpu"}, default "cpu"
+        Target device after loading.
 
     Returns
     -------
@@ -220,8 +229,7 @@ def load_npz(
 
     Examples
     --------
-    >>> sig = load_npz("capture.npz")           # auto: GPU if available
-    >>> sig_cpu = load_npz("capture.npz", device="cpu")
+    >>> sig = load_npz("capture.npz")                   # on the CPU
     >>> sig_gpu = load_npz("capture.npz", device="gpu")
     """
     from .core import Signal
@@ -230,33 +238,39 @@ def load_npz(
     if path.suffix != ".npz":
         path = path.with_suffix(".npz")
 
-    # allow_pickle=True is required to read the zero-d object array that
-    # holds the YAML string; no arbitrary Python objects are loaded.
-    data = np.load(path, allow_pickle=True)
+    # Metadata is stored as plain unicode arrays, so pickle is never needed:
+    # loading an untrusted archive cannot execute code.
+    data = np.load(path, allow_pickle=False)
 
     # -------------------------------------------------------------------------
-    # Parse YAML metadata
+    # Parse JSON metadata
     # -------------------------------------------------------------------------
-    yaml_str = str(data["__metadata__"])
-    meta: dict = yaml.safe_load(yaml_str)
+    meta: dict = _read_json(data, "__metadata__")
 
     # Build Signal constructor kwargs
     # -------------------------------------------------------------------------
-    kwargs: dict = {f: meta.get(f) for f in _META_FIELDS}
+    from . import filtering
+    from .core import Reference
+
+    kwargs: dict = {f: meta[f] for f in _META_FIELDS}
     kwargs["samples"] = data["samples"]
 
-    for field in _OPTIONAL_ARRAY_FIELDS:
-        if field in data:
-            kwargs[field] = data[field]
+    if "reference_symbols" in data:
+        kwargs["reference"] = Reference(
+            symbols=data["reference_symbols"],
+            bits=data["reference_bits"] if "reference_bits" in data else None,
+        )
+    kwargs["constellation"] = _get_constellation("constellation", data, meta)
+    if meta["pulse"] is not None:
+        pulse_fields = dict(meta["pulse"])
+        pulse_type = pulse_fields.pop("type")
+        if pulse_type not in _PULSE_TYPES:
+            raise ValueError(f"Unknown pulse type {pulse_type!r} in {path}.")
+        kwargs["pulse"] = getattr(filtering, pulse_type)(**pulse_fields)
 
+    # 1.x archives may hold resolved_symbols/resolved_bits caches; they are
+    # derived data and not restored.
     sig = Signal(**kwargs)
-
-    # -------------------------------------------------------------------------
-    # Restore cached arrays (bypass re-computation if present in file)
-    # -------------------------------------------------------------------------
-    for field in _CACHE_FIELDS:
-        if field in data:
-            setattr(sig, field, data[field])
 
     # -------------------------------------------------------------------------
     # Reconstruct originating frame (if serialised)
@@ -264,7 +278,7 @@ def load_npz(
     if "__frame_metadata__" in data:
         from . import core as _core
 
-        frame_dict = yaml.safe_load(str(data["__frame_metadata__"]))
+        frame_dict = _read_json(data, "__frame_metadata__")
         frame_type_name = frame_dict.pop("_frame_type", "SingleCarrierFrame")
 
         # Registry of known frame classes - extend here as new frame types land.
@@ -277,32 +291,55 @@ def load_npz(
                 f"Cannot reconstruct frame of type {frame_type_name!r}: "
                 "unknown frame class. Extend _FRAME_CLASSES in io.py."
             )
+        for name in ("payload_constellation", "pilot_constellation"):
+            frame_dict[name] = _get_constellation(f"frame_{name}", data, frame_dict)
+            frame_dict.pop(f"frame_{name}_family")
+        if frame_dict.get("preamble") is not None:
+            frame_dict["preamble"] = _core.Preamble(**frame_dict["preamble"])
         frame = frame_cls(**frame_dict)
 
-        # Inject the cached symbol/bit arrays back into the frame's PrivateAttrs
-        # so that frame.payload_symbols, frame.pilot_symbols, frame.payload_bits
-        # return the original generated data without re-randomising.
-        if "frame_payload_symbols" in data:
-            frame._payload_symbols = data["frame_payload_symbols"]
-        if "frame_pilot_symbols" in data:
-            frame._pilot_symbols = data["frame_pilot_symbols"]
-        if "frame_payload_bits" in data:
-            frame._payload_bits = data["frame_payload_bits"]
+        # Refill the frame's cache so that frame.payload_symbols,
+        # frame.pilot_symbols and frame.payload_bits return the original
+        # generated data without re-randomising.
+        for npz_key, cache_key in (
+            ("frame_payload_symbols", "payload_symbols"),
+            ("frame_pilot_symbols", "pilot_symbols"),
+            ("frame_payload_bits", "payload_bits"),
+        ):
+            if npz_key in data:
+                frame._cache[cache_key] = data[npz_key]
 
-        sig.frame = frame
-
-        # _payload_ps_pmf is a PrivateAttr set during _ensure_payload_generated().
-        # When _payload_bits is restored above, that method returns early and never
-        # sets _payload_ps_pmf.  sig.ps_pmf was saved via _OPTIONAL_ARRAY_FIELDS and
-        # is already loaded, so restore from it directly.
-        if sig.ps_pmf is not None:
-            frame._payload_ps_pmf = sig.ps_pmf
+        sig = sig.replace(frame=frame)
 
     # -------------------------------------------------------------------------
     # Move to target device
     # -------------------------------------------------------------------------
-    target = device.lower()
-    if target == "auto":
-        target = "gpu" if _backend.is_cupy_available() else "cpu"
-    sig = sig.to(target)
-    return sig
+    return sig.to(device)
+
+
+# -----------------------------------------------------------------------------
+# JSON metadata helpers
+# -----------------------------------------------------------------------------
+
+
+def _json_default(value: Any) -> Any:
+    """Convert NumPy scalars (e.g. ``np.float64``) to Python values for JSON."""
+    if isinstance(value, np.generic):
+        return value.item()
+    raise TypeError(f"Cannot store {type(value).__name__} in npz metadata.")
+
+
+def _json_array(obj: dict) -> np.ndarray:
+    """A zero-d unicode array holding ``obj`` as JSON (no pickling needed)."""
+    return np.array(json.dumps(obj, default=_json_default))
+
+
+def _read_json(data: Any, key: str) -> dict:
+    try:
+        return json.loads(str(data[key]))
+    except ValueError as exc:
+        raise ValueError(
+            f"{key!r} in this archive is not JSON. It was probably written by "
+            "commkit < 2.0, which stored YAML in a pickled object array; such "
+            "files are not loaded because unpickling can execute code."
+        ) from exc

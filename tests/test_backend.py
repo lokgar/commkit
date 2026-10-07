@@ -23,29 +23,6 @@ class TestGetArrayModule:
         """Verify that a Python list defaults to NumPy."""
         assert backend.get_array_module([1, 2, 3]) == np
 
-    @pytest.mark.gpu_only
-    def test_force_cpu_does_not_break_dispatched_cupy_array(self) -> None:
-        """A CuPy array that was already formed still dispatches to cupy even if
-        FORCE_CPU is toggled on after the fact (the array object itself carries
-        its module).
-        """
-        original_force = backend._FORCE_CPU
-        backend.use_cpu_only(False)
-
-        import cupy as cp
-
-        arr = cp.arange(4)
-        try:
-            backend.use_cpu_only(True)
-            assert backend.is_cupy_available() is False
-            assert backend.get_array_module(arr) is cp
-            assert backend.get_scipy_module(cp).__name__.startswith("cupyx")
-            _, out_xp, out_sp = backend.dispatch(arr)
-            assert out_xp is cp
-            assert hasattr(out_sp, "signal")
-        finally:
-            backend.use_cpu_only(original_force)
-
 
 class TestToDevice:
     """Tests for explicit device transfer via to_device."""
@@ -66,21 +43,13 @@ class TestToDevice:
             assert backend.get_array_module(device_data) == cp
 
     @pytest.mark.gpu_only
-    def test_to_device_cpu_fetches_gpu_array_under_force(self) -> None:
-        """to_device(x, "cpu") must bring a CuPy array to host even under force."""
-        original_force = backend._FORCE_CPU
-        backend.use_cpu_only(False)
+    def test_to_device_cpu_fetches_gpu_array(self) -> None:
+        """to_device(x, "cpu") brings a CuPy array to the host."""
         import cupy as cp
 
-        arr = cp.arange(5)
-        try:
-            backend.use_cpu_only(True)
-            assert backend.is_cupy_available() is False
-            host = backend.to_device(arr, "cpu")
-            assert isinstance(host, np.ndarray)
-            assert np.array_equal(host, [0, 1, 2, 3, 4])
-        finally:
-            backend.use_cpu_only(original_force)
+        host = backend.to_device(cp.arange(5), "cpu")
+        assert isinstance(host, np.ndarray)
+        assert np.array_equal(host, [0, 1, 2, 3, 4])
 
     def test_to_device_list_input(self) -> None:
         """Verify to_device handles plain list input by converting to ndarray."""
@@ -117,104 +86,32 @@ class TestBackendDispatch:
         assert x in (np, getattr(multirate, "cp", None))
 
 
-class TestCpuOnlyToggle:
-    """Tests for toggling CPU-only mode and restoring state."""
+class _ForeignArray:
+    """Stand-in for a JAX/PyTorch array: DLPack-capable, but not NumPy/CuPy."""
 
-    def test_cpu_only_toggle(self) -> None:
-        """Verify that forcing CPU mode correctly disables GPU detection."""
-        original_force = backend._FORCE_CPU
-        try:
-            backend.use_cpu_only(False)
-            backend.use_cpu_only(True)
-            assert backend.is_cupy_available() is False
-            backend.use_cpu_only(False)
-        finally:
-            backend.use_cpu_only(original_force)
+    def __init__(self, data):
+        self._a = np.asarray(data)
 
-    def test_use_cpu_only_forces_cpu(self) -> None:
-        """Test use_cpu_only forces CPU backend and blocks GPU allocation."""
-        original_force = backend._FORCE_CPU
-        try:
-            backend.use_cpu_only(True)
-            assert backend.is_cupy_available() is False
-            assert backend.get_array_module(np.array([1])) == np
+    def __dlpack__(self, **kwargs):
+        return self._a.__dlpack__(**kwargs)
 
-            with pytest.raises(ImportError):
-                backend.to_device(np.array([1]), "gpu")
-        finally:
-            backend.use_cpu_only(original_force)
+    def __dlpack_device__(self):
+        return self._a.__dlpack_device__()
 
 
-class TestJaxInterop:
-    """Tests for interoperability between CommKit backends and JAX."""
+class TestForeignArrays:
+    """Arrays from other frameworks are rejected, never silently copied."""
 
-    def test_jax_interop_roundtrip(
-        self, backend_device: str, xp: Any, xpt: Any, jax: Any
-    ) -> None:
-        """Verify interoperability between core backends and JAX using DLPack."""
-        import jax.numpy as jnp
+    def test_dispatch_rejects_foreign_array(self) -> None:
+        with pytest.raises(TypeError, match="from_dlpack"):
+            backend.dispatch(_ForeignArray([1.0, 2.0]))
 
-        data = xp.array([1.0, 2.0, 3.0])
+    def test_dispatch_accepts_python_and_numpy_scalars(self) -> None:
+        for value in ([1, 2, 3], (1.0, 2.0), 3.0, np.float32(2.0)):
+            data, xp, _ = backend.dispatch(value)
+            assert xp is np and isinstance(data, np.ndarray)
 
-        if backend_device == "cpu":
-            backend.use_cpu_only(True)
-
-        try:
-            jax_arr = backend.to_jax(data)
-            assert isinstance(jax_arr, jnp.ndarray)
-
-            back_arr = backend.from_jax(jax_arr)
-
-            if backend_device == "cpu":
-                assert isinstance(back_arr, np.ndarray)
-            elif backend_device == "gpu":
-                assert isinstance(back_arr, (np.ndarray, xp.ndarray))
-
-            xpt.assert_allclose(backend.to_device(back_arr, "cpu"), [1.0, 2.0, 3.0])
-        finally:
-            backend.use_cpu_only(False)
-
-    def test_jax_conversions(self, xp: Any, xpt: Any, jax: Any) -> None:
-        """Test JAX conversion utilities with real JAX if available."""
-        import jax.numpy as jnp
-
-        from commkit import Signal
-
-        arr_np = np.array([1, 2, 3])
-        arr_jax = backend.to_jax(arr_np)
-        assert isinstance(arr_jax, jnp.ndarray)
-
-        arr_back = backend.from_jax(arr_jax)
-        assert isinstance(arr_back, np.ndarray)
-        xpt.assert_array_equal(arr_back, arr_np)
-
-        sig = Signal(samples=arr_np, sampling_rate=1.0, symbol_rate=1.0)
-        jax_sig = sig.export_samples_to_jax()
-        assert isinstance(jax_sig, jnp.ndarray)
-
-        sig.update_samples_from_jax(jax_sig)
-        assert isinstance(sig.samples, xp.ndarray)
-        xpt.assert_allclose(sig.samples, xp.asarray(arr_np))
-
-    def test_to_jax_list_and_scalar(self, jax: Any) -> None:
-        """Verify to_jax handles list and scalar inputs by converting via jnp.asarray."""
-        import jax.numpy as jnp
-
-        result = backend.to_jax([1.0, 2.0, 3.0])
-        assert isinstance(result, jnp.ndarray)
-        np.testing.assert_allclose(np.asarray(result), [1.0, 2.0, 3.0])
-
-        result_scalar = backend.to_jax(42.0)
-        assert isinstance(result_scalar, jnp.ndarray)
-        assert float(result_scalar) == 42.0
-
-    def test_to_jax_explicit_device(self, jax: Any) -> None:
-        """Verify to_jax with explicit device placement places the array on requested device."""
-        import jax.numpy as jnp
-
-        result = backend.to_jax(np.array([1.0, 2.0]), device="cpu")
-        assert isinstance(result, jnp.ndarray)
-        assert result.device.platform == "cpu"
-
-        with pytest.raises(ValueError, match="not available"):
-            backend.to_jax(np.array([1.0]), device="tpu")
+    def test_explicit_dlpack_conversion_works(self) -> None:
+        data, xp, _ = backend.dispatch(np.from_dlpack(_ForeignArray([1.0, 2.0])))
+        assert xp is np
+        np.testing.assert_array_equal(data, [1.0, 2.0])

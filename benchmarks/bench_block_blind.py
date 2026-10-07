@@ -24,6 +24,7 @@ import pytest
 from workloads import mimo_equalizer_workload
 
 from commkit.equalization import block_cma, block_rde
+from commkit.mapping import Constellation
 
 ROUNDS = dict(rounds=3, warmup_rounds=1, iterations=1)
 N_SYM = 100_000
@@ -43,8 +44,7 @@ def _bench_block_blind(benchmark, xp, sync, eq_fn, block_size):
             x,
             num_taps=21,
             sps=2,
-            modulation="qam",
-            order=16,
+            constellation=Constellation.qam(16),
             block_size=block_size,
         )
         sync()

@@ -5,6 +5,7 @@ paths are both exercised.
 """
 
 import numpy as np
+import pytest
 
 from commkit import analysis
 from commkit.backend import to_device
@@ -18,7 +19,12 @@ T = 1.0 / R
 
 def _wiener_phase(linewidth, n, seed=0):
     """Discrete Wiener phase walk at the symbol rate (NumPy, float64)."""
-    return to_device(generate_phase_noise(n, R, linewidth=linewidth, seed=seed), "cpu")
+    return to_device(
+        generate_phase_noise(
+            num_samples=n, sampling_rate=R, linewidth=linewidth, rng=seed
+        ),
+        "cpu",
+    )
 
 
 def _qpsk(n, seed=1):
@@ -94,3 +100,13 @@ class TestCarrierPhaseTrajectory:
 
         assert not isinstance(phi_sig, Signal)
         xpt.assert_allclose(phi_sig, phi_arr)
+
+        # The Signal's reference is the default.
+        from commkit.core import Reference
+
+        with_ref = sig.replace(reference=Reference(symbols=xp.asarray(d)))
+        xpt.assert_allclose(analysis.carrier_phase_trajectory(with_ref), phi_arr)
+        with pytest.raises(ValueError, match="reference"):
+            analysis.carrier_phase_trajectory(sig)
+        with pytest.raises(ValueError, match="one sample per symbol"):
+            analysis.carrier_phase_trajectory(sig.replace(sampling_rate=2 * R))

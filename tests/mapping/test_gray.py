@@ -10,9 +10,9 @@ from commkit.mapping.gray import (
     _gray_ask,
     _gray_psk,
     _gray_qam_cross,
-    nearest_constellation_index,
-    square_qam_slicer_params,
-    unpack_bits,
+    _nearest_index,
+    _square_qam_slicer_params,
+    _unpack_bits,
 )
 
 
@@ -42,7 +42,7 @@ class TestGrayCode:
         xpt.assert_array_equal(mapping.gray_to_binary(0), xp.array([0]))
 
     def test_unpack_bits_matches_manual_shift(self, xp: Any, xpt: Any) -> None:
-        """unpack_bits(indices, k) must match the direct bit-shift idiom it replaced."""
+        """_unpack_bits(indices, k) must match the direct bit-shift idiom it replaced."""
         k = 4
         indices = xp.arange(2**k, dtype=xp.int32)
         indices_np = np.arange(2**k, dtype=np.int32)
@@ -50,7 +50,7 @@ class TestGrayCode:
             (indices_np[:, None] >> np.arange(k - 1, -1, -1, dtype=np.int32)) & 1
         ).astype(np.int8)
 
-        result = unpack_bits(indices, k)
+        result = _unpack_bits(indices, k)
         assert result.dtype == xp.int8 or result.dtype == np.int8
         assert result.shape == (2**k, k)
         xpt.assert_array_equal(result, xp.asarray(expected))
@@ -62,24 +62,24 @@ class TestGrayConstellation:
     def test_gray_constellation_advanced(self, xp: Any) -> None:
         """Verify constellation generation edge cases."""
         # 1. Unipolar via argument
-        const_unipol = mapping.gray_constellation("pam", 4, unipolar=True)
+        const_unipol = mapping.gray._gray_points("pam", 4, unipolar=True)
         assert xp.min(const_unipol) >= 0
 
         # 2. Custom scheme check
-        const_custom = mapping.gray_constellation("pam", 4)
+        const_custom = mapping.gray._gray_points("pam", 4)
         assert len(const_custom) == 4
 
         # 3. Order error
         with pytest.raises(ValueError, match="at least 2"):
-            mapping.gray_constellation("psk", 1)
+            mapping.gray._gray_points("psk", 1)
 
         # 4. QAM non-power-of-2
         with pytest.raises(ValueError, match="power of 2"):
-            mapping.gray_constellation("qam", 7)
+            mapping.gray._gray_points("qam", 7)
 
         # 5. Unknown modulation
         with pytest.raises(ValueError, match="Unsupported modulation type"):
-            mapping.gray_constellation("unknown", 4)
+            mapping.gray._gray_points("unknown", 4)
 
     def test_qam_cross_fallback(self) -> None:
         """Trigger the fallback in cross-QAM for small N (e.g. 8-QAM)."""
@@ -89,15 +89,15 @@ class TestGrayConstellation:
     def test_constellation_unsupported(self) -> None:
         """Verify error for unknown modulation type."""
         with pytest.raises(ValueError, match="Unsupported modulation type"):
-            mapping.gray_constellation("chaos", 4)
+            mapping.gray._gray_points("chaos", 4)
 
     def test_constellation_order_error(self) -> None:
         """Verify errors for non-matching orders."""
         with pytest.raises(ValueError, match="Order must be at least 2"):
-            mapping.gray_constellation("qam", 1)
+            mapping.gray._gray_points("qam", 1)
 
         with pytest.raises(ValueError, match="Order must be power of 2"):
-            mapping.gray_constellation("qam", 10)
+            mapping.gray._gray_points("qam", 10)
 
         with pytest.raises(ValueError, match="Order must be power of 2"):
             _gray_psk(3)
@@ -110,7 +110,7 @@ class TestGrayConstellation:
         with pytest.raises(
             ValueError, match="Unsupported modulation type: custom-unknown"
         ):
-            mapping.gray_constellation("custom-unknown", 4)
+            mapping.gray._gray_points("custom-unknown", 4)
 
 
 class TestConstellationSlicing:
@@ -118,8 +118,8 @@ class TestConstellationSlicing:
 
     def test_square_qam_slicer_params_valid(self) -> None:
         """16-QAM is square-sliceable: side=4, uniform lev_min/d_grid."""
-        const = mapping.gray_constellation("qam", 16)
-        side, lev_min, d_grid = square_qam_slicer_params(const)
+        const = mapping.gray._gray_points("qam", 16)
+        side, lev_min, d_grid = _square_qam_slicer_params(const)
         assert side == 4
         levels = np.unique(np.round(const.real, 6))
         assert np.isclose(lev_min, levels[0])
@@ -127,12 +127,12 @@ class TestConstellationSlicing:
 
     def test_square_qam_slicer_params_non_square(self) -> None:
         """PSK / cross-QAM constellations fall back to side=0 (O(M) search)."""
-        const_psk = mapping.gray_constellation("psk", 8)
-        side, _, _ = square_qam_slicer_params(const_psk)
+        const_psk = mapping.gray._gray_points("psk", 8)
+        side, _, _ = _square_qam_slicer_params(const_psk)
         assert side == 0
 
-        const_cross = mapping.gray_constellation("qam", 32)
-        side, _, _ = square_qam_slicer_params(const_cross)
+        const_cross = mapping.gray._gray_points("qam", 32)
+        side, _, _ = _square_qam_slicer_params(const_cross)
         assert side == 0
 
     def test_square_qam_slicer_params_non_uniform_grid(self) -> None:
@@ -142,7 +142,7 @@ class TestConstellationSlicing:
         const = (i_levels[:, None] + 1j * q_levels[None, :]).ravel()
         assert len(const) == 16
 
-        side, lev_min, d_grid = square_qam_slicer_params(const)
+        side, lev_min, d_grid = _square_qam_slicer_params(const)
         assert side == 0
         assert lev_min == np.float32(0.0)
         assert d_grid == np.float32(1.0)
@@ -151,7 +151,7 @@ class TestConstellationSlicing:
         self, xp: Any, xpt: Any
     ) -> None:
         """Chunked search agrees with plain unchunked argmin on active backend."""
-        const_np = mapping.gray_constellation("qam", 16)
+        const_np = mapping.gray._gray_points("qam", 16)
         rng = np.random.default_rng(0)
         x_np = const_np[rng.integers(0, 16, size=1000)] + (
             0.01 * rng.standard_normal(1000) + 0.01j * rng.standard_normal(1000)
@@ -161,6 +161,6 @@ class TestConstellationSlicing:
         const = xp.asarray(const_np)
         x = xp.asarray(x_np)
 
-        result = nearest_constellation_index(x, const, chunk=7)
+        result = _nearest_index(x, const, chunk=7)
         expected = np.argmin(np.abs(x_np[:, None] - const_np[None, :]), axis=1)
         xpt.assert_array_equal(result, xp.asarray(expected))

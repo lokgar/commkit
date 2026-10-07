@@ -3,10 +3,13 @@
 import numpy as np
 import pytest
 
-from commkit import generate_qam, recovery, spectral
+from commkit import generate, recovery, spectral
 from commkit.backend import to_device
 from commkit.core import Signal
+from commkit.filtering import RRC
 from commkit.impairments import apply_awgn
+from commkit.mapping import Constellation
+from tests.common.conversions import device_of
 from tests.common.metrics import calc_rms_phase_error
 from tests.common.signals import apply_phase_ramp
 
@@ -36,14 +39,21 @@ class TestCprPilots:
         self, xp, n_symbols=512, pilot_period=16, phase_per_sym=0.001, seed=0
     ):
         """Return (noisy+rotated samples, pilot_indices, pilot_values, true_phase)."""
-        sig = generate_qam(
-            order=16, num_symbols=n_symbols, sps=1, symbol_rate=FS, seed=seed
-        )
+        sig = generate(
+            Constellation.qam(16),
+            n_symbols,
+            symbol_rate=FS,
+            sps=1,
+            pulse=RRC(0.35),
+            rng=seed,
+        ).to(device_of(xp))
         # Save ideal symbols before adding noise
         ideal_symbols = xp.asarray(sig.samples.copy())
-        sig.samples = apply_awgn(sig.samples, esn0_db=SNR_DB, sps=1, seed=seed)
+        sig = sig.replace(
+            samples=apply_awgn(sig.samples, esn0_db=SNR_DB, sps=1, rng=seed)
+        )
         # Apply a slow linear phase ramp on top of noise
-        sig.samples = apply_phase_ramp(sig.samples, phase_per_sym, xp=xp)
+        sig = sig.replace(samples=apply_phase_ramp(sig.samples, phase_per_sym, xp=xp))
 
         pilot_indices = np.arange(0, n_symbols, pilot_period)
         # Known pilot values = noiseless, unrotated symbols at pilot positions
@@ -58,18 +68,18 @@ class TestCprPilots:
         samples, pilot_indices, pilot_values, true_phase = self._pilot_setup(
             xp, n_symbols=512, pilot_period=pilot_period, phase_per_sym=0.001
         )
-        phase_est = recovery.recover_carrier_phase_pilot_symbols(
-            samples, pilot_indices=pilot_indices, pilot_values=pilot_values
-        )
+        phase_est = recovery.estimate_carrier_phase(
+            samples, recovery.PilotAided(indices=pilot_indices, values=pilot_values)
+        ).value
         err = calc_rms_phase_error(phase_est, true_phase, xp=xp)
         assert err < 0.05
 
     def test_output_shape_siso(self, xp):
         """Pilot CPR: 1D input -> 1D phase output."""
         samples, pilot_indices, pilot_values, _ = self._pilot_setup(xp)
-        phase = recovery.recover_carrier_phase_pilot_symbols(
-            samples, pilot_indices=pilot_indices, pilot_values=pilot_values
-        )
+        phase = recovery.estimate_carrier_phase(
+            samples, recovery.PilotAided(indices=pilot_indices, values=pilot_values)
+        ).value
         assert phase.shape == samples.shape
 
     def test_output_shape_mimo(self, xp):
@@ -77,9 +87,9 @@ class TestCprPilots:
         samples_a, pilot_indices, pilot_values, _ = self._pilot_setup(xp, n_symbols=256)
         samples_b, _, _, _ = self._pilot_setup(xp, n_symbols=256)
         mimo = xp.stack([samples_a, samples_b])  # (2, 256)
-        phase = recovery.recover_carrier_phase_pilot_symbols(
-            mimo, pilot_indices=pilot_indices, pilot_values=pilot_values
-        )
+        phase = recovery.estimate_carrier_phase(
+            mimo, recovery.PilotAided(indices=pilot_indices, values=pilot_values)
+        ).value
         assert phase.shape == mimo.shape
 
     def test_large_phase_unwrap(self, xp):
@@ -90,32 +100,34 @@ class TestCprPilots:
         samples, pilot_indices, pilot_values, true_phase = self._pilot_setup(
             xp, n_symbols=n_symbols, pilot_period=8, phase_per_sym=phase_per_sym
         )
-        phase_est = recovery.recover_carrier_phase_pilot_symbols(
-            samples, pilot_indices=pilot_indices, pilot_values=pilot_values
-        )
+        phase_est = recovery.estimate_carrier_phase(
+            samples, recovery.PilotAided(indices=pilot_indices, values=pilot_values)
+        ).value
         err = _rms_phase_error(xp, phase_est, true_phase)
         assert err < 0.1  # relaxed tolerance for large phase
 
     def test_cubic_interpolation(self, xp):
         """Cubic interpolation works on both CPU and GPU."""
         samples, pilot_indices, pilot_values, _ = self._pilot_setup(xp)
-        phase = recovery.recover_carrier_phase_pilot_symbols(
+        phase = recovery.estimate_carrier_phase(
             samples,
-            pilot_indices=pilot_indices,
-            pilot_values=pilot_values,
-            interpolation="cubic",
-        )
+            recovery.PilotAided(
+                indices=pilot_indices, values=pilot_values, interpolation="cubic"
+            ),
+        ).value
         assert phase.shape == samples.shape
 
     def test_invalid_interpolation_raises(self, xp):
         """Unknown interpolation method raises ValueError."""
         samples, pilot_indices, pilot_values, _ = self._pilot_setup(xp)
         with pytest.raises(ValueError, match="Unknown interpolation method"):
-            recovery.recover_carrier_phase_pilot_symbols(
+            recovery.estimate_carrier_phase(
                 samples,
-                pilot_indices=pilot_indices,
-                pilot_values=pilot_values,
-                interpolation="spline_42",
+                recovery.PilotAided(
+                    indices=pilot_indices,
+                    values=pilot_values,
+                    interpolation="spline_42",
+                ),
             )
 
 
@@ -144,18 +156,18 @@ class TestCprPilotTone:
         *after* the tone, so the tone carries exactly the phase to be recovered.
         """
         fs = self.SPS * FS  # symbol rate = FS
-        sig = generate_qam(
-            order=16,
-            num_symbols=n_symbols,
-            sps=self.SPS,
+        sig = generate(
+            Constellation.qam(16),
+            n_symbols,
             symbol_rate=FS,
-            rrc_rolloff=self.BETA,
-            num_streams=num_streams,
-            seed=seed,
+            sps=self.SPS,
+            pulse=RRC(self.BETA),
+            num_channels=num_streams,
+            rng=seed,
         )
         samples = xp.asarray(sig.samples)
-        samples, _ = spectral.add_pilot_tone(
-            samples, fs, self.F_TONE, power_ratio_db=psr_db
+        samples = spectral.add_pilot_tone(
+            samples, sampling_rate=fs, frequency=self.F_TONE, power_ratio_db=psr_db
         )
 
         N = samples.shape[-1]
@@ -178,17 +190,21 @@ class TestCprPilotTone:
     def test_phase_residual_foe(self, xp, df):
         """Recovers a frequency-offset ramp (< B) to < 0.1 rad RMS."""
         samples, fs, common = self._setup(xp, df=df)
-        theta = recovery.recover_carrier_phase_pilot_tone(
-            samples, fs, self.F_TONE, bandwidth=self.BW
-        )
+        theta = recovery.estimate_carrier_phase(
+            samples,
+            recovery.PilotTone(frequency=self.F_TONE, bandwidth=self.BW),
+            sampling_rate=fs,
+        ).value
         assert self._interior_rms(xp, theta, common) < 0.1
 
     def test_phase_residual_foe_and_phase_noise(self, xp):
         """Recovers joint frequency offset + Wiener phase noise."""
         samples, fs, common = self._setup(xp, df=0.05e6, linewidth=5e3)
-        theta = recovery.recover_carrier_phase_pilot_tone(
-            samples, fs, self.F_TONE, bandwidth=self.BW
-        )
+        theta = recovery.estimate_carrier_phase(
+            samples,
+            recovery.PilotTone(frequency=self.F_TONE, bandwidth=self.BW),
+            sampling_rate=fs,
+        ).value
         assert self._interior_rms(xp, theta, common) < 0.15
 
     @pytest.mark.parametrize(
@@ -197,45 +213,55 @@ class TestCprPilotTone:
     def test_window_options(self, xp, window):
         """Any scipy.get_window spec tracks the common phase to < 0.12 rad RMS."""
         samples, fs, common = self._setup(xp, df=0.05e6)
-        theta = recovery.recover_carrier_phase_pilot_tone(
-            samples, fs, self.F_TONE, bandwidth=self.BW, window=window
-        )
+        theta = recovery.estimate_carrier_phase(
+            samples,
+            recovery.PilotTone(frequency=self.F_TONE, bandwidth=self.BW, window=window),
+            sampling_rate=fs,
+        ).value
         assert self._interior_rms(xp, theta, common) < 0.12
 
     def test_output_shape_siso(self, xp):
         """1D input -> 1D phase output of matching length."""
         samples, fs, _ = self._setup(xp)
-        theta = recovery.recover_carrier_phase_pilot_tone(
-            samples, fs, self.F_TONE, bandwidth=self.BW
-        )
+        theta = recovery.estimate_carrier_phase(
+            samples,
+            recovery.PilotTone(frequency=self.F_TONE, bandwidth=self.BW),
+            sampling_rate=fs,
+        ).value
         assert theta.shape == samples.shape
 
     def test_output_shape_mimo(self, xp):
         """2D input (C, N) -> 2D phase output (C, N)."""
         samples, fs, _ = self._setup(xp, num_streams=2)
-        theta = recovery.recover_carrier_phase_pilot_tone(
-            samples, fs, self.F_TONE, bandwidth=self.BW
-        )
+        theta = recovery.estimate_carrier_phase(
+            samples,
+            recovery.PilotTone(frequency=self.F_TONE, bandwidth=self.BW),
+            sampling_rate=fs,
+        ).value
         assert theta.shape == samples.shape
 
     def test_joint_rows_identical(self, xp):
         """joint_channels broadcasts a single trajectory to all rows."""
         samples, fs, _ = self._setup(xp, num_streams=2, df=0.05e6)
-        theta = recovery.recover_carrier_phase_pilot_tone(
-            samples, fs, self.F_TONE, bandwidth=self.BW, joint_channels=True
-        )
+        theta = recovery.estimate_carrier_phase(
+            samples,
+            recovery.PilotTone(
+                frequency=self.F_TONE, bandwidth=self.BW, joint_channels=True
+            ),
+            sampling_rate=fs,
+        ).value
         assert bool(xp.allclose(theta[0], theta[1]))
 
     def test_remove_frequency_offset_false_leaves_pure_pn(self, xp):
         """With FOE removal off, the estimate matches the detrended common phase."""
         samples, fs, common = self._setup(xp, df=0.08e6, linewidth=5e3)
-        theta = recovery.recover_carrier_phase_pilot_tone(
+        theta = recovery.estimate_carrier_phase(
             samples,
-            fs,
-            self.F_TONE,
-            bandwidth=self.BW,
-            remove_frequency_offset=False,
-        )
+            recovery.PilotTone(
+                frequency=self.F_TONE, bandwidth=self.BW, remove_frequency_offset=False
+            ),
+            sampling_rate=fs,
+        ).value
         N = samples.shape[-1]
         n = np.arange(N, dtype=np.float64)
         common_np = np.asarray(to_device(common, "cpu"))
@@ -251,39 +277,53 @@ class TestCprPilotTone:
         # df = 0.6 MHz exceeds B = 0.3 MHz: a window centred at nominal would miss
         # the tone, but refine + a wide search band relocates it.
         samples, fs, common = self._setup(xp, df=0.6e6)
-        theta = recovery.recover_carrier_phase_pilot_tone(
-            samples, fs, self.F_TONE, bandwidth=self.BW, search_band=1.0e6
-        )
+        theta = recovery.estimate_carrier_phase(
+            samples,
+            recovery.PilotTone(
+                frequency=self.F_TONE, bandwidth=self.BW, search_band=1.0e6
+            ),
+            sampling_rate=fs,
+        ).value
         assert self._interior_rms(xp, theta, common) < 0.1
 
     def test_refine_off_fails_when_tone_leaves_window(self, xp):
         """Without refinement, an offset > B drags the tone out of the window."""
         samples, fs, common = self._setup(xp, df=0.6e6)
-        theta = recovery.recover_carrier_phase_pilot_tone(
-            samples, fs, self.F_TONE, bandwidth=self.BW, refine_tone=False
-        )
+        theta = recovery.estimate_carrier_phase(
+            samples,
+            recovery.PilotTone(frequency=self.F_TONE, bandwidth=self.BW, refine=False),
+            sampling_rate=fs,
+        ).value
         # The tone is outside the nominal window -> estimate is garbage, not tracking.
         assert self._interior_rms(xp, theta, common) > 1.0
 
     def test_invalid_window_raises(self, xp):
         samples, fs, _ = self._setup(xp, n_symbols=256)
         with pytest.raises(ValueError, match="Invalid window"):
-            recovery.recover_carrier_phase_pilot_tone(
-                samples, fs, self.F_TONE, bandwidth=self.BW, window="brick"
+            recovery.estimate_carrier_phase(
+                samples,
+                recovery.PilotTone(
+                    frequency=self.F_TONE, bandwidth=self.BW, window="brick"
+                ),
+                sampling_rate=fs,
             )
 
     def test_invalid_bandwidth_raises(self, xp):
         samples, fs, _ = self._setup(xp, n_symbols=256)
         with pytest.raises(ValueError, match="bandwidth must be > 0"):
-            recovery.recover_carrier_phase_pilot_tone(
-                samples, fs, self.F_TONE, bandwidth=0.0
+            recovery.estimate_carrier_phase(
+                samples,
+                recovery.PilotTone(frequency=self.F_TONE, bandwidth=0.0),
+                sampling_rate=fs,
             )
 
     def test_tone_frequency_out_of_range_raises(self, xp):
         samples, fs, _ = self._setup(xp, n_symbols=256)
         with pytest.raises(ValueError, match=r"must lie in \(-fs/2, fs/2\)"):
-            recovery.recover_carrier_phase_pilot_tone(
-                samples, fs, fs, bandwidth=self.BW
+            recovery.estimate_carrier_phase(
+                samples,
+                recovery.PilotTone(frequency=fs, bandwidth=self.BW),
+                sampling_rate=fs,
             )
 
 
@@ -318,24 +358,24 @@ class TestCprPilotTones:
         ``(samples, fs, common)``.
         """
         fs = self.SPS * FS
-        sig = generate_qam(
-            order=16,
-            num_symbols=n_symbols,
-            sps=self.SPS,
+        sig = generate(
+            Constellation.qam(16),
+            n_symbols,
             symbol_rate=FS,
-            rrc_rolloff=self.BETA,
-            num_streams=2,
-            seed=seed,
+            sps=self.SPS,
+            pulse=RRC(self.BETA),
+            num_channels=2,
+            rng=seed,
         )
         samples = apply_awgn(
-            xp.asarray(sig.samples), esn0_db=snr_db, sps=self.SPS, seed=seed
+            xp.asarray(sig.samples), esn0_db=snr_db, sps=self.SPS, rng=seed
         )
         # One tone per channel (channel c gets frequency[c]); tone 1 gets a static
         # phase offset δ so the inter-tone differential is non-trivial.
-        samples, _ = spectral.add_pilot_tone(
+        samples = spectral.add_pilot_tone(
             samples,
-            fs,
-            [self.F0, self.F1],
+            sampling_rate=fs,
+            frequency=[self.F0, self.F1],
             power_ratio_db=list(psr_db),
             phase_init=0.0,
         )
@@ -362,14 +402,16 @@ class TestCprPilotTones:
     def test_recovers_common_phase(self, xp, df):
         """Two-pilot MRC tracks the shared FOE + phase noise to < 0.15 rad RMS."""
         samples, fs, common = self._setup(xp, df=df, linewidth=5e3)
-        phi = recovery.recover_carrier_phase_pilot_tones(
+        phi = recovery.estimate_carrier_phase(
             samples,
-            fs,
-            [self.F0, self.F1],
-            bandwidth=self.BW,
-            differential_bandwidth=self.DIFF_BW,
-            per_tone_channel=[0, 1],
-        )
+            recovery.PilotTones(
+                frequencies=[self.F0, self.F1],
+                bandwidth=self.BW,
+                differential_bandwidth=self.DIFF_BW,
+                per_tone_channel=[0, 1],
+            ),
+            sampling_rate=fs,
+        ).value
         assert self._interior_rms(xp, phi[0], common) < 0.15
 
     def test_mrc_beats_single_tone(self, xp):
@@ -386,39 +428,42 @@ class TestCprPilotTones:
             snr_db=6,
             psr_db=(-10.0, -10.0),
         )
-        single = recovery.recover_carrier_phase_pilot_tone(
+        single = recovery.estimate_carrier_phase(
             samples,
-            fs,
-            self.F0,
-            bandwidth=self.BW,
-            joint_channels=False,
-        )
-        both, diag = recovery.recover_carrier_phase_pilot_tones(
+            recovery.PilotTone(
+                frequency=self.F0, bandwidth=self.BW, joint_channels=False
+            ),
+            sampling_rate=fs,
+        ).value
+        est = recovery.estimate_carrier_phase(
             samples,
-            fs,
-            [self.F0, self.F1],
-            bandwidth=self.BW,
-            differential_bandwidth=self.DIFF_BW,
-            per_tone_channel=[0, 1],
-            return_diagnostics=True,
+            recovery.PilotTones(
+                frequencies=[self.F0, self.F1],
+                bandwidth=self.BW,
+                differential_bandwidth=self.DIFF_BW,
+                per_tone_channel=[0, 1],
+            ),
+            sampling_rate=fs,
         )
-        assert diag["used"] == [0, 1]  # both tones genuinely combined
+        assert est.used_tones == (0, 1)  # both tones genuinely combined
         # single-tone reads tone 0 on channel 0; compare like-for-like on row 0.
         rms_single = self._interior_rms(xp, single[0], common)
-        rms_both = self._interior_rms(xp, both[0], common)
+        rms_both = self._interior_rms(xp, est.value[0], common)
         assert rms_both < rms_single
 
     def test_output_shape_and_common_broadcast(self, xp):
         """(C, N) input -> (C, N) output; the common track is identical on all rows."""
         samples, fs, _ = self._setup(xp, df=0.05e6)
-        phi = recovery.recover_carrier_phase_pilot_tones(
+        phi = recovery.estimate_carrier_phase(
             samples,
-            fs,
-            [self.F0, self.F1],
-            bandwidth=self.BW,
-            differential_bandwidth=self.DIFF_BW,
-            per_tone_channel=[0, 1],
-        )
+            recovery.PilotTones(
+                frequencies=[self.F0, self.F1],
+                bandwidth=self.BW,
+                differential_bandwidth=self.DIFF_BW,
+                per_tone_channel=[0, 1],
+            ),
+            sampling_rate=fs,
+        ).value
         assert phi.shape == samples.shape
         assert bool(xp.allclose(phi[0], phi[1]))
 
@@ -429,88 +474,100 @@ class TestCprPilotTones:
         is SNR-invariant): a 48 dB weaker tone falls below the SNR gate.
         """
         samples, fs, _ = self._setup(xp, psr_db=(-12.0, -60.0))
-        _, diag = recovery.recover_carrier_phase_pilot_tones(
+        est = recovery.estimate_carrier_phase(
             samples,
-            fs,
-            [self.F0, self.F1],
-            bandwidth=self.BW,
-            differential_bandwidth=self.DIFF_BW,
-            per_tone_channel=[0, 1],
-            snr_gate_db=3.0,
-            return_diagnostics=True,
+            recovery.PilotTones(
+                frequencies=[self.F0, self.F1],
+                bandwidth=self.BW,
+                differential_bandwidth=self.DIFF_BW,
+                per_tone_channel=[0, 1],
+                snr_gate_db=3.0,
+            ),
+            sampling_rate=fs,
         )
-        assert diag["used"] == [diag["ref"]]
-        assert diag["ref"] == 0  # the strong tone
+        assert est.used_tones == (est.reference_tone,)
+        assert est.reference_tone == 0  # the strong tone
 
     def test_single_tone_K1_tracks(self, xp):
         """K=1 reduces to a single-tone tracker and still recovers the phase."""
         samples, fs, common = self._setup(xp, df=0.05e6)
-        phi = recovery.recover_carrier_phase_pilot_tones(
+        phi = recovery.estimate_carrier_phase(
             samples,
-            fs,
-            [self.F0],
-            bandwidth=self.BW,
-            differential_bandwidth=self.DIFF_BW,
-            per_tone_channel=[0],
-        )
+            recovery.PilotTones(
+                frequencies=[self.F0],
+                bandwidth=self.BW,
+                differential_bandwidth=self.DIFF_BW,
+                per_tone_channel=[0],
+            ),
+            sampling_rate=fs,
+        ).value
         assert self._interior_rms(xp, phi[0], common) < 0.15
 
     def test_joint_pre_demux_combine(self, xp):
         """per_tone_channel=None coherently sums each tone across channels."""
         samples, fs, common = self._setup(xp, df=0.05e6)
-        phi = recovery.recover_carrier_phase_pilot_tones(
+        phi = recovery.estimate_carrier_phase(
             samples,
-            fs,
-            [self.F0, self.F1],
-            bandwidth=self.BW,
-            differential_bandwidth=self.DIFF_BW,
-            per_tone_channel=None,
-        )
+            recovery.PilotTones(
+                frequencies=[self.F0, self.F1],
+                bandwidth=self.BW,
+                differential_bandwidth=self.DIFF_BW,
+                per_tone_channel=None,
+            ),
+            sampling_rate=fs,
+        ).value
         assert self._interior_rms(xp, phi[0], common) < 0.15
 
-    def test_diagnostics_keys(self, xp):
+    def test_diagnostics(self, xp):
+        """The estimate carries the per-tone data the MRC plot draws."""
         samples, fs, _ = self._setup(xp)
-        _, diag = recovery.recover_carrier_phase_pilot_tones(
+        est = recovery.estimate_carrier_phase(
             samples,
-            fs,
-            [self.F0, self.F1],
-            bandwidth=self.BW,
-            differential_bandwidth=self.DIFF_BW,
-            per_tone_channel=[0, 1],
-            return_diagnostics=True,
+            recovery.PilotTones(
+                frequencies=[self.F0, self.F1],
+                bandwidth=self.BW,
+                differential_bandwidth=self.DIFF_BW,
+                per_tone_channel=[0, 1],
+            ),
+            sampling_rate=fs,
         )
-        assert set(diag) == {"delta", "snr_db", "ref", "used", "f_centers"}
-        assert len(diag["snr_db"]) == 2
+        n = samples.shape[-1]
+        assert est.tone_snr_db.shape == (2,)
+        assert est.tone_frequencies.shape == (2, 2)  # (C, K)
+        assert est.differential_phase.shape == (2, n)
+        assert type(est.differential_phase).__module__.startswith(xp.__name__)
+        # The reference tone's differential is identically zero.
+        assert float(xp.max(xp.abs(est.differential_phase[est.reference_tone]))) == 0
 
     def test_per_tone_channel_length_mismatch_raises(self, xp):
         samples, fs, _ = self._setup(xp, n_symbols=256)
         with pytest.raises(ValueError, match="per_tone_channel must have one entry"):
-            recovery.recover_carrier_phase_pilot_tones(
+            recovery.estimate_carrier_phase(
                 samples,
-                fs,
-                [self.F0, self.F1],
-                bandwidth=self.BW,
-                per_tone_channel=[0],
+                recovery.PilotTones(
+                    frequencies=[self.F0, self.F1],
+                    bandwidth=self.BW,
+                    per_tone_channel=[0],
+                ),
+                sampling_rate=fs,
             )
 
     def test_invalid_bandwidth_raises(self, xp):
         samples, fs, _ = self._setup(xp, n_symbols=256)
         with pytest.raises(ValueError, match="bandwidth must be > 0"):
-            recovery.recover_carrier_phase_pilot_tones(
+            recovery.estimate_carrier_phase(
                 samples,
-                fs,
-                [self.F0, self.F1],
-                bandwidth=0.0,
+                recovery.PilotTones(frequencies=[self.F0, self.F1], bandwidth=0.0),
+                sampling_rate=fs,
             )
 
     def test_empty_tone_list_raises(self, xp):
         samples, fs, _ = self._setup(xp, n_symbols=256)
         with pytest.raises(ValueError, match="at least one frequency"):
-            recovery.recover_carrier_phase_pilot_tones(
+            recovery.estimate_carrier_phase(
                 samples,
-                fs,
-                [],
-                bandwidth=self.BW,
+                recovery.PilotTones(frequencies=[], bandwidth=self.BW),
+                sampling_rate=fs,
             )
 
 
@@ -521,12 +578,19 @@ class TestPilotsCPREnhancements:
         self, xp, n_symbols=512, pilot_period=8, phase_per_sym=0.001, seed=42
     ):
         """Return (samples, pilot_indices, pilot_values) for a 16-QAM signal."""
-        sig = generate_qam(
-            order=16, num_symbols=n_symbols, sps=1, symbol_rate=FS, seed=seed
-        )
+        sig = generate(
+            Constellation.qam(16),
+            n_symbols,
+            symbol_rate=FS,
+            sps=1,
+            pulse=RRC(0.35),
+            rng=seed,
+        ).to(device_of(xp))
         ideal = xp.asarray(sig.samples.copy())
-        sig.samples = apply_awgn(sig.samples, esn0_db=SNR_DB, sps=1, seed=seed)
-        sig.samples = _apply_phase_ramp(xp, sig.samples, phase_per_sym)
+        sig = sig.replace(
+            samples=apply_awgn(sig.samples, esn0_db=SNR_DB, sps=1, rng=seed)
+        )
+        sig = sig.replace(samples=_apply_phase_ramp(xp, sig.samples, phase_per_sym))
         pilot_indices = np.arange(0, n_symbols, pilot_period)
         pilot_values = ideal[pilot_indices]
         return sig.samples, pilot_indices, pilot_values
@@ -536,44 +600,43 @@ class TestPilotsCPREnhancements:
         samples_a, pilot_indices, pilot_values = self._pilot_setup(xp, seed=1)
         samples_b, _, _ = self._pilot_setup(xp, seed=2)
         mimo = xp.stack([samples_a, samples_b], axis=0)  # (2, N)
-        phi = recovery.recover_carrier_phase_pilot_symbols(
+        phi = recovery.estimate_carrier_phase(
             mimo,
-            pilot_indices=pilot_indices,
-            pilot_values=pilot_values,
-            joint_channels=True,
-            cycle_slip_correction=False,
-        )
+            recovery.PilotAided(
+                indices=pilot_indices, values=pilot_values, joint_channels=True
+            ),
+        ).value
         assert phi.shape == (2, mimo.shape[-1])
         xpt.assert_array_equal(phi[0], phi[1])
 
     def test_joint_siso_noop(self, xp, xpt):
         """joint_channels=True on SISO returns identical result to False."""
         samples, pilot_indices, pilot_values = self._pilot_setup(xp, seed=3)
-        phi_a = recovery.recover_carrier_phase_pilot_symbols(
+        phi_a = recovery.estimate_carrier_phase(
             samples,
-            pilot_indices=pilot_indices,
-            pilot_values=pilot_values,
-            joint_channels=False,
-            cycle_slip_correction=False,
-        )
-        phi_b = recovery.recover_carrier_phase_pilot_symbols(
+            recovery.PilotAided(
+                indices=pilot_indices, values=pilot_values, joint_channels=False
+            ),
+        ).value
+        phi_b = recovery.estimate_carrier_phase(
             samples,
-            pilot_indices=pilot_indices,
-            pilot_values=pilot_values,
-            joint_channels=True,
-            cycle_slip_correction=False,
-        )
+            recovery.PilotAided(
+                indices=pilot_indices, values=pilot_values, joint_channels=True
+            ),
+        ).value
         xpt.assert_allclose(phi_a, phi_b, atol=1e-10)
 
     def test_cycle_slip_shape(self, xp):
         """cycle_slip_correction=True returns correct shape."""
         samples, pilot_indices, pilot_values = self._pilot_setup(xp)
-        phi = recovery.recover_carrier_phase_pilot_symbols(
+        phi = recovery.estimate_carrier_phase(
             samples,
-            pilot_indices=pilot_indices,
-            pilot_values=pilot_values,
-            cycle_slip_correction=True,
-        )
+            recovery.PilotAided(
+                indices=pilot_indices,
+                values=pilot_values,
+                cycle_slip=recovery.CycleSlip(),
+            ),
+        ).value
         assert phi.shape == samples.shape
 
     def test_cycle_slip_standalone_symmetry_1(self, xp, xpt):
@@ -582,9 +645,7 @@ class TestPilotsCPREnhancements:
         phi_u = np.linspace(0.0, 3.0, B)
         phi_slipped = phi_u.copy()
         phi_slipped[100:] += 2.0 * np.pi
-        phi_out = recovery.correct_cycle_slips(
-            phi_slipped, symmetry=1, history_length=50
-        )
+        phi_out = recovery.correct_cycle_slips(phi_slipped, symmetry=1, history=50)
         xpt.assert_allclose(phi_out, phi_u, atol=0.1)
 
     def test_joint_cycle_slip_mimo_rows_identical(self, xp, xpt):
@@ -592,13 +653,15 @@ class TestPilotsCPREnhancements:
         samples_a, pilot_indices, pilot_values = self._pilot_setup(xp, seed=4)
         samples_b, _, _ = self._pilot_setup(xp, seed=5)
         mimo = xp.stack([samples_a, samples_b], axis=0)
-        phi = recovery.recover_carrier_phase_pilot_symbols(
+        phi = recovery.estimate_carrier_phase(
             mimo,
-            pilot_indices=pilot_indices,
-            pilot_values=pilot_values,
-            joint_channels=True,
-            cycle_slip_correction=True,
-        )
+            recovery.PilotAided(
+                indices=pilot_indices,
+                values=pilot_values,
+                joint_channels=True,
+                cycle_slip=recovery.CycleSlip(),
+            ),
+        ).value
         assert phi.shape == (2, mimo.shape[-1])
         xpt.assert_array_equal(phi[0], phi[1])
 
@@ -611,12 +674,12 @@ class TestSignalInputPilotFunctions:
         samples, pilot_indices, pilot_values, _ = TestCprPilots()._pilot_setup(xp)
         sig = Signal(samples=samples, sampling_rate=FS, symbol_rate=FS)
 
-        phi_sig = recovery.recover_carrier_phase_pilot_symbols(
-            sig, pilot_indices=pilot_indices, pilot_values=pilot_values
-        )
-        phi_arr = recovery.recover_carrier_phase_pilot_symbols(
-            samples, pilot_indices=pilot_indices, pilot_values=pilot_values
-        )
+        phi_sig = recovery.estimate_carrier_phase(
+            sig, recovery.PilotAided(indices=pilot_indices, values=pilot_values)
+        ).value
+        phi_arr = recovery.estimate_carrier_phase(
+            samples, recovery.PilotAided(indices=pilot_indices, values=pilot_values)
+        ).value
 
         assert not isinstance(phi_sig, Signal)
         xpt.assert_allclose(phi_sig, phi_arr)
@@ -627,12 +690,14 @@ class TestSignalInputPilotFunctions:
         samples, fs, _ = cpr._setup(xp, df=0.05e6)
         sig = Signal(samples=samples, sampling_rate=fs, symbol_rate=FS)
 
-        theta_sig = recovery.recover_carrier_phase_pilot_tone(
-            sig, tone_frequency=cpr.F_TONE, bandwidth=cpr.BW
-        )
-        theta_arr = recovery.recover_carrier_phase_pilot_tone(
-            samples, fs, cpr.F_TONE, bandwidth=cpr.BW
-        )
+        theta_sig = recovery.estimate_carrier_phase(
+            sig, recovery.PilotTone(frequency=cpr.F_TONE, bandwidth=cpr.BW)
+        ).value
+        theta_arr = recovery.estimate_carrier_phase(
+            samples,
+            recovery.PilotTone(frequency=cpr.F_TONE, bandwidth=cpr.BW),
+            sampling_rate=fs,
+        ).value
 
         assert not isinstance(theta_sig, Signal)
         xpt.assert_allclose(theta_sig, theta_arr)
@@ -643,12 +708,14 @@ class TestSignalInputPilotFunctions:
         samples, fs, _ = cpr._setup(xp, df=0.05e6, linewidth=5e3)
         sig = Signal(samples=samples, sampling_rate=fs, symbol_rate=FS)
 
-        phi_sig = recovery.recover_carrier_phase_pilot_tones(
-            sig, tone_frequencies=[cpr.F0, cpr.F1], bandwidth=cpr.BW
-        )
-        phi_arr = recovery.recover_carrier_phase_pilot_tones(
-            samples, fs, [cpr.F0, cpr.F1], bandwidth=cpr.BW
-        )
+        phi_sig = recovery.estimate_carrier_phase(
+            sig, recovery.PilotTones(frequencies=[cpr.F0, cpr.F1], bandwidth=cpr.BW)
+        ).value
+        phi_arr = recovery.estimate_carrier_phase(
+            samples,
+            recovery.PilotTones(frequencies=[cpr.F0, cpr.F1], bandwidth=cpr.BW),
+            sampling_rate=fs,
+        ).value
 
         assert not isinstance(phi_sig, Signal)
         xpt.assert_allclose(phi_sig, phi_arr)

@@ -7,10 +7,11 @@ Covers factory generation, frame structure, validation, and DSP operations
 from typing import Any
 
 import pytest
-from pydantic import ValidationError
 
-from commkit import filtering, generate_qam, multirate, spectral
+from commkit import filtering, generate, multirate, spectral
 from commkit.core import Preamble, Signal, SingleCarrierFrame
+from commkit.filtering import RRC, Rect
+from commkit.mapping import Constellation
 
 
 class TestMIMOSignalStructure:
@@ -18,8 +19,13 @@ class TestMIMOSignalStructure:
 
     def test_signal_generate_mimo(self, xp: Any) -> None:
         """Verify MIMO signal generation via high-level factories."""
-        sig = generate_qam(
-            order=4, num_symbols=100, sps=4, symbol_rate=1e6, num_streams=2
+        sig = generate(
+            Constellation.qam(4),
+            100,
+            symbol_rate=1e6,
+            sps=4,
+            pulse=RRC(0.35),
+            num_channels=2,
         )
 
         expected_samples = 100 * 4
@@ -28,16 +34,15 @@ class TestMIMOSignalStructure:
         assert sig.sps == 4.0
         assert not xp.allclose(sig.samples[0], sig.samples[1])
 
-    def test_signal_mimo_transpose(self, xp: Any) -> None:
-        """Transposition heuristic: shape (100, 2) is transposed to (2, 100)."""
-        data = xp.zeros((100, 2))
-        sig = Signal(samples=data, sampling_rate=1.0, symbol_rate=1.0)
-        assert sig.samples.shape == (2, 100)
+    def test_signal_rejects_time_first_layout(self, xp: Any) -> None:
+        """A (100, 2) array looks like (N, C) and raises instead of being transposed."""
+        with pytest.raises(ValueError, match="looks like"):
+            Signal(samples=xp.zeros((100, 2)), sampling_rate=1.0, symbol_rate=1.0)
 
     def test_signal_invalid_ndim(self, xp: Any) -> None:
-        """Arrays with >2 dimensions raise ValidationError."""
+        """Arrays with >2 dimensions raise ValueError."""
         data = xp.zeros((2, 2, 2))
-        with pytest.raises(ValidationError) as excparams:
+        with pytest.raises(ValueError) as excparams:
             Signal(samples=data, sampling_rate=1.0, symbol_rate=1.0)
         assert "3 dimensions" in str(excparams.value)
 
@@ -64,13 +69,12 @@ class TestMIMOFrameIntegration:
         """Verify multi-channel zero-insertion guard interval padding."""
         frame = SingleCarrierFrame(
             payload_len=100,
-            symbol_rate=1e6,
             num_streams=2,
             guard_type="zero",
             guard_len=10,
         )
 
-        sig = frame.to_signal(sps=1, pulse_shape="none")
+        sig = frame.to_signal(sps=1)
         assert sig.samples.shape == (2, 110)
         assert sig.num_streams == 2
         xpt.assert_array_equal(sig.samples[:, -10:], 0)
@@ -79,12 +83,11 @@ class TestMIMOFrameIntegration:
         """Verify that pilot patterns are correctly applied across all MIMO streams."""
         frame = SingleCarrierFrame(
             payload_len=10,
-            symbol_rate=1e6,
             num_streams=2,
             pilot_pattern="comb",
             pilot_period=2,
         )
-        sig = frame.to_signal(sps=1, pulse_shape="none")
+        sig = frame.to_signal(sps=1)
         assert sig.samples.shape == (2, 20)
 
         mask, _ = frame._generate_pilot_mask()
@@ -94,11 +97,9 @@ class TestMIMOFrameIntegration:
     def test_frame_mimo_preamble_broadcasting(self, xp: Any, xpt: Any) -> None:
         """Verify that a multi-stream Barker preamble tiles across all MIMO streams."""
         preamble = Preamble(sequence_type="barker", length=13, num_streams=2)
-        frame = SingleCarrierFrame(
-            payload_len=20, symbol_rate=1e6, num_streams=2, preamble=preamble
-        )
+        frame = SingleCarrierFrame(payload_len=20, num_streams=2, preamble=preamble)
 
-        sig = frame.to_signal(sps=1, pulse_shape="none")
+        sig = frame.to_signal(sps=1)
         assert sig.samples.shape == (2, 33)
 
         xpt.assert_allclose(sig.samples[0, :13], preamble.symbols[0])
@@ -106,9 +107,9 @@ class TestMIMOFrameIntegration:
 
     def test_frame_mimo_waveform(self, xp: Any) -> None:
         """Verify MIMO waveform generation with pulse shaping."""
-        frame = SingleCarrierFrame(payload_len=10, symbol_rate=1e6, num_streams=2)
+        frame = SingleCarrierFrame(payload_len=10, num_streams=2)
 
-        sig = frame.to_signal(sps=4, pulse_shape="rect")
+        sig = frame.to_signal(sps=4, pulse=Rect())
         assert sig.samples.shape == (2, 40)
         assert sig.sps == 4.0
 
@@ -121,7 +122,7 @@ class TestMIMODSPOperations:
         samples = xp.ones((2, 100), dtype=complex)
         sig = Signal(samples=samples, sampling_rate=1.0, symbol_rate=1.0)
 
-        sig = multirate.upsample(sig, 2)
+        sig = multirate.upsample(sig, factor=2)
         assert sig.samples.shape == (2, 200)
         assert sig.sampling_rate == 2.0
 
@@ -130,7 +131,7 @@ class TestMIMODSPOperations:
         samples = xp.ones((2, 200), dtype=complex)
         sig = Signal(samples=samples, sampling_rate=2.0, symbol_rate=1.0)
 
-        sig = multirate.decimate(sig, 2)
+        sig = multirate.decimate(sig, factor=2)
         assert sig.samples.shape == (2, 100)
         assert sig.sampling_rate == 1.0
 
@@ -148,7 +149,7 @@ class TestMIMODSPOperations:
         samples = xp.ones((2, 100), dtype=complex)
         sig = Signal(samples=samples, sampling_rate=100.0, symbol_rate=100.0)
 
-        sig = spectral.shift_frequency(sig, 25.0)
+        sig = spectral.shift_frequency(sig, frequency=25.0)
         expected_sample_1 = xp.exp(1j * xp.pi / 2)
 
         xpt.assert_allclose(sig.samples[0, 0], 1.0, atol=1e-6)

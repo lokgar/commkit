@@ -7,9 +7,13 @@ from unittest.mock import patch
 import matplotlib.pyplot as plt
 import matplotlib.ticker as mticker
 import numpy as np
+import pytest
 
-from commkit import generate_psk, plotting, spectral
+from commkit import generate, plotting, spectral
+from commkit.filtering import RRC
+from commkit.mapping import Constellation
 from commkit.plotting import plot_psd, plot_spectrogram
+from tests.common.conversions import to_numpy
 
 
 class TestPlotSpectralAndPSD:
@@ -66,14 +70,14 @@ class TestPlotSpectralAndPSD:
         sig = xp.ones((2, 256))
         fig, ax = plt.subplots()
         with patch("matplotlib.pyplot.show"):
-            plot_psd(sig, ax=ax)
+            plot_psd(sig, sampling_rate=1.0, ax=ax)
         assert "Multiple channels detected but single axis provided" in caplog.text
 
     def test_psd_wavelength_warning(self, caplog: Any, xp: Any) -> None:
         """Verify wavelength warning."""
         sig = xp.ones(256)
         with patch("matplotlib.pyplot.show"):
-            plot_psd(sig, x_axis="wavelength", domain="RF")
+            plot_psd(sig, sampling_rate=1.0, x_axis="wavelength", domain="RF")
         assert (
             "Wavelength plotting is typically used for optical signals" in caplog.text
         )
@@ -181,22 +185,80 @@ class TestPlotSpectrogram:
     def test_signal_spectrogram_convenience(self, xp: Any) -> None:
         """Verify core.Signal.spectrogram and plot_spectrogram convenience methods."""
         fs = 100.0
-        sig = generate_psk(
+        sig = generate(
+            Constellation.psk(4),
+            100,
             symbol_rate=10.0,
-            num_symbols=100,
-            order=4,
             sps=int(fs / 10.0),
-            seed=42,
+            pulse=RRC(0.35),
+            rng=42,
         )
-        sig.samples = xp.asarray(sig.samples)
+        sig = sig.replace(samples=xp.asarray(sig.samples))
 
-        f, t, Sxx = spectral.spectrogram(sig, nperseg=64, noverlap=32)
-        assert isinstance(f, xp.ndarray)
-        assert isinstance(t, xp.ndarray)
-        assert isinstance(Sxx, xp.ndarray)
-        assert len(f) == 64
-        assert Sxx.shape[-1] == len(t)
+        spec = spectral.spectrogram(sig, nperseg=64, noverlap=32)
+        assert isinstance(spec.frequencies, xp.ndarray)
+        assert isinstance(spec.times, xp.ndarray)
+        assert isinstance(spec.values, xp.ndarray)
+        assert len(spec.frequencies) == 64
+        assert spec.values.shape[-1] == len(spec.times)
 
         fig, ax = plotting.plot_spectrogram(sig, nperseg=64, show=False)
         assert fig is not None
         assert ax is not None
+
+
+class TestPlotFacts:
+    """sampling_rate and sps are facts: from a Signal, required for arrays."""
+
+    def test_conflicting_sampling_rate_raises(self, xp: Any) -> None:
+        from commkit.core import Signal
+
+        sig = Signal(samples=xp.ones(256), sampling_rate=2.0, symbol_rate=1.0)
+        with pytest.raises(ValueError, match="conflicts"):
+            plot_psd(sig, sampling_rate=4.0)
+
+    def test_array_without_sampling_rate_raises(self, xp: Any) -> None:
+        with pytest.raises(ValueError, match="requires sampling_rate"):
+            plot_psd(xp.ones(256))
+
+    def test_eye_array_without_sps_raises(self, xp: Any) -> None:
+        from commkit.plotting import plot_eye_diagram
+
+        with pytest.raises(ValueError, match="requires sps"):
+            plot_eye_diagram(xp.ones(256))
+
+
+class TestSpectrogramImage:
+    """The spectrogram is an image whose cells sit on the STFT grid."""
+
+    def test_image_values_and_extent(self, xp: Any) -> None:
+        from matplotlib.image import AxesImage
+
+        rng = np.random.default_rng(0)
+        x = xp.asarray(
+            (rng.standard_normal(8192) + 1j * rng.standard_normal(8192)).astype(
+                np.complex64
+            )
+        )
+        fs = 1e6
+        _, ax = plot_spectrogram(x, sampling_rate=fs, nperseg=128)
+        (im,) = [a for a in ax.get_images() if isinstance(a, AxesImage)]
+        spec = spectral.spectrogram(x, sampling_rate=fs, nperseg=128)
+        f = to_numpy(spec.frequencies)
+        t = to_numpy(spec.times)
+        expected = 10 * np.log10(to_numpy(spec.values) + 1e-20).T
+        np.testing.assert_allclose(im.get_array(), expected, rtol=1e-6)
+        df, dt = f[1] - f[0], t[1] - t[0]
+        np.testing.assert_allclose(
+            im.get_extent(),
+            [f[0] - df / 2, f[-1] + df / 2, t[0] - dt / 2, t[-1] + dt / 2],
+        )
+
+    def test_crop_happens_before_drawing(self, xp: Any) -> None:
+        x = xp.asarray(np.random.default_rng(1).standard_normal(8192))
+        _, ax = plot_spectrogram(
+            x, sampling_rate=1e6, nperseg=128, xlim=(1e5, 2e5), ylim=(1e-3, 4e-3)
+        )
+        lo, hi, t0, t1 = ax.get_images()[0].get_extent()
+        assert 0.99e5 - 1e6 / 128 <= lo and hi <= 2e5 + 1e6 / 128
+        assert t0 >= 1e-3 - 1e-3 and t1 <= 4e-3 + 1e-3

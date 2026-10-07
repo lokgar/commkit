@@ -4,10 +4,13 @@ from typing import Any
 
 import numpy as np
 
-from commkit import backend
+from commkit import backend, generate
 from commkit.core import Preamble, Signal, SingleCarrierFrame
-from commkit.helpers import normalize
-from commkit.mapping import gray_constellation
+from commkit.filtering import RRC
+from commkit.mapping import Constellation
+from commkit.math import normalize
+
+from .conversions import device_of
 
 
 def make_test_qam_samples(
@@ -20,8 +23,8 @@ def make_test_qam_samples(
 ) -> tuple[Any, Any]:
     """Generate QAM symbol sequence and oversampled sample array with optional AWGN."""
     rng = np.random.default_rng(seed)
-    const = gray_constellation("qam", order).astype(np.complex64)
-    const = normalize(const, "average_power").astype(np.complex64)
+    const = Constellation.qam(order).points.astype(np.complex64)
+    const = normalize(const, mode="average_power").astype(np.complex64)
     sym_indices = rng.integers(0, order, num_symbols)
     syms_np = const[sym_indices]
 
@@ -53,7 +56,7 @@ def make_test_psk_samples(
 ) -> tuple[Any, Any]:
     """Generate PSK symbol sequence and oversampled sample array with optional AWGN."""
     rng = np.random.default_rng(seed)
-    const = gray_constellation("psk", order).astype(np.complex64)
+    const = Constellation.psk(order).points.astype(np.complex64)
     sym_indices = rng.integers(0, order, num_symbols)
     syms_np = const[sym_indices]
 
@@ -118,26 +121,28 @@ def make_test_qam_signal(
     xp: Any = None,
 ) -> Signal:
     """Generate a Signal container populated with QAM samples, optional frequency offset and AWGN."""
-    from commkit import generate_qam, spectral
+    from commkit import spectral
     from commkit.impairments import apply_awgn
 
-    sig = generate_qam(
-        order=order,
-        num_symbols=num_symbols,
-        sps=sps,
+    sig = generate(
+        Constellation.qam(order),
+        num_symbols,
         symbol_rate=symbol_rate,
-        seed=seed,
+        sps=sps,
+        pulse=RRC(0.35),
+        rng=seed,
     )
     if snr_db is not None:
-        sig.samples = apply_awgn(sig.samples, esn0_db=snr_db, sps=sps, seed=seed)
+        sig = sig.replace(
+            samples=apply_awgn(sig.samples, esn0_db=snr_db, sps=sps, rng=seed)
+        )
     if fo_hz != 0.0:
-        sig.samples, _ = spectral.shift_frequency(sig.samples, fo_hz, symbol_rate * sps)
+        shifted = spectral.shift_frequency(
+            sig.samples, frequency=fo_hz, sampling_rate=symbol_rate * sps
+        )
+        sig = sig.replace(samples=shifted)
     if xp is not None:
-        sig.samples = xp.asarray(sig.samples)
-        if sig.source_symbols is not None:
-            sig.source_symbols = xp.asarray(sig.source_symbols)
-        if sig.source_bits is not None:
-            sig.source_bits = xp.asarray(sig.source_bits)
+        sig = sig.to(device_of(xp))
     return sig
 
 
@@ -152,26 +157,28 @@ def make_test_psk_signal(
     xp: Any = None,
 ) -> Signal:
     """Generate a Signal container populated with PSK samples, optional frequency offset and AWGN."""
-    from commkit import generate_psk, spectral
+    from commkit import spectral
     from commkit.impairments import apply_awgn
 
-    sig = generate_psk(
-        order=order,
-        num_symbols=num_symbols,
-        sps=sps,
+    sig = generate(
+        Constellation.psk(order),
+        num_symbols,
         symbol_rate=symbol_rate,
-        seed=seed,
+        sps=sps,
+        pulse=RRC(0.35),
+        rng=seed,
     )
     if snr_db is not None:
-        sig.samples = apply_awgn(sig.samples, esn0_db=snr_db, sps=sps, seed=seed)
+        sig = sig.replace(
+            samples=apply_awgn(sig.samples, esn0_db=snr_db, sps=sps, rng=seed)
+        )
     if fo_hz != 0.0:
-        sig.samples, _ = spectral.shift_frequency(sig.samples, fo_hz, symbol_rate * sps)
+        shifted = spectral.shift_frequency(
+            sig.samples, frequency=fo_hz, sampling_rate=symbol_rate * sps
+        )
+        sig = sig.replace(samples=shifted)
     if xp is not None:
-        sig.samples = xp.asarray(sig.samples)
-        if sig.source_symbols is not None:
-            sig.source_symbols = xp.asarray(sig.source_symbols)
-        if sig.source_bits is not None:
-            sig.source_bits = xp.asarray(sig.source_bits)
+        sig = sig.to(device_of(xp))
     return sig
 
 
@@ -185,27 +192,23 @@ def make_test_mimo_signal(
     xp: Any = None,
 ) -> Signal:
     """Generate a 2x2 or NxN MIMO Signal."""
-    from commkit import generate_qam
 
-    sig = generate_qam(
-        order=order,
-        num_symbols=num_symbols,
-        sps=sps,
+    sig = generate(
+        Constellation.qam(order),
+        num_symbols,
         symbol_rate=symbol_rate,
-        num_streams=num_channels,
-        seed=seed,
+        sps=sps,
+        pulse=RRC(0.35),
+        num_channels=num_channels,
+        rng=seed,
     )
     if xp is not None:
-        sig.samples = xp.asarray(sig.samples)
-        if sig.source_symbols is not None:
-            sig.source_symbols = xp.asarray(sig.source_symbols)
-        if sig.source_bits is not None:
-            sig.source_bits = xp.asarray(sig.source_bits)
+        sig = sig.to(device_of(xp))
     return sig
 
 
 def make_test_frame_signal(
-    payload_len: int = 200,
+    payload_len: int = 203,
     preamble_len: int = 13,
     sps: int = 4,
     symbol_rate: float = 1e9,
@@ -216,19 +219,17 @@ def make_test_frame_signal(
     """Generate a SingleCarrierFrame converted to a Signal."""
     frame = SingleCarrierFrame(
         payload_len=payload_len,
-        payload_mod_scheme="QAM",
-        payload_mod_order=payload_mod_order,
+        payload_constellation=Constellation.qam(payload_mod_order),
         preamble=Preamble(sequence_type="barker", length=preamble_len),
         pilot_pattern="comb",
         pilot_period=8,
-        pilot_mod_scheme="PSK",
-        pilot_mod_order=4,
+        pilot_constellation=Constellation.psk(4),
         guard_type="zero",
         guard_len=4,
     )
-    sig = frame.to_signal(sps=sps, symbol_rate=symbol_rate)
+    sig = frame.to_signal(sps=sps, symbol_rate=symbol_rate, pulse=RRC(0.35))
     if xp is not None:
-        sig.samples = xp.asarray(sig.samples)
+        sig = sig.to(device_of(xp))
     return sig
 
 
@@ -260,19 +261,18 @@ def make_isi_distorted_signal(
     noise: float = 0.02,
 ) -> tuple[Any, Any]:
     """Build a pulse-shaped, ISI-distorted, noisy signal on the xp device."""
-    from commkit import generate_psk, generate_qam
+    from commkit import RRC, generate
+    from commkit.mapping import Constellation
     from tests.common.conversions import to_numpy
 
-    factory = generate_qam if mod == "qam" else generate_psk
-    sig = factory(
-        symbol_rate=1e6,
-        num_symbols=n_symbols,
-        order=order,
-        pulse_shape="rrc",
-        sps=2,
-        seed=seed,
+    constellation = (
+        Constellation.qam(order) if mod == "qam" else Constellation.psk(order)
     )
-    tx = xp.asarray(to_numpy(sig.source_symbols))
+    sig = generate(
+        constellation, n_symbols, symbol_rate=1e6, sps=2, pulse=RRC(0.35), rng=seed
+    )
+    # Known symbols on the constellation's scale, as the equalizers take them.
+    tx = xp.asarray(to_numpy(sig.reference.symbols))
     rx = xp.convolve(
         xp.asarray(to_numpy(sig.samples)), xp.asarray(channel), mode="same"
     )
@@ -288,7 +288,7 @@ def make_ambiguous_qam16(
 ) -> tuple[np.ndarray, np.ndarray]:
     """Return (symbols, ref) where the first corrupt_head symbols are rotated by pi/2."""
     rng = np.random.default_rng(seed)
-    const = gray_constellation("qam", 16).astype(np.complex64)
+    const = Constellation.qam(16).points.astype(np.complex64)
     const /= np.sqrt(np.mean(np.abs(const) ** 2))
     ref = const[rng.integers(0, 16, n_sym)]
     rot1 = np.exp(1j * np.pi / 2).astype(np.complex64)
@@ -327,15 +327,21 @@ def make_dsh_beat(
 
     phi = to_device(
         generate_phase_noise(
-            num_samples + delay_samples, sample_rate, linewidth=linewidth, seed=seed
+            num_samples=num_samples + delay_samples,
+            sampling_rate=sample_rate,
+            linewidth=linewidth,
+            rng=seed,
         ),
         "cpu",
     )
     z, dphi = analysis.dsh_beat(
-        phi, sample_rate, delay_samples / sample_rate, f_shift=f_shift
+        phi,
+        sampling_rate=sample_rate,
+        delay=delay_samples / sample_rate,
+        f_shift=f_shift,
     )
     if snr_db is not None:
-        z = apply_awgn(z, sps=1, esn0_db=snr_db, seed=seed + 100)
+        z = apply_awgn(z, sps=1, esn0_db=snr_db, rng=seed + 100)
     if xp is not None:
         return xp.asarray(z), xp.asarray(dphi)
     return z, dphi
@@ -362,8 +368,8 @@ def make_test_symbols(
 ) -> Any:
     """Generate normalized constellation symbols (QAM or PSK)."""
     rng = np.random.default_rng(seed)
-    const = gray_constellation(scheme, order).astype(np.complex64)
-    const = normalize(const, "average_power").astype(np.complex64)
+    const = getattr(Constellation, scheme)(order).points.astype(np.complex64)
+    const = normalize(const, mode="average_power").astype(np.complex64)
     syms = const[rng.integers(0, order, num_symbols)]
     if xp is not None:
         return xp.asarray(syms)

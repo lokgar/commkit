@@ -13,17 +13,10 @@ from functools import lru_cache
 
 import numpy as np
 
-from ..backend import dispatch
+from ..backend import ArrayType, dispatch
 from ..logger import logger
 
-__all__ = [
-    "gray_code",
-    "gray_constellation",
-    "gray_to_binary",
-    "nearest_constellation_index",
-    "square_qam_slicer_params",
-    "unpack_bits",
-]
+__all__ = ["gray_code", "gray_to_binary"]
 
 
 @lru_cache(maxsize=128)
@@ -113,7 +106,7 @@ def _is_square_qam(modulation: str, order: int) -> bool:
 
 
 @lru_cache(maxsize=128)
-def gray_constellation(
+def _gray_points(
     modulation: str,
     order: int,
     normalize: bool = True,
@@ -193,14 +186,14 @@ def gray_constellation(
             # PSK is already on unit circle (E_s = 1)
             pass
         else:
-            from .. import helpers
+            from ..math import normalize as _normalize
 
-            result = helpers.normalize(result, mode="average_power")
+            result = _normalize(result, mode="average_power")
 
     return result
 
 
-def square_qam_slicer_params(
+def _square_qam_slicer_params(
     constellation: np.ndarray,
 ) -> tuple[int, np.float32, np.float32]:
     """Return (side, lev_min, d_grid) for O(1) square-QAM slicing.
@@ -216,7 +209,7 @@ def square_qam_slicer_params(
     constellation : np.ndarray
         Host NumPy constellation array, shape (M,).  This is a one-time
         O(M) setup call, not a per-symbol operation, so a host array is
-        correct even when the caller's decision loop runs on GPU/JAX.
+        correct even when the caller's decision loop runs on the GPU.
 
     Returns
     -------
@@ -236,7 +229,7 @@ def square_qam_slicer_params(
     return side, lev_min, d_grid
 
 
-def unpack_bits(indices, k: int):
+def _unpack_bits(indices: ArrayType, k: int) -> ArrayType:
     """Unpack integer indices into their k-bit binary representation (MSB-first).
 
     Backend-dispatched via ``indices``' own array module, so a GPU-resident
@@ -259,12 +252,13 @@ def unpack_bits(indices, k: int):
     return ((indices[:, xp.newaxis] >> shifts) & 1).astype(xp.int8)
 
 
-def nearest_constellation_index(x, constellation, chunk: int = 4096):
+def _nearest_index(
+    x: ArrayType, constellation: ArrayType, chunk: int = 4096
+) -> ArrayType:
     """Nearest-constellation-point index for each element of ``x`` (chunked).
 
     Bounds peak memory of the ``(N, M)`` distance matrix by chunking over
-    the ``N`` axis - see CLAUDE.md's "bound large broadcast intermediates"
-    rule.
+    the ``N`` axis.
 
     Parameters
     ----------
@@ -403,7 +397,7 @@ def _gray_qam_square(order: int) -> np.ndarray:
 
     constellation = i_vals + 1j * q_vals
 
-    return constellation
+    return np.asarray(constellation)
 
 
 def _gray_qam_8_rect() -> np.ndarray:
@@ -503,7 +497,7 @@ def _gray_qam_cross(order: int) -> np.ndarray:
         # Fallback
         val_i = (-width + 1 + 2 * geo_i).astype(float)
         val_q = (-height + 1 + 2 * geo_q).astype(float)
-        return val_i + 1j * val_q
+        return np.asarray(val_i + 1j * val_q)
 
     # 6. Identify Wings
     mask_left = geo_i < n_shift
@@ -536,4 +530,4 @@ def _gray_qam_cross(order: int) -> np.ndarray:
 
     constellation = final_i_vals + 1j * final_q_vals
 
-    return constellation
+    return np.asarray(constellation)

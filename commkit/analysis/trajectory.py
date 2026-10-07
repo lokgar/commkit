@@ -5,10 +5,12 @@ data-aided unwrapped phase that every downstream estimator (drift, linewidth,
 Allan deviation) consumes.
 """
 
-from ..backend import ArrayType, dispatch
+import numpy as np
+
+from .._array import as_2d, broadcast_channels, restore_1d
+from ..backend import ArrayType, dispatch, to_device
 from ..core._signal_adapter import adapt_signal
 from ..core.signal import Signal
-from ..helpers import as_2d, broadcast_channels, restore_1d
 from ..recovery.corrections import resolve_channel_permutation
 
 __all__ = ["carrier_phase_trajectory"]
@@ -16,7 +18,7 @@ __all__ = ["carrier_phase_trajectory"]
 
 def carrier_phase_trajectory(
     y_eq: ArrayType | Signal,
-    ref_symbols: ArrayType,
+    reference: ArrayType | None = None,
     *,
     channel_pairing: str = "auto",
 ) -> ArrayType:
@@ -36,10 +38,12 @@ def carrier_phase_trajectory(
         Equalized symbols at 1 sps (e.g. ``apply_taps``
         output with the CPR **disabled** so the carrier phase is left intact).
         Shape ``(N,)`` (SISO) or ``(C, N)`` (MIMO, time on last axis).  A
-        :class:`Signal` is unwrapped to its ``.samples``.
-    ref_symbols : array_like
-        Known transmitted symbols, same layout as ``y_eq``.  The two are
-        truncated to their common length on the last axis.
+        :class:`Signal` must be at one sample per symbol; its
+        ``reference.symbols`` is the default reference.
+    reference : array_like, optional
+        Known transmitted symbols, same layout as ``y_eq``; required for
+        arrays.  The two are truncated to their common length on the last
+        axis (both start at the first symbol).
     channel_pairing : {"auto", "identity", "swap"}, default "auto"
         For MIMO inputs the equalizer may permute the streams (for dual-pol,
         map pol 0<->1).  ``"auto"`` resolves it with
@@ -59,7 +63,7 @@ def carrier_phase_trajectory(
     -----
     **Limitations.**
 
-    * ``y_eq`` and ``ref_symbols`` must be *symbol-aligned* (same start, same
+    * ``y_eq`` and ``reference`` must be *symbol-aligned* (same start, same
       ordering).  A misalignment does not fail loudly - it turns the product
       ``y·conj(d)`` into noise-like phase and inflates every downstream
       linewidth estimate.  ``channel_pairing="auto"`` only resolves a channel
@@ -70,15 +74,26 @@ def carrier_phase_trajectory(
       moderate SNR (≳ 5 dB); beyond that the trajectory itself slips.
     * Residual equalizer ISI appears as extra white angle noise.  It is
       indistinguishable from AWGN here, which is why the downstream
-      ``linewidth_increment(method="slope")`` fits it into the intercept
+      ``IncrementSlope`` linewidth fits it into the intercept
       instead of requiring an explicit noise estimate.
     """
-    y_eq = adapt_signal(y_eq, function_name="carrier_phase_trajectory()").array
-    y, xp, _ = dispatch(y_eq)
+    name = "carrier_phase_trajectory()"
+    adapter = adapt_signal(y_eq, function_name=name)
+    y, xp, _ = dispatch(adapter.symbol_array())
+    if reference is None:
+        sig = adapter.signal
+        if sig is None or sig.reference is None:
+            raise ValueError(
+                f"{name} needs reference symbols: pass reference= or a Signal "
+                "that has a reference."
+            )
+        reference = sig.reference.symbols
 
     y2, was_1d = as_2d(y, name="y_eq")
     c = y2.shape[0]
-    d2 = broadcast_channels(xp.asarray(ref_symbols), c, xp, name="ref_symbols")
+    d2 = broadcast_channels(
+        to_device(reference, "cpu" if xp is np else "gpu"), c, xp, name="reference"
+    )
 
     n = min(y2.shape[-1], d2.shape[-1])
     y2, d2 = y2[:, :n], d2[:, :n]

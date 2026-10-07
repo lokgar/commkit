@@ -1,21 +1,39 @@
 """Overlapping Allan deviation of an instantaneous-frequency series."""
 
+from dataclasses import dataclass
+
 import numpy as np
 
+from .._array import as_2d, restore_1d
 from ..backend import ArrayType, dispatch, to_device
-from ..helpers import as_2d, restore_1d
 
-__all__ = ["allan_deviation"]
+__all__ = ["AllanDeviation", "allan_deviation"]
+
+
+@dataclass(frozen=True, eq=False)
+class AllanDeviation:
+    """Overlapping Allan deviation of a frequency record.
+
+    Attributes
+    ----------
+    tau_s : np.ndarray
+        Averaging times in seconds, ``(n_tau,)``.
+    adev : np.ndarray
+        Allan deviation in Hz, ``(n_tau,)`` or ``(C, n_tau)``; NaN where a
+        ``tau`` does not fit the record.
+    """
+
+    tau_s: np.ndarray
+    adev: np.ndarray
 
 
 def allan_deviation(
     df: ArrayType,
-    symbol_rate: float,
     *,
+    sampling_rate: float,
     taus: np.ndarray | None = None,
-    n_taus: int = 30,
-    debug_plot: bool = False,
-) -> dict[str, np.ndarray]:
+    num_taus: int = 30,
+) -> AllanDeviation:
     r"""Overlapping Allan deviation of an instantaneous-frequency series.
 
     The log-log slope of sigma_y(tau) classifies the dominant noise
@@ -26,24 +44,21 @@ def allan_deviation(
     Parameters
     ----------
     df : array_like
-        Instantaneous frequency samples in Hz (e.g. ``frequency_drift_metrics``
-        ``df``), ``(N,)`` or ``(C, N)``, sampled at ``symbol_rate``.
-    symbol_rate : float
-        Sample rate of ``df`` in Hz (``τ_0 = 1/symbol_rate``).
+        Instantaneous frequency samples in Hz (e.g. ``frequency_drift(...).df``),
+        ``(N,)`` or ``(C, N)``.
+    sampling_rate : float
+        Sampling rate of ``df`` in Hz (``τ_0 = 1/sampling_rate``).
     taus : array_like, optional
-        Explicit averaging times in seconds.  Default: ``n_taus`` values
+        Explicit averaging times in seconds.  Default: ``num_taus`` values
         geometrically spaced from ``τ_0`` to ``N//4·τ_0``.
-    n_taus : int, default 30
+    num_taus : int, default 30
         Number of log-spaced averaging times when ``taus`` is None.
-    debug_plot : bool, default False
-        If True, plot the Allan deviation
-        (``allan_deviation``).
 
     Returns
     -------
-    dict
-        ``{'tau_s', 'adev'}`` where ``adev`` is ``(n_tau,)`` (SISO) or
-        ``(C, n_tau)`` (MIMO).  NumPy arrays.
+    AllanDeviation
+        ``tau_s`` and ``adev``, ``(n_tau,)`` (SISO) or ``(C, n_tau)`` (MIMO),
+        host NumPy arrays.
 
     Notes
     -----
@@ -68,7 +83,7 @@ def allan_deviation(
     df_arr, xp, _ = dispatch(df)
     y2, was_1d = as_2d(df_arr, name="df")
     c, n = y2.shape
-    tau0 = 1.0 / float(symbol_rate)
+    tau0 = 1.0 / float(sampling_rate)
 
     # Cumulative phase (time error) x_i = Σ y · τ0.
     zeros_col = xp.zeros((c, 1), dtype=xp.float64)
@@ -78,7 +93,7 @@ def allan_deviation(
 
     if taus is None:
         m_max = max(1, n // 4)
-        ms = np.unique(np.round(np.geomspace(1, m_max, n_taus)).astype(int))
+        ms = np.unique(np.round(np.geomspace(1, m_max, num_taus)).astype(int))
     else:
         taus_cpu = np.asarray(to_device(taus, "cpu"), dtype=np.float64)
         ms = np.unique(np.maximum(1, np.round(taus_cpu / tau0).astype(int)))
@@ -100,9 +115,4 @@ def allan_deviation(
     adev_cpu = to_device(adev, "cpu")
     adev_out = restore_1d(was_1d, adev_cpu)
 
-    if debug_plot:
-        from .. import plotting as _plotting
-
-        _plotting.plot_allan_deviation(tau_s_cpu, adev_out, show=True)
-
-    return {"tau_s": tau_s_cpu, "adev": adev_out}
+    return AllanDeviation(tau_s=tau_s_cpu, adev=adev_out)

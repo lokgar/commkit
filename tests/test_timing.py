@@ -1,15 +1,17 @@
 """Tests for timing synchronization (Barker and Zadoff-Chu sequences, frame detection)."""
 
-from unittest.mock import MagicMock, patch
+from unittest.mock import patch
 
 import numpy as np
 import pytest
-from pydantic import ValidationError
 
-from commkit import timing
-from commkit.core import Preamble, Signal
-from commkit.helpers import cross_correlate_fft, zc_mimo_root
-from tests.common.conversions import to_numpy
+from commkit import generate, timing
+from commkit._sequences import zc_mimo_root
+from commkit.core import Preamble, Signal, SingleCarrierFrame
+from commkit.filtering import RRC
+from commkit.mapping import Constellation
+from commkit.timing import _parabolic_peak_offset, cross_correlate_fft
+from tests.common.conversions import device_of, to_numpy
 
 
 class TestTimingSequences:
@@ -30,7 +32,7 @@ class TestTimingSequences:
 
     def test_barker_autocorrelation(self, xp):
         """Verify that Barker sequences possess optimal autocorrelation properties."""
-        seq = timing.barker_sequence(13)
+        seq = xp.asarray(timing.barker_sequence(13))
         acorr = cross_correlate_fft(seq, seq, mode="full")
         peak_idx = len(acorr) // 2
         peak_val = float(xp.abs(acorr[peak_idx]))
@@ -44,7 +46,7 @@ class TestTimingSequences:
 
     def test_zadoff_chu_cazac(self, xp, xpt):
         """Verify that ZC sequences have constant amplitude (CAZAC property)."""
-        zc = timing.zadoff_chu_sequence(63, root=25)
+        zc = xp.asarray(timing.zadoff_chu_sequence(63, root=25))
         magnitudes = xp.abs(zc)
         xpt.assert_allclose(magnitudes, 1.0, atol=1e-5)
 
@@ -54,7 +56,7 @@ class TestTimingSequences:
             zc = timing.zadoff_chu_sequence(length, root=1)
             assert len(zc) == length
 
-        zc_even = timing.zadoff_chu_sequence(10, root=1)
+        zc_even = xp.asarray(timing.zadoff_chu_sequence(10, root=1))
         assert len(zc_even) == 10
         xpt.assert_allclose(xp.abs(zc_even), 1.0)
 
@@ -70,24 +72,23 @@ class TestTimingSequences:
         preamble = Preamble(sequence_type="barker", length=13)
         assert preamble.symbols is not None
         assert len(preamble.symbols) == 13
-        assert isinstance(preamble.symbols, xp.ndarray)
+        # Generated on the host; nothing is moved to the GPU implicitly.
+        assert isinstance(preamble.symbols, np.ndarray)
 
         preamble_zc = Preamble(sequence_type="zc", length=63, root=1)
         assert preamble_zc.symbols is not None
         assert len(preamble_zc.symbols) == 63
 
-        with pytest.raises(ValidationError):
+        with pytest.raises(ValueError, match="sequence_type"):
             Preamble(sequence_type="invalid", length=13)
 
-        with pytest.raises(ValidationError):
+        with pytest.raises(TypeError, match="length"):
             Preamble(sequence_type="barker")
 
-    def test_sequences_device(self, xp):
-        """Verify sequence generators return arrays on the active device."""
-        barker = timing.barker_sequence(13)
-        assert isinstance(barker, xp.ndarray)
-        zc = timing.zadoff_chu_sequence(13, root=1)
-        assert isinstance(zc, xp.ndarray)
+    def test_sequences_are_host_arrays(self):
+        """Sequence generators return NumPy arrays even when a GPU is present."""
+        assert isinstance(timing.barker_sequence(13), np.ndarray)
+        assert isinstance(timing.zadoff_chu_sequence(13, root=1), np.ndarray)
 
 
 class TestCrossCorrelation:
@@ -142,42 +143,45 @@ class TestEstimateTiming:
     def test_estimate_timing_advanced_scenarios(self, xp):
         """Verify estimate_timing with raw arrays, MIMO, and search ranges."""
         preamble = Preamble(sequence_type="barker", length=7)
+        ref = xp.asarray(preamble.symbols)
         data = xp.zeros(100, dtype="complex64")
-        data[20 : 20 + 7] = preamble.symbols
+        data[20 : 20 + 7] = ref
 
-        integer, _frac = timing.estimate_timing(data, preamble, threshold=2.0, sps=1)
-        assert 18 <= integer[0] <= 22
+        est = timing.estimate_timing(data, template=preamble, threshold=2.0, sps=1)
+        integer, _frac = est.integer, est.fractional
+        assert 18 <= int(integer) <= 22
 
         mimo_data = xp.zeros((2, 100), dtype="complex64")
-        mimo_data[0, 30:37] = preamble.symbols
-        mimo_data[1, 30:37] = preamble.symbols
-        integer_mimo, _frac = timing.estimate_timing(
-            mimo_data, preamble.symbols, threshold=2.0
-        )
+        mimo_data[0, 30:37] = ref
+        mimo_data[1, 30:37] = ref
+        est = timing.estimate_timing(mimo_data, template=ref, threshold=2.0)
+        integer_mimo, _frac = est.integer, est.fractional
         assert 28 <= integer_mimo[0] <= 32
         assert len(integer_mimo) == 2
 
-        integer_range, _frac = timing.estimate_timing(
-            data, preamble.symbols, threshold=2.0, search_range=(10, 50)
+        est = timing.estimate_timing(
+            data, template=ref, threshold=2.0, search_range=(10, 50)
         )
-        assert 18 <= integer_range[0] <= 22
+        integer_range, _frac = est.integer, est.fractional
+        assert 18 <= int(integer_range) <= 22
 
         with pytest.raises(ValueError, match="No correlation peak above threshold"):
-            timing.estimate_timing(data, preamble.symbols, threshold=100.0)
+            timing.estimate_timing(data, template=ref, threshold=100.0)
 
         zero_data = xp.zeros(100)
         with pytest.raises(ValueError, match="No correlation peak above threshold"):
-            timing.estimate_timing(zero_data, preamble.symbols, threshold=2.0)
+            timing.estimate_timing(zero_data, template=ref, threshold=2.0)
 
     def test_estimate_timing_known_position(self, xp):
         """Verify timing estimation accuracy for a known preamble position."""
-        preamble_symbols = timing.barker_sequence(13)
+        preamble_symbols = xp.asarray(timing.barker_sequence(13))
         signal = xp.zeros(200, dtype="complex64")
         start_pos = 50
         signal[start_pos : start_pos + 13] = preamble_symbols
 
-        integer, _frac = timing.estimate_timing(signal, preamble_symbols, threshold=2.0)
-        assert abs(integer[0] - start_pos) <= 1
+        est = timing.estimate_timing(signal, template=preamble_symbols, threshold=2.0)
+        integer, _frac = est.integer, est.fractional
+        assert abs(int(integer) - start_pos) <= 1
 
     def test_estimate_timing_with_preamble_object(self, xp):
         """Verify timing estimation using Preamble objects."""
@@ -188,119 +192,105 @@ class TestEstimateTiming:
         preamble_syms = xp.asarray(to_numpy(preamble.symbols))
         signal[start_pos : start_pos + 13] = preamble_syms
 
-        integer, _frac = timing.estimate_timing(
-            signal, preamble, sps=1, pulse_shape="none", threshold=2.0
-        )
-        assert abs(integer[0] - start_pos) <= 1
+        est = timing.estimate_timing(signal, template=preamble, sps=1, threshold=2.0)
+        integer, _frac = est.integer, est.fractional
+        assert abs(int(integer) - start_pos) <= 1
 
-    def test_estimate_timing_returns_tuple(self, xp):
-        """Verify that estimate_timing returns (integer_offsets, fractional_offsets)."""
-        preamble = timing.barker_sequence(7)
+    def test_estimate_timing_siso_rank(self, xp):
+        """SISO input gives 0-d integer and fractional offsets (rank rule)."""
+        preamble = xp.asarray(timing.barker_sequence(7))
         signal = xp.zeros(100, dtype="complex64")
         signal[30:37] = preamble
 
-        integer, frac = timing.estimate_timing(signal, preamble, threshold=2.0)
-        assert len(integer) == 1
-        assert len(frac) == 1
-        assert abs(float(frac[0])) < 0.5
-
-    def test_estimate_timing_debug_plot(self, xp):
-        """Trigger the debug plot code path in estimate_timing."""
-        preamble = xp.random.randn(10) + 1j * xp.random.randn(10)
-        sig = xp.concatenate([xp.zeros(20), preamble, xp.zeros(20)])
-
-        with patch("matplotlib.pyplot.show"):
-            mock_ax = MagicMock()
-            mock_fig = MagicMock()
-            with patch(
-                "matplotlib.pyplot.subplots",
-                return_value=(mock_fig, [[mock_ax, mock_ax]]),
-            ):
-                timing.estimate_timing(sig, preamble, debug_plot=True)
+        est = timing.estimate_timing(signal, template=preamble, threshold=2.0)
+        integer, frac = est.integer, est.fractional
+        assert integer.ndim == 0
+        assert frac.ndim == 0
+        assert abs(float(frac)) < 0.5
 
     def test_estimate_timing_zero_energy(self, xp):
         """Test estimate_timing with zero energy signal."""
         preamble = xp.ones(10)
         sig = xp.zeros(50)
         with pytest.raises(ValueError, match="No correlation peak above threshold"):
-            timing.estimate_timing(sig, preamble, threshold=2.0)
+            timing.estimate_timing(sig, template=preamble, threshold=2.0)
 
-    def test_estimate_timing_return_tuple(self, xp):
-        """Verify return tuple structure."""
+    def test_estimate_timing_returns_estimate(self, xp):
+        """estimate_timing returns a TimingEstimate with its diagnostics."""
         preamble = xp.ones(4)
         sig = xp.concatenate([xp.zeros(4), preamble, xp.zeros(4)])
 
-        res = timing.estimate_timing(sig, preamble, threshold=2.0)
-        assert isinstance(res, tuple)
-        assert len(res) == 2
-        assert len(res[0]) == 1
-        assert len(res[1]) == 1
+        est = timing.estimate_timing(sig, template=preamble, threshold=2.0)
+        assert isinstance(est, timing.TimingEstimate)
+        assert int(est.integer) == 4
+        assert est.correlation.shape == (12,)
+        assert float(est.metric) >= 2.0
+        assert 0.0 <= float(est.coherence) <= 1.0
+        assert float(est.value) == float(est.integer + est.fractional)
 
     def test_estimate_timing_search_range(self, xp):
         """Verify estimate_timing with search_range."""
         preamble = xp.random.randn(10) + 1j * xp.random.randn(10)
         sig = xp.concatenate([xp.zeros(50), preamble, xp.zeros(50)])
 
-        integer, _frac = timing.estimate_timing(
-            sig, preamble, search_range=(40, 70), threshold=2.0
+        est = timing.estimate_timing(
+            sig, template=preamble, search_range=(40, 70), threshold=2.0
         )
-        assert integer[0] == 50
+        integer, _frac = est.integer, est.fractional
+        assert int(integer) == 50
 
     def test_estimate_timing_infer_error(self, xp):
         """Verify error when Preamble object used without sps."""
         pre = Preamble(sequence_type="barker", length=3)
         sig = xp.zeros(20)
         with pytest.raises(ValueError, match="SPS must be provided"):
-            timing.estimate_timing(sig, pre)
+            timing.estimate_timing(sig, template=pre)
 
     def test_estimate_timing_fractional(self, xp):
         """Verify estimate_timing returns fractional offset."""
-        preamble = timing.barker_sequence(13)
+        preamble = xp.asarray(timing.barker_sequence(13))
         signal = xp.zeros(200, dtype="complex64")
         signal[50:63] = preamble
 
-        integer, frac = timing.estimate_timing(signal, preamble, threshold=2.0)
-        assert len(integer) == 1
-        assert len(frac) == 1
-        assert abs(float(frac[0])) < 0.5
+        est = timing.estimate_timing(signal, template=preamble, threshold=2.0)
+        integer, frac = est.integer, est.fractional
+        assert integer.ndim == 0
+        assert frac.ndim == 0
+        assert abs(float(frac)) < 0.5
 
     def test_estimate_timing_no_preamble_error(self, xp):
         """Verify estimate_timing raises when no reference is given."""
         sig = xp.zeros(100, dtype="complex64")
-        with pytest.raises(
-            ValueError,
-            match="A 'reference' sequence must be provided",
-        ):
+        with pytest.raises(ValueError, match="needs a template"):
             timing.estimate_timing(sig)
 
     def test_estimate_timing_with_preamble_object_explicit(self, xp):
         """Verify estimate_timing with explicit Preamble object."""
-        barker = timing.barker_sequence(7)
+        barker = xp.asarray(timing.barker_sequence(7))
         samples = xp.zeros(200, dtype="complex64")
         samples[40:47] = barker
 
         preamble = Preamble(sequence_type="barker", length=7)
-        integer, frac = timing.estimate_timing(
-            samples, preamble, sps=1, pulse_shape="none", threshold=2.0
-        )
-        assert abs(int(integer[0]) - 40) <= 1
+        est = timing.estimate_timing(samples, template=preamble, sps=1, threshold=2.0)
+        integer = est.integer
+        assert abs(int(integer) - 40) <= 1
 
     def test_estimate_timing_signal_derives_sps_for_preamble(self, xp):
         """A Signal provides the SPS required to reconstruct a Preamble."""
-        barker = timing.barker_sequence(7)
+        barker = xp.asarray(timing.barker_sequence(7))
         samples = xp.zeros(200, dtype="complex64")
         samples[40:47] = barker
         sig = Signal(
             samples=samples,
             sampling_rate=1.0,
             symbol_rate=1.0,
-            pulse_shape="none",
         )
 
-        integer, _ = timing.estimate_timing(
-            sig, Preamble(sequence_type="barker", length=7), threshold=2.0
+        est = timing.estimate_timing(
+            sig, template=Preamble(sequence_type="barker", length=7), threshold=2.0
         )
-        assert abs(int(integer[0]) - 40) <= 1
+        integer, _ = est.integer, est.fractional
+        assert abs(int(integer) - 40) <= 1
 
     def test_estimate_timing_fractional_sps_with_raw_reference(self, xp, xpt):
         """Raw waveform correlation does not require integer samples per symbol."""
@@ -308,21 +298,23 @@ class TestEstimateTiming:
         samples = xp.zeros(100, dtype=xp.complex64)
         samples[30:37] = reference
         sig = Signal(samples=samples, sampling_rate=1.5e6, symbol_rate=1e6)
-        actual = timing.estimate_timing(sig, reference, threshold=2.0)
-        expected = timing.estimate_timing(samples, reference, threshold=2.0)
-        for result, baseline in zip(actual, expected):
-            xpt.assert_allclose(result, baseline)
-        assert int(actual[0][0]) == 30
+        actual = timing.estimate_timing(sig, template=reference, threshold=2.0)
+        expected = timing.estimate_timing(samples, template=reference, threshold=2.0)
+        xpt.assert_allclose(actual.integer, expected.integer)
+        xpt.assert_allclose(actual.fractional, expected.fractional)
+        assert int(actual.integer) == 30
 
         with pytest.raises(ValueError, match="sps to be a positive integer"):
-            timing.estimate_timing(sig, Preamble(sequence_type="barker", length=7))
+            timing.estimate_timing(
+                sig, template=Preamble(sequence_type="barker", length=7)
+            )
 
     def test_estimate_timing_preamble_kwargs_without_sps(self, xp):
         """Verify estimate_timing raises when preamble is provided but sps is missing."""
         sig = xp.zeros(100, dtype="complex64")
         pre = Preamble(sequence_type="barker", length=7)
         with pytest.raises(ValueError, match="SPS must be provided"):
-            timing.estimate_timing(sig, reference=pre)
+            timing.estimate_timing(sig, template=pre)
 
 
 class TestEstimateTimingMIMO:
@@ -362,13 +354,14 @@ class TestEstimateTimingMIMO:
 
     def test_estimate_timing_skew_detection(self, xp):
         """Verify skew warning is emitted when MIMO channels have different preamble positions."""
-        barker = timing.barker_sequence(7)
+        barker = xp.asarray(timing.barker_sequence(7))
         sig = xp.zeros((2, 200), dtype="complex64")
         sig[0, 40:47] = barker
         sig[1, 42:49] = barker
 
         with patch("commkit.timing.logger") as mock_logger:
-            integer, frac = timing.estimate_timing(sig, barker, threshold=2.0)
+            est = timing.estimate_timing(sig, template=barker, threshold=2.0)
+            integer = est.integer
             mock_logger.warning.assert_called()
             call_args = mock_logger.warning.call_args[0][0]
             assert "Skew detected" in call_args
@@ -383,9 +376,8 @@ class TestEstimateTimingMIMO:
         rx, preamble, L = self._make_mimo_signal(
             xp, [[1.0, 0.0], [0.0, 1.0]], preamble_pos
         )
-        integer, frac = timing.estimate_timing(
-            rx, preamble, sps=1, pulse_shape="none", threshold=2.0
-        )
+        est = timing.estimate_timing(rx, template=preamble, sps=1, threshold=2.0)
+        integer = est.integer
         for ch in range(2):
             assert abs(int(integer[ch]) - preamble_pos) <= 1
 
@@ -396,9 +388,8 @@ class TestEstimateTimingMIMO:
         H = [[np.cos(angle), -np.sin(angle)], [np.sin(angle), np.cos(angle)]]
         rx, preamble, L = self._make_mimo_signal(xp, H, preamble_pos)
 
-        integer, frac = timing.estimate_timing(
-            rx, preamble, sps=1, pulse_shape="none", threshold=2.0
-        )
+        est = timing.estimate_timing(rx, template=preamble, sps=1, threshold=2.0)
+        integer = est.integer
         for ch in range(2):
             assert abs(int(integer[ch]) - preamble_pos) <= 1
 
@@ -410,9 +401,8 @@ class TestEstimateTimingMIMO:
             xp, [[1.0, 0.0], [0.0, 1.0]], preamble_pos, skew=skew
         )
 
-        integer, frac = timing.estimate_timing(
-            rx, preamble, sps=1, pulse_shape="none", threshold=2.0
-        )
+        est = timing.estimate_timing(rx, template=preamble, sps=1, threshold=2.0)
+        integer = est.integer
         assert abs(int(integer[0]) - preamble_pos) <= 1
         expected_ch1 = preamble_pos + skew
         assert abs(int(integer[1]) - expected_ch1) <= 1
@@ -424,9 +414,8 @@ class TestEstimateTimingMIMO:
         H = [[0.0, 1.0], [1.0, 0.0]]
         rx, preamble, L = self._make_mimo_signal(xp, H, preamble_pos)
 
-        integer, frac = timing.estimate_timing(
-            rx, preamble, sps=1, pulse_shape="none", threshold=2.0
-        )
+        est = timing.estimate_timing(rx, template=preamble, sps=1, threshold=2.0)
+        integer = est.integer
         for ch in range(2):
             assert abs(int(integer[ch]) - preamble_pos) <= 1
 
@@ -482,10 +471,10 @@ class TestFractionalDelay:
         peak_idx = xp.asarray(32)
 
         est_std = timing.estimate_fractional_delay(
-            corr_gauss, peak_idx, method="parabolic"
+            corr_gauss, peak_idx, fit="parabolic"
         )
         est_log = timing.estimate_fractional_delay(
-            corr_gauss, peak_idx, method="log-parabolic"
+            corr_gauss, peak_idx, fit="log-parabolic"
         )
         err_std = abs(float(est_std) - true_mu)
         err_log = abs(float(est_log) - true_mu)
@@ -520,7 +509,7 @@ class TestFractionalDelay:
         """Verify delay=0 is a perfect passthrough (identity operation)."""
         n = np.arange(100, dtype="float32")
         signal = xp.asarray(np.sin(2 * np.pi * 0.05 * n).astype("complex64"))
-        out = timing.fft_fractional_delay(signal, 0.0)
+        out = timing.fft_fractional_delay(signal, delay=0.0)
         xpt.assert_allclose(out, signal, atol=1e-6)
 
     def test_fft_fractional_delay_known_sine(self, xp, xpt):
@@ -531,7 +520,7 @@ class TestFractionalDelay:
         n = np.arange(N, dtype="float64")
         original = np.exp(2j * np.pi * f * n).astype("complex64")
         truth = np.exp(2j * np.pi * f * (n - delay)).astype("complex64")
-        out = timing.fft_fractional_delay(xp.asarray(original), delay)
+        out = timing.fft_fractional_delay(xp.asarray(original), delay=delay)
         xpt.assert_allclose(out, truth, atol=1e-5)
 
     def test_fft_fractional_delay_mimo(self, xp, xpt):
@@ -543,7 +532,7 @@ class TestFractionalDelay:
         sig[0] = np.exp(2j * np.pi * f * n).astype("complex64")
         sig[1] = np.exp(2j * np.pi * f * n).astype("complex64")
         delays = xp.asarray([0.3, -0.2], dtype="float32")
-        out = timing.fft_fractional_delay(xp.asarray(sig), delays)
+        out = timing.fft_fractional_delay(xp.asarray(sig), delay=delays)
         truth0 = np.exp(2j * np.pi * f * (n - 0.3)).astype("complex64")
         truth1 = np.exp(2j * np.pi * f * (n + 0.2)).astype("complex64")
         xpt.assert_allclose(out[0], truth0, atol=1e-5)
@@ -551,25 +540,29 @@ class TestFractionalDelay:
 
     def test_fft_fractional_delay_power_conservation(self, xp):
         """Verify FFT-based delay preserves signal power."""
-        np.random.seed(42)
+        rng = np.random.default_rng(42)
         N = 1000
-        signal = (np.random.randn(N) + 1j * np.random.randn(N)).astype("complex64")
+        signal = (rng.standard_normal(N) + 1j * rng.standard_normal(N)).astype(
+            "complex64"
+        )
         signal_xp = xp.asarray(signal)
         delay = 0.3
-        delayed = timing.fft_fractional_delay(signal_xp, delay)
+        delayed = timing.fft_fractional_delay(signal_xp, delay=delay)
         power_in = float(xp.mean(xp.abs(signal_xp) ** 2))
         power_out = float(xp.mean(xp.abs(delayed) ** 2))
         assert abs(power_out / power_in - 1.0) < 1e-5
 
     def test_fft_fractional_delay_roundtrip(self, xp, xpt):
         """Verify round-trip (delay + undo) recovers original signal."""
-        np.random.seed(42)
+        rng = np.random.default_rng(42)
         N = 1000
-        signal = (np.random.randn(N) + 1j * np.random.randn(N)).astype("complex64")
+        signal = (rng.standard_normal(N) + 1j * rng.standard_normal(N)).astype(
+            "complex64"
+        )
         signal_xp = xp.asarray(signal)
         delay = 0.37
-        delayed = timing.fft_fractional_delay(signal_xp, delay)
-        recovered = timing.fft_fractional_delay(delayed, -delay)
+        delayed = timing.fft_fractional_delay(signal_xp, delay=delay)
+        recovered = timing.fft_fractional_delay(delayed, delay=-delay)
         xpt.assert_allclose(recovered, signal_xp, atol=1e-5)
 
     def test_fft_fractional_delay_scalar_ndarray(self, xp, xpt):
@@ -579,7 +572,7 @@ class TestFractionalDelay:
         n = np.arange(N, dtype="float64")
         signal = xp.asarray(np.exp(2j * np.pi * f * n).astype("complex64"))
         delay = xp.asarray(0.3)
-        out = timing.fft_fractional_delay(signal, delay)
+        out = timing.fft_fractional_delay(signal, delay=delay)
         assert out.shape == (N,)
         truth = np.exp(2j * np.pi * f * (n - 0.3)).astype("complex64")
         xpt.assert_allclose(out, truth, atol=1e-5)
@@ -588,14 +581,14 @@ class TestFractionalDelay:
         """fft_fractional_delay: complex64 signal -> complex64 output."""
         n = np.arange(200)
         sig = xp.asarray(np.exp(2j * np.pi * 0.05 * n).astype(np.complex64))
-        out = timing.fft_fractional_delay(sig, 0.3)
+        out = timing.fft_fractional_delay(sig, delay=0.3)
         assert out.dtype == xp.complex64
 
     def test_fft_fractional_delay_preserves_float32_dtype(self, xp):
         """fft_fractional_delay: float32 signal -> float32 output."""
         n = np.arange(200, dtype=np.float32)
         sig = xp.asarray(np.sin(2 * np.pi * 0.05 * n))
-        out = timing.fft_fractional_delay(sig, 0.3)
+        out = timing.fft_fractional_delay(sig, delay=0.3)
         assert out.dtype == xp.float32
 
 
@@ -606,7 +599,7 @@ class TestCorrectTimingBasic:
         """Verify integer-only timing correction via roll."""
         signal = xp.zeros(50, dtype="float32")
         signal[10] = 1.0
-        corrected = timing.correct_timing(signal, integer_offset=10)
+        corrected = timing.correct_timing(signal, 10)
         assert int(xp.argmax(xp.abs(corrected))) == 0
 
     def test_correct_timing_combined(self, xp, xpt):
@@ -617,9 +610,7 @@ class TestCorrectTimingBasic:
         n = np.arange(N, dtype="float64")
         original = np.sin(2 * np.pi * f * n).astype("float32")
         delayed = np.sin(2 * np.pi * f * (n - delay)).astype("float32")
-        corrected = timing.correct_timing(
-            xp.asarray(delayed), integer_offset=20, fractional_offset=0.3
-        )
+        corrected = timing.correct_timing(xp.asarray(delayed), 20.3)
         xpt.assert_allclose(corrected[25:-25], original[25:-25], atol=0.02)
 
     def test_correct_timing_per_channel(self, xp):
@@ -628,7 +619,7 @@ class TestCorrectTimingBasic:
         sig[0, 10] = 1.0
         sig[1, 20] = 1.0
         offsets = xp.array([10, 20])
-        corrected = timing.correct_timing(sig, integer_offset=offsets)
+        corrected = timing.correct_timing(sig, offsets)
         assert corrected.shape == (2, 50)
         assert int(xp.argmax(xp.abs(corrected[0]))) == 0
         assert int(xp.argmax(xp.abs(corrected[1]))) == 0
@@ -643,9 +634,7 @@ class TestCorrectTimingBasic:
         sig[1] = xp.asarray(np.exp(2j * np.pi * f * (n + 0.2)).astype("complex64"))
 
         fractional = xp.array([0.3, -0.2])
-        corrected = timing.correct_timing(
-            sig, integer_offset=0, fractional_offset=fractional
-        )
+        corrected = timing.correct_timing(sig, fractional)
         assert corrected.ndim == 2
         assert corrected.shape == (2, N)
         truth = np.exp(2j * np.pi * f * n).astype("complex64")
@@ -720,7 +709,7 @@ class TestCorrectTiming:
         sig = np.exp(1j * 2 * np.pi * f0 * n).astype(np.complex64)
         sig_xp = xp.asarray(sig)
 
-        out = timing.correct_timing(sig_xp, integer, fract, mode="slice")
+        out = timing.correct_timing(sig_xp, integer + fract, mode="slice")
 
         n_out = np.arange(out.shape[-1], dtype=np.float64) + integer + fract
         expected = np.exp(1j * 2 * np.pi * f0 * n_out).astype(np.complex64)
@@ -738,8 +727,8 @@ class TestCorrectTiming:
         sig[-10:] += 5.0 + 5.0j
         sig_xp = xp.asarray(sig)
 
-        ref = timing.fft_fractional_delay(sig_xp, -fract)[..., integer:]
-        out = timing.correct_timing(sig_xp, integer, fract, mode="slice")
+        ref = timing.fft_fractional_delay(sig_xp, delay=-fract)[..., integer:]
+        out = timing.correct_timing(sig_xp, integer + fract, mode="slice")
         xpt.assert_allclose(out, ref, atol=1e-5)
 
 
@@ -773,24 +762,24 @@ class TestSignalInputTiming:
         )
         sig = Signal(samples=data, sampling_rate=1.0, symbol_rate=1.0)
 
-        out_sig = timing.fft_fractional_delay(sig, 0.3)
-        out_arr = timing.fft_fractional_delay(data, 0.3)
+        out_sig = timing.fft_fractional_delay(sig, delay=0.3)
+        out_arr = timing.fft_fractional_delay(data, delay=0.3)
 
         assert isinstance(out_sig, Signal)
         xpt.assert_allclose(out_sig.samples, out_arr)
 
     def test_estimate_timing_signal_input(self, xp, xpt):
         """Signal input: estimate_timing still returns a raw (int, frac) tuple."""
-        preamble_symbols = timing.barker_sequence(13)
+        preamble_symbols = xp.asarray(timing.barker_sequence(13))
         data = xp.zeros(200, dtype="complex64")
         start_pos = 50
         data[start_pos : start_pos + 13] = preamble_symbols
         sig = Signal(samples=data, sampling_rate=1.0, symbol_rate=1.0)
 
-        int_sig, frac_sig = timing.estimate_timing(sig, preamble_symbols, threshold=2.0)
-        int_arr, frac_arr = timing.estimate_timing(
-            data, preamble_symbols, threshold=2.0
-        )
+        est = timing.estimate_timing(sig, template=preamble_symbols, threshold=2.0)
+        int_sig, frac_sig = est.integer, est.fractional
+        est = timing.estimate_timing(data, template=preamble_symbols, threshold=2.0)
+        int_arr, frac_arr = est.integer, est.fractional
 
         assert not isinstance(int_sig, Signal)
         xpt.assert_allclose(int_sig, int_arr)
@@ -806,3 +795,88 @@ class TestSignalInputTiming:
 
         assert isinstance(out_sig, Signal)
         xpt.assert_allclose(out_sig.samples, out_arr)
+
+
+class TestTimingEstimateFlow:
+    """estimate_timing -> correct_timing round trip."""
+
+    def test_estimate_then_correct_restores_alignment(self, xp, xpt):
+        """correct_timing with a TimingEstimate undoes a delay of a band-limited
+        waveform (the template starts again at sample 0)."""
+        sig = generate(
+            Constellation.psk(4), 256, symbol_rate=1e6, sps=4, pulse=RRC(0.35), rng=3
+        ).to(device_of(xp))
+        template = sig.samples[:128]
+        delayed = xp.roll(sig.samples, 37)
+        est = timing.estimate_timing(delayed, template=template, threshold=2.0)
+        assert int(est.integer) == 37
+        assert abs(float(est.fractional)) < 0.05
+        out = timing.correct_timing(delayed, est)
+        xpt.assert_allclose(out, sig.samples, atol=2e-2)
+
+    def test_template_defaults_to_frame_preamble(self, xp):
+        """A frame Signal supplies its own preamble (shaped with its pulse)."""
+        frame = SingleCarrierFrame(
+            payload_len=124, preamble=Preamble(sequence_type="barker", length=13)
+        )
+        sig = frame.to_signal(sps=2, symbol_rate=1e6, pulse=RRC(0.35)).to(device_of(xp))
+        delayed = sig.replace(samples=xp.roll(sig.samples, 25))
+        est = timing.estimate_timing(delayed)
+        assert int(est.integer) == 25
+
+    def test_slice_keeps_reference_aligned(self, xp):
+        """mode='slice' keeps only the reference symbols still covered."""
+        sig = generate(Constellation.qam(4), 100, symbol_rate=1e6, sps=2)
+        sig = sig.to(device_of(xp))
+        out = timing.correct_timing(sig, 7, mode="slice")
+        assert out.samples.shape[-1] == 193
+        assert out.reference.symbols.shape[-1] == 96
+        assert out.reference.bits.shape[-1] == 192
+
+
+class TestParabolicAndSequences:
+    """Parabolic peak interpolation and MIMO ZC roots."""
+
+    def test_parabolic_peak_offset_recovers_known_offset(self, xp):
+        """A synthetic parabola with a known sub-bin peak must be recovered exactly."""
+        k_true = 2.3
+        nearest = round(k_true)
+        offset_true = k_true - nearest
+
+        def y(k):
+            return -((k - k_true) ** 2) + 10.0
+
+        y_prev, y_curr, y_next = y(nearest - 1), y(nearest), y(nearest + 1)
+        delta = _parabolic_peak_offset(
+            xp.asarray(y_prev), xp.asarray(y_curr), xp.asarray(y_next), xp, log=False
+        )
+        assert float(delta) == pytest.approx(offset_true, abs=1e-9)
+
+    def test_parabolic_peak_offset_degenerate_denom_returns_zero(self, xp):
+        """A flat triplet must return delta=0, not NaN/Inf."""
+        y_prev = xp.asarray(1.0)
+        y_curr = xp.asarray(1.0)
+        y_next = xp.asarray(1.0)
+        delta = _parabolic_peak_offset(y_prev, y_curr, y_next, xp, log=False)
+        assert float(delta) == 0.0
+
+    def test_parabolic_peak_offset_log_mode_host_scalars(self):
+        """log=True must work on plain host scalars with xp=numpy."""
+        delta = _parabolic_peak_offset(0.5, 1.0, 0.6, np, log=True)
+        assert isinstance(float(delta), float)
+        assert -0.5 <= float(delta) <= 0.5
+
+    def test_zc_mimo_root(self, xp):
+        """zc_mimo_root assigns distinct roots cycling from base_root in [1, length-1]."""
+        assert zc_mimo_root(0, 1, 13) == 1
+        assert zc_mimo_root(1, 1, 13) == 2
+        assert zc_mimo_root(2, 1, 13) == 3
+
+        assert zc_mimo_root(0, 10, 13) == 10
+        assert zc_mimo_root(1, 10, 13) == 11
+        assert zc_mimo_root(2, 10, 13) == 12
+        assert zc_mimo_root(3, 10, 13) == 1
+
+        for k in range(12):
+            r = zc_mimo_root(k, 1, 13)
+            assert 1 <= r <= 12

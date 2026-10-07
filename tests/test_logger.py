@@ -1,33 +1,56 @@
-"""Tests for commkit logging functionality."""
+"""Tests for commkit logging: no handlers at import, opt-in console output."""
 
 import logging
+
+import pytest
 
 from commkit import logger
 
 
+@pytest.fixture
+def clean_logger():
+    """Restore the commkit logger's handlers, level and propagation afterwards."""
+    lg = logger.logger
+    saved = (list(lg.handlers), lg.level, lg.propagate)
+    lg.handlers.clear()
+    yield lg
+    lg.handlers[:] = saved[0]
+    lg.setLevel(saved[1])
+    lg.propagate = saved[2]
+
+
 class TestCommkitLogger:
-    """Tests for CommKit logger configuration, formatting, and level filtering."""
+    """The library logger is unconfigured until the user asks for output."""
 
-    def test_logger_set_level(self) -> None:
-        """Verify setting log level via uppercase and lowercase string."""
+    def test_package_logger_is_named_commkit(self) -> None:
+        assert logger.logger is logging.getLogger("commkit")
+
+    def test_set_log_level_accepts_names_and_numbers(self, clean_logger) -> None:
         logger.set_log_level("DEBUG")
-        assert logger.logger.level == logging.DEBUG
+        assert clean_logger.level == logging.DEBUG
         logger.set_log_level("info")
-        assert logger.logger.level == logging.INFO
+        assert clean_logger.level == logging.INFO
         logger.set_log_level(logging.WARNING)
-        assert logger.logger.level == logging.WARNING
+        assert clean_logger.level == logging.WARNING
 
-    def test_logger_singleton_instance(self) -> None:
-        """get_logger returns configured logger with StreamHandler and ColorFormatter."""
-        lg = logger.get_logger("commkit")
-        assert lg is not None
-        assert len(lg.handlers) >= 1
-        assert any(isinstance(h.formatter, logger.ColorFormatter) for h in lg.handlers)
+    def test_set_log_level_attaches_one_colour_handler(self, clean_logger) -> None:
+        """The first call adds a console handler; later calls do not add more."""
+        logger.set_log_level("INFO")
+        logger.set_log_level("DEBUG")
+        assert len(clean_logger.handlers) == 1
+        assert isinstance(clean_logger.handlers[0].formatter, logger._ColorFormatter)
+        assert clean_logger.propagate is False
+
+    def test_set_log_level_keeps_existing_handlers(self, clean_logger) -> None:
+        """An application's own handler is left alone."""
+        own = logging.NullHandler()
+        clean_logger.addHandler(own)
+        logger.set_log_level("INFO")
+        assert clean_logger.handlers == [own]
 
     def test_color_formatter_applies_ansi_codes(self) -> None:
-        """ColorFormatter wraps messages in ANSI color codes."""
-        formatter = logger.ColorFormatter()
-        rec_debug = logging.LogRecord(
+        """The console formatter wraps messages in ANSI colour codes."""
+        rec = logging.LogRecord(
             name="commkit",
             level=logging.DEBUG,
             pathname=__file__,
@@ -36,6 +59,6 @@ class TestCommkitLogger:
             args=(),
             exc_info=None,
         )
-        formatted_debug = formatter.format(rec_debug)
-        assert logger.ColorFormatter.CYAN in formatted_debug
-        assert logger.ColorFormatter.RESET in formatted_debug
+        formatted = logger._ColorFormatter().format(rec)
+        assert logger._ColorFormatter.CYAN in formatted
+        assert logger._ColorFormatter.RESET in formatted

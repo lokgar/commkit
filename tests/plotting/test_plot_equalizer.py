@@ -5,7 +5,9 @@ from unittest.mock import patch
 
 import matplotlib.pyplot as plt
 
-from commkit import equalization, generate_psk
+from commkit import equalization, generate
+from commkit.filtering import RRC
+from commkit.mapping import Constellation
 from commkit.plotting import plot_equalizer_result
 from commkit.plotting.equalizer import plot_zf_equalizer_response
 
@@ -16,26 +18,25 @@ class TestPlotEqualizer:
     def test_equalizer_result_mimo_weights(self, xp: Any) -> None:
         """equalizer_result with MIMO error/weights plots per-channel error and weights."""
         n_symbols = 400
-        sig = generate_psk(
+        sig = generate(
+            Constellation.psk(4),
+            n_symbols,
             symbol_rate=1e6,
-            num_symbols=n_symbols,
-            order=4,
-            pulse_shape="rrc",
             sps=2,
-            num_streams=2,
-            seed=0,
+            pulse=RRC(0.35),
+            num_channels=2,
+            rng=0,
         )
         rx_mimo = xp.asarray(sig.samples)
-        train_mimo = xp.asarray(sig.source_symbols)
+        train_mimo = xp.asarray(sig.reference.symbols)
 
         result = equalization.lms(
             rx_mimo,
-            training_symbols=train_mimo,
+            train_mimo,
             num_taps=7,
             step_size=0.05,
-            modulation="psk",
-            order=4,
-            backend="numba",
+            constellation=Constellation.psk(4),
+            sps=2,
         )
 
         fig, axes = plot_equalizer_result(result, smoothing=10)
@@ -44,17 +45,16 @@ class TestPlotEqualizer:
 
     def test_equalizer_result_custom_axes(self, xp: Any) -> None:
         """equalizer_result with pre-existing axes uses them rather than creating new figures."""
-        sig = generate_psk(
-            symbol_rate=1e6, num_symbols=200, order=4, pulse_shape="rrc", sps=2, seed=0
+        sig = generate(
+            Constellation.psk(4), 200, symbol_rate=1e6, sps=2, pulse=RRC(0.35), rng=0
         )
         result = equalization.lms(
             xp.asarray(sig.samples),
-            training_symbols=xp.asarray(sig.source_symbols),
+            xp.asarray(sig.reference.symbols),
             num_taps=7,
             step_size=0.05,
-            modulation="psk",
-            order=4,
-            backend="numba",
+            constellation=Constellation.psk(4),
+            sps=2,
         )
 
         fig0, axes0 = plt.subplots(1, 2)
@@ -63,17 +63,16 @@ class TestPlotEqualizer:
 
     def test_equalizer_result_show(self, xp: Any) -> None:
         """equalizer_result with show=True calls plt.show() and returns None."""
-        sig = generate_psk(
-            symbol_rate=1e6, num_symbols=200, order=4, pulse_shape="rrc", sps=2, seed=0
+        sig = generate(
+            Constellation.psk(4), 200, symbol_rate=1e6, sps=2, pulse=RRC(0.35), rng=0
         )
         result = equalization.lms(
             xp.asarray(sig.samples),
-            training_symbols=xp.asarray(sig.source_symbols),
+            xp.asarray(sig.reference.symbols),
             num_taps=7,
             step_size=0.05,
-            modulation="psk",
-            order=4,
-            backend="numba",
+            constellation=Constellation.psk(4),
+            sps=2,
         )
 
         with patch("matplotlib.pyplot.show"):
@@ -82,57 +81,71 @@ class TestPlotEqualizer:
 
     def test_equalizer_result_short_smoothing_siso(self, xp: Any) -> None:
         """plot_equalizer_result() SISO where len(mse) <= smoothing uses raw mse."""
-        sig = generate_psk(
-            symbol_rate=1e6, num_symbols=50, order=4, pulse_shape="rrc", sps=2, seed=0
+        sig = generate(
+            Constellation.psk(4), 50, symbol_rate=1e6, sps=2, pulse=RRC(0.35), rng=0
         )
         result = equalization.lms(
             xp.asarray(sig.samples),
-            training_symbols=xp.asarray(sig.source_symbols),
+            xp.asarray(sig.reference.symbols),
             num_taps=5,
             step_size=0.05,
-            modulation="psk",
-            order=4,
-            backend="numba",
+            constellation=Constellation.psk(4),
+            sps=2,
         )
         fig, axes = plot_equalizer_result(result, smoothing=1000)
         assert fig is not None
 
+    def test_equalizer_result_siso_prints_nothing(self, xp: Any, capsys: Any) -> None:
+        """The SISO tap stem plot must not dump Matplotlib's property table
+        (a bare ``plt.setp(lines)`` prints it)."""
+        sig = generate(
+            Constellation.psk(4), 500, symbol_rate=1e3, sps=2, pulse=RRC(0.35)
+        )
+        res = equalization.lms(
+            xp.asarray(sig.samples),
+            xp.asarray(sig.reference.symbols),
+            num_taps=5,
+            sps=2,
+            constellation=Constellation.psk(4),
+            store_weights=True,
+        )
+        plot_equalizer_result(res)
+        assert capsys.readouterr().out == ""
+
     def test_equalizer_result_short_smoothing_mimo(self, xp: Any) -> None:
         """plot_equalizer_result() MIMO where len(mse) <= smoothing uses raw mse."""
-        sig = generate_psk(
+        sig = generate(
+            Constellation.psk(4),
+            50,
             symbol_rate=1e6,
-            num_symbols=50,
-            order=4,
-            pulse_shape="rrc",
             sps=2,
-            num_streams=2,
-            seed=0,
+            pulse=RRC(0.35),
+            num_channels=2,
+            rng=0,
         )
         result = equalization.lms(
             xp.asarray(sig.samples),
-            training_symbols=xp.asarray(sig.source_symbols),
+            xp.asarray(sig.reference.symbols),
             num_taps=5,
             step_size=0.05,
-            modulation="psk",
-            order=4,
-            backend="numba",
+            constellation=Constellation.psk(4),
+            sps=2,
         )
         fig, axes = plot_equalizer_result(result, smoothing=1000)
         assert fig is not None
 
     def test_equalizer_result_with_phase_trajectory(self, xp: Any) -> None:
         """equalizer_result with phase_trajectory renders the 3-panel CPR layout."""
-        sig = generate_psk(
-            symbol_rate=1e6, num_symbols=100, order=4, pulse_shape="rrc", sps=2, seed=0
+        sig = generate(
+            Constellation.psk(4), 100, symbol_rate=1e6, sps=2, pulse=RRC(0.35), rng=0
         )
         result = equalization.lms(
             xp.asarray(sig.samples),
-            training_symbols=xp.asarray(sig.source_symbols),
+            xp.asarray(sig.reference.symbols),
             num_taps=5,
             step_size=0.05,
-            modulation="psk",
-            order=4,
-            backend="numba",
+            constellation=Constellation.psk(4),
+            sps=2,
         )
         phase_1d = xp.linspace(0, 0.5, 100)
         result.phase_trajectory = phase_1d

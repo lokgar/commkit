@@ -6,15 +6,16 @@ from typing import Any
 
 import numpy as np
 
+from .._array import broadcast_channels
 from ..backend import ArrayType
 from ..core._signal_adapter import adapt_signal, require_integer_sps
 from ..core.signal import Signal
-from ..helpers import (
-    broadcast_channels,
-)
 from ._block import _block_fdaf_blind
 from ._common import _godard_radius, _rde_ring_radii
-from .result import EqualizerResult
+from .result import EqualizerResult, EqualizerState, _attach_equalized_signal
+from .sequential._blind import _check_pilots
+
+__all__ = ["block_cma", "block_rde", "build_pilot_ref"]
 
 # -----------------------------------------------------------------------------
 # BLOCK BLIND EQUALIZERS (Signal-aware)
@@ -23,24 +24,19 @@ from .result import EqualizerResult
 
 def block_cma(
     samples: ArrayType | Signal,
+    *,
     num_taps: int = 21,
     sps: int | None = None,
     step_size: float = 2e-4,
     block_size: int = 256,
-    modulation: str | None = None,
-    order: int | None = None,
-    unipolar: bool = False,
-    w_init: ArrayType | None = None,
+    constellation: Any = None,
+    initial_taps: ArrayType | None = None,
     pilot_ref: ArrayType | None = None,
     pilot_mask: np.ndarray | None = None,
     pilot_gain_db: float = 0.0,
-    pmf: Any | None = None,
-    input_norm_factor: float | np.ndarray | None = None,
-    samples_prefix: ArrayType | None = None,
     pad_mode: str = "zeros",
+    state: EqualizerState | None = None,
     cuda_graph: bool = True,
-    debug_plot: bool = False,
-    plot_smoothing: int = 50,
 ) -> EqualizerResult:
     """Blind frequency-domain CMA equalizer (overlap-save FDAF).
 
@@ -50,7 +46,7 @@ def block_cma(
     acquisition at the high-throughput frequency-domain operating point (slow or
     static channels, GPU/CuPy input); for the trained/DD case use
     :func:`block_lms`, and for fastest dynamics on a single stream use
-    :func:`cma` with ``backend='numba'``.
+    :func:`cma`.
 
     Like :func:`cma`, it is fully blind and recovers the channel up to a phase
     ambiguity - run a carrier-phase recovery stage afterwards.  Supplying
@@ -63,28 +59,25 @@ def block_cma(
     ~``block_size``x lower (reduce ``mu`` only if the run raises divergence).
     The primary target is GPU (CuPy); on CPU :func:`cma` is usually faster.
 
-    Parameters mirror :func:`cma` (no ``cpr_type`` - CMA is phase-blind, see
+    Parameters mirror :func:`cma` (no ``cpr`` - CMA is phase-blind, see
     :func:`cma` Notes).  On GPU, ``cuda_graph=True`` (default) captures the
     per-block FDAF body once and replays it, collapsing the per-block kernel
     launches into a single graph launch (a large win at small ``block_size``);
     it is ignored on CPU and silently disabled for the pilot-aided path.
     Returns an :class:`EqualizerResult` with ``y_hat``, ``weights``, ``error``
-    on the input's device.  A :class:`Signal` returns ``y_hat`` as a new
-    :class:`Signal` at the symbol rate (``sampling_rate = symbol_rate``);
-    ``sps`` is ignored for :class:`Signal` input, which always uses the
-    signal's own ``sps``.
+    on the input's device, and ``signal`` (the 1-SPS output Signal) for
+    Signal input; ``sps`` and ``constellation`` come from a :class:`Signal`;
+    array input needs ``sps``.
     """
     signal_adapter = adapt_signal(samples, function_name="block_cma()")
     samples = signal_adapter.array
-    if signal_adapter.signal is not None:
-        sps = require_integer_sps(
-            signal_adapter.resolve_required("sps", sps), "block_cma()"
-        )
+    sps = require_integer_sps(signal_adapter.resolve_fact("sps", sps), "block_cma()")
+    constellation = signal_adapter.resolve_choice("constellation", constellation)
+    pilot_ref, pilot_mask = _check_pilots(
+        signal_adapter.array, sps, pilot_ref, pilot_mask, "block_cma()", state
+    )
 
-    if sps is None:
-        sps = 2
-
-    r2, c_ps = _godard_radius(modulation, order, unipolar, pmf)
+    r2 = _godard_radius(constellation)
     result = _block_fdaf_blind(
         "cma",
         samples,
@@ -94,46 +87,33 @@ def block_cma(
         block_size=block_size,
         r2=r2,
         radii_np=None,
-        w_init=w_init,
-        input_norm_factor=input_norm_factor,
-        samples_prefix=samples_prefix,
+        initial_taps=initial_taps,
+        state=state,
         pad_mode=pad_mode,
         pilot_ref=pilot_ref,
         pilot_mask=pilot_mask,
         pilot_gain_db=pilot_gain_db,
-        c_ps=c_ps,
         cuda_graph=cuda_graph,
-        debug_plot=debug_plot,
-        plot_smoothing=plot_smoothing,
         name="Block-CMA" if pilot_ref is None else "Block-CMA(PA)",
     )
-    if signal_adapter.signal is not None:
-        result.y_hat = signal_adapter.wrap_samples(
-            result.y_hat, sampling_rate=signal_adapter.signal.symbol_rate
-        )
-    return result
+    return _attach_equalized_signal(result, signal_adapter.signal, state)
 
 
 def block_rde(
     samples: ArrayType | Signal,
+    *,
     num_taps: int = 21,
     sps: int | None = None,
     step_size: float = 2e-4,
     block_size: int = 256,
-    modulation: str | None = None,
-    order: int | None = None,
-    unipolar: bool = False,
-    w_init: ArrayType | None = None,
+    constellation: Any = None,
+    initial_taps: ArrayType | None = None,
     pilot_ref: ArrayType | None = None,
     pilot_mask: np.ndarray | None = None,
     pilot_gain_db: float = 0.0,
-    pmf: Any | None = None,
-    input_norm_factor: float | np.ndarray | None = None,
-    samples_prefix: ArrayType | None = None,
     pad_mode: str = "zeros",
+    state: EqualizerState | None = None,
     cuda_graph: bool = True,
-    debug_plot: bool = False,
-    plot_smoothing: int = 50,
 ) -> EqualizerResult:
     """Blind frequency-domain radius-directed equalizer (overlap-save FDAF).
 
@@ -154,22 +134,19 @@ def block_rde(
     per-block kernel launches into a single graph launch (a large win at small
     ``block_size``); it is ignored on CPU and silently disabled for the
     pilot-aided path.  Returns an :class:`EqualizerResult` with ``y_hat``,
-    ``weights``, ``error`` on the input's device.  A :class:`Signal` returns
-    ``y_hat`` as a new :class:`Signal` at the symbol rate (``sampling_rate =
-    symbol_rate``); ``sps`` is ignored for :class:`Signal` input, which
-    always uses the signal's own ``sps``.
+    ``weights``, ``error`` on the input's device, and ``signal`` (the 1-SPS
+    output Signal) for Signal input; ``sps`` and ``constellation`` come from
+    a :class:`Signal`; array input needs ``sps``.
     """
     signal_adapter = adapt_signal(samples, function_name="block_rde()")
     samples = signal_adapter.array
-    if signal_adapter.signal is not None:
-        sps = require_integer_sps(
-            signal_adapter.resolve_required("sps", sps), "block_rde()"
-        )
+    sps = require_integer_sps(signal_adapter.resolve_fact("sps", sps), "block_rde()")
+    constellation = signal_adapter.resolve_choice("constellation", constellation)
+    pilot_ref, pilot_mask = _check_pilots(
+        signal_adapter.array, sps, pilot_ref, pilot_mask, "block_rde()", state
+    )
 
-    if sps is None:
-        sps = 2
-
-    radii_np, c_ps = _rde_ring_radii(modulation, order, unipolar, pmf)
+    radii_np = _rde_ring_radii(constellation)
     result = _block_fdaf_blind(
         "rde",
         samples,
@@ -179,24 +156,16 @@ def block_rde(
         block_size=block_size,
         r2=1.0,
         radii_np=radii_np,
-        w_init=w_init,
-        input_norm_factor=input_norm_factor,
-        samples_prefix=samples_prefix,
+        initial_taps=initial_taps,
+        state=state,
         pad_mode=pad_mode,
         pilot_ref=pilot_ref,
         pilot_mask=pilot_mask,
         pilot_gain_db=pilot_gain_db,
-        c_ps=c_ps,
         cuda_graph=cuda_graph,
-        debug_plot=debug_plot,
-        plot_smoothing=plot_smoothing,
         name="Block-RDE" if pilot_ref is None else "Block-RDE(PA)",
     )
-    if signal_adapter.signal is not None:
-        result.y_hat = signal_adapter.wrap_samples(
-            result.y_hat, sampling_rate=signal_adapter.signal.symbol_rate
-        )
-    return result
+    return _attach_equalized_signal(result, signal_adapter.signal, state)
 
 
 # -----------------------------------------------------------------------------
@@ -210,9 +179,10 @@ def block_rde(
 def build_pilot_ref(
     pilot_symbols: np.ndarray,
     pilot_mask: np.ndarray,
+    *,
     n_sym: int,
     num_ch: int,
-) -> tuple:
+) -> tuple[np.ndarray, np.ndarray]:
     """Build dense pilot reference array and uint8 mask for the hybrid PA kernel.
 
     Packs sparse pilot symbols into a dense ``(C, n_sym)`` array suitable for

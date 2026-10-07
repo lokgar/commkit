@@ -1,142 +1,172 @@
 # CommKit
 
-**High-performance digital communications research kit for Python.**
+**Digital-communications research kit for Python, on CPU and GPU.**
 
 ![Python 3.12+](https://img.shields.io/badge/python-3.12%2B-blue)
-![Backends](https://img.shields.io/badge/backend-NumPy%20%7C%20CuPy%20%7C%20JAX-orange)
+![Backends](https://img.shields.io/badge/backend-NumPy%20%7C%20CuPy-orange)
 ![License](https://img.shields.io/badge/license-MIT-green)
 ![CUDA](https://img.shields.io/badge/CUDA-13.x-76B900?logo=nvidia)
 
----
-
-CommKit is a Python library for digital communications research that treats hardware as a first-class concern. A single `Signal` object carries IQ samples, physical metadata, and modulation context - with DSP operations dispatching automatically to NumPy, CuPy, or JAX based on data location.
-
----
-
-## Why CommKit?
-
-- **One object, complete context:** Sampling rate, symbol rate, modulation format, and pulse shape travel with the signal through the processing pipeline.
-- **Backend-transparent DSP:** `dispatch()` resolves NumPy, CuPy, or SciPy modules at runtime. The same code executes seamlessly on CPU or GPU.
-- **Functional pipelines:** DSP functions accept and return a `Signal` directly (`sig = fir_filter(sig, taps)`; `sig = resample(sig, sps_out=2)`), so pipelines compose without a monolithic `Signal` wrapper API - `sig.to("gpu")` moves data across backends, the rest is plain function composition.
-- **JAX escape hatch:** Zero-copy DLPack export on GPU allows direct application of JAX transforms (gradients, `vmap`, `scan`) without leaving the research loop.
+CommKit covers the receiver chain of coherent and IM/DD links (waveform
+generation, channel impairments, synchronization, carrier recovery, adaptive
+equalization, metrics, laser characterization and plotting) on NumPy or CuPy
+arrays. Computation runs on the device the data lives on.
 
 ---
 
-## Modules & Features
+## The model
 
-| Module | Key Capabilities & Features |
+```text
+plain arrays (NumPy / CuPy)          value objects (frozen, written inline)
+        \                            Constellation, RRC / RC / Gaussian / Rect,
+         \                           BPS / PLL / CycleSlip, MthPower, ...
+          v                                   |
+       Signal  = samples + facts + description + reference
+          |
+          v
+   functions: generate, apply_*, estimate_*, correct_*, resolve_*, ...
+          |                 \
+          v                  v
+   Signal or array      typed results (EqualizerResult, *Estimate, ...)
+                             |
+                             v
+                   plotting (draws results, never computes them)
+```
+
+- **Algorithms are plain functions.** Data is a `Signal` or an array.
+- **Things that describe** a modulation, a pulse or a sub-algorithm are small
+  frozen objects written in the call: `lms(rx, cpr=BPS(test_phases=64))`.
+  The same object works standalone: `correct_carrier_phase(y, BPS())`.
+- **A `Signal` carries facts and ground truth.** Facts are `sampling_rate`,
+  `symbol_rate` and `center_frequency`. The description is `constellation`
+  and `pulse`. The ground truth is `reference` (transmitted symbols and
+  bits). Functions take facts from the Signal and raise on a conflicting
+  argument. Choices such as the decision constellation default to the
+  Signal's and can be overridden.
+- **Results with several values are frozen dataclasses** with named fields.
+  Metrics return host floats: one per channel for `(C, N)` input.
+- **The device follows the data.** There are no `backend=` or `device=`
+  arguments; move data explicitly with `sig.to("gpu")`.
+- There is no pipeline object, receiver class or configuration file: the
+  orchestration stays in your script.
+
+## Quickstart
+
+```python
+import commkit as ck
+from commkit import RRC, Constellation
+from commkit.recovery import BPS, CycleSlip
+
+tx = ck.generate(Constellation.qam(16), num_symbols=2**16, symbol_rate=32e9,
+                 sps=2, pulse=RRC(rolloff=0.1), rng=1)
+rx = ck.impairments.apply_phase_noise(tx, linewidth=100e3, rng=2)
+rx = ck.impairments.apply_awgn(rx, esn0_db=18, rng=3).to("gpu")  # explicit move
+rx = ck.filtering.matched_filter(rx)                              # pulse from rx
+
+cpr = BPS(test_phases=64, cycle_slip=CycleSlip(history=100))
+res = ck.equalization.lms(
+    rx, num_taps=21, step_size=1e-3,
+    training_symbols=rx.reference.symbols[..., :2000], cpr=cpr,
+)
+y = res.signal                    # 1-SPS Signal, reference aligned
+print(f"EVM {ck.metrics.evm(y, num_skip_symbols=2000):.1f} %, "
+      f"BER {ck.metrics.ber(y, num_skip_symbols=2000):.1e}")
+# EVM 12.9 %, BER 2.6e-04
+
+# The next record continues from the converged taps and CPR state.
+res2 = ck.equalization.lms(rx, num_taps=21, step_size=1e-3, cpr=cpr, state=res.state)
+```
+
+Without CuPy, drop `.to("gpu")`: the same code runs on the CPU.
+
+---
+
+## Modules
+
+| Module | Contents |
 | --- | --- |
-| [`commkit.core`](commkit/core) | `Signal` container (IQ samples + metadata), `SingleCarrierFrame`, `Preamble`, and symbol/frame factories (PAM, PSK, QAM, PS-QAM). |
-| [`commkit.backend`](commkit/backend.py) | Hardware abstraction layer (`dispatch`, `to_device`, `to_jax`, `from_jax`), placement management, and backend execution (NumPy, CuPy, JAX). |
-| [`commkit.mapping`](commkit/mapping) | Gray-coded constellations, symbol mapping, hard demapping, soft LLR computation (max-log and exact log-sum-exp via JAX JIT), and probabilistic shaping (Maxwell-Boltzmann). |
-| [`commkit.filtering`](commkit/filtering.py) | Pulse shaping (RRC, RC, Gaussian, Smooth-Rectangle), FIR tap generators, IIR SOS filter design (Butterworth, Chebyshev I/II, elliptic, Bessel) and application, matched filtering, and Overlap-Save. |
-| [`commkit.multirate`](commkit/multirate.py) | Fractional and integer sample rate conversion (`resample`, `decimate`, `upsample`, `decimate_to_symbol_rate`). |
-| [`commkit.timing`](commkit/timing.py) | Preamble generation (Barker, Zadoff-Chu), cross-correlation timing delay estimation, and frame alignment. |
-| [`commkit.frequency`](commkit/frequency.py) | Carrier frequency offset estimation (FOE via M-th power, Mengali-Morelli, pilot-symbol, bias-tone) and static/blockwise time-varying FOE correction. |
-| [`commkit.recovery`](commkit/recovery) | Carrier phase recovery (CPR via Viterbi-Viterbi, BPS, DD-PLL, MAP Tikhonov-RTS, pilot-symbol/pilot-tone), cycle-slip detection/correction, and phase/channel-permutation ambiguity resolution. |
-| [`commkit.equalization`](commkit/equalization) | Sequential (`lms`, `rls`, `cma`, `rde`) and frequency-domain block (`block_lms`, `block_cma`, `block_rde`) adaptive equalizers, `zf_equalizer`, butterfly MIMO topology support, and polarization-tone demultiplexing, with Numba JIT and JAX execution backends. |
-| [`commkit.impairments`](commkit/impairments) | Channel impairments simulation: AWGN (with SPS correction), PMD (differential group delay, Jones matrix), phase noise, IQ imbalance (application + Löwdin/Gram-Schmidt compensation), and chromatic dispersion. |
-| [`commkit.coding`](commkit/coding) | **Planned, not yet implemented** - scaffold-only placeholders reserving the layout for channel coding / FEC primitives (BCH, Convolutional, CRC, Galois field arithmetic, Hamming, Interleaving, LDPC, Polar, Rate matching, Reed-Solomon, Turbo codes). |
-| [`commkit.metrics`](commkit/metrics.py) | System performance evaluation: EVM, SNR, BER, SER, and capacity metrics (GMI, MI) with PS-QAM support. |
-| [`commkit.analysis`](commkit/analysis) | Laser phase and linewidth characterization: DSH, homodyne IQ, zero-phase drift detrending, AWGN-free lag-slope linewidth fit, Di Domenico $\beta$-separation line FWHM, and Allan deviation. |
-| [`commkit.spectral`](commkit/spectral.py) | Welch PSD estimation, spectrograms, and frequency shifting with bin-quantized mixing. |
-| [`commkit.smoothing`](commkit/smoothing.py) | Diagnostic/plotting-only smoothers (moving average, Savitzky-Golay, 2-D density smoothing) - not signal-chain filters; see `commkit.filtering` for those. |
-| [`commkit.io`](commkit/io.py) | Signal persistence and disk serialization (`load_npz`, `save_npz`). |
-| [`commkit.plotting`](commkit/plotting) | Visualization tools for constellations, eye diagrams, PSDs/spectrograms, time-domain signals, filter responses, equalizer convergence, and sync/CPR diagnostics (timing correlation, FOE spectra, carrier-phase trajectories). |
-| [`commkit.helpers`](commkit/helpers.py) | General DSP helpers: random bit/symbol generators, array normalization, RMS calculation, dB<->linear conversion, and SI prefix formatting. |
+| [`commkit.core`](https://github.com/lokgar/commkit/tree/main/commkit/core) | `Signal`, `Reference`, `generate`, `SingleCarrierFrame` and `Preamble` (pilots, guard intervals, MIMO streams), `extract_payload`. |
+| [`commkit.mapping`](https://github.com/lokgar/commkit/tree/main/commkit/mapping) | `Constellation` (QAM, PSK, PAM, arbitrary points; Gray labels; probabilistic shaping with `.shaped()`), bit mapping, hard demapping, max-log and exact LLRs. |
+| [`commkit.filtering`](https://github.com/lokgar/commkit/blob/main/commkit/filtering.py) | Pulses (`RRC`, `RC`, `Gaussian`, `Rect`, `SmoothRect`), FIR and IIR design (Butterworth, Chebyshev I/II, elliptic, Bessel), `fir_filter`, `iir_filter`, `matched_filter`, overlap-save, chromatic-dispersion compensation. |
+| [`commkit.multirate`](https://github.com/lokgar/commkit/blob/main/commkit/multirate.py) | `resample` (fractional), `decimate`, `upsample`, `decimate_to_symbol_rate`. |
+| [`commkit.spectral`](https://github.com/lokgar/commkit/blob/main/commkit/spectral.py) | Welch PSD, spectrograms, frequency shifting, pilot tones. |
+| [`commkit.impairments`](https://github.com/lokgar/commkit/tree/main/commkit/impairments) | AWGN, phase noise, IQ imbalance (with Löwdin and Gram-Schmidt correction), chromatic dispersion, PMD and polarization mixing. Nonlinear channel models: **planned, not implemented**. |
+| [`commkit.timing`](https://github.com/lokgar/commkit/blob/main/commkit/timing.py) | Barker and Zadoff-Chu sequences, `estimate_timing` / `correct_timing`, fractional delay estimation and correction. |
+| [`commkit.frequency`](https://github.com/lokgar/commkit/blob/main/commkit/frequency.py) | `estimate_frequency_offset` / `correct_frequency_offset` with `MthPower`, `MengaliMorelli`, `PilotSymbols` and `BiasTone`; static and blockwise. |
+| [`commkit.recovery`](https://github.com/lokgar/commkit/tree/main/commkit/recovery) | `estimate_carrier_phase` / `correct_carrier_phase` with `ViterbiViterbi`, `BPS`, `PLL`, `Tikhonov`, `DataAided`, `PilotAided`, `PilotTone(s)`; cycle-slip correction; `resolve_phase_ambiguity` and `resolve_channel_permutation`. |
+| [`commkit.equalization`](https://github.com/lokgar/commkit/tree/main/commkit/equalization) | Sequential `lms`, `rls`, `cma`, `rde` (Numba) and frequency-domain `block_lms`, `block_cma`, `block_rde` (CuPy, CUDA graphs), butterfly MIMO, inline carrier recovery (`cpr=PLL()` / `BPS()`), continuation with `state=`, `zf_equalizer`, polarization-tone demultiplexing. |
+| [`commkit.metrics`](https://github.com/lokgar/commkit/blob/main/commkit/metrics.py) | `evm`, `snr`, `ber`, `ser`, `gmi`, `mi`, including shaped constellations; host values per channel. |
+| [`commkit.analysis`](https://github.com/lokgar/commkit/tree/main/commkit/analysis) | Laser and carrier-phase characterization: `estimate_linewidth` (increment slope, β-separation, delayed self-heterodyne FM-PSD / increment / Lorentzian), FM-noise PSDs, drift separation, Allan deviation. |
+| [`commkit.math`](https://github.com/lokgar/commkit/blob/main/commkit/math.py) | `rms`, `normalize`, dB conversions. |
+| [`commkit.smoothing`](https://github.com/lokgar/commkit/blob/main/commkit/smoothing.py) | Display and estimation smoothers (moving average, Savitzky-Golay, 2-D density). Signal-chain filters are in `filtering`. |
+| [`commkit.io`](https://github.com/lokgar/commkit/blob/main/commkit/io.py) | `save_npz` / `load_npz` for Signals. |
+| [`commkit.plotting`](https://github.com/lokgar/commkit/tree/main/commkit/plotting) | Constellations, eye diagrams, spectra, filter responses, equalizer convergence, and synchronization and laser diagnostics that draw the estimates. Imported on first use. |
+| [`commkit.coding`](https://github.com/lokgar/commkit/tree/main/commkit/coding) | Channel coding and FEC: **planned, not implemented**. |
+
+Importing `commkit` has no side effects: it configures no logging, Matplotlib
+or warning filters, and does not touch the GPU.
 
 ---
 
-## Installation & Usage
+## Installation
 
-**Requires Python 3.12+** and [`uv`](https://github.com/astral-sh/uv).
-
-### Core Installation (CPU)
+**Requires Python 3.12+.**
 
 ```bash
-# Using uv (Recommended)
-uv pip install commkit
-
-# Or with standard pip
-pip install commkit
+pip install commkit                 # CPU
+pip install "commkit[gpu]"          # CuPy with the CUDA 13 toolkit libraries
+pip install "commkit[notebook]"     # to run the example notebooks
+pip install "commkit[full]"         # everything
 ```
 
-### GPU Support
-
-To install with CUDA acceleration (includes JAX CUDA 13 and CuPy stacks):
-
-```bash
-# Using uv
-uv pip install "commkit[gpu]"
-
-# Or with standard pip
-pip install "commkit[gpu]"
-```
+With [`uv`](https://github.com/astral-sh/uv), use `uv pip install` in place of
+`pip install`. Extras combine, e.g. `commkit[gpu,notebook]`.
 
 > [!NOTE]
-> **WSL2 CUDA Configuration:**  
-> When NVIDIA drivers and CUDA are properly installed on Windows, there is no need to install CUDA inside WSL2. However, to allow Python CUDA packages inside WSL2 to locate the bundled NVIDIA shared libraries, add the following line to your `~/.bashrc`:
+> **WSL2 and CUDA.** With NVIDIA drivers and CUDA installed on Windows, there
+> is no need to install CUDA inside WSL2. To let the Python CUDA packages find
+> the bundled NVIDIA libraries, add to `~/.bashrc`:
 >
 > ```bash
 > export LD_LIBRARY_PATH=$LD_LIBRARY_PATH:$(echo $HOME/commkit/.venv/lib/python3.*/site-packages/nvidia/cu13/lib)
 > ```
 >
-> *(Assumes `commkit` is cloned in `$HOME/commkit`. If located elsewhere, replace `$HOME/commkit` with `<path-to-repo>`. `python3.*/` matches any Python version automatically).*
+> *(This assumes the repository is cloned to `$HOME/commkit`; adjust the path
+> otherwise.)*
 
-### Notebook Support
+## Examples
 
-To run the example notebooks and enable the rich HTML `Signal.print_info()` table (falls back to plain text without it):
+Jupyter notebooks in [`examples/`](https://github.com/lokgar/commkit/tree/main/examples) (install the `notebook` extra
+and run `jupyter lab examples`):
 
-```bash
-# Using uv
-uv pip install "commkit[notebook]"
+- [`qam_receiver_quickstart`](https://github.com/lokgar/commkit/blob/main/examples/qam_receiver_quickstart.ipynb) - the
+  quickstart above, cell by cell, with the constellation, spectrum and
+  equalizer plots;
+- [`carrier_phase_analysis`](https://github.com/lokgar/commkit/blob/main/examples/carrier_phase_analysis.ipynb) - drift,
+  linewidth and Allan deviation of a recovered carrier phase;
+- [`laser_linewidth_dsh`](https://github.com/lokgar/commkit/blob/main/examples/laser_linewidth_dsh.ipynb) and
+  [`laser_linewidth_homodyne_iq`](https://github.com/lokgar/commkit/blob/main/examples/laser_linewidth_homodyne_iq.ipynb)
+  - laser linewidth from delayed self-heterodyne and homodyne IQ captures;
+- `measurement_laser_linewidth_*` - lean templates for real captures.
 
-# Or with standard pip
-pip install "commkit[notebook]"
-```
+The notebooks are committed without outputs and run in CI.
 
-Extras can be combined, e.g. `commkit[gpu,notebook]`, or install everything at once with `commkit[full]`.
-
-### Development Installation
-
-Contributor guidance, including the [Signal adapter pattern](CLAUDE.md#signal-awareness),
-is maintained in [CLAUDE.md](CLAUDE.md). It covers implementation conventions and
-validation commands for human contributors as well as coding agents.
+## Development
 
 ```bash
 git clone https://github.com/lokgar/commkit.git
 cd commkit
-
-# Sync core environment
-uv sync
-
-# Sync environment with all extras (including GPU and notebook packages)
 uv sync --all-extras
+uv run nbstripout --install      # once per clone: notebooks are committed without outputs
+
+uv run pytest                    # CPU and GPU tests
+uv run pytest --device=cpu       # what CI runs
+uv run ruff check . && uv run mypy commkit/
 ```
 
----
-
-## Examples & Notebooks
-
-For complete usage scripts and DSP examples, explore the [`examples/`](examples) directory.
-
----
-
-## Running Tests
-
-```bash
-# CPU test suite
-uv run pytest --device=cpu
-
-# GPU test suite (requires CuPy + CUDA)
-uv run pytest --device=gpu
-
-# Run all test suites
-uv run pytest --device=all
-```
-
----
+Contributor and coding-agent guidance (architecture, API rules, numerics,
+performance and test conventions) is in [AGENTS.md](https://github.com/lokgar/commkit/blob/main/AGENTS.md).
 
 ## License
 
-This project is licensed under the [MIT License](LICENSE).
+[MIT](https://github.com/lokgar/commkit/blob/main/LICENSE).

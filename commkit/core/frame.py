@@ -2,35 +2,25 @@
 Frame containers: structured preamble and single-carrier frame models.
 """
 
+from dataclasses import dataclass, field
 from typing import Any, Literal
 
 import numpy as np
-from pydantic import (
-    BaseModel,
-    ConfigDict,
-    Field,
-    PrivateAttr,
-    model_validator,
-)
 
-from ._signal_adapter import require_integer_sps
-
-try:
-    import cupy as cp
-
-    _CUPY_AVAILABLE = True
-except ImportError:
-    cp = None
-    _CUPY_AVAILABLE = False
-
-from .. import helpers
-from ..backend import ArrayType, is_cupy_available, to_device
-from ..logger import logger
+from .._sequences import barker_sequence, zadoff_chu_sequence, zc_mimo_root
+from ..backend import ArrayType
+from ..filtering import Pulse
+from ..mapping import Constellation
+from ..math import db_to_linear, normalize
 from . import generation
-from .signal import Signal
+from ._signal_adapter import _same_fact, require_integer_sps
+from .signal import Reference, Signal
+
+__all__ = ["Preamble", "SingleCarrierFrame", "extract_payload"]
 
 
-class Preamble(BaseModel):
+@dataclass(frozen=True, kw_only=True)
+class Preamble:
     """
     Structured container for frame synchronization sequences (preambles).
 
@@ -51,80 +41,73 @@ class Preamble(BaseModel):
         Must satisfy ``1 <= root < length``.
     """
 
-    model_config = ConfigDict(arbitrary_types_allowed=True, validate_assignment=True)
-
-    sequence_type: Literal["barker", "zc"] = "barker"
+    sequence_type: str = "barker"
     length: int
-    root: int = Field(
-        default=1,
-        ge=1,
-        description="ZC root index.  Only meaningful for ``sequence_type='zc'``; "
-        "ignored for Barker sequences.  Must satisfy ``1 <= root < length``; "
-        "for prime ``length`` every root in this range yields a valid CAZAC sequence.",
-    )
-    num_streams: int = Field(
-        default=1,
-        ge=1,
-        description="Number of TX streams.  For ZC preambles each stream gets a "
-        "unique root derived via ``helpers.zc_mimo_root``.  "
-        "For Barker the same sequence is broadcast to all streams.",
-    )
+    # ZC root index, 1 <= root < length; ignored for Barker sequences.
+    root: int = 1
+    # Number of TX streams.  ZC preambles get a unique root per stream
+    # (zc_mimo_root); Barker broadcasts the same sequence.
+    num_streams: int = 1
 
-    # Internal state managed during post-init
-    _symbols: Any = PrivateAttr(default=None)
+    # Generated in __post_init__ from the fields above.
+    _symbols: Any = field(default=None, init=False, repr=False, compare=False)
 
     # -------------------------------------------------------------------------
     # Validators and Post-Initialization Hooks
     # -------------------------------------------------------------------------
 
-    def model_post_init(self, __context: Any) -> None:
+    def __post_init__(self) -> None:
         """
-        Post-initialization hook to automate symbol generation and device placement.
+        Validate the fields and generate the preamble symbols.
 
         This ensures that standard sequences are generated correctly according
         to the requested sequence properties.
 
         For ``num_streams == 1`` the internal ``_symbols`` shape is ``(length,)``.
         For ``num_streams > 1`` it becomes ``(num_streams, length)``:
-        - ZC: each row uses the unique root from ``helpers.zc_mimo_root``.
+        - ZC: each row uses the unique root from ``zc_mimo_root``.
         - Barker: the same sequence is tiled across all streams.
         """
-        from .. import timing
+        if self.sequence_type not in ("barker", "zc"):
+            raise ValueError(
+                f"sequence_type must be 'barker' or 'zc', got {self.sequence_type!r}."
+            )
+        _check_int("length", self.length, 1)
+        _check_int("root", self.root, 1)
+        _check_int("num_streams", self.num_streams, 1)
 
         stype = self.sequence_type.lower()
+        symbols: Any
 
         if stype == "barker":
             # Barker symbols (-1, +1)
-            base = timing.barker_sequence(self.length)
+            base = barker_sequence(self.length)
         elif stype in ("zc", "zadoff_chu"):
             # ZC complex symbols - use the named 'root' field directly.
-            base = timing.zadoff_chu_sequence(self.length, root=self.root)
+            base = zadoff_chu_sequence(self.length, root=self.root)
         else:
             base = None
 
         if base is not None and self.num_streams > 1:
             if stype in ("zc", "zadoff_chu"):
                 rows = [
-                    timing.zadoff_chu_sequence(
+                    zadoff_chu_sequence(
                         self.length,
-                        root=helpers.zc_mimo_root(k, self.root, self.length),
+                        root=zc_mimo_root(k, self.root, self.length),
                     )
                     for k in range(self.num_streams)
                 ]
-                self._symbols = np.stack(rows, axis=0)  # (num_streams, length)
+                symbols = np.stack(rows, axis=0)  # (num_streams, length)
             else:
-                self._symbols = np.tile(base[None, :], (self.num_streams, 1))
+                symbols = np.tile(base[None, :], (self.num_streams, 1))
         else:
-            self._symbols = base
+            symbols = base
 
-        # Move to GPU if available
-        if is_cupy_available():
-            if self._symbols is not None:
-                self._symbols = to_device(self._symbols, "gpu")
-
-            # Ensure consistent internal dtype (complex64)
-            if self._symbols is not None:
-                self._symbols = self._symbols.astype("complex64")
+        # Consistent internal dtype; sequences stay on the CPU (no hidden
+        # device placement).
+        if symbols is not None:
+            symbols = symbols.astype("complex64")
+        object.__setattr__(self, "_symbols", symbols)
 
     # -------------------------------------------------------------------------
     # Properties
@@ -148,15 +131,11 @@ class Preamble(BaseModel):
         self,
         sps: int,
         symbol_rate: float,
-        pulse_shape: str = "rrc",
-        filter_span: int = 10,
-        rrc_rolloff: float = 0.35,
-        rc_rolloff: float = 0.35,
-        rise_time: float = 0.0,
-        duty_cycle: float = 1.0,
+        *,
+        pulse: Pulse | ArrayType | None = None,
     ) -> Signal:
         """
-        Generates a shaped waveform from the preamble sequence.
+        Pulse-shaped waveform of the preamble sequence.
 
         Parameters
         ----------
@@ -164,59 +143,30 @@ class Preamble(BaseModel):
             Samples per symbol.
         symbol_rate : float
             Symbol rate in Hz.
-        pulse_shape : str, default "rrc"
-            The pulse shaping type to apply.
-        filter_span : int, default 10
-            Filter span in symbols.
-        rrc_rolloff : float, default 0.35
-            Roll-off factor for RRC filter.
-        rc_rolloff : float, default 0.35
-            Roll-off factor for RC filter.
-        rise_time : float, default 0.22
-            10%-90% edge transition duration in symbol periods (smoothrect only).
-        duty_cycle : float, default 1.0
-            FWHM of the Gaussian pulse in symbol periods (gaussian only).
-        duty_cycle : float, default 1.0
-            Fraction of the symbol period occupied by the pulse (rect/smoothrect).
+        pulse : Pulse or array_like, optional
+            Pulse object or taps; ``None`` zero-stuffs without shaping (as
+            :func:`commkit.generate`).
 
         Returns
         -------
         Signal
-            A `Signal` object with the shaped preamble.
+            The shaped preamble at unit symbol power.
         """
-        from .generation import shape_pulse
-
         sps = require_integer_sps(sps, "Preamble.to_signal()")
-
-        samples = shape_pulse(
-            self.symbols,
-            sps=sps,
-            pulse_shape=pulse_shape,
-            filter_span=filter_span,
-            rrc_rolloff=rrc_rolloff,
-            rc_rolloff=rc_rolloff,
-            rise_time=rise_time,
-            duty_cycle=duty_cycle,
-        )
-
         return Signal(
-            samples=samples,
+            samples=generation.shape_pulse(self.symbols, sps=sps, pulse=pulse),
             sampling_rate=symbol_rate * sps,
             symbol_rate=symbol_rate,
-            mod_scheme=None,
-            mod_order=None,
-            source_symbols=None,
-            pulse_shape=pulse_shape,
-            duty_cycle=duty_cycle,
-            filter_span=filter_span,
-            rrc_rolloff=rrc_rolloff,
-            rc_rolloff=rc_rolloff,
-            rise_time=rise_time,
-            signal_type="Preamble",
+            pulse=pulse if isinstance(pulse, Pulse) else None,
         )
 
 
-class SingleCarrierFrame(BaseModel):
+def _qpsk() -> Constellation:
+    return Constellation.psk(4)
+
+
+@dataclass(frozen=True, kw_only=True)
+class SingleCarrierFrame:
     """
     Represents a structured single-carrier frame with Preamble, Pilots, Payload, and Guard Interval.
 
@@ -228,26 +178,18 @@ class SingleCarrierFrame(BaseModel):
     Attributes
     ----------
     payload_len : int, default 1000
-        Number of data symbols per spatial stream.
-    payload_mod_scheme : str, default "PSK"
-        Modulation for payload data (e.g., 'QAM').
-    payload_mod_order : int, default 4
-        Modulation order for payload (e.g., 16 for 16-QAM).
+        Number of payload symbols per stream.  With pilots it must fill whole
+        pilot periods (comb: a multiple of ``pilot_period - 1``; block: of
+        ``pilot_period - pilot_block_len``); otherwise construction raises.
+    payload_constellation : Constellation, default ``Constellation.psk(4)``
+        Payload constellation.  A shaped one
+        (``Constellation.qam(64).shaped(entropy=5)``) gives a PS payload.
     payload_seed : int, default 42
         Seed for reproducible payload data generation.
-    payload_nu : float, optional
-        Maxwell-Boltzmann shaping parameter nu >= 0 for a
-        probabilistically shaped QAM payload.  Mutually exclusive with
-        ``payload_entropy``.  Requires ``payload_mod_scheme`` to contain
-        ``"qam"`` (case-insensitive).  nu = 0 -> uniform QAM.
-    payload_entropy : float, optional
-        Target entropy in bits per symbol for a PS-QAM payload.  The
-        optimal nu is solved numerically via ``mapping.optimal_nu``.
-        Mutually exclusive with ``payload_nu``.  Same QAM-only constraint.
     preamble : Preamble, optional
         Structured preamble for synchronization.  For MIMO with ZC sequences,
         each TX stream automatically receives a unique root via
-        ``helpers.zc_mimo_root``.
+        ``zc_mimo_root``.
     pilot_pattern : {"none", "block", "comb"}, default "none"
         "none": No pilots.
         "block": A block of symbols at the start of the frame body.
@@ -258,10 +200,8 @@ class SingleCarrierFrame(BaseModel):
         Length of the pilot block (mode="block") in symbols.
     pilot_seed : int, default 1337
         Seed for pilot symbol generation.
-    pilot_mod_scheme : str, default "PSK"
-        Modulation for pilots.
-    pilot_mod_order : int, default 4
-        Modulation order for pilots.
+    pilot_constellation : Constellation, default ``Constellation.psk(4)``
+        Pilot constellation; must be unshaped.
     pilot_gain_db : float, default 0.0
         Pilot boosting in dB relative to the payload power.
     guard_type : {"zero", "cp"}, default "zero"
@@ -274,127 +214,86 @@ class SingleCarrierFrame(BaseModel):
 
     Notes
     -----
-    **PS-QAM payload**: set either ``payload_nu`` or ``payload_entropy`` (not
-    both) together with a QAM ``payload_mod_scheme``.  The MB distribution is
-    solved once and cached; access the resulting PMF via the read-only
-    ``payload_ps_pmf`` property after the frame has been generated.
+    The layout (``get_structure_map``, the pilot mask) depends only on the
+    fields and never generates data.  Payload and pilot symbols are generated
+    on first access and cached.
     """
 
-    model_config = ConfigDict(arbitrary_types_allowed=True, validate_assignment=True)
-
-    payload_len: int = Field(default=1000, gt=0)
+    payload_len: int = 1000
+    payload_constellation: Constellation = field(default_factory=_qpsk)
     payload_seed: int = 42
-    payload_mod_scheme: str = "PSK"
-    payload_mod_order: int = Field(default=4, ge=1)
-    payload_mod_unipolar: bool = False
-    payload_nu: float | None = Field(default=None, ge=0)
-    payload_entropy: float | None = Field(default=None, gt=0)
 
     preamble: Preamble | None = None
 
-    pilot_pattern: Literal["none", "block", "comb"] = "none"
-    pilot_period: int = Field(default=0, ge=0)
-    pilot_block_len: int = Field(default=0, ge=0)
+    pilot_pattern: str = "none"
+    pilot_period: int = 0
+    pilot_block_len: int = 0
+    pilot_constellation: Constellation = field(default_factory=_qpsk)
     pilot_seed: int = 1337
-    pilot_mod_scheme: str = "PSK"
-    pilot_mod_order: int = Field(default=4, ge=1)
-    pilot_mod_unipolar: bool = False
     pilot_gain_db: float = 0.0
 
-    guard_type: Literal["zero", "cp"] = "zero"
-    guard_len: int = Field(default=0, ge=0)
+    guard_type: str = "zero"
+    guard_len: int = 0
 
-    num_streams: int = Field(default=1, ge=1)
+    num_streams: int = 1
 
-    # Internal cache
-    _payload_bits: Any | None = PrivateAttr(default=None)
-    _payload_symbols: Any | None = PrivateAttr(default=None)
-    _payload_ps_pmf: Any | None = PrivateAttr(default=None)
-    _pilot_bits: Any | None = PrivateAttr(default=None)
-    _pilot_symbols: Any | None = PrivateAttr(default=None)
+    # Lazily generated payload and pilot data.  The frame's fields are frozen;
+    # this cache is filled on first access and never changes afterwards.
+    _cache: dict[str, Any] = field(
+        default_factory=dict, init=False, repr=False, compare=False
+    )
 
     # -------------------------------------------------------------------------
     # Validators and Post-Initialization Hooks
     # -------------------------------------------------------------------------
 
-    def model_post_init(self, __context: Any) -> None:
-        """
-        Post-initialization hook.
+    def __post_init__(self) -> None:
+        """Validate the fields, including that the payload fills whole periods."""
+        _check_int("payload_len", self.payload_len, 1)
+        _check_int("pilot_period", self.pilot_period, 0)
+        _check_int("pilot_block_len", self.pilot_block_len, 0)
+        _check_int("guard_len", self.guard_len, 0)
+        _check_int("num_streams", self.num_streams, 1)
+        for name in ("payload_constellation", "pilot_constellation"):
+            if not isinstance(getattr(self, name), Constellation):
+                raise ValueError(
+                    f"{name} must be a Constellation, e.g. Constellation.qam(16)."
+                )
+        if self.pilot_constellation.pmf is not None:
+            raise ValueError("pilot_constellation must not be shaped.")
+        if self.pilot_pattern not in ("none", "block", "comb"):
+            raise ValueError(
+                "pilot_pattern must be 'none', 'block' or 'comb', "
+                f"got {self.pilot_pattern!r}."
+            )
+        if self.guard_type not in ("zero", "cp"):
+            raise ValueError(
+                f"guard_type must be 'zero' or 'cp', got {self.guard_type!r}."
+            )
+        if self.preamble is not None and not isinstance(self.preamble, Preamble):
+            raise ValueError("preamble must be a Preamble or None.")
+        if self.preamble is not None and self.preamble.num_streams > 1:
+            if self.preamble.num_streams != self.num_streams:
+                raise ValueError(
+                    f"preamble.num_streams={self.preamble.num_streams} does not "
+                    f"match frame.num_streams={self.num_streams}"
+                )
 
-        Validates that payload_len is evenly divisible by the per-period or
-        per-block data count implied by the pilot parameters.  If not, snaps
-        payload_len up to the next valid multiple and emits a warning so the
-        frame structure always satisfies:
-            num_pilot_periods == num_data_periods  (comb)
-            num_pilot_blocks  == num_data_blocks   (block)
-        """
-        import math
-
+        per_period = None
         if self.pilot_pattern == "comb" and self.pilot_period > 1:
-            data_per_period = self.pilot_period - 1
-            if self.payload_len % data_per_period != 0:
-                snapped = (
-                    math.ceil(self.payload_len / data_per_period) * data_per_period
-                )
-                logger.warning(
-                    "SingleCarrierFrame (comb): payload_len=%s is not "
-                    "divisible by data_per_period=%s (pilot_period=%s). "
-                    "Snapping payload_len %s -> %s so that "
-                    "num_pilot_periods == num_data_periods == %s.",
-                    self.payload_len,
-                    data_per_period,
-                    self.pilot_period,
-                    self.payload_len,
-                    snapped,
-                    snapped // data_per_period,
-                )
-                self.payload_len = snapped
-
+            per_period = self.pilot_period - 1
         elif (
             self.pilot_pattern == "block"
             and self.pilot_period > self.pilot_block_len > 0
         ):
-            data_per_block = self.pilot_period - self.pilot_block_len
-            if self.payload_len % data_per_block != 0:
-                snapped = math.ceil(self.payload_len / data_per_block) * data_per_block
-                logger.warning(
-                    "SingleCarrierFrame (block): payload_len=%s is not "
-                    "divisible by data_per_block=%s (pilot_period=%s, "
-                    "pilot_block_len=%s). Snapping payload_len %s -> %s so "
-                    "that num_pilot_blocks == num_data_blocks == %s.",
-                    self.payload_len,
-                    data_per_block,
-                    self.pilot_period,
-                    self.pilot_block_len,
-                    self.payload_len,
-                    snapped,
-                    snapped // data_per_block,
-                )
-                self.payload_len = snapped
-
-    @model_validator(mode="after")
-    def _check_psqam_fields(self) -> "SingleCarrierFrame":
-        if self.payload_nu is not None and self.payload_entropy is not None:
+            per_period = self.pilot_period - self.pilot_block_len
+        if per_period is not None and self.payload_len % per_period:
+            low = self.payload_len // per_period * per_period
+            valid = f"{low} or {low + per_period}" if low else f"{per_period}"
             raise ValueError(
-                "payload_nu and payload_entropy are mutually exclusive - specify one or neither."
+                f"payload_len={self.payload_len} does not fill whole pilot periods "
+                f"({per_period} payload symbols each); use {valid}."
             )
-        if self.payload_nu is not None or self.payload_entropy is not None:
-            if "qam" not in self.payload_mod_scheme.lower():
-                raise ValueError(
-                    f"payload_nu / payload_entropy require a QAM payload modulation, "
-                    f"got payload_mod_scheme='{self.payload_mod_scheme}'."
-                )
-        return self
-
-    @model_validator(mode="after")
-    def _check_preamble_streams(self) -> "SingleCarrierFrame":
-        if self.preamble is not None and self.preamble.num_streams > 1:
-            if self.preamble.num_streams != self.num_streams:
-                raise ValueError(
-                    f"preamble.num_streams={self.preamble.num_streams} does not match "
-                    f"frame.num_streams={self.num_streams}"
-                )
-        return self
 
     # -------------------------------------------------------------------------
     # Mask Generation and Internal Data Preparation Methods
@@ -411,7 +310,7 @@ class SingleCarrierFrame(BaseModel):
         body_length : int
             Total number of symbols in the frame body (payload + pilots).
         """
-        xp = cp if is_cupy_available() else np
+        xp = np
 
         # No pilots: simple payload mapping
         if self.pilot_pattern == "none":
@@ -461,119 +360,45 @@ class SingleCarrierFrame(BaseModel):
         return xp.zeros(self.payload_len, dtype=bool), self.payload_len
 
     def _ensure_payload_generated(self) -> None:
-        """
-        Generates and caches payload bits and symbols via the appropriate Signal factory.
-
-        Dispatches to ``generate_psqam``, ``generate_qam``, ``generate_psk``,
-        or ``generate_pam`` based on ``payload_mod_scheme`` and the PS
-        parameters.  Using the factories as the single source of generation
-        logic avoids duplicating bit/symbol generation code here.
-        """
-        if self._payload_bits is not None:
+        """Generate and cache the payload bits and symbols with ``generate()``."""
+        if self._cache.get("payload_bits") is not None:
             return
-
-        scheme = self.payload_mod_scheme.lower()
-        is_ps = self.payload_nu is not None or self.payload_entropy is not None
-
-        common: dict[str, Any] = dict(
-            num_symbols=self.payload_len,
-            sps=1,
+        sig = generation.generate(
+            self.payload_constellation,
+            self.payload_len,
             symbol_rate=1.0,
-            pulse_shape="none",
-            num_streams=self.num_streams,
-            seed=self.payload_seed,
+            num_channels=self.num_streams,
+            rng=self.payload_seed,
         )
-
-        if is_ps:
-            sig = generation.generate_psqam(
-                order=self.payload_mod_order,
-                nu=self.payload_nu,
-                entropy=self.payload_entropy,
-                **common,
-            )
-            self._payload_ps_pmf = sig.ps_pmf
-        elif "qam" in scheme:
-            sig = generation.generate_qam(
-                order=self.payload_mod_order,
-                unipolar=self.payload_mod_unipolar,
-                **common,
-            )
-        elif "psk" in scheme:
-            sig = generation.generate_psk(
-                order=self.payload_mod_order,
-                **common,
-            )
-        elif "pam" in scheme or "ask" in scheme:
-            sig = generation.generate_pam(
-                order=self.payload_mod_order,
-                unipolar=self.payload_mod_unipolar,
-                **common,
-            )
-        else:
-            sig = generation.generate(
-                modulation=self.payload_mod_scheme,
-                order=self.payload_mod_order,
-                unipolar=self.payload_mod_unipolar,
-                **common,
-            )
-
-        self._payload_bits = sig.source_bits
-        self._payload_symbols = sig.source_symbols
+        ref = sig.reference
+        assert ref is not None
+        self._cache["payload_bits"] = ref.bits
+        self._cache["payload_symbols"] = ref.symbols
 
     def _ensure_pilot_generated(self) -> None:
         """
-        Generates and caches pilot bits and symbols via the appropriate Signal factory.
+        Generate and cache the pilot bits and symbols with ``generate()``.
 
-        Pilots are always generated with a uniform distribution - PS on pilots
-        would destroy the known-reference property required for channel estimation.
+        Pilots are always uniform: shaping would destroy the known-reference
+        property required for channel estimation.
         """
-        if self._pilot_bits is not None or self.pilot_pattern == "none":
+        if self._cache.get("pilot_bits") is not None or self.pilot_pattern == "none":
             return
-
-        xp = cp if is_cupy_available() else np
         mask, _ = self._generate_pilot_mask()
-        pilot_count = int(xp.sum(mask))
+        pilot_count = int(np.sum(mask))
         if pilot_count == 0:
             return
-
-        scheme = self.pilot_mod_scheme.lower()
-
-        common: dict[str, Any] = dict(
-            num_symbols=pilot_count,
-            sps=1,
+        sig = generation.generate(
+            self.pilot_constellation,
+            pilot_count,
             symbol_rate=1.0,
-            pulse_shape="none",
-            num_streams=self.num_streams,
-            seed=self.pilot_seed,
+            num_channels=self.num_streams,
+            rng=self.pilot_seed,
         )
-
-        if "qam" in scheme:
-            sig = generation.generate_qam(
-                order=self.pilot_mod_order,
-                unipolar=self.pilot_mod_unipolar,
-                **common,
-            )
-        elif "psk" in scheme:
-            sig = generation.generate_psk(
-                order=self.pilot_mod_order,
-                **common,
-            )
-        elif "pam" in scheme or "ask" in scheme:
-            sig = generation.generate_pam(
-                order=self.pilot_mod_order,
-                unipolar=self.pilot_mod_unipolar,
-                **common,
-            )
-        else:
-            sig = generation.generate(
-                modulation=self.pilot_mod_scheme,
-                order=self.pilot_mod_order,
-                unipolar=self.pilot_mod_unipolar,
-                **common,
-            )
-
-        self._pilot_bits = sig.source_bits
-        self._pilot_symbols = sig.source_symbols
+        ref = sig.reference
+        assert ref is not None
+        self._cache["pilot_bits"] = ref.bits
+        self._cache["pilot_symbols"] = ref.symbols
 
     # -------------------------------------------------------------------------
     # Properties for Accessing Payload and Pilot Data
@@ -590,7 +415,7 @@ class SingleCarrierFrame(BaseModel):
             Binary bits (0s and 1s).
         """
         self._ensure_payload_generated()
-        return self._payload_bits
+        return self._cache.get("payload_bits")
 
     @property
     def payload_symbols(self) -> ArrayType:
@@ -603,24 +428,7 @@ class SingleCarrierFrame(BaseModel):
             IQ symbols.
         """
         self._ensure_payload_generated()
-        return self._payload_symbols
-
-    @property
-    def payload_ps_pmf(self) -> Any | None:
-        """
-        Returns the Maxwell-Boltzmann PMF used for PS-QAM payload generation.
-
-        ``None`` for uniform (non-PS) payloads.  Pass this to
-        ``metrics.mi`` and ``compute_llr`` after frame equalization
-        to compute PS-aware capacity and soft-decision metrics.
-
-        Returns
-        -------
-        np.ndarray or None
-            PMF array of shape ``(payload_mod_order,)`` summing to 1, or ``None``.
-        """
-        self._ensure_payload_generated()
-        return self._payload_ps_pmf
+        return self._cache.get("payload_symbols")
 
     @property
     def pilot_bits(self) -> ArrayType | None:
@@ -635,7 +443,7 @@ class SingleCarrierFrame(BaseModel):
         if self.pilot_pattern == "none":
             return None
         self._ensure_pilot_generated()
-        return self._pilot_bits
+        return self._cache.get("pilot_bits")
 
     @property
     def pilot_symbols(self) -> ArrayType | None:
@@ -650,7 +458,7 @@ class SingleCarrierFrame(BaseModel):
         if self.pilot_pattern == "none":
             return None
         self._ensure_pilot_generated()
-        return self._pilot_symbols
+        return self._cache.get("pilot_symbols")
 
     @property
     def body_symbols(self) -> ArrayType:
@@ -665,9 +473,10 @@ class SingleCarrierFrame(BaseModel):
         array_like
             Determined by `pilot_pattern` and `pilot_period`.
         """
-        xp = cp if is_cupy_available() else np
+        xp = np
         mask, body_length = self._generate_pilot_mask()
 
+        body: np.ndarray
         if self.num_streams > 1:
             # Shape: (Channels, Time)
             body = xp.zeros((self.num_streams, body_length), dtype="complex64")
@@ -677,7 +486,7 @@ class SingleCarrierFrame(BaseModel):
                 assert pilot_symbols is not None
                 # Apply pilot boosting/gain (dB to linear)
                 if self.pilot_gain_db != 0.0:
-                    pilot_symbols = pilot_symbols * helpers.db_to_linear(
+                    pilot_symbols = pilot_symbols * db_to_linear(
                         self.pilot_gain_db, power=False
                     )
 
@@ -691,7 +500,7 @@ class SingleCarrierFrame(BaseModel):
                 assert pilot_symbols is not None
                 # Apply pilot boosting/gain (dB to linear)
                 if self.pilot_gain_db != 0.0:
-                    pilot_symbols = pilot_symbols * helpers.db_to_linear(
+                    pilot_symbols = pilot_symbols * db_to_linear(
                         self.pilot_gain_db, power=False
                     )
 
@@ -733,7 +542,7 @@ class SingleCarrierFrame(BaseModel):
             - 'payload'
             - 'guard' (only if include_preamble=True OR guard_type='zero')
         """
-        xp = cp if is_cupy_available() else np
+        xp = np
         if unit == "samples":
             sps = require_integer_sps(sps, "get_structure_map()")
         mask, body_length = self._generate_pilot_mask()
@@ -817,12 +626,8 @@ class SingleCarrierFrame(BaseModel):
         self,
         sps: int = 4,
         symbol_rate: float = 1e6,
-        pulse_shape: str = "rrc",
-        filter_span: int = 10,
-        rrc_rolloff: float = 0.35,
-        rc_rolloff: float = 0.35,
-        rise_time: float = 0.0,
-        duty_cycle: float = 1.0,
+        *,
+        pulse: Pulse | ArrayType | None = None,
     ) -> Signal:
         """
         Generates a shaped, oversampled waveform from the frame description.
@@ -837,20 +642,9 @@ class SingleCarrierFrame(BaseModel):
             Samples per symbol (oversampling factor).
         symbol_rate : float, default 1e6
             Symbol rate in Hz.
-        pulse_shape : str, default "rrc"
-            Pulse shaping filter type.
-        filter_span : int, default 10
-            Filter span in symbols.
-        rrc_rolloff : float, default 0.35
-            Roll-off factor for RRC filter.
-        rc_rolloff : float, default 0.35
-            Roll-off factor for RC filter.
-        rise_time : float, default 0.22
-            10%-90% edge transition duration in symbol periods (smoothrect only).
-        duty_cycle : float, default 1.0
-            FWHM of the Gaussian pulse in symbol periods (gaussian only).
-        duty_cycle : float, default 1.0
-            Fraction of the symbol period occupied by the pulse (rect/smoothrect).
+        pulse : Pulse or array_like, optional
+            Pulse object or taps for both preamble and body; ``None``
+            zero-stuffs without shaping (as :func:`commkit.generate`).
 
         Returns
         -------
@@ -866,26 +660,13 @@ class SingleCarrierFrame(BaseModel):
         convention used by ``shape_pulse`` and ``apply_awgn``.
         Pilot/payload power ratios set by `pilot_gain_db` are preserved throughout.
         """
-        xp = cp if is_cupy_available() else np
-        from .. import mapping
-        from .generation import shape_pulse
-
+        xp = np
         sps = require_integer_sps(sps, "SingleCarrierFrame.to_signal()")
 
         # 1. Shape Body (Payload + Pilots)
-        body_symbols = self.body_symbols
-        body_samples = shape_pulse(
-            symbols=body_symbols,
-            sps=sps,
-            pulse_shape=pulse_shape,
-            filter_span=filter_span,
-            rrc_rolloff=rrc_rolloff,
-            rc_rolloff=rc_rolloff,
-            rise_time=rise_time,
-            duty_cycle=duty_cycle,
-        )
+        body_samples = generation.shape_pulse(self.body_symbols, sps=sps, pulse=pulse)
 
-        # Normalise body per-channel via helpers.normalize's "dac_peak" mode:
+        # Normalise body per-channel via normalize's "dac_peak" mode:
         # max(peak_|I|, peak_|Q|) - a single scale factor that brings the
         # dominant component to 1.0 while preserving the I/Q ratio.
         # Complex-envelope peak normalisation (used in the DSP chain) divides
@@ -894,7 +675,7 @@ class SingleCarrierFrame(BaseModel):
         # per-section (body and preamble separately) so each segment uses
         # the full DAC range regardless of modulation type or constellation
         # phase geometry.
-        body_samples = helpers.normalize(body_samples, "dac_peak", axis=-1)
+        body_samples = normalize(body_samples, mode="dac_peak", axis=-1)
 
         # 2. Shape Preamble (if present)
         if self.preamble is not None:
@@ -902,20 +683,16 @@ class SingleCarrierFrame(BaseModel):
             # but we only need the samples.
             # CRITICAL: Must use EXACT same shaping parameters as body.
             preamble_signal = self.preamble.to_signal(
-                sps=sps,
-                symbol_rate=symbol_rate,
-                pulse_shape=pulse_shape,
-                filter_span=filter_span,
-                rrc_rolloff=rrc_rolloff,
-                rc_rolloff=rc_rolloff,
-                rise_time=rise_time,
-                duty_cycle=duty_cycle,
+                sps=sps, symbol_rate=symbol_rate, pulse=pulse
             )
             preamble_samples = xp.asarray(preamble_signal.samples)
             # (L*sps,) for SISO  or  (num_streams, L*sps) for MIMO - shape driven by preamble.num_streams
 
             # I/Q peak normalisation - axis=-1 works for both 1-D and 2-D
-            preamble_samples = helpers.normalize(preamble_samples, "dac_peak", axis=-1)
+            preamble_samples = normalize(preamble_samples, mode="dac_peak", axis=-1)
+            if self.num_streams > 1 and preamble_samples.ndim == 1:
+                # A one-stream preamble is broadcast to every stream.
+                preamble_samples = xp.tile(preamble_samples, (self.num_streams, 1))
 
             # Concatenate Preamble + Body
             samples = xp.concatenate([preamble_samples, body_samples], axis=-1)
@@ -926,6 +703,7 @@ class SingleCarrierFrame(BaseModel):
         if self.guard_len > 0:
             guard_len_samples = int(self.guard_len * sps)
             if self.guard_type == "zero":
+                zeros: np.ndarray
                 if self.num_streams > 1:
                     zeros = xp.zeros(
                         (self.num_streams, guard_len_samples), dtype="complex64"
@@ -945,38 +723,88 @@ class SingleCarrierFrame(BaseModel):
         # i.e. average sample power = 1/sps.  Pilot/payload power ratios within
         # the body are preserved because every section's samples are scaled by the
         # same factor.  Guard zeros remain zero after scaling.
-        samples = helpers.normalize(samples, "symbol_power", sps=sps, axis=-1)
+        samples = normalize(samples, mode="symbol_power", sps=sps, axis=-1)
 
-        # Resolve ν: payload_nu is set directly; for entropy-specified frames call optimal_nu.
-        # payload_ps_pmf is already computed above (body_symbols triggers _ensure_payload_generated).
-        if self.payload_nu is not None:
-            ps_nu_val: float | None = self.payload_nu
-        elif self.payload_entropy is not None:
-            ps_nu_val, _ = mapping.optimal_nu(
-                self.payload_mod_order, self.payload_entropy
-            )
-        else:
-            ps_nu_val = None
-
+        # The payload modulation (and its pmf) lives on the frame:
+        # sig.frame.payload_constellation.
         return Signal(
             samples=samples,
             sampling_rate=symbol_rate * sps,
             symbol_rate=symbol_rate,
-            mod_scheme=None,
-            mod_order=None,
-            mod_unipolar=None,
-            mod_rz=None,
-            source_bits=None,  # extract via frame.get_structure_map() after equalization
-            source_symbols=None,  # samples include full frame (preamble + body);
-            # extract payload segment via frame.get_structure_map() explicitly.
-            ps_pmf=self.payload_ps_pmf,
-            ps_nu=ps_nu_val,
-            pulse_shape=pulse_shape,
-            duty_cycle=duty_cycle,
-            filter_span=filter_span,
-            rrc_rolloff=rrc_rolloff,
-            rc_rolloff=rc_rolloff,
-            rise_time=rise_time,
-            signal_type="Single-Carrier Frame",
+            pulse=pulse if isinstance(pulse, Pulse) else None,
             frame=self,
         )
+
+
+def extract_payload(signal: Signal) -> Signal:
+    """The payload of a frame Signal, as a plain Signal at the symbol rate.
+
+    The payload's position is known only in the full frame, so the Signal
+    must hold exactly the frame's symbols, one sample per symbol, aligned
+    with its start (preamble, pilots and guard included).
+
+    Parameters
+    ----------
+    signal : Signal
+        A Signal with a ``frame``, at one sample per symbol, ``(N,)`` or
+        ``(num_streams, N)`` with ``N`` the frame length in symbols.
+
+    Returns
+    -------
+    Signal
+        The payload symbols at one sample per symbol.  ``constellation`` is
+        the payload constellation, ``reference`` holds the payload symbols
+        and bits (on the samples' device) and ``frame`` is ``None``.
+
+    Raises
+    ------
+    ValueError
+        If the Signal has no frame, is not at one sample per symbol, or its
+        length or channel count is not the frame's.
+    """
+    if not isinstance(signal, Signal):
+        raise TypeError(
+            f"extract_payload() takes a Signal, got {type(signal).__name__}."
+        )
+    frame = signal.frame
+    if frame is None:
+        raise ValueError("extract_payload(): the Signal has no frame.")
+    if not _same_fact(signal.sps, 1):
+        raise ValueError(
+            f"extract_payload() needs one sample per symbol, got sps={signal.sps}; "
+            "decimate to the symbol rate first."
+        )
+    payload = frame.get_structure_map()["payload"]
+    x = signal.samples
+    if x.shape[-1] != payload.size:
+        raise ValueError(
+            f"extract_payload(): the Signal has {x.shape[-1]} symbols, the frame "
+            f"{payload.size}. The payload position is known only in the full "
+            "frame."
+        )
+    num_channels = 1 if x.ndim == 1 else x.shape[0]
+    if num_channels != frame.num_streams:
+        raise ValueError(
+            f"extract_payload(): the Signal has {num_channels} channel(s), the "
+            f"frame {frame.num_streams} stream(s)."
+        )
+    device = "cpu" if signal.xp is np else "gpu"
+    reference = Reference(symbols=frame.payload_symbols, bits=frame.payload_bits).to(
+        device
+    )
+    return Signal(
+        samples=x[..., signal.xp.asarray(payload)],
+        sampling_rate=signal.sampling_rate,
+        symbol_rate=signal.symbol_rate,
+        constellation=frame.payload_constellation,
+        pulse=signal.pulse,
+        reference=reference,
+        center_frequency=signal.center_frequency,
+    )
+
+
+def _check_int(name: str, value: Any, low: int) -> None:
+    if isinstance(value, bool) or not isinstance(value, int | np.integer):
+        raise ValueError(f"{name} must be an integer, got {value!r}.")
+    if value < low:
+        raise ValueError(f"{name} must be >= {low}, got {value}.")

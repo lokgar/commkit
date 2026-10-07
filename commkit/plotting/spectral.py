@@ -14,10 +14,13 @@ from .theme import (
     _set_eng_formatter,
 )
 
+__all__ = ["plot_psd", "plot_spectrogram"]
+
 
 def plot_psd(
     samples: Any,
-    sampling_rate: float = 1.0,
+    *,
+    sampling_rate: float | None = None,
     nperseg: int = 256,
     detrend: str | bool | None = False,
     average: str | None = "mean",
@@ -25,7 +28,7 @@ def plot_psd(
     noverlap: int | None = None,
     nfft: int | None = None,
     scaling: str = "density",
-    center_frequency: float = 0.0,
+    center_frequency: float | None = None,
     domain: str = "RF",
     x_axis: str = "frequency",
     ax: Any | None = None,
@@ -46,8 +49,8 @@ def plot_psd(
     ----------
     samples : array_like or Signal
         Input signal samples. Shape: (..., N_samples).
-    sampling_rate : float, default 1.0
-        Sampling rate in Hz.
+    sampling_rate : float, optional
+        Sampling rate in Hz (a fact): taken from a Signal, required for arrays.
     nperseg : int, default 256
         Length of each segment for Welch's method. Higher values provide
         better frequency resolution but more noise.
@@ -68,7 +71,7 @@ def plot_psd(
         Selects between computing the power spectral density ('density')
         where Pxx has units of V**2/Hz and computing the power spectrum
         ('spectrum') where Pxx has units of V**2.
-    center_frequency : float, default 0.0
+    center_frequency : float, optional
         Frequency offset to apply to the x-axis in Hz.
     domain : {"RF", "OPT"}, default "RF"
         Signal domain. If "OPT", wavelength scaling is enabled.
@@ -93,12 +96,58 @@ def plot_psd(
         The axis or array of axes used for the plot.
     """
     signal_adapter = adapt_signal(samples, function_name="plot_psd()")
-    samples = signal_adapter.array
+    x = signal_adapter.array
+    sampling_rate = signal_adapter.resolve_fact("sampling_rate", sampling_rate)
     if signal_adapter.signal is not None:
-        sampling_rate = signal_adapter.resolve_required("sampling_rate")
-        center_frequency = signal_adapter.signal.center_frequency
-        domain = signal_adapter.signal.physical_domain or "RF"
+        center_frequency = signal_adapter.resolve_fact(
+            "center_frequency", center_frequency
+        )
+    elif center_frequency is None:
+        center_frequency = 0.0
+    return _plot_psd(
+        x,
+        sampling_rate=sampling_rate,
+        nperseg=nperseg,
+        detrend=detrend,
+        average=average,
+        window=window,
+        noverlap=noverlap,
+        nfft=nfft,
+        scaling=scaling,
+        center_frequency=center_frequency,
+        domain=domain,
+        x_axis=x_axis,
+        ax=ax,
+        xlim=xlim,
+        ylim=ylim,
+        title=title,
+        show=show,
+        **kwargs,
+    )
 
+
+def _plot_psd(
+    samples: Any,
+    *,
+    sampling_rate: Any,
+    nperseg: Any,
+    detrend: Any,
+    average: Any,
+    window: Any,
+    noverlap: Any,
+    nfft: Any,
+    scaling: Any,
+    center_frequency: Any,
+    domain: Any,
+    x_axis: Any,
+    ax: Any,
+    xlim: Any,
+    ylim: Any,
+    title: Any,
+    show: Any,
+    **kwargs: Any,
+) -> tuple[Any, Any] | None:
+    """Render array data for :func:`plot_psd` (the public boundary resolves the Signal)."""
     logger.debug("Generating PSD plot (sampling_rate=%s Hz).", sampling_rate)
 
     samples, xp, _ = dispatch(samples)
@@ -140,7 +189,7 @@ def plot_psd(
 
             ch_title = f"{title} (Ch {i})" if title else f"Channel {i}"
 
-            plot_psd(
+            _plot_psd(
                 channel_samples,
                 sampling_rate=sampling_rate,
                 nperseg=nperseg,
@@ -238,7 +287,8 @@ def plot_psd(
 
 def plot_spectrogram(
     samples: Any,
-    sampling_rate: float = 1.0,
+    *,
+    sampling_rate: float | None = None,
     window: str | tuple[Any, ...] | Any = "hann",
     nperseg: int = 256,
     noverlap: int | None = None,
@@ -246,9 +296,8 @@ def plot_spectrogram(
     detrend: str | bool | None = False,
     return_onesided: bool | None = None,
     scaling: str = "density",
-    axis: int = -1,
     mode: str = "psd",
-    center_frequency: float = 0.0,
+    center_frequency: float | None = None,
     domain: str = "RF",
     ax: Any | None = None,
     xlim: tuple[float, float] | None = None,
@@ -269,8 +318,8 @@ def plot_spectrogram(
     ----------
     samples : array_like or Signal
         Input signal samples. Shape: (..., N_samples).
-    sampling_rate : float, default 1.0
-        Sampling rate in Hz.
+    sampling_rate : float, optional
+        Sampling rate in Hz (a fact): taken from a Signal, required for arrays.
     window : str or tuple or array_like, default "hann"
         Desired window to use.
     nperseg : int, default 256
@@ -285,11 +334,9 @@ def plot_spectrogram(
         If True, returns a one-sided spectrum for real-valued data.
     scaling : {"density", "spectrum"}, default "density"
         Selects between computing power spectral density or power spectrum.
-    axis : int, default -1
-        The axis along which to compute the spectrogram.
     mode : {"psd", "complex", "magnitude", "angle", "phase"}, default "psd"
         Type of spectrogram to return.
-    center_frequency : float, default 0.0
+    center_frequency : float, optional
         Frequency offset to apply to the frequency axis in Hz.
     domain : {"RF", "OPT"}, default "RF"
         Signal domain.
@@ -308,7 +355,8 @@ def plot_spectrogram(
     show : bool, default False
         If True, calls `plt.show()` immediately.
     **kwargs : Any
-        Additional keyword arguments passed to `ax.pcolormesh`.
+        Additional keyword arguments passed to ``ax.imshow`` (or
+        ``ax.pcolormesh`` for a non-uniform grid).
 
     Returns
     -------
@@ -318,13 +366,60 @@ def plot_spectrogram(
         The axis or array of axes used for the plot.
     """
     signal_adapter = adapt_signal(samples, function_name="plot_spectrogram()")
-    samples = signal_adapter.array
+    x = signal_adapter.array
+    sampling_rate = signal_adapter.resolve_fact("sampling_rate", sampling_rate)
     if signal_adapter.signal is not None:
-        sampling_rate = signal_adapter.resolve_required("sampling_rate")
-        center_frequency = signal_adapter.signal.center_frequency
-        domain = signal_adapter.signal.physical_domain or "RF"
-        axis = -1
+        center_frequency = signal_adapter.resolve_fact(
+            "center_frequency", center_frequency
+        )
+    elif center_frequency is None:
+        center_frequency = 0.0
+    return _plot_spectrogram(
+        x,
+        sampling_rate=sampling_rate,
+        window=window,
+        nperseg=nperseg,
+        noverlap=noverlap,
+        nfft=nfft,
+        detrend=detrend,
+        return_onesided=return_onesided,
+        scaling=scaling,
+        mode=mode,
+        center_frequency=center_frequency,
+        domain=domain,
+        ax=ax,
+        xlim=xlim,
+        ylim=ylim,
+        title=title,
+        cmap=cmap,
+        show=show,
+        **kwargs,
+    )
 
+
+def _plot_spectrogram(
+    samples: Any,
+    *,
+    sampling_rate: Any,
+    window: Any,
+    nperseg: Any,
+    noverlap: Any,
+    nfft: Any,
+    detrend: Any,
+    return_onesided: Any,
+    scaling: Any,
+    mode: Any,
+    center_frequency: Any,
+    domain: Any,
+    ax: Any,
+    xlim: Any,
+    ylim: Any,
+    title: Any,
+    cmap: Any,
+    show: Any,
+    **kwargs: Any,
+) -> tuple[Any, Any] | None:
+    """Render array data for :func:`plot_spectrogram` (the public boundary resolves the Signal)."""
     logger.debug("Generating spectrogram plot (sampling_rate=%s Hz).", sampling_rate)
 
     samples, xp, _ = dispatch(samples)
@@ -357,7 +452,7 @@ def plot_spectrogram(
             target_ax = axes[row, col] if row < axes.shape[0] else axes.flat[-1]
             ch_title = f"{title} (Ch {i})" if title else f"Channel {i}"
 
-            plot_spectrogram(
+            _plot_spectrogram(
                 channel_samples,
                 sampling_rate=sampling_rate,
                 window=window,
@@ -367,7 +462,6 @@ def plot_spectrogram(
                 detrend=detrend,
                 return_onesided=return_onesided,
                 scaling=scaling,
-                axis=axis,
                 mode=mode,
                 center_frequency=center_frequency,
                 domain=domain,
@@ -394,7 +488,7 @@ def plot_spectrogram(
     from .. import spectral
 
     # Calculate spectrogram
-    f, t, Sxx = spectral.spectrogram(
+    spec = spectral.spectrogram(
         samples,
         sampling_rate=sampling_rate,
         window=window,
@@ -404,14 +498,14 @@ def plot_spectrogram(
         detrend=detrend,
         return_onesided=return_onesided,
         scaling=scaling,
-        axis=axis,
         mode=mode,
     )
 
-    # Move to CPU for plotting
-    f = to_device(f, "cpu")
-    t = to_device(t, "cpu")
-    Sxx = to_device(Sxx, "cpu")
+    # The axes are small: bring them over to pick the crop; the values are
+    # cropped and converted on the device and transferred once.
+    f = np.asarray(to_device(spec.frequencies, "cpu"))
+    t = np.asarray(to_device(spec.times, "cpu"))
+    Sxx, xp, _ = dispatch(spec.values)
 
     # Shift frequency axis first
     f_shifted = f + center_frequency
@@ -455,19 +549,37 @@ def plot_spectrogram(
 
     # Convert values based on mode (e.g. dB scale for PSD/magnitude)
     if mode == "psd":
-        Sxx_plot = 10 * np.log10(Sxx_slice + 1e-20)
+        Sxx_plot = 10 * xp.log10(Sxx_slice + 1e-20)
     elif mode in ("complex", "magnitude"):
-        Sxx_plot = 10 * np.log10(np.abs(Sxx_slice) ** 2 + 1e-20)
+        Sxx_plot = 10 * xp.log10(xp.abs(Sxx_slice) ** 2 + 1e-20)
     else:
         # Angle, phase, etc., plot linearly
         Sxx_plot = Sxx_slice
+    # Time on the y-axis: (len(t_plot), len(f_plot)).
+    image = np.asarray(to_device(Sxx_plot.T, "cpu"))
 
-    # Plot spectrogram with frequency on x-axis and time on y-axis
-    # Sxx_plot has shape (len(f_plot), len(t_plot)).
-    # Transposing Sxx_plot to (len(t_plot), len(f_plot)) matches y-axis (time) and x-axis (frequency).
-    mesh = ax.pcolormesh(
-        f_plot, t_plot, Sxx_plot.T, cmap=cmap, shading="auto", **kwargs
-    )
+    # The STFT grids are uniform, so an image with the cell edges as its
+    # extent draws the same picture as pcolormesh, much faster.
+    if _uniform(f_plot) and _uniform(t_plot):
+        df = f_plot[1] - f_plot[0] if f_plot.size > 1 else 1.0
+        dt = t_plot[1] - t_plot[0] if t_plot.size > 1 else 1.0
+        extent = [
+            f_plot[0] - df / 2,
+            f_plot[-1] + df / 2,
+            t_plot[0] - dt / 2,
+            t_plot[-1] + dt / 2,
+        ]
+        imshow_kwargs: dict[str, Any] = {
+            "origin": "lower",
+            "aspect": "auto",
+            "interpolation": "nearest",
+            "extent": extent,
+            "cmap": cmap,
+        }
+        imshow_kwargs.update(kwargs)
+        mesh = ax.imshow(image, **imshow_kwargs)
+    else:
+        mesh = ax.pcolormesh(f_plot, t_plot, image, cmap=cmap, shading="auto", **kwargs)
     ax.set_xlabel("Frequency [Hz]")
     ax.set_ylabel("Time [s]")
     _set_eng_formatter(ax, "x", "Hz")
@@ -488,3 +600,11 @@ def plot_spectrogram(
         plt.show()
         return None
     return fig, ax
+
+
+def _uniform(axis: np.ndarray) -> bool:
+    """True for an increasing, evenly spaced axis (or one with < 3 points)."""
+    if axis.size < 3:
+        return True
+    step = np.diff(axis)
+    return bool(np.all(step > 0) and np.allclose(step, step[0], rtol=1e-6))

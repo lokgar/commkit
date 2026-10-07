@@ -16,8 +16,6 @@ import logging
 import numpy as np
 import pytest
 
-from commkit import backend
-
 try:
     import cupy as cp
 
@@ -61,19 +59,13 @@ def backend_device(request):
     """Current backend device name; skips GPU benches without functional CuPy."""
     device = request.param
     if device == "gpu":
-        backend.use_cpu_only(False)
         if not _CUPY_AVAILABLE:
             pytest.skip("CuPy not installed, skipping GPU benchmarks")
         try:
             cp.zeros(1)
         except Exception as e:  # pragma: no cover - environment-dependent
             pytest.skip(f"CuPy installed but not functional: {e}")
-    elif device == "cpu":
-        backend.use_cpu_only(True)
-    try:
-        yield device
-    finally:
-        backend.use_cpu_only(False)
+    yield device
 
 
 @pytest.fixture

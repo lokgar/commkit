@@ -9,9 +9,11 @@ from typing import Any
 import pytest
 
 from commkit import equalization, filtering, frequency, multirate
-from commkit.core import Preamble, Signal, SingleCarrierFrame, generation
+from commkit.core import Preamble, Reference, Signal, SingleCarrierFrame, generation
+from commkit.filtering import RRC, Rect
 from commkit.impairments import apply_awgn
-from commkit.mapping import demap_symbols_hard, map_bits
+from commkit.mapping import Constellation, demap_symbols_hard, map_bits
+from tests.common.conversions import device_of
 
 # -----------------------------------------------------------------------------
 # Helpers
@@ -24,18 +26,13 @@ def _signal(xp: Any, *, sps: float = 2.0) -> Signal:
         samples=samples,
         sampling_rate=sps * 1e6,
         symbol_rate=1e6,
-        mod_scheme="PSK",
-        mod_order=2,
-        source_bits=xp.asarray([0, 1] * 32),
-        source_symbols=xp.asarray([1.0, -1.0] * 32, dtype=xp.complex64),
-        pulse_shape="rrc",
-        filter_span=4,
-        rrc_rolloff=0.25,
-        spectral_domain="INTERMEDIATE",
-        physical_domain="RF",
+        constellation=Constellation.psk(2),
+        pulse=RRC(0.25, span=4),
+        reference=Reference(
+            symbols=xp.asarray([1.0, -1.0] * 32, dtype=xp.complex64),
+            bits=xp.asarray([0, 1] * 32),
+        ),
     )
-    sig.resolved_symbols = xp.asarray([1.0, -1.0], dtype=xp.complex64)
-    sig.resolved_bits = xp.asarray([0, 1])
     return sig
 
 
@@ -50,21 +47,19 @@ class MetadataCase:
     transform: Callable
     expected_rate: float
     output_is_signal: bool = True
-    expected_domains: tuple[str, str] = ("INTERMEDIATE", "RF")
     source_fields_valid: bool = True
-    resolved_fields_valid: bool = False
 
 
 METADATA_PROPAGATION_TABLE = (
     MetadataCase(
         "awgn",
         ("sps",),
-        lambda sig, xp: apply_awgn(sig, esn0_db=30, seed=3),
+        lambda sig, xp: apply_awgn(sig, esn0_db=30, rng=3),
         2e6,
     ),
     MetadataCase(
         "matched_filter",
-        ("pulse_shape", "sps", "filter_span", "rrc_rolloff"),
+        ("pulse", "sps"),
         lambda sig, xp: filtering.matched_filter(sig),
         2e6,
     ),
@@ -102,8 +97,8 @@ class TestPipelineComposition:
     @pytest.mark.parametrize(
         "operation",
         [
-            lambda x, xp: apply_awgn(x, sps=2, esn0_db=30, seed=7),
-            lambda x, xp: filtering.matched_filter(x, _identity_taps(xp)),
+            lambda x, xp: apply_awgn(x, sps=2, esn0_db=30, rng=7),
+            lambda x, xp: filtering.matched_filter(x, pulse=_identity_taps(xp)),
             lambda x, xp: multirate.resample(x, sps_in=2, sps_out=1.5),
             lambda x, xp: equalization.zf_equalizer(x, _identity_taps(xp)),
         ],
@@ -120,8 +115,8 @@ class TestPipelineComposition:
     @pytest.mark.parametrize(
         "operation",
         [
-            lambda sig, xp: apply_awgn(sig, esn0_db=30, seed=7),
-            lambda sig, xp: filtering.matched_filter(sig, _identity_taps(xp)),
+            lambda sig, xp: apply_awgn(sig, esn0_db=30, rng=7),
+            lambda sig, xp: filtering.matched_filter(sig, pulse=_identity_taps(xp)),
             lambda sig, xp: multirate.resample(sig, sps_out=1.5),
             lambda sig, xp: equalization.zf_equalizer(sig, _identity_taps(xp)),
         ],
@@ -146,8 +141,7 @@ class TestPipelineComposition:
         """Frame-backed Signals keep frame data and populated private caches attached."""
         frame = SingleCarrierFrame(
             payload_len=60,
-            payload_mod_scheme="QAM",
-            payload_mod_order=16,
+            payload_constellation=Constellation.qam(16),
             preamble=Preamble(sequence_type="barker", length=13),
             pilot_pattern="comb",
             pilot_period=4,
@@ -156,11 +150,13 @@ class TestPipelineComposition:
         payload_symbols = frame.payload_symbols
         assert frame.pilot_bits is not None
         assert frame.pilot_symbols is not None
-        sig = frame.to_signal(sps=4, symbol_rate=1e6, filter_span=4)
-        sig.source_bits = payload_bits
-        sig.source_symbols = payload_symbols
+        sig = frame.to_signal(sps=4, symbol_rate=1e6, pulse=RRC(0.35, span=4))
+        sig = sig.replace(
+            reference=Reference(symbols=payload_symbols, bits=payload_bits)
+        )
+        sig = sig.to(device_of(xp))
 
-        transformed = apply_awgn(sig, esn0_db=25, seed=5)
+        transformed = apply_awgn(sig, esn0_db=25, rng=5)
         transformed = filtering.matched_filter(transformed)
         transformed = multirate.resample(transformed, sps_out=2)
         transformed = equalization.zf_equalizer(transformed, _identity_taps(xp))
@@ -171,8 +167,8 @@ class TestPipelineComposition:
         assert transformed.frame.payload_symbols is not None
         assert transformed.frame.pilot_bits is not None
         assert transformed.frame.pilot_symbols is not None
-        assert transformed.source_bits is not None
-        assert transformed.source_symbols is not None
+        assert transformed.reference.bits is not None
+        assert transformed.reference.symbols is not None
         assert (
             transformed.frame.get_structure_map().keys()
             == frame.get_structure_map().keys()
@@ -182,37 +178,24 @@ class TestPipelineComposition:
 class TestPipelineMetadataPropagation:
     """Tests for metadata preservation, precedence, and domain tracking."""
 
-    def test_required_signal_metadata_takes_precedence(self, xp: Any, xpt: Any) -> None:
-        """A required Signal field wins over a contradictory duplicate argument."""
-        sig = _signal(xp, sps=2.0)
-        actual = apply_awgn(sig, sps=99.0, esn0_db=20, seed=11)
-        expected = apply_awgn(sig.samples, sps=sig.sps, esn0_db=20, seed=11)
-        xpt.assert_allclose(actual.samples, expected)
-
-    def test_optional_metadata_falls_back_only_when_signal_field_absent(
-        self, xp: Any
-    ) -> None:
-        """Optional modulation metadata uses arguments only when Signal lacks it."""
+    def test_constellation_is_a_choice(self, xp: Any) -> None:
+        """The Signal's constellation is the default; an explicit one wins."""
         n = 256
         sampling_rate = 1e6
         tone = xp.exp(1j * 2 * xp.pi * 25e3 * xp.arange(n) / sampling_rate)
-        without_mod = Signal(
-            samples=tone, sampling_rate=sampling_rate, symbol_rate=0.5e6
+        sig = Signal(
+            samples=tone,
+            sampling_rate=sampling_rate,
+            symbol_rate=0.5e6,
+            constellation=Constellation.psk(4),
         )
-        with_mod = without_mod.model_copy(update={"mod_scheme": "PSK", "mod_order": 4})
-
-        fallback = frequency.estimate_frequency_offset_mth_power(
-            without_mod, modulation="PSK", order=4
+        default = frequency.estimate_frequency_offset(sig, frequency.MthPower())
+        explicit = frequency.estimate_frequency_offset(
+            sig, frequency.MthPower(), constellation=Constellation.psk(2)
         )
-        explicit = frequency.estimate_frequency_offset_mth_power(
-            tone, sampling_rate=sampling_rate, modulation="PSK", order=4
-        )
-        signal_wins = frequency.estimate_frequency_offset_mth_power(
-            with_mod, modulation="PSK", order=2
-        )
-
-        assert fallback == pytest.approx(explicit)
-        assert signal_wins == pytest.approx(explicit)
+        assert default.power == 4
+        assert explicit.power == 2
+        assert float(default.value) == pytest.approx(25e3, abs=50)
 
     @pytest.mark.parametrize("case", METADATA_PROPAGATION_TABLE, ids=lambda c: c.name)
     def test_metadata_propagation_table(self, xp: Any, case: MetadataCase) -> None:
@@ -222,13 +205,11 @@ class TestPipelineMetadataPropagation:
 
         assert isinstance(result, Signal) is case.output_is_signal
         assert result.sampling_rate == pytest.approx(case.expected_rate)
-        assert (result.spectral_domain, result.physical_domain) == case.expected_domains
+        assert result.constellation is sig.constellation
+        assert result.pulse is sig.pulse
         assert (
-            result.source_bits is not None and result.source_symbols is not None
+            result.reference.bits is not None and result.reference.symbols is not None
         ) is (case.source_fields_valid)
-        assert (
-            result.resolved_symbols is not None and result.resolved_bits is not None
-        ) is case.resolved_fields_valid
 
     def test_fractional_sps_is_preserved_exactly_by_resampling(self, xp: Any) -> None:
         """Fractional-SPS-capable paths retain the requested ratio in metadata."""
@@ -237,26 +218,23 @@ class TestPipelineMetadataPropagation:
         assert result.sps == 2.5
         assert result.sampling_rate == 2.5 * sig.symbol_rate
 
-    @pytest.mark.parametrize("stored_unipolar", [None, False, True])
-    def test_demap_optional_unipolar_metadata(
-        self, xp: Any, xpt: Any, stored_unipolar: Any
-    ) -> None:
-        """demap_symbols_hard handles stored vs explicit unipolar flag."""
+    def test_demap_constellation_is_a_choice(self, xp: Any, xpt: Any) -> None:
+        """demap_symbols_hard defaults to the Signal's constellation; an
+        explicit argument wins."""
         bits = xp.asarray([0, 0, 0, 1, 1, 1, 1, 0], dtype=xp.uint8)
-        effective = True if stored_unipolar is None else stored_unipolar
-        symbols = map_bits(bits, "PAM", 4, unipolar=effective)
+        bipolar = Constellation.pam(4)
+        symbols = map_bits(bits, constellation=bipolar)
         sig = Signal(
             samples=symbols,
             sampling_rate=1e6,
             symbol_rate=1e6,
-            mod_scheme="PAM",
-            mod_order=4,
-            mod_unipolar=stored_unipolar,
-            resolved_symbols=symbols,
+            constellation=bipolar,
         )
-        result = demap_symbols_hard(sig, unipolar=True)
-        xpt.assert_array_equal(result.resolved_bits, bits)
-        assert sig.resolved_bits is None
+        xpt.assert_array_equal(demap_symbols_hard(sig), bits)
+
+        unipolar = Constellation.pam(4, unipolar=True)
+        explicit = demap_symbols_hard(sig, constellation=unipolar)
+        xpt.assert_array_equal(explicit, unipolar.demap(symbols))
 
 
 class TestPipelineSPSValidation:
@@ -266,9 +244,7 @@ class TestPipelineSPSValidation:
         "operation",
         [
             lambda sig, xp: multirate.decimate_to_symbol_rate(sig),
-            lambda sig, xp: filtering.shaping_filter_taps(
-                sig.model_copy(update={"pulse_shape": "rect"})
-            ),
+            lambda sig, xp: Rect().taps(sig.sps),
             lambda sig, xp: equalization.apply_taps(
                 sig, _identity_taps(xp), normalize=False
             ),
@@ -307,7 +283,7 @@ class TestPipelineSPSValidation:
         """Direct pulse shaping cannot truncate a fractional resampling factor."""
         symbols = xp.asarray([1.0, -1.0], dtype=xp.complex64)
         with pytest.raises(ValueError, match=r"sps.*positive integer"):
-            generation.shape_pulse(symbols, sps=1.5, pulse_shape="rrc")
+            generation.shape_pulse(symbols, sps=1.5, pulse=RRC(0.35))
 
     def test_frame_sample_map_rejects_fractional_sps(self, backend_device: str) -> None:
         """A sample-domain frame mask requires an integral repeat count."""
@@ -316,7 +292,7 @@ class TestPipelineSPSValidation:
             frame.get_structure_map(unit="samples", sps=1.5)
 
     @pytest.mark.parametrize("sps", [0, -1, 1.5, float("nan"), float("inf")])
-    @pytest.mark.parametrize("operation", ["decimate", "apply_taps", "resolve"])
+    @pytest.mark.parametrize("operation", ["decimate", "apply_taps"])
     def test_array_symbol_operations_validate_sps(
         self, xp: Any, sps: Any, operation: str
     ) -> None:
@@ -325,10 +301,8 @@ class TestPipelineSPSValidation:
         with pytest.raises(ValueError, match="sps to be a positive integer"):
             if operation == "decimate":
                 multirate.decimate_to_symbol_rate(samples, sps=sps)
-            elif operation == "apply_taps":
-                equalization.apply_taps(samples, _identity_taps(xp), sps=sps)
             else:
-                multirate.resolve_symbols(samples, sps=sps)
+                equalization.apply_taps(samples, _identity_taps(xp), sps=sps)
 
     def test_array_symbol_operations_accept_integral_float_sps(
         self, xp: Any, xpt: Any
@@ -347,21 +321,19 @@ class TestPipelineSPSValidation:
         xpt.assert_array_equal(actual, expected)
 
     @pytest.mark.parametrize("sps", [0, -1, 1.5, float("nan"), float("inf")])
-    @pytest.mark.parametrize("factory", ["qam", "psqam", "preamble", "frame"])
+    @pytest.mark.parametrize("factory", ["qam", "preamble", "frame"])
     def test_generation_boundaries_validate_sps(
         self, backend_device: str, sps: Any, factory: str
     ) -> None:
         """Waveform generators reject non-positive or non-integral SPS."""
         with pytest.raises(ValueError, match="sps to be a positive integer"):
             if factory == "qam":
-                generation.generate_qam(16, sps=sps, symbol_rate=1e6, order=4)
-            elif factory == "psqam":
-                generation.generate_psqam(
-                    16, sps=sps, symbol_rate=1e6, order=16, nu=0.3
+                generation.generate(
+                    Constellation.qam(4), 16, symbol_rate=1e6, sps=sps, pulse=RRC(0.35)
                 )
             elif factory == "preamble":
                 Preamble(sequence_type="barker", length=7).to_signal(
-                    sps=sps, symbol_rate=1e6
+                    sps=sps, symbol_rate=1e6, pulse=RRC(0.35)
                 )
             else:
-                SingleCarrierFrame(payload_len=16).to_signal(sps=sps)
+                SingleCarrierFrame(payload_len=16).to_signal(sps=sps, pulse=RRC(0.35))

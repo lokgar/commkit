@@ -6,7 +6,7 @@ import pytest
 from commkit import equalization
 from commkit.core import Signal
 from commkit.impairments import apply_polarization_mixing
-from commkit.spectral import add_pilot_tone
+from commkit.spectral import add_pilot_tone, grid_frequency
 
 
 class TestDemultiplexPolarizationTones:
@@ -42,10 +42,15 @@ class TestDemultiplexPolarizationTones:
 
         fs = 100.0
         s = self._streams(xp)
-        tx, f_used = add_pilot_tone(s, fs, self.TONES, power_ratio_db=-10.0)
+        tx = add_pilot_tone(
+            s, sampling_rate=fs, frequency=self.TONES, power_ratio_db=-10.0
+        )
+        f_used = grid_frequency(self.TONES, sampling_rate=fs, num_samples=s.shape[-1])
         rx = apply_polarization_mixing(tx, theta=0.6)  # frequency-flat Jones mix
 
-        demuxed = equalization.demultiplex_polarization_tones_static(rx, fs, f_used)
+        demuxed = equalization.demultiplex_polarization_tones_static(
+            rx, sampling_rate=fs, tone_frequencies=f_used
+        )
 
         assert demuxed.shape == tx.shape
         assert demuxed.dtype == rx.dtype
@@ -60,7 +65,10 @@ class TestDemultiplexPolarizationTones:
 
         fs = 100.0
         s = self._streams(xp, N=8192)
-        tx, f_used = add_pilot_tone(s, fs, self.TONES, power_ratio_db=-8.0)
+        tx = add_pilot_tone(
+            s, sampling_rate=fs, frequency=self.TONES, power_ratio_db=-8.0
+        )
+        f_used = grid_frequency(self.TONES, sampling_rate=fs, num_samples=s.shape[-1])
         rx = apply_polarization_mixing(tx, theta=-0.9)
         rng = xp.random.RandomState(123)
         std = 0.1
@@ -68,7 +76,9 @@ class TestDemultiplexPolarizationTones:
             rx.dtype
         )
 
-        demuxed = equalization.demultiplex_polarization_tones_static(rx, fs, f_used)
+        demuxed = equalization.demultiplex_polarization_tones_static(
+            rx, sampling_rate=fs, tone_frequencies=f_used
+        )
         for j in range(2):
             assert self._corr(xp, demuxed[j], tx[j]) > 0.99
 
@@ -77,9 +87,12 @@ class TestDemultiplexPolarizationTones:
 
         fs = 100.0
         s = self._streams(xp)
-        tx, f_used = add_pilot_tone(s, fs, self.TONES, power_ratio_db=-10.0)
+        tx = add_pilot_tone(
+            s, sampling_rate=fs, frequency=self.TONES, power_ratio_db=-10.0
+        )
+        f_used = grid_frequency(self.TONES, sampling_rate=fs, num_samples=s.shape[-1])
         demuxed, W = equalization.demultiplex_polarization_tones_static(
-            tx, fs, f_used, return_matrix=True
+            tx, sampling_rate=fs, tone_frequencies=f_used, return_matrix=True
         )
         assert W.shape == (2, 2)
         assert W.dtype == xp.complex128
@@ -89,12 +102,17 @@ class TestDemultiplexPolarizationTones:
 
         fs = 100.0
         s = self._streams(xp, C=2, N=8192)
-        tx, f_used = add_pilot_tone(s, fs, self.TONES, power_ratio_db=-10.0)
+        tx = add_pilot_tone(
+            s, sampling_rate=fs, frequency=self.TONES, power_ratio_db=-10.0
+        )
+        f_used = grid_frequency(self.TONES, sampling_rate=fs, num_samples=s.shape[-1])
         rng = xp.random.RandomState(7)
         J = (rng.randn(3, 2) + 1j * rng.randn(3, 2)).astype(xp.complex64)  # (3, 2)
         rx = (J @ tx.astype(xp.complex64)).astype(xp.complex64)  # (3, N)
 
-        demuxed = equalization.demultiplex_polarization_tones_static(rx, fs, f_used)
+        demuxed = equalization.demultiplex_polarization_tones_static(
+            rx, sampling_rate=fs, tone_frequencies=f_used
+        )
         assert demuxed.shape == (2, tx.shape[-1])
         for j in range(2):
             assert self._corr(xp, demuxed[j], tx[j]) > 0.999
@@ -105,7 +123,7 @@ class TestDemultiplexPolarizationTones:
         s = self._streams(xp, C=2)
         with pytest.raises(ValueError, match=r"need K <= C"):
             equalization.demultiplex_polarization_tones_static(
-                s, fs, [10.0, 20.0, 30.0]
+                s, sampling_rate=fs, tone_frequencies=[10.0, 20.0, 30.0]
             )
 
     def test_requires_2d(self, xp):
@@ -113,21 +131,28 @@ class TestDemultiplexPolarizationTones:
         fs = 100.0
         s = self._streams(xp, C=1)[0]  # (N,)
         with pytest.raises(ValueError, match=r"2-D \(C, N\)"):
-            equalization.demultiplex_polarization_tones_static(s, fs, [10.0])
+            equalization.demultiplex_polarization_tones_static(
+                s, sampling_rate=fs, tone_frequencies=[10.0]
+            )
 
     def test_signal_input_returns_signal(self, xp, xpt):
         """Signal input: sampling_rate is taken from the signal."""
 
         fs = 100.0
         s = self._streams(xp)
-        tx, f_used = add_pilot_tone(s, fs, self.TONES, power_ratio_db=-10.0)
+        tx = add_pilot_tone(
+            s, sampling_rate=fs, frequency=self.TONES, power_ratio_db=-10.0
+        )
+        f_used = grid_frequency(self.TONES, sampling_rate=fs, num_samples=s.shape[-1])
         rx = apply_polarization_mixing(tx, theta=0.6)
         sig = Signal(samples=rx, sampling_rate=fs, symbol_rate=fs)
 
         demuxed_sig = equalization.demultiplex_polarization_tones_static(
             sig, tone_frequencies=f_used
         )
-        demuxed_arr = equalization.demultiplex_polarization_tones_static(rx, fs, f_used)
+        demuxed_arr = equalization.demultiplex_polarization_tones_static(
+            rx, sampling_rate=fs, tone_frequencies=f_used
+        )
 
         assert isinstance(demuxed_sig, Signal)
         xpt.assert_allclose(demuxed_sig.samples, demuxed_arr)
@@ -137,14 +162,17 @@ class TestDemultiplexPolarizationTones:
 
         fs = 100.0
         s = self._streams(xp)
-        tx, f_used = add_pilot_tone(s, fs, self.TONES, power_ratio_db=-10.0)
+        tx = add_pilot_tone(
+            s, sampling_rate=fs, frequency=self.TONES, power_ratio_db=-10.0
+        )
+        f_used = grid_frequency(self.TONES, sampling_rate=fs, num_samples=s.shape[-1])
         sig = Signal(samples=tx, sampling_rate=fs, symbol_rate=fs)
 
         demuxed_sig, W_sig = equalization.demultiplex_polarization_tones_static(
             sig, tone_frequencies=f_used, return_matrix=True
         )
         demuxed_arr, W_arr = equalization.demultiplex_polarization_tones_static(
-            tx, fs, f_used, return_matrix=True
+            tx, sampling_rate=fs, tone_frequencies=f_used, return_matrix=True
         )
 
         assert isinstance(demuxed_sig, Signal)
@@ -165,15 +193,20 @@ class TestDemultiplexPolarizationTonesDynamic:
         fs = 100.0
         N = 16384
         s = self._streams(xp, N=N)
-        tx, f_used = add_pilot_tone(s, fs, self.TONES, power_ratio_db=-8.0)
+        tx = add_pilot_tone(
+            s, sampling_rate=fs, frequency=self.TONES, power_ratio_db=-8.0
+        )
+        f_used = grid_frequency(self.TONES, sampling_rate=fs, num_samples=s.shape[-1])
         # SOP sweeps a full ~pi/2 across the capture - the static average Jones
         # matrix matches no instant, so its cross-talk rejection collapses.
         drift = (np.pi / 2) / N
-        rx = apply_polarization_mixing(tx, theta=0.2, drift_rate_rad_per_sym=drift)
+        rx = apply_polarization_mixing(tx, theta=0.2, drift_rad_per_sample=drift)
 
-        static = equalization.demultiplex_polarization_tones_static(rx, fs, f_used)
+        static = equalization.demultiplex_polarization_tones_static(
+            rx, sampling_rate=fs, tone_frequencies=f_used
+        )
         dynamic = equalization.demultiplex_polarization_tones_dynamic(
-            rx, fs, f_used, track_bandwidth=2.0
+            rx, sampling_rate=fs, tone_frequencies=f_used, track_bandwidth=2.0
         )
 
         assert dynamic.shape == tx.shape
@@ -195,11 +228,14 @@ class TestDemultiplexPolarizationTonesDynamic:
 
         fs = 100.0
         s = self._streams(xp, N=8192)
-        tx, f_used = add_pilot_tone(s, fs, self.TONES, power_ratio_db=-10.0)
+        tx = add_pilot_tone(
+            s, sampling_rate=fs, frequency=self.TONES, power_ratio_db=-10.0
+        )
+        f_used = grid_frequency(self.TONES, sampling_rate=fs, num_samples=s.shape[-1])
         rx = apply_polarization_mixing(tx, theta=0.6)
 
         demuxed = equalization.demultiplex_polarization_tones_dynamic(
-            rx, fs, f_used, track_bandwidth=2.0
+            rx, sampling_rate=fs, tone_frequencies=f_used, track_bandwidth=2.0
         )
         for j in range(2):
             assert self._corr(xp, demuxed[j], tx[j]) > 0.99
@@ -211,10 +247,19 @@ class TestDemultiplexPolarizationTonesDynamic:
         fs = 100.0
         N = 8192
         s = self._streams(xp, N=N)
-        tx, f_used = add_pilot_tone(s, fs, self.TONES, power_ratio_db=-10.0)
-        demuxed, Wg, grid = equalization.demultiplex_polarization_tones_dynamic(
-            tx, fs, f_used, track_bandwidth=2.0, return_matrix=True
+        tx = add_pilot_tone(
+            s, sampling_rate=fs, frequency=self.TONES, power_ratio_db=-10.0
         )
+        f_used = grid_frequency(self.TONES, sampling_rate=fs, num_samples=s.shape[-1])
+        demuxed, track = equalization.demultiplex_polarization_tones_dynamic(
+            tx,
+            sampling_rate=fs,
+            tone_frequencies=f_used,
+            track_bandwidth=2.0,
+            return_matrix=True,
+        )
+        Wg, grid = track.matrix_grid, track.grid_positions
+        assert track.valid == slice(0, N)
         assert Wg.ndim == 3 and Wg.shape[1:] == (2, 2)
         assert Wg.shape[0] == grid.shape[0]
         assert Wg.dtype == xp.complex128
@@ -226,7 +271,7 @@ class TestDemultiplexPolarizationTonesDynamic:
         s = self._streams(xp, N=4096)
         with pytest.raises(ValueError, match=r"track_bandwidth must be positive"):
             equalization.demultiplex_polarization_tones_dynamic(
-                s, fs, self.TONES, track_bandwidth=0.0
+                s, sampling_rate=fs, tone_frequencies=self.TONES, track_bandwidth=0.0
             )
 
     def test_trim_edges_returns_valid_interior(self, xp):
@@ -236,10 +281,20 @@ class TestDemultiplexPolarizationTonesDynamic:
         N = 8192
         num_taps = 165
         s = self._streams(xp, N=N)
-        tx, f_used = add_pilot_tone(s, fs, self.TONES, power_ratio_db=-10.0)
-        demuxed, valid = equalization.demultiplex_polarization_tones_dynamic(
-            tx, fs, f_used, track_bandwidth=2.0, num_taps=num_taps, trim_edges=True
+        tx = add_pilot_tone(
+            s, sampling_rate=fs, frequency=self.TONES, power_ratio_db=-10.0
         )
+        f_used = grid_frequency(self.TONES, sampling_rate=fs, num_samples=s.shape[-1])
+        demuxed, track = equalization.demultiplex_polarization_tones_dynamic(
+            tx,
+            sampling_rate=fs,
+            tone_frequencies=f_used,
+            track_bandwidth=2.0,
+            num_taps=num_taps,
+            trim_edges=True,
+            return_matrix=True,
+        )
+        valid = track.valid
         g = num_taps // 2
         assert isinstance(valid, slice)
         assert (valid.start, valid.stop) == (g, N - g)
@@ -249,16 +304,24 @@ class TestDemultiplexPolarizationTonesDynamic:
             assert self._corr(xp, demuxed[j], tx[j, valid]) > 0.99
 
     def test_trim_edges_with_return_matrix_order(self, xp):
-        """Combined flags return (demuxed, valid, W_grid, grid) in that order."""
+        """With trim_edges the track's grid still spans the full record."""
 
         fs = 100.0
         N = 8192
         s = self._streams(xp, N=N)
-        tx, f_used = add_pilot_tone(s, fs, self.TONES, power_ratio_db=-10.0)
-        result = equalization.demultiplex_polarization_tones_dynamic(
-            tx, fs, f_used, track_bandwidth=2.0, trim_edges=True, return_matrix=True
+        tx = add_pilot_tone(
+            s, sampling_rate=fs, frequency=self.TONES, power_ratio_db=-10.0
         )
-        demuxed, valid, Wg, grid = result
+        f_used = grid_frequency(self.TONES, sampling_rate=fs, num_samples=s.shape[-1])
+        demuxed, track = equalization.demultiplex_polarization_tones_dynamic(
+            tx,
+            sampling_rate=fs,
+            tone_frequencies=f_used,
+            track_bandwidth=2.0,
+            trim_edges=True,
+            return_matrix=True,
+        )
+        valid, Wg, grid = track.valid, track.matrix_grid, track.grid_positions
         assert isinstance(valid, slice)
         assert demuxed.shape[-1] == valid.stop - valid.start
         # W_grid / grid still span the full record.
@@ -270,7 +333,10 @@ class TestDemultiplexPolarizationTonesDynamic:
 
         fs = 100.0
         s = self._streams(xp, N=8192)
-        tx, f_used = add_pilot_tone(s, fs, self.TONES, power_ratio_db=-10.0)
+        tx = add_pilot_tone(
+            s, sampling_rate=fs, frequency=self.TONES, power_ratio_db=-10.0
+        )
+        f_used = grid_frequency(self.TONES, sampling_rate=fs, num_samples=s.shape[-1])
         rx = apply_polarization_mixing(tx, theta=0.6)
         sig = Signal(samples=rx, sampling_rate=fs, symbol_rate=fs)
 
@@ -278,54 +344,47 @@ class TestDemultiplexPolarizationTonesDynamic:
             sig, tone_frequencies=f_used, track_bandwidth=2.0
         )
         demuxed_arr = equalization.demultiplex_polarization_tones_dynamic(
-            rx, fs, f_used, track_bandwidth=2.0
+            rx, sampling_rate=fs, tone_frequencies=f_used, track_bandwidth=2.0
         )
 
         assert isinstance(demuxed_sig, Signal)
         xpt.assert_allclose(demuxed_sig.samples, demuxed_arr)
 
-    def test_signal_input_apply_false_returns_raw_tuple(self, xp, xpt):
-        """apply=False: no signal-shaped output, so the tuple stays raw arrays."""
+    def test_signal_input_apply_false_returns_track(self, xp, xpt):
+        """apply=False: the JonesTrack alone, the same for Signal and array."""
 
         fs = 100.0
         s = self._streams(xp, N=8192)
-        tx, f_used = add_pilot_tone(s, fs, self.TONES, power_ratio_db=-10.0)
+        tx = add_pilot_tone(
+            s, sampling_rate=fs, frequency=self.TONES, power_ratio_db=-10.0
+        )
+        f_used = grid_frequency(self.TONES, sampling_rate=fs, num_samples=s.shape[-1])
         sig = Signal(samples=tx, sampling_rate=fs, symbol_rate=fs)
 
-        Wg_sig, grid_sig = equalization.demultiplex_polarization_tones_dynamic(
+        track_sig = equalization.demultiplex_polarization_tones_dynamic(
             sig, tone_frequencies=f_used, track_bandwidth=2.0, apply=False
         )
-        Wg_arr, grid_arr = equalization.demultiplex_polarization_tones_dynamic(
-            tx, fs, f_used, track_bandwidth=2.0, apply=False
+        track_arr = equalization.demultiplex_polarization_tones_dynamic(
+            tx,
+            sampling_rate=fs,
+            tone_frequencies=f_used,
+            track_bandwidth=2.0,
+            apply=False,
         )
 
-        assert not isinstance(Wg_sig, Signal)
-        xpt.assert_allclose(Wg_sig, Wg_arr)
-        xpt.assert_allclose(grid_sig, grid_arr)
+        assert isinstance(track_sig, equalization.JonesTrack)
+        xpt.assert_allclose(track_sig.matrix_grid, track_arr.matrix_grid)
+        xpt.assert_allclose(track_sig.grid_positions, track_arr.grid_positions)
 
-    def test_signal_input_trim_edges_with_return_matrix(self, xp, xpt):
-        """Signal input + trim_edges + return_matrix: (Signal, valid, W_grid, grid)."""
-
+    def test_signal_input_trim_edges_raises(self, xp):
+        """Trimming samples would misalign a Signal's reference."""
         fs = 100.0
-        N = 8192
-        s = self._streams(xp, N=N)
-        tx, f_used = add_pilot_tone(s, fs, self.TONES, power_ratio_db=-10.0)
-        sig = Signal(samples=tx, sampling_rate=fs, symbol_rate=fs)
-
-        demuxed_sig, valid, Wg, grid = (
+        s = self._streams(xp, N=8192)
+        sig = Signal(samples=s, sampling_rate=fs, symbol_rate=fs)
+        with pytest.raises(ValueError, match="trim_edges"):
             equalization.demultiplex_polarization_tones_dynamic(
-                sig,
-                tone_frequencies=f_used,
-                track_bandwidth=2.0,
-                trim_edges=True,
-                return_matrix=True,
+                sig, tone_frequencies=self.TONES, track_bandwidth=2.0, trim_edges=True
             )
-        )
-
-        assert isinstance(demuxed_sig, Signal)
-        assert isinstance(valid, slice)
-        assert demuxed_sig.samples.shape[-1] == valid.stop - valid.start
-        assert Wg.shape[1:] == (2, 2)
 
 
 class TestApplyInterpolatedMatrix:

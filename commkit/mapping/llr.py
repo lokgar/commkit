@@ -1,272 +1,239 @@
 """
 Soft-decision demapping (log-likelihood ratios).
 
-JAX JIT-compiled max-log and exact LLR kernels, with optional probabilistic-
-shaping prior.  Sign convention: positive LLR -> bit 0 more likely.
+Max-log and exact (log-sum-exp) LLRs with an optional probabilistic-shaping
+prior, computed with NumPy or CuPy on the input's device.  Sign convention:
+positive LLR -> bit 0 more likely.
 """
 
-from typing import Any
+from __future__ import annotations
+
+from collections.abc import Callable
+from types import ModuleType
+from typing import TYPE_CHECKING
 
 import numpy as np
 
-from ..backend import ArrayType, _get_jax, dispatch, is_jax_array, to_jax
+from ..backend import ArrayType, dispatch
 from ..core._signal_adapter import adapt_signal
 from ..core.signal import Signal
 from ..logger import logger
-from .gray import gray_constellation, unpack_bits
+
+if TYPE_CHECKING:
+    from .constellation import Constellation
 
 __all__ = ["compute_llr"]
 
-# Lazy cache for JIT-compiled soft demapping kernels
-_JITTED_SOFT_DEMAP: dict[str, Any] = {}
-
-
-def _get_jitted_soft_demap():
-    """
-    Returns JIT-compiled maxlog and exact LLR computation functions.
-
-    Functions are defined and compiled lazily on first call to avoid
-    importing JAX at module load time.
-    """
-    if not _JITTED_SOFT_DEMAP:
-        jax, jnp, _ = _get_jax()
-        if jax is None:
-            raise ImportError(
-                "JAX is required for soft demapping. Install with: pip install jax"
-            )
-
-        @jax.jit
-        def maxlog(symbols, constellation, bits_table_t, sigma_sq, log_pmf):
-            """Max-log LLR with PS prior.
-
-            symbols (N,), constellation (M,), bits_table_t (k, M), log_pmf (M,).
-            Uniform case: pass log_pmf = jnp.zeros(M) - constant offset cancels.
-            PS case: log_pmf = log P(sₘ).
-
-            Effective metric: eff_m = d_m/σ² - log P(sₘ)
-            LLR_k = min_{b=1} eff - min_{b=0} eff
-            """
-            distances_sq = (
-                jnp.abs(symbols[:, None] - constellation[None, :]) ** 2
-            )  # (N, M)
-            eff = distances_sq / sigma_sq - log_pmf[None, :]  # (N, M)
-
-            def bit_llr(bit_row):  # (M,)
-                d0 = jnp.where(bit_row == 0, eff, jnp.inf)  # (N, M)
-                d1 = jnp.where(bit_row == 1, eff, jnp.inf)  # (N, M)
-                return jnp.min(d1, axis=1) - jnp.min(d0, axis=1)  # (N,)
-
-            return jax.vmap(bit_llr)(bits_table_t).T  # (k, N) -> (N, k)
-
-        @jax.jit
-        def exact(symbols, constellation, bits_table_t, sigma_sq, log_pmf):
-            """Exact LLR with PS prior via log-sum-exp.
-
-            symbols (N,), constellation (M,), bits_table_t (k, M), log_pmf (M,).
-            Uniform case: pass log_pmf = jnp.zeros(M).
-            PS case: log_pmf = log P(sₘ).
-
-            log_terms_m = log P(sₘ) - d_m/σ²
-            LLR_k = LSE_{b=0}(log_terms) - LSE_{b=1}(log_terms)
-            """
-            distances_sq = (
-                jnp.abs(symbols[:, None] - constellation[None, :]) ** 2
-            )  # (N, M)
-            log_terms = log_pmf[None, :] - distances_sq / sigma_sq  # (N, M)
-
-            def bit_llr(bit_row):  # (M,)
-                e0 = jnp.where(bit_row == 0, log_terms, -jnp.inf)  # (N, M)
-                e1 = jnp.where(bit_row == 1, log_terms, -jnp.inf)  # (N, M)
-                return jax.scipy.special.logsumexp(
-                    e0, axis=1
-                ) - jax.scipy.special.logsumexp(e1, axis=1)  # (N,)
-
-            return jax.vmap(bit_llr)(bits_table_t).T  # (k, N) -> (N, k)
-
-        _JITTED_SOFT_DEMAP["maxlog"] = maxlog
-        _JITTED_SOFT_DEMAP["exact"] = exact
-
-    return _JITTED_SOFT_DEMAP["maxlog"], _JITTED_SOFT_DEMAP["exact"]
+# Upper bound on the (chunk, bits, M/2) intermediate, in elements.  Chunking
+# over symbols keeps peak memory independent of the record length.
+_CHUNK_ELEMENTS = 1 << 23
 
 
 def compute_llr(
     symbols: ArrayType | Signal,
-    modulation: str | None = None,
-    order: int | None = None,
-    noise_var: float | None = None,
+    *,
+    noise_var: float,
+    constellation: Constellation | None = None,
     method: str = "maxlog",
-    unipolar: bool = False,
-    output: str = "jax",
-    pmf: np.ndarray | None = None,
 ) -> ArrayType:
     """
-    Compute Log-Likelihood Ratios (LLRs) for soft-decision decoding.
+    Bit log-likelihood ratios for soft-decision decoding.
 
-    Positive LLR -> bit 0 more likely; negative -> bit 1; magnitude = confidence.
-    JAX JIT-compiled with ``jax.vmap`` over bit positions; fully differentiable.
+    Positive LLR means bit 0 is more likely; the magnitude is the confidence.
+    The constellation's ``pmf`` (if any) enters as the symbol prior.
+    Computed on the input's device in float32, chunked over symbols so memory
+    stays bounded for any record length.  Differentiable LLRs belong to
+    commax.
 
     Parameters
     ----------
     symbols : array_like or Signal
-        Received noisy symbols. Shape: (..., N_symbols). NumPy, CuPy, or JAX.
-        A :class:`Signal` supplies ``resolved_symbols`` and defaults
-        ``modulation``/``order``/``pmf`` from its metadata when not given
-        explicitly.
-    modulation : {"psk", "qam", "ask"}, optional
-        Modulation type.  Required for array input; for :class:`Signal`
-        input, used only as a fallback when the signal's ``mod_scheme`` is
-        unset.
-    order : int, optional
-        Modulation order.  Required for array input; for :class:`Signal`
-        input, used only as a fallback when the signal's ``mod_order`` is
-        unset.
+        Received symbols at one sample per symbol, shape ``(..., N)``, on the
+        constellation's scale.  A :class:`Signal` must be at one sample per
+        symbol.
     noise_var : float
-        Complex noise variance sigma^2 referenced to the normalised
-        constellation (unit avg power).  sigma^2 = 10^(-EsN0_dB / 10).
+        Complex noise variance ``sigma^2 = E[|n|^2]`` on the constellation's
+        scale.  For unit-power constellations, ``sigma^2 = 10^(-EsN0_dB/10)``.
+    constellation : Constellation, optional
+        Points, bit labels and prior.  Defaults to the Signal's
+        ``constellation``; required for array input.
     method : {"maxlog", "exact"}, default "maxlog"
-        LLR algorithm. ``"maxlog"`` is faster; ``"exact"`` uses log-sum-exp.
-    unipolar : bool, default False
-        Use unipolar constellation for ASK/PAM.
-    output : {"jax", "input", "numpy"}, default "jax"
-        Output array type.  ``"jax"`` preserves differentiability;
-        ``"input"`` matches the input backend; ``"numpy"`` forces NumPy.
-    pmf : np.ndarray, optional
-        Symbol PMF of shape ``(order,)`` for PS-QAM.  Pass
-        ``maxwell_boltzmann(order, nu)`` to incorporate the non-uniform prior.
-        ``None`` assumes uniform prior.  For :class:`Signal` input, used
-        only as a fallback when the signal's ``ps_pmf`` is unset.
+        ``"maxlog"`` keeps the largest term; ``"exact"`` uses log-sum-exp.
 
     Returns
     -------
     array_like
-        LLR values. Shape: (..., N_symbols * log2(order)).
-        Array type determined by ``output``.
+        float32 LLRs of shape ``(..., N * k)`` on the input's device; the
+        ``k`` bits of each symbol are adjacent (MSB first).
 
     Notes
     -----
-    Max-Log: LLR_k ≈ (1/sigma^2) * (min_{S_1^k} |r-s|^2 - min_{S_0^k} |r-s|^2).
-    Exact: LLR_k = log sum_{S_0^k} exp(-|r-s|^2/sigma^2) - log sum_{S_1^k} ...
-
-    For PS-QAM, ``symbols`` must be on the same scale as
-    ``gray_constellation`` (unit avg power).  After
-    ``resolve_symbols`` the receiver renormalises;
-    use ``gmi`` instead for correct scale.
+    Max-log: ``LLR_b = max_{s: b=0} m(s) - max_{s: b=1} m(s)``; exact:
+    ``LLR_b = log sum_{s: b=0} e^{m(s)} - log sum_{s: b=1} e^{m(s)}``, with
+    ``m(s) = -|r - s|^2 / sigma^2 + log P(s)``.
     """
-    signal_adapter = adapt_signal(
-        symbols, function_name="compute_llr()", field="resolved_symbols"
-    )
-    symbols = signal_adapter.array
-    if signal_adapter.signal is not None:
-        if symbols is None:
-            raise ValueError(
-                "No resolved symbols available. Call resolve_symbols(sig) first."
-            )
-        modulation = signal_adapter.resolve_optional("mod_scheme", modulation)
-        order = signal_adapter.resolve_optional("mod_order", order)
-        pmf = signal_adapter.resolve_optional("ps_pmf", pmf)
+    from .constellation import Constellation
 
-    if modulation is None or order is None:
-        raise ValueError("compute_llr() requires modulation and order for array input.")
-    if noise_var is None:
-        raise ValueError("compute_llr() requires noise_var.")
-    if symbols is None:
-        raise ValueError("compute_llr() requires resolved symbols.")
-    logger.debug(
-        "Computing LLRs for %s %s-level (method=%s, output=%s).",
-        modulation.upper(),
-        order,
-        method,
-        output,
-    )
+    signal_adapter = adapt_signal(symbols, function_name="compute_llr()")
+    x = signal_adapter.symbol_array()
+    constellation = signal_adapter.resolve_choice("constellation", constellation)
+    if constellation is None:
+        raise ValueError(
+            "compute_llr() needs a constellation: pass constellation= or a "
+            "Signal that has one."
+        )
+    if not isinstance(constellation, Constellation):
+        raise TypeError(
+            "compute_llr(): constellation must be a Constellation, got "
+            f"{type(constellation).__name__}; use e.g. Constellation.qam(16)."
+        )
+    logger.debug("Computing LLRs for %r (method=%s).", constellation, method)
+    return constellation.llr(x, noise_var=noise_var, method=method)
 
-    k = int(np.log2(order))
-    if 2**k != order:
-        raise ValueError(f"Order must be a power of 2, got {order}")
+
+_NUMBA_LLR: dict[str, Callable[..., None]] = {}
+
+
+def _get_numba_llr() -> Callable[..., None]:
+    """Numba LLR kernel for the CPU, parallel over symbols.
+
+    Per symbol: the M metrics ``-|x - s_m|^2 / sigma^2 + log P(s_m)`` once,
+    then per bit the max (max-log) or the log-sum-exp (exact) over the
+    points whose bit is 0, minus the same over those whose bit is 1.  float32,
+    as the NumPy path; it replaces that path's (chunk, k, M/2) intermediates.
+    """
+    if "llr" not in _NUMBA_LLR:
+        import numba
+
+        @numba.njit(cache=True, fastmath=True, nogil=True, parallel=True)
+        def llr_kernel(
+            x_re: np.ndarray,
+            x_im: np.ndarray,
+            c_re: np.ndarray,
+            c_im: np.ndarray,
+            log_pmf: np.ndarray,
+            idx0: np.ndarray,
+            idx1: np.ndarray,
+            inv_s2: np.float32,
+            exact: bool,
+            out: np.ndarray,
+        ) -> None:
+            n = x_re.shape[0]
+            M = c_re.shape[0]
+            k, half = idx0.shape
+            for i in numba.prange(n):  # type: ignore[attr-defined,no-untyped-call]
+                metric = np.empty(M, dtype=np.float32)
+                for m in range(M):
+                    dr = x_re[i] - c_re[m]
+                    di = x_im[i] - c_im[m]
+                    metric[m] = -(dr * dr + di * di) * inv_s2 + log_pmf[m]
+                for b in range(k):
+                    p0 = metric[idx0[b, 0]]
+                    p1 = metric[idx1[b, 0]]
+                    for j in range(1, half):
+                        v0 = metric[idx0[b, j]]
+                        v1 = metric[idx1[b, j]]
+                        if v0 > p0:
+                            p0 = v0
+                        if v1 > p1:
+                            p1 = v1
+                    if exact:
+                        s0 = np.float32(0.0)
+                        s1 = np.float32(0.0)
+                        for j in range(half):
+                            s0 += np.exp(metric[idx0[b, j]] - p0)
+                            s1 += np.exp(metric[idx1[b, j]] - p1)
+                        out[i, b] = (np.log(s0) + p0) - (np.log(s1) + p1)
+                    else:
+                        out[i, b] = p0 - p1
+
+        _NUMBA_LLR["llr"] = llr_kernel
+    kernel: Callable[..., None] = _NUMBA_LLR["llr"]
+    return kernel
+
+
+def _llr(
+    symbols: ArrayType,
+    points: np.ndarray,
+    bit_labels: np.ndarray,
+    pmf: np.ndarray | None,
+    noise_var: float,
+    method: str,
+) -> ArrayType:
+    """LLRs of ``symbols`` against host ``points`` labelled by ``bit_labels``.
+
+    Shared by :func:`compute_llr` and :meth:`Constellation.llr`.  Returns
+    float32 LLRs of shape ``(..., N * k)`` on the input's device.
+    """
     if method not in ("maxlog", "exact"):
         raise ValueError(f"Unknown method: {method}. Use 'maxlog' or 'exact'.")
-    if output not in ("jax", "input", "numpy"):
-        raise ValueError(f"Unknown output: {output!r}. Use 'jax', 'input', or 'numpy'.")
-
-    # Convert to JAX if not already
-    jax, jnp, _ = _get_jax()
-    if jax is None:
-        raise ImportError(
-            "JAX is required for LLR computation. Install with: pip install jax"
-        )
-
-    # Build constellation and bits table on CPU once - shared by both paths.
+    order, k = bit_labels.shape
+    symbols, xp, _ = dispatch(symbols)
     is_complex = symbols.dtype.kind == "c"
-    const = gray_constellation(modulation, order, unipolar=unipolar).astype(
-        "complex64" if is_complex else "float32"
+    sym_flat = symbols.reshape(-1).astype(xp.complex64 if is_complex else xp.float32)
+
+    const = xp.asarray(points.astype(np.complex64 if is_complex else np.float32))
+    # Column indices of the M/2 points whose bit b is 0 (resp. 1): (k, M/2).
+    idx0 = xp.asarray(
+        np.stack([np.flatnonzero(bit_labels[:, b] == 0) for b in range(k)])
     )
-    bits_table_np = unpack_bits(np.arange(order, dtype="int32"), k).astype("int32").T
-    sigma_np = np.float32(max(noise_var, 1e-20))
+    idx1 = xp.asarray(
+        np.stack([np.flatnonzero(bit_labels[:, b] == 1) for b in range(k)])
+    )
 
-    # Build log_pmf: zeros = uniform (constant offset cancels in LLR difference).
+    inv_sigma2 = np.float32(1.0 / max(noise_var, 1e-20))
     if pmf is not None:
-        log_pmf_np = np.log(np.clip(np.asarray(pmf, dtype=np.float32), 1e-40, None))
+        log_pmf = np.log(np.clip(np.asarray(pmf, dtype=np.float64), 1e-40, None))
+        log_pmf_dev = xp.asarray(log_pmf.astype(np.float32))
     else:
-        log_pmf_np = np.zeros(order, dtype=np.float32)
+        log_pmf_dev = None  # uniform prior: a constant that cancels
 
-    # JAX path
-    jax_module, jnp, _ = _get_jax()
-    if is_jax_array(symbols):
-        assert jnp is not None
-        if hasattr(symbols, "shape"):
-            original_shape = symbols.shape
+    n = sym_flat.shape[0]
+    llrs = xp.empty((n, k), dtype=xp.float32)
+    if xp is np:
+        # CPU: one parallel pass, no (chunk, k, M/2) intermediates.
+        zeros = np.zeros(order, dtype=np.float32)
+        _get_numba_llr()(
+            np.ascontiguousarray(sym_flat.real, dtype=np.float32),
+            np.ascontiguousarray(
+                sym_flat.imag if is_complex else np.zeros(n), dtype=np.float32
+            ),
+            np.ascontiguousarray(np.real(points), dtype=np.float32),
+            np.ascontiguousarray(
+                np.imag(points) if is_complex else zeros, dtype=np.float32
+            ),
+            zeros if log_pmf_dev is None else log_pmf_dev,
+            np.ascontiguousarray(idx0, dtype=np.int64),
+            np.ascontiguousarray(idx1, dtype=np.int64),
+            inv_sigma2,
+            method == "exact",
+            llrs,
+        )
+        return llrs.reshape((*symbols.shape[:-1], symbols.shape[-1] * k))
+    chunk = max(1, _CHUNK_ELEMENTS // (k * order))
+    for n0 in range(0, n, chunk):
+        x = sym_flat[n0 : n0 + chunk]
+        diff = x[:, None] - const[None, :]  # (chunk, M)
+        # log-likelihood (up to a shared constant): -|x - s|^2/sigma^2 + log P(s)
+        metric = (
+            -(diff.real**2 + diff.imag**2) * inv_sigma2
+            if is_complex
+            else -(diff**2) * inv_sigma2
+        )
+        if log_pmf_dev is not None:
+            metric = metric + log_pmf_dev
+        m0 = metric[:, idx0]  # (chunk, k, M/2)
+        m1 = metric[:, idx1]
+        if method == "maxlog":
+            llrs[n0 : n0 + chunk] = m0.max(axis=-1) - m1.max(axis=-1)
         else:
-            # Fallback for JAX tracers or odd objects
-            original_shape = jnp.shape(symbols)
+            llrs[n0 : n0 + chunk] = _logsumexp(m0, xp) - _logsumexp(m1, xp)
 
-        jax_symbols_flat = symbols.flatten()
-        constellation_jax = jnp.asarray(const)
-        bits_table_t_jax = jnp.asarray(bits_table_np)
-        sigma_sq = jnp.asarray(sigma_np)
-        log_pmf_jax = jnp.asarray(log_pmf_np)
+    out_shape = (*symbols.shape[:-1], symbols.shape[-1] * k)
+    return llrs.reshape(out_shape)
 
-    # NumPy/CuPy path
-    else:
-        symbols, xp, _ = dispatch(symbols)
-        original_shape = symbols.shape
 
-        jax_symbols_flat = to_jax(
-            symbols, dtype="complex64" if is_complex else "float32"
-        ).flatten()
-        device = jax_symbols_flat.device
-
-        assert jax_module is not None
-        assert jnp is not None
-        # device_put accepts NumPy arrays directly - no intermediate jnp.asarray needed
-        constellation_jax = jax_module.device_put(const, device)
-        bits_table_t_jax = jax_module.device_put(bits_table_np, device)
-        sigma_sq = jax_module.device_put(jnp.asarray(sigma_np), device)
-        log_pmf_jax = jax_module.device_put(log_pmf_np, device)
-
-    # Compute LLRs via JIT-compiled kernels
-    maxlog_fn, exact_fn = _get_jitted_soft_demap()
-    if method == "maxlog":
-        llrs = maxlog_fn(
-            jax_symbols_flat, constellation_jax, bits_table_t_jax, sigma_sq, log_pmf_jax
-        )
-    else:
-        llrs = exact_fn(
-            jax_symbols_flat, constellation_jax, bits_table_t_jax, sigma_sq, log_pmf_jax
-        )
-
-    # Reshape to match input structure
-    flat_llrs = llrs.flatten()
-    if len(original_shape) > 1:
-        new_shape = list(original_shape)
-        new_shape[-1] = new_shape[-1] * k
-        flat_llrs = flat_llrs.reshape(new_shape)
-
-    # Convert output to the requested backend
-    if output == "jax":
-        return flat_llrs
-    elif output == "numpy":
-        return np.asarray(flat_llrs)
-    else:  # output == "input"
-        if is_jax_array(symbols):
-            return flat_llrs  # already JAX
-        # xp is NumPy or CuPy - convert via NumPy intermediate
-        return xp.asarray(np.asarray(flat_llrs))
+def _logsumexp(a: ArrayType, xp: ModuleType) -> ArrayType:
+    """Stable log-sum-exp over the last axis."""
+    peak = a.max(axis=-1, keepdims=True)
+    return xp.log(xp.exp(a - peak).sum(axis=-1)) + peak[..., 0]

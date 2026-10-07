@@ -29,6 +29,8 @@ import pytest
 from workloads import mimo_equalizer_workload
 
 from commkit.equalization import block_lms
+from commkit.mapping import Constellation
+from commkit.recovery import BPS, CycleSlip
 
 ROUNDS = dict(rounds=3, warmup_rounds=1, iterations=1)
 N_SYM = 100_000
@@ -38,8 +40,18 @@ N_TRAIN_DD = 512
 
 CPR_CONFIGS = [
     ("no-cpr", dict()),
-    ("bps", dict(cpr_type="bps")),
-    ("bps+cs", dict(cpr_type="bps", cpr_cycle_slip_correction=True)),
+    (
+        "bps",
+        dict(
+            cpr=BPS(),
+        ),
+    ),
+    (
+        "bps+cs",
+        dict(
+            cpr=BPS(cycle_slip=CycleSlip()),
+        ),
+    ),
 ]
 
 
@@ -57,8 +69,7 @@ def _bench_block_lms(benchmark, xp, sync, cpr_kwargs, block_size, n_train=None):
             t,
             num_taps=21,
             sps=2,
-            modulation="qam",
-            order=16,
+            constellation=Constellation.qam(16),
             block_size=block_size,
             **cpr_kwargs,
         )

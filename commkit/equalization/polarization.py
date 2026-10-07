@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from collections.abc import Sequence
+from dataclasses import dataclass
 from typing import Any, cast, overload
 
 import numpy as np
@@ -12,6 +13,13 @@ from ..core._signal_adapter import adapt_signal
 from ..core.signal import Signal
 from ..filtering import fir_filter, fir_taps
 from ..logger import logger
+
+__all__ = [
+    "JonesTrack",
+    "apply_interpolated_matrix",
+    "demultiplex_polarization_tones_dynamic",
+    "demultiplex_polarization_tones_static",
+]
 
 # -----------------------------------------------------------------------------
 # TIME-VARYING MATRIX APPLY (Signal-aware)
@@ -109,10 +117,33 @@ def apply_interpolated_matrix(
 # TONE-BASED POLARIZATION DEMULTIPLEXING (Signal-aware)
 # -----------------------------------------------------------------------------
 
+
+@dataclass(frozen=True)
+class JonesTrack:
+    """Time-varying unmixing estimate of
+    :func:`demultiplex_polarization_tones_dynamic`.
+
+    Attributes
+    ----------
+    matrix_grid : array_like
+        ``(G, K, C)`` stack of unmixing matrices (``complex128``) at the grid
+        points; apply with :func:`apply_interpolated_matrix`.
+    grid_positions : array_like
+        ``(G,)`` sample indices (``float64``) of the grid points.
+    valid : slice
+        Samples of the record that the demuxed output keeps (all of them
+        unless ``trim_edges=True``).
+    """
+
+    matrix_grid: ArrayType
+    grid_positions: ArrayType
+    valid: slice
+
+
 _EXTRACT_CHUNK = 1 << 20  # samples per block in the chunked tone-phasor GEMM
 
 
-def _tone_phasor_matrix(xw: ArrayType, freqs, sampling_rate: float) -> ArrayType:
+def _tone_phasor_matrix(xw: ArrayType, freqs: Any, sampling_rate: float) -> ArrayType:
     r"""Tone-phasor matrix ``T[i, j] = (1/N) Σ_n xw[i, n]·exp(-j2π f_j n/fs)``.
 
     The whole-record accumulation is precision-sensitive (it feeds a matrix
@@ -146,13 +177,13 @@ def _tone_phasor_matrix(xw: ArrayType, freqs, sampling_rate: float) -> ArrayType
 def _refine_tone_frequencies(
     xw: ArrayType,
     T: ArrayType,
-    freqs,
+    freqs: Any,
     sampling_rate: float,
     search_band: float,
 ) -> list[float]:
     """Sub-bin refine each tone on the receive channel where it is strongest.
 
-    Two stages, replacing the per-tone ``find_bias_tone`` calls (each of which
+    Two stages, replacing the per-tone the ``BiasTone`` estimator calls (each of which
     ran its own full-record, power-of-two zero-padded FFT):
 
     1. **Coarse**: one batched FFT (working precision) of only the *unique*
@@ -203,7 +234,7 @@ def _refine_tone_frequencies(
 def _jones_at_grid_points(
     xw: ArrayType,
     h: np.ndarray,
-    freqs,
+    freqs: Any,
     grid_np: np.ndarray,
     sampling_rate: float,
 ) -> ArrayType:
@@ -299,9 +330,9 @@ def _jones_at_grid_points(
 
 def demultiplex_polarization_tones_static(
     samples: ArrayType | Signal,
-    sampling_rate: float | None = None,
-    tone_frequencies: Sequence[float] | None = None,
     *,
+    tone_frequencies: Sequence[float],
+    sampling_rate: float | None = None,
     refine_tones: bool = True,
     search_band: float | None = None,
     normalize: bool = True,
@@ -352,15 +383,14 @@ def demultiplex_polarization_tones_static(
         Received MIMO samples. Shape ``(C, N)`` - time on the last axis.  A
         :class:`Signal` returns a new demultiplexed :class:`Signal`.
     sampling_rate : float, optional
-        Sampling rate f_s in Hz.  Required for array input; ignored for
-        :class:`Signal` input, which always uses the signal's own
-        ``sampling_rate``.
+        Sampling rate f_s in Hz.  Taken from the Signal; required for array
+        input.  A value that disagrees with the Signal raises.
     tone_frequencies : sequence of float
         The ``K`` distinct per-stream tone frequencies in Hz (as added at the
         TX, in transmitted-stream order).  Require ``K <= C``.  Output row ``j``
         corresponds to ``tone_frequencies[j]``.
     refine_tones : bool, default True
-        If ``True``, sub-bin-refine each tone centre with ``find_bias_tone``
+        If ``True``, sub-bin-refine each tone centre with the ``BiasTone`` estimator
         (on the receive channel where that tone is strongest) before extraction,
         absorbing a residual carrier frequency offset that has dragged the tone
         off its nominal bin.  If ``False``, extract exactly at
@@ -406,11 +436,7 @@ def demultiplex_polarization_tones_static(
         samples, function_name="demultiplex_polarization_tones_static()"
     )
     samples = signal_adapter.array
-    sampling_rate = signal_adapter.resolve_required("sampling_rate", sampling_rate)
-    if tone_frequencies is None:
-        raise ValueError(
-            "demultiplex_polarization_tones_static() requires tone_frequencies."
-        )
+    sampling_rate = signal_adapter.resolve_fact("sampling_rate", sampling_rate)
 
     samples, xp, _ = dispatch(samples)
     if samples.ndim != 2:
@@ -437,7 +463,7 @@ def demultiplex_polarization_tones_static(
                 f"(±{nyq:.3g}) Hz."
             )
 
-    # The KxK inverse is precision-sensitive (CLAUDE.md) and stays in
+    # The KxK inverse is precision-sensitive and stays in
     # complex128, but every O(N) pass runs in the signal's working precision:
     # the tone phasors are accumulated block-wise with complex128 partials
     # (_tone_phasor_matrix), and the unmix is a well-conditioned per-sample
@@ -493,9 +519,9 @@ def demultiplex_polarization_tones_static(
 
 def demultiplex_polarization_tones_dynamic(
     samples: ArrayType | Signal,
-    sampling_rate: float | None = None,
-    tone_frequencies: Sequence[float] | None = None,
     *,
+    tone_frequencies: Sequence[float],
+    sampling_rate: float | None = None,
     track_bandwidth: float,
     num_taps: int | None = None,
     grid_step: int | None = None,
@@ -505,7 +531,7 @@ def demultiplex_polarization_tones_dynamic(
     trim_edges: bool = False,
     return_matrix: bool = False,
     apply: bool = True,
-) -> ArrayType | tuple[Any, ...]:
+) -> ArrayType | Signal | JonesTrack | tuple[ArrayType | Signal, JonesTrack]:
     r"""
     Time-varying polarization demux from distinct per-stream CW pilot tones.
 
@@ -555,9 +581,8 @@ def demultiplex_polarization_tones_dynamic(
         :class:`Signal` returns a new demultiplexed :class:`Signal` (when
         ``apply=True``).
     sampling_rate : float, optional
-        Sampling rate f_s in Hz.  Required for array input; ignored for
-        :class:`Signal` input, which always uses the signal's own
-        ``sampling_rate``.
+        Sampling rate f_s in Hz.  Taken from the Signal; required for array
+        input.  A value that disagrees with the Signal raises.
     tone_frequencies : sequence of float
         The ``K`` distinct per-stream tone frequencies in Hz (as added at the
         TX, in transmitted-stream order).  Require ``K <= C``.  Output row ``j``
@@ -577,7 +602,7 @@ def demultiplex_polarization_tones_dynamic(
         the tracked process ~4x.  ``W`` is linearly interpolated between grid
         points, so a finer grid costs more inverses but tracks marginally better.
     refine_tones : bool, default True
-        If ``True``, sub-bin-refine each tone centre with ``find_bias_tone`` (on
+        If ``True``, sub-bin-refine each tone centre with the ``BiasTone`` estimator (on
         the receive channel where it is strongest) before mixing down, absorbing
         a residual carrier frequency offset.
     search_band : float, optional
@@ -594,43 +619,34 @@ def demultiplex_polarization_tones_dynamic(
         samples of each record end (the convolution averages in zero-padding
         there).  The **data is never filtered**, so timing is unaffected, but
         those edge samples carry residual crosstalk.  If ``True``, drop them:
-        ``demuxed`` is returned as the reliable interior ``(K, N - 2·g)`` with
-        ``g = num_taps//2``, together with a ``valid`` slice giving the retained
-        sample range in **original** coordinates (so full-length references align
-        as ``ref[..., valid]``).
+        ``demuxed`` is the reliable interior ``(K, N - 2·g)`` with
+        ``g = num_taps//2``; ``JonesTrack.valid`` gives the retained sample range
+        in **original** coordinates (so references align as ``ref[..., valid]``).
+        Array input only: trimming samples would misalign a Signal's reference.
     return_matrix : bool, default False
-        If ``True``, also return the decimated unmixer stack ``W_grid`` and the
-        sample positions ``grid_positions`` it was evaluated at (suitable for
-        seeding a time-varying butterfly equalizer).  ``W_grid`` / ``grid_positions``
-        always span the **full** record, even when ``trim_edges=True``.
+        If ``True``, also return the :class:`JonesTrack`: the decimated unmixer
+        stack, the sample positions it was evaluated at (suitable for seeding a
+        time-varying butterfly equalizer) and the ``valid`` range.  The stack
+        always spans the **full** record, even when ``trim_edges=True``.
     apply : bool, default True
-        If ``True`` (default), interpolate ``W(n)`` to full rate and apply it,
-        returning the demuxed signal as documented below.  If ``False``,
-        **matrix-only mode**: skip the ``O(N)`` interpolate-and-apply entirely and
-        return just ``(W_grid, grid_positions)`` (``return_matrix`` is implied).
-        Use this when only the unmixer stack is needed - e.g. to make a
-        PDL/unitarity decision and then apply a *different* factor (a polar unitary
-        ``Qᴴ(n)``) without paying for a demux that would be discarded.  ``normalize``
-        and ``trim_edges`` act on the applied signal, so they have **no effect**
-        when ``apply=False``.
+        If ``True`` (default), interpolate ``W(n)`` to full rate and apply it.
+        If ``False``, **matrix-only mode**: skip the ``O(N)`` interpolate-and-apply
+        entirely and return just the :class:`JonesTrack`.  Use this when only the
+        unmixer stack is needed - e.g. to make a PDL/unitarity decision and then
+        apply a *different* factor (a polar unitary ``Qᴴ(n)``) without paying
+        for a demux that would be discarded.  ``normalize`` and ``trim_edges``
+        act on the applied signal, so they have **no effect** when
+        ``apply=False``.
 
     Returns
     -------
-    demuxed : array_like
+    demuxed : array_like or Signal
         Demultiplexed streams. Same complex dtype and backend as the input; row
         ``j`` carried ``tone_frequencies[j]``.  Shape ``(K, N)``, or
-        ``(K, N - 2·(num_taps//2))`` when ``trim_edges=True``.  **Omitted** when
-        ``apply=False`` (the return is then ``(W_grid, grid_positions)``).
-    valid : slice, optional
-        Returned only if ``trim_edges=True``: the ``slice(g, N - g)`` of original
-        sample indices retained in ``demuxed`` (``g = num_taps//2``).  Always
-        precedes ``W_grid`` in the output tuple.
-    W_grid : array_like, optional
-        Returned only if ``return_matrix=True``: the ``(G, K, C)`` stack of
-        per-grid-point unmixing matrices (``complex128``).
-    grid_positions : array_like, optional
-        Returned only if ``return_matrix=True``: the ``(G,)`` sample indices
-        (``float64``) at which ``W_grid`` was evaluated.
+        ``(K, N - 2·(num_taps//2))`` when ``trim_edges=True``.
+    track : JonesTrack
+        With ``return_matrix=True`` the return is ``(demuxed, track)``; with
+        ``apply=False`` it is ``track`` alone.
 
     Raises
     ------
@@ -648,11 +664,7 @@ def demultiplex_polarization_tones_dynamic(
         samples, function_name="demultiplex_polarization_tones_dynamic()"
     )
     samples = signal_adapter.array
-    sampling_rate = signal_adapter.resolve_required("sampling_rate", sampling_rate)
-    if tone_frequencies is None:
-        raise ValueError(
-            "demultiplex_polarization_tones_dynamic() requires tone_frequencies."
-        )
+    sampling_rate = signal_adapter.resolve_fact("sampling_rate", sampling_rate)
 
     samples, xp, _ = dispatch(samples)
     if samples.ndim != 2:
@@ -670,6 +682,11 @@ def demultiplex_polarization_tones_dynamic(
         raise ValueError(
             f"got K={K} tones but only C={C} receive channels; need K <= C to "
             "unmix (one tone per transmitted stream)."
+        )
+    if trim_edges and signal_adapter.signal is not None:
+        raise ValueError(
+            "demultiplex_polarization_tones_dynamic(): trim_edges drops samples "
+            "and would misalign the Signal's reference; use array input."
         )
     if not (track_bandwidth > 0):
         raise ValueError(f"track_bandwidth must be positive; got {track_bandwidth}.")
@@ -698,7 +715,12 @@ def demultiplex_polarization_tones_dynamic(
         num_taps += 1 - (num_taps % 2)  # nearest odd >= value
         num_taps = max(num_taps, 3)
     num_taps = min(int(num_taps), (N // 2) * 2 - 1)
-    h = fir_taps(sampling_rate, num_taps, track_bandwidth, btype="low")
+    h = fir_taps(
+        sampling_rate=sampling_rate,
+        num_taps=num_taps,
+        cutoff=track_bandwidth,
+        btype="low",
+    )
 
     # Edge guard: 'same' convolution corrupts num_taps//2 samples at each end.
     # num_taps is clipped < N above, so the retained interior is always non-empty.
@@ -768,9 +790,7 @@ def demultiplex_polarization_tones_dynamic(
         carrier = xp.exp(-1j * ph.astype(real_dtype))  # (K, N) working precision
         mixed = xw[:, None, :] * carrier[None, :, :]  # (C, K, N)
         # One batched linear-phase FIR over (C·K) rows instead of K calls.
-        T_t = cast(ArrayType, fir_filter(mixed.reshape(C * K, N), h, axis=-1)).reshape(
-            C, K, N
-        )
+        T_t = cast(ArrayType, fir_filter(mixed.reshape(C * K, N), h)).reshape(C, K, N)
         idx = xp.asarray(grid_np)
         Tg = xp.moveaxis(T_t[:, :, idx], 2, 0).astype(xp.complex128)  # (G, C, K)
     Th = xp.conj(xp.swapaxes(Tg, -1, -2))  # (G, K, C)
@@ -799,7 +819,7 @@ def demultiplex_polarization_tones_dynamic(
             K,
             N,
         )
-        return Wg, grid_positions
+        return JonesTrack(Wg, grid_positions, slice(0, N))
 
     # Interpolate W(n) to full rate and apply it (block-vectorised GEMMs in the
     # shared helper) as a fixed forward pass.
@@ -832,11 +852,7 @@ def demultiplex_polarization_tones_dynamic(
         N,
     )
 
-    out: tuple[Any, ...] = (demuxed,)
-    if trim_edges:
-        out = out + (valid,)
+    wrapped = signal_adapter.wrap_samples(demuxed)
     if return_matrix:
-        out = out + (Wg, grid_positions)
-    if signal_adapter.signal is not None:
-        out = (signal_adapter.wrap_samples(out[0]), *out[1:])
-    return out[0] if len(out) == 1 else out
+        return wrapped, JonesTrack(Wg, grid_positions, valid)
+    return wrapped

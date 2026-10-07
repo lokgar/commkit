@@ -4,6 +4,7 @@ from typing import Any
 
 import matplotlib.pyplot as plt
 import numpy as np
+from matplotlib.collections import LineCollection
 
 from ..backend import dispatch, to_device
 from ..core._signal_adapter import adapt_signal, require_integer_sps
@@ -11,13 +12,29 @@ from ..logger import logger
 from ..smoothing import smooth_density_2d
 from .theme import _grid_figsize
 
+__all__ = ["plot_eye_diagram"]
+
+
+def _interp_rows(traces: Any, width: int, xp: Any) -> Any:
+    """Each row linearly resampled to ``width`` points over the same span.
+
+    ``numpy.interp`` of every row at once: gather the two neighbours of each
+    new position and blend them (a Python loop over rows is one launch per
+    trace on the GPU).
+    """
+    n = traces.shape[-1]
+    x_new = xp.linspace(0, n - 1, width, dtype=xp.float64)
+    i0 = xp.minimum(xp.floor(x_new).astype(xp.int64), n - 2)
+    frac = (x_new - i0).astype(traces.real.dtype)
+    return traces[:, i0] * (1 - frac) + traces[:, i0 + 1] * frac
+
 
 def _plot_eye_traces(
     samples: Any,
     sps: float,
     num_symbols: int,
     ax: Any,
-    type: str,
+    kind: str,
     title: str | None,
     **kwargs: Any,
 ) -> None:
@@ -34,7 +51,7 @@ def _plot_eye_traces(
         Number of symbol periods per window.
     ax : matplotlib.axes.Axes
         The axis to plot on.
-    type : {"line", "hist"}
+    kind : {"line", "hist"}
         Plotting strategy.
     title : str, optional
         Title for the subplot.
@@ -44,7 +61,7 @@ def _plot_eye_traces(
     samples, xp, _ = dispatch(samples)
 
     # Normalize to max amplitude 1.0
-    from ..helpers import normalize
+    from ..math import normalize
 
     samples = normalize(samples, mode="peak")
 
@@ -58,7 +75,7 @@ def _plot_eye_traces(
     # We slide by 1 symbol period (sps)
     num_traces = (samples.shape[0] - trace_len) // int(sps) + 1
 
-    if type == "line":
+    if kind == "line":
         # Limit traces for performance/visuals
         max_traces = 5000
         if num_traces > max_traces:
@@ -80,21 +97,22 @@ def _plot_eye_traces(
         # Gather samples
         traces = samples[gather_indices]  # (num_traces, trace_len)
 
-        # Transpose for plotting
-        traces = traces.T  # (trace_len, num_traces)
-
-        # Move to cpu for plotting
-        traces = to_device(traces, "cpu")
-
-        # Time axis in symbols
+        traces = np.asarray(to_device(traces, "cpu"))
         t = np.linspace(0, num_symbols, trace_len, endpoint=True)
 
-        line_kwargs = {"alpha": 0.2, "linewidth": 1}
+        # One LineCollection instead of one Line2D per trace: a single artist
+        # draws thousands of traces far faster.
+        segments = np.empty((traces.shape[0], trace_len, 2))
+        segments[:, :, 0] = t
+        segments[:, :, 1] = traces
+        line_kwargs: dict[str, Any] = {"alpha": 0.2, "linewidth": 1, "color": "C0"}
         line_kwargs.update(kwargs)
+        ax.add_collection(LineCollection(list(segments), **line_kwargs))
+        y_lo, y_hi = float(traces.min()), float(traces.max())
+        pad = 0.05 * (y_hi - y_lo) or 1.0
+        ax.set_ylim(y_lo - pad, y_hi + pad)
 
-        ax.plot(t, traces, color="C0", **line_kwargs)
-
-    elif type == "hist":
+    elif kind == "hist":
         max_traces_hist = 20000
         if num_traces > max_traces_hist:
             skip = num_traces // max_traces_hist
@@ -110,10 +128,7 @@ def _plot_eye_traces(
         # Interpolate traces
         target_width = 500
         if trace_len < target_width:
-            x_old = xp.arange(trace_len, dtype=float)
-            x_new = xp.linspace(0, trace_len - 1, target_width, dtype=float)
-
-            traces = xp.stack([xp.interp(x_new, x_old, row) for row in traces])
+            traces = _interp_rows(traces, target_width, xp)
             trace_len = target_width
 
         # Create time matrix
@@ -174,7 +189,7 @@ def _plot_eye_traces(
         ax.imshow(h, **imshow_kwargs)  # type: ignore[arg-type]
 
     else:
-        raise ValueError(f"Unknown type: {type}. Supported: 'line', 'hist'")
+        raise ValueError(f"Unknown kind: {kind}. Supported: 'line', 'hist'")
 
     ax.set_xlabel("Time [Symbol Periods]")
     ax.set_ylabel("Amplitude")
@@ -185,10 +200,11 @@ def _plot_eye_traces(
 
 def plot_eye_diagram(
     samples: Any,
+    *,
     sps: float | None = None,
     ax: Any | tuple[Any, Any] | None = None,
     num_symbols: int = 2,
-    type: str = "hist",
+    kind: str = "hist",
     title: str | None = "Eye Diagram",
     vmin: float | None = None,
     vmax: float | None = None,
@@ -206,14 +222,15 @@ def plot_eye_diagram(
     ----------
     samples : array_like or Signal
         Input signal samples. Usually matched-filtered.
-    sps : float
-        Samples per symbol (must be an integer for windowing).
+    sps : float, optional
+        Samples per symbol (a fact, an integer for windowing): taken from a
+        Signal, required for arrays.
     ax : matplotlib.axes.Axes or array_like, optional
         Target axis or list of axes. For complex signals, two axes are
         required per channel (I and Q).
     num_symbols : int, default 2
         Number of symbol periods TO display in each eye window.
-    type : {"hist", "line"}, default "hist"
+    kind : {"hist", "line"}, default "hist"
         Visualization mode:
         - "hist": 2D density histogram (recommended for noisy signals).
         - "line": Vectorized overlapping traces (classic look).
@@ -239,16 +256,39 @@ def plot_eye_diagram(
     and matched-filtered before plotting to produce a clear "eye".
     """
     signal_adapter = adapt_signal(samples, function_name="plot_eye_diagram()")
-    samples = signal_adapter.array
-    if signal_adapter.signal is not None:
-        sps = signal_adapter.resolve_required("sps", sps)
+    x = signal_adapter.array
+    sps = require_integer_sps(
+        signal_adapter.resolve_fact("sps", sps), "plot_eye_diagram()"
+    )
+    return _plot_eye_diagram(
+        x,
+        sps=sps,
+        ax=ax,
+        num_symbols=num_symbols,
+        kind=kind,
+        title=title,
+        vmin=vmin,
+        vmax=vmax,
+        show=show,
+        **kwargs,
+    )
 
-    if sps is None:
-        raise ValueError("plot_eye_diagram() requires sps for array input.")
 
-    logger.debug("Generating eye diagram (%s mode).", type)
-
-    sps = require_integer_sps(sps, "plot_eye_diagram()")
+def _plot_eye_diagram(
+    samples: Any,
+    *,
+    sps: Any,
+    ax: Any,
+    num_symbols: Any,
+    kind: Any,
+    title: Any,
+    vmin: Any,
+    vmax: Any,
+    show: Any,
+    **kwargs: Any,
+) -> tuple[Any, Any] | None:
+    """Render array data for :func:`plot_eye_diagram` (the public boundary resolves the Signal)."""
+    logger.debug("Generating eye diagram (%s mode).", kind)
 
     # Dispatch to check backend
     samples, xp, _ = dispatch(samples)
@@ -296,12 +336,12 @@ def plot_eye_diagram(
             ch_title = f"{title} (Ch {i})" if title else f"Channel {i}"
 
             # Recursive call with 1D sample
-            plot_eye_diagram(
+            _plot_eye_diagram(
                 channel_samples,
                 sps=sps,
                 ax=ch_axes,
                 num_symbols=num_symbols,
-                type=type,
+                kind=kind,
                 title=ch_title,
                 vmin=vmin,
                 vmax=vmax,
@@ -342,7 +382,7 @@ def plot_eye_diagram(
             sps,
             num_symbols,
             ax[0],
-            type,
+            kind,
             title=f"{title} (I)" if title else "I-Channel",
             **kwargs,
         )
@@ -353,7 +393,7 @@ def plot_eye_diagram(
             sps,
             num_symbols,
             ax[1],
-            type,
+            kind,
             title=f"{title} (Q)" if title else "Q-Channel",
             **kwargs,
         )
@@ -368,7 +408,7 @@ def plot_eye_diagram(
             sps,
             num_symbols,
             target_ax,
-            type,
+            kind,
             title=title,
             **kwargs,
         )

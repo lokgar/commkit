@@ -5,10 +5,10 @@ from typing import Any
 import matplotlib.pyplot as plt
 import numpy as np
 
-from .. import helpers
 from ..backend import dispatch, to_device
 from ..core._signal_adapter import adapt_signal
 from ..logger import logger
+from ..math import rms
 from ..smoothing import smooth_density_2d
 from .theme import (
     _create_subplot_grid,
@@ -16,76 +16,52 @@ from .theme import (
     _square_figsize,
 )
 
+__all__ = ["plot_constellation", "plot_ideal_constellation"]
+
 
 def plot_ideal_constellation(
-    modulation: str,
-    order: int,
-    pmf: Any | None = None,
-    nu: float | None = None,
+    constellation: Any,
+    *,
     ax: Any | None = None,
     title: str | None = None,
     size: float | None = None,
     show: bool = False,
-    unipolar: bool | None = None,
 ) -> tuple[Any, Any] | None:
     """
-    Plots the ideal constellation diagram for a modulation format.
+    Plots the points of a constellation with their bit labels.
 
-    Draws theoretical symbol points with their associated Gray-coded bit
-    sequences. Includes concentric rings and center axes for reference.
-
-    For PS-QAM, pass either ``pmf`` or ``nu`` (not both) to activate
-    probability-weighted rendering: each marker's **area** and **colour**
-    encode the symbol probability under the Maxwell-Boltzmann distribution.
-    Inner (more probable) points appear larger and warmer.  Bit-label
-    annotations are suppressed to keep the plot readable at high orders.
+    Includes concentric rings and center axes for reference.  A shaped
+    constellation (one with a ``pmf``) is drawn probability-weighted: each
+    marker's colour encodes the symbol probability, and the bit labels are
+    left out to keep high orders readable.
 
     Parameters
     ----------
-    modulation : {"psk", "qam", "ask", "pam"}
-        Modulation scheme identifier.
-    order : int
-        Modulation order (e.g., 4, 16, 64).
-    pmf : array-like of float, optional
-        Symbol PMF of shape ``(M,)`` for PS-QAM (from ``maxwell_boltzmann``).
-        Mutually exclusive with ``nu``.
-    nu : float, optional
-        Maxwell-Boltzmann shaping parameter nu >= 0 for QAM.  The PMF is
-        computed automatically via ``maxwell_boltzmann``.
-        nu = 0 gives a uniform distribution (equal-sized markers).
-        Mutually exclusive with ``pmf``.
+    constellation : Constellation
+        The constellation, e.g. ``Constellation.qam(16)`` or
+        ``Constellation.qam(64).shaped(nu=0.05)``.
     ax : matplotlib.axes.Axes, optional
         Target axis.
     title : str, optional
-        Plot title.
+        Plot title; defaults to the constellation's description.
     size : float, optional
         Figure size (square), in inches. Defaults to the theme's square
         panel size (see ``theme._square_figsize``).
     show : bool, default False
         If True, calls `plt.show()`.
-    unipolar : bool, default False
-        If True, use unipolar plot_constellation (ASK/PAM).
 
     Returns
     -------
-    fig : matplotlib.figure.Figure
-        The figure object.
-    ax : matplotlib.axes.Axes
-        The plotting axis.
-
-    Raises
-    ------
-    ValueError
-        If both ``pmf`` and ``nu`` are provided.
+    (fig, ax) or None
     """
-    if pmf is not None and nu is not None:
-        raise ValueError("Provide at most one of `pmf` or `nu`, not both.")
+    from ..mapping import Constellation
 
-    logger.debug("Generating ideal constellation for %s (%s-level).", modulation, order)
-    from ..mapping import gray_constellation, maxwell_boltzmann
-
-    if nu is not None:
-        pmf = maxwell_boltzmann(order, nu)
+    if not isinstance(constellation, Constellation):
+        raise TypeError(
+            "plot_ideal_constellation(): constellation must be a Constellation, "
+            f"got {type(constellation).__name__}; use e.g. Constellation.qam(16)."
+        )
+    logger.debug("Plotting ideal constellation %r.", constellation)
 
     if ax is None:
         figsize = (size, size) if size is not None else _square_figsize()
@@ -93,27 +69,17 @@ def plot_ideal_constellation(
     else:
         fig = ax.figure
 
-    try:
-        # Generate constellation on backend (returns NumPy)
-        const = gray_constellation(modulation, order, unipolar=unipolar)
-    except ValueError as e:
-        logger.error("Error generating constellation: %s", e)
-        return None
-
-    # Move to cpu for plotting (already NumPy but good practice)
-    const = to_device(const, "cpu")
-
+    const = np.asarray(constellation.points).astype(np.complex128)
     real = const.real
     imag = const.imag
+    pmf = constellation.pmf
 
     if pmf is not None:
-        # PS-QAM mode
-        pmf_arr = np.asarray(pmf, dtype=np.float64)
         sc = ax.scatter(
             real,
             imag,
             s=100,
-            c=pmf_arr,
+            c=np.asarray(pmf, dtype=np.float64),
             cmap="YlOrRd",
             edgecolors="black",
             linewidths=0.5,
@@ -121,23 +87,18 @@ def plot_ideal_constellation(
         )
         plt.colorbar(sc, ax=ax, label="P(sₘ)")
     else:
-        # Uniform mode
         ax.scatter(real, imag, s=100, zorder=10)
-        n_bits = int(np.log2(order))
-        for i, point in enumerate(const):
-            x, y = point.real, point.imag
-            label = f"{i:0{n_bits}b} ({i})"
+        for point, bits in zip(const, constellation.bit_labels, strict=True):
+            label = "".join(str(int(b)) for b in bits)
             ax.annotate(
                 label,
-                (x, y),
+                (point.real, point.imag),
                 xytext=(5, 5),
                 textcoords="offset points",
             )
 
-    # Titles and Labels
     if title is None:
-        prefix = "PS-" if pmf is not None else ""
-        title = f"Constellation: {prefix}{modulation.upper()} {order}"
+        title = f"Constellation: {constellation!r}"
     ax.set_title(title)
     ax.set_xlabel("In-Phase (I)")
     ax.set_ylabel("Quadrature (Q)")
@@ -155,13 +116,9 @@ def plot_ideal_constellation(
 
     ax.grid(False)
 
-    # Draw concentric circles (rings) at point magnitudes
-    # Find unique radii from the constellation points
+    # Concentric rings at the point magnitudes (the origin excluded).
     radii = np.unique(np.round(np.abs(const), 6))
-
-    # Filter out zero radius (origin)
     radii = radii[radii > 1e-6]
-
     for r in radii:
         circle = plt.Circle(
             (0, 0),
@@ -182,15 +139,13 @@ def plot_ideal_constellation(
 
 def plot_constellation(
     samples: Any,
+    *,
     bins: int = 100,
     cmap: str = "inferno",
     ax: Any | None = None,
     overlay_ideal: bool = False,
-    overlay_source: bool = False,
-    modulation: str | None = None,
-    order: int | None = None,
-    unipolar: bool | None = None,
-    pmf: Any | None = None,
+    overlay_reference: bool = False,
+    constellation: Any | None = None,
     title: str | None = "Constellation",
     vmin: float | None = None,
     vmax: float | None = None,
@@ -207,7 +162,7 @@ def plot_constellation(
     Parameters
     ----------
     samples : array_like or Signal
-        Received complex samples. Shape: (..., N_symbols).
+        Received complex samples. Shape: ``(N,)`` or ``(C, N)``.
     bins : int, default 100
         Density resolution (bins per axis).
     cmap : str, default "inferno"
@@ -215,13 +170,11 @@ def plot_constellation(
     ax : matplotlib.axes.Axes, optional
         Target axis.
     overlay_ideal : bool, default False
-        If True, overlays theoretical points and scales them to signal power.
-    modulation : str, optional
-        Required parameter if `overlay_ideal` is enabled.
-    order : int, optional
-        Required parameter if `overlay_ideal` is enabled.
-    unipolar : bool, optional
-        Required parameter if `overlay_ideal` is enabled.
+        Overlay the constellation's points, scaled to the samples' RMS.
+    overlay_reference : bool, default False
+        Overlay a Signal's ``reference.symbols`` as given.
+    constellation : Constellation, optional
+        Constellation for ``overlay_ideal``.  Defaults to the Signal's.
     title : str, optional
         Plot title.
     vmin, vmax : float, optional
@@ -229,7 +182,7 @@ def plot_constellation(
     show : bool, default False
         If True, calls `plt.show()`.
     **kwargs : Any
-        Additional theoretical arguments passed to `ax.imshow`.
+        Additional arguments passed to `ax.imshow`.
 
     Returns
     -------
@@ -240,16 +193,19 @@ def plot_constellation(
     """
     signal_adapter = adapt_signal(samples, function_name="plot_constellation()")
     sig = signal_adapter.signal
+    constellation = signal_adapter.resolve_choice("constellation", constellation)
+    if overlay_ideal and constellation is None:
+        raise ValueError(
+            "plot_constellation(): overlay_ideal needs a constellation: pass "
+            "constellation= or a Signal that has one."
+        )
     result = _plot_constellation_array(
         signal_adapter.array,
         bins=bins,
         cmap=cmap,
         ax=ax,
         overlay_ideal=overlay_ideal,
-        modulation=signal_adapter.resolve_optional("mod_scheme", modulation),
-        order=signal_adapter.resolve_optional("mod_order", order),
-        unipolar=signal_adapter.resolve_optional("mod_unipolar", unipolar),
-        pmf=signal_adapter.resolve_optional("ps_pmf", pmf),
+        constellation=constellation,
         title=title,
         vmin=vmin,
         vmax=vmax,
@@ -257,30 +213,22 @@ def plot_constellation(
         **kwargs,
     )
 
-    if (
-        sig is not None
-        and overlay_source
-        and sig.source_symbols is not None
-        and result is not None
-    ):
+    if overlay_reference:
+        if sig is None or sig.reference is None:
+            raise ValueError(
+                "plot_constellation(): overlay_reference needs a Signal with a "
+                "reference."
+            )
+        assert result is not None
         _, axes = result
-        src = to_device(sig.source_symbols, "cpu")
-
-        # PS-QAM: source_symbols are on the {s_m} grid (avg power E_PS < 1)
-        # but received samples normalise to unit power ({s_m/sqrt(E_PS)}).
-        # Scale source symbols to match the received symbol scale.
-        if (
-            sig.ps_pmf is not None
-            and sig.mod_scheme is not None
-            and sig.mod_order is not None
-        ):
-            from ..mapping import gray_constellation as _gc_src
-
-            _const_src = _gc_src(sig.mod_scheme, sig.mod_order)
-            _pmf_src = np.asarray(sig.ps_pmf, dtype=np.float64)
-            _e_ps = float(np.dot(_pmf_src, np.abs(_const_src) ** 2))
-            if 0 < _e_ps < 1.0 - 1e-6:
-                src = src / np.sqrt(_e_ps)
+        # Each distinct symbol once: a scatter of every reference symbol
+        # draws the same few points thousands of times.
+        ref, xp_ref, _ = dispatch(sig.reference.symbols)
+        src: Any = (
+            [to_device(xp_ref.unique(row), "cpu") for row in ref]
+            if ref.ndim > 1
+            else to_device(xp_ref.unique(ref), "cpu")
+        )
 
         def _scatter_source(axis, symbols):
             axis.scatter(
@@ -294,9 +242,9 @@ def plot_constellation(
                 marker="o",
             )
 
-        if src.ndim > 1:
+        if isinstance(src, list):
             ax_list = list(np.asarray(axes).flat)
-            for ch in range(min(src.shape[0], len(ax_list))):
+            for ch in range(min(len(src), len(ax_list))):
                 _scatter_source(ax_list[ch], src[ch])
         else:
             _scatter_source(axes, src)
@@ -313,17 +261,14 @@ def _plot_constellation_array(
     cmap: str = "inferno",
     ax: Any | None = None,
     overlay_ideal: bool = False,
-    modulation: str | None = None,
-    order: int | None = None,
-    unipolar: bool | None = None,
-    pmf: Any | None = None,
+    constellation: Any | None = None,
     title: str | None = "Constellation",
     vmin: float | None = None,
     vmax: float | None = None,
     show: bool = False,
     **kwargs: Any,
 ) -> tuple[Any, Any] | None:
-    """Render array data; the public boundary handles Signal source overlays."""
+    """Render array data; the public boundary handles reference overlays."""
     logger.debug("Generating constellation density plot.")
 
     samples, xp, _ = dispatch(samples)
@@ -368,10 +313,7 @@ def _plot_constellation_array(
                 cmap=cmap,
                 ax=target_ax,
                 overlay_ideal=overlay_ideal,
-                modulation=modulation,
-                order=order,
-                unipolar=unipolar,
-                pmf=pmf,
+                constellation=constellation,
                 title=ch_title,
                 vmin=vmin,
                 vmax=vmax,
@@ -396,26 +338,15 @@ def _plot_constellation_array(
         logger.warning("Constellation plot expects complex samples. Converting.")
         samples = samples.astype(xp.complex64)
 
-    # Extract I and Q
-    i_data = samples.real.flatten()
-    q_data = samples.imag.flatten()
-
-    # Move to CPU for plotting
-    i_data = to_device(i_data, "cpu")
-    q_data = to_device(q_data, "cpu")
-
-    # Compute 2D histogram
-    # Determine range based on RMS (robust to noise outliers)
-    # Using np.sqrt(np.mean(|I|² + |Q|²)) is equivalent to rms(complex_signal)
-    signal_rms = float(helpers.rms(i_data + 1j * q_data))
-    # Use ~3x RMS as limit (covers most constellation points + noise spread)
+    # Bin on the device and transfer only the (bins, bins) counts.  The view
+    # spans 2x the RMS (robust to noise outliers).
+    i_data = samples.real.ravel()
+    q_data = samples.imag.ravel()
+    signal_rms = float(rms(samples))
     limit = signal_rms * 2.0
     if limit == 0:
         limit = 1.0  # Default view range for zero signal
-
-    h, xedges, yedges = np.histogram2d(
-        i_data, q_data, bins=bins, range=[[-limit, limit], [-limit, limit]]
-    )
+    h = _density(i_data, q_data, bins, limit, xp)
 
     # Transpose for imshow (rows=y, cols=x)
     h = h.T
@@ -444,44 +375,23 @@ def _plot_constellation_array(
 
     ax.imshow(h, **imshow_kwargs)
 
-    # Overlay ideal constellation if requested
-    if overlay_ideal:
-        if modulation is None or order is None:
-            logger.warning(
-                "Modulation and order must be provided to overlay ideal constellation."
-            )
-        else:
-            from ..mapping import constellation_power, gray_constellation
-
-            try:
-                const = gray_constellation(modulation, order, unipolar=unipolar)
-                const = to_device(const, "cpu")
-
-                # Scale constellation to match signal amplitude.
-                # For PS-QAM: use pmf-weighted RMS so ideal points land at
-                # {s_m / sqrt(E_PS)}, matching where the received clusters
-                # sit after shape_pulse normalises to E_s = 1.
-                if pmf is not None:
-                    e_ps = constellation_power(const, pmf)
-                    const_rms = float(np.sqrt(e_ps)) if e_ps > 0 else helpers.rms(const)
-                else:
-                    const_rms = helpers.rms(const)
-                if const_rms > 0:
-                    scale_factor = signal_rms / const_rms
-                    const = const * scale_factor
-
-                ax.scatter(
-                    const.real,
-                    const.imag,
-                    c="lime",
-                    edgecolors="dimgray",
-                    linewidths=1.5,
-                    s=30,
-                    zorder=10,
-                    marker="o",
-                )
-            except ValueError as e:
-                logger.warning("Could not overlay ideal constellation: %s", e)
+    # Overlay the constellation, scaled from its unit average power (under
+    # its pmf) to the samples' RMS.
+    if overlay_ideal and constellation is not None:
+        const = np.asarray(constellation.points).astype(np.complex128)
+        const_rms = float(np.sqrt(constellation.power()))
+        if const_rms > 0:
+            const = const * (signal_rms / const_rms)
+        ax.scatter(
+            const.real,
+            const.imag,
+            c="lime",
+            edgecolors="dimgray",
+            linewidths=1.5,
+            s=30,
+            zorder=10,
+            marker="o",
+        )
 
     # Add center lines
     ax.axhline(0, color="white", alpha=0.4, zorder=0)
@@ -502,6 +412,19 @@ def _plot_constellation_array(
     return fig, ax
 
 
-# -----------------------------------------------------------------------------
-# EQUALIZER DIAGNOSTICS
-# -----------------------------------------------------------------------------
+def _density(i_data: Any, q_data: Any, bins: int, limit: float, xp: Any) -> np.ndarray:
+    """2-D histogram over ``[-limit, limit]^2`` as ``(bins, bins)`` host counts.
+
+    ``bincount`` of the flattened bin index on the input's device, with
+    ``numpy.histogram2d``'s edges: equal bins, the last one closed.
+    """
+    scale = bins / (2.0 * limit)
+    ii = xp.floor((i_data + limit) * scale).astype(xp.int64)
+    qq = xp.floor((q_data + limit) * scale).astype(xp.int64)
+    # The upper edge belongs to the last bin, as in numpy.histogram2d.
+    ii = xp.where(i_data == limit, bins - 1, ii)
+    qq = xp.where(q_data == limit, bins - 1, qq)
+    inside = (ii >= 0) & (ii < bins) & (qq >= 0) & (qq < bins)
+    flat = (ii * bins + qq)[inside]
+    counts = xp.bincount(flat, minlength=bins * bins)
+    return np.asarray(to_device(counts, "cpu"), dtype=np.float64).reshape(bins, bins)

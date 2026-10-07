@@ -11,10 +11,9 @@ unchanged: ``from commkit.equalization import lms, rls, cma, rde`` and
 from __future__ import annotations
 
 from ._blind import cma, rde
-from ._dd import _check_rls_divergence, lms, rls
+from ._dd import lms, rls
 
 __all__ = [
-    "_check_rls_divergence",
     "cma",
     "lms",
     "rde",

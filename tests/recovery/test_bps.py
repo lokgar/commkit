@@ -5,6 +5,8 @@ import pytest
 
 from commkit import recovery
 from commkit.core import Signal
+from commkit.mapping import Constellation
+from tests.common.conversions import to_numpy
 from tests.common.signals import (
     make_test_mimo_samples,
     make_test_qam_signal,
@@ -23,16 +25,16 @@ class TestCprBps:
             order=order, num_symbols=1024, sps=1, symbol_rate=FS, xp=xp
         )
         phi_true = 0.2  # radians
-        sig.samples = sig.samples * xp.exp(1j * phi_true)
+        sig = sig.replace(samples=sig.samples * xp.exp(1j * phi_true))
 
-        phase_est = recovery.recover_carrier_phase_bps(
-            sig.samples, modulation="qam", order=order
-        )
+        phase_est = recovery.estimate_carrier_phase(
+            sig.samples, recovery.BPS(), constellation=Constellation.qam(order)
+        ).value
         corrected = recovery.correct_carrier_phase(sig.samples, phase_est)
 
-        phase_resid = recovery.recover_carrier_phase_bps(
-            corrected, modulation="qam", order=order
-        )
+        phase_resid = recovery.estimate_carrier_phase(
+            corrected, recovery.BPS(), constellation=Constellation.qam(order)
+        ).value
         assert float(xp.sqrt(xp.mean(phase_resid**2))) < 0.05
 
     def test_output_shape_siso(self, xp):
@@ -40,9 +42,9 @@ class TestCprBps:
         sig = make_test_qam_signal(
             order=16, num_symbols=512, sps=1, symbol_rate=FS, xp=xp
         )
-        phase = recovery.recover_carrier_phase_bps(
-            sig.samples, modulation="qam", order=16
-        )
+        phase = recovery.estimate_carrier_phase(
+            sig.samples, recovery.BPS(), constellation=Constellation.qam(16)
+        ).value
         assert phase.shape == sig.samples.shape
 
     def test_output_shape_mimo(self, xp):
@@ -50,7 +52,9 @@ class TestCprBps:
         mimo, _ = make_test_mimo_samples(
             num_channels=2, order=16, num_symbols=512, sps=1, xp=xp
         )
-        phase = recovery.recover_carrier_phase_bps(mimo, modulation="qam", order=16)
+        phase = recovery.estimate_carrier_phase(
+            mimo, recovery.BPS(), constellation=Constellation.qam(16)
+        ).value
         assert phase.shape == mimo.shape
 
     def test_too_short_raises(self, xp):
@@ -59,8 +63,10 @@ class TestCprBps:
             order=16, num_symbols=20, sps=1, symbol_rate=FS, xp=xp
         )
         with pytest.raises(ValueError, match="shorter than block_size"):
-            recovery.recover_carrier_phase_bps(
-                sig.samples[:10], modulation="qam", order=16, block_size=32
+            recovery.estimate_carrier_phase(
+                sig.samples[:10],
+                recovery.BPS(block_size=32),
+                constellation=Constellation.qam(16),
             )
 
 
@@ -78,9 +84,11 @@ class TestBPS:
     def test_siso_qam16_output_shape(self, xp):
         """SISO QAM16 (square QAM fast path): output is (N,) float64."""
         syms = self._qam16_symbols(xp)
-        phi_est = recovery.recover_carrier_phase_bps(
-            syms, "qam", 16, num_test_phases=32, block_size=32
-        )
+        phi_est = recovery.estimate_carrier_phase(
+            syms,
+            recovery.BPS(test_phases=32, block_size=32),
+            constellation=Constellation.qam(16),
+        ).value
         assert phi_est.shape == syms.shape
         assert phi_est.dtype == xp.float64
 
@@ -90,9 +98,11 @@ class TestBPS:
         phi_true = 0.25
         syms = self._qam16_symbols(xp, N=512)
         rotated = syms * xp.asarray(np.complex64(np.exp(1j * phi_true)))
-        phi_est = recovery.recover_carrier_phase_bps(
-            rotated, "qam", 16, num_test_phases=64, block_size=32
-        )
+        phi_est = recovery.estimate_carrier_phase(
+            rotated,
+            recovery.BPS(test_phases=64, block_size=32),
+            constellation=Constellation.qam(16),
+        ).value
         phi_mean = float(xp.mean(phi_est))
         # 4-fold ambiguity: allow ±π/8 residual
         residual = (phi_mean - phi_true + np.pi / 4) % (np.pi / 2) - np.pi / 4
@@ -103,9 +113,11 @@ class TestBPS:
     def test_siso_qpsk_general_path(self, xp):
         """SISO QPSK (non-square: triggers general distance path): output shape correct."""
         syms = self._qpsk_symbols(xp, N=256)
-        phi_est = recovery.recover_carrier_phase_bps(
-            syms, "psk", 4, num_test_phases=16, block_size=32
-        )
+        phi_est = recovery.estimate_carrier_phase(
+            syms,
+            recovery.BPS(test_phases=16, block_size=32),
+            constellation=Constellation.psk(4),
+        ).value
         assert phi_est.shape == syms.shape
 
     def test_mimo_output_shape(self, xp):
@@ -118,16 +130,60 @@ class TestBPS:
                 np.complex64
             )
         )
-        phi_est = recovery.recover_carrier_phase_bps(
-            syms, "qam", 16, num_test_phases=16, block_size=32
-        )
+        phi_est = recovery.estimate_carrier_phase(
+            syms,
+            recovery.BPS(test_phases=16, block_size=32),
+            constellation=Constellation.qam(16),
+        ).value
         assert phi_est.shape == (C, N)
 
     def test_block_size_too_large_raises(self, xp):
         """block_size > N should raise ValueError."""
         syms = self._qam16_symbols(xp, N=16)
         with pytest.raises(ValueError, match="block_size"):
-            recovery.recover_carrier_phase_bps(syms, "qam", 16, block_size=64)
+            recovery.estimate_carrier_phase(
+                syms, recovery.BPS(block_size=64), constellation=Constellation.qam(16)
+            )
+
+
+class TestRotationalSymmetry:
+    """BPS searches one ambiguity interval 2π/M of the constellation."""
+
+    @staticmethod
+    def _ambiguity_free_error(phi, truth, quantum):
+        err = phi - truth
+        return err - np.round(np.median(err) / quantum) * quantum
+
+    def test_8psk_tracks_wiener_phase(self, xp):
+        """8-PSK's metric has period π/4; a π/2 search held two minima."""
+        rng = np.random.default_rng(1)
+        n = 8192
+        pts = Constellation.psk(8).points
+        walk = np.cumsum(rng.normal(0.0, 0.01, n)) + 0.2
+        noise = 0.03 * (rng.standard_normal(n) + 1j * rng.standard_normal(n))
+        x = pts[rng.integers(0, 8, n)] * np.exp(1j * walk) + noise
+        for cycle_slip in (None, recovery.CycleSlip()):
+            phi = recovery.estimate_carrier_phase(
+                xp.asarray(x.astype(np.complex64)),
+                recovery.BPS(cycle_slip=cycle_slip),
+                constellation=Constellation.psk(8),
+            ).value
+            err = self._ambiguity_free_error(np.asarray(to_numpy(phi)), walk, np.pi / 4)
+            assert np.sqrt(np.mean(err**2)) < 0.05
+
+    def test_bpsk_reaches_phases_beyond_half_pi(self, xp):
+        """BPSK is 2-fold: a phase of 2.0 rad lies outside [0, π/2)."""
+        rng = np.random.default_rng(2)
+        n = 2048
+        x = np.sign(rng.standard_normal(n)) * np.exp(1j * 2.0)
+        x = x + 0.05 * (rng.standard_normal(n) + 1j * rng.standard_normal(n))
+        est = recovery.estimate_carrier_phase(
+            xp.asarray(x.astype(np.complex64)),
+            recovery.BPS(),
+            constellation=Constellation.psk(2),
+        )
+        err = self._ambiguity_free_error(np.asarray(to_numpy(est.value)), 2.0, np.pi)
+        assert np.max(np.abs(err)) < 0.05
 
 
 class TestSignalInputBpsAndCorrectCarrierPhase:
@@ -139,10 +195,10 @@ class TestSignalInputBpsAndCorrectCarrierPhase:
             order=16, num_symbols=512, sps=1, symbol_rate=FS, xp=xp
         )
 
-        phi_sig = recovery.recover_carrier_phase_bps(sig)
-        phi_arr = recovery.recover_carrier_phase_bps(
-            sig.samples, modulation="qam", order=16
-        )
+        phi_sig = recovery.estimate_carrier_phase(sig, recovery.BPS()).value
+        phi_arr = recovery.estimate_carrier_phase(
+            sig.samples, recovery.BPS(), constellation=Constellation.qam(16)
+        ).value
 
         assert not isinstance(phi_sig, Signal)  # phase estimate stays a raw array
         xpt.assert_allclose(phi_sig, phi_arr)
@@ -159,3 +215,38 @@ class TestSignalInputBpsAndCorrectCarrierPhase:
 
         assert isinstance(out_sig, Signal)
         xpt.assert_allclose(out_sig.samples, out_arr)
+
+
+class TestBPSNumbaTable:
+    """The CPU kernel for non-square constellations."""
+
+    @pytest.mark.parametrize("dtype", [np.complex64, np.complex128])
+    def test_block_metric_matches_brute_force(self, dtype):
+        from commkit.recovery.bps import _get_numba_bps_table
+
+        rng = np.random.default_rng(5)
+        points = Constellation.qam(32).points
+        C, n_blocks, K, B = 2, 6, 8, 16
+        x = (points[rng.integers(0, 32, (C, n_blocks * K))] * np.exp(0.3j)).astype(
+            dtype
+        )
+        x += 0.05 * (rng.standard_normal(x.shape) + 1j * rng.standard_normal(x.shape))
+        theta = np.arange(B) * (2 * np.pi / 4 / B)
+        ph = np.exp(-1j * theta)
+        real = np.float32 if dtype == np.complex64 else np.float64
+        out = np.empty((C, n_blocks, B))
+        _get_numba_bps_table()(
+            np.ascontiguousarray(x.real, real),
+            np.ascontiguousarray(x.imag, real),
+            ph.real.astype(real),
+            ph.imag.astype(real),
+            points.real.astype(real),
+            points.imag.astype(real),
+            K,
+            out,
+        )
+        rot = x[:, :, None] * ph  # (C, N, B)
+        d = np.abs(rot[..., None] - points) ** 2  # (C, N, B, M)
+        expected = d.min(axis=-1).reshape(C, n_blocks, K, B).sum(axis=2)
+        rtol = 1e-5 if dtype == np.complex64 else 1e-12
+        np.testing.assert_allclose(out, expected, rtol=rtol)

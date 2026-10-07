@@ -5,6 +5,7 @@ import pytest
 
 from commkit import recovery
 from commkit.core import Signal
+from commkit.mapping import Constellation
 from tests.common.signals import (
     make_test_mimo_samples,
     make_test_psk_signal,
@@ -41,11 +42,13 @@ class TestCprViterbiViterbi:
                 order=order, num_symbols=2048, sps=1, symbol_rate=FS, xp=xp
             )
         phi_true = 0.3  # radians
-        sig.samples = sig.samples * xp.exp(1j * phi_true)
+        sig = sig.replace(samples=sig.samples * xp.exp(1j * phi_true))
 
-        phase_est = recovery.recover_carrier_phase_viterbi_viterbi(
-            sig.samples, modulation=modulation, order=order, block_size=block_size
-        )
+        phase_est = recovery.estimate_carrier_phase(
+            sig.samples,
+            recovery.ViterbiViterbi(block_size=block_size),
+            constellation=getattr(Constellation, modulation)(order),
+        ).value
 
         M = 4 if modulation == "qam" else order
         step = 2 * np.pi / M
@@ -58,9 +61,9 @@ class TestCprViterbiViterbi:
         sig = make_test_qam_signal(
             order=16, num_symbols=512, sps=1, symbol_rate=FS, xp=xp
         )
-        phase = recovery.recover_carrier_phase_viterbi_viterbi(
-            sig.samples, modulation="qam", order=16
-        )
+        phase = recovery.estimate_carrier_phase(
+            sig.samples, recovery.ViterbiViterbi(), constellation=Constellation.qam(16)
+        ).value
         assert phase.shape == sig.samples.shape
 
     def test_output_shape_mimo(self, xp):
@@ -68,9 +71,9 @@ class TestCprViterbiViterbi:
         mimo, _ = make_test_mimo_samples(
             num_channels=2, order=4, num_symbols=512, sps=1, xp=xp
         )
-        phase = recovery.recover_carrier_phase_viterbi_viterbi(
-            mimo, modulation="qam", order=4
-        )
+        phase = recovery.estimate_carrier_phase(
+            mimo, recovery.ViterbiViterbi(), constellation=Constellation.qam(4)
+        ).value
         assert phase.shape == mimo.shape
 
     def test_too_short_raises(self, xp):
@@ -79,8 +82,10 @@ class TestCprViterbiViterbi:
             order=4, num_symbols=20, sps=1, symbol_rate=FS, xp=xp
         )
         with pytest.raises(ValueError, match="shorter than block_size"):
-            recovery.recover_carrier_phase_viterbi_viterbi(
-                sig.samples[:10], modulation="qam", order=4, block_size=32
+            recovery.estimate_carrier_phase(
+                sig.samples[:10],
+                recovery.ViterbiViterbi(block_size=32),
+                constellation=Constellation.qam(4),
             )
 
 
@@ -98,9 +103,11 @@ class TestViterbiViterbi:
     def test_siso_qpsk_output_shape(self, xp):
         """SISO QPSK: output is (N,) float64."""
         syms = self._qpsk_symbols(xp)
-        phi_est = recovery.recover_carrier_phase_viterbi_viterbi(
-            syms, "psk", 4, block_size=32
-        )
+        phi_est = recovery.estimate_carrier_phase(
+            syms,
+            recovery.ViterbiViterbi(block_size=32),
+            constellation=Constellation.psk(4),
+        ).value
         assert phi_est.shape == syms.shape
         assert phi_est.dtype == xp.float64
 
@@ -113,18 +120,22 @@ class TestViterbiViterbi:
         # Baseline (no rotation)
         phi_base = float(
             xp.mean(
-                recovery.recover_carrier_phase_viterbi_viterbi(
-                    syms, "psk", 4, block_size=32
-                )
+                recovery.estimate_carrier_phase(
+                    syms,
+                    recovery.ViterbiViterbi(block_size=32),
+                    constellation=Constellation.psk(4),
+                ).value
             )
         )
         # Rotated by phi_true
         rotated = syms * xp.asarray(np.complex64(np.exp(1j * phi_true)))
         phi_rot = float(
             xp.mean(
-                recovery.recover_carrier_phase_viterbi_viterbi(
-                    rotated, "psk", 4, block_size=32
-                )
+                recovery.estimate_carrier_phase(
+                    rotated,
+                    recovery.ViterbiViterbi(block_size=32),
+                    constellation=Constellation.psk(4),
+                ).value
             )
         )
         # The shift should equal phi_true modulo π/2
@@ -137,9 +148,11 @@ class TestViterbiViterbi:
     def test_siso_qam16_output_shape(self, xp):
         """SISO QAM16: output shape matches input."""
         syms = self._qam16_symbols(xp)
-        phi_est = recovery.recover_carrier_phase_viterbi_viterbi(
-            syms, "qam", 16, block_size=32
-        )
+        phi_est = recovery.estimate_carrier_phase(
+            syms,
+            recovery.ViterbiViterbi(block_size=32),
+            constellation=Constellation.qam(16),
+        ).value
         assert phi_est.shape == syms.shape
 
     def test_mimo_output_shape(self, xp):
@@ -151,18 +164,51 @@ class TestViterbiViterbi:
             np.random.default_rng(5).standard_normal((C, N)).astype(np.float32)
             + 1j * np.random.default_rng(6).standard_normal((C, N)).astype(np.float32)
         )
-        phi_est = recovery.recover_carrier_phase_viterbi_viterbi(
-            syms, "qam", 16, block_size=32
-        )
+        phi_est = recovery.estimate_carrier_phase(
+            syms,
+            recovery.ViterbiViterbi(block_size=32),
+            constellation=Constellation.qam(16),
+        ).value
         assert phi_est.shape == (C, N)
 
     def test_block_size_too_large_raises(self, xp):
         """block_size > N should raise ValueError."""
         syms = self._qpsk_symbols(xp, N=16)
         with pytest.raises(ValueError, match="block_size"):
-            recovery.recover_carrier_phase_viterbi_viterbi(
-                syms, "psk", 4, block_size=64
+            recovery.estimate_carrier_phase(
+                syms,
+                recovery.ViterbiViterbi(block_size=64),
+                constellation=Constellation.psk(4),
             )
+
+
+class TestJointChannelWeighting:
+    """Joint channels weigh equally, whatever their power."""
+
+    @pytest.mark.parametrize("method", ["vv", "tikhonov"])
+    def test_joint_estimate_ignores_channel_gain(self, xp, xpt, method):
+        """Scaling one channel leaves the joint trajectory unchanged.
+
+        With amplitude^M weighting a 10x stronger channel would carry 10^4
+        times the weight of the other for QPSK, and the joint estimate would
+        follow it alone.
+        """
+        rng = np.random.default_rng(5)
+        n = 4096
+        pts = Constellation.psk(4).points
+        walk = np.cumsum(rng.normal(0.0, 0.01, n)) + 0.2
+        sym = pts[rng.integers(0, 4, (2, n))] * np.exp(1j * walk)
+        noise = 0.2 * (rng.standard_normal((2, n)) + 1j * rng.standard_normal((2, n)))
+        x = xp.asarray((sym + noise).astype(np.complex64))
+        scaled = x * xp.asarray(np.array([[1.0], [10.0]], dtype=np.float32))
+        if method == "vv":
+            m = recovery.ViterbiViterbi(block_size=32, joint_channels=True)
+        else:
+            m = recovery.Tikhonov(1e-4, 10, block_size=32, joint_channels=True)
+        c = Constellation.psk(4)
+        a = recovery.estimate_carrier_phase(x, m, constellation=c).value
+        b = recovery.estimate_carrier_phase(scaled, m, constellation=c).value
+        xpt.assert_allclose(a, b, atol=1e-6)  # float32 rounding of the gain
 
 
 class TestSignalInputViterbiViterbi:
@@ -174,10 +220,10 @@ class TestSignalInputViterbiViterbi:
             order=16, num_symbols=512, sps=1, symbol_rate=FS, xp=xp
         )
 
-        phi_sig = recovery.recover_carrier_phase_viterbi_viterbi(sig)
-        phi_arr = recovery.recover_carrier_phase_viterbi_viterbi(
-            sig.samples, modulation="qam", order=16
-        )
+        phi_sig = recovery.estimate_carrier_phase(sig, recovery.ViterbiViterbi()).value
+        phi_arr = recovery.estimate_carrier_phase(
+            sig.samples, recovery.ViterbiViterbi(), constellation=Constellation.qam(16)
+        ).value
 
         assert not isinstance(phi_sig, Signal)  # phase estimate stays a raw array
         xpt.assert_allclose(phi_sig, phi_arr)

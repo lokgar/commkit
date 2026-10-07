@@ -3,7 +3,8 @@
 from typing import Any
 from unittest.mock import patch
 
-from commkit.plotting import _create_subplot_grid, apply_default_theme
+from commkit.plotting import apply_default_theme
+from commkit.plotting.theme import _create_subplot_grid
 
 
 class TestPlotThemeAndGridUtilities:

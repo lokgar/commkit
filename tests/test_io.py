@@ -11,13 +11,14 @@ from commkit import (
     Signal,
     SingleCarrierFrame,
     filtering,
-    generate_psqam,
-    generate_qam,
+    generate,
     mapping,
     metrics,
     multirate,
 )
+from commkit.filtering import RRC
 from commkit.io import load_npz, save_npz
+from commkit.mapping import Constellation
 from tests.common.conversions import to_numpy
 from tests.common.signals import (
     make_test_frame_signal,
@@ -44,7 +45,7 @@ def _mimo_signal() -> Signal:
 
 def _frame_signal() -> Signal:
     return make_test_frame_signal(
-        payload_len=200, preamble_len=13, sps=4, symbol_rate=1e9, payload_mod_order=16
+        payload_len=203, preamble_len=13, sps=4, symbol_rate=1e9, payload_mod_order=16
     )
 
 
@@ -73,60 +74,56 @@ class TestNPZSaveLoadSISO:
 
         assert sig2.sampling_rate == sig.sampling_rate
         assert sig2.symbol_rate == sig.symbol_rate
-        assert sig2.mod_scheme == sig.mod_scheme
-        assert sig2.mod_order == sig.mod_order
-        assert sig2.mod_unipolar == sig.mod_unipolar
-        assert sig2.pulse_shape == sig.pulse_shape
-        assert sig2.rrc_rolloff == sig.rrc_rolloff
-        assert sig2.filter_span == sig.filter_span
-        assert sig2.spectral_domain == sig.spectral_domain
-        assert sig2.physical_domain == sig.physical_domain
         assert sig2.center_frequency == sig.center_frequency
-        assert sig2.digital_frequency_offset == sig.digital_frequency_offset
-        assert sig2.pilot_tone_frequency == sig.pilot_tone_frequency
+        assert sig2.constellation == sig.constellation
+        assert sig2.constellation.family == sig.constellation.family
 
-    def test_roundtrip_pilot_tone_frequency(self, tmp_path: Any, xpt: Any) -> None:
-        """pilot_tone_frequency round-trips: None when absent, 1-D array when set."""
-        sig = _siso_signal()
-        assert sig.pilot_tone_frequency is None
+    @pytest.mark.parametrize(
+        "pulse",
+        [
+            filtering.RRC(0.2, span=6),
+            filtering.RC(0.5),
+            filtering.Gaussian(0.7, span=4),
+            filtering.Rect(0.5, 0.1),
+            filtering.SmoothRect(0.3, 0.5, 8),
+            None,
+        ],
+    )
+    def test_roundtrip_pulse(self, tmp_path: Any, pulse: Any) -> None:
+        sig = _siso_signal().replace(pulse=pulse)
+        save_npz(sig, tmp_path / "pulse.npz")
+        assert load_npz(tmp_path / "pulse.npz").pulse == pulse
 
-        sig.pilot_tone_frequency = 2.5e9
-        assert isinstance(sig.pilot_tone_frequency, np.ndarray)
-        p = tmp_path / "tone.npz"
-        save_npz(sig, p)
-        sig2 = load_npz(p)
-        assert isinstance(sig2.pilot_tone_frequency, np.ndarray)
-        xpt.assert_array_equal(sig2.pilot_tone_frequency, [2.5e9])
-
-    def test_roundtrip_pilot_tone_power_ratio_db(self, tmp_path: Any, xpt: Any) -> None:
-        """pilot_tone_power_ratio_db round-trips correctly."""
-        sig = _siso_signal()
-        assert sig.pilot_tone_power_ratio_db is None
-
-        sig.pilot_tone_power_ratio_db = -12.0
-        p = tmp_path / "psr.npz"
-        save_npz(sig, p)
-        sig2 = load_npz(p)
-        xpt.assert_array_equal(sig2.pilot_tone_power_ratio_db, [-12.0])
+    def test_roundtrip_custom_constellation(self, tmp_path: Any) -> None:
+        c = mapping.Constellation(
+            [-3.0, -1.0, 1.0, 3.0], bit_labels=[[0, 0], [0, 1], [1, 1], [1, 0]]
+        ).shaped(nu=0.1)
+        sig = _siso_signal().replace(constellation=c)
+        save_npz(sig, tmp_path / "custom.npz")
+        loaded = load_npz(tmp_path / "custom.npz").constellation
+        assert loaded == c
+        assert loaded.family is None
 
     def test_roundtrip_source_bits(self, tmp_path: Any, xpt: Any) -> None:
         """Source bits round-trip identically."""
         sig = _siso_signal()
-        assert sig.source_bits is not None
+        assert sig.reference.bits is not None
         p = tmp_path / "sig.npz"
         save_npz(sig, p)
         sig2 = load_npz(p)
-        xpt.assert_array_equal(to_numpy(sig.source_bits), to_numpy(sig2.source_bits))
+        xpt.assert_array_equal(
+            to_numpy(sig.reference.bits), to_numpy(sig2.reference.bits)
+        )
 
     def test_roundtrip_source_symbols(self, tmp_path: Any, xpt: Any) -> None:
         """Source symbols round-trip identically."""
         sig = _siso_signal()
-        assert sig.source_symbols is not None
+        assert sig.reference.symbols is not None
         p = tmp_path / "sig.npz"
         save_npz(sig, p)
         sig2 = load_npz(p)
         xpt.assert_allclose(
-            to_numpy(sig.source_symbols), to_numpy(sig2.source_symbols), atol=1e-7
+            to_numpy(sig.reference.symbols), to_numpy(sig2.reference.symbols), atol=1e-7
         )
 
     def test_extension_appended_automatically(self, tmp_path: Any, xpt: Any) -> None:
@@ -139,30 +136,19 @@ class TestNPZSaveLoadSISO:
         sig2 = load_npz(p_no_ext)
         xpt.assert_array_equal(to_numpy(sig.samples), to_numpy(sig2.samples))
 
-    def test_roundtrip_signal_type_none(self, tmp_path: Any) -> None:
-        """Signal without signal_type should load with signal_type=None."""
-        sig = _siso_signal()
-        assert sig.signal_type is None
-        p = tmp_path / "plain.npz"
-        save_npz(sig, p)
-        sig2 = load_npz(p)
-        assert sig2.signal_type is None
-
     def test_no_source_arrays_when_none(self, tmp_path: Any) -> None:
-        """Signal with no source_bits/source_symbols should load without them."""
+        """A Signal without a reference loads without one."""
         sig = Signal(
             samples=np.random.randn(512) + 1j * np.random.randn(512),
             sampling_rate=1e9,
             symbol_rate=250e6,
         )
-        assert sig.source_bits is None
-        assert sig.source_symbols is None
+        assert sig.reference is None
 
         p = tmp_path / "raw.npz"
         save_npz(sig, p)
         sig2 = load_npz(p)
-        assert sig2.source_bits is None
-        assert sig2.source_symbols is None
+        assert sig2.reference is None
 
 
 class TestNPZSaveLoadMIMO:
@@ -178,30 +164,6 @@ class TestNPZSaveLoadMIMO:
         assert sig2.samples.shape == sig.samples.shape
         xpt.assert_array_equal(to_numpy(sig.samples), to_numpy(sig2.samples))
 
-    def test_roundtrip_pilot_tone_frequency_per_channel(
-        self, tmp_path: Any, xpt: Any
-    ) -> None:
-        """Per-channel pilot frequencies round-trip as an array."""
-        sig = _mimo_signal()
-        sig.pilot_tone_frequency = [2.5e9, -3.0e9]
-        assert isinstance(sig.pilot_tone_frequency, np.ndarray)
-        p = tmp_path / "tones.npz"
-        save_npz(sig, p)
-        sig2 = load_npz(p)
-        assert isinstance(sig2.pilot_tone_frequency, np.ndarray)
-        xpt.assert_array_equal(sig2.pilot_tone_frequency, [2.5e9, -3.0e9])
-
-    def test_roundtrip_pilot_tone_power_ratio_db_mimo(
-        self, tmp_path: Any, xpt: Any
-    ) -> None:
-        """Per-channel pilot power ratios round-trip."""
-        mimo = _mimo_signal()
-        mimo.pilot_tone_power_ratio_db = [-10.0, -8.0]
-        assert isinstance(mimo.pilot_tone_power_ratio_db, np.ndarray)
-        save_npz(mimo, tmp_path / "psr_mimo.npz")
-        mimo2 = load_npz(tmp_path / "psr_mimo.npz")
-        xpt.assert_array_equal(mimo2.pilot_tone_power_ratio_db, [-10.0, -8.0])
-
 
 class TestNPZSaveLoadFrame:
     """Tests for saving and loading frame signals and structural metadata."""
@@ -209,18 +171,15 @@ class TestNPZSaveLoadFrame:
     def test_roundtrip_frame_metadata(self, tmp_path: Any) -> None:
         """Single-Carrier Frame geometry and slots survive round-trip."""
         sig = _frame_signal()
-        assert sig.signal_type == "Single-Carrier Frame"
         assert sig.frame is not None
 
         p = tmp_path / "frame.npz"
         save_npz(sig, p)
         sig2 = load_npz(p)
 
-        assert sig2.signal_type == "Single-Carrier Frame"
         assert sig2.frame is not None
         assert sig2.frame.payload_len == sig.frame.payload_len
-        assert sig2.frame.payload_mod_scheme == sig.frame.payload_mod_scheme
-        assert sig2.frame.payload_mod_order == sig.frame.payload_mod_order
+        assert sig2.frame == sig.frame
 
     def test_roundtrip_zc_preamble_kwargs(self, tmp_path: Any) -> None:
         """Zadoff-Chu preamble root and length kwargs round-trip."""
@@ -228,7 +187,7 @@ class TestNPZSaveLoadFrame:
             payload_len=100,
             preamble=Preamble(sequence_type="zc", length=31, root=7),
         )
-        sig = frame.to_signal(sps=4, symbol_rate=1e9)
+        sig = frame.to_signal(sps=4, symbol_rate=1e9, pulse=RRC(0.35))
         assert sig.frame.preamble.root == 7
 
         p = tmp_path / "zc.npz"
@@ -237,35 +196,68 @@ class TestNPZSaveLoadFrame:
         assert sig2.frame.preamble.root == 7
 
 
+class TestNPZNoPickle:
+    """Archives hold only numeric and unicode arrays and load without pickle."""
+
+    def test_archive_has_no_object_arrays(self, tmp_path: Any) -> None:
+        save_npz(_siso_signal(), tmp_path / "sig.npz")
+        with np.load(tmp_path / "sig.npz", allow_pickle=False) as data:
+            for key in data.files:
+                assert data[key].dtype != object, key
+
+    def test_frame_archive_has_no_object_arrays(self, tmp_path: Any) -> None:
+        save_npz(make_test_frame_signal(), tmp_path / "frame.npz")
+        with np.load(tmp_path / "frame.npz", allow_pickle=False) as data:
+            assert "__frame_metadata__" in data.files
+            for key in data.files:
+                assert data[key].dtype != object, key
+
+    def test_pickled_metadata_is_rejected_without_unpickling(
+        self, tmp_path: Any
+    ) -> None:
+        """An object array (old YAML format, or a crafted file) is never unpickled."""
+
+        class _Payload:
+            def __reduce__(self):
+                return (_mark_unpickled, ())
+
+        np.savez(
+            tmp_path / "evil.npz",
+            samples=np.zeros(8, np.complex64),
+            __metadata__=np.array(_Payload(), dtype=object),
+        )
+        _UNPICKLED.clear()
+        with pytest.raises(ValueError, match="not JSON"):
+            load_npz(tmp_path / "evil.npz")
+        assert not _UNPICKLED
+
+
+_UNPICKLED: list[bool] = []
+
+
+def _mark_unpickled() -> bool:
+    _UNPICKLED.append(True)
+    return True
+
+
 class TestNPZCompressionAndCaches:
-    """Tests for compression options and symbol/bit cache preservation."""
+    """Tests for compression options and 1.x cache entries."""
 
-    def test_include_cache_false_by_default(self, tmp_path: Any) -> None:
-        """Resolved caches are omitted from archive by default."""
+    def test_1x_cache_entries_are_ignored(self, tmp_path: Any, xpt: Any) -> None:
+        """1.x archives with resolved_symbols/resolved_bits still load; the
+        derived caches are dropped."""
         sig = _siso_signal()
-        sig = multirate.resolve_symbols(sig)
-        assert sig.resolved_symbols is not None
-
         p = tmp_path / "sig.npz"
         save_npz(sig, p)
+        with np.load(p, allow_pickle=False) as data:
+            entries = dict(data)
+        entries["resolved_symbols"] = entries["samples"][::2]
+        entries["resolved_bits"] = np.zeros(4, dtype=np.int8)
+        np.savez(p, **entries)
 
-        data = np.load(p, allow_pickle=True)
-        assert "resolved_symbols" not in data.files
-        assert "resolved_bits" not in data.files
-
-    def test_include_cache_roundtrip(self, tmp_path: Any, xpt: Any) -> None:
-        """Resolved caches round-trip when include_cache=True."""
-        sig = _siso_signal()
-        sig = multirate.resolve_symbols(sig)
-        assert sig.resolved_symbols is not None
-
-        p = tmp_path / "sig_cache.npz"
-        save_npz(sig, p, include_cache=True)
-        sig2 = load_npz(p)
-
-        xpt.assert_allclose(
-            to_numpy(sig.resolved_symbols), to_numpy(sig2.resolved_symbols), atol=1e-7
-        )
+        loaded = load_npz(p)
+        assert not hasattr(loaded, "resolved_symbols")
+        xpt.assert_array_equal(to_numpy(loaded.samples), to_numpy(sig.samples))
 
     def test_uncompressed_roundtrip(self, tmp_path: Any, xpt: Any) -> None:
         """Uncompressed archive round-trips identically."""
@@ -303,51 +295,62 @@ class TestNPZDeviceHandling:
         assert sig_gpu.backend == "GPU"
         xpt.assert_array_equal(to_numpy(sig.samples), to_numpy(sig_gpu.samples))
 
-    @pytest.mark.gpu_only
-    def test_auto_device_uses_gpu_when_available(
-        self, backend_device: str, tmp_path: Any
-    ) -> None:
-        """device='auto' chooses GPU if CuPy is available."""
-        sig = _siso_signal()
-        p = tmp_path / "auto.npz"
-        save_npz(sig, p)
-        sig2 = load_npz(p)
-        assert sig2.backend == "GPU"
+    def test_default_device_is_cpu(self, tmp_path: Any) -> None:
+        """load_npz loads to the CPU unless a device is requested, GPU or not."""
+        p = tmp_path / "default.npz"
+        save_npz(_siso_signal(), p)
+        assert load_npz(p).backend == "CPU"
 
     def test_psqam_pmf_roundtrip(self, tmp_path: Any, xpt: Any) -> None:
         """PS-QAM signal PMF, mod_scheme, and order round-trip."""
-        sig = generate_psqam(1000, sps=4, symbol_rate=10e9, order=64, entropy=5.0)
+        sig = generate(
+            Constellation.qam(64).shaped(entropy=5.0),
+            1000,
+            symbol_rate=10e9,
+            sps=4,
+            pulse=RRC(0.35),
+        )
         save_npz(sig, tmp_path / "psqam")
         loaded = load_npz(tmp_path / "psqam.npz", device="cpu")
-        assert loaded.ps_pmf is not None
-        xpt.assert_allclose(to_numpy(loaded.ps_pmf), to_numpy(sig.ps_pmf), rtol=1e-6)
-        assert loaded.mod_scheme == "PS-QAM"
-        assert loaded.mod_order == 64
+        assert loaded.constellation.pmf is not None
+        xpt.assert_allclose(loaded.constellation.pmf, sig.constellation.pmf, rtol=1e-6)
+        assert loaded.constellation.family == "qam"
+        assert loaded.constellation.order == 64
 
     def test_free_function_pipeline_metrics_survive_roundtrip(
         self, tmp_path: Any, xpt: Any
     ) -> None:
         """Signal processed via free functions preserves reproducible metrics."""
-        sig = generate_qam(num_symbols=2000, sps=4, symbol_rate=10e9, order=16, seed=7)
+        sig = generate(
+            Constellation.qam(16), 2000, symbol_rate=10e9, sps=4, pulse=RRC(0.35), rng=7
+        )
         sig = filtering.matched_filter(sig)
-        sig = multirate.resolve_symbols(sig)
-        sig = mapping.demap_symbols_hard(sig)
+        sig = multirate.decimate_to_symbol_rate(sig)
 
         evm_before = metrics.evm(sig)
         ber_before = metrics.ber(sig)
 
         p = tmp_path / "pipeline.npz"
-        save_npz(sig, p, include_cache=True)
+        save_npz(sig, p)
         loaded = load_npz(p, device="cpu")
 
-        xpt.assert_allclose(
-            to_numpy(sig.resolved_symbols), to_numpy(loaded.resolved_symbols), atol=1e-7
-        )
         xpt.assert_array_equal(
-            to_numpy(sig.resolved_bits), to_numpy(loaded.resolved_bits)
+            to_numpy(sig.reference.bits), to_numpy(loaded.reference.bits)
         )
-        xpt.assert_array_equal(to_numpy(sig.source_bits), to_numpy(loaded.source_bits))
+        xpt.assert_allclose(metrics.evm(loaded), evm_before, rtol=1e-5)
+        assert metrics.ber(loaded) == ber_before
 
-        assert metrics.evm(loaded) is not None
-        xpt.assert_allclose(metrics.evm(loaded)[0], evm_before[0], rtol=1e-5)
-        xpt.assert_allclose(float(metrics.ber(loaded)), float(ber_before), rtol=1e-9)
+
+def test_frame_constellations_roundtrip(tmp_path: Any) -> None:
+    frame = SingleCarrierFrame(
+        payload_len=21,
+        payload_constellation=mapping.Constellation.qam(64).shaped(nu=0.05),
+        pilot_pattern="comb",
+        pilot_period=4,
+        pilot_constellation=mapping.Constellation.psk(8),
+    )
+    sig = frame.to_signal(sps=2, symbol_rate=1e6, pulse=RRC(0.35))
+    save_npz(sig, tmp_path / "f.npz")
+    loaded = load_npz(tmp_path / "f.npz")
+    assert loaded.frame == frame
+    np.testing.assert_array_equal(loaded.frame.payload_symbols, frame.payload_symbols)

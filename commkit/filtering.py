@@ -7,19 +7,43 @@ and specialized pulse-shaping filters, with high-performance execution on
 both CPU and GPU backends.
 """
 
+from dataclasses import dataclass
+
 import numpy as np
 import scipy
 
-from .backend import ArrayType, dispatch, to_device
-from .core._signal_adapter import adapt_signal, require_integer_sps
-from .core.signal import Signal
-from .helpers import (
-    _cd_beta2_length,
-    as_2d,
-    normalize,
-    restore_1d,
-)
+from ._array import as_2d, restore_1d
+from ._dispersion import apply_dispersion
+from ._overlap_save import ols_backward, ols_forward
+from .backend import ArrayType, dispatch
+from .core._signal_adapter import S, adapt_signal, require_integer_sps
 from .logger import logger
+from .math import normalize
+
+__all__ = [
+    "Gaussian",
+    "Pulse",
+    "RC",
+    "RRC",
+    "Rect",
+    "SmoothRect",
+    "bessel_sos",
+    "butterworth_sos",
+    "chebyshev1_sos",
+    "chebyshev2_sos",
+    "correct_chromatic_dispersion",
+    "elliptic_sos",
+    "fir_filter",
+    "fir_taps",
+    "gaussian_taps",
+    "iir_filter",
+    "matched_filter",
+    "ols_fir_filter",
+    "rc_taps",
+    "rect_taps",
+    "rrc_taps",
+    "smoothrect_taps",
+]
 
 # -----------------------------------------------------------------------------
 # FILTER DESIGN - TAP GENERATORS (array-only)
@@ -35,7 +59,9 @@ from .logger import logger
 # Signal-aware (same category as gray_code/barker_sequence).
 
 
-def rect_taps(sps: int, duty_cycle: float = 1.0, rise_time: float = 0.0) -> np.ndarray:
+def rect_taps(
+    *, sps: int, duty_cycle: float = 1.0, rise_time: float = 0.0
+) -> np.ndarray:
     """
     Generates rectangular or trapezoidal pulse-shaping filter taps.
 
@@ -100,7 +126,7 @@ def rect_taps(sps: int, duty_cycle: float = 1.0, rise_time: float = 0.0) -> np.n
     return h
 
 
-def gaussian_taps(sps: float, span: int = 4, duty_cycle: float = 1.0) -> np.ndarray:
+def gaussian_taps(*, sps: float, fwhm: float = 1.0, span: int = 4) -> np.ndarray:
     """
     Generates Gaussian pulse-shaping filter taps.
 
@@ -111,14 +137,13 @@ def gaussian_taps(sps: float, span: int = 4, duty_cycle: float = 1.0) -> np.ndar
     ----------
     sps : float
         Samples per symbol.
+    fwhm : float, default 1.0
+        Full width at half maximum of the pulse in symbol periods.  Smaller
+        values give a narrower pulse (less ISI, wider bandwidth).  The
+        bandwidth-time product is ``BT = √2·ln(2) / (π·fwhm)``.
     span : int, default 4
         Total filter span in symbols. The number of taps will be ``span * sps + 1``
         to ensure symmetry.
-    duty_cycle : float, default 1.0
-        Full-Width at Half-Maximum (FWHM) of the Gaussian pulse in symbol periods.
-        Smaller values produce a narrower pulse (lower ISI but wider bandwidth).
-        The Bandwidth-Time product is derived internally as
-        ``bt = √2·ln(2) / (π·duty_cycle)``.
 
     Returns
     -------
@@ -126,18 +151,14 @@ def gaussian_taps(sps: float, span: int = 4, duty_cycle: float = 1.0) -> np.ndar
         Gaussian filter taps normalized to unit energy.
         Shape: (N_taps,).
     """
-    # Convert duty_cycle (FWHM in symbol periods) to BT product.
-    # FWHM of h(t) = exp(-(π·t/α)²) is α·√(ln2)/π = √(ln2/2)/B·√(ln2)/π = ln2/(π·B).
-    # Wait - using the standard relation:
-    #   FWHM = √(2·ln2) · σ_freq,  where B = 1/(2π·σ_freq)  ->  BT = √(ln2/2)/π
-    # More directly: FWHM_time = √(ln2/2) / (π·B) which gives BT = √(ln2/2)/π·(1/FWHM)
-    # Rearranged: bt = √2·ln(2) / (π·duty_cycle)
-    bt = np.sqrt(2) * np.log(2) / (np.pi * duty_cycle)
+    # h(t) = exp(-(π t / α)²) with α = √(ln2 / 2) / BT has its half-maximum
+    # at |t| = α √ln2 / π, so FWHM = √2 ln2 / (π BT)  ->  BT = √2 ln2 / (π fwhm).
+    bt = np.sqrt(2) * np.log(2) / (np.pi * fwhm)
     logger.debug(
-        "Generating Gaussian taps: sps=%s, span=%s, duty_cycle=%s (bt=%.4f)",
+        "Generating Gaussian taps: sps=%s, span=%s, fwhm=%s (bt=%.4f)",
         sps,
         span,
-        duty_cycle,
+        fwhm,
         bt,
     )
     # Ensure odd number of taps to have a center peak
@@ -153,12 +174,12 @@ def gaussian_taps(sps: float, span: int = 4, duty_cycle: float = 1.0) -> np.ndar
     alpha = np.sqrt(np.log(2) / 2) / bt
     h = (np.sqrt(np.pi) / alpha) * np.exp(-((np.pi * t / alpha) ** 2))
 
-    return normalize(h, "unit_energy")
+    return normalize(h, mode="unit_energy")
 
 
 def smoothrect_taps(
-    sps: int, span: int, rise_time: float = 0.22, duty_cycle: float = 1.0
-) -> ArrayType:
+    *, sps: int, span: int, rise_time: float = 0.22, duty_cycle: float = 1.0
+) -> np.ndarray:
     """
     Generates a perfectly centered Gaussian-smoothed rectangular pulse.
 
@@ -215,10 +236,10 @@ def smoothrect_taps(
         - scipy.special.erf((t - w_half) / (sigma * np.sqrt(2)))
     )
 
-    return normalize(h, "unit_energy")
+    return normalize(h, mode="unit_energy")
 
 
-def rrc_taps(sps: float, rolloff: float = 0.35, span: int = 8) -> np.ndarray:
+def rrc_taps(*, sps: float, rolloff: float = 0.35, span: int = 8) -> np.ndarray:
     """
     Generates Root Raised Cosine (RRC) filter taps.
 
@@ -286,10 +307,10 @@ def rrc_taps(sps: float, rolloff: float = 0.35, span: int = 8) -> np.ndarray:
     denom_safe = np.where(idx_general, denom, 1.0)
     h = np.where(idx_general, numer / denom_safe, h)
 
-    return normalize(h, "unit_energy")
+    return normalize(h, mode="unit_energy")
 
 
-def rc_taps(sps: float, rolloff: float = 0.35, span: int = 8) -> ArrayType:
+def rc_taps(*, sps: float, rolloff: float = 0.35, span: int = 8) -> np.ndarray:
     """
     Generates Raised Cosine (RC) filter taps.
 
@@ -358,10 +379,185 @@ def rc_taps(sps: float, rolloff: float = 0.35, span: int = 8) -> ArrayType:
     res = sinc_t * cos_t / denom_safe
     h = np.where(idx_general, res, h)
 
-    return normalize(h, "unit_energy")
+    return normalize(h, mode="unit_energy")
+
+
+# -----------------------------------------------------------------------------
+# PULSE VALUE OBJECTS
+# -----------------------------------------------------------------------------
+# A pulse describes a transmit pulse shape independently of the sampling rate;
+# ``pulse.taps(sps)`` builds the taps.  Wherever a pulse is accepted, a raw
+# taps array is accepted too.
+
+
+@dataclass(frozen=True)
+class Pulse:
+    """Base class of the pulse value objects (``RRC``, ``RC``, ``Gaussian``,
+    ``Rect``, ``SmoothRect``)."""
+
+    def taps(self, sps: float) -> np.ndarray:
+        """Pulse taps at ``sps`` samples per symbol (host ``float64``)."""
+        raise NotImplementedError
+
+
+def _check_span(span: int) -> None:
+    if not isinstance(span, int | np.integer) or span < 1:
+        raise ValueError(f"span must be a positive integer, got {span!r}.")
+
+
+def _check_rolloff(rolloff: float) -> None:
+    if not 0.0 <= rolloff <= 1.0:
+        raise ValueError(f"rolloff must be in [0, 1], got {rolloff}.")
+
+
+def _check_duty_cycle(duty_cycle: float) -> None:
+    if not 0.0 < duty_cycle <= 1.0:
+        raise ValueError(f"duty_cycle must be in (0, 1], got {duty_cycle}.")
+
+
+@dataclass(frozen=True)
+class RRC(Pulse):
+    """Root-raised-cosine pulse.
+
+    Parameters
+    ----------
+    rolloff : float
+        Roll-off factor in ``[0, 1]``.
+    span : int, default 10
+        Length in symbols; the taps have ``span * sps`` samples, rounded up to
+        an odd count.  Unit energy.
+    """
+
+    rolloff: float
+    span: int = 10
+
+    def __post_init__(self) -> None:
+        _check_rolloff(self.rolloff)
+        _check_span(self.span)
+
+    def taps(self, sps: float) -> np.ndarray:
+        return rrc_taps(sps=sps, rolloff=self.rolloff, span=self.span)
+
+
+@dataclass(frozen=True)
+class RC(Pulse):
+    """Raised-cosine (Nyquist) pulse; zero ISI at the symbol instants.
+
+    Parameters are those of :class:`RRC`.
+    """
+
+    rolloff: float
+    span: int = 10
+
+    def __post_init__(self) -> None:
+        _check_rolloff(self.rolloff)
+        _check_span(self.span)
+
+    def taps(self, sps: float) -> np.ndarray:
+        return rc_taps(sps=sps, rolloff=self.rolloff, span=self.span)
+
+
+@dataclass(frozen=True)
+class Gaussian(Pulse):
+    """Gaussian pulse.
+
+    Parameters
+    ----------
+    fwhm : float, default 1.0
+        Full width at half maximum in symbol periods.  The bandwidth-time
+        product is ``BT = sqrt(2) ln(2) / (pi fwhm)``.
+    span : int, default 10
+        Length in symbols.  Unit energy.
+    """
+
+    fwhm: float = 1.0
+    span: int = 10
+
+    def __post_init__(self) -> None:
+        if not self.fwhm > 0:
+            raise ValueError(f"fwhm must be > 0, got {self.fwhm}.")
+        _check_span(self.span)
+
+    def taps(self, sps: float) -> np.ndarray:
+        return gaussian_taps(sps=sps, fwhm=self.fwhm, span=self.span)
+
+
+@dataclass(frozen=True)
+class Rect(Pulse):
+    """Rectangular or trapezoidal pulse (integer ``sps`` only).
+
+    Parameters
+    ----------
+    duty_cycle : float, default 1.0
+        Total width in symbol periods, in ``(0, 1]``: 1.0 is NRZ, 0.5 is RZ.
+    rise_time : float, default 0.0
+        Length of each linear edge in symbol periods, at most
+        ``duty_cycle / 2``.  The taps are not normalized (unit height).
+    """
+
+    duty_cycle: float = 1.0
+    rise_time: float = 0.0
+
+    def __post_init__(self) -> None:
+        _check_duty_cycle(self.duty_cycle)
+        if not 0.0 <= self.rise_time <= self.duty_cycle / 2:
+            raise ValueError(
+                f"rise_time must be in [0, duty_cycle / 2], got {self.rise_time}."
+            )
+
+    def taps(self, sps: float) -> np.ndarray:
+        """Taps at integer ``sps``; ``duty_cycle * sps`` and ``rise_time * sps``
+        must be whole samples, so the pulse is never silently rounded."""
+        sps = require_integer_sps(sps, "Rect.taps()")
+        for name, value in (
+            ("duty_cycle", self.duty_cycle),
+            ("rise_time", self.rise_time),
+        ):
+            n = value * sps
+            if abs(n - round(n)) > 1e-9:
+                raise ValueError(
+                    f"Rect: {name} * sps = {value} * {sps} = {n:g} is not a whole "
+                    "number of samples; choose sps accordingly."
+                )
+        return rect_taps(sps=sps, duty_cycle=self.duty_cycle, rise_time=self.rise_time)
+
+
+@dataclass(frozen=True)
+class SmoothRect(Pulse):
+    """Rectangle convolved with a Gaussian (integer ``sps`` only).
+
+    Parameters
+    ----------
+    rise_time : float, default 0.22
+        10%-90% edge time in symbol periods.
+    duty_cycle : float, default 1.0
+        Width of the underlying rectangle in symbol periods: 1.0 is NRZ,
+        0.5 is RZ.
+    span : int, default 10
+        Length in symbols.  Unit energy.
+    """
+
+    rise_time: float = 0.22
+    duty_cycle: float = 1.0
+    span: int = 10
+
+    def __post_init__(self) -> None:
+        if not self.rise_time > 0:
+            raise ValueError(f"rise_time must be > 0, got {self.rise_time}.")
+        _check_duty_cycle(self.duty_cycle)
+        _check_span(self.span)
+
+    def taps(self, sps: float) -> np.ndarray:
+        return smoothrect_taps(
+            sps=require_integer_sps(sps, "SmoothRect.taps()"),
+            span=self.span,
+            rise_time=self.rise_time,
+            duty_cycle=self.duty_cycle,
+        )
 
 
 def fir_taps(
+    *,
     sampling_rate: float,
     num_taps: int,
     cutoff: float | tuple[float, float],
@@ -432,6 +628,7 @@ def _iir_wn(
 
 
 def butterworth_sos(
+    *,
     sampling_rate: float,
     cutoff: float | tuple[float, float],
     order: int = 4,
@@ -468,10 +665,11 @@ def butterworth_sos(
         cutoff,
         order,
     )
-    return scipy.signal.butter(order, Wn, btype=btype, output="sos")
+    return np.asarray(scipy.signal.butter(order, Wn, btype=btype, output="sos"))
 
 
 def chebyshev1_sos(
+    *,
     sampling_rate: float,
     cutoff: float | tuple[float, float],
     order: int = 4,
@@ -511,10 +709,11 @@ def chebyshev1_sos(
         order,
         ripple,
     )
-    return scipy.signal.cheby1(order, ripple, Wn, btype=btype, output="sos")
+    return np.asarray(scipy.signal.cheby1(order, ripple, Wn, btype=btype, output="sos"))
 
 
 def chebyshev2_sos(
+    *,
     sampling_rate: float,
     cutoff: float | tuple[float, float],
     order: int = 4,
@@ -554,10 +753,13 @@ def chebyshev2_sos(
         order,
         attenuation,
     )
-    return scipy.signal.cheby2(order, attenuation, Wn, btype=btype, output="sos")
+    return np.asarray(
+        scipy.signal.cheby2(order, attenuation, Wn, btype=btype, output="sos")
+    )
 
 
 def elliptic_sos(
+    *,
     sampling_rate: float,
     cutoff: float | tuple[float, float],
     order: int = 4,
@@ -602,10 +804,13 @@ def elliptic_sos(
         ripple,
         attenuation,
     )
-    return scipy.signal.ellip(order, ripple, attenuation, Wn, btype=btype, output="sos")
+    return np.asarray(
+        scipy.signal.ellip(order, ripple, attenuation, Wn, btype=btype, output="sos")
+    )
 
 
 def bessel_sos(
+    *,
     sampling_rate: float,
     cutoff: float | tuple[float, float],
     order: int = 4,
@@ -646,18 +851,15 @@ def bessel_sos(
         order,
         norm,
     )
-    return scipy.signal.bessel(order, Wn, btype=btype, output="sos", norm=norm)
+    return np.asarray(
+        scipy.signal.bessel(order, Wn, btype=btype, output="sos", norm=norm)
+    )
 
 
 # -----------------------------------------------------------------------------
 # FILTERING OPERATIONS (Signal-aware)
 # -----------------------------------------------------------------------------
-# _ols_forward:  OLS block windowing + batch FFT (shared scaffold)
-# _ols_backward: OLS batch IFFT + symmetric discard + reshape (shared scaffold)
 # ols_fir_filter: Public OLS FIR convolution (long-tap / memory-bounded)
-# shaping_filter_taps: Reconstruct pulse-shaping taps from a Signal's own
-#   metadata (pulse_shape/sps/rolloff) - takes a Signal, returns taps, used
-#   by matched_filter below to derive default taps for Signal input.
 # fir_filter: Generic FIR filtering operation (short-to-medium taps) - applies
 #   any of the FIR tap generators above.
 # matched_filter: Apply matched filter (time-reversed conjugate of pulse shape)
@@ -667,98 +869,16 @@ def bessel_sos(
 #
 # shape_pulse (TX symbol -> waveform synthesis) lives in core/generation.py,
 # not here: it is a signal-construction primitive, not a transform on an
-# existing Signal's samples (see CLAUDE.md, "Signal-Awareness").
-
-
-def _ols_forward(samples: ArrayType, N_fft: int):
-    """
-    Overlap-and-save forward pass: block windowing and batch FFT.
-
-    This is the shared OLS scaffolding used by both ``ols_fir_filter`` (SISO
-    scalar convolution) and ``zf_equalizer`` (MIMO per-bin matrix multiply).
-    It should be called on samples that have already been dispatched to the
-    correct backend and shaped as ``(num_ch, N)``.
-
-    Parameters
-    ----------
-    samples : array_like
-        Input samples. Shape: ``(num_ch, N)``. Must be 2-D.
-    N_fft : int
-        FFT block size. Must be a power of 2 and satisfy
-        ``N_fft // 4 >= filter_length`` so the causal/anti-causal guard
-        regions fully contain the filter transients.
-
-    Returns
-    -------
-    Y : array_like
-        Batch FFT of all OLS windows. Shape: ``(num_ch, num_blocks, N_fft)``.
-    meta : dict
-        Scaffold parameters required by ``_ols_backward``:
-        ``{'N': int, 'B': int, 'discard': int, 'num_blocks': int}``.
-    """
-    _, xp, _ = dispatch(samples)
-    num_ch, N = samples.shape
-    B = N_fft // 2  # 50 % hop - maximises block reuse
-    discard = N_fft // 4  # symmetric guard: absorbs causal & anti-causal transients
-    num_blocks = (N + B - 1) // B
-
-    # Pre-pad by discard so the first valid output aligns with sample 0.
-    # Post-pad to fill the last block window completely.
-    pad_left = discard
-    pad_right = num_blocks * B - N + discard
-    samples_padded = xp.pad(samples, ((0, 0), (pad_left, pad_right)))
-
-    # Zero-copy window extraction via as_strided (view, not copy).
-    stride = samples_padded.strides
-    windows = xp.lib.stride_tricks.as_strided(
-        samples_padded,
-        shape=(num_ch, num_blocks, N_fft),
-        strides=(stride[0], B * stride[1], stride[1]),
-    )
-
-    Y = xp.fft.fft(windows, n=N_fft, axis=-1)  # (num_ch, num_blocks, N_fft)
-    meta = {"N": N, "B": B, "discard": discard, "num_blocks": num_blocks}
-    return Y, meta
-
-
-def _ols_backward(X_hat_f: ArrayType, meta: dict) -> ArrayType:
-    """
-    Overlap-and-save backward pass: batch IFFT, symmetric discard, reshape.
-
-    Parameters
-    ----------
-    X_hat_f : array_like
-        Frequency-domain blocks after per-bin processing.
-        Shape: ``(num_ch, num_blocks, N_fft)``.
-    meta : dict
-        Scaffold parameters returned by ``_ols_forward``.
-
-    Returns
-    -------
-    array_like
-        Time-domain output trimmed to the original signal length ``N``.
-        Shape: ``(num_ch, N)``.
-    """
-    _, xp, _ = dispatch(X_hat_f)
-    N = meta["N"]
-    B = meta["B"]
-    discard = meta["discard"]
-    N_fft = X_hat_f.shape[-1]
-    num_ch = X_hat_f.shape[0]
-
-    x_hat = xp.fft.ifft(X_hat_f, n=N_fft, axis=-1)
-    # Keep the center B samples of each block (symmetric discard of guard regions).
-    valid = x_hat[:, :, discard : discard + B]
-    out = valid.reshape(num_ch, -1)[:, :N]
-    return out
+# existing Signal's samples.
 
 
 def ols_fir_filter(
-    samples: ArrayType | Signal,
+    samples: S,
     taps: ArrayType,
-    N_fft: int | None = None,
+    *,
+    fft_size: int | None = None,
     center: bool = True,
-) -> ArrayType | Signal:
+) -> S:
     """
     Overlap-and-save FIR filter for long-tap or large-signal convolution.
 
@@ -779,7 +899,7 @@ def ols_fir_filter(
         :class:`Signal`.
     taps : array_like
         FIR filter coefficients. Shape: ``(L,)``.
-    N_fft : int, optional
+    fft_size : int, optional
         FFT block size. Must be a power of 2. Defaults to
         ``max(1024, next_power_of_2(4 * L))`` so that the 25 % guard
         region is at least ``L`` samples long.
@@ -805,45 +925,49 @@ def ols_fir_filter(
 
     Notes
     -----
-    A symmetric guard of ``N_fft // 4`` samples is discarded from each
-    block edge, so ``N_fft // 4 >= len(taps)`` must hold.
+    A symmetric guard of ``fft_size // 4`` samples is discarded from each
+    block edge, so ``fft_size // 4 >= len(taps)`` must hold.
 
     The ``center=True`` path post-pads the input by ``L // 2`` zeros
     before OLS processing and trims the same number of leading output
     samples - a zero-copy shift that costs one extra OLS block at most.
     """
     signal_adapter = adapt_signal(samples, function_name="ols_fir_filter()")
-    samples = signal_adapter.array
+    x = signal_adapter.array
 
-    samples, xp, _ = dispatch(samples)
+    x, xp, _ = dispatch(x)
     taps = xp.asarray(taps)
-    is_real = not xp.iscomplexobj(samples) and not xp.iscomplexobj(taps)
-    out_dtype = samples.dtype  # capture before any reshape
+    is_real = not xp.iscomplexobj(x) and not xp.iscomplexobj(taps)
+    out_dtype = x.dtype  # capture before any reshape
 
     # Signal drives precision: cast taps to match signal so float64 tap
     # generators do not silently upcast complex64 signals via FFT multiply.
-    target_tap_dtype = (
-        samples.real.dtype if not xp.iscomplexobj(taps) else samples.dtype
-    )
+    target_tap_dtype = x.real.dtype if not xp.iscomplexobj(taps) else x.dtype
     if taps.dtype != target_tap_dtype:
         taps = taps.astype(target_tap_dtype)
 
     L = len(taps)
     half = L // 2
 
-    samples, was_1d = as_2d(samples, name="samples")
+    x, was_1d = as_2d(x, name="samples")
 
-    N = samples.shape[-1]
+    N = x.shape[-1]
 
+    N_fft = fft_size
     if N_fft is None:
         N_fft = max(1024, 1 << (max(1, 4 * L) - 1).bit_length())
+    elif N_fft & (N_fft - 1) or N_fft // 4 < L:
+        raise ValueError(
+            f"fft_size must be a power of 2 with fft_size // 4 >= len(taps) "
+            f"({L}), got {fft_size}."
+        )
 
     logger.debug(
         "ols_fir_filter: L=%s, N=%s, N_fft=%s, num_ch=%s, center=%s",
         L,
         N,
         N_fft,
-        samples.shape[0],
+        x.shape[0],
         center,
     )
 
@@ -853,15 +977,15 @@ def ols_fir_filter(
         # Post-pad by half so the OLS can compute full_conv[half : half+N].
         # This matches scipy's mode='same' (center-aligned, group-delay compensated),
         # which is required for correct eye-opening after pulse-shaped filtering.
-        samples_ext = xp.pad(samples, ((0, 0), (0, half)))
-        Y, meta = _ols_forward(samples_ext, N_fft)
+        samples_ext = xp.pad(x, ((0, 0), (0, half)))
+        Y, meta = ols_forward(samples_ext, N_fft)
         X_hat_f = Y * H
-        out_ext = _ols_backward(X_hat_f, meta)  # shape: (num_ch, N + half)
+        out_ext = ols_backward(X_hat_f, meta)  # shape: (num_ch, N + half)
         out = out_ext[:, half:]  # trim leading half -> shape: (num_ch, N)
     else:
-        Y, meta = _ols_forward(samples, N_fft)
+        Y, meta = ols_forward(x, N_fft)
         X_hat_f = Y * H
-        out = _ols_backward(X_hat_f, meta)
+        out = ols_backward(X_hat_f, meta)
 
     if is_real:
         out = out.real  # strip IFFT imaginary noise for real inputs
@@ -872,206 +996,111 @@ def ols_fir_filter(
     return signal_adapter.wrap_samples(restore_1d(was_1d, out))
 
 
-def shaping_filter_taps(sig: Signal) -> ArrayType:
+def fir_filter(samples: S, taps: ArrayType) -> S:
     """
-    Compute pulse-shaping filter taps from a :class:`Signal`'s metadata.
+    Apply an FIR filter along the time (last) axis.
 
-    Reconstructs the transmit pulse-shaping taps from ``pulse_shape`` and the
-    associated parameters (``sps``, ``filter_span``, roll-offs, ``duty_cycle``,
-    ``rise_time``) stored on the signal.  The taps are returned on the signal's
-    current backend.
-
-    Parameters
-    ----------
-    sig : Signal
-        Signal carrying valid ``pulse_shape`` metadata.
-
-    Returns
-    -------
-    array_like
-        Generated filter taps on the signal's device.
-
-    Raises
-    ------
-    ValueError
-        If ``pulse_shape`` is missing or unsupported.
-    """
-    if not sig.pulse_shape or sig.pulse_shape == "none":
-        raise ValueError("No pulse shape defined for this signal.")
-    logger.info("Generating shaping filter taps (shape: %s).", sig.pulse_shape)
-
-    # Use stored duty_cycle for RZ; NRZ always uses the full symbol period.
-    duty_cycle = sig.duty_cycle if sig.mod_rz else 1.0
-
-    if sig.pulse_shape == "rect":
-        taps = rect_taps(
-            require_integer_sps(sig.sps, "shaping_filter_taps()"),
-            duty_cycle=duty_cycle,
-            rise_time=sig.rise_time,
-        )
-    elif sig.pulse_shape == "smoothrect":
-        taps = smoothrect_taps(
-            sps=require_integer_sps(sig.sps, "shaping_filter_taps()"),
-            span=sig.filter_span,
-            rise_time=sig.rise_time,
-            duty_cycle=duty_cycle,
-        )
-    elif sig.pulse_shape == "gaussian":
-        taps = gaussian_taps(
-            sps=sig.sps, span=sig.filter_span, duty_cycle=sig.duty_cycle
-        )
-    elif sig.pulse_shape == "rrc":
-        taps = rrc_taps(sps=sig.sps, span=sig.filter_span, rolloff=sig.rrc_rolloff)
-    elif sig.pulse_shape == "rc":
-        taps = rc_taps(sps=sig.sps, span=sig.filter_span, rolloff=sig.rc_rolloff)
-    else:
-        raise ValueError(f"Unknown pulse shape: {sig.pulse_shape}")
-
-    return to_device(taps, sig.backend)
-
-
-def fir_filter(
-    samples: ArrayType | Signal, taps: ArrayType, axis: int = -1
-) -> ArrayType | Signal:
-    """
-    Apply a Finite Impulse Response (FIR) filter to signal samples.
-
-    The filter is applied via FFT-based convolution for high throughput,
-    efficiently handling both CPU and GPU backends.
+    FFT convolution, ``mode="same"``: the output is centred on tap
+    ``len(taps) // 2``, so a symmetric filter adds no delay.
 
     Parameters
     ----------
     samples : array_like or Signal
-        Input signal samples. Shape: (..., N_samples).  A :class:`Signal`
-        returns a new filtered :class:`Signal`.
+        Input samples, ``(N,)`` or ``(C, N)``.  A :class:`Signal` returns a
+        new filtered :class:`Signal`.
     taps : array_like
-        FIR filter coefficients (impulse response). Shape: (N_taps,).
-    axis : int, default -1
-        The axis along which the filter is applied (typically the Time axis).
+        Filter coefficients (impulse response), ``(L,)``.  Cast to the
+        precision of ``samples``.
 
     Returns
     -------
     array_like or Signal
-        Filtered samples with the same shape as `samples` (mode='same').
+        Filtered samples, same shape and dtype as ``samples``.
     """
     signal_adapter = adapt_signal(samples, function_name="fir_filter()")
-    samples = signal_adapter.array
-    if signal_adapter.signal is not None:
-        axis = -1
-
-    logger.debug(
-        "Applying FIR filter via convolution (%s taps, axis=%s).", len(taps), axis
-    )
-    samples, xp, sp = dispatch(samples)
-
-    # Ensure taps are on the correct backend
+    x, xp, sp = dispatch(signal_adapter.array)
     taps = xp.asarray(taps)
+    if taps.ndim != 1:
+        raise ValueError(f"taps must be 1-D, got shape {taps.shape}.")
+    logger.debug("Applying FIR filter via convolution (%s taps).", taps.size)
 
     # Signal drives precision: cast taps to match signal dtype so numpy/scipy
     # type-promotion rules do not silently upcast float32/complex64 signals.
-    target_tap_dtype = (
-        samples.real.dtype if not xp.iscomplexobj(taps) else samples.dtype
-    )
+    target_tap_dtype = x.real.dtype if not xp.iscomplexobj(taps) else x.dtype
     if taps.dtype != target_tap_dtype:
         taps = taps.astype(target_tap_dtype)
 
-    if samples.ndim > 1:
-        # Ensure axis is positive
-        axis = axis % samples.ndim
-
-        new_shape = [1] * samples.ndim
-        new_shape[axis] = len(taps)
-        taps_nd = taps.reshape(new_shape)
-
-        result = sp.signal.convolve(samples, taps_nd, mode="same", method="fft")
-    else:
-        # 1D case
-        result = sp.signal.convolve(samples, taps, mode="same", method="fft")
+    taps_nd = taps.reshape((1,) * (x.ndim - 1) + (-1,))
+    result = sp.signal.convolve(x, taps_nd, mode="same", method="fft")
 
     # Belt-and-suspenders: scipy may still promote internally (version-dependent)
-    if result.dtype != samples.dtype:
-        result = result.astype(samples.dtype)
+    if result.dtype != x.dtype:
+        result = result.astype(x.dtype)
     return signal_adapter.wrap_samples(result)
 
 
 def matched_filter(
-    samples: ArrayType | Signal,
-    pulse_taps: ArrayType | None = None,
+    samples: S,
+    *,
+    pulse: Pulse | ArrayType | None = None,
     taps_normalization: str = "unit_energy",
-    axis: int = -1,
-) -> ArrayType | Signal:
+) -> S:
     """
-    Applies a matched filter to the received signal.
+    Matched filter: convolve with the time-reversed conjugate of the pulse.
 
-    The matched filter is the time-reversed complex conjugate of the pulse
-    shaping filter. It maximizes the Signal-to-Noise Ratio (SNR) in the
-    presence of AWGN.
+    Maximizes the SNR at the symbol instants in AWGN.
 
     Parameters
     ----------
     samples : array_like or Signal
-        Input received samples. Shape: (..., N_samples).  A :class:`Signal`
-        returns a new matched-filtered :class:`Signal`; when ``pulse_taps`` is
-        omitted, the taps are derived from the signal's ``pulse_shape`` metadata
-        via :func:`shaping_filter_taps`.
-    pulse_taps : array_like, optional
-        Taps of the pulse-shaping filter used at the transmitter.
-        Shape: (N_taps,).  Required for raw-array input.
+        Received samples, ``(N,)`` or ``(C, N)``.  A :class:`Signal` returns
+        a new filtered :class:`Signal`.
+    pulse : Pulse or array_like, optional
+        Transmit pulse, as a pulse object (``RRC(0.35)``) or its taps.
+        Defaults to the Signal's ``pulse``; required for array input.  A
+        pulse object needs the samples per symbol, so array input takes taps.
     taps_normalization : {"unit_energy", "unity_gain"}, default "unit_energy"
-        Designates how the matched filter taps are normalized.
-    axis : int, default -1
-        The axis along which to apply the filter.
+        Normalization of the matched-filter taps.
 
     Returns
     -------
     array_like or Signal
-        Matched filtered samples. Shape: (..., N_samples).
+        Filtered samples, same shape as ``samples``.
     """
     signal_adapter = adapt_signal(samples, function_name="matched_filter()")
-    samples = signal_adapter.array
-    if signal_adapter.signal is not None:
+    pulse = signal_adapter.resolve_choice("pulse", pulse)
+    if pulse is None:
+        raise ValueError(
+            "matched_filter() needs a pulse: pass pulse= (a Pulse or taps) or a "
+            "Signal that has one."
+        )
+    if isinstance(pulse, Pulse):
         sig = signal_adapter.signal
-        taps = pulse_taps
-        if taps is None:
-            try:
-                taps = shaping_filter_taps(sig)
-            except ValueError as e:
-                logger.error("Cannot apply matched filter: %s", e)
-                return sig._shallow_clone()
-        pulse_taps = taps
-        axis = -1
-
-    if pulse_taps is None:
-        raise ValueError("matched_filter() requires pulse_taps for array input.")
-
-    logger.debug("Applying Matched Filter (taps length=%s).", len(pulse_taps))
-    samples, xp, _ = dispatch(samples)
-
-    # Matched filter is conjugate and time-reversed version of pulse
-    # Ensure pulse_taps is on correct backend
-    pulse_taps = xp.asarray(pulse_taps)
-    matched_taps = xp.conj(pulse_taps[::-1])
-
-    if taps_normalization == "unity_gain":
-        matched_taps = normalize(matched_taps, mode="unity_gain")
-    elif taps_normalization == "unit_energy":
-        matched_taps = normalize(matched_taps, mode="unit_energy")
-    else:
+        if sig is None:
+            raise ValueError(
+                "matched_filter(): a Pulse needs the x per symbol; pass "
+                "pulse.taps(sps) for array input."
+            )
+        pulse = pulse.taps(sig.sps)
+    if taps_normalization not in ("unit_energy", "unity_gain"):
         raise ValueError(
             f"Unknown taps_normalization: {taps_normalization!r}. "
             "Use 'unity_gain' or 'unit_energy'."
         )
 
-    return signal_adapter.wrap_samples(fir_filter(samples, matched_taps, axis=axis))
+    x, xp, _ = dispatch(signal_adapter.array)
+    pulse_taps = xp.asarray(pulse)
+    logger.debug("Applying matched filter (%s taps).", pulse_taps.size)
+    matched_taps = normalize(xp.conj(pulse_taps[::-1]), mode=taps_normalization)
+    return signal_adapter.wrap_samples(fir_filter(x, matched_taps))
 
 
 def iir_filter(
-    samples: ArrayType | Signal,
+    samples: S,
     sos: ArrayType,
     *,
-    axis: int = -1,
     zero_phase: bool = True,
-) -> ArrayType | Signal:
+) -> S:
     """
     Apply an Infinite Impulse Response (IIR) filter, in SOS form, to signal samples.
 
@@ -1088,8 +1117,6 @@ def iir_filter(
         :class:`Signal` returns a new filtered :class:`Signal`.
     sos : array_like
         Second-order-sections filter coefficients. Shape: ``(n_sections, 6)``.
-    axis : int, default -1
-        The axis along which the filter is applied.
     zero_phase : bool, default True
         ``True`` - forward-backward (``sosfiltfilt``): zero phase distortion
         (no group delay), at the cost of needing the whole record up front
@@ -1108,29 +1135,27 @@ def iir_filter(
     Internally promotes to ``float64``/``complex128`` for the filtering call
     and casts back to the input dtype on return: at very low normalized
     cutoffs (e.g. phase-drift extraction), SOS poles bunch near ``z=1`` and
-    single precision is not numerically safe (see ``CLAUDE.md``, "Phase
-    Unwrapping & Kalman Smoothers").
+    single precision is not numerically safe.
     """
     signal_adapter = adapt_signal(samples, function_name="iir_filter()")
-    samples = signal_adapter.array
+    x = signal_adapter.array
 
-    samples, xp, sp = dispatch(samples)
+    x, xp, sp = dispatch(x)
     sos = xp.asarray(sos)
 
     logger.debug(
-        "Applying IIR filter (%s SOS sections, zero_phase=%s, axis=%s).",
+        "Applying IIR filter (%s SOS sections, zero_phase=%s).",
         sos.shape[0],
         zero_phase,
-        axis,
     )
 
-    in_dtype = samples.dtype
-    work_dtype = xp.complex128 if xp.iscomplexobj(samples) else xp.float64
-    x_work = samples.astype(work_dtype)
+    in_dtype = x.dtype
+    work_dtype = xp.complex128 if xp.iscomplexobj(x) else xp.float64
+    x_work = x.astype(work_dtype)
     if zero_phase:
-        result = sp.signal.sosfiltfilt(sos, x_work, axis=axis)
+        result = sp.signal.sosfiltfilt(sos, x_work, axis=-1)
     else:
-        result = sp.signal.sosfilt(sos, x_work, axis=axis)
+        result = sp.signal.sosfilt(sos, x_work, axis=-1)
     return signal_adapter.wrap_samples(result.astype(in_dtype, copy=False))
 
 
@@ -1139,99 +1164,62 @@ def iir_filter(
 # -----------------------------------------------------------------------------
 
 
-def compensate_chromatic_dispersion(
-    samples: ArrayType | Signal,
+def correct_chromatic_dispersion(
+    samples: S,
+    *,
+    dispersion_ps_nm_km: float,
+    fiber_length_km: float,
+    center_wavelength_nm: float,
     sampling_rate: float | None = None,
-    dispersion_ps_nm_km: float | None = None,
-    fiber_length_km: float | None = None,
-    center_wavelength_nm: float | None = None,
-) -> ArrayType | Signal:
+) -> S:
     """
-    Electronic dispersion compensation (EDC) for chromatic dispersion.
+    Electronic dispersion compensation: the inverse fiber response.
 
-    Applies the inverse of the CD frequency-domain transfer function to remove
-    chromatic dispersion accumulated over a fiber link:
-
-        H_EDC(f) = exp(j/2 * beta_2 * (2*pi*f)^2 * L)
-
-    where
-
-        beta_2 = -D * lambda^2 / (2*pi*c)
-
-    and D is the dispersion parameter, lambda is the center wavelength,
-    c is the speed of light, and L is the fiber length.
+    Multiplies the spectrum by ``H(ω) = exp(+j β₂ L ω² / 2)`` with
+    ``β₂ = -D λ² / (2π c)``, which undoes
+    :func:`commkit.impairments.apply_chromatic_dispersion` exactly.
 
     Parameters
     ----------
     samples : array_like or Signal
-        Complex baseband signal. Shape: ``(N,)`` (SISO) or ``(C, N)`` (MIMO).
-    sampling_rate : float, optional
-        Sampling rate in Hz.  Required for array input; ignored for
-        :class:`Signal` input, which always uses the signal's own
-        ``sampling_rate``.
+        Complex baseband samples, ``(N,)`` or ``(C, N)``.
     dispersion_ps_nm_km : float
-        Fiber dispersion parameter D in ps / (nm * km).
-        Standard SMF-28: 17 ps/(nm*km) at 1550 nm.
+        Fiber dispersion parameter D in ps / (nm km) (SMF-28: 17 at 1550 nm).
     fiber_length_km : float
-        Fiber span length in km.
+        Fiber length in km.
     center_wavelength_nm : float
-        Center wavelength in nm (e.g. 1550 for C-band).
+        Carrier wavelength in nm.
+    sampling_rate : float, optional
+        Sampling rate in Hz.  Taken from the Signal; required for array
+        input.  A value that disagrees with the Signal raises.
 
     Returns
     -------
     array_like or Signal
-        CD-compensated signal, same shape, dtype, and backend as input.  A
-        :class:`Signal` returns a new compensated :class:`Signal`.
-
-    See Also
-    --------
-    commkit.impairments.apply_chromatic_dispersion :
-        Apply the forward CD impairment (use before this function in simulation).
+        Compensated samples, same shape, dtype and device as the input.
 
     Examples
     --------
-    >>> cd_free = compensate_chromatic_dispersion(
-    ...     received, dispersion_ps_nm_km=17.0, fiber_length_km=80.0,
-    ...     center_wavelength_nm=1550.0, sampling_rate=fs)
+    >>> sig = correct_chromatic_dispersion(
+    ...     sig, dispersion_ps_nm_km=17.0, fiber_length_km=80.0,
+    ...     center_wavelength_nm=1550.0)
     """
     signal_adapter = adapt_signal(
-        samples, function_name="compensate_chromatic_dispersion()"
+        samples, function_name="correct_chromatic_dispersion()"
     )
-    samples = signal_adapter.array
-    sampling_rate = signal_adapter.resolve_required("sampling_rate", sampling_rate)
-    if (
-        dispersion_ps_nm_km is None
-        or fiber_length_km is None
-        or center_wavelength_nm is None
-    ):
-        raise ValueError(
-            "compensate_chromatic_dispersion() requires dispersion_ps_nm_km, "
-            "fiber_length_km, and center_wavelength_nm."
-        )
-
+    sampling_rate = signal_adapter.resolve_fact("sampling_rate", sampling_rate)
     logger.info(
-        "Compensating CD (D=%s ps/nm/km, L=%s km, λ=%s nm).",
+        "Correcting CD (D=%s ps/nm/km, L=%s km, λ=%s nm).",
         dispersion_ps_nm_km,
         fiber_length_km,
         center_wavelength_nm,
     )
-
-    samples, xp, _ = dispatch(samples)
-    samples, was_1d = as_2d(samples, name="samples")
-    C, N = samples.shape
-
-    beta2 = _cd_beta2_length(
-        dispersion_ps_nm_km, fiber_length_km, center_wavelength_nm
-    )  # s²  (β₂·L product)
-
-    omega = 2.0 * np.pi * xp.fft.fftfreq(N, d=1.0 / sampling_rate)
-    H = xp.exp(1j * (beta2 / 2.0) * omega**2)
-
-    S_F = xp.fft.fft(samples, axis=-1)
-    out_F = S_F * H[None, :]
-    result = xp.fft.ifft(out_F, axis=-1)
-
-    if result.dtype != samples.dtype:
-        result = result.astype(samples.dtype)
-
-    return signal_adapter.wrap_samples(restore_1d(was_1d, result))
+    result = apply_dispersion(
+        signal_adapter.array,
+        sampling_rate=sampling_rate,
+        dispersion_ps_nm_km=dispersion_ps_nm_km,
+        fiber_length_km=fiber_length_km,
+        center_wavelength_nm=center_wavelength_nm,
+        inverse=True,
+    )
+    return signal_adapter.wrap_samples(result)

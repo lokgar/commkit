@@ -1,33 +1,31 @@
 """Tests for joint LMS/RLS+CPR equalizers and blockwise FOE.
 
 Verification plan:
-  1. Zero-Deviation Baseline   - cpr_type=None must produce bit-exact output
-  2. Numba/JAX Backend Parity  - pll and bps modes match within float32 tolerance
+  1. Zero-Deviation Baseline   - cpr=None must produce bit-exact output
   3. Cycle Slip Stress Test    - π/2 steps are corrected, weights converge
   4. PLL Convergence / Phase Noise - RMSE within PLL jitter bound
   5. Blockwise Phase Coherence - chirp FOE recovers EVM within 0.5 dB of ideal
   6. MIMO Coverage             - 2x2 butterfly LMS+PLL converges on both channels
   7. BPS Phase Unwrap          - phase_trajectory is monotone under linear drift
-  8. BPS Convergence           - lms(cpr_type='bps') converges under Wiener phase noise
+  8. BPS Convergence           - lms(cpr=BPS()) converges under Wiener phase noise
   9. BPS Block Size > 1        - bps_block_size=32 still converges (incremental sum)
- 10. RLS + BPS                 - rls(cpr_type='bps') convergence smoke test
- 11. PLL Joint Channels        - cpr_joint_channels=True shares phase across MIMO
- 12. CPRState warm-start       - second call resumes phase without re-lock transient
- 13. input_norm_factor         - pre-supplied scale skips RMS, result matches manual scale
- 14. Inline PLL raw gains      - cpr_pll_mu and cpr_pll_beta validation and parity
+ 10. RLS + BPS                 - rls(cpr=BPS()) convergence smoke test
+ 11. PLL Joint Channels        - joint_channels=True shares phase across MIMO
+ 12. state= warm-start         - second call resumes phase without re-lock transient
+ 14. Inline PLL raw gains      - PLL mu and beta validation and parity
 """
 
 import numpy as np
 import pytest
 
-from commkit.backend import to_device
-from commkit.equalization import CPRState, lms, rls
+from commkit.equalization import lms, rls
 from commkit.frequency import (
-    correct_frequency_offset_blockwise,
-    estimate_frequency_offset_mth_power,
+    MthPower,
+    correct_frequency_offset,
+    estimate_frequency_offset,
 )
-from commkit.mapping import gray_constellation
-from commkit.recovery import recover_carrier_phase_pll
+from commkit.mapping import Constellation
+from commkit.recovery import BPS, PLL, CycleSlip, estimate_carrier_phase
 from tests.common.conversions import to_numpy
 from tests.common.metrics import calc_mse_db
 from tests.common.signals import (
@@ -83,158 +81,27 @@ def _wiener_phase_signal(n_sym=4000, snr_db=20.0, linewidth=1e4, fs=1.0, seed=42
 class TestCPREqualizerBaseline:
     """Baseline equivalence and zero-deviation tests."""
 
-    @pytest.mark.parametrize("backend", ["numba", "jax"])
     @pytest.mark.parametrize("algo", ["lms", "rls"])
-    def test_cpr_none_baseline(self, backend, algo, xp):
-        """cpr_type=None produces bit-exact output vs the unmodified algorithm."""
-        if backend == "jax":
-            pytest.importorskip("jax")
+    def test_cpr_none_baseline(self, algo, xp):
+        """cpr=None produces bit-exact output vs the unmodified algorithm."""
         samples, syms = _qpsk_signal(n_sym=2000)
         kwargs = dict(
             training_symbols=syms[:500],
             num_taps=11,
             sps=2,
-            modulation="psk",
-            order=4,
-            backend=backend,
+            constellation=Constellation.psk(4),
         )
         fn = lms if algo == "lms" else rls
         extra = {} if algo == "lms" else {"sps": 2}
         kwargs.update(extra)
 
-        res_base = fn(xp.asarray(samples), **kwargs, cpr_type=None)
-        res_cpr_none = fn(xp.asarray(samples), **kwargs, cpr_type=None)
+        res_base = fn(xp.asarray(samples), **kwargs, cpr=None)
+        res_cpr_none = fn(xp.asarray(samples), **kwargs, cpr=None)
 
         assert bool(
             xp.all(xp.asarray(res_base.y_hat) == xp.asarray(res_cpr_none.y_hat))
-        ), f"{algo}/{backend}: cpr_type=None must be deterministic"
+        ), f"{algo}: cpr=None must be deterministic"
         assert res_cpr_none.phase_trajectory is None
-
-    def test_baseline_cpr_none_matches_unwrapped(self, xp, xpt):
-        """cpr_type=None baseline is identical to a standalone un-equalized slice."""
-        samples, syms = _qpsk_signal(n_sym=500)
-        kw = dict(
-            num_taps=11,
-            sps=2,
-            modulation="psk",
-            order=4,
-            cpr_type="pll",
-        )
-        r_default = lms(samples, syms[:50], **kw)
-        r_explicit_none = lms(
-            samples, syms[:50], **kw, cpr_state=None, input_norm_factor=None
-        )
-        xpt.assert_array_equal(
-            to_numpy(r_default.y_hat),
-            to_numpy(r_explicit_none.y_hat),
-        )
-
-
-class TestCPRBackendParity:
-    """Numba, JAX CPU, and JAX GPU backend equivalence."""
-
-    @pytest.mark.cpu_only
-    @pytest.mark.parametrize("cpr_type", ["pll", "bps"])
-    def test_numba_jax_parity_lms(self, cpr_type, xp, jax):
-        """Numba and JAX LMS+CPR produce matching outputs within float32 tolerance."""
-        samples, syms = _qpsk_signal(n_sym=1000)
-        kwargs = dict(
-            training_symbols=syms[:300],
-            num_taps=11,
-            sps=2,
-            modulation="psk",
-            order=4,
-            cpr_type=cpr_type,
-            cpr_pll_bandwidth=5e-3,
-            cpr_bps_test_phases=32,
-            cpr_cycle_slip_correction=False,
-        )
-        res_nb = lms(xp.asarray(samples), **kwargs, backend="numba")
-        res_jx = lms(xp.asarray(samples), **kwargs, backend="jax")
-
-        max_diff = float(
-            xp.max(xp.abs(xp.asarray(res_nb.y_hat) - xp.asarray(res_jx.y_hat)))
-        )
-        assert max_diff < 1e-4, (
-            f"LMS cpr={cpr_type}: Numba vs JAX y_hat mismatch (max diff {max_diff:.2e})"
-        )
-        assert res_nb.phase_trajectory is not None
-        assert res_jx.phase_trajectory is not None
-
-    @pytest.mark.cpu_only
-    def test_numba_jax_parity_bps_nonsquare(self, xp, jax):
-        """Numba/JAX BPS parity on a non-square (32-QAM cross) constellation."""
-        rng = np.random.default_rng(7)
-        const = gray_constellation("qam", 32).astype(np.complex64)
-        idxs = rng.integers(0, 32, 1200)
-        syms = const[idxs]
-        samples = np.repeat(syms, 2)
-        noise_pwr = 10 ** (-30.0 / 10)
-        samples = (
-            samples
-            + np.sqrt(noise_pwr / 2)
-            * (
-                rng.standard_normal(len(samples))
-                + 1j * rng.standard_normal(len(samples))
-            )
-        ).astype(np.complex64)
-
-        kwargs = dict(
-            training_symbols=syms[:400],
-            num_taps=11,
-            sps=2,
-            modulation="qam",
-            order=32,
-            cpr_type="bps",
-            cpr_bps_test_phases=32,
-            cpr_bps_block_size=16,
-            cpr_cycle_slip_correction=False,
-        )
-        res_nb = lms(xp.asarray(samples), **kwargs, backend="numba")
-        res_jx = lms(xp.asarray(samples), **kwargs, backend="jax")
-
-        max_diff = float(
-            xp.max(xp.abs(xp.asarray(res_nb.y_hat) - xp.asarray(res_jx.y_hat)))
-        )
-        assert max_diff < 1e-4, (
-            f"32-QAM BPS: Numba vs JAX y_hat mismatch (max diff {max_diff:.2e})"
-        )
-
-    @pytest.mark.gpu_only
-    def test_jax_cpr_gpu_device(self, xp, jax):
-        """JAX-CPR runs on an explicit GPU device and matches the CPU-JAX result."""
-        samples, syms = _qpsk_signal(n_sym=1500)
-        kwargs = dict(
-            training_symbols=syms[:400],
-            num_taps=11,
-            sps=2,
-            modulation="psk",
-            order=4,
-            cpr_type="bps",
-            cpr_bps_test_phases=32,
-            cpr_bps_block_size=16,
-        )
-        r_cpu = lms(np.asarray(samples), **kwargs, backend="jax", device="cpu")
-        r_gpu = lms(xp.asarray(samples), **kwargs, backend="jax", device="gpu")
-
-        assert isinstance(r_gpu.cpr_state.bps_prev4, np.ndarray)
-        assert isinstance(r_gpu.cpr_state.jax_bps_buf, np.ndarray)
-
-        max_diff = float(
-            np.max(np.abs(np.asarray(r_cpu.y_hat) - to_device(r_gpu.y_hat, "cpu")))
-        )
-        assert max_diff < 1e-4, (
-            f"GPU vs CPU JAX-CPR y_hat mismatch (max diff {max_diff:.2e})"
-        )
-
-        r_gpu2 = lms(
-            xp.asarray(samples),
-            **kwargs,
-            backend="jax",
-            device="gpu",
-            cpr_state=r_gpu.cpr_state,
-        )
-        assert r_gpu2.y_hat is not None
 
 
 class TestCPRPLLConvergence:
@@ -244,7 +111,7 @@ class TestCPRPLLConvergence:
         """LMS+PLL recovers through deliberate π/2 phase steps without diverging."""
         rng = np.random.default_rng(42)
         n_sym = 3000
-        const = gray_constellation("psk", 4).astype(np.complex64)
+        const = Constellation.psk(4).points.astype(np.complex64)
         idxs = rng.integers(0, 4, n_sym)
         syms = const[idxs]
 
@@ -258,16 +125,11 @@ class TestCPRPLLConvergence:
 
         res = lms(
             xp.asarray(samples),
-            training_symbols=syms[:300],
+            syms[:300],
             num_taps=1,
             sps=1,
-            modulation="psk",
-            order=4,
-            cpr_type="pll",
-            cpr_pll_bandwidth=5e-3,
-            cpr_cycle_slip_correction=True,
-            cpr_cycle_slip_history=200,
-            backend="numba",
+            constellation=Constellation.psk(4),
+            cpr=PLL(bandwidth=5e-3, cycle_slip=CycleSlip(history=200)),
         )
 
         assert res.phase_trajectory is not None
@@ -285,7 +147,7 @@ class TestCPRPLLConvergence:
         rng = np.random.default_rng(7)
         n_sym = 5000
         linewidth_ts = 1e-4
-        const = gray_constellation("qam", 16).astype(np.complex64)
+        const = Constellation.qam(16).points.astype(np.complex64)
         idxs = rng.integers(0, 16, n_sym)
         syms = const[idxs]
 
@@ -304,15 +166,11 @@ class TestCPRPLLConvergence:
         bw = 5e-3
         res = lms(
             xp.asarray(samples),
-            training_symbols=syms[:1000],
+            syms[:1000],
             num_taps=1,
             sps=1,
-            modulation="qam",
-            order=16,
-            cpr_type="pll",
-            cpr_pll_bandwidth=bw,
-            cpr_cycle_slip_correction=False,
-            backend="numba",
+            constellation=Constellation.qam(16),
+            cpr=PLL(bandwidth=bw),
         )
 
         assert res.phase_trajectory is not None
@@ -323,11 +181,8 @@ class TestCPRPLLConvergence:
         bound = np.sqrt(bw / linewidth_ts)
         assert rmse < bound, f"PLL phase RMSE {rmse:.4f} exceeds bound {bound:.4f}"
 
-    @pytest.mark.parametrize("backend", ["numba", "jax"])
-    def test_inline_raw_gains_match_bandwidth(self, backend, xp):
+    def test_inline_raw_gains_match_bandwidth(self, xp):
         """cpr_pll_mu/beta set to bandwidth-equivalent gains reproduces bandwidth path."""
-        if backend == "jax":
-            pytest.importorskip("jax")
         samples, syms = _qpsk_signal(n_sym=1500)
         samples = (samples * np.exp(1j * 0.2)).astype(np.complex64)
         bw = 5e-3
@@ -335,18 +190,15 @@ class TestCPRPLLConvergence:
             training_symbols=syms[:300],
             num_taps=11,
             sps=2,
-            modulation="psk",
-            order=4,
-            cpr_type="pll",
-            cpr_cycle_slip_correction=False,
-            backend=backend,
+            constellation=Constellation.psk(4),
         )
-        res_bw = lms(xp.asarray(samples), **kw, cpr_pll_bandwidth=bw)
+        res_bw = lms(xp.asarray(samples), **kw, cpr=PLL(bandwidth=bw))
         res_raw = lms(
             xp.asarray(samples),
             **kw,
-            cpr_pll_mu=float(np.float32(4.0 * bw)),
-            cpr_pll_beta=float(np.float32(4.0 * bw**2)),
+            cpr=PLL(
+                mu=float(np.float32(4.0 * bw)), beta=float(np.float32(4.0 * bw**2))
+            ),
         )
         max_diff = float(
             xp.max(xp.abs(xp.asarray(res_bw.y_hat) - xp.asarray(res_raw.y_hat)))
@@ -361,43 +213,52 @@ class TestCPRPLLConvergence:
         with pytest.raises(ValueError, match="beta requires mu"):
             lms(
                 xp.asarray(samples),
-                training_symbols=syms[:100],
+                syms[:100],
                 num_taps=11,
                 sps=2,
-                modulation="psk",
-                order=4,
-                cpr_type="pll",
-                cpr_pll_beta=1e-3,
-                backend="numba",
+                constellation=Constellation.psk(4),
+                cpr=PLL(beta=1e-3),
             )
+
+    def test_inline_pll_phase_init_seeds_cold_start(self, xp):
+        """PLL.phase_init is the first applied phase of a cold start."""
+        samples, syms = _qpsk_signal(n_sym=400)
+        res = lms(
+            xp.asarray(samples),
+            syms[:100],
+            num_taps=11,
+            sps=2,
+            constellation=Constellation.psk(4),
+            cpr=PLL(phase_init=0.3),
+        )
+        assert float(res.phase_trajectory[0]) == pytest.approx(0.3)
 
     def test_inline_pll_parity_with_standalone(self, xp):
         """A frozen 1-tap identity equalizer reduces inline PLL to standalone DD-PLL."""
         rng = np.random.default_rng(3)
         n_sym = 2000
-        const = gray_constellation("psk", 4).astype(np.complex64)
+        const = Constellation.psk(4).points.astype(np.complex64)
         syms = const[rng.integers(0, 4, n_sym)]
         samples = (syms * np.exp(1j * 0.3).astype(np.complex64)).astype(np.complex64)
 
         m, b = 0.02, 1e-4
         res = lms(
             xp.asarray(samples),
-            training_symbols=syms[:200],
+            syms[:200],
             num_taps=1,
             sps=1,
             step_size=0.0,
-            w_init=xp.asarray(np.array([1.0 + 0j], dtype=np.complex64)),
-            modulation="psk",
-            order=4,
-            cpr_type="pll",
-            cpr_pll_mu=m,
-            cpr_pll_beta=b,
-            cpr_cycle_slip_correction=False,
-            backend="numba",
+            initial_taps=xp.asarray(np.array([1.0 + 0j], dtype=np.complex64)),
+            constellation=Constellation.psk(4),
+            cpr=PLL(mu=m, beta=b),
         )
         phi_inline = to_numpy(res.phase_trajectory)
         phi_std = to_numpy(
-            recover_carrier_phase_pll(xp.asarray(samples), "psk", 4, mu=m, beta=b)
+            estimate_carrier_phase(
+                xp.asarray(samples),
+                PLL(mu=m, beta=b),
+                constellation=Constellation.psk(4),
+            ).value
         )
 
         tail = slice(n_sym // 4, n_sym)
@@ -408,12 +269,11 @@ class TestCPRPLLConvergence:
 class TestCPRBPSConvergence:
     """Blind Phase Search unwrapping, convergence, and block sizing."""
 
-    @pytest.mark.parametrize("backend", ["numba", "jax"])
-    def test_bps_phase_unwrap(self, backend, xp):
+    def test_bps_phase_unwrap(self, xp):
         """phase_trajectory from BPS must not wrap back to [0, π/2) under a ramp."""
         rng = np.random.default_rng(5)
         n_sym = 3000
-        const = gray_constellation("qam", 16).astype(np.complex64)
+        const = Constellation.qam(16).points.astype(np.complex64)
         syms = const[rng.integers(0, 16, n_sym)]
 
         phase_true = np.linspace(0.0, 3.0, n_sym, dtype=np.float64)
@@ -427,16 +287,11 @@ class TestCPRBPSConvergence:
 
         res = lms(
             xp.asarray(samples),
-            training_symbols=syms[:500],
+            syms[:500],
             num_taps=1,
             sps=1,
-            modulation="qam",
-            order=16,
-            cpr_type="bps",
-            cpr_bps_test_phases=64,
-            cpr_bps_block_size=32,
-            cpr_cycle_slip_correction=False,
-            backend=backend,
+            constellation=Constellation.qam(16),
+            cpr=BPS(test_phases=64, block_size=32),
         )
 
         phi = xp.asarray(res.phase_trajectory).astype(xp.float64)
@@ -446,12 +301,59 @@ class TestCPRBPSConvergence:
             f"BPS phase_trajectory looks wrapped (span={span:.3f} rad < π/2)"
         )
 
+    @pytest.mark.parametrize("algo", ["lms", "rls", "block_lms"])
+    @pytest.mark.parametrize(
+        "constellation",
+        [Constellation.psk(8), Constellation.psk(2)],
+        ids=["8psk", "bpsk"],
+    )
+    def test_bps_searches_the_constellation_symmetry(self, algo, constellation, xp):
+        """Inline BPS on 8-PSK (π/4 symmetry) and BPSK (π) tracks a ramp
+        itself, without symbol errors: the candidates span ``2π/S``, not
+        ``π/2``."""
+        from commkit.equalization import block_lms
+
+        rng = np.random.default_rng(11)
+        n_sym, n_train = 4000, 500
+        points = constellation.points.astype(np.complex64)
+        syms = points[rng.integers(0, points.size, n_sym)]
+        phase = 0.2 + 1.5e-3 * np.arange(n_sym)  # inside the first branch, ±π/S
+        awgn = 0.05 * (rng.standard_normal(n_sym) + 1j * rng.standard_normal(n_sym))
+        samples = (syms * np.exp(1j * phase) + awgn).astype(np.complex64)
+        cpr = BPS(test_phases=32, block_size=16, cycle_slip=CycleSlip())
+        kw = dict(num_taps=1, sps=1, constellation=constellation, cpr=cpr)
+        if algo == "lms":
+            res = lms(xp.asarray(samples), syms[:n_train], step_size=1e-4, **kw)
+        elif algo == "rls":
+            res = rls(
+                xp.asarray(samples), syms[:n_train], forgetting_factor=0.9999, **kw
+            )
+        else:
+            res = block_lms(
+                xp.asarray(samples),
+                syms[:n_train],
+                step_size=1e-4,
+                block_size=32,
+                **kw,
+            )
+        y = to_numpy(res.y_hat)[n_train:]
+        ref = syms[n_train : n_train + y.size]
+        decided = points[np.argmin(np.abs(y[:, None] - points[None, :]), axis=1)]
+        assert np.count_nonzero(decided != ref) == 0
+        # Slow taps: the CPR, not the taps, follows the ramp (modulo 2π/S).
+        S = constellation.rotational_symmetry
+        phi = to_numpy(res.phase_trajectory)[n_train:]
+        residual = np.angle(
+            np.exp(1j * S * (phase[n_train : n_train + phi.size] - phi))
+        )
+        assert np.std(residual / S) < 0.05
+
     def test_bps_phase_noise_tracking(self, xp):
         """LMS+BPS converges under Wiener phase noise (Numba backend)."""
         rng = np.random.default_rng(11)
         n_sym = 5000
         linewidth_ts = 5e-5
-        const = gray_constellation("qam", 16).astype(np.complex64)
+        const = Constellation.qam(16).points.astype(np.complex64)
         syms = const[rng.integers(0, 16, n_sym)]
 
         phase_noise = np.cumsum(
@@ -469,26 +371,18 @@ class TestCPRBPSConvergence:
 
         res_bps = lms(
             samples,
-            training_symbols=syms[:1000],
+            syms[:1000],
             num_taps=1,
             sps=1,
-            modulation="qam",
-            order=16,
-            cpr_type="bps",
-            cpr_bps_test_phases=64,
-            cpr_bps_block_size=32,
-            cpr_cycle_slip_correction=False,
-            backend="numba",
+            constellation=Constellation.qam(16),
+            cpr=BPS(test_phases=64, block_size=32),
         )
         res_none = lms(
             samples,
-            training_symbols=syms[:1000],
+            syms[:1000],
             num_taps=1,
             sps=1,
-            modulation="qam",
-            order=16,
-            cpr_type=None,
-            backend="numba",
+            constellation=Constellation.qam(16),
         )
 
         mse_bps = float(xp.mean(xp.abs(xp.asarray(res_bps.error[-2000:])) ** 2))
@@ -502,7 +396,7 @@ class TestCPRBPSConvergence:
         """lms(cpr_type='bps', bps_block_size=32) converges - verifies incremental sum."""
         rng = np.random.default_rng(13)
         n_sym = 4000
-        const = gray_constellation("qam", 16).astype(np.complex64)
+        const = Constellation.qam(16).points.astype(np.complex64)
         syms = const[rng.integers(0, 16, n_sym)]
 
         phase_noise = np.cumsum(
@@ -520,29 +414,19 @@ class TestCPRBPSConvergence:
 
         res_k1 = lms(
             samples,
-            training_symbols=syms[:1000],
+            syms[:1000],
             num_taps=1,
             sps=1,
-            modulation="qam",
-            order=16,
-            cpr_type="bps",
-            cpr_bps_test_phases=32,
-            cpr_bps_block_size=1,
-            cpr_cycle_slip_correction=False,
-            backend="numba",
+            constellation=Constellation.qam(16),
+            cpr=BPS(test_phases=32, block_size=1),
         )
         res_k32 = lms(
             samples,
-            training_symbols=syms[:1000],
+            syms[:1000],
             num_taps=1,
             sps=1,
-            modulation="qam",
-            order=16,
-            cpr_type="bps",
-            cpr_bps_test_phases=32,
-            cpr_bps_block_size=32,
-            cpr_cycle_slip_correction=False,
-            backend="numba",
+            constellation=Constellation.qam(16),
+            cpr=BPS(test_phases=32, block_size=32),
         )
 
         mse_k1 = float(xp.mean(xp.abs(xp.asarray(res_k1.error[-1000:])) ** 2))
@@ -551,10 +435,10 @@ class TestCPRBPSConvergence:
         assert mse_k1 < 0.1, f"BPS K=1 did not converge: MSE={mse_k1:.4f}"
 
     def test_rls_bps_convergence(self, xp):
-        """rls(cpr_type='bps') converges under phase noise."""
+        """rls(cpr=BPS()) converges under phase noise."""
         rng = np.random.default_rng(17)
         n_sym = 3000
-        const = gray_constellation("qam", 16).astype(np.complex64)
+        const = Constellation.qam(16).points.astype(np.complex64)
         syms = const[rng.integers(0, 16, n_sym)]
 
         phase_noise = np.cumsum(
@@ -570,22 +454,102 @@ class TestCPRBPSConvergence:
 
         res = rls(
             xp.asarray(samples),
-            training_symbols=syms[:500],
+            syms[:500],
             num_taps=1,
             sps=1,
-            modulation="qam",
-            order=16,
-            cpr_type="bps",
-            cpr_bps_test_phases=64,
-            cpr_bps_block_size=32,
-            cpr_cycle_slip_correction=False,
-            backend="numba",
+            constellation=Constellation.qam(16),
+            cpr=BPS(test_phases=64, block_size=32),
         )
 
         assert res.phase_trajectory is not None
         assert res.phase_trajectory.shape == (n_sym,)
         mse = float(xp.mean(xp.abs(xp.asarray(res.error[-1000:])) ** 2))
         assert mse < 0.1, f"RLS+BPS did not converge: MSE={mse:.4f}"
+
+
+class TestBlockSlipCarry:
+    """A slip correction carries into the block unwrap state."""
+
+    def test_trajectory_does_not_depend_on_the_block_size(self, xp):
+        """With frozen taps the CPR must not depend on where the blocks are
+        cut.  A fast 8-PSK phase step makes the slip corrector fire; its
+        correction carried times 4 instead of times S = 8 left every later
+        block start half a slip quantum (pi/8) away."""
+        from commkit.equalization import block_lms
+
+        c = Constellation.psk(8)
+        rng = np.random.default_rng(4)
+        n = 1536
+        syms = c.points[rng.integers(0, 8, n)].astype(np.complex64)
+        phase = np.zeros(n)
+        phase[1000:1004] = np.linspace(0.0, np.pi / 4, 4)
+        phase[1004:] = np.pi / 4
+        noise = 0.01 * (rng.standard_normal(n) + 1j * rng.standard_normal(n))
+        x = xp.asarray((syms * np.exp(1j * phase) + noise).astype(np.complex64))
+        cpr = BPS(test_phases=32, block_size=2, cycle_slip=CycleSlip(threshold=0.3))
+
+        def trajectory(block_size):
+            res = block_lms(
+                x,
+                syms[:200],
+                num_taps=1,
+                sps=1,
+                step_size=0.0,
+                block_size=block_size,
+                constellation=c,
+                cpr=cpr,
+            )
+            return to_numpy(res.phase_trajectory).ravel()
+
+        np.testing.assert_allclose(trajectory(64), trajectory(n), atol=1e-6)
+
+
+class TestBPSTrainingAnchor:
+    """Training symbols anchor the inline BPS phase."""
+
+    @pytest.mark.parametrize("algo", ["lms", "rls", "block_lms"])
+    @pytest.mark.parametrize("seed", [1, 5])
+    def test_multi_tap_receiver_locks_without_rotation(self, algo, seed, xp):
+        """A matched-filtered 16-QAM record at 2 sps through a 21-tap
+        equalizer: the output matches the reference without a rotation and
+        with the error rate of the noise alone.
+
+        Blind BPS during training started from a few-symbol window that fits
+        any rotation; the training error copied that phase into the taps and
+        nothing fixed the absolute phase, so the output wandered and slipped
+        (tail EVM above 100 %).  The data-aided estimate on the training
+        symbols pins it.
+        """
+        import commkit as ck
+        from commkit.equalization import block_lms
+
+        c = Constellation.qam(16)
+        tx = ck.generate(
+            c, 8192, symbol_rate=32e9, sps=2, pulse=ck.RRC(rolloff=0.1), rng=seed
+        )
+        rx = ck.impairments.apply_awgn(tx, esn0_db=18, rng=3)
+        rx = ck.filtering.matched_filter(rx).to("gpu" if xp is not np else "cpu")
+        ref = to_numpy(tx.reference.symbols)
+        kw = dict(num_taps=21, cpr=BPS(test_phases=64))
+        train = ref[:2000]
+        if algo == "lms":
+            res = lms(
+                rx, num_taps=21, step_size=1e-3, cpr=kw["cpr"], training_symbols=train
+            )
+        elif algo == "rls":
+            res = rls(rx, forgetting_factor=0.999, training_symbols=train, **kw)
+        else:
+            res = block_lms(
+                rx, step_size=1e-3, block_size=32, training_symbols=train, **kw
+            )
+        y = to_numpy(res.y_hat)[-3000:]
+        r = ref[: to_numpy(res.y_hat).size][-3000:]
+        assert abs(np.angle(np.vdot(r, y))) < 0.05
+
+        def nearest(v):
+            return np.argmin(np.abs(v[:, None] - c.points), axis=1)
+
+        assert np.count_nonzero(nearest(y) != nearest(r)) / r.size < 5e-3
 
 
 class TestCPRMIMOJoint:
@@ -595,7 +559,7 @@ class TestCPRMIMOJoint:
         """2x2 butterfly LMS+PLL converges on both output channels."""
         rng = np.random.default_rng(99)
         n_sym = 3000
-        const = gray_constellation("qam", 16).astype(np.complex64)
+        const = Constellation.qam(16).points.astype(np.complex64)
         const_xp = xp.asarray(const)
 
         syms_a = const[rng.integers(0, 16, n_sym)]
@@ -620,15 +584,11 @@ class TestCPRMIMOJoint:
 
         res = lms(
             samples,
-            training_symbols=training,
+            training,
             num_taps=1,
             sps=1,
-            modulation="qam",
-            order=16,
-            cpr_type="pll",
-            cpr_pll_bandwidth=5e-3,
-            cpr_cycle_slip_correction=False,
-            backend="numba",
+            constellation=Constellation.qam(16),
+            cpr=PLL(bandwidth=5e-3),
         )
 
         assert res.phase_trajectory is not None
@@ -645,10 +605,10 @@ class TestCPRMIMOJoint:
             assert mse < 0.1, f"MIMO channel {ch} MSE too large: {mse:.4f}"
 
     def test_pll_joint_channels(self, xp):
-        """cpr_joint_channels=True makes both PLL integrators identical (shared LO)."""
+        """joint_channels=True makes both PLL integrators identical (shared LO)."""
         rng = np.random.default_rng(23)
         n_sym = 3000
-        const = gray_constellation("qam", 16).astype(np.complex64)
+        const = Constellation.qam(16).points.astype(np.complex64)
         syms_a = const[rng.integers(0, 16, n_sym)]
         syms_b = const[rng.integers(0, 16, n_sym)]
 
@@ -676,16 +636,11 @@ class TestCPRMIMOJoint:
 
         res = lms(
             samples,
-            training_symbols=training,
+            training,
             num_taps=1,
             sps=1,
-            modulation="qam",
-            order=16,
-            cpr_type="pll",
-            cpr_pll_bandwidth=5e-3,
-            cpr_joint_channels=True,
-            cpr_cycle_slip_correction=False,
-            backend="numba",
+            constellation=Constellation.qam(16),
+            cpr=PLL(bandwidth=5e-3, joint_channels=True),
         )
 
         assert res.phase_trajectory is not None
@@ -693,140 +648,72 @@ class TestCPRMIMOJoint:
         phi0 = xp.asarray(res.phase_trajectory[0])
         phi1 = xp.asarray(res.phase_trajectory[1])
         assert bool(xp.all(phi0 == phi1)), (
-            "cpr_joint_channels=True: PLL integrators must be identical"
+            "joint_channels=True: PLL integrators must be identical"
         )
 
 
-class TestCPRStatePersistence:
-    """State preservation and warm-start behavior."""
+class TestStatePersistence:
+    """Continuation through state=: CPR resumes without a re-lock transient."""
 
     @pytest.mark.parametrize("cpr_mode", ["pll", "bps"])
-    def test_cpr_state_warmstart_lms(self, cpr_mode, xp):
-        """Second lms call with cpr_state should have lower initial MSE than cold restart."""
+    def test_state_warmstart_lms(self, cpr_mode, xp):
+        """A continued call is not worse than a cold restart with the same taps."""
         n_sym = 4000
         half = n_sym // 2
         samples_np, syms_np = _wiener_phase_signal(n_sym=n_sym)
-        s1, s2 = samples_np[:half], samples_np[half:]
-        t1, t2 = syms_np[:half], syms_np[half:]
-
-        r1 = lms(
-            s1,
-            t1,
+        cpr = PLL() if cpr_mode == "pll" else BPS(block_size=16, test_phases=32)
+        kw = dict(
             num_taps=5,
             sps=1,
             step_size=5e-3,
-            modulation="psk",
-            order=4,
-            cpr_type=cpr_mode,
-            cpr_bps_block_size=16,
-            cpr_bps_test_phases=32,
+            constellation=Constellation.psk(4),
+            cpr=cpr,
         )
-        assert r1.cpr_state is not None, (
-            "cpr_state must be populated when cpr_type is set"
-        )
-        assert r1.cpr_state.cpr_type == cpr_mode
-        assert r1.cpr_state.num_ch == 1
 
+        r1 = lms(samples_np[:half], syms_np[:half], **kw)
+        st = r1.state
+        assert st is not None and st.carrier is not None
+        assert st.cpr == cpr and st.num_channels == 1
+        ov = st.overlap
+        # The continued call starts at symbol half - ov; train 20 symbols.
         r2_warm = lms(
-            s2,
-            t2[:20],
-            num_taps=5,
-            sps=1,
-            step_size=5e-3,
-            modulation="psk",
-            order=4,
-            cpr_type=cpr_mode,
-            cpr_bps_block_size=16,
-            cpr_bps_test_phases=32,
-            w_init=r1.weights,
-            cpr_state=r1.cpr_state,
-            input_norm_factor=r1.input_norm_factor,
+            samples_np[half:], syms_np[half - ov : half - ov + 20], **kw, state=st
         )
         r2_cold = lms(
-            s2,
-            t2[:20],
-            num_taps=5,
-            sps=1,
-            step_size=5e-3,
-            modulation="psk",
-            order=4,
-            cpr_type=cpr_mode,
-            cpr_bps_block_size=16,
-            cpr_bps_test_phases=32,
-            w_init=r1.weights,
+            samples_np[half:], syms_np[half : half + 20], **kw, initial_taps=r1.weights
         )
-        n_eval_start, n_eval_end = 20, 50
-        mse_warm = calc_mse_db(
-            r2_warm.y_hat[n_eval_start:n_eval_end], t2[n_eval_start:n_eval_end]
-        )
-        mse_cold = calc_mse_db(
-            r2_cold.y_hat[n_eval_start:n_eval_end], t2[n_eval_start:n_eval_end]
-        )
+        ref = syms_np[half + 20 : half + 50]
+        mse_warm = calc_mse_db(r2_warm.y_hat[ov + 20 : ov + 50], ref)
+        mse_cold = calc_mse_db(r2_cold.y_hat[20:50], ref)
         assert mse_warm < mse_cold + 3.0, (
-            f"Warm CPRState should not be worse than cold by >3 dB: "
+            f"Warm state should not be worse than cold by >3 dB: "
             f"warm={mse_warm:.1f} dB  cold={mse_cold:.1f} dB"
         )
 
-    def test_cpr_state_warmstart_rls(self, xp):
-        """rls with cpr_state warm-start: second call has valid cpr_state output."""
+    def test_state_warmstart_rls(self, xp):
+        """The RLS state carries P and the PLL state, and continues."""
         n_sym = 2000
         half = n_sym // 2
         samples_np, syms_np = _wiener_phase_signal(n_sym=n_sym)
-        s1, s2 = samples_np[:half], samples_np[half:]
-        t1 = syms_np[:half]
+        kw = dict(num_taps=5, sps=1, constellation=Constellation.psk(4), cpr=PLL())
 
-        r1 = rls(
-            s1,
-            t1,
-            num_taps=5,
-            sps=1,
-            modulation="psk",
-            order=4,
-            cpr_type="pll",
-        )
-        assert r1.cpr_state is not None
-        assert isinstance(r1.cpr_state, CPRState)
-        assert r1.cpr_state.pll_phi is not None
+        r1 = rls(samples_np[:half], syms_np[:half], **kw)
+        st = r1.state
+        assert st.inverse_correlation is not None
+        assert st.inverse_correlation.dtype == np.complex128
+        assert st.inverse_correlation.shape == (5, 5)
+        assert st.carrier is not None
 
-        r2 = rls(
-            s2,
-            None,
-            num_taps=5,
-            sps=1,
-            modulation="psk",
-            order=4,
-            cpr_type="pll",
-            w_init=r1.weights,
-            cpr_state=r1.cpr_state,
-            input_norm_factor=r1.input_norm_factor,
-        )
-        assert r2.cpr_state is not None
-        assert r2.cpr_state.cpr_type == "pll"
-
-    def test_input_norm_factor_lms_skips_rms(self, xp, xpt):
-        """Supplying input_norm_factor should give same result as letting lms compute it."""
-        samples_np, syms_np = _wiener_phase_signal(n_sym=1000)
-        samples, syms = xp.asarray(samples_np), xp.asarray(syms_np)
-        kw = dict(num_taps=5, sps=1, step_size=5e-3, modulation="psk", order=4)
-
-        r_auto = lms(samples, syms[:50], **kw)
-        nf = r_auto.input_norm_factor
-
-        r_supplied = lms(samples, syms[:50], **kw, input_norm_factor=nf)
-        xpt.assert_allclose(
-            xp.asarray(r_supplied.y_hat),
-            xp.asarray(r_auto.y_hat),
-            rtol=1e-5,
-            atol=1e-6,
-        )
-        assert r_supplied.input_norm_factor == pytest.approx(float(nf), rel=1e-6)
+        r2 = rls(samples_np[half:], None, **kw, state=st)
+        assert r2.state.equalizer == "rls"
+        assert r2.y_hat.shape[-1] > 0
 
 
 class TestBlockwiseFOE:
     """Frequency offset estimation and blockwise correction."""
 
     def test_blockwise_foe_chirp(self, xp):
-        """correct_frequency_offset_blockwise recovers a linearly chirping frequency."""
+        """A blockwise M-th power estimate removes a linearly chirping frequency."""
         rng = np.random.default_rng(3)
         fs = 1e9
         n = 65536
@@ -837,22 +724,20 @@ class TestBlockwiseFOE:
         phase_chirp = 2 * np.pi * np.cumsum(f_t) / fs
         carrier = np.exp(1j * phase_chirp).astype(np.complex64)
 
-        const = gray_constellation("qam", 16).astype(np.complex64)
+        const = Constellation.qam(16).points.astype(np.complex64)
         idxs = rng.integers(0, 16, n // sps)
         syms = const[idxs]
         base_np = np.repeat(syms, sps).astype(np.complex64)
         samples = xp.asarray((base_np * carrier).astype(np.complex64))
         base = xp.asarray(base_np)
 
-        corrected = correct_frequency_offset_blockwise(
+        est = estimate_frequency_offset(
             samples,
-            fs,
-            block_size=4096,
-            overlap=0.5,
-            estimator=lambda b, f: estimate_frequency_offset_mth_power(
-                b, sampling_rate=f, modulation="qam", order=16
-            ),
+            MthPower(block_size=4096, overlap=0.5),
+            sampling_rate=fs,
+            constellation=Constellation.qam(16),
         )
+        corrected = correct_frequency_offset(samples, est, sampling_rate=fs)
 
         ratio_corr = float(
             xp.mean(xp.abs(corrected - base) ** 2) / xp.mean(xp.abs(base) ** 2)

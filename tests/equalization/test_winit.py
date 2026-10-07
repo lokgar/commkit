@@ -3,9 +3,10 @@
 import numpy as np
 import pytest
 
-from commkit import equalization, generate_qam
+from commkit import equalization, generate
 from commkit.equalization import EqualizerResult
-from commkit.mapping import gray_constellation
+from commkit.filtering import RRC
+from commkit.mapping import Constellation
 from tests.common.conversions import to_numpy
 from tests.common.signals import make_test_psk_samples, make_test_qam_signal
 
@@ -27,11 +28,11 @@ def _make_qam16_rx(xp, n_symbols=2000, seed=0):
 # -----------------------------------------------------------------------------
 
 
-class TestWInit:
-    """w_init parameter: warm-start from prior equalizer weights."""
+class TestInitialTaps:
+    """initial_taps: start from prior equalizer weights."""
 
-    def test_lms_accepts_w_init(self, xp):
-        """lms() accepts w_init array with correct shape and returns EqualizerResult."""
+    def test_lms_accepts_initial_taps(self, xp):
+        """lms() accepts initial_taps array with correct shape and returns EqualizerResult."""
         rx = _make_qam16_rx(xp)
         num_taps, num_ch = 21, 1
         w0 = np.zeros((num_ch, num_ch, num_taps), dtype=np.complex64)
@@ -39,20 +40,20 @@ class TestWInit:
 
         result = equalization.lms(
             rx,
-            training_symbols=None,
-            modulation="qam",
-            order=16,
+            None,
+            constellation=Constellation.qam(16),
             num_taps=num_taps,
-            w_init=w0,
+            initial_taps=w0,
+            sps=2,
         )
         assert isinstance(result, EqualizerResult)
         assert result.weights.shape == (num_taps,)  # SISO squeeze
 
-    def test_rls_accepts_w_init(self, xp):
-        """rls() accepts w_init array with correct shape."""
+    def test_rls_accepts_initial_taps(self, xp):
+        """rls() accepts initial_taps array with correct shape."""
 
-        sig = generate_qam(
-            symbol_rate=1e6, num_symbols=1000, order=4, pulse_shape="rrc", sps=2, seed=1
+        sig = generate(
+            Constellation.qam(4), 1000, symbol_rate=1e6, sps=2, pulse=RRC(0.35), rng=1
         )
         rx = xp.asarray(sig.samples)
         num_taps, num_ch = 11, 1
@@ -61,52 +62,71 @@ class TestWInit:
 
         result = equalization.rls(
             rx,
-            training_symbols=xp.asarray(sig.source_symbols),
-            modulation="qam",
-            order=4,
+            xp.asarray(sig.reference.symbols),
+            constellation=Constellation.qam(4),
             num_taps=num_taps,
             sps=2,
-            w_init=w0,
+            initial_taps=w0,
         )
         assert isinstance(result, EqualizerResult)
 
-    def test_cma_accepts_w_init(self, xp):
-        """cma() accepts w_init array with correct shape."""
+    def test_cma_accepts_initial_taps(self, xp):
+        """cma() accepts initial_taps array with correct shape."""
         rx = _make_qam16_rx(xp)
         num_taps, num_ch = 21, 1
         w0 = np.zeros((num_ch, num_ch, num_taps), dtype=np.complex64)
         w0[0, 0, num_taps // 2] = 1.0 + 0j
 
         result = equalization.cma(
-            rx, modulation="qam", order=16, num_taps=num_taps, w_init=w0
+            rx,
+            constellation=Constellation.qam(16),
+            num_taps=num_taps,
+            initial_taps=w0,
+            sps=2,
         )
         assert isinstance(result, EqualizerResult)
 
-    def test_rde_accepts_w_init(self, xp):
-        """rde() accepts w_init array with correct shape."""
+    def test_rde_accepts_initial_taps(self, xp):
+        """rde() accepts initial_taps array with correct shape."""
         rx = _make_qam16_rx(xp)
         num_taps, num_ch = 21, 1
         w0 = np.zeros((num_ch, num_ch, num_taps), dtype=np.complex64)
         w0[0, 0, num_taps // 2] = 1.0 + 0j
 
         result = equalization.rde(
-            rx, modulation="qam", order=16, num_taps=num_taps, w_init=w0
+            rx,
+            constellation=Constellation.qam(16),
+            num_taps=num_taps,
+            initial_taps=w0,
+            sps=2,
         )
         assert isinstance(result, EqualizerResult)
 
-    def test_w_init_shape_mismatch_raises(self, xp):
-        """Wrong w_init shape raises ValueError before kernel is called."""
+    def test_initial_taps_shape_mismatch_raises(self, xp):
+        """Wrong initial_taps shape raises ValueError before kernel is called."""
         rx = _make_qam16_rx(xp)
         bad_w = np.zeros((1, 1, 99), dtype=np.complex64)  # wrong num_taps
 
-        with pytest.raises(ValueError, match="w_init shape"):
-            equalization.cma(rx, modulation="qam", order=16, num_taps=21, w_init=bad_w)
+        with pytest.raises(ValueError, match="initial_taps shape"):
+            equalization.cma(
+                rx,
+                constellation=Constellation.qam(16),
+                num_taps=21,
+                initial_taps=bad_w,
+                sps=2,
+            )
 
-        with pytest.raises(ValueError, match="w_init shape"):
-            equalization.rde(rx, modulation="qam", order=16, num_taps=21, w_init=bad_w)
+        with pytest.raises(ValueError, match="initial_taps shape"):
+            equalization.rde(
+                rx,
+                constellation=Constellation.qam(16),
+                num_taps=21,
+                initial_taps=bad_w,
+                sps=2,
+            )
 
     def test_lms_to_rde_handoff_output_shape(self, xp):
-        """LMS weights can be handed off to RDE via w_init; output shape is correct."""
+        """LMS weights can be handed off to RDE via initial_taps; output shape is correct."""
         rx = _make_qam16_rx(xp, n_symbols=3000)
         half = rx.shape[-1] // 2
 
@@ -115,10 +135,10 @@ class TestWInit:
 
         pre = equalization.lms(
             pre_rx,
-            modulation="qam",
-            order=16,
+            constellation=Constellation.qam(16),
             num_taps=21,
             step_size=0.05,
+            sps=2,
         )
         w0 = to_numpy(pre.weights)
         if w0.ndim == 1:
@@ -126,11 +146,11 @@ class TestWInit:
 
         result = equalization.rde(
             payload_rx,
-            modulation="qam",
-            order=16,
+            constellation=Constellation.qam(16),
             num_taps=21,
             step_size=1e-4,
-            w_init=w0,
+            initial_taps=w0,
+            sps=2,
         )
         expected_syms = payload_rx.shape[-1] // 2
         assert result.y_hat.shape[-1] == expected_syms
@@ -139,28 +159,23 @@ class TestWInit:
         """RDE warm-started from LMS achieves same or better EVM than cold-start."""
         from commkit.impairments import apply_awgn
 
-        sig = generate_qam(
-            symbol_rate=1e6,
-            num_symbols=4000,
-            order=16,
-            pulse_shape="rrc",
-            sps=2,
-            seed=42,
+        sig = generate(
+            Constellation.qam(16), 4000, symbol_rate=1e6, sps=2, pulse=RRC(0.35), rng=42
         )
         rx_np = apply_awgn(sig.samples, esn0_db=25.0, sps=2)
         rx = xp.asarray(rx_np)
 
         # Cold-start RDE
         cold = equalization.rde(
-            rx, modulation="qam", order=16, num_taps=21, step_size=5e-4
+            rx, constellation=Constellation.qam(16), num_taps=21, step_size=5e-4, sps=2
         )
         # LMS pre-convergence
         pre = equalization.lms(
             rx,
-            training_symbols=xp.asarray(sig.source_symbols[:200]),
-            modulation="qam",
-            order=16,
+            xp.asarray(sig.reference.symbols[:200]),
+            constellation=Constellation.qam(16),
             num_taps=21,
+            sps=2,
         )
         _w = pre.weights
         w0 = to_numpy(pre.weights)
@@ -169,11 +184,16 @@ class TestWInit:
 
         # Warm RDE
         warm = equalization.rde(
-            rx, modulation="qam", order=16, num_taps=21, step_size=5e-4, w_init=w0
+            rx,
+            constellation=Constellation.qam(16),
+            num_taps=21,
+            step_size=5e-4,
+            initial_taps=w0,
+            sps=2,
         )
 
         tail = slice(-500, None)
-        ref = to_numpy(sig.source_symbols)
+        ref = to_numpy(sig.reference.symbols)
         cold_hat = to_numpy(cold.y_hat)
         warm_hat = to_numpy(warm.y_hat)
         evm_cold = float(np.mean(np.abs(cold_hat[tail] - ref[tail]) ** 2))
@@ -184,50 +204,11 @@ class TestWInit:
         )
 
 
-class TestEqualizerWInitBackend:
-    """Verify w_init works correctly on both numba and jax backends."""
-
-    def test_cma_jax_w_init(self, xp, jax):
-        """CMA JAX backend accepts w_init without error."""
-        rx = _make_qam16_rx(xp)
-        num_taps = 21
-        w0 = np.zeros((1, 1, num_taps), dtype=np.complex64)
-        w0[0, 0, num_taps // 2] = 1.0 + 0j
-
-        result = equalization.cma(
-            rx,
-            modulation="qam",
-            order=16,
-            num_taps=num_taps,
-            w_init=w0,
-            backend="jax",
-        )
-        assert isinstance(result, EqualizerResult)
-
-    def test_rde_jax_w_init(self, xp, jax):
-        """RDE JAX backend accepts w_init without error."""
-        rx = _make_qam16_rx(xp)
-        num_taps = 21
-        w0 = np.zeros((1, 1, num_taps), dtype=np.complex64)
-        w0[0, 0, num_taps // 2] = 1.0 + 0j
-
-        result = equalization.rde(
-            rx,
-            modulation="qam",
-            order=16,
-            num_taps=num_taps,
-            w_init=w0,
-            backend="jax",
-        )
-        assert isinstance(result, EqualizerResult)
-
-
 class TestNormalizationLengthIndependence:
     """Normalization uses full-signal RMS - training output scales with signal power."""
 
     @pytest.mark.parametrize("algo", ["lms", "rls"])
-    @pytest.mark.parametrize("backend", ["numba"])
-    def test_training_output_finite(self, algo, backend, xp):
+    def test_training_output_finite(self, algo, xp):
         """y_hat training region is finite and non-trivial."""
         import numpy as np
 
@@ -237,7 +218,7 @@ class TestNormalizationLengthIndependence:
         n_train = 200
         n_sym = 500
 
-        const = gray_constellation("qam", 16).astype(np.complex64)
+        const = Constellation.qam(16).points.astype(np.complex64)
         syms = const[rng.integers(0, 16, n_sym)]
         noise = (
             0.05 * (rng.standard_normal(n_sym) + 1j * rng.standard_normal(n_sym))
@@ -250,9 +231,7 @@ class TestNormalizationLengthIndependence:
             training_symbols=syms[:n_train],
             num_taps=1,
             sps=1,
-            modulation="qam",
-            order=16,
-            backend=backend,
+            constellation=Constellation.qam(16),
         )
 
         np.testing.assert_array_equal(
@@ -269,7 +248,7 @@ def _make_qpsk(xp, n_sym=2000, snr_db=20.0, seed=77):
 
 def _algo_kw(algo, num_taps):
     """Return algorithm-specific kwargs (lms uses step_size, rls uses forgetting_factor)."""
-    base = dict(num_taps=num_taps, sps=1, modulation="psk", order=4)
+    base = dict(num_taps=num_taps, sps=1, constellation=Constellation.psk(4))
     return (
         {**base, "step_size": 1e-2}
         if algo == "lms"
@@ -277,72 +256,21 @@ def _algo_kw(algo, num_taps):
     )
 
 
-class TestPrefixPadNormPhase4:
-    """Tests for samples_prefix / pad_mode / input_norm_factor added in Phase 4."""
+class TestPadAndNormalization:
+    """pad_mode of a cold start and the stored normalization."""
 
     @pytest.mark.parametrize("algo", ["lms", "rls"])
     def test_pad_mode_zeros_is_baseline(self, algo, xp, xpt):
-        """Explicit pad_mode='zeros' with no prefix must be byte-exact with default."""
+        """Explicit pad_mode='zeros' must be byte-exact with the default."""
         samples, syms = _make_qpsk(xp)
         fn = getattr(equalization, algo)
         kw = _algo_kw(algo, num_taps=7)
         r_default = fn(samples, syms[:50], **kw)
-        r_explicit = fn(samples, syms[:50], **kw, pad_mode="zeros", samples_prefix=None)
+        r_explicit = fn(samples, syms[:50], **kw, pad_mode="zeros")
         xpt.assert_array_equal(
             xp.asarray(r_default.y_hat),
             xp.asarray(r_explicit.y_hat),
         )
-
-    @pytest.mark.parametrize("algo", ["lms", "rls"])
-    def test_samples_prefix_does_not_worsen_leading_error(self, algo, xp):
-        """Warm prefix must not increase MSE on the first num_taps output symbols."""
-        n_total, half, num_taps = 4000, 2000, 11
-        samples, syms = _make_qpsk(xp, n_sym=n_total, snr_db=30.0)
-        fn = getattr(equalization, algo)
-        kw = _algo_kw(algo, num_taps=num_taps)
-
-        r1 = fn(samples[:half], syms[: half // 2], **kw)
-
-        r_cold = fn(
-            samples[half:],
-            syms[half : half + 50],
-            **kw,
-            w_init=r1.weights,
-            input_norm_factor=r1.input_norm_factor,
-        )
-        prefix = samples[half - num_taps + 1 : half]
-        r_prefix = fn(
-            samples[half:],
-            syms[half : half + 50],
-            **kw,
-            w_init=r1.weights,
-            input_norm_factor=r1.input_norm_factor,
-            samples_prefix=prefix,
-        )
-        ref = xp.asarray(syms[half : half + num_taps])
-        e_cold = float(xp.mean(xp.abs(xp.asarray(r_cold.y_hat[:num_taps]) - ref) ** 2))
-        e_prefix = float(
-            xp.mean(xp.abs(xp.asarray(r_prefix.y_hat[:num_taps]) - ref) ** 2)
-        )
-        assert e_prefix <= e_cold + 1e-3, (
-            f"{algo}: prefix raised leading MSE ({e_prefix:.4f} > {e_cold:.4f})"
-        )
-
-    def test_samples_prefix_shape_validation_lms(self, xp):
-        """Undersized samples_prefix must raise ValueError mentioning 'pad_left'."""
-        samples, syms = _make_qpsk(xp, n_sym=500)
-        # pad_left = min(num_taps//2, ...) = min(5, ...) - prefix of 1 is too short
-        with pytest.raises(ValueError, match="pad_left"):
-            equalization.lms(
-                samples,
-                syms[:20],
-                num_taps=11,
-                sps=1,
-                step_size=1e-2,
-                modulation="psk",
-                order=4,
-                samples_prefix=xp.zeros(1, dtype=xp.complex64),
-            )
 
     def test_pad_mode_edge_lms(self, xp):
         """pad_mode='edge' must not raise and must produce finite output."""
@@ -353,8 +281,7 @@ class TestPrefixPadNormPhase4:
             num_taps=11,
             sps=1,
             step_size=1e-2,
-            modulation="psk",
-            order=4,
+            constellation=Constellation.psk(4),
             pad_mode="edge",
         )
         assert bool(xp.all(xp.isfinite(xp.asarray(r.y_hat))))
@@ -368,8 +295,7 @@ class TestPrefixPadNormPhase4:
             num_taps=5,
             sps=1,
             step_size=1e-2,
-            modulation="psk",
-            order=4,
+            constellation=Constellation.psk(4),
         )
         assert isinstance(r.input_norm_factor, float)
         assert r.input_norm_factor > 0.0

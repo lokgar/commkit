@@ -182,7 +182,7 @@ class TestApplyPolarizationMixing:
         N = 256
         samples = xp.zeros((2, N), dtype=xp.complex64)
         samples[0, :] = 1.0 + 0j
-        out = apply_polarization_mixing(samples, theta=0.0, drift_rate_rad_per_sym=1e-2)
+        out = apply_polarization_mixing(samples, theta=0.0, drift_rad_per_sample=1e-2)
         # First sample: θ=0 -> Ex'=1, Ey'=0; later samples should differ
         assert float(xp.abs(out[0, -1] - out[0, 0])) > 1e-3
 
@@ -204,11 +204,11 @@ class TestApplyPolarizationMixing:
 
 
 class TestApplyChomaticDispersion:
-    """Tests for apply_chromatic_dispersion and round-trip with compensate_chromatic_dispersion."""
+    """Tests for apply_chromatic_dispersion and round-trip with correct_chromatic_dispersion."""
 
     def test_round_trip_siso(self, xp, xpt):
         """Apply CD then compensate: output should be ~equal to input."""
-        from commkit.filtering import compensate_chromatic_dispersion
+        from commkit.filtering import correct_chromatic_dispersion
 
         N = 1024
         rng = xp.random.RandomState(42)
@@ -216,14 +216,26 @@ class TestApplyChomaticDispersion:
         fs = 64e9
         D, L, lam = 17.0, 80.0, 1550.0
 
-        distorted = apply_chromatic_dispersion(samples, fs, D, L, lam)
-        recovered = compensate_chromatic_dispersion(distorted, fs, D, L, lam)
+        distorted = apply_chromatic_dispersion(
+            samples,
+            sampling_rate=fs,
+            dispersion_ps_nm_km=D,
+            fiber_length_km=L,
+            center_wavelength_nm=lam,
+        )
+        recovered = correct_chromatic_dispersion(
+            distorted,
+            sampling_rate=fs,
+            dispersion_ps_nm_km=D,
+            fiber_length_km=L,
+            center_wavelength_nm=lam,
+        )
 
         xpt.assert_allclose(recovered, samples, atol=1e-3)
 
     def test_round_trip_mimo(self, xp, xpt):
         """Round-trip (MIMO): each channel should recover to input."""
-        from commkit.filtering import compensate_chromatic_dispersion
+        from commkit.filtering import correct_chromatic_dispersion
 
         C, N = 2, 512
         rng = xp.random.RandomState(7)
@@ -231,28 +243,58 @@ class TestApplyChomaticDispersion:
         fs = 64e9
         D, L, lam = 17.0, 80.0, 1550.0
 
-        distorted = apply_chromatic_dispersion(samples, D, L, lam, fs)
-        recovered = compensate_chromatic_dispersion(distorted, D, L, lam, fs)
+        distorted = apply_chromatic_dispersion(
+            samples,
+            sampling_rate=D,
+            dispersion_ps_nm_km=L,
+            fiber_length_km=lam,
+            center_wavelength_nm=fs,
+        )
+        recovered = correct_chromatic_dispersion(
+            distorted,
+            sampling_rate=D,
+            dispersion_ps_nm_km=L,
+            fiber_length_km=lam,
+            center_wavelength_nm=fs,
+        )
 
         xpt.assert_allclose(recovered, samples, atol=1e-3)
 
     def test_output_shape_siso(self, xp):
         """SISO output shape matches input."""
         samples = xp.ones(512, dtype=xp.complex64)
-        out = apply_chromatic_dispersion(samples, 17.0, 80.0, 1550.0, 64e9)
+        out = apply_chromatic_dispersion(
+            samples,
+            sampling_rate=17.0,
+            dispersion_ps_nm_km=80.0,
+            fiber_length_km=1550.0,
+            center_wavelength_nm=64e9,
+        )
         assert out.shape == (512,)
 
     def test_output_shape_mimo(self, xp):
         """MIMO output shape matches input."""
         samples = xp.ones((2, 512), dtype=xp.complex64)
-        out = apply_chromatic_dispersion(samples, 17.0, 80.0, 1550.0, 64e9)
+        out = apply_chromatic_dispersion(
+            samples,
+            sampling_rate=17.0,
+            dispersion_ps_nm_km=80.0,
+            fiber_length_km=1550.0,
+            center_wavelength_nm=64e9,
+        )
         assert out.shape == (2, 512)
 
     def test_modifies_signal(self, xp):
         """CD should change the signal (non-trivial dispersion)."""
         rng = xp.random.RandomState(99)
         samples = (rng.randn(512) + 1j * rng.randn(512)).astype(xp.complex64)
-        out = apply_chromatic_dispersion(samples, 17.0, 80.0, 1550.0, 64e9)
+        out = apply_chromatic_dispersion(
+            samples,
+            sampling_rate=17.0,
+            dispersion_ps_nm_km=80.0,
+            fiber_length_km=1550.0,
+            center_wavelength_nm=64e9,
+        )
         diff = float(xp.max(xp.abs(out - samples)))
         assert diff > 1e-3
 
@@ -260,7 +302,13 @@ class TestApplyChomaticDispersion:
         """CD is an all-pass filter: energy must be preserved."""
         rng = xp.random.RandomState(11)
         samples = (rng.randn(1024) + 1j * rng.randn(1024)).astype(xp.complex64)
-        out = apply_chromatic_dispersion(samples, 17.0, 80.0, 1550.0, 64e9)
+        out = apply_chromatic_dispersion(
+            samples,
+            sampling_rate=17.0,
+            dispersion_ps_nm_km=80.0,
+            fiber_length_km=1550.0,
+            center_wavelength_nm=64e9,
+        )
         power_in = float(xp.sum(xp.abs(samples) ** 2))
         power_out = float(xp.sum(xp.abs(out) ** 2))
         xpt.assert_allclose(power_out, power_in, rtol=1e-4)
@@ -277,7 +325,13 @@ class TestApplyChomaticDispersion:
             fiber_length_km=80.0,
             center_wavelength_nm=1550.0,
         )
-        out_arr = apply_chromatic_dispersion(data, fs, 17.0, 80.0, 1550.0)
+        out_arr = apply_chromatic_dispersion(
+            data,
+            sampling_rate=fs,
+            dispersion_ps_nm_km=17.0,
+            fiber_length_km=80.0,
+            center_wavelength_nm=1550.0,
+        )
 
         assert isinstance(out_sig, Signal)
         xpt.assert_allclose(out_sig.samples, out_arr)
@@ -295,7 +349,7 @@ class TestSignalInputPMDAndPolarizationMixing:
         sig = Signal(samples=data, sampling_rate=fs, symbol_rate=fs / 2)
 
         out_sig = apply_pmd(sig, dgd=5e-12, theta=np.pi / 5)
-        out_arr = apply_pmd(data, fs, dgd=5e-12, theta=np.pi / 5)
+        out_arr = apply_pmd(data, sampling_rate=fs, dgd=5e-12, theta=np.pi / 5)
 
         assert isinstance(out_sig, Signal)
         xpt.assert_allclose(out_sig.samples, out_arr)

@@ -13,7 +13,6 @@ import pytest
 
 matplotlib.use("Agg")
 
-from commkit import backend
 
 try:
     import cupy as cp
@@ -81,14 +80,6 @@ def pytest_collection_modifyitems(config, items):
         items[:] = [item for item in items if not item.get_closest_marker("cpu_only")]
 
 
-@pytest.fixture(scope="session", autouse=True)
-def _ensure_jax_precision():
-    """Ensure JAX uses float64/complex128 precision across the entire test suite."""
-    from tests.common.conversions import ensure_jax_x64
-
-    ensure_jax_x64()
-
-
 @pytest.fixture(autouse=True)
 def _autoclose_figures():
     """Ensure all matplotlib figures are closed after each test to prevent resource leaks."""
@@ -99,18 +90,13 @@ def _autoclose_figures():
 
 
 @pytest.fixture
-def jax():
-    """Fixture providing the JAX module, cleanly skipping if not installed."""
-    return pytest.importorskip("jax", reason="JAX not installed")
-
-
-@pytest.fixture
 def backend_device(request):
     """
     Fixture that returns the current backend device name.
 
-    Skips GPU tests if CuPy is not available or functional.
-    Forces CPU mode when device is 'cpu' to ensure isolation.
+    Skips GPU tests if CuPy is not available or functional.  The device only
+    selects where tests build their inputs (via ``xp``); the library never
+    moves data on its own.
 
     Parameters
     ----------
@@ -127,7 +113,6 @@ def backend_device(request):
     if device == "gpu":
         if device_opt == "cpu":
             pytest.skip("Test requires GPU, but --device=cpu was selected")
-        backend.use_cpu_only(False)
         if not _CUPY_AVAILABLE:
             pytest.skip("CuPy not installed, skipping GPU tests")
         try:
@@ -140,10 +125,6 @@ def backend_device(request):
         except Exception as e:
             pytest.skip(f"CuPy installed but not functional (missing libs?): {e}")
 
-    elif device == "cpu":
-        # Force CPU to prevent accidental GPU usage in "cpu" tests
-        backend.use_cpu_only(True)
-
     marker = request.node.get_closest_marker("requires_kernel")
     if marker:
         kernel_name = marker.args[0] if marker.args else None
@@ -151,11 +132,7 @@ def backend_device(request):
 
         skip_unless_kernel_available(kernel_name, backend_device=device)
 
-    try:
-        yield device
-    finally:
-        # Always restore default state so later tests are not affected
-        backend.use_cpu_only(False)
+    yield device
 
 
 @pytest.fixture

@@ -14,7 +14,7 @@ except ImportError:
 
 
 def to_numpy(arr: Any) -> np.ndarray:
-    """Convert any array (NumPy, CuPy, JAX DeviceArray) to host numpy.ndarray.
+    """Convert any array (NumPy or CuPy) to a host numpy.ndarray.
 
     Parameters
     ----------
@@ -38,11 +38,10 @@ def to_numpy(arr: Any) -> np.ndarray:
     return np.asarray(arr)
 
 
-def ensure_jax_x64() -> None:
-    """Ensure JAX is configured for 64-bit precision (float64 and complex128)."""
-    try:
-        import jax
+def device_of(xp: Any) -> str:
+    """Device name for an array module: ``"gpu"`` for CuPy, else ``"cpu"``.
 
-        jax.config.update("jax_enable_x64", True)
-    except ImportError:
-        pass
+    Library generators return host arrays; tests move them explicitly with
+    ``sig.to(device_of(xp))`` or ``to_device(arr, device_of(xp))``.
+    """
+    return "gpu" if xp is not np else "cpu"
