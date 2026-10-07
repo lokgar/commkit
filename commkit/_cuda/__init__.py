@@ -309,10 +309,85 @@ def _cs_block_factory() -> Callable:
     return launch
 
 
+def _bps_anchor_factory() -> Callable:
+    """Wrapper factory for the block_lms data-aided BPS anchor kernel.
+
+    One launch scans the training columns of one equalizer block (one block
+    of 256 threads), keeping the block loop free of the host round
+    trip of the NumPy reference (``_BlockBps._anchor``).  ``offset4`` and ``prev4``
+    are updated in place; the anchored phase and the new trailing products
+    (complex64) are returned.  The window sums are float32 and the unwrap
+    float64.  Compiled without ``--use_fast_math``: the phase feeds an
+    unwrap.
+    """
+    import cupy as cp
+
+    from . import compiler
+
+    kern = compiler.get_raw_kernel("bps_anchor", "bps_anchor", options=("-std=c++17",))
+
+    def launch(
+        y: Any,
+        d: Any,
+        hist: Any,
+        offset4: Any,
+        prev4: Any,
+        *,
+        symmetry: int,
+        joint: bool,
+    ) -> tuple[Any, Any]:
+        """Anchored phase ``(C, n)`` float64 and the new ``(C, K-1)`` history."""
+        if y.ndim != 2:
+            raise ValueError(f"y must be 2-D (C, n), got shape {y.shape}")
+        C, n = y.shape
+        if n < 1:
+            raise ValueError("y must have at least one training column")
+        H = hist.shape[-1]
+        for label, arr, dtype, shape in (
+            ("y", y, cp.complex64, (C, n)),
+            ("d", d, cp.complex64, (C, n)),
+            ("hist", hist, cp.complex64, (C, H)),
+            ("offset4", offset4, cp.float64, (C,)),
+            ("prev4", prev4, cp.float64, (C,)),
+        ):
+            if arr.dtype != dtype:
+                raise TypeError(f"{label} must be {dtype}, got {arr.dtype}")
+            if arr.shape != shape:
+                raise ValueError(f"{label} must have shape {shape}, got {arr.shape}")
+            if not arr.flags.c_contiguous:
+                raise ValueError(f"{label} must be C-contiguous")
+        phi = cp.empty((C, n), dtype=cp.float64)
+        hist_out = cp.empty((C, H), dtype=cp.complex64)
+        total = cp.zeros(n if joint else 0, dtype=cp.complex64)
+        kern(
+            (1,),
+            (256,),
+            (
+                y,
+                d,
+                hist,
+                hist_out,
+                total,
+                offset4,
+                prev4,
+                phi,
+                cp.int32(C),
+                cp.int32(n),
+                cp.int32(H + 1),
+                cp.int32(1 if joint else 0),
+                cp.float64(symmetry),
+            ),
+        )
+        return phi, hist_out
+
+    return launch
+
+
 # name -> wrapper factory. Factories may raise; get_kernel translates any
 # failure into the warn-once-and-return-None fallback contract.
 _KERNEL_FACTORIES: dict[str, Callable[..., Callable]] = {
     "selftest_scale": _selftest_scale_factory,
     "bps_min_d2": _bps_min_d2_factory,
     "cs_block": _cs_block_factory,
+    "bps_anchor": _bps_anchor_factory,
 }

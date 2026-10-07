@@ -128,6 +128,8 @@ class _BlockBps:
     cs_buf_ptr: Any
     cs_buf_n: Any
     cs_stats: Any
+    da_hist: Any = None  # (C, K-1) trailing y·conj(d) (complex64 on the kernel path)
+    anchor_kernel: Any = None  # CUDA data-aided anchor kernel, or None
     kernel: Any = None  # CUDA min-distance kernel, or None
     cs_kernel: Any = None  # CUDA cycle-slip kernel, or None
 
@@ -145,10 +147,67 @@ class _BlockBps:
             cs_H=self.cs_H,
         )
 
+    def _anchor(self, y: ArrayType, d: ArrayType, xp: Any) -> ArrayType:
+        """Data-aided phase over the training columns, ``(C, n)`` float64.
+
+        The angle of ``sum(y conj(d))`` over a causal ``K``-symbol window
+        (continued across blocks), unwrapped from the current phase over the
+        full 2π.  The unwrap state then continues from it, so blind BPS keeps
+        its branch once decisions take over.
+        """
+        C = y.shape[0]
+        K = self.K
+        S = float(self.symmetry)
+        if self.anchor_kernel is not None:
+            # One launch per block and no host synchronization (the NumPy
+            # path below is its reference).
+            if self.da_hist is None:
+                self.da_hist = xp.zeros((C, max(0, K - 1)), dtype=xp.complex64)
+            phi, self.da_hist = self.anchor_kernel(
+                xp.ascontiguousarray(y, dtype=xp.complex64),
+                xp.ascontiguousarray(d, dtype=xp.complex64),
+                self.da_hist,
+                self.offset4,
+                self.prev4,
+                symmetry=self.symmetry,
+                joint=self.joint and C > 1,
+            )
+            return phi
+        # Host NumPy: a training block's (C, n) products are tiny, so the
+        # CuPy fallback brings them over once instead of a dozen launches.
+        if self.da_hist is None:
+            self.da_hist = np.zeros((C, max(0, K - 1)), dtype=np.complex128)
+        y_h = np.asarray(to_device(y, "cpu"), dtype=np.complex128)
+        d_h = np.asarray(to_device(d, "cpu"), dtype=np.complex128)
+        cat = np.concatenate([self.da_hist, y_h * np.conj(d_h)], axis=1)
+        cs = np.concatenate(
+            [np.zeros((C, 1), dtype=np.complex128), np.cumsum(cat, axis=1)], axis=1
+        )
+        win = cs[:, K:] - cs[:, :-K]  # (C, n), causal K-symbol window
+        if self.joint and C > 1:
+            win = np.broadcast_to(win.sum(axis=0, keepdims=True), win.shape)
+        offset = np.asarray(to_device(self.offset4, "cpu"), dtype=np.float64)
+        ext = np.concatenate([(offset / S)[:, None], np.angle(win)], axis=1)
+        phi = np.unwrap(ext, axis=1)[:, 1:]
+        if K > 1:
+            self.da_hist = cat[:, -(K - 1) :].copy()
+        self.offset4[...] = xp.asarray(phi[:, -1] * S)
+        self.prev4[...] = xp.asarray(phi[:, -1] * S)
+        return xp.asarray(phi)
+
     def phase(
-        self, y_block: ArrayType, slicer: _Slicer, b_start: int, xp: Any
+        self,
+        y_block: ArrayType,
+        slicer: _Slicer,
+        b_start: int,
+        xp: Any,
+        d_train: ArrayType | None = None,
     ) -> tuple[ArrayType, ArrayType]:
-        """Wrapped float32 phase to rotate by, and the unwrapped trajectory."""
+        """Wrapped float32 phase to rotate by, and the unwrapped trajectory.
+
+        The first ``d_train.shape[-1]`` columns are training symbols: their
+        phase is data-aided (see ``_anchor``) and blind BPS covers the rest.
+        """
         C, B = y_block.shape
         P = self.P
         if self.kernel is not None:
@@ -192,9 +251,15 @@ class _BlockBps:
             combined_hist = xp.concatenate([self.d2_hist, min_d2], axis=2)
             self.d2_hist[...] = combined_hist[:, :, -self.hist_len :]
 
-        # S-fold unwrap continuing from the previous block.
+        n_da = 0 if d_train is None else int(d_train.shape[-1])
+        phi_da = self._anchor(y_block[:, :n_da], d_train, xp) if n_da else None
+        phi_raw = phi_raw[:, n_da:]
+
+        # S-fold unwrap continuing from the previous block (or the anchor).
         S = float(self.symmetry)
-        if xp is np:
+        if phi_raw.shape[1] == 0:
+            phi_f64 = xp.empty((C, 0), dtype=xp.float64)
+        elif xp is np:
             raw4 = phi_raw.astype(np.float64) * S  # (C, B)
             extended = np.concatenate([self.prev4[:, np.newaxis], raw4], axis=1)
             unwrapped_ext = np.unwrap(extended, axis=1)  # (C, B+1)
@@ -212,6 +277,8 @@ class _BlockBps:
             phi_f64 = (self.offset4[:, None] + cumul_dev) / xp.float64(S)
             self.prev4 += cumul_dev[:, -1]
             self.offset4 += cumul_dev[:, -1]
+        if phi_da is not None:
+            phi_f64 = xp.concatenate([phi_da, phi_f64], axis=1)
 
         if self.cs:
             if self.cs_kernel is not None:
@@ -541,6 +608,8 @@ def block_lms(
             )
             if slicer.kernel is not None:
                 slicer.phasor = xp.ones(1, dtype=xp.complex64)
+        if bps is not None and n_train > 0:
+            bps.anchor_kernel = _cuda.get_kernel("bps_anchor")
         if bps is not None and bps.cs and C <= 1024:
             bps.cs_kernel = _cuda.get_kernel("cs_block")
             if bps.cs_kernel is not None:
@@ -590,9 +659,13 @@ def block_lms(
         nonlocal div_flag
         n_train_blk = max(0, min(n_train - b_start, B))
         y_block, X_fd = _fdaf_forward(run.h, run.x_win, run.fftsize, sps, B, xp)
+        d_train = None
+        if n_train_blk > 0:
+            assert training is not None
+            d_train = training[:, b_start : b_start + n_train_blk]
 
         if bps is not None:
-            phi_c, phi_traj = bps.phase(y_block, slicer, b_start, xp)
+            phi_c, phi_traj = bps.phase(y_block, slicer, b_start, xp, d_train)
             y_rot = y_block * xp.exp(-1j * phi_c.astype(xp.complex64))  # (C, B)
             assert phi_ws is not None
             phi_ws[:, :B] = phi_traj  # unwrapped float32, for trajectory
@@ -600,9 +673,7 @@ def block_lms(
             y_rot = y_block
 
         e_clean = xp.empty((C, B), dtype=xp.complex64)
-        if n_train_blk > 0:
-            assert training is not None
-            d_train = training[:, b_start : b_start + n_train_blk]
+        if d_train is not None:
             e_clean[:, :n_train_blk] = d_train - y_rot[:, :n_train_blk]
         if n_train_blk < B:
             y_dd = y_rot[:, n_train_blk:]

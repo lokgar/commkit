@@ -467,6 +467,54 @@ class TestCPRBPSConvergence:
         assert mse < 0.1, f"RLS+BPS did not converge: MSE={mse:.4f}"
 
 
+class TestBPSTrainingAnchor:
+    """Training symbols anchor the inline BPS phase."""
+
+    @pytest.mark.parametrize("algo", ["lms", "rls", "block_lms"])
+    @pytest.mark.parametrize("seed", [1, 5])
+    def test_multi_tap_receiver_locks_without_rotation(self, algo, seed, xp):
+        """A matched-filtered 16-QAM record at 2 sps through a 21-tap
+        equalizer: the output matches the reference without a rotation and
+        with the error rate of the noise alone.
+
+        Blind BPS during training started from a few-symbol window that fits
+        any rotation; the training error copied that phase into the taps and
+        nothing fixed the absolute phase, so the output wandered and slipped
+        (tail EVM above 100 %).  The data-aided estimate on the training
+        symbols pins it.
+        """
+        import commkit as ck
+        from commkit.equalization import block_lms
+
+        c = Constellation.qam(16)
+        tx = ck.generate(
+            c, 8192, symbol_rate=32e9, sps=2, pulse=ck.RRC(rolloff=0.1), rng=seed
+        )
+        rx = ck.impairments.apply_awgn(tx, esn0_db=18, rng=3)
+        rx = ck.filtering.matched_filter(rx).to("gpu" if xp is not np else "cpu")
+        ref = to_numpy(tx.reference.symbols)
+        kw = dict(num_taps=21, cpr=BPS(test_phases=64))
+        train = ref[:2000]
+        if algo == "lms":
+            res = lms(
+                rx, num_taps=21, step_size=1e-3, cpr=kw["cpr"], training_symbols=train
+            )
+        elif algo == "rls":
+            res = rls(rx, forgetting_factor=0.999, training_symbols=train, **kw)
+        else:
+            res = block_lms(
+                rx, step_size=1e-3, block_size=32, training_symbols=train, **kw
+            )
+        y = to_numpy(res.y_hat)[-3000:]
+        r = ref[: to_numpy(res.y_hat).size][-3000:]
+        assert abs(np.angle(np.vdot(r, y))) < 0.05
+
+        def nearest(v):
+            return np.argmin(np.abs(v[:, None] - c.points), axis=1)
+
+        assert np.count_nonzero(nearest(y) != nearest(r)) / r.size < 5e-3
+
+
 class TestCPRMIMOJoint:
     """Multi-channel MIMO CPR and joint carrier phase tracking."""
 

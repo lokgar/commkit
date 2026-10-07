@@ -1245,6 +1245,20 @@ The equalization pass (3.7) gets more commits:
   `reference`, `constellation`, `pulse` and `frame` instead, and the
   bridge's own tests go. `helpers.py` is already gone (3.9a).
 
+- [x] **4.2a `fix(equalization): training symbols anchor the inline BPS`.**
+  Found while checking the README workflow (16-QAM, 2 sps, 21 taps, 18 dB:
+  349 % EVM with `cpr=BPS()`); 1.x behaves the same. Blind BPS during
+  training starts from a few-symbol window that fits any rotation, the
+  training error copies that phase into the taps, and nothing fixes the
+  absolute phase. On training symbols the phase becomes the angle of
+  `sum(y_raw conj(d))` over the BPS window (full 2π), and the S-fold unwrap
+  continues from it. Sequential kernels, block engine (a `bps_anchor` CUDA
+  kernel on the GPU) and the oracle.
+- [ ] **4.2b `fix(equalization): block CPR slip carry uses the symmetry`.**
+  The block engine carried a cycle-slip correction into its unwrap
+  accumulator times 4 whatever the constellation's symmetry.
+- [ ] **4.2c `docs: final AGENTS.md pass and README around §2.1`.**
+
 ### Step 5: performance follow-ups (independent, any time after step 3.6)
 
 - A Numba CPU path for non-square BPS (1256 ms on CPU against 26 ms on GPU in

@@ -464,6 +464,8 @@ def _get_numba_lms_cpr():
             e_clean = np.empty(C, dtype=np.complex64)
             e_eq = np.empty(C, dtype=np.complex64)
             phi_hat_bps = np.zeros(C, dtype=np.float64)
+            da_buf = np.zeros((C, bps_block_size), dtype=np.complex128)
+            da_sum = np.zeros(C, dtype=np.complex128)
             for idx in range(n_sym):
                 sample_idx = idx * stride
 
@@ -571,6 +573,34 @@ def _get_numba_lms_cpr():
                             )
                             bps_prev4[i] = bps_prev4[i] + diff4
                             phi_hat_bps[i] = bps_prev4[i] / np.float64(symmetry)
+
+                # Training symbols anchor the BPS phase: while they last, the
+                # phase is the angle of sum(y_raw conj(d)) over the last K of
+                # them, over the full 2π.  Blind BPS sees only 2π/S, and a
+                # blind estimate here is copied into the taps by the training
+                # error, so nothing would fix the absolute phase.  prev4 follows
+                # the anchor, so the S-fold unwrap continues from its branch
+                # once decisions take over.
+                if cpr_mode == 2 and idx < n_train:
+                    da_slot = idx % bps_block_size
+                    for i in range(C):
+                        p_da = np.complex128(y_raw[i]) * np.conj(
+                            np.complex128(training[i, idx])
+                        )
+                        da_sum[i] = da_sum[i] + p_da - da_buf[i, da_slot]
+                        da_buf[i, da_slot] = p_da
+                    da_tot = np.complex128(0.0)
+                    if bps_joint_channels:
+                        for i in range(C):
+                            da_tot = da_tot + da_sum[i]
+                    for i in range(C):
+                        if not bps_joint_channels:
+                            da_tot = da_sum[i]
+                        ang = np.arctan2(da_tot.imag, da_tot.real)
+                        prev = bps_prev4[i] / np.float64(symmetry)
+                        ang = ang + two_pi * np.round((prev - ang) / two_pi)
+                        bps_prev4[i] = ang * np.float64(symmetry)
+                        phi_hat_bps[i] = ang
 
                 for i in range(C):
                     if cpr_mode == 1:  # PLL: read current integrator state
@@ -846,6 +876,8 @@ def _get_numba_rls_cpr():
             e_clean = np.empty(C, dtype=np.complex64)
             e_eq = np.empty(C, dtype=np.complex64)
             phi_hat_bps = np.zeros(C, dtype=np.float64)
+            da_buf = np.zeros((C, bps_block_size), dtype=np.complex128)
+            da_sum = np.zeros(C, dtype=np.complex128)
 
             lam_f64 = np.float64(lam)
             leak_term = np.float32(1.0) - np.float32(leakage)
@@ -950,6 +982,34 @@ def _get_numba_rls_cpr():
                             )
                             bps_prev4[i] = bps_prev4[i] + diff4
                             phi_hat_bps[i] = bps_prev4[i] / np.float64(symmetry)
+
+                # Training symbols anchor the BPS phase: while they last, the
+                # phase is the angle of sum(y_raw conj(d)) over the last K of
+                # them, over the full 2π.  Blind BPS sees only 2π/S, and a
+                # blind estimate here is copied into the taps by the training
+                # error, so nothing would fix the absolute phase.  prev4 follows
+                # the anchor, so the S-fold unwrap continues from its branch
+                # once decisions take over.
+                if cpr_mode == 2 and idx < n_train:
+                    da_slot = idx % bps_block_size
+                    for i in range(C):
+                        p_da = np.complex128(y_raw[i]) * np.conj(
+                            np.complex128(training[i, idx])
+                        )
+                        da_sum[i] = da_sum[i] + p_da - da_buf[i, da_slot]
+                        da_buf[i, da_slot] = p_da
+                    da_tot = np.complex128(0.0)
+                    if bps_joint_channels:
+                        for i in range(C):
+                            da_tot = da_tot + da_sum[i]
+                    for i in range(C):
+                        if not bps_joint_channels:
+                            da_tot = da_sum[i]
+                        ang = np.arctan2(da_tot.imag, da_tot.real)
+                        prev = bps_prev4[i] / np.float64(symmetry)
+                        ang = ang + two_pi * np.round((prev - ang) / two_pi)
+                        bps_prev4[i] = ang * np.float64(symmetry)
+                        phi_hat_bps[i] = ang
 
                 for i in range(C):
                     if cpr_mode == 1:

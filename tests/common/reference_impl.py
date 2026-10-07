@@ -157,8 +157,9 @@ def rls_reference(
 class _InlineCpr:
     """Carrier phase recovery inside the equalizer loop, per symbol.
 
-    ``estimate(y_raw)`` returns the phase applied to symbol ``n`` (state
-    before its update); ``update(y, d)`` runs the PLL after the decision.
+    ``estimate(y_raw, d)`` returns the phase applied to symbol ``n`` (state
+    before its update), ``d`` being its training symbols (``None`` once
+    decisions take over); ``update(y, d)`` runs the PLL after the decision.
 
     - PLL: ``phi`` is the integrator; ``e = Im(y conj(d))`` (averaged over
       channels when joint); ``phi += mu e + nu``, ``nu += beta e``.
@@ -166,7 +167,10 @@ class _InlineCpr:
       (float32)
       is summed over a causal window of the last ``K`` symbols (and over
       channels when joint); the argmin is unwrapped causally in the 4x
-      domain.
+      domain.  On training symbols the phase is instead the angle of
+      ``sum(y_raw conj(d))`` over the last ``K`` training symbols (summed
+      over channels when joint), unwrapped from the previous phase over
+      2 pi, and the S-fold unwrap state is set to it.
     - Cycle slips: the phase is predicted from the last ``min(n, H)``
       corrected values (the previous one while fewer than 10, else a
       least-squares line one step ahead) and a deviation beyond the
@@ -199,6 +203,7 @@ class _InlineCpr:
         self.symmetry = symmetry
         self.window = window
         self.metrics = [[] for _ in range(num_ch)]  # per channel: (B,) per symbol
+        self.products = [[] for _ in range(num_ch)]  # per channel: y_raw conj(d)
         self.prev4 = np.zeros(num_ch)
         self.phi = np.zeros(num_ch)
         self.nu = np.zeros(num_ch)
@@ -206,7 +211,7 @@ class _InlineCpr:
         self.quantum = 2 * np.pi / symmetry
         self.hist = [[] for _ in range(num_ch)]
 
-    def estimate(self, y_raw):
+    def estimate(self, y_raw, d=None):
         if self.kind == "pll":
             phi = self.phi.copy()
         else:
@@ -217,10 +222,22 @@ class _InlineCpr:
             sums = np.array([np.sum(m[-self.window :], axis=0) for m in self.metrics])
             if self.joint:
                 sums = np.repeat(np.sum(sums, axis=0, keepdims=True), self.num_ch, 0)
-            for i in range(self.num_ch):
-                raw4 = self.symmetry * self.theta[int(np.argmin(sums[i]))]
-                diff = raw4 - self.prev4[i]
-                self.prev4[i] += diff - 2 * np.pi * np.round(diff / (2 * np.pi))
+            if d is None:
+                for i in range(self.num_ch):
+                    raw4 = self.symmetry * self.theta[int(np.argmin(sums[i]))]
+                    diff = raw4 - self.prev4[i]
+                    self.prev4[i] += diff - 2 * np.pi * np.round(diff / (2 * np.pi))
+            else:
+                for i in range(self.num_ch):
+                    self.products[i].append(y_raw[i] * np.conj(d[i]))
+                da = np.array([np.sum(p[-self.window :]) for p in self.products])
+                if self.joint:
+                    da = np.full(self.num_ch, np.sum(da))
+                for i in range(self.num_ch):
+                    prev = self.prev4[i] / self.symmetry
+                    ang = np.angle(da[i])
+                    ang += 2 * np.pi * np.round((prev - ang) / (2 * np.pi))
+                    self.prev4[i] = ang * self.symmetry
             phi = self.prev4 / self.symmetry
         if self.history is not None:
             phi = np.array([self._slip(i, phi[i]) for i in range(self.num_ch)])
@@ -267,7 +284,7 @@ def lms_cpr_reference(
     for n in range(n_sym):
         win = _window(x, n, sps, num_taps)
         y_raw = _filter(w, win)
-        phi = cpr.estimate(y_raw)
+        phi = cpr.estimate(y_raw, d_train[:, n] if n < n_train else None)
         y = y_raw * np.exp(-1j * phi)
         d = np.array(
             [
@@ -303,7 +320,7 @@ def rls_cpr_reference(
     for n in range(n_sym):
         xr = _window(x, n, sps, num_taps).reshape(dim)
         y_raw = np.conj(w) @ xr
-        phi = cpr.estimate(y_raw)
+        phi = cpr.estimate(y_raw, d_train[:, n] if n < n_train else None)
         y = y_raw * np.exp(-1j * phi)
         d = np.array(
             [
