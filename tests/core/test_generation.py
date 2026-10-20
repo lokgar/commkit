@@ -9,6 +9,7 @@ from commkit.core import generate, generation
 from commkit.filtering import RC, RRC, Rect, SmoothRect
 from commkit.mapping import Constellation
 from tests.common.conversions import to_numpy
+from tests.common.periodic import circular_matched_samples, middle_period, symbol_power
 
 
 class TestWaveformSynthesis:
@@ -64,6 +65,73 @@ class TestWaveformSynthesis:
         )
         out = generation.shape_pulse(syms, sps=4, pulse=RRC(0.35))
         assert out.dtype == xp.complex64, f"Expected complex64, got {out.dtype}"
+
+
+class TestPeriodicShaping:
+    """shape_pulse/generate(periodic=True): one period of a looped waveform."""
+
+    @pytest.mark.parametrize(
+        "pulse, sps, num_symbols, reps",
+        [
+            (RRC(0.1), 4, 64, 3),
+            (Rect(0.5), 4, 32, 3),  # even number of taps
+            (RRC(0.1).taps(2), 2, 40, 3),  # raw taps
+            (RRC(0.1, span=32), 2, 5, 9),  # filter longer than the record
+        ],
+    )
+    def test_equals_middle_of_tiled_linear_shaping(
+        self, xp: Any, pulse: Any, sps: int, num_symbols: int, reps: int
+    ) -> None:
+        rng = np.random.default_rng(0)
+        syms = rng.standard_normal((2, num_symbols)) + 1j * rng.standard_normal(
+            (2, num_symbols)
+        )
+        syms = xp.asarray(syms.astype(np.complex64))
+        out = generation.shape_pulse(syms, sps=sps, pulse=pulse, periodic=True)
+        expected = middle_period(
+            lambda s: generation.shape_pulse(s, sps=sps, pulse=pulse), syms, reps=reps
+        )
+        assert out.dtype == xp.complex64
+        assert out.shape == (2, num_symbols * sps)
+        np.testing.assert_allclose(
+            to_numpy(out), symbol_power(expected, sps), atol=2e-6
+        )
+
+    def test_unshaped_is_unchanged(self, xp: Any, xpt: Any) -> None:
+        syms = xp.asarray(np.array([1, -1, 1j, -1j], dtype=np.complex64))
+        xpt.assert_allclose(
+            generation.shape_pulse(syms, sps=2, periodic=True),
+            generation.shape_pulse(syms, sps=2),
+        )
+
+    def test_edge_symbols_recovered_like_interior(self) -> None:
+        """A circular matched filter recovers the first and last symbols of a
+        periodic record as cleanly as the interior; not so for a linear one."""
+        pulse = RRC(0.1, span=32)
+        errors = {}
+        for periodic in (False, True):
+            sig = generate(
+                Constellation.qam(16),
+                512,
+                symbol_rate=1e6,
+                sps=4,
+                pulse=pulse,
+                periodic=periodic,
+                rng=0,
+            )
+            y = circular_matched_samples(sig.samples, pulse.taps(4), 4)
+            r = sig.reference.symbols
+            errors[periodic] = np.abs(y * np.vdot(r, r) / np.vdot(r, y) - r)
+        assert errors[True].max() < 0.02
+        assert errors[False][0] > 0.3
+
+    def test_generate_reference_unchanged(self) -> None:
+        kw = dict(symbol_rate=1e6, sps=2, pulse=RRC(0.1), num_channels=2, rng=3)
+        a = generate(Constellation.qam(16), 256, **kw)
+        b = generate(Constellation.qam(16), 256, periodic=True, **kw)
+        np.testing.assert_array_equal(a.reference.bits, b.reference.bits)
+        assert b.samples.shape == a.samples.shape
+        assert np.mean(np.abs(b.samples) ** 2) == pytest.approx(0.5, rel=1e-5)
 
 
 class TestGenerate:

@@ -5,11 +5,14 @@ Signal generation.
 pulse-shapes them into a :class:`Signal`, with samples normalized to unit
 symbol power (Es = 1, average sample power = 1/sps).  PS-QAM is a shaped
 constellation: ``generate(Constellation.qam(64).shaped(nu=0.1), ...)``.
+``periodic=True`` shapes the record as one period of a periodic waveform,
+for looping on a streaming AWG.
 """
 
 import numpy as np
 
 from .. import filtering, mapping
+from .._circular import convolve_periodic
 from ..backend import ArrayType, dispatch, to_device
 from ..logger import logger
 from ..math import normalize
@@ -61,12 +64,15 @@ def shape_pulse(
     *,
     sps: int,
     pulse: filtering.Pulse | ArrayType | None = None,
+    periodic: bool = False,
 ) -> ArrayType:
     """
     Pulse-shape a symbol sequence to unit symbol power.
 
     Polyphase interpolation by ``sps`` with the pulse taps
-    (``scipy.signal.resample_poly``), then ``E[|x|²] = 1/sps``.
+    (``scipy.signal.resample_poly``), then ``E[|x|²] = 1/sps``.  With
+    ``periodic=True`` the zero-stuffed symbols are convolved circularly with
+    the taps instead; away from the record ends both give the same samples.
 
     Parameters
     ----------
@@ -76,6 +82,10 @@ def shape_pulse(
         Samples per symbol (integer).
     pulse : Pulse or array_like, optional
         Pulse object or taps.  ``None`` zero-stuffs without shaping.
+    periodic : bool, default False
+        Treat ``symbols`` as one period of a periodic sequence (circular
+        convolution): the waveform loops seamlessly, e.g. on a streaming AWG,
+        and has no filter transients at its ends.
 
     Returns
     -------
@@ -88,6 +98,13 @@ def shape_pulse(
             expand(symbols, factor=sps), mode="symbol_power", sps=sps, axis=-1
         )
     taps = pulse.taps(sps) if isinstance(pulse, filtering.Pulse) else pulse
+    if periodic:
+        return normalize(
+            convolve_periodic(expand(symbols, factor=sps), taps),
+            mode="symbol_power",
+            sps=sps,
+            axis=-1,
+        )
     symbols, xp, sp = dispatch(symbols)
     # Cast the float64 taps to the symbol precision so resample_poly does not
     # promote complex64 symbols to complex128.
@@ -111,6 +128,7 @@ def generate(
     sps: int = 1,
     pulse: "filtering.Pulse | ArrayType | None" = None,
     num_channels: int = 1,
+    periodic: bool = False,
     rng: int | np.random.Generator | None = None,
     device: str = "cpu",
 ) -> Signal:
@@ -135,6 +153,10 @@ def generate(
     num_channels : int, default 1
         Number of independent channels.  Samples are ``(N,)`` for one
         channel and ``(C, N)`` otherwise; the reference has the same layout.
+    periodic : bool, default False
+        Shape the symbols as one period of a periodic sequence (circular
+        convolution): the record loops seamlessly, e.g. on a streaming AWG,
+        and has no filter transients at its ends.
     rng : int, numpy.random.Generator or None
         Seed or generator (SciPy SPEC 7).
     device : {"cpu", "gpu"}, default "cpu"
@@ -189,15 +211,17 @@ def generate(
         symbols = symbols.reshape(num_channels, num_symbols)
         bits = bits.reshape(num_channels, num_symbols * k)
 
-    samples = shape_pulse(symbols, sps=sps, pulse=pulse)
+    samples = shape_pulse(symbols, sps=sps, pulse=pulse, periodic=periodic)
 
     logger.info(
-        "Generated %r: %s symbols x %s channel(s), sps=%s, pulse=%r, on %s.",
+        "Generated %r: %s symbols x %s channel(s), sps=%s, pulse=%r, "
+        "periodic=%s, on %s.",
         c,
         num_symbols,
         num_channels,
         sps,
         pulse if isinstance(pulse, filtering.Pulse) or pulse is None else "taps",
+        periodic,
         device,
     )
     return Signal(

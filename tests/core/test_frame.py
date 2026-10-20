@@ -6,9 +6,11 @@ import numpy as np
 import pytest
 
 from commkit.core import Preamble, SingleCarrierFrame, extract_payload
+from commkit.core.generation import shape_pulse
 from commkit.filtering import RRC
 from commkit.mapping import Constellation
 from tests.common.conversions import device_of, to_numpy
+from tests.common.periodic import circular_matched_samples
 
 
 class TestSingleCarrierFrameBasics:
@@ -460,6 +462,67 @@ class TestExtractPayload:
         sig = sig.replace(samples=sig.samples[5:])
         with pytest.raises(ValueError, match="full frame"):
             extract_payload(sig)
+
+
+_PERIODIC_FRAMES = [
+    dict(),
+    dict(preamble=Preamble(length=13), guard_type="zero", guard_len=8),
+    dict(preamble=Preamble(length=13), guard_type="cp", guard_len=8),
+    dict(preamble=Preamble(length=13), num_streams=2, guard_type="zero", guard_len=8),
+    dict(
+        preamble=Preamble(sequence_type="zc", length=31, num_streams=2),
+        num_streams=2,
+        pilot_pattern="comb",
+        pilot_period=8,
+    ),
+]
+
+
+class TestPeriodicFrame:
+    """to_signal(periodic=True): the frame shaped once, as one loop period."""
+
+    @pytest.mark.parametrize("kw", _PERIODIC_FRAMES)
+    def test_unshaped_matches_linear(self, backend_device: str, kw: dict) -> None:
+        """Without a pulse there is nothing to wrap: section gains, guard and
+        layout must equal the linear path."""
+        frame = SingleCarrierFrame(payload_len=196, **kw)
+        a = frame.to_signal(sps=2, device=backend_device)
+        b = frame.to_signal(sps=2, periodic=True, device=backend_device)
+        assert b.samples.dtype == a.samples.dtype
+        np.testing.assert_allclose(to_numpy(b.samples), to_numpy(a.samples), atol=1e-6)
+        assert b.frame is frame
+
+    @pytest.mark.parametrize("kw", _PERIODIC_FRAMES[:2])
+    def test_section_edges_recovered(self, kw: dict) -> None:
+        """A circular matched filter recovers every section, edges included,
+        up to one gain per section; the linear frame breaks at the wrap."""
+        pulse = RRC(0.1, span=32)
+        frame = SingleCarrierFrame(payload_len=196, **kw)
+        pre = 0 if frame.preamble is None else frame.preamble.length
+        sections = [frame.body_symbols]
+        if pre:
+            sections.insert(0, frame.preamble.symbols)
+        errors = {}
+        for periodic in (False, True):
+            sig = frame.to_signal(sps=4, pulse=pulse, periodic=periodic)
+            y = circular_matched_samples(sig.samples, pulse.taps(4), 4)
+            start, err = 0, []
+            for ref in sections:
+                seg = y[start : start + ref.size]
+                g = np.vdot(ref, seg) / np.vdot(ref, ref)
+                err.append(np.abs(seg / g - ref))
+                start += ref.size
+            errors[periodic] = np.concatenate(err)
+        assert errors[True].max() < 0.03
+        assert errors[False].max() > 0.1
+
+    def test_preamble_forwards_periodic(self, xpt: Any) -> None:
+        preamble = Preamble(sequence_type="zc", length=31)
+        sig = preamble.to_signal(sps=4, symbol_rate=1e6, pulse=RRC(0.1), periodic=True)
+        xpt.assert_allclose(
+            sig.samples,
+            shape_pulse(preamble.symbols, sps=4, pulse=RRC(0.1), periodic=True),
+        )
 
 
 class TestFrameDevice:

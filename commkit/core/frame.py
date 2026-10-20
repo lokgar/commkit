@@ -7,6 +7,7 @@ from typing import Any, Literal
 
 import numpy as np
 
+from .._circular import convolve_periodic
 from .._sequences import barker_sequence, zadoff_chu_sequence, zc_mimo_root
 from ..backend import ArrayType, dispatch, to_device
 from ..filtering import Pulse
@@ -133,6 +134,7 @@ class Preamble:
         symbol_rate: float,
         *,
         pulse: Pulse | ArrayType | None = None,
+        periodic: bool = False,
         device: str = "cpu",
     ) -> Signal:
         """
@@ -147,6 +149,9 @@ class Preamble:
         pulse : Pulse or array_like, optional
             Pulse object or taps; ``None`` zero-stuffs without shaping (as
             :func:`commkit.generate`).
+        periodic : bool, default False
+            Shape the sequence as one period of a periodic sequence (circular
+            convolution), so the waveform loops seamlessly.
         device : {"cpu", "gpu"}, default "cpu"
             Where the waveform is shaped and returned.
 
@@ -159,7 +164,9 @@ class Preamble:
         device = require_device(device, "Preamble.to_signal()")
         symbols = to_device(self.symbols, device)
         return Signal(
-            samples=generation.shape_pulse(symbols, sps=sps, pulse=pulse),
+            samples=generation.shape_pulse(
+                symbols, sps=sps, pulse=pulse, periodic=periodic
+            ),
             sampling_rate=symbol_rate * sps,
             symbol_rate=symbol_rate,
             pulse=pulse if isinstance(pulse, Pulse) else None,
@@ -633,6 +640,7 @@ class SingleCarrierFrame:
         symbol_rate: float = 1e6,
         *,
         pulse: Pulse | ArrayType | None = None,
+        periodic: bool = False,
         device: str = "cpu",
     ) -> Signal:
         """
@@ -651,6 +659,12 @@ class SingleCarrierFrame:
         pulse : Pulse or array_like, optional
             Pulse object or taps for both preamble and body; ``None``
             zero-stuffs without shaping (as :func:`commkit.generate`).
+        periodic : bool, default False
+            Shape the whole frame (preamble, body and guard) at once as one
+            period of a periodic sequence (circular convolution): the frame
+            loops seamlessly, e.g. on a streaming AWG, and the preamble-body
+            junction carries no filter transients.  The guard is inserted in
+            symbols before shaping instead of in samples after it.
         device : {"cpu", "gpu"}, default "cpu"
             Where the waveform is shaped and returned.  The frame's symbols
             and bits stay on the host either way.
@@ -671,6 +685,14 @@ class SingleCarrierFrame:
         """
         sps = require_integer_sps(sps, "SingleCarrierFrame.to_signal()")
         device = require_device(device, "SingleCarrierFrame.to_signal()")
+        if periodic:
+            return Signal(
+                samples=self._periodic_samples(sps, pulse, device),
+                sampling_rate=symbol_rate * sps,
+                symbol_rate=symbol_rate,
+                pulse=pulse if isinstance(pulse, Pulse) else None,
+                frame=self,
+            )
 
         # 1. Shape Body (Payload + Pilots)
         body, xp, _ = dispatch(to_device(self.body_symbols, device))
@@ -744,6 +766,50 @@ class SingleCarrierFrame:
             pulse=pulse if isinstance(pulse, Pulse) else None,
             frame=self,
         )
+
+    def _periodic_samples(
+        self, sps: int, pulse: Pulse | ArrayType | None, device: str
+    ) -> ArrayType:
+        """The frame shaped once, circularly, at unit symbol power.
+
+        Each section gets the gain that brings its own circularly shaped
+        waveform to a ``dac_peak`` of 1, as in the linear path; the scaled
+        sections and the guard then form one symbol stream that is shaped
+        as a whole.
+        """
+        taps = pulse.taps(sps) if isinstance(pulse, Pulse) else pulse
+        body, xp, _ = dispatch(to_device(self.body_symbols, device))
+
+        def dac_peak_gain(symbols: ArrayType) -> ArrayType:
+            x = generation.expand(symbols, factor=sps)
+            if taps is not None:
+                x = convolve_periodic(x, taps)
+            peak = xp.maximum(
+                xp.max(xp.abs(x.real), axis=-1, keepdims=True),
+                xp.max(xp.abs(x.imag), axis=-1, keepdims=True),
+            )
+            return 1.0 / peak
+
+        stream = body * dac_peak_gain(body)
+        if self.preamble is not None:
+            preamble = to_device(self.preamble.symbols, device)
+            preamble = preamble * dac_peak_gain(preamble)
+            if self.num_streams > 1 and preamble.ndim == 1:
+                # A one-stream preamble is broadcast to every stream.
+                preamble = xp.tile(preamble, (self.num_streams, 1))
+            stream = xp.concatenate([preamble, stream], axis=-1)
+
+        if self.guard_len > 0:
+            if self.guard_type == "zero":
+                zeros = xp.zeros((*stream.shape[:-1], self.guard_len), stream.dtype)
+                stream = xp.concatenate([stream, zeros], axis=-1)
+            elif self.guard_type == "cp":
+                stream = xp.concatenate(
+                    [stream[..., -self.guard_len :], stream], axis=-1
+                )
+
+        stream = stream.astype("complex64", copy=False)
+        return generation.shape_pulse(stream, sps=sps, pulse=taps, periodic=True)
 
 
 def extract_payload(signal: Signal) -> Signal:
