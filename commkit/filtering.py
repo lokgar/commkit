@@ -13,6 +13,7 @@ import numpy as np
 import scipy
 
 from ._array import as_2d, restore_1d
+from ._circular import convolve_periodic
 from ._dispersion import apply_dispersion
 from ._overlap_save import ols_backward, ols_forward
 from .backend import ArrayType, dispatch
@@ -996,12 +997,14 @@ def ols_fir_filter(
     return signal_adapter.wrap_samples(restore_1d(was_1d, out))
 
 
-def fir_filter(samples: S, taps: ArrayType) -> S:
+def fir_filter(samples: S, taps: ArrayType, *, periodic: bool = False) -> S:
     """
     Apply an FIR filter along the time (last) axis.
 
     FFT convolution, ``mode="same"``: the output is centred on tap
-    ``len(taps) // 2``, so a symmetric filter adds no delay.
+    ``len(taps) // 2``, so a symmetric filter adds no delay.  With
+    ``periodic=True`` the convolution is circular; away from the record ends
+    both give the same samples.
 
     Parameters
     ----------
@@ -1011,6 +1014,10 @@ def fir_filter(samples: S, taps: ArrayType) -> S:
     taps : array_like
         Filter coefficients (impulse response), ``(L,)``.  Cast to the
         precision of ``samples``.
+    periodic : bool, default False
+        Treat ``samples`` as one period of a periodic sequence (circular
+        convolution): the output loops seamlessly, e.g. on a streaming AWG,
+        and has no filter transients at its ends.  Any ``L`` works.
 
     Returns
     -------
@@ -1030,6 +1037,8 @@ def fir_filter(samples: S, taps: ArrayType) -> S:
     if taps.dtype != target_tap_dtype:
         taps = taps.astype(target_tap_dtype)
 
+    if periodic:
+        return signal_adapter.wrap_samples(convolve_periodic(x, taps))
     taps_nd = taps.reshape((1,) * (x.ndim - 1) + (-1,))
     result = sp.signal.convolve(x, taps_nd, mode="same", method="fft")
 

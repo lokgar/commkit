@@ -7,7 +7,9 @@ import pytest
 
 from commkit import filtering
 from commkit.core import Signal
+from tests.common.conversions import to_numpy
 from tests.common.metrics import calc_freq_response
+from tests.common.periodic import middle_period
 
 
 class TestFilterTapGenerators:
@@ -168,6 +170,40 @@ class TestFilterApplication:
         taps = filtering.rrc_taps(sps=4)
         out = filtering.matched_filter(sig, pulse=taps)
         assert out.dtype == xp.complex64
+
+
+class TestPeriodicFirFilter:
+    """fir_filter(periodic=True): circular convolution of one period."""
+
+    @pytest.mark.parametrize(
+        "num_taps, n, reps, complex_taps",
+        [
+            (21, 200, 3, False),
+            (20, 200, 3, False),
+            (21, 64, 3, True),
+            (101, 30, 9, False),
+        ],
+    )
+    def test_equals_middle_of_tiled_linear_filter(
+        self, xp: Any, num_taps: int, n: int, reps: int, complex_taps: bool
+    ) -> None:
+        rng = np.random.default_rng(0)
+        x = (rng.standard_normal((2, n)) + 1j * rng.standard_normal((2, n))).astype(
+            np.complex64
+        )
+        taps = rng.standard_normal(num_taps)
+        if complex_taps:
+            taps = taps + 1j * rng.standard_normal(num_taps)
+        out = filtering.fir_filter(xp.asarray(x), xp.asarray(taps), periodic=True)
+        expected = middle_period(lambda t: filtering.fir_filter(t, taps), x, reps=reps)
+        assert out.dtype == xp.complex64
+        np.testing.assert_allclose(to_numpy(out), expected, atol=1e-4)
+
+    def test_real_input_stays_real(self, xp: Any) -> None:
+        x = xp.asarray(np.random.default_rng(1).standard_normal(64).astype(np.float32))
+        out = filtering.fir_filter(x, xp.asarray([0.25, 0.5, 0.25]), periodic=True)
+        assert out.dtype == xp.float32
+        assert out.shape == x.shape
 
 
 class TestOverlapSaveFiltering:

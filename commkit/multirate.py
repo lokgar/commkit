@@ -8,8 +8,9 @@ conversion using polyphase filter banks.
 Notes on power scaling
 ----------------------
 All rate-changing functions in this module delegate to
-``scipy.signal.resample_poly``, which is designed with **unity DC gain**:
-a constant-amplitude input produces a constant-amplitude output.
+``scipy.signal.resample_poly`` (or, with ``periodic=True``, to the Fourier
+``scipy.signal.resample``), both designed with **unity DC gain**: a
+constant-amplitude input produces a constant-amplitude output.
 
 **Bandlimited (pulse-shaped) signals**
 
@@ -56,6 +57,7 @@ these functions and need to maintain a specific power level, apply
 or use ``commkit.math.normalize`` after the fact.
 """
 
+import math
 from fractions import Fraction
 from typing import Any
 
@@ -146,12 +148,14 @@ def upsample(
     *,
     factor: int,
     correct_power: bool | None = None,
+    periodic: bool = False,
 ) -> S:
     """
     Increase the sampling rate by an integer factor (polyphase interpolation).
 
     Zero insertion followed by an anti-imaging filter
-    (``scipy.signal.resample_poly``).
+    (``scipy.signal.resample_poly``); with ``periodic=True``, Fourier
+    interpolation (``scipy.signal.resample``).
 
     Parameters
     ----------
@@ -163,6 +167,10 @@ def upsample(
     correct_power : bool, optional
         Multiply by ``factor**-0.5`` so that ``E[|x|²] = 1/sps`` still holds.
         Defaults to ``True`` for Signal input and ``False`` for arrays.
+    periodic : bool, default False
+        Treat the input as one period of a periodic sequence: the output is
+        one period at the new rate, loops seamlessly (e.g. on a streaming
+        AWG) and has no filter transients at its ends.
 
     Returns
     -------
@@ -176,9 +184,12 @@ def upsample(
         correct_power = True if correct_power is None else correct_power
         metadata["sampling_rate"] = signal_adapter.signal.sampling_rate * factor
 
-    logger.debug("Upsampling by factor %s (polyphase).", factor)
     arr, _, sp = dispatch(signal_adapter.array)
-    out = sp.signal.resample_poly(arr, factor, 1, axis=-1)
+    if periodic:
+        out = _resample_periodic(arr, factor, 1, sp, "upsample()")
+    else:
+        logger.debug("Upsampling by factor %s (polyphase).", factor)
+        out = sp.signal.resample_poly(arr, factor, 1, axis=-1)
     if correct_power:
         out = out * (factor**-0.5)
     return signal_adapter.wrap_samples(out, **metadata)
@@ -259,9 +270,11 @@ def resample(
     sps_in: float | None = None,
     sps_out: float | None = None,
     correct_power: bool | None = None,
+    periodic: bool = False,
 ) -> S:
     """
-    Rational resampling by ``up / down`` (polyphase).
+    Rational resampling by ``up / down`` (polyphase, or Fourier when
+    ``periodic``).
 
     Give either the integer factors ``up`` and ``down``, or the target
     ``sps_out`` (with ``sps_in``, which a Signal supplies).
@@ -283,16 +296,25 @@ def resample(
     correct_power : bool, optional
         Multiply by ``sqrt(down / up)`` so that ``E[|x|²] = 1/sps`` still
         holds.  Defaults to ``True`` for Signal input and ``False`` for arrays.
+    periodic : bool, default False
+        Treat the input as one period of a periodic sequence and resample it
+        by Fourier interpolation (``scipy.signal.resample``): the output is
+        one period at the new rate, loops seamlessly (e.g. on a streaming
+        AWG) and has no filter transients at its ends.  Exact for a
+        band-limited periodic input; downsampling discards everything above
+        the new Nyquist frequency.  ``N * up / down`` must be an integer.
 
     Returns
     -------
     array_like or Signal
-        Resampled samples, about ``N * up / down`` long.
+        Resampled samples, about ``N * up / down`` long (exactly, when
+        ``periodic``).
 
     Raises
     ------
     ValueError
-        If both or neither of ``(up, down)`` and ``sps_out`` are given.
+        If both or neither of ``(up, down)`` and ``sps_out`` are given, or
+        if ``periodic`` and ``N * up / down`` is not an integer.
     """
     signal_adapter = adapt_signal(samples, function_name="resample()")
     by_factors = up is not None or down is not None
@@ -322,13 +344,33 @@ def resample(
             else sps_out * sig.symbol_rate
         )
 
-    logger.debug("Resampling by rational factor %s/%s (polyphase).", up, down)
     arr, _, sp = dispatch(signal_adapter.array)
-    out = sp.signal.resample_poly(arr, up, down, axis=-1)
+    if periodic:
+        out = _resample_periodic(arr, up, down, sp, "resample()")
+    else:
+        logger.debug("Resampling by rational factor %s/%s (polyphase).", up, down)
+        out = sp.signal.resample_poly(arr, up, down, axis=-1)
     if correct_power:
         # sps_after / sps_before = up / down  ->  gain = sqrt(down/up).
         out = out * (down / up) ** 0.5
     return signal_adapter.wrap_samples(out, **metadata)
+
+
+def _resample_periodic(
+    arr: ArrayType, up: int, down: int, sp: Any, function_name: str
+) -> ArrayType:
+    """One period resampled by ``up / down`` with Fourier interpolation."""
+    n = arr.shape[-1]
+    step = down // math.gcd(up, down)
+    if n % step:
+        raise ValueError(
+            f"{function_name}: periodic=True needs N * up / down to be an integer "
+            f"(N={n}, up={up}, down={down}); use a record length that is a "
+            f"multiple of {step}, e.g. {n - n % step or step}."
+        )
+    logger.debug("Resampling one period by %s/%s (Fourier).", up, down)
+    out = sp.signal.resample(arr, n * up // down, axis=-1)
+    return out.astype(arr.dtype, copy=False)
 
 
 def _check_factor(factor: int, function_name: str) -> int:

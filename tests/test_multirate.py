@@ -2,9 +2,12 @@
 
 from typing import Any
 
+import numpy as np
 import pytest
 
 from commkit import multirate
+from commkit.core import Signal
+from tests.common.conversions import to_numpy
 
 
 class TestUpsampleAndDecimate:
@@ -103,3 +106,54 @@ class TestResample:
             multirate.upsample(data, factor=1.5)
         with pytest.raises(ValueError, match="offset"):
             multirate.decimate_to_symbol_rate(data, sps=2, offset=2)
+
+
+def _tones(n: int, bins: list[int], phases: list[float]) -> np.ndarray:
+    """Sum of complex tones with integer cycles per ``n`` samples."""
+    t = np.arange(n) / n
+    return sum(
+        np.exp(1j * (2 * np.pi * k * t + p)) for k, p in zip(bins, phases)
+    ).astype(np.complex64)
+
+
+class TestPeriodicResampling:
+    """upsample/resample(periodic=True): one period at the new rate."""
+
+    @pytest.mark.parametrize("up, down", [(23, 16), (3, 2), (2, 3), (4, 1)])
+    def test_band_limited_period_is_exact(self, xp: Any, up: int, down: int) -> None:
+        """Tones with whole cycles per record are resampled to the same tones
+        sampled at the new rate, ends included."""
+        n, bins, phases = 96, [-7, 2, 11], [0.3, 1.0, -2.0]
+        out = multirate.resample(
+            xp.asarray(_tones(n, bins, phases)), up=up, down=down, periodic=True
+        )
+        expected = _tones(n * up // down, bins, phases)
+        assert out.dtype == xp.complex64
+        np.testing.assert_allclose(to_numpy(out), expected, atol=1e-4)
+
+    def test_upsample_matches_resample(self, xp: Any) -> None:
+        x = xp.asarray(_tones(64, [3, -9], [0.0, 0.5]).reshape(1, -1).repeat(2, 0))
+        up = multirate.upsample(x, factor=3, periodic=True)
+        np.testing.assert_allclose(
+            to_numpy(up),
+            to_numpy(multirate.resample(x, up=3, down=1, periodic=True)),
+            atol=1e-6,
+        )
+        assert up.shape == (2, 192)
+
+    def test_signal_power_and_rate(self) -> None:
+        sig = Signal(
+            samples=_tones(128, [5], [0.0]) / np.sqrt(2),
+            sampling_rate=2e9,
+            symbol_rate=1e9,
+        )
+        out = multirate.resample(sig, sps_out=3.0, periodic=True)
+        assert out.sampling_rate == pytest.approx(3e9)
+        assert out.samples.shape == (192,)
+        assert np.mean(np.abs(out.samples) ** 2) == pytest.approx(1 / 3, rel=1e-5)
+
+    def test_non_integer_period_raises(self, xp: Any) -> None:
+        with pytest.raises(ValueError, match="periodic"):
+            multirate.resample(
+                xp.ones(100, dtype=xp.complex64), up=3, down=8, periodic=True
+            )
