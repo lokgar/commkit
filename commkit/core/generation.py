@@ -157,8 +157,8 @@ def generate(
         Shape the symbols as one period of a periodic sequence (circular
         convolution): the record loops seamlessly, e.g. on a streaming AWG,
         and has no filter transients at its ends.  Later Tx steps that filter
-        or resample the record (``fir_filter``, ``upsample``, ``resample``)
-        need ``periodic=True`` too; the Signal does not record it.
+        or resample the record (``fir_filter``, ``upsample``, ``resample``,
+        ``apply_phase_noise``) need ``periodic=True`` too; the Signal does not record it.
     rng : int, numpy.random.Generator or None
         Seed or generator (SciPy SPEC 7).
     device : {"cpu", "gpu"}, default "cpu"

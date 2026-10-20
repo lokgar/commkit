@@ -28,6 +28,7 @@ def _phase_trajectory(
     flicker_f_min: float | None,
     rng: np.random.Generator,
     xp: ModuleType,
+    periodic: bool = False,
 ) -> ArrayType:
     """
     float64 phase trajectories on ``xp``'s device with one-sided FM-noise PSD
@@ -39,6 +40,11 @@ def _phase_trajectory(
     spectral shaping of white frequency noise.  Like AWGN, the noise is drawn
     on the device: a seed gives the same statistics on every device, not the
     same realization.
+
+    ``periodic`` takes the same realization and subtracts one constant from
+    every increment so that they sum to a multiple of 2π: the trajectory then
+    closes on itself, and the step from the last sample back to the first is
+    an ordinary increment.
     """
     num_samples = shape[-1]
     phi = xp.zeros(shape, dtype=xp.float64)
@@ -60,6 +66,12 @@ def _phase_trajectory(
         df = xp.fft.irfft(xp.fft.rfft(white, axis=-1) * gain, num_samples, axis=-1)
         phi += 2.0 * math.pi * xp.cumsum(df, axis=-1) / sampling_rate
 
+    if periodic:
+        # phi[-1] is the sum of all N increments, the wrap step included.
+        two_pi = 2.0 * math.pi
+        excess = phi[..., -1:] - two_pi * xp.round(phi[..., -1:] / two_pi)
+        phi -= excess * (xp.arange(1, num_samples + 1, dtype=xp.float64) / num_samples)
+
     return phi
 
 
@@ -71,6 +83,7 @@ def generate_phase_noise(
     flicker: float = 0.0,
     flicker_f_min: float | None = None,
     num_channels: int = 1,
+    periodic: bool = False,
     rng: int | np.random.Generator | None = None,
     device: str = "cpu",
 ) -> ArrayType:
@@ -110,6 +123,10 @@ def generate_phase_noise(
         ``sampling_rate / num_samples``.
     num_channels : int, default 1
         Number of independent trajectories.
+    periodic : bool, default False
+        Make each trajectory one period of a periodic phase (modulo 2π), so
+        a record carrying it loops seamlessly, e.g. on a streaming AWG.  See
+        Notes.
     rng : int, numpy.random.Generator or None
         Random source (an int seeds ``numpy.random.default_rng``).
     device : {"cpu", "gpu"}, default "cpu"
@@ -128,13 +145,22 @@ def generate_phase_noise(
     trajectory on every run on one device, but CPU and GPU realizations
     differ (their statistics agree).  For the identical trajectory on both,
     generate it on the CPU and move it with ``to_device``.
+
+    A random walk does not end where it started, so a looped record would
+    jump in phase at every repetition.  ``periodic=True`` subtracts the same
+    constant from every increment so that the N increments, the one from the
+    last sample back to the first included, sum to a multiple of 2π.  This
+    is a frequency offset of at most ``sampling_rate / (2 * num_samples)``;
+    the statistics at lags much shorter than the record are unchanged.
     """
     device = require_device(device, "generate_phase_noise()")
     logger.info(
-        "Generating phase noise (linewidth=%.3g Hz, flicker=%.3g Hz², %s stream(s)).",
+        "Generating phase noise (linewidth=%.3g Hz, flicker=%.3g Hz², "
+        "%s stream(s), periodic=%s).",
         linewidth,
         flicker,
         num_channels,
+        periodic,
     )
 
     phi = _phase_trajectory(
@@ -145,6 +171,7 @@ def generate_phase_noise(
         flicker_f_min,
         np.random.default_rng(rng),
         _module_for(device),
+        periodic,
     )
     if num_channels == 1:
         phi = phi[0]
@@ -164,6 +191,7 @@ def apply_phase_noise(
     flicker: float = 0.0,
     flicker_f_min: float | None = None,
     shared_lo: bool = False,
+    periodic: bool = False,
     rng: int | np.random.Generator | None = None,
 ) -> S:
     """
@@ -195,6 +223,10 @@ def apply_phase_noise(
         (separate oscillators / lasers per TX-RX path).
         When ``True``, a single phase noise trajectory is shared across all
         channels (common local oscillator in a coherent system).
+    periodic : bool, default False
+        Treat ``samples`` as one period of a looped record (e.g. for a
+        streaming AWG) and make the phase noise periodic too; see
+        :func:`generate_phase_noise`.
     rng : int, numpy.random.Generator or None
         Random source for the trajectories, drawn on the input's device
         (see :func:`generate_phase_noise`).
@@ -214,10 +246,12 @@ def apply_phase_noise(
     sampling_rate = signal_adapter.resolve_fact("sampling_rate", sampling_rate)
 
     logger.info(
-        "Applying phase noise (linewidth=%.3g Hz, flicker=%.3g Hz², shared_lo=%s).",
+        "Applying phase noise (linewidth=%.3g Hz, flicker=%.3g Hz², shared_lo=%s, "
+        "periodic=%s).",
         linewidth,
         flicker,
         shared_lo,
+        periodic,
     )
 
     x, xp, _ = dispatch(signal_adapter.array)
@@ -233,6 +267,7 @@ def apply_phase_noise(
         flicker_f_min,
         np.random.default_rng(rng),
         xp,
+        periodic,
     )
     result = x * xp.exp(1j * phase)  # (1, N) broadcasts across channels
 

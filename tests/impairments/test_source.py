@@ -181,3 +181,63 @@ class TestGeneratePhaseNoise:
         # Wrapped comparison: increments are tiny, so unwrap-free diff works.
         err = xp.abs(xp.exp(1j * phi) - out)
         assert float(xp.max(err)) < 1e-9
+
+
+class TestPeriodicPhaseNoise:
+    """periodic=True: the same walk, closed on itself modulo 2π."""
+
+    def test_differs_from_walk_by_a_ramp(self, xp):
+        """Every increment, the wrap step included, is shifted by one constant
+        of at most π/N, and the increments sum to a multiple of 2π."""
+        kw = dict(num_samples=4096, sampling_rate=64e9, linewidth=5e6, flicker=1e12)
+        kw.update(num_channels=3, rng=3, device=device_of(xp))
+        walk = to_device(generate_phase_noise(**kw), "cpu")
+        loop = to_device(generate_phase_noise(periodic=True, **kw), "cpu")
+        n = kw["num_samples"]
+        shift = np.diff(loop - walk, axis=-1)
+        np.testing.assert_allclose(
+            shift, shift[:, :1].repeat(n - 1, axis=1), atol=1e-12
+        )
+        assert np.all(np.abs(shift) <= np.pi / n + 1e-12)
+        # Increments around the loop: loop[0] (from the wrap) plus the diffs.
+        total = loop[:, -1]
+        np.testing.assert_allclose(np.angle(np.exp(1j * total)), np.zeros(3), atol=1e-9)
+
+    def test_wrap_step_is_an_ordinary_increment(self, xp):
+        """Many loops: the wrap step has the variance of an interior step."""
+        fs, dnu, n = 64e9, 1e6, 256
+        phi = to_device(
+            generate_phase_noise(
+                num_samples=n,
+                sampling_rate=fs,
+                linewidth=dnu,
+                num_channels=4000,
+                periodic=True,
+                rng=5,
+                device=device_of(xp),
+            ),
+            "cpu",
+        )
+        wrap = np.angle(np.exp(1j * (phi[:, 0] - phi[:, -1])))
+        expected = 2.0 * math.pi * dnu / fs * (1 - 1 / n)
+        assert abs(np.var(wrap) - expected) / expected < 0.1
+        assert abs(np.var(np.diff(phi, axis=-1)) - expected) / expected < 0.05
+
+    def test_apply_forwards_periodic(self, xp):
+        fs, dnu, n = 64e9, 100e3, 1024
+        phi = generate_phase_noise(
+            num_samples=n,
+            sampling_rate=fs,
+            linewidth=dnu,
+            periodic=True,
+            rng=11,
+            device=device_of(xp),
+        )
+        out = apply_phase_noise(
+            xp.ones(n, dtype=xp.complex128),
+            sampling_rate=fs,
+            linewidth=dnu,
+            periodic=True,
+            rng=11,
+        )
+        assert float(xp.max(xp.abs(xp.exp(1j * phi) - out))) < 1e-9
