@@ -13,7 +13,7 @@ from commkit import analysis
 from commkit.backend import to_device
 from commkit.core import Signal
 from commkit.impairments import generate_phase_noise
-from tests.common.signals import make_dsh_beat
+from tests.common.signals import make_dsh_beat, make_dual_pol_dsh_beat
 
 FS = 500e6  # beat sampling rate (Hz)
 
@@ -112,3 +112,35 @@ class TestSignalInputInterferometry:
         sig = Signal(samples=xp.asarray(z), sampling_rate=FS, symbol_rate=FS)
         with pytest.raises(ValueError, match="conflicts"):
             analysis.dsh_phase(sig, sampling_rate=FS / 2)
+
+
+class TestPolarizationCombining:
+    """dsh_phase(combine_polarizations=True): one beat, two polarizations."""
+
+    def test_recovers_differential_phase_through_fades(self, xp):
+        """Noise-free: the combined phase follows Δφ through full fades of
+        each channel.  The only addition is the geometric phase of the SOP's
+        path on the Poincaré sphere, which varies at the SOP's own (kHz)
+        timescale."""
+        z, dphi = make_dual_pol_dsh_beat(snr_db=None, sop_rate=2e3, seed=1)
+        dp, _ = analysis.dsh_phase(
+            xp.asarray(z), sampling_rate=FS, f_shift=80e6, combine_polarizations=True
+        )
+        assert dp.shape == (z.shape[-1],)
+        err = to_device(dp, "cpu") - dphi
+        # Sample-to-sample, the combined phase is exact ...
+        assert np.max(np.abs(np.diff(err))) < 1e-3
+        # ... and what remains is slow: nothing left above ~100 kHz once a
+        # 10 µs moving average is removed.
+        w = 5000
+        c = np.cumsum(np.concatenate([[0.0], err]))
+        slow = (c[w:] - c[:-w]) / w
+        fast = err[w // 2 : w // 2 + slow.size] - slow
+        assert np.sqrt(np.mean(fast**2)) < 1e-2
+
+    def test_single_channel_raises(self, xp):
+        z, _ = make_dsh_beat(2e5, 1 << 12, 100, 80e6, seed=2)
+        with pytest.raises(ValueError, match="combine_polarizations"):
+            analysis.dsh_phase(
+                xp.asarray(z), sampling_rate=FS, combine_polarizations=True
+            )

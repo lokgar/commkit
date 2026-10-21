@@ -374,3 +374,39 @@ def make_test_symbols(
     if xp is not None:
         return xp.asarray(syms)
     return syms
+
+
+def make_dual_pol_dsh_beat(
+    linewidth: float = 2e5,
+    num_samples: int = 1 << 19,
+    delay_samples: int = 2450,
+    f_shift: float = 80e6,
+    snr_db: float | None = None,
+    sop_rate: float = 2e3,
+    seed: int = 0,
+    sample_rate: float = 500e6,
+) -> tuple[np.ndarray, np.ndarray]:
+    """Two-polarization DSH beat whose SOP fades each channel in turn.
+
+    The beat arrives in the Jones vector ``(cos α, sin α·e^{jβ})``: ``α``
+    swings between 0 and π/2 (a full fade of one channel, then the other)
+    and ``β`` rotates, both at about ``sop_rate``.  Independent complex
+    noise of variance ``10^(-snr_db/10)`` (relative to the total beat power)
+    is added per channel.  Returns ``(z, delta_phi)``: ``(2, N)`` beat and the
+    true differential phase.
+    """
+    z, dphi = make_dsh_beat(
+        linewidth, num_samples, delay_samples, f_shift, None, seed, sample_rate
+    )
+    t = np.arange(z.shape[-1]) / sample_rate
+    alpha = np.pi / 2 * np.sin(2 * np.pi * sop_rate * t + seed) ** 2
+    beta = 2 * np.pi * 1.7 * sop_rate * t
+    jones = np.stack([np.cos(alpha), np.sin(alpha) * np.exp(1j * beta)])
+    z2 = jones * z
+    if snr_db is not None:
+        rng = np.random.default_rng(seed + 1000)
+        std = np.sqrt(10 ** (-snr_db / 10) / 2)
+        z2 = z2 + std * (
+            rng.standard_normal(z2.shape) + 1j * rng.standard_normal(z2.shape)
+        )
+    return z2, dphi

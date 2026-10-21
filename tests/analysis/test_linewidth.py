@@ -21,7 +21,11 @@ from commkit.analysis import (
 from commkit.backend import to_device
 from commkit.core import Signal
 from commkit.impairments import apply_awgn, generate_phase_noise
-from tests.common.signals import make_dsh_beat, make_wiener_phase
+from tests.common.signals import (
+    make_dsh_beat,
+    make_dual_pol_dsh_beat,
+    make_wiener_phase,
+)
 
 R = 32e9  # symbol rate (Baud)
 T = 1.0 / R
@@ -425,6 +429,53 @@ class TestDshLinewidth:
             analysis.estimate_linewidth(
                 sig, DshFmPsd(delay=50 / FS), sampling_rate=FS / 2
             )
+
+
+class TestPolarizationDiversity:
+    """combine_polarizations=True: no fading, one estimate per beat."""
+
+    @pytest.mark.parametrize("snr_db", [25, 12])
+    def test_fm_psd_survives_fading(self, xp, snr_db):
+        z, _ = make_dual_pol_dsh_beat(snr_db=snr_db, num_samples=1 << 20, seed=3)
+        z = xp.asarray(z)
+        method = DshFmPsd(delay=2450 / FS, f_shift=80e6)
+        combined = analysis.estimate_linewidth(
+            z,
+            DshFmPsd(delay=2450 / FS, f_shift=80e6, combine_polarizations=True),
+            sampling_rate=FS,
+        )
+        one_pol = analysis.estimate_linewidth(z[0], method, sampling_rate=FS)
+        assert isinstance(combined.value, float)
+        assert combined.value == pytest.approx(2e5, rel=0.03)
+        assert one_pol.value > 5 * 2e5  # the fades are pure noise
+
+    def test_real_photodiodes(self, xp):
+        """One photodiode per polarization: Hilbert per channel, then combine."""
+        z, _ = make_dual_pol_dsh_beat(snr_db=25, num_samples=1 << 20, seed=4)
+        res = analysis.estimate_linewidth(
+            xp.asarray(z.real),
+            DshFmPsd(delay=2450 / FS, f_shift=80e6, combine_polarizations=True),
+            sampling_rate=FS,
+        )
+        assert res.value == pytest.approx(2e5, rel=0.03)
+
+    def test_increment_and_lorentzian_accept_it(self, xp):
+        z, _ = make_dual_pol_dsh_beat(
+            linewidth=2e6, snr_db=25, num_samples=1 << 20, delay_samples=2000, seed=5
+        )
+        z = xp.asarray(z)
+        inc = analysis.estimate_linewidth(
+            z,
+            DshIncrement(delay=2000 / FS, f_shift=80e6, combine_polarizations=True),
+            sampling_rate=FS,
+        )
+        lor = analysis.estimate_linewidth(
+            z,
+            DshLorentzian(delay=2000 / FS, combine_polarizations=True),
+            sampling_rate=FS,
+        )
+        assert inc.value == pytest.approx(2e6, rel=0.1)
+        assert lor.value == pytest.approx(2e6, rel=0.2)
 
 
 class TestEstimateLinewidthContract:

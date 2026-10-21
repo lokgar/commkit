@@ -31,10 +31,43 @@ combinations are supported:
   to phase and is rejected.
 
 All functions take ``(N,)`` or ``(C, N)`` records with time on the last
-axis; the ``C`` channels are **independent captures** processed as a batch -
-per-channel carrier removal, PSDs, and linewidths, no joint/MIMO processing
-- e.g. the two outputs of a polarization-diverse receiver, several lasers,
-or repeated captures stacked for a single GPU pass.
+axis.  By default the ``C`` channels are **independent captures** processed
+as a batch - per-channel carrier removal, PSDs and linewidths - e.g. several
+lasers, or repeated captures stacked for a single GPU pass.  With
+``combine_polarizations=True`` the channels are instead the polarization
+outputs of *one* beat and are combined into a single record (see below).
+
+**Polarization diversity.**  The two interferometer arms reach the receiver
+in different, slowly drifting states of polarization (SOP): the delay spool's
+birefringence wanders with temperature and vibration.  Only the projection
+of one arm's field onto the other's polarization beats, so a single-
+polarization receiver sees the beat amplitude fade - completely when the
+two SOPs become orthogonal - and during a fade the phase is pure noise and
+unwraps with slips.  A polarization-diverse (dual-pol) coherent receiver
+records the beat in two orthogonal polarizations,
+
+    z_p(t) = a_p(t)·s(t) + n_p(t),     p = x, y,
+
+where ``s = exp(j(2π f_shift t + Δφ))`` is the beat both channels share,
+``a = (a_x, a_y)`` the slowly varying Jones vector it arrives in
+(``|a_x|² + |a_y|²`` is the total beat power, which does not fade), and
+``n_p`` independent receiver noise.  The optimal combination for the phase
+of ``s`` is maximum-ratio combining, ``y = aᴴz / ‖a‖ = ‖a‖·s + noise``:
+each channel weighted by its own amplitude and co-phased.  ``a`` is
+estimated from the coherency matrix ``R = ⟨z zᴴ⟩ = a aᴴ + σ² I``, averaged
+over short blocks (≈ 1 µs, at least 256 samples): its dominant eigenvector
+is ``a/‖a‖`` up to a phase.  That phase is arbitrary per block, so the
+eigenvectors are *parallel-transported* - each block's phase chosen so it is
+in phase with the previous one - and interpolated to the sample rate before
+``y = vᴴz``.  The combined record has the SNR of the total beat power and no
+fading.
+
+Limitations: the channels must be sampled synchronously (deskew them
+first); SOP changes faster than a few blocks are not tracked; and a SOP that
+traces a closed loop on the Poincaré sphere adds the geometric
+(Pancharatnam) phase, half the enclosed solid angle, to ``y`` - a slow phase
+at the SOP's timescale, far below the frequencies the linewidth estimators
+use.
 
 The DSH estimators are methods of
 :func:`~commkit.analysis.linewidth.estimate_linewidth`:
@@ -73,13 +106,69 @@ __all__ = ["dsh_beat", "dsh_phase"]
 # -----------------------------------------------------------------------------
 
 
-def _analytic_beat(samples):
-    """Complex analytic beat ``(C, N)`` from raw DSH samples (Hilbert if real)."""
+def _analytic_beat(
+    samples, combine_polarizations: bool = False, sampling_rate: float = 0.0
+):
+    """Complex analytic beat ``(C, N)`` from raw DSH samples (Hilbert if real).
+
+    With ``combine_polarizations`` the channels are combined into one,
+    ``(1, N)``, and reported as 1-D; ``sampling_rate`` sets the combiner's
+    block length.
+    """
     z, xp, sp = dispatch(samples)
     z2, was_1d = as_2d(z, name="samples")
     if xp.iscomplexobj(z2):
-        return z2.astype(xp.complex128, copy=False), was_1d, xp
-    return sp.signal.hilbert(z2.astype(xp.float64), axis=-1), was_1d, xp
+        z2 = z2.astype(xp.complex128, copy=False)
+    else:
+        z2 = sp.signal.hilbert(z2.astype(xp.float64), axis=-1)
+    if combine_polarizations:
+        if z2.shape[0] < 2:
+            raise ValueError(
+                "combine_polarizations=True needs the polarization channels as "
+                f"a (C, N) record with C >= 2, got {z2.shape[0]} channel(s)."
+            )
+        return _combine_polarizations(z2, sampling_rate, xp), True, xp
+    return z2, was_1d, xp
+
+
+def _combine_polarizations(z2, sampling_rate: float, xp):
+    """Maximum-ratio combination of the polarization channels of one beat.
+
+    ``(C, N)`` complex in, ``(1, N)`` out: block coherency matrices, their
+    dominant eigenvectors (the Jones vector up to a phase), parallel
+    transport of that phase, linear interpolation to the sample rate and
+    ``y = vᴴz``.  See the module docstring.
+    """
+    c, n = z2.shape
+    block = min(max(256, int(round(1e-6 * sampling_rate))), n)
+    g = max(n // block, 1)
+    zb = z2[:, : g * block].reshape(c, g, block)
+    coherency = xp.einsum("pgk,qgk->gpq", zb, xp.conj(zb))  # (G, C, C)
+    # Average a few neighbouring blocks: noise in R averages down while the
+    # SOP is still tracked block by block.
+    kernel = 5 if g >= 5 else 1
+    if kernel > 1:
+        pad = xp.concatenate(
+            [coherency[:1].repeat(2, 0), coherency, coherency[-1:].repeat(2, 0)], 0
+        )
+        coherency = sum(pad[i : i + g] for i in range(kernel)) / kernel
+    _, vecs = xp.linalg.eigh(coherency)
+    v = vecs[:, :, -1]  # (G, C): dominant eigenvector per block
+    # Parallel transport: rotate each block's vector into phase with the
+    # previous one, so the weights (and the combined phase) stay continuous.
+    step = xp.angle(xp.sum(xp.conj(v[:-1]) * v[1:], axis=-1))
+    turn = xp.concatenate([xp.zeros(1), xp.cumsum(step)])
+    v = v * xp.exp(-1j * turn)[:, None]
+
+    centers = (xp.arange(g, dtype=xp.float64) + 0.5) * block
+    t = xp.arange(n, dtype=xp.float64)
+    y = xp.zeros(n, dtype=xp.complex128)
+    for p in range(c):
+        w = xp.interp(t, centers, v[:, p].real) + 1j * xp.interp(
+            t, centers, v[:, p].imag
+        )
+        y += xp.conj(w) * z2[p]
+    return y[None, :]
 
 
 def dsh_beat(
@@ -161,6 +250,7 @@ def dsh_phase(
     *,
     sampling_rate: float | None = None,
     f_shift: float | None = None,
+    combine_polarizations: bool = False,
 ) -> tuple[ArrayType, float | np.ndarray]:
     r"""Unwrapped differential laser phase Δφ(t) = φ(t) - φ(t-τ_d) from the beat.
 
@@ -186,12 +276,16 @@ def dsh_phase(
         frequency is estimated per channel in two stages - coarse Kay
         (lag-1-autocorrelation) estimate, then exact least-squares slope
         removal on the unwrapped phase - and removed.
+    combine_polarizations : bool, default False
+        Treat the ``C ≥ 2`` channels as the polarization outputs of one beat
+        and combine them (maximum-ratio, see the module docstring) into a
+        single differential phase that does not fade.
 
     Returns
     -------
     delta_phi : array_like
         Unwrapped differential phase in radians (``float64``), same layout and
-        backend as the input.
+        backend as the input (``(N,)`` when the polarizations are combined).
     f_shift_hz : float or ndarray
         The removed carrier frequency (estimated or as passed), float (SISO)
         or ``(C,)`` array.
@@ -234,7 +328,7 @@ def dsh_phase(
             "photodetector) observe cos(Δφ) only and cannot be inverted to "
             "phase. Use an AOM shift (heterodyne) or an IQ front-end."
         )
-    z2, was_1d, xp = _analytic_beat(samples)
+    z2, was_1d, xp = _analytic_beat(samples, combine_polarizations, fs)
 
     estimate = f_shift is None
     if f_shift is None:

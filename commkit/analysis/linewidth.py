@@ -405,6 +405,11 @@ class DshFmPsd:
         Masks near-notch bins of the displayed ``S_f`` when the segments
         resolve the fringes (see ``dsh_fm_noise_psd``); the fit uses every
         bin regardless.
+    combine_polarizations : bool, default False
+        Treat the ``C ≥ 2`` channels as the polarization outputs of one beat
+        and combine them before estimating (maximum-ratio, immune to
+        polarization fading; see :mod:`commkit.analysis.interferometry`).
+        The estimate is then a single value.
 
     Notes
     -----
@@ -484,6 +489,7 @@ class DshFmPsd:
     f_min: float | None = None
     f_max: float | None = None
     notch_guard: float = 0.1
+    combine_polarizations: bool = False
 
     def __post_init__(self) -> None:
         _check_delay(self.delay)
@@ -518,11 +524,17 @@ class DshIncrement:
         ``ℓ ≤ τ_d·f_s`` *and* small enough that the variance estimator keeps
         many independent averages when the delay is long (decoherence
         spools).
+    combine_polarizations : bool, default False
+        Treat the ``C ≥ 2`` channels as the polarization outputs of one beat
+        and combine them before estimating (maximum-ratio, immune to
+        polarization fading; see :mod:`commkit.analysis.interferometry`).
+        The estimate is then a single value.
     """
 
     delay: float
     f_shift: float | None = None
     lags: tuple[int, ...] | None = None
+    combine_polarizations: bool = False
 
     def __post_init__(self) -> None:
         _check_delay(self.delay)
@@ -554,6 +566,11 @@ class DshLorentzian:
         Welch segment length of the beat PSD.
     level_db : float, default 20.0
         Depth below the peak at which the width is measured.
+    combine_polarizations : bool, default False
+        Treat the ``C ≥ 2`` channels as the polarization outputs of one beat
+        and combine them before estimating (maximum-ratio, immune to
+        polarization fading; see :mod:`commkit.analysis.interferometry`).
+        The estimate is then a single value.
 
     Notes
     -----
@@ -569,6 +586,7 @@ class DshLorentzian:
     delay: float
     nperseg: int | None = None
     level_db: float = 20.0
+    combine_polarizations: bool = False
 
     def __post_init__(self) -> None:
         _check_delay(self.delay)
@@ -825,7 +843,12 @@ def _lorentzian_widths(f, p, level_lin):
 def _dsh_fm_psd(samples: ArrayType, method: DshFmPsd, fs: float) -> LinewidthEstimate:
     td = float(method.delay)
     m_samp = _delay_samples(td, fs)
-    dphi, f_hat = dsh_phase(samples, sampling_rate=fs, f_shift=method.f_shift)
+    dphi, f_hat = dsh_phase(
+        samples,
+        sampling_rate=fs,
+        f_shift=method.f_shift,
+        combine_polarizations=method.combine_polarizations,
+    )
     n_diff = dphi.shape[-1] - 1
     nps = _dsh_nperseg(n_diff, m_samp, method.nperseg)
     f, S_beat = fm_noise_psd(dphi, sampling_rate=fs, nperseg=nps)
@@ -913,7 +936,12 @@ def _dsh_increment(
     samples: ArrayType, method: DshIncrement, fs: float
 ) -> LinewidthEstimate:
     m_samp = _delay_samples(method.delay, fs)
-    dphi, f_hat = dsh_phase(samples, sampling_rate=fs, f_shift=method.f_shift)
+    dphi, f_hat = dsh_phase(
+        samples,
+        sampling_rate=fs,
+        f_shift=method.f_shift,
+        combine_polarizations=method.combine_polarizations,
+    )
     d2, _ = as_2d(dphi, name="delta_phi")
     _, xp, _ = dispatch(d2)
 
@@ -973,7 +1001,7 @@ def _dsh_lorentzian(
     td = float(method.delay)
     _delay_samples(td, fs)
     level_db = float(method.level_db)
-    z2, was_1d, xp = _analytic_beat(samples)
+    z2, was_1d, xp = _analytic_beat(samples, method.combine_polarizations, fs)
     npseg = _resolve_nperseg(z2.shape[-1], method.nperseg, cap=1 << 14)
     f, P = welch_psd(z2, sampling_rate=fs, nperseg=npseg, return_onesided=False)
     # From here on the work is scalar peak/width searching on an
