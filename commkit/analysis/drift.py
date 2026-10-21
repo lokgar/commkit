@@ -153,8 +153,8 @@ def frequency_drift(
     The first difference under-reads a spectral component at ``f`` by
     ``sinc(f·T)`` relative to a true derivative.  Because ``drift_phase`` is
     low-passed (``cutoff ≪ sampling_rate``), this bias is negligible here - it only
-    matters when differencing broadband phase (see ``fm_noise_psd``, which
-    corrects for it).
+    matters for band-limited content near Nyquist (see the Notes of
+    ``fm_noise_psd``; broadband white FM is not affected).
     """
     d, xp, _ = dispatch(drift_phase)
     d2, was_1d = as_2d(d, name="drift_phase")

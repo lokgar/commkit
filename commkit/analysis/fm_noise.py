@@ -50,7 +50,7 @@ def fm_noise_psd(
     sampling_rate: float,
     nperseg: int | None = None,
     detrend: str | bool = "constant",
-    bias_correction: bool = True,
+    bias_correction: bool = False,
 ) -> tuple[ArrayType, ArrayType]:
     r"""One-sided frequency-noise PSD S_f(f) [Hz²/Hz] from the phase.
 
@@ -75,8 +75,11 @@ def fm_noise_psd(
     detrend : str or bool, default "constant"
         Per-segment detrend passed to Welch; ``"constant"`` removes the mean
         residual frequency offset.
-    bias_correction : bool, default True
-        Undo the first-difference roll-off (see Notes).
+    bias_correction : bool, default False
+        Divide by ``sinc²(f/f_s)``, the first-difference roll-off of a
+        *band-limited* frequency.  Leave it off for laser phase noise: white
+        FM is not band-limited, and its sampled first difference is already
+        exactly white (see Notes).
 
     Returns
     -------
@@ -89,12 +92,33 @@ def fm_noise_psd(
 
     Notes
     -----
-    The first difference is not an ideal differentiator: its magnitude
-    response is ``|2 sin(πfT)|`` versus the ideal ``2πfT``, so the raw
-    estimate is ``S_f,true(f) · sinc²(fT)`` - a -3.9 dB droop at Nyquist
-    (``sampling_rate/2``).  With ``bias_correction=True`` the PSD is divided by
-    ``sinc²(fT)`` so the white-FM plateau and the AWGN ``f²`` tail keep their
-    analytic levels all the way to Nyquist.
+    **What the first difference measures.**  Sampling the phase at ``t = nT``
+    and differencing gives the frequency *averaged* over each sample
+    interval,
+
+        φ[n] - φ[n-1] = 2π ∫_{(n-1)T}^{nT} f(t) dt,
+
+    i.e. ``f(t)`` through a ``T``-long boxcar (response ``sinc(fT)``) and then
+    sampled, which folds every band ``f + k·f_s`` onto ``f``:
+
+        S_est(f) = Σ_k S_f(f + k·f_s) · sinc²((f + k·f_s)·T).
+
+    Two cases follow:
+
+    * **White FM (the Lorentzian linewidth)**: ``S_f = Δν/π`` at all
+      frequencies, and ``Σ_k sinc²(x + k) = 1`` for every ``x``, so the folded
+      copies exactly fill the droop and ``S_est = Δν/π`` flat up to Nyquist.
+      Equivalently, a sampled Wiener phase has independent Gaussian
+      increments.  No correction is needed, and dividing by ``sinc²`` would
+      tilt the plateau up by as much as ``π²/4 ≈ 2.47`` at Nyquist.
+    * **Band-limited FM** (well inside ``±f_s/2``, e.g. slow drift or a
+      modulation tone): only ``k = 0`` contributes and the estimate droops by
+      ``sinc²(fT)``, -3.9 dB at Nyquist.  ``bias_correction=True`` undoes it.
+
+    Additive white *phase* noise ``σ²`` per sample (detection noise on the
+    beat angle) is a third case: it is already discrete, and its difference
+    gives the one-sided ``S_est(f) = (2σ²·f_s/π²)·sin²(πf/f_s)``, which is
+    ``≈ (2σ²/f_s)·f²`` well below Nyquist.
 
     **Limitations.**
 
@@ -139,7 +163,7 @@ def dsh_fm_noise_psd(
     delay: float,
     nperseg: int | None = None,
     notch_guard: float = 0.1,
-    bias_correction: bool = True,
+    bias_correction: bool = False,
 ) -> DshFmNoisePsd:
     r"""Laser FM-noise PSD from the differential phase (notch-guarded deconvolution).
 
@@ -174,8 +198,8 @@ def dsh_fm_noise_psd(
     notch_guard : float, default 0.1
         Bins with ``sin²(πfτ_d)`` below this threshold are masked (NaN).  The
         default keeps ≈ 80 % of every response lobe.
-    bias_correction : bool, default True
-        Forwarded to ``fm_noise_psd`` (first-difference droop).
+    bias_correction : bool, default False
+        Forwarded to ``fm_noise_psd``; leave it off for laser phase noise.
 
     Returns
     -------
