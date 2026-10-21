@@ -142,9 +142,12 @@ def plot_frequency_noise_psd(
     * ``above`` (``BetaSeparation``) - the **actual β-integration region**
       ``{f : S_f(f) > β(f)}`` (in general a union of disjoint intervals): the
       area between the dashed β-line and the PSD is filled wherever it holds.
-    * ``used`` - the bins the floor median ran over (the auto-detected
-      plateau).  Sparse masks (≤ 400 bins) are drawn as markers on the PSD
-      trace, dense masks as a highlighted log-binned median curve.
+    * ``used`` - the bins the estimate ran over (the ``BetaSeparation``
+      floor median, or the ``DshFmPsd`` fit with spurs removed).  Sparse
+      masks (≤ 400 bins) are drawn as markers on the PSD trace, dense masks
+      as a highlighted log-binned median curve.
+    * ``S_f_model`` (``DshFmPsd``) - the fitted white-FM, flicker-FM and
+      detection-noise model, drawn over the PSD.
 
     Dense spectra are drawn faint with a log-binned median trace on top.
     Every channel's PSD is drawn; the masks are those of channel 0.
@@ -217,6 +220,12 @@ def plot_frequency_noise_psd(
             label=r"$\beta$-area (integrated region)",
         )
 
+    model = getattr(estimate, "S_f_model", None)
+    if model is not None:
+        m_c = _as_channels(model)
+        axi.loglog(fp, m_c[0, pos], color="#ef476f", lw=1.5, label="Fitted model")
+
+    used_label = "Fit bins" if model is not None else "Plateau bins (median)"
     if used is not None:
         u_c = np.asarray(to_device(used, "cpu"), dtype=bool)
         if u_c.ndim > 1:
@@ -230,13 +239,14 @@ def plot_frequency_noise_psd(
                 color="#06d6a0",
                 ms=3.0,
                 ls="none",
-                label="Plateau bins (median)",
+                label=used_label,
             )
         else:
             # Dense mask: highlight the log-binned median over the accepted
             # region instead of splattering one marker per bin.
             fg, sg = _log_cell_median(fp, S_c[0, pos], sel)
-            axi.loglog(fg, sg, color="#06d6a0", label="Plateau (median region)")
+            region = "Fit region" if model is not None else "Plateau (median region)"
+            axi.loglog(fg, sg, color="#06d6a0", label=region)
 
     if floor is not None:
         floors = np.atleast_1d(np.asarray(floor, dtype=np.float64))

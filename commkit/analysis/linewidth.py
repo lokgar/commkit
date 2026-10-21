@@ -34,8 +34,10 @@ from ._common import (
     _increment_variance_fit,
     _resolve_nperseg,
     _welch_floor_bias,
+    _welch_median_bias,
+    _whittle_fit,
 )
-from .fm_noise import dsh_fm_noise_psd, fm_noise_psd
+from .fm_noise import _dsh_nperseg, _interferometer_response, fm_noise_psd
 from .interferometry import _analytic_beat, dsh_phase
 
 __all__ = [
@@ -76,16 +78,23 @@ class LinewidthEstimate:
         or of ``psd`` (``DshLorentzian``, two-sided).
     S_f : np.ndarray or None
         FM-noise PSD in Hz²/Hz (``BetaSeparation``; for ``DshFmPsd`` the
-        deconvolved laser PSD, NaN at masked bins).
+        laser PSD, the beat PSD divided by the interferometer response, NaN at
+        masked bins).
+    S_f_model : np.ndarray or None
+        ``DshFmPsd``: the fitted model in the units of ``S_f`` - white FM,
+        flicker FM and the detection-noise term.
     used : np.ndarray or None
-        Boolean mask of the bins the white-FM floor median ran over
-        (``BetaSeparation``, ``DshFmPsd``).
+        Boolean mask of the bins the estimate ran over: the white-FM floor
+        median (``BetaSeparation``) or the fit, spurs removed (``DshFmPsd``).
     band : tuple of float or None
         ``BetaSeparation``: the ``(f_min, f_max)`` fence applied.
         ``DshFmPsd``: the frequency extent of ``used``.
     n_segments : int or None
         Welch segment count ``K`` behind every bin (``BetaSeparation``,
         ``DshFmPsd``).
+    flicker : float or np.ndarray or None
+        ``DshFmPsd``: fitted flicker-FM coefficient ``h_-1`` in Hz²
+        (``S_f = h_-1/f``).
     linewidth_floor : float or np.ndarray or None
         ``BetaSeparation``: the white-FM floor cross-check ``π·median(S_f)``
         in Hz.
@@ -113,7 +122,8 @@ class LinewidthEstimate:
         rad² (``IncrementSlope``, ``DshIncrement``).
     awgn_var : float or np.ndarray or None
         Additive-noise term in rad²: the fitted intercept (``IncrementSlope``,
-        ``DshIncrement``) or the subtracted term (``IncrementSubtract``).
+        ``DshIncrement``), the subtracted term (``IncrementSubtract``) or the
+        fitted angle-noise variance per sample (``DshFmPsd``).
     dphi_var : float or np.ndarray or None
         ``IncrementSlope``, ``IncrementSubtract``: lag-1 increment variance in
         rad².  ``DshIncrement``: total variance of the differential phase.
@@ -134,9 +144,11 @@ class LinewidthEstimate:
     method: Any
     f: np.ndarray | None = None
     S_f: np.ndarray | None = None
+    S_f_model: np.ndarray | None = None
     used: np.ndarray | None = None
     band: tuple[float, float] | None = None
     n_segments: int | None = None
+    flicker: float | np.ndarray | None = None
     linewidth_floor: float | np.ndarray | None = None
     area_hz2: float | np.ndarray | None = None
     beta_line: np.ndarray | None = None
@@ -366,47 +378,104 @@ def _check_delay(delay: float) -> None:
 
 @dataclass(frozen=True)
 class DshFmPsd:
-    r"""White-FM floor of the deconvolved DSH FM-noise PSD.
+    r"""Linewidth from a model fit to the DSH beat FM-noise PSD.
 
-    ``dsh_phase`` -> ``dsh_fm_noise_psd`` -> ``Δν = π·median(S_f,laser)``
-    over the usable band.  Works for **any** delay (coherent or incoherent
-    regime); the notch structure, not the regime, sets the usable band.
+    ``dsh_phase`` -> FM-noise PSD of the beat -> Whittle fit of white FM,
+    flicker FM and detection noise -> ``Δν = π·S_white``.  Works for any
+    delay, in the coherent and the incoherent regime.
 
     Parameters
     ----------
     delay : float
         Interferometer differential delay ``τ_d`` in seconds (≈ 4.9 µs per km
-        of SMF).
+        of SMF).  With the default segments it only has to be known well
+        enough to choose them (see Notes); it does not scale the result.
     f_shift : float, optional
         Known AOM/beat carrier in Hz; estimated if None (see ``dsh_phase``).
     nperseg : int, optional
-        Welch segment length.
+        Welch segment length.  Defaults to the longest power of two within the
+        delay, clipped to ``[256, 16384]``.  Longer segments resolve the
+        interferometer fringes and lower frequencies, but make the fit depend
+        on the exact delay.
     f_min, f_max : float, optional
-        Manual analysis fence.  When **both** are None the plateau is
-        **auto-detected**: the white-FM floor is located as the minimum of
-        octave-band medians over all valid bins and the median runs over
-        every bin within 3x that floor - spanning as many interferometer
-        lobes as the detection-noise knee allows, and excluding a rising
-        low-frequency (drift/flicker) region.  Passing either bound switches
-        to the literal fence (``f_min`` -> 0, ``f_max`` -> the first notch
-        ``1/τ_d`` when the other is omitted), with the median over *all*
-        valid bins inside.
+        Fit band in Hz.  Defaults to every bin above DC, capped for a real
+        (single-photodiode) capture at its FM detection bandwidth
+        ``min(f_shift, f_s/2 - f_shift)``.
     notch_guard : float, default 0.1
-        Notch mask threshold (see ``dsh_fm_noise_psd``).
+        Masks near-notch bins of the displayed ``S_f`` when the segments
+        resolve the fringes (see ``dsh_fm_noise_psd``); the fit uses every
+        bin regardless.
 
     Notes
     -----
-    The estimate reports the white-FM *floor*.  For **real** captures the
-    eligible band is additionally capped at the receiver's FM detection
-    bandwidth ``min(f_shift, f_s/2 - f_shift)`` - beyond it the beat carries
-    no sidebands and the deconvolved PSD reads fake-low.  It falls back to the
-    first lobe (with a warning) when no plateau is found.  If the *entire*
-    usable band is 1/f-dominated (very long ``τ_d``, quiet laser), the floor
-    is the lowest resolved noise level - inspect the PSD before quoting it as
-    Δν.  The χ²-median bias of the Welch bins is divided back out (keep the
-    record ≳ 5·nperseg so ``K ≳ 10``); the plotted log-binned median curve is
-    *not* corrected, so at small ``K`` the ``Δν/π`` guide sits visibly above
-    it.
+    **The measurement.**  The beat carries ``Δφ(t) = φ(t) - φ(t - τ_d)``, so
+    its instantaneous frequency is the laser frequency minus its own delayed
+    copy, ``f_beat(t) = f(t) - f(t - τ_d)``.  A white-FM laser of Lorentzian
+    linewidth ``Δν`` has a flat one-sided FM-noise PSD ``S_f = Δν/π``; the
+    task is to read that level from ``f_beat``.
+
+    **The interferometer seen through a Welch window.**  ``f(t) - f(t-τ_d)``
+    filters ``S_f`` by ``2 - 2 cos 2πfτ_d``.  A Welch bin averages over the
+    window's spectral kernel, which damps the oscillating term by the window
+    autocorrelation ``ρ_w`` at the delay, so the expected beat PSD is
+
+        E[S_beat(f)] = (2 - 2ρ_w(τ_d)·cos 2πfτ_d) · S_laser(f) + S_noise(f).
+
+    Segments longer than the delay (``ρ_w → 1``) resolve the ``4 sin²``
+    fringes and their notches.  With the default segments, **no longer than
+    the delay**, ``ρ_w = 0``: inside one segment the two copies of the laser
+    frequency are disjoint stretches of the same process and add their
+    power, so ``E[S_beat] = 2·S_laser + S_noise``.  The fit then needs no
+    deconvolution and no exact delay.  A delay error no longer moves notches
+    across the band (with resolved fringes, notch ``k`` moves by ``k·Δτ/τ_d``
+    of a lobe, so a 0.1 % error spoils the fit beyond lobe ~100), and a long
+    spool still gives many segments.
+
+    **The model.**  The mean beat PSD is fitted as
+
+        M(f) = g(f)·(S_white + h_-1/f) + σ²·(2f_s/π²)·sin²(πf/f_s),
+
+    with ``g(f) = 2 - 2ρ_w(τ_d)·cos 2πfτ_d``:
+
+    * ``S_white = Δν/π`` - white FM, the Lorentzian linewidth;
+    * ``h_-1/f`` - flicker FM (technical noise), so a rising low-frequency
+      region does not bias the floor (reported as ``flicker``);
+    * the last term - additive detection noise.  Noise on the beat adds a
+      white angle error of ``σ²`` rad² per sample, whose first difference
+      has this ``≈ f²`` spectrum; it bypasses the interferometer, so ``g``
+      does not shape it (reported as ``awgn_var``).
+
+    The PSD is computed without the ``sinc²`` correction of
+    ``fm_noise_psd``: sampled white FM has white increments, so its PSD is
+    flat to Nyquist as measured.
+
+    **The fit.**  A Welch bin is ``M·χ²_ν/ν``-distributed with ``ν ≈ 2K``
+    for ``K`` segments.  The coefficients minimize the Whittle negative
+    log-likelihood ``Σ_k [ln M_k + P_k/M_k]``, whose score has zero mean for
+    any ``K``: unlike a median of the bins, which reads ``χ²_ν``'s median and
+    is biased low at small ``K``, the fit stays unbiased down to a single
+    segment.  Bins far above the model (spurs) are screened out by a χ²
+    test and the fit repeated; ``used`` shows the bins that remained.
+
+    **Limitations.**
+
+    * The model covers white FM, flicker FM and white detection noise.
+      Other structure in the band (random-walk FM ``∝ 1/f²`` at the lowest
+      bins, fiber acoustic lines, a colored receiver noise) biases the fit;
+      fence it out with ``f_min``/``f_max`` and compare ``S_f`` with
+      ``S_f_model`` on ``plotting.plot_frequency_noise_psd``.
+    * The detection-noise term assumes additive Gaussian angle noise, i.e. a
+      beat SNR well above the unwrap threshold (≳ 10 dB in the record's
+      bandwidth).  Below it phase slips add a white-FM-like floor.
+    * ``flicker`` is only as good as the band's coverage of the flicker
+      region.  The default segments put the first bin at about ``1/τ_d``; a
+      flicker corner below it barely shapes the fitted band, and ``h_-1``
+      comes out low (by about 2x for a corner a quarter of the first bin).
+      ``Δν`` is unaffected.  To measure ``h_-1``, pass segments long enough
+      to resolve the corner (then the delay must be accurate, see above).
+    * Everything the interferometer adds - fiber acoustic/thermal noise in
+      the delay arm, AOM synthesizer noise - is indistinguishable from laser
+      noise.
     """
 
     delay: float
@@ -755,83 +824,88 @@ def _lorentzian_widths(f, p, level_lin):
 
 def _dsh_fm_psd(samples: ArrayType, method: DshFmPsd, fs: float) -> LinewidthEstimate:
     td = float(method.delay)
-    _delay_samples(td, fs)
+    m_samp = _delay_samples(td, fs)
     dphi, f_hat = dsh_phase(samples, sampling_rate=fs, f_shift=method.f_shift)
-    psd = dsh_fm_noise_psd(
-        dphi,
-        sampling_rate=fs,
-        delay=td,
-        nperseg=method.nperseg,
-        notch_guard=method.notch_guard,
-    )
-    # Summary layer: one transfer, host-side plateau search + median
-    # (plot-sized spectra - see the package backend policy).
-    f_cpu = np.asarray(to_device(psd.f, "cpu"), dtype=np.float64)
-    S_cpu = np.asarray(to_device(psd.S_f, "cpu"), dtype=np.float64)
-    valid_cpu = np.asarray(to_device(psd.valid, "cpu"), dtype=bool)
+    n_diff = dphi.shape[-1] - 1
+    nps = _dsh_nperseg(n_diff, m_samp, method.nperseg)
+    f, S_beat = fm_noise_psd(dphi, sampling_rate=fs, nperseg=nps)
+    # Summary layer: one transfer, host-side fit on the plot-sized spectrum.
+    f_cpu = np.asarray(to_device(f, "cpu"), dtype=np.float64)
+    S_cpu = np.asarray(to_device(S_beat, "cpu"), dtype=np.float64)
     S2 = S_cpu[None, :] if S_cpu.ndim == 1 else S_cpu
+    n_ch = S2.shape[0]
 
-    # Welch bins are χ²-distributed, so every median-based floor below reads
-    # the true level low by median(χ²_ν)/ν ≈ 1 - 1/(3K); the factor is
-    # divided back out of the linewidth at the end.  The segment length is
-    # reproduced from the resolver (f[1] = f_s/nperseg) rather than read back
-    # off the device.
-    nps_used = _resolve_nperseg(dphi.shape[-1] - 1, method.nperseg, cap=4096)
-    m_med, k_seg = _welch_floor_bias(
-        dphi.shape[-1] - 1, nps_used, label="estimate_linewidth(DshFmPsd)"
+    g = np.asarray(
+        _interferometer_response(f_cpu, delay=td, sampling_rate=fs, nperseg=nps)
     )
-
-    if method.f_min is None and method.f_max is None:
-        base = valid_cpu & (f_cpu > 0)
-        # Real (single-photodiode) captures carry FM sidebands only out to
-        # the beat carrier's distance from the band edges: offsets beyond
-        # min(f_shift, f_nyq - f_shift) have no physical support after the
-        # analytic-signal step and read as fake-low PSD - cap the eligible
-        # band there.  Complex IQ captures have no such limit (full ±Nyquist).
-        x_in, xp_in, _ = dispatch(samples)
-        if not xp_in.iscomplexobj(x_in):
-            fh = float(np.min(np.asarray(f_hat)))
-            base = base & (f_cpu <= min(fh, fs / 2.0 - fh))
-        base2 = np.broadcast_to(base, S2.shape)
-        # Channels where no plateau is found fall back to the first lobe.
-        first_lobe = np.broadcast_to(
-            valid_cpu & (f_cpu > 0) & (f_cpu <= 1.0 / td), S2.shape
-        )
-        used2, levels = _floor_levels(
-            f_cpu,
-            S2,
-            base2,
-            auto=True,
-            label="estimate_linewidth(DshFmPsd)",
-            fallback2=first_lobe,
-            fallback_desc="the first-lobe band [0, 1/τ_d]",
-        )
-    else:
-        fmin = 0.0 if method.f_min is None else float(method.f_min)
-        fmax = (1.0 / td) if method.f_max is None else float(method.f_max)
-        base2 = np.broadcast_to(valid_cpu & (f_cpu >= fmin) & (f_cpu <= fmax), S2.shape)
-        used2, levels = _floor_levels(
-            f_cpu, S2, base2, auto=False, label="estimate_linewidth(DshFmPsd)"
+    if nps > m_samp:
+        logger.info(
+            "estimate_linewidth(DshFmPsd): nperseg=%d exceeds the delay (%.0f "
+            "samples) - the fit models the interferometer fringes and depends "
+            "on the exact delay.",
+            nps,
+            m_samp,
         )
 
-    if not used2.any(axis=-1).all():
+    _, k_seg = _welch_median_bias(n_diff, nps)
+    dof = 2.0 * (k_seg / 1.056 if k_seg > 1 else 1.0)
+
+    fmin = 0.0 if method.f_min is None else float(method.f_min)
+    fmax = fs / 2.0 if method.f_max is None else float(method.f_max)
+    x_in, xp_in, _ = dispatch(samples)
+    if method.f_max is None and not xp_in.iscomplexobj(x_in):
+        # A real (single-photodiode) beat carries FM sidebands only out to the
+        # carrier's distance from DC and Nyquist; beyond it the analytic
+        # signal has no support and the PSD reads fake-low.
+        fh = float(np.min(np.abs(np.asarray(f_hat))))
+        fmax = min(fmax, fh, fs / 2.0 - fh)
+    band = (f_cpu > 0) & (f_cpu >= fmin) & (f_cpu <= fmax)
+    if int(band.sum()) < 8:
         raise ValueError(
-            "No valid FM-PSD bins in the analysis band - widen "
-            "[f_min, f_max], lower notch_guard, or increase nperseg."
+            f"Only {int(band.sum())} FM-PSD bins in the fit band - widen "
+            "[f_min, f_max] or lengthen nperseg."
         )
-    lw = np.pi * levels / m_med
+
+    fb = f_cpu[band]
+    X = np.stack(
+        [g[band], g[band] / fb, 2.0 * fs / np.pi**2 * np.sin(np.pi * fb / fs) ** 2],
+        axis=1,
+    )
+    theta = np.empty((n_ch, 3))
+    used2 = np.zeros(S2.shape, dtype=bool)
+    for c in range(n_ch):
+        theta[c], kept = _whittle_fit(S2[c, band], X, dof=dof)
+        used2[c, np.flatnonzero(band)[kept]] = True
+
+    # Display: the beat PSD divided by the interferometer response, and the
+    # fitted model in the same units.
+    valid = g >= 4.0 * float(method.notch_guard)
+    with np.errstate(divide="ignore", invalid="ignore"):
+        S_laser = np.where(valid, S2 / g, np.nan)
+        noise = theta[:, 2:3] * (2.0 * fs / np.pi**2) * np.sin(np.pi * f_cpu / fs) ** 2
+        model = np.where(
+            valid & (f_cpu > 0),
+            theta[:, 0:1] + theta[:, 1:2] / f_cpu + noise / g,
+            np.nan,
+        )
     f_used = f_cpu[used2.any(axis=0)]
 
+    def per_channel(a: np.ndarray) -> Any:
+        return a[0] if S_cpu.ndim == 1 else a
+
     return LinewidthEstimate(
-        value=to_report_scalar(lw),
+        value=to_report_scalar(np.pi * theta[:, 0]),
         method=method,
         f_shift=f_hat,
         f=f_cpu,
-        S_f=S_cpu,
-        valid=valid_cpu,
-        used=used2[0] if S_cpu.ndim == 1 else used2,
+        S_f=per_channel(S_laser),
+        S_f_model=per_channel(model),
+        valid=valid,
+        used=per_channel(used2),
         band=(float(f_used[0]), float(f_used[-1])),
         n_segments=k_seg,
+        flicker=to_report_scalar(theta[:, 1]),
+        awgn_var=to_report_scalar(theta[:, 2]),
     )
 
 

@@ -209,24 +209,21 @@ class TestDshLinewidth:
         res = analysis.estimate_linewidth(
             xp.asarray(z), DshFmPsd(delay=m / FS, nperseg=1 << 14), sampling_rate=FS
         )
-        assert res.value == pytest.approx(2e6, rel=0.15)
-        # Notch bins are masked and NaN.
+        assert res.value == pytest.approx(2e6, rel=0.05)
+        # Segments much longer than the delay resolve the fringes: notch bins
+        # are masked and NaN in the displayed PSD.
         k1 = int(np.argmin(np.abs(res.f - FS / m)))
         assert not res.valid[k1]
         assert np.isnan(res.S_f[k1])
-        # Auto plateau detection spans lobes: the band extends past the first
-        # notch, and the 'used' mask reproduces the reported band extent.
+        # The fit spans many lobes, and the 'used' mask reproduces the
+        # reported band extent.
         assert res.band[1] > FS / m
         f_used = res.f[res.used]
         assert res.band == (float(f_used[0]), float(f_used[-1]))
 
-    def test_fm_psd_auto_band_dodges_flicker(self, xp):
-        """Auto plateau detection excludes a rising low-frequency 1/f region.
-
-        With the flicker corner inside the first lobe, the naive first-lobe
-        median is strongly inflated; the auto-detected plateau reads the white
-        part.
-        """
+    def test_fm_psd_flicker_is_modeled(self, xp):
+        """A flicker corner inside the band neither biases the white-FM level
+        nor goes unreported: the fit carries an h_-1/f term."""
         dnu, n, m = 2e5, 1 << 21, 2450  # τ_d = 4.9 µs, corner ≈ 63 kHz
         phi = to_device(
             generate_phase_noise(
@@ -241,27 +238,76 @@ class TestDshLinewidth:
         )
         z, _ = analysis.dsh_beat(phi, sampling_rate=FS, delay=m / FS, f_shift=80e6)
         z = xp.asarray(apply_awgn(z, sps=1, esn0_db=25, rng=145))
-        auto = analysis.estimate_linewidth(
-            z, DshFmPsd(delay=m / FS, f_shift=80e6, nperseg=1 << 15), sampling_rate=FS
+        res = analysis.estimate_linewidth(
+            z, DshFmPsd(delay=m / FS, f_shift=80e6), sampling_rate=FS
         )
-        naive = analysis.estimate_linewidth(
-            z,
-            DshFmPsd(delay=m / FS, f_shift=80e6, nperseg=1 << 15, f_max=FS / m),
-            sampling_rate=FS,
+        assert res.value == pytest.approx(dnu, rel=0.03)
+        assert 1e9 < res.flicker < 8e9
+
+    def test_fm_psd_unbiased_with_few_segments(self, xp):
+        """Two Welch segments: the Whittle fit keeps its mean, where a median
+        floor reads the skewed χ²₄ low."""
+        dnu, n, m = 2e5, 1 << 20, 30000
+        values = []
+        for seed in range(4):
+            z, _ = make_dsh_beat(dnu, n, m, 80e6, snr_db=25, seed=20 + seed)
+            res = analysis.estimate_linewidth(
+                xp.asarray(z),
+                DshFmPsd(delay=m / FS, f_shift=80e6, nperseg=1 << 19),
+                sampling_rate=FS,
+            )
+            assert res.n_segments <= 3
+            values.append(res.value)
+        assert np.mean(values) == pytest.approx(dnu, rel=0.02)
+
+    def test_fm_psd_default_segments_ignore_delay_error(self, xp):
+        """Segments within the delay see the flat response 2: a 1 % delay
+        error leaves the estimate unchanged."""
+        n, m = 1 << 20, 6000
+        z, _ = make_dsh_beat(2e5, n, m, 80e6, snr_db=25, seed=30)
+        z = xp.asarray(z)
+        exact = analysis.estimate_linewidth(
+            z, DshFmPsd(delay=m / FS, f_shift=80e6), sampling_rate=FS
         )
-        assert auto.value == pytest.approx(dnu, rel=0.25)
-        assert abs(auto.value - dnu) < abs(naive.value - dnu)
-        # The rising flicker region is excluded: the plateau starts above the
-        # first Welch bin.
-        assert auto.band[0] > FS / (1 << 15)
+        off = analysis.estimate_linewidth(
+            z, DshFmPsd(delay=1.01 * m / FS, f_shift=80e6), sampling_rate=FS
+        )
+        assert off.value == exact.value
+        assert exact.value == pytest.approx(2e5, rel=0.02)
+        assert np.all(exact.valid)
+
+    def test_fm_psd_reports_detection_noise(self, xp):
+        """The noise term is the angle-noise variance per sample: N0/2 for a
+        unit beat at Es/N0."""
+        n, m, snr_db = 1 << 20, 6000, 20
+        z, _ = make_dsh_beat(2e5, n, m, 80e6, snr_db=snr_db, seed=31)
+        res = analysis.estimate_linewidth(
+            xp.asarray(z), DshFmPsd(delay=m / FS, f_shift=80e6), sampling_rate=FS
+        )
+        assert res.awgn_var == pytest.approx(0.5 * 10 ** (-snr_db / 10), rel=0.1)
+        assert res.value == pytest.approx(2e5, rel=0.03)
+
+    def test_fm_psd_screens_spurs(self, xp):
+        """A strong FM tone (an RF spur on the beat) is screened out of the
+        fit instead of raising the floor."""
+        n, m = 1 << 20, 6000
+        z, _ = make_dsh_beat(2e5, n, m, 80e6, snr_db=25, seed=32)
+        t = np.arange(z.shape[-1]) / FS
+        f_spur = 37e6
+        z = z * np.exp(1j * 0.05 * np.sin(2 * np.pi * f_spur * t))
+        res = analysis.estimate_linewidth(
+            xp.asarray(z), DshFmPsd(delay=m / FS, f_shift=80e6), sampling_rate=FS
+        )
+        k = int(np.argmin(np.abs(res.f - f_spur)))
+        assert not res.used[k]
+        assert res.value == pytest.approx(2e5, rel=0.03)
 
     def test_fm_psd_real_capture_band_capped(self, xp):
-        """Real (single-PD) captures: auto band stops at min(f_aom, nyq - f_aom).
+        """Real (single-PD) captures: the fit band stops at min(f_aom, nyq - f_aom).
 
         Beyond the receiver's FM detection bandwidth the Hilbert-derived beat has
-        no sideband support and the deconvolved PSD reads fake-low; the plateau
-        detector must not latch onto it. Includes a realistic calibrated-delay
-        error (regression: this failed with the band latched above 150 MHz).
+        no sideband support and the PSD reads fake-low.  Includes a realistic
+        delay-calibration error.
         """
         dnu, m, f_aom = 2e5, 2450, 80e6  # τ_d = 4.9 µs true
         phi = to_device(
@@ -274,12 +320,10 @@ class TestDshLinewidth:
         beat = apply_awgn(z, sps=1, esn0_db=25, rng=1).real
         tau_cal = 4.8978e-6  # -0.05 % delay-calibration error
         res = analysis.estimate_linewidth(
-            xp.asarray(beat),
-            DshFmPsd(delay=tau_cal, f_shift=f_aom, nperseg=1 << 15),
-            sampling_rate=FS,
+            xp.asarray(beat), DshFmPsd(delay=tau_cal, f_shift=f_aom), sampling_rate=FS
         )
         assert res.band[1] <= min(f_aom, FS / 2 - f_aom)
-        assert res.value == pytest.approx(dnu, rel=0.2)
+        assert res.value == pytest.approx(dnu, rel=0.03)
 
     def test_fm_psd_manual_fence_is_literal(self, xp):
         """Explicit f_min/f_max bypass auto detection: the band is the fence."""
@@ -302,7 +346,7 @@ class TestDshLinewidth:
             xp.asarray(z), DshFmPsd(delay=m / FS, nperseg=1 << 14), sampling_rate=FS
         )
         assert np.pi * 50e3 * (m / FS) < 1.0  # deeply coherent
-        assert res.value == pytest.approx(50e3, rel=0.15)
+        assert res.value == pytest.approx(50e3, rel=0.05)
 
     def test_increment_awgn_immune(self, xp):
         n, m = 1 << 20, 500

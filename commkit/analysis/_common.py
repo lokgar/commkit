@@ -1,6 +1,8 @@
 """Shared helpers and constants for the carrier-phase analysis package."""
 
 import numpy as np
+from scipy.optimize import nnls
+from scipy.stats import chi2
 
 from ..backend import to_device
 from ..logger import logger
@@ -14,6 +16,7 @@ __all__ = [
     "_resolve_nperseg",
     "_welch_floor_bias",
     "_welch_median_bias",
+    "_whittle_fit",
 ]
 
 # β-separation-line slope (Di Domenico 2010): S_f(f) = (8 ln2 / π²) · f
@@ -394,3 +397,73 @@ def _increment_variance_fit(y2, lags, dt: float, xp):
     x_sec = np.asarray(lags, dtype=np.float64) * float(dt)
     coeffs = np.polyfit(x_sec, var_cpu, 1)  # (2, C): [slope, intercept]
     return coeffs[0], coeffs[1], var_cpu, x_sec
+
+
+def _whittle_fit(
+    P: np.ndarray,
+    X: np.ndarray,
+    *,
+    dof: float,
+    alpha: float = 0.01,
+    max_rounds: int = 5,
+    max_iter: int = 100,
+) -> tuple[np.ndarray, np.ndarray]:
+    r"""Fit a non-negative linear PSD model by Whittle likelihood.
+
+    Each Welch bin ``P_k`` is ``M_k·χ²_ν/ν``-distributed around its mean
+    ``M_k = (Xθ)_k``.  The (Whittle) negative log-likelihood of the bins,
+
+        L(θ) = Σ_k [ln M_k + P_k / M_k]   (up to a factor ν/2),
+
+    has the score ``Σ_k (P_k - M_k)/M_k² · X_k``.  Its expectation is zero
+    for *any* ``ν``, so the fit stays consistent with one Welch segment,
+    where a median-based floor is biased by the skew of ``χ²_2``.  The score
+    equation is the normal equation of least squares with weights
+    ``1/M_k²``, solved by iteratively reweighted non-negative least squares.
+    Adjacent Hann bins are correlated, which costs efficiency, not bias.
+
+    Spurs (an AOM line, RF pickup) violate the model upward.  Bins with
+    ``P_k/M_k`` above the ``alpha/n`` upper χ²_ν/ν quantile (a Bonferroni
+    bound: about ``alpha`` false rejections per fit) are dropped and the fit
+    repeated, at most ``max_rounds`` times.
+
+    Parameters
+    ----------
+    P : ndarray, (n,)
+        Welch PSD values (host).
+    X : ndarray, (n, p)
+        Model columns; the mean PSD is ``X @ θ`` with ``θ ≥ 0``.
+    dof : float
+        Degrees of freedom ``ν`` of one bin (``2·K_eff``).
+    alpha : float, default 0.01
+        Family-wise false-rejection rate of the spur screen.
+    max_rounds, max_iter : int
+        Caps on rejection rounds and reweighting iterations.
+
+    Returns
+    -------
+    theta : ndarray, (p,)
+        Fitted coefficients.
+    kept : ndarray of bool, (n,)
+        Bins that survived the spur screen.
+    """
+    kept = np.ones(P.size, dtype=bool)
+    theta = np.zeros(X.shape[1])
+    for _ in range(max_rounds):
+        Pk, Xk = P[kept], X[kept]
+        # Start from relative least squares (weights 1/P), then reweight by
+        # the model: the fixed point solves the Whittle score equation.
+        theta = nnls(Xk / Pk[:, None], np.ones(Pk.size))[0]
+        for _ in range(max_iter):
+            M = np.maximum(Xk @ theta, 1e-300)
+            new = nnls(Xk / M[:, None], Pk / M)[0]
+            done = np.allclose(new, theta, rtol=1e-10, atol=0.0)
+            theta = new
+            if done:
+                break
+        threshold = chi2.isf(alpha / P.size, dof) / dof
+        spurs = kept & (P > threshold * np.maximum(X @ theta, 1e-300))
+        if not spurs.any():
+            break
+        kept &= ~spurs
+    return theta, kept

@@ -14,7 +14,6 @@ import numpy as np
 
 from .._array import as_2d, restore_1d
 from ..backend import ArrayType, dispatch
-from ..logger import logger
 from ..spectral import welch_psd
 from ._common import _resolve_nperseg
 
@@ -156,6 +155,63 @@ def fm_noise_psd(
     return f, S_out
 
 
+def _hann_overlap(lag: float, nperseg: int) -> float:
+    """Normalized autocorrelation ``ρ_w`` of the Welch (periodic Hann) window.
+
+    ``ρ_w(ℓ) = Σ_n w[n]·w[n+ℓ] / Σ_n w[n]²`` at a lag of ``ℓ`` samples,
+    linearly interpolated for a fractional lag.  It is 1 at lag 0 and exactly
+    0 from ``ℓ = nperseg`` on, where the shifted window no longer overlaps.
+    """
+    lag = abs(float(lag))
+    if lag >= nperseg:
+        return 0.0
+    n = np.arange(nperseg)
+    w = 0.5 - 0.5 * np.cos(2.0 * np.pi * n / nperseg)
+    acf = np.fft.irfft(np.abs(np.fft.rfft(w, 2 * nperseg)) ** 2)[: nperseg + 1]
+    acf[nperseg] = 0.0
+    k = int(lag)
+    frac = lag - k
+    return float(((1.0 - frac) * acf[k] + frac * acf[k + 1]) / acf[0])
+
+
+def _interferometer_response(
+    f: ArrayType, *, delay: float, sampling_rate: float, nperseg: int
+) -> ArrayType:
+    r"""Mean Welch response of the beat FM PSD to the laser FM PSD.
+
+    The beat frequency ``f_beat(t) = f(t) - f(t - τ_d)`` passes the laser
+    frequency through ``|1 - e^{-j2πfτ_d}|² = 2 - 2 cos(2πfτ_d)``.  A Welch
+    bin is not a point sample of that response: its expectation is the
+    response convolved with the window's spectral kernel, which multiplies
+    the oscillating term by the window autocorrelation at the delay,
+
+        E[S_beat(f)] = (2 - 2 ρ_w(τ_d)·cos 2πfτ_d) · S_laser(f)
+
+    for an ``S_laser`` that is smooth over one bin.  Long segments
+    (``ρ_w → 1``) resolve the ``4 sin²(πfτ_d)`` fringes; segments no longer
+    than the delay (``ρ_w = 0``) see the flat factor 2, because the two
+    copies of the laser frequency inside one segment never overlap.
+    """
+    rho = _hann_overlap(float(delay) * float(sampling_rate), nperseg)
+    _, xp, _ = dispatch(f)
+    return 2.0 - 2.0 * rho * xp.cos(2.0 * np.pi * f * float(delay))
+
+
+def _dsh_nperseg(n: int, delay_samples: float, nperseg: int | None) -> int:
+    """Default DSH Welch segment: the longest power of two within the delay.
+
+    Segments no longer than ``τ_d`` make the interferometer response flat
+    (``ρ_w = 0``, see ``_interferometer_response``), so the estimate needs no
+    notches and no accurate delay, and a long spool still yields many
+    segments.  Clipped to ``[256, 16384]`` and to the record; an explicit
+    ``nperseg`` is honoured (clipped to the record).
+    """
+    if nperseg is not None:
+        return int(min(int(nperseg), n))
+    within = 1 << int(np.floor(np.log2(max(delay_samples, 1.0))))
+    return int(min(max(within, 256), 1 << 14, n))
+
+
 def dsh_fm_noise_psd(
     delta_phi: ArrayType,
     *,
@@ -165,23 +221,35 @@ def dsh_fm_noise_psd(
     notch_guard: float = 0.1,
     bias_correction: bool = False,
 ) -> DshFmNoisePsd:
-    r"""Laser FM-noise PSD from the differential phase (notch-guarded deconvolution).
+    r"""Laser FM-noise PSD from the DSH differential phase.
 
-    The interferometer maps the laser phase PSD through
-    ``|1 - e^{-j2πfτ_d}|² = 4 sin²(πfτ_d)``, so the *beat* FM-noise PSD relates
-    to the *laser* FM-noise PSD as
+    **Physics.**  The beat carries the differential phase
+    ``Δφ(t) = φ(t) - φ(t - τ_d)``, so its instantaneous frequency is the laser
+    frequency minus its own delayed copy, ``f_beat(t) = f(t) - f(t - τ_d)``.
+    That is a linear filter with response ``1 - e^{-j2πfτ_d}``:
 
-        S_f,beat(f) = 4 sin²(πfτ_d) · S_f,laser(f).
+        S_f,beat(f) = 4 sin²(πfτ_d) · S_f,laser(f) = (2 - 2 cos 2πfτ_d) · S_f,laser(f).
 
-    This function computes ``S_f,beat`` from ``delta_phi`` (via
-    ``fm_noise_psd``) and divides the response back out.  Bins near the
-    response notches ``f = k/τ_d`` (including DC) are unrecoverable - they are
-    returned as NaN and flagged in ``valid``.
+    The response has notches at ``f = k/τ_d`` (frequencies whose period fits
+    the delay a whole number of times, so the two arms cancel) and peaks of 4
+    halfway between.  For ``f ≪ 1/τ_d`` it is ``(2πfτ_d)²``: a frequency
+    discriminator with a known gain, which is why the method also works when
+    the delay is far *shorter* than the coherence time.
 
-    For ``f ≪ 1/τ_d`` the response reduces to ``(2πfτ_d)²``: the interferometer
-    acts as a frequency discriminator with a known gain, which is why the
-    method still works when the delay is far *shorter* than the coherence time
-    (where the Lorentzian-fit method fails).
+    **What a Welch estimate sees.**  A Welch bin averages the spectrum over
+    the window's spectral kernel, which turns ``cos 2πfτ_d`` into
+    ``ρ_w(τ_d)·cos 2πfτ_d``, with ``ρ_w`` the window's normalized
+    autocorrelation at a lag of ``τ_d``:
+
+        E[S_f,beat(f)] = (2 - 2 ρ_w(τ_d)·cos 2πfτ_d) · S_f,laser(f).
+
+    This function divides by that response.  With segments much longer than
+    the delay (``ρ_w ≈ 1``) it is the classic ``4 sin²`` deconvolution, and
+    bins near the notches are unrecoverable (NaN, flagged in ``valid``).
+    With segments no longer than the delay (``ρ_w = 0``, the default) the two
+    delayed copies of the laser frequency never share a segment, the
+    response is the flat factor 2 and every bin is valid: no notches, and the
+    delay only needs to be known well enough to choose the segment.
 
     Parameters
     ----------
@@ -194,10 +262,12 @@ def dsh_fm_noise_psd(
         Interferometer differential delay τ_d in seconds (fiber: τ_d ≈ n·L/c ≈
         4.9 µs per km of SMF).
     nperseg : int, optional
-        Welch segment length (see ``fm_noise_psd``).
+        Welch segment length.  Defaults to the longest power of two within
+        the delay (``ρ_w = 0``), clipped to ``[256, 16384]``.
     notch_guard : float, default 0.1
-        Bins with ``sin²(πfτ_d)`` below this threshold are masked (NaN).  The
-        default keeps ≈ 80 % of every response lobe.
+        Bins whose response is below ``4·notch_guard`` (``sin²(πfτ_d) <
+        notch_guard`` for long segments) are masked (NaN).  The default keeps
+        about 80 % of every response lobe; with ``ρ_w = 0`` nothing is masked.
     bias_correction : bool, default False
         Forwarded to ``fm_noise_psd``; leave it off for laser phase noise.
 
@@ -219,57 +289,33 @@ def dsh_fm_noise_psd(
     -----
     **Limitations.**
 
-    * Even inside the guard band the deconvolution *amplifies* estimation
-      noise by ``1/(4 sin²)`` - near-notch bins are noisier than mid-lobe
-      bins.  Prefer median-based summaries (``DshFmPsd`` uses one).
-    * Additive detector noise on the beat produces an ``f²`` tail in
-      ``S_f,beat`` that deconvolution maps into every lobe; restrict analysis
-      to the first lobe (``f < 1/τ_d``) unless the beat SNR is very high.
-    * The delay must be known accurately: FM-PSD levels scale as ``1/τ_d²``
-      below the first notch, so a delay error maps 1:1 (x2) into the
-      linewidth.  Calibrate τ_d from the measured notch spacing ``1/τ_d`` if
-      in doubt.
-    * **Long (decoherence) delays need resolution**: the deconvolution is
-      only valid when the Welch bin is much narrower than the response period
-      ``1/τ_d`` - i.e. ``nperseg ≳ 8·f_s·τ_d``.  A warning is logged
-      otherwise (bins that average across notches bias the PSD low).
+    * Additive detection noise on the beat adds white phase noise, an
+      ``∝ sin²(πf/f_s)`` (≈ ``f²``) term that is *not* shaped by the
+      interferometer; after the division it rises in every lobe.
+      ``DshFmPsd`` fits it as a separate term instead of dividing it.
+    * Near the notches (long segments only) the division amplifies the
+      estimation noise by ``1/(4 sin²)``.
+    * With long segments the result depends on τ_d through the notch
+      positions: notch ``k`` moves by ``k·Δτ/τ_d`` of a lobe for a delay error
+      ``Δτ``, so high lobes need τ_d to a fraction of ``1/k``.  The default
+      segments avoid this.
+    * The response formula assumes ``S_f,laser`` smooth over one bin; the
+      lowest bins of a steep (flicker, drift) spectrum are approximate.
     """
     td = float(delay)
     if td <= 0.0:
         raise ValueError(f"delay={delay} must be positive (seconds).")
 
     dphi_arr, _, _ = dispatch(delta_phi)
+    fs = float(sampling_rate)
+    nps = _dsh_nperseg(dphi_arr.shape[-1] - 1, td * fs, nperseg)
     f, S_beat = fm_noise_psd(
-        dphi_arr,
-        sampling_rate=float(sampling_rate),
-        nperseg=nperseg,
-        bias_correction=bias_correction,
+        dphi_arr, sampling_rate=fs, nperseg=nps, bias_correction=bias_correction
     )
     _, xp, _ = dispatch(f)
 
-    # The deconvolution samples the response at bin centers; if a Welch bin
-    # spans a sizable fraction of the response period 1/τ_d (long decoherence
-    # spools), each bin *averages* across lobes and notches and the result is
-    # biased low.  Require ≥ 4 bins per period; recommend ≥ 8.
-    # f[1] = f_s / nperseg by construction - reproduce it from the resolver
-    # instead of syncing a scalar back off the device frequency axis.
-    bin_hz = float(sampling_rate) / _resolve_nperseg(
-        dphi_arr.shape[-1] - 1, nperseg, cap=4096
-    )
-    if bin_hz > 0.25 / td:
-        rec = 1 << int(np.ceil(np.log2(8.0 * float(sampling_rate) * td)))
-        logger.warning(
-            "dsh_fm_noise_psd: Welch bin (%.3g Hz) exceeds a quarter of the "
-            "interferometer response period 1/τ_d = %.3g Hz - bins average "
-            "across notches and the deconvolved PSD is biased low. Increase "
-            "nperseg to ≳ %d (≥ 8 bins per period).",
-            bin_hz,
-            1.0 / td,
-            rec,
-        )
-
-    s2 = xp.sin(np.pi * f * td) ** 2  # interferometer response / 4
-    valid = s2 >= float(notch_guard)
-    S_laser = xp.where(valid, S_beat / xp.maximum(4.0 * s2, 1e-300), xp.nan)
+    response = _interferometer_response(f, delay=td, sampling_rate=fs, nperseg=nps)
+    valid = response >= 4.0 * float(notch_guard)
+    S_laser = xp.where(valid, S_beat / xp.maximum(response, 1e-300), xp.nan)
 
     return DshFmNoisePsd(f=f, S_f=S_laser, valid=valid)

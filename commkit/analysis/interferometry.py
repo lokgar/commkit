@@ -39,9 +39,10 @@ or repeated captures stacked for a single GPU pass.
 The DSH estimators are methods of
 :func:`~commkit.analysis.linewidth.estimate_linewidth`:
 
-* ``DshFmPsd`` - deconvolve the beat FM-noise PSD by the interferometer
-  response ``4 sin²(πfτ_d)`` to recover the laser FM-noise PSD; works in both
-  the coherent (short-delay) and incoherent regimes.
+* ``DshFmPsd`` - fit white FM, flicker FM and detection noise to the beat
+  FM-noise PSD, through the interferometer response as a Welch estimate sees
+  it; works in both the coherent (short-delay) and incoherent regimes and,
+  with its default segments, needs the delay only roughly.
 * ``DshIncrement`` - lag-slope of the differential-phase increment variance;
   the AWGN-immune Wiener-linewidth estimate (DSH analogue of
   ``IncrementSlope``).
