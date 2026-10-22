@@ -118,10 +118,11 @@ def apply_pmd(
     # R(+θ): rotate back to the lab frame
     Rinv = _jones_rotation(theta, xp, x.dtype)
 
-    phase = xp.pi * freqs * dgd
-    D = xp.stack([xp.exp(-1j * phase), xp.exp(1j * phase)])  # (2, N)
-
     S_F = xp.fft.fft(x, axis=-1)  # (2, N)
+
+    # Phase in float64, response in the spectrum's precision (no promotion).
+    phase = xp.pi * freqs * dgd
+    D = xp.stack([xp.exp(-1j * phase), xp.exp(1j * phase)]).astype(S_F.dtype)
 
     # Apply: rotate to PSP frame -> DGD delay -> rotate back to lab frame
     out_F = Rinv @ (D * (Rfwd @ S_F))

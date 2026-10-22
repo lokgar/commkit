@@ -17,6 +17,7 @@ Its group delay ``τ(ω) = -dφ/dω = β₂ L ω`` makes the higher frequency
 """
 
 from types import ModuleType
+from typing import Any
 
 import numpy as np
 
@@ -47,11 +48,18 @@ def transfer_function(
     beta2_length: float,
     inverse: bool,
     xp: ModuleType,
+    dtype: Any = np.complex128,
 ) -> ArrayType:
-    """Fiber transfer function on the ``fftfreq`` grid (or its inverse)."""
+    """Fiber transfer function on the ``fftfreq`` grid (or its inverse).
+
+    The phase is computed in float64 (it reaches thousands of radians) and
+    the response is returned as ``dtype``, so complex64 data is filtered in
+    single precision instead of being promoted.
+    """
     omega = 2.0 * np.pi * xp.fft.fftfreq(num_samples, d=1.0 / sampling_rate)
     sign = 1.0 if inverse else -1.0
-    return xp.exp(sign * 1j * (beta2_length / 2.0) * omega**2)
+    h = xp.exp(sign * 1j * (beta2_length / 2.0) * omega**2)
+    return h.astype(dtype, copy=False)
 
 
 def apply_dispersion(
@@ -77,6 +85,7 @@ def apply_dispersion(
         ),
         inverse=inverse,
         xp=xp,
+        dtype=np.result_type(samples.dtype, np.complex64),
     )
     result = xp.fft.ifft(xp.fft.fft(samples, axis=-1) * h[None, :], axis=-1)
     if result.dtype != samples.dtype:
