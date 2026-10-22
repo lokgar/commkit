@@ -19,12 +19,24 @@ from .logger import logger
 
 __all__ = [
     "ArrayType",
+    "PrecisionWarning",
     "dispatch",
     "get_array_module",
     "get_scipy_module",
     "is_cupy_available",
     "to_device",
 ]
+
+
+class PrecisionWarning(UserWarning):
+    """Double-precision input reduced to a block's single working precision.
+
+    The equalizers and the soft demapper compute in complex64 / float32 (the
+    GPU's fast path) whatever their input; transforms keep the input's
+    precision.  Shown once per call site by Python's default filter; turn it
+    into an error for strict precision with
+    ``warnings.simplefilter("error", commkit.PrecisionWarning)``.
+    """
 
 
 @cache

@@ -248,7 +248,9 @@ class TestOperations:
         c = Constellation.qam(16)
         rng = np.random.default_rng(1)
         syms = xp.asarray(
-            c.points[rng.integers(0, 16, 200)] + 0.2 * rng.standard_normal(200)
+            (
+                c.points[rng.integers(0, 16, 200)] + 0.2 * rng.standard_normal(200)
+            ).astype(np.complex64)
         )
         for method in ("maxlog", "exact"):
             xpt.assert_allclose(
@@ -277,6 +279,7 @@ class TestOperations:
         y = Constellation.qam(16).points[rng.integers(0, 16, 100)] + 0.1 * (
             rng.standard_normal(100) + 1j * rng.standard_normal(100)
         )
+        y = y.astype(np.complex64)
         xpt.assert_allclose(
             s.llr(xp.asarray(y * a), noise_var=0.05 * a**2, method="exact"),
             mapping.compute_llr(

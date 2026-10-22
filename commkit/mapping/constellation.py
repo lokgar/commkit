@@ -27,6 +27,7 @@ from functools import cache, cached_property
 
 import numpy as np
 
+from .._array import warn_if_double
 from ..backend import ArrayType, dispatch
 from .gray import _gray_points, _nearest_index, _unpack_bits
 from .llr import _Axis, _llr, _llr_separable
@@ -284,6 +285,7 @@ class Constellation:
         scale.  ``method`` is ``"maxlog"`` or ``"exact"`` (log-sum-exp).
         Returns ``float32`` of shape ``(..., N * k)`` on the symbols' device.
         """
+        warn_if_double(symbols, "compute_llr() / Constellation.llr()", "float32")
         if self._axes is not None and dispatch(symbols)[1] is np:
             return _llr_separable(symbols, self._axes, noise_var, method)
         return _llr(symbols, self.points, self.bit_labels, self.pmf, noise_var, method)

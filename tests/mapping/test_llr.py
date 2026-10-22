@@ -150,7 +150,7 @@ class TestComputeLLRCore:
         """An unknown method raises ValueError."""
         with pytest.raises(ValueError, match="Unknown method"):
             mapping.compute_llr(
-                xp.ones(1),
+                xp.ones(1, dtype=xp.complex64),
                 noise_var=0.1,
                 constellation=Constellation.qam(4),
                 method="magic",
@@ -309,6 +309,7 @@ class TestLLRBruteForce:
             x = x + 1j * sd * rng.standard_normal(x.shape) + noise
         else:
             x = x + noise
+        x = x.astype(np.complex64 if np.iscomplexobj(x) else np.float32)
         got = to_numpy(
             mapping.compute_llr(
                 xp.asarray(x), noise_var=nv, constellation=constellation, method=method

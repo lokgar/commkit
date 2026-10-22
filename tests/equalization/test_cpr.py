@@ -65,7 +65,7 @@ def _wiener_phase_signal(n_sym=4000, snr_db=20.0, linewidth=1e4, fs=1.0, seed=42
     )
     samples = (samples * np.exp(1j * phase)).astype(np.complex64)
     if snr_db is not None:
-        noise_std = np.sqrt(10 ** (-snr_db / 10) / 2)
+        noise_std = float(np.sqrt(10 ** (-snr_db / 10) / 2))
         rng = np.random.default_rng(seed + 1)
         samples += noise_std * (
             rng.standard_normal(n_sym) + 1j * rng.standard_normal(n_sym)
@@ -156,7 +156,7 @@ class TestCPRPLLConvergence:
 
         snr_db = 25.0
         noise_pwr = 10 ** (-snr_db / 10)
-        awgn = np.sqrt(noise_pwr / 2) * (
+        awgn = float(np.sqrt(noise_pwr / 2)) * (
             rng.standard_normal(n_sym) + 1j * rng.standard_normal(n_sym)
         ).astype(np.complex64)
         samples = (syms * np.exp(1j * phase_noise).astype(np.complex64) + awgn).astype(
@@ -278,7 +278,7 @@ class TestCPRBPSConvergence:
 
         phase_true = np.linspace(0.0, 3.0, n_sym, dtype=np.float64)
         noise_pwr = 10 ** (-25.0 / 10)
-        awgn = np.sqrt(noise_pwr / 2) * (
+        awgn = float(np.sqrt(noise_pwr / 2)) * (
             rng.standard_normal(n_sym) + 1j * rng.standard_normal(n_sym)
         ).astype(np.complex64)
         samples = (syms * np.exp(1j * phase_true).astype(np.complex64) + awgn).astype(
@@ -360,7 +360,7 @@ class TestCPRBPSConvergence:
             rng.standard_normal(n_sym) * np.sqrt(2 * np.pi * linewidth_ts)
         ).astype(np.float64)
         noise_pwr = 10 ** (-25.0 / 10)
-        awgn = np.sqrt(noise_pwr / 2) * (
+        awgn = float(np.sqrt(noise_pwr / 2)) * (
             rng.standard_normal(n_sym) + 1j * rng.standard_normal(n_sym)
         ).astype(np.complex64)
         samples = xp.asarray(
@@ -403,7 +403,7 @@ class TestCPRBPSConvergence:
             rng.standard_normal(n_sym) * np.sqrt(2 * np.pi * 5e-5)
         ).astype(np.float64)
         noise_pwr = 10 ** (-25.0 / 10)
-        awgn = np.sqrt(noise_pwr / 2) * (
+        awgn = float(np.sqrt(noise_pwr / 2)) * (
             rng.standard_normal(n_sym) + 1j * rng.standard_normal(n_sym)
         ).astype(np.complex64)
         samples = xp.asarray(
@@ -445,7 +445,7 @@ class TestCPRBPSConvergence:
             rng.standard_normal(n_sym) * np.sqrt(2 * np.pi * 5e-5)
         ).astype(np.float64)
         noise_pwr = 10 ** (-25.0 / 10)
-        awgn = np.sqrt(noise_pwr / 2) * (
+        awgn = float(np.sqrt(noise_pwr / 2)) * (
             rng.standard_normal(n_sym) + 1j * rng.standard_normal(n_sym)
         ).astype(np.complex64)
         samples = (syms * np.exp(1j * phase_noise).astype(np.complex64) + awgn).astype(
@@ -572,10 +572,10 @@ class TestCPRMIMOJoint:
 
         snr_db = 25.0
         noise_pwr = 10 ** (-snr_db / 10)
-        noise_a = np.sqrt(noise_pwr / 2) * (
+        noise_a = float(np.sqrt(noise_pwr / 2)) * (
             rng.standard_normal(n_sym) + 1j * rng.standard_normal(n_sym)
         ).astype(np.complex64)
-        noise_b = np.sqrt(noise_pwr / 2) * (
+        noise_b = float(np.sqrt(noise_pwr / 2)) * (
             rng.standard_normal(n_sym) + 1j * rng.standard_normal(n_sym)
         ).astype(np.complex64)
 

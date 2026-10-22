@@ -18,7 +18,7 @@ from typing import Any
 import numpy as np
 
 from ... import _fft
-from ..._array import as_2d
+from ..._array import as_2d, warn_if_double
 from ...backend import ArrayType, dispatch, to_device
 from ...logger import logger
 from .._common import (
@@ -112,6 +112,9 @@ def _prepare_block(
             cpu_hint,
         )
     samples, was_1d = as_2d(samples, name="samples")
+    warn_if_double(samples, f"{equalizer}()")
+    # The working precision from here on, normalization included.
+    samples = samples.astype(xp.complex64, copy=False)
     C, N = samples.shape
     _check_state(
         state,

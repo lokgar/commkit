@@ -421,6 +421,7 @@ ROWS: list[Row] = [
         fact=FS_CONFLICT,
     ),
     # --- math -------------------------------------------------------------
+    Row("commkit.backend.PrecisionWarning", VALUE),
     Row("commkit.math.db_to_linear", HELPER),
     Row("commkit.math.linear_to_db", HELPER),
     Row("commkit.math.normalize", HELPER),

@@ -573,7 +573,7 @@ class TestGMIShaped:
         c = Constellation.qam(16)
         rng = np.random.default_rng(1)
         bits = rng.integers(0, 2, 4000).astype(np.int8)
-        rx = c.map(bits) + 0.2 * rng.standard_normal(1000)
+        rx = (c.map(bits) + 0.2 * rng.standard_normal(1000)).astype(np.complex64)
         llrs = compute_llr(xp.asarray(rx), noise_var=0.08, constellation=c)
         x = -np.asarray(to_device(llrs, "cpu"), np.float64) * (1 - 2.0 * bits)
         sp = (np.log1p(np.exp(-np.abs(x))) + np.maximum(0, x)) / np.log(2)

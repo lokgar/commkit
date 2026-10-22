@@ -302,3 +302,30 @@ def to_report_scalar(values: Any, *, was_1d: bool | None = None) -> float | np.n
     if arr.size != 1:
         raise ValueError(f"(N,) input reports one value, got shape {arr.shape}.")
     return float(arr.reshape(-1)[0])
+
+
+def warn_if_double(arr: Any, function_name: str, working: str = "complex64") -> None:
+    """Emit :class:`~commkit.backend.PrecisionWarning` when ``arr`` is double
+    precision (complex128 or float64) and ``function_name`` computes in the
+    single-precision ``working`` dtype; attributed to the caller's line."""
+    dtype = getattr(arr, "dtype", None)
+    if dtype is None or dtype not in (np.complex128, np.float64):
+        return
+    import sys
+    import warnings
+
+    from .backend import PrecisionWarning
+
+    # Point the warning at the first frame outside commkit.
+    frame: Any = sys._getframe(1)  # the caller: stacklevel 2
+    level = 2
+    while frame is not None and frame.f_globals.get("__name__", "").startswith(
+        "commkit"
+    ):
+        frame, level = frame.f_back, level + 1
+    warnings.warn(
+        f"{function_name} computes in {working}: the {dtype} input is reduced "
+        "to single precision.",
+        PrecisionWarning,
+        stacklevel=level,
+    )

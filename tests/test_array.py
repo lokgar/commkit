@@ -157,3 +157,40 @@ class TestShapeHelpers:
         assert _array.to_report_scalar(7) == 7.0
         with pytest.raises(ValueError, match="one value"):
             _array.to_report_scalar(xp.asarray(np.array([1.0, 2.0])), was_1d=True)
+
+
+class TestPrecisionWarning:
+    """Double input to a single-precision block warns, at the caller's line."""
+
+    @pytest.mark.parametrize("name", ["lms", "block_lms", "cma", "compute_llr"])
+    def test_double_input_warns_at_the_call_site(self, xp, name) -> None:
+        import commkit as ck
+        from commkit import equalization
+        from commkit.mapping import Constellation, compute_llr
+
+        c = Constellation.qam(16)
+        rng = np.random.default_rng(0)
+        x = xp.asarray(c.points[rng.integers(0, 16, 2048)])  # complex128
+        if name == "compute_llr":
+            call = lambda: compute_llr(x, noise_var=0.1, constellation=c)  # noqa: E731
+        else:
+            fn = getattr(equalization, name)
+            data = (x[:200],) if name != "cma" else ()
+            kw = {"block_size": 64} if name == "block_lms" else {}
+            call = lambda: fn(  # noqa: E731
+                x, *data, sps=1, num_taps=5, constellation=c, **kw
+            )
+        with pytest.warns(ck.PrecisionWarning, match="reduced to single") as rec:
+            call()
+        assert rec[0].filename == __file__
+
+    def test_single_input_is_silent(self, xp) -> None:
+        import warnings
+
+        from commkit.mapping import Constellation, compute_llr
+
+        c = Constellation.qam(16)
+        x = xp.asarray(c.points.astype(np.complex64))
+        with warnings.catch_warnings():
+            warnings.simplefilter("error")
+            compute_llr(x, noise_var=0.1, constellation=c)

@@ -661,7 +661,7 @@ class TestBlockLMSCUDAGraphAndPerformance:
         syms = const[rng.integers(0, 16, n_sym)]
         phase = np.cumsum(rng.normal(0.0, 0.01, n_sym))
         samples = (syms * np.exp(1j * phase)).astype(np.complex64)
-        noise = np.sqrt(10 ** (-25.0 / 10) / 2)
+        noise = float(np.sqrt(10 ** (-25.0 / 10) / 2))
         samples += noise * (
             rng.standard_normal(n_sym) + 1j * rng.standard_normal(n_sym)
         ).astype(np.complex64)

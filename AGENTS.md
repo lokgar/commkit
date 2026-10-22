@@ -168,7 +168,13 @@ Dependencies point downward only:
 
 ## 5. Numerics
 
-- **Storage dtypes:** `complex64` for IQ samples and `float32` for real signals. complex128 input is accepted end to end: transforms keep it, while equalizers (complex64) and LLRs (float32) work in their own precision. It pays only where single-precision rounding accumulates over many FFT passes, as in the fiber solver (6e-4 after 10^4 steps in complex64, 1e-12 in complex128); there the GPU runs its plain CuPy stages, not the fused complex64 kernels.
+- **Storage dtypes:** `complex64` for IQ samples and `float32` for real signals; `generate`, frames and `load_npz` produce them, so the GPU's single-precision path is the default.
+- **Precision contract.** Every function computes in a predictable precision, and none promotes single-precision data on its own:
+  - **Transforms keep the input's precision**: complex64 in, complex64 out and computed throughout (filters, impairments, the fiber solver and DBP, resampling, delays, carrier-phase correction); complex128 in, complex128 out.
+  - **Fixed-precision blocks** compute in single precision whatever the input: the equalizers in complex64 (with complex128 accumulation inside, below), `compute_llr` / `Constellation.llr` in float32. Double input to them emits `commkit.PrecisionWarning` (`_array.warn_if_double`, attributed to the caller's line; Python shows it once per call site). Users who want strictness turn it into an error with `warnings.simplefilter("error", commkit.PrecisionWarning)`; the test suite does (pyproject `filterwarnings`), so a library path that feeds double data to these blocks fails CI. Training and reference symbols are ideal values and are not checked.
+  - **Deliberate float64**, documented where it happens: phases before `unwrap` and phase trajectories, frequency grids and estimates, the IIR filter's sections (poles near z = 1), and the host-side reporting reductions (metrics, analysis summaries).
+  - complex128 pays only where single-precision rounding accumulates over many FFT passes, as in the fiber solver (6e-4 after 10^4 steps in complex64, 1e-12 in complex128); there the GPU runs its plain CuPy stages, not the fused complex64 kernels.
+  - **The NEP 50 trap**: under NumPy 2 a NumPy scalar is not weak, so `np.float64(a) * x64` (any `np.sqrt`, `np.pi * ...` result, or a float64 array such as `xp.fft.fftfreq`) promotes complex64 data to complex128. Combine single-precision data only with Python scalars or with arrays cast to its precision; rotate with `math._derotate` (float64 phase wrap, single-precision phasor, one fused kernel on the GPU).
 - **Accumulation precision:**
   - LMS/CMA/RDE: inputs and weights are `complex64`, but dot products and gradient updates in the hot loop are accumulated in `complex128`.
   - RLS keeps `P`, the gain `k` and the regressor buffers in `complex128` throughout. Single precision loses the Hermitian positive-definite property and the filter diverges.

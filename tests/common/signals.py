@@ -34,7 +34,7 @@ def make_test_qam_samples(
         samples_np = syms_np.copy()
 
     if snr_db is not None:
-        noise_std = np.sqrt(10 ** (-snr_db / 10) / 2)
+        noise_std = float(np.sqrt(10 ** (-snr_db / 10) / 2))
         noise = noise_std * (
             rng.standard_normal(len(samples_np))
             + 1j * rng.standard_normal(len(samples_np))
@@ -66,7 +66,7 @@ def make_test_psk_samples(
         samples_np = syms_np.copy()
 
     if snr_db is not None:
-        noise_std = np.sqrt(10 ** (-snr_db / 10) / 2)
+        noise_std = float(np.sqrt(10 ** (-snr_db / 10) / 2))
         noise = noise_std * (
             rng.standard_normal(len(samples_np))
             + 1j * rng.standard_normal(len(samples_np))
@@ -405,7 +405,7 @@ def make_dual_pol_dsh_beat(
     z2 = jones * z
     if snr_db is not None:
         rng = np.random.default_rng(seed + 1000)
-        std = np.sqrt(10 ** (-snr_db / 10) / 2)
+        std = float(np.sqrt(10 ** (-snr_db / 10) / 2))
         z2 = z2 + std * (
             rng.standard_normal(z2.shape) + 1j * rng.standard_normal(z2.shape)
         )

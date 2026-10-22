@@ -77,6 +77,8 @@ addopts = "--device=all --strict-markers"
 python_files = ["test_*.py", "bench_*.py"]
 python_functions = ["test_*", "bench_*"]
 filterwarnings = [
+    # The library's own paths must never reduce double input silently.
+    "error::commkit.backend.PrecisionWarning",
     "ignore::FutureWarning:cupyx",
     "ignore:.*cupyx.jit.rawkernel is experimental.*:UserWarning",
 ]

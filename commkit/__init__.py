@@ -21,6 +21,7 @@ from typing import Any
 
 __version__ = "2.1.0"
 
+from .backend import PrecisionWarning
 from .core import (
     Preamble,
     Reference,
@@ -88,6 +89,7 @@ __all__ = [
     "Rect",
     "SmoothRect",
     "Preamble",
+    "PrecisionWarning",
     "Signal",
     "SingleCarrierFrame",
     "__version__",

@@ -22,7 +22,7 @@ from typing import Any
 
 import numpy as np
 
-from ..._array import restore_1d
+from ..._array import restore_1d, warn_if_double
 from ...backend import ArrayType, dispatch, to_device
 from ...logger import logger
 from .._common import (
@@ -154,6 +154,7 @@ def _prepare_sequential(
         )
 
     # Plain NumPy (no-op for CPU NumPy; downloads CuPy)
+    warn_if_double(samples, f"{equalizer}()")
     samples_np = np.ascontiguousarray(to_device(samples, "cpu"), dtype=np.complex64)
     if pilot_mask is not None and pilot_gain_db != 0.0:
         # A copy: for NumPy complex64 input samples_np is the caller's array.
