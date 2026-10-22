@@ -270,13 +270,11 @@ def evm(
             raise ValueError(
                 f"{name}: blind=True measures against hard decisions; drop reference=."
             )
-        points = xp.asarray(_constellation(adapter, constellation, name).points)
+        c = _constellation(adapter, constellation, name)
         rx = _skip(rx, num_skip_symbols, name)
-        from .mapping.gray import _nearest_index
-
         # No gain correction: the caller passes symbols at the constellation's
-        # scale.  Chunked over N to bound the (N, M) distance matrix.
-        tx = points[_nearest_index(rx.reshape(-1), points)].reshape(rx.shape)
+        # scale.
+        tx = xp.asarray(c.points)[c._nearest(rx.reshape(-1))].reshape(rx.shape)
     else:
         ref = _reference(adapter, reference, "symbols", name, hint=", or blind=True")
         rx, tx = _paired(rx, ref, xp, name)
@@ -474,16 +472,13 @@ def ser(
     name = "ser()"
     adapter = adapt_signal(symbols, function_name=name)
     rx, xp, _ = dispatch(adapter.symbol_array())
-    points = xp.asarray(_constellation(adapter, constellation, name).points)
+    c = _constellation(adapter, constellation, name)
     rx, tx = _paired(rx, _reference(adapter, reference, "symbols", name), xp, name)
     rx = _skip(rx, num_skip_symbols, name)
     tx = _skip(tx, num_skip_symbols, name)
 
-    from .mapping.gray import _nearest_index
-
-    # Chunked over N to bound the (N, M) distance matrix.
-    dec_rx = _nearest_index(rx.reshape(-1), points).reshape(rx.shape)
-    dec_tx = _nearest_index(tx.reshape(-1), points).reshape(tx.shape)
+    dec_rx = c._nearest(rx.reshape(-1)).reshape(rx.shape)
+    dec_tx = c._nearest(tx.reshape(-1)).reshape(tx.shape)
     errors = xp.sum(dec_rx != dec_tx, axis=-1)
     total = rx.shape[-1]
     out = to_report_scalar(errors / total)

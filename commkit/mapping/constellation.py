@@ -271,21 +271,7 @@ class Constellation:
         they must be on the constellation's scale.
         """
         symbols, xp, _ = dispatch(symbols)
-        flat = symbols.reshape(-1)
-        grid = self._square_grid
-        if grid is None:
-            idx = _nearest_index(flat, self.points.astype(self._storage_dtype()))
-        else:
-            # Square lattice: the nearest point is found per axis, O(N) with
-            # no (N, M) distance matrix.
-            lev_min, step, side, lut = grid
-            dtype = flat.real.dtype
-
-            def level(v: ArrayType) -> ArrayType:
-                g = xp.round((v - dtype.type(lev_min)) / dtype.type(step))
-                return xp.clip(g, 0, side - 1).astype(xp.int64)
-
-            idx = xp.asarray(lut)[level(flat.real) * side + level(flat.imag)]
+        idx = self._nearest(symbols.reshape(-1))
         bits = xp.asarray(self.bit_labels)[idx]
         return bits.reshape(*symbols.shape[:-1], -1)
 
@@ -301,6 +287,25 @@ class Constellation:
         if self._axes is not None and dispatch(symbols)[1] is np:
             return _llr_separable(symbols, self._axes, noise_var, method)
         return _llr(symbols, self.points, self.bit_labels, self.pmf, noise_var, method)
+
+    def _nearest(self, symbols: ArrayType) -> ArrayType:
+        """Index of the nearest point for each of the ``(N,)`` ``symbols``,
+        int64 on their device.  The decision behind :meth:`demap` and the
+        decision-directed metrics."""
+        x, xp, _ = dispatch(symbols)
+        grid = self._square_grid
+        if grid is None:
+            return _nearest_index(x, self.points.astype(self._storage_dtype()))
+        # Square lattice: the nearest point is found per axis, O(N) with no
+        # (N, M) distance matrix.
+        lev_min, step, side, lut = grid
+        dtype = x.real.dtype
+
+        def level(v: ArrayType) -> ArrayType:
+            g = xp.round((v - dtype.type(lev_min)) / dtype.type(step))
+            return xp.clip(g, 0, side - 1).astype(xp.int64)
+
+        return xp.asarray(lut)[level(x.real) * side + level(x.imag)]
 
     # -- value semantics -----------------------------------------------------
 
