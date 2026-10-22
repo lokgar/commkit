@@ -10,7 +10,7 @@ from typing import Any
 import numpy as np
 import pytest
 
-from commkit._dispersion import apply_dispersion, beta2_length
+from commkit._dispersion import apply_dispersion, beta2_length, beta3_length
 from commkit.impairments import apply_chromatic_dispersion
 
 C = 299_792_458.0  # m/s, exact
@@ -35,6 +35,34 @@ class TestUnits:
 
         assert b2l(17.0, 80.0) == pytest.approx(80.0 * b2l(17.0, 1.0), rel=1e-12)
         assert b2l(-17.0, 80.0) == pytest.approx(-b2l(17.0, 80.0), rel=1e-12)
+
+    def test_beta3_is_the_frequency_derivative_of_beta2(self) -> None:
+        """β₃ = dβ₂/dω with D(λ) = D0 + S (λ - λ0): central difference of
+        β₂(λ) = -D(λ) λ² / (2πc) over ω = 2πc/λ (SSMF: about 0.13 ps³/km)."""
+        d0, s = 17.0, 0.057  # ps/(nm km), ps/(nm² km)
+
+        def beta2(lam_nm: float) -> float:
+            return beta2_length(
+                dispersion_ps_nm_km=d0 + s * (lam_nm - LAMBDA_NM),
+                fiber_length_km=1.0,
+                center_wavelength_nm=lam_nm,
+            )
+
+        def omega(lam_nm: float) -> float:
+            return 2.0 * np.pi * 2.998e8 / (lam_nm * 1e-9)
+
+        dl = 0.01
+        numeric = (beta2(LAMBDA_NM + dl) - beta2(LAMBDA_NM - dl)) / (
+            omega(LAMBDA_NM + dl) - omega(LAMBDA_NM - dl)
+        )
+        b3 = beta3_length(
+            dispersion_ps_nm_km=d0,
+            dispersion_slope_ps_nm2_km=s,
+            fiber_length_km=1.0,
+            center_wavelength_nm=LAMBDA_NM,
+        )
+        assert b3 == pytest.approx(numeric, rel=1e-6)
+        assert b3 == pytest.approx(0.13e-36, rel=0.05)  # s³ over 1 km
 
 
 def _tone_burst(xp: Any, n: int, fs: float, f0: float) -> Any:

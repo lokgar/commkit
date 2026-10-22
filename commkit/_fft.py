@@ -16,24 +16,58 @@ from .backend import ArrayType, _is_cupy_array
 _WORKERS = -1
 
 
-def _call(name: str, x: ArrayType, n: int | None, axis: int) -> Any:
+def _call(
+    name: str,
+    x: ArrayType,
+    n: int | None,
+    axis: int,
+    overwrite_x: bool = False,
+    norm: str = "backward",
+) -> Any:
     if _is_cupy_array(x):
+        if overwrite_x or norm != "backward":
+            # cupyx.scipy.fft transforms a C2C input in place when allowed
+            # (same cuFFT plans and cache as cupy.fft).
+            import cupyx.scipy.fft
+
+            return getattr(cupyx.scipy.fft, name)(
+                x, n=n, axis=axis, norm=norm, overwrite_x=overwrite_x
+            )
         import cupy
 
         return getattr(cupy.fft, name)(x, n=n, axis=axis)
     import scipy.fft
 
-    return getattr(scipy.fft, name)(x, n=n, axis=axis, workers=_WORKERS)
+    return getattr(scipy.fft, name)(
+        x, n=n, axis=axis, norm=norm, workers=_WORKERS, overwrite_x=overwrite_x
+    )
 
 
-def fft(x: ArrayType, n: int | None = None, axis: int = -1) -> ArrayType:
-    """Forward complex FFT along ``axis``."""
-    return _call("fft", x, n, axis)
+def fft(
+    x: ArrayType,
+    n: int | None = None,
+    axis: int = -1,
+    *,
+    overwrite_x: bool = False,
+    norm: str = "backward",
+) -> ArrayType:
+    """Forward complex FFT along ``axis``.  ``overwrite_x`` lets the
+    transform reuse ``x``'s buffer (in place on the GPU for complex input);
+    always use the returned array.  ``norm`` as in ``scipy.fft``."""
+    return _call("fft", x, n, axis, overwrite_x, norm)
 
 
-def ifft(x: ArrayType, n: int | None = None, axis: int = -1) -> ArrayType:
-    """Inverse complex FFT along ``axis``."""
-    return _call("ifft", x, n, axis)
+def ifft(
+    x: ArrayType,
+    n: int | None = None,
+    axis: int = -1,
+    *,
+    overwrite_x: bool = False,
+    norm: str = "backward",
+) -> ArrayType:
+    """Inverse complex FFT along ``axis`` (keywords as in :func:`fft`;
+    ``norm="forward"`` leaves the inverse unscaled)."""
+    return _call("ifft", x, n, axis, overwrite_x, norm)
 
 
 def rfft(x: ArrayType, n: int | None = None, axis: int = -1) -> ArrayType:

@@ -5,7 +5,8 @@ Single source of the fiber dispersion model used by
 dispersion compensation (its inverse):
 
 - ``beta2_length``: D [ps/(nm km)], L [km], λ [nm] to the β₂·L product [s²],
-  ``β₂ = -D λ² / (2π c)``.
+  ``β₂ = -D λ² / (2π c)``; ``beta3_length`` adds the slope S [ps/(nm² km)]
+  for the β₃·L product [s³] (``commkit._fiber``).
 - ``transfer_function``: ``H(ω) = exp(-j β₂ L ω² / 2)`` on the FFT grid of
   ``num_samples`` samples, or its inverse ``exp(+j β₂ L ω² / 2)``.
 
@@ -40,6 +41,26 @@ def beta2_length(
     lam = center_wavelength_nm * 1e-9  # m
     length = fiber_length_km * 1e3  # m
     return float(-(d * lam**2) / (2.0 * np.pi * _SPEED_OF_LIGHT) * length)
+
+
+def beta3_length(
+    *,
+    dispersion_ps_nm_km: float,
+    dispersion_slope_ps_nm2_km: float,
+    fiber_length_km: float,
+    center_wavelength_nm: float,
+) -> float:
+    """The ``β₃ · L`` product in s³ for D, the slope S = dD/dλ, L and λ.
+
+    From ``D = -(2πc/λ²) β₂`` and ``dω/dλ = -2πc/λ²``:
+    ``β₃ = (S + 2D/λ) · (λ² / (2πc))²``.
+    """
+    d = dispersion_ps_nm_km * 1e-12 / (1e-9 * 1e3)  # s/m²
+    slope = dispersion_slope_ps_nm2_km * 1e-12 / (1e-9 * 1e-9 * 1e3)  # s/m³
+    lam = center_wavelength_nm * 1e-9  # m
+    length = fiber_length_km * 1e3  # m
+    k = lam**2 / (2.0 * np.pi * _SPEED_OF_LIGHT)
+    return float((slope + 2.0 * d / lam) * k**2 * length)
 
 
 def transfer_function(
