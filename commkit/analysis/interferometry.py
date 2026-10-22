@@ -120,7 +120,11 @@ def _analytic_beat(
     if xp.iscomplexobj(z2):
         z2 = z2.astype(xp.complex128, copy=False)
     else:
-        z2 = sp.signal.hilbert(z2.astype(xp.float64), axis=-1)
+        # A photodiode's DC term is not part of the beat, which lies inside
+        # (0, f_s/2); left in, it adds a constant phasor to the analytic
+        # signal and corrupts the beat phase.
+        z2 = z2.astype(xp.float64)
+        z2 = sp.signal.hilbert(z2 - xp.mean(z2, axis=-1, keepdims=True), axis=-1)
     if combine_polarizations:
         if z2.shape[0] < 2:
             raise ValueError(

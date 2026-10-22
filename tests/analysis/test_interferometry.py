@@ -83,6 +83,19 @@ class TestDSHPhaseEstimation:
         err = resid - xp.mean(resid)
         assert float(xp.std(err)) < 0.05
 
+    @pytest.mark.parametrize("dc", [0.5, 5.0])
+    def test_dsh_phase_real_input_ignores_photodiode_dc(self, xp, dc):
+        """A single photodiode adds a DC term (here up to 7x the beat
+        amplitude); the beat lies inside (0, f_s/2), so the recovered phase
+        is the one of the beat alone."""
+        z, dphi = make_dsh_beat(2e5, 1 << 18, 500, 80e6, snr_db=None, seed=3)
+        dp, _ = analysis.dsh_phase(
+            xp.asarray(z.real + dc), sampling_rate=FS, f_shift=80e6
+        )
+        edge = 1000  # Hilbert edge transients
+        resid = (xp.asarray(dphi) - dp)[edge:-edge]
+        assert float(xp.std(resid - xp.mean(resid))) < 0.05
+
     def test_dsh_phase_real_homodyne_rejected(self, xp):
         x = xp.asarray(np.cos(np.linspace(0.0, 20.0, 1000)))
         with pytest.raises(ValueError, match="cannot be inverted"):
