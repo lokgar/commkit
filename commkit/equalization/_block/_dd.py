@@ -328,7 +328,7 @@ def block_lms(
     *,
     num_taps: int = 21,
     sps: int | None = None,
-    step_size: float = 2e-4,
+    step_size: float | None = None,
     block_size: int = 256,
     constellation: Any = None,
     store_weights: bool = False,
@@ -426,22 +426,21 @@ def block_lms(
         Samples per symbol at the input, an integer (2 is T/2-spaced).
         Taken from the Signal; required for array input.  A value that
         disagrees with the Signal raises.
-    step_size : float, default 2e-4
-        LMS step size μ, on the **same scale as** ``lms``.  Use the same
-        value you would use for ``lms``: because the block update is the
-        summed gradient over all B symbols - exactly what a frozen-weight
-        per-symbol LMS accumulates over those symbols - the same μ produces the
-        same convergence speed and steady-state MSE, independent of
-        ``block_size``.  **Do not** divide by ``block_size``; doing so
-        under-adapts the filter by that factor.
+    step_size : float, optional
+        LMS step size μ, on the **same scale as** ``lms``: because the block
+        update is the summed gradient over all B symbols - exactly what a
+        frozen-weight per-symbol LMS accumulates over those symbols - the same
+        μ produces the same convergence speed per symbol, independent of
+        ``block_size``.
 
-        The only ``block_size`` dependence is the *stability ceiling*: because
-        the weights are frozen across the block, the maximum stable μ is
-        ``2/(B·C·T·P_x)`` - roughly ``block_size`` times lower than
-        ``lms``.  Reduce μ below your ``lms`` value **only if** it
-        exceeds this ceiling (i.e. the run raises the divergence error); the
-        default ``2e-4`` is conservative and safe for ``block_size`` up to a
-        few thousand.
+        Because the weights are frozen across the block, the *stability
+        ceiling* falls as ``1/block_size``: the product ``μ·block_size``
+        must stay below about 1.5 (the ceiling does not depend on
+        ``num_taps`` or the channel count).  The default
+        ``min(0.5 / block_size, 8e-3)`` sits at a quarter of that ceiling,
+        where convergence takes a few blocks and the steady-state MSE is
+        within a few tenths of a dB of the best step; for ``block_size``
+        below 64 the cap ``8e-3`` limits the per-symbol misadjustment.
     block_size : int, default 256
         Number of output symbols per LMS gradient accumulation block.  Larger
         values increase GPU efficiency but reduce adaptation speed.  Independent
@@ -522,15 +521,13 @@ def block_lms(
 
     **Stability / overflow:** ``step_size`` is applied to the **summed**
     gradient over all ``block_size`` symbols (not averaged).  This keeps μ on
-    the same scale as ``lms`` (same μ -> same convergence and steady-state
-    MSE), but it also means the *stability ceiling* -
-    ``0 < μ < 2/(block_size·C·T·P_x)`` - is roughly ``block_size`` times lower
-    than per-symbol LMS, because the weights are frozen across the block.  So
-    start from the **same** ``step_size`` you use for ``lms``; if a large
-    ``block_size`` pushes that value above the ceiling the run diverges (NaN
-    weights, detected at end of run), in which case reduce μ until stable -
-    do **not** routinely divide by ``block_size`` (that under-adapts the
-    filter by the same factor).
+    the same scale as ``lms`` (same μ -> same convergence per symbol), but it
+    also means the *stability ceiling* - ``μ·block_size`` below about 1.5 -
+    is roughly ``block_size`` times lower than per-symbol LMS, because the
+    weights are frozen across the block.  Above the ceiling the run either
+    diverges (NaN weights, detected at end of run, raises) or stays bounded
+    without converging.  The default step scales with ``block_size`` and
+    stays below the ceiling.
     """
     signal_adapter = adapt_signal(samples, function_name="block_lms()")
     samples = signal_adapter.array
@@ -561,6 +558,7 @@ def block_lms(
     xp, C, n_sym, sps, block_size = run.xp, run.C, run.n_sym, run.sps, run.block_size
     num_taps = run.num_taps
     training = run.training
+    mu = min(0.5 / block_size, 8e-3) if step_size is None else step_size
 
     if constellation is None:
         raise ValueError(
@@ -635,7 +633,7 @@ def block_lms(
         sps,
         block_size,
         run.fftsize,
-        step_size,
+        mu,
         n_sym,
         cpr_info,
     )
@@ -704,9 +702,7 @@ def block_lms(
             e_taps = e_clean * xp.exp(1j * phi_c.astype(xp.complex64))  # (C, B)
         else:
             e_taps = e_clean
-        _fdaf_gradient_update(
-            run.h, X_fd, e_taps, e_scatter, sps, B, num_taps, step_size, xp
-        )
+        _fdaf_gradient_update(run.h, X_fd, e_taps, e_scatter, sps, B, num_taps, mu, xp)
         div_flag |= ~xp.isfinite(run.h).all()
 
     def store(b_start: int, b_end: int, B: int) -> None:
@@ -757,12 +753,11 @@ def block_lms(
 
     if bool(div_flag[0]):
         raise RuntimeError(
-            f"block_lms diverged (step_size={step_size}, block_size={block_size}). "
-            f"step_size is on the same scale as lms(), but because the weights are "
-            f"frozen across the block the stability ceiling is ~{block_size}x lower "
-            f"than per-symbol LMS. Reduce step_size until stable (e.g. try "
-            f"{step_size / 2:.2e}, then keep halving) rather than dividing by "
-            f"block_size, which would under-adapt the filter by that factor."
+            f"block_lms diverged (step_size={mu}, block_size={block_size}). "
+            f"Because the weights are frozen across the block, step_size * "
+            f"block_size must stay below about 1.5; the default "
+            f"min(0.5 / block_size, 8e-3) = {min(0.5 / block_size, 8e-3):.2e} "
+            f"sits at a quarter of that ceiling."
         )
     result = _assemble_block(run, y_all, e_all, w_hist, phi_all, n_train)
     weights, carrier = snap[0]

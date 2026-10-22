@@ -269,6 +269,39 @@ class TestBlockLMSConvergence:
             )
             assert evm < 0.15, f"MIMO ch{ch} EVM {evm:.3f} too high"
 
+    @pytest.mark.parametrize("block_size", [256, 2048])
+    def test_default_step_converges_under_polarization_mixing(
+        self, xp, xpt, block_size
+    ):
+        """The default step, min(0.5/block_size, 8e-3), untangles a 30-degree
+        polarization rotation within four blocks at small and large blocks."""
+        n_sym = 8 * block_size
+        samples, training = make_test_mimo_samples(
+            num_channels=2, order=16, num_symbols=n_sym, sps=2, snr_db=25.0, seed=7
+        )
+        th = np.deg2rad(30.0)
+        rot = np.array([[np.cos(th), np.sin(th)], [-np.sin(th), np.cos(th)]])
+        mixed = xp.asarray((rot @ samples).astype(np.complex64))
+        kw = dict(
+            num_taps=21,
+            sps=2,
+            constellation=Constellation.qam(16),
+            block_size=block_size,
+        )
+        r = block_lms(mixed, xp.asarray(training), **kw)
+        r_explicit = block_lms(
+            mixed,
+            xp.asarray(training),
+            step_size=min(0.5 / block_size, 8e-3),
+            **kw,
+        )
+        xpt.assert_array_equal(r.y_hat, r_explicit.y_hat)
+
+        t = xp.asarray(training[:, 4 * block_size :])
+        y = r.y_hat[:, 4 * block_size :]
+        evm = float(xp.sqrt(xp.mean(xp.abs(y - t) ** 2) / xp.mean(xp.abs(t) ** 2)))
+        assert evm < 0.1, f"EVM {evm:.3f}: default step did not converge"
+
     def test_isi_channel_convergence(self, xp):
         """Known 3-tap ISI channel: equalizer must converge across block boundaries."""
         rng = np.random.default_rng(99)

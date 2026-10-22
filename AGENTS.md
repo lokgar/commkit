@@ -249,7 +249,6 @@ What is not done yet, in suggested order. Unlike the sections above, this is a t
 
 ### Usability gaps
 
-- **`block_lms` default `step_size`** (2e-4) converges too slowly under strong polarization mixing (30 degrees needs about 3e-3 at `block_size=256`), and the stable step falls as `block_size` grows (5e-4 at 2048). Consider a default that scales with `block_size`, or at least a clearer warning when the error does not drop.
 - **RDE from a cold start** on 16-QAM settles at a few percent SER at large block sizes. CMA pre-convergence works today in two calls (`initial_taps=` or `state=` from a `cma`/`block_cma` result); a worked example in the docs or notebooks would make it discoverable.
 
 ### Performance
