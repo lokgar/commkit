@@ -249,7 +249,6 @@ What is not done yet, in suggested order. Unlike the sections above, this is a t
 
 ### Performance
 
-- **Exact LLRs on the CPU**: 256-QAM takes about 330 ms per 2^18 symbols (max-log about 18 ms), dominated by one `exp` per point and bit.
 - **Block equalizers at small `block_size` on the GPU**: a fixed cost per block; at 256 the GPU only ties the CPU without carrier recovery.
 - **`cs_block` on phases with frequent slip decisions**: one speculation pass per changed decision (about 1 pass per block on a realistic link, more on pathological input). Outside a CUDA graph the Python wrapper (validation, scratch allocation) costs about 18 us per launch.
 

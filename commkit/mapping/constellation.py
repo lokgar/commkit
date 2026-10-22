@@ -29,7 +29,7 @@ import numpy as np
 
 from ..backend import ArrayType, dispatch
 from .gray import _gray_points, _nearest_index, _unpack_bits
-from .llr import _llr
+from .llr import _Axis, _llr, _llr_separable
 from .shaping import (
     _constellation_power,
     _entropy_bits,
@@ -298,6 +298,8 @@ class Constellation:
         scale.  ``method`` is ``"maxlog"`` or ``"exact"`` (log-sum-exp).
         Returns ``float32`` of shape ``(..., N * k)`` on the symbols' device.
         """
+        if self._axes is not None and dispatch(symbols)[1] is np:
+            return _llr_separable(symbols, self._axes, noise_var, method)
         return _llr(symbols, self.points, self.bit_labels, self.pmf, noise_var, method)
 
     # -- value semantics -----------------------------------------------------
@@ -364,6 +366,38 @@ class Constellation:
         lut[cell] = np.arange(self.order)
         lut.setflags(write=False)
         return lev_min, step, side, lut
+
+    @cached_property
+    def _axes(self) -> tuple[_Axis, _Axis] | None:
+        """The real and imaginary axes of a square lattice whose labels and
+        prior factor into per-axis ones (Gray QAM, shaped or not).
+
+        Every bit then depends on one axis only, and the other axis's factor
+        cancels from its LLR.  ``None`` otherwise.
+        """
+        grid = self._square_grid
+        if grid is None:
+            return None
+        _, _, side, lut = grid
+        labels = self.bit_labels[lut].reshape(side, side, -1)  # [i, q, bit]
+        on_re = np.all(labels == labels[:, :1, :], axis=(0, 1))  # constant in q
+        on_im = np.all(labels == labels[:1, :, :], axis=(0, 1))  # constant in i
+        if not np.all(on_re ^ on_im):
+            return None
+        bits_re, bits_im = np.flatnonzero(on_re), np.flatnonzero(on_im)
+        if 2**bits_re.size != side or 2**bits_im.size != side:
+            return None
+        points = self.points[lut].reshape(side, side)
+        pmf_re = pmf_im = None
+        if self.pmf is not None:
+            pmf = self.pmf[lut].reshape(side, side)
+            pmf_re, pmf_im = pmf.sum(axis=1), pmf.sum(axis=0)
+            if not np.allclose(pmf, np.outer(pmf_re, pmf_im), rtol=1e-9, atol=0.0):
+                return None
+        return (
+            _Axis(points[:, 0].real, labels[:, 0][:, bits_re], pmf_re, bits_re),
+            _Axis(points[0, :].imag, labels[0, :][:, bits_im], pmf_im, bits_im),
+        )
 
     def _index_of_label(self) -> np.ndarray:
         """Point index for each packed label value, shape ``(M,)``."""

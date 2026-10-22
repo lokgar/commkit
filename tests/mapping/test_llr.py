@@ -275,26 +275,40 @@ class TestLLRBruteForce:
 
     @pytest.mark.parametrize("method", ["maxlog", "exact"])
     @pytest.mark.parametrize(
-        "constellation",
+        ("constellation", "nv"),
         [
-            Constellation.qam(64).shaped(nu=0.05),
-            Constellation.pam(4),
-            Constellation.psk(8),
+            (Constellation.qam(64).shaped(nu=0.05), 0.045),
+            (Constellation.pam(4), 0.045),
+            (Constellation.psk(8), 0.045),
+            (Constellation.qam(256), 0.045),
+            (Constellation.qam(128), 0.045),
+            # High SNR: most half-sums underflow relative to the symbol's
+            # peak metric, so exact LLRs take the per-half fallback.
+            (Constellation.qam(256), 2e-4),
+            (Constellation.qam(128), 2e-4),
         ],
-        ids=["shaped64qam", "pam4", "8psk"],
+        ids=[
+            "shaped64qam",
+            "pam4",
+            "8psk",
+            "256qam",
+            "cross128qam",
+            "256qam-high-snr",
+            "cross128qam-high-snr",
+        ],
     )
     def test_matches_brute_force(
-        self, xp: Any, method: str, constellation: Any
+        self, xp: Any, method: str, constellation: Any, nv: float
     ) -> None:
         rng = np.random.default_rng(9)
         pts = constellation.points
         x = pts[rng.integers(0, pts.size, 3000)]
-        noise = 0.15 * rng.standard_normal(x.shape)
+        sd = np.sqrt(nv / 2)
+        noise = sd * rng.standard_normal(x.shape)
         if np.iscomplexobj(pts):
-            x = x + 0.15j * rng.standard_normal(x.shape) + noise
+            x = x + 1j * sd * rng.standard_normal(x.shape) + noise
         else:
             x = x + noise
-        nv = 0.045
         got = to_numpy(
             mapping.compute_llr(
                 xp.asarray(x), noise_var=nv, constellation=constellation, method=method
@@ -312,3 +326,48 @@ class TestLLRBruteForce:
             else:
                 expected[:, b] = np.logaddexp.reduce(m0, 1) - np.logaddexp.reduce(m1, 1)
         np.testing.assert_allclose(got, expected, rtol=1e-4, atol=1e-3)
+
+
+class TestSeparableLLR:
+    """Square QAM with per-axis labels and prior is demapped per axis."""
+
+    @pytest.mark.parametrize(
+        "constellation",
+        [
+            Constellation.qam(16),
+            Constellation.qam(256),
+            Constellation.qam(64).shaped(nu=0.1),
+        ],
+        ids=["16qam", "256qam", "shaped64qam"],
+    )
+    def test_separable_detected(self, constellation: Any) -> None:
+        axes = constellation._axes
+        assert axes is not None
+        bits = np.sort(np.concatenate([a.bits for a in axes]))
+        np.testing.assert_array_equal(bits, np.arange(constellation.bits_per_symbol))
+
+    @pytest.mark.parametrize(
+        "constellation",
+        [
+            Constellation.qam(8),
+            Constellation.qam(32),
+            Constellation.psk(8),
+            Constellation.pam(4),
+        ],
+        ids=["8qam", "cross32qam", "8psk", "pam4"],
+    )
+    def test_not_a_square_lattice(self, constellation: Any) -> None:
+        assert constellation._axes is None
+
+    def test_labels_mixing_the_axes(self) -> None:
+        """Swapping two points' labels makes some bit depend on both axes."""
+        c = Constellation.qam(16)
+        labels = c.bit_labels.copy()
+        labels[[0, 5]] = labels[[5, 0]]
+        assert Constellation(c.points, bit_labels=labels)._axes is None
+
+    def test_prior_not_a_product(self) -> None:
+        c = Constellation.qam(16)
+        pmf = np.random.default_rng(0).uniform(0.5, 1.5, 16)
+        pmf /= pmf.sum()
+        assert Constellation(c.points, bit_labels=c.bit_labels, pmf=pmf)._axes is None
