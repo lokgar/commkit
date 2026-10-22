@@ -113,3 +113,20 @@ def llr_workload(
     )
     rx = apply_awgn(syms, esn0_db=esn0_db, sps=1, rng=seed + 1)
     return np.asarray(rx, dtype=np.complex64), bits, 10 ** (-esn0_db / 10)
+
+
+def fiber_workload(n_samples: int, seed: int = 0) -> np.ndarray:
+    """Dual-polarization 16-QAM at 2 SPS (RRC 0.1, 32 GBd at 64 GS/s), for
+    the split-step fiber benches.  Shape ``(2, n_samples)`` complex64."""
+    from commkit import RRC, generate
+
+    sig = generate(
+        Constellation.qam(16),
+        n_samples // 2,
+        symbol_rate=32e9,
+        sps=2,
+        pulse=RRC(0.1),
+        num_channels=2,
+        rng=seed,
+    )
+    return np.asarray(sig.samples, dtype=np.complex64)

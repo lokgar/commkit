@@ -12,12 +12,15 @@ originates:
   (``apply_iq_imbalance`` and the blind ``correct_iq_imbalance`` with
   ``Lowdin()`` / ``GramSchmidt()``).
 - :mod:`~commkit.impairments.channel` - fiber-channel effects (linear:
-  chromatic dispersion, PMD, polarization mixing; nonlinear: placeholder).
+  chromatic dispersion, PMD, polarization mixing; nonlinear: split-step
+  propagation over amplified spans of a :class:`Fiber`).
 
 """
 
 from .channel import (
+    Fiber,
     apply_chromatic_dispersion,
+    apply_fiber_propagation,
     apply_pmd,
     apply_polarization_mixing,
 )
@@ -26,10 +29,12 @@ from .noise import apply_awgn
 from .source import apply_phase_noise, generate_phase_noise
 
 __all__ = [
+    "Fiber",
     "GramSchmidt",
     "Lowdin",
     "apply_awgn",
     "apply_chromatic_dispersion",
+    "apply_fiber_propagation",
     "apply_iq_imbalance",
     "apply_phase_noise",
     "apply_pmd",

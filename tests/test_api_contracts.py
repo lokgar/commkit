@@ -45,7 +45,7 @@ from commkit.backend import to_device
 from commkit.core import Signal
 from commkit.equalization import EqualizerResult
 from commkit.frequency import MthPower
-from commkit.impairments import Lowdin
+from commkit.impairments import Fiber, Lowdin
 from commkit.mapping import Constellation
 from commkit.recovery import BPS
 
@@ -81,7 +81,7 @@ MET = "metric_host"
 EQR = "equalizer_result"
 
 # Placeholder modules for planned work are kept on purpose and not registered.
-PLACEHOLDERS = ("commkit.coding", "commkit.impairments.channel.nonlinear")
+PLACEHOLDERS = ("commkit.coding",)
 
 Builder = Callable[["Inputs", Any], tuple[tuple, dict]]
 
@@ -203,6 +203,13 @@ def L(*checks: str) -> frozenset[str]:
 
 
 CD = {"dispersion_ps_nm_km": 17, "fiber_length_km": 1, "center_wavelength_nm": 1550}
+FIBER_LINK = {
+    "fiber": Fiber(),
+    "span_length_km": 10.0,
+    "num_spans": 2,
+    "launch_power_dbm": 0.0,
+    "steps_per_span": 3,
+}
 FS_CONFLICT = ("sampling_rate", 3 * FS)
 SPS_CONFLICT = ("sps", 4)
 
@@ -387,6 +394,12 @@ ROWS: list[Row] = [
         call=lambda c, x: _a(x, sampling_rate=FS, **CD),
         fact=FS_CONFLICT,
     ),
+    Row(
+        "commkit.filtering.correct_fiber_propagation",
+        TRANSFORM,
+        call=lambda c, x: _a(x, sampling_rate=FS, **FIBER_LINK),
+        fact=FS_CONFLICT,
+    ),
     # --- frequency ----------------------------------------------------------
     Row("commkit.frequency.BiasTone", VALUE),
     Row("commkit.frequency.FrequencyOffsetEstimate", VALUE),
@@ -417,6 +430,15 @@ ROWS: list[Row] = [
         "commkit.impairments.channel.linear.apply_chromatic_dispersion",
         TRANSFORM,
         call=lambda c, x: _a(x, sampling_rate=FS, **CD),
+        fact=FS_CONFLICT,
+    ),
+    Row("commkit._fiber.Fiber", VALUE),
+    Row(
+        "commkit.impairments.channel.nonlinear.apply_fiber_propagation",
+        TRANSFORM,
+        call=lambda c, x: _a(
+            x, sampling_rate=FS, noise_figure_db=5.0, rng=1, **FIBER_LINK
+        ),
         fact=FS_CONFLICT,
     ),
     Row(

@@ -87,11 +87,10 @@ markers = [
 ]
 
 [tool.coverage.run]
-# Placeholder modules for planned work (FEC, nonlinear channel) are kept on
-# purpose as reminders; they hold no code yet, so they are not measured.
+# The placeholder package for planned work (FEC) is kept on purpose as a
+# reminder; it holds no code yet, so it is not measured.
 omit = [
     "commkit/coding/*",
-    "commkit/impairments/channel/nonlinear.py",
 ]
 
 [tool.bumpversion]

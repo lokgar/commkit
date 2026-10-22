@@ -90,7 +90,8 @@ Dependencies point downward only:
   - `analysis` holds laser and phase characterization.
   - `metrics` is the reporting layer.
 - **Splitting modules:** promote a flat module to a package only when it exceeds about 1000 lines *and* has two or more separable concerns. The package `__init__` re-exports the public names. Never create a `utils/` package or one-function files.
-- **Placeholder modules are kept on purpose.** `commkit.coding` and `commkit.impairments.channel.nonlinear` are reminders of planned work. Never delete them or treat them as dead code. They are excluded from coverage and from the contract registry, and the README labels them "planned, not implemented".
+- **Placeholder modules are kept on purpose.** `commkit.coding` is a reminder of planned work. Never delete it or treat it as dead code. It is excluded from coverage and from the contract registry, and the README labels it "planned, not implemented".
+- **Shared physics lives in one private module**, used by the channel and by its compensation: `_dispersion` (β₂, β₃, the dispersion response) and `_fiber` (`Fiber` and the split-step solver behind `apply_fiber_propagation` and `correct_fiber_propagation`).
 
 ---
 
@@ -121,7 +122,8 @@ Dependencies point downward only:
   - Equalizer continuation uses `state=result.state`.
 - **Randomness:** `rng: int | np.random.Generator | None` (SciPy SPEC 7).
   - What is transmitted (bits, symbols, pilots): draw on the host with the Generator, then transfer. A seed gives the same payload on CPU and GPU.
-  - What the channel adds (AWGN, phase noise): draw on the data's device through `_random.standard_normal`. Realizations differ between devices; statistics agree, and tests assert statistics.
+  - What the channel adds (AWGN, phase noise, ASE): draw on the data's device through `_random.standard_normal` / `complex_normal`. Realizations differ between devices; statistics agree, and tests assert statistics.
+  - Random parameters of a realization (the PMD waveplates of `Fiber`) are few and drawn on the host, so a seed gives the same fiber on every device.
   - Never use a global RNG.
 - **Types:** a transform is written `def f(samples: S, ...) -> S` with the TypeVar `S` from `core/_signal_adapter.py` (bound to `np.ndarray | Signal`), so a Signal gives a Signal and an array an array. Do not reassign the `samples` parameter; name the unwrapped array `x`.
 - **Device follows the data.** There are no `backend=` arguments and no global switches. Unsupported array types (JAX, PyTorch) raise `TypeError`.
@@ -183,6 +185,7 @@ Dependencies point downward only:
 | Vectorized: filters, resampling, spectra, impairments, metrics, LLR, frequency-domain equalizers | NumPy/CuPy via `x, xp, sp = dispatch(samples)` | follows the input |
 | Sequential recursions: LMS/RLS/CMA/RDE, PLL, Tikhonov, cycle slips | Numba `@njit(cache=True, fastmath=True, nogil=True)` | CPU; GPU input does one round trip to the host and back |
 | Hot spots limited by intermediates, launches or round trips | CUDA C++ via CuPy `RawModule` (`commkit/_cuda`) | GPU |
+| Elementwise chains with many temporaries, where a paired A/B shows the gain end to end (the PMD stage of `_fiber`: 0.61x) | Numba `@njit(parallel=True)` in one pass, real arithmetic (a `1j` literal promotes complex64 to complex128) | CPU |
 
 **Host-sync hygiene:**
 
@@ -246,8 +249,28 @@ What is not done yet, in suggested order. Unlike the sections above, this is a t
 
 ### Planned modules
 
-1. **Nonlinear fiber channel** (`impairments.channel.nonlinear`, a placeholder). Split-step Fourier propagation of the Kerr effect together with chromatic dispersion, then digital backpropagation as its compensation counterpart in `filtering`. Comes first because it builds on what exists: the dispersion operator (`_dispersion`), overlap-save and FFT-heavy GPU code. It completes the coherent optical link model.
-2. **Channel coding** (`coding`, a placeholder package). Resolve the "Before channel coding" items below first, so the decoder is built on soft demapping that is already at its final speed on both devices. Start with one soft decoder (LDPC) that consumes `compute_llr` output (positive LLR = bit 0) and reports post-FEC BER next to `gmi`, then add encoders. The package stays out of `commkit/__init__.py` until a real encode/decode entry point exists. Decoders are iterative message passing over many codewords: batch codewords on the GPU from the start.
+1. **Channel coding** (`coding`, a placeholder package). Resolve the "Before channel coding" items below first, so the decoder is built on soft demapping that is already at its final speed on both devices. Start with one soft decoder (LDPC) that consumes `compute_llr` output (positive LLR = bit 0) and reports post-FEC BER next to `gmi`, then add encoders. The package stays out of `commkit/__init__.py` until a real encode/decode entry point exists. Decoders are iterative message passing over many codewords: batch codewords on the GPU from the start.
+
+### Nonlinear fiber channel: GPU validation (local session)
+
+`apply_fiber_propagation` / `correct_fiber_propagation` (`_fiber`) were written on a machine without a CUDA driver. The CPU path is tested and timed; the GPU path (three fused `ElementwiseKernel`s, in-place unscaled cuFFT with the 1/N folded into the linear stage, one CUDA graph per PMD-free span) compiles under NVRTC and matches the CPU in a NumPy emulation of its logic, but has never run on a GPU.
+
+- **Run the GPU tests**: `uv run pytest tests/test_fiber.py tests/impairments/channel/test_channel_nonlinear.py tests/test_filtering.py -k "fiber or Fiber" --device=all`. `test_fiber.py` compares the fused kernels and the graph replay with the plain CuPy stages and with the CPU, and fails on a "fused CUDA kernels unavailable" or "capture failed" warning.
+- **Check the graph capture**: a span must allocate nothing (cupyx's in-place C2C transforms with `overwrite_x=True`, `norm="forward"` on the inverse). Confirm with `compute-sanitizer` or by checking that the memory pool does not grow between replays; if cupyx copies or scales out of place, the pointer check disables the graph, but a temporary inside the span would not be caught.
+- **Time `benchmarks/bench_fiber.py` on the GPU** (`auto` against `plain`): the kernel policy keeps the fused kernels only if they beat the plain CuPy stages. Expected order (estimate, not measured): about 0.4 ms per step for 2x2^20 complex64 on the reference GPU, about twice that unfused. CPU reference (4 cores, this container): 75 ms per step, 52 of them FFTs. Then record a baseline with the fiber benches.
+- **CPU fused stages without PMD**: Numba versions of the linear and Kerr stages (one pass each) measured 0.84-0.94x end to end at 2^20 samples and 1.04-1.30x at 2^16 on 4 cores, as their thread pool competes with `scipy.fft`'s workers; they were not kept. Re-measure on the reference machine (8 cores) before adding them.
+
+### Nonlinear fiber channel: future features
+
+Each is an addition that leaves the current API unchanged.
+
+- **Batched realizations**: an extra leading axis `(B, 2, N)` (launch-power sweeps, Monte Carlo over seeds) so cuFFT batches them and short records fill the GPU.
+- **Adaptive step rules**: a `step_rule=` object (maximum nonlinear phase per step, local-error method) next to the equal `steps_per_span`, which measured 3x more accurate than logarithmic steps on a 32 GBd, 80 km span.
+- **WDM helpers**: combining frequency-shifted channels into one wideband field and selecting one after propagation; the solver already handles the wide field (with `dispersion_slope_ps_nm2_km` set).
+- **Distributed (Raman) amplification and per-span fiber types** in one call (chaining calls already works: every call speaks launch-relative units).
+- **Reduced-complexity DBP**: filtered or enhanced split step and perturbation-based nonlinearity compensation, as `correct_fiber_propagation` methods.
+- **cuFFT callbacks** fusing the linear stage into the transforms (CuPy's support is experimental and compiles with nvcc at run time).
+- **Self-steepening and Raman scattering** for ultra-wideband fields.
 
 ### Before channel coding: mapping and soft demapping
 

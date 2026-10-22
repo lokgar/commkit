@@ -451,3 +451,108 @@ class TestOlsFftSize:
             filtering.ols_fir_filter(x, taps, fft_size=200)
         with pytest.raises(ValueError, match="fft_size"):
             filtering.ols_fir_filter(x, taps, fft_size=256)
+
+
+class TestCorrectFiberPropagation:
+    """Digital backpropagation: the inverse of apply_fiber_propagation."""
+
+    @staticmethod
+    def _field(n=4096, seed=1, dtype=np.complex64):
+        rng = np.random.default_rng(seed)
+        x = rng.standard_normal((2, n)) + 1j * rng.standard_normal((2, n))
+        spectrum = np.fft.fft(x, axis=-1)
+        spectrum[:, np.abs(np.fft.fftfreq(n)) > 0.25] = 0.0
+        return np.fft.ifft(spectrum, axis=-1).astype(dtype)
+
+    LINK = dict(span_length_km=80.0, num_spans=4, launch_power_dbm=6.0)
+
+    def test_inverts_a_noiseless_link(self, xp: Any) -> None:
+        """Same steps, ξ = 1: the time-reversible symmetric step makes DBP
+        the exact inverse; complex64 keeps a float32 rounding floor."""
+        from commkit.impairments import Fiber, apply_fiber_propagation
+
+        for dtype, tol in ((np.complex128, 1e-11), (np.complex64, 1e-4)):
+            x = xp.asarray(self._field(dtype=dtype))
+            kw = dict(fiber=Fiber(), steps_per_span=40, sampling_rate=64e9, **self.LINK)
+            y = apply_fiber_propagation(x, **kw)
+            z = filtering.correct_fiber_propagation(y, **kw)
+            err = float(xp.sqrt(xp.mean(xp.abs(z - x) ** 2) / xp.mean(xp.abs(x) ** 2)))
+            assert err < tol, (dtype, err)
+            assert z.dtype == dtype
+
+    def test_without_kerr_it_is_dispersion_compensation(self, xp: Any) -> None:
+        """ξ = 0 leaves the dispersion and loss: correct_chromatic_dispersion
+        over the whole link (the amplifiers cancel the loss)."""
+        from commkit.impairments import Fiber
+
+        x = xp.asarray(self._field())
+        z = filtering.correct_fiber_propagation(
+            x,
+            fiber=Fiber(),
+            steps_per_span=3,
+            nonlinear_scale=0.0,
+            sampling_rate=64e9,
+            **self.LINK,
+        )
+        ref = filtering.correct_chromatic_dispersion(
+            x,
+            dispersion_ps_nm_km=17.0,
+            fiber_length_km=320.0,
+            center_wavelength_nm=1550.0,
+            sampling_rate=64e9,
+        )
+        err = float(xp.sqrt(xp.mean(xp.abs(z - ref) ** 2) / xp.mean(xp.abs(ref) ** 2)))
+        assert err < 1e-5
+
+    def test_beats_linear_compensation_on_a_nonlinear_link(self, xp: Any) -> None:
+        """6 dBm over 4 x 80 km with ASE (NF 5 dB); distortion after
+        dispersion compensation alone is about -16 dB.  Ten DBP steps per
+        span reach the ASE floor (about -30 dB, measured); one step per span
+        gains about 2 dB, but only with ξ near 0.5 (ξ = 1 overshoots)."""
+        from commkit.impairments import Fiber, apply_fiber_propagation
+
+        x = xp.asarray(self._field(n=1 << 14))
+        y = apply_fiber_propagation(
+            x,
+            fiber=Fiber(),
+            steps_per_span=50,
+            noise_figure_db=5.0,
+            rng=3,
+            sampling_rate=64e9,
+            **self.LINK,
+        )
+
+        def error(z: Any) -> float:
+            g = xp.sum(xp.conj(x) * z) / xp.sum(xp.abs(x) ** 2)  # common phase
+            return float(xp.mean(xp.abs(z - g * x) ** 2) / xp.mean(xp.abs(x) ** 2))
+
+        cdc = error(
+            filtering.correct_chromatic_dispersion(
+                y,
+                dispersion_ps_nm_km=17.0,
+                fiber_length_km=320.0,
+                center_wavelength_nm=1550.0,
+                sampling_rate=64e9,
+            )
+        )
+        kw = dict(fiber=Fiber(), sampling_rate=64e9, **self.LINK)
+        full = error(filtering.correct_fiber_propagation(y, steps_per_span=10, **kw))
+        one = error(
+            filtering.correct_fiber_propagation(
+                y, steps_per_span=1, nonlinear_scale=0.5, **kw
+            )
+        )
+        assert full < 0.1 * cdc
+        assert one < 0.75 * cdc
+
+    def test_bad_nonlinear_scale_raises(self, xp: Any) -> None:
+        from commkit.impairments import Fiber
+
+        with pytest.raises(ValueError, match="nonlinear_scale"):
+            filtering.correct_fiber_propagation(
+                xp.asarray(self._field()),
+                fiber=Fiber(),
+                nonlinear_scale=float("nan"),
+                sampling_rate=64e9,
+                **self.LINK,
+            )
