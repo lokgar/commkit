@@ -280,7 +280,6 @@ def cma(
             run, equalizer="cma", cpr=None, resume=resume, snapshot=snap
         ),
         name="CMA" if not use_pilots else "CMA(PA)",
-        check_convergence=True,
     )
     return _attach_equalized_signal(result, sig, state)
 
@@ -491,6 +490,5 @@ def rde(
             run, equalizer="rde", cpr=None, resume=resume, snapshot=snap
         ),
         name="RDE" if not use_pilots else "RDE(PA)",
-        check_convergence=True,
     )
     return _attach_equalized_signal(result, sig, state)

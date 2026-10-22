@@ -229,61 +229,24 @@ class EqualizerResult:
     signal: Signal | None = None
 
 
-def _log_equalizer_exit(
-    result: EqualizerResult,
-    name: str,
-    check_convergence: bool = False,
-) -> EqualizerResult:
+def _log_equalizer_exit(result: EqualizerResult, name: str) -> EqualizerResult:
     """Log the exit MSE of an EqualizerResult (INFO level)."""
-    if result.error is not None:
-        n_sym = result.error.shape[-1]  # time axis; (N_sym,) or (C, N_sym)
-        _want_log = logger.isEnabledFor(logging.INFO)
-        # The convergence check emits a WARNING (normally always enabled), but
-        # only runs when explicitly requested and the signal is long enough.
-        want_conv = check_convergence and n_sym >= 20
-
-        # Skip the whole MSE computation - and its device->host transfer - when
-        # nothing will consume the result.  When it is needed, transfer only the
-        # tail (and head, for convergence) windows rather than the full error
-        # array: ≤100 samples/channel instead of N.
-        if _want_log or want_conv:
-            window = max(1, min(100, n_sym))
-            tail = to_device(result.error[..., -window:], "cpu")
-
-            if tail.ndim == 1:  # SISO
-                mse_final = float(np.mean(np.abs(tail) ** 2))
-                mse_db = 10.0 * np.log10(mse_final + 1e-30)
-                if _want_log:
-                    logger.info(
-                        "%s: exit MSE=%.1f dB (final %s symbols)", name, mse_db, window
-                    )
-            else:  # MIMO: per-channel MSE; keep the mean for the convergence check
-                per_ch_mse = np.mean(np.abs(tail) ** 2, axis=-1)  # (C,)
-                if _want_log:
-                    parts = ", ".join(
-                        f"ch{c}={10.0 * np.log10(m + 1e-30):.1f}"
-                        for c, m in enumerate(per_ch_mse)
-                    )
-                    logger.info(
-                        "%s: exit MSE (final %s symbols): %s dB", name, window, parts
-                    )
-                mse_final = float(np.mean(per_ch_mse))
-                mse_db = 10.0 * np.log10(mse_final + 1e-30)
-
-            if want_conv:
-                init_window = max(1, min(100, n_sym // 10))
-                head = to_device(result.error[..., :init_window], "cpu")
-                mse_init = float(np.mean(np.abs(head) ** 2))
-                if mse_init > 0 and mse_final > mse_init * 0.9:
-                    logger.warning(
-                        "%s: convergence may be poor - final MSE (%.1f dB) "
-                        "not significantly below initial MSE (%.1f dB). "
-                        "Consider reducing step_size or increasing signal length.",
-                        name,
-                        mse_db,
-                        10.0 * np.log10(mse_init + 1e-30),
-                    )
-
+    # Skip the device->host transfer when nothing will consume the result, and
+    # transfer only the tail window (<= 100 samples per channel) when it will.
+    if result.error is None or not logger.isEnabledFor(logging.INFO):
+        return result
+    n_sym = result.error.shape[-1]  # time axis; (N_sym,) or (C, N_sym)
+    window = max(1, min(100, n_sym))
+    tail = to_device(result.error[..., -window:], "cpu")
+    if tail.ndim == 1:  # SISO
+        mse_db = 10.0 * np.log10(float(np.mean(np.abs(tail) ** 2)) + 1e-30)
+        logger.info("%s: exit MSE=%.1f dB (final %s symbols)", name, mse_db, window)
+    else:  # MIMO: per-channel MSE
+        per_ch_mse = np.mean(np.abs(tail) ** 2, axis=-1)  # (C,)
+        parts = ", ".join(
+            f"ch{c}={10.0 * np.log10(m + 1e-30):.1f}" for c, m in enumerate(per_ch_mse)
+        )
+        logger.info("%s: exit MSE (final %s symbols): %s dB", name, window, parts)
     return result
 
 

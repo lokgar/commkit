@@ -166,4 +166,4 @@ def _block_fdaf_blind(
             run, equalizer=equalizer, cpr=None, weights=snap[0], carrier=None
         ),
     )
-    return _log_equalizer_exit(result, name=name, check_convergence=True)
+    return _log_equalizer_exit(result, name=name)
