@@ -1,6 +1,6 @@
 """Additive measurement noise (ASE / thermal) impairments."""
 
-from .._random import RNG, as_generator, standard_normal
+from .._random import RNG, as_generator, complex_normal, standard_normal
 from ..backend import dispatch
 from ..core._signal_adapter import S, adapt_signal
 from ..logger import logger
@@ -102,8 +102,7 @@ def apply_awgn(
     real_dtype = x.real.dtype if x.real.dtype.kind == "f" else xp.dtype(xp.float64)
     if xp.iscomplexobj(x):
         std = xp.sqrt(noise_power / 2).astype(real_dtype)
-        n = standard_normal(gen, (2, *x.shape), dtype=real_dtype, xp=xp)
-        noise = std * (n[0] + 1j * n[1])
+        noise = complex_normal(gen, x.shape, std=std, dtype=real_dtype, xp=xp)
     else:
         std = xp.sqrt(noise_power).astype(real_dtype)
         noise = std * standard_normal(gen, x.shape, dtype=real_dtype, xp=xp)

@@ -37,3 +37,20 @@ def standard_normal(
     seed = int(rng.integers(2**63))
     device_rng = xp.random.Generator(xp.random.Philox4x3210(seed))
     return device_rng.standard_normal(shape, dtype=dtype)
+
+
+def complex_normal(
+    rng: np.random.Generator,
+    shape: tuple[int, ...],
+    *,
+    std: float | ArrayType,
+    dtype: type | np.dtype,
+    xp: ModuleType,
+) -> ArrayType:
+    """Circular complex Gaussian noise ``std * (a + j b)``, ``a, b ~ N(0, 1)``,
+    of ``shape`` on ``xp``'s device; ``dtype`` is the real component type.
+
+    ``E[|n|^2] = 2 std^2``: pass ``std = sqrt(P / 2)`` for noise power ``P``.
+    """
+    n = standard_normal(rng, (2, *shape), dtype=dtype, xp=xp)
+    return std * (n[0] + 1j * n[1])
