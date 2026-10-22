@@ -43,7 +43,7 @@ res = ck.equalization.lms(
 y = res.signal                    # 1-SPS Signal, reference aligned
 print(f"EVM {ck.metrics.evm(y, num_skip_symbols=2000):.1f} %, "
       f"BER {ck.metrics.ber(y, num_skip_symbols=2000):.1e}")
-# EVM 12.8 %, BER 2.5e-04
+# EVM 12.7 %, BER 2.4e-04 (on the CPU; the GPU draws other noise)
 
 # The next record continues from the converged taps and CPR state.
 res2 = ck.equalization.lms(rx, num_taps=21, step_size=1e-3, cpr=cpr, state=res.state)

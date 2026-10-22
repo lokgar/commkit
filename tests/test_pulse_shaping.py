@@ -123,7 +123,7 @@ class TestPulseObjects:
         [
             (
                 filtering.RRC(0.2),
-                lambda: filtering.rrc_taps(sps=4, rolloff=0.2, span=10),
+                lambda: filtering.rrc_taps(sps=4, rolloff=0.2),  # same default
             ),
             (
                 filtering.RC(0.3, span=6),
@@ -131,7 +131,7 @@ class TestPulseObjects:
             ),
             (
                 filtering.Gaussian(0.8),
-                lambda: filtering.gaussian_taps(sps=4, span=10, fwhm=0.8),
+                lambda: filtering.gaussian_taps(sps=4, fwhm=0.8),  # same default
             ),
             (
                 filtering.Rect(0.5, 0.25),
@@ -207,7 +207,7 @@ class TestPulseObjects:
             factory()
 
     def test_value_semantics(self) -> None:
-        assert filtering.RRC(0.1) == filtering.RRC(0.1, span=10)
+        assert filtering.RRC(0.1) == filtering.RRC(0.1, span=32)
         assert filtering.RRC(0.1) != filtering.RC(0.1)
         assert len({filtering.RRC(0.1), filtering.RRC(0.1)}) == 1
         with pytest.raises(dataclasses.FrozenInstanceError):

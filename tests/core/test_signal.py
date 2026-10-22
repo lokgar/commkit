@@ -102,7 +102,7 @@ class TestSignalCreation:
             Constellation.qam(16), 8, symbol_rate=1e3, sps=2, pulse=RRC(0.35)
         )
         assert sig.constellation == Constellation.qam(16)
-        assert sig.pulse == RRC(0.35, span=10)
+        assert sig.pulse == RRC(0.35)
         assert sig.frame is None
         rz = generate(Constellation.pam(2), 8, symbol_rate=1e3, sps=4, pulse=Rect(0.5))
         assert rz.pulse == Rect(0.5)

@@ -143,7 +143,7 @@ def rect_taps(
     return h
 
 
-def gaussian_taps(*, sps: float, fwhm: float = 1.0, span: int = 4) -> np.ndarray:
+def gaussian_taps(*, sps: float, fwhm: float = 1.0, span: int = 10) -> np.ndarray:
     """
     Generates Gaussian pulse-shaping filter taps.
 
@@ -158,7 +158,7 @@ def gaussian_taps(*, sps: float, fwhm: float = 1.0, span: int = 4) -> np.ndarray
         Full width at half maximum of the pulse in symbol periods.  Smaller
         values give a narrower pulse (less ISI, wider bandwidth).  The
         bandwidth-time product is ``BT = √2·ln(2) / (π·fwhm)``.
-    span : int, default 4
+    span : int, default 10
         Total filter span in symbols. The number of taps will be ``span * sps + 1``
         to ensure symmetry.
 
@@ -246,7 +246,7 @@ def smoothrect_taps(
     return normalize(h, mode="unit_energy")
 
 
-def rrc_taps(*, sps: float, rolloff: float = 0.35, span: int = 8) -> np.ndarray:
+def rrc_taps(*, sps: float, rolloff: float = 0.35, span: int = 32) -> np.ndarray:
     """
     Generates Root Raised Cosine (RRC) filter taps.
 
@@ -259,8 +259,8 @@ def rrc_taps(*, sps: float, rolloff: float = 0.35, span: int = 8) -> np.ndarray:
         Samples per symbol.
     rolloff : float, default 0.35
         Roll-off factor (alpha), range [0, 1].
-    span : int, default 8
-        Filter span in symbols.
+    span : int, default 32
+        Filter span in symbols (see :class:`RRC` for the truncation floor).
 
     Returns
     -------
@@ -313,7 +313,7 @@ def rrc_taps(*, sps: float, rolloff: float = 0.35, span: int = 8) -> np.ndarray:
     return normalize(h, mode="unit_energy")
 
 
-def rc_taps(*, sps: float, rolloff: float = 0.35, span: int = 8) -> np.ndarray:
+def rc_taps(*, sps: float, rolloff: float = 0.35, span: int = 32) -> np.ndarray:
     """
     Generates Raised Cosine (RC) filter taps.
 
@@ -323,8 +323,8 @@ def rc_taps(*, sps: float, rolloff: float = 0.35, span: int = 8) -> np.ndarray:
         Samples per symbol.
     rolloff : float, default 0.35
         Roll-off factor (alpha), range [0, 1].
-    span : int, default 8
-        Filter span in symbols.
+    span : int, default 32
+        Filter span in symbols (see :class:`RRC` for the truncation floor).
 
     Returns
     -------
@@ -422,13 +422,16 @@ class RRC(Pulse):
     ----------
     rolloff : float
         Roll-off factor in ``[0, 1]``.
-    span : int, default 10
-        Length in symbols; the taps have ``span * sps`` samples, rounded up to
-        an odd count.  Unit energy.
+    span : int, default 32
+        Length in symbols; ``int(span * sps)`` taps made odd, spaced
+        ``1/sps``.  Unit energy.  Truncation limits the matched-filter SNR
+        (RRC on both ends, measured): at 32 symbols about 37 dB for
+        roll-off 0.05, 44 dB for 0.1, 52 dB for 0.2; at 10 symbols only
+        20, 25 and 44 dB.  Roll-offs below 0.05 need a longer span.
     """
 
     rolloff: float
-    span: int = 10
+    span: int = 32
 
     def __post_init__(self) -> None:
         _check_rolloff(self.rolloff)
@@ -446,7 +449,7 @@ class RC(Pulse):
     """
 
     rolloff: float
-    span: int = 10
+    span: int = 32
 
     def __post_init__(self) -> None:
         _check_rolloff(self.rolloff)
