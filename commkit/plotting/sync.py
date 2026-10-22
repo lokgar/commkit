@@ -6,6 +6,7 @@ from typing import Any
 import matplotlib.pyplot as plt
 import numpy as np
 
+from .. import _fft
 from ..backend import to_device
 from .theme import (
     _as_channels,
@@ -1247,7 +1248,7 @@ def plot_pilot_tone_phase_estimate(
     passband = (np.abs(freqs[None, :] - centers) <= method.bandwidth).astype(float)
     return _plot_pilot_tone_phase_estimate(
         freqs,
-        np.abs(np.fft.fft(x, axis=-1)),
+        np.abs(_fft.fft(x, axis=-1)),
         np.broadcast_to(passband, x.shape),
         tones,
         _host(estimate.value),

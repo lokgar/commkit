@@ -8,6 +8,7 @@ from typing import Any, cast, overload
 
 import numpy as np
 
+from .. import _fft
 from ..backend import ArrayType, dispatch, to_device
 from ..core._signal_adapter import adapt_signal
 from ..core.signal import Signal
@@ -207,7 +208,7 @@ def _refine_tone_frequencies(
     best_ch = to_device(xp.argmax(xp.abs(T), axis=0), "cpu")  # (K,) host ints
     uniq, inv = np.unique(np.asarray(best_ch), return_inverse=True)
     xr = xw[xp.asarray(uniq)]  # (U, N) unique strongest channels only
-    X = xp.fft.fft(xr, axis=-1)
+    X = _fft.fft(xr, axis=-1)
     f_coarse = _refine_tones_from_spectrum(
         X, sampling_rate, freqs, search_band, rows=inv
     )  # (K,) float64 host

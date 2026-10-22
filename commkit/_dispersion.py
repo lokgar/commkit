@@ -21,6 +21,7 @@ from typing import Any
 
 import numpy as np
 
+from . import _fft
 from ._array import as_2d, restore_1d
 from .backend import ArrayType, dispatch
 
@@ -87,7 +88,7 @@ def apply_dispersion(
         xp=xp,
         dtype=np.result_type(samples.dtype, np.complex64),
     )
-    result = xp.fft.ifft(xp.fft.fft(samples, axis=-1) * h[None, :], axis=-1)
+    result = _fft.ifft(_fft.fft(samples, axis=-1) * h[None, :], axis=-1)
     if result.dtype != samples.dtype:
         result = result.astype(samples.dtype)
     return restore_1d(was_1d, result)

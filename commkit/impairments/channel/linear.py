@@ -6,6 +6,7 @@ from typing import Any
 
 import numpy as np
 
+from ... import _fft
 from ..._array import require_channels
 from ..._dispersion import apply_dispersion
 from ...backend import ArrayType, dispatch
@@ -118,7 +119,7 @@ def apply_pmd(
     # R(+θ): rotate back to the lab frame
     Rinv = _jones_rotation(theta, xp, x.dtype)
 
-    S_F = xp.fft.fft(x, axis=-1)  # (2, N)
+    S_F = _fft.fft(x, axis=-1)  # (2, N)
 
     # Phase in float64, response in the spectrum's precision (no promotion).
     phase = xp.pi * freqs * dgd
@@ -127,7 +128,7 @@ def apply_pmd(
     # Apply: rotate to PSP frame -> DGD delay -> rotate back to lab frame
     out_F = Rinv @ (D * (Rfwd @ S_F))
 
-    result = xp.fft.ifft(out_F, axis=-1)
+    result = _fft.ifft(out_F, axis=-1)
 
     # Preserve input dtype (ifft may produce complex128 from complex64 input)
     if result.dtype != x.dtype:

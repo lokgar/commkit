@@ -188,6 +188,8 @@ Dependencies point downward only:
 
 - Never extract scalars from a possibly-GPU array inside a loop (`float(x[c])`, `.item()`). Compute the vector on the device, transfer it once with `to_device(v, "cpu")`, then loop on the host.
 - Prefer on-device gathers (`xp.take_along_axis`).
+- Every FFT goes through `commkit._fft` (`fft`, `ifft`, `rfft`, `irfft`), never `np.fft` or `xp.fft` directly: on the CPU it runs `scipy.fft` on every core and keeps complex64 in single precision (NumPy 2 computes it in double, about 3x slower per core); on the GPU it is `cupy.fft`. Frequency grids (`xp.fft.fftfreq`) are exempt.
+- Frequency responses (dispersion, delays, Jones matrices) are computed at float64 phase accuracy and cast to the spectrum's precision before the multiply, so complex64 data is never promoted.
 - Chunk `(N, M)` intermediates over N with an on-device accumulator.
 - Reduce on the device before transferring, including for plotting.
 - Pass whole records to compiled code. There are no Python loops over symbols or small blocks, except inside a CUDA graph.

@@ -12,6 +12,7 @@ from typing import Any
 
 import numpy as np
 
+from .. import _fft
 from .._array import as_2d, restore_1d
 from ..backend import ArrayType, dispatch
 from ..spectral import welch_psd
@@ -167,7 +168,7 @@ def _hann_overlap(lag: float, nperseg: int) -> float:
         return 0.0
     n = np.arange(nperseg)
     w = 0.5 - 0.5 * np.cos(2.0 * np.pi * n / nperseg)
-    acf = np.fft.irfft(np.abs(np.fft.rfft(w, 2 * nperseg)) ** 2)[: nperseg + 1]
+    acf = _fft.irfft(np.abs(_fft.rfft(w, 2 * nperseg)) ** 2)[: nperseg + 1]
     acf[nperseg] = 0.0
     k = int(lag)
     frac = lag - k

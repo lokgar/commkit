@@ -8,6 +8,7 @@ bin, and the backward pass inverts and keeps the centre of each block.
 
 from typing import Any
 
+from . import _fft
 from .backend import ArrayType, dispatch
 
 
@@ -57,7 +58,7 @@ def ols_forward(samples: ArrayType, N_fft: int) -> tuple[ArrayType, dict[str, An
         strides=(stride[0], B * stride[1], stride[1]),
     )
 
-    Y = xp.fft.fft(windows, n=N_fft, axis=-1)  # (num_ch, num_blocks, N_fft)
+    Y = _fft.fft(windows, n=N_fft, axis=-1)  # (num_ch, num_blocks, N_fft)
     meta = {"N": N, "B": B, "discard": discard, "num_blocks": num_blocks}
     return Y, meta
 
@@ -87,7 +88,7 @@ def ols_backward(X_hat_f: ArrayType, meta: dict[str, Any]) -> ArrayType:
     N_fft = X_hat_f.shape[-1]
     num_ch = X_hat_f.shape[0]
 
-    x_hat = xp.fft.ifft(X_hat_f, n=N_fft, axis=-1)
+    x_hat = _fft.ifft(X_hat_f, n=N_fft, axis=-1)
     # Keep the center B samples of each block (symmetric discard of guard regions).
     valid = x_hat[:, :, discard : discard + B]
     out = valid.reshape(num_ch, -1)[:, :N]

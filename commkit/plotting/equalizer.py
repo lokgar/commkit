@@ -5,6 +5,7 @@ from typing import Any
 import matplotlib.pyplot as plt
 import numpy as np
 
+from .. import _fft
 from ..backend import to_device
 from ..smoothing import moving_average
 from .theme import _grid_figsize, _set_eng_formatter
@@ -226,7 +227,7 @@ def plot_zf_equalizer_response(
             axi.set_ylabel("Magnitude [dB]")
 
     if siso:
-        H_f = np.fft.fft(h, n=nfft)
+        H_f = _fft.fft(h, n=nfft)
         if ax is None:
             fig, axes = plt.subplots(1, 3, figsize=_grid_figsize(1, 3))
         else:
@@ -257,7 +258,7 @@ def plot_zf_equalizer_response(
     for i in range(C_rx):
         for j in range(C_tx):
             row = i * C_tx + j
-            H_f = np.fft.fft(h[i, j], n=nfft)
+            H_f = _fft.fft(h[i, j], n=nfft)
             _draw_triplet(H_f, axes[row], row_label=f"[rx{i}$\\rightarrow$tx{j}]")
 
     fig.suptitle(title)

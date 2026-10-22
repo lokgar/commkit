@@ -5,6 +5,7 @@ from types import ModuleType
 
 import numpy as np
 
+from .. import _fft
 from .._array import as_2d, restore_1d
 from .._random import standard_normal
 from ..backend import ArrayType, _module_for, dispatch
@@ -63,7 +64,7 @@ def _phase_trajectory(
         # S_f = flicker/f requires the amplitude gain sqrt(flicker/f * f_s/2).
         gain = xp.sqrt(flicker / xp.maximum(f, f_min)) * math.sqrt(sampling_rate / 2.0)
         white = standard_normal(rng, shape, dtype=np.float64, xp=xp)
-        df = xp.fft.irfft(xp.fft.rfft(white, axis=-1) * gain, num_samples, axis=-1)
+        df = _fft.irfft(_fft.rfft(white, axis=-1) * gain, num_samples, axis=-1)
         phi += 2.0 * math.pi * xp.cumsum(df, axis=-1) / sampling_rate
 
     if periodic:

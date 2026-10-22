@@ -12,6 +12,7 @@ from dataclasses import dataclass
 import numpy as np
 import scipy
 
+from . import _fft
 from ._array import as_2d, restore_1d
 from ._circular import convolve_periodic
 from ._dispersion import apply_dispersion
@@ -972,7 +973,7 @@ def ols_fir_filter(
         center,
     )
 
-    H = xp.fft.fft(taps, n=N_fft)  # frequency response of the filter
+    H = _fft.fft(taps, n=N_fft)  # frequency response of the filter
 
     if center:
         # Post-pad by half so the OLS can compute full_conv[half : half+N].

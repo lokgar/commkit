@@ -10,6 +10,7 @@ delay.
 
 import numpy as np
 
+from . import _fft
 from .backend import ArrayType, dispatch, to_device
 
 
@@ -66,9 +67,9 @@ def convolve_periodic(samples: ArrayType, taps: ArrayType) -> ArrayType:
         precision = np.result_type(precision, np.complex64)
     kernel = kernel.astype(precision, copy=False)
     if real:
-        h_f = xp.fft.rfft(xp.asarray(kernel))
-        out = xp.fft.irfft(xp.fft.rfft(x, axis=-1) * h_f, n=n, axis=-1)
+        h_f = _fft.rfft(xp.asarray(kernel))
+        out = _fft.irfft(_fft.rfft(x, axis=-1) * h_f, n=n, axis=-1)
     else:
-        h_f = xp.fft.fft(xp.asarray(kernel))
-        out = xp.fft.ifft(xp.fft.fft(x, axis=-1) * h_f, axis=-1)
+        h_f = _fft.fft(xp.asarray(kernel))
+        out = _fft.ifft(_fft.fft(x, axis=-1) * h_f, axis=-1)
     return out.astype(x.dtype, copy=False)

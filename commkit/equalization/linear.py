@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import numpy as np
 
+from .. import _fft
 from .._array import as_2d, restore_1d
 from .._overlap_save import ols_backward, ols_forward
 from ..backend import ArrayType, dispatch
@@ -86,12 +87,12 @@ def zf_equalizer(
     if siso_channel:
         # SISO: scalar frequency-domain ZF/MMSE inversion.
         # channel_estimate was reshaped to (1,1,L) for was_1d; flatten to 1D.
-        H = xp.fft.fft(channel_estimate.reshape(-1), n=N_fft)
+        H = _fft.fft(channel_estimate.reshape(-1), n=N_fft)
         W = xp.conj(H) / (xp.abs(H) ** 2 + reg)
         X_hat_f = Y * W
     else:
         # MIMO: per-bin (CxC) matrix inversion - cannot reduce to scalar multiply.
-        H_f = xp.fft.fft(channel_estimate, n=N_fft, axis=-1)
+        H_f = _fft.fft(channel_estimate, n=N_fft, axis=-1)
         Hk = xp.transpose(H_f, (2, 0, 1))  # (N_fft, C_rx, C_tx)
         Hk_H = xp.conj(xp.transpose(Hk, (0, 2, 1)))  # (N_fft, C_tx, C_rx)
         HHh = Hk @ Hk_H  # (N_fft, C_rx, C_rx)
@@ -343,8 +344,8 @@ def estimate_transfer_function(
     step = max(n_fft // 2, (N - n_fft) // max(max_windows - 1, 1))
     starts = xp.arange(0, N - n_fft + 1, step)
     idx = starts[:, None] + xp.arange(n_fft)[None, :]  # (n_win, n_fft)
-    X = xp.fft.fft(x[:, idx] * win, axis=-1)  # (C, n_win, n_fft)
-    Y = xp.fft.fft(y[:, idx] * win, axis=-1)
+    X = _fft.fft(x[:, idx] * win, axis=-1)  # (C, n_win, n_fft)
+    Y = _fft.fft(y[:, idx] * win, axis=-1)
     Sxx = xp.einsum("cwf,dwf->fcd", X, X.conj())  # (n_fft, C, C)
     Syx = xp.einsum("cwf,dwf->fcd", Y, X.conj())
 
@@ -368,7 +369,7 @@ def estimate_transfer_function(
 
     # Centred, Hann-tapered impulse response, truncated to num_taps.
     n_taps = int(min(num_taps, n_fft))
-    b_t = xp.fft.fftshift(xp.fft.ifft(B, axis=0), axes=0)  # (n_fft, C, C), lag axis 0
+    b_t = xp.fft.fftshift(_fft.ifft(B, axis=0), axes=0)  # (n_fft, C, C), lag axis 0
     center = n_fft // 2
     half = n_taps // 2
     taps = b_t[center - half : center + half + 1]  # (L, C, C)

@@ -17,6 +17,7 @@ from typing import Any
 
 import numpy as np
 
+from ... import _fft
 from ..._array import as_2d
 from ...backend import ArrayType, dispatch, to_device
 from ...logger import logger
@@ -251,14 +252,14 @@ def _fdaf_forward(
     block output ``(C, B)`` and the input spectrum ``X_fd`` reused by the
     update.
     """
-    X_fd = xp.fft.fft(x_win, axis=-1)  # (C, F)
-    H_fd = xp.fft.fft(h, n=fftsize, axis=-1)  # (C, C, F)
+    X_fd = _fft.fft(x_win, axis=-1)  # (C, F)
+    H_fd = _fft.fft(h, n=fftsize, axis=-1)  # (C, C, F)
     Y_fd = (
         (xp.conj(H_fd).astype(xp.complex128) * X_fd.astype(xp.complex128)[None])
         .sum(axis=1)
         .astype(xp.complex64)
     )  # (C, F)
-    y_time = xp.fft.ifft(Y_fd, axis=-1)
+    y_time = _fft.ifft(Y_fd, axis=-1)
     y_block = y_time[:, : B * sps : sps].astype(xp.complex64)  # (C, B)
     return y_block, X_fd
 
@@ -281,9 +282,9 @@ def _fdaf_gradient_update(
     """
     e_scatter.fill(0)
     e_scatter[:, : B * sps : sps] = e_block
-    E_fd = xp.fft.fft(e_scatter, axis=-1)  # (C, F)
+    E_fd = _fft.fft(e_scatter, axis=-1)  # (C, F)
     dH_fd = xp.conj(E_fd)[:, None, :] * X_fd[None, :, :]  # (C, C, F)
-    dh = xp.fft.ifft(dH_fd, axis=-1)[:, :, :num_taps]  # (C, C, T)
+    dh = _fft.ifft(dH_fd, axis=-1)[:, :, :num_taps]  # (C, C, T)
     h += xp.float32(mu) * dh
 
 

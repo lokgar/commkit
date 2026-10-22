@@ -16,6 +16,7 @@ from typing import Any
 
 import numpy as np
 
+from . import _fft
 from ._array import as_2d, broadcast_channels, restore_1d
 from .backend import ArrayType, dispatch, to_device
 from .core._signal_adapter import S, adapt_signal
@@ -426,7 +427,7 @@ def _mth_power(
     if constellation is not None and np.ptp(np.abs(constellation.points)) > 1e-9:
         x_m = x_m - xp.mean(x_m, axis=-1, keepdims=True)
 
-    X_m = xp.fft.fft(x_m, n=nfft, axis=-1)  # (R, nfft)
+    X_m = _fft.fft(x_m, n=nfft, axis=-1)  # (R, nfft)
     freqs_np = np.fft.fftfreq(nfft, d=1.0 / fs)
     mag = xp.abs(X_m)
     if method.search_range is not None:
@@ -484,8 +485,8 @@ def _mengali_morelli(
     # Autocorrelation at all lags 1..L via Wiener-Khinchin (2 FFTs), linear
     # because of the zero-padding to nfft >= N + L.
     nfft_r = 1 << int(np.ceil(np.log2(N + L)))
-    Y_r = xp.fft.fft(y, n=nfft_r, axis=-1)
-    R_all = xp.fft.ifft(Y_r * xp.conj(Y_r), axis=-1)
+    Y_r = _fft.fft(y, n=nfft_r, axis=-1)
+    R_all = _fft.ifft(Y_r * xp.conj(Y_r), axis=-1)
     lags = xp.arange(1, L + 1, dtype=xp.float64)
     R_rows = R_all[:, 1 : L + 1] / (N - lags[None, :])  # unbiased, (R, L)
 
@@ -561,7 +562,7 @@ def _bias_tone(x: ArrayType, fs: float, method: BiasTone) -> _Rows:
             f"Segment too short for bias tone search (N={N}). Minimum 4 samples required."
         )
     nfft = 1 << int(np.ceil(np.log2(N)))
-    mag = xp.abs(xp.fft.fft(x, n=nfft, axis=-1))  # (R, nfft)
+    mag = xp.abs(_fft.fft(x, n=nfft, axis=-1))  # (R, nfft)
     freqs_np = np.fft.fftfreq(nfft, d=1.0 / fs)
     search = mag
     if method.target_frequency is not None:

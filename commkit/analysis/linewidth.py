@@ -20,6 +20,7 @@ from typing import Any
 
 import numpy as np
 
+from .. import _fft
 from .._array import as_2d, broadcast_channels, restore_1d, to_report_scalar
 from ..backend import ArrayType, dispatch, to_device
 from ..core._signal_adapter import adapt_signal
@@ -793,7 +794,7 @@ def _not_a_beat(x: ArrayType, f_shift: float | None, fs: float) -> np.ndarray:
     x2 = x2[:, : 1 << 16].astype(xp.float64)
     x2 = x2 - xp.mean(x2, axis=-1, keepdims=True)
     n = x2.shape[-1]
-    power = xp.abs(xp.fft.rfft(x2, axis=-1)) ** 2
+    power = xp.abs(_fft.rfft(x2, axis=-1)) ** 2
     f_full = xp.fft.rfftfreq(n, d=1.0 / fs)
     f_lo = abs(float(f_shift)) / 2.0 if f_shift else fs / 400.0
     low = xp.sum(xp.where(f_full < f_lo, power, 0.0), axis=-1)
@@ -801,7 +802,7 @@ def _not_a_beat(x: ArrayType, f_shift: float | None, fs: float) -> np.ndarray:
     k_seg = n // seg
     segs = x2[:, : k_seg * seg].reshape(x2.shape[0], k_seg, seg)
     psd = xp.mean(
-        xp.abs(xp.fft.rfft(segs * xp.asarray(np.hanning(seg)), axis=-1)) ** 2, axis=1
+        xp.abs(_fft.rfft(segs * xp.asarray(np.hanning(seg)), axis=-1)) ** 2, axis=1
     )
     with np.errstate(invalid="ignore", divide="ignore"):
         frac = np.asarray(to_device(low / xp.sum(power, axis=-1), "cpu"))

@@ -6,6 +6,7 @@ from typing import Literal
 
 import numpy as np
 
+from .. import _fft
 from .._array import broadcast_channels
 from ..backend import ArrayType, dispatch, to_device
 from ..logger import logger
@@ -186,7 +187,7 @@ def _extract_pilot_phasor(
     xp : module
         The dispatched array module for ``samples`` (numpy/cupy).
     X : (C, N) array, optional
-        Precomputed ``xp.fft.fft(samples, axis=-1)`` in working precision.
+        Precomputed ``_fft.fft(samples, axis=-1)`` in working precision.
         Pass it when extracting several tones from the same record so the
         record is transformed once (``PilotTones``).
     return_window : bool, default False
@@ -224,7 +225,7 @@ def _extract_pilot_phasor(
             if samples.dtype == xp.complex128
             else samples.astype(xp.complex64, copy=False)
         )
-        X = xp.fft.fft(xw, axis=-1)  # (C, N)
+        X = _fft.fft(xw, axis=-1)  # (C, N)
     real_dtype = xp.float64 if X.dtype == xp.complex128 else xp.float32
 
     # 2) Per-channel tone centre.  Refinement absorbs a frequency offset that
@@ -290,7 +291,7 @@ def _extract_pilot_phasor(
     #    full-record multiply) and IFFT.
     Xw = xp.zeros((C, N), dtype=X.dtype)
     Xw[rows, idx] = Xb * win64.astype(real_dtype)[None, :]
-    tone_t = xp.fft.ifft(Xw, axis=-1)  # (C, N) working precision
+    tone_t = _fft.ifft(Xw, axis=-1)  # (C, N) working precision
 
     # 5) Strip the *nominal* carrier so a residual frequency offset survives as
     #    a phase ramp - exact (non-quantized) complex mixing, same primitive
@@ -434,7 +435,7 @@ def _lowpass_fft(z: ArrayType, sampling_rate: float, cutoff: float, xp) -> Array
     N = z.shape[-1]
     freqs = xp.fft.fftfreq(N, d=1.0 / sampling_rate)
     mask = (xp.abs(freqs) <= cutoff).astype(z.real.dtype)
-    return xp.fft.ifft(xp.fft.fft(z, axis=-1) * mask, axis=-1)
+    return _fft.ifft(_fft.fft(z, axis=-1) * mask, axis=-1)
 
 
 @dataclass(frozen=True)
@@ -530,7 +531,7 @@ def _pilot_tones(samples: ArrayType, method: PilotTones, ctx: _Context) -> _Phas
         if samples.dtype == xp.complex128
         else samples.astype(xp.complex64, copy=False)
     )
-    X = xp.fft.fft(xw, axis=-1)  # (C, N)
+    X = _fft.fft(xw, axis=-1)  # (C, N)
     z_tones, sig, noise, f_centers = [], [], [], []
     for k, f_k in enumerate(tone_frequencies):
         ph, fc, s_c, n_c, _, _ = _extract_pilot_phasor(

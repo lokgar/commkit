@@ -6,6 +6,7 @@ from typing import Any
 
 import numpy as np
 
+from .. import _fft
 from .._array import as_2d, broadcast_channels, restore_1d
 from ..backend import ArrayType, dispatch, to_device
 from ..core._signal_adapter import S, adapt_signal
@@ -176,7 +177,7 @@ def smooth_phase_wiener(
     H = S / (S + r)
     H[0] = 1.0
 
-    phi_s = xp.fft.irfft(xp.fft.rfft(phi_c, axis=-1) * H[None, :], n=N, axis=-1)
+    phi_s = _fft.irfft(_fft.rfft(phi_c, axis=-1) * H[None, :], n=N, axis=-1)
     phi_s = phi_s + slope[:, None] * xc[None, :]
 
     if logger.isEnabledFor(logging.INFO):

@@ -13,6 +13,7 @@ from typing import Any
 
 import numpy as np
 
+from . import _fft
 from ._array import as_2d, restore_1d
 from ._sequences import barker_sequence, zadoff_chu_sequence
 from .backend import ArrayType, dispatch, to_device
@@ -97,9 +98,9 @@ def cross_correlate_fft(
     # Circular correlation places positive lags at 0..N-1 and negative lags
     # wrap to n_fft-(L-1)..n_fft-1.  Rearrange to match scipy layout:
     # lags [-(L-1), ..., -1, 0, 1, ..., N-1]  (total = N + L - 1).
-    SIG = xp.fft.fft(samples, n_fft, axis=-1)
-    TPL = xp.fft.fft(template, n_fft, axis=-1)
-    corr_circ = xp.fft.ifft(SIG * xp.conj(TPL), axis=-1)
+    SIG = _fft.fft(samples, n_fft, axis=-1)
+    TPL = _fft.fft(template, n_fft, axis=-1)
+    corr_circ = _fft.ifft(SIG * xp.conj(TPL), axis=-1)
 
     # Gather negative lags (indices n_fft-(L-1) .. n_fft-1) then positive (0 .. N-1)
     neg_lags = corr_circ[..., n_fft - L + 1 :]  # length L-1
@@ -311,7 +312,7 @@ def estimate_fractional_delay(
             gather_idx = k_valid[:, None] + offsets[None, :]
             windows = correlation[valid_indices[:, None], gather_idx]
 
-            specs = xp.fft.fft(windows, axis=-1)
+            specs = _fft.fft(windows, axis=-1)
             pos_limit = (_DFT_WINDOW + 1) // 2
             neg_len = _DFT_WINDOW - pos_limit
             target_len = _DFT_WINDOW * dft_upsample
@@ -319,7 +320,7 @@ def estimate_fractional_delay(
             padded_specs[:, :pos_limit] = specs[:, :pos_limit]
             padded_specs[:, -neg_len:] = specs[:, pos_limit:]
 
-            upsampled = xp.fft.ifft(padded_specs, axis=-1) * dft_upsample
+            upsampled = _fft.ifft(padded_specs, axis=-1) * dft_upsample
             up_mag = xp.abs(upsampled)
             k_up = xp.argmax(up_mag, axis=-1)
             k_up_safe = xp.clip(k_up, 1, target_len - 2)
@@ -430,7 +431,7 @@ def fft_fractional_delay(samples: S, *, delay: float | ArrayType) -> S:
             delay_arr = delay_arr[None]
 
     # FFT
-    spec = xp.fft.fft(x, axis=-1)
+    spec = _fft.fft(x, axis=-1)
 
     # Frequency axis: normalized frequencies in cycles/sample
     freqs = xp.fft.fftfreq(N, d=1.0)
@@ -446,7 +447,7 @@ def fft_fractional_delay(samples: S, *, delay: float | ArrayType) -> S:
     spec_delayed = spec * phase_shift
 
     # IFFT
-    result = xp.fft.ifft(spec_delayed, axis=-1)
+    result = _fft.ifft(spec_delayed, axis=-1)
 
     # Dtype restoration: mirrors the impairments.py pattern.
     if not xp.iscomplexobj(x):
