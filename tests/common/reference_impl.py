@@ -492,7 +492,8 @@ def bps_reference(
 
     Candidate ``b`` is ``b * pi / (2B)``.  Per block the candidate minimizing
     ``sum_n min_m |s_n exp(-j phi_b) - c_m|^2`` wins (summed over channels in
-    joint mode); block phases are 4-fold unwrapped and interpolated.
+    joint mode); the winners are taken on the branch ``[-pi/4, pi/4)``, then
+    4-fold unwrapped and interpolated.
     """
     s = _unit_power(symbols)
     num_ch, n = s.shape
@@ -508,7 +509,9 @@ def bps_reference(
                 metric[c, blk, k] = np.sum(np.min(d2, axis=-1))
     if joint_channels and num_ch > 1:
         metric = np.repeat(np.sum(metric, axis=0, keepdims=True), num_ch, axis=0)
-    phi = np.unwrap(4 * candidates[np.argmin(metric, axis=-1)], axis=-1) / 4
+    phi_b = candidates[np.argmin(metric, axis=-1)]
+    phi_b = np.where(phi_b >= np.pi / 4, phi_b - np.pi / 2, phi_b)
+    phi = np.unwrap(4 * phi_b, axis=-1) / 4
     return np.stack([_block_interp(p, n, block_size) for p in phi])
 
 

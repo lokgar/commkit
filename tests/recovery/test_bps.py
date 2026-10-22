@@ -185,6 +185,31 @@ class TestRotationalSymmetry:
         err = self._ambiguity_free_error(np.asarray(to_numpy(est.value)), 2.0, np.pi)
         assert np.max(np.abs(err)) < 0.05
 
+    @pytest.mark.parametrize(
+        "constellation",
+        [Constellation.psk(4), Constellation.qam(16), Constellation.psk(8)],
+        ids=["qpsk", "16qam", "8psk"],
+    )
+    @pytest.mark.parametrize("fraction", [-0.4, 0.0, 0.4])
+    def test_principal_branch(self, xp, constellation, fraction):
+        """The trajectory starts on the branch nearest zero, [-π/M, π/M): a
+        static phase inside it is returned as is, with no 2π/M rotation.
+        Zero sat on the edge of the old range [0, 2π/M) and came back
+        rotated by 2π/M for about half the seeds."""
+        M = constellation.rotational_symmetry
+        truth = fraction * np.pi / M
+        for seed in range(6):
+            rng = np.random.default_rng(seed)
+            s = constellation.points[rng.integers(0, constellation.order, 4096)]
+            noise = 0.05 * (
+                rng.standard_normal(s.size) + 1j * rng.standard_normal(s.size)
+            )
+            x = (s * np.exp(1j * truth) + noise).astype(np.complex64)
+            phi = recovery.estimate_carrier_phase(
+                xp.asarray(x), recovery.BPS(), constellation=constellation
+            ).value
+            assert abs(float(np.median(to_numpy(phi))) - truth) < 0.05
+
 
 class TestSignalInputBpsAndCorrectCarrierPhase:
     """Signal-awareness for recover_carrier_phase_bps and correct_carrier_phase."""

@@ -40,7 +40,11 @@ class BPS:
 
     Notes
     -----
-    A global ``2π/M`` ambiguity remains; resolve it against a reference.
+    A global ``2π/M`` ambiguity remains: the trajectory starts on the branch
+    nearest zero, ``[-π/M, π/M)``, as for :class:`ViterbiViterbi` and
+    :class:`PLL`, so a carrier phase near ``±π/M`` can come out one ``2π/M``
+    step off.  No blind estimator can tell those apart; training symbols,
+    pilots or :func:`resolve_phase_ambiguity` against a reference resolve it.
 
     Memory: the general (non-square) path builds a ``(1024, B, M)``
     distance tensor per chunk; square QAM uses an O(1) per-axis slicer.
@@ -278,8 +282,12 @@ def _bps(symbols: ArrayType, method: BPS, ctx: _Context) -> _Phase:
     if joint_channels and C > 1:
         metrics_all = xp.sum(metrics_all, axis=0, keepdims=True)  # (1, N_blocks, B)
     best_k = xp.argmin(metrics_all, axis=-1)  # (R, N_blocks)
-    phi_b = candidates[best_k]
-    phi_u = xp.unwrap(phi_b.astype(xp.float64) * M, axis=-1) / M
+    phi_b = candidates[best_k].astype(xp.float64)
+    # Principal branch [-π/M, π/M), as Viterbi-Viterbi and the PLL: the M-fold
+    # unwrap ignores 2π/M steps, so this only puts the first block on the
+    # branch nearest zero instead of the edge of the candidate range.
+    phi_b = xp.where(phi_b >= np.pi / M, phi_b - 2.0 * np.pi / M, phi_b)
+    phi_u = xp.unwrap(phi_b * M, axis=-1) / M
     phi_u = _repair_slips(phi_u, xp, method.cycle_slip, M)
     # Per row: a 1-D gather is about twice as fast as the 2-D fancy index.
     phi_full = xp.empty((phi_u.shape[0], N), dtype=xp.float64)
