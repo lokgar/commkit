@@ -406,6 +406,23 @@ class Constellation:
         return index
 
 
+def _slicer_params(
+    constellation: "Constellation | None",
+) -> tuple[int, np.float32, np.float32]:
+    """``(side, lev_min, step)`` for the compiled O(1) square-lattice slicers.
+
+    ``side = 0`` (and placeholder levels) unless the points form a full
+    square lattice with the same levels on both axes
+    (:attr:`Constellation._square_grid`); the slicers then search all
+    ``M`` points.  ``None`` (no decisions needed) also gives ``side = 0``.
+    """
+    grid = None if constellation is None else constellation._square_grid
+    if grid is None:
+        return 0, np.float32(0.0), np.float32(1.0)
+    lev_min, step, side, _ = grid
+    return side, np.float32(lev_min), np.float32(step)
+
+
 def _host_array(value: object, name: str) -> np.ndarray:
     """``value`` as a NumPy array; device arrays are rejected by name."""
     if type(value).__module__.split(".")[0] == "cupy":

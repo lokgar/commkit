@@ -11,7 +11,7 @@ from ...backend import ArrayType, to_device
 from ...core._signal_adapter import adapt_signal, require_integer_sps
 from ...core.signal import Signal
 from ...logger import logger
-from ...mapping.gray import _square_qam_slicer_params
+from ...mapping.constellation import _slicer_params
 from ...recovery import BPS, CycleSlip
 from .._common import _cpr_symmetry
 from .._kernels_numba import _get_numba_cs_block
@@ -566,7 +566,7 @@ def block_lms(
             "constellation= or a Signal that has one)."
         )
     constellation_np = np.ascontiguousarray(constellation.points, dtype=np.complex64)
-    sq_side, sq_lev_min, sq_d_grid = _square_qam_slicer_params(constellation_np)
+    sq_side, sq_lev_min, sq_d_grid = _slicer_params(constellation)
     slicer = _Slicer(
         constellation=xp.asarray(constellation_np),
         side=sq_side,

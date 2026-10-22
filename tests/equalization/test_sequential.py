@@ -615,6 +615,30 @@ class TestStoreWeights:
             )
 
 
+class TestNonSquareLatticeDecisions:
+    """The O(1) slicer is used only for square lattices with equal axes."""
+
+    @pytest.mark.parametrize("name", ["lms", "rls", "block_lms"])
+    def test_rectangular_constellation_decisions(self, xp, name):
+        """A 4x4 rectangular lattice (imaginary spacing twice the real one)
+        has sqrt(M) levels per axis but is not square; it was sliced on the
+        real grid, and the decision-directed equalizers lost 25 % of the
+        symbols on a clean channel."""
+        re, im = np.array([-3.0, -1.0, 1.0, 3.0]), np.array([-6.0, -2.0, 2.0, 6.0])
+        points = (re[:, None] + 1j * im[None, :]).ravel()
+        c = Constellation(points / np.sqrt(np.mean(np.abs(points) ** 2)))
+        rng = np.random.default_rng(0)
+        s = c.points[rng.integers(0, 16, 8000)].astype(np.complex64)
+        noise = 0.01 * (rng.standard_normal(s.size) + 1j * rng.standard_normal(s.size))
+        x = xp.asarray((s + noise).astype(np.complex64))
+        kw = {"block_size": 64} if name == "block_lms" else {}
+        r = getattr(equalization, name)(
+            x, xp.asarray(s[:500]), sps=1, num_taps=7, constellation=c, **kw
+        )
+        y = to_numpy(r.y_hat)[2000:7000]
+        assert np.mean(c.demap(y) != c.demap(s[2000:7000])) == 0.0
+
+
 class TestEdgeCases:
     """Tests for error paths, warnings, and edge-case inputs."""
 

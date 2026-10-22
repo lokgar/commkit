@@ -193,42 +193,6 @@ def _gray_points(
     return result
 
 
-def _square_qam_slicer_params(
-    constellation: np.ndarray,
-) -> tuple[int, np.float32, np.float32]:
-    """Return (side, lev_min, d_grid) for O(1) square-QAM slicing.
-
-    For a square M-QAM constellation the nearest symbol can be found by
-    independently snapping the real and imaginary components to the nearest
-    level - no O(M) search required.  Returns side=0 for non-square (or
-    non-uniform) constellations - PSK, PAM, shaped QAM, or a degenerate
-    levels grid - to signal that the O(M) fallback should be used.
-
-    Parameters
-    ----------
-    constellation : np.ndarray
-        Host NumPy constellation array, shape (M,).  This is a one-time
-        O(M) setup call, not a per-symbol operation, so a host array is
-        correct even when the caller's decision loop runs on the GPU.
-
-    Returns
-    -------
-    side    : int - sqrt(M) if square-QAM-sliceable, else 0.
-    lev_min : np.float32 - smallest per-axis level.
-    d_grid  : np.float32 - uniform per-axis grid spacing.
-    """
-    M = len(constellation)
-    side = int(M**0.5)
-    if side * side != M:
-        return 0, np.float32(0.0), np.float32(1.0)
-    levels = np.unique(np.round(constellation.real, 6))
-    if len(levels) != side:
-        return 0, np.float32(0.0), np.float32(1.0)
-    lev_min = np.float32(levels[0])
-    d_grid = np.float32(levels[1] - levels[0]) if side > 1 else np.float32(1.0)
-    return side, lev_min, d_grid
-
-
 def _unpack_bits(indices: ArrayType, k: int) -> ArrayType:
     """Unpack integer indices into their k-bit binary representation (MSB-first).
 

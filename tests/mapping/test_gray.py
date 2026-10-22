@@ -6,12 +6,12 @@ import numpy as np
 import pytest
 
 from commkit import mapping
+from commkit.mapping.constellation import _slicer_params
 from commkit.mapping.gray import (
     _gray_ask,
     _gray_psk,
     _gray_qam_cross,
     _nearest_index,
-    _square_qam_slicer_params,
     _unpack_bits,
 )
 
@@ -116,36 +116,34 @@ class TestGrayConstellation:
 class TestConstellationSlicing:
     """Tests for square-QAM slicing parameters and nearest-point indexing."""
 
-    def test_square_qam_slicer_params_valid(self) -> None:
-        """16-QAM is square-sliceable: side=4, uniform lev_min/d_grid."""
-        const = mapping.gray._gray_points("qam", 16)
-        side, lev_min, d_grid = _square_qam_slicer_params(const)
+    def test_slicer_params_square_qam(self) -> None:
+        """16-QAM is square-sliceable: side=4, uniform lev_min/step."""
+        c = mapping.Constellation.qam(16)
+        side, lev_min, step = _slicer_params(c)
         assert side == 4
-        levels = np.unique(np.round(const.real, 6))
+        levels = np.unique(np.round(c.points.real, 6))
         assert np.isclose(lev_min, levels[0])
-        assert np.isclose(d_grid, levels[1] - levels[0])
+        assert np.isclose(step, levels[1] - levels[0])
 
-    def test_square_qam_slicer_params_non_square(self) -> None:
-        """PSK / cross-QAM constellations fall back to side=0 (O(M) search)."""
-        const_psk = mapping.gray._gray_points("psk", 8)
-        side, _, _ = _square_qam_slicer_params(const_psk)
-        assert side == 0
+    @pytest.mark.parametrize(
+        ("re", "im"),
+        [
+            ([-3.0, -1.0, 1.0, 3.0], [-6.0, -2.0, 2.0, 6.0]),  # other imag grid
+            ([-3.0, -1.0, 1.0, 5.0], [-3.0, -1.0, 1.0, 5.0]),  # uneven levels
+        ],
+        ids=["rectangular", "uneven"],
+    )
+    def test_slicer_params_reject_non_square_lattices(self, re, im) -> None:
+        """sqrt(M) levels per axis are not enough: a slicer that snaps both
+        axes to one grid needs the same uniform levels on both."""
+        points = (np.array(re)[:, None] + 1j * np.array(im)[None, :]).ravel()
+        assert _slicer_params(mapping.Constellation(points))[0] == 0
 
-        const_cross = mapping.gray._gray_points("qam", 32)
-        side, _, _ = _square_qam_slicer_params(const_cross)
-        assert side == 0
-
-    def test_square_qam_slicer_params_non_uniform_grid(self) -> None:
-        """Degenerate grid collapsing to fewer than sqrt(M) levels is rejected (side=0)."""
-        i_levels = np.array([-3.0, -1.0, 1.0, 1.0])
-        q_levels = np.array([-3.0, -1.0, 1.0, 3.0])
-        const = (i_levels[:, None] + 1j * q_levels[None, :]).ravel()
-        assert len(const) == 16
-
-        side, lev_min, d_grid = _square_qam_slicer_params(const)
-        assert side == 0
-        assert lev_min == np.float32(0.0)
-        assert d_grid == np.float32(1.0)
+    def test_slicer_params_non_square(self) -> None:
+        """PSK, cross QAM and no constellation fall back to side=0."""
+        assert _slicer_params(mapping.Constellation.psk(8))[0] == 0
+        assert _slicer_params(mapping.Constellation.qam(32))[0] == 0
+        assert _slicer_params(None) == (0, np.float32(0.0), np.float32(1.0))
 
     def test_nearest_constellation_index_matches_unchunked_argmin(
         self, xp: Any, xpt: Any

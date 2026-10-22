@@ -105,7 +105,7 @@ def _get_numba_bps_table():
 
 def _bps(symbols: ArrayType, method: BPS, ctx: _Context) -> _Phase:
     """BPS phase of ``(C, N)`` symbols."""
-    from ..mapping.gray import _square_qam_slicer_params
+    from ..mapping.constellation import _slicer_params
     from ..math import normalize
 
     constellation = ctx.need_constellation(method)
@@ -172,7 +172,7 @@ def _bps(symbols: ArrayType, method: BPS, ctx: _Context) -> _Phase:
     # For square QAM (order a perfect square): the nearest constellation point
     # can be found in O(1) per symbol via per-component rounding, eliminating
     # the (CHUNK, B, M_const) distance tensor entirely.
-    side, lev_min_f32, d_grid_f32 = _square_qam_slicer_params(const_np)
+    side, lev_min_f32, d_grid_f32 = _slicer_params(constellation)
     is_sq_qam = side > 0
     lev_min = float(lev_min_f32)
     d_grid = float(d_grid_f32)
