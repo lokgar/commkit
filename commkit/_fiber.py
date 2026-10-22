@@ -21,10 +21,14 @@ the complex conjugate of the textbook (Agrawal) form, so the Kerr phase is
 ``exp(-j γ |A|² L)``.  Matching the dispersion sign is what keeps solitons
 in anomalous fiber and makes DBP an inverse.
 
-Solver.  Each span of length ``L`` is cut into ``K`` equal steps.  A step
-is ``D(h/2) N(h) D(h/2)``: the nonlinear phase uses the power at the step's
-midpoint and the effective length ``2 sinh(αh/2)/α``, so the scheme is
-second order (and exact for a continuous wave).  Equal steps measured about
+Solver.  The loss is taken out of the field: ``A = u e^{-αz/2}``, so ``u``
+obeys the lossless equation with a Kerr coefficient ``γ e^{-αz}``, its
+linear operator is a pure phase, and an amplifier that restores the span
+loss leaves ``u`` unchanged (no rounding of gains that should cancel).
+Each span of length ``L`` is cut into ``K`` equal steps.  A step is
+``D(h/2) N(h) D(h/2)``: the Kerr phase uses the power at the step's midpoint
+weighted over the step, ``γ (e^{-αz_{k-1}} - e^{-αz_k}) / α``, so the scheme
+is second order (and exact for a continuous wave).  Equal steps measured about
 3x more accurate than logarithmic ones (equal nonlinear phase per step) on a
 32 GBd, 80 km span at 4-10 dBm for every step count from 10 to 200: the
 long last steps of the logarithmic rule cost more dispersion accuracy than
@@ -44,13 +48,19 @@ With the forward steps and ``nonlinear_scale = 1`` it inverts a noiseless,
 PMD-free link to rounding error, because the symmetric step is
 time-reversible.
 
-Devices.  The CPU runs NumPy stages on ``scipy.fft`` (``_fft``), with the
-PMD stage in one Numba pass.  CuPy input runs three fused elementwise
-kernels (linear stage, linear stage with a PMD section, Kerr stage) on
-in-place, unscaled cuFFT transforms, so each stage reads and writes the
-field once and a span allocates nothing; a PMD-free span is captured once
-into a CUDA graph and replayed.  Any failure falls back to the plain CuPy
-stages, which complex128 input also uses.
+Devices.  With equal steps a span has two step lengths, so the CPU and the
+plain CuPy stages precompute their responses (float64 phase, cast to the
+field's precision) and the linear stage is one multiply.  The CPU runs the
+FFTs on ``scipy.fft`` (``_fft``), the Kerr stage as Numba power/phase and
+rotation passes around NumPy's SIMD sin/cos (Numba's are scalar without
+SVML) and the PMD section as one Numba pass.  CuPy input runs three fused
+elementwise kernels (linear stage, linear stage with a PMD section, Kerr
+stage) that compute the phase in registers, on in-place, unscaled cuFFT
+transforms, so each stage reads and writes the field once and a span
+allocates nothing; the span is captured once into a CUDA graph and
+replayed, with the next span's waveplates copied into a fixed device buffer
+before each replay.  Any failure falls back to the plain CuPy stages, which
+complex128 input also uses.
 """
 
 from __future__ import annotations
@@ -66,10 +76,17 @@ import numpy as np
 
 from . import _fft
 from ._array import as_2d
-from ._dispersion import _SPEED_OF_LIGHT, beta2_length, beta3_length
+from ._dispersion import (
+    _SPEED_OF_LIGHT,
+    beta2_length,
+    beta3_length,
+    dispersion_phase,
+    unit_phasor,
+)
 from ._random import as_generator, complex_normal
 from .backend import ArrayType
 from .logger import logger
+from .math import db_to_linear
 
 _PLANCK = 6.62607015e-34  # J s
 
@@ -212,17 +229,9 @@ def to_watts(
     power = float(xp.sum(xp.mean(field.real**2 + field.imag**2, axis=-1)))
     if not power > 0:
         raise ValueError(f"{function_name}: samples carry no power to launch.")
-    scale = math.sqrt(1e-3 * 10.0 ** (launch_power_dbm / 10.0) / power)
+    scale = math.sqrt(1e-3 * db_to_linear(launch_power_dbm) / power)
     field *= field.real.dtype.type(scale)
     return field, was_1d, scale
-
-
-def _nonlinear_lengths(h: np.ndarray, alpha_per_km: float) -> np.ndarray:
-    """Effective nonlinear length of each step relative to its midpoint,
-    ``2 sinh(αh/2) / α`` (km); ``h`` for a lossless fiber."""
-    if alpha_per_km == 0.0:
-        return h.copy()
-    return 2.0 * np.sinh(alpha_per_km * h / 2.0) / alpha_per_km
 
 
 def _haar_unitaries(rng: np.random.Generator, shape: tuple[int, ...]) -> np.ndarray:
@@ -236,6 +245,65 @@ def _haar_unitaries(rng: np.random.Generator, shape: tuple[int, ...]) -> np.ndar
     )
 
 
+def jones_section(
+    X: ArrayType, u: np.ndarray, hm: ArrayType, hp: ArrayType
+) -> ArrayType:
+    """``X ← U^H diag(hm, hp) U X`` for a ``(2, N)`` spectrum, in place.
+
+    ``u`` (host 2x2) rotates into the principal states of the section, which
+    get the per-bin responses ``hm`` and ``hp``: for a differential group
+    delay τ, ``e^{∓jωτ/2}`` times any common response.  Shared by
+    :func:`commkit.impairments.apply_pmd` (one section) and the fiber's PMD.
+    """
+    u = u.astype(X.dtype)
+    y0 = (u[0, 0] * X[0] + u[0, 1] * X[1]) * hm
+    y1 = (u[1, 0] * X[0] + u[1, 1] * X[1]) * hp
+    X[0] = u[0, 0].conj() * y0 + u[1, 0].conj() * y1
+    X[1] = u[0, 1].conj() * y0 + u[1, 1].conj() * y1
+    return X
+
+
+# -----------------------------------------------------------------------------
+# Span plan
+# -----------------------------------------------------------------------------
+
+
+@dataclass(frozen=True)
+class _SpanPlan:
+    """One span: ``K`` equal steps of ``step_km``, so ``K + 1`` linear stages
+    (half, ``K - 1`` full, half) around ``K`` Kerr stages."""
+
+    step_km: float
+    kerr: np.ndarray  # (K,) rad/W: γ_eff · power-weighted step length
+    half_tau_s: float  # half DGD of every PMD section (0 without PMD)
+
+    @property
+    def num_steps(self) -> int:
+        return int(self.kerr.size)
+
+    def linear_km(self, i: int) -> float:
+        """Length of linear stage ``i`` (``0 <= i <= K``)."""
+        return self.step_km / 2 if i in (0, self.num_steps) else self.step_km
+
+
+def _span_plan(link: _Link, num_channels: int) -> _SpanPlan:
+    fiber = link.fiber
+    alpha = fiber.alpha_per_km
+    K = link.steps_per_span
+    h = link.span_length_km / K
+    if alpha == 0.0:
+        weight = np.full(K, h)
+    else:  # ∫ e^{-αz} dz over each step: e^{-α z_{k-1}} (1 - e^{-αh}) / α
+        weight = np.exp(-alpha * h * np.arange(K)) * (-math.expm1(-alpha * h) / alpha)
+    gamma = fiber.nonlinearity_per_w_km * (8.0 / 9.0 if num_channels == 2 else 1.0)
+    half_tau = 0.0
+    if fiber.pmd_ps_sqrt_km > 0:
+        half_tau = (
+            0.5 * fiber.pmd_ps_sqrt_km * 1e-12 * math.sqrt(3.0 * math.pi * h / 8.0)
+        )
+    return _SpanPlan(h, gamma * weight, half_tau)
+
+
 # -----------------------------------------------------------------------------
 # Stage operations
 # -----------------------------------------------------------------------------
@@ -244,17 +312,37 @@ def _haar_unitaries(rng: np.random.Generator, shape: tuple[int, ...]) -> np.ndar
 class _Ops:
     """Stage operations on NumPy or (unfused) CuPy arrays.
 
-    ``phi`` is the dispersion phase per km on the FFT grid,
-    ``-(β₂ω²/2 + β₃ω³/6) · 1 km``, and ``omega`` the angular frequency
-    grid, both in the field's real precision on its device.
+    ``phase_km`` is the dispersion phase of 1 km on the FFT grid and
+    ``omega`` the angular frequency grid, both float64 on the field's
+    device.  The response of each distinct stage length (two with equal
+    steps, per direction) is computed once in float64 and cast to the
+    field's precision.  ``waveplates`` holds every span's PMD sections,
+    ``(spans, K, 2, 2)`` on the host, or ``None``.
     """
 
     fused = False
 
-    def __init__(self, xp: ModuleType, phi: ArrayType, omega: ArrayType) -> None:
+    def __init__(
+        self,
+        xp: ModuleType,
+        dtype: Any,
+        phase_km: ArrayType,
+        omega: ArrayType,
+        half_tau: float,
+        waveplates: np.ndarray | None,
+    ) -> None:
         self.xp = xp
-        self.phi = phi
+        self.dtype = dtype
+        self.phase_km = phase_km
         self.omega = omega
+        self.half_tau = half_tau
+        self.waveplates = waveplates
+        self.span = 0
+        self._responses: dict[tuple[str, float], Any] = {}
+
+    def set_span(self, span: int) -> None:
+        """Select the PMD sections of ``span`` for the next span's stages."""
+        self.span = span
 
     def fft(self, x: ArrayType) -> ArrayType:
         return _fft.fft(x, axis=-1, overwrite_x=True)
@@ -262,105 +350,131 @@ class _Ops:
     def ifft(self, x: ArrayType) -> ArrayType:
         return _fft.ifft(x, axis=-1, overwrite_x=True)
 
-    def _rotation(self, phase: ArrayType, dtype: Any) -> ArrayType:
-        """``exp(j·phase)`` from float32 sin/cos (much faster than complex exp)."""
-        xp = self.xp
-        r = xp.empty(phase.shape, dtype=dtype)
-        r.real = xp.cos(phase)
-        r.imag = xp.sin(phase)
-        return r
+    def _response(self, length_km: float) -> ArrayType:
+        key = ("h", length_km)
+        if key not in self._responses:
+            self._responses[key] = unit_phasor(
+                self.phase_km * length_km, self.dtype, self.xp
+            )
+        return self._responses[key]
 
-    def linear(
-        self,
-        X: ArrayType,
-        length_km: float,
-        gain: float,
-        section: tuple[np.ndarray, float] | None,
-    ) -> ArrayType:
-        """``X ← gain · e^{j length·phi} · X`` with an optional PMD section
-        ``(U, τ/2)``: ``X ← U^H diag(e^{-jωτ/2}, e^{jωτ/2}) U X``."""
-        h = self._rotation(self.phi * self.phi.dtype.type(length_km), X.dtype)
-        h *= X.real.dtype.type(gain)
+    def _pmd_responses(self, length_km: float) -> tuple[ArrayType, ArrayType]:
+        """``H e^{-jωτ/2}`` and ``H e^{+jωτ/2}`` of a stage with a section."""
+        key = ("pmd", length_km)
+        if key not in self._responses:
+            phase = self.phase_km * length_km
+            delay = self.omega * self.half_tau
+            self._responses[key] = (
+                unit_phasor(phase - delay, self.dtype, self.xp),
+                unit_phasor(phase + delay, self.dtype, self.xp),
+            )
+        hm, hp = self._responses[key]
+        return hm, hp
+
+    def linear(self, X: ArrayType, length_km: float, section: int | None) -> ArrayType:
+        """Linear stage of ``length_km`` (negative backward), with PMD
+        section ``section`` of the current span or none."""
         if section is None:
-            X *= h
+            X *= self._response(length_km)
             return X
-        u, half_tau = section
-        u = u.astype(X.dtype)
-        d = self._rotation(self.omega * self.omega.dtype.type(half_tau), X.dtype)
-        y0 = (u[0, 0] * X[0] + u[0, 1] * X[1]) * h * d.conj()
-        y1 = (u[1, 0] * X[0] + u[1, 1] * X[1]) * h * d
-        X[0] = u[0, 0].conj() * y0 + u[1, 0].conj() * y1
-        X[1] = u[0, 1].conj() * y0 + u[1, 1].conj() * y1
-        return X
+        assert self.waveplates is not None
+        hm, hp = self._pmd_responses(length_km)
+        return jones_section(X, self.waveplates[self.span, section], hm, hp)
 
     def nonlinear(self, x: ArrayType, k: float) -> ArrayType:
         """``x ← x · exp(-j k Σ_c |x_c|²)`` (the power summed over channels)."""
         power = (x.real * x.real + x.imag * x.imag).sum(axis=0)
-        x *= self._rotation(power * power.dtype.type(-k), x.dtype)
+        x *= unit_phasor(power * power.dtype.type(-k), x.dtype, self.xp)
         return x
 
 
 _NUMBA: dict[str, Callable[..., None]] = {}
 
+# Below this many samples the NumPy Kerr stage is faster than the Numba
+# passes, whose thread-pool start costs more than the passes they save
+# (4 cores: 0.5 vs 0.7 ms at 2^16, 3.3 vs 3.1 ms at 2^18, 17 vs 12 ms at 2^20).
+# The trig-free Jones pass wins at every size (2x at 2^12, 10x at 2^20).
+_HYBRID_KERR_MIN = 1 << 18
 
-def _numba_pmd_kernel() -> Callable[..., None]:
-    """Fused, parallel CPU linear stage with a PMD section (in place).
 
-    NumPy needs about ten passes and temporaries for the 2x2 Jones product;
-    this is one (2x2^20 complex64: 52 ms -> 7.5 ms per stage, 4 cores; the
-    whole PMD propagation 0.61x).  The PMD-free stages stay NumPy: fused
-    Numba versions measured only 0.84-0.94x at 2^20 samples and 1.04-1.30x
-    (slower) at 2^16 on 4 cores, as their thread pool competes with
-    scipy.fft's workers.
+def _numba_kernels() -> dict[str, Callable[..., None]]:
+    """Trig-free CPU passes (in place, complex64 or complex128).
+
+    Numba compiles sin/cos to scalar libm calls (no SVML), while NumPy 2 has
+    SIMD sin/cos; so the Kerr stage is a Numba power/phase pass, NumPy
+    sin/cos, then a Numba rotation pass, from ``_HYBRID_KERR_MIN`` samples.  Real arithmetic throughout: a
+    complex literal (1j) would promote complex64 work to complex128.
     """
-    if "pmd" not in _NUMBA:
+    if not _NUMBA:
         import numba
 
-        # Real arithmetic: a complex literal (1j) would promote complex64
-        # work to complex128.
-        @numba.njit(cache=True, fastmath=True, nogil=True, parallel=True)
-        def linear_pmd(X, phi, omega, length, gain, half_tau, u):  # type: ignore[no-untyped-def]
+        jit = numba.njit(cache=True, fastmath=True, nogil=True, parallel=True)
+
+        @jit
+        def kerr_phase(x, k, out):  # type: ignore[no-untyped-def]
+            C, N = x.shape
+            for i in numba.prange(N):  # type: ignore[attr-defined]
+                p = x[0, i].real * x[0, i].real + x[0, i].imag * x[0, i].imag
+                for c in range(1, C):
+                    p += x[c, i].real * x[c, i].real + x[c, i].imag * x[c, i].imag
+                out[i] = -k * p
+
+        @jit
+        def rotate(x, cos, sin):  # type: ignore[no-untyped-def]
+            C, N = x.shape
+            for i in numba.prange(N):  # type: ignore[attr-defined]
+                cr = cos[i]
+                ci = sin[i]
+                for c in range(C):
+                    xr = x[c, i].real
+                    xi = x[c, i].imag
+                    x[c, i] = complex(xr * cr - xi * ci, xr * ci + xi * cr)
+
+        @jit
+        def jones(X, u, hm, hp):  # type: ignore[no-untyped-def]
             for i in numba.prange(X.shape[1]):  # type: ignore[attr-defined]
-                a = length * phi[i]
-                b = omega[i] * half_tau
-                h = complex(gain * np.cos(a), gain * np.sin(a))
-                d = complex(np.cos(b), np.sin(b))
                 x0 = X[0, i]
                 x1 = X[1, i]
-                y0 = (u[0, 0] * x0 + u[0, 1] * x1) * h * d.conjugate()
-                y1 = (u[1, 0] * x0 + u[1, 1] * x1) * h * d
+                y0 = (u[0, 0] * x0 + u[0, 1] * x1) * hm[i]
+                y1 = (u[1, 0] * x0 + u[1, 1] * x1) * hp[i]
                 X[0, i] = u[0, 0].conjugate() * y0 + u[1, 0].conjugate() * y1
                 X[1, i] = u[0, 1].conjugate() * y0 + u[1, 1].conjugate() * y1
 
-        _NUMBA["pmd"] = linear_pmd
-    return _NUMBA["pmd"]
+        _NUMBA.update(kerr_phase=kerr_phase, rotate=rotate, jones=jones)
+    return _NUMBA
 
 
 class _CpuOps(_Ops):
-    """NumPy stages, with the PMD section in one Numba pass."""
+    """NumPy field: Numba Kerr and PMD passes on preallocated buffers."""
 
-    def linear(
-        self,
-        X: ArrayType,
-        length_km: float,
-        gain: float,
-        section: tuple[np.ndarray, float] | None,
-    ) -> ArrayType:
+    def __init__(self, *args: Any) -> None:
+        super().__init__(*args)
+        self.k = _numba_kernels()
+        n = self.phase_km.shape[-1]
+        real = np.empty(0, self.dtype).real.dtype
+        self._phase = np.empty(n, real)
+        self._cos = np.empty(n, real)
+        self._sin = np.empty(n, real)
+
+    def linear(self, X: ArrayType, length_km: float, section: int | None) -> ArrayType:
         if section is None:
-            return super().linear(X, length_km, gain, None)
+            return super().linear(X, length_km, None)
+        assert self.waveplates is not None
         X = np.ascontiguousarray(X)
-        real = X.real.dtype.type
-        u, half_tau = section
-        _numba_pmd_kernel()(
-            X,
-            self.phi,
-            self.omega,
-            real(length_km),
-            real(gain),
-            real(half_tau),
-            u.astype(X.dtype),
-        )
+        hm, hp = self._pmd_responses(length_km)
+        u = self.waveplates[self.span, section].astype(X.dtype)
+        self.k["jones"](X, u, hm, hp)
         return X
+
+    def nonlinear(self, x: ArrayType, k: float) -> ArrayType:
+        if x.shape[-1] < _HYBRID_KERR_MIN:
+            return super().nonlinear(x, k)
+        x = np.ascontiguousarray(x)
+        self.k["kerr_phase"](x, self._phase.dtype.type(k), self._phase)
+        np.cos(self._phase, out=self._cos)
+        np.sin(self._phase, out=self._sin)
+        self.k["rotate"](x, self._cos, self._sin)
+        return x
 
 
 _KERNELS: dict[str, Any] = {}
@@ -372,25 +486,26 @@ def _cupy_kernels() -> dict[str, Any]:
         import cupy as cp
 
         _KERNELS["linear"] = cp.ElementwiseKernel(
-            "float32 phi, float32 length, float32 gain",
+            "float32 phi, float32 length, float32 scale",
             "complex64 x",
             """
             float s, c;
             sincosf(length * phi, &s, &c);
-            x = x * complex<float>(gain * c, gain * s);
+            x = x * complex<float>(scale * c, scale * s);
             """,
             "commkit_fiber_linear",
         )
         _KERNELS["linear_pmd"] = cp.ElementwiseKernel(
-            "float32 phi, float32 omega, float32 length, float32 gain, "
-            "float32 half_tau, complex64 u00, complex64 u01, complex64 u10, "
-            "complex64 u11",
+            "float32 phi, float32 omega, float32 length, float32 scale, "
+            "float32 half_tau, raw complex64 u, int32 k",
             "complex64 x0, complex64 x1",
             """
             float s, c, sd, cd;
             sincosf(length * phi, &s, &c);
             sincosf(omega * half_tau, &sd, &cd);
-            const complex<float> h(gain * c, gain * s);
+            const complex<float> h(scale * c, scale * s);
+            const complex<float> u00 = u[4 * k], u01 = u[4 * k + 1];
+            const complex<float> u10 = u[4 * k + 2], u11 = u[4 * k + 3];
             const complex<float> y0 =
                 (u00 * x0 + u01 * x1) * h * complex<float>(cd, -sd);
             const complex<float> y1 =
@@ -428,50 +543,54 @@ def _cupy_kernels() -> dict[str, Any]:
 class _FusedOps(_Ops):
     """CuPy complex64 stages: one fused kernel per stage, in-place cuFFT.
 
-    Every operation works in place on the field's buffer and allocates
-    nothing, which is what lets a span be captured into a CUDA graph.
+    The kernels compute the phase in registers (a GPU stage is limited by
+    memory traffic, so reading a precomputed response would cost more than
+    the ``sincosf``).  Both transforms run unscaled and every linear stage
+    (one between each forward and inverse FFT) carries the 1/N, so there is
+    no separate scaling pass.  The current span's waveplates live in a fixed
+    device buffer, refreshed by :meth:`set_span` outside the graph.  Nothing
+    in a span allocates, which is what lets it be captured into a CUDA graph.
     """
 
     fused = True
 
-    def __init__(self, xp: ModuleType, phi: ArrayType, omega: ArrayType) -> None:
-        super().__init__(xp, phi, omega)
+    def __init__(self, *args: Any) -> None:
+        super().__init__(*args)
+        xp = self.xp
         self.k = _cupy_kernels()
-        # Both transforms run unscaled and every linear stage (one between
-        # each forward and inverse FFT) carries the 1/N: no separate scaling
-        # pass, so nothing in a span allocates.
-        self.inv_n = 1.0 / phi.shape[-1]
+        self.phi = self.phase_km.astype(xp.float32)
+        self.omega32 = self.omega.astype(xp.float32)
+        self.inv_n = np.float32(1.0 / self.phase_km.shape[-1])
+        self.u_all: Any = None
+        self.u_span: Any = None
+        if self.waveplates is not None:
+            spans, K = self.waveplates.shape[:2]
+            self.u_all = xp.asarray(
+                self.waveplates.astype(np.complex64).reshape(spans, 4 * K)
+            )
+            self.u_span = xp.empty(4 * K, dtype=xp.complex64)
 
-    def fft(self, x: ArrayType) -> ArrayType:
-        return _fft.fft(x, axis=-1, overwrite_x=True)
+    def set_span(self, span: int) -> None:
+        super().set_span(span)
+        if self.u_span is not None:
+            self.u_span[...] = self.u_all[span]
 
     def ifft(self, x: ArrayType) -> ArrayType:
         return _fft.ifft(x, axis=-1, overwrite_x=True, norm="forward")
 
-    def linear(
-        self,
-        X: ArrayType,
-        length_km: float,
-        gain: float,
-        section: tuple[np.ndarray, float] | None,
-    ) -> ArrayType:
+    def linear(self, X: ArrayType, length_km: float, section: int | None) -> ArrayType:
         f32 = np.float32
-        gain = gain * self.inv_n
         if section is None:
-            self.k["linear"](self.phi, f32(length_km), f32(gain), X)
+            self.k["linear"](self.phi, f32(length_km), self.inv_n, X)
             return X
-        u, half_tau = section
-        u = u.astype(np.complex64)
         self.k["linear_pmd"](
             self.phi,
-            self.omega,
+            self.omega32,
             f32(length_km),
-            f32(gain),
-            f32(half_tau),
-            u[0, 0],
-            u[0, 1],
-            u[1, 0],
-            u[1, 1],
+            self.inv_n,
+            f32(self.half_tau),
+            self.u_span,
+            np.int32(section),
             X[0],
             X[1],
         )
@@ -485,68 +604,27 @@ class _FusedOps(_Ops):
         return x
 
 
-def _make_ops(x: ArrayType, xp: ModuleType, phi: ArrayType, omega: ArrayType) -> _Ops:
+def _make_ops(x: ArrayType, xp: ModuleType, *args: Any) -> _Ops:
+    """The stage operations for the field ``x``; ``args`` as :class:`_Ops`
+    after ``xp`` and the dtype."""
     if xp is np:
-        return _CpuOps(xp, phi, omega)
+        return _CpuOps(xp, x.dtype, *args)
     if x.dtype != xp.complex64:
-        return _Ops(xp, phi, omega)
+        return _Ops(xp, x.dtype, *args)
     try:
-        return _FusedOps(xp, phi, omega)
+        return _FusedOps(xp, x.dtype, *args)
     except Exception as exc:  # pragma: no cover - GPU toolchain dependent
         logger.warning(
             "Fiber propagation: fused CUDA kernels unavailable (%s); using the "
             "plain CuPy path.",
             exc,
         )
-        return _Ops(xp, phi, omega)
+        return _Ops(xp, x.dtype, *args)
 
 
 # -----------------------------------------------------------------------------
 # Solver
 # -----------------------------------------------------------------------------
-
-
-@dataclass(frozen=True)
-class _SpanPlan:
-    """The operator sequence of one span: ``K + 1`` linear stages around
-    ``K`` Kerr stages (lengths in km, Kerr coefficients in rad/W)."""
-
-    linear_km: np.ndarray  # (K + 1,)
-    kerr: np.ndarray  # (K,) γ_eff · effective length
-    pmd_half_tau_s: np.ndarray | None  # (K,) half DGD per section
-
-
-def _span_plan(link: _Link, num_channels: int) -> _SpanPlan:
-    fiber = link.fiber
-    alpha = fiber.alpha_per_km
-    h = np.full(link.steps_per_span, link.span_length_km / link.steps_per_span)
-    linear = np.concatenate([[h[0] / 2], (h[:-1] + h[1:]) / 2, [h[-1] / 2]])
-    gamma = fiber.nonlinearity_per_w_km * (8.0 / 9.0 if num_channels == 2 else 1.0)
-    kerr = gamma * _nonlinear_lengths(h, alpha)
-    half_tau = None
-    if fiber.pmd_ps_sqrt_km > 0:
-        half_tau = 0.5 * fiber.pmd_ps_sqrt_km * 1e-12 * np.sqrt(3.0 * np.pi * h / 8.0)
-    return _SpanPlan(linear, kerr, half_tau)
-
-
-def _dispersion_phase(
-    num_samples: int, sampling_rate: float, link: _Link, xp: ModuleType, dtype: Any
-) -> tuple[ArrayType, ArrayType]:
-    """``(phi, omega)``: dispersion phase per km and the angular frequency
-    grid, computed in float64 and stored as the field's real ``dtype`` on
-    ``xp``'s device."""
-    fiber = link.fiber
-    kw = {
-        "dispersion_ps_nm_km": fiber.dispersion_ps_nm_km,
-        "fiber_length_km": 1.0,
-        "center_wavelength_nm": link.center_wavelength_nm,
-    }
-    b2 = beta2_length(**kw)
-    slope = fiber.dispersion_slope_ps_nm2_km
-    b3 = 0.0 if slope is None else beta3_length(dispersion_slope_ps_nm2_km=slope, **kw)
-    omega = 2.0 * np.pi * np.fft.fftfreq(num_samples, d=1.0 / sampling_rate)
-    phi = -(b2 / 2.0 * omega**2 + b3 / 6.0 * omega**3)
-    return xp.asarray(phi.astype(dtype)), xp.asarray(omega.astype(dtype))
 
 
 def _ase_std(link: _Link, noise_figure_db: float, sampling_rate: float) -> float:
@@ -558,7 +636,7 @@ def _ase_std(link: _Link, noise_figure_db: float, sampling_rate: float) -> float
     """
     gain = math.exp(link.fiber.alpha_per_km * link.span_length_km)
     nu = _SPEED_OF_LIGHT / (link.center_wavelength_nm * 1e-9)
-    f = 10.0 ** (noise_figure_db / 10.0)
+    f = db_to_linear(noise_figure_db)
     density = max(f * gain - 1.0, 0.0) * _PLANCK * nu / 2.0  # W/Hz
     return math.sqrt(density * sampling_rate / 2.0)
 
@@ -578,29 +656,26 @@ def _run_span(
     *,
     direction: int,
     kerr_scale: float,
-    alpha: float,
-    sections: np.ndarray | None,
+    pmd: bool,
     on_last_spectrum: Callable[[ArrayType], None] | None = None,
 ) -> ArrayType:
-    """One span's steps, time domain in and out (no amplifier).
+    """One span's steps, time domain in and out (the amplifier is the
+    identity on the loss-normalized field).
 
-    Forward: ``L_0 N_0 L_1 ... N_{K-1} L_K``.  Backward (``direction=-1``)
-    applies the inverse operators in reverse order; PMD sections are
-    forward-only.
+    Forward: ``L_0 N_0 L_1 ... N_{K-1} L_K``, PMD section ``k`` in ``L_k``.
+    Backward (``direction=-1``) applies the inverse operators in reverse
+    order, without PMD.
     """
-    K = plan.kerr.size
+    K = plan.num_steps
     order = range(K + 1) if direction > 0 else range(K, -1, -1)
     X = ops.fft(x)
     for i in order:
-        length = direction * plan.linear_km[i]
-        section = None
-        if sections is not None and i < K:
-            section = (sections[i], float(plan.pmd_half_tau_s[i]))  # type: ignore[index]
-        X = ops.linear(X, length, math.exp(-alpha * length / 2.0), section)
+        section = i if pmd and i < K else None
+        X = ops.linear(X, direction * plan.linear_km(i), section)
         nxt = i if direction > 0 else i - 1  # Kerr stage after this linear one
         if 0 <= nxt < K:
             x = ops.ifft(X)
-            x = ops.nonlinear(x, direction * kerr_scale * plan.kerr[nxt])
+            x = ops.nonlinear(x, direction * kerr_scale * float(plan.kerr[nxt]))
             X = ops.fft(x)
     if on_last_spectrum is not None:
         on_last_spectrum(X)
@@ -625,20 +700,35 @@ def propagate(
     """
     fiber = link.fiber
     C, N = x.shape
-    alpha = fiber.alpha_per_km
     forward = direction > 0
     plan = _span_plan(link, C)
-    phi, omega = _dispersion_phase(N, sampling_rate, link, xp, x.real.dtype)
-    ops = _make_ops(x, xp, phi, omega)
-    span_gain = math.exp(alpha * link.span_length_km / 2.0)  # field gain
+    kw = {
+        "dispersion_ps_nm_km": fiber.dispersion_ps_nm_km,
+        "fiber_length_km": 1.0,
+        "center_wavelength_nm": link.center_wavelength_nm,
+    }
+    slope = fiber.dispersion_slope_ps_nm2_km
+    phase_km = dispersion_phase(
+        N,
+        sampling_rate=sampling_rate,
+        beta2_length=beta2_length(**kw),
+        beta3_length=(
+            0.0
+            if slope is None
+            else beta3_length(dispersion_slope_ps_nm2_km=slope, **kw)
+        ),
+        xp=xp,
+    )
+    omega = 2.0 * np.pi * xp.fft.fftfreq(N, d=1.0 / sampling_rate)
 
-    pmd = std = None
+    waveplates = std = None
     if forward and (noise_figure_db is not None or fiber.pmd_ps_sqrt_km > 0):
         gen = as_generator(rng)
         if fiber.pmd_ps_sqrt_km > 0:
-            pmd = _haar_unitaries(gen, (link.num_spans, plan.kerr.size))
+            waveplates = _haar_unitaries(gen, (link.num_spans, plan.num_steps))
         if noise_figure_db is not None:
             std = x.real.dtype.type(_ase_std(link, noise_figure_db, sampling_rate))
+    ops = _make_ops(x, xp, phase_km, omega, plan.half_tau_s, waveplates)
 
     def check_aliasing(X: ArrayType) -> None:
         fraction = _outer_band_fraction(X, xp, sampling_rate)
@@ -650,23 +740,13 @@ def propagate(
                 fraction,
             )
 
-    run = _span_runner(ops, plan, direction, nonlinear_scale, alpha)
+    run = _span_runner(ops, plan, direction, nonlinear_scale, waveplates is not None)
     spans = range(link.num_spans) if forward else range(link.num_spans - 1, -1, -1)
     for n, span in enumerate(spans):
-        if not forward:
-            x = _scale(x, 1.0 / span_gain)  # undo the amplifier
-        sections = None if pmd is None else pmd[span]
-        x = run(x, sections, check_aliasing if forward and n == 0 else None)
-        if forward:
-            x = _scale(x, span_gain)  # the amplifier restores the span loss
-            if std is not None:
-                x += complex_normal(gen, x.shape, std=std, dtype=x.real.dtype, xp=xp)
-    return x
-
-
-def _scale(x: ArrayType, factor: float) -> ArrayType:
-    """In-place real scaling (keeps the working buffer)."""
-    x *= x.real.dtype.type(factor)
+        ops.set_span(span)
+        x = run(x, check_aliasing if forward and n == 0 else None)
+        if std is not None:  # the amplifier's ASE (its gain cancels the loss)
+            x += complex_normal(gen, x.shape, std=std, dtype=x.real.dtype, xp=xp)
     return x
 
 
@@ -680,23 +760,21 @@ def _span_runner(
     plan: _SpanPlan,
     direction: int,
     kerr_scale: float,
-    alpha: float,
+    pmd: bool,
 ) -> Callable[..., ArrayType]:
-    """``run(x, sections, on_last_spectrum) -> x`` for one span.
+    """``run(x, on_last_spectrum) -> x`` for one span.
 
     With fused CuPy operations every stage works in place, so a span always
-    reads and writes the same buffer.  A span without PMD sections or a
-    callback then runs eagerly once (priming cuFFT plans and the memory
-    pool), is captured into a CUDA graph on its next run, and is replayed
-    after that: one launch per span instead of about four per step.  A span
-    on another buffer runs eagerly; a failed capture falls back to eager
-    spans for the rest of the call.
+    reads and writes the same buffer, and the waveplates come from a fixed
+    device buffer.  A span without a callback then runs eagerly once
+    (priming cuFFT plans and the memory pool), is captured into a CUDA graph
+    on its next run, and is replayed after that: one launch per span instead
+    of about four per step.  A span on another buffer runs eagerly; a failed
+    capture falls back to eager spans for the rest of the call.
     """
 
     def eager(
-        x: ArrayType,
-        sections: np.ndarray | None = None,
-        on_last: Callable[[ArrayType], None] | None = None,
+        x: ArrayType, on_last: Callable[[ArrayType], None] | None = None
     ) -> ArrayType:
         return _run_span(
             ops,
@@ -704,8 +782,7 @@ def _span_runner(
             plan,
             direction=direction,
             kerr_scale=kerr_scale,
-            alpha=alpha,
-            sections=sections,
+            pmd=pmd,
             on_last_spectrum=on_last,
         )
 
@@ -714,14 +791,10 @@ def _span_runner(
 
     state: dict[str, Any] = {"graph": None, "ptr": None, "warm": False, "ok": True}
 
-    def run(
-        x: ArrayType,
-        sections: np.ndarray | None,
-        on_last: Callable[[ArrayType], None] | None,
-    ) -> ArrayType:
+    def run(x: ArrayType, on_last: Callable[[ArrayType], None] | None) -> ArrayType:
         ptr = _pointer(x)
-        if sections is not None or on_last is not None or not state["ok"]:
-            return eager(x, sections, on_last)
+        if on_last is not None or not state["ok"]:
+            return eager(x, on_last)
         if state["graph"] is not None:
             if ptr != state["ptr"]:
                 return eager(x)

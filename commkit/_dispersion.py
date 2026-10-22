@@ -7,6 +7,8 @@ dispersion compensation (its inverse):
 - ``beta2_length``: D [ps/(nm km)], L [km], λ [nm] to the β₂·L product [s²],
   ``β₂ = -D λ² / (2π c)``; ``beta3_length`` adds the slope S [ps/(nm² km)]
   for the β₃·L product [s³] (``commkit._fiber``).
+- ``dispersion_phase`` / ``unit_phasor``: the phase ``-(β₂Lω²/2 + β₃Lω³/6)``
+  on the FFT grid and ``exp(j·phase)`` (also used by ``commkit._fiber``).
 - ``transfer_function``: ``H(ω) = exp(-j β₂ L ω² / 2)`` on the FFT grid of
   ``num_samples`` samples, or its inverse ``exp(+j β₂ L ω² / 2)``.
 
@@ -63,6 +65,32 @@ def beta3_length(
     return float((slope + 2.0 * d / lam) * k**2 * length)
 
 
+def dispersion_phase(
+    num_samples: int,
+    *,
+    sampling_rate: float,
+    beta2_length: float,
+    beta3_length: float = 0.0,
+    xp: ModuleType,
+) -> ArrayType:
+    """Propagation phase ``-(β₂L ω²/2 + β₃L ω³/6)`` on the ``fftfreq`` grid,
+    float64 on ``xp``'s device (it reaches thousands of radians)."""
+    omega = 2.0 * np.pi * xp.fft.fftfreq(num_samples, d=1.0 / sampling_rate)
+    phase = (beta2_length / 2.0) * omega**2
+    if beta3_length:
+        phase += (beta3_length / 6.0) * omega**3
+    return -phase
+
+
+def unit_phasor(phase: ArrayType, dtype: Any, xp: ModuleType) -> ArrayType:
+    """``exp(j·phase)`` as ``dtype``, from real cos/sin (several times faster
+    than a complex exponential on the CPU)."""
+    h = xp.empty(phase.shape, dtype=dtype)
+    h.real = xp.cos(phase)
+    h.imag = xp.sin(phase)
+    return h
+
+
 def transfer_function(
     num_samples: int,
     *,
@@ -74,14 +102,14 @@ def transfer_function(
 ) -> ArrayType:
     """Fiber transfer function on the ``fftfreq`` grid (or its inverse).
 
-    The phase is computed in float64 (it reaches thousands of radians) and
-    the response is returned as ``dtype``, so complex64 data is filtered in
-    single precision instead of being promoted.
+    The phase is computed in float64 and the response is returned as
+    ``dtype``, so complex64 data is filtered in single precision instead of
+    being promoted.
     """
-    omega = 2.0 * np.pi * xp.fft.fftfreq(num_samples, d=1.0 / sampling_rate)
-    sign = 1.0 if inverse else -1.0
-    h = xp.exp(sign * 1j * (beta2_length / 2.0) * omega**2)
-    return h.astype(dtype, copy=False)
+    phase = dispersion_phase(
+        num_samples, sampling_rate=sampling_rate, beta2_length=beta2_length, xp=xp
+    )
+    return unit_phasor(-phase if inverse else phase, dtype, xp)
 
 
 def apply_dispersion(

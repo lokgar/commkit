@@ -110,7 +110,7 @@ jobs:
       - name: Run kernel tests with JIT disabled
         env:
           NUMBA_DISABLE_JIT: "1"
-        run: uv run pytest tests/equalization tests/recovery tests/test_frequency.py --device=cpu --cov=commkit --cov-report=
+        run: uv run pytest tests/equalization tests/recovery tests/test_frequency.py tests/test_fiber.py --device=cpu --cov=commkit --cov-report=
 
       - name: Kernel coverage report
         run: >-

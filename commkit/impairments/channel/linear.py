@@ -8,7 +8,8 @@ import numpy as np
 
 from ... import _fft
 from ..._array import require_channels
-from ..._dispersion import apply_dispersion
+from ..._dispersion import apply_dispersion, unit_phasor
+from ..._fiber import jones_section
 from ...backend import ArrayType, dispatch
 from ...core._signal_adapter import S, adapt_signal
 from ...logger import logger
@@ -23,8 +24,8 @@ __all__ = [
 def _jones_rotation(theta: float, xp: ModuleType, dtype: Any) -> ArrayType:
     """Static 2x2 Jones rotation matrix ``R(theta) = [[cos, -sin], [sin, cos]]``.
 
-    Shared builder for ``apply_pmd``'s PSP-frame rotation (``R(+theta)`` and
-    ``R(-theta) = R(theta)`` evaluated at ``-theta``) and
+    Shared builder for ``apply_pmd``'s rotation into the PSP frame,
+    ``R(-theta)`` (the section of ``_fiber.jones_section``), and
     ``apply_polarization_mixing``'s static-``theta`` path.  The time-varying
     path in ``apply_polarization_mixing`` doesn't build an explicit matrix -
     a distinct 2x2 matrix per sample isn't worth materialising - so it
@@ -113,21 +114,16 @@ def apply_pmd(
     N = x.shape[1]
     freqs = xp.fft.fftfreq(N, d=1.0 / sampling_rate)
 
-    # H(f) = R(+θ) · diag(D) · R(-θ)
-    # R(-θ): rotate INTO the principal-state-of-polarisation (PSP) frame
-    Rfwd = _jones_rotation(-theta, xp, x.dtype)
-    # R(+θ): rotate back to the lab frame
-    Rinv = _jones_rotation(theta, xp, x.dtype)
-
+    # H(f) = R(+θ) · diag(e^{-jπfτ}, e^{+jπfτ}) · R(-θ): one PMD section with
+    # the real rotation U = R(-θ) into the PSP frame (U^H = R(+θ)).
     S_F = _fft.fft(x, axis=-1)  # (2, N)
-
-    # Phase in float64, response in the spectrum's precision (no promotion).
-    phase = xp.pi * freqs * dgd
-    D = xp.stack([xp.exp(-1j * phase), xp.exp(1j * phase)]).astype(S_F.dtype)
-
-    # Apply: rotate to PSP frame -> DGD delay -> rotate back to lab frame
-    out_F = Rinv @ (D * (Rfwd @ S_F))
-
+    phase = xp.pi * freqs * dgd  # float64; responses in the spectrum's precision
+    out_F = jones_section(
+        S_F,
+        _jones_rotation(-theta, np, np.float64),
+        unit_phasor(-phase, S_F.dtype, xp),
+        unit_phasor(phase, S_F.dtype, xp),
+    )
     result = _fft.ifft(out_F, axis=-1)
 
     # Preserve input dtype (ifft may produce complex128 from complex64 input)

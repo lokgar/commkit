@@ -35,7 +35,7 @@ uv run pytest --device=cpu               # what CI runs
 uv run pytest tests/equalization/ -k lms # subset
 uv run pytest --cov=commkit              # coverage
 NUMBA_DISABLE_JIT=1 uv run pytest tests/equalization tests/recovery \
-    tests/test_frequency.py --device=cpu --cov=commkit   # real kernel coverage
+    tests/test_frequency.py tests/test_fiber.py --device=cpu --cov=commkit   # real kernel coverage
 ```
 
 **Commit gate.** CI fails on any of these, so run all of them before every commit, with `ruff format` last:
@@ -253,12 +253,13 @@ What is not done yet, in suggested order. Unlike the sections above, this is a t
 
 ### Nonlinear fiber channel: GPU validation (local session)
 
-`apply_fiber_propagation` / `correct_fiber_propagation` (`_fiber`) were written on a machine without a CUDA driver. The CPU path is tested and timed; the GPU path (three fused `ElementwiseKernel`s, in-place unscaled cuFFT with the 1/N folded into the linear stage, one CUDA graph per PMD-free span) compiles under NVRTC and matches the CPU in a NumPy emulation of its logic, but has never run on a GPU.
+`apply_fiber_propagation` / `correct_fiber_propagation` (`_fiber`) were written on a machine without a CUDA driver. The CPU path is tested and timed; the GPU path (three fused `ElementwiseKernel`s, in-place unscaled cuFFT with the 1/N folded into the linear stage, one CUDA graph per span with the waveplates in a fixed device buffer) compiles under NVRTC and matches the CPU in a NumPy emulation of its logic, but has never run on a GPU.
 
-- **Run the GPU tests**: `uv run pytest tests/test_fiber.py tests/impairments/channel/test_channel_nonlinear.py tests/test_filtering.py -k "fiber or Fiber" --device=all`. `test_fiber.py` compares the fused kernels and the graph replay with the plain CuPy stages and with the CPU, and fails on a "fused CUDA kernels unavailable" or "capture failed" warning.
+- **Run the GPU tests**: `uv run pytest tests/test_fiber.py tests/impairments/channel/test_channel_nonlinear.py tests/test_filtering.py -k "fiber or Fiber" --device=all`. `test_fiber.py` compares the fused kernels and the graph replay (PMD spans included) with the plain CuPy stages and with the CPU, and fails on a "fused CUDA kernels unavailable" or "capture failed" warning.
 - **Check the graph capture**: a span must allocate nothing (cupyx's in-place C2C transforms with `overwrite_x=True`, `norm="forward"` on the inverse). Confirm with `compute-sanitizer` or by checking that the memory pool does not grow between replays; if cupyx copies or scales out of place, the pointer check disables the graph, but a temporary inside the span would not be caught.
-- **Time `benchmarks/bench_fiber.py` on the GPU** (`auto` against `plain`): the kernel policy keeps the fused kernels only if they beat the plain CuPy stages. Expected order (estimate, not measured): about 0.4 ms per step for 2x2^20 complex64 on the reference GPU, about twice that unfused. CPU reference (4 cores, this container): 75 ms per step, 52 of them FFTs. Then record a baseline with the fiber benches.
-- **CPU fused stages without PMD**: Numba versions of the linear and Kerr stages (one pass each) measured 0.84-0.94x end to end at 2^20 samples and 1.04-1.30x at 2^16 on 4 cores, as their thread pool competes with `scipy.fft`'s workers; they were not kept. Re-measure on the reference machine (8 cores) before adding them.
+- **Time `benchmarks/bench_fiber.py` on the GPU** (`auto` against `plain`): the kernel policy keeps the fused kernels only if they beat the plain CuPy stages, which precompute the linear responses and so trade a `sincosf` per bin for a read of the response. Expected order (estimate, not measured): about 0.4 ms per step for 2x2^20 complex64 on the reference GPU. CPU reference (4 cores, this container): about 69 ms per step, 52 of them FFTs. Then record a baseline with the fiber benches.
+- **CPU crossovers on the reference machine**: the hybrid Kerr stage (Numba passes around NumPy's SIMD sin/cos) starts at `_HYBRID_KERR_MIN = 2^18` samples, measured on 4 cores (NumPy faster below: thread-pool start). Re-measure on 8 cores. Numba's sin/cos are scalar here (no SVML); with SVML a fully fused Numba Kerr stage may win and should be timed.
+- **One CUDA-graph driver**: the block equalizers' `_block/_engine.py` and `_fiber._span_runner` both warm once, capture on the second run, replay and fall back on a failed capture. Factor them into one helper once both can be validated on a GPU.
 
 ### Nonlinear fiber channel: future features
 
