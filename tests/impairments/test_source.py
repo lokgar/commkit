@@ -59,10 +59,9 @@ class TestApplyPhaseNoise:
         samples = xp.ones(N, dtype=xp.complex128)
         out = apply_phase_noise(samples, linewidth=linewidth, sampling_rate=fs, rng=42)
 
-        cumphase = xp.angle(out)  # (N,) wrapped, but increments are tiny
-        increments = xp.diff(cumphase)  # (N-1,)
-
-        # Small increments so wrapping is not an issue
+        # Increments from consecutive phasors: immune to the ±π wrap that
+        # diff(angle(out)) takes whenever the walk crosses it.
+        increments = xp.angle(out[1:] * xp.conj(out[:-1]))  # (N-1,)
         measured_var = float(xp.var(increments))
         assert abs(measured_var - expected_variance) / expected_variance < 0.05
 

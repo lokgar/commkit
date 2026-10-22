@@ -39,7 +39,8 @@ def _phase_trajectory(
 
     The white-FM part is generated exactly as a discrete Wiener walk
     (per-sample increments N(0, 2*pi*linewidth/f_s)); the flicker part by
-    spectral shaping of white frequency noise.  Like AWGN, the noise is drawn
+    spectral shaping of white frequency noise.  Both draw float32 noise and
+    accumulate in float64.  Like AWGN, the noise is drawn
     on the device: a seed gives the same statistics on every device, not the
     same realization.
 
@@ -51,10 +52,13 @@ def _phase_trajectory(
     num_samples = shape[-1]
     phi = xp.zeros(shape, dtype=xp.float64)
 
+    # The random steps are drawn in float32 (half the generator's work and
+    # memory) and summed in float64: the walk reaches thousands of radians,
+    # where float32 would resolve only about 1e-4 rad.
     if linewidth > 0.0:
         std = math.sqrt(2.0 * math.pi * linewidth / sampling_rate)
-        steps = standard_normal(rng, shape, dtype=np.float64, xp=xp)
-        phi += xp.cumsum(steps * std, axis=-1)
+        steps = standard_normal(rng, shape, dtype=np.float32, xp=xp)
+        phi += std * xp.cumsum(steps, axis=-1, dtype=xp.float64)
 
     if flicker > 0.0:
         f = xp.fft.rfftfreq(num_samples, 1.0 / sampling_rate)
@@ -64,9 +68,12 @@ def _phase_trajectory(
         # A unit-variance white input has one-sided PSD 2/f_s, so shaping to
         # S_f = flicker/f requires the amplitude gain sqrt(flicker/f * f_s/2).
         gain = xp.sqrt(flicker / xp.maximum(f, f_min)) * math.sqrt(sampling_rate / 2.0)
-        white = standard_normal(rng, shape, dtype=np.float64, xp=xp)
-        df = _fft.irfft(_fft.rfft(white, axis=-1) * gain, num_samples, axis=-1)
-        phi += 2.0 * math.pi * xp.cumsum(df, axis=-1) / sampling_rate
+        white = standard_normal(rng, shape, dtype=np.float32, xp=xp)
+        spectrum = _fft.rfft(white, axis=-1) * gain.astype(xp.float32)
+        df = _fft.irfft(spectrum, num_samples, axis=-1)
+        phi += (2.0 * math.pi / sampling_rate) * xp.cumsum(
+            df, axis=-1, dtype=xp.float64
+        )
 
     if periodic:
         # phi[-1] is the sum of all N increments, the wrap step included.
