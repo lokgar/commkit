@@ -15,10 +15,9 @@ source line:
 
 Every site is either a bug or one of the deliberate float64 uses listed in
 AGENTS.md (phases before unwrap, phase walks, recursion state, IIR sections,
-small host arrays, and complex128 input passed on purpose).  The tagged
-inputs are an ndarray subclass, which a few code paths reject: failures
-under this plugin are expected and say nothing about the code.  NumPy only;
-CuPy and the compiled kernels are not traced.
+small host arrays, and complex128 input passed on purpose).  The test suite
+passes under the plugin.  NumPy only; CuPy and the compiled kernels are not
+traced.
 """
 
 import collections
@@ -47,6 +46,8 @@ def _site() -> str | None:
 
 
 class _Tagged(np.ndarray):
+    """Single-precision data seen by commkit; reports as a NumPy array."""
+
     def __array_ufunc__(self, ufunc: Any, method: str, *inputs: Any, **kw: Any) -> Any:
         args = [np.asarray(a) if isinstance(a, _Tagged) else a for a in inputs]
         if "out" in kw:
@@ -66,6 +67,30 @@ class _Tagged(np.ndarray):
             return o
 
         return tuple(tag(o) for o in out) if isinstance(out, tuple) else tag(out)
+
+
+_Tagged.__module__ = "numpy"  # callers (and the contract tests) see NumPy
+
+
+class _Watched:
+    """A NumPy/SciPy function that records large 64-bit results returned to
+    commkit; every other attribute (``nin``, ``reduce``, ...) is the
+    function's own."""
+
+    def __init__(self, f: Any, name: str) -> None:
+        self._f, self._name = f, name
+        functools.update_wrapper(self, f)
+
+    def __call__(self, *args: Any, **kwargs: Any) -> Any:
+        r = self._f(*args, **kwargs)
+        if isinstance(r, np.ndarray) and r.dtype in _DOUBLE and r.size >= _MIN:
+            site = _site()
+            if site:
+                _HITS[f"FRESH {site} [{self._name} -> {r.dtype}]"] += 1
+        return r
+
+    def __getattr__(self, attr: str) -> Any:
+        return getattr(self._f, attr)
 
 
 def _install() -> None:
@@ -90,19 +115,32 @@ def _install() -> None:
         if name.startswith("commkit") and getattr(module, "dispatch", None) is original:
             module.dispatch = dispatch  # type: ignore[attr-defined]
 
+    # Results leave as plain NumPy arrays (callers check the exact type).
+    from commkit.core._signal_adapter import SignalAdapter
+
+    wrap = SignalAdapter.wrap_samples
+
+    @functools.wraps(wrap)
+    def wrap_samples(self: Any, arr: Any, *args: Any, **kwargs: Any) -> Any:
+        if isinstance(arr, _Tagged):
+            arr = arr.view(np.ndarray)
+        return wrap(self, arr, *args, **kwargs)
+
+    SignalAdapter.wrap_samples = wrap_samples  # type: ignore[method-assign]
+
+    # Numba builds its ufunc table from the numpy module on first use and
+    # types np.<name> at compile time: build the table first, and give it the
+    # real functions back while it compiles.
+    import numba.core.dispatcher
+    from numba.np import npyimpl, ufunc_db  # noqa: F401  (builds the table)
+
+    ufunc_db.get_ufuncs()
+    originals: dict[tuple[Any, str], Any] = {}
+
     def watch(owner: Any, name: str) -> None:
         f = getattr(owner, name)
-
-        @functools.wraps(f)
-        def g(*args: Any, **kwargs: Any) -> Any:
-            r = f(*args, **kwargs)
-            if isinstance(r, np.ndarray) and r.dtype in _DOUBLE and r.size >= _MIN:
-                site = _site()
-                if site:
-                    _HITS[f"FRESH {site} [{name} -> {r.dtype}]"] += 1
-            return r
-
-        setattr(owner, name, g)
+        originals[(owner, name)] = f
+        setattr(owner, name, _Watched(f, name))
 
     for name in ("exp", "cos", "sin", "sqrt", "log", "log1p", "cumsum", "angle",
                  "unwrap", "arctan2", "convolve"):  # fmt: skip
@@ -110,6 +148,20 @@ def _install() -> None:
     for name in ("sosfilt", "sosfiltfilt", "fftconvolve", "upfirdn",
                  "resample_poly", "lfilter", "filtfilt"):  # fmt: skip
         watch(scipy.signal, name)
+
+    compile_ = numba.core.dispatcher.Dispatcher._compile_for_args
+
+    def compile_with_originals(self: Any, *args: Any, **kwargs: Any) -> Any:
+        patched = {key: getattr(*key) for key in originals}
+        for (owner, name), f in originals.items():
+            setattr(owner, name, f)
+        try:
+            return compile_(self, *args, **kwargs)
+        finally:
+            for (owner, name), w in patched.items():
+                setattr(owner, name, w)
+
+    numba.core.dispatcher.Dispatcher._compile_for_args = compile_with_originals
 
 
 def pytest_configure(config: Any) -> None:

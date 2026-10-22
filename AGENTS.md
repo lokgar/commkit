@@ -38,7 +38,7 @@ uv run pytest --cov=commkit              # coverage
 NUMBA_DISABLE_JIT=1 uv run pytest tests/equalization tests/recovery \
     tests/test_frequency.py tests/test_fiber.py --device=cpu --cov=commkit   # real kernel coverage
 uv run pytest --device=cpu -p tests.plugins.precision_trace \
-    --ignore=tests/test_examples.py      # precision audit (see Numerics; some tests fail under it by design)
+    --ignore=tests/test_examples.py      # precision audit (see Numerics); the suite passes under it
 ```
 
 **Commit gate.** CI fails on any of these, so run all of them before every commit, with `ruff format` last:

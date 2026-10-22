@@ -68,6 +68,7 @@ Which scale each metric reads:
 """
 
 import logging
+import math
 from typing import Any
 
 import numpy as np
@@ -591,7 +592,8 @@ def gmi(
     # -(1 - 2c) L: negative (small loss) when the LLR favours the sent bit.
     x = -llr_arr * (1.0 - 2.0 * bits_arr)
     # log2(1 + e^x) = (log1p(e^-|x|) + max(0, x)) / ln 2
-    softplus = (xp.log1p(xp.exp(-xp.abs(x))) + xp.maximum(0.0, x)) / np.log(2.0)
+    # math.log, not np.log: a NumPy float64 scalar would promote (NEP 50).
+    softplus = (xp.log1p(xp.exp(-xp.abs(x))) + xp.maximum(0.0, x)) / math.log(2.0)
     # H(X) - sum_b E[...], written so that H(X)/k is exactly 1.0 when uniform.
     loss = xp.mean(softplus, axis=-1, dtype=xp.float64)
     out = to_report_scalar(k * (c.entropy / k - loss))
