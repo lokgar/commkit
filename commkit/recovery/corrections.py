@@ -554,6 +554,7 @@ def _pairing_scores(y, s, xp, metric: str):
         sn = s / xp.maximum(xp.linalg.norm(s, axis=-1, keepdims=True), 1e-12)
         return to_device(xp.abs(yn @ xp.conj(sn).T), "cpu")
     if metric == "phase_increment":
+        s = s.astype(np.result_type(y.dtype, np.complex64), copy=False)
         cols = [
             xp.var(
                 xp.diff(

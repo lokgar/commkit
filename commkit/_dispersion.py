@@ -27,7 +27,7 @@ import numpy as np
 from . import _fft
 from ._array import as_2d, restore_1d
 from .backend import ArrayType, dispatch
-from .math import _unit_phasor
+from .math import _phasor
 
 # Speed of light used by the 1.x conversion, kept so results do not change.
 _SPEED_OF_LIGHT = 2.998e8  # m/s
@@ -101,7 +101,7 @@ def transfer_function(
     phase = dispersion_phase(
         num_samples, sampling_rate=sampling_rate, beta2_length=beta2_length, xp=xp
     )
-    return _unit_phasor(-phase if inverse else phase, dtype, xp)
+    return _phasor(-phase if inverse else phase, dtype, xp)
 
 
 def apply_dispersion(

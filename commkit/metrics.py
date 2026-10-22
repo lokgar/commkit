@@ -150,12 +150,17 @@ def _constellation(adapter: SignalAdapter, constellation: Any, name: str) -> Any
 def _paired(
     rx: ArrayType, reference: Any, xp: Any, name: str
 ) -> tuple[ArrayType, ArrayType]:
-    """The reference on ``rx``'s device; the shapes must agree."""
+    """The reference on ``rx``'s device, and in its precision when both are
+    floating point (a complex128 reference does not promote complex64 data);
+    the shapes must agree."""
     ref = to_device(reference, "cpu" if xp is np else "gpu")
     if rx.shape != ref.shape:
         raise ValueError(
             f"{name}: shape mismatch: received {rx.shape} != reference {ref.shape}."
         )
+    if ref.dtype.kind in "fc" and rx.dtype.kind in "fc":
+        base = np.complex64 if ref.dtype.kind == "c" else np.float32
+        ref = ref.astype(np.result_type(base, rx.real.dtype), copy=False)
     return rx, ref
 
 
@@ -274,7 +279,8 @@ def evm(
         rx = _skip(rx, num_skip_symbols, name)
         # No gain correction: the caller passes symbols at the constellation's
         # scale.
-        tx = xp.asarray(c.points)[c._nearest(rx.reshape(-1))].reshape(rx.shape)
+        points = c.points.astype(np.result_type(np.complex64, rx.real.dtype))
+        tx = xp.asarray(points)[c._nearest(rx.reshape(-1))].reshape(rx.shape)
     else:
         ref = _reference(adapter, reference, "symbols", name, hint=", or blind=True")
         rx, tx = _paired(rx, ref, xp, name)
@@ -284,12 +290,12 @@ def evm(
             tx = normalize(tx, axis=axis, mode="average_power")
         rx = rx / _gain(rx, tx, xp)
 
-    ref_pwr = xp.mean(xp.abs(tx) ** 2, axis=axis)
+    ref_pwr = xp.mean(xp.abs(tx) ** 2, axis=axis, dtype=xp.float64)
     low_pwr_mask = ref_pwr < 1e-20
     if xp.any(low_pwr_mask):
         logger.warning("Reference signal power near zero in one or more channels.")
 
-    error_power = xp.mean(xp.abs(rx - tx) ** 2, axis=axis)
+    error_power = xp.mean(xp.abs(rx - tx) ** 2, axis=axis, dtype=xp.float64)
     # The reference power is 1 after normalization.
     evm_percent = xp.sqrt(error_power) * 100.0
     evm_percent = xp.where(low_pwr_mask, xp.inf, evm_percent)
@@ -350,8 +356,8 @@ def snr(
         tx = normalize(tx, axis=axis, mode="average_power")
     rx = rx / _gain(rx, tx, xp)
 
-    ref_pwr = xp.mean(xp.abs(tx) ** 2, axis=axis)
-    noise_power = xp.mean(xp.abs(rx - tx) ** 2, axis=axis)
+    ref_pwr = xp.mean(xp.abs(tx) ** 2, axis=axis, dtype=xp.float64)
+    noise_power = xp.mean(xp.abs(rx - tx) ** 2, axis=axis, dtype=xp.float64)
     with np.errstate(divide="ignore"):
         snr_db = linear_to_db(1.0 / noise_power, power=True)
     # No error: +inf even for a zero reference; error but no reference: -inf.

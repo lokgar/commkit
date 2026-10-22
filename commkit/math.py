@@ -344,6 +344,16 @@ def _unit_phasor(phase: ArrayType, dtype: Any, xp: Any) -> ArrayType:
     return h
 
 
+def _phasor(phase: ArrayType, dtype: Any, xp: Any) -> ArrayType:
+    """``exp(j·phase)`` as complex ``dtype`` for a float64 ``phase`` of any
+    size: wrapped to ``[-π, π]`` in float64, then cos/sin in the real
+    precision of ``dtype`` (no FP64 trig for a complex64 result)."""
+    two_pi = 2.0 * np.pi
+    wrapped = phase - xp.round(phase / two_pi) * two_pi
+    real = np.empty(0, dtype).real.dtype
+    return _unit_phasor(wrapped.astype(real, copy=False), dtype, xp)
+
+
 _DEROTATE_KERNEL: dict[str, Any] = {}
 
 
@@ -379,9 +389,4 @@ def _derotate(x: ArrayType, phase: Any) -> ArrayType:
     phi = xp.asarray(phase, dtype=xp.float64)
     if xp is not np and x.dtype == xp.complex64:
         return _cupy_derotate()(x, phi)
-    out_dtype = np.result_type(x.dtype, np.complex64)
-    two_pi = 2.0 * np.pi
-    wrapped = (phi - xp.round(phi / two_pi) * two_pi).astype(
-        np.empty(0, out_dtype).real.dtype
-    )
-    return x * _unit_phasor(-wrapped, out_dtype, xp)
+    return x * _phasor(-phi, np.result_type(x.dtype, np.complex64), xp)

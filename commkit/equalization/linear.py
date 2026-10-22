@@ -332,11 +332,15 @@ def estimate_transfer_function(
     single = x.ndim == 1
     if single:
         x, y = x[None, :], y[None, :]
-    x = x.astype(xp.complex128)
-    y = y.astype(xp.complex128)
+    # Windows, FFTs and the window sums of the cross-spectra in the inputs'
+    # precision (complex64 by default; complex128 changed the estimate by
+    # under 1e-6, far below its statistical error); the small per-bin solve runs in complex128.
+    cdtype = np.result_type(x.dtype, y.dtype, np.complex64)
+    x = x.astype(cdtype, copy=False)
+    y = y.astype(cdtype, copy=False)
     C, N = x.shape
     n_fft = int(min(n_fft, N))
-    win = xp.asarray(np.hanning(n_fft))
+    win = xp.asarray(np.hanning(n_fft).astype(np.empty(0, cdtype).real.dtype))
 
     # Welch auto/cross spectra, vectorised over windows (capped). One batched FFT
     # of the reference and the received, then every (C, C) cross term via einsum -
@@ -346,8 +350,8 @@ def estimate_transfer_function(
     idx = starts[:, None] + xp.arange(n_fft)[None, :]  # (n_win, n_fft)
     X = _fft.fft(x[:, idx] * win, axis=-1)  # (C, n_win, n_fft)
     Y = _fft.fft(y[:, idx] * win, axis=-1)
-    Sxx = xp.einsum("cwf,dwf->fcd", X, X.conj())  # (n_fft, C, C)
-    Syx = xp.einsum("cwf,dwf->fcd", Y, X.conj())
+    Sxx = xp.einsum("cwf,dwf->fcd", X, X.conj()).astype(xp.complex128)  # (n_fft, C, C)
+    Syx = xp.einsum("cwf,dwf->fcd", Y, X.conj()).astype(xp.complex128)
 
     eye = xp.eye(C, dtype=xp.complex128)
     reg_xx = reg * float(xp.einsum("fcc->f", Sxx).real.mean() / C)

@@ -13,7 +13,7 @@ from ..._fiber import jones_section
 from ...backend import ArrayType, dispatch
 from ...core._signal_adapter import S, adapt_signal
 from ...logger import logger
-from ...math import _unit_phasor
+from ...math import _phasor
 
 __all__ = [
     "apply_chromatic_dispersion",
@@ -122,8 +122,8 @@ def apply_pmd(
     out_F = jones_section(
         S_F,
         _jones_rotation(-theta, np, np.float64),
-        _unit_phasor(-phase, S_F.dtype, xp),
-        _unit_phasor(phase, S_F.dtype, xp),
+        _phasor(-phase, S_F.dtype, xp),
+        _phasor(phase, S_F.dtype, xp),
     )
     result = _fft.ifft(out_F, axis=-1)
 

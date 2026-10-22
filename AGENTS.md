@@ -37,6 +37,8 @@ uv run pytest tests/equalization/ -k lms # subset
 uv run pytest --cov=commkit              # coverage
 NUMBA_DISABLE_JIT=1 uv run pytest tests/equalization tests/recovery \
     tests/test_frequency.py tests/test_fiber.py --device=cpu --cov=commkit   # real kernel coverage
+uv run pytest --device=cpu -p tests.plugins.precision_trace \
+    --ignore=tests/test_examples.py      # precision audit (see Numerics; some tests fail under it by design)
 ```
 
 **Commit gate.** CI fails on any of these, so run all of them before every commit, with `ruff format` last:
@@ -173,6 +175,7 @@ Dependencies point downward only:
   - **Transforms keep the input's precision**: complex64 in, complex64 out and computed throughout (filters, impairments, the fiber solver and DBP, resampling, delays, carrier-phase correction); complex128 in, complex128 out.
   - **Fixed-precision blocks** compute in single precision whatever the input: the equalizers in complex64 (with complex128 accumulation inside, below), `compute_llr` / `Constellation.llr` in float32. Double input to them emits `commkit.PrecisionWarning` (`_array.warn_if_double`, attributed to the caller's line; Python shows it once per call site). Users who want strictness turn it into an error with `warnings.simplefilter("error", commkit.PrecisionWarning)`; the test suite does (pyproject `filterwarnings`), so a library path that feeds double data to these blocks fails CI. Training and reference symbols are ideal values and are not checked.
   - **Deliberate float64**, documented where it happens, always on phases, small arrays or accumulators, never on sample-rate data that is then cast back: phases before `unwrap`, phase trajectories and phase ramps (wrapped in float64, rotated in the data's precision), frequency grids and estimates, the recursions' state (PLL, Tikhonov, RLS `P`), the IIR filter's sections (poles near z = 1), and sums: the metrics compute per element in the input's precision and accumulate in float64 (`gmi` / `mi` in single precision moved by under 4e-8 bit, far below the Monte Carlo error).
+  - **Audit with `tests/plugins/precision_trace.py`** after touching numerics: it lists every float64/complex128 array of sample-rate size that a NumPy path of the library creates from single-precision data or from scratch, with its source line. Every reported site must be a deliberate use from the list above (or a test passing complex128 on purpose). Output dtypes alone do not show this: a function that computes in complex128 and casts back returns complex64.
   - complex128 pays only where single-precision rounding accumulates over many FFT passes, as in the fiber solver (6e-4 after 10^4 steps in complex64, 1e-12 in complex128); there the GPU runs its plain CuPy stages, not the fused complex64 kernels.
   - **The NEP 50 trap**: under NumPy 2 a NumPy scalar is not weak, so `np.float64(a) * x64` (any `np.sqrt`, `np.pi * ...` result, or a float64 array such as `xp.fft.fftfreq`) promotes complex64 data to complex128. Combine single-precision data only with Python scalars or with arrays cast to its precision; rotate with `math._derotate` (float64 phase wrap, single-precision phasor, one fused kernel on the GPU).
 - **Accumulation precision:**

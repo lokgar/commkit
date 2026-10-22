@@ -195,14 +195,12 @@ def _vv_block_phase(
     N_trunc = (N // block_size) * block_size
     N_blocks = N_trunc // block_size
 
-    # Reshape for block processing: (C, N_blocks, block_size).
-    # Promote to complex128 for the M-th power - identical to frequency.MthPower.
-    # On GPU, complex64^4 loses precision near the ±π/M unwrap boundary, causing
-    # spurious branch flips for high-order QAM with small block sizes.
-    blocks = symbols2d[:, :N_trunc].reshape(C, N_blocks, block_size)
-    blocks_c = blocks.astype(
-        xp.complex128 if blocks.dtype == xp.complex64 else blocks.dtype
-    )
+    # Reshape for block processing: (C, N_blocks, block_size), in the
+    # symbols' precision.  complex128 moved no block phase by more than 6e-6
+    # rad and flipped no unwrap decision (QPSK to 64-QAM, 2.6e6 symbols): a
+    # block that close to the ±π/M boundary is decided by its noise, whose
+    # phase spread is orders of magnitude larger, in either precision.
+    blocks_c = symbols2d[:, :N_trunc].reshape(C, N_blocks, block_size)
 
     # Project onto the unit circle before the M-th power (normalized VV).
     # This removes outer-ring amplitude dominance and makes the bias

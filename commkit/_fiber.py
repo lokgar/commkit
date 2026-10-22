@@ -85,7 +85,7 @@ from ._dispersion import (
 from ._random import as_generator, complex_normal
 from .backend import ArrayType
 from .logger import logger
-from .math import _unit_phasor, db_to_linear
+from .math import _phasor, _unit_phasor, db_to_linear
 
 _PLANCK = 6.62607015e-34  # J s
 
@@ -352,7 +352,7 @@ class _Ops:
     def _response(self, length_km: float) -> ArrayType:
         key = ("h", length_km)
         if key not in self._responses:
-            self._responses[key] = _unit_phasor(
+            self._responses[key] = _phasor(
                 self.phase_km * length_km, self.dtype, self.xp
             )
         return self._responses[key]
@@ -364,8 +364,8 @@ class _Ops:
             phase = self.phase_km * length_km
             delay = self.omega * self.half_tau
             self._responses[key] = (
-                _unit_phasor(phase - delay, self.dtype, self.xp),
-                _unit_phasor(phase + delay, self.dtype, self.xp),
+                _phasor(phase - delay, self.dtype, self.xp),
+                _phasor(phase + delay, self.dtype, self.xp),
             )
         hm, hp = self._responses[key]
         return hm, hp

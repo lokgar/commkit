@@ -67,9 +67,12 @@ def _phase_trajectory(
         )
         # A unit-variance white input has one-sided PSD 2/f_s, so shaping to
         # S_f = flicker/f requires the amplitude gain sqrt(flicker/f * f_s/2).
-        gain = xp.sqrt(flicker / xp.maximum(f, f_min)) * math.sqrt(sampling_rate / 2.0)
+        f32 = xp.maximum(f, f_min).astype(xp.float32)
+        gain = xp.sqrt(xp.float32(flicker) / f32) * xp.float32(
+            math.sqrt(sampling_rate / 2.0)
+        )
         white = standard_normal(rng, shape, dtype=np.float32, xp=xp)
-        spectrum = _fft.rfft(white, axis=-1) * gain.astype(xp.float32)
+        spectrum = _fft.rfft(white, axis=-1) * gain
         df = _fft.irfft(spectrum, num_samples, axis=-1)
         phi += (2.0 * math.pi / sampling_rate) * xp.cumsum(
             df, axis=-1, dtype=xp.float64

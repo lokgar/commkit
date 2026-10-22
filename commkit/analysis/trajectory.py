@@ -106,5 +106,7 @@ def carrier_phase_trajectory(
     elif c == 2 and channel_pairing == "swap":
         d2 = d2[::-1]
 
+    # The product in the samples' precision, the unwrap in float64.
+    d2 = xp.asarray(d2, dtype=np.result_type(y2.dtype, np.complex64))
     phi = xp.unwrap(xp.angle(y2 * xp.conj(d2)).astype(xp.float64), axis=-1)
     return restore_1d(was_1d, phi)
