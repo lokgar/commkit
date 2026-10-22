@@ -247,7 +247,18 @@ What is not done yet, in suggested order. Unlike the sections above, this is a t
 ### Planned modules
 
 1. **Nonlinear fiber channel** (`impairments.channel.nonlinear`, a placeholder). Split-step Fourier propagation of the Kerr effect together with chromatic dispersion, then digital backpropagation as its compensation counterpart in `filtering`. Comes first because it builds on what exists: the dispersion operator (`_dispersion`), overlap-save and FFT-heavy GPU code. It completes the coherent optical link model.
-2. **Channel coding** (`coding`, a placeholder package). Start with one soft decoder (LDPC) that consumes `compute_llr` output (positive LLR = bit 0) and reports post-FEC BER next to `gmi`, then add encoders. The package stays out of `commkit/__init__.py` until a real encode/decode entry point exists. Decoders are iterative message passing over many codewords: batch codewords on the GPU from the start.
+2. **Channel coding** (`coding`, a placeholder package). Resolve the "Before channel coding" items below first, so the decoder is built on soft demapping that is already at its final speed on both devices. Start with one soft decoder (LDPC) that consumes `compute_llr` output (positive LLR = bit 0) and reports post-FEC BER next to `gmi`, then add encoders. The package stays out of `commkit/__init__.py` until a real encode/decode entry point exists. Decoders are iterative message passing over many codewords: batch codewords on the GPU from the start.
+
+### Before channel coding: mapping and soft demapping
+
+The decoder's input path. The GPU items need a CUDA device to write, test (`--device=all`, against the Numba reference) and time.
+
+- **GPU LLRs of separable QAM.** `Constellation.llr` takes the per-axis path (2·sqrt(M) metrics instead of M) only on the CPU; on the GPU, 256-QAM evaluates 256 metrics per symbol instead of 32. Port `llr_separable` to a CUDA kernel.
+- **One exponential per point in the CUDA exact LLR.** `llr.cu` evaluates every metric twice and calls `expf` once per point and bit (M·k per symbol, 2048 for 256-QAM). The Numba kernel scales by one peak per symbol and needs M (with the underflow fallback of `_EXACT_FLOOR`). Together with the item above: 32 exponentials per 256-QAM symbol instead of 2048.
+- **CUDA LLR stores and per-call tables.** Each thread writes its k LLRs at stride k (uncoalesced), and every call rebuilds and copies the points, packed labels and log prior to the device; cache them per constellation and device.
+- **Non-square hard decisions on the GPU.** `gray._nearest_index` (used by `Constellation.demap`, `evm(blind=True)` and `ser` for PSK, cross QAM and arbitrary points) loops in Python over 4096-symbol chunks: about 250 iterations of several launches per 10^6 symbols. On the CPU that chunk and `abs` are the fastest NumPy form (measured); on the GPU, time it against a larger element-budget chunk or the nearest-point mode of `bps_min_d2`.
+- **`Constellation.map` intermediates.** It casts the bits to int32 groups and multiplies and sums them: two `(N, k)` int32 temporaries for `N·k` input bits, four times the bits' own size in int8. Encoders hand it long bit records; pack the labels in one pass.
+- **Closed-form max-log LLRs of Gray QAM** (optional, CPU and GPU): per bit, the nearest point of each half is found by snapping, O(k) instead of O(sqrt(M)). Expected gain under 2x on the CPU; measure before adopting.
 
 ### Performance
 
