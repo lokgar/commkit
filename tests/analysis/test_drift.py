@@ -26,6 +26,16 @@ class TestFrequencyDriftAnalysis:
         assert m.std == pytest.approx(amp / np.sqrt(2.0), rel=0.05)
         assert m.pp == pytest.approx(2.0 * amp, rel=0.10)
 
+    def test_one_channel_reports_an_array(self, xp: Any) -> None:
+        """(1, N) input reports (1,) statistics, not floats."""
+        phi = np.cumsum(np.random.default_rng(3).normal(0.0, 0.01, (1, 4096)), -1)
+        m = analysis.frequency_drift(xp.asarray(phi), sampling_rate=R)
+        for value in (m.std, m.pp, m.max_abs):
+            assert isinstance(value, np.ndarray) and value.shape == (1,)
+        flat = analysis.frequency_drift(xp.asarray(phi[0]), sampling_rate=R)
+        assert isinstance(flat.std, float)
+        assert flat.std == pytest.approx(float(m.std[0]))
+
     def test_separate_drift_phase_noise_splits(self, xp: Any) -> None:
         """Verify frequency split separates slow wander from fast phase jitter."""
         n = 1 << 16

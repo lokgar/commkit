@@ -72,6 +72,7 @@ from typing import Any
 
 import numpy as np
 
+from ._array import to_report_scalar
 from .backend import ArrayType, dispatch, to_device
 from .core._signal_adapter import SignalAdapter, adapt_signal
 from .core.signal import Signal
@@ -198,12 +199,6 @@ def _skip(x: ArrayType, n: int, name: str) -> ArrayType:
     return x
 
 
-def _host(values: Any) -> float | np.ndarray:
-    """A 0-d result as ``float``, per-channel results as a host float array."""
-    v = np.asarray(to_device(values, "cpu"), dtype=np.float64)
-    return float(v) if v.ndim == 0 else v
-
-
 # -----------------------------------------------------------------------------
 # Metrics
 # -----------------------------------------------------------------------------
@@ -300,7 +295,7 @@ def evm(
     # The reference power is 1 after normalization.
     evm_percent = xp.sqrt(error_power) * 100.0
     evm_percent = xp.where(low_pwr_mask, xp.inf, evm_percent)
-    out = _host(evm_percent)
+    out = to_report_scalar(evm_percent)
     if isinstance(out, float):
         logger.info("EVM: %.2f%%", out)
     else:
@@ -365,7 +360,7 @@ def snr(
     zero_noise = noise_power < 1e-20
     snr_db = xp.where(zero_noise, xp.inf, snr_db)
     snr_db = xp.where((ref_pwr < 1e-20) & ~zero_noise, -xp.inf, snr_db)
-    out = _host(snr_db)
+    out = to_report_scalar(snr_db)
     if isinstance(out, float):
         logger.info("SNR: %.2f dB", out)
     else:
@@ -428,7 +423,7 @@ def ber(
 
     errors = xp.sum(rx != tx, axis=-1)
     total = rx.shape[-1]
-    out = _host(errors / total)
+    out = to_report_scalar(errors / total)
     if isinstance(out, float):
         logger.info("BER: %.2e (%s/%s errors)", out, int(errors), total)
     else:
@@ -491,7 +486,7 @@ def ser(
     dec_tx = _nearest_index(tx.reshape(-1), points).reshape(tx.shape)
     errors = xp.sum(dec_rx != dec_tx, axis=-1)
     total = rx.shape[-1]
-    out = _host(errors / total)
+    out = to_report_scalar(errors / total)
     if isinstance(out, float):
         logger.info("SER: %.2e (%s/%s errors)", out, int(errors), total)
     else:
@@ -592,7 +587,7 @@ def gmi(
     # log2(1 + e^x) = (log1p(e^-|x|) + max(0, x)) / ln 2
     softplus = (xp.log1p(xp.exp(-xp.abs(x))) + xp.maximum(0.0, x)) / np.log(2.0)
     # H(X) - sum_b E[...], written so that H(X)/k is exactly 1.0 when uniform.
-    out = _host(k * (c.entropy / k - xp.mean(softplus, axis=-1)))
+    out = to_report_scalar(k * (c.entropy / k - xp.mean(softplus, axis=-1)))
     if isinstance(out, float):
         logger.info("GMI: %.4f b/symbol", out)
     else:
@@ -677,7 +672,7 @@ def mi(
         log_post = log_joint - log_sum[..., None]  # log p(s_m | r), nats
         acc += xp.sum(xp.exp(log_post) * log_post, axis=(-2, -1))
     mi_bits = np.clip(h_x + to_device(acc, "cpu") / n_sym / np.log(2.0), 0.0, h_x)
-    out = _host(mi_bits.reshape(rx.shape[:-1]))
+    out = to_report_scalar(mi_bits.reshape(rx.shape[:-1]))
     if isinstance(out, float):
         logger.info("MI: %.4f b/symbol (max %.2f)", out, h_x)
     else:

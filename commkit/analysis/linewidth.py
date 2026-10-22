@@ -619,11 +619,12 @@ def _increment_slope(
     slope, intercept, var_k_cpu, lag_sec = _increment_variance_fit(
         p2, np.asarray(method.lags), 1.0 / fs, xp
     )
+    was_1d = p.ndim == 1
     return LinewidthEstimate(
-        value=to_report_scalar(np.maximum(slope, 0.0) / (2.0 * np.pi)),
+        value=to_report_scalar(np.maximum(slope, 0.0) / (2.0 * np.pi), was_1d=was_1d),
         method=method,
-        dphi_var=to_report_scalar(to_device(var1, "cpu")),
-        awgn_var=to_report_scalar(intercept),
+        dphi_var=to_report_scalar(to_device(var1, "cpu"), was_1d=was_1d),
+        awgn_var=to_report_scalar(intercept, was_1d=was_1d),
         lag_s=lag_sec,
         var=var_k_cpu.T,
         slope=slope,
@@ -667,11 +668,12 @@ def _increment_subtract(
     linewidth = xp.maximum(var1 - awgn_var, 0.0) / (2.0 * np.pi * t_sym)
 
     var1_cpu = to_device(var1, "cpu")
+    was_1d = p.ndim == 1
     return LinewidthEstimate(
-        value=to_report_scalar(to_device(linewidth, "cpu")),
+        value=to_report_scalar(to_device(linewidth, "cpu"), was_1d=was_1d),
         method=method,
-        dphi_var=to_report_scalar(var1_cpu),
-        awgn_var=to_report_scalar(to_device(awgn_var, "cpu")),
+        dphi_var=to_report_scalar(var1_cpu, was_1d=was_1d),
+        awgn_var=to_report_scalar(to_device(awgn_var, "cpu"), was_1d=was_1d),
         lag_s=np.array([t_sym]),
         var=np.atleast_1d(var1_cpu)[:, None],
     )
@@ -740,12 +742,13 @@ def _beta_separation(
     if S_cpu.ndim == 1:
         above_cpu = above_cpu[0]
 
+    was_1d = phi.ndim == 1
     return LinewidthEstimate(
-        value=to_report_scalar(lw_cpu),
+        value=to_report_scalar(lw_cpu, was_1d=was_1d),
         method=method,
-        linewidth_floor=to_report_scalar(lw_floor_cpu),
+        linewidth_floor=to_report_scalar(lw_floor_cpu, was_1d=was_1d),
         n_segments=k_seg,
-        area_hz2=to_report_scalar(area_cpu),
+        area_hz2=to_report_scalar(area_cpu, was_1d=was_1d),
         f=f_cpu,
         S_f=S_cpu,
         beta_line=beta_cpu,
@@ -954,8 +957,9 @@ def _dsh_fm_psd(samples: ArrayType, method: DshFmPsd, fs: float) -> LinewidthEst
     def per_channel(a: np.ndarray) -> Any:
         return a[0] if S_cpu.ndim == 1 else a
 
+    was_1d = dphi.ndim == 1
     return LinewidthEstimate(
-        value=to_report_scalar(np.pi * theta[:, 0]),
+        value=to_report_scalar(np.pi * theta[:, 0], was_1d=was_1d),
         method=method,
         f_shift=f_hat,
         f=f_cpu,
@@ -965,8 +969,8 @@ def _dsh_fm_psd(samples: ArrayType, method: DshFmPsd, fs: float) -> LinewidthEst
         used=per_channel(used2),
         band=(float(f_used[0]), float(f_used[-1])),
         n_segments=k_seg,
-        flicker=to_report_scalar(theta[:, 1]),
-        awgn_var=to_report_scalar(theta[:, 2]),
+        flicker=to_report_scalar(theta[:, 1], was_1d=was_1d),
+        awgn_var=to_report_scalar(theta[:, 2], was_1d=was_1d),
     )
 
 
@@ -1019,12 +1023,13 @@ def _dsh_increment(
     # hence 4π rather than 2π).
     slope, intercept, var_cpu, a_sec = _increment_variance_fit(d2, ls, 1.0 / fs, xp)
 
+    was_1d = dphi.ndim == 1
     return LinewidthEstimate(
-        value=to_report_scalar(np.maximum(slope, 0.0) / (4.0 * np.pi)),
+        value=to_report_scalar(np.maximum(slope, 0.0) / (4.0 * np.pi), was_1d=was_1d),
         method=method,
         f_shift=f_hat,
-        awgn_var=to_report_scalar(intercept),
-        dphi_var=to_report_scalar(to_device(dphi_var, "cpu")),
+        awgn_var=to_report_scalar(intercept, was_1d=was_1d),
+        dphi_var=to_report_scalar(to_device(dphi_var, "cpu"), was_1d=was_1d),
         lags=ls,
         lag_s=a_sec,
         var=var_cpu.T,
@@ -1102,14 +1107,14 @@ def _dsh_lorentzian(
         )
 
     return LinewidthEstimate(
-        value=to_report_scalar(dnu_deep),
+        value=to_report_scalar(dnu_deep, was_1d=was_1d),
         method=method,
-        linewidth_3db=to_report_scalar(dnu_3db),
-        lineshape_ratio=to_report_scalar(ratio),
-        coherence_factor=to_report_scalar(coh),
+        linewidth_3db=to_report_scalar(dnu_3db, was_1d=was_1d),
+        lineshape_ratio=to_report_scalar(ratio, was_1d=was_1d),
+        coherence_factor=to_report_scalar(coh, was_1d=was_1d),
         f=f_cpu,
         psd=restore_1d(was_1d, P2),
-        f_peak=to_report_scalar(f_peak),
+        f_peak=to_report_scalar(f_peak, was_1d=was_1d),
     )
 
 

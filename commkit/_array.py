@@ -270,25 +270,35 @@ def require_channels(
     return arr
 
 
-def to_report_scalar(values: Any) -> float | np.ndarray:
+def to_report_scalar(values: Any, *, was_1d: bool | None = None) -> float | np.ndarray:
     """
-    Collapses a per-channel result to a Python float, or a host NumPy array.
+    A reporting-layer result on the host: a Python float or a float64 array.
 
-    The reporting-layer counterpart of :func:`as_2d`: channel-batched metrics
-    are computed as ``(C,)`` vectors, but a SISO caller wants a plain float
-    back.  Device arrays are transferred to the host internally, so this is
-    safe to call on a CuPy result directly.
+    The reporting-layer counterpart of :func:`restore_1d`: channel-batched
+    results are computed as ``(C,)`` vectors, but ``(N,)`` input reports a
+    plain float.  Device arrays are transferred to the host internally, so
+    this is safe to call on a CuPy result directly.
 
     Parameters
     ----------
     values : array_like or scalar
-        Per-channel metric, ``(C,)`` (or 0-d / scalar).
+        Per-channel result, ``(C,)``, or a 0-d value.
+    was_1d : bool, optional
+        Whether the input was ``(N,)``.  ``True`` collapses the single
+        channel to a float; ``False`` keeps the array, so ``(1, N)`` input
+        reports ``(1,)``.  ``None`` collapses only a 0-d value, for results
+        already reduced by input rank.
 
     Returns
     -------
     float or numpy.ndarray
-        A Python float when a single value is present, otherwise a
-        ``float64`` NumPy array.
+        A Python float for ``(N,)`` input, otherwise a ``float64`` NumPy array.
     """
     arr = np.asarray(to_device(values, "cpu"), dtype=np.float64)
-    return float(arr.reshape(-1)[0]) if arr.size == 1 else arr
+    if was_1d is None:
+        was_1d = arr.ndim == 0
+    if not was_1d:
+        return arr
+    if arr.size != 1:
+        raise ValueError(f"(N,) input reports one value, got shape {arr.shape}.")
+    return float(arr.reshape(-1)[0])

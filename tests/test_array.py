@@ -140,9 +140,13 @@ class TestShapeHelpers:
             _array.require_channels(xp.asarray(np.zeros((3, 16))), 2, name="samples")
 
     def test_to_report_scalar(self, xp):
-        """to_report_scalar: length-1 -> float, (C,) -> host array, device input OK."""
-        single = _array.to_report_scalar(xp.asarray(np.array([3.5])))
+        """to_report_scalar: (N,) input -> float, (C, N) -> host array (also
+        for C = 1), 0-d -> float by default, device input OK."""
+        single = _array.to_report_scalar(xp.asarray(np.array([3.5])), was_1d=True)
         assert isinstance(single, float) and single == 3.5
+
+        one_channel = _array.to_report_scalar(xp.asarray(np.array([3.5])), was_1d=False)
+        assert isinstance(one_channel, np.ndarray) and one_channel.shape == (1,)
 
         multi = _array.to_report_scalar(xp.asarray(np.array([1.0, 2.0])))
         assert isinstance(multi, np.ndarray)
@@ -151,3 +155,5 @@ class TestShapeHelpers:
 
         assert _array.to_report_scalar(xp.asarray(np.float64(2.0))) == 2.0
         assert _array.to_report_scalar(7) == 7.0
+        with pytest.raises(ValueError, match="one value"):
+            _array.to_report_scalar(xp.asarray(np.array([1.0, 2.0])), was_1d=True)

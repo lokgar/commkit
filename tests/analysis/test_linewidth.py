@@ -491,6 +491,34 @@ class TestEstimateLinewidthContract:
         with pytest.raises(AttributeError):
             res.value = 0.0  # type: ignore[misc]
 
+    @pytest.mark.parametrize(
+        "method",
+        [
+            IncrementSlope(),
+            IncrementSubtract(),
+            BetaSeparation(nperseg=1024),
+            DshIncrement(delay=500 / FS, f_shift=80e6),
+            DshFmPsd(delay=500 / FS, f_shift=80e6),
+            DshLorentzian(delay=500 / FS),
+        ],
+        ids=lambda m: type(m).__name__,
+    )
+    def test_one_channel_reports_an_array(self, xp, method):
+        """(N,) input reports floats; (1, N) input reports (1,) arrays, as
+        every (C, N) input does (they used to collapse to floats)."""
+        if isinstance(method, (DshIncrement, DshFmPsd, DshLorentzian)):
+            x, _ = make_dsh_beat(2e6, 1 << 16, 500, 80e6, snr_db=None, seed=1)
+            fs = FS
+        else:
+            x, fs = _wiener_phase(1e6, 1 << 14, seed=1), R
+        flat = analysis.estimate_linewidth(xp.asarray(x), method, sampling_rate=fs)
+        row = analysis.estimate_linewidth(
+            xp.asarray(x[None, :]), method, sampling_rate=fs
+        )
+        assert isinstance(flat.value, float)
+        assert isinstance(row.value, np.ndarray) and row.value.shape == (1,)
+        assert row.value[0] == pytest.approx(flat.value, rel=1e-6)
+
     def test_unknown_method_raises(self, xp):
         with pytest.raises(TypeError, match="IncrementSlope"):
             analysis.estimate_linewidth(xp.zeros(64), "slope", sampling_rate=R)

@@ -181,7 +181,7 @@ def frequency_drift(
 
     return FrequencyDrift(
         df=df_out,
-        std=to_report_scalar(std),
-        pp=to_report_scalar(pp),
-        max_abs=to_report_scalar(max_abs),
+        std=to_report_scalar(std, was_1d=was_1d),
+        pp=to_report_scalar(pp, was_1d=was_1d),
+        max_abs=to_report_scalar(max_abs, was_1d=was_1d),
     )

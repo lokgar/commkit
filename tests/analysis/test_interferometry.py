@@ -96,6 +96,14 @@ class TestDSHPhaseEstimation:
         resid = (xp.asarray(dphi) - dp)[edge:-edge]
         assert float(xp.std(resid - xp.mean(resid))) < 0.05
 
+    def test_one_channel_reports_an_array(self, xp):
+        """f_shift is a float for (N,) input and (1,) for (1, N) input."""
+        z, _ = make_dsh_beat(2e6, 1 << 14, 500, 80e6, snr_db=None, seed=1)
+        _, f_flat = analysis.dsh_phase(xp.asarray(z), sampling_rate=FS)
+        _, f_row = analysis.dsh_phase(xp.asarray(z[None, :]), sampling_rate=FS)
+        assert isinstance(f_flat, float)
+        assert isinstance(f_row, np.ndarray) and f_row.shape == (1,)
+
     def test_dsh_phase_real_homodyne_rejected(self, xp):
         x = xp.asarray(np.cos(np.linspace(0.0, 20.0, 1000)))
         with pytest.raises(ValueError, match="cannot be inverted"):

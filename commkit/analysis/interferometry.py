@@ -366,5 +366,5 @@ def dsh_phase(
         dphi, slope = _remove_linear_trend(dphi)  # slope in rad/sample
         f_hat = f_hat + slope * (fs / (2.0 * np.pi))
 
-    f_used = to_report_scalar(f_hat)
+    f_used = to_report_scalar(f_hat, was_1d=was_1d)
     return restore_1d(was_1d, dphi), f_used
