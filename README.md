@@ -127,6 +127,7 @@ With [`uv`](https://github.com/astral-sh/uv), use `uv pip install` in place of `
 Jupyter notebooks in [`examples/`](https://github.com/lokgar/commkit/tree/main/examples) (install the `notebook` extra and run `jupyter lab examples`):
 
 - [`qam_receiver_quickstart`](https://github.com/lokgar/commkit/blob/main/examples/qam_receiver_quickstart.ipynb) - the quickstart above, cell by cell, with the constellation, spectrum and equalizer plots;
+- [`blind_equalization`](https://github.com/lokgar/commkit/blob/main/examples/blind_equalization.ipynb) - CMA pre-convergence handed over to RDE with `state=`, against RDE from a cold start;
 - [`carrier_phase_analysis`](https://github.com/lokgar/commkit/blob/main/examples/carrier_phase_analysis.ipynb) - drift, linewidth and Allan deviation of a recovered carrier phase;
 - [`laser_linewidth_dsh`](https://github.com/lokgar/commkit/blob/main/examples/laser_linewidth_dsh.ipynb) and [`laser_linewidth_homodyne_iq`](https://github.com/lokgar/commkit/blob/main/examples/laser_linewidth_homodyne_iq.ipynb)
   - laser linewidth from delayed self-heterodyne and homodyne IQ captures;

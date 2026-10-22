@@ -396,8 +396,10 @@ def rde(
         Left padding of a cold start; see :func:`lms`.
     state : EqualizerState, optional
         Continue from ``result.state`` of a previous call with the same
-        configuration; see :func:`lms`.  Pilots start at this call's first
-        output symbol.
+        configuration; see :func:`lms`.  The state of a :func:`cma` call is
+        accepted too: CMA pre-convergence, then RDE on the rest of the record,
+        avoids RDE's slow cold start on multi-ring QAM.  Pilots start at this
+        call's first output symbol.
 
     Returns
     -------

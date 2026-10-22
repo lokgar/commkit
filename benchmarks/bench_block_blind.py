@@ -31,8 +31,9 @@ ROUNDS = dict(rounds=3, warmup_rounds=1, iterations=1)
 N_SYM = 100_000
 
 # Converging step sizes per (equalizer, block_size).  RDE on 16-QAM from a
-# cold start (no CMA pre-convergence) settles at a few percent SER at 2048;
-# its cost does not depend on the data.
+# cold start (no CMA pre-convergence) converges slowly and is still settling
+# after the skipped symbols at 2048, hence its looser SER bound; its cost does
+# not depend on the data.
 STEP_SIZE = {
     ("cma", 256): 2e-4,
     ("cma", 2048): 3e-4,

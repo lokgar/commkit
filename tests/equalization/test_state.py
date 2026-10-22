@@ -137,6 +137,30 @@ def test_chunked_pilots_with_deboost(name, xp):
     )
 
 
+@pytest.mark.parametrize(
+    ("first", "second", "extra"),
+    [("cma", "rde", {}), ("block_cma", "block_rde", {"block_size": 64})],
+)
+def test_cma_state_hands_over_to_rde(first, second, extra, xp):
+    """RDE continues a CMA state exactly as it continues its own: the weights,
+    pending input and normalization carry over, and the new state is RDE's."""
+    sps, n1 = 2, 1001 * 2
+    x_np, _ = _signal(2, 2500, sps)
+    x = xp.asarray(x_np)
+    kw = dict(sps=sps, num_taps=7, constellation=C16, **extra)
+
+    st = getattr(E, first)(x[:, :n1], **kw).state
+    handed = getattr(E, second)(x[:, n1:], **kw, state=st)
+    relabeled = dataclasses.replace(st, equalizer=second)
+    own = getattr(E, second)(x[:, n1:], **kw, state=relabeled)
+
+    np.testing.assert_array_equal(_host(handed.y_hat), _host(own.y_hat))
+    np.testing.assert_array_equal(_host(handed.weights), _host(own.weights))
+    assert handed.state.equalizer == second
+    with pytest.raises(ValueError, match=f"equalizer='{second}'"):
+        getattr(E, first)(x[:, n1:], **kw, state=handed.state)
+
+
 def test_state_resumes_at_the_last_complete_window():
     """LMS: the state is taken where the zero-padded tail starts; RLS, whose
     outputs already stop there at sps=1, has nothing to recompute."""

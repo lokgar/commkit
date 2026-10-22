@@ -128,6 +128,9 @@ def block_rde(
     ``pilot_ref``/``pilot_mask`` resolve the ambiguity at pilot positions.
     ``step_size`` is on the same scale as :func:`rde`, with the
     ~``block_size``x-lower stability ceiling of frozen-block adaptation.
+    From a cold start RDE converges several times slower than CMA; pass
+    ``state=`` from a :func:`block_cma` result over the first part of the
+    record to start from CMA-converged taps.
 
     Parameters mirror :func:`rde`.  On GPU, ``cuda_graph=True`` (default)
     captures the per-block FDAF body once and replays it, collapsing the

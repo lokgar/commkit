@@ -81,6 +81,10 @@ class EqualizerState:
         return int(self.weights.shape[0])
 
 
+# (state made by, continued by): equalizer changes a state may carry over.
+_HANDOVER = {("cma", "rde"), ("block_cma", "block_rde")}
+
+
 def _check_state(
     state: EqualizerState | None,
     *,
@@ -93,7 +97,12 @@ def _check_state(
     initial_taps: Any = None,
     center_tap: int | None = None,
 ) -> None:
-    """Raise unless ``state`` continues this exact equalizer configuration."""
+    """Raise unless ``state`` continues this exact equalizer configuration.
+
+    The one allowed change of equalizer is the blind handover from CMA to RDE
+    (``_HANDOVER``): the two share their engine and state layout, and CMA
+    pre-convergence is how RDE is started on multi-ring QAM.
+    """
     if state is None:
         return
     if not isinstance(state, EqualizerState):
@@ -117,8 +126,9 @@ def _check_state(
         "block_size": block_size,
         "number of channels": num_ch,
     }
+    handover = (state.equalizer, equalizer) in _HANDOVER
     actual = {
-        "equalizer": state.equalizer,
+        "equalizer": equalizer if handover else state.equalizer,
         "num_taps": state.num_taps,
         "sps": state.sps,
         "block_size": state.block_size,

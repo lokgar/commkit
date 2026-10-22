@@ -249,7 +249,7 @@ What is not done yet, in suggested order. Unlike the sections above, this is a t
 
 ### Usability gaps
 
-- **RDE from a cold start** on 16-QAM settles at a few percent SER at large block sizes. CMA pre-convergence works today in two calls (`initial_taps=` or `state=` from a `cma`/`block_cma` result); a worked example in the docs or notebooks would make it discoverable.
+- **`block_cma` and `block_rde` default `step_size`** (2e-4) does not scale with `block_size` the way `block_lms`'s now does. From a cold start at `block_size=256`, RDE barely converges within 10^5 symbols at the default (`step_size * block_size` = 0.05); 0.25 to 0.5 works for both.
 
 ### Performance
 
