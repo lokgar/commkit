@@ -254,5 +254,5 @@ What is not done yet, in suggested order. Unlike the sections above, this is a t
 
 ### Known limitations
 
-- The DSH-input warning of `estimate_linewidth` misses a drift-removed phase residual when `f_shift` is unknown: a real-valued record is valid input for both kinds of method, so the type alone cannot tell them apart.
+- The DSH-input warning of `estimate_linewidth` misses a drift-removed phase residual when `f_shift` is unknown: a real-valued record is valid input for both kinds of method, so the type alone cannot tell them apart. A spectral-line test (relative -3 dB width of the dominant peak; a high-passed random walk cannot go below about 0.41) does not separate them either: residuals dominated by white measurement noise show narrow random peaks, and requiring the peak to stand above the median flags broad beat lines at low SNR.
 - Blind carrier recovery on 8-PSK near ±π/8 can lock to the wrong rotation. Inherent to blind recovery; training symbols or `resolve_phase_ambiguity` resolve it.
