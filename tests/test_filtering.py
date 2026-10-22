@@ -21,6 +21,28 @@ class TestFilterTapGenerators:
         assert isinstance(taps, np.ndarray)
         assert len(taps) == 10 * 4 + 1
 
+    @pytest.mark.parametrize(("sps", "span"), [(3, 9), (1, 7), (4, 8), (2, 9)])
+    def test_rc_nyquist_zeros_on_the_sample_grid(self, sps: int, span: int) -> None:
+        """Taps sit exactly 1/sps apart, so a raised cosine is zero at every
+        other symbol's sample, also when span * sps is odd (the grid was
+        stretched there: 3.7 % ISI at sps=3, span=9)."""
+        h = filtering.rc_taps(sps=sps, rolloff=0.25, span=span)
+        c = len(h) // 2
+        assert len(h) % 2 == 1
+        others = h[c % sps :: sps]
+        others = np.delete(others, c // sps)
+        np.testing.assert_allclose(others, 0.0, atol=1e-12 * h[c])
+
+    @pytest.mark.parametrize(("sps", "span"), [(1.5, 10), (2.5, 7)])
+    def test_fractional_sps_grid(self, sps: float, span: int) -> None:
+        """Non-integer sps: the Gaussian taps are its samples at k/sps."""
+        h = filtering.gaussian_taps(sps=sps, fwhm=1.0, span=span)
+        c = len(h) // 2
+        t = (np.arange(len(h)) - c) / sps
+        bt = np.sqrt(2) * np.log(2) / np.pi
+        alpha = np.sqrt(np.log(2) / 2) / bt
+        np.testing.assert_allclose(h / h[c], np.exp(-((np.pi * t / alpha) ** 2)))
+
     def test_rrc_taps_rolloff_zero(self, xp: Any, xpt: Any) -> None:
         """Verify zero-rolloff RRC taps match a normalised sinc function."""
         taps = filtering.rrc_taps(sps=4, rolloff=0, span=8)

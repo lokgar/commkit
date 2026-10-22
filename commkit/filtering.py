@@ -63,6 +63,19 @@ __all__ = [
 # Signal-aware (same category as gray_code/barker_sequence).
 
 
+def _symbol_grid(sps: float, span: float) -> np.ndarray:
+    """Tap times in symbols: an odd count, centered on 0, spaced exactly
+    ``1/sps``, covering at most ``span`` symbols.
+
+    ``int(span * sps)`` taps, plus one when that is even, so the taps sit on
+    the sample grid of the signal (a symmetric pulse has its peak on a
+    sample and its Nyquist zeros on the other symbols' samples).
+    """
+    num_taps = int(span * sps)
+    num_taps += 1 - num_taps % 2
+    return (np.arange(num_taps) - num_taps // 2) / sps
+
+
 def rect_taps(
     *, sps: int, duty_cycle: float = 1.0, rise_time: float = 0.0
 ) -> np.ndarray:
@@ -165,12 +178,7 @@ def gaussian_taps(*, sps: float, fwhm: float = 1.0, span: int = 4) -> np.ndarray
         fwhm,
         bt,
     )
-    # Ensure odd number of taps to have a center peak
-    num_taps = int(span * sps)
-    if num_taps % 2 == 0:
-        num_taps += 1
-
-    t = np.linspace(-span / 2, span / 2, num_taps)
+    t = _symbol_grid(sps, span)
 
     # Gaussian function
     # h(t) = (sqrt(pi)/alpha) * exp(-(pi*t/alpha)^2)
@@ -219,13 +227,8 @@ def smoothrect_taps(
         rise_time,
         duty_cycle,
     )
-    # Ensure odd number of taps to have a center peak
     sps = require_integer_sps(sps, "smoothrect_taps()")
-    num_taps = int(span * sps)
-    if num_taps % 2 == 0:
-        num_taps += 1
-
-    t = np.linspace(-span / 2, span / 2, num_taps)
+    t = _symbol_grid(sps, span)
 
     # Convert rise_time to Gaussian sigma.
     # rise_time (10%-90%) = 2·√2·erfinv(0.8)·σ  ->  σ = rise_time / (2·√2·erfinv(0.8))
@@ -267,11 +270,7 @@ def rrc_taps(*, sps: float, rolloff: float = 0.35, span: int = 8) -> np.ndarray:
     """
     logger.debug("Generating RRC taps: sps=%s, rolloff=%s, span=%s", sps, rolloff, span)
     # Ensure odd number of taps
-    num_taps = int(span * sps)
-    if num_taps % 2 == 0:
-        num_taps += 1
-
-    t = np.linspace(-span / 2, span / 2, num_taps)
+    t = _symbol_grid(sps, span)
 
     # Avoid division by zero
     # 1. t = 0
@@ -335,11 +334,7 @@ def rc_taps(*, sps: float, rolloff: float = 0.35, span: int = 8) -> np.ndarray:
     """
     logger.debug("Generating RC taps: sps=%s, rolloff=%s, span=%s", sps, rolloff, span)
     # Ensure odd number of taps
-    num_taps = int(span * sps)
-    if num_taps % 2 == 0:
-        num_taps += 1
-
-    t = np.linspace(-span / 2, span / 2, num_taps)
+    t = _symbol_grid(sps, span)
 
     # Avoid division by zero
     # Singularities at t = +/- 1 / (2 * rolloff)
