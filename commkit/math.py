@@ -1,4 +1,9 @@
-"""Power, normalization and decibel conversions on NumPy/CuPy arrays."""
+"""Power, normalization and decibel conversions on NumPy/CuPy arrays.
+
+Also the private phase helpers shared by the DSP modules: ``_unit_phasor``
+(``exp(j·phase)`` in a chosen precision) and ``_derotate``
+(``x·exp(-j·phase)`` in the precision of ``x``).
+"""
 
 from typing import Any
 
@@ -322,3 +327,61 @@ def _remove_linear_trend(y: ArrayType, *, x: Any = None) -> tuple[ArrayType, Arr
     yc = y - xp.mean(y, axis=-1, keepdims=True)
     slope = xp.sum(yc * xc, axis=-1) / denom
     return y - slope[..., None] * xc[None, :], slope
+
+
+# ---------------------------------------------------------------------------
+# Phase rotation (private, shared)
+# ---------------------------------------------------------------------------
+
+
+def _unit_phasor(phase: ArrayType, dtype: Any, xp: Any) -> ArrayType:
+    """``exp(j·phase)`` as ``dtype``, from real cos/sin (several times faster
+    than a complex exponential on the CPU).  ``phase`` keeps its own
+    precision for the cos/sin; wrap large phases first if that is float32."""
+    h = xp.empty(phase.shape, dtype=dtype)
+    h.real = xp.cos(phase)
+    h.imag = xp.sin(phase)
+    return h
+
+
+_DEROTATE_KERNEL: dict[str, Any] = {}
+
+
+def _cupy_derotate() -> Any:
+    """Fused CuPy ``s · exp(-j·wrap(φ))``: float64 wrap, float32 sin/cos and
+    complex multiply in one pass, instead of about 7 ufunc passes."""
+    if "k" not in _DEROTATE_KERNEL:
+        import cupy as cp
+
+        _DEROTATE_KERNEL["k"] = cp.ElementwiseKernel(
+            "complex64 s, float64 phi",
+            "complex64 out",
+            """
+            double w = phi - rint(phi * 0.15915494309189535) * 6.283185307179586;
+            float sw, cw;
+            sincosf((float)w, &sw, &cw);
+            out = s * complex<float>(cw, -sw);
+            """,
+            "commkit_phase_rotate",
+        )
+    return _DEROTATE_KERNEL["k"]
+
+
+def _derotate(x: ArrayType, phase: Any) -> ArrayType:
+    """``x · exp(-j·phase)`` in the precision of ``x``.
+
+    ``phase`` (radians, broadcasting against ``x``, unbounded) is wrapped to
+    ``[-π, π]`` in float64, then the phasor is built in the real precision
+    of ``x``: complex64 data is never promoted, complex128 keeps double
+    precision.  Real ``x`` gives the matching complex type.
+    """
+    x, xp, _ = dispatch(x)
+    phi = xp.asarray(phase, dtype=xp.float64)
+    if xp is not np and x.dtype == xp.complex64:
+        return _cupy_derotate()(x, phi)
+    out_dtype = np.result_type(x.dtype, np.complex64)
+    two_pi = 2.0 * np.pi
+    wrapped = (phi - xp.round(phi / two_pi) * two_pi).astype(
+        np.empty(0, out_dtype).real.dtype
+    )
+    return x * _unit_phasor(-wrapped, out_dtype, xp)

@@ -11,6 +11,7 @@ from .._random import standard_normal
 from ..backend import ArrayType, _module_for, dispatch
 from ..core._signal_adapter import S, adapt_signal, require_device
 from ..logger import logger
+from ..math import _derotate
 
 __all__ = ["apply_phase_noise", "generate_phase_noise"]
 
@@ -270,9 +271,7 @@ def apply_phase_noise(
         xp,
         periodic,
     )
-    result = x * xp.exp(1j * phase)  # (1, N) broadcasts across channels
-
-    if result.dtype != x.dtype:
-        result = result.astype(x.dtype)
+    # x · e^{jφ} in the samples' precision ((1, N) broadcasts across channels).
+    result = _derotate(x, -phase)
 
     return signal_adapter.wrap_samples(restore_1d(was_1d, result))

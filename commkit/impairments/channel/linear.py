@@ -8,11 +8,12 @@ import numpy as np
 
 from ... import _fft
 from ..._array import require_channels
-from ..._dispersion import apply_dispersion, unit_phasor
+from ..._dispersion import apply_dispersion
 from ..._fiber import jones_section
 from ...backend import ArrayType, dispatch
 from ...core._signal_adapter import S, adapt_signal
 from ...logger import logger
+from ...math import _unit_phasor
 
 __all__ = [
     "apply_chromatic_dispersion",
@@ -121,8 +122,8 @@ def apply_pmd(
     out_F = jones_section(
         S_F,
         _jones_rotation(-theta, np, np.float64),
-        unit_phasor(-phase, S_F.dtype, xp),
-        unit_phasor(phase, S_F.dtype, xp),
+        _unit_phasor(-phase, S_F.dtype, xp),
+        _unit_phasor(phase, S_F.dtype, xp),
     )
     result = _fft.ifft(out_F, axis=-1)
 

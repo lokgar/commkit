@@ -81,12 +81,11 @@ from ._dispersion import (
     beta2_length,
     beta3_length,
     dispersion_phase,
-    unit_phasor,
 )
 from ._random import as_generator, complex_normal
 from .backend import ArrayType
 from .logger import logger
-from .math import db_to_linear
+from .math import _unit_phasor, db_to_linear
 
 _PLANCK = 6.62607015e-34  # J s
 
@@ -353,7 +352,7 @@ class _Ops:
     def _response(self, length_km: float) -> ArrayType:
         key = ("h", length_km)
         if key not in self._responses:
-            self._responses[key] = unit_phasor(
+            self._responses[key] = _unit_phasor(
                 self.phase_km * length_km, self.dtype, self.xp
             )
         return self._responses[key]
@@ -365,8 +364,8 @@ class _Ops:
             phase = self.phase_km * length_km
             delay = self.omega * self.half_tau
             self._responses[key] = (
-                unit_phasor(phase - delay, self.dtype, self.xp),
-                unit_phasor(phase + delay, self.dtype, self.xp),
+                _unit_phasor(phase - delay, self.dtype, self.xp),
+                _unit_phasor(phase + delay, self.dtype, self.xp),
             )
         hm, hp = self._responses[key]
         return hm, hp
@@ -384,7 +383,7 @@ class _Ops:
     def nonlinear(self, x: ArrayType, k: float) -> ArrayType:
         """``x ← x · exp(-j k Σ_c |x_c|²)`` (the power summed over channels)."""
         power = (x.real * x.real + x.imag * x.imag).sum(axis=0)
-        x *= unit_phasor(power * power.dtype.type(-k), x.dtype, self.xp)
+        x *= _unit_phasor(power * power.dtype.type(-k), x.dtype, self.xp)
         return x
 
 

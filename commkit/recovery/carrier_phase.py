@@ -15,6 +15,7 @@ from ..backend import ArrayType, dispatch
 from ..core._signal_adapter import S, adapt_signal
 from ..core.signal import Signal
 from ..logger import logger
+from ..math import _derotate
 from ._common import _Context, _Phase
 from .bps import BPS, _bps
 from .corrections import DataAided, _data_aided
@@ -199,34 +200,6 @@ def estimate_carrier_phase(
     )
 
 
-_PHASE_ROTATE_KERNEL: dict = {}
-
-
-def _get_cupy_phase_rotate() -> Any:
-    """Compile and cache the fused CuPy phase-rotation kernel.
-
-    Fuses the whole ``s · exp(-j·wrap(φ))`` chain - float64 wrap, float32
-    sin/cos, complex multiply - into a single elementwise kernel: one read of
-    the symbols, one read of the phase, one write, instead of the ~7 separate
-    full-record kernel passes and temporaries of the ufunc chain.
-    """
-    if "k" not in _PHASE_ROTATE_KERNEL:
-        import cupy as cp
-
-        _PHASE_ROTATE_KERNEL["k"] = cp.ElementwiseKernel(
-            "complex64 s, float64 phi",
-            "complex64 out",
-            """
-            double w = phi - rint(phi * 0.15915494309189535) * 6.283185307179586;
-            float sw, cw;
-            sincosf((float)w, &sw, &cw);
-            out = s * complex<float>(cw, -sw);
-            """,
-            "commkit_phase_rotate",
-        )
-    return _PHASE_ROTATE_KERNEL["k"]
-
-
 def correct_carrier_phase(
     samples: S,
     how: CarrierPhaseEstimate | CarrierPhaseMethod | float | ArrayType,
@@ -256,7 +229,8 @@ def correct_carrier_phase(
     Notes
     -----
     The phase is wrapped to ``[-π, π]`` in float64 (a standalone trajectory
-    is unbounded), then rotated with a float32 phasor.
+    is unbounded), then rotated in the samples' precision (a float32 phasor
+    for complex64, float64 for complex128).
     """
     signal_adapter = adapt_signal(samples, function_name="correct_carrier_phase()")
     if isinstance(how, CarrierPhaseMethod):
@@ -269,15 +243,4 @@ def correct_carrier_phase(
 
     x, xp, _ = dispatch(signal_adapter.array)
     logger.debug("Applying carrier phase correction: shape=%s", x.shape)
-    phase_f64 = xp.asarray(phase, dtype=xp.float64)
-    if xp is not np and x.dtype == xp.complex64:
-        # GPU fast path: single fused kernel (broadcasts (N,) phase over (C, N)).
-        return signal_adapter.wrap_samples(_get_cupy_phase_rotate()(x, phase_f64))
-    two_pi = 2.0 * xp.pi
-    phase_wrapped = (phase_f64 - xp.round(phase_f64 / two_pi) * two_pi).astype(
-        xp.float32
-    )
-    phasor = xp.exp(-1j * phase_wrapped)
-    if phasor.dtype != x.dtype:
-        phasor = phasor.astype(x.dtype)
-    return signal_adapter.wrap_samples(x * phasor)
+    return signal_adapter.wrap_samples(_derotate(x, phase))

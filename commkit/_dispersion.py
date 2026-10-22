@@ -7,8 +7,8 @@ dispersion compensation (its inverse):
 - ``beta2_length``: D [ps/(nm km)], L [km], λ [nm] to the β₂·L product [s²],
   ``β₂ = -D λ² / (2π c)``; ``beta3_length`` adds the slope S [ps/(nm² km)]
   for the β₃·L product [s³] (``commkit._fiber``).
-- ``dispersion_phase`` / ``unit_phasor``: the phase ``-(β₂Lω²/2 + β₃Lω³/6)``
-  on the FFT grid and ``exp(j·phase)`` (also used by ``commkit._fiber``).
+- ``dispersion_phase``: the phase ``-(β₂Lω²/2 + β₃Lω³/6)`` on the FFT grid
+  (also used by ``commkit._fiber``).
 - ``transfer_function``: ``H(ω) = exp(-j β₂ L ω² / 2)`` on the FFT grid of
   ``num_samples`` samples, or its inverse ``exp(+j β₂ L ω² / 2)``.
 
@@ -27,6 +27,7 @@ import numpy as np
 from . import _fft
 from ._array import as_2d, restore_1d
 from .backend import ArrayType, dispatch
+from .math import _unit_phasor
 
 # Speed of light used by the 1.x conversion, kept so results do not change.
 _SPEED_OF_LIGHT = 2.998e8  # m/s
@@ -82,15 +83,6 @@ def dispersion_phase(
     return -phase
 
 
-def unit_phasor(phase: ArrayType, dtype: Any, xp: ModuleType) -> ArrayType:
-    """``exp(j·phase)`` as ``dtype``, from real cos/sin (several times faster
-    than a complex exponential on the CPU)."""
-    h = xp.empty(phase.shape, dtype=dtype)
-    h.real = xp.cos(phase)
-    h.imag = xp.sin(phase)
-    return h
-
-
 def transfer_function(
     num_samples: int,
     *,
@@ -109,7 +101,7 @@ def transfer_function(
     phase = dispersion_phase(
         num_samples, sampling_rate=sampling_rate, beta2_length=beta2_length, xp=xp
     )
-    return unit_phasor(-phase if inverse else phase, dtype, xp)
+    return _unit_phasor(-phase if inverse else phase, dtype, xp)
 
 
 def apply_dispersion(
