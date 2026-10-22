@@ -68,6 +68,21 @@ class TestBlockFDAFEngine:
                 sps=2,
             )
 
+    @pytest.mark.parametrize("fn", [block_lms, block_cma, block_rde])
+    @pytest.mark.parametrize("block_size", [0, -4, 256.0])
+    def test_block_size_must_be_positive_integer(self, xp, fn, block_size):
+        rx = xp.ones(2000, dtype=xp.complex64)
+        data = (rx[:10],) if fn is block_lms else ()
+        with pytest.raises(ValueError, match="block_size must be a positive integer"):
+            fn(
+                rx,
+                *data,
+                constellation=Constellation.qam(16),
+                num_taps=5,
+                block_size=block_size,
+                sps=2,
+            )
+
 
 class TestBlockCMA:
     def test_blind_converges(self, xp):

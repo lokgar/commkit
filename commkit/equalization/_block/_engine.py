@@ -92,6 +92,10 @@ def _prepare_block(
     with a non-zero ``pilot_gain_db`` de-boosts the pilot samples (on a
     copy) before the normalization.
     """
+    if not isinstance(block_size, int | np.integer) or block_size < 1:
+        raise ValueError(
+            f"{equalizer}(): block_size must be a positive integer, got {block_size!r}."
+        )
     num_taps = int(num_taps)
     block_size = int(block_size)
     _validate_sps(sps, num_taps)
