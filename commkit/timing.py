@@ -21,6 +21,7 @@ from .core import Preamble, Signal
 from .core._signal_adapter import S, adapt_signal, require_integer_sps
 from .filtering import Pulse
 from .logger import logger
+from .math import _derotate
 
 __all__ = [
     "barker_sequence",
@@ -424,9 +425,9 @@ def fft_fractional_delay(samples: S, *, delay: float | ArrayType) -> S:
 
     # Convert delay to array
     if isinstance(delay, (int, float)):
-        delay_arr = xp.full(C, delay, dtype=x.real.dtype)
+        delay_arr = xp.full(C, delay, dtype=xp.float64)
     else:
-        delay_arr = xp.asarray(delay, dtype=x.real.dtype)
+        delay_arr = xp.asarray(delay, dtype=xp.float64)
         if delay_arr.ndim == 0:
             delay_arr = delay_arr[None]
 
@@ -436,15 +437,9 @@ def fft_fractional_delay(samples: S, *, delay: float | ArrayType) -> S:
     # Frequency axis: normalized frequencies in cycles/sample
     freqs = xp.fft.fftfreq(N, d=1.0)
 
-    # Phase shift: exp(-j * 2 * pi * f * delay)
-    # Positive delay -> phase ramp that shifts signal to the right.
-    # Computed at float64 accuracy, then cast to match spec's dtype to prevent
-    # -2j * xp.pi (complex128) from promoting complex64 spectra.
-    phase_shift = xp.exp(-2j * xp.pi * freqs[None, :] * delay_arr[:, None])
-    phase_shift = phase_shift.astype(spec.dtype)
-
-    # Apply phase shift
-    spec_delayed = spec * phase_shift
+    # spec · exp(-j 2π f delay): positive delay shifts the signal right.  The
+    # phase in float64, the rotation in the spectrum's precision.
+    spec_delayed = _derotate(spec, 2.0 * np.pi * freqs[None, :] * delay_arr[:, None])
 
     # IFFT
     result = _fft.ifft(spec_delayed, axis=-1)

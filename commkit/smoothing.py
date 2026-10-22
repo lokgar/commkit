@@ -64,7 +64,9 @@ def moving_average(
         return sp.ndimage.uniform_filter1d(x, window, axis=axis, mode="nearest")
     elif mode == "valid":
         axis = axis % x.ndim
-        kernel = xp.ones(window, dtype=xp.float64) / window
+        # The kernel in the data's precision (a float64 one promotes it).
+        real = xp.empty(0, dtype=x.dtype).real.dtype
+        kernel = xp.full(window, 1.0 / window, dtype=real)
         if x.ndim == 1:
             return xp.convolve(x, kernel, mode="valid")
         return xp.apply_along_axis(

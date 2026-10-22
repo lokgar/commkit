@@ -230,8 +230,9 @@ def apply_polarization_mixing(
 
     # Time-varying: vectorised per-sample rotation via broadcasting
     # R(θ[n]) applied to each column of x
-    cos_t = xp.cos(angles)  # (N,)
-    sin_t = xp.sin(angles)  # (N,)
+    # Angles in float64, the rotation in the samples' precision.
+    cos_t = xp.cos(angles).astype(x.real.dtype)  # (N,)
+    sin_t = xp.sin(angles).astype(x.real.dtype)  # (N,)
 
     Ex, Ey = x[0], x[1]
     Ex_out = cos_t * Ex - sin_t * Ey

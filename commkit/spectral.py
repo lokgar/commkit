@@ -17,6 +17,7 @@ from .backend import ArrayType, dispatch
 from .core._signal_adapter import S, adapt_signal
 from .core.signal import Signal
 from .logger import logger
+from .math import _derotate
 
 __all__ = [
     "Spectrogram",
@@ -188,27 +189,12 @@ def shift_frequency(
     else:
         logger.debug("Applying frequency offset: %.3f Hz.", actual_offset)
 
-    # Time vector
-    t = xp.arange(n) / sampling_rate
-
-    # Apply mixing
-    # exp(j * 2 * pi * f * t)
-    # Phase is computed at float64 accuracy (xp.pi is float64), then the mixer
-    # is cast to the signal's complex precision to prevent silent promotion of
-    # complex64/float32 signals to complex128/float64.
-    phase = 2 * xp.pi * actual_offset * t
-    mixer = xp.exp(1j * phase)  # complex128
-    if xp.iscomplexobj(x):
-        target_cdtype = x.dtype
-    else:
-        target_cdtype = xp.complex64 if x.dtype == xp.float32 else xp.complex128
-    mixer = mixer.astype(target_cdtype)
-
-    # Broadcast mixer to match x shape: (1, ..., 1, N)
-    if x.ndim > 1:
-        mixer = mixer.reshape((1,) * (x.ndim - 1) + (-1,))
-
-    return signal_adapter.wrap_samples(x * mixer)
+    # x · exp(j 2π f t): the phase in float64, the rotation in the samples'
+    # precision (one fused kernel for complex64 on the GPU).
+    phase = (2.0 * np.pi * actual_offset / sampling_rate) * xp.arange(
+        n, dtype=xp.float64
+    )
+    return signal_adapter.wrap_samples(_derotate(x, -phase))
 
 
 def add_pilot_tone(

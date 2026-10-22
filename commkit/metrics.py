@@ -574,15 +574,21 @@ def gmi(
             f"{name}: the last axis ({llr_arr.shape[-1]}) is not a multiple of "
             f"bits_per_symbol ({k})."
         )
-    llr_arr = _skip(llr_arr, num_skip_symbols * k, name).astype(xp.float64)
-    bits_arr = _skip(ref, num_skip_symbols * k, name).astype(xp.float64)
+    # Per element in the LLRs' precision (float32 from compute_llr), summed in
+    # float64: single precision changed no GMI by more than 2e-8 bit (QAM 16
+    # to 256), far below the Monte Carlo error.
+    llr_arr = _skip(llr_arr, num_skip_symbols * k, name)
+    real = llr_arr.dtype if llr_arr.dtype.kind == "f" else xp.dtype(xp.float32)
+    llr_arr = llr_arr.astype(real, copy=False)
+    bits_arr = _skip(ref, num_skip_symbols * k, name).astype(real)
 
     # -(1 - 2c) L: negative (small loss) when the LLR favours the sent bit.
     x = -llr_arr * (1.0 - 2.0 * bits_arr)
     # log2(1 + e^x) = (log1p(e^-|x|) + max(0, x)) / ln 2
     softplus = (xp.log1p(xp.exp(-xp.abs(x))) + xp.maximum(0.0, x)) / np.log(2.0)
     # H(X) - sum_b E[...], written so that H(X)/k is exactly 1.0 when uniform.
-    out = to_report_scalar(k * (c.entropy / k - xp.mean(softplus, axis=-1)))
+    loss = xp.mean(softplus, axis=-1, dtype=xp.float64)
+    out = to_report_scalar(k * (c.entropy / k - loss))
     if isinstance(out, float):
         logger.info("GMI: %.4f b/symbol", out)
     else:
@@ -644,13 +650,20 @@ def mi(
     rx, xp, _ = dispatch(adapter.symbol_array())
     c = _constellation(adapter, constellation, name)
     rx = _reference_scaled(adapter, rx, xp, name, num_skip_symbols)
-    rx = _skip(rx, num_skip_symbols, name).astype(xp.complex128)
-    points = xp.asarray(c.points, dtype=xp.complex128)
+    # Per element in the symbols' precision (complex64 by default), summed in
+    # float64: single precision changed no MI by more than 4e-8 bit (QAM 16
+    # to 256), far below the Monte Carlo error.
+    rx = _skip(rx, num_skip_symbols, name)
+    cdtype = np.result_type(rx.dtype, np.complex64)
+    rx = rx.astype(cdtype, copy=False)
+    real = np.empty(0, cdtype).real.dtype
+    points = xp.asarray(c.points.astype(cdtype))
     if c.pmf is not None:
         pmf = np.asarray(c.pmf, dtype=np.float64).clip(1e-300, None)
-        log_prior = xp.asarray(np.log(pmf))
+        log_prior = xp.asarray(np.log(pmf).astype(real))
     else:
-        log_prior = xp.full(points.size, -np.log(points.size), dtype=xp.float64)
+        log_prior = xp.full(points.size, -np.log(points.size), dtype=real)
+    inv_nv = real.type(1.0 / noise_var)
     h_x = c.entropy
 
     # Chunk over N to bound the (chunk, M) intermediates (~4 GB at N=1e6,
@@ -661,11 +674,11 @@ def mi(
     acc = xp.zeros(rows.shape[0], dtype=xp.float64)
     for n0 in range(0, n_sym, chunk):
         diff = rows[:, n0 : n0 + chunk, None] - points  # (C, chunk, M)
-        log_joint = log_prior - (diff.real**2 + diff.imag**2) / noise_var
+        log_joint = log_prior - (diff.real**2 + diff.imag**2) * inv_nv
         shift = log_joint.max(axis=-1, keepdims=True)
         log_sum = xp.log(xp.sum(xp.exp(log_joint - shift), axis=-1)) + shift[..., 0]
         log_post = log_joint - log_sum[..., None]  # log p(s_m | r), nats
-        acc += xp.sum(xp.exp(log_post) * log_post, axis=(-2, -1))
+        acc += xp.sum(xp.exp(log_post) * log_post, axis=(-2, -1), dtype=xp.float64)
     mi_bits = np.clip(h_x + to_device(acc, "cpu") / n_sym / np.log(2.0), 0.0, h_x)
     out = to_report_scalar(mi_bits.reshape(rx.shape[:-1]))
     if isinstance(out, float):

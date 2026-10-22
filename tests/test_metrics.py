@@ -578,7 +578,9 @@ class TestGMIShaped:
         x = -np.asarray(to_device(llrs, "cpu"), np.float64) * (1 - 2.0 * bits)
         sp = (np.log1p(np.exp(-np.abs(x))) + np.maximum(0, x)) / np.log(2)
         expected = 4 * (1 - np.mean(sp))
-        assert metrics.gmi(llrs, xp.asarray(bits), constellation=c) == expected
+        # float32 per element, float64 sum: equal to rounding.
+        got = metrics.gmi(llrs, xp.asarray(bits), constellation=c)
+        assert got == pytest.approx(expected, rel=1e-7)
 
 
 class TestLowSNRScale:

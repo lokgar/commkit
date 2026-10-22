@@ -22,7 +22,7 @@ from .backend import ArrayType, dispatch, to_device
 from .core._signal_adapter import S, adapt_signal
 from .core.signal import Signal
 from .logger import logger
-from .math import _linear_trend_slope
+from .math import _derotate, _linear_trend_slope
 from .timing import _parabolic_peak_offset
 
 # Lazy-compiled Numba kernel for the M&M iterative bootstrap.
@@ -780,26 +780,14 @@ def _correct_static(x: ArrayType, fs: float, offset: Any, xp: Any) -> ArrayType:
     n = x.shape[-1]
     t = xp.arange(n, dtype=xp.float64) / fs  # float64: exact for any N
 
-    if xp.iscomplexobj(x):
-        target_dtype = x.dtype
-    else:
-        target_dtype = xp.complex64 if x.dtype == xp.float32 else xp.complex128
-
-    # Wrap the phase to [-π, π] in float64 before casting to float32 for a
-    # complex64 target: a large unwrapped ramp in float32 loses ~|φ|·2⁻²³ rad.
-    dtype_real = xp.float32 if target_dtype == xp.complex64 else xp.float64
-    two_pi = 2.0 * np.pi
     if per_channel:
         C = x.shape[0]
         offsets = xp.asarray(offset_arr.reshape(-1)[:C], dtype=xp.float64)
         phase = -2.0 * xp.pi * offsets[:, None] * t[None, :]  # (C, N)
     else:
         phase = -2.0 * xp.pi * float(offset_arr.reshape(-1)[0]) * t  # (N,)
-    phase_w = (phase - xp.round(phase / two_pi) * two_pi).astype(dtype_real)
-    mixer = xp.exp(1j * phase_w).astype(target_dtype)
-    if not per_channel and x.ndim > 1:
-        mixer = mixer.reshape((1,) * (x.ndim - 1) + (-1,))
-    return x * mixer
+    # Wrapped in float64, rotated in the samples' precision.
+    return _derotate(x, -phase)
 
 
 def _correct_blockwise(
@@ -829,10 +817,7 @@ def _correct_blockwise(
     if df.shape[0] == 1 and C > 1:
         theta = np.broadcast_to(theta, (C, N))
 
-    phase = xp.asarray(theta)
-    two_pi = 2.0 * np.pi
-    phase_w = (phase - xp.round(phase / two_pi) * two_pi).astype(xp.float32)
-    corrected = x2 * xp.exp(-1j * phase_w).astype(x2.dtype)
+    corrected = _derotate(x2, xp.asarray(theta))
     logger.debug(
         "correct_frequency_offset (blockwise): C=%s, B=%s blocks, total phase "
         "drift=%.3f rad",
