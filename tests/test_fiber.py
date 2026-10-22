@@ -206,3 +206,22 @@ def test_launch_power_errors(x, power, match):
             launch_power_dbm=power,
             sampling_rate=FS,
         )
+
+
+@pytest.mark.gpu_only
+def test_complex128_on_the_gpu_matches_the_cpu(xp):
+    """complex128 takes the plain CuPy stages (the fused kernels are
+    complex64) and keeps double precision end to end."""
+    x = _field(2, n=4096).astype(np.complex128)
+    kw = dict(
+        fiber=Fiber(pmd_ps_sqrt_km=0.1),
+        span_length_km=80.0,
+        num_spans=3,
+        launch_power_dbm=6.0,
+        steps_per_span=20,
+        rng=2,
+        sampling_rate=FS,
+    )
+    gpu = apply_fiber_propagation(xp.asarray(x), **kw)
+    assert gpu.dtype == xp.complex128
+    assert _rel(gpu, apply_fiber_propagation(x, **kw)) < 1e-10

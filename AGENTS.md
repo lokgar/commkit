@@ -20,6 +20,7 @@ Users are researchers and engineers. Design for them:
 
 - **Everything is expressed in Python.** No configuration files, registries, global switches or multi-step setup.
 - **We deliberately do not build** pipeline or receiver objects, DSP methods on `Signal`, string shorthands for constellations, or public "config objects per algorithm".
+- **Scope is the reference model and its inverse**, not a catalogue of research variants: the fiber channel and standard digital backpropagation (`correct_fiber_propagation`, with `steps_per_span` and `nonlinear_scale`), like chromatic dispersion and its compensation. Reduced-complexity nonlinearity compensation (filtered or enhanced split step, perturbation-based) is left to user code built on these, and learned DBP, which needs gradients, belongs in commax.
 
 ---
 
@@ -167,7 +168,7 @@ Dependencies point downward only:
 
 ## 5. Numerics
 
-- **Storage dtypes:** `complex64` for IQ samples and `float32` for real signals.
+- **Storage dtypes:** `complex64` for IQ samples and `float32` for real signals. complex128 input is accepted end to end: transforms keep it, while equalizers (complex64) and LLRs (float32) work in their own precision. It pays only where single-precision rounding accumulates over many FFT passes, as in the fiber solver (6e-4 after 10^4 steps in complex64, 1e-12 in complex128); there the GPU runs its plain CuPy stages, not the fused complex64 kernels.
 - **Accumulation precision:**
   - LMS/CMA/RDE: inputs and weights are `complex64`, but dot products and gradient updates in the hot loop are accumulated in `complex128`.
   - RLS keeps `P`, the gain `k` and the regressor buffers in `complex128` throughout. Single precision loses the Hermitian positive-definite property and the filter diverges.
@@ -269,7 +270,6 @@ Each is an addition that leaves the current API unchanged.
 - **Adaptive step rules**: a `step_rule=` object (maximum nonlinear phase per step, local-error method) next to the equal `steps_per_span`, which measured 3x more accurate than logarithmic steps on a 32 GBd, 80 km span.
 - **WDM helpers**: combining frequency-shifted channels into one wideband field and selecting one after propagation; the solver already handles the wide field (with `dispersion_slope_ps_nm2_km` set).
 - **Distributed (Raman) amplification and per-span fiber types** in one call (chaining calls already works: every call speaks launch-relative units).
-- **Reduced-complexity DBP**: filtered or enhanced split step and perturbation-based nonlinearity compensation, as `correct_fiber_propagation` methods.
 - **cuFFT callbacks** fusing the linear stage into the transforms (CuPy's support is experimental and compiles with nvcc at run time).
 - **Self-steepening and Raman scattering** for ultra-wideband fields.
 

@@ -109,6 +109,16 @@ def apply_fiber_propagation(
     ``pmd · sqrt(3π h / 8)``, which gives a Maxwellian DGD of mean
     ``pmd_ps_sqrt_km · sqrt(L)``.
 
+    Precision follows the input.  complex64 (the default storage) loses
+    about 6e-8 per FFT pair: 1e-6 relative after 2 x 80 km at 7 steps per
+    span, 6e-4 (about -64 dB) after 100 x 80 km at 100 steps, far below the
+    SNR of a real link.  For more dynamic range (nonlinear interference at
+    low launch power, GN-model checks, step convergence or DBP-inverse
+    studies) pass complex128, e.g. ``sig.replace(samples=sig.samples.astype(
+    "complex128"))``: about 1e-12 over the same 100 spans, at 1.6x the CPU
+    time (the GPU then uses its plain CuPy stages).  Equalizers and LLRs
+    downstream work in complex64/float32 either way.
+
     Nonlinear spectral broadening must fit in the sampling rate; a warning
     is logged when the field after the first span has more than 0.1 % of
     its power beyond 0.4 f_s.
