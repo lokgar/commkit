@@ -276,6 +276,11 @@ def _half_indices(bit_labels: np.ndarray) -> np.ndarray:
     ).astype(np.int64)
 
 
+def _check_method(method: str) -> None:
+    if method not in ("maxlog", "exact"):
+        raise ValueError(f"Unknown method: {method}. Use 'maxlog' or 'exact'.")
+
+
 def _log_prior(pmf: np.ndarray | None, order: int) -> np.ndarray:
     """float32 log prior; zeros (a constant that cancels) for no prior."""
     if pmf is None:
@@ -296,34 +301,18 @@ def _llr(
     Shared by :func:`compute_llr` and :meth:`Constellation.llr`.  Returns
     float32 LLRs of shape ``(..., N * k)`` on the input's device.
     """
-    if method not in ("maxlog", "exact"):
-        raise ValueError(f"Unknown method: {method}. Use 'maxlog' or 'exact'.")
+    _check_method(method)
     order, k = bit_labels.shape
     symbols, xp, _ = dispatch(symbols)
     is_complex = symbols.dtype.kind == "c"
     sym_flat = symbols.reshape(-1).astype(xp.complex64 if is_complex else xp.float32)
-
-    const = xp.asarray(points.astype(np.complex64 if is_complex else np.float32))
-    # Column indices of the M/2 points whose bit b is 0 (resp. 1): (k, M/2).
-    idx0 = xp.asarray(
-        np.stack([np.flatnonzero(bit_labels[:, b] == 0) for b in range(k)])
-    )
-    idx1 = xp.asarray(
-        np.stack([np.flatnonzero(bit_labels[:, b] == 1) for b in range(k)])
-    )
-
     inv_sigma2 = np.float32(1.0 / max(noise_var, 1e-20))
-    if pmf is not None:
-        log_pmf = np.log(np.clip(np.asarray(pmf, dtype=np.float64), 1e-40, None))
-        log_pmf_dev = xp.asarray(log_pmf.astype(np.float32))
-    else:
-        log_pmf_dev = None  # uniform prior: a constant that cancels
+    log_pmf = _log_prior(pmf, order)
 
     n = sym_flat.shape[0]
     llrs = xp.empty((n, k), dtype=xp.float32)
     if xp is np:
         # CPU: one parallel pass, no (chunk, k, M/2) intermediates.
-        zeros = np.zeros(order, dtype=np.float32)
         _get_numba_llr()(
             np.ascontiguousarray(sym_flat.real, dtype=np.float32),
             np.ascontiguousarray(
@@ -331,9 +320,9 @@ def _llr(
             ),
             np.ascontiguousarray(np.real(points), dtype=np.float32),
             np.ascontiguousarray(
-                np.imag(points) if is_complex else zeros, dtype=np.float32
+                np.imag(points) if is_complex else np.zeros(order), dtype=np.float32
             ),
-            zeros if log_pmf_dev is None else log_pmf_dev,
+            log_pmf,
             _half_indices(bit_labels),
             inv_sigma2,
             method == "exact",
@@ -347,13 +336,17 @@ def _llr(
         llrs = kernel(
             sym_flat.astype(xp.complex64, copy=False),
             xp.asarray(points.astype(np.complex64)),
-            xp.zeros(order, xp.float32) if log_pmf_dev is None else log_pmf_dev,
+            xp.asarray(log_pmf),
             xp.asarray(labels.astype(np.int32)),
             k=k,
             inv_s2=float(inv_sigma2),
             exact=method == "exact",
         )
         return llrs.reshape((*symbols.shape[:-1], symbols.shape[-1] * k))
+    # CuPy fallback (no CUDA kernel, or more than 16 bits per symbol).
+    const = xp.asarray(points.astype(np.complex64 if is_complex else np.float32))
+    idx0, idx1 = (xp.asarray(i) for i in _half_indices(bit_labels))  # (k, M/2)
+    log_pmf_dev = None if pmf is None else xp.asarray(log_pmf)
     chunk = max(1, _CHUNK_ELEMENTS // (k * order))
     for n0 in range(0, n, chunk):
         x = sym_flat[n0 : n0 + chunk]
@@ -395,8 +388,7 @@ def _llr_separable(
     depends on one axis, so the other axis's factor cancels from its LLR in
     both methods: 2·sqrt(M) metrics per symbol instead of M.
     """
-    if method not in ("maxlog", "exact"):
-        raise ValueError(f"Unknown method: {method}. Use 'maxlog' or 'exact'.")
+    _check_method(method)
     re, im = axes
     flat = np.asarray(symbols).reshape(-1)
     k = re.bits.size + im.bits.size
