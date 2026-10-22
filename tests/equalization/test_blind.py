@@ -166,6 +166,33 @@ class TestBlockRDE:
         # Multi-ring 16-QAM: RDE drives |y| onto the rings (blind, phase-ambiguous).
         assert calc_dispersion(r.y_hat[8000:], 16, "qam") < 0.05
 
+    def test_default_step_converges_from_cold_start(self, xp, xpt):
+        """The default step, min(1e-3, 0.5/block_size), opens a dual-pol
+        16-QAM eye under a 30-degree polarization rotation from a cold start
+        (the previous fixed 2e-4 had not converged after 10^5 symbols)."""
+        from commkit import RRC, generate
+        from commkit.impairments import apply_awgn, apply_polarization_mixing
+        from commkit.recovery import resolve_phase_ambiguity
+
+        c16 = Constellation.qam(16)
+        n_sym, tail, block_size = 49152, 16384, 256
+        tx = generate(
+            c16, n_sym, symbol_rate=1e9, sps=2, pulse=RRC(0.1), num_channels=2, rng=1
+        )
+        rx = apply_polarization_mixing(tx.samples, theta=np.deg2rad(30.0))
+        rx = xp.asarray(apply_awgn(rx, esn0_db=20.0, sps=2, rng=3))
+        kw = dict(sps=2, num_taps=21, constellation=c16, block_size=block_size)
+        r = block_rde(rx, **kw)
+        r_explicit = block_rde(rx, step_size=min(1e-3, 0.5 / block_size), **kw)
+        xpt.assert_array_equal(r.y_hat, r_explicit.y_hat)
+
+        ref = tx.reference.symbols[:, -tail:]
+        y = resolve_phase_ambiguity(
+            to_numpy(r.y_hat)[:, -tail:], ref, constellation=c16
+        )
+        ser = float(np.mean(c16.demap(y) != c16.demap(ref)))
+        assert ser < 1e-3, f"SER {ser:.2e}: default step did not converge"
+
     def test_remainder_block_size(self, xp):
         """n_sym not divisible by block_size yields full-length output."""
         channel = np.array([0.1, 1.0, 0.2], np.complex64)

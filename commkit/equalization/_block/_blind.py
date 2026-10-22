@@ -26,7 +26,7 @@ def _block_fdaf_blind(
     *,
     num_taps: int,
     sps: int,
-    step_size: float,
+    step_size: float | None,
     block_size: int,
     r2: float,
     radii_np: np.ndarray | None,
@@ -44,7 +44,8 @@ def _block_fdaf_blind(
     Blind, phase-directed adaptation with no CPR - the per-block error is the
     Godard (``kind='cma'``) or nearest-ring (``kind='rde'``) gradient, with
     pilot positions overridden by the LMS residual.  ``r2`` is the Godard radius
-    (CMA) and ``radii_np`` the unique ring radii (RDE).
+    (CMA) and ``radii_np`` the unique ring radii (RDE).  ``step_size=None``
+    is block_rde's default, ``min(1e-3, 0.5 / block_size)``.
     """
     use_pilots = pilot_ref is not None and pilot_mask is not None
     equalizer = f"block_{kind}"
@@ -63,6 +64,7 @@ def _block_fdaf_blind(
         pilot_gain_db=pilot_gain_db,
     )
     xp, C, n_sym, sps = run.xp, run.C, run.n_sym, run.sps
+    mu = min(1e-3, 0.5 / run.block_size) if step_size is None else step_size
     logger.info(
         "%s: C=%s, num_taps=%s, sps=%s, block_size=%s, fftsize=%s, mu=%s, "
         "n_sym=%s, pilot_aided=%s",
@@ -72,7 +74,7 @@ def _block_fdaf_blind(
         sps,
         run.block_size,
         run.fftsize,
-        step_size,
+        mu,
         n_sym,
         use_pilots,
     )
@@ -114,9 +116,7 @@ def _block_fdaf_blind(
             e = xp.where(pm, pref[:, b_start : b_start + B] - y_block, e)
         y_ws[:, :B] = y_block
         e_ws[:, :B] = e
-        _fdaf_gradient_update(
-            run.h, X_fd, e, e_scatter, sps, B, run.num_taps, step_size, xp
-        )
+        _fdaf_gradient_update(run.h, X_fd, e, e_scatter, sps, B, run.num_taps, mu, xp)
 
     def store(b_start: int, b_end: int, B: int) -> None:
         y_all[:, b_start:b_end] = y_ws[:, :B]
@@ -146,10 +146,10 @@ def _block_fdaf_blind(
     h = run.h
     if not bool(xp.isfinite(h).all()):
         raise RuntimeError(
-            f"{name} diverged (step_size={step_size}, block_size={block_size}). "
+            f"{name} diverged (step_size={mu}, block_size={block_size}). "
             f"step_size is on the same scale as {kind}(); because the weights are "
             f"frozen across the block the stability ceiling is ~{block_size}x lower. "
-            f"Reduce step_size (e.g. {step_size / 2:.2e}, then keep halving)."
+            f"Reduce step_size (e.g. {mu / 2:.2e}, then keep halving)."
         )
     if run.was_1d:
         y_out, e_out, W_out = y_all[0], e_all[0], h[0, 0]

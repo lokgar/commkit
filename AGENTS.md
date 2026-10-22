@@ -247,10 +247,6 @@ What is not done yet, in suggested order. Unlike the sections above, this is a t
 1. **Nonlinear fiber channel** (`impairments.channel.nonlinear`, a placeholder). Split-step Fourier propagation of the Kerr effect together with chromatic dispersion, then digital backpropagation as its compensation counterpart in `filtering`. Comes first because it builds on what exists: the dispersion operator (`_dispersion`), overlap-save and FFT-heavy GPU code. It completes the coherent optical link model.
 2. **Channel coding** (`coding`, a placeholder package). Start with one soft decoder (LDPC) that consumes `compute_llr` output (positive LLR = bit 0) and reports post-FEC BER next to `gmi`, then add encoders. The package stays out of `commkit/__init__.py` until a real encode/decode entry point exists. Decoders are iterative message passing over many codewords: batch codewords on the GPU from the start.
 
-### Usability gaps
-
-- **`block_cma` and `block_rde` default `step_size`** (2e-4) does not scale with `block_size` the way `block_lms`'s now does. From a cold start at `block_size=256`, RDE barely converges within 10^5 symbols at the default (`step_size * block_size` = 0.05); 0.25 to 0.5 works for both.
-
 ### Performance
 
 - **Exact LLRs on the CPU**: 256-QAM takes about 330 ms per 2^18 symbols (max-log about 18 ms), dominated by one `exp` per point and bit.

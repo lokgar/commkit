@@ -104,7 +104,7 @@ def block_rde(
     *,
     num_taps: int = 21,
     sps: int | None = None,
-    step_size: float = 2e-4,
+    step_size: float | None = None,
     block_size: int = 256,
     constellation: Any = None,
     initial_taps: ArrayType | None = None,
@@ -127,7 +127,10 @@ def block_rde(
     Fully blind up to a phase ambiguity (run CPR afterwards);
     ``pilot_ref``/``pilot_mask`` resolve the ambiguity at pilot positions.
     ``step_size`` is on the same scale as :func:`rde`, with the
-    ~``block_size``x-lower stability ceiling of frozen-block adaptation.
+    ~``block_size``x-lower stability ceiling of frozen-block adaptation.  The
+    default ``min(1e-3, 0.5 / block_size)`` is the per-symbol step, capped
+    at half the ceiling (``step_size * block_size`` below about 1) for large
+    blocks.
     From a cold start RDE converges several times slower than CMA; pass
     ``state=`` from a :func:`block_cma` result over the first part of the
     record to start from CMA-converged taps.
