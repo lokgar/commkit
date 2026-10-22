@@ -252,6 +252,3 @@ What is not done yet, in suggested order. Unlike the sections above, this is a t
 - **Block equalizers at small `block_size` on the GPU**: a fixed cost per block; at 256 the GPU only ties the CPU without carrier recovery.
 - **`cs_block` on phases with frequent slip decisions**: one speculation pass per changed decision (about 1 pass per block on a realistic link, more on pathological input). Outside a CUDA graph the Python wrapper (validation, scratch allocation) costs about 18 us per launch.
 
-### Known limitations
-
-- The DSH-input warning of `estimate_linewidth` misses a drift-removed phase residual when `f_shift` is unknown: a real-valued record is valid input for both kinds of method, so the type alone cannot tell them apart. A spectral-line test (relative -3 dB width of the dominant peak; a high-passed random walk cannot go below about 0.41) does not separate them either: residuals dominated by white measurement noise show narrow random peaks, and requiring the peak to stand above the median flags broad beat lines at low SNR.

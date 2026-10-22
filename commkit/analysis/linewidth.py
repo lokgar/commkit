@@ -760,43 +760,81 @@ def _beta_separation(
 # -----------------------------------------------------------------------------
 
 
-def _warn_if_phase_trajectory(x: ArrayType, f_shift: float | None, fs: float) -> None:
-    """Warn when real input to a DSH method looks like a phase trajectory.
+# The beat-line test of ``_not_a_beat``: segment length of the averaged
+# periodogram, and how far a beat line must rise above the median PSD on
+# both sides of it, in the bands at 0.4-0.6 and 1.4-1.6 times its frequency.
+# A drift-removed phase residual may rise steeply below its peak (the
+# high-pass), but above it falls only as 1/f^2 (about 2x from f to 1.5 f),
+# and white noise is flat on both sides.
+_LINE_NPERSEG = 4096
+_LINE_CONTRAST = 10.0
 
-    A real beat must sit away from DC for the analytic-signal step, so almost
-    none of its (mean-removed) power lies below half its carrier, or below
-    ``fs/200`` when the carrier is unknown; a phase trajectory is a random
-    walk with nearly all of its power there.  Measured: beats at 2-200 MHz
-    (500 MS/s, -5 dB SNR, DC offsets) put at most 0.12 of their power in the
-    band, Wiener phases and ``dsh_phase`` outputs at least 0.9.  A
-    drift-removed residual is high-passed and passes unnoticed when the
-    carrier is unknown.  Complex input is never a phase trajectory.
+
+def _not_a_beat(x: ArrayType, f_shift: float | None, fs: float) -> np.ndarray:
+    """Per channel: real input that is not a DSH beat record, ``(C,)`` bool.
+
+    A real beat sits away from DC as a spectral line.  A channel fails when
+    (a) more than half of its mean-removed power lies below half its carrier
+    (``fs/400`` when the carrier is unknown): a raw phase trajectory, or
+    (b) its spectral peak (within ``0.8-1.2·f_shift`` when the carrier is
+    known) does not rise ``_LINE_CONTRAST`` above the median PSD on both
+    sides of it: a drift-removed residual, white or not, or a beat whose
+    line is too weak or too wide for its carrier to measure.  Complex input
+    is never a phase trajectory.
     """
     _, xp, _ = dispatch(x)
-    if xp.iscomplexobj(x):
-        return
-    # The first 2^16 samples resolve the fs/400 band with ~160 bins and keep
-    # the check at a few percent of an estimate.
     x2, _ = as_2d(x, name="samples")
+    if xp.iscomplexobj(x2):
+        return np.zeros(x2.shape[0], dtype=bool)
+    # The first 2^16 samples keep the check at a few percent of an estimate.
     x2 = x2[:, : 1 << 16].astype(xp.float64)
     x2 = x2 - xp.mean(x2, axis=-1, keepdims=True)
+    n = x2.shape[-1]
     power = xp.abs(xp.fft.rfft(x2, axis=-1)) ** 2
-    f = xp.fft.rfftfreq(x2.shape[-1], d=1.0 / fs)
+    f_full = xp.fft.rfftfreq(n, d=1.0 / fs)
     f_lo = abs(float(f_shift)) / 2.0 if f_shift else fs / 400.0
-    low = xp.sum(xp.where(f < f_lo, power, 0.0), axis=-1)
+    low = xp.sum(xp.where(f_full < f_lo, power, 0.0), axis=-1)
+    seg = min(_LINE_NPERSEG, n)
+    k_seg = n // seg
+    segs = x2[:, : k_seg * seg].reshape(x2.shape[0], k_seg, seg)
+    psd = xp.mean(
+        xp.abs(xp.fft.rfft(segs * xp.asarray(np.hanning(seg)), axis=-1)) ** 2, axis=1
+    )
     with np.errstate(invalid="ignore", divide="ignore"):
         frac = np.asarray(to_device(low / xp.sum(power, axis=-1), "cpu"))
-    channels = np.flatnonzero(frac > 0.5)
+    psd_cpu = np.asarray(to_device(psd, "cpu"))  # (C, seg/2 + 1), one transfer
+
+    f = np.fft.rfftfreq(seg, d=1.0 / fs)
+    if f_shift:
+        search = np.abs(f / abs(float(f_shift)) - 1.0) <= 0.2
+    else:
+        search = f >= fs / 400.0
+    flags = frac > 0.5
+    for c, p in enumerate(psd_cpu):
+        if flags[c] or not search.any():
+            continue
+        k = int(np.flatnonzero(search)[np.argmax(p[search])])
+        sides = [
+            p[(f >= a * f[k]) & (f <= b * f[k])] for a, b in ((0.4, 0.6), (1.4, 1.6))
+        ]
+        levels = [float(np.median(side)) for side in sides if side.size]
+        flags[c] = not levels or p[k] < _LINE_CONTRAST * max(levels)
+    return flags
+
+
+def _warn_if_phase_trajectory(x: ArrayType, f_shift: float | None, fs: float) -> None:
+    """Warn when real input to a DSH method is not a beat (``_not_a_beat``)."""
+    channels = np.flatnonzero(_not_a_beat(x, f_shift, fs))
     if channels.size:
         logger.warning(
-            "estimate_linewidth: channel(s) %s hold %s of their power below "
-            "%.3g Hz - this looks like a phase trajectory, not a DSH beat "
+            "estimate_linewidth: channel(s) %s show no DSH beat line - this "
+            "looks like a phase trajectory (raw or drift-removed), not a beat "
             "record. Phase trajectories take IncrementSlope, IncrementSubtract "
-            "or BetaSeparation; a real beat with a carrier that low needs "
-            "f_shift=.",
+            "or BetaSeparation. A real beat needs its line 10 dB above the "
+            "spectrum at half and 1.5 times its carrier; one with a carrier "
+            "below %.3g Hz also needs f_shift=.",
             channels.tolist(),
-            np.round(frac[channels], 2).tolist(),
-            f_lo,
+            fs / 400.0,
         )
 
 
@@ -1112,9 +1150,12 @@ def estimate_linewidth(
         * ``DshFmPsd``, ``DshIncrement``, ``DshLorentzian``: a delayed
           self-heterodyne beat record, real (single photodetector) or complex
           (IQ front end), as an array or a Signal.  A phase trajectory is
-          real too, so it cannot be rejected by type: real input whose power
-          sits near DC (below half the carrier, or below
-          ``sampling_rate/200`` without ``f_shift``) logs a warning.
+          real too, so it cannot be rejected by type: real input logs a
+          warning when its power sits near DC (below half the carrier, or
+          below ``sampling_rate/400`` without ``f_shift``) or when it has no
+          beat line, a peak 10 dB above the spectrum at half and 1.5 times
+          its frequency (a drift-removed residual, or a beat too weak or too
+          wide for its carrier to measure).
     method : IncrementSlope, IncrementSubtract, BetaSeparation, DshFmPsd, DshIncrement or DshLorentzian
         The estimator and its parameters.
     sampling_rate : float, optional

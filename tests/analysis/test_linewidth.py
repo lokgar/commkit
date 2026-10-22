@@ -519,17 +519,64 @@ class TestEstimateLinewidthContract:
             analysis.estimate_linewidth(xp.asarray(phi), method, sampling_rate=FS)
         assert "looks like a phase trajectory" in caplog.text
 
+    @pytest.mark.parametrize("f_shift", [None, 80e6])
     @pytest.mark.parametrize(
-        ("f_shift", "snr_db", "offset", "real"),
+        ("cutoff", "order", "white"),
+        [(5e5, 4, 0.0), (2.5e6, 8, 0.0), (2.5e7, 2, 0.0), (5e6, 4, 0.1)],
+        ids=["slow", "sharp", "wide", "white-dominated"],
+    )
+    def test_drift_removed_residual_warns(
+        self, xp, caplog, f_shift, cutoff, order, white
+    ):
+        """A drift-removed phase residual is high-passed, so it has little
+        power near DC; it has no beat line either: above its peak it falls
+        only as 1/f^2, and white measurement noise is flat."""
+        phi = to_device(
+            generate_phase_noise(
+                num_samples=1 << 16, sampling_rate=FS, linewidth=1e5, rng=3
+            ),
+            "cpu",
+        )
+        phi = phi + white * np.random.default_rng(5).standard_normal(phi.size)
+        _, residual = analysis.separate_drift_phase_noise(
+            phi, sampling_rate=FS, cutoff=cutoff, order=order
+        )
+        with caplog.at_level("WARNING", logger="commkit"):
+            analysis.estimate_linewidth(
+                xp.asarray(residual),
+                DshIncrement(delay=500 / FS, f_shift=f_shift),
+                sampling_rate=FS,
+            )
+        assert "looks like a phase trajectory" in caplog.text
+
+    def test_unmeasurable_beat_warns(self, xp, caplog):
+        """A line too weak and wide for its carrier (20 MHz FWHM at -5 dB
+        SNR) gives no usable estimate (about 9x off here) and is flagged."""
+        z, _ = make_dsh_beat(10e6, 1 << 16, 500, 200e6, snr_db=-5.0, seed=1)
+        with caplog.at_level("WARNING", logger="commkit"):
+            analysis.estimate_linewidth(
+                xp.asarray(z.real),
+                DshIncrement(delay=500 / FS, f_shift=200e6),
+                sampling_rate=FS,
+            )
+        assert "no DSH beat line" in caplog.text
+
+    @pytest.mark.parametrize(
+        ("linewidth", "f_shift", "snr_db", "offset", "real"),
         [
-            (80e6, 0.0, 0.0, True),  # low SNR
-            (None, 25.0, 3.0, True),  # strong DC offset, carrier unknown
-            (None, 10.0, 0.0, True),
-            (80e6, 25.0, 0.0, False),  # IQ capture
+            (2e6, 80e6, 0.0, 0.0, True),  # low SNR
+            (2e6, None, 25.0, 3.0, True),  # strong DC offset, carrier unknown
+            (2e6, None, 10.0, 0.0, True),
+            (2e6, 80e6, 25.0, 0.0, False),  # IQ capture
+            (1e4, 10e6, -5.0, 0.0, True),  # narrow line, low carrier
+            (1e6, 200e6, -5.0, 0.0, True),  # near Nyquist
         ],
     )
-    def test_beats_do_not_warn(self, xp, caplog, f_shift, snr_db, offset, real):
-        z, _ = make_dsh_beat(2e6, 1 << 16, 500, 80e6, snr_db=snr_db, seed=2)
+    def test_beats_do_not_warn(
+        self, xp, caplog, linewidth, f_shift, snr_db, offset, real
+    ):
+        carrier = 80e6 if f_shift is None else f_shift
+        z, _ = make_dsh_beat(linewidth, 1 << 16, 500, carrier, snr_db=snr_db, seed=2)
         z = (z.real if real else z) + offset
         with caplog.at_level("WARNING", logger="commkit"):
             analysis.estimate_linewidth(
