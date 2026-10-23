@@ -19,7 +19,7 @@ Matplotlib, change warning filters, or touch the GPU.  Subpackages such as
 import importlib
 from typing import Any
 
-__version__ = "2.1.0"
+__version__ = "2.2.0"
 
 from .backend import PrecisionWarning
 from .core import (
