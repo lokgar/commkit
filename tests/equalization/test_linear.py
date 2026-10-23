@@ -1,7 +1,16 @@
 """Linear equalizers: zero-forcing / MMSE (zf_equalizer, apply_taps)."""
 
+import pytest
+
 from commkit import equalization
 from commkit.core import Signal
+
+
+def _peak_lag(xp, y, x):
+    """Lag in samples of the circular cross-correlation peak of ``y`` against ``x``."""
+    c = xp.fft.ifft(xp.fft.fft(y) * xp.conj(xp.fft.fft(x)))
+    k = int(xp.argmax(xp.abs(c)))
+    return k if k < c.size // 2 else k - c.size
 
 
 class TestZFEqualizer:
@@ -34,6 +43,28 @@ class TestZFEqualizer:
         equalized = equalization.zf_equalizer(rx, channel)
 
         xpt.assert_allclose(equalized, tx, atol=1e-4)
+
+    def test_center_inverts_noncausal_channel(self, xp, xpt):
+        """center=c marks lag 0 at index c: taps before it are precursors."""
+        n = 256
+        channel = xp.array([0.25, 1.0, 0.4j], dtype=xp.complex64)
+        rng = xp.random.RandomState(7)
+        tx = (rng.randn(n) + 1j * rng.randn(n)).astype(xp.complex64)
+
+        # rx[k] = 0.25 tx[k + 1] + tx[k] + 0.4j tx[k - 1]
+        rx = xp.convolve(tx, channel, mode="full")[1 : n + 1]
+
+        equalized = equalization.zf_equalizer(rx, channel, center=1)
+
+        # The last sample lacks the precursor of tx[n], so skip the edges.
+        xpt.assert_allclose(equalized[8:-8], tx[8:-8], atol=1e-4)
+
+    @pytest.mark.parametrize("center", [-1, 3])
+    def test_center_out_of_range_raises(self, xp, center):
+        channel = xp.array([0.25, 1.0, 0.4j], dtype=xp.complex64)
+        samples = xp.ones(64, dtype=xp.complex64)
+        with pytest.raises(ValueError, match="center"):
+            equalization.zf_equalizer(samples, channel, center=center)
 
     def test_mmse_better_than_zf_in_noise(self, xp):
         """MMSE should have lower MSE than ZF with a noisy spectral null."""
@@ -270,8 +301,27 @@ class TestEstimateTransferFunction:
         assert int(xp.argmax(xp.abs(taps))) == 8
         xpt.assert_allclose(taps[8], xp.asarray(1.5 + 0j), rtol=0.01, atol=0.01)
 
-    def test_mimo_taps_shape_for_zf_equalizer(self, xp):
-        """MIMO taps come back as (C, C, L) - the layout zf_equalizer consumes."""
+    @pytest.mark.parametrize("num_taps", [15, 16, 31])
+    def test_taps_compose_with_zf_equalizer(self, xp, num_taps):
+        """zf_equalizer(rx, taps, center=L // 2) reproduces tx at lag 0."""
+        rng = xp.random.RandomState(5)
+        n = 1 << 15
+        tx = (rng.standard_normal(n) + 1j * rng.standard_normal(n)) / 2**0.5
+        tx = tx.astype(xp.complex64)
+        h = xp.asarray([0.25, 1.0, 0.4j], dtype=xp.complex64)
+        rx = xp.convolve(tx, h)[:n].astype(xp.complex64)
+
+        taps = equalization.estimate_transfer_function(tx, rx, num_taps=num_taps)
+        out = equalization.zf_equalizer(rx, taps, center=num_taps // 2)
+
+        assert _peak_lag(xp, out, tx) == 0
+        # The Hann taper attenuates the off-centre taps, so the inversion is
+        # approximate: about -20 dB at 15 taps, -30 dB at 31.
+        err = float(xp.mean(xp.abs(out[64:-64] - tx[64:-64]) ** 2))
+        assert err < 10 ** (-1.5)
+
+    def test_mimo_taps_compose_with_zf_equalizer(self, xp, xpt):
+        """MIMO taps come back as (C, C, L) and invert the channel with center."""
         rng = xp.random.RandomState(4)
         n = 1 << 14
         x = (rng.standard_normal((2, n)) + 1j * rng.standard_normal((2, n))).astype(
@@ -281,9 +331,9 @@ class TestEstimateTransferFunction:
         y = (M @ x).astype(xp.complex64)
         taps = equalization.estimate_transfer_function(x, y, n_fft=128, num_taps=63)
         assert taps.shape == (2, 2, 63)
-        # taps drop straight into zf_equalizer without shape juggling
-        out = equalization.zf_equalizer(y, taps, noise_variance=1e-2)
+        out = equalization.zf_equalizer(y, taps, noise_variance=1e-2, center=31)
         assert out.shape == (2, n)
+        xpt.assert_allclose(out[:, 64:-64], x[:, 64:-64], atol=0.1)
 
     def test_signal_input_unwraps_both_arguments(self, xp, xpt):
         """Signal input for either/both arguments unwraps to .samples; output

@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import operator
+
 import numpy as np
 
 from .. import _fft
@@ -25,6 +27,7 @@ def zf_equalizer(
     channel_estimate: ArrayType,
     *,
     noise_variance: float = 0.0,
+    center: int = 0,
 ) -> ArrayType | Signal:
     """
     Zero-Forcing / MMSE frequency-domain block equalizer.
@@ -44,10 +47,16 @@ def zf_equalizer(
     channel_estimate : array_like
         Channel impulse response. Shape: ``(L,)`` for SISO or
         ``(C, C, L)`` for MIMO (each ``[i, j]`` is the FIR from input j
-        to output i).
+        to output i). Index ``center`` holds lag 0.
     noise_variance : float, default 0.0
         Noise variance (sigma^2) for MMSE regularization.
         ``0.0`` gives pure ZF.
+    center : int, default 0
+        Index of lag 0 in ``channel_estimate``, in ``[0, L)``. ``0`` means a
+        causal response (``rx = convolve(tx, h)[:N]``). A centred estimate
+        from :func:`estimate_transfer_function` with ``num_taps=L`` has
+        ``center=L // 2``; taps before ``center`` are precursors (negative
+        lags). The output is aligned with the transmitted samples (no delay).
 
     Returns
     -------
@@ -71,6 +80,11 @@ def zf_equalizer(
 
     num_ch, N = samples.shape
     L = channel_estimate.shape[-1] if channel_estimate.ndim > 0 else 1
+    center = operator.index(center)
+    if not 0 <= center < L:
+        raise ValueError(
+            f"center must lie in [0, {L}) for a {L}-tap channel_estimate, got {center}"
+        )
     reg = noise_variance if noise_variance > 0 else 1e-12
 
     # N_fft must satisfy discard = N_fft//4 >= L so the IIR filter's causal
@@ -80,6 +94,12 @@ def zf_equalizer(
     logger.debug(
         "ZF/MMSE internals: N=%s, L=%s, num_ch=%s, N_fft=%s", N, L, num_ch, N_fft
     )
+
+    if center:
+        # Move lag 0 to index 0 circularly, so taps before `center` wrap to the
+        # end of the FFT window as negative lags.
+        pad = [(0, 0)] * (channel_estimate.ndim - 1) + [(0, N_fft - L)]
+        channel_estimate = xp.roll(xp.pad(channel_estimate, pad), -center, axis=-1)
 
     # --- Shared OLS forward pass: pad -> stride_tricks -> batch FFT ---
     Y, meta = ols_forward(samples, N_fft)  # Y: (num_ch, num_blocks, N_fft)
@@ -288,9 +308,14 @@ def estimate_transfer_function(
     recovered in one shot (the reference is FFT'd once and every channel pair is
     formed by a single einsum).
 
-    Pair it with :func:`zf_equalizer` / :func:`apply_taps` (which consume a
-    ``(C, C, L)`` impulse response) to invert the estimated channel, or use the
-    impulse response to seed an adaptive butterfly equalizer.
+    Invert the estimated channel with :func:`zf_equalizer`, passing the centre
+    index of the taps::
+
+        h = estimate_transfer_function(tx, rx, num_taps=L)
+        tx_hat = zf_equalizer(rx, h, center=L // 2)  # aligned with tx, no delay
+
+    The taps are a channel response, not equalizer weights, so they are not
+    input for :func:`apply_taps`.
 
     Parameters
     ----------
@@ -311,8 +336,10 @@ def estimate_transfer_function(
         bias, so the cap does not move the estimate).
     num_taps : int, optional
         If given, return the centred, Hann-tapered impulse response truncated to
-        ``num_taps`` taps - ``(C, C, num_taps)`` MIMO or ``(num_taps,)`` SISO, ready
-        for :func:`zf_equalizer`.  If ``None`` (default), return the frequency
+        ``num_taps`` taps - ``(C, C, num_taps)`` MIMO or ``(num_taps,)`` SISO.
+        Lag 0 sits at index ``num_taps // 2`` (taps before it are negative
+        lags), so pass ``center=num_taps // 2`` to :func:`zf_equalizer`.  If
+        ``None`` (default), return the frequency
         response ``B(f)`` in FFT-bin order - ``(n_fft, C, C)`` MIMO or ``(n_fft,)``
         SISO.
 
