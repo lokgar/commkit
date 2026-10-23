@@ -231,6 +231,9 @@ Dependencies point downward only:
 - **Mathematical meaning:** test documented definitions, such as a pulse width, a dispersion sign, or noise-variance scaling, with independently derived expectations, not only shapes and energies.
 - **API changes never change expected values.** A commit that changes a signature only changes how tests call the code. Numerical changes land in their own commit with independent validation.
 - **Examples** are Jupyter notebooks in `examples/`, committed without outputs: `.gitattributes` routes them through the `nbstripout` filter, which each clone enables once with `uv run nbstripout --install` (git does not ship filter configuration). `tests/test_examples.py` executes each one, so an API change updates the notebooks in the same commit.
+  - They form a course: one topic per notebook, named `NN-lowercase-words.ipynb`, numbered in teaching order (signals and DSP, channel and metrics, receiver algorithms, fiber systems, characterization). Each opens with what it covers, links the notebooks it builds on and ends with a link to the next. `examples/README.md` indexes them; a new notebook takes its place in the order and updates the index and the neighbours' links.
+  - Every claim in the text matches what the cells print: run the notebook and read its numbers before committing it. Keep each under about 20 s on the CPU.
+  - Plots of hand-computed arrays go through `to_device(x, "cpu")`, so the notebooks run unchanged on the GPU.
 - **Coverage** must not drop below the CI floor. Numba kernel coverage is measured by a separate `NUMBA_DISABLE_JIT=1` job.
 
 ---

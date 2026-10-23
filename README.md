@@ -124,17 +124,15 @@ With [`uv`](https://github.com/astral-sh/uv), use `uv pip install` in place of `
 
 ## Examples
 
-Jupyter notebooks in [`examples/`](https://github.com/lokgar/commkit/tree/main/examples) (install the `notebook` extra and run `jupyter lab examples`):
+[`examples/`](https://github.com/lokgar/commkit/tree/main/examples) is a course in 26 Jupyter notebooks, one topic each, in teaching order (install the `notebook` extra and run `jupyter lab examples`):
 
-- [`qam_receiver_quickstart`](https://github.com/lokgar/commkit/blob/main/examples/qam_receiver_quickstart.ipynb) - the quickstart above, cell by cell, with the constellation, spectrum and equalizer plots;
-- [`fiber_nonlinear_link`](https://github.com/lokgar/commkit/blob/main/examples/fiber_nonlinear_link.ipynb) - a launch-power sweep over 8 x 80 km of nonlinear fiber with amplifier noise: dispersion compensation against digital backpropagation;
-- [`blind_equalization`](https://github.com/lokgar/commkit/blob/main/examples/blind_equalization.ipynb) - CMA pre-convergence handed over to RDE with `state=`, against RDE from a cold start;
-- [`carrier_phase_analysis`](https://github.com/lokgar/commkit/blob/main/examples/carrier_phase_analysis.ipynb) - drift, linewidth and Allan deviation of a recovered carrier phase;
-- [`laser_linewidth_dsh`](https://github.com/lokgar/commkit/blob/main/examples/laser_linewidth_dsh.ipynb) and [`laser_linewidth_homodyne_iq`](https://github.com/lokgar/commkit/blob/main/examples/laser_linewidth_homodyne_iq.ipynb)
-  - laser linewidth from delayed self-heterodyne and homodyne IQ captures;
-- `measurement_laser_linewidth_*` - lean templates for real captures.
+- **00-05, signals and DSP**: the `Signal`, constellations and bit mapping, spectra, filters, pulse shaping and matched filtering, resampling;
+- **06-08, channel and performance**: AWGN and the metrics (SNR, BER, LLRs, GMI), laser phase noise, front-end impairments;
+- **09-16, receiver algorithms**: frame synchronization, frequency-offset estimation, blind and pilot-aided carrier recovery, linear, adaptive and blind equalization, polarization demultiplexing;
+- **17-19, optical fiber systems**: chromatic dispersion, the nonlinear fiber with digital backpropagation, and an end-to-end coherent transceiver;
+- **20-25, characterization**: carrier phase and laser linewidth measurements, with templates for real captures.
 
-The notebooks are committed without outputs and run in CI.
+[`examples/README.md`](https://github.com/lokgar/commkit/blob/main/examples/README.md) lists every notebook with its topics.  The quickstart above appears cell by cell in `00-getting-started` and `14-adaptive-equalization`.  The notebooks are committed without outputs and run in CI.
 
 ## Development
 

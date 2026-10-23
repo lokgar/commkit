@@ -527,7 +527,7 @@ def plot_carrier_phase_characterization(
 
     Combines ``plot_carrier_phase_decomposition``, ``plot_frequency_drift``,
     ``plot_frequency_noise_psd`` and ``plot_allan_deviation`` in one figure
-    (see ``examples/carrier_phase_analysis.py`` for the full chain).
+    (see ``examples/20-carrier-phase-characterization.ipynb`` for the full chain).
 
     Parameters
     ----------
