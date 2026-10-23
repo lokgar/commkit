@@ -117,6 +117,10 @@ post_commit_hooks = []
 
 [[tool.bumpversion.files]]
 filename = "pyproject.toml"
+# Only the version keys: a bare "{current_version}" would also bump any
+# dependency pin that happens to equal it (mypy>=2.1.0).
+search = 'version = "{current_version}"'
+replace = 'version = "{new_version}"'
 
 [[tool.bumpversion.files]]
 filename = "commkit/__init__.py"
