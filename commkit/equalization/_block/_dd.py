@@ -587,7 +587,7 @@ def block_lms(
             window=int(cpr.block_size),
             joint=bool(cpr.joint_channels),
             cycle_slip=cpr.cycle_slip is not None,
-            history=int(slip.history),
+            history=slip._history_values(1),  # per-symbol phase
             threshold=float(slip.threshold),
             symmetry=_cpr_symmetry(constellation),
             carrier=None if state is None else state.carrier,

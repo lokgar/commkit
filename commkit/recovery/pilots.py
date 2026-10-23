@@ -105,7 +105,10 @@ def _pilot_aided(symbols: ArrayType, method: PilotAided, ctx: _Context) -> _Phas
         # casting before avoids precision loss in the discontinuity test for float32 input)
         phi_pilots_u = xp.unwrap(phi_pilots.astype(xp.float64), axis=-1)  # (C, P)
     # Correction quantum 2π: wrap-around errors of the unwrap at large gaps.
-    phi_pilots_u = _repair_slips(phi_pilots_u, xp, method.cycle_slip, 1)
+    spacing = (
+        float(np.mean(np.diff(pilot_indices_np))) if pilot_indices_np.size > 1 else 1.0
+    )
+    phi_pilots_u = _repair_slips(phi_pilots_u, xp, method.cycle_slip, 1, spacing)
     R = phi_pilots_u.shape[0]
 
     all_positions = xp.arange(N, dtype=xp.float64)

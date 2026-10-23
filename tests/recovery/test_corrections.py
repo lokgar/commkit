@@ -7,8 +7,9 @@ import pytest
 
 from commkit import generate, recovery
 from commkit.filtering import RRC
-from commkit.impairments import apply_awgn
+from commkit.impairments import apply_awgn, generate_phase_noise
 from commkit.mapping import Constellation
+from commkit.metrics import snr
 from tests.common.conversions import device_of, to_numpy
 from tests.common.signals import (
     make_ambiguous_qam16,
@@ -121,6 +122,79 @@ class TestCycleSlipCorrection:
             constellation=Constellation.qam(16),
         ).value
         assert phi.shape == sig.samples.shape
+
+
+class TestCycleSlipHistoryRule:
+    """The documented rule ``2π·Δν·Δt·history < threshold²/2``."""
+
+    @staticmethod
+    def _corrected_records(q: float, history: int, records: int = 20) -> int:
+        """Records of a slip-free Wiener walk in which the repair fires."""
+        rng = np.random.default_rng(0)
+        hit = 0
+        for _ in range(records):
+            phi = np.cumsum(rng.normal(0.0, np.sqrt(q), 2048))
+            out = recovery.correct_cycle_slips(
+                phi, symmetry=4, history=history, threshold=np.pi / 4
+            )
+            hit += bool(np.any(np.abs(out - phi) > 1e-9))
+        return hit
+
+    @pytest.mark.parametrize(
+        ("spacing", "values"), [(32, 20), (8, 80), (1, 640), (256, 10)]
+    )
+    def test_default_history_spans_640_symbols(self, spacing, values):
+        """The default covers the same time for every trajectory spacing."""
+        assert recovery.CycleSlip()._history_values(spacing) == values
+        assert recovery.CycleSlip(history=7)._history_values(spacing) == 7
+
+    def test_wiener_walk_within_rule_is_left_alone(self):
+        """A history at a quarter of the bound never fires on a clean walk."""
+        q = 2 * np.pi * 1e6 / 32e9 * 32  # 1 MHz at 32 GBd, 32-symbol blocks
+        history = int((np.pi / 4) ** 2 / 2 / q / 4)
+        assert self._corrected_records(q, history) == 0
+
+    def test_wiener_walk_beyond_rule_is_damaged(self):
+        """At twice the bound the fit's lag declares slips that are not there."""
+        q = 2 * np.pi * 1e6 / 32e9 * 32
+        history = int(2 * (np.pi / 4) ** 2 / 2 / q)
+        assert self._corrected_records(q, history) >= 10
+
+    def test_default_adds_no_slips_to_bps_at_1mhz(self, backend_device):
+        """16-QAM, 1 MHz at 32 GBd, Es/N0 16 dB: the default repair is harmless.
+
+        Under the previous default (``history=100``, a 3200-symbol window)
+        the repair turned a slip-free BPS estimate into one with lasting
+        π/2 slips.
+        """
+        n = 2**16
+        tx = generate(
+            Constellation.qam(16),
+            num_symbols=n,
+            symbol_rate=32e9,
+            rng=1,
+            device=backend_device,
+        )
+        phi = generate_phase_noise(
+            num_samples=n,
+            sampling_rate=32e9,
+            linewidth=1e6,
+            rng=4,
+            device=backend_device,
+        )
+        rx = apply_awgn(
+            tx.replace(samples=(tx.samples * np.exp(1j * phi)).astype(np.complex64)),
+            esn0_db=16,
+            rng=5,
+        )
+        est = recovery.estimate_carrier_phase(
+            rx, recovery.BPS(cycle_slip=recovery.CycleSlip())
+        )
+        # Slips against the true phase: changes of the nearest π/2 multiple.
+        k = np.round((to_numpy(est.value) - to_numpy(phi).ravel()) / (np.pi / 2))
+        assert np.count_nonzero(np.diff(k)) == 0
+        y = recovery.resolve_phase_ambiguity(recovery.correct_carrier_phase(rx, est))
+        assert snr(y) > 15.0
 
 
 class TestResolvePhaseAmbiguity:

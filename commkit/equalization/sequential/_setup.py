@@ -392,7 +392,7 @@ def _inline_cpr(cpr: Any, constellation: Any, function_name: str) -> _InlineCpr 
         joint=bool(cpr.joint_channels),
         symmetry=symmetry,
         cycle_slip=cycle_slip is not None,
-        history=int(slip.history),
+        history=slip._history_values(1),  # per-symbol phase
         threshold=float(slip.threshold),
     )
 

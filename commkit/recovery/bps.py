@@ -288,7 +288,7 @@ def _bps(symbols: ArrayType, method: BPS, ctx: _Context) -> _Phase:
     # branch nearest zero instead of the edge of the candidate range.
     phi_b = xp.where(phi_b >= np.pi / M, phi_b - 2.0 * np.pi / M, phi_b)
     phi_u = xp.unwrap(phi_b * M, axis=-1) / M
-    phi_u = _repair_slips(phi_u, xp, method.cycle_slip, M)
+    phi_u = _repair_slips(phi_u, xp, method.cycle_slip, M, block_size)
     # Per row: a 1-D gather is about twice as fast as the 2-D fancy index.
     phi_full = xp.empty((phi_u.shape[0], N), dtype=xp.float64)
     for r, row in enumerate(phi_u):

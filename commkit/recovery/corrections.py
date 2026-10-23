@@ -344,7 +344,7 @@ def correct_cycle_slips(
     phase: np.ndarray,
     *,
     symmetry: int = 4,
-    history: int = 1000,
+    history: int = 20,
     threshold: float = np.pi / 4,
 ) -> np.ndarray:
     """
@@ -366,8 +366,9 @@ def correct_cycle_slips(
         Rotational symmetry of the constellation; the correction quantum is
         ``2π/symmetry`` (4 for square QAM and BPS, M for M-PSK, 1 for pilot
         phases).
-    history : int, default 1000
-        Past corrected values in the linear fit.  The fit lags a wandering
+    history : int, default 20
+        Past corrected values in the linear fit, sized for 32-symbol block
+        phases (the 640 symbols of :class:`CycleSlip`'s default).  The fit lags a wandering
         phase: keep ``2π·Δν·Δt·history < threshold²/2`` for a linewidth
         ``Δν`` and a spacing ``Δt`` between values (see :class:`CycleSlip`).
     threshold : float, default π/4
@@ -403,11 +404,13 @@ class CycleSlip:
 
     Parameters
     ----------
-    history : int, default 100
+    history : int, optional
         Past values in the linear fit, counted in values of the trajectory
         (blocks for BPS, Viterbi-Viterbi and Tikhonov, symbols for the PLL
         and for an equalizer's inline ``cpr=``, pilots for ``PilotAided``),
-        not in symbols.
+        not in symbols.  By default the values that span 640 symbol periods,
+        at least 10: 20 blocks for ``BPS()``, 640 symbols for the PLL and
+        the equalizers.
     threshold : float, default π/4
         Deviation in radians that declares a slip.
 
@@ -426,7 +429,8 @@ class CycleSlip:
     which puts ``threshold`` about 3.9 standard deviations out.  At 32 GBd
     with ``BPS()`` (``block_size=32``) and ``threshold=π/4`` this allows
     ``Δν·history ≲ 50 MHz``: ``history=100`` adds slips at a 1 MHz
-    linewidth, ``history=20`` does not.  Below about 10 values the fit's
+    linewidth, ``history=20`` does not.  The default span of 640 symbols
+    holds up to ``Δν ≈ 2.4 MHz`` at 32 GBd for every method.  Below about 10 values the fit's
     noise gain ``1 + 4/history`` dominates instead, at low SNR.
 
     Examples
@@ -434,28 +438,46 @@ class CycleSlip:
     >>> est = estimate_carrier_phase(y, BPS(cycle_slip=CycleSlip(history=50)))
     """
 
-    history: int = 100
+    history: int | None = None
     threshold: float = np.pi / 4
 
     def __post_init__(self) -> None:
-        if self.history < 1:
+        if self.history is not None and self.history < 1:
             raise ValueError(f"history must be >= 1, got {self.history}.")
         if not self.threshold > 0:
             raise ValueError(f"threshold must be > 0, got {self.threshold}.")
 
+    def _history_values(self, spacing: float) -> int:
+        """``history`` for a trajectory with ``spacing`` symbol periods per value."""
+        if self.history is not None:
+            return self.history
+        return max(10, round(_HISTORY_SPAN / spacing))
+
+
+# Symbol periods the default ``CycleSlip`` history spans, whatever the method.
+_HISTORY_SPAN = 640
+
 
 def _repair_slips(
-    phase: ArrayType, xp: Any, cycle_slip: CycleSlip | None, symmetry: int
+    phase: ArrayType,
+    xp: Any,
+    cycle_slip: CycleSlip | None,
+    symmetry: int,
+    spacing: float,
 ) -> ArrayType:
-    """Row-wise cycle-slip repair of a ``(R, B)`` trajectory (host round trip)."""
+    """Row-wise cycle-slip repair of a ``(R, B)`` trajectory (host round trip).
+
+    ``spacing`` is the number of symbol periods between trajectory values.
+    """
     if cycle_slip is None:
         return phase
+    history = cycle_slip._history_values(spacing)
     out = xp.empty_like(phase)
     for r in range(phase.shape[0]):
         out[r] = correct_cycle_slips(
             phase[r],
             symmetry=symmetry,
-            history=cycle_slip.history,
+            history=history,
             threshold=cycle_slip.threshold,
         )
     return out
