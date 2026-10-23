@@ -229,6 +229,7 @@ class TestLLRKernel:
         x = x + 0.1 * rng.standard_normal(x.shape)
         if np.iscomplexobj(pts):
             x = x + 0.1j * rng.standard_normal(x.shape)
+        x = x.astype(np.complex64 if np.iscomplexobj(x) else np.float32)
         kw = dict(noise_var=0.02, constellation=constellation, method=method)
         cpu = mapping.compute_llr(x, **kw)
         gpu = mapping.compute_llr(xp.asarray(x), **kw)

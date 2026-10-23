@@ -30,7 +30,7 @@ def _stages(backend_device, monkeypatch, path):
         if backend_device != "gpu":
             pytest.skip("the plain/fused split exists on the GPU only")
         monkeypatch.setattr(
-            _fiber, "_make_ops", lambda x, xp, phi, omega: _fiber._Ops(xp, phi, omega)
+            _fiber, "_make_ops", lambda x, xp, *args: _fiber._Ops(xp, x.dtype, *args)
         )
 
 

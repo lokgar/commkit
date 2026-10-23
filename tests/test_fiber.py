@@ -37,7 +37,7 @@ def _rel(a, b):
 def _plain_ops(monkeypatch):
     """Force the unfused CuPy stages (the fused path's reference)."""
     monkeypatch.setattr(
-        _fiber, "_make_ops", lambda x, xp, phi, omega: _fiber._Ops(xp, phi, omega)
+        _fiber, "_make_ops", lambda x, xp, *args: _fiber._Ops(xp, x.dtype, *args)
     )
 
 
