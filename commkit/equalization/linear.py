@@ -371,13 +371,17 @@ def estimate_transfer_function(
     if num_taps is None:
         return B[:, 0, 0] if single else B
 
-    # Centred, Hann-tapered impulse response, truncated to num_taps.
+    # Centred, Hann-tapered impulse response, truncated to num_taps: lag 0 sits
+    # at index num_taps // 2 for odd and even lengths alike.
     n_taps = int(min(num_taps, n_fft))
     b_t = xp.fft.fftshift(_fft.ifft(B, axis=0), axes=0)  # (n_fft, C, C), lag axis 0
     center = n_fft // 2
     half = n_taps // 2
-    taps = b_t[center - half : center + half + 1]  # (L, C, C)
-    taps = taps * xp.asarray(np.hanning(taps.shape[0]))[:, None, None]
+    taps = b_t[center - half : center - half + n_taps]  # (L, C, C)
+    # Symmetric Hann about lag 0 (unit weight there); an even length drops the
+    # last sample of the (2*half + 1)-point window.
+    window = np.hanning(2 * half + 1)[:n_taps]
+    taps = taps * xp.asarray(window)[:, None, None]
     if single:
         return taps[:, 0, 0]  # (L,)
     return xp.transpose(taps, (1, 2, 0))  # (C, C, L), matches zf_equalizer layout

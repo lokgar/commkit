@@ -257,6 +257,19 @@ class TestEstimateTransferFunction:
         assert peak == 32  # centre of 65 taps
         xpt.assert_allclose(taps[peak], xp.asarray(1.5 + 0j), rtol=0.1, atol=0.1)
 
+    def test_even_num_taps_returns_exactly_num_taps(self, xp, xpt):
+        """An even num_taps returns num_taps taps with an untapered lag 0 at L // 2."""
+        rng = xp.random.RandomState(3)
+        n = 1 << 16
+        x = (rng.standard_normal(n) + 1j * rng.standard_normal(n)).astype(xp.complex64)
+        y = (1.5 * x).astype(xp.complex64)
+        taps = equalization.estimate_transfer_function(
+            x, y, n_fft=256, reg=1e-3, num_taps=16
+        )
+        assert taps.shape == (16,)
+        assert int(xp.argmax(xp.abs(taps))) == 8
+        xpt.assert_allclose(taps[8], xp.asarray(1.5 + 0j), rtol=0.01, atol=0.01)
+
     def test_mimo_taps_shape_for_zf_equalizer(self, xp):
         """MIMO taps come back as (C, C, L) - the layout zf_equalizer consumes."""
         rng = xp.random.RandomState(4)
