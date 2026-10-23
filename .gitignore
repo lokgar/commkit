@@ -11,6 +11,7 @@ wheels/
 .coverage
 .coverage.*
 coverage.xml
+coverage.json
 htmlcov/
 
 # Virtual environments
@@ -20,6 +21,14 @@ htmlcov/
 .mypy_cache/
 
 .vscode/
+
+# Jupyter (uv run jupyter lab examples)
+.ipynb_checkpoints/
+
+# Nsight profiles (benchmarks/benchutils.nvtx_range)
+*.nsys-rep
+*.qdrep
+*.ncu-rep
 
 tmp/
 
