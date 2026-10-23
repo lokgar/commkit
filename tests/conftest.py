@@ -24,7 +24,12 @@ except ImportError:
 
 
 def pytest_configure(config):
-    """Register custom markers."""
+    """Register custom markers and the PrecisionWarning error filter."""
+    # The library's own paths must never reduce double input silently.  Added
+    # here rather than in pyproject's filterwarnings: pytest resolves those
+    # categories while reading its config, which would import commkit before
+    # pytest-cov starts and hide every module-level line from coverage.
+    config.addinivalue_line("filterwarnings", "error::commkit.backend.PrecisionWarning")
     config.addinivalue_line("markers", "gpu_only: mark test as requiring a GPU backend")
     config.addinivalue_line("markers", "cpu_only: mark test as CPU-only")
     config.addinivalue_line(

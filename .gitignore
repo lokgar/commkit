@@ -8,6 +8,10 @@ wheels/
 *.egg-info
 .ruff_cache
 .benchmarks
+.coverage
+.coverage.*
+coverage.xml
+htmlcov/
 
 # Virtual environments
 .venv
