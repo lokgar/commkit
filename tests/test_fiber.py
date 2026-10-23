@@ -225,3 +225,24 @@ def test_complex128_on_the_gpu_matches_the_cpu(xp):
     gpu = apply_fiber_propagation(xp.asarray(x), **kw)
     assert gpu.dtype == xp.complex128
     assert _rel(gpu, apply_fiber_propagation(x, **kw)) < 1e-10
+
+
+@pytest.mark.gpu_only
+def test_repeated_calls_do_not_grow_the_memory_pool(xp):
+    """The graph stream is reused across calls: CuPy caches freed blocks per
+    stream, so a fresh stream per call would grow the pool every call."""
+    x = xp.asarray(_field(2, n=1 << 16))
+    kw = dict(
+        fiber=Fiber(),
+        span_length_km=80.0,
+        num_spans=4,
+        launch_power_dbm=0.0,
+        steps_per_span=5,
+        sampling_rate=FS,
+    )
+    pool = xp.get_default_memory_pool()
+    apply_fiber_propagation(x, **kw)
+    before = pool.total_bytes()
+    for _ in range(5):
+        apply_fiber_propagation(x, **kw)
+    assert pool.total_bytes() == before

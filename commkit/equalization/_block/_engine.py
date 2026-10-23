@@ -10,7 +10,7 @@ block uses.
 
 from __future__ import annotations
 
-import contextlib
+import functools
 from collections.abc import Callable
 from dataclasses import dataclass
 from typing import Any
@@ -19,6 +19,7 @@ import numpy as np
 
 from ... import _fft
 from ..._array import as_2d, warn_if_double
+from ..._cuda.graphs import GraphRunner
 from ...backend import ArrayType, dispatch, to_device
 from ...logger import logger
 from .._common import (
@@ -308,75 +309,27 @@ def _block_loop(
     for a single kind) or ``None``/``False`` for an eager block.  With
     ``use_graph`` (CuPy only), per key the first block runs eagerly to prime
     the memory pool, the second is captured into a CUDA graph and every
-    later block of that key replays it: one launch per block instead of
-    dozens.  A failed capture falls back to the eager loop.  ``prepare(B,
+    later block of that key replays it (:class:`GraphRunner`): one launch
+    per block instead of dozens.  A failed capture falls back to the eager
+    loop.  ``prepare(B,
     b_start)`` runs before every block, outside any graph, like
     ``run.fill_window``: it stages per-block inputs into fixed buffers.
     ``at_resume()`` runs once, before block ``run.resume`` (or after the last
     block), to snapshot the continuation state.
     """
-    graph_stream = None
-    if use_graph:
-        try:
-            import cupy as cp
-
-            graph_stream = cp.cuda.Stream(non_blocking=True)
-        except Exception:
-            use_graph = False
-
-    stream_ctx: Any
-    if use_graph:
-        assert graph_stream is not None
-        # Order the setup work on the default stream before the loop stream.
-        setup_done = cp.cuda.Event()
-        setup_done.record()
-        graph_stream.wait_event(setup_done)
-        stream_ctx = graph_stream
-    else:
-        stream_ctx = contextlib.nullcontext()
-
-    graphs: dict[Any, Any] = {}  # key -> captured graph, built on its 2nd block
-    warmed: set[Any] = set()  # keys whose first block has primed the pool
     n_blocks = (run.n_sym + run.block_size - 1) // run.block_size
-    with stream_ctx:
+    with GraphRunner(name, use_graph) as graphs:
         for b in range(n_blocks):
             b_start = b * run.block_size
             b_end = min(b_start + run.block_size, run.n_sym)
             B = b_end - b_start  # symbols this block (may be short for the last)
             if at_resume is not None and b_start == run.resume:
                 at_resume()
-            key = capturable(B, b_start) if use_graph else None
+            key = capturable(B, b_start) if graphs.enabled else None
             run.fill_window(b_start, B)
             if prepare is not None:
                 prepare(B, b_start)
-            if key is None or key is False:
-                run_block(B, b_start)  # eager
-            elif key in graphs:
-                graphs[key].launch()  # replay (current stream == graph_stream)
-            elif key not in warmed:
-                run_block(B, b_start)  # eager warmup - primes the memory pool
-                warmed.add(key)
-            else:
-                assert graph_stream is not None
-                try:
-                    graph_stream.begin_capture()
-                    run_block(B, b_start)
-                    graphs[key] = graph_stream.end_capture()
-                    graphs[key].launch()
-                except Exception as exc:  # pragma: no cover - hw/version dependent
-                    with contextlib.suppress(Exception):
-                        graph_stream.end_capture()
-                    graphs.clear()
-                    use_graph = False
-                    logger.warning(
-                        "%s CUDA-graph capture failed (%s); continuing with the "
-                        "eager block loop.",
-                        name,
-                        exc,
-                    )
-                    run_block(B, b_start)  # ensure this block runs once
+            graphs.run(key, functools.partial(run_block, B, b_start))
             store(b_start, b_end, B)
         if at_resume is not None and run.resume >= run.n_sym:
             at_resume()
-    if graph_stream is not None:
-        graph_stream.synchronize()

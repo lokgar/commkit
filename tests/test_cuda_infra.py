@@ -13,6 +13,7 @@ import pytest
 
 from commkit import _cuda
 from commkit._cuda import compiler
+from commkit._cuda.graphs import GraphRunner
 from tests.common.kernel_utils import reset_warned_kernels, skip_unless_kernel_available
 
 
@@ -109,3 +110,51 @@ class TestCudaCompilerCacheAndFallback:
         ]
         assert len(warnings) == 1
         assert "falling back" in warnings[0].getMessage()
+
+
+class TestGraphRunner:
+    """Warm, capture and replay of keyed bodies (commkit._cuda.graphs)."""
+
+    def test_disabled_runs_every_body_eagerly(self) -> None:
+        calls = []
+        with GraphRunner("test", enabled=False) as graphs:
+            for _ in range(4):
+                assert graphs.run("k", lambda: calls.append(1) or len(calls)) == len(
+                    calls
+                )
+        assert len(calls) == 4
+
+    @pytest.mark.gpu_only
+    def test_warms_captures_then_replays(self, backend_device: str, xp: Any) -> None:
+        a = xp.zeros(8, dtype=xp.float32)
+        calls = []
+
+        def body() -> Any:
+            calls.append(1)
+            a[...] += 1  # in place: a replay repeats the captured address
+            return a
+
+        with GraphRunner("test", enabled=True) as graphs:
+            outs = [graphs.run("k", body) for _ in range(5)]
+            graphs.run(None, body)  # eager whatever the key's state
+        assert len(calls) == 3  # warmup, capture, eager
+        assert outs[0] is a and outs[1] is a and outs[2:] == [None] * 3
+        np.testing.assert_array_equal(a.get(), np.full(8, 6.0, np.float32))
+
+    @pytest.mark.gpu_only
+    def test_failed_capture_runs_the_body_and_turns_replay_off(
+        self, backend_device: str, xp: Any, caplog: Any
+    ) -> None:
+        a = xp.zeros(8, dtype=xp.float32)
+
+        def body() -> None:
+            a[...] += 1
+            float(a.sum())  # a host sync is illegal during capture
+
+        with caplog.at_level(logging.WARNING, logger="commkit"):
+            with GraphRunner("test", enabled=True) as graphs:
+                for _ in range(4):
+                    graphs.run("k", body)
+                assert graphs.enabled is False
+        assert "capture failed" in caplog.text
+        np.testing.assert_array_equal(a.get(), np.full(8, 4.0, np.float32))

@@ -206,6 +206,7 @@ Dependencies point downward only:
 - Chunk `(N, M)` intermediates over N with an on-device accumulator.
 - Reduce on the device before transferring, including for plotting.
 - Pass whole records to compiled code. There are no Python loops over symbols or small blocks, except inside a CUDA graph.
+- Repeated GPU work with fixed buffers (the block equalizers' blocks, the fiber solver's spans) is replayed from CUDA graphs through `_cuda.graphs.GraphRunner`, the one driver: warm once, capture on the second run, replay, fall back to eager on a failed capture. Its stream is reused per device and thread, because CuPy's pool caches freed blocks per stream and a fresh stream per call grows the pool every call.
 
 **Kernel policy:**
 

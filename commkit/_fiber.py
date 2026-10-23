@@ -65,7 +65,6 @@ complex128 input also uses.
 
 from __future__ import annotations
 
-import contextlib
 import math
 from collections.abc import Callable
 from dataclasses import dataclass
@@ -76,6 +75,7 @@ import numpy as np
 
 from . import _fft
 from ._array import as_2d
+from ._cuda.graphs import GraphRunner
 from ._dispersion import (
     _SPEED_OF_LIGHT,
     beta2_length,
@@ -739,13 +739,16 @@ def propagate(
                 fraction,
             )
 
-    run = _span_runner(ops, plan, direction, nonlinear_scale, waveplates is not None)
     spans = range(link.num_spans) if forward else range(link.num_spans - 1, -1, -1)
-    for n, span in enumerate(spans):
-        ops.set_span(span)
-        x = run(x, check_aliasing if forward and n == 0 else None)
-        if std is not None:  # the amplifier's ASE (its gain cancels the loss)
-            x += complex_normal(gen, x.shape, std=std, dtype=x.real.dtype, xp=xp)
+    with GraphRunner("Fiber propagation", ops.fused) as graphs:
+        run = _span_runner(
+            ops, plan, direction, nonlinear_scale, waveplates is not None, graphs
+        )
+        for n, span in enumerate(spans):
+            ops.set_span(span)
+            x = run(x, check_aliasing if forward and n == 0 else None)
+            if std is not None:  # the amplifier's ASE (its gain cancels the loss)
+                x += complex_normal(gen, x.shape, std=std, dtype=x.real.dtype, xp=xp)
     return x
 
 
@@ -760,16 +763,16 @@ def _span_runner(
     direction: int,
     kerr_scale: float,
     pmd: bool,
+    graphs: GraphRunner,
 ) -> Callable[..., ArrayType]:
     """``run(x, on_last_spectrum) -> x`` for one span.
 
     With fused CuPy operations every stage works in place, so a span always
     reads and writes the same buffer, and the waveplates come from a fixed
-    device buffer.  A span without a callback then runs eagerly once
-    (priming cuFFT plans and the memory pool), is captured into a CUDA graph
-    on its next run, and is replayed after that: one launch per span instead
-    of about four per step.  A span on another buffer runs eagerly; a failed
-    capture falls back to eager spans for the rest of the call.
+    device buffer.  A span without a callback is then replayed from a CUDA
+    graph keyed by its buffer (``graphs``, see :class:`GraphRunner`): one
+    launch per span instead of about four per step.  A span that did not run
+    in place turns replay off for the rest of the call.
     """
 
     def eager(
@@ -785,51 +788,14 @@ def _span_runner(
             on_last_spectrum=on_last,
         )
 
-    if not ops.fused:
-        return eager
-
-    state: dict[str, Any] = {"graph": None, "ptr": None, "warm": False, "ok": True}
-
     def run(x: ArrayType, on_last: Callable[[ArrayType], None] | None) -> ArrayType:
-        ptr = _pointer(x)
-        if on_last is not None or not state["ok"]:
+        if on_last is not None or not graphs.enabled:
             return eager(x, on_last)
-        if state["graph"] is not None:
-            if ptr != state["ptr"]:
-                return eager(x)
-            state["graph"].launch()
+        out = graphs.run(_pointer(x), lambda: eager(x))
+        if out is None:  # replayed, in place
             return x
-        if not state["warm"]:
-            out = eager(x)
-            state["warm"] = True
-            state["ok"] = _pointer(out) == ptr  # capturable only in place
-            return out
-        import cupy as cp
-
-        stream = cp.cuda.Stream(non_blocking=True)
-        try:
-            ready = cp.cuda.Event()
-            ready.record()  # order the work queued so far before the capture
-            stream.wait_event(ready)
-            with stream:
-                stream.begin_capture()
-                out = eager(x)
-                graph = stream.end_capture()
-            if _pointer(out) != ptr:
-                raise RuntimeError("the span did not run in place")
-            graph.launch(stream)
-            stream.synchronize()
-            state.update(graph=graph, ptr=ptr)
-            return x
-        except Exception as exc:  # pragma: no cover - hw/version dependent
-            with contextlib.suppress(Exception):
-                stream.end_capture()
-            state["ok"] = False
-            logger.warning(
-                "Fiber propagation: CUDA-graph capture failed (%s); continuing "
-                "with eager spans.",
-                exc,
-            )
-            return eager(x)
+        if _pointer(out) != _pointer(x):
+            graphs.disable()  # a replay repeats the captured buffers
+        return out
 
     return run
