@@ -367,7 +367,9 @@ def correct_cycle_slips(
         ``2π/symmetry`` (4 for square QAM and BPS, M for M-PSK, 1 for pilot
         phases).
     history : int, default 1000
-        Past corrected values in the linear fit.  Reduce for short bursts.
+        Past corrected values in the linear fit.  The fit lags a wandering
+        phase: keep ``2π·Δν·Δt·history < threshold²/2`` for a linewidth
+        ``Δν`` and a spacing ``Δt`` between values (see :class:`CycleSlip`).
     threshold : float, default π/4
         Deviation from the prediction that declares a slip; ``π/4`` is half
         the quantum for 4-fold symmetry.
@@ -402,9 +404,30 @@ class CycleSlip:
     Parameters
     ----------
     history : int, default 100
-        Past values in the linear fit.
+        Past values in the linear fit, counted in values of the trajectory
+        (blocks for BPS, Viterbi-Viterbi and Tikhonov, symbols for the PLL
+        and for an equalizer's inline ``cpr=``, pilots for ``PilotAided``),
+        not in symbols.
     threshold : float, default π/4
         Deviation in radians that declares a slip.
+
+    Notes
+    -----
+    The fit lags a wandering phase.  For a Wiener phase of linewidth ``Δν``
+    sampled every ``Δt`` (``block_size`` symbol periods for the block
+    methods), the one-step prediction error of a ``history``-point line has
+    variance ``≈ (2/15)·2πΔνΔt·history + σ_v²`` for ``history ≳ 20``, with
+    ``σ_v²`` the estimator noise.  A deviation beyond ``threshold`` is
+    snapped by a full quantum and the following values follow it, so one
+    false detection leaves a lasting slip.  Keep::
+
+        2π·Δν·Δt·history < threshold² / 2
+
+    which puts ``threshold`` about 3.9 standard deviations out.  At 32 GBd
+    with ``BPS()`` (``block_size=32``) and ``threshold=π/4`` this allows
+    ``Δν·history ≲ 50 MHz``: ``history=100`` adds slips at a 1 MHz
+    linewidth, ``history=20`` does not.  Below about 10 values the fit's
+    noise gain ``1 + 4/history`` dominates instead, at low SNR.
 
     Examples
     --------
