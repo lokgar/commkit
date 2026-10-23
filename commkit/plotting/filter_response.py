@@ -43,8 +43,8 @@ def plot_filter_response(
     * a 1-D array - FIR taps (``b = system``, ``a = [1.0]``); the impulse
       response is ``system`` itself, exact and finite.
     * a 2-D array with trailing dimension 6 - second-order sections (SOS),
-      the representation :func:`commkit.filtering.iir_zero_phase_filter`
-      designs internally.
+      as :func:`commkit.filtering.butterworth_sos` and the other ``*_sos``
+      designs return and :func:`commkit.filtering.iir_filter` applies.
     * a length-2 ``(b, a)`` tuple/list - a general IIR transfer function.
 
     For the SOS/IIR forms the true impulse response is infinite, so it's
