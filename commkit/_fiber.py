@@ -389,10 +389,15 @@ class _Ops:
 
 _NUMBA: dict[str, Callable[..., None]] = {}
 
-# Below this many samples the NumPy Kerr stage is faster than the Numba
-# passes, whose thread-pool start costs more than the passes they save
-# (4 cores: 0.5 vs 0.7 ms at 2^16, 3.3 vs 3.1 ms at 2^18, 17 vs 12 ms at 2^20).
-# The trig-free Jones pass wins at every size (2x at 2^12, 10x at 2^20).
+# Below this many samples the NumPy Kerr stage runs instead of the hybrid
+# one.  Measured on 4 cores (container), stage alone: 0.7 vs 0.5 ms at 2^16,
+# 3.1 vs 3.3 ms at 2^18, 17 vs 12 ms at 2^20; the trig-free Jones pass won at
+# every size (2x at 2^12, 10x at 2^20).  On the reference machine (8 cores,
+# 16 threads) the stage alone favors the hybrid from 2^12, but whole
+# propagations do not: there OpenMP workers spinning after each Numba pass
+# take the cores from scipy.fft, and the hybrid Kerr stage is 1.7x slower end
+# to end at 2^18 and 1.1x at 2^20, the Numba Jones pass 1.5-2.2x up to 2^18
+# (AGENTS roadmap, Performance).
 _HYBRID_KERR_MIN = 1 << 18
 
 

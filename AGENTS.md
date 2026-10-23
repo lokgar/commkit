@@ -195,7 +195,7 @@ Dependencies point downward only:
 | Vectorized: filters, resampling, spectra, impairments, metrics, LLR, frequency-domain equalizers | NumPy/CuPy via `x, xp, sp = dispatch(samples)` | follows the input |
 | Sequential recursions: LMS/RLS/CMA/RDE, PLL, Tikhonov, cycle slips | Numba `@njit(cache=True, fastmath=True, nogil=True)` | CPU; GPU input does one round trip to the host and back |
 | Hot spots limited by intermediates, launches or round trips | CUDA C++ via CuPy `RawModule` (`commkit/_cuda`) | GPU |
-| Elementwise chains with many temporaries, where a paired A/B shows the gain end to end (the PMD stage of `_fiber`: 0.61x) | Numba `@njit(parallel=True)` in one pass, real arithmetic (a `1j` literal promotes complex64 to complex128) | CPU |
+| Elementwise chains with many temporaries, where a paired A/B shows the gain end to end (the PMD stage of `_fiber`: 0.61x on 4 cores, but not on the reference machine; see the roadmap) | Numba `@njit(parallel=True)` in one pass, real arithmetic (a `1j` literal promotes complex64 to complex128) | CPU |
 
 **Host-sync hygiene:**
 
@@ -237,7 +237,7 @@ Dependencies point downward only:
 
 ## 8. Benchmarks
 
-`benchmarks/` tracks the GPU-relevant hot paths. Baselines are committed under `benchmarks/baselines/`. The current reference is `0003` (`v2_0`) on the reference machine: RTX 4070 Ti, Ryzen 7 7800X3D, WSL2; `0002` (`pre_v2`) is the 1.x state. `0002` ran the CPR equalizer and Viterbi-Viterbi benchmarks on workloads that did not converge, so compare those only from `0003` on.
+`benchmarks/` tracks the GPU-relevant hot paths. Baselines are committed under `benchmarks/baselines/`. The current reference is `0004` (`fiber_dbp`) on the reference machine: RTX 4070 Ti, Ryzen 7 7800X3D, WSL2. It adds the fiber and DBP benchmarks to `0003` (`v2_0`, the 2.0 state); `0002` (`pre_v2`) is the 1.x state. `0002` ran the CPR equalizer and Viterbi-Viterbi benchmarks on workloads that did not converge, so compare those only from `0003` on.
 
 - **Workloads must converge.** A workload the algorithm cannot handle times a failure mode (slip storms, divergence), not the operating point. Every equalizer benchmark asserts its symbol error rate with `benchutils.assert_converged`.
 - **Baselines** are recorded with `benchmarks/record_baseline.py`: each file in its own process, best of three passes. In one full-suite process, small GPU benchmarks after the large equalizer workloads ran 2-12x slower than alone, so never record a baseline from a single `pytest benchmarks/` run.
@@ -250,7 +250,7 @@ Dependencies point downward only:
 - **Tools:** `benchmarks/benchutils.py` provides `CudaEventTimer` and `nvtx_range` for `nsys` profiling.
 - **Logging** is set to WARNING in `benchmarks/conftest.py`.
 - **Trust deltas, not single runs.** A ±20-40% swing has been seen under load. Re-run a suspected regression in isolation, or do a controlled A/B with at least 7 repetitions, alternating old and new per repetition and comparing the paired ratios. When even unchanged benchmarks move, time the changed part itself with `CudaEventTimer` and quote it against the step it sits in.
-- A commit touching a hot path quotes its delta against `0003`. Tolerance is 5% on CPU and 10% on GPU.
+- A commit touching a hot path quotes its delta against `0004`. Tolerance is 5% on CPU and 10% on GPU.
 
 ---
 
@@ -261,16 +261,6 @@ What is not done yet, in suggested order. Unlike the sections above, this is a t
 ### Planned modules
 
 1. **Channel coding** (`coding`, a placeholder package). Resolve the "Before channel coding" items below first, so the decoder is built on soft demapping that is already at its final speed on both devices. Start with one soft decoder (LDPC) that consumes `compute_llr` output (positive LLR = bit 0) and reports post-FEC BER next to `gmi`, then add encoders. The package stays out of `commkit/__init__.py` until a real encode/decode entry point exists. Decoders are iterative message passing over many codewords: batch codewords on the GPU from the start.
-
-### Nonlinear fiber channel: GPU validation (local session)
-
-`apply_fiber_propagation` / `correct_fiber_propagation` (`_fiber`) were written on a machine without a CUDA driver. The CPU path is tested and timed; the GPU path (three fused `ElementwiseKernel`s, in-place unscaled cuFFT with the 1/N folded into the linear stage, one CUDA graph per span with the waveplates in a fixed device buffer) compiles under NVRTC and matches the CPU in a NumPy emulation of its logic, but has never run on a GPU.
-
-- **Run the GPU tests**: `uv run pytest tests/test_fiber.py tests/impairments/channel/test_channel_nonlinear.py tests/test_filtering.py -k "fiber or Fiber" --device=all`. `test_fiber.py` compares the fused kernels and the graph replay (PMD spans included) with the plain CuPy stages and with the CPU, and fails on a "fused CUDA kernels unavailable" or "capture failed" warning.
-- **Check the graph capture**: a span must allocate nothing (cupyx's in-place C2C transforms with `overwrite_x=True`, `norm="forward"` on the inverse). Confirm with `compute-sanitizer` or by checking that the memory pool does not grow between replays; if cupyx copies or scales out of place, the pointer check disables the graph, but a temporary inside the span would not be caught.
-- **Time `benchmarks/bench_fiber.py` on the GPU** (`auto` against `plain`): the kernel policy keeps the fused kernels only if they beat the plain CuPy stages, which precompute the linear responses and so trade a `sincosf` per bin for a read of the response. Expected order (estimate, not measured): about 0.4 ms per step for 2x2^20 complex64 on the reference GPU. CPU reference (4 cores, this container): about 69 ms per step, 52 of them FFTs. Then record a baseline with the fiber benches.
-- **CPU crossovers on the reference machine**: the hybrid Kerr stage (Numba passes around NumPy's SIMD sin/cos) starts at `_HYBRID_KERR_MIN = 2^18` samples, measured on 4 cores (NumPy faster below: thread-pool start). Re-measure on 8 cores. Numba's sin/cos are scalar here (no SVML); with SVML a fully fused Numba Kerr stage may win and should be timed.
-- **One CUDA-graph driver**: the block equalizers' `_block/_engine.py` and `_fiber._span_runner` both warm once, capture on the second run, replay and fall back on a failed capture. Factor them into one helper once both can be validated on a GPU.
 
 ### Nonlinear fiber channel: future features
 
@@ -297,5 +287,6 @@ The decoder's input path. The GPU items need a CUDA device to write, test (`--de
 ### Performance
 
 - **Block equalizers at small `block_size` on the GPU**: a fixed cost per block; at 256 the GPU only ties the CPU without carrier recovery.
+- **The fiber solver's Numba passes lose end to end on the reference machine.** On 4 cores (where they were tuned) the hybrid Kerr stage won from `_fiber._HYBRID_KERR_MIN = 2^18` and the trig-free Jones (PMD) pass won end to end (0.61x). On the reference machine (8 cores, 16 threads), whole propagations with NumPy stages and multi-core `scipy.fft` are faster: hybrid Kerr 1.74x slower at 2^18, 1.32x at 2^19, 1.12x at 2^20; Numba Jones 1.35x at 2^14, 2.19x at 2^16, 1.54x at 2^18, even at 2^20. The cause is contention: Numba's OpenMP workers spin after each pass and take the cores from the FFT workers (`OMP_WAIT_POLICY=passive` cuts the Kerr loss at 2^18 to 1.09x; one Numba thread makes Jones even with NumPy). The stage timed alone hides this. Options: choose the passes by core count, run them single-threaded, or keep NumPy stages only; decide by end-to-end A/Bs on both machines.
+- **A fully fused Numba Kerr stage** may beat the hybrid one where Numba has SVML (vector sin/cos); neither machine measured so far has it (`numba.core.config.USING_SVML` is False), so it is untimed.
 - **`cs_block` on phases with frequent slip decisions**: one speculation pass per changed decision (about 1 pass per block on a realistic link, more on pathological input). Outside a CUDA graph the Python wrapper (validation, scratch allocation) costs about 18 us per launch.
-
