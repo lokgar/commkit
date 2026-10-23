@@ -261,6 +261,34 @@ Dependencies point downward only:
 
 What is not done yet, in suggested order. Unlike the sections above, this is a to-do list, not a description of the code: remove an item in the commit that resolves it, and add one when a known gap is left open.
 
+### Switch to Python 3.15 (blocked on CuPy)
+
+Goal: require Python 3.15 and nothing older, mainly for explicit lazy imports (PEP 810, the `lazy` keyword). State checked on 2026-10-23 with uv 0.13.5 and CPython 3.15.1:
+
+- **Blocker: CuPy has no 3.15 wheels.** `cupy-cuda13x` 14.2.0 ships cp310-cp314 only, on PyPI and on `pip.cupy.dev/pre`. Support is tracked in cupy/cupy#10259, milestone v14.3.0 (unreleased; the 14.3.0.dev0 docs already list 3.15). Switching before then would leave `commkit[gpu]` uninstallable and the GPU suite unrunnable.
+- **Second blocker: `jupyter_client` fails to import on 3.15.** `jupyter_client/jsonutil.py` (line 32) calls `strptime` with a day of month and no year, which 3.15 rejects (cpython#70647). `tests/test_examples.py` then fails at collection, and the notebooks cannot run. Wait for a fixed release; do not work around it in commkit.
+- **Ready:** wheel-only installs on 3.15 work for NumPy 2.5.4, SciPy 1.18.1, Numba 0.68.0 (llvmlite 0.50.0), Matplotlib 3.11.2, mypy 2.4.0, ruff, pytest, pytest-cov, pytest-benchmark, nbclient, ipykernel, nbstripout and bump-my-version. The CPU suite has not been run on 3.15 beyond the collection error above.
+
+Steps, once CuPy 14.3 (with cp315 wheels for `cupy-cuda13x`) and a fixed `jupyter_client` are out. Keep the commits separate: the version switch alone first, then each refactor, so a failure points at one change.
+
+1. **Validate before changing anything**: in a 3.15 venv, install the current code and run the full CPU+GPU suite (`-rs`, notebooks included), the benchmark smoke run, the `NUMBA_DISABLE_JIT` job and the precision audit.
+2. **Switch the version floor**:
+   - `pyproject.toml`: `requires-python = ">=3.15"`, classifiers 3.15 only, ruff `target-version = "py315"` (if ruff supports it), raise the dependency minimums to the first releases with 3.15 wheels (`cupy-cuda13x[ctk]>=14.3`, `numba>=0.68`, `numpy>=2.5`, `scipy>=1.18`; recheck each).
+   - `ci.yml`: test matrix `python-version: ["3.15"]` (keep both `locked` and `lowest-direct`); the static-analysis, kernel-coverage and notebook jobs on 3.15. `publish.yml`: build on 3.15.
+   - `uv lock`; README install requirements; §2 here ("Python 3.12+").
+   - Benchmarks: record a new baseline on 3.15 (it lands in `benchmarks/baselines/Linux-CPython-3.15-64bit/`), compare it with `0004` by a paired A/B of 3.14 against 3.15 on unchanged code, and make it the reference.
+3. **Lazy imports (PEP 810)**. Confirm the rules on the interpreter first. As specified, `lazy` is allowed only for module-level imports: not inside functions, class bodies or `try` blocks, and not with `*`.
+   - About 60 function-local imports exist to keep `import commkit` light or optional: `import cupy as cp` (11 sites), `import numba` (9), `from . import compiler` in `_cuda` (5), and local imports that break cycles (`Constellation`, `Signal`, `normalize`). Move each to a module-level `lazy import` / `lazy from`. Concentrated in `_cuda/__init__.py`, `backend.py`, `io.py`, `recovery/`, `core/`, `plotting/`.
+   - CuPy stays optional: a lazy import of a missing module fails only when used, so every use must stay behind the existing availability checks (`is_cupy_available`, `dispatch`). `backend.py`'s probing needs care: decide per site whether the probe imports eagerly inside `try`.
+   - Numba: `@njit` at module level compiles lazily already; check that a lazy `numba` import does not make every first call pay the import at an odd moment (time with `benchmarks/bench_import.py`).
+   - The six `TYPE_CHECKING` blocks can become `lazy from` imports where the name is also useful at run time; keep them where it is not.
+   - Measure `import commkit` before and after with `bench_import.py`, and keep `tests/test_import_hygiene.py` passing; extend it to assert that `import commkit` loads neither CuPy nor Matplotlib, if lazy imports make that true.
+4. **Other cleanups that the 3.15 floor allows** (each its own commit; verify each against What's New in 3.14 and 3.15):
+   - Drop `from __future__ import annotations` (25 modules): annotations are evaluated lazily by default since 3.14 (PEP 649/749). Check that nothing reads `__annotations__` as strings.
+   - UTF-8 mode is the default from 3.15 (PEP 686): check `io` and any `open()` without `encoding=`.
+   - `strptime` with a day and no year now raises (the `jupyter_client` failure above); grep commkit for date parsing.
+   - The 3.15 sampling profiler (PEP 799) is a candidate tool for the CPU hot paths next to `nsys`; mention it in §8 if it proves useful.
+
 ### Planned modules
 
 1. **Channel coding** (`coding`, a placeholder package). Resolve the "Before channel coding" items below first, so the decoder is built on soft demapping that is already at its final speed on both devices. Start with one soft decoder (LDPC) that consumes `compute_llr` output (positive LLR = bit 0) and reports post-FEC BER next to `gmi`, then add encoders. The package stays out of `commkit/__init__.py` until a real encode/decode entry point exists. Decoders are iterative message passing over many codewords: batch codewords on the GPU from the start.
