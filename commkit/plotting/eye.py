@@ -38,8 +38,7 @@ def _plot_eye_traces(
     title: str | None,
     **kwargs: Any,
 ) -> None:
-    """
-    Internal helper to plot eye diagram traces for a single signal component.
+    """Internal helper to plot eye diagram traces for a single signal component.
 
     Parameters
     ----------
@@ -211,8 +210,7 @@ def plot_eye_diagram(
     show: bool = False,
     **kwargs: Any,
 ) -> tuple[Any, Any] | None:
-    """
-    Plots the eye diagram of the signal.
+    """Plot the eye diagram of the signal.
 
     Visualizes signal quality by overlapping segments of the signal
     synchronized to the symbol clock. Supports both fast trace-based

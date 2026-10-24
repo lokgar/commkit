@@ -26,8 +26,7 @@ __all__ = ["moving_average", "savgol_smooth", "smooth_density_2d"]
 def moving_average(
     x: ArrayType, *, window: int, mode: str = "same", axis: int = -1
 ) -> ArrayType:
-    """
-    Boxcar moving average.
+    """Moving average (boxcar) along one axis.
 
     Parameters
     ----------
@@ -48,7 +47,7 @@ def moving_average(
 
     Returns
     -------
-    array_like
+    ndarray
         Smoothed array. Same shape as ``x`` for ``mode="same"``; shrunk by
         ``window - 1`` along ``axis`` for ``mode="valid"``.
     """
@@ -76,19 +75,19 @@ def moving_average(
 def savgol_smooth(
     x: ArrayType, *, window: int, polyorder: int, axis: int = -1
 ) -> ArrayType:
-    """
-    Savitzky-Golay smoothing: local polynomial regression over a sliding window.
+    """Smooth with a Savitzky-Golay filter (``scipy.signal.savgol_filter``).
 
-    A curve-fitting smoother, not a linear-time-invariant filter - useful for
-    a diagnostic detrend where a designed low-pass cutoff isn't the natural
-    parameterization.
+    A least-squares polynomial fit in a sliding window, parameterized by the
+    window and the polynomial order rather than a cutoff frequency: for a
+    diagnostic detrend or a curve to read, not for the signal chain.
 
     Parameters
     ----------
     x : array_like
         Input array.
     window : int
-        Window length, in samples. Must be odd and > ``polyorder``.
+        Window length in samples, greater than ``polyorder``; an odd length
+        centres the fit on each sample.
     polyorder : int
         Order of the polynomial fit within each window.
     axis : int, default -1
@@ -96,7 +95,7 @@ def savgol_smooth(
 
     Returns
     -------
-    array_like
+    ndarray
         Smoothed array, same shape as ``x``.
     """
     _, _, sp = dispatch(x)
@@ -107,12 +106,10 @@ def savgol_smooth(
 
 
 def smooth_density_2d(hist: ArrayType, *, sigma: float = 1.0) -> ArrayType:
-    """
-    Gaussian-blur a 2-D histogram/density image for nicer visual contours.
+    """Blur a 2-D histogram with a Gaussian, for a smoother density image.
 
-    Used by density-style plots (constellation, eye diagram) to turn a raw
-    2-D histogram into a smoother heatmap; purely cosmetic, no signal-domain
-    meaning.
+    Used by the density plots (constellation, eye diagram); purely cosmetic,
+    with no meaning in the signal domain.
 
     Parameters
     ----------
@@ -123,7 +120,7 @@ def smooth_density_2d(hist: ArrayType, *, sigma: float = 1.0) -> ArrayType:
 
     Returns
     -------
-    array_like
+    ndarray
         Blurred array, same shape as ``hist``.
     """
     _, _, sp = dispatch(hist)

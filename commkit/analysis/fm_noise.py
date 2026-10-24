@@ -84,9 +84,9 @@ def fm_noise_psd(
 
     Returns
     -------
-    f : array_like
+    f : ndarray
         One-sided frequency axis in Hz (length ``nperseg//2 + 1``).
-    S_f : array_like
+    S_f : ndarray
         Frequency-noise PSD in Hz²/Hz, shape ``(nfreq,)`` or ``(C, nfreq)``.
         Both stay on the input backend (compute layer - no host transfer;
         ``estimate_linewidth`` is the reporting layer).

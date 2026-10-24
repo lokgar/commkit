@@ -38,8 +38,7 @@ def compute_llr(
     constellation: Constellation | None = None,
     method: str = "maxlog",
 ) -> ArrayType:
-    """
-    Bit log-likelihood ratios for soft-decision decoding.
+    """Bit log-likelihood ratios for soft-decision decoding.
 
     Positive LLR means bit 0 is more likely; the magnitude is the confidence.
     The constellation's ``pmf`` (if any) enters as the symbol prior.
@@ -67,7 +66,7 @@ def compute_llr(
 
     Returns
     -------
-    array_like
+    ndarray
         float32 LLRs of shape ``(..., N * k)`` on the input's device; the
         ``k`` bits of each symbol are adjacent (MSB first).
 

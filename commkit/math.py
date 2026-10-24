@@ -23,24 +23,22 @@ __all__ = ["db_to_linear", "linear_to_db", "normalize", "rms"]
 
 
 def rms(x: ArrayType, *, axis: int | None = None, keepdims: bool = False) -> ArrayType:
-    """
-    Computes the Root-Mean-Square (RMS) value of an array.
-
-    RMS is defined as: sqrt(E[|x|^2]).
+    """Root-mean-square value ``sqrt(E[|x|²])`` of an array.
 
     Parameters
     ----------
     x : array_like
         Input array.
     axis : int, optional
-        Axis along which to compute the RMS. If None, computes global RMS.
+        Axis to reduce; ``None`` reduces the whole array.
     keepdims : bool, default False
-        If True, the reduced axes are left in the result as dimensions with size one.
+        Keep the reduced axis as a dimension of size one.
 
     Returns
     -------
-    array_like or float
-        The RMS value of the input.
+    ndarray
+        The RMS in the real precision of ``x``, on its device (0-d without
+        ``axis``).
     """
     x, xp, _ = dispatch(x)
     # RMS = ||x||₂ / √N  ->  linalg.norm routes through BLAS (DZNRM2/SNRM2),
@@ -60,8 +58,7 @@ def normalize(
     axis: int | None = None,
     sps: float = 1,
 ) -> ArrayType:
-    """
-    Normalizes an array according to the specified strategy.
+    """Normalize an array according to the specified strategy.
 
     Parameters
     ----------
@@ -110,7 +107,7 @@ def normalize(
 
     Returns
     -------
-    array_like
+    ndarray
         The normalized array.
     """
     logger.debug("Normalizing array (mode: %s, axis=%s, sps=%s).", mode, axis, sps)
@@ -201,7 +198,7 @@ def db_to_linear(db: ArrayType | float, *, power: bool = True) -> ArrayType | fl
 
     Returns
     -------
-    array_like or float
+    ndarray or float
         The linear ratio, same type as ``db``.
     """
     exponent = 10.0 if power else 20.0
@@ -228,7 +225,7 @@ def linear_to_db(x: ArrayType, *, power: bool = True) -> ArrayType:
 
     Returns
     -------
-    array_like
+    ndarray
         Value(s) in decibels, same shape/backend as ``x``.
     """
     x, xp, _ = dispatch(x)
@@ -259,8 +256,7 @@ def _centered_axis(n: int, x: Any, xp: Any) -> tuple[ArrayType, ArrayType]:
 
 
 def _linear_trend_slope(y: ArrayType, *, x: Any = None, xp: Any = None) -> ArrayType:
-    r"""
-    Per-channel least-squares slope of a phase (or any) record.
+    r"""Per-channel least-squares slope of a phase (or any) record.
 
     Ordinary least squares on the centred normal equations,
 
@@ -285,7 +281,7 @@ def _linear_trend_slope(y: ArrayType, *, x: Any = None, xp: Any = None) -> Array
 
     Returns
     -------
-    array_like
+    ndarray
         Slope per channel, ``(C,)``, ``float64``, on the input backend.
     """
     if xp is None:
@@ -300,8 +296,7 @@ def _linear_trend_slope(y: ArrayType, *, x: Any = None, xp: Any = None) -> Array
 
 
 def _remove_linear_trend(y: ArrayType, *, x: Any = None) -> tuple[ArrayType, ArrayType]:
-    r"""
-    Removes the per-channel least-squares linear trend, preserving the mean.
+    r"""Remove the per-channel least-squares linear trend, preserving the mean.
 
     On an unwrapped phase record the linear term *is* the mean frequency
     offset, so this is the canonical "strip the residual FOE, keep the phase
@@ -318,9 +313,9 @@ def _remove_linear_trend(y: ArrayType, *, x: Any = None) -> tuple[ArrayType, Arr
 
     Returns
     -------
-    detrended : array_like
+    detrended : ndarray
         ``y`` minus the fitted slope term, ``float64``, on the input backend.
-    slope : array_like
+    slope : ndarray
         Fitted slope per channel, ``(C,)`` - in units of ``y`` per unit ``x``
         (per sample by default).
     """

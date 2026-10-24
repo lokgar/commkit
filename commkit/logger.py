@@ -12,8 +12,7 @@ __all__ = ["logger", "set_log_level"]
 
 
 class _ColorFormatter(logging.Formatter):
-    """
-    Custom logging formatter providing ANSI-colored output based on log levels.
+    """Custom logging formatter providing ANSI-colored output based on log levels.
 
     This formatter enhances readability by using distinct colors for different
     severities (e.g., Cyan for DEBUG, Red for ERROR).
@@ -37,8 +36,7 @@ class _ColorFormatter(logging.Formatter):
     }
 
     def format(self, record: logging.LogRecord) -> str:
-        """
-        Formats the log record with ANSI color codes.
+        """Format the log record with ANSI color codes.
 
         Parameters
         ----------
@@ -67,14 +65,14 @@ logger = logging.getLogger("commkit")
 
 
 def set_log_level(level: int | str) -> None:
-    """
-    Show commkit's log messages at ``level`` and above.
+    """Show commkit's log messages at ``level`` and above.
 
     Sets the level of the ``commkit`` logger.  On the first call it also
     attaches a coloured console handler (stdout), unless the logger already
-    has handlers, so calling this function is all a notebook needs to see
-    commkit's diagnostics.  The handler is attached only on request; importing
-    commkit never configures logging.
+    has handlers, and then stops propagation to the root logger (no duplicate
+    lines), so calling this function is all a notebook needs to see commkit's
+    diagnostics.  The handler is attached only on request; importing commkit
+    never configures logging.
 
     Parameters
     ----------

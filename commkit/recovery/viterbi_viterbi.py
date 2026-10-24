@@ -20,8 +20,7 @@ __all__ = ["ViterbiViterbi"]
 
 @dataclass(frozen=True)
 class ViterbiViterbi:
-    """
-    Viterbi-Viterbi (M-th power) block phase estimation.
+    """Viterbi-Viterbi (M-th power) block phase estimation.
 
     Each block of symbols is raised to the constellation's rotational
     symmetry ``M`` to remove the modulation, ``S_b = Σ s[n]^M``,

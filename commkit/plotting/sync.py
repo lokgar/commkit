@@ -45,8 +45,7 @@ def _plot_timing_correlation(
     show: bool = False,
     title: str = "Timing Correlation",
 ) -> tuple[Any, Any] | None:
-    """
-    Plots cross-correlation magnitude for timing estimation diagnostics.
+    """Plot cross-correlation magnitude for timing estimation diagnostics.
 
     For each channel, two panels are drawn: an overall view of the
     correlation and a zoomed view around the detected peak.
@@ -138,8 +137,7 @@ def _plot_mm_autocorrelation(
     show: bool = False,
     title: str = "FOE - Mengali-Morelli",
 ) -> tuple[Any, Any] | None:
-    """
-    Plots the Mengali-Morelli autocorrelation diagnostics.
+    """Plot the Mengali-Morelli autocorrelation diagnostics.
 
     Per-channel two-panel layout:
 
@@ -250,8 +248,7 @@ def _plot_frequency_offset_spectrum(
     show: bool = False,
     title: str = "FOE - M-th Power Spectrum",
 ) -> tuple[Any, Any] | None:
-    """
-    Plots the M-th power spectrum used for blind frequency offset estimation.
+    """Plot the M-th power spectrum used for blind frequency offset estimation.
 
     The spectrum has a tone at ``M·Δf``; this function maps the x-axis back
     to ``Δf`` by dividing by ``M`` so the detected peak aligns with the
@@ -339,8 +336,7 @@ def _plot_carrier_phase_trajectory(
     show: bool = False,
     title: str = "Carrier Phase Trajectory",
 ) -> tuple[Any, Any] | None:
-    """
-    Plots per-symbol carrier phase trajectory for CPR algorithm diagnostics.
+    """Plot per-symbol carrier phase trajectory for CPR algorithm diagnostics.
 
     All channels are overlaid on a single subplot.  Block-based methods may
     pass ``block_centers`` / ``phi_blocks`` to annotate block-phase estimates
@@ -414,8 +410,7 @@ def _plot_frequency_offset_blockwise_result(
     title: str = "Block-wise FOE",
     max_points: int = 4000,
 ) -> tuple[Any, Any] | None:
-    """
-    Diagnostic plot for blockwise ``frequency.correct_frequency_offset``.
+    """Diagnostic plot for blockwise ``frequency.correct_frequency_offset``.
 
     Shows three panels:
 
@@ -500,8 +495,7 @@ def _plot_pilot_phase_estimate(
     show: bool = False,
     title: str = "Pilot Phase Estimate",
 ) -> tuple[Any, Any] | None:
-    """
-    Plots pilot phase scatter, linear fit, and the full interpolated trajectory.
+    """Plot pilot phase scatter, linear fit, and the full interpolated trajectory.
 
     Used as a diagnostic for both pilot-based frequency offset estimation
     (``estimate_frequency_offset`` with ``PilotSymbols``) and pilot-aided carrier phase
@@ -645,8 +639,7 @@ def _plot_pilot_tone_phase_estimate(
     title: str = "CPR - Pilot Tone",
     max_points: int = 4000,
 ) -> tuple[Any, Any] | None:
-    """
-    Diagnostic for ``estimate_carrier_phase`` with ``PilotTone``.
+    """Diagnostic for ``estimate_carrier_phase`` with ``PilotTone``.
 
     Two panels:
 
@@ -777,8 +770,7 @@ def _plot_pilot_tones_phase_estimate(
     title: str = "CPR - Pilot Tones (MRC)",
     max_points: int = 4000,
 ) -> tuple[Any, Any] | None:
-    """
-    Diagnostic for ``estimate_carrier_phase`` with ``PilotTones``.
+    """Diagnostic for ``estimate_carrier_phase`` with ``PilotTones``.
 
     Two panels:
 
@@ -871,8 +863,7 @@ def plot_carrier_phase_decomposition(
     show: bool = False,
     title: str = "Recovered carrier phase",
 ) -> tuple[Any, Any] | None:
-    """
-    Plots the recovered carrier-phase trajectory and its slow drift component.
+    """Plot the recovered carrier-phase trajectory and its slow drift component.
 
     The total unwrapped phase phi(t) is drawn faintly with the
     low-pass drift overlaid in bold, visualising the
@@ -966,8 +957,7 @@ def plot_timing_correlation(
     show: bool = False,
     title: str = "Timing Correlation",
 ) -> tuple[Any, Any] | None:
-    """
-    Plots the correlation of a :class:`~commkit.timing.TimingEstimate`.
+    """Plot the correlation of a :class:`~commkit.timing.TimingEstimate`.
 
     Per channel, an overall view of ``|correlation|`` and a zoom on the
     detected start, with the detection threshold ``threshold · mean|R|``
@@ -1010,8 +1000,7 @@ def plot_mm_autocorrelation(
     show: bool = False,
     title: str = "FOE - Mengali-Morelli",
 ) -> tuple[Any, Any] | None:
-    """
-    Plots the autocorrelation of a Mengali-Morelli frequency estimate.
+    """Plot the autocorrelation of a Mengali-Morelli frequency estimate.
 
     Per channel: ``|R[m]|`` and the wrapped ``angle(R[m])`` against the lag,
     with the ramp ``2π·Δf·M·m/f_s`` the estimate implies.
@@ -1052,8 +1041,7 @@ def plot_frequency_offset_spectrum(
     show: bool = False,
     title: str = "FOE - M-th Power Spectrum",
 ) -> tuple[Any, Any] | None:
-    """
-    Plots the M-th power spectrum of an ``MthPower`` frequency estimate.
+    """Plot the M-th power spectrum of an ``MthPower`` frequency estimate.
 
     The axis is mapped back from ``M·Δf`` to ``Δf`` so the detected peak
     lines up with the estimate.
@@ -1099,8 +1087,7 @@ def plot_frequency_offset_blockwise_result(
     title: str = "Block-wise FOE",
     max_points: int = 4000,
 ) -> tuple[Any, Any] | None:
-    """
-    Plots a blockwise frequency estimate and the correction it applies.
+    """Plot a blockwise frequency estimate and the correction it applies.
 
     Two panels: the block estimates with the interpolated ``Δf`` trajectory,
     and the integrated phase.  Both are recomputed with
@@ -1163,8 +1150,7 @@ def plot_pilot_phase_estimate(
     show: bool = False,
     title: str = "Pilot Phase Estimate",
 ) -> tuple[Any, Any] | None:
-    """
-    Plots the pilot phases of a pilot-based estimate with their linear fit.
+    """Plot the pilot phases of a pilot-based estimate with their linear fit.
 
     For a :class:`~commkit.recovery.CarrierPhaseEstimate` (``PilotAided``) a
     second panel shows the interpolated per-symbol trajectory; for a
@@ -1214,8 +1200,7 @@ def plot_pilot_tone_phase_estimate(
     title: str = "CPR - Pilot Tone",
     max_points: int = 4000,
 ) -> tuple[Any, Any] | None:
-    """
-    Plots a ``PilotTone`` carrier-phase estimate against the tone spectrum.
+    """Plot a ``PilotTone`` carrier-phase estimate against the tone spectrum.
 
     Two panels: ``|FFT(samples)|`` (dB) with the extraction passband
     ``f_p ± B`` and the measured tone peaks, and the recovered phase.
@@ -1274,8 +1259,7 @@ def plot_pilot_tones_phase_estimate(
     title: str = "CPR - Pilot Tones (MRC)",
     max_points: int = 4000,
 ) -> tuple[Any, Any] | None:
-    """
-    Plots a ``PilotTones`` carrier-phase estimate.
+    """Plot a ``PilotTones`` carrier-phase estimate.
 
     Two panels: the tracked inter-tone differentials ``δ_k[n]`` (gated
     tones dashed) and the combined phase (the first channel).
@@ -1320,8 +1304,7 @@ def plot_carrier_phase_trajectory(
     show: bool = False,
     title: str = "Carrier Phase Trajectory",
 ) -> tuple[Any, Any] | None:
-    """
-    Plots a per-symbol carrier phase trajectory (all channels overlaid).
+    """Plot a per-symbol carrier phase trajectory (all channels overlaid).
 
     Parameters
     ----------

@@ -32,8 +32,7 @@ def plot_ideal_constellation(
     size: float | None = None,
     show: bool = False,
 ) -> tuple[Any, Any] | None:
-    """
-    Plots the points of a constellation with their bit labels.
+    """Plot the points of a constellation with their bit labels.
 
     Includes concentric rings and center axes for reference.  A shaped
     constellation (one with a ``pmf``) is drawn probability-weighted: each
@@ -157,8 +156,7 @@ def plot_constellation(
     show: bool = False,
     **kwargs: Any,
 ) -> tuple[Any, Any] | None:
-    """
-    Plots a constellation density diagram from received samples.
+    """Plot a constellation density diagram from received samples.
 
     Uses high-definition 2D histograms with Gaussian smoothing to
     visualize noisy or impaired signals. This is significantly more

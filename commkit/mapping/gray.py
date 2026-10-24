@@ -19,8 +19,7 @@ __all__ = ["gray_code", "gray_to_binary"]
 
 @lru_cache(maxsize=128)
 def gray_code(n: int) -> np.ndarray:
-    """
-    Generates a Gray code sequence for `n` bits.
+    """Generate a Gray code sequence for `n` bits.
 
     Gray coding ensures that adjacent symbols in the constellation differ
     by only one bit, minimizing bit error rate (BER) for a given symbol
@@ -55,8 +54,7 @@ def gray_code(n: int) -> np.ndarray:
 
 @lru_cache(maxsize=128)
 def gray_to_binary(n: int) -> np.ndarray:
-    """
-    Computes the inverse Gray code mapping: symbol index to bit pattern.
+    """Compute the inverse Gray code mapping: symbol index to bit pattern.
 
     In soft demapping, it is necessary to identify which bits correspond to
     each constellation point. Since `gray_code(n)[i]` provides the Gray
@@ -110,8 +108,7 @@ def _gray_points(
     normalize: bool = True,
     unipolar: bool = False,
 ) -> np.ndarray:
-    """
-    Generate constellation points with Gray mapping.
+    """Generate constellation points with Gray mapping.
 
     The returned array is indexed by the symbol's natural binary value.
     `constellation[i]` is the complex/float value for the symbol representing
@@ -206,7 +203,7 @@ def _unpack_bits(indices: ArrayType, k: int) -> ArrayType:
 
     Returns
     -------
-    array_like, shape (N, k), int8
+    ndarray, shape (N, k), int8
         MSB-first bit pattern per index. Same backend as ``indices``.
     """
     indices, xp, _ = dispatch(indices)
@@ -233,7 +230,7 @@ def _nearest_index(
 
     Returns
     -------
-    array_like, shape (N,), int64
+    ndarray, shape (N,), int64
         Index into ``constellation`` of the nearest point, per element.
         Same backend as ``x``.
     """
@@ -248,8 +245,7 @@ def _nearest_index(
 
 
 def _gray_psk(order: int) -> np.ndarray:
-    """
-    Generates an M-PSK constellation with Gray mapping.
+    """Generate an M-PSK constellation with Gray mapping.
 
     Parameters
     ----------
@@ -288,8 +284,7 @@ def _gray_psk(order: int) -> np.ndarray:
 
 
 def _gray_ask(order: int, unipolar: bool = False) -> np.ndarray:
-    """
-    Generates an M-ASK constellation with Gray mapping.
+    """Generate an M-ASK constellation with Gray mapping.
 
     By default, returns bipolar values centered at zero. If unipolar=True,
     shifts values to start from zero.
@@ -322,8 +317,7 @@ def _gray_ask(order: int, unipolar: bool = False) -> np.ndarray:
 
 
 def _gray_qam_square(order: int) -> np.ndarray:
-    """
-    Generates a Square M-QAM constellation with Gray mapping.
+    """Generate a Square M-QAM constellation with Gray mapping.
 
     Constructed as the Cartesian product of two Gray-coded ASK
     constellations. Valid for orders where log2(M) is even.
@@ -363,8 +357,7 @@ def _gray_qam_square(order: int) -> np.ndarray:
 
 
 def _gray_qam_8_rect() -> np.ndarray:
-    """
-    Generates an 8-QAM constellation with Rectangular Gray mapping.
+    """Generate an 8-QAM constellation with Rectangular Gray mapping.
 
     Returns
     -------
@@ -402,8 +395,7 @@ def _gray_qam_8_rect() -> np.ndarray:
 
 
 def _gray_qam_cross(order: int) -> np.ndarray:
-    """
-    Generates a Cross-QAM constellation using a Quasi-Gray mapping.
+    """Generate a Cross-QAM constellation using a Quasi-Gray mapping.
 
     Cross constellations are used for QAM orders where log2(M) is odd (e.g., 32, 128)
     to maintain a more circular/compact shape than a purely rectangular grid.

@@ -167,8 +167,7 @@ def _sskf_smoother_1d(
 
 @dataclass(frozen=True)
 class Tikhonov:
-    r"""
-    MAP phase estimation with a Wiener (Tikhonov) phase-noise prior.
+    r"""MAP phase estimation with a Wiener (Tikhonov) phase-noise prior.
 
     Viterbi-Viterbi block phases are smoothed by a Kalman smoother matched
     to the laser phase noise, with process variance

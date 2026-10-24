@@ -13,8 +13,7 @@ from .backend import ArrayType, dispatch
 
 
 def ols_forward(samples: ArrayType, N_fft: int) -> tuple[ArrayType, dict[str, Any]]:
-    """
-    Overlap-and-save forward pass: block windowing and batch FFT.
+    """Overlap-and-save forward pass: block windowing and batch FFT.
 
     This is the shared OLS scaffolding used by both ``ols_fir_filter`` (SISO
     scalar convolution) and ``zf_equalizer`` (MIMO per-bin matrix multiply).
@@ -32,7 +31,7 @@ def ols_forward(samples: ArrayType, N_fft: int) -> tuple[ArrayType, dict[str, An
 
     Returns
     -------
-    Y : array_like
+    Y : ndarray
         Batch FFT of all OLS windows. Shape: ``(num_ch, num_blocks, N_fft)``.
     meta : dict
         Scaffold parameters required by ``ols_backward``:
@@ -64,8 +63,7 @@ def ols_forward(samples: ArrayType, N_fft: int) -> tuple[ArrayType, dict[str, An
 
 
 def ols_backward(X_hat_f: ArrayType, meta: dict[str, Any]) -> ArrayType:
-    """
-    Overlap-and-save backward pass: batch IFFT, symmetric discard, reshape.
+    """Overlap-and-save backward pass: batch IFFT, symmetric discard, reshape.
 
     Parameters
     ----------
@@ -77,7 +75,7 @@ def ols_backward(X_hat_f: ArrayType, meta: dict[str, Any]) -> ArrayType:
 
     Returns
     -------
-    array_like
+    ndarray
         Time-domain output trimmed to the original signal length ``N``.
         Shape: ``(num_ch, N)``.
     """

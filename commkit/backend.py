@@ -79,8 +79,7 @@ ArrayType = np.ndarray | Any
 
 
 def is_cupy_available() -> bool:
-    """
-    Checks if NVIDIA GPU acceleration is functional via CuPy.
+    """Report whether CuPy is installed and can run on a GPU.
 
     Data placement never depends on this: arrays stay where the caller put
     them, and only an explicit ``to_device(x, "gpu")`` or ``Signal.to("gpu")``
@@ -106,22 +105,21 @@ def _module_for(device: str) -> types.ModuleType:
 
 
 def get_array_module(data: Any) -> types.ModuleType:
-    """
-    Infers the array module (NumPy or CuPy) for the given data.
+    """Return the array module (NumPy or CuPy) of the data.
 
-    The decision is made by inspecting the **actual type of the data**: the
-    device follows the data.
+    Decided by the type of the data itself, so the device follows the data.
+    Never imports CuPy for host data.
 
     Parameters
     ----------
-    data : array_like or list
-        The input data to inspect.
+    data : array_like
+        The data to inspect (an array, a list or a scalar).
 
     Returns
     -------
     module
-        `cupy` if the data is a CuPy device array, otherwise `numpy`
-        (CPU arrays, lists, and scalars).
+        ``cupy`` for a CuPy array, otherwise ``numpy`` (host arrays, lists
+        and scalars).
     """
     if _is_cupy_array(data):
         import cupy
@@ -132,18 +130,18 @@ def get_array_module(data: Any) -> types.ModuleType:
 
 @cache
 def get_scipy_module(xp: types.ModuleType) -> types.ModuleType:
-    """
-    Returns the signal processing library compatible with the given array module.
+    """Return the SciPy module that matches an array module.
 
     Parameters
     ----------
     xp : module
-        The array module (typically `numpy` or `cupy`).
+        ``numpy`` or ``cupy``.
 
     Returns
     -------
     sp : module
-        The corresponding signal processing module (`scipy` or `cupyx.scipy`).
+        ``scipy`` for NumPy, ``cupyx.scipy`` for CuPy, with ``signal``,
+        ``special`` and ``ndimage`` imported.
     """
     # Match sp to the actual array module so dispatch() returns a consistent
     # (xp, sp) pair.
@@ -171,33 +169,28 @@ def get_scipy_module(xp: types.ModuleType) -> types.ModuleType:
 
 
 def to_device(data: Any, device: str) -> ArrayType:
-    """
-    Moves data between CPU and GPU devices.
+    """Move data between the host (CPU) and the GPU.
 
     Parameters
     ----------
     data : array_like
-        The data to move.
-    device : {"CPU", "GPU"}
-        Target device name (case-insensitive).
+        The data to move (an array, a list or a scalar).
+    device : {"cpu", "gpu"}
+        Target device, case-insensitive.
 
     Returns
     -------
-    array_like
-        The data residing on the target device.
+    ndarray
+        The data on the target device: a NumPy array for ``"cpu"``, a CuPy
+        array for ``"gpu"``.  An array already on the target device is
+        returned as is, not copied.
 
     Raises
     ------
     ImportError
-        If "GPU" is requested but CuPy is not available.
+        If ``"gpu"`` is requested but CuPy is not available.
     ValueError
-        If an unsupported device name is provided.
-
-    Notes
-    -----
-    If the data is already on the target device, this operation
-    typically returns a view or the original array to avoid
-    unnecessary copies.
+        On an unknown device name.
     """
     logger.debug("Moving data to %s.", device.upper())
     device = device.lower()
@@ -225,25 +218,25 @@ def to_device(data: Any, device: str) -> ArrayType:
 def dispatch(
     data: Any,
 ) -> tuple[ArrayType, types.ModuleType, types.ModuleType]:
-    """
-    Inspects data and returns appropriate backend modules.
+    """Return the data as an array with its array and SciPy modules.
 
-    This helper is used throughout the library to implement backend-agnostic
-    functional logic.
+    The entry point of every numerical function: the device follows the
+    data.
 
     Parameters
     ----------
     data : array_like
-        The input data to analyze.
+        The input data.
 
     Returns
     -------
-    data_array : array_like
-        The input data forced to an array on its current device.
+    data_array : ndarray
+        The input as an array on its current device (NumPy and CuPy arrays
+        unchanged).
     xp : module
-        The array module (`numpy` or `cupy`).
+        ``numpy`` or ``cupy``.
     sp : module
-        The signal processing module (`scipy` or `cupyx.scipy`).
+        ``scipy`` or ``cupyx.scipy``.
 
     Raises
     ------

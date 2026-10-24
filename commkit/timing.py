@@ -4,8 +4,9 @@
 cross-correlation (:func:`cross_correlate_fft`) with a template or a
 :class:`~commkit.core.Preamble` (a :class:`TimingEstimate`), and
 :func:`correct_timing` removes it.  :func:`estimate_fractional_delay` and
-:func:`fft_fractional_delay` measure and apply sub-sample delays.  The sequences
-:func:`barker_sequence` and :func:`zadoff_chu_sequence` build preambles.
+:func:`fft_fractional_delay` measure and apply sub-sample delays.  The
+sequences :func:`barker_sequence` and :func:`zadoff_chu_sequence` build
+preambles.
 """
 
 import logging
@@ -48,13 +49,12 @@ def cross_correlate_fft(
     *,
     mode: str = "full",
 ) -> ArrayType:
-    """
-    Vectorized FFT-based cross-correlation.
+    """Cross-correlate samples with a template through the FFT.
 
-    Computes the cross-correlation of ``samples`` with ``template`` using
-    the frequency-domain multiplication approach. Handles 1D and 2D
-    (multichannel) inputs natively via ``axis=-1`` broadcasting - no
-    Python loops over channels.
+    ``R[k] = Σ_n samples[n + k] · conj(template[n])``, computed as
+    ``IFFT(FFT(samples) · conj(FFT(template)))`` on a power-of-2 grid of at
+    least ``N + L - 1`` points, for all channels at once (``(C, N)`` input,
+    time on the last axis).
 
     Parameters
     ----------
@@ -66,19 +66,19 @@ def cross_correlate_fft(
         broadcast across all channels.
     mode : {"full", "same", "valid", "positive_lags"}, default "full"
         Output size:
-        - ``"full"``: length ``N + L - 1``.
-        - ``"same"``: length ``N`` (centered).
+        - ``"full"``: lags ``-(L - 1) .. N - 1``, length ``N + L - 1``
+          (the layout of ``scipy.signal.correlate``).
+        - ``"same"``: length ``N``, centred.
         - ``"valid"``: length ``max(N, L) - min(N, L) + 1``.
-        - ``"positive_lags"``: length ``N`` (lags 0 ... N-1 only). Returns a
-          zero-copy view of the raw circular-correlation output - no
-          ``concatenate`` and no reordering. Use this when negative lags are
-          not needed (e.g. frame timing search within a bounded window).
+        - ``"positive_lags"``: lags ``0 .. N - 1`` only, a view of the
+          circular correlation; for a timing search, where negative lags are
+          not needed.
 
     Returns
     -------
-    array_like
-        Complex cross-correlation with shape matching the input
-        dimensionality and the selected ``mode``.
+    ndarray
+        Complex correlation, ``(M,)`` or ``(C, M)`` as ``samples``, with
+        ``M`` set by ``mode``.
     """
     samples, xp, _ = dispatch(samples)
     template = xp.asarray(template)
@@ -214,21 +214,17 @@ def estimate_fractional_delay(
     dft_upsample: int = 1,
     fit: str = "log-parabolic",
 ) -> ArrayType:
-    """
-    Estimates sub-sample timing offset via parabolic interpolation.
+    """Estimate the sub-sample offset of correlation peaks.
 
-    Given a correlation array and the integer peak positions, fits a
-    parabola (or Gaussian) through the three points around each peak to
-    estimate the fractional offset with sub-sample precision.
+    Fits a parabola (or, on the logarithm, a Gaussian) through the three
+    samples around each integer peak.  Complex input is rotated so that the
+    peak lies on the real axis before the fit, which keeps the peak's shape
+    (a fit to ``|R|`` distorts it).
 
-    When the input is **complex**, the peak is phase-rotated to the real
-    axis before fitting. This preserves the true peak shape (unlike
-    fitting to ``|R|``) and improves accuracy by 2-5x for typical
-    matched-filter outputs.
-
-    If ``dft_upsample > 1``, performs a "Zoom FFT" (DFT zero-padding)
-    around the peak to interpolate the correlation function onto a finer
-    grid before fitting. This significantly reduces bias error.
+    With ``dft_upsample > 1`` the correlation in a 33-sample window around
+    the peak is first interpolated onto a finer grid by DFT zero-padding,
+    which reduces the bias of the three-point fit.  Peaks closer than 16
+    samples to an end of the record fall back to the plain fit.
 
     Parameters
     ----------
@@ -238,9 +234,8 @@ def estimate_fractional_delay(
     peak_indices : array_like
         Integer peak positions. Shape: scalar or ``(C,)``.
     dft_upsample : int, default 1
-        Upsampling factor for DFT-based interpolation.
-        Values > 1 perform zero-padded FFT interpolation on a window
-        around the peak (typically 33 samples).
+        Interpolation factor of the DFT zero-padding; 1 fits the samples
+        directly.
     fit : {'parabolic', 'log-parabolic'}, default 'log-parabolic'
         Peak fit:
         - 'parabolic': Standard parabolic fit. Good for general peaks.
@@ -249,8 +244,11 @@ def estimate_fractional_delay(
 
     Returns
     -------
-    array_like
-        Fractional offset per channel, in [-0.5, 0.5). Shape: ``(C,)`` or scalar.
+    ndarray
+        Offset of each peak from ``peak_indices`` in samples, 0-d for a scalar
+        ``peak_indices``, else ``(C,)``.  In ``[-0.5, 0.5]`` with
+        ``dft_upsample=1``; with upsampling, the offset of the interpolated
+        peak.  0 for a peak on the first or last sample.
     """
     if fit not in ("parabolic", "log-parabolic"):
         raise ValueError(f"fit must be 'parabolic' or 'log-parabolic', got {fit!r}.")
@@ -389,34 +387,32 @@ def estimate_fractional_delay(
 
 
 def fft_fractional_delay(samples: S, *, delay: float | ArrayType) -> S:
-    """
-    Applies fractional sample delay using FFT-based frequency-domain method.
+    """Delay samples by a fractional number of samples in the frequency domain.
 
-    This is the mathematically ideal method for bandlimited signals. It
-    applies the delay as a phase shift in the frequency domain, which is
-    equivalent to ideal sinc interpolation in the time domain. Unlike
-    polynomial interpolators (e.g., Farrow), this method perfectly preserves
-    signal power and has no bandwidth limitations.
+    The delay is a linear phase on the spectrum, ideal (periodic sinc)
+    interpolation for band-limited signals: unlike polynomial interpolators
+    (Farrow), it keeps the power and the whole band.  The record is treated
+    as periodic, so samples shifted past one end reappear at the other.
 
     Parameters
     ----------
     samples : array_like or Signal
-        Input signal. Shape: (N,) or (C, N).  A :class:`Signal` returns a
+        Input samples, ``(N,)`` or ``(C, N)``.  A :class:`Signal` returns a
         new delayed :class:`Signal`.
     delay : float or array_like
-        Fractional delay in samples. Positive = delay (shift right).
-        Scalar applies the same delay to all channels.
-        Array of shape (C,) applies per-channel delays.
+        Delay in samples (any real value); positive shifts the signal later.
+        A scalar applies to all channels, a ``(C,)`` array per channel.
 
     Returns
     -------
-    array_like or Signal
-        Delayed signal with the same shape as input.
+    ndarray or Signal
+        Delayed samples, same shape and dtype as the input (real for real
+        input).
 
     Notes
     -----
-    Applies Y(f) = X(f) * exp(-j * 2*pi * f * delay / N) - equivalent to
-    ideal sinc interpolation with perfect power preservation.
+    ``Y[k] = X[k] · exp(-j 2π k · delay / N)`` with ``k`` the signed FFT bin
+    index.
     """
     signal_adapter = adapt_signal(samples, function_name="fft_fractional_delay()")
     x, xp, _ = dispatch(signal_adapter.array)
@@ -468,7 +464,9 @@ class TimingEstimate:
     integer : array_like
         Sample index where the template starts (``int64``).
     fractional : array_like
-        Sub-sample offset of the correlation peak, in ``[-0.5, 0.5]``.
+        Sub-sample offset of the correlation peak (see
+        :func:`estimate_fractional_delay`; in ``[-0.5, 0.5]`` without DFT
+        upsampling).
     metric : array_like
         Peak-to-mean ratio of ``|correlation|`` (the detection metric).
     coherence : array_like
@@ -477,7 +475,7 @@ class TimingEstimate:
         offset or dispersion.
     correlation : array_like
         Complex correlation at non-negative lags ``0 .. N_search - 1`` of the
-        searched window, ``(L,)`` or ``(C, L)``; the data
+        searched window, ``(N_search,)`` or ``(C, N_search)``; the data
         ``plot_timing_correlation`` draws.
     search_start : int
         First sample of the searched window: lag ``k`` is sample
@@ -508,8 +506,10 @@ def estimate_timing(
     dft_upsample: int = 1,
     fit: str = "log-parabolic",
 ) -> TimingEstimate:
-    """
-    Integer and fractional timing offset by cross-correlation with a template.
+    """Estimate the timing offset by cross-correlation with a template.
+
+    Finds the integer start of the template and the sub-sample offset of the
+    correlation peak.
 
     For a multi-stream template ``(C_tx, L)`` every stream is correlated with
     every receive channel and each channel takes its strongest peak, which
@@ -524,7 +524,8 @@ def estimate_timing(
         as is; a :class:`Preamble` is shaped at ``sps`` with ``pulse``.
         Defaults to the preamble of the Signal's frame.
     threshold : float, default 3.0
-        Minimum peak-to-mean ratio of ``|correlation|``.
+        Minimum peak-to-mean ratio of ``|correlation|``.  A channel below it
+        logs a warning; the call raises only when every channel is below.
     sps : float, optional
         Samples per symbol, needed to shape a Preamble.  Taken from the
         Signal; a value that disagrees with it raises.
@@ -532,7 +533,7 @@ def estimate_timing(
         Pulse that shapes a Preamble template.  Defaults to the Signal's
         ``pulse``; ``None`` leaves it unshaped (zero-stuffed).
     search_range : (int, int), optional
-        ``(start, stop)`` samples to search.
+        ``(start, stop)`` samples to search; defaults to the whole record.
     dft_upsample : int, default 1
         DFT interpolation factor for the fractional fit.
     fit : {'parabolic', 'log-parabolic'}, default 'log-parabolic'
@@ -768,8 +769,7 @@ def correct_timing(
     *,
     mode: str = "circular",
 ) -> S:
-    """
-    Remove a timing offset: integer shift, then FFT fractional delay.
+    """Remove a timing offset: integer shift, then FFT fractional delay.
 
     Parameters
     ----------
@@ -778,7 +778,8 @@ def correct_timing(
     how : TimingEstimate, float or array_like
         A :class:`TimingEstimate`, or the offset in samples (scalar or
         ``(C,)``), which is split into its nearest integer and a fraction
-        in ``[-0.5, 0.5)``.  Sample ``offset`` of the input becomes sample 0.
+        in ``[-0.5, 0.5)``.  The input's sample at the offset becomes
+        sample 0.
     mode : {'circular', 'zero', 'slice'}, default 'circular'
         How to handle boundary samples after the integer shift:
 
@@ -791,8 +792,14 @@ def correct_timing(
 
     Returns
     -------
-    array_like or Signal
-        Corrected samples; shorter for ``'slice'``.
+    ndarray or Signal
+        Corrected samples; shorter for ``'slice'``, which also logs a
+        warning.
+
+    Raises
+    ------
+    ValueError
+        On an unknown ``mode``.
 
     Notes
     -----

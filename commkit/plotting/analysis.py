@@ -48,8 +48,7 @@ def plot_frequency_drift(
     show: bool = False,
     title: str = "Residual frequency drift",
 ) -> tuple[Any, Any] | None:
-    """
-    Plots the instantaneous residual frequency offset vs time.
+    """Plot the instantaneous residual frequency offset vs time.
 
     Draws the ``df`` of ``analysis.frequency_drift`` - the slope of the
     smoothed (drift) phase.  This is the spin the carrier-phase recovery must
@@ -129,8 +128,7 @@ def plot_frequency_noise_psd(
     show: bool = False,
     title: str = "Frequency-noise PSD",
 ) -> tuple[Any, Any] | None:
-    """
-    Plots the frequency-noise PSD of a linewidth estimate on log-log axes.
+    """Plot the frequency-noise PSD of a linewidth estimate on log-log axes.
 
     Draws ``S_f`` with the white-FM floor ``Δν/π`` (``linewidth_floor`` for
     ``BetaSeparation``, the estimate itself for ``DshFmPsd``) and the region
@@ -291,8 +289,7 @@ def plot_allan_deviation(
     show: bool = False,
     title: str = "Allan deviation",
 ) -> tuple[Any, Any] | None:
-    """
-    Plots the (overlapping) Allan deviation vs averaging time on log-log axes.
+    """Plot the (overlapping) Allan deviation vs averaging time on log-log axes.
 
     The local slope classifies the dominant frequency-noise process:
     white-FM ~ tau^(-1/2), flicker-FM ~ tau^0 (flat), random-walk-FM ~ tau^(+1/2),
@@ -361,8 +358,7 @@ def plot_increment_variance(
     show: bool = False,
     title: str = "Phase-increment variance",
 ) -> tuple[Any, Any] | None:
-    """
-    Plots Var of phase increments vs lag with the fitted linear model.
+    """Plot Var of phase increments vs lag with the fitted linear model.
 
     The measured points should follow ``Var = slope·lag + intercept`` for
     white-FM (Wiener) phase noise; curvature signals flicker or drift
@@ -437,8 +433,7 @@ def plot_dsh_beat_psd(
     show: bool = False,
     title: str = "DSH beat spectrum",
 ) -> tuple[Any, Any] | None:
-    """
-    Plots the self-heterodyne beat PSD (dB rel. peak) with width annotations.
+    """Plot the self-heterodyne beat PSD (dB rel. peak) with width annotations.
 
     Centres the axis on the beat peak, overlays the half-power and
     ``-level_db`` contours, and shades the full widths implied by the
@@ -522,8 +517,7 @@ def plot_carrier_phase_characterization(
     show: bool = False,
     title: str | None = None,
 ) -> tuple[Any, Any] | None:
-    """
-    Full 2x2 carrier-phase characterization dashboard.
+    """Full 2x2 carrier-phase characterization dashboard.
 
     Combines ``plot_carrier_phase_decomposition``, ``plot_frequency_drift``,
     ``plot_frequency_noise_psd`` and ``plot_allan_deviation`` in one figure

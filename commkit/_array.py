@@ -30,8 +30,7 @@ from .backend import (
 def validate_array(
     v: Any, name: str = "array", complex_only: bool = False
 ) -> ArrayType:
-    """
-    Validates and coerces input data into a numeric array.
+    """Validate and coerces input data into a numeric array.
 
     Existing NumPy or CuPy arrays are passed through unchanged (preserving
     device placement). All other inputs (Python scalars, lists, tuples) are
@@ -49,7 +48,7 @@ def validate_array(
 
     Returns
     -------
-    array_like
+    ndarray
         NumPy or CuPy array (CuPy only when ``v`` was already a CuPy array).
 
     Raises
@@ -103,8 +102,7 @@ def validate_array(
 
 
 def as_2d(arr: ArrayType, *, name: str = "array") -> tuple[ArrayType, bool]:
-    """
-    Promotes a SISO ``(N,)`` array to the MIMO layout ``(1, N)``.
+    """Promotes a SISO ``(N,)`` array to the MIMO layout ``(1, N)``.
 
     The canonical entry half of the library's SISO/MIMO shape idiom; pair it
     with :func:`restore_1d` to squeeze the promoted axis back off the outputs.
@@ -120,7 +118,7 @@ def as_2d(arr: ArrayType, *, name: str = "array") -> tuple[ArrayType, bool]:
 
     Returns
     -------
-    arr_2d : array_like
+    arr_2d : ndarray
         ``arr[None, :]`` for 1-D input, ``arr`` itself (no copy) for 2-D.
     was_1d : bool
         Whether the promotion happened - pass this to :func:`restore_1d`.
@@ -154,8 +152,7 @@ def restore_1d(
 
 
 def restore_1d(was_1d: bool, *arrays: ArrayType) -> ArrayType | tuple[ArrayType, ...]:
-    """
-    Undoes :func:`as_2d` on one or more outputs.
+    """Undoes :func:`as_2d` on one or more outputs.
 
     Parameters
     ----------
@@ -166,7 +163,7 @@ def restore_1d(was_1d: bool, *arrays: ArrayType) -> ArrayType | tuple[ArrayType,
 
     Returns
     -------
-    array_like or tuple of array_like
+    ndarray or tuple of ndarray
         ``arr[0]`` per input when ``was_1d``, otherwise the inputs unchanged.
         A single input returns bare (not a 1-tuple), so both
         ``out = restore_1d(was_1d, out)`` and
@@ -181,8 +178,7 @@ def restore_1d(was_1d: bool, *arrays: ArrayType) -> ArrayType | tuple[ArrayType,
 def broadcast_channels(
     ref: ArrayType, num_channels: int, xp: Any = None, *, name: str = "reference"
 ) -> ArrayType:
-    """
-    Broadcasts a shared reference sequence across ``num_channels`` channels.
+    """Broadcasts a shared reference sequence across ``num_channels`` channels.
 
     Replaces the ad-hoc ``if ref.ndim == 1: ref = ref[None, :]`` promotion used
     at every reference/pilot input, adding the channel-count check that the
@@ -202,7 +198,7 @@ def broadcast_channels(
 
     Returns
     -------
-    array_like
+    ndarray
         A ``(C, L)`` view.  Shared references are returned as a **read-only
         broadcast view** (no data is copied); call ``.copy()`` before writing.
 
@@ -237,8 +233,7 @@ def require_channels(
     name: str = "samples",
     description: str | None = None,
 ) -> ArrayType:
-    """
-    Validates a strict MIMO layout with an exact channel count.
+    """Validate a strict MIMO layout with an exact channel count.
 
     For entry points that are *only* defined for a fixed number of channels -
     dual-polarization channel models and polarization equalizers - where a
@@ -258,7 +253,7 @@ def require_channels(
 
     Returns
     -------
-    array_like
+    ndarray
         ``arr`` unchanged.
 
     Raises
@@ -277,8 +272,7 @@ def require_channels(
 
 
 def to_report_scalar(values: Any, *, was_1d: bool | None = None) -> float | np.ndarray:
-    """
-    A reporting-layer result on the host: a Python float or a float64 array.
+    """A reporting-layer result on the host: a Python float or a float64 array.
 
     The reporting-layer counterpart of :func:`restore_1d`: channel-batched
     results are computed as ``(C,)`` vectors, but ``(N,)`` input reports a

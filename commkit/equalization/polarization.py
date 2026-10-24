@@ -345,8 +345,7 @@ def demultiplex_polarization_tones_static(
     normalize: bool = True,
     return_matrix: bool = False,
 ) -> ArrayType | Signal | tuple[ArrayType | Signal, ArrayType]:
-    r"""
-    One-shot polarization demux from distinct per-stream CW pilot tones.
+    r"""One-shot polarization demux from distinct per-stream CW pilot tones.
 
     Undoes a **frequency-flat** polarization / spatial mixing by inverting the
     channel's Jones matrix, which is read directly off pilot tones placed at a
@@ -416,14 +415,14 @@ def demultiplex_polarization_tones_static(
 
     Returns
     -------
-    demuxed : array_like
+    demuxed : ndarray
         Demultiplexed streams. Shape ``(K, N)`` - one row per recovered
         *stream* (``K`` = number of tones), **not** per receive channel: the
         ``C`` input channels are mapped down to the ``K`` transmitted streams.
         In the usual square dual-pol case ``K == C == 2`` the two coincide.
         Same complex dtype and backend as the input.  Row ``j`` is the stream
         that carried ``tone_frequencies[j]``.
-    W : array_like, optional
+    W : ndarray, optional
         Returned only if ``return_matrix=True``: the ``(K, C)`` unmixing matrix
         (``complex128``), i.e. the estimated inverse Jones matrix up to per-stream
         scaling.  Suitable as a seed for a butterfly equalizer.
@@ -539,8 +538,7 @@ def demultiplex_polarization_tones_dynamic(
     return_matrix: bool = False,
     apply: bool = True,
 ) -> ArrayType | Signal | JonesTrack | tuple[ArrayType | Signal, JonesTrack]:
-    r"""
-    Time-varying polarization demux from distinct per-stream CW pilot tones.
+    r"""Time-varying polarization demux from distinct per-stream CW pilot tones.
 
     Drifting-SOP counterpart of ``demultiplex_polarization_tones_static``.  Where
     the static routine reads a *single* Jones matrix from a whole-record DFT bin,
@@ -647,7 +645,7 @@ def demultiplex_polarization_tones_dynamic(
 
     Returns
     -------
-    demuxed : array_like or Signal
+    demuxed : ndarray or Signal
         Demultiplexed streams. Same complex dtype and backend as the input; row
         ``j`` carried ``tone_frequencies[j]``.  Shape ``(K, N)``, or
         ``(K, N - 2·(num_taps//2))`` when ``trim_edges=True``.

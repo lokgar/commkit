@@ -37,8 +37,7 @@ def decimate_to_symbol_rate(
     offset: int = 0,
     normalize: bool | None = None,
 ) -> S:
-    """
-    Decimate an oversampled signal to the symbol rate by direct slicing.
+    """Decimate an oversampled signal to the symbol rate by direct slicing.
 
     Use this **after** matched filtering: it keeps every ``sps``-th sample
     without further filtering, which is correct because the matched filter
@@ -62,7 +61,7 @@ def decimate_to_symbol_rate(
 
     Returns
     -------
-    array_like or Signal
+    ndarray or Signal
         Symbols at one sample per symbol, ``(..., ceil((N - offset) / sps))``.
     """
     signal_adapter = adapt_signal(samples, function_name="decimate_to_symbol_rate()")
@@ -111,8 +110,7 @@ def upsample(
     correct_power: bool | None = None,
     periodic: bool = False,
 ) -> S:
-    """
-    Increase the sampling rate by an integer factor (polyphase interpolation).
+    """Increase the sampling rate by an integer factor (polyphase interpolation).
 
     Zero insertion followed by an anti-imaging filter
     (``scipy.signal.resample_poly``); with ``periodic=True``, Fourier
@@ -135,7 +133,7 @@ def upsample(
 
     Returns
     -------
-    array_like or Signal
+    ndarray or Signal
         Upsampled samples, ``(..., N * factor)``.
     """
     factor = _check_factor(factor, "upsample()")
@@ -165,8 +163,7 @@ def decimate(
     zero_phase: bool = True,
     ftype: str = "fir",
 ) -> S:
-    """
-    Reduce the sampling rate by an integer factor with anti-aliasing.
+    """Reduce the sampling rate by an integer factor with anti-aliasing.
 
     Parameters
     ----------
@@ -189,7 +186,7 @@ def decimate(
 
     Returns
     -------
-    array_like or Signal
+    ndarray or Signal
         Decimated samples, ``(..., ceil(N / factor))``.
 
     Notes
@@ -233,8 +230,7 @@ def resample(
     correct_power: bool | None = None,
     periodic: bool = False,
 ) -> S:
-    """
-    Rational resampling by ``up / down`` (polyphase, or Fourier when
+    """Rational resampling by ``up / down`` (polyphase, or Fourier when
     ``periodic``).
 
     Give either the integer factors ``up`` and ``down``, or the target
@@ -267,7 +263,7 @@ def resample(
 
     Returns
     -------
-    array_like or Signal
+    ndarray or Signal
         Resampled samples, about ``N * up / down`` long (exactly, when
         ``periodic``).
 

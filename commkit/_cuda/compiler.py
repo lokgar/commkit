@@ -27,7 +27,7 @@ _KERNEL_CACHE: dict[tuple[str, tuple[str, ...], str], tuple[Any, Any]] = {}
 
 
 def read_source(source_name: str) -> str:
-    """Loads a CUDA C++ source file from the package's ``src/`` directory.
+    """Load a CUDA C++ source file from the package's ``src/`` directory.
 
     Parameters
     ----------
@@ -56,7 +56,7 @@ def get_raw_kernel(
     name_expression: str,
     options: tuple[str, ...] = DEFAULT_OPTIONS,
 ) -> Any:
-    """Compiles (or retrieves from cache) one kernel specialization.
+    """Compile (or retrieves from cache) one kernel specialization.
 
     Parameters
     ----------

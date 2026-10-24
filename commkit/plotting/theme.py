@@ -17,8 +17,7 @@ __all__ = ["apply_default_theme"]
 
 
 def apply_default_theme() -> None:
-    """
-    Applies the library's default visual theme to Matplotlib.
+    """Apply the library's default visual theme to Matplotlib.
 
     This theme configures publication-quality defaults, including:
     - Roboto or standard sans-serif typography.
@@ -105,8 +104,7 @@ def _finish(result, show: bool):
 
 
 def _create_subplot_grid(num_axes: int, max_cols: int = 2) -> tuple[int, int]:
-    """
-    Computes a grid layout (rows, cols) for a given number of axes.
+    """Compute a grid layout (rows, cols) for a given number of axes.
 
     Limits the maximum number of columns to prevent excessively wide figures.
 
@@ -134,8 +132,7 @@ def _create_subplot_grid(num_axes: int, max_cols: int = 2) -> tuple[int, int]:
 def _grid_figsize(
     nrows: int, ncols: int, panel: tuple[float, float] | None = None
 ) -> tuple[float, float]:
-    """
-    Figsize for a subplot grid that preserves the default single-panel size.
+    """Figsize for a subplot grid that preserves the default single-panel size.
 
     Tiles ``panel`` (default: ``rcParams["figure.figsize"]``) across the
     grid, so a single row keeps the default height, a single column keeps
@@ -158,8 +155,7 @@ def _grid_figsize(
 
 
 def _square_figsize(n: int = 1) -> tuple[float, float]:
-    """
-    Square panel size derived from the default figure height.
+    """Square panel size derived from the default figure height.
 
     Used for constellation-style plots that require an equal aspect ratio,
     where the default (non-square) ``figure.figsize`` doesn't apply directly.

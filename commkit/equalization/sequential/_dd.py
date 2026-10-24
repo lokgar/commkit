@@ -56,8 +56,7 @@ def lms(
     state: EqualizerState | None = None,
     pad_mode: str = "zeros",
 ) -> EqualizerResult:
-    """
-    Least Mean Squares adaptive equalizer with butterfly MIMO support.
+    """Least Mean Squares adaptive equalizer with butterfly MIMO support.
 
     The weights adapt every symbol (CPU, Numba).  For high throughput on slow
     or static channels, the frequency-domain :func:`block_lms` adapts once per
@@ -392,8 +391,7 @@ def rls(
     state: EqualizerState | None = None,
     pad_mode: str = "zeros",
 ) -> EqualizerResult:
-    """
-    Recursive Least Squares adaptive equalizer with butterfly MIMO support.
+    """Recursive Least Squares adaptive equalizer with butterfly MIMO support.
 
     RLS converges faster than LMS at the cost of higher per-symbol
     complexity (O(num_taps²) for the rank-1 Riccati update vs O(num_taps)

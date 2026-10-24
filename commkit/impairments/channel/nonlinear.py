@@ -34,8 +34,7 @@ def apply_fiber_propagation(
     sampling_rate: float | None = None,
     rng: RNG = None,
 ) -> S:
-    """
-    Propagates a field over ``num_spans`` amplified spans of nonlinear fiber.
+    """Propagate a field over ``num_spans`` amplified spans of nonlinear fiber.
 
     Solves the nonlinear Schrödinger equation for ``(N,)`` input (one
     polarization) or the Manakov equation for ``(2, N)`` input (two
@@ -81,7 +80,7 @@ def apply_fiber_propagation(
 
     Returns
     -------
-    array_like or Signal
+    ndarray or Signal
         The field at the output of the last amplifier, in the input's units:
         the input's power stands for the launch power, so a link whose
         amplifiers restore every span loss returns the input's power plus

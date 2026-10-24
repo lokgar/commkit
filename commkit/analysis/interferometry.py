@@ -219,10 +219,10 @@ def dsh_beat(
 
     Returns
     -------
-    z : array_like
+    z : ndarray
         Unit-amplitude complex beat, ``(..., N - m)``, ``complex128``, same
         backend as ``phi``.
-    delta_phi : array_like
+    delta_phi : ndarray
         The true differential phase Δφ, ``(..., N - m)`` - ground truth for
         validating ``dsh_phase`` and the DSH linewidth estimates.
     """
@@ -287,7 +287,7 @@ def dsh_phase(
 
     Returns
     -------
-    delta_phi : array_like
+    delta_phi : ndarray
         Unwrapped differential phase in radians (``float64``), same layout and
         backend as the input (``(N,)`` when the polarizations are combined).
     f_shift_hz : float or ndarray

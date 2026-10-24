@@ -1,11 +1,11 @@
 """Carrier frequency offset estimation and correction.
 
 :func:`estimate_frequency_offset` measures the offset with the estimator its
-method object chooses: :class:`MthPower` (blind, the
-spectral peak of the M-th power), :class:`MengaliMorelli` (blind, multi-lag
-autocorrelation), :class:`PilotSymbols` (the phase slope of known symbols)
-or :class:`BiasTone` (a CW pilot tone).  A ``block_size`` on the blind
-methods tracks a time-varying offset.  The estimate is a
+method object chooses: :class:`MthPower` (blind, the spectral peak of the
+M-th power), :class:`MengaliMorelli` (blind, multi-lag autocorrelation),
+:class:`PilotSymbols` (the phase slope of known symbols) or
+:class:`BiasTone` (a CW pilot tone).  A ``block_size`` on any method but
+``PilotSymbols`` tracks a time-varying offset.  The estimate is a
 :class:`FrequencyOffsetEstimate`; :func:`correct_frequency_offset` removes an
 estimate, an offset in Hz, or what a method estimates.
 """
@@ -626,8 +626,7 @@ def estimate_frequency_offset(
     sampling_rate: float | None = None,
     constellation: Any = None,
 ) -> FrequencyOffsetEstimate:
-    """
-    Estimate the carrier frequency offset.
+    """Estimate the carrier frequency offset.
 
     Parameters
     ----------
@@ -729,8 +728,7 @@ def correct_frequency_offset(
     *,
     sampling_rate: float | None = None,
 ) -> S:
-    """
-    Remove a carrier frequency offset by complex mixing.
+    """Remove a carrier frequency offset by complex mixing.
 
     A constant offset is removed exactly, ``y[n] = x[n]·exp(-j2πΔf·n/fs)``
     with ``n = 0`` at the first sample and no bin quantization.  A blockwise
@@ -751,7 +749,7 @@ def correct_frequency_offset(
 
     Returns
     -------
-    array_like or Signal
+    ndarray or Signal
         Corrected samples, same shape, dtype and device (complex for real
         input).
 

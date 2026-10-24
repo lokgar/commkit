@@ -35,8 +35,7 @@ def zf_equalizer(
     noise_variance: float = 0.0,
     center: int = 0,
 ) -> ArrayType | Signal:
-    """
-    Zero-Forcing / MMSE frequency-domain block equalizer.
+    """Zero-Forcing / MMSE frequency-domain block equalizer.
 
     Given a channel impulse response estimate, equalizes the received signal
     in the frequency domain. Supports both SISO and MIMO channels.
@@ -66,7 +65,7 @@ def zf_equalizer(
 
     Returns
     -------
-    array_like or Signal
+    ndarray or Signal
         Equalized samples. Same shape and backend as input.
     """
     signal_adapter = adapt_signal(samples, function_name="zf_equalizer()")
@@ -214,7 +213,7 @@ def apply_taps(
 
     Returns
     -------
-    array_like
+    ndarray
         Equalized symbols. Shape: ``(N_sym,)`` for SISO or
         ``(C, N_sym)`` for MIMO, where ``N_sym = N_samples // sps``.
         Resides on the same backend as ``samples``.
@@ -351,7 +350,7 @@ def estimate_transfer_function(
 
     Returns
     -------
-    array_like
+    ndarray
         Frequency response or impulse response (see ``num_taps``).
     """
     reference = adapt_signal(

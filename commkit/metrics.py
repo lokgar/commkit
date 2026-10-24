@@ -217,8 +217,7 @@ def evm(
     blind: bool = False,
     num_skip_symbols: int = 0,
 ) -> float | np.ndarray:
-    """
-    Error vector magnitude (RMS), in percent.
+    """Error vector magnitude (RMS), in percent.
 
     Data-aided by default: the error is measured against the known
     transmitted symbols.  With ``blind=True`` it is measured against the
@@ -313,8 +312,7 @@ def snr(
     *,
     num_skip_symbols: int = 0,
 ) -> float | np.ndarray:
-    """
-    Data-aided SNR in dB: signal power over error power.
+    """Data-aided SNR in dB: signal power over error power.
 
     ``SNR = 1 / E[|r / g - s|^2]`` with the reference ``s`` normalized to
     unit average power per channel and the data-aided gain
@@ -379,8 +377,7 @@ def ber(
     constellation: Constellation | None = None,
     num_skip_symbols: int = 0,
 ) -> float | np.ndarray:
-    """
-    Bit error rate.
+    """Bit error rate.
 
     Parameters
     ----------
@@ -442,8 +439,7 @@ def ser(
     constellation: Constellation | None = None,
     num_skip_symbols: int = 0,
 ) -> float | np.ndarray:
-    """
-    Symbol error rate of minimum-distance hard decisions.
+    """Symbol error rate of minimum-distance hard decisions.
 
     The received and the reference symbols are both decided against the
     constellation, so rounding in the reference does not count.  SER does
@@ -504,8 +500,7 @@ def gmi(
     method: str = "maxlog",
     num_skip_symbols: int = 0,
 ) -> float | np.ndarray:
-    r"""
-    Generalized mutual information (bit-metric decoding rate), bits/symbol.
+    r"""Generalized mutual information (bit-metric decoding rate), bits/symbol.
 
     .. math::
 
@@ -610,8 +605,7 @@ def mi(
     constellation: Constellation | None = None,
     num_skip_symbols: int = 0,
 ) -> float | np.ndarray:
-    r"""
-    Mutual information of the AWGN channel with the constellation's prior.
+    r"""Mutual information of the AWGN channel with the constellation's prior.
 
     Monte-Carlo estimate with Gaussian likelihoods
     ``p(r | s_m) ∝ exp(-|r - s_m|^2 / sigma^2)`` and prior ``P(s_m)``:

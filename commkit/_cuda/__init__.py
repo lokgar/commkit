@@ -52,7 +52,7 @@ def _device_supported() -> bool:
 
 
 def is_available() -> bool:
-    """Checks whether custom CUDA kernels can be compiled and launched.
+    """Check whether custom CUDA kernels can be compiled and launched.
 
     Returns
     -------
@@ -66,7 +66,7 @@ def is_available() -> bool:
 
 
 def get_kernel(name: str, **spec: Any) -> Callable | None:
-    """Returns a launchable kernel wrapper, or ``None`` if unavailable.
+    """Return a launchable kernel wrapper, or ``None`` if unavailable.
 
     ``None`` means the caller **must** fall back to the existing ``xp``
     implementation. Any compile/load failure logs one warning per kernel
@@ -173,7 +173,7 @@ def _bps_min_d2_factory(mode: str = "table", return_argmin: bool = False) -> Cal
         d_grid: float = 1.0,
         side: int = 0,
     ) -> Any:
-        """Returns min_d2 (P, C, N) float32; with argmin, an (min_d2, idx) tuple.
+        """Return min_d2 (P, C, N) float32; with argmin, an (min_d2, idx) tuple.
 
         `x` is (C, N) complex64 with time on the last axis; `phasor` is
         (P,) complex64, P <= 128. TABLE mode requires `constellation`
@@ -265,7 +265,7 @@ def _cs_block_factory() -> Callable:
         threshold: float,
         cs_H: int,
     ) -> Any:
-        """Corrects phi_blk into phi_corr ((C, B) float64), updating the
+        """Correct phi_blk into phi_corr ((C, B) float64), updating the
         per-channel circular history buffers in place."""
         if phi_blk.ndim != 2:
             raise ValueError(f"phi_blk must be 2-D (C, B), got shape {phi_blk.shape}")

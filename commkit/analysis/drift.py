@@ -74,9 +74,9 @@ def separate_drift_phase_noise(
 
     Returns
     -------
-    drift_phase : array_like
+    drift_phase : ndarray
         Low-frequency drift component, same shape/backend/dtype as ``phi``.
-    pn_phase : array_like
+    pn_phase : ndarray
         High-frequency phase-noise + AWGN residual ``phi - drift``.
 
     Notes

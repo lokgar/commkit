@@ -26,8 +26,7 @@ def plot_equalizer_result(
     ax=None,
     show: bool = False,
 ) -> tuple[Any, Any] | None:
-    """
-    Plots adaptive equalizer diagnostics: convergence curve, tap weights, and
+    """Plot adaptive equalizer diagnostics: convergence curve, tap weights, and
     (when CPR was enabled) the recovered phase trajectory.
 
     Parameters
@@ -177,8 +176,7 @@ def plot_zf_equalizer_response(
     show: bool = False,
     title: str = "ZF/MMSE Equalizer Response",
 ) -> tuple[Any, Any] | None:
-    """
-    Plots channel, equalizer, and combined frequency responses for ZF/MMSE.
+    """Plot channel, equalizer, and combined frequency responses for ZF/MMSE.
 
     For each channel path, three panels show:
 

@@ -35,8 +35,7 @@ __all__ = ["expand", "generate", "shape_pulse"]
 
 
 def expand(samples: ArrayType, *, factor: int) -> ArrayType:
-    """
-    Insert ``factor - 1`` zeros after every sample (zero-stuffing upsample).
+    """Insert ``factor - 1`` zeros after every sample (zero-stuffing upsample).
 
     The first step of interpolation; the spectral images it creates are
     removed by a following filter.
@@ -50,7 +49,7 @@ def expand(samples: ArrayType, *, factor: int) -> ArrayType:
 
     Returns
     -------
-    array_like
+    ndarray
         Expanded samples, ``(..., N * factor)``, same dtype and device.
     """
     logger.debug("Inserting zeros (expansion factor=%s).", factor)
@@ -67,8 +66,7 @@ def shape_pulse(
     pulse: filtering.Pulse | ArrayType | None = None,
     periodic: bool = False,
 ) -> ArrayType:
-    """
-    Pulse-shape a symbol sequence to unit symbol power.
+    """Pulse-shape a symbol sequence to unit symbol power.
 
     Polyphase interpolation by ``sps`` with the pulse taps
     (``scipy.signal.resample_poly``), then ``E[|x|²] = 1/sps``.  With
@@ -90,7 +88,7 @@ def shape_pulse(
 
     Returns
     -------
-    array_like
+    ndarray
         Waveform ``(..., N * sps)``, same dtype and device as ``symbols``.
     """
     sps = require_integer_sps(sps, "shape_pulse()")
@@ -133,8 +131,7 @@ def generate(
     rng: int | np.random.Generator | None = None,
     device: str = "cpu",
 ) -> Signal:
-    """
-    Random symbols from ``constellation``, pulse-shaped into a Signal.
+    """Random symbols from ``constellation``, pulse-shaped into a Signal.
 
     Parameters
     ----------

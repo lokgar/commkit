@@ -32,8 +32,7 @@ def plot_time_domain(
     show: bool = False,
     **kwargs: Any,
 ) -> tuple[Any, Any] | None:
-    """
-    Plots the time-domain representation of the signal.
+    """Plot the time-domain representation of the signal.
 
     For complex signals, both In-Phase (I) and Quadrature (Q) components
     are plotted. Handles SI scaling (s, ms, us, etc.) for the time axis.

@@ -41,8 +41,7 @@ def plot_psd(
     show: bool = False,
     **kwargs: Any,
 ) -> tuple[Any, Any] | None:
-    """
-    Plots the Power Spectral Density (PSD) of the signal.
+    """Plot the Power Spectral Density (PSD) of the signal.
 
     Supports automatic frequency scaling (Hz, MHz, GHz, etc.) or wavelength
     conversion for optical signals. Handles multidimensional (MIMO) signals
@@ -310,8 +309,7 @@ def plot_spectrogram(
     show: bool = False,
     **kwargs: Any,
 ) -> tuple[Any, Any] | None:
-    """
-    Plots the spectrogram of a signal.
+    """Plot the spectrogram of a signal.
 
     Plots with Frequency on the horizontal axis (x-axis) and Time on the
     vertical axis (y-axis). Supports dynamic subplots for multichannel/MIMO

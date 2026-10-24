@@ -55,7 +55,7 @@ def carrier_phase_trajectory(
 
     Returns
     -------
-    array_like
+    ndarray
         Unwrapped carrier phase in radians (``float64``), shape matching the
         truncated input, on the same backend as ``y_eq``.
 

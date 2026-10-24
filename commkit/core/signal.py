@@ -88,8 +88,7 @@ class Reference:
 
 @dataclass(frozen=True, eq=False, kw_only=True)
 class Signal:
-    """
-    A sampled waveform with its facts, description and ground truth.
+    """A sampled waveform with its facts, description and ground truth.
 
     Parameters
     ----------
@@ -262,8 +261,7 @@ class Signal:
         return copy.deepcopy(self)
 
     def to(self, device: str) -> Signal:
-        """
-        Return a copy of this signal with its arrays on ``device``.
+        """Return a copy of this signal with its arrays on ``device``.
 
         Moves the samples and the reference.  Host
         metadata (constellation, pulse, frame) stays where it is.  The
@@ -406,8 +404,7 @@ def _validate_field(name: str, value: Any) -> Any:
 
 
 def _format_si(value: float | None, unit: str = "Hz") -> str:
-    """
-    Formats a numeric value into a human-readable string with SI prefixes.
+    """Format a numeric value into a human-readable string with SI prefixes.
 
     Automatically selects the appropriate SI prefix (e.g., k, M, G, m, u, n)
     based on the magnitude of the value. Supports a wide range from

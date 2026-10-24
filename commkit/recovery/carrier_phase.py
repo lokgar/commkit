@@ -122,8 +122,7 @@ def estimate_carrier_phase(
     sampling_rate: float | None = None,
     constellation: Any = None,
 ) -> CarrierPhaseEstimate:
-    """
-    Estimate the carrier phase trajectory.
+    """Estimate the carrier phase trajectory.
 
     Parameters
     ----------
@@ -208,8 +207,7 @@ def correct_carrier_phase(
     sampling_rate: float | None = None,
     constellation: Any = None,
 ) -> S:
-    """
-    Remove a carrier phase: ``y[n] = x[n]·exp(-j·φ[n])``.
+    """Remove a carrier phase: ``y[n] = x[n]·exp(-j·φ[n])``.
 
     Parameters
     ----------
@@ -224,7 +222,7 @@ def correct_carrier_phase(
 
     Returns
     -------
-    array_like or Signal
+    ndarray or Signal
         Corrected samples, same shape, dtype and device.
 
     Notes

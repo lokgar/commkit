@@ -14,8 +14,7 @@ __all__ = ["BPS"]
 
 @dataclass(frozen=True)
 class BPS:
-    """
-    Blind Phase Search.
+    """Blind Phase Search.
 
     Tests ``test_phases`` candidate rotations over one ambiguity interval
     ``[0, 2π/M)``, ``M`` the constellation's rotational symmetry (``π/2``

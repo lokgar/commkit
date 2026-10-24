@@ -93,8 +93,7 @@ def cma(
     pad_mode: str = "zeros",
     state: EqualizerState | None = None,
 ) -> EqualizerResult:
-    """
-    Constant Modulus Algorithm blind equalizer with butterfly MIMO support.
+    """Constant Modulus Algorithm blind equalizer with butterfly MIMO support.
 
     CMA minimizes the Godard dispersion criterion and requires no training
     symbols. It is the standard blind equalizer for constant-modulus signals
@@ -303,8 +302,7 @@ def rde(
     pad_mode: str = "zeros",
     state: EqualizerState | None = None,
 ) -> EqualizerResult:
-    """
-    Radius Directed Equalizer (RDE) - blind equalizer for multi-ring constellations.
+    """Radius Directed Equalizer (RDE) - blind equalizer for multi-ring constellations.
 
     RDE is a CMA variant that replaces the single Godard dispersion radius with
     per-symbol radius selection from the set of unique constellation ring radii.

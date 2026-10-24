@@ -90,8 +90,7 @@ def smooth_phase_wiener(
     sampling_rate: float | None = None,
     detrend: bool = True,
 ) -> ArrayType:
-    r"""
-    Zero-phase Wiener smoother for a random-walk (Wiener) carrier phase.
+    r"""Zero-phase Wiener smoother for a random-walk (Wiener) carrier phase.
 
     Optimal minimum-variance estimate of a phase that random-walks with
     per-sample increment variance ``q`` (the random-walk strength) observed in
@@ -142,7 +141,7 @@ def smooth_phase_wiener(
 
     Returns
     -------
-    array_like
+    ndarray
         Smoothed phase, same shape and backend as ``phase``.
     """
     if process_variance is None:
@@ -354,8 +353,7 @@ def correct_cycle_slips(
     history: int = 20,
     threshold: float = np.pi / 4,
 ) -> np.ndarray:
-    """
-    Detects and corrects cycle slips in a phase trajectory.
+    """Detect and corrects cycle slips in a phase trajectory.
 
     After ``unwrap`` resolves the M-fold ambiguity, residual cycle slips may
     remain where the unwrapper chose the wrong branch.  The trajectory is
@@ -673,7 +671,7 @@ def resolve_channel_permutation(
 
     Returns
     -------
-    array_like or Signal
+    ndarray or Signal
         ``symbols`` with channels reordered to the reference order; same
         shape, dtype, and backend.  A Signal gives a new Signal with the
         samples reordered (its reference is already in that order).
@@ -768,8 +766,7 @@ def resolve_phase_ambiguity(
     symmetry: int | None = None,
     num_skip_symbols: int = 0,
 ) -> ArrayType | Signal:
-    """
-    Resolves the rotational phase ambiguity left by blind carrier recovery.
+    """Resolve the rotational phase ambiguity left by blind carrier recovery.
 
     Blind CPR (Viterbi-Viterbi, BPS, Tikhonov, PLL) cannot tell the
     ``symmetry`` rotated copies of the constellation apart.  The ML choice
@@ -802,7 +799,7 @@ def resolve_phase_ambiguity(
 
     Returns
     -------
-    array_like or Signal
+    ndarray or Signal
         Rotated symbols, same shape and dtype; a Signal gives a new Signal.
     """
     name = "resolve_phase_ambiguity()"

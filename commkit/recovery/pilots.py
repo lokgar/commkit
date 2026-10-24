@@ -23,8 +23,7 @@ __all__ = ["PilotAided", "PilotTone", "PilotTones"]
 
 @dataclass(frozen=True, eq=False)
 class PilotAided:
-    """
-    Phase from known pilot symbols, interpolated between pilots.
+    """Phase from known pilot symbols, interpolated between pilots.
 
     The phase at each pilot is ``∠(r_k·s_k*)``; the pilot phases are
     unwrapped and interpolated over the whole record.  Single-carrier only.
@@ -317,8 +316,7 @@ def _extract_pilot_phasor(
 
 @dataclass(frozen=True)
 class PilotTone:
-    r"""
-    Common carrier phase from a continuous-wave pilot tone.
+    r"""Common carrier phase from a continuous-wave pilot tone.
 
     The tone (see ``spectral.add_pilot_tone``) shares the data's oscillator
     and channel, so its phase is the common phase
@@ -447,8 +445,7 @@ def _lowpass_fft(z: ArrayType, sampling_rate: float, cutoff: float, xp) -> Array
 
 @dataclass(frozen=True)
 class PilotTones:
-    r"""
-    Common carrier phase from two or more pilot tones, combined by MRC.
+    r"""Common carrier phase from two or more pilot tones, combined by MRC.
 
     For a shared-laser dual-polarization link every pilot rides the same
     common phase φ[n]; combining K tones lowers the residual phase noise by

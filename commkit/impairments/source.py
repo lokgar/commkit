@@ -37,8 +37,7 @@ def _phase_trajectory(
     xp: ModuleType,
     periodic: bool = False,
 ) -> ArrayType:
-    """
-    float64 phase trajectories on ``xp``'s device with one-sided FM-noise PSD
+    """float64 phase trajectories on ``xp``'s device with one-sided FM-noise PSD
 
         S_f(f) = linewidth / pi  +  flicker / f      [Hz^2/Hz].
 
@@ -104,25 +103,26 @@ def generate_phase_noise(
     rng: int | np.random.Generator | None = None,
     device: str = "cpu",
 ) -> ArrayType:
-    """
-    Generates laser/oscillator phase-noise trajectories phi[n] in radians.
+    """Generate laser or oscillator phase-noise trajectories ``φ[n]`` in radians.
 
-    The instantaneous-frequency (FM) noise follows the standard power-law
-    model with a white and a flicker component:
+    The instantaneous-frequency (FM) noise follows the power-law model with a
+    white and a flicker component (one-sided, in Hz²/Hz):
 
-        S_f(f) = linewidth / pi  +  flicker / f      [Hz^2/Hz, one-sided]
+        S_f(f) = linewidth / π  +  flicker / f
 
-    * ``linewidth`` is the Lorentzian (white-FM / Wiener) linewidth
-      delta_nu: the phase performs a random walk with per-sample increments
-      N(0, 2*pi*delta_nu / f_s) and the field spectrum is a Lorentzian of
-      FWHM delta_nu.
-    * ``flicker`` is the 1/f FM coefficient h_-1: technical noise (current
-      source, temperature, acoustics) that dominates below the corner
-      frequency f_c = pi * h_-1 / delta_nu where the two terms cross.
+    * ``linewidth`` is the Lorentzian (white-FM, Wiener) linewidth ``Δν``:
+      the phase is a random walk with per-sample increments
+      ``N(0, 2π Δν / f_s)``, and the field spectrum is a Lorentzian of FWHM
+      ``Δν``.
+    * ``flicker`` is the 1/f FM coefficient ``h_-1``: technical noise
+      (current source, temperature, acoustics) that dominates below the
+      corner frequency ``f_c = π h_-1 / Δν`` where the two terms cross.
 
-    Returning the trajectory itself (rather than a rotated signal) makes the
-    ground truth available for estimator validation; apply it with
-    ``samples * xp.exp(1j * phi)`` or via :func:`apply_phase_noise`.
+    The trajectory itself (rather than a rotated signal) is the ground truth
+    for validating estimators.  :func:`apply_phase_noise` draws and applies
+    one in a single step; to apply this one, rotate in the samples'
+    precision (``samples * xp.exp(1j * phi)`` promotes complex64 to
+    complex128).
 
     Parameters
     ----------
@@ -131,9 +131,9 @@ def generate_phase_noise(
     sampling_rate : float
         Sampling rate in Hz.
     linewidth : float, default 0.0
-        White-FM (Lorentzian) linewidth delta_nu in Hz.
+        White-FM (Lorentzian) linewidth ``Δν`` in Hz.
     flicker : float, default 0.0
-        Flicker-FM coefficient h_-1 in Hz^2 (one-sided ``S_f = h_-1 / f``).
+        Flicker-FM coefficient ``h_-1`` in Hz² (one-sided ``S_f = h_-1 / f``).
     flicker_f_min : float, optional
         Frequency below which the flicker shaping is held flat (the 1/f
         divergence must be capped).  Defaults to the record resolution
@@ -145,13 +145,14 @@ def generate_phase_noise(
         a record carrying it loops seamlessly, e.g. on a streaming AWG.  See
         Notes.
     rng : int, numpy.random.Generator or None
-        Random source (an int seeds ``numpy.random.default_rng``).
+        Random source (an int seeds ``numpy.random.default_rng``); the noise
+        itself is drawn on ``device``.
     device : {"cpu", "gpu"}, default "cpu"
         Where the trajectory is drawn and returned.
 
     Returns
     -------
-    array_like
+    ndarray
         Phase in radians, ``float64``, on ``device``.  Shape
         ``(num_samples,)`` for ``num_channels=1``, else
         ``(num_channels, num_samples)``.
@@ -211,35 +212,31 @@ def apply_phase_noise(
     periodic: bool = False,
     rng: int | np.random.Generator | None = None,
 ) -> S:
-    """
-    Adds laser / oscillator phase noise to a signal.
+    """Add laser or oscillator phase noise.
 
-    Each sample is rotated by an accumulated phase drawn from the power-law
-    FM-noise model of :func:`generate_phase_noise` (white-FM Wiener walk
-    plus optional 1/f flicker):
-
-        r[n] = s[n] * exp(j * phi[n])
+    Each sample is rotated by a phase drawn from the power-law FM-noise
+    model of :func:`generate_phase_noise` (a white-FM Wiener walk plus
+    optional 1/f flicker): ``r[n] = s[n] · exp(j φ[n])``.
 
     Parameters
     ----------
     samples : array_like or Signal
-        Complex baseband signal. Shape: ``(N,)`` (SISO) or ``(C, N)`` (MIMO).
+        Complex baseband samples, ``(N,)`` or ``(C, N)``.
     linewidth : float
-        Combined transmitter + receiver laser linewidth delta_nu in Hz.
-        Typical values: 100 kHz (narrow-linewidth laser) to 10 MHz (DFB).
+        Combined transmitter and receiver laser linewidth ``Δν`` in Hz;
+        typically 100 kHz (narrow-linewidth laser) to 10 MHz (DFB).
     sampling_rate : float, optional
         Sampling rate in Hz.  Taken from the Signal; required for array
         input.  A value that disagrees with the Signal raises.
     flicker : float, default 0.0
-        Flicker-FM coefficient h_-1 in Hz^2 (one-sided ``S_f = h_-1 / f``).
+        Flicker-FM coefficient ``h_-1`` in Hz² (one-sided ``S_f = h_-1 / f``).
     flicker_f_min : float, optional
         Low-frequency cap for the flicker shaping; see
         :func:`generate_phase_noise`.
     shared_lo : bool, default False
-        When ``False`` (default), each channel receives independent phase noise
-        (separate oscillators / lasers per TX-RX path).
-        When ``True``, a single phase noise trajectory is shared across all
-        channels (common local oscillator in a coherent system).
+        ``False``: each channel gets independent phase noise (separate
+        lasers per path).  ``True``: one trajectory is shared by all
+        channels (a common local oscillator).
     periodic : bool, default False
         Treat ``samples`` as one period of a looped record (e.g. for a
         streaming AWG) and make the phase noise periodic too; see
@@ -250,9 +247,8 @@ def apply_phase_noise(
 
     Returns
     -------
-    array_like or Signal
-        Phase-noise-impaired signal, same shape, dtype, and backend as input.
-        A :class:`Signal` returns a new impaired :class:`Signal`.
+    ndarray or Signal
+        The rotated samples, same shape, dtype and device as the input.
 
     Examples
     --------

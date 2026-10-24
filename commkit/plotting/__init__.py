@@ -1,4 +1,4 @@
-"""Plots of signals and of the library's results (Matplotlib).
+"""Plot of signals and of the library's results (Matplotlib).
 
 Every public function is a ``plot_*`` that draws a Signal, an array or a
 result object (an estimate, an :class:`~commkit.equalization.EqualizerResult`,

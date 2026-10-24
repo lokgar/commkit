@@ -22,8 +22,7 @@ _BARKER_SEQUENCES = {
 
 
 def barker_sequence(length: int) -> np.ndarray:
-    """
-    Generates a Barker sequence of the specified length.
+    """Generate a Barker sequence of the specified length.
 
     Barker sequences are binary sequences (+1, -1) with optimal cyclic
     auto-correlation properties, where the sidelobes are at most 1. They are
@@ -36,7 +35,7 @@ def barker_sequence(length: int) -> np.ndarray:
 
     Returns
     -------
-    array_like
+    ndarray
         BPSK symbols (+1.0, -1.0). Shape: (length,).
         NumPy array; move it with ``to_device`` if needed.
 
@@ -61,8 +60,7 @@ def barker_sequence(length: int) -> np.ndarray:
 
 
 def zadoff_chu_sequence(length: int, *, root: int = 1) -> np.ndarray:
-    r"""
-    Generates a Zadoff-Chu (ZC) synchronization sequence.
+    r"""Generate a Zadoff-Chu (ZC) synchronization sequence.
 
     ZC sequences are Complex-valued, Constant Amplitude Zero
     Auto-Correlation (CAZAC) sequences. They possess the unique property
@@ -80,7 +78,7 @@ def zadoff_chu_sequence(length: int, *, root: int = 1) -> np.ndarray:
 
     Returns
     -------
-    array_like
+    ndarray
         Complex Zadoff-Chu symbols of unit magnitude.
         Shape: (length,). Data type: `complex64`.
 
@@ -113,8 +111,7 @@ def zadoff_chu_sequence(length: int, *, root: int = 1) -> np.ndarray:
 
 
 def zc_mimo_root(stream_idx: int, base_root: int, length: int) -> int:
-    """
-    Returns the Zadoff-Chu root for TX stream ``stream_idx`` in a MIMO preamble.
+    """Return the Zadoff-Chu root for TX stream ``stream_idx`` in a MIMO preamble.
 
     Assigns a deterministic unique root to each TX stream by cycling through
     distinct roots starting from ``base_root``, wrapping in the range

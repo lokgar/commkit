@@ -30,8 +30,7 @@ def plot_filter_response(
     n_impulse: int = 500,
     show: bool = False,
 ) -> tuple[Any, tuple[Any, Any, Any, Any]] | None:
-    """
-    Plots the impulse, magnitude, phase, and group-delay response of a filter.
+    """Plot the impulse, magnitude, phase, and group-delay response of a filter.
 
     A 2x2 diagnostic panel - ``(impulse, magnitude), (phase, group_delay)`` -
     covering the standard filter-design characterization set. Accepts any of

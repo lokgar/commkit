@@ -31,37 +31,31 @@ def apply_iq_imbalance(
     amplitude_imbalance_db: float,
     phase_imbalance_deg: float,
 ) -> S:
-    """
-    Applies IQ imbalance to a complex baseband signal.
+    """Apply IQ imbalance to a complex baseband signal.
 
-    Models the widely linear mixing that occurs when the I and Q branches of a
-    receiver have mismatched gain and/or non-orthogonal phase:
+    The widely linear mixing of I and Q branches with mismatched gain and
+    non-orthogonal phase, ``r = I + j·g·e^{jφ}·Q`` for ``s = I + jQ``:
 
-        r[n] = K1 * s[n] + K2 * s*[n]
+        r[n] = K1 · s[n] + K2 · conj(s[n]),
+        K1 = (1 + g e^{jφ}) / 2,   K2 = (1 - g e^{jφ}) / 2,
 
-    where
-
-        K1 = (1 + g * e^(j*phi)) / 2,
-        K2 = (1 - g * e^(-j*phi)) / 2
-
-    and g = 10^(A / 20) is the I/Q amplitude ratio and phi is the phase error in radians.
+    with the Q-to-I amplitude ratio ``g = 10^(A/20)`` and the phase error
+    ``φ`` in radians.
 
     Parameters
     ----------
     samples : array_like or Signal
-        Complex baseband signal. Shape: ``(N,)`` (SISO) or ``(C, N)`` (MIMO).
+        Complex baseband samples, ``(N,)`` or ``(C, N)``.
     amplitude_imbalance_db : float
-        Amplitude imbalance between I and Q branches in dB.  Positive values
-        mean Q has higher gain than I.  Use ``0.0`` for no amplitude mismatch.
+        Amplitude imbalance ``A`` between the branches in dB; positive gives
+        Q the higher gain, ``0.0`` none.
     phase_imbalance_deg : float
-        Phase error between I and Q branches in degrees.  Use ``0.0`` for no
-        phase mismatch.
+        Phase error ``φ`` of the Q branch in degrees; ``0.0`` for none.
 
     Returns
     -------
-    array_like or Signal
-        Imbalanced signal, same shape and dtype as input.  A :class:`Signal`
-        returns a new imbalanced :class:`Signal`.
+    ndarray or Signal
+        The imbalanced samples, same shape, dtype and device as the input.
 
     Examples
     --------
@@ -141,8 +135,7 @@ _IQ_CORRECTORS: dict[
 
 
 def correct_iq_imbalance(samples: S, how: Lowdin | GramSchmidt) -> S:
-    """
-    Blind IQ-imbalance correction.
+    """Correct IQ imbalance blindly.
 
     Orthogonalizes the I and Q branches of each channel with the algorithm
     ``how`` and restores the channel's input power.  Undoes
@@ -157,7 +150,7 @@ def correct_iq_imbalance(samples: S, how: Lowdin | GramSchmidt) -> S:
 
     Returns
     -------
-    array_like or Signal
+    ndarray or Signal
         Corrected samples, same shape, dtype and device as the input.
 
     Examples

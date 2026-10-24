@@ -26,8 +26,7 @@ __all__ = ["Preamble", "SingleCarrierFrame", "extract_payload"]
 
 @dataclass(frozen=True, kw_only=True)
 class Preamble:
-    """
-    Structured container for frame synchronization sequences (preambles).
+    """Structured container for frame synchronization sequences (preambles).
 
     Preambles are automatically generated based on the specified sequence type
     and length. Manual overrides for bits or symbols are not supported to
@@ -62,8 +61,7 @@ class Preamble:
     # -------------------------------------------------------------------------
 
     def __post_init__(self) -> None:
-        """
-        Validate the fields and generate the preamble symbols.
+        """Validate the fields and generate the preamble symbols.
 
         This ensures that standard sequences are generated correctly according
         to the requested sequence properties.
@@ -141,8 +139,7 @@ class Preamble:
         periodic: bool = False,
         device: str = "cpu",
     ) -> Signal:
-        """
-        Pulse-shaped waveform of the preamble sequence.
+        """Pulse-shaped waveform of the preamble sequence.
 
         Parameters
         ----------
@@ -183,8 +180,7 @@ def _qpsk() -> Constellation:
 
 @dataclass(frozen=True, kw_only=True)
 class SingleCarrierFrame:
-    """
-    Represents a structured single-carrier frame with Preamble, Pilots, Payload, and Guard Interval.
+    """Represents a structured single-carrier frame with Preamble, Pilots, Payload, and Guard Interval.
 
     This class provides a high-level abstraction for constructing frames
     used in digital communication systems (1/10/100 GbE, 5G, etc.).
@@ -316,12 +312,11 @@ class SingleCarrierFrame:
     # -------------------------------------------------------------------------
 
     def _generate_pilot_mask(self) -> tuple[ArrayType, int]:
-        """
-        Calculates the pilot placement mask and total frame length.
+        """Calculate the pilot placement mask and total frame length.
 
         Returns
         -------
-        mask : array_like (bool)
+        mask : ndarray (bool)
             Boolean mask where True indicates a pilot symbol location.
         body_length : int
             Total number of symbols in the frame body (payload + pilots).
@@ -392,8 +387,7 @@ class SingleCarrierFrame:
         self._cache["payload_symbols"] = ref.symbols
 
     def _ensure_pilot_generated(self) -> None:
-        """
-        Generate and cache the pilot bits and symbols with ``generate()``.
+        """Generate and cache the pilot bits and symbols with ``generate()``.
 
         Pilots are always uniform: shaping would destroy the known-reference
         property required for channel estimation.
@@ -422,12 +416,11 @@ class SingleCarrierFrame:
 
     @property
     def payload_bits(self) -> ArrayType:
-        """
-        Returns the raw payload bits.
+        """Return the raw payload bits.
 
         Returns
         -------
-        array_like
+        ndarray
             Binary bits (0s and 1s).
         """
         self._ensure_payload_generated()
@@ -435,12 +428,11 @@ class SingleCarrierFrame:
 
     @property
     def payload_symbols(self) -> ArrayType:
-        """
-        Returns the modulated payload symbols.
+        """Return the modulated payload symbols.
 
         Returns
         -------
-        array_like
+        ndarray
             IQ symbols.
         """
         self._ensure_payload_generated()
@@ -448,12 +440,11 @@ class SingleCarrierFrame:
 
     @property
     def pilot_bits(self) -> ArrayType | None:
-        """
-        Returns the raw pilot bits, if pilots are enabled.
+        """Return the raw pilot bits, if pilots are enabled.
 
         Returns
         -------
-        array_like or None
+        ndarray or None
             Binary bits if `pilot_pattern` is not "none".
         """
         if self.pilot_pattern == "none":
@@ -463,12 +454,11 @@ class SingleCarrierFrame:
 
     @property
     def pilot_symbols(self) -> ArrayType | None:
-        """
-        Returns the modulated pilot symbols.
+        """Return the modulated pilot symbols.
 
         Returns
         -------
-        array_like or None
+        ndarray or None
             IQ symbols if `pilot_pattern` is not "none".
         """
         if self.pilot_pattern == "none":
@@ -478,15 +468,14 @@ class SingleCarrierFrame:
 
     @property
     def body_symbols(self) -> ArrayType:
-        """
-        Returns the interleaved payload and pilot symbols.
+        """Return the interleaved payload and pilot symbols.
 
         WARNING: Pilot gain is applied if `pilot_gain_db` is not zero,
         so these are not "clean" symbols but scaled relatively.
 
         Returns
         -------
-        array_like
+        ndarray
             Determined by `pilot_pattern` and `pilot_period`.
         """
         xp = np
@@ -535,8 +524,7 @@ class SingleCarrierFrame:
         sps: int = 1,
         include_preamble: bool = True,
     ) -> dict[str, ArrayType]:
-        """
-        Generates boolean masks identifying the segments of the frame.
+        """Generate boolean masks identifying the segments of the frame.
 
         Parameters
         ----------
@@ -647,8 +635,7 @@ class SingleCarrierFrame:
         periodic: bool = False,
         device: str = "cpu",
     ) -> Signal:
-        """
-        Generates a shaped, oversampled waveform from the frame description.
+        """Generate a shaped, oversampled waveform from the frame description.
 
         This is the primary method for moving from a logical frame to
         physical IQ samples. It handles upsampling, pulse shaping,

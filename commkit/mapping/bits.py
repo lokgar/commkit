@@ -16,8 +16,7 @@ __all__ = ["demap_symbols_hard", "map_bits"]
 
 
 def map_bits(bits: ArrayType, *, constellation: Constellation) -> ArrayType:
-    """
-    Map bits to constellation points.
+    """Map bits to constellation points.
 
     Groups of ``k = constellation.bits_per_symbol`` bits (MSB first) become
     one symbol, following ``constellation.bit_labels``.
@@ -31,7 +30,7 @@ def map_bits(bits: ArrayType, *, constellation: Constellation) -> ArrayType:
 
     Returns
     -------
-    array_like
+    ndarray
         Symbols of shape ``(..., n / k)`` on the bits' device: ``complex64``,
         or ``float32`` for a real constellation.
     """
@@ -42,8 +41,7 @@ def map_bits(bits: ArrayType, *, constellation: Constellation) -> ArrayType:
 def demap_symbols_hard(
     symbols: ArrayType | Signal, *, constellation: Constellation | None = None
 ) -> ArrayType:
-    """
-    Hard decisions: the bits of the nearest constellation point.
+    """Hard decisions: the bits of the nearest constellation point.
 
     Symbols are compared with ``constellation.points`` as they are, so they
     must be on the constellation's scale (unit average power for the
@@ -60,7 +58,7 @@ def demap_symbols_hard(
 
     Returns
     -------
-    array_like
+    ndarray
         ``int8`` bits of shape ``(..., N * k)`` on the symbols' device.
 
     Raises

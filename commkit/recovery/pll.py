@@ -239,8 +239,7 @@ def _get_numba_dd_pll_joint():
 
 @dataclass(frozen=True)
 class PLL:
-    r"""
-    Decision-directed phase-locked loop.
+    r"""Decision-directed phase-locked loop.
 
     Tracks the carrier phase symbol by symbol from hard decisions:
     derotate by ``φ̂[n]``, decide, take the cross-product error
