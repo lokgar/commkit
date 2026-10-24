@@ -119,7 +119,9 @@ def test_chunked_pilots_with_deboost(name, xp):
     mask[::10] = True
     gain = 10 ** (3.0 / 20)
     x_np = x_np[0] * np.repeat(np.where(mask, gain, 1.0), sps).astype(np.float32)
-    ref, pm = E.build_pilot_ref(s_np[0][mask], mask, n_sym=mask.size, num_ch=1)
+    ref, pm = E.build_pilot_ref(
+        s_np[0][mask], mask, num_symbols=mask.size, num_channels=1
+    )
     fn = getattr(E, name)
     kw = dict(sps=sps, num_taps=7, constellation=C16, pilot_gain_db=3.0)
     if name == "block_cma":

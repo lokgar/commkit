@@ -150,7 +150,7 @@ def cma(
         the RMS normalization, so boosted pilots do not inflate the RMS and
         bias the Godard target of the data positions.  0.0 for unboosted
         pilots.
-    pad_mode : {'zeros', 'edge'}, default 'zeros'
+    pad_mode : {'zeros', 'edge', 'reflect'}, default 'zeros'
         Left padding of a cold start; see :func:`lms`.
     state : EqualizerState, optional
         Continue from ``result.state`` of a previous call with the same
@@ -337,7 +337,7 @@ def rde(
     pilot_gain_db : float, default 0.0
         Pilot boost in dB, as for :func:`cma` (here it keeps boosted pilots
         from biasing the ring radii).
-    pad_mode : {'zeros', 'edge'}, default 'zeros'
+    pad_mode : {'zeros', 'edge', 'reflect'}, default 'zeros'
         Left padding of a cold start; see :func:`lms`.
     state : EqualizerState, optional
         Continue from ``result.state`` of a previous call with the same

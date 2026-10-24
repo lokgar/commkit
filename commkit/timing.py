@@ -26,6 +26,7 @@ from .logger import logger
 from .math import _derotate
 
 __all__ = [
+    "TimingEstimate",
     "barker_sequence",
     "correct_timing",
     "cross_correlate_fft",

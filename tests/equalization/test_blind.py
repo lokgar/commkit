@@ -32,7 +32,7 @@ class TestBlockFDAFEngine:
         tx, rx = _isi_signal(xp, "qam", 16, 8000, 6, channel)
         n = 8000
         pmask = np.ones(n, bool)
-        pref, pu8 = build_pilot_ref(to_numpy(tx), pmask, n_sym=n, num_ch=1)
+        pref, pu8 = build_pilot_ref(to_numpy(tx), pmask, num_symbols=n, num_channels=1)
         r_cma = block_cma(
             rx,
             constellation=Constellation.qam(16),
@@ -127,7 +127,9 @@ class TestBlockCMA:
         tx, rx = _isi_signal(xp, "psk", 4, n, 5, channel)
         pmask = np.zeros(n, bool)
         pmask[::8] = True
-        pref, pu8 = build_pilot_ref(to_numpy(tx)[pmask], pmask, n_sym=n, num_ch=1)
+        pref, pu8 = build_pilot_ref(
+            to_numpy(tx)[pmask], pmask, num_symbols=n, num_channels=1
+        )
         r = block_cma(
             rx,
             constellation=Constellation.psk(4),

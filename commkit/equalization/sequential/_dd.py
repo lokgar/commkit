@@ -5,6 +5,7 @@
 
 from __future__ import annotations
 
+from dataclasses import replace
 from typing import Any
 
 import numpy as np
@@ -141,10 +142,11 @@ def lms(
         ``state.overlap`` symbols are computed again here, so the outputs
         join into exactly one uninterrupted run.  Training symbols start at
         this call's first output symbol.
-    pad_mode : {'zeros', 'edge'}, default 'zeros'
-        Padding of a cold start: ``'zeros'`` prepends ``center_tap`` zeros,
-        ``'edge'`` repeats the first sample, which can soften the initial
-        amplitude jump.
+    pad_mode : {'zeros', 'edge', 'reflect'}, default 'zeros'
+        Padding of a cold start before the first ``center_tap`` positions:
+        ``'zeros'`` prepends zeros, ``'edge'`` repeats the first sample and
+        ``'reflect'`` mirrors the record about its first sample.  The last two
+        can soften the initial amplitude jump.
 
     Returns
     -------
@@ -461,7 +463,7 @@ def rls(
     state : EqualizerState, optional
         Continue from ``result.state`` of an earlier call with the same
         configuration, as for :func:`lms`; the state also carries ``P``.
-    pad_mode : {'zeros', 'edge'}, default 'zeros'
+    pad_mode : {'zeros', 'edge', 'reflect'}, default 'zeros'
         Padding of a cold start, as for :func:`lms`.
 
     Returns
@@ -656,6 +658,6 @@ def rls(
         phase_out=phase_out,
     )
     result = _log_equalizer_exit(result, name="RLS")
-    result.tail_trim = tail_trim
+    result = replace(result, tail_trim=tail_trim)
     _check_rls_divergence(result.weights, run.xp, forgetting_factor, delta)
     return _attach_equalized_signal(result, sig, state)

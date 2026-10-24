@@ -963,8 +963,8 @@ class TestCmaPilotAided:
         pilot_ref, pilot_mask_u8 = build_pilot_ref(
             pilot_symbols=pilot_syms_cpu,
             pilot_mask=pilot_mask_bool,
-            n_sym=n_body,
-            num_ch=1,
+            num_symbols=n_body,
+            num_channels=1,
         )
         result = equalization.cma(
             body_samples,
@@ -992,8 +992,8 @@ class TestCmaPilotAided:
         pilot_ref, pilot_mask_u8 = build_pilot_ref(
             pilot_symbols=pilot_syms_cpu,
             pilot_mask=pilot_mask_bool,
-            n_sym=n_body,
-            num_ch=1,
+            num_symbols=n_body,
+            num_channels=1,
         )
         result = equalization.rde(
             body_samples,
@@ -1029,8 +1029,8 @@ class TestCmaPilotAided:
         pilot_ref, pilot_mask_u8 = build_pilot_ref(
             pilot_symbols=pilot_syms_cpu,
             pilot_mask=pilot_mask_bool,
-            n_sym=n_body,
-            num_ch=1,
+            num_symbols=n_body,
+            num_channels=1,
         )
         result = equalization.rde(
             body_samples,
@@ -1054,7 +1054,9 @@ class TestCmaPilotAided:
         mask = np.zeros(n_sym, dtype=bool)
         mask[positions] = True
         pilot_syms = np.ones((num_ch, n_pilots), dtype=np.complex64)
-        ref, mask_u8 = build_pilot_ref(pilot_syms, mask, n_sym=n_sym, num_ch=num_ch)
+        ref, mask_u8 = build_pilot_ref(
+            pilot_syms, mask, num_symbols=n_sym, num_channels=num_ch
+        )
         assert ref.shape == (num_ch, n_sym)
         assert mask_u8.shape == (n_sym,)
         assert mask_u8.dtype == np.uint8
@@ -1175,7 +1177,9 @@ class TestKnownSymbolScale:
         rng = np.random.default_rng(1)
         s = c.points[rng.choice(16, 3000, p=c.pmf)].astype(np.complex64)
         mask = np.ones(s.size, dtype=bool)
-        ref, pm = equalization.build_pilot_ref(s, mask, n_sym=s.size, num_ch=1)
+        ref, pm = equalization.build_pilot_ref(
+            s, mask, num_symbols=s.size, num_channels=1
+        )
         kw = dict(sps=1, num_taps=3, constellation=c, pilot_ref=ref, pilot_mask=pm)
         if name == "cma":
             kw["step_size"] = 0.05

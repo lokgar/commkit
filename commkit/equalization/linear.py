@@ -204,9 +204,9 @@ def apply_taps(
         record), at least ``num_taps // 2`` per channel: its last
         ``num_taps // 2`` samples fill the left edge of the first windows
         instead of padding, so a record split into pieces is filtered as one.
-    pad_mode : {'zeros', 'edge'}, default 'zeros'
-        Padding without ``samples_prefix``: zeros, or the edge samples
-        repeated.
+    pad_mode : {'zeros', 'edge', 'reflect'}, default 'zeros'
+        Padding without ``samples_prefix``: zeros, the edge samples repeated,
+        or the record mirrored about its end samples.
 
     Returns
     -------

@@ -83,7 +83,7 @@ def block_cma(
         Dense pilot reference and mask, from :func:`build_pilot_ref`.
     pilot_gain_db : float, default 0.0
         Pilot boost in dB, as for :func:`cma`.
-    pad_mode : {'zeros', 'edge'}, default 'zeros'
+    pad_mode : {'zeros', 'edge', 'reflect'}, default 'zeros'
         Left padding of a cold start; see :func:`lms`.
     state : EqualizerState, optional
         Continue from ``result.state`` of a previous call with the same
@@ -186,7 +186,7 @@ def block_rde(
         Dense pilot reference and mask, from :func:`build_pilot_ref`.
     pilot_gain_db : float, default 0.0
         Pilot boost in dB, as for :func:`rde`.
-    pad_mode : {'zeros', 'edge'}, default 'zeros'
+    pad_mode : {'zeros', 'edge', 'reflect'}, default 'zeros'
         Left padding of a cold start; see :func:`lms`.
     state : EqualizerState, optional
         Continue from ``result.state`` of a previous ``block_rde`` or
@@ -243,12 +243,12 @@ def build_pilot_ref(
     pilot_symbols: np.ndarray,
     pilot_mask: np.ndarray,
     *,
-    n_sym: int,
-    num_ch: int,
+    num_symbols: int,
+    num_channels: int,
 ) -> tuple[np.ndarray, np.ndarray]:
     """Build the dense pilot reference and mask of the pilot-aided blind equalizers.
 
-    Packs sparse pilot symbols into a dense ``(C, n_sym)`` array for the
+    Packs sparse pilot symbols into a dense ``(C, num_symbols)`` array for the
     ``pilot_ref`` / ``pilot_mask`` arguments of :func:`cma`, :func:`rde`,
     :func:`block_cma` and :func:`block_rde`: zeros at the data positions,
     the known symbols at the pilot positions.
@@ -259,20 +259,20 @@ def build_pilot_ref(
         Known pilot symbols in transmission order, ``(K,)`` (broadcast to
         every channel) or ``(C, K)``: the K pilots only, no data symbols.
     pilot_mask : array_like
-        Boolean ``(n_sym,)``, ``True`` at the K pilot positions of the
+        Boolean ``(num_symbols,)``, ``True`` at the K pilot positions of the
         equalized body.
-    n_sym : int
+    num_symbols : int
         Number of output symbols (payload and pilots).
-    num_ch : int
+    num_channels : int
         Number of receive channels C.
 
     Returns
     -------
     pilot_ref : numpy.ndarray
-        Host complex64 ``(C, n_sym)`` reference: zeros at the data
+        Host complex64 ``(C, num_symbols)`` reference: zeros at the data
         positions, the pilot symbols at the pilot positions.
     pilot_mask_u8 : numpy.ndarray
-        Host uint8 ``(n_sym,)``: 1 at the pilot positions, 0 elsewhere.
+        Host uint8 ``(num_symbols,)``: 1 at the pilot positions, 0 elsewhere.
 
     Examples
     --------
@@ -285,25 +285,25 @@ def build_pilot_ref(
         pilot_ref, pilot_mask_u8 = build_pilot_ref(
             pilot_symbols=frame.pilot_symbols,
             pilot_mask=np.asarray(struct["pilots"]),
-            n_sym=n_body_symbols,
-            num_ch=num_ch,
+            num_symbols=n_body_symbols,
+            num_channels=num_channels,
         )
         result = rde(body_samples, ..., pilot_ref=pilot_ref, pilot_mask=pilot_mask_u8)
     """
-    pilot_ref_arr = np.zeros((num_ch, n_sym), dtype=np.complex64)
-    mask_uint8 = np.zeros(n_sym, dtype=np.uint8)
+    pilot_ref_arr = np.zeros((num_channels, num_symbols), dtype=np.complex64)
+    mask_uint8 = np.zeros(num_symbols, dtype=np.uint8)
 
     pilot_positions = np.where(pilot_mask)[0]
     n_pilots = len(pilot_positions)
 
     if pilot_symbols.ndim == 1:
         pilot_symbols = broadcast_channels(
-            pilot_symbols, num_ch, np, name="pilot_symbols"
+            pilot_symbols, num_channels, np, name="pilot_symbols"
         )
     else:
         pilot_symbols = np.asarray(pilot_symbols, dtype=np.complex64)
 
-    for ch in range(num_ch):
+    for ch in range(num_channels):
         pilot_ref_arr[ch, pilot_positions] = pilot_symbols[ch, :n_pilots]
     mask_uint8[pilot_positions] = 1
 

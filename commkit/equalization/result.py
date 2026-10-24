@@ -7,7 +7,7 @@
 from __future__ import annotations
 
 import logging
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from typing import TYPE_CHECKING, Any
 
 import numpy as np
@@ -153,7 +153,7 @@ def _check_state(
         )
 
 
-@dataclass
+@dataclass(frozen=True, eq=False)
 class EqualizerResult:
     """Output of an adaptive or block equalizer.
 
@@ -266,7 +266,9 @@ def _attach_equalized_signal(
     reference = signal.reference
     if reference is not None:
         reference = reference.head(y.shape[-1])
-    result.signal = signal.replace(
-        samples=y, sampling_rate=signal.symbol_rate, reference=reference
+    return replace(
+        result,
+        signal=signal.replace(
+            samples=y, sampling_rate=signal.symbol_rate, reference=reference
+        ),
     )
-    return result

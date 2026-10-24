@@ -16,7 +16,7 @@ between the segments, plus the input from ``resume`` on, is the
 from __future__ import annotations
 
 from collections.abc import Callable
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from typing import Any
 
 import numpy as np
@@ -435,9 +435,12 @@ def _assemble_sequential(
     )
     if phase_out is not None:
         phi = phase_out if n_sym is None else phase_out[:n_sym]
-        result.phase_trajectory = restore_1d(run.was_1d, run.xp.asarray(phi.T))
+        result = replace(
+            result,
+            phase_trajectory=restore_1d(run.was_1d, run.xp.asarray(phi.T)),
+        )
     n_out = run.n_sym if n_sym is None else n_sym
-    result.state = EqualizerState(
+    state = EqualizerState(
         equalizer=equalizer,
         num_taps=run.num_taps,
         sps=run.stride,
@@ -451,4 +454,4 @@ def _assemble_sequential(
         inverse_correlation=snapshot.inverse_correlation,
         carrier=snapshot.carrier,
     )
-    return result
+    return replace(result, state=state)

@@ -5,7 +5,7 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from typing import Any
 
 import numpy as np
@@ -416,7 +416,7 @@ def block_lms(
         across MIMO channels, and an optional nested ``CycleSlip``.  There is
         no PLL option: its per-symbol integration does not fit the block
         gradient.
-    pad_mode : {'zeros', 'edge'}, default 'zeros'
+    pad_mode : {'zeros', 'edge', 'reflect'}, default 'zeros'
         Left padding of a cold start; see :func:`lms`.
     state : EqualizerState, optional
         Continue from ``result.state`` of a previous call with the same
@@ -757,8 +757,11 @@ def block_lms(
         )
     result = _assemble_block(run, y_all, e_all, w_hist, phi_all, n_train)
     weights, carrier = snap[0]
-    result.state = _block_state(
-        run, equalizer="block_lms", cpr=cpr, weights=weights, carrier=carrier
+    result = replace(
+        result,
+        state=_block_state(
+            run, equalizer="block_lms", cpr=cpr, weights=weights, carrier=carrier
+        ),
     )
     return _attach_equalized_signal(
         _log_equalizer_exit(result, name="Block-LMS"), sig, state
