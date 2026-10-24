@@ -1,12 +1,11 @@
-"""
-Channel coding / forward error correction (FEC).
+"""Channel coding and forward error correction (FEC): planned, not implemented.
 
-Scaffold only - no algorithms are implemented yet.  This package reserves the
+No algorithms exist yet.  This package reserves the
 public layout for the bits-layer neighbour of :mod:`commkit.mapping`:
 encoders turn information bits -> coded bits, which ``mapping.map_bits`` maps to
-symbols; soft decoders consume LLRs produced by ``mapping.compute_llr`` /
-``metrics`` (see :mod:`commkit.coding.base` for the shared hard/soft
-interface conventions).
+symbols; soft decoders consume LLRs produced by ``mapping.compute_llr``
+(see :mod:`commkit.coding.base` for the shared hard/soft interface
+conventions).
 
 Each module below is an importable placeholder carrying only its scope
 docstring.  The package is intentionally **absent from the top-level

@@ -1,7 +1,7 @@
-"""Laser/carrier characterization plots (drift, Allan, linewidth).
+"""Laser and carrier characterization plots (drift, Allan deviation, linewidth).
 
 Each plot takes the result it draws: a ``FrequencyDrift``, an
-``AllanDeviation`` or a ``LinewidthEstimate`` from ``commkit.analysis``.
+``AllanDeviation`` or a ``LinewidthEstimate`` from :mod:`commkit.analysis`.
 """
 
 from typing import Any

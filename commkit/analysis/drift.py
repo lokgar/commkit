@@ -1,4 +1,9 @@
-"""Drift / phase-noise separation and residual frequency-wander metrics."""
+"""Drift and phase-noise separation, and residual frequency wander.
+
+:func:`separate_drift_phase_noise` splits a phase trajectory into a slow
+drift and the fast phase noise; :func:`frequency_drift` summarizes the
+instantaneous frequency's wander in a :class:`FrequencyDrift`.
+"""
 
 from dataclasses import dataclass
 from typing import Any

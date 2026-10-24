@@ -1,4 +1,4 @@
-"""Decision-directed PLL carrier phase recovery."""
+"""Decision-directed PLL carrier phase recovery: :class:`PLL`."""
 
 from dataclasses import dataclass
 from typing import Any

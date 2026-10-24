@@ -1,7 +1,9 @@
-"""Transceiver front-end IQ-imbalance application and compensation.
+"""Transceiver IQ imbalance.
 
-Application and blind compensation are kept together because they are one
-device model (the widely-linear I/Q mixing) and are read as a pair.
+:func:`apply_iq_imbalance` and its blind compensation
+:func:`correct_iq_imbalance` (:class:`Lowdin` or
+:class:`GramSchmidt` orthogonalization) are kept together because they are
+one device model, the widely-linear I/Q mixing, and are read as a pair.
 """
 
 import math

@@ -1,4 +1,9 @@
-"""Block blind equalizers (block_cma, block_rde) and pilot reference builder."""
+"""Blind block equalizers and pilot references.
+
+:func:`block_cma` and :func:`block_rde` are the frequency-domain block
+versions of ``cma`` and ``rde``; :func:`build_pilot_ref` packs pilot symbols
+into the dense reference of pilot-aided ``cma`` / ``rde``.
+"""
 
 from __future__ import annotations
 

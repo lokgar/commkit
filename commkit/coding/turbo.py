@@ -1,5 +1,4 @@
-"""
-Turbo codes (scaffold).
+"""Turbo codes (scaffold).
 
 Parallel-concatenated convolutional codes with iterative BCJR decoding, reusing
 the constituent soft-output decoder from :mod:`commkit.coding.convolutional`

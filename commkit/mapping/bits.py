@@ -1,5 +1,4 @@
-"""
-Hard bit mapping and demapping.
+"""Hard bit mapping and demapping.
 
 ``map_bits`` maps bits to the points of a :class:`Constellation`;
 ``demap_symbols_hard`` returns the bits of the nearest point (minimum

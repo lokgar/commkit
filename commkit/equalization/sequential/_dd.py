@@ -1,4 +1,7 @@
-"""Decision-directed sequential adaptive equalizers: lms, rls."""
+"""Decision-directed sequential adaptive equalizers (private).
+
+:func:`lms` and :func:`rls`, re-exported by :mod:`commkit.equalization`.
+"""
 
 from __future__ import annotations
 

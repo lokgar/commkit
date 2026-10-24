@@ -1,4 +1,7 @@
-"""Overlapping Allan deviation of an instantaneous-frequency series."""
+"""Overlapping Allan deviation of an instantaneous-frequency series.
+
+:func:`allan_deviation` returns an :class:`AllanDeviation`.
+"""
 
 from dataclasses import dataclass
 

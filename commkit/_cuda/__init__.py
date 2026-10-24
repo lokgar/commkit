@@ -1,21 +1,19 @@
-"""
-Hand-written CUDA kernel infrastructure for the CuPy backend.
+"""Hand-written CUDA kernels for CuPy input (private).
 
-This subpackage hosts raw CUDA C++ kernels (under ``src/``) together with the
-lazy compilation machinery built on :class:`cupy.RawModule`. Its public
-surface is two functions:
+Raw CUDA C++ kernels (under ``src/``) and their lazy compilation through
+:class:`cupy.RawModule`.  Two functions are used by the rest of the library:
 
 is_available :
     True when CuPy is functional and a CUDA device with compute
     capability >= 7.0 is present.
 get_kernel :
-    Returns a launchable kernel wrapper, or ``None`` - in which case the
-    caller **must** fall back to its existing ``xp`` implementation.
+    A launchable kernel wrapper, or ``None``, in which case the caller
+    **must** fall back to its ``xp`` implementation.
 
-Importing this package (or ``commkit``) never touches NVRTC: kernel
-sources are read and compiled on the first ``get_kernel()`` call for a
-given specialization, and cached in-process afterwards. Cross-process
-reuse comes from CuPy's on-disk kernel cache (``~/.cupy/kernel_cache``).
+Importing this package (or ``commkit``) never touches NVRTC: kernel sources
+are read and compiled on the first ``get_kernel()`` call for a given
+specialization and cached in-process afterwards.  Cross-process reuse comes
+from CuPy's on-disk kernel cache (``~/.cupy/kernel_cache``).
 """
 
 from collections.abc import Callable

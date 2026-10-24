@@ -1,4 +1,4 @@
-"""Additive measurement noise (ASE / thermal) impairments."""
+"""Additive white Gaussian noise: :func:`apply_awgn`."""
 
 from .._random import RNG, as_generator, complex_normal, standard_normal
 from ..backend import dispatch

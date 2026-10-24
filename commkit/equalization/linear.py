@@ -1,4 +1,10 @@
-"""Linear block equalizers: zero-forcing and static tap application."""
+"""Linear block equalization: channel estimation, ZF / MMSE and fixed taps.
+
+:func:`estimate_transfer_function` estimates a (MIMO) channel from a known
+reference, :func:`zf_equalizer` inverts a channel estimate in the frequency
+domain (zero-forcing, or MMSE with a noise variance), and :func:`apply_taps`
+applies frozen equalizer taps.
+"""
 
 from __future__ import annotations
 

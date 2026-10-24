@@ -1,5 +1,9 @@
-"""
-Frame containers: structured preamble and single-carrier frame models.
+"""Frame containers: preambles and single-carrier frames.
+
+A :class:`SingleCarrierFrame` describes a transmitted frame (preamble,
+payload, pilots, guard intervals, MIMO streams) and builds it into a
+:class:`~commkit.core.Signal` with ``to_signal``; :func:`extract_payload`
+cuts the payload out of a frame Signal at one sample per symbol.
 """
 
 from dataclasses import dataclass, field

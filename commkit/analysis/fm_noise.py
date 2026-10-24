@@ -1,10 +1,11 @@
 """FM-noise power spectral densities of phase records.
 
-``fm_noise_psd`` differentiates a phase trajectory to the instantaneous
-frequency and returns its Welch PSD; ``dsh_fm_noise_psd`` does the same for a
-delayed self-heterodyne differential phase and divides the interferometer
-response back out.  Both stay on the input backend; the linewidth estimators
-in :mod:`commkit.analysis.linewidth` summarize them.
+:func:`fm_noise_psd` differentiates a phase trajectory to the instantaneous
+frequency and returns its Welch PSD; :func:`dsh_fm_noise_psd` does the same
+for a delayed self-heterodyne differential phase and divides the
+interferometer response back out (a :class:`DshFmNoisePsd`).  Both stay on
+the input's device; the linewidth estimators in
+:mod:`commkit.analysis.linewidth` summarize them.
 """
 
 from dataclasses import dataclass

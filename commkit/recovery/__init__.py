@@ -1,13 +1,15 @@
-"""
-Carrier phase recovery.
+"""Carrier phase recovery.
 
-``estimate_carrier_phase`` / ``correct_carrier_phase`` with one method object
-per algorithm: decision-directed ``PLL``, block-based ``ViterbiViterbi``,
-``BPS`` (blind phase search), MAP ``Tikhonov``, ``PilotAided`` symbols,
-``PilotTone`` / ``PilotTones`` and the static ``DataAided`` rotation.  Block
-methods repair cycle slips with a nested ``CycleSlip``.  Also: cycle-slip
-repair and Wiener smoothing of phase trajectories, and phase/channel
-ambiguity resolution against the reference.
+:func:`estimate_carrier_phase` and :func:`correct_carrier_phase`, with one
+method object per algorithm: decision-directed :class:`PLL`, block-based
+:class:`ViterbiViterbi`, blind phase search :class:`BPS`, MAP
+:class:`Tikhonov`, pilot symbols :class:`PilotAided`, pilot tones
+:class:`PilotTone` / :class:`PilotTones` and the static :class:`DataAided`
+rotation.  Block methods repair cycle slips with a nested :class:`CycleSlip`.
+
+Also :func:`correct_cycle_slips` and :func:`smooth_phase_wiener` on phase
+trajectories, and the ambiguity resolution against the reference,
+:func:`resolve_phase_ambiguity` and :func:`resolve_channel_permutation`.
 """
 
 from __future__ import annotations

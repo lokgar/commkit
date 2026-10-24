@@ -1,4 +1,4 @@
-"""Eye diagram plots."""
+"""Eye diagrams: :func:`plot_eye_diagram`."""
 
 from typing import Any
 

@@ -1,20 +1,15 @@
-"""
-Channel impairments and signal degradation models.
+"""Channel impairments, grouped by where in the link they originate.
 
-This package provides routines for simulating physical layer impairments,
-enabling the evaluation of receiver performance under realistic channel
-conditions.  The impairments are grouped by where in the link the effect
-originates:
-
-- :mod:`~commkit.impairments.noise` - additive measurement noise (AWGN).
-- :mod:`~commkit.impairments.source` - laser/oscillator phase noise.
-- :mod:`~commkit.impairments.frontend` - transceiver IQ imbalance
-  (``apply_iq_imbalance`` and the blind ``correct_iq_imbalance`` with
-  ``Lowdin()`` / ``GramSchmidt()``).
-- :mod:`~commkit.impairments.channel` - fiber-channel effects (linear:
-  chromatic dispersion, PMD, polarization mixing; nonlinear: split-step
-  propagation over amplified spans of a :class:`Fiber`).
-
+- :mod:`~commkit.impairments.noise`: additive noise (:func:`apply_awgn`).
+- :mod:`~commkit.impairments.source`: laser and oscillator phase noise
+  (:func:`generate_phase_noise`, :func:`apply_phase_noise`).
+- :mod:`~commkit.impairments.frontend`: transceiver IQ imbalance
+  (:func:`apply_iq_imbalance`, and the blind :func:`correct_iq_imbalance`
+  with :class:`Lowdin` or :class:`GramSchmidt`).
+- :mod:`~commkit.impairments.channel`: the fiber channel, linear
+  (:func:`apply_chromatic_dispersion`, :func:`apply_pmd`,
+  :func:`apply_polarization_mixing`) and nonlinear
+  (:func:`apply_fiber_propagation` over amplified spans of a :class:`Fiber`).
 """
 
 from .channel import (

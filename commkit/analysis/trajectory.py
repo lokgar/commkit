@@ -1,8 +1,8 @@
-"""Data-aided carrier-phase trajectory extraction.
+"""Data-aided carrier-phase trajectory: :func:`carrier_phase_trajectory`.
 
-The foundational extractor of the carrier-phase analysis chain: forms the
-data-aided unwrapped phase that every downstream estimator (drift, linewidth,
-Allan deviation) consumes.
+The first stage of the carrier-phase analyses: the data-aided, unwrapped
+phase that every downstream estimator (drift, linewidth, Allan deviation)
+consumes.
 """
 
 import numpy as np

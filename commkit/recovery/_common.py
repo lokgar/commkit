@@ -1,4 +1,7 @@
-"""Shared helpers for the recovery package (PLL gains, block-phase estimation)."""
+"""Shared helpers of the recovery package (private).
+
+PLL loop gains and block-phase estimation, used by the method modules.
+"""
 
 from __future__ import annotations
 

@@ -1,4 +1,8 @@
-"""Pilot-symbol and pilot-tone aided carrier phase recovery."""
+"""Pilot-aided carrier phase recovery.
+
+:class:`PilotAided` (known pilot symbols in the frame), :class:`PilotTone`
+(one CW pilot tone) and :class:`PilotTones` (two tones).
+"""
 
 import logging
 from dataclasses import dataclass

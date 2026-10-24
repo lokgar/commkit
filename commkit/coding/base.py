@@ -1,5 +1,4 @@
-"""
-Shared coding interfaces and conventions (scaffold).
+"""Shared coding interfaces and conventions (scaffold).
 
 Defines the contracts every code in this package will share - ``Encoder`` /
 ``Decoder`` protocols, a ``CodewordResult`` dataclass, and the hard/soft

@@ -1,5 +1,4 @@
-"""Shared front end, resumable kernel runs and result assembly of the
-sequential equalizers.
+"""Shared front end and result assembly of the sequential equalizers (private).
 
 ``lms``, ``rls``, ``cma`` and ``rde`` validate their own parameters, call
 :func:`_prepare_sequential` for the host-side setup, run their Numba kernel

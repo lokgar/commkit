@@ -1,14 +1,11 @@
-"""
-Filter design visualization.
+"""Filter responses: :func:`plot_filter_response`.
 
-Plots the impulse/frequency/group-delay response of a filter, in any of the
-representations produced elsewhere in the package: FIR taps
-(:mod:`commkit.filtering`'s ``rrc_taps``/``fir_taps``/...), an ``(b, a)``
-IIR transfer function, or the second-order-sections (``sos``) form produced
-by :func:`commkit.filtering.butterworth_sos` and its IIR SOS siblings. This
-module visualizes filter-design artifacts only - it has nothing to do with
-:mod:`commkit.smoothing`'s diagnostic smoothers, which have no meaningful
-frequency response to plot.
+Plots the impulse, frequency and group-delay response of a filter in any of
+the forms the library designs: FIR taps (:func:`commkit.filtering.rrc_taps`,
+:func:`~commkit.filtering.fir_taps`, ...), a ``(b, a)`` transfer function, or
+second-order sections (:func:`commkit.filtering.butterworth_sos` and the
+other ``*_sos`` designs).  The smoothers of :mod:`commkit.smoothing` have no
+meaningful frequency response and are not plotted here.
 """
 
 from typing import Any

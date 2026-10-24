@@ -1,12 +1,13 @@
-"""
-Carrier frequency offset estimation and correction.
+"""Carrier frequency offset estimation and correction.
 
-estimate_frequency_offset(x, method) measures the offset with one of the
-method objects MthPower (blind spectral), MengaliMorelli (multi-lag
-autocorrelation), PilotSymbols (pilot phase slope) or BiasTone (a CW
-pilot tone); a block_size on the blind methods tracks a time-varying
-offset.  correct_frequency_offset(x, how) removes an estimate, an offset
-in Hz, or what a method estimates.
+:func:`estimate_frequency_offset` measures the offset with the estimator its
+method object chooses: :class:`MthPower` (blind, the
+spectral peak of the M-th power), :class:`MengaliMorelli` (blind, multi-lag
+autocorrelation), :class:`PilotSymbols` (the phase slope of known symbols)
+or :class:`BiasTone` (a CW pilot tone).  A ``block_size`` on the blind
+methods tracks a time-varying offset.  The estimate is a
+:class:`FrequencyOffsetEstimate`; :func:`correct_frequency_offset` removes an
+estimate, an offset in Hz, or what a method estimates.
 """
 
 import logging

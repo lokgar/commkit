@@ -1,42 +1,29 @@
-"""
-Signal analysis and characterization.
+"""Laser and carrier-phase characterization.
 
-Post-processing and diagnostic routines that operate on recovered signals to
-quantify their properties, as opposed to the DSP stages that *produce* those
-signals (synchronization, equalization, recovery, ...).  Functions here are
-grouped by the property they characterize; new analyses can be added as
-independent groups without disturbing the others.
+Post-processing of recovered signals and laser captures, as opposed to the
+DSP stages that produce them:
 
-Backend policy
---------------
-Every function dispatches on the input array type (NumPy -> CPU, CuPy -> GPU)
-and all sample-rate work - phase extraction, unwrapping, filtering, Welch
-PSDs, variance reductions - runs on that backend.  Host-side NumPy inside this
-package is deliberate and limited to three cases:
+- :func:`carrier_phase_trajectory`: the data-aided unwrapped carrier phase
+  that the other analyses consume.
+- :func:`separate_drift_phase_noise` and :func:`frequency_drift`: slow
+  frequency drift against fast phase noise.
+- :func:`fm_noise_psd` and :func:`dsh_fm_noise_psd`: FM-noise spectra.
+- :func:`allan_deviation`: overlapping Allan deviation of the frequency.
+- :func:`estimate_linewidth`: the laser linewidth, with one method object per
+  estimator (:class:`IncrementSlope`, :class:`IncrementSubtract`,
+  :class:`BetaSeparation` on phase trajectories; :class:`DshFmPsd`,
+  :class:`DshIncrement`, :class:`DshLorentzian` on delayed self-heterodyne
+  beats, whose front end is :func:`dsh_beat` and :func:`dsh_phase`).
 
-* **metadata**: lag lists, Welch segment sizing, tau grids - scalar shapes,
-  never data;
-* **tiny post-reduction fits**: e.g. ``np.polyfit`` on an ``(n_lag, C)``
-  variance matrix after a single device->host transfer - cheaper than a device
-  least-squares launch;
-* **report packaging**: summaries (``estimate_linewidth``,
-  ``allan_deviation``, ``frequency_drift`` scalars) return Python
-  floats and *plot-sized* NumPy arrays (Welch/Allan grids, ≤ ``nperseg``
-  bins) after one transfer, because their consumers are prints and plots.
-
-Inputs are NumPy or CuPy arrays; arrays from other frameworks raise
-``TypeError`` (convert them explicitly through DLPack).
-
-Linewidth follows the verb rules of the rest of the library: one
-``estimate_linewidth(x, method)`` whose method object (``IncrementSlope``,
-``BetaSeparation``, ``DshFmPsd``, ...) chooses the estimator and returns a
-``LinewidthEstimate``.  The other analyses are plain computations.  Results
-with more than one value are frozen dataclasses (``AllanDeviation``,
-``FrequencyDrift``, ...).  Sample-rate arrays returned to the caller
-(``carrier_phase_trajectory``, ``separate_drift_phase_noise``,
-``frequency_drift(...).df``,
-``dsh_phase``, ``fm_noise_psd``, ``dsh_fm_noise_psd``) always stay on the
-input backend - chain them without paying transfers.
+Sample-rate outputs (``carrier_phase_trajectory``,
+``separate_drift_phase_noise``, ``frequency_drift(...).df``, ``dsh_phase``,
+the FM-noise PSDs) stay on the input's device, so they chain without
+transfers.  Summaries (:class:`LinewidthEstimate`, :class:`AllanDeviation`,
+the :class:`FrequencyDrift` statistics) are reporting-layer fits: they
+reduce on the device, transfer plot-sized arrays once and return host floats
+(SISO) or ``(C,)`` arrays (MIMO).  Host-side NumPy is otherwise limited to
+metadata (lag lists, segment sizes, tau grids) and the small fits on those
+reductions.
 """
 
 from .allan import AllanDeviation, allan_deviation

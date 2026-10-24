@@ -1,4 +1,11 @@
-"""Phase corrections, cycle-slip repair, and ambiguity resolution."""
+"""Phase corrections, cycle-slip repair and ambiguity resolution.
+
+:func:`smooth_phase_wiener` and :func:`correct_cycle_slips` on phase
+trajectories, with the nested :class:`CycleSlip` configuration of the block
+methods; the static :class:`DataAided` rotation; and
+:func:`resolve_phase_ambiguity` and :func:`resolve_channel_permutation`
+against the reference.
+"""
 
 import logging
 from dataclasses import dataclass

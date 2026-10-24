@@ -1,8 +1,11 @@
 """Power, normalization and decibel conversions on NumPy/CuPy arrays.
 
-Also the private phase helpers shared by the DSP modules: ``_unit_phasor``
-(``exp(j·phase)`` in a chosen precision) and ``_derotate``
-(``x·exp(-j·phase)`` in the precision of ``x``).
+:func:`rms`, :func:`normalize`, :func:`db_to_linear` and
+:func:`linear_to_db`.  Also the private helpers shared by the DSP modules:
+the linear trend (``_linear_trend_slope``, ``_remove_linear_trend``) and the
+phase rotations ``_unit_phasor`` (``exp(j·phase)`` in a chosen precision),
+``_phasor`` and ``_derotate`` (``x·exp(-j·phase)`` in the precision of
+``x``).
 """
 
 from typing import Any

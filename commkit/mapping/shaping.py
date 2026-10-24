@@ -1,5 +1,4 @@
-"""
-Probabilistic shaping.
+"""Probabilistic shaping: :func:`maxwell_boltzmann` and :func:`optimal_nu`.
 
 Maxwell-Boltzmann priors over any constellation, the shaping parameter that
 reaches a target entropy, and the pmf-weighted constellation power.  Shaped

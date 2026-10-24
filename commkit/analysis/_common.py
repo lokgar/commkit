@@ -1,4 +1,9 @@
-"""Shared helpers and constants for the carrier-phase analysis package."""
+"""Shared helpers and constants of the analysis package (private).
+
+Increment-variance and Whittle fits, Welch segment sizing and bias
+corrections, and the plateau mask, used by :mod:`commkit.analysis.linewidth`
+and :mod:`commkit.analysis.fm_noise`.
+"""
 
 import numpy as np
 from scipy.optimize import nnls

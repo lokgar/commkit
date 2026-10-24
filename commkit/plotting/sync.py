@@ -1,4 +1,9 @@
-"""Synchronization plots (timing, frequency offset, carrier phase)."""
+"""Synchronization plots: timing, frequency offset and carrier phase.
+
+Each plot draws an estimate from :mod:`commkit.timing`,
+:mod:`commkit.frequency` or :mod:`commkit.recovery`, or recomputes what it
+shows through their public functions.
+"""
 
 from collections.abc import Sequence
 from typing import Any

@@ -1,10 +1,11 @@
-"""
-Timing synchronization utilities.
+"""Timing synchronization.
 
-This module provides routines for time synchronization, including the
-generation of optimal synchronization sequences (Barker, Zadoff-Chu),
-robust integer timing offset estimation via cross-correlation, and
-fractional timing offset estimation and correction.
+:func:`estimate_timing` finds the integer and fractional timing offset by
+cross-correlation (:func:`cross_correlate_fft`) with a template or a
+:class:`~commkit.core.Preamble` (a :class:`TimingEstimate`), and
+:func:`correct_timing` removes it.  :func:`estimate_fractional_delay` and
+:func:`fft_fractional_delay` measure and apply sub-sample delays.  The sequences
+:func:`barker_sequence` and :func:`zadoff_chu_sequence` build preambles.
 """
 
 import logging

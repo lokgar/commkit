@@ -1,16 +1,9 @@
-"""
-Block / frequency-domain equalizer engine (block_lms, FDAF).
+"""Frequency-domain (FDAF) block equalizers (private).
 
-Split into two internal concerns:
-
-- ``_dd.py`` - ``block_lms``, the standalone decision-directed
-  frequency-domain (FDAF) block equalizer.
-- ``_blind.py`` - the blind FDAF engine backing ``blind.py``'s
-  ``block_cma``/``block_rde``.
-
-The public import surface is unchanged: ``from commkit.equalization import
-block_lms`` and ``from commkit.equalization._block import ...`` (used
-internally by ``blind``) continue to work.
+- ``_engine.py``: the block loop, filter and gradient update shared by all.
+- ``_dd.py``: :func:`block_lms`, the decision-directed block equalizer.
+- ``_blind.py``: the blind engine behind :func:`commkit.equalization.block_cma`
+  and :func:`commkit.equalization.block_rde` (``equalization/blind.py``).
 """
 
 from __future__ import annotations

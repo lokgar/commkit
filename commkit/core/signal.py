@@ -1,9 +1,9 @@
-"""
-The :class:`Signal` container and its :class:`Reference` ground truth.
+"""The :class:`Signal` container and its :class:`Reference` ground truth.
 
 A Signal is a waveform plus the facts and descriptions needed to process it:
-sampling and symbol rate, the constellation and pulse it was built with, and
-the transmitted reference.  It never holds pipeline results.
+sampling and symbol rate, center frequency, the constellation and pulse it
+was built with, the transmitted reference and the frame layout.  It never
+holds pipeline results.
 
 Containers are frozen dataclasses: every update returns a new object through
 :meth:`Signal.replace`, which validates the changed fields.

@@ -1,4 +1,7 @@
-"""Decision-directed frequency-domain block equalizer: block_lms."""
+"""Decision-directed frequency-domain block equalizer (private).
+
+:func:`block_lms`, re-exported by :mod:`commkit.equalization`.
+"""
 
 from __future__ import annotations
 

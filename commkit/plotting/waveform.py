@@ -1,4 +1,4 @@
-"""Time-domain waveform plots."""
+"""Time-domain waveform plots: :func:`plot_time_domain`."""
 
 from typing import Any
 

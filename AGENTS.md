@@ -160,6 +160,18 @@ Dependencies point downward only:
   - `num_taps`, `step_size`, `sps`, `constellation`, `pulse`, `rng`, `num_symbols`, `num_channels`, `sampling_rate`, `symbol_rate`.
   - Units are in the docstring. Use `_db` and `_hz` suffixes where the unit is ambiguous.
 
+### Docstrings
+
+Docstrings describe the code as it is; a change in behaviour updates them in the same commit. NumPy format (numpydoc), sections in its order: Parameters, Returns, Raises, Warns, See Also, Notes, References, Examples.
+
+- **Summary line** on the line of the opening quotes (`"""Summary.`), one line, ending with a period.
+  - Functions: imperative mood (`Apply ...`, `Estimate ...`, `Plot ...`), or a noun phrase for a function named after the quantity it returns (`evm`, `allan_deviation`, `welch_psd`).
+  - Classes and modules: a noun phrase.
+- **Module docstrings** say what the module holds, by public name (`:func:`, `:class:`), then the conventions particular to it (a sign convention, a scaling, a file layout). No marketing adjectives ("high-performance", "publication-quality"), no history of earlier layouts, and no restatement of the library-wide rules in this file. A private module's summary ends with "(private)" and the body names its users.
+- **Types:** inputs are `array_like` (NumPy or CuPy), `array_like or Signal` for Signal-aware arguments; returned arrays are `ndarray` (NumPy or CuPy, on the input's device), `ndarray or Signal` for transforms. Shapes in double backticks: ``(N,)``, ``(C, N)``.
+- **Defaults:** `name : type, default value`; `name : type, optional` when the default is `None`, with the description saying what `None` does.
+- Units go in the description; inline code in double backticks; references to library names through `:func:` / `:class:` / `:mod:` / `:meth:`.
+
 ### Errors and logging
 
 - Wrong input raises, with a message naming the argument.

@@ -1,12 +1,10 @@
-"""
-Constellation geometry and Gray labelling.
+"""Gray codes and Gray-labelled constellation geometry.
 
-Gray code sequences, their inverse, and the Gray-mapped constellation
-generators for PSK / ASK / square-, 8-rect-, and cross-QAM.  These are the
-geometric foundation consumed by the bit mapping, soft demapping, and
-probabilistic-shaping layers.
-
-Note: codes and constellations are generated using NumPy (host-side).
+:func:`gray_code` and its inverse :func:`gray_to_binary`, and the private
+generators of the Gray-mapped PSK, ASK (PAM), square-, 8-rect- and cross-QAM
+constellations behind the :class:`Constellation` factories, together with
+the nearest-point search of hard decisions.  Codes and constellations are
+built with NumPy on the host.
 """
 
 from functools import lru_cache

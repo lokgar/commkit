@@ -1,4 +1,7 @@
-"""Power spectral density and spectrogram plots."""
+"""Power spectral density and spectrogram plots.
+
+:func:`plot_psd` and :func:`plot_spectrogram`.
+"""
 
 from typing import Any
 

@@ -1,13 +1,20 @@
-"""
-Signal visualization and publication-quality plotting tools.
+"""Plots of signals and of the library's results (Matplotlib).
 
-This package provides high-level plotting functions optimized for
-communication signals. It leverages Matplotlib to produce high-density,
-professional diagrams with automatic SI scaling and backend-agnostic data
-handling.
+Every public function is a ``plot_*`` that draws a Signal, an array or a
+result object (an estimate, an :class:`~commkit.equalization.EqualizerResult`,
+an analysis summary) and never computes the result itself; device arrays are
+reduced on the device and only what is drawn is transferred.  Axes use SI
+prefixes.  :func:`apply_default_theme` sets the library's Matplotlib style;
+importing the package changes no Matplotlib settings.
 
-The package exports the public ``plot_*`` functions and
-``apply_default_theme``; private helpers live in their modules.
+- :mod:`~commkit.plotting.waveform`, :mod:`~commkit.plotting.eye`,
+  :mod:`~commkit.plotting.constellation`, :mod:`~commkit.plotting.spectral`:
+  the signal itself.
+- :mod:`~commkit.plotting.filter_response`,
+  :mod:`~commkit.plotting.equalizer`: filters and equalizers.
+- :mod:`~commkit.plotting.sync`: timing, frequency-offset and carrier-phase
+  estimates.
+- :mod:`~commkit.plotting.analysis`: drift, Allan deviation and linewidth.
 """
 
 from __future__ import annotations

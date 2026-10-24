@@ -1,4 +1,10 @@
-"""Filter and equalizer response plots."""
+"""Equalizer plots.
+
+:func:`plot_equalizer_result` draws an
+:class:`~commkit.equalization.EqualizerResult` (convergence, taps and the
+carrier phase of inline CPR); :func:`plot_zf_equalizer_response` draws the
+channel, equalizer and combined responses of a ZF / MMSE equalizer.
+"""
 
 from typing import Any
 

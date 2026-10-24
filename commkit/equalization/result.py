@@ -1,4 +1,8 @@
-"""Equalizer result containers and CPR state."""
+"""Equalizer results.
+
+:class:`EqualizerResult` is what every adaptive equalizer returns; its
+``state``, an :class:`EqualizerState`, continues a later call.
+"""
 
 from __future__ import annotations
 

@@ -1,15 +1,12 @@
-"""
-Diagnostic and analysis smoothers.
+"""Display and estimation smoothers.
 
-These are **not** signal-processing filters: they carry no claim of
-causality, linear-time-invariance, or a meaningful frequency response. They
-exist purely to make a plotted curve, a 2-D density image, or a peak/width
-search less noisy for a human or a downstream estimator to read - the
-"just for the plot / just for a robust estimate" counterpart to the real
-DSP filters in :mod:`commkit.filtering`. If a routine's job is to remove or
-pass a frequency band as part of the signal chain itself (channel filtering,
-pulse shaping, phase-noise separation), it belongs in ``filtering.py``
-instead, not here.
+:func:`moving_average`, :func:`savgol_smooth` and :func:`smooth_density_2d`
+are not signal-chain filters: they make no claim of causality or a
+meaningful frequency response.  They make a plotted curve, a 2-D density
+image or a peak or width search less noisy for a reader or a downstream
+estimator.  A routine that removes or passes a frequency band as part of the
+signal chain (channel filtering, pulse shaping, phase-noise separation)
+belongs in :mod:`commkit.filtering`.
 """
 
 from .backend import ArrayType, dispatch

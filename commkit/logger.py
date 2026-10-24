@@ -1,5 +1,4 @@
-"""
-Logging for the CommKit library.
+"""Logging of the CommKit library: :data:`logger` and :func:`set_log_level`.
 
 Importing commkit installs no log handler.  Call :func:`set_log_level` to show
 commkit's own diagnostics with a coloured console handler, or configure

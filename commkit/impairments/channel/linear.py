@@ -1,4 +1,9 @@
-"""Linear fiber-channel impairments: chromatic dispersion, PMD, SOP mixing."""
+"""Linear fiber-channel impairments.
+
+:func:`apply_chromatic_dispersion`, :func:`apply_pmd` (a single
+differential-group-delay section) and :func:`apply_polarization_mixing` (a
+rotation of the state of polarization).
+"""
 
 import math
 from types import ModuleType

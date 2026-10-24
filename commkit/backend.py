@@ -1,11 +1,16 @@
-"""
-Computational backend management and device orchestration.
+"""Array modules, devices and data movement.
 
-This module provides backend-agnostic execution on CPU (NumPy) and GPU (CuPy).
-The device follows the data: :func:`dispatch` returns the array module of the
-input, and data moves only through an explicit :func:`to_device` (or
-``Signal.to``).  Arrays from other frameworks are rejected with ``TypeError``;
-exchange data with them explicitly through DLPack.
+:func:`dispatch` returns an input as an array together with its array module
+(NumPy or CuPy) and SciPy module (``scipy`` or ``cupyx.scipy``), so the
+device follows the data; :func:`get_array_module` and
+:func:`get_scipy_module` are its two halves.  Data moves only through an
+explicit :func:`to_device` (or ``Signal.to``), and :func:`is_cupy_available`
+reports whether the GPU can be used.  Arrays from other frameworks are
+rejected with ``TypeError``; exchange data with them explicitly through
+DLPack.
+
+Also :class:`PrecisionWarning`, emitted when double-precision input reaches a
+block that computes in single precision.
 """
 
 import types

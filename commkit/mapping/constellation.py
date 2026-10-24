@@ -1,5 +1,4 @@
-"""
-The :class:`Constellation` value object.
+"""The :class:`Constellation` value object.
 
 A constellation is described by its ``points``, the ``bit_labels`` assigned to
 each point, and an optional probabilistic-shaping prior ``pmf``.  It is the

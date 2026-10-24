@@ -1,7 +1,13 @@
-"""Array shape and validation helpers shared by every module.
+"""Array shape and validation helpers (private).
 
-Pure indexing, broadcast and coercion operations on NumPy/CuPy arrays.  This
-module imports only ``backend``: nothing from ``core``, DSP modules or plotting.
+Indexing, broadcast and coercion operations on NumPy/CuPy arrays, used by
+every module: :func:`validate_array`, the SISO/MIMO shape pair
+:func:`as_2d` / :func:`restore_1d`, :func:`broadcast_channels`,
+:func:`require_channels`, :func:`to_report_scalar` (host values of the
+metrics and summaries) and :func:`warn_if_double` (the
+:class:`~commkit.PrecisionWarning` of the fixed-precision blocks).  This
+module imports only ``backend``: nothing from ``core``, DSP modules or
+plotting.
 """
 
 from typing import Any, overload

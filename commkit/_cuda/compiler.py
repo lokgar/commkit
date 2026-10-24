@@ -1,15 +1,14 @@
-"""
-Lazy CUDA kernel compilation with in-process caching.
+"""Lazy CUDA kernel compilation with in-process caching (private).
 
-Kernel sources are real ``.cu`` files under ``commkit/_cuda/src/``
-(shipped as package data) and are compiled via :class:`cupy.RawModule`
-with C++17 and templates for mode/dtype specialization. ``name_expressions``
-provides mangled-name resolution for the template instantiations.
+Kernel sources are ``.cu`` files under ``commkit/_cuda/src/`` (shipped as
+package data), compiled through :class:`cupy.RawModule` with C++17 and
+templates for mode and dtype specialization; ``name_expressions`` resolves
+the mangled names of the template instantiations.
 
-Compilation is lazy: nothing here imports CuPy or touches NVRTC until
-``get_raw_kernel()`` is called. Compiled kernels are cached per
-``(source_name, options, name_expression)`` for the process lifetime;
-cross-process reuse comes from CuPy's on-disk NVRTC cache.
+Nothing here imports CuPy or touches NVRTC until :func:`get_raw_kernel` is
+called.  Compiled kernels are cached per ``(source_name, options,
+name_expression)`` for the life of the process; cross-process reuse comes
+from CuPy's on-disk NVRTC cache.
 """
 
 from importlib import resources

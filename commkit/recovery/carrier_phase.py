@@ -1,7 +1,8 @@
-"""Carrier phase: ``estimate_carrier_phase`` and ``correct_carrier_phase``.
+"""Carrier phase estimation and correction.
 
-The method object selects the algorithm; each lives next to its kernel
-in this package and is dispatched through ``_ESTIMATORS``.
+:func:`estimate_carrier_phase` and :func:`correct_carrier_phase`.  The method object selects the algorithm; each lives next to its kernel in
+this package and is dispatched through ``_ESTIMATORS``.  The estimate is a
+:class:`CarrierPhaseEstimate`.
 """
 
 from collections.abc import Callable

@@ -1,4 +1,4 @@
-"""Blind Phase Search (BPS) carrier phase recovery."""
+"""Blind phase search (BPS) carrier phase recovery: :class:`BPS`."""
 
 from dataclasses import dataclass
 

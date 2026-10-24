@@ -1,4 +1,9 @@
-"""Constellation diagram plots."""
+"""Constellation diagrams.
+
+:func:`plot_constellation` draws the density of received samples (a smoothed
+2-D histogram); :func:`plot_ideal_constellation` draws the points of a
+:class:`Constellation` with their bit labels.
+"""
 
 from typing import Any
 

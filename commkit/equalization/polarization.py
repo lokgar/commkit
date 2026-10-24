@@ -1,4 +1,10 @@
-"""Pilot-tone-based polarization demultiplexing."""
+"""Pilot-tone polarization demultiplexing.
+
+:func:`demultiplex_polarization_tones_static` estimates one Jones matrix
+from two pilot tones; :func:`demultiplex_polarization_tones_dynamic` tracks
+it over time (a :class:`JonesTrack`), and :func:`apply_interpolated_matrix`
+applies such a track to the samples.
+"""
 
 from __future__ import annotations
 

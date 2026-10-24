@@ -1,7 +1,8 @@
-"""Frequency-domain (FDAF) block equalizer engine shared by block_lms/cma/rde.
+"""Frequency-domain (FDAF) block equalizer engine (private).
 
-One run is: :func:`_prepare_block` (normalization, padding, weights on the
-input's device), a ``run_block(B, b_start)`` callback per block driven by
+Shared by ``block_lms``, ``block_cma`` and ``block_rde``.  One run is:
+:func:`_prepare_block` (normalization, padding, weights on the input's
+device), a ``run_block(B, b_start)`` callback per block driven by
 :func:`_block_loop` (eager, or replayed from a captured CUDA graph), and the
 caller's result assembly.  :func:`_fdaf_forward` and
 :func:`_fdaf_gradient_update` are the filter and the LMS-type update every

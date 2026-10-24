@@ -1,5 +1,4 @@
-"""
-Performance metrics: EVM, SNR, BER, SER, GMI and MI.
+"""Performance metrics: EVM, SNR, BER, SER, GMI and MI.
 
 Metrics are the reporting layer.  They take received symbols (or bits, or
 LLRs) at one sample per symbol and their reference, as arrays or as a 1-SPS

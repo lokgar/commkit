@@ -1,4 +1,8 @@
-"""Shared helpers for the equalization package (normalization, padding, weight init, validation)."""
+"""Shared helpers of the equalization package (private).
+
+Normalization, padding, weight initialization and validation, used by the
+sequential and the block equalizers.
+"""
 
 from __future__ import annotations
 

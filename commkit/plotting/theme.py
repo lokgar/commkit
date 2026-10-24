@@ -1,4 +1,9 @@
-"""Shared plotting theme, layout, and formatting helpers."""
+"""Plot theme and shared layout and formatting helpers.
+
+:func:`apply_default_theme` sets the library's Matplotlib style; the private
+helpers (axes and figure layout, SI-prefixed tick labels, min/max
+decimation of long traces) are shared by the plot modules.
+"""
 
 import matplotlib as mpl
 import matplotlib.font_manager as fm

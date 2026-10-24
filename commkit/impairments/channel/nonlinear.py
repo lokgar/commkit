@@ -1,5 +1,4 @@
-"""
-Nonlinear fiber propagation: the Kerr effect with dispersion, loss and PMD.
+"""Nonlinear fiber propagation: the Kerr effect with dispersion, loss and PMD.
 
 :func:`apply_fiber_propagation` propagates a field over amplified spans of a
 :class:`Fiber` with the symmetric split-step Fourier method: self-phase

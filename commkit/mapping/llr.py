@@ -1,9 +1,9 @@
-"""
-Soft-decision demapping (log-likelihood ratios).
+"""Soft-decision demapping (log-likelihood ratios): :func:`compute_llr`.
 
 Max-log and exact (log-sum-exp) LLRs with an optional probabilistic-shaping
-prior, computed with NumPy or CuPy on the input's device.  Sign convention:
-positive LLR -> bit 0 more likely.
+prior, computed in float32 on the input's device.  Sign convention: a
+positive LLR means bit 0 is more likely,
+``LLR_k = log P(b_k = 0 | y) / P(b_k = 1 | y)``.
 """
 
 from __future__ import annotations

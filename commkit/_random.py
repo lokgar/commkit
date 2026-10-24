@@ -1,13 +1,15 @@
 """Random sources (private).
 
 Every random function takes ``rng: int | numpy.random.Generator | None``
-(SciPy SPEC 7).  What is transmitted (bits, symbols) is drawn on the host
-from that Generator and transferred, so a seed gives the same payload on
-every device.  What the channel adds (AWGN, phase noise) is drawn on the
-data's device: on the GPU from a CuPy Generator seeded from the host
-Generator, so CPU and GPU realizations differ while their statistics agree.  It uses the counter-based Philox
-bit generator, whose setup is negligible (XORWOW initializes per-thread state
-and costs about 0.8 ms per call).
+(SciPy SPEC 7), which :func:`as_generator` turns into a Generator.  What is
+transmitted (bits, symbols) is drawn on the host from that Generator and
+transferred, so a seed gives the same payload on every device.  What the
+channel adds (AWGN, phase noise, ASE) is drawn on the data's device by
+:func:`standard_normal` and :func:`complex_normal`: on the GPU from a CuPy
+Generator seeded from the host Generator, so CPU and GPU realizations differ
+while their statistics agree.  The CuPy Generator uses the counter-based
+Philox bit generator, whose setup is negligible (XORWOW initializes
+per-thread state and costs about 0.8 ms per call).
 """
 
 from types import ModuleType

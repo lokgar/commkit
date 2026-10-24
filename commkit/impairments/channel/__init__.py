@@ -1,10 +1,9 @@
-"""
-Fiber-channel impairments.
+"""Fiber-channel impairments.
 
-Linear effects (chromatic dispersion, PMD, polarization mixing) live in
+Linear effects (chromatic dispersion, PMD, polarization mixing) are in
 :mod:`~commkit.impairments.channel.linear`; nonlinear propagation over
 amplified spans (split-step Kerr effect with dispersion, loss, PMD and ASE)
-in :mod:`~commkit.impairments.channel.nonlinear`.
+is in :mod:`~commkit.impairments.channel.nonlinear`.
 """
 
 from .linear import (

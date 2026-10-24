@@ -1,9 +1,9 @@
-"""
-Spectral analysis and frequency-domain processing.
+"""Spectral estimation and frequency shifting.
 
-This module provides high-performance routines for spectral estimation and
-manipulation, optimized for both CPU and GPU backends. It supports Welch's
-Power Spectral Density (PSD) method and phase-continuous frequency shifting.
+:func:`welch_psd` (Welch's averaged periodogram) and :func:`spectrogram`
+(a :class:`Spectrogram`); :func:`shift_frequency` (a phase-continuous mix
+by a frequency on the FFT grid) and :func:`add_pilot_tone`, with
+:func:`grid_frequency` returning the grid frequency they snap to.
 """
 
 from collections.abc import Callable, Sequence

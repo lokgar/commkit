@@ -1,4 +1,7 @@
-"""MAP Tikhonov carrier phase recovery with RTS/SSKF smoothers."""
+"""MAP Tikhonov carrier phase recovery with RTS/SSKF smoothers.
+
+:class:`Tikhonov`.
+"""
 
 from dataclasses import dataclass
 from typing import Literal

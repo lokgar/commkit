@@ -1,12 +1,13 @@
-"""
-Signal generation.
+"""Signal generation: :func:`generate`, :func:`shape_pulse` and :func:`expand`.
 
 :func:`generate` draws random symbols from a :class:`Constellation` and
 pulse-shapes them into a :class:`Signal`, with samples normalized to unit
-symbol power (Es = 1, average sample power = 1/sps).  PS-QAM is a shaped
-constellation: ``generate(Constellation.qam(64).shaped(nu=0.1), ...)``.
-``periodic=True`` shapes the record as one period of a periodic waveform,
-for looping on a streaming AWG.
+symbol power (``Es = 1``, average sample power ``1/sps``).  PS-QAM is a
+shaped constellation: ``generate(Constellation.qam(64).shaped(nu=0.1),
+...)``.  ``periodic=True`` shapes the record as one period of a periodic
+waveform, for looping on a streaming AWG.  On arrays, :func:`shape_pulse`
+pulse-shapes a symbol sequence to unit symbol power and :func:`expand`
+inserts zeros between samples.
 """
 
 import numpy as np

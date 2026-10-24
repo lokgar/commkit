@@ -1,29 +1,27 @@
-"""
-Signal I/O and file management utilities.
+"""Signal storage: :func:`save_npz` and :func:`load_npz`.
 
-File layout
------------
-The .npz file contains the following named entries:
+A Signal is stored as a NumPy ``.npz`` archive with these entries:
 
-  ``samples``              - IQ sample array  (always present)
-  ``reference_symbols``    - reference symbols  (omitted without a reference)
-  ``reference_bits``       - reference bits     (omitted if None)
-  ``constellation_points``, ``constellation_bit_labels``, ``constellation_pmf``
-                           - the constellation (omitted if None; pmf if shaped)
-  ``__metadata__``         - zero-d unicode array holding a JSON string with the
-                             rates, the center frequency, the constellation
-                             family and the pulse (type name and fields).
-  ``__frame_metadata__``   - zero-d unicode array holding a JSON string with the
-                             serialised SingleCarrierFrame fields (omitted when
-                             the signal was not generated from a frame).
+``samples``
+    The samples (always present).
+``reference_symbols``, ``reference_bits``
+    The reference (omitted without one; bits omitted when ``None``).
+``constellation_points``, ``constellation_bit_labels``, ``constellation_pmf``
+    The constellation (omitted when ``None``; the pmf only when shaped).
+``__metadata__``
+    A zero-d unicode array holding a JSON string with the rates, the center
+    frequency, the constellation family and the pulse (type name and fields).
+``__frame_metadata__``
+    A zero-d unicode array holding a JSON string with the fields of the
+    Signal's frame (omitted without a frame).
+``frame_payload_symbols``, ``frame_pilot_symbols``, ``frame_payload_bits``
+    The frame's generated symbols and bits (omitted without a frame, or
+    without pilots).
+``frame_payload_constellation_*``, ``frame_pilot_constellation_*``
+    The frame's constellations, stored as the Signal's.
 
 The archive contains only numeric and unicode arrays, so it is read with
 ``allow_pickle=False``: loading a file never executes code from it.
-  ``frame_payload_symbols`` - frame payload symbols array  (omitted if no frame)
-  ``frame_pilot_symbols``   - frame pilot symbols array    (omitted if no frame/pilots)
-  ``frame_payload_bits``    - frame payload bits array     (omitted if no frame)
-  ``frame_payload_constellation_*``, ``frame_pilot_constellation_*``
-                            - the frame's constellations (as for the Signal's)
 """
 
 from __future__ import annotations

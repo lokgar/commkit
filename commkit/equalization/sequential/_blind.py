@@ -1,4 +1,7 @@
-"""Blind sequential adaptive equalizers: cma, rde."""
+"""Blind sequential adaptive equalizers (private).
+
+:func:`cma` and :func:`rde`, re-exported by :mod:`commkit.equalization`.
+"""
 
 from __future__ import annotations
 
