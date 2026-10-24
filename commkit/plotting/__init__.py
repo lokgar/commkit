@@ -1,11 +1,12 @@
-"""Plot of signals and of the library's results (Matplotlib).
+"""Plots of signals and of the library's results (Matplotlib).
 
-Every public function is a ``plot_*`` that draws a Signal, an array or a
-result object (an estimate, an :class:`~commkit.equalization.EqualizerResult`,
-an analysis summary) and never computes the result itself; device arrays are
-reduced on the device and only what is drawn is transferred.  Axes use SI
-prefixes.  :func:`apply_default_theme` sets the library's Matplotlib style;
-importing the package changes no Matplotlib settings.
+Every public function but :func:`apply_default_theme` is a ``plot_*`` function
+that draws a Signal, an array or a result object (an estimate, an
+:class:`~commkit.equalization.EqualizerResult`, an analysis summary) and never
+computes the result itself; device arrays are reduced on the device and only
+what is drawn is transferred.  Axis labels use SI prefixes.
+:func:`apply_default_theme` sets the library's Matplotlib style; importing the
+package changes no Matplotlib settings.
 
 - :mod:`~commkit.plotting.waveform`, :mod:`~commkit.plotting.eye`,
   :mod:`~commkit.plotting.constellation`, :mod:`~commkit.plotting.spectral`:

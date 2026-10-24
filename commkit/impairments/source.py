@@ -2,7 +2,8 @@
 
 :func:`generate_phase_noise` draws a phase trajectory from the power-law
 FM-noise model (white FM, the Lorentzian linewidth, plus optional 1/f
-flicker FM) and :func:`apply_phase_noise` rotates the samples by one.
+flicker FM) and :func:`apply_phase_noise` rotates samples by such a
+trajectory.
 """
 
 import math

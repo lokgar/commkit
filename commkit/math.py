@@ -95,9 +95,9 @@ def normalize(
           Brings the dominant I/Q component to 1.0 while preserving the I/Q
           ratio - unlike ``"peak"`` (complex-envelope ``max(|x[n]|)``), which
           leaves components at ``<= 1/sqrt(2)`` for square QAM/PSK whose
-          envelope peak sits at 45°.  Maximises DAC range utilisation for a
+          envelope peak sits at 45°.  Maximizes DAC range utilization for a
           signal section independent of modulation format or constellation
-          phase geometry (e.g. a frame's preamble and body, normalised
+          phase geometry (e.g. a frame's preamble and body, normalized
           separately so each uses the full DAC range).
     axis : int, optional
         The axis along which to compute the normalization factor.
@@ -219,14 +219,14 @@ def linear_to_db(x: ArrayType, *, power: bool = True) -> ArrayType:
     Parameters
     ----------
     x : array_like
-        Linear ratio value(s), any backend (NumPy/CuPy).
+        Linear ratio value(s), NumPy or CuPy.
     power : bool, default True
         Selects the 10x (power) or 20x (amplitude) convention.
 
     Returns
     -------
     ndarray
-        Value(s) in decibels, same shape/backend as ``x``.
+        Value(s) in decibels, same shape and device as ``x``.
     """
     x, xp, _ = dispatch(x)
     factor = 10.0 if power else 20.0
@@ -258,14 +258,14 @@ def _centered_axis(n: int, x: Any, xp: Any) -> tuple[ArrayType, ArrayType]:
 def _linear_trend_slope(y: ArrayType, *, x: Any = None, xp: Any = None) -> ArrayType:
     r"""Per-channel least-squares slope of a phase (or any) record.
 
-    Ordinary least squares on the centred normal equations,
+    Ordinary least squares on the centerd normal equations,
 
     .. math:: \hat{a} = \frac{\sum_k (x_k - \bar{x})(y_k - \bar{y})}
                              {\sum_k (x_k - \bar{x})^2},
 
-    evaluated for every channel in one vectorized pass and returned **on the
-    input backend** - no host synchronization, so the caller decides when (and
-    whether) to transfer.
+    evaluated for every channel in one vectorized pass and returned on the
+    input's device, without host synchronization, so the caller decides when
+    (and whether) to transfer.
 
     Parameters
     ----------
@@ -282,14 +282,14 @@ def _linear_trend_slope(y: ArrayType, *, x: Any = None, xp: Any = None) -> Array
     Returns
     -------
     ndarray
-        Slope per channel, ``(C,)``, ``float64``, on the input backend.
+        Slope per channel, ``(C,)``, ``float64``, on the input's device.
     """
     if xp is None:
         y, xp, _ = dispatch(y)
     n = y.shape[-1]
     xc, denom = _centered_axis(n, x, xp)
     # Subtracting the per-channel mean is mathematically redundant (xc is
-    # already centred) but keeps the products small when the record carries a
+    # already centerd) but keeps the products small when the record carries a
     # large constant offset - phase trajectories routinely do.
     yc = y - xp.mean(y, axis=-1, keepdims=True)
     return xp.sum(yc * xc, axis=-1) / denom
@@ -314,7 +314,7 @@ def _remove_linear_trend(y: ArrayType, *, x: Any = None) -> tuple[ArrayType, Arr
     Returns
     -------
     detrended : ndarray
-        ``y`` minus the fitted slope term, ``float64``, on the input backend.
+        ``y`` minus the fitted slope term, ``float64``, on the input's device.
     slope : ndarray
         Fitted slope per channel, ``(C,)`` - in units of ``y`` per unit ``x``
         (per sample by default).

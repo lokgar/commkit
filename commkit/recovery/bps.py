@@ -1,4 +1,4 @@
-"""Blind phase search (BPS) carrier phase recovery: :class:`BPS`."""
+"""Blind phase search (BPS) carrier-phase recovery: :class:`BPS`."""
 
 from dataclasses import dataclass
 
@@ -14,13 +14,14 @@ __all__ = ["BPS"]
 
 @dataclass(frozen=True)
 class BPS:
-    """Blind Phase Search.
+    """Blind phase search (BPS).
 
     Tests ``test_phases`` candidate rotations over one ambiguity interval
-    ``[0, 2π/M)``, ``M`` the constellation's rotational symmetry (``π/2``
-    for QAM), selects per block the candidate that minimises the summed
-    minimum squared distance to the constellation, M-fold-unwraps the block
-    phases and interpolates linearly to per-symbol resolution.
+    ``[0, 2π/M)``, ``M`` the constellation's rotational symmetry (an interval
+    of ``π/2`` for QAM); in each block it selects the candidate with the
+    smallest summed squared distance to the nearest constellation points,
+    then unwraps the block phases M-fold and interpolates them linearly to
+    one value per symbol.
 
     Parameters
     ----------
@@ -32,8 +33,8 @@ class BPS:
         candidates).
     joint_channels : bool, default False
         MIMO: sum the distance metrics across channels before the argmin and
-        give every channel the one trajectory (shared LO, ~√C lower
-        variance).
+        give every channel the one trajectory (a shared LO; about ``C``
+        times lower variance).
     cycle_slip : CycleSlip, optional
         Repair cycle slips in the block phases before interpolation.
 
@@ -115,7 +116,7 @@ def _bps(symbols: ArrayType, method: BPS, ctx: _Context) -> _Phase:
     symbols, xp, _ = dispatch(symbols)
     C, N = symbols.shape
 
-    # Normalise each channel to unit average power so the metric is computed at
+    # Normalize each channel to unit average power so the metric is computed at
     # the same scale as the (unit-power) constellation.  BPS is a phase estimator; it must be
     # amplitude-agnostic.
     symbols = normalize(symbols, mode="average_power", axis=-1)
@@ -152,7 +153,7 @@ def _bps(symbols: ArrayType, method: BPS, ctx: _Context) -> _Phase:
     all_positions = xp.arange(N, dtype=xp.float64)
 
     # Pre-compute interpolation indices and weights (identical for every channel).
-    # block b is "to the left" of position n when its centre b*bs + bs/2 <= n
+    # block b is "to the left" of position n when its center b*bs + bs/2 <= n
     #   => b <= (n - bs/2) / bs  => idx_left = floor((n - bs/2) / bs)
     idx_left = xp.clip(
         xp.floor((all_positions - block_size / 2) / block_size).astype(xp.int64),

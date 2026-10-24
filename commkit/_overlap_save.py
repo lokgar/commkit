@@ -3,7 +3,7 @@
 Shared by ``filtering.ols_fir_filter`` (per-channel convolution) and
 ``equalization.zf_equalizer`` (per-bin MIMO matrix multiply): the forward pass
 cuts the record into 50 %-overlapping FFT blocks, the caller processes each
-bin, and the backward pass inverts and keeps the centre of each block.
+bin, and the backward pass inverts and keeps the center of each block.
 """
 
 from typing import Any
@@ -18,7 +18,7 @@ def ols_forward(samples: ArrayType, N_fft: int) -> tuple[ArrayType, dict[str, An
     This is the shared OLS scaffolding used by both ``ols_fir_filter`` (SISO
     scalar convolution) and ``zf_equalizer`` (MIMO per-bin matrix multiply).
     It should be called on samples that have already been dispatched to the
-    correct backend and shaped as ``(num_ch, N)``.
+    right device and shaped as ``(num_ch, N)``.
 
     Parameters
     ----------
@@ -39,7 +39,7 @@ def ols_forward(samples: ArrayType, N_fft: int) -> tuple[ArrayType, dict[str, An
     """
     _, xp, _ = dispatch(samples)
     num_ch, N = samples.shape
-    B = N_fft // 2  # 50 % hop - maximises block reuse
+    B = N_fft // 2  # 50 % hop - maximizes block reuse
     discard = N_fft // 4  # symmetric guard: absorbs causal & anti-causal transients
     num_blocks = (N + B - 1) // B
 

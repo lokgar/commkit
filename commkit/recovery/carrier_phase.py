@@ -1,4 +1,4 @@
-"""Carrier phase estimation and correction.
+"""Carrier-phase estimation and correction.
 
 :func:`estimate_carrier_phase` and :func:`correct_carrier_phase`.  The method
 object selects the algorithm; each lives next to its kernel in this package and
@@ -80,7 +80,7 @@ class CarrierPhaseEstimate:
         Phase trajectory in radians, ``float64``, the shape of the samples.
         :func:`correct_carrier_phase` rotates by ``exp(-j·value)``.
     block_centers : numpy.ndarray or None
-        Block methods (BPS, Viterbi-Viterbi, Tikhonov): block centre
+        Block methods (BPS, Viterbi-Viterbi, Tikhonov): block center
         positions in symbols, ``(B,)``.
     block_phase : ndarray or None
         Block methods: the block phases after unwrapping, smoothing and
@@ -90,7 +90,7 @@ class CarrierPhaseEstimate:
     pilot_phase : ndarray or None
         ``PilotAided``: unwrapped pilot phases, ``(P,)`` or ``(C, P)``.
     tone_frequencies : numpy.ndarray or None
-        Tone methods: measured tone centres in Hz on the host; ``PilotTone``
+        Tone methods: measured tone centers in Hz on the host; ``PilotTone``
         per channel (0-d or ``(C,)``), ``PilotTones`` per channel and tone
         (``(K,)`` or ``(C, K)``).
     tone_snr_db : numpy.ndarray or None

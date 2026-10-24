@@ -6,8 +6,9 @@
   reference of pilot-aided ``cma`` / ``rde``.
 - Frequency-domain block equalizers :func:`block_lms`, :func:`block_cma` and
   :func:`block_rde`, on the input's device (CUDA graphs on the GPU).
-- Zero-forcing: :func:`estimate_transfer_function`, :func:`zf_equalizer` and
-  :func:`apply_taps`.
+- Linear block equalization: :func:`estimate_transfer_function` (channel
+  estimate), :func:`zf_equalizer` (its ZF / MMSE inverse) and
+  :func:`apply_taps` (frozen taps).
 - Pilot-tone polarization demultiplexing:
   :func:`demultiplex_polarization_tones_static`,
   :func:`demultiplex_polarization_tones_dynamic` (with its

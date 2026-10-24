@@ -5,7 +5,7 @@ each point, and an optional probabilistic-shaping prior ``pmf``.  It is the
 single way to describe a modulation in CommKit: functions take a
 ``Constellation``, never a ``modulation`` string plus an ``order``.
 
-Build one with a factory (Gray labelled, unit average power)::
+Build one with a factory (Gray labeled, unit average power)::
 
     Constellation.qam(16)
     Constellation.psk(8)
@@ -137,7 +137,7 @@ class Constellation:
 
     @classmethod
     def qam(cls, order: int) -> "Constellation":
-        """Gray-labelled M-QAM at unit average power.
+        """Gray-labeled M-QAM at unit average power.
 
         Square QAM for even ``k = log2(M)``, rectangular 8-QAM, and cross QAM
         for other odd ``k`` (32, 128, ...).
@@ -146,12 +146,12 @@ class Constellation:
 
     @classmethod
     def psk(cls, order: int) -> "Constellation":
-        """Gray-labelled M-PSK on the unit circle."""
+        """Gray-labeled M-PSK on the unit circle."""
         return _named("psk", order, False)
 
     @classmethod
     def pam(cls, order: int, *, unipolar: bool = False) -> "Constellation":
-        """Gray-labelled M-PAM (real) at unit average power.
+        """Gray-labeled M-PAM (real) at unit average power.
 
         ``unipolar=True`` gives non-negative levels, which is M-ASK as used in
         intensity modulation (``pam(2, unipolar=True)`` is on-off keying).

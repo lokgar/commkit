@@ -34,10 +34,10 @@ def plot_ideal_constellation(
 ) -> tuple[Any, Any] | None:
     """Plot the points of a constellation with their bit labels.
 
-    Includes concentric rings and center axes for reference.  A shaped
-    constellation (one with a ``pmf``) is drawn probability-weighted: each
-    marker's colour encodes the symbol probability, and the bit labels are
-    left out to keep high orders readable.
+    Concentric rings and the axes through the origin are drawn for
+    reference.  A shaped constellation (one with a ``pmf``) is drawn by
+    probability: each marker's color encodes the symbol's probability, and
+    the bit labels are left out so that high orders stay readable.
 
     Parameters
     ----------
@@ -45,14 +45,14 @@ def plot_ideal_constellation(
         The constellation, e.g. ``Constellation.qam(16)`` or
         ``Constellation.qam(64).shaped(nu=0.05)``.
     ax : matplotlib.axes.Axes, optional
-        Target axis.
+        Axes to draw on; ``None`` creates a figure.
     title : str, optional
-        Plot title; defaults to the constellation's description.
+        Title of the figure; defaults to the constellation's description.
     size : float, optional
-        Figure size (square), in inches. Defaults to the theme's square
-        panel size (see ``theme._square_figsize``).
+        Side of the square figure in inches; defaults to the theme's square
+        panel size.
     show : bool, default False
-        If True, calls `plt.show()`.
+        Call ``plt.show()`` and return ``None``.
 
     Returns
     -------
@@ -158,7 +158,7 @@ def plot_constellation(
     show: bool = False,
     **kwargs: Any,
 ) -> tuple[Any, Any] | None:
-    """Plot a constellation density diagram from received samples.
+    """Plot the density of received samples in the complex plane.
 
     A 2-D histogram of the samples, smoothed with a Gaussian
     (:func:`commkit.smoothing.smooth_density_2d`): for large records it shows
@@ -167,27 +167,28 @@ def plot_constellation(
     Parameters
     ----------
     samples : array_like or Signal
-        Received complex samples. Shape: ``(N,)`` or ``(C, N)``.
+        Received complex samples, ``(N,)`` or ``(C, N)`` (one panel per
+        channel).
     bins : int, default 100
-        Density resolution (bins per axis).
+        Histogram bins per axis.
     cmap : str, default "inferno"
-        Colormap for the density field.
+        Colormap of the density.
     ax : matplotlib.axes.Axes, optional
-        Target axis.
+        Axes to draw on; ``None`` creates a figure.
     overlay_ideal : bool, default False
         Overlay the constellation's points, scaled to the samples' RMS.
     overlay_reference : bool, default False
         Overlay a Signal's ``reference.symbols`` as given.
     constellation : Constellation, optional
         Constellation for ``overlay_ideal``.  Defaults to the Signal's.
-    title : str, optional
-        Plot title.
+    title : str or None, default "Constellation"
+        Title of the figure; ``None`` for none.
     vmin, vmax : float, optional
-        Color scaling limits. Defaults to auto-range [0, 1].
+        Color limits of the normalized density, ``[0, 1]`` by default.
     show : bool, default False
-        If True, calls `plt.show()`.
+        Call ``plt.show()`` and return ``None``.
     **kwargs : Any
-        Additional arguments passed to `ax.imshow`.
+        Passed to ``ax.imshow``.
 
     Returns
     -------

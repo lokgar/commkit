@@ -1,6 +1,8 @@
-"""MAP Tikhonov carrier phase recovery with RTS/SSKF smoothers.
+"""MAP carrier-phase recovery with a Tikhonov prior: :class:`Tikhonov`.
 
-:class:`Tikhonov`.
+Viterbi-Viterbi block phases smoothed by a Kalman smoother matched to the
+laser phase noise: the exact Rauch-Tung-Striebel (RTS) smoother or its
+steady-state form.
 """
 
 from dataclasses import dataclass
@@ -119,13 +121,12 @@ def _sskf_smoother_1d(
     """Steady-state Kalman smoother via zero-phase IIR filter (filtfilt).
 
     Approximates the RTS smoother by replacing the sequential Kalman
-    recurrence with a 1st-order IIR filter whose gain is solved analytically
+    recurrence with a first-order IIR filter whose gain is solved analytically
     from the discrete algebraic Riccati equation.  The bidirectional
     ``filtfilt`` call makes it equivalent to the RTS smoother in steady state.
 
-    Backend-aware: uses ``sp.signal.filtfilt`` where ``sp`` is
-    ``scipy`` (CPU) or ``cupyx.scipy`` (GPU) as returned by
-    ``dispatch``.
+    Runs on the input's device: ``sp.signal.filtfilt`` with ``sp`` from
+    ``dispatch`` (``scipy`` or ``cupyx.scipy``).
 
     The approximation is excellent when ``B >> 1/K_∞``
     (typically ``B > 20``).  For ``B < 7`` (``filtfilt`` minimum), falls

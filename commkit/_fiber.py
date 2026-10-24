@@ -22,19 +22,19 @@ the complex conjugate of the textbook (Agrawal) form, so the Kerr phase is
 in anomalous fiber and makes DBP an inverse.
 
 Solver.  The loss is taken out of the field: ``A = u e^{-αz/2}``, so ``u``
-obeys the lossless equation with a Kerr coefficient ``γ e^{-αz}``, its
-linear operator is a pure phase, and an amplifier that restores the span
-loss leaves ``u`` unchanged (no rounding of gains that should cancel).
-Each span of length ``L`` is cut into ``K`` equal steps.  A step is
-``D(h/2) N(h) D(h/2)``: the Kerr phase uses the power at the step's midpoint
-weighted over the step, ``γ (e^{-αz_{k-1}} - e^{-αz_k}) / α``, so the scheme
-is second order (and exact for a continuous wave).  Equal steps measured about
-3x more accurate than logarithmic ones (equal nonlinear phase per step) on a
-32 GBd, 80 km span at 4-10 dBm for every step count from 10 to 200: the
-long last steps of the logarithmic rule cost more dispersion accuracy than
-its balanced Kerr phase gains.  Neighbouring half steps are merged, so a
-step costs one FFT pair.  A lumped amplifier after every
-span restores the span loss exactly and, with a noise figure, adds ASE.
+obeys the lossless equation with a Kerr coefficient ``γ e^{-αz}``, its linear
+operator is a pure phase, and an amplifier that restores the span loss leaves
+``u`` unchanged (no rounding of gains that should cancel). Each span of length
+``L`` is cut into ``K`` equal steps.  A step is ``D(h/2) N(h) D(h/2)``: the
+Kerr phase uses the power at the step's midpoint weighted over the step, ``γ
+(e^{-αz_{k-1}} - e^{-αz_k}) / α``, so the scheme is second order (and exact for
+a continuous wave).  Equal steps were measured about 3x more accurate than
+logarithmic ones (equal nonlinear phase per step) on a 32 GBd, 80 km span at
+4-10 dBm for every step count from 10 to 200: the long last steps of the
+logarithmic rule cost more dispersion accuracy than its balanced Kerr phase
+gains.  Neighboring half steps are merged, so a step costs one FFT pair.  A
+lumped amplifier after every span restores the span loss exactly and, with a
+noise figure, adds ASE.
 
 PMD is the waveplate (coarse-step) model: every step carries one section, a
 Haar-random Jones rotation and a differential group delay

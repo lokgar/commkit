@@ -50,7 +50,7 @@ def _get_numba_mm_bootstrap() -> Callable[..., float]:
             Predicts each lag's phase from the running weighted frequency
             estimate accumulated from all previous lags, then folds it
             into the weighted sum.  Sequential data dependency prevents
-            vectorisation; Numba removes Python-interpreter overhead.
+            vectorization; Numba removes Python-interpreter overhead.
 
             Parameters
             ----------
@@ -72,7 +72,7 @@ def _get_numba_mm_bootstrap() -> Callable[..., float]:
             two_pi = 2.0 * np.pi
             L = len(theta)
 
-            # Lag 1 initialisation (m=1, m²=1)
+            # Lag 1 initialization (m=1, m²=1)
             Theta_0 = theta[0]
             w0 = amp[0] * amp[0]  # m² · |R|² at m=1
             f_hat = Theta_0 * fs / (two_pi * M_val)
@@ -264,7 +264,7 @@ class BiasTone:
     Parameters
     ----------
     target_frequency : float, optional
-        Centre of the search window in Hz; give it with ``search_band``.
+        Center of the search window in Hz; give it with ``search_band``.
     search_band : float, optional
         Half-width of the search window in Hz.
     block_size : int, optional
@@ -310,7 +310,7 @@ class FrequencyOffsetEstimate:
         Per-channel reliability weights used by :meth:`combined` (peak
         magnitude, autocorrelation energy or pilot power).
     block_centers : numpy.ndarray or None
-        Blockwise only: block centre sample indices, ``(B,)``.
+        Blockwise only: block center sample indices, ``(B,)``.
     block_values : ndarray or None
         Blockwise only: estimate per block in Hz, ``(B,)`` or ``(C, B)``.
     power : int or None
@@ -537,7 +537,7 @@ def _pilot_symbols(x: ArrayType, fs: float, method: PilotSymbols) -> _Rows:
         safe = xp.where(xp.abs(t_var) > 1e-30, t_var, xp.ones_like(t_var))
         slopes = xp.sum(v * phi_c * t_c, axis=-1) / safe
     else:
-        slopes = _linear_trend_slope(phi_u, x=t, xp=xp)  # rad/s, centred OLS
+        slopes = _linear_trend_slope(phi_u, x=t, xp=xp)  # rad/s, centerd OLS
 
     max_gap = int(np.max(np.diff(idx_np)))
     logger.debug(
@@ -732,7 +732,7 @@ def correct_frequency_offset(
 
     A constant offset is removed exactly, ``y[n] = x[n]·exp(-j2πΔf·n/fs)``
     with ``n = 0`` at the first sample and no bin quantization.  A blockwise
-    estimate is interpolated with PCHIP between block centres (held constant
+    estimate is interpolated with PCHIP between block centers (held constant
     outside them), integrated into a phase trajectory and removed.
 
     Parameters

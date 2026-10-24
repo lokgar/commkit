@@ -1,4 +1,4 @@
-"""Viterbi-Viterbi (M-th power) carrier phase recovery: :class:`ViterbiViterbi`."""
+"""Viterbi-Viterbi (M-th power) carrier-phase recovery: :class:`ViterbiViterbi`."""
 
 from dataclasses import dataclass
 

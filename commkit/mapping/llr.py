@@ -295,7 +295,7 @@ def _llr(
     noise_var: float,
     method: str,
 ) -> ArrayType:
-    """LLRs of ``symbols`` against host ``points`` labelled by ``bit_labels``.
+    """LLRs of ``symbols`` against host ``points`` labeled by ``bit_labels``.
 
     Shared by :func:`compute_llr` and :meth:`Constellation.llr`.  Returns
     float32 LLRs of shape ``(..., N * k)`` on the input's device.

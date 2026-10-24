@@ -87,7 +87,7 @@ def savgol_smooth(
         Input array.
     window : int
         Window length in samples, greater than ``polyorder``; an odd length
-        centres the fit on each sample.
+        centers the fit on each sample.
     polyorder : int
         Order of the polynomial fit within each window.
     axis : int, default -1

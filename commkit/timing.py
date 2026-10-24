@@ -68,7 +68,7 @@ def cross_correlate_fft(
         Output size:
         - ``"full"``: lags ``-(L - 1) .. N - 1``, length ``N + L - 1``
           (the layout of ``scipy.signal.correlate``).
-        - ``"same"``: length ``N``, centred.
+        - ``"same"``: length ``N``, centerd.
         - ``"valid"``: length ``max(N, L) - min(N, L) + 1``.
         - ``"positive_lags"``: lags ``0 .. N - 1`` only, a view of the
           circular correlation; for a timing search, where negative lags are
@@ -350,7 +350,7 @@ def estimate_fractional_delay(
     #   - M=1: all channels (Path A was skipped entirely)
     #   - M>1: only ~interior_mask channels (edges Path A cannot process)
     # Do NOT use `mu == 0` as a proxy - zero is a valid fractional offset and
-    # would wrongly overwrite DFT results for on-centre correlation peaks.
+    # would wrongly overwrite DFT results for on-center correlation peaks.
     if dft_upsample == 1:
         calc_mask = xp.ones(C, dtype=bool)
     else:
@@ -837,7 +837,7 @@ def correct_timing(
     # exactly the frame boundary we just aligned to. Applying first puts the
     # wrap at the physical buffer ends, the leading one of which is then
     # discarded by the slice; only the tail of the slice carries any residual
-    # ~sinc-tail artefact, well away from the equalizer training start.
+    # ~sinc-tail artifact, well away from the equalizer training start.
     if mode == "slice" and apply_frac:
         x = fft_fractional_delay(x, delay=-fractional_offset)
 

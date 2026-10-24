@@ -34,12 +34,12 @@ def _constellation_power(
     For a uniform constellation (``pmf=None``) this is the unweighted mean
     power ``mean(|s|^2)``.  For probabilistic shaping it is the pmf-weighted
     power ``Σ_m P(s_m) |s_m|^2`` - the quantity written ``E_PS`` when the
-    constellation is on the normalised grid (where it is ``< 1``).
+    constellation is on the normalized grid (where it is ``< 1``).
 
     The value is *grid-agnostic*: it reports the average power of the
-    constellation exactly as passed - ``≈1`` for a normalised uniform grid,
-    ``E_PS < 1`` for a normalised shaped grid, or the raw integer-grid energy
-    (e.g. ``10`` for an unnormalised 16-QAM).  Callers apply their own
+    constellation exactly as passed - ``≈1`` for a normalized uniform grid,
+    ``E_PS < 1`` for a normalized shaped grid, or the raw integer-grid energy
+    (e.g. ``10`` for an unnormalized 16-QAM).  Callers apply their own
     rescaling (``√E_PS`` on the received symbols, or ``1/√E_PS`` on the
     constellation) using the returned value.
 
@@ -93,7 +93,7 @@ def maxwell_boltzmann(constellation: Constellation, *, nu: float) -> np.ndarray:
         Points to shape; any existing pmf is ignored.
     nu : float
         Shaping parameter, ``nu >= 0``.  ``nu = 0`` gives the uniform prior;
-        larger values favour low-energy points.
+        larger values favor low-energy points.
 
     Returns
     -------

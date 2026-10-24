@@ -56,7 +56,7 @@ def zf_equalizer(
         Noise variance ``σ²`` of the MMSE regularization; ``0.0`` gives ZF.
     center : int, default 0
         Index of lag 0 in ``channel_estimate``, in ``[0, L)``. ``0`` means a
-        causal response (``rx = convolve(tx, h)[:N]``). A centred estimate
+        causal response (``rx = convolve(tx, h)[:N]``). A centerd estimate
         from :func:`estimate_transfer_function` with ``num_taps=L`` has
         ``center=L // 2``; taps before ``center`` are precursors (negative
         lags). The output is aligned with the transmitted samples (no delay).
@@ -175,7 +175,7 @@ def apply_taps(
 
         y[i, n] = sum_j sum_t conj(W[i, j, t]) * x[j, n*sps - T_c + t]
 
-    with the centre tap ``T_c = num_taps // 2``: the filter of the adaptive
+    with the center tap ``T_c = num_taps // 2``: the filter of the adaptive
     equalizers, as one batched ``einsum`` on the input's device.
 
     Parameters
@@ -305,11 +305,11 @@ def estimate_transfer_function(
     mapping a known ``reference`` ``x`` to the measured ``received`` ``y``, where
     :math:`S_{xx}` / :math:`S_{yx}` are the Welch auto/cross spectra - Hann-windowed,
     averaged periodograms.  This is the classic H1 channel-sounding estimator,
-    generalised to a full ``(C, C)`` cross-spectral matrix so the MIMO response is
+    generalized to a full ``(C, C)`` cross-spectral matrix so the MIMO response is
     recovered in one shot (the reference is FFT'd once and every channel pair is
     formed by a single einsum).
 
-    Invert the estimated channel with :func:`zf_equalizer`, passing the centre
+    Invert the estimated channel with :func:`zf_equalizer`, passing the center
     index of the taps::
 
         h = estimate_transfer_function(tx, rx, num_taps=L)
@@ -327,16 +327,16 @@ def estimate_transfer_function(
         Welch segment length (frequency resolution ``fs / n_fft``).
     reg : float, default 1e-2
         Relative Tikhonov loading for the :math:`S_{xx}` inverse - a diagonal term
-        scaled to the mean auto-spectrum, so it stabilises the estimate where the
+        scaled to the mean auto-spectrum, so it stabilizes the estimate where the
         reference has little power (band edges) without depending on the absolute
         signal level.  The H1 ratio is invariant to overall scale and window count.
     max_windows : int, default 4096
         Cap on the number of averaged segments.  An LTI channel is static, so a few
         thousand windows spread over the record give a stable estimate; capping
-        bounds the vectorised FFT batch (the averaging only trades variance, not
+        bounds the vectorized FFT batch (the averaging only trades variance, not
         bias, so the cap does not move the estimate).
     num_taps : int, optional
-        If given, return the centred, Hann-tapered impulse response truncated to
+        If given, return the centerd, Hann-tapered impulse response truncated to
         ``num_taps`` taps - ``(C, C, num_taps)`` MIMO or ``(num_taps,)`` SISO.
         Lag 0 sits at index ``num_taps // 2`` (taps before it are negative
         lags), so pass ``center=num_taps // 2`` to :func:`zf_equalizer`.  If
@@ -371,7 +371,7 @@ def estimate_transfer_function(
     n_fft = int(min(n_fft, N))
     win = xp.asarray(np.hanning(n_fft).astype(np.empty(0, cdtype).real.dtype))
 
-    # Welch auto/cross spectra, vectorised over windows (capped). One batched FFT
+    # Welch auto/cross spectra, vectorized over windows (capped). One batched FFT
     # of the reference and the received, then every (C, C) cross term via einsum -
     # no per-window Python loop, no redundant re-FFT of shared channels.
     step = max(n_fft // 2, (N - n_fft) // max(max_windows - 1, 1))
@@ -400,7 +400,7 @@ def estimate_transfer_function(
     if num_taps is None:
         return B[:, 0, 0] if single else B
 
-    # Centred, Hann-tapered impulse response, truncated to num_taps: lag 0 sits
+    # Centerd, Hann-tapered impulse response, truncated to num_taps: lag 0 sits
     # at index num_taps // 2 for odd and even lengths alike.
     n_taps = int(min(num_taps, n_fft))
     b_t = xp.fft.fftshift(_fft.ifft(B, axis=0), axes=0)  # (n_fft, C, C), lag axis 0

@@ -1,7 +1,8 @@
 """Frequency-domain (FDAF) block equalizers (private).
 
 - ``_engine.py``: the block loop, filter and gradient update shared by all.
-- ``_dd.py``: :func:`block_lms`, the decision-directed block equalizer.
+- ``_dd.py``: :func:`block_lms`, the trained and decision-directed block
+  equalizer.
 - ``_blind.py``: the blind engine behind :func:`commkit.equalization.block_cma`
   and :func:`commkit.equalization.block_rde` (``equalization/blind.py``).
 """

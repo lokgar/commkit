@@ -35,7 +35,7 @@ def _get_numba() -> Any:
 # -----------------------------------------------------------------------------
 #
 # Each factory lazily compiles a @njit kernel on first call and caches it in
-# _NUMBA_KERNELS.  Numba specialises over argument *types* (all complex64/
+# _NUMBA_KERNELS.  Numba specializes over argument *types* (all complex64/
 # float32/int32/bool), so a single compiled version handles any (C, T, M).
 #
 # All kernels share the same calling conventions:
@@ -46,12 +46,12 @@ def _get_numba() -> Any:
 #   - w_hist_out : (N_sym, C, C, T) if store_weights=True, else (1, C, C, T)
 #
 # Performance tricks:
-#   - fastmath=True   - LLVM unsafe-math: enables SIMD vectorisation of
+#   - fastmath=True   - LLVM unsafe-math: enables SIMD vectorization of
 #                       inner tap loops (AVX-512 on modern CPUs)
 #   - cache=True      - compiled LLVM IR cached to __pycache__ (*.nbi/*.nbc)
 #   - Pre-allocated temporaries (X_wins, y, e, x_bar, Px ...) - no heap
 #                       allocation inside the hot symbol loop
-#   - Manual argmin slicer - explicit loop over M; LLVM can SIMD-vectorise
+#   - Manual argmin slicer - explicit loop over M; LLVM can SIMD-vectorize
 #                       the distance computation for small constellations
 #   - In-place W update - no copy per step, minimal working-set pressure
 #   - np.conj() on scalars - valid in Numba 0.64+

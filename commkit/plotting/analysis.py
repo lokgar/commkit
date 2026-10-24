@@ -48,24 +48,28 @@ def plot_frequency_drift(
     show: bool = False,
     title: str = "Residual frequency drift",
 ) -> tuple[Any, Any] | None:
-    """Plot the instantaneous residual frequency offset vs time.
+    """Plot the instantaneous residual frequency offset against time.
 
-    Draws the ``df`` of ``analysis.frequency_drift`` - the slope of the
-    smoothed (drift) phase.  This is the spin the carrier-phase recovery must
-    track.
+    Draws the ``df`` of :func:`commkit.analysis.frequency_drift`, the slope
+    of the smoothed (drift) phase: the rotation the carrier-phase recovery
+    must follow.
 
     Parameters
     ----------
     drift : FrequencyDrift
-        From ``analysis.frequency_drift``; ``df`` is ``(M,)`` or ``(C, M)``.
+        From :func:`commkit.analysis.frequency_drift`; ``df`` is ``(M,)`` or
+        ``(C, M)``.
     sampling_rate : float
-        Sampling rate of ``df`` in Hz (time axis).
+        Sampling rate of ``df`` in Hz, for the time axis.
     amp_ref : float, optional
-        If given, draws dashed ``±amp_ref`` reference lines (e.g. the
-        injected wander amplitude in a simulation).
-    ax : Axes, optional
+        Draws dashed reference lines at ``±amp_ref`` (e.g. the wander
+        amplitude injected in a simulation).
+    ax : matplotlib.axes.Axes, optional
+        Axes to draw on; ``None`` creates a figure.
     show : bool, default False
-    title : str
+        Call ``plt.show()`` and return ``None``.
+    title : str, default "Residual frequency drift"
+        Title of the figure.
 
     Returns
     -------
@@ -136,18 +140,18 @@ def plot_frequency_noise_psd(
     ``BetaSeparation``, the estimate itself for ``DshFmPsd``) and the region
     annotations the estimate carries:
 
-    * ``band`` - the analysis window: the ``[f_min, f_max]`` fence of
-      ``BetaSeparation`` or the extent of the ``DshFmPsd`` plateau.  It is
-      *not* itself the integration region.
-    * ``above`` (``BetaSeparation``) - the **actual β-integration region**
-      ``{f : S_f(f) > β(f)}`` (in general a union of disjoint intervals): the
-      area between the dashed β-line and the PSD is filled wherever it holds.
-    * ``used`` - the bins the estimate ran over (the ``BetaSeparation``
-      floor median, or the ``DshFmPsd`` fit with spurs removed).  Sparse
-      masks (≤ 400 bins) are drawn as markers on the PSD trace, dense masks
-      as a highlighted log-binned median curve.
-    * ``S_f_model`` (``DshFmPsd``) - the fitted white-FM, flicker-FM and
-      detection-noise model, drawn over the PSD.
+    * ``band``: the analysis window, the ``[f_min, f_max]`` fence of
+      ``BetaSeparation`` or the extent of the ``DshFmPsd`` fit.  It is not
+      the integration region itself.
+    * ``above`` (``BetaSeparation``): the β-integration region
+      ``{f : S_f(f) > β(f)}``, in general a union of disjoint intervals; the
+      area between the dashed β-line and the PSD is filled where it holds.
+    * ``used``: the bins the estimate ran over (the median of the
+      ``BetaSeparation`` floor, or the ``DshFmPsd`` fit with its spurs
+      removed).  Sparse masks (400 bins or fewer) are drawn as markers on the
+      PSD, dense ones as a highlighted log-binned median curve.
+    * ``S_f_model`` (``DshFmPsd``): the fitted model of white FM, flicker FM
+      and detection noise, drawn over the PSD.
 
     Dense spectra are drawn faint with a log-binned median trace on top.
     Every channel's PSD is drawn; the masks are those of channel 0.
@@ -155,11 +159,14 @@ def plot_frequency_noise_psd(
     Parameters
     ----------
     estimate : LinewidthEstimate
-        From ``analysis.estimate_linewidth`` with ``BetaSeparation`` or
-        ``DshFmPsd``.
-    ax : Axes, optional
+        From :func:`commkit.analysis.estimate_linewidth` with
+        ``BetaSeparation`` or ``DshFmPsd``.
+    ax : matplotlib.axes.Axes, optional
+        Axes to draw on; ``None`` creates a figure.
     show : bool, default False
-    title : str
+        Call ``plt.show()`` and return ``None``.
+    title : str, default "Frequency-noise PSD"
+        Title of the figure.
 
     Returns
     -------
@@ -293,22 +300,25 @@ def plot_allan_deviation(
     show: bool = False,
     title: str = "Allan deviation",
 ) -> tuple[Any, Any] | None:
-    """Plot the (overlapping) Allan deviation vs averaging time on log-log axes.
+    """Plot the overlapping Allan deviation against averaging time, log-log.
 
-    The local slope classifies the dominant frequency-noise process:
-    white-FM ~ tau^(-1/2), flicker-FM ~ tau^0 (flat), random-walk-FM ~ tau^(+1/2),
-    linear drift ~ tau^(+1).
+    The local slope identifies the dominant frequency-noise process: white
+    FM goes as ``τ^(-1/2)``, flicker FM as ``τ^0`` (flat), random-walk FM as
+    ``τ^(1/2)`` and a linear drift as ``τ^1``.
 
     Parameters
     ----------
     allan : AllanDeviation
-        From ``analysis.allan_deviation``; ``adev`` in Hz, ``(n_tau,)`` or
-        ``(C, n_tau)``.
+        From :func:`commkit.analysis.allan_deviation`; ``adev`` in Hz,
+        ``(n_tau,)`` or ``(C, n_tau)``.
     reference_slopes : bool, default True
-        If True, overlays a faint ``τ^{-1/2}`` (white-FM) guide line.
-    ax : Axes, optional
+        Overlay a faint ``τ^(-1/2)`` (white-FM) guide line.
+    ax : matplotlib.axes.Axes, optional
+        Axes to draw on; ``None`` creates a figure.
     show : bool, default False
-    title : str
+        Call ``plt.show()`` and return ``None``.
+    title : str, default "Allan deviation"
+        Title of the figure.
 
     Returns
     -------
@@ -364,22 +374,24 @@ def plot_increment_variance(
     show: bool = False,
     title: str = "Phase-increment variance",
 ) -> tuple[Any, Any] | None:
-    """Plot Var of phase increments vs lag with the fitted linear model.
+    """Plot the variance of phase increments against lag, with the fitted line.
 
-    The measured points should follow ``Var = slope·lag + intercept`` for
-    white-FM (Wiener) phase noise; curvature signals flicker or drift
-    contamination.  The fit and its intercept (the additive-noise term
+    For white-FM (Wiener) phase noise the points follow
+    ``Var = slope·lag + intercept``; curvature points to flicker or drift.  The fit and its intercept (the additive-noise term
     ``2σ_φ²``) are drawn when the estimate has one (``IncrementSlope``,
     ``DshIncrement``); ``IncrementSubtract`` draws its single lag-1 point.
 
     Parameters
     ----------
     estimate : LinewidthEstimate
-        From ``analysis.estimate_linewidth`` with ``IncrementSlope``,
-        ``IncrementSubtract`` or ``DshIncrement``.
-    ax : Axes, optional
+        From :func:`commkit.analysis.estimate_linewidth` with
+        ``IncrementSlope``, ``IncrementSubtract`` or ``DshIncrement``.
+    ax : matplotlib.axes.Axes, optional
+        Axes to draw on; ``None`` creates a figure.
     show : bool, default False
-    title : str
+        Call ``plt.show()`` and return ``None``.
+    title : str, default "Phase-increment variance"
+        Title of the figure.
 
     Returns
     -------
@@ -441,19 +453,23 @@ def plot_dsh_beat_psd(
     show: bool = False,
     title: str = "DSH beat spectrum",
 ) -> tuple[Any, Any] | None:
-    """Plot the self-heterodyne beat PSD (dB rel. peak) with width annotations.
+    """Plot the self-heterodyne beat PSD (dB relative to the peak) with its widths.
 
-    Centres the axis on the beat peak, overlays the half-power and
-    ``-level_db`` contours, and shades the full widths implied by the
-    linewidth estimates (``FWHM = 2Δν``, ``W_L = 2√(10^{L/10}-1)·Δν``).
+    The axis is centered on the beat peak; the half-power and ``-level_db``
+    contours are overlaid, and the full widths that the linewidth estimates
+    imply are shaded (``FWHM = 2Δν``, ``W_L = 2√(10^{L/10}-1)·Δν``).
 
     Parameters
     ----------
     estimate : LinewidthEstimate
-        From ``analysis.estimate_linewidth`` with ``DshLorentzian``.
-    ax : Axes, optional
+        From :func:`commkit.analysis.estimate_linewidth` with
+        ``DshLorentzian``.
+    ax : matplotlib.axes.Axes, optional
+        Axes to draw on; ``None`` creates a figure.
     show : bool, default False
-    title : str
+        Call ``plt.show()`` and return ``None``.
+    title : str, default "DSH beat spectrum"
+        Title of the figure.
 
     Returns
     -------
@@ -527,33 +543,40 @@ def plot_carrier_phase_characterization(
     show: bool = False,
     title: str | None = None,
 ) -> tuple[Any, Any] | None:
-    """Full 2x2 carrier-phase characterization dashboard.
+    """Plot the four panels of a carrier-phase characterization.
 
-    Combines ``plot_carrier_phase_decomposition``, ``plot_frequency_drift``,
-    ``plot_frequency_noise_psd`` and ``plot_allan_deviation`` in one figure
-    (see ``examples/20-carrier-phase-characterization.ipynb`` for the full chain).
+    :func:`plot_carrier_phase_decomposition`, :func:`plot_frequency_drift`,
+    :func:`plot_frequency_noise_psd` and :func:`plot_allan_deviation` in one
+    2x2 figure (``examples/20-carrier-phase-characterization.ipynb`` shows
+    the whole chain).
 
     Parameters
     ----------
     phi : array_like
-        Carrier phase trajectory in radians (``carrier_phase_trajectory``).
+        Carrier-phase trajectory in radians (from
+        :func:`commkit.analysis.carrier_phase_trajectory`).
     drift : FrequencyDrift
-        From ``analysis.frequency_drift``.
+        From :func:`commkit.analysis.frequency_drift`.
     linewidth : LinewidthEstimate
         A ``BetaSeparation`` or ``DshFmPsd`` estimate (its PSD is drawn).
     allan : AllanDeviation
-        From ``analysis.allan_deviation``.
+        From :func:`commkit.analysis.allan_deviation`.
     sampling_rate : float
         Sampling rate of ``phi`` in Hz.
     drift_phase : array_like, optional
-        Smoothed drift phase (``separate_drift_phase_noise``), overlaid on
+        Smoothed drift phase (from
+        :func:`commkit.analysis.separate_drift_phase_noise`), overlaid on
         ``phi``.
     drift_cutoff : float, optional
-        Annotated in the phase-decomposition panel title.
+        Low-pass cutoff of the drift in Hz, shown in the title of the
+        phase panel.
     amp_ref : float, optional
-        Injected wander amplitude reference for the drift panel.
+        Reference wander amplitude for the drift panel, as for
+        :func:`plot_frequency_drift`.
     show : bool, default False
+        Call ``plt.show()`` and return ``None``.
     title : str, optional
+        Title of the figure.
 
     Returns
     -------

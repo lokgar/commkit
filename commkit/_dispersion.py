@@ -1,8 +1,8 @@
 """Chromatic dispersion physics (private).
 
 Single source of the fiber dispersion model used by
-``impairments.apply_chromatic_dispersion`` (the channel) and the receiver's
-dispersion compensation (its inverse):
+``impairments.apply_chromatic_dispersion`` (the channel) and
+``filtering.correct_chromatic_dispersion`` (its inverse):
 
 - ``beta2_length``: D [ps/(nm km)], L [km], λ [nm] to the β₂·L product [s²],
   ``β₂ = -D λ² / (2π c)``; ``beta3_length`` adds the slope S [ps/(nm² km)]

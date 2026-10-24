@@ -1,9 +1,10 @@
 """Pilot-tone polarization demultiplexing.
 
-:func:`demultiplex_polarization_tones_static` estimates one Jones matrix
-from two pilot tones; :func:`demultiplex_polarization_tones_dynamic` tracks
-it over time (a :class:`JonesTrack`), and :func:`apply_interpolated_matrix`
-applies such a track to the samples.
+Each transmitted stream carries a CW pilot tone at its own frequency.
+:func:`demultiplex_polarization_tones_static` estimates one Jones matrix from
+the tones; :func:`demultiplex_polarization_tones_dynamic` tracks it over time
+(a :class:`JonesTrack`), and :func:`apply_interpolated_matrix` applies such a
+track to the samples.
 """
 
 from __future__ import annotations
@@ -61,7 +62,7 @@ def apply_interpolated_matrix(
     applies it as a fixed forward pass.
 
     Within each uniform cell the apply collapses to two batched ``(K, C)`` GEMMs -
-    ``M[g]·X`` and ``dM·(X·t)`` - instead of materialising a per-sample
+    ``M[g]·X`` and ``dM·(X·t)`` - instead of materializing a per-sample
     ``(L, K, C)`` matrix and an einsum mat-vec, so the cost is a handful of batched
     kernels rather than an ``O(N)`` Python/launch-bound loop.  The ``O(N)`` data
     path runs in ``complex64`` (a well-conditioned mix with no long accumulation),
@@ -200,7 +201,7 @@ def _refine_tone_frequencies(
     1. **Coarse**: one batched FFT (working precision) of only the *unique*
        strongest channels + the device-side log-parabolic fit - good to a
        fraction of a bin, but ill-conditioned for a tone sitting exactly on a
-       bin (its neighbours are sinc nulls).
+       bin (its neighbors are sinc nulls).
     2. **Fine**: two-segment phase slope - the exact tone phasor of each
        half-record at the coarse frequency (chunked GEMMs); the phase advance
        between the segment centroids gives the residual offset
@@ -251,12 +252,12 @@ def _jones_at_grid_points(
 ) -> ArrayType:
     r"""Tone-tracked Jones estimate evaluated **only** at the grid points.
 
-    The mix-down + centred-FIR tracker output at sample ``g`` factors as
+    The mix-down + centerd-FIR tracker output at sample ``g`` factors as
 
         T[c, k, g] = e^{-j2π f_k g/fs} · Σ_q h̃_k[q] · r_c[g - lead + q],
         h̃_k[q]    = h[L-1-q] · e^{-j2π f_k (q - lead)/fs},   lead = ⌈(L-1)/2⌉,
 
-    i.e. a bandpass filter at ``+f_k`` - so instead of materialising the
+    i.e. a bandpass filter at ``+f_k`` - so instead of materializing the
     (C, K, N) mixed array and FFT-filtering every sample only to keep one in
     ``grid_step``, this gathers the (chunk, L) sample windows around the grid
     points and hits all K modulated tap vectors with one GEMM per chunk.  No
@@ -400,7 +401,7 @@ def demultiplex_polarization_tones_static(
         Sampling rate f_s in Hz.  Taken from the Signal; required for array
         input.  A value that disagrees with the Signal raises.
     refine_tones : bool, default True
-        If ``True``, sub-bin-refine each tone centre with the ``BiasTone`` estimator
+        If ``True``, sub-bin-refine each tone center with the ``BiasTone`` estimator
         (on the receive channel where that tone is strongest) before extraction,
         absorbing a residual carrier frequency offset that has dragged the tone
         off its nominal bin.  If ``False``, extract exactly at
@@ -603,7 +604,7 @@ def demultiplex_polarization_tones_dynamic(
     num_taps : int, optional
         Length of the tracking low-pass FIR.  Defaults to ``~3.3·f_s/track_bandwidth``
         (the Hamming transition width that resolves ``track_bandwidth``), forced
-        odd and clipped below ``N``.  Increase for sharper neighbour-tone
+        odd and clipped below ``N``.  Increase for sharper neighbor-tone
         rejection at the cost of longer edge transients.
     grid_step : int, optional
         Decimation (in samples) of the grid on which ``T(n)`` is inverted.
@@ -611,7 +612,7 @@ def demultiplex_polarization_tones_dynamic(
         the tracked process ~4x.  ``W`` is linearly interpolated between grid
         points, so a finer grid costs more inverses but tracks marginally better.
     refine_tones : bool, default True
-        If ``True``, sub-bin-refine each tone centre with the ``BiasTone`` estimator (on
+        If ``True``, sub-bin-refine each tone center with the ``BiasTone`` estimator (on
         the receive channel where it is strongest) before mixing down, absorbing
         a residual carrier frequency offset.
     search_band : float, optional
@@ -623,7 +624,7 @@ def demultiplex_polarization_tones_dynamic(
         library power invariant).  When ``trim_edges=True`` the power is measured
         over the retained interior only.
     trim_edges : bool, default False
-        The tracking FIR is applied with centred (``'same'``) convolution, so the
+        The tracking FIR is applied with centerd (``'same'``) convolution, so the
         Jones estimate - and hence ``W(n)`` - is unreliable within ``num_taps//2``
         samples of each record end (the convolution averages in zero-padding
         there).  The **data is never filtered**, so timing is unaffected, but
@@ -650,7 +651,7 @@ def demultiplex_polarization_tones_dynamic(
     Returns
     -------
     demuxed : ndarray or Signal
-        Demultiplexed streams. Same complex dtype and backend as the input; row
+        Demultiplexed streams. Same complex dtype and device as the input; row
         ``j`` carried ``tone_frequencies[j]``.  Shape ``(K, N)``, or
         ``(K, N - 2·(num_taps//2))`` when ``trim_edges=True``.
     track : JonesTrack
@@ -743,7 +744,7 @@ def demultiplex_polarization_tones_dynamic(
             logger.warning(
                 "demultiplex_polarization_tones_dynamic: tracking bandwidth "
                 "(%.3g Hz, FIR transition %.3g Hz) approaches the nearest tone "
-                "spacing %.3g Hz - neighbouring tones may leak into the Jones "
+                "spacing %.3g Hz - neighboring tones may leak into the Jones "
                 "estimate. Reduce track_bandwidth or widen the tone spacing.",
                 track_bandwidth,
                 transition,
@@ -772,7 +773,7 @@ def demultiplex_polarization_tones_dynamic(
 
     # --- Track the Jones matrix at the grid points ---------------------------
     # T[i, j, g] = LPF{ r_i(n) · exp(-j2π f_j n/fs) }(g) ≈ J_ij(g)·α_j, with a
-    # centred ('same') linear-phase FIR, so the LPF group delay is compensated
+    # centerd ('same') linear-phase FIR, so the LPF group delay is compensated
     # and the estimate aligns in time with the input.  Only the G grid points
     # feed the batched inverse, so the tracker is evaluated there directly
     # (windowed gather + GEMM in _jones_at_grid_points) instead of filtering
@@ -804,7 +805,7 @@ def demultiplex_polarization_tones_dynamic(
         Tg = xp.moveaxis(T_t[:, :, idx], 2, 0).astype(xp.complex128)  # (G, C, K)
     Th = xp.conj(xp.swapaxes(Tg, -1, -2))  # (G, K, C)
     gram = Th @ Tg  # (G, K, K)
-    # Tikhonov regularisation keeps the batched inverse well-conditioned when the
+    # Tikhonov regularization keeps the batched inverse well-conditioned when the
     # instantaneous SOP nearly aligns two streams (gram -> singular).
     diag_mean = xp.real(xp.trace(gram, axis1=-2, axis2=-1)) / K  # (G,)
     eye = xp.eye(K, dtype=xp.complex128)
@@ -830,7 +831,7 @@ def demultiplex_polarization_tones_dynamic(
         )
         return JonesTrack(Wg, grid_positions, slice(0, N))
 
-    # Interpolate W(n) to full rate and apply it (block-vectorised GEMMs in the
+    # Interpolate W(n) to full rate and apply it (block-vectorized GEMMs in the
     # shared helper) as a fixed forward pass.
     demuxed = apply_interpolated_matrix(samples, Wg, grid_positions)  # (K, N)
 

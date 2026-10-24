@@ -14,16 +14,16 @@ from ..backend import ArrayType, to_device
 
 
 def _pll_gains(bandwidth: float) -> tuple[np.float32, np.float32]:
-    """Convert normalised loop bandwidth to PI gains (mu, beta).
+    """Convert normalized loop bandwidth to PI gains (mu, beta).
 
-    Uses the standard 2nd-order loop approximation for a critically-damped
+    Uses the usual second-order loop approximation for a critically damped
     (ζ = 1) PI loop:  μ ≈ 4·B_L,  β ≈ 4·B_L².  (With ``ωₙT = √β = 2B`` and
     ``ζ = μ/(2√β) = 1``.)
 
     Parameters
     ----------
     bandwidth : float
-        Normalised one-sided loop bandwidth as a fraction of the symbol rate,
+        Normalized one-sided loop bandwidth as a fraction of the symbol rate,
         e.g. ``1e-3`` for a narrow loop.
 
     Returns
@@ -46,8 +46,8 @@ def _resolve_pll_gains(
 
     Precedence:
 
-    * ``mu`` given -> raw PI gains; ``beta`` defaults to ``0.0`` (1st-order loop).
-    * ``mu`` is ``None`` -> derive critically-damped (ζ=1) gains ``μ=4B, β=4B²``
+    * ``mu`` given: raw PI gains; ``beta`` defaults to ``0.0`` (a first-order loop).
+    * ``mu`` is ``None``: critically damped (ζ = 1) gains ``μ = 4B, β = 4B²``
       from ``bandwidth`` via ``_pll_gains``.
 
     ``beta`` without ``mu`` is ambiguous and raises ``ValueError``.
@@ -167,7 +167,7 @@ def _vv_block_phase(
 
     Parameters
     ----------
-    symbols2d : (C, N) complex array, any backend
+    symbols2d : (C, N) complex array, NumPy or CuPy
         1-sps symbols.
     xp : module
         ``symbols2d``'s array module (NumPy/CuPy).
@@ -187,10 +187,10 @@ def _vv_block_phase(
 
     Returns
     -------
-    phi_u : (C, N_blocks) float64 array, same backend as ``symbols2d``
+    phi_u : (C, N_blocks) float64 array, same device as ``symbols2d``
         Raw block-phase trajectory - identical across rows in joint mode.
     block_centers : (N_blocks,) float64 array
-        Block centre positions in symbols, for interpolation.
+        Block center positions in symbols, for interpolation.
     all_positions : (N,) float64 array
         Per-symbol positions, for interpolation.
     """
@@ -219,7 +219,7 @@ def _vv_block_phase(
 
     S_b = xp.sum(blocks_c**M, axis=-1)  # (C, N_blocks)
 
-    # Block centre positions for interpolation (uniform spacing = block_size)
+    # Block center positions for interpolation (uniform spacing = block_size)
     block_centers = xp.arange(N_blocks, dtype=xp.float64) * block_size + block_size / 2
     all_positions = xp.arange(N, dtype=xp.float64)
 

@@ -32,42 +32,40 @@ def plot_filter_response(
 ) -> tuple[Any, tuple[Any, Any, Any, Any]] | None:
     """Plot the impulse, magnitude, phase, and group-delay response of a filter.
 
-    A 2x2 diagnostic panel - ``(impulse, magnitude), (phase, group_delay)`` -
-    covering the standard filter-design characterization set. Accepts any of
-    three filter representations via ``system``:
+    Four panels, ``(impulse, magnitude), (phase, group_delay)``, for any of
+    three forms of ``system``:
 
-    * a 1-D array - FIR taps (``b = system``, ``a = [1.0]``); the impulse
-      response is ``system`` itself, exact and finite.
-    * a 2-D array with trailing dimension 6 - second-order sections (SOS),
-      as :func:`commkit.filtering.butterworth_sos` and the other ``*_sos``
-      designs return and :func:`commkit.filtering.iir_filter` applies.
-    * a length-2 ``(b, a)`` tuple/list - a general IIR transfer function.
+    * a 1-D array: FIR taps (``b = system``, ``a = [1.0]``), whose impulse
+      response is ``system`` itself;
+    * a 2-D array with a trailing dimension of 6: second-order sections
+      (SOS), as :func:`commkit.filtering.butterworth_sos` and the other
+      ``*_sos`` designs return them and :func:`commkit.filtering.iir_filter`
+      applies them;
+    * a ``(b, a)`` pair: a general IIR transfer function.
 
-    For the SOS/IIR forms the true impulse response is infinite, so it's
-    approximated by filtering a unit impulse of length ``n_impulse`` and
-    truncating - a standard diagnostic approximation, not an exact result.
+    The impulse response of the SOS and IIR forms is infinite: it is drawn
+    as the response to a unit impulse of length ``n_impulse``, truncated
+    there.
 
     Parameters
     ----------
     system : array_like or (b, a) tuple
         Filter representation, see above.
     sps : float, default 1.0
-        Samples per symbol for time/group-delay axis normalization, used
-        when ``sampling_rate`` is not given.
+        Samples per symbol, which normalizes the time and group-delay axes
+        to symbol periods when ``sampling_rate`` is not given.
     sampling_rate : float, optional
-        Sampling rate in Hz. When given, the impulse/group-delay axes are in
-        seconds and the frequency axes are in Hz with automatic SI scaling
-        (Hz/kHz/MHz/GHz). When omitted, axes stay in symbol-period /
-        cycles-per-sample units (backward-compatible with FIR-only usage).
-    ax : array_like, optional
-        Exactly 4 axes to plot on (a 2x2 array or a flat sequence of 4).
-        Any other count logs a warning and a fresh 2x2 figure is created
-        instead.
+        Sampling rate in Hz.  With it the impulse and group-delay axes are in
+        seconds and the frequency axes in Hz (with SI prefixes); without it
+        they are in symbol periods and cycles per sample.
+    ax : array_like of matplotlib.axes.Axes, optional
+        Exactly 4 axes to draw on (a 2x2 array or a flat sequence of 4);
+        any other count logs a warning and creates a new 2x2 figure.
     n_impulse : int, default 500
-        Impulse-response truncation length for SOS/IIR input. Ignored for
-        FIR (1-D array) input, whose impulse response is exact.
+        Length of the drawn impulse response of SOS and IIR input; ignored
+        for FIR taps.
     show : bool, default False
-        If True, calls ``plt.show()``.
+        Call ``plt.show()`` and return ``None``.
 
     Returns
     -------

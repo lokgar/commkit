@@ -3,7 +3,8 @@
 :func:`apply_iq_imbalance` and its blind compensation
 :func:`correct_iq_imbalance` (:class:`Lowdin` or
 :class:`GramSchmidt` orthogonalization) are kept together because they are
-one device model, the widely-linear I/Q mixing, and are read as a pair.
+one device model, the widely linear mixing of I and Q, and are read as a
+pair.
 """
 
 import math

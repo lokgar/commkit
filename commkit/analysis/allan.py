@@ -19,9 +19,9 @@ class AllanDeviation:
 
     Attributes
     ----------
-    tau_s : np.ndarray
+    tau_s : numpy.ndarray
         Averaging times in seconds, ``(n_tau,)``.
-    adev : np.ndarray
+    adev : numpy.ndarray
         Allan deviation in Hz, ``(n_tau,)`` or ``(C, n_tau)``; NaN where a
         ``tau`` does not fit the record.
     """
@@ -39,10 +39,9 @@ def allan_deviation(
 ) -> AllanDeviation:
     r"""Overlapping Allan deviation of an instantaneous-frequency series.
 
-    The log-log slope of sigma_y(tau) classifies the dominant noise
-    process by averaging time: white-FM proportional to tau^(-1/2),
-    flicker-FM proportional to tau^0, random-walk-FM proportional to tau^(+1/2),
-    linear drift proportional to tau^(+1).
+    The log-log slope of ``σ_y(τ)`` identifies the dominant noise process at
+    each averaging time: white FM goes as ``τ^(-1/2)``, flicker FM as
+    ``τ^0``, random-walk FM as ``τ^(1/2)`` and a linear drift as ``τ^1``.
 
     Parameters
     ----------
@@ -52,10 +51,10 @@ def allan_deviation(
     sampling_rate : float
         Sampling rate of ``df`` in Hz (``τ_0 = 1/sampling_rate``).
     taus : array_like, optional
-        Explicit averaging times in seconds.  Default: ``num_taus`` values
-        geometrically spaced from ``τ_0`` to ``N//4·τ_0``.
+        Averaging times in seconds.  Defaults to ``num_taus`` values spaced
+        geometrically from ``τ_0`` to ``N//4·τ_0``.
     num_taus : int, default 30
-        Number of log-spaced averaging times when ``taus`` is None.
+        Number of averaging times when ``taus`` is ``None``.
 
     Returns
     -------
@@ -67,21 +66,21 @@ def allan_deviation(
     -----
     **Limitations.**
 
-    * ``df`` is in **Hz**, not the dimensionless fractional frequency
-      ``y = δf/ν₀`` of clock metrology; ``adev`` is therefore in Hz.  Divide
-      by the optical carrier frequency (~193 THz) to compare against
-      oscillator specs quoted fractionally.
-    * The overlapping estimator improves confidence but the largest-τ points
-      still average only ``~N/(2m)`` second differences - the last decade of
-      the curve is statistically fragile (hence the ``N//4`` default cap).
-      No confidence intervals are computed.
+    * ``df`` is in Hz, not the dimensionless fractional frequency
+      ``y = δf/ν₀`` of clock metrology, so ``adev`` is in Hz too.  Divide by
+      the optical carrier frequency (about 193 THz) to compare with
+      oscillator specifications quoted as fractions.
+    * The overlapping estimator improves the confidence, but the points at
+      the largest ``τ`` still average only ``~N/(2m)`` second differences:
+      the last decade of the curve is statistically fragile (hence the
+      default cap at ``N//4``).  No confidence intervals are computed.
     * ADEV cannot distinguish white-PM from flicker-PM noise (both fall as
       ``~τ⁻¹`` after the frequency differencing); the modified Allan deviation
-      would be needed for that.  For laser work this matters at small τ where
-      AWGN angle noise (white-PM) dominates.
-    * A deterministic sinusoidal wander of period ``T_m`` produces the classic
-      scalloped ADEV with nulls at ``τ = k·T_m`` - do not read those dips as
-      noise-floor improvements.
+      would be needed for that.  For lasers this matters at small ``τ``,
+      where the angle noise of the AWGN (white PM) dominates.
+    * A deterministic sinusoidal wander of period ``T_m`` gives the familiar
+      scalloped ADEV with nulls at ``τ = k·T_m``; those dips are not a lower
+      noise floor.
     """
     df_arr, xp, _ = dispatch(df)
     y2, was_1d = as_2d(df_arr, name="df")

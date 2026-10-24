@@ -1,4 +1,6 @@
-"""CUDA-graph replay of repeated GPU work: warm once, capture, replay (private).
+"""CUDA-graph replay of repeated GPU work (private).
+
+Warm up once, capture, then replay.
 
 Used by the block equalizers (one graph per kind of block) and the fiber
 solver (one graph per span).  :class:`GraphRunner` owns a non-blocking

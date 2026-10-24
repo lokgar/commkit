@@ -9,10 +9,10 @@ A Signal is stored as a NumPy ``.npz`` archive with these entries:
 ``constellation_points``, ``constellation_bit_labels``, ``constellation_pmf``
     The constellation (omitted when ``None``; the pmf only when shaped).
 ``__metadata__``
-    A zero-d unicode array holding a JSON string with the rates, the center
+    A 0-d unicode array holding a JSON string with the rates, the center
     frequency, the constellation family and the pulse (type name and fields).
 ``__frame_metadata__``
-    A zero-d unicode array holding a JSON string with the fields of the
+    A 0-d unicode array holding a JSON string with the fields of the
     Signal's frame (omitted without a frame).
 ``frame_payload_symbols``, ``frame_pilot_symbols``, ``frame_payload_bits``
     The frame's generated symbols and bits (omitted without a frame, or
@@ -119,7 +119,7 @@ def save_npz(
     )
 
     # -------------------------------------------------------------------------
-    # Serialise originating SingleCarrierFrame (if present)
+    # Serialize originating SingleCarrierFrame (if present)
     # -------------------------------------------------------------------------
     # The frame holds the complete transmit-side description (structure map,
     # pilot masks, preamble sequence, generated payload/pilot symbols).
@@ -156,7 +156,7 @@ def save_npz(
                 arrays[npz_key] = _backend.to_device(arr, "CPU")
 
     # -------------------------------------------------------------------------
-    # Build metadata dict and serialise to JSON
+    # Build metadata dict and serialize to JSON
     # -------------------------------------------------------------------------
     arrays["__metadata__"] = _json_array(meta)
 
@@ -279,7 +279,7 @@ def load_npz(
     sig = Signal(**kwargs)
 
     # -------------------------------------------------------------------------
-    # Reconstruct originating frame (if serialised)
+    # Reconstruct originating frame (if serialized)
     # -------------------------------------------------------------------------
     if "__frame_metadata__" in data:
         from . import core as _core
@@ -306,7 +306,7 @@ def load_npz(
 
         # Refill the frame's cache so that frame.payload_symbols,
         # frame.pilot_symbols and frame.payload_bits return the original
-        # generated data without re-randomising.
+        # generated data without re-randomizing.
         for npz_key, cache_key in (
             ("frame_payload_symbols", "payload_symbols"),
             ("frame_pilot_symbols", "pilot_symbols"),
@@ -336,7 +336,7 @@ def _json_default(value: Any) -> Any:
 
 
 def _json_array(obj: dict) -> np.ndarray:
-    """A zero-d unicode array holding ``obj`` as JSON (no pickling needed)."""
+    """A 0-d unicode array holding ``obj`` as JSON (no pickling needed)."""
     return np.array(json.dumps(obj, default=_json_default))
 
 

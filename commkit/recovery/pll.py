@@ -1,4 +1,4 @@
-"""Decision-directed PLL carrier phase recovery: :class:`PLL`."""
+"""Decision-directed PLL carrier-phase recovery: :class:`PLL`."""
 
 from dataclasses import dataclass
 from typing import Any
@@ -53,7 +53,7 @@ def _get_numba_dd_pll():
                 Proportional (phase) gain - corrects the instantaneous phase error.
             beta : float64
                 Integral (frequency) gain - tracks residual frequency drift.
-                Set to 0.0 for a 1st-order loop.
+                Set to 0.0 for a first-order loop.
             phi0 : float64
                 Initial phase state in radians.
             freq0 : float64
@@ -244,14 +244,14 @@ class PLL:
     Tracks the carrier phase symbol by symbol from hard decisions:
     derotate by ``φ̂[n]``, decide, take the cross-product error
     ``e[n] = Im(y[n]·d̂*[n])``, then ``φ̂[n+1] = φ̂[n] + μ·e[n] + ν[n]`` and
-    ``ν[n+1] = ν[n] + β·e[n]``.  A 1st-order loop (``β = 0``) tracks phase;
+    ``ν[n+1] = ν[n] + β·e[n]``.  A first-order loop (``β = 0``) tracks the phase;
     ``β > 0`` also tracks a residual frequency offset.  The same object sets
     the inline PLL of the equalizers.
 
     Parameters
     ----------
     bandwidth : float, default 1e-3
-        Normalised one-sided loop bandwidth in ``(0, 0.5)``, as a fraction of
+        Normalized one-sided loop bandwidth in ``(0, 0.5)``, as a fraction of
         the symbol rate.  Gives critically damped gains ``μ = 4B``,
         ``β = 4B²``.  Used when ``mu`` is not given.
     mu : float, optional
@@ -259,14 +259,14 @@ class PLL:
         ``1e-3`` (high-order QAM, high SNR) to ``5e-2`` (QPSK).
     beta : float, optional
         Raw integral gain (``β ≈ μ²/4`` is critically damped); requires
-        ``mu``.  Defaults to 0 (1st-order) with ``mu``.
+        ``mu``.  Defaults to 0 (a first-order loop) with ``mu``.
     phase_init : float, default 0.0
         Initial phase in radians, e.g. the last value of a BPS estimate.
     joint_channels : bool, default False
         MIMO: average the phase error across channels at each symbol and
         drive one shared loop (shared LO).
     cycle_slip : CycleSlip, optional
-        Repair ``2π/M`` slips (M the rotational symmetry, ``π/2`` for QAM)
+        Repair slips of ``2π/M`` (M the rotational symmetry, 4 for QAM)
         in the per-symbol trajectory after the loop.
 
     Notes
@@ -305,7 +305,7 @@ def _pll(symbols: ArrayType, method: PLL, ctx: _Context) -> _Phase:
     symbols, xp, _ = dispatch(symbols)
     C, N = symbols.shape
 
-    # Normalise to unit average power so the effective loop gain is mu regardless
+    # Normalize to unit average power so the effective loop gain is mu regardless
     # of input amplitude.  The error signal is e[n] = Im(y[n]*d_hat*), which
     # scales with signal amplitude; without this, the effective gain is mu*A
     # (where A is the RMS amplitude), making loop bandwidth input-dependent.

@@ -34,7 +34,7 @@ def _jones_rotation(theta: float, xp: ModuleType, dtype: Any) -> ArrayType:
     ``R(-theta)`` (the section of ``_fiber.jones_section``), and
     ``apply_polarization_mixing``'s static-``theta`` path.  The time-varying
     path in ``apply_polarization_mixing`` doesn't build an explicit matrix -
-    a distinct 2x2 matrix per sample isn't worth materialising - so it
+    a distinct 2x2 matrix per sample isn't worth materializing - so it
     applies the same rotation via direct per-sample broadcasting instead.
     """
     c = math.cos(theta)
@@ -139,7 +139,7 @@ def apply_polarization_mixing(
     ``[x'[n], y'[n]] = R(θ[n]) · [x[n], y[n]]`` with
     ``R(θ) = [[cos θ, -sin θ], [sin θ, cos θ]]``: unlike :func:`apply_pmd`,
     there is no differential group delay.  For testing polarization-diverse
-    receivers and modelling slow SOP drift.
+    receivers and modeling slow SOP drift.
 
     Parameters
     ----------
@@ -210,7 +210,7 @@ def apply_polarization_mixing(
                 f"theta array must have shape (N,)={(N,)}, got {angles.shape}."
             )
 
-    # Time-varying: vectorised per-sample rotation via broadcasting
+    # Time-varying: vectorized per-sample rotation via broadcasting
     # R(θ[n]) applied to each column of x
     # Angles in float64, the rotation in the samples' precision.
     cos_t = xp.cos(angles).astype(x.real.dtype)  # (N,)
@@ -239,7 +239,7 @@ def apply_chromatic_dispersion(
     """Apply chromatic dispersion (CD) in the frequency domain.
 
     Multiplies the spectrum by ``H(ω) = exp(-j β₂ L ω² / 2)`` with
-    ``β₂ = -D λ² / (2π c)``: the dispersion parameter ``D``, the centre
+    ``β₂ = -D λ² / (2π c)``: the dispersion parameter ``D``, the center
     wavelength ``λ``, the speed of light ``c`` and the fiber length ``L``
     (second-order dispersion only, without loss or nonlinearity; see
     :func:`apply_fiber_propagation` for those).
@@ -254,7 +254,7 @@ def apply_chromatic_dispersion(
     fiber_length_km : float
         Fiber length in km.
     center_wavelength_nm : float
-        Centre wavelength in nm (e.g. 1550 for the C band).
+        Center wavelength in nm (e.g. 1550 for the C band).
     sampling_rate : float, optional
         Sampling rate in Hz.  Taken from the Signal; required for array
         input.  A value that disagrees with the Signal raises.

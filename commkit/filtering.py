@@ -176,7 +176,7 @@ def gaussian_taps(*, sps: float, fwhm: float = 1.0, span: int = 10) -> np.ndarra
         bandwidth-time product is ``BT = √2·ln(2) / (π·fwhm)``.
     span : int, default 10
         Filter span in symbols: ``int(span * sps)`` taps, made odd, spaced
-        ``1/sps`` and centred on a sample.
+        ``1/sps`` and centerd on a sample.
 
     Returns
     -------
@@ -210,7 +210,7 @@ def smoothrect_taps(
     """Generate the taps of a rectangle smoothed by a Gaussian.
 
     Evaluates the closed form of the convolution (a difference of error
-    functions) on the sample grid, so the pulse is centred on a sample,
+    functions) on the sample grid, so the pulse is centerd on a sample,
     without the half-sample shift of convolving two discrete arrays.
 
     Parameters
@@ -1015,7 +1015,7 @@ def ols_fir_filter(
 def fir_filter(samples: S, taps: ArrayType, *, periodic: bool = False) -> S:
     """Apply an FIR filter along the time (last) axis.
 
-    FFT convolution, ``mode="same"``: the output is centred on tap
+    FFT convolution, ``mode="same"``: the output is centerd on tap
     ``len(taps) // 2``, so a symmetric filter adds no delay.  With
     ``periodic=True`` the convolution is circular; away from the record ends
     both give the same samples.

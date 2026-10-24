@@ -4,7 +4,7 @@ Metrics are the reporting layer.  They take received symbols (or bits, or
 LLRs) at one sample per symbol and their reference, as arrays or as a 1-SPS
 :class:`~commkit.core.Signal` whose ``reference`` holds the transmitted
 symbols and bits.  They return host values: a ``float`` for ``(N,)`` input
-and an ``np.ndarray`` of shape ``(C,)`` for ``(C, N)`` input.
+and a ``(C,)`` NumPy array for ``(C, N)`` input.
 
 Metrics never align, rotate or permute the received symbols against the
 reference: synchronization, phase-ambiguity and channel-permutation
@@ -443,7 +443,7 @@ def ser(
 
     The received and the reference symbols are both decided against the
     constellation, so rounding in the reference does not count.  SER does
-    not depend on the bit labelling.
+    not depend on the bit labeling.
 
     Parameters
     ----------
@@ -508,7 +508,7 @@ def gmi(
             \mathbb{E}\big[\log_2(1 + e^{-(1 - 2 c_b) L_b})\big]
 
     with the entropy ``H(X)`` of the constellation's prior (``k`` bits when
-    uniform), the LLR ``L_b`` of bit ``b`` (positive favours 0) and the
+    uniform), the LLR ``L_b`` of bit ``b`` (positive favors 0) and the
     transmitted bit ``c_b``.  Each expectation estimates ``H(B_b | Y)``; with
     a shaped constellation the bits are not uniform, so the rate is not
     ``k - ...``.  The LLRs must include the prior, as those of
@@ -583,7 +583,7 @@ def gmi(
     llr_arr = llr_arr.astype(real, copy=False)
     bits_arr = _skip(ref, num_skip_symbols * k, name).astype(real)
 
-    # -(1 - 2c) L: negative (small loss) when the LLR favours the sent bit.
+    # -(1 - 2c) L: negative (small loss) when the LLR favors the sent bit.
     x = -llr_arr * (1.0 - 2.0 * bits_arr)
     # log2(1 + e^x) = (log1p(e^-|x|) + max(0, x)) / ln 2
     # math.log, not np.log: a NumPy float64 scalar would promote (NEP 50).

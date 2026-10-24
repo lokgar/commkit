@@ -29,7 +29,7 @@ def _normalize_inputs(
     For fractionally-spaced equalization (sps > 1) the fractional timing phase
     is unknown.  Strided power measurement ``samples[..., ::sps]`` is unsafe
     because it can land on zero-crossings of the Nyquist pulse, severely
-    underestimating signal power and destabilising adaptation.
+    underestimating signal power and destabilizing adaptation.
 
     Instead the *wideband* (all-sample) power over the full signal is used.
     This is the most accurate power estimate and is independent of whether
@@ -37,7 +37,7 @@ def _normalize_inputs(
 
     Parameters
     ----------
-    samples          : (C, N) or (N,)  complex, any backend (NumPy / CuPy)
+    samples          : (C, N) or (N,)  complex, NumPy or CuPy
     training_symbols : (C, K) or (K,)  or None - always at 1 sps
     sps              : int - samples per symbol
     input_norm_factor : float or np.ndarray, optional
@@ -48,7 +48,7 @@ def _normalize_inputs(
 
     Returns
     -------
-    samples          : unit symbol-power, same shape/backend
+    samples          : unit symbol-power, same shape and device
     training_symbols : unchanged (known symbols are on the constellation scale)
     input_norm_factor : float or np.ndarray
         Per-channel normalization factor(s) ``rms(ch) * sqrt(sps)`` applied
@@ -108,7 +108,7 @@ def _build_padded_samples(
     leading zero-pad, eliminating the warm-start transient.  Otherwise the
     leading edge is filled according to ``pad_mode``.
 
-    Backend-generic: runs on whichever device ``samples_np`` lives on (NumPy
+    Device-generic: runs on whichever device ``samples_np`` lives on (NumPy
     callers see unchanged behavior; ``apply_taps`` can pad GPU-resident
     signals without a host round trip).
     """

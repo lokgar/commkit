@@ -120,7 +120,10 @@ class Preamble:
 
     @property
     def symbols(self) -> Any:
-        """The preamble symbols (host complex64), ``(length,)`` or ``(num_streams, length)``."""
+        """The preamble symbols (host complex64).
+
+        ``(length,)``, or ``(num_streams, length)`` for several streams.
+        """
         return self._symbols
 
     @property
@@ -422,13 +425,21 @@ class SingleCarrierFrame:
 
     @property
     def payload_bits(self) -> ArrayType:
-        """The payload bits (host int8), ``(payload_len * k,)`` or ``(num_streams, payload_len * k)``."""
+        """The payload bits (host int8).
+
+        ``(payload_len * k,)``, or ``(num_streams, payload_len * k)`` for
+        several streams.
+        """
         self._ensure_payload_generated()
         return self._cache.get("payload_bits")
 
     @property
     def payload_symbols(self) -> ArrayType:
-        """The payload symbols (host), ``(payload_len,)`` or ``(num_streams, payload_len)``."""
+        """The payload symbols (host).
+
+        ``(payload_len,)``, or ``(num_streams, payload_len)`` for several
+        streams.
+        """
         self._ensure_payload_generated()
         return self._cache.get("payload_symbols")
 
@@ -442,7 +453,10 @@ class SingleCarrierFrame:
 
     @property
     def pilot_symbols(self) -> ArrayType | None:
-        """The pilot symbols (host, without ``pilot_gain_db``), or ``None`` without pilots."""
+        """The pilot symbols (host), or ``None`` without pilots.
+
+        Without ``pilot_gain_db``; :attr:`body_symbols` carries the boost.
+        """
         if self.pilot_pattern == "none":
             return None
         self._ensure_pilot_generated()
@@ -664,10 +678,10 @@ class SingleCarrierFrame:
         body, xp, _ = dispatch(to_device(self.body_symbols, device))
         body_samples = generation.shape_pulse(body, sps=sps, pulse=pulse)
 
-        # Normalise body per-channel via normalize's "dac_peak" mode:
+        # Normalize body per-channel via normalize's "dac_peak" mode:
         # max(peak_|I|, peak_|Q|) - a single scale factor that brings the
         # dominant component to 1.0 while preserving the I/Q ratio.
-        # Complex-envelope peak normalisation (used in the DSP chain) divides
+        # Complex-envelope peak normalization (used in the DSP chain) divides
         # by max(|sample|) instead, leaving components at ≤ 1/√2 ≈ 0.707 for
         # square QAM/PSK whose envelope peak sits at 45°.  Applied
         # per-section (body and preamble separately) so each segment uses
@@ -686,7 +700,7 @@ class SingleCarrierFrame:
             preamble_samples = preamble_signal.samples
             # (L*sps,) for SISO  or  (num_streams, L*sps) for MIMO - shape driven by preamble.num_streams
 
-            # I/Q peak normalisation - axis=-1 works for both 1-D and 2-D
+            # I/Q peak normalization - axis=-1 works for both 1-D and 2-D
             preamble_samples = normalize(preamble_samples, mode="dac_peak", axis=-1)
             if self.num_streams > 1 and preamble_samples.ndim == 1:
                 # A one-stream preamble is broadcast to every stream.
@@ -714,7 +728,7 @@ class SingleCarrierFrame:
                 samples = xp.concatenate([cp_slice, samples], axis=-1)
 
         # 4. Normalize assembled frame to unit average power.
-        # Each section (preamble, body) was independently I/Q peak-normalised so
+        # Each section (preamble, body) was independently I/Q peak-normalized so
         # that both use the full DAC range irrespective of their modulation format.
         # After concatenation the sections may differ in average power, so a final
         # global normalization brings the frame to unit symbol power (Es = 1),

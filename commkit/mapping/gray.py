@@ -1,4 +1,4 @@
-"""Gray codes and Gray-labelled constellation geometry.
+"""Gray codes and Gray-labeled constellation geometry.
 
 :func:`gray_code` and its inverse :func:`gray_to_binary`, and the private
 generators of the Gray-mapped PSK, ASK (PAM), square-, 8-rect- and cross-QAM
@@ -22,7 +22,7 @@ def gray_code(n: int) -> np.ndarray:
     """Generate the binary-reflected Gray code of ``n`` bits.
 
     ``gray_code(n)[i] = i ^ (i >> 1)``: consecutive entries differ in one
-    bit, so neighbouring constellation points labelled in this order differ
+    bit, so neighboring constellation points labeled in this order differ
     in one bit, which minimizes the bit errors per symbol error.
 
     Parameters
@@ -192,7 +192,7 @@ def _gray_points(
 def _unpack_bits(indices: ArrayType, k: int) -> ArrayType:
     """Unpack integer indices into their k-bit binary representation (MSB-first).
 
-    Backend-dispatched via ``indices``' own array module, so a GPU-resident
+    Runs with the array module of ``indices``, so a GPU-resident
     index array (e.g. from hard-decision demapping on CuPy) unpacks without
     a host round trip.
 
@@ -205,7 +205,7 @@ def _unpack_bits(indices: ArrayType, k: int) -> ArrayType:
     Returns
     -------
     ndarray, shape (N, k), int8
-        MSB-first bit pattern per index. Same backend as ``indices``.
+        MSB-first bit pattern per index, on the device of ``indices``.
     """
     indices, xp, _ = dispatch(indices)
     shifts = xp.arange(k - 1, -1, -1, dtype="int32")
@@ -223,9 +223,9 @@ def _nearest_index(
     Parameters
     ----------
     x : array_like, shape (N,)
-        Flat query points, any backend.
+        Flat query points, NumPy or CuPy.
     constellation : array_like, shape (M,)
-        Reference constellation points.  Cast to ``x``'s backend.
+        Reference constellation points.  Moved to ``x``'s device.
     chunk : int, default 4096
         ``N``-axis chunk size.
 
@@ -233,7 +233,7 @@ def _nearest_index(
     -------
     ndarray, shape (N,), int64
         Index into ``constellation`` of the nearest point, per element.
-        Same backend as ``x``.
+        On the device of ``x``.
     """
     x, xp, _ = dispatch(x)
     constellation = xp.asarray(constellation)

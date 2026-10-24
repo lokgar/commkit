@@ -1,11 +1,12 @@
-"""Carrier phase recovery.
+"""Carrier-phase recovery.
 
 :func:`estimate_carrier_phase` and :func:`correct_carrier_phase`, with one
 method object per algorithm: decision-directed :class:`PLL`, block-based
 :class:`ViterbiViterbi`, blind phase search :class:`BPS`, MAP
 :class:`Tikhonov`, pilot symbols :class:`PilotAided`, pilot tones
 :class:`PilotTone` / :class:`PilotTones` and the static :class:`DataAided`
-rotation.  Block methods repair cycle slips with a nested :class:`CycleSlip`.
+rotation.  The block methods, the PLL and ``PilotAided`` repair cycle
+slips with a nested :class:`CycleSlip`.
 
 Also :func:`correct_cycle_slips` and :func:`smooth_phase_wiener` on phase
 trajectories, and the ambiguity resolution against the reference,

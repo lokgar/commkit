@@ -1,8 +1,8 @@
 """Phase corrections, cycle-slip repair and ambiguity resolution.
 
 :func:`smooth_phase_wiener` and :func:`correct_cycle_slips` on phase
-trajectories, with the nested :class:`CycleSlip` configuration of the block
-methods; the static :class:`DataAided` rotation; and
+trajectories, with the :class:`CycleSlip` configuration nested in the
+estimation methods; the static :class:`DataAided` rotation; and
 :func:`resolve_phase_ambiguity` and :func:`resolve_channel_permutation`
 against the reference.
 """
@@ -55,7 +55,7 @@ def _log_phase_summary(
     Parameters
     ----------
     phi : array_like
-        Phase trajectory in radians, any shape/backend.
+        Phase trajectory in radians, any shape, on either device.
     prefix_fmt, suffix_fmt : str
         ``%``-style format strings, joined around the fixed
         ``phase mean=%.2f°, std=%.2f°`` core.
@@ -92,24 +92,22 @@ def smooth_phase_wiener(
 ) -> ArrayType:
     r"""Smooth a random-walk (Wiener) carrier phase with the zero-phase Wiener filter.
 
-    Optimal minimum-variance estimate of a phase that random-walks with
-    per-sample increment variance ``q`` (the random-walk strength) observed in
-    white phase-estimation noise of variance ``r``.  Applies the non-causal
-    Wiener filter
+    The minimum-variance estimate of a phase that random-walks with
+    per-sample increment variance ``q``, observed in white estimation noise
+    of variance ``r``: the non-causal Wiener filter
 
-        H(w)       = S_phi(w) / (S_phi(w) + r),
-        S_phi(w)   = q / (2 - 2*cos(w)),
+        H(ω)     = S_φ(ω) / (S_φ(ω) + r),
+        S_φ(ω)   = q / (2 - 2 cos ω),
 
-    in the frequency domain (FFT -> multiply by the real, even H -> IFFT), so it
-    is zero-phase (no group delay) and O(N log N).  This is the principled way to
-    hit the smallest residual phase std for a given ``q`` and ``r`` - it trades
-    tracking lag against additive noise automatically, where a fixed extraction
-    bandwidth must be tuned by hand.
+    applied in the frequency domain (FFT, multiplication by the real, even
+    ``H``, inverse FFT), so it is zero-phase (no group delay) and costs
+    ``O(N log N)``.  It reaches the smallest residual phase error for the
+    given ``q`` and ``r``, trading tracking lag against noise by itself,
+    where a fixed extraction bandwidth has to be tuned by hand.
 
-    The smoother is agnostic to where the track came from: it needs only the two
-    scalars ``q`` and ``r``.  ``q`` may be given directly or derived from a
-    linewidth (see ``process_variance`` / ``linewidth`` below); ``r`` is supplied
-    as ``measurement_variance``, however the caller measured it.
+    Only the two scalars matter, not where the track came from: ``q`` is
+    given directly or derived from a linewidth, ``r`` is the
+    ``measurement_variance``, however it was measured.
 
     It filters the phase track only, so a correction derived from it stays
     unit-modulus: applied to the samples, it cannot hide their excess noise.
@@ -120,17 +118,17 @@ def smooth_phase_wiener(
         Unwrapped phase track, ``(N,)`` or ``(C, N)`` (e.g. the ``value`` of a
         ``PilotTone`` or ``PilotTones`` estimate), in radians.
     process_variance : float, optional
-        Per-sample phase-increment variance q [rad²] - the random-walk strength.
-        Provide this, or derive it from ``linewidth`` + ``sampling_rate`` (see
-        below).  Exactly one of the two routes is required.
+        Variance ``q`` of the per-sample phase increment in rad² (the
+        random-walk strength).  Give it, or ``linewidth`` and
+        ``sampling_rate`` to derive it.
     measurement_variance : float, optional
-        Phase-estimation noise variance r [rad²] - the per-sample variance of the
-        additive phase-measurement noise, however it was measured.  Required.
+        Variance ``r`` of the additive estimation noise per sample, in rad².
+        Required.
     linewidth, sampling_rate : float, optional
-        Convenience route to ``process_variance``: q = 2*pi*linewidth / f_s, where
-        ``linewidth`` is the combined oscillator linewidth [Hz] and
-        ``sampling_rate`` is f_s [Hz] of the ``phase`` track.  Both must be given
-        together, and only when ``process_variance`` is omitted.
+        Instead of ``process_variance``: the combined oscillator linewidth in
+        Hz and the sampling rate of ``phase`` in Hz, which give
+        ``q = 2π·linewidth / sampling_rate``.  Both together, and only without
+        ``process_variance``.
     detrend : bool, default True
         Remove each channel's linear trend (its slope) before filtering and
         add it back after.  The random-walk PSD diverges at DC, so a ramp (a
@@ -359,8 +357,8 @@ def correct_cycle_slips(
 ) -> np.ndarray:
     """Detect and correct cycle slips in a phase trajectory.
 
-    After ``unwrap`` resolves the M-fold ambiguity, residual cycle slips may
-    remain where the unwrapper chose the wrong branch.  The trajectory is
+    After the M-fold unwrap, cycle slips can remain where the unwrap chose
+    the wrong branch.  The trajectory is
     scanned sequentially: each value is predicted by a linear fit through up
     to ``history`` past corrected values (the previous value while fewer than
     ``min(10, history)`` are available).  A deviation beyond ``threshold`` is
@@ -641,21 +639,21 @@ def resolve_channel_permutation(
 ) -> ArrayType | Signal:
     """Resolve a polarization (channel) permutation after MIMO equalization.
 
-    A MIMO (butterfly) equalizer has a **polarization-permutation ambiguity**:
-    it may emit the streams in swapped output order (output 0 carries pol 1,
-    etc.) - a perfectly valid demux that per-channel metrics would otherwise
-    score as random, since they compare ``output[i]`` with ``ref[i]``.  This
-    matches each output stream to the reference stream it actually carries (the
-    bijective assignment maximizing the **rotation-invariant** cross-correlation
-    magnitude ``|Σ yᵢ · conj(sⱼ)|``) and reorders ``symbols`` to the
-    reference order.
+    A MIMO (butterfly) equalizer can emit the streams in a permuted order
+    (output 0 carrying polarization 1, ...): a valid demultiplexing that
+    per-channel metrics, which compare ``output[i]`` with ``reference[i]``,
+    would score as random.  This matches each output stream to the reference
+    stream it carries (the one-to-one assignment that maximizes the
+    rotation-invariant correlation magnitude ``|Σ yᵢ · conj(sⱼ)|``) and
+    reorders ``symbols`` to the reference order.
 
-    Run this **before** ``resolve_phase_ambiguity`` (it is rotation
-    invariant, so the two compose) and before SER/BER.  For a converged
-    *data-aided* equalizer the outputs are already pinned to the training order,
-    so this is a no-op; it is the robust fix for **blind** equalizers, whose
-    output order is arbitrary.  Only a *constant* permutation is resolved - a
-    mid-stream swap is an equalizer-tracking issue, not a labeling one.
+    Run it before :func:`resolve_phase_ambiguity` (it is rotation-invariant,
+    so the two compose) and before SER and BER.  After a converged trained
+    equalizer the outputs already follow the training order and this is a
+    no-op; it is meant for blind equalizers, whose output order is
+    arbitrary.  Only a constant permutation is resolved: a swap in the
+    middle of a record is an equalizer-tracking problem, not a labeling
+    one.
 
     Parameters
     ----------
@@ -672,20 +670,21 @@ def resolve_channel_permutation(
         unconverged transient).  The reorder still covers the full input.
     metric : {"coherence", "phase_increment"}, default "coherence"
         How output streams are scored against reference streams.
-        ``"coherence"`` is the rotation-invariant correlation magnitude - the
+        ``"coherence"`` is the rotation-invariant correlation magnitude, the
         right choice after carrier recovery.  ``"phase_increment"`` scores by
-        the (negated) variance of the wrapped phase-error increment, which
-        survives a residual frequency offset and strong phase noise; use it on
-        records whose carrier phase is deliberately intact (e.g. frozen-tap
-        output feeding ``analysis.carrier_phase_trajectory``), where the
-        coherence sum collapses toward zero for *every* pairing and the
-        assignment would be arbitrary.
+        the negated variance of the wrapped phase-error increment, which a
+        residual frequency offset and strong phase noise do not disturb: use
+        it on records whose carrier phase is left in on purpose (e.g. the
+        frozen-tap output that feeds
+        :func:`commkit.analysis.carrier_phase_trajectory`), where the
+        coherence sum falls towards zero for every pairing and the assignment
+        would be arbitrary.
 
     Returns
     -------
     ndarray or Signal
         ``symbols`` with channels reordered to the reference order; same
-        shape, dtype, and backend.  A Signal gives a new Signal with the
+        shape, dtype and device.  A Signal gives a new Signal with the
         samples reordered (its reference is already in that order).
     """
     name = "resolve_channel_permutation()"
@@ -785,13 +784,13 @@ def resolve_phase_ambiguity(
     of rotation ``k·2π/symmetry`` is the one closest to ``-∠ Σ y·s*`` against
     the known symbols, and the symbols are returned rotated by it.
 
-    For MIMO inputs each channel is resolved independently - after MIMO
-    equalisation the output streams may land on different ambiguity branches.
+    For MIMO input each channel is resolved independently: after MIMO
+    equalization the output streams can land on different branches.
 
     Parameters
     ----------
     symbols : array_like or Signal
-        Received symbols after carrier phase correction, ``(N,)`` or
+        Received symbols after carrier-phase correction, ``(N,)`` or
         ``(C, N)``.  A Signal must be at one sample per symbol; its
         ``reference.symbols`` is the default reference.
     reference : array_like, optional
@@ -856,7 +855,7 @@ def _resolve_phase_ambiguity_array(
 
     step = 2.0 * np.pi / symmetry
 
-    # ML phase ambiguity estimator: the optimal rotation maximises
+    # ML phase ambiguity estimator: the optimal rotation maximizes
     # Re(e^{jkθ} · Σ y_n s_n*), which equals choosing k closest to
     # -∠(Σ y_n s_n*) / step.  Single inner product replaces symmetry
     # full SER passes.  All channels batched: one D2H of the (C,) angles

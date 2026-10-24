@@ -1,7 +1,7 @@
-"""Pilot-aided carrier phase recovery.
+"""Pilot-aided carrier-phase recovery.
 
 :class:`PilotAided` (known pilot symbols in the frame), :class:`PilotTone`
-(one CW pilot tone) and :class:`PilotTones` (two tones).
+(one CW pilot tone) and :class:`PilotTones` (two or more tones, combined).
 """
 
 import logging
@@ -40,7 +40,7 @@ class PilotAided:
         same constant hold outside.
     joint_channels : bool, default False
         MIMO: average ``r·s*`` coherently across channels before the angle
-        (no wrap-around artefacts) and give every channel the one trajectory.
+        (no wrap-around artifacts) and give every channel the one trajectory.
     cycle_slip : CycleSlip, optional
         Repair ``2π`` wraps in the unwrapped pilot phases (large pilot gaps)
         before interpolation.
@@ -98,7 +98,7 @@ def _pilot_aided(symbols: ArrayType, method: PilotAided, ctx: _Context) -> _Phas
 
     joint = method.joint_channels and C > 1
     if joint:
-        # Coherent complex averaging before angle() - avoids wrap-around artefacts
+        # Coherent complex averaging before angle() - avoids wrap-around artifacts
         # that arise from averaging phases directly (e.g. antipodal channels).
         z_joint = xp.mean(r_pilots * xp.conj(pilot_values_xp), axis=0)  # (P,)
         phi_pilots_u = xp.unwrap(xp.angle(z_joint).astype(xp.float64))[None, :]
@@ -173,7 +173,7 @@ def _extract_pilot_phasor(
     """Isolate a CW pilot tone and return its carrier-stripped complex phasor.
 
     Shared core of the ``PilotTone`` and ``PilotTones`` estimators:
-    refine the per-channel tone centre, extract it with a zero-phase spectral
+    refine the per-channel tone center, extract it with a zero-phase spectral
     window (FFT -> window -> IFFT, sample-aligned), and strip the nominal carrier
     so a residual frequency offset survives as a slow phase ramp.
 
@@ -206,7 +206,7 @@ def _extract_pilot_phasor(
     phasor : (C, N) complex, working precision
         ``z(n) ≈ A·e^{jθ(n)}`` per channel (carrier-frequency stripped).
     f_centers : (C,) float64
-        Detected per-channel tone centre [Hz].
+        Detected per-channel tone center [Hz].
     sig_power : (C,) float64
         In-band tone power ``|A|²`` within the tracking window, in the same
         units as ``mean(|z|²)`` (for SNR weights).
@@ -234,8 +234,8 @@ def _extract_pilot_phasor(
         X = _fft.fft(xw, axis=-1)  # (C, N)
     real_dtype = xp.float64 if X.dtype == xp.complex128 else xp.float32
 
-    # 2) Per-channel tone centre.  Refinement absorbs a frequency offset that
-    #    has dragged the tone away from nominal, so the window stays centred on
+    # 2) Per-channel tone center.  Refinement absorbs a frequency offset that
+    #    has dragged the tone away from nominal, so the window stays centerd on
     #    it.  Runs on the shared spectrum - no extra FFTs, one host transfer.
     if refine_tone:
         f_centers = _refine_tones_from_spectrum(
@@ -251,7 +251,7 @@ def _extract_pilot_phasor(
     # 3) Zero-phase extraction window placed circularly at each channel's tone bin.
     from scipy.signal import get_window
 
-    half = int(bandwidth // df)  # bins from centre to band edge
+    half = int(bandwidth // df)  # bins from center to band edge
     n_win = 2 * half + 1
     try:
         win_cpu = np.asarray(get_window(window, n_win, fftbins=False), dtype=np.float64)
@@ -260,7 +260,7 @@ def _extract_pilot_phasor(
             f"Invalid window {window!r}: {exc}. Pass any scipy.signal.get_window "
             "spec, e.g. 'tukey', ('tukey', 0.3), 'boxcar', ('gaussian', 50)."
         ) from exc
-    k_centers = np.round(f_centers / df).astype(np.int64) % N  # (C,) centre bins
+    k_centers = np.round(f_centers / df).astype(np.int64) % N  # (C,) center bins
     idx_np = (k_centers[:, None] + np.arange(-half, half + 1)[None, :]) % N
     idx = xp.asarray(idx_np)  # (C, n_win) circular in-band bins
     rows = xp.arange(C)[:, None]
@@ -268,7 +268,7 @@ def _extract_pilot_phasor(
 
     # Per-channel in-band tone power and additive-noise power, via Parseval
     # (mean|z|² = ΣΣ|X·W|²/N²).  The noise floor is the median |X|² of a guard
-    # band one window-width outside the passband (local, so a neighbouring tone
+    # band one window-width outside the passband (local, so a neighboring tone
     # on the other channel does not inflate it).  Batched over channels on the
     # gathered bins only - no dense (C, N) window/power arrays, one transfer.
     win64 = xp.asarray(win_cpu)  # (n_win,) float64 on device
@@ -342,7 +342,7 @@ class PilotTone:
         to ``bandwidth``.  Keep it inside the guard so the data band never
         wins the search.
     refine : bool, default True
-        Centre the window on the measured per-channel tone peak (needed when
+        Center the window on the measured per-channel tone peak (needed when
         a frequency offset can move the tone by more than B).
     window : str or tuple, default "tukey"
         Window over the passband, any ``scipy.signal.get_window`` spec.

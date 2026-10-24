@@ -1,6 +1,7 @@
 """FFTs on the data's device (private).
 
-Every FFT in the library goes through these four functions:
+Every FFT in the library goes through :func:`fft`, :func:`ifft`, :func:`rfft`
+and :func:`irfft`:
 
 - CPU: ``scipy.fft`` on every core.  It keeps complex64 in single precision,
   as cuFFT does, and is about 3x faster than ``numpy.fft`` on one core

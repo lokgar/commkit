@@ -1,26 +1,28 @@
-"""Digital-communications research on NumPy (CPU) and CuPy (GPU) arrays.
+"""Digital-communications research library for NumPy (CPU) and CuPy (GPU).
 
-CommKit covers the chain of coherent and IM/DD links: waveform generation
-(:mod:`commkit.core`, :mod:`commkit.mapping`), filters and resampling
-(:mod:`commkit.filtering`, :mod:`commkit.multirate`, :mod:`commkit.spectral`),
-channel impairments (:mod:`commkit.impairments`), synchronization and carrier
-recovery (:mod:`commkit.timing`, :mod:`commkit.frequency`,
-:mod:`commkit.recovery`), equalization (:mod:`commkit.equalization`), metrics
-(:mod:`commkit.metrics`), laser and phase characterization
-(:mod:`commkit.analysis`) and plots of their results (:mod:`commkit.plotting`).
+CommKit covers the signal chain of coherent and IM/DD links: waveform
+generation (:mod:`commkit.core`, :mod:`commkit.mapping`), filters and
+resampling (:mod:`commkit.filtering`, :mod:`commkit.multirate`,
+:mod:`commkit.spectral`), channel impairments (:mod:`commkit.impairments`),
+synchronization and carrier recovery (:mod:`commkit.timing`,
+:mod:`commkit.frequency`, :mod:`commkit.recovery`), equalization
+(:mod:`commkit.equalization`), metrics (:mod:`commkit.metrics`), laser and
+phase characterization (:mod:`commkit.analysis`) and plots of their results
+(:mod:`commkit.plotting`).
 
 Data is an array or a :class:`Signal`, which carries the samples with their
 facts (sampling and symbol rate), their description (constellation, pulse)
-and the transmitted reference.  Algorithms are functions; what describes a
-modulation, a pulse or a sub-algorithm is a frozen value object written in
-the call.  Every function runs on the device of its input.
+and the transmitted reference.  Algorithms are plain functions; a
+modulation, a pulse or a sub-algorithm is described by a frozen value object
+written in the call.  Every function runs on the device of its input.
 
 The top level re-exports :class:`Signal`, :class:`Reference`,
 :func:`generate`, :class:`SingleCarrierFrame`, :class:`Preamble`,
 :class:`Constellation`, the pulses (:class:`RRC`, :class:`RC`,
 :class:`Gaussian`, :class:`Rect`, :class:`SmoothRect`), :func:`save_npz`,
 :func:`load_npz`, :func:`set_log_level` and :class:`PrecisionWarning`.  The
-other modules load on first attribute access (``commkit.plotting``, ...).
+subpackages and modules are imported on first attribute access
+(``commkit.plotting``, ...).
 
 Importing commkit has no side effects: it does not configure logging or
 Matplotlib, change warning filters, or touch the GPU.

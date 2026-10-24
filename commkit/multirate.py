@@ -1,10 +1,11 @@
 """Sampling-rate conversion.
 
-:func:`upsample`, :func:`decimate` and :func:`resample` change the sampling rate through
-``scipy.signal.resample_poly`` (polyphase), ``scipy.signal.decimate``
-(``decimate(method="decimate")``) or, with ``periodic=True``, Fourier
-interpolation (``scipy.signal.resample``); ``decimate_to_symbol_rate``
-slices a matched-filtered signal to one sample per symbol.
+:func:`upsample`, :func:`decimate` and :func:`resample` change the
+sampling rate through ``scipy.signal.resample_poly`` (polyphase),
+``scipy.signal.decimate`` (``decimate(method="decimate")``) or, with
+``periodic=True``, Fourier interpolation (``scipy.signal.resample``);
+:func:`decimate_to_symbol_rate` slices a matched-filtered signal to one
+sample per symbol.
 
 Power scaling.  These filters have unity DC gain: a signal whose band fits
 in the output Nyquist band keeps its average sample power,
@@ -54,7 +55,7 @@ def decimate_to_symbol_rate(
         raises.
     offset : int, default 0
         Sampling phase in samples, ``0 <= offset < sps``: choose the eye
-        centre.
+        center.
     normalize : bool, optional
         Rescale the output to unit average power ``mean(|x|²) = 1``.
         Defaults to ``True`` for Signal input and ``False`` for arrays.

@@ -1,9 +1,10 @@
 """Spectral estimation and frequency shifting.
 
 :func:`welch_psd` (Welch's averaged periodogram) and :func:`spectrogram`
-(a :class:`Spectrogram`); :func:`shift_frequency` (a phase-continuous mix
-by a frequency on the FFT grid) and :func:`add_pilot_tone`, with
-:func:`grid_frequency` returning the grid frequency they snap to.
+(a :class:`Spectrogram`); :func:`shift_frequency` (complex mixing) and
+:func:`add_pilot_tone` (a CW tone), both at a frequency snapped to the FFT
+grid so that a periodic record stays periodic, and :func:`grid_frequency`,
+which returns that grid frequency.
 """
 
 from collections.abc import Callable, Sequence
@@ -264,7 +265,7 @@ def add_pilot_tone(
     x, was_1d = as_2d(x, name="samples")
     C, N = x.shape
 
-    # Normalise ``frequency`` to a per-channel (C,) host array.  A scalar is
+    # Normalize ``frequency`` to a per-channel (C,) host array.  A scalar is
     # broadcast to every channel (and returns a scalar for back-compat); a
     # sequence must supply exactly one frequency per channel.
     scalar_input = np.ndim(frequency) == 0
@@ -303,7 +304,7 @@ def add_pilot_tone(
                 df,
             )
 
-    # Normalise ``power_ratio_db`` to a per-channel (C,) list, mirroring how
+    # Normalize ``power_ratio_db`` to a per-channel (C,) list, mirroring how
     # ``frequency`` is handled: a scalar broadcasts to every channel; a sequence
     # must supply exactly one PSR per channel.
     scalar_power = np.ndim(power_ratio_db) == 0
@@ -317,7 +318,7 @@ def add_pilot_tone(
                 f"has C={C} channel(s); supply one PSR per channel."
             )
 
-    # Per-channel signal power and the tone amplitude that realises the PSR.
+    # Per-channel signal power and the tone amplitude that realizes the PSR.
     p_signal = xp.mean(xp.abs(x) ** 2, axis=-1, keepdims=True)  # (C, 1) float
     psr_lin = (10.0 ** (xp.asarray(psr_req, dtype=xp.float64) / 10.0)).reshape(
         C, 1
@@ -462,7 +463,7 @@ class Spectrogram:
         Frequencies in Hz, ``(F,)``, ascending (two-sided spectra are
         fftshifted).
     times : ndarray
-        Segment centre times in seconds, ``(T,)``.
+        Segment center times in seconds, ``(T,)``.
     values : ndarray
         ``(F, T)`` or ``(C, F, T)``; power density, power, complex, magnitude
         or phase depending on ``mode``.

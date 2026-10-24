@@ -1,6 +1,6 @@
 """Array shape and validation helpers (private).
 
-Indexing, broadcast and coercion operations on NumPy/CuPy arrays, used by
+Indexing, broadcasting and coercion operations on NumPy/CuPy arrays, used by
 every module: :func:`validate_array`, the SISO/MIMO shape pair
 :func:`as_2d` / :func:`restore_1d`, :func:`broadcast_channels`,
 :func:`require_channels`, :func:`to_report_scalar` (host values of the
