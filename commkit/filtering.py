@@ -1317,14 +1317,14 @@ def correct_fiber_propagation(
         The backpropagated field in the input's units, complex, on the
         input's device.  A :class:`Signal` returns a new :class:`Signal`.
 
+    See Also
+    --------
+    correct_chromatic_dispersion : the linear (``γ = 0``) special case.
+
     Notes
     -----
     DBP cannot undo the nonlinear interaction of the signal with ASE added
     along the link, nor random PMD: both bound its gain on a real link.
-
-    See Also
-    --------
-    correct_chromatic_dispersion : the linear (``γ = 0``) special case.
 
     Examples
     --------

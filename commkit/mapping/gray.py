@@ -19,22 +19,21 @@ __all__ = ["gray_code", "gray_to_binary"]
 
 @lru_cache(maxsize=128)
 def gray_code(n: int) -> np.ndarray:
-    """Generate a Gray code sequence for `n` bits.
+    """Generate the binary-reflected Gray code of ``n`` bits.
 
-    Gray coding ensures that adjacent symbols in the constellation differ
-    by only one bit, minimizing bit error rate (BER) for a given symbol
-    error rate (SER).
+    ``gray_code(n)[i] = i ^ (i >> 1)``: consecutive entries differ in one
+    bit, so neighbouring constellation points labelled in this order differ
+    in one bit, which minimizes the bit errors per symbol error.
 
     Parameters
     ----------
     n : int
-        Number of bits.
+        Number of bits, ``>= 0``.
 
     Returns
     -------
-    np.ndarray
-        Array of integers representing the Gray code sequence.
-        Shape: (2^n,).
+    numpy.ndarray
+        Host integer code words, ``(2**n,)``.
 
     Examples
     --------
@@ -54,23 +53,25 @@ def gray_code(n: int) -> np.ndarray:
 
 @lru_cache(maxsize=128)
 def gray_to_binary(n: int) -> np.ndarray:
-    """Compute the inverse Gray code mapping: symbol index to bit pattern.
+    """Invert the Gray code: the binary index of each Gray code word.
 
-    In soft demapping, it is necessary to identify which bits correspond to
-    each constellation point. Since `gray_code(n)[i]` provides the Gray
-    code for natural binary `i`, this inverse mapping finds the natural
-    binary representation corresponding to a specific Gray-coded index.
+    ``gray_to_binary(n)[gray_code(n)[i]] = i``, so ``gray_to_binary(n)[g]``
+    is the position of code word ``g`` in the Gray sequence.
 
     Parameters
     ----------
     n : int
-        Number of bits per symbol.
+        Number of bits, ``>= 0``.
 
     Returns
     -------
-    np.ndarray
-        Array where `result[s]` provides the natural binary integer
-        representing the bit pattern for symbol `s`. Shape: (2^n,).
+    numpy.ndarray
+        Host integers, ``(2**n,)``.
+
+    Examples
+    --------
+    >>> gray_to_binary(3)
+    array([0, 1, 3, 2, 7, 6, 4, 5])
     """
     if n < 0:
         raise ValueError("n must be non-negative")

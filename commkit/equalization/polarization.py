@@ -70,18 +70,22 @@ def apply_interpolated_matrix(
 
     Parameters
     ----------
-    samples : (C, N) array, or Signal
-        Input channels.  A :class:`Signal` returns a new :class:`Signal`.
-    matrix_grid : (G, K, C) array
-        Per-grid-point matrices mapping the ``C`` inputs to ``K`` outputs.
-    grid_positions : (G,) array
-        Sample indices at which ``matrix_grid`` was evaluated.  The interior must
-        be uniformly spaced (the last point may be pinned to ``N-1``).
+    samples : array_like or Signal
+        Input channels, ``(C, N)``.  A :class:`Signal` returns a new
+        :class:`Signal`.
+    matrix_grid : array_like
+        ``(G, K, C)`` matrices at the grid points, mapping the ``C`` inputs to
+        ``K`` outputs.
+    grid_positions : array_like
+        ``(G,)`` sample indices at which ``matrix_grid`` was evaluated; the
+        interior must be uniformly spaced (the last point may be pinned to
+        ``N - 1``).
 
     Returns
     -------
-    (K, N) array
-        ``M(n) · samples[:, n]``, same dtype as ``samples``.
+    ndarray or Signal
+        ``M(n) · samples[:, n]``, ``(K, N)``, same dtype and device as
+        ``samples``.
     """
     signal_adapter = adapt_signal(samples, function_name="apply_interpolated_matrix()")
     samples = signal_adapter.array
@@ -132,10 +136,10 @@ class JonesTrack:
 
     Attributes
     ----------
-    matrix_grid : array_like
+    matrix_grid : ndarray
         ``(G, K, C)`` stack of unmixing matrices (``complex128``) at the grid
         points; apply with :func:`apply_interpolated_matrix`.
-    grid_positions : array_like
+    grid_positions : ndarray
         ``(G,)`` sample indices (``float64``) of the grid points.
     valid : slice
         Samples of the record that the demuxed output keeps (all of them
@@ -345,7 +349,7 @@ def demultiplex_polarization_tones_static(
     normalize: bool = True,
     return_matrix: bool = False,
 ) -> ArrayType | Signal | tuple[ArrayType | Signal, ArrayType]:
-    r"""One-shot polarization demux from distinct per-stream CW pilot tones.
+    r"""Demultiplex polarizations once from distinct per-stream CW pilot tones.
 
     Undoes a **frequency-flat** polarization / spatial mixing by inverting the
     channel's Jones matrix, which is read directly off pilot tones placed at a
@@ -365,7 +369,7 @@ def demultiplex_polarization_tones_static(
     (removed by ``normalize`` and/or downstream CPR).  Because each tone uniquely
     labels its stream, output row ``j`` always corresponds to ``tone_frequencies[j]``
     - there is **no polarization-permutation ambiguity** (unlike blind CMA; cf.
-    ``resolve_polarization_permutation``).
+    :func:`commkit.recovery.resolve_channel_permutation`).
 
     **Speed.**  Tones added with ``add_pilot_tone`` are grid-quantized
     (buffer-periodic), so a single DFT bin is the exact, mutually-orthogonal,
@@ -388,13 +392,13 @@ def demultiplex_polarization_tones_static(
     samples : array_like or Signal
         Received MIMO samples. Shape ``(C, N)`` - time on the last axis.  A
         :class:`Signal` returns a new demultiplexed :class:`Signal`.
-    sampling_rate : float, optional
-        Sampling rate f_s in Hz.  Taken from the Signal; required for array
-        input.  A value that disagrees with the Signal raises.
     tone_frequencies : sequence of float
         The ``K`` distinct per-stream tone frequencies in Hz (as added at the
         TX, in transmitted-stream order).  Require ``K <= C``.  Output row ``j``
         corresponds to ``tone_frequencies[j]``.
+    sampling_rate : float, optional
+        Sampling rate f_s in Hz.  Taken from the Signal; required for array
+        input.  A value that disagrees with the Signal raises.
     refine_tones : bool, default True
         If ``True``, sub-bin-refine each tone centre with the ``BiasTone`` estimator
         (on the receive channel where that tone is strongest) before extraction,
@@ -415,14 +419,14 @@ def demultiplex_polarization_tones_static(
 
     Returns
     -------
-    demuxed : ndarray
+    demuxed : ndarray or Signal
         Demultiplexed streams. Shape ``(K, N)`` - one row per recovered
         *stream* (``K`` = number of tones), **not** per receive channel: the
         ``C`` input channels are mapped down to the ``K`` transmitted streams.
         In the usual square dual-pol case ``K == C == 2`` the two coincide.
-        Same complex dtype and backend as the input.  Row ``j`` is the stream
+        Same complex dtype and device as the input.  Row ``j`` is the stream
         that carried ``tone_frequencies[j]``.
-    W : ndarray, optional
+    W : ndarray
         Returned only if ``return_matrix=True``: the ``(K, C)`` unmixing matrix
         (``complex128``), i.e. the estimated inverse Jones matrix up to per-stream
         scaling.  Suitable as a seed for a butterfly equalizer.
@@ -538,7 +542,7 @@ def demultiplex_polarization_tones_dynamic(
     return_matrix: bool = False,
     apply: bool = True,
 ) -> ArrayType | Signal | JonesTrack | tuple[ArrayType | Signal, JonesTrack]:
-    r"""Time-varying polarization demux from distinct per-stream CW pilot tones.
+    r"""Demultiplex drifting polarizations from distinct per-stream CW pilot tones.
 
     Drifting-SOP counterpart of ``demultiplex_polarization_tones_static``.  Where
     the static routine reads a *single* Jones matrix from a whole-record DFT bin,
@@ -585,13 +589,13 @@ def demultiplex_polarization_tones_dynamic(
         Received MIMO samples. Shape ``(C, N)`` - time on the last axis.  A
         :class:`Signal` returns a new demultiplexed :class:`Signal` (when
         ``apply=True``).
-    sampling_rate : float, optional
-        Sampling rate f_s in Hz.  Taken from the Signal; required for array
-        input.  A value that disagrees with the Signal raises.
     tone_frequencies : sequence of float
         The ``K`` distinct per-stream tone frequencies in Hz (as added at the
         TX, in transmitted-stream order).  Require ``K <= C``.  Output row ``j``
         corresponds to ``tone_frequencies[j]``.
+    sampling_rate : float, optional
+        Sampling rate f_s in Hz.  Taken from the Signal; required for array
+        input.  A value that disagrees with the Signal raises.
     track_bandwidth : float
         One-sided LPF cut-off in Hz - the polarization-tracking bandwidth.  Set
         it a few times above the expected SOP rotation rate but well below the

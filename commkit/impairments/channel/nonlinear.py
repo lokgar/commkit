@@ -93,6 +93,12 @@ def apply_fiber_propagation(
         On input that is not ``(N,)`` or ``(2, N)``, PMD with a single
         polarization, a negative noise figure, or input without power.
 
+    See Also
+    --------
+    commkit.filtering.correct_fiber_propagation :
+        Digital backpropagation, the inverse of this model.
+    apply_chromatic_dispersion : the linear, single-span special case.
+
     Notes
     -----
     The field obeys (CommKit's engineering sign convention, the complex
@@ -120,12 +126,6 @@ def apply_fiber_propagation(
     Nonlinear spectral broadening must fit in the sampling rate; a warning
     is logged when the field after the first span has more than 0.1 % of
     its power beyond 0.4 f_s.
-
-    See Also
-    --------
-    commkit.filtering.correct_fiber_propagation :
-        Digital backpropagation, the inverse of this model.
-    apply_chromatic_dispersion : the linear, single-span special case.
 
     Examples
     --------

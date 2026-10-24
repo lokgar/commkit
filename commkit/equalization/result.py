@@ -64,6 +64,8 @@ class EqualizerState:
         recomputes.
     inverse_correlation : numpy.ndarray or None
         RLS only: ``(C·T, C·T)`` complex128 inverse correlation matrix.
+    carrier : object
+        The inline CPR's arrays, in the private layout of each engine.
     """
 
     equalizer: str
@@ -153,35 +155,31 @@ def _check_state(
 
 @dataclass
 class EqualizerResult:
-    """Container for equalizer outputs.
+    """Output of an adaptive or block equalizer.
+
+    Arrays stay on the input's device.
 
     Attributes
     ----------
-    y_hat : ArrayType
-        Equalized symbol sequence.  Shape: ``(N_sym,)`` SISO or
-        ``(C, N_sym)`` MIMO.
-    weights : ArrayType
-        Final tap weight vector. Shape: ``(num_taps,)`` for SISO
-        or ``(C, C, num_taps)`` for MIMO butterfly.
-    error : ArrayType
-        Error signal history. Shape: ``(N_sym,)`` or ``(C, N_sym)``.
-    weights_history : ArrayType or None
-        Tap weight evolution over time. Only populated when
-        ``store_weights=True``.
+    y_hat : ndarray
+        Equalized symbols, always an array (also for Signal input),
+        ``(N_sym,)`` SISO or ``(C, N_sym)`` MIMO.
+    weights : ndarray
+        Final tap weights, ``(num_taps,)`` SISO or ``(C, C, num_taps)`` for
+        the MIMO butterfly.
+    error : ndarray
+        Error signal, ``(N_sym,)`` or ``(C, N_sym)``.
+    weights_history : ndarray or None
+        Tap weights over time, only with ``store_weights=True``.
     num_train_symbols : int
-        Number of data-aided training symbols consumed (LMS/RLS).  Used to
-        discard the DA-trained transient before computing steady-state metrics
-        like EVM, SNR, and BER.
-    input_norm_factor : float or np.ndarray
-        Normalization factor(s) ``rms(samples, axis=-1) * sqrt(sps)`` applied
-        per-channel by ``_normalize_inputs`` before equalization.  For SISO
-        this is a plain ``float``; for MIMO it is a 1-D ``np.ndarray`` of
-        shape ``(C,)`` - one factor per input stream.
-        Stored so callers can apply the post-hoc power correction needed when
-        passing a different capture (e.g. vacuum noise) through the same
-        frozen taps without disturbing the per-channel ratio:
-
-        Example::
+        Training symbols consumed in the data-aided phase (LMS/RLS); skip
+        them before steady-state metrics such as EVM, SNR and BER.
+    input_norm_factor : float or numpy.ndarray
+        Factor ``rms(samples, axis=-1) * sqrt(sps)`` by which each channel's
+        input was divided before equalization: a ``float`` for SISO, ``(C,)``
+        for MIMO (at ``sps=1``, the plain RMS of the input symbols).  It
+        restores absolute power when a different capture (e.g. vacuum noise)
+        is passed through the same frozen taps::
 
             α = signal_result.input_norm_factor  # float or (C,) array
             β = noise_result.input_norm_factor
@@ -189,20 +187,23 @@ class EqualizerResult:
                 np.mean(np.abs(noise_result.y_hat) ** 2, axis=-1) * (β / α) ** 2
             )
 
-        ``P_signal / P_noise_corrected`` is then the physically meaningful
-        per-channel signal-to-noise power ratio preserved through the DSP chain.
-        At ``sps=1`` this factor equals the plain per-channel RMS of the input symbols.
+        ``P_signal / P_noise_corrected`` is then the per-channel signal to
+        noise power ratio through the DSP chain.
     tail_trim : int
-        Number of symbols trimmed from the tail of ``y_hat`` to remove the
-        zero-padding contamination zone.  Non-zero only for RLS (equals
-        ``num_taps // 2``).  ``result.signal`` already carries the reference
-        trimmed to match; with array input, trim your reference arrays::
+        Symbols trimmed from the tail of ``y_hat`` (the zero-padded window);
+        non-zero only for RLS, where it is ``num_taps // 2``.
+        ``result.signal`` carries the reference trimmed to match; with array
+        input, trim the reference arrays::
 
             symbols = symbols[..., :-result.tail_trim]
             bits = bits[..., :-result.tail_trim * bits_per_symbol]
-    phase_trajectory : np.ndarray or None
-        Per-symbol phase estimates produced by the inline CPR stage, in
-        radians.  ``None`` without ``cpr``.
+    phase_trajectory : ndarray or None
+        Phase in radians that the inline CPR applied to each symbol before
+        the decision and the weight update,
+        ``y_hat[n] = (Wᴴ x[n]) · exp(-j · phase_trajectory[n])``;
+        ``(N_sym,)`` or ``(C, N_sym)``, ``None`` without ``cpr``.  For
+        phase-noise analysis, cycle-slip diagnostics, or to start a later
+        CPR stage.
     state : EqualizerState or None
         Continuation state; pass as ``state=`` to the next call.
     signal : Signal or None
@@ -211,14 +212,6 @@ class EqualizerResult:
         a continued call it starts at the call's own first symbol, past the
         ``overlap`` recomputed for the previous chunk.  ``None`` for array
         input.
-
-        Shape: ``(N_sym,)`` for SISO, ``(C, N_sym)`` for MIMO butterfly.
-
-        The values are the instantaneous phase corrections *applied* to each
-        symbol before the hard decision and weight update, i.e.
-        ``y_hat[n] = (W^H x[n]) · exp(-j · phase_trajectory[n])``.
-        Useful for post-hoc phase-noise analysis, cycle-slip diagnostics, and
-        as a warm-start phase estimate for a subsequent CPR stage.
     """
 
     y_hat: ArrayType

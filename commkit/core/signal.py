@@ -71,12 +71,18 @@ class Reference:
             object.__setattr__(self, "bits", bits)
 
     def to(self, device: str) -> Reference:
-        """Return a copy with its arrays on ``device`` ("cpu" or "gpu")."""
+        """Return a Reference with its arrays on ``device`` ("cpu" or "gpu").
+
+        Arrays already on ``device`` are shared, not copied.
+        """
         bits = None if self.bits is None else to_device(self.bits, device)
         return Reference(symbols=to_device(self.symbols, device), bits=bits)
 
     def head(self, num_symbols: int) -> Reference:
-        """The first ``num_symbols`` symbols and their bits."""
+        """Return the first ``num_symbols`` symbols and their bits.
+
+        The Reference itself when it has no more symbols than that.
+        """
         if num_symbols >= self.symbols.shape[-1]:
             return self
         bits = self.bits
@@ -261,11 +267,11 @@ class Signal:
         return copy.deepcopy(self)
 
     def to(self, device: str) -> Signal:
-        """Return a copy of this signal with its arrays on ``device``.
+        """Return a new Signal with its arrays on ``device``.
 
-        Moves the samples and the reference.  Host
-        metadata (constellation, pulse, frame) stays where it is.  The
-        original signal is unchanged; arrays already on ``device`` are shared.
+        Moves the samples and the reference.  Host metadata (constellation,
+        pulse, frame) stays where it is.  The original Signal is unchanged;
+        arrays already on ``device`` are shared, not copied.
 
         Parameters
         ----------

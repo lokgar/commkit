@@ -109,50 +109,6 @@ def cma(
     phase ambiguity at pilot locations while preserving blind adaptation
     elsewhere.  Build the dense arrays with ``build_pilot_ref``.
 
-    Algorithm (per symbol n)
-    ------------------------
-    Steps 1 and 2 are identical to ``lms`` (sliding input window and
-    butterfly filter output ``y_raw[n]``).  There is **no CPR step** -
-    CMA's cost surface is phase-invariant; no radial error can drive a
-    phase rotator (see Notes below).
-
-    3. **Godard error** - third-order radial gradient of the dispersion
-       cost ``J = E[(|y|^2 - R^2)^2]``::
-
-           e[n] = (|y[n]|^2 - R^2) * y[n]
-
-       The Godard radius ``R^2 = E[|s|^4] / E[|s|^2]`` is computed once
-       from the unit-power constellation (1 without a constellation).
-       The error is purely radial: any constant phase
-       rotation of ``y`` leaves ``|y|^2`` and therefore ``e`` unchanged
-       up to the same rotation, so CMA cannot resolve the phase ambiguity
-       it introduces.
-
-    4. **Weight update** - steepest descent on the Godard criterion (note
-       the minus sign, opposite to LMS)::
-
-           w_{c,c'} -= mu * conj(e_c[n]) * x_{c',n}
-
-    **Pilot-aided hybrid** (when ``pilot_ref`` and ``pilot_mask`` are set):
-    at pilot positions the Godard error is replaced by the LMS pilot error
-    ``e_p[n] = pilot_ref[n] - y[n]``, and the weight update sign flips to
-    ``+mu`` (standard LMS gradient ascent toward the reference).  This
-    resolves the phase ambiguity at pilot locations while CMA handles data
-    positions blindly.
-
-    Notes
-    -----
-    **Why joint CMA + CPR is not supported:**
-    PLL requires a phase-coherent decision ``d[n]`` (nearest constellation
-    point) to form the cross-product error ``Im(y * conj(d))``; but CMA
-    output has an unknown phase rotation, so the decision is unreliable.
-    BPS is blind, but CMA weights converge to one of four equally-valid
-    90° rotations and slowly drift between them - BPS would track that
-    drift, but the next CMA gradient step would fight the correction.  Use
-    the sequential pipeline instead: CMA ->
-    ``correct_carrier_phase`` (BPS or
-    Viterbi-Viterbi) -> optional ``lms`` fine-tune.
-
     Parameters
     ----------
     samples : array_like or Signal
@@ -183,12 +139,12 @@ def cma(
         ``weights`` of a previous stage.  Shape ``(C, C, num_taps)``, or
         ``(num_taps,)`` / ``(1, num_taps)`` for SISO.  Only for a cold start:
         a ``state`` carries its own weights.
-    pilot_ref : (C, N_sym) complex64 array, optional
+    pilot_ref : array_like, optional
         Dense pilot reference array - zeros at data positions, known symbols
         (on the scale of the unit-power ``constellation``, used as given) at
         pilot positions.  Build with ``build_pilot_ref``.
         Must be provided together with ``pilot_mask``.
-    pilot_mask : (N_sym,) uint8 array, optional
+    pilot_mask : array_like, optional
         Pilot position mask - ``1`` at pilot positions, ``0`` elsewhere.
         Build with ``build_pilot_ref``.
     pilot_gain_db : float, default 0.0
@@ -209,13 +165,54 @@ def cma(
     Returns
     -------
     EqualizerResult
-        Equalized symbols, final weights, CMA error history, and optionally
-        weight trajectory.  ``input_norm_factor`` field is populated.  When
-        ``samples`` is a :class:`Signal`, ``y_hat`` is a new :class:`Signal`
-        at the symbol rate (``sampling_rate = symbol_rate``).
+        ``y_hat`` (always an array), the final ``weights``, the CMA ``error``,
+        ``input_norm_factor``, ``state``, ``weights_history`` with
+        ``store_weights=True``, and for Signal input ``signal``, the 1-SPS
+        output Signal (see :class:`EqualizerResult`).
 
     Notes
     -----
+    **Why joint CMA + CPR is not supported:**
+    PLL requires a phase-coherent decision ``d[n]`` (nearest constellation
+    point) to form the cross-product error ``Im(y * conj(d))``; but CMA
+    output has an unknown phase rotation, so the decision is unreliable.
+    BPS is blind, but the CMA cost does not depend on the output phase, so
+    the weights drift freely in phase: BPS would track that drift, and the
+    next CMA gradient step would fight the correction.  Use the stages in
+    sequence instead: CMA, then ``correct_carrier_phase`` (BPS or
+    Viterbi-Viterbi), then optionally ``lms`` to fine-tune.
+
+    **Algorithm (per symbol n).**
+
+    Steps 1 and 2 are identical to ``lms`` (sliding input window and
+    butterfly filter output ``y_raw[n]``).  There is **no CPR step** -
+    CMA's cost surface is phase-invariant; no radial error can drive a
+    phase rotator (see above).
+
+    3. **Godard error** - third-order radial gradient of the dispersion
+       cost ``J = E[(|y|^2 - R^2)^2]``::
+
+           e[n] = (|y[n]|^2 - R^2) * y[n]
+
+       The Godard radius ``R^2 = E[|s|^4] / E[|s|^2]`` is computed once
+       from the unit-power constellation (1 without a constellation).
+       The error is purely radial: any constant phase
+       rotation of ``y`` leaves ``|y|^2`` and therefore ``e`` unchanged
+       up to the same rotation, so CMA cannot resolve the phase ambiguity
+       it introduces.
+
+    4. **Weight update** - steepest descent on the Godard criterion (note
+       the minus sign, opposite to LMS)::
+
+           w_{c,c'} -= mu * conj(e_c[n]) * x_{c',n}
+
+    **Pilot-aided hybrid** (when ``pilot_ref`` and ``pilot_mask`` are set):
+    at pilot positions the Godard error is replaced by the LMS pilot error
+    ``e_p[n] = pilot_ref[n] - y[n]``, and the weight update takes the LMS
+    sign, ``+mu``, towards the reference.  This
+    resolves the phase ambiguity at pilot locations while CMA handles data
+    positions blindly.
+
     The adaptation is inherently sequential (each update depends on the
     previous weights), so it always runs as a compiled Numba loop on the CPU.
     CuPy input is copied to the host once and the outputs are copied back
@@ -316,37 +313,6 @@ def rde(
     up to a **phase ambiguity**.  A carrier-phase recovery step is needed after
     convergence; see ``cma`` Notes for why joint CPR is not supported.
 
-    Algorithm (per symbol n)
-    ------------------------
-    Steps 1 and 2 are identical to ``lms`` (sliding input window and
-    butterfly filter output ``y[n]``).  Like ``cma``, there is no
-    CPR step.
-
-    3. **Ring selection** - choose the constellation ring radius closest to
-       the current output magnitude::
-
-           R_d[n] = argmin_{r in R_set} |r - |y[n]||
-           R_set  = {|c| : c in constellation}
-
-       ``R_set`` is the set of unique ring radii extracted once from the
-       normalised Gray constellation.  For 16-QAM this yields three radii
-       rather than the single CMA average, eliminating the inward/outward
-       pull that degrades CMA convergence on higher-order QAM.
-
-    4. **RDE error** - same third-order form as ``cma`` but using the
-       per-symbol ring radius::
-
-           e[n] = (|y[n]|^2 - R_d[n]^2) * y[n]
-
-    5. **Weight update** - steepest descent (same sign convention as CMA)::
-
-           w_{c,c'} -= mu * conj(e_c[n]) * x_{c',n}
-
-    **Pilot-aided hybrid** (when ``pilot_ref`` and ``pilot_mask`` are set):
-    identical to ``cma`` - at pilot positions the RDE error is replaced
-    by ``e_p[n] = pilot_ref[n] - y[n]`` and the sign flips to ``+mu``,
-    resolving the phase ambiguity at those locations.
-
     Parameters
     ----------
     samples : array_like or Signal
@@ -376,12 +342,12 @@ def rde(
         ``weights`` of a previous stage.  Shape ``(C, C, num_taps)``, or
         ``(num_taps,)`` / ``(1, num_taps)`` for SISO.  Only for a cold start:
         a ``state`` carries its own weights.
-    pilot_ref : (C, N_sym) complex64 array, optional
+    pilot_ref : array_like, optional
         Dense pilot reference array - zeros at data positions, known symbols
         (on the scale of the unit-power ``constellation``, used as given) at
         pilot positions.  Build with ``build_pilot_ref``.
         Must be provided together with ``pilot_mask``.
-    pilot_mask : (N_sym,) uint8 array, optional
+    pilot_mask : array_like, optional
         Pilot position mask - ``1`` at pilot positions, ``0`` elsewhere.
         Build with ``build_pilot_ref``.
     pilot_gain_db : float, default 0.0
@@ -404,13 +370,44 @@ def rde(
     Returns
     -------
     EqualizerResult
-        Equalized symbols, final weights, RDE error history, and optionally
-        weight trajectory.  ``input_norm_factor`` field is populated.  When
-        ``samples`` is a :class:`Signal`, ``y_hat`` is a new :class:`Signal`
-        at the symbol rate (``sampling_rate = symbol_rate``).
+        ``y_hat`` (always an array), the final ``weights``, the RDE ``error``,
+        ``input_norm_factor``, ``state``, ``weights_history`` with
+        ``store_weights=True``, and for Signal input ``signal``, the 1-SPS
+        output Signal (see :class:`EqualizerResult`).
 
     Notes
     -----
+    **Algorithm (per symbol n).**
+
+    Steps 1 and 2 are identical to ``lms`` (sliding input window and
+    butterfly filter output ``y[n]``).  Like ``cma``, there is no
+    CPR step.
+
+    3. **Ring selection** - choose the constellation ring radius closest to
+       the current output magnitude::
+
+           R_d[n] = argmin_{r in R_set} |r - |y[n]||
+           R_set  = {|c| : c in constellation}
+
+       ``R_set`` is the set of distinct ring radii of the unit-power
+       constellation, computed once.  For 16-QAM this yields three radii
+       rather than the single CMA average, eliminating the inward/outward
+       pull that degrades CMA convergence on higher-order QAM.
+
+    4. **RDE error** - same third-order form as ``cma`` but using the
+       per-symbol ring radius::
+
+           e[n] = (|y[n]|^2 - R_d[n]^2) * y[n]
+
+    5. **Weight update** - steepest descent (same sign convention as CMA)::
+
+           w_{c,c'} -= mu * conj(e_c[n]) * x_{c',n}
+
+    **Pilot-aided hybrid** (when ``pilot_ref`` and ``pilot_mask`` are set):
+    identical to ``cma`` - at pilot positions the RDE error is replaced
+    by ``e_p[n] = pilot_ref[n] - y[n]`` and the sign flips to ``+mu``,
+    resolving the phase ambiguity at those locations.
+
     **Why RDE outperforms CMA on high-order QAM:**
 
     For 16-QAM the Godard radius ``R² = E[|s|⁴]/E[|s|²] ≈ 1.32`` (normalized).

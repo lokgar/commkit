@@ -43,36 +43,61 @@ def block_cma(
     state: EqualizerState | None = None,
     cuda_graph: bool = True,
 ) -> EqualizerResult:
-    """Blind frequency-domain CMA equalizer (overlap-save FDAF).
+    """Equalize blindly with the frequency-domain constant-modulus algorithm.
 
-    The blind, phase-directed sibling of :func:`block_lms`: the same
-    overlap-save frequency-domain adaptive filter, but driven by the Godard
-    constant-modulus error instead of a trained/DD slicer.  Use it for blind
-    acquisition at the high-throughput frequency-domain operating point (slow or
-    static channels, GPU/CuPy input); for the trained/DD case use
-    :func:`block_lms`, and for fastest dynamics on a single stream use
-    :func:`cma`.
+    The phase-blind sibling of :func:`block_lms`: the same overlap-save
+    frequency-domain adaptive filter (FDAF), driven by the Godard
+    constant-modulus error instead of training symbols or decisions.  For
+    blind acquisition at the high-throughput operating point (slow or static
+    channels, GPU input); :func:`cma` adapts every symbol instead, for the
+    fastest channel dynamics, and is usually faster on the CPU.
 
-    Like :func:`cma`, it is fully blind and recovers the channel up to a phase
-    ambiguity - run a carrier-phase recovery stage afterwards.  Supplying
-    ``pilot_ref``/``pilot_mask`` (build them with :func:`build_pilot_ref`)
-    switches pilot positions to the LMS residual error, resolving the phase
-    ambiguity there while data positions stay blind.
+    Like :func:`cma`, it recovers the channel up to a phase ambiguity: run a
+    carrier-phase recovery stage afterwards (there is no ``cpr``, see the
+    Notes of :func:`cma`).  ``pilot_ref`` / ``pilot_mask`` switch the pilot
+    positions to the LMS residual error, which resolves the ambiguity there
+    while the data positions stay blind.
 
-    ``step_size`` is on the same scale as :func:`cma`; because the weights are
-    frozen across each ``block_size``-symbol block, the stability ceiling is
-    ~``block_size``x lower (reduce ``mu`` only if the run raises divergence).
-    The primary target is GPU (CuPy); on CPU :func:`cma` is usually faster.
+    Parameters
+    ----------
+    samples : array_like or Signal
+        Input samples, ``(N,)`` or ``(C, N)``.  A :class:`Signal` supplies
+        ``sps`` and ``constellation``.
+    num_taps : int, default 21
+        Taps per FIR filter, in samples.
+    sps : int, optional
+        Samples per symbol, an integer.  Taken from the Signal; required for
+        array input.  A value that disagrees with the Signal raises.
+    step_size : float, default 2e-4
+        Step size on the scale of :func:`cma`.  The weights are frozen
+        across each block, so the stability ceiling is about ``block_size``
+        times lower than per symbol; reduce it if the run raises divergence.
+    block_size : int, default 256
+        Output symbols per weight update.
+    constellation : Constellation, optional
+        Sets the Godard radius, as for :func:`cma`.  Defaults to the
+        Signal's; without one the target is the unit circle.
+    initial_taps : array_like, optional
+        Initial tap weights, as for :func:`cma`; only for a cold start.
+    pilot_ref, pilot_mask : array_like, optional
+        Dense pilot reference and mask, from :func:`build_pilot_ref`.
+    pilot_gain_db : float, default 0.0
+        Pilot boost in dB, as for :func:`cma`.
+    pad_mode : {'zeros', 'edge'}, default 'zeros'
+        Left padding of a cold start; see :func:`lms`.
+    state : EqualizerState, optional
+        Continue from ``result.state`` of a previous call with the same
+        configuration; see :func:`lms`.
+    cuda_graph : bool, default True
+        On the GPU, capture the per-block body once into a CUDA graph and
+        replay it (one launch per block, a large gain at small
+        ``block_size``).  Ignored on the CPU and for the pilot-aided path.
 
-    Parameters mirror :func:`cma` (no ``cpr`` - CMA is phase-blind, see
-    :func:`cma` Notes).  On GPU, ``cuda_graph=True`` (default) captures the
-    per-block FDAF body once and replays it, collapsing the per-block kernel
-    launches into a single graph launch (a large win at small ``block_size``);
-    it is ignored on CPU and silently disabled for the pilot-aided path.
-    Returns an :class:`EqualizerResult` with ``y_hat``, ``weights``, ``error``
-    on the input's device, and ``signal`` (the 1-SPS output Signal) for
-    Signal input; ``sps`` and ``constellation`` come from a :class:`Signal`;
-    array input needs ``sps``.
+    Returns
+    -------
+    EqualizerResult
+        ``y_hat``, ``weights``, ``error`` and ``state`` on the input's
+        device, and for Signal input ``signal``, the 1-SPS output Signal.
     """
     signal_adapter = adapt_signal(samples, function_name="block_cma()")
     samples = signal_adapter.array
@@ -120,34 +145,61 @@ def block_rde(
     state: EqualizerState | None = None,
     cuda_graph: bool = True,
 ) -> EqualizerResult:
-    """Blind frequency-domain radius-directed equalizer (overlap-save FDAF).
+    """Equalize blindly with the frequency-domain radius-directed algorithm.
 
-    The multi-ring blind sibling of :func:`block_lms`, related to
-    :func:`block_cma` as :func:`rde` is to :func:`cma`: it drives each symbol
-    toward its nearest constellation ring instead of a single Godard circle,
-    giving correct blind convergence on higher-order QAM (16/64-QAM) where CMA's
-    single-radius target stalls.  Same overlap-save frequency-domain engine and
-    throughput positioning as :func:`block_cma`.
+    Related to :func:`block_cma` as :func:`rde` is to :func:`cma`: each
+    symbol is driven towards its nearest constellation ring instead of one
+    Godard circle, which converges blindly on multi-ring QAM (16-, 64-QAM)
+    where CMA's single radius stalls.  The same overlap-save engine and
+    operating point as :func:`block_cma`.
 
-    Fully blind up to a phase ambiguity (run CPR afterwards);
-    ``pilot_ref``/``pilot_mask`` resolve the ambiguity at pilot positions.
-    ``step_size`` is on the same scale as :func:`rde`, with the
-    ~``block_size``x-lower stability ceiling of frozen-block adaptation.  The
-    default ``min(1e-3, 0.5 / block_size)`` is the per-symbol step, capped
-    at half the ceiling (``step_size * block_size`` below about 1) for large
-    blocks.
-    From a cold start RDE converges several times slower than CMA; pass
-    ``state=`` from a :func:`block_cma` result over the first part of the
-    record to start from CMA-converged taps.
+    Blind up to a phase ambiguity (run carrier-phase recovery afterwards);
+    ``pilot_ref`` / ``pilot_mask`` resolve it at the pilot positions.  From a
+    cold start RDE converges several times slower than CMA: pass ``state=``
+    from a :func:`block_cma` call over the first part of the record to start
+    from CMA-converged taps.
 
-    Parameters mirror :func:`rde`.  On GPU, ``cuda_graph=True`` (default)
-    captures the per-block FDAF body once and replays it, collapsing the
-    per-block kernel launches into a single graph launch (a large win at small
-    ``block_size``); it is ignored on CPU and silently disabled for the
-    pilot-aided path.  Returns an :class:`EqualizerResult` with ``y_hat``,
-    ``weights``, ``error`` on the input's device, and ``signal`` (the 1-SPS
-    output Signal) for Signal input; ``sps`` and ``constellation`` come from
-    a :class:`Signal`; array input needs ``sps``.
+    Parameters
+    ----------
+    samples : array_like or Signal
+        Input samples, ``(N,)`` or ``(C, N)``.  A :class:`Signal` supplies
+        ``sps`` and ``constellation``.
+    num_taps : int, default 21
+        Taps per FIR filter, in samples.
+    sps : int, optional
+        Samples per symbol, an integer.  Taken from the Signal; required for
+        array input.  A value that disagrees with the Signal raises.
+    step_size : float, optional
+        Step size on the scale of :func:`rde`, with the about ``block_size``
+        times lower stability ceiling of frozen-block adaptation.  Defaults
+        to ``min(1e-3, 0.5 / block_size)``: the per-symbol step, capped at
+        half the ceiling (``step_size * block_size`` below about 1) for large
+        blocks.
+    block_size : int, default 256
+        Output symbols per weight update.
+    constellation : Constellation, optional
+        Sets the ring radii, as for :func:`rde`.  Defaults to the Signal's;
+        without one the single ring is the unit circle.
+    initial_taps : array_like, optional
+        Initial tap weights, as for :func:`rde`; only for a cold start.
+    pilot_ref, pilot_mask : array_like, optional
+        Dense pilot reference and mask, from :func:`build_pilot_ref`.
+    pilot_gain_db : float, default 0.0
+        Pilot boost in dB, as for :func:`rde`.
+    pad_mode : {'zeros', 'edge'}, default 'zeros'
+        Left padding of a cold start; see :func:`lms`.
+    state : EqualizerState, optional
+        Continue from ``result.state`` of a previous ``block_rde`` or
+        ``block_cma`` call with the same configuration; see :func:`lms`.
+    cuda_graph : bool, default True
+        On the GPU, capture the per-block body once into a CUDA graph and
+        replay it.  Ignored on the CPU and for the pilot-aided path.
+
+    Returns
+    -------
+    EqualizerResult
+        ``y_hat``, ``weights``, ``error`` and ``state`` on the input's
+        device, and for Signal input ``signal``, the 1-SPS output Signal.
     """
     signal_adapter = adapt_signal(samples, function_name="block_rde()")
     samples = signal_adapter.array
@@ -194,32 +246,33 @@ def build_pilot_ref(
     n_sym: int,
     num_ch: int,
 ) -> tuple[np.ndarray, np.ndarray]:
-    """Build dense pilot reference array and uint8 mask for the hybrid PA kernel.
+    """Build the dense pilot reference and mask of the pilot-aided blind equalizers.
 
-    Packs sparse pilot symbols into a dense ``(C, n_sym)`` array suitable for
-    passing to ``cma`` or ``rde`` as ``pilot_ref`` / ``pilot_mask``.
-    Data positions are filled with zeros; the mask marks which positions carry
-    known reference symbols.
+    Packs sparse pilot symbols into a dense ``(C, n_sym)`` array for the
+    ``pilot_ref`` / ``pilot_mask`` arguments of :func:`cma`, :func:`rde`,
+    :func:`block_cma` and :func:`block_rde`: zeros at the data positions,
+    the known symbols at the pilot positions.
 
     Parameters
     ----------
-    pilot_symbols : (K,) or (C, K) complex64 ndarray
-        Known pilot symbols in transmission order (only the K pilot positions,
-        no data symbols).  A 1-D array is broadcast to all C channels.
-    pilot_mask : (n_sym,) bool ndarray
-        ``True`` at the K pilot positions within the equalized body region.
+    pilot_symbols : array_like
+        Known pilot symbols in transmission order, ``(K,)`` (broadcast to
+        every channel) or ``(C, K)``: the K pilots only, no data symbols.
+    pilot_mask : array_like
+        Boolean ``(n_sym,)``, ``True`` at the K pilot positions of the
+        equalized body.
     n_sym : int
-        Total number of output symbols (payload + pilots).
+        Number of output symbols (payload and pilots).
     num_ch : int
         Number of receive channels C.
 
     Returns
     -------
-    pilot_ref : (C, n_sym) complex64 ndarray
-        Dense reference array - zeros at data positions, pilot symbols at
-        pilot positions.
-    pilot_mask_u8 : (n_sym,) uint8 ndarray
-        ``1`` at pilot positions, ``0`` elsewhere.
+    pilot_ref : numpy.ndarray
+        Host complex64 ``(C, n_sym)`` reference: zeros at the data
+        positions, the pilot symbols at the pilot positions.
+    pilot_mask_u8 : numpy.ndarray
+        Host uint8 ``(n_sym,)``: 1 at the pilot positions, 0 elsewhere.
 
     Examples
     --------

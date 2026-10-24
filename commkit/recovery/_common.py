@@ -44,8 +44,8 @@ def _resolve_pll_gains(
     and the standalone PLL, so the bandwidth->gain mapping is defined in
     exactly one place.
 
-    Precedence
-    ----------
+    Precedence:
+
     * ``mu`` given -> raw PI gains; ``beta`` defaults to ``0.0`` (1st-order loop).
     * ``mu`` is ``None`` -> derive critically-damped (ζ=1) gains ``μ=4B, β=4B²``
       from ``bandwidth`` via ``_pll_gains``.

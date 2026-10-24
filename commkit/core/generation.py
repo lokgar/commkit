@@ -89,7 +89,8 @@ def shape_pulse(
     Returns
     -------
     ndarray
-        Waveform ``(..., N * sps)``, same dtype and device as ``symbols``.
+        Waveform ``(..., N * sps)``, normalized per channel to
+        ``E[|x|²] = 1/sps``, same dtype and device as ``symbols``.
     """
     sps = require_integer_sps(sps, "shape_pulse()")
     if pulse is None:
@@ -131,7 +132,7 @@ def generate(
     rng: int | np.random.Generator | None = None,
     device: str = "cpu",
 ) -> Signal:
-    """Random symbols from ``constellation``, pulse-shaped into a Signal.
+    """Generate random symbols from a constellation, pulse-shaped into a Signal.
 
     Parameters
     ----------
@@ -156,7 +157,8 @@ def generate(
         convolution): the record loops seamlessly, e.g. on a streaming AWG,
         and has no filter transients at its ends.  Later Tx steps that filter
         or resample the record (``fir_filter``, ``upsample``, ``resample``,
-        ``apply_phase_noise``) need ``periodic=True`` too; the Signal does not record it.
+        ``apply_phase_noise``) need ``periodic=True`` too; the Signal does not
+        record it.
     rng : int, numpy.random.Generator or None
         Seed or generator (SciPy SPEC 7).
     device : {"cpu", "gpu"}, default "cpu"
@@ -169,9 +171,10 @@ def generate(
     Returns
     -------
     Signal
-        Samples normalized to unit symbol power (average sample power
-        ``1/sps``), with ``constellation``, ``pulse`` (when a Pulse was given)
-        and ``reference`` set.
+        Samples normalized per channel to unit symbol power (average sample
+        power ``1/sps``), complex64 (float32 for a real constellation such as
+        bipolar PAM), with ``constellation``, ``pulse`` (when a Pulse was
+        given) and ``reference`` set.
 
     Examples
     --------

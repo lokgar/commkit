@@ -41,7 +41,7 @@ def map_bits(bits: ArrayType, *, constellation: Constellation) -> ArrayType:
 def demap_symbols_hard(
     symbols: ArrayType | Signal, *, constellation: Constellation | None = None
 ) -> ArrayType:
-    """Hard decisions: the bits of the nearest constellation point.
+    """Demap hard decisions: the bits of the nearest constellation point.
 
     Symbols are compared with ``constellation.points`` as they are, so they
     must be on the constellation's scale (unit average power for the
