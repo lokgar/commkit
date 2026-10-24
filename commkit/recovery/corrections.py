@@ -39,28 +39,28 @@ def _log_phase_summary(
     suffix_fmt: str,
     suffix_args: tuple,
 ) -> None:
-    r"""Log a CPR algorithm's "phase mean/std in degrees" INFO summary.
+    r"""Log the mean and standard deviation of a CPR phase in degrees (INFO).
 
-    Every CPR estimator (``bps``, ``viterbi_viterbi``, ``tikhonov``, ``pll``,
-    ``pilots``' pilot-aided/pilot-tone estimators) ends with the same
-    diagnostic: one host transfer of the phase trajectory (skipped entirely
-    when INFO logging is disabled), then a mean/std reduction converted to
-    degrees and logged as
+    Every CPR estimator (BPS, Viterbi-Viterbi, Tikhonov, the PLL and the
+    pilot methods) ends with this diagnostic: one host transfer of the phase
+    trajectory (skipped when INFO logging is disabled), then the mean and
+    standard deviation in degrees, logged as::
 
         prefix_fmt + ": phase mean=%.2f°, std=%.2f° " + suffix_fmt
-
-    with ``prefix_args``/``suffix_args`` supplying each caller's own
-    parameters (algorithm name, block/pilot counts, channel count, ...).
 
     Parameters
     ----------
     phi : array_like
         Phase trajectory in radians, any shape, on either device.
-    prefix_fmt, suffix_fmt : str
-        ``%``-style format strings, joined around the fixed
-        ``phase mean=%.2f°, std=%.2f°`` core.
-    prefix_args, suffix_args : tuple
-        Positional args for ``prefix_fmt``/``suffix_fmt`` respectively.
+    prefix_fmt : str
+        ``%``-style format before the fixed part.
+    prefix_args : tuple
+        Arguments of ``prefix_fmt`` (the algorithm name, ...).
+    suffix_fmt : str
+        ``%``-style format after the fixed part.
+    suffix_args : tuple
+        Arguments of ``suffix_fmt`` (block or pilot counts, channel count,
+        ...).
     """
     if not logger.isEnabledFor(logging.INFO):
         return
@@ -219,35 +219,34 @@ def _get_numba_cycle_slip():
 
         @numba.njit(cache=True, fastmath=True, nogil=True)
         def _cycle_slip_loop(phi_u, symmetry, history_length, threshold):
-            """Cycle-slip detection and correction via linear extrapolation.
+            """Detect and correct cycle slips by linear extrapolation (Numba).
 
-            Scans the block-phase trajectory ``phi_u`` sequentially.  For each
-            block, linearly extrapolates from up to ``history_length`` past
-            *corrected* blocks.  When the deviation exceeds ``threshold``, it
-            is corrected by a multiple of ``2π/symmetry``.
+            Scans the block phases ``phi_u`` in order.  Each block is extrapolated
+            linearly from up to ``history_length`` past corrected blocks; a deviation
+            beyond ``threshold`` is corrected by a multiple of ``2π/symmetry``.
 
-            The linear regression uses relative coordinates [0, W-1] so that
-            ``Sx`` and ``Sxx`` are exact compile-time constants.  Only ``Sy``
-            and ``Sxy`` are maintained as running state, updated in O(1) per
-            step via a closed-form sliding-window identity.
+            The regression uses the relative coordinates ``[0, W-1]``, so ``Sx`` and
+            ``Sxx`` are closed-form constants; only ``Sy`` and ``Sxy`` are kept as
+            running state, updated in O(1) per step by a sliding-window identity.
 
             Parameters
             ----------
-            phi_u : (B,) float64
-                Block-phase trajectory after M-fold unwrap (modified in place).
+            phi_u : numpy.ndarray
+                Block phases after the M-fold unwrap, float64, ``(B,)``; modified in
+                place.
             symmetry : int
-                Rotational symmetry order; correction quantum = ``2π/symmetry``.
+                Rotational symmetry; the correction quantum is ``2π/symmetry``.
             history_length : int
-                Maximum number of past corrected blocks used for extrapolation.
-                Use ``min(b, history_length)`` at each step.
-            threshold : float64
-                Deviation from extrapolated value that triggers a correction
-                (radians).  Default in the caller: ``π/4``.
+                Largest number of past corrected blocks in the fit; block ``b`` uses
+                ``min(b, history_length)``.
+            threshold : float
+                Deviation from the extrapolated value, in radians, that declares a
+                slip (``π/4`` by default in the callers).
 
             Returns
             -------
-            (B,) float64
-                Corrected block-phase trajectory (same array, modified in place).
+            numpy.ndarray
+                The corrected block phases, ``phi_u`` itself.
             """
             two_pi = 2.0 * np.pi
             quantum = two_pi / float(symmetry)
@@ -597,12 +596,12 @@ def _pairing_scores(y, s, xp, metric: str):
 
     Higher is better, so the assignment below maximizes the total score.
 
-    * ``"coherence"`` - rotation-invariant normalized cross-correlation
-      magnitude ``|<y_i, s_j>| / (||y_i|| ||s_j||)``, in ``[0, 1]``.  One
-      matmul, and blind to any constant phase rotation.
-    * ``"phase_increment"`` - minus the variance of the *wrapped phase-error
-      increment* ``Var(Δ angle(y_i · conj(s_j)))``.  Immune not only to a
-      constant rotation but to a residual frequency offset and to phase noise,
+    * ``"coherence"``: the normalized cross-correlation magnitude
+      ``|<y_i, s_j>| / (||y_i|| ||s_j||)``, in ``[0, 1]``.  One matrix
+      product, and blind to any constant phase rotation.
+    * ``"phase_increment"``: minus the variance of the wrapped increment of
+      the phase error, ``Var(Δ angle(y_i · conj(s_j)))``.  Immune not only to
+      a constant rotation but to a residual frequency offset and to phase noise,
       which drive the coherence sum toward zero for every pairing (the
       rotating phasor averages out) and make ``"coherence"`` unusable on
       records whose carrier phase is deliberately left intact.  Evaluated one

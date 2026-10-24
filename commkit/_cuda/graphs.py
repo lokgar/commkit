@@ -44,7 +44,11 @@ def _stream() -> Any:
 
 
 class GraphRunner:
-    """Run keyed bodies eagerly or from captured CUDA graphs.
+    """Runner of keyed bodies, eagerly or from captured CUDA graphs.
+
+    Use it as a context manager around all the work of one run: entering
+    orders the work queued so far before the runner's stream and makes that
+    stream current; leaving synchronizes it.
 
     Parameters
     ----------
@@ -53,10 +57,6 @@ class GraphRunner:
     enabled : bool
         Capture and replay; ``False`` (or CuPy unavailable) runs every body
         eagerly on the current stream.
-
-    Use as a context manager around all the work of one run: entering
-    orders the work queued so far before the runner's stream and makes it
-    current; leaving synchronizes it.
     """
 
     def __init__(self, name: str, enabled: bool) -> None:

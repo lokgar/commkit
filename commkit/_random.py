@@ -49,8 +49,10 @@ def complex_normal(
     dtype: type | np.dtype,
     xp: ModuleType,
 ) -> ArrayType:
-    """Circular complex Gaussian noise ``std * (a + j b)``, ``a, b ~ N(0, 1)``,
-    of ``shape`` on ``xp``'s device; ``dtype`` is the real component type.
+    """Draw circular complex Gaussian noise ``std·(a + j b)``, ``a, b ~ N(0, 1)``.
+
+    The noise has ``shape`` and is on ``xp``'s device; ``dtype`` is the real
+    component type.
 
     ``E[|n|^2] = 2 std^2``: pass ``std = sqrt(P / 2)`` for noise power ``P``.
     """

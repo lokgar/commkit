@@ -75,12 +75,12 @@ def apply_default_theme() -> None:
 
 
 def _get_axis(ax):
-    """Get-or-create a single ``Axes``: returns ``(fig, axi)``.
+    """Return ``(fig, axi)`` for one ``Axes``, creating them when needed.
 
-    If ``ax`` is ``None``, creates a new 1x1 figure/axes pair (theme default
-    figsize). Otherwise reuses the given ``Axes`` and its parent ``Figure``.
-    For the single-``Axes`` case only - multi-panel functions build their
-    own subplot grid via :func:`_create_subplot_grid`/:func:`_grid_figsize`.
+    With ``ax=None`` a new 1x1 figure at the theme's default size is
+    created; otherwise the given ``Axes`` and its ``Figure`` are reused.
+    For single-panel plots only: multi-panel functions build their grid with
+    :func:`_create_subplot_grid` and :func:`_grid_figsize`.
     """
     if ax is None:
         fig, axi = plt.subplots(1, 1)
@@ -169,16 +169,16 @@ def _decimate_minmax(
 ) -> tuple[np.ndarray, np.ndarray]:
     """Down-sample a line for fast plotting while preserving its envelope.
 
-    Buckets the data and keeps the per-bucket min **and** max (emitted in
-    x-order), so sharp features - spectral peaks, window edges, glitches -
-    survive, unlike plain striding.  Matplotlib renders every vertex, so for
+    Buckets the data and keeps both the minimum and the maximum of each
+    bucket (in x order), so sharp features (spectral peaks, window edges,
+    glitches) survive, unlike plain striding.  Matplotlib renders every vertex, so for
     long oversampled records (N ≳ 10⁵) plotting the raw trace is the dominant
     cost; reducing to a few thousand points is visually identical but orders of
     magnitude faster.
 
     Parameters
     ----------
-    x, y : np.ndarray
+    x, y : numpy.ndarray
         1-D arrays of equal length.
     max_points : int, default 4000
         Approximate cap on the number of plotted points.  Returned length is
@@ -186,7 +186,7 @@ def _decimate_minmax(
 
     Returns
     -------
-    (x_dec, y_dec) : tuple of np.ndarray
+    x_dec, y_dec : numpy.ndarray
         Decimated arrays, or the inputs unchanged when already short enough.
     """
     n = len(y)

@@ -33,25 +33,23 @@ __all__ = [
 def _validate_and_shift(
     xp: Any, is_complex: bool, return_onesided: bool | None, label: str
 ) -> tuple[bool, Callable[..., tuple[ArrayType, ...]]]:
-    """Resolve/validate ``return_onesided`` and build the matching post-shift closure.
+    """Resolve ``return_onesided`` and build the matching shift of the result.
 
-    Shared by :func:`welch_psd` and :func:`spectrogram`, which both: default
-    ``return_onesided`` to ``not is_complex``, reject the one-sided request
-    for complex data, and - when the result ends up two-sided - fftshift the
-    frequency axis (and any data arrays indexed by it) back to centered
-    (``-fs/2`` to ``fs/2``) order.
+    Shared by :func:`welch_psd` and :func:`spectrogram`: ``return_onesided``
+    defaults to ``not is_complex``, a one-sided request for complex data is
+    rejected, and a two-sided result has its frequency axis (and the data
+    indexed by it) fftshifted to centered order, ``-fs/2`` to ``fs/2``.
 
     Parameters
     ----------
     xp : module
-        Array module (NumPy/CuPy) providing ``fft.fftshift``.
+        Array module providing ``fft.fftshift``.
     is_complex : bool
         Whether the input samples are complex-valued.
     return_onesided : bool or None
         The caller-supplied value (``None`` triggers the default).
     label : str
-        Human-readable name for the error message (e.g. ``"PSD"``,
-        ``"spectrogram"``).
+        Name for the error message (``"PSD"``, ``"spectrogram"``).
 
     Returns
     -------

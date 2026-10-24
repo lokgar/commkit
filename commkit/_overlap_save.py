@@ -68,16 +68,16 @@ def ols_backward(X_hat_f: ArrayType, meta: dict[str, Any]) -> ArrayType:
     Parameters
     ----------
     X_hat_f : array_like
-        Frequency-domain blocks after per-bin processing.
-        Shape: ``(num_ch, num_blocks, N_fft)``.
+        Frequency-domain blocks after the per-bin processing,
+        ``(num_ch, num_blocks, N_fft)``.
     meta : dict
         Scaffold parameters returned by ``ols_forward``.
 
     Returns
     -------
     ndarray
-        Time-domain output trimmed to the original signal length ``N``.
-        Shape: ``(num_ch, N)``.
+        Time-domain output trimmed to the original length ``N``,
+        ``(num_ch, N)``.
     """
     _, xp, _ = dispatch(X_hat_f)
     N = meta["N"]

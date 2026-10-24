@@ -41,39 +41,40 @@ def _get_numba_dd_pll():
             lev_min,
             side,
         ):
-            """Inner DD-PLL loop compiled to machine code by Numba.
+            """Run the decision-directed PLL over the symbols (Numba).
 
             Parameters
             ----------
-            sym_r, sym_i : (N,) float64
-                Real and imaginary parts of received symbols.
-            const_r, const_i : (M,) float64
-                Real and imaginary parts of reference constellation.
-            mu : float64
-                Proportional (phase) gain - corrects the instantaneous phase error.
-            beta : float64
-                Integral (frequency) gain - tracks residual frequency drift.
-                Set to 0.0 for a first-order loop.
-            phi0 : float64
-                Initial phase state in radians.
-            freq0 : float64
-                Initial frequency correction state in radians/symbol.
+            sym_r, sym_i : numpy.ndarray
+                Real and imaginary parts of the received symbols, float64, ``(N,)``.
+            const_r, const_i : numpy.ndarray
+                Real and imaginary parts of the constellation, float64, ``(M,)``.
+            mu : float
+                Proportional (phase) gain: corrects the instantaneous phase error.
+            beta : float
+                Integral (frequency) gain: tracks a residual frequency drift; 0 for
+                a first-order loop.
+            phi0 : float
+                Initial phase in radians.
+            freq0 : float
+                Initial frequency correction in radians per symbol.
             is_sq_qam : bool
-                True when the constellation is a square QAM grid.  Enables the
-                O(1) rounding decision path instead of the O(M) linear search.
-            levels : (side,) float64
-                Sorted unique axis levels for square QAM (ignored when not sq_qam).
-            d_grid : float64
-                Grid spacing (levels[1] - levels[0]).
-            lev_min : float64
-                Minimum level value (levels[0]).
+                The constellation is a square QAM grid: decide by rounding, O(1),
+                instead of the O(M) search.
+            levels : numpy.ndarray
+                Sorted distinct axis levels of the square grid, float64, ``(side,)``;
+                unused otherwise.
+            d_grid : float
+                Grid spacing, ``levels[1] - levels[0]``.
+            lev_min : float
+                Smallest level, ``levels[0]``.
             side : int
-                Number of points per axis (sqrt of constellation order).
+                Points per axis, ``sqrt(M)``.
 
             Returns
             -------
-            phase_est : (N,) float64
-                Per-symbol phase trajectory φ[n].
+            numpy.ndarray
+                Per-symbol phase ``φ[n]``, float64, ``(N,)``.
             """
             N = len(sym_r)
             M = len(const_r)
@@ -165,26 +166,33 @@ def _get_numba_dd_pll_joint():
             lev_min,
             side,
         ):
-            """Joint-channel DD-PLL with PI loop filter.
+            """Run one decision-directed PLL shared by all channels (Numba).
+
+            The phase error is averaged over the channels at each symbol and drives
+            one PI loop.
 
             Parameters
             ----------
-            sym_r, sym_i : (C, N) float64
-                Real and imaginary parts of received symbols, all channels.
-            const_r, const_i : (M,) float64
-                Reference constellation.
-            mu, beta, phi0, freq0 : float64
-                Loop parameters - same semantics as ``_dd_pll_loop``.
+            sym_r, sym_i : numpy.ndarray
+                Real and imaginary parts of the received symbols, float64, ``(C, N)``.
+            const_r, const_i : numpy.ndarray
+                Real and imaginary parts of the constellation, float64, ``(M,)``.
+            mu, beta, phi0, freq0 : float
+                Loop gains and initial state, as for ``_dd_pll_loop``.
             is_sq_qam : bool
-                Enables O(1) rounding decision for square QAM grids.
-            levels : (side,) float64
-            d_grid, lev_min : float64
+                Decide by rounding on a square QAM grid.
+            levels : numpy.ndarray
+                Axis levels of the square grid, float64, ``(side,)``.
+            d_grid, lev_min : float
+                Grid spacing and smallest level.
             side : int
+                Points per axis.
 
             Returns
             -------
-            phase_est : (N,) float64
-                Single shared phase trajectory (broadcast to all channels by caller).
+            numpy.ndarray
+                The shared phase ``φ[n]``, float64, ``(N,)``; the caller copies it to
+                every channel.
             """
             C = sym_r.shape[0]
             N = sym_r.shape[1]

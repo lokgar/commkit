@@ -319,9 +319,12 @@ def _remove_linear_trend(y: ArrayType, *, x: Any = None) -> tuple[ArrayType, Arr
 
 
 def _unit_phasor(phase: ArrayType, dtype: Any, xp: Any) -> ArrayType:
-    """``exp(j·phase)`` as ``dtype``, from real cos/sin (several times faster
-    than a complex exponential on the CPU).  ``phase`` keeps its own
-    precision for the cos/sin; wrap large phases first if that is float32."""
+    """``exp(j·phase)`` as ``dtype``, from a real cos and sin.
+
+    Several times faster than a complex exponential on the CPU.  ``phase``
+    keeps its own precision for the cos and sin; wrap large phases first if
+    that is float32.
+    """
     h = xp.empty(phase.shape, dtype=dtype)
     h.real = xp.cos(phase)
     h.imag = xp.sin(phase)
@@ -329,9 +332,12 @@ def _unit_phasor(phase: ArrayType, dtype: Any, xp: Any) -> ArrayType:
 
 
 def _phasor(phase: ArrayType, dtype: Any, xp: Any) -> ArrayType:
-    """``exp(j·phase)`` as complex ``dtype`` for a float64 ``phase`` of any
-    size: wrapped to ``[-π, π]`` in float64, then cos/sin in the real
-    precision of ``dtype`` (no FP64 trig for a complex64 result)."""
+    """``exp(j·phase)`` as complex ``dtype`` for a float64 ``phase`` of any size.
+
+    The phase is wrapped to ``[-π, π]`` in float64, then the cos and sin run
+    in the real precision of ``dtype`` (no float64 trigonometry for a
+    complex64 result).
+    """
     two_pi = 2.0 * np.pi
     wrapped = phase - xp.round(phase / two_pi) * two_pi
     real = np.empty(0, dtype).real.dtype
@@ -342,8 +348,11 @@ _DEROTATE_KERNEL: dict[str, Any] = {}
 
 
 def _cupy_derotate() -> Any:
-    """Fused CuPy ``s · exp(-j·wrap(φ))``: float64 wrap, float32 sin/cos and
-    complex multiply in one pass, instead of about 7 ufunc passes."""
+    """Fused CuPy kernel of ``s · exp(-j·wrap(φ))``.
+
+    The float64 wrap, the float32 sin and cos and the complex product in one
+    pass, instead of about 7 ufunc passes.
+    """
     if "k" not in _DEROTATE_KERNEL:
         import cupy as cp
 

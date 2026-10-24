@@ -209,10 +209,13 @@ def check_link(
 def to_watts(
     x: ArrayType, xp: ModuleType, launch_power_dbm: float, function_name: str
 ) -> tuple[ArrayType, bool, float]:
-    """``(field, was_1d, scale)``: a complex ``(C, N)`` working copy of ``x``
-    scaled to sqrt(W), with its average power (summed over the
-    polarizations) at ``launch_power_dbm``.  Divide the result by ``scale``
-    to return to the input's units."""
+    """Scale a working copy of the field to sqrt(W) at the launch power.
+
+    Returns ``(field, was_1d, scale)``: ``field`` is a complex ``(C, N)``
+    copy of ``x`` whose average power, summed over the polarizations, is
+    ``launch_power_dbm``.  Divide the result by ``scale`` to return to the
+    input's units.
+    """
     if not math.isfinite(launch_power_dbm):
         raise ValueError(
             f"{function_name}: launch_power_dbm must be finite, got {launch_power_dbm!r}."
@@ -269,8 +272,11 @@ def jones_section(
 
 @dataclass(frozen=True)
 class _SpanPlan:
-    """One span: ``K`` equal steps of ``step_km``, so ``K + 1`` linear stages
-    (half, ``K - 1`` full, half) around ``K`` Kerr stages."""
+    """Step plan of one span.
+
+    ``K`` equal steps of ``step_km``, so ``K + 1`` linear stages (half,
+    ``K - 1`` full, half) around ``K`` Kerr stages.
+    """
 
     step_km: float
     kerr: np.ndarray  # (K,) rad/W: γ_eff · power-weighted step length
@@ -371,8 +377,11 @@ class _Ops:
         return hm, hp
 
     def linear(self, X: ArrayType, length_km: float, section: int | None) -> ArrayType:
-        """Linear stage of ``length_km`` (negative backward), with PMD
-        section ``section`` of the current span or none."""
+        """Apply a linear stage of ``length_km`` (negative backward).
+
+        With PMD section ``section`` of the current span, or none for
+        ``None``.
+        """
         if section is None:
             X *= self._response(length_km)
             return X
@@ -610,8 +619,10 @@ class _FusedOps(_Ops):
 
 
 def _make_ops(x: ArrayType, xp: ModuleType, *args: Any) -> _Ops:
-    """The stage operations for the field ``x``; ``args`` as :class:`_Ops`
-    after ``xp`` and the dtype."""
+    """Pick the stage operations for the field ``x``.
+
+    ``args`` are those of :class:`_Ops` after ``xp`` and the dtype.
+    """
     if xp is np:
         return _CpuOps(xp, x.dtype, *args)
     if x.dtype != xp.complex64:
@@ -664,8 +675,9 @@ def _run_span(
     pmd: bool,
     on_last_spectrum: Callable[[ArrayType], None] | None = None,
 ) -> ArrayType:
-    """One span's steps, time domain in and out (the amplifier is the
-    identity on the loss-normalized field).
+    """Run the steps of one span, time domain in and out.
+
+    The amplifier is the identity on the loss-normalized field.
 
     Forward: ``L_0 N_0 L_1 ... N_{K-1} L_K``, PMD section ``k`` in ``L_k``.
     Backward (``direction=-1``) applies the inverse operators in reverse
@@ -698,8 +710,10 @@ def propagate(
     noise_figure_db: float | None = None,
     rng: Any = None,
 ) -> ArrayType:
-    """Propagate the ``(C, N)`` field ``x`` (sqrt(W), C in {1, 2}) over the
-    link; ``direction=-1`` backpropagates (DBP: no ASE, no PMD).
+    """Propagate the field over the link, or backpropagate it.
+
+    ``x`` is ``(C, N)`` in sqrt(W) with C in {1, 2}; ``direction=-1``
+    backpropagates (DBP: no ASE, no PMD).
 
     ``x`` is consumed: it is the working buffer.
     """
@@ -771,7 +785,7 @@ def _span_runner(
     pmd: bool,
     graphs: GraphRunner,
 ) -> Callable[..., ArrayType]:
-    """``run(x, on_last_spectrum) -> x`` for one span.
+    """Build the function ``run(x, on_last_spectrum) -> x`` of one span.
 
     With fused CuPy operations every stage works in place, so a span always
     reads and writes the same buffer, and the waveplates come from a fixed

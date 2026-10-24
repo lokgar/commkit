@@ -1651,12 +1651,12 @@ def _get_numba_pa_rde() -> Callable[..., Any]:
 
 
 def _get_numba_cs_block() -> Callable[..., Any]:
-    """Lazy-compile a Numba JIT kernel for the block_lms cycle-slip correction loop.
+    """Compile and cache the Numba kernel of the block equalizers' cycle-slip repair.
 
-    Replaces the Python ``for ci in range(C): for i in range(B)`` loop with
-    compiled native code.  D->H/H->D transfers (few KB) still happen, but the
-    loop body itself runs at native speed, eliminating the dominant overhead
-    when ``cpr_cycle_slip_correction=True`` on GPU.
+    Replaces a Python loop over channels and symbols with compiled code.  The
+    host transfers of the block phases (a few KB) remain, but the loop runs
+    at native speed, which removes the dominant cost of ``cycle_slip=`` in
+    the block equalizers on the GPU.
     """
     if "cs_block" not in _NUMBA_KERNELS:
         numba_mod = _get_numba()
@@ -1675,21 +1675,33 @@ def _get_numba_cs_block() -> Callable[..., Any]:
             threshold,
             cs_H,
         ):
-            """Per-symbol cycle-slip correction for one equalizer block.
+            """Repair the cycle slips of one equalizer block, symbol by symbol.
 
             Parameters
             ----------
-            phi_blk   : (C, B) float64 - BPS phase before correction (input)
-            phi_corr  : (C, B) float64 - corrected phase (output, pre-allocated)
-            cs_buf_x  : (C, H) float64 - unused (retained for call-site compat)
-            cs_buf_y  : (C, H) float64 - circular buffer of past corrected phases
-            cs_buf_ptr: (C,)   int64   - write pointer (monotonically increasing)
-            cs_buf_n  : (C,)   int64   - number of valid entries (≤ H)
-            cs_stats  : (C, 4) float64 - [0]=Sy, [1]=Sxy (relative coords); [2..3] unused
-            b_start   : int            - global symbol index of block start (unused)
-            quantum   : float64        - slip quantum (2π / symmetry)
-            threshold : float64        - |diff| threshold for declaring a slip
-            cs_H      : int            - circular buffer length
+            phi_blk : numpy.ndarray
+                BPS phases before the repair, float64, ``(C, B)``.
+            phi_corr : numpy.ndarray
+                Output: the repaired phases, float64, ``(C, B)``, preallocated.
+            cs_buf_x : numpy.ndarray
+                Unused, kept for the call sites, float64, ``(C, H)``.
+            cs_buf_y : numpy.ndarray
+                Circular buffer of the past repaired phases, float64, ``(C, H)``.
+            cs_buf_ptr : numpy.ndarray
+                Write pointer of each buffer (increasing), int64, ``(C,)``.
+            cs_buf_n : numpy.ndarray
+                Number of valid entries of each buffer (at most H), int64, ``(C,)``.
+            cs_stats : numpy.ndarray
+                Running sums, float64, ``(C, 4)``: ``[0]`` is ``Sy`` and ``[1]`` is
+                ``Sxy`` in relative coordinates; ``[2]`` and ``[3]`` are unused.
+            b_start : int
+                Index of the block's first symbol (unused).
+            quantum : float
+                Slip quantum, ``2π/symmetry``.
+            threshold : float
+                Deviation that declares a slip, in radians.
+            cs_H : int
+                Buffer length H.
             """
             C = phi_blk.shape[0]
             B = phi_blk.shape[1]

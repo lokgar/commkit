@@ -79,8 +79,10 @@ __all__ = [
 
 
 def _symbol_grid(sps: float, span: float) -> np.ndarray:
-    """Tap times in symbols: an odd count, centered on 0, spaced exactly
-    ``1/sps``, covering at most ``span`` symbols.
+    """Tap times of a pulse, in symbols.
+
+    An odd count, centered on 0, spaced exactly ``1/sps``, covering at most
+    ``span`` symbols.
 
     ``int(span * sps)`` taps, plus one when that is even, so the taps sit on
     the sample grid of the signal (a symmetric pulse has its peak on a

@@ -45,28 +45,27 @@ def _get_numba_mm_bootstrap() -> Callable[..., float]:
         def _mm_bootstrap_loop(
             theta: np.ndarray, amp: np.ndarray, M_val: float, fs: float
         ) -> float:
-            """Iterative Mengali-Morelli bootstrap compiled to machine code.
+            """Run the Mengali-Morelli bootstrap over the lags (Numba).
 
-            Predicts each lag's phase from the running weighted frequency
-            estimate accumulated from all previous lags, then folds it
-            into the weighted sum.  Sequential data dependency prevents
-            vectorization; Numba removes Python-interpreter overhead.
+            Each lag's phase is predicted from the weighted frequency estimate of the
+            previous lags, then folded into the weighted sum.  The dependency between
+            lags prevents vectorization.
 
             Parameters
             ----------
-            theta : (L,) float64
-                Wrapped phase of R[m] at each lag (output of np.angle).
-            amp : (L,) float64
-                Magnitude |R[m]| at each lag (output of np.abs).
-            M_val : float64
-                Modulation power (1 for data-aided/generic, order for PSK,
-                4 for QAM).
-            fs : float64
+            theta : numpy.ndarray
+                Wrapped phase of ``R[m]`` at each lag, float64, ``(L,)``.
+            amp : numpy.ndarray
+                Magnitude ``|R[m]|`` at each lag, float64, ``(L,)``.
+            M_val : float
+                Power ``M`` of the pre-processing: 1 for data-aided or generic input,
+                the order for PSK, 4 for QAM.
+            fs : float
                 Sampling rate in Hz.
 
             Returns
             -------
-            float64
+            float
                 Estimated frequency offset in Hz.
             """
             two_pi = 2.0 * np.pi
@@ -839,34 +838,33 @@ def _refine_tones_from_spectrum(
     search_band: float,
     rows: Sequence[int] | np.ndarray | None = None,
 ) -> np.ndarray:
-    """Batched log-parabolic tone refinement on a precomputed full-record FFT.
+    """Refine tone frequencies on an FFT of the whole record, in one batch.
 
-    Device-side counterpart of ``BiasTone`` for callers that already hold
-    the record's spectrum: refines each ``targets[t]`` by an argmax search over
-    ``targets[t] ± search_band`` in the spectrum row ``rows[t]``, followed by
-    the same three-bin log-parabolic sub-bin fit.  No zero-padding is applied
-    (the sub-bin fit compensates for the coarser bin grid), no extra FFTs are
-    run, and all per-tone work stays on device - the refined frequencies come
-    back in a **single** host transfer.
+    The counterpart of ``BiasTone`` for callers that already hold the
+    record's spectrum: each ``targets[t]`` is refined by an argmax search over
+    ``targets[t] ± search_band`` in spectrum row ``rows[t]``, then by the same
+    three-bin log-parabolic fit.  There is no zero padding (the fit makes up
+    for the coarser bins) and no extra FFT, and the work per tone stays on the
+    device: the refined frequencies come back in one host transfer.
 
     Parameters
     ----------
-    X : (R, N) array
-        Full FFT (``xp.fft.fft`` bin order) of the rows to search.
+    X : ndarray
+        FFT of the rows to search, in FFT-bin order, ``(R, N)``.
     sampling_rate : float
         Sampling rate in Hz.
     targets : sequence of float
-        Nominal tone frequencies to refine (length T).
+        Nominal tone frequencies to refine, T values.
     search_band : float
-        Half-width of the per-tone search window in Hz.
+        Half-width of the search window of each tone in Hz.
     rows : sequence of int, optional
-        Spectrum row for each target.  Defaults to ``range(T)`` (requires
-        ``R == T``).
+        Spectrum row of each target; defaults to ``range(T)``, which needs
+        ``R == T``.
 
     Returns
     -------
-    (T,) np.ndarray
-        Refined frequencies in Hz (float64, on host).
+    numpy.ndarray
+        Refined frequencies in Hz, float64, ``(T,)``.
     """
     X, xp, _ = dispatch(X)
     X, _ = as_2d(X, name="X")

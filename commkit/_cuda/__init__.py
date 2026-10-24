@@ -68,9 +68,9 @@ def is_available() -> bool:
 def get_kernel(name: str, **spec: Any) -> Callable | None:
     """Return a launchable kernel wrapper, or ``None`` if unavailable.
 
-    ``None`` means the caller **must** fall back to the existing ``xp``
-    implementation. Any compile/load failure logs one warning per kernel
-    name per process and returns ``None``.
+    With ``None`` the caller falls back to its ``xp`` implementation.  A
+    compile or load failure logs one warning per kernel name and process and
+    returns ``None``.
 
     Parameters
     ----------
@@ -117,8 +117,8 @@ def get_kernel(name: str, **spec: Any) -> Callable | None:
 def _selftest_scale_factory(dtype: str = "float32") -> Callable:
     """Wrapper factory for the infrastructure self-test kernel.
 
-    Validates the full compile -> specialize -> launch path; not used by
-    any DSP code.
+    Exercises the whole path of compiling, specializing and launching; no
+    DSP code uses it.
     """
     import cupy as cp
 
@@ -243,10 +243,10 @@ def _cs_block_factory() -> Callable:
     Per-channel slip detector (one block of threads per channel, decisions
     speculated in parallel; see ``cs_block.cu``) operating in place on
     device-resident state buffers. One launch processes one equalizer block,
-    replacing the per-block D2H -> CPU Numba -> H2D round trip of the
-    fallback path. All state arrays are float64/int64 and are mutated in
-    place - the wrapper therefore rejects non-contiguous inputs instead of
-    silently copying them.
+    replacing the fallback's round trip per block (device to host, the Numba
+    kernel, host to device).  All state arrays are float64 or int64 and are
+    changed in place, so the wrapper rejects non-contiguous inputs instead
+    of copying them silently.
     """
     import cupy as cp
 
@@ -265,8 +265,11 @@ def _cs_block_factory() -> Callable:
         threshold: float,
         cs_H: int,
     ) -> Any:
-        """Correct phi_blk into phi_corr ((C, B) float64), updating the
-        per-channel circular history buffers in place."""
+        """Repair the cycle slips of ``phi_blk`` into ``phi_corr``.
+
+        Both are ``(C, B)`` float64; the per-channel circular history
+        buffers are updated in place.
+        """
         if phi_blk.ndim != 2:
             raise ValueError(f"phi_blk must be 2-D (C, B), got shape {phi_blk.shape}")
         C, B = phi_blk.shape

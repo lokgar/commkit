@@ -141,8 +141,11 @@ def _get_numba_llr(name: str = "llr") -> Callable[..., None]:
 
         @jit
         def log_half_sum(metric, e, idx, v, b, peak):  # type: ignore[no-untyped-def]
-            """log sum_j exp(metric[idx[v, b, j]] - peak), via ``e`` unless
-            the half is underflowed there, else relative to its own max."""
+            """``log sum_j exp(metric[idx[v, b, j]] - peak)`` of one half.
+
+            Summed from ``e``, or relative to the half's own maximum where
+            it underflows in ``e``.
+            """
             half = idx.shape[2]
             s = np.float32(0.0)
             for j in range(half):

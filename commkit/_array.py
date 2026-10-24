@@ -102,7 +102,7 @@ def validate_array(
 
 
 def as_2d(arr: ArrayType, *, name: str = "array") -> tuple[ArrayType, bool]:
-    """Promotes a SISO ``(N,)`` array to the MIMO layout ``(1, N)``.
+    """Promote a SISO ``(N,)`` array to the MIMO layout ``(1, N)``.
 
     The canonical entry half of the library's SISO/MIMO shape idiom; pair it
     with :func:`restore_1d` to squeeze the promoted axis back off the outputs.
@@ -121,7 +121,7 @@ def as_2d(arr: ArrayType, *, name: str = "array") -> tuple[ArrayType, bool]:
     arr_2d : ndarray
         ``arr[None, :]`` for 1-D input, ``arr`` itself (no copy) for 2-D.
     was_1d : bool
-        Whether the promotion happened - pass this to :func:`restore_1d`.
+        Whether the promotion happened; pass it to :func:`restore_1d`.
 
     Raises
     ------
@@ -178,7 +178,7 @@ def restore_1d(was_1d: bool, *arrays: ArrayType) -> ArrayType | tuple[ArrayType,
 def broadcast_channels(
     ref: ArrayType, num_channels: int, xp: Any = None, *, name: str = "reference"
 ) -> ArrayType:
-    """Broadcasts a shared reference sequence across ``num_channels`` channels.
+    """Broadcast a shared reference sequence across ``num_channels`` channels.
 
     Replaces the ad-hoc ``if ref.ndim == 1: ref = ref[None, :]`` promotion used
     at every reference/pilot input, adding the channel-count check that the
@@ -235,8 +235,8 @@ def require_channels(
 ) -> ArrayType:
     """Validate a strict MIMO layout with an exact channel count.
 
-    For entry points that are *only* defined for a fixed number of channels -
-    dual-polarization channel models and polarization equalizers - where a
+    For entry points defined only for a fixed number of channels
+    (dual-polarization channel models and polarization equalizers), where a
     SISO input is a caller error rather than something to promote.
 
     Parameters
@@ -305,9 +305,12 @@ def to_report_scalar(values: Any, *, was_1d: bool | None = None) -> float | np.n
 
 
 def warn_if_double(arr: Any, function_name: str, working: str = "complex64") -> None:
-    """Emit :class:`~commkit.backend.PrecisionWarning` when ``arr`` is double
-    precision (complex128 or float64) and ``function_name`` computes in the
-    single-precision ``working`` dtype; attributed to the caller's line."""
+    """Warn that a single-precision block received double-precision data.
+
+    Emits :class:`~commkit.backend.PrecisionWarning` when ``arr`` is
+    complex128 or float64 and ``function_name`` computes in the
+    single-precision ``working`` dtype, attributed to the caller's line.
+    """
     dtype = getattr(arr, "dtype", None)
     if dtype is None or dtype not in (np.complex128, np.float64):
         return

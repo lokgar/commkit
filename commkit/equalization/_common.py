@@ -24,39 +24,40 @@ from .result import EqualizerResult
 def _normalize_inputs(
     samples: Any, training_symbols: Any, sps: int, input_norm_factor: Any = None
 ) -> tuple[Any, Any, Any]:
-    """Scale samples to unit symbol power (training symbols pass through).
+    """Scale samples to unit symbol power; training symbols pass through.
 
-    For fractionally-spaced equalization (sps > 1) the fractional timing phase
-    is unknown.  Strided power measurement ``samples[..., ::sps]`` is unsafe
-    because it can land on zero-crossings of the Nyquist pulse, severely
-    underestimating signal power and destabilizing adaptation.
-
-    Instead the *wideband* (all-sample) power over the full signal is used.
-    This is the most accurate power estimate and is independent of whether
-    training symbols are provided.
+    At more than one sample per symbol the timing phase is unknown, and the
+    strided power ``samples[..., ::sps]`` can land on zero crossings of the
+    Nyquist pulse, underestimating the power and destabilizing the
+    adaptation.  The power of all samples over the whole record is used
+    instead; it does not depend on whether training symbols are given.
 
     Parameters
     ----------
-    samples          : (C, N) or (N,)  complex, NumPy or CuPy
-    training_symbols : (C, K) or (K,)  or None - always at 1 sps
-    sps              : int - samples per symbol
-    input_norm_factor : float or np.ndarray, optional
-        When supplied, skip the RMS computation and divide samples by this
-        factor instead.  Pass ``EqualizerResult.input_norm_factor`` from a
-        previous call to keep successive blocks on the same power scale.
-        ``float`` for SISO, ``(C,)`` array for MIMO.
+    samples : array_like
+        Complex samples, ``(N,)`` or ``(C, N)``, NumPy or CuPy.
+    training_symbols : array_like or None
+        Training symbols at one sample per symbol, ``(K,)`` or ``(C, K)``.
+    sps : int
+        Samples per symbol.
+    input_norm_factor : float or numpy.ndarray, optional
+        Factor to divide by instead of measuring the RMS: the
+        ``EqualizerResult.input_norm_factor`` of an earlier call, to keep
+        successive records on one power scale.  A ``float`` for SISO, ``(C,)``
+        for MIMO.
 
     Returns
     -------
-    samples          : unit symbol-power, same shape and device
-    training_symbols : unchanged (known symbols are on the constellation scale)
-    input_norm_factor : float or np.ndarray
-        Per-channel normalization factor(s) ``rms(ch) * sqrt(sps)`` applied
-        to *samples* before this function returned.  ``float`` for SISO,
-        ``np.ndarray`` of shape ``(C,)`` for MIMO.  Stored in
-        ``EqualizerResult.input_norm_factor`` so callers can reconstruct
-        the physical power scale of a different capture (e.g. vacuum noise)
-        passed through the same frozen taps.  See ``EqualizerResult`` docs.
+    samples : ndarray
+        The samples at unit symbol power, same shape and device.
+    training_symbols : ndarray or None
+        Unchanged: known symbols are already on the constellation's scale.
+    input_norm_factor : float or numpy.ndarray
+        Per-channel factor ``rms(channel)·sqrt(sps)`` the samples were divided
+        by: a ``float`` for SISO, ``(C,)`` for MIMO.  Stored in
+        ``EqualizerResult.input_norm_factor``, so that another capture (vacuum
+        noise) passed through the same frozen taps can be put on the same
+        absolute power scale.
     """
     if input_norm_factor is not None:
         # Caller supplies scale - skip RMS and just apply it.
@@ -156,21 +157,24 @@ def _build_padded_samples(
 def _init_butterfly_weights_numpy(
     num_ch: int, num_taps: int, center_tap: int | None = None
 ) -> np.ndarray:
-    """Build center-tap identity butterfly weight matrix as a NumPy array.
+    """Build the identity butterfly weights: unit center taps, zeros elsewhere.
 
-    ``W[i, i, center] = 1+0j`` for each channel ``i``, all other entries zero:
-    at time 0 the equalizer passes each channel straight through.
+    ``W[i, i, center_tap] = 1`` for every channel ``i``, so at time 0 the
+    equalizer passes each channel straight through.
 
     Parameters
     ----------
-    num_ch     : int - number of input/output channels C
-    num_taps   : int - FIR filter length T
-    center_tap : int or None - tap index for unit initialization;
-                 defaults to ``num_taps // 2``
+    num_ch : int
+        Number of input and output channels C.
+    num_taps : int
+        FIR length T.
+    center_tap : int, optional
+        Index of the unit tap; defaults to ``num_taps // 2``.
 
     Returns
     -------
-    W : (C, C, num_taps) complex64 NumPy array
+    numpy.ndarray
+        complex64 weights, ``(C, C, num_taps)``.
     """
     W = np.zeros((num_ch, num_ch, num_taps), dtype=np.complex64)
     center = center_tap if center_tap is not None else num_taps // 2
@@ -180,26 +184,30 @@ def _init_butterfly_weights_numpy(
 
 
 def _validate_w_init(w: np.ndarray, num_ch: int, num_taps: int) -> np.ndarray:
-    """Validate initial_taps shape and return it in butterfly layout ``(C, C, T)``.
+    """Check ``initial_taps`` and return it in the butterfly layout ``(C, C, T)``.
 
-    The library's unpack helpers squeeze SISO weights from ``(1, 1, T)`` to
-    ``(T,)`` in ``EqualizerResult.weights`` for user convenience.  This means
-    a weight array produced by one SISO equalizer stage and passed as ``initial_taps``
-    to the next stage arrives here as ``(T,)``; that shape must be accepted.
+    ``EqualizerResult.weights`` squeezes SISO weights from ``(1, 1, T)`` to
+    ``(T,)``, so the weights of one SISO stage passed as ``initial_taps`` to
+    the next arrive as ``(T,)`` (or ``(1, T)``); both are accepted.
 
     Parameters
     ----------
-    w        : np.ndarray - candidate initial_taps array (already cast to NumPy)
-    num_ch   : int        - expected number of channels C
-    num_taps : int        - expected number of FIR taps T
+    w : numpy.ndarray
+        Candidate initial taps, already on the host.
+    num_ch : int
+        Expected number of channels C.
+    num_taps : int
+        Expected number of taps T.
 
     Returns
     -------
-    np.ndarray - w reshaped to ``(num_ch, num_ch, num_taps)`` if needed.
+    numpy.ndarray
+        ``w`` reshaped to ``(num_ch, num_ch, num_taps)`` where needed.
 
     Raises
     ------
-    ValueError if the shape cannot be mapped to ``(num_ch, num_ch, num_taps)``.
+    ValueError
+        If the shape cannot be mapped to ``(num_ch, num_ch, num_taps)``.
     """
     expected = (num_ch, num_ch, num_taps)
     if w.shape == expected:
@@ -220,22 +228,26 @@ def _prepare_training_numpy(
     num_ch: int,
     n_sym: int,
 ) -> tuple[np.ndarray, int]:
-    """Build the zero-padded training array for the Numba scan kernels.
+    """Build the zero-padded training array of the Numba scan kernels.
 
-    Pure NumPy implementation - no CuPy or ``dispatch`` dependencies.
-    The caller must ensure ``training_symbols`` is already a NumPy array
-    (use ``to_device(training_symbols, "cpu")`` before calling).
+    NumPy only: the caller moves ``training_symbols`` to the host first
+    (``to_device(training_symbols, "cpu")``).
 
     Parameters
     ----------
-    training_symbols : (K,) or (C, K) complex64 NumPy array, or None
-    num_ch           : int - C
-    n_sym            : int - symbol count (columns of output array)
+    training_symbols : array_like or None
+        Training symbols, ``(K,)`` (shared by all channels) or ``(C, K)``.
+    num_ch : int
+        Number of channels C.
+    n_sym : int
+        Number of output symbols, the columns of the result.
 
     Returns
     -------
-    train_full      : (C, n_sym) complex64 NumPy array
-    n_train_aligned : int - effective number of data-aided symbols
+    train_full : numpy.ndarray
+        complex64 training symbols followed by zeros, ``(C, n_sym)``.
+    n_train_aligned : int
+        Number of data-aided symbols, ``min(K, n_sym)``.
     """
     if training_symbols is not None:
         train_arr = np.asarray(training_symbols, dtype=np.complex64)
@@ -270,22 +282,33 @@ def _unpack_result_numpy(
     num_train_symbols: int = 0,
     input_norm_factor: Any = 1.0,
 ) -> EqualizerResult:
-    """Convert Numba kernel outputs (plain NumPy) into an ``EqualizerResult``.
+    """Convert the Numba kernels' host outputs into an ``EqualizerResult``.
 
-    All inputs are NumPy arrays produced by the Numba kernels; outputs are
-    placed on ``xp`` (the input's array module).
+    The outputs are moved to ``xp``, the array module of the input.
 
     Parameters
     ----------
-    y_out           : (N_sym, C) complex64 NumPy array - equalized symbols
-    e_out           : (N_sym, C) complex64 NumPy array - complex errors
-    W_final         : (C, C, num_taps) complex64 NumPy array - final weights
-    w_hist          : (N_sym or 1, C, C, num_taps) NumPy - weight history
-    was_1d          : bool - squeeze C=1 dimension for SISO inputs
-    store_weights   : bool - if False, ``weights_history`` is None
-    n_sym           : int or None - truncation length (None = no truncation)
-    xp              : output array module (np or cp)
-    num_train_symbols: int - stored in result for caller reference
+    y_out : numpy.ndarray
+        Equalized symbols, complex64, ``(N_sym, C)``.
+    e_out : numpy.ndarray
+        Errors, complex64, ``(N_sym, C)``.
+    W_final : numpy.ndarray
+        Final weights, complex64, ``(C, C, num_taps)``.
+    w_hist : numpy.ndarray
+        Weight history, ``(N_sym, C, C, num_taps)``, or a ``(1, ...)``
+        placeholder without ``store_weights``.
+    was_1d : bool
+        Squeeze the channel axes for SISO input.
+    store_weights : bool
+        Return ``w_hist`` as ``weights_history``; otherwise it is ``None``.
+    n_sym : int, optional
+        Number of symbols to keep; by default all.
+    xp : module, default numpy
+        Array module of the outputs (``numpy`` or ``cupy``).
+    num_train_symbols : int, default 0
+        Training symbols used, stored in the result.
+    input_norm_factor : float or numpy.ndarray, default 1.0
+        Input normalization factor, stored in the result.
 
     Returns
     -------
@@ -320,8 +343,10 @@ def _unpack_result_numpy(
 
 
 def _cpr_symmetry(constellation: Any) -> int:
-    """Rotational symmetry of the inline CPR: the BPS searches
-    ``[0, 2π/symmetry)`` and cycle slips are multiples of ``2π/symmetry``.
+    """Rotational symmetry used by the inline CPR.
+
+    The BPS searches ``[0, 2π/symmetry)`` and cycle slips are multiples of
+    ``2π/symmetry``.
 
     The constellation's own symmetry, as in ``recovery.BPS``; 4 without one.
     """

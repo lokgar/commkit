@@ -56,13 +56,13 @@ def apply_interpolated_matrix(
 
     Output sample ``n`` is ``M(n) · samples[:, n]``, where ``M(n)`` is the exact
     linear blend ``M[g] + (M[g+1]-M[g])·t`` inside grid cell ``g`` (``t`` ramps
-    ``0->1`` across the cell).  This is the apply half of the dynamic pilot demux,
+    from 0 to 1 across the cell).  This is the apply half of the dynamic pilot demux,
     but it is a generic operator: given any per-grid-point matrix stack (an inverse
     ``W(n)``, a polar unitary ``Qᴴ(n)``, a butterfly seed, ...) it interpolates and
     applies it as a fixed forward pass.
 
-    Within each uniform cell the apply collapses to two batched ``(K, C)`` GEMMs -
-    ``M[g]·X`` and ``dM·(X·t)`` - instead of materializing a per-sample
+    Within each uniform cell the product reduces to two batched ``(K, C)``
+    matrix products, ``M[g]·X`` and ``dM·(X·t)``, instead of building a per-sample
     ``(L, K, C)`` matrix and an einsum mat-vec, so the cost is a handful of batched
     kernels rather than an ``O(N)`` Python/launch-bound loop.  The ``O(N)`` data
     path runs in ``complex64`` (a well-conditioned mix with no long accumulation),
@@ -163,8 +163,9 @@ def _tone_phasor_matrix(xw: ArrayType, freqs: Any, sampling_rate: float) -> Arra
     path on the slow FP64 units.  Instead the record is processed in
     ``_EXTRACT_CHUNK`` blocks: each block's ``(C, chunk) @ (chunk, K)`` product
     runs in the signal's working precision (complex64 for complex64 input) and
-    the small ``(C, K)`` per-block partials are accumulated in complex128 - the
-    round-off no longer grows with N beyond a block, at complex64 bandwidth.
+    the small ``(C, K)`` per-block partials are accumulated in complex128, so
+    the rounding error no longer grows with N beyond a block, at complex64
+    bandwidth.
     The phase ramp is always formed and wrapped in float64 (a float32 ramp
     loses the integer turn count over long records) and only the *wrapped*
     phase drops to float32 for the ``exp``.
@@ -249,38 +250,41 @@ def _jones_at_grid_points(
     grid_np: np.ndarray,
     sampling_rate: float,
 ) -> ArrayType:
-    r"""Tone-tracked Jones estimate evaluated **only** at the grid points.
+    r"""Tone-tracked Jones estimate evaluated at the grid points only.
 
-    The mix-down + centered-FIR tracker output at sample ``g`` factors as
+    The output of the mix-down and the centered tracking FIR at sample ``g``
+    factors as::
 
         T[c, k, g] = e^{-j2π f_k g/fs} · Σ_q h̃_k[q] · r_c[g - lead + q],
         h̃_k[q]    = h[L-1-q] · e^{-j2π f_k (q - lead)/fs},   lead = ⌈(L-1)/2⌉,
 
-    i.e. a bandpass filter at ``+f_k`` - so instead of materializing the
-    (C, K, N) mixed array and FFT-filtering every sample only to keep one in
-    ``grid_step``, this gathers the (chunk, L) sample windows around the grid
-    points and hits all K modulated tap vectors with one GEMM per chunk.  No
-    full-record temporaries are created.  Zero-padding at the record edges
-    reproduces ``mode='same'`` semantics exactly, so the ``num_taps//2``
-    edge-guard contract is unchanged.
+    a bandpass filter at ``+f_k``.  So instead of building the ``(C, K, N)``
+    mixed array and filtering every sample to keep one in ``grid_step``, this
+    gathers the ``(chunk, L)`` sample windows around the grid points and
+    applies all K modulated tap vectors in one matrix product per chunk,
+    without temporaries of the record's size.  Zero padding at the record
+    ends reproduces ``mode='same'`` exactly, so the ``num_taps//2`` edge
+    guard is unchanged.
 
     Parameters
     ----------
-    xw : (C, N) array
-        Received samples in working precision (complex64/complex128).
-    h : (L,) np.ndarray
-        Tracking low-pass FIR taps.
+    xw : ndarray
+        Received samples in the working precision (complex64 or complex128),
+        ``(C, N)``.
+    h : numpy.ndarray
+        Tracking low-pass FIR taps, ``(L,)``.
     freqs : sequence of float
         The K tracked tone frequencies in Hz.
-    grid_np : (G,) np.ndarray of int
-        Sample indices of the inversion grid (host).
+    grid_np : numpy.ndarray
+        Integer sample indices of the inversion grid, ``(G,)``.
     sampling_rate : float
         Sampling rate in Hz.
 
     Returns
     -------
-    (G, C, K) array
-        Jones stack in complex128, ready for the batched Gram inverse.
+    ndarray
+        Jones stack, complex128, ``(G, C, K)``, ready for the batched Gram
+        inverse.
     """
     xw, xp, _ = dispatch(xw)
     C, N = xw.shape

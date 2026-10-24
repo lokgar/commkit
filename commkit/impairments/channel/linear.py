@@ -33,9 +33,9 @@ def _jones_rotation(theta: float, xp: ModuleType, dtype: Any) -> ArrayType:
     Shared builder for ``apply_pmd``'s rotation into the PSP frame,
     ``R(-theta)`` (the section of ``_fiber.jones_section``), and
     ``apply_polarization_mixing``'s static-``theta`` path.  The time-varying
-    path in ``apply_polarization_mixing`` doesn't build an explicit matrix -
-    a distinct 2x2 matrix per sample isn't worth materializing - so it
-    applies the same rotation via direct per-sample broadcasting instead.
+    path of ``apply_polarization_mixing`` builds no matrix (one 2x2 matrix
+    per sample is not worth building); it applies the same rotation by
+    broadcasting per sample.
     """
     c = math.cos(theta)
     s = math.sin(theta)

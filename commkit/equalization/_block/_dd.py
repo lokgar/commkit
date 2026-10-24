@@ -108,8 +108,11 @@ class _BlockCarrier:
 
 @dataclass
 class _BlockBps:
-    """Blind phase search across blocks: candidates, window history, S-fold
-    unwrap and cycle-slip state (device arrays; host for the Numba slip path).
+    """Blind phase search state carried across blocks.
+
+    The candidates, the window history, the S-fold unwrap and the
+    cycle-slip state, as device arrays (host arrays for the Numba slip
+    path).
     """
 
     P: int
@@ -363,15 +366,14 @@ def block_lms(
     Parameters
     ----------
     samples : array_like or Signal
-        Input signal samples.  Shape: ``(N_samples,)`` for SISO or
-        ``(C, N_samples)`` for MIMO butterfly equalization.
-        Typically at 2 samples/symbol for fractionally-spaced equalization.
+        Received samples, ``(N,)`` for SISO or ``(C, N)`` for the MIMO
+        butterfly, usually at 2 samples per symbol (fractionally spaced).
         A :class:`Signal` supplies ``sps`` and ``constellation``; the result
         then also carries ``signal``, the 1-SPS output Signal.
     training_symbols : array_like, optional
         Known transmitted symbols at 1 SPS, on the scale of the unit-power
-        ``constellation`` (used as given).
-        Shape: ``(N_train,)`` for SISO or ``(C, N_train)`` for MIMO.
+        ``constellation`` (used as given), ``(N_train,)`` or
+        ``(C, N_train)``.
     num_taps : int, default 21
         Number of taps per FIR filter (tap count in samples).
     sps : int, optional

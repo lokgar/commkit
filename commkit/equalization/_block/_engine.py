@@ -55,8 +55,9 @@ class _Block:
     x_win: ArrayType  # (C, F) input window of the current block
 
     def fill_window(self, b_start: int, B: int) -> None:
-        """Load the ``B·sps + T - 1`` input samples of block ``b_start`` into
-        ``x_win``, zeros after them.
+        """Load the input samples of block ``b_start`` into ``x_win``.
+
+        ``B·sps + T - 1`` samples, zeros after them.
 
         Only these samples reach the block's outputs and gradient; loading
         later ones too would change the FFT's rounding with data the block

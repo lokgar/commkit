@@ -255,9 +255,10 @@ def _attach_equalized_signal(
     """Attach the 1-SPS output Signal for Signal input.
 
     The Signal holds the output symbols that belong to ``signal``'s own
-    samples - after the ``state.overlap`` symbols a continued call recomputes
-    for the previous chunk - with the reference cut to them (RLS drops its
-    tail), at ``sampling_rate = symbol_rate``.  ``y_hat`` stays an array.
+    samples (after the ``state.overlap`` symbols that a continued call
+    recomputes for the previous chunk), with the reference cut to them (RLS
+    drops its tail), at ``sampling_rate = symbol_rate``.  ``y_hat`` stays an
+    array.
     """
     if signal is None:
         return result

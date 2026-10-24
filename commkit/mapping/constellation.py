@@ -291,9 +291,11 @@ class Constellation:
         return _llr(symbols, self.points, self.bit_labels, self.pmf, noise_var, method)
 
     def _nearest(self, symbols: ArrayType) -> ArrayType:
-        """Index of the nearest point for each of the ``(N,)`` ``symbols``,
-        int64 on their device.  The decision behind :meth:`demap` and the
-        decision-directed metrics."""
+        """Index of the nearest point for each symbol.
+
+        int64, ``(N,)`` for ``(N,)`` symbols, on their device: the decision
+        behind :meth:`demap` and the decision-directed metrics.
+        """
         x, xp, _ = dispatch(symbols)
         grid = self._square_grid
         if grid is None:
@@ -376,7 +378,9 @@ class Constellation:
 
     @cached_property
     def _axes(self) -> tuple[_Axis, _Axis] | None:
-        """The real and imaginary axes of a square lattice whose labels and
+        """Per-axis factors of a separable square lattice, or ``None``.
+
+        The real and imaginary axes of a square lattice whose labels and
         prior factor into per-axis ones (Gray QAM, shaped or not).
 
         Every bit then depends on one axis only, and the other axis's factor

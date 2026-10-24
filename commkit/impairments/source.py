@@ -38,16 +38,18 @@ def _phase_trajectory(
     xp: ModuleType,
     periodic: bool = False,
 ) -> ArrayType:
-    """float64 phase trajectories on ``xp``'s device with one-sided FM-noise PSD
+    """Draw float64 phase trajectories with a white and flicker FM-noise PSD.
+
+    The one-sided frequency-noise PSD is, on ``xp``'s device::
 
         S_f(f) = linewidth / pi  +  flicker / f      [Hz^2/Hz].
 
     The white-FM part is generated exactly as a discrete Wiener walk
     (per-sample increments N(0, 2*pi*linewidth/f_s)); the flicker part by
     spectral shaping of white frequency noise.  Both draw float32 noise and
-    accumulate in float64.  Like AWGN, the noise is drawn
-    on the device: a seed gives the same statistics on every device, not the
-    same realization.
+    accumulate in float64.  Like AWGN, the noise is drawn on the device: a
+    seed gives the same statistics on every device, not the same
+    realization.
 
     ``periodic`` takes the same realization and subtracts one constant from
     every increment so that they sum to a multiple of 2π: the trajectory then

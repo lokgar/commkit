@@ -106,9 +106,9 @@ def plot_frequency_drift(
 def _log_cell_median(f_pos, s, sel, points_per_octave=24):
     """Median-reduce a PSD onto a log-frequency grid (NaN for empty cells).
 
-    Returns geometric cell-center frequencies and the per-cell median of the
-    ``sel``-selected bins - the readable trace for dense Welch spectra, and
-    exactly the reduction the plateau detector medians over.
+    Returns the geometric cell-center frequencies and the per-cell median of
+    the bins selected by ``sel``: a readable trace of a dense Welch spectrum,
+    and the same reduction the plateau detector takes its median over.
     """
     if not sel.any():
         return np.array([]), np.array([])

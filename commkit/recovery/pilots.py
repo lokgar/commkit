@@ -170,52 +170,67 @@ def _extract_pilot_phasor(
     X: ArrayType | None = None,
     return_window: bool = False,
 ) -> tuple[ArrayType, np.ndarray, np.ndarray, np.ndarray, ArrayType | None, ArrayType]:
-    """Isolate a CW pilot tone and return its carrier-stripped complex phasor.
+    """Isolate a CW pilot tone and return its phasor with the carrier removed.
 
-    Shared core of the ``PilotTone`` and ``PilotTones`` estimators:
-    refine the per-channel tone center, extract it with a zero-phase spectral
-    window (FFT -> window -> IFFT, sample-aligned), and strip the nominal carrier
-    so a residual frequency offset survives as a slow phase ramp.
+    The shared core of ``PilotTone`` and ``PilotTones``: refine each
+    channel's tone center, extract the tone with a zero-phase spectral window
+    (FFT, window, IFFT, aligned with the samples), and remove the nominal
+    carrier, so that a residual frequency offset remains as a slow phase
+    ramp.
 
-    Everything runs in the signal's working precision (complex64 for complex64
-    input) - the ±π-safe part of the pipeline is the float64 promotion of the
-    *angle* before unwrap, which the callers already perform, not
-    double-precision spectra.  Tone refinement reuses the extraction FFT
-    (device-side log-parabolic fit; one host transfer) instead of running a
-    zero-padded full-record FFT per channel, and the window/noise statistics
-    touch only the ``O(bandwidth/df)`` occupied bins instead of dense (C, N)
-    arrays.
+    Everything runs in the working precision of the samples (complex64 for
+    complex64 input): the part that must be safe at ``±π`` is the float64
+    angle before the unwrap, which the callers take, not the spectra.  The
+    tone refinement reuses the extraction FFT (a log-parabolic fit on the
+    device, one host transfer) instead of a zero-padded FFT of the record per
+    channel, and the window and noise statistics touch only the
+    ``O(bandwidth/df)`` occupied bins, not dense ``(C, N)`` arrays.
 
     Parameters
     ----------
-    samples : (C, N) array
-        Oversampled complex samples, already 2-D (caller handles the 1-D case).
+    samples : ndarray
+        Oversampled complex samples, ``(C, N)`` (the caller promotes SISO).
+    sampling_rate : float
+        Sampling rate in Hz.
+    tone_frequency : float
+        Nominal tone frequency in Hz.
+    bandwidth : float
+        Half-width of the extraction window in Hz.
     xp : module
-        The dispatched array module for ``samples`` (numpy/cupy).
-    X : (C, N) array, optional
-        Precomputed ``_fft.fft(samples, axis=-1)`` in working precision.
-        Pass it when extracting several tones from the same record so the
+        Array module of ``samples``.
+    search_band : float, optional
+        Half-width of the peak search in Hz; defaults to ``bandwidth``.
+    refine_tone : bool, default True
+        Center the window on the measured tone peak of each channel.
+    window : str or tuple, default "tukey"
+        Window over the passband, a ``scipy.signal.get_window`` spec.
+    X : ndarray, optional
+        ``_fft.fft(samples, axis=-1)`` in the working precision, ``(C, N)``.
+        Pass it when several tones are extracted from one record, so the
         record is transformed once (``PilotTones``).
     return_window : bool, default False
-        Build and return the dense (C, N) extraction window ``W`` (diagnostics
-        only); when ``False`` the ``W`` slot in the return tuple is ``None``.
-    (others) : see ``PilotTone``.
+        Build and return the dense extraction window ``W`` (diagnostics
+        only); otherwise its slot in the result is ``None``.
 
     Returns
     -------
-    phasor : (C, N) complex, working precision
-        ``z(n) ≈ A·e^{jθ(n)}`` per channel (carrier-frequency stripped).
-    f_centers : (C,) float64
-        Detected per-channel tone center [Hz].
-    sig_power : (C,) float64
-        In-band tone power ``|A|²`` within the tracking window, in the same
-        units as ``mean(|z|²)`` (for SNR weights).
-    noise_power : (C,) float64
-        Additive-noise power ``σ²`` within the tracking window, same units.
-    W : (C, N) float64 or None
-        The extraction window (only if ``return_window=True``).
-    X : (C, N) complex, working precision
-        The full FFT (reusable for further tones / diagnostics).
+    phasor : ndarray
+        ``z(n) ≈ A·e^{jθ(n)}`` per channel with the carrier removed, complex,
+        working precision, ``(C, N)``.
+    f_centers : numpy.ndarray
+        Measured tone center of each channel in Hz, float64, ``(C,)``.
+    sig_power : numpy.ndarray
+        In-band tone power ``|A|²`` in the tracking window, in the units of
+        ``mean(|z|²)`` (for SNR weights), float64, ``(C,)``.
+    noise_power : numpy.ndarray
+        Additive noise power ``σ²`` in the tracking window, same units,
+        float64, ``(C,)``.
+    W : ndarray or None
+        The extraction window, float64, ``(C, N)``, with
+        ``return_window=True``.
+    X : ndarray
+        The FFT of the record, complex, working precision, ``(C, N)``, for
+        further tones or diagnostics.
     """
     from ..frequency import _refine_tones_from_spectrum, correct_frequency_offset
 
@@ -432,10 +447,10 @@ def _pilot_tone(samples: ArrayType, method: PilotTone, ctx: _Context) -> _Phase:
 
 
 def _lowpass_fft(z: ArrayType, sampling_rate: float, cutoff: float, xp) -> ArrayType:
-    """Zero-phase brick-wall low-pass of a complex stream (FFT -> mask -> IFFT).
+    """Zero-phase brick-wall low-pass of a complex stream: FFT, mask, IFFT.
 
-    Used to isolate the **slow** inter-tone differential phasor; zero-phase so
-    the recovered ``δ(n)`` is lag-free (it is far inside the passband anyway).
+    Isolates the slow inter-tone differential phasor; zero phase, so the
+    recovered ``δ(n)`` has no lag (it is far inside the passband anyway).
     """
     N = z.shape[-1]
     freqs = xp.fft.fftfreq(N, d=1.0 / sampling_rate)

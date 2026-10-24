@@ -196,8 +196,10 @@ def _plot_time_domain(
 def _envelope(
     y: Any, sampling_rate: float, max_points: int | None, xp: Any
 ) -> tuple[np.ndarray, np.ndarray]:
-    """Host time axis and values to draw: the samples, or their min/max
-    envelope when there are more than ``max_points``.
+    """Host time axis and values to draw.
+
+    The samples, or their min/max envelope when there are more than
+    ``max_points``.
 
     About ``max_points // 2`` buckets of equal width (the last one shorter)
     each contribute their minimum and maximum at the bucket's start time,

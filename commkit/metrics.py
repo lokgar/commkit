@@ -150,9 +150,11 @@ def _constellation(adapter: SignalAdapter, constellation: Any, name: str) -> Any
 def _paired(
     rx: ArrayType, reference: Any, xp: Any, name: str
 ) -> tuple[ArrayType, ArrayType]:
-    """The reference on ``rx``'s device, and in its precision when both are
-    floating point (a complex128 reference does not promote complex64 data);
-    the shapes must agree."""
+    """Move the reference to ``rx``'s device and precision.
+
+    The precision is matched when both are floating point, so a complex128
+    reference does not promote complex64 data.  The shapes must agree.
+    """
     ref = to_device(reference, "cpu" if xp is np else "gpu")
     if rx.shape != ref.shape:
         raise ValueError(
@@ -183,9 +185,12 @@ def _gain(rx: ArrayType, tx: ArrayType, xp: Any) -> ArrayType:
 def _reference_scaled(
     adapter: SignalAdapter, rx: ArrayType, xp: Any, name: str, num_skip: int
 ) -> ArrayType:
-    """A Signal's symbols divided by the data-aided gain against its reference
-    symbols (estimated after the first ``num_skip``); arrays and Signals
-    without a reference are returned as given."""
+    """Divide a Signal's symbols by their data-aided gain.
+
+    The gain is estimated against the reference symbols after the first
+    ``num_skip``.  Arrays and Signals without a reference are returned as
+    given.
+    """
     sig = adapter.signal
     if sig is None or sig.reference is None:
         return rx
