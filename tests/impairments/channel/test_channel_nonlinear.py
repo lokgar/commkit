@@ -241,6 +241,41 @@ class TestAmplifierNoise:
         measured = np.mean(np.abs(noise.reshape(num_channels, -1)) ** 2, axis=-1)
         np.testing.assert_allclose(measured, expected, rtol=0.03)
 
+    @staticmethod
+    def _ase_power(x, attenuation_db_km, nf_db, span_km=80.0, launch_dbm=-3.0):
+        """Mean ASE power per sample after one span, in the input's units."""
+        kw = dict(
+            fiber=Fiber(attenuation_db_km=attenuation_db_km, nonlinearity_per_w_km=0.0),
+            span_length_km=span_km,
+            num_spans=1,
+            launch_power_dbm=launch_dbm,
+            steps_per_span=4,
+            sampling_rate=FS,
+        )
+        noisy = apply_fiber_propagation(x, noise_figure_db=nf_db, rng=11, **kw)
+        clean = apply_fiber_propagation(x, **kw)
+        return float(np.mean(np.abs(np.asarray(to_device(noisy - clean, "cpu"))) ** 2))
+
+    def test_ase_power_scales_with_the_span_gain(self, xp):
+        """The amplifier's gain is the span loss, G = 10^(a L / 10), so at a
+        fixed noise figure F the ASE power follows (F G - 1): ratios between
+        attenuations cancel hν, f_s and the launch power."""
+        x = xp.asarray(_field(1, n=1 << 16, seed=5))[0]
+        nf_db, span_km = 5.0, 80.0
+        f = 10.0 ** (nf_db / 10.0)
+        attenuations = (0.0, 0.1, 0.25)  # G = 0, 8, 20 dB
+        powers = [self._ase_power(x, a, nf_db, span_km) for a in attenuations]
+        for a, p in zip(attenuations[1:], powers[1:], strict=True):
+            gain = 10.0 ** (a * span_km / 10.0)
+            assert p / powers[0] == pytest.approx(
+                (f * gain - 1.0) / (f - 1.0), rel=0.03
+            )
+
+    def test_ideal_amplifier_on_a_lossless_span_adds_no_noise(self, xp):
+        """F = 1 (0 dB) and G = 1: (F G - 1) hν / 2 = 0."""
+        x = xp.asarray(_field(1, n=1 << 12, seed=5))[0]
+        assert self._ase_power(x, 0.0, 0.0) == 0.0
+
     def test_noise_needs_a_seed_only_for_its_realization(self, xp):
         x = xp.asarray(_field(2))
         kw = dict(

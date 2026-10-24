@@ -1252,8 +1252,12 @@ def correct_fiber_propagation(
 
     Runs the split-step solver of
     :func:`commkit.impairments.apply_fiber_propagation` backward: the spans
-    in reverse order, each amplifier's gain removed, and every step's
-    dispersion, loss and Kerr phase inverted.  With the link's own
+    in reverse order and every step inverted (negated dispersion and Kerr
+    phase).  The solver works on the loss-normalized field ``u = A e^{αz/2}``,
+    on which an amplifier that restores the span loss is the identity, so
+    neither the loss nor the gain is applied as a factor: the loss enters
+    only through the Kerr phase of each step, ``γ (e^{-αz_{k-1}} -
+    e^{-αz_k}) / α`` times the power, which DBP negates.  With the link's own
     ``steps_per_span`` and ``nonlinear_scale=1`` this is the exact inverse
     of a noiseless, PMD-free link, up to rounding: the symmetric split step
     is time-reversible.  That is the default.
