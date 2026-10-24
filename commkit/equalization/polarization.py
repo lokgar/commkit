@@ -193,23 +193,22 @@ def _refine_tone_frequencies(
     sampling_rate: float,
     search_band: float,
 ) -> list[float]:
-    """Sub-bin refine each tone on the receive channel where it is strongest.
+    """Refine each tone frequency on the receive channel where it is strongest.
 
-    Two stages, replacing the per-tone the ``BiasTone`` estimator calls (each of which
-    ran its own full-record, power-of-two zero-padded FFT):
+    Two stages replace one ``BiasTone`` estimate per tone, each of which ran
+    its own zero-padded FFT of the full record:
 
-    1. **Coarse**: one batched FFT (working precision) of only the *unique*
-       strongest channels + the device-side log-parabolic fit - good to a
-       fraction of a bin, but ill-conditioned for a tone sitting exactly on a
-       bin (its neighbors are sinc nulls).
-    2. **Fine**: two-segment phase slope - the exact tone phasor of each
-       half-record at the coarse frequency (chunked GEMMs); the phase advance
-       between the segment centroids gives the residual offset
-       ``δ = ∠(z_b·conj(z_a))·fs/(2π·Δc)``, unambiguous for ``|δ| < 1`` bin
-       (which stage 1 guarantees) and accurate to well below either parabolic
-       fit.  The demux mix-down is Hz-sensitive - a tone-frequency error
-       leaves a slow residual rotation on the demuxed output - hence this
-       stage.
+    1. Coarse: one batched FFT, in the working precision, of the distinct
+       strongest channels only, and the log-parabolic peak fit on the
+       device.  It is good to a fraction of a bin but ill-conditioned for a
+       tone exactly on a bin, whose neighbors are sinc nulls.
+    2. Fine: the phase slope between two half-records.  The exact tone
+       phasor of each half at the coarse frequency (chunked matrix
+       products) advances between the segment centroids by the residual
+       offset ``δ = ∠(z_b·conj(z_a))·fs/(2π·Δc)``, unambiguous for
+       ``|δ| < 1`` bin (which stage 1 guarantees) and far more accurate than
+       either peak fit.  The mix-down needs it: a tone-frequency error
+       leaves a slow residual rotation on the demultiplexed output.
     """
     from ..frequency import _refine_tones_from_spectrum
 
@@ -252,7 +251,7 @@ def _jones_at_grid_points(
 ) -> ArrayType:
     r"""Tone-tracked Jones estimate evaluated **only** at the grid points.
 
-    The mix-down + centerd-FIR tracker output at sample ``g`` factors as
+    The mix-down + centered-FIR tracker output at sample ``g`` factors as
 
         T[c, k, g] = e^{-j2π f_k g/fs} · Σ_q h̃_k[q] · r_c[g - lead + q],
         h̃_k[q]    = h[L-1-q] · e^{-j2π f_k (q - lead)/fs},   lead = ⌈(L-1)/2⌉,
@@ -352,85 +351,84 @@ def demultiplex_polarization_tones_static(
 ) -> ArrayType | Signal | tuple[ArrayType | Signal, ArrayType]:
     r"""Demultiplex polarizations once from distinct per-stream CW pilot tones.
 
-    Undoes a **frequency-flat** polarization / spatial mixing by inverting the
-    channel's Jones matrix, which is read directly off pilot tones placed at a
-    *distinct* frequency on each transmitted stream (see ``add_pilot_tone`` with
-    a per-channel ``frequency`` list).
+    Undoes a frequency-flat polarization (or spatial) mixing by inverting the
+    channel's Jones matrix, read from pilot tones at a distinct frequency on
+    each transmitted stream (see :func:`~commkit.spectral.add_pilot_tone`
+    with one ``frequency`` per channel).
 
-    **Principle.**  With tone ``f_j`` carried *only* by transmitted stream ``j``
-    and a frequency-flat mixing ``r = J s`` (e.g.
-    ``apply_polarization_mixing``), the complex amplitude of tone ``f_j`` in
-    received channel ``i`` is ``T[i, j] = J[i, j] · α_j`` (``α_j`` = the TX tone
-    amplitude of stream ``j``).  Hence the measured tone-phasor matrix factors as
+    **Principle.**  With tone ``f_j`` carried only by stream ``j`` and a
+    frequency-flat mixing ``r = J s`` (e.g.
+    :func:`~commkit.impairments.apply_polarization_mixing`), the complex
+    amplitude of tone ``f_j`` in received channel ``i`` is
+    ``T[i, j] = J[i, j] · α_j``, with ``α_j`` the transmitted tone amplitude
+    of stream ``j``.  The measured matrix of tone phasors is therefore
     ``T = J · diag(α)``, and ``W = pinv(T)`` unmixes::
 
         W r = diag(1/α) · J^{-1} J s = diag(1/α) · s,
 
-    recovering each stream up to a trivial per-stream complex scale ``1/α_j``
-    (removed by ``normalize`` and/or downstream CPR).  Because each tone uniquely
-    labels its stream, output row ``j`` always corresponds to ``tone_frequencies[j]``
-    - there is **no polarization-permutation ambiguity** (unlike blind CMA; cf.
+    which recovers each stream up to a complex scale ``1/α_j`` (removed by
+    ``normalize`` and the downstream CPR).  Each tone labels its stream, so
+    output row ``j`` is always the stream of ``tone_frequencies[j]``: there
+    is no permutation ambiguity, unlike after blind equalization (see
     :func:`commkit.recovery.resolve_channel_permutation`).
 
-    **Speed.**  Tones added with ``add_pilot_tone`` are grid-quantized
-    (buffer-periodic), so a single DFT bin is the exact, mutually-orthogonal,
-    maximum-likelihood estimator of each tone phasor.  The whole operation is two
-    small GEMMs (extract ``T`` via a ``(C,N)·(N,K)`` product, apply ``W`` via a
-    ``(K,C)·(C,N)`` product) plus one ``KxK`` inverse - no iteration, no
-    convergence, far below the cost of a full FFT.
+    **Cost.**  Tones from ``add_pilot_tone`` sit on the FFT grid, so one DFT
+    bin is the exact (orthogonal, maximum-likelihood) estimate of each tone
+    phasor.  The whole operation is two small matrix products (``T`` from a
+    ``(C, N)·(N, K)`` product, the output from ``(K, C)·(C, N)``) and one
+    ``K x K`` inverse: no iteration, and far cheaper than a full FFT.
 
-    **Scope.**  Frequency-flat **and time-invariant** SOP only - the whole-record
-    DFT bin estimates a *single* Jones matrix.  If the state of polarization
-    drifts appreciably over the capture (long records and/or low baud rate, so
-    the wall-clock duration exceeds the SOP coherence time), the averaged tone
-    phasor is biased and attenuated and the one-shot inverse leaves residual,
-    time-growing crosstalk; use ``demultiplex_polarization_tones_dynamic``
-    instead.  For PMD / DGD use the returned unmixer (``return_matrix=True``) to
-    seed a butterfly equalizer (``cma`` / ``block_lms``).
+    **Scope.**  The SOP must be frequency-flat and constant: the
+    whole-record DFT bin estimates one Jones matrix.  If the SOP drifts
+    noticeably over the capture (a long record or a low symbol rate, whose
+    duration exceeds the SOP coherence time), the averaged phasors are
+    biased and attenuated, and the one-shot inverse leaves crosstalk that
+    grows with time: use :func:`demultiplex_polarization_tones_dynamic`
+    instead.  For PMD (DGD), seed a butterfly equalizer (``cma``,
+    ``block_lms``) with the returned unmixer (``return_matrix=True``).
 
     Parameters
     ----------
     samples : array_like or Signal
-        Received MIMO samples. Shape ``(C, N)`` - time on the last axis.  A
-        :class:`Signal` returns a new demultiplexed :class:`Signal`.
+        Received MIMO samples, ``(C, N)``.  A :class:`Signal` returns a new
+        demultiplexed :class:`Signal`.
     tone_frequencies : sequence of float
-        The ``K`` distinct per-stream tone frequencies in Hz (as added at the
-        TX, in transmitted-stream order).  Require ``K <= C``.  Output row ``j``
-        corresponds to ``tone_frequencies[j]``.
+        The ``K <= C`` distinct tone frequencies in Hz, one per stream, in the
+        order of the transmitted streams.  Output row ``j`` is the stream of
+        ``tone_frequencies[j]``.
     sampling_rate : float, optional
-        Sampling rate f_s in Hz.  Taken from the Signal; required for array
-        input.  A value that disagrees with the Signal raises.
+        Sampling rate ``f_s`` in Hz.  Taken from the Signal; required for
+        array input.  A value that disagrees with the Signal raises.
     refine_tones : bool, default True
-        If ``True``, sub-bin-refine each tone center with the ``BiasTone`` estimator
-        (on the receive channel where that tone is strongest) before extraction,
-        absorbing a residual carrier frequency offset that has dragged the tone
-        off its nominal bin.  If ``False``, extract exactly at
-        ``tone_frequencies``.
+        Refine each tone's frequency to a fraction of a bin with the
+        ``BiasTone`` estimator (on the receive channel where the tone is
+        strongest) before extracting it, which absorbs a residual carrier
+        frequency offset that moved the tone off its bin.  ``False``
+        extracts at ``tone_frequencies`` exactly.
     search_band : float, optional
-        Half-width in Hz of the per-tone peak search when ``refine_tones=True``.
-        Defaults to ``4 * f_s / N`` (a few FFT bins).  Widen it if the carrier
-        offset can exceed that, but keep it inside the tone-to-data guard so the
-        data band never wins the argmax.
+        Half-width in Hz of each tone's peak search with
+        ``refine_tones=True``; defaults to ``4 * f_s / N`` (a few FFT bins).
+        Widen it if the carrier offset can be larger, but keep it inside the
+        guard between tone and data, so the data band never wins the search.
     normalize : bool, default True
-        If ``True``, rescale each demuxed row so its mean power equals the mean
-        per-channel input power, removing the arbitrary ``1/α_j`` per-stream
-        scale and preserving the library power invariant.
+        Rescale each output row to the mean input power per channel, which
+        removes the scale ``1/α_j`` and keeps the library's power
+        convention.
     return_matrix : bool, default False
-        If ``True``, also return the ``(K, C)`` unmixing matrix ``W``.
+        Also return the ``(K, C)`` unmixing matrix ``W``.
 
     Returns
     -------
     demuxed : ndarray or Signal
-        Demultiplexed streams. Shape ``(K, N)`` - one row per recovered
-        *stream* (``K`` = number of tones), **not** per receive channel: the
-        ``C`` input channels are mapped down to the ``K`` transmitted streams.
-        In the usual square dual-pol case ``K == C == 2`` the two coincide.
-        Same complex dtype and device as the input.  Row ``j`` is the stream
-        that carried ``tone_frequencies[j]``.
+        Demultiplexed streams, ``(K, N)``: one row per transmitted stream
+        (``K`` tones), not per receive channel, so the ``C`` inputs map to
+        ``K`` streams (in the usual dual-pol case ``K == C == 2``).  Same
+        complex dtype and device as the input; row ``j`` carried
+        ``tone_frequencies[j]``.
     W : ndarray
-        Returned only if ``return_matrix=True``: the ``(K, C)`` unmixing matrix
-        (``complex128``), i.e. the estimated inverse Jones matrix up to per-stream
-        scaling.  Suitable as a seed for a butterfly equalizer.
+        Only with ``return_matrix=True``: the ``(K, C)`` complex128 unmixing
+        matrix, the estimated inverse Jones matrix up to a scale per stream;
+        a seed for a butterfly equalizer.
 
     Raises
     ------
@@ -440,8 +438,8 @@ def demultiplex_polarization_tones_static(
 
     See Also
     --------
-    add_pilot_tone : Add the per-stream tones at the transmitter.
-    demultiplex_polarization_tones_dynamic : Time-varying (drifting-SOP) demux.
+    commkit.spectral.add_pilot_tone : Add the per-stream tones at the transmitter.
+    demultiplex_polarization_tones_dynamic : Demultiplexing of a drifting SOP.
     """
     signal_adapter = adapt_signal(
         samples, function_name="demultiplex_polarization_tones_static()"
@@ -545,130 +543,130 @@ def demultiplex_polarization_tones_dynamic(
 ) -> ArrayType | Signal | JonesTrack | tuple[ArrayType | Signal, JonesTrack]:
     r"""Demultiplex drifting polarizations from distinct per-stream CW pilot tones.
 
-    Drifting-SOP counterpart of ``demultiplex_polarization_tones_static``.  Where
-    the static routine reads a *single* Jones matrix from a whole-record DFT bin,
-    this one **tracks** a slowly rotating frequency-flat mixing ``r(n) = J(n) s(n)``
-    by following each pilot tone continuously in time.
+    The counterpart of :func:`demultiplex_polarization_tones_static` for a
+    drifting SOP.  Where that function reads one Jones matrix from a
+    whole-record DFT bin, this one tracks a slowly rotating frequency-flat
+    mixing ``r(n) = J(n) s(n)`` by following each pilot tone in time.
 
-    **Principle.**  Tone ``f_j`` is a CW carried *only* by transmitted stream
-    ``j`` (amplitude ``α_j``).  Mixing receive channel ``i`` down by ``f_j`` and
-    low-pass filtering isolates that tone's slowly-varying phasor::
+    **Principle.**  Tone ``f_j`` is a CW carried only by stream ``j``
+    (amplitude ``α_j``).  Mixing receive channel ``i`` down by ``f_j`` and
+    low-pass filtering isolates that tone's slowly varying phasor::
 
         z_ij(n) = LPF{ r_i(n) · exp(-j2π f_j n / f_s) } ≈ J_ij(n) · α_j,
 
-    because every other tone ``f_k`` (k ≠ j) lands at ``f_k - f_j`` and the data
-    band is pushed away from DC, so the LPF rejects them.  Running this for all
-    ``K`` tones (one mix-down per *distinct* tone frequency) yields a continuous
-    estimate of the whole Jones matrix ``T(n) = J(n) diag(α)``, shape ``(C, K, N)``.
-    Inverting ``T`` on a decimated time grid and interpolating back to full rate
-    gives a per-sample unmixer ``W(n) = pinv(T(n))`` with::
+    because every other tone ``f_k`` (``k ≠ j``) lands at ``f_k - f_j`` and
+    the data band moves away from DC, so the low-pass rejects them.  Doing
+    this for all ``K`` tones (one mix-down per distinct tone frequency)
+    gives a continuous estimate of the whole Jones matrix
+    ``T(n) = J(n) diag(α)``, ``(C, K, N)``.  Inverting ``T`` on a decimated
+    time grid and interpolating back to the full rate gives a per-sample
+    unmixer ``W(n) = pinv(T(n))`` with::
 
         W(n) r(n) = diag(1/α) · s(n),
 
-    recovering each stream up to the same trivial per-stream scale ``1/α_j`` as
-    the static routine.  As with the static version each tone uniquely labels its
-    stream, so there is **no polarization-permutation ambiguity**: output row
-    ``j`` corresponds to ``tone_frequencies[j]``.
+    which recovers each stream up to the scale ``1/α_j``, as in the static
+    case.  Each tone labels its stream here too, so there is no permutation
+    ambiguity: output row ``j`` is the stream of ``tone_frequencies[j]``.
 
-    **Tracking-bandwidth trade-off.**  ``track_bandwidth`` (the LPF cut-off) is
-    the single design knob and is bounded on both sides:
+    **Tracking bandwidth.**  ``track_bandwidth``, the low-pass cutoff, is the
+    one design parameter, bounded on both sides:
 
-    * It must be **≥ the SOP rotation rate**, or ``W(n)`` lags the true ``J(n)``
-      and residual crosstalk remains (lag bias).
-    * It must be **≤ the guard** to the nearest other tone and to the data band,
-      or those leak into ``z_ij`` and corrupt the estimate.  The hard ceiling is
-      roughly half the smallest tone spacing.
+    * at least the SOP rotation rate, or ``W(n)`` lags the true ``J(n)`` and
+      crosstalk remains;
+    * at most the guard to the nearest other tone and to the data band, or
+      those leak into ``z_ij`` and corrupt the estimate; the hard ceiling is
+      about half the smallest tone spacing.
 
-    If the SOP rotates faster than the available tone spacing permits to track,
-    the tones are simply spaced too closely for that drift - a real feasibility
-    limit; a warning is logged when ``2·track_bandwidth`` (plus the FIR
-    transition) encroaches on the nearest tone spacing.
+    An SOP that rotates faster than the tone spacing allows to track is a
+    real limit of the design: the tones are too close for that drift.  A
+    warning is logged when ``2·track_bandwidth`` (plus the FIR transition)
+    reaches the nearest tone spacing.
 
     Parameters
     ----------
     samples : array_like or Signal
-        Received MIMO samples. Shape ``(C, N)`` - time on the last axis.  A
-        :class:`Signal` returns a new demultiplexed :class:`Signal` (when
-        ``apply=True``).
+        Received samples, ``(C, N)``.  A Signal gives a new demultiplexed
+        Signal when ``apply=True``.
     tone_frequencies : sequence of float
-        The ``K`` distinct per-stream tone frequencies in Hz (as added at the
-        TX, in transmitted-stream order).  Require ``K <= C``.  Output row ``j``
-        corresponds to ``tone_frequencies[j]``.
+        The ``K`` distinct per-stream tone frequencies in Hz, in transmitted
+        stream order; ``K <= C``.  Output row ``j`` is the stream of
+        ``tone_frequencies[j]``.
     sampling_rate : float, optional
-        Sampling rate f_s in Hz.  Taken from the Signal; required for array
-        input.  A value that disagrees with the Signal raises.
+        Sampling rate ``f_s`` in Hz.  Taken from the Signal; required for
+        array input.  A value that disagrees with the Signal raises.
     track_bandwidth : float
-        One-sided LPF cut-off in Hz - the polarization-tracking bandwidth.  Set
-        it a few times above the expected SOP rotation rate but well below the
-        smallest tone spacing (see the trade-off above).
+        One-sided cutoff of the tracking low-pass in Hz, the polarization
+        tracking bandwidth.  Set it a few times above the expected SOP
+        rotation rate and well below the smallest tone spacing (see above).
     num_taps : int, optional
-        Length of the tracking low-pass FIR.  Defaults to ``~3.3·f_s/track_bandwidth``
-        (the Hamming transition width that resolves ``track_bandwidth``), forced
-        odd and clipped below ``N``.  Increase for sharper neighbor-tone
-        rejection at the cost of longer edge transients.
+        Length of the tracking low-pass FIR.  Defaults to about
+        ``3.3·f_s/track_bandwidth`` (the Hamming transition width that
+        resolves ``track_bandwidth``), made odd and kept below ``N``.  More
+        taps reject neighboring tones more sharply but lengthen the edge
+        transients.
     grid_step : int, optional
-        Decimation (in samples) of the grid on which ``T(n)`` is inverted.
-        Defaults to ``max(1, floor(f_s / (4·track_bandwidth)))`` - i.e. oversample
-        the tracked process ~4x.  ``W`` is linearly interpolated between grid
-        points, so a finer grid costs more inverses but tracks marginally better.
+        Spacing in samples of the grid on which ``T(n)`` is inverted.
+        Defaults to ``max(1, floor(f_s/(4·track_bandwidth)))``, four grid
+        points per tracking period.  ``W`` is interpolated linearly between
+        grid points, so a finer grid costs more inversions for slightly
+        better tracking.
     refine_tones : bool, default True
-        If ``True``, sub-bin-refine each tone center with the ``BiasTone`` estimator (on
-        the receive channel where it is strongest) before mixing down, absorbing
-        a residual carrier frequency offset.
+        Refine each tone frequency below the DFT bin spacing with the
+        ``BiasTone`` estimator, on the receive channel where the tone is
+        strongest, before mixing down.  This absorbs a residual carrier
+        frequency offset.
     search_band : float, optional
-        Half-width in Hz of the per-tone peak search when ``refine_tones=True``.
-        Defaults to ``4 · f_s / N``.
+        Half-width in Hz of the per-tone peak search when
+        ``refine_tones=True``.  Defaults to ``4·f_s/N``.
     normalize : bool, default True
-        If ``True``, rescale each demuxed row so its mean power equals the mean
-        per-channel input power (removes the ``1/α_j`` scale; preserves the
-        library power invariant).  When ``trim_edges=True`` the power is measured
-        over the retained interior only.
+        Scale each output row so its mean power equals the mean per-channel
+        input power.  This removes the ``1/α_j`` scale and keeps the library's
+        power invariant.  With ``trim_edges=True`` the power is measured over
+        the retained interior only.
     trim_edges : bool, default False
-        The tracking FIR is applied with centerd (``'same'``) convolution, so the
-        Jones estimate - and hence ``W(n)`` - is unreliable within ``num_taps//2``
-        samples of each record end (the convolution averages in zero-padding
-        there).  The **data is never filtered**, so timing is unaffected, but
-        those edge samples carry residual crosstalk.  If ``True``, drop them:
-        ``demuxed`` is the reliable interior ``(K, N - 2·g)`` with
-        ``g = num_taps//2``; ``JonesTrack.valid`` gives the retained sample range
-        in **original** coordinates (so references align as ``ref[..., valid]``).
-        Array input only: trimming samples would misalign a Signal's reference.
+        Drop the samples within ``g = num_taps//2`` of each record end.  The
+        tracking FIR runs as a centered (``'same'``) convolution, so the Jones
+        estimate there averages in zero padding and leaves residual
+        crosstalk.  The data itself is never filtered, so timing is
+        unaffected.  The output is then the interior ``(K, N - 2·g)``, and
+        ``JonesTrack.valid`` gives the retained range in the original
+        sample indices (align references as ``ref[..., valid]``).  Array
+        input only: trimming would misalign a Signal's reference.
     return_matrix : bool, default False
-        If ``True``, also return the :class:`JonesTrack`: the decimated unmixer
-        stack, the sample positions it was evaluated at (suitable for seeding a
-        time-varying butterfly equalizer) and the ``valid`` range.  The stack
-        always spans the **full** record, even when ``trim_edges=True``.
+        Also return the :class:`JonesTrack`: the unmixer stack on the
+        decimated grid, the sample positions of its grid points (usable to
+        seed a time-varying butterfly equalizer) and the ``valid`` range.
+        The stack always spans the full record, also with
+        ``trim_edges=True``.
     apply : bool, default True
-        If ``True`` (default), interpolate ``W(n)`` to full rate and apply it.
-        If ``False``, **matrix-only mode**: skip the ``O(N)`` interpolate-and-apply
-        entirely and return just the :class:`JonesTrack`.  Use this when only the
-        unmixer stack is needed - e.g. to make a PDL/unitarity decision and then
-        apply a *different* factor (a polar unitary ``Qᴴ(n)``) without paying
-        for a demux that would be discarded.  ``normalize`` and ``trim_edges``
-        act on the applied signal, so they have **no effect** when
-        ``apply=False``.
+        Interpolate ``W(n)`` to the full rate and apply it.  With ``False``,
+        skip the ``O(N)`` interpolation and product and return only the
+        :class:`JonesTrack`, for example to test PDL or unitarity first and
+        then apply a different factor (the polar unitary ``Qᴴ(n)``).
+        ``normalize`` and ``trim_edges`` act on the applied output, so they
+        have no effect with ``apply=False``.
 
     Returns
     -------
     demuxed : ndarray or Signal
-        Demultiplexed streams. Same complex dtype and device as the input; row
-        ``j`` carried ``tone_frequencies[j]``.  Shape ``(K, N)``, or
-        ``(K, N - 2·(num_taps//2))`` when ``trim_edges=True``.
+        Demultiplexed streams, ``(K, N)``, or ``(K, N - 2·(num_taps//2))``
+        with ``trim_edges=True``; same complex dtype and device as the
+        input.  Row ``j`` is the stream of ``tone_frequencies[j]``.
     track : JonesTrack
-        With ``return_matrix=True`` the return is ``(demuxed, track)``; with
-        ``apply=False`` it is ``track`` alone.
+        Returned as ``(demuxed, track)`` with ``return_matrix=True``, and
+        alone with ``apply=False``.
 
     Raises
     ------
     ValueError
         If ``samples`` is not 2-D, ``tone_frequencies`` is empty, ``K > C``,
-        ``track_bandwidth`` is not positive, or any tone frequency lies outside
+        ``track_bandwidth`` is not positive, or a tone frequency lies outside
         ``(-f_s/2, f_s/2)``.
 
     See Also
     --------
-    demultiplex_polarization_tones_static : One-shot static-SOP demux (faster).
-    add_pilot_tone : Add the per-stream tones at the transmitter.
+    demultiplex_polarization_tones_static : Faster demultiplexing for a static SOP.
+    commkit.spectral.add_pilot_tone : Add the per-stream tones at the transmitter.
     """
     signal_adapter = adapt_signal(
         samples, function_name="demultiplex_polarization_tones_dynamic()"
@@ -773,7 +771,7 @@ def demultiplex_polarization_tones_dynamic(
 
     # --- Track the Jones matrix at the grid points ---------------------------
     # T[i, j, g] = LPF{ r_i(n) · exp(-j2π f_j n/fs) }(g) ≈ J_ij(g)·α_j, with a
-    # centerd ('same') linear-phase FIR, so the LPF group delay is compensated
+    # centered ('same') linear-phase FIR, so the LPF group delay is compensated
     # and the estimate aligns in time with the input.  Only the G grid points
     # feed the batched inverse, so the tracker is evaluated there directly
     # (windowed gather + GEMM in _jones_at_grid_points) instead of filtering

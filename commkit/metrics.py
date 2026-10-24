@@ -382,7 +382,7 @@ def ber(
     Parameters
     ----------
     bits : array_like or Signal
-        Received bits (0/1), ``(N_bits,)`` or ``(C, N_bits)``.  A Signal holds
+        Received bits (0 and 1), ``(N_bits,)`` or ``(C, N_bits)``.  A Signal holds
         received *symbols* at one sample per symbol: they are hard-decided
         against the constellation and compared with ``reference.bits``.
     reference : array_like, optional

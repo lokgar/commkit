@@ -52,7 +52,7 @@ def compute_llr(
     Parameters
     ----------
     symbols : array_like or Signal
-        Received symbols at one sample per symbol, shape ``(..., N)``, on the
+        Received symbols at one sample per symbol, ``(..., N)``, on the
         constellation's scale.  A :class:`Signal` must be at one sample per
         symbol.
     noise_var : float
@@ -67,7 +67,7 @@ def compute_llr(
     Returns
     -------
     ndarray
-        float32 LLRs of shape ``(..., N * k)`` on the input's device; the
+        float32 LLRs, ``(..., N * k)``, on the input's device; the
         ``k`` bits of each symbol are adjacent (MSB first).
 
     Notes
@@ -298,7 +298,7 @@ def _llr(
     """LLRs of ``symbols`` against host ``points`` labeled by ``bit_labels``.
 
     Shared by :func:`compute_llr` and :meth:`Constellation.llr`.  Returns
-    float32 LLRs of shape ``(..., N * k)`` on the input's device.
+    float32 LLRs, ``(..., N * k)``, on the input's device.
     """
     _check_method(method)
     order, k = bit_labels.shape

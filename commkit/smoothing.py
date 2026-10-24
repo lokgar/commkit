@@ -31,24 +31,25 @@ def moving_average(
     Parameters
     ----------
     x : array_like
-        Input array.
+        Data to smooth.
     window : int
-        Averaging window length, in samples.
+        Window length in samples.
     mode : {"same", "valid"}, default "same"
-        ``"same"`` - edge-aware boxcar (``nearest``-edge padding), output the
-        same length as ``x``. Good for smoothing a signal you still want to
-        index/plot against the original axis (e.g. a spectrum before a peak
-        search).
-        ``"valid"`` - shrinks by ``window - 1`` (``numpy.convolve``-style),
-        for callers that realign the output axis themselves (e.g. a
-        convergence-curve plot that re-centers the x-axis on the window).
+        Output length:
+
+        - ``"same"``: the length of ``x``, with the edges padded by their
+          nearest value, for data still indexed on its original axis (a
+          spectrum before a peak search).
+        - ``"valid"``: shorter by ``window - 1``, as ``numpy.convolve``, for
+          callers that realign the axis themselves (a convergence curve
+          plotted at the window centers).
     axis : int, default -1
         Axis along which to average.
 
     Returns
     -------
     ndarray
-        Smoothed array. Same shape as ``x`` for ``mode="same"``; shrunk by
+        Smoothed data, the shape of ``x`` for ``mode="same"`` and shorter by
         ``window - 1`` along ``axis`` for ``mode="valid"``.
     """
     x, xp, sp = dispatch(x)
@@ -84,7 +85,7 @@ def savgol_smooth(
     Parameters
     ----------
     x : array_like
-        Input array.
+        Data to smooth.
     window : int
         Window length in samples, greater than ``polyorder``; an odd length
         centers the fit on each sample.
@@ -96,7 +97,7 @@ def savgol_smooth(
     Returns
     -------
     ndarray
-        Smoothed array, same shape as ``x``.
+        Smoothed data, same shape as ``x``.
     """
     _, _, sp = dispatch(x)
     logger.debug(
@@ -114,7 +115,7 @@ def smooth_density_2d(hist: ArrayType, *, sigma: float = 1.0) -> ArrayType:
     Parameters
     ----------
     hist : array_like
-        2-D histogram/density array.
+        2-D histogram or density.
     sigma : float, default 1.0
         Gaussian standard deviation, in bins.
 

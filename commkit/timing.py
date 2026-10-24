@@ -59,20 +59,20 @@ def cross_correlate_fft(
     Parameters
     ----------
     samples : array_like
-        Input samples. Shape: ``(N,)`` or ``(C, N)``.
+        Samples, ``(N,)`` or ``(C, N)``.
     template : array_like
-        Reference sequence. Shape: ``(L,)`` or ``(C, L)``.
-        If ``(1, L)`` and samples is ``(C, N)``, the template is
-        broadcast across all channels.
+        Reference sequence, ``(L,)`` or ``(C, L)``.  A ``(1, L)`` template is
+        shared by all channels.
     mode : {"full", "same", "valid", "positive_lags"}, default "full"
         Output size:
+
         - ``"full"``: lags ``-(L - 1) .. N - 1``, length ``N + L - 1``
           (the layout of ``scipy.signal.correlate``).
-        - ``"same"``: length ``N``, centerd.
+        - ``"same"``: length ``N``, centered.
         - ``"valid"``: length ``max(N, L) - min(N, L) + 1``.
         - ``"positive_lags"``: lags ``0 .. N - 1`` only, a view of the
-          circular correlation; for a timing search, where negative lags are
-          not needed.
+          circular correlation, for a timing search that needs no negative
+          lags.
 
     Returns
     -------
@@ -136,53 +136,44 @@ def _parabolic_peak_offset(
     log_eps: float = 1e-300,
     denom_eps: float | None = None,
 ) -> ArrayType:
-    r"""Three-point (log-)parabolic sub-bin/sub-sample peak-offset fit.
+    r"""Offset of a peak from three samples by a (log-)parabolic fit.
 
-    Fits a parabola through three samples straddling a peak (bins/samples
-    k-1, k, k+1) - or through their logs, for the standard log-parabolic
-    (Gaussian-equivalent) fit - and returns the offset of the true peak
-    relative to the center sample, clipped to ``[-0.5, 0.5]``:
+    Fits a parabola through the samples at ``k-1``, ``k`` and ``k+1`` around
+    a peak, or through their logarithms (the log-parabolic fit, equivalent to
+    a Gaussian), and returns the offset of the vertex from ``k``, clipped to
+    ``[-0.5, 0.5]``::
 
         delta = 0.5 * (y_prev - y_next) / (y_prev - 2*y_curr + y_next)
 
-    Shared by every three-point peak-interpolation site in the library:
-    the FOE M-th-power estimator's magnitude-domain fit
-    (``frequency.MthPower``, ``log=False``), the
-    two log-parabolic tone-refinement estimators
-    (``frequency.BiasTone``, ``frequency._refine_tones_from_spectrum``,
-    ``log=True``), and the fractional-delay estimator
-    (``timing.estimate_fractional_delay``, either fit) - which first
-    phase-rotates a complex peak onto the real axis (a preprocessing step
-    outside this function's scope) before calling this with its own
-    ``log_eps``/``denom_eps`` tuning.  Inputs may be plain Python floats
-    with ``xp=numpy`` (host scalars) or device arrays (NumPy/CuPy) - the
-    arithmetic is expressed purely through ``xp``, so both execution models
-    are supported by the same implementation.
+    Every three-point peak fit of the library uses it: ``frequency.MthPower``
+    on magnitudes (``log=False``), ``frequency.BiasTone`` and
+    ``frequency._refine_tones_from_spectrum`` (``log=True``), and
+    :func:`estimate_fractional_delay` with either fit, which first rotates a
+    complex peak onto the real axis and passes its own ``log_eps`` and
+    ``denom_eps``.  The arithmetic goes through ``xp`` only, so the inputs
+    may be host floats (``xp=numpy``) or device arrays.
 
     Parameters
     ----------
     y_prev, y_curr, y_next : array_like or float
-        Samples at bins/positions k-1, k, k+1.
+        Samples at ``k-1``, ``k`` and ``k+1``.
     xp : module
         Array module (``numpy``/``cupy``) providing ``log``, ``maximum``,
         ``abs``, ``where``, ``ones_like``, ``zeros_like``, ``clip``.
     log : bool, default False
-        If True, fits to ``log(max(y, log_eps))`` (log-parabolic / Gaussian
-        fit - standard for spectral-magnitude tone estimation). If False,
-        fits directly to ``y`` (magnitude-domain fit).
+        Fit ``log(max(y, log_eps))``, the usual fit for spectral magnitudes,
+        instead of ``y``.
     log_eps : float, default 1e-300
-        Clamp floor before taking the log. Only used when ``log=True``.
+        Floor applied before the logarithm, with ``log=True`` only.
     denom_eps : float, optional
-        Threshold below which the fit denominator is treated as degenerate
-        (returns ``delta=0`` instead of dividing). Defaults to ``1e-30`` when
-        ``log=True``, ``1e-15`` when ``log=False`` - the values already in
-        use at every call site except ``timing.estimate_fractional_delay``,
-        which passes its own tuning explicitly.
+        Denominator magnitude below which the fit is degenerate and returns
+        0.  Defaults to ``1e-30`` with ``log=True`` and ``1e-15`` without.
 
     Returns
     -------
-    delta : same type as inputs
-        Sub-bin/sub-sample offset in ``[-0.5, 0.5]``.
+    delta : ndarray or float
+        Offset from the center sample in ``[-0.5, 0.5]``, the type of the
+        inputs.
     """
     if denom_eps is None:
         denom_eps = 1e-30 if log else 1e-15
@@ -229,18 +220,18 @@ def estimate_fractional_delay(
     Parameters
     ----------
     correlation : array_like
-        Correlation values - complex or real magnitude.
-        Shape: ``(N,)`` or ``(C, N)``.
+        Correlation, complex or real magnitude, ``(N,)`` or ``(C, N)``.
     peak_indices : array_like
-        Integer peak positions. Shape: scalar or ``(C,)``.
+        Integer peak positions, scalar or ``(C,)``.
     dft_upsample : int, default 1
         Interpolation factor of the DFT zero-padding; 1 fits the samples
         directly.
     fit : {'parabolic', 'log-parabolic'}, default 'log-parabolic'
         Peak fit:
-        - 'parabolic': Standard parabolic fit. Good for general peaks.
-        - 'log-parabolic': Fits a parabola to log(y), equivalent to a
-          Gaussian fit. Often more accurate for bandlimited pulses.
+
+        - ``'parabolic'``: a parabola through the samples.
+        - ``'log-parabolic'``: a parabola through their logarithms, a
+          Gaussian fit, usually more accurate for band-limited pulses.
 
     Returns
     -------

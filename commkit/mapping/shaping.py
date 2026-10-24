@@ -49,9 +49,9 @@ def _constellation_power(
     Parameters
     ----------
     constellation : array_like
-        Constellation points, shape ``(M,)``.  NumPy, CuPy, or list.
+        Constellation points, ``(M,)``, NumPy, CuPy or a list.
     pmf : array_like, optional
-        Per-point probabilities, shape ``(M,)``, aligned with
+        Per-point probabilities, ``(M,)``, aligned with
         ``constellation`` and summing to 1 (e.g. from
         :func:`maxwell_boltzmann`).  ``None`` (uniform) returns the
         unweighted mean power.
@@ -97,8 +97,8 @@ def maxwell_boltzmann(constellation: Constellation, *, nu: float) -> np.ndarray:
 
     Returns
     -------
-    np.ndarray
-        pmf of shape ``(M,)``, float64, aligned with ``constellation.points``
+    numpy.ndarray
+        pmf, ``(M,)``, float64, aligned with ``constellation.points``
         and summing to 1.
     """
     if nu < 0:

@@ -50,16 +50,16 @@ class Constellation:
     Parameters
     ----------
     points : array_like
-        Constellation points, shape ``(M,)`` with ``M = 2**k``.  Complex for
+        Constellation points, ``(M,)`` with ``M = 2**k``.  Complex for
         two-dimensional constellations, real for PAM.  Stored as
         ``complex128`` or ``float64``.  Points must be distinct.
     bit_labels : array_like, optional
-        Bit pattern of each point, shape ``(M, k)``, MSB first, values 0/1.
+        Bit pattern of each point, ``(M, k)``, MSB first, values 0 and 1.
         Every pattern must occur exactly once.  ``None`` assigns the natural
         binary labels (``points[i]`` carries the bits of ``i``).  The factories
         assign Gray labels this way, because their points are ordered by label.
     pmf : array_like, optional
-        Prior probability of each point, shape ``(M,)``, non-negative and
+        Prior probability of each point, ``(M,)``, non-negative and
         summing to 1.  ``None`` means uniform.  Use :meth:`shaped` to build a
         Maxwell-Boltzmann prior.
     family : {"qam", "psk", "pam"}, optional
@@ -213,9 +213,11 @@ class Constellation:
 
     @cached_property
     def rotational_symmetry(self) -> int:
-        """Largest ``n`` such that rotating the points by ``2π/n`` maps them
+        """Order of the rotational symmetry of the points.
+
+        The largest ``n`` for which a rotation by ``2π/n`` maps the points
         onto themselves: ``M`` for M-PSK, 4 for square and cross QAM, 2 for
-        bipolar PAM, 1 for unipolar PAM.
+        bipolar PAM and 1 for unipolar PAM.
 
         Raising symbols to this power removes the modulation phase, which is
         what M-th power frequency and phase estimators rely on.
@@ -246,9 +248,9 @@ class Constellation:
     def map(self, bits: ArrayType) -> ArrayType:
         """Map bits to symbols on the bits' device.
 
-        ``bits`` has shape ``(..., n)`` with ``n`` a multiple of ``k``; groups
-        of ``k`` bits (MSB first) become one symbol.  Returns shape
-        ``(..., n / k)``, ``complex64`` (or ``float32`` for real points).
+        ``bits`` is ``(..., n)`` with ``n`` a multiple of ``k``; each group of
+        ``k`` bits (MSB first) becomes one symbol.  Returns ``(..., n / k)``,
+        ``complex64`` (``float32`` for real points).
         """
         bits, xp, _ = dispatch(bits)
         k = self.bits_per_symbol
@@ -266,8 +268,7 @@ class Constellation:
     def demap(self, symbols: ArrayType) -> ArrayType:
         """Hard decisions: bits of the nearest point, on the symbols' device.
 
-        ``symbols`` has shape ``(..., N)``; returns ``int8`` bits of shape
-        ``(..., N * k)``.  Symbols are compared with ``points`` as they are, so
+        ``symbols`` is ``(..., N)``; returns ``int8`` bits, ``(..., N * k)``.  Symbols are compared with ``points`` as they are, so
         they must be on the constellation's scale.
         """
         symbols, xp, _ = dispatch(symbols)
@@ -282,7 +283,7 @@ class Constellation:
 
         ``noise_var`` is the complex noise variance on the constellation's
         scale.  ``method`` is ``"maxlog"`` or ``"exact"`` (log-sum-exp).
-        Returns ``float32`` of shape ``(..., N * k)`` on the symbols' device.
+        Returns ``float32``, ``(..., N * k)``, on the symbols' device.
         """
         warn_if_double(symbols, "compute_llr() / Constellation.llr()", "float32")
         if self._axes is not None and dispatch(symbols)[1] is np:

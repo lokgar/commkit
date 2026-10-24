@@ -24,15 +24,15 @@ def map_bits(bits: ArrayType, *, constellation: Constellation) -> ArrayType:
     Parameters
     ----------
     bits : array_like
-        Bits (0/1), shape ``(..., n)`` with ``n`` a multiple of ``k``.
+        Bits (0 and 1), ``(..., n)`` with ``n`` a multiple of ``k``.
     constellation : Constellation
         Points and bit labels to map onto.
 
     Returns
     -------
     ndarray
-        Symbols of shape ``(..., n / k)`` on the bits' device: ``complex64``,
-        or ``float32`` for a real constellation.
+        Symbols, ``(..., n / k)``, on the bits' device: ``complex64``, or
+        ``float32`` for a real constellation.
     """
     _check_constellation(constellation, "map_bits()")
     return constellation.map(bits)
@@ -50,7 +50,7 @@ def demap_symbols_hard(
     Parameters
     ----------
     symbols : array_like or Signal
-        Received symbols at one sample per symbol, shape ``(..., N)``.  A
+        Received symbols at one sample per symbol, ``(..., N)``.  A
         :class:`Signal` must be at one sample per symbol.
     constellation : Constellation, optional
         Decision constellation.  Defaults to the Signal's ``constellation``;
@@ -59,7 +59,7 @@ def demap_symbols_hard(
     Returns
     -------
     ndarray
-        ``int8`` bits of shape ``(..., N * k)`` on the symbols' device.
+        ``int8`` bits, ``(..., N * k)``, on the symbols' device.
 
     Raises
     ------

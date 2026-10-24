@@ -40,9 +40,9 @@ def decimate_to_symbol_rate(
 ) -> S:
     """Decimate an oversampled signal to the symbol rate by direct slicing.
 
-    Use this **after** matched filtering: it keeps every ``sps``-th sample
-    without further filtering, which is correct because the matched filter
-    has already done the optimal noise suppression.
+    Use it after matched filtering: it keeps every ``sps``-th sample without
+    further filtering, because the matched filter has already removed the
+    out-of-band noise.
 
     Parameters
     ----------
@@ -54,7 +54,7 @@ def decimate_to_symbol_rate(
         required for array input.  A value that disagrees with the Signal
         raises.
     offset : int, default 0
-        Sampling phase in samples, ``0 <= offset < sps``: choose the eye
+        Sampling phase in samples, ``0 <= offset < sps``, chosen at the eye
         center.
     normalize : bool, optional
         Rescale the output to unit average power ``mean(|x|²) = 1``.
@@ -231,10 +231,10 @@ def resample(
     correct_power: bool | None = None,
     periodic: bool = False,
 ) -> S:
-    """Rational resampling by ``up / down`` (polyphase, or Fourier when
-    ``periodic``).
+    """Resample by a rational factor ``up / down``.
 
-    Give either the integer factors ``up`` and ``down``, or the target
+    Polyphase filtering (``scipy.signal.resample_poly``), or Fourier
+    interpolation with ``periodic=True``.  Give either the integer factors ``up`` and ``down``, or the target
     ``sps_out`` (with ``sps_in``, which a Signal supplies).
 
     Parameters

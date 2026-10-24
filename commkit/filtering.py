@@ -176,7 +176,7 @@ def gaussian_taps(*, sps: float, fwhm: float = 1.0, span: int = 10) -> np.ndarra
         bandwidth-time product is ``BT = √2·ln(2) / (π·fwhm)``.
     span : int, default 10
         Filter span in symbols: ``int(span * sps)`` taps, made odd, spaced
-        ``1/sps`` and centerd on a sample.
+        ``1/sps`` and centered on a sample.
 
     Returns
     -------
@@ -210,7 +210,7 @@ def smoothrect_taps(
     """Generate the taps of a rectangle smoothed by a Gaussian.
 
     Evaluates the closed form of the convolution (a difference of error
-    functions) on the sample grid, so the pulse is centerd on a sample,
+    functions) on the sample grid, so the pulse is centered on a sample,
     without the half-sample shift of convolving two discrete arrays.
 
     Parameters
@@ -600,8 +600,8 @@ def fir_taps(
         Filter shape, as for :func:`butterworth_sos` and the other IIR
         designs.
     window : str, default "hamming"
-        Window function, as accepted by ``scipy.signal.firwin`` (e.g.
-        ``"hamming"``, ``"blackman"``).
+        Window, as accepted by ``scipy.signal.firwin`` (``"hamming"``,
+        ``"blackman"``, ...).
 
     Returns
     -------
@@ -655,8 +655,8 @@ def butterworth_sos(
 ) -> np.ndarray:
     """Design a Butterworth IIR filter in second-order-sections (SOS) form.
 
-    Maximally flat passband, monotonic roll-off - the standard general-purpose
-    IIR design.
+    Maximally flat passband and monotonic roll-off, the general-purpose IIR
+    design.
 
     Parameters
     ----------
@@ -673,7 +673,7 @@ def butterworth_sos(
     Returns
     -------
     ndarray
-        SOS coefficients. Shape: ``(n_sections, 6)``.
+        SOS coefficients, ``(n_sections, 6)``.
     """
     nyq = 0.5 * float(sampling_rate)
     Wn = _iir_wn(cutoff, btype, nyq)
@@ -715,7 +715,7 @@ def chebyshev1_sos(
     Returns
     -------
     ndarray
-        SOS coefficients. Shape: ``(n_sections, 6)``.
+        SOS coefficients, ``(n_sections, 6)``.
     """
     nyq = 0.5 * float(sampling_rate)
     Wn = _iir_wn(cutoff, btype, nyq)
@@ -739,8 +739,8 @@ def chebyshev2_sos(
 ) -> np.ndarray:
     """Design a Chebyshev Type II (inverse Chebyshev) IIR filter in SOS form.
 
-    Monotonic passband (no ripple), equiripple stopband - trades a Type I's
-    passband ripple for stopband ripple instead.
+    Monotonic passband and equiripple stopband: Type I's passband ripple
+    moves to the stopband.
 
     Parameters
     ----------
@@ -758,7 +758,7 @@ def chebyshev2_sos(
     Returns
     -------
     ndarray
-        SOS coefficients. Shape: ``(n_sections, 6)``.
+        SOS coefficients, ``(n_sections, 6)``.
     """
     nyq = 0.5 * float(sampling_rate)
     Wn = _iir_wn(cutoff, btype, nyq)
@@ -806,7 +806,7 @@ def elliptic_sos(
     Returns
     -------
     ndarray
-        SOS coefficients. Shape: ``(n_sections, 6)``.
+        SOS coefficients, ``(n_sections, 6)``.
     """
     nyq = 0.5 * float(sampling_rate)
     Wn = _iir_wn(cutoff, btype, nyq)
@@ -834,9 +834,9 @@ def bessel_sos(
 ) -> np.ndarray:
     """Design a Bessel/Thomson IIR filter in SOS form.
 
-    Maximally flat group delay (linear phase in the passband) rather than a
-    sharp magnitude roll-off - the IIR analogue of a linear-phase FIR design,
-    useful when waveform shape (not stopband rejection) matters most.
+    Maximally flat group delay (nearly linear phase in the passband) instead
+    of a sharp magnitude roll-off, for when the waveform shape matters more
+    than stopband rejection.
 
     Parameters
     ----------
@@ -854,7 +854,7 @@ def bessel_sos(
     Returns
     -------
     ndarray
-        SOS coefficients. Shape: ``(n_sections, 6)``.
+        SOS coefficients, ``(n_sections, 6)``.
     """
     nyq = 0.5 * float(sampling_rate)
     Wn = _iir_wn(cutoff, btype, nyq)
@@ -895,38 +895,31 @@ def ols_fir_filter(
 ) -> S:
     """Apply an FIR filter by overlap-save, for long filters and long records.
 
-    The overlap-save (OLS) method processes the record in fixed-size FFT
-    blocks, so memory stays bounded for long impulse responses (chromatic
-    dispersion compensation, group-delay equalizers) where one full-record
-    FFT would exhaust GPU memory.  For short filters on moderate records,
-    :func:`fir_filter` is as fast and simpler.
+    Overlap-save (OLS) processes the record in FFT blocks of fixed size, so
+    memory stays bounded for long impulse responses (chromatic dispersion,
+    group-delay equalizers) where one FFT of the whole record would exhaust
+    GPU memory.  For short filters on moderate records, :func:`fir_filter` is
+    as fast and simpler.
 
     Parameters
     ----------
     samples : array_like or Signal
-        Input signal. Shape: ``(N,)`` for SISO or ``(C, N)`` for
-        multi-channel.  A :class:`Signal` returns a new filtered
-        :class:`Signal`.
+        Samples, ``(N,)`` or ``(C, N)``.  A Signal gives a new Signal.
     taps : array_like
-        FIR filter coefficients. Shape: ``(L,)``.
+        FIR coefficients, ``(L,)``.
     fft_size : int, optional
-        FFT block size. Must be a power of 2. Defaults to
-        ``max(1024, next_power_of_2(4 * L))`` so that the 25 % guard
-        region is at least ``L`` samples long.
+        FFT block size, a power of 2.  Defaults to
+        ``max(1024, next_power_of_2(4·L))``, so the guard of a quarter block
+        is at least ``L`` samples long.
     center : bool, default True
-        When ``True`` (default), the output alignment matches
-        ``fir_filter`` (scipy ``mode='same'``, center-aligned at tap
-        ``L // 2``).  The output at position ``n`` equals
-        ``sum_k x[n + L//2 - k] * taps[k]``, which is correct for
-        pulse-shaped signals where the filter group delay must be
-        compensated before symbol sampling.
-
-        When ``False``, the output is the causal linear convolution
-        ``y[n] = sum_k x[n-k] * taps[k]`` (equivalent to
-        ``numpy.convolve(x, taps, mode='full')[:N]``).  Use this when
-        you need the raw causal impulse response (e.g. measuring filter
-        step response) or when writing CD/dispersion compensation where
-        the two-sided inverse filter alignment is handled externally.
+        Align the output as :func:`fir_filter` does (SciPy's
+        ``mode='same'``, centered on tap ``L // 2``):
+        ``y[n] = sum_k x[n + L//2 - k]·taps[k]``, which removes the group
+        delay of a symmetric filter before symbol sampling.  With ``False``
+        the output is the causal convolution ``y[n] = sum_k x[n-k]·taps[k]``
+        (``numpy.convolve(x, taps, mode='full')[:N]``), for a raw causal
+        response such as a step response, or when the caller aligns the
+        filter itself.
 
     Returns
     -------
@@ -944,9 +937,9 @@ def ols_fir_filter(
     A symmetric guard of ``fft_size // 4`` samples is discarded from each
     block edge, so ``fft_size // 4 >= len(taps)`` must hold.
 
-    The ``center=True`` path post-pads the input by ``L // 2`` zeros
-    before OLS processing and trims the same number of leading output
-    samples - a zero-copy shift that costs one extra OLS block at most.
+    With ``center=True`` the input is padded at the end by ``L // 2`` zeros
+    and as many leading output samples are dropped, which costs at most one
+    extra block.
     """
     signal_adapter = adapt_signal(samples, function_name="ols_fir_filter()")
     x = signal_adapter.array
@@ -1015,7 +1008,7 @@ def ols_fir_filter(
 def fir_filter(samples: S, taps: ArrayType, *, periodic: bool = False) -> S:
     """Apply an FIR filter along the time (last) axis.
 
-    FFT convolution, ``mode="same"``: the output is centerd on tap
+    FFT convolution, ``mode="same"``: the output is centered on tap
     ``len(taps) // 2``, so a symmetric filter adds no delay.  With
     ``periodic=True`` the convolution is circular; away from the record ends
     both give the same samples.
@@ -1030,7 +1023,7 @@ def fir_filter(samples: S, taps: ArrayType, *, periodic: bool = False) -> S:
         precision of ``samples``.
     periodic : bool, default False
         Treat ``samples`` as one period of a periodic sequence (circular
-        convolution): the output loops seamlessly, e.g. on a streaming AWG,
+        convolution): the output loops seamlessly, as on a streaming AWG,
         and has no filter transients at its ends.  Any ``L`` works.
 
     Returns
@@ -1131,26 +1124,23 @@ def iir_filter(
 ) -> S:
     """Apply an IIR filter in second-order sections (SOS) along the time axis.
 
-    The IIR sibling of :func:`fir_filter`: takes coefficients designed
-    separately (:func:`butterworth_sos`, :func:`chebyshev1_sos`,
-    :func:`chebyshev2_sos`, :func:`elliptic_sos`, :func:`bessel_sos`, or any
-    other second-order-sections design) and applies them, rather than coupling
-    a specific filter family to the application step.
+    The IIR counterpart of :func:`fir_filter`.  It applies sections designed
+    separately, by :func:`butterworth_sos`, :func:`chebyshev1_sos`,
+    :func:`chebyshev2_sos`, :func:`elliptic_sos`, :func:`bessel_sos` or any
+    other SOS design.
 
     Parameters
     ----------
     samples : array_like or Signal
-        Input signal samples. Shape: ``(N,)`` or ``(C, N)``.  A
-        :class:`Signal` returns a new filtered :class:`Signal`.
+        Samples, ``(N,)`` or ``(C, N)``.  A Signal gives a new Signal.
     sos : array_like
-        Second-order-sections filter coefficients. Shape: ``(n_sections, 6)``.
+        Second-order sections, ``(n_sections, 6)``.
     zero_phase : bool, default True
-        ``True`` - forward-backward (``sosfiltfilt``): zero phase distortion
-        (no group delay), at the cost of needing the whole record up front
-        (non-causal, offline use).
-        ``False`` - causal (``sosfilt``): the filter's real, frequency-
-        dependent group delay is present in the output, as it would be in a
-        streamed/real-time application.
+        Filter forward and backward (``sosfiltfilt``): no phase distortion
+        or group delay, but non-causal, so the whole record is needed.  With
+        ``False`` the filter runs causally (``sosfilt``) and its
+        frequency-dependent group delay stays in the output, as in a
+        real-time receiver.
 
     Returns
     -------
@@ -1159,10 +1149,10 @@ def iir_filter(
 
     Notes
     -----
-    Internally promotes to ``float64``/``complex128`` for the filtering call
-    and casts back to the input dtype on return: at very low normalized
-    cutoffs (e.g. phase-drift extraction), SOS poles bunch near ``z=1`` and
-    single precision is not numerically safe.
+    The filter runs in ``float64`` or ``complex128`` and the result is cast
+    back to the input dtype: at very low normalized cutoffs (phase-drift
+    extraction), the poles crowd near ``z = 1`` and single precision is not
+    stable.
     """
     signal_adapter = adapt_signal(samples, function_name="iir_filter()")
     x = signal_adapter.array

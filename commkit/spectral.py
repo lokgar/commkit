@@ -91,7 +91,8 @@ def grid_frequency(
     Both functions snap a requested frequency to the nearest multiple of the
     bin spacing ``sampling_rate / num_samples`` (ties to even), so the tone or
     shift completes a whole number of cycles over the record.  This returns
-    that applied value, e.g. to tell a receiver where a pilot tone sits.
+    that applied value, for example to tell a receiver where a pilot tone
+    sits.
 
     Parameters
     ----------
@@ -214,7 +215,7 @@ def add_pilot_tone(
         Requested tone frequency ``f_p`` in Hz, in ``(-f_s/2, f_s/2)``.  A
         scalar places the same tone on every channel; a sequence of length
         ``C`` places one tone per channel (channel ``c`` gets
-        ``frequency[c]``), e.g. for tone-based polarization demultiplexing
+        ``frequency[c]``), as for tone-based polarization demultiplexing
         (:func:`~commkit.equalization.demultiplex_polarization_tones_static`).
         Each value is snapped to the FFT grid ``f_s/N`` (see Notes);
         :func:`grid_frequency` gives the applied value.
@@ -231,9 +232,9 @@ def add_pilot_tone(
         recovered phase and is absorbed by the usual post-CPR ambiguity
         resolution.
     renormalize : bool, default False
-        If ``True``, rescale each channel after adding the tone so that its
-        mean power matches the input (keeping ``E[|x|²] = 1/sps``).  If
-        ``False``, the power rises by the factor ``1 + 10^(PSR/10)``.
+        Rescale each channel after adding the tone so that its mean power
+        matches the input (keeping ``E[|x|²] = 1/sps``).  Otherwise the power
+        rises by the factor ``1 + 10^(PSR/10)``.
 
     Returns
     -------

@@ -58,57 +58,47 @@ def normalize(
     axis: int | None = None,
     sps: float = 1,
 ) -> ArrayType:
-    """Normalize an array according to the specified strategy.
+    """Scale an array to unit gain, energy, peak or power.
 
     Parameters
     ----------
     x : array_like
-        Input signal or filter taps.
+        Signal or filter taps.
     mode : {"unity_gain", "unit_energy", "peak", "average_power", "symbol_power", "dac_peak"}, default "unity_gain"
-        Normalization strategy:
-        - "unity_gain": Sum of elements is 1.0 (DC gain normalization).
-          Preserves signal levels (e.g., 5V -> 5V). Used for general filters.
-        - "unit_energy": L2-norm is 1.0 (sum(|x|^2) = 1).
-          Preserves total energy/noise power. Used for pulse shaping and matched filters.
-        - "peak": Peak complex envelope is 1.0 (max_n |x[n]| = 1).
-          For complex signals this normalizes by the maximum instantaneous magnitude,
-          so |x[n]| <= 1 for all n. This bound is invariant under any
-          unit-magnitude operation (frequency shifts, phase rotations, equalization),
-          making it the correct choice for DSP chains. For real signals the behavior
-          is identical: max_n |x[n]| = 1.
-        - "average_power": Mean sample power is 1.0 (E[|x|^2] = 1 per sample).
-          Normalizes the composite complex signal power at the sample level.
-          Used for symbol constellations at 1 sps and for display/plotting.
-          **Not suitable for oversampled waveforms**: for a Nyquist pulse with
-          unit-energy taps at ``sps`` samples/symbol the natural average sample
-          power is ``Es/sps``, so ``"average_power"`` would inflate all samples
-          by ``√sps`` and break Es/N0 calibration.
-        - "symbol_power": Unit symbol energy regardless of oversampling factor.
-          Norm factor is ``rms(x) * √sps``, so the output satisfies
-          ``E[|x|²] * sps = 1`` (i.e. average sample power = 1/sps).
-          This is the correct mode for pulse-shaped waveforms: all pulse types
-          (zero-stuffed, rect, RRC, Gaussian, ...) end up at the same power level
-          and ``apply_awgn`` can use ``Es = signal_power * sps = 1`` directly.
-          Requires ``sps`` parameter. At ``sps=1`` it is identical to
-          ``"average_power"``.
-        - "dac_peak": Per-channel ``max(peak_|Re|, peak_|Im|)`` is 1.0.
-          Brings the dominant I/Q component to 1.0 while preserving the I/Q
-          ratio - unlike ``"peak"`` (complex-envelope ``max(|x[n]|)``), which
-          leaves components at ``<= 1/sqrt(2)`` for square QAM/PSK whose
-          envelope peak sits at 45°.  Maximizes DAC range utilization for a
-          signal section independent of modulation format or constellation
-          phase geometry (e.g. a frame's preamble and body, normalized
-          separately so each uses the full DAC range).
+        Quantity set to 1:
+
+        - ``"unity_gain"``: the sum of the elements, the DC gain of filter
+          taps.  A filter normalized this way keeps signal levels.
+        - ``"unit_energy"``: the energy ``sum(|x|²)``, as for pulse-shaping
+          and matched-filter taps, which then keep the noise power.
+        - ``"peak"``: the largest magnitude ``max |x[n]|``.  The bound is
+          invariant under unit-magnitude operations (frequency shifts, phase
+          rotations), so it survives the rest of a DSP chain.
+        - ``"average_power"``: the mean sample power ``E[|x|²]``, for symbols
+          at one sample per symbol.  Do not use it on an oversampled
+          waveform: with unit-energy pulse taps its natural sample power is
+          ``1/sps``, and this mode would scale it up by ``√sps``.
+        - ``"symbol_power"``: the symbol energy ``sps·E[|x|²]``, the library's
+          invariant ``E[|x|²] = 1/sps``.  Every pulse shape then ends at the
+          same power, and ``apply_awgn`` can take ``Es = 1``.  Equal to
+          ``"average_power"`` at ``sps=1``.
+        - ``"dac_peak"``: the larger of the I and Q peaks,
+          ``max(max |Re x|, max |Im x|)``.  It keeps the I/Q ratio and uses
+          the full DAC range whatever the constellation's orientation; with
+          ``"peak"``, square QAM, whose largest points sit at 45°, reaches only
+          ``1/√2`` on each axis.  Normalize frame sections (preamble, body)
+          separately to give each the full range.
     axis : int, optional
-        The axis along which to compute the normalization factor.
-        If `None`, normalizes the entire array globally.
+        Axis along which the factor is computed, so each slice is normalized
+        separately.  By default the whole array shares one factor.
     sps : float, default 1
-        Samples per symbol. Only used by the ``"symbol_power"`` mode.
+        Samples per symbol, used by ``"symbol_power"`` only.
 
     Returns
     -------
     ndarray
-        The normalized array.
+        The normalized array, same dtype and device.  An all-zero slice stays
+        zero.
     """
     logger.debug("Normalizing array (mode: %s, axis=%s, sps=%s).", mode, axis, sps)
     x, xp, _ = dispatch(x)
@@ -181,20 +171,18 @@ def normalize(
 def db_to_linear(db: ArrayType | float, *, power: bool = True) -> ArrayType | float:
     """Convert decibels to a linear ratio.
 
-    ``power=True`` (default) uses the power/energy convention
-    (``10**(db/10)``) - e.g. Es/N0, SNR.  ``power=False`` uses the
-    amplitude/field convention (``10**(db/20)``) - e.g. an I/Q gain
-    imbalance or a pilot-tone gain applied directly to complex amplitude
-    samples.  Picking the wrong convention silently mis-scales the result
-    by a factor of 2 in the exponent, so verify which quantity a given
-    ``_db`` parameter actually represents before choosing.
+    ``power=True`` uses the power convention ``10**(db/10)``, for Es/N0 or
+    an SNR.  ``power=False`` uses the amplitude convention ``10**(db/20)``,
+    for a gain applied to field samples, such as an I/Q gain imbalance or a
+    pilot-tone gain.  The wrong convention squares or square-roots the
+    result, so check which quantity a ``_db`` parameter describes.
 
     Parameters
     ----------
     db : array_like or float
-        Value(s) in decibels.
+        Value in decibels.
     power : bool, default True
-        Selects the 10x (power) or 20x (amplitude) convention.
+        Power (``10**(db/10)``) or amplitude (``10**(db/20)``) convention.
 
     Returns
     -------
@@ -206,27 +194,25 @@ def db_to_linear(db: ArrayType | float, *, power: bool = True) -> ArrayType | fl
 
 
 def linear_to_db(x: ArrayType, *, power: bool = True) -> ArrayType:
-    """Convert a linear ratio to decibels (inverse of :func:`db_to_linear`).
+    """Convert a linear ratio to decibels, the inverse of :func:`db_to_linear`.
 
-    ``power=True`` (default) uses the power/energy convention
-    (``10*log10(x)``) - e.g. an SNR ratio.  ``power=False`` uses the
-    amplitude/field convention (``20*log10(x)``) - e.g. an EVM ratio
-    (RMS error amplitude / RMS reference amplitude).  ``x <= 0`` maps to
-    ``-inf`` (or ``nan`` for ``x < 0``) without raising a RuntimeWarning -
-    callers that need a different zero/negative policy should guard before
-    calling.
+    ``power=True`` uses the power convention ``10·log10(x)``, for an SNR.
+    ``power=False`` uses the amplitude convention ``20·log10(x)``, for an
+    amplitude ratio such as the EVM.  Zero maps to ``-inf`` and negative
+    values to ``nan``, without a RuntimeWarning; guard the input if another
+    policy is needed.
 
     Parameters
     ----------
     x : array_like
-        Linear ratio value(s), NumPy or CuPy.
+        Linear ratio.
     power : bool, default True
-        Selects the 10x (power) or 20x (amplitude) convention.
+        Power (10·log10) or amplitude (20·log10) convention.
 
     Returns
     -------
     ndarray
-        Value(s) in decibels, same shape and device as ``x``.
+        Value in decibels, same shape and device as ``x``.
     """
     x, xp, _ = dispatch(x)
     factor = 10.0 if power else 20.0
@@ -258,7 +244,7 @@ def _centered_axis(n: int, x: Any, xp: Any) -> tuple[ArrayType, ArrayType]:
 def _linear_trend_slope(y: ArrayType, *, x: Any = None, xp: Any = None) -> ArrayType:
     r"""Per-channel least-squares slope of a phase (or any) record.
 
-    Ordinary least squares on the centerd normal equations,
+    Ordinary least squares on the centered normal equations,
 
     .. math:: \hat{a} = \frac{\sum_k (x_k - \bar{x})(y_k - \bar{y})}
                              {\sum_k (x_k - \bar{x})^2},
@@ -275,7 +261,7 @@ def _linear_trend_slope(y: ArrayType, *, x: Any = None, xp: Any = None) -> Array
     x : array_like, optional
         Abscissa, ``(N,)``.  Defaults to the sample index ``arange(N)``, so the
         slope is then in *units of y per sample*.  Pass a time axis in seconds
-        to get a slope per second (e.g. for non-uniform pilot positions).
+        to get a slope per second, for example at non-uniform pilot positions.
     xp : module, optional
         Array module; inferred from ``y`` when omitted.
 
@@ -289,7 +275,7 @@ def _linear_trend_slope(y: ArrayType, *, x: Any = None, xp: Any = None) -> Array
     n = y.shape[-1]
     xc, denom = _centered_axis(n, x, xp)
     # Subtracting the per-channel mean is mathematically redundant (xc is
-    # already centerd) but keeps the products small when the record carries a
+    # already centered) but keeps the products small when the record carries a
     # large constant offset - phase trajectories routinely do.
     yc = y - xp.mean(y, axis=-1, keepdims=True)
     return xp.sum(yc * xc, axis=-1) / denom
@@ -316,8 +302,8 @@ def _remove_linear_trend(y: ArrayType, *, x: Any = None) -> tuple[ArrayType, Arr
     detrended : ndarray
         ``y`` minus the fitted slope term, ``float64``, on the input's device.
     slope : ndarray
-        Fitted slope per channel, ``(C,)`` - in units of ``y`` per unit ``x``
-        (per sample by default).
+        Fitted slope per channel, ``(C,)``, in units of ``y`` per unit of
+        ``x`` (per sample by default).
     """
     y, xp, _ = dispatch(y)
     n = y.shape[-1]

@@ -72,11 +72,10 @@ def save_npz(
     signal : Signal
         The signal to persist.
     path : str or Path
-        Destination path.  A ``.npz`` extension is appended automatically
-        if absent.
+        Destination path; ``.npz`` is appended when missing.
     compressed : bool, default True
-        Use ``savez_compressed`` (zlib).  Set to ``False`` to use
-        the uncompressed ``savez`` (faster write, larger file).
+        Write with ``savez_compressed`` (zlib).  ``False`` writes
+        uncompressed with ``savez``: faster, but a larger file.
 
     Notes
     -----
@@ -208,8 +207,7 @@ def load_npz(
     Parameters
     ----------
     path : str or Path
-        Path to the ``.npz`` file.  A ``.npz`` extension is appended
-        automatically if absent.
+        Path to the archive; ``.npz`` is appended when missing.
     device : {"cpu", "gpu"}, default "cpu"
         Device of the loaded Signal's arrays.
 

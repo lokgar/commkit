@@ -49,14 +49,14 @@ def zf_equalizer(
         Received samples, ``(N,)`` for SISO or ``(C, N)`` for MIMO.  A
         :class:`Signal` returns a new equalized :class:`Signal`.
     channel_estimate : array_like
-        Channel impulse response. Shape: ``(L,)`` for SISO or
-        ``(C, C, L)`` for MIMO (each ``[i, j]`` is the FIR from input j
-        to output i). Index ``center`` holds lag 0.
+        Channel impulse response, ``(L,)`` for SISO or ``(C, C, L)`` for
+        MIMO, where ``[i, j]`` is the FIR from input ``j`` to output ``i``.
+        Index ``center`` holds lag 0.
     noise_variance : float, default 0.0
         Noise variance ``σ²`` of the MMSE regularization; ``0.0`` gives ZF.
     center : int, default 0
         Index of lag 0 in ``channel_estimate``, in ``[0, L)``. ``0`` means a
-        causal response (``rx = convolve(tx, h)[:N]``). A centerd estimate
+        causal response (``rx = convolve(tx, h)[:N]``). A centered estimate
         from :func:`estimate_transfer_function` with ``num_taps=L`` has
         ``center=L // 2``; taps before ``center`` are precursors (negative
         lags). The output is aligned with the transmitted samples (no delay).
@@ -301,13 +301,14 @@ def estimate_transfer_function(
 ) -> ArrayType:
     r"""Estimate a (MIMO) channel from a known reference by Welch's H1 method.
 
-    Estimates the frequency response :math:`B(f) \approx S_{yx}(f)\,S_{xx}(f)^{-1}`
-    mapping a known ``reference`` ``x`` to the measured ``received`` ``y``, where
-    :math:`S_{xx}` / :math:`S_{yx}` are the Welch auto/cross spectra - Hann-windowed,
-    averaged periodograms.  This is the classic H1 channel-sounding estimator,
-    generalized to a full ``(C, C)`` cross-spectral matrix so the MIMO response is
-    recovered in one shot (the reference is FFT'd once and every channel pair is
-    formed by a single einsum).
+    Estimates the frequency response
+    :math:`B(f) \approx S_{yx}(f)\,S_{xx}(f)^{-1}` from a known ``reference``
+    ``x`` to the measured ``received`` ``y``, where :math:`S_{xx}` and
+    :math:`S_{yx}` are the Welch auto- and cross-spectra (averaged
+    Hann-windowed periodograms).  This is the H1 channel-sounding estimator,
+    extended to the full ``(C, C)`` cross-spectral matrix, so the MIMO
+    response comes out of one pass: the reference is transformed once and
+    every channel pair is formed in one product.
 
     Invert the estimated channel with :func:`zf_equalizer`, passing the center
     index of the taps::
@@ -321,28 +322,29 @@ def estimate_transfer_function(
     Parameters
     ----------
     reference, received : array_like or Signal
-        Time-aligned, same-rate input / output.  ``(N,)`` SISO or ``(C, N)`` MIMO.
-        A :class:`Signal` is unwrapped to its ``.samples``.
+        Channel input and output, time-aligned at the same rate, ``(N,)`` or
+        ``(C, N)``.  A Signal contributes its samples.
     n_fft : int, default 512
         Welch segment length (frequency resolution ``fs / n_fft``).
     reg : float, default 1e-2
-        Relative Tikhonov loading for the :math:`S_{xx}` inverse - a diagonal term
-        scaled to the mean auto-spectrum, so it stabilizes the estimate where the
-        reference has little power (band edges) without depending on the absolute
-        signal level.  The H1 ratio is invariant to overall scale and window count.
+        Relative Tikhonov loading of the :math:`S_{xx}` inverse: a diagonal
+        term scaled to the mean auto-spectrum.  It stabilizes the estimate
+        where the reference has little power (band edges) independently of
+        the signal level.  The H1 ratio does not depend on the overall scale
+        or the number of windows.
     max_windows : int, default 4096
         Cap on the number of averaged segments.  An LTI channel is static, so a few
         thousand windows spread over the record give a stable estimate; capping
         bounds the vectorized FFT batch (the averaging only trades variance, not
         bias, so the cap does not move the estimate).
     num_taps : int, optional
-        If given, return the centerd, Hann-tapered impulse response truncated to
-        ``num_taps`` taps - ``(C, C, num_taps)`` MIMO or ``(num_taps,)`` SISO.
-        Lag 0 sits at index ``num_taps // 2`` (taps before it are negative
-        lags), so pass ``center=num_taps // 2`` to :func:`zf_equalizer`.  If
-        ``None`` (default), return the frequency
-        response ``B(f)`` in FFT-bin order - ``(n_fft, C, C)`` MIMO or ``(n_fft,)``
-        SISO.
+        Return the centered, Hann-tapered impulse response truncated to
+        ``num_taps`` taps, ``(C, C, num_taps)`` for MIMO or ``(num_taps,)``
+        for SISO.  Lag 0 is at index ``num_taps // 2`` (the taps before it are
+        negative lags), so pass ``center=num_taps // 2`` to
+        :func:`zf_equalizer`.  By default the frequency response ``B(f)`` is
+        returned in FFT-bin order, ``(n_fft, C, C)`` for MIMO or ``(n_fft,)``
+        for SISO.
 
     Returns
     -------
@@ -400,7 +402,7 @@ def estimate_transfer_function(
     if num_taps is None:
         return B[:, 0, 0] if single else B
 
-    # Centerd, Hann-tapered impulse response, truncated to num_taps: lag 0 sits
+    # Centered, Hann-tapered impulse response, truncated to num_taps: lag 0 sits
     # at index num_taps // 2 for odd and even lengths alike.
     n_taps = int(min(num_taps, n_fft))
     b_t = xp.fft.fftshift(_fft.ifft(B, axis=0), axes=0)  # (n_fft, C, C), lag axis 0

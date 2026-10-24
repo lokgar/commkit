@@ -168,7 +168,7 @@ class Signal:
     # -------------------------------------------------------------------------
 
     def time_axis(self) -> ArrayType:
-        """Time of each sample in seconds, starting at 0, shape ``(N,)``."""
+        """Time of each sample in seconds from 0, ``(N,)``."""
         n_samples = self.samples.shape[-1]
         return self.xp.arange(0, n_samples) / self.sampling_rate
 
@@ -263,7 +263,7 @@ class Signal:
     # -------------------------------------------------------------------------
 
     def clone(self) -> Signal:
-        """Return a fully independent (deep) copy, including all arrays."""
+        """Return an independent copy, arrays included."""
         return copy.deepcopy(self)
 
     def to(self, device: str) -> Signal:
@@ -276,12 +276,13 @@ class Signal:
         Parameters
         ----------
         device : {"cpu", "gpu"}
-            The target device. Case-insensitive.
+            Target device, case-insensitive.
 
         Raises
         ------
         ImportError
-            If GPU is requested but CuPy is not installed/functional.
+            If ``device`` is ``"gpu"`` and CuPy is not installed or finds no
+            usable GPU.
         """
         moved: dict[str, Any] = {}
         if self.reference is not None:

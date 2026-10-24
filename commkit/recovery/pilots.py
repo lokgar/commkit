@@ -235,7 +235,7 @@ def _extract_pilot_phasor(
     real_dtype = xp.float64 if X.dtype == xp.complex128 else xp.float32
 
     # 2) Per-channel tone center.  Refinement absorbs a frequency offset that
-    #    has dragged the tone away from nominal, so the window stays centerd on
+    #    has dragged the tone away from nominal, so the window stays centered on
     #    it.  Runs on the shared spectrum - no extra FFTs, one host transfer.
     if refine_tone:
         f_centers = _refine_tones_from_spectrum(
@@ -348,8 +348,8 @@ class PilotTone:
         Window over the passband, any ``scipy.signal.get_window`` spec.
     remove_frequency_offset : bool, default True
         Keep the linear phase ramp of a residual frequency offset in the
-        estimate, so that correcting removes offset and phase noise
-        together.  ``False`` subtracts the per-channel least-squares trend
+        estimate, so that the correction removes the offset and the phase
+        noise together.  ``False`` subtracts the per-channel least-squares trend
         and leaves only the phase-noise fluctuation.
     joint_channels : bool, default False
         MIMO: sum the tone phasors across channels before the angle (shared
@@ -358,7 +358,7 @@ class PilotTone:
     Notes
     -----
     Place the tone at ``|f_p| > (1+β)·R_s/2 + B`` and keep
-    ``|f_p| + B < f_s/2``; choose ``B ≳ 3-5 × linewidth``.
+    ``|f_p| + B < f_s/2``, with ``B`` at least 3 to 5 times the linewidth.
     """
 
     frequency: float
@@ -471,8 +471,8 @@ class PilotTones:
     bandwidth : float
         Half-width of each tone's extraction window in Hz.
     differential_bandwidth : float, default 5e3
-        Low-pass cut-off in Hz for the inter-tone differential: above the
-        SOP drift rate, far below the phase-noise band.
+        Low-pass cutoff in Hz of the inter-tone differential: above the SOP
+        drift rate and far below the phase-noise band.
     search_band : float, optional
         Peak-search half-width in Hz; defaults to ``bandwidth``.
     per_tone_channel : sequence of int, optional

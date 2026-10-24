@@ -53,18 +53,19 @@ def _plot_timing_correlation(
     Parameters
     ----------
     corr_mag : array_like
-        Correlation magnitude. Shape: ``(C, N)`` or ``(N,)``.
+        Correlation magnitude, ``(C, N)`` or ``(N,)``.
     peak_indices : array_like
-        Integer peak positions per channel. Shape: ``(C,)`` or scalar.
+        Integer peak positions per channel, ``(C,)`` or scalar.
     norm_factors : array_like
-        Per-channel normalization factors. The displayed threshold line is
-        ``threshold * norm_factors[c]``. Shape: ``(C,)``.
+        Per-channel normalization factors, ``(C,)``.  The threshold line is
+        drawn at ``threshold * norm_factors[c]``.
     threshold : float
-        Detection threshold (normalized 0-1).
+        Detection threshold, normalized to ``[0, 1]``.
     offset : int, default 0
-        Search-range start sample added to sample indices for correct labels.
+        First sample of the search range, added to the sample axis labels.
     ax : array_like of Axes, optional
-        Pre-existing axes of shape ``(C, 2)`` - overall and zoom per channel.
+        Existing axes, ``(C, 2)``: the overall and the zoomed view of each
+        channel.
         If ``None``, a new figure is created.
     show : bool, default False
         If ``True``, calls ``plt.show()`` and returns ``None``.
@@ -141,15 +142,17 @@ def _plot_mm_autocorrelation(
 
     Per-channel two-panel layout:
 
-    * **Left / Top** - Normalized autocorrelation magnitude ``|R[m]|`` vs lag
-      ``m``.  Encodes per-lag SNR; used as weight proxy ``w[m] ∝ m²|R[m]|²``.
-    * **Right / Bottom** - Wrapped phase ``angle(R[m])`` vs lag, with the
-      expected linear ramp overlaid and ``±π`` wrap boundaries marked.
+    * Left or top: the normalized autocorrelation magnitude ``|R[m]|`` against
+      the lag ``m``.  It shows the SNR per lag and is the basis of the weights
+      ``w[m] ∝ m²|R[m]|²``.
+    * Right or bottom: the wrapped phase ``angle(R[m])`` against the lag, with
+      the expected linear ramp and the ``±π`` wrap limits.
 
     Parameters
     ----------
-    R_np : (L,) or (C, L) complex128
-        Normalized per-channel autocorrelation at lags ``m = 1 ... L``.
+    R_np : array_like
+        Normalized per-channel autocorrelation at lags ``m = 1 ... L``,
+        complex, ``(L,)`` or ``(C, L)``.
         A 1-D input is treated as a single channel.
     f_est : float or list of float
         Frequency offset estimate(s) in Hz.  Scalar for a single channel;
@@ -159,9 +162,8 @@ def _plot_mm_autocorrelation(
     M : int, default 1
         Modulation pre-processing exponent.
     ax : Axes or array of Axes, optional
-        For a single channel: pair ``[ax_amp, ax_phase]``.
-        For multiple channels: array of shape ``(C, 2)``.
-        A new figure is created when ``None``.
+        Existing axes: the pair ``[ax_amp, ax_phase]`` for one channel, a
+        ``(C, 2)`` array for several.  By default a new figure is created.
     show : bool, default False
         If ``True``, calls ``plt.show()`` and returns ``None``.
     title : str, default "FOE - Mengali-Morelli"
@@ -257,14 +259,13 @@ def _plot_frequency_offset_spectrum(
     Parameters
     ----------
     mag_spectrum : array_like
-        Magnitude spectrum ``|X^M(f)|``. Shape: ``(C, nfft)`` or ``(nfft,)``.
+        Magnitude spectrum ``|X^M(f)|``, ``(C, nfft)`` or ``(nfft,)``.
     freqs : array_like
-        Frequency axis in Hz (``np.fft.fftfreq(nfft) * fs``).
-        Shape: ``(nfft,)``.
+        Frequency axis in Hz (``np.fft.fftfreq(nfft) * fs``), ``(nfft,)``.
     M : int
         M-th power used to remove modulation.
     k_peaks : array_like
-        Peak bin index per channel. Shape: ``(C,)`` or scalar.
+        Peak bin index per channel, ``(C,)`` or scalar.
     f_estimates : list of float
         Per-channel frequency estimates in Hz (before multi-channel averaging).
     search_range : tuple of float, optional
@@ -346,9 +347,9 @@ def _plot_carrier_phase_trajectory(
     Parameters
     ----------
     phi_full : array_like
-        Per-symbol phase estimate in radians. Shape: ``(C, N)`` or ``(N,)``.
+        Per-symbol phase estimate in radians, ``(C, N)`` or ``(N,)``.
     block_centers : array_like, optional
-        Block center positions in symbols (VV, BPS). Shape: ``(N_blocks,)``.
+        Block center positions in symbols (VV, BPS), ``(N_blocks,)``.
         If provided, thin vertical lines at each block center are drawn.
     n_train : int, default 0
         Training/DD boundary symbol index. Draws a dashed vertical line.
@@ -420,15 +421,15 @@ def _plot_frequency_offset_blockwise_result(
     Parameters
     ----------
     t_centers : array_like
-        Block center sample indices. Shape: ``(K,)``.
+        Block center sample indices, ``(K,)``.
     df_estimates : array_like
-        Per-block frequency estimates in Hz. Shape: ``(K,)``.
+        Per-block frequency estimates in Hz, ``(K,)``.
     n_grid : array_like
-        Dense sample index grid. Shape: ``(N,)``.
+        Dense sample index grid, ``(N,)``.
     df_dense : array_like
-        Interpolated frequency at each sample in Hz. Shape: ``(N,)``.
+        Interpolated frequency at each sample in Hz, ``(N,)``.
     phase_trajectory : array_like
-        Integrated phase in radians. Shape: ``(N,)``.
+        Integrated phase in radians, ``(N,)``.
     ax : list of 2 Axes, optional
         Pre-existing axes ``[ax_freq, ax_phase]``. If ``None``, a new figure
         with 2 panels is created.
@@ -504,11 +505,11 @@ def _plot_pilot_phase_estimate(
     Parameters
     ----------
     pilot_indices : array_like
-        Sample indices of pilot positions. Shape: ``(P,)``.
+        Sample indices of pilot positions, ``(P,)``.
     phi_pilots_u : array_like
-        Unwrapped pilot phases in radians. Shape: ``(C, P)`` or ``(P,)``.
+        Unwrapped pilot phases in radians, ``(C, P)`` or ``(P,)``.
     phi_full : array_like, optional
-        Interpolated per-symbol phase in radians. Shape: ``(C, N)`` or ``(N,)``.
+        Interpolated per-symbol phase in radians, ``(C, N)`` or ``(N,)``.
         If provided, a second panel shows the full trajectory per channel.
     f_est : float or list of float, default 0.0
         Estimated frequency offset in Hz (annotation on the fit line).
@@ -643,25 +644,25 @@ def _plot_pilot_tone_phase_estimate(
 
     Two panels:
 
-    1. **Tone spectrum** - magnitude spectrum ``|X(f)|`` (dB) with the
-       zero-phase extraction window overlaid on a twin axis, the per-channel
-       refined tone peak marked, and the nominal tone frequency annotated.
-    2. **Recovered phase** - the per-sample phase estimate ``θ̂[n]`` (deg).
+    1. Tone spectrum: the magnitude spectrum ``|X(f)|`` in dB, the
+       zero-phase extraction window on a twin axis, the refined tone peak of
+       each channel and the nominal tone frequency.
+    2. Recovered phase: the per-sample phase estimate ``θ̂[n]`` in degrees.
 
     All channels are overlaid on each panel.
 
     Parameters
     ----------
     freqs : array_like
-        FFT frequency axis in Hz (``np.fft.fftfreq(N) * fs``). Shape: ``(N,)``.
+        FFT frequency axis in Hz (``np.fft.fftfreq(N) * fs``), ``(N,)``.
     mag_spectrum : array_like
-        Magnitude spectrum ``|X(f)|``. Shape: ``(C, N)`` or ``(N,)``.
+        Magnitude spectrum ``|X(f)|``, ``(C, N)`` or ``(N,)``.
     window : array_like
-        Extraction window ``W(f)`` in ``[0, 1]``. Shape: ``(C, N)`` or ``(N,)``.
+        Extraction window ``W(f)`` in ``[0, 1]``, ``(C, N)`` or ``(N,)``.
     f_tones : array_like
-        Per-channel refined tone frequency in Hz. Shape: ``(C,)``.
+        Per-channel refined tone frequency in Hz, ``(C,)``.
     theta : array_like
-        Recovered per-sample phase in radians. Shape: ``(C, N)`` or ``(N,)``.
+        Recovered per-sample phase in radians, ``(C, N)`` or ``(N,)``.
     tone_frequency : float
         Nominal pilot-tone frequency in Hz.
     bandwidth : float
@@ -774,10 +775,10 @@ def _plot_pilot_tones_phase_estimate(
 
     Two panels:
 
-    1. **Inter-tone differential** - the slow tracked phase ``δ_k[n]`` (deg) for
-       each non-reference tone; the line style flags whether the tone was
-       combined (solid) or gated out (dashed).
-    2. **Combined phase** - the per-sample common estimate ``φ̂[n]`` (deg).
+    1. Inter-tone differential: the slowly tracked phase ``δ_k[n]`` in degrees
+       of each tone but the reference, solid when the tone was combined and
+       dashed when it was gated out.
+    2. Combined phase: the common per-sample estimate ``φ̂[n]`` in degrees.
 
     All channels share the active theme; no colors or line widths are set
     explicitly, so the trace colors come from the rcParams cycle.
@@ -785,11 +786,11 @@ def _plot_pilot_tones_phase_estimate(
     Parameters
     ----------
     delta : sequence of array_like
-        Per-tone differential phase ``δ_k[n]`` in radians - a length-``K``
-        sequence (or ``(K, N)`` array) of ``(N,)`` traces.  The reference tone's
+        Per-tone differential phase ``δ_k[n]`` in radians: ``K`` traces of
+        ``(N,)``, as a sequence or a ``(K, N)`` array.  The reference tone's
         entry is ``≈ 0`` and is skipped in panel 1.
     phi : array_like
-        Combined per-sample phase estimate ``φ̂[n]`` in radians.  Shape ``(N,)``.
+        Combined per-sample phase estimate ``φ̂[n]`` in radians, ``(N,)``.
     ref : int
         Reference-tone index (its differential is identically zero).
     used : sequence of int

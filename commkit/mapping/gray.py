@@ -109,35 +109,27 @@ def _gray_points(
     normalize: bool = True,
     unipolar: bool = False,
 ) -> np.ndarray:
-    """Generate constellation points with Gray mapping.
+    """Gray-labeled constellation points, indexed by their label.
 
-    The returned array is indexed by the symbol's natural binary value.
-    `constellation[i]` is the complex/float value for the symbol representing
-    the bit pattern for integer `i`.
+    ``points[i]`` is the point whose bit label is the binary value of ``i``.
 
     Parameters
     ----------
     modulation : {"psk", "qam", "ask", "pam"}
-        Modulation type. If string contains 'unipolar', unipolar=True is triggered.
+        Modulation family; a name containing ``"unipol"`` also sets
+        ``unipolar``.
     order : int
-        Modulation order (number of symbols). Must be a power of 2.
+        Number of points, a power of 2.
     normalize : bool, default True
-        If True, scales the constellation to unit average power (E_s = 1).
+        Scale to unit average power ``Es = 1``, so that formats combined in
+        one frame (PSK pilots with a QAM payload) start at the same power.
     unipolar : bool, default False
-        If True, shifts the constellation to be strictly non-negative (for 'ask'/'pam').
-        If the modulation string contains 'unipol', this is automatically forced to True.
+        Shift ASK/PAM points to non-negative values.
 
     Returns
     -------
-    np.ndarray
-        Array of constellation points (NumPy). Shape: (order,).
-        Complex for 'psk' and 'qam', Float for 'ask'.
-
-    Notes
-    -----
-    By default, constellations are normalized to **unit average power (E_s = 1)**.
-    This ensures that when different modulation schemes are mixed (e.g., PSK
-    pilots with QAM payload), they start from a consistent power baseline.
+    numpy.ndarray
+        Points, ``(order,)``: complex for PSK and QAM, real for ASK.
     """
     logger.debug(
         "Generating Gray-coded constellation: modulation=%s, order=%s, normalize=%s",
@@ -255,7 +247,7 @@ def _gray_psk(order: int) -> np.ndarray:
 
     Returns
     -------
-    np.ndarray
+    numpy.ndarray
         Complex array of PSK constellation points.
     """
     # Bits per symbol
@@ -332,7 +324,7 @@ def _gray_qam_square(order: int) -> np.ndarray:
 
     Returns
     -------
-    np.ndarray
+    numpy.ndarray
         Complex array of square QAM constellation points.
     """
     # M = 2^(2k). I bits = k, Q bits = k.
@@ -364,7 +356,7 @@ def _gray_qam_8_rect() -> np.ndarray:
 
     Returns
     -------
-    np.ndarray
+    numpy.ndarray
         Complex array of 8-QAM constellation points.
     """
 
@@ -410,7 +402,7 @@ def _gray_qam_cross(order: int) -> np.ndarray:
 
     Returns
     -------
-    np.ndarray
+    numpy.ndarray
         Complex array of cross QAM constellation points.
     """
     # M = 2^(2k+1).

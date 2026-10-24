@@ -358,11 +358,11 @@ def correct_cycle_slips(
     """Detect and correct cycle slips in a phase trajectory.
 
     After the M-fold unwrap, cycle slips can remain where the unwrap chose
-    the wrong branch.  The trajectory is
-    scanned sequentially: each value is predicted by a linear fit through up
-    to ``history`` past corrected values (the previous value while fewer than
-    ``min(10, history)`` are available).  A deviation beyond ``threshold`` is
-    corrected by the nearest integer multiple of ``2π/symmetry``.
+    the wrong branch.  The trajectory is scanned in order: each value is
+    predicted by a linear fit through up to ``history`` past corrected
+    values (the previous value while fewer than ``min(10, history)`` are
+    available), and a deviation beyond ``threshold`` is corrected by the
+    nearest integer multiple of ``2π/symmetry``.
 
     Parameters
     ----------

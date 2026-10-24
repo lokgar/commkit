@@ -189,8 +189,8 @@ class Tikhonov:
         ``"rts"``: the exact Rauch-Tung-Striebel smoother (Numba, CPU; GPU
         input makes one host round trip of the block phases).
         ``"steady_state"``: the steady-state Kalman gain as a zero-phase IIR
-        (``filtfilt``) on the input's device; accurate for 20 or more blocks,
-        and the exact smoother below 7 blocks.
+        (``filtfilt``) on the input's device, accurate from about 20 blocks;
+        below 7 blocks the exact smoother runs instead.
     joint_channels : bool, default False
         MIMO: one joint trajectory from the summed block phasors (shared LO).
     cycle_slip : CycleSlip, optional

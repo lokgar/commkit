@@ -36,7 +36,7 @@ __all__ = [
 class PrecisionWarning(UserWarning):
     """Double-precision input reduced to a block's single working precision.
 
-    The equalizers and the soft demapper compute in complex64 / float32 (the
+    The equalizers and the soft demapper compute in complex64 or float32 (the
     GPU's fast path) whatever their input; transforms keep the input's
     precision.  Shown once per call site by Python's default filter; turn it
     into an error for strict precision with

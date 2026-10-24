@@ -23,7 +23,7 @@ def ols_forward(samples: ArrayType, N_fft: int) -> tuple[ArrayType, dict[str, An
     Parameters
     ----------
     samples : array_like
-        Input samples. Shape: ``(num_ch, N)``. Must be 2-D.
+        Input samples, ``(num_ch, N)``. Must be 2-D.
     N_fft : int
         FFT block size. Must be a power of 2 and satisfy
         ``N_fft // 4 >= filter_length`` so the causal/anti-causal guard
@@ -32,7 +32,7 @@ def ols_forward(samples: ArrayType, N_fft: int) -> tuple[ArrayType, dict[str, An
     Returns
     -------
     Y : ndarray
-        Batch FFT of all OLS windows. Shape: ``(num_ch, num_blocks, N_fft)``.
+        Batch FFT of all OLS windows, ``(num_ch, num_blocks, N_fft)``.
     meta : dict
         Scaffold parameters required by ``ols_backward``:
         ``{'N': int, 'B': int, 'discard': int, 'num_blocks': int}``.
