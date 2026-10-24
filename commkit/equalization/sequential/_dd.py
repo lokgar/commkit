@@ -5,7 +5,6 @@
 
 from __future__ import annotations
 
-from dataclasses import replace
 from typing import Any
 
 import numpy as np
@@ -656,8 +655,8 @@ def rls(
         snapshot=snap,
         n_sym=n_update_halt,
         phase_out=phase_out,
+        tail_trim=tail_trim,
     )
     result = _log_equalizer_exit(result, name="RLS")
-    result = replace(result, tail_trim=tail_trim)
     _check_rls_divergence(result.weights, run.xp, forgetting_factor, delta)
     return _attach_equalized_signal(result, sig, state)

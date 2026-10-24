@@ -16,7 +16,7 @@ between the segments, plus the input from ``resume`` on, is the
 from __future__ import annotations
 
 from collections.abc import Callable
-from dataclasses import dataclass, replace
+from dataclasses import dataclass
 from typing import Any
 
 import numpy as np
@@ -414,31 +414,18 @@ def _assemble_sequential(
     snapshot: _Snapshot,
     n_sym: int | None = None,
     phase_out: np.ndarray | None = None,
+    tail_trim: int = 0,
 ) -> EqualizerResult:
-    """Kernel buffers -> ``EqualizerResult`` on the input's device.
+    """Build the ``EqualizerResult`` from the kernel buffers, on the input's device.
 
-    ``n_sym`` truncates the outputs (RLS drops its zero-padded tail).
-    ``phase_out`` attaches the inline CPR trajectory.  The state continues
-    at symbol ``resume`` from ``snapshot``.
+    ``n_sym`` truncates the outputs and ``tail_trim`` records it (RLS drops
+    its zero-padded tail).  ``phase_out`` gives the inline CPR trajectory.
+    The state continues at symbol ``resume`` from ``snapshot``.
     """
-    result = _unpack_result_numpy(
-        run.y_out,
-        run.e_out,
-        run.W,
-        run.w_hist,
-        run.was_1d,
-        run.store_weights,
-        n_sym=n_sym,
-        xp=run.xp,
-        num_train_symbols=run.n_train,
-        input_norm_factor=run.eq_norm,
-    )
+    phase_trajectory = None
     if phase_out is not None:
         phi = phase_out if n_sym is None else phase_out[:n_sym]
-        result = replace(
-            result,
-            phase_trajectory=restore_1d(run.was_1d, run.xp.asarray(phi.T)),
-        )
+        phase_trajectory = restore_1d(run.was_1d, run.xp.asarray(phi.T))
     n_out = run.n_sym if n_sym is None else n_sym
     state = EqualizerState(
         equalizer=equalizer,
@@ -454,4 +441,18 @@ def _assemble_sequential(
         inverse_correlation=snapshot.inverse_correlation,
         carrier=snapshot.carrier,
     )
-    return replace(result, state=state)
+    return _unpack_result_numpy(
+        run.y_out,
+        run.e_out,
+        run.W,
+        run.w_hist,
+        run.was_1d,
+        run.store_weights,
+        n_sym=n_sym,
+        xp=run.xp,
+        num_train_symbols=run.n_train,
+        input_norm_factor=run.eq_norm,
+        phase_trajectory=phase_trajectory,
+        state=state,
+        tail_trim=tail_trim,
+    )

@@ -14,7 +14,7 @@ from .._array import restore_1d
 from ..backend import dispatch, to_device
 from ..core._signal_adapter import require_integer_sps
 from ..logger import logger
-from .result import EqualizerResult
+from .result import EqualizerResult, EqualizerState
 
 # -----------------------------------------------------------------------------
 # SHARED HELPERS
@@ -281,6 +281,9 @@ def _unpack_result_numpy(
     xp: Any = np,
     num_train_symbols: int = 0,
     input_norm_factor: Any = 1.0,
+    phase_trajectory: Any = None,
+    state: EqualizerState | None = None,
+    tail_trim: int = 0,
 ) -> EqualizerResult:
     """Convert the Numba kernels' host outputs into an ``EqualizerResult``.
 
@@ -309,6 +312,12 @@ def _unpack_result_numpy(
         Training symbols used, stored in the result.
     input_norm_factor : float or numpy.ndarray, default 1.0
         Input normalization factor, stored in the result.
+    phase_trajectory : ndarray, optional
+        Phase of the inline CPR, already on ``xp`` and in the output layout.
+    state : EqualizerState, optional
+        Continuation state, stored in the result.
+    tail_trim : int, default 0
+        Symbols trimmed from the tail (RLS), stored in the result.
 
     Returns
     -------
@@ -339,6 +348,9 @@ def _unpack_result_numpy(
         weights_history=w_history,
         num_train_symbols=num_train_symbols,
         input_norm_factor=input_norm_factor,
+        phase_trajectory=phase_trajectory,
+        state=state,
+        tail_trim=tail_trim,
     )
 
 

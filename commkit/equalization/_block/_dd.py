@@ -5,7 +5,7 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass, replace
+from dataclasses import dataclass
 from typing import Any
 
 import numpy as np
@@ -757,14 +757,11 @@ def block_lms(
             f"min(0.5 / block_size, 8e-3) = {min(0.5 / block_size, 8e-3):.2e} "
             f"sits at a quarter of that ceiling."
         )
-    result = _assemble_block(run, y_all, e_all, w_hist, phi_all, n_train)
     weights, carrier = snap[0]
-    result = replace(
-        result,
-        state=_block_state(
-            run, equalizer="block_lms", cpr=cpr, weights=weights, carrier=carrier
-        ),
+    state_out = _block_state(
+        run, equalizer="block_lms", cpr=cpr, weights=weights, carrier=carrier
     )
+    result = _assemble_block(run, y_all, e_all, w_hist, phi_all, n_train, state_out)
     return _attach_equalized_signal(
         _log_equalizer_exit(result, name="Block-LMS"), sig, state
     )
@@ -840,8 +837,9 @@ def _assemble_block(
     w_hist: ArrayType | None,
     phi_all: ArrayType | None,
     n_train: int,
+    state: EqualizerState,
 ) -> EqualizerResult:
-    """Device buffers -> ``EqualizerResult`` (SISO squeezed)."""
+    """Build the ``EqualizerResult`` from the device buffers (SISO squeezed)."""
     if run.was_1d:
         return EqualizerResult(
             y_hat=y_all[0],
@@ -851,6 +849,7 @@ def _assemble_block(
             num_train_symbols=n_train,
             input_norm_factor=run.eq_norm,
             phase_trajectory=None if phi_all is None else phi_all[0],
+            state=state,
         )
     return EqualizerResult(
         y_hat=y_all,
@@ -860,4 +859,5 @@ def _assemble_block(
         num_train_symbols=n_train,
         input_norm_factor=run.eq_norm,
         phase_trajectory=phi_all,
+        state=state,
     )
