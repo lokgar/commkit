@@ -243,8 +243,15 @@ class TestIirFilter:
     @pytest.mark.parametrize("dtype", [np.float64, np.complex128])
     @pytest.mark.parametrize("cutoff", [0.2, 1e-3, 1e-5])
     def test_double_input_matches_scipy(
-        self, xp: Any, xpt: Any, zero_phase: bool, dtype: Any, cutoff: float
+        self,
+        backend_device: str,
+        xp: Any,
+        zero_phase: bool,
+        dtype: Any,
+        cutoff: float,
     ) -> None:
+        """The CPU kernel reproduces SciPy to rounding; CuPy's block-parallel
+        filter on the GPU rounds differently, so it gets a looser bound."""
         import scipy.signal
 
         x = self._record(dtype, (2, 4000))
@@ -253,7 +260,8 @@ class TestIirFilter:
         expected = scipy_filter(sos, x, axis=-1)
         out = filtering.iir_filter(xp.asarray(x), sos, zero_phase=zero_phase)
         assert out.dtype == dtype
-        xpt.assert_allclose(out, xp.asarray(expected), rtol=1e-12, atol=1e-14)
+        err = np.linalg.norm(to_numpy(out) - expected) / np.linalg.norm(expected)
+        assert err < (1e-13 if backend_device == "cpu" else 1e-9)
 
     @pytest.mark.parametrize("zero_phase", [False, True])
     @pytest.mark.parametrize("dtype", [np.float32, np.complex64])
