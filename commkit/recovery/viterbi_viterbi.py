@@ -43,8 +43,9 @@ class ViterbiViterbi:
 
     Notes
     -----
-    A global ``2π/M`` ambiguity remains.  For strong phase noise prefer
-    :class:`BPS`, which needs no M-fold unwrap.
+    A global ``2π/M`` ambiguity remains.  For strong noise prefer
+    :class:`BPS`, whose distance metric avoids the M-th power's noise
+    enhancement.
     """
 
     block_size: int = 32

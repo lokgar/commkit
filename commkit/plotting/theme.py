@@ -17,18 +17,17 @@ __all__ = ["apply_default_theme"]
 
 
 def apply_default_theme() -> None:
-    """Apply the library's default visual theme to Matplotlib.
+    """Apply the library's Matplotlib style.
 
-    This theme configures publication-quality defaults, including:
-    - Roboto or standard sans-serif typography.
-    - Optimized figure dimensions and DPI.
-    - Consistent grid styling and axis formatting.
-    - Improved LaTeX math rendering.
+    Matplotlib's ``dark_background`` style with Roboto (or the default
+    sans-serif font, with a logged warning, when Roboto is not installed)
+    for text and math, a 7 x 4.9 inch figure with constrained layout,
+    300-dpi saving, a light grid, and inward ticks on all four sides.
 
     Notes
     -----
-    This function modifies `matplotlib.rcParams` globally. It is recommended
-    to call this at the start of a script or notebook for consistent styling.
+    Changes ``matplotlib.rcParams`` globally, so call it once at the start of
+    a script or notebook.  The library never calls it on its own.
     """
     logger.debug("Applying default plotting theme.")
     try:

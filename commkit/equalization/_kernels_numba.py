@@ -1,10 +1,10 @@
 """Numba kernels of the sequential equalizers (private).
 
-The CPU hot loops behind :func:`commkit.equalization.lms` and ``rls`` (with
-and without inline carrier-phase recovery), ``cma`` and ``rde`` (blind and
-pilot-aided), and ``cs_block``, the cycle-slip scan of ``block_lms``: complex64 data and
-weights, complex128 accumulation (RLS keeps ``P`` and its gain in complex128
-throughout).
+The CPU hot loops behind :func:`commkit.equalization.lms` and ``rls`` (with and
+without inline carrier-phase recovery), ``cma`` and ``rde`` (blind and
+pilot-aided), and ``cs_block``, the cycle-slip scan of ``block_lms``: complex64
+data and weights, complex128 accumulation (RLS keeps ``P`` and its gain in
+complex128 throughout).
 """
 
 from __future__ import annotations

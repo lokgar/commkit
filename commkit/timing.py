@@ -461,19 +461,19 @@ class TimingEstimate:
 
     Attributes
     ----------
-    integer : array_like
+    integer : ndarray
         Sample index where the template starts (``int64``).
-    fractional : array_like
+    fractional : ndarray
         Sub-sample offset of the correlation peak (see
         :func:`estimate_fractional_delay`; in ``[-0.5, 0.5]`` without DFT
         upsampling).
-    metric : array_like
+    metric : ndarray
         Peak-to-mean ratio of ``|correlation|`` (the detection metric).
-    coherence : array_like
+    coherence : ndarray
         Peak ``|correlation|`` over the template and local signal energy, in
         ``[0, 1]``; low values with a high ``metric`` point to a frequency
         offset or dispersion.
-    correlation : array_like
+    correlation : ndarray
         Complex correlation at non-negative lags ``0 .. N_search - 1`` of the
         searched window, ``(N_search,)`` or ``(C, N_search)``; the data
         ``plot_timing_correlation`` draws.

@@ -339,7 +339,7 @@ def _plot_carrier_phase_trajectory(
     """Plot per-symbol carrier phase trajectory for CPR algorithm diagnostics.
 
     All channels are overlaid on a single subplot.  Block-based methods may
-    pass ``block_centers`` / ``phi_blocks`` to annotate block-phase estimates
+    pass ``block_centers`` to annotate the block-phase estimates
     as vertical lines (not scatter markers, consistent with the joint
     equalizer phase panel).
 
@@ -889,6 +889,8 @@ def plot_carrier_phase_decomposition(
     Returns
     -------
     (fig, ax) or None
+        The figure and its axes; ``None`` with ``show=True``, which
+        shows the figure instead.
     """
     phi_c = _as_channels(phi)
     C, N = phi_c.shape
@@ -977,6 +979,8 @@ def plot_timing_correlation(
     Returns
     -------
     (fig, axes) or None
+        The figure and its axes; ``None`` with ``show=True``, which
+        shows the figure instead.
     """
     corr = np.atleast_2d(np.abs(_host(estimate.correlation)))
     peaks = np.atleast_1d(_host(estimate.integer)) - estimate.search_start
@@ -1018,6 +1022,8 @@ def plot_mm_autocorrelation(
     Returns
     -------
     (fig, axes) or None
+        The figure and its axes; ``None`` with ``show=True``, which
+        shows the figure instead.
     """
     r = _require(
         estimate, "autocorrelation", "plot_mm_autocorrelation()", "MengaliMorelli"
@@ -1060,6 +1066,8 @@ def plot_frequency_offset_spectrum(
     Returns
     -------
     (fig, axes) or None
+        The figure and its axes; ``None`` with ``show=True``, which
+        shows the figure instead.
     """
     spectrum = _require(
         estimate, "spectrum", "plot_frequency_offset_spectrum()", "MthPower"
@@ -1112,6 +1120,8 @@ def plot_frequency_offset_blockwise_result(
     Returns
     -------
     (fig, axes) or None
+        The figure and its axes; ``None`` with ``show=True``, which
+        shows the figure instead.
     """
     from ..frequency import correct_frequency_offset
 
@@ -1171,6 +1181,8 @@ def plot_pilot_phase_estimate(
     Returns
     -------
     (fig, axes) or None
+        The figure and its axes; ``None`` with ``show=True``, which
+        shows the figure instead.
     """
     from ..recovery import CarrierPhaseEstimate
 
@@ -1225,6 +1237,8 @@ def plot_pilot_tone_phase_estimate(
     Returns
     -------
     (fig, axes) or None
+        The figure and its axes; ``None`` with ``show=True``, which
+        shows the figure instead.
     """
     from ..core._signal_adapter import adapt_signal
 
@@ -1277,6 +1291,8 @@ def plot_pilot_tones_phase_estimate(
     Returns
     -------
     (fig, axes) or None
+        The figure and its axes; ``None`` with ``show=True``, which
+        shows the figure instead.
     """
     delta = _require(
         estimate,
@@ -1321,6 +1337,8 @@ def plot_carrier_phase_trajectory(
     Returns
     -------
     (fig, ax) or None
+        The figure and its axes; ``None`` with ``show=True``, which
+        shows the figure instead.
     """
     from ..recovery import CarrierPhaseEstimate
 

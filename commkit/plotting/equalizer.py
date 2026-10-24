@@ -46,7 +46,8 @@ def plot_equalizer_result(
     Returns
     -------
     (fig, axes) or None
-        Figure and axes array when ``show=False``, None otherwise.
+        The figure and its axes; ``None`` with ``show=True``, which
+        shows the figure instead.
     """
     error = to_device(result.error, "cpu")
     weights = to_device(result.weights, "cpu")
@@ -204,6 +205,8 @@ def plot_zf_equalizer_response(
     Returns
     -------
     (fig, axes) or None
+        The figure and its axes; ``None`` with ``show=True``, which
+        shows the figure instead.
     """
     h = to_device(channel_estimate, "cpu")
     reg = max(noise_variance, 1e-12)

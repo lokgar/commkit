@@ -71,10 +71,9 @@ def plot_filter_response(
 
     Returns
     -------
-    fig : matplotlib.figure.Figure
-        The figure object.
-    axes : tuple of matplotlib.axes.Axes
-        The (impulse, magnitude, phase, group_delay) axes.
+    (fig, axes) or None
+        The figure and the ``(impulse, magnitude, phase, group_delay)``
+        Axes; ``None`` with ``show=True``, which shows the figure instead.
     """
     # --- Detect the filter representation and dispatch on its backend ---
     if isinstance(system, (tuple, list)) and len(system) == 2:

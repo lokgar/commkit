@@ -127,10 +127,11 @@ def lms(
         * ``BPS(test_phases=, block_size=, joint_channels=)`` - blind phase
           search over ``test_phases`` angles in ``[0, 2π/S)``, ``S`` the
           constellation's rotational symmetry (an interval of π/2 for QAM),
-          averaged over a causal window of the last ``block_size`` symbols.  Preferred for bursts where PLL pull-in is
-          impractical.  The wrapped float32 estimate rotates the output; the
-          causally ``S``-fold-unwrapped float64 accumulator is the
-          ``phase_trajectory``, so float32 rounding never accumulates.
+          averaged over a causal window of the last ``block_size`` symbols.
+          Preferred for bursts where PLL pull-in is impractical.  The wrapped
+          float32 estimate rotates the output; the causally
+          ``S``-fold-unwrapped float64 accumulator is the ``phase_trajectory``,
+          so float32 rounding never accumulates.
 
         ``joint_channels`` shares one estimate across MIMO channels (summed
         BPS metrics, or the PLL error averaged before the integrator).  A
@@ -495,10 +496,11 @@ def rls(
         * ``BPS(test_phases=, block_size=, joint_channels=)`` - blind phase
           search over ``test_phases`` angles in ``[0, 2π/S)``, ``S`` the
           constellation's rotational symmetry (an interval of π/2 for QAM),
-          averaged over a causal window of the last ``block_size`` symbols.  Preferred for bursts where PLL pull-in is
-          impractical.  The wrapped float32 estimate rotates the output; the
-          causally ``S``-fold-unwrapped float64 accumulator is the
-          ``phase_trajectory``, so float32 rounding never accumulates.
+          averaged over a causal window of the last ``block_size`` symbols.
+          Preferred for bursts where PLL pull-in is impractical.  The wrapped
+          float32 estimate rotates the output; the causally
+          ``S``-fold-unwrapped float64 accumulator is the ``phase_trajectory``,
+          so float32 rounding never accumulates.
 
         ``joint_channels`` shares one estimate across MIMO channels (summed
         BPS metrics, or the PLL error averaged before the integrator).  A

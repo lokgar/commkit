@@ -210,11 +210,10 @@ def plot_eye_diagram(
     show: bool = False,
     **kwargs: Any,
 ) -> tuple[Any, Any] | None:
-    """Plot the eye diagram of the signal.
+    """Plot the eye diagram of a signal.
 
-    Visualizes signal quality by overlapping segments of the signal
-    synchronized to the symbol clock. Supports both fast trace-based
-    plotting and high-definition density histograms.
+    Overlays segments of ``num_symbols`` symbol periods, aligned to the
+    symbol clock, as a 2-D density histogram or as line traces.
 
     Parameters
     ----------
@@ -227,7 +226,7 @@ def plot_eye_diagram(
         Target axis or list of axes. For complex signals, two axes are
         required per channel (I and Q).
     num_symbols : int, default 2
-        Number of symbol periods TO display in each eye window.
+        Symbol periods shown in each eye window.
     kind : {"hist", "line"}, default "hist"
         Visualization mode:
         - "hist": 2D density histogram (recommended for noisy signals).
@@ -243,10 +242,9 @@ def plot_eye_diagram(
 
     Returns
     -------
-    fig : matplotlib.figure.Figure
-        The figure object.
-    ax : matplotlib.axes.Axes or ndarray
-        The axis or array of axes used.
+    (fig, ax) or None
+        The figure and the Axes (an array of Axes for several panels);
+        ``None`` with ``show=True``, which shows the figure instead.
 
     Notes
     -----

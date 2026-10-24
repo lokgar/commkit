@@ -70,6 +70,8 @@ def plot_frequency_drift(
     Returns
     -------
     (fig, ax) or None
+        The figure and its axes; ``None`` with ``show=True``, which
+        shows the figure instead.
     """
     df_c = _as_channels(
         _require(drift, "df", "plot_frequency_drift()", "a FrequencyDrift")
@@ -162,6 +164,8 @@ def plot_frequency_noise_psd(
     Returns
     -------
     (fig, ax) or None
+        The figure and its axes; ``None`` with ``show=True``, which
+        shows the figure instead.
     """
     name = "plot_frequency_noise_psd()"
     S_f = _require(estimate, "S_f", name, "a BetaSeparation or DshFmPsd estimate")
@@ -309,6 +313,8 @@ def plot_allan_deviation(
     Returns
     -------
     (fig, ax) or None
+        The figure and its axes; ``None`` with ``show=True``, which
+        shows the figure instead.
     """
     adev = _require(allan, "adev", "plot_allan_deviation()", "an AllanDeviation")
     tau = np.asarray(to_device(allan.tau_s, "cpu"), dtype=np.float64)
@@ -378,6 +384,8 @@ def plot_increment_variance(
     Returns
     -------
     (fig, ax) or None
+        The figure and its axes; ``None`` with ``show=True``, which
+        shows the figure instead.
     """
     var = _require(
         estimate, "var", "plot_increment_variance()", "an increment-method estimate"
@@ -450,6 +458,8 @@ def plot_dsh_beat_psd(
     Returns
     -------
     (fig, ax) or None
+        The figure and its axes; ``None`` with ``show=True``, which
+        shows the figure instead.
     """
     psd = _require(estimate, "psd", "plot_dsh_beat_psd()", "a DshLorentzian estimate")
     f, f_peak = estimate.f, estimate.f_peak
@@ -548,6 +558,8 @@ def plot_carrier_phase_characterization(
     Returns
     -------
     (fig, axes) or None
+        The figure and its axes; ``None`` with ``show=True``, which
+        shows the figure instead.
     """
     fig, axes = plt.subplots(2, 2, figsize=_grid_figsize(2, 2))
 

@@ -294,10 +294,12 @@ def _gray_ask(order: int, unipolar: bool = False) -> np.ndarray:
     ----------
     order : int
         Modulation order (must be a power of 2).
+    unipolar : bool, default False
+        Shift the levels to start at zero.
 
     Returns
     -------
-    np.ndarray
+    numpy.ndarray
         Real-valued array of ASK constellation points.
     """
     k = int(np.log2(order))

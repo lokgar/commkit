@@ -405,9 +405,10 @@ def _numba_kernels() -> dict[str, Callable[..., None]]:
     """Trig-free CPU passes (in place, complex64 or complex128).
 
     Numba compiles sin/cos to scalar libm calls (no SVML), while NumPy 2 has
-    SIMD sin/cos; so the Kerr stage is a Numba power/phase pass, NumPy
-    sin/cos, then a Numba rotation pass, from ``_HYBRID_KERR_MIN`` samples.  Real arithmetic throughout: a
-    complex literal (1j) would promote complex64 work to complex128.
+    SIMD sin/cos; so the Kerr stage is a Numba power/phase pass, NumPy sin/cos,
+    then a Numba rotation pass, from ``_HYBRID_KERR_MIN`` samples.  Real
+    arithmetic throughout: a complex literal (1j) would promote complex64 work
+    to complex128.
     """
     if not _NUMBA:
         import numba

@@ -90,7 +90,7 @@ def smooth_phase_wiener(
     sampling_rate: float | None = None,
     detrend: bool = True,
 ) -> ArrayType:
-    r"""Zero-phase Wiener smoother for a random-walk (Wiener) carrier phase.
+    r"""Smooth a random-walk (Wiener) carrier phase with the zero-phase Wiener filter.
 
     Optimal minimum-variance estimate of a phase that random-walks with
     per-sample increment variance ``q`` (the random-walk strength) observed in
@@ -111,16 +111,14 @@ def smooth_phase_wiener(
     linewidth (see ``process_variance`` / ``linewidth`` below); ``r`` is supplied
     as ``measurement_variance``, however the caller measured it.
 
-    Because it only rescales the phase track (a deterministic, sample-independent
-    low-pass), it stays a unit-modulus correction downstream and cannot hide
-    excess noise when applied to a common reference phase rather than the data
-    samples.
+    It filters the phase track only, so a correction derived from it stays
+    unit-modulus: applied to the samples, it cannot hide their excess noise.
 
     Parameters
     ----------
-    phase : (N,) or (C, N) array
-        Unwrapped phase track (e.g. the ``value`` of a ``PilotTone`` or
-        ``PilotTones`` estimate), in radians.
+    phase : array_like
+        Unwrapped phase track, ``(N,)`` or ``(C, N)`` (e.g. the ``value`` of a
+        ``PilotTone`` or ``PilotTones`` estimate), in radians.
     process_variance : float, optional
         Per-sample phase-increment variance q [rad²] - the random-walk strength.
         Provide this, or derive it from ``linewidth`` + ``sampling_rate`` (see
@@ -134,15 +132,21 @@ def smooth_phase_wiener(
         ``sampling_rate`` is f_s [Hz] of the ``phase`` track.  Both must be given
         together, and only when ``process_variance`` is omitted.
     detrend : bool, default True
-        Remove the per-channel mean + linear trend before filtering and add it
-        back after.  Recommended: the random-walk PSD diverges at DC, so a raw
-        ramp (residual frequency offset) would be distorted; detrending keeps it
-        exact.
+        Remove each channel's linear trend (its slope) before filtering and
+        add it back after.  The random-walk PSD diverges at DC, so a ramp (a
+        residual frequency offset) would otherwise be distorted; the filter
+        passes a constant offset unchanged (``H(0) = 1``) either way.
 
     Returns
     -------
     ndarray
-        Smoothed phase, same shape and backend as ``phase``.
+        Smoothed float64 phase, same shape and device as ``phase``.
+
+    Raises
+    ------
+    ValueError
+        Without ``measurement_variance``, without ``process_variance`` or
+        both ``linewidth`` and ``sampling_rate``, or for a variance ``<= 0``.
     """
     if process_variance is None:
         if linewidth is None or sampling_rate is None:
@@ -353,7 +357,7 @@ def correct_cycle_slips(
     history: int = 20,
     threshold: float = np.pi / 4,
 ) -> np.ndarray:
-    """Detect and corrects cycle slips in a phase trajectory.
+    """Detect and correct cycle slips in a phase trajectory.
 
     After ``unwrap`` resolves the M-fold ambiguity, residual cycle slips may
     remain where the unwrapper chose the wrong branch.  The trajectory is
@@ -364,26 +368,33 @@ def correct_cycle_slips(
 
     Parameters
     ----------
-    phase : (B,) array_like
-        Phase trajectory in radians after the M-fold unwrap, e.g. block
-        phases.
+    phase : array_like
+        Phase trajectory in radians after the M-fold unwrap, ``(B,)``, e.g.
+        block phases.
     symmetry : int, default 4
         Rotational symmetry of the constellation; the correction quantum is
-        ``2π/symmetry`` (4 for square QAM and BPS, M for M-PSK, 1 for pilot
-        phases).
+        ``2π/symmetry`` (4 for square and cross QAM, M for M-PSK, 1 for pilot
+        phases, whose quantum is ``2π``).
     history : int, default 20
         Past corrected values in the linear fit, sized for 32-symbol block
-        phases (the 640 symbols of :class:`CycleSlip`'s default).  The fit lags a wandering
-        phase: keep ``2π·Δν·Δt·history < threshold²/2`` for a linewidth
-        ``Δν`` and a spacing ``Δt`` between values (see :class:`CycleSlip`).
+        phases (the 640 symbols of :class:`CycleSlip`'s default).  The fit lags
+        a wandering phase: keep ``2π·Δν·Δt·history < threshold²/2`` for a
+        linewidth ``Δν`` and a spacing ``Δt`` between values (see
+        :class:`CycleSlip`).
     threshold : float, default π/4
         Deviation from the prediction that declares a slip; ``π/4`` is half
         the quantum for 4-fold symmetry.
 
     Returns
     -------
-    (B,) float64 array
-        Corrected trajectory, a new array on the input's device.
+    ndarray
+        Corrected float64 trajectory, ``(B,)``, a new array on the input's
+        device.
+
+    Raises
+    ------
+    ValueError
+        If ``phase`` is not 1-D.
 
     Notes
     -----
@@ -435,8 +446,9 @@ class CycleSlip:
     with ``BPS()`` (``block_size=32``) and ``threshold=π/4`` this allows
     ``Δν·history ≲ 50 MHz``: ``history=100`` adds slips at a 1 MHz
     linewidth, ``history=20`` does not.  The default span of 640 symbols
-    holds up to ``Δν ≈ 2.4 MHz`` at 32 GBd for every method.  Below about 10 values the fit's
-    noise gain ``1 + 4/history`` dominates instead, at low SNR.
+    holds up to ``Δν ≈ 2.4 MHz`` at 32 GBd for every method.  Below about 10
+    values the fit's noise gain ``1 + 4/history`` dominates instead, at low
+    SNR.
 
     Examples
     --------

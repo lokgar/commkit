@@ -23,7 +23,7 @@ class FrequencyDrift:
 
     Attributes
     ----------
-    df : array_like
+    df : ndarray
         Per-symbol residual frequency, on the input backend.
     std, pp, max_abs : float or np.ndarray
         Standard deviation, peak-to-peak and largest magnitude of ``df``:

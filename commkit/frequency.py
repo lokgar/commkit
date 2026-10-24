@@ -303,27 +303,27 @@ class FrequencyOffsetEstimate:
 
     Attributes
     ----------
-    value : array_like
+    value : ndarray
         Frequency offset in Hz (the mean of the block estimates for a
         blockwise method).
-    weights : array_like
+    weights : ndarray
         Per-channel reliability weights used by :meth:`combined` (peak
         magnitude, autocorrelation energy or pilot power).
     block_centers : numpy.ndarray or None
         Blockwise only: block centre sample indices, ``(B,)``.
-    block_values : array_like or None
+    block_values : ndarray or None
         Blockwise only: estimate per block in Hz, ``(B,)`` or ``(C, B)``.
     power : int or None
         Exponent ``M`` used (M-th power and Mengali-Morelli).
-    spectrum : array_like or None
+    spectrum : ndarray or None
         M-th power: ``|FFT(x^M)|`` after the search mask, ``(nfft,)`` or
         ``(C, nfft)``.
     spectrum_frequencies : numpy.ndarray or None
         M-th power: FFT bin frequencies of ``spectrum`` in Hz (``fftfreq``
         order; divide by ``power`` for ``Δf``).
-    autocorrelation : array_like or None
+    autocorrelation : ndarray or None
         Mengali-Morelli: unbiased autocorrelation at lags ``1 .. L``.
-    pilot_phase : array_like or None
+    pilot_phase : ndarray or None
         Pilots: unwrapped pilot phase in radians, ``(P,)`` or ``(C, P)``.
     pilot_indices : numpy.ndarray or None
         Pilots: the pilot sample indices.

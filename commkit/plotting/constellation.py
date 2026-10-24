@@ -57,6 +57,8 @@ def plot_ideal_constellation(
     Returns
     -------
     (fig, ax) or None
+        The figure and its axes; ``None`` with ``show=True``, which
+        shows the figure instead.
     """
     from ..mapping import Constellation
 
@@ -158,9 +160,9 @@ def plot_constellation(
 ) -> tuple[Any, Any] | None:
     """Plot a constellation density diagram from received samples.
 
-    Uses high-definition 2D histograms with Gaussian smoothing to
-    visualize noisy or impaired signals. This is significantly more
-    informative than scatter plots for large sample sets.
+    A 2-D histogram of the samples, smoothed with a Gaussian
+    (:func:`commkit.smoothing.smooth_density_2d`): for large records it shows
+    the noise distribution, which a scatter plot saturates.
 
     Parameters
     ----------
@@ -189,10 +191,9 @@ def plot_constellation(
 
     Returns
     -------
-    fig : matplotlib.figure.Figure
-        The figure object.
-    ax : matplotlib.axes.Axes or ndarray
-        The axis or array of axes used.
+    (fig, ax) or None
+        The figure and the Axes (an array of Axes for several panels);
+        ``None`` with ``show=True``, which shows the figure instead.
     """
     signal_adapter = adapt_signal(samples, function_name="plot_constellation()")
     sig = signal_adapter.signal

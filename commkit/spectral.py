@@ -458,12 +458,12 @@ class Spectrogram:
 
     Attributes
     ----------
-    frequencies : array_like
+    frequencies : ndarray
         Frequencies in Hz, ``(F,)``, ascending (two-sided spectra are
         fftshifted).
-    times : array_like
+    times : ndarray
         Segment centre times in seconds, ``(T,)``.
-    values : array_like
+    values : ndarray
         ``(F, T)`` or ``(C, F, T)``; power density, power, complex, magnitude
         or phase depending on ``mode``.
     """

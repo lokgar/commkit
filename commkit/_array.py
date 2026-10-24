@@ -30,7 +30,7 @@ from .backend import (
 def validate_array(
     v: Any, name: str = "array", complex_only: bool = False
 ) -> ArrayType:
-    """Validate and coerces input data into a numeric array.
+    """Validate and coerce input data into a numeric array.
 
     Existing NumPy or CuPy arrays are passed through unchanged (preserving
     device placement). All other inputs (Python scalars, lists, tuples) are

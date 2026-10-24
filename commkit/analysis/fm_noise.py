@@ -30,12 +30,12 @@ class DshFmNoisePsd:
 
     Attributes
     ----------
-    f : array_like
+    f : ndarray
         One-sided frequency axis in Hz.
-    S_f : array_like
+    S_f : ndarray
         Laser FM-noise PSD in Hz²/Hz (NaN at masked bins), ``(nfreq,)`` or
         ``(C, nfreq)``.
-    valid : array_like
+    valid : ndarray
         Boolean mask ``(nfreq,)`` of trustworthy bins (away from the
         interferometer's transfer-function notches).
     """
@@ -55,10 +55,10 @@ def fm_noise_psd(
 ) -> tuple[ArrayType, ArrayType]:
     r"""One-sided frequency-noise PSD S_f(f) [Hz²/Hz] from the phase.
 
-    Differentiates the phase to the instantaneous frequency
-    ``f_inst = diff(phi)/(2π·T)`` (Hz, ``T = 1/sampling_rate``) and estimates its one-sided PSD via
-    Welch's method (``welch_psd``).  Distinct
-    impairments occupy distinct regions of S_f(f):
+    Differentiates the phase to the instantaneous frequency ``f_inst =
+    diff(phi)/(2π·T)`` (Hz, ``T = 1/sampling_rate``) and estimates its
+    one-sided PSD via Welch's method (``welch_psd``).  Distinct impairments
+    occupy distinct regions of S_f(f):
 
     * **white-FM** (linewidth): flat plateau at ``S_f = Δν/π``,
     * **drift / flicker**: steep ``1/f`` (and steeper) rise at low ``f``,

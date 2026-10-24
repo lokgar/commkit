@@ -1,7 +1,8 @@
 """Carrier phase estimation and correction.
 
-:func:`estimate_carrier_phase` and :func:`correct_carrier_phase`.  The method object selects the algorithm; each lives next to its kernel in
-this package and is dispatched through ``_ESTIMATORS``.  The estimate is a
+:func:`estimate_carrier_phase` and :func:`correct_carrier_phase`.  The method
+object selects the algorithm; each lives next to its kernel in this package and
+is dispatched through ``_ESTIMATORS``.  The estimate is a
 :class:`CarrierPhaseEstimate`.
 """
 
@@ -75,18 +76,18 @@ class CarrierPhaseEstimate:
 
     Attributes
     ----------
-    value : array_like
+    value : ndarray
         Phase trajectory in radians, ``float64``, the shape of the samples.
         :func:`correct_carrier_phase` rotates by ``exp(-j·value)``.
     block_centers : numpy.ndarray or None
         Block methods (BPS, Viterbi-Viterbi, Tikhonov): block centre
         positions in symbols, ``(B,)``.
-    block_phase : array_like or None
+    block_phase : ndarray or None
         Block methods: the block phases after unwrapping, smoothing and
         cycle-slip repair, ``(B,)`` or ``(C, B)``.
     pilot_indices : numpy.ndarray or None
         ``PilotAided``: the pilot symbol indices, ``(P,)``.
-    pilot_phase : array_like or None
+    pilot_phase : ndarray or None
         ``PilotAided``: unwrapped pilot phases, ``(P,)`` or ``(C, P)``.
     tone_frequencies : numpy.ndarray or None
         Tone methods: measured tone centres in Hz on the host; ``PilotTone``
@@ -94,7 +95,7 @@ class CarrierPhaseEstimate:
         (``(K,)`` or ``(C, K)``).
     tone_snr_db : numpy.ndarray or None
         ``PilotTones``: in-band SNR of each tone in dB, ``(K,)``.
-    differential_phase : array_like or None
+    differential_phase : ndarray or None
         ``PilotTones``: tracked inter-tone phase ``δ_k[n]`` in radians,
         ``(K, N)`` (zero for the reference tone).
     reference_tone : int or None

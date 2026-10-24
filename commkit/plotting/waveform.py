@@ -67,10 +67,9 @@ def plot_time_domain(
 
     Returns
     -------
-    fig : matplotlib.figure.Figure
-        The figure object.
-    ax : matplotlib.axes.Axes or ndarray
-        The axis or array of axes used for the plot.
+    (fig, ax) or None
+        The figure and the Axes (an array of Axes for several panels);
+        ``None`` with ``show=True``, which shows the figure instead.
     """
     signal_adapter = adapt_signal(samples, function_name="plot_time_domain()")
     x = signal_adapter.array
