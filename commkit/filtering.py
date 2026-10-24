@@ -22,6 +22,7 @@ and estimation smoothers are in :mod:`commkit.smoothing`.
 """
 
 from dataclasses import dataclass
+from typing import Any
 
 import numpy as np
 import scipy
@@ -32,7 +33,7 @@ from ._circular import convolve_periodic
 from ._dispersion import apply_dispersion
 from ._fiber import Fiber, check_link, propagate, to_watts
 from ._overlap_save import ols_backward, ols_forward
-from .backend import ArrayType, dispatch
+from .backend import ArrayType, dispatch, to_device
 from .core._signal_adapter import S, adapt_signal, require_integer_sps
 from .logger import logger
 from .math import normalize
@@ -1116,6 +1117,93 @@ def matched_filter(
     return signal_adapter.wrap_samples(fir_filter(x, matched_taps))
 
 
+_NUMBA_SOS: dict[str, Any] = {}
+
+
+def _get_numba_sos() -> Any:
+    """JIT-compile and cache the Numba second-order-sections kernel.
+
+    Returns
+    -------
+    callable
+        Numba-compiled ``_sos_loop(sos, x, zi, y)``: filters each row of
+        ``x`` (``(C, N)``) through the sections ``sos`` (``(S, 6)``,
+        float64) in transposed direct form II, the form of
+        ``scipy.signal.sosfilt``.  The state ``zi`` (``(C, S, 2)``, float64
+        or complex128) is updated in place and sets the working precision;
+        ``y`` takes the output in the dtype of ``x``.
+    """
+    if "sos" not in _NUMBA_SOS:
+        import numba
+
+        # No fastmath: without reassociation, double-precision input gives
+        # SciPy's sosfilt result bit for bit.
+        @numba.njit(cache=True, nogil=True)
+        def _sos_loop(sos: Any, x: Any, zi: Any, y: Any) -> None:
+            C, N = x.shape
+            S = sos.shape[0]
+            for c in range(C):
+                for n in range(N):
+                    # Promote the sample to the state's precision (float64
+                    # or complex128): adding the zero of a state element.
+                    v = zi[c, 0, 0] * 0.0 + x[c, n]
+                    for k in range(S):
+                        out = sos[k, 0] * v + zi[c, k, 0]
+                        zi[c, k, 0] = sos[k, 1] * v - sos[k, 4] * out + zi[c, k, 1]
+                        zi[c, k, 1] = sos[k, 2] * v - sos[k, 5] * out
+                        v = out
+                    y[c, n] = v
+
+        _NUMBA_SOS["sos"] = _sos_loop
+
+    return _NUMBA_SOS["sos"]
+
+
+def _sosfilt(sos: np.ndarray, x: np.ndarray, zi: np.ndarray) -> np.ndarray:
+    """Causal SOS filter of host ``(C, N)`` data from the initial state ``zi``.
+
+    ``zi`` is ``(C, S, 2)`` in float64 or complex128 and is not modified.
+    Returns ``(C, N)`` in the dtype of ``x``.
+    """
+    y = np.empty_like(x)
+    _get_numba_sos()(sos, np.ascontiguousarray(x), zi.copy(), y)
+    return y
+
+
+def _sosfiltfilt(sos: np.ndarray, x: np.ndarray, state_dtype: type) -> np.ndarray:
+    """Zero-phase SOS filter of host ``(C, N)`` data, as ``scipy.signal.sosfiltfilt``.
+
+    Odd extension by ``3·ntaps`` samples at each end, then a forward and a
+    backward pass, each started from the steady state ``sosfilt_zi`` scaled
+    by its first sample (SciPy's defaults ``padtype="odd"`` and
+    ``padlen=None``).
+
+    Raises
+    ------
+    ValueError
+        If the record is not longer than the extension.
+    """
+    n_sections = sos.shape[0]
+    ntaps = 2 * n_sections + 1
+    ntaps -= min(int((sos[:, 2] == 0).sum()), int((sos[:, 5] == 0).sum()))
+    edge = 3 * ntaps
+    N = x.shape[-1]
+    if N <= edge:
+        raise ValueError(
+            f"iir_filter(): samples must be longer than the zero-phase padding "
+            f"of {edge} samples for these sections, got {N}."
+        )
+    # Odd extension in the data's precision (2·x[0] - x[k] with a Python 2).
+    left = 2 * x[:, :1] - x[:, edge:0:-1]
+    right = 2 * x[:, -1:] - x[:, -2 : -(edge + 2) : -1]
+    ext = np.concatenate([left, x, right], axis=-1)
+    zi = scipy.signal.sosfilt_zi(sos).astype(state_dtype)  # (S, 2), small
+    y = _sosfilt(sos, ext, zi[None] * ext[:, :1, None].astype(state_dtype))
+    y = np.ascontiguousarray(y[:, ::-1])
+    y = _sosfilt(sos, y, zi[None] * y[:, :1, None].astype(state_dtype))
+    return y[:, ::-1][:, edge:-edge]
+
+
 def iir_filter(
     samples: S,
     sos: ArrayType,
@@ -1134,46 +1222,70 @@ def iir_filter(
     samples : array_like or Signal
         Samples, ``(N,)`` or ``(C, N)``.  A Signal gives a new Signal.
     sos : array_like
-        Second-order sections, ``(n_sections, 6)``.
+        Second-order sections, ``(n_sections, 6)``, with ``sos[:, 3] == 1``.
     zero_phase : bool, default True
-        Filter forward and backward (``sosfiltfilt``): no phase distortion
-        or group delay, but non-causal, so the whole record is needed.  With
-        ``False`` the filter runs causally (``sosfilt``) and its
-        frequency-dependent group delay stays in the output, as in a
-        real-time receiver.
+        Filter forward and backward, as ``scipy.signal.sosfiltfilt``: no
+        phase distortion or group delay, but non-causal, so the whole record
+        is needed.  With ``False`` the filter runs causally, as
+        ``scipy.signal.sosfilt``, and its frequency-dependent group delay
+        stays in the output, as in a real-time receiver.
 
     Returns
     -------
     ndarray or Signal
-        Filtered samples, same shape and dtype as ``samples``.
+        Filtered samples, same shape, dtype and device as ``samples``.
+
+    Raises
+    ------
+    ValueError
+        If ``sos`` is not ``(n_sections, 6)`` with ``sos[:, 3] == 1``, or,
+        with ``zero_phase=True``, the record is not longer than the
+        zero-phase padding: ``3·(2·n_sections + 1)`` samples, fewer when every
+        section has ``b2 = 0`` or every one ``a2 = 0``.
 
     Notes
     -----
-    The filter runs in ``float64`` or ``complex128`` and the result is cast
-    back to the input dtype: at very low normalized cutoffs (phase-drift
-    extraction), the poles crowd near ``z = 1`` and single precision is not
-    stable.
+    The samples keep their precision; the sections and the filter state are
+    float64 (complex128 for complex samples).  At very low normalized
+    cutoffs (phase-drift extraction) the poles crowd near ``z = 1``, and
+    single-precision sections or state are not stable: the causal output of
+    a 4th-order Butterworth at ``1e-4·f_s`` is 17 % off in float32.
+
+    The recursion is sequential: it runs in a Numba kernel on the CPU, and
+    GPU input makes one round trip to the host.  The odd extension of the
+    zero-phase filter is computed in the samples' precision.
     """
     signal_adapter = adapt_signal(samples, function_name="iir_filter()")
-    x = signal_adapter.array
-
-    x, xp, sp = dispatch(x)
-    sos = xp.asarray(sos)
+    x, xp, _ = dispatch(signal_adapter.array)
+    sos_np = np.asarray(to_device(sos, "cpu"), dtype=np.float64)
+    if sos_np.ndim != 2 or sos_np.shape[1] != 6:
+        raise ValueError(
+            f"iir_filter(): sos must have shape (n_sections, 6), got {sos_np.shape}."
+        )
+    if not np.allclose(sos_np[:, 3], 1.0):
+        raise ValueError("iir_filter(): sos[:, 3] (each section's a0) must be 1.")
 
     logger.debug(
         "Applying IIR filter (%s SOS sections, zero_phase=%s).",
-        sos.shape[0],
+        sos_np.shape[0],
         zero_phase,
     )
 
-    in_dtype = x.dtype
-    work_dtype = xp.complex128 if xp.iscomplexobj(x) else xp.float64
-    x_work = x.astype(work_dtype)
+    # Single and double precision pass through; other dtypes (integers) are
+    # filtered in double precision.
+    complex_input = np.iscomplexobj(x)
+    if x.dtype not in (np.float32, np.float64, np.complex64, np.complex128):
+        x = x.astype(np.complex128 if complex_input else np.float64)
+    state_dtype = np.complex128 if complex_input else np.float64
+    x_host, was_1d = as_2d(np.asarray(to_device(x, "cpu")), name="samples")
     if zero_phase:
-        result = sp.signal.sosfiltfilt(sos, x_work, axis=-1)
+        y = _sosfiltfilt(sos_np, x_host, state_dtype)
     else:
-        result = sp.signal.sosfilt(sos, x_work, axis=-1)
-    return signal_adapter.wrap_samples(result.astype(in_dtype, copy=False))
+        zi = np.zeros((x_host.shape[0], sos_np.shape[0], 2), dtype=state_dtype)
+        y = _sosfilt(sos_np, x_host, zi)
+    y = restore_1d(was_1d, np.ascontiguousarray(y))
+    device = "gpu" if xp is not np else "cpu"
+    return signal_adapter.wrap_samples(to_device(y, device))
 
 
 # -----------------------------------------------------------------------------

@@ -228,6 +228,78 @@ class TestPeriodicFirFilter:
         assert out.shape == x.shape
 
 
+class TestIirFilter:
+    """iir_filter: SciPy's sosfilt/sosfiltfilt in the samples' precision."""
+
+    @staticmethod
+    def _record(dtype: Any, shape: tuple[int, ...], seed: int = 0) -> np.ndarray:
+        rng = np.random.default_rng(seed)
+        x = rng.standard_normal(shape)
+        if np.dtype(dtype).kind == "c":
+            x = x + 1j * rng.standard_normal(shape)
+        return x.astype(dtype)
+
+    @pytest.mark.parametrize("zero_phase", [False, True])
+    @pytest.mark.parametrize("dtype", [np.float64, np.complex128])
+    @pytest.mark.parametrize("cutoff", [0.2, 1e-3, 1e-5])
+    def test_double_input_matches_scipy(
+        self, xp: Any, xpt: Any, zero_phase: bool, dtype: Any, cutoff: float
+    ) -> None:
+        import scipy.signal
+
+        x = self._record(dtype, (2, 4000))
+        sos = filtering.butterworth_sos(sampling_rate=1.0, cutoff=cutoff, order=4)
+        scipy_filter = scipy.signal.sosfiltfilt if zero_phase else scipy.signal.sosfilt
+        expected = scipy_filter(sos, x, axis=-1)
+        out = filtering.iir_filter(xp.asarray(x), sos, zero_phase=zero_phase)
+        assert out.dtype == dtype
+        xpt.assert_allclose(out, xp.asarray(expected), rtol=1e-12, atol=1e-14)
+
+    @pytest.mark.parametrize("zero_phase", [False, True])
+    @pytest.mark.parametrize("dtype", [np.float32, np.complex64])
+    def test_single_input_is_filtered_at_double_accuracy(
+        self, xp: Any, zero_phase: bool, dtype: Any
+    ) -> None:
+        """At a cutoff of 1e-4·fs single-precision sections are 17 % off; the
+        float64 sections and state keep the single-precision output within
+        its rounding of the float64 result."""
+        import scipy.signal
+
+        x = self._record(dtype, (8000,), seed=1)
+        sos = filtering.butterworth_sos(sampling_rate=1.0, cutoff=1e-4, order=4)
+        x64 = x.astype(np.complex128 if np.iscomplexobj(x) else np.float64)
+        scipy_filter = scipy.signal.sosfiltfilt if zero_phase else scipy.signal.sosfilt
+        expected = scipy_filter(sos, x64)
+        out = filtering.iir_filter(xp.asarray(x), sos, zero_phase=zero_phase)
+        assert out.dtype == dtype
+        out_np = to_numpy(out).astype(x64.dtype)
+        err = np.linalg.norm(out_np - expected) / np.linalg.norm(expected)
+        assert err < 5e-7
+
+    def test_lowpass_passes_dc_and_removes_a_tone(self, xp: Any, xpt: Any) -> None:
+        n = np.arange(4000)
+        x = (1.0 + np.cos(2 * np.pi * 0.25 * n)).astype(np.float32)
+        sos = filtering.butterworth_sos(sampling_rate=1.0, cutoff=0.05, order=6)
+        out = filtering.iir_filter(xp.asarray(x), sos)
+        xpt.assert_allclose(out[200:-200], xp.ones(3600, dtype=xp.float32), atol=1e-4)
+
+    def test_bad_sections_raise(self, xp: Any) -> None:
+        x = xp.ones(100, dtype=xp.float32)
+        with pytest.raises(ValueError, match="sos"):
+            filtering.iir_filter(x, np.ones((2, 5)))
+        sos = filtering.butterworth_sos(sampling_rate=1.0, cutoff=0.1, order=2)
+        sos[:, 3] = 2.0
+        with pytest.raises(ValueError, match="a0"):
+            filtering.iir_filter(x, sos)
+
+    def test_record_shorter_than_the_padding_raises(self, xp: Any) -> None:
+        sos = filtering.butterworth_sos(sampling_rate=1.0, cutoff=0.1, order=4)
+        with pytest.raises(ValueError, match="padding"):
+            filtering.iir_filter(xp.ones(10, dtype=xp.float32), sos)
+        out = filtering.iir_filter(xp.ones(20, dtype=xp.float32), sos, zero_phase=False)
+        assert out.shape == (20,)
+
+
 class TestOverlapSaveFiltering:
     """Tests for overlap-save FFT filtering (ols_fir_filter)."""
 

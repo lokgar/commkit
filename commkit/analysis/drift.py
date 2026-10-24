@@ -46,8 +46,9 @@ def separate_drift_phase_noise(
     r"""Split a phase trajectory into a slow drift and a fast phase-noise residual.
 
     The drift is the output of a zero-phase Butterworth low-pass at
-    ``cutoff`` (second-order sections through ``sosfiltfilt``, numerically
-    stable at the low normalized cutoffs used here); the residual
+    ``cutoff`` (second-order sections through
+    :func:`~commkit.filtering.iir_filter`, numerically stable at the low
+    normalized cutoffs used here); the residual
     ``pn = phi - drift`` holds the phase noise and the AWGN.  Zero-phase
     filtering avoids the group-delay bias of a causal filter and the
     spectral leakage of a boxcar moving average.
@@ -87,10 +88,10 @@ def separate_drift_phase_noise(
       laser's 1/f (flicker) FM noise straddles any cutoff, so part of it
       lands in ``drift`` and part in ``pn`` wherever the cutoff is.  Quote the
       cutoff with any metric derived from the split.
-    * ``sosfiltfilt`` extends the signal internally, but the first and last
-      ``~0.5·sampling_rate/cutoff`` samples of ``drift`` still carry
-      transients: trim them with ``edge_trim`` in the downstream metric
-      functions.
+    * The zero-phase filter extends the record at both ends, but the first
+      and last ``~0.5·sampling_rate/cutoff`` samples of ``drift`` still
+      carry transients: trim them with ``edge_trim`` in the downstream
+      metric functions.
     """
     phi_arr, xp, _ = dispatch(phi)
     fs = float(sampling_rate)
