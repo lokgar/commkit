@@ -98,19 +98,23 @@ def llr_workload(
     n_sym: int,
     esn0_db: float = 15.0,
     seed: int = 0,
+    constellation: Constellation | None = None,
 ):
     """Gray-mapped unit-power QAM after AWGN, for soft-demapping benches.
 
-    Returns ``(rx (n_sym,) complex64, bits (n_sym * log2(order),) int8,
-    noise_var float)`` with ``noise_var = 10**(-esn0_db / 10)`` - the complex
-    noise variance referenced to the unit-power constellation.
+    ``constellation`` replaces ``Constellation.qam(order)`` (PSK, cross QAM);
+    ``order`` must then be its order.  Returns ``(rx (n_sym,) complex64,
+    bits (n_sym * log2(order),) int8, noise_var float)`` with
+    ``noise_var = 10**(-esn0_db / 10)`` - the complex noise variance
+    referenced to the unit-power constellation.
     """
+    c = Constellation.qam(order) if constellation is None else constellation
+    if c.order != order:
+        raise ValueError(f"constellation has {c.order} points, order is {order}")
     k = int(np.log2(order))
     rng = np.random.default_rng(seed)
     bits = rng.integers(0, 2, n_sym * k, dtype=np.int8)
-    syms = np.asarray(
-        map_bits(bits, constellation=Constellation.qam(order)), dtype=np.complex64
-    )
+    syms = np.asarray(map_bits(bits, constellation=c), dtype=np.complex64)
     rx = apply_awgn(syms, esn0_db=esn0_db, sps=1, rng=seed + 1)
     return np.asarray(rx, dtype=np.complex64), bits, 10 ** (-esn0_db / 10)
 

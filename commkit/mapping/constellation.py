@@ -259,11 +259,16 @@ class Constellation:
                 f"bits: the last axis ({bits.shape[-1]}) must be a multiple of "
                 f"bits_per_symbol ({k})."
             )
-        groups = bits.reshape(*bits.shape[:-1], -1, k).astype(xp.int32)
-        weights = xp.asarray(1 << np.arange(k - 1, -1, -1, dtype=np.int32))
-        index_of_label = xp.asarray(self._index_of_label())
-        points = xp.asarray(self.points.astype(self._storage_dtype()))
-        return points[index_of_label[(groups * weights).sum(axis=-1)]]
+        groups = bits.reshape(*bits.shape[:-1], -1, k)
+        if groups.dtype.kind not in "biu" or groups.dtype.itemsize > 4:
+            groups = groups.astype(xp.int8)
+        # Shift in one bit per pass: the only temporary is the int32 label
+        # per symbol, a quarter of the bits' size in int8.
+        label = groups[..., 0].astype(xp.int32)
+        for b in range(1, k):
+            label <<= 1
+            label |= groups[..., b]
+        return xp.asarray(self._points_by_label)[label]
 
     def demap(self, symbols: ArrayType) -> ArrayType:
         """Hard decisions: bits of the nearest point, on the symbols' device.
@@ -410,11 +415,13 @@ class Constellation:
             _Axis(points[0, :].imag, labels[0, :][:, bits_im], pmf_im, bits_im),
         )
 
-    def _index_of_label(self) -> np.ndarray:
-        """Point index for each packed label value, shape ``(M,)``."""
-        index = np.empty(self.order, dtype=np.int64)
-        index[_pack(self.bit_labels)] = np.arange(self.order)
-        return index
+    @cached_property
+    def _points_by_label(self) -> np.ndarray:
+        """Points in the storage dtype, indexed by packed label, ``(M,)``."""
+        points: np.ndarray = np.empty(self.order, dtype=self._storage_dtype())
+        points[_pack(self.bit_labels)] = self.points
+        points.setflags(write=False)
+        return points
 
 
 def _slicer_params(
