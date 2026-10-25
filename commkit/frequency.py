@@ -197,6 +197,14 @@ class MengaliMorelli:
         Estimate per block of this many samples (blockwise tracking).
     overlap : float, default 0.5
         Fractional overlap of consecutive blocks, in ``[0, 1)``.
+
+    Notes
+    -----
+    The autocorrelation is computed on the samples' device.  The bootstrap
+    over the lags is a sequential recursion (each lag is unwrapped against
+    the estimate of the lags before it), run by a Numba kernel on the
+    host: GPU input copies the ``(R, L)`` autocorrelation, one row per
+    channel (and per block with ``block_size``), to the host once per call.
     """
 
     power: int | None = None
