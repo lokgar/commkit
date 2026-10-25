@@ -323,7 +323,7 @@ Each is an addition that leaves the current API unchanged.
 
 The decoder's input path. The GPU items need a CUDA device to write, test (`--device=all`, against the Numba reference) and time.
 
-- **Non-square hard decisions on the GPU.** `gray._nearest_index` (used by `Constellation.demap`, `evm(blind=True)` and `ser` for PSK, cross QAM and arbitrary points) loops in Python over 4096-symbol chunks: about 250 iterations of several launches per 10^6 symbols. On the CPU that chunk and `abs` are the fastest NumPy form (measured); on the GPU, time it against a larger element-budget chunk or the nearest-point mode of `bps_min_d2`.
+- **Non-square hard decisions on the GPU: time the new path.** `gray._nearest_index` (behind `Constellation.demap`, `evm(blind=True)` and `ser` for PSK, cross QAM and arbitrary points) used to loop in Python over 4096-symbol chunks on the GPU, about 250 iterations of several launches per 10^6 symbols. Single-precision input now takes one launch of `bps_min_d2`'s nearest-point mode, and double input chunks of `_GPU_CHUNK_ELEMENTS` (2^22) distances; neither has been timed. Time `bench_demap` (`benchmarks/bench_mapping.py`) on the GPU for the three variants (the kernel; no kernel, by patching `gray._cuda.get_kernel` to return `None`; and the old 4096-symbol chunk, by also setting `_GPU_CHUNK_ELEMENTS` to `4096 * M`), keep the fastest and quote the deltas.
 - **Closed-form max-log LLRs of Gray QAM** (optional, CPU and GPU): per bit, the nearest point of each half is found by snapping, O(k) instead of O(sqrt(M)). Expected gain under 2x on the CPU; measure before adopting.
 
 ### Performance

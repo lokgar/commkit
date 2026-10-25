@@ -8,9 +8,11 @@ built with NumPy on the host.
 """
 
 from functools import lru_cache
+from types import ModuleType
 
 import numpy as np
 
+from .. import _cuda
 from ..backend import ArrayType, dispatch
 from ..logger import logger
 
@@ -204,37 +206,76 @@ def _unpack_bits(indices: ArrayType, k: int) -> ArrayType:
     return ((indices[:, xp.newaxis] >> shifts) & 1).astype(xp.int8)
 
 
+# GPU fallback (no CUDA kernel, double precision, more than 1024 points):
+# budget of the (chunk, M) distance matrix per chunk, in elements.
+_GPU_CHUNK_ELEMENTS = 1 << 22
+
+
 def _nearest_index(
     x: ArrayType, constellation: ArrayType, chunk: int = 4096
 ) -> ArrayType:
     """Nearest-constellation-point index for each element of ``x`` (chunked).
 
-    Bounds peak memory of the ``(N, M)`` distance matrix by chunking over
-    the ``N`` axis.
+    On the CPU, chunking over the ``N`` axis bounds the peak memory of the
+    ``(N, M)`` distance matrix.  On the GPU, single-precision input takes
+    one launch of the ``bps_min_d2`` kernel's nearest-point mode (no
+    distance matrix); otherwise the chunks hold ``_GPU_CHUNK_ELEMENTS``
+    distances, so a long record is not hundreds of small launches.
 
     Parameters
     ----------
-    x : array_like, shape (N,)
-        Flat query points, NumPy or CuPy.
-    constellation : array_like, shape (M,)
-        Reference constellation points.  Moved to ``x``'s device.
+    x : array_like
+        Flat query points, ``(N,)``, NumPy or CuPy.
+    constellation : array_like
+        Reference constellation points, ``(M,)``.  Moved to ``x``'s device.
     chunk : int, default 4096
-        ``N``-axis chunk size.
+        ``N``-axis chunk size on the CPU (and the minimum on the GPU).
 
     Returns
     -------
-    ndarray, shape (N,), int64
-        Index into ``constellation`` of the nearest point, per element.
-        On the device of ``x``.
+    ndarray
+        int64 index into ``constellation`` of the nearest point, ``(N,)``, on
+        the device of ``x``.  Ties go to the lower index.
     """
     x, xp, _ = dispatch(x)
     constellation = xp.asarray(constellation)
+    if xp is not np:
+        indices = _nearest_index_kernel(x, constellation, xp)
+        if indices is not None:
+            return indices
+        chunk = max(chunk, _GPU_CHUNK_ELEMENTS // constellation.size)
     indices = xp.empty(len(x), dtype=xp.int64)
     for n0 in range(0, len(x), chunk):
         n1 = min(n0 + chunk, len(x))
         d = xp.abs(x[n0:n1, xp.newaxis] - constellation[xp.newaxis, :])
         indices[n0:n1] = xp.argmin(d, axis=1)
     return indices
+
+
+def _nearest_index_kernel(
+    x: ArrayType, constellation: ArrayType, xp: ModuleType
+) -> ArrayType | None:
+    """GPU nearest-point indices from ``bps_min_d2``, or ``None``.
+
+    ``None`` when the kernel is unavailable, ``x`` is not single precision
+    (the kernel computes in float32), the constellation has more than 1024
+    points or ``x`` is empty.  The kernel compares squared distances in
+    float32, which can break a tie of the distances differently from
+    ``abs`` only where two points are equally near up to float32 rounding.
+    """
+    if x.dtype not in (np.complex64, np.float32) or not 0 < x.size:
+        return None
+    if constellation.size > 1024:
+        return None
+    kernel = _cuda.get_kernel("bps_min_d2", mode="table", return_argmin=True)
+    if kernel is None:
+        return None
+    _, idx = kernel(
+        x.astype(np.complex64, copy=False).reshape(1, -1),
+        xp.ones(1, dtype=np.complex64),
+        constellation.astype(np.complex64, copy=False),
+    )
+    return idx.reshape(-1).astype(np.int64)
 
 
 def _gray_psk(order: int) -> np.ndarray:
