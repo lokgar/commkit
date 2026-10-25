@@ -206,7 +206,8 @@ Docstrings describe the code as it is; a change in behavior updates them in the 
 
 | Algorithm structure | Implementation | Device |
 | --- | --- | --- |
-| Vectorized: filters, resampling, spectra, impairments, metrics, LLR, frequency-domain equalizers | NumPy/CuPy via `x, xp, sp = dispatch(samples)` | follows the input |
+| Vectorized: filters, resampling, spectra, impairments, metrics, frequency-domain equalizers | NumPy/CuPy via `x, xp, sp = dispatch(samples)` | follows the input |
+| Per-symbol searches over a small table: LLRs (over all points, or per axis for separable QAM), hard decisions of constellations without a square lattice | CPU: Numba `parallel=True` over blocks of symbols (LLRs), chunked NumPy (decisions). GPU: CUDA kernels, one thread per symbol (`llr`, `llr_separable`, `bps_min_d2`'s nearest-point mode), with a chunked CuPy fallback | follows the input |
 | Sequential recursions: LMS/RLS/CMA/RDE, PLL, Tikhonov, cycle slips | Numba `@njit(cache=True, fastmath=True, nogil=True)` | CPU; GPU input does one round trip to the host and back |
 | Linear recursions: IIR filtering | CPU: Numba kernel without `fastmath`, so double input gives SciPy's result bit for bit. GPU: `cupyx.scipy.signal`, a block-parallel filter | follows the input |
 | Hot spots limited by intermediates, launches or round trips | CUDA C++ via CuPy `RawModule` (`commkit/_cuda`) | GPU |
@@ -319,7 +320,7 @@ Steps, once CuPy 14.3 (with cp315 wheels for `cupy-cuda13x`) and a fixed `jupyte
 
 ### Planned modules
 
-1. **Channel coding** (`coding`, a placeholder package). Resolve the "Before channel coding" items below first, so the decoder is built on soft demapping that is already at its final speed on both devices. Start with one soft decoder (LDPC) that consumes `compute_llr` output (positive LLR = bit 0) and reports post-FEC BER next to `gmi`, then add encoders. The package stays out of `commkit/__init__.py` until a real encode/decode entry point exists. Decoders are iterative message passing over many codewords: batch codewords on the GPU from the start.
+1. **Channel coding** (`coding`, a placeholder package). Do the GPU validation above first (it times the last open item of "Before channel coding"), so the decoder is built on soft demapping that is already at its final speed on both devices; the closed-form max-log item there is optional and does not block. Start with one soft decoder (LDPC) that consumes `compute_llr` output (positive LLR = bit 0) and reports post-FEC BER next to `gmi`, then add encoders. The package stays out of `commkit/__init__.py` until a real encode/decode entry point exists. Decoders are iterative message passing over many codewords: batch codewords on the GPU from the start.
 
 ### Nonlinear fiber channel: future features
 
@@ -337,7 +338,7 @@ Each is an addition that leaves the current API unchanged.
 The decoder's input path. The GPU items need a CUDA device to time and to test (`--device=all`, against the Numba reference).
 
 - **Non-square hard decisions on the GPU: time the new path.** `gray._nearest_index` (behind `Constellation.demap`, `evm(blind=True)` and `ser` for PSK, cross QAM and arbitrary points) used to loop in Python over 4096-symbol chunks on the GPU, about 250 iterations of several launches per 10^6 symbols. Single-precision input now takes one launch of `bps_min_d2`'s nearest-point mode, and double input chunks of `_GPU_CHUNK_ELEMENTS` (2^22) distances; neither has been timed. Time `bench_demap` (`benchmarks/bench_mapping.py`) on the GPU for the three variants (the kernel; no kernel, by patching `gray._cuda.get_kernel` to return `None`; and the old 4096-symbol chunk, by also setting `_GPU_CHUNK_ELEMENTS` to `4096 * M`), keep the fastest and quote the deltas.
-- **Closed-form max-log LLRs of Gray QAM** (optional, CPU and GPU; undecided): per bit, the nearest point of each half is found by snapping, O(k) instead of O(sqrt(M)). Valid for a uniform prior only (a shaped prior moves the maximum off the nearest level), with the axis labels a binary-reflected Gray code up to per-bit inversion. A Numba prototype (2 + 2k metrics per axis: the snapped level, then for each bit the two levels next to the run of the snapped level) matched `llr_separable` to float32 rounding; against the `llr_separable` kernel on the same prepared inputs, 2^20 symbols, 4 cores, median of 11 paired runs: 1.80x (slower) at 16-QAM, 0.91x at 64-QAM, 0.60x at 256-QAM, 0.40x at 1024-QAM. Adopting it means a third LLR path (CPU and CUDA) for maxlog, uniform, 256-QAM and up.
+- **Closed-form max-log LLRs of Gray QAM** (optional, CPU and GPU; undecided): per bit, the nearest point of each half is found by snapping, O(k) instead of O(sqrt(M)). Valid for a uniform prior only (a shaped prior moves the maximum off the nearest level), with the axis labels a binary-reflected Gray code up to per-bit inversion. A Numba prototype (not in the repository; 2 + 2k metrics per axis: the snapped level, then for each bit the two levels next to the run of the snapped level) matched `llr_separable` to float32 rounding; against the `llr_separable` kernel on the same prepared inputs, 2^20 symbols, 4 cores, median of 11 paired runs: 1.80x (slower) at 16-QAM, 0.91x at 64-QAM, 0.60x at 256-QAM, 0.40x at 1024-QAM. Adopting it means a third LLR path (CPU and CUDA) for maxlog, uniform, 256-QAM and up.
 
 ### Performance
 
