@@ -795,34 +795,41 @@ def _correct_blockwise(
     block_values: ArrayType,
     xp: Any,
 ) -> ArrayType:
+    """Remove a blockwise frequency estimate, interpolated to every sample.
+
+    The block values are interpolated (PCHIP, held constant outside the
+    block centers) and integrated into a float64 phase trajectory on the
+    samples' device: SciPy's interpolator on the CPU, CuPy's on the GPU.
+    """
     x2, was_1d = as_2d(x, name="samples")
     C, N = x2.shape
-    df = np.asarray(to_device(block_values, "cpu"), dtype=np.float64)
+    df = xp.asarray(block_values, dtype=xp.float64)
     df = df[None, :] if df.ndim == 1 else df  # (C_interp, B); 1 row is shared
     B = df.shape[-1]
-    n_grid = np.arange(N, dtype=np.float64)
-    theta = np.empty((df.shape[0], N), dtype=np.float64)
-    if B > 1:
-        from scipy.interpolate import PchipInterpolator
-
-        n_clamped = np.clip(n_grid, block_centers[0], block_centers[-1])
-    for c in range(df.shape[0]):
-        if B == 1:
-            df_dense = np.full(N, df[c, 0])
+    if B == 1:
+        df_dense = xp.broadcast_to(df, (df.shape[0], N))
+    else:
+        if xp is np:
+            from scipy.interpolate import PchipInterpolator
         else:
-            df_dense = PchipInterpolator(block_centers, df[c])(n_clamped)
-        theta[c] = (2.0 * np.pi / fs) * np.cumsum(df_dense)
-    if df.shape[0] == 1 and C > 1:
-        theta = np.broadcast_to(theta, (C, N))
+            from cupyx.scipy.interpolate import PchipInterpolator
+        centers = xp.asarray(block_centers, dtype=xp.float64)
+        n_grid = xp.arange(N, dtype=xp.float64)
+        n_clamped = xp.clip(n_grid, float(block_centers[0]), float(block_centers[-1]))
+        df_dense = PchipInterpolator(centers, df, axis=-1)(n_clamped)  # (C_interp, N)
+    theta = (2.0 * np.pi / fs) * xp.cumsum(df_dense, axis=-1)
+    if theta.shape[0] == 1 and C > 1:
+        theta = xp.broadcast_to(theta, (C, N))
 
-    corrected = _derotate(x2, xp.asarray(theta))
-    logger.debug(
-        "correct_frequency_offset (blockwise): C=%s, B=%s blocks, total phase "
-        "drift=%.3f rad",
-        C,
-        B,
-        float(theta[0, -1]),
-    )
+    corrected = _derotate(x2, theta)
+    if logger.isEnabledFor(logging.DEBUG):
+        logger.debug(
+            "correct_frequency_offset (blockwise): C=%s, B=%s blocks, total phase "
+            "drift=%.3f rad",
+            C,
+            B,
+            float(theta[0, -1]),
+        )
     return restore_1d(was_1d, corrected)
 
 

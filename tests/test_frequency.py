@@ -742,6 +742,26 @@ class TestCorrectFrequencyOffsetBlockwise:
         ).value
         assert abs(float(residual)) < 500.0
 
+    @pytest.mark.parametrize("rows", [1, 2], ids=["shared", "per-channel"])
+    def test_phase_is_the_integrated_pchip_of_the_blocks(self, xp, xpt, rows):
+        """The removed phase is ``2π/fs · cumsum`` of the PCHIP-interpolated
+        block values, held constant outside the block centers."""
+        from scipy.interpolate import PchipInterpolator
+
+        N = 6000
+        rng = np.random.default_rng(5)
+        est = _block_estimate(
+            N, 1024, 0.5, lambda b: rng.uniform(-2e4, 2e4, (rows, b) if rows > 1 else b)
+        )
+        out = frequency.correct_frequency_offset(
+            xp.ones((2, N), dtype=xp.complex64), est, sampling_rate=self.FS
+        )
+        centers = est.block_centers
+        n = np.clip(np.arange(N, dtype=np.float64), centers[0], centers[-1])
+        df = PchipInterpolator(centers, np.atleast_2d(est.block_values), axis=-1)(n)
+        theta = np.broadcast_to(2 * np.pi / self.FS * np.cumsum(df, axis=-1), (2, N))
+        xpt.assert_allclose(out, xp.asarray(np.exp(-1j * theta)), atol=2e-6)
+
     def test_output_on_same_device(self, xp):
         """Output array is on the same backend as the input."""
         sig = xp.ones(2048, dtype=xp.complex64)
