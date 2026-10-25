@@ -204,6 +204,16 @@ class TestComputeLLRDevice:
         xpt.assert_array_equal(full, chunked)
 
 
+def _noisy(constellation: Any, shape: tuple[int, ...], sd: float, seed: int) -> Any:
+    """Points of ``constellation`` plus Gaussian noise, in single precision."""
+    rng = np.random.default_rng(seed)
+    pts = constellation.points
+    x = pts[rng.integers(0, pts.size, shape)] + sd * rng.standard_normal(shape)
+    if np.iscomplexobj(pts):
+        x = x + 1j * sd * rng.standard_normal(shape)
+    return x.astype(np.complex64 if np.iscomplexobj(x) else np.float32)
+
+
 @pytest.mark.gpu_only
 class TestLLRKernel:
     """The CUDA LLR kernel against its CPU reference (Numba)."""
@@ -211,30 +221,46 @@ class TestLLRKernel:
     @pytest.mark.requires_kernel("llr")
     @pytest.mark.parametrize("method", ["maxlog", "exact"])
     @pytest.mark.parametrize(
-        "constellation",
+        ("constellation", "noise_var"),
         [
-            Constellation.qam(16),
-            Constellation.qam(256),
-            Constellation.qam(64).shaped(nu=0.05),
-            Constellation.pam(4),
+            (Constellation.psk(8), 0.02),
+            (Constellation.qam(128), 0.02),
+            (Constellation.qam(8), 0.02),
+            (Constellation.pam(4), 0.02),
+            # Most half-sums underflow relative to the symbol's peak metric:
+            # the exact method takes the per-half fallback.
+            (Constellation.qam(128), 2e-4),
         ],
-        ids=["16qam", "256qam", "shaped64qam", "pam4"],
+        ids=["8psk", "cross128qam", "8qam", "pam4", "cross128qam-high-snr"],
     )
     def test_kernel_matches_cpu(
-        self, xp: Any, xpt: Any, method: str, constellation: Any
+        self, xp: Any, xpt: Any, method: str, constellation: Any, noise_var: float
     ) -> None:
-        rng = np.random.default_rng(3)
-        pts = constellation.points
-        x = pts[rng.integers(0, pts.size, (2, 5000))]
-        x = x + 0.1 * rng.standard_normal(x.shape)
-        if np.iscomplexobj(pts):
-            x = x + 0.1j * rng.standard_normal(x.shape)
-        x = x.astype(np.complex64 if np.iscomplexobj(x) else np.float32)
-        kw = dict(noise_var=0.02, constellation=constellation, method=method)
+        x = _noisy(constellation, (2, 5000), 0.1, seed=3)
+        kw = dict(noise_var=noise_var, constellation=constellation, method=method)
         cpu = mapping.compute_llr(x, **kw)
         gpu = mapping.compute_llr(xp.asarray(x), **kw)
         assert gpu.shape == cpu.shape
         xpt.assert_allclose(gpu, xp.asarray(cpu), rtol=1e-4, atol=1e-3)
+
+    @pytest.mark.requires_kernel("llr")
+    @pytest.mark.parametrize("method", ["maxlog", "exact"])
+    @pytest.mark.parametrize(
+        "constellation",
+        [Constellation.qam(16), Constellation.qam(64).shaped(nu=0.05)],
+        ids=["16qam", "shaped64qam"],
+    )
+    def test_point_kernel_on_separable_qam(
+        self, xp: Any, xpt: Any, method: str, constellation: Any
+    ) -> None:
+        """The M-point kernel, which separable QAM bypasses, gives its LLRs too."""
+        from commkit.mapping.llr import _llr
+
+        x = _noisy(constellation, (777,), 0.1, seed=5)
+        c = constellation
+        args = (c.points, c.bit_labels, c.pmf, 0.02, method)
+        gpu = _llr(xp.asarray(x), *args)
+        xpt.assert_allclose(gpu, xp.asarray(_llr(x, *args)), rtol=1e-4, atol=1e-3)
 
 
 class TestComputeLLRSignalIntegration:

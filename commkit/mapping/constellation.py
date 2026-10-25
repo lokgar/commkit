@@ -293,7 +293,9 @@ class Constellation:
         warn_if_double(symbols, "compute_llr() / Constellation.llr()", "float32")
         if self._axes is not None and dispatch(symbols)[1] is np:
             return _llr_separable(symbols, self._axes, noise_var, method)
-        return _llr(symbols, self.points, self.bit_labels, self.pmf, noise_var, method)
+        return _llr(
+            symbols, self.points, self.bit_labels, self.pmf, noise_var, method, self
+        )
 
     def _nearest(self, symbols: ArrayType) -> ArrayType:
         """Index of the nearest point for each symbol.

@@ -390,19 +390,53 @@ def _bps_anchor_factory() -> Callable:
     return launch
 
 
+# LLR_MAX_K and LLR_THREADS in llr.cu.
+_LLR_MAX_K = 16
+_LLR_THREADS = 128
+
+
+def _check_llr_arrays(arrays: tuple[tuple[str, Any, Any, tuple], ...]) -> None:
+    """Check the dtype, shape and contiguity of LLR kernel arguments."""
+    for label, arr, dtype, shape in arrays:
+        if arr.dtype != dtype:
+            raise TypeError(f"{label} must be {dtype}, got {arr.dtype}")
+        if arr.shape != shape:
+            raise ValueError(f"{label} must have shape {shape}, got {arr.shape}")
+        if not arr.flags.c_contiguous:
+            raise ValueError(f"{label} must be C-contiguous")
+
+
+def _llr_launch(cp: Any, kern: Any, n: int, k: int, head: tuple, tail: tuple) -> Any:
+    """Launch an LLR kernel over ``n`` symbols; returns ``(n, k)`` float32.
+
+    The kernel's arguments are ``head``, the output, ``n``, then ``tail``.
+    """
+    out = cp.empty((n, k), dtype=cp.float32)
+    if n == 0:
+        return out
+    blocks = min((n + _LLR_THREADS - 1) // _LLR_THREADS, 65535)
+    kern(
+        (blocks,),
+        (_LLR_THREADS,),
+        (*head, out, cp.int32(n), *tail),
+        shared_mem=_LLR_THREADS * (k | 1) * 4,  # llr_stride(k) in llr.cu
+    )
+    return out
+
+
 def _llr_factory() -> Callable:
     """Wrapper factory for the bit-LLR kernel (``mapping.llr``).
 
     One thread per symbol walks the constellation and keeps the per-bit
-    maxima (and, for the exact method, the scaled sums) in registers, so no
-    ``(N, k, M/2)`` intermediate is formed.  Returns ``(n, k)`` float32 LLRs.
+    maxima (and, for the exact method, the sums of one exponential per
+    point) in registers, so no ``(N, k, M/2)`` intermediate is formed.
+    Returns ``(n, k)`` float32 LLRs.
     """
     import cupy as cp
 
     from . import compiler
 
     kern = compiler.get_raw_kernel("llr", "llr")
-    max_k = 16  # LLR_MAX_K in llr.cu
 
     def launch(
         x: Any,
@@ -415,44 +449,26 @@ def _llr_factory() -> Callable:
         exact: bool,
     ) -> Any:
         """LLRs of the ``(n,)`` complex64 symbols ``x``, shape ``(n, k)``."""
-        if not 1 <= k <= max_k:
-            raise ValueError(f"bits per symbol must be in [1, {max_k}], got {k}")
+        if not 1 <= k <= _LLR_MAX_K:
+            raise ValueError(f"bits per symbol must be in [1, {_LLR_MAX_K}], got {k}")
         n = x.shape[0]
         M = points.shape[0]
-        for label, arr, dtype, shape in (
-            ("x", x, cp.complex64, (n,)),
-            ("points", points, cp.complex64, (M,)),
-            ("log_pmf", log_pmf, cp.float32, (M,)),
-            ("labels", labels, cp.int32, (M,)),
-        ):
-            if arr.dtype != dtype:
-                raise TypeError(f"{label} must be {dtype}, got {arr.dtype}")
-            if arr.shape != shape:
-                raise ValueError(f"{label} must have shape {shape}, got {arr.shape}")
-            if not arr.flags.c_contiguous:
-                raise ValueError(f"{label} must be C-contiguous")
-        out = cp.empty((n, k), dtype=cp.float32)
-        if n == 0:
-            return out
-        threads = 128
-        blocks = min((n + threads - 1) // threads, 65535)
-        kern(
-            (blocks,),
-            (threads,),
+        _check_llr_arrays(
             (
-                x,
-                points,
-                log_pmf,
-                labels,
-                out,
-                cp.int32(n),
-                cp.int32(M),
-                cp.int32(k),
-                cp.float32(inv_s2),
-                cp.int32(1 if exact else 0),
+                ("x", x, cp.complex64, (n,)),
+                ("points", points, cp.complex64, (M,)),
+                ("log_pmf", log_pmf, cp.float32, (M,)),
+                ("labels", labels, cp.int32, (M,)),
             ),
         )
-        return out
+        return _llr_launch(
+            cp,
+            kern,
+            n,
+            k,
+            (x, points, log_pmf, labels),
+            (cp.int32(M), cp.int32(k), cp.float32(inv_s2), cp.int32(1 if exact else 0)),
+        )
 
     return launch
 

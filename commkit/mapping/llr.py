@@ -8,9 +8,10 @@ positive LLR means bit 0 is more likely,
 
 from __future__ import annotations
 
+import weakref
 from collections.abc import Callable
 from types import ModuleType
-from typing import TYPE_CHECKING, NamedTuple
+from typing import TYPE_CHECKING, Any, NamedTuple
 
 import numpy as np
 
@@ -103,6 +104,34 @@ _NUMBA_LLR: dict[str, Callable[..., None]] = {}
 _EXACT_FLOOR = np.float32(1e-26)
 # Symbols per prange task: amortizes the scratch buffers of the CPU kernels.
 _LLR_TASK = 256
+
+# Device copies of the CUDA kernels' tables (points, labels, log prior), per
+# constellation and then per (table kind, CUDA device id): built on the first
+# call instead of on every one.  Weak keys, so a dropped constellation frees
+# its tables; equal constellations share them.
+_DEVICE_TABLES: weakref.WeakKeyDictionary[
+    Constellation, dict[tuple[str, int], tuple[Any, ...]]
+] = weakref.WeakKeyDictionary()
+
+
+def _device_tables(
+    owner: Constellation | None,
+    kind: str,
+    xp: ModuleType,
+    build: Callable[[], tuple[np.ndarray, ...]],
+) -> tuple[Any, ...]:
+    """``build()``'s host tables on the current CUDA device, cached per ``owner``.
+
+    ``owner=None`` (no constellation to cache on) copies them every call.
+    """
+    if owner is None:
+        return tuple(xp.asarray(a) for a in build())
+    per_owner = _DEVICE_TABLES.setdefault(owner, {})
+    key = (kind, int(xp.cuda.Device().id))
+    tables = per_owner.get(key)
+    if tables is None:
+        tables = per_owner[key] = tuple(xp.asarray(a) for a in build())
+    return tables
 
 
 def _get_numba_llr(name: str = "llr") -> Callable[..., None]:
@@ -297,11 +326,13 @@ def _llr(
     pmf: np.ndarray | None,
     noise_var: float,
     method: str,
+    owner: Constellation | None = None,
 ) -> ArrayType:
     """LLRs of ``symbols`` against host ``points`` labeled by ``bit_labels``.
 
-    Shared by :func:`compute_llr` and :meth:`Constellation.llr`.  Returns
-    float32 LLRs, ``(..., N * k)``, on the input's device.
+    Behind :meth:`Constellation.llr` (and so :func:`compute_llr`), which
+    passes itself as ``owner`` to cache the GPU tables.  Returns float32
+    LLRs, ``(..., N * k)``, on the input's device.
     """
     _check_method(method)
     order, k = bit_labels.shape
@@ -334,12 +365,19 @@ def _llr(
     kernel = _cuda.get_kernel("llr") if k <= 16 else None
     if kernel is not None:
         # GPU: one thread per symbol, no (chunk, k, M/2) intermediates.
-        labels = (bit_labels.astype(np.int64) << np.arange(k - 1, -1, -1)).sum(-1)
+        def build() -> tuple[np.ndarray, ...]:
+            return (
+                points.astype(np.complex64),
+                log_pmf,
+                _packed_labels(bit_labels),
+            )
+
+        pts_dev, log_pmf_dev, labels_dev = _device_tables(owner, "llr", xp, build)
         llrs = kernel(
             sym_flat.astype(xp.complex64, copy=False),
-            xp.asarray(points.astype(np.complex64)),
-            xp.asarray(log_pmf),
-            xp.asarray(labels.astype(np.int32)),
+            pts_dev,
+            log_pmf_dev,
+            labels_dev,
             k=k,
             inv_s2=float(inv_sigma2),
             exact=method == "exact",
@@ -411,6 +449,14 @@ def _llr_separable(
         llrs,
     )
     return llrs.reshape((*symbols.shape[:-1], symbols.shape[-1] * k))
+
+
+def _packed_labels(bit_labels: np.ndarray) -> np.ndarray:
+    """MSB-first bit rows to int32 labels, the CUDA kernels' layout."""
+    k = bit_labels.shape[1]
+    weights = 1 << np.arange(k - 1, -1, -1, dtype=np.int64)
+    labels: np.ndarray = (bit_labels.astype(np.int64) @ weights).astype(np.int32)
+    return labels
 
 
 def _logsumexp(a: ArrayType, xp: ModuleType) -> ArrayType:
