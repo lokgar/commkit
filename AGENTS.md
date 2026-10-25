@@ -276,6 +276,19 @@ Docstrings describe the code as it is; a change in behavior updates them in the 
 
 What is not done yet, in suggested order. Unlike the sections above, this is a to-do list, not a description of the code: remove an item in the commit that resolves it, and add one when a known gap is left open.
 
+### GPU validation of the commits after v2.2.0 (needs a CUDA device)
+
+The commits from `8142a0a` to `d9b3b0b` were written in a session without a GPU: their CPU suite, lint, types and benchmark smoke run passed, but none of their GPU code has run on a device. The new CUDA code was compiled with NVRTC for sm_89 (no spills) and checked on the host by an emulation of the kernels (g++, one thread per CUDA thread, a barrier for `__syncthreads`) behind the real Python wrappers; that checks indexing and numerics, not timing, occupancy or the CuPy calls. Do this first, on the reference machine, then delete this section (quote the timings in that commit's message):
+
+1. **Full suite on the GPU**: `uv run pytest -rs --device=all`, notebooks included, with no failures and no skips beyond the usual ones; then `uv run pytest benchmarks/ --benchmark-disable --device=all`. A kernel that fails to compile logs `CUDA kernel '...' failed to compile/load` and falls back silently, so also check that no such warning appears (run `tests/mapping` with `-o log_cli=true -o log_cli_level=WARNING`).
+2. **Per commit**, the GPU paths not run before (the `docs:` commits change docstrings and two log and error messages only; `8142a0a` adds two fiber ASE tests that take `xp` and run on the GPU in step 1):
+   - `a96d432`, `80eff81` (`iir_filter`): the GPU branch (`cupyx.scipy.signal` in double precision, sections now passed as host float64) runs in `tests/test_filtering.py -k iir --device=gpu`; the double-precision test allows 1e-9 there instead of bit-for-bit. Its speed should equal v2.2.0 (same CuPy call); confirm with one timed run.
+   - `1864a7d`, `7d11ca6` (`EqualizerResult` frozen and built once): every GPU equalizer path, block equalizers with CUDA graphs, `cs_block` and `bps_anchor` included: `tests/equalization --device=gpu`.
+   - `9f7be1d` (`Constellation.map`): `tests/mapping/test_constellation.py --device=gpu` (bits of seven dtypes, through CuPy's in-place `<<=` and `|=`); time `bench_map[gpu-*]` against the code before it (paired A/B, no baseline has it).
+   - `61f7644` (LLR kernel: one exponential per point, staged stores, cached tables) and `e66dc79` (separable QAM per axis on the GPU): `tests/mapping/test_llr.py --device=gpu` (`TestLLRKernel` against the Numba kernels, the table cache) and `tests/test_metrics.py --device=gpu`. Time `bench_llr.py` on the GPU against `0004` (`bench_compute_llr`: expected faster, most for `exact` and 256-QAM, 32 exponentials per symbol instead of 2048; `bench_gmi` does not use the kernels and should not move) and record `bench_compute_llr_nonseparable`, which is new. If the staged stores or the cache lose anywhere, add a Performance item below.
+   - `d9b3b0b` (hard decisions of PSK and cross QAM): `tests/mapping/test_gray.py --device=gpu` and the metrics that decide (`evm(blind=True)`, `ser`); then the timing of the item "Non-square hard decisions on the GPU" below.
+3. **Baseline**: if the timings hold, record a new baseline with `benchmarks/record_baseline.py` and make it the reference in §8.
+
 ### Switch to Python 3.15 (blocked on CuPy)
 
 Goal: require Python 3.15 and nothing older, mainly for explicit lazy imports (PEP 810, the `lazy` keyword). State checked on 2026-10-23 with uv 0.13.5 and CPython 3.15.1:
@@ -321,10 +334,10 @@ Each is an addition that leaves the current API unchanged.
 
 ### Before channel coding: mapping and soft demapping
 
-The decoder's input path. The GPU items need a CUDA device to write, test (`--device=all`, against the Numba reference) and time.
+The decoder's input path. The GPU items need a CUDA device to time and to test (`--device=all`, against the Numba reference).
 
 - **Non-square hard decisions on the GPU: time the new path.** `gray._nearest_index` (behind `Constellation.demap`, `evm(blind=True)` and `ser` for PSK, cross QAM and arbitrary points) used to loop in Python over 4096-symbol chunks on the GPU, about 250 iterations of several launches per 10^6 symbols. Single-precision input now takes one launch of `bps_min_d2`'s nearest-point mode, and double input chunks of `_GPU_CHUNK_ELEMENTS` (2^22) distances; neither has been timed. Time `bench_demap` (`benchmarks/bench_mapping.py`) on the GPU for the three variants (the kernel; no kernel, by patching `gray._cuda.get_kernel` to return `None`; and the old 4096-symbol chunk, by also setting `_GPU_CHUNK_ELEMENTS` to `4096 * M`), keep the fastest and quote the deltas.
-- **Closed-form max-log LLRs of Gray QAM** (optional, CPU and GPU): per bit, the nearest point of each half is found by snapping, O(k) instead of O(sqrt(M)). Expected gain under 2x on the CPU; measure before adopting.
+- **Closed-form max-log LLRs of Gray QAM** (optional, CPU and GPU; undecided): per bit, the nearest point of each half is found by snapping, O(k) instead of O(sqrt(M)). Valid for a uniform prior only (a shaped prior moves the maximum off the nearest level), with the axis labels a binary-reflected Gray code up to per-bit inversion. A Numba prototype (2 + 2k metrics per axis: the snapped level, then for each bit the two levels next to the run of the snapped level) matched `llr_separable` to float32 rounding; against the `llr_separable` kernel on the same prepared inputs, 2^20 symbols, 4 cores, median of 11 paired runs: 1.80x (slower) at 16-QAM, 0.91x at 64-QAM, 0.60x at 256-QAM, 0.40x at 1024-QAM. Adopting it means a third LLR path (CPU and CUDA) for maxlog, uniform, 256-QAM and up.
 
 ### Performance
 
