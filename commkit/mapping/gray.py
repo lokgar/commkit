@@ -214,7 +214,7 @@ _GPU_CHUNK_ELEMENTS = 1 << 22
 def _nearest_index(
     x: ArrayType, constellation: ArrayType, chunk: int = 4096
 ) -> ArrayType:
-    """Nearest-constellation-point index for each element of ``x`` (chunked).
+    """Nearest-constellation-point index for each element of ``x``.
 
     On the CPU, chunking over the ``N`` axis bounds the peak memory of the
     ``(N, M)`` distance matrix.  On the GPU, single-precision input takes

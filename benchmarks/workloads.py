@@ -100,10 +100,10 @@ def llr_workload(
     seed: int = 0,
     constellation: Constellation | None = None,
 ):
-    """Gray-mapped unit-power QAM after AWGN, for soft-demapping benches.
+    """Gray-mapped unit-power symbols after AWGN, for (de)mapping benches.
 
-    ``constellation`` replaces ``Constellation.qam(order)`` (PSK, cross QAM);
-    ``order`` must then be its order.  Returns ``(rx (n_sym,) complex64,
+    ``constellation`` (PSK, cross QAM) replaces ``Constellation.qam(order)``
+    and must have ``order`` points.  Returns ``(rx (n_sym,) complex64,
     bits (n_sym * log2(order),) int8, noise_var float)`` with
     ``noise_var = 10**(-esn0_db / 10)`` - the complex noise variance
     referenced to the unit-power constellation.
