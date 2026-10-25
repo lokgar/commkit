@@ -29,7 +29,7 @@ import numpy as np
 from .._array import warn_if_double
 from ..backend import ArrayType, dispatch
 from .gray import _gray_points, _nearest_index, _unpack_bits
-from .llr import _Axis, _llr, _llr_separable
+from .llr import _Axis, _llr, _llr_separable, _llr_separable_gpu
 from .shaping import (
     _constellation_power,
     _entropy_bits,
@@ -291,8 +291,12 @@ class Constellation:
         Returns ``float32``, ``(..., N * k)``, on the symbols' device.
         """
         warn_if_double(symbols, "compute_llr() / Constellation.llr()", "float32")
-        if self._axes is not None and dispatch(symbols)[1] is np:
-            return _llr_separable(symbols, self._axes, noise_var, method)
+        if self._axes is not None:
+            if dispatch(symbols)[1] is np:
+                return _llr_separable(symbols, self._axes, noise_var, method)
+            llrs = _llr_separable_gpu(symbols, self._axes, noise_var, method, self)
+            if llrs is not None:
+                return llrs
         return _llr(
             symbols, self.points, self.bit_labels, self.pmf, noise_var, method, self
         )

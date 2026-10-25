@@ -216,7 +216,7 @@ def _noisy(constellation: Any, shape: tuple[int, ...], sd: float, seed: int) -> 
 
 @pytest.mark.gpu_only
 class TestLLRKernel:
-    """The CUDA LLR kernel against its CPU reference (Numba)."""
+    """The CUDA LLR kernels against their CPU references (Numba)."""
 
     @pytest.mark.requires_kernel("llr")
     @pytest.mark.parametrize("method", ["maxlog", "exact"])
@@ -261,6 +261,43 @@ class TestLLRKernel:
         args = (c.points, c.bit_labels, c.pmf, 0.02, method)
         gpu = _llr(xp.asarray(x), *args)
         xpt.assert_allclose(gpu, xp.asarray(_llr(x, *args)), rtol=1e-4, atol=1e-3)
+
+    @pytest.mark.requires_kernel("llr_separable")
+    @pytest.mark.parametrize("method", ["maxlog", "exact"])
+    @pytest.mark.parametrize(
+        ("constellation", "noise_var"),
+        [
+            (Constellation.qam(4), 0.02),
+            (Constellation.qam(16), 0.02),
+            (Constellation.qam(256), 0.02),
+            (Constellation.qam(1024), 0.002),
+            (Constellation.qam(64).shaped(nu=0.05), 0.02),
+            (Constellation.qam(256), 2e-4),
+        ],
+        ids=["4qam", "16qam", "256qam", "1024qam", "shaped64qam", "256qam-high-snr"],
+    )
+    def test_separable_kernel_matches_cpu(
+        self, xp: Any, xpt: Any, method: str, constellation: Any, noise_var: float
+    ) -> None:
+        x = _noisy(constellation, (2, 5000), 0.1, seed=3)
+        kw = dict(noise_var=noise_var, constellation=constellation, method=method)
+        cpu = mapping.compute_llr(x, **kw)
+        gpu = mapping.compute_llr(xp.asarray(x), **kw)
+        assert gpu.shape == cpu.shape
+        xpt.assert_allclose(gpu, xp.asarray(cpu), rtol=1e-4, atol=1e-3)
+
+    @pytest.mark.requires_kernel("llr_separable")
+    def test_tables_are_cached_per_constellation(self, xp: Any) -> None:
+        from commkit.mapping import llr as llr_module
+
+        c = Constellation.qam(64).shaped(nu=0.02)
+        x = xp.asarray(_noisy(c, (100,), 0.1, seed=1))
+        mapping.compute_llr(x, noise_var=0.05, constellation=c)
+        tables = dict(llr_module._DEVICE_TABLES[c])
+        mapping.compute_llr(x, noise_var=0.01, constellation=c, method="exact")
+        assert llr_module._DEVICE_TABLES[c].keys() == tables.keys()
+        for key, value in tables.items():
+            assert llr_module._DEVICE_TABLES[c][key] is value
 
 
 class TestComputeLLRSignalIntegration:

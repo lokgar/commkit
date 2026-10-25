@@ -473,6 +473,64 @@ def _llr_factory() -> Callable:
     return launch
 
 
+def _llr_separable_factory() -> Callable:
+    """Wrapper factory for the per-axis bit-LLR kernel (``mapping.llr``).
+
+    The LLRs of a separable square lattice from the levels of each axis:
+    2·sqrt(M) metrics (and exponentials) per symbol instead of M.
+    Returns ``(n, k)`` float32 LLRs.
+    """
+    import cupy as cp
+
+    from . import compiler
+
+    kern = compiler.get_raw_kernel("llr", "llr_separable")
+
+    def launch(
+        x: Any,
+        re: tuple[Any, Any, Any, Any],
+        im: tuple[Any, Any, Any, Any],
+        *,
+        inv_s2: float,
+        exact: bool,
+    ) -> Any:
+        """LLRs of the ``(n,)`` complex64 symbols ``x``, shape ``(n, k)``.
+
+        ``re`` and ``im`` are each ``(levels, log_prior, labels, positions)``
+        of one axis: float32, float32 and int32 ``(L,)``, int32 ``(k_axis,)``.
+        """
+        n = x.shape[0]
+        checks = [("x", x, cp.complex64, (n,))]
+        axis_args: list[Any] = []
+        for name, (lev, logp, lab, pos) in (("re", re), ("im", im)):
+            L, kb = lev.shape[0], pos.shape[0]
+            if not 1 <= kb <= _LLR_MAX_K:
+                raise ValueError(
+                    f"bits of the {name} axis must be in [1, {_LLR_MAX_K}], got {kb}"
+                )
+            checks += [
+                (f"{name} levels", lev, cp.float32, (L,)),
+                (f"{name} log prior", logp, cp.float32, (L,)),
+                (f"{name} labels", lab, cp.int32, (L,)),
+                (f"{name} positions", pos, cp.int32, (kb,)),
+            ]
+            axis_args += [lev, logp, lab, pos, cp.int32(L), cp.int32(kb)]
+        _check_llr_arrays(tuple(checks))
+        k = re[3].shape[0] + im[3].shape[0]
+        if k > _LLR_MAX_K:
+            raise ValueError(f"bits per symbol must be at most {_LLR_MAX_K}, got {k}")
+        return _llr_launch(
+            cp,
+            kern,
+            n,
+            k,
+            (x, *axis_args),
+            (cp.int32(k), cp.float32(inv_s2), cp.int32(1 if exact else 0)),
+        )
+
+    return launch
+
+
 # name -> wrapper factory. Factories may raise; get_kernel translates any
 # failure into the warn-once-and-return-None fallback contract.
 _KERNEL_FACTORIES: dict[str, Callable[..., Callable]] = {
@@ -481,4 +539,5 @@ _KERNEL_FACTORIES: dict[str, Callable[..., Callable]] = {
     "cs_block": _cs_block_factory,
     "bps_anchor": _bps_anchor_factory,
     "llr": _llr_factory,
+    "llr_separable": _llr_separable_factory,
 }

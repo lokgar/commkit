@@ -45,9 +45,9 @@ def compute_llr(
     The constellation's ``pmf`` (if any) enters as the symbol prior.
     Computed on the input's device in float32 by one compiled pass per
     symbol (Numba on the CPU, a CUDA kernel on the GPU), so memory stays
-    bounded for any record length.  On the CPU, square QAM whose labels and
-    prior factor per axis (Gray QAM, shaped or not) is demapped per axis,
-    which gives the same LLRs from 2·sqrt(M) metrics instead of M.
+    bounded for any record length.  Square QAM whose labels and prior factor
+    per axis (Gray QAM, shaped or not) is demapped per axis, which gives the
+    same LLRs from 2·sqrt(M) metrics instead of M.
     Differentiable LLRs belong to commax.
 
     Parameters
@@ -447,6 +447,49 @@ def _llr_separable(
         np.float32(1.0 / max(noise_var, 1e-20)),
         method == "exact",
         llrs,
+    )
+    return llrs.reshape((*symbols.shape[:-1], symbols.shape[-1] * k))
+
+
+def _llr_separable_gpu(
+    symbols: ArrayType,
+    axes: tuple[_Axis, _Axis],
+    noise_var: float,
+    method: str,
+    owner: Constellation | None = None,
+) -> ArrayType | None:
+    """GPU LLRs of a separable constellation (as :func:`_llr_separable`).
+
+    ``None`` when the CUDA kernel is unavailable or the symbol has more than
+    16 bits; the caller then takes the M-point path of :func:`_llr`.
+    """
+    _check_method(method)
+    re, im = axes
+    k = re.bits.size + im.bits.size
+    kernel = _cuda.get_kernel("llr_separable") if k <= 16 else None
+    if kernel is None:
+        return None
+    symbols, xp, _ = dispatch(symbols)
+
+    def build() -> tuple[np.ndarray, ...]:
+        return tuple(
+            t
+            for a in axes
+            for t in (
+                a.levels.astype(np.float32),
+                _log_prior(a.pmf, a.levels.size),
+                _packed_labels(a.labels),
+                a.bits.astype(np.int32),
+            )
+        )
+
+    tables = _device_tables(owner, "llr_separable", xp, build)
+    llrs = kernel(
+        symbols.reshape(-1).astype(xp.complex64, copy=False),
+        tables[:4],
+        tables[4:],
+        inv_s2=float(np.float32(1.0 / max(noise_var, 1e-20))),
+        exact=method == "exact",
     )
     return llrs.reshape((*symbols.shape[:-1], symbols.shape[-1] * k))
 
