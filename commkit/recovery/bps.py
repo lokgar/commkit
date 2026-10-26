@@ -182,7 +182,9 @@ def _bps(symbols: ArrayType, method: BPS, ctx: _Context) -> _Phase:
     # Fused CUDA kernel (CuPy + complex64 only): computes the per-symbol
     # min-distance metric for all B candidate phases and all C channels in a
     # single pass, avoiding the materialized (CHUNK, B[, M]) intermediates of
-    # the xp path.  None => fall back to the xp implementation below.
+    # the xp path.  Input outside its limits (complex128, more than 128
+    # phases, a table of more than 1024 points) takes the xp path below, the
+    # CPU's implementation.
     _kern = None
     if xp is not np and symbols.dtype == xp.complex64 and B <= 128:
         if is_sq_qam or const_xp.size <= 1024:

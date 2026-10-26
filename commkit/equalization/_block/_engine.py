@@ -312,10 +312,9 @@ def _block_loop(
     ``use_graph`` (CuPy only), per key the first block runs eagerly to prime
     the memory pool, the second is captured into a CUDA graph and every
     later block of that key replays it (:class:`GraphRunner`): one launch
-    per block instead of dozens.  A failed capture falls back to the eager
-    loop.  ``prepare(B,
-    b_start)`` runs before every block, outside any graph, like
-    ``run.fill_window``: it stages per-block inputs into fixed buffers.
+    per block instead of dozens.  ``prepare(B, b_start)`` runs before every
+    block, outside any graph, like ``run.fill_window``: it stages per-block
+    inputs into fixed buffers.
     ``at_resume()`` runs once, before block ``run.resume`` (or after the last
     block), to snapshot the continuation state.
     """

@@ -1,14 +1,11 @@
 """Hand-written CUDA kernels for CuPy input (private).
 
 Raw CUDA C++ kernels (under ``src/``) and their lazy compilation through
-:class:`cupy.RawModule`.  Two functions are used by the rest of the library:
-
-is_available :
-    True when CuPy is functional and a CUDA device with compute
-    capability >= 7.0 is present.
-get_kernel :
-    A launchable kernel wrapper, or ``None``, in which case the caller
-    **must** fall back to its ``xp`` implementation.
+:class:`cupy.RawModule`.  :func:`get_kernel` is the one entry point: it
+returns a launchable wrapper for a kernel, and callers use it only on CuPy
+input, so CuPy already works.  A kernel that fails to compile or load
+raises: there is no slower path to fall back to, since the kernels are
+tested on a GPU before every release.
 
 Importing this package (or ``commkit``) never touches NVRTC: kernel sources
 are read and compiled on the first ``get_kernel()`` call for a given
@@ -17,60 +14,11 @@ from CuPy's on-disk kernel cache (``~/.cupy/kernel_cache``).
 """
 
 from collections.abc import Callable
-from functools import lru_cache
 from typing import Any
 
-from ..backend import is_cupy_available
-from ..logger import logger
 
-# Volta and newer. Older parts lack the independent-thread-scheduling and
-# shared-memory sizes the kernels in src/ are written against.
-_MIN_COMPUTE_CAPABILITY = 70
-
-# Kernel names that have already produced a compile/load warning; the
-# fallback contract promises at most one warning per process per kernel.
-_warned_kernels: set[str] = set()
-
-
-@lru_cache(maxsize=1)
-def _device_supported() -> bool:
-    """Hardware probe, cached for the process lifetime.
-
-    Checks that at least one CUDA device is present and that the current
-    device has compute capability >= 7.0. Only called when CuPy itself is
-    importable and functional.
-    """
-    import cupy as cp
-
-    try:
-        if cp.cuda.runtime.getDeviceCount() < 1:
-            return False
-        cc = int(cp.cuda.Device().compute_capability)
-    except Exception:
-        return False
-    return cc >= _MIN_COMPUTE_CAPABILITY
-
-
-def is_available() -> bool:
-    """Check whether custom CUDA kernels can be compiled and launched.
-
-    Returns
-    -------
-    bool
-        True if CuPy is installed and functional, at least one CUDA device is
-        present, and the current device has compute capability >= 7.0.
-    """
-    if not is_cupy_available():
-        return False
-    return _device_supported()
-
-
-def get_kernel(name: str, **spec: Any) -> Callable | None:
-    """Return a launchable kernel wrapper, or ``None`` if unavailable.
-
-    With ``None`` the caller falls back to its ``xp`` implementation.  A
-    compile or load failure logs one warning per kernel name and process and
-    returns ``None``.
+def get_kernel(name: str, **spec: Any) -> Callable:
+    """Return a launchable kernel wrapper.
 
     Parameters
     ----------
@@ -82,36 +30,24 @@ def get_kernel(name: str, **spec: Any) -> Callable | None:
 
     Returns
     -------
-    callable or None
+    callable
         A wrapper that handles grid/block computation and input
         validation. Call sites pass CuPy arrays and plain Python scalars
-        only. ``None`` when no usable GPU is present or compilation fails.
+        only.
 
     Raises
     ------
     KeyError
-        If `name` is not a registered kernel. Unknown names are
-        programming errors, not runtime fallback conditions.
+        If `name` is not a registered kernel.
+    ValueError
+        If ``spec`` is not a valid specialization of the kernel.
     """
     factory = _KERNEL_FACTORIES.get(name)
     if factory is None:
         raise KeyError(
             f"Unknown CUDA kernel {name!r}; registered: {sorted(_KERNEL_FACTORIES)}"
         )
-    if not is_available():
-        return None
-    try:
-        return factory(**spec)
-    except Exception as exc:
-        if name not in _warned_kernels:
-            _warned_kernels.add(name)
-            logger.warning(
-                "CUDA kernel %r failed to compile/load (%s); "
-                "falling back to the array-module implementation.",
-                name,
-                exc,
-            )
-        return None
+    return factory(**spec)
 
 
 def _selftest_scale_factory(dtype: str = "float32") -> Callable:
@@ -243,8 +179,8 @@ def _cs_block_factory() -> Callable:
     Per-channel slip detector (one block of threads per channel, decisions
     speculated in parallel; see ``cs_block.cu``) operating in place on
     device-resident state buffers. One launch processes one equalizer block,
-    replacing the fallback's round trip per block (device to host, the Numba
-    kernel, host to device).  All state arrays are float64 or int64 and are
+    instead of a round trip per block through the CPU path (device to host,
+    the Numba kernel, host to device).  All state arrays are float64 or int64 and are
     changed in place, so the wrapper rejects non-contiguous inputs instead
     of copying them silently.
     """
@@ -531,8 +467,7 @@ def _llr_separable_factory() -> Callable:
     return launch
 
 
-# name -> wrapper factory. Factories may raise; get_kernel translates any
-# failure into the warn-once-and-return-None fallback contract.
+# name -> wrapper factory.
 _KERNEL_FACTORIES: dict[str, Callable[..., Callable]] = {
     "selftest_scale": _selftest_scale_factory,
     "bps_min_d2": _bps_min_d2_factory,

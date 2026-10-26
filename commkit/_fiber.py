@@ -59,8 +59,8 @@ stage) that compute the phase in registers, on in-place, unscaled cuFFT
 transforms, so each stage reads and writes the field once and a span
 allocates nothing; the span is captured once into a CUDA graph and
 replayed, with the next span's waveplates copied into a fixed device buffer
-before each replay.  Any failure falls back to the plain CuPy stages, which
-complex128 input also uses.
+before each replay.  complex128 input runs the plain CuPy stages, without
+the fused kernels and the graph.
 """
 
 from __future__ import annotations
@@ -627,15 +627,7 @@ def _make_ops(x: ArrayType, xp: ModuleType, *args: Any) -> _Ops:
         return _CpuOps(xp, x.dtype, *args)
     if x.dtype != xp.complex64:
         return _Ops(xp, x.dtype, *args)
-    try:
-        return _FusedOps(xp, x.dtype, *args)
-    except Exception as exc:  # pragma: no cover - GPU toolchain dependent
-        logger.warning(
-            "Fiber propagation: fused CUDA kernels unavailable (%s); using the "
-            "plain CuPy path.",
-            exc,
-        )
-        return _Ops(xp, x.dtype, *args)
+    return _FusedOps(xp, x.dtype, *args)
 
 
 # -----------------------------------------------------------------------------

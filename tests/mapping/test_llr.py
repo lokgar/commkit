@@ -175,34 +175,6 @@ class TestComputeLLRDevice:
             assert isinstance(llrs, xp.ndarray)
             assert llrs.dtype == xp.float32
 
-    def test_long_records_are_chunked_consistently(
-        self, xp: Any, xpt: Any, monkeypatch: Any
-    ) -> None:
-        """Results do not depend on how the record is split into chunks.
-
-        The chunked path is the GPU fallback when the CUDA kernel is
-        unavailable; the kernel is switched off to exercise it.
-        """
-        from commkit.mapping import llr as llr_module
-
-        monkeypatch.setattr(llr_module._cuda, "get_kernel", lambda *a, **k: None)
-
-        rng = np.random.default_rng(4)
-        const = mapping.Constellation.qam(64).points
-        y = xp.asarray(const[rng.integers(0, 64, 3000)].astype(np.complex64))
-        full = mapping.compute_llr(
-            y, noise_var=0.05, constellation=Constellation.qam(64), method="exact"
-        )
-        original = llr_module._CHUNK_ELEMENTS
-        try:
-            llr_module._CHUNK_ELEMENTS = 6 * 64 * 7  # 7 symbols per chunk
-            chunked = mapping.compute_llr(
-                y, noise_var=0.05, constellation=Constellation.qam(64), method="exact"
-            )
-        finally:
-            llr_module._CHUNK_ELEMENTS = original
-        xpt.assert_array_equal(full, chunked)
-
 
 def _noisy(constellation: Any, shape: tuple[int, ...], sd: float, seed: int) -> Any:
     """Points of ``constellation`` plus Gaussian noise, in single precision."""
@@ -218,7 +190,6 @@ def _noisy(constellation: Any, shape: tuple[int, ...], sd: float, seed: int) -> 
 class TestLLRKernel:
     """The CUDA LLR kernels against their CPU references (Numba)."""
 
-    @pytest.mark.requires_kernel("llr")
     @pytest.mark.parametrize("method", ["maxlog", "exact"])
     @pytest.mark.parametrize(
         ("constellation", "noise_var"),
@@ -243,7 +214,6 @@ class TestLLRKernel:
         assert gpu.shape == cpu.shape
         xpt.assert_allclose(gpu, xp.asarray(cpu), rtol=1e-4, atol=1e-3)
 
-    @pytest.mark.requires_kernel("llr")
     @pytest.mark.parametrize("method", ["maxlog", "exact"])
     @pytest.mark.parametrize(
         "constellation",
@@ -262,7 +232,6 @@ class TestLLRKernel:
         gpu = _llr(xp.asarray(x), *args)
         xpt.assert_allclose(gpu, xp.asarray(_llr(x, *args)), rtol=1e-4, atol=1e-3)
 
-    @pytest.mark.requires_kernel("llr_separable")
     @pytest.mark.parametrize("method", ["maxlog", "exact"])
     @pytest.mark.parametrize(
         ("constellation", "noise_var"),
@@ -286,7 +255,14 @@ class TestLLRKernel:
         assert gpu.shape == cpu.shape
         xpt.assert_allclose(gpu, xp.asarray(cpu), rtol=1e-4, atol=1e-3)
 
-    @pytest.mark.requires_kernel("llr_separable")
+    def test_more_than_16_bits_raises(self, xp: Any) -> None:
+        """The kernels' limit; there is no slower GPU path behind it."""
+        c = Constellation.pam(2**17)
+        with pytest.raises(ValueError, match="at most 16 bits"):
+            mapping.compute_llr(
+                xp.zeros(4, dtype=xp.float32), noise_var=0.1, constellation=c
+            )
+
     def test_tables_are_cached_per_constellation(self, xp: Any) -> None:
         from commkit.mapping import llr as llr_module
 

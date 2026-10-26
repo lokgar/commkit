@@ -83,7 +83,6 @@ filterwarnings = [
 markers = [
     "gpu_only: mark test as requiring a GPU backend",
     "cpu_only: mark test as CPU-only",
-    "requires_kernel(name): mark test as requiring a specific CUDA kernel",
 ]
 
 [tool.coverage.run]

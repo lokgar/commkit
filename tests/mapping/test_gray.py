@@ -196,7 +196,6 @@ def _noisy_points(constellation: Any, n: int, seed: int) -> np.ndarray:
 class TestNearestIndexGPU:
     """GPU hard decisions of constellations without a square lattice."""
 
-    @pytest.mark.requires_kernel("bps_min_d2")
     @pytest.mark.parametrize("constellation", _DECISION_CASES, ids=_DECISION_IDS)
     def test_kernel_matches_cpu(self, xp: Any, xpt: Any, constellation: Any) -> None:
         x = _noisy_points(constellation, 20000, seed=1)
@@ -206,13 +205,12 @@ class TestNearestIndexGPU:
         )
 
     @pytest.mark.parametrize("constellation", _DECISION_CASES, ids=_DECISION_IDS)
-    def test_chunked_fallback_matches_cpu(
+    def test_double_input_is_chunked_like_cpu(
         self, xp: Any, xpt: Any, constellation: Any, monkeypatch: Any
     ) -> None:
-        """Without the kernel (or for double input) the GPU searches in chunks."""
+        """Double input, outside the kernel's float32, is searched in chunks."""
         from commkit.mapping import gray
 
-        monkeypatch.setattr(gray._cuda, "get_kernel", lambda *a, **k: None)
         monkeypatch.setattr(gray, "_GPU_CHUNK_ELEMENTS", 999 * constellation.order)
         x = _noisy_points(constellation, 5000, seed=2).astype(
             np.complex128 if constellation.is_complex else np.float64
@@ -222,7 +220,6 @@ class TestNearestIndexGPU:
             _nearest_index(xp.asarray(x), pts), xp.asarray(_nearest_index(x, pts))
         )
 
-    @pytest.mark.requires_kernel("bps_min_d2")
     def test_demap_matches_cpu(self, xp: Any, xpt: Any) -> None:
         c = mapping.Constellation.psk(8)
         x = _noisy_points(c, 3000, seed=3).reshape(2, -1)

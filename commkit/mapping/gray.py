@@ -206,8 +206,8 @@ def _unpack_bits(indices: ArrayType, k: int) -> ArrayType:
     return ((indices[:, xp.newaxis] >> shifts) & 1).astype(xp.int8)
 
 
-# GPU fallback (no CUDA kernel, double precision, more than 1024 points):
-# budget of the (chunk, M) distance matrix per chunk, in elements.
+# GPU input outside the kernel's limits (double precision, more than 1024
+# points): budget of the (chunk, M) distance matrix per chunk, in elements.
 _GPU_CHUNK_ELEMENTS = 1 << 22
 
 
@@ -217,10 +217,12 @@ def _nearest_index(
     """Nearest-constellation-point index for each element of ``x``.
 
     On the CPU, chunking over the ``N`` axis bounds the peak memory of the
-    ``(N, M)`` distance matrix.  On the GPU, single-precision input takes
-    one launch of the ``bps_min_d2`` kernel's nearest-point mode (no
-    distance matrix); otherwise the chunks hold ``_GPU_CHUNK_ELEMENTS``
-    distances, so a long record is not hundreds of small launches.
+    ``(N, M)`` distance matrix.  On the GPU, single-precision input and up
+    to 1024 points take one launch of the ``bps_min_d2`` kernel's
+    nearest-point mode (no distance matrix; it computes in float32, the
+    limit of its table); other input runs the chunked loop with chunks of
+    ``_GPU_CHUNK_ELEMENTS`` distances, so a long record is not hundreds of
+    small launches.
 
     Parameters
     ----------
@@ -240,9 +242,8 @@ def _nearest_index(
     x, xp, _ = dispatch(x)
     constellation = xp.asarray(constellation)
     if xp is not np:
-        indices = _nearest_index_kernel(x, constellation, xp)
-        if indices is not None:
-            return indices
+        if x.dtype in (np.complex64, np.float32) and constellation.size <= 1024:
+            return _nearest_index_kernel(x, constellation, xp)
         chunk = max(chunk, _GPU_CHUNK_ELEMENTS // constellation.size)
     indices = xp.empty(len(x), dtype=xp.int64)
     for n0 in range(0, len(x), chunk):
@@ -254,22 +255,17 @@ def _nearest_index(
 
 def _nearest_index_kernel(
     x: ArrayType, constellation: ArrayType, xp: ModuleType
-) -> ArrayType | None:
-    """GPU nearest-point indices from ``bps_min_d2``, or ``None``.
+) -> ArrayType:
+    """GPU nearest-point indices from ``bps_min_d2``, ``(N,)`` int64.
 
-    ``None`` when the kernel is unavailable, ``x`` is not single precision
-    (the kernel computes in float32), the constellation has more than 1024
-    points or ``x`` is empty.  The kernel compares squared distances in
-    float32, which can break a tie of the distances differently from
-    ``abs`` only where two points are equally near up to float32 rounding.
+    For single-precision ``x`` and at most 1024 points.  The kernel compares
+    squared distances in float32, which can break a tie of the distances
+    differently from ``abs`` only where two points are equally near up to
+    float32 rounding.
     """
-    if x.dtype not in (np.complex64, np.float32) or not 0 < x.size:
-        return None
-    if constellation.size > 1024:
-        return None
+    if x.size == 0:
+        return xp.empty(0, dtype=xp.int64)
     kernel = _cuda.get_kernel("bps_min_d2", mode="table", return_argmin=True)
-    if kernel is None:
-        return None
     _, idx = kernel(
         x.astype(np.complex64, copy=False).reshape(1, -1),
         xp.ones(1, dtype=np.complex64),
@@ -484,7 +480,7 @@ def _gray_qam_cross(order: int) -> np.ndarray:
         n_shift = 2 ** (n - 3)
 
     if n_shift == 0:
-        # Fallback
+        # No wings to fold: the rectangular grid is the constellation.
         val_i = (-width + 1 + 2 * geo_i).astype(float)
         val_q = (-height + 1 + 2 * geo_q).astype(float)
         return np.asarray(val_i + 1j * val_q)

@@ -26,11 +26,6 @@ if TYPE_CHECKING:
 
 __all__ = ["compute_llr"]
 
-# Upper bound on the (chunk, bits, M/2) intermediate of the CuPy fallback
-# (no CUDA kernel, or more than 16 bits per symbol), in elements.  Chunking
-# over symbols keeps peak memory independent of the record length.
-_CHUNK_ELEMENTS = 1 << 23
-
 
 def compute_llr(
     symbols: ArrayType | Signal,
@@ -70,6 +65,12 @@ def compute_llr(
     ndarray
         float32 LLRs, ``(..., N * k)``, on the input's device; the
         ``k`` bits of each symbol are adjacent (MSB first).
+
+    Raises
+    ------
+    ValueError
+        For GPU input and a constellation of more than 16 bits per symbol,
+        the limit of the CUDA kernels.
 
     Notes
     -----
@@ -343,9 +344,9 @@ def _llr(
     log_pmf = _log_prior(pmf, order)
 
     n = sym_flat.shape[0]
-    llrs = xp.empty((n, k), dtype=xp.float32)
     if xp is np:
         # CPU: one parallel pass, no (chunk, k, M/2) intermediates.
+        llrs = np.empty((n, k), dtype=np.float32)
         _get_numba_llr()(
             np.ascontiguousarray(sym_flat.real, dtype=np.float32),
             np.ascontiguousarray(
@@ -362,52 +363,36 @@ def _llr(
             llrs,
         )
         return llrs.reshape((*symbols.shape[:-1], symbols.shape[-1] * k))
-    kernel = _cuda.get_kernel("llr") if k <= 16 else None
-    if kernel is not None:
-        # GPU: one thread per symbol, no (chunk, k, M/2) intermediates.
-        def build() -> tuple[np.ndarray, ...]:
-            return (
-                points.astype(np.complex64),
-                log_pmf,
-                _packed_labels(bit_labels),
-            )
+    # GPU: one thread per symbol, likewise.
+    _require_gpu_bits(k)
 
-        pts_dev, log_pmf_dev, labels_dev = _device_tables(owner, "llr", xp, build)
-        llrs = kernel(
-            sym_flat.astype(xp.complex64, copy=False),
-            pts_dev,
-            log_pmf_dev,
-            labels_dev,
-            k=k,
-            inv_s2=float(inv_sigma2),
-            exact=method == "exact",
+    def build() -> tuple[np.ndarray, ...]:
+        return (
+            points.astype(np.complex64),
+            log_pmf,
+            _packed_labels(bit_labels),
         )
-        return llrs.reshape((*symbols.shape[:-1], symbols.shape[-1] * k))
-    # CuPy fallback (no CUDA kernel, or more than 16 bits per symbol).
-    const = xp.asarray(points.astype(np.complex64 if is_complex else np.float32))
-    idx0, idx1 = (xp.asarray(i) for i in _half_indices(bit_labels))  # (k, M/2)
-    log_pmf_dev = None if pmf is None else xp.asarray(log_pmf)
-    chunk = max(1, _CHUNK_ELEMENTS // (k * order))
-    for n0 in range(0, n, chunk):
-        x = sym_flat[n0 : n0 + chunk]
-        diff = x[:, None] - const[None, :]  # (chunk, M)
-        # log-likelihood (up to a shared constant): -|x - s|^2/sigma^2 + log P(s)
-        metric = (
-            -(diff.real**2 + diff.imag**2) * inv_sigma2
-            if is_complex
-            else -(diff**2) * inv_sigma2
-        )
-        if log_pmf_dev is not None:
-            metric = metric + log_pmf_dev
-        m0 = metric[:, idx0]  # (chunk, k, M/2)
-        m1 = metric[:, idx1]
-        if method == "maxlog":
-            llrs[n0 : n0 + chunk] = m0.max(axis=-1) - m1.max(axis=-1)
-        else:
-            llrs[n0 : n0 + chunk] = _logsumexp(m0, xp) - _logsumexp(m1, xp)
 
-    out_shape = (*symbols.shape[:-1], symbols.shape[-1] * k)
-    return llrs.reshape(out_shape)
+    pts_dev, log_pmf_dev, labels_dev = _device_tables(owner, "llr", xp, build)
+    llrs = _cuda.get_kernel("llr")(
+        sym_flat.astype(xp.complex64, copy=False),
+        pts_dev,
+        log_pmf_dev,
+        labels_dev,
+        k=k,
+        inv_s2=float(inv_sigma2),
+        exact=method == "exact",
+    )
+    return llrs.reshape((*symbols.shape[:-1], symbols.shape[-1] * k))
+
+
+def _require_gpu_bits(k: int) -> None:
+    """Raise for more bits per symbol than the CUDA LLR kernels handle."""
+    if k > _cuda._LLR_MAX_K:
+        raise ValueError(
+            f"compute_llr(): GPU input supports at most {_cuda._LLR_MAX_K} bits "
+            f"per symbol, the constellation has {k}"
+        )
 
 
 class _Axis(NamedTuple):
@@ -457,18 +442,12 @@ def _llr_separable_gpu(
     noise_var: float,
     method: str,
     owner: Constellation | None = None,
-) -> ArrayType | None:
-    """GPU LLRs of a separable constellation (as :func:`_llr_separable`).
-
-    ``None`` when the CUDA kernel is unavailable or the symbol has more than
-    16 bits; the caller then takes the M-point path of :func:`_llr`.
-    """
+) -> ArrayType:
+    """GPU LLRs of a separable constellation (as :func:`_llr_separable`)."""
     _check_method(method)
     re, im = axes
     k = re.bits.size + im.bits.size
-    kernel = _cuda.get_kernel("llr_separable") if k <= 16 else None
-    if kernel is None:
-        return None
+    _require_gpu_bits(k)
     symbols, xp, _ = dispatch(symbols)
 
     def build() -> tuple[np.ndarray, ...]:
@@ -484,7 +463,7 @@ def _llr_separable_gpu(
         )
 
     tables = _device_tables(owner, "llr_separable", xp, build)
-    llrs = kernel(
+    llrs = _cuda.get_kernel("llr_separable")(
         symbols.reshape(-1).astype(xp.complex64, copy=False),
         tables[:4],
         tables[4:],
@@ -500,9 +479,3 @@ def _packed_labels(bit_labels: np.ndarray) -> np.ndarray:
     weights = 1 << np.arange(k - 1, -1, -1, dtype=np.int64)
     labels: np.ndarray = (bit_labels.astype(np.int64) @ weights).astype(np.int32)
     return labels
-
-
-def _logsumexp(a: ArrayType, xp: ModuleType) -> ArrayType:
-    """Stable log-sum-exp over the last axis."""
-    peak = a.max(axis=-1, keepdims=True)
-    return xp.log(xp.exp(a - peak).sum(axis=-1)) + peak[..., 0]

@@ -9,7 +9,9 @@ the eager work around it stay in order.  Per key, the first
 :meth:`GraphRunner.run` runs the body eagerly (priming cuFFT plans and the
 memory pool, so the capture allocates nothing), the second captures it and
 every later call replays it: one launch instead of one per kernel.  A failed
-capture logs a warning and turns replay off for the rest of the run.
+capture raises: it means the body is not capturable (it allocates,
+synchronizes or reads from the host), which is a bug to fix, not a
+condition to run around.
 
 The stream is one per device and thread, reused across runs: CuPy's memory
 pool caches freed blocks per stream, so a fresh stream per call would grow
@@ -26,8 +28,6 @@ import contextlib
 import threading
 from collections.abc import Callable, Hashable
 from typing import Any
-
-from ..logger import logger
 
 _local = threading.local()
 
@@ -53,10 +53,10 @@ class GraphRunner:
     Parameters
     ----------
     name : str
-        Prefix of the capture-failure warning.
+        Prefix of the capture-failure error.
     enabled : bool
-        Capture and replay; ``False`` (or CuPy unavailable) runs every body
-        eagerly on the current stream.
+        Capture and replay; ``False`` runs every body eagerly on the current
+        stream.
     """
 
     def __init__(self, name: str, enabled: bool) -> None:
@@ -66,10 +66,7 @@ class GraphRunner:
         self._graphs: dict[Hashable, Any] = {}
         self._warmed: set[Hashable] = set()
         if enabled:
-            try:
-                self._stream = _stream()
-            except Exception:
-                self.enabled = False
+            self._stream = _stream()
 
     def __enter__(self) -> GraphRunner:
         if self._stream is not None:
@@ -99,20 +96,17 @@ class GraphRunner:
         if key not in self._warmed:
             self._warmed.add(key)
             return body()
+        self._stream.begin_capture()
         try:
-            self._stream.begin_capture()
             out = body()
-            graph = self._stream.end_capture()
-        except Exception as exc:  # pragma: no cover - hw/version dependent
+        except BaseException as exc:
             with contextlib.suppress(Exception):
                 self._stream.end_capture()
-            self.disable()
-            logger.warning(
-                "%s: CUDA-graph capture failed (%s); continuing eagerly.",
-                self.name,
-                exc,
-            )
-            return body()  # the captured work never ran
+            raise RuntimeError(
+                f"{self.name}: CUDA-graph capture failed; the captured body must "
+                "only launch work on fixed buffers"
+            ) from exc
+        graph = self._stream.end_capture()
         self._graphs[key] = graph
         graph.launch()
         return out

@@ -45,24 +45,29 @@ class PrecisionWarning(UserWarning):
 
 
 @cache
-def _cupy() -> types.ModuleType | None:
+def _cupy_probe() -> tuple[types.ModuleType | None, Exception | None]:
     """Import CuPy and check it works, once, on the first GPU-related call.
 
     Importing ``commkit`` never imports CuPy or touches the GPU.  The probe
     allocates and runs one kernel, which catches installations whose CUDA
-    libraries (nvrtc, cublas, driver) are missing or broken.
+    libraries (nvrtc, cublas, driver) are missing or broken.  Returns the
+    module, or ``None`` and the reason.
     """
     try:
         import cupy
-    except ImportError:
-        logger.debug("CuPy is not installed; GPU support is unavailable.")
-        return None
-    try:
+
         cupy.arange(1)
     except Exception as exc:
-        logger.warning("CuPy is installed but not functional (%s); GPU disabled.", exc)
-        return None
-    return cast(types.ModuleType, cupy)
+        return None, exc
+    return cast(types.ModuleType, cupy), None
+
+
+def _cupy() -> types.ModuleType:
+    """The CuPy module; raises ``ImportError`` with the probe's reason."""
+    cp, exc = _cupy_probe()
+    if cp is None:
+        raise ImportError(f"CuPy is not available: {exc}") from exc
+    return cp
 
 
 def _is_cupy_array(data: Any) -> bool:
@@ -91,17 +96,14 @@ def is_cupy_available() -> bool:
         True if CuPy is installed and functional.  The first call imports CuPy
         and runs a small probe kernel; the result is cached.
     """
-    return _cupy() is not None
+    return _cupy_probe()[0] is not None
 
 
 def _module_for(device: str) -> types.ModuleType:
     """The array module for a validated ``"cpu"`` or ``"gpu"`` (factories)."""
     if device == "cpu":
         return np
-    cp = _cupy()
-    if cp is None:
-        raise ImportError("CuPy is not available.")
-    return cp
+    return _cupy()
 
 
 def get_array_module(data: Any) -> types.ModuleType:
@@ -205,8 +207,6 @@ def to_device(data: Any, device: str) -> ArrayType:
 
     elif device == "gpu":
         cp = _cupy()
-        if cp is None:
-            raise ImportError("CuPy is not available.")
         if isinstance(data, cp.ndarray):
             return data
         return cp.asarray(data)

@@ -294,9 +294,7 @@ class Constellation:
         if self._axes is not None:
             if dispatch(symbols)[1] is np:
                 return _llr_separable(symbols, self._axes, noise_var, method)
-            llrs = _llr_separable_gpu(symbols, self._axes, noise_var, method, self)
-            if llrs is not None:
-                return llrs
+            return _llr_separable_gpu(symbols, self._axes, noise_var, method, self)
         return _llr(
             symbols, self.points, self.bit_labels, self.pmf, noise_var, method, self
         )

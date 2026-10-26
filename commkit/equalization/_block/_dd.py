@@ -165,8 +165,8 @@ class _BlockBps:
         K = self.K
         S = float(self.symmetry)
         if self.anchor_kernel is not None:
-            # One launch per block and no host synchronization (the NumPy
-            # path below is its reference).
+            # GPU: one launch per block and no host synchronization (the
+            # NumPy path below is its reference).
             if self.da_hist is None:
                 self.da_hist = xp.zeros((C, max(0, K - 1)), dtype=xp.complex64)
             phi, hist = self.anchor_kernel(
@@ -181,12 +181,11 @@ class _BlockBps:
             # In place: a captured graph keeps reading this buffer.
             self.da_hist[...] = hist
             return phi
-        # Host NumPy: a training block's (C, n) products are tiny, so the
-        # CuPy fallback brings them over once instead of a dozen launches.
+        # CPU input (GPU input always has the kernel).
         if self.da_hist is None:
             self.da_hist = np.zeros((C, max(0, K - 1)), dtype=np.complex128)
-        y_h = np.asarray(to_device(y, "cpu"), dtype=np.complex128)
-        d_h = np.asarray(to_device(d, "cpu"), dtype=np.complex128)
+        y_h = np.asarray(y, dtype=np.complex128)
+        d_h = np.asarray(d, dtype=np.complex128)
         cat = np.concatenate([self.da_hist, y_h * np.conj(d_h)], axis=1)
         cs = np.concatenate(
             [np.zeros((C, 1), dtype=np.complex128), np.cumsum(cat, axis=1)], axis=1
@@ -194,14 +193,14 @@ class _BlockBps:
         win = cs[:, K:] - cs[:, :-K]  # (C, n), causal K-symbol window
         if self.joint and C > 1:
             win = np.broadcast_to(win.sum(axis=0, keepdims=True), win.shape)
-        offset = np.asarray(to_device(self.offset4, "cpu"), dtype=np.float64)
+        offset = np.asarray(self.offset4, dtype=np.float64)
         ext = np.concatenate([(offset / S)[:, None], np.angle(win)], axis=1)
         phi = np.unwrap(ext, axis=1)[:, 1:]
         if K > 1:
             self.da_hist = cat[:, -(K - 1) :].copy()
-        self.offset4[...] = xp.asarray(phi[:, -1] * S)
-        self.prev4[...] = xp.asarray(phi[:, -1] * S)
-        return xp.asarray(phi)
+        self.offset4[...] = phi[:, -1] * S
+        self.prev4[...] = phi[:, -1] * S
+        return phi
 
     def phase(
         self,
@@ -428,13 +427,13 @@ def block_lms(
         For GPU (CuPy) input, capture the work of one block into a CUDA graph
         and replay it once per block: one launch instead of about 30 to 50,
         which removes the launch overhead that dominates at small and medium
-        ``block_size``.  Only the full blocks of the decision-directed part
-        are captured; the training blocks and the last, partial block run
-        eagerly.  No effect on the CPU, with ``store_weights=True``, or with
-        cycle-slip correction but without the ``cs_block`` CUDA kernel.  A
-        failed capture falls back to the eager loop with a warning, so the
-        output is the same either way.  ``False`` forces the eager loop
-        (e.g. for debugging or profiling).
+        ``block_size``.  Full blocks are captured, one graph for training
+        blocks and one for decision-directed ones; the block that straddles
+        the end of the training and the last, partial block run eagerly.  No effect on the CPU, with ``store_weights=True``, or with
+        cycle-slip correction on more than 1024 channels (the limit of the
+        ``cs_block`` CUDA kernel; the correction then runs on the host once
+        per block).  The output is the same either way; ``False`` forces the
+        eager loop (e.g. for debugging or profiling).
 
     Returns
     -------
@@ -604,17 +603,15 @@ def block_lms(
             slicer.kernel = _cuda.get_kernel(
                 "bps_min_d2", mode="table", return_argmin=True
             )
-            if slicer.kernel is not None:
-                slicer.phasor = xp.ones(1, dtype=xp.complex64)
+            slicer.phasor = xp.ones(1, dtype=xp.complex64)
         if bps is not None and n_train > 0:
             bps.anchor_kernel = _cuda.get_kernel("bps_anchor")
         if bps is not None and bps.cs and C <= 1024:
             bps.cs_kernel = _cuda.get_kernel("cs_block")
-            if bps.cs_kernel is not None:
-                bps.cs_buf_y = xp.asarray(bps.cs_buf_y)
-                bps.cs_buf_ptr = xp.asarray(bps.cs_buf_ptr)
-                bps.cs_buf_n = xp.asarray(bps.cs_buf_n)
-                bps.cs_stats = xp.asarray(bps.cs_stats)
+            bps.cs_buf_y = xp.asarray(bps.cs_buf_y)
+            bps.cs_buf_ptr = xp.asarray(bps.cs_buf_ptr)
+            bps.cs_buf_n = xp.asarray(bps.cs_buf_n)
+            bps.cs_stats = xp.asarray(bps.cs_stats)
 
     cpr_info = ""
     if bps is not None:
@@ -719,15 +716,13 @@ def block_lms(
     first_dd_full = ((n_train + block_size - 1) // block_size) * block_size
     n_dd_full = max(0, (n_sym - first_dd_full) // block_size)
     n_train_full = min(n_train, n_sym) // block_size
-    # A training block needs the device anchor (the NumPy one syncs).
-    train_graph = bps is None or bps.anchor_kernel is not None
 
     def capturable(B: int, b_start: int) -> str | None:
         if B != block_size:
             return None
         if n_train - b_start <= 0:
             return "dd"
-        if train_graph and n_train - b_start >= B:
+        if n_train - b_start >= B:
             return "train"
         return None
 
@@ -742,7 +737,7 @@ def block_lms(
             and not store_weights
             and (bps is None or not bps.cs or bps.cs_kernel is not None)
             # need >= 1 warmup block + >= 1 captured block of a kind
-            and (n_dd_full >= 2 or (train_graph and n_train_full >= 2))
+            and (n_dd_full >= 2 or n_train_full >= 2)
         ),
         name="block_lms",
         at_resume=at_resume,

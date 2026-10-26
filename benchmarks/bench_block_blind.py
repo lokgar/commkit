@@ -10,7 +10,7 @@ Two block sizes are tracked, matching ``bench_block_lms``:
 
 * ``bench_block_blind`` (block_size=256) - the launch-overhead-bound stress
   case.  On GPU with graph capture this collapses the per-block kernel launches
-  into one replay; a graph regression / silent fallback shows up here as a jump
+  into one replay; a change that stops the replay shows up here as a jump
   back toward the eager loop (a ~7-8x slowdown vs the captured path).
 * ``bench_block_blind_large`` (block_size=2048) - the launch-overhead-amortized
   operating point; guards block-size-scaling regressions (per-element work,

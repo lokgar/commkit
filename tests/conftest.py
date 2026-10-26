@@ -32,10 +32,6 @@ def pytest_configure(config):
     config.addinivalue_line("filterwarnings", "error::commkit.backend.PrecisionWarning")
     config.addinivalue_line("markers", "gpu_only: mark test as requiring a GPU backend")
     config.addinivalue_line("markers", "cpu_only: mark test as CPU-only")
-    config.addinivalue_line(
-        "markers",
-        "requires_kernel(name): mark test as requiring a specific CUDA kernel",
-    )
 
 
 def pytest_addoption(parser):
@@ -73,14 +69,7 @@ def pytest_collection_modifyitems(config, items):
     """Filter items based on --device selection so incompatible tests are deselected rather than skipped."""
     device_opt = config.getoption("--device")
     if device_opt == "cpu":
-        items[:] = [
-            item
-            for item in items
-            if not (
-                item.get_closest_marker("gpu_only")
-                or item.get_closest_marker("requires_kernel")
-            )
-        ]
+        items[:] = [item for item in items if not item.get_closest_marker("gpu_only")]
     elif device_opt == "gpu":
         items[:] = [item for item in items if not item.get_closest_marker("cpu_only")]
 
@@ -129,13 +118,6 @@ def backend_device(request):
                 raise
         except Exception as e:
             pytest.skip(f"CuPy installed but not functional (missing libs?): {e}")
-
-    marker = request.node.get_closest_marker("requires_kernel")
-    if marker:
-        kernel_name = marker.args[0] if marker.args else None
-        from tests.common.kernel_utils import skip_unless_kernel_available
-
-        skip_unless_kernel_available(kernel_name, backend_device=device)
 
     yield device
 

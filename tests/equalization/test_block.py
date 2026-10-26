@@ -647,7 +647,6 @@ class TestBlockLMSCUDAGraphAndPerformance:
     """GPU-specific tests: CUDA graph capture, transfer counts, and kernel parity."""
 
     @pytest.mark.gpu_only
-    @pytest.mark.requires_kernel
     @pytest.mark.parametrize("cpr", ["bps", "bps+cs", None])
     @pytest.mark.parametrize("n_sym", [100_000, 100_137])
     @pytest.mark.parametrize("n_train", [512, 20_000, "all"])
@@ -699,12 +698,6 @@ class TestBlockLMSCUDAGraphAndPerformance:
     @pytest.mark.gpu_only
     @pytest.mark.parametrize("cs_corr", [False, True])
     def test_block_lms_bps_loop_transfer_count_constant(self, cs_corr, xp, monkeypatch):
-        if cs_corr:
-            from commkit import _cuda
-
-            if _cuda.get_kernel("cs_block") is None:
-                pytest.skip("cs_block CUDA kernel unavailable - fallback transfers")
-
         import commkit.equalization._block._dd as eqmod
 
         real_to_device = eqmod.to_device
@@ -743,12 +736,7 @@ class TestBlockLMSCUDAGraphAndPerformance:
         )
 
     @pytest.mark.gpu_only
-    @pytest.mark.requires_kernel("cs_block")
-    def test_block_lms_cycle_slip_kernel_matches_cpu_fallback(
-        self, xp, xpt, monkeypatch
-    ):
-        from commkit import _cuda
-
+    def test_block_lms_cycle_slip_kernel_matches_cpu(self, xp, xpt):
         samples_np, syms_np = _wiener_qam16_trackable(2048, sigma_phi=0.02)
         kw = dict(
             num_taps=11,
@@ -760,33 +748,24 @@ class TestBlockLMSCUDAGraphAndPerformance:
         )
 
         r_kernel = block_lms(xp.asarray(samples_np), xp.asarray(syms_np[:128]), **kw)
-
-        real_get_kernel = _cuda.get_kernel
-
-        def no_cs_kernel(name, **spec):
-            if name == "cs_block":
-                return None
-            return real_get_kernel(name, **spec)
-
-        monkeypatch.setattr(_cuda, "get_kernel", no_cs_kernel)
-        r_fallback = block_lms(xp.asarray(samples_np), xp.asarray(syms_np[:128]), **kw)
+        r_cpu = block_lms(samples_np, syms_np[:128], **kw)
 
         xpt.assert_allclose(
             to_numpy(r_kernel.phase_trajectory),
-            to_numpy(r_fallback.phase_trajectory),
+            to_numpy(r_cpu.phase_trajectory),
             rtol=1e-6,
             atol=1e-6,
         )
         xpt.assert_allclose(
             to_numpy(r_kernel.y_hat),
-            to_numpy(r_fallback.y_hat),
+            to_numpy(r_cpu.y_hat),
             rtol=1e-5,
             atol=1e-6,
         )
         for attr in ("cs_buf_y", "cs_buf_ptr", "cs_buf_n", "cs_stats"):
             xpt.assert_allclose(
                 getattr(r_kernel.state.carrier, attr),
-                getattr(r_fallback.state.carrier, attr),
+                getattr(r_cpu.state.carrier, attr),
                 rtol=1e-8,
                 atol=1e-8,
                 err_msg=attr,
