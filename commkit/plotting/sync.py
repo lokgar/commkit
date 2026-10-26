@@ -12,7 +12,7 @@ import matplotlib.pyplot as plt
 import numpy as np
 
 from .. import _fft
-from ..backend import to_device
+from ..backend import get_array_module, to_device
 from .theme import (
     _as_channels,
     _decimate_minmax,
@@ -1147,8 +1147,10 @@ def plot_frequency_offset_blockwise_result(
         "plot_frequency_offset_blockwise_result()",
         "a blockwise method (block_size=)",
     )
+    # The probe lives on the estimate's device, as the samples it was made from.
+    xp = get_array_module(estimate.block_values)
     rotation = correct_frequency_offset(
-        np.ones(num_samples, dtype=np.complex128),
+        xp.ones(num_samples, dtype=xp.complex128),
         estimate,
         sampling_rate=sampling_rate,
     )
