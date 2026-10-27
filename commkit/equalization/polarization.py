@@ -347,6 +347,38 @@ def _jones_at_grid_points(
     return xp.moveaxis(Tg_work, 0, 1).astype(xp.complex128)  # (G, C, K)
 
 
+def _check_tone_inputs(
+    samples: ArrayType, tone_frequencies: Any, sampling_rate: float, name: str
+) -> list[float]:
+    """Validate the input of the tone demultiplexers; return the tone list.
+
+    ``samples`` must be ``(C, N)``, with between 1 and C tones, each strictly
+    inside ``(-fs/2, fs/2)``.
+    """
+    if samples.ndim != 2:
+        raise ValueError(
+            f"{name} requires a 2-D (C, N) MIMO input; got ndim={samples.ndim}."
+        )
+    C = samples.shape[0]
+    f_tones = [float(f) for f in tone_frequencies]
+    K = len(f_tones)
+    if K == 0:
+        raise ValueError("tone_frequencies must contain at least one frequency.")
+    if K > C:
+        raise ValueError(
+            f"got K={K} tones but only C={C} receive channels; need K <= C to "
+            "unmix (one tone per transmitted stream)."
+        )
+    nyq = sampling_rate / 2.0
+    for f in f_tones:
+        if not (-nyq < f < nyq):
+            raise ValueError(
+                f"tone_frequencies entry {f} must lie in (-fs/2, fs/2) = "
+                f"(±{nyq:.3g}) Hz."
+            )
+    return f_tones
+
+
 def demultiplex_polarization_tones_static(
     samples: ArrayType | Signal,
     *,
@@ -456,29 +488,14 @@ def demultiplex_polarization_tones_static(
     sampling_rate = signal_adapter.resolve_fact("sampling_rate", sampling_rate)
 
     samples, xp, _ = dispatch(samples)
-    if samples.ndim != 2:
-        raise ValueError(
-            "demultiplex_polarization_tones_static requires a 2-D (C, N) MIMO "
-            f"input; got ndim={samples.ndim}."
-        )
+    f_tones = _check_tone_inputs(
+        samples,
+        tone_frequencies,
+        sampling_rate,
+        "demultiplex_polarization_tones_static",
+    )
     C, N = samples.shape
-
-    f_tones = [float(f) for f in tone_frequencies]
     K = len(f_tones)
-    if K == 0:
-        raise ValueError("tone_frequencies must contain at least one frequency.")
-    if K > C:
-        raise ValueError(
-            f"got K={K} tones but only C={C} receive channels; need K <= C to "
-            "unmix (one tone per transmitted stream)."
-        )
-    nyq = sampling_rate / 2.0
-    for f in f_tones:
-        if not (-nyq < f < nyq):
-            raise ValueError(
-                f"tone_frequencies entry {f} must lie in (-fs/2, fs/2) = "
-                f"(±{nyq:.3g}) Hz."
-            )
 
     # The KxK inverse is precision-sensitive and stays in
     # complex128, but every O(N) pass runs in the signal's working precision:
@@ -683,22 +700,14 @@ def demultiplex_polarization_tones_dynamic(
     sampling_rate = signal_adapter.resolve_fact("sampling_rate", sampling_rate)
 
     samples, xp, _ = dispatch(samples)
-    if samples.ndim != 2:
-        raise ValueError(
-            "demultiplex_polarization_tones_dynamic requires a 2-D (C, N) MIMO "
-            f"input; got ndim={samples.ndim}."
-        )
+    f_tones = _check_tone_inputs(
+        samples,
+        tone_frequencies,
+        sampling_rate,
+        "demultiplex_polarization_tones_dynamic",
+    )
     C, N = samples.shape
-
-    f_tones = [float(f) for f in tone_frequencies]
     K = len(f_tones)
-    if K == 0:
-        raise ValueError("tone_frequencies must contain at least one frequency.")
-    if K > C:
-        raise ValueError(
-            f"got K={K} tones but only C={C} receive channels; need K <= C to "
-            "unmix (one tone per transmitted stream)."
-        )
     if trim_edges and signal_adapter.signal is not None:
         raise ValueError(
             "demultiplex_polarization_tones_dynamic(): trim_edges drops samples "
@@ -706,13 +715,6 @@ def demultiplex_polarization_tones_dynamic(
         )
     if not (track_bandwidth > 0):
         raise ValueError(f"track_bandwidth must be positive; got {track_bandwidth}.")
-    nyq = sampling_rate / 2.0
-    for f in f_tones:
-        if not (-nyq < f < nyq):
-            raise ValueError(
-                f"tone_frequencies entry {f} must lie in (-fs/2, fs/2) = "
-                f"(±{nyq:.3g}) Hz."
-            )
 
     df = sampling_rate / N
     # Working precision for all O(N) traffic (complex64 unless the caller
