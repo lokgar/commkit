@@ -61,7 +61,7 @@ Timed runs:
 ```bash
 uv run pytest benchmarks/bench_bps.py --benchmark-only --device=all
 uv run pytest benchmarks/ --benchmark-only --device=all \
-    --benchmark-compare=0003 --benchmark-storage=file://benchmarks/baselines
+    --benchmark-compare=0005 --benchmark-storage=file://benchmarks/baselines
 uv run python benchmarks/record_baseline.py NAME   # record a new baseline
 ```
 
@@ -284,7 +284,6 @@ What is not done yet, in suggested order. Unlike the sections above, this is a t
 The contract registry checks that a function returns on its input's device, which a round trip through the host passes, and CuPy's refusal of implicit conversion only rules out the accidental kind. An audit of every explicit transfer (October 2026) found one silent host computation, the blockwise frequency correction (fixed in `50b7351`); the documented ones are the sequential recursions of §6, the block equalizers' cycle-slip correction beyond the `cs_block` kernel's 1024 channels, and the reporting layer. To keep it that way:
 
 - **A transfer-trace plugin**, the GPU counterpart of `tests/plugins/precision_trace.py`: during a `--device=gpu` run, wrap the device-to-host paths (`cupy.ndarray.get`, `cupy.asnumpy`, `backend.to_device(..., "cpu")`) and the host-to-device copies of NumPy arrays, record every transfer of sample-rate size (the same threshold as the precision trace) with its source line, and fail on one that is not in a documented list (the rows of §6 that make a host round trip, the metrics' and analysis summaries' reductions, INFO-level logging). Run it on the contract registry and the GPU suite; add the command to §2.
-- **Notebooks on the GPU.** `tests/test_examples.py` is `cpu_only`, so the claim that the notebooks run unchanged on the GPU is never checked; their inputs come from `generate(..., device="cpu")`, so a GPU run needs a way to choose the device (a notebook parameter or environment variable read in the first cell) without changing what the text teaches.
 
 ### Switch to Python 3.15 (blocked on CuPy)
 
