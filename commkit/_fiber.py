@@ -318,8 +318,8 @@ class _Ops:
     """Stage operations on NumPy or (unfused) CuPy arrays.
 
     ``phase_km`` is the dispersion phase of 1 km on the FFT grid and
-    ``omega`` the angular frequency grid, both float64 on the field's
-    device.  The response of each distinct stage length (two with equal
+    ``omega`` the angular frequency grid (only with PMD, else ``None``),
+    both float64 on the field's device.  The response of each distinct stage length (two with equal
     steps, per direction) is computed once in float64 and cast to the
     field's precision.  ``waveplates`` holds every span's PMD sections,
     ``(spans, K, 2, 2)`` on the host, or ``None``.
@@ -332,7 +332,7 @@ class _Ops:
         xp: ModuleType,
         dtype: Any,
         phase_km: ArrayType,
-        omega: ArrayType,
+        omega: ArrayType | None,
         half_tau: float,
         waveplates: np.ndarray | None,
     ) -> None:
@@ -367,6 +367,7 @@ class _Ops:
         """``H e^{-jωτ/2}`` and ``H e^{+jωτ/2}`` of a stage with a section."""
         key = ("pmd", length_km)
         if key not in self._responses:
+            assert self.omega is not None  # set with PMD
             phase = self.phase_km * length_km
             delay = self.omega * self.half_tau
             self._responses[key] = (
@@ -573,7 +574,7 @@ class _FusedOps(_Ops):
         xp = self.xp
         self.k = _cupy_kernels()
         self.phi = self.phase_km.astype(xp.float32)
-        self.omega32 = self.omega.astype(xp.float32)
+        self.omega32 = None if self.omega is None else self.omega.astype(xp.float32)
         self.inv_n = np.float32(1.0 / self.phase_km.shape[-1])
         self.u_all: Any = None
         self.u_span: Any = None
@@ -651,9 +652,10 @@ def _ase_std(link: _Link, noise_figure_db: float, sampling_rate: float) -> float
 
 def _outer_band_fraction(X: ArrayType, xp: ModuleType, sampling_rate: float) -> float:
     """Fraction of the spectrum's power beyond 0.4 f_s."""
-    f = xp.abs(xp.fft.fftfreq(X.shape[-1], d=1.0 / sampling_rate))
+    n = X.shape[-1]
+    k = int(0.4 * n)  # |f| > 0.4 f_s: FFT bins k + 1 .. n - k - 1, contiguous
     power = X.real * X.real + X.imag * X.imag
-    outer = xp.sum(power[:, f > 0.4 * sampling_rate])
+    outer = xp.sum(power[:, k + 1 : n - k])
     return float(outer / xp.maximum(xp.sum(power), 1e-300))
 
 
@@ -730,8 +732,6 @@ def propagate(
         ),
         xp=xp,
     )
-    omega = 2.0 * np.pi * xp.fft.fftfreq(N, d=1.0 / sampling_rate)
-
     waveplates = std = None
     if forward and (noise_figure_db is not None or fiber.pmd_ps_sqrt_km > 0):
         gen = as_generator(rng)
@@ -739,6 +739,11 @@ def propagate(
             waveplates = _haar_unitaries(gen, (link.num_spans, plan.num_steps))
         if noise_figure_db is not None:
             std = x.real.dtype.type(_ase_std(link, noise_figure_db, sampling_rate))
+    omega = (  # the PMD stages' delay response needs the angular frequencies
+        None
+        if waveplates is None
+        else 2.0 * np.pi * xp.fft.fftfreq(N, d=1.0 / sampling_rate)
+    )
     ops = _make_ops(x, xp, phase_km, omega, plan.half_tau_s, waveplates)
 
     def check_aliasing(X: ArrayType) -> None:
