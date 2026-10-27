@@ -83,10 +83,17 @@ from .math import linear_to_db, normalize
 __all__ = ["ber", "evm", "gmi", "mi", "ser", "snr"]
 
 
-def _is_normalized(arr, ax, xp):
-    """True if ``arr`` has ~unit average power along ``ax`` (within 1e-3)."""
-    pwr = xp.mean(xp.abs(arr) ** 2, axis=ax)
-    return xp.allclose(pwr, 1.0, atol=1e-3)
+def _unit_reference(tx: ArrayType, xp: Any) -> tuple[ArrayType, ArrayType]:
+    """``tx`` at unit average power per channel, and its power ``(..., 1)``.
+
+    A reference already at unit power (within 1e-3) is kept as it is; the
+    power is measured once and remeasured only after normalizing.
+    """
+    pwr = xp.mean(xp.abs(tx) ** 2, axis=-1, keepdims=True)
+    if not xp.allclose(pwr, 1.0, atol=1e-3):
+        tx = normalize(tx, axis=-1, mode="average_power")
+        pwr = xp.mean(xp.abs(tx) ** 2, axis=-1, keepdims=True)
+    return tx, pwr
 
 
 def _log_per_channel(fmt: str, *arrays: ArrayType, extra: tuple = ()) -> None:
@@ -166,7 +173,9 @@ def _paired(
     return rx, ref
 
 
-def _gain(rx: ArrayType, tx: ArrayType, xp: Any) -> ArrayType:
+def _gain(
+    rx: ArrayType, tx: ArrayType, xp: Any, tx_power: ArrayType | None = None
+) -> ArrayType:
     """The data-aided gain ``g = |<r s*>| / <|s|^2>`` per channel, ``(..., 1)``.
 
     ``g`` is the amplitude of the symbols in ``rx`` (the transmittance), so
@@ -174,9 +183,14 @@ def _gain(rx: ArrayType, tx: ArrayType, xp: Any) -> ArrayType:
     unit total power instead shrinks the symbols by ``1/sqrt(1 + 1/SNR)``.
     Only the magnitude is used: a rotation, ``pi`` included, stays visible.
     A channel without reference power or correlation gets ``g = 1``.
+    ``tx_power`` is ``<|s|^2>`` ``(..., 1)`` when the caller has it.
     """
     num = xp.abs(xp.mean(rx * xp.conj(tx), axis=-1, keepdims=True))
-    den = xp.mean(xp.abs(tx) ** 2, axis=-1, keepdims=True)
+    den = (
+        xp.mean(xp.abs(tx) ** 2, axis=-1, keepdims=True)
+        if tx_power is None
+        else tx_power
+    )
     with np.errstate(divide="ignore", invalid="ignore"):
         g = num / den
     return xp.where((den > 0) & (g > 0), g, 1.0).astype(rx.real.dtype)
@@ -285,25 +299,23 @@ def evm(
         # scale.
         points = c.points.astype(np.result_type(np.complex64, rx.real.dtype))
         tx = xp.asarray(points)[c._nearest(rx.reshape(-1))].reshape(rx.shape)
+        ref_pwr = xp.mean(xp.abs(tx) ** 2, axis=axis)
     else:
         ref = _reference(adapter, reference, "symbols", name, hint=", or blind=True")
         rx, tx = _paired(rx, ref, xp, name)
         rx = _skip(rx, num_skip_symbols, name)
         tx = _skip(tx, num_skip_symbols, name)
-        if not _is_normalized(tx, axis, xp):
-            tx = normalize(tx, axis=axis, mode="average_power")
-        rx = rx / _gain(rx, tx, xp)
-
-    ref_pwr = xp.mean(xp.abs(tx) ** 2, axis=axis, dtype=xp.float64)
-    low_pwr_mask = ref_pwr < 1e-20
-    if xp.any(low_pwr_mask):
-        logger.warning("Reference signal power near zero in one or more channels.")
+        tx, tx_pwr = _unit_reference(tx, xp)
+        rx = rx / _gain(rx, tx, xp, tx_pwr)
+        ref_pwr = tx_pwr[..., 0]
 
     error_power = xp.mean(xp.abs(rx - tx) ** 2, axis=axis, dtype=xp.float64)
     # The reference power is 1 after normalization.
     evm_percent = xp.sqrt(error_power) * 100.0
-    evm_percent = xp.where(low_pwr_mask, xp.inf, evm_percent)
+    evm_percent = xp.where(ref_pwr < 1e-20, xp.inf, evm_percent)
     out = to_report_scalar(evm_percent)
+    if np.any(np.isinf(out)):
+        logger.warning("Reference signal power near zero in one or more channels.")
     if isinstance(out, float):
         logger.info("EVM: %.2f%%", out)
     else:
@@ -355,11 +367,10 @@ def snr(
     tx = _skip(tx, num_skip_symbols, name)
     axis = -1
 
-    if not _is_normalized(tx, axis, xp):
-        tx = normalize(tx, axis=axis, mode="average_power")
-    rx = rx / _gain(rx, tx, xp)
+    tx, tx_pwr = _unit_reference(tx, xp)
+    rx = rx / _gain(rx, tx, xp, tx_pwr)
+    ref_pwr = tx_pwr[..., 0]
 
-    ref_pwr = xp.mean(xp.abs(tx) ** 2, axis=axis, dtype=xp.float64)
     noise_power = xp.mean(xp.abs(rx - tx) ** 2, axis=axis, dtype=xp.float64)
     with np.errstate(divide="ignore"):
         snr_db = linear_to_db(1.0 / noise_power, power=True)
