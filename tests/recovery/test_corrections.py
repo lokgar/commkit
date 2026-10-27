@@ -656,7 +656,7 @@ class TestVvBlockPhase:
             dtype=xp.complex64,
         )[None, :]  # (1, 64)
 
-        phi_u, block_centers, all_positions = _vv_block_phase(
+        phi_u = _vv_block_phase(
             symbols,
             xp,
             M=4,
@@ -666,8 +666,6 @@ class TestVvBlockPhase:
             joint_channels=False,
         )
         assert phi_u.shape == (1, 4)
-        assert block_centers.shape == (4,)
-        assert all_positions.shape == (64,)
         xpt.assert_allclose(phi_u, offset, atol=1e-4)
 
     def test_joint_channels_broadcasts_identical_rows(self, xp, xpt):
@@ -681,7 +679,7 @@ class TestVvBlockPhase:
         )
         symbols = xp.stack([base, base])  # (2, 32) - identical channels
 
-        phi_u, _, _ = _vv_block_phase(
+        phi_u = _vv_block_phase(
             symbols,
             xp,
             M=4,
@@ -692,3 +690,21 @@ class TestVvBlockPhase:
         )
         assert phi_u.shape == (2, 2)
         xpt.assert_array_equal(phi_u[0], phi_u[1])
+
+
+class TestInterpBlockPhases:
+    """Block phases to every symbol (recovery._common)."""
+
+    @pytest.mark.parametrize("N,block_size", [(64, 16), (70, 16), (31, 8), (16, 16)])
+    def test_matches_numpy_interp(self, xp, xpt, N, block_size):
+        """Linear between the block centers, held at the end values outside."""
+        from commkit.recovery._common import _interp_block_phases
+
+        rng = np.random.default_rng(0)
+        n_blocks = N // block_size
+        phi = rng.standard_normal((2, n_blocks))
+        centers = np.arange(n_blocks) * block_size + block_size / 2
+        expected = np.stack([np.interp(np.arange(N), centers, row) for row in phi])
+        out = _interp_block_phases(xp.asarray(phi), N, block_size, xp)
+        assert out.dtype == xp.float64
+        xpt.assert_allclose(out, xp.asarray(expected), rtol=0, atol=1e-14)

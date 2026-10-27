@@ -119,6 +119,46 @@ def _check_blocks(N: int, block_size: int) -> int:
     return N_blocks
 
 
+def _interp_block_phases(
+    phi_blocks: ArrayType, N: int, block_size: int, xp: Any
+) -> ArrayType:
+    """Interpolate block phases to every symbol.
+
+    Linear between the block centers ``b·block_size + block_size/2`` and held
+    at the end values outside them, as ``numpy.interp``.
+
+    Parameters
+    ----------
+    phi_blocks : ndarray
+        Phase per block, float64, ``(R, N_blocks)``.
+    N : int
+        Number of symbols.
+    block_size : int
+        Symbols per block.
+    xp : module
+        Array module of ``phi_blocks``.
+
+    Returns
+    -------
+    ndarray
+        Phase per symbol, float64, ``(R, N)``.
+    """
+    R, n_blocks = phi_blocks.shape
+    if n_blocks == 1:
+        return xp.repeat(phi_blocks, N, axis=1)
+    n = xp.arange(N, dtype=xp.float64)
+    # Block b is left of symbol n when its center b·bs + bs/2 <= n.
+    left = xp.clip(
+        xp.floor((n - block_size / 2) / block_size).astype(xp.int64), 0, n_blocks - 2
+    )
+    t = xp.clip((n - (left * block_size + block_size / 2)) / block_size, 0.0, 1.0)
+    out = xp.empty((R, N), dtype=xp.float64)
+    for r in range(R):  # a 1-D gather per row is about twice as fast as a 2-D one
+        row = phi_blocks[r]
+        out[r] = row[left] * (1.0 - t) + row[left + 1] * t
+    return out
+
+
 def _mth_power_geometry(constellation: Any) -> tuple[int, bool, float]:
     """Exponent, unit-circle projection and bias of the M-th power estimator.
 
@@ -151,7 +191,7 @@ def _vv_block_phase(
     bias: float,
     block_size: int,
     joint_channels: bool,
-) -> tuple[ArrayType, ArrayType, ArrayType]:
+) -> ArrayType:
     """Viterbi-Viterbi (M-th power) block phases.
 
     Splits the symbols into blocks, projects them onto the unit circle
@@ -184,13 +224,9 @@ def _vv_block_phase(
 
     Returns
     -------
-    phi_u : ndarray
+    ndarray
         Raw block phases, float64, ``(C, N_blocks)``, on the device of
         ``symbols2d``; equal rows with ``joint_channels``.
-    block_centers : ndarray
-        Block centers in symbols, float64, ``(N_blocks,)``.
-    all_positions : ndarray
-        Symbol positions, float64, ``(N,)``, for the interpolation.
     """
     C, N = symbols2d.shape
     N_trunc = (N // block_size) * block_size
@@ -216,10 +252,6 @@ def _vv_block_phase(
         blocks_c = blocks_c / xp.sqrt(xp.maximum(power, 1e-30))
 
     S_b = xp.sum(blocks_c**M, axis=-1)  # (C, N_blocks)
-
-    # Block center positions for interpolation (uniform spacing = block_size)
-    block_centers = xp.arange(N_blocks, dtype=xp.float64) * block_size + block_size / 2
-    all_positions = xp.arange(N, dtype=xp.float64)
 
     if joint_channels and C > 1:
         # Sum M-th-power phasors across channels -> single block-phase trajectory
@@ -252,4 +284,4 @@ def _vv_block_phase(
             k_np = np.round(diffs_np * M / (2 * np.pi))
             phi_u[1:] = phi_u[1:] - xp.asarray(k_np)[:, None] * (2 * np.pi / M)
 
-    return phi_u, block_centers, all_positions
+    return phi_u

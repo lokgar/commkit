@@ -9,6 +9,7 @@ from ..logger import logger
 from ._common import (
     _check_blocks,
     _Context,
+    _interp_block_phases,
     _mth_power_geometry,
     _Phase,
     _vv_block_phase,
@@ -96,14 +97,13 @@ def _viterbi_viterbi(
     _warn_small_qam_block("VV", block_size, project, constellation.order)
 
     joint = method.joint_channels and C > 1
-    phi_u, block_centers, all_positions = _vv_block_phase(
+    phi_u = _vv_block_phase(
         symbols, xp, M, project, bias, block_size, method.joint_channels
     )
     if joint:  # rows are copies of the joint trajectory
         phi_u = phi_u[:1]
     phi_u = _repair_slips(phi_u, xp, method.cycle_slip, M, block_size)
-    # xp.interp is 1D-only; loop over the rows.
-    phi_full = xp.stack([xp.interp(all_positions, block_centers, row) for row in phi_u])
+    phi_full = _interp_block_phases(phi_u, N, block_size, xp)
     if joint:
         phi_full = xp.broadcast_to(phi_full, (C, N)).copy()
         phi_u = xp.broadcast_to(phi_u, (C, N_blocks)).copy()

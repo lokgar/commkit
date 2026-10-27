@@ -6,7 +6,7 @@ import numpy as np
 
 from ..backend import ArrayType, dispatch
 from ..logger import logger
-from ._common import _check_blocks, _Context, _Phase
+from ._common import _check_blocks, _Context, _interp_block_phases, _Phase
 from .corrections import CycleSlip, _log_phase_summary, _repair_slips
 
 __all__ = ["BPS"]
@@ -146,24 +146,6 @@ def _bps(symbols: ArrayType, method: BPS, ctx: _Context) -> _Phase:
             block_size,
         )
 
-    # block_centers[b] = b * block_size + block_size/2  (consistent with VV)
-    block_centers = xp.arange(N_blocks, dtype=xp.float64) * block_size + block_size / 2
-
-    all_positions = xp.arange(N, dtype=xp.float64)
-
-    # Pre-compute interpolation indices and weights (identical for every channel).
-    # block b is "to the left" of position n when its center b*bs + bs/2 <= n
-    #   => b <= (n - bs/2) / bs  => idx_left = floor((n - bs/2) / bs)
-    idx_left = xp.clip(
-        xp.floor((all_positions - block_size / 2) / block_size).astype(xp.int64),
-        0,
-        N_blocks - 2,
-    )  # (N,)
-    idx_right = idx_left + 1  # (N,)
-    t_interp = xp.clip(
-        (all_positions - block_centers[idx_left]) / block_size, 0.0, 1.0
-    )  # (N,)
-
     # Pre-compute phasors for all B candidates once (avoid redundant exp per channel)
     dtype_c = xp.complex64 if symbols.dtype == xp.complex64 else xp.complex128
     phasors = xp.exp(-1j * candidates.astype(xp.float64)).astype(dtype_c)  # (B,)
@@ -291,10 +273,7 @@ def _bps(symbols: ArrayType, method: BPS, ctx: _Context) -> _Phase:
     phi_b = xp.where(phi_b >= np.pi / M, phi_b - 2.0 * np.pi / M, phi_b)
     phi_u = xp.unwrap(phi_b * M, axis=-1) / M
     phi_u = _repair_slips(phi_u, xp, method.cycle_slip, M, block_size)
-    # Per row: a 1-D gather is about twice as fast as the 2-D fancy index.
-    phi_full = xp.empty((phi_u.shape[0], N), dtype=xp.float64)
-    for r, row in enumerate(phi_u):
-        phi_full[r] = row[idx_left] * (1.0 - t_interp) + row[idx_right] * t_interp
+    phi_full = _interp_block_phases(phi_u, N, block_size, xp)
     if phi_u.shape[0] != C:  # joint: one trajectory for every channel
         phi_full = xp.broadcast_to(phi_full, (C, N)).copy()
         phi_u = xp.broadcast_to(phi_u, (C, N_blocks)).copy()
