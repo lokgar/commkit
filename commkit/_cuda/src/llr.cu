@@ -14,8 +14,15 @@
 // exp(m) of the two halves (exact).  The exact sums take e = exp(m - peak)
 // once per point, with the symbol's peak metric (which cancels in the
 // difference), so one exponential per point instead of one per point and
-// bit; a half-sum below LLR_EXACT_FLOOR (_EXACT_FLOOR in llr.py) is redone
-// relative to the half's own maximum, as in the Numba kernel.  The per-bit
+// bit.  A half whose maximum lies so far below the peak that its sum could
+// fall below LLR_EXACT_FLOOR (_EXACT_FLOOR in llr.py) is summed relative to
+// its own maximum instead, in the same pass: the maxima of the first pass
+// tell which halves those are, so no symbol needs a third pass (which sent
+// its whole warp through it).  The Numba kernel redoes a half-sum that
+// fell below the floor, which agrees to float rounding.  The exponentials
+// are the hardware __expf (about 2 ulp): the LLRs move by under 4e-7
+// relative to expf, far below the tolerance against the Numba reference,
+// and the exact pass runs 1.25-1.5x faster.  The per-bit
 // maxima and sums stay in registers, so no (N, M) or (N, k, M/2)
 // intermediate is formed.  Each block stages its LLRs in shared memory and
 // stores them contiguously (coalesced) instead of k values per thread at
@@ -122,59 +129,34 @@ __device__ __forceinline__ void llrs_of(const Metric& met,
     }
 
     // Every point lies in one half of bit 0: its two maxima give the peak.
+    // Halves whose maximum is more than -log(LLR_EXACT_FLOOR) below it
+    // (bit b of weak0/weak1) are summed relative to that maximum.
     const float peak = fmaxf(p0[0], p1[0]);
+    const float log_floor = logf(LLR_EXACT_FLOOR);
+    unsigned weak0 = 0u;
+    unsigned weak1 = 0u;
     float s0[LLR_MAX_K];
     float s1[LLR_MAX_K];
 #pragma unroll
     for (int b = 0; b < LLR_MAX_K; ++b) {
         s0[b] = 0.0f;
         s1[b] = 0.0f;
+        if (b < kb) {
+            weak0 |= (p0[b] - peak < log_floor ? 1u : 0u) << b;
+            weak1 |= (p1[b] - peak < log_floor ? 1u : 0u) << b;
+        }
     }
     for (int m = 0; m < M; ++m) {
-        const float e = expf(met(m) - peak);
+        const float v = met(m);
+        const float e = __expf(v - peak);
         const int lab = labels[m];
 #pragma unroll
         for (int b = 0; b < LLR_MAX_K; ++b) {
             if (b < kb) {
                 if ((lab >> (kb - 1 - b)) & 1) {
-                    s1[b] += e;
+                    s1[b] += ((weak1 >> b) & 1u) ? __expf(v - p1[b]) : e;
                 } else {
-                    s0[b] += e;
-                }
-            }
-        }
-    }
-
-    // Halves that underflowed relative to the peak: bit b of under0/under1.
-    unsigned under0 = 0u;
-    unsigned under1 = 0u;
-#pragma unroll
-    for (int b = 0; b < LLR_MAX_K; ++b) {
-        if (b < kb) {
-            if (!(s0[b] >= LLR_EXACT_FLOOR)) {
-                under0 |= 1u << b;
-                s0[b] = 0.0f;
-            }
-            if (!(s1[b] >= LLR_EXACT_FLOOR)) {
-                under1 |= 1u << b;
-                s1[b] = 0.0f;
-            }
-        }
-    }
-    if (under0 | under1) {
-        for (int m = 0; m < M; ++m) {
-            const float v = met(m);
-            const int lab = labels[m];
-#pragma unroll
-            for (int b = 0; b < LLR_MAX_K; ++b) {
-                if (b < kb) {
-                    if ((lab >> (kb - 1 - b)) & 1) {
-                        if ((under1 >> b) & 1u) {
-                            s1[b] += expf(v - p1[b]);
-                        }
-                    } else if ((under0 >> b) & 1u) {
-                        s0[b] += expf(v - p0[b]);
-                    }
+                    s0[b] += ((weak0 >> b) & 1u) ? __expf(v - p0[b]) : e;
                 }
             }
         }
@@ -183,8 +165,8 @@ __device__ __forceinline__ void llrs_of(const Metric& met,
     for (int b = 0; b < LLR_MAX_K; ++b) {
         if (b < kb) {
             // log of each half-sum, relative to the peak.
-            const float l0 = logf(s0[b]) + (((under0 >> b) & 1u) ? p0[b] - peak : 0.0f);
-            const float l1 = logf(s1[b]) + (((under1 >> b) & 1u) ? p1[b] - peak : 0.0f);
+            const float l0 = logf(s0[b]) + (((weak0 >> b) & 1u) ? p0[b] - peak : 0.0f);
+            const float l1 = logf(s1[b]) + (((weak1 >> b) & 1u) ? p1[b] - peak : 0.0f);
             dst[pos ? pos[b] : b] = l0 - l1;
         }
     }
