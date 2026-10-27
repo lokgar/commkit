@@ -9,6 +9,8 @@ signal chain (channel filtering, pulse shaping, phase-noise separation)
 belongs in :mod:`commkit.filtering`.
 """
 
+import numpy as np
+
 from .backend import ArrayType, dispatch
 from .logger import logger
 
@@ -42,7 +44,8 @@ def moving_average(
           spectrum before a peak search).
         - ``"valid"``: shorter by ``window - 1``, as ``numpy.convolve``, for
           callers that realign the axis themselves (a convergence curve
-          plotted at the window centers).
+          plotted at the window centers); ``x`` needs at least ``window``
+          samples along ``axis``.
     axis : int, default -1
         Axis along which to average.
 
@@ -51,6 +54,12 @@ def moving_average(
     ndarray
         Smoothed data, the shape of ``x`` for ``mode="same"`` and shorter by
         ``window - 1`` along ``axis`` for ``mode="valid"``.
+
+    Raises
+    ------
+    ValueError
+        On an unknown ``mode``, or with ``mode="valid"`` and fewer than
+        ``window`` samples along ``axis``.
     """
     x, xp, sp = dispatch(x)
     window = max(1, int(window))
@@ -61,14 +70,25 @@ def moving_average(
         return sp.ndimage.uniform_filter1d(x, window, axis=axis, mode="nearest")
     elif mode == "valid":
         axis = axis % x.ndim
-        # The kernel in the data's precision (a float64 one promotes it).
-        real = xp.empty(0, dtype=x.dtype).real.dtype
-        kernel = xp.full(window, 1.0 / window, dtype=real)
-        if x.ndim == 1:
-            return xp.convolve(x, kernel, mode="valid")
-        return xp.apply_along_axis(
-            lambda row: xp.convolve(row, kernel, mode="valid"), axis, x
-        )
+        n = x.shape[axis]
+        if n < window:
+            raise ValueError(
+                f"moving_average(): mode='valid' needs at least window={window} "
+                f"samples along axis {axis}, got {n}."
+            )
+        if xp is not np and window > 128:
+            # On the GPU the filter below costs O(window) per sample; past
+            # about 128 samples the overlap-add convolution is faster.
+            shape = [1] * x.ndim
+            shape[axis] = window
+            kernel = xp.full(shape, 1.0 / window, dtype=x.real.dtype)
+            return sp.signal.oaconvolve(x, kernel, mode="valid", axes=axis)
+        # The running sum of the "same" filter, every channel at once; the
+        # mean of x[k : k + window] is its output at k + window // 2.
+        full = sp.ndimage.uniform_filter1d(x, window, axis=axis, mode="constant")
+        keep = [slice(None)] * x.ndim
+        keep[axis] = slice(window // 2, window // 2 + n - window + 1)
+        return full[tuple(keep)]
     else:
         raise ValueError(f"Unknown mode: {mode!r}. Use 'same' or 'valid'.")
 

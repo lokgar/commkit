@@ -2,6 +2,7 @@
 
 from typing import Any
 
+import numpy as np
 import pytest
 
 from commkit import smoothing
@@ -25,6 +26,30 @@ class TestMovingAverage:
         assert out.shape[-1] == n - (window - 1)
         expected = xp.arange((window - 1) / 2, n - (window - 1) / 2)
         xpt.assert_allclose(out, expected, rtol=1e-6)
+
+    @pytest.mark.parametrize("window", [2, 3, 4, 17, 257])
+    @pytest.mark.parametrize("axis", [0, -1])
+    def test_moving_average_valid_matches_convolve(
+        self, xp: Any, xpt: Any, window: int, axis: int
+    ) -> None:
+        """Each slice along ``axis`` is numpy.convolve's 'valid' boxcar mean,
+        odd and even windows, complex data, on either axis."""
+        rng = np.random.default_rng(window)
+        x = rng.standard_normal((400, 300)) + 1j * rng.standard_normal((400, 300))
+        out = smoothing.moving_average(
+            xp.asarray(x), window=window, mode="valid", axis=axis
+        )
+        rows = np.moveaxis(x, axis, -1)
+        expected = np.stack(
+            [np.convolve(r, np.full(window, 1.0 / window), mode="valid") for r in rows]
+        )
+        xpt.assert_allclose(
+            out, xp.asarray(np.moveaxis(expected, -1, axis)), rtol=1e-12
+        )
+
+    def test_moving_average_valid_shorter_than_window_raises(self, xp: Any) -> None:
+        with pytest.raises(ValueError, match="at least window=8"):
+            smoothing.moving_average(xp.ones(5), window=8, mode="valid")
 
     def test_moving_average_invalid_mode_raises(self, xp: Any) -> None:
         """Unknown mode raises ValueError."""
