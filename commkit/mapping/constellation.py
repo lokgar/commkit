@@ -28,7 +28,7 @@ import numpy as np
 
 from .._array import warn_if_double
 from ..backend import ArrayType, dispatch
-from .gray import _gray_points, _nearest_index, _unpack_bits
+from .gray import _gray_points, _nearest_index, _pack, _unpack_bits
 from .llr import _Axis, _llr, _llr_separable, _llr_separable_gpu
 from .shaping import (
     _constellation_power,
@@ -455,12 +455,6 @@ def _host_array(value: object, name: str) -> np.ndarray:
     if type(value).__module__.split(".")[0] == "cupy":
         raise TypeError(f"{name} must be a host (NumPy) array; use .get() first.")
     return np.array(value, copy=True)
-
-
-def _pack(labels: np.ndarray) -> np.ndarray:
-    """MSB-first bit rows to integers."""
-    k = labels.shape[1]
-    return labels.astype(np.int64) @ (1 << np.arange(k - 1, -1, -1, dtype=np.int64))
 
 
 @cache

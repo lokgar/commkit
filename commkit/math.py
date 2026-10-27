@@ -308,10 +308,8 @@ def _remove_linear_trend(y: ArrayType, *, x: Any = None) -> tuple[ArrayType, Arr
         ``x`` (per sample by default).
     """
     y, xp, _ = dispatch(y)
-    n = y.shape[-1]
-    xc, denom = _centered_axis(n, x, xp)
-    yc = y - xp.mean(y, axis=-1, keepdims=True)
-    slope = xp.sum(yc * xc, axis=-1) / denom
+    slope = _linear_trend_slope(y, x=x, xp=xp)
+    xc, _ = _centered_axis(y.shape[-1], x, xp)
     return y - slope[..., None] * xc[None, :], slope
 
 
