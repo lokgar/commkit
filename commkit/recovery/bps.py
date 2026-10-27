@@ -46,8 +46,10 @@ class BPS:
     step off.  No blind estimator can tell those apart; training symbols,
     pilots or :func:`resolve_phase_ambiguity` against a reference resolve it.
 
-    Memory: the general (non-square) path builds a ``(1024, B, M)``
-    distance tensor per chunk; square QAM uses an O(1) per-axis slicer.
+    Memory: the CPU kernels and the GPU kernel stream the nearest-point
+    search (square QAM by an O(1) per-axis slicer).  The GPU beyond its
+    kernel's limits (complex128, more than 128 test phases, a table of more
+    than 1024 points) builds chunks of about 2^22 distance elements.
     """
 
     test_phases: int = 64
@@ -101,6 +103,41 @@ def _get_numba_bps_table():
 
         _NUMBA_BPS["table"] = bps_table
     return _NUMBA_BPS["table"]
+
+
+def _get_numba_bps_grid():
+    """Numba kernel for the BPS block metric of square QAM.
+
+    As :func:`_get_numba_bps_table`, with the nearest point found in O(1) by
+    snapping each axis to the grid of ``side`` levels from ``lev_min`` in
+    steps of ``d_grid``.
+    """
+    if "grid" not in _NUMBA_BPS:
+        import numba
+
+        @numba.njit(cache=True, fastmath=True, nogil=True, parallel=True)
+        def bps_grid(x_re, x_im, ph_re, ph_im, lev_min, d_grid, side, block_size, out):
+            C = x_re.shape[0]
+            n_blocks = out.shape[1]
+            B = ph_re.shape[0]
+            last = side - 1
+            for job in numba.prange(C * n_blocks):
+                c = job // n_blocks
+                b = job - c * n_blocks
+                for k in range(B):
+                    acc = 0.0
+                    for n in range(b * block_size, (b + 1) * block_size):
+                        xr = x_re[c, n] * ph_re[k] - x_im[c, n] * ph_im[k]
+                        xi = x_re[c, n] * ph_im[k] + x_im[c, n] * ph_re[k]
+                        ir = min(max(np.round((xr - lev_min) / d_grid), 0), last)
+                        ii = min(max(np.round((xi - lev_min) / d_grid), 0), last)
+                        dr = xr - (lev_min + ir * d_grid)
+                        di = xi - (lev_min + ii * d_grid)
+                        acc += dr * dr + di * di
+                    out[c, b, k] = acc
+
+        _NUMBA_BPS["grid"] = bps_grid
+    return _NUMBA_BPS["grid"]
 
 
 def _bps(symbols: ArrayType, method: BPS, ctx: _Context) -> _Phase:
@@ -176,10 +213,11 @@ def _bps(symbols: ArrayType, method: BPS, ctx: _Context) -> _Phase:
                 "bps_min_d2", mode="grid" if is_sq_qam else "table"
             )
 
-    # Chunk size for N axis: bounds peak memory of the distance tensor.
-    # Always a multiple of block_size so each chunk covers a whole number of
-    # blocks exactly.  Rounded up to the nearest multiple ≥ 1024.
-    CHUNK_N = max(block_size, ((1024 + block_size - 1) // block_size) * block_size)
+    # Symbols per chunk of the array path (the GPU beyond its kernel's
+    # limits): its (CHUNK, B) arrays, or (CHUNK, B, M) for a table, stay
+    # within about 2^22 elements; a whole number of blocks.
+    per_symbol = B * (1 if is_sq_qam else const_xp.size)
+    CHUNK_N = max(block_size, (2**22 // per_symbol) // block_size * block_size)
 
     # Accumulate per-channel distance metrics (N_blocks, B) for all channels.
     metrics_all = xp.zeros((C, N_blocks, B), dtype=float_dtype)
@@ -209,21 +247,29 @@ def _bps(symbols: ArrayType, method: BPS, ctx: _Context) -> _Phase:
                 md.reshape(B, C, n_b, block_size).sum(axis=3).transpose(1, 2, 0)
             )
 
-    elif xp is np and not is_sq_qam:
-        # Non-square constellation on the CPU: the Numba kernel streams the
-        # nearest-point search instead of materializing (CHUNK, B, M).
+    elif xp is np:
+        # The CPU: a Numba kernel over channels and blocks, with an O(1)
+        # per-axis slicer for square QAM or a scan of the table otherwise.
         real = np.float32 if symbols.dtype == np.complex64 else np.float64
         metrics_f64 = np.empty((C, N_blocks, B), dtype=np.float64)
-        _get_numba_bps_table()(
+        data = (
             np.ascontiguousarray(symbols[:, :N_trunc].real, dtype=real),
             np.ascontiguousarray(symbols[:, :N_trunc].imag, dtype=real),
             np.ascontiguousarray(phasors.real, dtype=real),
             np.ascontiguousarray(phasors.imag, dtype=real),
-            np.ascontiguousarray(const_np.real, dtype=real),
-            np.ascontiguousarray(const_np.imag, dtype=real),
-            block_size,
-            metrics_f64,
         )
+        if is_sq_qam:
+            _get_numba_bps_grid()(
+                *data, real(lev_min), real(d_grid), side, block_size, metrics_f64
+            )
+        else:
+            _get_numba_bps_table()(
+                *data,
+                np.ascontiguousarray(const_np.real, dtype=real),
+                np.ascontiguousarray(const_np.imag, dtype=real),
+                block_size,
+                metrics_f64,
+            )
         metrics_all = metrics_f64.astype(float_dtype)
 
     else:
