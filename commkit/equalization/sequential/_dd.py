@@ -356,8 +356,8 @@ def _check_rls_divergence(
 ) -> None:
     """Raise if RLS produced non-finite weights (silent divergence guard).
 
-    Mirrors the ``_div_flag`` check in ``block_lms``: a single device->host sync on
-    the assembled weights catches loss of positive-definiteness in the inverse
+    Like the block equalizers' check after their loop: a single device->host
+    sync on the assembled weights catches loss of positive-definiteness in the inverse
     correlation matrix P (which surfaces as NaN/Inf taps) and converts it into an
     actionable error instead of returning garbage weights.
     """

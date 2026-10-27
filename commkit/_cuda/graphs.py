@@ -18,8 +18,9 @@ pool caches freed blocks per stream, so a fresh stream per call would grow
 the pool by a run's working set on every call.
 
 A body is capturable only if it reads and writes fixed buffers: a replay
-repeats the captured addresses, so per-call inputs must be staged into those
-buffers outside the graph.
+repeats the captured addresses, so per-call inputs are staged into those
+buffers outside the graph, or read at an offset the body takes from a
+device buffer and advances itself (the block equalizers' block index).
 """
 
 from __future__ import annotations
