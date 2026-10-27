@@ -27,8 +27,7 @@ def _get_numba_dd_pll():
 
         @numba.njit(cache=True, fastmath=True, nogil=True)
         def _dd_pll_loop(
-            sym_r,
-            sym_i,
+            sym,
             const_r,
             const_i,
             mu,
@@ -41,12 +40,13 @@ def _get_numba_dd_pll():
             lev_min,
             side,
         ):
-            """Run the decision-directed PLL over the symbols (Numba).
+            """Run one decision-directed PLL per channel over the symbols (Numba).
 
             Parameters
             ----------
-            sym_r, sym_i : numpy.ndarray
-                Real and imaginary parts of the received symbols, float64, ``(N,)``.
+            sym : numpy.ndarray
+                Received symbols, complex64 or complex128, ``(C, N)``; each is
+                widened to float64 as it is read.
             const_r, const_i : numpy.ndarray
                 Real and imaginary parts of the constellation, float64, ``(M,)``.
             mu : float
@@ -74,59 +74,63 @@ def _get_numba_dd_pll():
             Returns
             -------
             numpy.ndarray
-                Per-symbol phase ``φ[n]``, float64, ``(N,)``.
+                Per-symbol phase ``φ[c, n]``, float64, ``(C, N)``.
             """
-            N = len(sym_r)
+            C = sym.shape[0]
+            N = sym.shape[1]
             M = len(const_r)
-            phase_est = np.empty(N, dtype=np.float64)
-            phi = phi0
-            freq = freq0
+            phase_est = np.empty((C, N), dtype=np.float64)
 
-            for n in range(N):
-                # Rotate received symbol by current phase estimate:
-                # y[n] = s[n] · exp(-jφ[n])
-                cos_phi = np.cos(phi)
-                sin_phi = np.sin(phi)
-                yr = sym_r[n] * cos_phi + sym_i[n] * sin_phi
-                yi = -sym_r[n] * sin_phi + sym_i[n] * cos_phi
+            for c in range(C):
+                phi = phi0
+                freq = freq0
+                for n in range(N):
+                    # Rotate received symbol by current phase estimate:
+                    # y[n] = s[n] · exp(-jφ[n])
+                    cos_phi = np.cos(phi)
+                    sin_phi = np.sin(phi)
+                    sr = np.float64(sym[c, n].real)
+                    si = np.float64(sym[c, n].imag)
+                    yr = sr * cos_phi + si * sin_phi
+                    yi = -sr * sin_phi + si * cos_phi
 
-                # Hard decision: argmin_{c ∈ C} |y - c|²
-                if is_sq_qam:
-                    # O(1) grid rounding for square QAM
-                    r_idx = int(round((yr - lev_min) / d_grid))
-                    if r_idx < 0:
-                        r_idx = 0
-                    elif r_idx >= side:
-                        r_idx = side - 1
-                    d_r = levels[r_idx]
-                    i_idx = int(round((yi - lev_min) / d_grid))
-                    if i_idx < 0:
-                        i_idx = 0
-                    elif i_idx >= side:
-                        i_idx = side - 1
-                    d_i = levels[i_idx]
-                else:
-                    min_d2 = (yr - const_r[0]) ** 2 + (yi - const_i[0]) ** 2
-                    d_r = const_r[0]
-                    d_i = const_i[0]
-                    for k in range(1, M):
-                        d2 = (yr - const_r[k]) ** 2 + (yi - const_i[k]) ** 2
-                        if d2 < min_d2:
-                            min_d2 = d2
-                            d_r = const_r[k]
-                            d_i = const_i[k]
+                    # Hard decision: the nearest constellation point
+                    if is_sq_qam:
+                        # O(1) grid rounding for square QAM
+                        r_idx = int(round((yr - lev_min) / d_grid))
+                        if r_idx < 0:
+                            r_idx = 0
+                        elif r_idx >= side:
+                            r_idx = side - 1
+                        d_r = levels[r_idx]
+                        i_idx = int(round((yi - lev_min) / d_grid))
+                        if i_idx < 0:
+                            i_idx = 0
+                        elif i_idx >= side:
+                            i_idx = side - 1
+                        d_i = levels[i_idx]
+                    else:
+                        min_d2 = (yr - const_r[0]) ** 2 + (yi - const_i[0]) ** 2
+                        d_r = const_r[0]
+                        d_i = const_i[0]
+                        for k in range(1, M):
+                            d2 = (yr - const_r[k]) ** 2 + (yi - const_i[k]) ** 2
+                            if d2 < min_d2:
+                                min_d2 = d2
+                                d_r = const_r[k]
+                                d_i = const_i[k]
 
-                # Cross-product phase error:  e = Im(y · d*) = yi·d_r - yr·d_i
-                e = yi * d_r - yr * d_i
+                    # Cross-product phase error:  e = Im(y · d*) = yi·d_r - yr·d_i
+                    e = yi * d_r - yr * d_i
 
-                # Record the phase used to derotate symbol n - before the update.
-                phase_est[n] = phi
+                    # Record the phase used to derotate symbol n - before the update.
+                    phase_est[c, n] = phi
 
-                # 2nd-order loop filter (reduces to 1st order when beta=0):
-                #   φ[n+1] = φ[n] + μ·e[n] + ν[n]
-                #   ν[n]   = ν[n-1] + β·e[n]
-                phi = phi + mu * e + freq
-                freq = freq + beta * e
+                    # 2nd-order loop filter (reduces to 1st order when beta=0):
+                    #   φ[n+1] = φ[n] + μ·e[n] + ν[n]
+                    #   ν[n]   = ν[n-1] + β·e[n]
+                    phi = phi + mu * e + freq
+                    freq = freq + beta * e
 
             return phase_est
 
@@ -152,8 +156,7 @@ def _get_numba_dd_pll_joint():
 
         @numba.njit(cache=True, fastmath=True, nogil=True)
         def _dd_pll_joint_loop(
-            sym_r,
-            sym_i,
+            sym,
             const_r,
             const_i,
             mu,
@@ -173,8 +176,9 @@ def _get_numba_dd_pll_joint():
 
             Parameters
             ----------
-            sym_r, sym_i : numpy.ndarray
-                Real and imaginary parts of the received symbols, float64, ``(C, N)``.
+            sym : numpy.ndarray
+                Received symbols, complex64 or complex128, ``(C, N)``; each is
+                widened to float64 as it is read.
             const_r, const_i : numpy.ndarray
                 Real and imaginary parts of the constellation, float64, ``(M,)``.
             mu, beta, phi0, freq0 : float
@@ -194,8 +198,8 @@ def _get_numba_dd_pll_joint():
                 The shared phase ``φ[n]``, float64, ``(N,)``; the caller copies it to
                 every channel.
             """
-            C = sym_r.shape[0]
-            N = sym_r.shape[1]
+            C = sym.shape[0]
+            N = sym.shape[1]
             M = len(const_r)
             phase_est = np.empty(N, dtype=np.float64)
             phi = phi0
@@ -206,8 +210,10 @@ def _get_numba_dd_pll_joint():
                 sin_phi = np.sin(phi)
                 e_sum = 0.0
                 for c in range(C):
-                    yr = sym_r[c, n] * cos_phi + sym_i[c, n] * sin_phi
-                    yi = -sym_r[c, n] * sin_phi + sym_i[c, n] * cos_phi
+                    sr = np.float64(sym[c, n].real)
+                    si = np.float64(sym[c, n].imag)
+                    yr = sr * cos_phi + si * sin_phi
+                    yi = -sr * sin_phi + si * cos_phi
                     if is_sq_qam:
                         r_idx = int(round((yr - lev_min) / d_grid))
                         if r_idx < 0:
@@ -337,8 +343,9 @@ def _pll(symbols: ArrayType, method: PLL, ctx: _Context) -> _Phase:
         _lev_min, _d_grid, _side = 0.0, 1.0, 0
         _levels = np.empty(0, dtype=np.float64)
 
-    # Move to CPU for sequential processing
-    symbols_cpu = to_device(symbols, "cpu").astype(np.complex128)
+    # Sequential loop on the host, in the samples' own precision: the kernels
+    # widen each symbol to float64 as they read it.
+    symbols_cpu = np.ascontiguousarray(to_device(symbols, "cpu"))
     loop_args = (
         const_r,
         const_i,
@@ -355,19 +362,9 @@ def _pll(symbols: ArrayType, method: PLL, ctx: _Context) -> _Phase:
 
     joint = method.joint_channels and C > 1
     if joint:
-        sym_r_all = np.ascontiguousarray(symbols_cpu.real)  # (C, N) float64
-        sym_i_all = np.ascontiguousarray(symbols_cpu.imag)
-        phi = _get_numba_dd_pll_joint()(sym_r_all, sym_i_all, *loop_args)[None, :]
+        phi = _get_numba_dd_pll_joint()(symbols_cpu, *loop_args)[None, :]
     else:
-        kernel = _get_numba_dd_pll()
-        phi = np.stack(
-            [
-                kernel(
-                    symbols_cpu[ch].real.copy(), symbols_cpu[ch].imag.copy(), *loop_args
-                )
-                for ch in range(C)
-            ]
-        )
+        phi = _get_numba_dd_pll()(symbols_cpu, *loop_args)
     phi = _repair_slips(
         phi, np, method.cycle_slip, int(constellation.rotational_symmetry), 1
     )
