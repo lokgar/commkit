@@ -27,6 +27,58 @@ __all__ = ["block_cma", "block_rde", "build_pilot_ref"]
 # -----------------------------------------------------------------------------
 
 
+def _block_blind(
+    kind: str,
+    samples: ArrayType | Signal,
+    *,
+    num_taps: int,
+    sps: int | None,
+    step_size: float | None,
+    block_size: int,
+    constellation: Any,
+    initial_taps: ArrayType | None,
+    pilot_ref: ArrayType | None,
+    pilot_mask: np.ndarray | None,
+    pilot_gain_db: float,
+    pad_mode: str,
+    state: EqualizerState | None,
+    cuda_graph: bool,
+) -> EqualizerResult:
+    """The body of :func:`block_cma` and :func:`block_rde` (``kind``)."""
+    name = f"block_{kind}()"
+    signal_adapter = adapt_signal(samples, function_name=name)
+    samples = signal_adapter.array
+    sps = require_integer_sps(signal_adapter.resolve_fact("sps", sps), name)
+    constellation = signal_adapter.resolve_choice("constellation", constellation)
+    pilot_ref, pilot_mask = _check_pilots(
+        signal_adapter.array, sps, pilot_ref, pilot_mask, name, state
+    )
+    if kind == "cma":
+        r2, radii_np = _godard_radius(constellation), None
+    else:
+        r2, radii_np = 1.0, _rde_ring_radii(constellation)
+    label = f"Block-{kind.upper()}"
+    result = _block_fdaf_blind(
+        kind,
+        samples,
+        num_taps=num_taps,
+        sps=sps,
+        step_size=step_size,
+        block_size=block_size,
+        r2=r2,
+        radii_np=radii_np,
+        initial_taps=initial_taps,
+        state=state,
+        pad_mode=pad_mode,
+        pilot_ref=pilot_ref,
+        pilot_mask=pilot_mask,
+        pilot_gain_db=pilot_gain_db,
+        cuda_graph=cuda_graph,
+        name=label if pilot_ref is None else f"{label}(PA)",
+    )
+    return _attach_equalized_signal(result, signal_adapter.signal, state)
+
+
 def block_cma(
     samples: ArrayType | Signal,
     *,
@@ -99,34 +151,22 @@ def block_cma(
         ``y_hat``, ``weights``, ``error`` and ``state`` on the input's
         device, and for Signal input ``signal``, the 1-SPS output Signal.
     """
-    signal_adapter = adapt_signal(samples, function_name="block_cma()")
-    samples = signal_adapter.array
-    sps = require_integer_sps(signal_adapter.resolve_fact("sps", sps), "block_cma()")
-    constellation = signal_adapter.resolve_choice("constellation", constellation)
-    pilot_ref, pilot_mask = _check_pilots(
-        signal_adapter.array, sps, pilot_ref, pilot_mask, "block_cma()", state
-    )
-
-    r2 = _godard_radius(constellation)
-    result = _block_fdaf_blind(
+    return _block_blind(
         "cma",
         samples,
         num_taps=num_taps,
         sps=sps,
         step_size=step_size,
         block_size=block_size,
-        r2=r2,
-        radii_np=None,
+        constellation=constellation,
         initial_taps=initial_taps,
-        state=state,
-        pad_mode=pad_mode,
         pilot_ref=pilot_ref,
         pilot_mask=pilot_mask,
         pilot_gain_db=pilot_gain_db,
+        pad_mode=pad_mode,
+        state=state,
         cuda_graph=cuda_graph,
-        name="Block-CMA" if pilot_ref is None else "Block-CMA(PA)",
     )
-    return _attach_equalized_signal(result, signal_adapter.signal, state)
 
 
 def block_rde(
@@ -201,34 +241,22 @@ def block_rde(
         ``y_hat``, ``weights``, ``error`` and ``state`` on the input's
         device, and for Signal input ``signal``, the 1-SPS output Signal.
     """
-    signal_adapter = adapt_signal(samples, function_name="block_rde()")
-    samples = signal_adapter.array
-    sps = require_integer_sps(signal_adapter.resolve_fact("sps", sps), "block_rde()")
-    constellation = signal_adapter.resolve_choice("constellation", constellation)
-    pilot_ref, pilot_mask = _check_pilots(
-        signal_adapter.array, sps, pilot_ref, pilot_mask, "block_rde()", state
-    )
-
-    radii_np = _rde_ring_radii(constellation)
-    result = _block_fdaf_blind(
+    return _block_blind(
         "rde",
         samples,
         num_taps=num_taps,
         sps=sps,
         step_size=step_size,
         block_size=block_size,
-        r2=1.0,
-        radii_np=radii_np,
+        constellation=constellation,
         initial_taps=initial_taps,
-        state=state,
-        pad_mode=pad_mode,
         pilot_ref=pilot_ref,
         pilot_mask=pilot_mask,
         pilot_gain_db=pilot_gain_db,
+        pad_mode=pad_mode,
+        state=state,
         cuda_graph=cuda_graph,
-        name="Block-RDE" if pilot_ref is None else "Block-RDE(PA)",
     )
-    return _attach_equalized_signal(result, signal_adapter.signal, state)
 
 
 # -----------------------------------------------------------------------------

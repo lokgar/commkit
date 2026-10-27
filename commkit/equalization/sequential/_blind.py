@@ -72,17 +72,98 @@ def _check_pilots(
 # -----------------------------------------------------------------------------
 
 
-def _pilot_args(
-    use_pilots: bool, pref: Any, pmask: Any, start: int, x: np.ndarray
-) -> tuple[bool, np.ndarray, np.ndarray]:
-    """The pilot arguments of the blind kernel for the segment from ``start``."""
-    if not use_pilots:
-        return False, np.empty((x.shape[0], 0), np.complex64), np.empty(0, np.uint8)
-    return (
-        True,
-        np.ascontiguousarray(pref[:, start:]),
-        np.ascontiguousarray(pmask[start:]),
+def _blind_equalizer(
+    kind: str,
+    samples: ArrayType | Signal,
+    *,
+    num_taps: int,
+    sps: int | None,
+    step_size: float,
+    constellation: Any,
+    store_weights: bool,
+    center_tap: int | None,
+    initial_taps: ArrayType | None,
+    pilot_ref: ArrayType | None,
+    pilot_mask: np.ndarray | None,
+    pilot_gain_db: float,
+    pad_mode: str,
+    state: EqualizerState | None,
+) -> EqualizerResult:
+    """The body of :func:`cma` and :func:`rde` (``kind``); the arguments as
+    there."""
+    name = f"{kind}()"
+    label = kind.upper()
+    signal_adapter = adapt_signal(samples, function_name=name)
+    samples = signal_adapter.array
+    sig = signal_adapter.signal
+    sps = require_integer_sps(signal_adapter.resolve_fact("sps", sps), name)
+    constellation = signal_adapter.resolve_choice("constellation", constellation)
+
+    pilot_ref, pilot_mask = _check_pilots(
+        signal_adapter.array, sps, pilot_ref, pilot_mask, name, state
     )
+    use_pilots = pilot_ref is not None
+    logger.info(
+        "%s equalizer: num_taps=%s, mu=%s, sps=%s, pilot_aided=%s, pilot_gain_db=%s",
+        label,
+        num_taps,
+        step_size,
+        sps,
+        use_pilots,
+        pilot_gain_db,
+    )
+
+    target: Any
+    if kind == "cma":
+        r2 = _godard_radius(constellation)
+        logger.debug("CMA R2: %.4f", r2)
+        target, kernel = np.float32(r2), _get_numba_cma()
+    else:
+        radii = _rde_ring_radii(constellation)
+        logger.debug("RDE radii: %s", ", ".join(f"{r:.4f}" for r in radii))
+        target = np.ascontiguousarray(radii, dtype=np.float32)
+        kernel = _get_numba_rde()
+
+    # RMS-normalize samples to unit symbol-rate power (no training)
+    run = _prepare_sequential(
+        samples,
+        equalizer=kind,
+        sps=sps,
+        num_taps=num_taps,
+        center_tap=center_tap,
+        initial_taps=initial_taps,
+        state=state,
+        store_weights=store_weights,
+        pad_mode=pad_mode,
+        pilot_mask=pilot_mask if use_pilots else None,
+        pilot_gain_db=pilot_gain_db,
+    )
+    mu = np.float32(step_size)
+    if use_pilots:
+        pref = np.ascontiguousarray(to_device(pilot_ref, "cpu"), dtype=np.complex64)
+        pmask = np.ascontiguousarray(pilot_mask, dtype=np.uint8)
+    else:
+        pref = np.empty((run.num_ch, 0), np.complex64)
+        pmask = np.empty(0, np.uint8)
+
+    def segment(start: int, stop: int) -> None:
+        x, _, _, y_out, e_out, w_hist = run.segment(start, stop)
+        kernel(
+            x, run.W, mu, target, run.stride, store_weights, y_out, e_out, w_hist,
+            use_pilots,
+            np.ascontiguousarray(pref[:, start:]) if use_pilots else pref,
+            np.ascontiguousarray(pmask[start:]) if use_pilots else pmask,
+        )  # fmt: skip
+
+    resume = run.n_done
+    snap = _run_resumable(run, resume, segment, lambda: _Snapshot(weights=run.W.copy()))
+    result = _log_equalizer_exit(
+        _assemble_sequential(
+            run, equalizer=kind, cpr=None, resume=resume, snapshot=snap
+        ),
+        name=label if not use_pilots else f"{label}(PA)",
+    )
+    return _attach_equalized_signal(result, sig, state)
 
 
 def cma(
@@ -221,65 +302,22 @@ def cma(
     CuPy input is copied to the host once and the outputs are copied back
     once; the result arrays live on the input's device.
     """
-    signal_adapter = adapt_signal(samples, function_name="cma()")
-    samples = signal_adapter.array
-    sig = signal_adapter.signal
-    sps = require_integer_sps(signal_adapter.resolve_fact("sps", sps), "cma()")
-    constellation = signal_adapter.resolve_choice("constellation", constellation)
-
-    pilot_ref, pilot_mask = _check_pilots(
-        signal_adapter.array, sps, pilot_ref, pilot_mask, "cma()", state
-    )
-    use_pilots = pilot_ref is not None
-    logger.info(
-        "CMA equalizer: num_taps=%s, mu=%s, sps=%s, pilot_aided=%s, pilot_gain_db=%s",
-        num_taps,
-        step_size,
-        sps,
-        use_pilots,
-        pilot_gain_db,
-    )
-
-    r2 = _godard_radius(constellation)
-    logger.debug("CMA R2: %.4f", r2)
-
-    # RMS-normalize samples to unit symbol-rate power (CMA has no training)
-    run = _prepare_sequential(
+    return _blind_equalizer(
+        "cma",
         samples,
-        equalizer="cma",
-        sps=sps,
         num_taps=num_taps,
+        sps=sps,
+        step_size=step_size,
+        constellation=constellation,
+        store_weights=store_weights,
         center_tap=center_tap,
         initial_taps=initial_taps,
-        state=state,
-        store_weights=store_weights,
-        pad_mode=pad_mode,
-        pilot_mask=pilot_mask if use_pilots else None,
+        pilot_ref=pilot_ref,
+        pilot_mask=pilot_mask,
         pilot_gain_db=pilot_gain_db,
+        pad_mode=pad_mode,
+        state=state,
     )
-    target = np.float32(r2)
-    mu = np.float32(step_size)
-    pref = pmask = None
-    if use_pilots:
-        pref = np.ascontiguousarray(to_device(pilot_ref, "cpu"), dtype=np.complex64)
-        pmask = np.ascontiguousarray(pilot_mask, dtype=np.uint8)
-
-    def segment(start: int, stop: int) -> None:
-        x, _, _, y_out, e_out, w_hist = run.segment(start, stop)
-        _get_numba_cma()(
-            x, run.W, mu, target, run.stride, store_weights, y_out, e_out, w_hist,
-            *_pilot_args(use_pilots, pref, pmask, start, x),
-        )  # fmt: skip
-
-    resume = run.n_done
-    snap = _run_resumable(run, resume, segment, lambda: _Snapshot(weights=run.W.copy()))
-    result = _log_equalizer_exit(
-        _assemble_sequential(
-            run, equalizer="cma", cpr=None, resume=resume, snapshot=snap
-        ),
-        name="CMA" if not use_pilots else "CMA(PA)",
-    )
-    return _attach_equalized_signal(result, sig, state)
 
 
 def rde(
@@ -407,62 +445,19 @@ def rde(
     CPU.  CuPy input is copied to the host once and the outputs back once;
     the result's arrays are on the input's device.
     """
-    signal_adapter = adapt_signal(samples, function_name="rde()")
-    samples = signal_adapter.array
-    sig = signal_adapter.signal
-    sps = require_integer_sps(signal_adapter.resolve_fact("sps", sps), "rde()")
-    constellation = signal_adapter.resolve_choice("constellation", constellation)
-
-    pilot_ref, pilot_mask = _check_pilots(
-        signal_adapter.array, sps, pilot_ref, pilot_mask, "rde()", state
-    )
-    use_pilots = pilot_ref is not None
-    logger.info(
-        "RDE equalizer: num_taps=%s, mu=%s, sps=%s, pilot_aided=%s, pilot_gain_db=%s",
-        num_taps,
-        step_size,
-        sps,
-        use_pilots,
-        pilot_gain_db,
-    )
-
-    radii = _rde_ring_radii(constellation)
-    logger.debug("RDE radii: %s", ", ".join(f"{r:.4f}" for r in radii))
-
-    # RMS-normalize samples to unit symbol-rate power (RDE has no training)
-    run = _prepare_sequential(
+    return _blind_equalizer(
+        "rde",
         samples,
-        equalizer="rde",
-        sps=sps,
         num_taps=num_taps,
+        sps=sps,
+        step_size=step_size,
+        constellation=constellation,
+        store_weights=store_weights,
         center_tap=center_tap,
         initial_taps=initial_taps,
-        state=state,
-        store_weights=store_weights,
-        pad_mode=pad_mode,
-        pilot_mask=pilot_mask if use_pilots else None,
+        pilot_ref=pilot_ref,
+        pilot_mask=pilot_mask,
         pilot_gain_db=pilot_gain_db,
+        pad_mode=pad_mode,
+        state=state,
     )
-    target = np.ascontiguousarray(radii, dtype=np.float32)
-    mu = np.float32(step_size)
-    pref = pmask = None
-    if use_pilots:
-        pref = np.ascontiguousarray(to_device(pilot_ref, "cpu"), dtype=np.complex64)
-        pmask = np.ascontiguousarray(pilot_mask, dtype=np.uint8)
-
-    def segment(start: int, stop: int) -> None:
-        x, _, _, y_out, e_out, w_hist = run.segment(start, stop)
-        _get_numba_rde()(
-            x, run.W, mu, target, run.stride, store_weights, y_out, e_out, w_hist,
-            *_pilot_args(use_pilots, pref, pmask, start, x),
-        )  # fmt: skip
-
-    resume = run.n_done
-    snap = _run_resumable(run, resume, segment, lambda: _Snapshot(weights=run.W.copy()))
-    result = _log_equalizer_exit(
-        _assemble_sequential(
-            run, equalizer="rde", cpr=None, resume=resume, snapshot=snap
-        ),
-        name="RDE" if not use_pilots else "RDE(PA)",
-    )
-    return _attach_equalized_signal(result, sig, state)
