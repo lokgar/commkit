@@ -1,4 +1,8 @@
-"""Pilot-symbol and pilot-tone aided carrier phase recovery."""
+"""Pilot-aided carrier-phase recovery.
+
+:class:`PilotAided` (known pilot symbols in the frame), :class:`PilotTone`
+(one CW pilot tone) and :class:`PilotTones` (two or more tones, combined).
+"""
 
 import logging
 from dataclasses import dataclass
@@ -19,8 +23,7 @@ __all__ = ["PilotAided", "PilotTone", "PilotTones"]
 
 @dataclass(frozen=True, eq=False)
 class PilotAided:
-    """
-    Phase from known pilot symbols, interpolated between pilots.
+    """Phase from known pilot symbols, interpolated between pilots.
 
     The phase at each pilot is ``∠(r_k·s_k*)``; the pilot phases are
     unwrapped and interpolated over the whole record.  Single-carrier only.
@@ -37,7 +40,7 @@ class PilotAided:
         same constant hold outside.
     joint_channels : bool, default False
         MIMO: average ``r·s*`` coherently across channels before the angle
-        (no wrap-around artefacts) and give every channel the one trajectory.
+        (no wrap-around artifacts) and give every channel the one trajectory.
     cycle_slip : CycleSlip, optional
         Repair ``2π`` wraps in the unwrapped pilot phases (large pilot gaps)
         before interpolation.
@@ -95,7 +98,7 @@ def _pilot_aided(symbols: ArrayType, method: PilotAided, ctx: _Context) -> _Phas
 
     joint = method.joint_channels and C > 1
     if joint:
-        # Coherent complex averaging before angle() - avoids wrap-around artefacts
+        # Coherent complex averaging before angle() - avoids wrap-around artifacts
         # that arise from averaging phases directly (e.g. antipodal channels).
         z_joint = xp.mean(r_pilots * xp.conj(pilot_values_xp), axis=0)  # (P,)
         phi_pilots_u = xp.unwrap(xp.angle(z_joint).astype(xp.float64))[None, :]
@@ -167,52 +170,67 @@ def _extract_pilot_phasor(
     X: ArrayType | None = None,
     return_window: bool = False,
 ) -> tuple[ArrayType, np.ndarray, np.ndarray, np.ndarray, ArrayType | None, ArrayType]:
-    """Isolate a CW pilot tone and return its carrier-stripped complex phasor.
+    """Isolate a CW pilot tone and return its phasor with the carrier removed.
 
-    Shared core of the ``PilotTone`` and ``PilotTones`` estimators:
-    refine the per-channel tone centre, extract it with a zero-phase spectral
-    window (FFT -> window -> IFFT, sample-aligned), and strip the nominal carrier
-    so a residual frequency offset survives as a slow phase ramp.
+    The shared core of ``PilotTone`` and ``PilotTones``: refine each
+    channel's tone center, extract the tone with a zero-phase spectral window
+    (FFT, window, IFFT, aligned with the samples), and remove the nominal
+    carrier, so that a residual frequency offset remains as a slow phase
+    ramp.
 
-    Everything runs in the signal's working precision (complex64 for complex64
-    input) - the ±π-safe part of the pipeline is the float64 promotion of the
-    *angle* before unwrap, which the callers already perform, not
-    double-precision spectra.  Tone refinement reuses the extraction FFT
-    (device-side log-parabolic fit; one host transfer) instead of running a
-    zero-padded full-record FFT per channel, and the window/noise statistics
-    touch only the ``O(bandwidth/df)`` occupied bins instead of dense (C, N)
-    arrays.
+    Everything runs in the working precision of the samples (complex64 for
+    complex64 input): the part that must be safe at ``±π`` is the float64
+    angle before the unwrap, which the callers take, not the spectra.  The
+    tone refinement reuses the extraction FFT (a log-parabolic fit on the
+    device, one host transfer) instead of a zero-padded FFT of the record per
+    channel, and the window and noise statistics touch only the
+    ``O(bandwidth/df)`` occupied bins, not dense ``(C, N)`` arrays.
 
     Parameters
     ----------
-    samples : (C, N) array
-        Oversampled complex samples, already 2-D (caller handles the 1-D case).
+    samples : ndarray
+        Oversampled complex samples, ``(C, N)`` (the caller promotes SISO).
+    sampling_rate : float
+        Sampling rate in Hz.
+    tone_frequency : float
+        Nominal tone frequency in Hz.
+    bandwidth : float
+        Half-width of the extraction window in Hz.
     xp : module
-        The dispatched array module for ``samples`` (numpy/cupy).
-    X : (C, N) array, optional
-        Precomputed ``_fft.fft(samples, axis=-1)`` in working precision.
-        Pass it when extracting several tones from the same record so the
+        Array module of ``samples``.
+    search_band : float, optional
+        Half-width of the peak search in Hz; defaults to ``bandwidth``.
+    refine_tone : bool, default True
+        Center the window on the measured tone peak of each channel.
+    window : str or tuple, default "tukey"
+        Window over the passband, a ``scipy.signal.get_window`` spec.
+    X : ndarray, optional
+        ``_fft.fft(samples, axis=-1)`` in the working precision, ``(C, N)``.
+        Pass it when several tones are extracted from one record, so the
         record is transformed once (``PilotTones``).
     return_window : bool, default False
-        Build and return the dense (C, N) extraction window ``W`` (diagnostics
-        only); when ``False`` the ``W`` slot in the return tuple is ``None``.
-    (others) : see ``PilotTone``.
+        Build and return the dense extraction window ``W`` (diagnostics
+        only); otherwise its slot in the result is ``None``.
 
     Returns
     -------
-    phasor : (C, N) complex, working precision
-        ``z(n) ≈ A·e^{jθ(n)}`` per channel (carrier-frequency stripped).
-    f_centers : (C,) float64
-        Detected per-channel tone centre [Hz].
-    sig_power : (C,) float64
-        In-band tone power ``|A|²`` within the tracking window, in the same
-        units as ``mean(|z|²)`` (for SNR weights).
-    noise_power : (C,) float64
-        Additive-noise power ``σ²`` within the tracking window, same units.
-    W : (C, N) float64 or None
-        The extraction window (only if ``return_window=True``).
-    X : (C, N) complex, working precision
-        The full FFT (reusable for further tones / diagnostics).
+    phasor : ndarray
+        ``z(n) ≈ A·e^{jθ(n)}`` per channel with the carrier removed, complex,
+        working precision, ``(C, N)``.
+    f_centers : numpy.ndarray
+        Measured tone center of each channel in Hz, float64, ``(C,)``.
+    sig_power : numpy.ndarray
+        In-band tone power ``|A|²`` in the tracking window, in the units of
+        ``mean(|z|²)`` (for SNR weights), float64, ``(C,)``.
+    noise_power : numpy.ndarray
+        Additive noise power ``σ²`` in the tracking window, same units,
+        float64, ``(C,)``.
+    W : ndarray or None
+        The extraction window, float64, ``(C, N)``, with
+        ``return_window=True``.
+    X : ndarray
+        The FFT of the record, complex, working precision, ``(C, N)``, for
+        further tones or diagnostics.
     """
     from ..frequency import _refine_tones_from_spectrum, correct_frequency_offset
 
@@ -231,8 +249,8 @@ def _extract_pilot_phasor(
         X = _fft.fft(xw, axis=-1)  # (C, N)
     real_dtype = xp.float64 if X.dtype == xp.complex128 else xp.float32
 
-    # 2) Per-channel tone centre.  Refinement absorbs a frequency offset that
-    #    has dragged the tone away from nominal, so the window stays centred on
+    # 2) Per-channel tone center.  Refinement absorbs a frequency offset that
+    #    has dragged the tone away from nominal, so the window stays centered on
     #    it.  Runs on the shared spectrum - no extra FFTs, one host transfer.
     if refine_tone:
         f_centers = _refine_tones_from_spectrum(
@@ -248,7 +266,7 @@ def _extract_pilot_phasor(
     # 3) Zero-phase extraction window placed circularly at each channel's tone bin.
     from scipy.signal import get_window
 
-    half = int(bandwidth // df)  # bins from centre to band edge
+    half = int(bandwidth // df)  # bins from center to band edge
     n_win = 2 * half + 1
     try:
         win_cpu = np.asarray(get_window(window, n_win, fftbins=False), dtype=np.float64)
@@ -257,7 +275,7 @@ def _extract_pilot_phasor(
             f"Invalid window {window!r}: {exc}. Pass any scipy.signal.get_window "
             "spec, e.g. 'tukey', ('tukey', 0.3), 'boxcar', ('gaussian', 50)."
         ) from exc
-    k_centers = np.round(f_centers / df).astype(np.int64) % N  # (C,) centre bins
+    k_centers = np.round(f_centers / df).astype(np.int64) % N  # (C,) center bins
     idx_np = (k_centers[:, None] + np.arange(-half, half + 1)[None, :]) % N
     idx = xp.asarray(idx_np)  # (C, n_win) circular in-band bins
     rows = xp.arange(C)[:, None]
@@ -265,7 +283,7 @@ def _extract_pilot_phasor(
 
     # Per-channel in-band tone power and additive-noise power, via Parseval
     # (mean|z|² = ΣΣ|X·W|²/N²).  The noise floor is the median |X|² of a guard
-    # band one window-width outside the passband (local, so a neighbouring tone
+    # band one window-width outside the passband (local, so a neighboring tone
     # on the other channel does not inflate it).  Batched over channels on the
     # gathered bins only - no dense (C, N) window/power arrays, one transfer.
     win64 = xp.asarray(win_cpu)  # (n_win,) float64 on device
@@ -313,8 +331,7 @@ def _extract_pilot_phasor(
 
 @dataclass(frozen=True)
 class PilotTone:
-    r"""
-    Common carrier phase from a continuous-wave pilot tone.
+    r"""Common carrier phase from a continuous-wave pilot tone.
 
     The tone (see ``spectral.add_pilot_tone``) shares the data's oscillator
     and channel, so its phase is the common phase
@@ -340,14 +357,14 @@ class PilotTone:
         to ``bandwidth``.  Keep it inside the guard so the data band never
         wins the search.
     refine : bool, default True
-        Centre the window on the measured per-channel tone peak (needed when
+        Center the window on the measured per-channel tone peak (needed when
         a frequency offset can move the tone by more than B).
     window : str or tuple, default "tukey"
         Window over the passband, any ``scipy.signal.get_window`` spec.
     remove_frequency_offset : bool, default True
         Keep the linear phase ramp of a residual frequency offset in the
-        estimate, so that correcting removes offset and phase noise
-        together.  ``False`` subtracts the per-channel least-squares trend
+        estimate, so that the correction removes the offset and the phase
+        noise together.  ``False`` subtracts the per-channel least-squares trend
         and leaves only the phase-noise fluctuation.
     joint_channels : bool, default False
         MIMO: sum the tone phasors across channels before the angle (shared
@@ -356,7 +373,7 @@ class PilotTone:
     Notes
     -----
     Place the tone at ``|f_p| > (1+β)·R_s/2 + B`` and keep
-    ``|f_p| + B < f_s/2``; choose ``B ≳ 3-5 × linewidth``.
+    ``|f_p| + B < f_s/2``, with ``B`` at least 3 to 5 times the linewidth.
     """
 
     frequency: float
@@ -430,10 +447,10 @@ def _pilot_tone(samples: ArrayType, method: PilotTone, ctx: _Context) -> _Phase:
 
 
 def _lowpass_fft(z: ArrayType, sampling_rate: float, cutoff: float, xp) -> ArrayType:
-    """Zero-phase brick-wall low-pass of a complex stream (FFT -> mask -> IFFT).
+    """Zero-phase brick-wall low-pass of a complex stream: FFT, mask, IFFT.
 
-    Used to isolate the **slow** inter-tone differential phasor; zero-phase so
-    the recovered ``δ(n)`` is lag-free (it is far inside the passband anyway).
+    Isolates the slow inter-tone differential phasor; zero phase, so the
+    recovered ``δ(n)`` has no lag (it is far inside the passband anyway).
     """
     N = z.shape[-1]
     freqs = xp.fft.fftfreq(N, d=1.0 / sampling_rate)
@@ -443,8 +460,7 @@ def _lowpass_fft(z: ArrayType, sampling_rate: float, cutoff: float, xp) -> Array
 
 @dataclass(frozen=True)
 class PilotTones:
-    r"""
-    Common carrier phase from two or more pilot tones, combined by MRC.
+    r"""Common carrier phase from two or more pilot tones, combined by MRC.
 
     For a shared-laser dual-polarization link every pilot rides the same
     common phase φ[n]; combining K tones lowers the residual phase noise by
@@ -470,8 +486,8 @@ class PilotTones:
     bandwidth : float
         Half-width of each tone's extraction window in Hz.
     differential_bandwidth : float, default 5e3
-        Low-pass cut-off in Hz for the inter-tone differential: above the
-        SOP drift rate, far below the phase-noise band.
+        Low-pass cutoff in Hz of the inter-tone differential: above the SOP
+        drift rate and far below the phase-noise band.
     search_band : float, optional
         Peak-search half-width in Hz; defaults to ``bandwidth``.
     per_tone_channel : sequence of int, optional

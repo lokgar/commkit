@@ -1,5 +1,4 @@
-"""
-LDPC codes (scaffold).
+"""LDPC codes (scaffold).
 
 Low-density parity-check codes: parity-check-matrix construction
 (Gallager / PEG / quasi-cyclic) and iterative belief-propagation decoding

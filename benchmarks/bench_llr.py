@@ -35,6 +35,22 @@ def bench_compute_llr(benchmark, backend_device, xp, sync, order, method):
     benchmark.pedantic(run, **ROUNDS)
 
 
+@pytest.mark.parametrize("method", ["maxlog", "exact"])
+@pytest.mark.parametrize("name", ["psk16", "qam128cross"])
+def bench_compute_llr_nonseparable(benchmark, backend_device, xp, sync, name, method):
+    """Constellations without per-axis factors: the M-point LLR kernels."""
+    c = {"psk16": Constellation.psk(16), "qam128cross": Constellation.qam(128)}[name]
+    rx_np, _, noise_var = llr_workload(order=c.order, n_sym=N_SYM, constellation=c)
+    rx = xp.asarray(rx_np)
+
+    def run():
+        out = compute_llr(rx, noise_var=noise_var, constellation=c, method=method)
+        sync()
+        return out
+
+    benchmark.pedantic(run, **ROUNDS)
+
+
 @pytest.mark.parametrize("order", [16, 256])
 def bench_gmi(benchmark, backend_device, xp, sync, order):
     rx_np, bits_np, noise_var = llr_workload(order=order, n_sym=N_SYM)

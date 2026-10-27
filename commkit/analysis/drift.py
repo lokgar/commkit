@@ -1,4 +1,9 @@
-"""Drift / phase-noise separation and residual frequency-wander metrics."""
+"""Drift and phase-noise separation, and residual frequency wander.
+
+:func:`separate_drift_phase_noise` splits a phase trajectory into a slow
+drift and the fast phase noise; :func:`frequency_drift` summarizes the
+instantaneous frequency's wander in a :class:`FrequencyDrift`.
+"""
 
 from dataclasses import dataclass
 from typing import Any
@@ -18,9 +23,9 @@ class FrequencyDrift:
 
     Attributes
     ----------
-    df : array_like
-        Per-symbol residual frequency, on the input backend.
-    std, pp, max_abs : float or np.ndarray
+    df : ndarray
+        Per-sample residual frequency in Hz, on the input's device.
+    std, pp, max_abs : float or numpy.ndarray
         Standard deviation, peak-to-peak and largest magnitude of ``df``:
         floats (SISO) or ``(C,)`` arrays (MIMO).
     """
@@ -38,21 +43,22 @@ def separate_drift_phase_noise(
     cutoff: float,
     order: int = 4,
 ) -> tuple[ArrayType, ArrayType]:
-    r"""Split a phase trajectory into slow drift and fast phase-noise residual.
+    r"""Split a phase trajectory into a slow drift and a fast phase-noise residual.
 
-    Applies a **zero-phase** Butterworth low-pass (second-order sections via
-    ``sosfiltfilt``, numerically stable at the very low normalized cutoffs
-    typical here) at ``cutoff`` to obtain the drift; the residual
-    ``pn = phi - drift`` carries the phase noise + AWGN.  Zero-phase filtering
-    avoids the group-delay bias of a causal filter and the spectral leakage of
-    a boxcar moving average.
+    The drift is the output of a zero-phase Butterworth low-pass at
+    ``cutoff`` (second-order sections through
+    :func:`~commkit.filtering.iir_filter`, numerically stable at the low
+    normalized cutoffs used here); the residual
+    ``pn = phi - drift`` holds the phase noise and the AWGN.  Zero-phase
+    filtering avoids the group-delay bias of a causal filter and the
+    spectral leakage of a boxcar moving average.
 
-    The split is a modelling choice: too low a cutoff lets fast drift leak into
+    The split is a modeling choice: too low a cutoff lets fast drift leak into
     ``pn`` (inflating the linewidth); too high a cutoff absorbs genuine
-    low-frequency phase noise into ``drift``.  Because the single-symbol
-    increment used downstream is itself a high-pass, the *increment-variance*
-    linewidth is only weakly sensitive to this cutoff - but discard the filter
-    edge transients (``edge_trim`` on the metric functions) regardless.
+    low-frequency phase noise into ``drift``.  The single-symbol increment
+    used downstream is itself a high-pass, so the increment-variance
+    linewidth depends only weakly on the cutoff; discard the filter's edge
+    transients (``edge_trim`` of the metric functions) either way.
 
     Parameters
     ----------
@@ -69,23 +75,23 @@ def separate_drift_phase_noise(
 
     Returns
     -------
-    drift_phase : array_like
-        Low-frequency drift component, same shape/backend/dtype as ``phi``.
-    pn_phase : array_like
-        High-frequency phase-noise + AWGN residual ``phi - drift``.
+    drift_phase : ndarray
+        Low-frequency drift, same shape, dtype and device as ``phi``.
+    pn_phase : ndarray
+        High-frequency residual ``phi - drift``: phase noise and AWGN.
 
     Notes
     -----
     **Limitations.**
 
-    * The drift/phase-noise dichotomy is *spectral*, not physical: a laser's
-      1/f (flicker) FM noise straddles any cutoff, so part of it lands in
-      ``drift`` and part in ``pn`` no matter where the cutoff is placed.
-      Quote the cutoff alongside any derived metric.
-    * ``sosfiltfilt`` extends the signal internally, but the first/last
-      ``~0.5·fs/cutoff`` samples of ``drift`` remain transient-contaminated -
-      trim them via ``edge_trim`` in the downstream metric functions
-      (``edge_trim ≈ 0.5·sampling_rate/cutoff``).
+    * The split between drift and phase noise is spectral, not physical: a
+      laser's 1/f (flicker) FM noise straddles any cutoff, so part of it
+      lands in ``drift`` and part in ``pn`` wherever the cutoff is.  Quote the
+      cutoff with any metric derived from the split.
+    * The zero-phase filter extends the record at both ends, but the first
+      and last ``~0.5·sampling_rate/cutoff`` samples of ``drift`` still
+      carry transients: trim them with ``edge_trim`` in the downstream
+      metric functions.
     """
     phi_arr, xp, _ = dispatch(phi)
     fs = float(sampling_rate)
@@ -119,17 +125,16 @@ def frequency_drift(
     sampling_rate: float,
     edge_trim: int = 0,
 ) -> FrequencyDrift:
-    r"""Residual frequency-wander statistics from a smoothed phase ramp.
+    r"""Residual frequency wander of a smoothed phase and its statistics.
 
     The instantaneous residual frequency offset is the phase slope
-    ``df = diff(drift) / (2π T)`` in Hz, ``T = 1/sampling_rate``.  Report the
-    std (typical wander) and the peak-to-peak (worst-case spin the CPR must
-    follow).
+    ``df = diff(drift) / (2π T)`` in Hz, ``T = 1/sampling_rate``; ``std`` is
+    its typical wander and ``pp`` the worst-case swing the CPR must follow.
 
-    Relate to the BPS tracking limit: a residual ``δf`` rotates the phase by
-    ``2π·δf·T_sym`` per symbol, so over a window of ``K`` symbols the
-    intra-window rotation must stay below the QAM quarter-symmetry ``π/4`` ->
-    ``δf_max ≈ 1/(8·K·T_sym)``.  A larger BPS window tracks *less* drift.
+    Compare with the tracking limit of BPS: a residual ``δf`` rotates the
+    phase by ``2π·δf·T_sym`` per symbol, and over a window of ``K`` symbols
+    the rotation must stay below ``π/4``, half the QAM ambiguity, which gives
+    ``δf_max ≈ 1/(8·K·T_sym)``.  A longer BPS window tracks less drift.
 
     Parameters
     ----------
@@ -139,22 +144,22 @@ def frequency_drift(
         Sampling rate of ``drift_phase`` in Hz (the symbol rate for a
         per-symbol trajectory).
     edge_trim : int, default 0
-        Number of samples to discard from each end before differencing
-        (removes low-pass filter transients).
+        Samples dropped at each end before differencing (the low-pass
+        filter's transients).
 
     Returns
     -------
     FrequencyDrift
-        ``df``, the per-sample residual frequency array, and ``std``, ``pp``,
-        ``max_abs``: floats (SISO) or per-channel arrays (MIMO).
+        ``df``, the per-sample residual frequency, and ``std``, ``pp`` and
+        ``max_abs``: floats (SISO) or ``(C,)`` arrays (MIMO).
 
     Notes
     -----
     The first difference under-reads a spectral component at ``f`` by
     ``sinc(f·T)`` relative to a true derivative.  Because ``drift_phase`` is
-    low-passed (``cutoff ≪ sampling_rate``), this bias is negligible here - it only
-    matters for band-limited content near Nyquist (see the Notes of
-    ``fm_noise_psd``; broadband white FM is not affected).
+    low-passed (``cutoff ≪ sampling_rate``), the bias is negligible here; it
+    matters only for band-limited content near Nyquist (see the Notes of
+    :func:`fm_noise_psd`; broadband white FM is not affected).
     """
     d, xp, _ = dispatch(drift_phase)
     d2, was_1d = as_2d(d, name="drift_phase")

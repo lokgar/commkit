@@ -1,9 +1,8 @@
 """Tests for the fused bps_min_d2 CUDA kernel and its call-site integration.
 
 Kernel-level tests compare against a float64 NumPy reference; end-to-end
-tests compare the public BPS / block_lms outputs computed with the kernel
-against the same call with the kernel disabled (xp fallback), which also
-exercises the fallback contract.
+tests compare the public BPS / block_lms outputs on the GPU against the same
+call on the CPU.
 """
 
 import numpy as np
@@ -14,21 +13,11 @@ from commkit.equalization import block_lms
 from commkit.mapping import Constellation
 from commkit.recovery import BPS, CycleSlip
 from tests.common.conversions import to_numpy
-from tests.common.kernel_utils import reference_bps_d2, skip_unless_kernel_available
+from tests.common.kernel_utils import reference_bps_d2, skip_unless_gpu
 
 # -----------------------------------------------------------------------------
 # Helpers
 # -----------------------------------------------------------------------------
-
-
-@pytest.fixture
-def no_kernel(monkeypatch):
-    """Disable the fused kernel so call sites take the xp fallback path."""
-
-    def disable():
-        monkeypatch.setattr(_cuda, "get_kernel", lambda *a, **k: None)
-
-    return disable
 
 
 def _phase_noise_symbols(order, C=2, N=20_000, seed=7):
@@ -67,7 +56,7 @@ class TestBPSAnchorKernel:
     @pytest.mark.parametrize("joint", [False, True])
     @pytest.mark.parametrize("window", [1, 32])
     def test_anchor_matches_numpy(self, backend_device, xp, joint, window):
-        skip_unless_kernel_available("bps_anchor", backend_device=backend_device)
+        skip_unless_gpu(backend_device)
         from commkit.equalization._block._dd import _block_bps
 
         rng = np.random.RandomState(5)
@@ -122,7 +111,7 @@ class TestBPSKernelCorrectness:
     """Kernel-level correctness against float64 reference."""
 
     def test_table_min_d2_matches_reference(self, backend_device, xp, xpt):
-        skip_unless_kernel_available("bps_min_d2", backend_device=backend_device)
+        skip_unless_gpu(backend_device)
         rng = np.random.RandomState(11)
         C, N, P = 2, 4096, 64
         x = (rng.randn(C, N) + 1j * rng.randn(C, N)).astype(np.complex64)
@@ -140,7 +129,7 @@ class TestBPSKernelCorrectness:
         xpt.assert_allclose(to_numpy(out), ref, rtol=1e-5, atol=1e-7)
 
     def test_table_argmin_matches_reference(self, backend_device, xp, xpt):
-        skip_unless_kernel_available("bps_min_d2", backend_device=backend_device)
+        skip_unless_gpu(backend_device)
         rng = np.random.RandomState(12)
         C, N, P = 2, 4096, 16
         x = (rng.randn(C, N) + 1j * rng.randn(C, N)).astype(np.complex64)
@@ -166,7 +155,7 @@ class TestBPSKernelCorrectness:
         xpt.assert_allclose(to_numpy(out), ref_min, rtol=1e-5, atol=1e-7)
 
     def test_grid_min_d2_matches_reference(self, backend_device, xp, xpt):
-        skip_unless_kernel_available("bps_min_d2", backend_device=backend_device)
+        skip_unless_gpu(backend_device)
         rng = np.random.RandomState(13)
         C, N, P = 2, 4096, 64
         x = (rng.randn(C, N) + 1j * rng.randn(C, N)).astype(np.complex64)
@@ -203,34 +192,29 @@ class TestBPSKernelCorrectness:
     def test_grid_mode_rejects_argmin(self):
         with pytest.raises(KeyError):
             _cuda.get_kernel("not_bps_min_d2")
-        assert _cuda.get_kernel("bps_min_d2", mode="grid", return_argmin=True) is None
+        with pytest.raises(ValueError, match="return_argmin"):
+            _cuda.get_kernel("bps_min_d2", mode="grid", return_argmin=True)
 
 
 @pytest.mark.gpu_only
 class TestBPSKernelEndToEnd:
-    """End-to-end equivalence: kernel vs xp fallback."""
+    """End-to-end equivalence: the GPU kernels against the CPU."""
 
     @pytest.mark.parametrize("order", [128, 16])
-    def test_recovery_bps_kernel_matches_fallback(
-        self, backend_device, xp, xpt, no_kernel, order
-    ):
-        skip_unless_kernel_available("bps_min_d2", backend_device=backend_device)
-        x = xp.asarray(_phase_noise_symbols(order))
+    def test_recovery_bps_kernel_matches_cpu(self, backend_device, xp, xpt, order):
+        skip_unless_gpu(backend_device)
+        x = _phase_noise_symbols(order)
 
-        phi_kern = recovery.estimate_carrier_phase(
-            x,
-            recovery.BPS(test_phases=64, block_size=32),
-            constellation=Constellation.qam(order),
-        ).value
-        no_kernel()
-        phi_fall = recovery.estimate_carrier_phase(
-            x,
-            recovery.BPS(test_phases=64, block_size=32),
-            constellation=Constellation.qam(order),
-        ).value
-        xpt.assert_allclose(
-            to_numpy(phi_kern), to_numpy(phi_fall), rtol=1e-6, atol=1e-9
-        )
+        def run(x):
+            return recovery.estimate_carrier_phase(
+                x,
+                recovery.BPS(test_phases=64, block_size=32),
+                constellation=Constellation.qam(order),
+            ).value
+
+        phi_kern = run(xp.asarray(x))
+        phi_cpu = run(x)
+        xpt.assert_allclose(to_numpy(phi_kern), to_numpy(phi_cpu), rtol=1e-6, atol=1e-9)
 
     @pytest.mark.parametrize(
         "order,cpr_kwargs",
@@ -256,13 +240,13 @@ class TestBPSKernelEndToEnd:
             ),
         ],
     )
-    def test_block_lms_kernel_matches_fallback(
-        self, backend_device, xp, xpt, no_kernel, order, cpr_kwargs
+    def test_block_lms_kernel_matches_cpu(
+        self, backend_device, xp, xpt, order, cpr_kwargs
     ):
-        skip_unless_kernel_available("bps_min_d2", backend_device=backend_device)
+        skip_unless_gpu(backend_device)
         x, train = _equalizer_input(order)
 
-        def run():
+        def run(xp):
             return block_lms(
                 xp.asarray(x),
                 xp.asarray(train),
@@ -273,9 +257,8 @@ class TestBPSKernelEndToEnd:
                 **cpr_kwargs,
             )
 
-        r_kern = run()
-        no_kernel()
-        r_fall = run()
+        r_kern = run(xp)
+        r_cpu = run(np)
 
         # The kernel's per-call metrics are exact (TestBPSKernelCorrectness);
         # over thousands of recursive steps a float32 near-tie in the window
@@ -283,28 +266,28 @@ class TestBPSKernelEndToEnd:
         # by rounding.  The receiver output must not change: same decisions,
         # and the phase apart only at isolated one-candidate ties.
         points = Constellation.qam(order).points
-        y_k, y_f = to_numpy(r_kern.y_hat), to_numpy(r_fall.y_hat)
+        y_k, y_c = to_numpy(r_kern.y_hat), to_numpy(r_cpu.y_hat)
         dec_k = np.argmin(np.abs(y_k[..., None] - points), axis=-1)
-        dec_f = np.argmin(np.abs(y_f[..., None] - points), axis=-1)
-        np.testing.assert_array_equal(dec_k, dec_f)
-        np.testing.assert_allclose(y_k, y_f, atol=0.05)
+        dec_c = np.argmin(np.abs(y_c[..., None] - points), axis=-1)
+        np.testing.assert_array_equal(dec_k, dec_c)
+        np.testing.assert_allclose(y_k, y_c, atol=0.05)
         if r_kern.phase_trajectory is not None:
             step = 2 * np.pi / 4 / 64  # one BPS candidate (square QAM, 64)
             diff = np.abs(
-                to_numpy(r_kern.phase_trajectory) - to_numpy(r_fall.phase_trajectory)
+                to_numpy(r_kern.phase_trajectory) - to_numpy(r_cpu.phase_trajectory)
             )
             assert diff.max() <= step * 1.01
             assert np.count_nonzero(diff > 1e-6) <= diff.size // 1000
 
 
-class TestBPSKernelFallback:
-    """Fallback conditions when kernel cannot or should not be used."""
+class TestBPSKernelDispatch:
+    """Input outside the kernel's limits takes the CPU's implementation."""
 
     @pytest.mark.gpu_only
     def test_recovery_complex128_does_not_consult_kernel(
         self, backend_device, xp, monkeypatch
     ):
-        skip_unless_kernel_available("bps_min_d2", backend_device=backend_device)
+        skip_unless_gpu(backend_device)
 
         def _fail(*a, **k):
             raise AssertionError(

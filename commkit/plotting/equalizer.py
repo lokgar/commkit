@@ -1,4 +1,10 @@
-"""Filter and equalizer response plots."""
+"""Equalizer plots.
+
+:func:`plot_equalizer_result` draws an
+:class:`~commkit.equalization.EqualizerResult` (convergence, taps and the
+carrier phase of inline CPR); :func:`plot_zf_equalizer_response` draws the
+channel, equalizer and combined responses of a ZF / MMSE equalizer.
+"""
 
 from typing import Any
 
@@ -20,28 +26,29 @@ def plot_equalizer_result(
     ax=None,
     show: bool = False,
 ) -> tuple[Any, Any] | None:
-    """
-    Plots adaptive equalizer diagnostics: convergence curve, tap weights, and
-    (when CPR was enabled) the recovered phase trajectory.
+    """Plot the convergence, taps and inline-CPR phase of an equalizer result.
+
+    Panels: the smoothed MSE convergence curve, the tap weights and, when
+    the equalizer ran with ``cpr``, the recovered phase trajectory.
 
     Parameters
     ----------
     result : EqualizerResult
-        Equalizer output containing ``error``, ``weights``, and optionally
-        ``phase_trajectory`` fields.
+        The equalizer's result (its ``error``, ``weights`` and, if any,
+        ``phase_trajectory``).
     smoothing : int, default 50
-        Moving-average window length for the MSE convergence curve.
-    ax : list of Axes, optional
-        Pre-existing axes.  Pass 2 axes when ``phase_trajectory`` is None, or
-        3 axes when CPR was used (``[ax_convergence, ax_taps, ax_phase]``).
-        If None, a new figure is created with the appropriate number of panels.
+        Moving-average window of the MSE convergence curve, in symbols.
+    ax : array_like of matplotlib.axes.Axes, optional
+        Axes to draw on: 2 without a ``phase_trajectory``, 3 with one; ``None``
+        creates a figure.
     show : bool, default False
-        If True, calls ``plt.show()`` and returns None.
+        Call ``plt.show()`` and return ``None``.
 
     Returns
     -------
     (fig, axes) or None
-        Figure and axes array when ``show=False``, None otherwise.
+        The figure and its axes; ``None`` with ``show=True``, which
+        shows the figure instead.
     """
     error = to_device(result.error, "cpu")
     weights = to_device(result.weights, "cpu")
@@ -72,7 +79,7 @@ def plot_equalizer_result(
         if effective > 1 and n > effective:
             mse_smooth = moving_average(mse, window=effective, mode="valid")
             # Element k of mode="valid" output averages mse[k : k+effective].
-            # Place it at the centre of that window so the x-axis is in
+            # Place it at the center of that window so the x-axis is in
             # actual symbol-index space, not smoothed-bin-index space.
             x = np.arange(len(mse_smooth)) + (effective - 1) / 2.0
         else:
@@ -171,35 +178,39 @@ def plot_zf_equalizer_response(
     show: bool = False,
     title: str = "ZF/MMSE Equalizer Response",
 ) -> tuple[Any, Any] | None:
-    """
-    Plots channel, equalizer, and combined frequency responses for ZF/MMSE.
+    """Plot the channel, ZF / MMSE equalizer and combined frequency responses.
 
-    For each channel path, three panels show:
+    Three panels per channel path, in dB:
 
-    * ``|H(f)|`` - channel response in dB.
-    * ``|W(f)|`` - equalizer response (``W = H* / (|H|² + σ²)``) in dB.
-    * ``|H(f)·W(f)|`` - combined response (≈ 0 dB for ZF, soft mask for MMSE).
+    * ``|H(f)|``: the channel;
+    * ``|W(f)|``: the equalizer, ``W = H* / (|H|² + σ²)``;
+    * ``|H(f)·W(f)|``: the combination (≈ 0 dB for ZF, a soft mask for
+      MMSE).
 
     Parameters
     ----------
     channel_estimate : array_like
-        Channel impulse response. Shape: ``(L,)`` for SISO or
-        ``(C_rx, C_tx, L)`` for MIMO.
+        Channel impulse response, ``(L,)`` for SISO or ``(C_rx, C_tx, L)``
+        for MIMO.
     noise_variance : float, default 0.0
-        Noise variance ``σ²`` for MMSE regularization. ``0.0`` gives pure ZF.
+        Noise variance ``σ²`` of the MMSE regularization; ``0.0`` gives ZF.
     nfft : int, default 1024
-        FFT size for the frequency response computation.
+        FFT size of the frequency responses.
     sampling_rate : float, default 1.0
-        Sampling rate in Hz for frequency-axis scaling.
-    ax : array_like of Axes, optional
-        For SISO: 3 Axes. For MIMO: ``(C_rx * C_tx, 3)`` Axes.
-        If ``None``, a new figure is created.
+        Sampling rate in Hz, for the frequency axis.
+    ax : array_like of matplotlib.axes.Axes, optional
+        Axes to draw on: 3 for SISO, ``(C_rx * C_tx, 3)`` for MIMO; ``None``
+        creates a figure.
     show : bool, default False
+        Call ``plt.show()`` and return ``None``.
     title : str, default "ZF/MMSE Equalizer Response"
+        Title of the figure.
 
     Returns
     -------
     (fig, axes) or None
+        The figure and its axes; ``None`` with ``show=True``, which
+        shows the figure instead.
     """
     h = to_device(channel_estimate, "cpu")
     reg = max(noise_variance, 1e-12)

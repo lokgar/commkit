@@ -1,4 +1,7 @@
-"""Decision-directed frequency-domain block equalizer: block_lms."""
+"""Trained and decision-directed frequency-domain block equalizer (private).
+
+:func:`block_lms`, re-exported by :mod:`commkit.equalization`.
+"""
 
 from __future__ import annotations
 
@@ -105,8 +108,11 @@ class _BlockCarrier:
 
 @dataclass
 class _BlockBps:
-    """Blind phase search across blocks: candidates, window history, S-fold
-    unwrap and cycle-slip state (device arrays; host for the Numba slip path).
+    """Blind phase search state carried across blocks.
+
+    The candidates, the window history, the S-fold unwrap and the
+    cycle-slip state, as device arrays (host arrays for the Numba slip
+    path).
     """
 
     P: int
@@ -159,8 +165,8 @@ class _BlockBps:
         K = self.K
         S = float(self.symmetry)
         if self.anchor_kernel is not None:
-            # One launch per block and no host synchronization (the NumPy
-            # path below is its reference).
+            # GPU: one launch per block and no host synchronization (the
+            # NumPy path below is its reference).
             if self.da_hist is None:
                 self.da_hist = xp.zeros((C, max(0, K - 1)), dtype=xp.complex64)
             phi, hist = self.anchor_kernel(
@@ -175,12 +181,11 @@ class _BlockBps:
             # In place: a captured graph keeps reading this buffer.
             self.da_hist[...] = hist
             return phi
-        # Host NumPy: a training block's (C, n) products are tiny, so the
-        # CuPy fallback brings them over once instead of a dozen launches.
+        # CPU input (GPU input always has the kernel).
         if self.da_hist is None:
             self.da_hist = np.zeros((C, max(0, K - 1)), dtype=np.complex128)
-        y_h = np.asarray(to_device(y, "cpu"), dtype=np.complex128)
-        d_h = np.asarray(to_device(d, "cpu"), dtype=np.complex128)
+        y_h = np.asarray(y, dtype=np.complex128)
+        d_h = np.asarray(d, dtype=np.complex128)
         cat = np.concatenate([self.da_hist, y_h * np.conj(d_h)], axis=1)
         cs = np.concatenate(
             [np.zeros((C, 1), dtype=np.complex128), np.cumsum(cat, axis=1)], axis=1
@@ -188,14 +193,14 @@ class _BlockBps:
         win = cs[:, K:] - cs[:, :-K]  # (C, n), causal K-symbol window
         if self.joint and C > 1:
             win = np.broadcast_to(win.sum(axis=0, keepdims=True), win.shape)
-        offset = np.asarray(to_device(self.offset4, "cpu"), dtype=np.float64)
+        offset = np.asarray(self.offset4, dtype=np.float64)
         ext = np.concatenate([(offset / S)[:, None], np.angle(win)], axis=1)
         phi = np.unwrap(ext, axis=1)[:, 1:]
         if K > 1:
             self.da_hist = cat[:, -(K - 1) :].copy()
-        self.offset4[...] = xp.asarray(phi[:, -1] * S)
-        self.prev4[...] = xp.asarray(phi[:, -1] * S)
-        return xp.asarray(phi)
+        self.offset4[...] = phi[:, -1] * S
+        self.prev4[...] = phi[:, -1] * S
+        return phi
 
     def phase(
         self,
@@ -338,88 +343,36 @@ def block_lms(
     state: EqualizerState | None = None,
     cuda_graph: bool = True,
 ) -> EqualizerResult:
-    """Block LMS equalizer with frequency-domain gradient accumulation.
+    """Equalize with block LMS, the gradient accumulated in the frequency domain.
 
-    Processes the signal in fixed-size blocks of ``block_size`` symbols.
-    Within each block the filter is held frozen, all ``block_size`` errors are
-    accumulated into a single frequency-domain gradient, and the weights are
-    updated once per block.  This amortises the FFT overhead over many symbols,
-    making it significantly more efficient than per-symbol LMS on GPU for large
-    MIMO configurations (C ≥ 4) or long sequences.
+    The record is processed in blocks of ``block_size`` symbols: within a
+    block the filter is frozen, the errors of all its symbols are summed
+    into one frequency-domain gradient, and the weights are updated once per
+    block.  The FFTs are shared by many symbols, which makes it much faster
+    than per-symbol LMS on the GPU for large MIMO configurations (C ≥ 4) or
+    long records.
 
-    The primary target is **GPU** via CuPy.  On CPU, per-symbol LMS with the
-    Numba backend (``lms(..., backend='numba')``) is typically faster because
-    the block-FFT overhead outweighs the gradient-accumulation saving for
-    small channel counts.
+    It is meant for GPU (CuPy) input.  On the CPU the per-symbol :func:`lms`
+    (Numba) is usually faster, because the block FFTs cost more than the
+    accumulated gradient saves at small channel counts.
 
-    ``block_lms`` is the **trained / decision-directed** frequency-domain
-    equalizer.  Its blind siblings share the same overlap-save engine but use a
-    phase-blind error: :func:`block_cma` (Godard constant-modulus) and
-    :func:`block_rde` (ring-directed, for multi-ring QAM).  For fast channel
-    dynamics, the per-symbol :func:`lms` adapts with a one-symbol lag.
-
-    Algorithm (per block b)
-    -----------------------
-    1. **Forward pass** - frequency-domain butterfly filter::
-
-           Y_fd[i] = sum_j conj(H_fd[i,j]) * X_fd[j]
-
-       where ``H_fd = FFT(h, n=F)`` and ``X_fd = FFT(x_block, n=F)``.
-       Output symbols are extracted at decimated positions ``y[n] = y_time[n*sps]``.
-
-    2. **BPS phase recovery** (if ``cpr`` is set) - for each symbol in the
-       block, averages the min-distance metric over a causal trailing window of
-       ``cpr.block_size`` symbols and picks the minimum-metric candidate
-       rotation.  This produces one phase estimate ``phi_n`` per symbol
-       (not one per block), so ``cpr.block_size`` and ``block_size`` are
-       independent parameters: ``block_size`` controls FFT/gradient efficiency
-       while ``cpr.block_size`` controls phase noise suppression.  The raw
-       ``[0, 2*pi/S)`` argmin (``S`` the constellation's rotational symmetry)
-       is converted to full-range radians by a causal ``S``-fold unwrap, and stored in a float64 accumulator in ``phase_trajectory``.
-
-    3. **Cycle-slip correction** (if ``cpr.cycle_slip`` is set) - for
-       each symbol of the per-symbol BPS phase tensor ``phi_n`` (shape
-       ``(C, B)``) the phase is compared to a linear-regression prediction
-       built from a circular buffer of ``history`` past
-       corrected phases (identical algorithm to ``lms`` with
-       ``cpr`` set).  If ``|phi_n - phi_pred| > threshold``
-       the nearest ``2*pi/symmetry`` quantum is subtracted and the corrected
-       value is stored in the history buffer.  On GPU the detector runs as a
-       small sequential CUDA kernel on device-resident buffers (no host
-       round-trip); when that kernel is unavailable the ``(C, B)`` float64
-       block is transferred device->host, corrected by the Numba/Python
-       detector, and written back - one D->H + H->D round-trip per block.
-
-    4. **Error** - training or DD slicer on CPR-corrected output; back-rotated
-       to the tap plane using the block-average phase ``phi_b``::
-
-           e_taps[n] = e_clean[n] * exp(+j*phi_b)
-
-    5. **Gradient** - scatter ``e_taps`` to sample positions, then::
-
-           dH_fd[i,j]  = conj(E_fd[i]) * X_fd[j]
-           h          += mu * IFFT(dH_fd)[...:T]
-
-       ``mu`` is applied to the **summed** block gradient (all B per-symbol
-       contributions).  This sum is exactly what a frozen-weight per-symbol LMS
-       would accumulate over the same B symbols, so ``step_size`` is on the
-       **same scale as** ``lms``: the same ``mu`` yields the same
-       convergence and steady-state MSE (see ``step_size`` below).  Only the
-       *stability ceiling* is Bx lower - the operating step that matches
-       ``lms`` is unchanged.
+    ``block_lms`` is the trained and decision-directed frequency-domain
+    equalizer.  Its blind siblings :func:`block_cma` (constant modulus) and
+    :func:`block_rde` (radius-directed, for multi-ring QAM) share its
+    overlap-save engine with a phase-blind error.  For fast channel dynamics,
+    the per-symbol :func:`lms` adapts with a lag of one symbol.
 
     Parameters
     ----------
     samples : array_like or Signal
-        Input signal samples.  Shape: ``(N_samples,)`` for SISO or
-        ``(C, N_samples)`` for MIMO butterfly equalization.
-        Typically at 2 samples/symbol for fractionally-spaced equalization.
+        Received samples, ``(N,)`` for SISO or ``(C, N)`` for the MIMO
+        butterfly, usually at 2 samples per symbol (fractionally spaced).
         A :class:`Signal` supplies ``sps`` and ``constellation``; the result
         then also carries ``signal``, the 1-SPS output Signal.
     training_symbols : array_like, optional
         Known transmitted symbols at 1 SPS, on the scale of the unit-power
-        ``constellation`` (used as given).
-        Shape: ``(N_train,)`` for SISO or ``(C, N_train)`` for MIMO.
+        ``constellation`` (used as given), ``(N_train,)`` or
+        ``(C, N_train)``.
     num_taps : int, default 21
         Number of taps per FIR filter (tap count in samples).
     sps : int, optional
@@ -427,107 +380,151 @@ def block_lms(
         Taken from the Signal; required for array input.  A value that
         disagrees with the Signal raises.
     step_size : float, optional
-        LMS step size μ, on the **same scale as** ``lms``: because the block
-        update is the summed gradient over all B symbols - exactly what a
-        frozen-weight per-symbol LMS accumulates over those symbols - the same
-        μ produces the same convergence speed per symbol, independent of
+        LMS step size ``μ`` on the scale of :func:`lms`: the block update is
+        the gradient summed over the block's symbols, exactly what a
+        per-symbol LMS with frozen weights accumulates over them, so the same
+        ``μ`` converges at the same speed per symbol, whatever
         ``block_size``.
 
-        Because the weights are frozen across the block, the *stability
-        ceiling* falls as ``1/block_size``: the product ``μ·block_size``
-        must stay below about 1.5 (the ceiling does not depend on
-        ``num_taps`` or the channel count).  The default
+        Because the weights are frozen across the block, the stability
+        ceiling falls as ``1/block_size``: ``μ·block_size`` must stay below
+        about 1.5 (whatever ``num_taps`` and the channel count).  The default
         ``min(0.5 / block_size, 8e-3)`` sits at a quarter of that ceiling,
         where convergence takes a few blocks and the steady-state MSE is
         within a few tenths of a dB of the best step; for ``block_size``
         below 64 the cap ``8e-3`` limits the per-symbol misadjustment.
     block_size : int, default 256
-        Number of output symbols per LMS gradient accumulation block.  Larger
-        values increase GPU efficiency but reduce adaptation speed.  Independent
-        of the BPS averaging window (``cpr.block_size``).
+        Output symbols per weight update.  Larger blocks use the GPU better
+        but adapt more slowly.  Independent of the BPS window
+        (``cpr.block_size``).
     constellation : Constellation, optional
-        Decision constellation for the slicer, unit power (a shaped
-        constellation carries its pmf).  Defaults to the Signal's
-        ``constellation``; required for array input.
+        Decision constellation, at unit power (a shaped constellation brings
+        its pmf).  Defaults to the Signal's ``constellation``; required for
+        array input.
     store_weights : bool, default False
-        If ``True``, stores the weight tensor at every block start in
-        ``EqualizerResult.weights_history``.
+        Record the weights at the start of every block in
+        ``weights_history``.
     initial_taps : array_like, optional
-        Initial tap weights instead of the center-tap identity, shape
-        ``(C, C, T)`` or the SISO short-hands.  Only for a cold start.
+        Initial tap weights instead of the center-tap identity,
+        ``(C, C, T)`` or the SISO shapes of :func:`lms`.  Only for a cold
+        start.
     cpr : BPS, optional
-        Inline blind phase search (``commkit.recovery.BPS``): ``test_phases``
-        candidates in ``[0, 2π/S)`` (``S`` the constellation's rotational
-        symmetry), a causal window of the last
-        ``block_size`` symbols per output symbol (independent of the
+        Inline blind phase search (:class:`commkit.recovery.BPS`):
+        ``test_phases`` candidates in ``[0, 2π/S)`` (``S`` the
+        constellation's rotational symmetry), a causal window of the last
+        ``block_size`` symbols for every output symbol (independent of the
         equalizer's ``block_size``), ``joint_channels`` to sum the metrics
-        across MIMO channels, and an optional nested ``CycleSlip``.  The PLL
-        is not available: its per-symbol integration does not fit the block
+        across MIMO channels, and an optional nested ``CycleSlip``.  There is
+        no PLL option: its per-symbol integration does not fit the block
         gradient.
-    pad_mode : {'zeros', 'edge'}, default 'zeros'
+    pad_mode : {'zeros', 'edge', 'reflect'}, default 'zeros'
         Left padding of a cold start; see :func:`lms`.
     state : EqualizerState, optional
         Continue from ``result.state`` of a previous call with the same
         configuration; see :func:`lms`.  The state is taken at the last block
         boundary before the zero-padded tail.
     cuda_graph : bool, default True
-        On the GPU (CuPy) backend, capture the per-block compute into a CUDA
-        graph and replay it once per block, collapsing the ~30-50 per-block
-        kernel launches into a single launch.  This removes the launch-overhead
-        floor that dominates small/medium ``block_size`` runs.  Only full blocks
-        in the decision-directed region are captured; the training and final
-        partial blocks always run eagerly.  Has no effect on CPU, when
-        ``store_weights=True``, or when cycle-slip correction is enabled without
-        the ``cs_block`` CUDA kernel; capture failures fall back to the eager
-        loop with a warning, so output is unaffected either way.  Set ``False``
-        to force the eager loop (e.g. for debugging or profiling).
+        For GPU (CuPy) input, capture the work of one block into a CUDA graph
+        and replay it once per block: one launch instead of about 30 to 50,
+        which removes the launch overhead that dominates at small and medium
+        ``block_size``.  Full blocks are captured, one graph for training
+        blocks and one for decision-directed ones; the block that straddles
+        the end of the training and the last, partial block run eagerly.  No effect on the CPU, with ``store_weights=True``, or with
+        cycle-slip correction on more than 1024 channels (the limit of the
+        ``cs_block`` CUDA kernel; the correction then runs on the host once
+        per block).  The output is the same either way; ``False`` forces the
+        eager loop (e.g. for debugging or profiling).
 
     Returns
     -------
     EqualizerResult
-        Same fields as ``lms``, plus:
-
-        * ``input_norm_factor`` - RMS factor used to normalize inputs.
-        * ``state`` - :class:`EqualizerState` for ``state=`` continuation,
-          including the BPS accumulators.
-
-        ``phase_trajectory`` is populated with ``cpr``; shape
-        ``(N_sym,)`` SISO or ``(C, N_sym)`` MIMO, one estimate per symbol.
-
-        When ``samples`` is a :class:`Signal`, ``y_hat`` is a new
-        :class:`Signal` at the symbol rate (``sampling_rate = symbol_rate``).
+        The fields described for :func:`lms`; ``state`` also carries the BPS
+        accumulators, and ``phase_trajectory`` (with ``cpr``) has one
+        estimate per symbol, ``(N_sym,)`` or ``(C, N_sym)``.  ``y_hat`` is
+        always an array; for Signal input ``signal`` is the 1-SPS output
+        Signal.
 
     Warnings
     --------
-    **GPU throughput - use large block_size:** On GPU (CuPy) each Python
-    loop iteration launches ~10-20 CUDA kernels (FFT, einsum, IFFT, BPS
-    rotations, ...).  At ``block_size=64`` and 100k symbols that is ~1 500
-    blocks x kernel-launch overhead; at ``block_size=2048`` it drops to
-    ~49 blocks.  Throughput improves markedly once the cuFFT/cuBLAS work
-    per block dominates the Python overhead.  On GPU prefer
-    ``block_size`` ≥ 512, ideally 1024-4096.
+    **GPU throughput: use a large block_size.**  On the GPU each block
+    launches about 10 to 20 kernels (FFT, einsum, IFFT, BPS rotations, ...):
+    100k symbols are about 1500 blocks at ``block_size=64`` but 49 at
+    ``block_size=2048``, and the throughput rises once the cuFFT and cuBLAS
+    work of a block outweighs the Python overhead.  On the GPU prefer
+    ``block_size`` of 512 or more, ideally 1024 to 4096.
 
-    **BPS cycle-slip correction (``cpr.cycle_slip``):**
-    On GPU the detector runs as a sequential CUDA kernel on device-resident
-    history buffers, so enabling it adds one extra kernel launch per block
-    and no host synchronization.  Only when that kernel is unavailable
-    (no custom-kernel support) does each block fall back to a synchronous
-    ``(C, block_size)`` float64 device->host round-trip through the CPU
-    detector, which serialises the GPU pipeline.
+    **Cycle-slip correction (``cpr.cycle_slip``).**  On the GPU the detector
+    is a sequential CUDA kernel on history buffers kept on the device, which
+    adds one launch per block and no host synchronization.  Only without
+    that kernel (no custom-kernel support) does each block make a
+    synchronous host round trip of its ``(C, block_size)`` float64 phases
+    through the CPU detector, which serializes the GPU pipeline.
 
-    **CPU (NumPy) backend:** even slower than GPU because the Python loop
-    dominates at any practical block size.  Use the per-symbol :func:`lms`
-    (Numba) for CPU workloads instead.
+    **CPU (NumPy) input** is slower than on the GPU: the Python loop over the
+    blocks dominates at any practical block size.  Use the per-symbol
+    :func:`lms` (Numba) on the CPU.
 
-    **Stability / overflow:** ``step_size`` is applied to the **summed**
-    gradient over all ``block_size`` symbols (not averaged).  This keeps μ on
-    the same scale as ``lms`` (same μ -> same convergence per symbol), but it
-    also means the *stability ceiling* - ``μ·block_size`` below about 1.5 -
-    is roughly ``block_size`` times lower than per-symbol LMS, because the
-    weights are frozen across the block.  Above the ceiling the run either
-    diverges (NaN weights, detected at end of run, raises) or stays bounded
-    without converging.  The default step scales with ``block_size`` and
-    stays below the ceiling.
+    **Stability.**  ``step_size`` multiplies the gradient summed (not
+    averaged) over the block.  That keeps ``μ`` on the scale of :func:`lms`
+    (the same ``μ`` converges at the same speed per symbol), but it makes the
+    stability ceiling, ``μ·block_size`` below about 1.5, about
+    ``block_size`` times lower than for per-symbol LMS, because the weights
+    are frozen across the block.  Above the ceiling the run diverges (NaN
+    weights, detected at the end, raise) or stays bounded without
+    converging.  The default step scales with ``block_size`` and stays below
+    the ceiling.
+
+    Notes
+    -----
+    **Algorithm (per block b).**
+
+    1. **Forward pass**: the butterfly filter in the frequency domain::
+
+           Y_fd[i] = sum_j conj(H_fd[i,j]) * X_fd[j]
+
+       with ``H_fd = FFT(h, n=F)`` and ``X_fd = FFT(x_block, n=F)``; the
+       output symbols are the decimated samples ``y[n] = y_time[n*sps]``.
+
+    2. **BPS phase recovery** (with ``cpr``): for each symbol of the block,
+       the distance metric is averaged over a causal window of the last
+       ``cpr.block_size`` symbols and the candidate rotation with the
+       smallest metric is picked.  That gives one phase ``phi_n`` per symbol,
+       not per block, so the two block sizes are independent: ``block_size``
+       sets the efficiency of the FFTs and the gradient, ``cpr.block_size``
+       the suppression of phase noise.  The raw
+       ``[0, 2*pi/S)`` argmin (``S`` the constellation's rotational symmetry)
+       is converted to full-range radians by a causal ``S``-fold unwrap and
+       stored in a float64 accumulator in ``phase_trajectory``.
+
+    3. **Cycle-slip correction** (with ``cpr.cycle_slip``): each phase
+       ``phi_n`` of the block's ``(C, B)`` BPS phases is compared with the
+       prediction of a regression line through a circular buffer of the last
+       ``history`` corrected phases (the algorithm of :func:`lms`).  If
+       ``|phi_n - phi_pred| > threshold``, the nearest multiple of
+       ``2*pi/symmetry`` is subtracted and the corrected value enters the
+       buffer.  On the GPU the detector is a small sequential CUDA kernel on
+       buffers kept on the device; without that kernel the ``(C, B)``
+       float64 block is copied to the host, corrected by the Numba detector
+       and copied back, one round trip per block.
+
+    4. **Error**: from the training symbols or the decisions on the
+       CPR-corrected output, rotated back to the tap plane with the block's
+       mean phase ``phi_b``::
+
+           e_taps[n] = e_clean[n] * exp(+j*phi_b)
+
+    5. **Gradient**: ``e_taps`` scattered to the sample positions, then::
+
+           dH_fd[i,j]  = conj(E_fd[i]) * X_fd[j]
+           h          += mu * IFFT(dH_fd)[...:T]
+
+       ``mu`` multiplies the block's summed gradient (the contributions of
+       all B symbols), exactly what a per-symbol LMS with frozen weights
+       accumulates over them, so ``step_size`` is on the scale of
+       :func:`lms`: the same ``mu`` gives the same convergence and
+       steady-state MSE (see ``step_size`` above).  Only the stability
+       ceiling is B times lower; the step that matches :func:`lms` is the
+       same.
     """
     signal_adapter = adapt_signal(samples, function_name="block_lms()")
     samples = signal_adapter.array
@@ -606,17 +603,15 @@ def block_lms(
             slicer.kernel = _cuda.get_kernel(
                 "bps_min_d2", mode="table", return_argmin=True
             )
-            if slicer.kernel is not None:
-                slicer.phasor = xp.ones(1, dtype=xp.complex64)
+            slicer.phasor = xp.ones(1, dtype=xp.complex64)
         if bps is not None and n_train > 0:
             bps.anchor_kernel = _cuda.get_kernel("bps_anchor")
         if bps is not None and bps.cs and C <= 1024:
             bps.cs_kernel = _cuda.get_kernel("cs_block")
-            if bps.cs_kernel is not None:
-                bps.cs_buf_y = xp.asarray(bps.cs_buf_y)
-                bps.cs_buf_ptr = xp.asarray(bps.cs_buf_ptr)
-                bps.cs_buf_n = xp.asarray(bps.cs_buf_n)
-                bps.cs_stats = xp.asarray(bps.cs_stats)
+            bps.cs_buf_y = xp.asarray(bps.cs_buf_y)
+            bps.cs_buf_ptr = xp.asarray(bps.cs_buf_ptr)
+            bps.cs_buf_n = xp.asarray(bps.cs_buf_n)
+            bps.cs_stats = xp.asarray(bps.cs_stats)
 
     cpr_info = ""
     if bps is not None:
@@ -721,15 +716,13 @@ def block_lms(
     first_dd_full = ((n_train + block_size - 1) // block_size) * block_size
     n_dd_full = max(0, (n_sym - first_dd_full) // block_size)
     n_train_full = min(n_train, n_sym) // block_size
-    # A training block needs the device anchor (the NumPy one syncs).
-    train_graph = bps is None or bps.anchor_kernel is not None
 
     def capturable(B: int, b_start: int) -> str | None:
         if B != block_size:
             return None
         if n_train - b_start <= 0:
             return "dd"
-        if train_graph and n_train - b_start >= B:
+        if n_train - b_start >= B:
             return "train"
         return None
 
@@ -744,7 +737,7 @@ def block_lms(
             and not store_weights
             and (bps is None or not bps.cs or bps.cs_kernel is not None)
             # need >= 1 warmup block + >= 1 captured block of a kind
-            and (n_dd_full >= 2 or (train_graph and n_train_full >= 2))
+            and (n_dd_full >= 2 or n_train_full >= 2)
         ),
         name="block_lms",
         at_resume=at_resume,
@@ -759,11 +752,11 @@ def block_lms(
             f"min(0.5 / block_size, 8e-3) = {min(0.5 / block_size, 8e-3):.2e} "
             f"sits at a quarter of that ceiling."
         )
-    result = _assemble_block(run, y_all, e_all, w_hist, phi_all, n_train)
     weights, carrier = snap[0]
-    result.state = _block_state(
+    state_out = _block_state(
         run, equalizer="block_lms", cpr=cpr, weights=weights, carrier=carrier
     )
+    result = _assemble_block(run, y_all, e_all, w_hist, phi_all, n_train, state_out)
     return _attach_equalized_signal(
         _log_equalizer_exit(result, name="Block-LMS"), sig, state
     )
@@ -839,8 +832,9 @@ def _assemble_block(
     w_hist: ArrayType | None,
     phi_all: ArrayType | None,
     n_train: int,
+    state: EqualizerState,
 ) -> EqualizerResult:
-    """Device buffers -> ``EqualizerResult`` (SISO squeezed)."""
+    """Build the ``EqualizerResult`` from the device buffers (SISO squeezed)."""
     if run.was_1d:
         return EqualizerResult(
             y_hat=y_all[0],
@@ -850,6 +844,7 @@ def _assemble_block(
             num_train_symbols=n_train,
             input_norm_factor=run.eq_norm,
             phase_trajectory=None if phi_all is None else phi_all[0],
+            state=state,
         )
     return EqualizerResult(
         y_hat=y_all,
@@ -859,4 +854,5 @@ def _assemble_block(
         num_train_symbols=n_train,
         input_norm_factor=run.eq_norm,
         phase_trajectory=phi_all,
+        state=state,
     )

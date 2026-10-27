@@ -1,5 +1,9 @@
-"""
-Frame containers: structured preamble and single-carrier frame models.
+"""Frame containers: preambles and single-carrier frames.
+
+A :class:`SingleCarrierFrame` describes a transmitted frame (preamble,
+payload, pilots, guard intervals, MIMO streams) and builds it into a
+:class:`~commkit.core.Signal` with ``to_signal``; :func:`extract_payload`
+cuts the payload out of a frame Signal at one sample per symbol.
 """
 
 from dataclasses import dataclass, field
@@ -22,24 +26,25 @@ __all__ = ["Preamble", "SingleCarrierFrame", "extract_payload"]
 
 @dataclass(frozen=True, kw_only=True)
 class Preamble:
-    """
-    Structured container for frame synchronization sequences (preambles).
+    """Frame-synchronization preamble: a Barker or Zadoff-Chu sequence.
 
-    Preambles are automatically generated based on the specified sequence type
-    and length. Manual overrides for bits or symbols are not supported to
-    ensure consistency within the processing pipeline.
+    The symbols are built from the fields on construction (host complex64,
+    ``(length,)``, or ``(num_streams, length)`` for several streams); they
+    cannot be set by hand.
 
-    Attributes
+    Parameters
     ----------
     sequence_type : {"barker", "zc"}, default "barker"
-        The synchronization sequence algorithm.
+        The sequence family.
     length : int
-        Total length of the preamble in symbols.
-        For "barker": length must be from the set {2, 3, 4, 5, 7, 11, 13}.
-        For "zc": length must be a prime number.
+        Length in symbols.  Barker: one of 2, 3, 4, 5, 7, 11, 13.  ZC: any
+        length; a prime gives the ideal cross-correlation between roots.
     root : int, default 1
-        ZC root index (only meaningful for ``sequence_type='zc'``).
-        Must satisfy ``1 <= root < length``.
+        ZC root index ``u``, in ``[1, length)`` and coprime to ``length``;
+        ignored for Barker.
+    num_streams : int, default 1
+        Number of TX streams.  ZC preambles get a distinct root per stream
+        (``zc_mimo_root``); a Barker preamble repeats the same sequence.
     """
 
     sequence_type: str = "barker"
@@ -58,8 +63,7 @@ class Preamble:
     # -------------------------------------------------------------------------
 
     def __post_init__(self) -> None:
-        """
-        Validate the fields and generate the preamble symbols.
+        """Validate the fields and generate the preamble symbols.
 
         This ensures that standard sequences are generated correctly according
         to the requested sequence properties.
@@ -116,12 +120,15 @@ class Preamble:
 
     @property
     def symbols(self) -> Any:
-        """The IQ symbols of the preamble."""
+        """The preamble symbols (host complex64).
+
+        ``(length,)``, or ``(num_streams, length)`` for several streams.
+        """
         return self._symbols
 
     @property
     def num_symbols(self) -> int:
-        """Total number of symbols in the preamble."""
+        """Number of symbols per stream, ``length``."""
         return self.length
 
     # -------------------------------------------------------------------------
@@ -137,8 +144,7 @@ class Preamble:
         periodic: bool = False,
         device: str = "cpu",
     ) -> Signal:
-        """
-        Pulse-shaped waveform of the preamble sequence.
+        """Shape the preamble into a Signal.
 
         Parameters
         ----------
@@ -158,7 +164,8 @@ class Preamble:
         Returns
         -------
         Signal
-            The shaped preamble at unit symbol power.
+            The shaped preamble, normalized per stream to unit symbol power,
+            without constellation or reference.
         """
         sps = require_integer_sps(sps, "Preamble.to_signal()")
         device = require_device(device, "Preamble.to_signal()")
@@ -179,15 +186,14 @@ def _qpsk() -> Constellation:
 
 @dataclass(frozen=True, kw_only=True)
 class SingleCarrierFrame:
-    """
-    Represents a structured single-carrier frame with Preamble, Pilots, Payload, and Guard Interval.
+    """Single-carrier frame: preamble, payload with pilots, and guard interval.
 
-    This class provides a high-level abstraction for constructing frames
-    used in digital communication systems (1/10/100 GbE, 5G, etc.).
-    It supports various pilot patterns for channel estimation and guard
-    intervals for multi-path mitigation.
+    The fields describe the layout and the seeds of the data; payload and
+    pilot symbols are drawn from them when first used, and
+    :meth:`to_signal` builds the waveform.  Pilots serve channel estimation
+    and pilot-aided recovery, the guard interval multipath.
 
-    Attributes
+    Parameters
     ----------
     payload_len : int, default 1000
         Number of payload symbols per stream.  With pilots it must fill whole
@@ -197,32 +203,35 @@ class SingleCarrierFrame:
         Payload constellation.  A shaped one
         (``Constellation.qam(64).shaped(entropy=5)``) gives a PS payload.
     payload_seed : int, default 42
-        Seed for reproducible payload data generation.
+        Seed of the payload data.
     preamble : Preamble, optional
-        Structured preamble for synchronization.  For MIMO with ZC sequences,
-        each TX stream automatically receives a unique root via
-        ``zc_mimo_root``.
+        Synchronization preamble, before the body.  A multi-stream preamble
+        must have ``num_streams`` streams; a one-stream preamble is repeated
+        on every stream.
     pilot_pattern : {"none", "block", "comb"}, default "none"
-        "none": No pilots.
-        "block": A block of symbols at the start of the frame body.
-        "comb": Single pilot symbols interleaved every `pilot_period`.
+        ``"none"``: no pilots.  ``"comb"``: one pilot every
+        ``pilot_period`` symbols, the first at the start of the body.
+        ``"block"``: ``pilot_block_len`` pilots at the start of every period
+        of ``pilot_period`` symbols.
     pilot_period : int, default 0
-        The period of pilot insertion in symbols.
+        Pilot period in symbols (pilots included); ``> 1`` for ``"comb"``,
+        ``> pilot_block_len`` for ``"block"``.
     pilot_block_len : int, default 0
-        Length of the pilot block (mode="block") in symbols.
+        Pilots per period for ``"block"``.
     pilot_seed : int, default 1337
-        Seed for pilot symbol generation.
+        Seed of the pilot symbols.
     pilot_constellation : Constellation, default ``Constellation.psk(4)``
         Pilot constellation; must be unshaped.
     pilot_gain_db : float, default 0.0
-        Pilot boosting in dB relative to the payload power.
+        Pilot power boost in dB relative to the payload.
     guard_type : {"zero", "cp"}, default "zero"
-        "zero": Zero-padding at the end of the frame.
-        "cp": Cyclic Prefix prepended to the frame.
+        ``"zero"``: zeros after the frame.  ``"cp"``: a cyclic prefix, the
+        last ``guard_len`` symbols of the frame repeated before it.
     guard_len : int, default 0
-        Length of the guard interval in symbols.
+        Guard interval in symbols.
     num_streams : int, default 1
-        Number of independent spatial streams (MIMO).
+        Number of independent streams (MIMO), each with its own payload and
+        pilots.
 
     Notes
     -----
@@ -312,12 +321,11 @@ class SingleCarrierFrame:
     # -------------------------------------------------------------------------
 
     def _generate_pilot_mask(self) -> tuple[ArrayType, int]:
-        """
-        Calculates the pilot placement mask and total frame length.
+        """Calculate the pilot placement mask and total frame length.
 
         Returns
         -------
-        mask : array_like (bool)
+        mask : ndarray (bool)
             Boolean mask where True indicates a pilot symbol location.
         body_length : int
             Total number of symbols in the frame body (payload + pilots).
@@ -388,8 +396,7 @@ class SingleCarrierFrame:
         self._cache["payload_symbols"] = ref.symbols
 
     def _ensure_pilot_generated(self) -> None:
-        """
-        Generate and cache the pilot bits and symbols with ``generate()``.
+        """Generate and cache the pilot bits and symbols with ``generate()``.
 
         Pilots are always uniform: shaping would destroy the known-reference
         property required for channel estimation.
@@ -418,40 +425,27 @@ class SingleCarrierFrame:
 
     @property
     def payload_bits(self) -> ArrayType:
-        """
-        Returns the raw payload bits.
+        """The payload bits (host int8).
 
-        Returns
-        -------
-        array_like
-            Binary bits (0s and 1s).
+        ``(payload_len * k,)``, or ``(num_streams, payload_len * k)`` for
+        several streams.
         """
         self._ensure_payload_generated()
         return self._cache.get("payload_bits")
 
     @property
     def payload_symbols(self) -> ArrayType:
-        """
-        Returns the modulated payload symbols.
+        """The payload symbols (host).
 
-        Returns
-        -------
-        array_like
-            IQ symbols.
+        ``(payload_len,)``, or ``(num_streams, payload_len)`` for several
+        streams.
         """
         self._ensure_payload_generated()
         return self._cache.get("payload_symbols")
 
     @property
     def pilot_bits(self) -> ArrayType | None:
-        """
-        Returns the raw pilot bits, if pilots are enabled.
-
-        Returns
-        -------
-        array_like or None
-            Binary bits if `pilot_pattern` is not "none".
-        """
+        """The pilot bits (host int8), or ``None`` without pilots."""
         if self.pilot_pattern == "none":
             return None
         self._ensure_pilot_generated()
@@ -459,13 +453,9 @@ class SingleCarrierFrame:
 
     @property
     def pilot_symbols(self) -> ArrayType | None:
-        """
-        Returns the modulated pilot symbols.
+        """The pilot symbols (host), or ``None`` without pilots.
 
-        Returns
-        -------
-        array_like or None
-            IQ symbols if `pilot_pattern` is not "none".
+        Without ``pilot_gain_db``; :attr:`body_symbols` carries the boost.
         """
         if self.pilot_pattern == "none":
             return None
@@ -474,16 +464,11 @@ class SingleCarrierFrame:
 
     @property
     def body_symbols(self) -> ArrayType:
-        """
-        Returns the interleaved payload and pilot symbols.
+        """The body: payload and pilot symbols interleaved (host complex64).
 
-        WARNING: Pilot gain is applied if `pilot_gain_db` is not zero,
-        so these are not "clean" symbols but scaled relatively.
-
-        Returns
-        -------
-        array_like
-            Determined by `pilot_pattern` and `pilot_period`.
+        The pilots carry ``pilot_gain_db``, so they differ from
+        :attr:`pilot_symbols` when it is not zero.  ``(L,)`` or
+        ``(num_streams, L)`` with ``L`` the body length.
         """
         xp = np
         mask, body_length = self._generate_pilot_mask()
@@ -531,28 +516,25 @@ class SingleCarrierFrame:
         sps: int = 1,
         include_preamble: bool = True,
     ) -> dict[str, ArrayType]:
-        """
-        Generates boolean masks identifying the segments of the frame.
+        """Return boolean masks of the frame's segments (host arrays).
 
         Parameters
         ----------
         unit : {"symbols", "samples"}, default "symbols"
-            The scale of the returned masks.
+            Resolution of the masks: one entry per symbol, or per sample.
         sps : int, default 1
-            Samples per symbol (required if unit="samples").
+            Samples per symbol, for ``unit="samples"``.
         include_preamble : bool, default True
-            If True, returns masks for the full frame including preamble and
-            guard intervals. If False, returns masks only for the segments
-            after the preamble (and after CP removal if guard_type='cp').
+            ``True``: masks over the whole frame, preamble and guard
+            included.  ``False``: masks over what follows the preamble (with
+            a cyclic prefix, the body alone).
 
         Returns
         -------
-        dict
-            Dictionary containing boolean masks for:
-            - 'preamble' (only if include_preamble=True)
-            - 'pilots'
-            - 'payload'
-            - 'guard' (only if include_preamble=True OR guard_type='zero')
+        dict of str to ndarray
+            ``"pilots"`` and ``"payload"``; ``"preamble"`` with
+            ``include_preamble=True``; ``"guard"`` with
+            ``include_preamble=True`` or a zero guard.
         """
         xp = np
         if unit == "samples":
@@ -643,12 +625,7 @@ class SingleCarrierFrame:
         periodic: bool = False,
         device: str = "cpu",
     ) -> Signal:
-        """
-        Generates a shaped, oversampled waveform from the frame description.
-
-        This is the primary method for moving from a logical frame to
-        physical IQ samples. It handles upsampling, pulse shaping,
-        guard interval insertion, and metadata population.
+        """Build the frame's waveform: shaped, oversampled, with its guard interval.
 
         Parameters
         ----------
@@ -672,16 +649,19 @@ class SingleCarrierFrame:
         Returns
         -------
         Signal
-            A `Signal` object containing the IQ samples and metadata.
+            complex64 samples, ``(N,)`` or ``(num_streams, N)``, with
+            ``frame`` set to this frame.  ``constellation`` and ``reference``
+            are not set: they belong to the payload, which
+            :func:`extract_payload` returns as a plain Signal.
 
         Notes
         -----
-        Each section (preamble and body) is independently I/Q component peak-normalised
-        so both occupy the full DAC range regardless of their modulation format.
-        After concatenation the full frame is normalised to **unit symbol power
-        (Es = 1)**, meaning average sample power = 1/sps.  This matches the
-        convention used by ``shape_pulse`` and ``apply_awgn``.
-        Pilot/payload power ratios set by `pilot_gain_db` are preserved throughout.
+        The preamble and the body are each scaled so that the larger of their
+        I and Q peaks is 1 (``normalize(mode="dac_peak")``), so both use the
+        full DAC range whatever their modulation.  The assembled frame is
+        then normalized per stream to unit symbol power (average sample power
+        ``1/sps``), as ``generate`` does; the pilot-to-payload ratio of
+        ``pilot_gain_db`` is kept.
         """
         sps = require_integer_sps(sps, "SingleCarrierFrame.to_signal()")
         device = require_device(device, "SingleCarrierFrame.to_signal()")
@@ -698,10 +678,10 @@ class SingleCarrierFrame:
         body, xp, _ = dispatch(to_device(self.body_symbols, device))
         body_samples = generation.shape_pulse(body, sps=sps, pulse=pulse)
 
-        # Normalise body per-channel via normalize's "dac_peak" mode:
+        # Normalize body per-channel via normalize's "dac_peak" mode:
         # max(peak_|I|, peak_|Q|) - a single scale factor that brings the
         # dominant component to 1.0 while preserving the I/Q ratio.
-        # Complex-envelope peak normalisation (used in the DSP chain) divides
+        # Complex-envelope peak normalization (used in the DSP chain) divides
         # by max(|sample|) instead, leaving components at ≤ 1/√2 ≈ 0.707 for
         # square QAM/PSK whose envelope peak sits at 45°.  Applied
         # per-section (body and preamble separately) so each segment uses
@@ -720,7 +700,7 @@ class SingleCarrierFrame:
             preamble_samples = preamble_signal.samples
             # (L*sps,) for SISO  or  (num_streams, L*sps) for MIMO - shape driven by preamble.num_streams
 
-            # I/Q peak normalisation - axis=-1 works for both 1-D and 2-D
+            # I/Q peak normalization - axis=-1 works for both 1-D and 2-D
             preamble_samples = normalize(preamble_samples, mode="dac_peak", axis=-1)
             if self.num_streams > 1 and preamble_samples.ndim == 1:
                 # A one-stream preamble is broadcast to every stream.
@@ -748,7 +728,7 @@ class SingleCarrierFrame:
                 samples = xp.concatenate([cp_slice, samples], axis=-1)
 
         # 4. Normalize assembled frame to unit average power.
-        # Each section (preamble, body) was independently I/Q peak-normalised so
+        # Each section (preamble, body) was independently I/Q peak-normalized so
         # that both use the full DAC range irrespective of their modulation format.
         # After concatenation the sections may differ in average power, so a final
         # global normalization brings the frame to unit symbol power (Es = 1),
@@ -813,7 +793,7 @@ class SingleCarrierFrame:
 
 
 def extract_payload(signal: Signal) -> Signal:
-    """The payload of a frame Signal, as a plain Signal at the symbol rate.
+    """Extract the payload of a frame Signal as a plain Signal at the symbol rate.
 
     The payload's position is known only in the full frame, so the Signal
     must hold exactly the frame's symbols, one sample per symbol, aligned

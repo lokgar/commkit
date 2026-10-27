@@ -1,4 +1,9 @@
-"""Synchronization plots (timing, frequency offset, carrier phase)."""
+"""Synchronization plots: timing, frequency offset and carrier phase.
+
+Each plot draws an estimate from :mod:`commkit.timing`,
+:mod:`commkit.frequency` or :mod:`commkit.recovery`, or recomputes what it
+shows through their public functions.
+"""
 
 from collections.abc import Sequence
 from typing import Any
@@ -7,7 +12,7 @@ import matplotlib.pyplot as plt
 import numpy as np
 
 from .. import _fft
-from ..backend import to_device
+from ..backend import get_array_module, to_device
 from .theme import (
     _as_channels,
     _decimate_minmax,
@@ -40,8 +45,7 @@ def _plot_timing_correlation(
     show: bool = False,
     title: str = "Timing Correlation",
 ) -> tuple[Any, Any] | None:
-    """
-    Plots cross-correlation magnitude for timing estimation diagnostics.
+    """Plot cross-correlation magnitude for timing estimation diagnostics.
 
     For each channel, two panels are drawn: an overall view of the
     correlation and a zoomed view around the detected peak.
@@ -49,18 +53,19 @@ def _plot_timing_correlation(
     Parameters
     ----------
     corr_mag : array_like
-        Correlation magnitude. Shape: ``(C, N)`` or ``(N,)``.
+        Correlation magnitude, ``(C, N)`` or ``(N,)``.
     peak_indices : array_like
-        Integer peak positions per channel. Shape: ``(C,)`` or scalar.
+        Integer peak positions per channel, ``(C,)`` or scalar.
     norm_factors : array_like
-        Per-channel normalization factors. The displayed threshold line is
-        ``threshold * norm_factors[c]``. Shape: ``(C,)``.
+        Per-channel normalization factors, ``(C,)``.  The threshold line is
+        drawn at ``threshold * norm_factors[c]``.
     threshold : float
-        Detection threshold (normalized 0-1).
+        Detection threshold, normalized to ``[0, 1]``.
     offset : int, default 0
-        Search-range start sample added to sample indices for correct labels.
+        First sample of the search range, added to the sample axis labels.
     ax : array_like of Axes, optional
-        Pre-existing axes of shape ``(C, 2)`` - overall and zoom per channel.
+        Existing axes, ``(C, 2)``: the overall and the zoomed view of each
+        channel.
         If ``None``, a new figure is created.
     show : bool, default False
         If ``True``, calls ``plt.show()`` and returns ``None``.
@@ -133,20 +138,21 @@ def _plot_mm_autocorrelation(
     show: bool = False,
     title: str = "FOE - Mengali-Morelli",
 ) -> tuple[Any, Any] | None:
-    """
-    Plots the Mengali-Morelli autocorrelation diagnostics.
+    """Plot the Mengali-Morelli autocorrelation diagnostics.
 
     Per-channel two-panel layout:
 
-    * **Left / Top** - Normalised autocorrelation magnitude ``|R[m]|`` vs lag
-      ``m``.  Encodes per-lag SNR; used as weight proxy ``w[m] ∝ m²|R[m]|²``.
-    * **Right / Bottom** - Wrapped phase ``angle(R[m])`` vs lag, with the
-      expected linear ramp overlaid and ``±π`` wrap boundaries marked.
+    * Left or top: the normalized autocorrelation magnitude ``|R[m]|`` against
+      the lag ``m``.  It shows the SNR per lag and is the basis of the weights
+      ``w[m] ∝ m²|R[m]|²``.
+    * Right or bottom: the wrapped phase ``angle(R[m])`` against the lag, with
+      the expected linear ramp and the ``±π`` wrap limits.
 
     Parameters
     ----------
-    R_np : (L,) or (C, L) complex128
-        Normalised per-channel autocorrelation at lags ``m = 1 ... L``.
+    R_np : array_like
+        Normalized per-channel autocorrelation at lags ``m = 1 ... L``,
+        complex, ``(L,)`` or ``(C, L)``.
         A 1-D input is treated as a single channel.
     f_est : float or list of float
         Frequency offset estimate(s) in Hz.  Scalar for a single channel;
@@ -156,9 +162,8 @@ def _plot_mm_autocorrelation(
     M : int, default 1
         Modulation pre-processing exponent.
     ax : Axes or array of Axes, optional
-        For a single channel: pair ``[ax_amp, ax_phase]``.
-        For multiple channels: array of shape ``(C, 2)``.
-        A new figure is created when ``None``.
+        Existing axes: the pair ``[ax_amp, ax_phase]`` for one channel, a
+        ``(C, 2)`` array for several.  By default a new figure is created.
     show : bool, default False
         If ``True``, calls ``plt.show()`` and returns ``None``.
     title : str, default "FOE - Mengali-Morelli"
@@ -245,8 +250,7 @@ def _plot_frequency_offset_spectrum(
     show: bool = False,
     title: str = "FOE - M-th Power Spectrum",
 ) -> tuple[Any, Any] | None:
-    """
-    Plots the M-th power spectrum used for blind frequency offset estimation.
+    """Plot the M-th power spectrum used for blind frequency offset estimation.
 
     The spectrum has a tone at ``M·Δf``; this function maps the x-axis back
     to ``Δf`` by dividing by ``M`` so the detected peak aligns with the
@@ -255,14 +259,13 @@ def _plot_frequency_offset_spectrum(
     Parameters
     ----------
     mag_spectrum : array_like
-        Magnitude spectrum ``|X^M(f)|``. Shape: ``(C, nfft)`` or ``(nfft,)``.
+        Magnitude spectrum ``|X^M(f)|``, ``(C, nfft)`` or ``(nfft,)``.
     freqs : array_like
-        Frequency axis in Hz (``np.fft.fftfreq(nfft) * fs``).
-        Shape: ``(nfft,)``.
+        Frequency axis in Hz (``np.fft.fftfreq(nfft) * fs``), ``(nfft,)``.
     M : int
         M-th power used to remove modulation.
     k_peaks : array_like
-        Peak bin index per channel. Shape: ``(C,)`` or scalar.
+        Peak bin index per channel, ``(C,)`` or scalar.
     f_estimates : list of float
         Per-channel frequency estimates in Hz (before multi-channel averaging).
     search_range : tuple of float, optional
@@ -334,21 +337,20 @@ def _plot_carrier_phase_trajectory(
     show: bool = False,
     title: str = "Carrier Phase Trajectory",
 ) -> tuple[Any, Any] | None:
-    """
-    Plots per-symbol carrier phase trajectory for CPR algorithm diagnostics.
+    """Plot per-symbol carrier phase trajectory for CPR algorithm diagnostics.
 
     All channels are overlaid on a single subplot.  Block-based methods may
-    pass ``block_centers`` / ``phi_blocks`` to annotate block-phase estimates
+    pass ``block_centers`` to annotate the block-phase estimates
     as vertical lines (not scatter markers, consistent with the joint
     equalizer phase panel).
 
     Parameters
     ----------
     phi_full : array_like
-        Per-symbol phase estimate in radians. Shape: ``(C, N)`` or ``(N,)``.
+        Per-symbol phase estimate in radians, ``(C, N)`` or ``(N,)``.
     block_centers : array_like, optional
-        Block centre positions in symbols (VV, BPS). Shape: ``(N_blocks,)``.
-        If provided, thin vertical lines at each block centre are drawn.
+        Block center positions in symbols (VV, BPS), ``(N_blocks,)``.
+        If provided, thin vertical lines at each block center are drawn.
     n_train : int, default 0
         Training/DD boundary symbol index. Draws a dashed vertical line.
     ax : Axes, optional
@@ -409,8 +411,7 @@ def _plot_frequency_offset_blockwise_result(
     title: str = "Block-wise FOE",
     max_points: int = 4000,
 ) -> tuple[Any, Any] | None:
-    """
-    Diagnostic plot for blockwise ``frequency.correct_frequency_offset``.
+    """Diagnostic plot for blockwise ``frequency.correct_frequency_offset``.
 
     Shows three panels:
 
@@ -420,15 +421,15 @@ def _plot_frequency_offset_blockwise_result(
     Parameters
     ----------
     t_centers : array_like
-        Block centre sample indices. Shape: ``(K,)``.
+        Block center sample indices, ``(K,)``.
     df_estimates : array_like
-        Per-block frequency estimates in Hz. Shape: ``(K,)``.
+        Per-block frequency estimates in Hz, ``(K,)``.
     n_grid : array_like
-        Dense sample index grid. Shape: ``(N,)``.
+        Dense sample index grid, ``(N,)``.
     df_dense : array_like
-        Interpolated frequency at each sample in Hz. Shape: ``(N,)``.
+        Interpolated frequency at each sample in Hz, ``(N,)``.
     phase_trajectory : array_like
-        Integrated phase in radians. Shape: ``(N,)``.
+        Integrated phase in radians, ``(N,)``.
     ax : list of 2 Axes, optional
         Pre-existing axes ``[ax_freq, ax_phase]``. If ``None``, a new figure
         with 2 panels is created.
@@ -495,8 +496,7 @@ def _plot_pilot_phase_estimate(
     show: bool = False,
     title: str = "Pilot Phase Estimate",
 ) -> tuple[Any, Any] | None:
-    """
-    Plots pilot phase scatter, linear fit, and the full interpolated trajectory.
+    """Plot pilot phase scatter, linear fit, and the full interpolated trajectory.
 
     Used as a diagnostic for both pilot-based frequency offset estimation
     (``estimate_frequency_offset`` with ``PilotSymbols``) and pilot-aided carrier phase
@@ -505,11 +505,11 @@ def _plot_pilot_phase_estimate(
     Parameters
     ----------
     pilot_indices : array_like
-        Sample indices of pilot positions. Shape: ``(P,)``.
+        Sample indices of pilot positions, ``(P,)``.
     phi_pilots_u : array_like
-        Unwrapped pilot phases in radians. Shape: ``(C, P)`` or ``(P,)``.
+        Unwrapped pilot phases in radians, ``(C, P)`` or ``(P,)``.
     phi_full : array_like, optional
-        Interpolated per-symbol phase in radians. Shape: ``(C, N)`` or ``(N,)``.
+        Interpolated per-symbol phase in radians, ``(C, N)`` or ``(N,)``.
         If provided, a second panel shows the full trajectory per channel.
     f_est : float or list of float, default 0.0
         Estimated frequency offset in Hz (annotation on the fit line).
@@ -640,30 +640,29 @@ def _plot_pilot_tone_phase_estimate(
     title: str = "CPR - Pilot Tone",
     max_points: int = 4000,
 ) -> tuple[Any, Any] | None:
-    """
-    Diagnostic for ``estimate_carrier_phase`` with ``PilotTone``.
+    """Diagnostic for ``estimate_carrier_phase`` with ``PilotTone``.
 
     Two panels:
 
-    1. **Tone spectrum** - magnitude spectrum ``|X(f)|`` (dB) with the
-       zero-phase extraction window overlaid on a twin axis, the per-channel
-       refined tone peak marked, and the nominal tone frequency annotated.
-    2. **Recovered phase** - the per-sample phase estimate ``θ̂[n]`` (deg).
+    1. Tone spectrum: the magnitude spectrum ``|X(f)|`` in dB, the
+       zero-phase extraction window on a twin axis, the refined tone peak of
+       each channel and the nominal tone frequency.
+    2. Recovered phase: the per-sample phase estimate ``θ̂[n]`` in degrees.
 
     All channels are overlaid on each panel.
 
     Parameters
     ----------
     freqs : array_like
-        FFT frequency axis in Hz (``np.fft.fftfreq(N) * fs``). Shape: ``(N,)``.
+        FFT frequency axis in Hz (``np.fft.fftfreq(N) * fs``), ``(N,)``.
     mag_spectrum : array_like
-        Magnitude spectrum ``|X(f)|``. Shape: ``(C, N)`` or ``(N,)``.
+        Magnitude spectrum ``|X(f)|``, ``(C, N)`` or ``(N,)``.
     window : array_like
-        Extraction window ``W(f)`` in ``[0, 1]``. Shape: ``(C, N)`` or ``(N,)``.
+        Extraction window ``W(f)`` in ``[0, 1]``, ``(C, N)`` or ``(N,)``.
     f_tones : array_like
-        Per-channel refined tone frequency in Hz. Shape: ``(C,)``.
+        Per-channel refined tone frequency in Hz, ``(C,)``.
     theta : array_like
-        Recovered per-sample phase in radians. Shape: ``(C, N)`` or ``(N,)``.
+        Recovered per-sample phase in radians, ``(C, N)`` or ``(N,)``.
     tone_frequency : float
         Nominal pilot-tone frequency in Hz.
     bandwidth : float
@@ -772,27 +771,26 @@ def _plot_pilot_tones_phase_estimate(
     title: str = "CPR - Pilot Tones (MRC)",
     max_points: int = 4000,
 ) -> tuple[Any, Any] | None:
-    """
-    Diagnostic for ``estimate_carrier_phase`` with ``PilotTones``.
+    """Diagnostic for ``estimate_carrier_phase`` with ``PilotTones``.
 
     Two panels:
 
-    1. **Inter-tone differential** - the slow tracked phase ``δ_k[n]`` (deg) for
-       each non-reference tone; the line style flags whether the tone was
-       combined (solid) or gated out (dashed).
-    2. **Combined phase** - the per-sample common estimate ``φ̂[n]`` (deg).
+    1. Inter-tone differential: the slowly tracked phase ``δ_k[n]`` in degrees
+       of each tone but the reference, solid when the tone was combined and
+       dashed when it was gated out.
+    2. Combined phase: the common per-sample estimate ``φ̂[n]`` in degrees.
 
-    All channels share the active theme; no colours or line widths are set
-    explicitly, so the trace colours come from the rcParams cycle.
+    All channels share the active theme; no colors or line widths are set
+    explicitly, so the trace colors come from the rcParams cycle.
 
     Parameters
     ----------
     delta : sequence of array_like
-        Per-tone differential phase ``δ_k[n]`` in radians - a length-``K``
-        sequence (or ``(K, N)`` array) of ``(N,)`` traces.  The reference tone's
+        Per-tone differential phase ``δ_k[n]`` in radians: ``K`` traces of
+        ``(N,)``, as a sequence or a ``(K, N)`` array.  The reference tone's
         entry is ``≈ 0`` and is skipped in panel 1.
     phi : array_like
-        Combined per-sample phase estimate ``φ̂[n]`` in radians.  Shape ``(N,)``.
+        Combined per-sample phase estimate ``φ̂[n]`` in radians, ``(N,)``.
     ref : int
         Reference-tone index (its differential is identically zero).
     used : sequence of int
@@ -866,33 +864,35 @@ def plot_carrier_phase_decomposition(
     show: bool = False,
     title: str = "Recovered carrier phase",
 ) -> tuple[Any, Any] | None:
-    """
-    Plots the recovered carrier-phase trajectory and its slow drift component.
+    """Plot the recovered carrier-phase trajectory and its slow drift component.
 
-    The total unwrapped phase phi(t) is drawn faintly with the
-    low-pass drift overlaid in bold, visualising the
-    ``analysis.separate_drift_phase_noise`` split.  MIMO inputs overlay all
-    channels.
+    The unwrapped phase ``φ(t)`` is drawn faintly with the low-pass drift
+    in bold over it: the split of
+    :func:`commkit.analysis.separate_drift_phase_noise`.  All channels of
+    MIMO input are overlaid.
 
     Parameters
     ----------
     phi : array_like
-        Unwrapped carrier phase in radians. Shape ``(N,)`` or ``(C, N)``.
+        Unwrapped carrier phase in radians, ``(N,)`` or ``(C, N)``.
     drift : array_like, optional
-        Drift (low-pass) component, same shape as ``phi``.  Overlaid in bold.
+        The low-pass drift, shaped as ``phi``; drawn in bold.
     symbol_rate : float
-        Symbol rate in Baud; sets the (seconds) time axis.
+        Symbol rate in Bd, for the time axis in seconds.
     n_train : int, default 0
-        If > 0, draws a dashed training/DD boundary marker.
-    ax : Axes, optional
-        Target axes; a new figure is created when None.
+        End of the training symbols, drawn as a dashed line when above 0.
+    ax : matplotlib.axes.Axes, optional
+        Axes to draw on; ``None`` creates a figure.
     show : bool, default False
-        If True, calls ``plt.show()`` and returns None.
-    title : str
+        Call ``plt.show()`` and return ``None``.
+    title : str, default "Recovered carrier phase"
+        Title of the figure.
 
     Returns
     -------
     (fig, ax) or None
+        The figure and its axes; ``None`` with ``show=True``, which
+        shows the figure instead.
     """
     phi_c = _as_channels(phi)
     C, N = phi_c.shape
@@ -961,8 +961,7 @@ def plot_timing_correlation(
     show: bool = False,
     title: str = "Timing Correlation",
 ) -> tuple[Any, Any] | None:
-    """
-    Plots the correlation of a :class:`~commkit.timing.TimingEstimate`.
+    """Plot the correlation of a :class:`~commkit.timing.TimingEstimate`.
 
     Per channel, an overall view of ``|correlation|`` and a zoom on the
     detected start, with the detection threshold ``threshold · mean|R|``
@@ -973,15 +972,21 @@ def plot_timing_correlation(
     estimate : TimingEstimate
         From :func:`~commkit.timing.estimate_timing`.
     threshold : float, default 3.0
-        Detection threshold drawn (the ``threshold`` of ``estimate_timing``).
-    ax : array_like of Axes, optional
-        ``(C, 2)`` axes - overall and zoom per channel.
+        Detection threshold drawn (the ``threshold`` of
+        :func:`~commkit.timing.estimate_timing`).
+    ax : array_like of matplotlib.axes.Axes, optional
+        Axes to draw on, ``(C, 2)``: the overall view and the zoom of each
+        channel; ``None`` creates a figure.
     show : bool, default False
+        Call ``plt.show()`` and return ``None``.
     title : str, default "Timing Correlation"
+        Title of the figure.
 
     Returns
     -------
     (fig, axes) or None
+        The figure and its axes; ``None`` with ``show=True``, which
+        shows the figure instead.
     """
     corr = np.atleast_2d(np.abs(_host(estimate.correlation)))
     peaks = np.atleast_1d(_host(estimate.integer)) - estimate.search_start
@@ -1005,8 +1010,7 @@ def plot_mm_autocorrelation(
     show: bool = False,
     title: str = "FOE - Mengali-Morelli",
 ) -> tuple[Any, Any] | None:
-    """
-    Plots the autocorrelation of a Mengali-Morelli frequency estimate.
+    """Plot the autocorrelation of a Mengali-Morelli frequency estimate.
 
     Per channel: ``|R[m]|`` and the wrapped ``angle(R[m])`` against the lag,
     with the ramp ``2π·Δf·M·m/f_s`` the estimate implies.
@@ -1017,13 +1021,19 @@ def plot_mm_autocorrelation(
         From ``estimate_frequency_offset(x, MengaliMorelli())``.
     sampling_rate : float
         Sampling rate in Hz of the estimated samples.
-    ax : Axes pair or ``(C, 2)`` axes, optional
+    ax : array_like of matplotlib.axes.Axes, optional
+        Axes to draw on, two (magnitude and angle) or ``(C, 2)``; ``None``
+        creates a figure.
     show : bool, default False
+        Call ``plt.show()`` and return ``None``.
     title : str, default "FOE - Mengali-Morelli"
+        Title of the figure.
 
     Returns
     -------
     (fig, axes) or None
+        The figure and its axes; ``None`` with ``show=True``, which
+        shows the figure instead.
     """
     r = _require(
         estimate, "autocorrelation", "plot_mm_autocorrelation()", "MengaliMorelli"
@@ -1047,8 +1057,7 @@ def plot_frequency_offset_spectrum(
     show: bool = False,
     title: str = "FOE - M-th Power Spectrum",
 ) -> tuple[Any, Any] | None:
-    """
-    Plots the M-th power spectrum of an ``MthPower`` frequency estimate.
+    """Plot the M-th power spectrum of an ``MthPower`` frequency estimate.
 
     The axis is mapped back from ``M·Δf`` to ``Δf`` so the detected peak
     lines up with the estimate.
@@ -1059,14 +1068,18 @@ def plot_frequency_offset_spectrum(
         From ``estimate_frequency_offset(x, MthPower())``.
     search_range : (float, float), optional
         The ``MthPower(search_range=)`` used, shaded.
-    ax : Axes or sequence of Axes, optional
-        One per channel.
+    ax : array_like of matplotlib.axes.Axes, optional
+        Axes to draw on, one per channel; ``None`` creates a figure.
     show : bool, default False
+        Call ``plt.show()`` and return ``None``.
     title : str, default "FOE - M-th Power Spectrum"
+        Title of the figure.
 
     Returns
     -------
     (fig, axes) or None
+        The figure and its axes; ``None`` with ``show=True``, which
+        shows the figure instead.
     """
     spectrum = _require(
         estimate, "spectrum", "plot_frequency_offset_spectrum()", "MthPower"
@@ -1094,8 +1107,7 @@ def plot_frequency_offset_blockwise_result(
     title: str = "Block-wise FOE",
     max_points: int = 4000,
 ) -> tuple[Any, Any] | None:
-    """
-    Plots a blockwise frequency estimate and the correction it applies.
+    """Plot a blockwise frequency estimate and the correction it applies.
 
     Two panels: the block estimates with the interpolated ``Δf`` trajectory,
     and the integrated phase.  Both are recomputed with
@@ -1111,15 +1123,21 @@ def plot_frequency_offset_blockwise_result(
         Length of the corrected record.
     sampling_rate : float
         Sampling rate in Hz.
-    ax : list of 2 Axes, optional
+    ax : array_like of matplotlib.axes.Axes, optional
+        Axes to draw on, two; ``None`` creates a figure.
     show : bool, default False
+        Call ``plt.show()`` and return ``None``.
     title : str, default "Block-wise FOE"
+        Title of the figure.
     max_points : int, default 4000
-        Per-trace point budget (envelope decimation); ``<= 0`` plots all.
+        Points per trace; longer traces are drawn as their min/max envelope.
+        ``<= 0`` draws every point.
 
     Returns
     -------
     (fig, axes) or None
+        The figure and its axes; ``None`` with ``show=True``, which
+        shows the figure instead.
     """
     from ..frequency import correct_frequency_offset
 
@@ -1129,8 +1147,10 @@ def plot_frequency_offset_blockwise_result(
         "plot_frequency_offset_blockwise_result()",
         "a blockwise method (block_size=)",
     )
+    # The probe lives on the estimate's device, as the samples it was made from.
+    xp = get_array_module(estimate.block_values)
     rotation = correct_frequency_offset(
-        np.ones(num_samples, dtype=np.complex128),
+        xp.ones(num_samples, dtype=xp.complex128),
         estimate,
         sampling_rate=sampling_rate,
     )
@@ -1158,13 +1178,12 @@ def plot_pilot_phase_estimate(
     show: bool = False,
     title: str = "Pilot Phase Estimate",
 ) -> tuple[Any, Any] | None:
-    """
-    Plots the pilot phases of a pilot-based estimate with their linear fit.
+    """Plot the pilot phases of a pilot-based estimate with their linear fit.
 
     For a :class:`~commkit.recovery.CarrierPhaseEstimate` (``PilotAided``) a
     second panel shows the interpolated per-symbol trajectory; for a
     :class:`~commkit.frequency.FrequencyOffsetEstimate` (``PilotSymbols``)
-    the fit is labelled with the estimated offset.
+    the fit is labeled with the estimated offset.
 
     Parameters
     ----------
@@ -1173,13 +1192,18 @@ def plot_pilot_phase_estimate(
     sampling_rate : float, default 1.0
         Sampling rate in Hz of the pilot indices (labels the fitted slope in
         Hz; 1.0 gives cycles per sample).
-    ax : array_like of Axes, optional
+    ax : array_like of matplotlib.axes.Axes, optional
+        Axes to draw on, one per panel; ``None`` creates a figure.
     show : bool, default False
+        Call ``plt.show()`` and return ``None``.
     title : str, default "Pilot Phase Estimate"
+        Title of the figure.
 
     Returns
     -------
     (fig, axes) or None
+        The figure and its axes; ``None`` with ``show=True``, which
+        shows the figure instead.
     """
     from ..recovery import CarrierPhaseEstimate
 
@@ -1209,8 +1233,7 @@ def plot_pilot_tone_phase_estimate(
     title: str = "CPR - Pilot Tone",
     max_points: int = 4000,
 ) -> tuple[Any, Any] | None:
-    """
-    Plots a ``PilotTone`` carrier-phase estimate against the tone spectrum.
+    """Plot a ``PilotTone`` carrier-phase estimate against the tone spectrum.
 
     Two panels: ``|FFT(samples)|`` (dB) with the extraction passband
     ``f_p ± B`` and the measured tone peaks, and the recovered phase.
@@ -1226,15 +1249,21 @@ def plot_pilot_tone_phase_estimate(
     sampling_rate : float, optional
         Sampling rate in Hz (a fact): taken from a Signal, required for
         arrays.
-    ax : two Axes, optional
+    ax : array_like of matplotlib.axes.Axes, optional
+        Axes to draw on, two; ``None`` creates a figure.
     show : bool, default False
+        Call ``plt.show()`` and return ``None``.
     title : str, default "CPR - Pilot Tone"
+        Title of the figure.
     max_points : int, default 4000
-        Per-trace point budget (envelope decimation); ``<= 0`` plots all.
+        Points per trace; longer traces are drawn as their min/max envelope.
+        ``<= 0`` draws every point.
 
     Returns
     -------
     (fig, axes) or None
+        The figure and its axes; ``None`` with ``show=True``, which
+        shows the figure instead.
     """
     from ..core._signal_adapter import adapt_signal
 
@@ -1269,8 +1298,7 @@ def plot_pilot_tones_phase_estimate(
     title: str = "CPR - Pilot Tones (MRC)",
     max_points: int = 4000,
 ) -> tuple[Any, Any] | None:
-    """
-    Plots a ``PilotTones`` carrier-phase estimate.
+    """Plot a ``PilotTones`` carrier-phase estimate.
 
     Two panels: the tracked inter-tone differentials ``δ_k[n]`` (gated
     tones dashed) and the combined phase (the first channel).
@@ -1279,15 +1307,21 @@ def plot_pilot_tones_phase_estimate(
     ----------
     estimate : CarrierPhaseEstimate
         From ``estimate_carrier_phase(x, PilotTones(...))``.
-    ax : two Axes, optional
+    ax : array_like of matplotlib.axes.Axes, optional
+        Axes to draw on, two; ``None`` creates a figure.
     show : bool, default False
+        Call ``plt.show()`` and return ``None``.
     title : str, default "CPR - Pilot Tones (MRC)"
+        Title of the figure.
     max_points : int, default 4000
-        Per-trace point budget (envelope decimation); ``<= 0`` plots all.
+        Points per trace; longer traces are drawn as their min/max envelope.
+        ``<= 0`` draws every point.
 
     Returns
     -------
     (fig, axes) or None
+        The figure and its axes; ``None`` with ``show=True``, which
+        shows the figure instead.
     """
     delta = _require(
         estimate,
@@ -1315,24 +1349,28 @@ def plot_carrier_phase_trajectory(
     show: bool = False,
     title: str = "Carrier Phase Trajectory",
 ) -> tuple[Any, Any] | None:
-    """
-    Plots a per-symbol carrier phase trajectory (all channels overlaid).
+    """Plot a per-symbol carrier-phase trajectory, all channels overlaid.
 
     Parameters
     ----------
     phase : CarrierPhaseEstimate or array_like
-        An estimate (its block centres, if any, are marked) or a phase array
-        in radians, ``(N,)`` or ``(C, N)`` - e.g. an equalizer's
+        An estimate (its block centers, if any, are marked) or a phase array
+        in radians, ``(N,)`` or ``(C, N)``, e.g. an equalizer's
         ``phase_trajectory``.
     n_train : int, default 0
-        Training/decision-directed boundary, drawn dashed.
-    ax : Axes, optional
+        End of the training symbols, drawn as a dashed line.
+    ax : matplotlib.axes.Axes, optional
+        Axes to draw on; ``None`` creates a figure.
     show : bool, default False
+        Call ``plt.show()`` and return ``None``.
     title : str, default "Carrier Phase Trajectory"
+        Title of the figure.
 
     Returns
     -------
     (fig, ax) or None
+        The figure and its axes; ``None`` with ``show=True``, which
+        shows the figure instead.
     """
     from ..recovery import CarrierPhaseEstimate
 

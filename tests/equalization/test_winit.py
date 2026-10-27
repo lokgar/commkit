@@ -304,6 +304,38 @@ class TestPadAndNormalization:
         )
         xpt.assert_allclose(r.y_hat, xp.asarray(ref.y_hat), atol=1e-4)
 
+    def test_pad_mode_reflect_mirrors_the_record(self, xp, xpt):
+        """'reflect' pads the cold start with the record mirrored about its
+        first sample: the same output as a prefix of those samples."""
+        samples, syms = _make_qpsk(xp, n_sym=500)
+        weights = equalization.lms(
+            samples,
+            syms[:50],
+            num_taps=11,
+            sps=1,
+            step_size=1e-2,
+            constellation=Constellation.psk(4),
+        ).weights
+        mirrored = samples[1:21][::-1]  # x[20], ..., x[1]
+        y_reflect = equalization.apply_taps(samples, weights, sps=1, pad_mode="reflect")
+        y_prefix = equalization.apply_taps(
+            samples, weights, sps=1, samples_prefix=mirrored
+        )
+        # The prefix path pads the tail with zeros; compare away from it.
+        xpt.assert_allclose(y_reflect[:-20], y_prefix[:-20], atol=1e-6)
+
+    def test_unknown_pad_mode_raises(self, xp):
+        samples, syms = _make_qpsk(xp, n_sym=200)
+        with pytest.raises(ValueError, match="pad_mode"):
+            equalization.lms(
+                samples,
+                syms[:20],
+                num_taps=5,
+                sps=1,
+                constellation=Constellation.psk(4),
+                pad_mode="wrap",
+            )
+
     def test_input_norm_factor_stored_in_result_lms(self, xp):
         """EqualizerResult.input_norm_factor must be a positive scalar for SISO."""
         samples, syms = _make_qpsk(xp, n_sym=500)

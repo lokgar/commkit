@@ -1,12 +1,13 @@
-"""
-Carrier frequency offset estimation and correction.
+"""Carrier frequency offset estimation and correction.
 
-estimate_frequency_offset(x, method) measures the offset with one of the
-method objects MthPower (blind spectral), MengaliMorelli (multi-lag
-autocorrelation), PilotSymbols (pilot phase slope) or BiasTone (a CW
-pilot tone); a block_size on the blind methods tracks a time-varying
-offset.  correct_frequency_offset(x, how) removes an estimate, an offset
-in Hz, or what a method estimates.
+:func:`estimate_frequency_offset` measures the offset with the estimator its
+method object chooses: :class:`MthPower` (blind, the spectral peak of the
+M-th power), :class:`MengaliMorelli` (blind, multi-lag autocorrelation),
+:class:`PilotSymbols` (the phase slope of known symbols) or
+:class:`BiasTone` (a CW pilot tone).  A ``block_size`` on any method but
+``PilotSymbols`` tracks a time-varying offset.  The estimate is a
+:class:`FrequencyOffsetEstimate`; :func:`correct_frequency_offset` removes an
+estimate, an offset in Hz, or what a method estimates.
 """
 
 import logging
@@ -44,34 +45,33 @@ def _get_numba_mm_bootstrap() -> Callable[..., float]:
         def _mm_bootstrap_loop(
             theta: np.ndarray, amp: np.ndarray, M_val: float, fs: float
         ) -> float:
-            """Iterative Mengali-Morelli bootstrap compiled to machine code.
+            """Run the Mengali-Morelli bootstrap over the lags (Numba).
 
-            Predicts each lag's phase from the running weighted frequency
-            estimate accumulated from all previous lags, then folds it
-            into the weighted sum.  Sequential data dependency prevents
-            vectorisation; Numba removes Python-interpreter overhead.
+            Each lag's phase is predicted from the weighted frequency estimate of the
+            previous lags, then folded into the weighted sum.  The dependency between
+            lags prevents vectorization.
 
             Parameters
             ----------
-            theta : (L,) float64
-                Wrapped phase of R[m] at each lag (output of np.angle).
-            amp : (L,) float64
-                Magnitude |R[m]| at each lag (output of np.abs).
-            M_val : float64
-                Modulation power (1 for data-aided/generic, order for PSK,
-                4 for QAM).
-            fs : float64
+            theta : numpy.ndarray
+                Wrapped phase of ``R[m]`` at each lag, float64, ``(L,)``.
+            amp : numpy.ndarray
+                Magnitude ``|R[m]|`` at each lag, float64, ``(L,)``.
+            M_val : float
+                Power ``M`` of the pre-processing: 1 for data-aided or generic input,
+                the order for PSK, 4 for QAM.
+            fs : float
                 Sampling rate in Hz.
 
             Returns
             -------
-            float64
+            float
                 Estimated frequency offset in Hz.
             """
             two_pi = 2.0 * np.pi
             L = len(theta)
 
-            # Lag 1 initialisation (m=1, m²=1)
+            # Lag 1 initialization (m=1, m²=1)
             Theta_0 = theta[0]
             w0 = amp[0] * amp[0]  # m² · |R|² at m=1
             f_hat = Theta_0 * fs / (two_pi * M_val)
@@ -197,6 +197,14 @@ class MengaliMorelli:
         Estimate per block of this many samples (blockwise tracking).
     overlap : float, default 0.5
         Fractional overlap of consecutive blocks, in ``[0, 1)``.
+
+    Notes
+    -----
+    The autocorrelation is computed on the samples' device.  The bootstrap
+    over the lags is a sequential recursion (each lag is unwrapped against
+    the estimate of the lags before it), run by a Numba kernel on the
+    host: GPU input copies the ``(R, L)`` autocorrelation, one row per
+    channel (and per block with ``block_size``), to the host once per call.
     """
 
     power: int | None = None
@@ -263,7 +271,7 @@ class BiasTone:
     Parameters
     ----------
     target_frequency : float, optional
-        Centre of the search window in Hz; give it with ``search_band``.
+        Center of the search window in Hz; give it with ``search_band``.
     search_band : float, optional
         Half-width of the search window in Hz.
     block_size : int, optional
@@ -302,27 +310,27 @@ class FrequencyOffsetEstimate:
 
     Attributes
     ----------
-    value : array_like
+    value : ndarray
         Frequency offset in Hz (the mean of the block estimates for a
         blockwise method).
-    weights : array_like
+    weights : ndarray
         Per-channel reliability weights used by :meth:`combined` (peak
         magnitude, autocorrelation energy or pilot power).
     block_centers : numpy.ndarray or None
-        Blockwise only: block centre sample indices, ``(B,)``.
-    block_values : array_like or None
+        Blockwise only: block center sample indices, ``(B,)``.
+    block_values : ndarray or None
         Blockwise only: estimate per block in Hz, ``(B,)`` or ``(C, B)``.
     power : int or None
         Exponent ``M`` used (M-th power and Mengali-Morelli).
-    spectrum : array_like or None
+    spectrum : ndarray or None
         M-th power: ``|FFT(x^M)|`` after the search mask, ``(nfft,)`` or
         ``(C, nfft)``.
     spectrum_frequencies : numpy.ndarray or None
         M-th power: FFT bin frequencies of ``spectrum`` in Hz (``fftfreq``
         order; divide by ``power`` for ``Δf``).
-    autocorrelation : array_like or None
+    autocorrelation : ndarray or None
         Mengali-Morelli: unbiased autocorrelation at lags ``1 .. L``.
-    pilot_phase : array_like or None
+    pilot_phase : ndarray or None
         Pilots: unwrapped pilot phase in radians, ``(P,)`` or ``(C, P)``.
     pilot_indices : numpy.ndarray or None
         Pilots: the pilot sample indices.
@@ -536,7 +544,7 @@ def _pilot_symbols(x: ArrayType, fs: float, method: PilotSymbols) -> _Rows:
         safe = xp.where(xp.abs(t_var) > 1e-30, t_var, xp.ones_like(t_var))
         slopes = xp.sum(v * phi_c * t_c, axis=-1) / safe
     else:
-        slopes = _linear_trend_slope(phi_u, x=t, xp=xp)  # rad/s, centred OLS
+        slopes = _linear_trend_slope(phi_u, x=t, xp=xp)  # rad/s, centered OLS
 
     max_gap = int(np.max(np.diff(idx_np)))
     logger.debug(
@@ -625,8 +633,7 @@ def estimate_frequency_offset(
     sampling_rate: float | None = None,
     constellation: Any = None,
 ) -> FrequencyOffsetEstimate:
-    """
-    Estimate the carrier frequency offset.
+    """Estimate the carrier frequency offset.
 
     Parameters
     ----------
@@ -728,12 +735,11 @@ def correct_frequency_offset(
     *,
     sampling_rate: float | None = None,
 ) -> S:
-    """
-    Remove a carrier frequency offset by complex mixing.
+    """Remove a carrier frequency offset by complex mixing.
 
     A constant offset is removed exactly, ``y[n] = x[n]·exp(-j2πΔf·n/fs)``
     with ``n = 0`` at the first sample and no bin quantization.  A blockwise
-    estimate is interpolated with PCHIP between block centres (held constant
+    estimate is interpolated with PCHIP between block centers (held constant
     outside them), integrated into a phase trajectory and removed.
 
     Parameters
@@ -750,7 +756,7 @@ def correct_frequency_offset(
 
     Returns
     -------
-    array_like or Signal
+    ndarray or Signal
         Corrected samples, same shape, dtype and device (complex for real
         input).
 
@@ -797,34 +803,41 @@ def _correct_blockwise(
     block_values: ArrayType,
     xp: Any,
 ) -> ArrayType:
+    """Remove a blockwise frequency estimate, interpolated to every sample.
+
+    The block values are interpolated (PCHIP, held constant outside the
+    block centers) and integrated into a float64 phase trajectory on the
+    samples' device: SciPy's interpolator on the CPU, CuPy's on the GPU.
+    """
     x2, was_1d = as_2d(x, name="samples")
     C, N = x2.shape
-    df = np.asarray(to_device(block_values, "cpu"), dtype=np.float64)
+    df = xp.asarray(block_values, dtype=xp.float64)
     df = df[None, :] if df.ndim == 1 else df  # (C_interp, B); 1 row is shared
     B = df.shape[-1]
-    n_grid = np.arange(N, dtype=np.float64)
-    theta = np.empty((df.shape[0], N), dtype=np.float64)
-    if B > 1:
-        from scipy.interpolate import PchipInterpolator
-
-        n_clamped = np.clip(n_grid, block_centers[0], block_centers[-1])
-    for c in range(df.shape[0]):
-        if B == 1:
-            df_dense = np.full(N, df[c, 0])
+    if B == 1:
+        df_dense = xp.broadcast_to(df, (df.shape[0], N))
+    else:
+        if xp is np:
+            from scipy.interpolate import PchipInterpolator
         else:
-            df_dense = PchipInterpolator(block_centers, df[c])(n_clamped)
-        theta[c] = (2.0 * np.pi / fs) * np.cumsum(df_dense)
-    if df.shape[0] == 1 and C > 1:
-        theta = np.broadcast_to(theta, (C, N))
+            from cupyx.scipy.interpolate import PchipInterpolator
+        centers = xp.asarray(block_centers, dtype=xp.float64)
+        n_grid = xp.arange(N, dtype=xp.float64)
+        n_clamped = xp.clip(n_grid, float(block_centers[0]), float(block_centers[-1]))
+        df_dense = PchipInterpolator(centers, df, axis=-1)(n_clamped)  # (C_interp, N)
+    theta = (2.0 * np.pi / fs) * xp.cumsum(df_dense, axis=-1)
+    if theta.shape[0] == 1 and C > 1:
+        theta = xp.broadcast_to(theta, (C, N))
 
-    corrected = _derotate(x2, xp.asarray(theta))
-    logger.debug(
-        "correct_frequency_offset (blockwise): C=%s, B=%s blocks, total phase "
-        "drift=%.3f rad",
-        C,
-        B,
-        float(theta[0, -1]),
-    )
+    corrected = _derotate(x2, theta)
+    if logger.isEnabledFor(logging.DEBUG):
+        logger.debug(
+            "correct_frequency_offset (blockwise): C=%s, B=%s blocks, total phase "
+            "drift=%.3f rad",
+            C,
+            B,
+            float(theta[0, -1]),
+        )
     return restore_1d(was_1d, corrected)
 
 
@@ -840,34 +853,33 @@ def _refine_tones_from_spectrum(
     search_band: float,
     rows: Sequence[int] | np.ndarray | None = None,
 ) -> np.ndarray:
-    """Batched log-parabolic tone refinement on a precomputed full-record FFT.
+    """Refine tone frequencies on an FFT of the whole record, in one batch.
 
-    Device-side counterpart of ``BiasTone`` for callers that already hold
-    the record's spectrum: refines each ``targets[t]`` by an argmax search over
-    ``targets[t] ± search_band`` in the spectrum row ``rows[t]``, followed by
-    the same three-bin log-parabolic sub-bin fit.  No zero-padding is applied
-    (the sub-bin fit compensates for the coarser bin grid), no extra FFTs are
-    run, and all per-tone work stays on device - the refined frequencies come
-    back in a **single** host transfer.
+    The counterpart of ``BiasTone`` for callers that already hold the
+    record's spectrum: each ``targets[t]`` is refined by an argmax search over
+    ``targets[t] ± search_band`` in spectrum row ``rows[t]``, then by the same
+    three-bin log-parabolic fit.  There is no zero padding (the fit makes up
+    for the coarser bins) and no extra FFT, and the work per tone stays on the
+    device: the refined frequencies come back in one host transfer.
 
     Parameters
     ----------
-    X : (R, N) array
-        Full FFT (``xp.fft.fft`` bin order) of the rows to search.
+    X : ndarray
+        FFT of the rows to search, in FFT-bin order, ``(R, N)``.
     sampling_rate : float
         Sampling rate in Hz.
     targets : sequence of float
-        Nominal tone frequencies to refine (length T).
+        Nominal tone frequencies to refine, T values.
     search_band : float
-        Half-width of the per-tone search window in Hz.
+        Half-width of the search window of each tone in Hz.
     rows : sequence of int, optional
-        Spectrum row for each target.  Defaults to ``range(T)`` (requires
-        ``R == T``).
+        Spectrum row of each target; defaults to ``range(T)``, which needs
+        ``R == T``.
 
     Returns
     -------
-    (T,) np.ndarray
-        Refined frequencies in Hz (float64, on host).
+    numpy.ndarray
+        Refined frequencies in Hz, float64, ``(T,)``.
     """
     X, xp, _ = dispatch(X)
     X, _ = as_2d(X, name="X")

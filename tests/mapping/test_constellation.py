@@ -235,6 +235,22 @@ class TestOperations:
         xpt.assert_array_equal(c.map(bits), xp.asarray([1j, -1j, -1, 1], "complex64"))
         xpt.assert_array_equal(c.demap(c.map(bits)), bits)
 
+    @pytest.mark.parametrize(
+        "dtype", ["bool", "int8", "uint8", "int32", "uint32", "int64", "float32"]
+    )
+    def test_map_accepts_any_bit_dtype(self, xp: Any, xpt: Any, dtype: str) -> None:
+        """Each group of k bits, MSB first, selects the point with that label."""
+        c = Constellation.qam(64)
+        rng = np.random.default_rng(2)
+        bits = rng.integers(0, 2, (2, 600))
+        label = bits.reshape(2, -1, 6) @ (1 << np.arange(5, -1, -1))
+        expected = np.empty(64, complex)
+        expected[c.bit_labels @ (1 << np.arange(5, -1, -1))] = c.points
+        xpt.assert_array_equal(
+            c.map(xp.asarray(bits.astype(dtype))),
+            xp.asarray(expected[label].astype(np.complex64)),
+        )
+
     def test_map_rejects_partial_symbol(self, xp: Any) -> None:
         with pytest.raises(ValueError, match="bits"):
             Constellation.qam(16).map(xp.zeros(6, dtype="int8"))

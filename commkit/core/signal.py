@@ -1,9 +1,9 @@
-"""
-The :class:`Signal` container and its :class:`Reference` ground truth.
+"""The :class:`Signal` container and its :class:`Reference` ground truth.
 
 A Signal is a waveform plus the facts and descriptions needed to process it:
-sampling and symbol rate, the constellation and pulse it was built with, and
-the transmitted reference.  It never holds pipeline results.
+sampling and symbol rate, center frequency, the constellation and pulse it
+was built with, the transmitted reference and the frame layout.  It never
+holds pipeline results.
 
 Containers are frozen dataclasses: every update returns a new object through
 :meth:`Signal.replace`, which validates the changed fields.
@@ -71,12 +71,18 @@ class Reference:
             object.__setattr__(self, "bits", bits)
 
     def to(self, device: str) -> Reference:
-        """Return a copy with its arrays on ``device`` ("cpu" or "gpu")."""
+        """Return a Reference with its arrays on ``device`` ("cpu" or "gpu").
+
+        Arrays already on ``device`` are shared, not copied.
+        """
         bits = None if self.bits is None else to_device(self.bits, device)
         return Reference(symbols=to_device(self.symbols, device), bits=bits)
 
     def head(self, num_symbols: int) -> Reference:
-        """The first ``num_symbols`` symbols and their bits."""
+        """Return the first ``num_symbols`` symbols and their bits.
+
+        The Reference itself when it has no more symbols than that.
+        """
         if num_symbols >= self.symbols.shape[-1]:
             return self
         bits = self.bits
@@ -88,8 +94,7 @@ class Reference:
 
 @dataclass(frozen=True, eq=False, kw_only=True)
 class Signal:
-    """
-    A sampled waveform with its facts, description and ground truth.
+    """A sampled waveform with its facts, description and ground truth.
 
     Parameters
     ----------
@@ -163,7 +168,7 @@ class Signal:
     # -------------------------------------------------------------------------
 
     def time_axis(self) -> ArrayType:
-        """Time of each sample in seconds, starting at 0, shape ``(N,)``."""
+        """Time of each sample in seconds from 0, ``(N,)``."""
         n_samples = self.samples.shape[-1]
         return self.xp.arange(0, n_samples) / self.sampling_rate
 
@@ -258,26 +263,26 @@ class Signal:
     # -------------------------------------------------------------------------
 
     def clone(self) -> Signal:
-        """Return a fully independent (deep) copy, including all arrays."""
+        """Return an independent copy, arrays included."""
         return copy.deepcopy(self)
 
     def to(self, device: str) -> Signal:
-        """
-        Return a copy of this signal with its arrays on ``device``.
+        """Return a new Signal with its arrays on ``device``.
 
-        Moves the samples and the reference.  Host
-        metadata (constellation, pulse, frame) stays where it is.  The
-        original signal is unchanged; arrays already on ``device`` are shared.
+        Moves the samples and the reference.  Host metadata (constellation,
+        pulse, frame) stays where it is.  The original Signal is unchanged;
+        arrays already on ``device`` are shared, not copied.
 
         Parameters
         ----------
         device : {"cpu", "gpu"}
-            The target device. Case-insensitive.
+            Target device, case-insensitive.
 
         Raises
         ------
         ImportError
-            If GPU is requested but CuPy is not installed/functional.
+            If ``device`` is ``"gpu"`` and CuPy is not installed or finds no
+            usable GPU.
         """
         moved: dict[str, Any] = {}
         if self.reference is not None:
@@ -406,8 +411,7 @@ def _validate_field(name: str, value: Any) -> Any:
 
 
 def _format_si(value: float | None, unit: str = "Hz") -> str:
-    """
-    Formats a numeric value into a human-readable string with SI prefixes.
+    """Format a numeric value into a human-readable string with SI prefixes.
 
     Automatically selects the appropriate SI prefix (e.g., k, M, G, m, u, n)
     based on the magnitude of the value. Supports a wide range from

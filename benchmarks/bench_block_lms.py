@@ -18,8 +18,9 @@ Two block sizes are tracked:
 
 ``bench_block_lms``/``_large`` pass the full symbol sequence as training.
 On the GPU, training blocks and decision-directed blocks are each replayed
-from their own CUDA graph, so all three exercise the graph path; a silent
-fallback to the eager loop shows up as a several-fold jump.
+from their own CUDA graph, so all three exercise the graph path; a change
+that stops the replay (a capture condition turned off) shows up as a
+several-fold jump.
 """
 
 import pytest

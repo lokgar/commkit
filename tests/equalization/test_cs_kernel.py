@@ -3,7 +3,7 @@
 Kernel-level tests compare against a pure-Python float64 reference of the
 same online-OLS slip detector, sequenced over multiple uneven blocks so the
 circular history buffer is exercised through fill, wrap, and steady state.
-The end-to-end kernel-vs-fallback comparison lives in test_block_lms.py.
+The end-to-end comparison with the CPU lives in test_block.py.
 """
 
 import numpy as np
@@ -13,7 +13,7 @@ from commkit import _cuda
 from tests.common.conversions import to_numpy
 from tests.common.kernel_utils import (
     reference_cs_block,
-    skip_unless_kernel_available,
+    skip_unless_gpu,
     slip_workload,
 )
 
@@ -27,7 +27,7 @@ class TestCSBlockKernel:
 
     def test_cs_block_matches_reference_across_blocks(self, backend_device, xp, xpt):
         """Kernel output and state match the reference through fill/wrap/slips."""
-        skip_unless_kernel_available("cs_block", backend_device=backend_device)
+        skip_unless_gpu(backend_device)
         kern = _cuda.get_kernel("cs_block")
         assert kern is not None
 
@@ -86,7 +86,7 @@ class TestCSBlockKernel:
 
     def test_cs_block_rejects_bad_inputs(self, backend_device, xp):
         """Wrapper must reject wrong dtype, wrong shape, and non-contiguous state."""
-        skip_unless_kernel_available("cs_block", backend_device=backend_device)
+        skip_unless_gpu(backend_device)
         kern = _cuda.get_kernel("cs_block")
         assert kern is not None
 

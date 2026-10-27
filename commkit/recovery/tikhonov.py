@@ -1,4 +1,9 @@
-"""MAP Tikhonov carrier phase recovery with RTS/SSKF smoothers."""
+"""MAP carrier-phase recovery with a Tikhonov prior: :class:`Tikhonov`.
+
+Viterbi-Viterbi block phases smoothed by a Kalman smoother matched to the
+laser phase noise: the exact Rauch-Tung-Striebel (RTS) smoother or its
+steady-state form.
+"""
 
 from dataclasses import dataclass
 from typing import Literal
@@ -34,17 +39,21 @@ def _get_numba_rts_smoother():
 
         @numba.njit(cache=True, fastmath=True, nogil=True)
         def _rts_loop(phi_obs, sigma_p2, sigma_v2):
-            """Rauch-Tung-Striebel smoother - Numba inner kernel.
+            """Run the Rauch-Tung-Striebel smoother over the block phases (Numba).
 
             Parameters
             ----------
-            phi_obs : (B,) float64
-            sigma_p2 : float64
-            sigma_v2 : float64
+            phi_obs : numpy.ndarray
+                Observed block phases, float64, ``(B,)``.
+            sigma_p2 : float
+                Process noise variance per block.
+            sigma_v2 : float
+                Observation noise variance per block.
 
             Returns
             -------
-            (B,) float64
+            numpy.ndarray
+                Smoothed phases, float64, ``(B,)``.
             """
             B = len(phi_obs)
             x_filt = np.empty(B, dtype=np.float64)
@@ -79,29 +88,29 @@ def _rts_smoother_1d(
     sigma_p2: float,
     sigma_v2: float,
 ) -> np.ndarray:
-    """Rauch-Tung-Striebel (RTS) Kalman smoother for a 1-D random-walk state.
+    """Smooth a random-walk phase with the Rauch-Tung-Striebel (RTS) smoother.
 
-    Uses the Numba-compiled kernel (``_get_numba_rts_smoother``) when
-    available; falls back to a pure-Python loop otherwise.  Always runs on
-    CPU - call with a NumPy array; the caller is responsible for
-    ``to_device`` conversion.
+    Runs the Numba kernel of ``_get_numba_rts_smoother`` on the host; the
+    caller moves the observations to the CPU.
 
-    State model  : x[k+1] = x[k] + w[k],   w ~ N(0, sigma_p2)
-    Observation  : y[k]   = x[k] + v[k],   v ~ N(0, sigma_v2)
+    State model: ``x[k+1] = x[k] + w[k]``, ``w ~ N(0, sigma_p2)``.
+    Observation: ``y[k] = x[k] + v[k]``, ``v ~ N(0, sigma_v2)``.
 
     Parameters
     ----------
-    phi_obs : (B,) float64
-        Noisy block-phase observations in radians (e.g. from VV).
+    phi_obs : numpy.ndarray
+        Noisy block phases in radians (from Viterbi-Viterbi), float64,
+        ``(B,)``.
     sigma_p2 : float
-        Process noise variance per block (Wiener phase noise increment).
+        Process noise variance per block (the Wiener phase increment).
     sigma_v2 : float
-        Observation noise variance (VV estimator variance per block).
+        Observation noise variance per block (the Viterbi-Viterbi estimator
+        variance).
 
     Returns
     -------
-    (B,) float64
-        MAP-smoothed phase trajectory.
+    numpy.ndarray
+        MAP-smoothed phases, float64, ``(B,)``.
     """
     return _get_numba_rts_smoother()(phi_obs, float(sigma_p2), float(sigma_v2))
 
@@ -113,25 +122,21 @@ def _sskf_smoother_1d(
     sp,
     xp,
 ) -> ArrayType:
-    """Steady-state Kalman smoother via zero-phase IIR filter (filtfilt).
+    """Approximate the RTS smoother by a steady-state Kalman gain and ``filtfilt``.
 
-    Approximates the RTS smoother by replacing the sequential Kalman
-    recurrence with a 1st-order IIR filter whose gain is solved analytically
-    from the discrete algebraic Riccati equation.  The bidirectional
-    ``filtfilt`` call makes it equivalent to the RTS smoother in steady state.
+    The sequential Kalman recursion is replaced by a first-order IIR filter
+    whose gain solves the discrete algebraic Riccati equation; running it
+    forward and backward (``filtfilt``) equals the RTS smoother in steady
+    state.  It runs on the input's device (``sp.signal.filtfilt``).
 
-    Backend-aware: uses ``sp.signal.filtfilt`` where ``sp`` is
-    ``scipy`` (CPU) or ``cupyx.scipy`` (GPU) as returned by
-    ``dispatch``.
-
-    The approximation is excellent when ``B >> 1/K_∞``
-    (typically ``B > 20``).  For ``B < 7`` (``filtfilt`` minimum), falls
-    back to the exact ``_rts_smoother_1d`` on CPU.
+    The approximation is close when ``B >> 1/K_∞`` (typically ``B > 20``).
+    Below 7 blocks (the ``filtfilt`` minimum) the exact ``_rts_smoother_1d``
+    runs on the CPU instead.
 
     Parameters
     ----------
-    phi_obs : (B,) float64, on the target device
-        Noisy block-phase observations in radians.
+    phi_obs : ndarray
+        Noisy block phases in radians, float64, ``(B,)``.
     sigma_p2, sigma_v2 : float
         Process and observation noise variances per block.
     sp : module
@@ -141,7 +146,8 @@ def _sskf_smoother_1d(
 
     Returns
     -------
-    (B,) float64, same device as ``phi_obs``.
+    ndarray
+        Smoothed phases, float64, ``(B,)``, on the device of ``phi_obs``.
     """
     # filtfilt requires at least padlen * 2 + 1 samples; padlen = 3 * max(len(b), len(a)) = 6
     if len(phi_obs) < 7:
@@ -164,8 +170,7 @@ def _sskf_smoother_1d(
 
 @dataclass(frozen=True)
 class Tikhonov:
-    r"""
-    MAP phase estimation with a Wiener (Tikhonov) phase-noise prior.
+    r"""MAP phase estimation with a Wiener (Tikhonov) phase-noise prior.
 
     Viterbi-Viterbi block phases are smoothed by a Kalman smoother matched
     to the laser phase noise, with process variance
@@ -186,8 +191,8 @@ class Tikhonov:
         ``"rts"``: the exact Rauch-Tung-Striebel smoother (Numba, CPU; GPU
         input makes one host round trip of the block phases).
         ``"steady_state"``: the steady-state Kalman gain as a zero-phase IIR
-        (``filtfilt``) on the input's device; accurate for 20 or more blocks,
-        and the exact smoother below 7 blocks.
+        (``filtfilt``) on the input's device, accurate from about 20 blocks;
+        below 7 blocks the exact smoother runs instead.
     joint_channels : bool, default False
         MIMO: one joint trajectory from the summed block phasors (shared LO).
     cycle_slip : CycleSlip, optional

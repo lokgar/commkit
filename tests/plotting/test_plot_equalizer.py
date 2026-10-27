@@ -1,5 +1,6 @@
 """Tests for equalizer result and frequency response plotting."""
 
+import dataclasses
 from typing import Any
 from unittest.mock import patch
 
@@ -148,13 +149,13 @@ class TestPlotEqualizer:
             sps=2,
         )
         phase_1d = xp.linspace(0, 0.5, 100)
-        result.phase_trajectory = phase_1d
+        result = dataclasses.replace(result, phase_trajectory=phase_1d)
         fig1, axes1 = plot_equalizer_result(result, show=False)
         assert fig1 is not None
         assert len(axes1) == 3
 
         phase_2d = xp.stack([phase_1d, phase_1d * 0.5])
-        result.phase_trajectory = phase_2d
+        result = dataclasses.replace(result, phase_trajectory=phase_2d)
         fig2, axes2 = plot_equalizer_result(result, show=False)
         assert fig2 is not None
         assert len(axes2) == 3

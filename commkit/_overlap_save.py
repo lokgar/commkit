@@ -3,7 +3,7 @@
 Shared by ``filtering.ols_fir_filter`` (per-channel convolution) and
 ``equalization.zf_equalizer`` (per-bin MIMO matrix multiply): the forward pass
 cuts the record into 50 %-overlapping FFT blocks, the caller processes each
-bin, and the backward pass inverts and keeps the centre of each block.
+bin, and the backward pass inverts and keeps the center of each block.
 """
 
 from typing import Any
@@ -13,18 +13,17 @@ from .backend import ArrayType, dispatch
 
 
 def ols_forward(samples: ArrayType, N_fft: int) -> tuple[ArrayType, dict[str, Any]]:
-    """
-    Overlap-and-save forward pass: block windowing and batch FFT.
+    """Overlap-and-save forward pass: block windowing and batch FFT.
 
     This is the shared OLS scaffolding used by both ``ols_fir_filter`` (SISO
     scalar convolution) and ``zf_equalizer`` (MIMO per-bin matrix multiply).
     It should be called on samples that have already been dispatched to the
-    correct backend and shaped as ``(num_ch, N)``.
+    right device and shaped as ``(num_ch, N)``.
 
     Parameters
     ----------
     samples : array_like
-        Input samples. Shape: ``(num_ch, N)``. Must be 2-D.
+        Input samples, ``(num_ch, N)``. Must be 2-D.
     N_fft : int
         FFT block size. Must be a power of 2 and satisfy
         ``N_fft // 4 >= filter_length`` so the causal/anti-causal guard
@@ -32,15 +31,15 @@ def ols_forward(samples: ArrayType, N_fft: int) -> tuple[ArrayType, dict[str, An
 
     Returns
     -------
-    Y : array_like
-        Batch FFT of all OLS windows. Shape: ``(num_ch, num_blocks, N_fft)``.
+    Y : ndarray
+        Batch FFT of all OLS windows, ``(num_ch, num_blocks, N_fft)``.
     meta : dict
         Scaffold parameters required by ``ols_backward``:
         ``{'N': int, 'B': int, 'discard': int, 'num_blocks': int}``.
     """
     _, xp, _ = dispatch(samples)
     num_ch, N = samples.shape
-    B = N_fft // 2  # 50 % hop - maximises block reuse
+    B = N_fft // 2  # 50 % hop - maximizes block reuse
     discard = N_fft // 4  # symmetric guard: absorbs causal & anti-causal transients
     num_blocks = (N + B - 1) // B
 
@@ -64,22 +63,21 @@ def ols_forward(samples: ArrayType, N_fft: int) -> tuple[ArrayType, dict[str, An
 
 
 def ols_backward(X_hat_f: ArrayType, meta: dict[str, Any]) -> ArrayType:
-    """
-    Overlap-and-save backward pass: batch IFFT, symmetric discard, reshape.
+    """Overlap-and-save backward pass: batch IFFT, symmetric discard, reshape.
 
     Parameters
     ----------
     X_hat_f : array_like
-        Frequency-domain blocks after per-bin processing.
-        Shape: ``(num_ch, num_blocks, N_fft)``.
+        Frequency-domain blocks after the per-bin processing,
+        ``(num_ch, num_blocks, N_fft)``.
     meta : dict
         Scaffold parameters returned by ``ols_forward``.
 
     Returns
     -------
-    array_like
-        Time-domain output trimmed to the original signal length ``N``.
-        Shape: ``(num_ch, N)``.
+    ndarray
+        Time-domain output trimmed to the original length ``N``,
+        ``(num_ch, N)``.
     """
     _, xp, _ = dispatch(X_hat_f)
     N = meta["N"]

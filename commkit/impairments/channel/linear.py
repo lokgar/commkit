@@ -1,4 +1,9 @@
-"""Linear fiber-channel impairments: chromatic dispersion, PMD, SOP mixing."""
+"""Linear fiber-channel impairments.
+
+:func:`apply_chromatic_dispersion`, :func:`apply_pmd` (a single
+differential-group-delay section) and :func:`apply_polarization_mixing` (a
+rotation of the state of polarization).
+"""
 
 import math
 from types import ModuleType
@@ -28,9 +33,9 @@ def _jones_rotation(theta: float, xp: ModuleType, dtype: Any) -> ArrayType:
     Shared builder for ``apply_pmd``'s rotation into the PSP frame,
     ``R(-theta)`` (the section of ``_fiber.jones_section``), and
     ``apply_polarization_mixing``'s static-``theta`` path.  The time-varying
-    path in ``apply_polarization_mixing`` doesn't build an explicit matrix -
-    a distinct 2x2 matrix per sample isn't worth materialising - so it
-    applies the same rotation via direct per-sample broadcasting instead.
+    path of ``apply_polarization_mixing`` builds no matrix (one 2x2 matrix
+    per sample is not worth building); it applies the same rotation by
+    broadcasting per sample.
     """
     c = math.cos(theta)
     s = math.sin(theta)
@@ -44,56 +49,44 @@ def apply_pmd(
     theta: float = 0.0,
     sampling_rate: float | None = None,
 ) -> S:
-    """
-    Applies first-order Polarization Mode Dispersion (PMD) to a dual-pol signal.
+    """Apply first-order polarization-mode dispersion (PMD) to a dual-pol field.
 
-    Models an uncompensated channel segment as a frequency-dependent Jones matrix:
+    One section with the frequency-dependent Jones matrix
 
-        H(f) = R(+theta) * diag(e^(-j*pi*f*tau), e^(+j*pi*f*tau)) * R(-theta)
+        H(f) = R(θ) · diag(exp(-jπfτ), exp(+jπfτ)) · R(-θ)
 
-    where tau is the differential group delay (DGD), theta is the PSP orientation
-    angle, and R(theta) is the 2x2 Jones rotation matrix.
-
-    The DGD is applied in the *principal states of polarisation* (PSP) frame:
-    R(-theta) projects the signal onto the PSPs, the differential delay +/- pi*f*tau
-    is applied to each PSP, then R(+theta) rotates back to the lab frame. The two PSPs
-    experience equal and opposite group delays, giving a total differential delay of
-    tau seconds.
-
-    theta is **not** a separate bulk rotation - it is the PSP orientation angle that
-    is intrinsic to the PMD model. For a frequency-independent polarization rotation
-    with no DGD use ``apply_polarization_mixing`` instead.
-
-    The operation is fully vectorised in the frequency domain and
-    backend-agnostic (NumPy / CuPy).
+    with the differential group delay (DGD) ``τ``, the orientation ``θ`` of
+    the principal states of polarization (PSPs) and the rotation
+    ``R(θ) = [[cos θ, -sin θ], [sin θ, cos θ]]``.  ``R(-θ)`` projects the
+    field onto the PSPs, which are delayed by ``±τ/2`` (a differential delay
+    of ``τ``), and ``R(θ)`` rotates back.  ``θ`` is part of the PMD model,
+    not a separate rotation: with ``τ = 0`` the section is the identity.
+    For a frequency-independent rotation use
+    :func:`apply_polarization_mixing`; for PMD distributed along a fiber,
+    :func:`apply_fiber_propagation` with ``Fiber(pmd_ps_sqrt_km=...)``.
 
     Parameters
     ----------
     samples : array_like or Signal
-        Dual-polarization signal. Shape: ``(2, N_samples)``.
+        Dual-polarization field, ``(2, N)``.
     dgd : float
-        Differential group delay tau in seconds.
-        Set to ``0`` to apply pure SOP rotation with no delay (equivalent
-        to ``apply_polarization_mixing``).
+        Differential group delay ``τ`` in seconds.
     theta : float, default 0.0
-        PSP orientation angle theta in radians.  Determines how
-        much energy couples between X and Y polarisations.
-        theta = 0 -> PSPs aligned with lab axes (no cross-coupling);
-        theta = pi/4 -> maximum coupling.
+        PSP orientation ``θ`` in radians: 0 aligns the PSPs with the X and Y
+        axes (no coupling between them), ``π/4`` couples them most.
     sampling_rate : float, optional
         Sampling rate in Hz.  Taken from the Signal; required for array
         input.  A value that disagrees with the Signal raises.
 
     Returns
     -------
-    array_like or Signal
-        PMD-distorted signal, same backend/shape as input.  A :class:`Signal`
-        returns a new distorted :class:`Signal`.
+    ndarray or Signal
+        The distorted field, same shape, dtype and device as the input.
 
     Raises
     ------
     ValueError
-        If input is not 2-dimensional with first axis == 2.
+        If the input is not ``(2, N)``.
 
     Examples
     --------
@@ -140,47 +133,36 @@ def apply_polarization_mixing(
     theta: float | ArrayType,
     drift_rad_per_sample: float = 0.0,
 ) -> S:
-    """
-    Applies a static or time-varying polarization rotation (pure SOP mixing).
+    """Rotate the state of polarization, statically or over time.
 
-    Models a frequency-independent 2x2 Jones rotation matrix:
-
-        [Ex'[n]; Ey'[n]] = R(theta[n]) * [Ex[n]; Ey[n]]
-
-        where R(theta) = [[cos(theta), -sin(theta)]; [sin(theta), cos(theta)]]
-
-    Unlike ``apply_pmd``, there is no differential group delay - this is a
-    pure bulk polarization rotation.  Useful for testing polarization-diverse
-    receivers and modelling slow SOP drift.
+    A frequency-independent real rotation,
+    ``[x'[n], y'[n]] = R(θ[n]) · [x[n], y[n]]`` with
+    ``R(θ) = [[cos θ, -sin θ], [sin θ, cos θ]]``: unlike :func:`apply_pmd`,
+    there is no differential group delay.  For testing polarization-diverse
+    receivers and modeling slow SOP drift.
 
     Parameters
     ----------
     samples : array_like or Signal
-        Dual-polarization signal. Shape: ``(2, N_samples)``.
-    theta : float or array_like of shape ``(N_samples,)``
-        Rotation angle(s) in radians.
-
-        * **Scalar** - static rotation: the same R(theta) is applied to every sample.
-        * **Array of shape** ``(N,)`` - time-varying SOP: one angle per sample,
-          applied sample-by-sample via vectorised broadcasting.
-
-        When ``theta`` is a scalar and ``drift_rad_per_sample != 0``, the
-        trajectory is extended as a linear ramp:
-        ``theta[n] = theta + drift_rad_per_sample * n``.
+        Dual-polarization field, ``(2, N)``.
+    theta : float or array_like
+        Rotation angle in radians: a scalar for one rotation of every sample
+        (a ramp with ``drift_rad_per_sample``), or ``(N,)`` angles, one per
+        sample.
     drift_rad_per_sample : float, default 0.0
-        Linear SOP drift in radians per sample.  Only used when ``theta``
-        is a scalar.  Ignored when ``theta`` is an array.
+        Linear drift for a scalar ``theta``:
+        ``θ[n] = theta + drift_rad_per_sample · n``.  Ignored for an array
+        ``theta``.
 
     Returns
     -------
-    array_like or Signal
-        Rotated dual-polarization signal, same shape, dtype, and backend as
-        input.  A :class:`Signal` returns a new rotated :class:`Signal`.
+    ndarray or Signal
+        The rotated field, same shape, dtype and device as the input.
 
     Raises
     ------
     ValueError
-        If input is not 2-dimensional with first axis == 2.
+        If the input is not ``(2, N)`` or an array ``theta`` is not ``(N,)``.
 
     Examples
     --------
@@ -228,7 +210,7 @@ def apply_polarization_mixing(
                 f"theta array must have shape (N,)={(N,)}, got {angles.shape}."
             )
 
-    # Time-varying: vectorised per-sample rotation via broadcasting
+    # Time-varying: vectorized per-sample rotation via broadcasting
     # R(θ[n]) applied to each column of x
     # Angles in float64, the rotation in the samples' precision.
     cos_t = xp.cos(angles).astype(x.real.dtype)  # (N,)
@@ -254,40 +236,33 @@ def apply_chromatic_dispersion(
     center_wavelength_nm: float,
     sampling_rate: float | None = None,
 ) -> S:
-    """
-    Applies chromatic dispersion (CD) to a signal in the frequency domain.
+    """Apply chromatic dispersion (CD) in the frequency domain.
 
-    Multiplies the signal spectrum by the CD transfer function:
-
-        H_CD(f) = exp(-j/2 * beta_2 * (2*pi*f)^2 * L)
-
-    where
-
-        beta_2 = -D * lambda^2 / (2*pi*c)
-
-    and D is the dispersion parameter, lambda is the center wavelength,
-    c is the speed of light, and L is the fiber length.
+    Multiplies the spectrum by ``H(ω) = exp(-j β₂ L ω² / 2)`` with
+    ``β₂ = -D λ² / (2π c)``: the dispersion parameter ``D``, the center
+    wavelength ``λ``, the speed of light ``c`` and the fiber length ``L``
+    (second-order dispersion only, without loss or nonlinearity; see
+    :func:`apply_fiber_propagation` for those).
 
     Parameters
     ----------
     samples : array_like or Signal
-        Complex baseband signal. Shape: ``(N,)`` (SISO) or ``(C, N)`` (MIMO).
+        Complex baseband samples, ``(N,)`` or ``(C, N)``.
     dispersion_ps_nm_km : float
-        Fiber dispersion parameter D in ps / (nm * km).
-        Standard SMF-28: 17 ps/(nm*km) at 1550 nm.
+        Dispersion parameter ``D`` in ps/(nm km); standard single-mode fiber
+        (G.652) has 17 at 1550 nm.  Positive is anomalous (``β₂ < 0``).
     fiber_length_km : float
-        Fiber span length in km.
+        Fiber length in km.
     center_wavelength_nm : float
-        Center wavelength in nm (e.g. 1550 for C-band).
+        Center wavelength in nm (e.g. 1550 for the C band).
     sampling_rate : float, optional
         Sampling rate in Hz.  Taken from the Signal; required for array
         input.  A value that disagrees with the Signal raises.
 
     Returns
     -------
-    array_like or Signal
-        CD-impaired signal, same shape, dtype, and backend as input.  A
-        :class:`Signal` returns a new impaired :class:`Signal`.
+    ndarray or Signal
+        The dispersed samples, same shape, dtype and device as the input.
 
     See Also
     --------

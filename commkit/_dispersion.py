@@ -1,8 +1,8 @@
 """Chromatic dispersion physics (private).
 
 Single source of the fiber dispersion model used by
-``impairments.apply_chromatic_dispersion`` (the channel) and the receiver's
-dispersion compensation (its inverse):
+``impairments.apply_chromatic_dispersion`` (the channel) and
+``filtering.correct_chromatic_dispersion`` (its inverse):
 
 - ``beta2_length``: D [ps/(nm km)], L [km], λ [nm] to the β₂·L product [s²],
   ``β₂ = -D λ² / (2π c)``; ``beta3_length`` adds the slope S [ps/(nm² km)]
@@ -74,8 +74,10 @@ def dispersion_phase(
     beta3_length: float = 0.0,
     xp: ModuleType,
 ) -> ArrayType:
-    """Propagation phase ``-(β₂L ω²/2 + β₃L ω³/6)`` on the ``fftfreq`` grid,
-    float64 on ``xp``'s device (it reaches thousands of radians)."""
+    """Propagation phase ``-(β₂L ω²/2 + β₃L ω³/6)`` on the ``fftfreq`` grid.
+
+    float64 on ``xp``'s device, because it reaches thousands of radians.
+    """
     omega = 2.0 * np.pi * xp.fft.fftfreq(num_samples, d=1.0 / sampling_rate)
     phase = (beta2_length / 2.0) * omega**2
     if beta3_length:
@@ -113,8 +115,10 @@ def apply_dispersion(
     center_wavelength_nm: float,
     inverse: bool,
 ) -> ArrayType:
-    """Filter ``(N,)`` or ``(C, N)`` samples with the fiber response or its
-    inverse, keeping shape, dtype and device."""
+    """Filter samples with the fiber's dispersion response or its inverse.
+
+    ``(N,)`` or ``(C, N)`` samples keep their shape, dtype and device.
+    """
     samples, xp, _ = dispatch(samples)
     samples, was_1d = as_2d(samples, name="samples")
     h = transfer_function(

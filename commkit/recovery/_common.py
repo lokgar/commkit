@@ -1,4 +1,7 @@
-"""Shared helpers for the recovery package (PLL gains, block-phase estimation)."""
+"""Shared helpers of the recovery package (private).
+
+PLL loop gains and block-phase estimation, used by the method modules.
+"""
 
 from __future__ import annotations
 
@@ -11,16 +14,16 @@ from ..backend import ArrayType, to_device
 
 
 def _pll_gains(bandwidth: float) -> tuple[np.float32, np.float32]:
-    """Convert normalised loop bandwidth to PI gains (mu, beta).
+    """Convert normalized loop bandwidth to PI gains (mu, beta).
 
-    Uses the standard 2nd-order loop approximation for a critically-damped
+    Uses the usual second-order loop approximation for a critically damped
     (ζ = 1) PI loop:  μ ≈ 4·B_L,  β ≈ 4·B_L².  (With ``ωₙT = √β = 2B`` and
     ``ζ = μ/(2√β) = 1``.)
 
     Parameters
     ----------
     bandwidth : float
-        Normalised one-sided loop bandwidth as a fraction of the symbol rate,
+        Normalized one-sided loop bandwidth as a fraction of the symbol rate,
         e.g. ``1e-3`` for a narrow loop.
 
     Returns
@@ -41,10 +44,10 @@ def _resolve_pll_gains(
     and the standalone PLL, so the bandwidth->gain mapping is defined in
     exactly one place.
 
-    Precedence
-    ----------
-    * ``mu`` given -> raw PI gains; ``beta`` defaults to ``0.0`` (1st-order loop).
-    * ``mu`` is ``None`` -> derive critically-damped (ζ=1) gains ``μ=4B, β=4B²``
+    Precedence:
+
+    * ``mu`` given: raw PI gains; ``beta`` defaults to ``0.0`` (a first-order loop).
+    * ``mu`` is ``None``: critically damped (ζ = 1) gains ``μ = 4B, β = 4B²``
       from ``bandwidth`` via ``_pll_gains``.
 
     ``beta`` without ``mu`` is ambiguous and raises ``ValueError``.
@@ -149,47 +152,45 @@ def _vv_block_phase(
     block_size: int,
     joint_channels: bool,
 ) -> tuple[ArrayType, ArrayType, ArrayType]:
-    """Viterbi-Viterbi (M-th power) block-phase estimator.
+    """Viterbi-Viterbi (M-th power) block phases.
 
-    Reshapes into blocks, projects onto the unit circle (``project``, see
-    ``_mth_power_geometry``) or else scales each channel to unit power, sums
-    the M-th power per block, M-fold-unwraps
-    the block-phase trajectory, removes the constellation ``bias``, and - for
-    MIMO in non-joint mode - aligns every channel's M-fold branch to channel
-    0's.
+    Splits the symbols into blocks, projects them onto the unit circle
+    (``project``, see ``_mth_power_geometry``) or else scales each channel
+    to unit power, sums the M-th power per block, unwraps the block phases
+    M-fold and removes the constellation ``bias``.  For MIMO without
+    ``joint_channels`` every channel's M-fold branch is aligned to channel 0.
 
-    Shared core of the ``ViterbiViterbi`` and ``Tikhonov`` estimators (the
-    latter adds a Kalman smoother before cycle-slip repair and
-    interpolation): both consume this **raw** block-phase trajectory.
+    The shared core of ``ViterbiViterbi`` and ``Tikhonov`` (which smooths
+    before the cycle-slip repair and the interpolation): both start from
+    these raw block phases.
 
     Parameters
     ----------
-    symbols2d : (C, N) complex array, any backend
-        1-sps symbols.
+    symbols2d : ndarray
+        Symbols at one sample per symbol, ``(C, N)``.
     xp : module
-        ``symbols2d``'s array module (NumPy/CuPy).
+        Array module of ``symbols2d``.
     M : int
-        M-th power exponent (the constellation's rotational symmetry).
+        Exponent, the constellation's rotational symmetry.
     project : bool
         Project each symbol onto the unit circle before the power.
     bias : float
         Constellation bias subtracted from the block phase.
     block_size : int
-        Symbols per block.  The caller has already validated
-        ``N // block_size > 0``.
+        Symbols per block; the caller has checked ``N // block_size > 0``.
     joint_channels : bool
-        If ``True`` and ``C > 1``, sum the M-th-power block phasors across
-        channels before angle/unwrap, producing a single joint trajectory
-        copied to all ``C`` rows of the return value.
+        For ``C > 1``, sum the block phasors over the channels before the
+        angle and the unwrap, and copy the one trajectory to every row.
 
     Returns
     -------
-    phi_u : (C, N_blocks) float64 array, same backend as ``symbols2d``
-        Raw block-phase trajectory - identical across rows in joint mode.
-    block_centers : (N_blocks,) float64 array
-        Block centre positions in symbols, for interpolation.
-    all_positions : (N,) float64 array
-        Per-symbol positions, for interpolation.
+    phi_u : ndarray
+        Raw block phases, float64, ``(C, N_blocks)``, on the device of
+        ``symbols2d``; equal rows with ``joint_channels``.
+    block_centers : ndarray
+        Block centers in symbols, float64, ``(N_blocks,)``.
+    all_positions : ndarray
+        Symbol positions, float64, ``(N,)``, for the interpolation.
     """
     C, N = symbols2d.shape
     N_trunc = (N // block_size) * block_size
@@ -216,7 +217,7 @@ def _vv_block_phase(
 
     S_b = xp.sum(blocks_c**M, axis=-1)  # (C, N_blocks)
 
-    # Block centre positions for interpolation (uniform spacing = block_size)
+    # Block center positions for interpolation (uniform spacing = block_size)
     block_centers = xp.arange(N_blocks, dtype=xp.float64) * block_size + block_size / 2
     all_positions = xp.arange(N, dtype=xp.float64)
 

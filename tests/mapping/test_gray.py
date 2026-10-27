@@ -162,3 +162,65 @@ class TestConstellationSlicing:
         result = _nearest_index(x, const, chunk=7)
         expected = np.argmin(np.abs(x_np[:, None] - const_np[None, :]), axis=1)
         xpt.assert_array_equal(result, xp.asarray(expected))
+
+
+_DECISION_CASES = [
+    mapping.Constellation.psk(16),
+    mapping.Constellation.qam(128),
+    mapping.Constellation.qam(8),
+    mapping.Constellation.pam(4),
+    # Two rings of 8 points (16-APSK-like), natural-binary labels.
+    mapping.Constellation(
+        np.concatenate(
+            [
+                np.exp(2j * np.pi * np.arange(8) / 8),
+                2 * np.exp(2j * np.pi * (np.arange(8) + 0.5) / 8),
+            ]
+        )
+    ),
+]
+_DECISION_IDS = ["16psk", "cross128qam", "8qam", "pam4", "two-rings"]
+
+
+def _noisy_points(constellation: Any, n: int, seed: int) -> np.ndarray:
+    """Points plus noise at the scale of their spacing, single precision."""
+    rng = np.random.default_rng(seed)
+    pts = constellation.points
+    x = pts[rng.integers(0, pts.size, n)] + 0.15 * rng.standard_normal(n)
+    if np.iscomplexobj(pts):
+        x = x + 0.15j * rng.standard_normal(n)
+    return x.astype(np.complex64 if np.iscomplexobj(x) else np.float32)
+
+
+@pytest.mark.gpu_only
+class TestNearestIndexGPU:
+    """GPU hard decisions of constellations without a square lattice."""
+
+    @pytest.mark.parametrize("constellation", _DECISION_CASES, ids=_DECISION_IDS)
+    def test_kernel_matches_cpu(self, xp: Any, xpt: Any, constellation: Any) -> None:
+        x = _noisy_points(constellation, 20000, seed=1)
+        pts = constellation.points.astype(constellation._storage_dtype())
+        xpt.assert_array_equal(
+            _nearest_index(xp.asarray(x), pts), xp.asarray(_nearest_index(x, pts))
+        )
+
+    @pytest.mark.parametrize("constellation", _DECISION_CASES, ids=_DECISION_IDS)
+    def test_double_input_is_chunked_like_cpu(
+        self, xp: Any, xpt: Any, constellation: Any, monkeypatch: Any
+    ) -> None:
+        """Double input, outside the kernel's float32, is searched in chunks."""
+        from commkit.mapping import gray
+
+        monkeypatch.setattr(gray, "_GPU_CHUNK_ELEMENTS", 999 * constellation.order)
+        x = _noisy_points(constellation, 5000, seed=2).astype(
+            np.complex128 if constellation.is_complex else np.float64
+        )
+        pts = constellation.points
+        xpt.assert_array_equal(
+            _nearest_index(xp.asarray(x), pts), xp.asarray(_nearest_index(x, pts))
+        )
+
+    def test_demap_matches_cpu(self, xp: Any, xpt: Any) -> None:
+        c = mapping.Constellation.psk(8)
+        x = _noisy_points(c, 3000, seed=3).reshape(2, -1)
+        xpt.assert_array_equal(c.demap(xp.asarray(x)), xp.asarray(c.demap(x)))

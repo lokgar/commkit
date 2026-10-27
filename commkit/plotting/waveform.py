@@ -1,4 +1,4 @@
-"""Time-domain waveform plots."""
+"""Time-domain waveform plots: :func:`plot_time_domain`."""
 
 from typing import Any
 
@@ -32,22 +32,23 @@ def plot_time_domain(
     show: bool = False,
     **kwargs: Any,
 ) -> tuple[Any, Any] | None:
-    """
-    Plots the time-domain representation of the signal.
+    """Plot a signal against time.
 
-    For complex signals, both In-Phase (I) and Quadrature (Q) components
-    are plotted. Handles SI scaling (s, ms, us, etc.) for the time axis.
+    Complex samples are drawn as their in-phase (I) and quadrature (Q)
+    components; the time axis uses SI prefixes.  ``(C, N)`` input gets one
+    panel per channel.
 
     Parameters
     ----------
     samples : array_like or Signal
-        Input signal samples. Shape: (..., N_samples).
+        Input samples, ``(N,)`` or ``(C, N)``.
     sampling_rate : float, optional
-        Sampling rate in Hz (a fact): taken from a Signal, required for arrays.
+        Sampling rate in Hz.  Taken from the Signal; required for array
+        input.
     start_symbol : int, default 0
-        The starting symbol to plot.
+        First symbol (or sample, without ``sps``) drawn.
     num_symbols : int, optional
-        Limit plot to a specific number of symbol periods. Requires `sps`.
+        Number of symbol periods drawn; needs ``sps``.
     sps : float, optional
         Samples per symbol (a fact): taken from a Signal; for arrays, needed
         to count in symbols, otherwise ``start_symbol`` counts samples.
@@ -58,20 +59,19 @@ def plot_time_domain(
         transfer.  At screen resolution this looks like the full trace.
         ``None`` draws every sample.
     ax : matplotlib.axes.Axes, optional
-        Existing axis to plot on.
-    title : str, optional
-        Plot title. Defaults to "Waveform".
+        Axes to draw on; ``None`` creates a figure.
+    title : str or None, default "Waveform"
+        Title of the figure; ``None`` for none.
     show : bool, default False
-        If True, calls `plt.show()`.
+        Call ``plt.show()`` and return ``None``.
     **kwargs : Any
-        Additional keyword arguments passed to `ax.plot`.
+        Passed to ``ax.plot``.
 
     Returns
     -------
-    fig : matplotlib.figure.Figure
-        The figure object.
-    ax : matplotlib.axes.Axes or ndarray
-        The axis or array of axes used for the plot.
+    (fig, ax) or None
+        The figure and the Axes (an array of Axes for several panels);
+        ``None`` with ``show=True``, which shows the figure instead.
     """
     signal_adapter = adapt_signal(samples, function_name="plot_time_domain()")
     x = signal_adapter.array
@@ -196,8 +196,10 @@ def _plot_time_domain(
 def _envelope(
     y: Any, sampling_rate: float, max_points: int | None, xp: Any
 ) -> tuple[np.ndarray, np.ndarray]:
-    """Host time axis and values to draw: the samples, or their min/max
-    envelope when there are more than ``max_points``.
+    """Host time axis and values to draw.
+
+    The samples, or their min/max envelope when there are more than
+    ``max_points``.
 
     About ``max_points // 2`` buckets of equal width (the last one shorter)
     each contribute their minimum and maximum at the bucket's start time,

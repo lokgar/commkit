@@ -1,9 +1,10 @@
-"""
-Spectral analysis and frequency-domain processing.
+"""Spectral estimation and frequency shifting.
 
-This module provides high-performance routines for spectral estimation and
-manipulation, optimized for both CPU and GPU backends. It supports Welch's
-Power Spectral Density (PSD) method and phase-continuous frequency shifting.
+:func:`welch_psd` (Welch's averaged periodogram) and :func:`spectrogram`
+(a :class:`Spectrogram`); :func:`shift_frequency` (complex mixing) and
+:func:`add_pilot_tone` (a CW tone), both at a frequency snapped to the FFT
+grid so that a periodic record stays periodic, and :func:`grid_frequency`,
+which returns that grid frequency.
 """
 
 from collections.abc import Callable, Sequence
@@ -32,25 +33,23 @@ __all__ = [
 def _validate_and_shift(
     xp: Any, is_complex: bool, return_onesided: bool | None, label: str
 ) -> tuple[bool, Callable[..., tuple[ArrayType, ...]]]:
-    """Resolve/validate ``return_onesided`` and build the matching post-shift closure.
+    """Resolve ``return_onesided`` and build the matching shift of the result.
 
-    Shared by :func:`welch_psd` and :func:`spectrogram`, which both: default
-    ``return_onesided`` to ``not is_complex``, reject the one-sided request
-    for complex data, and - when the result ends up two-sided - fftshift the
-    frequency axis (and any data arrays indexed by it) back to centered
-    (``-fs/2`` to ``fs/2``) order.
+    Shared by :func:`welch_psd` and :func:`spectrogram`: ``return_onesided``
+    defaults to ``not is_complex``, a one-sided request for complex data is
+    rejected, and a two-sided result has its frequency axis (and the data
+    indexed by it) fftshifted to centered order, ``-fs/2`` to ``fs/2``.
 
     Parameters
     ----------
     xp : module
-        Array module (NumPy/CuPy) providing ``fft.fftshift``.
+        Array module providing ``fft.fftshift``.
     is_complex : bool
         Whether the input samples are complex-valued.
     return_onesided : bool or None
         The caller-supplied value (``None`` triggers the default).
     label : str
-        Human-readable name for the error message (e.g. ``"PSD"``,
-        ``"spectrogram"``).
+        Name for the error message (``"PSD"``, ``"spectrogram"``).
 
     Returns
     -------
@@ -85,13 +84,13 @@ def grid_frequency(
     sampling_rate: float,
     num_samples: int,
 ) -> float | np.ndarray:
-    """
-    The FFT-bin frequency that ``shift_frequency`` / ``add_pilot_tone`` apply.
+    """The FFT-bin frequency that ``shift_frequency`` / ``add_pilot_tone`` apply.
 
     Both functions snap a requested frequency to the nearest multiple of the
     bin spacing ``sampling_rate / num_samples`` (ties to even), so the tone or
     shift completes a whole number of cycles over the record.  This returns
-    that applied value, e.g. to tell a receiver where a pilot tone sits.
+    that applied value, for example to tell a receiver where a pilot tone
+    sits.
 
     Parameters
     ----------
@@ -127,22 +126,17 @@ def shift_frequency(
     frequency: float,
     sampling_rate: float | None = None,
 ) -> S:
-    """
-    Applies a frequency offset (complex mixing) to a signal.
+    """Shift the spectrum by a frequency (complex mixing).
 
-    This function shifts the signal spectrum by a specified offset in Hz
-    by multiplying the samples with a complex phasor:
-    s_shifted(t) = s(t) * e^(j * 2 * pi * f_offset * t)
-
-    To maintain phase continuity and prevent spectral leakage when the
-    signal is treated as periodic (e.g., in circular convolution or
-    FFT-based operations), the applied offset is quantized to the
-    fundamental frequency resolution of the signal (df = f_s / N).
+    ``y[n] = x[n] · exp(j 2π f n / f_s)``, with ``f`` snapped to the FFT grid
+    ``f_s / N`` (see :func:`grid_frequency`; a warning is logged when it
+    moves), so the shift completes a whole number of cycles over the record
+    and a periodic record stays periodic.
 
     Parameters
     ----------
     samples : array_like or Signal
-        Input signal samples. Shape: (..., N_samples).
+        Input samples, time on the last axis.
     frequency : float
         Requested frequency shift in Hz; positive values move the spectrum
         up.
@@ -152,16 +146,9 @@ def shift_frequency(
 
     Returns
     -------
-    array_like or Signal
-        The frequency-shifted samples on the input's device (a new Signal for
-        Signal input).  The applied shift is
-        ``grid_frequency(frequency, sampling_rate=fs, num_samples=N)``.
-
-    Notes
-    -----
-    The quantization ensures that the applied shift corresponds to an
-    integer number of cycles over the signal duration, which is critical
-    for preserving the circularity of the signal's phase.
+    ndarray or Signal
+        The shifted samples, complex, on the input's device.  The applied
+        shift is ``grid_frequency(frequency, sampling_rate=fs, num_samples=N)``.
     """
     signal_adapter = adapt_signal(samples, function_name="shift_frequency()")
     x = signal_adapter.array
@@ -206,54 +193,52 @@ def add_pilot_tone(
     phase_init: float = 0.0,
     renormalize: bool = False,
 ) -> S:
-    r"""
-    Add a continuous-wave (CW) pilot tone to a baseband waveform.
+    r"""Add a continuous-wave (CW) pilot tone to a baseband waveform.
 
-    Superimposes a * exp(j*(2*pi*f_p*n/f_s + phi_0)) on the oversampled samples.
-    The tone acquires the same carrier frequency offset and phase noise as the
-    data; at the receiver its phase directly recovers both - see
-    ``recovery.PilotTone``.
+    Adds ``a · exp(j (2π f_p n / f_s + φ_0))`` to the samples.  The tone
+    acquires the same carrier frequency offset and phase noise as the data,
+    so its phase at the receiver recovers both (see
+    :class:`commkit.recovery.PilotTone`).
 
-    Apply to a pulse-shaped oversampled waveform before channel impairments.
-    Place the tone in a guard band: (1+beta)/2 * R_s < |f_p| < f_s/2.
+    Apply it to the pulse-shaped, oversampled waveform before the channel
+    impairments, with the tone in a guard band:
+    ``(1 + rolloff) / 2 · R_s < |f_p| < f_s / 2``.
 
     Parameters
     ----------
-    samples : array_like
-        Complex baseband samples. Shape: ``(N,)`` (SISO) or ``(C, N)`` (MIMO).
-        The tone is added to every channel, each scaled to its own power.
+    samples : array_like or Signal
+        Complex baseband samples, ``(N,)`` or ``(C, N)``.  The tone is added
+        to every channel, scaled to that channel's power.
     frequency : float or sequence of float
-        Requested tone frequency fp in Hz, in ``(-f_s/2, f_s/2)``.
-        A **scalar** places the same tone on every channel.  A **sequence**
-        of length ``C`` places one tone per channel (channel ``c`` gets
-        ``frequency[c]``) - distinct per-channel tones enable, e.g.,
-        tone-based polarization demultiplexing
-        (``demultiplex_polarization_tones``).  Each value is quantized to the
-        nearest FFT bin ``f_s/N`` (see Notes); the **actual** applied
-        frequency(ies) are returned.
+        Requested tone frequency ``f_p`` in Hz, in ``(-f_s/2, f_s/2)``.  A
+        scalar places the same tone on every channel; a sequence of length
+        ``C`` places one tone per channel (channel ``c`` gets
+        ``frequency[c]``), as for tone-based polarization demultiplexing
+        (:func:`~commkit.equalization.demultiplex_polarization_tones_static`).
+        Each value is snapped to the FFT grid ``f_s/N`` (see Notes);
+        :func:`grid_frequency` gives the applied value.
     sampling_rate : float, optional
-        Sampling rate fs in Hz.  Taken from the Signal; required for array
+        Sampling rate in Hz.  Taken from the Signal; required for array
         input.  A value that disagrees with the Signal raises.
     power_ratio_db : float or sequence of float, default -15.0
-        Pilot-to-signal power ratio (PSR) in dB: 10*log10(P_tone / P_signal).
-        Typical range -20 to -10 dB.  A **scalar** applies the same PSR to every
-        channel; a **sequence** of length ``C`` sets one PSR per channel
-        (mirroring per-channel ``frequency``).
+        Pilot-to-signal power ratio (PSR) in dB, ``10·log10(P_tone /
+        P_signal)``; typically -20 to -10 dB.  A scalar applies to every
+        channel, a sequence of length ``C`` sets one PSR per channel.
     phase_init : float, default 0.0
-        Initial tone phase phi_0 in radians, common to all channels.  Acts as
+        Initial tone phase ``φ_0`` in radians, common to all channels.  Acts as
         a known phase reference; it appears as a constant offset in the
         recovered phase and is absorbed by the usual post-CPR ambiguity
         resolution.
     renormalize : bool, default False
-        If ``True``, rescale each channel after adding the tone so its mean
-        power matches the input (preserves the library power invariant E[|x|²] = 1/sps).
-        If ``False``, total power rises by 1 + 10^(PSR/10).
+        Rescale each channel after adding the tone so that its mean power
+        matches the input (keeping ``E[|x|²] = 1/sps``).  Otherwise the power
+        rises by the factor ``1 + 10^(PSR/10)``.
 
     Returns
     -------
-    array_like or Signal
-        Samples with the pilot tone added, same shape, dtype, and device as
-        the input (a new Signal for Signal input).  The tones sit at
+    ndarray or Signal
+        Samples with the pilot tone added, same shape, dtype and device as
+        the input.  The tones sit at
         ``grid_frequency(frequency, sampling_rate=fs, num_samples=N)``, not at
         the requested values; pass that to the receiver.
 
@@ -265,11 +250,11 @@ def add_pilot_tone(
 
     Notes
     -----
-    Each requested frequency is snapped to the nearest FFT bin (fs/N) so the
-    tone completes an integer number of cycles per buffer - ensuring seamless
-    playback on an AWG/DAC.  The quantization error is at most fs/(2N).
-    The phase ramp is accumulated in float64 to avoid trig argument-reduction
-    error for large N.
+    Each requested frequency is snapped to the nearest FFT bin ``f_s/N`` (a
+    warning is logged when it moves), so the tone completes a whole number of
+    cycles per record and loops seamlessly on an AWG/DAC.  The snapping error
+    is at most ``f_s/(2N)``.  The phase ramp is computed and wrapped in
+    float64, so long records keep their phase accuracy in complex64.
     """
     signal_adapter = adapt_signal(samples, function_name="add_pilot_tone()")
     x = signal_adapter.array
@@ -279,7 +264,7 @@ def add_pilot_tone(
     x, was_1d = as_2d(x, name="samples")
     C, N = x.shape
 
-    # Normalise ``frequency`` to a per-channel (C,) host array.  A scalar is
+    # Normalize ``frequency`` to a per-channel (C,) host array.  A scalar is
     # broadcast to every channel (and returns a scalar for back-compat); a
     # sequence must supply exactly one frequency per channel.
     scalar_input = np.ndim(frequency) == 0
@@ -318,7 +303,7 @@ def add_pilot_tone(
                 df,
             )
 
-    # Normalise ``power_ratio_db`` to a per-channel (C,) list, mirroring how
+    # Normalize ``power_ratio_db`` to a per-channel (C,) list, mirroring how
     # ``frequency`` is handled: a scalar broadcasts to every channel; a sequence
     # must supply exactly one PSR per channel.
     scalar_power = np.ndim(power_ratio_db) == 0
@@ -332,7 +317,7 @@ def add_pilot_tone(
                 f"has C={C} channel(s); supply one PSR per channel."
             )
 
-    # Per-channel signal power and the tone amplitude that realises the PSR.
+    # Per-channel signal power and the tone amplitude that realizes the PSR.
     p_signal = xp.mean(xp.abs(x) ** 2, axis=-1, keepdims=True)  # (C, 1) float
     psr_lin = (10.0 ** (xp.asarray(psr_req, dtype=xp.float64) / 10.0)).reshape(
         C, 1
@@ -387,57 +372,52 @@ def welch_psd(
     scaling: str = "density",
     return_onesided: bool | None = None,
 ) -> tuple[ArrayType, ArrayType]:
-    """
-    Estimates the Power Spectral Density (PSD) using Welch's method.
+    """Estimate the power spectral density (PSD) with Welch's method.
 
-    Welch's method provides a lower-variance estimate of the PSD
-    compared to a raw periodogram by averaging spectra computed over
-    overlapping segments of the signal.
+    Averaging the periodograms of overlapping, windowed segments gives a
+    lower-variance estimate than one periodogram of the record
+    (``scipy.signal.welch`` on the input's device).
 
     Parameters
     ----------
     samples : array_like or Signal
-        Input signal samples. Shape: (..., N_samples).
+        Input samples, ``(N,)`` or ``(C, N)``.
     sampling_rate : float, optional
         Sampling rate in Hz.  Taken from the Signal; required for array
         input.  A value that disagrees with the Signal raises.
     nperseg : int, default 256
-        Length of each segment. A longer segment increases frequency
-        resolution but also increases the variance of the estimate.
+        Segment length in samples: longer segments resolve frequency more
+        finely, at a higher variance (fewer segments to average).
     detrend : str or bool, default False
-        Specifies how to detrend each segment (e.g., 'constant', 'linear').
+        How to detrend each segment (``"constant"``, ``"linear"``, or
+        ``False`` for none).
     average : {"mean", "median"}, default "mean"
-        Method to use for averaging segments. Median is more robust to
-        transient outliers.
+        How the segment periodograms are averaged; the median is more robust
+        to transient outliers.
     window : str or tuple or array_like, default "hann"
-        Desired window to use. If `window` is a string or tuple, it is
-        passed to `scipy.signal.get_window` to generate the window values.
+        Window; a string or tuple is passed to ``scipy.signal.get_window``.
     noverlap : int, optional
-        Number of points to overlap between segments. If None,
-        `noverlap = nperseg // 2`.
+        Samples of overlap between segments; ``None`` gives ``nperseg // 2``.
     nfft : int, optional
-        Length of the FFT used, if a zero padded FFT is desired. If None,
-        the FFT length is `nperseg`.
+        FFT length, for zero-padded segments; ``None`` gives ``nperseg``.
     scaling : {"density", "spectrum"}, default "density"
-        Selects between computing the power spectral density ('density')
-        where Pxx has units of V**2/Hz and computing the power spectrum
-        ('spectrum') where Pxx has units of V**2.
+        Power spectral density (units² per Hz) or power spectrum (units²).
     return_onesided : bool, optional
-        If True, returns a one-sided spectrum (frequencies 0 to f_s/2)
-        for real-valued data. For complex data, only two-sided spectra
-        (frequencies -f_s/2 to f_s/2) are supported.
+        One-sided spectrum (``0`` to ``f_s/2``), only for real input.
+        ``None`` gives one-sided for real and two-sided for complex input.
 
     Returns
     -------
-    f : array_like
-        Frequencies in Hz, ``(F,)``.
-    Pxx : array_like
-        Power spectral density (linear, V²/Hz), ``(F,)`` or ``(C, F)``.
+    f : ndarray
+        Frequencies in Hz, ``(F,)``, ascending (a two-sided spectrum runs
+        from ``-f_s/2``).
+    Pxx : ndarray
+        Linear PSD (or power spectrum), ``(F,)`` or ``(C, F)``.
 
     Raises
     ------
     ValueError
-        If `return_onesided` set to True for complex-valued inputs.
+        If ``return_onesided=True`` for complex input.
     """
     signal_adapter = adapt_signal(samples, function_name="welch_psd()")
     x = signal_adapter.array
@@ -478,12 +458,12 @@ class Spectrogram:
 
     Attributes
     ----------
-    frequencies : array_like
+    frequencies : ndarray
         Frequencies in Hz, ``(F,)``, ascending (two-sided spectra are
         fftshifted).
-    times : array_like
-        Segment centre times in seconds, ``(T,)``.
-    values : array_like
+    times : ndarray
+        Segment center times in seconds, ``(T,)``.
+    values : ndarray
         ``(F, T)`` or ``(C, F, T)``; power density, power, complex, magnitude
         or phase depending on ``mode``.
     """
@@ -506,41 +486,39 @@ def spectrogram(
     scaling: str = "density",
     mode: str = "psd",
 ) -> Spectrogram:
-    """
-    Computes a spectrogram with consecutive Fourier transforms.
+    """Compute a spectrogram: the spectra of consecutive segments.
+
+    ``scipy.signal.spectrogram`` on the input's device, with the frequency
+    axis of a two-sided result in ascending order.
 
     Parameters
     ----------
     samples : array_like or Signal
-        Input signal samples. Shape: (..., N_samples).
+        Input samples, ``(N,)`` or ``(C, N)``.
     sampling_rate : float, optional
         Sampling rate in Hz.  Taken from the Signal; required for array
         input.  A value that disagrees with the Signal raises.
     window : str or tuple or array_like, default "hann"
-        Desired window to use. If `window` is a string or tuple, it is
-        passed to `scipy.signal.get_window` to generate the window values.
+        Window; a string or tuple is passed to ``scipy.signal.get_window``.
     nperseg : int, default 256
-        Length of each segment. A longer segment increases frequency
-        resolution but also increases the variance of the estimate.
+        Segment length in samples: longer segments resolve frequency more
+        finely and time more coarsely.
     noverlap : int, optional
-        Number of points to overlap between segments. If None,
-        `noverlap = nperseg // 2`.
+        Samples of overlap between segments; ``None`` gives ``nperseg // 8``
+        (SciPy's default for spectrograms).
     nfft : int, optional
-        Length of the FFT used, if a zero padded FFT is desired. If None,
-        the FFT length is `nperseg`.
+        FFT length, for zero-padded segments; ``None`` gives ``nperseg``.
     detrend : str or bool, default False
-        Specifies how to detrend each segment (e.g., 'constant', 'linear').
+        How to detrend each segment (``"constant"``, ``"linear"``, or
+        ``False`` for none).
     return_onesided : bool, optional
-        If True, returns a one-sided spectrum (frequencies 0 to f_s/2)
-        for real-valued data. For complex data, only two-sided spectra
-        are supported.
+        One-sided spectrum (``0`` to ``f_s/2``), only for real input.
+        ``None`` gives one-sided for real and two-sided for complex input.
     scaling : {"density", "spectrum"}, default "density"
-        Selects between computing the power spectral density ('density')
-        where Sxx has units of V**2/Hz and computing the power spectrum
-        ('spectrum') where Sxx has units of V**2.
+        Power spectral density (units² per Hz) or power spectrum (units²).
     mode : {"psd", "complex", "magnitude", "angle", "phase"}, default "psd"
-        Type of spectrogram to return. Options are 'psd', 'complex',
-        'magnitude', 'angle', 'phase'.
+        What ``values`` holds: power, the complex STFT, its magnitude, its
+        wrapped angle or its unwrapped phase.
 
     Returns
     -------
@@ -550,7 +528,7 @@ def spectrogram(
     Raises
     ------
     ValueError
-        If `return_onesided` set to True for complex-valued inputs.
+        If ``return_onesided=True`` for complex input.
     """
     signal_adapter = adapt_signal(samples, function_name="spectrogram()")
     x = signal_adapter.array

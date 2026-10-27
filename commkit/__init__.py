@@ -1,19 +1,31 @@
-"""
-`commkit` is a high-performance library for simulating and analyzing
-digital communication systems. It provides a unified API for generating,
-transforming, and assessing signals on NumPy (CPU) and CuPy (GPU) data.
+"""Digital-communications research library for NumPy (CPU) and CuPy (GPU).
 
-Main Features
--------------
-- **Signal Abstractions**: Unified `Signal` and `SingleCarrierFrame` containers.
-- **Modulation**: Support for PAM, PSK, and QAM (NRZ/RZ) with Gray coding.
-- **Impairments**: Simulation of AWGN, Phase Noise, and Frequency Offset.
-- **Synchronization**: Time and frequency synchronization algorithms.
-- **Execution backends**: the device follows the data (NumPy or CuPy).
+CommKit covers the signal chain of coherent and IM/DD links: waveform
+generation (:mod:`commkit.core`, :mod:`commkit.mapping`), filters and
+resampling (:mod:`commkit.filtering`, :mod:`commkit.multirate`,
+:mod:`commkit.spectral`), channel impairments (:mod:`commkit.impairments`),
+synchronization and carrier recovery (:mod:`commkit.timing`,
+:mod:`commkit.frequency`, :mod:`commkit.recovery`), equalization
+(:mod:`commkit.equalization`), metrics (:mod:`commkit.metrics`), laser and
+phase characterization (:mod:`commkit.analysis`) and plots of their results
+(:mod:`commkit.plotting`).
+
+Data is an array or a :class:`Signal`, which carries the samples with their
+facts (sampling and symbol rate), their description (constellation, pulse)
+and the transmitted reference.  Algorithms are plain functions; a
+modulation, a pulse or a sub-algorithm is described by a frozen value object
+written in the call.  Every function runs on the device of its input.
+
+The top level re-exports :class:`Signal`, :class:`Reference`,
+:func:`generate`, :class:`SingleCarrierFrame`, :class:`Preamble`,
+:class:`Constellation`, the pulses (:class:`RRC`, :class:`RC`,
+:class:`Gaussian`, :class:`Rect`, :class:`SmoothRect`), :func:`save_npz`,
+:func:`load_npz`, :func:`set_log_level` and :class:`PrecisionWarning`.  The
+subpackages and modules are imported on first attribute access
+(``commkit.plotting``, ...).
 
 Importing commkit has no side effects: it does not configure logging or
-Matplotlib, change warning filters, or touch the GPU.  Subpackages such as
-``commkit.plotting`` are loaded on first access.
+Matplotlib, change warning filters, or touch the GPU.
 """
 
 import importlib

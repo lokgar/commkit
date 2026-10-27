@@ -4,8 +4,7 @@ from tests.common.conversions import device_of, to_numpy
 from tests.common.kernel_utils import (
     reference_bps_d2,
     reference_cs_block,
-    reset_warned_kernels,
-    skip_unless_kernel_available,
+    skip_unless_gpu,
     slip_workload,
 )
 from tests.common.metrics import (
@@ -55,8 +54,7 @@ __all__ = [
     "make_wiener_phase",
     "reference_bps_d2",
     "reference_cs_block",
-    "reset_warned_kernels",
-    "skip_unless_kernel_available",
+    "skip_unless_gpu",
     "slip_workload",
     "to_numpy",
 ]

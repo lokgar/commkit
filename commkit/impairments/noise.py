@@ -1,4 +1,4 @@
-"""Additive measurement noise (ASE / thermal) impairments."""
+"""Additive white Gaussian noise: :func:`apply_awgn`."""
 
 from .._random import RNG, as_generator, complex_normal, standard_normal
 from ..backend import dispatch
@@ -17,45 +17,41 @@ def apply_awgn(
     signal_power: float | None = None,
     rng: RNG = None,
 ) -> S:
-    """
-    Adds Additive White Gaussian Noise (AWGN) to a signal based on Es/N0.
+    """Add white Gaussian noise at a symbol-energy-to-noise ratio Es/N0.
 
-    Uses the standard communications definition where Es/N0 is the ratio of
-    symbol energy to noise spectral density. This accounts for oversampling
-    so the specified Es/N0 matches what you'd measure in the signal bandwidth.
+    The noise variance per sample is ``signal_power · sps / (Es/N0)``: with
+    ``Es = sps · signal_power``, that is ``Es/N0`` per symbol after a matched
+    filter and decimation, whatever the oversampling.
 
     Parameters
     ----------
     samples : array_like or Signal
-        The input signal samples. Shape: (..., N_samples)
+        Input samples, time on the last axis.
     esn0_db : float
-        Symbol energy to noise spectral density ratio (Es/N0) in dB.
+        Symbol energy over noise spectral density, Es/N0, in dB.
     sps : float, optional
         Samples per symbol.  Taken from the Signal; required for array input.
         A value that disagrees with the Signal raises.
+    signal_power : float, optional
+        Signal power for the noise scaling.  Defaults to the mean power of
+        ``samples`` over all channels.  Pass a value to add noise at an
+        absolute level, e.g. ``signal_power=1.0`` on a dark (signal-blocked)
+        capture, whose own power cannot set it.
     rng : int, numpy.random.Generator or None
         Random source.  The noise is drawn on the data's device: from this
         Generator on the CPU, and on the GPU from a CuPy Generator seeded from
         it, so a seed is reproducible per device.
-    signal_power : float, optional
-        Reference signal power for the noise scaling.  Defaults to the
-        measured mean power of ``samples``.  Pass an explicit value to add
-        noise at an absolute level - e.g. ``signal_power=1.0`` on a dark
-        (signal-blocked) capture adds the noise a unit-power signal would
-        see, which the record's own (near-zero) power cannot define.
 
     Returns
     -------
-    array_like or Signal
-        The noisy signal with the same type and backend as the input.  A
-        :class:`Signal` returns a new noisy :class:`Signal`.
+    ndarray or Signal
+        The noisy samples, same shape, dtype and device as the input.
 
     Notes
     -----
-    - For symbol-rate signals (sps=1), Es/N0 equals the sample-level SNR.
-    - For oversampled signals, noise power is scaled by `sps` to maintain
-      the correct Es/N0 in the signal bandwidth.
-    - For complex signals, noise power is split equally between I and Q.
+    Complex input gets circular complex noise, its variance split equally
+    between I and Q; real input gets real noise of the full variance.  At
+    ``sps = 1`` Es/N0 equals the per-sample SNR.
 
     Examples
     --------

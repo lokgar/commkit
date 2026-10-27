@@ -1,15 +1,12 @@
-"""
-Diagnostic and analysis smoothers.
+"""Display and estimation smoothers.
 
-These are **not** signal-processing filters: they carry no claim of
-causality, linear-time-invariance, or a meaningful frequency response. They
-exist purely to make a plotted curve, a 2-D density image, or a peak/width
-search less noisy for a human or a downstream estimator to read - the
-"just for the plot / just for a robust estimate" counterpart to the real
-DSP filters in :mod:`commkit.filtering`. If a routine's job is to remove or
-pass a frequency band as part of the signal chain itself (channel filtering,
-pulse shaping, phase-noise separation), it belongs in ``filtering.py``
-instead, not here.
+:func:`moving_average`, :func:`savgol_smooth` and :func:`smooth_density_2d`
+are not signal-chain filters: they make no claim of causality or a
+meaningful frequency response.  They make a plotted curve, a 2-D density
+image or a peak or width search less noisy for a reader or a downstream
+estimator.  A routine that removes or passes a frequency band as part of the
+signal chain (channel filtering, pulse shaping, phase-noise separation)
+belongs in :mod:`commkit.filtering`.
 """
 
 from .backend import ArrayType, dispatch
@@ -29,30 +26,30 @@ __all__ = ["moving_average", "savgol_smooth", "smooth_density_2d"]
 def moving_average(
     x: ArrayType, *, window: int, mode: str = "same", axis: int = -1
 ) -> ArrayType:
-    """
-    Boxcar moving average.
+    """Moving average (boxcar) along one axis.
 
     Parameters
     ----------
     x : array_like
-        Input array.
+        Data to smooth.
     window : int
-        Averaging window length, in samples.
+        Window length in samples.
     mode : {"same", "valid"}, default "same"
-        ``"same"`` - edge-aware boxcar (``nearest``-edge padding), output the
-        same length as ``x``. Good for smoothing a signal you still want to
-        index/plot against the original axis (e.g. a spectrum before a peak
-        search).
-        ``"valid"`` - shrinks by ``window - 1`` (``numpy.convolve``-style),
-        for callers that realign the output axis themselves (e.g. a
-        convergence-curve plot that re-centers the x-axis on the window).
+        Output length:
+
+        - ``"same"``: the length of ``x``, with the edges padded by their
+          nearest value, for data still indexed on its original axis (a
+          spectrum before a peak search).
+        - ``"valid"``: shorter by ``window - 1``, as ``numpy.convolve``, for
+          callers that realign the axis themselves (a convergence curve
+          plotted at the window centers).
     axis : int, default -1
         Axis along which to average.
 
     Returns
     -------
-    array_like
-        Smoothed array. Same shape as ``x`` for ``mode="same"``; shrunk by
+    ndarray
+        Smoothed data, the shape of ``x`` for ``mode="same"`` and shorter by
         ``window - 1`` along ``axis`` for ``mode="valid"``.
     """
     x, xp, sp = dispatch(x)
@@ -79,19 +76,19 @@ def moving_average(
 def savgol_smooth(
     x: ArrayType, *, window: int, polyorder: int, axis: int = -1
 ) -> ArrayType:
-    """
-    Savitzky-Golay smoothing: local polynomial regression over a sliding window.
+    """Smooth with a Savitzky-Golay filter (``scipy.signal.savgol_filter``).
 
-    A curve-fitting smoother, not a linear-time-invariant filter - useful for
-    a diagnostic detrend where a designed low-pass cutoff isn't the natural
-    parameterization.
+    A least-squares polynomial fit in a sliding window, parameterized by the
+    window and the polynomial order rather than a cutoff frequency: for a
+    diagnostic detrend or a curve to read, not for the signal chain.
 
     Parameters
     ----------
     x : array_like
-        Input array.
+        Data to smooth.
     window : int
-        Window length, in samples. Must be odd and > ``polyorder``.
+        Window length in samples, greater than ``polyorder``; an odd length
+        centers the fit on each sample.
     polyorder : int
         Order of the polynomial fit within each window.
     axis : int, default -1
@@ -99,8 +96,8 @@ def savgol_smooth(
 
     Returns
     -------
-    array_like
-        Smoothed array, same shape as ``x``.
+    ndarray
+        Smoothed data, same shape as ``x``.
     """
     _, _, sp = dispatch(x)
     logger.debug(
@@ -110,23 +107,21 @@ def savgol_smooth(
 
 
 def smooth_density_2d(hist: ArrayType, *, sigma: float = 1.0) -> ArrayType:
-    """
-    Gaussian-blur a 2-D histogram/density image for nicer visual contours.
+    """Blur a 2-D histogram with a Gaussian, for a smoother density image.
 
-    Used by density-style plots (constellation, eye diagram) to turn a raw
-    2-D histogram into a smoother heatmap; purely cosmetic, no signal-domain
-    meaning.
+    Used by the density plots (constellation, eye diagram); purely cosmetic,
+    with no meaning in the signal domain.
 
     Parameters
     ----------
     hist : array_like
-        2-D histogram/density array.
+        2-D histogram or density.
     sigma : float, default 1.0
         Gaussian standard deviation, in bins.
 
     Returns
     -------
-    array_like
+    ndarray
         Blurred array, same shape as ``hist``.
     """
     _, _, sp = dispatch(hist)

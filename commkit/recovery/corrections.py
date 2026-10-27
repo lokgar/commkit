@@ -1,4 +1,11 @@
-"""Phase corrections, cycle-slip repair, and ambiguity resolution."""
+"""Phase corrections, cycle-slip repair and ambiguity resolution.
+
+:func:`smooth_phase_wiener` and :func:`correct_cycle_slips` on phase
+trajectories, with the :class:`CycleSlip` configuration nested in the
+estimation methods; the static :class:`DataAided` rotation; and
+:func:`resolve_phase_ambiguity` and :func:`resolve_channel_permutation`
+against the reference.
+"""
 
 import logging
 from dataclasses import dataclass
@@ -32,28 +39,28 @@ def _log_phase_summary(
     suffix_fmt: str,
     suffix_args: tuple,
 ) -> None:
-    r"""Log a CPR algorithm's "phase mean/std in degrees" INFO summary.
+    r"""Log the mean and standard deviation of a CPR phase in degrees (INFO).
 
-    Every CPR estimator (``bps``, ``viterbi_viterbi``, ``tikhonov``, ``pll``,
-    ``pilots``' pilot-aided/pilot-tone estimators) ends with the same
-    diagnostic: one host transfer of the phase trajectory (skipped entirely
-    when INFO logging is disabled), then a mean/std reduction converted to
-    degrees and logged as
+    Every CPR estimator (BPS, Viterbi-Viterbi, Tikhonov, the PLL and the
+    pilot methods) ends with this diagnostic: one host transfer of the phase
+    trajectory (skipped when INFO logging is disabled), then the mean and
+    standard deviation in degrees, logged as::
 
         prefix_fmt + ": phase mean=%.2f°, std=%.2f° " + suffix_fmt
-
-    with ``prefix_args``/``suffix_args`` supplying each caller's own
-    parameters (algorithm name, block/pilot counts, channel count, ...).
 
     Parameters
     ----------
     phi : array_like
-        Phase trajectory in radians, any shape/backend.
-    prefix_fmt, suffix_fmt : str
-        ``%``-style format strings, joined around the fixed
-        ``phase mean=%.2f°, std=%.2f°`` core.
-    prefix_args, suffix_args : tuple
-        Positional args for ``prefix_fmt``/``suffix_fmt`` respectively.
+        Phase trajectory in radians, any shape, on either device.
+    prefix_fmt : str
+        ``%``-style format before the fixed part.
+    prefix_args : tuple
+        Arguments of ``prefix_fmt`` (the algorithm name, ...).
+    suffix_fmt : str
+        ``%``-style format after the fixed part.
+    suffix_args : tuple
+        Arguments of ``suffix_fmt`` (block or pilot counts, channel count,
+        ...).
     """
     if not logger.isEnabledFor(logging.INFO):
         return
@@ -83,60 +90,61 @@ def smooth_phase_wiener(
     sampling_rate: float | None = None,
     detrend: bool = True,
 ) -> ArrayType:
-    r"""
-    Zero-phase Wiener smoother for a random-walk (Wiener) carrier phase.
+    r"""Smooth a random-walk (Wiener) carrier phase with the zero-phase Wiener filter.
 
-    Optimal minimum-variance estimate of a phase that random-walks with
-    per-sample increment variance ``q`` (the random-walk strength) observed in
-    white phase-estimation noise of variance ``r``.  Applies the non-causal
-    Wiener filter
+    The minimum-variance estimate of a phase that random-walks with
+    per-sample increment variance ``q``, observed in white estimation noise
+    of variance ``r``: the non-causal Wiener filter
 
-        H(w)       = S_phi(w) / (S_phi(w) + r),
-        S_phi(w)   = q / (2 - 2*cos(w)),
+        H(ω)     = S_φ(ω) / (S_φ(ω) + r),
+        S_φ(ω)   = q / (2 - 2 cos ω),
 
-    in the frequency domain (FFT -> multiply by the real, even H -> IFFT), so it
-    is zero-phase (no group delay) and O(N log N).  This is the principled way to
-    hit the smallest residual phase std for a given ``q`` and ``r`` - it trades
-    tracking lag against additive noise automatically, where a fixed extraction
-    bandwidth must be tuned by hand.
+    applied in the frequency domain (FFT, multiplication by the real, even
+    ``H``, inverse FFT), so it is zero-phase (no group delay) and costs
+    ``O(N log N)``.  It reaches the smallest residual phase error for the
+    given ``q`` and ``r``, trading tracking lag against noise by itself,
+    where a fixed extraction bandwidth has to be tuned by hand.
 
-    The smoother is agnostic to where the track came from: it needs only the two
-    scalars ``q`` and ``r``.  ``q`` may be given directly or derived from a
-    linewidth (see ``process_variance`` / ``linewidth`` below); ``r`` is supplied
-    as ``measurement_variance``, however the caller measured it.
+    Only the two scalars matter, not where the track came from: ``q`` is
+    given directly or derived from a linewidth, ``r`` is the
+    ``measurement_variance``, however it was measured.
 
-    Because it only rescales the phase track (a deterministic, sample-independent
-    low-pass), it stays a unit-modulus correction downstream and cannot hide
-    excess noise when applied to a common reference phase rather than the data
-    samples.
+    It filters the phase track only, so a correction derived from it stays
+    unit-modulus: applied to the samples, it cannot hide their excess noise.
 
     Parameters
     ----------
-    phase : (N,) or (C, N) array
-        Unwrapped phase track (e.g. the ``value`` of a ``PilotTone`` or
-        ``PilotTones`` estimate), in radians.
+    phase : array_like
+        Unwrapped phase track, ``(N,)`` or ``(C, N)`` (e.g. the ``value`` of a
+        ``PilotTone`` or ``PilotTones`` estimate), in radians.
     process_variance : float, optional
-        Per-sample phase-increment variance q [rad²] - the random-walk strength.
-        Provide this, or derive it from ``linewidth`` + ``sampling_rate`` (see
-        below).  Exactly one of the two routes is required.
+        Variance ``q`` of the per-sample phase increment in rad² (the
+        random-walk strength).  Give it, or ``linewidth`` and
+        ``sampling_rate`` to derive it.
     measurement_variance : float, optional
-        Phase-estimation noise variance r [rad²] - the per-sample variance of the
-        additive phase-measurement noise, however it was measured.  Required.
+        Variance ``r`` of the additive estimation noise per sample, in rad².
+        Required.
     linewidth, sampling_rate : float, optional
-        Convenience route to ``process_variance``: q = 2*pi*linewidth / f_s, where
-        ``linewidth`` is the combined oscillator linewidth [Hz] and
-        ``sampling_rate`` is f_s [Hz] of the ``phase`` track.  Both must be given
-        together, and only when ``process_variance`` is omitted.
+        Instead of ``process_variance``: the combined oscillator linewidth in
+        Hz and the sampling rate of ``phase`` in Hz, which give
+        ``q = 2π·linewidth / sampling_rate``.  Both together, and only without
+        ``process_variance``.
     detrend : bool, default True
-        Remove the per-channel mean + linear trend before filtering and add it
-        back after.  Recommended: the random-walk PSD diverges at DC, so a raw
-        ramp (residual frequency offset) would be distorted; detrending keeps it
-        exact.
+        Remove each channel's linear trend (its slope) before filtering and
+        add it back after.  The random-walk PSD diverges at DC, so a ramp (a
+        residual frequency offset) would otherwise be distorted; the filter
+        passes a constant offset unchanged (``H(0) = 1``) either way.
 
     Returns
     -------
-    array_like
-        Smoothed phase, same shape and backend as ``phase``.
+    ndarray
+        Smoothed float64 phase, same shape and device as ``phase``.
+
+    Raises
+    ------
+    ValueError
+        Without ``measurement_variance``, without ``process_variance`` or
+        both ``linewidth`` and ``sampling_rate``, or for a variance ``<= 0``.
     """
     if process_variance is None:
         if linewidth is None or sampling_rate is None:
@@ -211,35 +219,34 @@ def _get_numba_cycle_slip():
 
         @numba.njit(cache=True, fastmath=True, nogil=True)
         def _cycle_slip_loop(phi_u, symmetry, history_length, threshold):
-            """Cycle-slip detection and correction via linear extrapolation.
+            """Detect and correct cycle slips by linear extrapolation (Numba).
 
-            Scans the block-phase trajectory ``phi_u`` sequentially.  For each
-            block, linearly extrapolates from up to ``history_length`` past
-            *corrected* blocks.  When the deviation exceeds ``threshold``, it
-            is corrected by a multiple of ``2π/symmetry``.
+            Scans the block phases ``phi_u`` in order.  Each block is extrapolated
+            linearly from up to ``history_length`` past corrected blocks; a deviation
+            beyond ``threshold`` is corrected by a multiple of ``2π/symmetry``.
 
-            The linear regression uses relative coordinates [0, W-1] so that
-            ``Sx`` and ``Sxx`` are exact compile-time constants.  Only ``Sy``
-            and ``Sxy`` are maintained as running state, updated in O(1) per
-            step via a closed-form sliding-window identity.
+            The regression uses the relative coordinates ``[0, W-1]``, so ``Sx`` and
+            ``Sxx`` are closed-form constants; only ``Sy`` and ``Sxy`` are kept as
+            running state, updated in O(1) per step by a sliding-window identity.
 
             Parameters
             ----------
-            phi_u : (B,) float64
-                Block-phase trajectory after M-fold unwrap (modified in place).
+            phi_u : numpy.ndarray
+                Block phases after the M-fold unwrap, float64, ``(B,)``; modified in
+                place.
             symmetry : int
-                Rotational symmetry order; correction quantum = ``2π/symmetry``.
+                Rotational symmetry; the correction quantum is ``2π/symmetry``.
             history_length : int
-                Maximum number of past corrected blocks used for extrapolation.
-                Use ``min(b, history_length)`` at each step.
-            threshold : float64
-                Deviation from extrapolated value that triggers a correction
-                (radians).  Default in the caller: ``π/4``.
+                Largest number of past corrected blocks in the fit; block ``b`` uses
+                ``min(b, history_length)``.
+            threshold : float
+                Deviation from the extrapolated value, in radians, that declares a
+                slip (``π/4`` by default in the callers).
 
             Returns
             -------
-            (B,) float64
-                Corrected block-phase trajectory (same array, modified in place).
+            numpy.ndarray
+                The corrected block phases, ``phi_u`` itself.
             """
             two_pi = 2.0 * np.pi
             quantum = two_pi / float(symmetry)
@@ -347,38 +354,44 @@ def correct_cycle_slips(
     history: int = 20,
     threshold: float = np.pi / 4,
 ) -> np.ndarray:
-    """
-    Detects and corrects cycle slips in a phase trajectory.
+    """Detect and correct cycle slips in a phase trajectory.
 
-    After ``unwrap`` resolves the M-fold ambiguity, residual cycle slips may
-    remain where the unwrapper chose the wrong branch.  The trajectory is
-    scanned sequentially: each value is predicted by a linear fit through up
-    to ``history`` past corrected values (the previous value while fewer than
-    ``min(10, history)`` are available).  A deviation beyond ``threshold`` is
-    corrected by the nearest integer multiple of ``2π/symmetry``.
+    After the M-fold unwrap, cycle slips can remain where the unwrap chose
+    the wrong branch.  The trajectory is scanned in order: each value is
+    predicted by a linear fit through up to ``history`` past corrected
+    values (the previous value while fewer than ``min(10, history)`` are
+    available), and a deviation beyond ``threshold`` is corrected by the
+    nearest integer multiple of ``2π/symmetry``.
 
     Parameters
     ----------
-    phase : (B,) array_like
-        Phase trajectory in radians after the M-fold unwrap, e.g. block
-        phases.
+    phase : array_like
+        Phase trajectory in radians after the M-fold unwrap, ``(B,)``, e.g.
+        block phases.
     symmetry : int, default 4
         Rotational symmetry of the constellation; the correction quantum is
-        ``2π/symmetry`` (4 for square QAM and BPS, M for M-PSK, 1 for pilot
-        phases).
+        ``2π/symmetry`` (4 for square and cross QAM, M for M-PSK, 1 for pilot
+        phases, whose quantum is ``2π``).
     history : int, default 20
         Past corrected values in the linear fit, sized for 32-symbol block
-        phases (the 640 symbols of :class:`CycleSlip`'s default).  The fit lags a wandering
-        phase: keep ``2π·Δν·Δt·history < threshold²/2`` for a linewidth
-        ``Δν`` and a spacing ``Δt`` between values (see :class:`CycleSlip`).
+        phases (the 640 symbols of :class:`CycleSlip`'s default).  The fit lags
+        a wandering phase: keep ``2π·Δν·Δt·history < threshold²/2`` for a
+        linewidth ``Δν`` and a spacing ``Δt`` between values (see
+        :class:`CycleSlip`).
     threshold : float, default π/4
         Deviation from the prediction that declares a slip; ``π/4`` is half
         the quantum for 4-fold symmetry.
 
     Returns
     -------
-    (B,) float64 array
-        Corrected trajectory, a new array on the input's device.
+    ndarray
+        Corrected float64 trajectory, ``(B,)``, a new array on the input's
+        device.
+
+    Raises
+    ------
+    ValueError
+        If ``phase`` is not 1-D.
 
     Notes
     -----
@@ -430,8 +443,9 @@ class CycleSlip:
     with ``BPS()`` (``block_size=32``) and ``threshold=π/4`` this allows
     ``Δν·history ≲ 50 MHz``: ``history=100`` adds slips at a 1 MHz
     linewidth, ``history=20`` does not.  The default span of 640 symbols
-    holds up to ``Δν ≈ 2.4 MHz`` at 32 GBd for every method.  Below about 10 values the fit's
-    noise gain ``1 + 4/history`` dominates instead, at low SNR.
+    holds up to ``Δν ≈ 2.4 MHz`` at 32 GBd for every method.  Below about 10
+    values the fit's noise gain ``1 + 4/history`` dominates instead, at low
+    SNR.
 
     Examples
     --------
@@ -582,12 +596,12 @@ def _pairing_scores(y, s, xp, metric: str):
 
     Higher is better, so the assignment below maximizes the total score.
 
-    * ``"coherence"`` - rotation-invariant normalized cross-correlation
-      magnitude ``|<y_i, s_j>| / (||y_i|| ||s_j||)``, in ``[0, 1]``.  One
-      matmul, and blind to any constant phase rotation.
-    * ``"phase_increment"`` - minus the variance of the *wrapped phase-error
-      increment* ``Var(Δ angle(y_i · conj(s_j)))``.  Immune not only to a
-      constant rotation but to a residual frequency offset and to phase noise,
+    * ``"coherence"``: the normalized cross-correlation magnitude
+      ``|<y_i, s_j>| / (||y_i|| ||s_j||)``, in ``[0, 1]``.  One matrix
+      product, and blind to any constant phase rotation.
+    * ``"phase_increment"``: minus the variance of the wrapped increment of
+      the phase error, ``Var(Δ angle(y_i · conj(s_j)))``.  Immune not only to
+      a constant rotation but to a residual frequency offset and to phase noise,
       which drive the coherence sum toward zero for every pairing (the
       rotating phasor averages out) and make ``"coherence"`` unusable on
       records whose carrier phase is deliberately left intact.  Evaluated one
@@ -624,21 +638,21 @@ def resolve_channel_permutation(
 ) -> ArrayType | Signal:
     """Resolve a polarization (channel) permutation after MIMO equalization.
 
-    A MIMO (butterfly) equalizer has a **polarization-permutation ambiguity**:
-    it may emit the streams in swapped output order (output 0 carries pol 1,
-    etc.) - a perfectly valid demux that per-channel metrics would otherwise
-    score as random, since they compare ``output[i]`` with ``ref[i]``.  This
-    matches each output stream to the reference stream it actually carries (the
-    bijective assignment maximizing the **rotation-invariant** cross-correlation
-    magnitude ``|Σ yᵢ · conj(sⱼ)|``) and reorders ``symbols`` to the
-    reference order.
+    A MIMO (butterfly) equalizer can emit the streams in a permuted order
+    (output 0 carrying polarization 1, ...): a valid demultiplexing that
+    per-channel metrics, which compare ``output[i]`` with ``reference[i]``,
+    would score as random.  This matches each output stream to the reference
+    stream it carries (the one-to-one assignment that maximizes the
+    rotation-invariant correlation magnitude ``|Σ yᵢ · conj(sⱼ)|``) and
+    reorders ``symbols`` to the reference order.
 
-    Run this **before** ``resolve_phase_ambiguity`` (it is rotation
-    invariant, so the two compose) and before SER/BER.  For a converged
-    *data-aided* equalizer the outputs are already pinned to the training order,
-    so this is a no-op; it is the robust fix for **blind** equalizers, whose
-    output order is arbitrary.  Only a *constant* permutation is resolved - a
-    mid-stream swap is an equalizer-tracking issue, not a labeling one.
+    Run it before :func:`resolve_phase_ambiguity` (it is rotation-invariant,
+    so the two compose) and before SER and BER.  After a converged trained
+    equalizer the outputs already follow the training order and this is a
+    no-op; it is meant for blind equalizers, whose output order is
+    arbitrary.  Only a constant permutation is resolved: a swap in the
+    middle of a record is an equalizer-tracking problem, not a labeling
+    one.
 
     Parameters
     ----------
@@ -655,20 +669,21 @@ def resolve_channel_permutation(
         unconverged transient).  The reorder still covers the full input.
     metric : {"coherence", "phase_increment"}, default "coherence"
         How output streams are scored against reference streams.
-        ``"coherence"`` is the rotation-invariant correlation magnitude - the
+        ``"coherence"`` is the rotation-invariant correlation magnitude, the
         right choice after carrier recovery.  ``"phase_increment"`` scores by
-        the (negated) variance of the wrapped phase-error increment, which
-        survives a residual frequency offset and strong phase noise; use it on
-        records whose carrier phase is deliberately intact (e.g. frozen-tap
-        output feeding ``analysis.carrier_phase_trajectory``), where the
-        coherence sum collapses toward zero for *every* pairing and the
-        assignment would be arbitrary.
+        the negated variance of the wrapped phase-error increment, which a
+        residual frequency offset and strong phase noise do not disturb: use
+        it on records whose carrier phase is left in on purpose (e.g. the
+        frozen-tap output that feeds
+        :func:`commkit.analysis.carrier_phase_trajectory`), where the
+        coherence sum falls towards zero for every pairing and the assignment
+        would be arbitrary.
 
     Returns
     -------
-    array_like or Signal
+    ndarray or Signal
         ``symbols`` with channels reordered to the reference order; same
-        shape, dtype, and backend.  A Signal gives a new Signal with the
+        shape, dtype and device.  A Signal gives a new Signal with the
         samples reordered (its reference is already in that order).
     """
     name = "resolve_channel_permutation()"
@@ -761,21 +776,20 @@ def resolve_phase_ambiguity(
     symmetry: int | None = None,
     num_skip_symbols: int = 0,
 ) -> ArrayType | Signal:
-    """
-    Resolves the rotational phase ambiguity left by blind carrier recovery.
+    """Resolve the rotational phase ambiguity left by blind carrier recovery.
 
     Blind CPR (Viterbi-Viterbi, BPS, Tikhonov, PLL) cannot tell the
     ``symmetry`` rotated copies of the constellation apart.  The ML choice
     of rotation ``k·2π/symmetry`` is the one closest to ``-∠ Σ y·s*`` against
     the known symbols, and the symbols are returned rotated by it.
 
-    For MIMO inputs each channel is resolved independently - after MIMO
-    equalisation the output streams may land on different ambiguity branches.
+    For MIMO input each channel is resolved independently: after MIMO
+    equalization the output streams can land on different branches.
 
     Parameters
     ----------
     symbols : array_like or Signal
-        Received symbols after carrier phase correction, ``(N,)`` or
+        Received symbols after carrier-phase correction, ``(N,)`` or
         ``(C, N)``.  A Signal must be at one sample per symbol; its
         ``reference.symbols`` is the default reference.
     reference : array_like, optional
@@ -795,7 +809,7 @@ def resolve_phase_ambiguity(
 
     Returns
     -------
-    array_like or Signal
+    ndarray or Signal
         Rotated symbols, same shape and dtype; a Signal gives a new Signal.
     """
     name = "resolve_phase_ambiguity()"
@@ -840,7 +854,7 @@ def _resolve_phase_ambiguity_array(
 
     step = 2.0 * np.pi / symmetry
 
-    # ML phase ambiguity estimator: the optimal rotation maximises
+    # ML phase ambiguity estimator: the optimal rotation maximizes
     # Re(e^{jkθ} · Σ y_n s_n*), which equals choosing k closest to
     # -∠(Σ y_n s_n*) / step.  Single inner product replaces symmetry
     # full SER passes.  All channels batched: one D2H of the (C,) angles

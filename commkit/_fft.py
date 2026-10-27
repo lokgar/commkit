@@ -1,6 +1,7 @@
 """FFTs on the data's device (private).
 
-Every FFT in the library goes through these four functions:
+Every FFT in the library goes through :func:`fft`, :func:`ifft`, :func:`rfft`
+and :func:`irfft`:
 
 - CPU: ``scipy.fft`` on every core.  It keeps complex64 in single precision,
   as cuFFT does, and is about 3x faster than ``numpy.fft`` on one core
@@ -51,9 +52,12 @@ def fft(
     overwrite_x: bool = False,
     norm: str = "backward",
 ) -> ArrayType:
-    """Forward complex FFT along ``axis``.  ``overwrite_x`` lets the
-    transform reuse ``x``'s buffer (in place on the GPU for complex input);
-    always use the returned array.  ``norm`` as in ``scipy.fft``."""
+    """Forward complex FFT along ``axis``.
+
+    ``overwrite_x`` lets the transform reuse ``x``'s buffer (in place on the
+    GPU for complex input); always use the returned array.  ``norm`` as in
+    ``scipy.fft``.
+    """
     return _call("fft", x, n, axis, overwrite_x, norm)
 
 
@@ -65,8 +69,11 @@ def ifft(
     overwrite_x: bool = False,
     norm: str = "backward",
 ) -> ArrayType:
-    """Inverse complex FFT along ``axis`` (keywords as in :func:`fft`;
-    ``norm="forward"`` leaves the inverse unscaled)."""
+    """Inverse complex FFT along ``axis``.
+
+    Keywords as in :func:`fft`; ``norm="forward"`` leaves the inverse
+    unscaled.
+    """
     return _call("ifft", x, n, axis, overwrite_x, norm)
 
 

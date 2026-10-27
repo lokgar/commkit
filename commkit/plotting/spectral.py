@@ -1,4 +1,7 @@
-"""Power spectral density and spectrogram plots."""
+"""Power spectral density and spectrogram plots.
+
+:func:`plot_psd` and :func:`plot_spectrogram`.
+"""
 
 from typing import Any
 
@@ -38,62 +41,47 @@ def plot_psd(
     show: bool = False,
     **kwargs: Any,
 ) -> tuple[Any, Any] | None:
-    """
-    Plots the Power Spectral Density (PSD) of the signal.
+    """Plot the power spectral density (PSD) of a signal, in dB.
 
-    Supports automatic frequency scaling (Hz, MHz, GHz, etc.) or wavelength
-    conversion for optical signals. Handles multidimensional (MIMO) signals
-    by generating a grid of subplots.
+    The Welch estimate of :func:`commkit.spectral.welch_psd`, against
+    frequency (SI prefixes) or, for optical signals, wavelength.  ``(C, N)``
+    input gets one panel per channel.
 
     Parameters
     ----------
     samples : array_like or Signal
-        Input signal samples. Shape: (..., N_samples).
+        Input samples, ``(N,)`` or ``(C, N)``.
     sampling_rate : float, optional
-        Sampling rate in Hz (a fact): taken from a Signal, required for arrays.
-    nperseg : int, default 256
-        Length of each segment for Welch's method. Higher values provide
-        better frequency resolution but more noise.
-    detrend : str or bool, default False
-        Specifies how to detrend each segment (e.g., 'constant', 'linear').
-    average : str, default "mean"
-        Method to use for averaging segments ('mean' or 'median').
-    window : str or tuple or array_like, default "hann"
-        Desired window to use. If `window` is a string or tuple, it is
-        passed to `scipy.signal.get_window` to generate the window values.
-    noverlap : int, optional
-        Number of points to overlap between segments. If None,
-        `noverlap = nperseg // 2`.
-    nfft : int, optional
-        Length of the FFT used, if a zero padded FFT is desired. If None,
-        the FFT length is `nperseg`.
-    scaling : {"density", "spectrum"}, default "density"
-        Selects between computing the power spectral density ('density')
-        where Pxx has units of V**2/Hz and computing the power spectrum
-        ('spectrum') where Pxx has units of V**2.
+        Sampling rate in Hz.  Taken from the Signal; required for array
+        input.
+    nperseg, detrend, average, window, noverlap, nfft, scaling
+        As for :func:`commkit.spectral.welch_psd`.
     center_frequency : float, optional
-        Frequency offset to apply to the x-axis in Hz.
+        Frequency added to the axis in Hz (the carrier, for an RF or optical
+        axis).  Taken from the Signal (a value that disagrees with it
+        raises); 0 for arrays when not given.
     domain : {"RF", "OPT"}, default "RF"
-        Signal domain. If "OPT", wavelength scaling is enabled.
+        Signal domain; a wavelength axis for an ``"RF"`` signal logs a
+        warning.
     x_axis : {"frequency", "wavelength"}, default "frequency"
-        Units for the horizontal axis.
+        Horizontal axis: frequency in Hz, or wavelength ``c / f`` in nm
+        (which needs ``center_frequency``).
     ax : matplotlib.axes.Axes, optional
-        Existing axis to plot on. If `None`, a new figure is created.
+        Axes to draw on; ``None`` creates a figure.
     xlim, ylim : tuple of float, optional
-        Axis limits for the plot.
-    title : str, optional
-        Plot title. Defaults to "Power Spectral Density".
+        Axis limits (frequency in Hz or wavelength in nm; PSD in dB).
+    title : str or None, default "Power Spectral Density"
+        Title of the figure; ``None`` for none.
     show : bool, default False
-        If True, calls `plt.show()` immediately.
+        Call ``plt.show()`` and return ``None``.
     **kwargs : Any
-        Additional keyword arguments passed to `ax.plot`.
+        Passed to ``ax.plot``.
 
     Returns
     -------
-    fig : matplotlib.figure.Figure
-        The figure object.
-    ax : matplotlib.axes.Axes or ndarray
-        The axis or array of axes used for the plot.
+    (fig, ax) or None
+        The figure and the Axes (an array of Axes for several panels);
+        ``None`` with ``show=True``, which shows the figure instead.
     """
     signal_adapter = adapt_signal(samples, function_name="plot_psd()")
     x = signal_adapter.array
@@ -307,63 +295,47 @@ def plot_spectrogram(
     show: bool = False,
     **kwargs: Any,
 ) -> tuple[Any, Any] | None:
-    """
-    Plots the spectrogram of a signal.
+    """Plot the spectrogram of a signal, in dB.
 
-    Plots with Frequency on the horizontal axis (x-axis) and Time on the
-    vertical axis (y-axis). Supports dynamic subplots for multichannel/MIMO
-    signals.
+    Frequency on the horizontal axis, time on the vertical one; ``(C, N)``
+    input gets one panel per channel.
 
     Parameters
     ----------
     samples : array_like or Signal
-        Input signal samples. Shape: (..., N_samples).
+        Input samples, ``(N,)`` or ``(C, N)``.
     sampling_rate : float, optional
-        Sampling rate in Hz (a fact): taken from a Signal, required for arrays.
-    window : str or tuple or array_like, default "hann"
-        Desired window to use.
-    nperseg : int, default 256
-        Length of each segment.
-    noverlap : int, optional
-        Number of points to overlap between segments.
-    nfft : int, optional
-        Length of the FFT used.
-    detrend : str or bool, default False
-        Specifies how to detrend each segment.
-    return_onesided : bool, optional
-        If True, returns a one-sided spectrum for real-valued data.
-    scaling : {"density", "spectrum"}, default "density"
-        Selects between computing power spectral density or power spectrum.
-    mode : {"psd", "complex", "magnitude", "angle", "phase"}, default "psd"
-        Type of spectrogram to return.
+        Sampling rate in Hz.  Taken from the Signal; required for array
+        input.
+    window, nperseg, noverlap, nfft, detrend, return_onesided, scaling, mode
+        As for :func:`commkit.spectral.spectrogram`.
     center_frequency : float, optional
-        Frequency offset to apply to the frequency axis in Hz.
+        Frequency added to the axis in Hz.  Taken from the Signal (a value
+        that disagrees with it raises); 0 for arrays when not given.
     domain : {"RF", "OPT"}, default "RF"
-        Signal domain.
+        Signal domain; accepted for symmetry with :func:`plot_psd` and
+        without effect here.
     ax : matplotlib.axes.Axes, optional
-        Existing axis to plot on.
+        Axes to draw on; ``None`` creates a figure.
     xlim : tuple of float, optional
-        Frequency limits for the plot (in Hz, after center_frequency offset).
-        Used to crop data before plotting for performance.
+        Frequency limits in Hz, ``center_frequency`` included; the data is
+        cropped to them before drawing.
     ylim : tuple of float, optional
-        Time limits for the plot (in seconds).
-        Used to crop data before plotting for performance.
-    title : str, optional
-        Plot title.
+        Time limits in seconds; the data is cropped to them too.
+    title : str or None, default "Spectrogram"
+        Title of the figure; ``None`` for none.
     cmap : str, default "viridis"
-        Colormap for the spectrogram plot.
+        Colormap.
     show : bool, default False
-        If True, calls `plt.show()` immediately.
+        Call ``plt.show()`` and return ``None``.
     **kwargs : Any
-        Additional keyword arguments passed to ``ax.imshow`` (or
-        ``ax.pcolormesh`` for a non-uniform grid).
+        Passed to ``ax.imshow`` (``ax.pcolormesh`` for a non-uniform grid).
 
     Returns
     -------
-    fig : matplotlib.figure.Figure
-        The figure object.
-    ax : matplotlib.axes.Axes or ndarray
-        The axis or array of axes used for the plot.
+    (fig, ax) or None
+        The figure and the Axes (an array of Axes for several panels);
+        ``None`` with ``show=True``, which shows the figure instead.
     """
     signal_adapter = adapt_signal(samples, function_name="plot_spectrogram()")
     x = signal_adapter.array

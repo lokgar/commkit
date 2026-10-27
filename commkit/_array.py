@@ -1,7 +1,13 @@
-"""Array shape and validation helpers shared by every module.
+"""Array shape and validation helpers (private).
 
-Pure indexing, broadcast and coercion operations on NumPy/CuPy arrays.  This
-module imports only ``backend``: nothing from ``core``, DSP modules or plotting.
+Indexing, broadcasting and coercion operations on NumPy/CuPy arrays, used by
+every module: :func:`validate_array`, the SISO/MIMO shape pair
+:func:`as_2d` / :func:`restore_1d`, :func:`broadcast_channels`,
+:func:`require_channels`, :func:`to_report_scalar` (host values of the
+metrics and summaries) and :func:`warn_if_double` (the
+:class:`~commkit.PrecisionWarning` of the fixed-precision blocks).  This
+module imports only ``backend``: nothing from ``core``, DSP modules or
+plotting.
 """
 
 from typing import Any, overload
@@ -24,8 +30,7 @@ from .backend import (
 def validate_array(
     v: Any, name: str = "array", complex_only: bool = False
 ) -> ArrayType:
-    """
-    Validates and coerces input data into a numeric array.
+    """Validate and coerce input data into a numeric array.
 
     Existing NumPy or CuPy arrays are passed through unchanged (preserving
     device placement). All other inputs (Python scalars, lists, tuples) are
@@ -43,7 +48,7 @@ def validate_array(
 
     Returns
     -------
-    array_like
+    ndarray
         NumPy or CuPy array (CuPy only when ``v`` was already a CuPy array).
 
     Raises
@@ -97,8 +102,7 @@ def validate_array(
 
 
 def as_2d(arr: ArrayType, *, name: str = "array") -> tuple[ArrayType, bool]:
-    """
-    Promotes a SISO ``(N,)`` array to the MIMO layout ``(1, N)``.
+    """Promote a SISO ``(N,)`` array to the MIMO layout ``(1, N)``.
 
     The canonical entry half of the library's SISO/MIMO shape idiom; pair it
     with :func:`restore_1d` to squeeze the promoted axis back off the outputs.
@@ -114,10 +118,10 @@ def as_2d(arr: ArrayType, *, name: str = "array") -> tuple[ArrayType, bool]:
 
     Returns
     -------
-    arr_2d : array_like
+    arr_2d : ndarray
         ``arr[None, :]`` for 1-D input, ``arr`` itself (no copy) for 2-D.
     was_1d : bool
-        Whether the promotion happened - pass this to :func:`restore_1d`.
+        Whether the promotion happened; pass it to :func:`restore_1d`.
 
     Raises
     ------
@@ -148,8 +152,7 @@ def restore_1d(
 
 
 def restore_1d(was_1d: bool, *arrays: ArrayType) -> ArrayType | tuple[ArrayType, ...]:
-    """
-    Undoes :func:`as_2d` on one or more outputs.
+    """Undoes :func:`as_2d` on one or more outputs.
 
     Parameters
     ----------
@@ -160,7 +163,7 @@ def restore_1d(was_1d: bool, *arrays: ArrayType) -> ArrayType | tuple[ArrayType,
 
     Returns
     -------
-    array_like or tuple of array_like
+    ndarray or tuple of ndarray
         ``arr[0]`` per input when ``was_1d``, otherwise the inputs unchanged.
         A single input returns bare (not a 1-tuple), so both
         ``out = restore_1d(was_1d, out)`` and
@@ -175,8 +178,7 @@ def restore_1d(was_1d: bool, *arrays: ArrayType) -> ArrayType | tuple[ArrayType,
 def broadcast_channels(
     ref: ArrayType, num_channels: int, xp: Any = None, *, name: str = "reference"
 ) -> ArrayType:
-    """
-    Broadcasts a shared reference sequence across ``num_channels`` channels.
+    """Broadcast a shared reference sequence across ``num_channels`` channels.
 
     Replaces the ad-hoc ``if ref.ndim == 1: ref = ref[None, :]`` promotion used
     at every reference/pilot input, adding the channel-count check that the
@@ -196,7 +198,7 @@ def broadcast_channels(
 
     Returns
     -------
-    array_like
+    ndarray
         A ``(C, L)`` view.  Shared references are returned as a **read-only
         broadcast view** (no data is copied); call ``.copy()`` before writing.
 
@@ -231,11 +233,10 @@ def require_channels(
     name: str = "samples",
     description: str | None = None,
 ) -> ArrayType:
-    """
-    Validates a strict MIMO layout with an exact channel count.
+    """Validate a strict MIMO layout with an exact channel count.
 
-    For entry points that are *only* defined for a fixed number of channels -
-    dual-polarization channel models and polarization equalizers - where a
+    For entry points defined only for a fixed number of channels
+    (dual-polarization channel models and polarization equalizers), where a
     SISO input is a caller error rather than something to promote.
 
     Parameters
@@ -252,7 +253,7 @@ def require_channels(
 
     Returns
     -------
-    array_like
+    ndarray
         ``arr`` unchanged.
 
     Raises
@@ -271,8 +272,7 @@ def require_channels(
 
 
 def to_report_scalar(values: Any, *, was_1d: bool | None = None) -> float | np.ndarray:
-    """
-    A reporting-layer result on the host: a Python float or a float64 array.
+    """A reporting-layer result on the host: a Python float or a float64 array.
 
     The reporting-layer counterpart of :func:`restore_1d`: channel-batched
     results are computed as ``(C,)`` vectors, but ``(N,)`` input reports a
@@ -305,9 +305,12 @@ def to_report_scalar(values: Any, *, was_1d: bool | None = None) -> float | np.n
 
 
 def warn_if_double(arr: Any, function_name: str, working: str = "complex64") -> None:
-    """Emit :class:`~commkit.backend.PrecisionWarning` when ``arr`` is double
-    precision (complex128 or float64) and ``function_name`` computes in the
-    single-precision ``working`` dtype; attributed to the caller's line."""
+    """Warn that a single-precision block received double-precision data.
+
+    Emits :class:`~commkit.backend.PrecisionWarning` when ``arr`` is
+    complex128 or float64 and ``function_name`` computes in the
+    single-precision ``working`` dtype, attributed to the caller's line.
+    """
     dtype = getattr(arr, "dtype", None)
     if dtype is None or dtype not in (np.complex128, np.float64):
         return

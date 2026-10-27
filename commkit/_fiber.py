@@ -22,19 +22,19 @@ the complex conjugate of the textbook (Agrawal) form, so the Kerr phase is
 in anomalous fiber and makes DBP an inverse.
 
 Solver.  The loss is taken out of the field: ``A = u e^{-αz/2}``, so ``u``
-obeys the lossless equation with a Kerr coefficient ``γ e^{-αz}``, its
-linear operator is a pure phase, and an amplifier that restores the span
-loss leaves ``u`` unchanged (no rounding of gains that should cancel).
-Each span of length ``L`` is cut into ``K`` equal steps.  A step is
-``D(h/2) N(h) D(h/2)``: the Kerr phase uses the power at the step's midpoint
-weighted over the step, ``γ (e^{-αz_{k-1}} - e^{-αz_k}) / α``, so the scheme
-is second order (and exact for a continuous wave).  Equal steps measured about
-3x more accurate than logarithmic ones (equal nonlinear phase per step) on a
-32 GBd, 80 km span at 4-10 dBm for every step count from 10 to 200: the
-long last steps of the logarithmic rule cost more dispersion accuracy than
-its balanced Kerr phase gains.  Neighbouring half steps are merged, so a
-step costs one FFT pair.  A lumped amplifier after every
-span restores the span loss exactly and, with a noise figure, adds ASE.
+obeys the lossless equation with a Kerr coefficient ``γ e^{-αz}``, its linear
+operator is a pure phase, and an amplifier that restores the span loss leaves
+``u`` unchanged (no rounding of gains that should cancel). Each span of length
+``L`` is cut into ``K`` equal steps.  A step is ``D(h/2) N(h) D(h/2)``: the
+Kerr phase uses the power at the step's midpoint weighted over the step, ``γ
+(e^{-αz_{k-1}} - e^{-αz_k}) / α``, so the scheme is second order (and exact for
+a continuous wave).  Equal steps were measured about 3x more accurate than
+logarithmic ones (equal nonlinear phase per step) on a 32 GBd, 80 km span at
+4-10 dBm for every step count from 10 to 200: the long last steps of the
+logarithmic rule cost more dispersion accuracy than its balanced Kerr phase
+gains.  Neighboring half steps are merged, so a step costs one FFT pair.  A
+lumped amplifier after every span restores the span loss exactly and, with a
+noise figure, adds ASE.
 
 PMD is the waveplate (coarse-step) model: every step carries one section, a
 Haar-random Jones rotation and a differential group delay
@@ -59,8 +59,8 @@ stage) that compute the phase in registers, on in-place, unscaled cuFFT
 transforms, so each stage reads and writes the field once and a span
 allocates nothing; the span is captured once into a CUDA graph and
 replayed, with the next span's waveplates copied into a fixed device buffer
-before each replay.  Any failure falls back to the plain CuPy stages, which
-complex128 input also uses.
+before each replay.  complex128 input runs the plain CuPy stages, without
+the fused kernels and the graph.
 """
 
 from __future__ import annotations
@@ -209,10 +209,13 @@ def check_link(
 def to_watts(
     x: ArrayType, xp: ModuleType, launch_power_dbm: float, function_name: str
 ) -> tuple[ArrayType, bool, float]:
-    """``(field, was_1d, scale)``: a complex ``(C, N)`` working copy of ``x``
-    scaled to sqrt(W), with its average power (summed over the
-    polarizations) at ``launch_power_dbm``.  Divide the result by ``scale``
-    to return to the input's units."""
+    """Scale a working copy of the field to sqrt(W) at the launch power.
+
+    Returns ``(field, was_1d, scale)``: ``field`` is a complex ``(C, N)``
+    copy of ``x`` whose average power, summed over the polarizations, is
+    ``launch_power_dbm``.  Divide the result by ``scale`` to return to the
+    input's units.
+    """
     if not math.isfinite(launch_power_dbm):
         raise ValueError(
             f"{function_name}: launch_power_dbm must be finite, got {launch_power_dbm!r}."
@@ -269,8 +272,11 @@ def jones_section(
 
 @dataclass(frozen=True)
 class _SpanPlan:
-    """One span: ``K`` equal steps of ``step_km``, so ``K + 1`` linear stages
-    (half, ``K - 1`` full, half) around ``K`` Kerr stages."""
+    """Step plan of one span.
+
+    ``K`` equal steps of ``step_km``, so ``K + 1`` linear stages (half,
+    ``K - 1`` full, half) around ``K`` Kerr stages.
+    """
 
     step_km: float
     kerr: np.ndarray  # (K,) rad/W: γ_eff · power-weighted step length
@@ -371,8 +377,11 @@ class _Ops:
         return hm, hp
 
     def linear(self, X: ArrayType, length_km: float, section: int | None) -> ArrayType:
-        """Linear stage of ``length_km`` (negative backward), with PMD
-        section ``section`` of the current span or none."""
+        """Apply a linear stage of ``length_km`` (negative backward).
+
+        With PMD section ``section`` of the current span, or none for
+        ``None``.
+        """
         if section is None:
             X *= self._response(length_km)
             return X
@@ -405,9 +414,10 @@ def _numba_kernels() -> dict[str, Callable[..., None]]:
     """Trig-free CPU passes (in place, complex64 or complex128).
 
     Numba compiles sin/cos to scalar libm calls (no SVML), while NumPy 2 has
-    SIMD sin/cos; so the Kerr stage is a Numba power/phase pass, NumPy
-    sin/cos, then a Numba rotation pass, from ``_HYBRID_KERR_MIN`` samples.  Real arithmetic throughout: a
-    complex literal (1j) would promote complex64 work to complex128.
+    SIMD sin/cos; so the Kerr stage is a Numba power/phase pass, NumPy sin/cos,
+    then a Numba rotation pass, from ``_HYBRID_KERR_MIN`` samples.  Real
+    arithmetic throughout: a complex literal (1j) would promote complex64 work
+    to complex128.
     """
     if not _NUMBA:
         import numba
@@ -609,21 +619,15 @@ class _FusedOps(_Ops):
 
 
 def _make_ops(x: ArrayType, xp: ModuleType, *args: Any) -> _Ops:
-    """The stage operations for the field ``x``; ``args`` as :class:`_Ops`
-    after ``xp`` and the dtype."""
+    """Pick the stage operations for the field ``x``.
+
+    ``args`` are those of :class:`_Ops` after ``xp`` and the dtype.
+    """
     if xp is np:
         return _CpuOps(xp, x.dtype, *args)
     if x.dtype != xp.complex64:
         return _Ops(xp, x.dtype, *args)
-    try:
-        return _FusedOps(xp, x.dtype, *args)
-    except Exception as exc:  # pragma: no cover - GPU toolchain dependent
-        logger.warning(
-            "Fiber propagation: fused CUDA kernels unavailable (%s); using the "
-            "plain CuPy path.",
-            exc,
-        )
-        return _Ops(xp, x.dtype, *args)
+    return _FusedOps(xp, x.dtype, *args)
 
 
 # -----------------------------------------------------------------------------
@@ -663,8 +667,9 @@ def _run_span(
     pmd: bool,
     on_last_spectrum: Callable[[ArrayType], None] | None = None,
 ) -> ArrayType:
-    """One span's steps, time domain in and out (the amplifier is the
-    identity on the loss-normalized field).
+    """Run the steps of one span, time domain in and out.
+
+    The amplifier is the identity on the loss-normalized field.
 
     Forward: ``L_0 N_0 L_1 ... N_{K-1} L_K``, PMD section ``k`` in ``L_k``.
     Backward (``direction=-1``) applies the inverse operators in reverse
@@ -697,8 +702,10 @@ def propagate(
     noise_figure_db: float | None = None,
     rng: Any = None,
 ) -> ArrayType:
-    """Propagate the ``(C, N)`` field ``x`` (sqrt(W), C in {1, 2}) over the
-    link; ``direction=-1`` backpropagates (DBP: no ASE, no PMD).
+    """Propagate the field over the link, or backpropagate it.
+
+    ``x`` is ``(C, N)`` in sqrt(W) with C in {1, 2}; ``direction=-1``
+    backpropagates (DBP: no ASE, no PMD).
 
     ``x`` is consumed: it is the working buffer.
     """
@@ -770,7 +777,7 @@ def _span_runner(
     pmd: bool,
     graphs: GraphRunner,
 ) -> Callable[..., ArrayType]:
-    """``run(x, on_last_spectrum) -> x`` for one span.
+    """Build the function ``run(x, on_last_spectrum) -> x`` of one span.
 
     With fused CuPy operations every stage works in place, so a span always
     reads and writes the same buffer, and the waveplates come from a fixed

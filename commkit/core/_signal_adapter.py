@@ -1,7 +1,14 @@
-"""Boundary helpers for functions accepting arrays or :class:`Signal` objects.
+"""Boundary helpers for functions that accept an array or a Signal (private).
 
-This module deliberately contains container adaptation only.  Numerical DSP
-implementations should receive arrays and fully resolved scalar metadata.
+:func:`adapt_signal` unwraps the argument once into a :class:`SignalAdapter`,
+which resolves facts (``resolve_fact``: a conflicting argument raises) and
+choices (``resolve_choice``: an explicit argument wins), and returns results
+through ``wrap_samples``.  :data:`S` is the TypeVar of a transform's
+argument and result.  Also :func:`require_device` and
+:func:`require_integer_sps`.
+
+This module holds container adaptation only: numerical code receives arrays
+and fully resolved scalar metadata.
 """
 
 from __future__ import annotations

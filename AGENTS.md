@@ -160,9 +160,23 @@ Dependencies point downward only:
   - `num_taps`, `step_size`, `sps`, `constellation`, `pulse`, `rng`, `num_symbols`, `num_channels`, `sampling_rate`, `symbol_rate`.
   - Units are in the docstring. Use `_db` and `_hz` suffixes where the unit is ambiguous.
 
+### Docstrings
+
+Docstrings describe the code as it is; a change in behavior updates them in the same commit. NumPy format (numpydoc), sections in its order: Parameters, Returns, Raises, Warns, See Also, Notes, References, Examples.
+
+- **Summary line** on the line of the opening quotes (`"""Summary.`), one line, ending with a period.
+  - Functions: imperative mood (`Apply ...`, `Estimate ...`, `Plot ...`), or a noun phrase for a function named after the quantity it returns (`evm`, `allan_deviation`, `welch_psd`).
+  - Classes and modules: a noun phrase.
+- **Module docstrings** say what the module holds, by public name (`:func:`, `:class:`), then the conventions particular to it (a sign convention, a scaling, a file layout). No marketing adjectives ("high-performance", "publication-quality"), no history of earlier layouts, and no restatement of the library-wide rules in this file. A private module's summary ends with "(private)" and the body names its users.
+- **Types:** inputs are `array_like` (NumPy or CuPy), `array_like or Signal` for Signal-aware arguments; returned arrays and result fields are `ndarray` (NumPy or CuPy, on the input's device), `ndarray or Signal` for transforms, and `numpy.ndarray` where the array is always on the host. Shapes go in the description, in double backticks: ``(N,)``, ``(C, N)``.
+- **Plots** return `(fig, ax) or None` (`None` with `show=True`).
+- **Defaults:** `name : type, default value`; `name : type, optional` when the default is `None`, with the description saying what `None` does.
+- Units go in the description; inline code in double backticks; references to library names through `:func:` / `:class:` / `:mod:` / `:meth:`.
+
 ### Errors and logging
 
 - Wrong input raises, with a message naming the argument.
+- **No fallbacks for a broken environment.** Code never catches a failure of CuPy, a CUDA kernel (compile, load, launch), a CUDA-graph capture or any other dependency in order to run a slower or different implementation; the failure raises to the caller. The kernels and graphs are tested on a GPU before every release (§2), a broken CuPy already fails when data moves to the GPU, and a path kept "just in case" is code that no test or user runs. Dispatch on the *input* is different and allowed: a kernel's documented limits (dtype, number of points, phases or channels) may route to the general implementation where that implementation exists anyway (the CPU's), and the dispatch says so where it happens. A GPU-only path that would serve only inputs beyond a kernel's limit is not written; such input raises (`compute_llr` above 16 bits per symbol).
 - `logger` is for diagnostics only. Per-channel logging that needs a device-to-host transfer is wrapped in `if logger.isEnabledFor(logging.INFO):`.
 - The library never configures handlers, Matplotlib or warning filters at import time.
 
@@ -174,7 +188,8 @@ Dependencies point downward only:
 - **Precision contract.** Every function computes in a predictable precision, and none promotes single-precision data on its own:
   - **Transforms keep the input's precision**: complex64 in, complex64 out and computed throughout (filters, impairments, the fiber solver and DBP, resampling, delays, carrier-phase correction); complex128 in, complex128 out.
   - **Fixed-precision blocks** compute in single precision whatever the input: the equalizers in complex64 (with complex128 accumulation inside, below), `compute_llr` / `Constellation.llr` in float32. Double input to them emits `commkit.PrecisionWarning` (`_array.warn_if_double`, attributed to the caller's line; Python shows it once per call site). Users who want strictness turn it into an error with `warnings.simplefilter("error", commkit.PrecisionWarning)`; the test suite does (`pytest_configure` in `tests/conftest.py`; never in pyproject's `filterwarnings`, which imports commkit before coverage starts and drops every module-level line from the report), so a library path that feeds double data to these blocks fails CI. Training and reference symbols are ideal values and are not checked.
-  - **Deliberate float64**, documented where it happens, always on phases, small arrays or accumulators, never on sample-rate data that is then cast back: phases before `unwrap`, phase trajectories and phase ramps (wrapped in float64, rotated in the data's precision), frequency grids and estimates, the recursions' state (PLL, Tikhonov, RLS `P`), the IIR filter's sections (poles near z = 1), and sums: the metrics compute per element in the input's precision and accumulate in float64 (`gmi` / `mi` in single precision moved by under 4e-8 bit, far below the Monte Carlo error).
+  - **Deliberate float64**, documented where it happens, always on phases, small arrays or accumulators, never on sample-rate data that is then cast back: phases before `unwrap`, phase trajectories and phase ramps (wrapped in float64, rotated in the data's precision), frequency grids and estimates, the recursions' state (PLL, Tikhonov, RLS `P`), the IIR filter's sections and state (poles near z = 1; on the CPU the samples keep their precision), and sums: the metrics compute per element in the input's precision and accumulate in float64 (`gmi` / `mi` in single precision moved by under 4e-8 bit, far below the Monte Carlo error).
+  - **One known exception:** `iir_filter` on the GPU filters single-precision samples in double precision and casts the result back, because `cupyx.scipy.signal`'s block-parallel filter computes in one dtype for samples and sections, and single-precision sections are unstable at low cutoffs. See the roadmap (Performance).
   - **Audit with `tests/plugins/precision_trace.py`** after touching numerics: it lists every float64/complex128 array of sample-rate size that a NumPy path of the library creates from single-precision data or from scratch, with its source line. Every reported site must be a deliberate use from the list above (or a test passing complex128 on purpose). Output dtypes alone do not show this: a function that computes in complex128 and casts back returns complex64.
   - complex128 pays only where single-precision rounding accumulates over many FFT passes, as in the fiber solver (6e-4 after 10^4 steps in complex64, 1e-12 in complex128); there the GPU runs its plain CuPy stages, not the fused complex64 kernels.
   - **The NEP 50 trap**: under NumPy 2 a NumPy scalar is not weak, so `np.float64(a) * x64` (any `np.sqrt`, `np.pi * ...` result, or a float64 array such as `xp.fft.fftfreq`) promotes complex64 data to complex128. Combine single-precision data only with Python scalars or with arrays cast to its precision; rotate with `math._derotate` (float64 phase wrap, single-precision phasor, one fused kernel on the GPU).
@@ -192,8 +207,10 @@ Dependencies point downward only:
 
 | Algorithm structure | Implementation | Device |
 | --- | --- | --- |
-| Vectorized: filters, resampling, spectra, impairments, metrics, LLR, frequency-domain equalizers | NumPy/CuPy via `x, xp, sp = dispatch(samples)` | follows the input |
-| Sequential recursions: LMS/RLS/CMA/RDE, PLL, Tikhonov, cycle slips | Numba `@njit(cache=True, fastmath=True, nogil=True)` | CPU; GPU input does one round trip to the host and back |
+| Vectorized: filters, resampling, spectra, impairments, metrics, frequency-domain equalizers | NumPy/CuPy via `x, xp, sp = dispatch(samples)` | follows the input |
+| Per-symbol searches over a small table: LLRs (over all points, or per axis for separable QAM), hard decisions of constellations without a square lattice | CPU: Numba `parallel=True` over blocks of symbols (LLRs), chunked NumPy (decisions). GPU: CUDA kernels, one thread per symbol (`llr`, `llr_separable`, `bps_min_d2`'s nearest-point mode); decisions on double input or more than 1024 points run the chunked search on both devices, LLRs above 16 bits per symbol raise on the GPU | follows the input |
+| Sequential recursions: LMS/RLS/CMA/RDE, PLL, Tikhonov, cycle slips, the Mengali-Morelli bootstrap over the lags | Numba `@njit(cache=True, fastmath=True, nogil=True)` | CPU; GPU input does one round trip to the host and back |
+| Linear recursions: IIR filtering | CPU: Numba kernel without `fastmath`, so double input gives SciPy's result bit for bit. GPU: `cupyx.scipy.signal`, a block-parallel filter | follows the input |
 | Hot spots limited by intermediates, launches or round trips | CUDA C++ via CuPy `RawModule` (`commkit/_cuda`) | GPU |
 | Elementwise chains with many temporaries, where a paired A/B shows the gain end to end (the PMD stage of `_fiber`: 0.61x on 4 cores, but not on the reference machine; see the roadmap) | Numba `@njit(parallel=True)` in one pass, real arithmetic (a `1j` literal promotes complex64 to complex128) | CPU |
 
@@ -206,17 +223,18 @@ Dependencies point downward only:
 - Chunk `(N, M)` intermediates over N with an on-device accumulator.
 - Reduce on the device before transferring, including for plotting.
 - Pass whole records to compiled code. There are no Python loops over symbols or small blocks, except inside a CUDA graph.
-- Repeated GPU work with fixed buffers (the block equalizers' blocks, the fiber solver's spans) is replayed from CUDA graphs through `_cuda.graphs.GraphRunner`, the one driver: warm once, capture on the second run, replay, fall back to eager on a failed capture. Its stream is reused per device and thread, because CuPy's pool caches freed blocks per stream and a fresh stream per call grows the pool every call.
+- Repeated GPU work with fixed buffers (the block equalizers' blocks, the fiber solver's spans) is replayed from CUDA graphs through `_cuda.graphs.GraphRunner`, the one driver: warm once, capture on the second run, replay; a failed capture raises. Its stream is reused per device and thread, because CuPy's pool caches freed blocks per stream and a fresh stream per call grows the pool every call.
 
 **Kernel policy:**
 
 - A `.cu` kernel needs a benchmark showing that CuPy is limited by intermediates, launch count or round trips.
+- `_cuda.get_kernel` returns the launch wrapper or raises (compile, load or a bad specialization); it is called only on CuPy input.
 - It optimizes a CPU reference (Numba or NumPy) and is tested against it with `--device=all`.
 - Wrappers check dtype, contiguity, shape and size before launch.
 - `float32` with explicit literals.
 - `--use_fast_math` only per kernel (through `options`), after an accuracy check; the compiler default does not pass it.
 - Short elementwise chains use `ElementwiseKernel` or `cupy.fuse`.
-- Sequential recursions over a whole record are never ported to the GPU; one record has no parallel work per step. A short per-block scan may be, as one launch, when it replaces a host round trip per block (`cs_block`, `bps_anchor`); keep its parallel part parallel (float64 is 1/64 of float32 throughput on consumer GPUs).
+- Sequential recursions over a whole record are never ported to the GPU; one record has no parallel work per step. Linear recursions (IIR filters) are the exception: blocks of the record are filtered in parallel from a zero state and then corrected by the state carried in from the previous block, as `cupyx.scipy.signal` does. A short per-block scan may be, as one launch, when it replaces a host round trip per block (`cs_block`, `bps_anchor`); keep its parallel part parallel (float64 is 1/64 of float32 throughput on consumer GPUs).
 
 ---
 
@@ -227,11 +245,11 @@ Dependencies point downward only:
 - **Shared builders** live in `tests/common/` and use the public API.
 - **Contract registry** (`tests/test_api_contracts.py`): every public function has a row. Generic checks run per row: array in/out, Signal in/out, device preserved, input not mutated, keyword-only parameters, `TypeError` on unsupported arrays, fact-conflict errors, return rules.
   - Do not duplicate these checks in per-module tests.
-- **Oracles:** sequential kernels are tested against plain-Python reference implementations in `tests/common/reference_impl.py`. CUDA kernels are tested against their CPU reference.
+- **Oracles:** sequential kernels are tested against plain-Python reference implementations in `tests/common/reference_impl.py`. CUDA kernels are tested against their CPU reference. Kernel tests skip only on the CPU parametrization (`skip_unless_gpu`), never because a kernel is unavailable, so a kernel that fails to compile fails its tests.
 - **Mathematical meaning:** test documented definitions, such as a pulse width, a dispersion sign, or noise-variance scaling, with independently derived expectations, not only shapes and energies.
 - **API changes never change expected values.** A commit that changes a signature only changes how tests call the code. Numerical changes land in their own commit with independent validation.
 - **Examples** are Jupyter notebooks in `examples/`, committed without outputs: `.gitattributes` routes them through the `nbstripout` filter, which each clone enables once with `uv run nbstripout --install` (git does not ship filter configuration). `tests/test_examples.py` executes each one, so an API change updates the notebooks in the same commit.
-  - They form a course: one topic per notebook, named `NN-lowercase-words.ipynb`, numbered in teaching order (signals and DSP, channel and metrics, receiver algorithms, fiber systems, characterization). Each opens with what it covers, links the notebooks it builds on and ends with a link to the next. `examples/README.md` indexes them; a new notebook takes its place in the order and updates the index and the neighbours' links.
+  - They form a course: one topic per notebook, named `NN-lowercase-words.ipynb`, numbered in teaching order (signals and DSP, channel and metrics, receiver algorithms, fiber systems, characterization). Each opens with what it covers, links the notebooks it builds on and ends with a link to the next. `examples/README.md` indexes them; a new notebook takes its place in the order and updates the index and the neighbors' links.
   - Every claim in the text matches what the cells print: run the notebook and read its numbers before committing it. Keep each under about 20 s on the CPU.
   - Plots of hand-computed arrays go through `to_device(x, "cpu")`, so the notebooks run unchanged on the GPU.
 - **Coverage** must not drop below the CI floor. Numba kernel coverage is measured by a separate `NUMBA_DISABLE_JIT=1` job.
@@ -240,7 +258,7 @@ Dependencies point downward only:
 
 ## 8. Benchmarks
 
-`benchmarks/` tracks the GPU-relevant hot paths. Baselines are committed under `benchmarks/baselines/`. The current reference is `0004` (`fiber_dbp`) on the reference machine: RTX 4070 Ti, Ryzen 7 7800X3D, WSL2. It adds the fiber and DBP benchmarks to `0003` (`v2_0`, the 2.0 state); `0002` (`pre_v2`) is the 1.x state. `0002` ran the CPR equalizer and Viterbi-Viterbi benchmarks on workloads that did not converge, so compare those only from `0003` on.
+`benchmarks/` tracks the GPU-relevant hot paths. Baselines are committed under `benchmarks/baselines/`. The current reference is `0005` (`gpu_decoder_path`) on the reference machine: RTX 4070 Ti, Ryzen 7 7800X3D, WSL2. It is the first baseline with `bench_mapping.py` and `bench_compute_llr_nonseparable`, recorded after the GPU LLR, mapping and decision kernels; `0004` (`fiber_dbp`) adds the fiber and DBP benchmarks to `0003` (`v2_0`, the 2.0 state); `0002` (`pre_v2`) is the 1.x state. `0002` ran the CPR equalizer and Viterbi-Viterbi benchmarks on workloads that did not converge, so compare those only from `0003` on.
 
 - **Workloads must converge.** A workload the algorithm cannot handle times a failure mode (slip storms, divergence), not the operating point. Every equalizer benchmark asserts its symbol error rate with `benchutils.assert_converged`.
 - **Baselines** are recorded with `benchmarks/record_baseline.py`: each file in its own process, best of three passes. In one full-suite process, small GPU benchmarks after the large equalizer workloads ran 2-12x slower than alone, so never record a baseline from a single `pytest benchmarks/` run.
@@ -253,13 +271,20 @@ Dependencies point downward only:
 - **Tools:** `benchmarks/benchutils.py` provides `CudaEventTimer` and `nvtx_range` for `nsys` profiling.
 - **Logging** is set to WARNING in `benchmarks/conftest.py`.
 - **Trust deltas, not single runs.** A ±20-40% swing has been seen under load. Re-run a suspected regression in isolation, or do a controlled A/B with at least 7 repetitions, alternating old and new per repetition and comparing the paired ratios. When even unchanged benchmarks move, time the changed part itself with `CudaEventTimer` and quote it against the step it sits in.
-- A commit touching a hot path quotes its delta against `0004`. Tolerance is 5% on CPU and 10% on GPU.
+- A commit touching a hot path quotes its delta against `0005`. Tolerance is 5% on CPU and 10% on GPU.
 
 ---
 
 ## 9. Roadmap and open items
 
 What is not done yet, in suggested order. Unlike the sections above, this is a to-do list, not a description of the code: remove an item in the commit that resolves it, and add one when a known gap is left open.
+
+### Tests: catch silent host round trips (needs a CUDA device)
+
+The contract registry checks that a function returns on its input's device, which a round trip through the host passes, and CuPy's refusal of implicit conversion only rules out the accidental kind. An audit of every explicit transfer (October 2026) found one silent host computation, the blockwise frequency correction (fixed in `50b7351`); the documented ones are the sequential recursions of §6, the block equalizers' cycle-slip correction beyond the `cs_block` kernel's 1024 channels, and the reporting layer. To keep it that way:
+
+- **A transfer-trace plugin**, the GPU counterpart of `tests/plugins/precision_trace.py`: during a `--device=gpu` run, wrap the device-to-host paths (`cupy.ndarray.get`, `cupy.asnumpy`, `backend.to_device(..., "cpu")`) and the host-to-device copies of NumPy arrays, record every transfer of sample-rate size (the same threshold as the precision trace) with its source line, and fail on one that is not in a documented list (the rows of §6 that make a host round trip, the metrics' and analysis summaries' reductions, INFO-level logging). Run it on the contract registry and the GPU suite; add the command to §2.
+- **Notebooks on the GPU.** `tests/test_examples.py` is `cpu_only`, so the claim that the notebooks run unchanged on the GPU is never checked; their inputs come from `generate(..., device="cpu")`, so a GPU run needs a way to choose the device (a notebook parameter or environment variable read in the first cell) without changing what the text teaches.
 
 ### Switch to Python 3.15 (blocked on CuPy)
 
@@ -276,7 +301,7 @@ Steps, once CuPy 14.3 (with cp315 wheels for `cupy-cuda13x`) and a fixed `jupyte
    - `pyproject.toml`: `requires-python = ">=3.15"`, classifiers 3.15 only, ruff `target-version = "py315"` (if ruff supports it), raise the dependency minimums to the first releases with 3.15 wheels (`cupy-cuda13x[ctk]>=14.3`, `numba>=0.68`, `numpy>=2.5`, `scipy>=1.18`; recheck each).
    - `ci.yml`: test matrix `python-version: ["3.15"]` (keep both `locked` and `lowest-direct`); the static-analysis, kernel-coverage and notebook jobs on 3.15. `publish.yml`: build on 3.15.
    - `uv lock`; README install requirements; §2 here ("Python 3.12+").
-   - Benchmarks: record a new baseline on 3.15 (it lands in `benchmarks/baselines/Linux-CPython-3.15-64bit/`), compare it with `0004` by a paired A/B of 3.14 against 3.15 on unchanged code, and make it the reference.
+   - Benchmarks: record a new baseline on 3.15 (it lands in `benchmarks/baselines/Linux-CPython-3.15-64bit/`), compare it with `0005` by a paired A/B of 3.14 against 3.15 on unchanged code, and make it the reference.
 3. **Lazy imports (PEP 810)**. Confirm the rules on the interpreter first. As specified, `lazy` is allowed only for module-level imports: not inside functions, class bodies or `try` blocks, and not with `*`.
    - About 60 function-local imports exist to keep `import commkit` light or optional: `import cupy as cp` (11 sites), `import numba` (9), `from . import compiler` in `_cuda` (5), and local imports that break cycles (`Constellation`, `Signal`, `normalize`). Move each to a module-level `lazy import` / `lazy from`. Concentrated in `_cuda/__init__.py`, `backend.py`, `io.py`, `recovery/`, `core/`, `plotting/`.
    - CuPy stays optional: a lazy import of a missing module fails only when used, so every use must stay behind the existing availability checks (`is_cupy_available`, `dispatch`). `backend.py`'s probing needs care: decide per site whether the probe imports eagerly inside `try`.
@@ -291,7 +316,7 @@ Steps, once CuPy 14.3 (with cp315 wheels for `cupy-cuda13x`) and a fixed `jupyte
 
 ### Planned modules
 
-1. **Channel coding** (`coding`, a placeholder package). Resolve the "Before channel coding" items below first, so the decoder is built on soft demapping that is already at its final speed on both devices. Start with one soft decoder (LDPC) that consumes `compute_llr` output (positive LLR = bit 0) and reports post-FEC BER next to `gmi`, then add encoders. The package stays out of `commkit/__init__.py` until a real encode/decode entry point exists. Decoders are iterative message passing over many codewords: batch codewords on the GPU from the start.
+1. **Channel coding** (`coding`, a placeholder package). Soft demapping is GPU-validated on both devices; the closed-form max-log item of "Before channel coding" is optional and does not block, and the exact-LLR underflow item under Performance matters only for non-separable constellations. Start with one soft decoder (LDPC) that consumes `compute_llr` output (positive LLR = bit 0) and reports post-FEC BER next to `gmi`, then add encoders. The package stays out of `commkit/__init__.py` until a real encode/decode entry point exists. Decoders are iterative message passing over many codewords: batch codewords on the GPU from the start.
 
 ### Nonlinear fiber channel: future features
 
@@ -306,17 +331,14 @@ Each is an addition that leaves the current API unchanged.
 
 ### Before channel coding: mapping and soft demapping
 
-The decoder's input path. The GPU items need a CUDA device to write, test (`--device=all`, against the Numba reference) and time.
+The decoder's input path. The GPU items need a CUDA device to time and to test (`--device=all`, against the Numba reference).
 
-- **GPU LLRs of separable QAM.** `Constellation.llr` takes the per-axis path (2·sqrt(M) metrics instead of M) only on the CPU; on the GPU, 256-QAM evaluates 256 metrics per symbol instead of 32. Port `llr_separable` to a CUDA kernel.
-- **One exponential per point in the CUDA exact LLR.** `llr.cu` evaluates every metric twice and calls `expf` once per point and bit (M·k per symbol, 2048 for 256-QAM). The Numba kernel scales by one peak per symbol and needs M (with the underflow fallback of `_EXACT_FLOOR`). Together with the item above: 32 exponentials per 256-QAM symbol instead of 2048.
-- **CUDA LLR stores and per-call tables.** Each thread writes its k LLRs at stride k (uncoalesced), and every call rebuilds and copies the points, packed labels and log prior to the device; cache them per constellation and device.
-- **Non-square hard decisions on the GPU.** `gray._nearest_index` (used by `Constellation.demap`, `evm(blind=True)` and `ser` for PSK, cross QAM and arbitrary points) loops in Python over 4096-symbol chunks: about 250 iterations of several launches per 10^6 symbols. On the CPU that chunk and `abs` are the fastest NumPy form (measured); on the GPU, time it against a larger element-budget chunk or the nearest-point mode of `bps_min_d2`.
-- **`Constellation.map` intermediates.** It casts the bits to int32 groups and multiplies and sums them: two `(N, k)` int32 temporaries for `N·k` input bits, four times the bits' own size in int8. Encoders hand it long bit records; pack the labels in one pass.
-- **Closed-form max-log LLRs of Gray QAM** (optional, CPU and GPU): per bit, the nearest point of each half is found by snapping, O(k) instead of O(sqrt(M)). Expected gain under 2x on the CPU; measure before adopting.
+- **Closed-form max-log LLRs of Gray QAM** (optional, CPU and GPU; undecided): per bit, the nearest point of each half is found by snapping, O(k) instead of O(sqrt(M)). Valid for a uniform prior only (a shaped prior moves the maximum off the nearest level), with the axis labels a binary-reflected Gray code up to per-bit inversion. A Numba prototype (not in the repository; 2 + 2k metrics per axis: the snapped level, then for each bit the two levels next to the run of the snapped level) matched `llr_separable` to float32 rounding; against the `llr_separable` kernel on the same prepared inputs, 2^20 symbols, 4 cores, median of 11 paired runs: 1.80x (slower) at 16-QAM, 0.91x at 64-QAM, 0.60x at 256-QAM, 0.40x at 1024-QAM. Adopting it means a third LLR path (CPU and CUDA) for maxlog, uniform, 256-QAM and up.
 
 ### Performance
 
+- **The exact-LLR underflow pass on the GPU.** `llr.cu` redoes a half-sum that underflows against the symbol's peak (`LLR_EXACT_FLOOR`) in a third pass over all points, with `expf` per point and bit; one such symbol sends its whole warp through it. At Es/N0 = 15 dB it hits 1.5% of 128-cross-QAM symbols but 38% of warps (16-PSK: 31% of symbols, every warp), and `bench_compute_llr_nonseparable[gpu-qam128cross-exact]` went from 2.50 to 3.11 ms at 2^20 symbols against v2.2.0 (7 alternating process pairs, all slower; max-log and 16-PSK got faster). Square QAM takes the separable kernel and gained 4.8x. Candidates: an online per-half maximum with rescaled sums (one pass, no fallback), or a fallback limited to the underflowed bits' halves; test against the Numba reference, including the high-SNR fallback cases.
+- **Single-precision IIR filtering on the GPU.** `iir_filter` on the GPU converts complex64 samples to complex128 for `cupyx.scipy.signal` and back: two double-size copies of the record, against the precision contract. A block-parallel CUDA kernel that reads and writes the samples in their dtype and keeps the sections, block carries and corrections in float64 removes both. Test it against the Numba reference with `--device=all` and time it against the CuPy path.
 - **Block equalizers at small `block_size` on the GPU**: a fixed cost per block; at 256 the GPU only ties the CPU without carrier recovery.
 - **The fiber solver's Numba passes lose end to end on the reference machine.** On 4 cores (where they were tuned) the hybrid Kerr stage won from `_fiber._HYBRID_KERR_MIN = 2^18` and the trig-free Jones (PMD) pass won end to end (0.61x). On the reference machine (8 cores, 16 threads), whole propagations with NumPy stages and multi-core `scipy.fft` are faster: hybrid Kerr 1.74x slower at 2^18, 1.32x at 2^19, 1.12x at 2^20; Numba Jones 1.35x at 2^14, 2.19x at 2^16, 1.54x at 2^18, even at 2^20. The cause is contention: Numba's OpenMP workers spin after each pass and take the cores from the FFT workers (`OMP_WAIT_POLICY=passive` cuts the Kerr loss at 2^18 to 1.09x; one Numba thread makes Jones even with NumPy). The stage timed alone hides this. Options: choose the passes by core count, run them single-threaded, or keep NumPy stages only; decide by end-to-end A/Bs on both machines.
 - **A fully fused Numba Kerr stage** may beat the hybrid one where Numba has SVML (vector sin/cos); neither machine measured so far has it (`numba.core.config.USING_SVML` is False), so it is untimed.

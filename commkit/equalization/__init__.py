@@ -1,14 +1,23 @@
-"""
-Adaptive and block channel equalization.
+"""Adaptive and block channel equalization.
 
-This package provides sequential (LMS, RLS, CMA, RDE) and block / frequency-domain
-equalizers with optional carrier-phase recovery, plus linear (zero-forcing) and
-pilot-tone polarization-demultiplexing routines. Sequential equalizers run as
-Numba loops on the CPU; block / frequency-domain equalizers run on the device
-the input lives on (NumPy or CuPy).
+- Sequential (symbol-by-symbol) equalizers :func:`lms` and :func:`rls`
+  (trained, then decision-directed) and :func:`cma` and :func:`rde` (blind),
+  as Numba loops on the CPU; :func:`build_pilot_ref` builds the pilot
+  reference of pilot-aided ``cma`` / ``rde``.
+- Frequency-domain block equalizers :func:`block_lms`, :func:`block_cma` and
+  :func:`block_rde`, on the input's device (CUDA graphs on the GPU).
+- Linear block equalization: :func:`estimate_transfer_function` (channel
+  estimate), :func:`zf_equalizer` (its ZF / MMSE inverse) and
+  :func:`apply_taps` (frozen taps).
+- Pilot-tone polarization demultiplexing:
+  :func:`demultiplex_polarization_tones_static`,
+  :func:`demultiplex_polarization_tones_dynamic` (with its
+  :class:`JonesTrack`) and :func:`apply_interpolated_matrix`.
 
-The public API is unchanged from when this was a single module:
-``from commkit.equalization import lms, rls, cma, rde, ...`` continues to work.
+The adaptive equalizers take ``(N,)`` or butterfly-MIMO ``(C, N)`` input,
+run optional inline carrier-phase recovery (``cpr=PLL()`` or ``BPS()``) and
+return an :class:`EqualizerResult`, whose ``state`` (an
+:class:`EqualizerState`) continues a later call with ``state=``.
 """
 
 from __future__ import annotations

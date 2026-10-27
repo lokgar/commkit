@@ -1,5 +1,4 @@
-"""
-Polar codes (scaffold).
+"""Polar codes (scaffold).
 
 Polar codes: frozen-bit-set construction (Bhattacharyya / Gaussian
 approximation) and successive-cancellation (SC) / SC-list (SCL, CRC-aided)

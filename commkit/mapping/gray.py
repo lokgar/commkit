@@ -1,18 +1,18 @@
-"""
-Constellation geometry and Gray labelling.
+"""Gray codes and Gray-labeled constellation geometry.
 
-Gray code sequences, their inverse, and the Gray-mapped constellation
-generators for PSK / ASK / square-, 8-rect-, and cross-QAM.  These are the
-geometric foundation consumed by the bit mapping, soft demapping, and
-probabilistic-shaping layers.
-
-Note: codes and constellations are generated using NumPy (host-side).
+:func:`gray_code` and its inverse :func:`gray_to_binary`, and the private
+generators of the Gray-mapped PSK, ASK (PAM), square-, 8-rect- and cross-QAM
+constellations behind the :class:`Constellation` factories, together with
+the nearest-point search of hard decisions.  Codes and constellations are
+built with NumPy on the host.
 """
 
 from functools import lru_cache
+from types import ModuleType
 
 import numpy as np
 
+from .. import _cuda
 from ..backend import ArrayType, dispatch
 from ..logger import logger
 
@@ -21,23 +21,21 @@ __all__ = ["gray_code", "gray_to_binary"]
 
 @lru_cache(maxsize=128)
 def gray_code(n: int) -> np.ndarray:
-    """
-    Generates a Gray code sequence for `n` bits.
+    """Generate the binary-reflected Gray code of ``n`` bits.
 
-    Gray coding ensures that adjacent symbols in the constellation differ
-    by only one bit, minimizing bit error rate (BER) for a given symbol
-    error rate (SER).
+    ``gray_code(n)[i] = i ^ (i >> 1)``: consecutive entries differ in one
+    bit, so neighboring constellation points labeled in this order differ
+    in one bit, which minimizes the bit errors per symbol error.
 
     Parameters
     ----------
     n : int
-        Number of bits.
+        Number of bits, ``>= 0``.
 
     Returns
     -------
-    np.ndarray
-        Array of integers representing the Gray code sequence.
-        Shape: (2^n,).
+    numpy.ndarray
+        Host integer code words, ``(2**n,)``.
 
     Examples
     --------
@@ -57,24 +55,25 @@ def gray_code(n: int) -> np.ndarray:
 
 @lru_cache(maxsize=128)
 def gray_to_binary(n: int) -> np.ndarray:
-    """
-    Computes the inverse Gray code mapping: symbol index to bit pattern.
+    """Invert the Gray code: the binary index of each Gray code word.
 
-    In soft demapping, it is necessary to identify which bits correspond to
-    each constellation point. Since `gray_code(n)[i]` provides the Gray
-    code for natural binary `i`, this inverse mapping finds the natural
-    binary representation corresponding to a specific Gray-coded index.
+    ``gray_to_binary(n)[gray_code(n)[i]] = i``, so ``gray_to_binary(n)[g]``
+    is the position of code word ``g`` in the Gray sequence.
 
     Parameters
     ----------
     n : int
-        Number of bits per symbol.
+        Number of bits, ``>= 0``.
 
     Returns
     -------
-    np.ndarray
-        Array where `result[s]` provides the natural binary integer
-        representing the bit pattern for symbol `s`. Shape: (2^n,).
+    numpy.ndarray
+        Host integers, ``(2**n,)``.
+
+    Examples
+    --------
+    >>> gray_to_binary(3)
+    array([0, 1, 3, 2, 7, 6, 4, 5])
     """
     if n < 0:
         raise ValueError("n must be non-negative")
@@ -112,36 +111,27 @@ def _gray_points(
     normalize: bool = True,
     unipolar: bool = False,
 ) -> np.ndarray:
-    """
-    Generate constellation points with Gray mapping.
+    """Gray-labeled constellation points, indexed by their label.
 
-    The returned array is indexed by the symbol's natural binary value.
-    `constellation[i]` is the complex/float value for the symbol representing
-    the bit pattern for integer `i`.
+    ``points[i]`` is the point whose bit label is the binary value of ``i``.
 
     Parameters
     ----------
     modulation : {"psk", "qam", "ask", "pam"}
-        Modulation type. If string contains 'unipolar', unipolar=True is triggered.
+        Modulation family; a name containing ``"unipol"`` also sets
+        ``unipolar``.
     order : int
-        Modulation order (number of symbols). Must be a power of 2.
+        Number of points, a power of 2.
     normalize : bool, default True
-        If True, scales the constellation to unit average power (E_s = 1).
+        Scale to unit average power ``Es = 1``, so that formats combined in
+        one frame (PSK pilots with a QAM payload) start at the same power.
     unipolar : bool, default False
-        If True, shifts the constellation to be strictly non-negative (for 'ask'/'pam').
-        If the modulation string contains 'unipol', this is automatically forced to True.
+        Shift ASK/PAM points to non-negative values.
 
     Returns
     -------
-    np.ndarray
-        Array of constellation points (NumPy). Shape: (order,).
-        Complex for 'psk' and 'qam', Float for 'ask'.
-
-    Notes
-    -----
-    By default, constellations are normalized to **unit average power (E_s = 1)**.
-    This ensures that when different modulation schemes are mixed (e.g., PSK
-    pilots with QAM payload), they start from a consistent power baseline.
+    numpy.ndarray
+        Points, ``(order,)``: complex for PSK and QAM, real for ASK.
     """
     logger.debug(
         "Generating Gray-coded constellation: modulation=%s, order=%s, normalize=%s",
@@ -196,7 +186,7 @@ def _gray_points(
 def _unpack_bits(indices: ArrayType, k: int) -> ArrayType:
     """Unpack integer indices into their k-bit binary representation (MSB-first).
 
-    Backend-dispatched via ``indices``' own array module, so a GPU-resident
+    Runs with the array module of ``indices``, so a GPU-resident
     index array (e.g. from hard-decision demapping on CuPy) unpacks without
     a host round trip.
 
@@ -208,39 +198,53 @@ def _unpack_bits(indices: ArrayType, k: int) -> ArrayType:
 
     Returns
     -------
-    array_like, shape (N, k), int8
-        MSB-first bit pattern per index. Same backend as ``indices``.
+    ndarray, shape (N, k), int8
+        MSB-first bit pattern per index, on the device of ``indices``.
     """
     indices, xp, _ = dispatch(indices)
     shifts = xp.arange(k - 1, -1, -1, dtype="int32")
     return ((indices[:, xp.newaxis] >> shifts) & 1).astype(xp.int8)
 
 
+# GPU input outside the kernel's limits (double precision, more than 1024
+# points): budget of the (chunk, M) distance matrix per chunk, in elements.
+_GPU_CHUNK_ELEMENTS = 1 << 22
+
+
 def _nearest_index(
     x: ArrayType, constellation: ArrayType, chunk: int = 4096
 ) -> ArrayType:
-    """Nearest-constellation-point index for each element of ``x`` (chunked).
+    """Nearest-constellation-point index for each element of ``x``.
 
-    Bounds peak memory of the ``(N, M)`` distance matrix by chunking over
-    the ``N`` axis.
+    On the CPU, chunking over the ``N`` axis bounds the peak memory of the
+    ``(N, M)`` distance matrix.  On the GPU, single-precision input and up
+    to 1024 points take one launch of the ``bps_min_d2`` kernel's
+    nearest-point mode (no distance matrix; it computes in float32, the
+    limit of its table); other input runs the chunked loop with chunks of
+    ``_GPU_CHUNK_ELEMENTS`` distances, so a long record is not hundreds of
+    small launches.
 
     Parameters
     ----------
-    x : array_like, shape (N,)
-        Flat query points, any backend.
-    constellation : array_like, shape (M,)
-        Reference constellation points.  Cast to ``x``'s backend.
+    x : array_like
+        Flat query points, ``(N,)``, NumPy or CuPy.
+    constellation : array_like
+        Reference constellation points, ``(M,)``.  Moved to ``x``'s device.
     chunk : int, default 4096
-        ``N``-axis chunk size.
+        ``N``-axis chunk size on the CPU (and the minimum on the GPU).
 
     Returns
     -------
-    array_like, shape (N,), int64
-        Index into ``constellation`` of the nearest point, per element.
-        Same backend as ``x``.
+    ndarray
+        int64 index into ``constellation`` of the nearest point, ``(N,)``, on
+        the device of ``x``.  Ties go to the lower index.
     """
     x, xp, _ = dispatch(x)
     constellation = xp.asarray(constellation)
+    if xp is not np:
+        if x.dtype in (np.complex64, np.float32) and constellation.size <= 1024:
+            return _nearest_index_kernel(x, constellation, xp)
+        chunk = max(chunk, _GPU_CHUNK_ELEMENTS // constellation.size)
     indices = xp.empty(len(x), dtype=xp.int64)
     for n0 in range(0, len(x), chunk):
         n1 = min(n0 + chunk, len(x))
@@ -249,9 +253,29 @@ def _nearest_index(
     return indices
 
 
-def _gray_psk(order: int) -> np.ndarray:
+def _nearest_index_kernel(
+    x: ArrayType, constellation: ArrayType, xp: ModuleType
+) -> ArrayType:
+    """GPU nearest-point indices from ``bps_min_d2``, ``(N,)`` int64.
+
+    For single-precision ``x`` and at most 1024 points.  The kernel compares
+    squared distances in float32, which can break a tie of the distances
+    differently from ``abs`` only where two points are equally near up to
+    float32 rounding.
     """
-    Generates an M-PSK constellation with Gray mapping.
+    if x.size == 0:
+        return xp.empty(0, dtype=xp.int64)
+    kernel = _cuda.get_kernel("bps_min_d2", mode="table", return_argmin=True)
+    _, idx = kernel(
+        x.astype(np.complex64, copy=False).reshape(1, -1),
+        xp.ones(1, dtype=np.complex64),
+        constellation.astype(np.complex64, copy=False),
+    )
+    return idx.reshape(-1).astype(np.int64)
+
+
+def _gray_psk(order: int) -> np.ndarray:
+    """Generate an M-PSK constellation with Gray mapping.
 
     Parameters
     ----------
@@ -260,7 +284,7 @@ def _gray_psk(order: int) -> np.ndarray:
 
     Returns
     -------
-    np.ndarray
+    numpy.ndarray
         Complex array of PSK constellation points.
     """
     # Bits per symbol
@@ -290,8 +314,7 @@ def _gray_psk(order: int) -> np.ndarray:
 
 
 def _gray_ask(order: int, unipolar: bool = False) -> np.ndarray:
-    """
-    Generates an M-ASK constellation with Gray mapping.
+    """Generate an M-ASK constellation with Gray mapping.
 
     By default, returns bipolar values centered at zero. If unipolar=True,
     shifts values to start from zero.
@@ -300,10 +323,12 @@ def _gray_ask(order: int, unipolar: bool = False) -> np.ndarray:
     ----------
     order : int
         Modulation order (must be a power of 2).
+    unipolar : bool, default False
+        Shift the levels to start at zero.
 
     Returns
     -------
-    np.ndarray
+    numpy.ndarray
         Real-valued array of ASK constellation points.
     """
     k = int(np.log2(order))
@@ -324,8 +349,7 @@ def _gray_ask(order: int, unipolar: bool = False) -> np.ndarray:
 
 
 def _gray_qam_square(order: int) -> np.ndarray:
-    """
-    Generates a Square M-QAM constellation with Gray mapping.
+    """Generate a Square M-QAM constellation with Gray mapping.
 
     Constructed as the Cartesian product of two Gray-coded ASK
     constellations. Valid for orders where log2(M) is even.
@@ -337,7 +361,7 @@ def _gray_qam_square(order: int) -> np.ndarray:
 
     Returns
     -------
-    np.ndarray
+    numpy.ndarray
         Complex array of square QAM constellation points.
     """
     # M = 2^(2k). I bits = k, Q bits = k.
@@ -365,12 +389,11 @@ def _gray_qam_square(order: int) -> np.ndarray:
 
 
 def _gray_qam_8_rect() -> np.ndarray:
-    """
-    Generates an 8-QAM constellation with Rectangular Gray mapping.
+    """Generate an 8-QAM constellation with Rectangular Gray mapping.
 
     Returns
     -------
-    np.ndarray
+    numpy.ndarray
         Complex array of 8-QAM constellation points.
     """
 
@@ -404,8 +427,7 @@ def _gray_qam_8_rect() -> np.ndarray:
 
 
 def _gray_qam_cross(order: int) -> np.ndarray:
-    """
-    Generates a Cross-QAM constellation using a Quasi-Gray mapping.
+    """Generate a Cross-QAM constellation using a Quasi-Gray mapping.
 
     Cross constellations are used for QAM orders where log2(M) is odd (e.g., 32, 128)
     to maintain a more circular/compact shape than a purely rectangular grid.
@@ -417,7 +439,7 @@ def _gray_qam_cross(order: int) -> np.ndarray:
 
     Returns
     -------
-    np.ndarray
+    numpy.ndarray
         Complex array of cross QAM constellation points.
     """
     # M = 2^(2k+1).
@@ -458,7 +480,7 @@ def _gray_qam_cross(order: int) -> np.ndarray:
         n_shift = 2 ** (n - 3)
 
     if n_shift == 0:
-        # Fallback
+        # No wings to fold: the rectangular grid is the constellation.
         val_i = (-width + 1 + 2 * geo_i).astype(float)
         val_q = (-height + 1 + 2 * geo_q).astype(float)
         return np.asarray(val_i + 1j * val_q)

@@ -1,4 +1,10 @@
-"""Linear block equalizers: zero-forcing and static tap application."""
+"""Linear block equalization: channel estimation, ZF / MMSE and fixed taps.
+
+:func:`estimate_transfer_function` estimates a (MIMO) channel from a known
+reference, :func:`zf_equalizer` inverts a channel estimate in the frequency
+domain (zero-forcing, or MMSE with a noise variance), and :func:`apply_taps`
+applies frozen equalizer taps.
+"""
 
 from __future__ import annotations
 
@@ -29,39 +35,41 @@ def zf_equalizer(
     noise_variance: float = 0.0,
     center: int = 0,
 ) -> ArrayType | Signal:
-    """
-    Zero-Forcing / MMSE frequency-domain block equalizer.
+    """Equalize a known channel in the frequency domain: zero-forcing or MMSE.
 
-    Given a channel impulse response estimate, equalizes the received signal
-    in the frequency domain. Supports both SISO and MIMO channels.
-
-    When ``noise_variance=0``, this is a pure Zero-Forcing equalizer.
-    When ``noise_variance > 0``, this becomes an MMSE equalizer that
-    regularizes spectral nulls to avoid noise enhancement.
+    Inverts a channel impulse response estimate per frequency bin over
+    overlap-save blocks, for SISO or MIMO channels: ``W = Hᴴ (H Hᴴ + σ² I)⁻¹``.
+    ``noise_variance=0`` gives zero-forcing (with a ``1e-12`` floor);
+    ``noise_variance > 0`` gives MMSE, which does not amplify the noise in
+    spectral nulls.
 
     Parameters
     ----------
     samples : array_like or Signal
-        Received samples. Shape: ``(N,)`` for SISO or ``(C, N)`` for MIMO.
-        A :class:`Signal` returns a new equalized :class:`Signal`.
+        Received samples, ``(N,)`` for SISO or ``(C, N)`` for MIMO.  A
+        :class:`Signal` returns a new equalized :class:`Signal`.
     channel_estimate : array_like
-        Channel impulse response. Shape: ``(L,)`` for SISO or
-        ``(C, C, L)`` for MIMO (each ``[i, j]`` is the FIR from input j
-        to output i). Index ``center`` holds lag 0.
+        Channel impulse response, ``(L,)`` for SISO or ``(C, C, L)`` for
+        MIMO, where ``[i, j]`` is the FIR from input ``j`` to output ``i``.
+        Index ``center`` holds lag 0.
     noise_variance : float, default 0.0
-        Noise variance (sigma^2) for MMSE regularization.
-        ``0.0`` gives pure ZF.
+        Noise variance ``σ²`` of the MMSE regularization; ``0.0`` gives ZF.
     center : int, default 0
         Index of lag 0 in ``channel_estimate``, in ``[0, L)``. ``0`` means a
-        causal response (``rx = convolve(tx, h)[:N]``). A centred estimate
+        causal response (``rx = convolve(tx, h)[:N]``). A centered estimate
         from :func:`estimate_transfer_function` with ``num_taps=L`` has
         ``center=L // 2``; taps before ``center`` are precursors (negative
         lags). The output is aligned with the transmitted samples (no delay).
 
     Returns
     -------
-    array_like or Signal
-        Equalized samples. Same shape and backend as input.
+    ndarray or Signal
+        Equalized samples, same shape, rate and device as the input.
+
+    Raises
+    ------
+    ValueError
+        If ``center`` is outside ``[0, L)``.
     """
     signal_adapter = adapt_signal(samples, function_name="zf_equalizer()")
     samples = signal_adapter.array
@@ -160,58 +168,51 @@ def apply_taps(
     samples_prefix: ArrayType | None = None,
     pad_mode: str = "zeros",
 ) -> ArrayType | Signal:
-    """Apply frozen equalizer taps to a signal (inference pass, no weight updates).
+    """Apply frozen equalizer taps: the butterfly filter without adaptation.
 
-    Performs the butterfly FIR forward pass using pre-converged weights,
-    decimating by ``sps`` to produce one output symbol per ``sps`` input samples.
-    Suitable for reusing frozen taps from a prior equalizer run on a new signal
-    without re-running adaptation.
+    Reuses the weights of an earlier equalizer run on new samples, one
+    output symbol per ``sps`` input samples::
 
-    The forward pass implements::
+        y[i, n] = sum_j sum_t conj(W[i, j, t]) * x[j, n*sps - T_c + t]
 
-        y[i, n] = sum_j sum_t conj(W[i,j,t]) * x[j, n*sps + t]
-
-    which is the same inner computation as the Numba adaptive-equalizer
-    kernels, fully vectorized over ``n`` via a single batched ``einsum``.
+    with the center tap ``T_c = num_taps // 2``: the filter of the adaptive
+    equalizers, as one batched ``einsum`` on the input's device.
 
     Parameters
     ----------
     samples : array_like or Signal
-        Input samples. Shape: ``(N_samples,)`` for SISO or
-        ``(C, N_samples)`` for MIMO. Typically at ``sps`` samples/symbol.  A
-        :class:`Signal` returns a new :class:`Signal` at the symbol rate
-        (``sampling_rate = symbol_rate``).
+        Input samples at ``sps`` samples per symbol, ``(N,)`` for SISO or
+        ``(C, N)`` for MIMO.  A :class:`Signal` returns a new :class:`Signal`
+        at the symbol rate (``sampling_rate = symbol_rate``).
     weights : array_like
-        Frozen tap weights, typically ``EqualizerResult.weights`` from a
-        prior equalizer run. Shape: ``(num_taps,)`` for SISO or
-        ``(C, C, num_taps)`` for MIMO butterfly.
+        Frozen tap weights, typically ``EqualizerResult.weights`` of an
+        earlier run: ``(num_taps,)`` for SISO or ``(C, C, num_taps)`` for
+        the MIMO butterfly.
     sps : int, optional
-        Samples per symbol. Output length is ``N_samples // sps``.
-        An integer.  Taken from the Signal; required for array input.  A
-        value that disagrees with the Signal raises.
+        Samples per symbol, an integer.  Taken from the Signal; required for
+        array input.  A value that disagrees with the Signal raises.
     normalize : bool, default True
-        If ``True``, normalize ``samples`` to unit symbol power before
-        filtering (same pre-processing as the adaptive equalizers via
-        ``_normalize_inputs``). Set to ``False`` if the caller has already
-        scaled the input consistently with the original training run.
-    input_norm_factor : float or ndarray, optional
-        Pre-computed RMS normalization factor.  When provided and
-        ``normalize=True``, skips RMS recomputation and uses this value
-        directly.  Typically ``EqualizerResult.input_norm_factor`` from the
-        prior equalizer run that produced ``weights``.
+        Normalize ``samples`` to unit symbol power first, as the adaptive
+        equalizers do.  ``False`` when the caller has already scaled the
+        input as in the run that produced ``weights``.
+    input_norm_factor : float or array_like, optional
+        Normalization factor to divide by instead of measuring one (with
+        ``normalize=True``), typically ``EqualizerResult.input_norm_factor``
+        of the run that produced ``weights``.
     samples_prefix : array_like, optional
-        Signal history from the end of the previous block.  See ``lms()``
-        for the full description; behaviour is identical.
-    pad_mode : {'zeros', 'edge'}, default 'zeros'
-        Padding strategy when ``samples_prefix`` is ``None``.  See
-        ``lms()`` for the full description; behaviour is identical.
+        Input samples that precede ``samples`` (e.g. the end of the previous
+        record), at least ``num_taps // 2`` per channel: its last
+        ``num_taps // 2`` samples fill the left edge of the first windows
+        instead of padding, so a record split into pieces is filtered as one.
+    pad_mode : {'zeros', 'edge', 'reflect'}, default 'zeros'
+        Padding without ``samples_prefix``: zeros, the edge samples repeated,
+        or the record mirrored about its end samples.
 
     Returns
     -------
-    array_like
-        Equalized symbols. Shape: ``(N_sym,)`` for SISO or
-        ``(C, N_sym)`` for MIMO, where ``N_sym = N_samples // sps``.
-        Resides on the same backend as ``samples``.
+    ndarray or Signal
+        Equalized symbols, ``(N_sym,)`` for SISO or ``(C, N_sym)`` for MIMO
+        with ``N_sym = N // sps``, on the input's device.
 
     Examples
     --------
@@ -298,17 +299,18 @@ def estimate_transfer_function(
     max_windows: int = 4096,
     num_taps: int | None = None,
 ) -> ArrayType:
-    r"""Data-aided (MIMO) channel estimate via Welch's H1 transfer-function method.
+    r"""Estimate a (MIMO) channel from a known reference by Welch's H1 method.
 
-    Estimates the frequency response :math:`B(f) \approx S_{yx}(f)\,S_{xx}(f)^{-1}`
-    mapping a known ``reference`` ``x`` to the measured ``received`` ``y``, where
-    :math:`S_{xx}` / :math:`S_{yx}` are the Welch auto/cross spectra - Hann-windowed,
-    averaged periodograms.  This is the classic H1 channel-sounding estimator,
-    generalised to a full ``(C, C)`` cross-spectral matrix so the MIMO response is
-    recovered in one shot (the reference is FFT'd once and every channel pair is
-    formed by a single einsum).
+    Estimates the frequency response
+    :math:`B(f) \approx S_{yx}(f)\,S_{xx}(f)^{-1}` from a known ``reference``
+    ``x`` to the measured ``received`` ``y``, where :math:`S_{xx}` and
+    :math:`S_{yx}` are the Welch auto- and cross-spectra (averaged
+    Hann-windowed periodograms).  This is the H1 channel-sounding estimator,
+    extended to the full ``(C, C)`` cross-spectral matrix, so the MIMO
+    response comes out of one pass: the reference is transformed once and
+    every channel pair is formed in one product.
 
-    Invert the estimated channel with :func:`zf_equalizer`, passing the centre
+    Invert the estimated channel with :func:`zf_equalizer`, passing the center
     index of the taps::
 
         h = estimate_transfer_function(tx, rx, num_taps=L)
@@ -320,33 +322,35 @@ def estimate_transfer_function(
     Parameters
     ----------
     reference, received : array_like or Signal
-        Time-aligned, same-rate input / output.  ``(N,)`` SISO or ``(C, N)`` MIMO.
-        A :class:`Signal` is unwrapped to its ``.samples``.
+        Channel input and output, time-aligned at the same rate, ``(N,)`` or
+        ``(C, N)``.  A Signal contributes its samples.
     n_fft : int, default 512
         Welch segment length (frequency resolution ``fs / n_fft``).
     reg : float, default 1e-2
-        Relative Tikhonov loading for the :math:`S_{xx}` inverse - a diagonal term
-        scaled to the mean auto-spectrum, so it stabilises the estimate where the
-        reference has little power (band edges) without depending on the absolute
-        signal level.  The H1 ratio is invariant to overall scale and window count.
+        Relative Tikhonov loading of the :math:`S_{xx}` inverse: a diagonal
+        term scaled to the mean auto-spectrum.  It stabilizes the estimate
+        where the reference has little power (band edges) independently of
+        the signal level.  The H1 ratio does not depend on the overall scale
+        or the number of windows.
     max_windows : int, default 4096
         Cap on the number of averaged segments.  An LTI channel is static, so a few
         thousand windows spread over the record give a stable estimate; capping
-        bounds the vectorised FFT batch (the averaging only trades variance, not
+        bounds the vectorized FFT batch (the averaging only trades variance, not
         bias, so the cap does not move the estimate).
     num_taps : int, optional
-        If given, return the centred, Hann-tapered impulse response truncated to
-        ``num_taps`` taps - ``(C, C, num_taps)`` MIMO or ``(num_taps,)`` SISO.
-        Lag 0 sits at index ``num_taps // 2`` (taps before it are negative
-        lags), so pass ``center=num_taps // 2`` to :func:`zf_equalizer`.  If
-        ``None`` (default), return the frequency
-        response ``B(f)`` in FFT-bin order - ``(n_fft, C, C)`` MIMO or ``(n_fft,)``
-        SISO.
+        Return the centered, Hann-tapered impulse response truncated to
+        ``num_taps`` taps, ``(C, C, num_taps)`` for MIMO or ``(num_taps,)``
+        for SISO.  Lag 0 is at index ``num_taps // 2`` (the taps before it are
+        negative lags), so pass ``center=num_taps // 2`` to
+        :func:`zf_equalizer`.  By default the frequency response ``B(f)`` is
+        returned in FFT-bin order, ``(n_fft, C, C)`` for MIMO or ``(n_fft,)``
+        for SISO.
 
     Returns
     -------
-    array_like
-        Frequency response or impulse response (see ``num_taps``).
+    ndarray
+        Frequency response or impulse response (see ``num_taps``), on the
+        input's device.
     """
     reference = adapt_signal(
         reference, function_name="estimate_transfer_function(reference)"
@@ -369,7 +373,7 @@ def estimate_transfer_function(
     n_fft = int(min(n_fft, N))
     win = xp.asarray(np.hanning(n_fft).astype(np.empty(0, cdtype).real.dtype))
 
-    # Welch auto/cross spectra, vectorised over windows (capped). One batched FFT
+    # Welch auto/cross spectra, vectorized over windows (capped). One batched FFT
     # of the reference and the received, then every (C, C) cross term via einsum -
     # no per-window Python loop, no redundant re-FFT of shared channels.
     step = max(n_fft // 2, (N - n_fft) // max(max_windows - 1, 1))
@@ -398,7 +402,7 @@ def estimate_transfer_function(
     if num_taps is None:
         return B[:, 0, 0] if single else B
 
-    # Centred, Hann-tapered impulse response, truncated to num_taps: lag 0 sits
+    # Centered, Hann-tapered impulse response, truncated to num_taps: lag 0 sits
     # at index num_taps // 2 for odd and even lengths alike.
     n_taps = int(min(num_taps, n_fft))
     b_t = xp.fft.fftshift(_fft.ifft(B, axis=0), axes=0)  # (n_fft, C, C), lag axis 0

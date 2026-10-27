@@ -1,0 +1,4458 @@
+{
+    "machine_info": {
+        "node": "redacted",
+        "processor": "",
+        "machine": "x86_64",
+        "python_compiler": "Clang 22.1.3 ",
+        "python_implementation": "CPython",
+        "python_implementation_version": "3.14.7",
+        "python_version": "3.14.7",
+        "python_build": [
+            "main",
+            "Sep  1 2026 14:18:09"
+        ],
+        "release": "6.18.33.2-microsoft-standard-WSL2",
+        "system": "Linux",
+        "cpu": {
+            "python_version": "3.14.7.final.0 (64 bit)",
+            "cpuinfo_version": [
+                9,
+                0,
+                0
+            ],
+            "cpuinfo_version_string": "9.0.0",
+            "arch": "X86_64",
+            "bits": 64,
+            "count": 16,
+            "arch_string_raw": "x86_64",
+            "vendor_id_raw": "AuthenticAMD",
+            "brand_raw": "AMD Ryzen 7 7800X3D 8-Core Processor",
+            "hz_advertised_friendly": "4.1920 GHz",
+            "hz_actual_friendly": "4.1920 GHz",
+            "hz_advertised": [
+                4192033000,
+                0
+            ],
+            "hz_actual": [
+                4192033000,
+                0
+            ],
+            "stepping": 2,
+            "model": 97,
+            "family": 25,
+            "flags": [
+                "3dnowprefetch",
+                "abm",
+                "adx",
+                "aes",
+                "apic",
+                "arat",
+                "avx",
+                "avx2",
+                "avx512_bf16",
+                "avx512_bitalg",
+                "avx512_vbmi2",
+                "avx512_vnni",
+                "avx512_vpopcntdq",
+                "avx512bitalg",
+                "avx512bw",
+                "avx512cd",
+                "avx512dq",
+                "avx512f",
+                "avx512ifma",
+                "avx512vbmi",
+                "avx512vbmi2",
+                "avx512vl",
+                "avx512vnni",
+                "avx512vpopcntdq",
+                "bmi1",
+                "bmi2",
+                "clflush",
+                "clflushopt",
+                "clwb",
+                "clzero",
+                "cmov",
+                "cmp_legacy",
+                "constant_tsc",
+                "cpuid",
+                "cr8_legacy",
+                "cx16",
+                "cx8",
+                "de",
+                "erms",
+                "extd_apicid",
+                "f16c",
+                "fma",
+                "fpu",
+                "fsgsbase",
+                "fsrm",
+                "fxsr",
+                "fxsr_opt",
+                "gfni",
+                "ht",
+                "hypervisor",
+                "ibpb",
+                "ibrs",
+                "invpcid",
+                "lahf_lm",
+                "lm",
+                "mca",
+                "mce",
+                "misalignsse",
+                "mmx",
+                "mmxext",
+                "movbe",
+                "msr",
+                "mtrr",
+                "nonstop_tsc",
+                "nopl",
+                "nx",
+                "osvw",
+                "osxsave",
+                "pae",
+                "pat",
+                "pclmulqdq",
+                "pdpe1gb",
+                "perfctr_core",
+                "pge",
+                "pni",
+                "popcnt",
+                "pse",
+                "pse36",
+                "rdpid",
+                "rdrand",
+                "rdrnd",
+                "rdseed",
+                "rdtscp",
+                "rep_good",
+                "sep",
+                "sha",
+                "sha_ni",
+                "smap",
+                "smep",
+                "ssbd",
+                "sse",
+                "sse2",
+                "sse4_1",
+                "sse4_2",
+                "sse4a",
+                "ssse3",
+                "stibp",
+                "syscall",
+                "topoext",
+                "tsc",
+                "tsc_known_freq",
+                "tsc_reliable",
+                "umip",
+                "vaes",
+                "vme",
+                "vmmcall",
+                "vpclmulqdq",
+                "xgetbv1",
+                "xsave",
+                "xsavec",
+                "xsaveerptr",
+                "xsaveopt",
+                "xsaves",
+                "xtopology"
+            ],
+            "l3_cache_size": 1048576,
+            "l2_cache_size": 8388608,
+            "l1_data_cache_size": 262144,
+            "l1_instruction_cache_size": 262144,
+            "l2_cache_line_size": 1024,
+            "l2_cache_associativity": 6
+        },
+        "gpu": {
+            "name": "NVIDIA GeForce RTX 4070 Ti",
+            "compute_capability": "8.9",
+            "total_memory_bytes": 12878086144,
+            "multi_processor_count": 60,
+            "cuda_runtime_version": 13020,
+            "cuda_driver_version": 13030,
+            "cupy_version": "14.1.1"
+        }
+    },
+    "commit_info": {
+        "id": "836ae21dcfdb9832c662761b79e721f247963d5a",
+        "time": "2026-10-26T09:17:42+01:00",
+        "author_time": "2026-10-26T09:17:42+01:00",
+        "dirty": true,
+        "project": "commkit",
+        "branch": "roadmap-work"
+    },
+    "benchmarks": [
+        {
+            "group": null,
+            "name": "bench_block_blind[cpu-cma-block_cma]",
+            "fullname": "benchmarks/bench_block_blind.py::bench_block_blind[cpu-cma-block_cma]",
+            "params": {
+                "backend_device": "cpu",
+                "label": "cma",
+                "eq_fn": "UNSERIALIZABLE[<function block_cma at 0x74ceba78c300>]"
+            },
+            "param": "cpu-cma-block_cma",
+            "extra_info": {},
+            "options": {
+                "disable_gc": false,
+                "timer": "perf_counter",
+                "min_rounds": 5,
+                "max_time": 1.0,
+                "min_time": 5e-06,
+                "warmup": false
+            },
+            "stats": {
+                "min": 0.031301654000117196,
+                "max": 0.034308567000152834,
+                "mean": 0.03293776700002127,
+                "stddev": 0.001520912452553415,
+                "rounds": 3,
+                "median": 0.03320307999979377,
+                "iqr": 0.0022551847500267286,
+                "q1": 0.03177701050003634,
+                "q3": 0.03403219525006307,
+                "iqr_outliers": 0,
+                "stddev_outliers": 1,
+                "outliers": "1;0",
+                "ld15iqr": 0.031301654000117196,
+                "hd15iqr": 0.034308567000152834,
+                "ops": 30.36028520085634,
+                "total": 0.0988133010000638,
+                "data": [
+                    0.03320307999979377,
+                    0.034308567000152834,
+                    0.031301654000117196
+                ],
+                "iterations": 1
+            }
+        },
+        {
+            "group": null,
+            "name": "bench_block_blind[cpu-rde-block_rde]",
+            "fullname": "benchmarks/bench_block_blind.py::bench_block_blind[cpu-rde-block_rde]",
+            "params": {
+                "backend_device": "cpu",
+                "label": "rde",
+                "eq_fn": "UNSERIALIZABLE[<function block_rde at 0x74ddd67dc670>]"
+            },
+            "param": "cpu-rde-block_rde",
+            "extra_info": {},
+            "options": {
+                "disable_gc": false,
+                "timer": "perf_counter",
+                "min_rounds": 5,
+                "max_time": 1.0,
+                "min_time": 5e-06,
+                "warmup": false
+            },
+            "stats": {
+                "min": 0.03603393000003052,
+                "max": 0.03917269299995496,
+                "mean": 0.037261979000049905,
+                "stddev": 0.0016770455923961474,
+                "rounds": 3,
+                "median": 0.03657931400016423,
+                "iqr": 0.0023540722499433286,
+                "q1": 0.03617027600006395,
+                "q3": 0.03852434825000728,
+                "iqr_outliers": 0,
+                "stddev_outliers": 1,
+                "outliers": "1;0",
+                "ld15iqr": 0.03603393000003052,
+                "hd15iqr": 0.03917269299995496,
+                "ops": 26.837007234603956,
+                "total": 0.11178593700014972,
+                "data": [
+                    0.03657931400016423,
+                    0.03917269299995496,
+                    0.03603393000003052
+                ],
+                "iterations": 1
+            }
+        },
+        {
+            "group": null,
+            "name": "bench_block_blind[gpu-cma-block_cma]",
+            "fullname": "benchmarks/bench_block_blind.py::bench_block_blind[gpu-cma-block_cma]",
+            "params": {
+                "backend_device": "gpu",
+                "label": "cma",
+                "eq_fn": "UNSERIALIZABLE[<function block_cma at 0x78ceb1790300>]"
+            },
+            "param": "gpu-cma-block_cma",
+            "extra_info": {},
+            "options": {
+                "disable_gc": false,
+                "timer": "perf_counter",
+                "min_rounds": 5,
+                "max_time": 1.0,
+                "min_time": 5e-06,
+                "warmup": false
+            },
+            "stats": {
+                "min": 0.0317659840000033,
+                "max": 0.03386507499999425,
+                "mean": 0.0326706833333598,
+                "stddev": 0.0010791139849574594,
+                "rounds": 3,
+                "median": 0.03238099100008185,
+                "iqr": 0.0015743182499932118,
+                "q1": 0.03191973575002294,
+                "q3": 0.03349405400001615,
+                "iqr_outliers": 0,
+                "stddev_outliers": 1,
+                "outliers": "1;0",
+                "ld15iqr": 0.0317659840000033,
+                "hd15iqr": 0.03386507499999425,
+                "ops": 30.608481304059755,
+                "total": 0.0980120500000794,
+                "data": [
+                    0.03386507499999425,
+                    0.0317659840000033,
+                    0.03238099100008185
+                ],
+                "iterations": 1
+            }
+        },
+        {
+            "group": null,
+            "name": "bench_block_blind[gpu-rde-block_rde]",
+            "fullname": "benchmarks/bench_block_blind.py::bench_block_blind[gpu-rde-block_rde]",
+            "params": {
+                "backend_device": "gpu",
+                "label": "rde",
+                "eq_fn": "UNSERIALIZABLE[<function block_rde at 0x74ceba7f0670>]"
+            },
+            "param": "gpu-rde-block_rde",
+            "extra_info": {},
+            "options": {
+                "disable_gc": false,
+                "timer": "perf_counter",
+                "min_rounds": 5,
+                "max_time": 1.0,
+                "min_time": 5e-06,
+                "warmup": false
+            },
+            "stats": {
+                "min": 0.023518460000104824,
+                "max": 0.02473244399993746,
+                "mean": 0.024013289000019238,
+                "stddev": 0.0006373232332738957,
+                "rounds": 3,
+                "median": 0.02378896300001543,
+                "iqr": 0.0009104879998744764,
+                "q1": 0.023586085750082475,
+                "q3": 0.02449657374995695,
+                "iqr_outliers": 0,
+                "stddev_outliers": 1,
+                "outliers": "1;0",
+                "ld15iqr": 0.023518460000104824,
+                "hd15iqr": 0.02473244399993746,
+                "ops": 41.64360825371314,
+                "total": 0.07203986700005771,
+                "data": [
+                    0.023518460000104824,
+                    0.02378896300001543,
+                    0.02473244399993746
+                ],
+                "iterations": 1
+            }
+        },
+        {
+            "group": null,
+            "name": "bench_block_blind_large[cpu-cma-block_cma]",
+            "fullname": "benchmarks/bench_block_blind.py::bench_block_blind_large[cpu-cma-block_cma]",
+            "params": {
+                "backend_device": "cpu",
+                "label": "cma",
+                "eq_fn": "UNSERIALIZABLE[<function block_cma at 0x74ceba78c300>]"
+            },
+            "param": "cpu-cma-block_cma",
+            "extra_info": {},
+            "options": {
+                "disable_gc": false,
+                "timer": "perf_counter",
+                "min_rounds": 5,
+                "max_time": 1.0,
+                "min_time": 5e-06,
+                "warmup": false
+            },
+            "stats": {
+                "min": 0.027959504000136803,
+                "max": 0.030941950999931578,
+                "mean": 0.029639831000016176,
+                "stddev": 0.0015267704240528519,
+                "rounds": 3,
+                "median": 0.03001803799998015,
+                "iqr": 0.002236835249846081,
+                "q1": 0.02847413750009764,
+                "q3": 0.03071097274994372,
+                "iqr_outliers": 0,
+                "stddev_outliers": 1,
+                "outliers": "1;0",
+                "ld15iqr": 0.027959504000136803,
+                "hd15iqr": 0.030941950999931578,
+                "ops": 33.73838400088901,
+                "total": 0.08891949300004853,
+                "data": [
+                    0.03001803799998015,
+                    0.030941950999931578,
+                    0.027959504000136803
+                ],
+                "iterations": 1
+            }
+        },
+        {
+            "group": null,
+            "name": "bench_block_blind_large[cpu-rde-block_rde]",
+            "fullname": "benchmarks/bench_block_blind.py::bench_block_blind_large[cpu-rde-block_rde]",
+            "params": {
+                "backend_device": "cpu",
+                "label": "rde",
+                "eq_fn": "UNSERIALIZABLE[<function block_rde at 0x74ceba7f0670>]"
+            },
+            "param": "cpu-rde-block_rde",
+            "extra_info": {},
+            "options": {
+                "disable_gc": false,
+                "timer": "perf_counter",
+                "min_rounds": 5,
+                "max_time": 1.0,
+                "min_time": 5e-06,
+                "warmup": false
+            },
+            "stats": {
+                "min": 0.03073759699987022,
+                "max": 0.0341574409999339,
+                "mean": 0.03195433833328328,
+                "stddev": 0.0019114169497973256,
+                "rounds": 3,
+                "median": 0.03096797700004572,
+                "iqr": 0.0025648830000477574,
+                "q1": 0.030795191999914096,
+                "q3": 0.03336007499996185,
+                "iqr_outliers": 0,
+                "stddev_outliers": 1,
+                "outliers": "1;0",
+                "ld15iqr": 0.03073759699987022,
+                "hd15iqr": 0.0341574409999339,
+                "ops": 31.294655191104717,
+                "total": 0.09586301499984984,
+                "data": [
+                    0.03073759699987022,
+                    0.0341574409999339,
+                    0.03096797700004572
+                ],
+                "iterations": 1
+            }
+        },
+        {
+            "group": null,
+            "name": "bench_block_blind_large[gpu-cma-block_cma]",
+            "fullname": "benchmarks/bench_block_blind.py::bench_block_blind_large[gpu-cma-block_cma]",
+            "params": {
+                "backend_device": "gpu",
+                "label": "cma",
+                "eq_fn": "UNSERIALIZABLE[<function block_cma at 0x78ceb1790300>]"
+            },
+            "param": "gpu-cma-block_cma",
+            "extra_info": {},
+            "options": {
+                "disable_gc": false,
+                "timer": "perf_counter",
+                "min_rounds": 5,
+                "max_time": 1.0,
+                "min_time": 5e-06,
+                "warmup": false
+            },
+            "stats": {
+                "min": 0.005044619000045714,
+                "max": 0.008822371000178464,
+                "mean": 0.0063370023334149055,
+                "stddev": 0.002152966104679147,
+                "rounds": 3,
+                "median": 0.00514401700002054,
+                "iqr": 0.0028333140000995627,
+                "q1": 0.00506946850003942,
+                "q3": 0.007902782500138983,
+                "iqr_outliers": 0,
+                "stddev_outliers": 1,
+                "outliers": "1;0",
+                "ld15iqr": 0.005044619000045714,
+                "hd15iqr": 0.008822371000178464,
+                "ops": 157.80331888581088,
+                "total": 0.019011007000244717,
+                "data": [
+                    0.00514401700002054,
+                    0.008822371000178464,
+                    0.005044619000045714
+                ],
+                "iterations": 1
+            }
+        },
+        {
+            "group": null,
+            "name": "bench_block_blind_large[gpu-rde-block_rde]",
+            "fullname": "benchmarks/bench_block_blind.py::bench_block_blind_large[gpu-rde-block_rde]",
+            "params": {
+                "backend_device": "gpu",
+                "label": "rde",
+                "eq_fn": "UNSERIALIZABLE[<function block_rde at 0x78ceb17f4670>]"
+            },
+            "param": "gpu-rde-block_rde",
+            "extra_info": {},
+            "options": {
+                "disable_gc": false,
+                "timer": "perf_counter",
+                "min_rounds": 5,
+                "max_time": 1.0,
+                "min_time": 5e-06,
+                "warmup": false
+            },
+            "stats": {
+                "min": 0.006291683999961606,
+                "max": 0.007474978999880477,
+                "mean": 0.006723289333270562,
+                "stddev": 0.0006533660915036761,
+                "rounds": 3,
+                "median": 0.006403204999969603,
+                "iqr": 0.0008874712499391535,
+                "q1": 0.006319564249963605,
+                "q3": 0.007207035499902759,
+                "iqr_outliers": 0,
+                "stddev_outliers": 1,
+                "outliers": "1;0",
+                "ld15iqr": 0.006291683999961606,
+                "hd15iqr": 0.007474978999880477,
+                "ops": 148.73671954759493,
+                "total": 0.020169867999811686,
+                "data": [
+                    0.006403204999969603,
+                    0.006291683999961606,
+                    0.007474978999880477
+                ],
+                "iterations": 1
+            }
+        },
+        {
+            "group": null,
+            "name": "bench_block_lms[cpu-bps+cs-cpr_kwargs2]",
+            "fullname": "benchmarks/bench_block_lms.py::bench_block_lms[cpu-bps+cs-cpr_kwargs2]",
+            "params": {
+                "backend_device": "cpu",
+                "label": "bps+cs",
+                "cpr_kwargs": {
+                    "cpr": "UNSERIALIZABLE[BPS(test_phases=64, block_size=32, joint_channels=False, cycle_slip=CycleSlip(history=None, threshold=0.7853981633974483))]"
+                }
+            },
+            "param": "cpu-bps+cs-cpr_kwargs2",
+            "extra_info": {},
+            "options": {
+                "disable_gc": false,
+                "timer": "perf_counter",
+                "min_rounds": 5,
+                "max_time": 1.0,
+                "min_time": 5e-06,
+                "warmup": false
+            },
+            "stats": {
+                "min": 0.20605485999999473,
+                "max": 0.2062795010001537,
+                "mean": 0.20615209333338194,
+                "stddev": 0.00011532026072856316,
+                "rounds": 3,
+                "median": 0.20612191899999743,
+                "iqr": 0.00016848075011921537,
+                "q1": 0.2060716247499954,
+                "q3": 0.20624010550011462,
+                "iqr_outliers": 0,
+                "stddev_outliers": 1,
+                "outliers": "1;0",
+                "ld15iqr": 0.20605485999999473,
+                "hd15iqr": 0.2062795010001537,
+                "ops": 4.850787512416064,
+                "total": 0.6184562800001459,
+                "data": [
+                    0.2062795010001537,
+                    0.20605485999999473,
+                    0.20612191899999743
+                ],
+                "iterations": 1
+            }
+        },
+        {
+            "group": null,
+            "name": "bench_block_lms[cpu-bps-cpr_kwargs1]",
+            "fullname": "benchmarks/bench_block_lms.py::bench_block_lms[cpu-bps-cpr_kwargs1]",
+            "params": {
+                "backend_device": "cpu",
+                "label": "bps",
+                "cpr_kwargs": {
+                    "cpr": "UNSERIALIZABLE[BPS(test_phases=64, block_size=32, joint_channels=False, cycle_slip=None)]"
+                }
+            },
+            "param": "cpu-bps-cpr_kwargs1",
+            "extra_info": {},
+            "options": {
+                "disable_gc": false,
+                "timer": "perf_counter",
+                "min_rounds": 5,
+                "max_time": 1.0,
+                "min_time": 5e-06,
+                "warmup": false
+            },
+            "stats": {
+                "min": 0.1978719149999506,
+                "max": 0.20185915599995496,
+                "mean": 0.20033232099998108,
+                "stddev": 0.0021513225716147054,
+                "rounds": 3,
+                "median": 0.20126589200003764,
+                "iqr": 0.00299043075000327,
+                "q1": 0.19872040924997236,
+                "q3": 0.20171083999997563,
+                "iqr_outliers": 0,
+                "stddev_outliers": 1,
+                "outliers": "1;0",
+                "ld15iqr": 0.1978719149999506,
+                "hd15iqr": 0.20185915599995496,
+                "ops": 4.9917057567565175,
+                "total": 0.6009969629999432,
+                "data": [
+                    0.20126589200003764,
+                    0.20185915599995496,
+                    0.1978719149999506
+                ],
+                "iterations": 1
+            }
+        },
+        {
+            "group": null,
+            "name": "bench_block_lms[cpu-no-cpr-cpr_kwargs0]",
+            "fullname": "benchmarks/bench_block_lms.py::bench_block_lms[cpu-no-cpr-cpr_kwargs0]",
+            "params": {
+                "backend_device": "cpu",
+                "label": "no-cpr",
+                "cpr_kwargs": {}
+            },
+            "param": "cpu-no-cpr-cpr_kwargs0",
+            "extra_info": {},
+            "options": {
+                "disable_gc": false,
+                "timer": "perf_counter",
+                "min_rounds": 5,
+                "max_time": 1.0,
+                "min_time": 5e-06,
+                "warmup": false
+            },
+            "stats": {
+                "min": 0.03256282699999247,
+                "max": 0.03562747099999797,
+                "mean": 0.0344421353333928,
+                "stddev": 0.0016459675751321835,
+                "rounds": 3,
+                "median": 0.03513610800018796,
+                "iqr": 0.0022984830000041256,
+                "q1": 0.03320614725004134,
+                "q3": 0.035504630250045466,
+                "iqr_outliers": 0,
+                "stddev_outliers": 1,
+                "outliers": "1;0",
+                "ld15iqr": 0.03256282699999247,
+                "hd15iqr": 0.03562747099999797,
+                "ops": 29.03420448007086,
+                "total": 0.1033264060001784,
+                "data": [
+                    0.03562747099999797,
+                    0.03513610800018796,
+                    0.03256282699999247
+                ],
+                "iterations": 1
+            }
+        },
+        {
+            "group": null,
+            "name": "bench_block_lms[gpu-bps+cs-cpr_kwargs2]",
+            "fullname": "benchmarks/bench_block_lms.py::bench_block_lms[gpu-bps+cs-cpr_kwargs2]",
+            "params": {
+                "backend_device": "gpu",
+                "label": "bps+cs",
+                "cpr_kwargs": {
+                    "cpr": "UNSERIALIZABLE[BPS(test_phases=64, block_size=32, joint_channels=False, cycle_slip=CycleSlip(history=None, threshold=0.7853981633974483))]"
+                }
+            },
+            "param": "gpu-bps+cs-cpr_kwargs2",
+            "extra_info": {},
+            "options": {
+                "disable_gc": false,
+                "timer": "perf_counter",
+                "min_rounds": 5,
+                "max_time": 1.0,
+                "min_time": 5e-06,
+                "warmup": false
+            },
+            "stats": {
+                "min": 0.04919285599999057,
+                "max": 0.0574696880000829,
+                "mean": 0.052177863000072953,
+                "stddev": 0.004595382895149266,
+                "rounds": 3,
+                "median": 0.049871045000145386,
+                "iqr": 0.006207624000069245,
+                "q1": 0.049362403250029274,
+                "q3": 0.05557002725009852,
+                "iqr_outliers": 0,
+                "stddev_outliers": 1,
+                "outliers": "1;0",
+                "ld15iqr": 0.04919285599999057,
+                "hd15iqr": 0.0574696880000829,
+                "ops": 19.165215716071046,
+                "total": 0.15653358900021885,
+                "data": [
+                    0.0574696880000829,
+                    0.049871045000145386,
+                    0.04919285599999057
+                ],
+                "iterations": 1
+            }
+        },
+        {
+            "group": null,
+            "name": "bench_block_lms[gpu-bps-cpr_kwargs1]",
+            "fullname": "benchmarks/bench_block_lms.py::bench_block_lms[gpu-bps-cpr_kwargs1]",
+            "params": {
+                "backend_device": "gpu",
+                "label": "bps",
+                "cpr_kwargs": {
+                    "cpr": "UNSERIALIZABLE[BPS(test_phases=64, block_size=32, joint_channels=False, cycle_slip=None)]"
+                }
+            },
+            "param": "gpu-bps-cpr_kwargs1",
+            "extra_info": {},
+            "options": {
+                "disable_gc": false,
+                "timer": "perf_counter",
+                "min_rounds": 5,
+                "max_time": 1.0,
+                "min_time": 5e-06,
+                "warmup": false
+            },
+            "stats": {
+                "min": 0.04427998899996055,
+                "max": 0.05051556999978857,
+                "mean": 0.046455052666563766,
+                "stddev": 0.0035194913337138144,
+                "rounds": 3,
+                "median": 0.04456959899994217,
+                "iqr": 0.004676685749871012,
+                "q1": 0.04435239149995596,
+                "q3": 0.04902907724982697,
+                "iqr_outliers": 0,
+                "stddev_outliers": 1,
+                "outliers": "1;0",
+                "ld15iqr": 0.04427998899996055,
+                "hd15iqr": 0.05051556999978857,
+                "ops": 21.526183753952658,
+                "total": 0.1393651579996913,
+                "data": [
+                    0.05051556999978857,
+                    0.04427998899996055,
+                    0.04456959899994217
+                ],
+                "iterations": 1
+            }
+        },
+        {
+            "group": null,
+            "name": "bench_block_lms[gpu-no-cpr-cpr_kwargs0]",
+            "fullname": "benchmarks/bench_block_lms.py::bench_block_lms[gpu-no-cpr-cpr_kwargs0]",
+            "params": {
+                "backend_device": "gpu",
+                "label": "no-cpr",
+                "cpr_kwargs": {}
+            },
+            "param": "gpu-no-cpr-cpr_kwargs0",
+            "extra_info": {},
+            "options": {
+                "disable_gc": false,
+                "timer": "perf_counter",
+                "min_rounds": 5,
+                "max_time": 1.0,
+                "min_time": 5e-06,
+                "warmup": false
+            },
+            "stats": {
+                "min": 0.027292519000184257,
+                "max": 0.07417552999982036,
+                "mean": 0.047313949999988836,
+                "stddev": 0.0241783975659043,
+                "rounds": 3,
+                "median": 0.040473800999961895,
+                "iqr": 0.035162258249727074,
+                "q1": 0.030587839500128666,
+                "q3": 0.06575009774985574,
+                "iqr_outliers": 0,
+                "stddev_outliers": 1,
+                "outliers": "1;0",
+                "ld15iqr": 0.027292519000184257,
+                "hd15iqr": 0.07417552999982036,
+                "ops": 21.135415664941014,
+                "total": 0.1419418499999665,
+                "data": [
+                    0.07417552999982036,
+                    0.027292519000184257,
+                    0.040473800999961895
+                ],
+                "iterations": 1
+            }
+        },
+        {
+            "group": null,
+            "name": "bench_block_lms_dd[cpu-bps+cs-cpr_kwargs2]",
+            "fullname": "benchmarks/bench_block_lms.py::bench_block_lms_dd[cpu-bps+cs-cpr_kwargs2]",
+            "params": {
+                "backend_device": "cpu",
+                "label": "bps+cs",
+                "cpr_kwargs": {
+                    "cpr": "UNSERIALIZABLE[BPS(test_phases=64, block_size=32, joint_channels=False, cycle_slip=CycleSlip(history=None, threshold=0.7853981633974483))]"
+                }
+            },
+            "param": "cpu-bps+cs-cpr_kwargs2",
+            "extra_info": {},
+            "options": {
+                "disable_gc": false,
+                "timer": "perf_counter",
+                "min_rounds": 5,
+                "max_time": 1.0,
+                "min_time": 5e-06,
+                "warmup": false
+            },
+            "stats": {
+                "min": 0.20507424099992022,
+                "max": 0.20949317800000244,
+                "mean": 0.2067140043332832,
+                "stddev": 0.0024198022612381335,
+                "rounds": 3,
+                "median": 0.20557459399992695,
+                "iqr": 0.0033142027500616678,
+                "q1": 0.2051993292499219,
+                "q3": 0.20851353199998357,
+                "iqr_outliers": 0,
+                "stddev_outliers": 1,
+                "outliers": "1;0",
+                "ld15iqr": 0.20507424099992022,
+                "hd15iqr": 0.20949317800000244,
+                "ops": 4.837601609166782,
+                "total": 0.6201420129998496,
+                "data": [
+                    0.20507424099992022,
+                    0.20949317800000244,
+                    0.20557459399992695
+                ],
+                "iterations": 1
+            }
+        },
+        {
+            "group": null,
+            "name": "bench_block_lms_dd[cpu-bps-cpr_kwargs1]",
+            "fullname": "benchmarks/bench_block_lms.py::bench_block_lms_dd[cpu-bps-cpr_kwargs1]",
+            "params": {
+                "backend_device": "cpu",
+                "label": "bps",
+                "cpr_kwargs": {
+                    "cpr": "UNSERIALIZABLE[BPS(test_phases=64, block_size=32, joint_channels=False, cycle_slip=None)]"
+                }
+            },
+            "param": "cpu-bps-cpr_kwargs1",
+            "extra_info": {},
+            "options": {
+                "disable_gc": false,
+                "timer": "perf_counter",
+                "min_rounds": 5,
+                "max_time": 1.0,
+                "min_time": 5e-06,
+                "warmup": false
+            },
+            "stats": {
+                "min": 0.19707141000003503,
+                "max": 0.20383936100006395,
+                "mean": 0.20004391166670152,
+                "stddev": 0.0034582108569733484,
+                "rounds": 3,
+                "median": 0.19922096400000555,
+                "iqr": 0.005075963250021687,
+                "q1": 0.19760879850002766,
+                "q3": 0.20268476175004935,
+                "iqr_outliers": 0,
+                "stddev_outliers": 1,
+                "outliers": "1;0",
+                "ld15iqr": 0.19707141000003503,
+                "hd15iqr": 0.20383936100006395,
+                "ops": 4.998902449308863,
+                "total": 0.6001317350001045,
+                "data": [
+                    0.19707141000003503,
+                    0.20383936100006395,
+                    0.19922096400000555
+                ],
+                "iterations": 1
+            }
+        },
+        {
+            "group": null,
+            "name": "bench_block_lms_dd[cpu-no-cpr-cpr_kwargs0]",
+            "fullname": "benchmarks/bench_block_lms.py::bench_block_lms_dd[cpu-no-cpr-cpr_kwargs0]",
+            "params": {
+                "backend_device": "cpu",
+                "label": "no-cpr",
+                "cpr_kwargs": {}
+            },
+            "param": "cpu-no-cpr-cpr_kwargs0",
+            "extra_info": {},
+            "options": {
+                "disable_gc": false,
+                "timer": "perf_counter",
+                "min_rounds": 5,
+                "max_time": 1.0,
+                "min_time": 5e-06,
+                "warmup": false
+            },
+            "stats": {
+                "min": 0.03809674299986909,
+                "max": 0.0415275020000081,
+                "mean": 0.03965725400000034,
+                "stddev": 0.0017362256725662333,
+                "rounds": 3,
+                "median": 0.039347517000123844,
+                "iqr": 0.002573069250104254,
+                "q1": 0.03840943649993278,
+                "q3": 0.040982505750037035,
+                "iqr_outliers": 0,
+                "stddev_outliers": 1,
+                "outliers": "1;0",
+                "ld15iqr": 0.03809674299986909,
+                "hd15iqr": 0.0415275020000081,
+                "ops": 25.21606765813869,
+                "total": 0.11897176200000104,
+                "data": [
+                    0.039347517000123844,
+                    0.0415275020000081,
+                    0.03809674299986909
+                ],
+                "iterations": 1
+            }
+        },
+        {
+            "group": null,
+            "name": "bench_block_lms_dd[gpu-bps+cs-cpr_kwargs2]",
+            "fullname": "benchmarks/bench_block_lms.py::bench_block_lms_dd[gpu-bps+cs-cpr_kwargs2]",
+            "params": {
+                "backend_device": "gpu",
+                "label": "bps+cs",
+                "cpr_kwargs": {
+                    "cpr": "UNSERIALIZABLE[BPS(test_phases=64, block_size=32, joint_channels=False, cycle_slip=CycleSlip(history=None, threshold=0.7853981633974483))]"
+                }
+            },
+            "param": "gpu-bps+cs-cpr_kwargs2",
+            "extra_info": {},
+            "options": {
+                "disable_gc": false,
+                "timer": "perf_counter",
+                "min_rounds": 5,
+                "max_time": 1.0,
+                "min_time": 5e-06,
+                "warmup": false
+            },
+            "stats": {
+                "min": 0.05641166199984582,
+                "max": 0.09064854400003242,
+                "mean": 0.07177243899991481,
+                "stddev": 0.017387040302611012,
+                "rounds": 3,
+                "median": 0.0682571109998662,
+                "iqr": 0.025677661500139948,
+                "q1": 0.059373024249850914,
+                "q3": 0.08505068574999086,
+                "iqr_outliers": 0,
+                "stddev_outliers": 1,
+                "outliers": "1;0",
+                "ld15iqr": 0.05641166199984582,
+                "hd15iqr": 0.09064854400003242,
+                "ops": 13.932924865507037,
+                "total": 0.21531731699974443,
+                "data": [
+                    0.09064854400003242,
+                    0.05641166199984582,
+                    0.0682571109998662
+                ],
+                "iterations": 1
+            }
+        },
+        {
+            "group": null,
+            "name": "bench_block_lms_dd[gpu-bps-cpr_kwargs1]",
+            "fullname": "benchmarks/bench_block_lms.py::bench_block_lms_dd[gpu-bps-cpr_kwargs1]",
+            "params": {
+                "backend_device": "gpu",
+                "label": "bps",
+                "cpr_kwargs": {
+                    "cpr": "UNSERIALIZABLE[BPS(test_phases=64, block_size=32, joint_channels=False, cycle_slip=None)]"
+                }
+            },
+            "param": "gpu-bps-cpr_kwargs1",
+            "extra_info": {},
+            "options": {
+                "disable_gc": false,
+                "timer": "perf_counter",
+                "min_rounds": 5,
+                "max_time": 1.0,
+                "min_time": 5e-06,
+                "warmup": false
+            },
+            "stats": {
+                "min": 0.048064137999972445,
+                "max": 0.049621053999999276,
+                "mean": 0.04870654966672797,
+                "stddev": 0.0008133404405067004,
+                "rounds": 3,
+                "median": 0.048434457000212205,
+                "iqr": 0.0011676870000201234,
+                "q1": 0.048156717750032385,
+                "q3": 0.04932440475005251,
+                "iqr_outliers": 0,
+                "stddev_outliers": 1,
+                "outliers": "1;0",
+                "ld15iqr": 0.048064137999972445,
+                "hd15iqr": 0.049621053999999276,
+                "ops": 20.531119671634467,
+                "total": 0.14611964900018393,
+                "data": [
+                    0.049621053999999276,
+                    0.048434457000212205,
+                    0.048064137999972445
+                ],
+                "iterations": 1
+            }
+        },
+        {
+            "group": null,
+            "name": "bench_block_lms_dd[gpu-no-cpr-cpr_kwargs0]",
+            "fullname": "benchmarks/bench_block_lms.py::bench_block_lms_dd[gpu-no-cpr-cpr_kwargs0]",
+            "params": {
+                "backend_device": "gpu",
+                "label": "no-cpr",
+                "cpr_kwargs": {}
+            },
+            "param": "gpu-no-cpr-cpr_kwargs0",
+            "extra_info": {},
+            "options": {
+                "disable_gc": false,
+                "timer": "perf_counter",
+                "min_rounds": 5,
+                "max_time": 1.0,
+                "min_time": 5e-06,
+                "warmup": false
+            },
+            "stats": {
+                "min": 0.026659579999886773,
+                "max": 0.03483651200008353,
+                "mean": 0.03188318466663986,
+                "stddev": 0.004536647838609951,
+                "rounds": 3,
+                "median": 0.034153461999949286,
+                "iqr": 0.006132699000147568,
+                "q1": 0.0285330504999024,
+                "q3": 0.03466574950004997,
+                "iqr_outliers": 0,
+                "stddev_outliers": 1,
+                "outliers": "1;0",
+                "ld15iqr": 0.026659579999886773,
+                "hd15iqr": 0.03483651200008353,
+                "ops": 31.364495437192755,
+                "total": 0.09564955399991959,
+                "data": [
+                    0.03483651200008353,
+                    0.034153461999949286,
+                    0.026659579999886773
+                ],
+                "iterations": 1
+            }
+        },
+        {
+            "group": null,
+            "name": "bench_block_lms_large[cpu-bps+cs-cpr_kwargs2]",
+            "fullname": "benchmarks/bench_block_lms.py::bench_block_lms_large[cpu-bps+cs-cpr_kwargs2]",
+            "params": {
+                "backend_device": "cpu",
+                "label": "bps+cs",
+                "cpr_kwargs": {
+                    "cpr": "UNSERIALIZABLE[BPS(test_phases=64, block_size=32, joint_channels=False, cycle_slip=CycleSlip(history=None, threshold=0.7853981633974483))]"
+                }
+            },
+            "param": "cpu-bps+cs-cpr_kwargs2",
+            "extra_info": {},
+            "options": {
+                "disable_gc": false,
+                "timer": "perf_counter",
+                "min_rounds": 5,
+                "max_time": 1.0,
+                "min_time": 5e-06,
+                "warmup": false
+            },
+            "stats": {
+                "min": 0.17783124899983704,
+                "max": 0.18562875100019482,
+                "mean": 0.1811720936666461,
+                "stddev": 0.00401671978009898,
+                "rounds": 3,
+                "median": 0.18005628099990645,
+                "iqr": 0.005848126500268336,
+                "q1": 0.1783875069998544,
+                "q3": 0.18423563350012273,
+                "iqr_outliers": 0,
+                "stddev_outliers": 1,
+                "outliers": "1;0",
+                "ld15iqr": 0.17783124899983704,
+                "hd15iqr": 0.18562875100019482,
+                "ops": 5.519613864152747,
+                "total": 0.5435162809999383,
+                "data": [
+                    0.18005628099990645,
+                    0.18562875100019482,
+                    0.17783124899983704
+                ],
+                "iterations": 1
+            }
+        },
+        {
+            "group": null,
+            "name": "bench_block_lms_large[cpu-bps-cpr_kwargs1]",
+            "fullname": "benchmarks/bench_block_lms.py::bench_block_lms_large[cpu-bps-cpr_kwargs1]",
+            "params": {
+                "backend_device": "cpu",
+                "label": "bps",
+                "cpr_kwargs": {
+                    "cpr": "UNSERIALIZABLE[BPS(test_phases=64, block_size=32, joint_channels=False, cycle_slip=None)]"
+                }
+            },
+            "param": "cpu-bps-cpr_kwargs1",
+            "extra_info": {},
+            "options": {
+                "disable_gc": false,
+                "timer": "perf_counter",
+                "min_rounds": 5,
+                "max_time": 1.0,
+                "min_time": 5e-06,
+                "warmup": false
+            },
+            "stats": {
+                "min": 0.17400824000014836,
+                "max": 0.17993626699990273,
+                "mean": 0.17680523300001974,
+                "stddev": 0.002978097306959721,
+                "rounds": 3,
+                "median": 0.17647119200000816,
+                "iqr": 0.004446020249815774,
+                "q1": 0.1746239780001133,
+                "q3": 0.17906999824992909,
+                "iqr_outliers": 0,
+                "stddev_outliers": 1,
+                "outliers": "1;0",
+                "ld15iqr": 0.17400824000014836,
+                "hd15iqr": 0.17993626699990273,
+                "ops": 5.655941190382574,
+                "total": 0.5304156990000592,
+                "data": [
+                    0.17647119200000816,
+                    0.17993626699990273,
+                    0.17400824000014836
+                ],
+                "iterations": 1
+            }
+        },
+        {
+            "group": null,
+            "name": "bench_block_lms_large[cpu-no-cpr-cpr_kwargs0]",
+            "fullname": "benchmarks/bench_block_lms.py::bench_block_lms_large[cpu-no-cpr-cpr_kwargs0]",
+            "params": {
+                "backend_device": "cpu",
+                "label": "no-cpr",
+                "cpr_kwargs": {}
+            },
+            "param": "cpu-no-cpr-cpr_kwargs0",
+            "extra_info": {},
+            "options": {
+                "disable_gc": false,
+                "timer": "perf_counter",
+                "min_rounds": 5,
+                "max_time": 1.0,
+                "min_time": 5e-06,
+                "warmup": false
+            },
+            "stats": {
+                "min": 0.027070798000067953,
+                "max": 0.03163299799984998,
+                "mean": 0.029480327333279394,
+                "stddev": 0.0022919204808357044,
+                "rounds": 3,
+                "median": 0.029737185999920257,
+                "iqr": 0.003421649999836518,
+                "q1": 0.02773739500003103,
+                "q3": 0.031159044999867547,
+                "iqr_outliers": 0,
+                "stddev_outliers": 1,
+                "outliers": "1;0",
+                "ld15iqr": 0.027070798000067953,
+                "hd15iqr": 0.03163299799984998,
+                "ops": 33.92092593460223,
+                "total": 0.08844098199983819,
+                "data": [
+                    0.03163299799984998,
+                    0.029737185999920257,
+                    0.027070798000067953
+                ],
+                "iterations": 1
+            }
+        },
+        {
+            "group": null,
+            "name": "bench_block_lms_large[gpu-bps+cs-cpr_kwargs2]",
+            "fullname": "benchmarks/bench_block_lms.py::bench_block_lms_large[gpu-bps+cs-cpr_kwargs2]",
+            "params": {
+                "backend_device": "gpu",
+                "label": "bps+cs",
+                "cpr_kwargs": {
+                    "cpr": "UNSERIALIZABLE[BPS(test_phases=64, block_size=32, joint_channels=False, cycle_slip=CycleSlip(history=None, threshold=0.7853981633974483))]"
+                }
+            },
+            "param": "gpu-bps+cs-cpr_kwargs2",
+            "extra_info": {},
+            "options": {
+                "disable_gc": false,
+                "timer": "perf_counter",
+                "min_rounds": 5,
+                "max_time": 1.0,
+                "min_time": 5e-06,
+                "warmup": false
+            },
+            "stats": {
+                "min": 0.015006293999931586,
+                "max": 0.017159322999987126,
+                "mean": 0.015846058666663037,
+                "stddev": 0.0011519700167398218,
+                "rounds": 3,
+                "median": 0.015372559000070396,
+                "iqr": 0.0016147717500416547,
+                "q1": 0.015097860249966288,
+                "q3": 0.016712632000007943,
+                "iqr_outliers": 0,
+                "stddev_outliers": 1,
+                "outliers": "1;0",
+                "ld15iqr": 0.015006293999931586,
+                "hd15iqr": 0.017159322999987126,
+                "ops": 63.107175168031006,
+                "total": 0.04753817599998911,
+                "data": [
+                    0.017159322999987126,
+                    0.015372559000070396,
+                    0.015006293999931586
+                ],
+                "iterations": 1
+            }
+        },
+        {
+            "group": null,
+            "name": "bench_block_lms_large[gpu-bps-cpr_kwargs1]",
+            "fullname": "benchmarks/bench_block_lms.py::bench_block_lms_large[gpu-bps-cpr_kwargs1]",
+            "params": {
+                "backend_device": "gpu",
+                "label": "bps",
+                "cpr_kwargs": {
+                    "cpr": "UNSERIALIZABLE[BPS(test_phases=64, block_size=32, joint_channels=False, cycle_slip=None)]"
+                }
+            },
+            "param": "gpu-bps-cpr_kwargs1",
+            "extra_info": {},
+            "options": {
+                "disable_gc": false,
+                "timer": "perf_counter",
+                "min_rounds": 5,
+                "max_time": 1.0,
+                "min_time": 5e-06,
+                "warmup": false
+            },
+            "stats": {
+                "min": 0.013400437999962378,
+                "max": 0.014039258999900994,
+                "mean": 0.01362865066660864,
+                "stddev": 0.0003563343961773795,
+                "rounds": 3,
+                "median": 0.013446254999962548,
+                "iqr": 0.0004791157499539622,
+                "q1": 0.01341189224996242,
+                "q3": 0.013891007999916383,
+                "iqr_outliers": 0,
+                "stddev_outliers": 1,
+                "outliers": "1;0",
+                "ld15iqr": 0.013400437999962378,
+                "hd15iqr": 0.014039258999900994,
+                "ops": 73.37483544501478,
+                "total": 0.04088595199982592,
+                "data": [
+                    0.014039258999900994,
+                    0.013446254999962548,
+                    0.013400437999962378
+                ],
+                "iterations": 1
+            }
+        },
+        {
+            "group": null,
+            "name": "bench_block_lms_large[gpu-no-cpr-cpr_kwargs0]",
+            "fullname": "benchmarks/bench_block_lms.py::bench_block_lms_large[gpu-no-cpr-cpr_kwargs0]",
+            "params": {
+                "backend_device": "gpu",
+                "label": "no-cpr",
+                "cpr_kwargs": {}
+            },
+            "param": "gpu-no-cpr-cpr_kwargs0",
+            "extra_info": {},
+            "options": {
+                "disable_gc": false,
+                "timer": "perf_counter",
+                "min_rounds": 5,
+                "max_time": 1.0,
+                "min_time": 5e-06,
+                "warmup": false
+            },
+            "stats": {
+                "min": 0.005546170000116035,
+                "max": 0.01097304399991117,
+                "mean": 0.0073832280000563815,
+                "stddev": 0.0031091575719334593,
+                "rounds": 3,
+                "median": 0.0056304700001419405,
+                "iqr": 0.004070155499846351,
+                "q1": 0.0055672450001225116,
+                "q3": 0.009637400499968862,
+                "iqr_outliers": 0,
+                "stddev_outliers": 1,
+                "outliers": "1;0",
+                "ld15iqr": 0.005546170000116035,
+                "hd15iqr": 0.01097304399991117,
+                "ops": 135.44211285258473,
+                "total": 0.022149684000169145,
+                "data": [
+                    0.01097304399991117,
+                    0.005546170000116035,
+                    0.0056304700001419405
+                ],
+                "iterations": 1
+            }
+        },
+        {
+            "group": null,
+            "name": "bench_bps[cpu-128cross-table-128]",
+            "fullname": "benchmarks/bench_bps.py::bench_bps[cpu-128cross-table-128]",
+            "params": {
+                "backend_device": "cpu",
+                "label": "128cross-table",
+                "order": 128
+            },
+            "param": "cpu-128cross-table-128",
+            "extra_info": {},
+            "options": {
+                "disable_gc": false,
+                "timer": "perf_counter",
+                "min_rounds": 5,
+                "max_time": 1.0,
+                "min_time": 5e-06,
+                "warmup": false
+            },
+            "stats": {
+                "min": 0.015223195000089618,
+                "max": 0.015897880000011355,
+                "mean": 0.015600319333392084,
+                "stddev": 0.00034430763144592747,
+                "rounds": 3,
+                "median": 0.01567988300007528,
+                "iqr": 0.0005060137499413031,
+                "q1": 0.015337367000086033,
+                "q3": 0.015843380750027336,
+                "iqr_outliers": 0,
+                "stddev_outliers": 1,
+                "outliers": "1;0",
+                "ld15iqr": 0.015223195000089618,
+                "hd15iqr": 0.015897880000011355,
+                "ops": 64.10125194421666,
+                "total": 0.04680095800017625,
+                "data": [
+                    0.015897880000011355,
+                    0.01567988300007528,
+                    0.015223195000089618
+                ],
+                "iterations": 1
+            }
+        },
+        {
+            "group": null,
+            "name": "bench_bps[cpu-16qam-square-16]",
+            "fullname": "benchmarks/bench_bps.py::bench_bps[cpu-16qam-square-16]",
+            "params": {
+                "backend_device": "cpu",
+                "label": "16qam-square",
+                "order": 16
+            },
+            "param": "cpu-16qam-square-16",
+            "extra_info": {},
+            "options": {
+                "disable_gc": false,
+                "timer": "perf_counter",
+                "min_rounds": 5,
+                "max_time": 1.0,
+                "min_time": 5e-06,
+                "warmup": false
+            },
+            "stats": {
+                "min": 0.014985263999960807,
+                "max": 0.01755625200007671,
+                "mean": 0.016521402000004553,
+                "stddev": 0.00135682057338899,
+                "rounds": 3,
+                "median": 0.017022689999976137,
+                "iqr": 0.0019282410000869277,
+                "q1": 0.01549462049996464,
+                "q3": 0.017422861500051567,
+                "iqr_outliers": 0,
+                "stddev_outliers": 1,
+                "outliers": "1;0",
+                "ld15iqr": 0.014985263999960807,
+                "hd15iqr": 0.01755625200007671,
+                "ops": 60.527550870060814,
+                "total": 0.049564206000013655,
+                "data": [
+                    0.017022689999976137,
+                    0.014985263999960807,
+                    0.01755625200007671
+                ],
+                "iterations": 1
+            }
+        },
+        {
+            "group": null,
+            "name": "bench_bps[gpu-128cross-table-128]",
+            "fullname": "benchmarks/bench_bps.py::bench_bps[gpu-128cross-table-128]",
+            "params": {
+                "backend_device": "gpu",
+                "label": "128cross-table",
+                "order": 128
+            },
+            "param": "gpu-128cross-table-128",
+            "extra_info": {},
+            "options": {
+                "disable_gc": false,
+                "timer": "perf_counter",
+                "min_rounds": 5,
+                "max_time": 1.0,
+                "min_time": 5e-06,
+                "warmup": false
+            },
+            "stats": {
+                "min": 0.0036598019999019016,
+                "max": 0.0036887969999952475,
+                "mean": 0.0036771513332496397,
+                "stddev": 1.5315886103470318e-05,
+                "rounds": 3,
+                "median": 0.00368285499985177,
+                "iqr": 2.174625007000941e-05,
+                "q1": 0.0036655652498893687,
+                "q3": 0.003687311499959378,
+                "iqr_outliers": 0,
+                "stddev_outliers": 1,
+                "outliers": "1;0",
+                "ld15iqr": 0.0036598019999019016,
+                "hd15iqr": 0.0036887969999952475,
+                "ops": 271.9496450847079,
+                "total": 0.01103145399974892,
+                "data": [
+                    0.00368285499985177,
+                    0.0036887969999952475,
+                    0.0036598019999019016
+                ],
+                "iterations": 1
+            }
+        },
+        {
+            "group": null,
+            "name": "bench_bps[gpu-16qam-square-16]",
+            "fullname": "benchmarks/bench_bps.py::bench_bps[gpu-16qam-square-16]",
+            "params": {
+                "backend_device": "gpu",
+                "label": "16qam-square",
+                "order": 16
+            },
+            "param": "gpu-16qam-square-16",
+            "extra_info": {},
+            "options": {
+                "disable_gc": false,
+                "timer": "perf_counter",
+                "min_rounds": 5,
+                "max_time": 1.0,
+                "min_time": 5e-06,
+                "warmup": false
+            },
+            "stats": {
+                "min": 0.0023361010000826354,
+                "max": 0.0043004970000311005,
+                "mean": 0.0029909833333476854,
+                "stddev": 0.00113407210889485,
+                "rounds": 3,
+                "median": 0.0023363519999293203,
+                "iqr": 0.0014732969999613488,
+                "q1": 0.0023361637500443067,
+                "q3": 0.0038094607500056554,
+                "iqr_outliers": 0,
+                "stddev_outliers": 1,
+                "outliers": "1;0",
+                "ld15iqr": 0.0023361010000826354,
+                "hd15iqr": 0.0043004970000311005,
+                "ops": 334.3382053823553,
+                "total": 0.008972950000043056,
+                "data": [
+                    0.0023363519999293203,
+                    0.0043004970000311005,
+                    0.0023361010000826354
+                ],
+                "iterations": 1
+            }
+        },
+        {
+            "group": null,
+            "name": "bench_bps_128cross_N1e6_C2[cpu]",
+            "fullname": "benchmarks/bench_bps.py::bench_bps_128cross_N1e6_C2[cpu]",
+            "params": {
+                "backend_device": "cpu"
+            },
+            "param": "cpu",
+            "extra_info": {},
+            "options": {
+                "disable_gc": false,
+                "timer": "perf_counter",
+                "min_rounds": 5,
+                "max_time": 1.0,
+                "min_time": 5e-06,
+                "warmup": false
+            },
+            "stats": {
+                "min": 0.7558401310000136,
+                "max": 0.7783314000000701,
+                "mean": 0.7639250896666757,
+                "stddev": 0.012507354255760876,
+                "rounds": 3,
+                "median": 0.7576037379999434,
+                "iqr": 0.016868451750042368,
+                "q1": 0.756281032749996,
+                "q3": 0.7731494845000384,
+                "iqr_outliers": 0,
+                "stddev_outliers": 1,
+                "outliers": "1;0",
+                "ld15iqr": 0.7558401310000136,
+                "hd15iqr": 0.7783314000000701,
+                "ops": 1.3090288740697484,
+                "total": 2.291775269000027,
+                "data": [
+                    0.7558401310000136,
+                    0.7783314000000701,
+                    0.7576037379999434
+                ],
+                "iterations": 1
+            }
+        },
+        {
+            "group": null,
+            "name": "bench_bps_128cross_N1e6_C2[gpu]",
+            "fullname": "benchmarks/bench_bps.py::bench_bps_128cross_N1e6_C2[gpu]",
+            "params": {
+                "backend_device": "gpu"
+            },
+            "param": "gpu",
+            "extra_info": {},
+            "options": {
+                "disable_gc": false,
+                "timer": "perf_counter",
+                "min_rounds": 5,
+                "max_time": 1.0,
+                "min_time": 5e-06,
+                "warmup": false
+            },
+            "stats": {
+                "min": 0.015347171000030357,
+                "max": 0.015485082000168404,
+                "mean": 0.015428218000124616,
+                "stddev": 7.206576238651668e-05,
+                "rounds": 3,
+                "median": 0.015452401000175087,
+                "iqr": 0.0001034332501035351,
+                "q1": 0.01537347850006654,
+                "q3": 0.015476911750170075,
+                "iqr_outliers": 0,
+                "stddev_outliers": 1,
+                "outliers": "1;0",
+                "ld15iqr": 0.015347171000030357,
+                "hd15iqr": 0.015485082000168404,
+                "ops": 64.81629958767259,
+                "total": 0.04628465400037385,
+                "data": [
+                    0.015347171000030357,
+                    0.015485082000168404,
+                    0.015452401000175087
+                ],
+                "iterations": 1
+            }
+        },
+        {
+            "group": null,
+            "name": "bench_cma[cpu]",
+            "fullname": "benchmarks/bench_equalizers.py::bench_cma[cpu]",
+            "params": {
+                "backend_device": "cpu"
+            },
+            "param": "cpu",
+            "extra_info": {},
+            "options": {
+                "disable_gc": false,
+                "timer": "perf_counter",
+                "min_rounds": 5,
+                "max_time": 1.0,
+                "min_time": 5e-06,
+                "warmup": false
+            },
+            "stats": {
+                "min": 0.005703829999902155,
+                "max": 0.0061215509999783535,
+                "mean": 0.0059486969999701005,
+                "stddev": 0.00021797273363740468,
+                "rounds": 3,
+                "median": 0.006020710000029794,
+                "iqr": 0.0003132907500571491,
+                "q1": 0.0057830499999340645,
+                "q3": 0.006096340749991214,
+                "iqr_outliers": 0,
+                "stddev_outliers": 1,
+                "outliers": "1;0",
+                "ld15iqr": 0.005703829999902155,
+                "hd15iqr": 0.0061215509999783535,
+                "ops": 168.1040402637798,
+                "total": 0.017846090999910302,
+                "data": [
+                    0.005703829999902155,
+                    0.0061215509999783535,
+                    0.006020710000029794
+                ],
+                "iterations": 1
+            }
+        },
+        {
+            "group": null,
+            "name": "bench_cma[gpu]",
+            "fullname": "benchmarks/bench_equalizers.py::bench_cma[gpu]",
+            "params": {
+                "backend_device": "gpu"
+            },
+            "param": "gpu",
+            "extra_info": {},
+            "options": {
+                "disable_gc": false,
+                "timer": "perf_counter",
+                "min_rounds": 5,
+                "max_time": 1.0,
+                "min_time": 5e-06,
+                "warmup": false
+            },
+            "stats": {
+                "min": 0.006397118999984741,
+                "max": 0.008178492000070037,
+                "mean": 0.00706814033333103,
+                "stddev": 0.0009685457127763455,
+                "rounds": 3,
+                "median": 0.006628809999938312,
+                "iqr": 0.0013360297500639717,
+                "q1": 0.006455041749973134,
+                "q3": 0.007791071500037106,
+                "iqr_outliers": 0,
+                "stddev_outliers": 1,
+                "outliers": "1;0",
+                "ld15iqr": 0.006397118999984741,
+                "hd15iqr": 0.008178492000070037,
+                "ops": 141.4799300580279,
+                "total": 0.02120442099999309,
+                "data": [
+                    0.008178492000070037,
+                    0.006628809999938312,
+                    0.006397118999984741
+                ],
+                "iterations": 1
+            }
+        },
+        {
+            "group": null,
+            "name": "bench_lms[cpu]",
+            "fullname": "benchmarks/bench_equalizers.py::bench_lms[cpu]",
+            "params": {
+                "backend_device": "cpu"
+            },
+            "param": "cpu",
+            "extra_info": {},
+            "options": {
+                "disable_gc": false,
+                "timer": "perf_counter",
+                "min_rounds": 5,
+                "max_time": 1.0,
+                "min_time": 5e-06,
+                "warmup": false
+            },
+            "stats": {
+                "min": 0.005651531000012255,
+                "max": 0.006441117999884227,
+                "mean": 0.006047057666667873,
+                "stddev": 0.0003947955422646279,
+                "rounds": 3,
+                "median": 0.006048524000107136,
+                "iqr": 0.0005921902499039788,
+                "q1": 0.0057507792500359756,
+                "q3": 0.006342969499939954,
+                "iqr_outliers": 0,
+                "stddev_outliers": 1,
+                "outliers": "1;0",
+                "ld15iqr": 0.005651531000012255,
+                "hd15iqr": 0.006441117999884227,
+                "ops": 165.3696814422861,
+                "total": 0.01814117300000362,
+                "data": [
+                    0.006441117999884227,
+                    0.006048524000107136,
+                    0.005651531000012255
+                ],
+                "iterations": 1
+            }
+        },
+        {
+            "group": null,
+            "name": "bench_lms[gpu]",
+            "fullname": "benchmarks/bench_equalizers.py::bench_lms[gpu]",
+            "params": {
+                "backend_device": "gpu"
+            },
+            "param": "gpu",
+            "extra_info": {},
+            "options": {
+                "disable_gc": false,
+                "timer": "perf_counter",
+                "min_rounds": 5,
+                "max_time": 1.0,
+                "min_time": 5e-06,
+                "warmup": false
+            },
+            "stats": {
+                "min": 0.007492873000046529,
+                "max": 0.012394704999906025,
+                "mean": 0.009520328666591618,
+                "stddev": 0.0025583090510261607,
+                "rounds": 3,
+                "median": 0.008673407999822302,
+                "iqr": 0.003676373999894622,
+                "q1": 0.007788006749990473,
+                "q3": 0.011464380749885095,
+                "iqr_outliers": 0,
+                "stddev_outliers": 1,
+                "outliers": "1;0",
+                "ld15iqr": 0.007492873000046529,
+                "hd15iqr": 0.012394704999906025,
+                "ops": 105.03839048216503,
+                "total": 0.028560985999774857,
+                "data": [
+                    0.012394704999906025,
+                    0.008673407999822302,
+                    0.007492873000046529
+                ],
+                "iterations": 1
+            }
+        },
+        {
+            "group": null,
+            "name": "bench_lms_bps[cpu]",
+            "fullname": "benchmarks/bench_equalizers.py::bench_lms_bps[cpu]",
+            "params": {
+                "backend_device": "cpu"
+            },
+            "param": "cpu",
+            "extra_info": {},
+            "options": {
+                "disable_gc": false,
+                "timer": "perf_counter",
+                "min_rounds": 5,
+                "max_time": 1.0,
+                "min_time": 5e-06,
+                "warmup": false
+            },
+            "stats": {
+                "min": 0.006991351999886319,
+                "max": 0.007038679999823216,
+                "mean": 0.007010514666565844,
+                "stddev": 2.491527440428149e-05,
+                "rounds": 3,
+                "median": 0.007001511999987997,
+                "iqr": 3.549599995267272e-05,
+                "q1": 0.006993891999911739,
+                "q3": 0.0070293879998644115,
+                "iqr_outliers": 0,
+                "stddev_outliers": 1,
+                "outliers": "1;0",
+                "ld15iqr": 0.006991351999886319,
+                "hd15iqr": 0.007038679999823216,
+                "ops": 142.64287966889853,
+                "total": 0.021031543999697533,
+                "data": [
+                    0.007038679999823216,
+                    0.007001511999987997,
+                    0.006991351999886319
+                ],
+                "iterations": 1
+            }
+        },
+        {
+            "group": null,
+            "name": "bench_lms_bps[gpu]",
+            "fullname": "benchmarks/bench_equalizers.py::bench_lms_bps[gpu]",
+            "params": {
+                "backend_device": "gpu"
+            },
+            "param": "gpu",
+            "extra_info": {},
+            "options": {
+                "disable_gc": false,
+                "timer": "perf_counter",
+                "min_rounds": 5,
+                "max_time": 1.0,
+                "min_time": 5e-06,
+                "warmup": false
+            },
+            "stats": {
+                "min": 0.007389987999886216,
+                "max": 0.007458386000052997,
+                "mean": 0.007435293333325414,
+                "stddev": 3.923803675688537e-05,
+                "rounds": 3,
+                "median": 0.007457506000037029,
+                "iqr": 5.129850012508541e-05,
+                "q1": 0.007406867499923919,
+                "q3": 0.007458166000049005,
+                "iqr_outliers": 0,
+                "stddev_outliers": 1,
+                "outliers": "1;0",
+                "ld15iqr": 0.007389987999886216,
+                "hd15iqr": 0.007458386000052997,
+                "ops": 134.49368507331678,
+                "total": 0.02230587999997624,
+                "data": [
+                    0.007389987999886216,
+                    0.007458386000052997,
+                    0.007457506000037029
+                ],
+                "iterations": 1
+            }
+        },
+        {
+            "group": null,
+            "name": "bench_rls[cpu]",
+            "fullname": "benchmarks/bench_equalizers.py::bench_rls[cpu]",
+            "params": {
+                "backend_device": "cpu"
+            },
+            "param": "cpu",
+            "extra_info": {},
+            "options": {
+                "disable_gc": false,
+                "timer": "perf_counter",
+                "min_rounds": 5,
+                "max_time": 1.0,
+                "min_time": 5e-06,
+                "warmup": false
+            },
+            "stats": {
+                "min": 0.05658587300013096,
+                "max": 0.06153798699983781,
+                "mean": 0.0585400900000271,
+                "stddev": 0.0026358697280384367,
+                "rounds": 3,
+                "median": 0.05749641000011252,
+                "iqr": 0.00371408549978014,
+                "q1": 0.05681350725012635,
+                "q3": 0.06052759274990649,
+                "iqr_outliers": 0,
+                "stddev_outliers": 1,
+                "outliers": "1;0",
+                "ld15iqr": 0.05658587300013096,
+                "hd15iqr": 0.06153798699983781,
+                "ops": 17.082310601154475,
+                "total": 0.1756202700000813,
+                "data": [
+                    0.06153798699983781,
+                    0.05749641000011252,
+                    0.05658587300013096
+                ],
+                "iterations": 1
+            }
+        },
+        {
+            "group": null,
+            "name": "bench_rls[gpu]",
+            "fullname": "benchmarks/bench_equalizers.py::bench_rls[gpu]",
+            "params": {
+                "backend_device": "gpu"
+            },
+            "param": "gpu",
+            "extra_info": {},
+            "options": {
+                "disable_gc": false,
+                "timer": "perf_counter",
+                "min_rounds": 5,
+                "max_time": 1.0,
+                "min_time": 5e-06,
+                "warmup": false
+            },
+            "stats": {
+                "min": 0.057948718000034205,
+                "max": 0.06505762300002971,
+                "mean": 0.06036389599997468,
+                "stddev": 0.004065460826792278,
+                "rounds": 3,
+                "median": 0.05808534699986012,
+                "iqr": 0.005331678749996627,
+                "q1": 0.057982875249990684,
+                "q3": 0.06331455399998731,
+                "iqr_outliers": 0,
+                "stddev_outliers": 1,
+                "outliers": "1;0",
+                "ld15iqr": 0.057948718000034205,
+                "hd15iqr": 0.06505762300002971,
+                "ops": 16.566193805655278,
+                "total": 0.18109168799992403,
+                "data": [
+                    0.05808534699986012,
+                    0.06505762300002971,
+                    0.057948718000034205
+                ],
+                "iterations": 1
+            }
+        },
+        {
+            "group": null,
+            "name": "bench_dbp[cpu-1-auto]",
+            "fullname": "benchmarks/bench_fiber.py::bench_dbp[cpu-1-auto]",
+            "params": {
+                "backend_device": "cpu",
+                "steps": 1,
+                "path": "auto"
+            },
+            "param": "cpu-1-auto",
+            "extra_info": {},
+            "options": {
+                "disable_gc": false,
+                "timer": "perf_counter",
+                "min_rounds": 5,
+                "max_time": 1.0,
+                "min_time": 5e-06,
+                "warmup": false
+            },
+            "stats": {
+                "min": 0.1505109239999456,
+                "max": 0.1536120260000189,
+                "mean": 0.15169111966671758,
+                "stddev": 0.0016780040590974,
+                "rounds": 3,
+                "median": 0.1509504090001883,
+                "iqr": 0.0023258265000549727,
+                "q1": 0.15062079525000627,
+                "q3": 0.15294662175006124,
+                "iqr_outliers": 0,
+                "stddev_outliers": 1,
+                "outliers": "1;0",
+                "ld15iqr": 0.1505109239999456,
+                "hd15iqr": 0.1536120260000189,
+                "ops": 6.59234371924416,
+                "total": 0.4550733590001528,
+                "data": [
+                    0.1509504090001883,
+                    0.1536120260000189,
+                    0.1505109239999456
+                ],
+                "iterations": 1
+            }
+        },
+        {
+            "group": null,
+            "name": "bench_dbp[cpu-10-auto]",
+            "fullname": "benchmarks/bench_fiber.py::bench_dbp[cpu-10-auto]",
+            "params": {
+                "backend_device": "cpu",
+                "steps": 10,
+                "path": "auto"
+            },
+            "param": "cpu-10-auto",
+            "extra_info": {},
+            "options": {
+                "disable_gc": false,
+                "timer": "perf_counter",
+                "min_rounds": 5,
+                "max_time": 1.0,
+                "min_time": 5e-06,
+                "warmup": false
+            },
+            "stats": {
+                "min": 0.8850683940002,
+                "max": 0.9011792860001151,
+                "mean": 0.8917054900001252,
+                "stddev": 0.008421719564673686,
+                "rounds": 3,
+                "median": 0.8888687900000605,
+                "iqr": 0.012083168999936333,
+                "q1": 0.8860184930001651,
+                "q3": 0.8981016620001014,
+                "iqr_outliers": 0,
+                "stddev_outliers": 1,
+                "outliers": "1;0",
+                "ld15iqr": 0.8850683940002,
+                "hd15iqr": 0.9011792860001151,
+                "ops": 1.1214464991124589,
+                "total": 2.6751164700003756,
+                "data": [
+                    0.8850683940002,
+                    0.9011792860001151,
+                    0.8888687900000605
+                ],
+                "iterations": 1
+            }
+        },
+        {
+            "group": null,
+            "name": "bench_dbp[gpu-1-auto]",
+            "fullname": "benchmarks/bench_fiber.py::bench_dbp[gpu-1-auto]",
+            "params": {
+                "backend_device": "gpu",
+                "steps": 1,
+                "path": "auto"
+            },
+            "param": "gpu-1-auto",
+            "extra_info": {},
+            "options": {
+                "disable_gc": false,
+                "timer": "perf_counter",
+                "min_rounds": 5,
+                "max_time": 1.0,
+                "min_time": 5e-06,
+                "warmup": false
+            },
+            "stats": {
+                "min": 0.00214454700017086,
+                "max": 0.0021647959999882005,
+                "mean": 0.002151500333335813,
+                "stddev": 1.1518437131400815e-05,
+                "rounds": 3,
+                "median": 0.0021451579998483794,
+                "iqr": 1.5186749863005389e-05,
+                "q1": 0.00214469975009024,
+                "q3": 0.0021598864999532452,
+                "iqr_outliers": 0,
+                "stddev_outliers": 1,
+                "outliers": "1;0",
+                "ld15iqr": 0.00214454700017086,
+                "hd15iqr": 0.0021647959999882005,
+                "ops": 464.79193356644333,
+                "total": 0.00645450100000744,
+                "data": [
+                    0.0021647959999882005,
+                    0.0021451579998483794,
+                    0.00214454700017086
+                ],
+                "iterations": 1
+            }
+        },
+        {
+            "group": null,
+            "name": "bench_dbp[gpu-1-plain]",
+            "fullname": "benchmarks/bench_fiber.py::bench_dbp[gpu-1-plain]",
+            "params": {
+                "backend_device": "gpu",
+                "steps": 1,
+                "path": "plain"
+            },
+            "param": "gpu-1-plain",
+            "extra_info": {},
+            "options": {
+                "disable_gc": false,
+                "timer": "perf_counter",
+                "min_rounds": 5,
+                "max_time": 1.0,
+                "min_time": 5e-06,
+                "warmup": false
+            },
+            "stats": {
+                "min": 0.0028459780000957835,
+                "max": 0.0028582909999386175,
+                "mean": 0.002853372333371832,
+                "stddev": 6.519139937439948e-06,
+                "rounds": 3,
+                "median": 0.002855848000081096,
+                "iqr": 9.23474988212547e-06,
+                "q1": 0.0028484455000921116,
+                "q3": 0.002857680249974237,
+                "iqr_outliers": 0,
+                "stddev_outliers": 1,
+                "outliers": "1;0",
+                "ld15iqr": 0.0028459780000957835,
+                "hd15iqr": 0.0028582909999386175,
+                "ops": 350.4624995148457,
+                "total": 0.008560117000115497,
+                "data": [
+                    0.0028459780000957835,
+                    0.0028582909999386175,
+                    0.002855848000081096
+                ],
+                "iterations": 1
+            }
+        },
+        {
+            "group": null,
+            "name": "bench_dbp[gpu-10-auto]",
+            "fullname": "benchmarks/bench_fiber.py::bench_dbp[gpu-10-auto]",
+            "params": {
+                "backend_device": "gpu",
+                "steps": 10,
+                "path": "auto"
+            },
+            "param": "gpu-10-auto",
+            "extra_info": {},
+            "options": {
+                "disable_gc": false,
+                "timer": "perf_counter",
+                "min_rounds": 5,
+                "max_time": 1.0,
+                "min_time": 5e-06,
+                "warmup": false
+            },
+            "stats": {
+                "min": 0.00763656499998433,
+                "max": 0.007753381999918929,
+                "mean": 0.007693904333336832,
+                "stddev": 5.843784920905824e-05,
+                "rounds": 3,
+                "median": 0.007691766000107236,
+                "iqr": 8.761274995094936e-05,
+                "q1": 0.0076503652500150565,
+                "q3": 0.007737977999966006,
+                "iqr_outliers": 0,
+                "stddev_outliers": 1,
+                "outliers": "1;0",
+                "ld15iqr": 0.00763656499998433,
+                "hd15iqr": 0.007753381999918929,
+                "ops": 129.97302236617514,
+                "total": 0.023081713000010495,
+                "data": [
+                    0.007691766000107236,
+                    0.00763656499998433,
+                    0.007753381999918929
+                ],
+                "iterations": 1
+            }
+        },
+        {
+            "group": null,
+            "name": "bench_dbp[gpu-10-plain]",
+            "fullname": "benchmarks/bench_fiber.py::bench_dbp[gpu-10-plain]",
+            "params": {
+                "backend_device": "gpu",
+                "steps": 10,
+                "path": "plain"
+            },
+            "param": "gpu-10-plain",
+            "extra_info": {},
+            "options": {
+                "disable_gc": false,
+                "timer": "perf_counter",
+                "min_rounds": 5,
+                "max_time": 1.0,
+                "min_time": 5e-06,
+                "warmup": false
+            },
+            "stats": {
+                "min": 0.02419258300005822,
+                "max": 0.026489221000019825,
+                "mean": 0.024999463000009808,
+                "stddev": 0.0012916571905655782,
+                "rounds": 3,
+                "median": 0.024316584999951374,
+                "iqr": 0.0017224784999712028,
+                "q1": 0.02422358350003151,
+                "q3": 0.025946062000002712,
+                "iqr_outliers": 0,
+                "stddev_outliers": 1,
+                "outliers": "1;0",
+                "ld15iqr": 0.02419258300005822,
+                "hd15iqr": 0.026489221000019825,
+                "ops": 40.00085921844032,
+                "total": 0.07499838900002942,
+                "data": [
+                    0.026489221000019825,
+                    0.02419258300005822,
+                    0.024316584999951374
+                ],
+                "iterations": 1
+            }
+        },
+        {
+            "group": null,
+            "name": "bench_fiber_propagation[cpu-N1M-auto]",
+            "fullname": "benchmarks/bench_fiber.py::bench_fiber_propagation[cpu-N1M-auto]",
+            "params": {
+                "backend_device": "cpu",
+                "n": 1048576,
+                "path": "auto"
+            },
+            "param": "cpu-N1M-auto",
+            "extra_info": {},
+            "options": {
+                "disable_gc": false,
+                "timer": "perf_counter",
+                "min_rounds": 5,
+                "max_time": 1.0,
+                "min_time": 5e-06,
+                "warmup": false
+            },
+            "stats": {
+                "min": 2.1640888439999344,
+                "max": 2.2651267329999882,
+                "mean": 2.198623078999996,
+                "stddev": 0.05760812934640078,
+                "rounds": 3,
+                "median": 2.1666536600000654,
+                "iqr": 0.07577841675004038,
+                "q1": 2.164730047999967,
+                "q3": 2.2405084647500075,
+                "iqr_outliers": 0,
+                "stddev_outliers": 1,
+                "outliers": "1;0",
+                "ld15iqr": 2.1640888439999344,
+                "hd15iqr": 2.2651267329999882,
+                "ops": 0.4548301205201721,
+                "total": 6.595869236999988,
+                "data": [
+                    2.1640888439999344,
+                    2.1666536600000654,
+                    2.2651267329999882
+                ],
+                "iterations": 1
+            }
+        },
+        {
+            "group": null,
+            "name": "bench_fiber_propagation[cpu-N64k-auto]",
+            "fullname": "benchmarks/bench_fiber.py::bench_fiber_propagation[cpu-N64k-auto]",
+            "params": {
+                "backend_device": "cpu",
+                "n": 65536,
+                "path": "auto"
+            },
+            "param": "cpu-N64k-auto",
+            "extra_info": {},
+            "options": {
+                "disable_gc": false,
+                "timer": "perf_counter",
+                "min_rounds": 5,
+                "max_time": 1.0,
+                "min_time": 5e-06,
+                "warmup": false
+            },
+            "stats": {
+                "min": 0.08848022500001207,
+                "max": 0.08922691199995825,
+                "mean": 0.08878778199997821,
+                "stddev": 0.0003903446678534898,
+                "rounds": 3,
+                "median": 0.08865620899996429,
+                "iqr": 0.0005600152499596334,
+                "q1": 0.08852422100000013,
+                "q3": 0.08908423624995976,
+                "iqr_outliers": 0,
+                "stddev_outliers": 1,
+                "outliers": "1;0",
+                "ld15iqr": 0.08848022500001207,
+                "hd15iqr": 0.08922691199995825,
+                "ops": 11.262810912432135,
+                "total": 0.2663633459999346,
+                "data": [
+                    0.08865620899996429,
+                    0.08922691199995825,
+                    0.08848022500001207
+                ],
+                "iterations": 1
+            }
+        },
+        {
+            "group": null,
+            "name": "bench_fiber_propagation[gpu-N1M-auto]",
+            "fullname": "benchmarks/bench_fiber.py::bench_fiber_propagation[gpu-N1M-auto]",
+            "params": {
+                "backend_device": "gpu",
+                "n": 1048576,
+                "path": "auto"
+            },
+            "param": "gpu-N1M-auto",
+            "extra_info": {},
+            "options": {
+                "disable_gc": false,
+                "timer": "perf_counter",
+                "min_rounds": 5,
+                "max_time": 1.0,
+                "min_time": 5e-06,
+                "warmup": false
+            },
+            "stats": {
+                "min": 0.017491036999899734,
+                "max": 0.01819344899990938,
+                "mean": 0.017737307666569297,
+                "stddev": 0.0003954490194524856,
+                "rounds": 3,
+                "median": 0.017527436999898782,
+                "iqr": 0.0005268090000072334,
+                "q1": 0.017500136999899496,
+                "q3": 0.01802694599990673,
+                "iqr_outliers": 0,
+                "stddev_outliers": 1,
+                "outliers": "1;0",
+                "ld15iqr": 0.017491036999899734,
+                "hd15iqr": 0.01819344899990938,
+                "ops": 56.378342124874315,
+                "total": 0.053211922999707895,
+                "data": [
+                    0.017527436999898782,
+                    0.01819344899990938,
+                    0.017491036999899734
+                ],
+                "iterations": 1
+            }
+        },
+        {
+            "group": null,
+            "name": "bench_fiber_propagation[gpu-N1M-plain]",
+            "fullname": "benchmarks/bench_fiber.py::bench_fiber_propagation[gpu-N1M-plain]",
+            "params": {
+                "backend_device": "gpu",
+                "n": 1048576,
+                "path": "plain"
+            },
+            "param": "gpu-N1M-plain",
+            "extra_info": {},
+            "options": {
+                "disable_gc": false,
+                "timer": "perf_counter",
+                "min_rounds": 5,
+                "max_time": 1.0,
+                "min_time": 5e-06,
+                "warmup": false
+            },
+            "stats": {
+                "min": 0.030289248999906704,
+                "max": 0.06981262599992988,
+                "mean": 0.044377455999892845,
+                "stddev": 0.022070104425781115,
+                "rounds": 3,
+                "median": 0.033030492999841954,
+                "iqr": 0.02964253275001738,
+                "q1": 0.030974559999890516,
+                "q3": 0.0606170927499079,
+                "iqr_outliers": 0,
+                "stddev_outliers": 1,
+                "outliers": "1;0",
+                "ld15iqr": 0.030289248999906704,
+                "hd15iqr": 0.06981262599992988,
+                "ops": 22.533964092092493,
+                "total": 0.13313236799967854,
+                "data": [
+                    0.06981262599992988,
+                    0.033030492999841954,
+                    0.030289248999906704
+                ],
+                "iterations": 1
+            }
+        },
+        {
+            "group": null,
+            "name": "bench_fiber_propagation[gpu-N64k-auto]",
+            "fullname": "benchmarks/bench_fiber.py::bench_fiber_propagation[gpu-N64k-auto]",
+            "params": {
+                "backend_device": "gpu",
+                "n": 65536,
+                "path": "auto"
+            },
+            "param": "gpu-N64k-auto",
+            "extra_info": {},
+            "options": {
+                "disable_gc": false,
+                "timer": "perf_counter",
+                "min_rounds": 5,
+                "max_time": 1.0,
+                "min_time": 5e-06,
+                "warmup": false
+            },
+            "stats": {
+                "min": 0.0053907460001028085,
+                "max": 0.005960897000022669,
+                "mean": 0.00570206066671138,
+                "stddev": 0.00028867546185405116,
+                "rounds": 3,
+                "median": 0.005754539000008663,
+                "iqr": 0.00042761324993989547,
+                "q1": 0.005481694250079272,
+                "q3": 0.0059093075000191675,
+                "iqr_outliers": 0,
+                "stddev_outliers": 1,
+                "outliers": "1;0",
+                "ld15iqr": 0.0053907460001028085,
+                "hd15iqr": 0.005960897000022669,
+                "ops": 175.37519476739317,
+                "total": 0.01710618200013414,
+                "data": [
+                    0.0053907460001028085,
+                    0.005754539000008663,
+                    0.005960897000022669
+                ],
+                "iterations": 1
+            }
+        },
+        {
+            "group": null,
+            "name": "bench_fiber_propagation[gpu-N64k-plain]",
+            "fullname": "benchmarks/bench_fiber.py::bench_fiber_propagation[gpu-N64k-plain]",
+            "params": {
+                "backend_device": "gpu",
+                "n": 65536,
+                "path": "plain"
+            },
+            "param": "gpu-N64k-plain",
+            "extra_info": {},
+            "options": {
+                "disable_gc": false,
+                "timer": "perf_counter",
+                "min_rounds": 5,
+                "max_time": 1.0,
+                "min_time": 5e-06,
+                "warmup": false
+            },
+            "stats": {
+                "min": 0.020768059999909383,
+                "max": 0.05212423700004365,
+                "mean": 0.031248726999971648,
+                "stddev": 0.01807877290531843,
+                "rounds": 3,
+                "median": 0.02085388399996191,
+                "iqr": 0.0235171327501007,
+                "q1": 0.020789515999922514,
+                "q3": 0.044306648750023214,
+                "iqr_outliers": 0,
+                "stddev_outliers": 1,
+                "outliers": "1;0",
+                "ld15iqr": 0.020768059999909383,
+                "hd15iqr": 0.05212423700004365,
+                "ops": 32.00130360513269,
+                "total": 0.09374618099991494,
+                "data": [
+                    0.020768059999909383,
+                    0.05212423700004365,
+                    0.02085388399996191
+                ],
+                "iterations": 1
+            }
+        },
+        {
+            "group": null,
+            "name": "bench_import_commkit",
+            "fullname": "benchmarks/bench_import.py::bench_import_commkit",
+            "params": null,
+            "param": null,
+            "extra_info": {
+                "num_modules": 299
+            },
+            "options": {
+                "disable_gc": false,
+                "timer": "perf_counter",
+                "min_rounds": 5,
+                "max_time": 1.0,
+                "min_time": 5e-06,
+                "warmup": false
+            },
+            "stats": {
+                "min": 0.1116454140001224,
+                "max": 0.12170981799999936,
+                "mean": 0.11635526300001402,
+                "stddev": 0.004179689164712975,
+                "rounds": 5,
+                "median": 0.11763716599989493,
+                "iqr": 0.006695436250026887,
+                "q1": 0.1123656547500218,
+                "q3": 0.11906109100004869,
+                "iqr_outliers": 0,
+                "stddev_outliers": 2,
+                "outliers": "2;0",
+                "ld15iqr": 0.1116454140001224,
+                "hd15iqr": 0.12170981799999936,
+                "ops": 8.594368438665981,
+                "total": 0.5817763150000701,
+                "data": [
+                    0.11817818200006514,
+                    0.1116454140001224,
+                    0.11763716599989493,
+                    0.12170981799999936,
+                    0.11260573499998827
+                ],
+                "iterations": 1
+            }
+        },
+        {
+            "group": null,
+            "name": "bench_compute_llr[cpu-16-exact]",
+            "fullname": "benchmarks/bench_llr.py::bench_compute_llr[cpu-16-exact]",
+            "params": {
+                "backend_device": "cpu",
+                "order": 16,
+                "method": "exact"
+            },
+            "param": "cpu-16-exact",
+            "extra_info": {},
+            "options": {
+                "disable_gc": false,
+                "timer": "perf_counter",
+                "min_rounds": 5,
+                "max_time": 1.0,
+                "min_time": 5e-06,
+                "warmup": false
+            },
+            "stats": {
+                "min": 0.0030237949999900593,
+                "max": 0.0037498120000236668,
+                "mean": 0.0032780639999903847,
+                "stddev": 0.00040895966509663393,
+                "rounds": 3,
+                "median": 0.0030605849999574275,
+                "iqr": 0.0005445127500252056,
+                "q1": 0.0030329924999819013,
+                "q3": 0.003577505250007107,
+                "iqr_outliers": 0,
+                "stddev_outliers": 1,
+                "outliers": "1;0",
+                "ld15iqr": 0.0030237949999900593,
+                "hd15iqr": 0.0037498120000236668,
+                "ops": 305.05810746920537,
+                "total": 0.009834191999971154,
+                "data": [
+                    0.0030605849999574275,
+                    0.0037498120000236668,
+                    0.0030237949999900593
+                ],
+                "iterations": 1
+            }
+        },
+        {
+            "group": null,
+            "name": "bench_compute_llr[cpu-16-maxlog]",
+            "fullname": "benchmarks/bench_llr.py::bench_compute_llr[cpu-16-maxlog]",
+            "params": {
+                "backend_device": "cpu",
+                "order": 16,
+                "method": "maxlog"
+            },
+            "param": "cpu-16-maxlog",
+            "extra_info": {},
+            "options": {
+                "disable_gc": false,
+                "timer": "perf_counter",
+                "min_rounds": 5,
+                "max_time": 1.0,
+                "min_time": 5e-06,
+                "warmup": false
+            },
+            "stats": {
+                "min": 0.000853247999884843,
+                "max": 0.0018089420000251266,
+                "mean": 0.001215939999913947,
+                "stddev": 0.0005178028365887814,
+                "rounds": 3,
+                "median": 0.0009856299998318718,
+                "iqr": 0.0007167705001052127,
+                "q1": 0.0008863434998716002,
+                "q3": 0.001603113999976813,
+                "iqr_outliers": 0,
+                "stddev_outliers": 1,
+                "outliers": "1;0",
+                "ld15iqr": 0.000853247999884843,
+                "hd15iqr": 0.0018089420000251266,
+                "ops": 822.4090005023032,
+                "total": 0.0036478199997418415,
+                "data": [
+                    0.0018089420000251266,
+                    0.0009856299998318718,
+                    0.000853247999884843
+                ],
+                "iterations": 1
+            }
+        },
+        {
+            "group": null,
+            "name": "bench_compute_llr[cpu-256-exact]",
+            "fullname": "benchmarks/bench_llr.py::bench_compute_llr[cpu-256-exact]",
+            "params": {
+                "backend_device": "cpu",
+                "order": 256,
+                "method": "exact"
+            },
+            "param": "cpu-256-exact",
+            "extra_info": {},
+            "options": {
+                "disable_gc": false,
+                "timer": "perf_counter",
+                "min_rounds": 5,
+                "max_time": 1.0,
+                "min_time": 5e-06,
+                "warmup": false
+            },
+            "stats": {
+                "min": 0.008578462000059517,
+                "max": 0.009509240999932445,
+                "mean": 0.00903437666662891,
+                "stddev": 0.00046567875628281895,
+                "rounds": 3,
+                "median": 0.009015426999894771,
+                "iqr": 0.0006980842499046958,
+                "q1": 0.00868770325001833,
+                "q3": 0.009385787499923026,
+                "iqr_outliers": 0,
+                "stddev_outliers": 1,
+                "outliers": "1;0",
+                "ld15iqr": 0.008578462000059517,
+                "hd15iqr": 0.009509240999932445,
+                "ops": 110.68832271448122,
+                "total": 0.027103129999886733,
+                "data": [
+                    0.008578462000059517,
+                    0.009509240999932445,
+                    0.009015426999894771
+                ],
+                "iterations": 1
+            }
+        },
+        {
+            "group": null,
+            "name": "bench_compute_llr[cpu-256-maxlog]",
+            "fullname": "benchmarks/bench_llr.py::bench_compute_llr[cpu-256-maxlog]",
+            "params": {
+                "backend_device": "cpu",
+                "order": 256,
+                "method": "maxlog"
+            },
+            "param": "cpu-256-maxlog",
+            "extra_info": {},
+            "options": {
+                "disable_gc": false,
+                "timer": "perf_counter",
+                "min_rounds": 5,
+                "max_time": 1.0,
+                "min_time": 5e-06,
+                "warmup": false
+            },
+            "stats": {
+                "min": 0.0020524429999113636,
+                "max": 0.0029212409999672673,
+                "mean": 0.0024346079999304493,
+                "stddev": 0.00044372025364644243,
+                "rounds": 3,
+                "median": 0.002330139999912717,
+                "iqr": 0.0006515985000419278,
+                "q1": 0.002121867249911702,
+                "q3": 0.0027734657499536297,
+                "iqr_outliers": 0,
+                "stddev_outliers": 1,
+                "outliers": "1;0",
+                "ld15iqr": 0.0020524429999113636,
+                "hd15iqr": 0.0029212409999672673,
+                "ops": 410.7437419200822,
+                "total": 0.007303823999791348,
+                "data": [
+                    0.002330139999912717,
+                    0.0029212409999672673,
+                    0.0020524429999113636
+                ],
+                "iterations": 1
+            }
+        },
+        {
+            "group": null,
+            "name": "bench_compute_llr[cpu-64-exact]",
+            "fullname": "benchmarks/bench_llr.py::bench_compute_llr[cpu-64-exact]",
+            "params": {
+                "backend_device": "cpu",
+                "order": 64,
+                "method": "exact"
+            },
+            "param": "cpu-64-exact",
+            "extra_info": {},
+            "options": {
+                "disable_gc": false,
+                "timer": "perf_counter",
+                "min_rounds": 5,
+                "max_time": 1.0,
+                "min_time": 5e-06,
+                "warmup": false
+            },
+            "stats": {
+                "min": 0.004700076000062836,
+                "max": 0.005832000999816955,
+                "mean": 0.005147138666567723,
+                "stddev": 0.0006022666040840073,
+                "rounds": 3,
+                "median": 0.004909338999823376,
+                "iqr": 0.0008489437498155894,
+                "q1": 0.004752391750002971,
+                "q3": 0.0056013354998185605,
+                "iqr_outliers": 0,
+                "stddev_outliers": 1,
+                "outliers": "1;0",
+                "ld15iqr": 0.004700076000062836,
+                "hd15iqr": 0.005832000999816955,
+                "ops": 194.28270050218643,
+                "total": 0.015441415999703167,
+                "data": [
+                    0.004700076000062836,
+                    0.005832000999816955,
+                    0.004909338999823376
+                ],
+                "iterations": 1
+            }
+        },
+        {
+            "group": null,
+            "name": "bench_compute_llr[cpu-64-maxlog]",
+            "fullname": "benchmarks/bench_llr.py::bench_compute_llr[cpu-64-maxlog]",
+            "params": {
+                "backend_device": "cpu",
+                "order": 64,
+                "method": "maxlog"
+            },
+            "param": "cpu-64-maxlog",
+            "extra_info": {},
+            "options": {
+                "disable_gc": false,
+                "timer": "perf_counter",
+                "min_rounds": 5,
+                "max_time": 1.0,
+                "min_time": 5e-06,
+                "warmup": false
+            },
+            "stats": {
+                "min": 0.0011412050000672025,
+                "max": 0.0020767690000411676,
+                "mean": 0.0015204206666415605,
+                "stddev": 0.0004922925814536411,
+                "rounds": 3,
+                "median": 0.0013432879998163116,
+                "iqr": 0.0007016729999804738,
+                "q1": 0.0011917257500044798,
+                "q3": 0.0018933987499849536,
+                "iqr_outliers": 0,
+                "stddev_outliers": 1,
+                "outliers": "1;0",
+                "ld15iqr": 0.0011412050000672025,
+                "hd15iqr": 0.0020767690000411676,
+                "ops": 657.7127119752248,
+                "total": 0.004561261999924682,
+                "data": [
+                    0.0013432879998163116,
+                    0.0020767690000411676,
+                    0.0011412050000672025
+                ],
+                "iterations": 1
+            }
+        },
+        {
+            "group": null,
+            "name": "bench_compute_llr[gpu-16-exact]",
+            "fullname": "benchmarks/bench_llr.py::bench_compute_llr[gpu-16-exact]",
+            "params": {
+                "backend_device": "gpu",
+                "order": 16,
+                "method": "exact"
+            },
+            "param": "gpu-16-exact",
+            "extra_info": {},
+            "options": {
+                "disable_gc": false,
+                "timer": "perf_counter",
+                "min_rounds": 5,
+                "max_time": 1.0,
+                "min_time": 5e-06,
+                "warmup": false
+            },
+            "stats": {
+                "min": 0.00017599300008441787,
+                "max": 0.00017927000021700223,
+                "mean": 0.0001778603334514628,
+                "stddev": 1.685756953371293e-06,
+                "rounds": 3,
+                "median": 0.00017831800005296827,
+                "iqr": 2.4577500994382717e-06,
+                "q1": 0.00017657425007655547,
+                "q3": 0.00017903200017599374,
+                "iqr_outliers": 0,
+                "stddev_outliers": 1,
+                "outliers": "1;0",
+                "ld15iqr": 0.00017599300008441787,
+                "hd15iqr": 0.00017927000021700223,
+                "ops": 5622.389099326046,
+                "total": 0.0005335810003543884,
+                "data": [
+                    0.00017599300008441787,
+                    0.00017831800005296827,
+                    0.00017927000021700223
+                ],
+                "iterations": 1
+            }
+        },
+        {
+            "group": null,
+            "name": "bench_compute_llr[gpu-16-maxlog]",
+            "fullname": "benchmarks/bench_llr.py::bench_compute_llr[gpu-16-maxlog]",
+            "params": {
+                "backend_device": "gpu",
+                "order": 16,
+                "method": "maxlog"
+            },
+            "param": "gpu-16-maxlog",
+            "extra_info": {},
+            "options": {
+                "disable_gc": false,
+                "timer": "perf_counter",
+                "min_rounds": 5,
+                "max_time": 1.0,
+                "min_time": 5e-06,
+                "warmup": false
+            },
+            "stats": {
+                "min": 0.00013373299998420407,
+                "max": 0.0004914620001272851,
+                "mean": 0.0002607343333996444,
+                "stddev": 0.00020015462411005495,
+                "rounds": 3,
+                "median": 0.0001570080000874441,
+                "iqr": 0.0002682967501073108,
+                "q1": 0.00013955175001001408,
+                "q3": 0.0004078485001173249,
+                "iqr_outliers": 0,
+                "stddev_outliers": 1,
+                "outliers": "1;0",
+                "ld15iqr": 0.00013373299998420407,
+                "hd15iqr": 0.0004914620001272851,
+                "ops": 3835.3215204199255,
+                "total": 0.0007822030001989333,
+                "data": [
+                    0.0001570080000874441,
+                    0.0004914620001272851,
+                    0.00013373299998420407
+                ],
+                "iterations": 1
+            }
+        },
+        {
+            "group": null,
+            "name": "bench_compute_llr[gpu-256-exact]",
+            "fullname": "benchmarks/bench_llr.py::bench_compute_llr[gpu-256-exact]",
+            "params": {
+                "backend_device": "gpu",
+                "order": 256,
+                "method": "exact"
+            },
+            "param": "gpu-256-exact",
+            "extra_info": {},
+            "options": {
+                "disable_gc": false,
+                "timer": "perf_counter",
+                "min_rounds": 5,
+                "max_time": 1.0,
+                "min_time": 5e-06,
+                "warmup": false
+            },
+            "stats": {
+                "min": 0.00029700300001422875,
+                "max": 0.000303215000030832,
+                "mean": 0.0002993409999968814,
+                "stddev": 3.3788619637032103e-06,
+                "rounds": 3,
+                "median": 0.0002978049999455834,
+                "iqr": 4.659000012452452e-06,
+                "q1": 0.0002972034999970674,
+                "q3": 0.00030186250000951986,
+                "iqr_outliers": 0,
+                "stddev_outliers": 1,
+                "outliers": "1;0",
+                "ld15iqr": 0.00029700300001422875,
+                "hd15iqr": 0.000303215000030832,
+                "ops": 3340.6716754818694,
+                "total": 0.0008980229999906442,
+                "data": [
+                    0.000303215000030832,
+                    0.0002978049999455834,
+                    0.00029700300001422875
+                ],
+                "iterations": 1
+            }
+        },
+        {
+            "group": null,
+            "name": "bench_compute_llr[gpu-256-maxlog]",
+            "fullname": "benchmarks/bench_llr.py::bench_compute_llr[gpu-256-maxlog]",
+            "params": {
+                "backend_device": "gpu",
+                "order": 256,
+                "method": "maxlog"
+            },
+            "param": "gpu-256-maxlog",
+            "extra_info": {},
+            "options": {
+                "disable_gc": false,
+                "timer": "perf_counter",
+                "min_rounds": 5,
+                "max_time": 1.0,
+                "min_time": 5e-06,
+                "warmup": false
+            },
+            "stats": {
+                "min": 0.0001674079999247624,
+                "max": 0.0005600580000191258,
+                "mean": 0.00029844499999853724,
+                "stddev": 0.0002265636212305687,
+                "rounds": 3,
+                "median": 0.00016786900005172356,
+                "iqr": 0.0002944875000707725,
+                "q1": 0.0001675232499565027,
+                "q3": 0.0004620107500272752,
+                "iqr_outliers": 0,
+                "stddev_outliers": 1,
+                "outliers": "1;0",
+                "ld15iqr": 0.0001674079999247624,
+                "hd15iqr": 0.0005600580000191258,
+                "ops": 3350.7011342287565,
+                "total": 0.0008953349999956117,
+                "data": [
+                    0.00016786900005172356,
+                    0.0005600580000191258,
+                    0.0001674079999247624
+                ],
+                "iterations": 1
+            }
+        },
+        {
+            "group": null,
+            "name": "bench_compute_llr[gpu-64-exact]",
+            "fullname": "benchmarks/bench_llr.py::bench_compute_llr[gpu-64-exact]",
+            "params": {
+                "backend_device": "gpu",
+                "order": 64,
+                "method": "exact"
+            },
+            "param": "gpu-64-exact",
+            "extra_info": {},
+            "options": {
+                "disable_gc": false,
+                "timer": "perf_counter",
+                "min_rounds": 5,
+                "max_time": 1.0,
+                "min_time": 5e-06,
+                "warmup": false
+            },
+            "stats": {
+                "min": 0.0002134950000254321,
+                "max": 0.0002179729999625124,
+                "mean": 0.00021514099997451316,
+                "stddev": 2.463344865900484e-06,
+                "rounds": 3,
+                "median": 0.00021395499993559497,
+                "iqr": 3.3584999528102344e-06,
+                "q1": 0.0002136100000029728,
+                "q3": 0.00021696849995578305,
+                "iqr_outliers": 0,
+                "stddev_outliers": 1,
+                "outliers": "1;0",
+                "ld15iqr": 0.0002134950000254321,
+                "hd15iqr": 0.0002179729999625124,
+                "ops": 4648.114492906818,
+                "total": 0.0006454229999235395,
+                "data": [
+                    0.0002179729999625124,
+                    0.00021395499993559497,
+                    0.0002134950000254321
+                ],
+                "iterations": 1
+            }
+        },
+        {
+            "group": null,
+            "name": "bench_compute_llr[gpu-64-maxlog]",
+            "fullname": "benchmarks/bench_llr.py::bench_compute_llr[gpu-64-maxlog]",
+            "params": {
+                "backend_device": "gpu",
+                "order": 64,
+                "method": "maxlog"
+            },
+            "param": "gpu-64-maxlog",
+            "extra_info": {},
+            "options": {
+                "disable_gc": false,
+                "timer": "perf_counter",
+                "min_rounds": 5,
+                "max_time": 1.0,
+                "min_time": 5e-06,
+                "warmup": false
+            },
+            "stats": {
+                "min": 0.0001419590000750759,
+                "max": 0.0005269650000627735,
+                "mean": 0.0002746793333396151,
+                "stddev": 0.0002185847815618344,
+                "rounds": 3,
+                "median": 0.00015511399988099583,
+                "iqr": 0.0002887544999907732,
+                "q1": 0.00014524775002655588,
+                "q3": 0.00043400225001732906,
+                "iqr_outliers": 0,
+                "stddev_outliers": 1,
+                "outliers": "1;0",
+                "ld15iqr": 0.0001419590000750759,
+                "hd15iqr": 0.0005269650000627735,
+                "ops": 3640.608806792153,
+                "total": 0.0008240380000188452,
+                "data": [
+                    0.0001419590000750759,
+                    0.0005269650000627735,
+                    0.00015511399988099583
+                ],
+                "iterations": 1
+            }
+        },
+        {
+            "group": null,
+            "name": "bench_compute_llr_nonseparable[cpu-psk16-exact]",
+            "fullname": "benchmarks/bench_llr.py::bench_compute_llr_nonseparable[cpu-psk16-exact]",
+            "params": {
+                "backend_device": "cpu",
+                "name": "psk16",
+                "method": "exact"
+            },
+            "param": "cpu-psk16-exact",
+            "extra_info": {},
+            "options": {
+                "disable_gc": false,
+                "timer": "perf_counter",
+                "min_rounds": 5,
+                "max_time": 1.0,
+                "min_time": 5e-06,
+                "warmup": false
+            },
+            "stats": {
+                "min": 0.005305693999844152,
+                "max": 0.005681837000111045,
+                "mean": 0.005431181666608609,
+                "stddev": 0.0002170739453732701,
+                "rounds": 3,
+                "median": 0.005306013999870629,
+                "iqr": 0.0002821072502001698,
+                "q1": 0.005305773999850771,
+                "q3": 0.005587881250050941,
+                "iqr_outliers": 0,
+                "stddev_outliers": 1,
+                "outliers": "1;0",
+                "ld15iqr": 0.005305693999844152,
+                "hd15iqr": 0.005681837000111045,
+                "ops": 184.12199432548712,
+                "total": 0.016293544999825826,
+                "data": [
+                    0.005306013999870629,
+                    0.005305693999844152,
+                    0.005681837000111045
+                ],
+                "iterations": 1
+            }
+        },
+        {
+            "group": null,
+            "name": "bench_compute_llr_nonseparable[cpu-psk16-maxlog]",
+            "fullname": "benchmarks/bench_llr.py::bench_compute_llr_nonseparable[cpu-psk16-maxlog]",
+            "params": {
+                "backend_device": "cpu",
+                "name": "psk16",
+                "method": "maxlog"
+            },
+            "param": "cpu-psk16-maxlog",
+            "extra_info": {},
+            "options": {
+                "disable_gc": false,
+                "timer": "perf_counter",
+                "min_rounds": 5,
+                "max_time": 1.0,
+                "min_time": 5e-06,
+                "warmup": false
+            },
+            "stats": {
+                "min": 0.0010928430001513334,
+                "max": 0.002413266999838015,
+                "mean": 0.001680530666665921,
+                "stddev": 0.0006720559660560152,
+                "rounds": 3,
+                "median": 0.0015354820000084146,
+                "iqr": 0.0009903179997650113,
+                "q1": 0.0012035027501156037,
+                "q3": 0.002193820749880615,
+                "iqr_outliers": 0,
+                "stddev_outliers": 1,
+                "outliers": "1;0",
+                "ld15iqr": 0.0010928430001513334,
+                "hd15iqr": 0.002413266999838015,
+                "ops": 595.0501349576347,
+                "total": 0.005041591999997763,
+                "data": [
+                    0.0015354820000084146,
+                    0.002413266999838015,
+                    0.0010928430001513334
+                ],
+                "iterations": 1
+            }
+        },
+        {
+            "group": null,
+            "name": "bench_compute_llr_nonseparable[cpu-qam128cross-exact]",
+            "fullname": "benchmarks/bench_llr.py::bench_compute_llr_nonseparable[cpu-qam128cross-exact]",
+            "params": {
+                "backend_device": "cpu",
+                "name": "qam128cross",
+                "method": "exact"
+            },
+            "param": "cpu-qam128cross-exact",
+            "extra_info": {},
+            "options": {
+                "disable_gc": false,
+                "timer": "perf_counter",
+                "min_rounds": 5,
+                "max_time": 1.0,
+                "min_time": 5e-06,
+                "warmup": false
+            },
+            "stats": {
+                "min": 0.03328678399998353,
+                "max": 0.03750572699982513,
+                "mean": 0.034707430333279866,
+                "stddev": 0.002423491353296676,
+                "rounds": 3,
+                "median": 0.03332978000003095,
+                "iqr": 0.0031642072498812013,
+                "q1": 0.03329753299999538,
+                "q3": 0.036461740249876584,
+                "iqr_outliers": 0,
+                "stddev_outliers": 1,
+                "outliers": "1;0",
+                "ld15iqr": 0.03328678399998353,
+                "hd15iqr": 0.03750572699982513,
+                "ops": 28.812274213257766,
+                "total": 0.1041222909998396,
+                "data": [
+                    0.03332978000003095,
+                    0.03750572699982513,
+                    0.03328678399998353
+                ],
+                "iterations": 1
+            }
+        },
+        {
+            "group": null,
+            "name": "bench_compute_llr_nonseparable[cpu-qam128cross-maxlog]",
+            "fullname": "benchmarks/bench_llr.py::bench_compute_llr_nonseparable[cpu-qam128cross-maxlog]",
+            "params": {
+                "backend_device": "cpu",
+                "name": "qam128cross",
+                "method": "maxlog"
+            },
+            "param": "cpu-qam128cross-maxlog",
+            "extra_info": {},
+            "options": {
+                "disable_gc": false,
+                "timer": "perf_counter",
+                "min_rounds": 5,
+                "max_time": 1.0,
+                "min_time": 5e-06,
+                "warmup": false
+            },
+            "stats": {
+                "min": 0.007523781999907442,
+                "max": 0.008753944000090996,
+                "mean": 0.008071810666630578,
+                "stddev": 0.0006259494251969874,
+                "rounds": 3,
+                "median": 0.007937705999893296,
+                "iqr": 0.0009226215001376659,
+                "q1": 0.0076272629999039054,
+                "q3": 0.008549884500041571,
+                "iqr_outliers": 0,
+                "stddev_outliers": 1,
+                "outliers": "1;0",
+                "ld15iqr": 0.007523781999907442,
+                "hd15iqr": 0.008753944000090996,
+                "ops": 123.88794055020008,
+                "total": 0.024215431999891734,
+                "data": [
+                    0.007523781999907442,
+                    0.008753944000090996,
+                    0.007937705999893296
+                ],
+                "iterations": 1
+            }
+        },
+        {
+            "group": null,
+            "name": "bench_compute_llr_nonseparable[gpu-psk16-exact]",
+            "fullname": "benchmarks/bench_llr.py::bench_compute_llr_nonseparable[gpu-psk16-exact]",
+            "params": {
+                "backend_device": "gpu",
+                "name": "psk16",
+                "method": "exact"
+            },
+            "param": "gpu-psk16-exact",
+            "extra_info": {},
+            "options": {
+                "disable_gc": false,
+                "timer": "perf_counter",
+                "min_rounds": 5,
+                "max_time": 1.0,
+                "min_time": 5e-06,
+                "warmup": false
+            },
+            "stats": {
+                "min": 0.00024278999990201555,
+                "max": 0.00024660799999765004,
+                "mean": 0.0002443099999709375,
+                "stddev": 2.0244120463255176e-06,
+                "rounds": 3,
+                "median": 0.0002435320000131469,
+                "iqr": 2.8635000717258663e-06,
+                "q1": 0.0002429754999297984,
+                "q3": 0.00024583900000152425,
+                "iqr_outliers": 0,
+                "stddev_outliers": 1,
+                "outliers": "1;0",
+                "ld15iqr": 0.00024278999990201555,
+                "hd15iqr": 0.00024660799999765004,
+                "ops": 4093.1603295770024,
+                "total": 0.0007329299999128125,
+                "data": [
+                    0.00024278999990201555,
+                    0.00024660799999765004,
+                    0.0002435320000131469
+                ],
+                "iterations": 1
+            }
+        },
+        {
+            "group": null,
+            "name": "bench_compute_llr_nonseparable[gpu-psk16-maxlog]",
+            "fullname": "benchmarks/bench_llr.py::bench_compute_llr_nonseparable[gpu-psk16-maxlog]",
+            "params": {
+                "backend_device": "gpu",
+                "name": "psk16",
+                "method": "maxlog"
+            },
+            "param": "gpu-psk16-maxlog",
+            "extra_info": {},
+            "options": {
+                "disable_gc": false,
+                "timer": "perf_counter",
+                "min_rounds": 5,
+                "max_time": 1.0,
+                "min_time": 5e-06,
+                "warmup": false
+            },
+            "stats": {
+                "min": 0.00010802500014506222,
+                "max": 0.0001434420000805403,
+                "mean": 0.00012368466673251532,
+                "stddev": 1.8060568257060337e-05,
+                "rounds": 3,
+                "median": 0.00011958699997194344,
+                "iqr": 2.6562749951608566e-05,
+                "q1": 0.00011091550010178253,
+                "q3": 0.0001374782500533911,
+                "iqr_outliers": 0,
+                "stddev_outliers": 1,
+                "outliers": "1;0",
+                "ld15iqr": 0.00010802500014506222,
+                "hd15iqr": 0.0001434420000805403,
+                "ops": 8085.076561370652,
+                "total": 0.000371054000197546,
+                "data": [
+                    0.0001434420000805403,
+                    0.00011958699997194344,
+                    0.00010802500014506222
+                ],
+                "iterations": 1
+            }
+        },
+        {
+            "group": null,
+            "name": "bench_compute_llr_nonseparable[gpu-qam128cross-exact]",
+            "fullname": "benchmarks/bench_llr.py::bench_compute_llr_nonseparable[gpu-qam128cross-exact]",
+            "params": {
+                "backend_device": "gpu",
+                "name": "qam128cross",
+                "method": "exact"
+            },
+            "param": "gpu-qam128cross-exact",
+            "extra_info": {},
+            "options": {
+                "disable_gc": false,
+                "timer": "perf_counter",
+                "min_rounds": 5,
+                "max_time": 1.0,
+                "min_time": 5e-06,
+                "warmup": false
+            },
+            "stats": {
+                "min": 0.0009359859998312459,
+                "max": 0.0009581070000876935,
+                "mean": 0.0009475076665997525,
+                "stddev": 1.108930507727007e-05,
+                "rounds": 3,
+                "median": 0.0009484299998803181,
+                "iqr": 1.659075019233569e-05,
+                "q1": 0.0009390969998435139,
+                "q3": 0.0009556877500358496,
+                "iqr_outliers": 0,
+                "stddev_outliers": 1,
+                "outliers": "1;0",
+                "ld15iqr": 0.0009359859998312459,
+                "hd15iqr": 0.0009581070000876935,
+                "ops": 1055.40043131115,
+                "total": 0.0028425229997992574,
+                "data": [
+                    0.0009484299998803181,
+                    0.0009581070000876935,
+                    0.0009359859998312459
+                ],
+                "iterations": 1
+            }
+        },
+        {
+            "group": null,
+            "name": "bench_compute_llr_nonseparable[gpu-qam128cross-maxlog]",
+            "fullname": "benchmarks/bench_llr.py::bench_compute_llr_nonseparable[gpu-qam128cross-maxlog]",
+            "params": {
+                "backend_device": "gpu",
+                "name": "qam128cross",
+                "method": "maxlog"
+            },
+            "param": "gpu-qam128cross-maxlog",
+            "extra_info": {},
+            "options": {
+                "disable_gc": false,
+                "timer": "perf_counter",
+                "min_rounds": 5,
+                "max_time": 1.0,
+                "min_time": 5e-06,
+                "warmup": false
+            },
+            "stats": {
+                "min": 0.0003685189999487193,
+                "max": 0.001131191000013132,
+                "mean": 0.0006238186666299347,
+                "stddev": 0.00043940029232380953,
+                "rounds": 3,
+                "median": 0.00037174599992795265,
+                "iqr": 0.0005720040000483095,
+                "q1": 0.0003693257499435276,
+                "q3": 0.0009413297499918372,
+                "iqr_outliers": 0,
+                "stddev_outliers": 1,
+                "outliers": "1;0",
+                "ld15iqr": 0.0003685189999487193,
+                "hd15iqr": 0.001131191000013132,
+                "ops": 1603.0299404189293,
+                "total": 0.001871455999889804,
+                "data": [
+                    0.00037174599992795265,
+                    0.001131191000013132,
+                    0.0003685189999487193
+                ],
+                "iterations": 1
+            }
+        },
+        {
+            "group": null,
+            "name": "bench_gmi[cpu-16]",
+            "fullname": "benchmarks/bench_llr.py::bench_gmi[cpu-16]",
+            "params": {
+                "backend_device": "cpu",
+                "order": 16
+            },
+            "param": "cpu-16",
+            "extra_info": {},
+            "options": {
+                "disable_gc": false,
+                "timer": "perf_counter",
+                "min_rounds": 5,
+                "max_time": 1.0,
+                "min_time": 5e-06,
+                "warmup": false
+            },
+            "stats": {
+                "min": 0.004866010000114329,
+                "max": 0.004919822000147178,
+                "mean": 0.0048944990001018596,
+                "stddev": 2.7045341624934223e-05,
+                "rounds": 3,
+                "median": 0.004897665000044071,
+                "iqr": 4.035900002463677e-05,
+                "q1": 0.004873923750096765,
+                "q3": 0.0049142827501214015,
+                "iqr_outliers": 0,
+                "stddev_outliers": 1,
+                "outliers": "1;0",
+                "ld15iqr": 0.004866010000114329,
+                "hd15iqr": 0.004919822000147178,
+                "ops": 204.31100302179834,
+                "total": 0.014683497000305579,
+                "data": [
+                    0.004897665000044071,
+                    0.004866010000114329,
+                    0.004919822000147178
+                ],
+                "iterations": 1
+            }
+        },
+        {
+            "group": null,
+            "name": "bench_gmi[cpu-256]",
+            "fullname": "benchmarks/bench_llr.py::bench_gmi[cpu-256]",
+            "params": {
+                "backend_device": "cpu",
+                "order": 256
+            },
+            "param": "cpu-256",
+            "extra_info": {},
+            "options": {
+                "disable_gc": false,
+                "timer": "perf_counter",
+                "min_rounds": 5,
+                "max_time": 1.0,
+                "min_time": 5e-06,
+                "warmup": false
+            },
+            "stats": {
+                "min": 0.007755750999876909,
+                "max": 0.00794868699995277,
+                "mean": 0.007869763999982146,
+                "stddev": 0.00010114126810260685,
+                "rounds": 3,
+                "median": 0.007904854000116757,
+                "iqr": 0.00014470200005689549,
+                "q1": 0.007793026749936871,
+                "q3": 0.007937728749993767,
+                "iqr_outliers": 0,
+                "stddev_outliers": 1,
+                "outliers": "1;0",
+                "ld15iqr": 0.007755750999876909,
+                "hd15iqr": 0.00794868699995277,
+                "ops": 127.06861349365353,
+                "total": 0.023609291999946436,
+                "data": [
+                    0.007904854000116757,
+                    0.00794868699995277,
+                    0.007755750999876909
+                ],
+                "iterations": 1
+            }
+        },
+        {
+            "group": null,
+            "name": "bench_gmi[gpu-16]",
+            "fullname": "benchmarks/bench_llr.py::bench_gmi[gpu-16]",
+            "params": {
+                "backend_device": "gpu",
+                "order": 16
+            },
+            "param": "gpu-16",
+            "extra_info": {},
+            "options": {
+                "disable_gc": false,
+                "timer": "perf_counter",
+                "min_rounds": 5,
+                "max_time": 1.0,
+                "min_time": 5e-06,
+                "warmup": false
+            },
+            "stats": {
+                "min": 0.0002851509998436086,
+                "max": 0.00037882899982832896,
+                "mean": 0.00031659066659509943,
+                "stddev": 5.3900930539967024e-05,
+                "rounds": 3,
+                "median": 0.0002857920001133607,
+                "iqr": 7.025849998854028e-05,
+                "q1": 0.0002853112499110466,
+                "q3": 0.0003555697498995869,
+                "iqr_outliers": 0,
+                "stddev_outliers": 1,
+                "outliers": "1;0",
+                "ld15iqr": 0.0002851509998436086,
+                "hd15iqr": 0.00037882899982832896,
+                "ops": 3158.6528142313823,
+                "total": 0.0009497719997852982,
+                "data": [
+                    0.00037882899982832896,
+                    0.0002857920001133607,
+                    0.0002851509998436086
+                ],
+                "iterations": 1
+            }
+        },
+        {
+            "group": null,
+            "name": "bench_gmi[gpu-256]",
+            "fullname": "benchmarks/bench_llr.py::bench_gmi[gpu-256]",
+            "params": {
+                "backend_device": "gpu",
+                "order": 256
+            },
+            "param": "gpu-256",
+            "extra_info": {},
+            "options": {
+                "disable_gc": false,
+                "timer": "perf_counter",
+                "min_rounds": 5,
+                "max_time": 1.0,
+                "min_time": 5e-06,
+                "warmup": false
+            },
+            "stats": {
+                "min": 0.0002844190000814706,
+                "max": 0.0003047580000838934,
+                "mean": 0.0002912223333927007,
+                "stddev": 1.172228496620252e-05,
+                "rounds": 3,
+                "median": 0.00028449000001273816,
+                "iqr": 1.5254250001817127e-05,
+                "q1": 0.0002844367500642875,
+                "q3": 0.0002996910000661046,
+                "iqr_outliers": 0,
+                "stddev_outliers": 1,
+                "outliers": "1;0",
+                "ld15iqr": 0.0002844190000814706,
+                "hd15iqr": 0.0003047580000838934,
+                "ops": 3433.8025808327798,
+                "total": 0.0008736670001781022,
+                "data": [
+                    0.0002844190000814706,
+                    0.00028449000001273816,
+                    0.0003047580000838934
+                ],
+                "iterations": 1
+            }
+        },
+        {
+            "group": null,
+            "name": "bench_demap[cpu-psk16]",
+            "fullname": "benchmarks/bench_mapping.py::bench_demap[cpu-psk16]",
+            "params": {
+                "backend_device": "cpu",
+                "name": "psk16"
+            },
+            "param": "cpu-psk16",
+            "extra_info": {},
+            "options": {
+                "disable_gc": false,
+                "timer": "perf_counter",
+                "min_rounds": 5,
+                "max_time": 1.0,
+                "min_time": 5e-06,
+                "warmup": false
+            },
+            "stats": {
+                "min": 0.04809144099999685,
+                "max": 0.0485202400000162,
+                "mean": 0.04832993866663552,
+                "stddev": 0.00021842461058460452,
+                "rounds": 3,
+                "median": 0.04837813499989352,
+                "iqr": 0.00032159925001451484,
+                "q1": 0.048163114499971016,
+                "q3": 0.04848471374998553,
+                "iqr_outliers": 0,
+                "stddev_outliers": 1,
+                "outliers": "1;0",
+                "ld15iqr": 0.04809144099999685,
+                "hd15iqr": 0.0485202400000162,
+                "ops": 20.691108401723422,
+                "total": 0.14498981599990657,
+                "data": [
+                    0.0485202400000162,
+                    0.04809144099999685,
+                    0.04837813499989352
+                ],
+                "iterations": 1
+            }
+        },
+        {
+            "group": null,
+            "name": "bench_demap[cpu-qam128cross]",
+            "fullname": "benchmarks/bench_mapping.py::bench_demap[cpu-qam128cross]",
+            "params": {
+                "backend_device": "cpu",
+                "name": "qam128cross"
+            },
+            "param": "cpu-qam128cross",
+            "extra_info": {},
+            "options": {
+                "disable_gc": false,
+                "timer": "perf_counter",
+                "min_rounds": 5,
+                "max_time": 1.0,
+                "min_time": 5e-06,
+                "warmup": false
+            },
+            "stats": {
+                "min": 0.15897395499996492,
+                "max": 0.1614378280000892,
+                "mean": 0.15981646000000183,
+                "stddev": 0.0014045063972161524,
+                "rounds": 3,
+                "median": 0.15903759699995135,
+                "iqr": 0.001847904750093221,
+                "q1": 0.15898986549996152,
+                "q3": 0.16083777025005475,
+                "iqr_outliers": 0,
+                "stddev_outliers": 1,
+                "outliers": "1;0",
+                "ld15iqr": 0.15897395499996492,
+                "hd15iqr": 0.1614378280000892,
+                "ops": 6.257177765043655,
+                "total": 0.4794493800000055,
+                "data": [
+                    0.15903759699995135,
+                    0.1614378280000892,
+                    0.15897395499996492
+                ],
+                "iterations": 1
+            }
+        },
+        {
+            "group": null,
+            "name": "bench_demap[cpu-qam256]",
+            "fullname": "benchmarks/bench_mapping.py::bench_demap[cpu-qam256]",
+            "params": {
+                "backend_device": "cpu",
+                "name": "qam256"
+            },
+            "param": "cpu-qam256",
+            "extra_info": {},
+            "options": {
+                "disable_gc": false,
+                "timer": "perf_counter",
+                "min_rounds": 5,
+                "max_time": 1.0,
+                "min_time": 5e-06,
+                "warmup": false
+            },
+            "stats": {
+                "min": 0.010958685999867157,
+                "max": 0.013233871000011277,
+                "mean": 0.01201016366667318,
+                "stddev": 0.001147329067768054,
+                "rounds": 3,
+                "median": 0.011837934000141104,
+                "iqr": 0.0017063887501080899,
+                "q1": 0.011178497999935644,
+                "q3": 0.012884886750043734,
+                "iqr_outliers": 0,
+                "stddev_outliers": 1,
+                "outliers": "1;0",
+                "ld15iqr": 0.010958685999867157,
+                "hd15iqr": 0.013233871000011277,
+                "ops": 83.26281204434248,
+                "total": 0.03603049100001954,
+                "data": [
+                    0.010958685999867157,
+                    0.011837934000141104,
+                    0.013233871000011277
+                ],
+                "iterations": 1
+            }
+        },
+        {
+            "group": null,
+            "name": "bench_demap[gpu-psk16]",
+            "fullname": "benchmarks/bench_mapping.py::bench_demap[gpu-psk16]",
+            "params": {
+                "backend_device": "gpu",
+                "name": "psk16"
+            },
+            "param": "gpu-psk16",
+            "extra_info": {},
+            "options": {
+                "disable_gc": false,
+                "timer": "perf_counter",
+                "min_rounds": 5,
+                "max_time": 1.0,
+                "min_time": 5e-06,
+                "warmup": false
+            },
+            "stats": {
+                "min": 0.00022791300011704152,
+                "max": 0.0002784280000014405,
+                "mean": 0.0002456730000327904,
+                "stddev": 2.840033139366668e-05,
+                "rounds": 3,
+                "median": 0.00023067799997988914,
+                "iqr": 3.788624991329925e-05,
+                "q1": 0.00022860425008275342,
+                "q3": 0.0002664904999960527,
+                "iqr_outliers": 0,
+                "stddev_outliers": 1,
+                "outliers": "1;0",
+                "ld15iqr": 0.00022791300011704152,
+                "hd15iqr": 0.0002784280000014405,
+                "ops": 4070.45137180939,
+                "total": 0.0007370190000983712,
+                "data": [
+                    0.0002784280000014405,
+                    0.00022791300011704152,
+                    0.00023067799997988914
+                ],
+                "iterations": 1
+            }
+        },
+        {
+            "group": null,
+            "name": "bench_demap[gpu-qam128cross]",
+            "fullname": "benchmarks/bench_mapping.py::bench_demap[gpu-qam128cross]",
+            "params": {
+                "backend_device": "gpu",
+                "name": "qam128cross"
+            },
+            "param": "gpu-qam128cross",
+            "extra_info": {},
+            "options": {
+                "disable_gc": false,
+                "timer": "perf_counter",
+                "min_rounds": 5,
+                "max_time": 1.0,
+                "min_time": 5e-06,
+                "warmup": false
+            },
+            "stats": {
+                "min": 0.0003250869999646966,
+                "max": 0.0003402259999347734,
+                "mean": 0.000331001333279346,
+                "stddev": 8.09419916630401e-06,
+                "rounds": 3,
+                "median": 0.000327690999938568,
+                "iqr": 1.1354249977557629e-05,
+                "q1": 0.00032573799995816444,
+                "q3": 0.00033709224993572207,
+                "iqr_outliers": 0,
+                "stddev_outliers": 1,
+                "outliers": "1;0",
+                "ld15iqr": 0.0003250869999646966,
+                "hd15iqr": 0.0003402259999347734,
+                "ops": 3021.1358670149457,
+                "total": 0.000993003999838038,
+                "data": [
+                    0.000327690999938568,
+                    0.0003402259999347734,
+                    0.0003250869999646966
+                ],
+                "iterations": 1
+            }
+        },
+        {
+            "group": null,
+            "name": "bench_demap[gpu-qam256]",
+            "fullname": "benchmarks/bench_mapping.py::bench_demap[gpu-qam256]",
+            "params": {
+                "backend_device": "gpu",
+                "name": "qam256"
+            },
+            "param": "gpu-qam256",
+            "extra_info": {},
+            "options": {
+                "disable_gc": false,
+                "timer": "perf_counter",
+                "min_rounds": 5,
+                "max_time": 1.0,
+                "min_time": 5e-06,
+                "warmup": false
+            },
+            "stats": {
+                "min": 0.0004394439999941824,
+                "max": 0.0008689979999871866,
+                "mean": 0.0006086343333511953,
+                "stddev": 0.00022883092503723625,
+                "rounds": 3,
+                "median": 0.0005174610000722168,
+                "iqr": 0.0003221654999947532,
+                "q1": 0.000458948250013691,
+                "q3": 0.0007811137500084442,
+                "iqr_outliers": 0,
+                "stddev_outliers": 1,
+                "outliers": "1;0",
+                "ld15iqr": 0.0004394439999941824,
+                "hd15iqr": 0.0008689979999871866,
+                "ops": 1643.022657781907,
+                "total": 0.0018259030000535859,
+                "data": [
+                    0.0005174610000722168,
+                    0.0008689979999871866,
+                    0.0004394439999941824
+                ],
+                "iterations": 1
+            }
+        },
+        {
+            "group": null,
+            "name": "bench_map[cpu-16]",
+            "fullname": "benchmarks/bench_mapping.py::bench_map[cpu-16]",
+            "params": {
+                "backend_device": "cpu",
+                "order": 16
+            },
+            "param": "cpu-16",
+            "extra_info": {},
+            "options": {
+                "disable_gc": false,
+                "timer": "perf_counter",
+                "min_rounds": 5,
+                "max_time": 1.0,
+                "min_time": 5e-06,
+                "warmup": false
+            },
+            "stats": {
+                "min": 0.0030287249999219057,
+                "max": 0.003621689999818045,
+                "mean": 0.003233483666614726,
+                "stddev": 0.0003363653631641751,
+                "rounds": 3,
+                "median": 0.003050036000104228,
+                "iqr": 0.0004447237499221046,
+                "q1": 0.0030340527499674863,
+                "q3": 0.003478776499889591,
+                "iqr_outliers": 0,
+                "stddev_outliers": 1,
+                "outliers": "1;0",
+                "ld15iqr": 0.0030287249999219057,
+                "hd15iqr": 0.003621689999818045,
+                "ops": 309.26397133990884,
+                "total": 0.009700450999844179,
+                "data": [
+                    0.0030287249999219057,
+                    0.003621689999818045,
+                    0.003050036000104228
+                ],
+                "iterations": 1
+            }
+        },
+        {
+            "group": null,
+            "name": "bench_map[cpu-256]",
+            "fullname": "benchmarks/bench_mapping.py::bench_map[cpu-256]",
+            "params": {
+                "backend_device": "cpu",
+                "order": 256
+            },
+            "param": "cpu-256",
+            "extra_info": {},
+            "options": {
+                "disable_gc": false,
+                "timer": "perf_counter",
+                "min_rounds": 5,
+                "max_time": 1.0,
+                "min_time": 5e-06,
+                "warmup": false
+            },
+            "stats": {
+                "min": 0.004894984999964436,
+                "max": 0.005848924000019906,
+                "mean": 0.005253705333340501,
+                "stddev": 0.0005190842900706503,
+                "rounds": 3,
+                "median": 0.0050172070000371605,
+                "iqr": 0.0007154542500416028,
+                "q1": 0.004925540499982617,
+                "q3": 0.00564099475002422,
+                "iqr_outliers": 0,
+                "stddev_outliers": 1,
+                "outliers": "1;0",
+                "ld15iqr": 0.004894984999964436,
+                "hd15iqr": 0.005848924000019906,
+                "ops": 190.34185142701236,
+                "total": 0.015761116000021502,
+                "data": [
+                    0.0050172070000371605,
+                    0.005848924000019906,
+                    0.004894984999964436
+                ],
+                "iterations": 1
+            }
+        },
+        {
+            "group": null,
+            "name": "bench_map[gpu-16]",
+            "fullname": "benchmarks/bench_mapping.py::bench_map[gpu-16]",
+            "params": {
+                "backend_device": "gpu",
+                "order": 16
+            },
+            "param": "gpu-16",
+            "extra_info": {},
+            "options": {
+                "disable_gc": false,
+                "timer": "perf_counter",
+                "min_rounds": 5,
+                "max_time": 1.0,
+                "min_time": 5e-06,
+                "warmup": false
+            },
+            "stats": {
+                "min": 0.00022646000002168876,
+                "max": 0.0006776449999961187,
+                "mean": 0.0003848433332980979,
+                "stddev": 0.00025385663733762067,
+                "rounds": 3,
+                "median": 0.00025042499987648625,
+                "iqr": 0.00033838874998082247,
+                "q1": 0.00023245124998538813,
+                "q3": 0.0005708399999662106,
+                "iqr_outliers": 0,
+                "stddev_outliers": 1,
+                "outliers": "1;0",
+                "ld15iqr": 0.00022646000002168876,
+                "hd15iqr": 0.0006776449999961187,
+                "ops": 2598.45997962346,
+                "total": 0.0011545299998942937,
+                "data": [
+                    0.00025042499987648625,
+                    0.0006776449999961187,
+                    0.00022646000002168876
+                ],
+                "iterations": 1
+            }
+        },
+        {
+            "group": null,
+            "name": "bench_map[gpu-256]",
+            "fullname": "benchmarks/bench_mapping.py::bench_map[gpu-256]",
+            "params": {
+                "backend_device": "gpu",
+                "order": 256
+            },
+            "param": "gpu-256",
+            "extra_info": {},
+            "options": {
+                "disable_gc": false,
+                "timer": "perf_counter",
+                "min_rounds": 5,
+                "max_time": 1.0,
+                "min_time": 5e-06,
+                "warmup": false
+            },
+            "stats": {
+                "min": 0.00029064099999231985,
+                "max": 0.0007758519998333213,
+                "mean": 0.0004643473333392952,
+                "stddev": 0.0002703677385622317,
+                "rounds": 3,
+                "median": 0.0003265490001922444,
+                "iqr": 0.0003639082498807511,
+                "q1": 0.000299618000042301,
+                "q3": 0.0006635262499230521,
+                "iqr_outliers": 0,
+                "stddev_outliers": 1,
+                "outliers": "1;0",
+                "ld15iqr": 0.00029064099999231985,
+                "hd15iqr": 0.0007758519998333213,
+                "ops": 2153.5603377080392,
+                "total": 0.0013930420000178856,
+                "data": [
+                    0.00029064099999231985,
+                    0.0007758519998333213,
+                    0.0003265490001922444
+                ],
+                "iterations": 1
+            }
+        },
+        {
+            "group": null,
+            "name": "bench_signal_pipeline[cpu-frame-backed]",
+            "fullname": "benchmarks/bench_signal_pipeline.py::bench_signal_pipeline[cpu-frame-backed]",
+            "params": {
+                "backend_device": "cpu",
+                "case": "frame"
+            },
+            "param": "cpu-frame-backed",
+            "extra_info": {
+                "peak_cpu_tracemalloc_bytes": 5426771,
+                "rewrap_peak_bytes": 1384,
+                "legacy_rewrap_peak_bytes": 1498852,
+                "rewrap_saved_bytes": 1497468,
+                "input_sample_bytes": 1083808,
+                "frame_backed": true
+            },
+            "options": {
+                "disable_gc": false,
+                "timer": "perf_counter",
+                "min_rounds": 5,
+                "max_time": 1.0,
+                "min_time": 5e-06,
+                "warmup": false
+            },
+            "stats": {
+                "min": 0.01285974300003545,
+                "max": 0.013052319000053103,
+                "mean": 0.012968490000048405,
+                "stddev": 9.867653717580639e-05,
+                "rounds": 3,
+                "median": 0.012993408000056661,
+                "iqr": 0.0001444320000132393,
+                "q1": 0.012893159250040753,
+                "q3": 0.013037591250053993,
+                "iqr_outliers": 0,
+                "stddev_outliers": 1,
+                "outliers": "1;0",
+                "ld15iqr": 0.01285974300003545,
+                "hd15iqr": 0.013052319000053103,
+                "ops": 77.10997965038855,
+                "total": 0.038905470000145215,
+                "data": [
+                    0.01285974300003545,
+                    0.012993408000056661,
+                    0.013052319000053103
+                ],
+                "iterations": 1
+            }
+        },
+        {
+            "group": null,
+            "name": "bench_signal_pipeline[cpu-plain]",
+            "fullname": "benchmarks/bench_signal_pipeline.py::bench_signal_pipeline[cpu-plain]",
+            "params": {
+                "backend_device": "cpu",
+                "case": "plain"
+            },
+            "param": "cpu-plain",
+            "extra_info": {
+                "peak_cpu_tracemalloc_bytes": 5259147,
+                "rewrap_peak_bytes": 1512,
+                "legacy_rewrap_peak_bytes": 1448328,
+                "rewrap_saved_bytes": 1446816,
+                "input_sample_bytes": 1048576,
+                "frame_backed": false
+            },
+            "options": {
+                "disable_gc": false,
+                "timer": "perf_counter",
+                "min_rounds": 5,
+                "max_time": 1.0,
+                "min_time": 5e-06,
+                "warmup": false
+            },
+            "stats": {
+                "min": 0.014248768000015843,
+                "max": 0.015196193999827301,
+                "mean": 0.01475832366660749,
+                "stddev": 0.00047776364087816323,
+                "rounds": 3,
+                "median": 0.014830008999979327,
+                "iqr": 0.0007105694998585932,
+                "q1": 0.014394078250006714,
+                "q3": 0.015104647749865308,
+                "iqr_outliers": 0,
+                "stddev_outliers": 1,
+                "outliers": "1;0",
+                "ld15iqr": 0.014248768000015843,
+                "hd15iqr": 0.015196193999827301,
+                "ops": 67.75837300970855,
+                "total": 0.04427497099982247,
+                "data": [
+                    0.014248768000015843,
+                    0.014830008999979327,
+                    0.015196193999827301
+                ],
+                "iterations": 1
+            }
+        },
+        {
+            "group": null,
+            "name": "bench_signal_pipeline[gpu-frame-backed]",
+            "fullname": "benchmarks/bench_signal_pipeline.py::bench_signal_pipeline[gpu-frame-backed]",
+            "params": {
+                "backend_device": "gpu",
+                "case": "frame"
+            },
+            "param": "gpu-frame-backed",
+            "extra_info": {
+                "peak_gpu_pool_bytes": 10032640,
+                "rewrap_peak_bytes": 0,
+                "legacy_rewrap_peak_bytes": 1478144,
+                "rewrap_saved_bytes": 1478144,
+                "input_sample_bytes": 1083808,
+                "frame_backed": true
+            },
+            "options": {
+                "disable_gc": false,
+                "timer": "perf_counter",
+                "min_rounds": 5,
+                "max_time": 1.0,
+                "min_time": 5e-06,
+                "warmup": false
+            },
+            "stats": {
+                "min": 0.002221594000047844,
+                "max": 0.0023043300000153977,
+                "mean": 0.0022663650000443645,
+                "stddev": 4.1785794834105475e-05,
+                "rounds": 3,
+                "median": 0.0022731710000698513,
+                "iqr": 6.205199997566524e-05,
+                "q1": 0.002234488250053346,
+                "q3": 0.002296540250029011,
+                "iqr_outliers": 0,
+                "stddev_outliers": 1,
+                "outliers": "1;0",
+                "ld15iqr": 0.002221594000047844,
+                "hd15iqr": 0.0023043300000153977,
+                "ops": 441.23519379289075,
+                "total": 0.006799095000133093,
+                "data": [
+                    0.0023043300000153977,
+                    0.0022731710000698513,
+                    0.002221594000047844
+                ],
+                "iterations": 1
+            }
+        },
+        {
+            "group": null,
+            "name": "bench_signal_pipeline[gpu-plain]",
+            "fullname": "benchmarks/bench_signal_pipeline.py::bench_signal_pipeline[gpu-plain]",
+            "params": {
+                "backend_device": "gpu",
+                "case": "plain"
+            },
+            "param": "gpu-plain",
+            "extra_info": {
+                "peak_gpu_pool_bytes": 9961472,
+                "rewrap_peak_bytes": 0,
+                "legacy_rewrap_peak_bytes": 1441792,
+                "rewrap_saved_bytes": 1441792,
+                "input_sample_bytes": 1048576,
+                "frame_backed": false
+            },
+            "options": {
+                "disable_gc": false,
+                "timer": "perf_counter",
+                "min_rounds": 5,
+                "max_time": 1.0,
+                "min_time": 5e-06,
+                "warmup": false
+            },
+            "stats": {
+                "min": 0.002176517999942007,
+                "max": 0.002483710999968025,
+                "mean": 0.0022939310000159216,
+                "stddev": 0.00016589039098083308,
+                "rounds": 3,
+                "median": 0.0022215640001377324,
+                "iqr": 0.0002303947500195136,
+                "q1": 0.0021877794999909383,
+                "q3": 0.002418174250010452,
+                "iqr_outliers": 0,
+                "stddev_outliers": 1,
+                "outliers": "1;0",
+                "ld15iqr": 0.002176517999942007,
+                "hd15iqr": 0.002483710999968025,
+                "ops": 435.93290294828364,
+                "total": 0.0068817930000477645,
+                "data": [
+                    0.0022215640001377324,
+                    0.002483710999968025,
+                    0.002176517999942007
+                ],
+                "iterations": 1
+            }
+        },
+        {
+            "group": null,
+            "name": "bench_evm[cpu]",
+            "fullname": "benchmarks/bench_sync_misc.py::bench_evm[cpu]",
+            "params": {
+                "backend_device": "cpu"
+            },
+            "param": "cpu",
+            "extra_info": {},
+            "options": {
+                "disable_gc": false,
+                "timer": "perf_counter",
+                "min_rounds": 5,
+                "max_time": 1.0,
+                "min_time": 5e-06,
+                "warmup": false
+            },
+            "stats": {
+                "min": 0.0010374579999279376,
+                "max": 0.0011226999999962572,
+                "mean": 0.0010820993333406175,
+                "stddev": 4.276441142811316e-05,
+                "rounds": 3,
+                "median": 0.0010861400000976573,
+                "iqr": 6.393150005123971e-05,
+                "q1": 0.0010496284999703676,
+                "q3": 0.0011135600000216073,
+                "iqr_outliers": 0,
+                "stddev_outliers": 1,
+                "outliers": "1;0",
+                "ld15iqr": 0.0010374579999279376,
+                "hd15iqr": 0.0011226999999962572,
+                "ops": 924.1295777466535,
+                "total": 0.003246298000021852,
+                "data": [
+                    0.0011226999999962572,
+                    0.0010861400000976573,
+                    0.0010374579999279376
+                ],
+                "iterations": 1
+            }
+        },
+        {
+            "group": null,
+            "name": "bench_evm[gpu]",
+            "fullname": "benchmarks/bench_sync_misc.py::bench_evm[gpu]",
+            "params": {
+                "backend_device": "gpu"
+            },
+            "param": "gpu",
+            "extra_info": {},
+            "options": {
+                "disable_gc": false,
+                "timer": "perf_counter",
+                "min_rounds": 5,
+                "max_time": 1.0,
+                "min_time": 5e-06,
+                "warmup": false
+            },
+            "stats": {
+                "min": 0.0008530880002126651,
+                "max": 0.0010016999999606924,
+                "mean": 0.0009135330001299735,
+                "stddev": 7.808817821332664e-05,
+                "rounds": 3,
+                "median": 0.0008858110002165631,
+                "iqr": 0.00011145899981102048,
+                "q1": 0.0008612687502136396,
+                "q3": 0.00097272775002466,
+                "iqr_outliers": 0,
+                "stddev_outliers": 1,
+                "outliers": "1;0",
+                "ld15iqr": 0.0008530880002126651,
+                "hd15iqr": 0.0010016999999606924,
+                "ops": 1094.6512056572935,
+                "total": 0.0027405990003899205,
+                "data": [
+                    0.0010016999999606924,
+                    0.0008858110002165631,
+                    0.0008530880002126651
+                ],
+                "iterations": 1
+            }
+        },
+        {
+            "group": null,
+            "name": "bench_resolve_phase_ambiguity[cpu]",
+            "fullname": "benchmarks/bench_sync_misc.py::bench_resolve_phase_ambiguity[cpu]",
+            "params": {
+                "backend_device": "cpu"
+            },
+            "param": "cpu",
+            "extra_info": {},
+            "options": {
+                "disable_gc": false,
+                "timer": "perf_counter",
+                "min_rounds": 5,
+                "max_time": 1.0,
+                "min_time": 5e-06,
+                "warmup": false
+            },
+            "stats": {
+                "min": 0.00017728600005284534,
+                "max": 0.00019293600007586065,
+                "mean": 0.00018376866675377337,
+                "stddev": 8.163099982860042e-06,
+                "rounds": 3,
+                "median": 0.00018108400013261416,
+                "iqr": 1.1737500017261482e-05,
+                "q1": 0.00017823550007278754,
+                "q3": 0.00018997300009004903,
+                "iqr_outliers": 0,
+                "stddev_outliers": 1,
+                "outliers": "1;0",
+                "ld15iqr": 0.00017728600005284534,
+                "hd15iqr": 0.00019293600007586065,
+                "ops": 5441.624068263349,
+                "total": 0.0005513060002613202,
+                "data": [
+                    0.00019293600007586065,
+                    0.00018108400013261416,
+                    0.00017728600005284534
+                ],
+                "iterations": 1
+            }
+        },
+        {
+            "group": null,
+            "name": "bench_resolve_phase_ambiguity[gpu]",
+            "fullname": "benchmarks/bench_sync_misc.py::bench_resolve_phase_ambiguity[gpu]",
+            "params": {
+                "backend_device": "gpu"
+            },
+            "param": "gpu",
+            "extra_info": {},
+            "options": {
+                "disable_gc": false,
+                "timer": "perf_counter",
+                "min_rounds": 5,
+                "max_time": 1.0,
+                "min_time": 5e-06,
+                "warmup": false
+            },
+            "stats": {
+                "min": 0.00022623899985774187,
+                "max": 0.0005385500001011678,
+                "mean": 0.0003415706667055929,
+                "stddev": 0.0001714184829817909,
+                "rounds": 3,
+                "median": 0.00025992300015786896,
+                "iqr": 0.00023423325018256946,
+                "q1": 0.00023465999993277364,
+                "q3": 0.0004688932501153431,
+                "iqr_outliers": 0,
+                "stddev_outliers": 1,
+                "outliers": "1;0",
+                "ld15iqr": 0.00022623899985774187,
+                "hd15iqr": 0.0005385500001011678,
+                "ops": 2927.651866727542,
+                "total": 0.0010247120001167787,
+                "data": [
+                    0.00025992300015786896,
+                    0.0005385500001011678,
+                    0.00022623899985774187
+                ],
+                "iterations": 1
+            }
+        },
+        {
+            "group": null,
+            "name": "bench_viterbi_viterbi_cs[cpu]",
+            "fullname": "benchmarks/bench_sync_misc.py::bench_viterbi_viterbi_cs[cpu]",
+            "params": {
+                "backend_device": "cpu"
+            },
+            "param": "cpu",
+            "extra_info": {},
+            "options": {
+                "disable_gc": false,
+                "timer": "perf_counter",
+                "min_rounds": 5,
+                "max_time": 1.0,
+                "min_time": 5e-06,
+                "warmup": false
+            },
+            "stats": {
+                "min": 0.003346779000139577,
+                "max": 0.004106660000161355,
+                "mean": 0.003621028666808949,
+                "stddev": 0.00042174214907428613,
+                "rounds": 3,
+                "median": 0.003409647000125915,
+                "iqr": 0.0005699107500163336,
+                "q1": 0.0033624960001361615,
+                "q3": 0.003932406750152495,
+                "iqr_outliers": 0,
+                "stddev_outliers": 1,
+                "outliers": "1;0",
+                "ld15iqr": 0.003346779000139577,
+                "hd15iqr": 0.004106660000161355,
+                "ops": 276.1646184042104,
+                "total": 0.010863086000426847,
+                "data": [
+                    0.003409647000125915,
+                    0.004106660000161355,
+                    0.003346779000139577
+                ],
+                "iterations": 1
+            }
+        },
+        {
+            "group": null,
+            "name": "bench_viterbi_viterbi_cs[gpu]",
+            "fullname": "benchmarks/bench_sync_misc.py::bench_viterbi_viterbi_cs[gpu]",
+            "params": {
+                "backend_device": "gpu"
+            },
+            "param": "gpu",
+            "extra_info": {},
+            "options": {
+                "disable_gc": false,
+                "timer": "perf_counter",
+                "min_rounds": 5,
+                "max_time": 1.0,
+                "min_time": 5e-06,
+                "warmup": false
+            },
+            "stats": {
+                "min": 0.0012715419998130528,
+                "max": 0.0015672489998905803,
+                "mean": 0.0013715639998584568,
+                "stddev": 0.00016948219566832683,
+                "rounds": 3,
+                "median": 0.0012759009998717374,
+                "iqr": 0.0002217802500581456,
+                "q1": 0.001272631749827724,
+                "q3": 0.0014944119998858696,
+                "iqr_outliers": 0,
+                "stddev_outliers": 1,
+                "outliers": "1;0",
+                "ld15iqr": 0.0012715419998130528,
+                "hd15iqr": 0.0015672489998905803,
+                "ops": 729.094668643387,
+                "total": 0.004114691999575371,
+                "data": [
+                    0.0012759009998717374,
+                    0.0015672489998905803,
+                    0.0012715419998130528
+                ],
+                "iterations": 1
+            }
+        }
+    ],
+    "datetime": "2026-10-26T08:23:12.618578+00:00",
+    "version": "5.2.3"
+}

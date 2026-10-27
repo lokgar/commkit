@@ -1,4 +1,4 @@
-"""Decision-directed PLL carrier phase recovery."""
+"""Decision-directed PLL carrier-phase recovery: :class:`PLL`."""
 
 from dataclasses import dataclass
 from typing import Any
@@ -41,39 +41,40 @@ def _get_numba_dd_pll():
             lev_min,
             side,
         ):
-            """Inner DD-PLL loop compiled to machine code by Numba.
+            """Run the decision-directed PLL over the symbols (Numba).
 
             Parameters
             ----------
-            sym_r, sym_i : (N,) float64
-                Real and imaginary parts of received symbols.
-            const_r, const_i : (M,) float64
-                Real and imaginary parts of reference constellation.
-            mu : float64
-                Proportional (phase) gain - corrects the instantaneous phase error.
-            beta : float64
-                Integral (frequency) gain - tracks residual frequency drift.
-                Set to 0.0 for a 1st-order loop.
-            phi0 : float64
-                Initial phase state in radians.
-            freq0 : float64
-                Initial frequency correction state in radians/symbol.
+            sym_r, sym_i : numpy.ndarray
+                Real and imaginary parts of the received symbols, float64, ``(N,)``.
+            const_r, const_i : numpy.ndarray
+                Real and imaginary parts of the constellation, float64, ``(M,)``.
+            mu : float
+                Proportional (phase) gain: corrects the instantaneous phase error.
+            beta : float
+                Integral (frequency) gain: tracks a residual frequency drift; 0 for
+                a first-order loop.
+            phi0 : float
+                Initial phase in radians.
+            freq0 : float
+                Initial frequency correction in radians per symbol.
             is_sq_qam : bool
-                True when the constellation is a square QAM grid.  Enables the
-                O(1) rounding decision path instead of the O(M) linear search.
-            levels : (side,) float64
-                Sorted unique axis levels for square QAM (ignored when not sq_qam).
-            d_grid : float64
-                Grid spacing (levels[1] - levels[0]).
-            lev_min : float64
-                Minimum level value (levels[0]).
+                The constellation is a square QAM grid: decide by rounding, O(1),
+                instead of the O(M) search.
+            levels : numpy.ndarray
+                Sorted distinct axis levels of the square grid, float64, ``(side,)``;
+                unused otherwise.
+            d_grid : float
+                Grid spacing, ``levels[1] - levels[0]``.
+            lev_min : float
+                Smallest level, ``levels[0]``.
             side : int
-                Number of points per axis (sqrt of constellation order).
+                Points per axis, ``sqrt(M)``.
 
             Returns
             -------
-            phase_est : (N,) float64
-                Per-symbol phase trajectory φ[n].
+            numpy.ndarray
+                Per-symbol phase ``φ[n]``, float64, ``(N,)``.
             """
             N = len(sym_r)
             M = len(const_r)
@@ -165,26 +166,33 @@ def _get_numba_dd_pll_joint():
             lev_min,
             side,
         ):
-            """Joint-channel DD-PLL with PI loop filter.
+            """Run one decision-directed PLL shared by all channels (Numba).
+
+            The phase error is averaged over the channels at each symbol and drives
+            one PI loop.
 
             Parameters
             ----------
-            sym_r, sym_i : (C, N) float64
-                Real and imaginary parts of received symbols, all channels.
-            const_r, const_i : (M,) float64
-                Reference constellation.
-            mu, beta, phi0, freq0 : float64
-                Loop parameters - same semantics as ``_dd_pll_loop``.
+            sym_r, sym_i : numpy.ndarray
+                Real and imaginary parts of the received symbols, float64, ``(C, N)``.
+            const_r, const_i : numpy.ndarray
+                Real and imaginary parts of the constellation, float64, ``(M,)``.
+            mu, beta, phi0, freq0 : float
+                Loop gains and initial state, as for ``_dd_pll_loop``.
             is_sq_qam : bool
-                Enables O(1) rounding decision for square QAM grids.
-            levels : (side,) float64
-            d_grid, lev_min : float64
+                Decide by rounding on a square QAM grid.
+            levels : numpy.ndarray
+                Axis levels of the square grid, float64, ``(side,)``.
+            d_grid, lev_min : float
+                Grid spacing and smallest level.
             side : int
+                Points per axis.
 
             Returns
             -------
-            phase_est : (N,) float64
-                Single shared phase trajectory (broadcast to all channels by caller).
+            numpy.ndarray
+                The shared phase ``φ[n]``, float64, ``(N,)``; the caller copies it to
+                every channel.
             """
             C = sym_r.shape[0]
             N = sym_r.shape[1]
@@ -239,20 +247,19 @@ def _get_numba_dd_pll_joint():
 
 @dataclass(frozen=True)
 class PLL:
-    r"""
-    Decision-directed phase-locked loop.
+    r"""Decision-directed phase-locked loop.
 
     Tracks the carrier phase symbol by symbol from hard decisions:
     derotate by ``φ̂[n]``, decide, take the cross-product error
     ``e[n] = Im(y[n]·d̂*[n])``, then ``φ̂[n+1] = φ̂[n] + μ·e[n] + ν[n]`` and
-    ``ν[n+1] = ν[n] + β·e[n]``.  A 1st-order loop (``β = 0``) tracks phase;
+    ``ν[n+1] = ν[n] + β·e[n]``.  A first-order loop (``β = 0``) tracks the phase;
     ``β > 0`` also tracks a residual frequency offset.  The same object sets
     the inline PLL of the equalizers.
 
     Parameters
     ----------
     bandwidth : float, default 1e-3
-        Normalised one-sided loop bandwidth in ``(0, 0.5)``, as a fraction of
+        Normalized one-sided loop bandwidth in ``(0, 0.5)``, as a fraction of
         the symbol rate.  Gives critically damped gains ``μ = 4B``,
         ``β = 4B²``.  Used when ``mu`` is not given.
     mu : float, optional
@@ -260,14 +267,14 @@ class PLL:
         ``1e-3`` (high-order QAM, high SNR) to ``5e-2`` (QPSK).
     beta : float, optional
         Raw integral gain (``β ≈ μ²/4`` is critically damped); requires
-        ``mu``.  Defaults to 0 (1st-order) with ``mu``.
+        ``mu``.  Defaults to 0 (a first-order loop) with ``mu``.
     phase_init : float, default 0.0
         Initial phase in radians, e.g. the last value of a BPS estimate.
     joint_channels : bool, default False
         MIMO: average the phase error across channels at each symbol and
         drive one shared loop (shared LO).
     cycle_slip : CycleSlip, optional
-        Repair ``2π/M`` slips (M the rotational symmetry, ``π/2`` for QAM)
+        Repair slips of ``2π/M`` (M the rotational symmetry, 4 for QAM)
         in the per-symbol trajectory after the loop.
 
     Notes
@@ -306,7 +313,7 @@ def _pll(symbols: ArrayType, method: PLL, ctx: _Context) -> _Phase:
     symbols, xp, _ = dispatch(symbols)
     C, N = symbols.shape
 
-    # Normalise to unit average power so the effective loop gain is mu regardless
+    # Normalize to unit average power so the effective loop gain is mu regardless
     # of input amplitude.  The error signal is e[n] = Im(y[n]*d_hat*), which
     # scales with signal amplitude; without this, the effective gain is mu*A
     # (where A is the RMS amplitude), making loop bandwidth input-dependent.

@@ -15,8 +15,7 @@ from .backend import ArrayType, dispatch, to_device
 
 
 def circular_kernel(taps: ArrayType, length: int) -> np.ndarray:
-    """
-    Fold ``taps`` into a length-``length`` circular kernel on the host.
+    """Fold ``taps`` into a length-``length`` circular kernel on the host.
 
     Tap ``(L - 1) // 2`` goes to index 0; taps longer than ``length`` wrap
     around and add up, which is exactly circular convolution with them.
@@ -41,8 +40,7 @@ def circular_kernel(taps: ArrayType, length: int) -> np.ndarray:
 
 
 def convolve_periodic(samples: ArrayType, taps: ArrayType) -> ArrayType:
-    """
-    Circular convolution of each row of ``samples`` with ``taps``.
+    """Circular convolution of each row of ``samples`` with ``taps``.
 
     Parameters
     ----------
@@ -53,7 +51,7 @@ def convolve_periodic(samples: ArrayType, taps: ArrayType) -> ArrayType:
 
     Returns
     -------
-    array_like
+    ndarray
         Filtered period, same shape, dtype and device as ``samples``.  Real
         samples and real taps give a real result.
     """

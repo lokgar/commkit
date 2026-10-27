@@ -1,78 +1,24 @@
-"""
-Hand-written CUDA kernel infrastructure for the CuPy backend.
+"""Hand-written CUDA kernels for CuPy input (private).
 
-This subpackage hosts raw CUDA C++ kernels (under ``src/``) together with the
-lazy compilation machinery built on :class:`cupy.RawModule`. Its public
-surface is two functions:
+Raw CUDA C++ kernels (under ``src/``) and their lazy compilation through
+:class:`cupy.RawModule`.  :func:`get_kernel` is the one entry point: it
+returns a launchable wrapper for a kernel, and callers use it only on CuPy
+input, so CuPy already works.  A kernel that fails to compile or load
+raises: there is no slower path to fall back to, since the kernels are
+tested on a GPU before every release.
 
-is_available :
-    True when CuPy is functional and a CUDA device with compute
-    capability >= 7.0 is present.
-get_kernel :
-    Returns a launchable kernel wrapper, or ``None`` - in which case the
-    caller **must** fall back to its existing ``xp`` implementation.
-
-Importing this package (or ``commkit``) never touches NVRTC: kernel
-sources are read and compiled on the first ``get_kernel()`` call for a
-given specialization, and cached in-process afterwards. Cross-process
-reuse comes from CuPy's on-disk kernel cache (``~/.cupy/kernel_cache``).
+Importing this package (or ``commkit``) never touches NVRTC: kernel sources
+are read and compiled on the first ``get_kernel()`` call for a given
+specialization and cached in-process afterwards.  Cross-process reuse comes
+from CuPy's on-disk kernel cache (``~/.cupy/kernel_cache``).
 """
 
 from collections.abc import Callable
-from functools import lru_cache
 from typing import Any
 
-from ..backend import is_cupy_available
-from ..logger import logger
 
-# Volta and newer. Older parts lack the independent-thread-scheduling and
-# shared-memory sizes the kernels in src/ are written against.
-_MIN_COMPUTE_CAPABILITY = 70
-
-# Kernel names that have already produced a compile/load warning; the
-# fallback contract promises at most one warning per process per kernel.
-_warned_kernels: set[str] = set()
-
-
-@lru_cache(maxsize=1)
-def _device_supported() -> bool:
-    """Hardware probe, cached for the process lifetime.
-
-    Checks that at least one CUDA device is present and that the current
-    device has compute capability >= 7.0. Only called when CuPy itself is
-    importable and functional.
-    """
-    import cupy as cp
-
-    try:
-        if cp.cuda.runtime.getDeviceCount() < 1:
-            return False
-        cc = int(cp.cuda.Device().compute_capability)
-    except Exception:
-        return False
-    return cc >= _MIN_COMPUTE_CAPABILITY
-
-
-def is_available() -> bool:
-    """Checks whether custom CUDA kernels can be compiled and launched.
-
-    Returns
-    -------
-    bool
-        True if CuPy is installed and functional, at least one CUDA device is
-        present, and the current device has compute capability >= 7.0.
-    """
-    if not is_cupy_available():
-        return False
-    return _device_supported()
-
-
-def get_kernel(name: str, **spec: Any) -> Callable | None:
-    """Returns a launchable kernel wrapper, or ``None`` if unavailable.
-
-    ``None`` means the caller **must** fall back to the existing ``xp``
-    implementation. Any compile/load failure logs one warning per kernel
-    name per process and returns ``None``.
+def get_kernel(name: str, **spec: Any) -> Callable:
+    """Return a launchable kernel wrapper.
 
     Parameters
     ----------
@@ -84,43 +30,31 @@ def get_kernel(name: str, **spec: Any) -> Callable | None:
 
     Returns
     -------
-    callable or None
+    callable
         A wrapper that handles grid/block computation and input
         validation. Call sites pass CuPy arrays and plain Python scalars
-        only. ``None`` when no usable GPU is present or compilation fails.
+        only.
 
     Raises
     ------
     KeyError
-        If `name` is not a registered kernel. Unknown names are
-        programming errors, not runtime fallback conditions.
+        If `name` is not a registered kernel.
+    ValueError
+        If ``spec`` is not a valid specialization of the kernel.
     """
     factory = _KERNEL_FACTORIES.get(name)
     if factory is None:
         raise KeyError(
             f"Unknown CUDA kernel {name!r}; registered: {sorted(_KERNEL_FACTORIES)}"
         )
-    if not is_available():
-        return None
-    try:
-        return factory(**spec)
-    except Exception as exc:
-        if name not in _warned_kernels:
-            _warned_kernels.add(name)
-            logger.warning(
-                "CUDA kernel %r failed to compile/load (%s); "
-                "falling back to the array-module implementation.",
-                name,
-                exc,
-            )
-        return None
+    return factory(**spec)
 
 
 def _selftest_scale_factory(dtype: str = "float32") -> Callable:
     """Wrapper factory for the infrastructure self-test kernel.
 
-    Validates the full compile -> specialize -> launch path; not used by
-    any DSP code.
+    Exercises the whole path of compiling, specializing and launching; no
+    DSP code uses it.
     """
     import cupy as cp
 
@@ -175,7 +109,7 @@ def _bps_min_d2_factory(mode: str = "table", return_argmin: bool = False) -> Cal
         d_grid: float = 1.0,
         side: int = 0,
     ) -> Any:
-        """Returns min_d2 (P, C, N) float32; with argmin, an (min_d2, idx) tuple.
+        """Return min_d2 (P, C, N) float32; with argmin, an (min_d2, idx) tuple.
 
         `x` is (C, N) complex64 with time on the last axis; `phasor` is
         (P,) complex64, P <= 128. TABLE mode requires `constellation`
@@ -245,10 +179,10 @@ def _cs_block_factory() -> Callable:
     Per-channel slip detector (one block of threads per channel, decisions
     speculated in parallel; see ``cs_block.cu``) operating in place on
     device-resident state buffers. One launch processes one equalizer block,
-    replacing the per-block D2H -> CPU Numba -> H2D round trip of the
-    fallback path. All state arrays are float64/int64 and are mutated in
-    place - the wrapper therefore rejects non-contiguous inputs instead of
-    silently copying them.
+    instead of a round trip per block through the CPU path (device to host,
+    the Numba kernel, host to device).  All state arrays are float64 or int64 and are
+    changed in place, so the wrapper rejects non-contiguous inputs instead
+    of copying them silently.
     """
     import cupy as cp
 
@@ -267,8 +201,11 @@ def _cs_block_factory() -> Callable:
         threshold: float,
         cs_H: int,
     ) -> Any:
-        """Corrects phi_blk into phi_corr ((C, B) float64), updating the
-        per-channel circular history buffers in place."""
+        """Repair the cycle slips of ``phi_blk`` into ``phi_corr``.
+
+        Both are ``(C, B)`` float64; the per-channel circular history
+        buffers are updated in place.
+        """
         if phi_blk.ndim != 2:
             raise ValueError(f"phi_blk must be 2-D (C, B), got shape {phi_blk.shape}")
         C, B = phi_blk.shape
@@ -389,19 +326,53 @@ def _bps_anchor_factory() -> Callable:
     return launch
 
 
+# LLR_MAX_K and LLR_THREADS in llr.cu.
+_LLR_MAX_K = 16
+_LLR_THREADS = 128
+
+
+def _check_llr_arrays(arrays: tuple[tuple[str, Any, Any, tuple], ...]) -> None:
+    """Check the dtype, shape and contiguity of LLR kernel arguments."""
+    for label, arr, dtype, shape in arrays:
+        if arr.dtype != dtype:
+            raise TypeError(f"{label} must be {dtype}, got {arr.dtype}")
+        if arr.shape != shape:
+            raise ValueError(f"{label} must have shape {shape}, got {arr.shape}")
+        if not arr.flags.c_contiguous:
+            raise ValueError(f"{label} must be C-contiguous")
+
+
+def _llr_launch(cp: Any, kern: Any, n: int, k: int, head: tuple, tail: tuple) -> Any:
+    """Launch an LLR kernel over ``n`` symbols; returns ``(n, k)`` float32.
+
+    The kernel's arguments are ``head``, the output, ``n``, then ``tail``.
+    """
+    out = cp.empty((n, k), dtype=cp.float32)
+    if n == 0:
+        return out
+    blocks = min((n + _LLR_THREADS - 1) // _LLR_THREADS, 65535)
+    kern(
+        (blocks,),
+        (_LLR_THREADS,),
+        (*head, out, cp.int32(n), *tail),
+        shared_mem=_LLR_THREADS * (k | 1) * 4,  # llr_stride(k) in llr.cu
+    )
+    return out
+
+
 def _llr_factory() -> Callable:
     """Wrapper factory for the bit-LLR kernel (``mapping.llr``).
 
     One thread per symbol walks the constellation and keeps the per-bit
-    maxima (and, for the exact method, the scaled sums) in registers, so no
-    ``(N, k, M/2)`` intermediate is formed.  Returns ``(n, k)`` float32 LLRs.
+    maxima (and, for the exact method, the sums of one exponential per
+    point) in registers, so no ``(N, k, M/2)`` intermediate is formed.
+    Returns ``(n, k)`` float32 LLRs.
     """
     import cupy as cp
 
     from . import compiler
 
     kern = compiler.get_raw_kernel("llr", "llr")
-    max_k = 16  # LLR_MAX_K in llr.cu
 
     def launch(
         x: Any,
@@ -414,54 +385,94 @@ def _llr_factory() -> Callable:
         exact: bool,
     ) -> Any:
         """LLRs of the ``(n,)`` complex64 symbols ``x``, shape ``(n, k)``."""
-        if not 1 <= k <= max_k:
-            raise ValueError(f"bits per symbol must be in [1, {max_k}], got {k}")
+        if not 1 <= k <= _LLR_MAX_K:
+            raise ValueError(f"bits per symbol must be in [1, {_LLR_MAX_K}], got {k}")
         n = x.shape[0]
         M = points.shape[0]
-        for label, arr, dtype, shape in (
-            ("x", x, cp.complex64, (n,)),
-            ("points", points, cp.complex64, (M,)),
-            ("log_pmf", log_pmf, cp.float32, (M,)),
-            ("labels", labels, cp.int32, (M,)),
-        ):
-            if arr.dtype != dtype:
-                raise TypeError(f"{label} must be {dtype}, got {arr.dtype}")
-            if arr.shape != shape:
-                raise ValueError(f"{label} must have shape {shape}, got {arr.shape}")
-            if not arr.flags.c_contiguous:
-                raise ValueError(f"{label} must be C-contiguous")
-        out = cp.empty((n, k), dtype=cp.float32)
-        if n == 0:
-            return out
-        threads = 128
-        blocks = min((n + threads - 1) // threads, 65535)
-        kern(
-            (blocks,),
-            (threads,),
+        _check_llr_arrays(
             (
-                x,
-                points,
-                log_pmf,
-                labels,
-                out,
-                cp.int32(n),
-                cp.int32(M),
-                cp.int32(k),
-                cp.float32(inv_s2),
-                cp.int32(1 if exact else 0),
+                ("x", x, cp.complex64, (n,)),
+                ("points", points, cp.complex64, (M,)),
+                ("log_pmf", log_pmf, cp.float32, (M,)),
+                ("labels", labels, cp.int32, (M,)),
             ),
         )
-        return out
+        return _llr_launch(
+            cp,
+            kern,
+            n,
+            k,
+            (x, points, log_pmf, labels),
+            (cp.int32(M), cp.int32(k), cp.float32(inv_s2), cp.int32(1 if exact else 0)),
+        )
 
     return launch
 
 
-# name -> wrapper factory. Factories may raise; get_kernel translates any
-# failure into the warn-once-and-return-None fallback contract.
+def _llr_separable_factory() -> Callable:
+    """Wrapper factory for the per-axis bit-LLR kernel (``mapping.llr``).
+
+    The LLRs of a separable square lattice from the levels of each axis:
+    2·sqrt(M) metrics (and exponentials) per symbol instead of M.
+    Returns ``(n, k)`` float32 LLRs.
+    """
+    import cupy as cp
+
+    from . import compiler
+
+    kern = compiler.get_raw_kernel("llr", "llr_separable")
+
+    def launch(
+        x: Any,
+        re: tuple[Any, Any, Any, Any],
+        im: tuple[Any, Any, Any, Any],
+        *,
+        inv_s2: float,
+        exact: bool,
+    ) -> Any:
+        """LLRs of the ``(n,)`` complex64 symbols ``x``, shape ``(n, k)``.
+
+        ``re`` and ``im`` are each ``(levels, log_prior, labels, positions)``
+        of one axis: float32, float32 and int32 ``(L,)``, int32 ``(k_axis,)``.
+        """
+        n = x.shape[0]
+        checks = [("x", x, cp.complex64, (n,))]
+        axis_args: list[Any] = []
+        for name, (lev, logp, lab, pos) in (("re", re), ("im", im)):
+            L, kb = lev.shape[0], pos.shape[0]
+            if not 1 <= kb <= _LLR_MAX_K:
+                raise ValueError(
+                    f"bits of the {name} axis must be in [1, {_LLR_MAX_K}], got {kb}"
+                )
+            checks += [
+                (f"{name} levels", lev, cp.float32, (L,)),
+                (f"{name} log prior", logp, cp.float32, (L,)),
+                (f"{name} labels", lab, cp.int32, (L,)),
+                (f"{name} positions", pos, cp.int32, (kb,)),
+            ]
+            axis_args += [lev, logp, lab, pos, cp.int32(L), cp.int32(kb)]
+        _check_llr_arrays(tuple(checks))
+        k = re[3].shape[0] + im[3].shape[0]
+        if k > _LLR_MAX_K:
+            raise ValueError(f"bits per symbol must be at most {_LLR_MAX_K}, got {k}")
+        return _llr_launch(
+            cp,
+            kern,
+            n,
+            k,
+            (x, *axis_args),
+            (cp.int32(k), cp.float32(inv_s2), cp.int32(1 if exact else 0)),
+        )
+
+    return launch
+
+
+# name -> wrapper factory.
 _KERNEL_FACTORIES: dict[str, Callable[..., Callable]] = {
     "selftest_scale": _selftest_scale_factory,
     "bps_min_d2": _bps_min_d2_factory,
     "cs_block": _cs_block_factory,
     "bps_anchor": _bps_anchor_factory,
     "llr": _llr_factory,
+    "llr_separable": _llr_separable_factory,
 }

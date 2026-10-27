@@ -1,5 +1,4 @@
-"""
-Nonlinear fiber propagation: the Kerr effect with dispersion, loss and PMD.
+"""Nonlinear fiber propagation: the Kerr effect with dispersion, loss and PMD.
 
 :func:`apply_fiber_propagation` propagates a field over amplified spans of a
 :class:`Fiber` with the symmetric split-step Fourier method: self-phase
@@ -35,8 +34,7 @@ def apply_fiber_propagation(
     sampling_rate: float | None = None,
     rng: RNG = None,
 ) -> S:
-    """
-    Propagates a field over ``num_spans`` amplified spans of nonlinear fiber.
+    """Propagate a field over ``num_spans`` amplified spans of nonlinear fiber.
 
     Solves the nonlinear Schrödinger equation for ``(N,)`` input (one
     polarization) or the Manakov equation for ``(2, N)`` input (two
@@ -82,7 +80,7 @@ def apply_fiber_propagation(
 
     Returns
     -------
-    array_like or Signal
+    ndarray or Signal
         The field at the output of the last amplifier, in the input's units:
         the input's power stands for the launch power, so a link whose
         amplifiers restore every span loss returns the input's power plus
@@ -94,6 +92,12 @@ def apply_fiber_propagation(
     ValueError
         On input that is not ``(N,)`` or ``(2, N)``, PMD with a single
         polarization, a negative noise figure, or input without power.
+
+    See Also
+    --------
+    commkit.filtering.correct_fiber_propagation :
+        Digital backpropagation, the inverse of this model.
+    apply_chromatic_dispersion : the linear, single-span special case.
 
     Notes
     -----
@@ -122,12 +126,6 @@ def apply_fiber_propagation(
     Nonlinear spectral broadening must fit in the sampling rate; a warning
     is logged when the field after the first span has more than 0.1 % of
     its power beyond 0.4 f_s.
-
-    See Also
-    --------
-    commkit.filtering.correct_fiber_propagation :
-        Digital backpropagation, the inverse of this model.
-    apply_chromatic_dispersion : the linear, single-span special case.
 
     Examples
     --------

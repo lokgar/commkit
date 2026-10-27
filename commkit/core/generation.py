@@ -1,12 +1,13 @@
-"""
-Signal generation.
+"""Signal generation: :func:`generate`, :func:`shape_pulse` and :func:`expand`.
 
 :func:`generate` draws random symbols from a :class:`Constellation` and
 pulse-shapes them into a :class:`Signal`, with samples normalized to unit
-symbol power (Es = 1, average sample power = 1/sps).  PS-QAM is a shaped
-constellation: ``generate(Constellation.qam(64).shaped(nu=0.1), ...)``.
-``periodic=True`` shapes the record as one period of a periodic waveform,
-for looping on a streaming AWG.
+symbol power (``Es = 1``, average sample power ``1/sps``).  PS-QAM is a
+shaped constellation: ``generate(Constellation.qam(64).shaped(nu=0.1),
+...)``.  ``periodic=True`` shapes the record as one period of a periodic
+waveform, for looping on a streaming AWG.  On arrays, :func:`shape_pulse`
+pulse-shapes a symbol sequence to unit symbol power and :func:`expand`
+inserts zeros between samples.
 """
 
 import numpy as np
@@ -34,8 +35,7 @@ __all__ = ["expand", "generate", "shape_pulse"]
 
 
 def expand(samples: ArrayType, *, factor: int) -> ArrayType:
-    """
-    Insert ``factor - 1`` zeros after every sample (zero-stuffing upsample).
+    """Insert ``factor - 1`` zeros after every sample (zero-stuffing upsample).
 
     The first step of interpolation; the spectral images it creates are
     removed by a following filter.
@@ -49,7 +49,7 @@ def expand(samples: ArrayType, *, factor: int) -> ArrayType:
 
     Returns
     -------
-    array_like
+    ndarray
         Expanded samples, ``(..., N * factor)``, same dtype and device.
     """
     logger.debug("Inserting zeros (expansion factor=%s).", factor)
@@ -66,8 +66,7 @@ def shape_pulse(
     pulse: filtering.Pulse | ArrayType | None = None,
     periodic: bool = False,
 ) -> ArrayType:
-    """
-    Pulse-shape a symbol sequence to unit symbol power.
+    """Pulse-shape a symbol sequence to unit symbol power.
 
     Polyphase interpolation by ``sps`` with the pulse taps
     (``scipy.signal.resample_poly``), then ``E[|x|²] = 1/sps``.  With
@@ -89,8 +88,9 @@ def shape_pulse(
 
     Returns
     -------
-    array_like
-        Waveform ``(..., N * sps)``, same dtype and device as ``symbols``.
+    ndarray
+        Waveform ``(..., N * sps)``, normalized per channel to
+        ``E[|x|²] = 1/sps``, same dtype and device as ``symbols``.
     """
     sps = require_integer_sps(sps, "shape_pulse()")
     if pulse is None:
@@ -132,8 +132,7 @@ def generate(
     rng: int | np.random.Generator | None = None,
     device: str = "cpu",
 ) -> Signal:
-    """
-    Random symbols from ``constellation``, pulse-shaped into a Signal.
+    """Generate random symbols from a constellation, pulse-shaped into a Signal.
 
     Parameters
     ----------
@@ -158,7 +157,8 @@ def generate(
         convolution): the record loops seamlessly, e.g. on a streaming AWG,
         and has no filter transients at its ends.  Later Tx steps that filter
         or resample the record (``fir_filter``, ``upsample``, ``resample``,
-        ``apply_phase_noise``) need ``periodic=True`` too; the Signal does not record it.
+        ``apply_phase_noise``) need ``periodic=True`` too; the Signal does not
+        record it.
     rng : int, numpy.random.Generator or None
         Seed or generator (SciPy SPEC 7).
     device : {"cpu", "gpu"}, default "cpu"
@@ -171,9 +171,10 @@ def generate(
     Returns
     -------
     Signal
-        Samples normalized to unit symbol power (average sample power
-        ``1/sps``), with ``constellation``, ``pulse`` (when a Pulse was given)
-        and ``reference`` set.
+        Samples normalized per channel to unit symbol power (average sample
+        power ``1/sps``), complex64 (float32 for a real constellation such as
+        bipolar PAM), with ``constellation``, ``pulse`` (when a Pulse was
+        given) and ``reference`` set.
 
     Examples
     --------

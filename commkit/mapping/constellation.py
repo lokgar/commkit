@@ -1,12 +1,11 @@
-"""
-The :class:`Constellation` value object.
+"""The :class:`Constellation` value object.
 
 A constellation is described by its ``points``, the ``bit_labels`` assigned to
 each point, and an optional probabilistic-shaping prior ``pmf``.  It is the
 single way to describe a modulation in CommKit: functions take a
 ``Constellation``, never a ``modulation`` string plus an ``order``.
 
-Build one with a factory (Gray labelled, unit average power)::
+Build one with a factory (Gray labeled, unit average power)::
 
     Constellation.qam(16)
     Constellation.psk(8)
@@ -30,7 +29,7 @@ import numpy as np
 from .._array import warn_if_double
 from ..backend import ArrayType, dispatch
 from .gray import _gray_points, _nearest_index, _unpack_bits
-from .llr import _Axis, _llr, _llr_separable
+from .llr import _Axis, _llr, _llr_separable, _llr_separable_gpu
 from .shaping import (
     _constellation_power,
     _entropy_bits,
@@ -51,16 +50,16 @@ class Constellation:
     Parameters
     ----------
     points : array_like
-        Constellation points, shape ``(M,)`` with ``M = 2**k``.  Complex for
+        Constellation points, ``(M,)`` with ``M = 2**k``.  Complex for
         two-dimensional constellations, real for PAM.  Stored as
         ``complex128`` or ``float64``.  Points must be distinct.
     bit_labels : array_like, optional
-        Bit pattern of each point, shape ``(M, k)``, MSB first, values 0/1.
+        Bit pattern of each point, ``(M, k)``, MSB first, values 0 and 1.
         Every pattern must occur exactly once.  ``None`` assigns the natural
         binary labels (``points[i]`` carries the bits of ``i``).  The factories
         assign Gray labels this way, because their points are ordered by label.
     pmf : array_like, optional
-        Prior probability of each point, shape ``(M,)``, non-negative and
+        Prior probability of each point, ``(M,)``, non-negative and
         summing to 1.  ``None`` means uniform.  Use :meth:`shaped` to build a
         Maxwell-Boltzmann prior.
     family : {"qam", "psk", "pam"}, optional
@@ -138,7 +137,7 @@ class Constellation:
 
     @classmethod
     def qam(cls, order: int) -> "Constellation":
-        """Gray-labelled M-QAM at unit average power.
+        """Gray-labeled M-QAM at unit average power.
 
         Square QAM for even ``k = log2(M)``, rectangular 8-QAM, and cross QAM
         for other odd ``k`` (32, 128, ...).
@@ -147,12 +146,12 @@ class Constellation:
 
     @classmethod
     def psk(cls, order: int) -> "Constellation":
-        """Gray-labelled M-PSK on the unit circle."""
+        """Gray-labeled M-PSK on the unit circle."""
         return _named("psk", order, False)
 
     @classmethod
     def pam(cls, order: int, *, unipolar: bool = False) -> "Constellation":
-        """Gray-labelled M-PAM (real) at unit average power.
+        """Gray-labeled M-PAM (real) at unit average power.
 
         ``unipolar=True`` gives non-negative levels, which is M-ASK as used in
         intensity modulation (``pam(2, unipolar=True)`` is on-off keying).
@@ -214,9 +213,11 @@ class Constellation:
 
     @cached_property
     def rotational_symmetry(self) -> int:
-        """Largest ``n`` such that rotating the points by ``2π/n`` maps them
+        """Order of the rotational symmetry of the points.
+
+        The largest ``n`` for which a rotation by ``2π/n`` maps the points
         onto themselves: ``M`` for M-PSK, 4 for square and cross QAM, 2 for
-        bipolar PAM, 1 for unipolar PAM.
+        bipolar PAM and 1 for unipolar PAM.
 
         Raising symbols to this power removes the modulation phase, which is
         what M-th power frequency and phase estimators rely on.
@@ -247,9 +248,9 @@ class Constellation:
     def map(self, bits: ArrayType) -> ArrayType:
         """Map bits to symbols on the bits' device.
 
-        ``bits`` has shape ``(..., n)`` with ``n`` a multiple of ``k``; groups
-        of ``k`` bits (MSB first) become one symbol.  Returns shape
-        ``(..., n / k)``, ``complex64`` (or ``float32`` for real points).
+        ``bits`` is ``(..., n)`` with ``n`` a multiple of ``k``; each group of
+        ``k`` bits (MSB first) becomes one symbol.  Returns ``(..., n / k)``,
+        ``complex64`` (``float32`` for real points).
         """
         bits, xp, _ = dispatch(bits)
         k = self.bits_per_symbol
@@ -258,17 +259,21 @@ class Constellation:
                 f"bits: the last axis ({bits.shape[-1]}) must be a multiple of "
                 f"bits_per_symbol ({k})."
             )
-        groups = bits.reshape(*bits.shape[:-1], -1, k).astype(xp.int32)
-        weights = xp.asarray(1 << np.arange(k - 1, -1, -1, dtype=np.int32))
-        index_of_label = xp.asarray(self._index_of_label())
-        points = xp.asarray(self.points.astype(self._storage_dtype()))
-        return points[index_of_label[(groups * weights).sum(axis=-1)]]
+        groups = bits.reshape(*bits.shape[:-1], -1, k)
+        if groups.dtype.kind not in "biu" or groups.dtype.itemsize > 4:
+            groups = groups.astype(xp.int8)
+        # Shift in one bit per pass: the only temporary is the int32 label
+        # per symbol, a quarter of the bits' size in int8.
+        label = groups[..., 0].astype(xp.int32)
+        for b in range(1, k):
+            label <<= 1
+            label |= groups[..., b]
+        return xp.asarray(self._points_by_label)[label]
 
     def demap(self, symbols: ArrayType) -> ArrayType:
         """Hard decisions: bits of the nearest point, on the symbols' device.
 
-        ``symbols`` has shape ``(..., N)``; returns ``int8`` bits of shape
-        ``(..., N * k)``.  Symbols are compared with ``points`` as they are, so
+        ``symbols`` is ``(..., N)``; returns ``int8`` bits, ``(..., N * k)``.  Symbols are compared with ``points`` as they are, so
         they must be on the constellation's scale.
         """
         symbols, xp, _ = dispatch(symbols)
@@ -283,17 +288,23 @@ class Constellation:
 
         ``noise_var`` is the complex noise variance on the constellation's
         scale.  ``method`` is ``"maxlog"`` or ``"exact"`` (log-sum-exp).
-        Returns ``float32`` of shape ``(..., N * k)`` on the symbols' device.
+        Returns ``float32``, ``(..., N * k)``, on the symbols' device.
         """
         warn_if_double(symbols, "compute_llr() / Constellation.llr()", "float32")
-        if self._axes is not None and dispatch(symbols)[1] is np:
-            return _llr_separable(symbols, self._axes, noise_var, method)
-        return _llr(symbols, self.points, self.bit_labels, self.pmf, noise_var, method)
+        if self._axes is not None:
+            if dispatch(symbols)[1] is np:
+                return _llr_separable(symbols, self._axes, noise_var, method)
+            return _llr_separable_gpu(symbols, self._axes, noise_var, method, self)
+        return _llr(
+            symbols, self.points, self.bit_labels, self.pmf, noise_var, method, self
+        )
 
     def _nearest(self, symbols: ArrayType) -> ArrayType:
-        """Index of the nearest point for each of the ``(N,)`` ``symbols``,
-        int64 on their device.  The decision behind :meth:`demap` and the
-        decision-directed metrics."""
+        """Index of the nearest point for each symbol.
+
+        int64, ``(N,)`` for ``(N,)`` symbols, on their device: the decision
+        behind :meth:`demap` and the decision-directed metrics.
+        """
         x, xp, _ = dispatch(symbols)
         grid = self._square_grid
         if grid is None:
@@ -376,7 +387,9 @@ class Constellation:
 
     @cached_property
     def _axes(self) -> tuple[_Axis, _Axis] | None:
-        """The real and imaginary axes of a square lattice whose labels and
+        """Per-axis factors of a separable square lattice, or ``None``.
+
+        The real and imaginary axes of a square lattice whose labels and
         prior factor into per-axis ones (Gray QAM, shaped or not).
 
         Every bit then depends on one axis only, and the other axis's factor
@@ -406,11 +419,13 @@ class Constellation:
             _Axis(points[0, :].imag, labels[0, :][:, bits_im], pmf_im, bits_im),
         )
 
-    def _index_of_label(self) -> np.ndarray:
-        """Point index for each packed label value, shape ``(M,)``."""
-        index = np.empty(self.order, dtype=np.int64)
-        index[_pack(self.bit_labels)] = np.arange(self.order)
-        return index
+    @cached_property
+    def _points_by_label(self) -> np.ndarray:
+        """Points in the storage dtype, indexed by packed label, ``(M,)``."""
+        points: np.ndarray = np.empty(self.order, dtype=self._storage_dtype())
+        points[_pack(self.bit_labels)] = self.points
+        points.setflags(write=False)
+        return points
 
 
 def _slicer_params(

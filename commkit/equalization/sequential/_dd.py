@@ -1,4 +1,7 @@
-"""Decision-directed sequential adaptive equalizers: lms, rls."""
+"""Trained and decision-directed sequential adaptive equalizers (private).
+
+:func:`lms` and :func:`rls`, re-exported by :mod:`commkit.equalization`.
+"""
 
 from __future__ import annotations
 
@@ -53,196 +56,188 @@ def lms(
     state: EqualizerState | None = None,
     pad_mode: str = "zeros",
 ) -> EqualizerResult:
-    """
-    Least Mean Squares adaptive equalizer with butterfly MIMO support.
+    """Equalize with the least-mean-squares (LMS) algorithm, SISO or butterfly MIMO.
 
-    The weights adapt every symbol (CPU, Numba).  For high throughput on slow
-    or static channels, the frequency-domain :func:`block_lms` adapts once per
-    block instead.
+    The weights adapt at every symbol (Numba, on the CPU).  For high
+    throughput on slow or static channels, the frequency-domain
+    :func:`block_lms` adapts once per block instead.
 
-    Supports data-aided (training) and decision-directed (DD) modes.
-    When ``training_symbols`` are provided, the equalizer uses them for the
-    initial convergence phase, then switches to DD mode, slicing to
-    ``constellation``.
-
-    For MIMO inputs ``(C, N)``, a butterfly ``(C, C, num_taps)`` filter
-    structure is used so each output is a weighted sum of all input streams,
-    enabling cross-channel interference cancellation.
-
-    Algorithm (per symbol n)
-    ------------------------
-    1. **Sliding input window** - the length-T tap vector for output channel c
-       is drawn from the padded input at the strided sample position::
-
-           x_{c',n} = [x_{c'}[n*sps - T_c], ..., x_{c'}[n*sps - T_c + T - 1]]
-
-       where ``T_c`` = ``center_tap`` (default ``T // 2``).  The causal delay
-       ``T_c`` is absorbed into the tap vector so the filter can model both
-       pre- and post-cursor ISI.
-
-    2. **Butterfly filter** - cross-correlate conjugate weights with the input
-       across all C input channels::
-
-           y_c_raw[n] = sum_{c'} w_{c,c'}^H * x_{c',n}
-
-    3. **Carrier phase recovery** (if ``cpr`` is set):
-
-       * **PLL** - cross-product phase detector
-         ``phi_err = Im(y_raw * conj(d_prev))``
-         drives a PI integrator with gains ``K_p``, ``K_i``; accumulated
-         phase ``phi_n`` is applied as ``y[n] = y_raw * exp(-j*phi_n)``.
-       * **BPS** - ``B`` candidate rotations ``exp(-j*2*pi*k/(S*B))`` are
-         tested, ``S`` the constellation's rotational symmetry; the one
-         minimising the summed nearest-constellation distance over the
-         trailing ``K`` = ``cpr.block_size`` symbols is chosen.  A causal
-         ``S``-fold unwrap converts the ``[0, 2*pi/S)`` argmin to full-range
-         ``phi_n`` stored in a float64 accumulator.
-
-    4. **Decision** - training symbol ``d[n]`` (DA phase, while
-       ``n < len(training_symbols)``) or nearest-constellation hard decision on
-       ``y[n]`` (DD phase thereafter).
-
-    5. **Error and tap-plane back-rotation**::
-
-           e_clean[n] = d[n] - y[n]
-           e_taps[n]  = e_clean[n] * exp(+j*phi_n)
-
-       The back-rotation undoes the CPR correction so the gradient operates in
-       the original tap space.
-
-    6. **LMS weight update** (plain, no input-power normalisation)::
-
-           w_{c,c'} += mu * conj(e_taps_c[n]) * x_{c',n}
-
-       Stability bound: ``0 < mu < 2 / (C * T * P_x)`` where ``P_x`` is the
-       mean per-tap input power.  The equalizer normalises inputs to unit
-       symbol-rate power before adaptation, so ``P_x ≈ 1``.
-
-    7. **Cycle-slip correction** (if ``cpr.cycle_slip`` is set) - a
-       circular buffer of ``history`` past phase values is
-       maintained per channel.  An online least-squares linear fit over the
-       buffer predicts ``phi_pred_n``.  If
-       ``|phi_n - phi_pred_n| > threshold``,
-       ``phi_n`` is snapped to the nearest ``2*pi/sym``
-       multiple (``sym`` = constellation symmetry order, 4 for QAM/QPSK); the
-       corrected value replaces ``phi_n`` in steps 5 and 6 and is written into
-       the history buffer.
+    With ``training_symbols`` the equalizer adapts to them first, then
+    switches to decision-directed (DD) adaptation on decisions against
+    ``constellation``; without them it is decision-directed throughout.
+    For ``(C, N)`` input the filter is a ``(C, C, num_taps)`` butterfly:
+    every output is a weighted sum of all input streams, which cancels the
+    crosstalk between them.
 
     Parameters
     ----------
     samples : array_like or Signal
-        Input signal samples. Shape: ``(N_samples,)`` for SISO or
-        ``(C, N_samples)`` for MIMO butterfly equalization.
-        Typically at 2 samples/symbol for fractionally-spaced equalization.
+        Input samples, ``(N,)`` for SISO or ``(C, N)`` for the MIMO
+        butterfly, typically at 2 samples per symbol (fractionally spaced).
         A :class:`Signal` supplies ``sps`` and ``constellation``; the result
         then also carries ``signal``, the 1-SPS output Signal.
     training_symbols : array_like, optional
-        Known transmitted symbols (at symbol rate, 1 SPS), on the scale of
-        the unit-power ``constellation`` (used as given, not renormalized).
-        Shape: ``(N_train,)`` for SISO or ``(C, N_train)`` for MIMO.
-        Without them the equalizer is decision-directed throughout.
+        Known transmitted symbols at one sample per symbol, ``(N_train,)``
+        or ``(C, N_train)``, on the scale of the unit-power
+        ``constellation`` (used as given, not renormalized).
     num_taps : int, default 21
-        Number of equalizer taps per FIR filter. For fractionally-spaced
-        equalization (sps > 1), use at least ``4 * sps`` taps.
+        Taps per FIR filter.  For fractionally spaced equalization
+        (``sps > 1``) use at least ``4 * sps``.
     sps : int, optional
         Samples per symbol at the input, an integer: 2 (T/2-spaced) for a
-        first stage, 1 for a symbol-spaced stage after FOE and CPR (use 3-11
-        taps), more is accepted but uncommon.  The output is one symbol per
-        ``sps`` samples.  Taken from the Signal; required for array input.
-        A value that disagrees with the Signal raises.
+        first stage, 1 for a symbol-spaced stage after frequency and phase
+        recovery (with 3-11 taps); larger values work but are uncommon.  The
+        output has one symbol per ``sps`` samples.  Taken from the Signal;
+        required for array input.  A value that disagrees with the Signal
+        raises.
     step_size : float, default 0.01
-        Plain LMS step size (mu). The gradient is applied directly without
-        input-power normalization, matching the convention in Haykin's
-        *Adaptive Filter Theory* and most published papers.  Stability
-        requires ``0 < mu < 2 / (C * num_taps * P_x)`` where ``P_x`` is the
-        mean per-tap input power.  Because inputs are normalized to unit
-        symbol-rate power by default, a safe starting range for typical
-        settings is ``1e-4`` to ``1e-2``.  Values closer to the upper bound
-        converge faster but produce higher steady-state misadjustment.
+        Step size ``μ`` of plain LMS: the gradient is applied without
+        normalizing by the input power, as in Haykin's *Adaptive Filter
+        Theory* and most of the literature.  Stability requires
+        ``0 < μ < 2 / (C · num_taps · P_x)``, with ``P_x`` the mean input
+        power per tap; the inputs are normalized to unit symbol power, so
+        ``1e-4`` to ``1e-2`` is a safe range to start from.  Steps near the
+        bound converge faster but leave a larger steady-state misadjustment.
     constellation : Constellation, optional
-        Decision constellation for the slicer, unit power (a shaped
-        constellation carries its pmf).  Defaults to the Signal's
-        ``constellation``; required for array input.
+        Decision constellation, at unit power (a shaped constellation brings
+        its pmf).  Defaults to the Signal's ``constellation``; required for
+        array input.
     store_weights : bool, default False
-        If True, stores weight trajectory in ``weights_history``.
+        Record the weights of every symbol in ``weights_history``.
     center_tap : int, optional
-        Index of the center tap. If None, defaults to ``num_taps // 2``.
+        Index of the center tap; defaults to ``num_taps // 2``.
     initial_taps : array_like, optional
         Initial tap weights instead of the center-tap identity, e.g. the
-        ``weights`` of a previous stage (preamble LMS -> payload RLS).  Shape
+        ``weights`` of an earlier stage (preamble LMS, then payload RLS):
         ``(C, C, num_taps)``, or ``(num_taps,)`` / ``(1, num_taps)`` for SISO.
         Only for a cold start: a ``state`` carries its own weights.
     cpr : PLL or BPS, optional
-        Inline carrier phase recovery (``commkit.recovery``), run jointly
-        with the weight updates at every symbol; ``None`` disables it.
+        Inline carrier-phase recovery (from :mod:`commkit.recovery`), run
+        jointly with the weight updates at every symbol; ``None`` for none.
 
-        * ``PLL(bandwidth=, mu=, beta=, phase_init=, joint_channels=)`` -
-          decision-directed loop: the cross-product detector
-          ``Im(y · conj(d))`` drives a PI loop (gains from ``bandwidth`` or
-          raw ``mu`` / ``beta``).  ``phase_init`` seeds a cold start.  Low
-          noise floor; recommended for QPSK through 64-QAM.
-        * ``BPS(test_phases=, block_size=, joint_channels=)`` - blind phase
+        * ``PLL(bandwidth=, mu=, beta=, phase_init=, joint_channels=)``: a
+          decision-directed loop in which the cross-product detector
+          ``Im(y · conj(d))`` drives a PI filter (gains from ``bandwidth``,
+          or the raw ``mu`` and ``beta``); ``phase_init`` seeds a cold start.
+          It has a low noise floor and is recommended for QPSK to 64-QAM.
+        * ``BPS(test_phases=, block_size=, joint_channels=)``: blind phase
           search over ``test_phases`` angles in ``[0, 2π/S)``, ``S`` the
-          constellation's rotational symmetry (π/2 for QAM), averaged over a causal window of the last
-          ``block_size`` symbols.  Preferred for bursts where PLL pull-in is
-          impractical.  The wrapped float32 estimate rotates the output; the
-          causally ``S``-fold-unwrapped float64 accumulator is the
+          constellation's rotational symmetry (an interval of π/2 for QAM),
+          averaged over a causal window of the last ``block_size`` symbols.
+          Preferred for bursts, where the pull-in of a PLL is impractical.
+          The wrapped float32 estimate rotates the output, and the causally
+          ``S``-fold-unwrapped float64 accumulator is the
           ``phase_trajectory``, so float32 rounding never accumulates.
 
         ``joint_channels`` shares one estimate across MIMO channels (summed
         BPS metrics, or the PLL error averaged before the integrator).  A
         nested ``CycleSlip(history=, threshold=)`` predicts each phase from a
-        linear fit through the last ``history`` values and snaps a deviation
-        beyond ``threshold`` to the nearest ``2π/4`` multiple (``π`` for
-        2-fold constellations).
+        linear fit through the last ``history`` values and removes the
+        nearest multiple of ``2π/S`` from a deviation beyond ``threshold``.
     state : EqualizerState, optional
-        Continue from ``result.state`` of a previous call of this equalizer
-        with the same configuration: weights, normalization, inline CPR state
-        and the input from where the previous call left off.  The previous
-        result's last ``state.overlap`` symbols are recomputed here, so the
-        outputs stitch to exactly one uninterrupted run.  Training symbols
-        start at this call's first output symbol.
-    pad_mode : {'zeros', 'edge'}, default 'zeros'
-        Left padding of a cold start: ``'zeros'`` (default) prepends
-        ``center_tap`` zeros, ``'edge'`` replicates the first sample, which
+        Continue from ``result.state`` of an earlier call of this equalizer
+        with the same configuration: its weights, normalization, inline CPR
+        state and the input from where it stopped.  The earlier result's last
+        ``state.overlap`` symbols are computed again here, so the outputs
+        join into exactly one uninterrupted run.  Training symbols start at
+        this call's first output symbol.
+    pad_mode : {'zeros', 'edge', 'reflect'}, default 'zeros'
+        Padding of a cold start before the first ``center_tap`` positions:
+        ``'zeros'`` prepends zeros, ``'edge'`` repeats the first sample and
+        ``'reflect'`` mirrors the record about its first sample.  The last two
         can soften the initial amplitude jump.
 
     Returns
     -------
     EqualizerResult
-        Result container with the following fields:
+        With the fields:
 
-        * ``y_hat`` - equalized symbol estimates, shape ``(N_sym,)`` SISO
-          or ``(C, N_sym)`` MIMO, at 1 SPS (symbol rate); always an array.
-        * ``signal`` - for Signal input, the output as a 1-SPS Signal with
-          its reference cut to the output symbols.
-        * ``weights`` - final tap-weight tensor, shape ``(num_taps,)`` SISO
-          or ``(C, C, num_taps)`` MIMO.
-        * ``error`` - complex error signal ``e[n] = d[n] - y[n]``, same
-          shape as ``y_hat``.
-        * ``weights_history`` - tap weights recorded at each symbol (only
-          when ``store_weights=True``); shape ``(N_sym, num_taps)`` SISO or
-          ``(N_sym, C, C, num_taps)`` MIMO.  ``None`` otherwise.
-        * ``phase_trajectory`` - accumulated per-symbol phase estimates,
-          shape ``(N_sym,)`` SISO or ``(C, N_sym)`` MIMO.  For BPS, this
-          is the causal ``S``-fold-unwrapped float64 phase.  For PLL, it is
-          the PI integrator state accumulated over all symbols.  ``None``
-          when ``cpr=None``.
-        * ``num_train_symbols`` - number of training symbols consumed
-          (data-aided phase).
-        * ``input_norm_factor`` - the RMS factor used to normalize inputs.
-        * ``state`` - :class:`EqualizerState`; pass as ``state=`` to the
-          next call to continue without a re-convergence transient.
+        * ``y_hat``: the equalized symbols at one sample per symbol,
+          ``(N_sym,)`` or ``(C, N_sym)``; always an array.
+        * ``signal``: for Signal input, the output as a 1-SPS Signal whose
+          reference is cut to the output symbols.
+        * ``weights``: the final taps, ``(num_taps,)`` or
+          ``(C, C, num_taps)``.
+        * ``error``: the complex error ``e[n] = d[n] - y[n]``, shaped as
+          ``y_hat``.
+        * ``weights_history``: the taps at every symbol with
+          ``store_weights=True``, ``(N_sym, num_taps)`` or
+          ``(N_sym, C, C, num_taps)``; ``None`` otherwise.
+        * ``phase_trajectory``: the per-symbol phase of the inline CPR,
+          ``(N_sym,)`` or ``(C, N_sym)``: for BPS the causally
+          ``S``-fold-unwrapped float64 phase, for the PLL its integrator
+          state; ``None`` without ``cpr``.
+        * ``num_train_symbols``: the training symbols consumed.
+        * ``input_norm_factor``: the RMS factor that normalized the input.
+        * ``state``: an :class:`EqualizerState`; pass it as ``state=`` to the
+          next call to continue without converging again.
 
-        Arrays reside on the same device as the input (NumPy CPU or CuPy
-        GPU).
+        The arrays are on the input's device.
 
     Notes
     -----
-    The adaptation is inherently sequential (each update depends on the
-    previous weights), so it always runs as a compiled Numba loop on the CPU.
-    CuPy input is copied to the host once and the outputs are copied back
-    once; the result arrays live on the input's device.
+    **Algorithm (per symbol n).**
+
+    1. **Sliding input window**: the length-T window of input channel c'
+       starts at the strided sample position of the padded input::
+
+           x_{c',n} = [x_{c'}[n*sps - T_c], ..., x_{c'}[n*sps - T_c + T - 1]]
+
+       with ``T_c`` = ``center_tap`` (default ``T // 2``).  The delay ``T_c``
+       sits inside the window, so the filter covers both pre- and
+       post-cursor ISI.
+
+    2. **Butterfly filter**: the conjugate weights applied to the windows of
+       all C input channels::
+
+           y_c_raw[n] = sum_{c'} w_{c,c'}^H * x_{c',n}
+
+    3. **Carrier phase recovery** (if ``cpr`` is set):
+
+       * **PLL**: the cross-product detector
+         ``phi_err = Im(y_raw * conj(d_prev))`` drives a PI filter with
+         gains ``mu`` and ``beta``; the accumulated phase ``phi_n`` is
+         applied as ``y[n] = y_raw * exp(-j*phi_n)``.
+       * **BPS**: of ``B`` candidate rotations ``exp(-j*2*pi*k/(S*B))``, ``S``
+         the constellation's rotational symmetry, the one with the smallest
+         summed distance to the nearest points over the last
+         ``K`` = ``cpr.block_size`` symbols is chosen.  A causal ``S``-fold
+         unwrap turns the argmin in ``[0, 2*pi/S)`` into the full-range
+         ``phi_n``, kept in a float64 accumulator.
+
+    4. **Decision**: the training symbol ``d[n]`` while
+       ``n < len(training_symbols)``, then the nearest constellation point
+       to ``y[n]``.
+
+    5. **Error, rotated back to the tap plane**::
+
+           e_clean[n] = d[n] - y[n]
+           e_taps[n]  = e_clean[n] * exp(+j*phi_n)
+
+       The back-rotation undoes the CPR correction, so the gradient acts in
+       the taps' own phase reference.
+
+    6. **LMS weight update** (plain, not normalized by the input power)::
+
+           w_{c,c'} += mu * conj(e_taps_c[n]) * x_{c',n}
+
+       Stability bound: ``0 < mu < 2 / (C * T * P_x)`` with ``P_x`` the mean
+       input power per tap.  The equalizer normalizes the input to unit
+       symbol power before adapting, so ``P_x ≈ 1``.
+
+    7. **Cycle-slip correction** (with ``cpr.cycle_slip``): each channel keeps
+       a circular buffer of its last ``history`` phase values, and a
+       running least-squares line through the buffer predicts
+       ``phi_pred_n``.  If
+       ``|phi_n - phi_pred_n| > threshold``, the nearest multiple of
+       ``2*pi/S`` (``S`` the rotational symmetry, 4 for QAM) is removed from
+       ``phi_n``; the corrected value replaces ``phi_n`` in steps 5 and 6
+       and is written into the history buffer.
+
+    The adaptation is sequential (each update depends on the previous
+    weights), so it always runs as a compiled Numba loop on the CPU.  CuPy
+    input is copied to the host once and the outputs back once; the result's
+    arrays are on the input's device.
     """
     signal_adapter = adapt_signal(samples, function_name="lms()")
     samples = signal_adapter.array
@@ -389,194 +384,129 @@ def rls(
     state: EqualizerState | None = None,
     pad_mode: str = "zeros",
 ) -> EqualizerResult:
-    """
-    Recursive Least Squares adaptive equalizer with butterfly MIMO support.
+    """Equalize with the recursive-least-squares (RLS) algorithm, SISO or butterfly MIMO.
 
-    RLS converges faster than LMS at the cost of higher per-symbol
-    complexity (O(num_taps²) for the rank-1 Riccati update vs O(num_taps)
-    for LMS).  It maintains an inverse correlation matrix P per output stream.
-
-    Algorithm (per symbol n)
-    ------------------------
-    Steps 1-5 and 7 are identical to ``lms`` (input windowing, butterfly
-    filter output, carrier phase recovery, decision, error + tap-plane
-    back-rotation, and cycle-slip correction).  Step 6 replaces the plain LMS
-    gradient with a rank-1 Riccati update:
-
-    6. **RLS weight update** - for each output channel c, maintaining the
-       inverse input auto-correlation matrix ``P_c`` of shape ``(T, T)``::
-
-           k_c        = (P_c @ x_{c,n}) / (lambda + x_{c,n}^H @ P_c @ x_{c,n})
-           P_c        = (P_c - k_c @ x_{c,n}^H @ P_c) / lambda
-           w_{c,c'}  += k_c * conj(e_taps_c[n])
-
-       where ``lambda`` = ``forgetting_factor``.  ``P_c`` is initialised to
-       ``(1/delta) * I`` (``delta`` parameter).  With ``leakage`` ``gamma > 0``
-       the weight update becomes
-       ``w = (1 - gamma) * w + k * conj(e_taps)``, which exponentially
-       suppresses tap energy in frequency-null subspaces and prevents the
-       eigenvalue blow-up that afflicts ``P`` for fractionally-spaced
-       (sps > 1) inputs.
+    RLS converges faster than LMS at a higher cost per symbol:
+    ``O((C·num_taps)²)`` for the rank-1 Riccati update against
+    ``O(C·num_taps)`` for LMS.  It keeps the inverse correlation matrix ``P``
+    of the stacked input windows.
 
     Parameters
     ----------
     samples : array_like or Signal
-        Input signal samples. Shape: ``(N_samples,)`` or ``(C, N_samples)``.
-        A :class:`Signal` supplies ``sps`` and ``constellation``; the result
-        then also carries ``signal``, the 1-SPS output Signal.
+        Input samples, ``(N,)`` or ``(C, N)``.  A :class:`Signal` supplies
+        ``sps`` and ``constellation``; the result then also carries
+        ``signal``, the 1-SPS output Signal.
     training_symbols : array_like, optional
-        Known symbols for data-aided adaptation (at symbol rate, 1 SPS), on
-        the scale of the unit-power ``constellation`` (used as given).
+        Known symbols at one sample per symbol for the trained start, on the
+        scale of the unit-power ``constellation`` (used as given).
     num_taps : int, default 21
-        Number of equalizer taps per FIR filter.
+        Taps per FIR filter.
     sps : int, optional
-        Samples per symbol at the input (1 is the well-conditioned case).
-        Taken from the Signal; required for array input.  A value that
-        disagrees with the Signal raises.
+        Samples per symbol at the input; 1 is the well-conditioned case (see
+        Warnings).  Taken from the Signal; required for array input.  A value
+        that disagrees with the Signal raises.
     forgetting_factor : float, default 0.99
-        RLS forgetting factor (lambda). Range: (0, 1].
-        Values close to 1 give longer memory.
+        Forgetting factor ``λ`` in ``(0, 1]``; values close to 1 give a
+        longer memory.
     delta : float, default 0.01
-        Tikhonov regularisation coefficient that seeds the inverse correlation
-        matrix as ``P₀ = (1/delta) · I``.
+        Regularization that seeds the inverse correlation matrix,
+        ``P₀ = (1/delta) · I``: a Tikhonov (ridge) prior of ``delta`` per
+        tap, since ``P`` must start positive definite before any data.  The
+        input is normalized to unit symbol power, so ``delta`` is on the
+        scale of the noise variance, whatever the raw amplitude.
 
-        **Physical interpretation.**  RLS recursively refines a running estimate
-        of ``Rxx⁻¹``, where ``Rxx = E[x xᴴ]`` is the input auto-correlation
-        matrix.  Before any data have been observed, ``P`` must be initialised
-        to some positive-definite matrix.  Choosing ``P₀ = (1/delta) · I``
-        is equivalent to assuming a fictitious prior with `delta` units of
-        regularisation energy per tap - a textbook Tikhonov (ridge) prior on
-        the tap vector with regularisation parameter ``delta``.
+        * A large ``delta`` (e.g. 1.0) gives a small ``P₀`` and small first
+          gains ``k = P x / (λ + xᴴ P x)``: the equalizer starts slowly over
+          the first tens of symbols, and the bias then disappears.  Safe
+          with a long training sequence when robustness matters most.
+        * A small ``delta`` (e.g. 1e-4) gives large first gains: the
+          equalizer converges in few symbols, but those updates are
+          dominated by the noise of the first observations and can take
+          longer to settle.  Below about 1e-5, ``P`` can overflow before the
+          Riccati update contracts it.
 
-        **Effect on convergence.**
-
-        * **Large delta** (e.g. 1.0): ``P₀`` is small -> the first Kalman gain
-          vectors ``k = P x / (λ + xᴴ P x)`` are small -> the equalizer adapts
-          sluggishly over the first tens of symbols.  Once enough data are seen
-          the bias disappears, so this is safe when a long training sequence is
-          available and numerical robustness is the priority.
-        * **Small delta** (e.g. 1e-4): ``P₀ = (1/delta) · I`` is a large matrix
-          -> ``k`` is large for the first symbols -> the equalizer converges in
-          very few symbols but the weight update is dominated by noise on those
-          first few observations, potentially requiring more symbols to settle.
-          Extremely small values (< 1e-5) risk numerical overflow of ``P``
-          before the Riccati update can contract it.
-
-        **Sensitivity to signal power.**  The code normalises input samples to
-        unit symbol-rate power before running the Riccati recursion, so
-        ``delta`` is expressed in normalised units (≈ noise variance scale) and
-        is not sensitive to the raw signal amplitude.
-
-        **Practical guidelines.**
-
-        * **Training-aided mode** (``training_symbols`` provided): the default
-          ``delta=0.01`` works well for most symbol rates and SNR regimes.
-          Increase toward 1.0 if tap weights oscillate wildly during the first
-          training symbols; decrease toward 1e-3 if convergence is slow and
-          your training block is short.
-        * **Decision-directed (DD) only**: prefer ``delta=1.0`` and rely on the
-          forgetting factor to drive convergence, keeping ``P`` bounded.
-        * **Fractionally-spaced signals** (``sps=2``, with ``leakage > 0``):
-          larger ``delta`` (0.1-1.0) helps counteract the positive-feedback
-          tendency of the unbounded ``P`` eigenvalues in the null sub-space.
-          Pair with ``leakage=1e-4`` for structural stability.
+        With training symbols the default works for most symbol rates and
+        SNRs: raise it towards 1.0 if the taps swing wildly during the first
+        training symbols, lower it towards 1e-3 if a short training block
+        converges too slowly.  Decision-directed only, prefer ``delta=1.0``
+        and let the forgetting factor drive convergence.  For fractionally
+        spaced input (``sps=2``, with ``leakage > 0``), 0.1 to 1.0 counters
+        the growth of ``P``'s eigenvalues in the null subspace; pair it with
+        ``leakage=1e-4``.
     leakage : float, default 0.0
-        Weight-decay coefficient (γ) applied to the tap vector at every step::
+        Weight decay ``γ`` applied to the taps at every step::
 
             W <- (1 - γ)·W + k·ē         # leaky weight update
-            P <- (P - k·x̄ᴴP) / λ         # standard Riccati (unchanged)
+            P <- (P - k·x̄ᴴP) / λ         # Riccati update, unchanged
 
-        Weight decay exponentially suppresses tap weights in the null subspace -
-        noise-only frequency bands that arise in T/2-spaced (sps=2) signals -
-        without inflating ``P``'s eigenvalues.
-        A value of ``0.0`` (default) gives standard RLS.
-        For fractionally-spaced equalization start with ``leakage=1e-4`` and
-        increase if steady-state EVM remains high.
+        It damps the taps in the null subspace (the noise-only bands of a
+        T/2-spaced input) without touching ``P``.  0.0 is standard RLS; for
+        fractionally spaced equalization start at 1e-4 and increase it if the
+        steady-state EVM stays high.
     constellation : Constellation, optional
-        Decision constellation for the slicer, unit power (a shaped
-        constellation carries its pmf).  Defaults to the Signal's
-        ``constellation``; required for array input.
+        Decision constellation, at unit power (a shaped constellation brings
+        its pmf).  Defaults to the Signal's ``constellation``; required for
+        array input.
     store_weights : bool, default False
-        If True, stores weight trajectory.
+        Record the weights of every symbol in ``weights_history``.
     center_tap : int, optional
-        Index of the center tap. If None, defaults to ``num_taps // 2``.
+        Index of the center tap; defaults to ``num_taps // 2``.
     initial_taps : array_like, optional
         Initial tap weights instead of the center-tap identity, e.g. the
-        ``weights`` of a previous stage (preamble LMS -> payload RLS).  Shape
+        ``weights`` of an earlier stage (preamble LMS, then payload RLS):
         ``(C, C, num_taps)``, or ``(num_taps,)`` / ``(1, num_taps)`` for SISO.
         Only for a cold start: a ``state`` carries its own weights.
     cpr : PLL or BPS, optional
-        Inline carrier phase recovery (``commkit.recovery``), run jointly
-        with the weight updates at every symbol; ``None`` disables it.
-
-        * ``PLL(bandwidth=, mu=, beta=, phase_init=, joint_channels=)`` -
-          decision-directed loop: the cross-product detector
-          ``Im(y · conj(d))`` drives a PI loop (gains from ``bandwidth`` or
-          raw ``mu`` / ``beta``).  ``phase_init`` seeds a cold start.  Low
-          noise floor; recommended for QPSK through 64-QAM.
-        * ``BPS(test_phases=, block_size=, joint_channels=)`` - blind phase
-          search over ``test_phases`` angles in ``[0, 2π/S)``, ``S`` the
-          constellation's rotational symmetry (π/2 for QAM), averaged over a causal window of the last
-          ``block_size`` symbols.  Preferred for bursts where PLL pull-in is
-          impractical.  The wrapped float32 estimate rotates the output; the
-          causally ``S``-fold-unwrapped float64 accumulator is the
-          ``phase_trajectory``, so float32 rounding never accumulates.
-
-        ``joint_channels`` shares one estimate across MIMO channels (summed
-        BPS metrics, or the PLL error averaged before the integrator).  A
-        nested ``CycleSlip(history=, threshold=)`` predicts each phase from a
-        linear fit through the last ``history`` values and snaps a deviation
-        beyond ``threshold`` to the nearest ``2π/4`` multiple (``π`` for
-        2-fold constellations).
+        Inline carrier-phase recovery, as for :func:`lms`; ``None`` for none.
     state : EqualizerState, optional
-        Continue from ``result.state`` of a previous call of this equalizer
-        with the same configuration: weights, normalization, inline CPR state
-        and the input from where the previous call left off.  The previous
-        result's last ``state.overlap`` symbols are recomputed here, so the
-        outputs stitch to exactly one uninterrupted run.  Training symbols
-        start at this call's first output symbol.
-    pad_mode : {'zeros', 'edge'}, default 'zeros'
-        Left padding of a cold start: ``'zeros'`` (default) prepends
-        ``center_tap`` zeros, ``'edge'`` replicates the first sample, which
-        can soften the initial amplitude jump.
+        Continue from ``result.state`` of an earlier call with the same
+        configuration, as for :func:`lms`; the state also carries ``P``.
+    pad_mode : {'zeros', 'edge', 'reflect'}, default 'zeros'
+        Padding of a cold start, as for :func:`lms`.
 
     Returns
     -------
     EqualizerResult
-        Result container with the following fields:
-
-        * ``y_hat`` - equalized symbol estimates, shape ``(N_sym,)`` SISO
-          or ``(C, N_sym)`` MIMO, at 1 SPS; always an array.
-        * ``signal`` - for Signal input, the output as a 1-SPS Signal with
-          its reference cut to the output symbols (RLS drops its tail).
-        * ``weights`` - final tap-weight tensor, shape ``(num_taps,)`` SISO
-          or ``(C, C, num_taps)`` MIMO.
-        * ``error`` - complex error signal ``e[n] = d[n] - y[n]``, same
-          shape as ``y_hat``.
-        * ``weights_history`` - tap weights at each symbol when
-          ``store_weights=True``; ``None`` otherwise.
-        * ``phase_trajectory`` - per-symbol phase estimates, shape
-          ``(N_sym,)`` SISO or ``(C, N_sym)`` MIMO.  BPS: causal
-          ``S``-fold-unwrapped float64.  PLL: PI integrator state.  ``None``
-          when ``cpr=None``.
-        * ``num_train_symbols`` - number of data-aided training symbols.
-        * ``input_norm_factor`` - RMS factor used to normalize inputs.
-        * ``state`` - :class:`EqualizerState` for ``state=`` continuation;
-          it also carries the inverse correlation matrix ``P``.
+        The fields described for :func:`lms`.  ``y_hat`` lacks the last
+        ``num_taps // 2`` symbols (``tail_trim``), and ``signal`` carries the
+        reference cut to match.
 
     Warnings
     --------
-    **Fractional Spacing Singularity:**
-    Applying RLS to fractionally-spaced signals (sps > 1) is not recommended.
-    Fractional spacing bounds the signal energy within a subset of the Nyquist
-    bandwidth. The unexcited frequency bands contain strictly thermal noise,
-    rendering the input correlation matrix mathematically singular. RLS
-    attempts to invert these near-zero eigenvalues, exponentially amplifying
-    high-frequency noise and causing severe tap weight bloat.  Normalized LMS
-    is the structurally stable alternative.
+    RLS is not recommended for fractionally spaced input (``sps > 1``).  The
+    signal then fills only part of the Nyquist band, the other bands carry
+    noise alone, and the input correlation matrix is nearly singular: RLS
+    inverts its near-zero eigenvalues, which amplifies the high-frequency
+    noise and inflates the taps.  :func:`lms` is the stable alternative.
 
+    Notes
+    -----
     ``initial_taps`` seeds the tap weights only: ``P`` starts at
     ``(1/delta) · I``.  ``state`` continues both.
+
+    **Algorithm (per symbol n).**
+
+    Steps 1-5 and 7 are those of :func:`lms` (input window, butterfly
+    filter, carrier-phase recovery, decision, error rotated back to the tap
+    plane, cycle-slip correction).  Step 6 replaces the LMS gradient with a
+    rank-1 Riccati update:
+
+    6. **RLS weight update**: with the regressor ``x_n`` that stacks the
+       windows of all C inputs (``C*T`` entries) and its inverse
+       auto-correlation matrix ``P`` of shape ``(C*T, C*T)``, shared by the
+       C outputs::
+
+           k   = (P @ x_n) / (lambda + x_n^H @ P @ x_n)
+           P   = (P - k @ x_n^H @ P) / lambda
+           w_c += k * conj(e_taps_c[n])
+
+       where ``lambda`` = ``forgetting_factor`` and ``w_c`` stacks the taps
+       of output ``c``.  ``P`` starts at ``(1/delta) * I``.  With a
+       ``leakage`` ``gamma > 0`` the update becomes
+       ``w = (1 - gamma) * w + k * conj(e_taps)``, which damps the taps in
+       the null subspace, where ``P``'s eigenvalues grow for fractionally
+       spaced (``sps > 1``) input.
     """
     signal_adapter = adapt_signal(samples, function_name="rls()")
     samples = signal_adapter.array
@@ -725,8 +655,8 @@ def rls(
         snapshot=snap,
         n_sym=n_update_halt,
         phase_out=phase_out,
+        tail_trim=tail_trim,
     )
     result = _log_equalizer_exit(result, name="RLS")
-    result.tail_trim = tail_trim
     _check_rls_divergence(result.weights, run.xp, forgetting_factor, delta)
     return _attach_equalized_signal(result, sig, state)

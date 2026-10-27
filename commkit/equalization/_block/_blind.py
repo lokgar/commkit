@@ -1,5 +1,7 @@
-"""Blind frequency-domain block equalizer engine (FDAF) backing blind.py's
-block_cma / block_rde.
+"""Blind frequency-domain block equalizer engine (private).
+
+The FDAF loop behind :func:`commkit.equalization.block_cma` and
+:func:`commkit.equalization.block_rde`.
 """
 
 from __future__ import annotations

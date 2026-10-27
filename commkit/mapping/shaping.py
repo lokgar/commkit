@@ -1,5 +1,4 @@
-"""
-Probabilistic shaping.
+"""Probabilistic shaping: :func:`maxwell_boltzmann` and :func:`optimal_nu`.
 
 Maxwell-Boltzmann priors over any constellation, the shaping parameter that
 reaches a target entropy, and the pmf-weighted constellation power.  Shaped
@@ -34,13 +33,13 @@ def _constellation_power(
 
     For a uniform constellation (``pmf=None``) this is the unweighted mean
     power ``mean(|s|^2)``.  For probabilistic shaping it is the pmf-weighted
-    power ``Σ_m P(s_m) |s_m|^2`` - the quantity written ``E_PS`` when the
-    constellation is on the normalised grid (where it is ``< 1``).
+    power ``Σ_m P(s_m) |s_m|^2``, written ``E_PS`` when the constellation is
+    on the normalized grid (where it is ``< 1``).
 
-    The value is *grid-agnostic*: it reports the average power of the
-    constellation exactly as passed - ``≈1`` for a normalised uniform grid,
-    ``E_PS < 1`` for a normalised shaped grid, or the raw integer-grid energy
-    (e.g. ``10`` for an unnormalised 16-QAM).  Callers apply their own
+    The value does not depend on the grid: it is the average power of the
+    constellation exactly as passed, ``≈1`` for a normalized uniform grid,
+    ``E_PS < 1`` for a normalized shaped grid, or the raw integer-grid
+    energy (``10`` for an unnormalized 16-QAM).  Callers apply their own
     rescaling (``√E_PS`` on the received symbols, or ``1/√E_PS`` on the
     constellation) using the returned value.
 
@@ -50,9 +49,9 @@ def _constellation_power(
     Parameters
     ----------
     constellation : array_like
-        Constellation points, shape ``(M,)``.  NumPy, CuPy, or list.
+        Constellation points, ``(M,)``, NumPy, CuPy or a list.
     pmf : array_like, optional
-        Per-point probabilities, shape ``(M,)``, aligned with
+        Per-point probabilities, ``(M,)``, aligned with
         ``constellation`` and summing to 1 (e.g. from
         :func:`maxwell_boltzmann`).  ``None`` (uniform) returns the
         unweighted mean power.
@@ -94,12 +93,12 @@ def maxwell_boltzmann(constellation: Constellation, *, nu: float) -> np.ndarray:
         Points to shape; any existing pmf is ignored.
     nu : float
         Shaping parameter, ``nu >= 0``.  ``nu = 0`` gives the uniform prior;
-        larger values favour low-energy points.
+        larger values favor low-energy points.
 
     Returns
     -------
-    np.ndarray
-        pmf of shape ``(M,)``, float64, aligned with ``constellation.points``
+    numpy.ndarray
+        pmf, ``(M,)``, float64, aligned with ``constellation.points``
         and summing to 1.
     """
     if nu < 0:

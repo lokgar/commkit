@@ -1,11 +1,10 @@
-"""
-Performance metrics: EVM, SNR, BER, SER, GMI and MI.
+"""Performance metrics: EVM, SNR, BER, SER, GMI and MI.
 
 Metrics are the reporting layer.  They take received symbols (or bits, or
 LLRs) at one sample per symbol and their reference, as arrays or as a 1-SPS
 :class:`~commkit.core.Signal` whose ``reference`` holds the transmitted
 symbols and bits.  They return host values: a ``float`` for ``(N,)`` input
-and an ``np.ndarray`` of shape ``(C,)`` for ``(C, N)`` input.
+and a ``(C,)`` NumPy array for ``(C, N)`` input.
 
 Metrics never align, rotate or permute the received symbols against the
 reference: synchronization, phase-ambiguity and channel-permutation
@@ -151,9 +150,11 @@ def _constellation(adapter: SignalAdapter, constellation: Any, name: str) -> Any
 def _paired(
     rx: ArrayType, reference: Any, xp: Any, name: str
 ) -> tuple[ArrayType, ArrayType]:
-    """The reference on ``rx``'s device, and in its precision when both are
-    floating point (a complex128 reference does not promote complex64 data);
-    the shapes must agree."""
+    """Move the reference to ``rx``'s device and precision.
+
+    The precision is matched when both are floating point, so a complex128
+    reference does not promote complex64 data.  The shapes must agree.
+    """
     ref = to_device(reference, "cpu" if xp is np else "gpu")
     if rx.shape != ref.shape:
         raise ValueError(
@@ -184,9 +185,12 @@ def _gain(rx: ArrayType, tx: ArrayType, xp: Any) -> ArrayType:
 def _reference_scaled(
     adapter: SignalAdapter, rx: ArrayType, xp: Any, name: str, num_skip: int
 ) -> ArrayType:
-    """A Signal's symbols divided by the data-aided gain against its reference
-    symbols (estimated after the first ``num_skip``); arrays and Signals
-    without a reference are returned as given."""
+    """Divide a Signal's symbols by their data-aided gain.
+
+    The gain is estimated against the reference symbols after the first
+    ``num_skip``.  Arrays and Signals without a reference are returned as
+    given.
+    """
     sig = adapter.signal
     if sig is None or sig.reference is None:
         return rx
@@ -218,8 +222,7 @@ def evm(
     blind: bool = False,
     num_skip_symbols: int = 0,
 ) -> float | np.ndarray:
-    """
-    Error vector magnitude (RMS), in percent.
+    """Error vector magnitude (RMS), in percent.
 
     Data-aided by default: the error is measured against the known
     transmitted symbols.  With ``blind=True`` it is measured against the
@@ -314,8 +317,7 @@ def snr(
     *,
     num_skip_symbols: int = 0,
 ) -> float | np.ndarray:
-    """
-    Data-aided SNR in dB: signal power over error power.
+    """Data-aided SNR in dB: signal power over error power.
 
     ``SNR = 1 / E[|r / g - s|^2]`` with the reference ``s`` normalized to
     unit average power per channel and the data-aided gain
@@ -380,13 +382,12 @@ def ber(
     constellation: Constellation | None = None,
     num_skip_symbols: int = 0,
 ) -> float | np.ndarray:
-    """
-    Bit error rate.
+    """Bit error rate.
 
     Parameters
     ----------
     bits : array_like or Signal
-        Received bits (0/1), ``(N_bits,)`` or ``(C, N_bits)``.  A Signal holds
+        Received bits (0 and 1), ``(N_bits,)`` or ``(C, N_bits)``.  A Signal holds
         received *symbols* at one sample per symbol: they are hard-decided
         against the constellation and compared with ``reference.bits``.
     reference : array_like, optional
@@ -443,12 +444,11 @@ def ser(
     constellation: Constellation | None = None,
     num_skip_symbols: int = 0,
 ) -> float | np.ndarray:
-    """
-    Symbol error rate of minimum-distance hard decisions.
+    """Symbol error rate of minimum-distance hard decisions.
 
     The received and the reference symbols are both decided against the
     constellation, so rounding in the reference does not count.  SER does
-    not depend on the bit labelling.
+    not depend on the bit labeling.
 
     Parameters
     ----------
@@ -505,8 +505,7 @@ def gmi(
     method: str = "maxlog",
     num_skip_symbols: int = 0,
 ) -> float | np.ndarray:
-    r"""
-    Generalized mutual information (bit-metric decoding rate), bits/symbol.
+    r"""Generalized mutual information (bit-metric decoding rate), bits/symbol.
 
     .. math::
 
@@ -514,7 +513,7 @@ def gmi(
             \mathbb{E}\big[\log_2(1 + e^{-(1 - 2 c_b) L_b})\big]
 
     with the entropy ``H(X)`` of the constellation's prior (``k`` bits when
-    uniform), the LLR ``L_b`` of bit ``b`` (positive favours 0) and the
+    uniform), the LLR ``L_b`` of bit ``b`` (positive favors 0) and the
     transmitted bit ``c_b``.  Each expectation estimates ``H(B_b | Y)``; with
     a shaped constellation the bits are not uniform, so the rate is not
     ``k - ...``.  The LLRs must include the prior, as those of
@@ -589,7 +588,7 @@ def gmi(
     llr_arr = llr_arr.astype(real, copy=False)
     bits_arr = _skip(ref, num_skip_symbols * k, name).astype(real)
 
-    # -(1 - 2c) L: negative (small loss) when the LLR favours the sent bit.
+    # -(1 - 2c) L: negative (small loss) when the LLR favors the sent bit.
     x = -llr_arr * (1.0 - 2.0 * bits_arr)
     # log2(1 + e^x) = (log1p(e^-|x|) + max(0, x)) / ln 2
     # math.log, not np.log: a NumPy float64 scalar would promote (NEP 50).
@@ -611,8 +610,7 @@ def mi(
     constellation: Constellation | None = None,
     num_skip_symbols: int = 0,
 ) -> float | np.ndarray:
-    r"""
-    Mutual information of the AWGN channel with the constellation's prior.
+    r"""Mutual information of the AWGN channel with the constellation's prior.
 
     Monte-Carlo estimate with Gaussian likelihoods
     ``p(r | s_m) ∝ exp(-|r - s_m|^2 / sigma^2)`` and prior ``P(s_m)``:

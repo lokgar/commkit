@@ -1,60 +1,22 @@
-"""
-Multirate signal processing and resampling.
+"""Sampling-rate conversion.
 
-This module provides high-performance implementations of multirate
-operations, including interpolation, decimation, and rational rate
-conversion using polyphase filter banks.
+:func:`upsample`, :func:`decimate` and :func:`resample` change the
+sampling rate through ``scipy.signal.resample_poly`` (polyphase),
+``scipy.signal.decimate`` (``decimate(method="decimate")``) or, with
+``periodic=True``, Fourier interpolation (``scipy.signal.resample``);
+:func:`decimate_to_symbol_rate` slices a matched-filtered signal to one
+sample per symbol.
 
-Notes on power scaling
-----------------------
-All rate-changing functions in this module delegate to
-``scipy.signal.resample_poly`` (or, with ``periodic=True``, to the Fourier
-``scipy.signal.resample``), both designed with **unity DC gain**: a
-constant-amplitude input produces a constant-amplitude output.
-
-**Bandlimited (pulse-shaped) signals**
-
-For a signal whose bandwidth fits within the new Nyquist band
-(i.e. ``signal_bandwidth < fs_out / 2``), the polyphase filter is
-effectively transparent - it passes all signal energy and the average
-sample power is preserved:
-
-    E[|x_out[n]|^2] ≈ E[|x_in[n]|^2]
-
-This holds regardless of the resampling ratio, rolloff factor, or
-signal length (verified for RRC-shaped signals with rolloff 0.01-0.99,
-sps_in down to 1.5, and block sizes as short as 64 symbols).
-
-**Consequence for the ``"symbol_power"`` convention**
-
-The ``Signal`` class uses the ``"symbol_power"`` normalization
-(``E[|x|^2] = 1/sps``) so that symbol energy ``Es = E[|x|^2] * sps = 1``
-is independent of the oversampling factor.  Because ``resample_poly``
-preserves sample power while ``sps`` changes, the convention is broken
-after any rate change: the actual sample power remains ``1/sps_old``
-instead of ``1/sps_new``.
-
-``upsample``, ``decimate`` and ``resample`` correct for this by applying a
-deterministic amplitude gain of ``sqrt(sps_old / sps_new)`` when
-``correct_power=True`` (the default for Signal input).  This correction is **exact** for pulse-shaped
-signals because the power-preserving behaviour of ``resample_poly`` is
-guaranteed (not statistical).
-
-**Non-bandlimited signals (white noise, arbitrary arrays)**
-
-For a flat-PSD (white-noise) signal, decimation removes the
-out-of-band spectral power together with the aliased bandwidth, so
-sample power scales as ``up / down``:
-
-    E[|x_out[n]|^2] ≈ (up / down) * E[|x_in[n]|^2]
-
-Upsampling preserves sample power for non-bandlimited signals too
-(the anti-imaging filter passes the baseband content unchanged).
-
-If you are passing raw noise or an unfiltered wideband array through
-these functions and need to maintain a specific power level, apply
-``correct_power=False`` in the ``Signal`` methods and rescale manually,
-or use ``commkit.math.normalize`` after the fact.
+Power scaling.  These filters have unity DC gain: a signal whose band fits
+in the output Nyquist band keeps its average sample power,
+``E[|x_out|²] ≈ E[|x_in|²]``, whatever the ratio.  A Signal is normalized to
+``E[|x|²] = 1/sps``, so a rate change alone would leave the power at
+``1/sps_old``; with ``correct_power=True`` (the default for Signal input)
+the output is scaled by ``sqrt(sps_old / sps_new)``, which is exact for
+band-limited signals.  White noise and other wideband arrays do not follow
+this rule (decimation removes the out-of-band power, scaling it by
+``up / down``): pass ``correct_power=False`` and rescale them, e.g. with
+:func:`commkit.math.normalize`.
 """
 
 import math
@@ -76,12 +38,11 @@ def decimate_to_symbol_rate(
     offset: int = 0,
     normalize: bool | None = None,
 ) -> S:
-    """
-    Decimate an oversampled signal to the symbol rate by direct slicing.
+    """Decimate an oversampled signal to the symbol rate by direct slicing.
 
-    Use this **after** matched filtering: it keeps every ``sps``-th sample
-    without further filtering, which is correct because the matched filter
-    has already done the optimal noise suppression.
+    Use it after matched filtering: it keeps every ``sps``-th sample without
+    further filtering, because the matched filter has already removed the
+    out-of-band noise.
 
     Parameters
     ----------
@@ -93,15 +54,15 @@ def decimate_to_symbol_rate(
         required for array input.  A value that disagrees with the Signal
         raises.
     offset : int, default 0
-        Sampling phase in samples, ``0 <= offset < sps``: choose the eye
-        centre.
+        Sampling phase in samples, ``0 <= offset < sps``, chosen at the eye
+        center.
     normalize : bool, optional
         Rescale the output to unit average power ``mean(|x|²) = 1``.
         Defaults to ``True`` for Signal input and ``False`` for arrays.
 
     Returns
     -------
-    array_like or Signal
+    ndarray or Signal
         Symbols at one sample per symbol, ``(..., ceil((N - offset) / sps))``.
     """
     signal_adapter = adapt_signal(samples, function_name="decimate_to_symbol_rate()")
@@ -150,8 +111,7 @@ def upsample(
     correct_power: bool | None = None,
     periodic: bool = False,
 ) -> S:
-    """
-    Increase the sampling rate by an integer factor (polyphase interpolation).
+    """Increase the sampling rate by an integer factor (polyphase interpolation).
 
     Zero insertion followed by an anti-imaging filter
     (``scipy.signal.resample_poly``); with ``periodic=True``, Fourier
@@ -174,7 +134,7 @@ def upsample(
 
     Returns
     -------
-    array_like or Signal
+    ndarray or Signal
         Upsampled samples, ``(..., N * factor)``.
     """
     factor = _check_factor(factor, "upsample()")
@@ -204,8 +164,7 @@ def decimate(
     zero_phase: bool = True,
     ftype: str = "fir",
 ) -> S:
-    """
-    Reduce the sampling rate by an integer factor with anti-aliasing.
+    """Reduce the sampling rate by an integer factor with anti-aliasing.
 
     Parameters
     ----------
@@ -228,7 +187,7 @@ def decimate(
 
     Returns
     -------
-    array_like or Signal
+    ndarray or Signal
         Decimated samples, ``(..., ceil(N / factor))``.
 
     Notes
@@ -272,11 +231,10 @@ def resample(
     correct_power: bool | None = None,
     periodic: bool = False,
 ) -> S:
-    """
-    Rational resampling by ``up / down`` (polyphase, or Fourier when
-    ``periodic``).
+    """Resample by a rational factor ``up / down``.
 
-    Give either the integer factors ``up`` and ``down``, or the target
+    Polyphase filtering (``scipy.signal.resample_poly``), or Fourier
+    interpolation with ``periodic=True``.  Give either the integer factors ``up`` and ``down``, or the target
     ``sps_out`` (with ``sps_in``, which a Signal supplies).
 
     Parameters
@@ -306,7 +264,7 @@ def resample(
 
     Returns
     -------
-    array_like or Signal
+    ndarray or Signal
         Resampled samples, about ``N * up / down`` long (exactly, when
         ``periodic``).
 

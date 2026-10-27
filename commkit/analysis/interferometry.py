@@ -1,48 +1,48 @@
 r"""Delayed self-heterodyne / self-homodyne (DSH) laser characterization.
 
-Estimate a CW laser's FM-noise PSD and linewidth from the digitized *beat* of
-a delayed self-interference measurement: the laser under test is split in two,
+A DSH measurement gives a CW laser's FM-noise PSD and linewidth from the
+digitized beat of a delayed self-interference: the laser under test is split in two,
 one arm is delayed by ``τ_d`` (a fiber spool), the other is optionally
 frequency-shifted by ``f_shift`` (an AOM), and the arms are recombined on a
-photodetector.  The beat at ``f_shift`` carries the **differential** laser
+photodetector.  The beat at ``f_shift`` carries the differential laser
 phase
 
     Δφ(t) = φ(t) - φ(t - τ_d),
 
-i.e. the interferometer converts the laser's absolute phase noise - which is
-unobservable without a second, better laser - into a measurable quantity by
-using the laser itself, delayed toward or beyond its own coherence time, as
-the reference.
+so the interferometer turns the laser's absolute phase noise, which cannot
+be observed without a second, better laser, into a measurable quantity: the
+laser itself, delayed towards or beyond its own coherence time, is the
+reference.
 
 The AOM shift and the receiver are independent choices, and ``dsh_phase``
-dispatches on the input *dtype* rather than on a named variant, so three
-combinations are supported:
+dispatches on the dtype of the input rather than on a named variant, so
+three combinations are supported:
 
-* **heterodyne, single photodetector** - ``f_shift ≠ 0``, *real* samples;
-  the analytic signal is formed internally (Hilbert), so the whole beat
-  lineshape must sit inside ``(0, f_s/2)``.
-* **heterodyne, IQ receiver** - ``f_shift ≠ 0`` with a 90°-hybrid (coherent)
-  front-end giving *complex* samples, used directly: no Hilbert step, no
-  ``(0, f_s/2)`` restriction (the line may sit anywhere in ``±f_s/2``), and
-  receiver DC / hybrid-image spurs land ``f_shift`` / ``2·f_shift`` away
-  from the line instead of on top of it.
-* **homodyne, IQ receiver** - ``f_shift = 0``, complex samples.  Real-valued
-  homodyne detection (single photodiode, ``cos Δφ`` only) is not invertible
-  to phase and is rejected.
+* heterodyne with a single photodetector: ``f_shift ≠ 0`` and real samples;
+  the analytic signal is formed internally (Hilbert transform), so the
+  whole beat lineshape must sit inside ``(0, f_s/2)``.
+* heterodyne with an IQ receiver: ``f_shift ≠ 0`` with a 90°-hybrid
+  (coherent) front end whose complex samples are used directly.  There is
+  no Hilbert step and no ``(0, f_s/2)`` restriction (the line may sit
+  anywhere in ``±f_s/2``), and the receiver's DC and hybrid-image spurs land
+  ``f_shift`` and ``2·f_shift`` away from the line instead of on it.
+* homodyne with an IQ receiver: ``f_shift = 0`` and complex samples.  Real
+  homodyne detection (a single photodiode, ``cos Δφ`` only) cannot be
+  inverted to a phase and is rejected.
 
 All functions take ``(N,)`` or ``(C, N)`` records with time on the last
-axis.  By default the ``C`` channels are **independent captures** processed
-as a batch - per-channel carrier removal, PSDs and linewidths - e.g. several
-lasers, or repeated captures stacked for a single GPU pass.  With
+axis.  By default the ``C`` channels are independent captures processed as a
+batch (carrier removal, PSDs and linewidths per channel), e.g. several
+lasers, or repeated captures stacked for one GPU pass.  With
 ``combine_polarizations=True`` the channels are instead the polarization
-outputs of *one* beat and are combined into a single record (see below).
+outputs of one beat and are combined into a single record (see below).
 
-**Polarization diversity.**  The two interferometer arms reach the receiver
+Polarization diversity.  The two interferometer arms reach the receiver
 in different, slowly drifting states of polarization (SOP): the delay spool's
 birefringence wanders with temperature and vibration.  Only the projection
-of one arm's field onto the other's polarization beats, so a single-
-polarization receiver sees the beat amplitude fade - completely when the
-two SOPs become orthogonal - and during a fade the phase is pure noise and
+of one arm's field onto the other's polarization beats, so a
+single-polarization receiver sees the beat amplitude fade (completely when the two
+SOPs become orthogonal), and during a fade the phase is pure noise and
 unwraps with slips.  A polarization-diverse (dual-pol) coherent receiver
 records the beat in two orthogonal polarizations,
 
@@ -56,34 +56,34 @@ of ``s`` is maximum-ratio combining, ``y = aᴴz / ‖a‖ = ‖a‖·s + noise`
 each channel weighted by its own amplitude and co-phased.  ``a`` is
 estimated from the coherency matrix ``R = ⟨z zᴴ⟩ = a aᴴ + σ² I``, averaged
 over short blocks (≈ 1 µs, at least 256 samples): its dominant eigenvector
-is ``a/‖a‖`` up to a phase.  That phase is arbitrary per block, so the
-eigenvectors are *parallel-transported* - each block's phase chosen so it is
-in phase with the previous one - and interpolated to the sample rate before
+is ``a/‖a‖`` up to a phase.  That phase is arbitrary in each block, so the
+eigenvectors are parallel-transported (each block's phase is chosen to match
+the previous block) and interpolated to the sample rate before
 ``y = vᴴz``.  The combined record has the SNR of the total beat power and no
 fading.
 
 Limitations: the channels must be sampled synchronously (deskew them
 first); SOP changes faster than a few blocks are not tracked; and a SOP that
 traces a closed loop on the Poincaré sphere adds the geometric
-(Pancharatnam) phase, half the enclosed solid angle, to ``y`` - a slow phase
-at the SOP's timescale, far below the frequencies the linewidth estimators
+(Pancharatnam) phase, half the enclosed solid angle, to ``y``: a slow phase
+at the SOP's time scale, far below the frequencies the linewidth estimators
 use.
 
 The DSH estimators are methods of
 :func:`~commkit.analysis.linewidth.estimate_linewidth`:
 
-* ``DshFmPsd`` - fit white FM, flicker FM and detection noise to the beat
+* ``DshFmPsd``: fits white FM, flicker FM and detection noise to the beat's
   FM-noise PSD, through the interferometer response as a Welch estimate sees
-  it; works in both the coherent (short-delay) and incoherent regimes and,
+  it; it works in the coherent (short-delay) and the incoherent regime and,
   with its default segments, needs the delay only roughly.
-* ``DshIncrement`` - lag-slope of the differential-phase increment variance;
-  the AWGN-immune Wiener-linewidth estimate (DSH analogue of
-  ``IncrementSlope``).
-* ``DshLorentzian`` - classic spectral width of the beat line; valid only in
-  the incoherent regime ``τ_d ≫ τ_c = 1/(πΔν)``.
+* ``DshIncrement``: the lag slope of the variance of the differential-phase
+  increments, a Wiener-linewidth estimate unaffected by AWGN (the DSH
+  analogue of ``IncrementSlope``).
+* ``DshLorentzian``: the usual spectral width of the beat line, valid only
+  in the incoherent regime ``τ_d ≫ τ_c = 1/(πΔν)``.
 
-This module holds the front end they share: the forward model ``dsh_beat``
-and the phase extraction ``dsh_phase``.
+This module holds the front end they share: the forward model
+:func:`dsh_beat` and the phase extraction :func:`dsh_phase`.
 """
 
 import numpy as np
@@ -148,7 +148,7 @@ def _combine_polarizations(z2, sampling_rate: float, xp):
     g = max(n // block, 1)
     zb = z2[:, : g * block].reshape(c, g, block)
     coherency = xp.einsum("pgk,qgk->gpq", zb, xp.conj(zb))  # (G, C, C)
-    # Average a few neighbouring blocks: noise in R averages down while the
+    # Average a few neighboring blocks: noise in R averages down while the
     # SOP is still tracked block by block.
     kernel = 5 if g >= 5 else 1
     if kernel > 1:
@@ -182,49 +182,51 @@ def dsh_beat(
     delay: float,
     f_shift: float = 0.0,
 ) -> tuple[ArrayType, ArrayType]:
-    r"""Ideal interferometer beat for a laser phase trajectory (forward model).
+    r"""Ideal interferometer beat of a laser phase trajectory (the forward model).
 
-    Deterministic synthesis counterpart of ``dsh_phase`` - the model that the
-    estimators in this module invert.  The laser field ``E(t) = exp(jφ(t))``
+    The deterministic counterpart of :func:`dsh_phase`: the model that the
+    estimators of this module invert.  The laser field ``E(t) = exp(jφ(t))``
     interferes with its own delayed replica; the detector output is the field
     product
 
         z(t) = E(t) · E*(t - τ_d) · exp(j 2π f_shift t)
              = exp(j (2π f_shift t + Δφ(t))),   Δφ(t) = φ(t) - φ(t - τ_d),
 
-    with ``τ_d`` rounded to the nearest whole sample.  ``z`` is what an IQ
-    (90°-hybrid) receiver records at any ``f_shift`` - ``f_shift = 0`` is the
-    self-*homodyne* case, ``f_shift ≠ 0`` the AOM self-*heterodyne* case; a
-    single-photodetector heterodyne receiver records ``z.real`` instead.
+    with ``τ_d`` rounded to a whole number of samples.  ``z`` is what an IQ
+    (90°-hybrid) receiver records at any ``f_shift``: ``f_shift = 0`` is the
+    self-homodyne case, ``f_shift ≠ 0`` the self-heterodyne case with an AOM;
+    a single-photodetector heterodyne receiver records ``z.real`` instead.
 
-    Deliberately *not* included - chain separately to build a full
-    measurement:
+    Two parts of a measurement are left out on purpose, to be chained
+    separately:
 
-    * the phase trajectory itself: ``impairments.generate_phase_noise``;
-    * detection noise: ``impairments.apply_awgn`` on the returned beat.
+    * the phase trajectory itself: :func:`commkit.impairments.generate_phase_noise`;
+    * detection noise: :func:`commkit.impairments.apply_awgn` on the
+      returned beat.
 
     Parameters
     ----------
     phi : array_like
-        Laser phase trajectory in radians, ``(N,)`` or ``(C, N)``
-        (``float64`` recommended; see ``generate_phase_noise``).
+        Laser phase trajectory in radians, ``(N,)`` or ``(C, N)``, preferably
+        float64 (as :func:`~commkit.impairments.generate_phase_noise` returns).
     sampling_rate : float
         Sampling rate in Hz.
     delay : float
-        Interferometer delay ``τ_d`` in seconds (≈ 4.9 µs per km of SMF).
-        Rounded to ``m = round(delay · f_s)`` samples; must satisfy
+        Interferometer delay ``τ_d`` in seconds (about 4.9 µs per km of
+        standard fiber), rounded to ``m = round(delay · f_s)`` samples with
         ``1 ≤ m < N``.
     f_shift : float, default 0.0
-        AOM frequency shift in Hz (0 = homodyne).
+        AOM frequency shift in Hz; 0 for homodyne.
 
     Returns
     -------
-    z : array_like
-        Unit-amplitude complex beat, ``(..., N - m)``, ``complex128``, same
-        backend as ``phi``.
-    delta_phi : array_like
-        The true differential phase Δφ, ``(..., N - m)`` - ground truth for
-        validating ``dsh_phase`` and the DSH linewidth estimates.
+    z : ndarray
+        Unit-amplitude complex beat, ``(..., N - m)``, ``complex128``, on the
+        device of ``phi``.
+    delta_phi : ndarray
+        The true differential phase ``Δφ``, ``(..., N - m)``: the ground
+        truth for validating :func:`dsh_phase` and the DSH linewidth
+        estimates.
     """
     x, xp, _ = dispatch(phi)
 
@@ -256,15 +258,15 @@ def dsh_phase(
     f_shift: float | None = None,
     combine_polarizations: bool = False,
 ) -> tuple[ArrayType, float | np.ndarray]:
-    r"""Unwrapped differential laser phase Δφ(t) = φ(t) - φ(t-τ_d) from the beat.
+    r"""Unwrapped differential laser phase ``Δφ(t) = φ(t) - φ(t - τ_d)`` of a beat.
 
     Removes the beat carrier (the AOM shift plus any receiver frequency
-    offset) and unwraps the remaining angle in ``float64``.  Real inputs are
-    made analytic with a Hilbert transform first; complex (IQ) inputs are
-    used directly at any carrier - both the self-*homodyne* capture
-    (``f_shift = 0`` with a 90° hybrid) and the *heterodyne* IQ capture
-    (AOM + coherent receiver) work transparently, free of the Hilbert
-    step's band restrictions.
+    offset) and unwraps the remaining angle in float64.  Real input is made
+    analytic with a Hilbert transform first; complex (IQ) input is used
+    directly at any carrier, so both the self-homodyne capture
+    (``f_shift = 0`` with a 90° hybrid) and the heterodyne IQ capture (AOM
+    and coherent receiver) work without the band restrictions of the Hilbert
+    step.
 
     Parameters
     ----------
@@ -276,10 +278,10 @@ def dsh_phase(
         Sampling rate in Hz (a fact).  Taken from a Signal; required for array
         input.  A value that disagrees with the Signal raises.
     f_shift : float, optional
-        Known beat carrier in Hz (AOM frequency).  If None, the mean beat
-        frequency is estimated per channel in two stages - coarse Kay
-        (lag-1-autocorrelation) estimate, then exact least-squares slope
-        removal on the unwrapped phase - and removed.
+        Known beat carrier in Hz (the AOM frequency).  ``None`` estimates the
+        mean beat frequency of each channel and removes it, in two stages: a
+        coarse Kay estimate (from the lag-1 autocorrelation), then the exact
+        least-squares slope of the unwrapped phase.
     combine_polarizations : bool, default False
         Treat the ``C ≥ 2`` channels as the polarization outputs of one beat
         and combine them (maximum-ratio, see the module docstring) into a
@@ -287,37 +289,37 @@ def dsh_phase(
 
     Returns
     -------
-    delta_phi : array_like
-        Unwrapped differential phase in radians (``float64``), same layout and
-        backend as the input (``(N,)`` when the polarizations are combined).
+    delta_phi : ndarray
+        Unwrapped differential phase in radians (float64), same layout and
+        device as the input (``(N,)`` when the polarizations are combined).
     f_shift_hz : float or ndarray
-        The removed carrier frequency (estimated or as passed), float (SISO)
-        or ``(C,)`` array.
+        The removed carrier frequency (estimated or as passed): a float
+        (SISO) or a ``(C,)`` array.
 
     Notes
     -----
     **Limitations.**
 
-    * A perfectly removed carrier is *not* required downstream: a constant
-      residual offset drops out of the increment variances and of the
-      (detrended) FM-noise PSD.  Carrier removal mainly keeps ``delta_phi``
-      flat for inspection/plotting.
-    * The estimated carrier is the record's best-fit mean beat frequency - it
+    * The carrier need not be removed perfectly: a constant residual offset
+      drops out of the increment variances and of the (detrended) FM-noise
+      PSD.  Removing it mainly keeps ``delta_phi`` flat for inspection and
+      plots.
+    * The estimated carrier is the record's best-fit mean beat frequency: it
       absorbs the mean laser drift over the capture into ``f_shift_hz`` and
-      *linearly detrends* ``delta_phi``.  Pass the known AOM frequency to keep
-      drift visible in ``delta_phi``.
-    * **Real input**: the analytic-signal step requires the whole beat
-      lineshape inside ``(0, f_s/2)`` - i.e. ``f_shift`` larger than the beat
+      removes the linear trend of ``delta_phi``.  Pass the known AOM
+      frequency to keep the drift in ``delta_phi``.
+    * Real input: the analytic-signal step needs the whole beat lineshape
+      inside ``(0, f_s/2)``, that is ``f_shift`` larger than the beat's
       half-bandwidth and below Nyquist by the same margin; spectral folding
-      corrupts the phase silently.  Real input with ``f_shift = 0`` is
-      rejected (see module docstring).
+      corrupts the phase without a warning.  Real input with
+      ``f_shift = 0`` is rejected (see the module docstring).
     * ``unwrap`` needs the per-sample phase step below π: keep the beat SNR
       moderate (≳ 10 dB in the beat bandwidth) and the sampling rate well
       above the beat linewidth; slips appear as ±2π staircase jumps in
       ``delta_phi``.
-    * Everything the interferometer adds - fiber acoustic/thermal noise in
-      the delay arm, AOM RF-synthesizer phase noise - is indistinguishable
-      from laser phase noise here and adds to the low-frequency PSD.
+    * Everything the interferometer adds (acoustic and thermal noise of the
+      delay fiber, phase noise of the AOM's RF synthesizer) cannot be told
+      apart from laser phase noise here and adds to the low-frequency PSD.
     """
     signal_adapter = adapt_signal(samples, function_name="dsh_phase()")
     samples = signal_adapter.array

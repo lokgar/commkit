@@ -4,51 +4,15 @@ from typing import Any
 
 import pytest
 
-from commkit import _cuda
 
+def skip_unless_gpu(backend_device: str) -> None:
+    """Skip a kernel test on the CPU parametrization.
 
-def skip_unless_kernel_available(
-    arg1: str | None = None,
-    arg2: str | None = None,
-    *,
-    backend_device: str | None = None,
-    kernel_name: str | None = None,
-) -> None:
-    """Skip test unless CUDA kernel infrastructure is available and device is GPU.
-
-    Supports both:
-    - ``skip_unless_kernel_available(backend_device, kernel_name)``
-    - ``skip_unless_kernel_available(kernel_name, backend_device=backend_device)``
+    On the GPU the kernels are always used, so a kernel that fails to compile
+    fails its tests.
     """
-    dev = backend_device
-    kname = kernel_name
-
-    if arg1 is not None:
-        if arg1 in ("cpu", "gpu"):
-            dev = arg1
-            if arg2 is not None:
-                kname = arg2
-        else:
-            kname = arg1
-            if arg2 is not None and arg2 in ("cpu", "gpu"):
-                dev = arg2
-
-    if dev is None:
-        dev = "gpu"
-
-    if dev != "gpu":
+    if backend_device != "gpu":
         pytest.skip("Test requires a GPU (CUDA device)")
-    if not _cuda.is_available():
-        pytest.skip("CUDA device below compute capability 7.0 or driver unavailable")
-    if kname is not None:
-        kern = _cuda.get_kernel(kname)
-        if kern is None:
-            pytest.skip(f"Kernel {kname!r} not available on this platform")
-
-
-def reset_warned_kernels(monkeypatch: Any) -> None:
-    """Isolate the warn-once bookkeeping between tests."""
-    monkeypatch.setattr(_cuda, "_warned_kernels", set())
 
 
 def reference_cs_block(

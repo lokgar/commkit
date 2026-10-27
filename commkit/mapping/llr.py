@@ -1,16 +1,17 @@
-"""
-Soft-decision demapping (log-likelihood ratios).
+"""Soft-decision demapping (log-likelihood ratios): :func:`compute_llr`.
 
 Max-log and exact (log-sum-exp) LLRs with an optional probabilistic-shaping
-prior, computed with NumPy or CuPy on the input's device.  Sign convention:
-positive LLR -> bit 0 more likely.
+prior, computed in float32 on the input's device.  Sign convention: a
+positive LLR means bit 0 is more likely,
+``LLR_k = log P(b_k = 0 | y) / P(b_k = 1 | y)``.
 """
 
 from __future__ import annotations
 
+import weakref
 from collections.abc import Callable
 from types import ModuleType
-from typing import TYPE_CHECKING, NamedTuple
+from typing import TYPE_CHECKING, Any, NamedTuple
 
 import numpy as np
 
@@ -25,11 +26,6 @@ if TYPE_CHECKING:
 
 __all__ = ["compute_llr"]
 
-# Upper bound on the (chunk, bits, M/2) intermediate of the CuPy fallback
-# (no CUDA kernel, or more than 16 bits per symbol), in elements.  Chunking
-# over symbols keeps peak memory independent of the record length.
-_CHUNK_ELEMENTS = 1 << 23
-
 
 def compute_llr(
     symbols: ArrayType | Signal,
@@ -38,22 +34,21 @@ def compute_llr(
     constellation: Constellation | None = None,
     method: str = "maxlog",
 ) -> ArrayType:
-    """
-    Bit log-likelihood ratios for soft-decision decoding.
+    """Compute bit log-likelihood ratios (LLRs) for soft-decision decoding.
 
     Positive LLR means bit 0 is more likely; the magnitude is the confidence.
     The constellation's ``pmf`` (if any) enters as the symbol prior.
     Computed on the input's device in float32 by one compiled pass per
     symbol (Numba on the CPU, a CUDA kernel on the GPU), so memory stays
-    bounded for any record length.  On the CPU, square QAM whose labels and
-    prior factor per axis (Gray QAM, shaped or not) is demapped per axis,
-    which gives the same LLRs from 2·sqrt(M) metrics instead of M.
+    bounded for any record length.  Square QAM whose labels and prior factor
+    per axis (Gray QAM, shaped or not) is demapped per axis, which gives the
+    same LLRs from 2·sqrt(M) metrics instead of M.
     Differentiable LLRs belong to commax.
 
     Parameters
     ----------
     symbols : array_like or Signal
-        Received symbols at one sample per symbol, shape ``(..., N)``, on the
+        Received symbols at one sample per symbol, ``(..., N)``, on the
         constellation's scale.  A :class:`Signal` must be at one sample per
         symbol.
     noise_var : float
@@ -67,9 +62,15 @@ def compute_llr(
 
     Returns
     -------
-    array_like
-        float32 LLRs of shape ``(..., N * k)`` on the input's device; the
+    ndarray
+        float32 LLRs, ``(..., N * k)``, on the input's device; the
         ``k`` bits of each symbol are adjacent (MSB first).
+
+    Raises
+    ------
+    ValueError
+        For GPU input and a constellation of more than 16 bits per symbol,
+        the limit of the CUDA kernels.
 
     Notes
     -----
@@ -104,6 +105,34 @@ _NUMBA_LLR: dict[str, Callable[..., None]] = {}
 _EXACT_FLOOR = np.float32(1e-26)
 # Symbols per prange task: amortizes the scratch buffers of the CPU kernels.
 _LLR_TASK = 256
+
+# Device copies of the CUDA kernels' tables (points, labels, log prior), per
+# constellation and then per (table kind, CUDA device id): built on the first
+# call instead of on every one.  Weak keys, so a dropped constellation frees
+# its tables; equal constellations share them.
+_DEVICE_TABLES: weakref.WeakKeyDictionary[
+    Constellation, dict[tuple[str, int], tuple[Any, ...]]
+] = weakref.WeakKeyDictionary()
+
+
+def _device_tables(
+    owner: Constellation | None,
+    kind: str,
+    xp: ModuleType,
+    build: Callable[[], tuple[np.ndarray, ...]],
+) -> tuple[Any, ...]:
+    """``build()``'s host tables on the current CUDA device, cached per ``owner``.
+
+    ``owner=None`` (no constellation to cache on) copies them every call.
+    """
+    if owner is None:
+        return tuple(xp.asarray(a) for a in build())
+    per_owner = _DEVICE_TABLES.setdefault(owner, {})
+    key = (kind, int(xp.cuda.Device().id))
+    tables = per_owner.get(key)
+    if tables is None:
+        tables = per_owner[key] = tuple(xp.asarray(a) for a in build())
+    return tables
 
 
 def _get_numba_llr(name: str = "llr") -> Callable[..., None]:
@@ -142,8 +171,11 @@ def _get_numba_llr(name: str = "llr") -> Callable[..., None]:
 
         @jit
         def log_half_sum(metric, e, idx, v, b, peak):  # type: ignore[no-untyped-def]
-            """log sum_j exp(metric[idx[v, b, j]] - peak), via ``e`` unless
-            the half is underflowed there, else relative to its own max."""
+            """``log sum_j exp(metric[idx[v, b, j]] - peak)`` of one half.
+
+            Summed from ``e``, or relative to the half's own maximum where
+            it underflows in ``e``.
+            """
             half = idx.shape[2]
             s = np.float32(0.0)
             for j in range(half):
@@ -295,11 +327,13 @@ def _llr(
     pmf: np.ndarray | None,
     noise_var: float,
     method: str,
+    owner: Constellation | None = None,
 ) -> ArrayType:
-    """LLRs of ``symbols`` against host ``points`` labelled by ``bit_labels``.
+    """LLRs of ``symbols`` against host ``points`` labeled by ``bit_labels``.
 
-    Shared by :func:`compute_llr` and :meth:`Constellation.llr`.  Returns
-    float32 LLRs of shape ``(..., N * k)`` on the input's device.
+    Behind :meth:`Constellation.llr` (and so :func:`compute_llr`), which
+    passes itself as ``owner`` to cache the GPU tables.  Returns float32
+    LLRs, ``(..., N * k)``, on the input's device.
     """
     _check_method(method)
     order, k = bit_labels.shape
@@ -310,9 +344,9 @@ def _llr(
     log_pmf = _log_prior(pmf, order)
 
     n = sym_flat.shape[0]
-    llrs = xp.empty((n, k), dtype=xp.float32)
     if xp is np:
         # CPU: one parallel pass, no (chunk, k, M/2) intermediates.
+        llrs = np.empty((n, k), dtype=np.float32)
         _get_numba_llr()(
             np.ascontiguousarray(sym_flat.real, dtype=np.float32),
             np.ascontiguousarray(
@@ -329,45 +363,36 @@ def _llr(
             llrs,
         )
         return llrs.reshape((*symbols.shape[:-1], symbols.shape[-1] * k))
-    kernel = _cuda.get_kernel("llr") if k <= 16 else None
-    if kernel is not None:
-        # GPU: one thread per symbol, no (chunk, k, M/2) intermediates.
-        labels = (bit_labels.astype(np.int64) << np.arange(k - 1, -1, -1)).sum(-1)
-        llrs = kernel(
-            sym_flat.astype(xp.complex64, copy=False),
-            xp.asarray(points.astype(np.complex64)),
-            xp.asarray(log_pmf),
-            xp.asarray(labels.astype(np.int32)),
-            k=k,
-            inv_s2=float(inv_sigma2),
-            exact=method == "exact",
-        )
-        return llrs.reshape((*symbols.shape[:-1], symbols.shape[-1] * k))
-    # CuPy fallback (no CUDA kernel, or more than 16 bits per symbol).
-    const = xp.asarray(points.astype(np.complex64 if is_complex else np.float32))
-    idx0, idx1 = (xp.asarray(i) for i in _half_indices(bit_labels))  # (k, M/2)
-    log_pmf_dev = None if pmf is None else xp.asarray(log_pmf)
-    chunk = max(1, _CHUNK_ELEMENTS // (k * order))
-    for n0 in range(0, n, chunk):
-        x = sym_flat[n0 : n0 + chunk]
-        diff = x[:, None] - const[None, :]  # (chunk, M)
-        # log-likelihood (up to a shared constant): -|x - s|^2/sigma^2 + log P(s)
-        metric = (
-            -(diff.real**2 + diff.imag**2) * inv_sigma2
-            if is_complex
-            else -(diff**2) * inv_sigma2
-        )
-        if log_pmf_dev is not None:
-            metric = metric + log_pmf_dev
-        m0 = metric[:, idx0]  # (chunk, k, M/2)
-        m1 = metric[:, idx1]
-        if method == "maxlog":
-            llrs[n0 : n0 + chunk] = m0.max(axis=-1) - m1.max(axis=-1)
-        else:
-            llrs[n0 : n0 + chunk] = _logsumexp(m0, xp) - _logsumexp(m1, xp)
+    # GPU: one thread per symbol, likewise.
+    _require_gpu_bits(k)
 
-    out_shape = (*symbols.shape[:-1], symbols.shape[-1] * k)
-    return llrs.reshape(out_shape)
+    def build() -> tuple[np.ndarray, ...]:
+        return (
+            points.astype(np.complex64),
+            log_pmf,
+            _packed_labels(bit_labels),
+        )
+
+    pts_dev, log_pmf_dev, labels_dev = _device_tables(owner, "llr", xp, build)
+    llrs = _cuda.get_kernel("llr")(
+        sym_flat.astype(xp.complex64, copy=False),
+        pts_dev,
+        log_pmf_dev,
+        labels_dev,
+        k=k,
+        inv_s2=float(inv_sigma2),
+        exact=method == "exact",
+    )
+    return llrs.reshape((*symbols.shape[:-1], symbols.shape[-1] * k))
+
+
+def _require_gpu_bits(k: int) -> None:
+    """Raise for more bits per symbol than the CUDA LLR kernels handle."""
+    if k > _cuda._LLR_MAX_K:
+        raise ValueError(
+            f"compute_llr(): GPU input supports at most {_cuda._LLR_MAX_K} bits "
+            f"per symbol, the constellation has {k}"
+        )
 
 
 class _Axis(NamedTuple):
@@ -411,7 +436,46 @@ def _llr_separable(
     return llrs.reshape((*symbols.shape[:-1], symbols.shape[-1] * k))
 
 
-def _logsumexp(a: ArrayType, xp: ModuleType) -> ArrayType:
-    """Stable log-sum-exp over the last axis."""
-    peak = a.max(axis=-1, keepdims=True)
-    return xp.log(xp.exp(a - peak).sum(axis=-1)) + peak[..., 0]
+def _llr_separable_gpu(
+    symbols: ArrayType,
+    axes: tuple[_Axis, _Axis],
+    noise_var: float,
+    method: str,
+    owner: Constellation | None = None,
+) -> ArrayType:
+    """GPU LLRs of a separable constellation (as :func:`_llr_separable`)."""
+    _check_method(method)
+    re, im = axes
+    k = re.bits.size + im.bits.size
+    _require_gpu_bits(k)
+    symbols, xp, _ = dispatch(symbols)
+
+    def build() -> tuple[np.ndarray, ...]:
+        return tuple(
+            t
+            for a in axes
+            for t in (
+                a.levels.astype(np.float32),
+                _log_prior(a.pmf, a.levels.size),
+                _packed_labels(a.labels),
+                a.bits.astype(np.int32),
+            )
+        )
+
+    tables = _device_tables(owner, "llr_separable", xp, build)
+    llrs = _cuda.get_kernel("llr_separable")(
+        symbols.reshape(-1).astype(xp.complex64, copy=False),
+        tables[:4],
+        tables[4:],
+        inv_s2=float(np.float32(1.0 / max(noise_var, 1e-20))),
+        exact=method == "exact",
+    )
+    return llrs.reshape((*symbols.shape[:-1], symbols.shape[-1] * k))
+
+
+def _packed_labels(bit_labels: np.ndarray) -> np.ndarray:
+    """MSB-first bit rows to int32 labels, the CUDA kernels' layout."""
+    k = bit_labels.shape[1]
+    weights = 1 << np.arange(k - 1, -1, -1, dtype=np.int64)
+    labels: np.ndarray = (bit_labels.astype(np.int64) @ weights).astype(np.int32)
+    return labels

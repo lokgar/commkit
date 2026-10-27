@@ -1,5 +1,4 @@
-"""
-Hard bit mapping and demapping.
+"""Hard bit mapping and demapping.
 
 ``map_bits`` maps bits to the points of a :class:`Constellation`;
 ``demap_symbols_hard`` returns the bits of the nearest point (minimum
@@ -17,8 +16,7 @@ __all__ = ["demap_symbols_hard", "map_bits"]
 
 
 def map_bits(bits: ArrayType, *, constellation: Constellation) -> ArrayType:
-    """
-    Map bits to constellation points.
+    """Map bits to constellation points.
 
     Groups of ``k = constellation.bits_per_symbol`` bits (MSB first) become
     one symbol, following ``constellation.bit_labels``.
@@ -26,15 +24,15 @@ def map_bits(bits: ArrayType, *, constellation: Constellation) -> ArrayType:
     Parameters
     ----------
     bits : array_like
-        Bits (0/1), shape ``(..., n)`` with ``n`` a multiple of ``k``.
+        Bits (0 and 1), ``(..., n)`` with ``n`` a multiple of ``k``.
     constellation : Constellation
         Points and bit labels to map onto.
 
     Returns
     -------
-    array_like
-        Symbols of shape ``(..., n / k)`` on the bits' device: ``complex64``,
-        or ``float32`` for a real constellation.
+    ndarray
+        Symbols, ``(..., n / k)``, on the bits' device: ``complex64``, or
+        ``float32`` for a real constellation.
     """
     _check_constellation(constellation, "map_bits()")
     return constellation.map(bits)
@@ -43,8 +41,7 @@ def map_bits(bits: ArrayType, *, constellation: Constellation) -> ArrayType:
 def demap_symbols_hard(
     symbols: ArrayType | Signal, *, constellation: Constellation | None = None
 ) -> ArrayType:
-    """
-    Hard decisions: the bits of the nearest constellation point.
+    """Demap hard decisions: the bits of the nearest constellation point.
 
     Symbols are compared with ``constellation.points`` as they are, so they
     must be on the constellation's scale (unit average power for the
@@ -53,7 +50,7 @@ def demap_symbols_hard(
     Parameters
     ----------
     symbols : array_like or Signal
-        Received symbols at one sample per symbol, shape ``(..., N)``.  A
+        Received symbols at one sample per symbol, ``(..., N)``.  A
         :class:`Signal` must be at one sample per symbol.
     constellation : Constellation, optional
         Decision constellation.  Defaults to the Signal's ``constellation``;
@@ -61,8 +58,8 @@ def demap_symbols_hard(
 
     Returns
     -------
-    array_like
-        ``int8`` bits of shape ``(..., N * k)`` on the symbols' device.
+    ndarray
+        ``int8`` bits, ``(..., N * k)``, on the symbols' device.
 
     Raises
     ------

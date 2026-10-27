@@ -1,4 +1,4 @@
-"""Viterbi-Viterbi (V&V) carrier phase recovery."""
+"""Viterbi-Viterbi (M-th power) carrier-phase recovery: :class:`ViterbiViterbi`."""
 
 from dataclasses import dataclass
 
@@ -20,8 +20,7 @@ __all__ = ["ViterbiViterbi"]
 
 @dataclass(frozen=True)
 class ViterbiViterbi:
-    """
-    Viterbi-Viterbi (M-th power) block phase estimation.
+    """Viterbi-Viterbi (M-th power) block phase estimation.
 
     Each block of symbols is raised to the constellation's rotational
     symmetry ``M`` to remove the modulation, ``S_b = Σ s[n]^M``,
@@ -44,8 +43,9 @@ class ViterbiViterbi:
 
     Notes
     -----
-    A global ``2π/M`` ambiguity remains.  For strong phase noise prefer
-    :class:`BPS`, which needs no M-fold unwrap.
+    A global ``2π/M`` ambiguity remains.  For strong noise prefer
+    :class:`BPS`, whose distance metric avoids the M-th power's noise
+    enhancement.
     """
 
     block_size: int = 32

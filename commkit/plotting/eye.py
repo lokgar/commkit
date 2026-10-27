@@ -1,4 +1,4 @@
-"""Eye diagram plots."""
+"""Eye diagrams: :func:`plot_eye_diagram`."""
 
 from typing import Any
 
@@ -18,7 +18,7 @@ __all__ = ["plot_eye_diagram"]
 def _interp_rows(traces: Any, width: int, xp: Any) -> Any:
     """Each row linearly resampled to ``width`` points over the same span.
 
-    ``numpy.interp`` of every row at once: gather the two neighbours of each
+    ``numpy.interp`` of every row at once: gather the two neighbors of each
     new position and blend them (a Python loop over rows is one launch per
     trace on the GPU).
     """
@@ -38,8 +38,7 @@ def _plot_eye_traces(
     title: str | None,
     **kwargs: Any,
 ) -> None:
-    """
-    Internal helper to plot eye diagram traces for a single signal component.
+    """Internal helper to plot eye diagram traces for a single signal component.
 
     Parameters
     ----------
@@ -211,49 +210,46 @@ def plot_eye_diagram(
     show: bool = False,
     **kwargs: Any,
 ) -> tuple[Any, Any] | None:
-    """
-    Plots the eye diagram of the signal.
+    """Plot the eye diagram of a signal.
 
-    Visualizes signal quality by overlapping segments of the signal
-    synchronized to the symbol clock. Supports both fast trace-based
-    plotting and high-definition density histograms.
+    Overlays segments of ``num_symbols`` symbol periods, aligned to the
+    symbol clock, as a 2-D density histogram or as line traces.
 
     Parameters
     ----------
     samples : array_like or Signal
-        Input signal samples. Usually matched-filtered.
+        Input samples, usually matched-filtered, ``(N,)`` or ``(C, N)``.
     sps : float, optional
-        Samples per symbol (a fact, an integer for windowing): taken from a
-        Signal, required for arrays.
-    ax : matplotlib.axes.Axes or array_like, optional
-        Target axis or list of axes. For complex signals, two axes are
-        required per channel (I and Q).
+        Samples per symbol, an integer value.  Taken from the Signal;
+        required for array input.
+    ax : matplotlib.axes.Axes or array_like of Axes, optional
+        Axes to draw on, two per channel (I and Q) for complex samples;
+        ``None`` creates a figure.
     num_symbols : int, default 2
-        Number of symbol periods TO display in each eye window.
+        Symbol periods shown in each eye window.
     kind : {"hist", "line"}, default "hist"
-        Visualization mode:
-        - "hist": 2D density histogram (recommended for noisy signals).
-        - "line": Vectorized overlapping traces (classic look).
-    title : str, optional
-        Base title for the plot.
+        ``"hist"``: a 2-D density histogram (recommended for noisy
+        signals); ``"line"``: overlaid traces.
+    title : str or None, default "Eye Diagram"
+        Title of the figure; ``None`` for none.
     vmin, vmax : float, optional
-         Color scaling limits for "hist" mode.
+        Color limits for ``kind="hist"``.
     show : bool, default False
-        If True, calls `plt.show()`.
+        Call ``plt.show()`` and return ``None``.
     **kwargs : Any
-        Additional keyword arguments passed to the plotting backend.
+        Passed to Matplotlib: ``imshow`` for ``"hist"``, the ``LineCollection``
+        of traces for ``"line"``.
 
     Returns
     -------
-    fig : matplotlib.figure.Figure
-        The figure object.
-    ax : matplotlib.axes.Axes or ndarray
-        The axis or array of axes used.
+    (fig, ax) or None
+        The figure and the Axes (an array of Axes for several panels);
+        ``None`` with ``show=True``, which shows the figure instead.
 
     Notes
     -----
-    The signal should typically be synchronized (no CFO or timing offset)
-    and matched-filtered before plotting to produce a clear "eye".
+    For an open eye, synchronize the signal (no frequency or timing offset)
+    and matched-filter it first.
     """
     signal_adapter = adapt_signal(samples, function_name="plot_eye_diagram()")
     x = signal_adapter.array

@@ -1,4 +1,7 @@
-"""Blind sequential adaptive equalizers: cma, rde."""
+"""Blind sequential adaptive equalizers (private).
+
+:func:`cma` and :func:`rde`, re-exported by :mod:`commkit.equalization`.
+"""
 
 from __future__ import annotations
 
@@ -90,29 +93,96 @@ def cma(
     pad_mode: str = "zeros",
     state: EqualizerState | None = None,
 ) -> EqualizerResult:
-    """
-    Constant Modulus Algorithm blind equalizer with butterfly MIMO support.
+    """Equalize blindly with the constant-modulus algorithm (CMA), SISO or butterfly MIMO.
 
-    CMA minimizes the Godard dispersion criterion and requires no training
-    symbols. It is the standard blind equalizer for constant-modulus signals
-    (PSK) and near-constant-modulus signals (low-order QAM).
+    CMA minimizes the Godard dispersion criterion and needs no training
+    symbols: the standard blind equalizer for constant-modulus signals (PSK)
+    and nearly constant-modulus ones (low-order QAM).  It recovers the signal
+    up to a phase, so a carrier-phase recovery stage (e.g. Viterbi-Viterbi or
+    pilot-aided) usually follows.
 
-    CMA recovers the signal up to a phase ambiguity. A phase recovery step
-    (e.g. Viterbi-Viterbi, pilot-aided) is typically needed after CMA.
+    With ``pilot_ref`` and ``pilot_mask`` the equalizer runs pilot-aided: the
+    Godard error at the data positions, the LMS error ``pilot_ref - y`` at
+    the pilot positions, which resolves the phase there while the data
+    positions stay blind.  :func:`build_pilot_ref` builds the two arrays.
 
-    When ``pilot_ref`` and ``pilot_mask`` are both supplied the equalizer
-    switches to a **pilot-aided hybrid** mode: the standard Godard CMA error
-    is used at data positions while an LMS residual error
-    (``pilot_ref - y``) is used at every pilot position.  This resolves the
-    phase ambiguity at pilot locations while preserving blind adaptation
-    elsewhere.  Build the dense arrays with ``build_pilot_ref``.
+    Parameters
+    ----------
+    samples : array_like or Signal
+        Input samples, ``(N,)`` or ``(C, N)``, typically at 2 samples per
+        symbol (fractionally spaced).  A :class:`Signal` supplies ``sps`` and
+        ``constellation``; the result then also carries ``signal``, the
+        1-SPS output Signal.
+    num_taps : int, default 21
+        Taps per FIR filter.
+    sps : int, optional
+        Samples per symbol at the input, an integer.  Taken from the Signal;
+        required for array input.  A value that disagrees with the Signal
+        raises.
+    step_size : float, default 1e-3
+        Step size ``μ``.  The CMA cost is non-convex and of higher order
+        than the LMS cost, so normalizing the step by the input power would
+        distort the gradient: use a fixed step between 1e-5 and 1e-3.
+    constellation : Constellation, optional
+        Sets the Godard radius ``R² = E[|c|⁴]/E[|c|²]`` (weighted by the pmf
+        of a shaped constellation).  Defaults to the Signal's
+        ``constellation``; without one the target is the unit circle.
+    store_weights : bool, default False
+        Record the weights of every symbol in ``weights_history``.
+    center_tap : int, optional
+        Index of the center tap; defaults to ``num_taps // 2``.
+    initial_taps : array_like, optional
+        Initial tap weights instead of the center-tap identity, e.g. the
+        ``weights`` of a previous stage.  Shape ``(C, C, num_taps)``, or
+        ``(num_taps,)`` / ``(1, num_taps)`` for SISO.  Only for a cold start:
+        a ``state`` carries its own weights.
+    pilot_ref : array_like, optional
+        Dense pilot reference, ``(C, N_sym)``: zeros at the data positions,
+        the known symbols (on the scale of the unit-power ``constellation``,
+        used as given) at the pilot positions.  Give it with ``pilot_mask``;
+        :func:`build_pilot_ref` builds both.
+    pilot_mask : array_like, optional
+        Pilot positions, ``(N_sym,)``: 1 at a pilot, 0 elsewhere.
+    pilot_gain_db : float, default 0.0
+        Pilot boost in dB relative to the payload, as
+        ``SingleCarrierFrame.pilot_gain_db``.  When non-zero, the received
+        samples at the pilot positions are scaled down by the boost before
+        the RMS normalization, so boosted pilots do not inflate the RMS and
+        bias the Godard target of the data positions.  0.0 for unboosted
+        pilots.
+    pad_mode : {'zeros', 'edge', 'reflect'}, default 'zeros'
+        Left padding of a cold start; see :func:`lms`.
+    state : EqualizerState, optional
+        Continue from ``result.state`` of a previous call with the same
+        configuration; see :func:`lms`.  Pilots start at this call's first
+        output symbol.
 
-    Algorithm (per symbol n)
-    ------------------------
+    Returns
+    -------
+    EqualizerResult
+        ``y_hat`` (always an array), the final ``weights``, the CMA ``error``,
+        ``input_norm_factor``, ``state``, ``weights_history`` with
+        ``store_weights=True``, and for Signal input ``signal``, the 1-SPS
+        output Signal (see :class:`EqualizerResult`).
+
+    Notes
+    -----
+    **Why CMA has no inline CPR.**
+    PLL requires a phase-coherent decision ``d[n]`` (nearest constellation
+    point) to form the cross-product error ``Im(y * conj(d))``; but CMA
+    output has an unknown phase rotation, so the decision is unreliable.
+    BPS is blind, but the CMA cost does not depend on the output phase, so
+    the weights drift freely in phase: BPS would track that drift, and the
+    next CMA gradient step would fight the correction.  Use the stages in
+    sequence instead: CMA, then ``correct_carrier_phase`` (BPS or
+    Viterbi-Viterbi), then optionally ``lms`` to fine-tune.
+
+    **Algorithm (per symbol n).**
+
     Steps 1 and 2 are identical to ``lms`` (sliding input window and
     butterfly filter output ``y_raw[n]``).  There is **no CPR step** -
     CMA's cost surface is phase-invariant; no radial error can drive a
-    phase rotator (see Notes below).
+    phase rotator (see above).
 
     3. **Godard error** - third-order radial gradient of the dispersion
        cost ``J = E[(|y|^2 - R^2)^2]``::
@@ -133,87 +203,11 @@ def cma(
 
     **Pilot-aided hybrid** (when ``pilot_ref`` and ``pilot_mask`` are set):
     at pilot positions the Godard error is replaced by the LMS pilot error
-    ``e_p[n] = pilot_ref[n] - y[n]``, and the weight update sign flips to
-    ``+mu`` (standard LMS gradient ascent toward the reference).  This
+    ``e_p[n] = pilot_ref[n] - y[n]``, and the weight update takes the LMS
+    sign, ``+mu``, towards the reference.  This
     resolves the phase ambiguity at pilot locations while CMA handles data
     positions blindly.
 
-    Notes
-    -----
-    **Why joint CMA + CPR is not supported:**
-    PLL requires a phase-coherent decision ``d[n]`` (nearest constellation
-    point) to form the cross-product error ``Im(y * conj(d))``; but CMA
-    output has an unknown phase rotation, so the decision is unreliable.
-    BPS is blind, but CMA weights converge to one of four equally-valid
-    90° rotations and slowly drift between them - BPS would track that
-    drift, but the next CMA gradient step would fight the correction.  Use
-    the sequential pipeline instead: CMA ->
-    ``correct_carrier_phase`` (BPS or
-    Viterbi-Viterbi) -> optional ``lms`` fine-tune.
-
-    Parameters
-    ----------
-    samples : array_like or Signal
-        Input signal samples. Shape: ``(N_samples,)`` or ``(C, N_samples)``.
-        Typically at 2 samples/symbol for fractionally-spaced equalization.
-        A :class:`Signal` supplies ``sps`` and ``constellation``; the result
-        then also carries ``signal``, the 1-SPS output Signal.
-    num_taps : int, default 21
-        Number of equalizer taps per FIR filter.
-    sps : int, optional
-        Samples per symbol at the input, an integer.  Taken from the Signal;
-        required for array input.  A value that disagrees with the Signal
-        raises.
-    step_size : float, default 1e-3
-        CMA step size (mu). Unlike LMS, CMA's cost surface is non-convex and
-        higher-order, so input-power normalization distorts the gradient geometry.
-        Use a fixed step size in the range 1e-5 to 1e-3 for stability.
-    constellation : Constellation, optional
-        Sets the Godard radius ``R2 = E[|c|^4]/E[|c|^2]`` (pmf-weighted for a
-        shaped constellation).  Defaults to the Signal's ``constellation``;
-        without one the target is the unit circle.
-    store_weights : bool, default False
-        If True, stores weight trajectory.
-    center_tap : int, optional
-        Index of the center tap. If None, defaults to ``num_taps // 2``.
-    initial_taps : array_like, optional
-        Initial tap weights instead of the center-tap identity, e.g. the
-        ``weights`` of a previous stage.  Shape ``(C, C, num_taps)``, or
-        ``(num_taps,)`` / ``(1, num_taps)`` for SISO.  Only for a cold start:
-        a ``state`` carries its own weights.
-    pilot_ref : (C, N_sym) complex64 array, optional
-        Dense pilot reference array - zeros at data positions, known symbols
-        (on the scale of the unit-power ``constellation``, used as given) at
-        pilot positions.  Build with ``build_pilot_ref``.
-        Must be provided together with ``pilot_mask``.
-    pilot_mask : (N_sym,) uint8 array, optional
-        Pilot position mask - ``1`` at pilot positions, ``0`` elsewhere.
-        Build with ``build_pilot_ref``.
-    pilot_gain_db : float, default 0.0
-        Pilot boosting in dB relative to payload power, matching
-        ``SingleCarrierFrame.pilot_gain_db``.  When non-zero, the received
-        signal at pilot positions is attenuated by the inverse of the boost
-        factor before the global RMS normalisation.  This prevents boosted
-        pilots from inflating the RMS estimate and biasing the Godard
-        convergence target at data positions.  Set to ``0.0`` when pilots
-        are not boosted.
-    pad_mode : {'zeros', 'edge'}, default 'zeros'
-        Left padding of a cold start; see :func:`lms`.
-    state : EqualizerState, optional
-        Continue from ``result.state`` of a previous call with the same
-        configuration; see :func:`lms`.  Pilots start at this call's first
-        output symbol.
-
-    Returns
-    -------
-    EqualizerResult
-        Equalized symbols, final weights, CMA error history, and optionally
-        weight trajectory.  ``input_norm_factor`` field is populated.  When
-        ``samples`` is a :class:`Signal`, ``y_hat`` is a new :class:`Signal`
-        at the symbol rate (``sampling_rate = symbol_rate``).
-
-    Notes
-    -----
     The adaptation is inherently sequential (each update depends on the
     previous weights), so it always runs as a compiled Numba loop on the CPU.
     CuPy input is copied to the host once and the outputs are copied back
@@ -300,23 +294,70 @@ def rde(
     pad_mode: str = "zeros",
     state: EqualizerState | None = None,
 ) -> EqualizerResult:
-    """
-    Radius Directed Equalizer (RDE) - blind equalizer for multi-ring constellations.
+    """Equalize blindly with the radius-directed equalizer (RDE), for multi-ring constellations.
 
-    RDE is a CMA variant that replaces the single Godard dispersion radius with
-    per-symbol radius selection from the set of unique constellation ring radii.
-    This corrects CMA's fundamental weakness on higher-order QAM: CMA forces
-    all symbols toward a single average circle, severely degrading convergence
-    when the constellation spans multiple rings (e.g. inner, middle, outer rings
-    of 16-QAM).  RDE instead drives each symbol toward its *nearest* ring,
-    producing a gradient surface that matches the true constellation geometry.
+    RDE is the CMA variant that replaces the single Godard radius by the
+    nearest of the constellation's ring radii, symbol by symbol.  CMA pulls
+    every symbol towards one average circle, which degrades its convergence
+    when the constellation has several rings (the inner, middle and outer
+    rings of 16-QAM); RDE drives each symbol towards its nearest ring, a
+    gradient that matches the constellation's geometry.
 
-    Like CMA, RDE is fully blind (no training symbols) and recovers the channel
-    up to a **phase ambiguity**.  A carrier-phase recovery step is needed after
-    convergence; see ``cma`` Notes for why joint CPR is not supported.
+    Like CMA, it is blind and recovers the channel up to a phase, so a
+    carrier-phase recovery stage follows (see the Notes of :func:`cma` for
+    why there is no inline CPR).
 
-    Algorithm (per symbol n)
-    ------------------------
+    Parameters
+    ----------
+    samples : array_like or Signal
+        Input samples, ``(N,)`` or ``(C, N)``, typically at 2 samples per
+        symbol.  A :class:`Signal` supplies ``sps`` and ``constellation``;
+        the result then also carries ``signal``, the 1-SPS output Signal.
+    num_taps : int, default 21
+        Taps per FIR filter.
+    sps : int, optional
+        Samples per symbol at the input, an integer.  Taken from the Signal;
+        required for array input.  A value that disagrees with the Signal
+        raises.
+    step_size : float, default 1e-3
+        Step size ``μ``; the cost is non-convex as for :func:`cma`, so use a
+        fixed step between 1e-5 and 1e-3.
+    constellation : Constellation, optional
+        Sets the ring radii (one ring for PSK, where RDE equals CMA).
+        Defaults to the Signal's ``constellation``; without one the single
+        ring is the unit circle.
+    store_weights : bool, default False
+        Record the weights of every symbol in ``weights_history``.
+    center_tap : int, optional
+        Index of the center tap; defaults to ``num_taps // 2``.
+    initial_taps : array_like, optional
+        Initial tap weights, as for :func:`cma`; only for a cold start.
+    pilot_ref, pilot_mask : array_like, optional
+        Dense pilot reference and mask, as for :func:`cma`.
+    pilot_gain_db : float, default 0.0
+        Pilot boost in dB, as for :func:`cma` (here it keeps boosted pilots
+        from biasing the ring radii).
+    pad_mode : {'zeros', 'edge', 'reflect'}, default 'zeros'
+        Left padding of a cold start; see :func:`lms`.
+    state : EqualizerState, optional
+        Continue from ``result.state`` of a previous call with the same
+        configuration; see :func:`lms`.  The state of a :func:`cma` call is
+        accepted too: CMA pre-convergence, then RDE on the rest of the record,
+        avoids RDE's slow cold start on multi-ring QAM.  Pilots start at this
+        call's first output symbol.
+
+    Returns
+    -------
+    EqualizerResult
+        ``y_hat`` (always an array), the final ``weights``, the RDE ``error``,
+        ``input_norm_factor``, ``state``, ``weights_history`` with
+        ``store_weights=True``, and for Signal input ``signal``, the 1-SPS
+        output Signal (see :class:`EqualizerResult`).
+
+    Notes
+    -----
+    **Algorithm (per symbol n).**
+
     Steps 1 and 2 are identical to ``lms`` (sliding input window and
     butterfly filter output ``y[n]``).  Like ``cma``, there is no
     CPR step.
@@ -327,8 +368,8 @@ def rde(
            R_d[n] = argmin_{r in R_set} |r - |y[n]||
            R_set  = {|c| : c in constellation}
 
-       ``R_set`` is the set of unique ring radii extracted once from the
-       normalised Gray constellation.  For 16-QAM this yields three radii
+       ``R_set`` is the set of distinct ring radii of the unit-power
+       constellation, computed once.  For 16-QAM this yields three radii
        rather than the single CMA average, eliminating the inward/outward
        pull that degrades CMA convergence on higher-order QAM.
 
@@ -341,93 +382,26 @@ def rde(
 
            w_{c,c'} -= mu * conj(e_c[n]) * x_{c',n}
 
-    **Pilot-aided hybrid** (when ``pilot_ref`` and ``pilot_mask`` are set):
-    identical to ``cma`` - at pilot positions the RDE error is replaced
-    by ``e_p[n] = pilot_ref[n] - y[n]`` and the sign flips to ``+mu``,
-    resolving the phase ambiguity at those locations.
+    **Pilot-aided** (with ``pilot_ref`` and ``pilot_mask``): as for
+    :func:`cma`, the RDE error at a pilot position is replaced by
+    ``e_p[n] = pilot_ref[n] - y[n]`` with the LMS sign ``+mu``, which
+    resolves the phase there.
 
-    Parameters
-    ----------
-    samples : array_like or Signal
-        Input signal samples. Shape: ``(N_samples,)`` or ``(C, N_samples)``.
-        Typically at 2 samples/symbol for fractionally-spaced equalization.
-        A :class:`Signal` supplies ``sps`` and ``constellation``; the result
-        then also carries ``signal``, the 1-SPS output Signal.
-    num_taps : int, default 21
-        Number of equalizer taps per FIR filter.
-    sps : int, optional
-        Samples per symbol at the input, an integer.  Taken from the Signal;
-        required for array input.  A value that disagrees with the Signal
-        raises.
-    step_size : float, default 1e-3
-        RDE step size (mu). Same non-convex gradient geometry as CMA; use a
-        fixed step in the range 1e-5 to 1e-3 for stability.
-    constellation : Constellation, optional
-        Sets the ring radii (one ring for PSK, where RDE equals CMA).
-        Defaults to the Signal's ``constellation``; without one the single
-        ring is the unit circle.
-    store_weights : bool, default False
-        If True, stores weight trajectory in ``result.weights_history``.
-    center_tap : int, optional
-        Index of the center tap. Defaults to ``num_taps // 2``.
-    initial_taps : array_like, optional
-        Initial tap weights instead of the center-tap identity, e.g. the
-        ``weights`` of a previous stage.  Shape ``(C, C, num_taps)``, or
-        ``(num_taps,)`` / ``(1, num_taps)`` for SISO.  Only for a cold start:
-        a ``state`` carries its own weights.
-    pilot_ref : (C, N_sym) complex64 array, optional
-        Dense pilot reference array - zeros at data positions, known symbols
-        (on the scale of the unit-power ``constellation``, used as given) at
-        pilot positions.  Build with ``build_pilot_ref``.
-        Must be provided together with ``pilot_mask``.
-    pilot_mask : (N_sym,) uint8 array, optional
-        Pilot position mask - ``1`` at pilot positions, ``0`` elsewhere.
-        Build with ``build_pilot_ref``.
-    pilot_gain_db : float, default 0.0
-        Pilot boosting in dB relative to payload power, matching
-        ``SingleCarrierFrame.pilot_gain_db``.  When non-zero, the received
-        signal at pilot positions is attenuated by the inverse of the boost
-        factor before the global RMS normalisation.  This prevents boosted
-        pilots from inflating the RMS estimate and biasing the ring-radius
-        convergence targets at data positions.  Set to ``0.0`` when pilots
-        are not boosted.
-    pad_mode : {'zeros', 'edge'}, default 'zeros'
-        Left padding of a cold start; see :func:`lms`.
-    state : EqualizerState, optional
-        Continue from ``result.state`` of a previous call with the same
-        configuration; see :func:`lms`.  The state of a :func:`cma` call is
-        accepted too: CMA pre-convergence, then RDE on the rest of the record,
-        avoids RDE's slow cold start on multi-ring QAM.  Pilots start at this
-        call's first output symbol.
+    **Why RDE beats CMA on high-order QAM.**  For unit-power 16-QAM the
+    Godard radius is ``R² = E[|s|⁴]/E[|s|²] ≈ 1.32``, a poor stand-in for the
+    three rings at ``|c| ≈ 0.45, 1.00, 1.34``: CMA pulls the inner ring
+    outwards and the outer ring inwards, a lasting gradient against the
+    right solution.  In RDE each symbol is attracted only to its own ring, so
+    the gradient vanishes at the right solution.
 
-    Returns
-    -------
-    EqualizerResult
-        Equalized symbols, final weights, RDE error history, and optionally
-        weight trajectory.  ``input_norm_factor`` field is populated.  When
-        ``samples`` is a :class:`Signal`, ``y_hat`` is a new :class:`Signal`
-        at the symbol rate (``sampling_rate = symbol_rate``).
+    **Phase.**  Both costs depend only on ``|y|``, so any rotation of the
+    output is a solution: run carrier-phase recovery after blind
+    equalization.
 
-    Notes
-    -----
-    **Why RDE outperforms CMA on high-order QAM:**
-
-    For 16-QAM the Godard radius ``R² = E[|s|⁴]/E[|s|²] ≈ 1.32`` (normalized).
-    This single target is a poor proxy for the three distinct rings at
-    ``|c| ≈ {0.45, 1.00, 1.34}`` (normalized unit-average-power 16-QAM).
-    CMA pulls inner-ring symbols outward and outer-ring symbols inward,
-    creating a persistent gradient that opposes correct convergence.
-    RDE eliminates this bias entirely: each symbol is only attracted to its
-    own ring, so the steady-state gradient vanishes at the correct solution.
-
-    **Phase ambiguity:** Both CMA and RDE share the same 90°-symmetric cost
-    surface for QAM/PSK.  Use a phase recovery algorithm after blind equalization.
-
-    **Execution:** the adaptation is inherently sequential (each update
-    depends on the previous weights), so it always runs as a compiled Numba
-    loop on the CPU.
-    CuPy input is copied to the host once and the outputs are copied back
-    once; the result arrays live on the input's device.
+    **Execution.**  The adaptation is sequential (each update depends on the
+    previous weights), so it always runs as a compiled Numba loop on the
+    CPU.  CuPy input is copied to the host once and the outputs back once;
+    the result's arrays are on the input's device.
     """
     signal_adapter = adapt_signal(samples, function_name="rde()")
     samples = signal_adapter.array

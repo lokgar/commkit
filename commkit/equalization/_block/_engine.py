@@ -1,7 +1,8 @@
-"""Frequency-domain (FDAF) block equalizer engine shared by block_lms/cma/rde.
+"""Frequency-domain (FDAF) block equalizer engine (private).
 
-One run is: :func:`_prepare_block` (normalization, padding, weights on the
-input's device), a ``run_block(B, b_start)`` callback per block driven by
+Shared by ``block_lms``, ``block_cma`` and ``block_rde``.  One run is:
+:func:`_prepare_block` (normalization, padding, weights on the input's
+device), a ``run_block(B, b_start)`` callback per block driven by
 :func:`_block_loop` (eager, or replayed from a captured CUDA graph), and the
 caller's result assembly.  :func:`_fdaf_forward` and
 :func:`_fdaf_gradient_update` are the filter and the LMS-type update every
@@ -54,8 +55,9 @@ class _Block:
     x_win: ArrayType  # (C, F) input window of the current block
 
     def fill_window(self, b_start: int, B: int) -> None:
-        """Load the ``B·sps + T - 1`` input samples of block ``b_start`` into
-        ``x_win``, zeros after them.
+        """Load the input samples of block ``b_start`` into ``x_win``.
+
+        ``B·sps + T - 1`` samples, zeros after them.
 
         Only these samples reach the block's outputs and gradient; loading
         later ones too would change the FFT's rounding with data the block
@@ -310,10 +312,9 @@ def _block_loop(
     ``use_graph`` (CuPy only), per key the first block runs eagerly to prime
     the memory pool, the second is captured into a CUDA graph and every
     later block of that key replays it (:class:`GraphRunner`): one launch
-    per block instead of dozens.  A failed capture falls back to the eager
-    loop.  ``prepare(B,
-    b_start)`` runs before every block, outside any graph, like
-    ``run.fill_window``: it stages per-block inputs into fixed buffers.
+    per block instead of dozens.  ``prepare(B, b_start)`` runs before every
+    block, outside any graph, like ``run.fill_window``: it stages per-block
+    inputs into fixed buffers.
     ``at_resume()`` runs once, before block ``run.resume`` (or after the last
     block), to snapshot the continuation state.
     """

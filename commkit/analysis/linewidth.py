@@ -1,4 +1,4 @@
-r"""Laser and carrier linewidth: ``estimate_linewidth`` and its methods.
+r"""Laser and carrier linewidth: :func:`estimate_linewidth` and its methods.
 
 The method object chooses the estimator and the kind of record it reads:
 
@@ -64,27 +64,27 @@ class LinewidthEstimate:
 
     ``value`` and ``method`` are always set; the other fields belong to one
     or more methods and are ``None`` for the rest.  Scalars are floats (SISO)
-    or ``(C,)`` arrays (MIMO); arrays are host NumPy.
+    or ``(C,)`` arrays (MIMO); arrays are host NumPy arrays.
 
     Attributes
     ----------
-    value : float or np.ndarray
+    value : float or numpy.ndarray
         Linewidth in Hz: the Lorentzian (white-FM) linewidth, except for
         ``BetaSeparation`` (the β-separation FWHM) and ``DshLorentzian``
         (the deep-width estimate).
     method : object
         The method object that produced the estimate.
-    f : np.ndarray or None
+    f : numpy.ndarray or None
         Frequency axis in Hz: of ``S_f`` (``BetaSeparation``, ``DshFmPsd``)
         or of ``psd`` (``DshLorentzian``, two-sided).
-    S_f : np.ndarray or None
+    S_f : numpy.ndarray or None
         FM-noise PSD in Hz²/Hz (``BetaSeparation``; for ``DshFmPsd`` the
         laser PSD, the beat PSD divided by the interferometer response, NaN at
         masked bins).
-    S_f_model : np.ndarray or None
+    S_f_model : numpy.ndarray or None
         ``DshFmPsd``: the fitted model in the units of ``S_f`` - white FM,
         flicker FM and the detection-noise term.
-    used : np.ndarray or None
+    used : numpy.ndarray or None
         Boolean mask of the bins the estimate ran over: the white-FM floor
         median (``BetaSeparation``) or the fit, spurs removed (``DshFmPsd``).
     band : tuple of float or None
@@ -93,51 +93,51 @@ class LinewidthEstimate:
     n_segments : int or None
         Welch segment count ``K`` behind every bin (``BetaSeparation``,
         ``DshFmPsd``).
-    flicker : float or np.ndarray or None
+    flicker : float or numpy.ndarray or None
         ``DshFmPsd``: fitted flicker-FM coefficient ``h_-1`` in Hz²
         (``S_f = h_-1/f``).
-    linewidth_floor : float or np.ndarray or None
+    linewidth_floor : float or numpy.ndarray or None
         ``BetaSeparation``: the white-FM floor cross-check ``π·median(S_f)``
         in Hz.
-    area_hz2 : float or np.ndarray or None
+    area_hz2 : float or numpy.ndarray or None
         ``BetaSeparation``: integrated FM-noise area above the β-line, Hz².
-    beta_line : np.ndarray or None
+    beta_line : numpy.ndarray or None
         ``BetaSeparation``: the β-line ``8 ln2 f / π²``.
-    above : np.ndarray or None
+    above : numpy.ndarray or None
         ``BetaSeparation``: boolean mask of the integrated bins
         (``S_f > β`` within ``band``), in general a union of disjoint
         intervals.
-    valid : np.ndarray or None
+    valid : numpy.ndarray or None
         ``DshFmPsd``: bins away from the interferometer notches.
-    f_shift : float or np.ndarray or None
+    f_shift : float or numpy.ndarray or None
         ``DshFmPsd``, ``DshIncrement``: the removed beat carrier in Hz.
-    lags : np.ndarray or None
+    lags : numpy.ndarray or None
         ``DshIncrement``: increment lags in samples.
-    lag_s : np.ndarray or None
+    lag_s : numpy.ndarray or None
         Increment lags in seconds, ``(n_lags,)`` (increment methods).
-    var : np.ndarray or None
+    var : numpy.ndarray or None
         Measured increment variances in rad², ``(C, n_lags)`` (increment
         methods).
-    slope, intercept : np.ndarray or None
+    slope, intercept : numpy.ndarray or None
         The fit ``var = slope * lag_s + intercept`` per channel, rad²/s and
         rad² (``IncrementSlope``, ``DshIncrement``).
-    awgn_var : float or np.ndarray or None
+    awgn_var : float or numpy.ndarray or None
         Additive-noise term in rad²: the fitted intercept (``IncrementSlope``,
         ``DshIncrement``), the subtracted term (``IncrementSubtract``) or the
         fitted angle-noise variance per sample (``DshFmPsd``).
-    dphi_var : float or np.ndarray or None
+    dphi_var : float or numpy.ndarray or None
         ``IncrementSlope``, ``IncrementSubtract``: lag-1 increment variance in
         rad².  ``DshIncrement``: total variance of the differential phase.
-    linewidth_3db : float or np.ndarray or None
+    linewidth_3db : float or numpy.ndarray or None
         ``DshLorentzian``: half-power width / 2 (the effective linewidth).
-    lineshape_ratio : float or np.ndarray or None
+    lineshape_ratio : float or numpy.ndarray or None
         ``DshLorentzian``: ``W_L/W_3`` (about 9.95 Lorentzian, 2.6 Gaussian at
         -20 dB).
-    coherence_factor : float or np.ndarray or None
+    coherence_factor : float or numpy.ndarray or None
         ``DshLorentzian``: ``τ_d/τ_c``.
-    psd : np.ndarray or None
+    psd : numpy.ndarray or None
         ``DshLorentzian``: the beat PSD, ``(nfreq,)`` or ``(C, nfreq)``.
-    f_peak : float or np.ndarray or None
+    f_peak : float or numpy.ndarray or None
         ``DshLorentzian``: beat peak frequency in Hz.
     """
 
@@ -195,16 +195,16 @@ class IncrementSlope:
     r"""Wiener linewidth from the lag-slope of the phase-increment variance.
 
     For a Wiener phase plus AWGN angle noise, the variance of the lag-``k``
-    increment ``Δφ_k = φ(n) - φ(n-k)`` is **linear in ``k``**:
+    increment ``Δφ_k = φ(n) - φ(n-k)`` is linear in ``k``:
 
         Var(Δφ_k) = slope · k·T + intercept,
         slope = 2π·Δν,  intercept = 2σ_φ²,
 
     because the random-walk variance accumulates with ``k`` while the
     uncorrelated angle noise contributes a fixed ``2σ_φ²``.  A least-squares
-    fit over ``lags`` gives ``Δν = slope/(2π)``: the additive noise (AWGN
-    *and* residual white error from imperfect equalization) cancels into the
-    intercept, so **no noise estimate is needed**.  The recommended method.
+    fit over ``lags`` gives ``Δν = slope/(2π)``: the additive noise (the AWGN
+    and the residual white error of the equalizer) goes into the intercept,
+    so no noise estimate is needed.  The recommended method.
 
     Parameters
     ----------
@@ -212,28 +212,28 @@ class IncrementSlope:
         Increment lags ``k`` in samples; at least two distinct lags ``>= 1``
         (smaller entries are ignored).
     edge_trim : int, default 0
-        Samples discarded from each end before differencing (filter edge
-        transients of ``separate_drift_phase_noise``).
+        Samples dropped at each end before differencing (the filter
+        transients of :func:`separate_drift_phase_noise`).
 
     Notes
     -----
     **Limitations.**
 
-    * The linearity of ``Var(Δφ_k)`` in ``k`` holds for **white-FM (Wiener)**
-      phase noise only.  Flicker (1/f) FM noise makes the variance grow
-      *faster* than linear, biasing the fitted slope - and hence Δν - high;
-      what is reported is then an *effective* linewidth at the lag timescale,
-      not the intrinsic Lorentzian linewidth.
-    * The variance subtracts the per-lag mean, so a **constant** residual
-      frequency offset does not bias the fit, but a frequency *ramp*
+    * ``Var(Δφ_k)`` is linear in ``k`` for white-FM (Wiener) phase noise
+      only.  Flicker (1/f) FM noise makes the variance grow faster than
+      linearly, which biases the fitted slope, and so ``Δν``, high: the result
+      is then an effective linewidth at the time scale of the lags, not the
+      intrinsic Lorentzian linewidth.
+    * The variance subtracts the mean of each lag, so a constant residual
+      frequency offset does not bias the fit, but a frequency ramp
       (nonlinear drift) adds a ``k²`` term.  Detrend first
-      (``separate_drift_phase_noise``) and keep the largest lag ``k·T`` well
-      inside the drift timescale.
-    * Larger lags raise the phase-noise term above the AWGN intercept but
-      admit more drift/flicker contamination; the default 1-5 symbol lags
-      suit multi-MHz linewidths at GBaud rates.  For sub-100-kHz linewidths at
-      high symbol rates the per-lag walk variance may sit orders of magnitude
-      below ``2σ_φ²`` - prefer ``BetaSeparation`` there.
+      (:func:`separate_drift_phase_noise`) and keep the largest lag ``k·T``
+      well inside the drift's time scale.
+    * Larger lags lift the phase-noise term above the AWGN intercept but let
+      in more drift and flicker; the default lags of 1 to 5 symbols suit
+      linewidths of several MHz at GBd rates.  For linewidths below 100 kHz
+      at high symbol rates the walk variance per lag can sit orders of
+      magnitude below ``2σ_φ²``: prefer ``BetaSeparation`` there.
     """
 
     lags: tuple[int, ...] = (1, 2, 3, 4, 5)
@@ -252,15 +252,15 @@ class IncrementSubtract:
     r"""Lag-1 phase-increment variance minus a known AWGN term.
 
     ``Δν = (Var(Δφ_1) - σ²) / (2π·T)``.  With unit-power symbols the angle
-    noise of the increment is ``σ_n²`` (complex noise variance): the flat
-    correction subtracts ``σ_n²`` (exact for PSK, *under*-corrects QAM),
-    while passing ``reference`` applies the amplitude-aware
-    ``σ_n²·E[1/|d|²]`` (rigorous for QAM, since inner-ring symbols carry
-    larger angle noise).
+    noise of the increment is ``σ_n²`` (the complex noise variance): the
+    flat correction subtracts ``σ_n²`` (exact for PSK, too little for QAM),
+    and passing ``reference`` applies the amplitude-aware ``σ_n²·E[1/|d|²]``
+    (exact for QAM too, whose inner-ring symbols carry more angle noise).
 
-    Needs the *additive*-noise variance only: ``metrics.snr`` reports the
-    total residual (noise, phase noise and ISI) and over-subtracts.  Prefer
-    ``IncrementSlope``, which needs no noise estimate.
+    It needs the additive-noise variance alone: :func:`commkit.metrics.snr`
+    measures the total residual (noise, phase noise and ISI), which
+    subtracts too much.  Prefer ``IncrementSlope``, which needs no noise
+    estimate.
 
     Parameters
     ----------
@@ -272,7 +272,7 @@ class IncrementSubtract:
         Transmitted symbols aligned with the phase, ``(N,)`` or ``(C, N)``,
         for the amplitude-aware correction.
     edge_trim : int, default 0
-        Samples discarded from each end before differencing.
+        Samples dropped at each end before differencing.
     """
 
     noise_var: float | np.ndarray | None = None
@@ -304,58 +304,59 @@ class IncrementSubtract:
 class BetaSeparation:
     r"""Linewidth by the Di Domenico β-separation line.
 
-    Integrates the frequency-noise PSD ``S_f(f)`` (``fm_noise_psd``) only
-    over the **region where it lies above** the β-separation line
-    ``S_f = (8 ln2 / π²)·f`` - in general a union of disjoint intervals; the
-    estimate's ``above`` mask is the exact region used.  The FWHM linewidth
-    is ``sqrt(8 ln2 · A)`` for the integrated area ``A`` (Hz²).  The
-    ``[f_min, f_max]`` window is only an outer *fence* on that region: it
-    excludes the unresolved DC bin and - with an appropriate ``f_max`` - the
-    high-frequency AWGN ``f²`` tail (which eventually climbs back above the
-    line and would otherwise be integrated as fake linewidth).
+    Integrates the frequency-noise PSD ``S_f(f)`` (:func:`fm_noise_psd`) only
+    where it lies above the β-separation line ``S_f = (8 ln2 / π²)·f``, in
+    general a union of disjoint intervals; the estimate's ``above`` mask is
+    the region used.  The FWHM linewidth is ``sqrt(8 ln2 · A)`` for the
+    integrated area ``A`` in Hz².  The ``[f_min, f_max]`` window only fences
+    that region: it excludes the unresolved DC bin and, with a suitable
+    ``f_max``, the AWGN's ``f²`` tail at high frequencies, which climbs back
+    above the line and would otherwise be integrated as a false linewidth.
 
-    A white-FM-floor cross-check ``linewidth_floor = π·median(S_f)`` is also
-    returned.  Without a fence the floor's median band is auto-detected as
-    the PSD's minimum-level (plateau) region - octave-band-median floor, all
-    bins within 3x of it - so a low-frequency drift/flicker rise and the AWGN
-    ``f²`` tail are excluded without manual fencing.  An explicit ``f_min``
-    or ``f_max`` switches the floor back to a literal-band median (the β-area
-    integral always uses the literal fence).  The floor is corrected for the
+    A cross-check from the white-FM floor, ``linewidth_floor = π·median(S_f)``,
+    is returned too.  Without a fence, the band of that median is detected
+    as the PSD's lowest-level (plateau) region: the floor from octave-band
+    medians and every bin within 3x of it, so a drift or flicker rise at low
+    frequencies and the AWGN's ``f²`` tail are excluded without fencing by
+    hand.  An explicit ``f_min`` or ``f_max`` makes the floor the median of
+    that band instead (the β-area integral always uses the fence as given).  The floor is corrected for the
     χ²-median bias of Welch bins (a raw median reads ``≈ 1 - 1/(3K)`` below
     the true level for ``K`` averaged segments).
 
     Parameters
     ----------
     nperseg : int, optional
-        Welch segment length (see ``fm_noise_psd``).
+        Welch segment length (see :func:`fm_noise_psd`).
     f_min : float, optional
-        Lower fence in Hz (drops the residual-FOE DC region).  Defaults to
-        the first non-zero Welch bin (``sampling_rate/nperseg``).  This is a
-        *resolution* floor, not the canonical ``1/T_obs`` of the method:
-        FM-noise area between ``1/T_obs`` and the first bin is unresolved and
-        excluded, so for drift/flicker-dominated sources the result depends
-        on ``nperseg``.
+        Lower fence in Hz (it drops the DC region of a residual frequency
+        offset).  Defaults to the first non-zero Welch bin,
+        ``sampling_rate/nperseg``.  That is a resolution limit, not the
+        method's usual ``1/T_obs``: the FM-noise area between ``1/T_obs`` and
+        the first bin is unresolved and left out, so for sources dominated by
+        drift or flicker the result depends on ``nperseg``.
     f_max : float, optional
-        Upper fence in Hz.  **Set it below the AWGN ``f²`` knee**; defaults
-        to the Nyquist bin.
+        Upper fence in Hz; set it below the knee of the AWGN's ``f²`` tail.
+        Defaults to the Nyquist bin.
 
     Notes
     -----
     **Limitations.**
 
-    * The β-separation FWHM is an *approximation* (about 10 % for lineshapes
-      dominated by slow FM noise, exact for pure white FM - the line is
-      constructed so a flat ``S_f = Δν/π`` integrates back to ``Δν``).
-    * The result is **observation-time dependent** for flicker/drift-dominated
-      sources: lowering ``f_min`` (longer capture) adds low-frequency area and
-      grows ``Δν``.  Always quote ``f_min`` with the number.
-    * The AWGN ``f²`` tail crosses back above the β-line: set ``f_max`` below
-      the knee where the plateau ``Δν/π`` meets the tail ``2σ_φ²T·f²``, i.e.
-      ``f_knee = (Δν/(2π σ_φ² T))^{1/2}``.  Inspect it with
-      ``plotting.plot_frequency_noise_psd``.
-    * ``linewidth_floor`` is the more robust estimate when a clean white-FM
-      plateau exists in the band; the two should agree within tens of
-      percent, otherwise inspect the PSD.
+    * The β-separation FWHM is an approximation: within about 10 % for
+      lineshapes dominated by slow FM noise, and exact for pure white FM (the
+      line is built so that a flat ``S_f = Δν/π`` integrates back to
+      ``Δν``).
+    * For sources dominated by flicker or drift the result depends on the
+      observation time: a lower ``f_min`` (a longer capture) adds
+      low-frequency area and a larger ``Δν``.  Quote ``f_min`` with the
+      number.
+    * The AWGN's ``f²`` tail crosses back above the β-line: set ``f_max``
+      below the knee where the plateau ``Δν/π`` meets the tail
+      ``2σ_φ²T·f²``, ``f_knee = (Δν/(2π σ_φ² T))^{1/2}``.  Inspect it with
+      :func:`commkit.plotting.plot_frequency_noise_psd`.
+    * ``linewidth_floor`` is the more robust estimate when the band holds a
+      clean white-FM plateau; the two should agree within tens of percent,
+      otherwise inspect the PSD.
     """
 
     nperseg: int | None = None
@@ -381,18 +382,21 @@ def _check_delay(delay: float) -> None:
 class DshFmPsd:
     r"""Linewidth from a model fit to the DSH beat FM-noise PSD.
 
-    ``dsh_phase`` -> FM-noise PSD of the beat -> Whittle fit of white FM,
-    flicker FM and detection noise -> ``Δν = π·S_white``.  Works for any
-    delay, in the coherent and the incoherent regime.
+    The beat's differential phase (:func:`dsh_phase`) gives the FM-noise PSD
+    of the beat, to which a Whittle fit of white FM, flicker FM and detection
+    noise is applied: ``Δν = π·S_white``.  Works for any delay, in the
+    coherent and the incoherent regime.
 
     Parameters
     ----------
     delay : float
-        Interferometer differential delay ``τ_d`` in seconds (≈ 4.9 µs per km
-        of SMF).  With the default segments it only has to be known well
-        enough to choose them (see Notes); it does not scale the result.
+        Differential delay ``τ_d`` of the interferometer in seconds (about
+        4.9 µs per km of standard fiber).  With the default segments it only
+        has to be known well enough to choose them (see Notes); it does not
+        scale the result.
     f_shift : float, optional
-        Known AOM/beat carrier in Hz; estimated if None (see ``dsh_phase``).
+        Known beat carrier (AOM frequency) in Hz; estimated when ``None``
+        (see :func:`dsh_phase`).
     nperseg : int, optional
         Welch segment length.  Defaults to the longest power of two within the
         delay, clipped to ``[256, 16384]``.  Longer segments resolve the
@@ -403,9 +407,9 @@ class DshFmPsd:
         (single-photodiode) capture at its FM detection bandwidth
         ``min(f_shift, f_s/2 - f_shift)``.
     notch_guard : float, default 0.1
-        Masks near-notch bins of the displayed ``S_f`` when the segments
-        resolve the fringes (see ``dsh_fm_noise_psd``); the fit uses every
-        bin regardless.
+        Masks the bins near the notches of the reported ``S_f`` when the
+        segments resolve the fringes (see :func:`dsh_fm_noise_psd`); the fit
+        uses every bin either way.
     combine_polarizations : bool, default False
         Treat the ``C ≥ 2`` channels as the polarization outputs of one beat
         and combine them before estimating (maximum-ratio, immune to
@@ -428,8 +432,8 @@ class DshFmPsd:
         E[S_beat(f)] = (2 - 2ρ_w(τ_d)·cos 2πfτ_d) · S_laser(f) + S_noise(f).
 
     Segments longer than the delay (``ρ_w → 1``) resolve the ``4 sin²``
-    fringes and their notches.  With the default segments, **no longer than
-    the delay**, ``ρ_w = 0``: inside one segment the two copies of the laser
+    fringes and their notches.  With the default segments, no longer than
+    the delay, ``ρ_w = 0``: inside one segment the two copies of the laser
     frequency are disjoint stretches of the same process and add their
     power, so ``E[S_beat] = 2·S_laser + S_noise``.  The fit then needs no
     deconvolution and no exact delay.  A delay error no longer moves notches
@@ -443,16 +447,16 @@ class DshFmPsd:
 
     with ``g(f) = 2 - 2ρ_w(τ_d)·cos 2πfτ_d``:
 
-    * ``S_white = Δν/π`` - white FM, the Lorentzian linewidth;
-    * ``h_-1/f`` - flicker FM (technical noise), so a rising low-frequency
+    * ``S_white = Δν/π``: white FM, the Lorentzian linewidth;
+    * ``h_-1/f``: flicker FM (technical noise), so a rising low-frequency
       region does not bias the floor (reported as ``flicker``);
-    * the last term - additive detection noise.  Noise on the beat adds a
+    * the last term: additive detection noise.  Noise on the beat adds a
       white angle error of ``σ²`` rad² per sample, whose first difference
       has this ``≈ f²`` spectrum; it bypasses the interferometer, so ``g``
       does not shape it (reported as ``awgn_var``).
 
     The PSD is computed without the ``sinc²`` correction of
-    ``fm_noise_psd``: sampled white FM has white increments, so its PSD is
+    :func:`fm_noise_psd`: sampled white FM has white increments, so its PSD is
     flat to Nyquist as measured.
 
     **The fit.**  A Welch bin is ``M·χ²_ν/ν``-distributed with ``ν ≈ 2K``
@@ -468,9 +472,9 @@ class DshFmPsd:
     * The model covers white FM, flicker FM and white detection noise.
       Other structure in the band (random-walk FM ``∝ 1/f²`` at the lowest
       bins, fiber acoustic lines, a colored receiver noise) biases the fit;
-      fence it out with ``f_min``/``f_max`` and compare ``S_f`` with
-      ``S_f_model`` on ``plotting.plot_frequency_noise_psd``.
-    * The detection-noise term assumes additive Gaussian angle noise, i.e. a
+      fence it out with ``f_min`` and ``f_max``, and compare ``S_f`` with
+      ``S_f_model`` on :func:`commkit.plotting.plot_frequency_noise_psd`.
+    * The detection-noise term assumes additive Gaussian angle noise, that is a
       beat SNR well above the unwrap threshold (≳ 10 dB in the record's
       bandwidth).  Below it phase slips add a white-FM-like floor.
     * ``flicker`` is only as good as the band's coverage of the flicker
@@ -479,9 +483,9 @@ class DshFmPsd:
       comes out low (by about 2x for a corner a quarter of the first bin).
       ``Δν`` is unaffected.  To measure ``h_-1``, pass segments long enough
       to resolve the corner (then the delay must be accurate, see above).
-    * Everything the interferometer adds - fiber acoustic/thermal noise in
-      the delay arm, AOM synthesizer noise - is indistinguishable from laser
-      noise.
+    * Everything the interferometer adds (acoustic and thermal noise of the
+      delay fiber, noise of the AOM's synthesizer) cannot be told apart from
+      laser noise.
     """
 
     delay: float
@@ -508,23 +512,22 @@ class DshIncrement:
         Var[Δφ(t) - Δφ(t-a)] = 4π·Δν·a + 2σ_w²,
 
     and a straight-line fit against ``a`` gives ``Δν = slope/(4π)``, with the
-    beat angle noise cancelling into the intercept - no SNR estimate needed
-    (as for ``IncrementSlope``).  White-FM (Wiener) assumption: flicker bends
-    ``Var(a)`` super-linear and biases Δν high.  Slow drift is harmless up to
-    a linear frequency chirp.
+    beat's angle noise in the intercept, so no SNR estimate is needed (as for
+    ``IncrementSlope``).  It assumes white FM (Wiener phase noise): flicker
+    bends ``Var(a)`` upwards and biases ``Δν`` high.  Slow drift does no harm
+    up to a linear frequency chirp.
 
     Parameters
     ----------
     delay : float
-        Interferometer differential delay ``τ_d`` in seconds.
+        Differential delay ``τ_d`` of the interferometer in seconds.
     f_shift : float, optional
-        Known AOM/beat carrier in Hz; estimated if None.
+        Known beat carrier (AOM frequency) in Hz; estimated when ``None``.
     lags : tuple of int, optional
-        Increment lags in *samples*.  Default: five lags up to
-        ``a_max = min(0.5·τ_d·f_s, N/2000)`` - inside the disjoint window
-        ``ℓ ≤ τ_d·f_s`` *and* small enough that the variance estimator keeps
-        many independent averages when the delay is long (decoherence
-        spools).
+        Increment lags in samples.  Defaults to five lags up to
+        ``a_max = min(0.5·τ_d·f_s, N/2000)``: inside the disjoint window
+        ``ℓ ≤ τ_d·f_s``, and small enough that the variance estimate keeps
+        many independent averages for a long delay (decoherence spools).
     combine_polarizations : bool, default False
         Treat the ``C ≥ 2`` channels as the polarization outputs of one beat
         and combine them before estimating (maximum-ratio, immune to
@@ -555,18 +558,18 @@ class DshLorentzian:
     In the incoherent regime (``τ_d ≫ τ_c = 1/(πΔν)``) the beat line is
     Lorentzian with FWHM ``2Δν``.  The width is measured ``level_db`` below
     the peak and converted via ``Δν = W_L / (2·√(10^{L/10} - 1))``
-    (``W₂₀/(2√99)`` for the customary -20 dB width, which suppresses the
-    Gaussian 1/f-noise core that contaminates the -3 dB width).
+    (``W₂₀/(2√99)`` for the usual -20 dB width, which avoids the Gaussian
+    core of the 1/f noise that distorts the -3 dB width).
 
     Parameters
     ----------
     delay : float
-        Interferometer differential delay ``τ_d`` in seconds (for the
-        coherence check).
+        Differential delay ``τ_d`` of the interferometer in seconds, for the
+        coherence check.
     nperseg : int, optional
         Welch segment length of the beat PSD.
     level_db : float, default 20.0
-        Depth below the peak at which the width is measured.
+        Depth in dB below the peak at which the width is measured.
     combine_polarizations : bool, default False
         Treat the ``C ≥ 2`` channels as the polarization outputs of one beat
         and combine them before estimating (maximum-ratio, immune to
@@ -575,13 +578,14 @@ class DshLorentzian:
 
     Notes
     -----
-    Requires ``coherence_factor ≳ 6``: below that the spectrum develops a
-    coherent carrier spike plus fringes at ``1/τ_d`` spacing and the width no
+    Requires ``coherence_factor ≳ 6``: below that the spectrum has a
+    coherent carrier spike and fringes spaced ``1/τ_d``, and the width no
     longer reads ``2Δν`` (a warning is logged).  It also needs the
-    ``-level_db`` contour above the noise floor (peak dynamic range ≳
-    ``level_db`` + 10 dB) and ``≳ 10`` Welch bins across the line.  With a
-    homodyne IQ capture, calibrate photodiode DC offsets out first: a DC spur
-    mid-line hijacks the peak and narrows the widths.
+    ``-level_db`` contour above the noise floor (a peak dynamic range of
+    ``level_db`` + 10 dB or more) and about 10 or more Welch bins across the
+    line.  For a homodyne IQ capture, calibrate the photodiode DC offsets out
+    first: a DC spur in the middle of the line takes the peak and narrows
+    the widths.
     """
 
     delay: float
@@ -1141,7 +1145,7 @@ def estimate_linewidth(
     *,
     sampling_rate: float | None = None,
 ) -> LinewidthEstimate:
-    r"""Laser or carrier linewidth by the given method.
+    r"""Estimate a laser or carrier linewidth with the given method.
 
     Parameters
     ----------
@@ -1172,7 +1176,7 @@ def estimate_linewidth(
     Returns
     -------
     LinewidthEstimate
-        ``value`` (Hz) plus the method's diagnostics, host-side.
+        ``value`` in Hz and the method's diagnostics, on the host.
 
     Raises
     ------

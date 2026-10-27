@@ -1,11 +1,9 @@
-"""
-Public sequential adaptive equalizers: lms, rls, cma, rde.
+"""Sequential adaptive equalizers.
 
-Split into ``_dd.py`` (decision-directed: ``lms``, ``rls``) and ``_blind.py``
-(blind: ``cma``, ``rde``), mirroring the package-level ``sequential.py``
-(DD) vs. ``blind.py`` (blind) split.  The public import surface is
-unchanged: ``from commkit.equalization import lms, rls, cma, rde`` and
-``from commkit.equalization.sequential import ...`` continue to work.
+:func:`lms`, :func:`rls`, :func:`cma` and :func:`rde`.  ``_dd.py`` holds the
+trained and decision-directed ones (``lms``, ``rls``), ``_blind.py`` the blind
+ones (``cma``, ``rde``) and ``_setup.py`` their shared front end and result
+assembly; the kernels are in ``commkit/equalization/_kernels_numba.py``.
 """
 
 from __future__ import annotations

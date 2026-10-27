@@ -1,4 +1,9 @@
-"""Shared plotting theme, layout, and formatting helpers."""
+"""Plot theme and shared layout and formatting helpers.
+
+:func:`apply_default_theme` sets the library's Matplotlib style; the private
+helpers (axes and figure layout, SI-prefixed tick labels, min/max
+decimation of long traces) are shared by the plot modules.
+"""
 
 import matplotlib as mpl
 import matplotlib.font_manager as fm
@@ -12,19 +17,17 @@ __all__ = ["apply_default_theme"]
 
 
 def apply_default_theme() -> None:
-    """
-    Applies the library's default visual theme to Matplotlib.
+    """Apply the library's Matplotlib style.
 
-    This theme configures publication-quality defaults, including:
-    - Roboto or standard sans-serif typography.
-    - Optimized figure dimensions and DPI.
-    - Consistent grid styling and axis formatting.
-    - Improved LaTeX math rendering.
+    Matplotlib's ``dark_background`` style with Roboto (or the default
+    sans-serif font, with a logged warning, when Roboto is not installed)
+    for text and math, a 7 x 4.9 inch figure with constrained layout,
+    300-dpi saving, a light grid, and inward ticks on all four sides.
 
     Notes
     -----
-    This function modifies `matplotlib.rcParams` globally. It is recommended
-    to call this at the start of a script or notebook for consistent styling.
+    Changes ``matplotlib.rcParams`` globally, so call it once at the start of
+    a script or notebook.  The library never calls it on its own.
     """
     logger.debug("Applying default plotting theme.")
     try:
@@ -72,12 +75,12 @@ def apply_default_theme() -> None:
 
 
 def _get_axis(ax):
-    """Get-or-create a single ``Axes``: returns ``(fig, axi)``.
+    """Return ``(fig, axi)`` for one ``Axes``, creating them when needed.
 
-    If ``ax`` is ``None``, creates a new 1x1 figure/axes pair (theme default
-    figsize). Otherwise reuses the given ``Axes`` and its parent ``Figure``.
-    For the single-``Axes`` case only - multi-panel functions build their
-    own subplot grid via :func:`_create_subplot_grid`/:func:`_grid_figsize`.
+    With ``ax=None`` a new 1x1 figure at the theme's default size is
+    created; otherwise the given ``Axes`` and its ``Figure`` are reused.
+    For single-panel plots only: multi-panel functions build their grid with
+    :func:`_create_subplot_grid` and :func:`_grid_figsize`.
     """
     if ax is None:
         fig, axi = plt.subplots(1, 1)
@@ -100,8 +103,7 @@ def _finish(result, show: bool):
 
 
 def _create_subplot_grid(num_axes: int, max_cols: int = 2) -> tuple[int, int]:
-    """
-    Computes a grid layout (rows, cols) for a given number of axes.
+    """Compute a grid layout (rows, cols) for a given number of axes.
 
     Limits the maximum number of columns to prevent excessively wide figures.
 
@@ -129,8 +131,7 @@ def _create_subplot_grid(num_axes: int, max_cols: int = 2) -> tuple[int, int]:
 def _grid_figsize(
     nrows: int, ncols: int, panel: tuple[float, float] | None = None
 ) -> tuple[float, float]:
-    """
-    Figsize for a subplot grid that preserves the default single-panel size.
+    """Figsize for a subplot grid that preserves the default single-panel size.
 
     Tiles ``panel`` (default: ``rcParams["figure.figsize"]``) across the
     grid, so a single row keeps the default height, a single column keeps
@@ -153,8 +154,7 @@ def _grid_figsize(
 
 
 def _square_figsize(n: int = 1) -> tuple[float, float]:
-    """
-    Square panel size derived from the default figure height.
+    """Square panel size derived from the default figure height.
 
     Used for constellation-style plots that require an equal aspect ratio,
     where the default (non-square) ``figure.figsize`` doesn't apply directly.
@@ -169,16 +169,16 @@ def _decimate_minmax(
 ) -> tuple[np.ndarray, np.ndarray]:
     """Down-sample a line for fast plotting while preserving its envelope.
 
-    Buckets the data and keeps the per-bucket min **and** max (emitted in
-    x-order), so sharp features - spectral peaks, window edges, glitches -
-    survive, unlike plain striding.  Matplotlib renders every vertex, so for
+    Buckets the data and keeps both the minimum and the maximum of each
+    bucket (in x order), so sharp features (spectral peaks, window edges,
+    glitches) survive, unlike plain striding.  Matplotlib renders every vertex, so for
     long oversampled records (N ≳ 10⁵) plotting the raw trace is the dominant
     cost; reducing to a few thousand points is visually identical but orders of
     magnitude faster.
 
     Parameters
     ----------
-    x, y : np.ndarray
+    x, y : numpy.ndarray
         1-D arrays of equal length.
     max_points : int, default 4000
         Approximate cap on the number of plotted points.  Returned length is
@@ -186,7 +186,7 @@ def _decimate_minmax(
 
     Returns
     -------
-    (x_dec, y_dec) : tuple of np.ndarray
+    x_dec, y_dec : numpy.ndarray
         Decimated arrays, or the inputs unchanged when already short enough.
     """
     n = len(y)

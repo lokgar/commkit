@@ -22,23 +22,22 @@ _BARKER_SEQUENCES = {
 
 
 def barker_sequence(length: int) -> np.ndarray:
-    """
-    Generates a Barker sequence of the specified length.
+    """Generate a Barker sequence.
 
-    Barker sequences are binary sequences (+1, -1) with optimal cyclic
-    auto-correlation properties, where the sidelobes are at most 1. They are
-    widely used for frame synchronization and pulse compression.
+    Barker sequences are binary (+1, -1) sequences whose aperiodic
+    autocorrelation sidelobes are at most 1 in magnitude, used for frame
+    synchronization and pulse compression.
 
     Parameters
     ----------
     length : {2, 3, 4, 5, 7, 11, 13}
-        Total length of the Barker sequence.
+        Sequence length.
 
     Returns
     -------
-    array_like
-        BPSK symbols (+1.0, -1.0). Shape: (length,).
-        NumPy array; move it with ``to_device`` if needed.
+    ndarray
+        Host float32 BPSK symbols (+1, -1), ``(length,)``; move them with
+        ``to_device`` if needed.
 
     Raises
     ------
@@ -61,34 +60,36 @@ def barker_sequence(length: int) -> np.ndarray:
 
 
 def zadoff_chu_sequence(length: int, *, root: int = 1) -> np.ndarray:
-    r"""
-    Generates a Zadoff-Chu (ZC) synchronization sequence.
+    r"""Generate a Zadoff-Chu (ZC) synchronization sequence.
 
-    ZC sequences are Complex-valued, Constant Amplitude Zero
-    Auto-Correlation (CAZAC) sequences. They possess the unique property
-    that their periodic auto-correlation is zero at all non-zero lags,
-    and their DFT is also a ZC sequence. This makes them ideal for
-    timing and frequency synchronization in systems like LTE and 5G NR.
+    ZC sequences are constant-amplitude zero-autocorrelation (CAZAC)
+    sequences: the periodic autocorrelation vanishes at every non-zero lag,
+    and the DFT of a ZC sequence is again one.  They serve timing and
+    frequency synchronization (LTE, 5G NR).
 
     Parameters
     ----------
     length : int
-        The sequence length (N_ZC). For optimal cross-correlation
-        properties, this should be a prime number.
+        Sequence length ``N_ZC``; a prime gives the lowest cross-correlation
+        between roots.
     root : int, default 1
-        The root index (u). Must be relatively prime to `length`.
+        Root index ``u`` in ``[1, length)``, coprime to ``length`` (not
+        checked).
 
     Returns
     -------
-    array_like
-        Complex Zadoff-Chu symbols of unit magnitude.
-        Shape: (length,). Data type: `complex64`.
+    ndarray
+        Host complex64 symbols of unit magnitude, ``(length,)``.
+
+    Raises
+    ------
+    ValueError
+        If ``length < 1`` or ``root`` is outside ``[1, length)``.
 
     Notes
     -----
     - For odd lengths: x[n] = exp(-j * pi * u * n * (n + 1) / N_ZC)
     - For even lengths: x[n] = exp(-j * pi * u * n^2 / N_ZC)
-    - ZC sequences have exceptionally low Peak-to-Average Power Ratio (PAPR).
     """
     if length < 1:
         raise ValueError("Length must be positive.")
@@ -113,8 +114,7 @@ def zadoff_chu_sequence(length: int, *, root: int = 1) -> np.ndarray:
 
 
 def zc_mimo_root(stream_idx: int, base_root: int, length: int) -> int:
-    """
-    Returns the Zadoff-Chu root for TX stream ``stream_idx`` in a MIMO preamble.
+    """Return the Zadoff-Chu root for TX stream ``stream_idx`` in a MIMO preamble.
 
     Assigns a deterministic unique root to each TX stream by cycling through
     distinct roots starting from ``base_root``, wrapping in the range

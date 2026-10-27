@@ -1,13 +1,12 @@
-"""
-Core data structures and signal factories for commkit.
+"""Containers and factories: :class:`Signal`, frames and generation.
 
-Re-exports the primary containers and generation factories so existing imports
-(``from commkit.core import Signal, Preamble, SingleCarrierFrame``) keep
-working after the split of the former monolithic ``core.py`` into a package.
-
-``signal`` is the thin container (no leaf-module dependencies); ``frame`` and
-``generation`` build on it.  The generation factories are also re-exported at
-the package top level (``commkit.generate(...)``).
+- :class:`Signal` and :class:`Reference` (:mod:`commkit.core.signal`): a
+  waveform with its facts, description and ground truth.
+- :class:`Preamble`, :class:`SingleCarrierFrame` and :func:`extract_payload`
+  (:mod:`commkit.core.frame`): structured frames with pilots, guard intervals
+  and MIMO streams.
+- :func:`generate` (:mod:`commkit.core.generation`): random symbols,
+  pulse-shaped into a Signal; also re-exported as ``commkit.generate``.
 """
 
 from .frame import Preamble, SingleCarrierFrame, extract_payload

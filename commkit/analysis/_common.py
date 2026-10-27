@@ -1,4 +1,9 @@
-"""Shared helpers and constants for the carrier-phase analysis package."""
+"""Shared helpers and constants of the analysis package (private).
+
+Increment-variance and Whittle fits, Welch segment sizing and bias
+corrections, and the plateau mask, used by :mod:`commkit.analysis.linewidth`
+and :mod:`commkit.analysis.fm_noise`.
+"""
 
 import numpy as np
 from scipy.optimize import nnls
@@ -366,14 +371,14 @@ def _increment_variance_fit(y2, lags, dt: float, xp):
     caller only applies its own constant (``Δν = slope/2π`` for a direct phase
     record, ``slope/4π`` for a DSH differential phase).
 
-    The variances are computed on the input backend and the ``(n_lag, C)``
+    The variances are computed on the input's device and the ``(n_lag, C)``
     result is transferred once - a tiny host-side ``polyfit`` beats launching a
     device least-squares.
 
     Parameters
     ----------
     y2 : array_like, (C, N)
-        Phase record on the input backend.
+        Phase record on the input's device.
     lags : sequence of int
         Increment lags in samples (each ``≥ 1``).
     dt : float
