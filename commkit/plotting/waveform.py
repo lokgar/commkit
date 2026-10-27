@@ -2,17 +2,15 @@
 
 from typing import Any
 
-import matplotlib.pyplot as plt
 import numpy as np
 
 from ..backend import dispatch, to_device
 from ..core._signal_adapter import adapt_signal
 from ..logger import logger
 from .theme import (
-    _create_subplot_grid,
+    _channel_axes,
     _finish,
     _get_axis,
-    _grid_figsize,
     _set_eng_formatter,
 )
 
@@ -115,29 +113,12 @@ def _plot_time_domain(
     if samples.ndim > 1:
         num_channels = samples.shape[0]
 
-        if ax is None:
-            nrows, ncols = _create_subplot_grid(num_channels)
-            fig, axes = plt.subplots(
-                nrows, ncols, figsize=_grid_figsize(nrows, ncols), squeeze=False
-            )
-        else:
-            if not isinstance(ax, (list, tuple, np.ndarray)):
-                logger.warning(
-                    "Multiple channels detected but single axis provided. "
-                    "Overlaying plots."
-                )
-                axes = np.array([[ax] * num_channels])
-                fig = ax.figure
-            else:
-                axes = np.atleast_2d(ax)
-                fig = axes.flat[0].figure
+        fig, axes, targets = _channel_axes(num_channels, ax)
 
         for i in range(num_channels):
             channel_samples = samples[i]
 
-            # Determine target axis using 2D indexing
-            row, col = divmod(i, axes.shape[1])
-            target_ax = axes[row, col] if row < axes.shape[0] else axes.flat[-1]
+            target_ax = targets[i]
 
             ch_title = f"{title} (Ch {i})" if title else f"Channel {i}"
 

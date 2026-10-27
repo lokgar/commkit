@@ -16,8 +16,7 @@ from ..logger import logger
 from ..math import rms
 from ..smoothing import smooth_density_2d
 from .theme import (
-    _create_subplot_grid,
-    _grid_figsize,
+    _channel_axes,
     _square_figsize,
 )
 
@@ -283,32 +282,12 @@ def _plot_constellation_array(
     if samples.ndim > 1:
         num_channels = samples.shape[0]
 
-        if ax is None:
-            nrows, ncols = _create_subplot_grid(num_channels)
-            fig, axes = plt.subplots(
-                nrows,
-                ncols,
-                figsize=_grid_figsize(nrows, ncols, panel=_square_figsize()),
-                squeeze=False,
-            )
-        else:
-            if not isinstance(ax, (list, tuple, np.ndarray)):
-                logger.warning(
-                    "Multiple channels detected but single axis provided. "
-                    "Overlaying plots."
-                )
-                axes = np.array([[ax] * num_channels])
-                fig = ax.figure
-            else:
-                axes = np.atleast_2d(ax)
-                fig = axes.flat[0].figure
+        fig, axes, targets = _channel_axes(num_channels, ax, panel=_square_figsize())
 
         for i in range(num_channels):
             channel_samples = samples[i]
 
-            # Determine target axis using 2D indexing
-            row, col = divmod(i, axes.shape[1])
-            target_ax = axes[row, col] if row < axes.shape[0] else axes.flat[-1]
+            target_ax = targets[i]
 
             ch_title = f"{title} (Ch {i})" if title else f"Channel {i}"
 
