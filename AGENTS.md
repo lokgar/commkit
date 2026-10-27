@@ -39,6 +39,8 @@ NUMBA_DISABLE_JIT=1 uv run pytest tests/equalization tests/recovery \
     tests/test_frequency.py tests/test_fiber.py --device=cpu --cov=commkit   # real kernel coverage
 uv run pytest --device=cpu -p tests.plugins.precision_trace \
     --ignore=tests/test_examples.py      # precision audit (see Numerics); the suite passes under it
+uv run pytest --device=gpu -p tests.plugins.transfer_trace \
+    --ignore=tests/test_examples.py      # transfer audit (see Performance); fails on an undocumented transfer
 ```
 
 **Commit gate.** CI fails on any of these, so run all of them before every commit, with `ruff format` last:
@@ -222,6 +224,8 @@ Docstrings describe the code as it is; a change in behavior updates them in the 
 - Frequency responses (dispersion, delays, Jones matrices) are computed at float64 phase accuracy and cast to the spectrum's precision before the multiply, so complex64 data is never promoted.
 - Chunk `(N, M)` intermediates over N with an on-device accumulator.
 - Reduce on the device before transferring, including for plotting.
+- Build grids, windows and index tables on the data's device (`xp.fft.fftfreq`, `xp.hanning`, `xp.arange`), not on the host and then upload them.
+- **Audit with `tests/plugins/transfer_trace.py`** after touching a GPU path. The contract registry checks only that a result comes back on the input's device, which a silent round trip through the host passes. The plugin records every host-device copy of sample-rate size that commkit makes during a `--device=gpu` run, with its function and lines, and fails on a site missing from its documented list. The documented sites are the round trip of the sequential recursions (table above, and the block equalizers' cycle-slip correction beyond the `cs_block` kernel's 1024 channels), the equalizers' continuation state (host copies), the reporting layer (metrics, analysis summaries, plotting), explicit device moves and the transmitted payload, and host values (reference symbols, pilots, tables from host parameters such as a SciPy window) moved to the data's device. A new site is either fixed or added to the list with its reason.
 - Pass whole records to compiled code. There are no Python loops over symbols or small blocks, except inside a CUDA graph.
 - Repeated GPU work with fixed buffers (the block equalizers' blocks, the fiber solver's spans) is replayed from CUDA graphs through `_cuda.graphs.GraphRunner`, the one driver: warm once, capture on the second run, replay; a failed capture raises. Its stream is reused per device and thread, because CuPy's pool caches freed blocks per stream and a fresh stream per call grows the pool every call.
 
@@ -278,12 +282,6 @@ Docstrings describe the code as it is; a change in behavior updates them in the 
 ## 9. Roadmap and open items
 
 What is not done yet, in suggested order. Unlike the sections above, this is a to-do list, not a description of the code: remove an item in the commit that resolves it, and add one when a known gap is left open.
-
-### Tests: catch silent host round trips (needs a CUDA device)
-
-The contract registry checks that a function returns on its input's device, which a round trip through the host passes, and CuPy's refusal of implicit conversion only rules out the accidental kind. An audit of every explicit transfer (October 2026) found one silent host computation, the blockwise frequency correction (fixed in `50b7351`); the documented ones are the sequential recursions of §6, the block equalizers' cycle-slip correction beyond the `cs_block` kernel's 1024 channels, and the reporting layer. To keep it that way:
-
-- **A transfer-trace plugin**, the GPU counterpart of `tests/plugins/precision_trace.py`: during a `--device=gpu` run, wrap the device-to-host paths (`cupy.ndarray.get`, `cupy.asnumpy`, `backend.to_device(..., "cpu")`) and the host-to-device copies of NumPy arrays, record every transfer of sample-rate size (the same threshold as the precision trace) with its source line, and fail on one that is not in a documented list (the rows of §6 that make a host round trip, the metrics' and analysis summaries' reductions, INFO-level logging). Run it on the contract registry and the GPU suite; add the command to §2.
 
 ### Switch to Python 3.15 (blocked on CuPy)
 
