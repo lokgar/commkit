@@ -53,9 +53,14 @@ class _Block:
     eq_norm: Any
     h: ArrayType  # (C, C, T) complex64 weights, updated in place
     x_win: ArrayType  # (C, F) input window of the current block
+    # Index of the current block: on the host for NumPy, and on the device
+    # for CuPy (int64 (1,)), where the per-block copies read it, so that a
+    # captured graph replays them at the right offset.
+    block: int = 0
+    block_dev: ArrayType | None = None
 
-    def fill_window(self, b_start: int, B: int) -> None:
-        """Load the input samples of block ``b_start`` into ``x_win``.
+    def fill_window(self, B: int) -> None:
+        """Load the input samples of the current block into ``x_win``.
 
         ``B·sps + T - 1`` samples, zeros after them.
 
@@ -63,13 +68,89 @@ class _Block:
         later ones too would change the FFT's rounding with data the block
         does not use (and break exact continuation at a block boundary).
         """
-        x_start = b_start * self.sps
+        need = B * self.sps + self.num_taps - 1
+        if self.block_dev is not None:
+            n_src = self.x_padded.shape[1]
+            _block_kernels()["window"](
+                self.x_padded, n_src, self.block_dev, self.block_size * self.sps,
+                need, self.x_win.shape[1], self.x_win,
+            )  # fmt: skip
+            return
+        x_start = self.block * self.block_size * self.sps
         self.x_win.fill(0)
-        available = min(
-            B * self.sps + self.num_taps - 1, self.x_padded.shape[1] - x_start
-        )
+        available = min(need, self.x_padded.shape[1] - x_start)
         if available > 0:
             self.x_win[:, :available] = self.x_padded[:, x_start : x_start + available]
+
+    def take(self, dst: ArrayType, src: ArrayType, B: int) -> None:
+        """``dst[:, :B] = src[:, start : start + B]`` at the current block's
+        first symbol; ``src`` C-contiguous ``(C, K)``, ``K >= start + B``."""
+        if self.block_dev is not None:
+            _block_kernels()["window"](
+                src, src.shape[1], self.block_dev, self.block_size, B, B, dst[:, :B]
+            )
+            return
+        start = self.block * self.block_size
+        dst[:, :B] = src[:, start : start + B]
+
+    def put(self, dst: ArrayType, src: ArrayType, B: int) -> None:
+        """``dst[:, start : start + B] = src[:, :B]`` at the current block's
+        first symbol; ``dst`` C-contiguous ``(C, n_sym)``."""
+        if self.block_dev is not None:
+            _block_kernels()["put"](
+                src[:, :B], self.block_dev, self.block_size, dst.shape[1], B, dst
+            )
+            return
+        start = self.block * self.block_size
+        dst[:, start : start + B] = src[:, :B]
+
+    def advance(self) -> None:
+        """Advance the device block index, the last step of a block body (the
+        host index is set by the loop, which a replay does not run)."""
+        if self.block_dev is not None:
+            _block_kernels()["advance"](self.block_dev, size=1)
+
+
+_BLOCK_KERNELS: dict[str, Any] = {}
+
+
+def _block_kernels() -> dict[str, Any]:
+    """Elementwise CuPy kernels of the per-block copies, at the offset of the
+    device block index ``blk[0]`` (times ``step``), so they can be captured.
+
+    ``window``: ``dst[c, j] = src[c, start + j]`` for ``j < min(n, n_src -
+    start)``, zero after (``dst`` ``(C, cols)``, possibly a strided view),
+    cast to ``dst``'s type as a slice assignment would (double training
+    symbols into the complex64 staging buffer).
+    ``put``: ``dst[c, start + j] = src[c, j]``.  ``advance``: ``blk[0] += 1``.
+    """
+    if not _BLOCK_KERNELS:
+        import cupy as cp
+
+        _BLOCK_KERNELS["window"] = cp.ElementwiseKernel(
+            "raw S src, int64 n_src, raw int64 blk, int64 step, int64 n, int64 cols",
+            "T dst",
+            """
+            const long long c = i / cols, j = i % cols;
+            const long long start = blk[0] * step;
+            const long long avail = min(n, n_src - start);
+            dst = (j < avail) ? T(src[c * n_src + start + j]) : T(0);
+            """,
+            "commkit_block_window",
+        )
+        _BLOCK_KERNELS["put"] = cp.ElementwiseKernel(
+            "T src, raw int64 blk, int64 step, int64 n_dst, int64 cols",
+            "raw T dst",
+            """
+            const long long c = i / cols, j = i % cols;
+            dst[c * n_dst + blk[0] * step + j] = src;
+            """,
+            "commkit_block_put",
+        )
+        _BLOCK_KERNELS["advance"] = cp.ElementwiseKernel(
+            "", "raw int64 blk", "blk[0] += 1", "commkit_block_advance"
+        )
+    return _BLOCK_KERNELS
 
 
 def _prepare_block(
@@ -216,14 +297,17 @@ def _prepare_block(
         num_taps=num_taps,
         block_size=block_size,
         fftsize=fftsize,
-        x_padded=x_padded,
+        x_padded=xp.ascontiguousarray(x_padded),
         lead=lead,
         real_end=real_end,
         resume=resume,
-        training=training_symbols,
+        training=(
+            None if training_symbols is None else xp.ascontiguousarray(training_symbols)
+        ),
         eq_norm=eq_norm,
         h=h,
         x_win=xp.zeros((C, fftsize), dtype=xp.complex64),
+        block_dev=None if xp is np else xp.zeros(1, dtype=xp.int64),
     )
 
 
@@ -310,12 +394,25 @@ def _block_loop(
     the memory pool, the second is captured into a CUDA graph and every
     later block of that key replays it (:class:`GraphRunner`): one launch
     per block instead of dozens.  ``prepare(B, b_start)`` runs before every
-    block, outside any graph, like ``run.fill_window``: it stages per-block
-    inputs into fixed buffers.
+    block, inside its body like ``run.fill_window``: it stages per-block
+    inputs into fixed buffers (with ``run.take``, at the device block index on
+    CuPy).  ``store(b_start, b_end, B)`` ends the body (with ``run.put``).
     ``at_resume()`` runs once, before block ``run.resume`` (or after the last
     block), to snapshot the continuation state.
     """
     n_blocks = (run.n_sym + run.block_size - 1) // run.block_size
+
+    def body(B: int, b_start: int, b_end: int) -> None:
+        # Everything a block does, so a replay does all of it.
+        run.fill_window(B)
+        if prepare is not None:
+            prepare(B, b_start)
+        run_block(B, b_start)
+        store(b_start, b_end, B)
+        run.advance()
+
+    if run.block_dev is not None:
+        run.block_dev.fill(0)
     with GraphRunner(name, use_graph) as graphs:
         for b in range(n_blocks):
             b_start = b * run.block_size
@@ -324,10 +421,7 @@ def _block_loop(
             if at_resume is not None and b_start == run.resume:
                 at_resume()
             key = capturable(B, b_start) if graphs.enabled else None
-            run.fill_window(b_start, B)
-            if prepare is not None:
-                prepare(B, b_start)
-            graphs.run(key, functools.partial(run_block, B, b_start))
-            store(b_start, b_end, B)
+            run.block = b
+            graphs.run(key, functools.partial(body, B, b_start, b_end))
         if at_resume is not None and run.resume >= run.n_sym:
             at_resume()

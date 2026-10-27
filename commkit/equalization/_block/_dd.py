@@ -642,8 +642,8 @@ def block_lms(
 
     def prepare(B: int, b_start: int) -> None:
         if d_ws is not None and n_train - b_start >= B:
-            assert training is not None
-            d_ws[:, :B] = training[:, b_start : b_start + B]
+            assert run.training is not None
+            run.take(d_ws, run.training, B)
 
     def run_block(B: int, b_start: int) -> None:
         """One block: filter, CPR, slicer/training error, update.
@@ -688,11 +688,11 @@ def block_lms(
         _fdaf_gradient_update(run.h, X_fd, e_taps, e_scatter, sps, B, num_taps, mu, xp)
 
     def store(b_start: int, b_end: int, B: int) -> None:
-        y_all[:, b_start:b_end] = y_rot_ws[:, :B]
-        e_all[:, b_start:b_end] = e_clean_ws[:, :B]
+        run.put(y_all, y_rot_ws, B)
+        run.put(e_all, e_clean_ws, B)
         if bps is not None:
             assert phi_all is not None and phi_ws is not None
-            phi_all[:, b_start:b_end] = phi_ws[:, :B]
+            run.put(phi_all, phi_ws, B)
 
     snap: list[tuple[np.ndarray, Any]] = []
 
