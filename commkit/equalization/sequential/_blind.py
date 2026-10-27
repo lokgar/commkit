@@ -13,7 +13,7 @@ from ...backend import ArrayType, to_device
 from ...core._signal_adapter import adapt_signal, require_integer_sps
 from ...core.signal import Signal
 from ...logger import logger
-from .._common import _godard_radius, _rde_ring_radii
+from .._common import _godard_radius, _rde_ring_radii, _rde_rings
 from .._kernels_numba import _get_numba_cma, _get_numba_rde
 from ..result import (
     EqualizerResult,
@@ -121,7 +121,7 @@ def _blind_equalizer(
     else:
         radii = _rde_ring_radii(constellation)
         logger.debug("RDE radii: %s", ", ".join(f"{r:.4f}" for r in radii))
-        target = np.ascontiguousarray(radii, dtype=np.float32)
+        target = _rde_rings(radii)
         kernel = _get_numba_rde()
 
     # RMS-normalize samples to unit symbol-rate power (no training)

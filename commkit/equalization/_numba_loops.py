@@ -744,14 +744,14 @@ def cma_loop(
 
 @_fast
 def rde_loop(
-    x_padded, W, step_size, radii, stride, store_weights, y_out, e_out,
+    x_padded, W, step_size, rings, stride, store_weights, y_out, e_out,
     w_hist_out, use_pilots, pilot_ref, pilot_mask,
 ):  # fmt: skip
-    """RDE towards the nearest of the ring ``radii`` (sorted ascending),
-    blind or pilot-aided as :func:`cma_loop`."""
+    """RDE towards the nearest ring, blind or pilot-aided as :func:`cma_loop`;
+    ``rings`` is the ``(2, K)`` table of ``_common._rde_rings``."""
     C = W.shape[0]
     num_taps = W.shape[2]
-    K = radii.shape[0]
+    K = rings.shape[1]
     X_wins = np.empty((C, num_taps), dtype=np.complex64)
     y = np.empty(C, dtype=np.complex64)
     e = np.empty(C, dtype=np.complex64)
@@ -764,15 +764,10 @@ def rde_loop(
                 e[i] = y[i] - pilot_ref[i, idx]
             else:
                 mod2 = y[i].real * y[i].real + y[i].imag * y[i].imag
-                abs_y = np.sqrt(mod2)
-                best_rd = radii[0]
-                best_dist = abs(abs_y - radii[0])
-                for k in range(1, K):
-                    dist_k = abs(abs_y - radii[k])
-                    if dist_k < best_dist:
-                        best_dist = dist_k
-                        best_rd = radii[k]
-                e[i] = y[i] * np.float32(mod2 - best_rd * best_rd)
+                k = 0
+                for j in range(K - 1):  # branch-free: count the bounds below
+                    k += mod2 > rings[1, j]
+                e[i] = y[i] * np.float32(mod2 - rings[0, k])
             e_out[idx, i] = e[i]
         _descend_taps(W, e, X_wins, step_size)
         if store_weights:
