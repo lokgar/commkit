@@ -196,7 +196,7 @@ Docstrings describe the code as it is; a change in behavior updates them in the 
   - complex128 pays only where single-precision rounding accumulates over many FFT passes, as in the fiber solver (6e-4 after 10^4 steps in complex64, 1e-12 in complex128); there the GPU runs its plain CuPy stages, not the fused complex64 kernels.
   - **The NEP 50 trap**: under NumPy 2 a NumPy scalar is not weak, so `np.float64(a) * x64` (any `np.sqrt`, `np.pi * ...` result, or a float64 array such as `xp.fft.fftfreq`) promotes complex64 data to complex128. Combine single-precision data only with Python scalars or with arrays cast to its precision; rotate with `math._derotate` (float64 phase wrap, single-precision phasor, one fused kernel on the GPU).
 - **Accumulation precision:**
-  - LMS/CMA/RDE: inputs and weights are `complex64`, but dot products and gradient updates in the hot loop are accumulated in `complex128`.
+  - LMS/CMA/RDE: inputs and weights are `complex64`, but dot products and gradient updates in the hot loop are accumulated in `complex128`. The block equalizers compute in `complex64` throughout: their sums over the taps run inside the FFTs, and the sum over the C input channels between them is as short as C.
   - RLS keeps `P`, the gain `k` and the regressor buffers in `complex128` throughout. Single precision loses the Hermitian positive-definite property and the filter diverges.
   - Carrier phase: promote angles to `float64` before `xp.unwrap()`, because float32 rounding causes spurious quadrant slips. Tikhonov/Kalman block transitions also run in `float64`.
 - **Normalization invariant:** at `sps` samples per symbol, `E[|x|²] = 1/sps`; at symbol rate, `E[|x|²] = 1`. Any rate-changing block applies the exact gain correction.

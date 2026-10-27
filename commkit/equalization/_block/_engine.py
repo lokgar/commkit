@@ -253,18 +253,15 @@ def _fdaf_forward(
 ) -> tuple[ArrayType, ArrayType]:
     """Butterfly filter of one block in the frequency domain.
 
-    ``y[c] = Σ_c' conj(h[c, c']) ⋆ x[c']`` (cross-correlation), accumulated in
-    complex128 and decimated to the ``B`` symbols of the block.  Returns the
-    block output ``(C, B)`` and the input spectrum ``X_fd`` reused by the
-    update.
+    ``y[c] = Σ_c' conj(h[c, c']) ⋆ x[c']`` (cross-correlation), decimated to
+    the ``B`` symbols of the block.  The sum over the C input channels runs
+    in complex64, like the FFTs around it, which do the sum over the taps.
+    Returns the block output ``(C, B)`` and the input spectrum ``X_fd``
+    reused by the update.
     """
     X_fd = _fft.fft(x_win, axis=-1)  # (C, F)
     H_fd = _fft.fft(h, n=fftsize, axis=-1)  # (C, C, F)
-    Y_fd = (
-        (xp.conj(H_fd).astype(xp.complex128) * X_fd.astype(xp.complex128)[None])
-        .sum(axis=1)
-        .astype(xp.complex64)
-    )  # (C, F)
+    Y_fd = (xp.conj(H_fd) * X_fd[None]).sum(axis=1)  # (C, F)
     y_time = _fft.ifft(Y_fd, axis=-1)
     y_block = y_time[:, : B * sps : sps].astype(xp.complex64)  # (C, B)
     return y_block, X_fd
