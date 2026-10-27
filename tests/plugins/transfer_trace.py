@@ -52,8 +52,6 @@ _DOCUMENTED: dict[str, str] = {
     "core/signal.py::Reference.to": "explicit device move",
     "core/signal.py::Signal.to": "explicit device move",
     "equalization/_block/_blind.py::_block_fdaf_blind": _HOST_VALUE + " (pilots)",
-    "equalization/_block/_dd.py::_BlockBps.phase": _RECURSION
-    + " (cycle slips beyond the cs_block kernel's 1024 channels)",
     "equalization/_block/_dd.py::_BlockBps.snapshot": _STATE,
     "equalization/_block/_dd.py::block_lms": _STATE + " (cycle-slip buffers)",
     "equalization/_block/_engine.py::_block_state": _STATE,

@@ -429,11 +429,10 @@ def block_lms(
         which removes the launch overhead that dominates at small and medium
         ``block_size``.  Full blocks are captured, one graph for training
         blocks and one for decision-directed ones; the block that straddles
-        the end of the training and the last, partial block run eagerly.  No effect on the CPU, with ``store_weights=True``, or with
-        cycle-slip correction on more than 1024 channels (the limit of the
-        ``cs_block`` CUDA kernel; the correction then runs on the host once
-        per block).  The output is the same either way; ``False`` forces the
-        eager loop (e.g. for debugging or profiling).
+        the end of the training and the last, partial block run eagerly.  No
+        effect on the CPU or with ``store_weights=True``.  The output is the
+        same either way; ``False`` forces the eager loop (e.g. for debugging
+        or profiling).
 
     Returns
     -------
@@ -606,7 +605,7 @@ def block_lms(
             slicer.phasor = xp.ones(1, dtype=xp.complex64)
         if bps is not None and n_train > 0:
             bps.anchor_kernel = _cuda.get_kernel("bps_anchor")
-        if bps is not None and bps.cs and C <= 1024:
+        if bps is not None and bps.cs:
             bps.cs_kernel = _cuda.get_kernel("cs_block")
             bps.cs_buf_y = xp.asarray(bps.cs_buf_y)
             bps.cs_buf_ptr = xp.asarray(bps.cs_buf_ptr)
@@ -735,7 +734,6 @@ def block_lms(
             cuda_graph
             and xp is not np
             and not store_weights
-            and (bps is None or not bps.cs or bps.cs_kernel is not None)
             # need >= 1 warmup block + >= 1 captured block of a kind
             and (n_dd_full >= 2 or n_train_full >= 2)
         ),
