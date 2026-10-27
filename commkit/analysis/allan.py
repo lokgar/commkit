@@ -87,11 +87,11 @@ def allan_deviation(
     c, n = y2.shape
     tau0 = 1.0 / float(sampling_rate)
 
-    # Cumulative phase (time error) x_i = Σ y · τ0.
-    zeros_col = xp.zeros((c, 1), dtype=xp.float64)
-    x = xp.concatenate(
-        [zeros_col, xp.cumsum(y2.astype(xp.float64), axis=-1) * tau0], axis=-1
-    )
+    # Cumulative phase (time error) x_i = Σ y · τ0, in one float64 buffer.
+    x = xp.empty((c, n + 1), dtype=xp.float64)
+    x[:, 0] = 0.0
+    xp.cumsum(y2, axis=-1, dtype=xp.float64, out=x[:, 1:])
+    x[:, 1:] *= tau0
 
     if taus is None:
         m_max = max(1, n // 4)
