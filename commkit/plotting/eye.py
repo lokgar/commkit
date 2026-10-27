@@ -36,6 +36,8 @@ def _plot_eye_traces(
     ax: Any,
     kind: str,
     title: str | None,
+    vmin: float | None = None,
+    vmax: float | None = None,
     **kwargs: Any,
 ) -> None:
     """Internal helper to plot eye diagram traces for a single signal component.
@@ -54,6 +56,8 @@ def _plot_eye_traces(
         Plotting strategy.
     title : str, optional
         Title for the subplot.
+    vmin, vmax : float, optional
+        Color limits of the ``"hist"`` image.
     **kwargs : Any
         Additional plotting parameters.
     """
@@ -182,6 +186,8 @@ def _plot_eye_traces(
             "extent": [xedges[0], xedges[-1], yedges[0], yedges[-1]],
             "aspect": "auto",
             "cmap": "inferno",
+            "vmin": vmin,
+            "vmax": vmax,
         }
         imshow_kwargs.update(kwargs)
 
@@ -380,6 +386,8 @@ def _plot_eye_diagram(
             ax[0],
             kind,
             title=f"{title} (I)" if title else "I-Channel",
+            vmin=vmin,
+            vmax=vmax,
             **kwargs,
         )
 
@@ -391,6 +399,8 @@ def _plot_eye_diagram(
             ax[1],
             kind,
             title=f"{title} (Q)" if title else "Q-Channel",
+            vmin=vmin,
+            vmax=vmax,
             **kwargs,
         )
     else:
@@ -406,6 +416,8 @@ def _plot_eye_diagram(
             target_ax,
             kind,
             title=title,
+            vmin=vmin,
+            vmax=vmax,
             **kwargs,
         )
 
