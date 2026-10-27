@@ -223,6 +223,30 @@ class TestDemultiplexPolarizationTonesDynamic:
         assert min_static < 0.95  # static degraded by the drift
         assert min_dynamic > min_static + 0.04
 
+    def test_tracks_with_long_tracking_filter(self, xp):
+        """A narrow tracking bandwidth (fs/B in the hundreds, as in real
+        captures) gives a tracking FIR of hundreds of taps; it still tracks."""
+
+        fs = 100.0
+        N = 16384
+        s = self._streams(xp, N=N)
+        tx = add_pilot_tone(
+            s, sampling_rate=fs, frequency=self.TONES, power_ratio_db=-8.0
+        )
+        f_used = grid_frequency(self.TONES, sampling_rate=fs, num_samples=s.shape[-1])
+        rx = apply_polarization_mixing(
+            tx, theta=0.2, drift_rad_per_sample=(np.pi / 2) / N
+        )
+
+        # Default num_taps = round(3.3 fs / B) = 660 at B = 0.5 Hz.
+        dynamic = equalization.demultiplex_polarization_tones_dynamic(
+            rx, sampling_rate=fs, tone_frequencies=f_used, track_bandwidth=0.5
+        )
+
+        for j in range(2):
+            assert self._corr(xp, dynamic[j], tx[j]) > 0.99
+            assert self._corr(xp, dynamic[j], tx[1 - j]) < 0.1
+
     def test_static_sop_still_recovered(self, xp):
         """With no drift the dynamic path matches the static result (no regression)."""
 
