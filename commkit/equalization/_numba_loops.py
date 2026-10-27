@@ -14,13 +14,19 @@ so the per-symbol carrier recovery of :func:`cpr_loop` (one kernel for LMS
 and RLS) stays written out in it, cycle-slip step included: as helpers, the
 same steps cost 15-25% on the CPU.  It compiles without ``fastmath`` (the
 S-fold unwrap rounds at the ±π boundary and the running sums must not be
-reassociated); the other kernels compile with it.
+reassociated), except for its arithmetic over the taps and the BPS
+distances: those run in separate fast-math functions (``*_fm``,
+:func:`_bps_distances`), which LLVM inlines with their own flags (an
+``inline="always"`` helper would take the kernel's).  The other kernels
+compile with ``fastmath``.
 
 Conventions: ``x_padded`` ``(C, N_pad)`` complex64, ``W`` ``(C, C, T)``
 complex64 (updated in place), ``y_out`` / ``e_out`` ``(N_sym, C)`` complex64,
 ``w_hist_out`` ``(N_sym or 1, C, C, T)``; dot products accumulate in float64,
 RLS keeps ``P``, its gain and the regressor in complex128.
 """
+
+from typing import Any
 
 import numba
 import numpy as np
@@ -172,6 +178,48 @@ def _rls_update(W, P, x_bar, e, Px, xH_P, k_gain, lam_f64, leak_term, update):
                     avg = (val + np.conj(conj_val)) * np.float64(0.5)
                     P[ii, jj] = avg
                     P[jj, ii] = np.conj(avg)
+
+
+# Fast-math steps of the strict cpr_loop: separate compiled functions, so
+# that LLVM inlines them into it with their own fast-math flags.
+def _fast_copy(step: Any) -> Any:
+    # NUMBA_DISABLE_JIT leaves the step a plain function, without py_func.
+    return _fast(getattr(step, "py_func", step))
+
+
+_butterfly_fm = _fast_copy(_butterfly)
+_update_taps_fm = _fast_copy(_update_taps)
+_rls_update_fm = _fast_copy(_rls_update)
+
+
+@_fast
+def _bps_distances(y, phases_neg, constellation, sq_lev_min, sq_d_grid, sq_side, d2):
+    """``d2[k]``: squared distance of ``y`` rotated by ``phases_neg[k]`` to its
+    nearest constellation point, snapped on a square grid or scanned."""
+    for k in range(phases_neg.shape[0]):
+        y_rot = y * phases_neg[k]
+        if sq_side > np.int32(0):
+            ir = np.int32(np.round((y_rot.real - sq_lev_min) / sq_d_grid))
+            if ir < np.int32(0):
+                ir = np.int32(0)
+            if ir >= sq_side:
+                ir = sq_side - np.int32(1)
+            ii = np.int32(np.round((y_rot.imag - sq_lev_min) / sq_d_grid))
+            if ii < np.int32(0):
+                ii = np.int32(0)
+            if ii >= sq_side:
+                ii = sq_side - np.int32(1)
+            nr = sq_lev_min + np.float32(ir) * sq_d_grid
+            ni = sq_lev_min + np.float32(ii) * sq_d_grid
+            d2[k] = (y_rot.real - nr) ** 2 + (y_rot.imag - ni) ** 2
+        else:
+            d2_min = np.float32(1e38)
+            for m in range(constellation.shape[0]):
+                dv = y_rot - constellation[m]
+                dd = dv.real * dv.real + dv.imag * dv.imag
+                if dd < d2_min:
+                    d2_min = dd
+            d2[k] = d2_min
 
 
 @_step
@@ -424,15 +472,16 @@ def cpr_loop(
     phi_hat_bps = np.zeros(C, dtype=np.float64)
     da_buf = np.zeros((C, bps_block_size), dtype=np.complex128)
     da_sum = np.zeros(C, dtype=np.complex128)
+    d2_new = np.empty(B, dtype=np.float32)
     for idx in range(n_sym):
         sample_idx = idx * stride
 
         if rls:
             _load_window(x_padded, sample_idx, X_rls)
-            _butterfly(W, X_rls, y_raw)
+            _butterfly_fm(W, X_rls, y_raw)
         else:
             _load_window(x_padded, sample_idx, X_wins)
-            _butterfly(W, X_wins, y_raw)
+            _butterfly_fm(W, X_wins, y_raw)
 
         # -- CPR: Phase estimation ----------------------------------
 
@@ -444,34 +493,16 @@ def cpr_loop(
         if cpr_mode == 2:
             slot = bps_dist_ptr[0] % np.int64(bps_block_size)
             for i in range(C):
+                _bps_distances(
+                    y_raw[i], bps_phases_neg, constellation,
+                    sq_lev_min, sq_d_grid, sq_side, d2_new,
+                )  # fmt: skip
                 for k in range(B):
-                    y_rot = y_raw[i] * bps_phases_neg[k]
-                    if sq_side > np.int32(0):
-                        ir = np.int32(np.round((y_rot.real - sq_lev_min) / sq_d_grid))
-                        if ir < np.int32(0):
-                            ir = np.int32(0)
-                        if ir >= sq_side:
-                            ir = sq_side - np.int32(1)
-                        ii = np.int32(np.round((y_rot.imag - sq_lev_min) / sq_d_grid))
-                        if ii < np.int32(0):
-                            ii = np.int32(0)
-                        if ii >= sq_side:
-                            ii = sq_side - np.int32(1)
-                        nr = sq_lev_min + np.float32(ir) * sq_d_grid
-                        ni = sq_lev_min + np.float32(ii) * sq_d_grid
-                        d2_min = (y_rot.real - nr) ** 2 + (y_rot.imag - ni) ** 2
-                    else:
-                        d2_min = np.float32(1e38)
-                        for m in range(M):
-                            dv = y_rot - constellation[m]
-                            d2 = dv.real * dv.real + dv.imag * dv.imag
-                            if d2 < d2_min:
-                                d2_min = d2
                     # Subtract evicted slot, add new slot
                     bps_running_sum[i, k] = (
-                        bps_running_sum[i, k] - bps_dist_buf[i, slot, k] + d2_min
+                        bps_running_sum[i, k] - bps_dist_buf[i, slot, k] + d2_new[k]
                     )
-                    bps_dist_buf[i, slot, k] = d2_min
+                    bps_dist_buf[i, slot, k] = d2_new[k]
             bps_dist_ptr[0] = bps_dist_ptr[0] + np.int64(1)
 
             if bps_joint_channels:
@@ -698,12 +729,12 @@ def cpr_loop(
             e_eq[i] = np.complex64(er + ei * np.complex64(1j))
 
         if rls:
-            _rls_update(
+            _rls_update_fm(
                 W, P, x_bar, e_eq, Px, xH_P, k_gain, lam_f64, leak_term,
                 idx < n_update_halt,
             )  # fmt: skip
         else:
-            _update_taps(W, e_eq, X_wins, step_size)
+            _update_taps_fm(W, e_eq, X_wins, step_size)
 
         if store_weights:
             _store_weights(W, w_hist_out, idx)
