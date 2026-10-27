@@ -148,7 +148,11 @@ def _bps_min_d2_factory(mode: str = "table", return_argmin: bool = False) -> Cal
 
         min_d2 = cp.empty((P, C, N), dtype=cp.float32)
         argmin = cp.empty((P, C, N), dtype=cp.int32) if return_argmin else _empty_i32
-        grid = ((N + block_n - 1) // block_n, P, C)
+        if C == 0 or N == 0:  # a zero-size grid is a launch error
+            return (min_d2, argmin) if return_argmin else min_d2
+        # Channels beyond the grid's z limit (65535) run in the kernel's
+        # channel loop.
+        grid = ((N + block_n - 1) // block_n, P, min(C, 65535))
         kern(
             grid,
             (block_n,),
@@ -160,6 +164,7 @@ def _bps_min_d2_factory(mode: str = "table", return_argmin: bool = False) -> Cal
                 cp.float32(d_grid),
                 cp.int32(side),
                 cp.int32(M),
+                cp.int32(C),
                 cp.int64(N),
                 min_d2,
                 argmin,
@@ -368,6 +373,8 @@ def _llr_launch(cp: Any, kern: Any, n: int, k: int, head: tuple, tail: tuple) ->
 
     The kernel's arguments are ``head``, the output, ``n``, then ``tail``.
     """
+    if n >= 2**31:
+        raise ValueError(f"at most 2**31 - 1 symbols per call, got {n}")
     out = cp.empty((n, k), dtype=cp.float32)
     if n == 0:
         return out
@@ -551,8 +558,12 @@ def _iir_factory() -> Callable:
                 f"zi must be a C-contiguous ({C}, {S}, 2) {np.dtype(state)} array"
             )
         D = 2 * S
+        if block < 1 or group < 1:
+            raise ValueError(f"block and group must be >= 1, got {block}, {group}")
         if np.shape(transitions) != (group + 1, D, D):
             raise ValueError(f"transitions must be ({group + 1}, {D}, {D})")
+        if x.size == 0:  # a zero-size grid is a launch error
+            return cp.empty_like(x)
         t, u = _IIR_TYPES[x.dtype.name]
         L, G = int(block), int(group)
         nb = -(-N // L)

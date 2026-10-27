@@ -661,7 +661,7 @@ def _sosfilt(sos: np.ndarray, x: ArrayType, zi: ArrayType, xp: Any) -> ArrayType
     x = xp.ascontiguousarray(x)
     if xp is not np:
         block = min(_IIR_BLOCK, max(1, x.shape[-1]))
-        group = min(_IIR_GROUP, -(-x.shape[-1] // block))
+        group = max(1, min(_IIR_GROUP, -(-x.shape[-1] // block)))
         transitions = _iir_transitions(sos, block, group)
         return _cuda.get_kernel("iir")(
             sos, x, xp.ascontiguousarray(zi), block, group, transitions

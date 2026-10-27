@@ -26,8 +26,10 @@
 //   min_d2   (P, C, N) float32
 //   argmin   (P, C, N) int32   (RETURN_ARGMIN only)
 //
-// Launch contract: block = (BLOCK_N, 1, 1); grid = (ceil(N/BLOCK_N), P, C);
-// dynamic shared memory = M * sizeof(complex<float>) in TABLE mode, 0 in GRID.
+// Launch contract: block = (BLOCK_N, 1, 1); grid = (ceil(N/BLOCK_N), P,
+// min(C, 65535)): the channels beyond the grid's z limit are walked in a
+// grid-stride loop; dynamic shared memory = M * sizeof(complex<float>) in
+// TABLE mode, 0 in GRID; N >= 1.
 // Arithmetic is FP32 throughout, matching the float32 metric of the xp path.
 
 #include <cupy/complex.cuh>
@@ -43,13 +45,13 @@ __global__ void bps_min_d2(const complex<float>* __restrict__ x,
                            const float d_grid,
                            const int side,
                            const int M,
+                           const int C,
                            const long long N,
                            float* __restrict__ min_d2,
                            int* __restrict__ argmin_out) {
     extern __shared__ complex<float> s_const[];
 
     const int p = blockIdx.y;
-    const int c = blockIdx.z;
 
     if (MODE == MODE_TABLE) {
         for (int m = threadIdx.x; m < M; m += blockDim.x) {
@@ -64,41 +66,42 @@ __global__ void bps_min_d2(const complex<float>* __restrict__ x,
         return;
     }
 
-    // Coalesced in n; the per-block phasor load is an L1-cached broadcast.
-    const complex<float> xr = x[static_cast<long long>(c) * N + n] * phasor[p];
-    const float re = xr.real();
-    const float im = xr.imag();
+    for (int c = blockIdx.z; c < C; c += gridDim.z) {
+        // Coalesced in n; the per-block phasor load is an L1-cached broadcast.
+        const complex<float> xr = x[static_cast<long long>(c) * N + n] * phasor[p];
+        const float re = xr.real();
+        const float im = xr.imag();
 
-    float best = 3.402823466e+38f;  // FLT_MAX
-    int best_m = 0;
+        float best = 3.402823466e+38f;  // FLT_MAX
+        int best_m = 0;
 
-    if (MODE == MODE_TABLE) {
-        // Warp-uniform m => shared-memory broadcast, no bank conflicts.
-        for (int m = 0; m < M; ++m) {
-            const float dr = re - s_const[m].real();
-            const float di = im - s_const[m].imag();
-            const float d2 = fmaf(dr, dr, di * di);
-            if (d2 < best) {
-                best = d2;
-                best_m = m;
+        if (MODE == MODE_TABLE) {
+            // Warp-uniform m => shared-memory broadcast, no bank conflicts.
+            for (int m = 0; m < M; ++m) {
+                const float dr = re - s_const[m].real();
+                const float di = im - s_const[m].imag();
+                const float d2 = fmaf(dr, dr, di * di);
+                if (d2 < best) {
+                    best = d2;
+                    best_m = m;
+                }
+            }
+        } else {  // MODE_GRID
+            const float hi = static_cast<float>(side - 1);
+            const float ri = fminf(fmaxf(roundf((re - lev_min) / d_grid), 0.0f), hi);
+            const float ii = fminf(fmaxf(roundf((im - lev_min) / d_grid), 0.0f), hi);
+            const float dr = re - fmaf(ri, d_grid, lev_min);
+            const float di = im - fmaf(ii, d_grid, lev_min);
+            best = fmaf(dr, dr, di * di);
+            if (RETURN_ARGMIN) {
+                best_m = static_cast<int>(ri) * side + static_cast<int>(ii);
             }
         }
-    } else {  // MODE_GRID
-        const float hi = static_cast<float>(side - 1);
-        const float ri = fminf(fmaxf(roundf((re - lev_min) / d_grid), 0.0f), hi);
-        const float ii = fminf(fmaxf(roundf((im - lev_min) / d_grid), 0.0f), hi);
-        const float dr = re - fmaf(ri, d_grid, lev_min);
-        const float di = im - fmaf(ii, d_grid, lev_min);
-        best = fmaf(dr, dr, di * di);
-        if (RETURN_ARGMIN) {
-            best_m = static_cast<int>(ri) * side + static_cast<int>(ii);
-        }
-    }
 
-    const long long out_idx =
-        (static_cast<long long>(p) * gridDim.z + c) * N + n;
-    min_d2[out_idx] = best;
-    if (RETURN_ARGMIN) {
-        argmin_out[out_idx] = best_m;
+        const long long out_idx = (static_cast<long long>(p) * C + c) * N + n;
+        min_d2[out_idx] = best;
+        if (RETURN_ARGMIN) {
+            argmin_out[out_idx] = best_m;
+        }
     }
 }

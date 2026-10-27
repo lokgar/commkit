@@ -128,6 +128,50 @@ class TestBPSKernelCorrectness:
         assert out.shape == (P, C, N) and out.dtype == xp.float32
         xpt.assert_allclose(to_numpy(out), ref, rtol=1e-5, atol=1e-7)
 
+    @pytest.mark.parametrize("mode", ["table", "grid"])
+    def test_channels_beyond_the_grid_limit(self, backend_device, xp, xpt, mode):
+        """More channels than a grid's z extent (65535) run in the kernel's
+        channel loop; every channel matches the reference."""
+        skip_unless_gpu(backend_device)
+        rng = np.random.RandomState(13)
+        C, N, P = 70_001, 3, 2
+        x = (rng.randn(C, N) + 1j * rng.randn(C, N)).astype(np.complex64)
+        phasor = np.exp(-1j * np.array([0.0, 0.3])).astype(np.complex64)
+        c = Constellation.qam(16)
+        ref = reference_bps_d2(x, phasor, c.points.astype(np.complex64)).min(axis=-1)
+        if mode == "table":
+            kern = _cuda.get_kernel("bps_min_d2", mode="table")
+            out = kern(
+                xp.asarray(x),
+                xp.asarray(phasor),
+                constellation=xp.asarray(c.points.astype(np.complex64)),
+            )
+        else:
+            lev_min, step, side, _ = c._square_grid
+            kern = _cuda.get_kernel("bps_min_d2", mode="grid")
+            out = kern(
+                xp.asarray(x),
+                xp.asarray(phasor),
+                lev_min=lev_min,
+                d_grid=step,
+                side=side,
+            )
+        assert out.shape == (P, C, N)
+        xpt.assert_allclose(to_numpy(out), ref, rtol=1e-5, atol=1e-6)
+
+    def test_empty_input(self, backend_device, xp):
+        """No symbols or no channels: an empty result, no launch (a zero-size
+        grid is a launch error)."""
+        skip_unless_gpu(backend_device)
+        phasor = xp.ones(4, dtype=xp.complex64)
+        const = xp.asarray(Constellation.qam(32).points.astype(np.complex64))
+        kern = _cuda.get_kernel("bps_min_d2", mode="table", return_argmin=True)
+        for shape in ((2, 0), (0, 5)):
+            d2, idx = kern(
+                xp.zeros(shape, dtype=xp.complex64), phasor, constellation=const
+            )
+            assert d2.shape == idx.shape == (4, *shape)
+
     def test_table_argmin_matches_reference(self, backend_device, xp, xpt):
         skip_unless_gpu(backend_device)
         rng = np.random.RandomState(12)

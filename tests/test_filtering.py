@@ -663,6 +663,17 @@ class TestCorrectFiberPropagation:
             )
 
 
+@pytest.mark.parametrize("shape", [(2, 0), (0, 10), (0,)])
+def test_causal_iir_of_empty_input(xp: Any, shape: tuple[int, ...]) -> None:
+    """No samples or no channels: an empty result (on the GPU, without a
+    zero-size launch)."""
+    sos = filtering.butterworth_sos(sampling_rate=1.0, cutoff=0.02, order=4)
+    out = filtering.iir_filter(
+        xp.zeros(shape, dtype=xp.float32), sos=sos, zero_phase=False
+    )
+    assert out.shape == shape
+
+
 @pytest.mark.gpu_only
 class TestIIRKernel:
     """The block-parallel CUDA IIR kernel against its CPU reference (Numba)."""
