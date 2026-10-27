@@ -8,6 +8,7 @@ import pytest
 from commkit import filtering
 from commkit.core import Signal
 from tests.common.conversions import to_numpy
+from tests.common.kernel_utils import skip_unless_gpu
 from tests.common.metrics import calc_freq_response
 from tests.common.periodic import middle_period
 
@@ -250,10 +251,10 @@ class TestIirFilter:
         dtype: Any,
         cutoff: float,
     ) -> None:
-        """The CPU kernel reproduces SciPy to rounding; CuPy's block-parallel
-        filter on the GPU rounds differently, so it gets a looser bound
-        (4e-8 measured at ``cutoff=1e-5`` with ``zero_phase``, poles nearest
-        z = 1)."""
+        """The CPU kernel reproduces SciPy to rounding; the GPU kernel carries
+        the state across blocks, which rounds differently, so it gets a looser
+        bound (2e-10 measured at ``cutoff=1e-5`` with ``zero_phase``, poles
+        nearest z = 1)."""
         import scipy.signal
 
         x = self._record(dtype, (2, 4000))
@@ -263,7 +264,7 @@ class TestIirFilter:
         out = filtering.iir_filter(xp.asarray(x), sos, zero_phase=zero_phase)
         assert out.dtype == dtype
         err = np.linalg.norm(to_numpy(out) - expected) / np.linalg.norm(expected)
-        assert err < (1e-13 if backend_device == "cpu" else 1e-7)
+        assert err < (1e-13 if backend_device == "cpu" else 2e-9)
 
     @pytest.mark.parametrize("zero_phase", [False, True])
     @pytest.mark.parametrize("dtype", [np.float32, np.complex64])
@@ -660,3 +661,34 @@ class TestCorrectFiberPropagation:
                 sampling_rate=64e9,
                 **self.LINK,
             )
+
+
+@pytest.mark.gpu_only
+class TestIIRKernel:
+    """The block-parallel CUDA IIR kernel against its CPU reference (Numba)."""
+
+    @pytest.mark.parametrize(
+        "dtype", [np.float32, np.float64, np.complex64, np.complex128]
+    )
+    @pytest.mark.parametrize("n", [1, 5, 1023, 1024, 1025, 3001, 1 << 16])
+    @pytest.mark.parametrize("order", [2, 8, 16])
+    def test_matches_cpu_from_a_state(
+        self, backend_device: str, xp: Any, xpt: Any, dtype: Any, n: int, order: int
+    ) -> None:
+        """Any length (one block, a block boundary, many blocks), any state."""
+        skip_unless_gpu(backend_device)
+        from commkit.filtering.linear import _sosfilt
+
+        rng = np.random.default_rng(n + order)
+        x = rng.standard_normal((2, n))
+        if np.dtype(dtype).kind == "c":
+            x = x + 1j * rng.standard_normal((2, n))
+        x = x.astype(dtype)
+        sos = filtering.butterworth_sos(sampling_rate=1.0, cutoff=0.02, order=order)
+        state = np.complex128 if np.dtype(dtype).kind == "c" else np.float64
+        zi = (0.1 * rng.standard_normal((2, sos.shape[0], 2))).astype(state)
+        expected = _sosfilt(sos, x, zi, np)
+        out = _sosfilt(sos, xp.asarray(x), xp.asarray(zi), xp)
+        assert out.dtype == dtype
+        rtol = 1e-6 if dtype in (np.float32, np.complex64) else 1e-9
+        xpt.assert_allclose(out, xp.asarray(expected), rtol=rtol, atol=rtol)

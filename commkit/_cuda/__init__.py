@@ -467,6 +467,110 @@ def _llr_separable_factory() -> Callable:
     return launch
 
 
+# IIR_MAX_S in iir.cu, and the threads per block of its launches.
+_IIR_MAX_S = 16
+_IIR_THREADS = 128
+# Sample dtype -> (sample type, state type) of the iir.cu templates.
+_IIR_TYPES = {
+    "float32": ("float", "double"),
+    "float64": ("double", "double"),
+    "complex64": ("complex<float>", "complex<double>"),
+    "complex128": ("complex<double>", "complex<double>"),
+}
+
+
+def _iir_factory() -> Callable:
+    """Wrapper factory for the block-parallel SOS filter (``filtering.linear``).
+
+    Filters the rows of a C-contiguous ``(C, N)`` record through the
+    sections in double precision, reading and writing the samples in their
+    own dtype (see ``iir.cu``).
+    """
+    import cupy as cp
+    import numpy as np
+
+    from . import compiler
+
+    kernels: dict[tuple[str, str, str], Any] = {}
+
+    def kernel(name: str, t: str, u: str) -> Any:
+        key = (name, t, u)
+        if key not in kernels:
+            carry = name in ("iir_carry", "iir_group_carry")
+            expr = f"{name}<{u}>" if carry else f"{name}<{t}, {u}>"
+            kernels[key] = compiler.get_raw_kernel("iir", expr)
+        return kernels[key]
+
+    def launch(
+        sos: Any, x: Any, zi: Any, block: int, group: int, transitions: Any
+    ) -> Any:
+        """``y`` of the causal filter of ``x`` from the initial state ``zi``.
+
+        ``sos`` is ``(S, 6)`` float64 on the host, ``x`` ``(C, N)`` float32,
+        float64, complex64 or complex128, ``zi`` ``(C, S, 2)`` float64 (real
+        ``x``) or complex128 (complex ``x``).  ``transitions`` is the host
+        float64 ``(group + 1, 2S, 2S)`` stack of the zero-input state
+        transitions of the cascade over ``j·block`` samples, ``j = 0 ..
+        group`` (state index ``2k + i``).
+        """
+        sos = np.ascontiguousarray(sos, dtype=np.float64)
+        if sos.ndim != 2 or sos.shape[1] != 6 or not 1 <= sos.shape[0] <= _IIR_MAX_S:
+            raise ValueError(
+                f"sos must be (S, 6) with 1 <= S <= {_IIR_MAX_S}, got {sos.shape}"
+            )
+        if x.dtype.name not in _IIR_TYPES:
+            raise TypeError(f"x must be float32/64 or complex64/128, got {x.dtype}")
+        if x.ndim != 2 or not x.flags.c_contiguous:
+            raise ValueError(f"x must be a C-contiguous (C, N) array, got {x.shape}")
+        S = sos.shape[0]
+        C, N = x.shape
+        state = cp.complex128 if x.dtype.kind == "c" else cp.float64
+        if zi.dtype != state or zi.shape != (C, S, 2) or not zi.flags.c_contiguous:
+            raise ValueError(
+                f"zi must be a C-contiguous ({C}, {S}, 2) {np.dtype(state)} array"
+            )
+        D = 2 * S
+        if np.shape(transitions) != (group + 1, D, D):
+            raise ValueError(f"transitions must be ({group + 1}, {D}, {D})")
+        t, u = _IIR_TYPES[x.dtype.name]
+        L, G = int(block), int(group)
+        nb = -(-N // L)
+        ng = -(-nb // G)
+        tr = cp.asarray(np.ascontiguousarray(transitions, dtype=np.float64))
+        sos_dev = cp.asarray(sos)
+        zend = cp.empty((C, nb, S, 2), dtype=state)
+        zloc = cp.empty_like(zend)
+        zgend = cp.empty((C, ng, S, 2), dtype=state)
+        zgin = cp.empty_like(zgend)
+        y = cp.empty_like(x)
+
+        def grid(threads: int) -> tuple[int]:
+            return (-(-threads // _IIR_THREADS),)
+
+        th = (_IIR_THREADS,)
+        common = (sos_dev, cp.int32(S), x, cp.int64(N), cp.int32(L), cp.int32(nb))
+        kernel("iir_block_state", t, u)(grid(C * nb), th, (*common, cp.int32(C), zend))
+        kernel("iir_group_carry", t, u)(
+            grid(C * ng),
+            th,
+            (tr[1], cp.int32(S), zend, cp.int32(nb), cp.int32(G), cp.int32(ng),
+             cp.int32(C), zloc, zgend),
+        )  # fmt: skip
+        kernel("iir_carry", t, u)(
+            grid(C),
+            th,
+            (tr[G], cp.int32(S), zi, zgend, cp.int32(ng), cp.int32(C), zgin),
+        )
+        kernel("iir_block_out", t, u)(
+            grid(C * nb),
+            th,
+            (*common, cp.int32(C), tr[:G], cp.int32(G), cp.int32(ng), zloc, zgin, y),
+        )
+        return y
+
+    return launch
+
+
 # name -> wrapper factory.
 _KERNEL_FACTORIES: dict[str, Callable[..., Callable]] = {
     "selftest_scale": _selftest_scale_factory,
@@ -475,4 +579,5 @@ _KERNEL_FACTORIES: dict[str, Callable[..., Callable]] = {
     "bps_anchor": _bps_anchor_factory,
     "llr": _llr_factory,
     "llr_separable": _llr_separable_factory,
+    "iir": _iir_factory,
 }

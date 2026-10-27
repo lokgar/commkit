@@ -62,6 +62,8 @@ _DOCUMENTED: dict[str, str] = {
     "equalization/sequential/_setup.py::_assemble_sequential": _RECURSION,
     "equalization/sequential/_setup.py::_prepare_sequential": _RECURSION,
     "frequency.py::_mengali_morelli": _RECURSION + " (bootstrap over the lags)",
+    "_cuda/__init__.py::_iir_factory.<locals>.launch": _HOST_VALUE
+    + " (the IIR state transitions)",
     "metrics.py::_paired": _HOST_VALUE + " (reference symbols)",
     "recovery/corrections.py::DataAided.__post_init__": "value object: host copy",
     "recovery/corrections.py::_data_aided": _HOST_VALUE + " (reference symbols)",
