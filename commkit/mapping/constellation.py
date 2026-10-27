@@ -225,7 +225,12 @@ class Constellation:
         pts = self.points.astype(np.complex128)
         scale = float(np.max(np.abs(pts))) or 1.0
         tol = 1e-6 * scale
-        for n in range(self.order, 1, -1):
+        # A rotation by 2π/n moves the points off the origin in orbits of n,
+        # so n divides their count.
+        off_origin = int(np.count_nonzero(np.abs(pts) > tol))
+        for n in range(off_origin, 1, -1):
+            if off_origin % n:
+                continue
             rotated = pts * np.exp(2j * np.pi / n)
             dist = np.abs(rotated[:, None] - pts[None, :]).min(axis=1)
             if float(dist.max()) < tol:
