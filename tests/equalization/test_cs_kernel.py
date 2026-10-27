@@ -10,6 +10,7 @@ import numpy as np
 import pytest
 
 from commkit import _cuda
+from commkit.equalization._kernels_numba import _get_numba_cs_block
 from tests.common.conversions import to_numpy
 from tests.common.kernel_utils import (
     reference_cs_block,
@@ -83,6 +84,41 @@ class TestCSBlockKernel:
         # The injected slips must actually be corrected
         jumps = np.abs(np.diff(corr_full_dev, axis=1))
         assert float(jumps.max()) < QUANTUM / 2.0
+
+    def test_cs_block_more_than_1024_channels(self, backend_device, xp, xpt):
+        """One thread block per channel: wider than one block's thread limit,
+        the kernel matches the Numba path that the CPU runs."""
+        skip_unless_gpu(backend_device)
+        kern = _cuda.get_kernel("cs_block")
+        cs_numba = _get_numba_cs_block()
+
+        C, H = 1100, 100
+        phi = slip_workload(C=C, n_total=400)
+        phi[C - 1, 250:] += QUANTUM  # a slip on the last thread block
+
+        bufs_ref = [np.zeros((C, H)), np.zeros(C, np.int64), np.zeros(C, np.int64)]
+        st_ref = np.zeros((C, 4))
+        bufs_dev = [xp.asarray(b) for b in bufs_ref]
+        st_dev = xp.zeros((C, 4))
+        out_ref, out_dev = [], []
+        for a, b in ((0, 150), (150, 400)):  # fill, then past the H=100 wrap
+            blk = np.ascontiguousarray(phi[:, a:b])
+            corr_ref = blk.copy()
+            cs_numba(
+                blk, corr_ref, np.zeros((C, H)), *bufs_ref, st_ref, a,
+                QUANTUM, THRESHOLD, H,
+            )  # fmt: skip
+            out_ref.append(corr_ref)
+            corr_dev = xp.empty_like(xp.asarray(blk))
+            kern(xp.asarray(blk), corr_dev, *bufs_dev, st_dev, QUANTUM, THRESHOLD, H)
+            out_dev.append(corr_dev)
+
+        corr_dev_full = xp.concatenate(out_dev, axis=1)
+        xpt.assert_allclose(
+            corr_dev_full, xp.asarray(np.concatenate(out_ref, axis=1)), atol=1e-9
+        )
+        xpt.assert_allclose(bufs_dev[0], xp.asarray(bufs_ref[0]), atol=1e-9)
+        assert float(xp.abs(xp.diff(corr_dev_full[C - 1])).max()) < QUANTUM / 2.0
 
     def test_cs_block_rejects_bad_inputs(self, backend_device, xp):
         """Wrapper must reject wrong dtype, wrong shape, and non-contiguous state."""

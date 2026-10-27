@@ -371,7 +371,7 @@ def estimate_transfer_function(
     y = y.astype(cdtype, copy=False)
     C, N = x.shape
     n_fft = int(min(n_fft, N))
-    win = xp.asarray(np.hanning(n_fft).astype(np.empty(0, cdtype).real.dtype))
+    win = xp.hanning(n_fft).astype(np.empty(0, cdtype).real.dtype)
 
     # Welch auto/cross spectra, vectorized over windows (capped). One batched FFT
     # of the reference and the received, then every (C, C) cross term via einsum -

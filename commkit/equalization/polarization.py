@@ -248,6 +248,7 @@ def _jones_at_grid_points(
     h: np.ndarray,
     freqs: Any,
     grid_np: np.ndarray,
+    grid: ArrayType,
     sampling_rate: float,
 ) -> ArrayType:
     r"""Tone-tracked Jones estimate evaluated at the grid points only.
@@ -276,7 +277,10 @@ def _jones_at_grid_points(
     freqs : sequence of float
         The K tracked tone frequencies in Hz.
     grid_np : numpy.ndarray
-        Integer sample indices of the inversion grid, ``(G,)``.
+        Integer sample indices of the inversion grid, ``(G,)``, on the host
+        (for the edge-window search).
+    grid : ndarray
+        The same indices, int64, on the device of ``xw``.
     sampling_rate : float
         Sampling rate in Hz.
 
@@ -304,7 +308,7 @@ def _jones_at_grid_points(
     h_rev = xp.asarray(np.ascontiguousarray(h[::-1]), dtype=real_dtype)  # h[L-1-q]
     Ht = h_rev[:, None] * xp.exp(-1j * ph_m.astype(real_dtype))  # (L, K)
 
-    gp = xp.asarray(grid_np, dtype=xp.float64)
+    gp = grid.astype(xp.float64)
     ph_g = (two_pi / sampling_rate) * gp[:, None] * f_dev[None, :]  # (G, K)
     ph_g -= xp.round(ph_g / two_pi) * two_pi
     rot = xp.exp(-1j * ph_g.astype(real_dtype))  # (G, K)
@@ -319,13 +323,13 @@ def _jones_at_grid_points(
     itemsize = xw.dtype.itemsize
     chunk = max(1, int((128 << 20) // (L * (itemsize + 4))))
     off = xp.arange(L, dtype=idx_dtype)
+    starts = (grid - lead).astype(idx_dtype)  # (G,) on the device
     Tg_work = xp.empty((C, G, K), dtype=xw.dtype)
 
     def _fill(a: int, b: int, masked: bool) -> None:
         for s0 in range(a, b, chunk):
             s1 = min(s0 + chunk, b)
-            st = xp.asarray(starts_np[s0:s1], dtype=idx_dtype)
-            idx = st[:, None] + off[None, :]  # (chunk, L)
+            idx = starts[s0:s1, None] + off[None, :]  # (chunk, L)
             if masked:
                 valid = (idx >= 0) & (idx < N)
                 idx = xp.clip(idx, 0, N - 1)
@@ -771,7 +775,10 @@ def demultiplex_polarization_tones_dynamic(
     if int(grid_np[-1]) != N - 1:
         grid_np = np.concatenate([grid_np, [N - 1]])  # pin the last sample
     G = int(grid_np.shape[0])
-    grid_positions = xp.asarray(grid_np, dtype=xp.float64)
+    grid = xp.arange(0, N, grid_step, dtype=xp.int64)  # grid_np, built on the device
+    if int(grid.shape[0]) != G:
+        grid = xp.concatenate([grid, xp.full(1, N - 1, dtype=xp.int64)])
+    grid_positions = grid.astype(xp.float64)
 
     # --- Track the Jones matrix at the grid points ---------------------------
     # T[i, j, g] = LPF{ r_i(n) · exp(-j2π f_j n/fs) }(g) ≈ J_ij(g)·α_j, with a
@@ -783,7 +790,7 @@ def demultiplex_polarization_tones_dynamic(
     # The batched inverse follows the RLS-style double-precision convention,
     # hence the complex128 (G, C, K) stack.
     if G * num_taps <= 24 * K * N:
-        Tg = _jones_at_grid_points(xw, h, f_used, grid_np, sampling_rate)
+        Tg = _jones_at_grid_points(xw, h, f_used, grid_np, grid, sampling_rate)
     else:
         # Dense grid (grid_step ≪ num_taps): per-grid-point windows would touch
         # far more elements than the record itself, so keep the full-rate
@@ -803,8 +810,7 @@ def demultiplex_polarization_tones_dynamic(
         mixed = xw[:, None, :] * carrier[None, :, :]  # (C, K, N)
         # One batched linear-phase FIR over (C·K) rows instead of K calls.
         T_t = cast(ArrayType, fir_filter(mixed.reshape(C * K, N), h)).reshape(C, K, N)
-        idx = xp.asarray(grid_np)
-        Tg = xp.moveaxis(T_t[:, :, idx], 2, 0).astype(xp.complex128)  # (G, C, K)
+        Tg = xp.moveaxis(T_t[:, :, grid], 2, 0).astype(xp.complex128)  # (G, C, K)
     Th = xp.conj(xp.swapaxes(Tg, -1, -2))  # (G, K, C)
     gram = Th @ Tg  # (G, K, K)
     # Tikhonov regularization keeps the batched inverse well-conditioned when the

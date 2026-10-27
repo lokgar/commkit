@@ -805,9 +805,7 @@ def _not_a_beat(x: ArrayType, f_shift: float | None, fs: float) -> np.ndarray:
     seg = min(_LINE_NPERSEG, n)
     k_seg = n // seg
     segs = x2[:, : k_seg * seg].reshape(x2.shape[0], k_seg, seg)
-    psd = xp.mean(
-        xp.abs(_fft.rfft(segs * xp.asarray(np.hanning(seg)), axis=-1)) ** 2, axis=1
-    )
+    psd = xp.mean(xp.abs(_fft.rfft(segs * xp.hanning(seg), axis=-1)) ** 2, axis=1)
     with np.errstate(invalid="ignore", divide="ignore"):
         frac = np.asarray(to_device(low / xp.sum(power, axis=-1), "cpu"))
     psd_cpu = np.asarray(to_device(psd, "cpu"))  # (C, seg/2 + 1), one transfer
