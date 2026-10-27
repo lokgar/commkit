@@ -238,21 +238,35 @@ class TestSingleCarrierFramePilots:
     """Tests for pilot generation, validation, caching, and power boost."""
 
     def test_comb_pilot_period_le1_error(self, xp: Any) -> None:
-        """comb pilot_period <= 1 raises ValueError."""
-        frame = SingleCarrierFrame(payload_len=10, pilot_pattern="comb", pilot_period=1)
+        """comb pilot_period <= 1 raises ValueError on construction."""
         with pytest.raises(ValueError, match="pilot_period must be > 1"):
-            frame._generate_pilot_mask()
+            SingleCarrierFrame(payload_len=10, pilot_pattern="comb", pilot_period=1)
 
     def test_block_pilot_period_le_block_len_error(self, xp: Any) -> None:
-        """block pilot_period <= pilot_block_len raises ValueError."""
-        frame = SingleCarrierFrame(
-            payload_len=10,
-            pilot_pattern="block",
-            pilot_period=3,
-            pilot_block_len=3,
-        )
+        """block pilot_period <= pilot_block_len raises ValueError on construction."""
         with pytest.raises(ValueError, match="pilot_period must be > pilot_block_len"):
-            frame._generate_pilot_mask()
+            SingleCarrierFrame(
+                payload_len=10,
+                pilot_pattern="block",
+                pilot_period=3,
+                pilot_block_len=3,
+            )
+
+    def test_block_without_pilot_block_len_error(self, xp: Any) -> None:
+        """The block pattern needs at least one pilot per period."""
+        with pytest.raises(ValueError, match="pilot_block_len must be >= 1"):
+            SingleCarrierFrame(payload_len=12, pilot_pattern="block", pilot_period=4)
+
+    def test_comb_is_a_block_of_one_pilot(self, xp: Any) -> None:
+        """comb places one pilot at the start of each period, like block with 1."""
+        comb = SingleCarrierFrame(payload_len=12, pilot_pattern="comb", pilot_period=4)
+        block = SingleCarrierFrame(
+            payload_len=12, pilot_pattern="block", pilot_period=4, pilot_block_len=1
+        )
+        mask, length = comb._generate_pilot_mask()
+        assert length == 16
+        np.testing.assert_array_equal(np.flatnonzero(mask), [0, 4, 8, 12])
+        np.testing.assert_array_equal(mask, block._generate_pilot_mask()[0])
 
     def test_pilot_bits_none_when_no_pilots(self, xp: Any) -> None:
         """pilot_bits returns None when pilot_pattern='none'."""
