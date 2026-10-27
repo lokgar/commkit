@@ -108,6 +108,33 @@ def _iir_wn(
     return float(cutoff) / nyq  # type: ignore[arg-type]
 
 
+def _design_sos(
+    name: str,
+    design: Any,
+    args: tuple,
+    *,
+    sampling_rate: float,
+    cutoff: float | tuple[float, float],
+    btype: str,
+    **kwargs: Any,
+) -> np.ndarray:
+    """Second-order sections of the SciPy IIR ``design`` for cutoffs in Hz.
+
+    Calls ``design(*args, Wn, btype=btype, output="sos", **kwargs)`` with the
+    cutoffs normalized to the Nyquist frequency.
+    """
+    Wn = _iir_wn(cutoff, btype, 0.5 * float(sampling_rate))
+    logger.debug(
+        "Designing %s SOS: btype=%s, cutoff=%s Hz, args=%s %s.",
+        name,
+        btype,
+        cutoff,
+        args,
+        kwargs,
+    )
+    return np.asarray(design(*args, Wn, btype=btype, output="sos", **kwargs))
+
+
 def butterworth_sos(
     *,
     sampling_rate: float,
@@ -137,15 +164,14 @@ def butterworth_sos(
     ndarray
         SOS coefficients, ``(n_sections, 6)``.
     """
-    nyq = 0.5 * float(sampling_rate)
-    Wn = _iir_wn(cutoff, btype, nyq)
-    logger.debug(
-        "Designing Butterworth SOS: btype=%s, cutoff=%s Hz, order=%s.",
-        btype,
-        cutoff,
-        order,
+    return _design_sos(
+        "Butterworth",
+        scipy.signal.butter,
+        (order,),
+        sampling_rate=sampling_rate,
+        cutoff=cutoff,
+        btype=btype,
     )
-    return np.asarray(scipy.signal.butter(order, Wn, btype=btype, output="sos"))
 
 
 def chebyshev1_sos(
@@ -179,16 +205,14 @@ def chebyshev1_sos(
     ndarray
         SOS coefficients, ``(n_sections, 6)``.
     """
-    nyq = 0.5 * float(sampling_rate)
-    Wn = _iir_wn(cutoff, btype, nyq)
-    logger.debug(
-        "Designing Chebyshev-I SOS: btype=%s, cutoff=%s Hz, order=%s, ripple=%s dB.",
-        btype,
-        cutoff,
-        order,
-        ripple,
+    return _design_sos(
+        "Chebyshev-I",
+        scipy.signal.cheby1,
+        (order, ripple),
+        sampling_rate=sampling_rate,
+        cutoff=cutoff,
+        btype=btype,
     )
-    return np.asarray(scipy.signal.cheby1(order, ripple, Wn, btype=btype, output="sos"))
 
 
 def chebyshev2_sos(
@@ -222,17 +246,13 @@ def chebyshev2_sos(
     ndarray
         SOS coefficients, ``(n_sections, 6)``.
     """
-    nyq = 0.5 * float(sampling_rate)
-    Wn = _iir_wn(cutoff, btype, nyq)
-    logger.debug(
-        "Designing Chebyshev-II SOS: btype=%s, cutoff=%s Hz, order=%s, attenuation=%s dB.",
-        btype,
-        cutoff,
-        order,
-        attenuation,
-    )
-    return np.asarray(
-        scipy.signal.cheby2(order, attenuation, Wn, btype=btype, output="sos")
+    return _design_sos(
+        "Chebyshev-II",
+        scipy.signal.cheby2,
+        (order, attenuation),
+        sampling_rate=sampling_rate,
+        cutoff=cutoff,
+        btype=btype,
     )
 
 
@@ -270,19 +290,13 @@ def elliptic_sos(
     ndarray
         SOS coefficients, ``(n_sections, 6)``.
     """
-    nyq = 0.5 * float(sampling_rate)
-    Wn = _iir_wn(cutoff, btype, nyq)
-    logger.debug(
-        "Designing Elliptic SOS: btype=%s, cutoff=%s Hz, order=%s, ripple=%s dB, "
-        "attenuation=%s dB.",
-        btype,
-        cutoff,
-        order,
-        ripple,
-        attenuation,
-    )
-    return np.asarray(
-        scipy.signal.ellip(order, ripple, attenuation, Wn, btype=btype, output="sos")
+    return _design_sos(
+        "Elliptic",
+        scipy.signal.ellip,
+        (order, ripple, attenuation),
+        sampling_rate=sampling_rate,
+        cutoff=cutoff,
+        btype=btype,
     )
 
 
@@ -318,34 +332,15 @@ def bessel_sos(
     ndarray
         SOS coefficients, ``(n_sections, 6)``.
     """
-    nyq = 0.5 * float(sampling_rate)
-    Wn = _iir_wn(cutoff, btype, nyq)
-    logger.debug(
-        "Designing Bessel SOS: btype=%s, cutoff=%s Hz, order=%s, norm=%s.",
-        btype,
-        cutoff,
-        order,
-        norm,
+    return _design_sos(
+        "Bessel",
+        scipy.signal.bessel,
+        (order,),
+        sampling_rate=sampling_rate,
+        cutoff=cutoff,
+        btype=btype,
+        norm=norm,
     )
-    return np.asarray(
-        scipy.signal.bessel(order, Wn, btype=btype, output="sos", norm=norm)
-    )
-
-
-# -----------------------------------------------------------------------------
-# FILTERING OPERATIONS (Signal-aware)
-# -----------------------------------------------------------------------------
-# ols_fir_filter: Public OLS FIR convolution (long-tap / memory-bounded)
-# fir_filter: Generic FIR filtering operation (short-to-medium taps) - applies
-#   any of the FIR tap generators above.
-# matched_filter: Apply matched filter (time-reversed conjugate of pulse shape)
-# iir_filter: Generic IIR filtering operation (SOS form, causal or zero-phase)
-#   - applies any of the IIR SOS generators above, the IIR sibling of
-#   fir_filter().
-#
-# shape_pulse (TX symbol -> waveform synthesis) lives in core/generation.py,
-# not here: it is a signal-construction primitive, not a transform on an
-# existing Signal's samples.
 
 
 def ols_fir_filter(
