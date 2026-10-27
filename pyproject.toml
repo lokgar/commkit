@@ -191,10 +191,10 @@ warn_return_any = true
 
 [[tool.mypy.overrides]]
 # The jitted kernel bodies are typed by Numba at compile time (and rely on
-# Numba's integer unification); their 20-35
-# positional array arguments are documented in comments instead.  The
-# factories that return them are annotated.
-module = ["commkit.equalization._kernels_numba"]
+# Numba's integer unification); their positional array arguments are
+# documented in the docstrings instead.  The getters that return them are
+# annotated.
+module = ["commkit.equalization._numba_loops"]
 disallow_untyped_defs = false
 disallow_incomplete_defs = false
 check_untyped_defs = false  # Numba integer unification is not NumPy typing

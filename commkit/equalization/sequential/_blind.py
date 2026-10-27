@@ -14,12 +14,7 @@ from ...core._signal_adapter import adapt_signal, require_integer_sps
 from ...core.signal import Signal
 from ...logger import logger
 from .._common import _godard_radius, _rde_ring_radii
-from .._kernels_numba import (
-    _get_numba_cma,
-    _get_numba_pa_cma,
-    _get_numba_pa_rde,
-    _get_numba_rde,
-)
+from .._kernels_numba import _get_numba_cma, _get_numba_rde
 from ..result import (
     EqualizerResult,
     EqualizerState,
@@ -75,6 +70,19 @@ def _check_pilots(
 # -----------------------------------------------------------------------------
 # BLIND equalization
 # -----------------------------------------------------------------------------
+
+
+def _pilot_args(
+    use_pilots: bool, pref: Any, pmask: Any, start: int, x: np.ndarray
+) -> tuple[bool, np.ndarray, np.ndarray]:
+    """The pilot arguments of the blind kernel for the segment from ``start``."""
+    if not use_pilots:
+        return False, np.empty((x.shape[0], 0), np.complex64), np.empty(0, np.uint8)
+    return (
+        True,
+        np.ascontiguousarray(pref[:, start:]),
+        np.ascontiguousarray(pmask[start:]),
+    )
 
 
 def cma(
@@ -251,21 +259,17 @@ def cma(
     )
     target = np.float32(r2)
     mu = np.float32(step_size)
+    pref = pmask = None
     if use_pilots:
         pref = np.ascontiguousarray(to_device(pilot_ref, "cpu"), dtype=np.complex64)
         pmask = np.ascontiguousarray(pilot_mask, dtype=np.uint8)
 
     def segment(start: int, stop: int) -> None:
         x, _, _, y_out, e_out, w_hist = run.segment(start, stop)
-        args = (x, run.W, mu, target, run.stride, store_weights, y_out, e_out, w_hist)
-        if use_pilots:
-            _get_numba_pa_cma()(
-                *args,
-                np.ascontiguousarray(pref[:, start:]),
-                np.ascontiguousarray(pmask[start:]),
-            )
-        else:
-            _get_numba_cma()(*args)
+        _get_numba_cma()(
+            x, run.W, mu, target, run.stride, store_weights, y_out, e_out, w_hist,
+            *_pilot_args(use_pilots, pref, pmask, start, x),
+        )  # fmt: skip
 
     resume = run.n_done
     snap = _run_resumable(run, resume, segment, lambda: _Snapshot(weights=run.W.copy()))
@@ -441,21 +445,17 @@ def rde(
     )
     target = np.ascontiguousarray(radii, dtype=np.float32)
     mu = np.float32(step_size)
+    pref = pmask = None
     if use_pilots:
         pref = np.ascontiguousarray(to_device(pilot_ref, "cpu"), dtype=np.complex64)
         pmask = np.ascontiguousarray(pilot_mask, dtype=np.uint8)
 
     def segment(start: int, stop: int) -> None:
         x, _, _, y_out, e_out, w_hist = run.segment(start, stop)
-        args = (x, run.W, mu, target, run.stride, store_weights, y_out, e_out, w_hist)
-        if use_pilots:
-            _get_numba_pa_rde()(
-                *args,
-                np.ascontiguousarray(pref[:, start:]),
-                np.ascontiguousarray(pmask[start:]),
-            )
-        else:
-            _get_numba_rde()(*args)
+        _get_numba_rde()(
+            x, run.W, mu, target, run.stride, store_weights, y_out, e_out, w_hist,
+            *_pilot_args(use_pilots, pref, pmask, start, x),
+        )  # fmt: skip
 
     resume = run.n_done
     snap = _run_resumable(run, resume, segment, lambda: _Snapshot(weights=run.W.copy()))
