@@ -36,7 +36,7 @@ uv run pytest --device=cpu               # what CI runs
 uv run pytest tests/equalization/ -k lms # subset
 uv run pytest --cov=commkit              # coverage
 NUMBA_DISABLE_JIT=1 uv run pytest tests/equalization tests/recovery \
-    tests/test_frequency.py tests/test_fiber.py --device=cpu --cov=commkit   # real kernel coverage
+    tests/test_frequency.py --device=cpu --cov=commkit   # real kernel coverage
 uv run pytest --device=cpu -p tests.plugins.precision_trace \
     --ignore=tests/test_examples.py      # precision audit (see Numerics); the suite passes under it
 uv run pytest --device=gpu -p tests.plugins.transfer_trace \
@@ -213,7 +213,7 @@ Docstrings describe the code as it is; a change in behavior updates them in the 
 | Sequential recursions: LMS/RLS/CMA/RDE, PLL, Tikhonov, cycle slips, the Mengali-Morelli bootstrap over the lags | Numba `@njit(cache=True, fastmath=True, nogil=True)` | CPU; GPU input does one round trip to the host and back |
 | Linear recursions: IIR filtering | CPU: Numba kernel without `fastmath`, so double input gives SciPy's result bit for bit. GPU: CUDA kernel (`iir`), blocks filtered in parallel and the state carried across them in two levels, in double precision | follows the input |
 | Hot spots limited by intermediates, launches or round trips | CUDA C++ via CuPy `RawModule` (`commkit/_cuda`) | GPU |
-| Elementwise chains with many temporaries, where a paired A/B shows the gain end to end (the PMD stage of `_fiber`: 0.61x on 4 cores, but not on the reference machine; see the roadmap) | Numba `@njit(parallel=True)` in one pass, real arithmetic (a `1j` literal promotes complex64 to complex128) | CPU |
+| Elementwise chains between multi-core FFTs (the fiber solver's Kerr and PMD stages) | NumPy: a Numba `parallel=True` pass there competes with `scipy.fft`'s threads (the solver's Numba passes measured 1.1-1.8x slower end to end, 2^14-2^20); adopt one only on a paired end-to-end A/B | CPU |
 
 **Host-sync hygiene:**
 
@@ -334,6 +334,4 @@ The decoder's input path. The GPU items need a CUDA device to time and to test (
 ### Performance
 
 - **Block equalizers at small `block_size` on the GPU**: a fixed cost per block; at 256 the GPU only ties the CPU without carrier recovery.
-- **The fiber solver's Numba passes lose end to end on the reference machine.** On 4 cores (where they were tuned) the hybrid Kerr stage won from `_fiber._HYBRID_KERR_MIN = 2^18` and the trig-free Jones (PMD) pass won end to end (0.61x). On the reference machine (8 cores, 16 threads), whole propagations with NumPy stages and multi-core `scipy.fft` are faster: hybrid Kerr 1.74x slower at 2^18, 1.32x at 2^19, 1.12x at 2^20; Numba Jones 1.35x at 2^14, 2.19x at 2^16, 1.54x at 2^18, even at 2^20. The cause is contention: Numba's OpenMP workers spin after each pass and take the cores from the FFT workers (`OMP_WAIT_POLICY=passive` cuts the Kerr loss at 2^18 to 1.09x; one Numba thread makes Jones even with NumPy). The stage timed alone hides this. Options: choose the passes by core count, run them single-threaded, or keep NumPy stages only; decide by end-to-end A/Bs on both machines.
-- **A fully fused Numba Kerr stage** may beat the hybrid one where Numba has SVML (vector sin/cos); neither machine measured so far has it (`numba.core.config.USING_SVML` is False), so it is untimed.
 - **`cs_block` on phases with frequent slip decisions**: one speculation pass per changed decision (about 1 pass per block on a realistic link, more on pathological input). Outside a CUDA graph the Python wrapper (validation, scratch allocation) costs about 18 us per launch.

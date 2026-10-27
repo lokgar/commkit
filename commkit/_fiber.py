@@ -51,11 +51,11 @@ time-reversible.
 Devices.  With equal steps a span has two step lengths, so the CPU and the
 plain CuPy stages precompute their responses (float64 phase, cast to the
 field's precision) and the linear stage is one multiply.  The CPU runs the
-FFTs on ``scipy.fft`` (``_fft``), the Kerr stage as Numba power/phase and
-rotation passes around NumPy's SIMD sin/cos (Numba's are scalar without
-SVML) and the PMD section as one Numba pass.  CuPy input runs three fused
-elementwise kernels (linear stage, linear stage with a PMD section, Kerr
-stage) that compute the phase in registers, on in-place, unscaled cuFFT
+FFTs on ``scipy.fft`` (``_fft``) and the other stages as NumPy passes
+(Numba passes for the Kerr and PMD stages measured 1.1-1.8x slower end to
+end on 8 cores: their worker threads compete with the FFT's).  CuPy input
+runs three fused elementwise kernels (linear stage, linear stage with a PMD
+section, Kerr stage) that compute the phase in registers, on in-place, unscaled cuFFT
 transforms, so each stage reads and writes the field once and a span
 allocates nothing; the span is captured once into a CUDA graph and
 replayed, with the next span's waveplates copied into a fixed device buffer
@@ -397,101 +397,6 @@ class _Ops:
         return x
 
 
-_NUMBA: dict[str, Callable[..., None]] = {}
-
-# Below this many samples the NumPy Kerr stage runs instead of the hybrid
-# one.  Measured on 4 cores (container), stage alone: 0.7 vs 0.5 ms at 2^16,
-# 3.1 vs 3.3 ms at 2^18, 17 vs 12 ms at 2^20; the trig-free Jones pass won at
-# every size (2x at 2^12, 10x at 2^20).  On the reference machine (8 cores,
-# 16 threads) the stage alone favors the hybrid from 2^12, but whole
-# propagations do not: there OpenMP workers spinning after each Numba pass
-# take the cores from scipy.fft, and the hybrid Kerr stage is 1.7x slower end
-# to end at 2^18 and 1.1x at 2^20, the Numba Jones pass 1.5-2.2x up to 2^18
-# (AGENTS roadmap, Performance).
-_HYBRID_KERR_MIN = 1 << 18
-
-
-def _numba_kernels() -> dict[str, Callable[..., None]]:
-    """Trig-free CPU passes (in place, complex64 or complex128).
-
-    Numba compiles sin/cos to scalar libm calls (no SVML), while NumPy 2 has
-    SIMD sin/cos; so the Kerr stage is a Numba power/phase pass, NumPy sin/cos,
-    then a Numba rotation pass, from ``_HYBRID_KERR_MIN`` samples.  Real
-    arithmetic throughout: a complex literal (1j) would promote complex64 work
-    to complex128.
-    """
-    if not _NUMBA:
-        import numba
-
-        jit = numba.njit(cache=True, fastmath=True, nogil=True, parallel=True)
-
-        @jit
-        def kerr_phase(x, k, out):  # type: ignore[no-untyped-def]
-            C, N = x.shape
-            for i in numba.prange(N):  # type: ignore[attr-defined]
-                p = x[0, i].real * x[0, i].real + x[0, i].imag * x[0, i].imag
-                for c in range(1, C):
-                    p += x[c, i].real * x[c, i].real + x[c, i].imag * x[c, i].imag
-                out[i] = -k * p
-
-        @jit
-        def rotate(x, cos, sin):  # type: ignore[no-untyped-def]
-            C, N = x.shape
-            for i in numba.prange(N):  # type: ignore[attr-defined]
-                cr = cos[i]
-                ci = sin[i]
-                for c in range(C):
-                    xr = x[c, i].real
-                    xi = x[c, i].imag
-                    x[c, i] = complex(xr * cr - xi * ci, xr * ci + xi * cr)
-
-        @jit
-        def jones(X, u, hm, hp):  # type: ignore[no-untyped-def]
-            for i in numba.prange(X.shape[1]):  # type: ignore[attr-defined]
-                x0 = X[0, i]
-                x1 = X[1, i]
-                y0 = (u[0, 0] * x0 + u[0, 1] * x1) * hm[i]
-                y1 = (u[1, 0] * x0 + u[1, 1] * x1) * hp[i]
-                X[0, i] = u[0, 0].conjugate() * y0 + u[1, 0].conjugate() * y1
-                X[1, i] = u[0, 1].conjugate() * y0 + u[1, 1].conjugate() * y1
-
-        _NUMBA.update(kerr_phase=kerr_phase, rotate=rotate, jones=jones)
-    return _NUMBA
-
-
-class _CpuOps(_Ops):
-    """NumPy field: Numba Kerr and PMD passes on preallocated buffers."""
-
-    def __init__(self, *args: Any) -> None:
-        super().__init__(*args)
-        self.k = _numba_kernels()
-        n = self.phase_km.shape[-1]
-        real = np.empty(0, self.dtype).real.dtype
-        self._phase = np.empty(n, real)
-        self._cos = np.empty(n, real)
-        self._sin = np.empty(n, real)
-
-    def linear(self, X: ArrayType, length_km: float, section: int | None) -> ArrayType:
-        if section is None:
-            return super().linear(X, length_km, None)
-        assert self.waveplates is not None
-        X = np.ascontiguousarray(X)
-        hm, hp = self._pmd_responses(length_km)
-        u = self.waveplates[self.span, section].astype(X.dtype)
-        self.k["jones"](X, u, hm, hp)
-        return X
-
-    def nonlinear(self, x: ArrayType, k: float) -> ArrayType:
-        if x.shape[-1] < _HYBRID_KERR_MIN:
-            return super().nonlinear(x, k)
-        x = np.ascontiguousarray(x)
-        self.k["kerr_phase"](x, self._phase.dtype.type(k), self._phase)
-        np.cos(self._phase, out=self._cos)
-        np.sin(self._phase, out=self._sin)
-        self.k["rotate"](x, self._cos, self._sin)
-        return x
-
-
 _KERNELS: dict[str, Any] = {}
 
 
@@ -624,9 +529,7 @@ def _make_ops(x: ArrayType, xp: ModuleType, *args: Any) -> _Ops:
 
     ``args`` are those of :class:`_Ops` after ``xp`` and the dtype.
     """
-    if xp is np:
-        return _CpuOps(xp, x.dtype, *args)
-    if x.dtype != xp.complex64:
+    if xp is np or x.dtype != xp.complex64:
         return _Ops(xp, x.dtype, *args)
     return _FusedOps(xp, x.dtype, *args)
 
