@@ -156,11 +156,13 @@ def normalize(
     # Handle division by zero safely for both NumPy and CuPy.
     # Avoid control flow based on data values to prevent host-device synchronization.
     # Use ones_like instead of the literal 1.0 (float64) to preserve float32 dtype.
-    safe_norm = xp.where(norm_factor == 0, xp.ones_like(norm_factor), norm_factor)
-    result = x / safe_norm
-
-    # If norm_factor is 0, the input was all zeros -> output should also be zeros
-    return xp.where(norm_factor == 0, xp.zeros(x.shape, dtype=x.dtype), result)
+    is_zero = norm_factor == 0
+    result = x / xp.where(is_zero, xp.ones_like(norm_factor), norm_factor)
+    # A zero factor means an all-zero slice, which 0 / 1 keeps at zero, except
+    # for "unity_gain", where a non-zero slice can sum to zero.
+    if mode == "unity_gain":
+        result = xp.where(is_zero, xp.zeros((), dtype=x.dtype), result)
+    return result
 
 
 # ---------------------------------------------------------------------------

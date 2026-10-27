@@ -53,11 +53,24 @@ class TestNormalization:
         norm = ckmath.normalize(data, mode="unity_gain")
         assert xp.isclose(xp.sum(norm), 1.0)
 
-    def test_normalize_zeros(self, xp, xpt):
-        """Normalizing an all-zero array returns all zeros without NaN."""
-        zeros = xp.zeros(5)
-        norm = ckmath.normalize(zeros, mode="peak")
-        xpt.assert_array_equal(norm, 0)
+    @pytest.mark.parametrize(
+        "mode",
+        ["unity_gain", "unit_energy", "peak", "average_power", "symbol_power",
+         "dac_peak"],
+    )  # fmt: skip
+    def test_normalize_zeros(self, xp, xpt, mode):
+        """An all-zero slice stays zero without NaN; the others are normalized."""
+        data = xp.array([[0.0, 0.0, 0.0], [1.0, 2.0, 3.0]], dtype=xp.complex64)
+        norm = ckmath.normalize(data, mode=mode, axis=-1)
+        xpt.assert_array_equal(norm[0], 0)
+        assert bool(xp.all(norm[1] != 0))
+
+    def test_normalize_unity_gain_zero_sum(self, xp, xpt):
+        """unity_gain sets a slice that sums to zero to zero."""
+        data = xp.array([[1.0, -1.0, 0.0], [1.0, 1.0, 2.0]], dtype=xp.float32)
+        norm = ckmath.normalize(data, mode="unity_gain", axis=-1)
+        xpt.assert_array_equal(norm[0], 0)
+        xpt.assert_allclose(norm[1], xp.asarray([0.25, 0.25, 0.5], dtype=xp.float32))
 
     def test_normalize_invalid_mode(self, xp):
         """Invalid mode raises ValueError."""
