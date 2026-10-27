@@ -442,17 +442,17 @@ def _mth_power(
 
     X_m = _fft.fft(x_m, n=nfft, axis=-1)  # (R, nfft)
     freqs_np = np.fft.fftfreq(nfft, d=1.0 / fs)  # reported on the host
-    freqs = xp.fft.fftfreq(nfft, d=1.0 / fs)
     mag = xp.abs(X_m)
     if method.search_range is not None:
         tone_lo = M * min(method.search_range)
         tone_hi = M * max(method.search_range)
-        mask = (freqs >= tone_lo) & (freqs <= tone_hi)
-        if not bool(xp.any(mask)):
+        if not np.any((freqs_np >= tone_lo) & (freqs_np <= tone_hi)):
             raise ValueError(
                 f"search_range {method.search_range} Hz produces an empty search "
                 f"window in the M={M} scaled spectrum."
             )
+        freqs = xp.fft.fftfreq(nfft, d=1.0 / fs)
+        mask = (freqs >= tone_lo) & (freqs <= tone_hi)
         mag = xp.where(mask[None, :], mag, xp.zeros_like(mag))
     mag[:, 0] = 0.0  # Δf = 0 is degenerate; also any residual DC
 
@@ -474,7 +474,9 @@ def _mth_power(
         mu = _parabolic_peak_offset(
             mag[rows, k_prev], mag[rows, k_peak], mag[rows, k_next], xp, log=False
         )
-    f_bin = freqs[k_peak]
+    # The peak bin's frequency, as fftfreq computes it: signed bin times fs/nfft.
+    k_signed = xp.where(k_peak > (nfft - 1) // 2, k_peak - nfft, k_peak)
+    f_bin = k_signed.astype(xp.float64) * (1.0 / (nfft * (1.0 / fs)))
     values = (f_bin + mu * (fs / nfft)) / M
     return _Rows(
         values=values.astype(xp.float64),

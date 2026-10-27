@@ -105,22 +105,21 @@ def cross_correlate_fft(
     TPL = _fft.fft(template, n_fft, axis=-1)
     corr_circ = _fft.ifft(SIG * xp.conj(TPL), axis=-1)
 
-    # Gather negative lags (indices n_fft-(L-1) .. n_fft-1) then positive (0 .. N-1)
-    neg_lags = corr_circ[..., n_fft - L + 1 :]  # length L-1
-    pos_lags = corr_circ[..., :N]  # length N
-    corr = xp.concatenate([neg_lags, pos_lags], axis=-1)  # length N+L-1
-
-    # Apply mode trimming
     if mode == "positive_lags":
         corr = corr_circ[..., :N]  # zero-copy view; lags 0 ... N-1
-    elif mode == "same":
-        start = (L - 1) // 2
-        corr = corr[..., start : start + N]
-    elif mode == "valid":
-        valid_len = max(N, L) - min(N, L) + 1
-        start = min(N, L) - 1
-        corr = corr[..., start : start + valid_len]
-    # mode == "full": no trimming needed
+    else:
+        # Negative lags (indices n_fft-(L-1) .. n_fft-1), then positive (0 .. N-1).
+        neg_lags = corr_circ[..., n_fft - L + 1 :]  # length L-1
+        pos_lags = corr_circ[..., :N]  # length N
+        corr = xp.concatenate([neg_lags, pos_lags], axis=-1)  # length N+L-1
+        if mode == "same":
+            start = (L - 1) // 2
+            corr = corr[..., start : start + N]
+        elif mode == "valid":
+            valid_len = max(N, L) - min(N, L) + 1
+            start = min(N, L) - 1
+            corr = corr[..., start : start + valid_len]
+        # mode == "full": no trimming needed
 
     if was_1d:
         return corr[0]
@@ -587,17 +586,14 @@ def estimate_timing(
     C_tx = ref_waveform.shape[0]
 
     if C_tx > 1:
-        # Correlate every TX template against every RX channel.
-        # corr_all[rx, tx, lag] - shape (C_rx, C_tx, N_lag)
-        corr_all = xp.stack(
-            [
-                cross_correlate_fft(
-                    sig_processing, ref_waveform[t : t + 1], mode="positive_lags"
-                )
-                for t in range(C_tx)
-            ],
-            axis=1,
-        )
+        # Correlate every TX template against every RX channel, with one
+        # transform of the signal: corr_all[rx, tx, lag], (C_rx, C_tx, N_lag),
+        # the positive lags of cross_correlate_fft.
+        N_lag = sig_processing.shape[-1]
+        n_fft = 1 << (N_lag + L - 2).bit_length()
+        SIG = _fft.fft(sig_processing, n_fft, axis=-1)[:, None, :]
+        TPL = _fft.fft(ref_waveform, n_fft, axis=-1)[None, :, :]
+        corr_all = _fft.ifft(SIG * xp.conj(TPL), axis=-1)[..., :N_lag]
 
         # === Greedy per-channel peak finding ===
         # Each RX channel takes its strongest peak across all (template, lag).
@@ -608,21 +604,14 @@ def estimate_timing(
         # identity is not resolved here (see recovery.resolve_channel_permutation).
         corr_all_mag = xp.abs(corr_all)  # (C_rx, C_tx, N_lag)
         best_tx = xp.argmax(xp.max(corr_all_mag, axis=-1), axis=-1)  # (C_rx,)
-        corr = xp.take_along_axis(corr_all, best_tx[:, None, None], axis=1)[
-            :, 0
-        ]  # (C_rx, N_lag) complex - on-device gather, no per-channel host sync
-        corr_incoherent = xp.abs(corr)  # (C_rx, N_lag)
-        peak_indices = xp.argmax(corr_incoherent, axis=-1)  # (C_rx,)
+        # On-device gathers, no per-channel host sync: (C_rx, N_lag).
+        pick = best_tx[:, None, None]
+        corr = xp.take_along_axis(corr_all, pick, axis=1)[:, 0]
+        corr_mag = xp.take_along_axis(corr_all_mag, pick, axis=1)[:, 0]
     else:
         corr = cross_correlate_fft(sig_processing, ref_waveform, mode="positive_lags")
-
-    # Magnitude
-    corr_mag = xp.abs(corr)
-
-    # === Per-Channel Analysis ===
-    # For SISO / broadcast single template: find peak from magnitude
-    if C_tx == 1:
-        peak_indices = xp.argmax(corr_mag, axis=-1)  # Shape (C,)
+        corr_mag = xp.abs(corr)
+    peak_indices = xp.argmax(corr_mag, axis=-1)  # (C,)
 
     # === Per-Channel Normalization ===
     # Normalized correlation metric: use local signal energy around each
@@ -649,14 +638,8 @@ def estimate_timing(
     norm_factors = xp.maximum(norm_factors, 1e-12)
 
     # Calculate per-channel coherence (diagnostic mathematically absolute bound, [0, 1])
-    if C_tx > 1:
-        peak_vals = xp.max(
-            corr_incoherent, axis=-1
-        )  # (C,) incoherent - matches peak detection
-        mean_vals = xp.mean(corr_incoherent, axis=-1)
-    else:
-        peak_vals = xp.max(corr_mag, axis=-1)  # (C,)
-        mean_vals = xp.mean(corr_mag, axis=-1)
+    peak_vals = xp.max(corr_mag, axis=-1)  # (C,) incoherent, as the peak search
+    mean_vals = xp.mean(corr_mag, axis=-1)
 
     coherence = peak_vals / norm_factors
     coherence = xp.clip(coherence, 0.0, 1.0)
