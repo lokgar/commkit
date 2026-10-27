@@ -180,9 +180,13 @@ def _cs_block_factory() -> Callable:
     speculated in parallel; see ``cs_block.cu``) operating in place on
     device-resident state buffers. One launch processes one equalizer block,
     instead of a round trip per block through the CPU path (device to host,
-    the Numba kernel, host to device).  All state arrays are float64 or int64 and are
-    changed in place, so the wrapper rejects non-contiguous inputs instead
-    of copying them silently.
+    the Numba kernel, host to device).
+
+    The wrapper binds one run: it checks the state buffers (float64 or
+    int64, changed in place, so non-contiguous ones are rejected instead of
+    copied silently) and allocates the kernel's scratch for the largest
+    block once, and returns the per-block launch, which checks only the
+    block's phases.
     """
     import cupy as cp
 
@@ -190,31 +194,22 @@ def _cs_block_factory() -> Callable:
 
     kern = compiler.get_raw_kernel("cs_block", "cs_block")
 
-    def launch(
-        phi_blk: Any,
-        phi_corr: Any,
+    def bind(
         cs_buf_y: Any,
         cs_buf_ptr: Any,
         cs_buf_n: Any,
         cs_stats: Any,
+        *,
         quantum: float,
         threshold: float,
         cs_H: int,
-    ) -> Any:
-        """Repair the cycle slips of ``phi_blk`` into ``phi_corr``.
-
-        Both are ``(C, B)`` float64; the per-channel circular history
-        buffers are updated in place.
-        """
-        if phi_blk.ndim != 2:
-            raise ValueError(f"phi_blk must be 2-D (C, B), got shape {phi_blk.shape}")
-        C, B = phi_blk.shape
-        if B < 1:
-            raise ValueError("phi_blk must have at least one column")
+        max_block: int,
+    ) -> Callable[[Any, Any], Any]:
+        """Bind the state buffers of one run, ``C`` channels and blocks of at
+        most ``max_block`` symbols."""
+        C = cs_buf_ptr.shape[0] if cs_buf_ptr.ndim == 1 else -1
         cs_H = int(cs_H)
         for label, arr, dtype, shape in (
-            ("phi_blk", phi_blk, cp.float64, (C, B)),
-            ("phi_corr", phi_corr, cp.float64, (C, B)),
             ("cs_buf_y", cs_buf_y, cp.float64, (C, cs_H)),
             ("cs_buf_ptr", cs_buf_ptr, cp.int64, (C,)),
             ("cs_buf_n", cs_buf_n, cp.int64, (C,)),
@@ -226,31 +221,57 @@ def _cs_block_factory() -> Callable:
                 raise ValueError(f"{label} must have shape {shape}, got {arr.shape}")
             if not arr.flags.c_contiguous:
                 raise ValueError(f"{label} must be C-contiguous (mutated in place)")
-        L = cs_H + B
-        kern(
-            (C,),
-            (256,),  # CS_THREADS in cs_block.cu
-            (
-                phi_blk,
-                phi_corr,
-                cs_buf_y,
-                cs_buf_ptr,
-                cs_buf_n,
-                cs_stats,
-                cp.empty((C, L), dtype=cp.float64),
-                cp.empty((C, L + 1), dtype=cp.float64),
-                cp.empty((C, L + 1), dtype=cp.float64),
-                cp.empty((C, B), dtype=cp.int32),
-                cp.empty((C, B), dtype=cp.int32),
-                cp.float64(quantum),
-                cp.float64(threshold),
-                cp.int32(cs_H),
-                cp.int32(B),
-            ),
-        )
-        return phi_corr
+        if max_block < 1:
+            raise ValueError(f"max_block must be >= 1, got {max_block}")
+        # Scratch for the largest block: the kernel strides by the actual B.
+        L = cs_H + max_block
+        z = cp.empty(C * L, dtype=cp.float64)
+        p1 = cp.empty(C * (L + 1), dtype=cp.float64)
+        p2 = cp.empty(C * (L + 1), dtype=cp.float64)
+        guess = cp.empty(C * max_block, dtype=cp.int32)
+        decided = cp.empty(C * max_block, dtype=cp.int32)
+        scalars = (cp.float64(quantum), cp.float64(threshold), cp.int32(cs_H))
 
-    return launch
+        def launch(phi_blk: Any, phi_corr: Any) -> Any:
+            """Repair the cycle slips of ``phi_blk`` into ``phi_corr``.
+
+            Both are ``(C, B)`` float64, ``1 <= B <= max_block``; the bound
+            history buffers are updated in place.
+            """
+            shape = phi_blk.shape
+            if (
+                phi_blk.dtype != cp.float64
+                or len(shape) != 2
+                or shape[0] != C
+                or not 1 <= shape[1] <= max_block
+                or not phi_blk.flags.c_contiguous
+            ):
+                raise ValueError(
+                    f"phi_blk must be C-contiguous float64 (C={C}, B<={max_block}), "
+                    f"got {phi_blk.dtype} {shape}"
+                )
+            if (
+                phi_corr.dtype != cp.float64
+                or phi_corr.shape != shape
+                or not phi_corr.flags.c_contiguous
+            ):
+                raise ValueError(
+                    f"phi_corr must be C-contiguous float64 {shape}, got "
+                    f"{phi_corr.dtype} {phi_corr.shape}"
+                )
+            kern(
+                (C,),
+                (256,),  # CS_THREADS in cs_block.cu
+                (
+                    phi_blk, phi_corr, cs_buf_y, cs_buf_ptr, cs_buf_n, cs_stats,
+                    z, p1, p2, guess, decided, *scalars, cp.int32(shape[1]),
+                ),
+            )  # fmt: skip
+            return phi_corr
+
+        return launch
+
+    return bind
 
 
 def _bps_anchor_factory() -> Callable:

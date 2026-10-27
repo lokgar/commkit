@@ -29,9 +29,6 @@ class TestCSBlockKernel:
     def test_cs_block_matches_reference_across_blocks(self, backend_device, xp, xpt):
         """Kernel output and state match the reference through fill/wrap/slips."""
         skip_unless_gpu(backend_device)
-        kern = _cuda.get_kernel("cs_block")
-        assert kern is not None
-
         C, H = 3, 100
         phi = slip_workload(C=C)
 
@@ -47,6 +44,10 @@ class TestCSBlockKernel:
 
         # Uneven block edges: tiny blocks during fill, then past the H=100 wrap.
         edges = [0, 7, 8, 64, 200, 333, 700, 1000]
+        kern = _cuda.get_kernel("cs_block")(
+            buf_y_dev, ptr_dev, n_dev, st_dev,
+            quantum=QUANTUM, threshold=THRESHOLD, cs_H=H, max_block=367,
+        )  # fmt: skip
         out_ref, out_dev = [], []
         for a, b in zip(edges[:-1], edges[1:]):
             blk = np.ascontiguousarray(phi[:, a:b])
@@ -58,17 +59,7 @@ class TestCSBlockKernel:
 
             blk_dev = xp.asarray(blk)
             corr_dev = xp.empty_like(blk_dev)
-            kern(
-                blk_dev,
-                corr_dev,
-                buf_y_dev,
-                ptr_dev,
-                n_dev,
-                st_dev,
-                QUANTUM,
-                THRESHOLD,
-                H,
-            )
+            kern(blk_dev, corr_dev)
             out_dev.append(to_numpy(corr_dev))
 
         corr_full_ref = np.concatenate(out_ref, axis=1)
@@ -89,7 +80,6 @@ class TestCSBlockKernel:
         """One thread block per channel: wider than one block's thread limit,
         the kernel matches the Numba path that the CPU runs."""
         skip_unless_gpu(backend_device)
-        kern = _cuda.get_kernel("cs_block")
         cs_numba = _get_numba_cs_block()
 
         C, H = 1100, 100
@@ -100,6 +90,10 @@ class TestCSBlockKernel:
         st_ref = np.zeros((C, 4))
         bufs_dev = [xp.asarray(b) for b in bufs_ref]
         st_dev = xp.zeros((C, 4))
+        kern = _cuda.get_kernel("cs_block")(
+            *bufs_dev, st_dev, quantum=QUANTUM, threshold=THRESHOLD, cs_H=H,
+            max_block=250,
+        )  # fmt: skip
         out_ref, out_dev = [], []
         for a, b in ((0, 150), (150, 400)):  # fill, then past the H=100 wrap
             blk = np.ascontiguousarray(phi[:, a:b])
@@ -110,7 +104,7 @@ class TestCSBlockKernel:
             )  # fmt: skip
             out_ref.append(corr_ref)
             corr_dev = xp.empty_like(xp.asarray(blk))
-            kern(xp.asarray(blk), corr_dev, *bufs_dev, st_dev, QUANTUM, THRESHOLD, H)
+            kern(xp.asarray(blk), corr_dev)
             out_dev.append(corr_dev)
 
         corr_dev_full = xp.concatenate(out_dev, axis=1)
@@ -121,10 +115,9 @@ class TestCSBlockKernel:
         assert float(xp.abs(xp.diff(corr_dev_full[C - 1])).max()) < QUANTUM / 2.0
 
     def test_cs_block_rejects_bad_inputs(self, backend_device, xp):
-        """Wrapper must reject wrong dtype, wrong shape, and non-contiguous state."""
+        """The binding rejects wrong state buffers, the launch wrong phases."""
         skip_unless_gpu(backend_device)
-        kern = _cuda.get_kernel("cs_block")
-        assert kern is not None
+        bind = _cuda.get_kernel("cs_block")
 
         C, B, H = 2, 16, 100
         phi = xp.zeros((C, B), dtype=xp.float64)
@@ -133,20 +126,19 @@ class TestCSBlockKernel:
         ptr = xp.zeros(C, xp.int64)
         n = xp.zeros(C, xp.int64)
         st = xp.zeros((C, 4))
+        kw = dict(quantum=QUANTUM, threshold=THRESHOLD, cs_H=H, max_block=B)
 
-        with pytest.raises(TypeError, match="phi_blk"):
-            kern(phi.astype(xp.float32), corr, buf_y, ptr, n, st, QUANTUM, THRESHOLD, H)
         with pytest.raises(ValueError, match="cs_buf_y"):
-            kern(phi, corr, buf_y[:, : H // 2], ptr, n, st, QUANTUM, THRESHOLD, H)
+            bind(buf_y[:, : H // 2], ptr, n, st, **kw)
+        with pytest.raises(TypeError, match="cs_buf_n"):
+            bind(buf_y, ptr, n.astype(xp.int32), st, **kw)
         with pytest.raises(ValueError, match="C-contiguous"):
-            kern(
-                phi,
-                corr,
-                xp.asfortranarray(xp.zeros((C, H))),
-                ptr,
-                n,
-                st,
-                QUANTUM,
-                THRESHOLD,
-                H,
-            )
+            bind(xp.asfortranarray(xp.zeros((C, H))), ptr, n, st, **kw)
+
+        launch = bind(buf_y, ptr, n, st, **kw)
+        with pytest.raises(ValueError, match="phi_blk"):
+            launch(phi.astype(xp.float32), corr)
+        with pytest.raises(ValueError, match="phi_blk"):
+            launch(xp.zeros((C, B + 1)), xp.zeros((C, B + 1)))  # beyond max_block
+        with pytest.raises(ValueError, match="phi_corr"):
+            launch(phi, corr[:, :-1])

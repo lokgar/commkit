@@ -137,7 +137,7 @@ class _BlockBps:
     da_hist: Any = None  # (C, K-1) trailing y·conj(d) (complex64 on the kernel path)
     anchor_kernel: Any = None  # CUDA data-aided anchor kernel, or None
     kernel: Any = None  # CUDA min-distance kernel, or None
-    cs_kernel: Any = None  # CUDA cycle-slip kernel, or None
+    cs_kernel: Any = None  # CUDA cycle-slip launch bound to the buffers, or None
 
     def snapshot(self) -> _BlockCarrier:
         """Host copies of the state, at a block boundary."""
@@ -285,17 +285,7 @@ class _BlockBps:
         if self.cs:
             if self.cs_kernel is not None:
                 phi_corr = xp.empty_like(phi_f64)
-                self.cs_kernel(
-                    phi_f64,
-                    phi_corr,
-                    self.cs_buf_y,
-                    self.cs_buf_ptr,
-                    self.cs_buf_n,
-                    self.cs_stats,
-                    float(self.quantum),
-                    float(self.threshold),
-                    self.cs_H,
-                )
+                self.cs_kernel(phi_f64, phi_corr)
             else:
                 phi_blk_np = to_device(phi_f64, "cpu").astype(np.float64)  # (C, B)
                 phi_corr_np = phi_blk_np.copy()
@@ -601,11 +591,20 @@ def block_lms(
         if bps is not None and n_train > 0:
             bps.anchor_kernel = _cuda.get_kernel("bps_anchor")
         if bps is not None and bps.cs:
-            bps.cs_kernel = _cuda.get_kernel("cs_block")
             bps.cs_buf_y = xp.asarray(bps.cs_buf_y)
             bps.cs_buf_ptr = xp.asarray(bps.cs_buf_ptr)
             bps.cs_buf_n = xp.asarray(bps.cs_buf_n)
             bps.cs_stats = xp.asarray(bps.cs_stats)
+            bps.cs_kernel = _cuda.get_kernel("cs_block")(
+                bps.cs_buf_y,
+                bps.cs_buf_ptr,
+                bps.cs_buf_n,
+                bps.cs_stats,
+                quantum=float(bps.quantum),
+                threshold=float(bps.threshold),
+                cs_H=bps.cs_H,
+                max_block=run.block_size,
+            )
 
     cpr_info = ""
     if bps is not None:
