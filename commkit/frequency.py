@@ -436,12 +436,12 @@ def _mth_power(
         x_m = x_m - xp.mean(x_m, axis=-1, keepdims=True)
 
     X_m = _fft.fft(x_m, n=nfft, axis=-1)  # (R, nfft)
-    freqs_np = np.fft.fftfreq(nfft, d=1.0 / fs)
+    freqs_np = np.fft.fftfreq(nfft, d=1.0 / fs)  # reported on the host
+    freqs = xp.fft.fftfreq(nfft, d=1.0 / fs)
     mag = xp.abs(X_m)
     if method.search_range is not None:
         tone_lo = M * min(method.search_range)
         tone_hi = M * max(method.search_range)
-        freqs = xp.asarray(freqs_np)
         mask = (freqs >= tone_lo) & (freqs <= tone_hi)
         if not bool(xp.any(mask)):
             raise ValueError(
@@ -469,7 +469,7 @@ def _mth_power(
         mu = _parabolic_peak_offset(
             mag[rows, k_prev], mag[rows, k_peak], mag[rows, k_next], xp, log=False
         )
-    f_bin = xp.asarray(freqs_np)[k_peak]
+    f_bin = freqs[k_peak]
     values = (f_bin + mu * (fs / nfft)) / M
     return _Rows(
         values=values.astype(xp.float64),
@@ -571,13 +571,12 @@ def _bias_tone(x: ArrayType, fs: float, method: BiasTone) -> _Rows:
         )
     nfft = 1 << int(np.ceil(np.log2(N)))
     mag = xp.abs(_fft.fft(x, n=nfft, axis=-1))  # (R, nfft)
-    freqs_np = np.fft.fftfreq(nfft, d=1.0 / fs)
+    freqs = xp.fft.fftfreq(nfft, d=1.0 / fs)
     search = mag
     if method.target_frequency is not None:
         assert method.search_band is not None
         lo = method.target_frequency - abs(method.search_band)
         hi = method.target_frequency + abs(method.search_band)
-        freqs = xp.asarray(freqs_np)
         mask = (freqs >= lo) & (freqs <= hi)
         if not bool(xp.any(mask)):
             raise ValueError(
@@ -592,7 +591,7 @@ def _bias_tone(x: ArrayType, fs: float, method: BiasTone) -> _Rows:
     delta = _parabolic_peak_offset(
         m64[rows, (k - 1) % nfft], m64[rows, k], m64[rows, (k + 1) % nfft], xp, log=True
     )
-    values = xp.asarray(freqs_np)[k] + delta * (fs / nfft)
+    values = freqs[k] + delta * (fs / nfft)
     return _Rows(values=values, weights=m64[rows, k])
 
 
