@@ -321,10 +321,13 @@ def _remove_linear_trend(y: ArrayType, *, x: Any = None) -> tuple[ArrayType, Arr
 def _unit_phasor(phase: ArrayType, dtype: Any, xp: Any) -> ArrayType:
     """``exp(j·phase)`` as ``dtype``, from a real cos and sin.
 
-    Several times faster than a complex exponential on the CPU.  ``phase``
-    keeps its own precision for the cos and sin; wrap large phases first if
-    that is float32.
+    Several times faster than a complex exponential on the CPU; on the GPU
+    the complex exponential is one kernel and gives the same values.
+    ``phase`` keeps its own precision for the cos and sin; wrap large phases
+    first if that is float32.
     """
+    if xp is not np:
+        return xp.exp(1j * phase).astype(dtype, copy=False)
     h = xp.empty(phase.shape, dtype=dtype)
     h.real = xp.cos(phase)
     h.imag = xp.sin(phase)

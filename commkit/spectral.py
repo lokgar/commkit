@@ -18,7 +18,7 @@ from .backend import ArrayType, dispatch
 from .core._signal_adapter import S, adapt_signal
 from .core.signal import Signal
 from .logger import logger
-from .math import _derotate
+from .math import _derotate, _phasor
 
 __all__ = [
     "Spectrogram",
@@ -165,7 +165,7 @@ def shift_frequency(
         frequency, sampling_rate=sampling_rate, num_samples=n
     )
 
-    if not xp.isclose(frequency, actual_offset):
+    if not np.isclose(frequency, actual_offset):
         logger.warning(
             "Requested offset %.3f Hz quantized to %.3f Hz (step %.3f Hz) "
             "to maintain phase continuity.",
@@ -324,17 +324,13 @@ def add_pilot_tone(
     )  # (C, 1)
     amp = xp.sqrt(p_signal * psr_lin)  # (C, 1)
 
-    # Per-channel phase ramp (C, N) in float64; wrap to [-π, π) before exp so
-    # complex64 targets avoid argument-reduction error on long ramps
-    # (cf. frequency.correct_frequency_offset).
-    two_pi = 2.0 * xp.pi
+    # Per-channel phase ramp (C, N) in float64, wrapped by _phasor before the
+    # trigonometry in the samples' precision (long ramps keep their accuracy).
     n = xp.arange(N, dtype=xp.float64)  # (N,)
     f_ch = xp.asarray(actual, dtype=xp.float64).reshape(C, 1)  # (C, 1)
-    phase = two_pi * f_ch * n[None, :] / sampling_rate + phase_init  # (C, N) float64
-    phase = phase - xp.round(phase / two_pi) * two_pi
-
-    dtype_real = xp.float32 if x.dtype == xp.complex64 else xp.float64
-    tone = xp.exp(1j * phase.astype(dtype_real)).astype(x.dtype)  # (C, N)
+    phase = 2.0 * np.pi * f_ch * n[None, :] / sampling_rate + phase_init  # (C, N)
+    tone = _phasor(phase, np.result_type(x.dtype, np.complex64), xp)
+    tone = tone.astype(x.dtype, copy=False)  # (C, N); real input keeps the cosine
     out = x + amp.astype(x.dtype) * tone  # (C, N)
 
     if renormalize:
