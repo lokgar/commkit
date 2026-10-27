@@ -122,7 +122,8 @@ def _block_kernels() -> dict[str, Any]:
     start)``, zero after (``dst`` ``(C, cols)``, possibly a strided view),
     cast to ``dst``'s type as a slice assignment would (double training
     symbols into the complex64 staging buffer).
-    ``put``: ``dst[c, start + j] = src[c, j]``.  ``advance``: ``blk[0] += 1``.
+    ``put``: ``dst[c, start + j] = src[c, j]``, only inside ``dst``'s row.
+    ``advance``: ``blk[0] += 1``.
     """
     if not _BLOCK_KERNELS:
         import cupy as cp
@@ -143,7 +144,8 @@ def _block_kernels() -> dict[str, Any]:
             "raw T dst",
             """
             const long long c = i / cols, j = i % cols;
-            dst[c * n_dst + blk[0] * step + j] = src;
+            const long long col = blk[0] * step + j;
+            if (col < n_dst) dst[c * n_dst + col] = src;  // never past the row
             """,
             "commkit_block_put",
         )
