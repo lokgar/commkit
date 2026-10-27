@@ -111,7 +111,7 @@ def _iir_wn(
 def _design_sos(
     name: str,
     design: Any,
-    args: tuple,
+    args: tuple[Any, ...],
     *,
     sampling_rate: float,
     cutoff: float | tuple[float, float],

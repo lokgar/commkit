@@ -170,7 +170,7 @@ module = [
     "commkit.backend",
     "commkit.core.*",
     "commkit.equalization.*",
-    "commkit.filtering",
+    "commkit.filtering.*",
     "commkit.impairments.*",
     "commkit.logger",
     "commkit.frequency",
