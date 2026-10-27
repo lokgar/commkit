@@ -89,7 +89,7 @@ def _block_fdaf_blind(
             pref = xp.tile(pref[None, :], (C, 1))
         pmask_dev = xp.asarray(np.asarray(pilot_mask).astype(bool))
     if kind == "rde":
-        radii = xp.asarray(np.asarray(radii_np, dtype=np.float64))
+        radii = xp.asarray(np.asarray(radii_np, dtype=np.float32))
 
     e_scatter = xp.zeros((C, run.fftsize), dtype=xp.complex64)
     y_all = xp.empty((C, n_sym), dtype=xp.complex64)
@@ -112,7 +112,7 @@ def _block_fdaf_blind(
             rd = radii[
                 xp.argmin(xp.abs(abs_y[:, :, None] - radii[None, None, :]), axis=-1)
             ]
-            e = y_block * (rd.astype(xp.float32) ** 2 - abs2)
+            e = y_block * (rd**2 - abs2)
         if use_pilots:
             pm = pmask_dev[b_start : b_start + B][None, :]
             e = xp.where(pm, pref[:, b_start : b_start + B] - y_block, e)

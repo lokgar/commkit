@@ -124,7 +124,6 @@ def _bps(symbols: ArrayType, method: BPS, ctx: _Context) -> _Phase:
     # Reference constellation (unit power; a shaped constellation is already
     # on the {s_m/sqrt(E_PS)} grid of the unit-power input).
     const_np = np.asarray(constellation.points, dtype=np.complex128)
-    const_xp = xp.asarray(const_np)  # (M_const,)
 
     # Candidate test phases over one ambiguity interval [0, 2π/M).
     M = int(constellation.rotational_symmetry)
@@ -168,6 +167,7 @@ def _bps(symbols: ArrayType, method: BPS, ctx: _Context) -> _Phase:
     # Pre-compute phasors for all B candidates once (avoid redundant exp per channel)
     dtype_c = xp.complex64 if symbols.dtype == xp.complex64 else xp.complex128
     phasors = xp.exp(-1j * candidates.astype(xp.float64)).astype(dtype_c)  # (B,)
+    const_xp = xp.asarray(const_np.astype(dtype_c))  # (M_const,), the data's precision
 
     # For square QAM (order a perfect square): the nearest constellation point
     # can be found in O(1) per symbol via per-component rounding, eliminating
@@ -208,7 +208,7 @@ def _bps(symbols: ArrayType, method: BPS, ctx: _Context) -> _Phase:
         # layout.  The kernel writes only the minima, so the chunk can be far
         # larger than the tensor-bounded CHUNK_N of the xp path.
         chunk_gpu = ((131072 + block_size - 1) // block_size) * block_size
-        const_c64 = None if is_sq_qam else const_xp.astype(xp.complex64)
+        const_c64 = None if is_sq_qam else const_xp
         for n0 in range(0, N_trunc, chunk_gpu):
             n1 = min(n0 + chunk_gpu, N_trunc)
             if is_sq_qam:
