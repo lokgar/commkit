@@ -63,7 +63,7 @@ Timed runs:
 ```bash
 uv run pytest benchmarks/bench_bps.py --benchmark-only --device=all
 uv run pytest benchmarks/ --benchmark-only --device=all \
-    --benchmark-compare=0005 --benchmark-storage=file://benchmarks/baselines
+    --benchmark-compare=0006 --benchmark-storage=file://benchmarks/baselines
 uv run python benchmarks/record_baseline.py NAME   # record a new baseline
 ```
 
@@ -210,7 +210,7 @@ Docstrings describe the code as it is; a change in behavior updates them in the 
 | --- | --- | --- |
 | Vectorized: filters, resampling, spectra, impairments, metrics, frequency-domain equalizers | NumPy/CuPy via `x, xp, sp = dispatch(samples)` | follows the input |
 | Per-symbol searches over a small table: LLRs (over all points, or per axis for separable QAM), hard decisions of constellations without a square lattice | CPU: Numba `parallel=True` over blocks of symbols (LLRs), chunked NumPy (decisions). GPU: CUDA kernels, one thread per symbol (`llr`, `llr_separable`, `bps_min_d2`'s nearest-point mode); decisions on double input or more than 1024 points run the chunked search on both devices, LLRs above 16 bits per symbol raise on the GPU | follows the input |
-| Sequential recursions: LMS/RLS/CMA/RDE, PLL, Tikhonov, cycle slips, the Mengali-Morelli bootstrap over the lags | Numba `@njit(cache=True, fastmath=True, nogil=True)` | CPU; GPU input does one round trip to the host and back |
+| Sequential recursions: LMS/RLS/CMA/RDE, PLL, Tikhonov, cycle slips, the Mengali-Morelli bootstrap over the lags | Numba `@njit(cache=True, fastmath=True, nogil=True)`; independent rows in parallel (`prange`: the bootstrap's blocks). The equalizers' kernel with inline carrier recovery compiles strict (its unwrap and running sums) and calls its tap and distance loops as separate fast-math functions, which keep their flags when inlined (an `inline="always"` helper takes its caller's) | CPU; GPU input does one round trip to the host and back |
 | Linear recursions: IIR filtering | CPU: Numba kernel without `fastmath`, so double input gives SciPy's result bit for bit. GPU: CUDA kernel (`iir`), blocks filtered in parallel and the state carried across them in two levels, in double precision | follows the input |
 | Hot spots limited by intermediates, launches or round trips | CUDA C++ via CuPy `RawModule` (`commkit/_cuda`) | GPU |
 | Elementwise chains between multi-core FFTs (the fiber solver's Kerr and PMD stages) | NumPy: a Numba `parallel=True` pass there competes with `scipy.fft`'s threads (the solver's Numba passes measured 1.1-1.8x slower end to end, 2^14-2^20); adopt one only on a paired end-to-end A/B | CPU |
@@ -226,7 +226,7 @@ Docstrings describe the code as it is; a change in behavior updates them in the 
 - Build grids, windows and index tables on the data's device (`xp.fft.fftfreq`, `xp.hanning`, `xp.arange`), not on the host and then upload them.
 - **Audit with `tests/plugins/transfer_trace.py`** after touching a GPU path. The contract registry checks only that a result comes back on the input's device, which a silent round trip through the host passes. The plugin records every host-device copy of sample-rate size that commkit makes during a `--device=gpu` run, with its function and lines, and fails on a site missing from its documented list. The documented sites are the round trip of the sequential recursions (table above), the equalizers' continuation state (host copies), the reporting layer (metrics, analysis summaries, plotting), explicit device moves and the transmitted payload, and host values (reference symbols, pilots, tables from host parameters such as a SciPy window) moved to the data's device. A new site is either fixed or added to the list with its reason.
 - Pass whole records to compiled code. There are no Python loops over symbols or small blocks, except inside a CUDA graph.
-- Repeated GPU work with fixed buffers (the block equalizers' blocks, the fiber solver's spans) is replayed from CUDA graphs through `_cuda.graphs.GraphRunner`, the one driver: warm once, capture on the second run, replay; a failed capture raises. Its stream is reused per device and thread, because CuPy's pool caches freed blocks per stream and a fresh stream per call grows the pool every call.
+- Repeated GPU work with fixed buffers (the block equalizers' blocks, the fiber solver's spans) is replayed from CUDA graphs through `_cuda.graphs.GraphRunner`, the one driver: warm once, capture on the second run, replay; a failed capture raises. Per-replay offsets come from a device index inside the graph (the block equalizers' window, staging and stores read the block index and advance it), so a replay does all of a block's work and the host launches one graph per block. Its stream is reused per device and thread, because CuPy's pool caches freed blocks per stream and a fresh stream per call grows the pool every call.
 
 **Kernel policy:**
 
@@ -237,7 +237,7 @@ Docstrings describe the code as it is; a change in behavior updates them in the 
 - `float32` with explicit literals.
 - `--use_fast_math` only per kernel (through `options`), after an accuracy check; the compiler default does not pass it.
 - Short elementwise chains use `ElementwiseKernel` or `cupy.fuse`.
-- Sequential recursions over a whole record are never ported to the GPU; one record has no parallel work per step. Linear recursions (IIR filters) are the exception: the `iir` kernel finds each block's state from a zero start in parallel, carries the states across blocks (per group of blocks, then across groups), and filters the blocks again from them. A short per-block scan may be, as one launch, when it replaces a host round trip per block (`cs_block`, `bps_anchor`); keep its parallel part parallel (float64 is 1/64 of float32 throughput on consumer GPUs).
+- Sequential recursions over a whole record are never ported to the GPU; one record has no parallel work per step. Linear recursions (IIR filters) are the exception: the `iir` kernel finds each block's state from a zero start in parallel, carries the states across blocks (per group of blocks, then across groups), and filters the blocks again from them. A short per-block scan may be, as one launch, when it replaces a host round trip per block (`cs_block`, which speculates its slip decisions in parallel, one pass per changed decision, about one per block on a realistic link; `bps_anchor`); keep its parallel part parallel (float64 is 1/64 of float32 throughput on consumer GPUs).
 
 ---
 
@@ -261,10 +261,10 @@ Docstrings describe the code as it is; a change in behavior updates them in the 
 
 ## 8. Benchmarks
 
-`benchmarks/` tracks the GPU-relevant hot paths. Baselines are committed under `benchmarks/baselines/`. The current reference is `0005` (`gpu_decoder_path`) on the reference machine: RTX 4070 Ti, Ryzen 7 7800X3D, WSL2. It is the first baseline with `bench_mapping.py` and `bench_compute_llr_nonseparable`, recorded after the GPU LLR, mapping and decision kernels; `0004` (`fiber_dbp`) adds the fiber and DBP benchmarks to `0003` (`v2_0`, the 2.0 state); `0002` (`pre_v2`) is the 1.x state. `0002` ran the CPR equalizer and Viterbi-Viterbi benchmarks on workloads that did not converge, so compare those only from `0003` on.
+`benchmarks/` tracks the GPU-relevant hot paths. Baselines are committed under `benchmarks/baselines/`. The current reference is `0006` (`perf_cleanup`) on the reference machine: RTX 4070 Ti, Ryzen 7 7800X3D, WSL2. It is the first baseline with `bench_filters.py`, `bench_pll`, `bench_mengali_morelli_blockwise` and `bench_correct_iq_imbalance`, recorded after the performance pass of the IIR kernel and the block equalizers' in-graph block copies, best of five passes; `0005` (`gpu_decoder_path`) is the first with `bench_mapping.py` and `bench_compute_llr_nonseparable`, recorded after the GPU LLR, mapping and decision kernels; `0004` (`fiber_dbp`) adds the fiber and DBP benchmarks to `0003` (`v2_0`, the 2.0 state); `0002` (`pre_v2`) is the 1.x state. `0002` ran the CPR equalizer and Viterbi-Viterbi benchmarks on workloads that did not converge, so compare those only from `0003` on.
 
 - **Workloads must converge.** A workload the algorithm cannot handle times a failure mode (slip storms, divergence), not the operating point. Every equalizer benchmark asserts its symbol error rate with `benchutils.assert_converged`.
-- **Baselines** are recorded with `benchmarks/record_baseline.py`: each file in its own process, best of three passes. In one full-suite process, small GPU benchmarks after the large equalizer workloads ran 2-12x slower than alone, so never record a baseline from a single `pytest benchmarks/` run.
+- **Baselines** are recorded with `benchmarks/record_baseline.py`: each file in its own process, best of three passes (`--passes`; `0006` used five, as three still kept outliers of 2-4x on a few small benchmarks). In one full-suite process, small GPU benchmarks after the large equalizer workloads ran 2-12x slower than alone, so never record a baseline from a single `pytest benchmarks/` run.
 
 - **IDs** are `[cpu]` or `[gpu]`, meaning the input device.
 - **Timing:**
@@ -274,7 +274,7 @@ Docstrings describe the code as it is; a change in behavior updates them in the 
 - **Tools:** `benchmarks/benchutils.py` provides `CudaEventTimer` and `nvtx_range` for `nsys` profiling.
 - **Logging** is set to WARNING in `benchmarks/conftest.py`.
 - **Trust deltas, not single runs.** A ±20-40% swing has been seen under load. Re-run a suspected regression in isolation, or do a controlled A/B with at least 7 repetitions, alternating old and new per repetition and comparing the paired ratios. When even unchanged benchmarks move, time the changed part itself with `CudaEventTimer` and quote it against the step it sits in.
-- A commit touching a hot path quotes its delta against `0005`. Tolerance is 5% on CPU and 10% on GPU.
+- A commit touching a hot path quotes its delta against `0006`. Tolerance is 5% on CPU and 10% on GPU.
 
 ---
 
@@ -297,7 +297,7 @@ Steps, once CuPy 14.3 (with cp315 wheels for `cupy-cuda13x`) and a fixed `jupyte
    - `pyproject.toml`: `requires-python = ">=3.15"`, classifiers 3.15 only, ruff `target-version = "py315"` (if ruff supports it), raise the dependency minimums to the first releases with 3.15 wheels (`cupy-cuda13x[ctk]>=14.3`, `numba>=0.68`, `numpy>=2.5`, `scipy>=1.18`; recheck each).
    - `ci.yml`: test matrix `python-version: ["3.15"]` (keep both `locked` and `lowest-direct`); the static-analysis, kernel-coverage and notebook jobs on 3.15. `publish.yml`: build on 3.15.
    - `uv lock`; README install requirements; §2 here ("Python 3.12+").
-   - Benchmarks: record a new baseline on 3.15 (it lands in `benchmarks/baselines/Linux-CPython-3.15-64bit/`), compare it with `0005` by a paired A/B of 3.14 against 3.15 on unchanged code, and make it the reference.
+   - Benchmarks: record a new baseline on 3.15 (it lands in `benchmarks/baselines/Linux-CPython-3.15-64bit/`), compare it with `0006` by a paired A/B of 3.14 against 3.15 on unchanged code, and make it the reference.
 3. **Lazy imports (PEP 810)**. Confirm the rules on the interpreter first. As specified, `lazy` is allowed only for module-level imports: not inside functions, class bodies or `try` blocks, and not with `*`.
    - About 60 function-local imports exist to keep `import commkit` light or optional: `import cupy as cp` (11 sites), `import numba` (9), `from . import compiler` in `_cuda` (5), and local imports that break cycles (`Constellation`, `Signal`, `normalize`). Move each to a module-level `lazy import` / `lazy from`. Concentrated in `_cuda/__init__.py`, `backend.py`, `io.py`, `recovery/`, `core/`, `plotting/`.
    - CuPy stays optional: a lazy import of a missing module fails only when used, so every use must stay behind the existing availability checks (`is_cupy_available`, `dispatch`). `backend.py`'s probing needs care: decide per site whether the probe imports eagerly inside `try`.
@@ -312,7 +312,7 @@ Steps, once CuPy 14.3 (with cp315 wheels for `cupy-cuda13x`) and a fixed `jupyte
 
 ### Planned modules
 
-1. **Channel coding** (`coding`, a placeholder package). Soft demapping is GPU-validated on both devices; the closed-form max-log item of "Before channel coding" is optional and does not block. Start with one soft decoder (LDPC) that consumes `compute_llr` output (positive LLR = bit 0) and reports post-FEC BER next to `gmi`, then add encoders. The package stays out of `commkit/__init__.py` until a real encode/decode entry point exists. Decoders are iterative message passing over many codewords: batch codewords on the GPU from the start.
+1. **Channel coding** (`coding`, a placeholder package). Soft demapping is GPU-validated on both devices. Start with one soft decoder (LDPC) that consumes `compute_llr` output (positive LLR = bit 0) and reports post-FEC BER next to `gmi`, then add encoders. The package stays out of `commkit/__init__.py` until a real encode/decode entry point exists. Decoders are iterative message passing over many codewords: batch codewords on the GPU from the start.
 
 ### Nonlinear fiber channel: future features
 
@@ -324,14 +324,3 @@ Each is an addition that leaves the current API unchanged.
 - **Distributed (Raman) amplification and per-span fiber types** in one call (chaining calls already works: every call speaks launch-relative units).
 - **cuFFT callbacks** fusing the linear stage into the transforms (CuPy's support is experimental and compiles with nvcc at run time).
 - **Self-steepening and Raman scattering** for ultra-wideband fields.
-
-### Before channel coding: mapping and soft demapping
-
-The decoder's input path. The GPU items need a CUDA device to time and to test (`--device=all`, against the Numba reference).
-
-- **Closed-form max-log LLRs of Gray QAM** (optional, CPU and GPU; undecided): per bit, the nearest point of each half is found by snapping, O(k) instead of O(sqrt(M)). Valid for a uniform prior only (a shaped prior moves the maximum off the nearest level), with the axis labels a binary-reflected Gray code up to per-bit inversion. A Numba prototype (not in the repository; 2 + 2k metrics per axis: the snapped level, then for each bit the two levels next to the run of the snapped level) matched `llr_separable` to float32 rounding; against the `llr_separable` kernel on the same prepared inputs, 2^20 symbols, 4 cores, median of 11 paired runs: 1.80x (slower) at 16-QAM, 0.91x at 64-QAM, 0.60x at 256-QAM, 0.40x at 1024-QAM. Adopting it means a third LLR path (CPU and CUDA) for maxlog, uniform, 256-QAM and up.
-
-### Performance
-
-- **Block equalizers at small `block_size` on the GPU**: a fixed cost per block; at 256 the GPU only ties the CPU without carrier recovery.
-- **`cs_block` on phases with frequent slip decisions**: one speculation pass per changed decision (about 1 pass per block on a realistic link, more on pathological input). Outside a CUDA graph the Python wrapper (validation, scratch allocation) costs about 18 us per launch.

@@ -65,7 +65,7 @@ CommKit never picks a device for you: data stays where you put it, and each func
   | Frequency-domain equalizers `block_lms`, `block_cma`, `block_rde` | runs on the GPU (CUDA graphs) |
   | Sequential equalizers `lms`, `rls`, `cma`, `rde`; `PLL`, `Tikhonov`, cycle-slip correction | runs on the CPU (Numba): one copy to the host and back, no speedup |
 
-  A sample-by-sample recursion has no parallel work per step. For long records on the GPU, prefer the block equalizers with `block_size=1024` or more. Each block costs a fixed overhead: at 256 the GPU only ties the CPU without carrier recovery, at 2048 it is 6-9x faster. A larger block also lowers the stable `step_size`.
+  A sample-by-sample recursion has no parallel work per step. For long records on the GPU, prefer the block equalizers with `block_size=1024` or more. Each block costs a fixed overhead: at 256 the GPU is about 2x faster than the CPU without carrier recovery and 5x with BPS, at 2048 about 4x and 13x. A larger block also lowers the stable `step_size`.
 - **Short records do not pay off.** Launch overhead dominates below roughly 10⁴-10⁵ samples, where the CPU is as fast.
 - **Batch channels and records.** Pass `(C, N)` arrays rather than looping over channels in Python: one call does the work of C.
 - **Keep scalars on the device inside loops.** `float(x)`, `x.item()` and `if x > 0:` on a CuPy array wait for the GPU and copy. Collect values in an array and transfer once.
