@@ -243,7 +243,6 @@ def _plot_frequency_offset_spectrum(
     mag_spectrum,
     freqs,
     M: int,
-    k_peaks,
     f_estimates,
     search_range=None,
     ax=None,
@@ -264,8 +263,6 @@ def _plot_frequency_offset_spectrum(
         Frequency axis in Hz (``np.fft.fftfreq(nfft) * fs``), ``(nfft,)``.
     M : int
         M-th power used to remove modulation.
-    k_peaks : array_like
-        Peak bin index per channel, ``(C,)`` or scalar.
     f_estimates : list of float
         Per-channel frequency estimates in Hz (before multi-channel averaging).
     search_range : tuple of float, optional
@@ -282,7 +279,6 @@ def _plot_frequency_offset_spectrum(
     """
     mag_spectrum = to_device(mag_spectrum, "cpu")
     freqs = to_device(freqs, "cpu")
-    k_peaks = to_device(k_peaks, "cpu").flatten()
     f_estimates = list(f_estimates)
 
     if mag_spectrum.ndim == 1:
@@ -1088,7 +1084,6 @@ def plot_frequency_offset_spectrum(
         _host(spectrum),
         _host(estimate.spectrum_frequencies),
         estimate.power or 1,
-        np.zeros(1, dtype=int),
         np.atleast_1d(_host(estimate.value)).tolist(),
         search_range=search_range,
         ax=ax,
