@@ -270,6 +270,7 @@ class TestRDERings:
         assert rings[1, 0] == 4.0
         assert np.searchsorted(rings[1, :-1], np.float32(4.0)) == 0
 
+    @pytest.mark.gpu_only
     def test_kernel_matches_cpu(self, backend_device, xp, xpt):
         skip_unless_gpu(backend_device)
         rings = _rde_rings(_rde_ring_radii(Constellation.qam(64)))
