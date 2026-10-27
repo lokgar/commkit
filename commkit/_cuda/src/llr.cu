@@ -7,7 +7,12 @@
 //                  every point;
 //   llr_separable  the 2 sqrt(M) metrics of a separable square lattice, the
 //                  real levels of each axis (every bit depends on one axis,
-//                  and the other axis's factor cancels from its LLR).
+//                  and the other axis's factor cancels from its LLR);
+//   llr_separable_maxlog
+//                  max-log LLRs of a uniform separable lattice in closed
+//                  form, 1 + 2k metrics per axis: the metric of the snapped
+//                  level against the better of the two levels just outside
+//                  its run of equal bits (see mapping/llr.py).
 //
 // Per bit, the LLR is the max over the points whose bit is 0 minus the max
 // over those whose bit is 1 (max-log), or the difference of the log-sums of
@@ -42,6 +47,11 @@
 //                                 bits, MSB first
 //     pos_a   (k_a,)  int32     - position of each of those bits in the
 //                                 symbol's label
+//   llr_separable_maxlog, per axis a: lev_a, lab_a and pos_a as above, and
+//     lo_a, hi_a (k_a, L_a) int32 - per bit and level, the nearest level
+//                                 below / above with the other bit value,
+//                                 -1 for none; L_a >= 2, levels ascending
+//                                 and equally spaced
 //   out       (n, k)  float32   - LLRs (output)
 //
 // Launch contract: 1-D grid of 1-D blocks of LLR_THREADS threads, any grid
@@ -241,6 +251,84 @@ extern "C" __global__ void llr_separable(const complex<float>* __restrict__ x,
             llrs_of(met_re, L_re, lab_re, k_re, pos_re, exact, row);
             const LevelMetric met_im{lev_im, logp_im, xi.imag(), inv_s2};
             llrs_of(met_im, L_im, lab_im, k_im, pos_im, exact, row);
+        }
+        __syncthreads();
+        llr_store_tile(tile, out, base, static_cast<int>(min(static_cast<long long>(blockDim.x), n - base)), k);
+        __syncthreads();
+    }
+}
+
+// Closed-form max-log LLRs of one axis's bits into row[pos[b]].
+__device__ __forceinline__ void axis_maxlog(const float x,
+                                            const float* __restrict__ lev,
+                                            const int* __restrict__ lab,
+                                            const int* __restrict__ lo,
+                                            const int* __restrict__ hi,
+                                            const int* __restrict__ pos,
+                                            const int L,
+                                            const int kb,
+                                            const float inv_s2,
+                                            float* row) {
+    int s = __float2int_rn((x - lev[0]) / (lev[1] - lev[0]));
+    s = min(max(s, 0), L - 1);
+    float t = x - lev[s];
+    // Near a midpoint the rounded quotient can land one level off: keep the
+    // nearer of s and its neighbor towards x.
+    const int s2 = t > 0.0f ? s + 1 : s - 1;
+    if (s2 >= 0 && s2 < L) {
+        const float t2 = x - lev[s2];
+        if (t2 * t2 < t * t) {
+            s = s2;
+            t = t2;
+        }
+    }
+    const float m_own = -(t * t) * inv_s2;
+    const int label = lab[s];
+    for (int b = 0; b < kb; ++b) {
+        float m_other = -LLR_INF;
+        int j = lo[b * L + s];
+        if (j >= 0) {
+            t = x - lev[j];
+            m_other = fmaxf(m_other, -(t * t) * inv_s2);
+        }
+        j = hi[b * L + s];
+        if (j >= 0) {
+            t = x - lev[j];
+            m_other = fmaxf(m_other, -(t * t) * inv_s2);
+        }
+        const bool one = (label >> (kb - 1 - b)) & 1;
+        row[pos[b]] = one ? m_other - m_own : m_own - m_other;
+    }
+}
+
+extern "C" __global__ void llr_separable_maxlog(const complex<float>* __restrict__ x,
+                                                const float* __restrict__ lev_re,
+                                                const int* __restrict__ lab_re,
+                                                const int* __restrict__ lo_re,
+                                                const int* __restrict__ hi_re,
+                                                const int* __restrict__ pos_re,
+                                                const int L_re,
+                                                const int k_re,
+                                                const float* __restrict__ lev_im,
+                                                const int* __restrict__ lab_im,
+                                                const int* __restrict__ lo_im,
+                                                const int* __restrict__ hi_im,
+                                                const int* __restrict__ pos_im,
+                                                const int L_im,
+                                                const int k_im,
+                                                float* __restrict__ out,
+                                                const int n,
+                                                const int k,
+                                                const float inv_s2) {
+    extern __shared__ float tile[];
+    float* row = tile + threadIdx.x * llr_stride(k);
+    for (long long base = static_cast<long long>(blockIdx.x) * blockDim.x; base < n;
+         base += static_cast<long long>(gridDim.x) * blockDim.x) {
+        const long long i = base + threadIdx.x;
+        if (i < n) {
+            const complex<float> xi = x[i];
+            axis_maxlog(xi.real(), lev_re, lab_re, lo_re, hi_re, pos_re, L_re, k_re, inv_s2, row);
+            axis_maxlog(xi.imag(), lev_im, lab_im, lo_im, hi_im, pos_im, L_im, k_im, inv_s2, row);
         }
         __syncthreads();
         llr_store_tile(tile, out, base, static_cast<int>(min(static_cast<long long>(blockDim.x), n - base)), k);
