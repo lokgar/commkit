@@ -14,7 +14,7 @@ import numpy as np
 from .._circular import convolve_periodic
 from .._sequences import barker_sequence, zadoff_chu_sequence, zc_mimo_root
 from ..backend import ArrayType, dispatch, to_device
-from ..filtering import Pulse
+from ..filtering.pulses import Pulse
 from ..mapping import Constellation
 from ..math import db_to_linear, normalize
 from . import generation

@@ -30,7 +30,7 @@ __all__ = ["expand", "generate", "shape_pulse"]
 #              below and by Preamble/SingleCarrierFrame.to_signal())
 #
 # Both operate on the raw symbol array a Signal gets *built from*, not on an
-# existing Signal's samples, so they live here rather than in filtering.py /
+# existing Signal's samples, so they live here rather than in filtering /
 # multirate.py.
 
 

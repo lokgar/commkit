@@ -30,7 +30,7 @@ from ..backend import (
 __all__ = ["Reference", "Signal"]
 
 if TYPE_CHECKING:
-    from ..filtering import Pulse
+    from ..filtering.pulses import Pulse
     from ..mapping import Constellation
 
 
@@ -393,7 +393,7 @@ def _validate_field(name: str, value: Any) -> Any:
                 f"constellation must be a Constellation, got {type(value).__name__}."
             )
     elif name == "pulse":
-        from ..filtering import Pulse
+        from ..filtering.pulses import Pulse
 
         if not isinstance(value, Pulse):
             raise ValueError(f"pulse must be a Pulse, got {type(value).__name__}.")

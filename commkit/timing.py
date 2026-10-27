@@ -21,7 +21,7 @@ from ._sequences import barker_sequence, zadoff_chu_sequence
 from .backend import ArrayType, dispatch, to_device
 from .core import Preamble, Signal
 from .core._signal_adapter import S, adapt_signal, require_integer_sps
-from .filtering import Pulse
+from .filtering.pulses import Pulse
 from .logger import logger
 from .math import _derotate
 
