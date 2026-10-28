@@ -91,34 +91,42 @@ class _StaircaseComponent(_Algebraic):
 
     @property
     def n(self) -> int:
+        """Bits per component codeword, 1022."""
         return _ROWS + _COLUMNS
 
     @property
     def k(self) -> int:
+        """Information bits per component codeword, 990."""
         return self.n - _PARITY
 
     @property
     def length(self) -> int:  # type: ignore[override]
+        """Transmitted bits per codeword."""
         return self.n
 
     @property
     def t(self) -> int:  # type: ignore[override]
+        """Correctable errors of the BCH part."""
         return 3
 
     @property
     def first_root(self) -> int:  # type: ignore[override]
+        """``b = 1``: roots ``beta, beta^3, beta^5``."""
         return 1
 
     @property
     def binary(self) -> bool:  # type: ignore[override]
+        """True: the symbols are bits."""
         return True
 
     @cached_property
     def field(self) -> _Field:  # type: ignore[override]
+        """GF(2^10) of the locators."""
         return _Field(10, 0x409)  # p(x) = 1 + x^3 + x^10, clause A.6
 
     @cached_property
     def locators(self) -> np.ndarray:
+        """The locator ``X_p`` of each bit, a GF(2^10) element as an integer, ``(1022,)``."""
         inverse = np.argsort(_pi_d())
         left = np.concatenate([[1021, 1022], np.arange(1, 511)])
         return np.concatenate([left, 511 + inverse])
@@ -139,8 +147,11 @@ class _StaircaseComponent(_Algebraic):
         return np.concatenate([*rows, extra[None], ~extra[None]]).astype(np.int8)
 
     def correct(self, words: ArrayType) -> tuple[ArrayType, ArrayType]:
-        """Bounded-distance correction of ``(R, 1022)`` words, kept only where
-        all 32 checks then hold (the extension rejects most miscorrections)."""
+        """Bounded-distance correction of ``(R, 1022)`` words.
+
+        A correction is kept only where all 32 checks then hold (the
+        extension rejects most miscorrections).
+        """
         _, xp, _ = dispatch(words)
         fixed, ok = _correct(self, words)
         (h_t,) = _device_tables(
@@ -446,10 +457,12 @@ class _Repeat(_Code):
 
     @property
     def n(self) -> int:
+        """Transmitted bits of the ``count`` codewords."""
         return int(self.code.n * self.count)
 
     @property
     def k(self) -> int:
+        """Information bits of the ``count`` codewords."""
         return int(self.code.k * self.count)
 
     def __repr__(self) -> str:

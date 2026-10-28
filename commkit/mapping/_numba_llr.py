@@ -94,6 +94,7 @@ def llr_kernel(
     exact: bool,
     out: np.ndarray,
 ) -> None:
+    """LLRs from the metrics of every point (see ``_get_numba_llr``)."""
     n = x_re.shape[0]
     M = c_re.shape[0]
     k = idx.shape[1]
@@ -126,6 +127,7 @@ def llr_separable_kernel(
     exact: bool,
     out: np.ndarray,
 ) -> None:
+    """LLRs from the metrics of the levels of each axis."""
     n = x_re.shape[0]
     for t in numba.prange((n + _LLR_TASK - 1) // _LLR_TASK):  # type: ignore[attr-defined,no-untyped-call]
         m_re = np.empty(lev_re.shape[0], dtype=np.float32)
@@ -212,6 +214,7 @@ def llr_separable_maxlog_kernel(
     inv_s2: np.float32,
     out: np.ndarray,
 ) -> None:
+    """Closed-form max-log LLRs of a uniform separable constellation."""
     n = x_re.shape[0]
     for t in numba.prange((n + _LLR_TASK - 1) // _LLR_TASK):  # type: ignore[attr-defined,no-untyped-call]
         for i in range(t * _LLR_TASK, min(n, (t + 1) * _LLR_TASK)):

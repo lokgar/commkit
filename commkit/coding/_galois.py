@@ -88,6 +88,7 @@ class _Field:
         return int(self._tables[0][power % (self.order - 1)])
 
     def mul_scalar(self, a: int, b: int) -> int:
+        """Product of two host elements."""
         if a == 0 or b == 0:
             return 0
         exp, log = self._tables

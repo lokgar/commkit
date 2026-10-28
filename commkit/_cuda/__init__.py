@@ -66,6 +66,7 @@ def _selftest_scale_factory(dtype: str = "float32") -> Callable:
     block = 256
 
     def launch(x: Any, alpha: float) -> Any:
+        """``alpha * x`` elementwise, in the factory's dtype."""
         x = cp.ascontiguousarray(x)
         if x.dtype != np_dtype:
             raise TypeError(f"expected {np_dtype} input, got {x.dtype}")
@@ -210,8 +211,11 @@ def _cs_block_factory() -> Callable:
         cs_H: int,
         max_block: int,
     ) -> Callable[[Any, Any], Any]:
-        """Bind the state buffers of one run, ``C`` channels and blocks of at
-        most ``max_block`` symbols."""
+        """Bind the state buffers of one run.
+
+        ``C`` channels (the length of ``cs_buf_ptr``) and blocks of at most
+        ``max_block`` symbols.
+        """
         C = cs_buf_ptr.shape[0] if cs_buf_ptr.ndim == 1 else -1
         cs_H = int(cs_H)
         for label, arr, dtype, shape in (
@@ -580,6 +584,10 @@ def _iir_factory() -> Callable:
     kernels: dict[tuple[str, str, str], Any] = {}
 
     def kernel(name: str, t: str, u: str) -> Any:
+        """The compiled ``name`` kernel, cached per specialization.
+
+        ``t`` is the sample type and ``u`` the state type of the template.
+        """
         key = (name, t, u)
         if key not in kernels:
             carry = name in ("iir_carry", "iir_group_carry")
@@ -635,6 +643,7 @@ def _iir_factory() -> Callable:
         y = cp.empty_like(x)
 
         def grid(threads: int) -> tuple[int]:
+            """Blocks of ``_IIR_THREADS`` covering ``threads`` threads."""
             return (-(-threads // _IIR_THREADS),)
 
         th = (_IIR_THREADS,)

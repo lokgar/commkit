@@ -117,6 +117,7 @@ def _permute(x: Any, interleaver: Any, inverse: bool, name: str) -> ArrayType:
         )
 
     def build() -> tuple[np.ndarray, ...]:
+        """The permutation and its inverse."""
         p = interleaver.permutation
         return (p, np.argsort(p))
 

@@ -37,12 +37,14 @@ _ZERO = np.float32(0.0)
 
 @_inline
 def phi(x):  # type: ignore[no-untyped-def]
+    """``-log tanh(x / 2)``, ``x`` clipped to ``[1e-7, 30]``."""
     x = min(max(x, _PHI_MIN), _PHI_MAX)
     return -np.log(np.tanh(_HALF * x))
 
 
 @_inline
 def min_sum_row(a, r, cols, e0, e1, scale, offset):  # type: ignore[no-untyped-def]
+    """Update one check row by min-sum (scaled, offset); ``a`` and ``r`` in place."""
     min1 = np.float32(np.inf)
     min2 = np.float32(np.inf)
     idx = -1
@@ -70,6 +72,7 @@ def min_sum_row(a, r, cols, e0, e1, scale, offset):  # type: ignore[no-untyped-d
 
 @_inline
 def sum_product_row(a, r, cols, e0, e1):  # type: ignore[no-untyped-def]
+    """Update one check row by sum-product (``phi`` form); ``a`` and ``r`` in place."""
     total = _ZERO
     neg = False
     for e in range(e0, e1):
@@ -87,6 +90,7 @@ def sum_product_row(a, r, cols, e0, e1):  # type: ignore[no-untyped-def]
 
 @_inline
 def satisfied(a, row_ptr, cols):  # type: ignore[no-untyped-def]
+    """Whether the hard decisions of ``a`` satisfy every check."""
     for row in range(row_ptr.shape[0] - 1):
         parity = False
         for e in range(row_ptr[row], row_ptr[row + 1]):
@@ -101,6 +105,7 @@ def ldpc_layered(  # type: ignore[no-untyped-def]
     app, row_ptr, cols, sum_product, scale, offset, max_iterations,
     early_stop, iters, valid,
 ):  # fmt: skip
+    """Layered LDPC decoding of the rows of ``app`` in place (see ``_get_numba_ldpc``)."""
     m = row_ptr.shape[0] - 1
     for b in numba.prange(app.shape[0]):  # type: ignore[attr-defined,no-untyped-call]
         a = app[b]
@@ -137,6 +142,7 @@ def ldpc_layered(  # type: ignore[no-untyped-def]
 
 @_inline
 def descend(alpha, beta, i, levels):  # type: ignore[no-untyped-def]
+    """SC LLRs from the root down to leaf ``i`` (``f`` for left, ``g`` for right children)."""
     top = levels if i == 0 else 1
     if i:
         while not (i >> (top - 1)) & 1:
@@ -160,6 +166,7 @@ def descend(alpha, beta, i, levels):  # type: ignore[no-untyped-def]
 
 @_inline
 def ascend(beta, scratch, i, bit, levels):  # type: ignore[no-untyped-def]
+    """Propagate leaf ``i``'s decision ``bit`` up through the completed subtrees."""
     scratch[0] = bit
     size = 1
     s = 0
@@ -176,6 +183,7 @@ def ascend(beta, scratch, i, bit, levels):  # type: ignore[no-untyped-def]
 
 @numba.njit(cache=True, nogil=True, parallel=True)
 def polar_scl(llrs, frozen, list_size, crc_g, crc_c, info, k_info, out_u, valid):  # type: ignore[no-untyped-def]
+    """SC list decoding of the rows of ``llrs``, CRC-aided when ``crc_g`` is not empty."""
     rows, n = llrs.shape
     levels = 0
     while (1 << levels) < n:
@@ -271,6 +279,7 @@ _NEG = -1.0e300
 
 @numba.njit(cache=True, nogil=True)
 def branch(llr_t, outputs, s, u):  # type: ignore[no-untyped-def]
+    """Correlation of a trellis branch's outputs with the step's channel LLRs."""
     acc = 0.0
     for j in range(outputs.shape[2]):
         v = llr_t[j]
@@ -290,6 +299,7 @@ def combine(a, b, exact):  # type: ignore[no-untyped-def]
 
 @numba.njit(cache=True, nogil=True)
 def viterbi_one(llr, nxt, outputs, start, end, decisions, metric, nm):  # type: ignore[no-untyped-def]
+    """Viterbi pass from ``start`` to ``end``: the end state and its path metric."""
     steps = llr.shape[0]
     states = nxt.shape[0]
     for s in range(states):
@@ -313,6 +323,7 @@ def viterbi_one(llr, nxt, outputs, start, end, decisions, metric, nm):  # type: 
 
 @numba.njit(cache=True, nogil=True, parallel=True)
 def viterbi(llrs, nxt, outputs, tail_biting, info_steps, out_bits):  # type: ignore[no-untyped-def]
+    """Viterbi decoding of the rows of ``llrs`` (see ``_get_numba_trellis``)."""
     rows, steps = llrs.shape[0], llrs.shape[1]
     states = nxt.shape[0]
     for row in numba.prange(rows):  # type: ignore[attr-defined,no-untyped-call]
@@ -341,6 +352,7 @@ def viterbi(llrs, nxt, outputs, tail_biting, info_steps, out_bits):  # type: ign
 
 @numba.njit(cache=True, nogil=True)
 def bcjr(llr, apriori, nxt, outputs, tail, forced, start, end, exact, app_u, app_c):  # type: ignore[no-untyped-def]
+    """BCJR over one block: a-posteriori LLRs of the inputs and the outputs."""
     steps = llr.shape[0]
     states = nxt.shape[0]
     r = outputs.shape[2]
@@ -405,6 +417,7 @@ def bcjr(llr, apriori, nxt, outputs, tail, forced, start, end, exact, app_u, app
 
 @numba.njit(cache=True, nogil=True, parallel=True)
 def bcjr_blocks(llrs, nxt, outputs, tail, forced, start, end, exact, app_u, app_c):  # type: ignore[no-untyped-def]
+    """BCJR over the rows of ``llrs``, without a-priori information."""
     apriori = np.zeros(llrs.shape[1])
     for row in numba.prange(llrs.shape[0]):  # type: ignore[attr-defined,no-untyped-call]
         bcjr(llrs[row], apriori, nxt, outputs, tail, forced, start, end, exact,
@@ -433,6 +446,7 @@ def rsc(bits, nxt, outputs, tail, parity, tail_bits):  # type: ignore[no-untyped
 
 @numba.njit(cache=True, nogil=True, parallel=True)
 def turbo_encode(bits, pi, nxt, outputs, tail, out):  # type: ignore[no-untyped-def]
+    """LTE turbo encoding of the rows of ``bits`` (see ``_get_numba_turbo``)."""
     k = bits.shape[1]
     for row in numba.prange(bits.shape[0]):  # type: ignore[attr-defined,no-untyped-call]
         p1 = np.empty(k, dtype=np.int8)
@@ -459,6 +473,7 @@ def turbo_encode(bits, pi, nxt, outputs, tail, out):  # type: ignore[no-untyped-
 
 @numba.njit(cache=True, nogil=True, parallel=True)
 def turbo_decode(llrs, pi, nxt, outputs, tail, iterations, exact, scale, out):  # type: ignore[no-untyped-def]
+    """Iterative turbo decoding of the rows of ``llrs`` (see ``_get_numba_turbo``)."""
     k = pi.shape[0]
     steps = k + 3
     forced = np.zeros(steps, dtype=np.bool_)
@@ -515,6 +530,7 @@ _HALF_RANGE = np.int64(1) << (_RANGE_BITS - 1)
 
 @numba.njit(cache=True, nogil=True, inline="always")
 def largest(counts):  # type: ignore[no-untyped-def]
+    """Index of the largest count (the first on ties)."""
     big = 0
     for i in range(1, counts.shape[0]):
         if counts[i] > counts[big]:
@@ -524,6 +540,7 @@ def largest(counts):  # type: ignore[no-untyped-def]
 
 @numba.njit(cache=True, nogil=True, parallel=True)
 def ccdm_match(bits, composition, out):  # type: ignore[no-untyped-def]
+    """Match the rows of ``bits`` to point indices of the composition (range coder)."""
     k = bits.shape[1]
     n = out.shape[1]
     for b in numba.prange(bits.shape[0]):  # type: ignore[attr-defined,no-untyped-call]
@@ -564,6 +581,7 @@ def ccdm_match(bits, composition, out):  # type: ignore[no-untyped-def]
 
 @numba.njit(cache=True, nogil=True, parallel=True)
 def ccdm_dematch(symbols, composition, buffer_bits, bits, valid):  # type: ignore[no-untyped-def]
+    """Dematch the rows of ``symbols`` back to bits, flagging invalid rows."""
     k = bits.shape[1]
     n = symbols.shape[1]
     for b in numba.prange(symbols.shape[0]):  # type: ignore[attr-defined,no-untyped-call]

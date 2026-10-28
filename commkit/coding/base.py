@@ -300,6 +300,7 @@ def decode(llrs: ArrayType, *, code: Any, method: Any = None) -> DecodeResult:
     num_blocks = x2.shape[-1] // code.n
 
     def shaped(a: ArrayType | None, size: int) -> ArrayType | None:
+        """Per-block rows back to the input's layout, ``size`` per block."""
         if a is None:
             return None
         return restore_1d(was_1d, a.reshape(x2.shape[0], num_blocks * size))
