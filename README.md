@@ -127,12 +127,12 @@ With [`uv`](https://github.com/astral-sh/uv), use `uv pip install` in place of `
 [`examples/`](https://github.com/lokgar/commkit/tree/main/examples) is a course in 26 Jupyter notebooks, one topic each, in teaching order (install the `notebook` extra and run `jupyter lab examples`):
 
 - **00-05, signals and DSP**: the `Signal`, constellations and bit mapping, spectra, filters, pulse shaping and matched filtering, resampling;
-- **06-08, channel and performance**: AWGN and the metrics (SNR, BER, LLRs, GMI), laser phase noise, front-end impairments;
-- **09-16, receiver algorithms**: frame synchronization, frequency-offset estimation, blind and pilot-aided carrier recovery, linear, adaptive and blind equalization, polarization demultiplexing;
-- **17-19, optical fiber systems**: chromatic dispersion, the nonlinear fiber with digital backpropagation, and an end-to-end coherent transceiver;
-- **20-25, characterization**: carrier phase and laser linewidth measurements, with templates for real captures.
+- **06-10, channel, coding and performance**: AWGN and the metrics (SNR, BER, LLRs, GMI), channel coding, probabilistic shaping and coded modulation, laser phase noise, front-end impairments;
+- **11-18, receiver algorithms**: frame synchronization, frequency-offset estimation, blind and pilot-aided carrier recovery, linear, adaptive and blind equalization, polarization demultiplexing;
+- **19-22, optical fiber systems**: chromatic dispersion, the nonlinear fiber with digital backpropagation, FEC in optical standards, and an end-to-end coherent transceiver;
+- **23-28, characterization**: carrier phase and laser linewidth measurements, with templates for real captures.
 
-[`examples/README.md`](https://github.com/lokgar/commkit/blob/main/examples/README.md) lists every notebook with its topics.  The quickstart above appears cell by cell in `00-getting-started` and `14-adaptive-equalization`.  The notebooks are committed without outputs and run in CI.
+[`examples/README.md`](https://github.com/lokgar/commkit/blob/main/examples/README.md) lists every notebook with its topics.  The quickstart above appears cell by cell in `00-getting-started` and `16-adaptive-equalization`.  The notebooks are committed without outputs and run in CI.
 
 ## Development
 

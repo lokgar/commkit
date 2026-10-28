@@ -547,7 +547,7 @@ def plot_carrier_phase_characterization(
 
     :func:`plot_carrier_phase_decomposition`, :func:`plot_frequency_drift`,
     :func:`plot_frequency_noise_psd` and :func:`plot_allan_deviation` in one
-    2x2 figure (``examples/20-carrier-phase-characterization.ipynb`` shows
+    2x2 figure (``examples/23-carrier-phase-characterization.ipynb`` shows
     the whole chain).
 
     Parameters
