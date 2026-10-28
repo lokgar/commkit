@@ -19,15 +19,13 @@ nearest levels, so it keeps the level metrics.
 
 from __future__ import annotations
 
-import weakref
 from collections.abc import Callable
-from types import ModuleType
-from typing import TYPE_CHECKING, Any, NamedTuple
+from typing import TYPE_CHECKING, NamedTuple
 
 import numpy as np
 
 from .. import _cuda
-from ..backend import ArrayType, dispatch
+from ..backend import ArrayType, _device_tables, dispatch
 from ..core._signal_adapter import adapt_signal
 from ..core.signal import Signal
 from ..logger import logger
@@ -117,34 +115,6 @@ _NUMBA_LLR: dict[str, Callable[..., None]] = {}
 _EXACT_FLOOR = np.float32(1e-26)
 # Symbols per prange task: amortizes the scratch buffers of the CPU kernels.
 _LLR_TASK = 256
-
-# Device copies of the CUDA kernels' tables (points, labels, log prior), per
-# constellation and then per (table kind, CUDA device id): built on the first
-# call instead of on every one.  Weak keys, so a dropped constellation frees
-# its tables; equal constellations share them.
-_DEVICE_TABLES: weakref.WeakKeyDictionary[
-    Constellation, dict[tuple[str, int], tuple[Any, ...]]
-] = weakref.WeakKeyDictionary()
-
-
-def _device_tables(
-    owner: Constellation | None,
-    kind: str,
-    xp: ModuleType,
-    build: Callable[[], tuple[np.ndarray, ...]],
-) -> tuple[Any, ...]:
-    """``build()``'s host tables on the current CUDA device, cached per ``owner``.
-
-    ``owner=None`` (no constellation to cache on) copies them every call.
-    """
-    if owner is None:
-        return tuple(xp.asarray(a) for a in build())
-    per_owner = _DEVICE_TABLES.setdefault(owner, {})
-    key = (kind, int(xp.cuda.Device().id))
-    tables = per_owner.get(key)
-    if tables is None:
-        tables = per_owner[key] = tuple(xp.asarray(a) for a in build())
-    return tables
 
 
 def _get_numba_llr(name: str = "llr") -> Callable[..., None]:

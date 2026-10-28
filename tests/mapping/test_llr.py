@@ -264,16 +264,16 @@ class TestLLRKernel:
             )
 
     def test_tables_are_cached_per_constellation(self, xp: Any) -> None:
-        from commkit.mapping import llr as llr_module
+        from commkit import backend
 
         c = Constellation.qam(64).shaped(nu=0.02)
         x = xp.asarray(_noisy(c, (100,), 0.1, seed=1))
         mapping.compute_llr(x, noise_var=0.05, constellation=c)
-        tables = dict(llr_module._DEVICE_TABLES[c])
+        tables = dict(backend._DEVICE_TABLES[c])
         mapping.compute_llr(x, noise_var=0.01, constellation=c, method="exact")
-        assert llr_module._DEVICE_TABLES[c].keys() == tables.keys()
+        assert backend._DEVICE_TABLES[c].keys() == tables.keys()
         for key, value in tables.items():
-            assert llr_module._DEVICE_TABLES[c][key] is value
+            assert backend._DEVICE_TABLES[c][key] is value
 
 
 class TestComputeLLRSignalIntegration:

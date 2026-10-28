@@ -15,6 +15,8 @@ block that computes in single precision.
 
 import types
 import warnings
+import weakref
+from collections.abc import Callable
 from functools import cache
 from typing import Any, cast
 
@@ -213,6 +215,38 @@ def to_device(data: Any, device: str) -> ArrayType:
 
     else:
         raise ValueError(f"Unknown device: {device.upper()}")
+
+
+# Device copies of the host tables of value objects (a constellation's
+# points and labels, a code's parity checks), per owner and then per (table
+# kind, CUDA device id): built on the first call instead of on every one.
+# Weak keys, so a dropped object frees its tables; equal objects share them.
+_DEVICE_TABLES: weakref.WeakKeyDictionary[
+    Any, dict[tuple[str, int], tuple[Any, ...]]
+] = weakref.WeakKeyDictionary()
+
+
+def _device_tables(
+    owner: Any,
+    kind: str,
+    xp: types.ModuleType,
+    build: Callable[[], tuple[np.ndarray, ...]],
+) -> tuple[Any, ...]:
+    """``build()``'s host tables on the current CUDA device, cached per ``owner``.
+
+    ``owner`` is a hashable, weakly referenceable value object (a frozen
+    dataclass); ``None`` (nothing to cache on) copies the tables every call.
+    Used by the GPU paths of :mod:`commkit.mapping.llr` and
+    :mod:`commkit.coding`.
+    """
+    if owner is None:
+        return tuple(xp.asarray(a) for a in build())
+    per_owner = _DEVICE_TABLES.setdefault(owner, {})
+    key = (kind, int(xp.cuda.Device().id))
+    tables = per_owner.get(key)
+    if tables is None:
+        tables = per_owner[key] = tuple(xp.asarray(a) for a in build())
+    return tables
 
 
 def dispatch(
