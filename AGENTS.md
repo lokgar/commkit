@@ -43,20 +43,38 @@ uv run pytest --device=gpu -p tests.plugins.transfer_trace \
     --ignore=tests/test_examples.py      # transfer audit (see Performance); fails on an undocumented transfer
 ```
 
-**CUDA sanitizer** (see Kernel policy): NVIDIA's `compute-sanitizer` checks the kernels for out-of-bounds and misaligned accesses (`memcheck`), shared-memory races (`racecheck`), barrier misuse (`synccheck`) and reads of uninitialized device memory (`initcheck`). It is not a dependency: install its wheel, matching the CUDA major version of `cupy-cuda13x`, into a scratch directory and run the GPU tests of the kernels under each tool (10-100x slower):
+**CUDA sanitizer** (see Kernel policy): NVIDIA's `compute-sanitizer` checks the kernels for out-of-bounds and misaligned accesses (`memcheck`), shared-memory races (`racecheck`), barrier misuse (`synccheck`) and reads of uninitialized device memory (`initcheck`). It is not a dependency: install its wheel, matching the CUDA major version of `cupy-cuda13x`, into a scratch directory and run the GPU tests of the kernels under each tool (10-100x slower; the whole pass takes about 50 minutes on the reference machine):
 
 ```bash
 uv pip install --target /tmp/sanitizer "nvidia-cuda-sanitizer-api==13.*"
+S=/tmp/sanitizer/nvidia/cu13/bin/compute-sanitizer
+OWN=(--kernel-name kns=commkit_ --kernel-name kns=bps_ --kernel-name kns=cs_block \
+     --kernel-name kns=llr --kernel-name kns=iir_ --kernel-name kns=selftest)
+FILES="tests/test_cuda_infra.py tests/equalization/test_cs_kernel.py tests/equalization/test_bps_kernel.py
+  tests/equalization/test_blind.py tests/mapping/test_llr.py tests/mapping/test_gray.py tests/recovery/test_bps.py
+  tests/test_filtering.py tests/test_fiber.py tests/impairments/channel/test_channel_nonlinear.py"
+BLOCK=$(.venv/bin/python -m pytest --device=gpu -q --collect-only tests/equalization/test_block.py | grep '::')
 for tool in memcheck racecheck synccheck initcheck; do
-  /tmp/sanitizer/nvidia/cu13/bin/compute-sanitizer --tool $tool --leak-check full \
-    .venv/bin/python -m pytest --device=gpu -p no:cacheprovider \
-    tests/equalization/test_cs_kernel.py tests/equalization/test_bps_kernel.py \
-    tests/equalization/test_block.py tests/equalization/test_blind.py tests/mapping/test_llr.py \
-    tests/test_filtering.py tests/test_fiber.py tests/impairments/channel/test_channel_nonlinear.py
+  filter=(); [[ $tool == racecheck || $tool == synccheck ]] && filter=("${OWN[@]}")
+  for target in $FILES $BLOCK; do
+    "$S" --tool $tool "${filter[@]}" .venv/bin/python -m pytest --device=gpu -p no:cacheprovider -q "$target" \
+      2>&1 | grep -E "SUMMARY|passed|failed"
+  done
 done
 ```
 
-Under WSL2 the sanitizer needs the Windows GPU debugger interface; without it every run stops at "Failed to initialize WDDM debugger interface". Enable it once by running `EnableDebuggerInterface.bat` as a Windows administrator; the script comes with the Windows CUDA Toolkit, not with the Linux wheel.
+- **One process per file, and one per test for `test_block.py`.** Under the sanitizer each CUDA-graph test of the block equalizers gets slower the more tests ran before it in the process (one took 10 minutes after 26 others, 61 s alone).
+- **`racecheck` and `synccheck` check commkit's kernels only** (`OWN`: the `.cu` kernels and the `commkit_*` ElementwiseKernels). Unfiltered, racecheck tracks every CuPy and cuFFT launch of the 100k-symbol graph tests and grows by about 0.1 GB of host memory per second until the machine runs out. Those two tools concern shared memory and barriers, which only the `.cu` kernels use; `memcheck` and `initcheck` run unfiltered, as a CuPy kernel reading a buffer commkit never filled is a commkit bug.
+- **No `--leak-check full`.** CuPy's pool holds device memory until exit, so the check finds nothing in commkit, and with it every CuPy process exits with SIGSEGV after the summary (`import cupy as cp; cp.arange(3).sum()` alone does).
+- **The wheel must be complete.** The 13.2 and 13.3 wheels lack the launcher helpers (`TreeLauncherSubreaper`, `TreeLauncherTargetLdPreloadHelper`) and stop every target, even `/bin/echo`, with "Target application terminated before first instrumented API call". The 13.4 wheel has them and runs on a 13.3 driver. If a driver needs an older version, take NVIDIA's redistributable archive (`developer.download.nvidia.com/compute/cuda/redist/cuda_sanitizer_api/`), which is complete.
+
+Under WSL2 the sanitizer needs the Windows GPU debugger interface; without it every run stops at "Error: Device not supported" (older versions: "Failed to initialize WDDM debugger interface"). Enable it once from an elevated Windows prompt, then restart WSL (`wsl --shutdown`):
+
+```bat
+reg add "HKLM\SOFTWARE\NVIDIA Corporation\GPUDebugger" /v EnableInterface /t REG_DWORD /d 1 /f
+```
+
+Windows also kills a kernel that runs longer than `TdrDelay` seconds (`HKLM\System\CurrentControlSet\Control\GraphicsDrivers`, 8 on the reference machine, which the whole pass stays under); raise it if a sanitized launch times out.
 
 **Commit gate.** CI fails on any of these, so run all of them before every commit, with `ruff format` last:
 
@@ -326,10 +344,6 @@ Steps, once CuPy 14.3 (with cp315 wheels for `cupy-cuda13x`) and a fixed `jupyte
    - UTF-8 mode is the default from 3.15 (PEP 686): check `io` and any `open()` without `encoding=`.
    - `strptime` with a day and no year now raises (the `jupyter_client` failure above); grep commkit for date parsing.
    - The 3.15 sampling profiler (PEP 799) is a candidate tool for the CPU hot paths next to `nsys`; mention it in §8 if it proves useful.
-
-### CUDA sanitizer pass (blocked on the WDDM debugger interface)
-
-The kernels have not run under `compute-sanitizer` (§2): on the reference machine (WSL2) it needs the Windows GPU debugger interface, which is not enabled yet. The review that stands in for it (every `.cu` kernel and wrapper read for bounds, barriers, races and overflow; empty, one-sample and NaN/Inf inputs; 4 KB guard zones around every array the library allocated during the GPU kernel tests, 565 tests and 57,723 arrays, none touched) catches out-of-bounds writes but not out-of-bounds reads or reads of uninitialized memory. Once the interface is enabled, run the four tools of §2, fix what they report, and remove this item.
 
 ### Planned modules
 
