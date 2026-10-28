@@ -43,6 +43,21 @@ uv run pytest --device=gpu -p tests.plugins.transfer_trace \
     --ignore=tests/test_examples.py      # transfer audit (see Performance); fails on an undocumented transfer
 ```
 
+**CUDA sanitizer** (see Kernel policy): NVIDIA's `compute-sanitizer` checks the kernels for out-of-bounds and misaligned accesses (`memcheck`), shared-memory races (`racecheck`), barrier misuse (`synccheck`) and reads of uninitialized device memory (`initcheck`). It is not a dependency: install its wheel, matching the CUDA major version of `cupy-cuda13x`, into a scratch directory and run the GPU tests of the kernels under each tool (10-100x slower):
+
+```bash
+uv pip install --target /tmp/sanitizer "nvidia-cuda-sanitizer-api==13.*"
+for tool in memcheck racecheck synccheck initcheck; do
+  /tmp/sanitizer/nvidia/cu13/bin/compute-sanitizer --tool $tool --leak-check full \
+    .venv/bin/python -m pytest --device=gpu -p no:cacheprovider \
+    tests/equalization/test_cs_kernel.py tests/equalization/test_bps_kernel.py \
+    tests/equalization/test_block.py tests/equalization/test_blind.py tests/mapping/test_llr.py \
+    tests/test_filtering.py tests/test_fiber.py tests/impairments/channel/test_channel_nonlinear.py
+done
+```
+
+Under WSL2 the sanitizer needs the Windows GPU debugger interface; without it every run stops at "Failed to initialize WDDM debugger interface". Enable it once by running `EnableDebuggerInterface.bat` as a Windows administrator; the script comes with the Windows CUDA Toolkit, not with the Linux wheel.
+
 **Commit gate.** CI fails on any of these, so run all of them before every commit, with `ruff format` last:
 
 ```bash
@@ -233,7 +248,8 @@ Docstrings describe the code as it is; a change in behavior updates them in the 
 - A `.cu` kernel needs a benchmark showing that CuPy is limited by intermediates, launch count or round trips.
 - `_cuda.get_kernel` returns the launch wrapper or raises (compile, load or a bad specialization); it is called only on CuPy input.
 - It optimizes a CPU reference (Numba or NumPy) and is tested against it with `--device=all`.
-- Wrappers check dtype, contiguity, shape and size before launch.
+- Wrappers check dtype, contiguity, shape and size before launch, and never launch a zero-size grid (a launch error): empty input returns an empty result, or raises where the kernel's caller never has one (`cs_block`, `bps_anchor`). Grid dimensions y and z are limited to 65535: a kernel that maps channels or rows there walks the rest in a grid-stride loop (`bps_min_d2`).
+- A new or changed kernel runs its GPU tests under `compute-sanitizer` (§2) before release.
 - `float32` with explicit literals.
 - `--use_fast_math` only per kernel (through `options`), after an accuracy check; the compiler default does not pass it.
 - Short elementwise chains use `ElementwiseKernel` or `cupy.fuse`.
@@ -309,6 +325,10 @@ Steps, once CuPy 14.3 (with cp315 wheels for `cupy-cuda13x`) and a fixed `jupyte
    - UTF-8 mode is the default from 3.15 (PEP 686): check `io` and any `open()` without `encoding=`.
    - `strptime` with a day and no year now raises (the `jupyter_client` failure above); grep commkit for date parsing.
    - The 3.15 sampling profiler (PEP 799) is a candidate tool for the CPU hot paths next to `nsys`; mention it in §8 if it proves useful.
+
+### CUDA sanitizer pass (blocked on the WDDM debugger interface)
+
+The kernels have not run under `compute-sanitizer` (§2): on the reference machine (WSL2) it needs the Windows GPU debugger interface, which is not enabled yet. The review that stands in for it (every `.cu` kernel and wrapper read for bounds, barriers, races and overflow; empty, one-sample and NaN/Inf inputs; 4 KB guard zones around every array the library allocated during the GPU kernel tests, 565 tests and 57,723 arrays, none touched) catches out-of-bounds writes but not out-of-bounds reads or reads of uninitialized memory. Once the interface is enabled, run the four tools of §2, fix what they report, and remove this item.
 
 ### Planned modules
 
