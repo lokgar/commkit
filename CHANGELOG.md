@@ -2,6 +2,20 @@
 
 Notable changes to CommKit, newest first. Performance figures are from the reference machine (RTX 4070 Ti, Ryzen 7 7800X3D, WSL2) unless stated otherwise, as a ratio of new to old time (below 1 is faster).
 
+## [Unreleased]
+
+### Changes that may need code updates
+
+- **`Reference` has two more fields**, `info_bits` and `code_block`. `bits` are the bits on the air; `info_bits` are the source bits before coding. Without coding `info_bits` is `bits` itself and `code_block` is `(1, 1)`, so existing code that reads `reference.bits` is unaffected. Code that builds a `Reference` positionally keeps working.
+
+### Added
+
+- **`commkit.coding`**, the channel-coding module: `encode(bits, code=...)` and `decode(llrs, code=..., method=...)`, dispatched on a code object, returning a `DecodeResult` (decoded bits, per-block success check and iterations).
+  - `LinearBlockCode` from a generator or parity-check matrix, and `LinearBlockCode.hamming(r, extended=, length=)` for Hamming codes, including the inner codes of 400ZR, Hamming(128,119), and of IEEE 802.3dj, Hamming(128,120).
+  - Decoders `Syndrome(max_weight=)` (coset leaders; `max_weight=1` makes an extended Hamming code correct one error and detect two) and `MaximumLikelihood()` (exhaustive, for small codes).
+- **Coded payloads:** `generate(..., code=)` and `SingleCarrierFrame(payload_code=)` encode random information bits before mapping. The reference keeps both bit streams.
+- **`metrics.fer`**, the block error rate, and **`metrics.ngmi`**, the normalized GMI used as the soft-decision FEC threshold. Post-FEC BER is `ber(res.bits, reference.info_bits)`.
+
 ## [2.3.0] - 2026-10-28
 
 A performance and robustness release. GPU block equalizers and the CPU decision-directed equalizers with inline carrier recovery run substantially faster. `iir_filter` keeps single precision on both devices. Max-log LLRs of uniform square QAM have a closed form. The CUDA code was reviewed end to end. A few changes need code updates; see the first section.
@@ -109,6 +123,7 @@ See the [GitHub release](https://github.com/lokgar/commkit/releases/tag/v1.1.0) 
 
 First release. See the [GitHub release](https://github.com/lokgar/commkit/releases/tag/v1.0.0).
 
+[Unreleased]: https://github.com/lokgar/commkit/compare/v2.3.0...HEAD
 [2.3.0]: https://github.com/lokgar/commkit/compare/v2.2.0...v2.3.0
 [2.2.0]: https://github.com/lokgar/commkit/compare/v2.1.0...v2.2.0
 [2.1.0]: https://github.com/lokgar/commkit/compare/v2.0.0...v2.1.0

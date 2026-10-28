@@ -91,6 +91,65 @@ class TestSignalCreation:
             Reference(symbols=xp.zeros((2, 4)), bits=xp.zeros(8))
         assert Reference(symbols=[1.0, -1.0]).bits is None
 
+    def test_reference_info_bits_default_to_bits(self, xp):
+        """Nothing transformed the bits: info_bits is the same array."""
+        bits = xp.zeros(8, dtype=xp.int8)
+        ref = Reference(symbols=xp.zeros(4), bits=bits)
+        assert ref.info_bits is ref.bits
+        assert ref.code_block == (1, 1)
+        assert Reference(symbols=xp.zeros(4)).info_bits is None
+
+    def test_reference_coded_validation(self, xp):
+        sym, bits = xp.zeros((2, 7)), xp.zeros((2, 14), dtype=xp.int8)
+        info = xp.zeros((2, 8), dtype=xp.int8)
+        ref = Reference(symbols=sym, bits=bits, info_bits=info, code_block=(7, 4))
+        assert ref.code_block == (7, 4) and ref.info_bits is info
+        with pytest.raises(ValueError, match="together"):
+            Reference(symbols=sym, bits=bits, info_bits=info)
+        with pytest.raises(ValueError, match="needs bits"):
+            Reference(symbols=sym, info_bits=info, code_block=(7, 4))
+        with pytest.raises(ValueError, match="needs 8"):
+            Reference(symbols=sym, bits=bits, info_bits=info[:, :4], code_block=(7, 4))
+        with pytest.raises(ValueError, match="code_block"):
+            Reference(symbols=sym, bits=bits, info_bits=info, code_block=(7, 0))
+        with pytest.raises(ValueError, match="channel axis"):
+            Reference(symbols=sym, bits=bits, info_bits=info[0], code_block=(7, 4))
+
+    def test_reference_to_keeps_sharing(self, xp):
+        ref = Reference(symbols=np.zeros(4), bits=np.zeros(8, np.int8))
+        moved = ref.to("gpu" if xp is not np else "cpu")
+        assert moved.info_bits is moved.bits
+        coded = Reference(
+            symbols=np.zeros(7),
+            bits=np.zeros(14, np.int8),
+            info_bits=np.ones(8, np.int8),
+            code_block=(7, 4),
+        ).to("gpu" if xp is not np else "cpu")
+        assert (
+            device_of(coded.info_bits)
+            == device_of(coded.bits)
+            == device_of(xp.zeros(1))
+        )
+        assert coded.code_block == (7, 4)
+        assert int(coded.info_bits.sum()) == 8
+        assert Reference(symbols=np.zeros(4)).to("cpu").bits is None
+
+    def test_reference_head_keeps_whole_blocks(self, xp, xpt):
+        """head() trims the source bits to the blocks the kept bits carry whole."""
+        bits = xp.arange(28) % 2
+        info = xp.arange(16) % 3
+        ref = Reference(
+            symbols=xp.zeros(14), bits=bits, info_bits=info, code_block=(7, 4)
+        )
+        head = ref.head(9)  # 18 bits: two whole blocks of 7
+        xpt.assert_array_equal(head.bits, bits[:18])
+        xpt.assert_array_equal(head.info_bits, info[:8])
+        assert head.code_block == (7, 4)
+        plain = Reference(symbols=xp.zeros(4), bits=bits[:8]).head(3)
+        assert plain.info_bits is plain.bits and plain.bits.shape == (6,)
+        assert Reference(symbols=xp.zeros(4)).head(2).symbols.shape == (2,)
+        assert ref.head(14) is ref
+
     @pytest.mark.gpu_only
     def test_reference_rejects_mixed_devices(self, xp):
         with pytest.raises(ValueError, match="same device"):

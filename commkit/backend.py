@@ -232,17 +232,19 @@ def _device_tables(
     xp: types.ModuleType,
     build: Callable[[], tuple[np.ndarray, ...]],
 ) -> tuple[Any, ...]:
-    """``build()``'s host tables on the current CUDA device, cached per ``owner``.
+    """``build()``'s host tables on ``xp``'s device, cached per ``owner``.
 
-    ``owner`` is a hashable, weakly referenceable value object (a frozen
-    dataclass); ``None`` (nothing to cache on) copies the tables every call.
-    Used by the GPU paths of :mod:`commkit.mapping.llr` and
+    On the current CUDA device for CuPy; for NumPy the host tables
+    themselves, so a table derived from the owner's fields is also built
+    once.  ``owner`` is a hashable, weakly referenceable value object (a
+    frozen dataclass); ``None`` (nothing to cache on) builds the tables
+    every call.  Used by :mod:`commkit.mapping.llr` and
     :mod:`commkit.coding`.
     """
     if owner is None:
         return tuple(xp.asarray(a) for a in build())
     per_owner = _DEVICE_TABLES.setdefault(owner, {})
-    key = (kind, int(xp.cuda.Device().id))
+    key = (kind, -1 if xp is np else int(xp.cuda.Device().id))
     tables = per_owner.get(key)
     if tables is None:
         tables = per_owner[key] = tuple(xp.asarray(a) for a in build())

@@ -88,13 +88,13 @@ CommKit never picks a device for you: data stays where you put it, and each func
 | [`commkit.frequency`](https://github.com/lokgar/commkit/blob/main/commkit/frequency.py) | `estimate_frequency_offset` / `correct_frequency_offset` with `MthPower`, `MengaliMorelli`, `PilotSymbols` and `BiasTone`; static and blockwise. |
 | [`commkit.recovery`](https://github.com/lokgar/commkit/tree/main/commkit/recovery) | `estimate_carrier_phase` / `correct_carrier_phase` with `ViterbiViterbi`, `BPS`, `PLL`, `Tikhonov`, `DataAided`, `PilotAided`, `PilotTone(s)`; cycle-slip correction; `resolve_phase_ambiguity` and `resolve_channel_permutation`. |
 | [`commkit.equalization`](https://github.com/lokgar/commkit/tree/main/commkit/equalization) | Sequential `lms`, `rls`, `cma`, `rde` (Numba) and frequency-domain `block_lms`, `block_cma`, `block_rde` (CuPy, CUDA graphs), butterfly MIMO, inline carrier recovery (`cpr=PLL()` / `BPS()`), continuation with `state=`, `zf_equalizer`, polarization-tone demultiplexing. |
-| [`commkit.metrics`](https://github.com/lokgar/commkit/blob/main/commkit/metrics.py) | `evm`, `snr`, `ber`, `ser`, `gmi`, `mi`, including shaped constellations; host values per channel. |
+| [`commkit.metrics`](https://github.com/lokgar/commkit/blob/main/commkit/metrics.py) | `evm`, `snr`, `ber`, `fer`, `ser`, `gmi`, `ngmi`, `mi`, including shaped constellations; pre-FEC and post-FEC; host values per channel. |
 | [`commkit.analysis`](https://github.com/lokgar/commkit/tree/main/commkit/analysis) | Laser and carrier-phase characterization: `estimate_linewidth` (increment slope, β-separation, delayed self-heterodyne FM-PSD / increment / Lorentzian), FM-noise PSDs, drift separation, Allan deviation. |
 | [`commkit.math`](https://github.com/lokgar/commkit/blob/main/commkit/math.py) | `rms`, `normalize`, dB conversions. |
 | [`commkit.smoothing`](https://github.com/lokgar/commkit/blob/main/commkit/smoothing.py) | Display and estimation smoothers (moving average, Savitzky-Golay, 2-D density). Signal-chain filters are in `filtering`. |
 | [`commkit.io`](https://github.com/lokgar/commkit/blob/main/commkit/io.py) | `save_npz` / `load_npz` for Signals. |
 | [`commkit.plotting`](https://github.com/lokgar/commkit/tree/main/commkit/plotting) | Constellations, eye diagrams, spectra, filter responses, equalizer convergence, and synchronization and laser diagnostics that draw the estimates. Imported on first use. |
-| [`commkit.coding`](https://github.com/lokgar/commkit/tree/main/commkit/coding) | Channel coding and FEC: **planned, not implemented**. |
+| [`commkit.coding`](https://github.com/lokgar/commkit/tree/main/commkit/coding) | Channel coding: `encode` / `decode` dispatched on a code object, `LinearBlockCode` (Hamming, extended and shortened), syndrome and maximum-likelihood decoding. Coded payloads through `generate(..., code=)`. Further codes (LDPC, algebraic, polar, convolutional, turbo) and distribution matching are **planned, not implemented**. |
 
 Importing `commkit` has no side effects: it configures no logging, Matplotlib or warning filters, and does not touch the GPU.
 

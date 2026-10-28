@@ -5,6 +5,7 @@ from typing import Any
 import numpy as np
 import pytest
 
+from commkit.coding import LinearBlockCode, encode
 from commkit.core import generate, generation
 from commkit.filtering import RC, RRC, Rect, SmoothRect
 from commkit.mapping import Constellation
@@ -224,3 +225,59 @@ class TestGenerateDevice:
         )
         assert sig.samples.dtype == ref.samples.dtype
         np.testing.assert_allclose(to_numpy(sig.samples), ref.samples, atol=1e-5)
+
+
+class TestGenerateCoded:
+    """generate(..., code=): information bits encoded, the coded bits mapped."""
+
+    def test_reference_holds_both_bit_streams(
+        self, backend_device: str, xp: Any
+    ) -> None:
+        code = LinearBlockCode.hamming(3)
+        c = Constellation.qam(16)
+        sig = generate(
+            c,
+            700,
+            symbol_rate=1e6,
+            num_channels=2,
+            code=code,
+            rng=0,
+            device=backend_device,
+        )
+        ref = sig.reference
+        assert ref.code_block == (7, 4)
+        assert ref.bits.shape == (2, 2800) and ref.info_bits.shape == (2, 1600)
+        assert isinstance(ref.info_bits, xp.ndarray)
+        np.testing.assert_array_equal(
+            to_numpy(encode(ref.info_bits, code=code)), to_numpy(ref.bits)
+        )
+        np.testing.assert_array_equal(to_numpy(c.map(ref.bits)), to_numpy(ref.symbols))
+        cpu = generate(c, 700, symbol_rate=1e6, num_channels=2, code=code, rng=0)
+        np.testing.assert_array_equal(to_numpy(ref.info_bits), cpu.reference.info_bits)
+
+    def test_single_channel_layout(self) -> None:
+        sig = generate(
+            Constellation.psk(4), 14, symbol_rate=1.0, code=LinearBlockCode.hamming(3)
+        )
+        assert sig.reference.bits.shape == (28,)
+        assert sig.reference.info_bits.shape == (16,)
+
+    def test_uncoded_is_unchanged(self) -> None:
+        """Without code the bits are the plain draw, shared as info_bits."""
+        sig = generate(Constellation.qam(16), 100, symbol_rate=1e6, rng=7)
+        expected = np.random.default_rng(7).integers(0, 2, 400, dtype="int8")
+        np.testing.assert_array_equal(sig.reference.bits, expected)
+        assert sig.reference.info_bits is sig.reference.bits
+
+    def test_invalid(self) -> None:
+        code = LinearBlockCode.hamming(3)
+        with pytest.raises(ValueError, match="num_symbols=7 or 14"):
+            generate(Constellation.qam(16), 10, symbol_rate=1.0, code=code)
+        with pytest.raises(ValueError, match=r"use num_symbols=7\."):
+            generate(Constellation.qam(16), 3, symbol_rate=1.0, code=code)
+        with pytest.raises(ValueError, match="shaped"):
+            generate(
+                Constellation.qam(16).shaped(nu=0.1), 7, symbol_rate=1.0, code=code
+            )
+        with pytest.raises(TypeError, match="code object"):
+            generate(Constellation.qam(16), 7, symbol_rate=1.0, code="hamming")

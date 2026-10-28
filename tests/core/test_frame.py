@@ -5,6 +5,7 @@ from typing import Any
 import numpy as np
 import pytest
 
+from commkit.coding import LinearBlockCode, encode
 from commkit.core import Preamble, SingleCarrierFrame, extract_payload
 from commkit.core.generation import shape_pulse
 from commkit.filtering import RRC
@@ -458,6 +459,36 @@ class TestExtractPayload:
         num = xp.sum(out.samples * xp.conj(ref), axis=-1, keepdims=True)
         scale = num / xp.sum(xp.abs(ref) ** 2, axis=-1, keepdims=True)
         xpt.assert_allclose(out.samples, scale * ref, rtol=1e-5, atol=1e-6)
+
+    def test_coded_payload(self, xp, xpt):
+        """payload_code forwards to generate; the reference keeps both bit
+        streams on the samples' device."""
+        code = LinearBlockCode.hamming(3)
+        frame = SingleCarrierFrame(
+            payload_len=70,
+            payload_constellation=Constellation.qam(16),
+            payload_code=code,
+            num_streams=2,
+        )
+        np.testing.assert_array_equal(
+            encode(frame.payload_info_bits, code=code), frame.payload_bits
+        )
+        assert frame.payload_info_bits.shape == (2, 160)
+        sig = frame.to_signal(sps=1, symbol_rate=1e6).to(
+            "gpu" if xp is not np else "cpu"
+        )
+        ref = extract_payload(sig).reference
+        assert ref.code_block == (7, 4)
+        xpt.assert_array_equal(ref.info_bits, xp.asarray(frame.payload_info_bits))
+        xpt.assert_array_equal(ref.bits, xp.asarray(frame.payload_bits))
+        uncoded = SingleCarrierFrame(payload_len=10)
+        assert uncoded.payload_info_bits is uncoded.payload_bits
+
+    def test_coded_payload_validation(self):
+        with pytest.raises(ValueError, match="payload_code.n=7"):
+            SingleCarrierFrame(payload_len=10, payload_code=LinearBlockCode.hamming(3))
+        with pytest.raises(TypeError, match="code object"):
+            SingleCarrierFrame(payload_len=7, payload_code="hamming")
 
     def test_without_frame_raises(self):
         from commkit import generate

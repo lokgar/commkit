@@ -7,8 +7,10 @@ import pytest
 
 from commkit import generate, metrics, multirate
 from commkit.backend import to_device
+from commkit.coding import LinearBlockCode, decode
 from commkit.impairments import apply_awgn
 from commkit.mapping import Constellation, compute_llr, map_bits
+from tests.common.coding import coded_awgn
 
 
 class TestBitErrorRate:
@@ -581,6 +583,101 @@ class TestGMIShaped:
         # float32 per element, float64 sum: equal to rounding.
         got = metrics.gmi(llrs, xp.asarray(bits), constellation=c)
         assert got == pytest.approx(expected, rel=1e-7)
+
+
+class TestNGMI:
+    """NGMI = 1 - (H(X) - GMI) / m, the soft-FEC threshold metric."""
+
+    @pytest.mark.parametrize(
+        "c", [Constellation.qam(16), Constellation.qam(64).shaped(entropy=5.0)]
+    )
+    def test_relation_to_gmi(self, xp: Any, c: Constellation) -> None:
+        sig = apply_awgn(generate(c, 4000, symbol_rate=1e9, rng=0), esn0_db=9.0, rng=1)
+        sig = sig.to("gpu" if xp is not np else "cpu")
+        nv = 10**-0.9
+        g = metrics.gmi(sig, noise_var=nv)
+        n = metrics.ngmi(sig, noise_var=nv)
+        m = c.bits_per_symbol
+        assert n == pytest.approx(1 - (c.entropy - g) / m, abs=1e-12)
+        assert 0 < n < 1
+
+    def test_error_free_llrs_give_one(self, xp: Any) -> None:
+        c = Constellation.qam(16)
+        bits = np.random.default_rng(2).integers(0, 2, 4000).astype(np.int8)
+        llrs = compute_llr(
+            map_bits(xp.asarray(bits), constellation=c), noise_var=1e-4, constellation=c
+        )
+        assert metrics.ngmi(llrs, xp.asarray(bits), constellation=c) == pytest.approx(
+            1.0, abs=1e-9
+        )
+
+    def test_errors(self, xp: Any) -> None:
+        llrs = xp.zeros(8, dtype=xp.float32)
+        with pytest.raises(ValueError, match="noise_var"):
+            metrics.ngmi(
+                llrs, xp.zeros(8), constellation=Constellation.qam(4), noise_var=1.0
+            )
+
+
+class TestFrameErrorRate:
+    """fer: the fraction of blocks with at least one wrong bit."""
+
+    def test_known_counts(self, xp: Any) -> None:
+        tx = xp.zeros((2, 12), dtype=xp.int8)
+        rx = tx.copy()
+        rx[0, 0] = 1  # block 0 of channel 0
+        rx[0, 1] = 1  # same block: still one block error
+        rx[1, 11] = 1  # last block of channel 1
+        rx[1, 5] = 1  # block 1 of channel 1
+        out = metrics.fer(rx, tx, block_length=4)
+        np.testing.assert_allclose(out, [1 / 3, 2 / 3])
+        assert metrics.fer(rx[0], tx[0], block_length=4) == pytest.approx(1 / 3)
+        assert metrics.fer(tx[0], tx[0], block_length=12) == 0.0
+
+    def test_errors(self, xp: Any) -> None:
+        bits = xp.zeros(8, dtype=xp.int8)
+        with pytest.raises(ValueError, match="multiple of block_length"):
+            metrics.fer(bits, bits, block_length=3)
+        with pytest.raises(ValueError, match="nothing to measure"):
+            metrics.fer(bits[:0], bits[:0], block_length=4)
+        with pytest.raises(ValueError, match="shape mismatch"):
+            metrics.fer(bits, bits[:4], block_length=4)
+        with pytest.raises(ValueError, match="block_length"):
+            metrics.fer(bits, bits, block_length=0)
+        with pytest.raises(ValueError, match="block_length"):
+            metrics.fer(bits, bits, block_length=2.0)
+
+
+class TestPostFEC:
+    """The coded chain end to end: generate -> AWGN -> LLRs -> decode -> metrics."""
+
+    def test_hamming_chain(self, backend_device: str) -> None:
+        code = LinearBlockCode.hamming(3)
+        rx, llrs = coded_awgn(
+            code,
+            Constellation.qam(16),
+            num_symbols=7000,
+            esn0_db=13.0,
+            backend_device=backend_device,
+            num_channels=2,
+        )
+        ref = rx.reference
+        res = decode(llrs, code=code)
+        pre = metrics.ber(rx)
+        post = metrics.ber(res.bits, ref.info_bits)
+        fer = metrics.fer(res.bits, ref.info_bits, block_length=ref.code_block[1])
+        assert np.all(post < pre / 2)
+        assert np.all(fer > post) and np.all(fer < 1)
+
+    def test_uncoded_post_fec_equals_pre_fec(self, xp: Any) -> None:
+        """info_bits is bits: the post-FEC call measures the same BER."""
+        sig = apply_awgn(
+            generate(Constellation.qam(16), 2000, symbol_rate=1e9, rng=3),
+            esn0_db=10.0,
+            rng=4,
+        ).to("gpu" if xp is not np else "cpu")
+        hard = sig.constellation.demap(sig.samples)
+        assert metrics.ber(sig) == metrics.ber(hard, sig.reference.info_bits)
 
 
 class TestLowSNRScale:

@@ -86,10 +86,19 @@ markers = [
 ]
 
 [tool.coverage.run]
-# The placeholder package for planned work (FEC) is kept on purpose as a
-# reminder; it holds no code yet, so it is not measured.
+# Placeholder modules for planned codes are kept on purpose as reminders;
+# they hold no code yet, so they are not measured.
 omit = [
-    "commkit/coding/*",
+    "commkit/coding/bch.py",
+    "commkit/coding/convolutional.py",
+    "commkit/coding/crc.py",
+    "commkit/coding/galois.py",
+    "commkit/coding/interleaving.py",
+    "commkit/coding/ldpc.py",
+    "commkit/coding/polar.py",
+    "commkit/coding/ratematch.py",
+    "commkit/coding/reed_solomon.py",
+    "commkit/coding/turbo.py",
 ]
 
 [tool.bumpversion]

@@ -43,6 +43,13 @@ def test_import_does_not_load_matplotlib_or_cupy():
     assert result == "False False"
 
 
+def test_import_does_not_load_coding():
+    """``commkit.coding`` loads on first use (``generate`` imports it only for
+    ``code=``)."""
+    result = _run("import sys, commkit\nprint('commkit.coding' in sys.modules)")
+    assert result == "False"
+
+
 def test_import_leaves_matplotlib_defaults_unchanged():
     """Even with plotting loaded, the commkit theme is applied only on request."""
     result = _run(

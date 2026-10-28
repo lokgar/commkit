@@ -23,6 +23,8 @@ The checks encode the API rules in AGENTS.md section 4:
   ``np.ndarray (C,)`` for 2-D input.
 - ``equalizer_result``: ``EqualizerResult.y_hat`` is an array on the input
   device, and ``result.signal`` is a Signal for Signal input.
+- ``codec``: ``encode`` returns, and ``decode`` returns in its
+  ``DecodeResult``, arrays on the input's device with the input's rank.
 
 Once a function is deleted, ``test_rows_resolve`` fails until its row is
 deleted too.
@@ -42,6 +44,7 @@ import pytest
 
 import commkit
 from commkit.backend import to_device
+from commkit.coding import DecodeResult, LinearBlockCode
 from commkit.core import Signal
 from commkit.equalization import EqualizerResult
 from commkit.frequency import MthPower
@@ -60,6 +63,7 @@ ESTIMATE = "estimate"  # per-channel estimate (array, or an Estimate with .value
 METRIC = "metric"  # reporting-layer figure of merit
 EQUALIZER = "equalizer"  # returns EqualizerResult
 MULTI = "multi"  # returns several values (2.0: a frozen dataclass)
+CODEC = "codec"  # coding.encode / coding.decode: bits or LLRs in, blocks out
 DESIGN = "design"  # builds coefficients/sequences/values from parameters
 SYNTHESIS = "synthesis"  # generates signals or data from parameters
 PLOT = "plot"
@@ -67,7 +71,16 @@ VALUE = "value"  # classes / value objects
 HELPER = "helper"  # array/math utilities (moving out of helpers.py)
 INFRA = "infra"  # backend, logging, io
 
-BEHAVIORAL = {TRANSFORM, RATE_CHANGE, TRAJECTORY, ESTIMATE, METRIC, EQUALIZER, MULTI}
+BEHAVIORAL = {
+    TRANSFORM,
+    RATE_CHANGE,
+    TRAJECTORY,
+    ESTIMATE,
+    METRIC,
+    EQUALIZER,
+    MULTI,
+    CODEC,
+}
 
 SIG = "signature"
 ARR = "array_roundtrip"
@@ -81,7 +94,21 @@ MET = "metric_host"
 EQR = "equalizer_result"
 
 # Placeholder modules for planned work are kept on purpose and not registered.
-PLACEHOLDERS = ("commkit.coding",)
+PLACEHOLDERS = tuple(
+    f"commkit.coding.{name}"
+    for name in (
+        "bch",
+        "convolutional",
+        "crc",
+        "galois",
+        "interleaving",
+        "ldpc",
+        "polar",
+        "ratematch",
+        "reed_solomon",
+        "turbo",
+    )
+)
 
 Builder = Callable[["Inputs", Any], tuple[tuple, dict]]
 
@@ -128,6 +155,7 @@ N_SYM = 512
 RS = 1e9
 FS = RS * SPS
 C16 = Constellation.qam(16)
+HAMMING = LinearBlockCode.hamming(3)  # (7, 4)
 
 
 class Inputs:
@@ -180,6 +208,12 @@ def _ref(c: Inputs, x: Any) -> Any:
 
 def _bits(c: Inputs, x: Any) -> Any:
     return c.bits1 if _arr(x).ndim == 1 else c.bits2
+
+
+def _codeword_llrs(c: Inputs, x: Any) -> Any:
+    """LLRs of ``x``, cut to whole (7, 4) Hamming blocks."""
+    llrs = C16.llr(x, noise_var=0.1)
+    return llrs[..., : llrs.shape[-1] // 7 * 7]
 
 
 def _identity_taps(c: Inputs, x: Any) -> Any:
@@ -247,6 +281,23 @@ ROWS: list[Row] = [
     Row("commkit.logger.set_log_level", INFRA),
     Row("commkit.io.load_npz", INFRA),
     Row("commkit.io.save_npz", INFRA, data=2),
+    # --- coding (array-only: bits and LLRs are derived quantities) -----------
+    Row("commkit.coding.base.DecodeResult", VALUE),
+    Row(
+        "commkit.coding.base.decode",
+        CODEC,
+        call=lambda c, x: _a(_codeword_llrs(c, x), code=HAMMING),
+        symbols=True,
+    ),
+    Row(
+        "commkit.coding.base.encode",
+        CODEC,
+        call=lambda c, x: _a(_bits(c, x), code=HAMMING),
+        symbols=True,
+    ),
+    Row("commkit.coding.linear.LinearBlockCode", VALUE),
+    Row("commkit.coding.linear.MaximumLikelihood", VALUE),
+    Row("commkit.coding.linear.Syndrome", VALUE),
     # --- core ---------------------------------------------------------------
     Row("commkit.core.frame.Preamble", VALUE),
     Row("commkit.core.signal.Reference", VALUE),
@@ -520,6 +571,20 @@ ROWS: list[Row] = [
         METRIC,
         data=2,
         call=lambda c, x: _a(x * 1.01, _ref(c, x)),
+        symbols=True,
+    ),
+    Row(
+        "commkit.metrics.fer",
+        METRIC,
+        data=2,
+        call=lambda c, x: _a(_bits(c, x), _bits(c, x), block_length=8),
+        symbols=True,
+    ),
+    Row(
+        "commkit.metrics.ngmi",
+        METRIC,
+        data=2,
+        call=lambda c, x: _a(C16.llr(x, noise_var=0.1), _bits(c, x), constellation=C16),
         symbols=True,
     ),
     Row(
@@ -927,6 +992,19 @@ def test_equalizer_result(row: Row, xp):
     res_sig = _call(row, c, c.primary_signal(row, 1))
     assert _module(res_sig.y_hat) == xp.__name__, f"y_hat is {type(res_sig.y_hat)}"
     assert isinstance(getattr(res_sig, "signal", None), Signal)
+
+
+@pytest.mark.parametrize("row", _rows({CODEC}))
+def test_codec_device_and_rank(row: Row, xp):
+    c = Inputs(xp)
+    for ndim in row.dims:
+        out = _call(row, c, c.primary(row, ndim))
+        arrays = [out]
+        if isinstance(out, DecodeResult):
+            arrays = [out.bits, out.valid, out.iterations]
+        for a in arrays:
+            assert _module(a) == xp.__name__, f"returned {type(a)}"
+            assert a.ndim == ndim
 
 
 def test_every_public_module_declares_all():

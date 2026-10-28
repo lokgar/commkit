@@ -1,21 +1,33 @@
-"""Channel coding and forward error correction (FEC): planned, not implemented.
+"""Channel coding: forward error correction (FEC) codes and their decoders.
 
-No algorithms exist yet.  This package reserves the public layout of the
-bit-level neighbor of :mod:`commkit.mapping`: encoders turn information bits
-into coded bits, which ``mapping.map_bits`` maps to symbols; soft decoders
-consume the LLRs of ``mapping.compute_llr`` (see :mod:`commkit.coding.base`
-for the shared hard and soft interface conventions).
+The bit-level neighbor of :mod:`commkit.mapping`: :func:`encode` turns
+information bits into the transmitted bits of a code, which
+``Constellation.map`` maps to symbols; :func:`decode` takes the LLRs of
+:func:`commkit.mapping.compute_llr` (positive means bit 0) or hard
+decisions back to information bits, as a :class:`DecodeResult`.  Both
+dispatch on the code object, and :func:`decode` on an optional decoder
+object::
 
-Each module below is an importable placeholder carrying only its scope
-docstring.  The package is intentionally **absent from the top-level
-``commkit`` public surface** until at least one real encode/decode entry
-point exists; do not add ``from . import coding`` to ``commkit/__init__.py``
-before then.
+    code = LinearBlockCode.hamming(7, extended=True)
+    res = decode(compute_llr(rx, noise_var=nv), code=code, method=Syndrome())
 
-Promotion path, applying the module-splitting rule of AGENTS.md as real code
-lands: ``ldpc`` and ``polar`` become ``{construction,decode}`` subpackages,
-and the algebraic block codes (``hamming``, ``bch``, ``reed_solomon``) move
-into a ``block/`` subpackage once they share enough ``galois`` machinery.
+Codes: :class:`LinearBlockCode`.  Decoders: :class:`Syndrome`,
+:class:`MaximumLikelihood`.
+
+The modules ``bch``, ``convolutional``, ``crc``, ``galois``,
+``interleaving``, ``ldpc``, ``polar``, ``ratematch``, ``reed_solomon`` and
+``turbo`` are placeholders for planned codes, carrying only their scope
+docstring.
 """
 
-__all__: list[str] = []
+from .base import DecodeResult, decode, encode
+from .linear import LinearBlockCode, MaximumLikelihood, Syndrome
+
+__all__ = [
+    "DecodeResult",
+    "LinearBlockCode",
+    "MaximumLikelihood",
+    "Syndrome",
+    "decode",
+    "encode",
+]

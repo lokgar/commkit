@@ -183,10 +183,15 @@ def _gray_points(
     return result
 
 
-def _pack(labels: np.ndarray) -> np.ndarray:
-    """MSB-first bit rows to integers, int64: the inverse of :func:`_unpack_bits`."""
-    k = labels.shape[1]
-    return labels.astype(np.int64) @ (1 << np.arange(k - 1, -1, -1, dtype=np.int64))
+def _pack(labels: ArrayType) -> ArrayType:
+    """MSB-first bit rows ``(..., k)`` to integers, int64, on their device.
+
+    The inverse of :func:`_unpack_bits`.
+    """
+    labels, xp, _ = dispatch(labels)
+    k = labels.shape[-1]
+    weights = xp.left_shift(1, xp.arange(k - 1, -1, -1, dtype=xp.int64))
+    return (labels.astype(xp.int64) * weights).sum(axis=-1)
 
 
 def _unpack_bits(indices: ArrayType, k: int) -> ArrayType:

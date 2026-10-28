@@ -45,12 +45,31 @@ class Reference:
         NumPy or CuPy.  Symbol *k* corresponds to symbol period *k* of the
         Signal's samples.
     bits : array_like, optional
-        Transmitted bits, ``(N * k,)`` or ``(C, N * k)``, on the same device
-        as ``symbols``.
+        The bits on the air: the labels mapped onto ``symbols``, ``(N * m,)``
+        or ``(C, N * m)`` for ``m`` bits per symbol, on the same device as
+        ``symbols``.
+    info_bits : array_like, optional
+        The source bits, before distribution matching and channel coding,
+        ``(..., B * k)``, on the same device.  Given together with
+        ``code_block``.  ``None`` with ``bits`` given means nothing
+        transformed the bits: ``info_bits`` is then ``bits`` itself (the same
+        array) and ``code_block`` is ``(1, 1)``.
+    code_block : tuple of int, optional
+        ``(n, k)``: every ``n`` bits of ``bits`` carry ``k`` bits of
+        ``info_bits``, so ``info_bits`` holds ``bits.shape[-1] // n`` blocks
+        of ``k`` bits (whole blocks only).
+
+    Notes
+    -----
+    Pre-FEC metrics (``ber`` and ``gmi`` of a Signal) compare with ``bits``;
+    post-FEC metrics compare decoded bits with ``info_bits``, which for an
+    uncoded payload is the same array.
     """
 
     symbols: Any
     bits: Any | None = None
+    info_bits: Any | None = None
+    code_block: tuple[int, int] | None = None
 
     def __post_init__(self) -> None:
         symbols = validate_array(self.symbols, name="symbols")
@@ -59,37 +78,100 @@ class Reference:
                 f"symbols must have shape (N,) or (C, N), got {symbols.shape}."
             )
         object.__setattr__(self, "symbols", symbols)
-        if self.bits is not None:
-            bits = validate_array(self.bits, name="bits")
-            if bits.ndim != symbols.ndim or bits.shape[:-1] != symbols.shape[:-1]:
-                raise ValueError(
-                    f"bits shape {bits.shape} does not match symbols shape "
-                    f"{symbols.shape} on the channel axis."
-                )
-            if get_array_module(bits) is not get_array_module(symbols):
-                raise ValueError("bits and symbols must be on the same device.")
-            object.__setattr__(self, "bits", bits)
+        if (self.info_bits is None) != (self.code_block is None):
+            raise ValueError("info_bits and code_block must be given together.")
+        if self.bits is None:
+            if self.info_bits is not None:
+                raise ValueError("info_bits needs bits (the bits on the air).")
+            return
+        bits = self._checked(self.bits, "bits")
+        object.__setattr__(self, "bits", bits)
+        if self.info_bits is None:
+            object.__setattr__(self, "info_bits", bits)
+            object.__setattr__(self, "code_block", (1, 1))
+            return
+        info_bits = (
+            bits
+            if self.info_bits is self.bits
+            else self._checked(self.info_bits, "info_bits")
+        )
+        object.__setattr__(self, "info_bits", info_bits)
+        code_block = self.code_block
+        if (
+            not isinstance(code_block, tuple)
+            or len(code_block) != 2
+            or not all(isinstance(v, int | np.integer) and v >= 1 for v in code_block)
+        ):
+            raise ValueError(
+                f"code_block must be a tuple (n, k) of positive integers, got {code_block!r}."
+            )
+        n, k = (int(v) for v in code_block)
+        object.__setattr__(self, "code_block", (n, k))
+        if info_bits.shape[-1] != (bits.shape[-1] // n) * k:
+            raise ValueError(
+                f"info_bits has {info_bits.shape[-1]} bits per channel; code_block "
+                f"{(n, k)} with {bits.shape[-1]} bits on the air needs "
+                f"{(bits.shape[-1] // n) * k}."
+            )
+
+    def _checked(self, value: Any, name: str) -> Any:
+        """``value`` as an array laid out and placed like ``symbols``."""
+        arr = validate_array(value, name=name)
+        symbols = self.symbols
+        if arr.ndim != symbols.ndim or arr.shape[:-1] != symbols.shape[:-1]:
+            raise ValueError(
+                f"{name} shape {arr.shape} does not match symbols shape "
+                f"{symbols.shape} on the channel axis."
+            )
+        if get_array_module(arr) is not get_array_module(symbols):
+            raise ValueError(f"{name} and symbols must be on the same device.")
+        return arr
+
+    @property
+    def _uncoded(self) -> bool:
+        return self.info_bits is self.bits
 
     def to(self, device: str) -> Reference:
         """Return a Reference with its arrays on ``device`` ("cpu" or "gpu").
 
-        Arrays already on ``device`` are shared, not copied.
+        Arrays already on ``device`` are shared, not copied; ``info_bits``
+        that is ``bits`` stays the same array.
         """
-        bits = None if self.bits is None else to_device(self.bits, device)
-        return Reference(symbols=to_device(self.symbols, device), bits=bits)
+        if self.bits is None:
+            return Reference(symbols=to_device(self.symbols, device))
+        bits = to_device(self.bits, device)
+        if self._uncoded:
+            return Reference(symbols=to_device(self.symbols, device), bits=bits)
+        return Reference(
+            symbols=to_device(self.symbols, device),
+            bits=bits,
+            info_bits=to_device(self.info_bits, device),
+            code_block=self.code_block,
+        )
 
     def head(self, num_symbols: int) -> Reference:
-        """Return the first ``num_symbols`` symbols and their bits.
+        """Return the first ``num_symbols`` symbols, their bits and source bits.
 
-        The Reference itself when it has no more symbols than that.
+        ``info_bits`` keeps the blocks carried whole by the kept bits.  The
+        Reference itself when it has no more symbols than that.
         """
         if num_symbols >= self.symbols.shape[-1]:
             return self
-        bits = self.bits
-        if bits is not None:
-            k = bits.shape[-1] // self.symbols.shape[-1]
-            bits = bits[..., : num_symbols * k]
-        return Reference(symbols=self.symbols[..., :num_symbols], bits=bits)
+        symbols = self.symbols[..., :num_symbols]
+        if self.bits is None:
+            return Reference(symbols=symbols)
+        m = self.bits.shape[-1] // self.symbols.shape[-1]
+        bits = self.bits[..., : num_symbols * m]
+        if self._uncoded:
+            return Reference(symbols=symbols, bits=bits)
+        assert self.code_block is not None and self.info_bits is not None
+        n, k = self.code_block
+        return Reference(
+            symbols=symbols,
+            bits=bits,
+            info_bits=self.info_bits[..., : (bits.shape[-1] // n) * k],
+            code_block=self.code_block,
+        )
 
 
 @dataclass(frozen=True, eq=False, kw_only=True)

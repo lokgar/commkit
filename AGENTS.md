@@ -118,7 +118,7 @@ Dependencies point downward only:
 | --- | --- | --- |
 | Infrastructure | `backend`, `logger`, `_cuda` | NumPy, CuPy |
 | Array and math helpers | `_array` (shape and validation), `math` (power, normalization, dB, linear trend) | infrastructure |
-| Value objects | `mapping.Constellation`, pulse classes, `recovery` CPR configs | layers above |
+| Value objects | `mapping.Constellation`, pulse classes, `recovery` CPR configs, `coding` (code objects with their `encode` / `decode`; array-only, never imports `core`) | layers above |
 | Core | `core` (`Signal`, frames, generation), `io` | layers above |
 | DSP | `mapping`, `filtering`, `multirate`, `spectral`, `smoothing`, `impairments`, `timing`, `frequency`, `recovery`, `equalization`, `metrics`, `analysis` | layers above, and lower DSP modules |
 | Presentation | `plotting` | everything; **nothing imports plotting** |
@@ -129,7 +129,7 @@ Dependencies point downward only:
   - `analysis` holds laser and phase characterization.
   - `metrics` is the reporting layer.
 - **Splitting modules:** promote a flat module to a package only when it exceeds about 1000 lines *and* has two or more separable concerns. The package `__init__` re-exports the public names. Never create a `utils/` package or one-function files.
-- **Placeholder modules are kept on purpose.** `commkit.coding` is a reminder of planned work. Never delete it or treat it as dead code. It is excluded from coverage and from the contract registry, and the README labels it "planned, not implemented".
+- **Placeholder modules are kept on purpose.** The modules of `commkit.coding` that hold only a scope docstring (`bch`, `convolutional`, `crc`, `galois`, `interleaving`, `ldpc`, `polar`, `ratematch`, `reed_solomon`, `turbo`) are reminders of planned codes. Never delete them or treat them as dead code. They are excluded from coverage and from the contract registry (`PLACEHOLDERS`), and the README labels them "planned, not implemented"; a module that gets code leaves all three lists.
 - **Shared physics lives in one private module**, used by the channel and by its compensation: `_dispersion` (β₂, β₃, the dispersion response) and `_fiber` (`Fiber` and the split-step solver behind `apply_fiber_propagation` and `correct_fiber_propagation`).
 
 ---
@@ -138,7 +138,7 @@ Dependencies point downward only:
 
 ### Signal
 
-- `Signal` holds: samples (NumPy or CuPy, `(N,)` or `(C, N)`, time on the last axis), the **facts** `sampling_rate`, `symbol_rate` and `center_frequency`, the **description** `constellation` and `pulse`, and the ground truth `reference` (transmitted symbols and bits) plus the `frame` layout.
+- `Signal` holds: samples (NumPy or CuPy, `(N,)` or `(C, N)`, time on the last axis), the **facts** `sampling_rate`, `symbol_rate` and `center_frequency`, the **description** `constellation` and `pulse`, and the ground truth `reference` (transmitted symbols, the bits on the air `bits` and the source bits `info_bits`, the same array when nothing is coded or matched) plus the `frame` layout.
 - It never holds pipeline results.
 - Construction does no hidden work: no mapping, no normalization, no device move, no shape guessing. Factories (`generate`, frames) do that work.
 - `sig.to("gpu")` and `sig.replace(...)` return new Signals. Arrays are shared, not copied; use `clone()` for an independent copy.
@@ -175,7 +175,7 @@ Dependencies point downward only:
 - **Transforms:** array in gives array out on the same device; Signal in gives a new Signal out (update `sampling_rate` when the rate changes).
 - **Estimators** reduce over the time axis by input rank: `(N,)` gives 0-d and `(C, N)` gives `(C,)`. Results stay on the input device.
 - **Analysis summaries** (`estimate_linewidth`, `allan_deviation`, the `frequency_drift` statistics) are reporting-layer fits on plot-sized reductions. Like the metrics, they return host floats or `(C,)` arrays. Sample-rate outputs (trajectories, PSDs, `dsh_phase`) stay on the input device.
-- **Metrics** (`evm`, `snr`, `ber`, `ser`, `gmi`, `mi`) return host values: a `float` for 1-D input and `np.ndarray (C,)` for 2-D input. They **raise** on empty selections; they never return `None` or `0.0` for "nothing measured". Metrics never silently align, rotate or permute against the reference.
+- **Metrics** (`evm`, `snr`, `ber`, `fer`, `ser`, `gmi`, `ngmi`, `mi`) return host values: a `float` for 1-D input and `np.ndarray (C,)` for 2-D input. They **raise** on empty selections; they never return `None` or `0.0` for "nothing measured". Metrics never silently align, rotate or permute against the reference.
 - **More than one value** is returned as a frozen dataclass with named fields. No dicts, and no tuples longer than two.
 - **Equalizers** return `EqualizerResult`. `y_hat` is always an array, `signal` holds the 1-SPS Signal for Signal input, `state` is the continuation state, and diagnostics are returned as data.
 
@@ -188,6 +188,7 @@ Dependencies point downward only:
 | `correct_<quantity>(x, how)` | remove the impairment; returns only the corrected data. `how` is an estimate or an algorithm object (which estimates first) |
 | `resolve_*` | pick among discrete candidates (π/2 rotation, channel permutation); nothing else |
 | `generate` | synthesis from parameters, takes `rng` |
+| `encode` / `decode` | information bits to a code's transmitted bits, and LLRs (or hard decisions) back to a `DecodeResult`; dispatched on the code object, the decoder chosen by a `method` object |
 | `plot_*` | every public plotting function (only `apply_default_theme` is exempt) |
 
 - The algorithm is chosen by an object, never by the function name or a string: `estimate_carrier_phase(y, BPS())`, not `recover_carrier_phase_bps(y)`. The verb function dispatches on the object's type through a private table in its module. There is no `recover_*` or `compensate_*`.
@@ -247,6 +248,7 @@ Docstrings describe the code as it is; a change in behavior updates them in the 
 | Sequential recursions: LMS/RLS/CMA/RDE, PLL, Tikhonov, cycle slips, the Mengali-Morelli bootstrap over the lags | Numba `@njit(cache=True, fastmath=True, nogil=True)`; independent rows in parallel (`prange`: the bootstrap's blocks). The equalizers' kernel with inline carrier recovery compiles strict (its unwrap and running sums) and calls its tap and distance loops as separate fast-math functions, which keep their flags when inlined (an `inline="always"` helper takes its caller's) | CPU; GPU input does one round trip to the host and back |
 | Linear recursions: IIR filtering | CPU: Numba kernel without `fastmath`, so double input gives SciPy's result bit for bit. GPU: CUDA kernel (`iir`), blocks filtered in parallel and the state carried across them in two levels, in double precision | follows the input |
 | Hot spots limited by intermediates, launches or round trips | CUDA C++ via CuPy `RawModule` (`commkit/_cuda`) | GPU |
+| Binary linear algebra of codes: encoding, syndromes, the correlations of maximum-likelihood decoding | one float32 GEMM per chunk (`coding._gf2.matmul_mod2`: BLAS, cuBLAS), exact below an inner dimension of 2^24; small tables (generators, coset leaders) cached per code object and device (`backend._device_tables`) | follows the input |
 | Elementwise chains between multi-core FFTs (the fiber solver's Kerr and PMD stages) | NumPy: a Numba `parallel=True` pass there competes with `scipy.fft`'s threads (the solver's Numba passes measured 1.1-1.8x slower end to end, 2^14-2^20); adopt one only on a paired end-to-end A/B | CPU |
 
 **Host-sync hygiene:**
@@ -347,7 +349,8 @@ Steps, once CuPy 14.3 (with cp315 wheels for `cupy-cuda13x`) and a fixed `jupyte
 
 ### Planned modules
 
-1. **Channel coding** (`coding`, a placeholder package). Soft demapping is GPU-validated on both devices. Start with one soft decoder (LDPC) that consumes `compute_llr` output (positive LLR = bit 0) and reports post-FEC BER next to `gmi`, then add encoders. The package stays out of `commkit/__init__.py` until a real encode/decode entry point exists. Decoders are iterative message passing over many codewords: batch codewords on the GPU from the start.
+1. **Channel coding** (`coding`). `encode` / `decode`, linear block codes (Hamming, syndrome and ML decoding), coded payloads in `generate` and frames, and `fer` / `ngmi` exist. Still to come, in this order: LDPC (layered min-sum and sum-product, a CUDA kernel, DVB-S2 and PON presets); CRC, interleaving and rate matching; distribution matching (CCDM, PAS) with shaped `generate` drawing through the matcher instead of i.i.d. symbols; BCH and Reed-Solomon (G.709, KR4, KP4, PON presets); Chase-Pyndiah, concatenated, staircase and oFEC codes; polar; convolutional and turbo. Decoders batch codewords on both devices.
+2. **Storing frames with a payload code.** `save_npz` raises for a frame with a `payload_code`, because code objects are not serialized; store `extract_payload(signal)` instead.
 
 ### Nonlinear fiber channel: future features
 
