@@ -11,22 +11,27 @@ object::
     code = LinearBlockCode.hamming(7, extended=True)
     res = decode(compute_llr(rx, noise_var=nv), code=code, method=Syndrome())
 
-Codes: :class:`LinearBlockCode`.  Decoders: :class:`Syndrome`,
-:class:`MaximumLikelihood`.
+Codes: :class:`LinearBlockCode` (Hamming), :class:`LDPCCode` (DVB-S2, PON).
+Decoders: :class:`Syndrome`, :class:`MaximumLikelihood`, :class:`MinSum`,
+:class:`SumProduct`.
 
 The modules ``bch``, ``convolutional``, ``crc``, ``galois``,
-``interleaving``, ``ldpc``, ``polar``, ``ratematch``, ``reed_solomon`` and
-``turbo`` are placeholders for planned codes, carrying only their scope
+``interleaving``, ``polar``, ``ratematch``, ``reed_solomon`` and ``turbo``
+are placeholders for planned codes, carrying only their scope
 docstring.
 """
 
 from .base import DecodeResult, decode, encode
+from .ldpc import LDPCCode, MinSum, SumProduct
 from .linear import LinearBlockCode, MaximumLikelihood, Syndrome
 
 __all__ = [
     "DecodeResult",
+    "LDPCCode",
     "LinearBlockCode",
     "MaximumLikelihood",
+    "MinSum",
+    "SumProduct",
     "Syndrome",
     "decode",
     "encode",

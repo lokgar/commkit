@@ -540,3 +540,43 @@ def pll_reference(
             phi = phi + mu * e + nu
             nu = nu + beta * e
     return out
+
+
+def ldpc_layered_reference(
+    llrs: np.ndarray,
+    rows: list[list[int]],
+    *,
+    sum_product: bool,
+    scale: float = 1.0,
+    offset: float = 0.0,
+    iterations: int = 1,
+) -> np.ndarray:
+    """Layered belief propagation over the checks ``rows`` in the given order.
+
+    ``rows[i]`` lists the bits of check ``i``.  Each check, in turn, sends
+    every bit the extrinsic message of the textbook rules over the other
+    bits' messages ``Q = APP - R_old``:
+
+    - min-sum: ``R = prod sign(Q) * max(scale * min |Q| - offset, 0)``;
+    - sum-product: ``R = 2 atanh(prod tanh(Q / 2))``.
+
+    Returns the a-posteriori LLRs after ``iterations`` passes, float64,
+    ``(N,)`` for one codeword's ``(N,)`` channel LLRs.
+    """
+    app = np.asarray(llrs, dtype=np.float64).copy()
+    msgs = [np.zeros(len(r)) for r in rows]
+    for _ in range(iterations):
+        for i, bits in enumerate(rows):
+            q = app[bits] - msgs[i]
+            new = np.empty(len(bits))
+            for e in range(len(bits)):
+                others = np.delete(q, e)
+                if sum_product:
+                    t = np.prod(np.tanh(others / 2))
+                    new[e] = 2 * np.arctanh(np.clip(t, -1 + 1e-15, 1 - 1e-15))
+                else:
+                    mag = max(scale * np.min(np.abs(others)) - offset, 0.0)
+                    new[e] = np.prod(np.sign(others)) * mag
+            app[bits] = q + new
+            msgs[i] = new
+    return app

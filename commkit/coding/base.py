@@ -94,7 +94,13 @@ class _Code:
         return self._key() == other._key()  # type: ignore[attr-defined]
 
     def __hash__(self) -> int:
-        return hash((type(self), self._key()))
+        # Cached: the device-table cache hashes the code on every call, and
+        # a large code's arrays are megabytes.
+        h: int | None = self.__dict__.get("_hash")
+        if h is None:
+            h = hash((type(self), self._key()))
+            self.__dict__["_hash"] = h
+        return h
 
 
 @dataclass(frozen=True)
