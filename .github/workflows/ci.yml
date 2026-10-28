@@ -112,13 +112,14 @@ jobs:
           NUMBA_DISABLE_JIT: "1"
         run: >-
           uv run pytest tests/equalization tests/recovery tests/test_frequency.py
-          tests/coding/test_ldpc.py -k "not waterfall and not threshold"
+          tests/coding/test_ldpc.py tests/coding/test_shaping.py::TestCCDM
+          -k "not waterfall and not threshold"
           --device=cpu --cov=commkit --cov-report=
 
       - name: Kernel coverage report
         run: >-
           uv run coverage report --show-missing --fail-under=85
-          --include="commkit/equalization/_kernels_numba.py,commkit/equalization/_numba_loops.py,commkit/equalization/sequential/*,commkit/frequency.py,commkit/recovery/*,commkit/coding/ldpc.py"
+          --include="commkit/equalization/_kernels_numba.py,commkit/equalization/_numba_loops.py,commkit/equalization/sequential/*,commkit/frequency.py,commkit/recovery/*,commkit/coding/ldpc.py,commkit/coding/shaping.py"
 
 # GPU legs (--device=gpu / --device=all) require CuPy + CUDA and are run
 # manually or on a self-hosted runner; they are intentionally not part of

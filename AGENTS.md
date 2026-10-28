@@ -36,7 +36,8 @@ uv run pytest --device=cpu               # what CI runs
 uv run pytest tests/equalization/ -k lms # subset
 uv run pytest --cov=commkit              # coverage
 NUMBA_DISABLE_JIT=1 uv run pytest tests/equalization tests/recovery \
-    tests/test_frequency.py tests/coding/test_ldpc.py -k "not waterfall and not threshold" \
+    tests/test_frequency.py tests/coding/test_ldpc.py tests/coding/test_shaping.py::TestCCDM \
+    -k "not waterfall and not threshold" \
     --device=cpu --cov=commkit   # real kernel coverage
 uv run pytest --device=cpu -p tests.plugins.precision_trace \
     --ignore=tests/test_examples.py      # precision audit (see Numerics); the suite passes under it
@@ -247,7 +248,7 @@ Docstrings describe the code as it is; a change in behavior updates them in the 
 | --- | --- | --- |
 | Vectorized: filters, resampling, spectra, impairments, metrics, frequency-domain equalizers | NumPy/CuPy via `x, xp, sp = dispatch(samples)` | follows the input |
 | Per-symbol searches over a small table: LLRs (over all points, or per axis for separable QAM; max-log without a prior in closed form, from the nearest levels of each bit's two values), hard decisions of constellations without a square lattice | CPU: Numba `parallel=True` over blocks of symbols (LLRs; the closed form from 16 levels per axis, below which the level metrics are as fast), chunked NumPy (decisions). GPU: CUDA kernels, one thread per symbol (`llr`, `llr_separable`, `llr_separable_maxlog` at every order, `bps_min_d2`'s nearest-point mode); decisions on double input or more than 1024 points run the chunked search on both devices, LLRs above 16 bits per symbol raise on the GPU | follows the input |
-| Sequential recursions: LMS/RLS/CMA/RDE, PLL, Tikhonov, cycle slips, the Mengali-Morelli bootstrap over the lags | Numba `@njit(cache=True, fastmath=True, nogil=True)`; independent rows in parallel (`prange`: the bootstrap's blocks). The equalizers' kernel with inline carrier recovery compiles strict (its unwrap and running sums) and calls its tap and distance loops as separate fast-math functions, which keep their flags when inlined (an `inline="always"` helper takes its caller's) | CPU; GPU input does one round trip to the host and back |
+| Sequential recursions: LMS/RLS/CMA/RDE, PLL, Tikhonov, cycle slips, the Mengali-Morelli bootstrap over the lags, distribution matching (the CCDM range coder; independent blocks in parallel) | Numba `@njit(cache=True, fastmath=True, nogil=True)`; independent rows in parallel (`prange`: the bootstrap's blocks). The equalizers' kernel with inline carrier recovery compiles strict (its unwrap and running sums) and calls its tap and distance loops as separate fast-math functions, which keep their flags when inlined (an `inline="always"` helper takes its caller's) | CPU; GPU input does one round trip to the host and back |
 | Linear recursions: IIR filtering | CPU: Numba kernel without `fastmath`, so double input gives SciPy's result bit for bit. GPU: CUDA kernel (`iir`), blocks filtered in parallel and the state carried across them in two levels, in double precision | follows the input |
 | Hot spots limited by intermediates, launches or round trips | CUDA C++ via CuPy `RawModule` (`commkit/_cuda`) | GPU |
 | Binary linear algebra of codes: encoding, syndromes, the correlations of maximum-likelihood decoding | one float32 GEMM per chunk (`coding._gf2.matmul_mod2`: BLAS, cuBLAS), exact below an inner dimension of 2^24; small tables (generators, coset leaders) cached per code object and device (`backend._device_tables`) | follows the input |
@@ -352,7 +353,7 @@ Steps, once CuPy 14.3 (with cp315 wheels for `cupy-cuda13x`) and a fixed `jupyte
 
 ### Planned modules
 
-1. **Channel coding** (`coding`). `encode` / `decode`, linear block codes (Hamming, syndrome and ML decoding), LDPC codes (layered min-sum and sum-product on both devices, DVB-S2 and PON presets), CRCs, interleavers, puncturing and shortening, coded payloads in `generate` and frames, and `fer` / `ngmi` exist. Still to come, in this order: distribution matching (CCDM, PAS) with shaped `generate` drawing through the matcher instead of i.i.d. symbols; BCH and Reed-Solomon (G.709, KR4, KP4, PON presets); Chase-Pyndiah, concatenated, staircase and oFEC codes; polar; convolutional and turbo. Decoders batch codewords on both devices.
+1. **Channel coding** (`coding`). `encode` / `decode`, linear block codes (Hamming, syndrome and ML decoding), LDPC codes (layered min-sum and sum-product on both devices, DVB-S2 and PON presets), CRCs, interleavers, puncturing and shortening, distribution matching (CCDM, PAS), coded and matched payloads in `generate` and frames, and `fer` / `ngmi` exist. Still to come, in this order: shaped `generate` without `code` drawing through a CCDM instead of i.i.d. symbols; BCH and Reed-Solomon (G.709, KR4, KP4, PON presets); Chase-Pyndiah, concatenated, staircase and oFEC codes; polar; convolutional and turbo. Decoders batch codewords on both devices.
 2. **Storing frames with a payload code.** `save_npz` raises for a frame with a `payload_code`, because code objects are not serialized; store `extract_payload(signal)` instead.
 
 ### Nonlinear fiber channel: future features

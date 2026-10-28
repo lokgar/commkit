@@ -120,6 +120,9 @@ class _Codec:
     methods: tuple[type, ...]
     # Codeword positions of the information bits, for systematic codes.
     info_positions: Callable[[Any], np.ndarray | None] | None = None
+    # Sequential on the host (distribution matchers): GPU input round-trips,
+    # and generate() encodes before moving the payload.
+    host: bool = False
 
 
 _CODECS: dict[type, _Codec] = {}

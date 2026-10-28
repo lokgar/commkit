@@ -295,6 +295,8 @@ ROWS: list[Row] = [
         symbols=True,
     ),
     Row("commkit.coding.ratematch.Punctured", VALUE),
+    Row("commkit.coding.shaping.CCDM", VALUE),
+    Row("commkit.coding.shaping.PAS", VALUE),
     Row("commkit.coding.ratematch.Shortened", VALUE),
     Row(
         "commkit.coding.base.decode",

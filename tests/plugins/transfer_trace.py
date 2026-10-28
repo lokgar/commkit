@@ -50,6 +50,9 @@ _DOCUMENTED: dict[str, str] = {
     "analysis/linewidth/dsh.py::_not_a_beat": _REPORT,
     "backend.py::_device_tables": _HOST_VALUE
     + " (tables of a value object: once per object and device)",
+    "coding/shaping.py::_decode_ccdm": _RECURSION + " (the dematcher)",
+    "coding/shaping.py::_encode_ccdm": _RECURSION
+    + " (the matcher; generate runs it on the host)",
     "core/generation.py::generate": "transmitted payload drawn on the host",
     "core/signal.py::Reference.to": "explicit device move",
     "core/signal.py::Signal.to": "explicit device move",

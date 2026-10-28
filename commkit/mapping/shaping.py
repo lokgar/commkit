@@ -9,6 +9,10 @@ The shaping parameter ``nu`` is defined on the points scaled to a minimum
 distance of 2, which is the odd-integer grid for QAM and PAM, so ``nu``
 matches the literature (``P(s) ∝ exp(-nu |s|^2)`` on that grid) for every
 scale of the same geometry.
+
+The distribution matchers that turn uniform bits into symbols with such a
+prior (:class:`~commkit.coding.CCDM`, :class:`~commkit.coding.PAS`) are in
+:mod:`commkit.coding.shaping`.
 """
 
 from __future__ import annotations

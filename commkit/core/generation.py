@@ -165,13 +165,16 @@ def generate(
         ``apply_phase_noise``) need ``periodic=True`` too; the Signal does not
         record it.
     code : code object, optional
-        A channel code of :mod:`commkit.coding` (``LinearBlockCode``, ...):
-        random information bits are encoded with
-        :func:`commkit.coding.encode`, and the code's output is mapped.
-        ``num_symbols * bits_per_symbol`` must be a multiple of ``code.n``.
-        The reference then holds the bits on the air as ``bits`` and the
-        information bits as ``info_bits``, with ``code_block = (n, k)``.
-        Not with a shaped constellation.
+        A code of :mod:`commkit.coding`: random information bits are encoded
+        with :func:`commkit.coding.encode`, and the code's output is mapped.
+        A FEC code (``LDPCCode``, ...) takes a uniform constellation; a
+        distribution matcher (``CCDM``) or probabilistic amplitude shaping
+        (``PAS``) carries the constellation it matches onto, which must be
+        ``constellation``.  ``num_symbols * bits_per_symbol`` must be a
+        multiple of ``code.n``.  The reference then holds the bits on the
+        air as ``bits`` and the information bits as ``info_bits``, with
+        ``code_block = (n, k)``.  Matchers run on the host before the
+        payload moves to ``device``.
     rng : int, numpy.random.Generator or None
         Seed or generator (SciPy SPEC 7).
     device : {"cpu", "gpu"}, default "cpu"
@@ -193,7 +196,8 @@ def generate(
     ------
     ValueError
         On a non-positive count, a ``code`` whose block length does not
-        divide the record's bits, or a ``code`` with a shaped constellation.
+        divide the record's bits, a FEC code with a shaped constellation, or
+        a matcher onto another constellation.
 
     Examples
     --------
@@ -223,18 +227,28 @@ def generate(
     if code is not None:
         from .. import coding
 
-        coding.base._codec(code, "generate()")
-        if c.pmf is not None:
+        codec = coding.base._codec(code, "generate()")
+        matched = getattr(code, "constellation", None)
+        if matched is not None and matched != c:
             raise ValueError(
-                "generate(): code= does not take a shaped constellation; coded "
-                "shaping needs a distribution matcher."
+                f"generate(): {code!r} matches onto another constellation than {c!r}."
+            )
+        if c.pmf is not None and matched is None:
+            raise ValueError(
+                "generate(): a shaped constellation with a FEC code needs a "
+                "distribution matcher: use code=PAS(code, constellation)."
             )
         num_blocks = _num_blocks(int(num_symbols), k, code.n)
-        info_bits = to_device(
-            gen.integers(0, 2, size=(num_channels, num_blocks * code.k), dtype="int8"),
-            device,
+        info_bits = gen.integers(
+            0, 2, size=(num_channels, num_blocks * code.k), dtype="int8"
         )
-        bits = coding.encode(info_bits, code=code)
+        if codec.host:
+            # Matchers are sequential: encode on the host, move the labels.
+            bits = to_device(coding.encode(info_bits, code=code), device)
+            info_bits = to_device(info_bits, device)
+        else:
+            info_bits = to_device(info_bits, device)
+            bits = coding.encode(info_bits, code=code)
         symbols = c.map(bits)
         if num_channels == 1:
             info_bits, bits, symbols = info_bits[0], bits[0], symbols[0]
