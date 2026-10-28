@@ -316,7 +316,7 @@ Docstrings describe the code as it is; a change in behavior updates them in the 
 - **IDs** are `[cpu]` or `[gpu]`, meaning the input device.
 - **Timing:**
   - Timed bodies end with the `sync` fixture; otherwise GPU timings measure launches, not execution.
-  - Each benchmark has one warmup round, so compilation and pool growth are excluded.
+  - Each benchmark has one warmup round, so compilation and pool growth are excluded, and a session fixture keeps Numba's thread pool busy for half a second before the first: the first parallel calls of a process ran 4-8x slower while the OpenMP workers came up, which a kernel loaded from Numba's cache reaches in the timed rounds.
 - **Workloads** come from `benchmarks/workloads.py` with fixed seeds; never generate data inline.
 - **Tools:** `benchmarks/benchutils.py` provides `CudaEventTimer` and `nvtx_range` for `nsys` profiling.
 - **Logging** is set to WARNING in `benchmarks/conftest.py`.
