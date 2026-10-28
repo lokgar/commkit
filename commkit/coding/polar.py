@@ -104,8 +104,6 @@ _NR_SEQUENCE = np.array([
 ], dtype=np.int64)
 # fmt: on
 
-_NUMBA_POLAR: dict[str, Any] = {}
-
 
 @dataclass(frozen=True, eq=False)
 class PolarCode(_Code):
@@ -283,137 +281,9 @@ def _get_numba_polar() -> Any:
     partial sums where bit ``s - 1`` of ``i`` is 1, ``f`` (min-sum) where it
     is 0.
     """
-    if "scl" not in _NUMBA_POLAR:
-        import numba
+    from . import _numba_loops
 
-        jit = numba.njit(cache=True, nogil=True, inline="always")
-
-        @jit
-        def descend(alpha, beta, i, levels):  # type: ignore[no-untyped-def]
-            top = levels if i == 0 else 1
-            if i:
-                while not (i >> (top - 1)) & 1:
-                    top += 1
-            for s in range(top, 0, -1):
-                half = 1 << (s - 1)
-                src = 1 << s
-                dst = half
-                if (i >> (s - 1)) & 1:
-                    for j in range(half):
-                        a = alpha[src + j]
-                        b = alpha[src + half + j]
-                        alpha[dst + j] = b - a if beta[half + j] else b + a
-                else:
-                    for j in range(half):
-                        a = alpha[src + j]
-                        b = alpha[src + half + j]
-                        m = min(abs(a), abs(b))
-                        alpha[dst + j] = -m if (a < 0) != (b < 0) else m
-
-        @jit
-        def ascend(beta, scratch, i, bit, levels):  # type: ignore[no-untyped-def]
-            scratch[0] = bit
-            size = 1
-            s = 0
-            while s < levels and (i >> s) & 1:
-                # Right child of size 2^s complete: parent = [left ^ right, right].
-                for j in range(size):
-                    scratch[size + j] = scratch[j]
-                    scratch[j] ^= beta[size + j]
-                size *= 2
-                s += 1
-            for j in range(size):
-                beta[size + j] = scratch[j]
-
-        @numba.njit(cache=True, nogil=True, parallel=True)
-        def scl(llrs, frozen, list_size, crc_g, crc_c, info, k_info, out_u, valid):  # type: ignore[no-untyped-def]
-            rows, n = llrs.shape
-            levels = 0
-            while (1 << levels) < n:
-                levels += 1
-            r = crc_c.shape[0]
-            for row in numba.prange(rows):  # type: ignore[attr-defined,no-untyped-call]
-                cap = list_size
-                alpha = np.zeros((2 * cap, 2 * n), dtype=np.float32)
-                beta = np.zeros((2 * cap, 2 * n), dtype=np.int8)
-                u = np.zeros((2 * cap, n), dtype=np.int8)
-                pm = np.full(2 * cap, np.inf, dtype=np.float64)
-                scratch = np.zeros(n, dtype=np.int8)
-                alive = 1
-                pm[0] = 0.0
-                for j in range(n):
-                    alpha[0, n + j] = llrs[row, j]
-                for i in range(n):
-                    for p in range(alive):
-                        descend(alpha[p], beta[p], i, levels)
-                    if frozen[i]:
-                        for p in range(alive):
-                            l0 = alpha[p, 1]
-                            if l0 < 0:
-                                pm[p] += -l0
-                            u[p, i] = 0
-                            ascend(beta[p], scratch, i, 0, levels)
-                        continue
-                    # Both decisions of every path: path p + alive takes the other bit.
-                    for p in range(alive):
-                        q = p + alive
-                        alpha[q] = alpha[p]
-                        beta[q] = beta[p]
-                        u[q] = u[p]
-                        l0 = alpha[p, 1]
-                        hard = 1 if l0 < 0 else 0
-                        pm[q] = pm[p] + abs(l0)
-                        u[p, i] = hard
-                        u[q, i] = 1 - hard
-                    total = 2 * alive
-                    keep = min(cap, total)
-                    order = np.argsort(pm[:total], kind="mergesort")
-                    if keep < total:
-                        # Survivors to the front: copy into slots of the dropped.
-                        chosen = np.zeros(total, dtype=np.bool_)
-                        for t in range(keep):
-                            chosen[order[t]] = True
-                        dst = 0
-                        for src in range(keep, total):
-                            if not chosen[src]:
-                                continue
-                            while chosen[dst]:
-                                dst += 1
-                            alpha[dst] = alpha[src]
-                            beta[dst] = beta[src]
-                            u[dst] = u[src]
-                            pm[dst] = pm[src]
-                            chosen[dst] = True
-                    alive = keep
-                    for p in range(alive):
-                        ascend(beta[p], scratch, i, u[p, i], levels)
-                # Final choice: best metric, among CRC passes when there is a CRC.
-                best = -1
-                ok = False
-                for p in range(alive):
-                    passes = True
-                    if r:
-                        for b in range(r):
-                            acc = crc_c[b]
-                            for t in range(k_info):
-                                acc ^= u[p, info[t]] & crc_g[t, b]
-                            if acc != u[p, info[k_info + b]]:
-                                passes = False
-                                break
-                    if passes and (best < 0 or pm[p] < pm[best]):
-                        best = p
-                        ok = True
-                if best < 0:
-                    best = 0
-                    for p in range(1, alive):
-                        if pm[p] < pm[best]:
-                            best = p
-                for j in range(n):
-                    out_u[row, j] = u[best, j]
-                valid[row] = ok
-
-        _NUMBA_POLAR["scl"] = scl
-    return _NUMBA_POLAR["scl"]
+    return _numba_loops.polar_scl
 
 
 def _decode(code: PolarCode, llrs: ArrayType, method: SC | SCL) -> _Decoded:

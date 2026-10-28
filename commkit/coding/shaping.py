@@ -64,8 +64,6 @@ __all__ = ["CCDM", "PAS"]
 _RANGE_BITS = 32
 _MAX_BLOCK = 1 << 30
 
-_NUMBA_CCDM: dict[str, Any] = {}
-
 
 @dataclass(frozen=True, eq=False)
 class CCDM(_Code):
@@ -229,120 +227,9 @@ def _get_numba_ccdm(name: str) -> Any:
     accumulates ``low`` exactly in a bit array and rounds it up to ``k``
     bits.
     """
-    if name not in _NUMBA_CCDM:
-        import numba
+    from . import _numba_loops
 
-        top = np.int64(1) << _RANGE_BITS
-        half = np.int64(1) << (_RANGE_BITS - 1)
-
-        @numba.njit(cache=True, nogil=True, inline="always")
-        def largest(counts):  # type: ignore[no-untyped-def]
-            big = 0
-            for i in range(1, counts.shape[0]):
-                if counts[i] > counts[big]:
-                    big = i
-            return big
-
-        @numba.njit(cache=True, nogil=True, parallel=True)
-        def match(bits, composition, out):  # type: ignore[no-untyped-def]
-            k = bits.shape[1]
-            n = out.shape[1]
-            for b in numba.prange(bits.shape[0]):  # type: ignore[attr-defined,no-untyped-call]
-                counts = composition.copy()
-                rng = top
-                d = np.int64(0)
-                pos = 0
-                for _ in range(_RANGE_BITS):
-                    d = (d << 1) | (bits[b, pos] if pos < k else 0)
-                    pos += 1
-                remaining = np.int64(n)
-                for t in range(n):
-                    big = largest(counts)
-                    rest = rng
-                    for i in range(counts.shape[0]):
-                        rest -= rng * counts[i] // remaining
-                    cum = np.int64(0)
-                    s = 0
-                    share = np.int64(0)
-                    for i in range(counts.shape[0]):
-                        share = rng * counts[i] // remaining
-                        if i == big:
-                            share += rest
-                        if d < cum + share:
-                            s = i
-                            break
-                        cum += share
-                    out[b, t] = s
-                    d -= cum
-                    rng = share
-                    counts[s] -= 1
-                    remaining -= 1
-                    while rng < half:
-                        rng <<= 1
-                        d = (d << 1) | (bits[b, pos] if pos < k else 0)
-                        pos += 1
-
-        @numba.njit(cache=True, nogil=True, parallel=True)
-        def dematch(symbols, composition, buffer_bits, bits, valid):  # type: ignore[no-untyped-def]
-            k = bits.shape[1]
-            n = symbols.shape[1]
-            for b in numba.prange(symbols.shape[0]):  # type: ignore[attr-defined,no-untyped-call]
-                counts = composition.copy()
-                low = np.zeros(buffer_bits + 1, dtype=np.uint8)  # low[j]: bit 2^-j
-                rng = top
-                shift = _RANGE_BITS
-                remaining = np.int64(n)
-                ok = True
-                for t in range(n):
-                    s = symbols[b, t]
-                    if s < 0 or s >= counts.shape[0] or counts[s] == 0:
-                        ok = False
-                        break
-                    big = largest(counts)
-                    rest = rng
-                    for i in range(counts.shape[0]):
-                        rest -= rng * counts[i] // remaining
-                    cum = np.int64(0)
-                    for i in range(s):
-                        cum += rng * counts[i] // remaining
-                        if i == big:
-                            cum += rest
-                    share = rng * counts[s] // remaining
-                    if s == big:
-                        share += rest
-                    # low += cum 2^-shift, with carries into the higher bits.
-                    carry = 0
-                    j = shift
-                    while (cum > 0 or carry) and j > 0:
-                        v = low[j] + (cum & 1) + carry
-                        low[j] = v & 1
-                        carry = v >> 1
-                        cum >>= 1
-                        j -= 1
-                    rng = share
-                    counts[s] -= 1
-                    remaining -= 1
-                    while rng < half:
-                        rng <<= 1
-                        shift += 1
-                    if shift > buffer_bits:
-                        ok = False
-                        break
-                valid[b] = ok
-                # v = ceil(low 2^k): the first k bits, plus one if more follow.
-                up = 0
-                for j in range(k + 1, buffer_bits + 1):
-                    if low[j]:
-                        up = 1
-                        break
-                for j in range(k, 0, -1):
-                    v = low[j] + up
-                    bits[b, j - 1] = v & 1
-                    up = v >> 1
-
-        _NUMBA_CCDM["match"] = match
-        _NUMBA_CCDM["dematch"] = dematch
-    return _NUMBA_CCDM[name]
+    return getattr(_numba_loops, f"ccdm_{name}")
 
 
 def _encode_ccdm(code: CCDM, bits: ArrayType) -> ArrayType:

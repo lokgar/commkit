@@ -17,7 +17,7 @@ from commkit.coding import (
     decode,
     encode,
 )
-from commkit.coding.shaping import _composition
+from commkit.coding.shaping import _composition, _get_numba_ccdm
 from commkit.impairments import apply_awgn
 from commkit.mapping import Constellation
 from tests.common.coding import random_bits
@@ -92,6 +92,19 @@ class TestCCDM:
         labels = encode(random_bits(cc.k, xp, seed=2), code=cc)
         labels[:2] = 1 - labels[:2]  # the first point changes kind
         assert not bool(decode(labels, code=cc).valid.all())
+
+    def test_dematcher_guards_its_buffer(self) -> None:
+        """The dematcher flags a block whose interval needs more fractional
+        bits than its buffer holds, instead of writing past it."""
+        cc = CCDM(AMPLITUDES, block_length=50)
+        symbols = cc._match(to_device(random_bits(cc.k, np, seed=3), "cpu")[None])
+        bits = np.empty((1, cc.k), dtype=np.int8)
+        valid = np.empty(1, dtype=np.bool_)
+        dematch = _get_numba_ccdm("dematch")
+        dematch(symbols, cc.composition, cc._buffer_bits, bits, valid)
+        assert valid[0]
+        dematch(symbols, cc.composition, cc.k + 1, bits, valid)
+        assert not valid[0]
 
     def test_validation(self) -> None:
         with pytest.raises(TypeError, match="Constellation"):

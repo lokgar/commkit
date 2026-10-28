@@ -20,7 +20,7 @@
 // once per point, with the symbol's peak metric (which cancels in the
 // difference), so one exponential per point instead of one per point and
 // bit.  A half whose maximum lies so far below the peak that its sum could
-// fall below LLR_EXACT_FLOOR (_EXACT_FLOOR in llr.py) is summed relative to
+// fall below LLR_EXACT_FLOOR (_EXACT_FLOOR in _numba_llr.py) is summed relative to
 // its own maximum instead, in the same pass: the maxima of the first pass
 // tell which halves those are, so no symbol needs a third pass (which sent
 // its whole warp through it).  The Numba kernel redoes a half-sum that

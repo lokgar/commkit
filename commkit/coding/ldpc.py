@@ -45,8 +45,6 @@ _MAX_DENSE = 1 << 27
 # float32 elements of the GPU message buffer per launch (512 MiB).
 _GPU_MESSAGES = 1 << 27
 
-_NUMBA_LDPC: dict[str, Any] = {}
-
 
 @dataclass(frozen=True, eq=False)
 class LDPCCode(_Code):
@@ -553,106 +551,9 @@ def _get_numba_ldpc() -> Any:
     kernel bit for bit.  ``app`` holds the channel LLRs on entry and the
     a-posteriori LLRs on exit.
     """
-    if "ldpc" not in _NUMBA_LDPC:
-        import numba
+    from . import _numba_loops
 
-        jit = numba.njit(cache=True, nogil=True, inline="always")
-        phi_min, phi_max = np.float32(1e-7), np.float32(30.0)
-        half = np.float32(0.5)
-        zero = np.float32(0.0)
-
-        @jit
-        def phi(x):  # type: ignore[no-untyped-def]
-            x = min(max(x, phi_min), phi_max)
-            return -np.log(np.tanh(half * x))
-
-        @jit
-        def min_sum_row(a, r, cols, e0, e1, scale, offset):  # type: ignore[no-untyped-def]
-            min1 = np.float32(np.inf)
-            min2 = np.float32(np.inf)
-            idx = -1
-            neg = False
-            for e in range(e0, e1):
-                q = a[cols[e]] - r[e]
-                neg ^= q < zero
-                mag = abs(q)
-                if mag < min1:
-                    min2 = min1
-                    min1 = mag
-                    idx = e
-                elif mag < min2:
-                    min2 = mag
-            m1 = max(scale * min1 - offset, zero)
-            m2 = max(scale * min2 - offset, zero)
-            for e in range(e0, e1):
-                c = cols[e]
-                q = a[c] - r[e]
-                mag = m2 if e == idx else m1
-                rn = -mag if neg ^ (q < zero) else mag
-                a[c] = q + rn
-                r[e] = rn
-
-        @jit
-        def sum_product_row(a, r, cols, e0, e1):  # type: ignore[no-untyped-def]
-            total = zero
-            neg = False
-            for e in range(e0, e1):
-                q = a[cols[e]] - r[e]
-                neg ^= q < zero
-                total += phi(abs(q))
-            for e in range(e0, e1):
-                c = cols[e]
-                q = a[c] - r[e]
-                mag = phi(total - phi(abs(q)))
-                rn = -mag if neg ^ (q < zero) else mag
-                a[c] = q + rn
-                r[e] = rn
-
-        @jit
-        def satisfied(a, row_ptr, cols):  # type: ignore[no-untyped-def]
-            for row in range(row_ptr.shape[0] - 1):
-                parity = False
-                for e in range(row_ptr[row], row_ptr[row + 1]):
-                    parity ^= a[cols[e]] < zero
-                if parity:
-                    return False
-            return True
-
-        @numba.njit(cache=True, nogil=True, parallel=True)
-        def ldpc_layered(  # type: ignore[no-untyped-def]
-            app, row_ptr, cols, sum_product, scale, offset, max_iterations,
-            early_stop, iters, valid,
-        ):  # fmt: skip
-            m = row_ptr.shape[0] - 1
-            for b in numba.prange(app.shape[0]):  # type: ignore[attr-defined,no-untyped-call]
-                a = app[b]
-                r = np.zeros(cols.shape[0], dtype=np.float32)
-                it = 0
-                ok = early_stop and satisfied(a, row_ptr, cols)
-                while not ok and it < max_iterations:
-                    for row in range(m):
-                        if sum_product:
-                            sum_product_row(a, r, cols, row_ptr[row], row_ptr[row + 1])
-                        else:
-                            min_sum_row(
-                                a,
-                                r,
-                                cols,
-                                row_ptr[row],
-                                row_ptr[row + 1],
-                                scale,
-                                offset,
-                            )
-                    it += 1
-                    if early_stop:
-                        ok = satisfied(a, row_ptr, cols)
-                if not early_stop:
-                    ok = satisfied(a, row_ptr, cols)
-                iters[b] = it
-                valid[b] = ok
-
-        _NUMBA_LDPC["ldpc"] = ldpc_layered
-    return _NUMBA_LDPC["ldpc"]
+    return _numba_loops.ldpc_layered
 
 
 _register(

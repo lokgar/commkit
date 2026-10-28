@@ -27,7 +27,7 @@ import numpy as np
 
 from ..backend import ArrayType, dispatch, to_device
 from .base import _Code, _Codec, _Decoded, _register
-from .convolutional import _get_numba_trellis, _Trellis, _trellis
+from .convolutional import _Trellis, _trellis
 
 __all__ = ["TurboCode", "TurboIterations"]
 
@@ -74,8 +74,6 @@ _QPP = (
     (6080, 47, 190), (6144, 263, 480),
 )
 # fmt: on
-
-_NUMBA_TURBO: dict[str, Any] = {}
 
 
 @dataclass(frozen=True, eq=False)
@@ -176,100 +174,9 @@ class TurboIterations:
 
 def _get_numba_turbo(name: str) -> Any:
     """Numba RSC encoder and turbo decoder, parallel over blocks."""
-    if name not in _NUMBA_TURBO:
-        import numba
+    from . import _numba_loops
 
-        bcjr = _get_numba_trellis("bcjr")
-
-        @numba.njit(cache=True, nogil=True)
-        def rsc(bits, nxt, outputs, tail, parity, tail_bits):  # type: ignore[no-untyped-def]
-            """Parity of ``bits`` and the 3 tail (systematic, parity) pairs."""
-            s = 0
-            for t in range(bits.shape[0]):
-                u = bits[t]
-                parity[t] = outputs[s, u, 1]
-                s = nxt[s, u]
-            for t in range(3):
-                u = tail[s]
-                tail_bits[t, 0] = u
-                tail_bits[t, 1] = outputs[s, u, 1]
-                s = nxt[s, u]
-
-        @numba.njit(cache=True, nogil=True, parallel=True)
-        def encode(bits, pi, nxt, outputs, tail, out):  # type: ignore[no-untyped-def]
-            k = bits.shape[1]
-            for row in numba.prange(bits.shape[0]):  # type: ignore[attr-defined,no-untyped-call]
-                p1 = np.empty(k, dtype=np.int8)
-                p2 = np.empty(k, dtype=np.int8)
-                t1 = np.empty((3, 2), dtype=np.int8)
-                t2 = np.empty((3, 2), dtype=np.int8)
-                permuted = np.empty(k, dtype=np.int8)
-                for i in range(k):
-                    permuted[i] = bits[row, pi[i]]
-                rsc(bits[row], nxt, outputs, tail, p1, t1)
-                rsc(permuted, nxt, outputs, tail, p2, t2)
-                d0 = out[row, : k + 4]
-                d1 = out[row, k + 4 : 2 * k + 8]
-                d2 = out[row, 2 * k + 8 :]
-                d0[:k] = bits[row]
-                d1[:k] = p1
-                d2[:k] = p2
-                # TS 36.212 clause 5.1.3.2.2.
-                d0[k], d1[k], d2[k] = t1[0, 0], t1[0, 1], t1[1, 0]
-                d0[k + 1], d1[k + 1], d2[k + 1] = t1[1, 1], t1[2, 0], t1[2, 1]
-                d0[k + 2], d1[k + 2], d2[k + 2] = t2[0, 0], t2[0, 1], t2[1, 0]
-                d0[k + 3], d1[k + 3], d2[k + 3] = t2[1, 1], t2[2, 0], t2[2, 1]
-
-        @numba.njit(cache=True, nogil=True, parallel=True)
-        def decode(llrs, pi, nxt, outputs, tail, iterations, exact, scale, out):  # type: ignore[no-untyped-def]
-            k = pi.shape[0]
-            steps = k + 3
-            forced = np.zeros(steps, dtype=np.bool_)
-            forced[k:] = True
-            for row in numba.prange(llrs.shape[0]):  # type: ignore[attr-defined,no-untyped-call]
-                d0 = llrs[row, : k + 4]
-                d1 = llrs[row, k + 4 : 2 * k + 8]
-                d2 = llrs[row, 2 * k + 8 :]
-                ch1 = np.empty((steps, 2))
-                ch2 = np.empty((steps, 2))
-                for t in range(k):
-                    ch1[t, 0] = d0[t]
-                    ch1[t, 1] = d1[t]
-                    ch2[t, 0] = d0[pi[t]]
-                    ch2[t, 1] = d2[t]
-                ch1[k, 0], ch1[k, 1], ch1[k + 1, 0] = d0[k], d1[k], d2[k]
-                ch1[k + 1, 1], ch1[k + 2, 0], ch1[k + 2, 1] = (
-                    d0[k + 1],
-                    d1[k + 1],
-                    d2[k + 1],
-                )
-                ch2[k, 0], ch2[k, 1], ch2[k + 1, 0] = d0[k + 2], d1[k + 2], d2[k + 2]
-                ch2[k + 1, 1], ch2[k + 2, 0], ch2[k + 2, 1] = (
-                    d0[k + 3],
-                    d1[k + 3],
-                    d2[k + 3],
-                )
-                la1 = np.zeros(steps)
-                la2 = np.zeros(steps)
-                app1 = np.empty(steps)
-                app2 = np.empty(steps)
-                app_c = np.empty((steps, 2))
-                for _ in range(iterations):
-                    bcjr(ch1, la1, nxt, outputs, tail, forced, 0, 0, exact, app1, app_c)
-                    for t in range(k):
-                        # Extrinsic of decoder 1, kept in la1 (natural order).
-                        la1[t] = scale * (app1[t] - la1[t] - ch1[t, 0])
-                    for t in range(k):
-                        la2[t] = la1[pi[t]]
-                    bcjr(ch2, la2, nxt, outputs, tail, forced, 0, 0, exact, app2, app_c)
-                    for t in range(k):
-                        la1[pi[t]] = scale * (app2[t] - la2[t] - ch2[t, 0])
-                for t in range(k):
-                    out[row, pi[t]] = 1 if app2[t] < 0 else 0
-
-        _NUMBA_TURBO["encode"] = encode
-        _NUMBA_TURBO["decode"] = decode
-    return _NUMBA_TURBO[name]
+    return getattr(_numba_loops, f"turbo_{name}")
 
 
 def _encode(code: TurboCode, bits: ArrayType) -> ArrayType:

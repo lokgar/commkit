@@ -36,9 +36,10 @@ uv run pytest --device=cpu               # what CI runs
 uv run pytest tests/equalization/ -k lms # subset
 uv run pytest --cov=commkit              # coverage
 NUMBA_DISABLE_JIT=1 uv run pytest tests/equalization tests/recovery \
-    tests/test_frequency.py tests/coding/test_ldpc.py tests/coding/test_shaping.py::TestCCDM \
+    tests/test_frequency.py tests/mapping/test_llr.py tests/coding/test_ldpc.py tests/coding/test_shaping.py::TestCCDM \
     tests/coding/test_polar.py::TestEncoding "tests/coding/test_polar.py::TestDecoding::test_sc_matches_the_recursive_reference" \
     "tests/coding/test_polar.py::TestDecoding::test_full_list_is_maximum_likelihood" \
+    "tests/coding/test_polar.py::TestDecoding::test_crc_failure_keeps_the_best_path" \
     tests/coding/test_convolutional.py tests/coding/test_turbo.py::TestEncoding \
     tests/coding/test_turbo.py::TestDecoding::test_noiseless \
     -k "not waterfall and not threshold" \
@@ -257,6 +258,8 @@ Docstrings describe the code as it is; a change in behavior updates them in the 
 | Binary linear algebra of codes: encoding, syndromes, the correlations of maximum-likelihood decoding, the evaluations of algebraic decoding (Chien search, Forney), Chase's test patterns through a hard decoder | one float32 GEMM per chunk (`coding._gf2.matmul_mod2`: BLAS, cuBLAS), exact below an inner dimension of 2^24; small tables (generators, coset leaders) cached per code object and device (`backend._device_tables`) | follows the input |
 | Iterative decoding of many codewords: layered LDPC belief propagation (min-sum, sum-product) | CPU: Numba `parallel=True` over codewords, all layers and iterations inside, without fast-math. GPU: CUDA kernel (`ldpc_layered`), one thread block per codeword, the rows of a layer in parallel, early stop per codeword inside the kernel; the same rows in the same order on both, so min-sum agrees bit for bit (a CuPy version, about 12 launches per layer, was 7-23x slower) | follows the input |
 | Elementwise chains between multi-core FFTs (the fiber solver's Kerr and PMD stages) | NumPy: a Numba `parallel=True` pass there competes with `scipy.fft`'s threads (the solver's Numba passes measured 1.1-1.8x slower end to end, 2^14-2^20); adopt one only on a paired end-to-end A/B | CPU |
+
+**Numba kernels live at module level**, in a private module that a getter imports on first use (`equalization/_numba_loops.py`, `coding/_numba_loops.py`, `mapping/_numba_llr.py`), so `import commkit` does not load Numba and the disk cache (`cache=True`) keeps them across processes. A kernel defined inside a function that calls another kernel defined there captures that dispatcher in its closure, which Numba's cache key does not reproduce in a new process: it compiled again in every process (3 s for `compute_llr`, 6 s for polar list decoding). A getter may build a kernel in a closure that captures only constants (`_get_numba_sos`).
 
 **Host-sync hygiene:**
 

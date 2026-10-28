@@ -105,6 +105,20 @@ class TestDecoding:
         got = decode(xp.asarray(llrs), code=code, method=SCL(16)).bits
         np.testing.assert_array_equal(to_device(got, "cpu").reshape(300, -1), ml)
 
+    def test_crc_failure_keeps_the_best_path(self, xp: Any) -> None:
+        """Where no list entry passes the CRC, SCL returns the most likely
+        path, as the same list without a CRC does, and flags the block."""
+        code = PolarCode.nr(16, 64, crc="6")
+        plain = PolarCode(64, code.info_positions)
+        llrs = np.random.default_rng(6).standard_normal((40, 64)).astype(np.float32)
+        res = decode(xp.asarray(llrs), code=code, method=SCL(4))
+        ref = decode(xp.asarray(llrs), code=plain, method=SCL(4))
+        failed = ~to_device(res.valid, "cpu").reshape(-1)
+        assert failed.sum() > 30  # pure noise: 4 candidates pass 6 checks rarely
+        bits = to_device(res.bits, "cpu").reshape(40, -1)
+        ref_bits = to_device(ref.bits, "cpu").reshape(40, -1)
+        np.testing.assert_array_equal(bits[failed], ref_bits[failed, : code.k])
+
     def test_list_and_crc_help(self, backend_device: str) -> None:
         code = PolarCode.nr(64, 128, crc="11")
         sig = generate(

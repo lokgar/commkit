@@ -31,8 +31,6 @@ from .base import _Code, _Codec, _Decoded, _register
 
 __all__ = ["BCJR", "ConvolutionalCode", "Viterbi"]
 
-_NUMBA_TRELLIS: dict[str, Any] = {}
-
 
 class _Trellis(NamedTuple):
     """State-transition tables of a binary trellis (private).
@@ -225,176 +223,16 @@ def _encode(code: ConvolutionalCode, bits: ArrayType) -> ArrayType:
 def _get_numba_trellis(name: str) -> Any:
     """Numba Viterbi and BCJR over a trellis's tables, parallel over blocks.
 
-    ``viterbi`` maximizes ``sum (1 - 2 c) L`` over paths from ``start`` to
-    ``end`` (``-1`` for any), once per start state when ``tail_biting``
-    (start and end equal).  ``bcjr`` is shared with the turbo decoder: per
+    ``viterbi`` maximizes ``sum (1 - 2 c) L`` over paths from state 0 back
+    to state 0, or once per start state when ``tail_biting`` (start and end
+    equal).  ``bcjr`` is shared with the turbo decoder: per
     step a channel LLR for each output and an a-priori LLR for the input,
     ``forced[t]`` steps (termination tails) taking the tail input only;
     it returns the a-posteriori LLRs of the inputs and of the outputs.
     """
-    if not _NUMBA_TRELLIS:
-        import numba
+    from . import _numba_loops
 
-        neg = -1.0e300
-
-        @numba.njit(cache=True, nogil=True)
-        def branch(llr_t, outputs, s, u):  # type: ignore[no-untyped-def]
-            acc = 0.0
-            for j in range(outputs.shape[2]):
-                v = llr_t[j]
-                acc += -v if outputs[s, u, j] else v
-            return acc
-
-        @numba.njit(cache=True, nogil=True)
-        def combine(a, b, exact):  # type: ignore[no-untyped-def]
-            """``log(e^a + e^b)`` (exact) or ``max(a, b)``."""
-            if a < b:
-                a, b = b, a
-            if b <= neg or not exact:
-                return a
-            return a + np.log1p(np.exp(b - a))
-
-        @numba.njit(cache=True, nogil=True)
-        def viterbi_one(llr, nxt, outputs, start, end, decisions, metric, nm):  # type: ignore[no-untyped-def]
-            steps = llr.shape[0]
-            states = nxt.shape[0]
-            for s in range(states):
-                metric[s] = 0.0 if (start < 0 or s == start) else neg
-            for t in range(steps):
-                for s in range(states):
-                    nm[s] = neg
-                for s in range(states):
-                    if metric[s] <= neg:
-                        continue
-                    for u in range(2):
-                        q = nxt[s, u]
-                        v = metric[s] + branch(llr[t], outputs, s, u)
-                        if v > nm[q]:
-                            nm[q] = v
-                            decisions[t, q] = s * 2 + u
-                for s in range(states):
-                    metric[s] = nm[s]
-            best = end
-            if end < 0:
-                best = 0
-                for s in range(1, states):
-                    if metric[s] > metric[best]:
-                        best = s
-            return best, metric[best]
-
-        @numba.njit(cache=True, nogil=True, parallel=True)
-        def viterbi(llrs, nxt, outputs, tail_biting, info_steps, out_bits):  # type: ignore[no-untyped-def]
-            rows, steps = llrs.shape[0], llrs.shape[1]
-            states = nxt.shape[0]
-            for row in numba.prange(rows):  # type: ignore[attr-defined,no-untyped-call]
-                decisions = np.zeros((steps, states), dtype=np.int64)
-                best_dec = np.zeros((steps, states), dtype=np.int64)
-                metric = np.empty(states)
-                nm = np.empty(states)
-                best_end = 0
-                best_val = neg
-                for start in range(states if tail_biting else 1):
-                    end = start if tail_biting else 0
-                    last, val = viterbi_one(
-                        llrs[row], nxt, outputs, start, end, decisions, metric, nm
-                    )
-                    if val > best_val:
-                        best_val = val
-                        best_end = last
-                        best_dec[:, :] = decisions
-                s = best_end
-                for t in range(steps - 1, -1, -1):
-                    code = best_dec[t, s]
-                    if t < info_steps:
-                        out_bits[row, t] = code & 1
-                    s = code >> 1
-
-        @numba.njit(cache=True, nogil=True)
-        def bcjr(
-            llr, apriori, nxt, outputs, tail, forced, start, end, exact, app_u, app_c
-        ):  # type: ignore[no-untyped-def]
-            steps = llr.shape[0]
-            states = nxt.shape[0]
-            r = outputs.shape[2]
-            alpha = np.full((steps + 1, states), neg)
-            beta = np.full((steps + 1, states), neg)
-            if start < 0:
-                alpha[0, :] = 0.0
-            else:
-                alpha[0, start] = 0.0
-            if end < 0:
-                beta[steps, :] = 0.0
-            else:
-                beta[steps, end] = 0.0
-            gamma = np.full((steps, states, 2), neg)
-            for t in range(steps):
-                for s in range(states):
-                    for u in range(2):
-                        if forced[t] and u != tail[s]:
-                            continue
-                        g = 0.5 * branch(llr[t], outputs, s, u)
-                        g += -0.5 * apriori[t] if u else 0.5 * apriori[t]
-                        gamma[t, s, u] = g
-
-            for t in range(steps):
-                for s in range(states):
-                    if alpha[t, s] <= neg:
-                        continue
-                    for u in range(2):
-                        if gamma[t, s, u] <= neg:
-                            continue
-                        q = nxt[s, u]
-                        alpha[t + 1, q] = combine(
-                            alpha[t + 1, q], alpha[t, s] + gamma[t, s, u], exact
-                        )
-            for t in range(steps - 1, -1, -1):
-                for s in range(states):
-                    acc = neg
-                    for u in range(2):
-                        if gamma[t, s, u] <= neg:
-                            continue
-                        acc = combine(
-                            acc, gamma[t, s, u] + beta[t + 1, nxt[s, u]], exact
-                        )
-                    beta[t, s] = acc
-            for t in range(steps):
-                zu = neg
-                ou = neg
-                for j in range(r):
-                    app_c[t, j] = 0.0
-                c0 = np.full(r, neg)
-                c1 = np.full(r, neg)
-                for s in range(states):
-                    for u in range(2):
-                        if gamma[t, s, u] <= neg or alpha[t, s] <= neg:
-                            continue
-                        v = alpha[t, s] + gamma[t, s, u] + beta[t + 1, nxt[s, u]]
-                        if u:
-                            ou = combine(ou, v, exact)
-                        else:
-                            zu = combine(zu, v, exact)
-                        for j in range(r):
-                            if outputs[s, u, j]:
-                                c1[j] = combine(c1[j], v, exact)
-                            else:
-                                c0[j] = combine(c0[j], v, exact)
-                app_u[t] = zu - ou
-                for j in range(r):
-                    app_c[t, j] = c0[j] - c1[j]
-
-        @numba.njit(cache=True, nogil=True, parallel=True)
-        def bcjr_blocks(
-            llrs, nxt, outputs, tail, forced, start, end, exact, app_u, app_c
-        ):  # type: ignore[no-untyped-def]
-            apriori = np.zeros(llrs.shape[1])
-            for row in numba.prange(llrs.shape[0]):  # type: ignore[attr-defined,no-untyped-call]
-                bcjr(llrs[row], apriori, nxt, outputs, tail, forced, start, end, exact,
-                     app_u[row], app_c[row])  # fmt: skip
-
-        _NUMBA_TRELLIS["viterbi"] = viterbi
-        _NUMBA_TRELLIS["bcjr"] = bcjr
-        _NUMBA_TRELLIS["bcjr_blocks"] = bcjr_blocks
-    return _NUMBA_TRELLIS[name]
+    return getattr(_numba_loops, name)
 
 
 def _decode(
