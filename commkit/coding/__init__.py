@@ -12,18 +12,20 @@ object::
     res = decode(compute_llr(rx, noise_var=nv), code=code, method=Syndrome())
 
 Codes: :class:`LinearBlockCode` (Hamming), :class:`LDPCCode` (DVB-S2, PON),
+:class:`ReedSolomonCode` (G.709, KR4, KP4, PON), :class:`BCHCode`,
 :class:`CRC` (error detection), and the rate-matching wrappers
 :class:`Punctured` and :class:`Shortened`.  Distribution matching:
 :class:`CCDM` and probabilistic amplitude shaping, :class:`PAS`.  Decoders: :class:`Syndrome`,
-:class:`MaximumLikelihood`, :class:`MinSum`, :class:`SumProduct`.  Bit
+:class:`MaximumLikelihood`, :class:`MinSum`, :class:`SumProduct`,
+:class:`BerlekampMassey`.  Bit
 permutations: :func:`interleave` and :func:`deinterleave` with an
 :class:`Interleaver`.
 
-The modules ``bch``, ``convolutional``, ``galois``, ``polar``,
-``reed_solomon`` and ``turbo`` are placeholders for planned codes, carrying only their scope
+The modules ``convolutional``, ``polar`` and ``turbo`` are placeholders for planned codes, carrying only their scope
 docstring.
 """
 
+from .algebraic import BCHCode, BerlekampMassey, ReedSolomonCode
 from .base import DecodeResult, decode, encode
 from .crc import CRC
 from .interleaving import Interleaver, deinterleave, interleave
@@ -33,6 +35,8 @@ from .ratematch import Punctured, Shortened
 from .shaping import CCDM, PAS
 
 __all__ = [
+    "BCHCode",
+    "BerlekampMassey",
     "CCDM",
     "CRC",
     "DecodeResult",
@@ -43,6 +47,7 @@ __all__ = [
     "MinSum",
     "PAS",
     "Punctured",
+    "ReedSolomonCode",
     "Shortened",
     "SumProduct",
     "Syndrome",

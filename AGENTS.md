@@ -132,7 +132,7 @@ Dependencies point downward only:
   - `analysis` holds laser and phase characterization.
   - `metrics` is the reporting layer.
 - **Splitting modules:** promote a flat module to a package only when it exceeds about 1000 lines *and* has two or more separable concerns. The package `__init__` re-exports the public names. Never create a `utils/` package or one-function files.
-- **Placeholder modules are kept on purpose.** The modules of `commkit.coding` that hold only a scope docstring (`bch`, `convolutional`, `galois`, `polar`, `reed_solomon`, `turbo`) are reminders of planned codes. Never delete them or treat them as dead code. They are excluded from coverage and from the contract registry (`PLACEHOLDERS`), and the README labels them "planned, not implemented"; a module that gets code leaves all three lists.
+- **Placeholder modules are kept on purpose.** The modules of `commkit.coding` that hold only a scope docstring (`convolutional`, `polar`, `turbo`) are reminders of planned codes. Never delete them or treat them as dead code. They are excluded from coverage and from the contract registry (`PLACEHOLDERS`), and the README labels them "planned, not implemented"; a module that gets code leaves all three lists.
 - **Shared physics lives in one private module**, used by the channel and by its compensation: `_dispersion` (β₂, β₃, the dispersion response) and `_fiber` (`Fiber` and the split-step solver behind `apply_fiber_propagation` and `correct_fiber_propagation`).
 
 ---
@@ -353,7 +353,7 @@ Steps, once CuPy 14.3 (with cp315 wheels for `cupy-cuda13x`) and a fixed `jupyte
 
 ### Planned modules
 
-1. **Channel coding** (`coding`). `encode` / `decode`, linear block codes (Hamming, syndrome and ML decoding), LDPC codes (layered min-sum and sum-product on both devices, DVB-S2 and PON presets), CRCs, interleavers, puncturing and shortening, distribution matching (CCDM, PAS), coded and matched payloads in `generate` and frames, and `fer` / `ngmi` exist; shaped `generate` draws through a CCDM. Still to come, in this order: BCH and Reed-Solomon (G.709, KR4, KP4, PON presets); Chase-Pyndiah, concatenated, staircase and oFEC codes; polar; convolutional and turbo. Decoders batch codewords on both devices.
+1. **Channel coding** (`coding`). `encode` / `decode`, linear block codes (Hamming, syndrome and ML decoding), LDPC codes (layered min-sum and sum-product on both devices, DVB-S2 and PON presets), CRCs, interleavers, puncturing and shortening, distribution matching (CCDM, PAS), coded and matched payloads in `generate` and frames, and `fer` / `ngmi` exist; shaped `generate` draws through a CCDM, BCH and Reed-Solomon codes (G.709, KR4, KP4, PON presets). Still to come, in this order: Chase-Pyndiah, concatenated, staircase and oFEC codes; polar; convolutional and turbo. Decoders batch codewords on both devices.
 2. **Storing frames with a payload code.** `save_npz` raises for a frame with a `payload_code`, because code objects are not serialized; store `extract_payload(signal)` instead.
 
 ### Nonlinear fiber channel: future features

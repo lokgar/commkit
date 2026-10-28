@@ -97,11 +97,8 @@ EQR = "equalizer_result"
 PLACEHOLDERS = tuple(
     f"commkit.coding.{name}"
     for name in (
-        "bch",
         "convolutional",
-        "galois",
         "polar",
-        "reed_solomon",
         "turbo",
     )
 )
@@ -279,6 +276,9 @@ ROWS: list[Row] = [
     Row("commkit.io.load_npz", INFRA),
     Row("commkit.io.save_npz", INFRA, data=2),
     # --- coding (array-only: bits and LLRs are derived quantities) -----------
+    Row("commkit.coding.algebraic.BCHCode", VALUE),
+    Row("commkit.coding.algebraic.BerlekampMassey", VALUE),
+    Row("commkit.coding.algebraic.ReedSolomonCode", VALUE),
     Row("commkit.coding.base.DecodeResult", VALUE),
     Row("commkit.coding.crc.CRC", VALUE),
     Row("commkit.coding.interleaving.Interleaver", VALUE),

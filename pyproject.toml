@@ -89,11 +89,8 @@ markers = [
 # Placeholder modules for planned codes are kept on purpose as reminders;
 # they hold no code yet, so they are not measured.
 omit = [
-    "commkit/coding/bch.py",
     "commkit/coding/convolutional.py",
-    "commkit/coding/galois.py",
     "commkit/coding/polar.py",
-    "commkit/coding/reed_solomon.py",
     "commkit/coding/turbo.py",
 ]
 

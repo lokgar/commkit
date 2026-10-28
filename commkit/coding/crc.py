@@ -150,32 +150,13 @@ class CRC(_Code):
     def _tables(self) -> tuple[np.ndarray, np.ndarray]:
         """``(G, c)``: float32 ``(k, r)`` and int8 ``(r,)``, ``crc = u G + c``."""
         r, k = self.degree, self.block_length
-        mask = (1 << r) - 1
-        top = 1 << (r - 1)
-
-        def times_x(v: int) -> int:
-            """``v x mod g``."""
-            return ((v << 1) & mask) ^ (self.polynomial if v & top else 0)
-
-        # Row i of G: x^(r + k - 1 - i) mod g, the remainder of message bit i.
-        rows = [0] * k
-        v = self.polynomial  # x^r mod g
-        for i in range(k - 1, -1, -1):
-            rows[i] = v
-            v = times_x(v)
-        # The initial register value enters as init * x^k mod g.
-        c = self.init
-        for _ in range(k):
-            c = times_x(c)
-        g = np.array([[(row >> (r - 1 - j)) & 1 for j in range(r)] for row in rows])
-
+        g, c = _remainders(self.polynomial, r, k, self.init)
         if self.reflect_in:
             g = g.reshape(-1, 8, r)[:, ::-1].reshape(k, r)
-        bits_c = np.array([(c >> (r - 1 - j)) & 1 for j in range(r)])
         if self.reflect_out:
-            g, bits_c = g[:, ::-1], bits_c[::-1]
-        bits_c ^= np.array([(self.xor_out >> (r - 1 - j)) & 1 for j in range(r)])
-        return g.astype(np.float32), bits_c.astype(np.int8)
+            g, c = g[:, ::-1], c[::-1]
+        c = c ^ _bits(self.xor_out, r)
+        return g.astype(np.float32), c.astype(np.int8)
 
     def checksum(self, bits: ArrayType) -> ArrayType:
         """The check bits of blocks of information bits.
@@ -185,6 +166,44 @@ class CRC(_Code):
         _, xp, _ = dispatch(bits)
         g, c = _device_tables(self, "crc", xp, lambda: self._tables)
         return matmul_mod2(bits, g) ^ c
+
+
+def _bits(value: int, width: int) -> np.ndarray:
+    """``width`` bits of ``value``, MSB first, int8."""
+    return np.array(
+        [(value >> (width - 1 - j)) & 1 for j in range(width)], dtype=np.int8
+    )
+
+
+def _remainders(
+    polynomial: int, degree: int, k: int, init: int = 0
+) -> tuple[np.ndarray, np.ndarray]:
+    """Systematic parity of a binary cyclic code (or CRC) with generator ``g``.
+
+    ``g(x) = x^degree + polynomial`` (MSB first).  Returns ``G`` ``(k,
+    degree)`` int8, row ``i`` the remainder ``x^(degree + k - 1 - i) mod
+    g`` of message bit ``i``, and ``c`` ``(degree,)``, the remainder of an
+    initial register ``init``, ``init x^k mod g``: the parity of ``u`` is
+    ``u G + c`` (mod 2).  Python integers, so any degree.  Shared by
+    :class:`CRC` and the BCH codes.
+    """
+    mask = (1 << degree) - 1
+    top = 1 << (degree - 1)
+
+    def times_x(v: int) -> int:
+        """``v x mod g``."""
+        return ((v << 1) & mask) ^ (polynomial if v & top else 0)
+
+    rows = [0] * k
+    v = polynomial  # x^degree mod g
+    for i in range(k - 1, -1, -1):
+        rows[i] = v
+        v = times_x(v)
+    c = init
+    for _ in range(k):
+        c = times_x(c)
+    g = np.array([_bits(row, degree) for row in rows], dtype=np.int8).reshape(k, degree)
+    return g, _bits(c, degree)
 
 
 def _encode(code: CRC, bits: ArrayType) -> ArrayType:
