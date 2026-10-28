@@ -460,6 +460,7 @@ def _dsh_fm_psd(samples: ArrayType, method: DshFmPsd, fs: float) -> LinewidthEst
     f_used = f_cpu[used2.any(axis=0)]
 
     def per_channel(a: np.ndarray) -> Any:
+        """The channel axis dropped for 1-D input."""
         return a[0] if S_cpu.ndim == 1 else a
 
     was_1d = dphi.ndim == 1

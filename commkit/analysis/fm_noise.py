@@ -169,6 +169,7 @@ def _hann_overlap(lag: float, nperseg: int) -> float:
     w = 0.5 - 0.5 * np.cos(2.0 * np.pi * np.arange(nperseg) / nperseg)
 
     def acf(m: int) -> float:  # Σ_n w[n]·w[n+m], zero once nothing overlaps
+        """Window autocorrelation ``sum_n w[n] w[n + m]`` at integer lag ``m``."""
         return float(np.sum(w[: nperseg - m] * w[m:])) if m < nperseg else 0.0
 
     k = int(lag)

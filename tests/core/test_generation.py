@@ -5,6 +5,7 @@ from typing import Any
 import numpy as np
 import pytest
 
+from commkit.coding import CCDM, LinearBlockCode, decode, encode
 from commkit.core import generate, generation
 from commkit.filtering import RC, RRC, Rect, SmoothRect
 from commkit.mapping import Constellation
@@ -160,13 +161,26 @@ class TestGenerate:
         np.testing.assert_allclose(scale, scale[0], rtol=1e-6)
         assert np.mean(np.abs(sig.samples) ** 2) == pytest.approx(1.0, rel=1e-6)
 
-    def test_shaped_draws_follow_pmf(self) -> None:
+    def test_shaped_comes_from_bits_through_a_matcher(self) -> None:
+        """Each channel is one CCDM block: the point counts are exactly the
+        composition (the pmf quantized to 1/N), and the source bits are the
+        matcher's input."""
         c = Constellation.qam(16).shaped(nu=0.1)
-        sig = generate(c, 200_000, symbol_rate=1e6, rng=2)
-        idx = np.argmin(np.abs(sig.reference.symbols[:, None] - c.points), axis=1)
-        freq = np.bincount(idx, minlength=16) / idx.size
-        np.testing.assert_allclose(freq, c.pmf, atol=4e-3)
-        np.testing.assert_array_equal(c.map(sig.reference.bits), sig.reference.symbols)
+        sig = generate(c, 20_000, symbol_rate=1e6, num_channels=2, rng=2)
+        ref = sig.reference
+        matcher = CCDM(c, block_length=20_000)
+        assert ref.code_block == (80_000, matcher.k)
+        assert ref.info_bits.shape == (2, matcher.k)
+        for ch in range(2):
+            idx = c._nearest(ref.symbols[ch])
+            np.testing.assert_array_equal(
+                np.bincount(idx, minlength=16), matcher.composition
+            )
+        np.testing.assert_allclose(matcher.composition / 20_000, c.pmf, atol=1e-4)
+        np.testing.assert_array_equal(c.map(ref.bits), ref.symbols)
+        np.testing.assert_array_equal(
+            decode(ref.bits, code=matcher).bits, ref.info_bits
+        )
 
     def test_int_seed_matches_default_rng_bits(self) -> None:
         """An int rng draws the bits default_rng(seed).integers would."""
@@ -224,3 +238,59 @@ class TestGenerateDevice:
         )
         assert sig.samples.dtype == ref.samples.dtype
         np.testing.assert_allclose(to_numpy(sig.samples), ref.samples, atol=1e-5)
+
+
+class TestGenerateCoded:
+    """generate(..., code=): information bits encoded, the coded bits mapped."""
+
+    def test_reference_holds_both_bit_streams(
+        self, backend_device: str, xp: Any
+    ) -> None:
+        code = LinearBlockCode.hamming(3)
+        c = Constellation.qam(16)
+        sig = generate(
+            c,
+            700,
+            symbol_rate=1e6,
+            num_channels=2,
+            code=code,
+            rng=0,
+            device=backend_device,
+        )
+        ref = sig.reference
+        assert ref.code_block == (7, 4)
+        assert ref.bits.shape == (2, 2800) and ref.info_bits.shape == (2, 1600)
+        assert isinstance(ref.info_bits, xp.ndarray)
+        np.testing.assert_array_equal(
+            to_numpy(encode(ref.info_bits, code=code)), to_numpy(ref.bits)
+        )
+        np.testing.assert_array_equal(to_numpy(c.map(ref.bits)), to_numpy(ref.symbols))
+        cpu = generate(c, 700, symbol_rate=1e6, num_channels=2, code=code, rng=0)
+        np.testing.assert_array_equal(to_numpy(ref.info_bits), cpu.reference.info_bits)
+
+    def test_single_channel_layout(self) -> None:
+        sig = generate(
+            Constellation.psk(4), 14, symbol_rate=1.0, code=LinearBlockCode.hamming(3)
+        )
+        assert sig.reference.bits.shape == (28,)
+        assert sig.reference.info_bits.shape == (16,)
+
+    def test_uncoded_is_unchanged(self) -> None:
+        """Without code the bits are the plain draw, shared as info_bits."""
+        sig = generate(Constellation.qam(16), 100, symbol_rate=1e6, rng=7)
+        expected = np.random.default_rng(7).integers(0, 2, 400, dtype="int8")
+        np.testing.assert_array_equal(sig.reference.bits, expected)
+        assert sig.reference.info_bits is sig.reference.bits
+
+    def test_invalid(self) -> None:
+        code = LinearBlockCode.hamming(3)
+        with pytest.raises(ValueError, match="num_symbols=7 or 14"):
+            generate(Constellation.qam(16), 10, symbol_rate=1.0, code=code)
+        with pytest.raises(ValueError, match=r"use num_symbols=7\."):
+            generate(Constellation.qam(16), 3, symbol_rate=1.0, code=code)
+        with pytest.raises(ValueError, match="shaped"):
+            generate(
+                Constellation.qam(16).shaped(nu=0.1), 7, symbol_rate=1.0, code=code
+            )
+        with pytest.raises(TypeError, match="code object"):
+            generate(Constellation.qam(16), 7, symbol_rate=1.0, code="hamming")

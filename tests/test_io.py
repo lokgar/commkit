@@ -16,6 +16,7 @@ from commkit import (
     metrics,
     multirate,
 )
+from commkit.coding import LinearBlockCode
 from commkit.filtering import RRC
 from commkit.io import load_npz, save_npz
 from commkit.mapping import Constellation
@@ -343,6 +344,56 @@ class TestNPZDeviceHandling:
         )
         xpt.assert_allclose(metrics.evm(loaded), evm_before, rtol=1e-5)
         assert metrics.ber(loaded) == ber_before
+
+
+class TestNPZCodedReference:
+    """The reference's source bits are stored only when they differ."""
+
+    def test_coded_roundtrip(self, tmp_path: Any, xp: Any, xpt: Any) -> None:
+        device = "gpu" if xp is not np else "cpu"
+        sig = generate(
+            Constellation.qam(16),
+            70,
+            symbol_rate=1e9,
+            code=LinearBlockCode.hamming(3),
+            rng=0,
+            device=device,
+        )
+        save_npz(sig, tmp_path / "coded")
+        assert "reference_info_bits" in np.load(tmp_path / "coded.npz")
+        back = load_npz(tmp_path / "coded.npz", device=device)
+        assert back.reference.code_block == (7, 4)
+        xpt.assert_array_equal(back.reference.info_bits, sig.reference.info_bits)
+        xpt.assert_array_equal(back.reference.bits, sig.reference.bits)
+
+    def test_uncoded_stores_bits_once(self, tmp_path: Any) -> None:
+        save_npz(_siso_signal(), tmp_path / "plain")
+        assert "reference_info_bits" not in np.load(tmp_path / "plain.npz")
+        ref = load_npz(tmp_path / "plain.npz").reference
+        assert ref.info_bits is ref.bits
+
+    def test_shaped_frame_keeps_the_matcher_input(self, tmp_path: Any) -> None:
+        frame = SingleCarrierFrame(
+            payload_len=400, payload_constellation=Constellation.qam(16).shaped(nu=0.1)
+        )
+        save_npz(frame.to_signal(sps=1, symbol_rate=1e9), tmp_path / "shaped")
+        loaded = load_npz(tmp_path / "shaped.npz").frame
+        np.testing.assert_array_equal(loaded.payload_info_bits, frame.payload_info_bits)
+        assert (
+            loaded._payload_reference().code_block
+            == frame._payload_reference().code_block
+        )
+        plain = SingleCarrierFrame(payload_len=40)
+        save_npz(plain.to_signal(sps=1, symbol_rate=1e9), tmp_path / "plain_frame")
+        back = load_npz(tmp_path / "plain_frame.npz").frame
+        assert back.payload_info_bits is back.payload_bits
+
+    def test_frame_with_payload_code_raises(self, tmp_path: Any) -> None:
+        frame = SingleCarrierFrame(
+            payload_len=14, payload_code=LinearBlockCode.hamming(3)
+        )
+        with pytest.raises(ValueError, match="payload_code"):
+            save_npz(frame.to_signal(sps=1, symbol_rate=1e9), tmp_path / "f")
 
 
 def test_frame_constellations_roundtrip(tmp_path: Any) -> None:

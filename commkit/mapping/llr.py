@@ -19,15 +19,13 @@ nearest levels, so it keeps the level metrics.
 
 from __future__ import annotations
 
-import weakref
 from collections.abc import Callable
-from types import ModuleType
-from typing import TYPE_CHECKING, Any, NamedTuple
+from typing import TYPE_CHECKING, NamedTuple
 
 import numpy as np
 
 from .. import _cuda
-from ..backend import ArrayType, dispatch
+from ..backend import ArrayType, _device_tables, dispatch
 from ..core._signal_adapter import adapt_signal
 from ..core.signal import Signal
 from ..logger import logger
@@ -109,44 +107,6 @@ def compute_llr(
     return constellation.llr(x, noise_var=noise_var, method=method)
 
 
-_NUMBA_LLR: dict[str, Callable[..., None]] = {}
-
-# Exact LLRs sum exp(m - P) with one peak P per symbol; a half-sum below this
-# (its largest term under about e^-60 relative to P) is redone relative to its
-# own max, so float32 underflow never costs more than ~1e-9 relative error.
-_EXACT_FLOOR = np.float32(1e-26)
-# Symbols per prange task: amortizes the scratch buffers of the CPU kernels.
-_LLR_TASK = 256
-
-# Device copies of the CUDA kernels' tables (points, labels, log prior), per
-# constellation and then per (table kind, CUDA device id): built on the first
-# call instead of on every one.  Weak keys, so a dropped constellation frees
-# its tables; equal constellations share them.
-_DEVICE_TABLES: weakref.WeakKeyDictionary[
-    Constellation, dict[tuple[str, int], tuple[Any, ...]]
-] = weakref.WeakKeyDictionary()
-
-
-def _device_tables(
-    owner: Constellation | None,
-    kind: str,
-    xp: ModuleType,
-    build: Callable[[], tuple[np.ndarray, ...]],
-) -> tuple[Any, ...]:
-    """``build()``'s host tables on the current CUDA device, cached per ``owner``.
-
-    ``owner=None`` (no constellation to cache on) copies them every call.
-    """
-    if owner is None:
-        return tuple(xp.asarray(a) for a in build())
-    per_owner = _DEVICE_TABLES.setdefault(owner, {})
-    key = (kind, int(xp.cuda.Device().id))
-    tables = per_owner.get(key)
-    if tables is None:
-        tables = per_owner[key] = tuple(xp.asarray(a) for a in build())
-    return tables
-
-
 def _get_numba_llr(name: str = "llr") -> Callable[..., None]:
     """Numba LLR kernels for the CPU, parallel over blocks of symbols.
 
@@ -165,212 +125,14 @@ def _get_numba_llr(name: str = "llr") -> Callable[..., None]:
 
     float32, as the GPU paths.
     """
-    if name not in _NUMBA_LLR:
-        import numba
+    from . import _numba_llr
 
-        floor = _EXACT_FLOOR
-        task = _LLR_TASK
-        jit = numba.njit(cache=True, fastmath=True, nogil=True, inline="always")
-
-        @jit
-        def prepare_exp(metric, e):  # type: ignore[no-untyped-def]
-            """``e = exp(metric - peak)`` with the largest metric ``peak``."""
-            peak = metric[0]
-            for m in range(1, metric.shape[0]):
-                if metric[m] > peak:
-                    peak = metric[m]
-            for m in range(metric.shape[0]):
-                e[m] = np.exp(metric[m] - peak)
-            return peak
-
-        @jit
-        def log_half_sum(metric, e, idx, v, b, peak):  # type: ignore[no-untyped-def]
-            """``log sum_j exp(metric[idx[v, b, j]] - peak)`` of one half.
-
-            Summed from ``e``, or relative to the half's own maximum where
-            it underflows in ``e``.
-            """
-            half = idx.shape[2]
-            s = np.float32(0.0)
-            for j in range(half):
-                s += e[idx[v, b, j]]
-            if s >= floor:
-                return np.log(s)
-            p = metric[idx[v, b, 0]]
-            for j in range(1, half):
-                p = max(p, metric[idx[v, b, j]])
-            s = np.float32(0.0)
-            for j in range(half):
-                s += np.exp(metric[idx[v, b, j]] - p)
-            return np.log(s) + (p - peak)
-
-        @jit
-        def bit_llr(metric, e, idx, b, peak, exact):  # type: ignore[no-untyped-def]
-            """LLR of bit ``b``; ``idx[v, b]`` are the points with bit ``v``."""
-            if exact:
-                return log_half_sum(metric, e, idx, 0, b, peak) - log_half_sum(
-                    metric, e, idx, 1, b, peak
-                )
-            p0 = metric[idx[0, b, 0]]
-            p1 = metric[idx[1, b, 0]]
-            for j in range(1, idx.shape[2]):
-                p0 = max(p0, metric[idx[0, b, j]])
-                p1 = max(p1, metric[idx[1, b, j]])
-            return p0 - p1
-
-        @jit
-        def axis_llrs(x, lev, logp, idx, bits, inv_s2, exact, metric, e, out, i):  # type: ignore[no-untyped-def]
-            """LLRs of one axis's bits into ``out[i, bits]``."""
-            for m in range(lev.shape[0]):
-                d = x - lev[m]
-                metric[m] = -(d * d) * inv_s2 + logp[m]
-            peak = prepare_exp(metric, e) if exact else np.float32(0.0)
-            for b in range(bits.shape[0]):
-                out[i, bits[b]] = bit_llr(metric, e, idx, b, peak, exact)
-
-        @numba.njit(cache=True, fastmath=True, nogil=True, parallel=True)
-        def llr_kernel(
-            x_re: np.ndarray,
-            x_im: np.ndarray,
-            c_re: np.ndarray,
-            c_im: np.ndarray,
-            log_pmf: np.ndarray,
-            idx: np.ndarray,
-            inv_s2: np.float32,
-            exact: bool,
-            out: np.ndarray,
-        ) -> None:
-            n = x_re.shape[0]
-            M = c_re.shape[0]
-            k = idx.shape[1]
-            for t in numba.prange((n + task - 1) // task):  # type: ignore[attr-defined,no-untyped-call]
-                metric = np.empty(M, dtype=np.float32)
-                e = np.empty(M, dtype=np.float32)
-                for i in range(t * task, min(n, (t + 1) * task)):
-                    for m in range(M):
-                        dr = x_re[i] - c_re[m]
-                        di = x_im[i] - c_im[m]
-                        metric[m] = -(dr * dr + di * di) * inv_s2 + log_pmf[m]
-                    peak = prepare_exp(metric, e) if exact else np.float32(0.0)
-                    for b in range(k):
-                        out[i, b] = bit_llr(metric, e, idx, b, peak, exact)
-
-        @numba.njit(cache=True, fastmath=True, nogil=True, parallel=True)
-        def llr_separable_kernel(
-            x_re: np.ndarray,
-            x_im: np.ndarray,
-            lev_re: np.ndarray,
-            lev_im: np.ndarray,
-            logp_re: np.ndarray,
-            logp_im: np.ndarray,
-            idx_re: np.ndarray,
-            idx_im: np.ndarray,
-            bits_re: np.ndarray,
-            bits_im: np.ndarray,
-            inv_s2: np.float32,
-            exact: bool,
-            out: np.ndarray,
-        ) -> None:
-            n = x_re.shape[0]
-            for t in numba.prange((n + task - 1) // task):  # type: ignore[attr-defined,no-untyped-call]
-                m_re = np.empty(lev_re.shape[0], dtype=np.float32)
-                e_re = np.empty(lev_re.shape[0], dtype=np.float32)
-                m_im = np.empty(lev_im.shape[0], dtype=np.float32)
-                e_im = np.empty(lev_im.shape[0], dtype=np.float32)
-                for i in range(t * task, min(n, (t + 1) * task)):
-                    axis_llrs(
-                        x_re[i],
-                        lev_re,
-                        logp_re,
-                        idx_re,
-                        bits_re,
-                        inv_s2,
-                        exact,
-                        m_re,
-                        e_re,
-                        out,
-                        i,
-                    )
-                    axis_llrs(
-                        x_im[i],
-                        lev_im,
-                        logp_im,
-                        idx_im,
-                        bits_im,
-                        inv_s2,
-                        exact,
-                        m_im,
-                        e_im,
-                        out,
-                        i,
-                    )
-
-        _NUMBA_LLR["llr"] = llr_kernel
-
-        @jit
-        def axis_maxlog(x, lev, lab, lo, hi, pos, inv_s2, out, i):  # type: ignore[no-untyped-def]
-            """Closed-form max-log LLRs of one axis's bits into ``out[i, pos]``."""
-            L = lev.shape[0]
-            kb = pos.shape[0]
-            s = int(np.rint((x - lev[0]) / (lev[1] - lev[0])))
-            s = min(max(s, 0), L - 1)
-            t = x - lev[s]
-            # Near a midpoint the rounded quotient can land one level off:
-            # keep the nearer of s and its neighbor towards x.
-            s2 = s + 1 if t > 0 else s - 1
-            if 0 <= s2 < L:
-                t2 = x - lev[s2]
-                if t2 * t2 < t * t:
-                    s = s2
-                    t = t2
-            m_own = -(t * t) * inv_s2
-            for b in range(kb):
-                # Both halves are never empty: one of lo, hi is a level.
-                m_other = np.float32(-3.0e38)
-                j = lo[b, s]
-                if j >= 0:
-                    t = x - lev[j]
-                    m_other = max(m_other, -(t * t) * inv_s2)
-                j = hi[b, s]
-                if j >= 0:
-                    t = x - lev[j]
-                    m_other = max(m_other, -(t * t) * inv_s2)
-                if (lab[s] >> (kb - 1 - b)) & 1:
-                    out[i, pos[b]] = m_other - m_own
-                else:
-                    out[i, pos[b]] = m_own - m_other
-
-        @numba.njit(cache=True, fastmath=True, nogil=True, parallel=True)
-        def llr_separable_maxlog_kernel(
-            x_re: np.ndarray,
-            x_im: np.ndarray,
-            lev_re: np.ndarray,
-            lab_re: np.ndarray,
-            lo_re: np.ndarray,
-            hi_re: np.ndarray,
-            pos_re: np.ndarray,
-            lev_im: np.ndarray,
-            lab_im: np.ndarray,
-            lo_im: np.ndarray,
-            hi_im: np.ndarray,
-            pos_im: np.ndarray,
-            inv_s2: np.float32,
-            out: np.ndarray,
-        ) -> None:
-            n = x_re.shape[0]
-            for t in numba.prange((n + task - 1) // task):  # type: ignore[attr-defined,no-untyped-call]
-                for i in range(t * task, min(n, (t + 1) * task)):
-                    axis_maxlog(
-                        x_re[i], lev_re, lab_re, lo_re, hi_re, pos_re, inv_s2, out, i
-                    )
-                    axis_maxlog(
-                        x_im[i], lev_im, lab_im, lo_im, hi_im, pos_im, inv_s2, out, i
-                    )
-
-        _NUMBA_LLR["llr_separable"] = llr_separable_kernel
-        _NUMBA_LLR["llr_separable_maxlog"] = llr_separable_maxlog_kernel
-    kernel: Callable[..., None] = _NUMBA_LLR[name]
-    return kernel
+    kernels: dict[str, Callable[..., None]] = {
+        "llr": _numba_llr.llr_kernel,
+        "llr_separable": _numba_llr.llr_separable_kernel,
+        "llr_separable_maxlog": _numba_llr.llr_separable_maxlog_kernel,
+    }
+    return kernels[name]
 
 
 def _half_indices(bit_labels: np.ndarray) -> np.ndarray:
@@ -483,6 +245,7 @@ def _llr(
     _require_gpu_bits(k)
 
     def build() -> tuple[np.ndarray, ...]:
+        """The device tables: points, log prior and packed labels."""
         return (
             points.astype(np.complex64),
             log_pmf,
@@ -591,6 +354,7 @@ def _llr_separable_gpu(
     if _closed_form(axes, method):
 
         def build_closed() -> tuple[np.ndarray, ...]:
+            """The device tables of the closed form, per axis."""
             return tuple(
                 t
                 for a in axes
@@ -609,6 +373,7 @@ def _llr_separable_gpu(
         return llrs.reshape((*symbols.shape[:-1], symbols.shape[-1] * k))
 
     def build() -> tuple[np.ndarray, ...]:
+        """The device tables of the level metrics, per axis."""
         return tuple(
             t
             for a in axes

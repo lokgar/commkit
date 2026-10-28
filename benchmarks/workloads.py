@@ -150,3 +150,19 @@ def phase_workload(n_samples: int, num_ch: int = 2, seed: int = 0) -> np.ndarray
     rng = np.random.default_rng(seed)
     walk = np.cumsum(1e-3 * rng.standard_normal((num_ch, n_samples)), axis=-1)
     return (walk + 0.1 * rng.standard_normal((num_ch, n_samples))).astype(np.float32)
+
+
+def ldpc_workload(code, num_codewords: int, esn0_db: float, seed: int = 0):
+    """QPSK codewords of ``code`` after AWGN, for the decoder benches.
+
+    Returns ``(llrs (num_codewords * n,) float32, info_bits int8)`` on the
+    host, at an Es/N0 where the decoders converge.
+    """
+    from commkit import generate
+    from commkit.mapping import compute_llr
+
+    c = Constellation.qam(4)
+    sig = generate(c, num_codewords * code.n // 2, symbol_rate=FS, code=code, rng=seed)
+    rx = apply_awgn(sig, esn0_db=esn0_db, rng=seed + 1)
+    llrs = compute_llr(rx, noise_var=10 ** (-esn0_db / 10))
+    return np.asarray(llrs, dtype=np.float32), sig.reference.info_bits

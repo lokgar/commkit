@@ -48,6 +48,15 @@ _DOCUMENTED: dict[str, str] = {
     "analysis/linewidth/dsh.py::_dsh_fm_psd": _REPORT,
     "analysis/linewidth/dsh.py::_dsh_lorentzian": _REPORT,
     "analysis/linewidth/dsh.py::_not_a_beat": _REPORT,
+    "backend.py::_device_tables": _HOST_VALUE
+    + " (tables of a value object: once per object and device)",
+    "coding/convolutional.py::_decode": _RECURSION + " (Viterbi, BCJR)",
+    "coding/polar.py::_decode": _RECURSION + " (successive-cancellation list decoding)",
+    "coding/shaping.py::_decode_ccdm": _RECURSION + " (the dematcher)",
+    "coding/shaping.py::_encode_ccdm": _RECURSION
+    + " (the matcher; generate runs it on the host)",
+    "coding/turbo.py::_decode": _RECURSION + " (turbo decoding)",
+    "coding/turbo.py::_encode": _RECURSION + " (recursive systematic encoding)",
     "core/generation.py::generate": "transmitted payload drawn on the host",
     "core/signal.py::Reference.to": "explicit device move",
     "core/signal.py::Signal.to": "explicit device move",
@@ -87,6 +96,10 @@ def _site() -> tuple[str, int] | None:
     frame: FrameType | None = sys._getframe(2)
     while frame is not None:
         path = frame.f_code.co_filename.replace("\\", "/")
+        if path.endswith("/commkit/backend.py") and frame.f_code.co_qualname.startswith(
+            "_device_tables"
+        ):
+            return "backend.py::_device_tables", frame.f_lineno
         if "/site-packages/cupy" in path or path.endswith("/commkit/backend.py"):
             frame = frame.f_back
             continue

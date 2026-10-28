@@ -194,6 +194,11 @@ class SingleCarrierFrame:
         (``Constellation.qam(64).shaped(entropy=5)``) gives a PS payload.
     payload_seed : int, default 42
         Seed of the payload data.
+    payload_code : code object, optional
+        Channel code of the payload (:mod:`commkit.coding`), passed to
+        :func:`generate` as ``code``: ``payload_len`` times the bits per
+        symbol must be a multiple of ``payload_code.n``.  Not with a shaped
+        payload constellation.
     preamble : Preamble, optional
         Synchronization preamble, before the body.  A multi-stream preamble
         must have ``num_streams`` streams; a one-stream preamble is repeated
@@ -233,6 +238,7 @@ class SingleCarrierFrame:
     payload_len: int = 1000
     payload_constellation: Constellation = field(default_factory=_qpsk)
     payload_seed: int = 42
+    payload_code: Any = None
 
     preamble: Preamble | None = None
 
@@ -272,6 +278,16 @@ class SingleCarrierFrame:
                 )
         if self.pilot_constellation.pmf is not None:
             raise ValueError("pilot_constellation must not be shaped.")
+        if self.payload_code is not None:
+            from .. import coding
+
+            coding.base._codec(self.payload_code, "SingleCarrierFrame()")
+            bits = self.payload_len * self.payload_constellation.bits_per_symbol
+            if bits % self.payload_code.n:
+                raise ValueError(
+                    f"payload_len={self.payload_len} carries {bits} bits, not a "
+                    f"multiple of payload_code.n={self.payload_code.n}."
+                )
         if self.pilot_pattern not in ("none", "block", "comb"):
             raise ValueError(
                 "pilot_pattern must be 'none', 'block' or 'comb', "
@@ -351,11 +367,14 @@ class SingleCarrierFrame:
             self.payload_len,
             symbol_rate=1.0,
             num_channels=self.num_streams,
+            code=self.payload_code,
             rng=self.payload_seed,
         )
         ref = sig.reference
         assert ref is not None
         self._cache["payload_bits"] = ref.bits
+        self._cache["payload_info_bits"] = ref.info_bits
+        self._cache["payload_code_block"] = ref.code_block
         self._cache["payload_symbols"] = ref.symbols
 
     def _ensure_pilot_generated(self) -> None:
@@ -393,6 +412,28 @@ class SingleCarrierFrame:
         """
         self._ensure_payload_generated()
         return self._cache.get("payload_bits")
+
+    @property
+    def payload_info_bits(self) -> ArrayType:
+        """The payload's source bits, before matching and coding (host int8).
+
+        :attr:`payload_bits` itself (the same array) for a uniform payload
+        without a code.
+        """
+        self._ensure_payload_generated()
+        return self._cache["payload_info_bits"]
+
+    def _payload_reference(self) -> Reference:
+        """The payload's ground truth on the host (symbols and both bit streams)."""
+        self._ensure_payload_generated()
+        code_block = self._cache["payload_code_block"]
+        coded = code_block != (1, 1)
+        return Reference(
+            symbols=self._cache["payload_symbols"],
+            bits=self._cache["payload_bits"],
+            info_bits=self._cache["payload_info_bits"] if coded else None,
+            code_block=code_block if coded else None,
+        )
 
     @property
     def payload_symbols(self) -> ArrayType:
@@ -700,6 +741,7 @@ class SingleCarrierFrame:
         body, xp, _ = dispatch(to_device(self.body_symbols, device))
 
         def dac_peak_gain(symbols: ArrayType) -> ArrayType:
+            """Per stream, the gain that scales the larger quadrature peak to 1."""
             x = generation.expand(symbols, factor=sps)
             if taps is not None:
                 x = convolve_periodic(x, taps)
@@ -748,8 +790,9 @@ def extract_payload(signal: Signal) -> Signal:
     -------
     Signal
         The payload symbols at one sample per symbol.  ``constellation`` is
-        the payload constellation, ``reference`` holds the payload symbols
-        and bits (on the samples' device) and ``frame`` is ``None``.
+        the payload constellation, ``reference`` holds the payload symbols,
+        bits and source bits (on the samples' device) and ``frame`` is
+        ``None``.
 
     Raises
     ------
@@ -784,9 +827,7 @@ def extract_payload(signal: Signal) -> Signal:
             f"frame {frame.num_streams} stream(s)."
         )
     device = "cpu" if signal.xp is np else "gpu"
-    reference = Reference(symbols=frame.payload_symbols, bits=frame.payload_bits).to(
-        device
-    )
+    reference = frame._payload_reference().to(device)
     return Signal(
         samples=x[..., signal.xp.asarray(payload)],
         sampling_rate=signal.sampling_rate,

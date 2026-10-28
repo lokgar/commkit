@@ -23,6 +23,8 @@ The checks encode the API rules in AGENTS.md section 4:
   ``np.ndarray (C,)`` for 2-D input.
 - ``equalizer_result``: ``EqualizerResult.y_hat`` is an array on the input
   device, and ``result.signal`` is a Signal for Signal input.
+- ``codec``: ``encode`` returns, and ``decode`` returns in its
+  ``DecodeResult``, arrays on the input's device with the input's rank.
 
 Once a function is deleted, ``test_rows_resolve`` fails until its row is
 deleted too.
@@ -42,6 +44,7 @@ import pytest
 
 import commkit
 from commkit.backend import to_device
+from commkit.coding import DecodeResult, Interleaver, LinearBlockCode
 from commkit.core import Signal
 from commkit.equalization import EqualizerResult
 from commkit.frequency import MthPower
@@ -60,6 +63,7 @@ ESTIMATE = "estimate"  # per-channel estimate (array, or an Estimate with .value
 METRIC = "metric"  # reporting-layer figure of merit
 EQUALIZER = "equalizer"  # returns EqualizerResult
 MULTI = "multi"  # returns several values (2.0: a frozen dataclass)
+CODEC = "codec"  # coding.encode / coding.decode: bits or LLRs in, blocks out
 DESIGN = "design"  # builds coefficients/sequences/values from parameters
 SYNTHESIS = "synthesis"  # generates signals or data from parameters
 PLOT = "plot"
@@ -67,7 +71,16 @@ VALUE = "value"  # classes / value objects
 HELPER = "helper"  # array/math utilities (moving out of helpers.py)
 INFRA = "infra"  # backend, logging, io
 
-BEHAVIORAL = {TRANSFORM, RATE_CHANGE, TRAJECTORY, ESTIMATE, METRIC, EQUALIZER, MULTI}
+BEHAVIORAL = {
+    TRANSFORM,
+    RATE_CHANGE,
+    TRAJECTORY,
+    ESTIMATE,
+    METRIC,
+    EQUALIZER,
+    MULTI,
+    CODEC,
+}
 
 SIG = "signature"
 ARR = "array_roundtrip"
@@ -79,9 +92,6 @@ TRJ = "trajectory"
 RNK = "estimate_rank"
 MET = "metric_host"
 EQR = "equalizer_result"
-
-# Placeholder modules for planned work are kept on purpose and not registered.
-PLACEHOLDERS = ("commkit.coding",)
 
 Builder = Callable[["Inputs", Any], tuple[tuple, dict]]
 
@@ -128,6 +138,8 @@ N_SYM = 512
 RS = 1e9
 FS = RS * SPS
 C16 = Constellation.qam(16)
+HAMMING = LinearBlockCode.hamming(3)  # (7, 4)
+INTERLEAVER = Interleaver.block(2, 4)
 
 
 class Inputs:
@@ -180,6 +192,12 @@ def _ref(c: Inputs, x: Any) -> Any:
 
 def _bits(c: Inputs, x: Any) -> Any:
     return c.bits1 if _arr(x).ndim == 1 else c.bits2
+
+
+def _codeword_llrs(c: Inputs, x: Any) -> Any:
+    """LLRs of ``x``, cut to whole (7, 4) Hamming blocks."""
+    llrs = C16.llr(x, noise_var=0.1)
+    return llrs[..., : llrs.shape[-1] // 7 * 7]
 
 
 def _identity_taps(c: Inputs, x: Any) -> Any:
@@ -247,6 +265,60 @@ ROWS: list[Row] = [
     Row("commkit.logger.set_log_level", INFRA),
     Row("commkit.io.load_npz", INFRA),
     Row("commkit.io.save_npz", INFRA, data=2),
+    # --- coding (array-only: bits and LLRs are derived quantities) -----------
+    Row("commkit.coding.algebraic.BCHCode", VALUE),
+    Row("commkit.coding.algebraic.BerlekampMassey", VALUE),
+    Row("commkit.coding.algebraic.ReedSolomonCode", VALUE),
+    Row("commkit.coding.base.DecodeResult", VALUE),
+    Row("commkit.coding.convolutional.BCJR", VALUE),
+    Row("commkit.coding.convolutional.ConvolutionalCode", VALUE),
+    Row("commkit.coding.convolutional.Viterbi", VALUE),
+    Row("commkit.coding.crc.CRC", VALUE),
+    Row("commkit.coding.interleaving.Interleaver", VALUE),
+    Row(
+        "commkit.coding.interleaving.deinterleave",
+        TRANSFORM,
+        call=lambda c, x: _a(x, interleaver=INTERLEAVER),
+        symbols=True,
+    ),
+    Row(
+        "commkit.coding.interleaving.interleave",
+        TRANSFORM,
+        call=lambda c, x: _a(x, interleaver=INTERLEAVER),
+        symbols=True,
+    ),
+    Row("commkit.coding.polar.PolarCode", VALUE),
+    Row("commkit.coding.polar.SC", VALUE),
+    Row("commkit.coding.polar.SCL", VALUE),
+    Row("commkit.coding.product.Concatenated", VALUE),
+    Row("commkit.coding.product.HardIterations", VALUE),
+    Row("commkit.coding.product.Stages", VALUE),
+    Row("commkit.coding.product.StaircaseCode", VALUE),
+    Row("commkit.coding.ratematch.Punctured", VALUE),
+    Row("commkit.coding.shaping.CCDM", VALUE),
+    Row("commkit.coding.shaping.PAS", VALUE),
+    Row("commkit.coding.turbo.TurboCode", VALUE),
+    Row("commkit.coding.turbo.TurboIterations", VALUE),
+    Row("commkit.coding.ratematch.Shortened", VALUE),
+    Row(
+        "commkit.coding.base.decode",
+        CODEC,
+        call=lambda c, x: _a(_codeword_llrs(c, x), code=HAMMING),
+        symbols=True,
+    ),
+    Row(
+        "commkit.coding.base.encode",
+        CODEC,
+        call=lambda c, x: _a(_bits(c, x), code=HAMMING),
+        symbols=True,
+    ),
+    Row("commkit.coding.ldpc.LDPCCode", VALUE),
+    Row("commkit.coding.ldpc.MinSum", VALUE),
+    Row("commkit.coding.ldpc.SumProduct", VALUE),
+    Row("commkit.coding.linear.Chase", VALUE),
+    Row("commkit.coding.linear.LinearBlockCode", VALUE),
+    Row("commkit.coding.linear.MaximumLikelihood", VALUE),
+    Row("commkit.coding.linear.Syndrome", VALUE),
     # --- core ---------------------------------------------------------------
     Row("commkit.core.frame.Preamble", VALUE),
     Row("commkit.core.signal.Reference", VALUE),
@@ -523,6 +595,20 @@ ROWS: list[Row] = [
         symbols=True,
     ),
     Row(
+        "commkit.metrics.fer",
+        METRIC,
+        data=2,
+        call=lambda c, x: _a(_bits(c, x), _bits(c, x), block_length=8),
+        symbols=True,
+    ),
+    Row(
+        "commkit.metrics.ngmi",
+        METRIC,
+        data=2,
+        call=lambda c, x: _a(C16.llr(x, noise_var=0.1), _bits(c, x), constellation=C16),
+        symbols=True,
+    ),
+    Row(
         "commkit.metrics.ser",
         METRIC,
         data=2,
@@ -711,7 +797,7 @@ def _public_callables() -> dict[str, Any]:
     found: dict[str, Any] = {}
     for info in pkgutil.walk_packages(commkit.__path__, "commkit."):
         parts = info.name.split(".")[1:]
-        if any(p.startswith("_") for p in parts) or info.name.startswith(PLACEHOLDERS):
+        if any(p.startswith("_") for p in parts):
             continue
         mod = importlib.import_module(info.name)
         names = getattr(mod, "__all__", None)
@@ -929,6 +1015,19 @@ def test_equalizer_result(row: Row, xp):
     assert isinstance(getattr(res_sig, "signal", None), Signal)
 
 
+@pytest.mark.parametrize("row", _rows({CODEC}))
+def test_codec_device_and_rank(row: Row, xp):
+    c = Inputs(xp)
+    for ndim in row.dims:
+        out = _call(row, c, c.primary(row, ndim))
+        arrays = [out]
+        if isinstance(out, DecodeResult):
+            arrays = [out.bits, out.valid, out.iterations]
+        for a in arrays:
+            assert _module(a) == xp.__name__, f"returned {type(a)}"
+            assert a.ndim == ndim
+
+
 def test_every_public_module_declares_all():
     """Each public module lists its API in ``__all__``, so helpers it imports
     (``np``, ``dispatch``, ...) are not part of it."""
@@ -943,8 +1042,6 @@ def test_every_public_module_declares_all():
         if any(p.startswith("_") for p in parts if p != "__init__"):
             continue
         name = ".".join(p for p in parts if p != "__init__")
-        if name.startswith(PLACEHOLDERS):
-            continue
         tree = ast.parse(path.read_text())
         declared = any(
             isinstance(n, ast.Assign)

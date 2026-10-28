@@ -540,3 +540,64 @@ def pll_reference(
             phi = phi + mu * e + nu
             nu = nu + beta * e
     return out
+
+
+def ldpc_layered_reference(
+    llrs: np.ndarray,
+    rows: list[list[int]],
+    *,
+    sum_product: bool,
+    scale: float = 1.0,
+    offset: float = 0.0,
+    iterations: int = 1,
+) -> np.ndarray:
+    """Layered belief propagation over the checks ``rows`` in the given order.
+
+    ``rows[i]`` lists the bits of check ``i``.  Each check, in turn, sends
+    every bit the extrinsic message of the textbook rules over the other
+    bits' messages ``Q = APP - R_old``:
+
+    - min-sum: ``R = prod sign(Q) * max(scale * min |Q| - offset, 0)``;
+    - sum-product: ``R = 2 atanh(prod tanh(Q / 2))``.
+
+    Returns the a-posteriori LLRs after ``iterations`` passes, float64,
+    ``(N,)`` for one codeword's ``(N,)`` channel LLRs.
+    """
+    app = np.asarray(llrs, dtype=np.float64).copy()
+    msgs = [np.zeros(len(r)) for r in rows]
+    for _ in range(iterations):
+        for i, bits in enumerate(rows):
+            q = app[bits] - msgs[i]
+            new = np.empty(len(bits))
+            for e in range(len(bits)):
+                others = np.delete(q, e)
+                if sum_product:
+                    t = np.prod(np.tanh(others / 2))
+                    new[e] = 2 * np.arctanh(np.clip(t, -1 + 1e-15, 1 - 1e-15))
+                else:
+                    mag = max(scale * np.min(np.abs(others)) - offset, 0.0)
+                    new[e] = np.prod(np.sign(others)) * mag
+            app[bits] = q + new
+            msgs[i] = new
+    return app
+
+
+def polar_sc_reference(llrs: np.ndarray, frozen: np.ndarray) -> np.ndarray:
+    """Successive-cancellation decisions ``u`` of a polar code, recursively.
+
+    ``x = u G_N`` with ``G_N = [[G, 0], [G, G]]``: the first half of ``u``
+    sees ``f(L_left, L_right) = sign * min |.|`` (min-sum), the second half
+    ``g = L_right + (1 - 2 v) L_left`` with ``v`` the re-encoded first half.
+    Returns ``(u, x)`` for one codeword, float64 recursion.
+    """
+    llrs = np.asarray(llrs, dtype=np.float64)
+    n = llrs.size
+    if n == 1:
+        bit = 0 if frozen[0] else int(llrs[0] < 0)
+        return np.array([bit]), np.array([bit])
+    left, right = llrs[: n // 2], llrs[n // 2 :]
+    f = np.sign(left) * np.sign(right) * np.minimum(np.abs(left), np.abs(right))
+    u_left, v = polar_sc_reference(f, frozen[: n // 2])
+    g = right + (1 - 2 * v) * left
+    u_right, w = polar_sc_reference(g, frozen[n // 2 :])
+    return np.concatenate([u_left, u_right]), np.concatenate([v ^ w, w])

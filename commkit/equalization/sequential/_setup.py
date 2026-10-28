@@ -307,6 +307,7 @@ class _CarrierArrays:
         )
 
     def copy(self) -> _CarrierArrays:
+        """Independent copies of the arrays."""
         return _CarrierArrays(*(a.copy() for a in self.args()))
 
 
@@ -328,9 +329,14 @@ class _InlineCpr:
     threshold: float
 
     def bps_args(self) -> tuple[Any, ...]:
+        """The BPS arguments of the CPR kernel."""
         return (self.phases_neg, self.angles, np.int32(self.window), bool(self.joint))
 
     def loop_args(self) -> tuple[Any, ...]:
+        """The loop arguments of the CPR kernel.
+
+        Kind, PLL gains, symmetry and the cycle-slip settings.
+        """
         return (
             np.int32(1 if self.kind == "pll" else 2),
             self.pll_mu,

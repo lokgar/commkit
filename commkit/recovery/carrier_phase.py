@@ -185,6 +185,7 @@ def estimate_carrier_phase(
     res = estimator(x, method, ctx)
 
     def per_channel(a: Any) -> Any:
+        """The channel axis dropped for 1-D input; ``None`` stays ``None``."""
         return None if a is None else restore_1d(was_1d, a)
 
     return CarrierPhaseEstimate(

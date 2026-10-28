@@ -12,7 +12,9 @@ Run explicitly (the default ``uv run pytest`` collects ``tests/`` only):
 """
 
 import logging
+import time
 
+import numba
 import numpy as np
 import pytest
 
@@ -52,6 +54,29 @@ def pytest_generate_tests(metafunc):
         else:
             params = ["cpu"]
         metafunc.parametrize("backend_device", params, indirect=True)
+
+
+@numba.njit(cache=True, parallel=True)
+def _spin(x):
+    total = 0.0
+    for i in numba.prange(x.shape[0]):
+        total += np.sqrt(x[i])
+    return total
+
+
+@pytest.fixture(scope="session", autouse=True)
+def _warm_numba_threads():
+    """Keep Numba's thread pool busy for half a second before any benchmark.
+
+    The first parallel calls of a process run 4-8x slower while the OpenMP
+    workers come up (seen as 7 ms instead of 1 ms on the 16-QAM LLRs).
+    Kernels loaded from Numba's cache reach the timed rounds that early,
+    since one warmup round no longer includes a compile of several seconds.
+    """
+    x = np.ones(1 << 20)
+    stop = time.perf_counter() + 0.5
+    while time.perf_counter() < stop:
+        _spin(x)
 
 
 @pytest.fixture

@@ -147,6 +147,7 @@ def _blind_equalizer(
         pmask = np.empty(0, np.uint8)
 
     def segment(start: int, stop: int) -> None:
+        """Run the kernel over symbols ``start`` to ``stop``."""
         x, _, _, y_out, e_out, w_hist = run.segment(start, stop)
         kernel(
             x, run.W, mu, target, run.stride, store_weights, y_out, e_out, w_hist,

@@ -110,12 +110,22 @@ jobs:
       - name: Run kernel tests with JIT disabled
         env:
           NUMBA_DISABLE_JIT: "1"
-        run: uv run pytest tests/equalization tests/recovery tests/test_frequency.py --device=cpu --cov=commkit --cov-report=
+        run: >-
+          uv run pytest tests/equalization tests/recovery tests/test_frequency.py tests/mapping/test_llr.py
+          tests/coding/test_ldpc.py tests/coding/test_shaping.py::TestCCDM
+          tests/coding/test_polar.py::TestEncoding
+          tests/coding/test_polar.py::TestDecoding::test_sc_matches_the_recursive_reference
+          tests/coding/test_polar.py::TestDecoding::test_full_list_is_maximum_likelihood
+          tests/coding/test_polar.py::TestDecoding::test_crc_failure_keeps_the_best_path
+          tests/coding/test_convolutional.py tests/coding/test_turbo.py::TestEncoding
+          tests/coding/test_turbo.py::TestDecoding::test_noiseless
+          -k "not waterfall and not threshold"
+          --device=cpu --cov=commkit --cov-report=
 
       - name: Kernel coverage report
         run: >-
           uv run coverage report --show-missing --fail-under=85
-          --include="commkit/equalization/_kernels_numba.py,commkit/equalization/_numba_loops.py,commkit/equalization/sequential/*,commkit/frequency.py,commkit/recovery/*"
+          --include="commkit/equalization/_kernels_numba.py,commkit/equalization/_numba_loops.py,commkit/equalization/sequential/*,commkit/frequency.py,commkit/recovery/*,commkit/coding/ldpc.py,commkit/coding/shaping.py,commkit/coding/polar.py,commkit/coding/convolutional.py,commkit/coding/turbo.py"
 
 # GPU legs (--device=gpu / --device=all) require CuPy + CUDA and are run
 # manually or on a self-hosted runner; they are intentionally not part of

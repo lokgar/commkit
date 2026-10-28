@@ -27,37 +27,40 @@ The notebooks run on the GPU when CuPy works and on the CPU otherwise. They are 
 | # | notebook | topics |
 | --- | --- | --- |
 | 06 | [AWGN and performance metrics](06-awgn-and-performance-metrics.ipynb) | Es/N0 at any oversampling, SNR and EVM, BER against theory, LLRs, GMI and MI against capacity |
-| 07 | [Laser phase noise](07-laser-phase-noise.ipynb) | the Wiener model, the Lorentzian line, `Δν·T`, a shared LO, flicker noise and the FM-noise PSD |
-| 08 | [Front-end impairments](08-front-end-impairments.ipynb) | IQ imbalance and its correction, DC offsets, electrical bandwidth, carrier frequency offset |
+| 07 | [Channel coding](07-channel-coding.ipynb) | `encode` / `decode`, coded `generate`, post-FEC BER and FER, hard and soft decoding, Reed-Solomon, LDPC, NGMI as a threshold, polar, convolutional and turbo codes |
+| 08 | [Probabilistic shaping and coded modulation](08-probabilistic-shaping-and-coded-modulation.ipynb) | the CCDM, shaped `generate`, probabilistic amplitude shaping with LDPC, the shaping gain at the decoder |
+| 09 | [Laser phase noise](09-laser-phase-noise.ipynb) | the Wiener model, the Lorentzian line, `Δν·T`, a shared LO, flicker noise and the FM-noise PSD |
+| 10 | [Front-end impairments](10-front-end-impairments.ipynb) | IQ imbalance and its correction, DC offsets, electrical bandwidth, carrier frequency offset |
 
 ## III. Receiver algorithms
 
 | # | notebook | topics |
 | --- | --- | --- |
-| 09 | [Frame synchronization and timing](09-frame-synchronization-and-timing.ipynb) | Barker and Zadoff-Chu preambles, frames, `estimate_timing` / `correct_timing`, payload extraction |
-| 10 | [Frequency-offset estimation](10-frequency-offset-estimation.ipynb) | M-th power and Mengali-Morelli, lock range, accuracy, pilot symbols, pilot tones, drift tracking |
-| 11 | [Blind carrier-phase recovery](11-blind-carrier-phase-recovery.ipynb) | Viterbi-Viterbi, BPS, block size, Tikhonov, the 90° ambiguity, cycle slips, joint polarizations |
-| 12 | [Pilot-aided carrier recovery](12-pilot-aided-carrier-recovery.ipynb) | pilot symbols, data-aided rotation, the decision-directed PLL, pilot tones |
-| 13 | [Linear channel equalization](13-linear-channel-equalization.ipynb) | ISI channels, zero forcing, MMSE, channel sounding |
-| 14 | [Adaptive equalization](14-adaptive-equalization.ipynb) | LMS training and decisions, step size, RLS, block LMS, inline CPR, continuation with `state=` |
-| 15 | [Blind equalization](15-blind-equalization.ipynb) | CMA and RDE, CMA pre-convergence handed over to RDE |
-| 16 | [Polarization multiplexing](16-polarization-multiplexing.ipynb) | Jones matrices, the 2x2 butterfly, PMD, SOP drift, channel permutation |
+| 11 | [Frame synchronization and timing](11-frame-synchronization-and-timing.ipynb) | Barker and Zadoff-Chu preambles, frames, `estimate_timing` / `correct_timing`, payload extraction |
+| 12 | [Frequency-offset estimation](12-frequency-offset-estimation.ipynb) | M-th power and Mengali-Morelli, lock range, accuracy, pilot symbols, pilot tones, drift tracking |
+| 13 | [Blind carrier-phase recovery](13-blind-carrier-phase-recovery.ipynb) | Viterbi-Viterbi, BPS, block size, Tikhonov, the 90° ambiguity, cycle slips, joint polarizations |
+| 14 | [Pilot-aided carrier recovery](14-pilot-aided-carrier-recovery.ipynb) | pilot symbols, data-aided rotation, the decision-directed PLL, pilot tones |
+| 15 | [Linear channel equalization](15-linear-channel-equalization.ipynb) | ISI channels, zero forcing, MMSE, channel sounding |
+| 16 | [Adaptive equalization](16-adaptive-equalization.ipynb) | LMS training and decisions, step size, RLS, block LMS, inline CPR, continuation with `state=` |
+| 17 | [Blind equalization](17-blind-equalization.ipynb) | CMA and RDE, CMA pre-convergence handed over to RDE |
+| 18 | [Polarization multiplexing](18-polarization-multiplexing.ipynb) | Jones matrices, the 2x2 butterfly, PMD, SOP drift, channel permutation |
 
 ## IV. Optical fiber systems
 
 | # | notebook | topics |
 | --- | --- | --- |
-| 17 | [Chromatic dispersion](17-chromatic-dispersion.ipynb) | the dispersion spread, the all-pass response, compensation, residual dispersion |
-| 18 | [Nonlinear fiber and backpropagation](18-nonlinear-fiber-and-backpropagation.ipynb) | the Kerr effect, the optimum launch power, digital backpropagation |
-| 19 | [End-to-end coherent transceiver](19-coherent-transceiver-end-to-end.ipynb) | every impairment and the full receiver DSP chain in one link, with its SNR budget |
+| 19 | [Chromatic dispersion](19-chromatic-dispersion.ipynb) | the dispersion spread, the all-pass response, compensation, residual dispersion |
+| 20 | [Nonlinear fiber and backpropagation](20-nonlinear-fiber-and-backpropagation.ipynb) | the Kerr effect, the optimum launch power, digital backpropagation |
+| 21 | [FEC in optical standards](21-fec-in-optical-standards.ipynb) | KP4 and IEEE 802.3dj, G.709 RS and the staircase code, the 400ZR C-FEC, PON RS and LDPC, their thresholds |
+| 22 | [End-to-end coherent transceiver](22-coherent-transceiver-end-to-end.ipynb) | every impairment and the full receiver DSP chain in one link, an LDPC-coded payload, the SNR budget |
 
 ## V. Laser and carrier-phase characterization
 
 | # | notebook | topics |
 | --- | --- | --- |
-| 20 | [Carrier-phase characterization](20-carrier-phase-characterization.ipynb) | data-aided phase, drift and phase noise, linewidth estimators, Allan deviation |
-| 21 | [Self-heterodyne linewidth](21-laser-linewidth-self-heterodyne.ipynb) | the delayed self-heterodyne setup and its three linewidth estimators |
-| 22 | [Short delays, flicker and fading](22-laser-linewidth-short-delay-and-flicker.ipynb) | the coherent regime, flicker FM noise, Allan deviation, polarization fading |
-| 23 | [Self-homodyne IQ linewidth](23-laser-linewidth-self-homodyne-iq.ipynb) | the AOM-free setup with a 90° hybrid, front-end calibration |
-| 24 | [Template: self-heterodyne](24-measurement-template-self-heterodyne.ipynb) | a lean notebook for real captures |
-| 25 | [Template: self-homodyne IQ](25-measurement-template-self-homodyne-iq.ipynb) | a lean notebook for real captures |
+| 23 | [Carrier-phase characterization](23-carrier-phase-characterization.ipynb) | data-aided phase, drift and phase noise, linewidth estimators, Allan deviation |
+| 24 | [Self-heterodyne linewidth](24-laser-linewidth-self-heterodyne.ipynb) | the delayed self-heterodyne setup and its three linewidth estimators |
+| 25 | [Short delays, flicker and fading](25-laser-linewidth-short-delay-and-flicker.ipynb) | the coherent regime, flicker FM noise, Allan deviation, polarization fading |
+| 26 | [Self-homodyne IQ linewidth](26-laser-linewidth-self-homodyne-iq.ipynb) | the AOM-free setup with a 90° hybrid, front-end calibration |
+| 27 | [Template: self-heterodyne](27-measurement-template-self-heterodyne.ipynb) | a lean notebook for real captures |
+| 28 | [Template: self-homodyne IQ](28-measurement-template-self-homodyne-iq.ipynb) | a lean notebook for real captures |

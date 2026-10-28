@@ -66,6 +66,7 @@ def _selftest_scale_factory(dtype: str = "float32") -> Callable:
     block = 256
 
     def launch(x: Any, alpha: float) -> Any:
+        """``alpha * x`` elementwise, in the factory's dtype."""
         x = cp.ascontiguousarray(x)
         if x.dtype != np_dtype:
             raise TypeError(f"expected {np_dtype} input, got {x.dtype}")
@@ -210,8 +211,11 @@ def _cs_block_factory() -> Callable:
         cs_H: int,
         max_block: int,
     ) -> Callable[[Any, Any], Any]:
-        """Bind the state buffers of one run, ``C`` channels and blocks of at
-        most ``max_block`` symbols."""
+        """Bind the state buffers of one run.
+
+        ``C`` channels (the length of ``cs_buf_ptr``) and blocks of at most
+        ``max_block`` symbols.
+        """
         C = cs_buf_ptr.shape[0] if cs_buf_ptr.ndim == 1 else -1
         cs_H = int(cs_H)
         for label, arr, dtype, shape in (
@@ -580,6 +584,10 @@ def _iir_factory() -> Callable:
     kernels: dict[tuple[str, str, str], Any] = {}
 
     def kernel(name: str, t: str, u: str) -> Any:
+        """The compiled ``name`` kernel, cached per specialization.
+
+        ``t`` is the sample type and ``u`` the state type of the template.
+        """
         key = (name, t, u)
         if key not in kernels:
             carry = name in ("iir_carry", "iir_group_carry")
@@ -635,6 +643,7 @@ def _iir_factory() -> Callable:
         y = cp.empty_like(x)
 
         def grid(threads: int) -> tuple[int]:
+            """Blocks of ``_IIR_THREADS`` covering ``threads`` threads."""
             return (-(-threads // _IIR_THREADS),)
 
         th = (_IIR_THREADS,)
@@ -662,6 +671,67 @@ def _iir_factory() -> Callable:
 
 
 # name -> wrapper factory.
+def _ldpc_layered_factory(sum_product: bool = False) -> Callable:
+    """Wrapper factory for the layered LDPC decoder (``coding.ldpc``).
+
+    One thread block per codeword (see ``ldpc.cu``); ``sum_product``
+    selects the check-node rule (min-sum otherwise).  The launch decodes the
+    codewords of ``app`` in place and returns the iterations run and the
+    syndrome check per codeword.
+    """
+    import cupy as cp
+
+    from . import compiler
+
+    kern = compiler.get_raw_kernel(
+        "ldpc", f"ldpc_layered<{'true' if sum_product else 'false'}>"
+    )
+
+    def launch(
+        app: Any,
+        row_ptr: Any,
+        cols: Any,
+        layer_ptr: Any,
+        *,
+        scale: float,
+        offset: float,
+        max_iterations: int,
+        early_stop: bool,
+    ) -> tuple[Any, Any]:
+        """Decode ``app`` ``(B, N)`` float32 in place; ``(iters, valid)``."""
+        if app.dtype != cp.float32 or app.ndim != 2 or not app.flags.c_contiguous:
+            raise ValueError(
+                f"app must be C-contiguous float32 (B, N), got {app.dtype} {app.shape}"
+            )
+        for label, arr in (
+            ("row_ptr", row_ptr),
+            ("cols", cols),
+            ("layer_ptr", layer_ptr),
+        ):
+            if arr.dtype != cp.int32 or arr.ndim != 1 or not arr.flags.c_contiguous:
+                raise ValueError(f"{label} must be C-contiguous int32 (n,)")
+        B, N = app.shape
+        m, E = row_ptr.size - 1, cols.size
+        iters = cp.zeros(B, dtype=cp.int32)
+        valid = cp.zeros(B, dtype=cp.uint8)
+        if B == 0:
+            return iters, valid.astype(bool)
+        msg = cp.empty((B, E), dtype=cp.float32)
+        kern(
+            (B,),
+            (256,),  # LDPC_THREADS in ldpc.cu
+            (
+                app, msg, row_ptr, cols, layer_ptr, cp.int32(layer_ptr.size - 1),
+                cp.int32(m), cp.int32(N), cp.int32(E), cp.float32(scale),
+                cp.float32(offset), cp.int32(max_iterations), cp.int32(early_stop),
+                iters, valid,
+            ),
+        )  # fmt: skip
+        return iters, valid.astype(bool)
+
+    return launch
+
+
 _KERNEL_FACTORIES: dict[str, Callable[..., Callable]] = {
     "selftest_scale": _selftest_scale_factory,
     "bps_min_d2": _bps_min_d2_factory,
@@ -671,4 +741,5 @@ _KERNEL_FACTORIES: dict[str, Callable[..., Callable]] = {
     "llr_separable": _llr_separable_factory,
     "llr_separable_maxlog": _llr_separable_maxlog_factory,
     "iir": _iir_factory,
+    "ldpc_layered": _ldpc_layered_factory,
 }

@@ -81,6 +81,11 @@ def _get_numba_bps_table():
 
         @numba.njit(cache=True, fastmath=True, nogil=True, parallel=True)
         def bps_table(x_re, x_im, ph_re, ph_im, c_re, c_im, block_size, out):
+            """Per block and test phase, the summed distance to the nearest point.
+
+            ``out[c, b, k]`` for block ``b`` of channel ``c`` rotated by phase
+            ``k``, the nearest point found by a search over the table.
+            """
             C = x_re.shape[0]
             n_blocks = out.shape[1]
             B = ph_re.shape[0]
@@ -117,6 +122,11 @@ def _get_numba_bps_grid():
 
         @numba.njit(cache=True, fastmath=True, nogil=True, parallel=True)
         def bps_grid(x_re, x_im, ph_re, ph_im, lev_min, d_grid, side, block_size, out):
+            """Per block and test phase, the summed distance to the nearest point.
+
+            As ``bps_table``, the nearest point found by rounding each axis to
+            the square lattice.
+            """
             C = x_re.shape[0]
             n_blocks = out.shape[1]
             B = ph_re.shape[0]

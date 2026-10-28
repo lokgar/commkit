@@ -6,9 +6,9 @@ resampling (:mod:`commkit.filtering`, :mod:`commkit.multirate`,
 :mod:`commkit.spectral`), channel impairments (:mod:`commkit.impairments`),
 synchronization and carrier recovery (:mod:`commkit.timing`,
 :mod:`commkit.frequency`, :mod:`commkit.recovery`), equalization
-(:mod:`commkit.equalization`), metrics (:mod:`commkit.metrics`), laser and
-phase characterization (:mod:`commkit.analysis`) and plots of their results
-(:mod:`commkit.plotting`).
+(:mod:`commkit.equalization`), channel coding (:mod:`commkit.coding`),
+metrics (:mod:`commkit.metrics`), laser and phase characterization
+(:mod:`commkit.analysis`) and plots of their results (:mod:`commkit.plotting`).
 
 Data is an array or a :class:`Signal`, which carries the samples with their
 facts (sampling and symbol rate), their description (constellation, pulse)
@@ -106,6 +106,7 @@ __all__ = [
     "SingleCarrierFrame",
     "__version__",
     "analysis",
+    "coding",
     "equalization",
     "frequency",
     "generate",

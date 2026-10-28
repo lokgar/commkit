@@ -1,4 +1,4 @@
-"""Performance metrics: EVM, SNR, BER, SER, GMI and MI.
+"""Performance metrics: EVM, SNR, BER, FER, SER, GMI, NGMI and MI.
 
 Metrics are the reporting layer.  They take received symbols (or bits, or
 LLRs) at one sample per symbol and their reference, as arrays or as a 1-SPS
@@ -48,7 +48,18 @@ MI, GMI (bits/symbol)       At most ``H(X)``: ``log2(M)`` when uniform, the
                             entropy of the pmf when shaped.  GMI is the
                             bit-metric decoding rate
                             ``H(X) - sum_b H(B_b | Y)``.
+NGMI                        ``1 - (H(X) - GMI) / m`` for ``m`` bits per
+                            symbol: the FEC threshold metric of soft
+                            decoders, 1 for error-free LLRs.
 ==========================  =================================================
+
+Pre-FEC and post-FEC.  ``ber``, ``gmi`` and ``ngmi`` of a Signal measure
+the channel and demapper before decoding: they compare with
+``reference.bits``, the bits on the air.  Post-FEC metrics take arrays,
+the decoded bits of :func:`commkit.coding.decode` and the source bits
+``reference.info_bits``: ``ber(res.bits, ref.info_bits)`` and
+``fer(res.bits, ref.info_bits, block_length=ref.code_block[1])``.  For an
+uncoded payload ``info_bits`` is ``bits``, so the same calls work unchanged.
 
 Which scale each metric reads:
 
@@ -80,7 +91,7 @@ from .logger import logger
 from .mapping import Constellation
 from .math import linear_to_db, normalize
 
-__all__ = ["ber", "evm", "gmi", "mi", "ser", "snr"]
+__all__ = ["ber", "evm", "fer", "gmi", "mi", "ngmi", "ser", "snr"]
 
 
 def _unit_reference(tx: ArrayType, xp: Any) -> tuple[ArrayType, ArrayType]:
@@ -400,10 +411,13 @@ def ber(
     bits : array_like or Signal
         Received bits (0 and 1), ``(N_bits,)`` or ``(C, N_bits)``.  A Signal holds
         received *symbols* at one sample per symbol: they are hard-decided
-        against the constellation and compared with ``reference.bits``.
+        against the constellation and compared with ``reference.bits``, the
+        bits on the air (the pre-FEC BER of a coded payload).
     reference : array_like, optional
         Transmitted bits, same shape as the received bits.  Required for
-        arrays.
+        arrays.  For the post-FEC BER, the decoded bits against the
+        source bits: ``ber(decode(llrs, code=code).bits,
+        signal.reference.info_bits)``.
     constellation : Constellation, optional
         Decision constellation for a Signal (defaults to the Signal's).  For
         bit arrays, needed only to convert ``num_skip_symbols`` to bits.
@@ -445,6 +459,64 @@ def ber(
         logger.info("BER: %.2e (%s/%s errors)", out, int(errors), total)
     else:
         _log_per_channel("BER Ch%s: %.2e (%s/%s errors)", out, errors, extra=(total,))
+    return out
+
+
+def fer(
+    bits: ArrayType, reference: ArrayType, *, block_length: int
+) -> float | np.ndarray:
+    """Block (frame) error rate: the fraction of blocks with any bit in error.
+
+    The post-FEC companion of :func:`ber`: compare the decoded information
+    bits of :func:`commkit.coding.decode` with ``reference.info_bits``, in
+    blocks of ``k = reference.code_block[1]`` bits.
+
+    Parameters
+    ----------
+    bits : array_like
+        Received bits (0 and 1), ``(N,)`` or ``(C, N)``, with ``N`` a multiple
+        of ``block_length``.
+    reference : array_like
+        Transmitted bits, same shape.
+    block_length : int
+        Bits per block.
+
+    Returns
+    -------
+    float or ndarray
+        FER in ``[0, 1]``: a float for 1-D input, ``(C,)`` for 2-D input.
+
+    Raises
+    ------
+    ValueError
+        On a shape mismatch, a length that is not a multiple of
+        ``block_length``, or no bits.
+    """
+    name = "fer()"
+    if isinstance(block_length, bool) or not isinstance(block_length, int | np.integer):
+        raise ValueError(
+            f"{name}: block_length must be an integer, got {block_length!r}."
+        )
+    if block_length < 1:
+        raise ValueError(f"{name}: block_length must be >= 1, got {block_length}.")
+    rx, xp, _ = dispatch(bits)
+    rx, tx = _paired(rx, reference, xp, name)
+    total = rx.shape[-1]
+    if total == 0:
+        raise ValueError(f"{name}: nothing to measure (no bits).")
+    if total % block_length:
+        raise ValueError(
+            f"{name}: the last axis ({total}) is not a multiple of block_length "
+            f"({block_length})."
+        )
+    wrong = (rx != tx).reshape(*rx.shape[:-1], -1, block_length).any(axis=-1)
+    errors = xp.sum(wrong, axis=-1)
+    blocks = total // block_length
+    out = to_report_scalar(errors / blocks)
+    if isinstance(out, float):
+        logger.info("FER: %.2e (%s/%s blocks)", out, int(errors), blocks)
+    else:
+        _log_per_channel("FER Ch%s: %.2e (%s/%s blocks)", out, errors, extra=(blocks,))
     return out
 
 
@@ -507,6 +579,61 @@ def ser(
     return out
 
 
+def _gmi_loss(
+    llrs: ArrayType | Signal,
+    reference: ArrayType | None,
+    constellation: Constellation | None,
+    noise_var: float | None,
+    method: str,
+    num_skip_symbols: int,
+    name: str,
+) -> tuple[ArrayType, Constellation]:
+    """``E[log2(1 + e^{-(1 - 2c) L})]`` per channel, averaged over the bits.
+
+    Behind :func:`gmi` (``GMI = H(X) - k * loss``) and :func:`ngmi`
+    (``NGMI = 1 - loss``); returns the loss on the device, ``(...)``, and
+    the constellation.
+    """
+    adapter = adapt_signal(llrs, function_name=name)
+    received = adapter.symbol_array()
+    c = _constellation(adapter, constellation, name)
+    k = c.bits_per_symbol
+    if adapter.signal is not None:
+        if noise_var is None:
+            raise ValueError(f"{name} needs noise_var to compute LLRs of a Signal.")
+        received = _reference_scaled(
+            adapter, received, dispatch(received)[1], name, num_skip_symbols
+        )
+        received = c.llr(received, noise_var=noise_var, method=method)
+    elif noise_var is not None:
+        raise ValueError(
+            f"{name}: noise_var is for Signal input; LLR arrays already contain it."
+        )
+    llr_arr, xp, _ = dispatch(received)
+    llr_arr, ref = _paired(
+        llr_arr, _reference(adapter, reference, "bits", name), xp, name
+    )
+    if llr_arr.shape[-1] % k:
+        raise ValueError(
+            f"{name}: the last axis ({llr_arr.shape[-1]}) is not a multiple of "
+            f"bits_per_symbol ({k})."
+        )
+    # Per element in the LLRs' precision (float32 from compute_llr), summed in
+    # float64: single precision changed no GMI by more than 2e-8 bit (QAM 16
+    # to 256), far below the Monte Carlo error.
+    llr_arr = _skip(llr_arr, num_skip_symbols * k, name)
+    real = llr_arr.dtype if llr_arr.dtype.kind == "f" else xp.dtype(xp.float32)
+    llr_arr = llr_arr.astype(real, copy=False)
+    bits_arr = _skip(ref, num_skip_symbols * k, name).astype(real)
+
+    # -(1 - 2c) L: negative (small loss) when the LLR favors the sent bit.
+    x = -llr_arr * (1.0 - 2.0 * bits_arr)
+    # log2(1 + e^x) = (log1p(e^-|x|) + max(0, x)) / ln 2
+    # math.log, not np.log: a NumPy float64 scalar would promote (NEP 50).
+    softplus = (xp.log1p(xp.exp(-xp.abs(x))) + xp.maximum(0.0, x)) / math.log(2.0)
+    return xp.mean(softplus, axis=-1, dtype=xp.float64), c
+
+
 def gmi(
     llrs: ArrayType | Signal,
     reference: ArrayType | None = None,
@@ -566,51 +693,78 @@ def gmi(
         mismatch, an empty selection, or a frame Signal or one not at one
         sample per symbol.
     """
-    name = "gmi()"
-    adapter = adapt_signal(llrs, function_name=name)
-    received = adapter.symbol_array()
-    c = _constellation(adapter, constellation, name)
-    k = c.bits_per_symbol
-    if adapter.signal is not None:
-        if noise_var is None:
-            raise ValueError(f"{name} needs noise_var to compute LLRs of a Signal.")
-        received = _reference_scaled(
-            adapter, received, dispatch(received)[1], name, num_skip_symbols
-        )
-        received = c.llr(received, noise_var=noise_var, method=method)
-    elif noise_var is not None:
-        raise ValueError(
-            f"{name}: noise_var is for Signal input; LLR arrays already contain it."
-        )
-    llr_arr, xp, _ = dispatch(received)
-    llr_arr, ref = _paired(
-        llr_arr, _reference(adapter, reference, "bits", name), xp, name
+    loss, c = _gmi_loss(
+        llrs, reference, constellation, noise_var, method, num_skip_symbols, "gmi()"
     )
-    if llr_arr.shape[-1] % k:
-        raise ValueError(
-            f"{name}: the last axis ({llr_arr.shape[-1]}) is not a multiple of "
-            f"bits_per_symbol ({k})."
-        )
-    # Per element in the LLRs' precision (float32 from compute_llr), summed in
-    # float64: single precision changed no GMI by more than 2e-8 bit (QAM 16
-    # to 256), far below the Monte Carlo error.
-    llr_arr = _skip(llr_arr, num_skip_symbols * k, name)
-    real = llr_arr.dtype if llr_arr.dtype.kind == "f" else xp.dtype(xp.float32)
-    llr_arr = llr_arr.astype(real, copy=False)
-    bits_arr = _skip(ref, num_skip_symbols * k, name).astype(real)
-
-    # -(1 - 2c) L: negative (small loss) when the LLR favors the sent bit.
-    x = -llr_arr * (1.0 - 2.0 * bits_arr)
-    # log2(1 + e^x) = (log1p(e^-|x|) + max(0, x)) / ln 2
-    # math.log, not np.log: a NumPy float64 scalar would promote (NEP 50).
-    softplus = (xp.log1p(xp.exp(-xp.abs(x))) + xp.maximum(0.0, x)) / math.log(2.0)
     # H(X) - sum_b E[...], written so that H(X)/k is exactly 1.0 when uniform.
-    loss = xp.mean(softplus, axis=-1, dtype=xp.float64)
+    k = c.bits_per_symbol
     out = to_report_scalar(k * (c.entropy / k - loss))
     if isinstance(out, float):
         logger.info("GMI: %.4f b/symbol", out)
     else:
         _log_per_channel("GMI Ch%s: %.4f b/symbol", out)
+    return out
+
+
+def ngmi(
+    llrs: ArrayType | Signal,
+    reference: ArrayType | None = None,
+    *,
+    constellation: Constellation | None = None,
+    noise_var: float | None = None,
+    method: str = "maxlog",
+    num_skip_symbols: int = 0,
+) -> float | np.ndarray:
+    r"""Normalized generalized mutual information, the soft-FEC threshold metric.
+
+    .. math::
+
+        \mathrm{NGMI} = 1 - \frac{H(X) - \mathrm{GMI}}{m}
+            = 1 - \frac{1}{m} \sum_{b=0}^{m-1}
+            \mathbb{E}\big[\log_2(1 + e^{-(1 - 2 c_b) L_b})\big]
+
+    for ``m`` bits per symbol: 1 for error-free LLRs, and the same for
+    uniform and shaped constellations at equal LLR quality.  A soft-decision
+    FEC of rate ``R_c`` decodes error-free above an NGMI threshold close to
+    ``R_c`` (the threshold of a given code is published with it).
+
+    Parameters
+    ----------
+    llrs : array_like or Signal
+        As for :func:`gmi`.
+    reference : array_like, optional
+        Transmitted bits, same shape as the LLRs.  Required for arrays.
+    constellation : Constellation, optional
+        As for :func:`gmi`.
+    noise_var : float, optional
+        As for :func:`gmi`: for a Signal only.
+    method : {"maxlog", "exact"}, default "maxlog"
+        LLR computation for a Signal.
+    num_skip_symbols : int, default 0
+        Leading symbols left out (``m`` LLRs each).
+
+    Returns
+    -------
+    float or ndarray
+        NGMI, at most 1: a float for 1-D input, ``(C,)`` for 2-D input.
+
+    Raises
+    ------
+    ValueError
+        As :func:`gmi`.
+
+    See Also
+    --------
+    gmi : The unnormalized rate in bits per symbol.
+    """
+    loss, _ = _gmi_loss(
+        llrs, reference, constellation, noise_var, method, num_skip_symbols, "ngmi()"
+    )
+    out = to_report_scalar(1.0 - loss)
+    if isinstance(out, float):
+        logger.info("NGMI: %.4f", out)
+    else:
+        _log_per_channel("NGMI Ch%s: %.4f", out)
     return out
 
 

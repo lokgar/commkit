@@ -72,6 +72,7 @@ class _Context:
     reference: ArrayType | None  # known symbols (DataAided)
 
     def need_constellation(self, method: object) -> Any:
+        """The constellation, or raise naming the method that needs it."""
         if self.constellation is None:
             raise ValueError(
                 f"estimate_carrier_phase(): {type(method).__name__} needs a "
@@ -80,6 +81,7 @@ class _Context:
         return self.constellation
 
     def need_sampling_rate(self, method: object) -> float:
+        """The sampling rate, or raise naming the method that needs it."""
         if self.sampling_rate is None:
             raise ValueError(
                 f"estimate_carrier_phase(): {type(method).__name__} requires "

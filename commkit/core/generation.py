@@ -4,11 +4,16 @@
 pulse-shapes them into a :class:`Signal`, with samples normalized to unit
 symbol power (``Es = 1``, average sample power ``1/sps``).  PS-QAM is a
 shaped constellation: ``generate(Constellation.qam(64).shaped(nu=0.1),
-...)``.  ``periodic=True`` shapes the record as one period of a periodic
+...)``, whose random bits go through a distribution matcher.  ``code=``
+encodes random information bits with a code of :mod:`commkit.coding`
+(channel code, matcher or both) before mapping.  ``periodic=True`` shapes the record as one period of a periodic
 waveform, for looping on a streaming AWG.  On arrays, :func:`shape_pulse`
 pulse-shapes a symbol sequence to unit symbol power and :func:`expand`
 inserts zeros between samples.
 """
+
+import math
+from typing import Any
 
 import numpy as np
 
@@ -129,6 +134,7 @@ def generate(
     pulse: "filtering.Pulse | ArrayType | None" = None,
     num_channels: int = 1,
     periodic: bool = False,
+    code: Any = None,
     rng: int | np.random.Generator | None = None,
     device: str = "cpu",
 ) -> Signal:
@@ -137,9 +143,13 @@ def generate(
     Parameters
     ----------
     constellation : Constellation
-        The constellation to draw from.  Uniform constellations draw random
-        bits and map them; a shaped constellation (``pmf`` set) draws points
-        with probabilities ``pmf`` and takes their labels as the bits.
+        The constellation to draw from.  Every symbol comes from bits: a
+        uniform constellation maps random bits; a shaped constellation
+        (``pmf`` set) passes random bits through a constant-composition
+        distribution matcher, ``CCDM(constellation, block_length=num_symbols)``
+        per channel, unless ``code`` gives another matcher.  The shaped
+        record then holds each point exactly as often as the composition
+        says: the pmf quantized to ``1 / num_symbols``.
     num_symbols : int
         Symbols per channel.
     symbol_rate : float
@@ -159,12 +169,23 @@ def generate(
         or resample the record (``fir_filter``, ``upsample``, ``resample``,
         ``apply_phase_noise``) need ``periodic=True`` too; the Signal does not
         record it.
+    code : code object, optional
+        A code of :mod:`commkit.coding`: random information bits are encoded
+        with :func:`commkit.coding.encode`, and the code's output is mapped.
+        A FEC code (``LDPCCode``, ...) takes a uniform constellation; a
+        distribution matcher (``CCDM``) or probabilistic amplitude shaping
+        (``PAS``) carries the constellation it matches onto, which must be
+        ``constellation``.  ``num_symbols * bits_per_symbol`` must be a
+        multiple of ``code.n``.  The reference then holds the bits on the
+        air as ``bits`` and the information bits as ``info_bits``, with
+        ``code_block = (n, k)``.  Matchers run on the host before the
+        payload moves to ``device``.
     rng : int, numpy.random.Generator or None
         Seed or generator (SciPy SPEC 7).
     device : {"cpu", "gpu"}, default "cpu"
         Where the samples and the reference are built.  The random bits are
         always drawn on the host, so a seed gives the same symbols on either
-        device; mapping and pulse shaping run on ``device``.  Prefer
+        device; encoding, mapping and pulse shaping run on ``device``.  Prefer
         ``device="gpu"`` to ``generate(...).to("gpu")`` for long records:
         shaping on the GPU is an order of magnitude faster.
 
@@ -175,6 +196,13 @@ def generate(
         power ``1/sps``), complex64 (float32 for a real constellation such as
         bipolar PAM), with ``constellation``, ``pulse`` (when a Pulse was
         given) and ``reference`` set.
+
+    Raises
+    ------
+    ValueError
+        On a non-positive count, a ``code`` whose block length does not
+        divide the record's bits, a FEC code with a shaped constellation, or
+        a matcher onto another constellation.
 
     Examples
     --------
@@ -198,28 +226,55 @@ def generate(
     c = constellation
     k = c.bits_per_symbol
     total = int(num_symbols) * int(num_channels)
+    info_bits = None
     # Draw on the host (same data on every device), move the small draw,
     # build symbols and samples on the target device.
-    if c.pmf is None:
+    if code is not None or c.pmf is not None:
+        from .. import coding
+
+        if code is None:
+            # Every shaped symbol comes from bits: one matcher block per channel.
+            code = coding.CCDM(c, block_length=int(num_symbols))
+        codec = coding.base._codec(code, "generate()")
+        matched = getattr(code, "constellation", None)
+        if matched is not None and matched != c:
+            raise ValueError(
+                f"generate(): {code!r} matches onto another constellation than {c!r}."
+            )
+        if c.pmf is not None and matched is None:
+            raise ValueError(
+                "generate(): a shaped constellation with a FEC code needs a "
+                "distribution matcher: use code=PAS(code, constellation)."
+            )
+        num_blocks = _num_blocks(int(num_symbols), k, code.n)
+        info_bits = gen.integers(
+            0, 2, size=(num_channels, num_blocks * code.k), dtype="int8"
+        )
+        if codec.host:
+            # Matchers are sequential: encode on the host, move the labels.
+            bits = to_device(coding.encode(info_bits, code=code), device)
+            info_bits = to_device(info_bits, device)
+        else:
+            info_bits = to_device(info_bits, device)
+            bits = coding.encode(info_bits, code=code)
+        symbols = c.map(bits)
+        if num_channels == 1:
+            info_bits, bits, symbols = info_bits[0], bits[0], symbols[0]
+    else:
         bits = to_device(gen.integers(0, 2, size=total * k, dtype="int8"), device)
         symbols = c.map(bits)
-    else:
-        idx, xp, _ = dispatch(
-            to_device(gen.choice(c.order, size=total, p=c.pmf), device)
-        )
-        symbols = xp.asarray(c.points.astype(c._storage_dtype()))[idx]
-        bits = xp.asarray(c.bit_labels)[idx].reshape(-1)
 
-    if num_channels > 1:
+    if num_channels > 1 and code is None:
         symbols = symbols.reshape(num_channels, num_symbols)
         bits = bits.reshape(num_channels, num_symbols * k)
 
     samples = shape_pulse(symbols, sps=sps, pulse=pulse, periodic=periodic)
 
     logger.info(
-        "Generated %r: %s symbols x %s channel(s), sps=%s, pulse=%r, "
+        "Generated %r%s: %s symbols x %s channel(s), sps=%s, pulse=%r, "
         "periodic=%s, on %s.",
         c,
+        "" if code is None else f" coded with {code!r}",
         num_symbols,
         num_channels,
         sps,
@@ -233,5 +288,24 @@ def generate(
         symbol_rate=symbol_rate,
         constellation=c,
         pulse=pulse if isinstance(pulse, filtering.Pulse) else None,
-        reference=Reference(symbols=symbols, bits=bits),
+        reference=Reference(
+            symbols=symbols,
+            bits=bits,
+            info_bits=info_bits,
+            code_block=None if code is None else (code.n, code.k),
+        ),
     )
+
+
+def _num_blocks(num_symbols: int, bits_per_symbol: int, n: int) -> int:
+    """Code blocks of ``n`` bits in ``num_symbols`` symbols; raises unless whole."""
+    total = num_symbols * bits_per_symbol
+    if total % n:
+        step = n // math.gcd(n, bits_per_symbol)
+        low = num_symbols // step * step
+        valid = f"{low} or {low + step}" if low else f"{step}"
+        raise ValueError(
+            f"generate(): num_symbols={num_symbols} carries {total} bits, not a "
+            f"multiple of the code's block length {n}; use num_symbols={valid}."
+        )
+    return total // n

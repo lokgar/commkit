@@ -211,6 +211,7 @@ def _apply_iq_correction(
     real = i_branch.dtype
 
     def coef(a: ArrayType) -> ArrayType:
+        """A per-channel coefficient, scaled by ``gain``, as a ``(C, 1)`` column."""
         return (a * gain).astype(real)[:, None]
 
     result = xp.empty_like(samples)

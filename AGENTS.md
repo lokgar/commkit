@@ -36,27 +36,53 @@ uv run pytest --device=cpu               # what CI runs
 uv run pytest tests/equalization/ -k lms # subset
 uv run pytest --cov=commkit              # coverage
 NUMBA_DISABLE_JIT=1 uv run pytest tests/equalization tests/recovery \
-    tests/test_frequency.py --device=cpu --cov=commkit   # real kernel coverage
+    tests/test_frequency.py tests/mapping/test_llr.py tests/coding/test_ldpc.py tests/coding/test_shaping.py::TestCCDM \
+    tests/coding/test_polar.py::TestEncoding "tests/coding/test_polar.py::TestDecoding::test_sc_matches_the_recursive_reference" \
+    "tests/coding/test_polar.py::TestDecoding::test_full_list_is_maximum_likelihood" \
+    "tests/coding/test_polar.py::TestDecoding::test_crc_failure_keeps_the_best_path" \
+    tests/coding/test_convolutional.py tests/coding/test_turbo.py::TestEncoding \
+    tests/coding/test_turbo.py::TestDecoding::test_noiseless \
+    -k "not waterfall and not threshold" \
+    --device=cpu --cov=commkit   # real kernel coverage
 uv run pytest --device=cpu -p tests.plugins.precision_trace \
     --ignore=tests/test_examples.py      # precision audit (see Numerics); the suite passes under it
 uv run pytest --device=gpu -p tests.plugins.transfer_trace \
     --ignore=tests/test_examples.py      # transfer audit (see Performance); fails on an undocumented transfer
 ```
 
-**CUDA sanitizer** (see Kernel policy): NVIDIA's `compute-sanitizer` checks the kernels for out-of-bounds and misaligned accesses (`memcheck`), shared-memory races (`racecheck`), barrier misuse (`synccheck`) and reads of uninitialized device memory (`initcheck`). It is not a dependency: install its wheel, matching the CUDA major version of `cupy-cuda13x`, into a scratch directory and run the GPU tests of the kernels under each tool (10-100x slower):
+**CUDA sanitizer** (see Kernel policy): NVIDIA's `compute-sanitizer` checks the kernels for out-of-bounds and misaligned accesses (`memcheck`), shared-memory races (`racecheck`), barrier misuse (`synccheck`) and reads of uninitialized device memory (`initcheck`). It is not a dependency: install its wheel, matching the CUDA major version of `cupy-cuda13x`, into a scratch directory and run the GPU tests of the kernels under each tool (10-100x slower; the whole pass takes about 50 minutes on the reference machine):
 
 ```bash
 uv pip install --target /tmp/sanitizer "nvidia-cuda-sanitizer-api==13.*"
+S=/tmp/sanitizer/nvidia/cu13/bin/compute-sanitizer
+OWN=(--kernel-name kns=commkit_ --kernel-name kns=bps_ --kernel-name kns=cs_block \
+     --kernel-name kns=llr --kernel-name kns=iir_ --kernel-name kns=selftest --kernel-name kns=ldpc)
+FILES="tests/test_cuda_infra.py tests/equalization/test_cs_kernel.py tests/equalization/test_bps_kernel.py
+  tests/equalization/test_blind.py tests/mapping/test_llr.py tests/mapping/test_gray.py tests/recovery/test_bps.py
+  tests/test_filtering.py tests/test_fiber.py tests/impairments/channel/test_channel_nonlinear.py
+  tests/coding/test_ldpc_kernel.py"
+BLOCK=$(.venv/bin/python -m pytest --device=gpu -q --collect-only tests/equalization/test_block.py | grep '::')
 for tool in memcheck racecheck synccheck initcheck; do
-  /tmp/sanitizer/nvidia/cu13/bin/compute-sanitizer --tool $tool --leak-check full \
-    .venv/bin/python -m pytest --device=gpu -p no:cacheprovider \
-    tests/equalization/test_cs_kernel.py tests/equalization/test_bps_kernel.py \
-    tests/equalization/test_block.py tests/equalization/test_blind.py tests/mapping/test_llr.py \
-    tests/test_filtering.py tests/test_fiber.py tests/impairments/channel/test_channel_nonlinear.py
+  filter=(); [[ $tool == racecheck || $tool == synccheck ]] && filter=("${OWN[@]}")
+  for target in $FILES $BLOCK; do
+    "$S" --tool $tool "${filter[@]}" .venv/bin/python -m pytest --device=gpu -p no:cacheprovider -q "$target" \
+      2>&1 | grep -E "SUMMARY|passed|failed"
+  done
 done
 ```
 
-Under WSL2 the sanitizer needs the Windows GPU debugger interface; without it every run stops at "Failed to initialize WDDM debugger interface". Enable it once by running `EnableDebuggerInterface.bat` as a Windows administrator; the script comes with the Windows CUDA Toolkit, not with the Linux wheel.
+- **One process per file, and one per test for `test_block.py`.** Under the sanitizer each CUDA-graph test of the block equalizers gets slower the more tests ran before it in the process (one took 10 minutes after 26 others, 61 s alone).
+- **`racecheck` and `synccheck` check commkit's kernels only** (`OWN`: the `.cu` kernels and the `commkit_*` ElementwiseKernels). Unfiltered, racecheck tracks every CuPy and cuFFT launch of the 100k-symbol graph tests and grows by about 0.1 GB of host memory per second until the machine runs out. Those two tools concern shared memory and barriers, which only the `.cu` kernels use; `memcheck` and `initcheck` run unfiltered, as a CuPy kernel reading a buffer commkit never filled is a commkit bug.
+- **No `--leak-check full`.** CuPy's pool holds device memory until exit, so the check finds nothing in commkit, and with it every CuPy process exits with SIGSEGV after the summary (`import cupy as cp; cp.arange(3).sum()` alone does).
+- **The wheel must be complete.** The 13.2 and 13.3 wheels lack the launcher helpers (`TreeLauncherSubreaper`, `TreeLauncherTargetLdPreloadHelper`) and stop every target, even `/bin/echo`, with "Target application terminated before first instrumented API call". The 13.4 wheel has them and runs on a 13.3 driver. If a driver needs an older version, take NVIDIA's redistributable archive (`developer.download.nvidia.com/compute/cuda/redist/cuda_sanitizer_api/`), which is complete.
+
+Under WSL2 the sanitizer needs the Windows GPU debugger interface; without it every run stops at "Error: Device not supported" (older versions: "Failed to initialize WDDM debugger interface"). Enable it once from an elevated Windows prompt, then restart WSL (`wsl --shutdown`):
+
+```bat
+reg add "HKLM\SOFTWARE\NVIDIA Corporation\GPUDebugger" /v EnableInterface /t REG_DWORD /d 1 /f
+```
+
+Windows also kills a kernel that runs longer than `TdrDelay` seconds (`HKLM\System\CurrentControlSet\Control\GraphicsDrivers`, 8 on the reference machine, which the whole pass stays under); raise it if a sanitized launch times out.
 
 **Commit gate.** CI fails on any of these, so run all of them before every commit, with `ruff format` last:
 
@@ -78,7 +104,7 @@ Timed runs:
 ```bash
 uv run pytest benchmarks/bench_bps.py --benchmark-only --device=all
 uv run pytest benchmarks/ --benchmark-only --device=all \
-    --benchmark-compare=0006 --benchmark-storage=file://benchmarks/baselines
+    --benchmark-compare=0007 --benchmark-storage=file://benchmarks/baselines
 uv run python benchmarks/record_baseline.py NAME   # record a new baseline
 ```
 
@@ -100,7 +126,7 @@ Dependencies point downward only:
 | --- | --- | --- |
 | Infrastructure | `backend`, `logger`, `_cuda` | NumPy, CuPy |
 | Array and math helpers | `_array` (shape and validation), `math` (power, normalization, dB, linear trend) | infrastructure |
-| Value objects | `mapping.Constellation`, pulse classes, `recovery` CPR configs | layers above |
+| Value objects | `mapping.Constellation`, pulse classes, `recovery` CPR configs, `coding` (code objects with their `encode` / `decode`; array-only, never imports `core`) | layers above |
 | Core | `core` (`Signal`, frames, generation), `io` | layers above |
 | DSP | `mapping`, `filtering`, `multirate`, `spectral`, `smoothing`, `impairments`, `timing`, `frequency`, `recovery`, `equalization`, `metrics`, `analysis` | layers above, and lower DSP modules |
 | Presentation | `plotting` | everything; **nothing imports plotting** |
@@ -111,7 +137,6 @@ Dependencies point downward only:
   - `analysis` holds laser and phase characterization.
   - `metrics` is the reporting layer.
 - **Splitting modules:** promote a flat module to a package only when it exceeds about 1000 lines *and* has two or more separable concerns. The package `__init__` re-exports the public names. Never create a `utils/` package or one-function files.
-- **Placeholder modules are kept on purpose.** `commkit.coding` is a reminder of planned work. Never delete it or treat it as dead code. It is excluded from coverage and from the contract registry, and the README labels it "planned, not implemented".
 - **Shared physics lives in one private module**, used by the channel and by its compensation: `_dispersion` (β₂, β₃, the dispersion response) and `_fiber` (`Fiber` and the split-step solver behind `apply_fiber_propagation` and `correct_fiber_propagation`).
 
 ---
@@ -120,7 +145,7 @@ Dependencies point downward only:
 
 ### Signal
 
-- `Signal` holds: samples (NumPy or CuPy, `(N,)` or `(C, N)`, time on the last axis), the **facts** `sampling_rate`, `symbol_rate` and `center_frequency`, the **description** `constellation` and `pulse`, and the ground truth `reference` (transmitted symbols and bits) plus the `frame` layout.
+- `Signal` holds: samples (NumPy or CuPy, `(N,)` or `(C, N)`, time on the last axis), the **facts** `sampling_rate`, `symbol_rate` and `center_frequency`, the **description** `constellation` and `pulse`, and the ground truth `reference` (transmitted symbols, the bits on the air `bits` and the source bits `info_bits`, the same array when nothing is coded or matched) plus the `frame` layout.
 - It never holds pipeline results.
 - Construction does no hidden work: no mapping, no normalization, no device move, no shape guessing. Factories (`generate`, frames) do that work.
 - `sig.to("gpu")` and `sig.replace(...)` return new Signals. Arrays are shared, not copied; use `clone()` for an independent copy.
@@ -157,7 +182,7 @@ Dependencies point downward only:
 - **Transforms:** array in gives array out on the same device; Signal in gives a new Signal out (update `sampling_rate` when the rate changes).
 - **Estimators** reduce over the time axis by input rank: `(N,)` gives 0-d and `(C, N)` gives `(C,)`. Results stay on the input device.
 - **Analysis summaries** (`estimate_linewidth`, `allan_deviation`, the `frequency_drift` statistics) are reporting-layer fits on plot-sized reductions. Like the metrics, they return host floats or `(C,)` arrays. Sample-rate outputs (trajectories, PSDs, `dsh_phase`) stay on the input device.
-- **Metrics** (`evm`, `snr`, `ber`, `ser`, `gmi`, `mi`) return host values: a `float` for 1-D input and `np.ndarray (C,)` for 2-D input. They **raise** on empty selections; they never return `None` or `0.0` for "nothing measured". Metrics never silently align, rotate or permute against the reference.
+- **Metrics** (`evm`, `snr`, `ber`, `fer`, `ser`, `gmi`, `ngmi`, `mi`) return host values: a `float` for 1-D input and `np.ndarray (C,)` for 2-D input. They **raise** on empty selections; they never return `None` or `0.0` for "nothing measured". Metrics never silently align, rotate or permute against the reference.
 - **More than one value** is returned as a frozen dataclass with named fields. No dicts, and no tuples longer than two.
 - **Equalizers** return `EqualizerResult`. `y_hat` is always an array, `signal` holds the 1-SPS Signal for Signal input, `state` is the continuation state, and diagnostics are returned as data.
 
@@ -170,6 +195,7 @@ Dependencies point downward only:
 | `correct_<quantity>(x, how)` | remove the impairment; returns only the corrected data. `how` is an estimate or an algorithm object (which estimates first) |
 | `resolve_*` | pick among discrete candidates (π/2 rotation, channel permutation); nothing else |
 | `generate` | synthesis from parameters, takes `rng` |
+| `encode` / `decode` | information bits to a code's transmitted bits, and LLRs (or hard decisions) back to a `DecodeResult`; dispatched on the code object, the decoder chosen by a `method` object |
 | `plot_*` | every public plotting function (only `apply_default_theme` is exempt) |
 
 - The algorithm is chosen by an object, never by the function name or a string: `estimate_carrier_phase(y, BPS())`, not `recover_carrier_phase_bps(y)`. The verb function dispatches on the object's type through a private table in its module. There is no `recover_*` or `compensate_*`.
@@ -226,10 +252,14 @@ Docstrings describe the code as it is; a change in behavior updates them in the 
 | --- | --- | --- |
 | Vectorized: filters, resampling, spectra, impairments, metrics, frequency-domain equalizers | NumPy/CuPy via `x, xp, sp = dispatch(samples)` | follows the input |
 | Per-symbol searches over a small table: LLRs (over all points, or per axis for separable QAM; max-log without a prior in closed form, from the nearest levels of each bit's two values), hard decisions of constellations without a square lattice | CPU: Numba `parallel=True` over blocks of symbols (LLRs; the closed form from 16 levels per axis, below which the level metrics are as fast), chunked NumPy (decisions). GPU: CUDA kernels, one thread per symbol (`llr`, `llr_separable`, `llr_separable_maxlog` at every order, `bps_min_d2`'s nearest-point mode); decisions on double input or more than 1024 points run the chunked search on both devices, LLRs above 16 bits per symbol raise on the GPU | follows the input |
-| Sequential recursions: LMS/RLS/CMA/RDE, PLL, Tikhonov, cycle slips, the Mengali-Morelli bootstrap over the lags | Numba `@njit(cache=True, fastmath=True, nogil=True)`; independent rows in parallel (`prange`: the bootstrap's blocks). The equalizers' kernel with inline carrier recovery compiles strict (its unwrap and running sums) and calls its tap and distance loops as separate fast-math functions, which keep their flags when inlined (an `inline="always"` helper takes its caller's) | CPU; GPU input does one round trip to the host and back |
+| Sequential recursions: LMS/RLS/CMA/RDE, PLL, Tikhonov, cycle slips, the Mengali-Morelli bootstrap over the lags, per-codeword decoders on trellises and trees (CCDM matching, polar SC/SCL, Viterbi, BCJR, turbo decoding, recursive systematic encoding; independent blocks in parallel) | Numba `@njit(cache=True, fastmath=True, nogil=True)`; independent rows in parallel (`prange`: the bootstrap's blocks). The equalizers' kernel with inline carrier recovery compiles strict (its unwrap and running sums) and calls its tap and distance loops as separate fast-math functions, which keep their flags when inlined (an `inline="always"` helper takes its caller's) | CPU; GPU input does one round trip to the host and back |
 | Linear recursions: IIR filtering | CPU: Numba kernel without `fastmath`, so double input gives SciPy's result bit for bit. GPU: CUDA kernel (`iir`), blocks filtered in parallel and the state carried across them in two levels, in double precision | follows the input |
 | Hot spots limited by intermediates, launches or round trips | CUDA C++ via CuPy `RawModule` (`commkit/_cuda`) | GPU |
+| Binary linear algebra of codes: encoding, syndromes, the correlations of maximum-likelihood decoding, the evaluations of algebraic decoding (Chien search, Forney), Chase's test patterns through a hard decoder | one float32 GEMM per chunk (`coding._gf2.matmul_mod2`: BLAS, cuBLAS), exact below an inner dimension of 2^24; small tables (generators, coset leaders) cached per code object and device (`backend._device_tables`) | follows the input |
+| Iterative decoding of many codewords: layered LDPC belief propagation (min-sum, sum-product) | CPU: Numba `parallel=True` over codewords, all layers and iterations inside, without fast-math. GPU: CUDA kernel (`ldpc_layered`), one thread block per codeword, the rows of a layer in parallel, early stop per codeword inside the kernel; the same rows in the same order on both, so min-sum agrees bit for bit (a CuPy version, about 12 launches per layer, was 7-23x slower) | follows the input |
 | Elementwise chains between multi-core FFTs (the fiber solver's Kerr and PMD stages) | NumPy: a Numba `parallel=True` pass there competes with `scipy.fft`'s threads (the solver's Numba passes measured 1.1-1.8x slower end to end, 2^14-2^20); adopt one only on a paired end-to-end A/B | CPU |
+
+**Numba kernels live at module level**, in a private module that a getter imports on first use (`equalization/_numba_loops.py`, `coding/_numba_loops.py`, `mapping/_numba_llr.py`), so `import commkit` does not load Numba and the disk cache (`cache=True`) keeps them across processes. A kernel defined inside a function that calls another kernel defined there captures that dispatcher in its closure, which Numba's cache key does not reproduce in a new process: it compiled again in every process (3 s for `compute_llr`, 6 s for polar list decoding). A getter may build a kernel in a closure that captures only constants (`_get_numba_sos`).
 
 **Host-sync hygiene:**
 
@@ -278,20 +308,20 @@ Docstrings describe the code as it is; a change in behavior updates them in the 
 
 ## 8. Benchmarks
 
-`benchmarks/` tracks the GPU-relevant hot paths. Baselines are committed under `benchmarks/baselines/`. The current reference is `0006` (`perf_cleanup`) on the reference machine: RTX 4070 Ti, Ryzen 7 7800X3D, WSL2. It is the first baseline with `bench_filters.py`, `bench_pll`, `bench_mengali_morelli_blockwise` and `bench_correct_iq_imbalance`, recorded after the performance pass of the IIR kernel and the block equalizers' in-graph block copies, best of five passes; `0005` (`gpu_decoder_path`) is the first with `bench_mapping.py` and `bench_compute_llr_nonseparable`, recorded after the GPU LLR, mapping and decision kernels; `0004` (`fiber_dbp`) adds the fiber and DBP benchmarks to `0003` (`v2_0`, the 2.0 state); `0002` (`pre_v2`) is the 1.x state. `0002` ran the CPR equalizer and Viterbi-Viterbi benchmarks on workloads that did not converge, so compare those only from `0003` on.
+`benchmarks/` tracks the GPU-relevant hot paths. Baselines are committed under `benchmarks/baselines/`. The current reference is `0007` (`v3_0`) on the reference machine: RTX 4070 Ti, Ryzen 7 7800X3D, WSL2. It is the first baseline with `bench_coding.py` (LDPC encoding and decoding, KP4 decoding), recorded at the 3.0 state with the session warmup of Numba's thread pool, best of five passes; `0006` (`perf_cleanup`) is the first with `bench_filters.py`, `bench_pll`, `bench_mengali_morelli_blockwise` and `bench_correct_iq_imbalance`, recorded after the performance pass of the IIR kernel and the block equalizers' in-graph block copies, best of five passes; `0005` (`gpu_decoder_path`) is the first with `bench_mapping.py` and `bench_compute_llr_nonseparable`, recorded after the GPU LLR, mapping and decision kernels; `0004` (`fiber_dbp`) adds the fiber and DBP benchmarks to `0003` (`v2_0`, the 2.0 state); `0002` (`pre_v2`) is the 1.x state. `0002` ran the CPR equalizer and Viterbi-Viterbi benchmarks on workloads that did not converge, so compare those only from `0003` on.
 
 - **Workloads must converge.** A workload the algorithm cannot handle times a failure mode (slip storms, divergence), not the operating point. Every equalizer benchmark asserts its symbol error rate with `benchutils.assert_converged`.
-- **Baselines** are recorded with `benchmarks/record_baseline.py`: each file in its own process, best of three passes (`--passes`; `0006` used five, as three still kept outliers of 2-4x on a few small benchmarks). In one full-suite process, small GPU benchmarks after the large equalizer workloads ran 2-12x slower than alone, so never record a baseline from a single `pytest benchmarks/` run.
+- **Baselines** are recorded with `benchmarks/record_baseline.py`: each file in its own process, best of three passes (`--passes`; `0006` and `0007` used five, as three still kept outliers of 2-4x on a few small benchmarks). In one full-suite process, small GPU benchmarks after the large equalizer workloads ran 2-12x slower than alone, so never record a baseline from a single `pytest benchmarks/` run.
 
 - **IDs** are `[cpu]` or `[gpu]`, meaning the input device.
 - **Timing:**
   - Timed bodies end with the `sync` fixture; otherwise GPU timings measure launches, not execution.
-  - Each benchmark has one warmup round, so compilation and pool growth are excluded.
+  - Each benchmark has one warmup round, so compilation and pool growth are excluded, and a session fixture keeps Numba's thread pool busy for half a second before the first: the first parallel calls of a process ran 4-8x slower while the OpenMP workers came up, which a kernel loaded from Numba's cache reaches in the timed rounds.
 - **Workloads** come from `benchmarks/workloads.py` with fixed seeds; never generate data inline.
 - **Tools:** `benchmarks/benchutils.py` provides `CudaEventTimer` and `nvtx_range` for `nsys` profiling.
 - **Logging** is set to WARNING in `benchmarks/conftest.py`.
 - **Trust deltas, not single runs.** A ±20-40% swing has been seen under load. Re-run a suspected regression in isolation, or do a controlled A/B with at least 7 repetitions, alternating old and new per repetition and comparing the paired ratios. When even unchanged benchmarks move, time the changed part itself with `CudaEventTimer` and quote it against the step it sits in.
-- A commit touching a hot path quotes its delta against `0006`. Tolerance is 5% on CPU and 10% on GPU.
+- A commit touching a hot path quotes its delta against `0007`. Tolerance is 5% on CPU and 10% on GPU.
 
 ---
 
@@ -314,7 +344,7 @@ Steps, once CuPy 14.3 (with cp315 wheels for `cupy-cuda13x`) and a fixed `jupyte
    - `pyproject.toml`: `requires-python = ">=3.15"`, classifiers 3.15 only, ruff `target-version = "py315"` (if ruff supports it), raise the dependency minimums to the first releases with 3.15 wheels (`cupy-cuda13x[ctk]>=14.3`, `numba>=0.68`, `numpy>=2.5`, `scipy>=1.18`; recheck each).
    - `ci.yml`: test matrix `python-version: ["3.15"]` (keep both `locked` and `lowest-direct`); the static-analysis, kernel-coverage and notebook jobs on 3.15. `publish.yml`: build on 3.15.
    - `uv lock`; README install requirements; §2 here ("Python 3.12+").
-   - Benchmarks: record a new baseline on 3.15 (it lands in `benchmarks/baselines/Linux-CPython-3.15-64bit/`), compare it with `0006` by a paired A/B of 3.14 against 3.15 on unchanged code, and make it the reference.
+   - Benchmarks: record a new baseline on 3.15 (it lands in `benchmarks/baselines/Linux-CPython-3.15-64bit/`), compare it with `0007` by a paired A/B of 3.14 against 3.15 on unchanged code, and make it the reference.
 3. **Lazy imports (PEP 810)**. Confirm the rules on the interpreter first. As specified, `lazy` is allowed only for module-level imports: not inside functions, class bodies or `try` blocks, and not with `*`.
    - About 60 function-local imports exist to keep `import commkit` light or optional: `import cupy as cp` (11 sites), `import numba` (9), `from . import compiler` in `_cuda` (5), and local imports that break cycles (`Constellation`, `Signal`, `normalize`). Move each to a module-level `lazy import` / `lazy from`. Concentrated in `_cuda/__init__.py`, `backend.py`, `io.py`, `recovery/`, `core/`, `plotting/`.
    - CuPy stays optional: a lazy import of a missing module fails only when used, so every use must stay behind the existing availability checks (`is_cupy_available`, `dispatch`). `backend.py`'s probing needs care: decide per site whether the probe imports eagerly inside `try`.
@@ -327,13 +357,11 @@ Steps, once CuPy 14.3 (with cp315 wheels for `cupy-cuda13x`) and a fixed `jupyte
    - `strptime` with a day and no year now raises (the `jupyter_client` failure above); grep commkit for date parsing.
    - The 3.15 sampling profiler (PEP 799) is a candidate tool for the CPU hot paths next to `nsys`; mention it in §8 if it proves useful.
 
-### CUDA sanitizer pass (blocked on the WDDM debugger interface)
+### Channel coding: open items
 
-The kernels have not run under `compute-sanitizer` (§2): on the reference machine (WSL2) it needs the Windows GPU debugger interface, which is not enabled yet. The review that stands in for it (every `.cu` kernel and wrapper read for bounds, barriers, races and overflow; empty, one-sample and NaN/Inf inputs; 4 KB guard zones around every array the library allocated during the GPU kernel tests, 565 tests and 57,723 arrays, none touched) catches out-of-bounds writes but not out-of-bounds reads or reads of uninitialized memory. Once the interface is enabled, run the four tools of §2, fix what they report, and remove this item.
-
-### Planned modules
-
-1. **Channel coding** (`coding`, a placeholder package). Soft demapping is GPU-validated on both devices. Start with one soft decoder (LDPC) that consumes `compute_llr` output (positive LLR = bit 0) and reports post-FEC BER next to `gmi`, then add encoders. The package stays out of `commkit/__init__.py` until a real encode/decode entry point exists. Decoders are iterative message passing over many codewords: batch codewords on the GPU from the start.
+1. **Storing frames with a payload code.** `save_npz` raises for a frame with a `payload_code`, because code objects are not serialized; store `extract_payload(signal)` instead.
+2. **oFEC** (OpenROADM, ITU-T G.709.3) is not implemented: its block structure is specified in the OpenROADM MSA documents, which were not available in a form to implement from. It would build on `BCHCode` (extended BCH(256, 239)), `Chase` with soft output and the staircase decoder's iteration over a window.
+3. **NR rate matching for polar codes** (sub-block interleaving, the circular buffer, puncturing and shortening with their frozen-set rules, parity-check bits) and **LTE rate matching for turbo codes** are not included: `PolarCode` and `TurboCode` are the mother codes. `Punctured` and `Shortened` cover generic rate matching.
 
 ### Nonlinear fiber channel: future features
 

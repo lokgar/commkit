@@ -321,8 +321,11 @@ def rc_taps(*, sps: float, rolloff: float = 0.35, span: int = 32) -> np.ndarray:
 
 @dataclass(frozen=True)
 class Pulse:
-    """Base class of the pulse value objects (``RRC``, ``RC``, ``Gaussian``,
-    ``Rect``, ``SmoothRect``)."""
+    """Base class of the pulse value objects.
+
+    The pulses are ``RRC``, ``RC``, ``Gaussian``, ``Rect`` and
+    ``SmoothRect``.
+    """
 
     def taps(self, sps: float) -> np.ndarray:
         """Pulse taps at ``sps`` samples per symbol (host ``float64``)."""
@@ -368,6 +371,7 @@ class RRC(Pulse):
         _check_span(self.span)
 
     def taps(self, sps: float) -> np.ndarray:
+        """RRC taps at ``sps`` samples per symbol (host ``float64``)."""
         return rrc_taps(sps=sps, rolloff=self.rolloff, span=self.span)
 
 
@@ -386,6 +390,7 @@ class RC(Pulse):
         _check_span(self.span)
 
     def taps(self, sps: float) -> np.ndarray:
+        """RC taps at ``sps`` samples per symbol (host ``float64``)."""
         return rc_taps(sps=sps, rolloff=self.rolloff, span=self.span)
 
 
@@ -411,6 +416,7 @@ class Gaussian(Pulse):
         _check_span(self.span)
 
     def taps(self, sps: float) -> np.ndarray:
+        """Gaussian taps at ``sps`` samples per symbol (host ``float64``)."""
         return gaussian_taps(sps=sps, fwhm=self.fwhm, span=self.span)
 
 
@@ -438,8 +444,11 @@ class Rect(Pulse):
             )
 
     def taps(self, sps: float) -> np.ndarray:
-        """Taps at integer ``sps``; ``duty_cycle * sps`` and ``rise_time * sps``
-        must be whole samples, so the pulse is never silently rounded."""
+        """Taps at integer ``sps`` (host ``float64``).
+
+        ``duty_cycle * sps`` and ``rise_time * sps`` must be whole samples,
+        so the pulse is never silently rounded.
+        """
         sps = require_integer_sps(sps, "Rect.taps()")
         for name, value in (
             ("duty_cycle", self.duty_cycle),
@@ -480,6 +489,7 @@ class SmoothRect(Pulse):
         _check_span(self.span)
 
     def taps(self, sps: float) -> np.ndarray:
+        """Smoothed rectangular taps at integer ``sps`` (host ``float64``)."""
         return smoothrect_taps(
             sps=require_integer_sps(sps, "SmoothRect.taps()"),
             span=self.span,

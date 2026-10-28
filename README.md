@@ -16,7 +16,7 @@ CommKit covers the receiver chain of coherent and IM/DD links (waveform generati
 Data is a NumPy or CuPy array, or a `Signal` that wraps the samples together with what is known about them. Algorithms are plain functions that take the data and return a new `Signal` or array, or a typed result such as `EqualizerResult` or an `*Estimate`. Plotting functions draw those results; they never compute them.
 
 - **Things that describe** a modulation, a pulse or a sub-algorithm are small frozen objects written in the call: `lms(rx, cpr=BPS(test_phases=64))`. The same object works standalone: `correct_carrier_phase(y, BPS())`.
-- **A `Signal` carries facts and ground truth.** Facts are `sampling_rate`, `symbol_rate` and `center_frequency`. The description is `constellation` and `pulse`. The ground truth is `reference` (transmitted symbols and bits). Functions take facts from the Signal and raise on a conflicting argument. Choices such as the decision constellation default to the Signal's and can be overridden.
+- **A `Signal` carries facts and ground truth.** Facts are `sampling_rate`, `symbol_rate` and `center_frequency`. The description is `constellation` and `pulse`. The ground truth is `reference`: the transmitted symbols, the bits on the air and the source bits before coding or distribution matching (the same array when there is neither). Functions take facts from the Signal and raise on a conflicting argument. Choices such as the decision constellation default to the Signal's and can be overridden.
 - **Results with several values are frozen dataclasses** with named fields. Metrics return host floats: one per channel for `(C, N)` input.
 - **The device follows the data.** Processing functions have no `backend=` or `device=` argument. Only factories, which have no input data to follow, take `device=`: `generate(..., device="gpu")`. Move existing data with `sig.to("gpu")`.
 - **Plots draw results.** `plot_*` functions take a Signal, an array or a result object; numerical code never imports plotting.
@@ -78,7 +78,7 @@ CommKit never picks a device for you: data stays where you put it, and each func
 
 | Module | Contents |
 | --- | --- |
-| [`commkit.core`](https://github.com/lokgar/commkit/tree/main/commkit/core) | `Signal`, `Reference`, `generate`, `SingleCarrierFrame` and `Preamble` (pilots, guard intervals, MIMO streams), `extract_payload`. |
+| [`commkit.core`](https://github.com/lokgar/commkit/tree/main/commkit/core) | `Signal`, `Reference`, `generate` (uniform, shaped through a distribution matcher, or coded with `code=`), `SingleCarrierFrame` and `Preamble` (pilots, guard intervals, MIMO streams), `extract_payload`. |
 | [`commkit.mapping`](https://github.com/lokgar/commkit/tree/main/commkit/mapping) | `Constellation` (QAM, PSK, PAM, arbitrary points; Gray labels; probabilistic shaping with `.shaped()`), bit mapping, hard demapping, max-log and exact LLRs. |
 | [`commkit.filtering`](https://github.com/lokgar/commkit/tree/main/commkit/filtering) | Pulses (`RRC`, `RC`, `Gaussian`, `Rect`, `SmoothRect`), FIR and IIR design (Butterworth, Chebyshev I/II, elliptic, Bessel), `fir_filter`, `iir_filter`, `matched_filter`, overlap-save, chromatic-dispersion compensation and digital backpropagation (`correct_fiber_propagation`). |
 | [`commkit.multirate`](https://github.com/lokgar/commkit/blob/main/commkit/multirate.py) | `resample` (fractional), `decimate`, `upsample`, `decimate_to_symbol_rate`. |
@@ -88,13 +88,13 @@ CommKit never picks a device for you: data stays where you put it, and each func
 | [`commkit.frequency`](https://github.com/lokgar/commkit/blob/main/commkit/frequency.py) | `estimate_frequency_offset` / `correct_frequency_offset` with `MthPower`, `MengaliMorelli`, `PilotSymbols` and `BiasTone`; static and blockwise. |
 | [`commkit.recovery`](https://github.com/lokgar/commkit/tree/main/commkit/recovery) | `estimate_carrier_phase` / `correct_carrier_phase` with `ViterbiViterbi`, `BPS`, `PLL`, `Tikhonov`, `DataAided`, `PilotAided`, `PilotTone(s)`; cycle-slip correction; `resolve_phase_ambiguity` and `resolve_channel_permutation`. |
 | [`commkit.equalization`](https://github.com/lokgar/commkit/tree/main/commkit/equalization) | Sequential `lms`, `rls`, `cma`, `rde` (Numba) and frequency-domain `block_lms`, `block_cma`, `block_rde` (CuPy, CUDA graphs), butterfly MIMO, inline carrier recovery (`cpr=PLL()` / `BPS()`), continuation with `state=`, `zf_equalizer`, polarization-tone demultiplexing. |
-| [`commkit.metrics`](https://github.com/lokgar/commkit/blob/main/commkit/metrics.py) | `evm`, `snr`, `ber`, `ser`, `gmi`, `mi`, including shaped constellations; host values per channel. |
+| [`commkit.metrics`](https://github.com/lokgar/commkit/blob/main/commkit/metrics.py) | `evm`, `snr`, `ber`, `fer`, `ser`, `gmi`, `ngmi`, `mi`, including shaped constellations; pre-FEC and post-FEC; host values per channel. |
 | [`commkit.analysis`](https://github.com/lokgar/commkit/tree/main/commkit/analysis) | Laser and carrier-phase characterization: `estimate_linewidth` (increment slope, β-separation, delayed self-heterodyne FM-PSD / increment / Lorentzian), FM-noise PSDs, drift separation, Allan deviation. |
 | [`commkit.math`](https://github.com/lokgar/commkit/blob/main/commkit/math.py) | `rms`, `normalize`, dB conversions. |
 | [`commkit.smoothing`](https://github.com/lokgar/commkit/blob/main/commkit/smoothing.py) | Display and estimation smoothers (moving average, Savitzky-Golay, 2-D density). Signal-chain filters are in `filtering`. |
 | [`commkit.io`](https://github.com/lokgar/commkit/blob/main/commkit/io.py) | `save_npz` / `load_npz` for Signals. |
 | [`commkit.plotting`](https://github.com/lokgar/commkit/tree/main/commkit/plotting) | Constellations, eye diagrams, spectra, filter responses, equalizer convergence, and synchronization and laser diagnostics that draw the estimates. Imported on first use. |
-| [`commkit.coding`](https://github.com/lokgar/commkit/tree/main/commkit/coding) | Channel coding and FEC: **planned, not implemented**. |
+| [`commkit.coding`](https://github.com/lokgar/commkit/tree/main/commkit/coding) | Channel coding: `encode` / `decode` dispatched on a code object, `LinearBlockCode` (Hamming, extended and shortened), syndrome and maximum-likelihood decoding; `LDPCCode` (DVB-S2, the 802.3ca / 50G-PON code, any parity-check or quasi-cyclic matrix) with layered min-sum and sum-product decoding on the CPU (Numba) and GPU (CUDA); `ReedSolomonCode` (G.709, KR4, KP4, 10G-EPON, XGS-PON) and `BCHCode` with Berlekamp-Massey decoding; Chase-Pyndiah soft decoding; the G.709.2 `StaircaseCode` and `Concatenated` codes (400ZR C-FEC with its exact Hamming(128,119), 802.3dj); `PolarCode` (5G NR information set) with SC and CRC-aided SCL decoding; `ConvolutionalCode` (K = 7, terminated or tail-biting) with Viterbi and BCJR, `TurboCode` (LTE); `CRC` (NR, LTE, Ethernet), `Interleaver`, `Punctured` and `Shortened`; distribution matching (`CCDM`) and probabilistic amplitude shaping (`PAS`). Coded payloads through `generate(..., code=)`. |
 
 Importing `commkit` has no side effects: it configures no logging, Matplotlib or warning filters, and does not touch the GPU.
 
@@ -124,15 +124,15 @@ With [`uv`](https://github.com/astral-sh/uv), use `uv pip install` in place of `
 
 ## Examples
 
-[`examples/`](https://github.com/lokgar/commkit/tree/main/examples) is a course in 26 Jupyter notebooks, one topic each, in teaching order (install the `notebook` extra and run `jupyter lab examples`):
+[`examples/`](https://github.com/lokgar/commkit/tree/main/examples) is a course in 29 Jupyter notebooks, one topic each, in teaching order (install the `notebook` extra and run `jupyter lab examples`):
 
 - **00-05, signals and DSP**: the `Signal`, constellations and bit mapping, spectra, filters, pulse shaping and matched filtering, resampling;
-- **06-08, channel and performance**: AWGN and the metrics (SNR, BER, LLRs, GMI), laser phase noise, front-end impairments;
-- **09-16, receiver algorithms**: frame synchronization, frequency-offset estimation, blind and pilot-aided carrier recovery, linear, adaptive and blind equalization, polarization demultiplexing;
-- **17-19, optical fiber systems**: chromatic dispersion, the nonlinear fiber with digital backpropagation, and an end-to-end coherent transceiver;
-- **20-25, characterization**: carrier phase and laser linewidth measurements, with templates for real captures.
+- **06-10, channel, coding and performance**: AWGN and the metrics (SNR, BER, LLRs, GMI), channel coding, probabilistic shaping and coded modulation, laser phase noise, front-end impairments;
+- **11-18, receiver algorithms**: frame synchronization, frequency-offset estimation, blind and pilot-aided carrier recovery, linear, adaptive and blind equalization, polarization demultiplexing;
+- **19-22, optical fiber systems**: chromatic dispersion, the nonlinear fiber with digital backpropagation, FEC in optical standards, and an end-to-end coherent transceiver;
+- **23-28, characterization**: carrier phase and laser linewidth measurements, with templates for real captures.
 
-[`examples/README.md`](https://github.com/lokgar/commkit/blob/main/examples/README.md) lists every notebook with its topics.  The quickstart above appears cell by cell in `00-getting-started` and `14-adaptive-equalization`.  The notebooks are committed without outputs and run in CI.
+[`examples/README.md`](https://github.com/lokgar/commkit/blob/main/examples/README.md) lists every notebook with its topics.  The quickstart above appears cell by cell in `00-getting-started` and `16-adaptive-equalization`.  The notebooks are committed without outputs and run in CI.
 
 ## Development
 

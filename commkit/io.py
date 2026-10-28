@@ -6,6 +6,9 @@ A Signal is stored as a NumPy ``.npz`` archive with these entries:
     The samples (always present).
 ``reference_symbols``, ``reference_bits``
     The reference (omitted without one; bits omitted when ``None``).
+``reference_info_bits``, ``reference_code_block``
+    The reference's source bits and ``(n, k)`` (omitted when ``info_bits``
+    is ``bits``, as for an uncoded payload).
 ``constellation_points``, ``constellation_bit_labels``, ``constellation_pmf``
     The constellation (omitted when ``None``; the pmf only when shaped).
 ``__metadata__``
@@ -17,6 +20,9 @@ A Signal is stored as a NumPy ``.npz`` archive with these entries:
 ``frame_payload_symbols``, ``frame_pilot_symbols``, ``frame_payload_bits``
     The frame's generated symbols and bits (omitted without a frame, or
     without pilots).
+``frame_payload_info_bits``, ``frame_payload_code_block``
+    The payload's source bits and ``(n, k)``, for a shaped payload (omitted
+    when they are the payload bits).
 ``frame_payload_constellation_*``, ``frame_pilot_constellation_*``
     The frame's constellations, stored as the Signal's.
 
@@ -77,6 +83,11 @@ def save_npz(
         Write with ``savez_compressed`` (zlib).  ``False`` writes
         uncompressed with ``savez``: faster, but a larger file.
 
+    Raises
+    ------
+    ValueError
+        For a frame with a ``payload_code``: code objects are not stored.
+
     Notes
     -----
     When the Signal has a ``frame`` (one built by
@@ -107,6 +118,9 @@ def save_npz(
         arrays["reference_symbols"] = _backend.to_device(ref.symbols, "CPU")
         if ref.bits is not None:
             arrays["reference_bits"] = _backend.to_device(ref.bits, "CPU")
+        if ref.info_bits is not ref.bits:
+            arrays["reference_info_bits"] = _backend.to_device(ref.info_bits, "CPU")
+            arrays["reference_code_block"] = np.asarray(ref.code_block, np.int64)
 
     _put_constellation(signal.constellation, "constellation", arrays, meta)
 
@@ -126,6 +140,11 @@ def save_npz(
     # after a save/load round-trip without requiring the caller to keep a
     # reference to the original frame object.
     frame = signal.frame
+    if frame is not None and getattr(frame, "payload_code", None) is not None:
+        raise ValueError(
+            "save_npz(): a frame with a payload_code cannot be stored; store "
+            "extract_payload(signal) or signal.replace(frame=None)."
+        )
     if frame is not None:
         # All public fields are JSON-serializable primitives; the nested
         # Preamble dataclass becomes a dict.
@@ -153,6 +172,12 @@ def save_npz(
             arr = getattr(frame, frame_attr, None)
             if arr is not None:
                 arrays[npz_key] = _backend.to_device(arr, "CPU")
+        payload = frame._payload_reference()
+        if payload.info_bits is not payload.bits:
+            arrays["frame_payload_info_bits"] = payload.info_bits
+            arrays["frame_payload_code_block"] = np.asarray(
+                payload.code_block, np.int64
+            )
 
     # -------------------------------------------------------------------------
     # Build metadata dict and serialize to JSON
@@ -260,9 +285,19 @@ def load_npz(
     kwargs["samples"] = data["samples"]
 
     if "reference_symbols" in data:
+        coded = "reference_info_bits" in data
         kwargs["reference"] = Reference(
             symbols=data["reference_symbols"],
             bits=data["reference_bits"] if "reference_bits" in data else None,
+            info_bits=data["reference_info_bits"] if coded else None,
+            code_block=(
+                (
+                    int(data["reference_code_block"][0]),
+                    int(data["reference_code_block"][1]),
+                )
+                if coded
+                else None
+            ),
         )
     kwargs["constellation"] = _get_constellation("constellation", data, meta)
     if meta["pulse"] is not None:
@@ -312,6 +347,18 @@ def load_npz(
         ):
             if npz_key in data:
                 frame._cache[cache_key] = data[npz_key]
+        if "frame_payload_bits" in data:
+            matched = "frame_payload_info_bits" in data
+            frame._cache["payload_info_bits"] = (
+                data["frame_payload_info_bits"]
+                if matched
+                else frame._cache["payload_bits"]
+            )
+            frame._cache["payload_code_block"] = (
+                tuple(int(v) for v in data["frame_payload_code_block"])
+                if matched
+                else (1, 1)
+            )
 
         sig = sig.replace(frame=frame)
 
