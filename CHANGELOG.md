@@ -4,10 +4,16 @@ Notable changes to CommKit, newest first. Performance figures are from the refer
 
 ## [Unreleased]
 
+## [3.0.0] - 2026-10-28
+
+The channel-coding release. `commkit.coding` grows from an empty scaffold into a full FEC toolbox: one `encode` / `decode` pair dispatched on code objects covers linear block, LDPC, BCH and Reed-Solomon, polar, convolutional and turbo codes, the FEC structures of the optical standards (KP4, the 802.3dj and 400ZR concatenated codes, the G.709.2 staircase code, PON LDPC), CRCs, interleavers, rate matching and probabilistic amplitude shaping. `generate` and frames produce coded payloads, the reference keeps the source bits next to the bits on the air, and three new notebooks teach it. Shaped `generate` now goes through a distribution matcher, and the example notebooks are renumbered; see the first section.
+
 ### Changes that may need code updates
 
 - **Shaped `generate` goes through a distribution matcher.** A shaped constellation used to draw i.i.d. symbols from its pmf and take their labels as the "bits", so the bits described a stream that was never sent. Now random bits pass through `CCDM(constellation, block_length=num_symbols)` per channel: every symbol comes from bits, each record holds every point exactly as often as the pmf (quantized to `1/num_symbols`) says, and `reference.info_bits` holds the matcher's input. For the same seed the symbols differ from 2.x; GMI and MI agree within Monte Carlo error. A shaped record must be long enough to carry a bit (a few symbols). Frames inherit this, and `save_npz` stores a shaped frame's source bits.
 - **`Reference` has two more fields**, `info_bits` and `code_block`. `bits` are the bits on the air; `info_bits` are the source bits before coding. Without coding `info_bits` is `bits` itself and `code_block` is `(1, 1)`, so existing code that reads `reference.bits` is unaffected. Code that builds a `Reference` positionally keeps working.
+- **The placeholder modules of `commkit.coding` are gone.** 2.x shipped empty scaffold modules (`hamming`, `bch`, `reed_solomon`, `galois`) that held only docstrings. The codes now live in `linear` (Hamming and other linear block codes), `algebraic` (BCH and Reed-Solomon) and the private `_galois`; import the public names from `commkit.coding` itself (`from commkit.coding import BCHCode, ReedSolomonCode`), which is the supported path. `commkit.coding` is also reachable as `ck.coding` after `import commkit as ck`.
+- **The example notebooks are renumbered** to fit the coding chapters: 07 Channel coding and 08 Probabilistic shaping and coded modulation join Part II, 21 FEC in optical standards joins Part IV. Old 07-18 are now 09-20, old 19 (the end-to-end transceiver) is 22, and old 20-25 (characterization and templates) are 23-28. Update bookmarks and links to the notebooks.
 
 ### Added
 
@@ -15,7 +21,7 @@ Notable changes to CommKit, newest first. Performance figures are from the refer
   - `LinearBlockCode` from a generator or parity-check matrix, and `LinearBlockCode.hamming(r, extended=, length=)` for Hamming codes, including the inner codes of 400ZR, Hamming(128,119), and of IEEE 802.3dj, Hamming(128,120).
   - Decoders `Syndrome(max_weight=)` (coset leaders; `max_weight=1` makes an extended Hamming code correct one error and detect two) and `MaximumLikelihood()` (exhaustive, for small codes).
 - **LDPC codes:** `LDPCCode.from_parity_check(H)`, `LDPCCode.quasi_cyclic(base, lifting)`, `LDPCCode.dvbs2(rate, frame)` (all DVB-S2 rates, normal and short frames) and `LDPCCode.pon()` (LDPC(17280, 14592) of IEEE 802.3ca and ITU-T G.9804.2). Decoders `MinSum(scale=, offset=)` and `SumProduct()`, layered, with early stopping per codeword, on the CPU (Numba) and the GPU (a CUDA kernel, about 10x the CPU on 64 DVB-S2 codewords). Encoding is systematic: a sparse product and a cumulative XOR for DVB-S2, a sparse product and a GEMM with the inverted parity part for PON.
-- **Algebraic codes:** `ReedSolomonCode(n, k, m=)` with the presets `g709()` (RS(255,239)), `kr4()` (RS(528,514)), `kp4()` (RS(544,514)), `epon10g()` (RS(255,223)) and `xgspon()` (RS(248,216)), and binary `BCHCode(m, t, length=)`, decoded by `BerlekampMassey()` (Chien search, Forney) on both devices; a codeword with more than `t` errors is reported `valid=False` or decoded to a codeword within distance `t`. Encoding, syndromes and the locator evaluations are GEMMs over GF(2): KP4 decodes 2048 codewords in 0.45 s on the CPU and 89 ms on the GPU.
+- **Algebraic codes:** `ReedSolomonCode(symbols, info_symbols, m=)` with the presets `g709()` (RS(255,239)), `kr4()` (RS(528,514)), `kp4()` (RS(544,514)), `epon10g()` (RS(255,223)) and `xgspon()` (RS(248,216)), and binary `BCHCode(m, t, length=)`, decoded by `BerlekampMassey()` (Chien search, Forney) on both devices; a codeword with more than `t` errors is reported `valid=False` or decoded to a codeword within distance `t`. Encoding, syndromes and the locator evaluations are GEMMs over GF(2): KP4 decodes 2048 codewords in 0.45 s on the CPU and 89 ms on the GPU.
 - **Soft decoding of block codes and optical FEC structures:** `Chase(test_positions=, hard=, beta=)`, Chase-II decoding with Pyndiah's soft output for linear block and BCH codes; `LinearBlockCode.oif400zr()`, the double-extended Hamming(128,119) of OIF 400ZR exactly as its clause 10.5 defines it; `StaircaseCode.g709_2(num_blocks)`, the 512 x 510 staircase code of ITU-T G.709.2 (its double-extended BCH(1022,990) component and column permutation as specified), decoded by `HardIterations()`; and `Concatenated(outer, inner, interleaver)` with the presets `cfec()` (400ZR C-FEC) and `ieee_802_3dj()` (KP4 + Hamming(128,120)), decoded by `Stages(inner=, outer=)`. Measured thresholds match the standards: the staircase code decodes at an input BER of 4.5e-3, the C-FEC at 1.2e-2.
 - **Polar codes:** `PolarCode.nr(k, n, crc=)` with the information set of the 5G NR reliability sequence (TS 38.212 Table 5.3.1.2-1) and an optional NR CRC, or `PolarCode.from_frozen(mask)`; decoders `SC()` and `SCL(list_size)` (CRC-aided when the code has a CRC). Mother code only (no NR rate matching).
 - **Convolutional and turbo codes:** `ConvolutionalCode(generators, constraint_length, block_length, termination=)` and `ConvolutionalCode.k7()` (133, 171), terminated or tail-biting, decoded by `Viterbi()` (maximum likelihood) or `BCJR(exact=)` (a-posteriori LLRs); `TurboCode.lte(K)` for the 188 LTE block sizes (QPP interleaver of TS 36.212 Table 5.1.3-3, trellis termination as clause 5.1.3.2.2), decoded by `TurboIterations(iterations, exact=)`.
@@ -23,6 +29,21 @@ Notable changes to CommKit, newest first. Performance figures are from the refer
 - **Distribution matching:** `CCDM(constellation, block_length=)`, a constant-composition matcher (an exact 64-bit range coder, invertible for every input, blocks up to 2^30 points, 0.35 s for 10^6 points of 64-QAM on one core), and `PAS(code, constellation)`, probabilistic amplitude shaping with a systematic FEC code supplying the signs. Both are codes: `generate(..., code=PAS(LDPCCode.dvbs2("3/4"), Constellation.qam(64).shaped(entropy=5)))` builds a coded PS payload, and `decode` runs the FEC decoder and the dematcher.
 - **Coded payloads:** `generate(..., code=)` and `SingleCarrierFrame(payload_code=)` encode random information bits before mapping. The reference keeps both bit streams.
 - **`metrics.fer`**, the block error rate, and **`metrics.ngmi`**, the normalized GMI used as the soft-decision FEC threshold. Post-FEC BER is `ber(res.bits, reference.info_bits)`.
+- **`save_npz` / `load_npz`** store a frame's payload source bits and code block (`frame_payload_info_bits`), so a shaped frame round-trips; a frame with a `payload_code` raises, as code objects are not serialized (store `extract_payload(signal)` instead).
+- **Notebooks:** [07 · Channel coding](examples/07-channel-coding.ipynb) (codes as objects, hard and soft decoding, Reed-Solomon, LDPC waterfalls, NGMI as a threshold, polar, convolutional and turbo codes), [08 · Probabilistic shaping and coded modulation](examples/08-probabilistic-shaping-and-coded-modulation.ipynb) (the CCDM, the shaping gain, PAS with LDPC against uniform 16-QAM) and [21 · FEC in optical standards](examples/21-fec-in-optical-standards.ipynb) (the codes of IEEE 802.3, G.709, 400ZR and PON at their thresholds). The end-to-end transceiver (22) carries an LDPC-coded payload and reports post-FEC BER and FER.
+
+### Fixed
+
+- **`compute_llr` compiled its CPU kernels in every process.** They are declared with Numba's disk cache, but their kernels called helpers built in the same function, which Numba cannot cache, so the first call of every Python process spent about 3 s compiling. They now load from the cache (about 0.2 s, Numba import included); the results are unchanged.
+
+### Development
+
+- `benchmarks/bench_coding.py` times LDPC decoding (min-sum on both devices) and KP4 decoding; the `ldpc` kernel is in the sanitizer pass of AGENTS §2, and the coding tests of the Numba decoders and the CCDM run in the `NUMBA_DISABLE_JIT` coverage job.
+- Baseline `0007` (`v3_0`) is the new benchmark reference, the first with the coding benchmarks: min-sum decoding of DVB-S2 codewords takes 16 ms on the GPU against 133 ms on the CPU, KP4 decoding 41 ms against 410 ms. The benchmarks without coding match `0006` (geometric mean of the ratios 0.97; the slowest moves reproduced within 10% in isolation, or were within the GPU's run-to-run swing on a 0.1 ms call).
+- A session fixture keeps Numba's thread pool busy for half a second before the first benchmark: kernels now loaded from the cache reached the timed rounds while the OpenMP workers were still coming up, which made the first parallel benchmark of a file 4-8x slower.
+- The Numba kernels of the coding module and of `compute_llr` live in private modules (`coding/_numba_loops.py`, `mapping/_numba_llr.py`), so Numba's disk cache keeps them; the coding decoders compiled again in every process too, costing up to 6 s on their first call.
+- Every helper in the package has a docstring, with one-line summaries throughout.
+- `backend._device_tables` caches small per-object tables (generators, interleavers, field tables) on each device, shared by the coding module and the earlier users; its upload is a documented site of the transfer audit.
 
 ## [2.3.0] - 2026-10-28
 
@@ -131,7 +152,8 @@ See the [GitHub release](https://github.com/lokgar/commkit/releases/tag/v1.1.0) 
 
 First release. See the [GitHub release](https://github.com/lokgar/commkit/releases/tag/v1.0.0).
 
-[Unreleased]: https://github.com/lokgar/commkit/compare/v2.3.0...HEAD
+[Unreleased]: https://github.com/lokgar/commkit/compare/v3.0.0...HEAD
+[3.0.0]: https://github.com/lokgar/commkit/compare/v2.3.0...v3.0.0
 [2.3.0]: https://github.com/lokgar/commkit/compare/v2.2.0...v2.3.0
 [2.2.0]: https://github.com/lokgar/commkit/compare/v2.1.0...v2.2.0
 [2.1.0]: https://github.com/lokgar/commkit/compare/v2.0.0...v2.1.0
