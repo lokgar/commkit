@@ -85,9 +85,10 @@ uv run python benchmarks/record_baseline.py NAME   # record a new baseline
 **Release:**
 
 1. On `main`: the CPU and GPU suites pass with no failures or skips (`uv run pytest -rs`), `uv build` succeeds and `uv run --with twine twine check dist/*` passes.
-2. `uv run bump-my-version bump {patch|minor|major}`. This commits the new version and tags it `vX.Y.Z`.
-3. `git push origin main --tags`.
-4. Publish a GitHub Release for the tag (`gh release create vX.Y.Z --generate-notes`). Publishing the release runs `.github/workflows/publish.yml`, which builds and uploads to PyPI through Trusted Publishing; pushing a tag alone publishes nothing.
+2. `CHANGELOG.md`: a `## [X.Y.Z] - YYYY-MM-DD` section for the release, written for users. Changes that may need code updates come first, with how to migrate, then Added, Performance (measured, as a ratio of new to old time), Fixed and Development. Add its compare link at the bottom, and commit it.
+3. `uv run bump-my-version bump {patch|minor|major}`. This commits the new version and tags it `vX.Y.Z`.
+4. `git push origin main --tags`. The ruleset on `main` requires pull requests; repository admins bypass it for these two commits.
+5. Publish a GitHub Release for the tag, with the release's changelog section as its notes (`gh release create vX.Y.Z --title vX.Y.Z --notes-file notes.md`). Publishing the release runs `.github/workflows/publish.yml`, which builds and uploads to PyPI through Trusted Publishing; pushing a tag alone publishes nothing.
 
 ---
 
