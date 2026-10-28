@@ -39,6 +39,7 @@ from ._galois import PRIMITIVE, _Field
 from ._gf2 import matmul_mod2
 from .base import _Code, _Codec, _Decoded, _hard, _register
 from .crc import _remainders
+from .linear import Chase, _decode_chase
 
 __all__ = ["BCHCode", "BerlekampMassey", "ReedSolomonCode"]
 
@@ -65,8 +66,12 @@ class _Algebraic(_Code):
     binary: Any
 
     @cached_property
-    def _degrees(self) -> np.ndarray:
-        """Polynomial degree of each transmitted symbol: ``n - 1 ... 0``."""
+    def _locator_logs(self) -> np.ndarray:
+        """``log_alpha`` of each position's locator ``X_p``.
+
+        For a cyclic code the polynomial degree of each transmitted symbol,
+        ``n - 1 ... 0``; codes with another position map override it.
+        """
         return np.arange(self.length - 1, -1, -1)
 
     @cached_property
@@ -79,11 +84,11 @@ class _Algebraic(_Code):
         every position ``p``.
         """
         f, t, b = self.field, self.t, self.first_root
-        roots = (b + np.arange(2 * t))[:, None] * self._degrees[None, :]  # (2t, n)
+        roots = (b + np.arange(2 * t))[:, None] * self._locator_logs[None, :]  # (2t, n)
         syn = f.evaluation_matrix(roots.T)  # rows: symbol p's bits; cols: S_j bits
         if self.binary:
             syn = syn[self.field.m - 1 :: self.field.m]  # a bit is the element 0 or 1
-        powers = -np.arange(2 * t + 1)[:, None] * self._degrees[None, :]
+        powers = -np.arange(2 * t + 1)[:, None] * self._locator_logs[None, :]
         evaluate = f.evaluation_matrix(powers)
         return syn.astype(np.float32), evaluate.astype(np.float32)
 
@@ -376,10 +381,22 @@ def _xor_reduce(x: ArrayType, m: int, axis: int) -> ArrayType:
 
 def _decode(code: Any, llrs: ArrayType, method: BerlekampMassey) -> _Decoded:
     _, xp, _ = dispatch(llrs)
+    words, valid = _correct(code, _hard(llrs))
+    return _Decoded(
+        words[:, : code.k], None, valid, xp.ones(llrs.shape[0], dtype=np.int32)
+    )
+
+
+def _correct(code: Any, hard: ArrayType) -> tuple[ArrayType, ArrayType]:
+    """Bounded-distance correction of hard words ``(R, n bits)``.
+
+    Returns the corrected words (the received ones where decoding failed)
+    and the per-word success.
+    """
+    _, xp, _ = dispatch(hard)
     f, t, m = code.field, code.t, code.field.m
-    rows, n = llrs.shape[0], code.length
+    rows, n = hard.shape[0], code.length
     syn_t, evaluate = _device_tables(code, "decoder", xp, lambda: code._decoder_tables)
-    hard = _hard(llrs)
     # Syndromes as field elements, (R, 2t).
     s = _pack(matmul_mod2(hard, syn_t).reshape(rows, 2 * t, m))
     locator, length = _berlekamp_massey(f, s, t)  # (R, 2t + 1), lowest degree first
@@ -412,7 +429,9 @@ def _decode(code: Any, llrs: ArrayType, method: BerlekampMassey) -> _Decoded:
             "forney",
             xp,
             lambda: (
-                f._tables[0][((1 - code.first_root) * code._degrees) % (f.order - 1)],
+                f._tables[0][
+                    ((1 - code.first_root) * code._locator_logs) % (f.order - 1)
+                ],
             ),
         )
         values = f.mul(
@@ -423,7 +442,7 @@ def _decode(code: Any, llrs: ArrayType, method: BerlekampMassey) -> _Decoded:
         values = xp.where(valid[:, None], values, 0)
         symbols = _pack(hard.reshape(rows, n, m)) ^ values
         words = _unpack_bits(symbols.reshape(-1), m).reshape(rows, -1)
-    return _Decoded(words[:, : code.k], None, valid, xp.ones(rows, dtype=np.int32))
+    return words, valid
 
 
 def _toeplitz(s: ArrayType, xp: Any) -> ArrayType:
@@ -467,14 +486,23 @@ def _berlekamp_massey(f: _Field, s: ArrayType, t: int) -> tuple[ArrayType, Array
     return locator, length
 
 
-for _cls in (ReedSolomonCode, BCHCode):
+def _decode_bch(code: BCHCode, llrs: ArrayType, method: Any) -> _Decoded:
+    if isinstance(method, Chase):
+        return _decode_chase(code, llrs, method)
+    return _decode(code, llrs, method)
+
+
+for _cls, _dec, _methods in (
+    (ReedSolomonCode, _decode, (BerlekampMassey,)),
+    (BCHCode, _decode_bch, (BerlekampMassey, Chase)),
+):
     _register(
         _cls,
         _Codec(
             encode=_encode,
-            decode=_decode,
+            decode=_dec,
             default_method=lambda code: BerlekampMassey(),
-            methods=(BerlekampMassey,),
+            methods=_methods,
             info_positions=lambda code: np.arange(code.k),
         ),
     )

@@ -13,11 +13,13 @@ object::
 
 Codes: :class:`LinearBlockCode` (Hamming), :class:`LDPCCode` (DVB-S2, PON),
 :class:`ReedSolomonCode` (G.709, KR4, KP4, PON), :class:`BCHCode`,
-:class:`CRC` (error detection), and the rate-matching wrappers
+:class:`StaircaseCode` (G.709.2), :class:`Concatenated` (400ZR C-FEC,
+802.3dj), :class:`CRC` (error detection), and the rate-matching wrappers
 :class:`Punctured` and :class:`Shortened`.  Distribution matching:
 :class:`CCDM` and probabilistic amplitude shaping, :class:`PAS`.  Decoders: :class:`Syndrome`,
 :class:`MaximumLikelihood`, :class:`MinSum`, :class:`SumProduct`,
-:class:`BerlekampMassey`.  Bit
+:class:`BerlekampMassey`, :class:`Chase`, :class:`HardIterations`,
+:class:`Stages`.  Bit
 permutations: :func:`interleave` and :func:`deinterleave` with an
 :class:`Interleaver`.
 
@@ -30,7 +32,8 @@ from .base import DecodeResult, decode, encode
 from .crc import CRC
 from .interleaving import Interleaver, deinterleave, interleave
 from .ldpc import LDPCCode, MinSum, SumProduct
-from .linear import LinearBlockCode, MaximumLikelihood, Syndrome
+from .linear import Chase, LinearBlockCode, MaximumLikelihood, Syndrome
+from .product import Concatenated, HardIterations, Stages, StaircaseCode
 from .ratematch import Punctured, Shortened
 from .shaping import CCDM, PAS
 
@@ -39,7 +42,10 @@ __all__ = [
     "BerlekampMassey",
     "CCDM",
     "CRC",
+    "Chase",
+    "Concatenated",
     "DecodeResult",
+    "HardIterations",
     "Interleaver",
     "LDPCCode",
     "LinearBlockCode",
@@ -49,6 +55,8 @@ __all__ = [
     "Punctured",
     "ReedSolomonCode",
     "Shortened",
+    "Stages",
+    "StaircaseCode",
     "SumProduct",
     "Syndrome",
     "decode",

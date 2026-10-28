@@ -7,9 +7,10 @@ builds a systematic generator from a parity-check matrix, and
 the inner codes of 400ZR, Hamming(128,119), and of IEEE 802.3dj,
 Hamming(128,120)).
 
-Decoders: :class:`Syndrome` (hard decisions, coset leaders from a table)
-and :class:`MaximumLikelihood` (soft, exhaustive over the ``2^k``
-codewords, for small codes and as a test oracle).
+Decoders: :class:`Syndrome` (hard decisions, coset leaders from a table),
+:class:`MaximumLikelihood` (soft, exhaustive over the ``2^k`` codewords,
+for small codes and as a test oracle) and :class:`Chase` (soft, Chase-II
+over any hard decoder, with Pyndiah's soft output; also for BCH codes).
 """
 
 from __future__ import annotations
@@ -18,15 +19,24 @@ from dataclasses import dataclass
 from functools import cached_property
 from itertools import combinations
 from math import comb
+from typing import Any
 
 import numpy as np
 
 from ..backend import ArrayType, _device_tables, dispatch
 from ..mapping.gray import _pack, _unpack_bits
 from ._gf2 import matmul_mod2, null_space, row_reduce
-from .base import _Code, _Codec, _Decoded, _hard, _register
+from .base import (
+    _Code,
+    _Codec,
+    _decode_blocks,
+    _Decoded,
+    _encode_blocks,
+    _hard,
+    _register,
+)
 
-__all__ = ["LinearBlockCode", "MaximumLikelihood", "Syndrome"]
+__all__ = ["Chase", "LinearBlockCode", "MaximumLikelihood", "Syndrome"]
 
 # Largest syndrome table of Syndrome (2^(n-k) coset leaders of n bits).
 _MAX_TABLE_BITS = 1 << 26
@@ -36,6 +46,8 @@ _MAX_PATTERNS = 1 << 22
 _MAX_ML_K = 20
 # Elements of one (rows, codewords) correlation chunk of MaximumLikelihood.
 _ML_CHUNK = 1 << 24
+# Elements of one (rows, test patterns, n) chunk of Chase.
+_CHASE_CHUNK = 1 << 23
 
 
 @dataclass(frozen=True, eq=False)
@@ -176,6 +188,78 @@ class LinearBlockCode(_Code):
                 )
             h = h[:, h.shape[1] - length :]
         return cls.from_parity_check(h)
+
+    @classmethod
+    def oif400zr(cls) -> LinearBlockCode:
+        """The double-extended Hamming(128, 119) inner code of OIF 400ZR (C-FEC).
+
+        OIF-400ZR-01.0, clause 10.5: the parity-check matrix column by
+        column from ``g(i) = [s_0 ... s_6, s_7, 1]`` (``s`` the bits of
+        ``i``, ``s_7`` a function of ``s_0, s_1, s_2``) in the clause's
+        order; systematic, ``c = [b, b P^T]``.  Minimum distance 4.
+
+        Returns
+        -------
+        LinearBlockCode
+        """
+        i = np.arange(128)
+        s = (i[None, :] >> np.arange(7)[:, None]) & 1  # s_0 ... s_6
+        s0, s1, s2 = s[0].astype(bool), s[1].astype(bool), s[2].astype(bool)
+        s7 = (s0 & s2) | (~s0 & ~s1 & ~s2) | (s0 & s1 & ~s2)
+        g = np.concatenate([s, s7[None, :], np.ones((1, 128), dtype=s.dtype)]).astype(
+            np.int8
+        )
+        info = [
+            *range(0, 63),
+            *range(64, 95),
+            *range(96, 111),
+            *range(112, 119),
+            120,
+            122,
+            124,
+        ]
+        parity = [63, 95, 111, 119, 121, 123, 125, 126, 127]
+        return cls.from_parity_check(g[:, info + parity])
+
+
+@dataclass(frozen=True)
+class Chase:
+    """Chase-II soft decoding around a hard decoder, with Pyndiah's soft output.
+
+    The ``test_positions`` least reliable bits of each word are flipped in
+    all ``2^test_positions`` combinations; each test word goes through the
+    hard decoder, and the candidate codeword of largest correlation
+    ``sum_i (1 - 2 c_i) LLR_i`` is the decision.  The soft output of bit
+    ``i`` is half the metric difference between the best candidates with
+    ``c_i = 0`` and ``c_i = 1`` (max-log), or, when no candidate disagrees
+    with the decision there, ``beta`` with the decision's sign (Pyndiah,
+    1998).  For codes with a hard decoder: linear block codes and BCH codes.
+
+    Parameters
+    ----------
+    test_positions : int, default 4
+        Least reliable positions flipped, 1 to 12.
+    hard : decoder object, optional
+        The hard decoder; ``None`` takes the code's default
+        (``Syndrome()``, ``BerlekampMassey()``).  For an extended Hamming
+        code, ``Syndrome(max_weight=1)`` rejects test words with two errors.
+    beta : float, optional
+        Soft-output magnitude of bits without a competitor; ``None`` takes
+        the largest competitor magnitude of the same word.
+    """
+
+    test_positions: int = 4
+    hard: Any = None
+    beta: float | None = None
+
+    def __post_init__(self) -> None:
+        p = self.test_positions
+        if isinstance(p, bool) or not isinstance(p, int) or not 1 <= p <= 12:
+            raise ValueError(
+                f"test_positions must be an integer in [1, 12], got {p!r}."
+            )
+        if self.beta is not None and self.beta <= 0:
+            raise ValueError(f"beta must be positive, got {self.beta}.")
 
 
 @dataclass(frozen=True)
@@ -334,7 +418,60 @@ def _decode_ml(
     )
 
 
+def _decode_chase(code: Any, llrs: ArrayType, method: Chase) -> _Decoded:
+    """Chase-II over ``code``'s hard decoder; shared with the BCH codes."""
+    _, xp, _ = dispatch(llrs)
+    rows, n = llrs.shape
+    p = min(method.test_positions, n)
+    tests = 1 << p
+    patterns = _unpack_bits(xp.arange(tests), p).astype(bool)  # (T, p)
+    chunk = max(1, _CHASE_CHUNK // (tests * n * p))
+    bits_out = xp.empty((rows, code.k), dtype=np.int8)
+    llrs_out = xp.empty((rows, n), dtype=xp.float32)
+    valid_out = xp.empty(rows, dtype=bool)
+    positions = xp.arange(n)
+    for r0 in range(0, rows, chunk):
+        x = llrs[r0 : r0 + chunk]
+        r = x.shape[0]
+        least = xp.argsort(xp.abs(x), axis=1)[:, :p]  # (r, p)
+        flips = (
+            (least[:, None, :, None] == positions) & patterns[None, :, :, None]
+        ).any(axis=2)
+        test_words = _hard(x)[:, None, :] ^ flips.astype(np.int8)  # (r, T, n)
+        res = _decode_blocks(
+            code,
+            (1.0 - 2.0 * test_words.reshape(-1, n)).astype(xp.float32),
+            method.hard,
+        )
+        words = _encode_blocks(code, res.bits).reshape(r, tests, n)
+        valid = res.valid.reshape(r, tests)
+        metric = xp.einsum("rtn,rn->rt", (1.0 - 2.0 * words).astype(xp.float32), x)
+        metric = xp.where(valid, metric, -xp.inf)
+        best = xp.argmax(metric, axis=1)
+        pick = xp.arange(r)
+        bits_out[r0 : r0 + r] = res.bits.reshape(r, tests, -1)[pick, best]
+        valid_out[r0 : r0 + r] = valid.any(axis=1)
+        # Max-log soft output from the candidates of each value of each bit.
+        m = metric[:, :, None]
+        m0 = xp.where(words == 0, m, -xp.inf).max(axis=1)
+        m1 = xp.where(words == 1, m, -xp.inf).max(axis=1)
+        with np.errstate(invalid="ignore"):
+            soft = 0.5 * (m0 - m1)
+        decided = words[pick, best]
+        known = xp.isfinite(soft)
+        if method.beta is None:
+            beta = xp.where(known, xp.abs(soft), 0).max(axis=1, keepdims=True)
+            beta = xp.where(beta > 0, beta, xp.abs(x).max(axis=1, keepdims=True))
+        else:
+            beta = xp.float32(method.beta)
+        fallback = beta * (1.0 - 2.0 * decided)
+        llrs_out[r0 : r0 + r] = xp.where(known, soft, fallback).astype(xp.float32)
+    return _Decoded(bits_out, llrs_out, valid_out, xp.ones(rows, dtype=np.int32))
+
+
 def _decode(code: LinearBlockCode, llrs: ArrayType, method: object) -> _Decoded:
+    if isinstance(method, Chase):
+        return _decode_chase(code, llrs, method)
     if isinstance(method, MaximumLikelihood):
         return _decode_ml(code, llrs, method)
     assert isinstance(method, Syndrome)
@@ -347,7 +484,7 @@ _register(
         encode=_encode,
         decode=_decode,
         default_method=lambda code: Syndrome(),
-        methods=(Syndrome, MaximumLikelihood),
+        methods=(Syndrome, MaximumLikelihood, Chase),
         info_positions=lambda code: code._unmix[0] if code._unmix[1] is None else None,
     ),
 )
