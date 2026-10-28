@@ -20,6 +20,9 @@ A Signal is stored as a NumPy ``.npz`` archive with these entries:
 ``frame_payload_symbols``, ``frame_pilot_symbols``, ``frame_payload_bits``
     The frame's generated symbols and bits (omitted without a frame, or
     without pilots).
+``frame_payload_info_bits``, ``frame_payload_code_block``
+    The payload's source bits and ``(n, k)``, for a shaped payload (omitted
+    when they are the payload bits).
 ``frame_payload_constellation_*``, ``frame_pilot_constellation_*``
     The frame's constellations, stored as the Signal's.
 
@@ -169,6 +172,12 @@ def save_npz(
             arr = getattr(frame, frame_attr, None)
             if arr is not None:
                 arrays[npz_key] = _backend.to_device(arr, "CPU")
+        payload = frame._payload_reference()
+        if payload.info_bits is not payload.bits:
+            arrays["frame_payload_info_bits"] = payload.info_bits
+            arrays["frame_payload_code_block"] = np.asarray(
+                payload.code_block, np.int64
+            )
 
     # -------------------------------------------------------------------------
     # Build metadata dict and serialize to JSON
@@ -338,6 +347,18 @@ def load_npz(
         ):
             if npz_key in data:
                 frame._cache[cache_key] = data[npz_key]
+        if "frame_payload_bits" in data:
+            matched = "frame_payload_info_bits" in data
+            frame._cache["payload_info_bits"] = (
+                data["frame_payload_info_bits"]
+                if matched
+                else frame._cache["payload_bits"]
+            )
+            frame._cache["payload_code_block"] = (
+                tuple(int(v) for v in data["frame_payload_code_block"])
+                if matched
+                else (1, 1)
+            )
 
         sig = sig.replace(frame=frame)
 

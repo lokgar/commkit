@@ -374,6 +374,7 @@ class SingleCarrierFrame:
         assert ref is not None
         self._cache["payload_bits"] = ref.bits
         self._cache["payload_info_bits"] = ref.info_bits
+        self._cache["payload_code_block"] = ref.code_block
         self._cache["payload_symbols"] = ref.symbols
 
     def _ensure_pilot_generated(self) -> None:
@@ -414,14 +415,25 @@ class SingleCarrierFrame:
 
     @property
     def payload_info_bits(self) -> ArrayType:
-        """The payload's source bits before ``payload_code`` (host int8).
+        """The payload's source bits, before matching and coding (host int8).
 
-        :attr:`payload_bits` itself (the same array) without a code.
+        :attr:`payload_bits` itself (the same array) for a uniform payload
+        without a code.
         """
         self._ensure_payload_generated()
-        info = self._cache.get("payload_info_bits")
-        # A frame restored by load_npz has its bits but no source bits.
-        return self._cache["payload_bits"] if info is None else info
+        return self._cache["payload_info_bits"]
+
+    def _payload_reference(self) -> Reference:
+        """The payload's ground truth on the host (symbols and both bit streams)."""
+        self._ensure_payload_generated()
+        code_block = self._cache["payload_code_block"]
+        coded = code_block != (1, 1)
+        return Reference(
+            symbols=self._cache["payload_symbols"],
+            bits=self._cache["payload_bits"],
+            info_bits=self._cache["payload_info_bits"] if coded else None,
+            code_block=code_block if coded else None,
+        )
 
     @property
     def payload_symbols(self) -> ArrayType:
@@ -814,13 +826,7 @@ def extract_payload(signal: Signal) -> Signal:
             f"frame {frame.num_streams} stream(s)."
         )
     device = "cpu" if signal.xp is np else "gpu"
-    code = frame.payload_code
-    reference = Reference(
-        symbols=frame.payload_symbols,
-        bits=frame.payload_bits,
-        info_bits=None if code is None else frame.payload_info_bits,
-        code_block=None if code is None else (code.n, code.k),
-    ).to(device)
+    reference = frame._payload_reference().to(device)
     return Signal(
         samples=x[..., signal.xp.asarray(payload)],
         sampling_rate=signal.sampling_rate,

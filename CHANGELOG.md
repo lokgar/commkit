@@ -6,6 +6,7 @@ Notable changes to CommKit, newest first. Performance figures are from the refer
 
 ### Changes that may need code updates
 
+- **Shaped `generate` goes through a distribution matcher.** A shaped constellation used to draw i.i.d. symbols from its pmf and take their labels as the "bits", so the bits described a stream that was never sent. Now random bits pass through `CCDM(constellation, block_length=num_symbols)` per channel: every symbol comes from bits, each record holds every point exactly as often as the pmf (quantized to `1/num_symbols`) says, and `reference.info_bits` holds the matcher's input. For the same seed the symbols differ from 2.x; GMI and MI agree within Monte Carlo error. A shaped record must be long enough to carry a bit (a few symbols). Frames inherit this, and `save_npz` stores a shaped frame's source bits.
 - **`Reference` has two more fields**, `info_bits` and `code_block`. `bits` are the bits on the air; `info_bits` are the source bits before coding. Without coding `info_bits` is `bits` itself and `code_block` is `(1, 1)`, so existing code that reads `reference.bits` is unaffected. Code that builds a `Reference` positionally keeps working.
 
 ### Added

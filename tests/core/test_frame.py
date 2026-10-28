@@ -5,7 +5,7 @@ from typing import Any
 import numpy as np
 import pytest
 
-from commkit.coding import LinearBlockCode, encode
+from commkit.coding import CCDM, LinearBlockCode, decode, encode
 from commkit.core import Preamble, SingleCarrierFrame, extract_payload
 from commkit.core.generation import shape_pulse
 from commkit.filtering import RRC
@@ -483,6 +483,18 @@ class TestExtractPayload:
         xpt.assert_array_equal(ref.bits, xp.asarray(frame.payload_bits))
         uncoded = SingleCarrierFrame(payload_len=10)
         assert uncoded.payload_info_bits is uncoded.payload_bits
+
+    def test_shaped_payload_keeps_the_matcher_input(self, xp, xpt):
+        c = Constellation.qam(16).shaped(entropy=3.5)
+        frame = SingleCarrierFrame(payload_len=500, payload_constellation=c)
+        sig = frame.to_signal(sps=1, symbol_rate=1e6).to(
+            "gpu" if xp is not np else "cpu"
+        )
+        ref = extract_payload(sig).reference
+        matcher = CCDM(c, block_length=500)
+        assert ref.code_block == (2000, matcher.k)
+        xpt.assert_array_equal(ref.info_bits, xp.asarray(frame.payload_info_bits))
+        xpt.assert_array_equal(decode(ref.bits, code=matcher).bits, ref.info_bits)
 
     def test_coded_payload_validation(self):
         with pytest.raises(ValueError, match="payload_code.n=7"):

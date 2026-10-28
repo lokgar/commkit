@@ -570,6 +570,35 @@ class TestGMIShaped:
         assert g <= m + 1e-3
         assert m <= c.entropy + 1e-9
 
+    def test_matched_payload_keeps_the_rates(self, xp) -> None:
+        """Shaped symbols from generate (a CCDM per record) and symbols drawn
+        i.i.d. from the pmf give the same GMI and MI within Monte Carlo
+        error: the matcher makes every symbol come from bits without moving
+        the rate metrics."""
+        c = Constellation.qam(64).shaped(entropy=5.0)
+        nv = 10**-1.2
+        n = 100_000
+        matched = generate(c, n, symbol_rate=1e9, rng=0).reference.symbols
+        drawn = c.points[np.random.default_rng(1).choice(64, n, p=c.pmf)].astype(
+            np.complex64
+        )
+        rates = []
+        for i, sym in enumerate((matched, drawn)):
+            noise = np.random.default_rng(2 + i).standard_normal((2, n)) * np.sqrt(
+                nv / 2
+            )
+            rx = xp.asarray((sym + noise[0] + 1j * noise[1]).astype(np.complex64))
+            bits = c.bit_labels[c._nearest(sym)].reshape(-1)
+            llrs = compute_llr(rx, noise_var=nv, constellation=c)
+            rates.append(
+                (
+                    metrics.gmi(llrs, xp.asarray(bits), constellation=c),
+                    metrics.mi(rx, noise_var=nv, constellation=c),
+                )
+            )
+        assert rates[0][0] == pytest.approx(rates[1][0], abs=0.02)
+        assert rates[0][1] == pytest.approx(rates[1][1], abs=0.02)
+
     def test_uniform_gmi_unchanged(self, xp) -> None:
         """Uniform: H(X) = k, so the rate is the usual k - sum_b E[...]."""
         c = Constellation.qam(16)

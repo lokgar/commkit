@@ -372,6 +372,22 @@ class TestNPZCodedReference:
         ref = load_npz(tmp_path / "plain.npz").reference
         assert ref.info_bits is ref.bits
 
+    def test_shaped_frame_keeps_the_matcher_input(self, tmp_path: Any) -> None:
+        frame = SingleCarrierFrame(
+            payload_len=400, payload_constellation=Constellation.qam(16).shaped(nu=0.1)
+        )
+        save_npz(frame.to_signal(sps=1, symbol_rate=1e9), tmp_path / "shaped")
+        loaded = load_npz(tmp_path / "shaped.npz").frame
+        np.testing.assert_array_equal(loaded.payload_info_bits, frame.payload_info_bits)
+        assert (
+            loaded._payload_reference().code_block
+            == frame._payload_reference().code_block
+        )
+        plain = SingleCarrierFrame(payload_len=40)
+        save_npz(plain.to_signal(sps=1, symbol_rate=1e9), tmp_path / "plain_frame")
+        back = load_npz(tmp_path / "plain_frame.npz").frame
+        assert back.payload_info_bits is back.payload_bits
+
     def test_frame_with_payload_code_raises(self, tmp_path: Any) -> None:
         frame = SingleCarrierFrame(
             payload_len=14, payload_code=LinearBlockCode.hamming(3)

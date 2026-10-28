@@ -4,8 +4,9 @@
 pulse-shapes them into a :class:`Signal`, with samples normalized to unit
 symbol power (``Es = 1``, average sample power ``1/sps``).  PS-QAM is a
 shaped constellation: ``generate(Constellation.qam(64).shaped(nu=0.1),
-...)``.  ``code=`` encodes random information bits with a channel code of
-:mod:`commkit.coding` before mapping.  ``periodic=True`` shapes the record as one period of a periodic
+...)``, whose random bits go through a distribution matcher.  ``code=``
+encodes random information bits with a code of :mod:`commkit.coding`
+(channel code, matcher or both) before mapping.  ``periodic=True`` shapes the record as one period of a periodic
 waveform, for looping on a streaming AWG.  On arrays, :func:`shape_pulse`
 pulse-shapes a symbol sequence to unit symbol power and :func:`expand`
 inserts zeros between samples.
@@ -142,9 +143,13 @@ def generate(
     Parameters
     ----------
     constellation : Constellation
-        The constellation to draw from.  Uniform constellations draw random
-        bits and map them; a shaped constellation (``pmf`` set) draws points
-        with probabilities ``pmf`` and takes their labels as the bits.
+        The constellation to draw from.  Every symbol comes from bits: a
+        uniform constellation maps random bits; a shaped constellation
+        (``pmf`` set) passes random bits through a constant-composition
+        distribution matcher, ``CCDM(constellation, block_length=num_symbols)``
+        per channel, unless ``code`` gives another matcher.  The shaped
+        record then holds each point exactly as often as the composition
+        says: the pmf quantized to ``1 / num_symbols``.
     num_symbols : int
         Symbols per channel.
     symbol_rate : float
@@ -224,9 +229,12 @@ def generate(
     info_bits = None
     # Draw on the host (same data on every device), move the small draw,
     # build symbols and samples on the target device.
-    if code is not None:
+    if code is not None or c.pmf is not None:
         from .. import coding
 
+        if code is None:
+            # Every shaped symbol comes from bits: one matcher block per channel.
+            code = coding.CCDM(c, block_length=int(num_symbols))
         codec = coding.base._codec(code, "generate()")
         matched = getattr(code, "constellation", None)
         if matched is not None and matched != c:
@@ -252,15 +260,9 @@ def generate(
         symbols = c.map(bits)
         if num_channels == 1:
             info_bits, bits, symbols = info_bits[0], bits[0], symbols[0]
-    elif c.pmf is None:
+    else:
         bits = to_device(gen.integers(0, 2, size=total * k, dtype="int8"), device)
         symbols = c.map(bits)
-    else:
-        idx, xp, _ = dispatch(
-            to_device(gen.choice(c.order, size=total, p=c.pmf), device)
-        )
-        symbols = xp.asarray(c.points.astype(c._storage_dtype()))[idx]
-        bits = xp.asarray(c.bit_labels)[idx].reshape(-1)
 
     if num_channels > 1 and code is None:
         symbols = symbols.reshape(num_channels, num_symbols)

@@ -5,7 +5,7 @@ from typing import Any
 import numpy as np
 import pytest
 
-from commkit.coding import LinearBlockCode, encode
+from commkit.coding import CCDM, LinearBlockCode, decode, encode
 from commkit.core import generate, generation
 from commkit.filtering import RC, RRC, Rect, SmoothRect
 from commkit.mapping import Constellation
@@ -161,13 +161,26 @@ class TestGenerate:
         np.testing.assert_allclose(scale, scale[0], rtol=1e-6)
         assert np.mean(np.abs(sig.samples) ** 2) == pytest.approx(1.0, rel=1e-6)
 
-    def test_shaped_draws_follow_pmf(self) -> None:
+    def test_shaped_comes_from_bits_through_a_matcher(self) -> None:
+        """Each channel is one CCDM block: the point counts are exactly the
+        composition (the pmf quantized to 1/N), and the source bits are the
+        matcher's input."""
         c = Constellation.qam(16).shaped(nu=0.1)
-        sig = generate(c, 200_000, symbol_rate=1e6, rng=2)
-        idx = np.argmin(np.abs(sig.reference.symbols[:, None] - c.points), axis=1)
-        freq = np.bincount(idx, minlength=16) / idx.size
-        np.testing.assert_allclose(freq, c.pmf, atol=4e-3)
-        np.testing.assert_array_equal(c.map(sig.reference.bits), sig.reference.symbols)
+        sig = generate(c, 20_000, symbol_rate=1e6, num_channels=2, rng=2)
+        ref = sig.reference
+        matcher = CCDM(c, block_length=20_000)
+        assert ref.code_block == (80_000, matcher.k)
+        assert ref.info_bits.shape == (2, matcher.k)
+        for ch in range(2):
+            idx = c._nearest(ref.symbols[ch])
+            np.testing.assert_array_equal(
+                np.bincount(idx, minlength=16), matcher.composition
+            )
+        np.testing.assert_allclose(matcher.composition / 20_000, c.pmf, atol=1e-4)
+        np.testing.assert_array_equal(c.map(ref.bits), ref.symbols)
+        np.testing.assert_array_equal(
+            decode(ref.bits, code=matcher).bits, ref.info_bits
+        )
 
     def test_int_seed_matches_default_rng_bits(self) -> None:
         """An int rng draws the bits default_rng(seed).integers would."""
