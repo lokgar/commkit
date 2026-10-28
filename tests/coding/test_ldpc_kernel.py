@@ -9,7 +9,8 @@ from commkit import _cuda
 from commkit.backend import to_device
 from commkit.coding import LDPCCode, MinSum, SumProduct, decode
 from commkit.coding import ldpc as ldpc_module
-from tests.common.kernel_utils import skip_unless_gpu
+
+pytestmark = pytest.mark.gpu_only
 
 
 def _llrs(code: LDPCCode, rows: int, mean: float, seed: int) -> np.ndarray:
@@ -23,7 +24,6 @@ CODES = [LDPCCode.dvbs2("1/2", "short"), LDPCCode.pon()]
 @pytest.mark.parametrize("code", CODES, ids=["dvbs2-short-1/2", "pon"])
 @pytest.mark.parametrize("early_stop", [False, True])
 def test_min_sum_bit_exact(backend_device: str, xp: Any, code, early_stop) -> None:
-    skip_unless_gpu(backend_device)
     llrs = _llrs(code, 6, 1.8, seed=1)
     method = MinSum(scale=0.75, offset=0.05, max_iterations=12, early_stop=early_stop)
     cpu = decode(llrs, code=code, method=method)
@@ -35,7 +35,6 @@ def test_min_sum_bit_exact(backend_device: str, xp: Any, code, early_stop) -> No
 
 
 def test_sum_product_matches(backend_device: str, xp: Any) -> None:
-    skip_unless_gpu(backend_device)
     code = CODES[0]
     llrs = _llrs(code, 4, 0.8, seed=2)
     method = SumProduct(max_iterations=5, early_stop=False)
@@ -47,7 +46,6 @@ def test_sum_product_matches(backend_device: str, xp: Any) -> None:
 
 
 def test_chunks_agree(backend_device: str, xp: Any, monkeypatch) -> None:
-    skip_unless_gpu(backend_device)
     code = CODES[0]
     llrs = xp.asarray(_llrs(code, 5, 1.8, seed=3))
     method = MinSum(max_iterations=6, early_stop=False)
@@ -60,7 +58,6 @@ def test_chunks_agree(backend_device: str, xp: Any, monkeypatch) -> None:
 
 
 def test_wrapper_checks(backend_device: str, xp: Any) -> None:
-    skip_unless_gpu(backend_device)
     code = CODES[0]
     row_ptr, cols, layer_ptr = (xp.asarray(a) for a in code._schedule)
     launch = _cuda.get_kernel("ldpc_layered")
