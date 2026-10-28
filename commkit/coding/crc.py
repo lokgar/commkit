@@ -161,7 +161,15 @@ class CRC(_Code):
     def checksum(self, bits: ArrayType) -> ArrayType:
         """The check bits of blocks of information bits.
 
-        ``bits`` is ``(..., k)``; returns int8 ``(..., degree)`` on its device.
+        Parameters
+        ----------
+        bits : array_like
+            Information bits, ``(..., k)``.
+
+        Returns
+        -------
+        ndarray
+            The check bits, int8, ``(..., degree)``, on the input's device.
         """
         _, xp, _ = dispatch(bits)
         g, c = _device_tables(self, "crc", xp, lambda: self._tables)

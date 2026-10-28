@@ -118,7 +118,18 @@ class TurboCode(_Code):
 
     @classmethod
     def lte(cls, block_length: int) -> TurboCode:
-        """The LTE turbo code (TS 36.212 clause 5.1.3.2) of block size ``K``."""
+        """The LTE turbo code (TS 36.212 clause 5.1.3.2) of block size ``K``.
+
+        Parameters
+        ----------
+        block_length : int
+            ``K``, one of the 188 block sizes of TS 36.212 Table 5.1.3-3
+            (40 to 6144).
+
+        Returns
+        -------
+        TurboCode
+        """
         return cls(block_length)
 
     @cached_property

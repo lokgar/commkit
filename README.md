@@ -16,7 +16,7 @@ CommKit covers the receiver chain of coherent and IM/DD links (waveform generati
 Data is a NumPy or CuPy array, or a `Signal` that wraps the samples together with what is known about them. Algorithms are plain functions that take the data and return a new `Signal` or array, or a typed result such as `EqualizerResult` or an `*Estimate`. Plotting functions draw those results; they never compute them.
 
 - **Things that describe** a modulation, a pulse or a sub-algorithm are small frozen objects written in the call: `lms(rx, cpr=BPS(test_phases=64))`. The same object works standalone: `correct_carrier_phase(y, BPS())`.
-- **A `Signal` carries facts and ground truth.** Facts are `sampling_rate`, `symbol_rate` and `center_frequency`. The description is `constellation` and `pulse`. The ground truth is `reference` (transmitted symbols and bits). Functions take facts from the Signal and raise on a conflicting argument. Choices such as the decision constellation default to the Signal's and can be overridden.
+- **A `Signal` carries facts and ground truth.** Facts are `sampling_rate`, `symbol_rate` and `center_frequency`. The description is `constellation` and `pulse`. The ground truth is `reference`: the transmitted symbols, the bits on the air and the source bits before coding or distribution matching (the same array when there is neither). Functions take facts from the Signal and raise on a conflicting argument. Choices such as the decision constellation default to the Signal's and can be overridden.
 - **Results with several values are frozen dataclasses** with named fields. Metrics return host floats: one per channel for `(C, N)` input.
 - **The device follows the data.** Processing functions have no `backend=` or `device=` argument. Only factories, which have no input data to follow, take `device=`: `generate(..., device="gpu")`. Move existing data with `sig.to("gpu")`.
 - **Plots draw results.** `plot_*` functions take a Signal, an array or a result object; numerical code never imports plotting.
@@ -78,7 +78,7 @@ CommKit never picks a device for you: data stays where you put it, and each func
 
 | Module | Contents |
 | --- | --- |
-| [`commkit.core`](https://github.com/lokgar/commkit/tree/main/commkit/core) | `Signal`, `Reference`, `generate`, `SingleCarrierFrame` and `Preamble` (pilots, guard intervals, MIMO streams), `extract_payload`. |
+| [`commkit.core`](https://github.com/lokgar/commkit/tree/main/commkit/core) | `Signal`, `Reference`, `generate` (uniform, shaped through a distribution matcher, or coded with `code=`), `SingleCarrierFrame` and `Preamble` (pilots, guard intervals, MIMO streams), `extract_payload`. |
 | [`commkit.mapping`](https://github.com/lokgar/commkit/tree/main/commkit/mapping) | `Constellation` (QAM, PSK, PAM, arbitrary points; Gray labels; probabilistic shaping with `.shaped()`), bit mapping, hard demapping, max-log and exact LLRs. |
 | [`commkit.filtering`](https://github.com/lokgar/commkit/tree/main/commkit/filtering) | Pulses (`RRC`, `RC`, `Gaussian`, `Rect`, `SmoothRect`), FIR and IIR design (Butterworth, Chebyshev I/II, elliptic, Bessel), `fir_filter`, `iir_filter`, `matched_filter`, overlap-save, chromatic-dispersion compensation and digital backpropagation (`correct_fiber_propagation`). |
 | [`commkit.multirate`](https://github.com/lokgar/commkit/blob/main/commkit/multirate.py) | `resample` (fractional), `decimate`, `upsample`, `decimate_to_symbol_rate`. |

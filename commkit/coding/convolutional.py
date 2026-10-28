@@ -163,6 +163,17 @@ class ConvolutionalCode(_Code):
 
         The industry-standard code of IEEE 802.11 (clause 17.3.5.6), CCSDS
         131.0-B and many others.
+
+        Parameters
+        ----------
+        block_length : int
+            Information bits per block.
+        termination : {"zero", "tail-biting"}, default "zero"
+            As for :class:`ConvolutionalCode`.
+
+        Returns
+        -------
+        ConvolutionalCode
         """
         return cls((0o133, 0o171), 7, block_length, termination)
 

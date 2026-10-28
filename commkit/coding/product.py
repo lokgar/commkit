@@ -222,6 +222,15 @@ class StaircaseCode(_Code):
 
         Its measured threshold (Table A.1): an input BER of 4.5e-3 gives an
         output BER of 1e-15.
+
+        Parameters
+        ----------
+        num_blocks : int, default 4
+            Staircase blocks of information per frame.
+
+        Returns
+        -------
+        StaircaseCode
         """
         return cls(num_blocks)
 
@@ -389,6 +398,15 @@ class Concatenated(_Code):
         decorrelator and convolutional interleaver, which spread each inner
         codeword's errors over the staircase rows.  OIF gives an input BER
         of 1.25e-2 for an output BER of 1e-15.
+
+        Parameters
+        ----------
+        num_blocks : int, default 4
+            Staircase blocks per frame, as for :meth:`StaircaseCode.g709_2`.
+
+        Returns
+        -------
+        Concatenated
         """
         outer = StaircaseCode.g709_2(num_blocks)
         return cls(

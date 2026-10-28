@@ -411,10 +411,13 @@ def ber(
     bits : array_like or Signal
         Received bits (0 and 1), ``(N_bits,)`` or ``(C, N_bits)``.  A Signal holds
         received *symbols* at one sample per symbol: they are hard-decided
-        against the constellation and compared with ``reference.bits``.
+        against the constellation and compared with ``reference.bits``, the
+        bits on the air (the pre-FEC BER of a coded payload).
     reference : array_like, optional
         Transmitted bits, same shape as the received bits.  Required for
-        arrays.
+        arrays.  For the post-FEC BER, the decoded bits against the
+        source bits: ``ber(decode(llrs, code=code).bits,
+        signal.reference.info_bits)``.
     constellation : Constellation, optional
         Decision constellation for a Signal (defaults to the Signal's).  For
         bit arrays, needed only to convert ``num_skip_symbols`` to bits.

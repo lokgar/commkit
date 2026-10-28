@@ -227,7 +227,7 @@ def encode(bits: ArrayType, *, code: Any) -> ArrayType:
     Returns
     -------
     ndarray
-        int8 transmitted bits, ``(..., N / k * n)``, on the input's device.
+        Transmitted bits, int8, ``(..., N / k * n)``, on the input's device.
 
     Raises
     ------

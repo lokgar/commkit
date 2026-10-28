@@ -121,7 +121,14 @@ class LDPCCode(_Code):
         return f"LDPCCode(n={self.n}, k={self.k})"
 
     def parity_check(self) -> Any:
-        """``H`` as a SciPy CSR matrix (host, int8)."""
+        """The parity-check matrix ``H``.
+
+        Returns
+        -------
+        scipy.sparse.csr_matrix
+            ``(num_checks, length)`` int8 on the host, over the mother
+            codeword (punctured positions included).
+        """
         import scipy.sparse
 
         return scipy.sparse.csr_matrix(

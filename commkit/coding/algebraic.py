@@ -99,9 +99,10 @@ class ReedSolomonCode(_Algebraic):
 
     Parameters
     ----------
-    n, k : int
-        Symbols per codeword and information symbols, ``n - k`` even, ``n <=
-        2^m - 1`` (shorter codes are shortened).
+    symbols, info_symbols : int
+        Symbols per codeword and information symbols, ``symbols -
+        info_symbols`` even, ``symbols <= 2^m - 1`` (shorter codes are
+        shortened).
     m : int
         Bits per symbol.
     primitive : int, optional
@@ -150,14 +151,17 @@ class ReedSolomonCode(_Algebraic):
 
     @property
     def length(self) -> int:
+        """Transmitted symbols per codeword."""
         return self.symbols
 
     @property
     def binary(self) -> bool:
+        """False: the symbols are elements of GF(2^m)."""
         return False
 
     @cached_property
     def field(self) -> _Field:
+        """The symbol field GF(2^m)."""
         assert self.primitive is not None
         return _Field(self.m, self.primitive)
 
@@ -294,14 +298,17 @@ class BCHCode(_Algebraic):
 
     @property
     def first_root(self) -> int:
+        """``b = 1``: narrow-sense, roots ``alpha^1 .. alpha^(2t)``."""
         return 1
 
     @property
     def binary(self) -> bool:
+        """True: the symbols are bits."""
         return True
 
     @cached_property
     def field(self) -> _Field:
+        """The locator field GF(2^m)."""
         assert self.primitive is not None
         return _Field(self.m, self.primitive)
 

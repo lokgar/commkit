@@ -203,7 +203,21 @@ class PolarCode(_Code):
 
     @classmethod
     def from_frozen(cls, frozen: Any, *, crc: CRC | None = None) -> PolarCode:
-        """Polar code from a frozen-position mask ``(N,)`` (True = frozen)."""
+        """Polar code from a frozen-position mask.
+
+        Parameters
+        ----------
+        frozen : array_like
+            ``(N,)`` bool, True at the frozen positions; ``N`` a power of two.
+        crc : CRC, optional
+            A CRC over the information bits, appended before placing them
+            (the unfrozen positions number ``k + crc.degree``); list decoding
+            keeps the best candidate that passes it.
+
+        Returns
+        -------
+        PolarCode
+        """
         mask = np.asarray(frozen, dtype=bool)
         if mask.ndim != 1:
             raise ValueError("frozen must be a 1-D mask.")
