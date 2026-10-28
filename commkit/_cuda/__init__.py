@@ -495,6 +495,64 @@ def _llr_separable_factory() -> Callable:
     return launch
 
 
+def _llr_separable_maxlog_factory() -> Callable:
+    """Wrapper factory for the closed-form max-log LLR kernel (``mapping.llr``).
+
+    Max-log LLRs of a uniform separable square lattice: per axis the snapped
+    level's metric against the two levels just outside its run of equal
+    bits, 1 + 2k metrics instead of sqrt(M).  Returns ``(n, k)`` float32.
+    """
+    import cupy as cp
+
+    from . import compiler
+
+    kern = compiler.get_raw_kernel("llr", "llr_separable_maxlog")
+
+    def launch(
+        x: Any,
+        re: tuple[Any, Any, Any, Any, Any],
+        im: tuple[Any, Any, Any, Any, Any],
+        *,
+        inv_s2: float,
+    ) -> Any:
+        """LLRs of the ``(n,)`` complex64 symbols ``x``, shape ``(n, k)``.
+
+        ``re`` and ``im`` are each ``(levels, labels, lo, hi, positions)`` of
+        one axis: float32 and int32 ``(L,)``, int32 ``(k_axis, L)`` twice,
+        int32 ``(k_axis,)``; ``L >= 2`` equally spaced ascending levels.
+        """
+        n = x.shape[0]
+        checks: list[tuple[str, Any, Any, tuple[int, ...]]] = [
+            ("x", x, cp.complex64, (n,))
+        ]
+        axis_args: list[Any] = []
+        for name, (lev, lab, lo, hi, pos) in (("re", re), ("im", im)):
+            L, kb = lev.shape[0], pos.shape[0]
+            if not 1 <= kb <= _LLR_MAX_K:
+                raise ValueError(
+                    f"bits of the {name} axis must be in [1, {_LLR_MAX_K}], got {kb}"
+                )
+            if L < 2:
+                raise ValueError(f"the {name} axis needs at least 2 levels, got {L}")
+            checks += [
+                (f"{name} levels", lev, cp.float32, (L,)),
+                (f"{name} labels", lab, cp.int32, (L,)),
+                (f"{name} lo", lo, cp.int32, (kb, L)),
+                (f"{name} hi", hi, cp.int32, (kb, L)),
+                (f"{name} positions", pos, cp.int32, (kb,)),
+            ]
+            axis_args += [lev, lab, lo, hi, pos, cp.int32(L), cp.int32(kb)]
+        _check_llr_arrays(tuple(checks))
+        k = re[4].shape[0] + im[4].shape[0]
+        if k > _LLR_MAX_K:
+            raise ValueError(f"bits per symbol must be at most {_LLR_MAX_K}, got {k}")
+        return _llr_launch(
+            cp, kern, n, k, (x, *axis_args), (cp.int32(k), cp.float32(inv_s2))
+        )
+
+    return launch
+
+
 # IIR_MAX_S in iir.cu, and the threads per block of its launches.
 _IIR_MAX_S = 16
 _IIR_THREADS = 128
@@ -611,5 +669,6 @@ _KERNEL_FACTORIES: dict[str, Callable[..., Callable]] = {
     "bps_anchor": _bps_anchor_factory,
     "llr": _llr_factory,
     "llr_separable": _llr_separable_factory,
+    "llr_separable_maxlog": _llr_separable_maxlog_factory,
     "iir": _iir_factory,
 }

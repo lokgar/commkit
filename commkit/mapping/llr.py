@@ -4,6 +4,17 @@ Max-log and exact (log-sum-exp) LLRs with an optional probabilistic-shaping
 prior, computed in float32 on the input's device.  Sign convention: a
 positive LLR means bit 0 is more likely,
 ``LLR_k = log P(b_k = 0 | y) / P(b_k = 1 | y)``.
+
+Three paths: the metrics of every point (any constellation); the metrics
+of the levels of each axis of a separable square lattice (exact LLRs, or a
+shaping prior); and, for max-log LLRs of a uniform separable lattice, a
+closed form.  There the largest metric of each bit's half is that of the
+nearest level with that bit value: the snapped level for its own value,
+and for the other value the nearer of the two levels just outside the
+snapped level's run of equal bits (1 + 2k metrics per axis instead of
+sqrt(M)), on the GPU at every order and on the CPU from 256-QAM, below
+which the level metrics are as fast.  A prior moves the maxima off the
+nearest levels, so it keeps the level metrics.
 """
 
 from __future__ import annotations
@@ -142,8 +153,10 @@ def _get_numba_llr(name: str = "llr") -> Callable[..., None]:
     ``"llr"`` computes per symbol the M metrics
     ``m = -|x - s|^2 / sigma^2 + log P(s)``; ``"llr_separable"`` the
     sqrt(M) metrics of each axis of a separable constellation
-    (:func:`_llr_separable`).  Each bit's LLR then comes from the metrics of
-    the points whose bit is 0 and of those whose bit is 1:
+    (:func:`_llr_separable`); ``"llr_separable_maxlog"`` the closed-form
+    max-log LLRs of a uniform separable constellation (module docstring),
+    1 + 2k metrics per axis.  The first two take each bit's LLR from the
+    metrics of the points whose bit is 0 and of those whose bit is 1:
 
     - max-log: the max over the first minus the max over the second;
     - exact: sums of ``e = exp(m - peak)``, computed once per point with the
@@ -293,7 +306,69 @@ def _get_numba_llr(name: str = "llr") -> Callable[..., None]:
                     )
 
         _NUMBA_LLR["llr"] = llr_kernel
+
+        @jit
+        def axis_maxlog(x, lev, lab, lo, hi, pos, inv_s2, out, i):  # type: ignore[no-untyped-def]
+            """Closed-form max-log LLRs of one axis's bits into ``out[i, pos]``."""
+            L = lev.shape[0]
+            kb = pos.shape[0]
+            s = int(np.rint((x - lev[0]) / (lev[1] - lev[0])))
+            s = min(max(s, 0), L - 1)
+            t = x - lev[s]
+            # Near a midpoint the rounded quotient can land one level off:
+            # keep the nearer of s and its neighbor towards x.
+            s2 = s + 1 if t > 0 else s - 1
+            if 0 <= s2 < L:
+                t2 = x - lev[s2]
+                if t2 * t2 < t * t:
+                    s = s2
+                    t = t2
+            m_own = -(t * t) * inv_s2
+            for b in range(kb):
+                # Both halves are never empty: one of lo, hi is a level.
+                m_other = np.float32(-3.0e38)
+                j = lo[b, s]
+                if j >= 0:
+                    t = x - lev[j]
+                    m_other = max(m_other, -(t * t) * inv_s2)
+                j = hi[b, s]
+                if j >= 0:
+                    t = x - lev[j]
+                    m_other = max(m_other, -(t * t) * inv_s2)
+                if (lab[s] >> (kb - 1 - b)) & 1:
+                    out[i, pos[b]] = m_other - m_own
+                else:
+                    out[i, pos[b]] = m_own - m_other
+
+        @numba.njit(cache=True, fastmath=True, nogil=True, parallel=True)
+        def llr_separable_maxlog_kernel(
+            x_re: np.ndarray,
+            x_im: np.ndarray,
+            lev_re: np.ndarray,
+            lab_re: np.ndarray,
+            lo_re: np.ndarray,
+            hi_re: np.ndarray,
+            pos_re: np.ndarray,
+            lev_im: np.ndarray,
+            lab_im: np.ndarray,
+            lo_im: np.ndarray,
+            hi_im: np.ndarray,
+            pos_im: np.ndarray,
+            inv_s2: np.float32,
+            out: np.ndarray,
+        ) -> None:
+            n = x_re.shape[0]
+            for t in numba.prange((n + task - 1) // task):  # type: ignore[attr-defined,no-untyped-call]
+                for i in range(t * task, min(n, (t + 1) * task)):
+                    axis_maxlog(
+                        x_re[i], lev_re, lab_re, lo_re, hi_re, pos_re, inv_s2, out, i
+                    )
+                    axis_maxlog(
+                        x_im[i], lev_im, lab_im, lo_im, hi_im, pos_im, inv_s2, out, i
+                    )
+
         _NUMBA_LLR["llr_separable"] = llr_separable_kernel
+        _NUMBA_LLR["llr_separable_maxlog"] = llr_separable_maxlog_kernel
     kernel: Callable[..., None] = _NUMBA_LLR[name]
     return kernel
 
@@ -307,6 +382,44 @@ def _half_indices(bit_labels: np.ndarray) -> np.ndarray:
             for v in (0, 1)
         ]
     ).astype(np.int64)
+
+
+def _opposite_levels(labels: np.ndarray) -> tuple[np.ndarray, np.ndarray]:
+    """Nearest levels of the other bit value, for the closed-form max-log.
+
+    For bit ``b`` and level ``m`` of one axis (``labels`` ``(L, k)``, levels
+    ascending): ``lo[b, m]``, the highest level below ``m`` whose bit ``b``
+    differs from level ``m``'s, and ``hi[b, m]``, the lowest one above it;
+    -1 where there is none.  These are the levels just outside the run of
+    equal bits that holds ``m``.  int32 ``(k, L)`` each.
+    """
+    L, k = labels.shape
+    lo = np.empty((k, L), dtype=np.int32)
+    hi = np.empty((k, L), dtype=np.int32)
+    for b in range(k):
+        col = labels[:, b]
+        change = np.flatnonzero(col[1:] != col[:-1])  # level j differs from j + 1
+        run = np.concatenate([[0], np.cumsum(col[1:] != col[:-1])])
+        starts = np.concatenate([[0], change + 1])
+        ends = np.concatenate([change, [L - 1]])
+        lo[b] = starts[run] - 1
+        hi[b] = np.where(ends[run] + 1 < L, ends[run] + 1, -1)
+    return lo, hi
+
+
+# Fewest levels per axis from which the CPU takes the closed form.  Against
+# the level metrics, 2^18 symbols: 1.21x at 16-QAM (4 levels), 1.05x at 64,
+# 0.65x at 256, 0.40x at 1024, 0.23x at 4096; on the GPU it is faster at
+# every order, so the GPU always takes it.
+_CLOSED_FORM_MIN_LEVELS_CPU = 16
+
+
+def _closed_form(axes: tuple[_Axis, _Axis], method: str, min_levels: int = 2) -> bool:
+    """Max-log LLRs of a uniform separable constellation, with at least
+    ``min_levels`` levels per axis: the closed form."""
+    return method == "maxlog" and all(
+        a.pmf is None and a.levels.size >= min_levels for a in axes
+    )
 
 
 def _check_method(method: str) -> None:
@@ -414,13 +527,33 @@ def _llr_separable(
 
     The metric splits as ``m(s) = m_re(s_re) + m_im(s_im)`` and every bit
     depends on one axis, so the other axis's factor cancels from its LLR in
-    both methods: 2·sqrt(M) metrics per symbol instead of M.
+    both methods: 2·sqrt(M) metrics per symbol instead of M.  Max-log LLRs
+    without a prior take the closed form (module docstring) from 256-QAM
+    (``_CLOSED_FORM_MIN_LEVELS_CPU``), where it is faster on the CPU.
     """
     _check_method(method)
     re, im = axes
     flat = np.asarray(symbols).reshape(-1)
     k = re.bits.size + im.bits.size
     llrs = np.empty((flat.size, k), dtype=np.float32)
+    if _closed_form(axes, method, _CLOSED_FORM_MIN_LEVELS_CPU):
+        _get_numba_llr("llr_separable_maxlog")(
+            np.ascontiguousarray(flat.real, dtype=np.float32),
+            np.ascontiguousarray(flat.imag, dtype=np.float32),
+            *(
+                t
+                for a in axes
+                for t in (
+                    a.levels.astype(np.float32),
+                    _packed_labels(a.labels),
+                    *_opposite_levels(a.labels),
+                    a.bits.astype(np.int64),
+                )
+            ),
+            np.float32(1.0 / max(noise_var, 1e-20)),
+            llrs,
+        )
+        return llrs.reshape((*symbols.shape[:-1], symbols.shape[-1] * k))
     _get_numba_llr("llr_separable")(
         np.ascontiguousarray(flat.real, dtype=np.float32),
         np.ascontiguousarray(flat.imag, dtype=np.float32),
@@ -452,6 +585,28 @@ def _llr_separable_gpu(
     k = re.bits.size + im.bits.size
     _require_gpu_bits(k)
     symbols, xp, _ = dispatch(symbols)
+    x = symbols.reshape(-1).astype(xp.complex64, copy=False)
+    inv_s2 = float(np.float32(1.0 / max(noise_var, 1e-20)))
+
+    if _closed_form(axes, method):
+
+        def build_closed() -> tuple[np.ndarray, ...]:
+            return tuple(
+                t
+                for a in axes
+                for t in (
+                    a.levels.astype(np.float32),
+                    _packed_labels(a.labels),
+                    *_opposite_levels(a.labels),
+                    a.bits.astype(np.int32),
+                )
+            )
+
+        closed = _device_tables(owner, "llr_separable_maxlog", xp, build_closed)
+        llrs = _cuda.get_kernel("llr_separable_maxlog")(
+            x, closed[:5], closed[5:], inv_s2=inv_s2
+        )
+        return llrs.reshape((*symbols.shape[:-1], symbols.shape[-1] * k))
 
     def build() -> tuple[np.ndarray, ...]:
         return tuple(
@@ -467,11 +622,7 @@ def _llr_separable_gpu(
 
     tables = _device_tables(owner, "llr_separable", xp, build)
     llrs = _cuda.get_kernel("llr_separable")(
-        symbols.reshape(-1).astype(xp.complex64, copy=False),
-        tables[:4],
-        tables[4:],
-        inv_s2=float(np.float32(1.0 / max(noise_var, 1e-20))),
-        exact=method == "exact",
+        x, tables[:4], tables[4:], inv_s2=inv_s2, exact=method == "exact"
     )
     return llrs.reshape((*symbols.shape[:-1], symbols.shape[-1] * k))
 

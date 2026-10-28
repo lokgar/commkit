@@ -412,3 +412,132 @@ class TestSeparableLLR:
         pmf = np.random.default_rng(0).uniform(0.5, 1.5, 16)
         pmf /= pmf.sum()
         assert Constellation(c.points, bit_labels=c.bit_labels, pmf=pmf)._axes is None
+
+
+def _axis_labelled(order: int, labeling: str, seed: int = 0) -> Constellation:
+    """Square QAM with per-axis labels: Gray (the factory's), natural binary,
+    or a random permutation of each axis's labels."""
+    if labeling == "gray":
+        return Constellation.qam(order)
+    side = int(round(order**0.5))
+    kb = side.bit_length() - 1
+    perm = (
+        np.arange(side)
+        if labeling == "natural"
+        else np.random.default_rng(seed).permutation(side)
+    )
+    lev = np.arange(-(side - 1), side, 2.0)
+    bits = (perm[:, None] >> np.arange(kb - 1, -1, -1)) & 1  # (side, kb)
+    points = (lev[:, None] + 1j * lev[None, :]).ravel()
+    labels = np.concatenate(
+        [np.repeat(bits, side, axis=0), np.tile(bits, (side, 1))], axis=1
+    )
+    return Constellation(
+        points / np.sqrt(np.mean(np.abs(points) ** 2)), bit_labels=labels
+    )
+
+
+class TestClosedFormMaxLog:
+    """Max-log LLRs of uniform separable QAM in closed form: equal to the level
+    metrics they replace, on every labeling of the axes."""
+
+    @pytest.mark.parametrize("labeling", ["gray", "natural", "random"])
+    def test_opposite_levels_definition(self, labeling: str) -> None:
+        from commkit.mapping.llr import _opposite_levels
+
+        labels = _axis_labelled(256, labeling, seed=2)._axes[0].labels
+        lo, hi = _opposite_levels(labels)
+        L, k = labels.shape
+        for b in range(k):
+            for m in range(L):
+                other = np.flatnonzero(labels[:, b] != labels[m, b])
+                below, above = other[other < m], other[other > m]
+                assert lo[b, m] == (below.max() if below.size else -1)
+                assert hi[b, m] == (above.min() if above.size else -1)
+
+    @pytest.mark.parametrize("labeling", ["gray", "natural", "random"])
+    @pytest.mark.parametrize("order", [4, 16, 64, 256, 1024])
+    def test_matches_level_metrics(
+        self, xp: Any, xpt: Any, monkeypatch: Any, order: int, labeling: str
+    ) -> None:
+        """Bit for bit on the CPU (the closed form forced at every order);
+        to float rounding on the GPU.  Symbols beyond the outer levels too."""
+        from commkit.mapping import llr as llr_module
+
+        c = _axis_labelled(order, labeling, seed=order)
+        x = xp.asarray(1.3 * _noisy(c, (2, 3000), 0.05, seed=order))
+        noise_var = 0.5 / order
+        monkeypatch.setattr(llr_module, "_CLOSED_FORM_MIN_LEVELS_CPU", 2)
+        closed = mapping.compute_llr(x, noise_var=noise_var, constellation=c)
+        monkeypatch.setattr(llr_module, "_closed_form", lambda *a: False)
+        level = mapping.compute_llr(x, noise_var=noise_var, constellation=c)
+        if xp is np:
+            np.testing.assert_array_equal(closed, level)
+        else:
+            xpt.assert_allclose(closed, level, rtol=1e-6, atol=1e-6)
+
+    @pytest.mark.parametrize(
+        ("constellation", "method", "cpu_closed"),
+        [
+            (Constellation.qam(256), "maxlog", True),
+            (Constellation.qam(64), "maxlog", False),  # CPU: below 16 levels per axis
+            (Constellation.qam(256), "exact", False),
+            (Constellation.qam(256).shaped(nu=0.02), "maxlog", False),
+        ],
+        ids=["256qam", "64qam", "256qam-exact", "shaped256qam"],
+    )
+    def test_routing(
+        self,
+        xp: Any,
+        monkeypatch: Any,
+        constellation: Any,
+        method: str,
+        cpu_closed: bool,
+    ) -> None:
+        """Only max-log without a prior takes the closed form (on the CPU from
+        16 levels per axis, on the GPU always); the rest the level metrics."""
+        from commkit import _cuda
+        from commkit.mapping import llr as llr_module
+
+        used: list[str] = []
+        if xp is np:
+            real = llr_module._get_numba_llr
+            monkeypatch.setattr(
+                llr_module,
+                "_get_numba_llr",
+                lambda name="llr": used.append(name) or real(name),
+            )
+            expect_closed = cpu_closed
+        else:
+            real = _cuda.get_kernel
+            monkeypatch.setattr(
+                _cuda,
+                "get_kernel",
+                lambda name, **kw: used.append(name) or real(name, **kw),
+            )
+            expect_closed = method == "maxlog" and constellation.pmf is None
+        x = xp.asarray(_noisy(constellation, (500,), 0.05, seed=1))
+        mapping.compute_llr(
+            x, noise_var=0.01, constellation=constellation, method=method
+        )
+        closed = "llr_separable_maxlog"
+        assert used == [closed if expect_closed else "llr_separable"]
+
+    @pytest.mark.gpu_only
+    def test_kernel_rejects_bad_tables(self, xp: Any) -> None:
+        from commkit import _cuda
+
+        launch = _cuda.get_kernel("llr_separable_maxlog")
+        lev = xp.asarray([-1.0, 1.0], dtype=xp.float32)
+        lab = xp.asarray([0, 1], dtype=xp.int32)
+        nb = xp.asarray([[-1, 0]], dtype=xp.int32)
+        pos = xp.asarray([0], dtype=xp.int32)
+        axis = (lev, lab, nb, nb, pos)
+        x = xp.zeros(4, dtype=xp.complex64)
+        with pytest.raises(ValueError, match="at least 2 levels"):
+            launch(x, (lev[:1], lab[:1], nb[:, :1], nb[:, :1], pos), axis, inv_s2=1.0)
+        with pytest.raises(TypeError, match="re levels"):
+            launch(x, (lev.astype(xp.float64), *axis[1:]), axis, inv_s2=1.0)
+        assert launch(
+            x, axis, (lev, lab, nb, nb, xp.asarray([1], xp.int32)), inv_s2=1.0
+        ).shape == (4, 2)
