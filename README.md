@@ -124,7 +124,7 @@ With [`uv`](https://github.com/astral-sh/uv), use `uv pip install` in place of `
 
 ## Examples
 
-[`examples/`](https://github.com/lokgar/commkit/tree/main/examples) is a course in 26 Jupyter notebooks, one topic each, in teaching order (install the `notebook` extra and run `jupyter lab examples`):
+[`examples/`](https://github.com/lokgar/commkit/tree/main/examples) is a course in 29 Jupyter notebooks, one topic each, in teaching order (install the `notebook` extra and run `jupyter lab examples`):
 
 - **00-05, signals and DSP**: the `Signal`, constellations and bit mapping, spectra, filters, pulse shaping and matched filtering, resampling;
 - **06-10, channel, coding and performance**: AWGN and the metrics (SNR, BER, LLRs, GMI), channel coding, probabilistic shaping and coded modulation, laser phase noise, front-end impairments;
