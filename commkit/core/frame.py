@@ -741,6 +741,7 @@ class SingleCarrierFrame:
         body, xp, _ = dispatch(to_device(self.body_symbols, device))
 
         def dac_peak_gain(symbols: ArrayType) -> ArrayType:
+            """Per stream, the gain that scales the larger quadrature peak to 1."""
             x = generation.expand(symbols, factor=sps)
             if taps is not None:
                 x = convolve_periodic(x, taps)

@@ -69,6 +69,10 @@ def _validate_and_shift(
     def shift(
         f: ArrayType, *arrays_with_axis: tuple[ArrayType, int]
     ) -> tuple[ArrayType, ...]:
+        """Order a two-sided spectrum by ascending frequency.
+
+        ``f`` and each array, along its given axis; one-sided spectra pass through.
+        """
         if return_onesided:
             return (f, *(a for a, _ in arrays_with_axis))
         f_shifted = xp.fft.fftshift(f)

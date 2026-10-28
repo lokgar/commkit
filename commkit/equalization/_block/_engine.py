@@ -83,8 +83,11 @@ class _Block:
             self.x_win[:, :available] = self.x_padded[:, x_start : x_start + available]
 
     def take(self, dst: ArrayType, src: ArrayType, B: int) -> None:
-        """``dst[:, :B] = src[:, start : start + B]`` at the current block's
-        first symbol; ``src`` C-contiguous ``(C, K)``, ``K >= start + B``."""
+        """Copy the current block's window of ``src`` into ``dst``.
+
+        ``dst[:, :B] = src[:, start : start + B]`` with ``start`` the block's
+        first symbol; ``src`` C-contiguous ``(C, K)``, ``K >= start + B``.
+        """
         if self.block_dev is not None:
             _block_kernels()["window"](
                 src, src.shape[1], self.block_dev, self.block_size, B, B, dst[:, :B]
@@ -94,8 +97,11 @@ class _Block:
         dst[:, :B] = src[:, start : start + B]
 
     def put(self, dst: ArrayType, src: ArrayType, B: int) -> None:
-        """``dst[:, start : start + B] = src[:, :B]`` at the current block's
-        first symbol; ``dst`` C-contiguous ``(C, n_sym)``."""
+        """Store ``src`` at the current block's place in ``dst``.
+
+        ``dst[:, start : start + B] = src[:, :B]`` with ``start`` the block's
+        first symbol; ``dst`` C-contiguous ``(C, n_sym)``.
+        """
         if self.block_dev is not None:
             _block_kernels()["put"](
                 src[:, :B], self.block_dev, self.block_size, dst.shape[1], B, dst
@@ -105,8 +111,10 @@ class _Block:
         dst[:, start : start + B] = src[:, :B]
 
     def advance(self) -> None:
-        """Advance the device block index, the last step of a block body (the
-        host index is set by the loop, which a replay does not run)."""
+        """Advance the device block index, the last step of a block body.
+
+        The host index is set by the loop, which a replay does not run.
+        """
         if self.block_dev is not None:
             _block_kernels()["advance"](self.block_dev, size=1)
 
@@ -405,6 +413,7 @@ def _block_loop(
     n_blocks = (run.n_sym + run.block_size - 1) // run.block_size
 
     def body(B: int, b_start: int, b_end: int) -> None:
+        """Everything one block does, so that a replay does all of it."""
         # Everything a block does, so a replay does all of it.
         run.fill_window(B)
         if prepare is not None:

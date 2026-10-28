@@ -358,8 +358,11 @@ def rls_loop(
     sq_d_grid,
     sq_side,
 ):
-    """Decision-directed RLS; ``P`` ``(C·T, C·T)`` complex128 in place, the
-    taps frozen from symbol ``n_update_halt`` on."""
+    """Decision-directed RLS.
+
+    ``P`` ``(C·T, C·T)`` complex128 is updated in place, and the taps are
+    frozen from symbol ``n_update_halt`` on.
+    """
     C = W.shape[0]
     num_taps = W.shape[2]
     N = C * num_taps
@@ -434,11 +437,12 @@ def cpr_loop(
     sq_d_grid,
     sq_side,
 ):
-    """LMS (rls False, step_size) or RLS (rls True: P,
-    lam, leakage, the taps frozen from n_update_halt) with inline
-    carrier recovery: cpr_mode 1 is a decision-directed PLL, 2 a causal
-    BPS anchored by the training symbols, both with optional cycle-slip
-    repair.
+    """LMS or RLS with inline carrier recovery.
+
+    LMS with rls False (step_size), RLS with rls True (P, lam, leakage, the
+    taps frozen from n_update_halt).  cpr_mode 1 is a decision-directed
+    PLL, 2 a causal BPS anchored by the training symbols, both with
+    optional cycle-slip repair.
 
     The PLL state (pll_phi, pll_freq), the cycle-slip buffers
     (cs_*; cs_buf_x unused) and the BPS window (bps_prev4,
@@ -778,8 +782,10 @@ def rde_loop(
     x_padded, W, step_size, rings, stride, store_weights, y_out, e_out,
     w_hist_out, use_pilots, pilot_ref, pilot_mask,
 ):  # fmt: skip
-    """RDE towards the nearest ring, blind or pilot-aided as :func:`cma_loop`;
-    ``rings`` is the ``(2, K)`` table of ``_common._rde_rings``."""
+    """RDE towards the nearest ring, blind or pilot-aided as :func:`cma_loop`.
+
+    ``rings`` is the ``(2, K)`` table of ``_common._rde_rings``.
+    """
     C = W.shape[0]
     num_taps = W.shape[2]
     K = rings.shape[1]

@@ -320,6 +320,7 @@ class Constellation:
         dtype = x.real.dtype
 
         def level(v: ArrayType) -> ArrayType:
+            """Index of the nearest level per axis value, clipped to the lattice."""
             g = xp.round((v - dtype.type(lev_min)) / dtype.type(step))
             return xp.clip(g, 0, side - 1).astype(xp.int64)
 

@@ -132,8 +132,9 @@ def apply_interpolated_matrix(
 
 @dataclass(frozen=True)
 class JonesTrack:
-    """Time-varying unmixing estimate of
-    :func:`demultiplex_polarization_tones_dynamic`.
+    """Time-varying unmixing estimate of the dynamic tone demultiplexer.
+
+    Returned by :func:`demultiplex_polarization_tones_dynamic`.
 
     Attributes
     ----------

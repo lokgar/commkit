@@ -180,6 +180,7 @@ def _nu_for_entropy(energies: np.ndarray, entropy: float) -> float:
         return 0.0
 
     def gap(nu: float) -> float:
+        """Entropy of the Maxwell-Boltzmann pmf at ``nu`` minus the target."""
         return _entropy_bits(_mb_pmf(energies, nu)) - entropy
 
     nu_hi = 0.01

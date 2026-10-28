@@ -150,12 +150,14 @@ def _block_fdaf_blind(
         _fdaf_gradient_update(run.h, X_fd, e, e_scatter, sps, B, run.num_taps, mu, xp)
 
     def store(b_start: int, b_end: int, B: int) -> None:
+        """Store the block's outputs and errors."""
         run.put(y_all, y_ws, B)
         run.put(e_all, e_ws, B)
 
     snap: list[np.ndarray] = []
 
     def at_resume() -> None:
+        """Snapshot the weights where a later call resumes."""
         snap.append(to_device(run.h, "cpu").copy())
 
     _block_loop(

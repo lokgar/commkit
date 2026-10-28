@@ -284,6 +284,7 @@ class _SpanPlan:
 
     @property
     def num_steps(self) -> int:
+        """Kerr steps ``K`` of the span."""
         return int(self.kerr.size)
 
     def linear_km(self, i: int) -> float:
@@ -350,9 +351,11 @@ class _Ops:
         self.span = span
 
     def fft(self, x: ArrayType) -> ArrayType:
+        """Forward FFT over time, in place where the backend allows."""
         return _fft.fft(x, axis=-1, overwrite_x=True)
 
     def ifft(self, x: ArrayType) -> ArrayType:
+        """Inverse FFT over time, in place where the backend allows."""
         return _fft.ifft(x, axis=-1, overwrite_x=True)
 
     def _response(self, length_km: float) -> ArrayType:
@@ -491,14 +494,21 @@ class _FusedOps(_Ops):
             self.u_span = xp.empty(4 * K, dtype=xp.complex64)
 
     def set_span(self, span: int) -> None:
+        """Select span ``span``, with its PMD waveplates on the device."""
         super().set_span(span)
         if self.u_span is not None:
             self.u_span[...] = self.u_all[span]
 
     def ifft(self, x: ArrayType) -> ArrayType:
+        """Inverse FFT without the ``1/N``, which the fused linear stage applies."""
         return _fft.ifft(x, axis=-1, overwrite_x=True, norm="forward")
 
     def linear(self, X: ArrayType, length_km: float, section: int | None) -> ArrayType:
+        """Fused linear stage on the spectrum ``X``, in place.
+
+        Dispersion and loss over ``length_km``, and PMD section ``section`` (``None``:
+        none).
+        """
         f32 = np.float32
         if section is None:
             self.k["linear"](self.phi, f32(length_km), self.inv_n, X)
@@ -517,6 +527,7 @@ class _FusedOps(_Ops):
         return X
 
     def nonlinear(self, x: ArrayType, k: float) -> ArrayType:
+        """Fused Kerr stage with nonlinear coefficient ``k`` on ``x``, in place."""
         if x.shape[0] == 1:
             self.k["kerr1"](np.float32(k), x[0])
         else:
@@ -650,6 +661,7 @@ def propagate(
     ops = _make_ops(x, xp, phase_km, omega, plan.half_tau_s, waveplates)
 
     def check_aliasing(X: ArrayType) -> None:
+        """Warn when the spectrum after the first span reaches the outer band."""
         fraction = _outer_band_fraction(X, xp, sampling_rate)
         if fraction > _ALIASING_FRACTION:
             logger.warning(
@@ -698,6 +710,11 @@ def _span_runner(
     def eager(
         x: ArrayType, on_last: Callable[[ArrayType], None] | None = None
     ) -> ArrayType:
+        """Propagate one span without a graph.
+
+        ``on_last`` sees the spectrum after the last stage, before the inverse
+        FFT.
+        """
         return _run_span(
             ops,
             x,
@@ -709,6 +726,7 @@ def _span_runner(
         )
 
     def run(x: ArrayType, on_last: Callable[[ArrayType], None] | None) -> ArrayType:
+        """Propagate one span, replayed from a CUDA graph where possible."""
         if on_last is not None or not graphs.enabled:
             return eager(x, on_last)
         out = graphs.run(_pointer(x), lambda: eager(x))

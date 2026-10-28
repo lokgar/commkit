@@ -46,6 +46,7 @@ class _Slicer:
     phasor: ArrayType | None = None  # unit rotation fed to that kernel
 
     def decide(self, y: ArrayType, xp: Any) -> ArrayType:
+        """Nearest constellation points of ``y``."""
         if self.side > 0:
             m1 = self.side - 1
             d_r = (
@@ -641,6 +642,7 @@ def block_lms(
     d_ws = xp.empty((C, block_size), dtype=xp.complex64) if n_train else None
 
     def prepare(B: int, b_start: int) -> None:
+        """Stage the block's training symbols while training lasts the whole block."""
         if d_ws is not None and n_train - b_start >= B:
             assert run.training is not None
             run.take(d_ws, run.training, B)
@@ -688,6 +690,7 @@ def block_lms(
         _fdaf_gradient_update(run.h, X_fd, e_taps, e_scatter, sps, B, num_taps, mu, xp)
 
     def store(b_start: int, b_end: int, B: int) -> None:
+        """Store the block's outputs, errors and (with BPS) phases."""
         run.put(y_all, y_rot_ws, B)
         run.put(e_all, e_clean_ws, B)
         if bps is not None:
@@ -697,6 +700,7 @@ def block_lms(
     snap: list[tuple[np.ndarray, Any]] = []
 
     def at_resume() -> None:
+        """Snapshot the weights and the BPS state where a later call resumes."""
         weights = to_device(run.h, "cpu").copy()
         snap.append((weights, None if bps is None else bps.snapshot()))
 
@@ -705,6 +709,10 @@ def block_lms(
     n_train_full = min(n_train, n_sym) // block_size
 
     def capturable(B: int, b_start: int) -> str | None:
+        """Graph key of a block: ``"train"``, ``"dd"`` or ``None``.
+
+        ``None`` for a short block or one that mixes training and decisions.
+        """
         if B != block_size:
             return None
         if n_train - b_start <= 0:

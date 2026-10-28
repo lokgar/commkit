@@ -140,6 +140,7 @@ def plot_filter_response(
         ax1.xaxis.set_major_locator(ticker.MultipleLocator(1))
 
         def t_formatter(x, pos):
+            """Tick label in symbol periods (``0``, ``2T``, ``0.5T``)."""
             if np.isclose(x, 0):
                 return "0"
             return f"{int(x)}T" if float(x).is_integer() else f"{x}T"

@@ -245,6 +245,7 @@ def _llr(
     _require_gpu_bits(k)
 
     def build() -> tuple[np.ndarray, ...]:
+        """The device tables: points, log prior and packed labels."""
         return (
             points.astype(np.complex64),
             log_pmf,
@@ -353,6 +354,7 @@ def _llr_separable_gpu(
     if _closed_form(axes, method):
 
         def build_closed() -> tuple[np.ndarray, ...]:
+            """The device tables of the closed form, per axis."""
             return tuple(
                 t
                 for a in axes
@@ -371,6 +373,7 @@ def _llr_separable_gpu(
         return llrs.reshape((*symbols.shape[:-1], symbols.shape[-1] * k))
 
     def build() -> tuple[np.ndarray, ...]:
+        """The device tables of the level metrics, per axis."""
         return tuple(
             t
             for a in axes

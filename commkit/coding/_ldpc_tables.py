@@ -1,4 +1,4 @@
-"""Parity-check tables of the standard LDPC codes (private, data only).
+"""Parity-check tables of the standard LDPC codes, data only (private).
 
 Used by :meth:`commkit.coding.LDPCCode.dvbs2` and
 :meth:`commkit.coding.LDPCCode.pon`.

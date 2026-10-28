@@ -279,6 +279,7 @@ def lms(
     if inline is None:
 
         def segment(start: int, stop: int) -> None:
+            """Run the LMS kernel over symbols ``start`` to ``stop``."""
             x, train, n_train, y_out, e_out, w_hist = run.segment(start, stop)
             _get_numba_lms()(
                 x,
@@ -296,6 +297,7 @@ def lms(
             )
 
         def snapshot() -> _Snapshot:
+            """Weights for a later call to resume from."""
             return _Snapshot(weights=run.W.copy())
 
     else:
@@ -309,6 +311,7 @@ def lms(
         phase_out = phase
 
         def segment(start: int, stop: int) -> None:
+            """Run LMS with inline carrier recovery from ``start`` to ``stop``."""
             x, train, n_train, y_out, e_out, w_hist = run.segment(start, stop)
             _get_numba_cpr()(
                 x,
@@ -335,6 +338,7 @@ def lms(
             )
 
         def snapshot() -> _Snapshot:
+            """Weights and carrier state for a later call to resume from."""
             return _Snapshot(weights=run.W.copy(), carrier=carrier.copy())
 
     resume = run.n_done
@@ -584,6 +588,7 @@ def rls(
     if inline is None:
 
         def segment(start: int, stop: int) -> None:
+            """Run the RLS kernel over symbols ``start`` to ``stop``."""
             x, train, n_train, y_out, e_out, w_hist = run.segment(start, stop)
             _get_numba_rls()(
                 x,
@@ -604,6 +609,7 @@ def rls(
             )
 
         def snapshot() -> _Snapshot:
+            """Weights and ``P`` for a later call to resume from."""
             return _Snapshot(weights=run.W.copy(), inverse_correlation=P.copy())
 
     else:
@@ -617,6 +623,7 @@ def rls(
         phase_out = phase
 
         def segment(start: int, stop: int) -> None:
+            """Run RLS with inline carrier recovery from ``start`` to ``stop``."""
             x, train, n_train, y_out, e_out, w_hist = run.segment(start, stop)
             _get_numba_cpr()(
                 x,
@@ -643,6 +650,7 @@ def rls(
             )
 
         def snapshot() -> _Snapshot:
+            """Weights, carrier state and ``P`` for a later call to resume from."""
             return _Snapshot(
                 weights=run.W.copy(),
                 carrier=carrier.copy(),
