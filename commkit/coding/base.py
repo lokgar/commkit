@@ -67,18 +67,12 @@ class _Decoded(NamedTuple):
     iterations: ArrayType
 
 
-class _Code:
-    """Base of the code value objects: ``rate``, value equality and hashing.
+class _Value:
+    """Value equality and hashing of frozen dataclasses with host arrays.
 
-    Subclasses are frozen dataclasses with read-only host arrays and define
-    ``n`` and ``k``.  Equality compares the fields (arrays by value), so equal
-    codes share their cached device tables.
+    Equality compares the fields (arrays by value), so equal objects share
+    their cached device tables.
     """
-
-    @property
-    def rate(self) -> float:
-        """Code rate ``k / n``."""
-        return float(self.k / self.n)  # type: ignore[attr-defined]
 
     def _key(self) -> tuple[Any, ...]:
         return tuple(
@@ -94,13 +88,26 @@ class _Code:
         return self._key() == other._key()  # type: ignore[attr-defined]
 
     def __hash__(self) -> int:
-        # Cached: the device-table cache hashes the code on every call, and
+        # Cached: the device-table cache hashes the object on every call, and
         # a large code's arrays are megabytes.
         h: int | None = self.__dict__.get("_hash")
         if h is None:
             h = hash((type(self), self._key()))
             self.__dict__["_hash"] = h
         return h
+
+
+class _Code(_Value):
+    """Base of the code value objects: ``rate`` and value semantics.
+
+    Subclasses are frozen dataclasses with read-only host arrays and define
+    ``n`` and ``k``.
+    """
+
+    @property
+    def rate(self) -> float:
+        """Code rate ``k / n``."""
+        return float(self.k / self.n)  # type: ignore[attr-defined]
 
 
 @dataclass(frozen=True)
@@ -111,6 +118,8 @@ class _Codec:
     decode: Callable[[Any, ArrayType, Any], _Decoded]  # (code, (R, n), method)
     default_method: Callable[[Any], Any]
     methods: tuple[type, ...]
+    # Codeword positions of the information bits, for systematic codes.
+    info_positions: Callable[[Any], np.ndarray | None] | None = None
 
 
 _CODECS: dict[type, _Codec] = {}
@@ -151,6 +160,15 @@ def _blocks(x: ArrayType, size: int, name: str, function_name: str) -> ArrayType
             f"multiple of the block length {size}."
         )
     return x.reshape(-1, size)
+
+
+def _info_positions(code: Any, function_name: str) -> np.ndarray:
+    """Positions of the information bits in a systematic code's codewords."""
+    positions = _codec(code, function_name).info_positions
+    found = None if positions is None else positions(code)
+    if found is None:
+        raise TypeError(f"{function_name}: {code!r} is not systematic.")
+    return found
 
 
 def _encode_blocks(code: Any, bits: ArrayType) -> ArrayType:

@@ -91,11 +91,8 @@ markers = [
 omit = [
     "commkit/coding/bch.py",
     "commkit/coding/convolutional.py",
-    "commkit/coding/crc.py",
     "commkit/coding/galois.py",
-    "commkit/coding/interleaving.py",
     "commkit/coding/polar.py",
-    "commkit/coding/ratematch.py",
     "commkit/coding/reed_solomon.py",
     "commkit/coding/turbo.py",
 ]

@@ -348,5 +348,6 @@ _register(
         decode=_decode,
         default_method=lambda code: Syndrome(),
         methods=(Syndrome, MaximumLikelihood),
+        info_positions=lambda code: code._unmix[0] if code._unmix[1] is None else None,
     ),
 )

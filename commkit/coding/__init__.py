@@ -11,28 +11,39 @@ object::
     code = LinearBlockCode.hamming(7, extended=True)
     res = decode(compute_llr(rx, noise_var=nv), code=code, method=Syndrome())
 
-Codes: :class:`LinearBlockCode` (Hamming), :class:`LDPCCode` (DVB-S2, PON).
-Decoders: :class:`Syndrome`, :class:`MaximumLikelihood`, :class:`MinSum`,
-:class:`SumProduct`.
+Codes: :class:`LinearBlockCode` (Hamming), :class:`LDPCCode` (DVB-S2, PON),
+:class:`CRC` (error detection), and the rate-matching wrappers
+:class:`Punctured` and :class:`Shortened`.  Decoders: :class:`Syndrome`,
+:class:`MaximumLikelihood`, :class:`MinSum`, :class:`SumProduct`.  Bit
+permutations: :func:`interleave` and :func:`deinterleave` with an
+:class:`Interleaver`.
 
-The modules ``bch``, ``convolutional``, ``crc``, ``galois``,
-``interleaving``, ``polar``, ``ratematch``, ``reed_solomon`` and ``turbo``
-are placeholders for planned codes, carrying only their scope
+The modules ``bch``, ``convolutional``, ``galois``, ``polar``,
+``reed_solomon`` and ``turbo`` are placeholders for planned codes, carrying only their scope
 docstring.
 """
 
 from .base import DecodeResult, decode, encode
+from .crc import CRC
+from .interleaving import Interleaver, deinterleave, interleave
 from .ldpc import LDPCCode, MinSum, SumProduct
 from .linear import LinearBlockCode, MaximumLikelihood, Syndrome
+from .ratematch import Punctured, Shortened
 
 __all__ = [
+    "CRC",
     "DecodeResult",
+    "Interleaver",
     "LDPCCode",
     "LinearBlockCode",
     "MaximumLikelihood",
     "MinSum",
+    "Punctured",
+    "Shortened",
     "SumProduct",
     "Syndrome",
     "decode",
+    "deinterleave",
     "encode",
+    "interleave",
 ]

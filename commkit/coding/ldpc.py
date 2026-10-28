@@ -655,5 +655,6 @@ _register(
         decode=_decode,
         default_method=lambda code: MinSum(),
         methods=(MinSum, SumProduct),
+        info_positions=lambda code: code._encoder.info,
     ),
 )

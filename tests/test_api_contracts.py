@@ -44,7 +44,7 @@ import pytest
 
 import commkit
 from commkit.backend import to_device
-from commkit.coding import DecodeResult, LinearBlockCode
+from commkit.coding import DecodeResult, Interleaver, LinearBlockCode
 from commkit.core import Signal
 from commkit.equalization import EqualizerResult
 from commkit.frequency import MthPower
@@ -99,11 +99,8 @@ PLACEHOLDERS = tuple(
     for name in (
         "bch",
         "convolutional",
-        "crc",
         "galois",
-        "interleaving",
         "polar",
-        "ratematch",
         "reed_solomon",
         "turbo",
     )
@@ -155,6 +152,7 @@ RS = 1e9
 FS = RS * SPS
 C16 = Constellation.qam(16)
 HAMMING = LinearBlockCode.hamming(3)  # (7, 4)
+INTERLEAVER = Interleaver.block(2, 4)
 
 
 class Inputs:
@@ -282,6 +280,22 @@ ROWS: list[Row] = [
     Row("commkit.io.save_npz", INFRA, data=2),
     # --- coding (array-only: bits and LLRs are derived quantities) -----------
     Row("commkit.coding.base.DecodeResult", VALUE),
+    Row("commkit.coding.crc.CRC", VALUE),
+    Row("commkit.coding.interleaving.Interleaver", VALUE),
+    Row(
+        "commkit.coding.interleaving.deinterleave",
+        TRANSFORM,
+        call=lambda c, x: _a(x, interleaver=INTERLEAVER),
+        symbols=True,
+    ),
+    Row(
+        "commkit.coding.interleaving.interleave",
+        TRANSFORM,
+        call=lambda c, x: _a(x, interleaver=INTERLEAVER),
+        symbols=True,
+    ),
+    Row("commkit.coding.ratematch.Punctured", VALUE),
+    Row("commkit.coding.ratematch.Shortened", VALUE),
     Row(
         "commkit.coding.base.decode",
         CODEC,
