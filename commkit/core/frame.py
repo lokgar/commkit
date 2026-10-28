@@ -14,7 +14,7 @@ import numpy as np
 from .._circular import convolve_periodic
 from .._sequences import barker_sequence, zadoff_chu_sequence, zc_mimo_root
 from ..backend import ArrayType, dispatch, to_device
-from ..filtering import Pulse
+from ..filtering.pulses import Pulse
 from ..mapping import Constellation
 from ..math import db_to_linear, normalize
 from . import generation
@@ -81,38 +81,28 @@ class Preamble:
         _check_int("root", self.root, 1)
         _check_int("num_streams", self.num_streams, 1)
 
-        stype = self.sequence_type.lower()
-        symbols: Any
-
-        if stype == "barker":
-            # Barker symbols (-1, +1)
-            base = barker_sequence(self.length)
-        elif stype in ("zc", "zadoff_chu"):
-            # ZC complex symbols - use the named 'root' field directly.
-            base = zadoff_chu_sequence(self.length, root=self.root)
-        else:
-            base = None
-
-        if base is not None and self.num_streams > 1:
-            if stype in ("zc", "zadoff_chu"):
-                rows = [
+        symbols: np.ndarray
+        if self.sequence_type == "barker":
+            # Barker symbols (-1, +1), the same on every stream.
+            symbols = barker_sequence(self.length)
+            if self.num_streams > 1:
+                symbols = np.tile(symbols[None, :], (self.num_streams, 1))
+        elif self.num_streams > 1:
+            # One Zadoff-Chu root per stream, (num_streams, length).
+            symbols = np.stack(
+                [
                     zadoff_chu_sequence(
-                        self.length,
-                        root=zc_mimo_root(k, self.root, self.length),
+                        self.length, root=zc_mimo_root(k, self.root, self.length)
                     )
                     for k in range(self.num_streams)
                 ]
-                symbols = np.stack(rows, axis=0)  # (num_streams, length)
-            else:
-                symbols = np.tile(base[None, :], (self.num_streams, 1))
+            )
         else:
-            symbols = base
+            symbols = zadoff_chu_sequence(self.length, root=self.root)
 
         # Consistent internal dtype; sequences stay on the CPU (no hidden
         # device placement).
-        if symbols is not None:
-            symbols = symbols.astype("complex64")
-        object.__setattr__(self, "_symbols", symbols)
+        object.__setattr__(self, "_symbols", symbols.astype("complex64"))
 
     # -------------------------------------------------------------------------
     # Properties
@@ -300,15 +290,22 @@ class SingleCarrierFrame:
                     f"match frame.num_streams={self.num_streams}"
                 )
 
-        per_period = None
-        if self.pilot_pattern == "comb" and self.pilot_period > 1:
-            per_period = self.pilot_period - 1
-        elif (
-            self.pilot_pattern == "block"
-            and self.pilot_period > self.pilot_block_len > 0
-        ):
-            per_period = self.pilot_period - self.pilot_block_len
-        if per_period is not None and self.payload_len % per_period:
+        if self.pilot_pattern == "none":
+            return
+        block = self._pilot_block()
+        if block < 1:
+            raise ValueError(
+                "pilot_block_len must be >= 1 for the 'block' pattern, got "
+                f"{self.pilot_block_len}."
+            )
+        if self.pilot_period <= block:
+            bound = "1" if self.pilot_pattern == "comb" else "pilot_block_len"
+            raise ValueError(
+                f"pilot_period must be > {bound} for the {self.pilot_pattern!r} "
+                f"pattern, got {self.pilot_period}."
+            )
+        per_period = self.pilot_period - block
+        if self.payload_len % per_period:
             low = self.payload_len // per_period * per_period
             valid = f"{low} or {low + per_period}" if low else f"{per_period}"
             raise ValueError(
@@ -320,8 +317,15 @@ class SingleCarrierFrame:
     # Mask Generation and Internal Data Preparation Methods
     # -------------------------------------------------------------------------
 
+    def _pilot_block(self) -> int:
+        """Pilots at the start of each period: one for "comb"."""
+        return 1 if self.pilot_pattern == "comb" else self.pilot_block_len
+
     def _generate_pilot_mask(self) -> tuple[ArrayType, int]:
         """Calculate the pilot placement mask and total frame length.
+
+        Every period starts with its pilots; ``__post_init__`` guarantees that
+        the payload fills whole periods.
 
         Returns
         -------
@@ -330,54 +334,13 @@ class SingleCarrierFrame:
         body_length : int
             Total number of symbols in the frame body (payload + pilots).
         """
-        xp = np
-
-        # No pilots: simple payload mapping
         if self.pilot_pattern == "none":
-            body_length = self.payload_len
-            mask = xp.zeros(body_length, dtype=bool)
-            return mask, body_length
-
-        # Comb pattern: single pilot every N symbols
-        if self.pilot_pattern == "comb":
-            if self.pilot_period <= 1:
-                raise ValueError("pilot_period must be > 1 for 'comb' pattern.")
-            data_per_period = self.pilot_period - 1
-            num_full_periods = self.payload_len // data_per_period
-            remainder = self.payload_len % data_per_period
-
-            total_length = num_full_periods * self.pilot_period + remainder
-            # If we have a remainder, we need one more pilot at the start of the partial period
-            if remainder > 0:
-                total_length += 1
-
-            mask = xp.zeros(total_length, dtype=bool)
-            mask[:: self.pilot_period] = True
-            return mask, total_length
-
-        # Block pattern: block of pilots followed by block of data
-        if self.pilot_pattern == "block":
-            if self.pilot_period <= self.pilot_block_len:
-                raise ValueError(
-                    "pilot_period must be > pilot_block_len for 'block' pattern."
-                )
-            data_per_block = self.pilot_period - self.pilot_block_len
-            num_blocks = int(xp.ceil(self.payload_len / data_per_block))
-
-            # Create a single block pattern [P P ... P D D ... D]
-            block_pattern = xp.zeros(self.pilot_period, dtype=bool)
-            block_pattern[: self.pilot_block_len] = True
-
-            # Repeat the pattern for all blocks
-            mask = xp.tile(block_pattern, num_blocks)
-
-            # Truncation: Find the exact index where the required payload ends
-            false_indices = xp.where(~mask)[0]
-            last_idx = false_indices[self.payload_len - 1]
-            mask = mask[: last_idx + 1]
-            return mask, len(mask)
-
-        return xp.zeros(self.payload_len, dtype=bool), self.payload_len
+            return np.zeros(self.payload_len, dtype=bool), self.payload_len
+        block = self._pilot_block()
+        period = np.zeros(self.pilot_period, dtype=bool)
+        period[:block] = True
+        mask = np.tile(period, self.payload_len // (self.pilot_period - block))
+        return mask, mask.size
 
     def _ensure_payload_generated(self) -> None:
         """Generate and cache the payload bits and symbols with ``generate()``."""
@@ -405,8 +368,6 @@ class SingleCarrierFrame:
             return
         mask, _ = self._generate_pilot_mask()
         pilot_count = int(np.sum(mask))
-        if pilot_count == 0:
-            return
         sig = generation.generate(
             self.pilot_constellation,
             pilot_count,
@@ -470,40 +431,18 @@ class SingleCarrierFrame:
         :attr:`pilot_symbols` when it is not zero.  ``(L,)`` or
         ``(num_streams, L)`` with ``L`` the body length.
         """
-        xp = np
         mask, body_length = self._generate_pilot_mask()
-
-        body: np.ndarray
-        if self.num_streams > 1:
-            # Shape: (Channels, Time)
-            body = xp.zeros((self.num_streams, body_length), dtype="complex64")
-
-            if self.pilot_pattern != "none":
-                pilot_symbols = self.pilot_symbols
-                assert pilot_symbols is not None
-                # Apply pilot boosting/gain (dB to linear)
-                if self.pilot_gain_db != 0.0:
-                    pilot_symbols = pilot_symbols * db_to_linear(
-                        self.pilot_gain_db, power=False
-                    )
-
-                body[:, mask] = pilot_symbols
-
-            body[:, ~mask] = self.payload_symbols
-        else:
-            body = xp.zeros(body_length, dtype="complex64")
-            if self.pilot_pattern != "none":
-                pilot_symbols = self.pilot_symbols
-                assert pilot_symbols is not None
-                # Apply pilot boosting/gain (dB to linear)
-                if self.pilot_gain_db != 0.0:
-                    pilot_symbols = pilot_symbols * db_to_linear(
-                        self.pilot_gain_db, power=False
-                    )
-
-                body[mask] = pilot_symbols
-            body[~mask] = self.payload_symbols
-
+        streams = (self.num_streams,) if self.num_streams > 1 else ()
+        body = np.zeros((*streams, body_length), dtype="complex64")
+        if self.pilot_pattern != "none":
+            pilot_symbols = self.pilot_symbols
+            assert pilot_symbols is not None
+            if self.pilot_gain_db != 0.0:  # pilot boost, dB to linear amplitude
+                pilot_symbols = pilot_symbols * db_to_linear(
+                    self.pilot_gain_db, power=False
+                )
+            body[..., mask] = pilot_symbols
+        body[..., ~mask] = self.payload_symbols
         return body
 
     # -------------------------------------------------------------------------

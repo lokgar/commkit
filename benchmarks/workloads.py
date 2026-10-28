@@ -8,7 +8,7 @@ benchmark parametrization, e.g. ``bps/128cross/N1e6/C2``.
 
 import numpy as np
 
-from commkit.impairments import apply_awgn, apply_phase_noise
+from commkit.impairments import apply_awgn, apply_iq_imbalance, apply_phase_noise
 from commkit.mapping import Constellation, map_bits
 from commkit.math import normalize
 
@@ -134,3 +134,19 @@ def fiber_workload(n_samples: int, seed: int = 0) -> np.ndarray:
         rng=seed,
     )
     return np.asarray(sig.samples, dtype=np.complex64)
+
+
+def iq_imbalance_workload(n_sym: int, num_ch: int = 2, seed: int = 0) -> np.ndarray:
+    """16-QAM after AWGN with 1.5 dB / 4 deg IQ imbalance, for the blind IQ
+    correction benches.  Shape ``(num_ch, n_sym)`` complex64."""
+    x = rotated_symbols_workload(16, n_sym, num_ch, rot_quadrants=0, seed=seed)[0]
+    x = apply_iq_imbalance(x, amplitude_imbalance_db=1.5, phase_imbalance_deg=4.0)
+    return np.asarray(x, dtype=np.complex64)
+
+
+def phase_workload(n_samples: int, num_ch: int = 2, seed: int = 0) -> np.ndarray:
+    """Wiener phase walk plus white noise, float32 ``(num_ch, n_samples)``:
+    a phase trajectory, the input of the smoothers."""
+    rng = np.random.default_rng(seed)
+    walk = np.cumsum(1e-3 * rng.standard_normal((num_ch, n_samples)), axis=-1)
+    return (walk + 0.1 * rng.standard_normal((num_ch, n_samples))).astype(np.float32)

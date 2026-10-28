@@ -183,6 +183,12 @@ def _gray_points(
     return result
 
 
+def _pack(labels: np.ndarray) -> np.ndarray:
+    """MSB-first bit rows to integers, int64: the inverse of :func:`_unpack_bits`."""
+    k = labels.shape[1]
+    return labels.astype(np.int64) @ (1 << np.arange(k - 1, -1, -1, dtype=np.int64))
+
+
 def _unpack_bits(indices: ArrayType, k: int) -> ArrayType:
     """Unpack integer indices into their k-bit binary representation (MSB-first).
 
@@ -391,39 +397,15 @@ def _gray_qam_square(order: int) -> np.ndarray:
 def _gray_qam_8_rect() -> np.ndarray:
     """Generate an 8-QAM constellation with Rectangular Gray mapping.
 
+    A 4-level Gray I axis (the two MSBs) times a 2-level Q axis (the LSB):
+    label ``b2 b1 b0`` sits at ``I = gray4[b2 b1]``, ``Q = gray2[b0]``.
+
     Returns
     -------
     numpy.ndarray
         Complex array of 8-QAM constellation points.
     """
-
-    points = np.zeros(8, dtype=complex)
-
-    # 000 (I=-3, Q=-1)
-    points[0] = -3.0 - 1.0j
-
-    # 001 (I=-3, Q=+1)
-    points[1] = -3.0 + 1.0j
-
-    # 010 (I=-1, Q=-1)
-    points[2] = -1.0 - 1.0j
-
-    # 011 (I=-1, Q=+1)
-    points[3] = -1.0 + 1.0j
-
-    # 100 (I=+3, Q=-1)
-    points[4] = 3.0 - 1.0j
-
-    # 101 (I=+3, Q=+1)
-    points[5] = 3.0 + 1.0j
-
-    # 110 (I=+1, Q=-1)
-    points[6] = 1.0 - 1.0j
-
-    # 111 (I=+1, Q=+1)
-    points[7] = 1.0 + 1.0j
-
-    return points
+    return (_gray_ask(4)[:, None] + 1j * _gray_ask(2)[None, :]).ravel()
 
 
 def _gray_qam_cross(order: int) -> np.ndarray:
@@ -453,28 +435,22 @@ def _gray_qam_cross(order: int) -> np.ndarray:
     width = 2**n
     height = 2**m
 
-    # 1. Generate Gray sequences for underlying Rectangular Grid
-    gray_i_seq = gray_code(n)
-    gray_q_seq = gray_code(m)
+    # 1. Inverse Gray tables of the underlying rectangular grid
+    #    (Gray symbol -> geometric index)
+    inv_gray_i = gray_to_binary(n)
+    inv_gray_q = gray_to_binary(m)
 
-    # 2. Build Inverse Lookup Tables (Symbol -> Geometric Index)
-    inv_gray_i = np.zeros(width, dtype=int)
-    inv_gray_i[gray_i_seq] = np.arange(width)
-
-    inv_gray_q = np.zeros(height, dtype=int)
-    inv_gray_q[gray_q_seq] = np.arange(height)
-
-    # 3. Decompose input Symbols into I and Q components
+    # 2. Decompose input Symbols into I and Q components
     s = np.arange(order)
     mask_q = (1 << m) - 1
     idx_i_sym = s >> m
     idx_q_sym = s & mask_q  # This is the Gray-coded Symbol Value for Q
 
-    # 4. Map Symbols to Geometric Indices (0..Width-1, 0..Height-1)
+    # 3. Map Symbols to Geometric Indices (0..Width-1, 0..Height-1)
     geo_i = inv_gray_i[idx_i_sym]
     geo_q = inv_gray_q[idx_q_sym]
 
-    # 5. Determine Folding Parameters
+    # 4. Determine Folding Parameters
     n_shift = 0
     if n >= 3:
         n_shift = 2 ** (n - 3)
@@ -485,11 +461,11 @@ def _gray_qam_cross(order: int) -> np.ndarray:
         val_q = (-height + 1 + 2 * geo_q).astype(float)
         return np.asarray(val_i + 1j * val_q)
 
-    # 6. Identify Wings
+    # 5. Identify Wings
     mask_left = geo_i < n_shift
     mask_right = geo_i >= (width - n_shift)
 
-    # 7. Calculate Rotation/Translation
+    # 6. Calculate Rotation/Translation
     center_offset = (width - height) // 2
 
     # Left Wing -> Top Cap

@@ -15,7 +15,10 @@ from commkit.equalization import (
     block_rde,
     build_pilot_ref,
 )
+from commkit.equalization._block._blind import _cupy_rde_error
+from commkit.equalization._common import _rde_ring_radii, _rde_rings
 from commkit.mapping import Constellation
+from tests.common import skip_unless_gpu
 from tests.common.conversions import to_numpy
 from tests.common.metrics import calc_dispersion
 from tests.common.signals import make_isi_distorted_signal
@@ -245,6 +248,45 @@ class TestBlockRDE:
         assert result_sig.signal.sampling_rate == 1e6
         xpt.assert_allclose(result_sig.signal.samples, result_arr.y_hat)
         xpt.assert_allclose(result_sig.y_hat, result_arr.y_hat)
+
+
+class TestRDERings:
+    @pytest.mark.parametrize("order", [16, 64, 256])
+    def test_squared_midpoints_pick_the_nearest_radius(self, order):
+        """Counting the squared midpoints below |y|² picks the radius nearest
+        |y|, the definition of the RDE decision, without a square root."""
+        radii = _rde_ring_radii(Constellation.qam(order))
+        rings = _rde_rings(radii)
+        np.testing.assert_array_equal(rings[0], radii * radii)
+        assert rings[1, -1] == np.finfo(np.float32).max
+        a = np.random.default_rng(0).uniform(0.0, 1.2 * radii[-1], 100_000)
+        a = a.astype(np.float32)
+        nearest = np.argmin(np.abs(a[:, None] - radii[None, :]), axis=1)
+        counted = np.searchsorted(rings[1, :-1], a * a)
+        np.testing.assert_array_equal(counted, nearest)
+
+    def test_tie_at_midpoint_goes_to_inner_ring(self):
+        rings = _rde_rings(np.array([1.0, 3.0], dtype=np.float32))
+        assert rings[1, 0] == 4.0
+        assert np.searchsorted(rings[1, :-1], np.float32(4.0)) == 0
+
+    @pytest.mark.gpu_only
+    def test_kernel_matches_cpu(self, backend_device, xp, xpt):
+        skip_unless_gpu(backend_device)
+        rings = _rde_rings(_rde_ring_radii(Constellation.qam(64)))
+        rng = np.random.default_rng(1)
+        y = 0.7 * (rng.standard_normal((2, 4099)) + 1j * rng.standard_normal((2, 4099)))
+        y = y.astype(np.complex64)
+        a2 = (y * np.conj(y)).real
+        expected = y * (rings[0][np.searchsorted(rings[1, :-1], a2)] - a2)
+        y_d = xp.asarray(y)
+        e = _cupy_rde_error()(
+            y_d,
+            xp.real(y_d * xp.conj(y_d)),
+            xp.asarray(rings),
+            np.int32(rings.shape[1]),
+        )
+        xpt.assert_allclose(e, xp.asarray(expected), rtol=1e-6, atol=1e-7)
 
 
 class TestBlockBlindMIMO:

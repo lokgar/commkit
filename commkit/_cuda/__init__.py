@@ -148,7 +148,11 @@ def _bps_min_d2_factory(mode: str = "table", return_argmin: bool = False) -> Cal
 
         min_d2 = cp.empty((P, C, N), dtype=cp.float32)
         argmin = cp.empty((P, C, N), dtype=cp.int32) if return_argmin else _empty_i32
-        grid = ((N + block_n - 1) // block_n, P, C)
+        if C == 0 or N == 0:  # a zero-size grid is a launch error
+            return (min_d2, argmin) if return_argmin else min_d2
+        # Channels beyond the grid's z limit (65535) run in the kernel's
+        # channel loop.
+        grid = ((N + block_n - 1) // block_n, P, min(C, 65535))
         kern(
             grid,
             (block_n,),
@@ -160,6 +164,7 @@ def _bps_min_d2_factory(mode: str = "table", return_argmin: bool = False) -> Cal
                 cp.float32(d_grid),
                 cp.int32(side),
                 cp.int32(M),
+                cp.int32(C),
                 cp.int64(N),
                 min_d2,
                 argmin,
@@ -180,9 +185,13 @@ def _cs_block_factory() -> Callable:
     speculated in parallel; see ``cs_block.cu``) operating in place on
     device-resident state buffers. One launch processes one equalizer block,
     instead of a round trip per block through the CPU path (device to host,
-    the Numba kernel, host to device).  All state arrays are float64 or int64 and are
-    changed in place, so the wrapper rejects non-contiguous inputs instead
-    of copying them silently.
+    the Numba kernel, host to device).
+
+    The wrapper binds one run: it checks the state buffers (float64 or
+    int64, changed in place, so non-contiguous ones are rejected instead of
+    copied silently) and allocates the kernel's scratch for the largest
+    block once, and returns the per-block launch, which checks only the
+    block's phases.
     """
     import cupy as cp
 
@@ -190,31 +199,22 @@ def _cs_block_factory() -> Callable:
 
     kern = compiler.get_raw_kernel("cs_block", "cs_block")
 
-    def launch(
-        phi_blk: Any,
-        phi_corr: Any,
+    def bind(
         cs_buf_y: Any,
         cs_buf_ptr: Any,
         cs_buf_n: Any,
         cs_stats: Any,
+        *,
         quantum: float,
         threshold: float,
         cs_H: int,
-    ) -> Any:
-        """Repair the cycle slips of ``phi_blk`` into ``phi_corr``.
-
-        Both are ``(C, B)`` float64; the per-channel circular history
-        buffers are updated in place.
-        """
-        if phi_blk.ndim != 2:
-            raise ValueError(f"phi_blk must be 2-D (C, B), got shape {phi_blk.shape}")
-        C, B = phi_blk.shape
-        if B < 1:
-            raise ValueError("phi_blk must have at least one column")
+        max_block: int,
+    ) -> Callable[[Any, Any], Any]:
+        """Bind the state buffers of one run, ``C`` channels and blocks of at
+        most ``max_block`` symbols."""
+        C = cs_buf_ptr.shape[0] if cs_buf_ptr.ndim == 1 else -1
         cs_H = int(cs_H)
         for label, arr, dtype, shape in (
-            ("phi_blk", phi_blk, cp.float64, (C, B)),
-            ("phi_corr", phi_corr, cp.float64, (C, B)),
             ("cs_buf_y", cs_buf_y, cp.float64, (C, cs_H)),
             ("cs_buf_ptr", cs_buf_ptr, cp.int64, (C,)),
             ("cs_buf_n", cs_buf_n, cp.int64, (C,)),
@@ -226,31 +226,57 @@ def _cs_block_factory() -> Callable:
                 raise ValueError(f"{label} must have shape {shape}, got {arr.shape}")
             if not arr.flags.c_contiguous:
                 raise ValueError(f"{label} must be C-contiguous (mutated in place)")
-        L = cs_H + B
-        kern(
-            (C,),
-            (256,),  # CS_THREADS in cs_block.cu
-            (
-                phi_blk,
-                phi_corr,
-                cs_buf_y,
-                cs_buf_ptr,
-                cs_buf_n,
-                cs_stats,
-                cp.empty((C, L), dtype=cp.float64),
-                cp.empty((C, L + 1), dtype=cp.float64),
-                cp.empty((C, L + 1), dtype=cp.float64),
-                cp.empty((C, B), dtype=cp.int32),
-                cp.empty((C, B), dtype=cp.int32),
-                cp.float64(quantum),
-                cp.float64(threshold),
-                cp.int32(cs_H),
-                cp.int32(B),
-            ),
-        )
-        return phi_corr
+        if max_block < 1:
+            raise ValueError(f"max_block must be >= 1, got {max_block}")
+        # Scratch for the largest block: the kernel strides by the actual B.
+        L = cs_H + max_block
+        z = cp.empty(C * L, dtype=cp.float64)
+        p1 = cp.empty(C * (L + 1), dtype=cp.float64)
+        p2 = cp.empty(C * (L + 1), dtype=cp.float64)
+        guess = cp.empty(C * max_block, dtype=cp.int32)
+        decided = cp.empty(C * max_block, dtype=cp.int32)
+        scalars = (cp.float64(quantum), cp.float64(threshold), cp.int32(cs_H))
 
-    return launch
+        def launch(phi_blk: Any, phi_corr: Any) -> Any:
+            """Repair the cycle slips of ``phi_blk`` into ``phi_corr``.
+
+            Both are ``(C, B)`` float64, ``1 <= B <= max_block``; the bound
+            history buffers are updated in place.
+            """
+            shape = phi_blk.shape
+            if (
+                phi_blk.dtype != cp.float64
+                or len(shape) != 2
+                or shape[0] != C
+                or not 1 <= shape[1] <= max_block
+                or not phi_blk.flags.c_contiguous
+            ):
+                raise ValueError(
+                    f"phi_blk must be C-contiguous float64 (C={C}, B<={max_block}), "
+                    f"got {phi_blk.dtype} {shape}"
+                )
+            if (
+                phi_corr.dtype != cp.float64
+                or phi_corr.shape != shape
+                or not phi_corr.flags.c_contiguous
+            ):
+                raise ValueError(
+                    f"phi_corr must be C-contiguous float64 {shape}, got "
+                    f"{phi_corr.dtype} {phi_corr.shape}"
+                )
+            kern(
+                (C,),
+                (256,),  # CS_THREADS in cs_block.cu
+                (
+                    phi_blk, phi_corr, cs_buf_y, cs_buf_ptr, cs_buf_n, cs_stats,
+                    z, p1, p2, guess, decided, *scalars, cp.int32(shape[1]),
+                ),
+            )  # fmt: skip
+            return phi_corr
+
+        return launch
+
+    return bind
 
 
 def _bps_anchor_factory() -> Callable:
@@ -347,6 +373,8 @@ def _llr_launch(cp: Any, kern: Any, n: int, k: int, head: tuple, tail: tuple) ->
 
     The kernel's arguments are ``head``, the output, ``n``, then ``tail``.
     """
+    if n >= 2**31:
+        raise ValueError(f"at most 2**31 - 1 symbols per call, got {n}")
     out = cp.empty((n, k), dtype=cp.float32)
     if n == 0:
         return out
@@ -467,6 +495,114 @@ def _llr_separable_factory() -> Callable:
     return launch
 
 
+# IIR_MAX_S in iir.cu, and the threads per block of its launches.
+_IIR_MAX_S = 16
+_IIR_THREADS = 128
+# Sample dtype -> (sample type, state type) of the iir.cu templates.
+_IIR_TYPES = {
+    "float32": ("float", "double"),
+    "float64": ("double", "double"),
+    "complex64": ("complex<float>", "complex<double>"),
+    "complex128": ("complex<double>", "complex<double>"),
+}
+
+
+def _iir_factory() -> Callable:
+    """Wrapper factory for the block-parallel SOS filter (``filtering.linear``).
+
+    Filters the rows of a C-contiguous ``(C, N)`` record through the
+    sections in double precision, reading and writing the samples in their
+    own dtype (see ``iir.cu``).
+    """
+    import cupy as cp
+    import numpy as np
+
+    from . import compiler
+
+    kernels: dict[tuple[str, str, str], Any] = {}
+
+    def kernel(name: str, t: str, u: str) -> Any:
+        key = (name, t, u)
+        if key not in kernels:
+            carry = name in ("iir_carry", "iir_group_carry")
+            expr = f"{name}<{u}>" if carry else f"{name}<{t}, {u}>"
+            kernels[key] = compiler.get_raw_kernel("iir", expr)
+        return kernels[key]
+
+    def launch(
+        sos: Any, x: Any, zi: Any, block: int, group: int, transitions: Any
+    ) -> Any:
+        """``y`` of the causal filter of ``x`` from the initial state ``zi``.
+
+        ``sos`` is ``(S, 6)`` float64 on the host, ``x`` ``(C, N)`` float32,
+        float64, complex64 or complex128, ``zi`` ``(C, S, 2)`` float64 (real
+        ``x``) or complex128 (complex ``x``).  ``transitions`` is the host
+        float64 ``(group + 1, 2S, 2S)`` stack of the zero-input state
+        transitions of the cascade over ``j·block`` samples, ``j = 0 ..
+        group`` (state index ``2k + i``).
+        """
+        sos = np.ascontiguousarray(sos, dtype=np.float64)
+        if sos.ndim != 2 or sos.shape[1] != 6 or not 1 <= sos.shape[0] <= _IIR_MAX_S:
+            raise ValueError(
+                f"sos must be (S, 6) with 1 <= S <= {_IIR_MAX_S}, got {sos.shape}"
+            )
+        if x.dtype.name not in _IIR_TYPES:
+            raise TypeError(f"x must be float32/64 or complex64/128, got {x.dtype}")
+        if x.ndim != 2 or not x.flags.c_contiguous:
+            raise ValueError(f"x must be a C-contiguous (C, N) array, got {x.shape}")
+        S = sos.shape[0]
+        C, N = x.shape
+        state = cp.complex128 if x.dtype.kind == "c" else cp.float64
+        if zi.dtype != state or zi.shape != (C, S, 2) or not zi.flags.c_contiguous:
+            raise ValueError(
+                f"zi must be a C-contiguous ({C}, {S}, 2) {np.dtype(state)} array"
+            )
+        D = 2 * S
+        if block < 1 or group < 1:
+            raise ValueError(f"block and group must be >= 1, got {block}, {group}")
+        if np.shape(transitions) != (group + 1, D, D):
+            raise ValueError(f"transitions must be ({group + 1}, {D}, {D})")
+        if x.size == 0:  # a zero-size grid is a launch error
+            return cp.empty_like(x)
+        t, u = _IIR_TYPES[x.dtype.name]
+        L, G = int(block), int(group)
+        nb = -(-N // L)
+        ng = -(-nb // G)
+        tr = cp.asarray(np.ascontiguousarray(transitions, dtype=np.float64))
+        sos_dev = cp.asarray(sos)
+        zend = cp.empty((C, nb, S, 2), dtype=state)
+        zloc = cp.empty_like(zend)
+        zgend = cp.empty((C, ng, S, 2), dtype=state)
+        zgin = cp.empty_like(zgend)
+        y = cp.empty_like(x)
+
+        def grid(threads: int) -> tuple[int]:
+            return (-(-threads // _IIR_THREADS),)
+
+        th = (_IIR_THREADS,)
+        common = (sos_dev, cp.int32(S), x, cp.int64(N), cp.int32(L), cp.int32(nb))
+        kernel("iir_block_state", t, u)(grid(C * nb), th, (*common, cp.int32(C), zend))
+        kernel("iir_group_carry", t, u)(
+            grid(C * ng),
+            th,
+            (tr[1], cp.int32(S), zend, cp.int32(nb), cp.int32(G), cp.int32(ng),
+             cp.int32(C), zloc, zgend),
+        )  # fmt: skip
+        kernel("iir_carry", t, u)(
+            grid(C),
+            th,
+            (tr[G], cp.int32(S), zi, zgend, cp.int32(ng), cp.int32(C), zgin),
+        )
+        kernel("iir_block_out", t, u)(
+            grid(C * nb),
+            th,
+            (*common, cp.int32(C), tr[:G], cp.int32(G), cp.int32(ng), zloc, zgin, y),
+        )
+        return y
+
+    return launch
+
+
 # name -> wrapper factory.
 _KERNEL_FACTORIES: dict[str, Callable[..., Callable]] = {
     "selftest_scale": _selftest_scale_factory,
@@ -475,4 +611,5 @@ _KERNEL_FACTORIES: dict[str, Callable[..., Callable]] = {
     "bps_anchor": _bps_anchor_factory,
     "llr": _llr_factory,
     "llr_separable": _llr_separable_factory,
+    "iir": _iir_factory,
 }

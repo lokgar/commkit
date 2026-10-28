@@ -296,7 +296,6 @@ def _floor_levels(
     *,
     auto: bool,
     label: str,
-    fallback2=None,
     fallback_desc: str = "the fenced band",
 ):
     """White-FM floor level per channel, by plateau auto-detection or fence.
@@ -315,14 +314,12 @@ def _floor_levels(
         Eligible bins (validity mask and any user fences).
     auto : bool
         If True, auto-detect the plateau (``_plateau_mask``) and fall back to
-        ``fallback2`` per channel where detection fails.  If False, the median
+        ``base2`` per channel where detection fails.  If False, the median
         runs over ``base2`` as given.
     label : str
         Caller name used in the fallback warning.
-    fallback2 : ndarray of bool, (C, nf), optional
-        Per-channel fallback mask for failed detection; defaults to ``base2``.
     fallback_desc : str
-        Human-readable description of that fallback, for the warning.
+        Human-readable description of ``base2``, the fallback, for the warning.
 
     Returns
     -------
@@ -340,7 +337,6 @@ def _floor_levels(
 
     if auto:
         used2, levels = _plateau_mask(f, s2, base2)
-        fb = base2 if fallback2 is None else np.broadcast_to(fallback2, s2.shape)
         for c in range(n_ch):
             if np.isfinite(levels[c]):
                 continue
@@ -351,7 +347,7 @@ def _floor_levels(
                 c,
                 fallback_desc,
             )
-            used2[c] = fb[c]
+            used2[c] = base2[c]
             levels[c] = _median(used2[c], c)
         return used2, levels
 

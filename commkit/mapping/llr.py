@@ -20,6 +20,7 @@ from ..backend import ArrayType, dispatch
 from ..core._signal_adapter import adapt_signal
 from ..core.signal import Signal
 from ..logger import logger
+from .gray import _pack
 
 if TYPE_CHECKING:
     from .constellation import Constellation
@@ -350,11 +351,13 @@ def _llr(
         _get_numba_llr()(
             np.ascontiguousarray(sym_flat.real, dtype=np.float32),
             np.ascontiguousarray(
-                sym_flat.imag if is_complex else np.zeros(n), dtype=np.float32
+                sym_flat.imag if is_complex else np.zeros(n, np.float32),
+                dtype=np.float32,
             ),
             np.ascontiguousarray(np.real(points), dtype=np.float32),
             np.ascontiguousarray(
-                np.imag(points) if is_complex else np.zeros(order), dtype=np.float32
+                np.imag(points) if is_complex else np.zeros(order, np.float32),
+                dtype=np.float32,
             ),
             log_pmf,
             _half_indices(bit_labels),
@@ -475,7 +478,4 @@ def _llr_separable_gpu(
 
 def _packed_labels(bit_labels: np.ndarray) -> np.ndarray:
     """MSB-first bit rows to int32 labels, the CUDA kernels' layout."""
-    k = bit_labels.shape[1]
-    weights = 1 << np.arange(k - 1, -1, -1, dtype=np.int64)
-    labels: np.ndarray = (bit_labels.astype(np.int64) @ weights).astype(np.int32)
-    return labels
+    return _pack(bit_labels).astype(np.int32)

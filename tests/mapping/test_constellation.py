@@ -149,6 +149,38 @@ class TestValueSemantics:
         assert {Constellation.qam(16): 1}[Constellation(Constellation.qam(16).points)]
 
 
+class TestRotationalSymmetry:
+    @pytest.mark.parametrize(
+        "constellation,expected",
+        [
+            (Constellation.qam(16), 4),
+            (Constellation.qam(32), 4),  # cross QAM
+            (Constellation.qam(1024), 4),
+            (Constellation.psk(8), 8),
+            (Constellation.pam(4), 2),
+            (Constellation.pam(4, unipolar=True), 1),
+            # The origin and a 7-gon: the order divides the 7 points off the
+            # origin, not the 8 points.
+            (Constellation(np.r_[0, np.exp(2j * np.pi * np.arange(7) / 7)]), 7),
+            (Constellation(np.array([1, 2j, -1, -2j])), 2),
+            (Constellation(np.array([0.1, 1, 1j, 2])), 1),
+        ],
+        ids=[
+            "qam16",
+            "qam32",
+            "qam1024",
+            "psk8",
+            "pam4",
+            "pam4u",
+            "0+7gon",
+            "rhombus",
+            "none",
+        ],  # fmt: skip
+    )
+    def test_order(self, constellation, expected) -> None:
+        assert constellation.rotational_symmetry == expected
+
+
 class TestShaping:
     @pytest.mark.parametrize("order", [16, 32, 64, 256])
     def test_nu_is_defined_on_the_odd_integer_grid(self, order) -> None:

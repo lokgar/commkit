@@ -36,6 +36,8 @@ def _plot_eye_traces(
     ax: Any,
     kind: str,
     title: str | None,
+    vmin: float | None = None,
+    vmax: float | None = None,
     **kwargs: Any,
 ) -> None:
     """Internal helper to plot eye diagram traces for a single signal component.
@@ -54,6 +56,8 @@ def _plot_eye_traces(
         Plotting strategy.
     title : str, optional
         Title for the subplot.
+    vmin, vmax : float, optional
+        Color limits of the ``"hist"`` image.
     **kwargs : Any
         Additional plotting parameters.
     """
@@ -130,58 +134,36 @@ def _plot_eye_traces(
             traces = _interp_rows(traces, target_width, xp)
             trace_len = target_width
 
-        # Create time matrix
-        # Use xp.linspace
-        t = xp.linspace(0, num_symbols, trace_len, endpoint=True)
-        # Use xp.tile
-        t_matrix = xp.tile(t, (traces.shape[0], 1))  # shape: (num_traces, trace_len)
-
-        # Flatten
-        t_flat = t_matrix.flatten()
-        y_flat = traces.flatten()
-
-        # Compute 2D histogram
-        # Bins: Time (x) and Amplitude (y)
-        bins_x = trace_len
+        # 2-D histogram, time (x) by amplitude (y).  Trace column j is time
+        # j * num_symbols / (L - 1), which falls in time bin j of L equal bins
+        # over [0, num_symbols]; the amplitude bin is computed per sample, so
+        # one bincount of (amplitude bin, column) gives the (bins_y, L) image.
         bins_y = 500
-
-        # Add padding to Y range
-        y_min, y_max = xp.min(y_flat), xp.max(y_flat)
-        y_range = y_max - y_min
-        if y_range == 0:
-            y_range = 1.0
-        y_pad = y_range * 0.1
-        range_y = [float(y_min - y_pad), float(y_max + y_pad)]
-
-        # Min/max of t_flat
-        t_min, t_max = xp.min(t_flat), xp.max(t_flat)
-
-        h, xedges, yedges = xp.histogram2d(
-            t_flat,
-            y_flat,
-            bins=[bins_x, bins_y],
-            range=[[float(t_min), float(t_max)], range_y],
-        )
-
-        h = h.T
+        lo_hi = to_device(xp.stack([xp.min(traces), xp.max(traces)]), "cpu")
+        y_min, y_max = float(lo_hi[0]), float(lo_hi[1])
+        y_range = (y_max - y_min) or 1.0
+        y_lo, y_hi = y_min - 0.1 * y_range, y_max + 0.1 * y_range
+        yb = xp.floor((traces - y_lo) * (bins_y / (y_hi - y_lo))).astype(xp.int64)
+        yb = xp.clip(yb, 0, bins_y - 1)  # the upper edge closes the last bin
+        flat = yb * trace_len + xp.arange(trace_len)[None, :]
+        counts = xp.bincount(flat.ravel(), minlength=bins_y * trace_len)
+        h = counts.reshape(bins_y, trace_len).astype(xp.float64)
         h = smooth_density_2d(h, sigma=1.0)
 
-        # Normalize
-        h_max = xp.max(h)
+        # Normalize on the host, where the image goes anyway.
+        h = np.asarray(to_device(h, "cpu"))
+        h_max = h.max()
         if h_max > 0:
             h = h / h_max
-
-        # Move to cpu for plotting
-        h = to_device(h, "cpu")
-        xedges = to_device(xedges, "cpu")
-        yedges = to_device(yedges, "cpu")
 
         # Plot using imshow
         imshow_kwargs = {
             "origin": "lower",
-            "extent": [xedges[0], xedges[-1], yedges[0], yedges[-1]],
+            "extent": [0.0, float(num_symbols), y_lo, y_hi],
             "aspect": "auto",
             "cmap": "inferno",
+            "vmin": vmin,
+            "vmax": vmax,
         }
         imshow_kwargs.update(kwargs)
 
@@ -380,6 +362,8 @@ def _plot_eye_diagram(
             ax[0],
             kind,
             title=f"{title} (I)" if title else "I-Channel",
+            vmin=vmin,
+            vmax=vmax,
             **kwargs,
         )
 
@@ -391,6 +375,8 @@ def _plot_eye_diagram(
             ax[1],
             kind,
             title=f"{title} (Q)" if title else "Q-Channel",
+            vmin=vmin,
+            vmax=vmax,
             **kwargs,
         )
     else:
@@ -406,6 +392,8 @@ def _plot_eye_diagram(
             target_ax,
             kind,
             title=title,
+            vmin=vmin,
+            vmax=vmax,
             **kwargs,
         )
 

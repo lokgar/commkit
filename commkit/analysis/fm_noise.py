@@ -13,7 +13,6 @@ from typing import Any
 
 import numpy as np
 
-from .. import _fft
 from .._array import as_2d, restore_1d
 from ..backend import ArrayType, dispatch
 from ..spectral import welch_psd
@@ -167,13 +166,14 @@ def _hann_overlap(lag: float, nperseg: int) -> float:
     lag = abs(float(lag))
     if lag >= nperseg:
         return 0.0
-    n = np.arange(nperseg)
-    w = 0.5 - 0.5 * np.cos(2.0 * np.pi * n / nperseg)
-    acf = _fft.irfft(np.abs(_fft.rfft(w, 2 * nperseg)) ** 2)[: nperseg + 1]
-    acf[nperseg] = 0.0
+    w = 0.5 - 0.5 * np.cos(2.0 * np.pi * np.arange(nperseg) / nperseg)
+
+    def acf(m: int) -> float:  # Σ_n w[n]·w[n+m], zero once nothing overlaps
+        return float(np.sum(w[: nperseg - m] * w[m:])) if m < nperseg else 0.0
+
     k = int(lag)
     frac = lag - k
-    return float(((1.0 - frac) * acf[k] + frac * acf[k + 1]) / acf[0])
+    return ((1.0 - frac) * acf(k) + frac * acf(k + 1)) / acf(0)
 
 
 def _interferometer_response(

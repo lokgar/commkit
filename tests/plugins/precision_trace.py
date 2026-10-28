@@ -7,8 +7,9 @@ Two kinds of site are reported in the terminal summary, with their commkit
 source line:
 
 - ``PROMOTE``: an operation on single-precision data that came through
-  ``dispatch`` produced a float64/complex128 array of at least 512 elements
-  (the NEP 50 trap, a float64 operand, a double reference);
+  ``dispatch`` (and through any ``commkit._fft`` transform after it) produced
+  a float64/complex128 array of at least 512 elements (the NEP 50 trap, a
+  float64 operand, a double reference);
 - ``FRESH``: a NumPy math function (exp, cos, sin, sqrt, log, cumsum, angle,
   unwrap, ...) or a SciPy filter called from commkit returned such an array
   (a double phasor or response built and cast afterwards).
@@ -127,6 +128,27 @@ def _install() -> None:
         return wrap(self, arr, *args, **kwargs)
 
     SignalAdapter.wrap_samples = wrap_samples  # type: ignore[method-assign]
+
+    # SciPy's FFTs return plain arrays: keep single-precision data tagged
+    # through commkit._fft, so the work after a transform is traced too.
+    import commkit._fft as fft_module
+
+    call = fft_module._call
+
+    @functools.wraps(call)
+    def fft_call(name: str, x: Any, *args: Any, **kwargs: Any) -> Any:
+        tagged = isinstance(x, _Tagged)
+        r = call(name, x.view(np.ndarray) if tagged else x, *args, **kwargs)
+        if tagged and isinstance(r, np.ndarray):
+            if r.dtype in _SINGLE:
+                return r.view(_Tagged)
+            if r.dtype in _DOUBLE and r.size >= _MIN:
+                site = _site()
+                if site:
+                    _HITS[f"PROMOTE {site} [{name} -> {r.dtype}]"] += 1
+        return r
+
+    fft_module._call = fft_call
 
     # Numba builds its ufunc table from the numpy module on first use and
     # types np.<name> at compile time: build the table first, and give it the

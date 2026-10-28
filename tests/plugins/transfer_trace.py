@@ -44,10 +44,10 @@ _HOST_VALUE = "host value moved to the data's device"
 
 # "path/to/module.py::qualname" -> why the transfer is deliberate.
 _DOCUMENTED: dict[str, str] = {
-    "analysis/linewidth.py::_beta_separation": _REPORT,
-    "analysis/linewidth.py::_dsh_fm_psd": _REPORT,
-    "analysis/linewidth.py::_dsh_lorentzian": _REPORT,
-    "analysis/linewidth.py::_not_a_beat": _REPORT,
+    "analysis/linewidth/phase.py::_beta_separation": _REPORT,
+    "analysis/linewidth/dsh.py::_dsh_fm_psd": _REPORT,
+    "analysis/linewidth/dsh.py::_dsh_lorentzian": _REPORT,
+    "analysis/linewidth/dsh.py::_not_a_beat": _REPORT,
     "core/generation.py::generate": "transmitted payload drawn on the host",
     "core/signal.py::Reference.to": "explicit device move",
     "core/signal.py::Signal.to": "explicit device move",
@@ -62,6 +62,8 @@ _DOCUMENTED: dict[str, str] = {
     "equalization/sequential/_setup.py::_assemble_sequential": _RECURSION,
     "equalization/sequential/_setup.py::_prepare_sequential": _RECURSION,
     "frequency.py::_mengali_morelli": _RECURSION + " (bootstrap over the lags)",
+    "_cuda/__init__.py::_iir_factory.<locals>.launch": _HOST_VALUE
+    + " (the IIR state transitions)",
     "metrics.py::_paired": _HOST_VALUE + " (reference symbols)",
     "recovery/corrections.py::DataAided.__post_init__": "value object: host copy",
     "recovery/corrections.py::_data_aided": _HOST_VALUE + " (reference symbols)",

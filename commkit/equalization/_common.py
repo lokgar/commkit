@@ -417,3 +417,21 @@ def _rde_ring_radii(constellation: Any) -> np.ndarray:
     raw = np.abs(np.asarray(constellation.points)).astype(np.float32)
     # Round to 6 decimals to merge numerically identical radii.
     return np.unique(np.round(raw, 6))
+
+
+def _rde_rings(radii: np.ndarray) -> np.ndarray:
+    """Ring table of the RDE decision, float32 ``(2, K)``.
+
+    Row 0 holds the squared radii (sorted ascending), row 1 the squared
+    midpoint to the next ring, then the largest float32 after the last ring
+    (finite, because the kernels compile with fast math).  ``|y|²`` decides
+    the ring of the first bound it does not exceed, the nearest radius
+    without a square root; a tie at a midpoint goes to the inner ring.
+    """
+    r = np.asarray(radii, dtype=np.float32)
+    rings = np.empty((2, r.size), dtype=np.float32)
+    rings[0] = r * r
+    mid = 0.5 * (r[:-1].astype(np.float64) + r[1:])
+    rings[1, :-1] = mid * mid
+    rings[1, -1] = np.finfo(np.float32).max
+    return rings

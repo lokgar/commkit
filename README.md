@@ -65,7 +65,7 @@ CommKit never picks a device for you: data stays where you put it, and each func
   | Frequency-domain equalizers `block_lms`, `block_cma`, `block_rde` | runs on the GPU (CUDA graphs) |
   | Sequential equalizers `lms`, `rls`, `cma`, `rde`; `PLL`, `Tikhonov`, cycle-slip correction | runs on the CPU (Numba): one copy to the host and back, no speedup |
 
-  A sample-by-sample recursion has no parallel work per step. For long records on the GPU, prefer the block equalizers with `block_size=1024` or more. Each block costs a fixed overhead: at 256 the GPU only ties the CPU without carrier recovery, at 2048 it is 6-9x faster. A larger block also lowers the stable `step_size`.
+  A sample-by-sample recursion has no parallel work per step. For long records on the GPU, prefer the block equalizers with `block_size=1024` or more. Each block costs a fixed overhead: at 256 the GPU is about 2x faster than the CPU without carrier recovery and 5x with BPS, at 2048 about 4x and 13x. A larger block also lowers the stable `step_size`.
 - **Short records do not pay off.** Launch overhead dominates below roughly 10⁴-10⁵ samples, where the CPU is as fast.
 - **Batch channels and records.** Pass `(C, N)` arrays rather than looping over channels in Python: one call does the work of C.
 - **Keep scalars on the device inside loops.** `float(x)`, `x.item()` and `if x > 0:` on a CuPy array wait for the GPU and copy. Collect values in an array and transfer once.
@@ -80,7 +80,7 @@ CommKit never picks a device for you: data stays where you put it, and each func
 | --- | --- |
 | [`commkit.core`](https://github.com/lokgar/commkit/tree/main/commkit/core) | `Signal`, `Reference`, `generate`, `SingleCarrierFrame` and `Preamble` (pilots, guard intervals, MIMO streams), `extract_payload`. |
 | [`commkit.mapping`](https://github.com/lokgar/commkit/tree/main/commkit/mapping) | `Constellation` (QAM, PSK, PAM, arbitrary points; Gray labels; probabilistic shaping with `.shaped()`), bit mapping, hard demapping, max-log and exact LLRs. |
-| [`commkit.filtering`](https://github.com/lokgar/commkit/blob/main/commkit/filtering.py) | Pulses (`RRC`, `RC`, `Gaussian`, `Rect`, `SmoothRect`), FIR and IIR design (Butterworth, Chebyshev I/II, elliptic, Bessel), `fir_filter`, `iir_filter`, `matched_filter`, overlap-save, chromatic-dispersion compensation and digital backpropagation (`correct_fiber_propagation`). |
+| [`commkit.filtering`](https://github.com/lokgar/commkit/tree/main/commkit/filtering) | Pulses (`RRC`, `RC`, `Gaussian`, `Rect`, `SmoothRect`), FIR and IIR design (Butterworth, Chebyshev I/II, elliptic, Bessel), `fir_filter`, `iir_filter`, `matched_filter`, overlap-save, chromatic-dispersion compensation and digital backpropagation (`correct_fiber_propagation`). |
 | [`commkit.multirate`](https://github.com/lokgar/commkit/blob/main/commkit/multirate.py) | `resample` (fractional), `decimate`, `upsample`, `decimate_to_symbol_rate`. |
 | [`commkit.spectral`](https://github.com/lokgar/commkit/blob/main/commkit/spectral.py) | Welch PSD, spectrograms, frequency shifting, pilot tones. |
 | [`commkit.impairments`](https://github.com/lokgar/commkit/tree/main/commkit/impairments) | AWGN, phase noise, IQ imbalance (with Löwdin and Gram-Schmidt correction), chromatic dispersion, PMD and polarization mixing, and nonlinear fiber propagation over amplified spans (split-step Kerr effect with dispersion, loss, PMD and ASE) of a `Fiber`. |

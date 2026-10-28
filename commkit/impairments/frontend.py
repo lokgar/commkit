@@ -112,26 +112,37 @@ class GramSchmidt:
     """
 
 
-def _lowdin(r: ArrayType, xp: ModuleType) -> tuple[ArrayType, ArrayType]:
-    N = r.shape[0]
-    X = xp.stack([r.real, r.imag])  # (2, N), rows = [I, Q]
-    M = (X @ X.T) / N  # 2x2 second-moment matrix
-    lam, V = xp.linalg.eigh(M)
-    W = (V * (1.0 / xp.sqrt(lam))) @ V.T  # M^(-1/2)
-    X_corr = W @ X  # identity second-moment matrix
-    return X_corr[0], X_corr[1]
+# The correctors map the per-channel branch statistics ``E[I²]``, ``E[Q²]``
+# and ``E[IQ]`` (float64, ``(C,)``) to the 2x2 transform ``[I'; Q'] = A [I; Q]``
+# of each channel, as the four entries ``(a_ii, a_iq, a_qi, a_qq)``.
+_Coefficients = tuple[ArrayType, ArrayType, ArrayType, ArrayType]
 
 
-def _gram_schmidt(r: ArrayType, xp: ModuleType) -> tuple[ArrayType, ArrayType]:
-    i_branch, q_branch = r.real, r.imag
-    i_norm = i_branch / xp.sqrt(xp.mean(i_branch**2))
-    q_orth = q_branch - xp.mean(i_norm * q_branch) * i_norm
-    q_norm = q_orth / xp.sqrt(xp.mean(q_orth**2))
-    return i_norm, q_norm
+def _lowdin(
+    sii: ArrayType, sqq: ArrayType, siq: ArrayType, xp: ModuleType
+) -> _Coefficients:
+    # M^(-1/2) of M = [[sii, siq], [siq, sqq]] in closed form: the square root
+    # of a 2x2 SPD matrix is (M + s·1) / t, with s = sqrt(det M) and
+    # t = sqrt(tr M + 2s), so M^(-1/2) = t · (M + s·1)^(-1).
+    det_s = xp.sqrt(sii * sqq - siq * siq)
+    t = xp.sqrt(sii + sqq + 2.0 * det_s)
+    a, d = sii + det_s, sqq + det_s
+    scale = t / (a * d - siq * siq)
+    return d * scale, -siq * scale, -siq * scale, a * scale
+
+
+def _gram_schmidt(
+    sii: ArrayType, sqq: ArrayType, siq: ArrayType, xp: ModuleType
+) -> _Coefficients:
+    # I / rms(I); Q minus its projection on I, siq/sii · I, over its rms,
+    # sqrt(sqq - siq²/sii).
+    inv_i = 1.0 / xp.sqrt(sii)
+    inv_q = 1.0 / xp.sqrt(sqq - siq * siq / sii)
+    return inv_i, xp.zeros_like(sii), -(siq / sii) * inv_q, inv_q
 
 
 _IQ_CORRECTORS: dict[
-    type, Callable[[ArrayType, ModuleType], tuple[ArrayType, ArrayType]]
+    type, Callable[[ArrayType, ArrayType, ArrayType, ModuleType], _Coefficients]
 ] = {Lowdin: _lowdin, GramSchmidt: _gram_schmidt}
 
 
@@ -174,34 +185,35 @@ def correct_iq_imbalance(samples: S, how: Lowdin | GramSchmidt) -> S:
 def _apply_iq_correction(
     samples: ArrayType,
     xp: ModuleType,
-    correct_fn: Callable[[ArrayType, ModuleType], tuple[ArrayType, ArrayType]],
+    correct_fn: Callable[[ArrayType, ArrayType, ArrayType, ModuleType], _Coefficients],
 ) -> ArrayType:
-    """Shared per-channel scaffold for the blind IQ-imbalance compensators.
+    """Shared scaffold for the blind IQ-imbalance compensators, all channels
+    at once.
 
-    ``correct_fn(r, xp) -> (comp0, comp1)`` computes one channel's corrected
-    real I/Q-like components (algorithm-specific: Löwdin symmetric whitening
-    or Gram-Schmidt orthogonalisation) from the complex channel ``r`` (shape
-    ``(N,)``).  Shares the per-channel input-power measurement, power
-    restoration, dtype cast, and channel loop between the two compensators -
-    the correction math itself stays in ``correct_fn``.
+    Measures the branch statistics, takes the 2x2 transform of
+    ``correct_fn`` (Löwdin symmetric whitening or Gram-Schmidt
+    orthogonalization; both give unit-power, uncorrelated branches), folds in
+    the gain that restores each channel's input power, and writes the
+    corrected real and imaginary parts in the samples' precision.
     """
     samples, was_1d = as_2d(samples, name="samples")
+    i_branch, q_branch = samples.real, samples.imag
+    # Means in the samples' precision (pairwise on NumPy, a tree on CuPy,
+    # whose float64-accumulating reduction over few long rows is 10x
+    # slower); the 2x2 algebra in float64.
+    sii = xp.mean(i_branch * i_branch, axis=-1).astype(xp.float64)
+    sqq = xp.mean(q_branch * q_branch, axis=-1).astype(xp.float64)
+    siq = xp.mean(i_branch * q_branch, axis=-1).astype(xp.float64)
 
-    C, N = samples.shape
+    a_ii, a_iq, a_qi, a_qq = correct_fn(sii, sqq, siq, xp)
+    # Restore input power: E[|s_hat|^2] = E[|r|^2], each branch at half.
+    gain = xp.sqrt((sii + sqq) / 2.0)
+    real = i_branch.dtype
+
+    def coef(a: ArrayType) -> ArrayType:
+        return (a * gain).astype(real)[:, None]
+
     result = xp.empty_like(samples)
-
-    for ch in range(C):
-        r = samples[ch]  # (N,)
-        P_in = xp.mean(xp.abs(r) ** 2)
-
-        comp0, comp1 = correct_fn(r, xp)
-
-        # Restore input power: E[|s_hat|^2] = P_in
-        s_corr = (comp0 + 1j * comp1) * xp.sqrt(P_in / 2.0)
-
-        if s_corr.dtype != samples.dtype:
-            s_corr = s_corr.astype(samples.dtype)
-
-        result[ch] = s_corr
-
+    result.real[...] = coef(a_ii) * i_branch + coef(a_iq) * q_branch
+    result.imag[...] = coef(a_qi) * i_branch + coef(a_qq) * q_branch
     return restore_1d(was_1d, result)

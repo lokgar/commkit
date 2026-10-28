@@ -5,6 +5,8 @@ helpers (axes and figure layout, SI-prefixed tick labels, min/max
 decimation of long traces) are shared by the plot modules.
 """
 
+from typing import Any
+
 import matplotlib as mpl
 import matplotlib.font_manager as fm
 import matplotlib.pyplot as plt
@@ -151,6 +153,39 @@ def _grid_figsize(
     """
     w, h = panel if panel is not None else mpl.rcParams["figure.figsize"]
     return (w * ncols, h * nrows)
+
+
+def _channel_axes(
+    num_channels: int, ax: Any, panel: tuple[float, float] | None = None
+) -> tuple[Any, Any, list[Any]]:
+    """The figure, its Axes grid and one target Axes per channel.
+
+    ``ax=None`` creates a grid of ``panel``-sized Axes (two columns at most);
+    one Axes for several channels overlays them, with a warning; several
+    Axes are used in order, the last one taking any surplus channels.
+    """
+    if ax is None:
+        nrows, ncols = _create_subplot_grid(num_channels)
+        fig, axes = plt.subplots(
+            nrows,
+            ncols,
+            figsize=_grid_figsize(nrows, ncols, panel=panel),
+            squeeze=False,
+        )
+    elif not isinstance(ax, (list, tuple, np.ndarray)):
+        logger.warning(
+            "Multiple channels detected but single axis provided. Overlaying plots."
+        )
+        axes = np.array([[ax] * num_channels])
+        fig = ax.figure
+    else:
+        axes = np.atleast_2d(ax)
+        fig = axes.flat[0].figure
+    targets = []
+    for i in range(num_channels):
+        row, col = divmod(i, axes.shape[1])
+        targets.append(axes[row, col] if row < axes.shape[0] else axes.flat[-1])
+    return fig, axes, targets
 
 
 def _square_figsize(n: int = 1) -> tuple[float, float]:

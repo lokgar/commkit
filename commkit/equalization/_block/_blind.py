@@ -12,6 +12,7 @@ import numpy as np
 
 from ...backend import to_device
 from ...logger import logger
+from .._common import _rde_rings
 from ..result import EqualizerResult, _log_equalizer_exit
 from ._engine import (
     _block_loop,
@@ -20,6 +21,31 @@ from ._engine import (
     _fdaf_gradient_update,
     _prepare_block,
 )
+
+_RDE_KERNEL: dict[str, Any] = {}
+
+
+def _cupy_rde_error() -> Any:
+    """Fused CuPy kernel of the RDE error ``y · (r_k² - |y|²)``.
+
+    The ring of each symbol is counted against the squared midpoints of the
+    ``(2, K)`` table of ``_rde_rings`` and the error formed, in one launch
+    instead of a search and three ufunc passes.
+    """
+    if "k" not in _RDE_KERNEL:
+        import cupy as cp
+
+        _RDE_KERNEL["k"] = cp.ElementwiseKernel(
+            "complex64 y, float32 a2, raw float32 rings, int32 K",
+            "complex64 e",
+            """
+            int k = 0;
+            for (int j = 0; j < K - 1; ++j) k += a2 > rings[K + j];
+            e = y * (rings[k] - a2);
+            """,
+            "commkit_rde_error",
+        )
+    return _RDE_KERNEL["k"]
 
 
 def _block_fdaf_blind(
@@ -46,7 +72,8 @@ def _block_fdaf_blind(
     Blind, phase-directed adaptation with no CPR - the per-block error is the
     Godard (``kind='cma'``) or nearest-ring (``kind='rde'``) gradient, with
     pilot positions overridden by the LMS residual.  ``r2`` is the Godard radius
-    (CMA) and ``radii_np`` the unique ring radii (RDE).  ``step_size=None``
+    (CMA) and ``radii_np`` the unique ring radii (RDE), decided by their
+    squared midpoints (``_rde_rings``).  ``step_size=None``
     is block_rde's default, ``min(1e-3, 0.5 / block_size)``.
     """
     use_pilots = pilot_ref is not None and pilot_mask is not None
@@ -89,7 +116,10 @@ def _block_fdaf_blind(
             pref = xp.tile(pref[None, :], (C, 1))
         pmask_dev = xp.asarray(np.asarray(pilot_mask).astype(bool))
     if kind == "rde":
-        radii = xp.asarray(np.asarray(radii_np, dtype=np.float64))
+        assert radii_np is not None
+        rings = xp.asarray(_rde_rings(radii_np))
+        ring2, bounds2 = rings[0], rings[1, :-1]
+        rde_error = _cupy_rde_error() if xp is not np else None
 
     e_scatter = xp.zeros((C, run.fftsize), dtype=xp.complex64)
     y_all = xp.empty((C, n_sym), dtype=xp.complex64)
@@ -108,11 +138,10 @@ def _block_fdaf_blind(
         if kind == "cma":
             e = y_block * (xp.float32(r2) - abs2)
         else:  # rde - nearest ring radius per symbol
-            abs_y = xp.sqrt(abs2)
-            rd = radii[
-                xp.argmin(xp.abs(abs_y[:, :, None] - radii[None, None, :]), axis=-1)
-            ]
-            e = y_block * (rd.astype(xp.float32) ** 2 - abs2)
+            if rde_error is not None:
+                e = rde_error(y_block, abs2, rings, np.int32(rings.shape[1]))
+            else:
+                e = y_block * (ring2[np.searchsorted(bounds2, abs2)] - abs2)
         if use_pilots:
             pm = pmask_dev[b_start : b_start + B][None, :]
             e = xp.where(pm, pref[:, b_start : b_start + B] - y_block, e)
@@ -121,8 +150,8 @@ def _block_fdaf_blind(
         _fdaf_gradient_update(run.h, X_fd, e, e_scatter, sps, B, run.num_taps, mu, xp)
 
     def store(b_start: int, b_end: int, B: int) -> None:
-        y_all[:, b_start:b_end] = y_ws[:, :B]
-        e_all[:, b_start:b_end] = e_ws[:, :B]
+        run.put(y_all, y_ws, B)
+        run.put(e_all, e_ws, B)
 
     snap: list[np.ndarray] = []
 

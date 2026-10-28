@@ -109,45 +109,6 @@ def test_gpu_matches_cpu(xp):
     assert _rel(gpu, apply_fiber_propagation(x, **kw)) < 1e-4
 
 
-# -----------------------------------------------------------------------------
-# CPU passes against the plain stages (oracle; also gives the Numba kernels
-# real coverage under NUMBA_DISABLE_JIT)
-# -----------------------------------------------------------------------------
-
-
-@pytest.mark.parametrize("dtype", [np.complex64, np.complex128])
-def test_numba_passes_match_the_plain_stages(dtype, monkeypatch):
-    monkeypatch.setattr(_fiber, "_HYBRID_KERR_MIN", 0)  # Numba Kerr at any size
-    rng = np.random.default_rng(3)
-    n = 512
-    x = (rng.standard_normal((2, n)) + 1j * rng.standard_normal((2, n))).astype(dtype)
-    phase_km = rng.uniform(-3.0, 3.0, n)
-    omega = 2.0 * np.pi * np.fft.fftfreq(n, d=1.0 / FS)
-    waveplates = _fiber._haar_unitaries(rng, (2, 3))
-    args = (np, np.dtype(dtype), phase_km, omega, 2e-13, waveplates)
-    cpu, plain = _fiber._CpuOps(*args), _fiber._Ops(*args)
-    cpu.set_span(1)
-    plain.set_span(1)
-    tol = 1e-5 if dtype == np.complex64 else 1e-12
-    for section in (None, 2):
-        np.testing.assert_allclose(
-            cpu.linear(x.copy(), 0.7, section),
-            plain.linear(x.copy(), 0.7, section),
-            rtol=tol,
-            atol=tol,
-        )
-    for k in (0.3, -1.2):
-        np.testing.assert_allclose(
-            cpu.nonlinear(x.copy(), k), plain.nonlinear(x.copy(), k), rtol=tol, atol=tol
-        )
-        np.testing.assert_allclose(
-            cpu.nonlinear(x[:1].copy(), k),
-            plain.nonlinear(x[:1].copy(), k),
-            rtol=tol,
-            atol=tol,
-        )
-
-
 def test_dbp_leaves_pmd_alone():
     """A receiver cannot know the waveplates: DBP of a PMD fiber is DBP of
     the same fiber without PMD."""

@@ -21,6 +21,7 @@ import pytest
 
 from commkit.core import Signal
 from commkit.equalization import block_lms
+from commkit.equalization._block._engine import _Block
 from commkit.mapping import Constellation
 from commkit.math import normalize
 from commkit.recovery import BPS, PLL, CycleSlip
@@ -641,6 +642,47 @@ class TestBlockLMSEdgeCases:
         assert result_sig.signal.sampling_rate == 1e6
         xpt.assert_allclose(result_sig.signal.samples, result_arr.y_hat)
         xpt.assert_allclose(result_sig.y_hat, result_arr.y_hat)
+
+
+class TestBlockCopies:
+    """The per-block copies at the block index (on the device for CuPy, so a
+    captured graph replays them at the right offset) equal plain slicing."""
+
+    def _run(self, xp, C=2, n_sym=10, block_size=4, sps=2, num_taps=3):
+        rng = np.random.default_rng(0)
+        n_pad = n_sym * sps + 1  # the last window runs past the data
+        x = rng.standard_normal((C, n_pad)) + 1j * rng.standard_normal((C, n_pad))
+        return _Block(
+            xp=xp, was_1d=False, C=C, n_sym=n_sym, sps=sps, num_taps=num_taps,
+            block_size=block_size, fftsize=16,
+            x_padded=xp.asarray(x.astype(np.complex64)), lead=0, real_end=n_pad,
+            resume=0, training=None, eq_norm=None, h=None,
+            x_win=xp.full((C, 16), 7.0, dtype=xp.complex64),
+            block_dev=None if xp is np else xp.zeros(1, dtype=xp.int64),
+        )  # fmt: skip
+
+    def test_window_take_put_follow_the_block_index(self, xp, xpt):
+        run = self._run(xp)
+        x = to_numpy(run.x_padded)
+        src = xp.asarray(np.arange(2 * 10, dtype=np.float32).reshape(2, 10))
+        dst = xp.zeros((2, 10), dtype=xp.float32)
+        for b, B in ((0, 4), (1, 4), (2, 2)):
+            run.block = b
+            run.fill_window(B)
+            start, need = b * 4 * 2, B * 2 + 2
+            expected = np.zeros((2, 16), np.complex64)
+            avail = min(need, x.shape[1] - start)
+            expected[:, :avail] = x[:, start : start + avail]
+            xpt.assert_array_equal(run.x_win, xp.asarray(expected))
+
+            staged = xp.full((2, 4), -1.0, dtype=xp.float32)
+            run.take(staged, src, B)
+            xpt.assert_array_equal(staged[:, :B], src[:, 4 * b : 4 * b + B])
+            run.put(dst, staged, B)
+            run.advance()
+        xpt.assert_array_equal(dst, src)
+        if run.block_dev is not None:
+            assert int(run.block_dev[0]) == 3
 
 
 class TestBlockLMSCUDAGraphAndPerformance:

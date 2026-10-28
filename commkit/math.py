@@ -156,11 +156,13 @@ def normalize(
     # Handle division by zero safely for both NumPy and CuPy.
     # Avoid control flow based on data values to prevent host-device synchronization.
     # Use ones_like instead of the literal 1.0 (float64) to preserve float32 dtype.
-    safe_norm = xp.where(norm_factor == 0, xp.ones_like(norm_factor), norm_factor)
-    result = x / safe_norm
-
-    # If norm_factor is 0, the input was all zeros -> output should also be zeros
-    return xp.where(norm_factor == 0, xp.zeros(x.shape, dtype=x.dtype), result)
+    is_zero = norm_factor == 0
+    result = x / xp.where(is_zero, xp.ones_like(norm_factor), norm_factor)
+    # A zero factor means an all-zero slice, which 0 / 1 keeps at zero, except
+    # for "unity_gain", where a non-zero slice can sum to zero.
+    if mode == "unity_gain":
+        result = xp.where(is_zero, xp.zeros((), dtype=x.dtype), result)
+    return result
 
 
 # ---------------------------------------------------------------------------
@@ -306,10 +308,8 @@ def _remove_linear_trend(y: ArrayType, *, x: Any = None) -> tuple[ArrayType, Arr
         ``x`` (per sample by default).
     """
     y, xp, _ = dispatch(y)
-    n = y.shape[-1]
-    xc, denom = _centered_axis(n, x, xp)
-    yc = y - xp.mean(y, axis=-1, keepdims=True)
-    slope = xp.sum(yc * xc, axis=-1) / denom
+    slope = _linear_trend_slope(y, x=x, xp=xp)
+    xc, _ = _centered_axis(y.shape[-1], x, xp)
     return y - slope[..., None] * xc[None, :], slope
 
 
@@ -321,10 +321,13 @@ def _remove_linear_trend(y: ArrayType, *, x: Any = None) -> tuple[ArrayType, Arr
 def _unit_phasor(phase: ArrayType, dtype: Any, xp: Any) -> ArrayType:
     """``exp(j·phase)`` as ``dtype``, from a real cos and sin.
 
-    Several times faster than a complex exponential on the CPU.  ``phase``
-    keeps its own precision for the cos and sin; wrap large phases first if
-    that is float32.
+    Several times faster than a complex exponential on the CPU; on the GPU
+    the complex exponential is one kernel and gives the same values.
+    ``phase`` keeps its own precision for the cos and sin; wrap large phases
+    first if that is float32.
     """
+    if xp is not np:
+        return xp.exp(1j * phase).astype(dtype, copy=False)
     h = xp.empty(phase.shape, dtype=dtype)
     h.real = xp.cos(phase)
     h.imag = xp.sin(phase)

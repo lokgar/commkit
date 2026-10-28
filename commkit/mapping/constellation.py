@@ -28,7 +28,7 @@ import numpy as np
 
 from .._array import warn_if_double
 from ..backend import ArrayType, dispatch
-from .gray import _gray_points, _nearest_index, _unpack_bits
+from .gray import _gray_points, _nearest_index, _pack, _unpack_bits
 from .llr import _Axis, _llr, _llr_separable, _llr_separable_gpu
 from .shaping import (
     _constellation_power,
@@ -225,7 +225,12 @@ class Constellation:
         pts = self.points.astype(np.complex128)
         scale = float(np.max(np.abs(pts))) or 1.0
         tol = 1e-6 * scale
-        for n in range(self.order, 1, -1):
+        # A rotation by 2π/n moves the points off the origin in orbits of n,
+        # so n divides their count.
+        off_origin = int(np.count_nonzero(np.abs(pts) > tol))
+        for n in range(off_origin, 1, -1):
+            if off_origin % n:
+                continue
             rotated = pts * np.exp(2j * np.pi / n)
             dist = np.abs(rotated[:, None] - pts[None, :]).min(axis=1)
             if float(dist.max()) < tol:
@@ -450,12 +455,6 @@ def _host_array(value: object, name: str) -> np.ndarray:
     if type(value).__module__.split(".")[0] == "cupy":
         raise TypeError(f"{name} must be a host (NumPy) array; use .get() first.")
     return np.array(value, copy=True)
-
-
-def _pack(labels: np.ndarray) -> np.ndarray:
-    """MSB-first bit rows to integers."""
-    k = labels.shape[1]
-    return labels.astype(np.int64) @ (1 << np.arange(k - 1, -1, -1, dtype=np.int64))
 
 
 @cache

@@ -25,6 +25,20 @@ class TestPlotEyeDiagram:
         assert fig is not None
         assert ax is not None
 
+    @pytest.mark.parametrize("shape", [(1000,), (2, 1000)], ids=["1-D", "2-D"])
+    @pytest.mark.parametrize("cplx", [False, True], ids=["real", "complex"])
+    def test_eye_diagram_hist_color_limits(
+        self, xp: Any, shape: tuple, cplx: bool
+    ) -> None:
+        """vmin / vmax set the color limits of every histogram image."""
+        samples = xp.random.randn(*shape) + (
+            1j * xp.random.randn(*shape) if cplx else 0
+        )
+        _, ax = plot_eye_diagram(samples, sps=4, kind="hist", vmin=0.5, vmax=7.0)
+        for a in np.atleast_1d(ax).ravel():
+            assert a.images[0].get_clim() == (0.5, 7.0)
+        plt.close("all")
+
     def test_eye_diagram_complex(self, xp: Any) -> None:
         """Verify eye diagram generation for complex-valued signals (I/Q)."""
         samples = xp.random.randn(1000) + 1j * xp.random.randn(1000)

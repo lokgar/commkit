@@ -15,12 +15,7 @@ from ...core.signal import Signal
 from ...logger import logger
 from ...mapping.constellation import _slicer_params
 from ...recovery import BPS, PLL
-from .._kernels_numba import (
-    _get_numba_lms,
-    _get_numba_lms_cpr,
-    _get_numba_rls,
-    _get_numba_rls_cpr,
-)
+from .._kernels_numba import _get_numba_cpr, _get_numba_lms, _get_numba_rls
 from ..result import (
     EqualizerResult,
     EqualizerState,
@@ -39,6 +34,9 @@ from ._setup import (
 # -----------------------------------------------------------------------------
 # ADAPTIVE equalization
 # -----------------------------------------------------------------------------
+
+
+_NO_P = np.empty((0, 0), dtype=np.complex128)  # the RLS matrix, unused by LMS
 
 
 def lms(
@@ -312,14 +310,19 @@ def lms(
 
         def segment(start: int, stop: int) -> None:
             x, train, n_train, y_out, e_out, w_hist = run.segment(start, stop)
-            _get_numba_lms_cpr()(
+            _get_numba_cpr()(
                 x,
                 train,
                 constellation_np,
                 *cpr_args.bps_args(),
                 run.W,
+                False,  # LMS: no RLS state
                 mu,
+                _NO_P,
+                np.float32(1.0),
+                np.float32(0.0),
                 n_train,
+                np.int32(0),
                 run.stride,
                 store_weights,
                 *cpr_args.loop_args(),
@@ -353,8 +356,8 @@ def _check_rls_divergence(
 ) -> None:
     """Raise if RLS produced non-finite weights (silent divergence guard).
 
-    Mirrors the ``_div_flag`` check in ``block_lms``: a single device->host sync on
-    the assembled weights catches loss of positive-definiteness in the inverse
+    Like the block equalizers' check after their loop: a single device->host
+    sync on the assembled weights catches loss of positive-definiteness in the inverse
     correlation matrix P (which surfaces as NaN/Inf taps) and converts it into an
     actionable error instead of returning garbage weights.
     """
@@ -615,12 +618,14 @@ def rls(
 
         def segment(start: int, stop: int) -> None:
             x, train, n_train, y_out, e_out, w_hist = run.segment(start, stop)
-            _get_numba_rls_cpr()(
+            _get_numba_cpr()(
                 x,
                 train,
                 constellation_np,
                 *cpr_args.bps_args(),
                 run.W,
+                True,  # RLS
+                np.float32(0.0),
                 P,
                 lam,
                 leak,

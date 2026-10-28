@@ -51,11 +51,11 @@ time-reversible.
 Devices.  With equal steps a span has two step lengths, so the CPU and the
 plain CuPy stages precompute their responses (float64 phase, cast to the
 field's precision) and the linear stage is one multiply.  The CPU runs the
-FFTs on ``scipy.fft`` (``_fft``), the Kerr stage as Numba power/phase and
-rotation passes around NumPy's SIMD sin/cos (Numba's are scalar without
-SVML) and the PMD section as one Numba pass.  CuPy input runs three fused
-elementwise kernels (linear stage, linear stage with a PMD section, Kerr
-stage) that compute the phase in registers, on in-place, unscaled cuFFT
+FFTs on ``scipy.fft`` (``_fft``) and the other stages as NumPy passes
+(Numba passes for the Kerr and PMD stages measured 1.1-1.8x slower end to
+end on 8 cores: their worker threads compete with the FFT's).  CuPy input
+runs three fused elementwise kernels (linear stage, linear stage with a PMD
+section, Kerr stage) that compute the phase in registers, on in-place, unscaled cuFFT
 transforms, so each stage reads and writes the field once and a span
 allocates nothing; the span is captured once into a CUDA graph and
 replayed, with the next span's waveplates copied into a fixed device buffer
@@ -318,8 +318,8 @@ class _Ops:
     """Stage operations on NumPy or (unfused) CuPy arrays.
 
     ``phase_km`` is the dispersion phase of 1 km on the FFT grid and
-    ``omega`` the angular frequency grid, both float64 on the field's
-    device.  The response of each distinct stage length (two with equal
+    ``omega`` the angular frequency grid (only with PMD, else ``None``),
+    both float64 on the field's device.  The response of each distinct stage length (two with equal
     steps, per direction) is computed once in float64 and cast to the
     field's precision.  ``waveplates`` holds every span's PMD sections,
     ``(spans, K, 2, 2)`` on the host, or ``None``.
@@ -332,7 +332,7 @@ class _Ops:
         xp: ModuleType,
         dtype: Any,
         phase_km: ArrayType,
-        omega: ArrayType,
+        omega: ArrayType | None,
         half_tau: float,
         waveplates: np.ndarray | None,
     ) -> None:
@@ -367,6 +367,7 @@ class _Ops:
         """``H e^{-jωτ/2}`` and ``H e^{+jωτ/2}`` of a stage with a section."""
         key = ("pmd", length_km)
         if key not in self._responses:
+            assert self.omega is not None  # set with PMD
             phase = self.phase_km * length_km
             delay = self.omega * self.half_tau
             self._responses[key] = (
@@ -393,101 +394,6 @@ class _Ops:
         """``x ← x · exp(-j k Σ_c |x_c|²)`` (the power summed over channels)."""
         power = (x.real * x.real + x.imag * x.imag).sum(axis=0)
         x *= _unit_phasor(power * power.dtype.type(-k), x.dtype, self.xp)
-        return x
-
-
-_NUMBA: dict[str, Callable[..., None]] = {}
-
-# Below this many samples the NumPy Kerr stage runs instead of the hybrid
-# one.  Measured on 4 cores (container), stage alone: 0.7 vs 0.5 ms at 2^16,
-# 3.1 vs 3.3 ms at 2^18, 17 vs 12 ms at 2^20; the trig-free Jones pass won at
-# every size (2x at 2^12, 10x at 2^20).  On the reference machine (8 cores,
-# 16 threads) the stage alone favors the hybrid from 2^12, but whole
-# propagations do not: there OpenMP workers spinning after each Numba pass
-# take the cores from scipy.fft, and the hybrid Kerr stage is 1.7x slower end
-# to end at 2^18 and 1.1x at 2^20, the Numba Jones pass 1.5-2.2x up to 2^18
-# (AGENTS roadmap, Performance).
-_HYBRID_KERR_MIN = 1 << 18
-
-
-def _numba_kernels() -> dict[str, Callable[..., None]]:
-    """Trig-free CPU passes (in place, complex64 or complex128).
-
-    Numba compiles sin/cos to scalar libm calls (no SVML), while NumPy 2 has
-    SIMD sin/cos; so the Kerr stage is a Numba power/phase pass, NumPy sin/cos,
-    then a Numba rotation pass, from ``_HYBRID_KERR_MIN`` samples.  Real
-    arithmetic throughout: a complex literal (1j) would promote complex64 work
-    to complex128.
-    """
-    if not _NUMBA:
-        import numba
-
-        jit = numba.njit(cache=True, fastmath=True, nogil=True, parallel=True)
-
-        @jit
-        def kerr_phase(x, k, out):  # type: ignore[no-untyped-def]
-            C, N = x.shape
-            for i in numba.prange(N):  # type: ignore[attr-defined]
-                p = x[0, i].real * x[0, i].real + x[0, i].imag * x[0, i].imag
-                for c in range(1, C):
-                    p += x[c, i].real * x[c, i].real + x[c, i].imag * x[c, i].imag
-                out[i] = -k * p
-
-        @jit
-        def rotate(x, cos, sin):  # type: ignore[no-untyped-def]
-            C, N = x.shape
-            for i in numba.prange(N):  # type: ignore[attr-defined]
-                cr = cos[i]
-                ci = sin[i]
-                for c in range(C):
-                    xr = x[c, i].real
-                    xi = x[c, i].imag
-                    x[c, i] = complex(xr * cr - xi * ci, xr * ci + xi * cr)
-
-        @jit
-        def jones(X, u, hm, hp):  # type: ignore[no-untyped-def]
-            for i in numba.prange(X.shape[1]):  # type: ignore[attr-defined]
-                x0 = X[0, i]
-                x1 = X[1, i]
-                y0 = (u[0, 0] * x0 + u[0, 1] * x1) * hm[i]
-                y1 = (u[1, 0] * x0 + u[1, 1] * x1) * hp[i]
-                X[0, i] = u[0, 0].conjugate() * y0 + u[1, 0].conjugate() * y1
-                X[1, i] = u[0, 1].conjugate() * y0 + u[1, 1].conjugate() * y1
-
-        _NUMBA.update(kerr_phase=kerr_phase, rotate=rotate, jones=jones)
-    return _NUMBA
-
-
-class _CpuOps(_Ops):
-    """NumPy field: Numba Kerr and PMD passes on preallocated buffers."""
-
-    def __init__(self, *args: Any) -> None:
-        super().__init__(*args)
-        self.k = _numba_kernels()
-        n = self.phase_km.shape[-1]
-        real = np.empty(0, self.dtype).real.dtype
-        self._phase = np.empty(n, real)
-        self._cos = np.empty(n, real)
-        self._sin = np.empty(n, real)
-
-    def linear(self, X: ArrayType, length_km: float, section: int | None) -> ArrayType:
-        if section is None:
-            return super().linear(X, length_km, None)
-        assert self.waveplates is not None
-        X = np.ascontiguousarray(X)
-        hm, hp = self._pmd_responses(length_km)
-        u = self.waveplates[self.span, section].astype(X.dtype)
-        self.k["jones"](X, u, hm, hp)
-        return X
-
-    def nonlinear(self, x: ArrayType, k: float) -> ArrayType:
-        if x.shape[-1] < _HYBRID_KERR_MIN:
-            return super().nonlinear(x, k)
-        x = np.ascontiguousarray(x)
-        self.k["kerr_phase"](x, self._phase.dtype.type(k), self._phase)
-        np.cos(self._phase, out=self._cos)
-        np.sin(self._phase, out=self._sin)
-        self.k["rotate"](x, self._cos, self._sin)
         return x
 
 
@@ -573,7 +479,7 @@ class _FusedOps(_Ops):
         xp = self.xp
         self.k = _cupy_kernels()
         self.phi = self.phase_km.astype(xp.float32)
-        self.omega32 = self.omega.astype(xp.float32)
+        self.omega32 = None if self.omega is None else self.omega.astype(xp.float32)
         self.inv_n = np.float32(1.0 / self.phase_km.shape[-1])
         self.u_all: Any = None
         self.u_span: Any = None
@@ -623,9 +529,7 @@ def _make_ops(x: ArrayType, xp: ModuleType, *args: Any) -> _Ops:
 
     ``args`` are those of :class:`_Ops` after ``xp`` and the dtype.
     """
-    if xp is np:
-        return _CpuOps(xp, x.dtype, *args)
-    if x.dtype != xp.complex64:
+    if xp is np or x.dtype != xp.complex64:
         return _Ops(xp, x.dtype, *args)
     return _FusedOps(xp, x.dtype, *args)
 
@@ -651,9 +555,10 @@ def _ase_std(link: _Link, noise_figure_db: float, sampling_rate: float) -> float
 
 def _outer_band_fraction(X: ArrayType, xp: ModuleType, sampling_rate: float) -> float:
     """Fraction of the spectrum's power beyond 0.4 f_s."""
-    f = xp.abs(xp.fft.fftfreq(X.shape[-1], d=1.0 / sampling_rate))
+    n = X.shape[-1]
+    k = int(0.4 * n)  # |f| > 0.4 f_s: FFT bins k + 1 .. n - k - 1, contiguous
     power = X.real * X.real + X.imag * X.imag
-    outer = xp.sum(power[:, f > 0.4 * sampling_rate])
+    outer = xp.sum(power[:, k + 1 : n - k])
     return float(outer / xp.maximum(xp.sum(power), 1e-300))
 
 
@@ -730,8 +635,6 @@ def propagate(
         ),
         xp=xp,
     )
-    omega = 2.0 * np.pi * xp.fft.fftfreq(N, d=1.0 / sampling_rate)
-
     waveplates = std = None
     if forward and (noise_figure_db is not None or fiber.pmd_ps_sqrt_km > 0):
         gen = as_generator(rng)
@@ -739,6 +642,11 @@ def propagate(
             waveplates = _haar_unitaries(gen, (link.num_spans, plan.num_steps))
         if noise_figure_db is not None:
             std = x.real.dtype.type(_ase_std(link, noise_figure_db, sampling_rate))
+    omega = (  # the PMD stages' delay response needs the angular frequencies
+        None
+        if waveplates is None
+        else 2.0 * np.pi * xp.fft.fftfreq(N, d=1.0 / sampling_rate)
+    )
     ops = _make_ops(x, xp, phase_km, omega, plan.half_tau_s, waveplates)
 
     def check_aliasing(X: ArrayType) -> None:

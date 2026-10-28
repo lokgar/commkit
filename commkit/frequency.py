@@ -27,10 +27,10 @@ from .math import _derotate, _linear_trend_slope
 from .timing import _parabolic_peak_offset
 
 # Lazy-compiled Numba kernel for the M&M iterative bootstrap.
-_NUMBA_MM: dict[str, Callable[..., float]] = {}
+_NUMBA_MM: dict[str, Callable[..., np.ndarray]] = {}
 
 
-def _get_numba_mm_bootstrap() -> Callable[..., float]:
+def _get_numba_mm_bootstrap() -> Callable[..., np.ndarray]:
     """JIT-compile and cache the Numba M&M iterative bootstrap kernel.
 
     Returns
@@ -41,22 +41,23 @@ def _get_numba_mm_bootstrap() -> Callable[..., float]:
     if "mm" not in _NUMBA_MM:
         import numba
 
-        @numba.njit(cache=True, fastmath=True, nogil=True)
+        @numba.njit(cache=True, fastmath=True, nogil=True, parallel=True)
         def _mm_bootstrap_loop(
             theta: np.ndarray, amp: np.ndarray, M_val: float, fs: float
-        ) -> float:
-            """Run the Mengali-Morelli bootstrap over the lags (Numba).
+        ) -> np.ndarray:
+            """Run the Mengali-Morelli bootstrap over the lags of each row (Numba).
 
             Each lag's phase is predicted from the weighted frequency estimate of the
             previous lags, then folded into the weighted sum.  The dependency between
-            lags prevents vectorization.
+            lags prevents vectorization; the rows are independent and run in
+            parallel.
 
             Parameters
             ----------
             theta : numpy.ndarray
-                Wrapped phase of ``R[m]`` at each lag, float64, ``(L,)``.
+                Wrapped phase of ``R[m]`` at each lag, float64, ``(R, L)``.
             amp : numpy.ndarray
-                Magnitude ``|R[m]|`` at each lag, float64, ``(L,)``.
+                Magnitude ``|R[m]|`` at each lag, float64, ``(R, L)``.
             M_val : float
                 Power ``M`` of the pre-processing: 1 for data-aided or generic input,
                 the order for PSK, 4 for QAM.
@@ -65,37 +66,41 @@ def _get_numba_mm_bootstrap() -> Callable[..., float]:
 
             Returns
             -------
-            float
-                Estimated frequency offset in Hz.
+            numpy.ndarray
+                Estimated frequency offset of each row in Hz, float64, ``(R,)``.
             """
             two_pi = 2.0 * np.pi
-            L = len(theta)
+            rows, L = theta.shape
+            out = np.empty(rows, dtype=np.float64)
 
-            # Lag 1 initialization (m=1, m²=1)
-            Theta_0 = theta[0]
-            w0 = amp[0] * amp[0]  # m² · |R|² at m=1
-            f_hat = Theta_0 * fs / (two_pi * M_val)
-            w_sum = w0 if w0 > 1e-30 else 1e-30
-            wf_sum = w_sum * f_hat
+            for r in numba.prange(rows):  # type: ignore[attr-defined,no-untyped-call]
+                # Lag 1 initialization (m=1, m²=1)
+                Theta_0 = theta[r, 0]
+                w0 = amp[r, 0] * amp[r, 0]  # m² · |R|² at m=1
+                f_hat = Theta_0 * fs / (two_pi * M_val)
+                w_sum = w0 if w0 > 1e-30 else 1e-30
+                wf_sum = w_sum * f_hat
 
-            for m_idx in range(1, L):
-                m_val = float(m_idx + 1)
-                predicted = two_pi * f_hat * M_val * m_val / fs
-                diff = predicted - theta[m_idx]
-                # round() is the C math round - unboxed, no Python overhead
-                correction = round(diff / two_pi)
-                Theta_m = theta[m_idx] + two_pi * correction
-                f_m = Theta_m * fs / (two_pi * m_val * M_val)
-                w_m = m_val * m_val * amp[m_idx] * amp[m_idx]
-                w_sum += w_m
-                wf_sum += w_m * f_m
-                f_hat = wf_sum / w_sum
+                for m_idx in range(1, L):
+                    m_val = float(m_idx + 1)
+                    predicted = two_pi * f_hat * M_val * m_val / fs
+                    diff = predicted - theta[r, m_idx]
+                    # round() is the C math round - unboxed, no Python overhead
+                    correction = round(diff / two_pi)
+                    Theta_m = theta[r, m_idx] + two_pi * correction
+                    f_m = Theta_m * fs / (two_pi * m_val * M_val)
+                    w_m = m_val * m_val * amp[r, m_idx] * amp[r, m_idx]
+                    w_sum += w_m
+                    wf_sum += w_m * f_m
+                    f_hat = wf_sum / w_sum
 
-            return float(f_hat)
+                out[r] = f_hat
+
+            return out
 
         _NUMBA_MM["mm"] = _mm_bootstrap_loop
 
-    kernel: Callable[..., float] = _NUMBA_MM["mm"]
+    kernel: Callable[..., np.ndarray] = _NUMBA_MM["mm"]
     return kernel
 
 
@@ -437,17 +442,17 @@ def _mth_power(
 
     X_m = _fft.fft(x_m, n=nfft, axis=-1)  # (R, nfft)
     freqs_np = np.fft.fftfreq(nfft, d=1.0 / fs)  # reported on the host
-    freqs = xp.fft.fftfreq(nfft, d=1.0 / fs)
     mag = xp.abs(X_m)
     if method.search_range is not None:
         tone_lo = M * min(method.search_range)
         tone_hi = M * max(method.search_range)
-        mask = (freqs >= tone_lo) & (freqs <= tone_hi)
-        if not bool(xp.any(mask)):
+        if not np.any((freqs_np >= tone_lo) & (freqs_np <= tone_hi)):
             raise ValueError(
                 f"search_range {method.search_range} Hz produces an empty search "
                 f"window in the M={M} scaled spectrum."
             )
+        freqs = xp.fft.fftfreq(nfft, d=1.0 / fs)
+        mask = (freqs >= tone_lo) & (freqs <= tone_hi)
         mag = xp.where(mask[None, :], mag, xp.zeros_like(mag))
     mag[:, 0] = 0.0  # Δf = 0 is degenerate; also any residual DC
 
@@ -469,7 +474,9 @@ def _mth_power(
         mu = _parabolic_peak_offset(
             mag[rows, k_prev], mag[rows, k_peak], mag[rows, k_next], xp, log=False
         )
-    f_bin = freqs[k_peak]
+    # The peak bin's frequency, as fftfreq computes it: signed bin times fs/nfft.
+    k_signed = xp.where(k_peak > (nfft - 1) // 2, k_peak - nfft, k_peak)
+    f_bin = k_signed.astype(xp.float64) * (1.0 / (nfft * (1.0 / fs)))
     values = (f_bin + mu * (fs / nfft)) / M
     return _Rows(
         values=values.astype(xp.float64),
@@ -498,16 +505,12 @@ def _mengali_morelli(
     lags = xp.arange(1, L + 1, dtype=xp.float64)
     R_rows = R_all[:, 1 : L + 1] / (N - lags[None, :])  # unbiased, (R, L)
 
-    # The bootstrap is a sequential scan; one transfer, then Numba per row.
+    # The bootstrap is a sequential scan over the lags; one transfer, then one
+    # Numba call over all rows.
     R_np = np.asarray(to_device(R_rows, "cpu"))
-    kernel = _get_numba_mm_bootstrap()
-    values = np.array(
-        [
-            float(kernel(np.angle(R_np[r]), np.abs(R_np[r]), float(M), float(fs)))
-            for r in range(R)
-        ]
-    )
-    weights = np.sum(np.abs(R_np) ** 2, axis=-1)
+    amp = np.abs(R_np)
+    values = _get_numba_mm_bootstrap()(np.angle(R_np), amp, float(M), float(fs))
+    weights = np.sum(amp**2, axis=-1)
     return _Rows(
         values=xp.asarray(values),
         weights=xp.asarray(weights),

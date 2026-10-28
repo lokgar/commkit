@@ -14,6 +14,7 @@ from ..backend import ArrayType, dispatch, to_device
 from ._common import (
     _check_blocks,
     _Context,
+    _interp_block_phases,
     _mth_power_geometry,
     _Phase,
     _vv_block_phase,
@@ -241,7 +242,7 @@ def _tikhonov(symbols: ArrayType, method: Tikhonov, ctx: _Context) -> _Phase:
     sigma_v2 = float(1.0 / (M**2 * snr_lin * block_size))
 
     joint = method.joint_channels and C > 1
-    phi_u, block_centers, all_positions = _vv_block_phase(
+    phi_u = _vv_block_phase(
         symbols, xp, M, project, bias, block_size, method.joint_channels
     )
     if joint:  # rows are copies of the joint trajectory
@@ -257,9 +258,7 @@ def _tikhonov(symbols: ArrayType, method: Tikhonov, ctx: _Context) -> _Phase:
             [_sskf_smoother_1d(row, sigma_p2, sigma_v2, sp, xp) for row in phi_u]
         )
     phi_smooth = _repair_slips(phi_smooth, xp, method.cycle_slip, M, block_size)
-    phi_full = xp.stack(
-        [xp.interp(all_positions, block_centers, row) for row in phi_smooth]
-    )
+    phi_full = _interp_block_phases(phi_smooth, N, block_size, xp)
     if joint:
         phi_full = xp.broadcast_to(phi_full, (C, N)).copy()
         phi_smooth = xp.broadcast_to(phi_smooth, (C, N_blocks)).copy()
