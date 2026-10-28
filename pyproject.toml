@@ -85,14 +85,6 @@ markers = [
     "cpu_only: mark test as CPU-only",
 ]
 
-[tool.coverage.run]
-# Placeholder modules for planned codes are kept on purpose as reminders;
-# they hold no code yet, so they are not measured.
-omit = [
-    "commkit/coding/convolutional.py",
-    "commkit/coding/turbo.py",
-]
-
 [tool.bumpversion]
 current_version = "2.3.0"
 parse = "(?P<major>\\d+)\\.(?P<minor>\\d+)\\.(?P<patch>\\d+)"

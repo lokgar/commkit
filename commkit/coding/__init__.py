@@ -14,21 +14,21 @@ object::
 Codes: :class:`LinearBlockCode` (Hamming), :class:`LDPCCode` (DVB-S2, PON),
 :class:`ReedSolomonCode` (G.709, KR4, KP4, PON), :class:`BCHCode`,
 :class:`StaircaseCode` (G.709.2), :class:`Concatenated` (400ZR C-FEC,
-802.3dj), :class:`PolarCode` (5G NR), :class:`CRC` (error detection), and the rate-matching wrappers
+802.3dj), :class:`PolarCode` (5G NR), :class:`ConvolutionalCode` (K = 7),
+:class:`TurboCode` (LTE), :class:`CRC` (error detection), and the rate-matching wrappers
 :class:`Punctured` and :class:`Shortened`.  Distribution matching:
 :class:`CCDM` and probabilistic amplitude shaping, :class:`PAS`.  Decoders: :class:`Syndrome`,
 :class:`MaximumLikelihood`, :class:`MinSum`, :class:`SumProduct`,
 :class:`BerlekampMassey`, :class:`Chase`, :class:`HardIterations`,
-:class:`Stages`, :class:`SC`, :class:`SCL`.  Bit
+:class:`Stages`, :class:`SC`, :class:`SCL`, :class:`Viterbi`, :class:`BCJR`,
+:class:`TurboIterations`.  Bit
 permutations: :func:`interleave` and :func:`deinterleave` with an
 :class:`Interleaver`.
-
-The modules ``convolutional`` and ``turbo`` are placeholders for planned codes, carrying only their scope
-docstring.
 """
 
 from .algebraic import BCHCode, BerlekampMassey, ReedSolomonCode
 from .base import DecodeResult, decode, encode
+from .convolutional import BCJR, ConvolutionalCode, Viterbi
 from .crc import CRC
 from .interleaving import Interleaver, deinterleave, interleave
 from .ldpc import LDPCCode, MinSum, SumProduct
@@ -37,14 +37,17 @@ from .polar import SC, SCL, PolarCode
 from .product import Concatenated, HardIterations, Stages, StaircaseCode
 from .ratematch import Punctured, Shortened
 from .shaping import CCDM, PAS
+from .turbo import TurboCode, TurboIterations
 
 __all__ = [
     "BCHCode",
+    "BCJR",
     "BerlekampMassey",
     "CCDM",
     "CRC",
     "Chase",
     "Concatenated",
+    "ConvolutionalCode",
     "DecodeResult",
     "HardIterations",
     "Interleaver",
@@ -63,6 +66,9 @@ __all__ = [
     "StaircaseCode",
     "SumProduct",
     "Syndrome",
+    "TurboCode",
+    "TurboIterations",
+    "Viterbi",
     "decode",
     "deinterleave",
     "encode",

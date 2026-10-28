@@ -93,15 +93,6 @@ RNK = "estimate_rank"
 MET = "metric_host"
 EQR = "equalizer_result"
 
-# Placeholder modules for planned work are kept on purpose and not registered.
-PLACEHOLDERS = tuple(
-    f"commkit.coding.{name}"
-    for name in (
-        "convolutional",
-        "turbo",
-    )
-)
-
 Builder = Callable[["Inputs", Any], tuple[tuple, dict]]
 
 
@@ -279,6 +270,9 @@ ROWS: list[Row] = [
     Row("commkit.coding.algebraic.BerlekampMassey", VALUE),
     Row("commkit.coding.algebraic.ReedSolomonCode", VALUE),
     Row("commkit.coding.base.DecodeResult", VALUE),
+    Row("commkit.coding.convolutional.BCJR", VALUE),
+    Row("commkit.coding.convolutional.ConvolutionalCode", VALUE),
+    Row("commkit.coding.convolutional.Viterbi", VALUE),
     Row("commkit.coding.crc.CRC", VALUE),
     Row("commkit.coding.interleaving.Interleaver", VALUE),
     Row(
@@ -303,6 +297,8 @@ ROWS: list[Row] = [
     Row("commkit.coding.ratematch.Punctured", VALUE),
     Row("commkit.coding.shaping.CCDM", VALUE),
     Row("commkit.coding.shaping.PAS", VALUE),
+    Row("commkit.coding.turbo.TurboCode", VALUE),
+    Row("commkit.coding.turbo.TurboIterations", VALUE),
     Row("commkit.coding.ratematch.Shortened", VALUE),
     Row(
         "commkit.coding.base.decode",
@@ -801,7 +797,7 @@ def _public_callables() -> dict[str, Any]:
     found: dict[str, Any] = {}
     for info in pkgutil.walk_packages(commkit.__path__, "commkit."):
         parts = info.name.split(".")[1:]
-        if any(p.startswith("_") for p in parts) or info.name.startswith(PLACEHOLDERS):
+        if any(p.startswith("_") for p in parts):
             continue
         mod = importlib.import_module(info.name)
         names = getattr(mod, "__all__", None)
@@ -1046,8 +1042,6 @@ def test_every_public_module_declares_all():
         if any(p.startswith("_") for p in parts if p != "__init__"):
             continue
         name = ".".join(p for p in parts if p != "__init__")
-        if name.startswith(PLACEHOLDERS):
-            continue
         tree = ast.parse(path.read_text())
         declared = any(
             isinstance(n, ast.Assign)
