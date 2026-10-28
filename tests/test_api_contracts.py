@@ -98,7 +98,6 @@ PLACEHOLDERS = tuple(
     f"commkit.coding.{name}"
     for name in (
         "convolutional",
-        "polar",
         "turbo",
     )
 )
@@ -294,6 +293,9 @@ ROWS: list[Row] = [
         call=lambda c, x: _a(x, interleaver=INTERLEAVER),
         symbols=True,
     ),
+    Row("commkit.coding.polar.PolarCode", VALUE),
+    Row("commkit.coding.polar.SC", VALUE),
+    Row("commkit.coding.polar.SCL", VALUE),
     Row("commkit.coding.product.Concatenated", VALUE),
     Row("commkit.coding.product.HardIterations", VALUE),
     Row("commkit.coding.product.Stages", VALUE),

@@ -580,3 +580,24 @@ def ldpc_layered_reference(
             app[bits] = q + new
             msgs[i] = new
     return app
+
+
+def polar_sc_reference(llrs: np.ndarray, frozen: np.ndarray) -> np.ndarray:
+    """Successive-cancellation decisions ``u`` of a polar code, recursively.
+
+    ``x = u G_N`` with ``G_N = [[G, 0], [G, G]]``: the first half of ``u``
+    sees ``f(L_left, L_right) = sign * min |.|`` (min-sum), the second half
+    ``g = L_right + (1 - 2 v) L_left`` with ``v`` the re-encoded first half.
+    Returns ``(u, x)`` for one codeword, float64 recursion.
+    """
+    llrs = np.asarray(llrs, dtype=np.float64)
+    n = llrs.size
+    if n == 1:
+        bit = 0 if frozen[0] else int(llrs[0] < 0)
+        return np.array([bit]), np.array([bit])
+    left, right = llrs[: n // 2], llrs[n // 2 :]
+    f = np.sign(left) * np.sign(right) * np.minimum(np.abs(left), np.abs(right))
+    u_left, v = polar_sc_reference(f, frozen[: n // 2])
+    g = right + (1 - 2 * v) * left
+    u_right, w = polar_sc_reference(g, frozen[n // 2 :])
+    return np.concatenate([u_left, u_right]), np.concatenate([v ^ w, w])

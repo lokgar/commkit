@@ -50,6 +50,7 @@ _DOCUMENTED: dict[str, str] = {
     "analysis/linewidth/dsh.py::_not_a_beat": _REPORT,
     "backend.py::_device_tables": _HOST_VALUE
     + " (tables of a value object: once per object and device)",
+    "coding/polar.py::_decode": _RECURSION + " (successive-cancellation list decoding)",
     "coding/shaping.py::_decode_ccdm": _RECURSION + " (the dematcher)",
     "coding/shaping.py::_encode_ccdm": _RECURSION
     + " (the matcher; generate runs it on the host)",

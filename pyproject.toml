@@ -90,7 +90,6 @@ markers = [
 # they hold no code yet, so they are not measured.
 omit = [
     "commkit/coding/convolutional.py",
-    "commkit/coding/polar.py",
     "commkit/coding/turbo.py",
 ]
 
