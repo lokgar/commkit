@@ -79,7 +79,7 @@ class _Algebraic(_Code):
         """float32 GF(2) matrices: syndromes, locator and evaluator evaluation.
 
         ``syndromes``: transmitted bits to the bits of ``S_j = c(alpha^(b +
-        j))``, ``j < 2t``.  ``evaluate``: bits of ``2t + 1`` coefficients
+        j))``, ``j < 2t``.  ``evaluate``: bits of ``t + 1`` coefficients
         to the bits of the polynomial at ``X_p^-1 = alpha^-deg(p)`` for
         every position ``p``.
         """
@@ -88,9 +88,18 @@ class _Algebraic(_Code):
         syn = f.evaluation_matrix(roots.T)  # rows: symbol p's bits; cols: S_j bits
         if self.binary:
             syn = syn[self.field.m - 1 :: self.field.m]  # a bit is the element 0 or 1
-        powers = -np.arange(2 * t + 1)[:, None] * self._locator_logs[None, :]
+        powers = -np.arange(t + 1)[:, None] * self._locator_logs[None, :]
         evaluate = f.evaluation_matrix(powers)
         return syn.astype(np.float32), evaluate.astype(np.float32)
+
+    @cached_property
+    def _forney_tables(self) -> tuple[np.ndarray, np.ndarray]:
+        """Field elements per position: ``X_p^(1-b)`` ``(n,)`` and ``X_p^-k``,
+        ``k < t``, ``(n, t)``."""
+        exp, q1 = self.field._tables[0], self.field.order - 1
+        logs = self._locator_logs
+        xinv = exp[(-np.arange(self.t)[None, :] * logs[:, None]) % q1]
+        return exp[((1 - self.first_root) * logs) % q1], xinv
 
 
 @dataclass(frozen=True, eq=False)
@@ -418,12 +427,10 @@ def _correct(code: Any, hard: ArrayType) -> tuple[ArrayType, ArrayType]:
     degree = (locator != 0).astype(xp.int64)
     degree = (degree * xp.arange(2 * t + 1)).max(axis=1)
 
-    def at_positions(poly: ArrayType) -> ArrayType:
-        """Values of (R, 2t + 1) polynomials at every X_p^-1, (R, n)."""
-        bits = _unpack_bits(poly.reshape(-1), m).reshape(rows, -1)
-        return _pack(matmul_mod2(bits, evaluate).reshape(rows, n, m))
-
-    roots = at_positions(locator) == 0
+    # The locator at every X_p^-1: a root where all m bits of the value are 0.
+    # Only Lambda_0 .. Lambda_t: a locator of higher degree fails anyway.
+    bits = _unpack_bits(locator[:, : t + 1].reshape(-1), m).reshape(rows, -1)
+    roots = ~matmul_mod2(bits, evaluate).reshape(rows, n, m).any(axis=2)
     # A locator of the length Berlekamp-Massey found (its top coefficients
     # may vanish beyond t errors), with that many roots among the positions.
     valid = (roots.sum(axis=1) == degree) & (degree == length) & (length <= t)
@@ -432,31 +439,32 @@ def _correct(code: Any, hard: ArrayType) -> tuple[ArrayType, ArrayType]:
         words = hard ^ errors.astype(np.int8)
     else:
         # Forney: e_p = X_p^(1-b) Omega(X_p^-1) / Lambda'(X_p^-1), with
-        # Omega = S Lambda mod x^2t (characteristic 2: no signs).
-        prods = f.mul(locator[:, None, : 2 * t], _toeplitz(s, xp))  # (R, 2t, 2t)
-        omega = _xor_reduce(prods, axis=2)
-        omega = xp.concatenate([omega, xp.zeros((rows, 1), dtype=omega.dtype)], axis=1)
-        derivative = xp.zeros_like(locator)
-        derivative[:, :-1:2] = locator[:, 1::2]  # odd terms, shifted down
-        exp, _ = f.tables(xp)
-        (xpow,) = _device_tables(
-            code,
-            "forney",
-            xp,
-            lambda: (
-                f._tables[0][
-                    ((1 - code.first_root) * code._locator_logs) % (f.order - 1)
-                ],
+        # Omega = S Lambda mod x^2t (characteristic 2: no signs).  For a
+        # decodable word both have degree < t: Omega by the key equation,
+        # Lambda' = sum over odd j of Lambda_j x^(j-1).
+        omega = _xor_reduce(
+            f.mul(locator[:, None, :t], _toeplitz(s[:, :t], xp)), axis=2
+        )
+        derivative = xp.zeros_like(omega)
+        derivative[:, ::2] = locator[:, 1 : t + 1 : 2]
+        xpow, xinv = _device_tables(code, "forney", xp, lambda: code._forney_tables)
+        # Evaluated only at the at most t error positions of each row, (R, t).
+        pos = xp.argsort(~errors, axis=1)[:, :t]
+        hit = xp.take_along_axis(errors, pos, axis=1)
+        powers = xinv[pos]  # (R, t, t): X_p^-k at those positions
+        values = f.mul(
+            xpow[pos],
+            f.div(
+                _xor_reduce(f.mul(omega[:, None, :], powers), axis=2),
+                _xor_reduce(f.mul(derivative[:, None, :], powers), axis=2),
             ),
         )
-        values = f.mul(
-            xpow[None, :], f.div(at_positions(omega), at_positions(derivative))
-        )
-        values = xp.where(errors, values, 0)
-        valid = valid & ~xp.any(errors & (values == 0), axis=1)
+        values = xp.where(hit, values, 0)
+        valid = valid & ~xp.any(hit & (values == 0), axis=1)
         values = xp.where(valid[:, None], values, 0)
-        symbols = _pack(hard.reshape(rows, n, m)) ^ values
-        words = _unpack_bits(symbols.reshape(-1), m).reshape(rows, -1)
+        words = hard.copy()
+        flips = _unpack_bits(values.reshape(-1), m).reshape(rows, t, m)
+        words.reshape(rows, n, m)[xp.arange(rows)[:, None], pos] ^= flips
     return words, valid
 
 
