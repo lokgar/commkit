@@ -18,8 +18,8 @@ Notable changes to CommKit, newest first. Performance figures are from the refer
 
 Paired A/B of alternating processes against the previous commit of each change:
 
-- Reed-Solomon decoding: KP4, 2048 hard-decision codewords at BER 1e-3, CPU 413 to about 30 ms (direct XOR reduction 0.80, Forney's formula at the error positions only 0.42, hard input converted in place 0.79, a per-codeword Numba decoder from the syndromes 0.27), GPU 42 to 25 ms.
-- BCH decoding on the CPU through the same Numba decoder: Chase-II of BCH(1000, 970) 0.26, staircase decoding 0.35.
+- Reed-Solomon decoding: KP4, 2048 hard-decision codewords at BER 1e-3, CPU 413 to about 30 ms (direct XOR reduction 0.80, Forney's formula at the error positions only 0.42, hard input converted in place 0.79, a per-codeword Numba decoder from the syndromes 0.27), GPU 42 to 1.9 ms (a CUDA kernel with one thread per codeword in place of Berlekamp-Massey's 450 launches, 0.080).
+- BCH decoding through the same per-codeword decoders: Chase-II of BCH(1000, 970) 0.26 on the CPU and 0.22 on the GPU, staircase decoding 0.35 and 0.14.
 - Chase decoding: 0.53 on the CPU, 0.30-0.51 on the GPU (no LLR round trip or re-encoding, no 4-D flip mask, larger GPU chunks).
 - Polar decoding: SC of N = 1024 0.32, SCL(8) 0.70, SCL(32) 0.68 (paths copied only when they change slot).
 - Tail-biting Viterbi: K = 7, 0.035 (all start states scored in one pass); decision storage a quarter of before at every termination.

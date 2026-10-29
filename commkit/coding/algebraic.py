@@ -11,12 +11,11 @@ as many roots among the code's positions as its degree is reported
 
 The systematic encoder and the syndromes are GF(2)-linear in bits, so
 each is one :func:`~commkit.coding._gf2.matmul_mod2` with a matrix built
-once per code.  From the syndromes, the CPU decodes each codeword in a
-Numba kernel (Berlekamp-Massey, a Chien search that stops at the
-locator's degree, Forney at the roots), parallel over codewords.  The GPU
-runs Berlekamp-Massey's ``2t`` steps in lockstep over all codewords
-(small array operations), the Chien search as one more GEMM over every
-position, and Forney at the error positions.
+once per code.  From the syndromes, each codeword is decoded on its own
+(Berlekamp-Massey, a Chien search that stops at the locator's degree,
+Forney at the roots): a Numba kernel parallel over codewords on the CPU,
+a CUDA kernel with one thread per codeword on the GPU, the same steps on
+both.
 
 Bits: a Reed-Solomon symbol is ``m`` bits, MSB first, the first transmitted
 symbol the highest-degree coefficient; information first, then parity.
@@ -35,8 +34,9 @@ from typing import Any
 
 import numpy as np
 
+from .. import _cuda
 from ..backend import ArrayType, _device_tables, dispatch
-from ..mapping.gray import _pack, _unpack_bits
+from ..mapping.gray import _pack
 from ._galois import PRIMITIVE, _Field
 from ._gf2 import matmul_mod2
 from .base import _Code, _Codec, _Decoded, _hard, _register, _resolve_method
@@ -77,31 +77,15 @@ class _Algebraic(_Code):
         return np.arange(self.length - 1, -1, -1)
 
     @cached_property
-    def _decoder_tables(self) -> tuple[np.ndarray, ...]:
-        """float32 GF(2) matrices: syndromes, locator and evaluator evaluation.
-
-        ``syndromes``: transmitted bits to the bits of ``S_j = c(alpha^(b +
-        j))``, ``j < 2t``.  ``evaluate``: bits of ``t + 1`` coefficients
-        to the bits of the polynomial at ``X_p^-1 = alpha^-deg(p)`` for
-        every position ``p``.
-        """
+    def _syndrome_matrix(self) -> np.ndarray:
+        """float32 GF(2) matrix from the transmitted bits to the bits of the
+        syndromes ``S_j = c(alpha^(b + j))``, ``j < 2t``."""
         f, t, b = self.field, self.t, self.first_root
         roots = (b + np.arange(2 * t))[:, None] * self._locator_logs[None, :]  # (2t, n)
         syn = f.evaluation_matrix(roots.T)  # rows: symbol p's bits; cols: S_j bits
         if self.binary:
             syn = syn[self.field.m - 1 :: self.field.m]  # a bit is the element 0 or 1
-        powers = -np.arange(t + 1)[:, None] * self._locator_logs[None, :]
-        evaluate = f.evaluation_matrix(powers)
-        return syn.astype(np.float32), evaluate.astype(np.float32)
-
-    @cached_property
-    def _forney_tables(self) -> tuple[np.ndarray, np.ndarray]:
-        """Field elements per position: ``X_p^(1-b)`` ``(n,)`` and ``X_p^-k``,
-        ``k < t``, ``(n, t)``."""
-        exp, q1 = self.field._tables[0], self.field.order - 1
-        logs = self._locator_logs
-        xinv = exp[(-np.arange(self.t)[None, :] * logs[:, None]) % q1]
-        return exp[((1 - self.first_root) * logs) % q1], xinv
+        return syn.astype(np.float32)
 
 
 @dataclass(frozen=True, eq=False)
@@ -389,22 +373,6 @@ def _encode(code: Any, bits: ArrayType) -> ArrayType:
     return xp.concatenate([bits, matmul_mod2(bits, p)], axis=1)
 
 
-_XOR_KERNEL: dict[str, Any] = {}
-
-
-def _xor_reduce(x: ArrayType, axis: int) -> ArrayType:
-    """XOR of field elements along ``axis`` (the field sum)."""
-    xp = dispatch(x)[1]
-    if xp is np:
-        return np.bitwise_xor.reduce(x, axis=axis)
-    # CuPy's bitwise_xor has no reduce.
-    if "k" not in _XOR_KERNEL:
-        _XOR_KERNEL["k"] = xp.ReductionKernel(
-            "T x", "T y", "x", "a ^ b", "y = a", "0", "commkit_xor_reduce"
-        )
-    return _XOR_KERNEL["k"](x, axis=axis)
-
-
 def _decode(code: Any, llrs: ArrayType, method: BerlekampMassey) -> _Decoded:
     _, xp, _ = dispatch(llrs)
     words, valid = _correct(code, _hard(llrs))
@@ -418,12 +386,14 @@ def _correct(code: Any, hard: ArrayType) -> tuple[ArrayType, ArrayType]:
 
     Returns the corrected words (the received ones where decoding failed)
     and the per-word success.  The syndromes are one GEMM; the rest runs
-    per word in Numba on the CPU and in lockstep on the GPU.
+    per word, in Numba on the CPU and in the CUDA kernel
+    ``algebraic_correct`` on the GPU.
     """
     _, xp, _ = dispatch(hard)
     f, t, m = code.field, code.t, code.field.m
     rows = hard.shape[0]
-    syn_t, _ = _device_tables(code, "decoder", xp, lambda: code._decoder_tables)
+    bits = 1 if code.binary else m  # per position
+    (syn_t,) = _device_tables(code, "decoder", xp, lambda: (code._syndrome_matrix,))
     # Syndromes as field elements, (R, 2t).
     s = _pack(matmul_mod2(hard, syn_t).reshape(rows, 2 * t, m))
     if xp is np:
@@ -431,121 +401,34 @@ def _correct(code: Any, hard: ArrayType) -> tuple[ArrayType, ArrayType]:
         valid = np.empty(rows, dtype=np.bool_)
         exp, log = f._tables
         _get_numba_algebraic()(
-            s, exp, log, code._locator_logs, t, code.first_root, m, code.binary,
+            s, exp, log, code._locator_logs, t, code.first_root, bits, code.binary,
             words, valid,
         )  # fmt: skip
         return words, valid
-    return _correct_lockstep(code, hard, s)
-
-
-def _correct_lockstep(
-    code: Any, hard: ArrayType, s: ArrayType
-) -> tuple[ArrayType, ArrayType]:
-    """:func:`_correct` from the syndromes ``s`` ``(R, 2t)``, all words in
-    lockstep: small array operations per step, for the GPU."""
-    _, xp, _ = dispatch(hard)
-    f, t, m = code.field, code.t, code.field.m
-    rows, n = hard.shape[0], code.length
-    _, evaluate = _device_tables(code, "decoder", xp, lambda: code._decoder_tables)
-    locator, length = _berlekamp_massey(f, s, t)  # (R, 2t + 1), lowest degree first
-    degree = (locator != 0).astype(xp.int64)
-    degree = (degree * xp.arange(2 * t + 1)).max(axis=1)
-
-    # The locator at every X_p^-1: a root where all m bits of the value are 0.
-    # Only Lambda_0 .. Lambda_t: a locator of higher degree fails anyway.
-    bits = _unpack_bits(locator[:, : t + 1].reshape(-1), m).reshape(rows, -1)
-    roots = ~matmul_mod2(bits, evaluate).reshape(rows, n, m).any(axis=2)
-    # A locator of the length Berlekamp-Massey found (its top coefficients
-    # may vanish beyond t errors), with that many roots among the positions.
-    valid = (roots.sum(axis=1) == degree) & (degree == length) & (length <= t)
-    errors = roots & valid[:, None]
-    if code.binary:
-        words = hard ^ errors.astype(np.int8)
-    else:
-        # Forney: e_p = X_p^(1-b) Omega(X_p^-1) / Lambda'(X_p^-1), with
-        # Omega = S Lambda mod x^2t (characteristic 2: no signs).  For a
-        # decodable word both have degree < t: Omega by the key equation,
-        # Lambda' = sum over odd j of Lambda_j x^(j-1).
-        omega = _xor_reduce(
-            f.mul(locator[:, None, :t], _toeplitz(s[:, :t], xp)), axis=2
-        )
-        derivative = xp.zeros_like(omega)
-        derivative[:, ::2] = locator[:, 1 : t + 1 : 2]
-        xpow, xinv = _device_tables(code, "forney", xp, lambda: code._forney_tables)
-        # Evaluated only at the at most t error positions of each row, (R, t).
-        # An int64 key: CuPy's sort of bool keys reads the padding of its
-        # (index, key) pairs, which compute-sanitizer's initcheck reports.
-        pos = xp.argsort(xp.where(errors, 0, 1), axis=1)[:, :t]
-        hit = xp.take_along_axis(errors, pos, axis=1)
-        powers = xinv[pos]  # (R, t, t): X_p^-k at those positions
-        values = f.mul(
-            xpow[pos],
-            f.div(
-                _xor_reduce(f.mul(omega[:, None, :], powers), axis=2),
-                _xor_reduce(f.mul(derivative[:, None, :], powers), axis=2),
-            ),
-        )
-        values = xp.where(hit, values, 0)
-        valid = valid & ~xp.any(hit & (values == 0), axis=1)
-        values = xp.where(valid[:, None], values, 0)
-        words = hard.copy()
-        flips = _unpack_bits(values.reshape(-1), m).reshape(rows, t, m)
-        words.reshape(rows, n, m)[xp.arange(rows)[:, None], pos] ^= flips
+    words = xp.array(hard, dtype=np.int8, order="C")
+    exp, log = f.tables(xp)
+    (logs,) = _device_tables(
+        code, "locators", xp, lambda: (np.asarray(code._locator_logs, np.int64),)
+    )
+    launch = _cuda.get_kernel("algebraic_correct")
+    valid = launch(
+        s, exp, log, logs, words, t=t, first_root=code.first_root, m=bits,
+        binary=code.binary,
+    )  # fmt: skip
     return words, valid
 
 
 def _get_numba_algebraic() -> Any:
     """Numba decoder from the syndromes for the CPU, parallel over words.
 
-    Per word, the steps of the lockstep GPU path: Berlekamp-Massey, a
-    Chien search over the positions that stops at the locator's degree,
-    and for Reed-Solomon Forney's formula at the roots; the word is
-    corrected in place, or left as received where decoding fails.
+    Per word: Berlekamp-Massey, a Chien search over the positions that
+    stops at the locator's degree, and for Reed-Solomon Forney's formula
+    at the roots; the word is corrected in place, or left as received
+    where decoding fails.  The CPU reference of ``algebraic.cu``.
     """
     from . import _numba_loops
 
     return _numba_loops.algebraic_correct
-
-
-def _toeplitz(s: ArrayType, xp: Any) -> ArrayType:
-    """``T[r, k, i] = S_(k - i)`` for ``i <= k`` (else 0): Omega_k = sum_i L_i T."""
-    rows, n2 = s.shape
-    k = xp.arange(n2)[:, None]
-    i = xp.arange(n2)[None, :]
-    idx = k - i
-    return xp.where(idx >= 0, s[:, xp.clip(idx, 0, None)], 0)
-
-
-def _berlekamp_massey(f: _Field, s: ArrayType, t: int) -> tuple[ArrayType, ArrayType]:
-    """Error locators of all rows in lockstep, ``(R, 2t + 1)``, lowest degree
-    first, and their linear complexities ``L``, ``(R,)``."""
-    xp = dispatch(s)[1]
-    rows = s.shape[0]
-    width = 2 * t + 1
-    locator = xp.zeros((rows, width), dtype=xp.int64)
-    locator[:, 0] = 1
-    previous = locator.copy()
-    length = xp.zeros(rows, dtype=xp.int64)
-    shift = xp.ones(rows, dtype=xp.int64)
-    last = xp.ones(rows, dtype=xp.int64)
-    cols = xp.arange(width)
-    for r in range(2 * t):
-        # Discrepancy d = sum_{i <= r} Lambda_i S_(r - i).
-        terms = f.mul(locator[:, : r + 1], s[:, r::-1])
-        d = _xor_reduce(terms, axis=1)
-        nonzero = d != 0
-        grow = nonzero & (2 * length <= r)
-        src = cols[None, :] - shift[:, None]
-        shifted = xp.where(
-            src >= 0, xp.take_along_axis(previous, xp.clip(src, 0, None), axis=1), 0
-        )
-        updated = locator ^ f.mul(f.div(d, last)[:, None], shifted)
-        previous = xp.where(grow[:, None], locator, previous)
-        locator = xp.where(nonzero[:, None], updated, locator)
-        last = xp.where(grow, d, last)
-        length = xp.where(grow, r + 1 - length, length)
-        shift = xp.where(grow, 1, shift + 1)
-    return locator, length
 
 
 def _decode_bch(code: BCHCode, llrs: ArrayType, method: Any) -> _Decoded:

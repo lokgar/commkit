@@ -601,3 +601,112 @@ def polar_sc_reference(llrs: np.ndarray, frozen: np.ndarray) -> np.ndarray:
     g = right + (1 - 2 * v) * left
     u_right, w = polar_sc_reference(g, frozen[n // 2 :])
     return np.concatenate([u_left, u_right]), np.concatenate([v ^ w, w])
+
+
+def algebraic_reference(
+    word: np.ndarray,
+    *,
+    m: int,
+    primitive: int,
+    t: int,
+    first_root: int,
+    binary: bool,
+) -> tuple[np.ndarray, bool]:
+    """Bounded-distance decoding of one cyclic BCH or Reed-Solomon word.
+
+    ``word`` holds the received bits (``m`` per symbol, MSB first, for
+    Reed-Solomon), the first symbol the highest-degree coefficient.  The
+    textbook steps, on GF(2^m) tables built here: syndromes ``S_j =
+    r(alpha^(b + j))``, ``j < 2t``; Massey's LFSR synthesis of the locator
+    ``Lambda`` and its length ``L``; a brute-force search of the positions
+    whose ``X_p^-1`` is a root; Forney's ``e_p = X_p^(1-b) Omega(X_p^-1) /
+    Lambda'(X_p^-1)`` with ``Omega = S Lambda mod x^2t``.  Success needs
+    ``L <= t``, ``L`` roots among the positions and nonzero error values;
+    otherwise the word is returned as received.  Returns ``(bits, ok)``.
+    """
+    q1 = (1 << m) - 1
+    exp = [0] * q1
+    v = 1
+    for i in range(q1):
+        exp[i] = v
+        v <<= 1
+        if v >> m:
+            v ^= primitive
+    log = {e: i for i, e in enumerate(exp)}
+
+    def mul(a: int, b: int) -> int:
+        return 0 if a == 0 or b == 0 else exp[(log[a] + log[b]) % q1]
+
+    def power(e: int) -> int:
+        return exp[e % q1]
+
+    def evaluate(poly: list[int], x: int) -> int:
+        acc = 0
+        for j, c in enumerate(poly):
+            acc ^= mul(c, power(j * log[x]))
+        return acc
+
+    bits = np.asarray(word, dtype=np.int64)
+    width = 1 if binary else m
+    symbols = [
+        int("".join(str(b) for b in bits[i : i + width]), 2)
+        for i in range(0, bits.size, width)
+    ]
+    n = len(symbols)
+    degrees = [n - 1 - p for p in range(n)]
+    s = [0] * (2 * t)
+    for j in range(2 * t):
+        for r, d in zip(symbols, degrees, strict=True):
+            s[j] ^= mul(r, power((first_root + j) * d))
+
+    # Massey: C the connection polynomial, B the last one before a length
+    # change, bb its discrepancy, gap the shift since then.
+    c, b, length, gap, bb = [1], [1], 0, 1, 1
+    for k in range(2 * t):
+        d = s[k]
+        for i in range(1, len(c)):
+            if k - i >= 0:
+                d ^= mul(c[i], s[k - i])
+        if d == 0:
+            gap += 1
+            continue
+        coef = mul(d, power(-log[bb]))
+        new = c + [0] * max(0, len(b) + gap - len(c))
+        for i, bi in enumerate(b):
+            new[i + gap] ^= mul(coef, bi)
+        if 2 * length <= k:
+            b, bb, length, gap = c, d, k + 1 - length, 1
+        else:
+            gap += 1
+        c = new
+    while len(c) > 1 and c[-1] == 0:
+        c.pop()
+    if length > t:
+        return bits.astype(np.int8), False
+    roots = [p for p in range(n) if evaluate(c, power(-degrees[p])) == 0]
+    if len(roots) != length:
+        return bits.astype(np.int8), False
+    out = list(symbols)
+    if binary:
+        for p in roots:
+            out[p] ^= 1
+    else:
+        omega = [0] * (2 * t)
+        for i, ci in enumerate(c):
+            for j, sj in enumerate(s):
+                if i + j < 2 * t:
+                    omega[i + j] ^= mul(ci, sj)
+        derivative = [c[j] if j % 2 else 0 for j in range(1, len(c))]
+        for p in roots:
+            x_inv = power(-degrees[p])
+            num, den = evaluate(omega, x_inv), evaluate(derivative, x_inv)
+            if num == 0 or den == 0:
+                return bits.astype(np.int8), False
+            value = mul(
+                power((1 - first_root) * degrees[p]), mul(num, power(-log[den]))
+            )
+            out[p] ^= value
+    fixed = np.array(
+        [(sym >> (width - 1 - i)) & 1 for sym in out for i in range(width)], np.int8
+    )
+    return fixed, True

@@ -10,10 +10,10 @@ import pytest
 from commkit.backend import to_device
 from commkit.coding import BCHCode, ReedSolomonCode, decode, encode
 from commkit.coding._galois import PRIMITIVE, _Field
-from commkit.coding._gf2 import matmul_mod2
-from commkit.coding.algebraic import _correct, _correct_lockstep, _xor_reduce
-from commkit.mapping.gray import _pack
+from commkit.coding.algebraic import _correct
+from tests.common import skip_unless_gpu
 from tests.common.coding import random_bits
+from tests.common.reference_impl import algebraic_reference
 
 
 def _clmul_mod(a: int, b: int, prim: int, m: int) -> int:
@@ -270,46 +270,49 @@ class TestBCH:
         )
 
 
-class TestXorReduce:
-    @pytest.mark.parametrize("m", [1, 4, 8, 10, 16])
-    @pytest.mark.parametrize("shape", [(5, 7, 3), (5, 0, 3), (1, 1, 1)])
-    def test_matches_the_parity_of_each_bit(self, xp: Any, xpt: Any, m, shape) -> None:
-        """The field sum: each bit of the result is the parity of that bit."""
-        x = np.random.default_rng(m).integers(0, 1 << m, size=shape, dtype=np.int64)
-        for axis in range(3):
-            bits = (x[..., None] >> np.arange(m)) & 1
-            expected = ((bits.sum(axis=axis) & 1) << np.arange(m)).sum(axis=-1)
-            xpt.assert_array_equal(
-                _xor_reduce(xp.asarray(x), axis), xp.asarray(expected)
-            )
+_KERNEL_CODES = [
+    ReedSolomonCode(15, 9, m=4),
+    ReedSolomonCode(31, 21, m=5, first_root=3),
+    ReedSolomonCode(63, 55, m=6, first_root=1),
+    BCHCode(m=6, t=3),
+    BCHCode(m=7, t=4, length=100),
+]
 
 
-class TestCpuKernel:
-    @pytest.mark.parametrize(
-        "code",
-        [
-            ReedSolomonCode(15, 9, m=4),
-            ReedSolomonCode(31, 21, m=5, first_root=3),
-            ReedSolomonCode.kp4(),
-            BCHCode(m=6, t=3),
-            BCHCode(m=10, t=3, length=1000),
-        ],
-        ids=repr,
-    )
-    def test_matches_the_lockstep_path(self, code) -> None:
-        """The Numba decoder equals the lockstep one, up to and beyond t."""
-        rng = np.random.default_rng(7)
-        m = 1 if code.binary else code.m
-        rows = 200
-        words = encode(random_bits(rows * code.k, np, seed=3), code=code).reshape(
-            rows, -1
-        )
-        counts = rng.integers(0, 2 * code.t + 3, rows)
-        hard = _corrupt(words, rng, counts, m)
-        syn_t = code._decoder_tables[0]
-        s = _pack(matmul_mod2(hard, syn_t).reshape(rows, 2 * code.t, code.field.m))
+def _received(code: Any, rows: int, seed: int) -> tuple[Any, Any]:
+    """Codewords with 0 to 2t + 2 symbol errors per row, and the counts."""
+    rng = np.random.default_rng(seed)
+    m = 1 if code.binary else code.m
+    words = encode(random_bits(rows * code.k, np, seed=seed), code=code)
+    counts = rng.integers(0, 2 * code.t + 3, rows)
+    return _corrupt(words.reshape(rows, -1), rng, counts, m), counts
+
+
+class TestKernels:
+    @pytest.mark.parametrize("code", _KERNEL_CODES, ids=repr)
+    def test_cpu_matches_the_reference(self, code) -> None:
+        """The Numba decoder against the textbook decoder, up to and beyond t."""
+        hard, counts = _received(code, 60, seed=4)
         got, ok = _correct(code, hard)
-        want, want_ok = _correct_lockstep(code, hard, s)
-        np.testing.assert_array_equal(ok, want_ok)
-        np.testing.assert_array_equal(got, want)
+        for r in range(hard.shape[0]):
+            want, want_ok = algebraic_reference(
+                hard[r], m=code.field.m, primitive=code.primitive, t=code.t,
+                first_root=code.first_root, binary=code.binary,
+            )  # fmt: skip
+            assert ok[r] == want_ok, (r, counts[r])
+            np.testing.assert_array_equal(got[r], want)
         assert ok[counts <= code.t].all() and not ok.all()
+
+    @pytest.mark.parametrize("code", [*_KERNEL_CODES, ReedSolomonCode.kp4()], ids=repr)
+    def test_gpu_matches_cpu(self, backend_device: str, code) -> None:
+        skip_unless_gpu(backend_device)
+        hard, _ = _received(code, 400, seed=5)
+        want, want_ok = _correct(code, hard)
+        got, ok = _correct(code, to_device(hard, "gpu"))
+        np.testing.assert_array_equal(to_device(ok, "cpu"), want_ok)
+        np.testing.assert_array_equal(to_device(got, "cpu"), want)
+
+    def test_no_words(self, xp: Any) -> None:
+        code = ReedSolomonCode(15, 11, m=4)
+        words, ok = _correct(code, xp.zeros((0, code.n), dtype=xp.int8))
+        assert words.shape == (0, code.n) and ok.shape == (0,)
