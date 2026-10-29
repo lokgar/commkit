@@ -783,19 +783,18 @@ def correct_frequency_offset(
 
 
 def _correct_static(x: ArrayType, fs: float, offset: Any, xp: Any) -> ArrayType:
-    offset_arr = xp.asarray(offset)
+    offset_arr = xp.asarray(offset, dtype=xp.float64)
     per_channel = offset_arr.ndim >= 1 and offset_arr.size > 1
     n = x.shape[-1]
-    t = xp.arange(n, dtype=xp.float64) / fs  # float64: exact for any N
-
+    # Phase step per sample, kept on the device (no sync for a device
+    # scalar): (C, 1) per channel, 0-d otherwise.
     if per_channel:
-        C = x.shape[0]
-        offsets = xp.asarray(offset_arr.reshape(-1)[:C], dtype=xp.float64)
-        phase = -2.0 * xp.pi * offsets[:, None] * t[None, :]  # (C, N)
+        step = offset_arr.reshape(-1)[: x.shape[0], None] * (2.0 * np.pi / fs)
     else:
-        phase = -2.0 * xp.pi * float(offset_arr.reshape(-1)[0]) * t  # (N,)
-    # Wrapped in float64, rotated in the samples' precision.
-    return _derotate(x, -phase)
+        step = offset_arr.reshape(-1)[0] * (2.0 * np.pi / fs)
+    # float64 ramp, exact for any N; wrapped in float64, rotated in the
+    # samples' precision.
+    return _derotate(x, step * xp.arange(n, dtype=xp.float64))
 
 
 def _correct_blockwise(
