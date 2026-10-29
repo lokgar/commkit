@@ -113,10 +113,11 @@ def lms(
         Inline carrier-phase recovery (from :mod:`commkit.recovery`), run
         jointly with the weight updates at every symbol; ``None`` for none.
 
-        * ``PLL(bandwidth=, mu=, beta=, phase_init=, joint_channels=)``: a
-          decision-directed loop in which the cross-product detector
-          ``Im(y · conj(d))`` drives a PI filter (gains from ``bandwidth``,
-          or the raw ``mu`` and ``beta``); ``phase_init`` seeds a cold start.
+        * ``PLL(normalized_bandwidth=, mu=, beta=, phase_init=,
+          joint_channels=)``: a decision-directed loop in which the
+          cross-product detector ``Im(y · conj(d))`` drives a PI filter (gains
+          from ``normalized_bandwidth``, or the raw ``mu`` and ``beta``);
+          ``phase_init`` seeds a cold start.
           It has a low noise floor and is recommended for QPSK to 64-QAM.
         * ``BPS(test_phases=, block_size=, joint_channels=)``: blind phase
           search over ``test_phases`` angles in ``[0, 2π/S)``, ``S`` the

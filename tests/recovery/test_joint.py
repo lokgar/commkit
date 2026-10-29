@@ -51,10 +51,9 @@ class TestJointChannels:
         mimo = self._make_mimo(xp)
         phi = recovery.estimate_carrier_phase(
             mimo,
-            recovery.Tikhonov(
-                linewidth_symbol_periods=1e-4, snr_db=SNR_DB, joint_channels=True
-            ),
+            recovery.Tikhonov(linewidth=1e-4 * FS, snr_db=SNR_DB, joint_channels=True),
             constellation=Constellation.qam(16),
+            sampling_rate=FS,
         ).value
         assert phi.shape == (2, self.N)
         xpt.assert_array_equal(phi[0], phi[1])

@@ -129,7 +129,8 @@ def apply_polarization_mixing(
     samples: S,
     *,
     theta: float | ArrayType,
-    drift_rad_per_sample: float = 0.0,
+    drift_rate: float = 0.0,
+    sampling_rate: float | None = None,
 ) -> S:
     """Rotate the state of polarization, statically or over time.
 
@@ -145,12 +146,15 @@ def apply_polarization_mixing(
         Dual-polarization field, ``(2, N)``.
     theta : float or array_like
         Rotation angle in radians: a scalar for one rotation of every sample
-        (a ramp with ``drift_rad_per_sample``), or ``(N,)`` angles, one per
-        sample.
-    drift_rad_per_sample : float, default 0.0
-        Linear drift for a scalar ``theta``:
-        ``θ[n] = theta + drift_rad_per_sample · n``.  Ignored for an array
-        ``theta``.
+        (a ramp with ``drift_rate``), or ``(N,)`` angles, one per sample.
+    drift_rate : float, default 0.0
+        Linear SOP drift for a scalar ``theta``, in rad/s:
+        ``θ(t) = theta + drift_rate · t``, so the drift is a property of the
+        channel whatever the sampling rate.  Not with an array ``theta``.
+    sampling_rate : float, optional
+        Sampling rate in Hz, for ``drift_rate``.  Taken from the Signal;
+        required for array input with a drift.  A value that disagrees with
+        the Signal raises.
 
     Returns
     -------
@@ -160,24 +164,31 @@ def apply_polarization_mixing(
     Raises
     ------
     ValueError
-        If the input is not ``(2, N)`` or an array ``theta`` is not ``(N,)``.
+        If the input is not ``(2, N)``, an array ``theta`` is not ``(N,)``
+        or comes with a ``drift_rate``.
 
     Examples
     --------
     >>> # Static 45° rotation
     >>> rotated = apply_polarization_mixing(samples, theta=np.pi / 4)
 
-    >>> # Slow linear SOP drift: 1 mrad per sample
-    >>> drifted = apply_polarization_mixing(
-    ...     samples, theta=0.0, drift_rad_per_sample=1e-3)
+    >>> # Slow linear SOP drift: 10 krad/s
+    >>> drifted = apply_polarization_mixing(signal, theta=0.0, drift_rate=1e4)
     """
     signal_adapter = adapt_signal(samples, function_name="apply_polarization_mixing()")
 
     logger.info(
-        "Applying polarization mixing (theta=%s, drift=%.3g rad/sym).",
+        "Applying polarization mixing (theta=%s, drift=%.3g rad/s).",
         theta if np.ndim(theta) == 0 else "array",
-        drift_rad_per_sample,
+        drift_rate,
     )
+    if drift_rate != 0.0:
+        if np.ndim(theta) != 0:
+            raise ValueError(
+                "apply_polarization_mixing(): drift_rate needs a scalar theta; "
+                "an array theta gives every angle."
+            )
+        sampling_rate = signal_adapter.resolve_fact("sampling_rate", sampling_rate)
 
     x, xp, _ = dispatch(signal_adapter.array)
 
@@ -190,10 +201,10 @@ def apply_polarization_mixing(
     # Build angle trajectory
     if np.ndim(theta) == 0:
         scalar_theta = float(theta)
-        if drift_rad_per_sample != 0.0:
-            angles = (
-                xp.arange(N, dtype=xp.float64) * drift_rad_per_sample + scalar_theta
-            )
+        if drift_rate != 0.0:
+            assert sampling_rate is not None
+            step = drift_rate / sampling_rate  # rad per sample
+            angles = xp.arange(N, dtype=xp.float64) * step + scalar_theta
         else:
             # Static: scalar path - avoid building (N,) array
             R = _jones_rotation(scalar_theta, xp, x.dtype)

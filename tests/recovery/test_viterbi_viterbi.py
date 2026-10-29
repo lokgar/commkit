@@ -206,8 +206,12 @@ class TestJointChannelWeighting:
         else:
             m = recovery.Tikhonov(1e-4, 10, block_size=32, joint_channels=True)
         c = Constellation.psk(4)
-        a = recovery.estimate_carrier_phase(x, m, constellation=c).value
-        b = recovery.estimate_carrier_phase(scaled, m, constellation=c).value
+        a = recovery.estimate_carrier_phase(
+            x, m, constellation=c, sampling_rate=1.0
+        ).value
+        b = recovery.estimate_carrier_phase(
+            scaled, m, constellation=c, sampling_rate=1.0
+        ).value
         xpt.assert_allclose(a, b, atol=1e-6)  # float32 rounding of the gain
 
 

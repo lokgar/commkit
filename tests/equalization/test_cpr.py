@@ -129,7 +129,7 @@ class TestCPRPLLConvergence:
             num_taps=1,
             sps=1,
             constellation=Constellation.psk(4),
-            cpr=PLL(bandwidth=5e-3, cycle_slip=CycleSlip(history=200)),
+            cpr=PLL(normalized_bandwidth=5e-3, cycle_slip=CycleSlip(history=200)),
         )
 
         assert res.phase_trajectory is not None
@@ -170,7 +170,7 @@ class TestCPRPLLConvergence:
             num_taps=1,
             sps=1,
             constellation=Constellation.qam(16),
-            cpr=PLL(bandwidth=bw),
+            cpr=PLL(normalized_bandwidth=bw),
         )
 
         assert res.phase_trajectory is not None
@@ -192,7 +192,7 @@ class TestCPRPLLConvergence:
             sps=2,
             constellation=Constellation.psk(4),
         )
-        res_bw = lms(xp.asarray(samples), **kw, cpr=PLL(bandwidth=bw))
+        res_bw = lms(xp.asarray(samples), **kw, cpr=PLL(normalized_bandwidth=bw))
         res_raw = lms(
             xp.asarray(samples),
             **kw,
@@ -588,7 +588,7 @@ class TestCPRMIMOJoint:
             num_taps=1,
             sps=1,
             constellation=Constellation.qam(16),
-            cpr=PLL(bandwidth=5e-3),
+            cpr=PLL(normalized_bandwidth=5e-3),
         )
 
         assert res.phase_trajectory is not None
@@ -640,7 +640,7 @@ class TestCPRMIMOJoint:
             num_taps=1,
             sps=1,
             constellation=Constellation.qam(16),
-            cpr=PLL(bandwidth=5e-3, joint_channels=True),
+            cpr=PLL(normalized_bandwidth=5e-3, joint_channels=True),
         )
 
         assert res.phase_trajectory is not None

@@ -135,9 +135,10 @@ def estimate_carrier_phase(
     method : BPS, ViterbiViterbi, Tikhonov, PLL, PilotAided, PilotTone, PilotTones or DataAided
         Estimation method.
     sampling_rate : float, optional
-        Sampling rate in Hz, needed by the tone methods.  Taken from the
-        Signal; required for array input.  A value that disagrees with the
-        Signal raises.
+        Sampling rate in Hz, needed by the tone methods and by ``Tikhonov``
+        (where it is the symbol rate, to relate the linewidth to the symbol
+        period).  Taken from the Signal; required for array input.  A value
+        that disagrees with the Signal raises.
     constellation : Constellation, optional
         Decision constellation of the blind and decision-directed methods.
         Defaults to the Signal's ``constellation``.

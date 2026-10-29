@@ -115,11 +115,12 @@ class TestCycleSlipCorrection:
         phi = recovery.estimate_carrier_phase(
             sig.samples,
             recovery.Tikhonov(
-                linewidth_symbol_periods=1e-4,
+                linewidth=1e-4 * FS,
                 snr_db=SNR_DB,
                 cycle_slip=recovery.CycleSlip(),
             ),
             constellation=Constellation.qam(16),
+            sampling_rate=FS,
         ).value
         assert phi.shape == sig.samples.shape
 
@@ -406,7 +407,7 @@ class TestSlipQuantum:
         c = Constellation.psk(8)
         rng = np.random.default_rng(0)
         x = xp.asarray(c.points[rng.integers(0, 8, 512)].astype(np.complex64))
-        recovery.estimate_carrier_phase(x, method, constellation=c)
+        recovery.estimate_carrier_phase(x, method, constellation=c, sampling_rate=1.0)
         assert seen == [8]
 
 

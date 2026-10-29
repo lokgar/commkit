@@ -199,8 +199,10 @@ class TestDemultiplexPolarizationTonesDynamic:
         f_used = grid_frequency(self.TONES, sampling_rate=fs, num_samples=s.shape[-1])
         # SOP sweeps a full ~pi/2 across the capture - the static average Jones
         # matrix matches no instant, so its cross-talk rejection collapses.
-        drift = (np.pi / 2) / N
-        rx = apply_polarization_mixing(tx, theta=0.2, drift_rad_per_sample=drift)
+        drift = (np.pi / 2) / N * fs  # rad/s
+        rx = apply_polarization_mixing(
+            tx, theta=0.2, drift_rate=drift, sampling_rate=fs
+        )
 
         static = equalization.demultiplex_polarization_tones_static(
             rx, sampling_rate=fs, tone_frequencies=f_used
@@ -235,7 +237,7 @@ class TestDemultiplexPolarizationTonesDynamic:
         )
         f_used = grid_frequency(self.TONES, sampling_rate=fs, num_samples=s.shape[-1])
         rx = apply_polarization_mixing(
-            tx, theta=0.2, drift_rad_per_sample=(np.pi / 2) / N
+            tx, theta=0.2, drift_rate=(np.pi / 2) / N * fs, sampling_rate=fs
         )
 
         # Default num_taps = round(3.3 fs / B) = 660 at B = 0.5 Hz.

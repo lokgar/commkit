@@ -140,7 +140,9 @@ class TestDDPLL:
         """mu=None opts into the loop_bandwidth_normalized shortcut; shape/dtype hold."""
         syms = self._qpsk_symbols(xp, N=512)
         phi = recovery.estimate_carrier_phase(
-            syms, recovery.PLL(bandwidth=1e-3), constellation=Constellation.psk(4)
+            syms,
+            recovery.PLL(normalized_bandwidth=1e-3),
+            constellation=Constellation.psk(4),
         ).value
         assert phi.shape == syms.shape
         assert phi.dtype == xp.float64
@@ -153,7 +155,9 @@ class TestDDPLL:
 
         B = 1e-3
         phi_bw = recovery.estimate_carrier_phase(
-            syms, recovery.PLL(bandwidth=B), constellation=Constellation.psk(4)
+            syms,
+            recovery.PLL(normalized_bandwidth=B),
+            constellation=Constellation.psk(4),
         ).value
         phi_raw = recovery.estimate_carrier_phase(
             syms,
@@ -192,7 +196,7 @@ class TestDDPLL:
     def test_invalid_bandwidth_raises(self):
         """A bandwidth outside (0, 0.5) raises on construction."""
         with pytest.raises(ValueError, match="bandwidth"):
-            recovery.PLL(bandwidth=0.6)
+            recovery.PLL(normalized_bandwidth=0.6)
 
     def test_beta_without_mu_raises(self):
         """Passing beta with mu=None is ambiguous and must raise ValueError."""

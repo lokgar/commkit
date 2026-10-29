@@ -264,12 +264,13 @@ class PLL:
 
     Parameters
     ----------
-    bandwidth : float, default 1e-3
-        Normalized one-sided loop bandwidth in ``(0, 0.5)``, as a fraction of
-        the symbol rate.  Gives critically damped gains ``μ = 4B``,
-        ``β = 4B²``.  Used when ``mu`` is not given.
+    normalized_bandwidth : float, default 1e-3
+        One-sided loop bandwidth ``B·T`` in ``(0, 0.5)``, a fraction of the
+        symbol rate (not Hz: ``1e-3`` at 32 GBd is 32 MHz).  Gives
+        critically damped gains ``μ = 4BT``, ``β = 4(BT)²``.  Used when
+        ``mu`` is not given.
     mu : float, optional
-        Raw proportional gain; overrides ``bandwidth``.  Typical values
+        Raw proportional gain; overrides ``normalized_bandwidth``.  Typical values
         ``1e-3`` (high-order QAM, high SNR) to ``5e-2`` (QPSK).
     beta : float, optional
         Raw integral gain (``β ≈ μ²/4`` is critically damped); requires
@@ -290,7 +291,7 @@ class PLL:
     round trip.  A global M-fold ambiguity remains.
     """
 
-    bandwidth: float = 1e-3
+    normalized_bandwidth: float = 1e-3
     mu: float | None = None
     beta: float | None = None
     phase_init: float = 0.0
@@ -298,14 +299,18 @@ class PLL:
     cycle_slip: CycleSlip | None = None
 
     def __post_init__(self) -> None:
-        if not (0.0 < self.bandwidth < 0.5):
-            raise ValueError(f"bandwidth must be in (0, 0.5), got {self.bandwidth}.")
-        _resolve_pll_gains(self.bandwidth, self.mu, self.beta)  # validates beta
+        bt = self.normalized_bandwidth
+        if not (0.0 < bt < 0.5):
+            raise ValueError(
+                f"normalized_bandwidth must be in (0, 0.5) (a fraction of the "
+                f"symbol rate), got {bt}."
+            )
+        _resolve_pll_gains(bt, self.mu, self.beta)  # validates beta
 
     @property
     def gains(self) -> tuple[Any, Any]:
         """The loop gains ``(mu, beta)``."""
-        return _resolve_pll_gains(self.bandwidth, self.mu, self.beta)
+        return _resolve_pll_gains(self.normalized_bandwidth, self.mu, self.beta)
 
 
 def _pll(symbols: ArrayType, method: PLL, ctx: _Context) -> _Phase:

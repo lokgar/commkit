@@ -177,14 +177,26 @@ class TestApplyPolarizationMixing:
         power_out_per_sample = xp.abs(out[0]) ** 2 + xp.abs(out[1]) ** 2
         xpt.assert_allclose(power_out_per_sample, power_in_per_sample, rtol=1e-4)
 
-    def test_drift_rate_produces_varying_output(self, xp):
+    def test_drift_rate_produces_varying_output(self, xp, xpt):
         """Non-zero drift_rate should produce time-varying output."""
         N = 256
         samples = xp.zeros((2, N), dtype=xp.complex64)
         samples[0, :] = 1.0 + 0j
-        out = apply_polarization_mixing(samples, theta=0.0, drift_rad_per_sample=1e-2)
-        # First sample: θ=0 -> Ex'=1, Ey'=0; later samples should differ
-        assert float(xp.abs(out[0, -1] - out[0, 0])) > 1e-3
+        out = apply_polarization_mixing(
+            samples, theta=0.0, drift_rate=1e4, sampling_rate=1e6
+        )
+        # theta = 1e-2 rad per sample: the last sample is rotated by 2.55 rad.
+        xpt.assert_allclose(out[0, -1], xp.asarray(np.cos(2.55 + 0j)), atol=1e-5)
+        sig = Signal(samples=samples, sampling_rate=1e6, symbol_rate=1e6)
+        xpt.assert_allclose(
+            apply_polarization_mixing(sig, theta=0.0, drift_rate=1e4).samples, out
+        )
+        with pytest.raises(ValueError, match="sampling_rate"):
+            apply_polarization_mixing(samples, theta=0.0, drift_rate=1e4)
+        with pytest.raises(ValueError, match="scalar theta"):
+            apply_polarization_mixing(
+                samples, theta=xp.zeros(N), drift_rate=1e4, sampling_rate=1e6
+            )
 
     def test_rejects_siso(self, xp):
         """Should raise ValueError for 1D input."""

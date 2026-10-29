@@ -180,9 +180,12 @@ class Tikhonov:
 
     Parameters
     ----------
-    linewidth_symbol_periods : float
-        Combined linewidth-symbol-time product ``Δν·T_s``; typical values
-        ``1e-5`` (narrow laser, 32 GBd) to ``5e-4``.
+    linewidth : float
+        Combined linewidth ``Δν`` of the transmitter laser and the LO in Hz,
+        as in :func:`commkit.impairments.apply_phase_noise`.  The symbol
+        period ``T_s`` comes from the sampling rate of the one-sample-per-
+        symbol input (the Signal's, or ``sampling_rate=`` of the verb);
+        ``Δν·T_s`` is typically ``1e-5`` (narrow laser, 32 GBd) to ``5e-4``.
     snr_db : float
         Operating SNR per symbol in dB; sets ``σ_v²``.
     block_size : int, default 32
@@ -204,7 +207,7 @@ class Tikhonov:
     A residual ``2π/M`` ambiguity remains.
     """
 
-    linewidth_symbol_periods: float
+    linewidth: float
     snr_db: float
     block_size: int = 32
     smoother: Literal["rts", "steady_state"] = "rts"
@@ -216,11 +219,8 @@ class Tikhonov:
             raise ValueError(
                 f"smoother must be 'rts' or 'steady_state', got {self.smoother!r}."
             )
-        if not self.linewidth_symbol_periods > 0:
-            raise ValueError(
-                "linewidth_symbol_periods must be > 0, got "
-                f"{self.linewidth_symbol_periods}."
-            )
+        if not self.linewidth > 0:
+            raise ValueError(f"linewidth must be > 0 Hz, got {self.linewidth}.")
         if self.block_size < 1:
             raise ValueError(f"block_size must be >= 1, got {self.block_size}.")
 
@@ -238,7 +238,8 @@ def _tikhonov(symbols: ArrayType, method: Tikhonov, ctx: _Context) -> _Phase:
     _warn_small_qam_block("Tikhonov", block_size, project, constellation.order)
 
     snr_lin = 10.0 ** (method.snr_db / 10.0)
-    sigma_p2 = float(2.0 * np.pi * method.linewidth_symbol_periods * block_size)
+    linewidth_symbol_periods = method.linewidth / ctx.need_sampling_rate(method)
+    sigma_p2 = float(2.0 * np.pi * linewidth_symbol_periods * block_size)
     sigma_v2 = float(1.0 / (M**2 * snr_lin * block_size))
 
     joint = method.joint_channels and C > 1
