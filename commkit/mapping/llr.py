@@ -196,6 +196,24 @@ def _log_prior(pmf: np.ndarray | None, order: int) -> np.ndarray:
     return np.log(np.clip(np.asarray(pmf, np.float64), 1e-40, None)).astype(np.float32)
 
 
+def _real_imag(flat: np.ndarray) -> tuple[np.ndarray, np.ndarray]:
+    """float32 real and imaginary parts of flat CPU symbols for the kernels.
+
+    Strided views of complex64 data, so the record is not copied on one
+    thread before the parallel kernel; zeros for the imaginary part of
+    real data.
+    """
+    if flat.dtype == np.complex64:
+        return flat.real, flat.imag
+    re = np.ascontiguousarray(flat.real, dtype=np.float32)
+    im = (
+        np.ascontiguousarray(flat.imag, dtype=np.float32)
+        if flat.dtype.kind == "c"
+        else np.zeros(flat.size, np.float32)
+    )
+    return re, im
+
+
 def _llr(
     symbols: ArrayType,
     points: np.ndarray,
@@ -217,25 +235,28 @@ def _llr(
     is_complex = symbols.dtype.kind == "c"
     sym_flat = symbols.reshape(-1).astype(xp.complex64 if is_complex else xp.float32)
     inv_sigma2 = np.float32(1.0 / max(noise_var, 1e-20))
-    log_pmf = _log_prior(pmf, order)
 
     n = sym_flat.shape[0]
     if xp is np:
         # CPU: one parallel pass, no (chunk, k, M/2) intermediates.
+
+        def build_cpu() -> tuple[np.ndarray, ...]:
+            """Points per axis, log prior and the halves of each bit."""
+            return (
+                np.ascontiguousarray(np.real(points), dtype=np.float32),
+                np.ascontiguousarray(np.imag(points), dtype=np.float32),
+                _log_prior(pmf, order),
+                _half_indices(bit_labels),
+            )
+
+        c_re, c_im, log_pmf_cpu, halves = _device_tables(owner, "llr", np, build_cpu)
         llrs = np.empty((n, k), dtype=np.float32)
         _get_numba_llr()(
-            np.ascontiguousarray(sym_flat.real, dtype=np.float32),
-            np.ascontiguousarray(
-                sym_flat.imag if is_complex else np.zeros(n, np.float32),
-                dtype=np.float32,
-            ),
-            np.ascontiguousarray(np.real(points), dtype=np.float32),
-            np.ascontiguousarray(
-                np.imag(points) if is_complex else np.zeros(order, np.float32),
-                dtype=np.float32,
-            ),
-            log_pmf,
-            _half_indices(bit_labels),
+            *_real_imag(sym_flat),
+            c_re,
+            c_im if is_complex else np.zeros(order, np.float32),
+            log_pmf_cpu,
+            halves,
             inv_sigma2,
             method == "exact",
             llrs,
@@ -248,7 +269,7 @@ def _llr(
         """The device tables: points, log prior and packed labels."""
         return (
             points.astype(np.complex64),
-            log_pmf,
+            _log_prior(pmf, order),
             _packed_labels(bit_labels),
         )
 
@@ -284,7 +305,11 @@ class _Axis(NamedTuple):
 
 
 def _llr_separable(
-    symbols: np.ndarray, axes: tuple[_Axis, _Axis], noise_var: float, method: str
+    symbols: np.ndarray,
+    axes: tuple[_Axis, _Axis],
+    noise_var: float,
+    method: str,
+    owner: Constellation | None = None,
 ) -> np.ndarray:
     """CPU LLRs of a separable constellation, one pass over both axes.
 
@@ -292,7 +317,8 @@ def _llr_separable(
     depends on one axis, so the other axis's factor cancels from its LLR in
     both methods: 2·sqrt(M) metrics per symbol instead of M.  Max-log LLRs
     without a prior take the closed form (module docstring) from 256-QAM
-    (``_CLOSED_FORM_MIN_LEVELS_CPU``), where it is faster on the CPU.
+    (``_CLOSED_FORM_MIN_LEVELS_CPU``), where it is faster on the CPU.  The
+    tables are cached on ``owner``.
     """
     _check_method(method)
     re, im = axes
@@ -300,10 +326,10 @@ def _llr_separable(
     k = re.bits.size + im.bits.size
     llrs = np.empty((flat.size, k), dtype=np.float32)
     if _closed_form(axes, method, _CLOSED_FORM_MIN_LEVELS_CPU):
-        _get_numba_llr("llr_separable_maxlog")(
-            np.ascontiguousarray(flat.real, dtype=np.float32),
-            np.ascontiguousarray(flat.imag, dtype=np.float32),
-            *(
+
+        def build_closed() -> tuple[np.ndarray, ...]:
+            """Levels, packed labels, opposite levels and bit positions per axis."""
+            return tuple(
                 t
                 for a in axes
                 for t in (
@@ -312,22 +338,32 @@ def _llr_separable(
                     *_opposite_levels(a.labels),
                     a.bits.astype(np.int64),
                 )
-            ),
+            )
+
+        _get_numba_llr("llr_separable_maxlog")(
+            *_real_imag(flat),
+            *_device_tables(owner, "llr_separable_maxlog", np, build_closed),
             np.float32(1.0 / max(noise_var, 1e-20)),
             llrs,
         )
         return llrs.reshape((*symbols.shape[:-1], symbols.shape[-1] * k))
+
+    def build() -> tuple[np.ndarray, ...]:
+        """Levels, log priors, halves of each bit and bit positions per axis."""
+        return (
+            re.levels.astype(np.float32),
+            im.levels.astype(np.float32),
+            _log_prior(re.pmf, re.levels.size),
+            _log_prior(im.pmf, im.levels.size),
+            _half_indices(re.labels),
+            _half_indices(im.labels),
+            re.bits.astype(np.int64),
+            im.bits.astype(np.int64),
+        )
+
     _get_numba_llr("llr_separable")(
-        np.ascontiguousarray(flat.real, dtype=np.float32),
-        np.ascontiguousarray(flat.imag, dtype=np.float32),
-        re.levels.astype(np.float32),
-        im.levels.astype(np.float32),
-        _log_prior(re.pmf, re.levels.size),
-        _log_prior(im.pmf, im.levels.size),
-        _half_indices(re.labels),
-        _half_indices(im.labels),
-        re.bits.astype(np.int64),
-        im.bits.astype(np.int64),
+        *_real_imag(flat),
+        *_device_tables(owner, "llr_separable", np, build),
         np.float32(1.0 / max(noise_var, 1e-20)),
         method == "exact",
         llrs,

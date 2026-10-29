@@ -31,6 +31,7 @@ Paired A/B of alternating processes against the previous commit of each change:
 - `mi`: one exponential per element, 256-QAM 0.82 on the CPU and 0.33 on the GPU, 16-QAM 0.52 on the GPU.
 - LMS/RLS with inline carrier recovery: 2 x 50000 16-QAM symbols, PLL 0.95, BPS 0.97 (each symbol's phasor computed once).
 - `Constellation.map` / `demap` on the GPU: about 0.65 per call for 64-QAM and 8-PSK, 4096 to 2^20 symbols (tables cached per device; the hash cached and an identity shortcut in the equality the cache calls).
+- LLRs on the CPU (`compute_llr`, `Constellation.llr`): 0.07-0.26 for 4096 symbols (tables cached per constellation; 256-QAM's closed-form tables were most of the call), 0.84 for 2^20 (no copies of the real and imaginary parts).
 - `block_lms` with BPS: 2 x 100000 16-QAM symbols, block 256, 0.97 on the CPU and 0.86 on the GPU (the phasor from a real cos and sin).
 
 ### Fixed
