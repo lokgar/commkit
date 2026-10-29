@@ -343,6 +343,22 @@ def bessel_sos(
     )
 
 
+def _taps_like(taps: ArrayType, x: ArrayType, xp: Any, function_name: str) -> ArrayType:
+    """``taps`` in the precision of ``x``; complex taps need complex samples.
+
+    The samples set the precision, so float64 tap designs do not promote
+    single-precision data.  The output keeps the dtype of the samples, which
+    for real samples has no room for the imaginary part of complex taps.
+    """
+    if xp.iscomplexobj(taps) and not xp.iscomplexobj(x):
+        raise ValueError(
+            f"{function_name}: complex taps need complex samples, got {x.dtype} "
+            f"samples; pass samples.astype(complex64) for a complex output."
+        )
+    target = x.dtype if xp.iscomplexobj(taps) else x.real.dtype
+    return taps if taps.dtype == target else taps.astype(target)
+
+
 def ols_fir_filter(
     samples: S,
     taps: ArrayType,
@@ -387,7 +403,8 @@ def ols_fir_filter(
     Raises
     ------
     ValueError
-        If ``fft_size`` is not a power of 2 or ``fft_size // 4 < len(taps)``.
+        If ``fft_size`` is not a power of 2 or ``fft_size // 4 < len(taps)``,
+        or ``taps`` is complex and ``samples`` real.
 
     Notes
     -----
@@ -402,15 +419,9 @@ def ols_fir_filter(
     x = signal_adapter.array
 
     x, xp, _ = dispatch(x)
-    taps = xp.asarray(taps)
+    taps = _taps_like(xp.asarray(taps), x, xp, "ols_fir_filter()")
     is_real = not xp.iscomplexobj(x) and not xp.iscomplexobj(taps)
     out_dtype = x.dtype  # capture before any reshape
-
-    # Signal drives precision: cast taps to match signal so float64 tap
-    # generators do not silently upcast complex64 signals via FFT multiply.
-    target_tap_dtype = x.real.dtype if not xp.iscomplexobj(taps) else x.dtype
-    if taps.dtype != target_tap_dtype:
-        taps = taps.astype(target_tap_dtype)
 
     L = len(taps)
     half = L // 2
@@ -487,6 +498,11 @@ def fir_filter(samples: S, taps: ArrayType, *, periodic: bool = False) -> S:
     -------
     ndarray or Signal
         Filtered samples, same shape and dtype as ``samples``.
+
+    Raises
+    ------
+    ValueError
+        If ``taps`` is not 1-D, or is complex and ``samples`` real.
     """
     signal_adapter = adapt_signal(samples, function_name="fir_filter()")
     x, xp, sp = dispatch(signal_adapter.array)
@@ -494,12 +510,7 @@ def fir_filter(samples: S, taps: ArrayType, *, periodic: bool = False) -> S:
     if taps.ndim != 1:
         raise ValueError(f"taps must be 1-D, got shape {taps.shape}.")
     logger.debug("Applying FIR filter via convolution (%s taps).", taps.size)
-
-    # Signal drives precision: cast taps to match signal dtype so numpy/scipy
-    # type-promotion rules do not silently upcast float32/complex64 signals.
-    target_tap_dtype = x.real.dtype if not xp.iscomplexobj(taps) else x.dtype
-    if taps.dtype != target_tap_dtype:
-        taps = taps.astype(target_tap_dtype)
+    taps = _taps_like(taps, x, xp, "fir_filter()")
 
     if periodic:
         return signal_adapter.wrap_samples(convolve_periodic(x, taps))

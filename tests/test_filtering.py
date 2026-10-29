@@ -182,6 +182,17 @@ class TestFilterApplication:
         out = filtering.fir_filter(x, taps)
         assert out.dtype == xp.complex64
 
+    @pytest.mark.parametrize("fn", [filtering.fir_filter, filtering.ols_fir_filter])
+    def test_complex_taps_need_complex_samples(self, xp: Any, xpt: Any, fn) -> None:
+        """A real output has no room for the imaginary part: [1j] raises on
+        real samples instead of returning zeros, and rotates complex ones."""
+        taps = xp.asarray([1j], dtype=xp.complex64)
+        with pytest.raises(ValueError, match="complex taps need complex samples"):
+            fn(xp.ones(256, dtype=xp.float32), taps)
+        out = fn(xp.ones(256, dtype=xp.complex64), taps)
+        assert out.dtype == xp.complex64
+        xpt.assert_allclose(out, xp.full(256, 1j, dtype=xp.complex64), atol=1e-6)
+
     def test_matched_filter_preserves_dtype(self, xp: Any) -> None:
         """matched_filter with rrc_taps (float64) on complex64 signal -> complex64."""
         rng = np.random.default_rng(11)
