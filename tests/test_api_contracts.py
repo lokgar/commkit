@@ -535,6 +535,8 @@ ROWS: list[Row] = [
         call=lambda c, x: _a(x, Lowdin()),
     ),
     Row("commkit.impairments.frontend.estimate_iq_imbalance", MULTI, data=2),
+    # Optical Signals only, like extract_payload: tested in test_noise.py.
+    Row("commkit.impairments.noise.apply_ase", DESIGN),
     Row(
         "commkit.impairments.noise.apply_awgn",
         TRANSFORM,
