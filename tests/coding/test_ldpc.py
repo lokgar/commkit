@@ -96,7 +96,7 @@ class TestConstruction:
             )
         with pytest.raises(TypeError, match="num_checks must be an integer"):
             LDPCCode([0, 0, 1, 1], [0, 2, 1, 3], 2.9, 4)
-        with pytest.raises(TypeError, match="length must be an integer"):
+        with pytest.raises(TypeError, match="num_variables must be an integer"):
             LDPCCode([0, 0, 1, 1], [0, 2, 1, 3], 2, 4.9)
         with pytest.raises(ValueError, match=">= 0"):
             LDPCCode.from_parity_check(_h(TREE, 8), punctured=-1)

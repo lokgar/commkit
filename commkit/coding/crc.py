@@ -44,7 +44,7 @@ _NR = {
 
 @dataclass(frozen=True, eq=False)
 class CRC(_Code):
-    """Cyclic redundancy check of ``degree`` bits over blocks of ``block_length``.
+    """Cyclic redundancy check of ``degree`` bits over blocks of ``info_bits`` bits.
 
     Parameters
     ----------
@@ -53,12 +53,12 @@ class CRC(_Code):
         first (CRC-32: ``0x04C11DB7``).
     degree : int
         Check bits ``r``, 1 to 64.
-    block_length : int
+    info_bits : int
         Information bits ``k`` per block.
     init : int, default 0
         Initial register value.
     reflect_in : bool, default False
-        Reverse the bit order of each input byte (``block_length`` must be a
+        Reverse the bit order of each input byte (``info_bits`` must be a
         multiple of 8).
     reflect_out : bool, default False
         Reverse the check bits before the final XOR.
@@ -74,47 +74,47 @@ class CRC(_Code):
 
     polynomial: int
     degree: int
-    block_length: int
+    info_bits: int
     init: int = 0
     reflect_in: bool = False
     reflect_out: bool = False
     xor_out: int = 0
 
     def __post_init__(self) -> None:
-        r, k = self.degree, self.block_length
+        r, k = self.degree, self.info_bits
         if isinstance(r, bool) or not isinstance(r, int) or not 1 <= r <= 64:
             raise ValueError(f"degree must be an integer in [1, 64], got {r!r}.")
         if isinstance(k, bool) or not isinstance(k, int) or k < 1:
-            raise ValueError(f"block_length must be an integer >= 1, got {k!r}.")
+            raise ValueError(f"info_bits must be an integer >= 1, got {k!r}.")
         for name in ("polynomial", "init", "xor_out"):
             value = getattr(self, name)
             if not isinstance(value, int) or not 0 <= value < (1 << r):
                 raise ValueError(f"{name} must be an integer in [0, 2^{r}).")
         if self.reflect_in and k % 8:
-            raise ValueError("reflect_in needs a block_length that is a multiple of 8.")
+            raise ValueError("reflect_in needs info_bits that is a multiple of 8.")
 
     @property
     def n(self) -> int:
         """Bits per block with the check: ``k + degree``."""
-        return self.block_length + self.degree
+        return self.info_bits + self.degree
 
     @property
     def k(self) -> int:
         """Information bits per block."""
-        return self.block_length
+        return self.info_bits
 
     def __repr__(self) -> str:
         return f"CRC(0x{self.polynomial:X}, degree={self.degree}, k={self.k})"
 
     @classmethod
-    def nr(cls, name: str, block_length: int) -> CRC:
+    def nr(cls, name: str, info_bits: int) -> CRC:
         """A CRC of 3GPP TS 38.212 clause 5.1 (5G NR; LTE uses 24A and 24B).
 
         Parameters
         ----------
         name : {"6", "11", "16", "24A", "24B", "24C"}
             The polynomial ``g_CRC<name>``.
-        block_length : int
+        info_bits : int
             Information bits per block.
 
         Returns
@@ -125,15 +125,15 @@ class CRC(_Code):
         if name not in _NR:
             raise ValueError(f"name must be one of {sorted(_NR)}, got {name!r}.")
         degree, poly = _NR[name]
-        return cls(poly, degree, block_length)
+        return cls(poly, degree, info_bits)
 
     @classmethod
-    def ethernet(cls, block_length: int) -> CRC:
+    def ethernet(cls, info_bits: int) -> CRC:
         """The CRC-32 of IEEE 802.3 (frame check sequence), over whole bytes.
 
         Parameters
         ----------
-        block_length : int
+        info_bits : int
             Information bits per block, a multiple of 8.
 
         Returns
@@ -144,12 +144,12 @@ class CRC(_Code):
             ``"123456789"`` is ``0xCBF43926``.
         """
         ones = (1 << 32) - 1
-        return cls(0x04C11DB7, 32, block_length, ones, True, True, ones)
+        return cls(0x04C11DB7, 32, info_bits, ones, True, True, ones)
 
     @cached_property
     def _tables(self) -> tuple[np.ndarray, np.ndarray]:
         """``(G, c)``: float32 ``(k, r)`` and int8 ``(r,)``, ``crc = u G + c``."""
-        r, k = self.degree, self.block_length
+        r, k = self.degree, self.info_bits
         g, c = _remainders(self.polynomial, r, k, self.init)
         if self.reflect_in:
             g = g.reshape(-1, 8, r)[:, ::-1].reshape(k, r)

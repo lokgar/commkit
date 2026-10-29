@@ -82,7 +82,7 @@ class TurboCode(_Code):
 
     Parameters
     ----------
-    block_length : int
+    info_bits : int
         ``K``, information bits per block: a size of Table 5.1.3-3 (40 to
         6144).
 
@@ -93,39 +93,39 @@ class TurboCode(_Code):
     slightly below 1/3: ``K = 40`` gives 132 bits, rate 0.303.
     """
 
-    block_length: int
+    info_bits: int
 
     def __post_init__(self) -> None:
-        k = self.block_length
+        k = self.info_bits
         if isinstance(k, bool) or not isinstance(k, int | np.integer):
-            raise TypeError(f"block_length must be an integer, got {k!r}.")
-        object.__setattr__(self, "block_length", int(k))
-        if self.block_length not in _QPP_PARAMETERS:
+            raise TypeError(f"info_bits must be an integer, got {k!r}.")
+        object.__setattr__(self, "info_bits", int(k))
+        if self.info_bits not in _QPP_PARAMETERS:
             raise ValueError(
-                f"block_length must be a K of TS 36.212 Table 5.1.3-3 (40, 48, ..., 6144), "
-                f"got {self.block_length!r}."
+                f"info_bits must be a K of TS 36.212 Table 5.1.3-3 (40, 48, ..., 6144), "
+                f"got {self.info_bits!r}."
             )
 
     @property
     def n(self) -> int:
         """Transmitted bits per block, ``3 K + 12``."""
-        return 3 * self.block_length + 12
+        return 3 * self.info_bits + 12
 
     @property
     def k(self) -> int:
         """Information bits per block, ``K``."""
-        return self.block_length
+        return self.info_bits
 
     def __repr__(self) -> str:
-        return f"TurboCode.lte({self.block_length})"
+        return f"TurboCode.lte({self.info_bits})"
 
     @classmethod
-    def lte(cls, block_length: int) -> TurboCode:
+    def lte(cls, info_bits: int) -> TurboCode:
         """The LTE turbo code (TS 36.212 clause 5.1.3.2) of block size ``K``.
 
         Parameters
         ----------
-        block_length : int
+        info_bits : int
             ``K``, one of the 188 block sizes of TS 36.212 Table 5.1.3-3
             (40 to 6144).
 
@@ -133,14 +133,14 @@ class TurboCode(_Code):
         -------
         TurboCode
         """
-        return cls(block_length)
+        return cls(info_bits)
 
     @cached_property
     def interleaver(self) -> np.ndarray:
         """``Pi``, ``(K,)``: the second encoder's input bit ``i`` is ``c[Pi(i)]``."""
-        f1, f2 = _QPP_PARAMETERS[self.block_length]
-        i = np.arange(self.block_length, dtype=np.int64)
-        pi = (f1 * i + f2 * i * i) % self.block_length
+        f1, f2 = _QPP_PARAMETERS[self.info_bits]
+        i = np.arange(self.info_bits, dtype=np.int64)
+        pi = (f1 * i + f2 * i * i) % self.info_bits
         pi.setflags(write=False)
         return pi
 

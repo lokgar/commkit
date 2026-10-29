@@ -108,9 +108,9 @@ class TestDecoding:
     def test_validation(self) -> None:
         with pytest.raises(ValueError, match="Table 5.1.3-3"):
             TurboCode(41)
-        with pytest.raises(TypeError, match="block_length must be an integer"):
+        with pytest.raises(TypeError, match="info_bits must be an integer"):
             TurboCode(40.0)
-        with pytest.raises(TypeError, match="block_length must be an integer"):
+        with pytest.raises(TypeError, match="info_bits must be an integer"):
             TurboCode(True)
         assert TurboCode(np.int64(40)) == TurboCode(40)
         with pytest.raises(ValueError, match="iterations"):

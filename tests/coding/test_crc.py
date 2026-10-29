@@ -64,7 +64,7 @@ def test_encode_appends_and_decode_checks(xp: Any, xpt: Any) -> None:
 def test_validation() -> None:
     with pytest.raises(ValueError, match="degree"):
         CRC(0x3, 0, 8)
-    with pytest.raises(ValueError, match="block_length"):
+    with pytest.raises(ValueError, match="info_bits"):
         CRC(0x3, 2, 0)
     with pytest.raises(ValueError, match="polynomial"):
         CRC(0x10, 2, 8)

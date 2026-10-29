@@ -118,7 +118,7 @@ class TestDecoding:
             ConvolutionalCode((0o7,), 3, 10)
         with pytest.raises(ValueError, match="generators"):
             ConvolutionalCode((0o17, 0o5), 3, 10)
-        with pytest.raises(ValueError, match="block_length"):
+        with pytest.raises(ValueError, match="info_bits"):
             ConvolutionalCode((0o7, 0o5), 3, 0)
         with pytest.raises(ValueError, match="termination"):
             ConvolutionalCode((0o7, 0o5), 3, 10, "flush")

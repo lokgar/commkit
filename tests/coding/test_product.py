@@ -188,11 +188,11 @@ class TestStaircase:
         assert res.valid.tolist() == [True]
 
     def test_validation(self) -> None:
-        with pytest.raises(ValueError, match="num_blocks"):
+        with pytest.raises(ValueError, match="blocks_per_frame"):
             StaircaseCode(0)
         with pytest.raises(ValueError, match="iterations"):
             HardIterations(0)
-        assert repr(StaircaseCode(3)) == "StaircaseCode(num_blocks=3)"
+        assert repr(StaircaseCode(3)) == "StaircaseCode(blocks_per_frame=3)"
 
 
 class TestConcatenated:

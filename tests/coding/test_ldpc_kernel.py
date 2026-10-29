@@ -63,13 +63,13 @@ def test_wrapper_checks(backend_device: str, xp: Any) -> None:
     launch = _cuda.get_kernel("ldpc_layered")
     kw = dict(scale=1.0, offset=0.0, max_iterations=1, early_stop=True)
     with pytest.raises(ValueError, match="float32"):
-        launch(xp.zeros((1, code.length)), row_ptr, cols, layer_ptr, **kw)
+        launch(xp.zeros((1, code.num_variables)), row_ptr, cols, layer_ptr, **kw)
     with pytest.raises(ValueError, match="int32"):
         launch(
-            xp.zeros((1, code.length), xp.float32), row_ptr.astype(xp.int64), cols,
+            xp.zeros((1, code.num_variables), xp.float32), row_ptr.astype(xp.int64), cols,
             layer_ptr, **kw,
         )  # fmt: skip
     iters, valid = launch(
-        xp.zeros((0, code.length), xp.float32), row_ptr, cols, layer_ptr, **kw
+        xp.zeros((0, code.num_variables), xp.float32), row_ptr, cols, layer_ptr, **kw
     )
     assert iters.shape == (0,) and valid.shape == (0,)

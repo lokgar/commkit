@@ -95,11 +95,11 @@ class ConvolutionalCode(_Code):
     """Feed-forward convolutional code of rate ``1 / len(generators)``, in blocks.
 
     A convolutional encoder runs on an unbounded stream; here it encodes
-    blocks of ``block_length`` information bits, each a codeword of
-    :attr:`n` bits.  With ``g = len(generators)``: ``n = g (block_length +
+    blocks of ``info_bits`` information bits each, every block a codeword of
+    :attr:`n` bits.  With ``g = len(generators)``: ``n = g (info_bits +
     K - 1)`` for ``"zero"`` termination, whose tail bits lower the rate
     below ``1 / g`` (``k7(100)``: 212 bits, rate 0.472), and ``n = g
-    block_length`` for ``"tail-biting"`` (rate exactly ``1 / g``).
+    info_bits`` for ``"tail-biting"`` (rate exactly ``1 / g``).
 
     Parameters
     ----------
@@ -108,7 +108,7 @@ class ConvolutionalCode(_Code):
         written in octal; the MSB taps the current input.
     constraint_length : int
         ``K``, register length including the current input, 2 to 16.
-    block_length : int
+    info_bits : int
         Information bits per block.
     termination : {"zero", "tail-biting"}, default "zero"
         ``"zero"`` appends ``K - 1`` zero bits that return the encoder to
@@ -118,7 +118,7 @@ class ConvolutionalCode(_Code):
 
     generators: tuple[int, ...]
     constraint_length: int
-    block_length: int
+    info_bits: int
     termination: str = "zero"
 
     def __post_init__(self) -> None:
@@ -133,9 +133,9 @@ class ConvolutionalCode(_Code):
                 f"need two or more generators of at most {k} bits, nonzero."
             )
         object.__setattr__(self, "generators", gens)
-        b = self.block_length
+        b = self.info_bits
         if isinstance(b, bool) or not isinstance(b, int) or b < 1:
-            raise ValueError(f"block_length must be an integer >= 1, got {b!r}.")
+            raise ValueError(f"info_bits must be an integer >= 1, got {b!r}.")
         if self.termination not in ("zero", "tail-biting"):
             raise ValueError(
                 f"termination must be 'zero' or 'tail-biting', got {self.termination!r}."
@@ -146,13 +146,13 @@ class ConvolutionalCode(_Code):
     @property
     def n(self) -> int:
         """Transmitted bits per block, the tail included."""
-        steps = self.block_length + (self.constraint_length - 1 if self._zero else 0)
+        steps = self.info_bits + (self.constraint_length - 1 if self._zero else 0)
         return steps * len(self.generators)
 
     @property
     def k(self) -> int:
         """Information bits per block."""
-        return self.block_length
+        return self.info_bits
 
     @property
     def _zero(self) -> bool:
@@ -163,7 +163,7 @@ class ConvolutionalCode(_Code):
         return f"ConvolutionalCode(({gens}), K={self.constraint_length}, k={self.k})"
 
     @classmethod
-    def k7(cls, block_length: int, *, termination: str = "zero") -> ConvolutionalCode:
+    def k7(cls, info_bits: int, *, termination: str = "zero") -> ConvolutionalCode:
         """The rate-1/2, ``K = 7`` code with generators 133 and 171 (octal).
 
         The industry-standard code of IEEE 802.11 (clause 17.3.5.6), CCSDS
@@ -171,7 +171,7 @@ class ConvolutionalCode(_Code):
 
         Parameters
         ----------
-        block_length : int
+        info_bits : int
             Information bits per block.
         termination : {"zero", "tail-biting"}, default "zero"
             As for :class:`ConvolutionalCode`.
@@ -180,7 +180,7 @@ class ConvolutionalCode(_Code):
         -------
         ConvolutionalCode
         """
-        return cls((0o133, 0o171), 7, block_length, termination)
+        return cls((0o133, 0o171), 7, info_bits, termination)
 
     @cached_property
     def _trellis(self) -> _Trellis:

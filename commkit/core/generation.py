@@ -148,7 +148,7 @@ def generate(
         The constellation to draw from.  Every symbol comes from bits: a
         uniform constellation maps random bits; a shaped constellation
         (``pmf`` set) passes random bits through a constant-composition
-        distribution matcher, ``CCDM(constellation, block_length=num_symbols)``
+        distribution matcher, ``CCDM(constellation, num_symbols=num_symbols)``
         per channel, unless ``code`` gives another matcher.  The shaped
         record then holds each point exactly as often as the composition
         says: the pmf quantized to ``1 / num_symbols``.
@@ -246,7 +246,7 @@ def generate(
     the composition follows the record length.  A transmitter's matcher is
     shorter (a few hundred to a few thousand symbols, at a rate loss of
     about 0.16 bit per symbol for 1024 symbols of PS-64-QAM at 5 bits);
-    model one with ``code=CCDM(constellation, block_length=1024)`` and
+    model one with ``code=CCDM(constellation, num_symbols=1024)`` and
     ``num_blocks``.
 
     Examples
@@ -290,7 +290,7 @@ def generate(
         if code is None:
             # Every shaped symbol comes from bits: one matcher block per channel.
             assert num_symbols is not None
-            code = coding.CCDM(c, block_length=int(num_symbols))
+            code = coding.CCDM(c, num_symbols=int(num_symbols))
         codec = coding.base._codec(code, "generate()")
         matched = getattr(code, "constellation", None)
         if matched is not None and matched != c:

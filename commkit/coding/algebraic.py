@@ -58,14 +58,19 @@ class _Algebraic(_Code):
     """What the shared decoder needs from a code.
 
     Subclasses provide ``field`` (a :class:`_Field`), ``t``, ``first_root``
-    (``b``), ``length`` (transmitted symbols, bits for BCH) and ``binary``.
+    (``b``) and ``binary``.
     """
 
     field: Any
     t: Any
     first_root: Any
-    length: Any
     binary: Any
+    n: Any
+
+    @property
+    def _positions(self) -> int:
+        """Transmitted code symbols per codeword (bits for a binary code)."""
+        return self.n if self.binary else self.n // self.field.m
 
     @cached_property
     def _locator_logs(self) -> np.ndarray:
@@ -74,7 +79,7 @@ class _Algebraic(_Code):
         For a cyclic code the polynomial degree of each transmitted symbol,
         ``n - 1 ... 0``; codes with another position map override it.
         """
-        return np.arange(self.length - 1, -1, -1)
+        return np.arange(self._positions - 1, -1, -1)
 
     @cached_property
     def _syndrome_matrix(self) -> np.ndarray:
@@ -98,7 +103,7 @@ class ReedSolomonCode(_Algebraic):
     information, and corrects ``t = (544 - 514) / 2 = 15`` wrong code
     symbols, whatever the bit errors inside each.  Like every code object,
     :attr:`n` and :attr:`k` count *bits*: 5440 and 5140 for KP4.  The code
-    symbol counts are :attr:`length` (``symbols``) and ``info_symbols``.
+    symbol counts are the fields ``symbols`` and ``info_symbols``.
 
     Parameters
     ----------
@@ -155,11 +160,6 @@ class ReedSolomonCode(_Algebraic):
     def t(self) -> int:
         """Correctable code-symbol errors per codeword."""
         return (self.symbols - self.info_symbols) // 2
-
-    @property
-    def length(self) -> int:
-        """Code symbols per codeword, ``symbols`` (``n`` counts bits)."""
-        return self.symbols
 
     @property
     def binary(self) -> bool:

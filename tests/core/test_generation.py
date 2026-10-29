@@ -168,7 +168,7 @@ class TestGenerate:
         c = Constellation.qam(16).shaped(nu=0.1)
         sig = generate(c, 20_000, symbol_rate=1e6, num_channels=2, rng=2)
         ref = sig.reference
-        matcher = CCDM(c, block_length=20_000)
+        matcher = CCDM(c, num_symbols=20_000)
         assert ref.code_block == (80_000, matcher.k)
         assert ref.info_bits.shape == (2, matcher.k)
         for ch in range(2):
@@ -345,7 +345,7 @@ class TestGenerateCoded:
         with pytest.raises(ValueError, match="num_blocks=4 or 8"):
             generate(c, symbol_rate=1.0, code=code, num_blocks=5)
         shaped = c.shaped(entropy=3.5)
-        matcher = CCDM(shaped, block_length=10)
+        matcher = CCDM(shaped, num_symbols=10)
         with pytest.raises(ValueError, match="composition"):
             generate(shaped, 25, symbol_rate=1.0, code=matcher, pad=True)
         sig = generate(shaped, symbol_rate=1.0, code=matcher, num_blocks=3)

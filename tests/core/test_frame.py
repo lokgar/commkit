@@ -540,7 +540,7 @@ class TestExtractPayload:
             "gpu" if xp is not np else "cpu"
         )
         ref = extract_payload(sig).reference
-        matcher = CCDM(c, block_length=500)
+        matcher = CCDM(c, num_symbols=500)
         assert ref.code_block == (2000, matcher.k) and ref.code == matcher
         xpt.assert_array_equal(ref.info_bits, xp.asarray(frame.payload_info_bits))
         xpt.assert_array_equal(decode(ref.bits, code=ref.code).bits, ref.info_bits)
@@ -621,12 +621,12 @@ class TestExtractPayload:
         with pytest.raises(ValueError, match="composition"):
             SingleCarrierFrame(
                 payload_num_symbols=25, payload_constellation=c,
-                payload_code=CCDM(c, block_length=10), payload_pad=True,
+                payload_code=CCDM(c, num_symbols=10), payload_pad=True,
             )  # fmt: skip
 
     def test_matched_payload_in_blocks(self, xp, xpt):
         c = Constellation.qam(16).shaped(entropy=3.5)
-        matcher = CCDM(c, block_length=100)
+        matcher = CCDM(c, num_symbols=100)
         frame = SingleCarrierFrame(
             payload_blocks=3, payload_constellation=c, payload_code=matcher
         )

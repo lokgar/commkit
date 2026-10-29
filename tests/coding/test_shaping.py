@@ -53,7 +53,7 @@ class TestCCDM:
     )
     def test_exhaustive_round_trip(self, n: int, pmf) -> None:
         """Every k-bit input: exact composition, distinct sequences, inverse."""
-        cc = CCDM(Constellation(AMPLITUDES.points, pmf=pmf), block_length=n)
+        cc = CCDM(Constellation(AMPLITUDES.points, pmf=pmf), num_symbols=n)
         u = np.array(list(itertools.product([0, 1], repeat=cc.k)), dtype=np.int8)
         sym = cc._match(u)
         for row in sym:
@@ -70,7 +70,7 @@ class TestCCDM:
     def test_valid_exactly_on_the_image(self, n: int, pmf) -> None:
         """Of all sequences of the composition (more than the 2^k payloads),
         exactly those the matcher emits are valid."""
-        cc = CCDM(Constellation(AMPLITUDES.points, pmf=pmf), block_length=n)
+        cc = CCDM(Constellation(AMPLITUDES.points, pmf=pmf), num_symbols=n)
         u = np.array(list(itertools.product([0, 1], repeat=cc.k)), dtype=np.int8)
         image = {tuple(r) for r in cc._match(u)}
         every = np.array(list(itertools.product(range(4), repeat=n)), dtype=np.int64)
@@ -84,7 +84,7 @@ class TestCCDM:
 
     def test_two_points_of_four_sequences(self) -> None:
         """Two of each of two points: six sequences, four payloads (k = 2)."""
-        cc = CCDM(Constellation.pam(2), block_length=4)
+        cc = CCDM(Constellation.pam(2), num_symbols=4)
         assert cc.k == 2
         every = np.array(
             [r for r in itertools.product(range(2), repeat=4) if sum(r) == 2]
@@ -93,7 +93,7 @@ class TestCCDM:
         assert valid.sum() == 4
 
     def test_round_trip_at_operating_size(self, xp: Any, xpt: Any) -> None:
-        cc = CCDM(PS64, block_length=20_000)
+        cc = CCDM(PS64, num_symbols=20_000)
         u = random_bits((3, cc.k), xp, seed=1)
         labels = encode(u, code=cc)
         assert labels.shape == (3, 20_000 * 6)
@@ -110,14 +110,14 @@ class TestCCDM:
         """Rate loss H - k/n is positive and O(log n / n)."""
         losses = []
         for n in (100, 1_000, 10_000, 100_000):
-            cc = CCDM(AMPLITUDES, block_length=n)
+            cc = CCDM(AMPLITUDES, num_symbols=n)
             loss = AMPLITUDES.entropy - cc.k / n
             assert 0 < loss < 4 * np.log2(n) / n
             losses.append(loss)
         assert np.all(np.diff(losses) < 0)
 
     def test_invalid_composition_is_flagged(self, xp: Any) -> None:
-        cc = CCDM(AMPLITUDES, block_length=50)
+        cc = CCDM(AMPLITUDES, num_symbols=50)
         labels = encode(random_bits(cc.k, xp, seed=2), code=cc)
         labels[:2] = 1 - labels[:2]  # the first point changes kind
         assert not bool(decode(labels, code=cc).valid.all())
@@ -125,7 +125,7 @@ class TestCCDM:
     def test_dematcher_guards_its_buffer(self) -> None:
         """The dematcher flags a block whose interval needs more fractional
         bits than its buffer holds, instead of writing past it."""
-        cc = CCDM(AMPLITUDES, block_length=50)
+        cc = CCDM(AMPLITUDES, num_symbols=50)
         symbols = cc._match(to_device(random_bits(cc.k, np, seed=3), "cpu")[None])
         bits = np.empty((1, cc.k), dtype=np.int8)
         valid = np.empty(1, dtype=np.bool_)
@@ -137,13 +137,13 @@ class TestCCDM:
 
     def test_validation(self) -> None:
         with pytest.raises(TypeError, match="Constellation"):
-            CCDM("qam", block_length=10)
-        with pytest.raises(ValueError, match="block_length"):
-            CCDM(AMPLITUDES, block_length=0)
+            CCDM("qam", num_symbols=10)
+        with pytest.raises(ValueError, match="num_symbols"):
+            CCDM(AMPLITUDES, num_symbols=0)
         with pytest.raises(ValueError, match="no information bit"):
-            CCDM(AMPLITUDES, block_length=2)
-        assert CCDM(AMPLITUDES, block_length=10) == CCDM(AMPLITUDES, block_length=10)
-        assert "block_length=10" in repr(CCDM(AMPLITUDES, block_length=10))
+            CCDM(AMPLITUDES, num_symbols=2)
+        assert CCDM(AMPLITUDES, num_symbols=10) == CCDM(AMPLITUDES, num_symbols=10)
+        assert "num_symbols=10" in repr(CCDM(AMPLITUDES, num_symbols=10))
 
 
 class TestPAS:
@@ -151,7 +151,7 @@ class TestPAS:
         pas = PAS(LDPCCode.dvbs2("3/4"), PS64)
         n_real = 64800 // 3
         assert pas.n == 64800
-        assert pas.matcher.block_length == n_real
+        assert pas.matcher.num_symbols == n_real
         assert pas.k == pas.matcher.k + 48600 - 2 * n_real
         # Signs per real dimension, then the two amplitude bits.
         perm = pas._interleaver.permutation.reshape(n_real, 3)
@@ -229,7 +229,7 @@ class TestPAS:
 
 class TestGenerateMatched:
     def test_ccdm_payload(self, backend_device: str, xp: Any) -> None:
-        cc = CCDM(PS64, block_length=1000)
+        cc = CCDM(PS64, num_symbols=1000)
         sig = generate(
             PS64,
             4000,
@@ -256,5 +256,5 @@ class TestGenerateMatched:
         with pytest.raises(ValueError, match="another constellation"):
             generate(
                 Constellation.qam(64), 1000, symbol_rate=1.0,
-                code=CCDM(PS64, block_length=1000),
+                code=CCDM(PS64, num_symbols=1000),
             )  # fmt: skip

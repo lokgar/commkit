@@ -57,7 +57,7 @@ class LDPCCode(_Code):
         without duplicates.  Every row has at least two entries.
     num_checks : int
         Rows ``m`` of ``H``.
-    length : int
+    num_variables : int
         Columns ``N`` of ``H``: the mother codeword length.
     punctured : int, default 0
         Trailing codeword bits that are not transmitted (parity bits), so
@@ -73,17 +73,17 @@ class LDPCCode(_Code):
     checks: np.ndarray
     variables: np.ndarray
     num_checks: int
-    length: int
+    num_variables: int
     punctured: int = 0
 
     def __post_init__(self) -> None:
         rows = np.asarray(self.checks)
         cols = np.asarray(self.variables)
-        for name in ("num_checks", "length", "punctured"):
+        for name in ("num_checks", "num_variables", "punctured"):
             v = getattr(self, name)
             if isinstance(v, bool) or not isinstance(v, int | np.integer):
                 raise TypeError(f"{name} must be an integer, got {v!r}.")
-        m, n = int(self.num_checks), int(self.length)
+        m, n = int(self.num_checks), int(self.num_variables)
         if rows.ndim != 1 or rows.shape != cols.shape or rows.size == 0:
             raise ValueError("checks and variables must be equal-length 1-D arrays.")
         if rows.dtype.kind not in "iu" or cols.dtype.kind not in "iu":
@@ -92,7 +92,7 @@ class LDPCCode(_Code):
                 f"{cols.dtype}."
             )
         if m < 1 or n <= m:
-            raise ValueError(f"need 1 <= num_checks < length, got {m} and {n}.")
+            raise ValueError(f"need 1 <= num_checks < num_variables, got {m} and {n}.")
         if rows.min() < 0 or rows.max() >= m or cols.min() < 0 or cols.max() >= n:
             raise ValueError("checks or variables out of range.")
         order = np.lexsort((cols, rows))
@@ -109,7 +109,7 @@ class LDPCCode(_Code):
             value.setflags(write=False)
             object.__setattr__(self, name, value)
         object.__setattr__(self, "num_checks", m)
-        object.__setattr__(self, "length", n)
+        object.__setattr__(self, "num_variables", n)
         object.__setattr__(self, "punctured", p)
         if self._encoder.info.max(initial=-1) >= n - p:
             raise ValueError("punctured bits must be parity bits.")
@@ -117,7 +117,7 @@ class LDPCCode(_Code):
     @property
     def n(self) -> int:
         """Transmitted bits per codeword."""
-        return self.length - self.punctured
+        return self.num_variables - self.punctured
 
     @property
     def k(self) -> int:
@@ -133,14 +133,14 @@ class LDPCCode(_Code):
         Returns
         -------
         scipy.sparse.csr_array
-            ``(num_checks, length)`` int8 on the host, over the mother
+            ``(num_checks, num_variables)`` int8 on the host, over the mother
             codeword (punctured positions included).
         """
         import scipy.sparse
 
         return scipy.sparse.csr_array(
             (np.ones(self.checks.size, np.int8), (self.checks, self.variables)),
-            shape=(self.num_checks, self.length),
+            shape=(self.num_checks, self.num_variables),
         )
 
     # -- constructors ----------------------------------------------------------
@@ -279,7 +279,7 @@ class LDPCCode(_Code):
         """``(row_ptr, cols, layer_ptr)``: CSR of H with rows in layer order."""
         m = self.num_checks
         ptr = np.concatenate([[0], np.cumsum(np.bincount(self.checks, minlength=m))])
-        color = _first_fit(ptr, self.variables, self.length)
+        color = _first_fit(ptr, self.variables, self.num_variables)
         order = np.argsort(color, kind="stable")
         degree = np.diff(ptr)[order]
         row_ptr = np.concatenate([[0], np.cumsum(degree)]).astype(np.int32)
@@ -439,7 +439,7 @@ def _first_fit(ptr: np.ndarray, variables: np.ndarray, n: int) -> np.ndarray:
 
 
 def _build_encoder(code: LDPCCode) -> _Encoder:
-    m, n = code.num_checks, code.length
+    m, n = code.num_checks, code.num_variables
     rows, cols = code.checks, code.variables
     k = n - m
     in_parity = cols >= k
@@ -516,7 +516,7 @@ def _encode(code: LDPCCode, bits: ArrayType) -> ArrayType:
             parity = (xp.cumsum(s, axis=0) & 1).astype(xp.int8).T
         else:
             parity = matmul_mod2(s.T, tables[3])
-    words = xp.empty((bits.shape[0], code.length), dtype=xp.int8)
+    words = xp.empty((bits.shape[0], code.num_variables), dtype=xp.int8)
     if enc.kind == "dense":
         info_dev, parity_dev = _device_tables(
             code, "positions", xp, lambda: (enc.info, enc.parity)
@@ -535,7 +535,7 @@ def _decode(code: LDPCCode, llrs: ArrayType, method: MinSum | SumProduct) -> _De
         code, "schedule", xp, lambda: code._schedule
     )
     rows = llrs.shape[0]
-    app = xp.zeros((rows, code.length), dtype=xp.float32)
+    app = xp.zeros((rows, code.num_variables), dtype=xp.float32)
     app[:, : code.n] = llrs
     sum_product = isinstance(method, SumProduct)
     scale = 1.0 if sum_product else method.scale  # type: ignore[union-attr]

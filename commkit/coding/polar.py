@@ -110,8 +110,8 @@ class PolarCode(_Code):
     """Polar code of length ``N``, a power of two, with given information positions.
 
     :attr:`n` is ``N`` and :attr:`k` the information bits without the CRC,
-    so the rate ``k / N`` counts the CRC as overhead: ``PolarCode.nr(64,
-    128, crc="11")`` carries 64 information and 11 CRC bits in 128.
+    so the rate ``k / N`` counts the CRC as overhead: ``PolarCode.nr(k=64,
+    n=128, crc="11")`` carries 64 information and 11 CRC bits in 128.
 
     Parameters
     ----------
@@ -174,12 +174,12 @@ class PolarCode(_Code):
         return f"PolarCode(n={self.n}, k={self.k}{crc})"
 
     @classmethod
-    def nr(cls, k: int, n: int, *, crc: str | None = None) -> PolarCode:
+    def nr(cls, *, k: int, n: int, crc: str | None = None) -> PolarCode:
         """Polar code with the 5G NR information set (TS 38.212 clause 5.3.1.2).
 
-        The arguments are in the order of the standard's notation ``(K,
-        N)``, information bits first: ``nr(128, 256)`` is the rate-1/2 code
-        of 256 bits.
+        The standard writes ``(K, N)`` and the library ``(n, k)``, so both
+        sizes are keywords: ``nr(k=128, n=256)`` is the rate-1/2 code of 256
+        bits.
 
         Parameters
         ----------

@@ -30,7 +30,7 @@ class TestConstruction:
         assert _NR_SEQUENCE[-1] == 1023
 
     def test_nr_information_set(self) -> None:
-        code = PolarCode.nr(40, 128, crc="11")
+        code = PolarCode.nr(k=40, n=128, crc="11")
         assert (code.n, code.k) == (128, 40)
         reliable = _NR_SEQUENCE[_NR_SEQUENCE < 128][-51:]
         np.testing.assert_array_equal(code.info_positions, np.sort(reliable))
@@ -48,19 +48,19 @@ class TestConstruction:
         with pytest.raises(TypeError, match="CRC"):
             PolarCode(8, [7], crc="6")
         with pytest.raises(ValueError, match="n must be"):
-            PolarCode.nr(10, 100)
+            PolarCode.nr(k=10, n=100)
         with pytest.raises(ValueError, match="fewer"):
-            PolarCode.nr(30, 32, crc="6")
+            PolarCode.nr(k=30, n=32, crc="6")
         with pytest.raises(ValueError, match="1-D"):
             PolarCode.from_frozen(np.ones((2, 4)))
         with pytest.raises(ValueError, match="list_size"):
             SCL(0)
-        assert repr(PolarCode.nr(20, 64, crc="6")) == "PolarCode(n=64, k=20, crc=6)"
+        assert repr(PolarCode.nr(k=20, n=64, crc="6")) == "PolarCode(n=64, k=20, crc=6)"
 
 
 class TestEncoding:
     def test_matches_the_kronecker_power(self, xp: Any) -> None:
-        code = PolarCode.nr(20, 64)
+        code = PolarCode.nr(k=20, n=64)
         u_info = random_bits((5, 20), xp, seed=1)
         x = to_device(encode(u_info, code=code), "cpu")
         u = np.zeros((5, 64), dtype=int)
@@ -68,7 +68,7 @@ class TestEncoding:
         np.testing.assert_array_equal(x, (u @ _generator(64)) % 2)
 
     def test_crc_is_appended(self, xp: Any, xpt: Any) -> None:
-        code = PolarCode.nr(30, 64, crc="6")
+        code = PolarCode.nr(k=30, n=64, crc="6")
         u = random_bits((4, 30), xp, seed=2)
         x = encode(u, code=code)
         res = decode(x, code=code)
@@ -79,7 +79,7 @@ class TestEncoding:
 class TestDecoding:
     @pytest.mark.parametrize("n", [32, 64])
     def test_sc_matches_the_recursive_reference(self, xp: Any, n: int) -> None:
-        code = PolarCode.nr(n // 2, n)
+        code = PolarCode.nr(k=n // 2, n=n)
         llrs = (
             np.random.default_rng(n).standard_normal((50, n)).astype(np.float32) + 0.5
         )
@@ -108,7 +108,7 @@ class TestDecoding:
     def test_crc_failure_keeps_the_best_path(self, xp: Any) -> None:
         """Where no list entry passes the CRC, SCL returns the most likely
         path, as the same list without a CRC does, and flags the block."""
-        code = PolarCode.nr(16, 64, crc="6")
+        code = PolarCode.nr(k=16, n=64, crc="6")
         plain = PolarCode(64, code.info_positions)
         llrs = np.random.default_rng(6).standard_normal((40, 64)).astype(np.float32)
         res = decode(xp.asarray(llrs), code=code, method=SCL(4))
@@ -120,7 +120,7 @@ class TestDecoding:
         np.testing.assert_array_equal(bits[failed], ref_bits[failed, : code.k])
 
     def test_list_and_crc_help(self, backend_device: str) -> None:
-        code = PolarCode.nr(64, 128, crc="11")
+        code = PolarCode.nr(k=64, n=128, crc="11")
         sig = generate(
             mapping.Constellation.qam(4), 64 * 300, symbol_rate=1e9, code=code, rng=4,
             device=backend_device,

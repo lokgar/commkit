@@ -102,8 +102,8 @@ def _bench_decode(benchmark, xp, sync, code, method, num_codewords, esn0_db):
     ("method", "esn0_db"), [(SC(), 3.0), (SCL(8), 2.0)], ids=["sc", "scl8"]
 )
 def bench_polar_decode(benchmark, backend_device, xp, sync, method, esn0_db):
-    """PolarCode.nr(512, 1024) with the NR CRC-16, 64 codewords."""
-    code = PolarCode.nr(512, 1024, crc="16")
+    """PolarCode.nr(k=512, n=1024) with the NR CRC-16, 64 codewords."""
+    code = PolarCode.nr(k=512, n=1024, crc="16")
     _bench_decode(benchmark, xp, sync, code, method, 64, esn0_db)
 
 
@@ -131,7 +131,7 @@ def bench_chase_decode(benchmark, backend_device, xp, sync):
 
 def bench_ccdm_decode(benchmark, backend_device, xp, sync):
     """Dematching of 8 blocks of 20000 PS-64-QAM symbols (labels, no noise)."""
-    code = CCDM(Constellation.qam(64).shaped(entropy=5.0), block_length=20_000)
+    code = CCDM(Constellation.qam(64).shaped(entropy=5.0), num_symbols=20_000)
     rng = np.random.default_rng(0)
     bits = rng.integers(0, 2, 8 * code.k, dtype=np.int8)
     labels = xp.asarray(np.asarray(encode(bits, code=code)))

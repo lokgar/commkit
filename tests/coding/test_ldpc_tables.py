@@ -54,7 +54,7 @@ def test_dvbs2_codewords() -> None:
 def test_pon_structure() -> None:
     """ITU-T G.9804.2 Annex B.1: 12 x 69 circulants of 256, 384 punctured."""
     code = LDPCCode.pon()
-    assert (code.length, code.num_checks, code.punctured) == (17664, 3072, 384)
+    assert (code.num_variables, code.num_checks, code.punctured) == (17664, 3072, 384)
     assert (code.n, code.k) == (17280, 14592)
     assert code.rate == pytest.approx(0.8444, abs=1e-4)
     degree = np.bincount(code.variables, minlength=17664).reshape(69, 256)

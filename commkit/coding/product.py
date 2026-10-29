@@ -5,7 +5,7 @@ Annex A (OTU4 long reach, and the outer code of OIF 400ZR): blocks of 512
 rows and 510 columns, every row of block ``B_i`` a codeword of a
 double-extended BCH(1022, 990) code (``t = 3`` plus two extra parity
 checks) whose first 512 bits are a column of ``B_(i-1)``, permuted by the
-standard's ``Pi_d``.  A frame of ``num_blocks`` blocks starts from a zero
+standard's ``Pi_d``.  A frame of ``blocks_per_frame`` blocks starts from a zero
 block and ends with a terminating block whose information is zero, so the
 last block is protected like the others; only the terminating block's
 parity is transmitted.  :class:`HardIterations` decodes it: each
@@ -100,11 +100,6 @@ class _StaircaseComponent(_Algebraic):
         return self.n - _PARITY
 
     @property
-    def length(self) -> int:  # type: ignore[override]
-        """Transmitted bits per codeword."""
-        return self.n
-
-    @property
     def t(self) -> int:  # type: ignore[override]
         """Correctable errors of the BCH part."""
         return 3
@@ -197,16 +192,16 @@ class StaircaseCode(_Code):
     """The 512 x 510 staircase code of ITU-T G.709.2 Annex A, in frames.
 
     A staircase code is a continuous chain of 512 x 510 blocks.  Here it
-    is cut into terminated *frames*: ``num_blocks`` staircase blocks and
+    is cut into terminated *frames*: ``blocks_per_frame`` staircase blocks and
     a terminating parity block.  The frame is the codeword, the unit that
     :attr:`n`, :attr:`k` and ``generate(..., num_blocks=)`` count;
-    ``num_blocks`` here counts the staircase blocks inside one frame.
-    Per frame ``n = 261120 num_blocks + 16384`` and ``k = 244736
-    num_blocks`` bits: the default 4 gives 1060864 and 978944, rate 0.923.
+    ``blocks_per_frame`` here counts the staircase blocks inside one frame.
+    Per frame ``n = 261120 blocks_per_frame + 16384`` and ``k = 244736
+    blocks_per_frame`` bits: the default 4 gives 1060864 and 978944, rate 0.923.
 
     Parameters
     ----------
-    num_blocks : int, default 4
+    blocks_per_frame : int, default 4
         Staircase blocks of information per frame, each 512 x 478
         information bits (512 x 510 with its parity); the frame adds a
         terminating block of 512 x 32 parity bits.
@@ -220,28 +215,28 @@ class StaircaseCode(_Code):
     and its mapping to OTU frames are not included.
     """
 
-    num_blocks: int = 4
+    blocks_per_frame: int = 4
 
     def __post_init__(self) -> None:
-        b = self.num_blocks
+        b = self.blocks_per_frame
         if isinstance(b, bool) or not isinstance(b, int) or b < 1:
-            raise ValueError(f"num_blocks must be an integer >= 1, got {b!r}.")
+            raise ValueError(f"blocks_per_frame must be an integer >= 1, got {b!r}.")
 
     @property
     def n(self) -> int:
-        """Transmitted bits per frame, ``261120 num_blocks + 16384``."""
-        return self.num_blocks * _ROWS * _COLUMNS + _ROWS * _PARITY
+        """Transmitted bits per frame, ``261120 blocks_per_frame + 16384``."""
+        return self.blocks_per_frame * _ROWS * _COLUMNS + _ROWS * _PARITY
 
     @property
     def k(self) -> int:
-        """Information bits per frame, ``244736 num_blocks``."""
-        return self.num_blocks * _ROWS * _INFO
+        """Information bits per frame, ``244736 blocks_per_frame``."""
+        return self.blocks_per_frame * _ROWS * _INFO
 
     def __repr__(self) -> str:
-        return f"StaircaseCode(num_blocks={self.num_blocks})"
+        return f"StaircaseCode(blocks_per_frame={self.blocks_per_frame})"
 
     @classmethod
-    def g709_2(cls, num_blocks: int = 4) -> StaircaseCode:
+    def g709_2(cls, blocks_per_frame: int = 4) -> StaircaseCode:
         """The staircase code of ITU-T G.709.2 (also the outer code of OIF 400ZR).
 
         Its measured threshold (Table A.1): an input BER of 4.5e-3 gives an
@@ -249,7 +244,7 @@ class StaircaseCode(_Code):
 
         Parameters
         ----------
-        num_blocks : int, default 4
+        blocks_per_frame : int, default 4
             Staircase blocks of information per frame (a frame is one
             codeword; see :class:`StaircaseCode`).
 
@@ -257,7 +252,7 @@ class StaircaseCode(_Code):
         -------
         StaircaseCode
         """
-        return cls(num_blocks)
+        return cls(blocks_per_frame)
 
     @cached_property
     def _left_columns(self) -> np.ndarray:
@@ -285,16 +280,18 @@ def _encode_staircase(code: StaircaseCode, bits: ArrayType) -> ArrayType:
         _COMPONENT, "parity", xp, lambda: (_COMPONENT._parity_matrix,)
     )
     (columns,) = _device_tables(code, "columns", xp, lambda: (code._left_columns,))
-    info = bits.reshape(rows, code.num_blocks, _ROWS, _INFO)
+    info = bits.reshape(rows, code.blocks_per_frame, _ROWS, _INFO)
     previous = xp.zeros((rows, _ROWS, _COLUMNS), dtype=np.int8)
     out = []
-    for i in range(code.num_blocks + 1):
-        block_info = info[:, i] if i < code.num_blocks else xp.zeros_like(info[:, 0])
+    for i in range(code.blocks_per_frame + 1):
+        block_info = (
+            info[:, i] if i < code.blocks_per_frame else xp.zeros_like(info[:, 0])
+        )
         word = xp.concatenate([_left(previous, columns), block_info], axis=2)
         previous = xp.concatenate([block_info, matmul_mod2(word, p)], axis=2)
         out.append(
             previous.reshape(rows, -1)
-            if i < code.num_blocks
+            if i < code.blocks_per_frame
             else previous[:, :, _INFO:]
         )
     return xp.concatenate([o.reshape(rows, -1) for o in out], axis=1)
@@ -304,7 +301,7 @@ def _decode_staircase(
     code: StaircaseCode, llrs: ArrayType, method: HardIterations
 ) -> _Decoded:
     _, xp, _ = dispatch(llrs)
-    rows, num = llrs.shape[0], code.num_blocks
+    rows, num = llrs.shape[0], code.blocks_per_frame
     (columns,) = _device_tables(code, "columns", xp, lambda: (code._left_columns,))
     hard = _hard(llrs)
     blocks = xp.zeros((rows, num + 1, _ROWS, _COLUMNS), dtype=np.int8)
@@ -422,7 +419,7 @@ class Concatenated(_Code):
         return f"Concatenated({self.outer!r}, {self.inner!r})"
 
     @classmethod
-    def cfec(cls, num_blocks: int = 4) -> Concatenated:
+    def cfec(cls, blocks_per_frame: int = 4) -> Concatenated:
         """The C-FEC of OIF 400ZR (OIF-400ZR-01.0 clause 10), at code level.
 
         The G.709.2 staircase code outside the double-extended
@@ -439,14 +436,14 @@ class Concatenated(_Code):
 
         Parameters
         ----------
-        num_blocks : int, default 4
+        blocks_per_frame : int, default 4
             Staircase blocks per frame, as for :meth:`StaircaseCode.g709_2`.
 
         Returns
         -------
         Concatenated
         """
-        outer = StaircaseCode.g709_2(num_blocks)
+        outer = StaircaseCode.g709_2(blocks_per_frame)
         return cls(
             outer, LinearBlockCode.oif400zr(), Interleaver.random(outer.n, rng=400)
         )

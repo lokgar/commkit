@@ -8,7 +8,7 @@ target distribution, invertibly.  Both classes are code objects, so
 :mod:`commkit.mapping.shaping`.
 
 :class:`CCDM` (constant-composition distribution matching, Schulte and
-Böcherer, 2016) maps ``k`` bits to ``block_length`` points whose counts are
+Böcherer, 2016) maps ``k`` bits to ``num_symbols`` points whose counts are
 fixed: the composition that best approximates the constellation's pmf
 (Böcherer and Geiger, 2016).  Each block of bits selects a point of
 ``[0, 1)``; the sequences of that composition partition ``[0, 1)`` by
@@ -73,24 +73,24 @@ class CCDM(_Code):
     ----------
     constellation : Constellation
         The target: its ``pmf`` (uniform if none), points and labels.
-    block_length : int
-        Constellation points (symbols) per block, ``1 <= block_length <=
+    num_symbols : int
+        Constellation points (symbols) per block, ``1 <= num_symbols <=
         2^30``; a block of ``generate(..., num_blocks=)`` is that many
         symbols.  Unlike a FEC code's, this length is a count of symbols,
         and :attr:`n` is it in bits.
 
     Notes
     -----
-    ``k`` information bits per block map to ``block_length`` points, whose
-    labels are the transmitted bits: ``n = block_length * bits_per_symbol``.
+    ``k`` information bits per block map to ``num_symbols`` points, whose
+    labels are the transmitted bits: ``n = num_symbols * bits_per_symbol``.
     Every block holds exactly :attr:`composition` of each point, so the
     transmitted statistics are the composition, which differs from the pmf
-    by its quantization to ``1 / block_length``.  The rate ``k /
-    block_length`` approaches the entropy of the pmf as ``O(log(n) / n)``.
+    by its quantization to ``1 / num_symbols``.  The rate ``k /
+    num_symbols`` approaches the entropy of the pmf as ``O(log(n) / n)``.
     """
 
     constellation: Constellation
-    block_length: int
+    num_symbols: int
 
     def __post_init__(self) -> None:
         if not isinstance(self.constellation, Constellation):
@@ -98,16 +98,14 @@ class CCDM(_Code):
                 "CCDM(): constellation must be a Constellation, got "
                 f"{type(self.constellation).__name__}."
             )
-        n = self.block_length
+        n = self.num_symbols
         if (
             isinstance(n, bool)
             or not isinstance(n, int | np.integer)
             or not 1 <= n <= _MAX_BLOCK
         ):
-            raise ValueError(
-                f"block_length must be an integer in [1, 2^30], got {n!r}."
-            )
-        object.__setattr__(self, "block_length", int(n))
+            raise ValueError(f"num_symbols must be an integer in [1, 2^30], got {n!r}.")
+        object.__setattr__(self, "num_symbols", int(n))
         if self.k < 1:
             raise ValueError(
                 f"CCDM(): a block of {n} points carries no information bit; use a "
@@ -116,8 +114,8 @@ class CCDM(_Code):
 
     @property
     def n(self) -> int:
-        """Transmitted bits per block: ``block_length * bits_per_symbol``."""
-        return self.block_length * self.constellation.bits_per_symbol
+        """Transmitted bits per block: ``num_symbols * bits_per_symbol``."""
+        return self.num_symbols * self.constellation.bits_per_symbol
 
     @property
     def k(self) -> int:
@@ -125,17 +123,17 @@ class CCDM(_Code):
         return self._k
 
     def __repr__(self) -> str:
-        return f"CCDM({self.constellation!r}, block_length={self.block_length})"
+        return f"CCDM({self.constellation!r}, num_symbols={self.num_symbols})"
 
     @cached_property
     def composition(self) -> np.ndarray:
-        """Points of each kind per block, ``(M,)`` int64 summing to ``block_length``.
+        """Points of each kind per block, ``(M,)`` int64 summing to ``num_symbols``.
 
         The quantization of the pmf that minimizes the divergence
-        ``D(composition / block_length || pmf)``: ``floor(n p)`` raised one
+        ``D(composition / num_symbols || pmf)``: ``floor(n p)`` raised one
         point at a time where the divergence grows least.
         """
-        c = _composition(self._pmf, self.block_length)
+        c = _composition(self._pmf, self.num_symbols)
         c.setflags(write=False)
         return c
 
@@ -149,7 +147,7 @@ class CCDM(_Code):
     def _log2_sequences(self) -> float:
         """``log2`` of the number of sequences of the composition."""
         counts = self.composition
-        n = self.block_length
+        n = self.num_symbols
         lg = math.lgamma(n + 1) - sum(math.lgamma(c + 1) for c in counts)
         return lg / math.log(2)
 
@@ -159,7 +157,7 @@ class CCDM(_Code):
         a = int(np.count_nonzero(self.composition))
         # Worst-case growth of a sequence interval from the floor rounding:
         # the most frequent point's share grows by at most (a - 1) / range.
-        slack = self.block_length * math.log2(
+        slack = self.num_symbols * math.log2(
             1.0 + a * (a - 1) / 2.0 ** (_RANGE_BITS - 1)
         )
         # lgamma is good to a few ulp; the margin covers it many times over.
@@ -169,7 +167,7 @@ class CCDM(_Code):
     @cached_property
     def _buffer_bits(self) -> int:
         """Fractional bits of the dematcher's interval bound, with margin."""
-        n = self.block_length
+        n = self.num_symbols
         shrink = -n * math.log2(1.0 - n / 2.0 ** (_RANGE_BITS - 1))
         return int(math.ceil(self._log2_sequences + shrink)) + 2 * _RANGE_BITS + 8
 
@@ -181,15 +179,15 @@ class CCDM(_Code):
         return lut
 
     def _match(self, bits: np.ndarray) -> np.ndarray:
-        """Host ``(R, k)`` bits to ``(R, block_length)`` point indices."""
-        out = np.empty((bits.shape[0], self.block_length), dtype=np.int64)
+        """Host ``(R, k)`` bits to ``(R, num_symbols)`` point indices."""
+        out = np.empty((bits.shape[0], self.num_symbols), dtype=np.int64)
         _get_numba_ccdm("match")(
             np.ascontiguousarray(bits, dtype=np.int8), self.composition, out
         )
         return out
 
     def _dematch(self, symbols: np.ndarray) -> tuple[np.ndarray, np.ndarray]:
-        """Host ``(R, block_length)`` indices to ``(R, k)`` bits and validity."""
+        """Host ``(R, num_symbols)`` indices to ``(R, k)`` bits and validity."""
         rows = symbols.shape[0]
         bits = np.empty((rows, self.k), dtype=np.int8)
         valid = np.empty(rows, dtype=np.bool_)
@@ -247,10 +245,10 @@ def _decode_ccdm(code: CCDM, llrs: ArrayType, method: object) -> _Decoded:
 
 
 def _dematch_labels(code: CCDM, labels: ArrayType) -> _Decoded:
-    """Dematch hard label bits ``(R, block_length m)``, on their device."""
+    """Dematch hard label bits ``(R, num_symbols m)``, on their device."""
     _, xp, _ = dispatch(labels)
     m = code.constellation.bits_per_symbol
-    hard = to_device(labels, "cpu").reshape(labels.shape[0], code.block_length, m)
+    hard = to_device(labels, "cpu").reshape(labels.shape[0], code.num_symbols, m)
     symbols = code._label_index[_pack(hard)]
     bits, valid = code._dematch(symbols)
     device = "cpu" if xp is np else "gpu"
@@ -389,7 +387,7 @@ class PAS(_Code):
     def matcher(self) -> CCDM:
         """The CCDM of the amplitudes of one FEC codeword."""
         m, amplitudes = self._layout
-        return CCDM(amplitudes, block_length=self.code.n // m)
+        return CCDM(amplitudes, num_symbols=self.code.n // m)
 
     @cached_property
     def _sign_info(self) -> int:
