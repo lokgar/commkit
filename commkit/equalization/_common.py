@@ -228,7 +228,7 @@ def _prepare_training_numpy(
     num_ch: int,
     n_sym: int,
 ) -> tuple[np.ndarray, int]:
-    """Build the zero-padded training array of the Numba scan kernels.
+    """Build the training array of the Numba scan kernels.
 
     NumPy only: the caller moves ``training_symbols`` to the host first
     (``to_device(training_symbols, "cpu")``).
@@ -245,28 +245,19 @@ def _prepare_training_numpy(
     Returns
     -------
     train_full : numpy.ndarray
-        complex64 training symbols followed by zeros, ``(C, n_sym)``.
+        complex64 training symbols, ``(C, n_train_aligned)``, C-contiguous;
+        the kernels read symbol ``idx`` only while ``idx < n_train_aligned``.
     n_train_aligned : int
         Number of data-aided symbols, ``min(K, n_sym)``.
     """
-    if training_symbols is not None:
-        train_arr = np.asarray(training_symbols, dtype=np.complex64)
-        if train_arr.ndim == 1:
-            train_arr = (
-                np.tile(train_arr[None, :], (num_ch, 1))
-                if num_ch > 1
-                else train_arr[None, :]
-            )
-        n_raw = train_arr.shape[1]
-        n_train_aligned = max(0, min(n_raw, n_sym))
-
-        train_full = np.zeros((num_ch, n_sym), dtype=np.complex64)
-        if n_train_aligned > 0:
-            train_full[:, :n_train_aligned] = train_arr[:, :n_train_aligned]
-    else:
-        n_train_aligned = 0
-        train_full = np.zeros((num_ch, n_sym), dtype=np.complex64)
-
+    if training_symbols is None:
+        return np.zeros((num_ch, 0), dtype=np.complex64), 0
+    train_arr = np.asarray(training_symbols, dtype=np.complex64)
+    if train_arr.ndim == 1:
+        train_arr = train_arr[None, :]
+    n_train_aligned = max(0, min(train_arr.shape[1], n_sym))
+    train_full = np.empty((num_ch, n_train_aligned), dtype=np.complex64)
+    train_full[:] = train_arr[:, :n_train_aligned]
     return train_full, n_train_aligned
 
 

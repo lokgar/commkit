@@ -469,7 +469,8 @@ def cpr_loop(
     leak_term = np.float32(1.0) - np.float32(leakage)
     y_raw = np.empty(C, dtype=np.complex64)
     y_fin = np.empty(C, dtype=np.complex64)
-    phi_c = np.empty(C, dtype=np.float64)
+    cos_c = np.empty(C, dtype=np.float32)  # each channel's phasor, kept for
+    sin_c = np.empty(C, dtype=np.float32)  # the error's de-rotation
     d_sym = np.empty(C, dtype=np.complex64)
     e_clean = np.empty(C, dtype=np.complex64)
     e_eq = np.empty(C, dtype=np.complex64)
@@ -656,14 +657,15 @@ def cpr_loop(
             else:
                 phi_corr = np.float64(phi_hat)
 
-            phi_c[i] = phi_corr
             phase_out[idx, i] = phi_corr
 
             # y_final = y_raw * exp(-j * phi_corr)
-            cos_p = np.cos(phi_corr)
-            sin_p = np.sin(phi_corr)
-            yr = y_raw[i].real * np.float32(cos_p) + y_raw[i].imag * np.float32(sin_p)
-            yi = -y_raw[i].real * np.float32(sin_p) + y_raw[i].imag * np.float32(cos_p)
+            cos_p = np.float32(np.cos(phi_corr))
+            sin_p = np.float32(np.sin(phi_corr))
+            cos_c[i] = cos_p
+            sin_c[i] = sin_p
+            yr = y_raw[i].real * cos_p + y_raw[i].imag * sin_p
+            yi = -y_raw[i].real * sin_p + y_raw[i].imag * cos_p
             y_fin[i] = np.complex64(yr + yi * np.complex64(1j))
             y_out[idx, i] = y_fin[i]
 
@@ -722,14 +724,10 @@ def cpr_loop(
         # -- De-rotate error and weight update ----------------------
         for i in range(C):
             # e_eq = e_clean * exp(+j * phi_corr)  (back to pre-rotation plane)
-            cos_p = np.cos(phi_c[i])
-            sin_p = np.sin(phi_c[i])
-            er = e_clean[i].real * np.float32(cos_p) - e_clean[i].imag * np.float32(
-                sin_p
-            )
-            ei = e_clean[i].real * np.float32(sin_p) + e_clean[i].imag * np.float32(
-                cos_p
-            )
+            cos_p = cos_c[i]
+            sin_p = sin_c[i]
+            er = e_clean[i].real * cos_p - e_clean[i].imag * sin_p
+            ei = e_clean[i].real * sin_p + e_clean[i].imag * cos_p
             e_eq[i] = np.complex64(er + ei * np.complex64(1j))
 
         if rls:

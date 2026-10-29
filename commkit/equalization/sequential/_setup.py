@@ -52,7 +52,7 @@ class _Sequential:
     real_end: int  # x[:, :real_end] is data (or left padding), the rest zeros
     n_done: int  # symbols whose filter window lies inside x[:, :real_end]
     training: np.ndarray | None  # normalized training symbols (host)
-    train_full: np.ndarray  # (C, n_sym) complex64, zero after the training
+    train_full: np.ndarray  # (C, n_train) complex64
     n_train: int
     eq_norm: Any  # input_norm_factor actually applied
     W: np.ndarray  # (C, C, T) complex64, updated in place by the kernel

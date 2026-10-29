@@ -30,6 +30,8 @@ Paired A/B of alternating processes against the previous commit of each change:
 - Cached code tables: interleaving 2^20 values with one `Interleaver` 0.19 on the CPU, 0.013 on the GPU (identity shortcut in the code objects' equality, which every cached lookup called).
 - `mi`: one exponential per element, 256-QAM 0.82 on the CPU and 0.33 on the GPU, 16-QAM 0.52 on the GPU.
 
+- LMS/RLS with inline carrier recovery: 2 x 50000 16-QAM symbols, PLL 0.95, BPS 0.97 (each symbol's phasor computed once).
+
 ### Fixed
 
 - **Staircase `valid` reflected an earlier state of the frame**: a block corrected through the next one kept its failed flag, so `HardIterations(1)` could return the right payload with `valid=False`. Success is now checked on the final frame.
