@@ -49,8 +49,10 @@ class TestConstruction:
     def test_from_parity_check_dense_and_sparse(self) -> None:
         h = _h(TREE, 8)
         a = LDPCCode.from_parity_check(h)
-        b = LDPCCode.from_parity_check(scipy.sparse.csr_matrix(h))
-        assert a == b and hash(a) == hash(b)
+        b = LDPCCode.from_parity_check(scipy.sparse.csr_array(h))
+        c = LDPCCode.from_parity_check(scipy.sparse.csr_matrix(h))
+        assert a == b == c and hash(a) == hash(b) == hash(c)
+        assert isinstance(a.parity_check(), scipy.sparse.csr_array)
         assert (a.n, a.k, a.num_checks) == (8, 4, 4)
         np.testing.assert_array_equal(a.parity_check().toarray(), h)
         assert repr(a) == "LDPCCode(n=8, k=4)"
@@ -130,7 +132,8 @@ class TestConstruction:
             got = sorted(tuple(r) for r in _rows_in_schedule(code))
             h = code.parity_check()
             assert got == sorted(
-                tuple(h[i].indices.tolist()) for i in range(h.shape[0])
+                tuple(h.indices[h.indptr[i] : h.indptr[i + 1]].tolist())
+                for i in range(h.shape[0])
             )
 
 

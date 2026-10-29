@@ -10,6 +10,7 @@ Notable changes to CommKit, newest first. Performance figures are from the refer
 - **`TurboCode` and `LDPCCode` reject non-integer parameters** with `TypeError` (`TurboCode(40.0)` was accepted; float LDPC indices were truncated into a different code).
 - **`fir_filter` and `ols_fir_filter` raise for complex taps on real samples.** The imaginary part was dropped (the taps `[1j]` gave zeros). Pass complex samples for a complex output.
 - **`correct_timing(mode="slice")` raises for offsets outside `[0, N)`**: a negative offset kept only the last samples. Use `mode="zero"` or `"circular"` for negative offsets.
+- **`LDPCCode.parity_check()` returns a `scipy.sparse.csr_array`** instead of a `csr_matrix`, as SciPy plans to deprecate its matrix interface. `@` is unchanged, but `*` is now elementwise and indexing a row gives a 1-D array; use `@` for products, or `scipy.sparse.csr_matrix(code.parity_check())` for the old type. `LDPCCode.from_parity_check` accepts either.
 - **`gray_code`, `gray_to_binary` return read-only arrays.** They are cached, so writing to one changed every later call's result; copy before modifying.
 
 ### Performance

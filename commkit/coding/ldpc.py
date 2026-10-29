@@ -132,13 +132,13 @@ class LDPCCode(_Code):
 
         Returns
         -------
-        scipy.sparse.csr_matrix
+        scipy.sparse.csr_array
             ``(num_checks, length)`` int8 on the host, over the mother
             codeword (punctured positions included).
         """
         import scipy.sparse
 
-        return scipy.sparse.csr_matrix(
+        return scipy.sparse.csr_array(
             (np.ones(self.checks.size, np.int8), (self.checks, self.variables)),
             shape=(self.num_checks, self.length),
         )
@@ -151,7 +151,7 @@ class LDPCCode(_Code):
 
         Parameters
         ----------
-        parity_check : array_like or scipy.sparse matrix
+        parity_check : array_like or scipy.sparse array or matrix
             ``H``, ``(m, N)``, values 0 and 1, on the host.
         punctured : int, default 0
             Trailing codeword bits not transmitted.
@@ -164,7 +164,7 @@ class LDPCCode(_Code):
         """
         import scipy.sparse
 
-        h = scipy.sparse.coo_matrix(parity_check)
+        h = scipy.sparse.coo_array(parity_check)
         h.sum_duplicates()
         h.eliminate_zeros()
         if np.any(h.data != 1):
@@ -459,12 +459,17 @@ def _csr(
 
 
 def _sparse(xp: Any, tables: tuple[Any, ...], shape: tuple[int, int]) -> Any:
-    """A CSR matrix on ``xp``'s device from cached ``(data, indices, indptr)``."""
+    """A CSR matrix on ``xp``'s device from cached ``(data, indices, indptr)``.
+
+    SciPy's sparse array on the CPU; CuPy has only the matrix interface.
+    """
     if xp is np:
-        import scipy.sparse as sparse
-    else:
-        import cupyx.scipy.sparse as sparse
-    return sparse.csr_matrix(tuple(tables), shape=shape)
+        import scipy.sparse
+
+        return scipy.sparse.csr_array(tuple(tables), shape=shape)
+    import cupyx.scipy.sparse
+
+    return cupyx.scipy.sparse.csr_matrix(tuple(tables), shape=shape)
 
 
 # -----------------------------------------------------------------------------
