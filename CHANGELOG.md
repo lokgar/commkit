@@ -4,6 +4,27 @@ Notable changes to CommKit, newest first. Performance figures are from the refer
 
 ## [Unreleased]
 
+## [3.1.3] - 2026-10-30
+
+Additive noise without a scaling knob. `apply_awgn` either measures the signal or takes an absolute noise variance, and the OSNR moves to its own function, `apply_ase`.
+
+### Changes that may need code updates
+
+- **`apply_awgn(signal_power=)` is removed.** Its uses each have a direct replacement:
+  - silence or zero padding around the signal: nothing to pass, as Es is now measured as energy per symbol (below);
+  - a fixed noise floor, noise referenced to the transmitter, or noise on a dark capture: `noise_var=`, the absolute noise variance per sample. For unit-energy symbols, `noise_var = 10 ** (-esn0_db / 10)` at any `sps`.
+- **`apply_awgn(osnr_db=, reference_bandwidth=, noise_modes=)` is `apply_ase(osnr_db=, reference_bandwidth=, noise_modes=)`.** Same arguments and noise.
+
+### Changes that alter results
+
+- **`apply_awgn(esn0_db=)` measures Es as energy per symbol**: each channel's energy over the number of symbols the record carries (a Signal's frame length without a zero guard, else its reference's symbol count, else `N / sps`). Zero padding and silence around a frame no longer lower the noise level; without silence the noise is as before. `apply_ase` measures the signal power the same way.
+
+### Added
+
+- `apply_awgn(noise_var=)`, an absolute noise variance per sample, scalar or `(C,)`; exactly one of `esn0_db` and `noise_var` is given.
+- `apply_awgn(per_channel=False)` gives every channel one noise level, from the mean symbol energy over channels, as identical receivers with one noise floor; the default gives each channel the requested Es/N0.
+- Notebook 06 shows relative (`esn0_db`) against absolute (`noise_var`) noise.
+
 ## [3.1.2] - 2026-10-29
 
 `apply_awgn` without hidden assumptions about what a channel is: Es/N0 holds per channel, and the OSNR counts the ASE of the modes the medium guides instead of assuming the two polarizations of a single-mode fiber.
