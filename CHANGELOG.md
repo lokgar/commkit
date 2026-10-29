@@ -4,6 +4,53 @@ Notable changes to CommKit, newest first. Performance figures are from the refer
 
 ## [Unreleased]
 
+## [3.1.1] - 2026-10-29
+
+API consistency. One name per concept and a unit in every size, defaults that model the physics, physical units where the rest of the API has them, and features that use what the Signal and the frame already carry: the optical carrier for dispersion, fiber and OSNR noise, the frame's pilots for the pilot-aided algorithms, the code of the reference for post-FEC metrics. Most changes are renames that fail loudly with `TypeError`; the four default changes and the speed of light alter numbers and are listed first.
+
+### Changes that alter results
+
+- **`iir_filter` is causal by default** (`zero_phase=False`): a DAC, driver or photodiode bandwidth has group delay and an unsquared magnitude response. The old default filtered forward and backward, squaring the response. Pass `zero_phase=True` for offline zero-phase filtering.
+- **`correct_timing` zero-fills by default** (`mode="zero"`); `mode="circular"` wrapped the end of a capture onto its start, right only for a periodic record.
+- **`SingleCarrierFrame` draws a fresh payload by default** (`payload_rng=None`), so a Monte Carlo loop over frames no longer repeats one payload. Pass `payload_rng=<int>` for a fixed payload; the frame keeps the seed it used, so copies, `replace()` and saved frames rebuild the same one. The pilots keep their fixed `pilot_seed`.
+- **`SingleCarrierFrame.to_signal` and `Preamble.to_signal` require `symbol_rate`** and default to `sps=1`, as `generate` does; they used to default to 1 MBd at 4 samples per symbol.
+- **One exact speed of light** (299 792 458 m/s): dispersion used 2.998e8, which moves chromatic-dispersion results by 7e-5 relative.
+
+### Changes that may need code updates
+
+- **Code sizes name their unit**: `CRC`, `ConvolutionalCode` and `TurboCode` (and `CRC.nr`, `CRC.ethernet`, `ConvolutionalCode.k7`, `TurboCode.lte`) take `info_bits` instead of `block_length`; `CCDM` takes `num_symbols`; `StaircaseCode`, `StaircaseCode.g709_2` and `Concatenated.cfec` take `blocks_per_frame` instead of `num_blocks` (which `generate` uses for codewords); `LDPCCode`'s mother length is `num_variables`; `PolarCode.nr(k=, n=)` is keyword-only. The Reed-Solomon `length` property (in code symbols) is gone: read `symbols` or `n`.
+- **`num_streams` is `num_channels`** in `SingleCarrierFrame`, `Preamble` and `Signal`.
+- **One name per concept**:
+  - `noise_var` in `zf_equalizer` and `plot_zf_equalizer_response` (was `noise_variance`); `LinewidthEstimate.awgn_var`, a phase term in rad², is `angle_noise_var`.
+  - `nfft` in `estimate_transfer_function` (was `n_fft`) and `ols_fir_filter` (was `fft_size`).
+  - `regularization` in `estimate_transfer_function` (was `reg`) and `rls` (was `delta`).
+  - `zf_equalizer(center_tap=)` (was `center`); `ols_fir_filter(causal=False)` replaces `center=True`.
+  - `num_train_symbols` and `num_impulse_samples` in the equalizer plots (were `n_train`, `n_impulse`).
+  - `HardIterations(max_iterations=)` (was `iterations`, though it stops early); `BCJR` and `TurboIterations` take `method="maxlog" | "exact"` like `compute_llr` (was `exact=False | True`).
+  - `barker_sequence` and `zadoff_chu_sequence` take `num_symbols` like `Preamble` (was `length`).
+  - `AllanDeviation.taus` matches `allan_deviation(taus=)` (was `tau_s`); `LinewidthEstimate.num_segments` (was `n_segments`).
+- **`estimate_transfer_function(received, reference)`**: the data under test first, as everywhere else (was `reference, received`).
+- **Physical units**: `apply_polarization_mixing(drift_rate=)` in rad/s with the sampling rate from the Signal (was `drift_rad_per_sample`); `Tikhonov(linewidth=)` in Hz like `apply_phase_noise`, the symbol period taken from its one-sample-per-symbol input (was `linewidth_symbol_periods`); `PLL(normalized_bandwidth=)` (was `bandwidth`), so a bandwidth in Hz cannot be passed by mistake.
+- **One entry point per concept**: the pulse objects (`RRC`, `RC`, `Gaussian`, `Rect`, `SmoothRect`) are the only way to build pulse taps; `rrc_taps`, `rc_taps`, `gaussian_taps`, `rect_taps` and `smoothrect_taps` are private, as their defaults disagreed with the objects'. `demap_symbols_hard` is `demap_symbols`, the twin of `Constellation.demap`.
+- **Polarization demultiplexing on pilot tones is an estimate / correct pair**: `estimate_polarization_tones(samples, tone_frequencies=, track_bandwidth=)` returns a `JonesTrack` (one unmixing matrix by default, or matrices tracked over time), and `correct_polarization(samples, track)` applies it. This replaces `demultiplex_polarization_tones_static` / `_dynamic`, whose return type changed with `return_matrix` and `apply`, and the public `apply_interpolated_matrix`.
+- **The optical functions read the carrier**: `apply_chromatic_dispersion`, `correct_chromatic_dispersion`, `apply_fiber_propagation` and `correct_fiber_propagation` take `center_wavelength_nm` from an optical Signal's `center_frequency`; an explicit value must agree. Arrays and other Signals must pass it: the fiber functions no longer assume 1550 nm silently.
+- **Pilots for the blind equalizers are one object**: `EqualizerPilots(values, mask, gain_db)` replaces the `pilot_ref`, `pilot_mask` and `pilot_gain_db` arguments of `cma`, `rde`, `block_cma` and `block_rde` (now `pilots=`) and the `build_pilot_ref` helper.
+
+### Added
+
+- **`Signal.center_wavelength_nm`**, the wavelength of an optical Signal's carrier.
+- **`apply_awgn(osnr_db=, reference_bandwidth=12.5e9)`** adds ASE to an optical Signal at an OSNR, counted over both polarizations in the reference bandwidth, so `Es/N0 = 2 B_ref / (p R_s) · OSNR` whatever the oversampling.
+- **`EqualizerPilots.from_frame`, `PilotAided.from_frame` and `PilotSymbols.from_frame`** take the pilot positions, symbols and gain from a `SingleCarrierFrame`.
+- **Post-FEC metrics from a `DecodeResult`**: `ber(decoded, sig)` and `fer(decoded, sig)` compare with the reference's `info_bits`, and `fer` takes the block length from the code.
+- **`estimate_noise_variance`**, the data-aided noise variance that `compute_llr`, `gmi` and `mi` take, without the round trip through `snr`.
+- **`estimate_iq_imbalance`** measures the amplitude (dB) and phase (degrees) of an IQ imbalance blindly, per channel, as an `IQImbalanceEstimate`; `correct_iq_imbalance` also takes the estimate and inverts the model exactly.
+- `SingleCarrierFrame.pilot_mask` and `payload_mask`, the symbol masks over the whole frame.
+
+### Fixed
+
+- `apply_awgn` rejects a non-positive `reference_bandwidth`.
+- `zadoff_chu_sequence`'s length error names the argument.
+
 ## [3.1.0] - 2026-10-29
 
 Review fixes and the completion of the coding release. Coded records are sized in codewords (`generate(num_blocks=)`, `SingleCarrierFrame(payload_blocks=)`) or padded to any length, the reference carries its code, `save_npz` stores everything a Signal holds (codes included), and `Signal.domain` is back. Reed-Solomon and BCH decoding run in per-codeword kernels (KP4 23 times faster on the GPU, 16 on the CPU), and the remaining decoders, LLRs and several DSP paths got faster. Correctness fixes cover bit validation in `encode`, staircase and CCDM validity, complex FIR taps, ZF precision and timing correction. Frame lengths in symbols are renamed `*_num_symbols`; see the first section.
