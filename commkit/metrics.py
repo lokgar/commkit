@@ -826,8 +826,8 @@ def mi(
     c = _constellation(adapter, constellation, name)
     rx = _reference_scaled(adapter, rx, xp, name, num_skip_symbols)
     # Per element in the symbols' precision (complex64 by default), summed in
-    # float64: single precision changed no MI by more than 4e-8 bit (QAM 16
-    # to 256), far below the Monte Carlo error.
+    # float64: single precision changed no MI by more than 5e-8 bit (QAM 4
+    # to 256, Es/N0 -5 to 30 dB), far below the Monte Carlo error.
     rx = _skip(rx, num_skip_symbols, name)
     cdtype = np.result_type(rx.dtype, np.complex64)
     rx = rx.astype(cdtype, copy=False)
@@ -852,10 +852,13 @@ def mi(
     for n0 in range(0, n_sym, chunk):
         diff = rows[:, n0 : n0 + chunk, None] - points  # (C, chunk, M)
         log_joint = log_prior - (diff.real**2 + diff.imag**2) * inv_nv
-        shift = log_joint.max(axis=-1, keepdims=True)
-        log_sum = xp.log(xp.sum(xp.exp(log_joint - shift), axis=-1)) + shift[..., 0]
-        log_post = log_joint - log_sum[..., None]  # log p(s_m | r), nats
-        acc += xp.sum(xp.exp(log_post) * log_post, axis=(-2, -1), dtype=xp.float64)
+        # With d = log_joint - max and u = exp(d), the posterior is u / Z
+        # (Z = sum u), and sum_m p log p = sum(u d) / Z - log Z: one exp.
+        d = log_joint - log_joint.max(axis=-1, keepdims=True)
+        u = xp.exp(d)
+        z = xp.sum(u, axis=-1)
+        neg_entropy = xp.sum(u * d, axis=-1) / z - xp.log(z)  # nats, (C, chunk)
+        acc += xp.sum(neg_entropy, axis=-1, dtype=xp.float64)
     mi_bits = np.clip(h_x + to_device(acc, "cpu") / n_sym / np.log(2.0), 0.0, h_x)
     out = to_report_scalar(mi_bits.reshape(rx.shape[:-1]))
     if isinstance(out, float):
