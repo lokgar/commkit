@@ -21,7 +21,7 @@ _BARKER_SEQUENCES = {
 }
 
 
-def barker_sequence(length: int) -> np.ndarray:
+def barker_sequence(num_symbols: int) -> np.ndarray:
     """Generate a Barker sequence.
 
     Barker sequences are binary (+1, -1) sequences whose aperiodic
@@ -30,36 +30,36 @@ def barker_sequence(length: int) -> np.ndarray:
 
     Parameters
     ----------
-    length : {2, 3, 4, 5, 7, 11, 13}
-        Sequence length.
+    num_symbols : {2, 3, 4, 5, 7, 11, 13}
+        Sequence length in symbols.
 
     Returns
     -------
     ndarray
-        Host float32 BPSK symbols (+1, -1), ``(length,)``; move them with
+        Host float32 BPSK symbols (+1, -1), ``(num_symbols,)``; move them with
         ``to_device`` if needed.
 
     Raises
     ------
     ValueError
-        If the requested length is not a valid Barker length.
+        If ``num_symbols`` is not a Barker length.
 
     Examples
     --------
     >>> barker_sequence(7)
     array([ 1.,  1.,  1., -1., -1.,  1., -1.], dtype=float32)
     """
-    if length not in _BARKER_SEQUENCES:
+    if num_symbols not in _BARKER_SEQUENCES:
         valid = sorted(_BARKER_SEQUENCES.keys())
-        raise ValueError(f"No Barker sequence of length {length}. Valid: {valid}")
+        raise ValueError(f"No Barker sequence of length {num_symbols}. Valid: {valid}")
 
-    seq = np.array(_BARKER_SEQUENCES[length], dtype="float32")
+    seq = np.array(_BARKER_SEQUENCES[num_symbols], dtype="float32")
 
-    logger.debug("Generated Barker-%s sequence.", length)
+    logger.debug("Generated Barker-%s sequence.", num_symbols)
     return seq
 
 
-def zadoff_chu_sequence(length: int, *, root: int = 1) -> np.ndarray:
+def zadoff_chu_sequence(num_symbols: int, *, root: int = 1) -> np.ndarray:
     r"""Generate a Zadoff-Chu (ZC) synchronization sequence.
 
     ZC sequences are constant-amplitude zero-autocorrelation (CAZAC)
@@ -69,72 +69,72 @@ def zadoff_chu_sequence(length: int, *, root: int = 1) -> np.ndarray:
 
     Parameters
     ----------
-    length : int
+    num_symbols : int
         Sequence length ``N_ZC``; a prime gives the lowest cross-correlation
         between roots.
     root : int, default 1
-        Root index ``u`` in ``[1, length)``, coprime to ``length`` (not
+        Root index ``u`` in ``[1, num_symbols)``, coprime to ``num_symbols`` (not
         checked).
 
     Returns
     -------
     ndarray
-        Host complex64 symbols of unit magnitude, ``(length,)``.
+        Host complex64 symbols of unit magnitude, ``(num_symbols,)``.
 
     Raises
     ------
     ValueError
-        If ``length < 1`` or ``root`` is outside ``[1, length)``.
+        If ``num_symbols < 1`` or ``root`` is outside ``[1, num_symbols)``.
 
     Notes
     -----
     - For odd lengths: x[n] = exp(-j * pi * u * n * (n + 1) / N_ZC)
     - For even lengths: x[n] = exp(-j * pi * u * n^2 / N_ZC)
     """
-    if length < 1:
-        raise ValueError("Length must be positive.")
-    if root < 1 or root >= length:
-        raise ValueError(f"Root must be in [1, {length - 1}].")
+    if num_symbols < 1:
+        raise ValueError(f"num_symbols must be positive, got {num_symbols}.")
+    if root < 1 or root >= num_symbols:
+        raise ValueError(f"Root must be in [1, {num_symbols - 1}].")
 
     xp = np
 
     # ZC formula: x[n] = exp(-j * pi * u * n * (n+1) / N)
-    n = xp.arange(length)
-    if length % 2 == 0:
+    n = xp.arange(num_symbols)
+    if num_symbols % 2 == 0:
         # Even length: x[n] = exp(-j * pi * u * n^2 / N)
-        seq = xp.exp(-1j * xp.pi * root * n * n / length)
+        seq = xp.exp(-1j * xp.pi * root * n * n / num_symbols)
     else:
         # Odd length: x[n] = exp(-j * pi * u * n * (n+1) / N)
-        seq = xp.exp(-1j * xp.pi * root * n * (n + 1) / length)
+        seq = xp.exp(-1j * xp.pi * root * n * (n + 1) / num_symbols)
 
     out: np.ndarray = seq.astype(xp.complex64)
 
-    logger.debug("Generated ZC sequence: length=%s, root=%s.", length, root)
+    logger.debug("Generated ZC sequence: num_symbols=%s, root=%s.", num_symbols, root)
     return out
 
 
-def zc_mimo_root(stream_idx: int, base_root: int, length: int) -> int:
-    """Return the Zadoff-Chu root for TX stream ``stream_idx`` in a MIMO preamble.
+def zc_mimo_root(channel_index: int, base_root: int, num_symbols: int) -> int:
+    """Return the Zadoff-Chu root for channel ``channel_index`` in a MIMO preamble.
 
-    Assigns a deterministic unique root to each TX stream by cycling through
+    Assigns a deterministic unique root to each channel by cycling through
     distinct roots starting from ``base_root``, wrapping in the range
-    ``[1, length-1]``.  For prime ``length`` all roots are valid CAZAC
+    ``[1, num_symbols-1]``.  For a prime ``num_symbols`` all roots are valid CAZAC
     sequences; any two distinct roots are near-orthogonal with cross-correlation
-    magnitude ``1/sqrt(length)`` at every lag.
+    magnitude ``1/sqrt(num_symbols)`` at every lag.
 
     Parameters
     ----------
-    stream_idx : int
-        TX stream index (0-based).
+    channel_index : int
+        Channel index (0-based).
     base_root : int
-        ZC root assigned to stream 0.  Must be in ``[1, length-1]``.
-    length : int
+        ZC root assigned to channel 0.  Must be in ``[1, num_symbols-1]``.
+    num_symbols : int
         Sequence length (should be prime for the CAZAC property).
 
     Returns
     -------
     int
-        ZC root for stream ``stream_idx``, guaranteed in ``[1, length-1]``.
+        ZC root for channel ``channel_index``, guaranteed in ``[1, num_symbols-1]``.
 
     Examples
     --------
@@ -143,4 +143,4 @@ def zc_mimo_root(stream_idx: int, base_root: int, length: int) -> int:
     >>> [zc_mimo_root(k, 10, 13) for k in range(4)]
     [10, 11, 12, 1]
     """
-    return ((base_root - 1 + stream_idx) % (length - 1)) + 1
+    return ((base_root - 1 + channel_index) % (num_symbols - 1)) + 1

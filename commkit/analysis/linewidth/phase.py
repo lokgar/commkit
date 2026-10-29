@@ -372,7 +372,7 @@ def _beta_separation(
         value=to_report_scalar(lw_cpu, was_1d=was_1d),
         method=method,
         linewidth_floor=to_report_scalar(lw_floor_cpu, was_1d=was_1d),
-        n_segments=k_seg,
+        num_segments=k_seg,
         area_hz2=to_report_scalar(area_cpu, was_1d=was_1d),
         f=f_cpu,
         S_f=S_cpu,

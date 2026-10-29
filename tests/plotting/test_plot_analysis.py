@@ -66,7 +66,7 @@ class TestPlotAnalysis:
         drift = analysis.frequency_drift(_phase(xp), sampling_rate=R)
         allan = analysis.allan_deviation(drift.df, sampling_rate=R, num_taus=12)
         fig, ax = plot_allan_deviation(allan, reference_slopes=True)
-        np.testing.assert_allclose(ax.lines[0].get_xdata(), allan.tau_s)
+        np.testing.assert_allclose(ax.lines[0].get_xdata(), allan.taus)
         assert len(ax.lines) == 2
 
     def test_frequency_noise_psd_beta(self, xp: Any) -> None:

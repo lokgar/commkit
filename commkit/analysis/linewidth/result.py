@@ -51,7 +51,7 @@ class LinewidthEstimate:
     band : tuple of float or None
         ``BetaSeparation``: the ``(f_min, f_max)`` fence applied.
         ``DshFmPsd``: the frequency extent of ``used``.
-    n_segments : int or None
+    num_segments : int or None
         Welch segment count ``K`` behind every bin (``BetaSeparation``,
         ``DshFmPsd``).
     flicker : float or numpy.ndarray or None
@@ -109,7 +109,7 @@ class LinewidthEstimate:
     S_f_model: np.ndarray | None = None
     used: np.ndarray | None = None
     band: tuple[float, float] | None = None
-    n_segments: int | None = None
+    num_segments: int | None = None
     flicker: float | np.ndarray | None = None
     linewidth_floor: float | np.ndarray | None = None
     area_hz2: float | np.ndarray | None = None

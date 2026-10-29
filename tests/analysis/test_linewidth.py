@@ -260,7 +260,7 @@ class TestDshLinewidth:
                 DshFmPsd(delay=m / FS, f_shift=80e6, nperseg=1 << 19),
                 sampling_rate=FS,
             )
-            assert res.n_segments <= 3
+            assert res.num_segments <= 3
             values.append(res.value)
         assert np.mean(values) == pytest.approx(dnu, rel=0.02)
 

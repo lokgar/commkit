@@ -19,14 +19,14 @@ class AllanDeviation:
 
     Attributes
     ----------
-    tau_s : numpy.ndarray
+    taus : numpy.ndarray
         Averaging times in seconds, ``(n_tau,)``.
     adev : numpy.ndarray
         Allan deviation in Hz, ``(n_tau,)`` or ``(C, n_tau)``; NaN where a
         ``tau`` does not fit the record.
     """
 
-    tau_s: np.ndarray
+    taus: np.ndarray
     adev: np.ndarray
 
 
@@ -59,7 +59,7 @@ def allan_deviation(
     Returns
     -------
     AllanDeviation
-        ``tau_s`` and ``adev``, ``(n_tau,)`` (SISO) or ``(C, n_tau)`` (MIMO),
+        ``taus`` and ``adev``, ``(n_tau,)`` (SISO) or ``(C, n_tau)`` (MIMO),
         host NumPy arrays.
 
     Notes
@@ -101,7 +101,7 @@ def allan_deviation(
         ms = np.unique(np.maximum(1, np.round(taus_cpu / tau0).astype(int)))
         ms = ms[ms <= max(1, (x.shape[-1] - 1) // 2)]
 
-    tau_s = ms * tau0
+    taus = ms * tau0
     adev = xp.full((c, ms.size), xp.nan, dtype=xp.float64)
     # One vectorized second-difference per τ across all channels (the C-loop
     # would launch C·n_tau tiny kernels on GPU for no benefit).
@@ -113,8 +113,8 @@ def allan_deviation(
         avar = xp.mean(d2**2, axis=-1) / (2.0 * (m * tau0) ** 2)
         adev[:, j] = xp.sqrt(avar)
 
-    tau_s_cpu = np.asarray(tau_s, dtype=np.float64)
+    taus_cpu = np.asarray(taus, dtype=np.float64)
     adev_cpu = to_device(adev, "cpu")
     adev_out = restore_1d(was_1d, adev_cpu)
 
-    return AllanDeviation(tau_s=tau_s_cpu, adev=adev_out)
+    return AllanDeviation(taus=taus_cpu, adev=adev_out)

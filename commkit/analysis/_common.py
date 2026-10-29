@@ -76,7 +76,7 @@ def _welch_median_bias(n_samples: int, nperseg: int) -> tuple[float, int]:
     -------
     factor : float
         ``median/mean`` ratio in ``(0, 1]``.
-    n_segments : int
+    num_segments : int
         Welch segment count ``K``.
     """
     step = max(nperseg // 2, 1)
@@ -269,7 +269,7 @@ def _welch_floor_bias(n_samples: int, nperseg: int, *, label: str) -> tuple[floa
     -------
     factor : float
         ``median/mean`` ratio to divide the median-based floor by.
-    n_segments : int
+    num_segments : int
         Welch segment count ``K``.
     """
     m_med, k_seg = _welch_median_bias(n_samples, nperseg)

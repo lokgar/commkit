@@ -474,7 +474,7 @@ def _dsh_fm_psd(samples: ArrayType, method: DshFmPsd, fs: float) -> LinewidthEst
         valid=valid,
         used=per_channel(used2),
         band=(float(f_used[0]), float(f_used[-1])),
-        n_segments=k_seg,
+        num_segments=k_seg,
         flicker=to_report_scalar(theta[:, 1], was_1d=was_1d),
         angle_noise_var=to_report_scalar(theta[:, 2], was_1d=was_1d),
     )

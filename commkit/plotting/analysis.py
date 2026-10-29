@@ -327,7 +327,7 @@ def plot_allan_deviation(
         shows the figure instead.
     """
     adev = _require(allan, "adev", "plot_allan_deviation()", "an AllanDeviation")
-    tau = np.asarray(to_device(allan.tau_s, "cpu"), dtype=np.float64)
+    tau = np.asarray(to_device(allan.taus, "cpu"), dtype=np.float64)
     adv = _as_channels(adev)
     C = adv.shape[0]
 
