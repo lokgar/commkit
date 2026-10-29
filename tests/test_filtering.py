@@ -328,7 +328,7 @@ class TestOverlapSaveFiltering:
     def test_ols_fir_filter_center_matches_fir_filter_siso(
         self, xp: Any, xpt: Any
     ) -> None:
-        """ols_fir_filter(default, center=True) matches fir_filter."""
+        """ols_fir_filter() by default matches fir_filter."""
         rng = np.random.default_rng(0)
         x_np = rng.standard_normal(512).astype(np.float32)
         taps_np = filtering.rrc_taps(sps=4, span=6, rolloff=0.35).astype(np.float32)
@@ -345,7 +345,7 @@ class TestOverlapSaveFiltering:
     def test_ols_fir_filter_center_matches_fir_filter_multichannel(
         self, xp: Any, xpt: Any
     ) -> None:
-        """ols_fir_filter(center=True) matches fir_filter for 2-channel input."""
+        """ols_fir_filter() matches fir_filter for 2-channel input."""
         rng = np.random.default_rng(1)
         x_np = rng.standard_normal((2, 512)).astype(np.float32)
         taps_np = filtering.rrc_taps(sps=4, span=6, rolloff=0.35).astype(np.float32)
@@ -360,7 +360,7 @@ class TestOverlapSaveFiltering:
         xpt.assert_allclose(out[:, L:-L], ref[:, L:-L], atol=1e-4)
 
     def test_ols_fir_filter_causal_siso(self, xp: Any, xpt: Any) -> None:
-        """ols_fir_filter(center=False) returns causal convolution."""
+        """ols_fir_filter(causal=True) returns causal convolution."""
         rng = np.random.default_rng(0)
         x_np = rng.standard_normal(512).astype(np.float32)
         taps_np = filtering.rrc_taps(sps=4, span=6, rolloff=0.35).astype(np.float32)
@@ -368,7 +368,7 @@ class TestOverlapSaveFiltering:
         taps = xp.asarray(taps_np)
 
         ref = xp.asarray(np.convolve(x_np, taps_np, mode="full")[: len(x_np)])
-        out = filtering.ols_fir_filter(x, taps, center=False)
+        out = filtering.ols_fir_filter(x, taps, causal=True)
 
         assert out.shape == (len(x_np),)
         L = len(taps_np)
@@ -387,12 +387,12 @@ class TestOverlapSaveFiltering:
         rng = np.random.default_rng(2)
         x = xp.asarray(rng.standard_normal(256).astype(np.float32))
         taps = xp.asarray(np.ones(4, dtype=np.float32) / 4)
-        out = filtering.ols_fir_filter(x, taps, fft_size=1024)
+        out = filtering.ols_fir_filter(x, taps, nfft=1024)
         assert out.shape == x.shape
 
-    @pytest.mark.parametrize("center", [True, False])
+    @pytest.mark.parametrize("causal", [False, True])
     def test_batches_do_not_change_the_output(
-        self, xp: Any, xpt: Any, monkeypatch, center
+        self, xp: Any, xpt: Any, monkeypatch, causal
     ) -> None:
         """Batches of 3 blocks (a partial last one) give the one-batch output."""
         import commkit._overlap_save as ols
@@ -404,11 +404,11 @@ class TestOverlapSaveFiltering:
             ).astype(np.complex64)
         )
         taps = xp.asarray(np.hanning(101).astype(np.float32))
-        whole = filtering.ols_fir_filter(x, taps, center=center)
+        whole = filtering.ols_fir_filter(x, taps, causal=causal)
         monkeypatch.setattr(ols, "_OLS_ELEMENTS", 2 * 1024 * 3)
         # Batched FFTs round differently in float32.
         xpt.assert_allclose(
-            filtering.ols_fir_filter(x, taps, center=center),
+            filtering.ols_fir_filter(x, taps, causal=causal),
             whole,
             rtol=1e-5,
             atol=1e-5,
@@ -604,14 +604,14 @@ class TestCorrectChromaticDispersion:
 
 
 class TestOlsFftSize:
-    def test_invalid_fft_size_raises(self, xp: Any) -> None:
-        """fft_size must be a power of 2 with a guard of at least len(taps)."""
+    def test_invalid_nfft_raises(self, xp: Any) -> None:
+        """nfft must be a power of 2 with a guard of at least len(taps)."""
         x = xp.ones(256, dtype=xp.complex64)
         taps = xp.ones(65)
-        with pytest.raises(ValueError, match="fft_size"):
-            filtering.ols_fir_filter(x, taps, fft_size=200)
-        with pytest.raises(ValueError, match="fft_size"):
-            filtering.ols_fir_filter(x, taps, fft_size=256)
+        with pytest.raises(ValueError, match="nfft"):
+            filtering.ols_fir_filter(x, taps, nfft=200)
+        with pytest.raises(ValueError, match="nfft"):
+            filtering.ols_fir_filter(x, taps, nfft=256)
 
 
 class TestCorrectFiberPropagation:

@@ -54,7 +54,7 @@ class TestZFEqualizer:
         # rx[k] = 0.25 tx[k + 1] + tx[k] + 0.4j tx[k - 1]
         rx = xp.convolve(tx, channel, mode="full")[1 : n + 1]
 
-        equalized = equalization.zf_equalizer(rx, channel, center=1)
+        equalized = equalization.zf_equalizer(rx, channel, center_tap=1)
 
         # The last sample lacks the precursor of tx[n], so skip the edges.
         xpt.assert_allclose(equalized[8:-8], tx[8:-8], atol=1e-4)
@@ -93,7 +93,7 @@ class TestZFEqualizer:
         channel = xp.array([0.25, 1.0, 0.4j], dtype=xp.complex64)
         samples = xp.ones(64, dtype=xp.complex64)
         with pytest.raises(ValueError, match="center"):
-            equalization.zf_equalizer(samples, channel, center=center)
+            equalization.zf_equalizer(samples, channel, center_tap=center)
 
     def test_mmse_better_than_zf_in_noise(self, xp):
         """MMSE should have lower MSE than ZF with a noisy spectral null."""
@@ -111,7 +111,7 @@ class TestZFEqualizer:
         rx_noisy = rx + noise
 
         zf_out = equalization.zf_equalizer(rx_noisy, channel)
-        mmse_out = equalization.zf_equalizer(rx_noisy, channel, noise_variance=0.01)
+        mmse_out = equalization.zf_equalizer(rx_noisy, channel, noise_var=0.01)
 
         mse_zf = xp.mean(xp.abs(zf_out - tx) ** 2)
         mse_mmse = xp.mean(xp.abs(mmse_out - tx) ** 2)
@@ -163,7 +163,7 @@ class TestZFEqualizer:
         noise = 0.05 * (rng.randn(N) + 1j * rng.randn(N)).astype(xp.complex64)
         rx_noisy = rx + noise
 
-        out = equalization.zf_equalizer(rx_noisy, channel, noise_variance=0.0025)
+        out = equalization.zf_equalizer(rx_noisy, channel, noise_var=0.0025)
 
         # Skip edges affected by convolution truncation (mode="full"[:N])
         interior = slice(10, N - 10)
@@ -244,7 +244,7 @@ class TestZF3x3:
             for j in range(3):
                 rx[i] += H[i, j, 0] * tx[j]
 
-        equalized = equalization.zf_equalizer(rx, H, noise_variance=0.0)
+        equalized = equalization.zf_equalizer(rx, H, noise_var=0.0)
 
         assert equalized.shape == (3, n)
         xpt.assert_allclose(equalized, tx, atol=1e-3)
@@ -260,7 +260,7 @@ class TestZF3x3:
         rng = xp.random.RandomState(0)
         rx = (rng.randn(3, n) + 1j * rng.randn(3, n)).astype(xp.complex64)
 
-        equalized = equalization.zf_equalizer(rx, channel, noise_variance=0.01)
+        equalized = equalization.zf_equalizer(rx, channel, noise_var=0.01)
 
         assert equalized.shape == (3, n)
 
@@ -275,7 +275,7 @@ class TestEstimateTransferFunction:
         x = (rng.standard_normal(n) + 1j * rng.standard_normal(n)).astype(xp.complex64)
         g = 2.0 - 1.0j
         y = (g * x).astype(xp.complex64)
-        B = equalization.estimate_transfer_function(x, y, n_fft=256, reg=1e-3)
+        B = equalization.estimate_transfer_function(y, x, nfft=256, regularization=1e-3)
         assert B.shape == (256,)
         xpt.assert_allclose(B, xp.full_like(B, g), rtol=2e-2, atol=2e-2)
 
@@ -288,7 +288,7 @@ class TestEstimateTransferFunction:
         )
         M = xp.asarray([[1.0, 0.3j], [-0.2, 0.9]], dtype=xp.complex64)
         y = (M @ x).astype(xp.complex64)
-        B = equalization.estimate_transfer_function(x, y, n_fft=256, reg=1e-3)
+        B = equalization.estimate_transfer_function(y, x, nfft=256, regularization=1e-3)
         assert B.shape == (256, 2, 2)
         xpt.assert_allclose(B[64], M, rtol=3e-2, atol=3e-2)
 
@@ -299,7 +299,7 @@ class TestEstimateTransferFunction:
         x = (rng.standard_normal(n) + 1j * rng.standard_normal(n)).astype(xp.complex64)
         h = xp.asarray([1.0, 0.5, -0.25], dtype=xp.complex64)
         y = xp.convolve(x, h)[:n].astype(xp.complex64)
-        B = equalization.estimate_transfer_function(x, y, n_fft=256, reg=1e-3)
+        B = equalization.estimate_transfer_function(y, x, nfft=256, regularization=1e-3)
         Hf = xp.fft.fft(h, n=256)
         xpt.assert_allclose(B, Hf, rtol=0.1, atol=0.05)
 
@@ -310,7 +310,7 @@ class TestEstimateTransferFunction:
         x = (rng.standard_normal(n) + 1j * rng.standard_normal(n)).astype(xp.complex64)
         y = (1.5 * x).astype(xp.complex64)
         taps = equalization.estimate_transfer_function(
-            x, y, n_fft=256, reg=1e-3, num_taps=65
+            y, x, nfft=256, regularization=1e-3, num_taps=65
         )
         assert taps.shape == (65,)
         peak = int(xp.argmax(xp.abs(taps)))
@@ -324,7 +324,7 @@ class TestEstimateTransferFunction:
         x = (rng.standard_normal(n) + 1j * rng.standard_normal(n)).astype(xp.complex64)
         y = (1.5 * x).astype(xp.complex64)
         taps = equalization.estimate_transfer_function(
-            x, y, n_fft=256, reg=1e-3, num_taps=16
+            y, x, nfft=256, regularization=1e-3, num_taps=16
         )
         assert taps.shape == (16,)
         assert int(xp.argmax(xp.abs(taps))) == 8
@@ -332,7 +332,7 @@ class TestEstimateTransferFunction:
 
     @pytest.mark.parametrize("num_taps", [15, 16, 31])
     def test_taps_compose_with_zf_equalizer(self, xp, num_taps):
-        """zf_equalizer(rx, taps, center=L // 2) reproduces tx at lag 0."""
+        """zf_equalizer(rx, taps, center_tap=L // 2) reproduces tx at lag 0."""
         rng = xp.random.RandomState(5)
         n = 1 << 15
         tx = (rng.standard_normal(n) + 1j * rng.standard_normal(n)) / 2**0.5
@@ -340,8 +340,8 @@ class TestEstimateTransferFunction:
         h = xp.asarray([0.25, 1.0, 0.4j], dtype=xp.complex64)
         rx = xp.convolve(tx, h)[:n].astype(xp.complex64)
 
-        taps = equalization.estimate_transfer_function(tx, rx, num_taps=num_taps)
-        out = equalization.zf_equalizer(rx, taps, center=num_taps // 2)
+        taps = equalization.estimate_transfer_function(rx, tx, num_taps=num_taps)
+        out = equalization.zf_equalizer(rx, taps, center_tap=num_taps // 2)
 
         assert _peak_lag(xp, out, tx) == 0
         # The Hann taper attenuates the off-centre taps, so the inversion is
@@ -358,9 +358,9 @@ class TestEstimateTransferFunction:
         )
         M = xp.asarray([[1.0, 0.1], [0.0, 1.0]], dtype=xp.complex64)
         y = (M @ x).astype(xp.complex64)
-        taps = equalization.estimate_transfer_function(x, y, n_fft=128, num_taps=63)
+        taps = equalization.estimate_transfer_function(y, x, nfft=128, num_taps=63)
         assert taps.shape == (2, 2, 63)
-        out = equalization.zf_equalizer(y, taps, noise_variance=1e-2, center=31)
+        out = equalization.zf_equalizer(y, taps, noise_var=1e-2, center_tap=31)
         assert out.shape == (2, n)
         xpt.assert_allclose(out[:, 64:-64], x[:, 64:-64], atol=0.1)
 
@@ -376,9 +376,11 @@ class TestEstimateTransferFunction:
         rx_sig = Signal(samples=y, sampling_rate=1.0, symbol_rate=1.0)
 
         B_sig = equalization.estimate_transfer_function(
-            ref_sig, rx_sig, n_fft=256, reg=1e-3
+            rx_sig, ref_sig, nfft=256, regularization=1e-3
         )
-        B_arr = equalization.estimate_transfer_function(x, y, n_fft=256, reg=1e-3)
+        B_arr = equalization.estimate_transfer_function(
+            y, x, nfft=256, regularization=1e-3
+        )
 
         assert not isinstance(B_sig, Signal)
         xpt.assert_allclose(B_sig, B_arr)

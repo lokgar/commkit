@@ -179,7 +179,7 @@ def plot_equalizer_result(
 def plot_zf_equalizer_response(
     channel_estimate,
     *,
-    noise_variance: float = 0.0,
+    noise_var: float = 0.0,
     nfft: int = 1024,
     sampling_rate: float = 1.0,
     ax=None,
@@ -200,7 +200,7 @@ def plot_zf_equalizer_response(
     channel_estimate : array_like
         Channel impulse response, ``(L,)`` for SISO or ``(C_rx, C_tx, L)``
         for MIMO.
-    noise_variance : float, default 0.0
+    noise_var : float, default 0.0
         Noise variance ``σ²`` of the MMSE regularization; ``0.0`` gives ZF.
     nfft : int, default 1024
         FFT size of the frequency responses.
@@ -221,7 +221,7 @@ def plot_zf_equalizer_response(
         shows the figure instead.
     """
     h = to_device(channel_estimate, "cpu")
-    reg = max(noise_variance, 1e-12)
+    reg = max(noise_var, 1e-12)
     siso = h.ndim == 1
 
     freqs = np.fft.fftfreq(nfft, d=1.0 / sampling_rate)

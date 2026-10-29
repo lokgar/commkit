@@ -96,7 +96,7 @@ class TestDecoding:
             axis=1,
         )
         x = xp.asarray(llrs)
-        exact = decode(x, code=code, method=BCJR(exact=True))
+        exact = decode(x, code=code, method=BCJR(method="exact"))
         np.testing.assert_allclose(
             to_device(exact.llrs, "cpu").reshape(100, -1), expect, atol=1e-4
         )
@@ -131,3 +131,8 @@ class TestDecoding:
             repr(ConvolutionalCode.k7(5))
             == "ConvolutionalCode((0o133, 0o171), K=7, k=5)"
         )
+
+
+def test_bcjr_method_is_validated() -> None:
+    with pytest.raises(ValueError, match="method"):
+        BCJR(method="log")

@@ -39,7 +39,7 @@ def plot_carrier_phase_decomposition(
     drift=None,
     *,
     symbol_rate: float,
-    n_train: int = 0,
+    num_train_symbols: int = 0,
     ax=None,
     show: bool = False,
     title: str = "Recovered carrier phase",
@@ -59,7 +59,7 @@ def plot_carrier_phase_decomposition(
         The low-pass drift, shaped as ``phi``; drawn in bold.
     symbol_rate : float
         Symbol rate in Bd, for the time axis in seconds.
-    n_train : int, default 0
+    num_train_symbols : int, default 0
         End of the training symbols, drawn as a dashed line when above 0.
     ax : matplotlib.axes.Axes, optional
         Axes to draw on; ``None`` creates a figure.
@@ -98,12 +98,12 @@ def plot_carrier_phase_decomposition(
                 label=f"Drift (pol {i})" if C > 1 else "Drift",
             )
 
-    if n_train > 0:
+    if num_train_symbols > 0:
         axi.axvline(
-            n_train / float(symbol_rate),
+            num_train_symbols / float(symbol_rate),
             color="white",
             ls="--",
-            label=f"DD start ({n_train})",
+            label=f"DD start ({num_train_symbols})",
         )
 
     _set_eng_formatter(axi, "x", "s")
@@ -898,7 +898,7 @@ def plot_pilot_tones_phase_estimate(
 def plot_carrier_phase_trajectory(
     phase: Any,
     *,
-    n_train: int = 0,
+    num_train_symbols: int = 0,
     ax=None,
     show: bool = False,
     title: str = "Carrier Phase Trajectory",
@@ -911,7 +911,7 @@ def plot_carrier_phase_trajectory(
         An estimate (its block centers, if any, are marked) or a phase array
         in radians, ``(N,)`` or ``(C, N)``, e.g. an equalizer's
         ``phase_trajectory``.
-    n_train : int, default 0
+    num_train_symbols : int, default 0
         End of the training symbols, drawn as a dashed line.
     ax : matplotlib.axes.Axes, optional
         Axes to draw on; ``None`` creates a figure.
@@ -949,12 +949,12 @@ def plot_carrier_phase_trajectory(
         for tc in np.asarray(to_device(block_centers, "cpu")):
             axi.axvline(tc, color="gray", alpha=0.4)
 
-    if n_train > 0:
+    if num_train_symbols > 0:
         axi.axvline(
-            n_train,
+            num_train_symbols,
             color="white",
             linestyle="--",
-            label=f"DD start ({n_train})",
+            label=f"DD start ({num_train_symbols})",
         )
 
     phi_all = np.degrees(phi_full)
@@ -963,7 +963,7 @@ def plot_carrier_phase_trajectory(
     axi.set_title(f"{title}  [$\\mu$={phi_mean:.1f}°,  $\\sigma$={phi_std:.2f}°]")
     axi.set_xlabel("Symbol Index")
     axi.set_ylabel("Phase [deg]")
-    if C > 1 or n_train > 0:
+    if C > 1 or num_train_symbols > 0:
         axi.legend(loc="upper right")
 
     return _finish((fig, axi), show)

@@ -356,7 +356,7 @@ def lms(
 
 
 def _check_rls_divergence(
-    weights: Any, xp: Any, forgetting_factor: float, delta: float
+    weights: Any, xp: Any, forgetting_factor: float, regularization: float
 ) -> None:
     """Raise if RLS produced non-finite weights (silent divergence guard).
 
@@ -368,8 +368,9 @@ def _check_rls_divergence(
     if not bool(xp.isfinite(weights).all()):
         raise RuntimeError(
             f"RLS equalizer diverged (forgetting_factor={forgetting_factor}, "
-            f"delta={delta}). RLS requires a positive-definite correlation matrix. "
-            "Try increasing regularization 'delta', reducing 'forgetting_factor', "
+            f"regularization={regularization}). RLS requires a positive-definite "
+            "correlation matrix. "
+            "Try increasing 'regularization', reducing 'forgetting_factor', "
             "or adding 'leakage' (e.g. 1e-4) to stabilize fractionally-spaced inputs."
         )
 
@@ -381,7 +382,7 @@ def rls(
     num_taps: int = 21,
     sps: int | None = None,
     forgetting_factor: float = 0.99,
-    delta: float = 0.01,
+    regularization: float = 0.01,
     leakage: float = 0.0,
     constellation: Any = None,
     store_weights: bool = False,
@@ -416,18 +417,18 @@ def rls(
     forgetting_factor : float, default 0.99
         Forgetting factor ``λ`` in ``(0, 1]``; values close to 1 give a
         longer memory.
-    delta : float, default 0.01
-        Regularization that seeds the inverse correlation matrix,
-        ``P₀ = (1/delta) · I``: a Tikhonov (ridge) prior of ``delta`` per
-        tap, since ``P`` must start positive definite before any data.  The
-        input is normalized to unit symbol power, so ``delta`` is on the
-        scale of the noise variance, whatever the raw amplitude.
+    regularization : float, default 0.01
+        Regularization ``δ`` that seeds the inverse correlation matrix,
+        ``P₀ = (1/δ) · I``: a Tikhonov (ridge) prior of ``δ`` per tap, since
+        ``P`` must start positive definite before any data.  The input is
+        normalized to unit symbol power, so ``δ`` is on the scale of the
+        noise variance, whatever the raw amplitude.
 
-        * A large ``delta`` (e.g. 1.0) gives a small ``P₀`` and small first
+        * A large ``δ`` (e.g. 1.0) gives a small ``P₀`` and small first
           gains ``k = P x / (λ + xᴴ P x)``: the equalizer starts slowly over
           the first tens of symbols, and the bias then disappears.  Safe
           with a long training sequence when robustness matters most.
-        * A small ``delta`` (e.g. 1e-4) gives large first gains: the
+        * A small ``δ`` (e.g. 1e-4) gives large first gains: the
           equalizer converges in few symbols, but those updates are
           dominated by the noise of the first observations and can take
           longer to settle.  Below about 1e-5, ``P`` can overflow before the
@@ -436,8 +437,8 @@ def rls(
         With training symbols the default works for most symbol rates and
         SNRs: raise it towards 1.0 if the taps swing wildly during the first
         training symbols, lower it towards 1e-3 if a short training block
-        converges too slowly.  Decision-directed only, prefer ``delta=1.0``
-        and let the forgetting factor drive convergence.  For fractionally
+        converges too slowly.  Decision-directed only, prefer
+        ``regularization=1.0`` and let the forgetting factor drive convergence.  For fractionally
         spaced input (``sps=2``, with ``leakage > 0``), 0.1 to 1.0 counters
         the growth of ``P``'s eigenvalues in the null subspace; pair it with
         ``leakage=1e-4``.
@@ -490,7 +491,7 @@ def rls(
     Notes
     -----
     ``initial_taps`` seeds the tap weights only: ``P`` starts at
-    ``(1/delta) · I``.  ``state`` continues both.
+    ``(1/regularization) · I``.  ``state`` continues both.
 
     **Algorithm (per symbol n).**
 
@@ -509,7 +510,7 @@ def rls(
            w_c += k * conj(e_taps_c[n])
 
        where ``lambda`` = ``forgetting_factor`` and ``w_c`` stacks the taps
-       of output ``c``.  ``P`` starts at ``(1/delta) * I``.  With a
+       of output ``c``.  ``P`` starts at ``(1/regularization) * I``.  With a
        ``leakage`` ``gamma > 0`` the update becomes
        ``w = (1 - gamma) * w + k * conj(e_taps)``, which damps the taps in
        the null subspace, where ``P``'s eigenvalues grow for fractionally
@@ -534,11 +535,11 @@ def rls(
 
     n_train_log = training_symbols.shape[-1] if training_symbols is not None else 0
     logger.info(
-        "RLS equalizer: num_taps=%s, forgetting_factor=%s, delta=%.2e, "
+        "RLS equalizer: num_taps=%s, forgetting_factor=%s, regularization=%.2e, "
         "leakage=%.2e, sps=%s, n_train=%s%s",
         num_taps,
         forgetting_factor,
-        delta,
+        regularization,
         leakage,
         sps,
         n_train_log,
@@ -581,7 +582,9 @@ def rls(
     if state is not None and state.inverse_correlation is not None:
         P = state.inverse_correlation.copy()
     else:
-        P = np.eye(run.num_ch * num_taps, dtype=np.complex128) / np.float64(delta)
+        P = np.eye(run.num_ch * num_taps, dtype=np.complex128) / np.float64(
+            regularization
+        )
     lam, leak = np.float32(forgetting_factor), np.float32(leakage)
 
     phase_out = None
@@ -671,5 +674,5 @@ def rls(
         tail_trim=tail_trim,
     )
     result = _log_equalizer_exit(result, name="RLS")
-    _check_rls_divergence(result.weights, run.xp, forgetting_factor, delta)
+    _check_rls_divergence(result.weights, run.xp, forgetting_factor, regularization)
     return _attach_equalized_signal(result, sig, state)

@@ -191,7 +191,7 @@ class TestPlotEqualizer:
         """Verify plot_zf_equalizer_response for SISO channel impulse response."""
         h = xp.array([0.2, 1.0, -0.3, 0.1], dtype=xp.float32)
         fig, axes = plot_zf_equalizer_response(
-            h, noise_variance=0.01, sampling_rate=1e6, show=False
+            h, noise_var=0.01, sampling_rate=1e6, show=False
         )
         assert fig is not None
         assert len(axes) == 3
@@ -200,7 +200,7 @@ class TestPlotEqualizer:
         """Verify plot_zf_equalizer_response for 2x2 MIMO channel impulse response."""
         h = xp.random.randn(2, 2, 8).astype(xp.float32)
         fig, axes = plot_zf_equalizer_response(
-            h, noise_variance=0.005, sampling_rate=1e6, show=False
+            h, noise_var=0.005, sampling_rate=1e6, show=False
         )
         assert fig is not None
         assert len(axes) == 4

@@ -101,7 +101,7 @@ class TestDecoding:
                 sig.reference.info_bits,
                 block_length=code.k,
             )  # fmt: skip
-            for m in (TurboIterations(4), TurboIterations(4, exact=True))
+            for m in (TurboIterations(4), TurboIterations(4, method="exact"))
         ]
         assert fer[1] <= fer[0]
 
@@ -117,4 +117,6 @@ class TestDecoding:
             TurboIterations(0)
         with pytest.raises(ValueError, match="scale"):
             TurboIterations(scale=1.5)
+        with pytest.raises(ValueError, match="method"):
+            TurboIterations(method="exact-ish")
         assert repr(TurboCode.lte(40)) == "TurboCode.lte(40)"

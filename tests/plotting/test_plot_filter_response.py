@@ -33,7 +33,7 @@ class TestPlotFilterResponse:
 
         sos = xp.asarray(scipy.signal.butter(4, 0.1, btype="low", output="sos"))
         fig, axes = plot_filter_response(
-            sos, sampling_rate=1e9, n_impulse=200, show=False
+            sos, sampling_rate=1e9, num_impulse_samples=200, show=False
         )
         assert fig is not None
         assert len(axes) == 4

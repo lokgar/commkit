@@ -82,7 +82,7 @@ class LinewidthEstimate:
     slope, intercept : numpy.ndarray or None
         The fit ``var = slope * lag_s + intercept`` per channel, rad²/s and
         rad² (``IncrementSlope``, ``DshIncrement``).
-    awgn_var : float or numpy.ndarray or None
+    angle_noise_var : float or numpy.ndarray or None
         Additive-noise term in rad²: the fitted intercept (``IncrementSlope``,
         ``DshIncrement``), the subtracted term (``IncrementSubtract``) or the
         fitted angle-noise variance per sample (``DshFmPsd``).
@@ -122,7 +122,7 @@ class LinewidthEstimate:
     var: np.ndarray | None = None
     slope: np.ndarray | None = None
     intercept: np.ndarray | None = None
-    awgn_var: float | np.ndarray | None = None
+    angle_noise_var: float | np.ndarray | None = None
     dphi_var: float | np.ndarray | None = None
     linewidth_3db: float | np.ndarray | None = None
     lineshape_ratio: float | np.ndarray | None = None

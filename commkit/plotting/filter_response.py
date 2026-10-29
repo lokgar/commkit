@@ -27,7 +27,7 @@ def plot_filter_response(
     sps: float = 1.0,
     sampling_rate: float | None = None,
     ax: Any | None = None,
-    n_impulse: int = 500,
+    num_impulse_samples: int = 500,
     show: bool = False,
 ) -> tuple[Any, tuple[Any, Any, Any, Any]] | None:
     """Plot the impulse, magnitude, phase, and group-delay response of a filter.
@@ -44,7 +44,7 @@ def plot_filter_response(
     * a ``(b, a)`` pair: a general IIR transfer function.
 
     The impulse response of the SOS and IIR forms is infinite: it is drawn
-    as the response to a unit impulse of length ``n_impulse``, truncated
+    as the response to a unit impulse of length ``num_impulse_samples``, truncated
     there.
 
     Parameters
@@ -61,7 +61,7 @@ def plot_filter_response(
     ax : array_like of matplotlib.axes.Axes, optional
         Exactly 4 axes to draw on (a 2x2 array or a flat sequence of 4);
         any other count logs a warning and creates a new 2x2 figure.
-    n_impulse : int, default 500
+    num_impulse_samples : int, default 500
         Length of the drawn impulse response of SOS and IIR input; ignored
         for FIR taps.
     show : bool, default False
@@ -108,14 +108,14 @@ def plot_filter_response(
         num_imp = len(h_imp)
         n_axis = xp.arange(num_imp) - (num_imp - 1) / 2  # centered (linear-phase FIR)
     else:
-        impulse = xp.zeros(n_impulse, dtype=xp.float64)
+        impulse = xp.zeros(num_impulse_samples, dtype=xp.float64)
         impulse[0] = 1.0
         h_imp = (
             sp.signal.sosfilt(sos, impulse)
             if kind == "sos"
             else sp.signal.lfilter(b, a, impulse)
         )
-        n_axis = xp.arange(n_impulse)  # causal, starts at 0
+        n_axis = xp.arange(num_impulse_samples)  # causal, starts at 0
 
     if sampling_rate is not None:
         t = n_axis / float(sampling_rate)

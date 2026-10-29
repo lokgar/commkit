@@ -113,13 +113,13 @@ def rls_reference(
     num_taps: int,
     sps: int,
     forgetting_factor: float,
-    delta: float,
+    regularization: float,
     leakage: float = 0.0,
 ) -> dict[str, np.ndarray]:
     """Exponentially weighted (leaky) RLS on the stacked butterfly regressor.
 
     ``k = P x / (lam + x^H P x)``, ``W_i <- (1 - gamma) W_i + k conj(e_i)``,
-    ``P <- (P - k x^H P) / lam`` with ``P(0) = I / delta``.  Updates stop
+    ``P <- (P - k x^H P) / lam`` with ``P(0) = I / regularization``.  Updates stop
     ``T // 2`` symbols before the end and the output is truncated there (the
     trailing zero-pad zone), matching the documented ``tail_trim``.
     """
@@ -130,7 +130,7 @@ def rls_reference(
     n_halt = max(0, n_sym - num_taps // 2)
     dim = num_ch * num_taps
     w = identity_taps(num_ch, num_taps).reshape(num_ch, dim)
-    p = np.eye(dim, dtype=np.complex128) / delta
+    p = np.eye(dim, dtype=np.complex128) / regularization
     lam = forgetting_factor
     y_out = np.zeros((num_ch, n_sym), dtype=np.complex128)
     e_out = np.zeros_like(y_out)
@@ -302,7 +302,15 @@ def lms_cpr_reference(
 
 
 def rls_cpr_reference(
-    samples, training, constellation, *, num_taps, sps, forgetting_factor, delta, cpr
+    samples,
+    training,
+    constellation,
+    *,
+    num_taps,
+    sps,
+    forgetting_factor,
+    regularization,
+    cpr,
 ) -> dict[str, np.ndarray]:
     """RLS with inline CPR, as :func:`lms_cpr_reference` with the RLS update
     of :func:`rls_reference` (updates and output stop ``T // 2`` early)."""
@@ -313,7 +321,7 @@ def rls_cpr_reference(
     n_halt = max(0, n_sym - num_taps // 2)
     dim = num_ch * num_taps
     w = identity_taps(num_ch, num_taps).reshape(num_ch, dim)
-    p = np.eye(dim, dtype=np.complex128) / delta
+    p = np.eye(dim, dtype=np.complex128) / regularization
     lam = forgetting_factor
     out = {k: np.zeros((num_ch, n_sym), np.complex128) for k in ("y", "e")}
     phis = np.zeros((num_ch, n_sym))

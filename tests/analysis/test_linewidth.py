@@ -55,7 +55,7 @@ class TestLinewidthEstimation:
         )
         assert res.value == pytest.approx(dnu, rel=0.10)
         # The fitted intercept ≈ 2σ_φ² ≈ σ_n² for unit-power QPSK.
-        assert res.awgn_var == pytest.approx(sigma2, rel=0.30)
+        assert res.angle_noise_var == pytest.approx(sigma2, rel=0.30)
 
     def test_increment_subtract_noise_free(self, xp):
         n = 1 << 18
@@ -180,7 +180,7 @@ class TestLinewidthEstimation:
             xp.asarray(phi), IncrementSubtract(noise_var=sigma2), sampling_rate=R
         )
         assert res.value == pytest.approx(dnu, rel=0.10)
-        assert res.awgn_var == pytest.approx(sigma2)
+        assert res.angle_noise_var == pytest.approx(sigma2)
 
     def test_increment_subtract_per_channel_noise(self, xp):
         """One noise variance per channel; a count mismatch raises."""
@@ -288,7 +288,7 @@ class TestDshLinewidth:
         res = analysis.estimate_linewidth(
             xp.asarray(z), DshFmPsd(delay=m / FS, f_shift=80e6), sampling_rate=FS
         )
-        assert res.awgn_var == pytest.approx(0.5 * 10 ** (-snr_db / 10), rel=0.1)
+        assert res.angle_noise_var == pytest.approx(0.5 * 10 ** (-snr_db / 10), rel=0.1)
         assert res.value == pytest.approx(2e5, rel=0.03)
 
     def test_fm_psd_screens_spurs(self, xp):

@@ -148,7 +148,7 @@ class TestPlotCarrierPhase:
             recovery.ViterbiViterbi(block_size=64),
             constellation=Constellation.psk(4),
         )
-        fig, ax = plot_carrier_phase_trajectory(est, n_train=100, show=False)
+        fig, ax = plot_carrier_phase_trajectory(est, num_train_symbols=100, show=False)
         assert len(ax.lines) == 1 + len(est.block_centers) + 1
 
     def test_carrier_phase_trajectory_array(self, xp: Any) -> None:
@@ -203,7 +203,7 @@ class TestPlotCarrierPhase:
             phi=phi_raw,
             drift=phi_smooth,
             symbol_rate=1e6,
-            n_train=25,
+            num_train_symbols=25,
             show=False,
         )
         assert fig is not None

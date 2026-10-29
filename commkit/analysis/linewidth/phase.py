@@ -247,7 +247,7 @@ def _increment_slope(
         value=to_report_scalar(np.maximum(slope, 0.0) / (2.0 * np.pi), was_1d=was_1d),
         method=method,
         dphi_var=to_report_scalar(to_device(var1, "cpu"), was_1d=was_1d),
-        awgn_var=to_report_scalar(intercept, was_1d=was_1d),
+        angle_noise_var=to_report_scalar(intercept, was_1d=was_1d),
         lag_s=lag_sec,
         var=var_k_cpu.T,
         slope=slope,
@@ -285,10 +285,10 @@ def _increment_subtract(
         d2 = normalize(d2, mode="average_power", axis=-1)
         inv = 1.0 / xp.maximum(xp.abs(d2) ** 2, 1e-12)
         pair_mean = 0.5 * (inv[:, 1:] + inv[:, :-1])
-        awgn_var = sigma_n2 * xp.mean(pair_mean, axis=-1)
+        angle_noise_var = sigma_n2 * xp.mean(pair_mean, axis=-1)
     else:
-        awgn_var = sigma_n2.copy()
-    linewidth = xp.maximum(var1 - awgn_var, 0.0) / (2.0 * np.pi * t_sym)
+        angle_noise_var = sigma_n2.copy()
+    linewidth = xp.maximum(var1 - angle_noise_var, 0.0) / (2.0 * np.pi * t_sym)
 
     var1_cpu = to_device(var1, "cpu")
     was_1d = p.ndim == 1
@@ -296,7 +296,9 @@ def _increment_subtract(
         value=to_report_scalar(to_device(linewidth, "cpu"), was_1d=was_1d),
         method=method,
         dphi_var=to_report_scalar(var1_cpu, was_1d=was_1d),
-        awgn_var=to_report_scalar(to_device(awgn_var, "cpu"), was_1d=was_1d),
+        angle_noise_var=to_report_scalar(
+            to_device(angle_noise_var, "cpu"), was_1d=was_1d
+        ),
         lag_s=np.array([t_sym]),
         var=np.atleast_1d(var1_cpu)[:, None],
     )

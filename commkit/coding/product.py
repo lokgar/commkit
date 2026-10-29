@@ -174,17 +174,17 @@ class HardIterations:
 
     Parameters
     ----------
-    iterations : int, default 8
-        Passes over the frame; each corrects the rows of every block in
+    max_iterations : int, default 8
+        Most passes over the frame; each corrects the rows of every block in
         order.  Stops early once a pass changes nothing.
     """
 
-    iterations: int = 8
+    max_iterations: int = 8
 
     def __post_init__(self) -> None:
-        it = self.iterations
+        it = self.max_iterations
         if isinstance(it, bool) or not isinstance(it, int) or it < 1:
-            raise ValueError(f"iterations must be an integer >= 1, got {it!r}.")
+            raise ValueError(f"max_iterations must be an integer >= 1, got {it!r}.")
 
 
 @dataclass(frozen=True, eq=False)
@@ -319,7 +319,7 @@ def _decode_staircase(
         return xp.concatenate([_left(previous, columns), blocks[:, i]], axis=2)
 
     passes = 0
-    for _ in range(method.iterations):
+    for _ in range(method.max_iterations):
         passes += 1
         # On the device, read once per pass: no sync per block.
         changed = xp.zeros((), dtype=bool)

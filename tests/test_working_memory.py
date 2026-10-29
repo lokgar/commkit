@@ -40,7 +40,7 @@ def test_ols_fir_filter_workspace() -> None:
     """About one padded input copy (whole-record batches: 7x the input)."""
     x = _samples(1 << 19)
     taps = np.hanning(63).astype(np.float32)
-    assert _workspace(lambda: ols_fir_filter(x, taps, fft_size=1024)) < 3 * x.nbytes
+    assert _workspace(lambda: ols_fir_filter(x, taps, nfft=1024)) < 3 * x.nbytes
 
 
 @pytest.mark.usefixtures("small_ols_budget")

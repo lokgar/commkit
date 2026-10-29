@@ -97,7 +97,7 @@ def test_rls_matches_oracle(num_ch, leakage):
         num_taps=NUM_TAPS,
         sps=SPS,
         forgetting_factor=0.99,
-        delta=0.01,
+        regularization=0.01,
         leakage=leakage,
         constellation=Constellation.qam(16),
     )
@@ -108,7 +108,7 @@ def test_rls_matches_oracle(num_ch, leakage):
         num_taps=NUM_TAPS,
         sps=SPS,
         forgetting_factor=0.99,
-        delta=0.01,
+        regularization=0.01,
         leakage=leakage,
     )
     assert res.tail_trim == NUM_TAPS // 2
@@ -252,7 +252,7 @@ def test_rls_inline_cpr_matches_oracle(num_ch, kind, joint, slips):
         num_taps=NUM_TAPS,
         sps=SPS,
         forgetting_factor=0.99,
-        delta=0.01,
+        regularization=0.01,
         constellation=Constellation.qam(16),
         cpr=obj,
     )
@@ -263,7 +263,7 @@ def test_rls_inline_cpr_matches_oracle(num_ch, kind, joint, slips):
         num_taps=NUM_TAPS,
         sps=SPS,
         forgetting_factor=0.99,
-        delta=0.01,
+        regularization=0.01,
         cpr=ref_cpr,
     )
     _assert_cpr_matches(res, ref, num_ch)

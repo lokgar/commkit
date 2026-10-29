@@ -118,7 +118,7 @@ class DshFmPsd:
     * the last term: additive detection noise.  Noise on the beat adds a
       white angle error of ``σ²`` rad² per sample, whose first difference
       has this ``≈ f²`` spectrum; it bypasses the interferometer, so ``g``
-      does not shape it (reported as ``awgn_var``).
+      does not shape it (reported as ``angle_noise_var``).
 
     The PSD is computed without the ``sinc²`` correction of
     :func:`fm_noise_psd`: sampled white FM has white increments, so its PSD is
@@ -476,7 +476,7 @@ def _dsh_fm_psd(samples: ArrayType, method: DshFmPsd, fs: float) -> LinewidthEst
         band=(float(f_used[0]), float(f_used[-1])),
         n_segments=k_seg,
         flicker=to_report_scalar(theta[:, 1], was_1d=was_1d),
-        awgn_var=to_report_scalar(theta[:, 2], was_1d=was_1d),
+        angle_noise_var=to_report_scalar(theta[:, 2], was_1d=was_1d),
     )
 
 
@@ -534,7 +534,7 @@ def _dsh_increment(
         value=to_report_scalar(np.maximum(slope, 0.0) / (4.0 * np.pi), was_1d=was_1d),
         method=method,
         f_shift=f_hat,
-        awgn_var=to_report_scalar(intercept, was_1d=was_1d),
+        angle_noise_var=to_report_scalar(intercept, was_1d=was_1d),
         dphi_var=to_report_scalar(to_device(dphi_var, "cpu"), was_1d=was_1d),
         lags=ls,
         lag_s=a_sec,

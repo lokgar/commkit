@@ -198,11 +198,18 @@ class BCJR:
 
     Parameters
     ----------
-    exact : bool, default False
-        Log-MAP (exact, log-sum-exp) instead of max-log-MAP.
+    method : {"maxlog", "exact"}, default "maxlog"
+        Max-log-MAP, or log-MAP (exact log-sum-exp), as in
+        :func:`commkit.mapping.compute_llr`.
     """
 
-    exact: bool = False
+    method: str = "maxlog"
+
+    def __post_init__(self) -> None:
+        if self.method not in ("maxlog", "exact"):
+            raise ValueError(
+                f"method must be 'maxlog' or 'exact', got {self.method!r}."
+            )
 
 
 def _encode(code: ConvolutionalCode, bits: ArrayType) -> ArrayType:
@@ -269,7 +276,7 @@ def _decode(
         forced = np.zeros(steps, dtype=np.bool_)
         forced[code.k :] = True
         _get_numba_trellis("bcjr_blocks")(
-            host, trellis.next, trellis.outputs, trellis.tail, forced, 0, 0, method.exact,
+            host, trellis.next, trellis.outputs, trellis.tail, forced, 0, 0, method.method == "exact",
             app_u, app_c,
         )  # fmt: skip
         bits = (app_u[:, : code.k] < 0).astype(np.int8)

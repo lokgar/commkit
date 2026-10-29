@@ -363,8 +363,8 @@ def ols_fir_filter(
     samples: S,
     taps: ArrayType,
     *,
-    fft_size: int | None = None,
-    center: bool = True,
+    nfft: int | None = None,
+    causal: bool = False,
 ) -> S:
     """Apply an FIR filter by overlap-save, for long filters and long records.
 
@@ -381,15 +381,15 @@ def ols_fir_filter(
         Samples, ``(N,)`` or ``(C, N)``.  A Signal gives a new Signal.
     taps : array_like
         FIR coefficients, ``(L,)``.
-    fft_size : int, optional
+    nfft : int, optional
         FFT block size, a power of 2.  Defaults to
         ``max(1024, next_power_of_2(4·L))``, so the guard of a quarter block
         is at least ``L`` samples long.
-    center : bool, default True
-        Align the output as :func:`fir_filter` does (SciPy's
-        ``mode='same'``, centered on tap ``L // 2``):
+    causal : bool, default False
+        By default the output is aligned as :func:`fir_filter` aligns it
+        (SciPy's ``mode='same'``, centered on tap ``L // 2``):
         ``y[n] = sum_k x[n + L//2 - k]·taps[k]``, which removes the group
-        delay of a symmetric filter before symbol sampling.  With ``False``
+        delay of a symmetric filter before symbol sampling.  With ``True``
         the output is the causal convolution ``y[n] = sum_k x[n-k]·taps[k]``
         (``numpy.convolve(x, taps, mode='full')[:N]``), for a raw causal
         response such as a step response, or when the caller aligns the
@@ -404,15 +404,15 @@ def ols_fir_filter(
     Raises
     ------
     ValueError
-        If ``fft_size`` is not a power of 2 or ``fft_size // 4 < len(taps)``,
+        If ``nfft`` is not a power of 2 or ``nfft // 4 < len(taps)``,
         or ``taps`` is complex and ``samples`` real.
 
     Notes
     -----
-    A symmetric guard of ``fft_size // 4`` samples is discarded from each
-    block edge, so ``fft_size // 4 >= len(taps)`` must hold.
+    A symmetric guard of ``nfft // 4`` samples is discarded from each
+    block edge, so ``nfft // 4 >= len(taps)`` must hold.
 
-    With ``center=True`` the input is padded at the end by ``L // 2`` zeros
+    Without ``causal`` the input is padded at the end by ``L // 2`` zeros
     and as many leading output samples are dropped, which costs at most one
     extra block.
     """
@@ -431,27 +431,26 @@ def ols_fir_filter(
 
     N = x.shape[-1]
 
-    N_fft = fft_size
+    N_fft = nfft
     if N_fft is None:
         N_fft = max(1024, 1 << (max(1, 4 * L) - 1).bit_length())
     elif N_fft & (N_fft - 1) or N_fft // 4 < L:
         raise ValueError(
-            f"fft_size must be a power of 2 with fft_size // 4 >= len(taps) "
-            f"({L}), got {fft_size}."
+            f"nfft must be a power of 2 with nfft // 4 >= len(taps) ({L}), got {nfft}."
         )
 
     logger.debug(
-        "ols_fir_filter: L=%s, N=%s, N_fft=%s, num_ch=%s, center=%s",
+        "ols_fir_filter: L=%s, N=%s, N_fft=%s, num_ch=%s, causal=%s",
         L,
         N,
         N_fft,
         x.shape[0],
-        center,
+        causal,
     )
 
     H = _fft.fft(taps, n=N_fft)  # frequency response of the filter
 
-    if center:
+    if not causal:
         # Post-pad by half so the OLS can compute full_conv[half : half+N].
         # This matches scipy's mode='same' (center-aligned, group-delay compensated),
         # which is required for correct eye-opening after pulse-shaped filtering.

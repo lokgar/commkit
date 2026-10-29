@@ -190,7 +190,7 @@ class TestStaircase:
     def test_validation(self) -> None:
         with pytest.raises(ValueError, match="blocks_per_frame"):
             StaircaseCode(0)
-        with pytest.raises(ValueError, match="iterations"):
+        with pytest.raises(ValueError, match="max_iterations"):
             HardIterations(0)
         assert repr(StaircaseCode(3)) == "StaircaseCode(blocks_per_frame=3)"
 

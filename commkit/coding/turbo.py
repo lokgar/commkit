@@ -158,21 +158,26 @@ class TurboIterations:
     ----------
     iterations : int, default 8
         Full iterations (both decoders).
-    exact : bool, default False
-        Log-MAP constituents instead of max-log-MAP.
+    method : {"maxlog", "exact"}, default "maxlog"
+        Max-log-MAP constituents, or log-MAP (exact log-sum-exp), as in
+        :func:`commkit.mapping.compute_llr`.
     scale : float, optional
         Factor on the exchanged extrinsic LLRs; ``None`` takes 0.7 for
         max-log-MAP (which overestimates them) and 1 for log-MAP.
     """
 
     iterations: int = 8
-    exact: bool = False
+    method: str = "maxlog"
     scale: float | None = None
 
     def __post_init__(self) -> None:
         it = self.iterations
         if isinstance(it, bool) or not isinstance(it, int) or it < 1:
             raise ValueError(f"iterations must be an integer >= 1, got {it!r}.")
+        if self.method not in ("maxlog", "exact"):
+            raise ValueError(
+                f"method must be 'maxlog' or 'exact', got {self.method!r}."
+            )
         if self.scale is not None and not 0 < self.scale <= 1:
             raise ValueError(f"scale must be in (0, 1], got {self.scale}.")
 
@@ -198,11 +203,15 @@ def _decode(code: TurboCode, llrs: ArrayType, method: TurboIterations) -> _Decod
     _, xp, _ = dispatch(llrs)
     host = np.ascontiguousarray(to_device(llrs, "cpu"), dtype=np.float64)
     rows = host.shape[0]
-    scale = method.scale if method.scale is not None else (1.0 if method.exact else 0.7)
+    scale = (
+        method.scale
+        if method.scale is not None
+        else (1.0 if method.method == "exact" else 0.7)
+    )
     bits = np.empty((rows, code.k), dtype=np.int8)
     _get_numba_turbo("decode")(
         host, code.interleaver, _RSC.next, _RSC.outputs, _RSC.tail, method.iterations,
-        method.exact, scale, bits,
+        method.method == "exact", scale, bits,
     )  # fmt: skip
     device = "cpu" if xp is np else "gpu"
     return _Decoded(

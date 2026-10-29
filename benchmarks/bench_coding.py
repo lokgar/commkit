@@ -114,11 +114,11 @@ def bench_viterbi_decode(benchmark, backend_device, xp, sync, termination):
     _bench_decode(benchmark, xp, sync, code, Viterbi(), 16, 5.0)
 
 
-@pytest.mark.parametrize("exact", [False, True], ids=["maxlog", "exact"])
-def bench_turbo_decode(benchmark, backend_device, xp, sync, exact):
+@pytest.mark.parametrize("method", ["maxlog", "exact"])
+def bench_turbo_decode(benchmark, backend_device, xp, sync, method):
     """TurboCode.lte(1024), 32 blocks, 6 iterations, at Es/N0 = 0 dB."""
     code = TurboCode.lte(1024)
-    _bench_decode(benchmark, xp, sync, code, TurboIterations(6, exact=exact), 32, 0.0)
+    _bench_decode(benchmark, xp, sync, code, TurboIterations(6, method=method), 32, 0.0)
 
 
 def bench_chase_decode(benchmark, backend_device, xp, sync):

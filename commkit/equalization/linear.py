@@ -32,15 +32,15 @@ def zf_equalizer(
     samples: ArrayType | Signal,
     channel_estimate: ArrayType,
     *,
-    noise_variance: float = 0.0,
-    center: int = 0,
+    noise_var: float = 0.0,
+    center_tap: int = 0,
 ) -> ArrayType | Signal:
     """Equalize a known channel in the frequency domain: zero-forcing or MMSE.
 
     Inverts a channel impulse response estimate per frequency bin over
     overlap-save blocks, for SISO or MIMO channels: ``W = Hᴴ (H Hᴴ + σ² I)⁻¹``.
-    ``noise_variance=0`` gives zero-forcing (with a ``1e-12`` floor);
-    ``noise_variance > 0`` gives MMSE, which does not amplify the noise in
+    ``noise_var=0`` gives zero-forcing (with a ``1e-12`` floor);
+    ``noise_var > 0`` gives MMSE, which does not amplify the noise in
     spectral nulls.
 
     Parameters
@@ -51,14 +51,14 @@ def zf_equalizer(
     channel_estimate : array_like
         Channel impulse response, ``(L,)`` for SISO or ``(C, C, L)`` for
         MIMO, where ``[i, j]`` is the FIR from input ``j`` to output ``i``.
-        Index ``center`` holds lag 0.  Cast to the precision of ``samples``.
-    noise_variance : float, default 0.0
+        Index ``center_tap`` holds lag 0.  Cast to the precision of ``samples``.
+    noise_var : float, default 0.0
         Noise variance ``σ²`` of the MMSE regularization; ``0.0`` gives ZF.
-    center : int, default 0
+    center_tap : int, default 0
         Index of lag 0 in ``channel_estimate``, in ``[0, L)``. ``0`` means a
         causal response (``rx = convolve(tx, h)[:N]``). A centered estimate
         from :func:`estimate_transfer_function` with ``num_taps=L`` has
-        ``center=L // 2``; taps before ``center`` are precursors (negative
+        ``center_tap=L // 2``; taps before it are precursors (negative
         lags). The output is aligned with the transmitted samples (no delay).
 
     Returns
@@ -69,12 +69,12 @@ def zf_equalizer(
     Raises
     ------
     ValueError
-        If ``center`` is outside ``[0, L)``.
+        If ``center_tap`` is outside ``[0, L)``.
     """
     signal_adapter = adapt_signal(samples, function_name="zf_equalizer()")
     samples = signal_adapter.array
 
-    logger.info("ZF/MMSE equalizer: noise_variance=%.2e", noise_variance)
+    logger.info("ZF/MMSE equalizer: noise_var=%.2e", noise_var)
     samples, xp, _ = dispatch(samples)
     # In the samples' precision before the FFT: a float64 estimate would
     # promote the whole overlap-save spectrum and its inverse to complex128.
@@ -92,12 +92,13 @@ def zf_equalizer(
 
     num_ch, N = samples.shape
     L = channel_estimate.shape[-1] if channel_estimate.ndim > 0 else 1
-    center = operator.index(center)
+    center = operator.index(center_tap)
     if not 0 <= center < L:
         raise ValueError(
-            f"center must lie in [0, {L}) for a {L}-tap channel_estimate, got {center}"
+            f"center_tap must lie in [0, {L}) for a {L}-tap channel_estimate, "
+            f"got {center}"
         )
-    reg = noise_variance if noise_variance > 0 else 1e-12
+    reg = noise_var if noise_var > 0 else 1e-12
 
     # N_fft must satisfy discard = N_fft//4 >= L so the IIR filter's causal
     # and anti-causal tails both decay within the discarded guard regions.
@@ -297,11 +298,11 @@ def apply_taps(
 
 
 def estimate_transfer_function(
-    reference: ArrayType | Signal,
     received: ArrayType | Signal,
+    reference: ArrayType | Signal,
     *,
-    n_fft: int = 512,
-    reg: float = 1e-2,
+    nfft: int = 512,
+    regularization: float = 1e-2,
     max_windows: int = 4096,
     num_taps: int | None = None,
 ) -> ArrayType:
@@ -319,20 +320,21 @@ def estimate_transfer_function(
     Invert the estimated channel with :func:`zf_equalizer`, passing the center
     index of the taps::
 
-        h = estimate_transfer_function(tx, rx, num_taps=L)
-        tx_hat = zf_equalizer(rx, h, center=L // 2)  # aligned with tx, no delay
+        h = estimate_transfer_function(rx, tx, num_taps=L)
+        tx_hat = zf_equalizer(rx, h, center_tap=L // 2)  # aligned with tx, no delay
 
     The taps are a channel response, not equalizer weights, so they are not
     input for :func:`apply_taps`.
 
     Parameters
     ----------
-    reference, received : array_like or Signal
-        Channel input and output, time-aligned at the same rate, ``(N,)`` or
-        ``(C, N)``.  A Signal contributes its samples.
-    n_fft : int, default 512
-        Welch segment length (frequency resolution ``fs / n_fft``).
-    reg : float, default 1e-2
+    received, reference : array_like or Signal
+        Channel output and input, time-aligned at the same rate, ``(N,)`` or
+        ``(C, N)``; the measured data first and the known reference second,
+        as in the metrics.  A Signal contributes its samples.
+    nfft : int, default 512
+        Welch segment length (frequency resolution ``fs / nfft``).
+    regularization : float, default 1e-2
         Relative Tikhonov loading of the :math:`S_{xx}` inverse: a diagonal
         term scaled to the mean auto-spectrum.  It stabilizes the estimate
         where the reference has little power (band edges) independently of
@@ -347,9 +349,9 @@ def estimate_transfer_function(
         Return the centered, Hann-tapered impulse response truncated to
         ``num_taps`` taps, ``(C, C, num_taps)`` for MIMO or ``(num_taps,)``
         for SISO.  Lag 0 is at index ``num_taps // 2`` (the taps before it are
-        negative lags), so pass ``center=num_taps // 2`` to
+        negative lags), so pass ``center_tap=num_taps // 2`` to
         :func:`zf_equalizer`.  By default the frequency response ``B(f)`` is
-        returned in FFT-bin order, ``(n_fft, C, C)`` for MIMO or ``(n_fft,)``
+        returned in FFT-bin order, ``(nfft, C, C)`` for MIMO or ``(nfft,)``
         for SISO.
 
     Returns
@@ -358,11 +360,11 @@ def estimate_transfer_function(
         Frequency response or impulse response (see ``num_taps``), on the
         input's device.
     """
-    reference = adapt_signal(
-        reference, function_name="estimate_transfer_function(reference)"
-    ).array
     received = adapt_signal(
         received, function_name="estimate_transfer_function(received)"
+    ).array
+    reference = adapt_signal(
+        reference, function_name="estimate_transfer_function(reference)"
     ).array
     x, xp, _ = dispatch(reference)
     y = xp.asarray(received)
@@ -376,30 +378,30 @@ def estimate_transfer_function(
     x = x.astype(cdtype, copy=False)
     y = y.astype(cdtype, copy=False)
     C, N = x.shape
-    n_fft = int(min(n_fft, N))
-    win = xp.hanning(n_fft).astype(np.empty(0, cdtype).real.dtype)
+    nfft = int(min(nfft, N))
+    win = xp.hanning(nfft).astype(np.empty(0, cdtype).real.dtype)
 
     # Welch auto/cross spectra, vectorized over windows (capped). One batched FFT
     # of the reference and the received, then every (C, C) cross term via einsum -
     # no per-window Python loop, no redundant re-FFT of shared channels.
-    step = max(n_fft // 2, (N - n_fft) // max(max_windows - 1, 1))
-    starts = xp.arange(0, N - n_fft + 1, step)
-    idx = starts[:, None] + xp.arange(n_fft)[None, :]  # (n_win, n_fft)
-    X = _fft.fft(x[:, idx] * win, axis=-1)  # (C, n_win, n_fft)
+    step = max(nfft // 2, (N - nfft) // max(max_windows - 1, 1))
+    starts = xp.arange(0, N - nfft + 1, step)
+    idx = starts[:, None] + xp.arange(nfft)[None, :]  # (n_win, nfft)
+    X = _fft.fft(x[:, idx] * win, axis=-1)  # (C, n_win, nfft)
     Y = _fft.fft(y[:, idx] * win, axis=-1)
-    Sxx = xp.einsum("cwf,dwf->fcd", X, X.conj()).astype(xp.complex128)  # (n_fft, C, C)
+    Sxx = xp.einsum("cwf,dwf->fcd", X, X.conj()).astype(xp.complex128)  # (nfft, C, C)
     Syx = xp.einsum("cwf,dwf->fcd", Y, X.conj()).astype(xp.complex128)
 
     eye = xp.eye(C, dtype=xp.complex128)
-    reg_xx = reg * float(xp.einsum("fcc->f", Sxx).real.mean() / C)
-    B = Syx @ xp.linalg.inv(Sxx + reg_xx * eye)  # (n_fft, C, C), H1 estimate
+    reg_xx = regularization * float(xp.einsum("fcc->f", Sxx).real.mean() / C)
+    B = Syx @ xp.linalg.inv(Sxx + reg_xx * eye)  # (nfft, C, C), H1 estimate
 
     logger.info(
-        "estimate_transfer_function (Welch H1): n_fft=%d, n_win=%d, reg=%.2e "
+        "estimate_transfer_function (Welch H1): nfft=%d, n_win=%d, regularization=%.2e "
         "[C=%d, N=%d, %s]",
-        n_fft,
+        nfft,
         int(starts.shape[0]),
-        reg,
+        regularization,
         C,
         N,
         "taps" if num_taps is not None else "freq-response",
@@ -410,9 +412,9 @@ def estimate_transfer_function(
 
     # Centered, Hann-tapered impulse response, truncated to num_taps: lag 0 sits
     # at index num_taps // 2 for odd and even lengths alike.
-    n_taps = int(min(num_taps, n_fft))
-    b_t = xp.fft.fftshift(_fft.ifft(B, axis=0), axes=0)  # (n_fft, C, C), lag axis 0
-    center = n_fft // 2
+    n_taps = int(min(num_taps, nfft))
+    b_t = xp.fft.fftshift(_fft.ifft(B, axis=0), axes=0)  # (nfft, C, C), lag axis 0
+    center = nfft // 2
     half = n_taps // 2
     taps = b_t[center - half : center - half + n_taps]  # (L, C, C)
     # Symmetric Hann about lag 0 (unit weight there); an even length drops the
