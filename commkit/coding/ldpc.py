@@ -214,18 +214,47 @@ class LDPCCode(_Code):
         Parameters
         ----------
         rate : str
-            Code rate: ``"1/4"``, ``"1/3"``, ``"2/5"``, ``"1/2"``, ``"3/5"``,
-            ``"2/3"``, ``"3/4"``, ``"4/5"``, ``"5/6"``, ``"8/9"``, ``"9/10"``
-            (normal frames only).
+            The standard's rate label: ``"1/4"``, ``"1/3"``, ``"2/5"``,
+            ``"1/2"``, ``"3/5"``, ``"2/3"``, ``"3/4"``, ``"4/5"``, ``"5/6"``,
+            ``"8/9"``, ``"9/10"`` (normal frames only).
         frame : {"normal", "short"}, default "normal"
-            ``n = 64800`` or ``16200``.  Short frames have the standard's
-            nominal rates (``k = 7200`` for ``"1/2"``).
+            The codeword length ``n``: 64800 bits (normal) or 16200 (short),
+            whatever the rate.
 
         Returns
         -------
         LDPCCode
             The LDPC code alone, without the outer BCH code of the standard;
             parity part dual-diagonal (accumulator encoding).
+
+        Notes
+        -----
+        A codeword carries ``k`` information bits in its ``n`` bits.  For
+        normal frames the label is the rate, ``k = n * rate``.  Short codes
+        keep the labels, but five of them carry fewer information bits
+        than the label gives (Table 5b of the standard): ``"1/2"`` short
+        has ``k = 7200``, rate 4/9, not 8100.  Read ``code.k`` and
+        ``code.rate``, not the label:
+
+        =====  ======  ======  ======
+        label  k       rate    16200 x label
+        =====  ======  ======  ======
+        1/4    3240    0.200   4050
+        1/3    5400    0.333   5400
+        2/5    6480    0.400   6480
+        1/2    7200    0.444   8100
+        3/5    9720    0.600   9720
+        2/3    10800   0.667   10800
+        3/4    11880   0.733   12150
+        4/5    12600   0.778   12960
+        5/6    13320   0.822   13500
+        8/9    14400   0.889   14400
+        =====  ======  ======  ======
+
+        On the air a codeword fills ``n / m`` symbols of a constellation
+        with ``m`` bits per symbol (16200 bits: 4050 16-QAM symbols);
+        ``generate(..., num_blocks=)`` and ``SingleCarrierFrame(
+        payload_blocks=)`` size a record in codewords.
         """
         return _dvbs2(rate, frame)
 
