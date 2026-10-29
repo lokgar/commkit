@@ -58,6 +58,26 @@ class TestDecoding:
         got = decode(xp.asarray(llrs), code=code, method=Viterbi()).bits
         np.testing.assert_array_equal(to_device(got, "cpu").reshape(150, -1), best)
 
+    def test_tail_biting_per_start_matches_the_joint_pass(self, monkeypatch) -> None:
+        """Above _JOINT_STATES the starts are scored one pass each; both give
+        the same decisions (run through py_func, which reads the threshold
+        at call time)."""
+        from commkit.coding import _numba_loops
+
+        code = ConvolutionalCode((0o23, 0o35), 5, 30, "tail-biting")
+        rng = np.random.default_rng(8)
+        c = to_device(encode(random_bits(20 * code.k, np, seed=9), code=code), "cpu")
+        llrs = (1 - 2 * c) + 1.2 * rng.standard_normal(c.shape)
+        llrs = llrs.reshape(20, code.k, 2)
+        t = code._trellis
+        joint = np.empty((20, code.k), dtype=np.int8)
+        _numba_loops.viterbi(llrs, t.next, t.outputs, True, code.k, joint)
+        monkeypatch.setattr(_numba_loops, "_JOINT_STATES", 0)
+        single = np.empty_like(joint)
+        per_start = getattr(_numba_loops.viterbi, "py_func", _numba_loops.viterbi)
+        per_start(llrs, t.next, t.outputs, True, code.k, single)
+        np.testing.assert_array_equal(single, joint)
+
     def test_bcjr_is_bitwise_map(self, xp: Any) -> None:
         """Exact BCJR: a-posteriori LLRs of the coded bits equal brute-force
         MAP; max-log decisions equal Viterbi's."""

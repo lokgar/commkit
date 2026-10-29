@@ -338,8 +338,12 @@ def combine(a, b, exact):  # type: ignore[no-untyped-def]
 
 
 @numba.njit(cache=True, nogil=True)
-def viterbi_one(llr, nxt, outputs, start, end, decisions, metric, nm):  # type: ignore[no-untyped-def]
-    """Viterbi pass from ``start`` to ``end``: the end state and its path metric."""
+def viterbi_one(llr, nxt, outputs, start, end, decisions, record, metric, nm):  # type: ignore[no-untyped-def]
+    """Viterbi pass from ``start`` to ``end``: the path metric at ``end``.
+
+    With ``record``, ``decisions[t, q]`` holds ``2 s + u`` of the survivor
+    into state ``q`` at step ``t + 1`` (written where ``q`` is reachable).
+    """
     steps = llr.shape[0]
     states = nxt.shape[0]
     for s in range(states):
@@ -355,36 +359,110 @@ def viterbi_one(llr, nxt, outputs, start, end, decisions, metric, nm):  # type: 
                 v = metric[s] + branch(llr[t], outputs, s, u)
                 if v > nm[q]:
                     nm[q] = v
-                    decisions[t, q] = s * 2 + u
+                    if record:
+                        decisions[t, q] = s * 2 + u
         for s in range(states):
             metric[s] = nm[s]
-    return end, metric[end]
+    return metric[end]
+
+
+# Tail-biting decoding scores all start states in one pass up to this many
+# states (two float64 (states, states) matrices per block: 16 MB at 1024).
+_JOINT_STATES = 1024
+
+
+@numba.njit(cache=True, nogil=True)
+def tail_biting_start(llr, nxt, outputs, cur, new):  # type: ignore[no-untyped-def]
+    """The best start state of a tail-biting block (``-1`` if none ends where it starts).
+
+    The Viterbi passes of every start in one: ``cur[q, st]`` is the metric
+    of state ``q`` from start ``st``, each branch metric computed once per
+    step.  The same sums in the same order as one pass per start.
+    """
+    steps = llr.shape[0]
+    states = nxt.shape[0]
+    for q in range(states):
+        for st in range(states):
+            cur[q, st] = 0.0 if q == st else _NEG
+    for t in range(steps):
+        new[:, :] = _NEG
+        for s in range(states):
+            for u in range(2):
+                q = nxt[s, u]
+                b = branch(llr[t], outputs, s, u)
+                for st in range(states):
+                    c = cur[s, st]
+                    if c > _NEG:
+                        v = c + b
+                        if v > new[q, st]:
+                            new[q, st] = v
+        cur, new = new, cur
+    best = -1
+    best_val = _NEG
+    for st in range(states):
+        if cur[st, st] > best_val:
+            best_val = cur[st, st]
+            best = st
+    return best
 
 
 @numba.njit(cache=True, nogil=True, parallel=True)
 def viterbi(llrs, nxt, outputs, tail_biting, info_steps, out_bits):  # type: ignore[no-untyped-def]
-    """Viterbi decoding of the rows of ``llrs`` (see ``_get_numba_trellis``)."""
+    """Viterbi decoding of the rows of ``llrs`` (see ``_get_numba_trellis``).
+
+    Tail-biting decoding scores every start state (ending in the same
+    state) without decisions, then records them for the best start only.
+    """
     rows, steps = llrs.shape[0], llrs.shape[1]
     states = nxt.shape[0]
+    joint = tail_biting and states <= _JOINT_STATES
+    size = states if joint else 0
     for row in numba.prange(rows):  # type: ignore[attr-defined,no-untyped-call]
-        decisions = np.zeros((steps, states), dtype=np.int64)
-        best_dec = np.zeros((steps, states), dtype=np.int64)
+        # 2 s + u < 2^16 for the 2^15 states of K = 16.
+        decisions = np.zeros((steps, states), dtype=np.uint16)
         metric = np.empty(states)
         nm = np.empty(states)
-        best_end = 0
-        best_val = _NEG
-        for start in range(states if tail_biting else 1):
-            end = start if tail_biting else 0
-            last, val = viterbi_one(
-                llrs[row], nxt, outputs, start, end, decisions, metric, nm
-            )
-            if val > best_val:
-                best_val = val
-                best_end = last
-                best_dec[:, :] = decisions
-        s = best_end
+        best = -1
+        if tail_biting:
+            if joint:
+                best = tail_biting_start(
+                    llrs[row],
+                    nxt,
+                    outputs,
+                    np.empty((size, size)),
+                    np.empty((size, size)),
+                )
+            else:
+                best_val = _NEG
+                for start in range(states):
+                    val = viterbi_one(
+                        llrs[row],
+                        nxt,
+                        outputs,
+                        start,
+                        start,
+                        decisions,
+                        False,
+                        metric,
+                        nm,
+                    )
+                    if val > best_val:
+                        best_val = val
+                        best = start
+            if best >= 0:
+                viterbi_one(
+                    llrs[row], nxt, outputs, best, best, decisions, True, metric, nm
+                )
+        elif (
+            viterbi_one(llrs[row], nxt, outputs, 0, 0, decisions, True, metric, nm)
+            > _NEG
+        ):
+            best = 0
+        if best < 0:
+            decisions[:, :] = 0  # no path reaches an end state
+        s = max(best, 0)
         for t in range(steps - 1, -1, -1):
-            code = best_dec[t, s]
+            code = np.int64(decisions[t, s])
             if t < info_steps:
                 out_bits[row, t] = code & 1
             s = code >> 1
