@@ -1,7 +1,7 @@
 """Frame containers: preambles and single-carrier frames.
 
 A :class:`SingleCarrierFrame` describes a transmitted frame (preamble,
-payload, pilots, guard intervals, MIMO streams) and builds it into a
+payload, pilots, guard intervals, MIMO channels) and builds it into a
 :class:`~commkit.core.Signal` with ``to_signal``; :func:`extract_payload`
 cuts the payload out of a frame Signal at one sample per symbol.
 """
@@ -30,7 +30,7 @@ class Preamble:
     """Frame-synchronization preamble: a Barker or Zadoff-Chu sequence.
 
     The symbols are built from the fields on construction (host complex64,
-    ``(num_symbols,)``, or ``(num_streams, num_symbols)`` for several streams); they
+    ``(num_symbols,)``, or ``(num_channels, num_symbols)`` for several channels); they
     cannot be set by hand.
 
     Parameters
@@ -43,8 +43,8 @@ class Preamble:
     root : int, default 1
         ZC root index ``u``, in ``[1, num_symbols)`` and coprime to ``num_symbols``;
         ignored for Barker.
-    num_streams : int, default 1
-        Number of TX streams.  ZC preambles get a distinct root per stream
+    num_channels : int, default 1
+        Number of channels.  ZC preambles get a distinct root per channel
         (``zc_mimo_root``); a Barker preamble repeats the same sequence.
     """
 
@@ -52,9 +52,9 @@ class Preamble:
     num_symbols: int
     # ZC root index, 1 <= root < num_symbols; ignored for Barker sequences.
     root: int = 1
-    # Number of TX streams.  ZC preambles get a unique root per stream
+    # Number of channels.  ZC preambles get a unique root per channel
     # (zc_mimo_root); Barker broadcasts the same sequence.
-    num_streams: int = 1
+    num_channels: int = 1
 
     # Generated in __post_init__ from the fields above.
     _symbols: Any = field(default=None, init=False, repr=False, compare=False)
@@ -69,10 +69,10 @@ class Preamble:
         This ensures that standard sequences are generated correctly according
         to the requested sequence properties.
 
-        For ``num_streams == 1`` the internal ``_symbols`` shape is ``(num_symbols,)``.
-        For ``num_streams > 1`` it becomes ``(num_streams, num_symbols)``:
+        For ``num_channels == 1`` the internal ``_symbols`` shape is ``(num_symbols,)``.
+        For ``num_channels > 1`` it becomes ``(num_channels, num_symbols)``:
         - ZC: each row uses the unique root from ``zc_mimo_root``.
-        - Barker: the same sequence is tiled across all streams.
+        - Barker: the same sequence is tiled across all channels.
         """
         if self.sequence_type not in ("barker", "zc"):
             raise ValueError(
@@ -80,23 +80,23 @@ class Preamble:
             )
         _check_int("num_symbols", self.num_symbols, 1)
         _check_int("root", self.root, 1)
-        _check_int("num_streams", self.num_streams, 1)
+        _check_int("num_channels", self.num_channels, 1)
 
         symbols: np.ndarray
         if self.sequence_type == "barker":
-            # Barker symbols (-1, +1), the same on every stream.
+            # Barker symbols (-1, +1), the same on every channel.
             symbols = barker_sequence(self.num_symbols)
-            if self.num_streams > 1:
-                symbols = np.tile(symbols[None, :], (self.num_streams, 1))
-        elif self.num_streams > 1:
-            # One Zadoff-Chu root per stream, (num_streams, num_symbols).
+            if self.num_channels > 1:
+                symbols = np.tile(symbols[None, :], (self.num_channels, 1))
+        elif self.num_channels > 1:
+            # One Zadoff-Chu root per channel, (num_channels, num_symbols).
             symbols = np.stack(
                 [
                     zadoff_chu_sequence(
                         self.num_symbols,
                         root=zc_mimo_root(k, self.root, self.num_symbols),
                     )
-                    for k in range(self.num_streams)
+                    for k in range(self.num_channels)
                 ]
             )
         else:
@@ -114,7 +114,7 @@ class Preamble:
     def symbols(self) -> Any:
         """The preamble symbols (host complex64).
 
-        ``(num_symbols,)``, or ``(num_streams, num_symbols)`` for several streams.
+        ``(num_symbols,)``, or ``(num_channels, num_symbols)`` for several channels.
         """
         return self._symbols
 
@@ -151,7 +151,7 @@ class Preamble:
         Returns
         -------
         Signal
-            The shaped preamble, normalized per stream to unit symbol power,
+            The shaped preamble, normalized per channel to unit symbol power,
             without constellation or reference.
         """
         sps = require_integer_sps(sps, "Preamble.to_signal()")
@@ -183,7 +183,7 @@ class SingleCarrierFrame:
     Parameters
     ----------
     payload_num_symbols : int, optional
-        Number of payload symbols per stream; ``None`` takes the symbols of
+        Number of payload symbols per channel; ``None`` takes the symbols of
         ``payload_blocks``, or 1000 without it.  With pilots it must fill
         whole pilot periods (comb: a multiple of ``pilot_period - 1``; block:
         of ``pilot_period - pilot_block_num_symbols``); otherwise construction raises.
@@ -200,7 +200,7 @@ class SingleCarrierFrame:
         symbol must be a multiple of ``payload_code.n`` (whole blocks),
         unless ``payload_pad`` is set.
     payload_blocks : int, optional
-        Code blocks (codewords) per stream, instead of ``payload_num_symbols``: the
+        Code blocks (codewords) per channel, instead of ``payload_num_symbols``: the
         payload is the symbols they fill, which must be whole symbols and
         whole pilot periods (the error names the nearest valid counts).
     payload_pad : bool, default False
@@ -211,9 +211,9 @@ class SingleCarrierFrame:
         reference's ``num_blocks`` counts the codewords.  Not with a
         distribution matcher.
     preamble : Preamble, optional
-        Synchronization preamble, before the body.  A multi-stream preamble
-        must have ``num_streams`` streams; a one-stream preamble is repeated
-        on every stream.
+        Synchronization preamble, before the body.  A multi-channel preamble
+        must have ``num_channels`` channels; a one-channel preamble is repeated
+        on every channel.
     pilot_pattern : {"none", "block", "comb"}, default "none"
         ``"none"``: no pilots.  ``"comb"``: one pilot every
         ``pilot_period`` symbols, the first at the start of the body.
@@ -235,8 +235,8 @@ class SingleCarrierFrame:
         last ``guard_num_symbols`` symbols of the frame repeated before it.
     guard_num_symbols : int, default 0
         Guard interval in symbols.
-    num_streams : int, default 1
-        Number of independent streams (MIMO), each with its own payload and
+    num_channels : int, default 1
+        Number of independent channels (MIMO streams), each with its own payload and
         pilots.
 
     Notes
@@ -247,7 +247,7 @@ class SingleCarrierFrame:
 
     **Sizing a frame.**  :attr:`num_symbols` is the frame's length in
     symbols (preamble, body and guard), so ``to_signal`` gives
-    ``num_symbols * sps`` samples per stream.  For a payload of whole
+    ``num_symbols * sps`` samples per channel.  For a payload of whole
     codewords, give ``payload_blocks``; a ``payload_num_symbols`` that does not
     fill whole codewords raises, naming the nearest valid lengths, pilot
     periods included.  To fit an instrument's record (an
@@ -276,7 +276,7 @@ class SingleCarrierFrame:
     guard_type: str = "zero"
     guard_num_symbols: int = 0
 
-    num_streams: int = 1
+    num_channels: int = 1
 
     # Lazily generated payload and pilot data.  The frame's fields are frozen;
     # this cache is filled on first access and never changes afterwards.
@@ -304,7 +304,7 @@ class SingleCarrierFrame:
         _check_int("pilot_period", self.pilot_period, 0)
         _check_int("pilot_block_num_symbols", self.pilot_block_num_symbols, 0)
         _check_int("guard_num_symbols", self.guard_num_symbols, 0)
-        _check_int("num_streams", self.num_streams, 1)
+        _check_int("num_channels", self.num_channels, 1)
         for name in ("payload_constellation", "pilot_constellation"):
             if not isinstance(getattr(self, name), Constellation):
                 raise ValueError(
@@ -323,11 +323,11 @@ class SingleCarrierFrame:
             )
         if self.preamble is not None and not isinstance(self.preamble, Preamble):
             raise ValueError("preamble must be a Preamble or None.")
-        if self.preamble is not None and self.preamble.num_streams > 1:
-            if self.preamble.num_streams != self.num_streams:
+        if self.preamble is not None and self.preamble.num_channels > 1:
+            if self.preamble.num_channels != self.num_channels:
                 raise ValueError(
-                    f"preamble.num_streams={self.preamble.num_streams} does not "
-                    f"match frame.num_streams={self.num_streams}"
+                    f"preamble.num_channels={self.preamble.num_channels} does not "
+                    f"match frame.num_channels={self.num_channels}"
                 )
 
         per_period = 1  # payload symbols per pilot period (1: no constraint)
@@ -477,7 +477,7 @@ class SingleCarrierFrame:
             self.payload_constellation,
             self.payload_num_symbols,
             symbol_rate=1.0,
-            num_channels=self.num_streams,
+            num_channels=self.num_channels,
             code=self.payload_code,
             pad=self.payload_pad,
             rng=self.payload_seed,
@@ -505,7 +505,7 @@ class SingleCarrierFrame:
             self.pilot_constellation,
             pilot_count,
             symbol_rate=1.0,
-            num_channels=self.num_streams,
+            num_channels=self.num_channels,
             rng=self.pilot_seed,
         )
         ref = sig.reference
@@ -521,8 +521,8 @@ class SingleCarrierFrame:
     def payload_bits(self) -> ArrayType:
         """The payload bits (host int8).
 
-        ``(payload_num_symbols * k,)``, or ``(num_streams, payload_num_symbols * k)`` for
-        several streams.
+        ``(payload_num_symbols * k,)``, or ``(num_channels, payload_num_symbols * k)`` for
+        several channels.
         """
         self._ensure_payload_generated()
         return self._cache.get("payload_bits")
@@ -552,8 +552,8 @@ class SingleCarrierFrame:
     def payload_symbols(self) -> ArrayType:
         """The payload symbols (host).
 
-        ``(payload_num_symbols,)``, or ``(num_streams, payload_num_symbols)`` for several
-        streams.
+        ``(payload_num_symbols,)``, or ``(num_channels, payload_num_symbols)`` for several
+        channels.
         """
         self._ensure_payload_generated()
         return self._cache.get("payload_symbols")
@@ -583,11 +583,11 @@ class SingleCarrierFrame:
 
         The pilots carry ``pilot_gain_db``, so they differ from
         :attr:`pilot_symbols` when it is not zero.  ``(L,)`` or
-        ``(num_streams, L)`` with ``L`` the body length.
+        ``(num_channels, L)`` with ``L`` the body length.
         """
         mask, body_num_symbols = self._generate_pilot_mask()
-        streams = (self.num_streams,) if self.num_streams > 1 else ()
-        body = np.zeros((*streams, body_num_symbols), dtype="complex64")
+        channels = (self.num_channels,) if self.num_channels > 1 else ()
+        body = np.zeros((*channels, body_num_symbols), dtype="complex64")
         if self.pilot_pattern != "none":
             pilot_symbols = self.pilot_symbols
             assert pilot_symbols is not None
@@ -605,10 +605,10 @@ class SingleCarrierFrame:
 
     @property
     def num_symbols(self) -> int:
-        """Frame length in symbols per stream: preamble, body and guard.
+        """Frame length in symbols per channel: preamble, body and guard.
 
         ``to_signal(sps=sps)`` gives ``num_symbols * sps`` samples per
-        stream.
+        channel.
         """
         preamble_num_symbols = self.preamble.num_symbols if self.preamble else 0
         return (
@@ -767,7 +767,7 @@ class SingleCarrierFrame:
         Returns
         -------
         Signal
-            complex64 samples, ``(N,)`` or ``(num_streams, N)``, with
+            complex64 samples, ``(N,)`` or ``(num_channels, N)``, with
             ``frame`` set to this frame.  ``constellation`` and ``reference``
             are not set: they belong to the payload, which
             :func:`extract_payload` returns as a plain Signal.
@@ -777,7 +777,7 @@ class SingleCarrierFrame:
         The preamble and the body are each scaled so that the larger of their
         I and Q peaks is 1 (``normalize(mode="dac_peak")``), so both use the
         full DAC range whatever their modulation.  The assembled frame is
-        then normalized per stream to unit symbol power (average sample power
+        then normalized per channel to unit symbol power (average sample power
         ``1/sps``), as ``generate`` does; the pilot-to-payload ratio of
         ``pilot_gain_db`` is kept.
         """
@@ -816,13 +816,13 @@ class SingleCarrierFrame:
                 sps=sps, symbol_rate=symbol_rate, pulse=pulse, device=device
             )
             preamble_samples = preamble_signal.samples
-            # (L*sps,) for SISO  or  (num_streams, L*sps) for MIMO - shape driven by preamble.num_streams
+            # (L*sps,) for SISO  or  (num_channels, L*sps) for MIMO - shape driven by preamble.num_channels
 
             # I/Q peak normalization - axis=-1 works for both 1-D and 2-D
             preamble_samples = normalize(preamble_samples, mode="dac_peak", axis=-1)
-            if self.num_streams > 1 and preamble_samples.ndim == 1:
-                # A one-stream preamble is broadcast to every stream.
-                preamble_samples = xp.tile(preamble_samples, (self.num_streams, 1))
+            if self.num_channels > 1 and preamble_samples.ndim == 1:
+                # A one-channel preamble is broadcast to every channel.
+                preamble_samples = xp.tile(preamble_samples, (self.num_channels, 1))
 
             # Concatenate Preamble + Body
             samples = xp.concatenate([preamble_samples, body_samples], axis=-1)
@@ -834,9 +834,9 @@ class SingleCarrierFrame:
             guard_num_samples = int(self.guard_num_symbols * sps)
             if self.guard_type == "zero":
                 zeros: ArrayType
-                if self.num_streams > 1:
+                if self.num_channels > 1:
                     zeros = xp.zeros(
-                        (self.num_streams, guard_num_samples), dtype="complex64"
+                        (self.num_channels, guard_num_samples), dtype="complex64"
                     )
                 else:
                     zeros = xp.zeros(guard_num_samples, dtype="complex64")
@@ -879,7 +879,7 @@ class SingleCarrierFrame:
         body, xp, _ = dispatch(to_device(self.body_symbols, device))
 
         def dac_peak_gain(symbols: ArrayType) -> ArrayType:
-            """Per stream, the gain that scales the larger quadrature peak to 1."""
+            """Per channel, the gain that scales the larger quadrature peak to 1."""
             x = generation.expand(symbols, factor=sps)
             if taps is not None:
                 x = convolve_periodic(x, taps)
@@ -893,9 +893,9 @@ class SingleCarrierFrame:
         if self.preamble is not None:
             preamble = to_device(self.preamble.symbols, device)
             preamble = preamble * dac_peak_gain(preamble)
-            if self.num_streams > 1 and preamble.ndim == 1:
-                # A one-stream preamble is broadcast to every stream.
-                preamble = xp.tile(preamble, (self.num_streams, 1))
+            if self.num_channels > 1 and preamble.ndim == 1:
+                # A one-channel preamble is broadcast to every channel.
+                preamble = xp.tile(preamble, (self.num_channels, 1))
             stream = xp.concatenate([preamble, stream], axis=-1)
 
         if self.guard_num_symbols > 0:
@@ -924,7 +924,7 @@ def extract_payload(signal: Signal) -> Signal:
     ----------
     signal : Signal
         A Signal with a ``frame``, at one sample per symbol, ``(N,)`` or
-        ``(num_streams, N)`` with ``N`` the frame length in symbols.
+        ``(num_channels, N)`` with ``N`` the frame length in symbols.
 
     Returns
     -------
@@ -961,10 +961,10 @@ def extract_payload(signal: Signal) -> Signal:
             "frame."
         )
     num_channels = 1 if x.ndim == 1 else x.shape[0]
-    if num_channels != frame.num_streams:
+    if num_channels != frame.num_channels:
         raise ValueError(
             f"extract_payload(): the Signal has {num_channels} channel(s), the "
-            f"frame {frame.num_streams} stream(s)."
+            f"frame {frame.num_channels} channel(s)."
         )
     device = "cpu" if signal.xp is np else "gpu"
     reference = frame._payload_reference().to(device)

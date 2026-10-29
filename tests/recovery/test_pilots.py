@@ -147,7 +147,7 @@ class TestCprPilotTone:
         df=0.0,
         linewidth=0.0,
         psr_db=-12.0,
-        num_streams=1,
+        num_channels=1,
         seed=7,
     ):
         """Return (samples, fs, true_common_phase) for a tone-bearing waveform.
@@ -162,7 +162,7 @@ class TestCprPilotTone:
             symbol_rate=FS,
             sps=self.SPS,
             pulse=RRC(self.BETA),
-            num_channels=num_streams,
+            num_channels=num_channels,
             rng=seed,
         )
         samples = xp.asarray(sig.samples)
@@ -232,7 +232,7 @@ class TestCprPilotTone:
 
     def test_output_shape_mimo(self, xp):
         """2D input (C, N) -> 2D phase output (C, N)."""
-        samples, fs, _ = self._setup(xp, num_streams=2)
+        samples, fs, _ = self._setup(xp, num_channels=2)
         theta = recovery.estimate_carrier_phase(
             samples,
             recovery.PilotTone(frequency=self.F_TONE, bandwidth=self.BW),
@@ -242,7 +242,7 @@ class TestCprPilotTone:
 
     def test_joint_rows_identical(self, xp):
         """joint_channels broadcasts a single trajectory to all rows."""
-        samples, fs, _ = self._setup(xp, num_streams=2, df=0.05e6)
+        samples, fs, _ = self._setup(xp, num_channels=2, df=0.05e6)
         theta = recovery.estimate_carrier_phase(
             samples,
             recovery.PilotTone(

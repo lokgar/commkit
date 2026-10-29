@@ -349,7 +349,7 @@ class TestEstimateTimingMIMO:
         if skew != 0:
             rx = xp.stack([rx[0], xp.roll(rx[1], skew)], axis=0)
 
-        preamble = Preamble(sequence_type="zc", num_symbols=L, root=1, num_streams=2)
+        preamble = Preamble(sequence_type="zc", num_symbols=L, root=1, num_channels=2)
         return rx, preamble, L
 
     def test_estimate_timing_skew_detection(self, xp):

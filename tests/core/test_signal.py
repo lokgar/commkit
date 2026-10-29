@@ -315,7 +315,7 @@ class TestSignalProperties:
 
         # Properties
         assert sig.duration == 1.0
-        assert sig.num_streams == 1
+        assert sig.num_channels == 1
 
         # wrappers
         # Use small nperseg to match signal length
@@ -999,7 +999,7 @@ class TestSignalDeviceAndPlotting:
         sig = generate(
             Constellation.psk(4), 200, symbol_rate=1e6, sps=1, pulse=RRC(0.35), rng=0
         )
-        assert sig.num_streams == 1
+        assert sig.num_channels == 1
         assert sig.reference.symbols is not None
 
         result = plotting.plot_constellation(sig, overlay_reference=True, show=False)

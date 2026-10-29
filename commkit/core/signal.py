@@ -353,7 +353,7 @@ class Signal:
             ("Backend", self.backend.upper()),
             (
                 "Configuration",
-                "SISO" if self.num_streams == 1 else f"MIMO ({self.num_streams}x)",
+                "SISO" if self.num_channels == 1 else f"MIMO ({self.num_channels}x)",
             ),
             ("Samples shape", str(self.samples.shape)),
         ]
@@ -487,7 +487,7 @@ class Signal:
         return "CPU" if self.xp is np else "GPU"
 
     @property
-    def num_streams(self) -> int:
+    def num_channels(self) -> int:
         """Number of channels: 1 for ``(N,)`` samples, C for ``(C, N)``."""
         if self.samples.ndim == 1:
             return 1

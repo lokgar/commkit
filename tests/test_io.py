@@ -438,7 +438,7 @@ _SHAPED = Constellation.qam(16).shaped(entropy=3.5)
             pilot_block_num_symbols=2,
             guard_type="cp",
             guard_num_symbols=4,
-            num_streams=2,
+            num_channels=2,
         ).to_signal(sps=2, symbol_rate=1e9, pulse=RRC(0.2)),
         lambda: SingleCarrierFrame(
             payload_blocks=12,

@@ -47,9 +47,9 @@ class TestPlotTimingSync:
         frame = SingleCarrierFrame(
             payload_num_symbols=200,
             preamble=Preamble(
-                sequence_type="barker", num_symbols=13, num_streams=channels
+                sequence_type="barker", num_symbols=13, num_channels=channels
             ),
-            num_streams=channels,
+            num_channels=channels,
         )
         sig = frame.to_signal(sps=1, symbol_rate=FS)
         pad = np.zeros((channels, 37), dtype=np.complex64)

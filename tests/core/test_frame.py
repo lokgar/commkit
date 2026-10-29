@@ -109,7 +109,7 @@ class TestSingleCarrierFrameBasics:
         frame = SingleCarrierFrame(
             payload_num_symbols=40,
             preamble=Preamble(sequence_type="barker", num_symbols=13),
-            num_streams=2,
+            num_channels=2,
         )
         x = frame.to_signal(sps=1, symbol_rate=1e6).samples
         assert x.shape == (2, 13 + 40)
@@ -333,7 +333,7 @@ class TestSingleCarrierFramePilots:
             pilot_pattern="comb",
             pilot_period=5,
             pilot_gain_db=6.0,
-            num_streams=2,
+            num_channels=2,
         )
         body = frame.body_symbols
         assert body.shape[0] == 2
@@ -472,25 +472,25 @@ class TestExtractPayload:
     """extract_payload: the payload of a full 1-SPS frame, reference attached."""
 
     @staticmethod
-    def _frame(num_streams: int = 1, guard_type: str = "cp") -> SingleCarrierFrame:
+    def _frame(num_channels: int = 1, guard_type: str = "cp") -> SingleCarrierFrame:
         return SingleCarrierFrame(
             payload_num_symbols=90,
             payload_constellation=Constellation.qam(16),
             preamble=Preamble(
-                sequence_type="barker", num_symbols=13, num_streams=num_streams
+                sequence_type="barker", num_symbols=13, num_channels=num_channels
             ),
             pilot_pattern="comb",
             pilot_period=10,
             pilot_gain_db=3.0,
             guard_type=guard_type,
             guard_num_symbols=7,
-            num_streams=num_streams,
+            num_channels=num_channels,
         )
 
     @pytest.mark.parametrize("guard_type", ["cp", "zero"])
-    @pytest.mark.parametrize("num_streams", [1, 2])
-    def test_payload_and_reference(self, num_streams, guard_type, xp, xpt):
-        frame = self._frame(num_streams, guard_type)
+    @pytest.mark.parametrize("num_channels", [1, 2])
+    def test_payload_and_reference(self, num_channels, guard_type, xp, xpt):
+        frame = self._frame(num_channels, guard_type)
         sig = frame.to_signal(sps=1, symbol_rate=1e6).to(
             "gpu" if xp is not np else "cpu"
         )
@@ -517,7 +517,7 @@ class TestExtractPayload:
             payload_num_symbols=70,
             payload_constellation=Constellation.qam(16),
             payload_code=code,
-            num_streams=2,
+            num_channels=2,
         )
         np.testing.assert_array_equal(
             encode(frame.payload_info_bits, code=code), frame.payload_bits
@@ -579,7 +579,7 @@ class TestExtractPayload:
             payload_pad=True,
             pilot_pattern="comb",
             pilot_period=4,
-            num_streams=2,
+            num_channels=2,
         )
         sig = frame.to_signal(sps=1, symbol_rate=1e6).to(
             "gpu" if xp is not np else "cpu"
@@ -675,13 +675,13 @@ _PERIODIC_FRAMES = [
     dict(preamble=Preamble(num_symbols=13), guard_type="cp", guard_num_symbols=8),
     dict(
         preamble=Preamble(num_symbols=13),
-        num_streams=2,
+        num_channels=2,
         guard_type="zero",
         guard_num_symbols=8,
     ),
     dict(
-        preamble=Preamble(sequence_type="zc", num_symbols=31, num_streams=2),
-        num_streams=2,
+        preamble=Preamble(sequence_type="zc", num_symbols=31, num_channels=2),
+        num_channels=2,
         pilot_pattern="comb",
         pilot_period=8,
     ),
@@ -741,7 +741,7 @@ class TestFrameDevice:
     def test_frame_matches_cpu(self, backend_device: str, xp: Any) -> None:
         frame = SingleCarrierFrame(
             payload_num_symbols=196,
-            num_streams=2,
+            num_channels=2,
             preamble=Preamble(sequence_type="zc", num_symbols=31),
             pilot_pattern="comb",
             pilot_period=8,

@@ -30,7 +30,7 @@ class TestMIMOSignalStructure:
 
         expected_samples = 100 * 4
         assert sig.samples.shape == (2, expected_samples)
-        assert sig.num_streams == 2
+        assert sig.num_channels == 2
         assert sig.sps == 4.0
         assert not xp.allclose(sig.samples[0], sig.samples[1])
 
@@ -52,13 +52,13 @@ class TestMIMOSignalStructure:
         sig = Signal(samples=samples, sampling_rate=1.0, symbol_rate=1.0)
 
         assert sig.samples.shape == (2, 100)
-        assert sig.num_streams == 2
+        assert sig.num_channels == 2
 
     def test_siso_fallback(self, xp: Any) -> None:
         """Verify that 1D samples are correctly treated as single-polarization (SISO)."""
         samples = xp.zeros(100)
         sig = Signal(samples=samples, sampling_rate=1.0, symbol_rate=1.0)
-        assert sig.num_streams == 1
+        assert sig.num_channels == 1
         assert sig.samples.ndim == 1
 
 
@@ -69,21 +69,21 @@ class TestMIMOFrameIntegration:
         """Verify multi-channel zero-insertion guard interval padding."""
         frame = SingleCarrierFrame(
             payload_num_symbols=100,
-            num_streams=2,
+            num_channels=2,
             guard_type="zero",
             guard_num_symbols=10,
         )
 
         sig = frame.to_signal(sps=1)
         assert sig.samples.shape == (2, 110)
-        assert sig.num_streams == 2
+        assert sig.num_channels == 2
         xpt.assert_array_equal(sig.samples[:, -10:], 0)
 
     def test_frame_mimo_pilots(self, xp: Any) -> None:
         """Verify that pilot patterns are correctly applied across all MIMO streams."""
         frame = SingleCarrierFrame(
             payload_num_symbols=10,
-            num_streams=2,
+            num_channels=2,
             pilot_pattern="comb",
             pilot_period=2,
         )
@@ -96,9 +96,9 @@ class TestMIMOFrameIntegration:
 
     def test_frame_mimo_preamble_broadcasting(self, xp: Any, xpt: Any) -> None:
         """Verify that a multi-stream Barker preamble tiles across all MIMO streams."""
-        preamble = Preamble(sequence_type="barker", num_symbols=13, num_streams=2)
+        preamble = Preamble(sequence_type="barker", num_symbols=13, num_channels=2)
         frame = SingleCarrierFrame(
-            payload_num_symbols=20, num_streams=2, preamble=preamble
+            payload_num_symbols=20, num_channels=2, preamble=preamble
         )
 
         sig = frame.to_signal(sps=1)
@@ -109,7 +109,7 @@ class TestMIMOFrameIntegration:
 
     def test_frame_mimo_waveform(self, xp: Any) -> None:
         """Verify MIMO waveform generation with pulse shaping."""
-        frame = SingleCarrierFrame(payload_num_symbols=10, num_streams=2)
+        frame = SingleCarrierFrame(payload_num_symbols=10, num_channels=2)
 
         sig = frame.to_signal(sps=4, pulse=Rect())
         assert sig.samples.shape == (2, 40)
