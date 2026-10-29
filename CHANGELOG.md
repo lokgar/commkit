@@ -35,6 +35,7 @@ Paired A/B of alternating processes against the previous commit of each change:
 - `correct_frequency_offset` with a static offset: 2 x 2^22 samples, 0.83 on the CPU and 0.69 on the GPU (one float64 ramp instead of three, and no host sync for an offset on the GPU).
 - `plot_equalizer_result` of 2 x 10^6 symbols: 0.08 on both devices (curves smoothed and cut to their min/max envelope on the result's device; about 4000 points per line are transferred and drawn instead of every symbol).
 - White-FM plateau detection of the linewidth estimators: 0.26 for 2^19 PSD bins, 0.91 for 4097 (each log-spaced cell read as a slice instead of a scan over all bins).
+- `apply_pmd`: 2 x 2^22 samples, 0.91 on the CPU and 0.90 on the GPU (the second phasor is the conjugate of the first).
 - `block_lms` with BPS: 2 x 100000 16-QAM symbols, block 256, 0.97 on the CPU and 0.86 on the GPU (the phasor from a real cos and sin).
 
 ### Fixed

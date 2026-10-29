@@ -112,11 +112,9 @@ def apply_pmd(
     # the real rotation U = R(-θ) into the PSP frame (U^H = R(+θ)).
     S_F = _fft.fft(x, axis=-1)  # (2, N)
     phase = xp.pi * freqs * dgd  # float64; responses in the spectrum's precision
+    h_neg = _phasor(-phase, S_F.dtype, xp)
     out_F = jones_section(
-        S_F,
-        _jones_rotation(-theta, np, np.float64),
-        _phasor(-phase, S_F.dtype, xp),
-        _phasor(phase, S_F.dtype, xp),
+        S_F, _jones_rotation(-theta, np, np.float64), h_neg, xp.conj(h_neg)
     )
     result = _fft.ifft(out_F, axis=-1)
 
