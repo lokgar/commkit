@@ -15,6 +15,7 @@ from ...core._signal_adapter import adapt_signal, require_integer_sps
 from ...core.signal import Signal
 from ...logger import logger
 from ...mapping.constellation import _slicer_params
+from ...math import _unit_phasor
 from ...recovery import BPS, CycleSlip
 from .._common import _cpr_symmetry
 from .._kernels_numba import _get_numba_cs_block
@@ -666,7 +667,7 @@ def block_lms(
 
         if bps is not None:
             phi_c, phi_traj = bps.phase(y_block, slicer, b_start, xp, d_train)
-            rot = xp.exp(-1j * phi_c.astype(xp.complex64))  # (C, B)
+            rot = _unit_phasor(-phi_c, xp.complex64, xp)  # (C, B), phi_c wrapped
             y_rot = y_block * rot
             assert phi_ws is not None
             phi_ws[:, :B] = phi_traj  # unwrapped float32, for trajectory

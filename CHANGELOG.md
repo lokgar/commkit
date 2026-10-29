@@ -29,8 +29,8 @@ Paired A/B of alternating processes against the previous commit of each change:
 - Turbo decoding: LTE K = 1024, max-log 0.82, exact log-MAP 0.65.
 - Cached code tables: interleaving 2^20 values with one `Interleaver` 0.19 on the CPU, 0.013 on the GPU (identity shortcut in the code objects' equality, which every cached lookup called).
 - `mi`: one exponential per element, 256-QAM 0.82 on the CPU and 0.33 on the GPU, 16-QAM 0.52 on the GPU.
-
 - LMS/RLS with inline carrier recovery: 2 x 50000 16-QAM symbols, PLL 0.95, BPS 0.97 (each symbol's phasor computed once).
+- `block_lms` with BPS: 2 x 100000 16-QAM symbols, block 256, 0.97 on the CPU and 0.86 on the GPU (the phasor from a real cos and sin).
 
 ### Fixed
 
