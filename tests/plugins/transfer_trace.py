@@ -52,7 +52,7 @@ _DOCUMENTED: dict[str, str] = {
     + " (tables of a value object: once per object and device)",
     "coding/convolutional.py::_decode": _RECURSION + " (Viterbi, BCJR)",
     "coding/polar.py::_decode": _RECURSION + " (successive-cancellation list decoding)",
-    "coding/shaping.py::_decode_ccdm": _RECURSION + " (the dematcher)",
+    "coding/shaping.py::_dematch_labels": _RECURSION + " (the dematcher)",
     "coding/shaping.py::_encode_ccdm": _RECURSION
     + " (the matcher; generate runs it on the host)",
     "coding/turbo.py::_decode": _RECURSION + " (turbo decoding)",
