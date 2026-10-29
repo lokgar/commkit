@@ -37,7 +37,7 @@ class TestAddAWGN:
         )
 
     def test_awgn_signal_power_override(self, xp):
-        """Explicit signal_power sets an absolute noise level (dark capture)."""
+        """Explicit signal_power sets an absolute noise level (silent capture)."""
         dark = xp.zeros(20000, dtype=xp.complex128)
         noisy = apply_awgn(dark, esn0_db=10.0, sps=1, signal_power=1.0, rng=3)
         # Without the override the noise power would be 0; with it, 0.1.
@@ -158,3 +158,87 @@ class TestOSNR:
         wide = apply_awgn(sig, osnr_db=15.0, reference_bandwidth=25e9, rng=1)
         var_wide = float(xp.mean(xp.abs(wide.samples - x) ** 2))
         assert var_wide == pytest.approx(var / 2, rel=0.02)
+
+
+class TestPerChannel:
+    """Es/N0 holds per channel; a scalar signal_power shares one noise floor."""
+
+    @staticmethod
+    def _noise_var(xp, noisy, x):
+        return xp.mean(xp.abs(noisy - x) ** 2, axis=-1)
+
+    def test_each_channel_gets_its_esn0(self, xp):
+        x = xp.ones((2, 1 << 16), dtype=xp.complex64)
+        x[1] *= 2.0  # 6 dB stronger
+        noisy = apply_awgn(x, esn0_db=10.0, sps=1, rng=1)
+        var = self._noise_var(xp, noisy, x)
+        assert xp.allclose(var, xp.asarray([0.1, 0.4]), rtol=0.03)
+
+    def test_scalar_signal_power_is_shared(self, xp):
+        x = xp.ones((2, 1 << 16), dtype=xp.complex64)
+        x[1] *= 2.0
+        noisy = apply_awgn(x, esn0_db=10.0, sps=1, signal_power=1.0, rng=1)
+        var = self._noise_var(xp, noisy, x)
+        assert xp.allclose(var, xp.asarray([0.1, 0.1]), rtol=0.03)
+
+    def test_per_channel_signal_power(self, xp):
+        x = xp.zeros((2, 1 << 16), dtype=xp.complex64)
+        noisy = apply_awgn(x, esn0_db=10.0, sps=2, signal_power=[1.0, 0.5], rng=1)
+        var = self._noise_var(xp, noisy, x)
+        assert noisy.dtype == xp.complex64
+        assert xp.allclose(var, xp.asarray([0.2, 0.1]), rtol=0.03)
+        with pytest.raises(ValueError, match="one entry per channel"):
+            apply_awgn(x, esn0_db=10.0, sps=1, signal_power=[1.0, 1.0, 1.0])
+
+
+class TestNoiseModes:
+    """apply_awgn(osnr_db=, noise_modes=): ASE counted over the guided modes."""
+
+    RS = 32e9
+
+    def _field(self, xp, num_channels, sps=2):
+        x = xp.ones((num_channels, 1 << 16), dtype=xp.complex64)
+        return Signal(
+            samples=x,
+            sampling_rate=sps * self.RS,
+            symbol_rate=self.RS,
+            domain="OPT",
+            center_frequency=193.4e12,
+        )
+
+    def _esn0(self, xp, sig, **kwargs):
+        noisy = apply_awgn(sig, osnr_db=20.0, rng=2, **kwargs)
+        var = float(xp.mean(xp.abs(noisy.samples - sig.samples) ** 2))
+        return sig.sps / var
+
+    def test_mode_division_default_counts_every_channel(self, xp):
+        """Six channels in a 3-mode fiber: Es/N0 = 6 B_ref / (6 R_s) · OSNR,
+        the single-mode dual-polarization value."""
+        esn0 = self._esn0(xp, self._field(xp, 6))
+        assert esn0 == pytest.approx(100 * 12.5e9 / self.RS, rel=0.02)
+        assert self._esn0(xp, self._field(xp, 2)) == pytest.approx(esn0, rel=0.02)
+
+    def test_unexcited_modes_still_carry_ase(self, xp):
+        """4 of 6 modes carry signal: the ASE of all 6 counts, so each
+        channel sees 6/4 of the default's Es/N0."""
+        sig = self._field(xp, 4)
+        assert self._esn0(xp, sig, noise_modes=6) == pytest.approx(
+            1.5 * self._esn0(xp, sig), rel=0.02
+        )
+
+    def test_unequal_powers_share_one_ase_level(self, xp):
+        sig = self._field(xp, 2)
+        x = sig.samples.copy()
+        x[1] *= 2.0
+        noisy = apply_awgn(sig.replace(samples=x), osnr_db=20.0, rng=2)
+        var = xp.mean(xp.abs(noisy.samples - x) ** 2, axis=-1)
+        assert float(var[1]) == pytest.approx(float(var[0]), rel=0.03)
+        # Total power 1 + 4 = 5 over two modes: 5 · f_s / (2 B_ref OSNR).
+        expected = 5 * 2 * self.RS / (2 * 12.5e9 * 100)
+        assert float(var[0]) == pytest.approx(expected, rel=0.03)
+
+    def test_noise_modes_validated(self, xp):
+        sig = self._field(xp, 4)
+        for bad in (3, 0, 4.0, True):
+            with pytest.raises(ValueError, match="noise_modes"):
+                apply_awgn(sig, osnr_db=20.0, noise_modes=bad)
