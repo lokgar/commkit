@@ -102,9 +102,12 @@ def llr_kernel(
         metric = np.empty(M, dtype=np.float32)
         e = np.empty(M, dtype=np.float32)
         for i in range(t * _LLR_TASK, min(n, (t + 1) * _LLR_TASK)):
+            # Loaded once: the symbols may be strided views, whose loads
+            # inside the loop keep it from vectorizing.
+            xr, xi = x_re[i], x_im[i]
             for m in range(M):
-                dr = x_re[i] - c_re[m]
-                di = x_im[i] - c_im[m]
+                dr = xr - c_re[m]
+                di = xi - c_im[m]
                 metric[m] = -(dr * dr + di * di) * inv_s2 + log_pmf[m]
             peak = prepare_exp(metric, e) if exact else np.float32(0.0)
             for b in range(k):
