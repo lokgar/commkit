@@ -337,5 +337,5 @@ class TestPipelineSPSValidation:
                 )
             else:
                 SingleCarrierFrame(payload_num_symbols=16).to_signal(
-                    sps=sps, pulse=RRC(0.35)
+                    symbol_rate=1e6, sps=sps, pulse=RRC(0.35)
                 )

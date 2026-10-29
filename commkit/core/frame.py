@@ -124,9 +124,9 @@ class Preamble:
 
     def to_signal(
         self,
-        sps: int,
-        symbol_rate: float,
         *,
+        symbol_rate: float,
+        sps: int = 1,
         pulse: Pulse | ArrayType | None = None,
         periodic: bool = False,
         device: str = "cpu",
@@ -135,10 +135,10 @@ class Preamble:
 
         Parameters
         ----------
-        sps : int
-            Samples per symbol.
         symbol_rate : float
             Symbol rate in Hz.
+        sps : int, default 1
+            Samples per symbol.
         pulse : Pulse or array_like, optional
             Pulse object or taps; ``None`` zero-stuffs without shaping (as
             :func:`commkit.generate`).
@@ -736,9 +736,9 @@ class SingleCarrierFrame:
 
     def to_signal(
         self,
-        sps: int = 4,
-        symbol_rate: float = 1e6,
         *,
+        symbol_rate: float,
+        sps: int = 1,
         pulse: Pulse | ArrayType | None = None,
         periodic: bool = False,
         device: str = "cpu",
@@ -747,10 +747,10 @@ class SingleCarrierFrame:
 
         Parameters
         ----------
-        sps : int, default 4
-            Samples per symbol (oversampling factor).
-        symbol_rate : float, default 1e6
+        symbol_rate : float
             Symbol rate in Hz.
+        sps : int, default 1
+            Samples per symbol (oversampling factor).
         pulse : Pulse or array_like, optional
             Pulse object or taps for both preamble and body; ``None``
             zero-stuffs without shaping (as :func:`commkit.generate`).

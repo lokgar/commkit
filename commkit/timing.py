@@ -752,7 +752,7 @@ def correct_timing(
     samples: S,
     how: TimingEstimate | float | ArrayType,
     *,
-    mode: str = "circular",
+    mode: str = "zero",
 ) -> S:
     """Remove a timing offset: integer shift, then FFT fractional delay.
 
@@ -765,13 +765,16 @@ def correct_timing(
         ``(C,)``), which is split into its nearest integer and a fraction
         in ``[-0.5, 0.5)``.  The input's sample at the offset becomes
         sample 0.
-    mode : {'circular', 'zero', 'slice'}, default 'circular'
+    mode : {'zero', 'circular', 'slice'}, default 'zero'
         How to handle boundary samples after the integer shift:
 
-        - ``'circular'``: wrap around (``roll``); same length.  For periodic
-          signals; not for bursts.
         - ``'zero'``: shift and zero-fill the samples shifted in (the tail
           for a positive offset, the head for a negative one); same length.
+          Right for a real capture, whose samples beyond its ends are
+          unknown.
+        - ``'circular'``: wrap around (``roll``); same length.  Only for a
+          periodic record (one AWG period), where the samples past the end
+          are those at the start.
         - ``'slice'``: drop the leading samples.  With per-channel offsets
           the output has ``N - max(offset)`` samples so all channels share the
           overlap.  A Signal's reference keeps the symbol periods left.
@@ -797,7 +800,7 @@ def correct_timing(
 
     if mode not in ("circular", "zero", "slice"):
         raise ValueError(
-            f"Unknown mode {mode!r}. Choose 'circular', 'zero', or 'slice'."
+            f"Unknown mode {mode!r}. Choose 'zero', 'circular', or 'slice'."
         )
     signal_adapter = adapt_signal(samples, function_name="correct_timing()")
     x, xp, _ = dispatch(signal_adapter.array)

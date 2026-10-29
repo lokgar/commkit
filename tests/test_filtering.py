@@ -305,6 +305,15 @@ class TestIirFilter:
         out = filtering.iir_filter(xp.asarray(x), sos)
         xpt.assert_allclose(out[200:-200], xp.ones(3600, dtype=xp.float32), atol=1e-4)
 
+    def test_default_is_causal(self, xp: Any) -> None:
+        """A device model by default: sosfilt, with its group delay."""
+        import scipy.signal
+
+        x = self._record(np.float32, (500,), seed=2)
+        sos = filtering.butterworth_sos(sampling_rate=1.0, cutoff=0.1, order=4)
+        out = to_numpy(filtering.iir_filter(xp.asarray(x), sos))
+        np.testing.assert_allclose(out, scipy.signal.sosfilt(sos, x), atol=1e-6)
+
     def test_bad_sections_raise(self, xp: Any) -> None:
         x = xp.ones(100, dtype=xp.float32)
         with pytest.raises(ValueError, match="sos"):
@@ -317,8 +326,8 @@ class TestIirFilter:
     def test_record_shorter_than_the_padding_raises(self, xp: Any) -> None:
         sos = filtering.butterworth_sos(sampling_rate=1.0, cutoff=0.1, order=4)
         with pytest.raises(ValueError, match="padding"):
-            filtering.iir_filter(xp.ones(10, dtype=xp.float32), sos)
-        out = filtering.iir_filter(xp.ones(20, dtype=xp.float32), sos, zero_phase=False)
+            filtering.iir_filter(xp.ones(10, dtype=xp.float32), sos, zero_phase=True)
+        out = filtering.iir_filter(xp.ones(20, dtype=xp.float32), sos)
         assert out.shape == (20,)
 
 
@@ -724,9 +733,7 @@ def test_causal_iir_of_empty_input(xp: Any, shape: tuple[int, ...]) -> None:
     """No samples or no channels: an empty result (on the GPU, without a
     zero-size launch)."""
     sos = filtering.butterworth_sos(sampling_rate=1.0, cutoff=0.02, order=4)
-    out = filtering.iir_filter(
-        xp.zeros(shape, dtype=xp.float32), sos=sos, zero_phase=False
-    )
+    out = filtering.iir_filter(xp.zeros(shape, dtype=xp.float32), sos=sos)
     assert out.shape == shape
 
 

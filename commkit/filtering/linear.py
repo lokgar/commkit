@@ -731,7 +731,7 @@ def iir_filter(
     samples: S,
     sos: ArrayType,
     *,
-    zero_phase: bool = True,
+    zero_phase: bool = False,
 ) -> S:
     """Apply an IIR filter in second-order sections (SOS) along the time axis.
 
@@ -746,12 +746,15 @@ def iir_filter(
         Samples, ``(N,)`` or ``(C, N)``.  A Signal gives a new Signal.
     sos : array_like
         Second-order sections, ``(n_sections, 6)``, with ``sos[:, 3] == 1``.
-    zero_phase : bool, default True
-        Filter forward and backward, as ``scipy.signal.sosfiltfilt``: no
-        phase distortion or group delay, but non-causal, so the whole record
-        is needed.  With ``False`` the filter runs causally, as
-        ``scipy.signal.sosfilt``, and its frequency-dependent group delay
-        stays in the output, as in a real-time receiver.
+    zero_phase : bool, default False
+        By default the filter runs causally, as ``scipy.signal.sosfilt``,
+        and its frequency-dependent group delay stays in the output, as in
+        the hardware it models (a DAC, driver or photodiode bandwidth).
+        With ``True`` it filters forward and backward, as
+        ``scipy.signal.sosfiltfilt``: no phase distortion or group delay,
+        but the magnitude response is squared and the filter non-causal (the
+        whole record is needed), which suits offline analysis, not device
+        models.
 
     Returns
     -------

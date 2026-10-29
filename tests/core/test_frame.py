@@ -21,7 +21,7 @@ class TestSingleCarrierFrameBasics:
     def test_sc_frame_none(self, xp: Any) -> None:
         """Verify basic frame generation with no pilots or guard intervals."""
         frame = SingleCarrierFrame(payload_num_symbols=100, pilot_pattern="none")
-        sig = frame.to_signal(sps=1)
+        sig = frame.to_signal(symbol_rate=1e6, sps=1)
         assert len(sig.samples) == 100
         assert sig.symbol_rate == 1e6
         assert sig.frame is frame
@@ -36,7 +36,7 @@ class TestSingleCarrierFrameBasics:
         assert length == 12
         assert xp.sum(mask) == 3
 
-        sig = frame.to_signal(sps=1)
+        sig = frame.to_signal(symbol_rate=1e6, sps=1)
         assert len(sig.samples) == 12
         assert len(sig.frame.pilot_symbols) >= 3
 
@@ -52,7 +52,7 @@ class TestSingleCarrierFrameBasics:
         assert length == 20
         assert xp.sum(mask) == 10
 
-        sig = frame.to_signal(sps=1)
+        sig = frame.to_signal(symbol_rate=1e6, sps=1)
         assert len(sig.samples) == 20
 
     def test_sc_frame_guard_zero(self, xp: Any, xpt: Any) -> None:
@@ -60,7 +60,7 @@ class TestSingleCarrierFrameBasics:
         frame = SingleCarrierFrame(
             payload_num_symbols=100, guard_type="zero", guard_num_symbols=20
         )
-        sig = frame.to_signal(sps=1)
+        sig = frame.to_signal(symbol_rate=1e6, sps=1)
         assert len(sig.samples) == 120
         xpt.assert_array_equal(sig.samples[-20:], 0)
         assert sig.frame.guard_num_symbols == 20
@@ -71,7 +71,7 @@ class TestSingleCarrierFrameBasics:
         frame = SingleCarrierFrame(
             payload_num_symbols=100, guard_type="cp", guard_num_symbols=20
         )
-        sig = frame.to_signal(sps=1)
+        sig = frame.to_signal(symbol_rate=1e6, sps=1)
         assert len(sig.samples) == 120
         xpt.assert_allclose(sig.samples[:20], sig.samples[-20:])
         assert sig.frame.guard_type == "cp"
@@ -80,7 +80,7 @@ class TestSingleCarrierFrameBasics:
         """Verify that auto-generated preambles are prepended to the frame."""
         preamble = Preamble(sequence_type="barker", num_symbols=13)
         frame = SingleCarrierFrame(payload_num_symbols=100, preamble=preamble)
-        sig = frame.to_signal(sps=1)
+        sig = frame.to_signal(symbol_rate=1e6, sps=1)
         assert len(sig.samples) == 113
         xpt.assert_allclose(sig.samples[:13], preamble.symbols)
         assert sig.frame.preamble.num_symbols == 13
@@ -92,11 +92,11 @@ class TestSingleCarrierFrameBasics:
         assert bits is not None
         assert bits.size == 200
 
-        sig = frame.to_signal(sps=1)
+        sig = frame.to_signal(symbol_rate=1e6, sps=1)
         assert sig.reference is None
 
     def test_preamble_to_signal(self, xp: Any) -> None:
-        """Verify Preamble.to_signal() standalone signal generation."""
+        """Verify Preamble.to_signal(symbol_rate=1e6) standalone signal generation."""
         preamble = Preamble(sequence_type="barker", num_symbols=13)
         sig = preamble.to_signal(sps=4, symbol_rate=1e6, pulse=RRC(0.35))
 
@@ -123,7 +123,9 @@ class TestSingleCarrierFrameBasics:
         )
 
         sps = 4
-        sig = frame.to_signal(sps=sps, pulse=RRC(0.5)).to(device_of(xp))
+        sig = frame.to_signal(symbol_rate=1e6, sps=sps, pulse=RRC(0.5)).to(
+            device_of(xp)
+        )
         preamble_len_samples = 13 * sps
         preamble_section = sig.samples[:preamble_len_samples]
         body_section = sig.samples[preamble_len_samples:]
@@ -696,8 +698,10 @@ class TestPeriodicFrame:
         """Without a pulse there is nothing to wrap: section gains, guard and
         layout must equal the linear path."""
         frame = SingleCarrierFrame(payload_num_symbols=196, **kw)
-        a = frame.to_signal(sps=2, device=backend_device)
-        b = frame.to_signal(sps=2, periodic=True, device=backend_device)
+        a = frame.to_signal(symbol_rate=1e6, sps=2, device=backend_device)
+        b = frame.to_signal(
+            symbol_rate=1e6, sps=2, periodic=True, device=backend_device
+        )
         assert b.samples.dtype == a.samples.dtype
         np.testing.assert_allclose(to_numpy(b.samples), to_numpy(a.samples), atol=1e-6)
         assert b.frame is frame
@@ -714,7 +718,9 @@ class TestPeriodicFrame:
             sections.insert(0, frame.preamble.symbols)
         errors = {}
         for periodic in (False, True):
-            sig = frame.to_signal(sps=4, pulse=pulse, periodic=periodic)
+            sig = frame.to_signal(
+                symbol_rate=1e6, sps=4, pulse=pulse, periodic=periodic
+            )
             y = circular_matched_samples(sig.samples, pulse.taps(4), 4)
             start, err = 0, []
             for ref in sections:
@@ -748,8 +754,10 @@ class TestFrameDevice:
             guard_type="cp",
             guard_num_symbols=16,
         )
-        ref = frame.to_signal(sps=2, pulse=RRC(0.2))
-        sig = frame.to_signal(sps=2, pulse=RRC(0.2), device=backend_device)
+        ref = frame.to_signal(symbol_rate=1e6, sps=2, pulse=RRC(0.2))
+        sig = frame.to_signal(
+            symbol_rate=1e6, sps=2, pulse=RRC(0.2), device=backend_device
+        )
         assert isinstance(sig.samples, xp.ndarray)
         assert sig.samples.dtype == ref.samples.dtype
         np.testing.assert_allclose(to_numpy(sig.samples), ref.samples, atol=1e-5)
@@ -762,4 +770,6 @@ class TestFrameDevice:
 
     def test_invalid_device(self) -> None:
         with pytest.raises(ValueError, match="device"):
-            SingleCarrierFrame(payload_num_symbols=10).to_signal(sps=1, device="tpu")
+            SingleCarrierFrame(payload_num_symbols=10).to_signal(
+                symbol_rate=1e6, sps=1, device="tpu"
+            )

@@ -596,11 +596,14 @@ class TestCorrectTimingBasic:
     """Basic integer and fractional timing correction applications."""
 
     def test_correct_timing_integer_only(self, xp):
-        """Verify integer-only timing correction via roll."""
+        """Integer-only timing correction; by default the samples shifted in
+        are zeros, not the wrapped head of the capture."""
         signal = xp.zeros(50, dtype="float32")
         signal[10] = 1.0
+        signal[0] = 0.5
         corrected = timing.correct_timing(signal, 10)
         assert int(xp.argmax(xp.abs(corrected))) == 0
+        assert not bool(xp.any(corrected[-10:]))
 
     def test_correct_timing_combined(self, xp, xpt):
         """Verify integer + fractional timing correction."""
@@ -831,7 +834,7 @@ class TestTimingEstimateFlow:
         est = timing.estimate_timing(delayed, template=template, threshold=2.0)
         assert int(est.integer) == 37
         assert abs(float(est.fractional)) < 0.05
-        out = timing.correct_timing(delayed, est)
+        out = timing.correct_timing(delayed, est, mode="circular")  # a rolled record
         xpt.assert_allclose(out, sig.samples, atol=2e-2)
 
     def test_template_defaults_to_frame_preamble(self, xp):

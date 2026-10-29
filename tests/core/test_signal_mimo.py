@@ -74,7 +74,7 @@ class TestMIMOFrameIntegration:
             guard_num_symbols=10,
         )
 
-        sig = frame.to_signal(sps=1)
+        sig = frame.to_signal(symbol_rate=1e6, sps=1)
         assert sig.samples.shape == (2, 110)
         assert sig.num_channels == 2
         xpt.assert_array_equal(sig.samples[:, -10:], 0)
@@ -87,7 +87,7 @@ class TestMIMOFrameIntegration:
             pilot_pattern="comb",
             pilot_period=2,
         )
-        sig = frame.to_signal(sps=1)
+        sig = frame.to_signal(symbol_rate=1e6, sps=1)
         assert sig.samples.shape == (2, 20)
 
         mask, _ = frame._generate_pilot_mask()
@@ -101,7 +101,7 @@ class TestMIMOFrameIntegration:
             payload_num_symbols=20, num_channels=2, preamble=preamble
         )
 
-        sig = frame.to_signal(sps=1)
+        sig = frame.to_signal(symbol_rate=1e6, sps=1)
         assert sig.samples.shape == (2, 33)
 
         xpt.assert_allclose(sig.samples[0, :13], preamble.symbols[0])
@@ -111,7 +111,7 @@ class TestMIMOFrameIntegration:
         """Verify MIMO waveform generation with pulse shaping."""
         frame = SingleCarrierFrame(payload_num_symbols=10, num_channels=2)
 
-        sig = frame.to_signal(sps=4, pulse=Rect())
+        sig = frame.to_signal(symbol_rate=1e6, sps=4, pulse=Rect())
         assert sig.samples.shape == (2, 40)
         assert sig.sps == 4.0
 
