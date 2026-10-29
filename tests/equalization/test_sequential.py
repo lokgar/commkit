@@ -912,7 +912,7 @@ class TestCmaPilotAided:
         from commkit.backend import to_device
         from commkit.core import Preamble, SingleCarrierFrame
 
-        preamble = Preamble(sequence_type="barker", length=13)
+        preamble = Preamble(sequence_type="barker", num_symbols=13)
         frame = SingleCarrierFrame(
             payload_num_symbols=1008,
             pilot_pattern="comb",

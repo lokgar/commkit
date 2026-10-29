@@ -69,20 +69,20 @@ class TestTimingSequences:
 
     def test_preamble_auto_generation(self, xp):
         """Verify automated preamble bit and symbol generation."""
-        preamble = Preamble(sequence_type="barker", length=13)
+        preamble = Preamble(sequence_type="barker", num_symbols=13)
         assert preamble.symbols is not None
         assert len(preamble.symbols) == 13
         # Generated on the host; nothing is moved to the GPU implicitly.
         assert isinstance(preamble.symbols, np.ndarray)
 
-        preamble_zc = Preamble(sequence_type="zc", length=63, root=1)
+        preamble_zc = Preamble(sequence_type="zc", num_symbols=63, root=1)
         assert preamble_zc.symbols is not None
         assert len(preamble_zc.symbols) == 63
 
         with pytest.raises(ValueError, match="sequence_type"):
-            Preamble(sequence_type="invalid", length=13)
+            Preamble(sequence_type="invalid", num_symbols=13)
 
-        with pytest.raises(TypeError, match="length"):
+        with pytest.raises(TypeError, match="num_symbols"):
             Preamble(sequence_type="barker")
 
     def test_sequences_are_host_arrays(self):
@@ -142,7 +142,7 @@ class TestEstimateTiming:
 
     def test_estimate_timing_advanced_scenarios(self, xp):
         """Verify estimate_timing with raw arrays, MIMO, and search ranges."""
-        preamble = Preamble(sequence_type="barker", length=7)
+        preamble = Preamble(sequence_type="barker", num_symbols=7)
         ref = xp.asarray(preamble.symbols)
         data = xp.zeros(100, dtype="complex64")
         data[20 : 20 + 7] = ref
@@ -185,7 +185,7 @@ class TestEstimateTiming:
 
     def test_estimate_timing_with_preamble_object(self, xp):
         """Verify timing estimation using Preamble objects."""
-        preamble = Preamble(sequence_type="barker", length=13)
+        preamble = Preamble(sequence_type="barker", num_symbols=13)
         signal = xp.zeros(200, dtype="complex64")
         start_pos = 75
 
@@ -241,7 +241,7 @@ class TestEstimateTiming:
 
     def test_estimate_timing_infer_error(self, xp):
         """Verify error when Preamble object used without sps."""
-        pre = Preamble(sequence_type="barker", length=3)
+        pre = Preamble(sequence_type="barker", num_symbols=3)
         sig = xp.zeros(20)
         with pytest.raises(ValueError, match="SPS must be provided"):
             timing.estimate_timing(sig, template=pre)
@@ -270,7 +270,7 @@ class TestEstimateTiming:
         samples = xp.zeros(200, dtype="complex64")
         samples[40:47] = barker
 
-        preamble = Preamble(sequence_type="barker", length=7)
+        preamble = Preamble(sequence_type="barker", num_symbols=7)
         est = timing.estimate_timing(samples, template=preamble, sps=1, threshold=2.0)
         integer = est.integer
         assert abs(int(integer) - 40) <= 1
@@ -287,7 +287,7 @@ class TestEstimateTiming:
         )
 
         est = timing.estimate_timing(
-            sig, template=Preamble(sequence_type="barker", length=7), threshold=2.0
+            sig, template=Preamble(sequence_type="barker", num_symbols=7), threshold=2.0
         )
         integer, _ = est.integer, est.fractional
         assert abs(int(integer) - 40) <= 1
@@ -306,13 +306,13 @@ class TestEstimateTiming:
 
         with pytest.raises(ValueError, match="sps to be a positive integer"):
             timing.estimate_timing(
-                sig, template=Preamble(sequence_type="barker", length=7)
+                sig, template=Preamble(sequence_type="barker", num_symbols=7)
             )
 
     def test_estimate_timing_preamble_kwargs_without_sps(self, xp):
         """Verify estimate_timing raises when preamble is provided but sps is missing."""
         sig = xp.zeros(100, dtype="complex64")
-        pre = Preamble(sequence_type="barker", length=7)
+        pre = Preamble(sequence_type="barker", num_symbols=7)
         with pytest.raises(ValueError, match="SPS must be provided"):
             timing.estimate_timing(sig, template=pre)
 
@@ -349,7 +349,7 @@ class TestEstimateTimingMIMO:
         if skew != 0:
             rx = xp.stack([rx[0], xp.roll(rx[1], skew)], axis=0)
 
-        preamble = Preamble(sequence_type="zc", length=L, root=1, num_streams=2)
+        preamble = Preamble(sequence_type="zc", num_symbols=L, root=1, num_streams=2)
         return rx, preamble, L
 
     def test_estimate_timing_skew_detection(self, xp):
@@ -838,7 +838,7 @@ class TestTimingEstimateFlow:
         """A frame Signal supplies its own preamble (shaped with its pulse)."""
         frame = SingleCarrierFrame(
             payload_num_symbols=124,
-            preamble=Preamble(sequence_type="barker", length=13),
+            preamble=Preamble(sequence_type="barker", num_symbols=13),
         )
         sig = frame.to_signal(sps=2, symbol_rate=1e6, pulse=RRC(0.35)).to(device_of(xp))
         delayed = sig.replace(samples=xp.roll(sig.samples, 25))

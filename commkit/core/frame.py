@@ -30,18 +30,18 @@ class Preamble:
     """Frame-synchronization preamble: a Barker or Zadoff-Chu sequence.
 
     The symbols are built from the fields on construction (host complex64,
-    ``(length,)``, or ``(num_streams, length)`` for several streams); they
+    ``(num_symbols,)``, or ``(num_streams, num_symbols)`` for several streams); they
     cannot be set by hand.
 
     Parameters
     ----------
     sequence_type : {"barker", "zc"}, default "barker"
         The sequence family.
-    length : int
+    num_symbols : int
         Length in symbols.  Barker: one of 2, 3, 4, 5, 7, 11, 13.  ZC: any
         length; a prime gives the ideal cross-correlation between roots.
     root : int, default 1
-        ZC root index ``u``, in ``[1, length)`` and coprime to ``length``;
+        ZC root index ``u``, in ``[1, num_symbols)`` and coprime to ``num_symbols``;
         ignored for Barker.
     num_streams : int, default 1
         Number of TX streams.  ZC preambles get a distinct root per stream
@@ -49,8 +49,8 @@ class Preamble:
     """
 
     sequence_type: str = "barker"
-    length: int
-    # ZC root index, 1 <= root < length; ignored for Barker sequences.
+    num_symbols: int
+    # ZC root index, 1 <= root < num_symbols; ignored for Barker sequences.
     root: int = 1
     # Number of TX streams.  ZC preambles get a unique root per stream
     # (zc_mimo_root); Barker broadcasts the same sequence.
@@ -69,8 +69,8 @@ class Preamble:
         This ensures that standard sequences are generated correctly according
         to the requested sequence properties.
 
-        For ``num_streams == 1`` the internal ``_symbols`` shape is ``(length,)``.
-        For ``num_streams > 1`` it becomes ``(num_streams, length)``:
+        For ``num_streams == 1`` the internal ``_symbols`` shape is ``(num_symbols,)``.
+        For ``num_streams > 1`` it becomes ``(num_streams, num_symbols)``:
         - ZC: each row uses the unique root from ``zc_mimo_root``.
         - Barker: the same sequence is tiled across all streams.
         """
@@ -78,28 +78,29 @@ class Preamble:
             raise ValueError(
                 f"sequence_type must be 'barker' or 'zc', got {self.sequence_type!r}."
             )
-        _check_int("length", self.length, 1)
+        _check_int("num_symbols", self.num_symbols, 1)
         _check_int("root", self.root, 1)
         _check_int("num_streams", self.num_streams, 1)
 
         symbols: np.ndarray
         if self.sequence_type == "barker":
             # Barker symbols (-1, +1), the same on every stream.
-            symbols = barker_sequence(self.length)
+            symbols = barker_sequence(self.num_symbols)
             if self.num_streams > 1:
                 symbols = np.tile(symbols[None, :], (self.num_streams, 1))
         elif self.num_streams > 1:
-            # One Zadoff-Chu root per stream, (num_streams, length).
+            # One Zadoff-Chu root per stream, (num_streams, num_symbols).
             symbols = np.stack(
                 [
                     zadoff_chu_sequence(
-                        self.length, root=zc_mimo_root(k, self.root, self.length)
+                        self.num_symbols,
+                        root=zc_mimo_root(k, self.root, self.num_symbols),
                     )
                     for k in range(self.num_streams)
                 ]
             )
         else:
-            symbols = zadoff_chu_sequence(self.length, root=self.root)
+            symbols = zadoff_chu_sequence(self.num_symbols, root=self.root)
 
         # Consistent internal dtype; sequences stay on the CPU (no hidden
         # device placement).
@@ -113,14 +114,9 @@ class Preamble:
     def symbols(self) -> Any:
         """The preamble symbols (host complex64).
 
-        ``(length,)``, or ``(num_streams, length)`` for several streams.
+        ``(num_symbols,)``, or ``(num_streams, num_symbols)`` for several streams.
         """
         return self._symbols
-
-    @property
-    def num_symbols(self) -> int:
-        """Number of symbols per stream, ``length``."""
-        return self.length
 
     # -------------------------------------------------------------------------
     # Signal Generation
@@ -190,7 +186,7 @@ class SingleCarrierFrame:
         Number of payload symbols per stream; ``None`` takes the symbols of
         ``payload_blocks``, or 1000 without it.  With pilots it must fill
         whole pilot periods (comb: a multiple of ``pilot_period - 1``; block:
-        of ``pilot_period - pilot_block_len``); otherwise construction raises.
+        of ``pilot_period - pilot_block_num_symbols``); otherwise construction raises.
     payload_constellation : Constellation, default ``Constellation.psk(4)``
         Payload constellation.  A shaped one
         (``Constellation.qam(64).shaped(entropy=5)``) gives a PS payload.
@@ -221,12 +217,12 @@ class SingleCarrierFrame:
     pilot_pattern : {"none", "block", "comb"}, default "none"
         ``"none"``: no pilots.  ``"comb"``: one pilot every
         ``pilot_period`` symbols, the first at the start of the body.
-        ``"block"``: ``pilot_block_len`` pilots at the start of every period
+        ``"block"``: ``pilot_block_num_symbols`` pilots at the start of every period
         of ``pilot_period`` symbols.
     pilot_period : int, default 0
         Pilot period in symbols (pilots included); ``> 1`` for ``"comb"``,
-        ``> pilot_block_len`` for ``"block"``.
-    pilot_block_len : int, default 0
+        ``> pilot_block_num_symbols`` for ``"block"``.
+    pilot_block_num_symbols : int, default 0
         Pilots per period for ``"block"``.
     pilot_seed : int, default 1337
         Seed of the pilot symbols.
@@ -236,8 +232,8 @@ class SingleCarrierFrame:
         Pilot power boost in dB relative to the payload.
     guard_type : {"zero", "cp"}, default "zero"
         ``"zero"``: zeros after the frame.  ``"cp"``: a cyclic prefix, the
-        last ``guard_len`` symbols of the frame repeated before it.
-    guard_len : int, default 0
+        last ``guard_num_symbols`` symbols of the frame repeated before it.
+    guard_num_symbols : int, default 0
         Guard interval in symbols.
     num_streams : int, default 1
         Number of independent streams (MIMO), each with its own payload and
@@ -272,13 +268,13 @@ class SingleCarrierFrame:
 
     pilot_pattern: str = "none"
     pilot_period: int = 0
-    pilot_block_len: int = 0
+    pilot_block_num_symbols: int = 0
     pilot_constellation: Constellation = field(default_factory=_qpsk)
     pilot_seed: int = 1337
     pilot_gain_db: float = 0.0
 
     guard_type: str = "zero"
-    guard_len: int = 0
+    guard_num_symbols: int = 0
 
     num_streams: int = 1
 
@@ -306,8 +302,8 @@ class SingleCarrierFrame:
         if self.payload_blocks is not None:
             _check_int("payload_blocks", self.payload_blocks, 1)
         _check_int("pilot_period", self.pilot_period, 0)
-        _check_int("pilot_block_len", self.pilot_block_len, 0)
-        _check_int("guard_len", self.guard_len, 0)
+        _check_int("pilot_block_num_symbols", self.pilot_block_num_symbols, 0)
+        _check_int("guard_num_symbols", self.guard_num_symbols, 0)
         _check_int("num_streams", self.num_streams, 1)
         for name in ("payload_constellation", "pilot_constellation"):
             if not isinstance(getattr(self, name), Constellation):
@@ -339,11 +335,13 @@ class SingleCarrierFrame:
             block = self._pilot_block()
             if block < 1:
                 raise ValueError(
-                    "pilot_block_len must be >= 1 for the 'block' pattern, got "
-                    f"{self.pilot_block_len}."
+                    "pilot_block_num_symbols must be >= 1 for the 'block' pattern, got "
+                    f"{self.pilot_block_num_symbols}."
                 )
             if self.pilot_period <= block:
-                bound = "1" if self.pilot_pattern == "comb" else "pilot_block_len"
+                bound = (
+                    "1" if self.pilot_pattern == "comb" else "pilot_block_num_symbols"
+                )
                 raise ValueError(
                     f"pilot_period must be > {bound} for the {self.pilot_pattern!r} "
                     f"pattern, got {self.pilot_period}."
@@ -370,10 +368,12 @@ class SingleCarrierFrame:
                     "one of them."
                 )
         if self.payload_num_symbols is None:
-            length = (
-                1000 if self.payload_blocks is None else self._blocks_length(per_period)
+            num_symbols = (
+                1000
+                if self.payload_blocks is None
+                else self._blocks_num_symbols(per_period)
             )
-            object.__setattr__(self, "payload_num_symbols", length)
+            object.__setattr__(self, "payload_num_symbols", num_symbols)
         assert self.payload_num_symbols is not None
 
         if self.payload_num_symbols % per_period:
@@ -386,7 +386,7 @@ class SingleCarrierFrame:
         if self.payload_code is not None:
             self._check_codewords(per_period)
 
-    def _blocks_length(self, per_period: int) -> int:
+    def _blocks_num_symbols(self, per_period: int) -> int:
         """``payload_num_symbols`` of ``payload_blocks`` codewords: the symbols they fill,
         which must be whole symbols and whole pilot periods."""
         assert self.payload_code is not None and self.payload_blocks is not None
@@ -394,7 +394,7 @@ class SingleCarrierFrame:
         n = self.payload_code.n
         blocks = self.payload_blocks
         bits = blocks * n
-        length = bits // m
+        num_symbols = bits // m
         if bits % (m * per_period):
             unit = m * per_period  # bits of the shortest valid payload
             step = unit // math.gcd(n, unit)
@@ -405,7 +405,7 @@ class SingleCarrierFrame:
                 f"payload symbols{' and pilot periods' if per_period > 1 else ''}; "
                 f"use payload_blocks={valid}, or payload_num_symbols= with payload_pad=True."
             )
-        return int(length)
+        return int(num_symbols)
 
     def _check_codewords(self, per_period: int) -> None:
         """Whole codewords in ``payload_num_symbols``, or filler with ``payload_pad``."""
@@ -444,7 +444,7 @@ class SingleCarrierFrame:
 
     def _pilot_block(self) -> int:
         """Pilots at the start of each period: one for "comb"."""
-        return 1 if self.pilot_pattern == "comb" else self.pilot_block_len
+        return 1 if self.pilot_pattern == "comb" else self.pilot_block_num_symbols
 
     def _generate_pilot_mask(self) -> tuple[ArrayType, int]:
         """Calculate the pilot placement mask and total frame length.
@@ -456,7 +456,7 @@ class SingleCarrierFrame:
         -------
         mask : ndarray (bool)
             Boolean mask where True indicates a pilot symbol location.
-        body_length : int
+        body_num_symbols : int
             Total number of symbols in the frame body (payload + pilots).
         """
         if self.pilot_pattern == "none":
@@ -584,9 +584,9 @@ class SingleCarrierFrame:
         :attr:`pilot_symbols` when it is not zero.  ``(L,)`` or
         ``(num_streams, L)`` with ``L`` the body length.
         """
-        mask, body_length = self._generate_pilot_mask()
+        mask, body_num_symbols = self._generate_pilot_mask()
         streams = (self.num_streams,) if self.num_streams > 1 else ()
-        body = np.zeros((*streams, body_length), dtype="complex64")
+        body = np.zeros((*streams, body_num_symbols), dtype="complex64")
         if self.pilot_pattern != "none":
             pilot_symbols = self.pilot_symbols
             assert pilot_symbols is not None
@@ -609,8 +609,12 @@ class SingleCarrierFrame:
         ``to_signal(sps=sps)`` gives ``num_symbols * sps`` samples per
         stream.
         """
-        preamble_len = self.preamble.num_symbols if self.preamble else 0
-        return preamble_len + self._generate_pilot_mask()[1] + self.guard_len
+        preamble_num_symbols = self.preamble.num_symbols if self.preamble else 0
+        return (
+            preamble_num_symbols
+            + self._generate_pilot_mask()[1]
+            + self.guard_num_symbols
+        )
 
     def get_structure_map(
         self,
@@ -641,34 +645,45 @@ class SingleCarrierFrame:
         xp = np
         if unit == "samples":
             sps = require_integer_sps(sps, "get_structure_map()")
-        mask, body_length = self._generate_pilot_mask()
+        mask, body_num_symbols = self._generate_pilot_mask()
 
-        preamble_len = self.preamble.num_symbols if self.preamble else 0
+        preamble_num_symbols = self.preamble.num_symbols if self.preamble else 0
 
         if include_preamble:
-            total_len = preamble_len + body_length + self.guard_len
+            total_num_symbols = (
+                preamble_num_symbols + body_num_symbols + self.guard_num_symbols
+            )
 
-            preamble_bool = xp.zeros(total_len, dtype=bool)
-            pilot_bool = xp.zeros(total_len, dtype=bool)
-            payload_bool = xp.zeros(total_len, dtype=bool)
-            guard_bool = xp.zeros(total_len, dtype=bool)
+            preamble_bool = xp.zeros(total_num_symbols, dtype=bool)
+            pilot_bool = xp.zeros(total_num_symbols, dtype=bool)
+            payload_bool = xp.zeros(total_num_symbols, dtype=bool)
+            guard_bool = xp.zeros(total_num_symbols, dtype=bool)
 
             if self.guard_type == "cp":
-                g_slice = slice(0, self.guard_len)
-                p_slice = slice(self.guard_len, self.guard_len + preamble_len)
-                b_slice = slice(self.guard_len + preamble_len, total_len)
+                g_slice = slice(0, self.guard_num_symbols)
+                p_slice = slice(
+                    self.guard_num_symbols,
+                    self.guard_num_symbols + preamble_num_symbols,
+                )
+                b_slice = slice(
+                    self.guard_num_symbols + preamble_num_symbols, total_num_symbols
+                )
             else:
-                p_slice = slice(0, preamble_len)
-                b_slice = slice(preamble_len, preamble_len + body_length)
-                g_slice = slice(preamble_len + body_length, total_len)
+                p_slice = slice(0, preamble_num_symbols)
+                b_slice = slice(
+                    preamble_num_symbols, preamble_num_symbols + body_num_symbols
+                )
+                g_slice = slice(
+                    preamble_num_symbols + body_num_symbols, total_num_symbols
+                )
 
-            if preamble_len > 0:
+            if preamble_num_symbols > 0:
                 preamble_bool[p_slice] = True
 
             pilot_bool[b_slice] = mask
             payload_bool[b_slice] = ~mask
 
-            if self.guard_len > 0:
+            if self.guard_num_symbols > 0:
                 guard_bool[g_slice] = True
 
             res = {
@@ -682,7 +697,7 @@ class SingleCarrierFrame:
             # If CP, guard is at the start and is typically removed with preamble.
             # If ZERO, guard is at the end and remains part of the signal.
             if self.guard_type == "cp":
-                total_len = body_length
+                total_num_symbols = body_num_symbols
                 pilot_bool = mask
                 payload_bool = ~mask
                 res = {
@@ -690,13 +705,13 @@ class SingleCarrierFrame:
                     "payload": payload_bool,
                 }
             else:
-                total_len = body_length + self.guard_len
-                pilot_bool = xp.zeros(total_len, dtype=bool)
-                payload_bool = xp.zeros(total_len, dtype=bool)
-                guard_bool = xp.zeros(total_len, dtype=bool)
+                total_num_symbols = body_num_symbols + self.guard_num_symbols
+                pilot_bool = xp.zeros(total_num_symbols, dtype=bool)
+                payload_bool = xp.zeros(total_num_symbols, dtype=bool)
+                guard_bool = xp.zeros(total_num_symbols, dtype=bool)
 
-                b_slice = slice(0, body_length)
-                g_slice = slice(body_length, total_len)
+                b_slice = slice(0, body_num_symbols)
+                g_slice = slice(body_num_symbols, total_num_symbols)
 
                 pilot_bool[b_slice] = mask
                 payload_bool[b_slice] = ~mask
@@ -814,19 +829,19 @@ class SingleCarrierFrame:
             samples = body_samples
 
         # 3. Apply Guard Interval at sample level
-        if self.guard_len > 0:
-            guard_len_samples = int(self.guard_len * sps)
+        if self.guard_num_symbols > 0:
+            guard_num_samples = int(self.guard_num_symbols * sps)
             if self.guard_type == "zero":
                 zeros: ArrayType
                 if self.num_streams > 1:
                     zeros = xp.zeros(
-                        (self.num_streams, guard_len_samples), dtype="complex64"
+                        (self.num_streams, guard_num_samples), dtype="complex64"
                     )
                 else:
-                    zeros = xp.zeros(guard_len_samples, dtype="complex64")
+                    zeros = xp.zeros(guard_num_samples, dtype="complex64")
                 samples = xp.concatenate([samples, zeros], axis=-1)
             elif self.guard_type == "cp":
-                cp_slice = samples[..., -guard_len_samples:]
+                cp_slice = samples[..., -guard_num_samples:]
                 samples = xp.concatenate([cp_slice, samples], axis=-1)
 
         # 4. Normalize assembled frame to unit average power.
@@ -882,13 +897,15 @@ class SingleCarrierFrame:
                 preamble = xp.tile(preamble, (self.num_streams, 1))
             stream = xp.concatenate([preamble, stream], axis=-1)
 
-        if self.guard_len > 0:
+        if self.guard_num_symbols > 0:
             if self.guard_type == "zero":
-                zeros = xp.zeros((*stream.shape[:-1], self.guard_len), stream.dtype)
+                zeros = xp.zeros(
+                    (*stream.shape[:-1], self.guard_num_symbols), stream.dtype
+                )
                 stream = xp.concatenate([stream, zeros], axis=-1)
             elif self.guard_type == "cp":
                 stream = xp.concatenate(
-                    [stream[..., -self.guard_len :], stream], axis=-1
+                    [stream[..., -self.guard_num_symbols :], stream], axis=-1
                 )
 
         stream = stream.astype("complex64", copy=False)

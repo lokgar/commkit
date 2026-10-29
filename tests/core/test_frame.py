@@ -46,7 +46,7 @@ class TestSingleCarrierFrameBasics:
             payload_num_symbols=10,
             pilot_pattern="block",
             pilot_period=4,
-            pilot_block_len=2,
+            pilot_block_num_symbols=2,
         )
         mask, length = frame._generate_pilot_mask()
         assert length == 20
@@ -58,18 +58,18 @@ class TestSingleCarrierFrameBasics:
     def test_sc_frame_guard_zero(self, xp: Any, xpt: Any) -> None:
         """Verify zero-insertion guard interval (GI) padding."""
         frame = SingleCarrierFrame(
-            payload_num_symbols=100, guard_type="zero", guard_len=20
+            payload_num_symbols=100, guard_type="zero", guard_num_symbols=20
         )
         sig = frame.to_signal(sps=1)
         assert len(sig.samples) == 120
         xpt.assert_array_equal(sig.samples[-20:], 0)
-        assert sig.frame.guard_len == 20
+        assert sig.frame.guard_num_symbols == 20
         assert sig.frame.guard_type == "zero"
 
     def test_sc_frame_guard_cp(self, xp: Any, xpt: Any) -> None:
         """Verify cyclic prefix (CP) guard interval generation."""
         frame = SingleCarrierFrame(
-            payload_num_symbols=100, guard_type="cp", guard_len=20
+            payload_num_symbols=100, guard_type="cp", guard_num_symbols=20
         )
         sig = frame.to_signal(sps=1)
         assert len(sig.samples) == 120
@@ -78,12 +78,12 @@ class TestSingleCarrierFrameBasics:
 
     def test_sc_frame_preamble(self, xp: Any, xpt: Any) -> None:
         """Verify that auto-generated preambles are prepended to the frame."""
-        preamble = Preamble(sequence_type="barker", length=13)
+        preamble = Preamble(sequence_type="barker", num_symbols=13)
         frame = SingleCarrierFrame(payload_num_symbols=100, preamble=preamble)
         sig = frame.to_signal(sps=1)
         assert len(sig.samples) == 113
         xpt.assert_allclose(sig.samples[:13], preamble.symbols)
-        assert sig.frame.preamble.length == 13
+        assert sig.frame.preamble.num_symbols == 13
 
     def test_sc_frame_bit_first(self, xp: Any) -> None:
         """Verify Frame preserves source bits (bit-first architecture)."""
@@ -97,7 +97,7 @@ class TestSingleCarrierFrameBasics:
 
     def test_preamble_to_signal(self, xp: Any) -> None:
         """Verify Preamble.to_signal() standalone signal generation."""
-        preamble = Preamble(sequence_type="barker", length=13)
+        preamble = Preamble(sequence_type="barker", num_symbols=13)
         sig = preamble.to_signal(sps=4, symbol_rate=1e6, pulse=RRC(0.35))
 
         assert len(sig.samples) == 13 * 4
@@ -108,7 +108,7 @@ class TestSingleCarrierFrameBasics:
         """A one-stream Barker preamble starts every stream of a MIMO frame."""
         frame = SingleCarrierFrame(
             payload_num_symbols=40,
-            preamble=Preamble(sequence_type="barker", length=13),
+            preamble=Preamble(sequence_type="barker", num_symbols=13),
             num_streams=2,
         )
         x = frame.to_signal(sps=1, symbol_rate=1e6).samples
@@ -117,7 +117,7 @@ class TestSingleCarrierFrameBasics:
 
     def test_independent_preamble_normalization(self, xp: Any) -> None:
         """Verify frame normalization contract for independent section scaling."""
-        preamble = Preamble(sequence_type="barker", length=13)
+        preamble = Preamble(sequence_type="barker", num_symbols=13)
         frame = SingleCarrierFrame(
             payload_num_symbols=100, preamble=preamble, pilot_pattern="none"
         )
@@ -145,21 +145,21 @@ class TestSingleCarrierFrameStructureMap:
 
     def test_sc_frame_structure_map(self, xp: Any) -> None:
         """Verify get_structure_map identifies preamble, body, pilot, and guard boundaries."""
-        preamble = Preamble(sequence_type="barker", length=2)
+        preamble = Preamble(sequence_type="barker", num_symbols=2)
         frame = SingleCarrierFrame(
             payload_num_symbols=6,
             preamble=preamble,
             pilot_pattern="comb",
             pilot_period=2,
             guard_type="zero",
-            guard_len=5,
+            guard_num_symbols=5,
         )
 
         struct = frame.get_structure_map(unit="symbols", include_preamble=True)
-        _, body_len = frame._generate_pilot_mask()
-        total_len = 2 + body_len + 5
+        _, body_num_symbols = frame._generate_pilot_mask()
+        total_num_symbols = 2 + body_num_symbols + 5
 
-        assert len(struct["preamble"]) == total_len
+        assert len(struct["preamble"]) == total_num_symbols
         assert xp.sum(struct["preamble"]) == 2
         assert xp.sum(struct["pilots"]) > 0
         assert xp.sum(struct["payload"]) == 6
@@ -169,12 +169,14 @@ class TestSingleCarrierFrameStructureMap:
         struct_s = frame.get_structure_map(
             unit="samples", sps=sps, include_preamble=True
         )
-        assert len(struct_s["preamble"]) == total_len * sps
+        assert len(struct_s["preamble"]) == total_num_symbols * sps
         assert xp.sum(struct_s["preamble"]) == 2 * sps
 
     def test_sc_frame_structure_map_cp(self, xp: Any) -> None:
         """Verify get_structure_map with Cyclic Prefix (CP) guard interval."""
-        frame = SingleCarrierFrame(payload_num_symbols=10, guard_type="cp", guard_len=5)
+        frame = SingleCarrierFrame(
+            payload_num_symbols=10, guard_type="cp", guard_num_symbols=5
+        )
         struct = frame.get_structure_map(unit="symbols", include_preamble=True)
         assert struct["guard"][0]
         assert struct["guard"][4]
@@ -193,7 +195,7 @@ class TestSingleCarrierFrameStructureMap:
 
     def test_structure_map_include_preamble(self, xp: Any) -> None:
         """Verify explicit include_preamble=True in structure map."""
-        preamble = Preamble(sequence_type="barker", length=13)
+        preamble = Preamble(sequence_type="barker", num_symbols=13)
         frame = SingleCarrierFrame(payload_num_symbols=100, preamble=preamble)
         struct = frame.get_structure_map(include_preamble=True)
 
@@ -205,7 +207,7 @@ class TestSingleCarrierFrameStructureMap:
     def test_structure_map_no_preamble_with_zero_guard(self, xp: Any) -> None:
         """Verify behavior with zero guard when preamble is excluded."""
         frame = SingleCarrierFrame(
-            payload_num_symbols=100, guard_type="zero", guard_len=20
+            payload_num_symbols=100, guard_type="zero", guard_num_symbols=20
         )
         struct = frame.get_structure_map(include_preamble=False)
 
@@ -218,7 +220,7 @@ class TestSingleCarrierFrameStructureMap:
     def test_structure_map_no_preamble_with_cp_guard(self, xp: Any) -> None:
         """Verify behavior with CP guard when preamble is excluded."""
         frame = SingleCarrierFrame(
-            payload_num_symbols=100, guard_type="cp", guard_len=20
+            payload_num_symbols=100, guard_type="cp", guard_num_symbols=20
         )
         struct = frame.get_structure_map(include_preamble=False)
 
@@ -259,18 +261,20 @@ class TestSingleCarrierFramePilots:
             )
 
     def test_block_pilot_period_le_block_len_error(self, xp: Any) -> None:
-        """block pilot_period <= pilot_block_len raises ValueError on construction."""
-        with pytest.raises(ValueError, match="pilot_period must be > pilot_block_len"):
+        """block pilot_period <= pilot_block_num_symbols raises ValueError on construction."""
+        with pytest.raises(
+            ValueError, match="pilot_period must be > pilot_block_num_symbols"
+        ):
             SingleCarrierFrame(
                 payload_num_symbols=10,
                 pilot_pattern="block",
                 pilot_period=3,
-                pilot_block_len=3,
+                pilot_block_num_symbols=3,
             )
 
     def test_block_without_pilot_block_len_error(self, xp: Any) -> None:
         """The block pattern needs at least one pilot per period."""
-        with pytest.raises(ValueError, match="pilot_block_len must be >= 1"):
+        with pytest.raises(ValueError, match="pilot_block_num_symbols must be >= 1"):
             SingleCarrierFrame(
                 payload_num_symbols=12, pilot_pattern="block", pilot_period=4
             )
@@ -284,7 +288,7 @@ class TestSingleCarrierFramePilots:
             payload_num_symbols=12,
             pilot_pattern="block",
             pilot_period=4,
-            pilot_block_len=1,
+            pilot_block_num_symbols=1,
         )
         mask, length = comb._generate_pilot_mask()
         assert length == 16
@@ -361,7 +365,7 @@ class TestSingleCarrierFramePilots:
             payload_num_symbols=20,
             pilot_pattern="block",
             pilot_period=4,
-            pilot_block_len=2,
+            pilot_block_num_symbols=2,
         )
         syms = frame.pilot_symbols
         assert syms is not None
@@ -389,13 +393,13 @@ class TestSingleCarrierFrameDivisibility:
                 payload_num_symbols=9,
                 pilot_pattern="block",
                 pilot_period=4,
-                pilot_block_len=2,
+                pilot_block_num_symbols=2,
             )
         frame = SingleCarrierFrame(
             payload_num_symbols=10,
             pilot_pattern="block",
             pilot_period=4,
-            pilot_block_len=2,
+            pilot_block_num_symbols=2,
         )
         mask, length = frame._generate_pilot_mask()
         assert length == 20
@@ -420,7 +424,7 @@ class TestSingleCarrierFrameDivisibility:
             payload_num_symbols=10,
             pilot_pattern="block",
             pilot_period=4,
-            pilot_block_len=2,
+            pilot_block_num_symbols=2,
         )
         assert frame.payload_num_symbols == 10
 
@@ -473,13 +477,13 @@ class TestExtractPayload:
             payload_num_symbols=90,
             payload_constellation=Constellation.qam(16),
             preamble=Preamble(
-                sequence_type="barker", length=13, num_streams=num_streams
+                sequence_type="barker", num_symbols=13, num_streams=num_streams
             ),
             pilot_pattern="comb",
             pilot_period=10,
             pilot_gain_db=3.0,
             guard_type=guard_type,
-            guard_len=7,
+            guard_num_symbols=7,
             num_streams=num_streams,
         )
 
@@ -633,12 +637,12 @@ class TestExtractPayload:
     def test_num_symbols_is_the_frame_length(self):
         for kwargs in (
             {},
-            {"guard_type": "cp", "guard_len": 16},
+            {"guard_type": "cp", "guard_num_symbols": 16},
             {"pilot_pattern": "comb", "pilot_period": 4, "payload_num_symbols": 300},
         ):
             frame = SingleCarrierFrame(
-                preamble=Preamble(sequence_type="zc", length=31),
-                **{"guard_len": 8, **kwargs},
+                preamble=Preamble(sequence_type="zc", num_symbols=31),
+                **{"guard_num_symbols": 8, **kwargs},
             )
             sig = frame.to_signal(sps=2, symbol_rate=1e6)
             assert sig.samples.shape[-1] == 2 * frame.num_symbols
@@ -664,11 +668,16 @@ class TestExtractPayload:
 
 _PERIODIC_FRAMES = [
     dict(),
-    dict(preamble=Preamble(length=13), guard_type="zero", guard_len=8),
-    dict(preamble=Preamble(length=13), guard_type="cp", guard_len=8),
-    dict(preamble=Preamble(length=13), num_streams=2, guard_type="zero", guard_len=8),
+    dict(preamble=Preamble(num_symbols=13), guard_type="zero", guard_num_symbols=8),
+    dict(preamble=Preamble(num_symbols=13), guard_type="cp", guard_num_symbols=8),
     dict(
-        preamble=Preamble(sequence_type="zc", length=31, num_streams=2),
+        preamble=Preamble(num_symbols=13),
+        num_streams=2,
+        guard_type="zero",
+        guard_num_symbols=8,
+    ),
+    dict(
+        preamble=Preamble(sequence_type="zc", num_symbols=31, num_streams=2),
         num_streams=2,
         pilot_pattern="comb",
         pilot_period=8,
@@ -696,7 +705,7 @@ class TestPeriodicFrame:
         up to one gain per section; the linear frame breaks at the wrap."""
         pulse = RRC(0.1, span=32)
         frame = SingleCarrierFrame(payload_num_symbols=196, **kw)
-        pre = 0 if frame.preamble is None else frame.preamble.length
+        pre = 0 if frame.preamble is None else frame.preamble.num_symbols
         sections = [frame.body_symbols]
         if pre:
             sections.insert(0, frame.preamble.symbols)
@@ -715,7 +724,7 @@ class TestPeriodicFrame:
         assert errors[False].max() > 0.1
 
     def test_preamble_forwards_periodic(self, xpt: Any) -> None:
-        preamble = Preamble(sequence_type="zc", length=31)
+        preamble = Preamble(sequence_type="zc", num_symbols=31)
         sig = preamble.to_signal(sps=4, symbol_rate=1e6, pulse=RRC(0.1), periodic=True)
         xpt.assert_allclose(
             sig.samples,
@@ -730,11 +739,11 @@ class TestFrameDevice:
         frame = SingleCarrierFrame(
             payload_num_symbols=196,
             num_streams=2,
-            preamble=Preamble(sequence_type="zc", length=31),
+            preamble=Preamble(sequence_type="zc", num_symbols=31),
             pilot_pattern="comb",
             pilot_period=8,
             guard_type="cp",
-            guard_len=16,
+            guard_num_symbols=16,
         )
         ref = frame.to_signal(sps=2, pulse=RRC(0.2))
         sig = frame.to_signal(sps=2, pulse=RRC(0.2), device=backend_device)
@@ -743,7 +752,7 @@ class TestFrameDevice:
         np.testing.assert_allclose(to_numpy(sig.samples), ref.samples, atol=1e-5)
 
     def test_preamble_device(self, backend_device: str, xp: Any) -> None:
-        sig = Preamble(sequence_type="barker", length=13).to_signal(
+        sig = Preamble(sequence_type="barker", num_symbols=13).to_signal(
             sps=4, symbol_rate=1e6, device=backend_device
         )
         assert isinstance(sig.samples, xp.ndarray)

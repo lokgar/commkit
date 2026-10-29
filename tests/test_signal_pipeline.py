@@ -142,7 +142,7 @@ class TestPipelineComposition:
         frame = SingleCarrierFrame(
             payload_num_symbols=60,
             payload_constellation=Constellation.qam(16),
-            preamble=Preamble(sequence_type="barker", length=13),
+            preamble=Preamble(sequence_type="barker", num_symbols=13),
             pilot_pattern="comb",
             pilot_period=4,
         )
@@ -332,7 +332,7 @@ class TestPipelineSPSValidation:
                     Constellation.qam(4), 16, symbol_rate=1e6, sps=sps, pulse=RRC(0.35)
                 )
             elif factory == "preamble":
-                Preamble(sequence_type="barker", length=7).to_signal(
+                Preamble(sequence_type="barker", num_symbols=7).to_signal(
                     sps=sps, symbol_rate=1e6, pulse=RRC(0.35)
                 )
             else:

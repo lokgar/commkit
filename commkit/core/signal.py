@@ -313,7 +313,7 @@ class Signal:
             rows.append(("--- Frame structure", ""))
             if frame.preamble is not None:
                 p = frame.preamble
-                preamble_str = f"{p.sequence_type.upper()}  len={p.length}"
+                preamble_str = f"{p.sequence_type.upper()}  len={p.num_symbols}"
                 if p.sequence_type == "zc":
                     preamble_str += f"  root={p.root}"
                 rows.append(("Preamble", preamble_str))
@@ -340,8 +340,10 @@ class Signal:
                 rows.append(("Pilots", pilot_str))
             else:
                 rows.append(("Pilots", "none"))
-            if frame.guard_len:
-                rows.append(("Guard", f"{frame.guard_type}  len={frame.guard_len}"))
+            if frame.guard_num_symbols:
+                rows.append(
+                    ("Guard", f"{frame.guard_type}  len={frame.guard_num_symbols}")
+                )
             else:
                 rows.append(("Guard", "none"))
 

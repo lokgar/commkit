@@ -71,7 +71,7 @@ class TestMIMOFrameIntegration:
             payload_num_symbols=100,
             num_streams=2,
             guard_type="zero",
-            guard_len=10,
+            guard_num_symbols=10,
         )
 
         sig = frame.to_signal(sps=1)
@@ -96,7 +96,7 @@ class TestMIMOFrameIntegration:
 
     def test_frame_mimo_preamble_broadcasting(self, xp: Any, xpt: Any) -> None:
         """Verify that a multi-stream Barker preamble tiles across all MIMO streams."""
-        preamble = Preamble(sequence_type="barker", length=13, num_streams=2)
+        preamble = Preamble(sequence_type="barker", num_symbols=13, num_streams=2)
         frame = SingleCarrierFrame(
             payload_num_symbols=20, num_streams=2, preamble=preamble
         )

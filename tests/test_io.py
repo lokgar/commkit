@@ -47,7 +47,7 @@ def _mimo_signal() -> Signal:
 def _frame_signal() -> Signal:
     return make_test_frame_signal(
         payload_num_symbols=203,
-        preamble_len=13,
+        preamble_num_symbols=13,
         sps=4,
         symbol_rate=1e9,
         payload_mod_order=16,
@@ -190,7 +190,7 @@ class TestNPZSaveLoadFrame:
         """Zadoff-Chu preamble root and length kwargs round-trip."""
         frame = SingleCarrierFrame(
             payload_num_symbols=100,
-            preamble=Preamble(sequence_type="zc", length=31, root=7),
+            preamble=Preamble(sequence_type="zc", num_symbols=31, root=7),
         )
         sig = frame.to_signal(sps=4, symbol_rate=1e9, pulse=RRC(0.35))
         assert sig.frame.preamble.root == 7

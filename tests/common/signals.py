@@ -209,7 +209,7 @@ def make_test_mimo_signal(
 
 def make_test_frame_signal(
     payload_num_symbols: int = 203,
-    preamble_len: int = 13,
+    preamble_num_symbols: int = 13,
     sps: int = 4,
     symbol_rate: float = 1e9,
     payload_mod_order: int = 16,
@@ -220,12 +220,12 @@ def make_test_frame_signal(
     frame = SingleCarrierFrame(
         payload_num_symbols=payload_num_symbols,
         payload_constellation=Constellation.qam(payload_mod_order),
-        preamble=Preamble(sequence_type="barker", length=preamble_len),
+        preamble=Preamble(sequence_type="barker", num_symbols=preamble_num_symbols),
         pilot_pattern="comb",
         pilot_period=8,
         pilot_constellation=Constellation.psk(4),
         guard_type="zero",
-        guard_len=4,
+        guard_num_symbols=4,
     )
     sig = frame.to_signal(sps=sps, symbol_rate=symbol_rate, pulse=RRC(0.35))
     if xp is not None:

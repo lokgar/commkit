@@ -34,7 +34,7 @@ def _frame_signal():
         payload_num_symbols=32_798,
         payload_constellation=Constellation.qam(16),
         payload_seed=42,
-        preamble=Preamble(sequence_type="barker", length=13),
+        preamble=Preamble(sequence_type="barker", num_symbols=13),
         pilot_pattern="comb",
         pilot_period=32,
     )
