@@ -100,6 +100,12 @@ class _Value:
             self.__dict__["_hash"] = h
         return h
 
+    def __getstate__(self) -> dict[str, Any]:
+        # Not the cached hash: hashes of bytes differ between processes.
+        state = self.__dict__.copy()
+        state.pop("_hash", None)
+        return state
+
 
 class _Code(_Value):
     """Base of the code value objects: ``rate`` and value semantics.

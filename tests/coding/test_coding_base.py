@@ -1,5 +1,9 @@
 """Tests for the encode/decode verbs and DecodeResult (coding/base.py)."""
 
+import os
+import pickle
+import subprocess
+import sys
 import warnings
 from typing import Any
 
@@ -114,6 +118,29 @@ class TestCodeValue:
     def test_arrays_are_read_only(self) -> None:
         with pytest.raises(ValueError):
             H74.generator[0, 0] = 1
+
+    def test_pickle_leaves_the_hash_behind(self) -> None:
+        """A hash of bytes is valid in its own process only."""
+        code = LinearBlockCode.hamming(4)
+        hash(code)
+        copy = pickle.loads(pickle.dumps(code))
+        assert "_hash" not in copy.__dict__
+        assert copy == code and hash(copy) == hash(code)
+
+    def test_pickled_code_hashes_like_a_new_one_in_another_process(self) -> None:
+        script = (
+            "import pickle, sys; from commkit.coding import LinearBlockCode; "
+            "c = pickle.loads(sys.stdin.buffer.read()); "
+            "print(hash(c) == hash(LinearBlockCode.hamming(4)))"
+        )
+        code = LinearBlockCode.hamming(4)
+        hash(code)
+        env = {**os.environ, "PYTHONHASHSEED": "12345"}
+        out = subprocess.run(
+            [sys.executable, "-c", script], input=pickle.dumps(code),
+            capture_output=True, env=env, check=True,
+        )  # fmt: skip
+        assert out.stdout.strip() == b"True"
 
     def test_equal_codes_share_device_tables(self, xp: Any) -> None:
         a = LinearBlockCode.hamming(5)

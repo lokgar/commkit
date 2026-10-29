@@ -39,6 +39,7 @@ Paired A/B of alternating processes against the previous commit of each change:
 - **`zf_equalizer` with a float64 channel estimate returned complex128** for complex64 samples; it now computes in the samples' precision.
 - **`correct_timing(mode="zero")`** repeated each channel's first sample for a negative per-channel offset instead of zero-filling, and returned zeros for a scalar offset of 0.
 - **`mi` and `ols_fir_filter` / `zf_equalizer` bound their working memory.** `mi`'s intermediates reached GiBs for many channels of high-order QAM (1 GiB of differences for two channels of 1024-QAM); they are now capped at 2^24 elements. Overlap-save transformed the whole record at once, against its docstring, about 8 times the input; it now runs in batches of blocks (3.5 times the input on long records; about 5% slower on the CPU for 2^25 samples).
+- **A code object unpickled in another process missed its cached device tables**: it carried the hash of the first process (hashes of bytes differ between processes), so it compared equal to the same code but hashed differently. The cached hash is no longer pickled.
 - `load_npz` closes its archive; `ber`, `fer` and `ser` transfer their error counts once.
 
 ### Development
