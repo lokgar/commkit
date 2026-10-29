@@ -208,7 +208,7 @@ def make_test_mimo_signal(
 
 
 def make_test_frame_signal(
-    payload_len: int = 203,
+    payload_num_symbols: int = 203,
     preamble_len: int = 13,
     sps: int = 4,
     symbol_rate: float = 1e9,
@@ -218,7 +218,7 @@ def make_test_frame_signal(
 ) -> Signal:
     """Generate a SingleCarrierFrame converted to a Signal."""
     frame = SingleCarrierFrame(
-        payload_len=payload_len,
+        payload_num_symbols=payload_num_symbols,
         payload_constellation=Constellation.qam(payload_mod_order),
         preamble=Preamble(sequence_type="barker", length=preamble_len),
         pilot_pattern="comb",

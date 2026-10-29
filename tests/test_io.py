@@ -46,7 +46,11 @@ def _mimo_signal() -> Signal:
 
 def _frame_signal() -> Signal:
     return make_test_frame_signal(
-        payload_len=203, preamble_len=13, sps=4, symbol_rate=1e9, payload_mod_order=16
+        payload_num_symbols=203,
+        preamble_len=13,
+        sps=4,
+        symbol_rate=1e9,
+        payload_mod_order=16,
     )
 
 
@@ -179,13 +183,13 @@ class TestNPZSaveLoadFrame:
         sig2 = load_npz(p)
 
         assert sig2.frame is not None
-        assert sig2.frame.payload_len == sig.frame.payload_len
+        assert sig2.frame.payload_num_symbols == sig.frame.payload_num_symbols
         assert sig2.frame == sig.frame
 
     def test_roundtrip_zc_preamble_kwargs(self, tmp_path: Any) -> None:
         """Zadoff-Chu preamble root and length kwargs round-trip."""
         frame = SingleCarrierFrame(
-            payload_len=100,
+            payload_num_symbols=100,
             preamble=Preamble(sequence_type="zc", length=31, root=7),
         )
         sig = frame.to_signal(sps=4, symbol_rate=1e9, pulse=RRC(0.35))
@@ -386,7 +390,8 @@ class TestNPZCodedReference:
 
     def test_shaped_frame_keeps_the_matcher_input(self, tmp_path: Any) -> None:
         frame = SingleCarrierFrame(
-            payload_len=400, payload_constellation=Constellation.qam(16).shaped(nu=0.1)
+            payload_num_symbols=400,
+            payload_constellation=Constellation.qam(16).shaped(nu=0.1),
         )
         save_npz(frame.to_signal(sps=1, symbol_rate=1e9), tmp_path / "shaped")
         loaded = load_npz(tmp_path / "shaped.npz").frame
@@ -395,14 +400,14 @@ class TestNPZCodedReference:
             loaded._payload_reference().code_block
             == frame._payload_reference().code_block
         )
-        plain = SingleCarrierFrame(payload_len=40)
+        plain = SingleCarrierFrame(payload_num_symbols=40)
         save_npz(plain.to_signal(sps=1, symbol_rate=1e9), tmp_path / "plain_frame")
         back = load_npz(tmp_path / "plain_frame.npz").frame
         assert back.payload_info_bits is back.payload_bits
 
     def test_frame_with_payload_code_raises(self, tmp_path: Any) -> None:
         frame = SingleCarrierFrame(
-            payload_len=14, payload_code=LinearBlockCode.hamming(3)
+            payload_num_symbols=14, payload_code=LinearBlockCode.hamming(3)
         )
         with pytest.raises(ValueError, match="payload_code"):
             save_npz(frame.to_signal(sps=1, symbol_rate=1e9), tmp_path / "f")
@@ -410,7 +415,7 @@ class TestNPZCodedReference:
 
 def test_frame_constellations_roundtrip(tmp_path: Any) -> None:
     frame = SingleCarrierFrame(
-        payload_len=21,
+        payload_num_symbols=21,
         payload_constellation=mapping.Constellation.qam(64).shaped(nu=0.05),
         pilot_pattern="comb",
         pilot_period=4,

@@ -140,7 +140,7 @@ class TestPipelineComposition:
     def test_frame_relationship_survives_pipeline(self, xp: Any) -> None:
         """Frame-backed Signals keep frame data and populated private caches attached."""
         frame = SingleCarrierFrame(
-            payload_len=60,
+            payload_num_symbols=60,
             payload_constellation=Constellation.qam(16),
             preamble=Preamble(sequence_type="barker", length=13),
             pilot_pattern="comb",
@@ -287,7 +287,7 @@ class TestPipelineSPSValidation:
 
     def test_frame_sample_map_rejects_fractional_sps(self, backend_device: str) -> None:
         """A sample-domain frame mask requires an integral repeat count."""
-        frame = SingleCarrierFrame(payload_len=16)
+        frame = SingleCarrierFrame(payload_num_symbols=16)
         with pytest.raises(ValueError, match=r"sps.*positive integer"):
             frame.get_structure_map(unit="samples", sps=1.5)
 
@@ -336,4 +336,6 @@ class TestPipelineSPSValidation:
                     sps=sps, symbol_rate=1e6, pulse=RRC(0.35)
                 )
             else:
-                SingleCarrierFrame(payload_len=16).to_signal(sps=sps, pulse=RRC(0.35))
+                SingleCarrierFrame(payload_num_symbols=16).to_signal(
+                    sps=sps, pulse=RRC(0.35)
+                )

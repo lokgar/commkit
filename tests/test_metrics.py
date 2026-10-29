@@ -517,7 +517,9 @@ class TestSignalMetricsIntegration:
         """A frame Signal mixes segments: extract the payload first."""
         from commkit.core import SingleCarrierFrame
 
-        sig = SingleCarrierFrame(payload_len=100).to_signal(sps=1, symbol_rate=1e6)
+        sig = SingleCarrierFrame(payload_num_symbols=100).to_signal(
+            sps=1, symbol_rate=1e6
+        )
         with pytest.raises(ValueError, match="extract_payload"):
             metrics.ser(sig)
 

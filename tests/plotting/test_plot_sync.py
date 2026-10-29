@@ -45,7 +45,7 @@ class TestPlotTimingSync:
 
     def _estimate(self, xp: Any, channels: int = 1):
         frame = SingleCarrierFrame(
-            payload_len=200,
+            payload_num_symbols=200,
             preamble=Preamble(sequence_type="barker", length=13, num_streams=channels),
             num_streams=channels,
         )

@@ -837,7 +837,8 @@ class TestTimingEstimateFlow:
     def test_template_defaults_to_frame_preamble(self, xp):
         """A frame Signal supplies its own preamble (shaped with its pulse)."""
         frame = SingleCarrierFrame(
-            payload_len=124, preamble=Preamble(sequence_type="barker", length=13)
+            payload_num_symbols=124,
+            preamble=Preamble(sequence_type="barker", length=13),
         )
         sig = frame.to_signal(sps=2, symbol_rate=1e6, pulse=RRC(0.35)).to(device_of(xp))
         delayed = sig.replace(samples=xp.roll(sig.samples, 25))

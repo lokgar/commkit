@@ -397,7 +397,9 @@ class TestSignalCloningAndProvenance:
         """A frame mixes segments: demapping it raises instead of skipping."""
         from commkit.core import SingleCarrierFrame
 
-        sig = SingleCarrierFrame(payload_len=16).to_signal(sps=1, symbol_rate=1.0)
+        sig = SingleCarrierFrame(payload_num_symbols=16).to_signal(
+            sps=1, symbol_rate=1.0
+        )
         with pytest.raises(ValueError, match="extract_payload"):
             mapping.demap_symbols_hard(sig)
 

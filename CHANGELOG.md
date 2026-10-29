@@ -7,6 +7,7 @@ Notable changes to CommKit, newest first. Performance figures are from the refer
 ### Changes that may need code updates
 
 - **The `gpu` extra requires CuPy 14.2** (`cupy-cuda13x>=14.2`), the first release with sparse arrays (`cupyx.scipy.sparse.csr_array`), which the LDPC encoder now uses on the GPU.
+- **`SingleCarrierFrame(payload_len=)` is now `payload_num_symbols`**, the name `generate`, `Preamble` and `SingleCarrierFrame.num_symbols` use for a length in symbols; rename the argument (and `frame.payload_len` reads).
 - **`encode` rejects bits other than 0 and 1** with `ValueError`. Before, linear codes silently encoded another payload (`[2, 0, 0, 0]` gave the all-zero codeword), a value of 256 wrapped to 0, and the turbo encoder indexed its trellis with the value.
 - **`TurboCode` and `LDPCCode` reject non-integer parameters** with `TypeError` (`TurboCode(40.0)` was accepted; float LDPC indices were truncated into a different code).
 - **`fir_filter` and `ols_fir_filter` raise for complex taps on real samples.** The imaginary part was dropped (the taps `[1j]` gave zeros). Pass complex samples for a complex output.
@@ -19,8 +20,8 @@ Notable changes to CommKit, newest first. Performance figures are from the refer
 - **`generate(..., code=, num_blocks=)` sizes a coded record in code blocks** (codewords of a FEC code) instead of symbols, so `generate(QPSK, symbol_rate=..., code=code, num_blocks=100)` replaces `num_codewords * code.n // bits_per_symbol`. Give either `num_symbols` or `num_blocks`.
 - **`pad=True` fits a coded record to any length**, such as an arbitrary waveform generator's record: `generate(..., num_symbols=N, code=code, pad=True)` carries as many whole codewords as fit, then random uncoded filler bits; `SingleCarrierFrame(payload_pad=True)` does the same for a frame's payload. Not with a distribution matcher, whose composition the filler would change.
 - `Reference.num_blocks`, the whole code blocks per channel: decode them with `decode(llrs[..., : ref.num_blocks * code.n], code=code)`.
-- **`SingleCarrierFrame(payload_blocks=)` sizes a coded payload in codewords** instead of `payload_len` (which it then sets); the codewords must fill whole symbols and pilot periods, and the error names the nearest valid counts. `payload_code` takes distribution matchers and PAS too, with the shaped payload constellation they match onto.
-- `SingleCarrierFrame.num_symbols`, the frame length in symbols (preamble, body, guard): `to_signal` gives `num_symbols * sps` samples per stream. A `payload_len` that does not fill whole codewords now names the nearest valid lengths, pilot periods included.
+- **`SingleCarrierFrame(payload_blocks=)` sizes a coded payload in codewords** instead of `payload_num_symbols` (which it then sets); the codewords must fill whole symbols and pilot periods, and the error names the nearest valid counts. `payload_code` takes distribution matchers and PAS too, with the shaped payload constellation they match onto.
+- `SingleCarrierFrame.num_symbols`, the frame length in symbols (preamble, body, guard): `to_signal` gives `num_symbols * sps` samples per stream. A `payload_num_symbols` that does not fill whole codewords now names the nearest valid lengths, pilot periods included.
 - The Signal summary (`print(sig)`) shows the code block, the blocks per channel with any filler, and the information rate of a coded reference, and a frame's payload code.
 - `generate`'s docstring explains coded payloads (blocks, sizing, decoding) and that a shaped constellation without a code goes through one CCDM block of the whole record, the ideal-matcher limit, with how to model a transmitter's shorter matcher.
 
