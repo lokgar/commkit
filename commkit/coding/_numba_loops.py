@@ -469,16 +469,37 @@ def viterbi(llrs, nxt, outputs, tail_biting, info_steps, out_bits):  # type: ign
 
 
 @numba.njit(cache=True, nogil=True)
-def bcjr(llr, apriori, nxt, outputs, tail, forced, start, end, exact, app_u, app_c):  # type: ignore[no-untyped-def]
-    """BCJR over one block: a-posteriori LLRs of the inputs and the outputs."""
+def bcjr(
+    llr,
+    apriori,
+    nxt,
+    outputs,
+    tail,
+    forced,
+    start,
+    end,
+    exact,
+    app_u,
+    app_c,
+    alpha,
+    beta,
+    gamma,
+):  # type: ignore[no-untyped-def]
+    """BCJR over one block: a-posteriori LLRs of the inputs and the outputs.
+
+    ``app_c`` without rows skips the outputs' LLRs.  ``alpha`` and ``beta``
+    ``(steps + 1, states)`` and ``gamma`` ``(steps, states, 2)`` are
+    workspaces, overwritten.
+    """
     steps = llr.shape[0]
-    states = nxt.shape[0]
     r = outputs.shape[2]
-    alpha = np.full((steps + 1, states), _NEG)
-    beta = np.full((steps + 1, states), _NEG)
+    coded = app_c.shape[0] > 0
+    alpha[:, :] = _NEG
+    beta[:, :] = _NEG
+    gamma[:, :, :] = _NEG
     alpha[0, start] = 0.0
     beta[steps, end] = 0.0
-    gamma = np.full((steps, states, 2), _NEG)
+    states = nxt.shape[0]
     for t in range(steps):
         for s in range(states):
             for u in range(2):
@@ -507,13 +528,13 @@ def bcjr(llr, apriori, nxt, outputs, tail, forced, start, end, exact, app_u, app
                     continue
                 acc = combine(acc, gamma[t, s, u] + beta[t + 1, nxt[s, u]], exact)
             beta[t, s] = acc
+    c0 = np.empty(r)
+    c1 = np.empty(r)
     for t in range(steps):
         zu = _NEG
         ou = _NEG
-        for j in range(r):
-            app_c[t, j] = 0.0
-        c0 = np.full(r, _NEG)
-        c1 = np.full(r, _NEG)
+        c0[:] = _NEG
+        c1[:] = _NEG
         for s in range(states):
             for u in range(2):
                 if gamma[t, s, u] <= _NEG or alpha[t, s] <= _NEG:
@@ -523,23 +544,30 @@ def bcjr(llr, apriori, nxt, outputs, tail, forced, start, end, exact, app_u, app
                     ou = combine(ou, v, exact)
                 else:
                     zu = combine(zu, v, exact)
-                for j in range(r):
-                    if outputs[s, u, j]:
-                        c1[j] = combine(c1[j], v, exact)
-                    else:
-                        c0[j] = combine(c0[j], v, exact)
+                if coded:
+                    for j in range(r):
+                        if outputs[s, u, j]:
+                            c1[j] = combine(c1[j], v, exact)
+                        else:
+                            c0[j] = combine(c0[j], v, exact)
         app_u[t] = zu - ou
-        for j in range(r):
-            app_c[t, j] = c0[j] - c1[j]
+        if coded:
+            for j in range(r):
+                app_c[t, j] = c0[j] - c1[j]
 
 
 @numba.njit(cache=True, nogil=True, parallel=True)
 def bcjr_blocks(llrs, nxt, outputs, tail, forced, start, end, exact, app_u, app_c):  # type: ignore[no-untyped-def]
     """BCJR over the rows of ``llrs``, without a-priori information."""
-    apriori = np.zeros(llrs.shape[1])
+    steps = llrs.shape[1]
+    states = nxt.shape[0]
+    apriori = np.zeros(steps)
     for row in numba.prange(llrs.shape[0]):  # type: ignore[attr-defined,no-untyped-call]
+        alpha = np.empty((steps + 1, states))
+        beta = np.empty((steps + 1, states))
+        gamma = np.empty((steps, states, 2))
         bcjr(llrs[row], apriori, nxt, outputs, tail, forced, start, end, exact,
-             app_u[row], app_c[row])  # fmt: skip
+             app_u[row], app_c[row], alpha, beta, gamma)  # fmt: skip
 
 
 # -----------------------------------------------------------------------------
@@ -623,15 +651,20 @@ def turbo_decode(llrs, pi, nxt, outputs, tail, iterations, exact, scale, out):  
         la2 = np.zeros(steps)
         app1 = np.empty(steps)
         app2 = np.empty(steps)
-        app_c = np.empty((steps, 2))
+        no_app_c = np.empty((0, 2))  # the iterations use the inputs' LLRs only
+        alpha = np.empty((steps + 1, nxt.shape[0]))
+        beta = np.empty((steps + 1, nxt.shape[0]))
+        gamma = np.empty((steps, nxt.shape[0], 2))
         for _ in range(iterations):
-            bcjr(ch1, la1, nxt, outputs, tail, forced, 0, 0, exact, app1, app_c)
+            bcjr(ch1, la1, nxt, outputs, tail, forced, 0, 0, exact, app1, no_app_c,
+                 alpha, beta, gamma)  # fmt: skip
             for t in range(k):
                 # Extrinsic of decoder 1, kept in la1 (natural order).
                 la1[t] = scale * (app1[t] - la1[t] - ch1[t, 0])
             for t in range(k):
                 la2[t] = la1[pi[t]]
-            bcjr(ch2, la2, nxt, outputs, tail, forced, 0, 0, exact, app2, app_c)
+            bcjr(ch2, la2, nxt, outputs, tail, forced, 0, 0, exact, app2, no_app_c,
+                 alpha, beta, gamma)  # fmt: skip
             for t in range(k):
                 la1[pi[t]] = scale * (app2[t] - la2[t] - ch2[t, 0])
         for t in range(k):
