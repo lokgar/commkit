@@ -1,5 +1,6 @@
 """Tests for SingleCarrierFrame structure and waveform generation."""
 
+import dataclasses
 from typing import Any
 
 import numpy as np
@@ -503,7 +504,7 @@ class TestExtractPayload:
             SingleCarrierFrame(payload_len=7, payload_code="hamming")
         with pytest.raises(ValueError, match="fewer than one codeword"):
             SingleCarrierFrame(payload_len=3, payload_code=LinearBlockCode.hamming(3))
-        with pytest.raises(ValueError, match="payload_pad needs a payload_code"):
+        with pytest.raises(ValueError, match="need a payload_code"):
             SingleCarrierFrame(payload_len=10, payload_pad=True)
 
     def test_coded_payload_suggests_lengths_with_pilots(self):
@@ -536,6 +537,51 @@ class TestExtractPayload:
         assert ref.bits.shape == (2, 60) and ref.info_bits.shape == (2, 32)
         res = decode(ref.bits[:, : ref.num_blocks * code.n], code=code)
         xpt.assert_array_equal(res.bits, ref.info_bits)
+
+    def test_sized_in_codewords(self):
+        """payload_blocks: the payload is the symbols its codewords fill."""
+        code = LinearBlockCode.hamming(3)
+        frame = SingleCarrierFrame(payload_blocks=6, payload_code=code)
+        assert frame.payload_len == 21  # 42 bits of QPSK
+        assert frame.payload_info_bits.shape == (24,)
+        # With pilots: 6 codewords fill 7 periods of 3 payload symbols.
+        piloted = SingleCarrierFrame(
+            payload_blocks=6, payload_code=code, pilot_pattern="comb", pilot_period=4
+        )
+        assert piloted.payload_len == 21
+        # replace() passes both sizes, which agree.
+        again = dataclasses.replace(frame, payload_seed=3)
+        assert again.payload_len == 21 and again.payload_blocks == 6
+
+    def test_codeword_sizing_errors(self):
+        code = LinearBlockCode.hamming(3)
+        with pytest.raises(ValueError, match="payload_blocks=2 or 4"):
+            SingleCarrierFrame(payload_blocks=3, payload_code=code)
+        with pytest.raises(ValueError, match="disagree"):
+            SingleCarrierFrame(payload_len=14, payload_blocks=6, payload_code=code)
+        with pytest.raises(ValueError, match="Give one of them"):
+            SingleCarrierFrame(payload_blocks=6, payload_code=code, payload_pad=True)
+        with pytest.raises(ValueError, match="need a payload_code"):
+            SingleCarrierFrame(payload_blocks=6)
+        c = Constellation.qam(16).shaped(entropy=3.5)
+        with pytest.raises(ValueError, match="composition"):
+            SingleCarrierFrame(
+                payload_len=25, payload_constellation=c,
+                payload_code=CCDM(c, block_length=10), payload_pad=True,
+            )  # fmt: skip
+
+    def test_matched_payload_in_blocks(self, xp, xpt):
+        c = Constellation.qam(16).shaped(entropy=3.5)
+        matcher = CCDM(c, block_length=100)
+        frame = SingleCarrierFrame(
+            payload_blocks=3, payload_constellation=c, payload_code=matcher
+        )
+        assert frame.payload_len == 300
+        ref = extract_payload(frame.to_signal(sps=1, symbol_rate=1e6)).reference
+        assert ref.num_blocks == 3
+        xpt.assert_array_equal(
+            to_numpy(decode(ref.bits, code=matcher).bits), to_numpy(ref.info_bits)
+        )
 
     def test_num_symbols_is_the_frame_length(self):
         for kwargs in (

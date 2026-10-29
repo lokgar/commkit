@@ -319,7 +319,11 @@ class Signal:
                 rows.append(("Preamble", preamble_str))
             else:
                 rows.append(("Preamble", "none"))
-            rows.append(("Payload length", f"{frame.payload_len} symbols"))
+            length = f"{frame.payload_len} symbols"
+            if frame.payload_code is not None:
+                bits = frame.payload_len * frame.payload_constellation.bits_per_symbol
+                length += f"  ({bits // frame.payload_code.n} code blocks)"
+            rows.append(("Payload length", length))
             if frame.payload_code is not None:
                 pad = "  (filler after the last codeword)" if frame.payload_pad else ""
                 rows.append(("Payload code", f"{frame.payload_code!r}{pad}"))

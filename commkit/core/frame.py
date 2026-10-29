@@ -186,27 +186,34 @@ class SingleCarrierFrame:
 
     Parameters
     ----------
-    payload_len : int, default 1000
-        Number of payload symbols per stream.  With pilots it must fill whole
-        pilot periods (comb: a multiple of ``pilot_period - 1``; block: of
-        ``pilot_period - pilot_block_len``); otherwise construction raises.
+    payload_len : int, optional
+        Number of payload symbols per stream; ``None`` takes the symbols of
+        ``payload_blocks``, or 1000 without it.  With pilots it must fill
+        whole pilot periods (comb: a multiple of ``pilot_period - 1``; block:
+        of ``pilot_period - pilot_block_len``); otherwise construction raises.
     payload_constellation : Constellation, default ``Constellation.psk(4)``
         Payload constellation.  A shaped one
         (``Constellation.qam(64).shaped(entropy=5)``) gives a PS payload.
     payload_seed : int, default 42
         Seed of the payload data.
     payload_code : code object, optional
-        Channel code of the payload (:mod:`commkit.coding`), passed to
-        :func:`generate` as ``code``: ``payload_len`` times the bits per
-        symbol must be a multiple of ``payload_code.n`` (whole codewords),
-        unless ``payload_pad`` is set.  Not with a shaped payload
-        constellation.
+        Code of the payload (:mod:`commkit.coding`), passed to
+        :func:`generate` as ``code``: a FEC code with a uniform payload
+        constellation, a distribution matcher (``CCDM``) or ``PAS`` with the
+        shaped one it matches onto.  ``payload_len`` times the bits per
+        symbol must be a multiple of ``payload_code.n`` (whole blocks),
+        unless ``payload_pad`` is set.
+    payload_blocks : int, optional
+        Code blocks (codewords) per stream, instead of ``payload_len``: the
+        payload is the symbols they fill, which must be whole symbols and
+        whole pilot periods (the error names the nearest valid counts).
     payload_pad : bool, default False
-        With ``payload_code``: fill the payload symbols after the last whole
-        codeword with random uncoded bits (``generate``'s ``pad``), so the
-        payload length can follow an instrument's record length instead of
-        the code.  The payload reference's ``num_blocks`` counts the
-        codewords.
+        With ``payload_code`` and ``payload_len``: fill the payload symbols
+        after the last whole codeword with random uncoded bits
+        (``generate``'s ``pad``), so the payload length can follow an
+        instrument's record length instead of the code.  The payload
+        reference's ``num_blocks`` counts the codewords.  Not with a
+        distribution matcher.
     preamble : Preamble, optional
         Synchronization preamble, before the body.  A multi-stream preamble
         must have ``num_streams`` streams; a one-stream preamble is repeated
@@ -245,18 +252,20 @@ class SingleCarrierFrame:
     **Sizing a frame.**  :attr:`num_symbols` is the frame's length in
     symbols (preamble, body and guard), so ``to_signal`` gives
     ``num_symbols * sps`` samples per stream.  For a payload of whole
-    codewords, ``payload_len = codewords * payload_code.n /
-    bits_per_symbol``; the construction error names the nearest valid
-    lengths, pilot periods included.  To fit an instrument's record (an
+    codewords, give ``payload_blocks``; a ``payload_len`` that does not
+    fill whole codewords raises, naming the nearest valid lengths, pilot
+    periods included.  To fit an instrument's record (an
     arbitrary waveform generator's memory granularity, with
     ``to_signal(periodic=True)``), choose ``payload_len`` from the target
     length and set ``payload_pad=True``.
     """
 
-    payload_len: int = 1000
+    # None until __post_init__ resolves it (1000, or from payload_blocks).
+    payload_len: int = None  # type: ignore[assignment]
     payload_constellation: Constellation = field(default_factory=_qpsk)
     payload_seed: int = 42
     payload_code: Any = None
+    payload_blocks: int | None = None
     payload_pad: bool = False
 
     preamble: Preamble | None = None
@@ -284,8 +293,18 @@ class SingleCarrierFrame:
     # -------------------------------------------------------------------------
 
     def __post_init__(self) -> None:
-        """Validate the fields, including that the payload fills whole periods."""
-        _check_int("payload_len", self.payload_len, 1)
+        """Validate the fields and resolve the payload length.
+
+        The payload fills whole pilot periods, and with a ``payload_code``
+        whole codewords unless ``payload_pad`` is set; ``payload_blocks``
+        sets ``payload_len`` to the symbols its codewords fill.  Both are
+        accepted when they agree, as ``dataclasses.replace`` and
+        :func:`~commkit.io.load_npz` pass both.
+        """
+        if self.payload_len is not None:
+            _check_int("payload_len", self.payload_len, 1)
+        if self.payload_blocks is not None:
+            _check_int("payload_blocks", self.payload_blocks, 1)
         _check_int("pilot_period", self.pilot_period, 0)
         _check_int("pilot_block_len", self.pilot_block_len, 0)
         _check_int("guard_len", self.guard_len, 0)
@@ -297,34 +316,6 @@ class SingleCarrierFrame:
                 )
         if self.pilot_constellation.pmf is not None:
             raise ValueError("pilot_constellation must not be shaped.")
-        if self.payload_code is not None:
-            from .. import coding
-
-            coding.base._codec(self.payload_code, "SingleCarrierFrame()")
-            m = self.payload_constellation.bits_per_symbol
-            n = self.payload_code.n
-            bits = self.payload_len * m
-            if bits < n:
-                raise ValueError(
-                    f"payload_len={self.payload_len} carries {bits} bits, fewer than "
-                    f"one codeword of payload_code.n={n}."
-                )
-            if bits % n and not self.payload_pad:
-                # Whole codewords, and whole pilot periods where there are pilots.
-                step = n // math.gcd(n, m)
-                if self.pilot_pattern in ("block", "comb"):
-                    per_period = self.pilot_period - self._pilot_block()
-                    if per_period > 0:
-                        step = math.lcm(step, per_period)
-                low = self.payload_len // step * step
-                valid = f"{low} or {low + step}" if low else f"{step}"
-                raise ValueError(
-                    f"payload_len={self.payload_len} carries {bits} bits, not a "
-                    f"multiple of payload_code.n={n}; use payload_len={valid}, or "
-                    "payload_pad=True to fill the rest with random bits."
-                )
-        elif self.payload_pad:
-            raise ValueError("payload_pad needs a payload_code.")
         if self.pilot_pattern not in ("none", "block", "comb"):
             raise ValueError(
                 "pilot_pattern must be 'none', 'block' or 'comb', "
@@ -343,27 +334,108 @@ class SingleCarrierFrame:
                     f"match frame.num_streams={self.num_streams}"
                 )
 
-        if self.pilot_pattern == "none":
-            return
-        block = self._pilot_block()
-        if block < 1:
-            raise ValueError(
-                "pilot_block_len must be >= 1 for the 'block' pattern, got "
-                f"{self.pilot_block_len}."
+        per_period = 1  # payload symbols per pilot period (1: no constraint)
+        if self.pilot_pattern != "none":
+            block = self._pilot_block()
+            if block < 1:
+                raise ValueError(
+                    "pilot_block_len must be >= 1 for the 'block' pattern, got "
+                    f"{self.pilot_block_len}."
+                )
+            if self.pilot_period <= block:
+                bound = "1" if self.pilot_pattern == "comb" else "pilot_block_len"
+                raise ValueError(
+                    f"pilot_period must be > {bound} for the {self.pilot_pattern!r} "
+                    f"pattern, got {self.pilot_period}."
+                )
+            per_period = self.pilot_period - block
+
+        if self.payload_code is None:
+            if self.payload_pad or self.payload_blocks is not None:
+                raise ValueError("payload_pad and payload_blocks need a payload_code.")
+        else:
+            from .. import coding
+
+            coding.base._codec(self.payload_code, "SingleCarrierFrame()")
+            if self.payload_pad and getattr(self.payload_code, "constellation", None):
+                raise ValueError(
+                    f"payload_pad fills with uniform random bits, which would change "
+                    f"the composition of {self.payload_code!r}; size the payload in "
+                    "whole blocks."
+                )
+            if self.payload_blocks is not None and self.payload_pad:
+                raise ValueError(
+                    "payload_pad fills a payload_len with whole codewords and filler; "
+                    "payload_blocks sizes the payload exactly, without filler.  Give "
+                    "one of them."
+                )
+        if self.payload_len is None:
+            length = (
+                1000 if self.payload_blocks is None else self._blocks_length(per_period)
             )
-        if self.pilot_period <= block:
-            bound = "1" if self.pilot_pattern == "comb" else "pilot_block_len"
-            raise ValueError(
-                f"pilot_period must be > {bound} for the {self.pilot_pattern!r} "
-                f"pattern, got {self.pilot_period}."
-            )
-        per_period = self.pilot_period - block
+            object.__setattr__(self, "payload_len", length)
+        assert self.payload_len is not None
+
         if self.payload_len % per_period:
             low = self.payload_len // per_period * per_period
             valid = f"{low} or {low + per_period}" if low else f"{per_period}"
             raise ValueError(
                 f"payload_len={self.payload_len} does not fill whole pilot periods "
                 f"({per_period} payload symbols each); use {valid}."
+            )
+        if self.payload_code is not None:
+            self._check_codewords(per_period)
+
+    def _blocks_length(self, per_period: int) -> int:
+        """``payload_len`` of ``payload_blocks`` codewords: the symbols they fill,
+        which must be whole symbols and whole pilot periods."""
+        assert self.payload_code is not None and self.payload_blocks is not None
+        m = self.payload_constellation.bits_per_symbol
+        n = self.payload_code.n
+        blocks = self.payload_blocks
+        bits = blocks * n
+        length = bits // m
+        if bits % (m * per_period):
+            unit = m * per_period  # bits of the shortest valid payload
+            step = unit // math.gcd(n, unit)
+            low = blocks // step * step
+            valid = f"{low} or {low + step}" if low else f"{step}"
+            raise ValueError(
+                f"payload_blocks={blocks} codewords of {n} bits do not fill whole "
+                f"payload symbols{' and pilot periods' if per_period > 1 else ''}; "
+                f"use payload_blocks={valid}, or payload_len= with payload_pad=True."
+            )
+        return int(length)
+
+    def _check_codewords(self, per_period: int) -> None:
+        """Whole codewords in ``payload_len``, or filler with ``payload_pad``."""
+        assert self.payload_code is not None and self.payload_len is not None
+        m = self.payload_constellation.bits_per_symbol
+        n = self.payload_code.n
+        bits = self.payload_len * m
+        if bits < n:
+            raise ValueError(
+                f"payload_len={self.payload_len} carries {bits} bits, fewer than "
+                f"one codeword of payload_code.n={n}."
+            )
+        if self.payload_blocks is not None:
+            if self.payload_blocks * n != bits:
+                raise ValueError(
+                    f"payload_len={self.payload_len} and payload_blocks="
+                    f"{self.payload_blocks} disagree ({bits} bits against "
+                    f"{self.payload_blocks * n}); give one of them."
+                )
+            return
+        if bits % n and not self.payload_pad:
+            # Whole codewords, and whole pilot periods.
+            step = math.lcm(n // math.gcd(n, m), per_period)
+            low = self.payload_len // step * step
+            valid = f"{low} or {low + step}" if low else f"{step}"
+            raise ValueError(
+                f"payload_len={self.payload_len} carries {bits} bits, not a "
+                f"multiple of payload_code.n={n}; use payload_len={valid}, "
+                "payload_blocks= to size the payload in codewords, or "
+                "payload_pad=True to fill the rest with random bits."
             )
 
     # -------------------------------------------------------------------------
