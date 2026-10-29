@@ -715,6 +715,32 @@ class TestPostFEC:
         fer = metrics.fer(res.bits, ref.info_bits, block_length=ref.code_block[1])
         assert np.all(post < pre / 2)
         assert np.all(fer > post) and np.all(fer < 1)
+        # A DecodeResult with the Signal or its Reference: info_bits and k
+        # come from the reference.
+        np.testing.assert_array_equal(metrics.ber(res, rx), post)
+        np.testing.assert_array_equal(metrics.ber(res, ref), post)
+        np.testing.assert_array_equal(metrics.fer(res, rx), fer)
+        np.testing.assert_array_equal(metrics.fer(res, ref, block_length=4), fer)
+        with pytest.raises(ValueError, match="disagrees"):
+            metrics.fer(res, rx, block_length=7)
+        with pytest.raises(ValueError, match="give block_length"):
+            metrics.fer(res.bits, ref.info_bits)
+        with pytest.raises(ValueError, match="needs the transmitted Signal"):
+            metrics.ber(res)
+        with pytest.raises(ValueError, match="num_skip_symbols"):
+            metrics.ber(res, rx, num_skip_symbols=2)
+
+    def test_estimate_noise_variance(self, xp: Any) -> None:
+        """σ² on the constellation's scale, 10^(-SNR/10), near 10^(-Es/N0/10)."""
+        sig = apply_awgn(
+            generate(Constellation.qam(16), 20_000, symbol_rate=1e9, rng=3),
+            esn0_db=12.0,
+            rng=4,
+        ).to("gpu" if xp is not np else "cpu")
+        nv = metrics.estimate_noise_variance(sig)
+        assert isinstance(nv, float)
+        assert nv == pytest.approx(10 ** (-metrics.snr(sig) / 10), rel=1e-9)
+        assert nv == pytest.approx(10**-1.2, rel=0.05)
 
     def test_uncoded_post_fec_equals_pre_fec(self, xp: Any) -> None:
         """info_bits is bits: the post-FEC call measures the same BER."""

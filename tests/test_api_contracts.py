@@ -581,6 +581,13 @@ ROWS: list[Row] = [
         symbols=True,
     ),
     Row(
+        "commkit.metrics.estimate_noise_variance",
+        METRIC,
+        data=2,
+        call=lambda c, x: _a(x * 1.01, _ref(c, x)),
+        symbols=True,
+    ),
+    Row(
         "commkit.metrics.snr",
         METRIC,
         data=2,
