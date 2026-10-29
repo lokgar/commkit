@@ -138,6 +138,7 @@ Dependencies point downward only:
   - `analysis` holds laser and phase characterization.
   - `metrics` is the reporting layer.
 - **Splitting modules:** promote a flat module to a package only when it exceeds about 1000 lines *and* has two or more separable concerns. The package `__init__` re-exports the public names. Never create a `utils/` package or one-function files.
+- **One documented home per public name.** A package re-exports its subpackages' names, and users and documentation import them from the package (`commkit.impairments.Fiber`, `commkit.impairments.apply_pmd`), not from the subpackage that defines them.
 - **Shared physics lives in one private module**, used by the channel and by its compensation: `_dispersion` (β₂, β₃, the dispersion response) and `_fiber` (`Fiber` and the split-step solver behind `apply_fiber_propagation` and `correct_fiber_propagation`).
 
 ---
@@ -146,7 +147,7 @@ Dependencies point downward only:
 
 ### Signal
 
-- `Signal` holds: samples (NumPy or CuPy, `(N,)` or `(C, N)`, time on the last axis), the **facts** `sampling_rate`, `symbol_rate`, `center_frequency` and `domain` (`"DIG"`, `"RF"` or `"OPT"`; only RF and optical signals have a carrier), the **description** `constellation` and `pulse`, and the ground truth `reference` (transmitted symbols, the bits on the air `bits` and the source bits `info_bits`, the same array when nothing is coded or matched, and the `code` between them) plus the `frame` layout.
+- `Signal` holds: samples (NumPy or CuPy, `(N,)` or `(C, N)`, time on the last axis), the **facts** `sampling_rate`, `symbol_rate`, `center_frequency` and `domain` (`"DIG"`, `"RF"` or `"OPT"`; only RF and optical signals have a carrier; an optical carrier also gives the derived `center_wavelength_nm`, which the dispersion, fiber and OSNR functions take as a fact), the **description** `constellation` and `pulse`, and the ground truth `reference` (transmitted symbols, the bits on the air `bits` and the source bits `info_bits`, the same array when nothing is coded or matched, and the `code` between them) plus the `frame` layout.
 - It never holds pipeline results.
 - Construction does no hidden work: no mapping, no normalization, no device move, no shape guessing. Factories (`generate`, frames) do that work.
 - `sig.to("gpu")` and `sig.replace(...)` return new Signals. Arrays are shared, not copied; use `clone()` for an independent copy.
@@ -202,8 +203,11 @@ Dependencies point downward only:
 - The algorithm is chosen by an object, never by the function name or a string: `estimate_carrier_phase(y, BPS())`, not `recover_carrier_phase_bps(y)`. The verb function dispatches on the object's type through a private table in its module. There is no `recover_*` or `compensate_*`.
 - Computations use plain nouns (`allan_deviation`).
 - **Glossary**, one name each:
-  - `num_taps`, `step_size`, `sps`, `constellation`, `pulse`, `rng`, `num_symbols`, `num_blocks` (code blocks, codewords of a FEC code), `num_channels`, `sampling_rate`, `symbol_rate`.
-  - Units are in the docstring. Use `_db` and `_hz` suffixes where the unit is ambiguous.
+  - `num_taps`, `step_size`, `sps`, `constellation`, `pulse`, `rng`, `num_symbols`, `num_channels` (never streams), `sampling_rate`, `symbol_rate`, `noise_var`, `nfft`, `regularization`, `max_iterations`.
+  - A size names its unit: `num_symbols`, `num_blocks` (code blocks, codewords of a FEC code), `info_bits` (a code's information length where it is a parameter), `blocks_per_frame`, `num_variables`, `num_segments`. In `coding`, `length` and `n` mean the codeword length in bits and `k` the information length, nothing else.
+  - A seeded part of a factory takes `<part>_rng` (`payload_rng`), with the same int / Generator / None semantics as `rng`.
+  - A variant of one algorithm is a `method=` string only where it is a numerical flavor, not an algorithm (`method="maxlog" | "exact"`); algorithms are objects.
+  - Values are in SI units without a suffix: Hz, s, rad, rad/s, W (`linewidth` and `reference_bandwidth` in Hz, `drift_rate` in rad/s, `taus` in s). A result that holds one quantity in two units suffixes the SI one (`lags` in samples, `lag_s` in seconds). A conventional non-SI unit goes into the name: `_db`, `_dbm`, `_deg`, `_nm`, `_km`, `_ps_nm_km`. Normalized quantities say so (`normalized_bandwidth`). Do not add second names for one quantity in another unit (no `center_frequency_ghz` next to `center_frequency`); `center_wavelength_nm` is a different quantity, derived from the carrier.
 
 ### Docstrings
 

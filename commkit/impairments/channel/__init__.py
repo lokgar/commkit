@@ -3,7 +3,9 @@
 Linear effects (chromatic dispersion, PMD, polarization mixing) are in
 :mod:`~commkit.impairments.channel.linear`; nonlinear propagation over
 amplified spans (split-step Kerr effect with dispersion, loss, PMD and ASE)
-is in :mod:`~commkit.impairments.channel.nonlinear`.
+is in :mod:`~commkit.impairments.channel.nonlinear`.  Import the public
+names from :mod:`commkit.impairments`, which re-exports them and is their
+documented home.
 """
 
 from .linear import (
