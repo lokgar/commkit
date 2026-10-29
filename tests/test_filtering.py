@@ -390,6 +390,51 @@ class TestOverlapSaveFiltering:
         out = filtering.ols_fir_filter(x, taps, fft_size=1024)
         assert out.shape == x.shape
 
+    @pytest.mark.parametrize("center", [True, False])
+    def test_batches_do_not_change_the_output(
+        self, xp: Any, xpt: Any, monkeypatch, center
+    ) -> None:
+        """Batches of 3 blocks (a partial last one) give the one-batch output."""
+        import commkit._overlap_save as ols
+
+        rng = np.random.default_rng(6)
+        x = xp.asarray(
+            (
+                rng.standard_normal((2, 20_000)) + 1j * rng.standard_normal((2, 20_000))
+            ).astype(np.complex64)
+        )
+        taps = xp.asarray(np.hanning(101).astype(np.float32))
+        whole = filtering.ols_fir_filter(x, taps, center=center)
+        monkeypatch.setattr(ols, "_OLS_ELEMENTS", 2 * 1024 * 3)
+        # Batched FFTs round differently in float32.
+        xpt.assert_allclose(
+            filtering.ols_fir_filter(x, taps, center=center),
+            whole,
+            rtol=1e-5,
+            atol=1e-5,
+        )
+
+    def test_batches_bound_the_working_memory(self, monkeypatch) -> None:
+        """With batches, the peak is the padded input and the output (3.5x the
+        input for complex64), not the record's spectra (8x)."""
+        import tracemalloc
+
+        import commkit._overlap_save as ols
+
+        x = (np.random.default_rng(7).standard_normal(1 << 20) + 0j).astype(
+            np.complex64
+        )
+        taps = np.hanning(201).astype(np.float32)
+        monkeypatch.setattr(ols, "_OLS_ELEMENTS", 1 << 17)
+        filtering.ols_fir_filter(x, taps)
+        tracemalloc.start()
+        try:
+            filtering.ols_fir_filter(x, taps)
+            peak = tracemalloc.get_traced_memory()[1]
+        finally:
+            tracemalloc.stop()
+        assert peak < 4 * x.nbytes
+
     def test_ols_fir_filter_preserves_real_dtype(self, xp: Any) -> None:
         """ols_fir_filter returns real dtype when both inputs are real."""
         rng = np.random.default_rng(3)

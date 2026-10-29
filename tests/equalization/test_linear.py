@@ -75,6 +75,19 @@ class TestZFEqualizer:
         mimo[0, 1, 1] = mimo[1, 0, 1] = 0.3
         assert equalization.zf_equalizer(tx, mimo).dtype == xp.complex64
 
+    def test_batches_do_not_change_the_output(self, xp, xpt, monkeypatch):
+        """MIMO ZF over batches of 3 blocks equals the one-batch result."""
+        import commkit._overlap_save as ols
+
+        rng = xp.random.RandomState(4)
+        tx = (rng.randn(2, 10_000) + 1j * rng.randn(2, 10_000)).astype(xp.complex64)
+        h = xp.zeros((2, 2, 3), dtype=xp.complex64)
+        h[0, 0, 0] = h[1, 1, 0] = 1.0
+        h[0, 1, 2] = h[1, 0, 1] = 0.3j
+        whole = equalization.zf_equalizer(tx, h)
+        monkeypatch.setattr(ols, "_OLS_ELEMENTS", 2 * 1024 * 3)
+        xpt.assert_allclose(equalization.zf_equalizer(tx, h), whole, atol=1e-5)
+
     @pytest.mark.parametrize("center", [-1, 3])
     def test_center_out_of_range_raises(self, xp, center):
         channel = xp.array([0.25, 1.0, 0.4j], dtype=xp.complex64)

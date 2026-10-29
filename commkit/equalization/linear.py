@@ -14,7 +14,7 @@ import numpy as np
 
 from .. import _fft
 from .._array import as_2d, restore_1d
-from .._overlap_save import ols_backward, ols_forward
+from .._overlap_save import ols_apply
 from ..backend import ArrayType, dispatch
 from ..core._signal_adapter import adapt_signal, require_integer_sps
 from ..core.signal import Signal
@@ -113,15 +113,16 @@ def zf_equalizer(
         pad = [(0, 0)] * (channel_estimate.ndim - 1) + [(0, N_fft - L)]
         channel_estimate = xp.roll(xp.pad(channel_estimate, pad), -center, axis=-1)
 
-    # --- Shared OLS forward pass: pad -> stride_tricks -> batch FFT ---
-    Y, meta = ols_forward(samples, N_fft)  # Y: (num_ch, num_blocks, N_fft)
-
     if siso_channel:
         # SISO: scalar frequency-domain ZF/MMSE inversion.
         # channel_estimate was reshaped to (1,1,L) for was_1d; flatten to 1D.
         H = _fft.fft(channel_estimate.reshape(-1), n=N_fft)
         W = xp.conj(H) / (xp.abs(H) ** 2 + reg)
-        X_hat_f = Y * W
+
+        def process(Y: ArrayType) -> ArrayType:
+            """Each bin times its scalar inverse."""
+            return Y * W
+
     else:
         # MIMO: per-bin (CxC) matrix inversion - cannot reduce to scalar multiply.
         H_f = _fft.fft(channel_estimate, n=N_fft, axis=-1)
@@ -150,14 +151,15 @@ def zf_equalizer(
 
         Wk = Hk_H @ inv_term  # (N_fft, C_tx, C_rx)
 
-        # Vectorized batch matrix multiplication across frequency bins and blocks.
-        # Uses explicit batched GEMM instead of einsum for better GPU utilization.
-        Y_t = xp.transpose(Y, (2, 0, 1))  # (N_fft, num_ch, num_blocks)
-        X_hat_k = Wk @ Y_t  # (N_fft, C_tx, C_rx) @ (N_fft, C_rx, num_blocks)
-        X_hat_f = xp.transpose(X_hat_k, (1, 2, 0))  # (num_ch, num_blocks, N_fft)
+        def process(Y: ArrayType) -> ArrayType:
+            """Each bin's (C, C) inverse times the bin's channel vector.
 
-    # --- Shared OLS backward pass: batch IFFT -> symmetric discard -> reshape ---
-    out = ols_backward(X_hat_f, meta)
+            Batched GEMM over the bins rather than einsum, for GPU use.
+            """
+            Y_t = xp.transpose(Y, (2, 0, 1))  # (N_fft, num_ch, blocks)
+            return xp.transpose(Wk @ Y_t, (1, 2, 0))  # (num_ch, blocks, N_fft)
+
+    out = ols_apply(samples, N_fft, process)
 
     return signal_adapter.wrap_samples(restore_1d(was_1d, out))
 

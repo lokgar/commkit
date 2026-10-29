@@ -17,7 +17,7 @@ import scipy
 from .. import _cuda, _fft
 from .._array import as_2d, restore_1d
 from .._circular import convolve_periodic
-from .._overlap_save import ols_backward, ols_forward
+from .._overlap_save import ols_apply
 from ..backend import ArrayType, dispatch, to_device
 from ..core._signal_adapter import S, adapt_signal
 from ..logger import logger
@@ -368,10 +368,11 @@ def ols_fir_filter(
 ) -> S:
     """Apply an FIR filter by overlap-save, for long filters and long records.
 
-    Overlap-save (OLS) processes the record in FFT blocks of fixed size, so
-    memory stays bounded for long impulse responses (chromatic dispersion,
-    group-delay equalizers) where one FFT of the whole record would exhaust
-    GPU memory.  For short filters on moderate records, :func:`fir_filter` is
+    Overlap-save (OLS) processes the record in FFT blocks of fixed size,
+    transformed in batches of at most 2^24 spectrum elements, so the working
+    memory beyond the input and output stays bounded for long records and
+    long impulse responses (chromatic dispersion, group-delay equalizers),
+    where one FFT of the whole record would exhaust GPU memory.  For short filters on moderate records, :func:`fir_filter` is
     as fast and simpler.
 
     Parameters
@@ -455,14 +456,10 @@ def ols_fir_filter(
         # This matches scipy's mode='same' (center-aligned, group-delay compensated),
         # which is required for correct eye-opening after pulse-shaped filtering.
         samples_ext = xp.pad(x, ((0, 0), (0, half)))
-        Y, meta = ols_forward(samples_ext, N_fft)
-        X_hat_f = Y * H
-        out_ext = ols_backward(X_hat_f, meta)  # shape: (num_ch, N + half)
+        out_ext = ols_apply(samples_ext, N_fft, lambda Y: Y * H)  # (num_ch, N + half)
         out = out_ext[:, half:]  # trim leading half -> shape: (num_ch, N)
     else:
-        Y, meta = ols_forward(x, N_fft)
-        X_hat_f = Y * H
-        out = ols_backward(X_hat_f, meta)
+        out = ols_apply(x, N_fft, lambda Y: Y * H)
 
     if is_real:
         out = out.real  # strip IFFT imaginary noise for real inputs
