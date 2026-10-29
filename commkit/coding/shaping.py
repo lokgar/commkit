@@ -240,9 +240,14 @@ def _encode_ccdm(code: CCDM, bits: ArrayType) -> ArrayType:
 
 
 def _decode_ccdm(code: CCDM, llrs: ArrayType, method: object) -> _Decoded:
-    _, xp, _ = dispatch(llrs)
+    return _dematch_labels(code, _hard(llrs))
+
+
+def _dematch_labels(code: CCDM, labels: ArrayType) -> _Decoded:
+    """Dematch hard label bits ``(R, block_length m)``, on their device."""
+    _, xp, _ = dispatch(labels)
     m = code.constellation.bits_per_symbol
-    hard = to_device(_hard(llrs), "cpu").reshape(llrs.shape[0], code.block_length, m)
+    hard = to_device(labels, "cpu").reshape(labels.shape[0], code.block_length, m)
     symbols = code._label_index[_pack(hard)]
     bits, valid = code._dematch(symbols)
     device = "cpu" if xp is np else "gpu"
@@ -250,7 +255,7 @@ def _decode_ccdm(code: CCDM, llrs: ArrayType, method: object) -> _Decoded:
         to_device(bits, device),
         None,
         to_device(valid, device),
-        xp.ones(llrs.shape[0], dtype=np.int32),
+        xp.ones(labels.shape[0], dtype=np.int32),
     )
 
 
@@ -409,7 +414,7 @@ def _decode_pas(code: PAS, llrs: ArrayType, method: Any) -> _Decoded:
         code.code, deinterleave(llrs, interleaver=code._interleaver), method
     )
     amplitude_bits = res.bits[:, : ccdm.n]
-    dm = _decode_ccdm(ccdm, (1.0 - 2.0 * amplitude_bits).astype(xp.float32), _Dematch())
+    dm = _dematch_labels(ccdm, amplitude_bits)
     return _Decoded(
         xp.concatenate([dm.bits, res.bits[:, ccdm.n :]], axis=1),
         None

@@ -208,7 +208,8 @@ def _as_llrs(llrs: Any, function_name: str) -> ArrayType:
     if x.dtype.kind == "c":
         raise TypeError(f"{function_name}: llrs must be real, got {x.dtype}.")
     if x.dtype.kind in "biu":
-        return xp.where(x != 0, -_HARD_LLR, _HARD_LLR).astype(xp.float32)
+        hard = xp.float32(_HARD_LLR)  # Python floats would give a float64 array
+        return xp.where(x != 0, -hard, hard)
     warn_if_double(x, function_name, "float32")
     return x.astype(xp.float32, copy=False)
 

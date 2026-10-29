@@ -500,7 +500,7 @@ def _decode_concatenated(
     rows = llrs.shape[0]
     res = _decode_blocks(code.inner, llrs.reshape(-1, code.inner.n), method.inner)
     if res.llrs is None:
-        soft = (1.0 - 2.0 * res.bits).astype(xp.float32)
+        soft = 1 - 2 * res.bits.astype(xp.float32)
     else:
         (info,) = _device_tables(code, "inner_info", xp, lambda: (code._inner_info,))
         soft = res.llrs[:, info]
