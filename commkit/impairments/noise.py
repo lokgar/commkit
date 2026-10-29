@@ -41,7 +41,17 @@ def apply_awgn(
     which gives the textbook ``Es/N0 = 2 B_ref / (p R_s) · OSNR`` for ``p``
     polarizations, whatever the oversampling.  A single-polarization Signal
     (``C = 1``) still counts the ASE of both polarizations, as an OSNR meter
-    does, and receives the half that falls into its own.
+    does, and receives the half that falls into its own: the noise a
+    single-polarization coherent receiver sees, 3 dB less than a
+    dual-polarization signal of the same total power at the same OSNR.
+
+    OSNR is a property of the whole optical field, so pass every
+    polarization in one call.  Calling once per polarization of a
+    dual-polarization signal counts only that polarization's power and
+    adds half the intended noise.  The orthogonal polarization's ASE is not
+    simulated for ``C = 1``, which matters for a receiver without a
+    polarizer (direct detection, where it adds ASE-ASE beat noise); model
+    such a link with both polarizations.
 
     Parameters
     ----------
