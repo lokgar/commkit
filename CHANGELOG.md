@@ -22,6 +22,7 @@ Paired A/B of alternating processes against the previous commit of each change:
 - BCH decoding through the same per-codeword decoders: Chase-II of BCH(1000, 970) 0.26 on the CPU and 0.22 on the GPU, staircase decoding 0.35 and 0.14.
 - Chase decoding: 0.53 on the CPU, 0.30-0.51 on the GPU (no LLR round trip or re-encoding, no 4-D flip mask, larger GPU chunks).
 - LDPC sum-product decoding on the CPU: DVB-S2 1/2, 64 codewords, 0.70 (`phi(|Q|)` kept from a row's first pass instead of computed again).
+- Products of bit arrays modulo 2 (encoding, syndromes): encoding 2^17 OIF 400ZR codewords 0.85 on the CPU and 0.64 on the GPU (no int32 temporaries for the parity).
 - Polar decoding: SC of N = 1024 0.32, SCL(8) 0.70, SCL(32) 0.68 (paths copied only when they change slot).
 - Tail-biting Viterbi: K = 7, 0.035 (all start states scored in one pass); decision storage a quarter of before at every termination.
 - Turbo decoding: LTE K = 1024, max-log 0.82, exact log-MAP 0.65.

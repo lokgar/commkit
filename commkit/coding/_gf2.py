@@ -166,5 +166,19 @@ def matmul_mod2(a: ArrayType, b: ArrayType) -> ArrayType:
     rows = max(1, _CHUNK_ELEMENTS // max(inner, b.shape[1], 1))
     for r0 in range(0, a2.shape[0], rows):
         prod = a2[r0 : r0 + rows].astype(xp.float32) @ b
-        out[r0 : r0 + rows] = prod.astype(xp.int32) & 1
+        if xp is np:
+            parity = prod.astype(np.int32)
+            parity &= 1
+            out[r0 : r0 + rows] = parity
+        else:
+            _mod2_kernel()(prod, out[r0 : r0 + rows])
     return out.reshape(*lead, b.shape[1])
+
+
+def _mod2_kernel() -> Any:
+    """CuPy kernel: exact float32 sums to their parity, written as int8."""
+    import cupy as cp
+
+    return cp.ElementwiseKernel(
+        "float32 p", "int8 out", "out = ((int)p) & 1", "commkit_f32_mod2"
+    )
