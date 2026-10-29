@@ -1,10 +1,11 @@
 """Transceiver IQ imbalance.
 
-:func:`apply_iq_imbalance` and its blind compensation
-:func:`correct_iq_imbalance` (:class:`Lowdin` or
-:class:`GramSchmidt` orthogonalization) are kept together because they are
-one device model, the widely linear mixing of I and Q, and are read as a
-pair.
+:func:`apply_iq_imbalance`, its blind measurement
+:func:`estimate_iq_imbalance` and its compensation
+:func:`correct_iq_imbalance` (:class:`Lowdin` or :class:`GramSchmidt`
+orthogonalization, or the inverse of an :class:`IQImbalanceEstimate`) are
+kept together because they are one device model, the widely linear mixing
+of I and Q.
 """
 
 import math
@@ -20,9 +21,11 @@ from ..math import db_to_linear
 
 __all__ = [
     "GramSchmidt",
+    "IQImbalanceEstimate",
     "Lowdin",
     "apply_iq_imbalance",
     "correct_iq_imbalance",
+    "estimate_iq_imbalance",
 ]
 
 
@@ -88,6 +91,99 @@ def apply_iq_imbalance(
 
 
 # -----------------------------------------------------------------------------
+# IQ-IMBALANCE ESTIMATION
+# -----------------------------------------------------------------------------
+
+
+@dataclass(frozen=True)
+class IQImbalanceEstimate:
+    """Result of :func:`estimate_iq_imbalance`, in the units of
+    :func:`apply_iq_imbalance`.
+
+    Per-channel fields follow the rank rule (0-d for ``(N,)`` input, ``(C,)``
+    for ``(C, N)``) and stay on the input's device.
+
+    Attributes
+    ----------
+    amplitude_imbalance_db : ndarray
+        Q-to-I amplitude ratio ``A`` in dB; positive when Q has the higher
+        gain.
+    phase_imbalance_deg : ndarray
+        Phase error ``φ`` of the Q branch in degrees.
+    """
+
+    amplitude_imbalance_db: ArrayType
+    phase_imbalance_deg: ArrayType
+
+
+def estimate_iq_imbalance(samples: ArrayType) -> IQImbalanceEstimate:
+    """Measure IQ imbalance blindly, as the parameters of
+    :func:`apply_iq_imbalance`.
+
+    Assumes the undistorted signal is circular, its I and Q of equal power
+    and uncorrelated, as square QAM, PSK and Gaussian noise are.  The
+    imbalanced branches ``r_I = I - g sin φ · Q`` and ``r_Q = g cos φ · Q``
+    then have the second moments
+
+        E[r_Q²] = σ² g² cos² φ,   E[r_I r_Q] = -σ² g² sin φ cos φ,
+        E[r_I²] - E[r_I r_Q]² / E[r_Q²] = σ²,
+
+    which give ``tan φ = -E[r_I r_Q] / E[r_Q²]`` and ``g`` in closed form.
+
+    Parameters
+    ----------
+    samples : array_like or Signal
+        Complex baseband samples, ``(N,)`` or ``(C, N)``.  A carrier
+        frequency offset does no harm (it rotates the signal, which stays
+        circular), but the imbalance must sit after it, at the receiver.
+
+    Returns
+    -------
+    IQImbalanceEstimate
+        Per channel, on the input's device.
+
+    Notes
+    -----
+    The moments are estimated from ``N`` samples, so the spread of the
+    estimate falls as ``1/sqrt(N)``: about ``57°/sqrt(N)`` in phase for
+    QPSK, 0.06° at ``N = 10^6``.
+
+    Examples
+    --------
+    >>> r = apply_iq_imbalance(s, amplitude_imbalance_db=0.5, phase_imbalance_deg=3.0)
+    >>> est = estimate_iq_imbalance(r)  # ≈ 0.5 dB, 3.0°
+    >>> s_hat = correct_iq_imbalance(r, est)
+    """
+    signal_adapter = adapt_signal(samples, function_name="estimate_iq_imbalance()")
+    x, xp, _ = dispatch(signal_adapter.array)
+    x2, was_1d = as_2d(x, name="samples")
+    sii, sqq, siq = _branch_moments(x2, xp)
+    g2 = (sqq * sqq + siq * siq) / (sii * sqq - siq * siq)
+    amplitude_db = 10.0 * xp.log10(g2)
+    phase_deg = xp.degrees(xp.arctan2(-siq, sqq))
+    if was_1d:
+        amplitude_db, phase_deg = amplitude_db[0], phase_deg[0]
+    logger.info("Estimated IQ imbalance.")
+    return IQImbalanceEstimate(amplitude_db, phase_deg)
+
+
+def _branch_moments(
+    samples: ArrayType, xp: ModuleType
+) -> tuple[ArrayType, ArrayType, ArrayType]:
+    """``E[I²]``, ``E[Q²]``, ``E[IQ]`` per channel of ``(C, N)`` samples,
+    float64 ``(C,)``.
+
+    Means in the samples' precision (pairwise on NumPy, a tree on CuPy,
+    whose float64-accumulating reduction over few long rows is 10x slower).
+    """
+    i_branch, q_branch = samples.real, samples.imag
+    sii = xp.mean(i_branch * i_branch, axis=-1).astype(xp.float64)
+    sqq = xp.mean(q_branch * q_branch, axis=-1).astype(xp.float64)
+    siq = xp.mean(i_branch * q_branch, axis=-1).astype(xp.float64)
+    return sii, sqq, siq
+
+
+# -----------------------------------------------------------------------------
 # BLIND IQ-IMBALANCE CORRECTION
 # -----------------------------------------------------------------------------
 
@@ -146,19 +242,25 @@ _IQ_CORRECTORS: dict[
 ] = {Lowdin: _lowdin, GramSchmidt: _gram_schmidt}
 
 
-def correct_iq_imbalance(samples: S, how: Lowdin | GramSchmidt) -> S:
-    """Correct IQ imbalance blindly.
+def correct_iq_imbalance(
+    samples: S, how: Lowdin | GramSchmidt | IQImbalanceEstimate
+) -> S:
+    """Correct IQ imbalance, blindly or from an estimate.
 
-    Orthogonalizes the I and Q branches of each channel with the algorithm
-    ``how`` and restores the channel's input power.  Undoes
-    :func:`apply_iq_imbalance` up to a common gain and rotation.
+    With :class:`Lowdin` or :class:`GramSchmidt`, orthogonalizes the I and Q
+    branches of each channel and restores the channel's input power; this
+    undoes :func:`apply_iq_imbalance` up to a common gain and rotation.  With
+    an :class:`IQImbalanceEstimate` (from :func:`estimate_iq_imbalance`,
+    possibly of an earlier capture), inverts the widely linear model exactly,
+    ``s = (conj(K1) · r - K2 · conj(r)) / (|K1|² - |K2|²)``.
 
     Parameters
     ----------
     samples : array_like or Signal
         Complex baseband samples, ``(N,)`` or ``(C, N)``.
-    how : Lowdin or GramSchmidt
-        Orthogonalization algorithm.
+    how : Lowdin, GramSchmidt or IQImbalanceEstimate
+        Orthogonalization algorithm, or the imbalance to invert (0-d, or
+        ``(C,)`` per channel).
 
     Returns
     -------
@@ -169,17 +271,48 @@ def correct_iq_imbalance(samples: S, how: Lowdin | GramSchmidt) -> S:
     --------
     >>> r = apply_iq_imbalance(s, amplitude_imbalance_db=1.5, phase_imbalance_deg=4.0)
     >>> s_hat = correct_iq_imbalance(r, Lowdin())
+    >>> s_hat = correct_iq_imbalance(r, estimate_iq_imbalance(r))
     """
     correct_fn = _IQ_CORRECTORS.get(type(how))
-    if correct_fn is None:
+    if correct_fn is None and not isinstance(how, IQImbalanceEstimate):
         raise TypeError(
-            "correct_iq_imbalance(): how must be Lowdin() or GramSchmidt(), got "
-            f"{type(how).__name__}."
+            "correct_iq_imbalance(): how must be Lowdin(), GramSchmidt() or an "
+            f"IQImbalanceEstimate, got {type(how).__name__}."
         )
     signal_adapter = adapt_signal(samples, function_name="correct_iq_imbalance()")
     logger.info("Correcting IQ imbalance (%s).", type(how).__name__)
     x, xp, _ = dispatch(signal_adapter.array)
+    if correct_fn is None:
+        assert isinstance(how, IQImbalanceEstimate)
+        return signal_adapter.wrap_samples(_invert_iq_imbalance(x, xp, how))
     return signal_adapter.wrap_samples(_apply_iq_correction(x, xp, correct_fn))
+
+
+def _invert_iq_imbalance(
+    samples: ArrayType, xp: ModuleType, how: IQImbalanceEstimate
+) -> ArrayType:
+    """The exact inverse of :func:`apply_iq_imbalance`, with common or
+    per-channel parameters."""
+    samples, was_1d = as_2d(samples, name="samples")
+    num_channels = samples.shape[0]
+
+    def column(value: ArrayType, name: str) -> ArrayType:
+        arr = xp.asarray(value, dtype=xp.float64).reshape(-1)
+        if arr.size not in (1, num_channels):
+            raise ValueError(
+                f"correct_iq_imbalance(): how.{name} has {arr.size} channels "
+                f"for {num_channels}."
+            )
+        return arr[:, None]
+
+    g = 10.0 ** (column(how.amplitude_imbalance_db, "amplitude_imbalance_db") / 20.0)
+    phi = xp.radians(column(how.phase_imbalance_deg, "phase_imbalance_deg"))
+    ge = g * xp.exp(1j * phi)
+    k1, k2 = (1.0 + ge) / 2.0, (1.0 - ge) / 2.0
+    det = g * xp.cos(phi)  # |K1|² - |K2|²
+    a = (xp.conj(k1) / det).astype(samples.dtype)
+    b = (-k2 / det).astype(samples.dtype)
+    return restore_1d(was_1d, a * samples + b * xp.conj(samples))
 
 
 def _apply_iq_correction(
@@ -198,12 +331,8 @@ def _apply_iq_correction(
     """
     samples, was_1d = as_2d(samples, name="samples")
     i_branch, q_branch = samples.real, samples.imag
-    # Means in the samples' precision (pairwise on NumPy, a tree on CuPy,
-    # whose float64-accumulating reduction over few long rows is 10x
-    # slower); the 2x2 algebra in float64.
-    sii = xp.mean(i_branch * i_branch, axis=-1).astype(xp.float64)
-    sqq = xp.mean(q_branch * q_branch, axis=-1).astype(xp.float64)
-    siq = xp.mean(i_branch * q_branch, axis=-1).astype(xp.float64)
+    # The 2x2 algebra in float64.
+    sii, sqq, siq = _branch_moments(samples, xp)
 
     a_ii, a_iq, a_qi, a_qq = correct_fn(sii, sqq, siq, xp)
     # Restore input power: E[|s_hat|^2] = E[|r|^2], each branch at half.

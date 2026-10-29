@@ -5,9 +5,11 @@ import pytest
 from commkit.core import Signal
 from commkit.impairments import (
     GramSchmidt,
+    IQImbalanceEstimate,
     Lowdin,
     apply_iq_imbalance,
     correct_iq_imbalance,
+    estimate_iq_imbalance,
 )
 
 
@@ -235,3 +237,77 @@ class TestSignalInputFrontend:
     def test_unknown_method_raises(self, xp):
         with pytest.raises(TypeError, match="Lowdin"):
             correct_iq_imbalance(xp.ones(8, dtype=xp.complex64), "lowdin")
+
+
+class TestEstimateIQImbalance:
+    """estimate_iq_imbalance measures the parameters of apply_iq_imbalance,
+    and correct_iq_imbalance inverts them."""
+
+    @staticmethod
+    def _qpsk(xp, shape, seed=0):
+        rng = xp.random.RandomState(seed)
+        bits = rng.randint(0, 2, size=(2, *shape))
+        return ((2 * bits[0] - 1) + 1j * (2 * bits[1] - 1)).astype(xp.complex64) / (
+            2**0.5
+        )
+
+    @pytest.mark.parametrize("amp_db, phase_deg", [(0.5, 3.0), (-1.5, -7.0), (0, 0)])
+    def test_recovers_parameters(self, xp, amp_db, phase_deg):
+        s = self._qpsk(xp, (200_000,))
+        r = apply_iq_imbalance(
+            s, amplitude_imbalance_db=amp_db, phase_imbalance_deg=phase_deg
+        )
+        est = estimate_iq_imbalance(r)
+        assert est.amplitude_imbalance_db.shape == ()
+        assert float(est.amplitude_imbalance_db) == pytest.approx(amp_db, abs=0.05)
+        assert float(est.phase_imbalance_deg) == pytest.approx(phase_deg, abs=0.5)
+
+    def test_per_channel(self, xp):
+        s = self._qpsk(xp, (2, 100_000))
+        r = xp.stack(
+            [
+                apply_iq_imbalance(
+                    s[0], amplitude_imbalance_db=1.0, phase_imbalance_deg=2.0
+                ),
+                apply_iq_imbalance(
+                    s[1], amplitude_imbalance_db=-0.5, phase_imbalance_deg=-4.0
+                ),
+            ]
+        )
+        est = estimate_iq_imbalance(r)
+        assert type(est.amplitude_imbalance_db) is xp.ndarray
+        assert est.amplitude_imbalance_db.shape == (2,)
+        assert xp.allclose(
+            est.amplitude_imbalance_db, xp.asarray([1.0, -0.5]), atol=0.05
+        )
+        assert xp.allclose(est.phase_imbalance_deg, xp.asarray([2.0, -4.0]), atol=0.5)
+
+    def test_insensitive_to_carrier_rotation(self, xp):
+        """A rotating carrier before the imbalance keeps the signal circular."""
+        s = self._qpsk(xp, (100_000,))
+        n = xp.arange(s.size)
+        s = (s * xp.exp(1j * 2 * xp.pi * 1e-3 * n)).astype(xp.complex64)
+        r = apply_iq_imbalance(s, amplitude_imbalance_db=0.8, phase_imbalance_deg=5.0)
+        est = estimate_iq_imbalance(r)
+        assert float(est.amplitude_imbalance_db) == pytest.approx(0.8, abs=0.05)
+        assert float(est.phase_imbalance_deg) == pytest.approx(5.0, abs=0.5)
+
+    def test_correct_inverts_exactly(self, xp, xpt):
+        """With the true parameters the correction is the exact inverse."""
+        s = self._qpsk(xp, (2, 1024))
+        r = apply_iq_imbalance(s, amplitude_imbalance_db=1.2, phase_imbalance_deg=6.0)
+        how = IQImbalanceEstimate(1.2, 6.0)
+        out = correct_iq_imbalance(r, how)
+        assert out.dtype == xp.complex64
+        xpt.assert_allclose(out, s, atol=1e-5)
+
+    def test_correct_from_estimate(self, xp, xpt):
+        s = self._qpsk(xp, (100_000,))
+        r = apply_iq_imbalance(s, amplitude_imbalance_db=-1.0, phase_imbalance_deg=4.0)
+        out = correct_iq_imbalance(r, estimate_iq_imbalance(r))
+        assert float(xp.max(xp.abs(out - s))) < 0.02
+
+    def test_correct_per_channel_size_mismatch_raises(self, xp):
+        how = IQImbalanceEstimate(xp.zeros(3), xp.zeros(3))
+        with pytest.raises(ValueError, match="3 channels for 2"):
+            correct_iq_imbalance(xp.ones((2, 8), dtype=xp.complex64), how)

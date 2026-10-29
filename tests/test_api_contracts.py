@@ -527,12 +527,14 @@ ROWS: list[Row] = [
     ),
     Row("commkit.impairments.frontend.GramSchmidt", VALUE),
     Row("commkit.impairments.frontend.Lowdin", VALUE),
+    Row("commkit.impairments.frontend.IQImbalanceEstimate", VALUE),
     Row(
         "commkit.impairments.frontend.correct_iq_imbalance",
         TRANSFORM,
         data=2,
         call=lambda c, x: _a(x, Lowdin()),
     ),
+    Row("commkit.impairments.frontend.estimate_iq_imbalance", MULTI, data=2),
     Row(
         "commkit.impairments.noise.apply_awgn",
         TRANSFORM,
