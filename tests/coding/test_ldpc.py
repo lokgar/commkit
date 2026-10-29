@@ -88,6 +88,14 @@ class TestConstruction:
             LDPCCode([0, 0], [0, 1], 2, 2)
         with pytest.raises(ValueError, match="equal-length"):
             LDPCCode([0, 0], [0], 1, 4)
+        with pytest.raises(TypeError, match="must be integers"):
+            LDPCCode(
+                np.array([0.0, 0.0, 1.0, 1.0]), np.array([0.1, 2.1, 1.1, 3.1]), 2, 4
+            )
+        with pytest.raises(TypeError, match="num_checks must be an integer"):
+            LDPCCode([0, 0, 1, 1], [0, 2, 1, 3], 2.9, 4)
+        with pytest.raises(TypeError, match="length must be an integer"):
+            LDPCCode([0, 0, 1, 1], [0, 2, 1, 3], 2, 4.9)
         with pytest.raises(ValueError, match=">= 0"):
             LDPCCode.from_parity_check(_h(TREE, 8), punctured=-1)
         with pytest.raises(ValueError, match="parity bits"):

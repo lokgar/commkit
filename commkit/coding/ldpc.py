@@ -79,9 +79,18 @@ class LDPCCode(_Code):
     def __post_init__(self) -> None:
         rows = np.asarray(self.checks)
         cols = np.asarray(self.variables)
+        for name in ("num_checks", "length", "punctured"):
+            v = getattr(self, name)
+            if isinstance(v, bool) or not isinstance(v, int | np.integer):
+                raise TypeError(f"{name} must be an integer, got {v!r}.")
         m, n = int(self.num_checks), int(self.length)
         if rows.ndim != 1 or rows.shape != cols.shape or rows.size == 0:
             raise ValueError("checks and variables must be equal-length 1-D arrays.")
+        if rows.dtype.kind not in "iu" or cols.dtype.kind not in "iu":
+            raise TypeError(
+                f"checks and variables must be integers, got {rows.dtype} and "
+                f"{cols.dtype}."
+            )
         if m < 1 or n <= m:
             raise ValueError(f"need 1 <= num_checks < length, got {m} and {n}.")
         if rows.min() < 0 or rows.max() >= m or cols.min() < 0 or cols.max() >= n:

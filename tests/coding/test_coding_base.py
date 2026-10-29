@@ -47,6 +47,16 @@ class TestEncode:
         with pytest.raises(ValueError):
             encode(xp.zeros((2, 2, 4), dtype=np.int8), code=H74)
 
+    @pytest.mark.parametrize(
+        "bits",
+        [[2, 0, 0, 0], [0, -1, 0, 0], [0, 0, 256, 0]],
+        ids=["two", "minus-one", "wraps-to-zero-in-int8"],
+    )
+    def test_nonbinary_bits(self, xp: Any, bits: list[int]) -> None:
+        """Values other than 0 and 1 raise instead of encoding another payload."""
+        with pytest.raises(ValueError, match="0 or 1"):
+            encode(xp.asarray(bits, dtype=xp.int16), code=H74)
+
 
 class TestDecode:
     def test_result_layout(self, xp: Any) -> None:

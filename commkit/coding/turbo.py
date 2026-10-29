@@ -95,6 +95,10 @@ class TurboCode(_Code):
     block_length: int
 
     def __post_init__(self) -> None:
+        k = self.block_length
+        if isinstance(k, bool) or not isinstance(k, int | np.integer):
+            raise TypeError(f"block_length must be an integer, got {k!r}.")
+        object.__setattr__(self, "block_length", int(k))
         if self.block_length not in _QPP_PARAMETERS:
             raise ValueError(
                 f"block_length must be a K of TS 36.212 Table 5.1.3-3 (40, 48, ..., 6144), "

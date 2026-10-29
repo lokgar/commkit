@@ -234,7 +234,8 @@ def encode(bits: ArrayType, *, code: Any) -> ArrayType:
     TypeError
         If ``code`` is not a code object.
     ValueError
-        If ``N`` is not a multiple of ``code.k``.
+        If ``N`` is not a multiple of ``code.k``, or ``bits`` holds a value
+        other than 0 and 1.
 
     See Also
     --------
@@ -244,6 +245,9 @@ def encode(bits: ArrayType, *, code: Any) -> ArrayType:
     x = validate_array(bits, name="bits")
     if x.dtype.kind not in "biu":
         raise TypeError(f"encode(): bits must be integers or bool, got {x.dtype}.")
+    # Before the int8 cast, which would wrap 256 to 0; one sync on the GPU.
+    if x.dtype.kind != "b" and x.size and bool(((x != 0) & (x != 1)).any()):
+        raise ValueError("encode(): bits must be 0 or 1.")
     x2, was_1d = as_2d(x, name="bits")
     blocks = _blocks(x2, code.k, "bits", "encode()").astype(np.int8, copy=False)
     logger.debug("Encoding %d block(s) with %r.", blocks.shape[0], code)
