@@ -124,7 +124,10 @@ class Constellation:
             total = pmf.sum()
             if abs(total - 1.0) > 1e-6:
                 raise ValueError(f"pmf must sum to 1, got {total:.8g}.")
-            pmf = pmf / total
+            # A pmf normalized before (a stored one, a replace()) sums to 1
+            # within rounding; dividing again would move it by an ulp.
+            if abs(total - 1.0) > order * np.finfo(np.float64).eps:
+                pmf = pmf / total
 
         if self.family is not None and self.family not in _FAMILIES:
             raise ValueError(f"family must be one of {_FAMILIES} or None.")

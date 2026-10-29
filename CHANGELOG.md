@@ -52,6 +52,7 @@ Paired A/B of alternating processes against the previous commit of each change:
 
 ### Fixed
 
+- **A shaped `Constellation` rebuilt from its fields is equal to the original.** The constructor divided the pmf by its sum every time, which moved an already normalized pmf by an ulp, so a shaped constellation loaded with `load_npz` could compare unequal to the saved one. A pmf that sums to 1 within rounding is now kept as given.
 - **Staircase `valid` reflected an earlier state of the frame**: a block corrected through the next one kept its failed flag, so `HardIterations(1)` could return the right payload with `valid=False`. Success is now checked on the final frame.
 - **CCDM (and so PAS) `valid` accepted sequences no payload maps to**: a composition has more sequences than the 2^k payloads, and all were valid. Only the matcher's image is valid now.
 - **`zf_equalizer` with a float64 channel estimate returned complex128** for complex64 samples; it now computes in the samples' precision.

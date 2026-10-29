@@ -146,6 +146,16 @@ class TestValueSemantics:
         assert a == b
         assert hash(a) == hash(b)
 
+    @pytest.mark.parametrize("entropy", [3.5, 5.0, 5.9])
+    def test_rebuilt_from_its_fields_is_equal(self, entropy: float) -> None:
+        """A normalized pmf is kept as given, so a stored constellation reloads equal."""
+        c = Constellation.qam(64).shaped(entropy=entropy)
+        back = Constellation(c.points, bit_labels=c.bit_labels, pmf=c.pmf)
+        np.testing.assert_array_equal(back.pmf, c.pmf)
+        assert back == c
+        loose = Constellation(c.points, pmf=c.pmf * (1 + 1e-9))
+        assert abs(loose.pmf.sum() - 1.0) < 1e-15
+
     def test_usable_as_dict_key(self) -> None:
         assert {Constellation.qam(16): 1}[Constellation(Constellation.qam(16).points)]
 
