@@ -58,14 +58,14 @@ class TestPlotFilterResponse:
 
     def test_filter_response_complex_taps(self, xp: Any) -> None:
         """plot_filter_response() with complex taps plots I/Q components separately."""
-        taps = filtering.rrc_taps(sps=4, span=4, rolloff=0.35)
+        taps = filtering.RRC(0.35, span=4).taps(4)
         complex_taps = taps.astype(complex)
         result = plot_filter_response(complex_taps, sps=4, show=False)
         assert result is not None
 
     def test_filter_response_show(self, xp: Any) -> None:
         """plot_filter_response() with show=True calls plt.show() and returns None."""
-        taps = filtering.rrc_taps(sps=4, span=4, rolloff=0.35)
+        taps = filtering.RRC(0.35, span=4).taps(4)
         with patch("matplotlib.pyplot.show"):
             result = plot_filter_response(taps, sps=4, show=True)
         assert result is None

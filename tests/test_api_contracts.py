@@ -430,11 +430,6 @@ ROWS: list[Row] = [
     Row("commkit.filtering.linear.chebyshev2_sos", DESIGN, data=0),
     Row("commkit.filtering.linear.elliptic_sos", DESIGN, data=0),
     Row("commkit.filtering.linear.fir_taps", DESIGN, data=0),
-    Row("commkit.filtering.pulses.gaussian_taps", DESIGN, data=0),
-    Row("commkit.filtering.pulses.rc_taps", DESIGN, data=0),
-    Row("commkit.filtering.pulses.rect_taps", DESIGN, data=0),
-    Row("commkit.filtering.pulses.rrc_taps", DESIGN, data=0),
-    Row("commkit.filtering.pulses.smoothrect_taps", DESIGN, data=0),
     Row(
         "commkit.filtering.linear.fir_filter",
         TRANSFORM,
@@ -555,7 +550,7 @@ ROWS: list[Row] = [
     Row("commkit.impairments.source.generate_phase_noise", SYNTHESIS, data=0),
     # --- mapping ------------------------------------------------------------
     Row(
-        "commkit.mapping.bits.demap_symbols_hard",
+        "commkit.mapping.bits.demap_symbols",
         MULTI,
         call=lambda c, x: _a(x, constellation=C16),
         symbols=True,

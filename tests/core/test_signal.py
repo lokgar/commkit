@@ -454,7 +454,7 @@ class TestSignalCloningAndProvenance:
             sps=1, symbol_rate=1.0
         )
         with pytest.raises(ValueError, match="extract_payload"):
-            mapping.demap_symbols_hard(sig)
+            mapping.demap_symbols(sig)
 
 
 class TestSignalDSPOperations:
@@ -721,7 +721,7 @@ class TestSignalResolutionAndMetrics:
 
         # Symbol operations need one sample per symbol.
         with pytest.raises(ValueError, match="one sample per symbol"):
-            mapping.demap_symbols_hard(sig)
+            mapping.demap_symbols(sig)
 
         sym = multirate.decimate_to_symbol_rate(sig, offset=0)
         assert sym is not sig
@@ -729,7 +729,7 @@ class TestSignalResolutionAndMetrics:
         assert sym.samples.shape == (num_symbols,)
         assert isinstance(sym.samples, xp.ndarray)
 
-        bits = mapping.demap_symbols_hard(sym)
+        bits = mapping.demap_symbols(sym)
         assert isinstance(bits, xp.ndarray)
         assert bits.shape == (num_symbols,)
 
@@ -754,12 +754,12 @@ class TestSignalResolutionAndMetrics:
             multirate.decimate_to_symbol_rate(s2)
 
     def test_demap_without_modulation(self, xp):
-        """Verify demap_symbols_hard raises error without a constellation."""
+        """Verify demap_symbols raises error without a constellation."""
         s = Signal(
             samples=xp.ones(10, dtype="complex64"), sampling_rate=1.0, symbol_rate=1.0
         )
         with pytest.raises(ValueError, match="needs a constellation"):
-            mapping.demap_symbols_hard(s)
+            mapping.demap_symbols(s)
 
     def test_evm_no_reference(self, xp):
         """Verify evm raises when no reference is available."""

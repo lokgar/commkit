@@ -18,7 +18,7 @@ class TestFilterTapGenerators:
 
     def test_rrc_taps(self) -> None:
         """Verify Root Raised Cosine filter tap length and type."""
-        taps = filtering.rrc_taps(sps=4, span=10, rolloff=0.35)
+        taps = filtering.RRC(0.35, span=10).taps(4)
         assert isinstance(taps, np.ndarray)
         assert len(taps) == 10 * 4 + 1
 
@@ -27,7 +27,7 @@ class TestFilterTapGenerators:
         """Taps sit exactly 1/sps apart, so a raised cosine is zero at every
         other symbol's sample, also when span * sps is odd (the grid was
         stretched there: 3.7 % ISI at sps=3, span=9)."""
-        h = filtering.rc_taps(sps=sps, rolloff=0.25, span=span)
+        h = filtering.RC(0.25, span=span).taps(sps)
         c = len(h) // 2
         assert len(h) % 2 == 1
         others = h[c % sps :: sps]
@@ -37,7 +37,7 @@ class TestFilterTapGenerators:
     @pytest.mark.parametrize(("sps", "span"), [(1.5, 10), (2.5, 7)])
     def test_fractional_sps_grid(self, sps: float, span: int) -> None:
         """Non-integer sps: the Gaussian taps are its samples at k/sps."""
-        h = filtering.gaussian_taps(sps=sps, fwhm=1.0, span=span)
+        h = filtering.Gaussian(1.0, span=span).taps(sps)
         c = len(h) // 2
         t = (np.arange(len(h)) - c) / sps
         bt = np.sqrt(2) * np.log(2) / np.pi
@@ -46,7 +46,7 @@ class TestFilterTapGenerators:
 
     def test_rrc_taps_rolloff_zero(self, xp: Any, xpt: Any) -> None:
         """Verify zero-rolloff RRC taps match a normalised sinc function."""
-        taps = filtering.rrc_taps(sps=4, rolloff=0, span=8)
+        taps = filtering.RRC(0, span=8).taps(4)
         assert len(taps) > 0
         t = xp.linspace(-4, 4, len(taps))
         expected = xp.sinc(t)
@@ -55,27 +55,27 @@ class TestFilterTapGenerators:
 
     def test_rc_taps(self) -> None:
         """Verify Raised Cosine tap length and unit-energy normalisation."""
-        taps = filtering.rc_taps(sps=4, rolloff=0.5, span=8)
+        taps = filtering.RC(0.5, span=8).taps(4)
         assert isinstance(taps, np.ndarray)
         assert len(taps) == 8 * 4 + 1
         assert np.isclose(np.sum(np.abs(taps) ** 2), 1.0)
 
     def test_rc_taps_rolloff_zero(self) -> None:
         """Verify zero-rolloff RC tap unit energy (brick-wall filter)."""
-        taps = filtering.rc_taps(sps=4, rolloff=0.0, span=8)
+        taps = filtering.RC(0.0, span=8).taps(4)
         assert isinstance(taps, np.ndarray)
         assert np.isclose(np.sum(np.abs(taps) ** 2), 1.0)
 
     def test_gaussian_taps(self) -> None:
         """Verify Gaussian filter tap length and unit-energy normalisation."""
-        taps = filtering.gaussian_taps(sps=4, fwhm=0.5, span=4)
+        taps = filtering.Gaussian(0.5, span=4).taps(4)
         assert isinstance(taps, np.ndarray)
         assert len(taps) == 4 * 4 + 1
         assert np.isclose(np.sum(np.abs(taps) ** 2), 1.0)
 
     def test_smoothrect_taps(self) -> None:
         """Verify smoothrect tap length and unit-energy normalisation."""
-        taps = filtering.smoothrect_taps(sps=8, span=4, rise_time=0.22)
+        taps = filtering.SmoothRect(0.22, span=4).taps(8)
         assert isinstance(taps, np.ndarray)
         assert len(taps) == 4 * 8 + 1
         assert np.isclose(np.sum(np.abs(taps) ** 2), 1.0)
@@ -201,7 +201,7 @@ class TestFilterApplication:
                 np.complex64
             )
         )
-        taps = filtering.rrc_taps(sps=4)
+        taps = filtering.RRC(0.35).taps(4)
         out = filtering.matched_filter(sig, pulse=taps)
         assert out.dtype == xp.complex64
 
@@ -340,7 +340,7 @@ class TestOverlapSaveFiltering:
         """ols_fir_filter() by default matches fir_filter."""
         rng = np.random.default_rng(0)
         x_np = rng.standard_normal(512).astype(np.float32)
-        taps_np = filtering.rrc_taps(sps=4, span=6, rolloff=0.35).astype(np.float32)
+        taps_np = filtering.RRC(0.35, span=6).taps(4).astype(np.float32)
         x = xp.asarray(x_np)
         taps = xp.asarray(taps_np)
 
@@ -357,7 +357,7 @@ class TestOverlapSaveFiltering:
         """ols_fir_filter() matches fir_filter for 2-channel input."""
         rng = np.random.default_rng(1)
         x_np = rng.standard_normal((2, 512)).astype(np.float32)
-        taps_np = filtering.rrc_taps(sps=4, span=6, rolloff=0.35).astype(np.float32)
+        taps_np = filtering.RRC(0.35, span=6).taps(4).astype(np.float32)
         x = xp.asarray(x_np)
         taps = xp.asarray(taps_np)
 
@@ -372,7 +372,7 @@ class TestOverlapSaveFiltering:
         """ols_fir_filter(causal=True) returns causal convolution."""
         rng = np.random.default_rng(0)
         x_np = rng.standard_normal(512).astype(np.float32)
-        taps_np = filtering.rrc_taps(sps=4, span=6, rolloff=0.35).astype(np.float32)
+        taps_np = filtering.RRC(0.35, span=6).taps(4).astype(np.float32)
         x = xp.asarray(x_np)
         taps = xp.asarray(taps_np)
 

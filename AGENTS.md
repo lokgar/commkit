@@ -154,7 +154,7 @@ Dependencies point downward only:
 
 ### Function signatures
 
-- `f(data, other_data, *, params)`: everything after the data arguments is keyword-only. A function without data arguments may keep its single primary parameter positional (`barker_sequence(13)`, `gray_code(5)`); with several parameters, all are keyword-only (`rrc_taps(sps=2, rolloff=0.1, span=10)`). The data-argument count is recorded per function in the contract registry.
+- `f(data, other_data, *, params)`: everything after the data arguments is keyword-only. A function without data arguments may keep its single primary parameter positional (`barker_sequence(13)`, `gray_code(5)`); with several parameters, all are keyword-only (`fir_taps(sampling_rate=..., num_taps=..., cutoff=...)`). The data-argument count is recorded per function in the contract registry.
 - **Signal awareness.** A function whose main argument is waveform data (or a field a Signal really carries) accepts an array or a Signal. It unwraps once with `adapt_signal()` (in `core/_signal_adapter.py`), works on arrays, and returns through `wrap_samples()`. Never re-enter the public function recursively.
   - Functions on *derived* quantities (phase trajectories, correlations, taps, PSD bins, results) and synthesis primitives stay array-only.
 - **Metadata rule: facts versus choices.**
@@ -176,7 +176,7 @@ Dependencies point downward only:
 - **Device follows the data.** There are no `backend=` arguments and no global switches. Unsupported array types (JAX, PyTorch) raise `TypeError`.
   - Only factories with no input data to follow (`generate`, `generate_phase_noise`, `Preamble`/`SingleCarrierFrame.to_signal`, `load_npz`) take `device: str = "cpu"`, validated with `require_device()`. They draw randomness as the rule above says and do the vectorized work (mapping, shaping) on `device`. The default is never "GPU if available".
 - **No `debug_plot`.** Numerical code never imports plotting. Plot functions consume results or recompute through public compute functions.
-- **Design and apply are separate functions**, for example `rrc_taps` and `fir_filter`, or `butterworth_sos` and `iir_filter`.
+- **Design and apply are separate functions**, for example `RRC(...).taps(sps)` and `fir_filter`, or `butterworth_sos` and `iir_filter`.
 
 ### Returns
 

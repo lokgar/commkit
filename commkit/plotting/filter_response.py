@@ -1,7 +1,7 @@
 """Filter responses: :func:`plot_filter_response`.
 
 Plots the impulse, frequency and group-delay response of a filter in any of
-the forms the library designs: FIR taps (:func:`commkit.filtering.rrc_taps`,
+the forms the library designs: FIR taps (``RRC(0.1).taps(sps)``,
 :func:`~commkit.filtering.fir_taps`, ...), a ``(b, a)`` transfer function, or
 second-order sections (:func:`commkit.filtering.butterworth_sos` and the
 other ``*_sos`` designs).  The smoothers of :mod:`commkit.smoothing` have no

@@ -33,7 +33,7 @@ class TestBitMapping:
         syms = mapping.map_bits(bits, constellation=Constellation.qam(8))
         assert len(syms) == 2
 
-        bits_out = mapping.demap_symbols_hard(syms, constellation=Constellation.qam(8))
+        bits_out = mapping.demap_symbols(syms, constellation=Constellation.qam(8))
         xpt.assert_array_equal(bits, bits_out)
 
     def test_cross_qam_32_mapping(self, xp: Any, xpt: Any) -> None:
@@ -42,7 +42,7 @@ class TestBitMapping:
         syms = mapping.map_bits(bits, constellation=Constellation.qam(32))
         assert len(syms) == 2
 
-        bits_out = mapping.demap_symbols_hard(syms, constellation=Constellation.qam(32))
+        bits_out = mapping.demap_symbols(syms, constellation=Constellation.qam(32))
         xpt.assert_array_equal(bits, bits_out)
 
     def test_map_demap_unipolar(self, xp: Any, xpt: Any) -> None:
@@ -51,7 +51,7 @@ class TestBitMapping:
         syms = mapping.map_bits(bits, constellation=Constellation.pam(4, unipolar=True))
         xpt.assert_array_equal(syms >= 0, True)
 
-        bits_rx = mapping.demap_symbols_hard(
+        bits_rx = mapping.demap_symbols(
             syms, constellation=Constellation.pam(4, unipolar=True)
         )
         xpt.assert_array_equal(bits, bits_rx)
@@ -83,7 +83,7 @@ class TestBitDemapping:
     """Tests for symbol-to-bit hard demapping."""
 
     def test_demap_dimensions_mimo(self, xp: Any, xpt: Any) -> None:
-        """Test that demap_symbols_hard preserves multidimensional structure."""
+        """Test that demap_symbols preserves multidimensional structure."""
         order = 4
         constellation = Constellation.qam(order)
 
@@ -93,24 +93,22 @@ class TestBitDemapping:
         symbols_flat = mapping.map_bits(bits_in, constellation=constellation)
         symbols_mimo = symbols_flat.reshape(2, 4)
 
-        bits_out = mapping.demap_symbols_hard(symbols_mimo, constellation=constellation)
+        bits_out = mapping.demap_symbols(symbols_mimo, constellation=constellation)
         assert bits_out.shape == (2, 8)
         xpt.assert_array_equal(bits_out.flatten(), bits_in)
 
     def test_demap_symbols_empty_shape(self, xp: Any) -> None:
         """Verify demapping behavior for effectively scalar inputs."""
         s = xp.array(1.0)
-        bits = mapping.demap_symbols_hard(s, constellation=Constellation.psk(2))
+        bits = mapping.demap_symbols(s, constellation=Constellation.psk(2))
         assert bits.size == 1
         assert int(bits.item()) == 1
 
     def test_demap_symbols_returns_int8(self, xp: Any) -> None:
-        """Verify demap_symbols_hard returns int8 bits matching source_bits dtype."""
+        """Verify demap_symbols returns int8 bits matching source_bits dtype."""
         bits = xp.array([0, 1, 0, 1], dtype="int8")
         symbols = mapping.map_bits(bits, constellation=Constellation.qam(4))
-        demapped = mapping.demap_symbols_hard(
-            symbols, constellation=Constellation.qam(4)
-        )
+        demapped = mapping.demap_symbols(symbols, constellation=Constellation.qam(4))
         assert demapped.dtype == "int8"
 
 
@@ -122,11 +120,11 @@ class TestBitMappingValidation:
         with pytest.raises(TypeError, match="Constellation"):
             mapping.map_bits(xp.array([0, 0]), constellation="qpsk")
         with pytest.raises(TypeError, match="Constellation"):
-            mapping.demap_symbols_hard(xp.array([0j]), constellation="qpsk")
+            mapping.demap_symbols(xp.array([0j]), constellation="qpsk")
         with pytest.raises(TypeError, match="Constellation"):
             mapping.compute_llr(xp.array([0j]), noise_var=0.1, constellation="qpsk")
         with pytest.raises(ValueError, match="constellation="):
-            mapping.demap_symbols_hard(xp.array([0j]))
+            mapping.demap_symbols(xp.array([0j]))
         with pytest.raises(ValueError, match="constellation="):
             mapping.compute_llr(xp.array([0j]), noise_var=0.1)
 

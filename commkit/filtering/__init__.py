@@ -1,10 +1,8 @@
 """Signal-chain filters, pulse shapes and fiber compensation.
 
 - Pulses: the value objects :class:`RRC`, :class:`RC`, :class:`Gaussian`,
-  :class:`Rect` and :class:`SmoothRect` (``pulse.taps(sps)``), and their tap
-  generators :func:`rrc_taps`, :func:`rc_taps`, :func:`gaussian_taps`,
-  :func:`rect_taps` and :func:`smoothrect_taps`.  Wherever a pulse is
-  accepted, a raw taps array is accepted too.
+  :class:`Rect` and :class:`SmoothRect`; ``pulse.taps(sps)`` gives the taps.
+  Wherever a pulse is accepted, a raw taps array is accepted too.
 - Design: :func:`fir_taps` (window method) and the IIR designs in
   second-order sections, :func:`butterworth_sos`, :func:`chebyshev1_sos`,
   :func:`chebyshev2_sos`, :func:`elliptic_sos` and :func:`bessel_sos`.
@@ -41,11 +39,6 @@ from .pulses import (
     Pulse,
     Rect,
     SmoothRect,
-    gaussian_taps,
-    rc_taps,
-    rect_taps,
-    rrc_taps,
-    smoothrect_taps,
 )
 
 __all__ = [
@@ -64,12 +57,7 @@ __all__ = [
     "elliptic_sos",
     "fir_filter",
     "fir_taps",
-    "gaussian_taps",
     "iir_filter",
     "matched_filter",
     "ols_fir_filter",
-    "rc_taps",
-    "rect_taps",
-    "rrc_taps",
-    "smoothrect_taps",
 ]

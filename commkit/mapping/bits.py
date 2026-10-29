@@ -1,7 +1,7 @@
 """Hard bit mapping and demapping.
 
 ``map_bits`` maps bits to the points of a :class:`Constellation`;
-``demap_symbols_hard`` returns the bits of the nearest point (minimum
+``demap_symbols`` returns the bits of the nearest point (minimum
 Euclidean distance).  Both run on the data's device.
 """
 
@@ -12,7 +12,7 @@ from ..core._signal_adapter import adapt_signal
 from ..core.signal import Signal
 from .constellation import Constellation
 
-__all__ = ["demap_symbols_hard", "map_bits"]
+__all__ = ["demap_symbols", "map_bits"]
 
 
 def map_bits(bits: ArrayType, *, constellation: Constellation) -> ArrayType:
@@ -38,7 +38,7 @@ def map_bits(bits: ArrayType, *, constellation: Constellation) -> ArrayType:
     return constellation.map(bits)
 
 
-def demap_symbols_hard(
+def demap_symbols(
     symbols: ArrayType | Signal, *, constellation: Constellation | None = None
 ) -> ArrayType:
     """Demap hard decisions: the bits of the nearest constellation point.
@@ -67,10 +67,10 @@ def demap_symbols_hard(
         Without a constellation, or for a frame Signal or one not at one
         sample per symbol.
     """
-    signal_adapter = adapt_signal(symbols, function_name="demap_symbols_hard()")
+    signal_adapter = adapt_signal(symbols, function_name="demap_symbols()")
     x = signal_adapter.symbol_array()
     constellation = signal_adapter.resolve_choice("constellation", constellation)
-    _check_constellation(constellation, "demap_symbols_hard()")
+    _check_constellation(constellation, "demap_symbols()")
     return constellation.demap(x)
 
 

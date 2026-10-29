@@ -118,36 +118,6 @@ class TestMatchedFilterAuto:
 class TestPulseObjects:
     """Pulse value objects: delegation, definitions, validation."""
 
-    @pytest.mark.parametrize(
-        "pulse, expected",
-        [
-            (
-                filtering.RRC(0.2),
-                lambda: filtering.rrc_taps(sps=4, rolloff=0.2),  # same default
-            ),
-            (
-                filtering.RC(0.3, span=6),
-                lambda: filtering.rc_taps(sps=4, rolloff=0.3, span=6),
-            ),
-            (
-                filtering.Gaussian(0.8),
-                lambda: filtering.gaussian_taps(sps=4, fwhm=0.8),  # same default
-            ),
-            (
-                filtering.Rect(0.5, 0.25),
-                lambda: filtering.rect_taps(sps=4, duty_cycle=0.5, rise_time=0.25),
-            ),
-            (
-                filtering.SmoothRect(0.3, 0.5),
-                lambda: filtering.smoothrect_taps(
-                    sps=4, span=10, rise_time=0.3, duty_cycle=0.5
-                ),
-            ),
-        ],
-    )
-    def test_taps_match_design_functions(self, pulse, expected) -> None:
-        np.testing.assert_array_equal(pulse.taps(4), np.asarray(expected()))
-
     def test_rc_has_zero_isi(self) -> None:
         sps = 8
         h = filtering.RC(0.25).taps(sps)

@@ -12,7 +12,7 @@ from commkit import equalization, filtering, frequency, multirate
 from commkit.core import Preamble, Reference, Signal, SingleCarrierFrame, generation
 from commkit.filtering import RRC, Rect
 from commkit.impairments import apply_awgn
-from commkit.mapping import Constellation, demap_symbols_hard, map_bits
+from commkit.mapping import Constellation, demap_symbols, map_bits
 from tests.common.conversions import device_of
 
 # -----------------------------------------------------------------------------
@@ -219,7 +219,7 @@ class TestPipelineMetadataPropagation:
         assert result.sampling_rate == 2.5 * sig.symbol_rate
 
     def test_demap_constellation_is_a_choice(self, xp: Any, xpt: Any) -> None:
-        """demap_symbols_hard defaults to the Signal's constellation; an
+        """demap_symbols defaults to the Signal's constellation; an
         explicit argument wins."""
         bits = xp.asarray([0, 0, 0, 1, 1, 1, 1, 0], dtype=xp.uint8)
         bipolar = Constellation.pam(4)
@@ -230,10 +230,10 @@ class TestPipelineMetadataPropagation:
             symbol_rate=1e6,
             constellation=bipolar,
         )
-        xpt.assert_array_equal(demap_symbols_hard(sig), bits)
+        xpt.assert_array_equal(demap_symbols(sig), bits)
 
         unipolar = Constellation.pam(4, unipolar=True)
-        explicit = demap_symbols_hard(sig, constellation=unipolar)
+        explicit = demap_symbols(sig, constellation=unipolar)
         xpt.assert_array_equal(explicit, unipolar.demap(symbols))
 
 

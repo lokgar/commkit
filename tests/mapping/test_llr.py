@@ -40,7 +40,7 @@ class TestComputeLLRCore:
 
         llrs = mapping.compute_llr(symbols, noise_var=1e-6, constellation=constellation)
         hard_from_llr = (to_numpy(llrs) < 0).astype("int32")
-        hard_direct = mapping.demap_symbols_hard(symbols, constellation=constellation)
+        hard_direct = mapping.demap_symbols(symbols, constellation=constellation)
 
         xpt.assert_array_equal(xp.asarray(hard_from_llr), hard_direct)
 

@@ -1,10 +1,10 @@
-"""Pulse shapes: the value objects and their tap generators.
+"""Pulse shapes as value objects.
 
 The pulses :class:`RRC`, :class:`RC`, :class:`Gaussian`, :class:`Rect` and
-:class:`SmoothRect` (``pulse.taps(sps)``, subclasses of :class:`Pulse`) and
-their tap generators :func:`rrc_taps`, :func:`rc_taps`,
-:func:`gaussian_taps`, :func:`rect_taps` and :func:`smoothrect_taps`.  Taps
-are built from parameters alone, as host NumPy arrays.
+:class:`SmoothRect`, subclasses of :class:`Pulse`, build their taps with
+``pulse.taps(sps)``, from parameters alone, as host NumPy arrays.  They are
+the one entry point: every function that shapes or matches a pulse takes a
+pulse object (or raw taps).
 """
 
 from dataclasses import dataclass
@@ -23,24 +23,11 @@ __all__ = [
     "RRC",
     "Rect",
     "SmoothRect",
-    "gaussian_taps",
-    "rc_taps",
-    "rect_taps",
-    "rrc_taps",
-    "smoothrect_taps",
 ]
 
 # -----------------------------------------------------------------------------
-# PULSE TAP GENERATORS (array-only)
+# TAP GENERATORS (private: the pulse objects validate and call them)
 # -----------------------------------------------------------------------------
-# rect_taps:     Hard or trapezoidal rectangular pulse taps
-# gaussian_taps: Gaussian filter taps
-# smoothrect_taps: Gaussian-smoothed rectangular pulse taps
-# rrc_taps:      Root Raised Cosine filter taps
-# rc_taps:       Raised Cosine filter taps
-#
-# All build taps from parameters alone - no signal input, so none are
-# Signal-aware (same category as gray_code/barker_sequence).
 
 
 def _symbol_grid(sps: float, span: float) -> np.ndarray:
@@ -58,9 +45,7 @@ def _symbol_grid(sps: float, span: float) -> np.ndarray:
     return (np.arange(num_taps) - num_taps // 2) / sps
 
 
-def rect_taps(
-    *, sps: int, duty_cycle: float = 1.0, rise_time: float = 0.0
-) -> np.ndarray:
+def _rect_taps(*, sps: int, duty_cycle: float, rise_time: float) -> np.ndarray:
     """Generate rectangular or trapezoidal pulse taps.
 
     With ``rise_time=0`` (default) the output is a hard rectangular pulse of
@@ -72,10 +57,10 @@ def rect_taps(
     ----------
     sps : int
         Samples per symbol; must be an integer value.
-    duty_cycle : float, default 1.0
+    duty_cycle : float
         Total pulse width in symbol periods, including both ramps, in
         ``(0, 1]``: 1.0 is NRZ, 0.5 is RZ.  Rounded to whole samples.
-    rise_time : float, default 0.0
+    rise_time : float
         Length of each linear ramp (0 to 100 % of the height) in symbol
         periods, at most ``duty_cycle / 2`` so that the ramps do not
         overlap.  Rounded to whole samples.
@@ -91,9 +76,6 @@ def rect_taps(
     ValueError
         If ``rise_time > duty_cycle / 2`` or ``sps`` is not an integer.
 
-    See Also
-    --------
-    Rect : the pulse object, which refuses widths that are not whole samples.
     """
     if rise_time > duty_cycle / 2:
         raise ValueError(
@@ -101,7 +83,7 @@ def rect_taps(
             "ramps would overlap with no flat top."
         )
 
-    sps = require_integer_sps(sps, "rect_taps()")
+    sps = require_integer_sps(sps, "Rect.taps()")
     n_total = int(round(sps * duty_cycle))
     if n_total < 1:
         n_total = 1
@@ -128,7 +110,7 @@ def rect_taps(
     return h
 
 
-def gaussian_taps(*, sps: float, fwhm: float = 1.0, span: int = 10) -> np.ndarray:
+def _gaussian_taps(*, sps: float, fwhm: float, span: int) -> np.ndarray:
     """Generate Gaussian pulse taps.
 
     The pulse shape of GMSK/GFSK: a narrow occupied bandwidth at the price of
@@ -138,11 +120,11 @@ def gaussian_taps(*, sps: float, fwhm: float = 1.0, span: int = 10) -> np.ndarra
     ----------
     sps : float
         Samples per symbol.
-    fwhm : float, default 1.0
+    fwhm : float
         Full width at half maximum of the pulse in symbol periods.  Smaller
         values give a narrower pulse (less ISI, wider bandwidth).  The
         bandwidth-time product is ``BT = √2·ln(2) / (π·fwhm)``.
-    span : int, default 10
+    span : int
         Filter span in symbols: ``int(span * sps)`` taps, made odd, spaced
         ``1/sps`` and centered on a sample.
 
@@ -172,8 +154,8 @@ def gaussian_taps(*, sps: float, fwhm: float = 1.0, span: int = 10) -> np.ndarra
     return normalize(h, mode="unit_energy")
 
 
-def smoothrect_taps(
-    *, sps: int, span: int, rise_time: float = 0.22, duty_cycle: float = 1.0
+def _smoothrect_taps(
+    *, sps: int, span: int, rise_time: float, duty_cycle: float
 ) -> np.ndarray:
     """Generate the taps of a rectangle smoothed by a Gaussian.
 
@@ -188,12 +170,12 @@ def smoothrect_taps(
     span : int
         Filter span in symbols: ``int(span * sps)`` taps, made odd, spaced
         ``1/sps``.
-    rise_time : float, default 0.22
+    rise_time : float
         10 %-90 % edge time in symbol periods, ``> 0``.  Smaller values give
         sharper edges (closer to a hard rectangle), larger ones softer edges
         (towards a Gaussian).  The Gaussian's standard deviation is
         ``σ = rise_time / (2·√2·erfinv(0.8))``.
-    duty_cycle : float, default 1.0
+    duty_cycle : float
         Width of the underlying rectangle in symbol periods: 1.0 for NRZ,
         0.5 for RZ.
 
@@ -214,7 +196,7 @@ def smoothrect_taps(
         rise_time,
         duty_cycle,
     )
-    sps = require_integer_sps(sps, "smoothrect_taps()")
+    sps = require_integer_sps(sps, "SmoothRect.taps()")
     t = _symbol_grid(sps, span)
 
     # Convert rise_time to Gaussian sigma.
@@ -233,7 +215,7 @@ def smoothrect_taps(
     return normalize(h, mode="unit_energy")
 
 
-def rrc_taps(*, sps: float, rolloff: float = 0.35, span: int = 32) -> np.ndarray:
+def _rrc_taps(*, sps: float, rolloff: float, span: int) -> np.ndarray:
     """Generate root-raised-cosine (RRC) pulse taps.
 
     An RRC at the transmitter (pulse shaping) and at the receiver (matched
@@ -244,9 +226,9 @@ def rrc_taps(*, sps: float, rolloff: float = 0.35, span: int = 32) -> np.ndarray
     ----------
     sps : float
         Samples per symbol.
-    rolloff : float, default 0.35
+    rolloff : float
         Roll-off factor in ``[0, 1]``.
-    span : int, default 32
+    span : int
         Filter span in symbols: ``int(span * sps)`` taps, made odd, spaced
         ``1/sps`` (see :class:`RRC` for the SNR floor of truncation).
 
@@ -276,16 +258,16 @@ def rrc_taps(*, sps: float, rolloff: float = 0.35, span: int = 32) -> np.ndarray
     return normalize(h, mode="unit_energy")
 
 
-def rc_taps(*, sps: float, rolloff: float = 0.35, span: int = 32) -> np.ndarray:
+def _rc_taps(*, sps: float, rolloff: float, span: int) -> np.ndarray:
     """Generate raised-cosine (RC) pulse taps.
 
     Parameters
     ----------
     sps : float
         Samples per symbol.
-    rolloff : float, default 0.35
+    rolloff : float
         Roll-off factor in ``[0, 1]``.
-    span : int, default 32
+    span : int
         Filter span in symbols: ``int(span * sps)`` taps, made odd, spaced
         ``1/sps`` (see :class:`RRC` for the SNR floor of truncation).
 
@@ -351,6 +333,10 @@ def _check_duty_cycle(duty_cycle: float) -> None:
 class RRC(Pulse):
     """Root-raised-cosine pulse.
 
+    An RRC at the transmitter (pulse shaping) and at the receiver (matched
+    filter) together make a raised cosine, which meets the Nyquist ISI
+    criterion.
+
     Parameters
     ----------
     rolloff : float
@@ -372,7 +358,7 @@ class RRC(Pulse):
 
     def taps(self, sps: float) -> np.ndarray:
         """RRC taps at ``sps`` samples per symbol (host ``float64``)."""
-        return rrc_taps(sps=sps, rolloff=self.rolloff, span=self.span)
+        return _rrc_taps(sps=sps, rolloff=self.rolloff, span=self.span)
 
 
 @dataclass(frozen=True)
@@ -391,7 +377,7 @@ class RC(Pulse):
 
     def taps(self, sps: float) -> np.ndarray:
         """RC taps at ``sps`` samples per symbol (host ``float64``)."""
-        return rc_taps(sps=sps, rolloff=self.rolloff, span=self.span)
+        return _rc_taps(sps=sps, rolloff=self.rolloff, span=self.span)
 
 
 @dataclass(frozen=True)
@@ -417,12 +403,16 @@ class Gaussian(Pulse):
 
     def taps(self, sps: float) -> np.ndarray:
         """Gaussian taps at ``sps`` samples per symbol (host ``float64``)."""
-        return gaussian_taps(sps=sps, fwhm=self.fwhm, span=self.span)
+        return _gaussian_taps(sps=sps, fwhm=self.fwhm, span=self.span)
 
 
 @dataclass(frozen=True)
 class Rect(Pulse):
     """Rectangular or trapezoidal pulse (integer ``sps`` only).
+
+    With ``rise_time=0`` a hard rectangle of ``duty_cycle`` symbol periods;
+    with ``rise_time > 0`` the edges are linear ramps, an isosceles trapezoid
+    that models a slew-rate-limited driver or modulator.
 
     Parameters
     ----------
@@ -460,7 +450,7 @@ class Rect(Pulse):
                     f"Rect: {name} * sps = {value} * {sps} = {n:g} is not a whole "
                     "number of samples; choose sps accordingly."
                 )
-        return rect_taps(sps=sps, duty_cycle=self.duty_cycle, rise_time=self.rise_time)
+        return _rect_taps(sps=sps, duty_cycle=self.duty_cycle, rise_time=self.rise_time)
 
 
 @dataclass(frozen=True)
@@ -470,7 +460,9 @@ class SmoothRect(Pulse):
     Parameters
     ----------
     rise_time : float, default 0.22
-        10%-90% edge time in symbol periods.
+        10%-90% edge time in symbol periods: the Gaussian's standard
+        deviation is ``rise_time / (2 sqrt(2) erfinv(0.8))``.  Smaller values
+        give sharper edges, larger ones a pulse closer to a Gaussian.
     duty_cycle : float, default 1.0
         Width of the underlying rectangle in symbol periods: 1.0 is NRZ,
         0.5 is RZ.
@@ -490,7 +482,7 @@ class SmoothRect(Pulse):
 
     def taps(self, sps: float) -> np.ndarray:
         """Smoothed rectangular taps at integer ``sps`` (host ``float64``)."""
-        return smoothrect_taps(
+        return _smoothrect_taps(
             sps=require_integer_sps(sps, "SmoothRect.taps()"),
             span=self.span,
             rise_time=self.rise_time,
