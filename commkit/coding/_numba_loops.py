@@ -74,17 +74,25 @@ def min_sum_row(a, r, cols, e0, e1, scale, offset):  # type: ignore[no-untyped-d
 
 @_inline
 def sum_product_row(a, r, cols, e0, e1):  # type: ignore[no-untyped-def]
-    """Update one check row by sum-product (``phi`` form); ``a`` and ``r`` in place."""
+    """Update one check row by sum-product (``phi`` form); ``a`` and ``r`` in place.
+
+    The first pass keeps ``Q`` in ``a`` and ``phi(|Q|)`` in ``r`` for the
+    second (no other row of the layer touches them).
+    """
     total = _ZERO
     neg = False
     for e in range(e0, e1):
-        q = a[cols[e]] - r[e]
-        neg ^= q < _ZERO
-        total += phi(abs(q))
-    for e in range(e0, e1):
         c = cols[e]
         q = a[c] - r[e]
-        mag = phi(total - phi(abs(q)))
+        neg ^= q < _ZERO
+        p = phi(abs(q))
+        total += p
+        a[c] = q
+        r[e] = p
+    for e in range(e0, e1):
+        c = cols[e]
+        q = a[c]
+        mag = phi(total - r[e])
         rn = -mag if neg ^ (q < _ZERO) else mag
         a[c] = q + rn
         r[e] = rn

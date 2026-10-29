@@ -8,7 +8,10 @@
 // separates the layers.  Each row makes two passes over its edges, as the
 // CPU decoder: the first gathers Q = APP - R_old (min1, min2, argmin and the
 // sign parity for min-sum; the sum of phi(|Q|) for sum-product), the second
-// recomputes Q and writes R_new and APP = Q + R_new.  Rows and layers run in
+// recomputes Q and writes R_new and APP = Q + R_new.  (The CPU's sum-product
+// keeps Q and phi(|Q|) from the first pass instead, the same values; here
+// keeping them in global memory was 1.7x slower and in a local array no
+// faster: the kernel waits on memory, not on logf/tanhf.)  Rows and layers run in
 // the same order as on the CPU, so min-sum gives the same values bit for bit
 // (explicit _rn intrinsics keep the compiler from contracting into FMAs);
 // sum-product differs by the rounding of logf/tanhf.
