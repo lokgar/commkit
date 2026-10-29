@@ -23,11 +23,12 @@ data's device.
 
 from dataclasses import dataclass, replace
 from functools import cache, cached_property
+from typing import Any
 
 import numpy as np
 
 from .._array import warn_if_double
-from ..backend import ArrayType, dispatch
+from ..backend import ArrayType, _device_tables, dispatch
 from .gray import _gray_points, _nearest_index, _pack, _unpack_bits
 from .llr import _Axis, _llr, _llr_separable, _llr_separable_gpu
 from .shaping import (
@@ -273,7 +274,8 @@ class Constellation:
         for b in range(1, k):
             label <<= 1
             label |= groups[..., b]
-        return xp.asarray(self._points_by_label)[label]
+        (points,) = _device_tables(self, "map", xp, lambda: (self._points_by_label,))
+        return points[label]
 
     def demap(self, symbols: ArrayType) -> ArrayType:
         """Hard decisions: bits of the nearest point, on the symbols' device.
@@ -283,7 +285,8 @@ class Constellation:
         """
         symbols, xp, _ = dispatch(symbols)
         idx = self._nearest(symbols.reshape(-1))
-        bits = xp.asarray(self.bit_labels)[idx]
+        (labels,) = _device_tables(self, "labels", xp, lambda: (self.bit_labels,))
+        bits = labels[idx]
         return bits.reshape(*symbols.shape[:-1], -1)
 
     def llr(
@@ -313,7 +316,10 @@ class Constellation:
         x, xp, _ = dispatch(symbols)
         grid = self._square_grid
         if grid is None:
-            return _nearest_index(x, self.points.astype(self._storage_dtype()))
+            (points,) = _device_tables(
+                self, "points", xp, lambda: (self.points.astype(self._storage_dtype()),)
+            )
+            return _nearest_index(x, points)
         # Square lattice: the nearest point is found per axis, O(N) with no
         # (N, M) distance matrix.
         lev_min, step, side, lut = grid
@@ -324,11 +330,16 @@ class Constellation:
             g = xp.round((v - dtype.type(lev_min)) / dtype.type(step))
             return xp.clip(g, 0, side - 1).astype(xp.int64)
 
-        return xp.asarray(lut)[level(x.real) * side + level(x.imag)]
+        (lut_dev,) = _device_tables(self, "grid", xp, lambda: (lut,))
+        return lut_dev[level(x.real) * side + level(x.imag)]
 
     # -- value semantics -----------------------------------------------------
 
     def __eq__(self, other: object) -> bool:
+        # The device-table cache compares an object with itself on every
+        # lookup.
+        if self is other:
+            return True
         if not isinstance(other, Constellation):
             return NotImplemented
         return (
@@ -345,9 +356,20 @@ class Constellation:
         )
 
     def __hash__(self) -> int:
-        # ``+ 0.0`` maps -0.0 to 0.0, which array_equal treats as equal.
-        pmf = None if self.pmf is None else (self.pmf + 0.0).tobytes()
-        return hash(((self.points + 0.0).tobytes(), self.bit_labels.tobytes(), pmf))
+        # Cached: the device-table cache hashes the object on every call.
+        h: int | None = self.__dict__.get("_hash")
+        if h is None:
+            # ``+ 0.0`` maps -0.0 to 0.0, which array_equal treats as equal.
+            pmf = None if self.pmf is None else (self.pmf + 0.0).tobytes()
+            h = hash(((self.points + 0.0).tobytes(), self.bit_labels.tobytes(), pmf))
+            self.__dict__["_hash"] = h
+        return h
+
+    def __getstate__(self) -> dict[str, Any]:
+        # Not the cached hash: hashes of bytes differ between processes.
+        state = self.__dict__.copy()
+        state.pop("_hash", None)
+        return state
 
     def __repr__(self) -> str:
         name = self.family.upper() if self.family else "custom"

@@ -1,12 +1,13 @@
 """Tests for the Constellation value object (mapping.constellation)."""
 
 import dataclasses
+import pickle
 from typing import Any
 
 import numpy as np
 import pytest
 
-from commkit import mapping
+from commkit import backend, mapping
 from commkit.mapping import Constellation
 from commkit.mapping.gray import _gray_points
 
@@ -147,6 +148,25 @@ class TestValueSemantics:
 
     def test_usable_as_dict_key(self) -> None:
         assert {Constellation.qam(16): 1}[Constellation(Constellation.qam(16).points)]
+
+    def test_pickle_leaves_the_hash_behind(self) -> None:
+        """A hash of bytes is valid in its own process only."""
+        q = Constellation.qam(16).shaped(nu=0.1)
+        hash(q)
+        copy = pickle.loads(pickle.dumps(q))
+        assert "_hash" not in copy.__dict__
+        assert copy == q and hash(copy) == hash(q)
+
+    def test_tables_cached_per_device(self, xp: Any, xpt: Any) -> None:
+        q = Constellation.qam(16)
+        bits = xp.asarray(np.random.default_rng(0).integers(0, 2, 64, dtype=np.int8))
+        xpt.assert_array_equal(q.demap(q.map(bits)), bits)
+        tables = backend._DEVICE_TABLES[q]
+        assert {kind for kind, _ in tables} >= {"map", "labels", "grid"}
+        p = Constellation.psk(8)
+        y = p.map(bits[:63])
+        xpt.assert_array_equal(p.demap(y), bits[:63])
+        assert {kind for kind, _ in backend._DEVICE_TABLES[p]} >= {"points"}
 
 
 class TestRotationalSymmetry:
