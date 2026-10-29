@@ -87,7 +87,7 @@ class TestSingleCarrierFrameBasics:
 
     def test_sc_frame_bit_first(self, xp: Any) -> None:
         """Verify Frame preserves source bits (bit-first architecture)."""
-        frame = SingleCarrierFrame(payload_num_symbols=100, payload_seed=42)
+        frame = SingleCarrierFrame(payload_num_symbols=100, payload_rng=42)
         bits = frame.payload_bits
         assert bits is not None
         assert bits.size == 200
@@ -95,8 +95,28 @@ class TestSingleCarrierFrameBasics:
         sig = frame.to_signal(symbol_rate=1e6, sps=1)
         assert sig.reference is None
 
+    def test_payload_rng(self) -> None:
+        """A fresh payload by default; the frame keeps the seed it drew, so
+        a copy or a rebuilt frame repeats the payload."""
+        a, b = (
+            SingleCarrierFrame(payload_num_symbols=64),
+            SingleCarrierFrame(payload_num_symbols=64),
+        )
+        assert isinstance(a.payload_rng, int)
+        assert not np.array_equal(a.payload_bits, b.payload_bits)
+        again = SingleCarrierFrame(payload_num_symbols=64, payload_rng=a.payload_rng)
+        np.testing.assert_array_equal(again.payload_bits, a.payload_bits)
+        copy = dataclasses.replace(a, pilot_gain_db=1.0)
+        np.testing.assert_array_equal(copy.payload_bits, a.payload_bits)
+        drawn = SingleCarrierFrame(
+            payload_num_symbols=64, payload_rng=np.random.default_rng(5)
+        )
+        assert drawn.payload_rng == int(np.random.default_rng(5).integers(2**63))
+        with pytest.raises(ValueError, match="payload_rng"):
+            SingleCarrierFrame(payload_rng=-1)
+
     def test_preamble_to_signal(self, xp: Any) -> None:
-        """Verify Preamble.to_signal(symbol_rate=1e6) standalone signal generation."""
+        """Verify Preamble.to_signal() standalone signal generation."""
         preamble = Preamble(sequence_type="barker", num_symbols=13)
         sig = preamble.to_signal(sps=4, symbol_rate=1e6, pulse=RRC(0.35))
 
@@ -604,7 +624,7 @@ class TestExtractPayload:
         )
         assert piloted.payload_num_symbols == 21
         # replace() passes both sizes, which agree.
-        again = dataclasses.replace(frame, payload_seed=3)
+        again = dataclasses.replace(frame, payload_rng=3)
         assert again.payload_num_symbols == 21 and again.payload_blocks == 6
 
     def test_codeword_sizing_errors(self):

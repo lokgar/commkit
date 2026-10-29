@@ -190,8 +190,12 @@ class SingleCarrierFrame:
     payload_constellation : Constellation, default ``Constellation.psk(4)``
         Payload constellation.  A shaped one
         (``Constellation.qam(64).shaped(entropy=5)``) gives a PS payload.
-    payload_seed : int, default 42
-        Seed of the payload data.
+    payload_rng : int or numpy.random.Generator, optional
+        Seed or generator of the payload data, as ``generate(rng=)``;
+        ``None`` draws a fresh payload.  The frame keeps the integer seed it
+        used (a generator gives one draw), so a frame, its
+        ``dataclasses.replace`` copies and a saved and loaded frame
+        rebuild the same payload.
     payload_code : code object, optional
         Code of the payload (:mod:`commkit.coding`), passed to
         :func:`generate` as ``code``: a FEC code with a uniform payload
@@ -225,7 +229,8 @@ class SingleCarrierFrame:
     pilot_block_num_symbols : int, default 0
         Pilots per period for ``"block"``.
     pilot_seed : int, default 1337
-        Seed of the pilot symbols.
+        Seed of the pilot symbols: pilots are a known sequence, the same
+        in every frame by default.
     pilot_constellation : Constellation, default ``Constellation.psk(4)``
         Pilot constellation; must be unshaped.
     pilot_gain_db : float, default 0.0
@@ -259,7 +264,7 @@ class SingleCarrierFrame:
     # None until __post_init__ resolves it (1000, or from payload_blocks).
     payload_num_symbols: int = None  # type: ignore[assignment]
     payload_constellation: Constellation = field(default_factory=_qpsk)
-    payload_seed: int = 42
+    payload_rng: int | np.random.Generator | None = None
     payload_code: Any = None
     payload_blocks: int | None = None
     payload_pad: bool = False
@@ -297,6 +302,8 @@ class SingleCarrierFrame:
         accepted when they agree, as ``dataclasses.replace`` and
         :func:`~commkit.io.load_npz` pass both.
         """
+        object.__setattr__(self, "payload_rng", _resolve_seed(self.payload_rng))
+        _check_int("pilot_seed", self.pilot_seed, 0)
         if self.payload_num_symbols is not None:
             _check_int("payload_num_symbols", self.payload_num_symbols, 1)
         if self.payload_blocks is not None:
@@ -480,7 +487,7 @@ class SingleCarrierFrame:
             num_channels=self.num_channels,
             code=self.payload_code,
             pad=self.payload_pad,
-            rng=self.payload_seed,
+            rng=self.payload_rng,
         )
         ref = sig.reference
         assert ref is not None
@@ -978,6 +985,17 @@ def extract_payload(signal: Signal) -> Signal:
         center_frequency=signal.center_frequency,
         domain=signal.domain,
     )
+
+
+def _resolve_seed(rng: Any) -> int:
+    """The integer seed a frame keeps: ``rng`` itself, one draw from a
+    Generator, or fresh entropy for ``None``."""
+    if isinstance(rng, np.random.Generator):
+        return int(rng.integers(2**63))
+    if rng is None:
+        return int(np.random.SeedSequence().generate_state(1, np.uint64)[0] >> 1)
+    _check_int("payload_rng", rng, 0)
+    return int(rng)
 
 
 def _check_int(name: str, value: Any, low: int) -> None:

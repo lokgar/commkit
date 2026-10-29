@@ -33,7 +33,7 @@ def _frame_signal():
         # snapped 32_768 up to, so the workload matches the 0002 baseline.
         payload_num_symbols=32_798,
         payload_constellation=Constellation.qam(16),
-        payload_seed=42,
+        payload_rng=42,
         preamble=Preamble(sequence_type="barker", num_symbols=13),
         pilot_pattern="comb",
         pilot_period=32,
