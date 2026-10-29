@@ -24,13 +24,20 @@ def apply_awgn(
 ) -> S:
     """Add white Gaussian noise at an Es/N0, or at an OSNR for an optical field.
 
-    With ``esn0_db`` every channel gets the requested Es/N0 on its own: the
-    noise variance per sample of channel ``c`` is
-    ``P_c · sps / (Es/N0)`` with ``P_c`` its signal power.  With
-    ``Es = sps · P_c``, that is ``Es/N0`` per symbol after a matched filter
-    and decimation, whatever the oversampling.  A channel can be anything
-    with its own receiver noise: a polarization, an antenna, a wire pair, a
-    lane.
+    Powers are per sample and per channel, in the squared units of the
+    samples: ``P_c = mean(|x_c[n]|²)`` over the samples of channel ``c``.
+    A symbol lasts ``T = sps / f_s``, so its energy is
+    ``Es_c = P_c · T = sps · P_c / f_s``; white noise of variance ``σ²``
+    per sample fills the band ``f_s`` with the density ``N0 = σ² / f_s``.
+    Hence ``Es/N0 = sps · P_c / σ²``: in sample units, ``Es`` is the power
+    summed over the ``sps`` samples of a symbol and ``N0`` the noise
+    variance of one sample.
+
+    With ``esn0_db`` every channel gets the requested Es/N0 on its own:
+    channel ``c`` gets noise of variance ``σ_c² = sps · P_c / (Es/N0)`` per
+    sample.  That is the Es/N0 per symbol after a matched filter and
+    decimation, whatever the oversampling.  A channel can be anything with
+    its own receiver noise: a polarization, an antenna, a wire pair, a lane.
 
     With ``osnr_db`` (an optical Signal) the noise is amplified spontaneous
     emission specified as optical links are: the total signal power of all
@@ -65,14 +72,21 @@ def apply_awgn(
         Samples per symbol, for ``esn0_db``.  Taken from the Signal; required
         for array input.  A value that disagrees with the Signal raises.
     signal_power : float or array_like, optional
-        Signal power for the noise scaling: a scalar shared by every channel,
-        or ``(C,)`` per channel.  Defaults to each channel's mean power,
-        which counts any silent stretch.  Pass the nominal power instead
-        when that is the reference: e.g. ``signal_power=1.0`` for a
-        unit-power constellation sent in bursts separated by zero guard
-        intervals, whose measured mean falls below the power of the symbols.
-        A scalar also gives every channel the same absolute noise level, as
-        identical receivers with one noise floor.
+        The power ``P_c`` per sample of each channel, ``mean(|x_c|²)`` in
+        the squared units of the samples, that the Es/N0 or OSNR refers to:
+        ``Es_c = sps · P_c``.  A scalar is the power of *each* channel (not
+        their sum or a total), so every channel gets the same absolute
+        noise level, as identical receivers with one noise floor; ``(C,)``
+        gives one power per channel.  Defaults to each channel's measured
+        mean power over the whole record, which counts any silent stretch.
+        Pass the nominal power instead when that is the reference: e.g.
+        ``signal_power=1.0`` for unit-power symbols at one sample per
+        symbol sent in bursts separated by zero guard intervals, whose
+        measured mean falls below the power of the symbols.  For a
+        pulse-shaped signal the per-sample power of unit-energy symbols is
+        ``1 / sps`` (``signal_power=1 / sig.sps``).  With ``osnr_db`` the
+        signal power is the sum over channels, ``C · signal_power`` for a
+        scalar.
     reference_bandwidth : float, default 12.5e9
         Noise reference bandwidth ``B_ref`` of ``osnr_db`` in Hz.  The
         standard reference is 0.1 nm of optical bandwidth, ``c · 0.1 nm /
