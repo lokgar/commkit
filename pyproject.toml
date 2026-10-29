@@ -36,7 +36,7 @@ Issues = "https://github.com/lokgar/commkit/issues"
 # CuPy with its pip-packaged CUDA toolkit libraries (cuBLAS, cuFFT, cuRAND,
 # cuSOLVER, cuSPARSE, NVRTC), so no system CUDA toolkit is needed.
 gpu = [
-    "cupy-cuda13x[ctk]>=14.1",
+    "cupy-cuda13x[ctk]>=14.2",
 ]
 # Running the example notebooks. Not required for the library itself.
 notebook = [

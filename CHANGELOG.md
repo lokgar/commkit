@@ -6,6 +6,7 @@ Notable changes to CommKit, newest first. Performance figures are from the refer
 
 ### Changes that may need code updates
 
+- **The `gpu` extra requires CuPy 14.2** (`cupy-cuda13x>=14.2`), the first release with sparse arrays (`cupyx.scipy.sparse.csr_array`), which the LDPC encoder now uses on the GPU.
 - **`encode` rejects bits other than 0 and 1** with `ValueError`. Before, linear codes silently encoded another payload (`[2, 0, 0, 0]` gave the all-zero codeword), a value of 256 wrapped to 0, and the turbo encoder indexed its trellis with the value.
 - **`TurboCode` and `LDPCCode` reject non-integer parameters** with `TypeError` (`TurboCode(40.0)` was accepted; float LDPC indices were truncated into a different code).
 - **`fir_filter` and `ols_fir_filter` raise for complex taps on real samples.** The imaginary part was dropped (the taps `[1j]` gave zeros). Pass complex samples for a complex output.

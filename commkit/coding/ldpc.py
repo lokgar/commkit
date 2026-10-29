@@ -459,17 +459,12 @@ def _csr(
 
 
 def _sparse(xp: Any, tables: tuple[Any, ...], shape: tuple[int, int]) -> Any:
-    """A CSR matrix on ``xp``'s device from cached ``(data, indices, indptr)``.
-
-    SciPy's sparse array on the CPU; CuPy has only the matrix interface.
-    """
+    """A CSR array on ``xp``'s device from cached ``(data, indices, indptr)``."""
     if xp is np:
-        import scipy.sparse
-
-        return scipy.sparse.csr_array(tuple(tables), shape=shape)
-    import cupyx.scipy.sparse
-
-    return cupyx.scipy.sparse.csr_matrix(tuple(tables), shape=shape)
+        import scipy.sparse as sparse
+    else:
+        import cupyx.scipy.sparse as sparse
+    return sparse.csr_array(tuple(tables), shape=shape)
 
 
 # -----------------------------------------------------------------------------
