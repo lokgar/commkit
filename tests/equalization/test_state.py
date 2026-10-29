@@ -119,20 +119,22 @@ def test_chunked_pilots_with_deboost(name, xp):
     mask[::10] = True
     gain = 10 ** (3.0 / 20)
     x_np = x_np[0] * np.repeat(np.where(mask, gain, 1.0), sps).astype(np.float32)
-    ref, pm = E.build_pilot_ref(
-        s_np[0][mask], mask, num_symbols=mask.size, num_channels=1
-    )
+    s0 = s_np[0]
+
+    def pilots(span):
+        return E.EqualizerPilots(s0[span][mask[span]], mask[span], gain_db=3.0)
+
     fn = getattr(E, name)
-    kw = dict(sps=sps, num_taps=7, constellation=C16, pilot_gain_db=3.0)
+    kw = dict(sps=sps, num_taps=7, constellation=C16)
     if name == "block_cma":
         kw["block_size"] = 64
     x = xp.asarray(x_np)
     n1 = n_sym1 * sps
 
-    r1 = fn(x[:n1], **kw, pilot_ref=ref[:, :n_sym1], pilot_mask=pm[:n_sym1])
+    r1 = fn(x[:n1], **kw, pilots=pilots(slice(None, n_sym1)))
     k = n_sym1 - r1.state.overlap  # first symbol of the continued call
-    r2 = fn(x[n1:], **kw, pilot_ref=ref[:, k:], pilot_mask=pm[k:], state=r1.state)
-    full = fn(x, **kw, pilot_ref=ref, pilot_mask=pm, state=_cold_like(r1.state))
+    r2 = fn(x[n1:], **kw, pilots=pilots(slice(k, None)), state=r1.state)
+    full = fn(x, **kw, pilots=pilots(slice(None)), state=_cold_like(r1.state))
 
     np.testing.assert_array_equal(
         _stitch(r1.y_hat, r2.y_hat, r1.state.overlap), _host(full.y_hat)

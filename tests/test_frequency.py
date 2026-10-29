@@ -947,3 +947,23 @@ class TestSignalInputFrequency:
 
         assert isinstance(out_sig, Signal)
         xpt.assert_allclose(out_sig.samples, out_arr)
+
+
+def test_pilot_symbols_from_frame(xp):
+    """PilotSymbols.from_frame: the frame's pilots at the symbol-centered
+    samples of a record at sps samples per symbol."""
+    from commkit.core import SingleCarrierFrame
+
+    frame = SingleCarrierFrame(
+        payload_num_symbols=1800, pilot_pattern="comb", pilot_period=10, payload_rng=2
+    )
+    method = frequency.PilotSymbols.from_frame(frame, sps=2)
+    one = frequency.PilotSymbols.from_frame(frame)
+    np.testing.assert_array_equal(method.indices, 2 * one.indices)
+    sig = frame.to_signal(symbol_rate=1e6).to(device_of(xp))
+    n = xp.arange(sig.samples.shape[-1])
+    shifted = sig.replace(
+        samples=(sig.samples * xp.exp(2j * np.pi * 1e3 * n / 1e6)).astype(xp.complex64)
+    )
+    est = frequency.estimate_frequency_offset(shifted, one)
+    assert float(to_numpy(est.value)) == pytest.approx(1e3, rel=1e-3)

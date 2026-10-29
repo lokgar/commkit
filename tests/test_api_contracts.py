@@ -388,7 +388,7 @@ ROWS: list[Row] = [
         call=lambda c, x: _a(x, num_taps=5, sps=SPS, block_size=64, constellation=C16),
         fact=SPS_CONFLICT,
     ),
-    Row("commkit.equalization.blind.build_pilot_ref", DESIGN, data=2),
+    Row("commkit.equalization.pilots.EqualizerPilots", VALUE),
     Row(
         "commkit.equalization.linear.apply_taps",
         RATE_CHANGE,

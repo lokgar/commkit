@@ -719,3 +719,28 @@ class TestSignalInputPilotFunctions:
 
         assert not isinstance(phi_sig, Signal)
         xpt.assert_allclose(phi_sig, phi_arr)
+
+
+def test_pilot_aided_from_frame(xp):
+    """PilotAided.from_frame reads the frame's pilot positions and symbols and
+    removes a phase offset of the frame's symbols."""
+    from commkit.core import Preamble, SingleCarrierFrame
+
+    frame = SingleCarrierFrame(
+        payload_num_symbols=900,
+        pilot_pattern="comb",
+        pilot_period=10,
+        preamble=Preamble(num_symbols=13),
+        payload_rng=1,
+    )
+    sig = frame.to_signal(symbol_rate=1e6).to(device_of(xp))
+    rotated = sig.replace(samples=sig.samples * xp.exp(1j * 0.7).astype(xp.complex64))
+    method = recovery.PilotAided.from_frame(frame)
+    assert method.indices.size == frame.pilot_symbols.size
+    assert method.indices[0] >= 13  # after the preamble
+    est = recovery.estimate_carrier_phase(rotated, method)
+    np.testing.assert_allclose(to_device(est.value, "cpu"), 0.7, atol=1e-4)
+    body = recovery.PilotAided.from_frame(frame, include_preamble=False)
+    np.testing.assert_array_equal(body.indices + 13, method.indices)
+    with pytest.raises(ValueError, match="no pilots"):
+        recovery.PilotAided.from_frame(SingleCarrierFrame(payload_num_symbols=10))

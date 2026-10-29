@@ -282,7 +282,7 @@ class TestDemultiplexPolarizationTonesDynamic:
         Wg, grid = track.matrix_grid, track.grid_positions
         assert track.edge > 0
         with pytest.raises(ValueError, match="matrices"):
-            track.matrix
+            _ = track.matrix
         assert Wg.ndim == 3 and Wg.shape[1:] == (2, 2)
         assert Wg.shape[0] == grid.shape[0]
         assert Wg.dtype == xp.complex128

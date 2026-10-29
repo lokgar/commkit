@@ -20,7 +20,8 @@ import numpy as np
 from . import _fft
 from ._array import as_2d, broadcast_channels, restore_1d
 from .backend import ArrayType, dispatch, to_device
-from .core._signal_adapter import S, adapt_signal
+from .core._signal_adapter import S, adapt_signal, require_integer_sps
+from .core.frame import _frame_pilots
 from .core.signal import Signal
 from .logger import logger
 from .math import _derotate, _linear_trend_slope
@@ -262,6 +263,45 @@ class PilotSymbols:
         for name, arr in (("indices", indices), ("values", values)):
             arr.setflags(write=False)
             object.__setattr__(self, name, arr)
+
+    @classmethod
+    def from_frame(
+        cls,
+        frame: Any,
+        *,
+        sps: int = 1,
+        include_preamble: bool = True,
+        snr_weighted: bool = True,
+    ) -> "PilotSymbols":
+        """The pilots of a ``SingleCarrierFrame``.
+
+        Parameters
+        ----------
+        frame : SingleCarrierFrame
+            A frame with pilots.
+        sps : int, default 1
+            Samples per symbol of the record to estimate on: the pilot of
+            symbol ``k`` is sample ``k * sps``, the symbol-centered phase of
+            a matched-filtered, timing-corrected record.
+        include_preamble : bool, default True
+            Count from the frame start (the preamble's first symbol, as after
+            ``correct_timing(mode="slice")``); ``False`` counts from the end
+            of the preamble.
+        snr_weighted : bool, default True
+            As for the constructor.
+
+        Returns
+        -------
+        PilotSymbols
+
+        Raises
+        ------
+        ValueError
+            If the frame has no pilots.
+        """
+        sps = require_integer_sps(sps, "PilotSymbols.from_frame()")
+        indices, values = _frame_pilots(frame, include_preamble, "PilotSymbols")
+        return cls(indices * sps, values, snr_weighted)
 
 
 @dataclass(frozen=True)

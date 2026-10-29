@@ -6,13 +6,14 @@
 
 import logging
 from dataclasses import dataclass
-from typing import Literal
+from typing import Any, Literal
 
 import numpy as np
 
 from .. import _fft
 from .._array import broadcast_channels
 from ..backend import ArrayType, dispatch, to_device
+from ..core.frame import _frame_pilots
 from ..logger import logger
 from ..math import _remove_linear_trend
 from ._common import _Context, _Phase
@@ -72,6 +73,36 @@ class PilotAided:
         for name, arr in (("indices", indices), ("values", values)):
             arr.setflags(write=False)
             object.__setattr__(self, name, arr)
+
+    @classmethod
+    def from_frame(
+        cls, frame: Any, *, include_preamble: bool = True, **options: Any
+    ) -> "PilotAided":
+        """The pilots of a ``SingleCarrierFrame``, for its symbols at one
+        sample per symbol.
+
+        Parameters
+        ----------
+        frame : SingleCarrierFrame
+            A frame with pilots.
+        include_preamble : bool, default True
+            Count the indices from the frame start (the preamble's first
+            symbol, as after ``correct_timing(mode="slice")``); ``False``
+            counts from the end of the preamble.
+        **options
+            ``interpolation``, ``joint_channels``, ``cycle_slip``.
+
+        Returns
+        -------
+        PilotAided
+
+        Raises
+        ------
+        ValueError
+            If the frame has no pilots.
+        """
+        indices, values = _frame_pilots(frame, include_preamble, "PilotAided")
+        return cls(indices, values, **options)
 
 
 def _pilot_aided(symbols: ArrayType, method: PilotAided, ctx: _Context) -> _Phase:

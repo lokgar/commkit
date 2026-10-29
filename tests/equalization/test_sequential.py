@@ -4,7 +4,7 @@ import numpy as np
 import pytest
 
 from commkit import equalization, generate
-from commkit.core import Signal
+from commkit.core import Signal, SingleCarrierFrame
 from commkit.equalization import EqualizerResult
 from commkit.equalization.sequential._dd import _check_rls_divergence
 from commkit.filtering import RRC
@@ -906,7 +906,7 @@ class TestNumbaBackendCoverage:
 
 
 class TestCmaPilotAided:
-    """Tests for cma()/rde() with pilot_ref/pilot_mask (hybrid PA mode)."""
+    """Tests for cma()/rde() with EqualizerPilots (hybrid PA mode)."""
 
     def _make_comb_frame_and_samples(self, xp):
         from commkit.backend import to_device
@@ -935,23 +935,16 @@ class TestCmaPilotAided:
             np.complex64
         )
         before = x.copy()
-        mask = np.zeros(200, dtype=np.uint8)
-        mask[::10] = 1
-        ref = np.where(mask, 1 + 1j, 0).astype(np.complex64)[None, :]
-        getattr(equalization, name)(
-            x,
-            sps=2,
-            num_taps=5,
-            pilot_ref=ref,
-            pilot_mask=mask,
-            pilot_gain_db=3.0,
+        mask = np.zeros(200, dtype=bool)
+        mask[::10] = True
+        pilots = equalization.EqualizerPilots(
+            np.full(20, 1 + 1j, np.complex64), mask, gain_db=3.0
         )
+        getattr(equalization, name)(x, sps=2, num_taps=5, pilots=pilots)
         np.testing.assert_array_equal(x, before)
 
     def test_cma_pilot_aided_numba_output_shape(self, xp):
-        """cma() with pilot_ref/pilot_mask returns correct body length."""
-        from commkit.equalization import build_pilot_ref
-
+        """cma() with pilots returns the body length."""
         frame, samples_cpu, pilot_syms_cpu, pilot_mask_bool, n_body = (
             self._make_comb_frame_and_samples(xp)
         )
@@ -960,28 +953,20 @@ class TestCmaPilotAided:
         n_pre = frame.preamble.num_symbols * sps
         body_samples = samples_cpu[n_pre:]
 
-        pilot_ref, pilot_mask_u8 = build_pilot_ref(
-            pilot_symbols=pilot_syms_cpu,
-            pilot_mask=pilot_mask_bool,
-            num_symbols=n_body,
-            num_channels=1,
-        )
+        pilots = equalization.EqualizerPilots(pilot_syms_cpu, pilot_mask_bool)
         result = equalization.cma(
             body_samples,
             constellation=Constellation.qam(16),
             num_taps=11,
             step_size=1e-4,
             sps=2,
-            pilot_ref=pilot_ref,
-            pilot_mask=pilot_mask_u8,
+            pilots=pilots,
         )
         assert isinstance(result, EqualizerResult)
         assert result.y_hat.shape[-1] == n_body
 
     def test_rde_pilot_aided_numba_output_shape(self, xp):
-        """rde() with pilot_ref/pilot_mask returns correct body length."""
-        from commkit.equalization import build_pilot_ref
-
+        """rde() with pilots returns the body length."""
         frame, samples_cpu, pilot_syms_cpu, pilot_mask_bool, n_body = (
             self._make_comb_frame_and_samples(xp)
         )
@@ -989,28 +974,20 @@ class TestCmaPilotAided:
         n_pre = frame.preamble.num_symbols * sps
         body_samples = samples_cpu[n_pre:]
 
-        pilot_ref, pilot_mask_u8 = build_pilot_ref(
-            pilot_symbols=pilot_syms_cpu,
-            pilot_mask=pilot_mask_bool,
-            num_symbols=n_body,
-            num_channels=1,
-        )
+        pilots = equalization.EqualizerPilots(pilot_syms_cpu, pilot_mask_bool)
         result = equalization.rde(
             body_samples,
             constellation=Constellation.qam(16),
             num_taps=11,
             step_size=1e-4,
             sps=2,
-            pilot_ref=pilot_ref,
-            pilot_mask=pilot_mask_u8,
+            pilots=pilots,
         )
         assert isinstance(result, EqualizerResult)
         assert result.y_hat.shape[-1] == n_body
 
     def test_rde_pilot_aided_initial_taps_warm_start(self, xp):
         """rde() PA accepts initial_taps from a prior lms() call."""
-        from commkit.equalization import build_pilot_ref
-
         frame, samples_cpu, pilot_syms_cpu, pilot_mask_bool, n_body = (
             self._make_comb_frame_and_samples(xp)
         )
@@ -1026,12 +1003,7 @@ class TestCmaPilotAided:
             step_size=0.01,
             sps=2,
         )
-        pilot_ref, pilot_mask_u8 = build_pilot_ref(
-            pilot_symbols=pilot_syms_cpu,
-            pilot_mask=pilot_mask_bool,
-            num_symbols=n_body,
-            num_channels=1,
-        )
+        pilots = equalization.EqualizerPilots(pilot_syms_cpu, pilot_mask_bool)
         result = equalization.rde(
             body_samples,
             constellation=Constellation.qam(16),
@@ -1039,28 +1011,39 @@ class TestCmaPilotAided:
             step_size=1e-4,
             sps=2,
             initial_taps=pre.weights,
-            pilot_ref=pilot_ref,
-            pilot_mask=pilot_mask_u8,
+            pilots=pilots,
         )
         assert isinstance(result, EqualizerResult)
         assert result.y_hat.shape[-1] == n_body
 
-    def test_build_pilot_ref_shape(self, xp):
-        """build_pilot_ref returns correct shapes."""
-        from commkit.equalization import build_pilot_ref
-
-        n_sym, n_pilots, num_ch = 100, 10, 2
-        positions = np.linspace(0, n_sym - 1, n_pilots, dtype=int)
+    def test_equalizer_pilots(self, xp):
+        """EqualizerPilots checks its shapes; from_frame takes the frame's
+        positions, symbols and gain, and a wrong length raises at the call."""
+        n_sym, n_pilots = 100, 10
         mask = np.zeros(n_sym, dtype=bool)
-        mask[positions] = True
-        pilot_syms = np.ones((num_ch, n_pilots), dtype=np.complex64)
-        ref, mask_u8 = build_pilot_ref(
-            pilot_syms, mask, num_symbols=n_sym, num_channels=num_ch
+        mask[np.linspace(0, n_sym - 1, n_pilots, dtype=int)] = True
+        pilots = equalization.EqualizerPilots(np.ones((2, n_pilots)), mask)
+        assert pilots.values.dtype == np.complex64 and pilots.gain_db == 0.0
+        with pytest.raises(ValueError, match="K = 10 pilots"):
+            equalization.EqualizerPilots(np.ones(9), mask)
+        frame, samples_cpu, pilot_syms_cpu, pilot_mask_bool, n_body = (
+            self._make_comb_frame_and_samples(xp)
         )
-        assert ref.shape == (num_ch, n_sym)
-        assert mask_u8.shape == (n_sym,)
-        assert mask_u8.dtype == np.uint8
-        assert int(mask_u8.sum()) == n_pilots
+        from_frame = equalization.EqualizerPilots.from_frame(frame)
+        assert from_frame.gain_db == frame.pilot_gain_db
+        assert from_frame.mask.size == frame.num_symbols
+        np.testing.assert_array_equal(
+            from_frame.mask[frame.preamble.num_symbols :], pilot_mask_bool
+        )
+        np.testing.assert_array_equal(from_frame.values, pilot_syms_cpu)
+        with pytest.raises(ValueError, match="output symbols"):
+            equalization.cma(samples_cpu[:-20], sps=2, pilots=from_frame)
+        with pytest.raises(TypeError, match="EqualizerPilots"):
+            equalization.cma(samples_cpu, sps=2, pilots=(1, 2))
+        with pytest.raises(ValueError, match="no pilots"):
+            equalization.EqualizerPilots.from_frame(
+                SingleCarrierFrame(payload_num_symbols=10)
+            )
 
 
 class TestSignalInputSequentialEqualizers:
@@ -1176,11 +1159,8 @@ class TestKnownSymbolScale:
         c = Constellation.qam(16).shaped(nu=0.2)
         rng = np.random.default_rng(1)
         s = c.points[rng.choice(16, 3000, p=c.pmf)].astype(np.complex64)
-        mask = np.ones(s.size, dtype=bool)
-        ref, pm = equalization.build_pilot_ref(
-            s, mask, num_symbols=s.size, num_channels=1
-        )
-        kw = dict(sps=1, num_taps=3, constellation=c, pilot_ref=ref, pilot_mask=pm)
+        pilots = equalization.EqualizerPilots(s, np.ones(s.size, dtype=bool))
+        kw = dict(sps=1, num_taps=3, constellation=c, pilots=pilots)
         if name == "cma":
             kw["step_size"] = 0.05
         else:

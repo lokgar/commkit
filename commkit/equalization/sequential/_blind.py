@@ -15,6 +15,7 @@ from ...core.signal import Signal
 from ...logger import logger
 from .._common import _godard_radius, _rde_ring_radii, _rde_rings
 from .._kernels_numba import _get_numba_cma, _get_numba_rde
+from ..pilots import EqualizerPilots
 from ..result import (
     EqualizerResult,
     EqualizerState,
@@ -32,39 +33,28 @@ from ._setup import (
 def _check_pilots(
     samples: Any,
     sps: int,
-    pilot_ref: Any,
-    pilot_mask: Any,
+    pilots: EqualizerPilots | None,
     function_name: str,
     state: Any = None,
-) -> tuple[Any, Any]:
-    """Validate the pilot reference and mask before any work is done.
+) -> tuple[Any, Any, float]:
+    """The dense pilot reference, uint8 mask and gain of ``pilots``, checked
+    before any work is done; ``(None, None, 0.0)`` without pilots.
 
-    ``pilot_ref`` is ``(C, N_sym)`` (``(N_sym,)`` for SISO), ``pilot_mask``
-    ``(N_sym,)``, for the output symbols of this call (a ``state`` adds its
-    pending input); one without the other raises.
+    The mask covers the output symbols of this call (a ``state`` adds its
+    pending input).
     """
-    if (pilot_ref is None) != (pilot_mask is None):
-        raise ValueError(
-            f"{function_name}: pilot_ref and pilot_mask must be given together."
+    if pilots is None:
+        return None, None, 0.0
+    if not isinstance(pilots, EqualizerPilots):
+        raise TypeError(
+            f"{function_name}: pilots must be EqualizerPilots, got "
+            f"{type(pilots).__name__}."
         )
-    if pilot_ref is None:
-        return None, None
     num_ch = 1 if samples.ndim == 1 else samples.shape[0]
     offset = 0 if state is None else state.pending.shape[-1] - state.lead
     n_sym = (offset + samples.shape[-1]) // sps
-    if pilot_ref.ndim == 1:
-        pilot_ref = pilot_ref[None, :]
-    if tuple(pilot_ref.shape) != (num_ch, n_sym):
-        raise ValueError(
-            f"{function_name}: pilot_ref must have shape ({num_ch}, {n_sym}) "
-            f"(channels, symbols), got {tuple(pilot_ref.shape)}."
-        )
-    if tuple(np.shape(pilot_mask)) != (n_sym,):
-        raise ValueError(
-            f"{function_name}: pilot_mask must have shape ({n_sym},), got "
-            f"{tuple(np.shape(pilot_mask))}."
-        )
-    return pilot_ref, pilot_mask
+    reference, mask = pilots._dense(num_ch, n_sym, function_name)
+    return reference, mask, pilots.gain_db
 
 
 # -----------------------------------------------------------------------------
@@ -83,9 +73,7 @@ def _blind_equalizer(
     store_weights: bool,
     center_tap: int | None,
     initial_taps: ArrayType | None,
-    pilot_ref: ArrayType | None,
-    pilot_mask: np.ndarray | None,
-    pilot_gain_db: float,
+    pilots: EqualizerPilots | None,
     pad_mode: str,
     state: EqualizerState | None,
 ) -> EqualizerResult:
@@ -99,8 +87,8 @@ def _blind_equalizer(
     sps = require_integer_sps(signal_adapter.resolve_fact("sps", sps), name)
     constellation = signal_adapter.resolve_choice("constellation", constellation)
 
-    pilot_ref, pilot_mask = _check_pilots(
-        signal_adapter.array, sps, pilot_ref, pilot_mask, name, state
+    pilot_ref, pilot_mask, pilot_gain_db = _check_pilots(
+        signal_adapter.array, sps, pilots, name, state
     )
     use_pilots = pilot_ref is not None
     logger.info(
@@ -177,9 +165,7 @@ def cma(
     store_weights: bool = False,
     center_tap: int | None = None,
     initial_taps: ArrayType | None = None,
-    pilot_ref: ArrayType | None = None,
-    pilot_mask: np.ndarray | None = None,
-    pilot_gain_db: float = 0.0,
+    pilots: EqualizerPilots | None = None,
     pad_mode: str = "zeros",
     state: EqualizerState | None = None,
 ) -> EqualizerResult:
@@ -191,10 +177,11 @@ def cma(
     up to a phase, so a carrier-phase recovery stage (e.g. Viterbi-Viterbi or
     pilot-aided) usually follows.
 
-    With ``pilot_ref`` and ``pilot_mask`` the equalizer runs pilot-aided: the
-    Godard error at the data positions, the LMS error ``pilot_ref - y`` at
-    the pilot positions, which resolves the phase there while the data
-    positions stay blind.  :func:`build_pilot_ref` builds the two arrays.
+    With ``pilots`` the equalizer runs pilot-aided: the Godard error at the
+    data positions, the LMS error towards the known symbol at the pilot
+    positions, which resolves the phase there while the data positions stay
+    blind.  ``EqualizerPilots.from_frame(frame)`` takes the pilots of a
+    ``SingleCarrierFrame``.
 
     Parameters
     ----------
@@ -226,20 +213,9 @@ def cma(
         ``weights`` of a previous stage.  Shape ``(C, C, num_taps)``, or
         ``(num_taps,)`` / ``(1, num_taps)`` for SISO.  Only for a cold start:
         a ``state`` carries its own weights.
-    pilot_ref : array_like, optional
-        Dense pilot reference, ``(C, N_sym)``: zeros at the data positions,
-        the known symbols (on the scale of the unit-power ``constellation``,
-        used as given) at the pilot positions.  Give it with ``pilot_mask``;
-        :func:`build_pilot_ref` builds both.
-    pilot_mask : array_like, optional
-        Pilot positions, ``(N_sym,)``: 1 at a pilot, 0 elsewhere.
-    pilot_gain_db : float, default 0.0
-        Pilot boost in dB relative to the payload, as
-        ``SingleCarrierFrame.pilot_gain_db``.  When non-zero, the received
-        samples at the pilot positions are scaled down by the boost before
-        the RMS normalization, so boosted pilots do not inflate the RMS and
-        bias the Godard target of the data positions.  0.0 for unboosted
-        pilots.
+    pilots : EqualizerPilots, optional
+        Known pilot symbols, their positions among the ``N_sym`` output
+        symbols and their boost (see :class:`EqualizerPilots`).
     pad_mode : {'zeros', 'edge', 'reflect'}, default 'zeros'
         Left padding of a cold start; see :func:`lms`.
     state : EqualizerState, optional
@@ -291,9 +267,9 @@ def cma(
 
            w_{c,c'} -= mu * conj(e_c[n]) * x_{c',n}
 
-    **Pilot-aided hybrid** (when ``pilot_ref`` and ``pilot_mask`` are set):
-    at pilot positions the Godard error is replaced by the LMS pilot error
-    ``e_p[n] = pilot_ref[n] - y[n]``, and the weight update takes the LMS
+    **Pilot-aided hybrid** (with ``pilots``): at pilot positions the Godard
+    error is replaced by the LMS pilot error ``e_p[n] = p[n] - y[n]`` towards
+    the known symbol ``p[n]``, and the weight update takes the LMS
     sign, ``+mu``, towards the reference.  This
     resolves the phase ambiguity at pilot locations while CMA handles data
     positions blindly.
@@ -313,9 +289,7 @@ def cma(
         store_weights=store_weights,
         center_tap=center_tap,
         initial_taps=initial_taps,
-        pilot_ref=pilot_ref,
-        pilot_mask=pilot_mask,
-        pilot_gain_db=pilot_gain_db,
+        pilots=pilots,
         pad_mode=pad_mode,
         state=state,
     )
@@ -331,9 +305,7 @@ def rde(
     store_weights: bool = False,
     center_tap: int | None = None,
     initial_taps: ArrayType | None = None,
-    pilot_ref: ArrayType | None = None,
-    pilot_mask: np.ndarray | None = None,
-    pilot_gain_db: float = 0.0,
+    pilots: EqualizerPilots | None = None,
     pad_mode: str = "zeros",
     state: EqualizerState | None = None,
 ) -> EqualizerResult:
@@ -375,11 +347,9 @@ def rde(
         Index of the center tap; defaults to ``num_taps // 2``.
     initial_taps : array_like, optional
         Initial tap weights, as for :func:`cma`; only for a cold start.
-    pilot_ref, pilot_mask : array_like, optional
-        Dense pilot reference and mask, as for :func:`cma`.
-    pilot_gain_db : float, default 0.0
-        Pilot boost in dB, as for :func:`cma` (here it keeps boosted pilots
-        from biasing the ring radii).
+    pilots : EqualizerPilots, optional
+        Known pilots, as for :func:`cma` (their boost is kept from biasing
+        the ring radii).
     pad_mode : {'zeros', 'edge', 'reflect'}, default 'zeros'
         Left padding of a cold start; see :func:`lms`.
     state : EqualizerState, optional
@@ -425,9 +395,8 @@ def rde(
 
            w_{c,c'} -= mu * conj(e_c[n]) * x_{c',n}
 
-    **Pilot-aided** (with ``pilot_ref`` and ``pilot_mask``): as for
-    :func:`cma`, the RDE error at a pilot position is replaced by
-    ``e_p[n] = pilot_ref[n] - y[n]`` with the LMS sign ``+mu``, which
+    **Pilot-aided** (with ``pilots``): as for :func:`cma`, the RDE error at
+    a pilot position is replaced by ``e_p[n] = p[n] - y[n]`` with the LMS sign ``+mu``, which
     resolves the phase there.
 
     **Why RDE beats CMA on high-order QAM.**  For unit-power 16-QAM the
@@ -456,9 +425,7 @@ def rde(
         store_weights=store_weights,
         center_tap=center_tap,
         initial_taps=initial_taps,
-        pilot_ref=pilot_ref,
-        pilot_mask=pilot_mask,
-        pilot_gain_db=pilot_gain_db,
+        pilots=pilots,
         pad_mode=pad_mode,
         state=state,
     )

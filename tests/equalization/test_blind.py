@@ -10,10 +10,10 @@ import pytest
 
 from commkit.core import Signal
 from commkit.equalization import (
+    EqualizerPilots,
     block_cma,
     block_lms,
     block_rde,
-    build_pilot_ref,
 )
 from commkit.equalization._block._blind import _cupy_rde_error
 from commkit.equalization._common import _rde_ring_radii, _rde_rings
@@ -35,15 +35,14 @@ class TestBlockFDAFEngine:
         tx, rx = _isi_signal(xp, "qam", 16, 8000, 6, channel)
         n = 8000
         pmask = np.ones(n, bool)
-        pref, pu8 = build_pilot_ref(to_numpy(tx), pmask, num_symbols=n, num_channels=1)
+        pilots = EqualizerPilots(to_numpy(tx), pmask)
         r_cma = block_cma(
             rx,
             constellation=Constellation.qam(16),
             num_taps=15,
             step_size=2e-4,
             block_size=256,
-            pilot_ref=pref,
-            pilot_mask=pu8,
+            pilots=pilots,
             sps=2,
         )
         r_lms = block_lms(
@@ -130,17 +129,14 @@ class TestBlockCMA:
         tx, rx = _isi_signal(xp, "psk", 4, n, 5, channel)
         pmask = np.zeros(n, bool)
         pmask[::8] = True
-        pref, pu8 = build_pilot_ref(
-            to_numpy(tx)[pmask], pmask, num_symbols=n, num_channels=1
-        )
+        pilots = EqualizerPilots(to_numpy(tx)[pmask], pmask)
         r = block_cma(
             rx,
             constellation=Constellation.psk(4),
             num_taps=15,
             step_size=1e-3,
             block_size=128,
-            pilot_ref=pref,
-            pilot_mask=pu8,
+            pilots=pilots,
             sps=2,
         )
         # Phase resolved by pilots => low MSE vs the true symbols (no ambiguity).
