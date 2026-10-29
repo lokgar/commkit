@@ -1,5 +1,6 @@
 """Tests for commkit.io - save_npz / load_npz round-trips."""
 
+import json
 from typing import Any
 
 import numpy as np
@@ -10,6 +11,7 @@ from commkit import (
     Preamble,
     Signal,
     SingleCarrierFrame,
+    coding,
     filtering,
     generate,
     mapping,
@@ -415,12 +417,84 @@ class TestNPZCodedReference:
         back = load_npz(tmp_path / "plain_frame.npz").frame
         assert back.payload_info_bits is back.payload_bits
 
-    def test_frame_with_payload_code_raises(self, tmp_path: Any) -> None:
+    @pytest.mark.parametrize(
+        "code, constellation",
+        [
+            (LinearBlockCode.hamming(3), Constellation.qam(16)),
+            (coding.LDPCCode.dvbs2("1/2", "short"), Constellation.qam(16)),
+            (
+                coding.PAS(
+                    coding.LDPCCode.dvbs2("3/4", "short"),
+                    Constellation.qam(64).shaped(entropy=5.0),
+                ),
+                Constellation.qam(64).shaped(entropy=5.0),
+            ),
+        ],
+        ids=["hamming", "ldpc", "pas"],
+    )
+    def test_frame_with_payload_code(self, tmp_path: Any, code, constellation) -> None:
+        """The payload code is stored; the loaded frame encodes and decodes alike."""
         frame = SingleCarrierFrame(
-            payload_num_symbols=14, payload_code=LinearBlockCode.hamming(3)
+            payload_blocks=12,
+            payload_code=code,
+            payload_constellation=constellation,
+            pilot_pattern="comb",
+            pilot_period=4,
         )
-        with pytest.raises(ValueError, match="payload_code"):
-            save_npz(frame.to_signal(sps=1, symbol_rate=1e9), tmp_path / "f")
+        sig = frame.to_signal(sps=1, symbol_rate=1e9)
+        save_npz(sig, tmp_path / "f")
+        back = load_npz(tmp_path / "f").frame
+        assert back.payload_code == code
+        assert back == frame
+        np.testing.assert_array_equal(back.payload_info_bits, frame.payload_info_bits)
+        np.testing.assert_array_equal(back.payload_bits, frame.payload_bits)
+        np.testing.assert_array_equal(
+            coding.encode(back.payload_info_bits, code=back.payload_code),
+            coding.encode(frame.payload_info_bits, code=code),
+        )
+
+
+_CODES = [
+    LinearBlockCode.hamming(4, extended=True),
+    coding.LDPCCode.dvbs2("2/3", "short"),
+    coding.ReedSolomonCode.kp4(),
+    coding.BCHCode(6, 3),
+    coding.StaircaseCode.g709_2(),
+    coding.Concatenated.cfec(),
+    coding.Concatenated.ieee_802_3dj(),
+    coding.PolarCode.nr(64, 128, crc="11"),
+    coding.ConvolutionalCode.k7(40, termination="tail-biting"),
+    coding.TurboCode.lte(40),
+    coding.CRC.ethernet(64),
+    coding.Punctured(LinearBlockCode.hamming(4, extended=True), [15]),
+    coding.Shortened(coding.ReedSolomonCode.kp4(), 10),
+    coding.CCDM(Constellation.pam(4).shaped(entropy=1.5), block_length=16),
+    coding.PAS(
+        coding.LDPCCode.dvbs2("3/4", "short"),
+        Constellation.qam(64).shaped(entropy=5.0),
+    ),
+]
+
+
+@pytest.mark.parametrize("code", _CODES, ids=lambda c: type(c).__name__)
+def test_code_roundtrip(code) -> None:
+    """Every code family is stored as its class and fields, arrays aside."""
+    from commkit.io import _get_code, _put_code
+
+    arrays: dict = {}
+    stored = json.loads(json.dumps(_put_code(code, "c", arrays)))
+    back = _get_code(stored, arrays, "test")
+    assert type(back) is type(code)
+    assert back == code
+    assert (back.n, back.k) == (code.n, code.k)
+
+
+def test_unknown_code_type_is_rejected() -> None:
+    """Only commkit.coding classes are rebuilt, never an arbitrary name."""
+    from commkit.io import _get_code
+
+    with pytest.raises(ValueError, match="Unknown code type 'Popen'"):
+        _get_code({"type": "Popen", "fields": {}}, {}, "test")
 
 
 def test_frame_constellations_roundtrip(tmp_path: Any) -> None:

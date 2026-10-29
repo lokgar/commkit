@@ -25,9 +25,16 @@ A Signal is stored as a NumPy ``.npz`` archive with these entries:
     when they are the payload bits).
 ``frame_payload_constellation_*``, ``frame_pilot_constellation_*``
     The frame's constellations, stored as the Signal's.
+``frame_payload_code.*``
+    The array fields of the frame's ``payload_code`` (an LDPC code's
+    parity checks, a polar code's information positions, ...), named by
+    their dotted path in the code; the code itself is in ``__frame_metadata__`` as
+    its class name and fields.
 
 The archive contains only numeric and unicode arrays, so it is read with
-``allow_pickle=False``: loading a file never executes code from it.
+``allow_pickle=False``: loading a file never executes code from it.  Code
+objects are rebuilt only from the classes of :mod:`commkit.coding`, by
+calling their constructors with the stored fields.
 """
 
 from __future__ import annotations
@@ -88,11 +95,6 @@ def save_npz(
         Write with ``savez_compressed`` (zlib).  ``False`` writes
         uncompressed with ``savez``: faster, but a larger file.
 
-    Raises
-    ------
-    ValueError
-        For a frame with a ``payload_code``: code objects are not stored.
-
     Notes
     -----
     When the Signal has a ``frame`` (one built by
@@ -100,7 +102,9 @@ def save_npz(
     (``__frame_metadata__``, ``frame_payload_symbols``, ...).
     :func:`load_npz` rebuilds it, so ``estimate_timing``, ``extract_payload``
     and the frame-aware equalizer steps work on a loaded Signal as on a
-    freshly generated one.
+    freshly generated one.  A ``payload_code`` (FEC code, distribution
+    matcher or their composition) is stored as its class and fields, so the
+    loaded frame decodes as the original.
 
     Examples
     --------
@@ -145,11 +149,6 @@ def save_npz(
     # after a save/load round-trip without requiring the caller to keep a
     # reference to the original frame object.
     frame = signal.frame
-    if frame is not None and getattr(frame, "payload_code", None) is not None:
-        raise ValueError(
-            "save_npz(): a frame with a payload_code cannot be stored; store "
-            "extract_payload(signal) or signal.replace(frame=None)."
-        )
     if frame is not None:
         # All public fields are JSON-serializable primitives; the nested
         # Preamble dataclass becomes a dict.
@@ -163,6 +162,9 @@ def save_npz(
             )
         if frame_dict.get("preamble") is not None:
             frame_dict["preamble"] = _init_fields(frame_dict["preamble"])
+        frame_dict["payload_code"] = _put_code(
+            frame_dict["payload_code"], "frame_payload_code", arrays
+        )
         frame_dict["_frame_type"] = type(frame).__name__
         arrays["__frame_metadata__"] = _json_array(frame_dict)
 
@@ -222,6 +224,65 @@ def _get_constellation(key: str, data: Any, meta: dict) -> Any:
     )
 
 
+def _code_types() -> dict[str, type]:
+    """The classes a stored code may name: the coding families and Interleaver."""
+    from .coding import Interleaver
+    from .coding.base import _CODECS
+
+    return {cls.__name__: cls for cls in (*_CODECS, Interleaver)}
+
+
+def _put_code(value: Any, key: str, arrays: dict) -> Any:
+    """``value``, a code object or one of its fields, as JSON.
+
+    Arrays go to ``arrays`` under ``key`` extended by the field path
+    (``frame_payload_code.code.checks``);
+    a code becomes ``{"type": class name, "fields": ...}``.
+    """
+    from .mapping import Constellation
+
+    if value is None or isinstance(value, bool | int | float | str):
+        return value
+    if isinstance(value, np.generic):
+        return value.item()
+    if isinstance(value, tuple):
+        return {
+            "tuple": [_put_code(v, f"{key}.{i}", arrays) for i, v in enumerate(value)]
+        }
+    if isinstance(value, np.ndarray):
+        arrays[key] = value
+        return {"array": key}
+    if isinstance(value, Constellation):
+        meta: dict = {}
+        _put_constellation(value, key, arrays, meta)
+        return {"constellation": key, "family": meta[f"{key}_family"]}
+    name = type(value).__name__
+    if _code_types().get(name) is type(value):
+        fields = {
+            f: _put_code(v, f"{key}.{f}", arrays)
+            for f, v in _init_fields(value).items()
+        }
+        return {"type": name, "fields": fields}
+    raise ValueError(f"save_npz(): cannot store a {name} in a code.")
+
+
+def _get_code(value: Any, data: Any, path: Path) -> Any:
+    """The code object (or field) that :func:`_put_code` stored as ``value``."""
+    if not isinstance(value, dict):
+        return value
+    if "tuple" in value:
+        return tuple(_get_code(v, data, path) for v in value["tuple"])
+    if "array" in value:
+        return data[value["array"]]
+    if "constellation" in value:
+        key = value["constellation"]
+        return _get_constellation(key, data, {f"{key}_family": value["family"]})
+    cls = _code_types().get(value["type"])
+    if cls is None:
+        raise ValueError(f"Unknown code type {value['type']!r} in {path}.")
+    return cls(**{f: _get_code(v, data, path) for f, v in value["fields"].items()})
+
+
 def _init_fields(obj: Any) -> dict:
     """The constructor arguments of a dataclass instance (no derived fields)."""
     return {f.name: getattr(obj, f.name) for f in dataclasses.fields(obj) if f.init}
@@ -250,8 +311,9 @@ def load_npz(
     Raises
     ------
     ValueError
-        On an unknown device, pulse type or frame type, or an archive whose
-        metadata is not JSON (written by commkit < 2.0, which pickled it).
+        On an unknown device, pulse type, frame type or code type, or an
+        archive whose metadata is not JSON (written by commkit < 2.0, which
+        pickled it).
 
     Notes
     -----
@@ -344,6 +406,7 @@ def _read_signal(data: Any, path: Path) -> Signal:
             frame_dict.pop(f"frame_{name}_family")
         if frame_dict.get("preamble") is not None:
             frame_dict["preamble"] = _core.Preamble(**frame_dict["preamble"])
+        frame_dict["payload_code"] = _get_code(frame_dict["payload_code"], data, path)
         frame = frame_cls(**frame_dict)
 
         # Refill the frame's cache so that frame.payload_symbols,

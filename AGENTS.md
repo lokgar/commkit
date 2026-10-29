@@ -127,7 +127,7 @@ Dependencies point downward only:
 | --- | --- | --- |
 | Infrastructure | `backend`, `logger`, `_cuda` | NumPy, CuPy |
 | Array and math helpers | `_array` (shape and validation), `math` (power, normalization, dB, linear trend) | infrastructure |
-| Value objects | `mapping.Constellation`, pulse classes, `recovery` CPR configs, `coding` (code objects with their `encode` / `decode`; array-only, never imports `core`) | layers above |
+| Value objects | `mapping.Constellation`, pulse classes, `recovery` CPR configs, `coding` (code objects with their `encode` / `decode`; array-only, never imports `core`; `io` stores a code as its class and constructor fields, so those fields are numbers, strings, tuples, host arrays, constellations or other codes) | layers above |
 | Core | `core` (`Signal`, frames, generation), `io` | layers above |
 | DSP | `mapping`, `filtering`, `multirate`, `spectral`, `smoothing`, `impairments`, `timing`, `frequency`, `recovery`, `equalization`, `metrics`, `analysis` | layers above, and lower DSP modules |
 | Presentation | `plotting` | everything; **nothing imports plotting** |
@@ -361,9 +361,8 @@ Steps, once CuPy 14.3 (with cp315 wheels for `cupy-cuda13x`) and a fixed `jupyte
 
 ### Channel coding: open items
 
-1. **Storing frames with a payload code.** `save_npz` raises for a frame with a `payload_code`, because code objects are not serialized; store `extract_payload(signal)` instead.
-2. **oFEC** (OpenROADM, ITU-T G.709.3) is not implemented: its block structure is specified in the OpenROADM MSA documents, which were not available in a form to implement from. It would build on `BCHCode` (extended BCH(256, 239)), `Chase` with soft output and the staircase decoder's iteration over a window.
-3. **NR rate matching for polar codes** (sub-block interleaving, the circular buffer, puncturing and shortening with their frozen-set rules, parity-check bits) and **LTE rate matching for turbo codes** are not included: `PolarCode` and `TurboCode` are the mother codes. `Punctured` and `Shortened` cover generic rate matching.
+1. **oFEC** (OpenROADM, ITU-T G.709.3) is not implemented: its block structure is specified in the OpenROADM MSA documents, which were not available in a form to implement from. It would build on `BCHCode` (extended BCH(256, 239)), `Chase` with soft output and the staircase decoder's iteration over a window.
+2. **NR rate matching for polar codes** (sub-block interleaving, the circular buffer, puncturing and shortening with their frozen-set rules, parity-check bits) and **LTE rate matching for turbo codes** are not included: `PolarCode` and `TurboCode` are the mother codes. `Punctured` and `Shortened` cover generic rate matching.
 
 ### Nonlinear fiber channel: future features
 
