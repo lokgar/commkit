@@ -227,6 +227,7 @@ FIBER_LINK = {
     "num_spans": 2,
     "launch_power_dbm": 0.0,
     "steps_per_span": 3,
+    "center_wavelength_nm": 1550.0,
 }
 FS_CONFLICT = ("sampling_rate", 3 * FS)
 SPS_CONFLICT = ("sps", 4)

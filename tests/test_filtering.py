@@ -634,7 +634,12 @@ class TestCorrectFiberPropagation:
         spectrum[:, np.abs(np.fft.fftfreq(n)) > 0.25] = 0.0
         return np.fft.ifft(spectrum, axis=-1).astype(dtype)
 
-    LINK = dict(span_length_km=80.0, num_spans=4, launch_power_dbm=6.0)
+    LINK = dict(
+        span_length_km=80.0,
+        num_spans=4,
+        launch_power_dbm=6.0,
+        center_wavelength_nm=1550.0,
+    )
 
     def test_inverts_a_noiseless_link(self, xp: Any) -> None:
         """Same steps, ξ = 1: the time-reversible symmetric step makes DBP

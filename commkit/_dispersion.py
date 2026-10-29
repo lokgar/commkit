@@ -26,11 +26,9 @@ import numpy as np
 
 from . import _fft
 from ._array import as_2d, restore_1d
+from ._constants import SPEED_OF_LIGHT as _SPEED_OF_LIGHT
 from .backend import ArrayType, dispatch
 from .math import _phasor
-
-# Speed of light used by the 1.x conversion, kept so results do not change.
-_SPEED_OF_LIGHT = 2.998e8  # m/s
 
 
 def beta2_length(

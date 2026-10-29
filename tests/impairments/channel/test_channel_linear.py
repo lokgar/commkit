@@ -377,3 +377,43 @@ class TestSignalInputPMDAndPolarizationMixing:
 
         assert isinstance(out_sig, Signal)
         xpt.assert_allclose(out_sig.samples, out_arr)
+
+
+class TestOpticalCarrier:
+    """The fiber functions read the wavelength from an optical Signal."""
+
+    CD = dict(dispersion_ps_nm_km=17.0, fiber_length_km=20.0)
+
+    def _signal(self, xp, **carrier):
+        rng = np.random.default_rng(0)
+        x = (rng.standard_normal(512) + 1j * rng.standard_normal(512)).astype(
+            np.complex64
+        )
+        return Signal(
+            samples=xp.asarray(x), sampling_rate=64e9, symbol_rate=32e9, **carrier
+        )
+
+    def test_optical_signal_supplies_the_wavelength(self, xp, xpt):
+        sig = self._signal(xp, domain="OPT", center_frequency=193.4e12)
+        lam = 299_792_458.0 / 193.4e12 * 1e9
+        assert sig.center_wavelength_nm == pytest.approx(lam)
+        out = apply_chromatic_dispersion(sig, **self.CD)
+        ref = apply_chromatic_dispersion(
+            sig.samples, sampling_rate=64e9, center_wavelength_nm=lam, **self.CD
+        )
+        xpt.assert_allclose(out.samples, ref)
+        # An agreeing value is accepted (0.01 %), a conflicting one raises.
+        apply_chromatic_dispersion(sig, center_wavelength_nm=round(lam, 2), **self.CD)
+        with pytest.raises(ValueError, match="conflicts with the optical"):
+            apply_chromatic_dispersion(sig, center_wavelength_nm=1310.0, **self.CD)
+
+    def test_other_signals_need_the_wavelength(self, xp):
+        for sig in (
+            self._signal(xp),
+            self._signal(xp, domain="RF", center_frequency=10e9),
+            self._signal(xp, domain="OPT"),  # no carrier
+        ):
+            assert sig.center_wavelength_nm is None
+            with pytest.raises(ValueError, match="requires center_wavelength_nm"):
+                apply_chromatic_dispersion(sig, **self.CD)
+            apply_chromatic_dispersion(sig, center_wavelength_nm=1550.0, **self.CD)

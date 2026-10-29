@@ -65,6 +65,33 @@ class SignalAdapter(Generic[S]):
             )
         return value
 
+    def resolve_wavelength_nm(self, supplied: float | None) -> float:
+        """Resolve the carrier wavelength in nm of an optical process.
+
+        An optical Signal (``domain="OPT"``) gives ``c / center_frequency``;
+        a supplied value must agree with it to 0.01 % (0.15 nm in the C
+        band) or ``ValueError`` is raised.  Arrays and Signals of another
+        domain need the supplied value.
+        """
+        sig = self.signal
+        carrier = None if sig is None else sig.center_wavelength_nm
+        if sig is None or carrier is None:
+            if supplied is None:
+                raise ValueError(
+                    f"{self.function_name} requires center_wavelength_nm for "
+                    "array input or a Signal that is not optical with a carrier "
+                    "(domain='OPT', center_frequency > 0)."
+                )
+            return float(supplied)
+        if supplied is not None and abs(supplied - carrier) > 1e-4 * carrier:
+            raise ValueError(
+                f"{self.function_name}: center_wavelength_nm={supplied!r} conflicts "
+                f"with the optical Signal's carrier, {carrier:.3f} nm at "
+                f"{sig.center_frequency / 1e12:.4f} THz.  Omit the "
+                "argument for an optical Signal."
+            )
+        return carrier
+
     def resolve_choice(self, field: str, supplied: Any = None) -> Any:
         """Resolve a processing choice (``constellation``, ``pulse``, ...).
 

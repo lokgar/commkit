@@ -242,7 +242,7 @@ def apply_chromatic_dispersion(
     *,
     dispersion_ps_nm_km: float,
     fiber_length_km: float,
-    center_wavelength_nm: float,
+    center_wavelength_nm: float | None = None,
     sampling_rate: float | None = None,
 ) -> S:
     """Apply chromatic dispersion (CD) in the frequency domain.
@@ -262,8 +262,11 @@ def apply_chromatic_dispersion(
         (G.652) has 17 at 1550 nm.  Positive is anomalous (``β₂ < 0``).
     fiber_length_km : float
         Fiber length in km.
-    center_wavelength_nm : float
-        Center wavelength in nm (e.g. 1550 for the C band).
+    center_wavelength_nm : float, optional
+        Carrier wavelength in nm (e.g. 1550 for the C band).  Taken from an optical Signal's
+        carrier (``domain="OPT"``, ``c / center_frequency``); required for
+        array input and Signals of another domain.  A value that disagrees
+        with the optical Signal raises.
     sampling_rate : float, optional
         Sampling rate in Hz.  Taken from the Signal; required for array
         input.  A value that disagrees with the Signal raises.
@@ -283,12 +286,12 @@ def apply_chromatic_dispersion(
     >>> distorted = apply_chromatic_dispersion(
     ...     x, dispersion_ps_nm_km=17.0, fiber_length_km=80.0,
     ...     center_wavelength_nm=1550.0, sampling_rate=fs)
-    >>> distorted = apply_chromatic_dispersion(  # Signal input
-    ...     sig, dispersion_ps_nm_km=17.0, fiber_length_km=80.0,
-    ...     center_wavelength_nm=1550.0)
+    >>> distorted = apply_chromatic_dispersion(  # optical Signal: its carrier
+    ...     sig, dispersion_ps_nm_km=17.0, fiber_length_km=80.0)
     """
     signal_adapter = adapt_signal(samples, function_name="apply_chromatic_dispersion()")
     sampling_rate = signal_adapter.resolve_fact("sampling_rate", sampling_rate)
+    center_wavelength_nm = signal_adapter.resolve_wavelength_nm(center_wavelength_nm)
 
     logger.info(
         "Applying CD (D=%s ps/nm/km, L=%s km, λ=%s nm).",

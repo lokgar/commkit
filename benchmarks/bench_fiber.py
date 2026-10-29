@@ -17,6 +17,7 @@ from commkit.impairments import Fiber, apply_fiber_propagation
 ROUNDS = dict(rounds=3, warmup_rounds=1, iterations=1)
 FS = 64e9
 LINK = dict(
+    center_wavelength_nm=1550.0,
     fiber=Fiber(),
     span_length_km=80.0,
     num_spans=4,

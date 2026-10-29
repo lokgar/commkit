@@ -28,7 +28,7 @@ def apply_fiber_propagation(
     span_length_km: float,
     num_spans: int,
     launch_power_dbm: float,
-    center_wavelength_nm: float = 1550.0,
+    center_wavelength_nm: float | None = None,
     noise_figure_db: float | None = None,
     steps_per_span: int = 100,
     sampling_rate: float | None = None,
@@ -60,9 +60,12 @@ def apply_fiber_propagation(
         Average launch power of the field in dBm, summed over the
         polarizations.  It sets the strength of the Kerr effect and of the
         ASE relative to the signal.
-    center_wavelength_nm : float, default 1550.0
+    center_wavelength_nm : float, optional
         Carrier wavelength in nm, at which the fiber's dispersion is given
-        and which sets the photon energy of the ASE.
+        and which sets the photon energy of the ASE.  Taken from an optical
+        Signal's carrier (``domain="OPT"``, ``c / center_frequency``); required for
+        array input and Signals of another domain.  A value that disagrees
+        with the optical Signal raises.
     noise_figure_db : float, optional
         Amplifier noise figure in dB (``>= 0``).  ``None`` (default) gives
         noiseless amplifiers.  Each amplifier of gain ``G`` adds white ASE
@@ -136,6 +139,7 @@ def apply_fiber_propagation(
     name = "apply_fiber_propagation()"
     signal_adapter = adapt_signal(samples, function_name=name)
     sampling_rate = signal_adapter.resolve_fact("sampling_rate", sampling_rate)
+    center_wavelength_nm = signal_adapter.resolve_wavelength_nm(center_wavelength_nm)
     link = check_link(
         fiber=fiber,
         span_length_km=span_length_km,

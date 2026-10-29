@@ -30,7 +30,7 @@ def correct_chromatic_dispersion(
     *,
     dispersion_ps_nm_km: float,
     fiber_length_km: float,
-    center_wavelength_nm: float,
+    center_wavelength_nm: float | None = None,
     sampling_rate: float | None = None,
 ) -> S:
     """Compensate chromatic dispersion electronically: the inverse fiber response.
@@ -47,8 +47,11 @@ def correct_chromatic_dispersion(
         Fiber dispersion parameter D in ps / (nm km) (SMF-28: 17 at 1550 nm).
     fiber_length_km : float
         Fiber length in km.
-    center_wavelength_nm : float
-        Carrier wavelength in nm.
+    center_wavelength_nm : float, optional
+        Carrier wavelength in nm.  Taken from an optical Signal's
+        carrier (``domain="OPT"``, ``c / center_frequency``); required for
+        array input and Signals of another domain.  A value that disagrees
+        with the optical Signal raises.
     sampling_rate : float, optional
         Sampling rate in Hz.  Taken from the Signal; required for array
         input.  A value that disagrees with the Signal raises.
@@ -60,14 +63,14 @@ def correct_chromatic_dispersion(
 
     Examples
     --------
-    >>> sig = correct_chromatic_dispersion(
-    ...     sig, dispersion_ps_nm_km=17.0, fiber_length_km=80.0,
-    ...     center_wavelength_nm=1550.0)
+    >>> sig = correct_chromatic_dispersion(  # optical Signal: its carrier
+    ...     sig, dispersion_ps_nm_km=17.0, fiber_length_km=80.0)
     """
     signal_adapter = adapt_signal(
         samples, function_name="correct_chromatic_dispersion()"
     )
     sampling_rate = signal_adapter.resolve_fact("sampling_rate", sampling_rate)
+    center_wavelength_nm = signal_adapter.resolve_wavelength_nm(center_wavelength_nm)
     logger.info(
         "Correcting CD (D=%s ps/nm/km, L=%s km, λ=%s nm).",
         dispersion_ps_nm_km,
@@ -92,7 +95,7 @@ def correct_fiber_propagation(
     span_length_km: float,
     num_spans: int,
     launch_power_dbm: float,
-    center_wavelength_nm: float = 1550.0,
+    center_wavelength_nm: float | None = None,
     steps_per_span: int = 100,
     nonlinear_scale: float = 1.0,
     sampling_rate: float | None = None,
@@ -135,8 +138,11 @@ def correct_fiber_propagation(
         Number of spans to backpropagate.
     launch_power_dbm : float
         The link's launch power in dBm, summed over the polarizations.
-    center_wavelength_nm : float, default 1550.0
-        Carrier wavelength in nm.
+    center_wavelength_nm : float, optional
+        Carrier wavelength in nm.  Taken from an optical Signal's
+        carrier (``domain="OPT"``, ``c / center_frequency``); required for
+        array input and Signals of another domain.  A value that disagrees
+        with the optical Signal raises.
     steps_per_span : int, default 100
         Backward steps per span (the forward model's default).
     nonlinear_scale : float, default 1.0
@@ -170,6 +176,7 @@ def correct_fiber_propagation(
     name = "correct_fiber_propagation()"
     signal_adapter = adapt_signal(samples, function_name=name)
     sampling_rate = signal_adapter.resolve_fact("sampling_rate", sampling_rate)
+    center_wavelength_nm = signal_adapter.resolve_wavelength_nm(center_wavelength_nm)
     link = check_link(
         fiber=fiber,
         span_length_km=span_length_km,

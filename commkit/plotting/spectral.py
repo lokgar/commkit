@@ -8,6 +8,7 @@ from typing import Any
 import matplotlib.pyplot as plt
 import numpy as np
 
+from .._constants import SPEED_OF_LIGHT
 from ..backend import dispatch, to_device
 from ..core._signal_adapter import adapt_signal
 from ..logger import logger
@@ -242,8 +243,7 @@ def _plot_psd(
         if domain != "OPT":
             logger.warning("Wavelength plotting is typically used for optical signals.")
 
-        # c = 299,792,458 m/s
-        c = 299792458.0
+        c = SPEED_OF_LIGHT
         # Avoid division by zero
         # Convert frequency to wavelength: lambda = c / f
         # Result in nanometers (1e9)

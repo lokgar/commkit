@@ -58,6 +58,7 @@ def test_fused_kernels_match_plain_stages(xp, monkeypatch, caplog, case):
     if num_channels == 1:
         x = x[0]
     kw = dict(
+        center_wavelength_nm=1550.0,
         fiber=fiber,
         span_length_km=80.0,
         num_spans=6,
@@ -80,6 +81,7 @@ def test_fused_kernels_match_plain_stages(xp, monkeypatch, caplog, case):
 def test_fused_dbp_matches_plain_stages(xp, monkeypatch):
     x = xp.asarray(_field(2))
     kw = dict(
+        center_wavelength_nm=1550.0,
         fiber=Fiber(),
         span_length_km=80.0,
         num_spans=5,
@@ -98,6 +100,7 @@ def test_gpu_matches_cpu(xp):
     float32 rounding (the noise realizations differ between devices)."""
     x = _field(2)
     kw = dict(
+        center_wavelength_nm=1550.0,
         fiber=Fiber(),
         span_length_km=80.0,
         num_spans=4,
@@ -114,6 +117,7 @@ def test_dbp_leaves_pmd_alone():
     the same fiber without PMD."""
     x = _field(2, n=2048)
     kw = dict(
+        center_wavelength_nm=1550.0,
         span_length_km=80.0,
         num_spans=2,
         launch_power_dbm=4.0,
@@ -129,6 +133,7 @@ def test_real_input_propagates_as_a_complex_field():
     x = _field(1, n=2048)[0].real
     y = apply_fiber_propagation(
         x,
+        center_wavelength_nm=1550.0,
         fiber=Fiber(),
         span_length_km=40.0,
         num_spans=1,
@@ -138,6 +143,7 @@ def test_real_input_propagates_as_a_complex_field():
     )
     ref = apply_fiber_propagation(
         x.astype(np.complex64),
+        center_wavelength_nm=1550.0,
         fiber=Fiber(),
         span_length_km=40.0,
         num_spans=1,
@@ -161,6 +167,7 @@ def test_launch_power_errors(x, power, match):
     with pytest.raises(ValueError, match=match):
         apply_fiber_propagation(
             x,
+            center_wavelength_nm=1550.0,
             fiber=Fiber(),
             span_length_km=10.0,
             num_spans=1,
@@ -175,6 +182,7 @@ def test_complex128_on_the_gpu_matches_the_cpu(xp):
     complex64) and keeps double precision end to end."""
     x = _field(2, n=4096).astype(np.complex128)
     kw = dict(
+        center_wavelength_nm=1550.0,
         fiber=Fiber(pmd_ps_sqrt_km=0.1),
         span_length_km=80.0,
         num_spans=3,
@@ -194,6 +202,7 @@ def test_repeated_calls_do_not_grow_the_memory_pool(xp):
     stream, so a fresh stream per call would grow the pool every call."""
     x = xp.asarray(_field(2, n=1 << 16))
     kw = dict(
+        center_wavelength_nm=1550.0,
         fiber=Fiber(),
         span_length_km=80.0,
         num_spans=4,

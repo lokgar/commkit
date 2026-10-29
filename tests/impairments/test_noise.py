@@ -95,3 +95,38 @@ class TestAWGNRandomness:
         assert float(xp.mean(xp.abs(y) ** 2)) == pytest.approx(expected, rel=0.02)
         if y.dtype.kind == "c":
             assert float(xp.mean(y.real**2)) == pytest.approx(expected / 2, rel=0.02)
+
+
+class TestOSNR:
+    """apply_awgn(osnr_db=): ASE in 12.5 GHz over both polarizations."""
+
+    def test_textbook_relation(self, xp):
+        """Dual-pol at 32 GBd: Es/N0 = OSNR · 2 B_ref / (p R_s)."""
+        n, rs, sps = 1 << 18, 32e9, 2
+        x = xp.ones((2, n), dtype=xp.complex64)
+        sig = Signal(
+            samples=x,
+            sampling_rate=sps * rs,
+            symbol_rate=rs,
+            domain="OPT",
+            center_frequency=193.4e12,
+        )
+        noisy = apply_awgn(sig, osnr_db=20.0, rng=3)
+        var = float(xp.mean(xp.abs(noisy.samples - x) ** 2))
+        esn0 = sps * 1.0 / var
+        assert esn0 == pytest.approx(100 * 2 * 12.5e9 / (2 * rs), rel=0.01)
+        # One polarization: the ASE of both counts against half the power.
+        single = apply_awgn(sig.replace(samples=x[0]), osnr_db=20.0, rng=3)
+        var1 = float(xp.mean(xp.abs(single.samples - x[0]) ** 2))
+        assert var1 == pytest.approx(var / 2, rel=0.01)
+
+    def test_needs_one_ratio_and_an_optical_signal(self, xp):
+        x = xp.ones(64, dtype=xp.complex64)
+        sig = Signal(samples=x, sampling_rate=2.0, symbol_rate=1.0)
+        with pytest.raises(ValueError, match="one of esn0_db and osnr_db"):
+            apply_awgn(sig)
+        with pytest.raises(ValueError, match="one of esn0_db and osnr_db"):
+            apply_awgn(sig, esn0_db=10.0, osnr_db=10.0)
+        for bad in (x, sig, sig.replace(domain="OPT", samples=x.real)):
+            with pytest.raises(ValueError, match="optical Signal"):
+                apply_awgn(bad, osnr_db=10.0)

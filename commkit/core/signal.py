@@ -20,6 +20,7 @@ from typing import TYPE_CHECKING, Any
 import numpy as np
 
 from .._array import validate_array
+from .._constants import SPEED_OF_LIGHT
 from ..backend import (
     ArrayType,
     get_array_module,
@@ -346,8 +347,8 @@ class Signal:
         ]
         if self.domain != "DIG":
             carrier = _format_si(self.center_frequency, "Hz")
-            if self.domain == "OPT" and self.center_frequency > 0:
-                carrier += f"  ({_SPEED_OF_LIGHT / self.center_frequency * 1e9:.2f} nm)"
+            if self.center_wavelength_nm is not None:
+                carrier += f"  ({self.center_wavelength_nm:.2f} nm)"
             rows.append(("Center frequency", carrier))
         rows += [
             ("Backend", self.backend.upper()),
@@ -494,6 +495,14 @@ class Signal:
         return int(self.samples.shape[0])
 
     @property
+    def center_wavelength_nm(self) -> float | None:
+        """Carrier wavelength in nm of an optical (``"OPT"``) Signal with a
+        carrier, ``c / center_frequency``; ``None`` otherwise."""
+        if self.domain != "OPT" or self.center_frequency <= 0:
+            return None
+        return SPEED_OF_LIGHT / self.center_frequency * 1e9
+
+    @property
     def duration(self) -> float:
         """Duration in seconds."""
         return float(self.samples.shape[-1] / self.sampling_rate)
@@ -519,7 +528,6 @@ _FIELD_NAMES = frozenset(f.name for f in dataclasses.fields(Signal))
 
 # Summary label of each domain.
 _DOMAIN_NAMES = {"DIG": "DIG (digital baseband)", "RF": "RF", "OPT": "OPT (optical)"}
-_SPEED_OF_LIGHT = 299_792_458.0  # m/s
 
 
 def _validate_samples(v: Any) -> Any:

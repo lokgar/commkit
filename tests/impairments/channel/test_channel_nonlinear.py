@@ -52,6 +52,7 @@ class TestLinearLimits:
         fiber = Fiber(attenuation_db_km=0.0, nonlinearity_per_w_km=0.0)
         y = apply_fiber_propagation(
             x,
+            center_wavelength_nm=1550.0,
             fiber=fiber,
             span_length_km=80.0,
             num_spans=2,
@@ -72,6 +73,7 @@ class TestLinearLimits:
         """With loss, each amplifier's gain e^{αL} restores the span exactly."""
         x = xp.asarray(_field(1)[0])
         kw = dict(
+            center_wavelength_nm=1550.0,
             span_length_km=80.0,
             num_spans=3,
             launch_power_dbm=0.0,
@@ -93,6 +95,7 @@ class TestLinearLimits:
         delta = np.zeros(n, np.complex128)
         delta[0] = 1.0
         kw = dict(
+            center_wavelength_nm=1550.0,
             span_length_km=50.0,
             num_spans=1,
             launch_power_dbm=0.0,
@@ -116,7 +119,7 @@ class TestLinearLimits:
             )
         )
         lam, d, s = 1550e-9, 17e-6, 0.057e3  # m; s/m²; s/m³
-        beta3 = (s + 2.0 * d / lam) * (lam**2 / (2.0 * np.pi * 2.998e8)) ** 2
+        beta3 = (s + 2.0 * d / lam) * (lam**2 / (2.0 * np.pi * 299_792_458.0)) ** 2
         omega = 2.0 * np.pi * np.fft.fftfreq(n, 1.0 / FS)
         expected = np.exp(-1j * beta3 * omega**3 * 50e3 / 6.0)
         np.testing.assert_allclose(h3 / h2, expected, atol=1e-9)
@@ -133,6 +136,7 @@ class TestKerrEffect:
         fiber = Fiber(dispersion_ps_nm_km=0.0)
         y = apply_fiber_propagation(
             x if num_channels == 2 else x[0],
+            center_wavelength_nm=1550.0,
             fiber=fiber,
             span_length_km=80.0,
             num_spans=spans,
@@ -156,7 +160,9 @@ class TestKerrEffect:
         power (no longer a soliton) reshapes.  Holds only if the Kerr and
         dispersion signs match."""
         fs, n, t0 = 2e12, 4096, 10e-12
-        beta2 = 17e-6 * (1550e-9) ** 2 / (2.0 * np.pi * 2.998e8) * 1e3  # |β₂| s²/km
+        beta2 = (
+            17e-6 * (1550e-9) ** 2 / (2.0 * np.pi * 299_792_458.0) * 1e3
+        )  # |β₂| s²/km
         gamma = 1.3
         p0 = beta2 / (gamma * t0**2)
         length = 5.0 * t0**2 / beta2  # 5 L_D, km
@@ -172,6 +178,7 @@ class TestKerrEffect:
                 num_spans=1,
                 launch_power_dbm=_dbm(peak * np.mean(np.abs(pulse) ** 2)),
                 steps_per_span=400,
+                center_wavelength_nm=1550.0,
                 sampling_rate=fs,
             )
             return np.abs(np.asarray(to_device(y, "cpu")))
@@ -183,6 +190,7 @@ class TestKerrEffect:
         """Halving the step quarters the error of the symmetric scheme."""
         x = _field(2, n=2048, dtype=np.complex128)
         kw = dict(
+            center_wavelength_nm=1550.0,
             fiber=Fiber(),
             span_length_km=80.0,
             num_spans=1,
@@ -198,6 +206,7 @@ class TestKerrEffect:
         x = _field(2, dtype=np.complex128)
         y = apply_fiber_propagation(
             x,
+            center_wavelength_nm=1550.0,
             fiber=Fiber(attenuation_db_km=0.0, dispersion_slope_ps_nm2_km=0.06),
             span_length_km=100.0,
             num_spans=2,
@@ -221,6 +230,7 @@ class TestAmplifierNoise:
             x = x[0]
         nf_db, spans, launch_dbm, span_km = 5.0, 4, -3.0, 80.0
         kw = dict(
+            center_wavelength_nm=1550.0,
             fiber=Fiber(nonlinearity_per_w_km=0.0),
             span_length_km=span_km,
             num_spans=spans,
@@ -245,6 +255,7 @@ class TestAmplifierNoise:
     def _ase_power(x, attenuation_db_km, nf_db, span_km=80.0, launch_dbm=-3.0):
         """Mean ASE power per sample after one span, in the input's units."""
         kw = dict(
+            center_wavelength_nm=1550.0,
             fiber=Fiber(attenuation_db_km=attenuation_db_km, nonlinearity_per_w_km=0.0),
             span_length_km=span_km,
             num_spans=1,
@@ -279,6 +290,7 @@ class TestAmplifierNoise:
     def test_noise_needs_a_seed_only_for_its_realization(self, xp):
         x = xp.asarray(_field(2))
         kw = dict(
+            center_wavelength_nm=1550.0,
             fiber=Fiber(),
             span_length_km=50.0,
             num_spans=2,
@@ -315,6 +327,7 @@ class TestPMD:
                 np.fft.fft(
                     apply_fiber_propagation(
                         impulses[k],
+                        center_wavelength_nm=1550.0,
                         fiber=fiber,
                         span_length_km=length / 10,
                         num_spans=10,
@@ -340,6 +353,7 @@ class TestPMD:
         with pytest.raises(ValueError, match="pmd"):
             apply_fiber_propagation(
                 xp.asarray(_field(1)[0]),
+                center_wavelength_nm=1550.0,
                 fiber=Fiber(pmd_ps_sqrt_km=0.1),
                 span_length_km=10.0,
                 num_spans=1,
@@ -381,6 +395,7 @@ class TestValidation:
                 span_length_km=10.0,
                 num_spans=1,
                 launch_power_dbm=0.0,
+                center_wavelength_nm=1550.0,
                 sampling_rate=FS,
             )
             | kwargs
@@ -392,6 +407,7 @@ class TestValidation:
         with pytest.raises(ValueError, match=r"\(2, N\)"):
             apply_fiber_propagation(
                 xp.asarray(_field(3)),
+                center_wavelength_nm=1550.0,
                 fiber=Fiber(),
                 span_length_km=10.0,
                 num_spans=1,
@@ -408,6 +424,7 @@ class TestValidation:
         with caplog.at_level("WARNING", logger="commkit"):
             apply_fiber_propagation(
                 xp.asarray(x),
+                center_wavelength_nm=1550.0,
                 fiber=Fiber(),
                 span_length_km=10.0,
                 num_spans=1,
@@ -423,6 +440,7 @@ class TestSignalInput:
         x = xp.asarray(_field(2))
         sig = Signal(samples=x, sampling_rate=FS, symbol_rate=FS / 2)
         kw = dict(
+            center_wavelength_nm=1550.0,
             fiber=Fiber(),
             span_length_km=40.0,
             num_spans=2,

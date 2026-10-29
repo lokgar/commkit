@@ -1,5 +1,7 @@
 """Additive white Gaussian noise: :func:`apply_awgn`."""
 
+from typing import Any
+
 from .._random import RNG, as_generator, complex_normal, standard_normal
 from ..backend import dispatch
 from ..core._signal_adapter import S, adapt_signal
@@ -12,31 +14,49 @@ __all__ = ["apply_awgn"]
 def apply_awgn(
     samples: S,
     *,
-    esn0_db: float,
+    esn0_db: float | None = None,
+    osnr_db: float | None = None,
     sps: float | None = None,
     signal_power: float | None = None,
+    reference_bandwidth: float = 12.5e9,
     rng: RNG = None,
 ) -> S:
-    """Add white Gaussian noise at a symbol-energy-to-noise ratio Es/N0.
+    """Add white Gaussian noise at an Es/N0, or at an OSNR for an optical field.
 
-    The noise variance per sample is ``signal_power · sps / (Es/N0)``: with
-    ``Es = sps · signal_power``, that is ``Es/N0`` per symbol after a matched
-    filter and decimation, whatever the oversampling.
+    With ``esn0_db`` the noise variance per sample is
+    ``signal_power · sps / (Es/N0)``: with ``Es = sps · signal_power``, that
+    is ``Es/N0`` per symbol after a matched filter and decimation, whatever
+    the oversampling.
+
+    With ``osnr_db`` (an optical Signal) the noise is amplified spontaneous
+    emission specified as optical links are: the total signal power over the
+    ASE power in ``reference_bandwidth`` (12.5 GHz, 0.1 nm at 1550 nm),
+    counted in both polarizations.  Each channel (polarization) gets complex
+    noise of variance ``C · signal_power · f_s / (2 · B_ref · OSNR)``, which
+    gives the textbook ``OSNR = p R_s / (2 B_ref) · SNR`` for ``p``
+    polarizations.
 
     Parameters
     ----------
     samples : array_like or Signal
-        Input samples, time on the last axis.
-    esn0_db : float
+        Input samples, time on the last axis; for ``osnr_db`` a complex
+        optical Signal (``domain="OPT"``), ``(N,)`` or ``(C, N)`` with one
+        channel per polarization.
+    esn0_db : float, optional
         Symbol energy over noise spectral density, Es/N0, in dB.
+    osnr_db : float, optional
+        Optical signal-to-noise ratio in dB in ``reference_bandwidth``,
+        instead of ``esn0_db``.
     sps : float, optional
-        Samples per symbol.  Taken from the Signal; required for array input.
-        A value that disagrees with the Signal raises.
+        Samples per symbol, for ``esn0_db``.  Taken from the Signal; required
+        for array input.  A value that disagrees with the Signal raises.
     signal_power : float, optional
-        Signal power for the noise scaling.  Defaults to the mean power of
-        ``samples`` over all channels.  Pass a value to add noise at an
-        absolute level, e.g. ``signal_power=1.0`` on a dark (signal-blocked)
-        capture, whose own power cannot set it.
+        Signal power per channel for the noise scaling.  Defaults to the mean
+        power of ``samples`` over all channels.  Pass a value to add noise at
+        an absolute level, e.g. ``signal_power=1.0`` on a dark
+        (signal-blocked) capture, whose own power cannot set it.
+    reference_bandwidth : float, default 12.5e9
+        Noise reference bandwidth ``B_ref`` of ``osnr_db`` in Hz.
     rng : int, numpy.random.Generator or None
         Random source.  The noise is drawn on the data's device: from this
         Generator on the CPU, and on the GPU from a CuPy Generator seeded from
@@ -46,6 +66,12 @@ def apply_awgn(
     -------
     ndarray or Signal
         The noisy samples, same shape, dtype and device as the input.
+
+    Raises
+    ------
+    ValueError
+        If neither or both of ``esn0_db`` and ``osnr_db`` are given, or
+        ``osnr_db`` is given for anything but a complex optical Signal.
 
     Notes
     -----
@@ -58,13 +84,34 @@ def apply_awgn(
     >>> sig = generate(Constellation.pam(4), 1000, symbol_rate=1e6, sps=4)
     >>> noisy = apply_awgn(sig.samples, esn0_db=20, sps=4)
     >>> noisy = apply_awgn(sig, esn0_db=20)  # Signal input: sps taken from sig
+    >>> field = sig.replace(domain="OPT", center_frequency=193.4e12)
+    >>> noisy = apply_awgn(field, osnr_db=18)  # in 12.5 GHz, both polarizations
     """
     signal_adapter = adapt_signal(samples, function_name="apply_awgn()")
-    sps = signal_adapter.resolve_fact("sps", sps)
-
-    logger.info("Adding AWGN (Es/N0 target: %.2f dB).", esn0_db)
-
+    if (esn0_db is None) == (osnr_db is None):
+        raise ValueError("apply_awgn(): give one of esn0_db and osnr_db.")
     x, xp, _ = dispatch(signal_adapter.array)
+    if signal_power is None:
+        signal_power = xp.mean(xp.abs(x) ** 2)
+    if osnr_db is not None:
+        sig = signal_adapter.signal
+        if sig is None or sig.domain != "OPT" or not xp.iscomplexobj(x):
+            raise ValueError(
+                "apply_awgn(): osnr_db needs a complex optical Signal "
+                "(domain='OPT'), whose sampling rate sets the noise bandwidth."
+            )
+        logger.info("Adding ASE noise (OSNR target: %.2f dB).", osnr_db)
+        num_channels = 1 if x.ndim == 1 else x.shape[0]
+        total_power = num_channels * signal_power
+        noise_power = (
+            total_power
+            * sig.sampling_rate
+            / (2.0 * reference_bandwidth * db_to_linear(osnr_db, power=True))
+        )
+        return signal_adapter.wrap_samples(x + _noise(x, xp, noise_power, rng))
+
+    sps = signal_adapter.resolve_fact("sps", sps)
+    logger.info("Adding AWGN (Es/N0 target: %.2f dB).", esn0_db)
 
     # === Es/N0 to sample-level SNR conversion ===
     #
@@ -83,8 +130,6 @@ def apply_awgn(
     #
     # Or equivalently: P_noise = P_signal * sps / Es_N0_linear
 
-    if signal_power is None:
-        signal_power = xp.mean(xp.abs(x) ** 2)
     esn0_linear = db_to_linear(esn0_db, power=True)
 
     # Noise power accounting for oversampling
@@ -93,16 +138,18 @@ def apply_awgn(
     else:
         noise_power = signal_power * sps / esn0_linear
 
-    # Complex noise splits its power equally between I and Q.
+    return signal_adapter.wrap_samples(x + _noise(x, xp, noise_power, rng))
+
+
+def _noise(x: Any, xp: Any, noise_power: Any, rng: RNG) -> Any:
+    """White Gaussian noise of ``noise_power`` per sample, shaped like ``x``.
+
+    Complex noise splits its power equally between I and Q.
+    """
     gen = as_generator(rng)
     real_dtype = x.real.dtype if x.real.dtype.kind == "f" else xp.dtype(xp.float64)
     if xp.iscomplexobj(x):
         std = xp.sqrt(noise_power / 2).astype(real_dtype)
-        noise = complex_normal(gen, x.shape, std=std, dtype=real_dtype, xp=xp)
-    else:
-        std = xp.sqrt(noise_power).astype(real_dtype)
-        noise = std * standard_normal(gen, x.shape, dtype=real_dtype, xp=xp)
-
-    noisy_samples = x + noise
-
-    return signal_adapter.wrap_samples(noisy_samples)
+        return complex_normal(gen, x.shape, std=std, dtype=real_dtype, xp=xp)
+    std = xp.sqrt(noise_power).astype(real_dtype)
+    return std * standard_normal(gen, x.shape, dtype=real_dtype, xp=xp)

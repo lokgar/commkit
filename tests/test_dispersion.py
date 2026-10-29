@@ -49,7 +49,7 @@ class TestUnits:
             )
 
         def omega(lam_nm: float) -> float:
-            return 2.0 * np.pi * 2.998e8 / (lam_nm * 1e-9)
+            return 2.0 * np.pi * 299_792_458.0 / (lam_nm * 1e-9)
 
         dl = 0.01
         numeric = (beta2(LAMBDA_NM + dl) - beta2(LAMBDA_NM - dl)) / (
