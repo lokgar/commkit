@@ -4,11 +4,13 @@ The per-codeword decoders and matchers that run on the CPU, parallel over
 blocks: layered LDPC belief propagation (:func:`ldpc_layered`), polar
 list decoding (:func:`polar_scl`), Viterbi and BCJR on a trellis
 (:func:`viterbi`, :func:`bcjr`, :func:`bcjr_blocks`), turbo encoding and
-decoding (:func:`turbo_encode`, :func:`turbo_decode`) and the CCDM
+decoding (:func:`turbo_encode`, :func:`turbo_decode`), algebraic
+decoding from the syndromes (:func:`algebraic_correct`) and the CCDM
 (:func:`ccdm_match`, :func:`ccdm_dematch`).  Imported on first use through
 the ``_get_numba_*`` getters of :mod:`~commkit.coding.ldpc`,
 :mod:`~commkit.coding.polar`, :mod:`~commkit.coding.convolutional`,
-:mod:`~commkit.coding.turbo` and :mod:`~commkit.coding.shaping`, which
+:mod:`~commkit.coding.turbo`, :mod:`~commkit.coding.algebraic` and
+:mod:`~commkit.coding.shaping`, which
 document each kernel, so ``import commkit`` does not load Numba.
 
 The kernels sit at module level so that Numba's disk cache holds them: a
@@ -669,6 +671,116 @@ def turbo_decode(llrs, pi, nxt, outputs, tail, iterations, exact, scale, out):  
                 la1[pi[t]] = scale * (app2[t] - la2[t] - ch2[t, 0])
         for t in range(k):
             out[row, pi[t]] = 1 if app2[t] < 0 else 0
+
+
+# -----------------------------------------------------------------------------
+# Algebraic decoding: Berlekamp-Massey, Chien search, Forney
+# -----------------------------------------------------------------------------
+
+
+@_inline
+def gf_mul(a, b, exp, log):  # type: ignore[no-untyped-def]
+    """Product of two field elements."""
+    if a == 0 or b == 0:
+        return 0
+    return exp[log[a] + log[b]]
+
+
+@_inline
+def gf_eval(coef, count, x_log, exp, log, q1):  # type: ignore[no-untyped-def]
+    """``sum_j coef[j] alpha^(j x_log)`` over ``j < count``."""
+    acc = 0
+    for j in range(count):
+        if coef[j] != 0:
+            acc ^= exp[(log[coef[j]] + j * x_log) % q1]
+    return acc
+
+
+@numba.njit(cache=True, nogil=True, parallel=True)
+def algebraic_correct(
+    s, exp, log, locator_logs, t, first_root, m, binary, words, valid
+):  # type: ignore[no-untyped-def]
+    q1 = exp.shape[0] // 2 - 1  # exp is doubled: 2q entries
+    width = 2 * t + 1
+    for row in numba.prange(s.shape[0]):
+        syn = s[row]
+        locator = np.zeros(width, dtype=np.int64)
+        previous = np.zeros(width, dtype=np.int64)
+        updated = np.empty(width, dtype=np.int64)
+        locator[0] = 1
+        previous[0] = 1
+        length, shift, last = 0, 1, 1
+        for r in range(2 * t):
+            d = 0
+            for i in range(r + 1):
+                d ^= gf_mul(locator[i], syn[r - i], exp, log)
+            grow = d != 0 and 2 * length <= r
+            if d != 0:
+                coef = exp[log[d] - log[last] + q1]
+                for c in range(width):
+                    shifted = previous[c - shift] if c >= shift else 0
+                    updated[c] = locator[c] ^ gf_mul(coef, shifted, exp, log)
+                if grow:
+                    previous[:] = locator
+                locator[:] = updated
+            if grow:
+                last = d
+                length = r + 1 - length
+                shift = 1
+            else:
+                shift += 1
+        degree = 0
+        for c in range(width):
+            if locator[c] != 0:
+                degree = c
+        valid[row] = False
+        if degree != length or length > t:
+            continue
+        if degree == 0:
+            valid[row] = True
+            continue
+        # Chien search: a locator of degree L has at most L roots.
+        positions = np.empty(degree, dtype=np.int64)
+        found = 0
+        for p in range(locator_logs.shape[0]):
+            if gf_eval(locator, degree + 1, q1 - locator_logs[p], exp, log, q1) == 0:
+                positions[found] = p
+                found += 1
+                if found == degree:
+                    break
+        if found != degree:
+            continue
+        if binary:
+            for e in range(degree):
+                words[row, positions[e]] ^= 1
+            valid[row] = True
+            continue
+        # Forney: e_p = X_p^(1-b) Omega(X_p^-1) / Lambda'(X_p^-1), both of
+        # degree < t, Omega = S Lambda mod x^2t and Lambda' the odd terms.
+        omega = np.zeros(t, dtype=np.int64)
+        derivative = np.zeros(t, dtype=np.int64)
+        for k in range(t):
+            for i in range(k + 1):
+                omega[k] ^= gf_mul(locator[i], syn[k - i], exp, log)
+            if k % 2 == 0:
+                derivative[k] = locator[k + 1]
+        values = np.empty(degree, dtype=np.int64)
+        ok = True
+        for e in range(degree):
+            x = locator_logs[positions[e]]
+            num = gf_eval(omega, t, q1 - x, exp, log, q1)
+            den = gf_eval(derivative, t, q1 - x, exp, log, q1)
+            if num == 0 or den == 0:
+                ok = False
+                break
+            values[e] = exp[(log[num] - log[den] + q1 + (1 - first_root) * x % q1) % q1]
+        if not ok:
+            continue
+        for e in range(degree):
+            base = positions[e] * m
+            for b in range(m):
+                words[row, base + b] ^= (values[e] >> (m - 1 - b)) & 1
+        valid[row] = True
 
 
 # -----------------------------------------------------------------------------

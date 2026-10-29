@@ -9,12 +9,14 @@ errors per codeword are corrected; a codeword whose locator does not have
 as many roots among the code's positions as its degree is reported
 ``valid=False`` and left as received.
 
-Everything except Berlekamp-Massey is GF(2)-linear in bits, so it is one
-:func:`~commkit.coding._gf2.matmul_mod2` with a matrix built once per
-code: the systematic encoder, the syndromes, and the evaluation of the
-locator, its derivative and the error evaluator at every position.
-Berlekamp-Massey runs its ``2t`` steps in lockstep over all codewords,
-small array operations on either device.
+The systematic encoder and the syndromes are GF(2)-linear in bits, so
+each is one :func:`~commkit.coding._gf2.matmul_mod2` with a matrix built
+once per code.  From the syndromes, the CPU decodes each codeword in a
+Numba kernel (Berlekamp-Massey, a Chien search that stops at the
+locator's degree, Forney at the roots), parallel over codewords.  The GPU
+runs Berlekamp-Massey's ``2t`` steps in lockstep over all codewords
+(small array operations), the Chien search as one more GEMM over every
+position, and Forney at the error positions.
 
 Bits: a Reed-Solomon symbol is ``m`` bits, MSB first, the first transmitted
 symbol the highest-degree coefficient; information first, then parity.
@@ -415,14 +417,36 @@ def _correct(code: Any, hard: ArrayType) -> tuple[ArrayType, ArrayType]:
     """Bounded-distance correction of hard words ``(R, n bits)``.
 
     Returns the corrected words (the received ones where decoding failed)
-    and the per-word success.
+    and the per-word success.  The syndromes are one GEMM; the rest runs
+    per word in Numba on the CPU and in lockstep on the GPU.
     """
     _, xp, _ = dispatch(hard)
     f, t, m = code.field, code.t, code.field.m
-    rows, n = hard.shape[0], code.length
-    syn_t, evaluate = _device_tables(code, "decoder", xp, lambda: code._decoder_tables)
+    rows = hard.shape[0]
+    syn_t, _ = _device_tables(code, "decoder", xp, lambda: code._decoder_tables)
     # Syndromes as field elements, (R, 2t).
     s = _pack(matmul_mod2(hard, syn_t).reshape(rows, 2 * t, m))
+    if xp is np:
+        words = np.array(hard, dtype=np.int8, order="C")
+        valid = np.empty(rows, dtype=np.bool_)
+        exp, log = f._tables
+        _get_numba_algebraic()(
+            s, exp, log, code._locator_logs, t, code.first_root, m, code.binary,
+            words, valid,
+        )  # fmt: skip
+        return words, valid
+    return _correct_lockstep(code, hard, s)
+
+
+def _correct_lockstep(
+    code: Any, hard: ArrayType, s: ArrayType
+) -> tuple[ArrayType, ArrayType]:
+    """:func:`_correct` from the syndromes ``s`` ``(R, 2t)``, all words in
+    lockstep: small array operations per step, for the GPU."""
+    _, xp, _ = dispatch(hard)
+    f, t, m = code.field, code.t, code.field.m
+    rows, n = hard.shape[0], code.length
+    _, evaluate = _device_tables(code, "decoder", xp, lambda: code._decoder_tables)
     locator, length = _berlekamp_massey(f, s, t)  # (R, 2t + 1), lowest degree first
     degree = (locator != 0).astype(xp.int64)
     degree = (degree * xp.arange(2 * t + 1)).max(axis=1)
@@ -468,6 +492,19 @@ def _correct(code: Any, hard: ArrayType) -> tuple[ArrayType, ArrayType]:
         flips = _unpack_bits(values.reshape(-1), m).reshape(rows, t, m)
         words.reshape(rows, n, m)[xp.arange(rows)[:, None], pos] ^= flips
     return words, valid
+
+
+def _get_numba_algebraic() -> Any:
+    """Numba decoder from the syndromes for the CPU, parallel over words.
+
+    Per word, the steps of the lockstep GPU path: Berlekamp-Massey, a
+    Chien search over the positions that stops at the locator's degree,
+    and for Reed-Solomon Forney's formula at the roots; the word is
+    corrected in place, or left as received where decoding fails.
+    """
+    from . import _numba_loops
+
+    return _numba_loops.algebraic_correct
 
 
 def _toeplitz(s: ArrayType, xp: Any) -> ArrayType:

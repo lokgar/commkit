@@ -112,7 +112,7 @@ jobs:
           NUMBA_DISABLE_JIT: "1"
         run: >-
           uv run pytest tests/equalization tests/recovery tests/test_frequency.py tests/mapping/test_llr.py
-          tests/coding/test_ldpc.py tests/coding/test_shaping.py::TestCCDM
+          tests/coding/test_ldpc.py tests/coding/test_shaping.py::TestCCDM tests/coding/test_algebraic.py
           tests/coding/test_polar.py::TestEncoding
           tests/coding/test_polar.py::TestDecoding::test_sc_matches_the_recursive_reference
           tests/coding/test_polar.py::TestDecoding::test_full_list_is_maximum_likelihood

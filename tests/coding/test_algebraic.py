@@ -10,7 +10,9 @@ import pytest
 from commkit.backend import to_device
 from commkit.coding import BCHCode, ReedSolomonCode, decode, encode
 from commkit.coding._galois import PRIMITIVE, _Field
-from commkit.coding.algebraic import _xor_reduce
+from commkit.coding._gf2 import matmul_mod2
+from commkit.coding.algebraic import _correct, _correct_lockstep, _xor_reduce
+from commkit.mapping.gray import _pack
 from tests.common.coding import random_bits
 
 
@@ -280,3 +282,34 @@ class TestXorReduce:
             xpt.assert_array_equal(
                 _xor_reduce(xp.asarray(x), axis), xp.asarray(expected)
             )
+
+
+class TestCpuKernel:
+    @pytest.mark.parametrize(
+        "code",
+        [
+            ReedSolomonCode(15, 9, m=4),
+            ReedSolomonCode(31, 21, m=5, first_root=3),
+            ReedSolomonCode.kp4(),
+            BCHCode(m=6, t=3),
+            BCHCode(m=10, t=3, length=1000),
+        ],
+        ids=repr,
+    )
+    def test_matches_the_lockstep_path(self, code) -> None:
+        """The Numba decoder equals the lockstep one, up to and beyond t."""
+        rng = np.random.default_rng(7)
+        m = 1 if code.binary else code.m
+        rows = 200
+        words = encode(random_bits(rows * code.k, np, seed=3), code=code).reshape(
+            rows, -1
+        )
+        counts = rng.integers(0, 2 * code.t + 3, rows)
+        hard = _corrupt(words, rng, counts, m)
+        syn_t = code._decoder_tables[0]
+        s = _pack(matmul_mod2(hard, syn_t).reshape(rows, 2 * code.t, code.field.m))
+        got, ok = _correct(code, hard)
+        want, want_ok = _correct_lockstep(code, hard, s)
+        np.testing.assert_array_equal(ok, want_ok)
+        np.testing.assert_array_equal(got, want)
+        assert ok[counts <= code.t].all() and not ok.all()
