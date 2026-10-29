@@ -452,7 +452,7 @@ def ber(
     elif rx.shape[-1] == 0:
         raise ValueError(f"{name}: nothing to measure (no bits).")
 
-    errors = xp.sum(rx != tx, axis=-1)
+    errors = to_device(xp.sum(rx != tx, axis=-1), "cpu")  # one transfer, logged too
     total = rx.shape[-1]
     out = to_report_scalar(errors / total)
     if isinstance(out, float):
@@ -510,7 +510,7 @@ def fer(
             f"({block_length})."
         )
     wrong = (rx != tx).reshape(*rx.shape[:-1], -1, block_length).any(axis=-1)
-    errors = xp.sum(wrong, axis=-1)
+    errors = to_device(xp.sum(wrong, axis=-1), "cpu")  # one transfer, logged too
     blocks = total // block_length
     out = to_report_scalar(errors / blocks)
     if isinstance(out, float):
@@ -569,7 +569,7 @@ def ser(
 
     dec_rx = c._nearest(rx.reshape(-1)).reshape(rx.shape)
     dec_tx = c._nearest(tx.reshape(-1)).reshape(tx.shape)
-    errors = xp.sum(dec_rx != dec_tx, axis=-1)
+    errors = to_device(xp.sum(dec_rx != dec_tx, axis=-1), "cpu")  # logged too
     total = rx.shape[-1]
     out = to_report_scalar(errors / total)
     if isinstance(out, float):

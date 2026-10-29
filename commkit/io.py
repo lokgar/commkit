@@ -259,7 +259,6 @@ def load_npz(
     >>> sig = load_npz("capture.npz")                   # on the CPU
     >>> sig_gpu = load_npz("capture.npz", device="gpu")
     """
-    from .core import Signal
     from .core._signal_adapter import require_device
 
     device = require_device(device, "load_npz()")
@@ -269,8 +268,13 @@ def load_npz(
 
     # Metadata is stored as plain unicode arrays, so pickle is never needed:
     # loading an untrusted archive cannot execute code.
-    data = np.load(path, allow_pickle=False)
+    with np.load(path, allow_pickle=False) as data:
+        sig = _read_signal(data, path)
+    return sig.to(device)
 
+
+def _read_signal(data: Any, path: Path) -> Signal:
+    """The host Signal stored in the open archive ``data``."""
     # -------------------------------------------------------------------------
     # Parse JSON metadata
     # -------------------------------------------------------------------------
@@ -279,7 +283,7 @@ def load_npz(
     # Build Signal constructor kwargs
     # -------------------------------------------------------------------------
     from . import filtering
-    from .core import Reference
+    from .core import Reference, Signal
 
     kwargs: dict = {f: meta[f] for f in _META_FIELDS}
     kwargs["samples"] = data["samples"]
@@ -361,11 +365,7 @@ def load_npz(
             )
 
         sig = sig.replace(frame=frame)
-
-    # -------------------------------------------------------------------------
-    # Move to target device
-    # -------------------------------------------------------------------------
-    return sig.to(device)
+    return sig
 
 
 # -----------------------------------------------------------------------------

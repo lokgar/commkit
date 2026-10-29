@@ -9,6 +9,7 @@ from commkit import mapping
 from commkit.mapping.constellation import _slicer_params
 from commkit.mapping.gray import (
     _gray_ask,
+    _gray_points,
     _gray_psk,
     _gray_qam_cross,
     _nearest_index,
@@ -40,6 +41,22 @@ class TestGrayCode:
         """Verify Gray code for 0 bits returns single-element zero array."""
         xpt.assert_array_equal(mapping.gray_code(0), xp.array([0]))
         xpt.assert_array_equal(mapping.gray_to_binary(0), xp.array([0]))
+
+    @pytest.mark.parametrize(
+        "cached",
+        [
+            lambda: mapping.gray_code(3),
+            lambda: mapping.gray_code(0),
+            lambda: mapping.gray_to_binary(3),
+            lambda: _gray_points("qam", 16),
+        ],
+        ids=["gray_code", "gray_code-0", "gray_to_binary", "points"],
+    )
+    def test_cached_arrays_are_read_only(self, cached) -> None:
+        """One array is shared by every call: writing to it would change the
+        result of all later calls."""
+        with pytest.raises(ValueError, match="read-only"):
+            cached()[0] = 5
 
     def test_unpack_bits_matches_manual_shift(self, xp: Any, xpt: Any) -> None:
         """_unpack_bits(indices, k) must match the direct bit-shift idiom it replaced."""

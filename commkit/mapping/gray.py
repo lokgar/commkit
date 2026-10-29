@@ -19,6 +19,12 @@ from ..logger import logger
 __all__ = ["gray_code", "gray_to_binary"]
 
 
+def _read_only(a: np.ndarray) -> np.ndarray:
+    """``a`` made read-only: the cached functions share one array per call."""
+    a.setflags(write=False)
+    return a
+
+
 @lru_cache(maxsize=128)
 def gray_code(n: int) -> np.ndarray:
     """Generate the binary-reflected Gray code of ``n`` bits.
@@ -35,7 +41,7 @@ def gray_code(n: int) -> np.ndarray:
     Returns
     -------
     numpy.ndarray
-        Host integer code words, ``(2**n,)``.
+        Host integer code words, ``(2**n,)``, read-only (cached).
 
     Examples
     --------
@@ -45,12 +51,12 @@ def gray_code(n: int) -> np.ndarray:
     if n < 0:
         raise ValueError("n must be non-negative")
     if n == 0:
-        return np.array([0], dtype=int)
+        return _read_only(np.array([0], dtype=int))
 
     # Vectorized implementation: s ^ (s >> 1)
     i = np.arange(1 << n, dtype=int)
 
-    return i ^ (i >> 1)
+    return _read_only(i ^ (i >> 1))
 
 
 @lru_cache(maxsize=128)
@@ -68,7 +74,7 @@ def gray_to_binary(n: int) -> np.ndarray:
     Returns
     -------
     numpy.ndarray
-        Host integers, ``(2**n,)``.
+        Host integers, ``(2**n,)``, read-only (cached).
 
     Examples
     --------
@@ -78,7 +84,7 @@ def gray_to_binary(n: int) -> np.ndarray:
     if n < 0:
         raise ValueError("n must be non-negative")
     if n == 0:
-        return np.array([0], dtype=int)
+        return _read_only(np.array([0], dtype=int))
 
     # gray_code gives: natural_binary -> gray_symbol
     # We want: gray_symbol -> natural_binary (inverse)
@@ -86,7 +92,7 @@ def gray_to_binary(n: int) -> np.ndarray:
     inverse = np.zeros(1 << n, dtype=int)
     inverse[gray] = np.arange(1 << n)
 
-    return inverse
+    return _read_only(inverse)
 
 
 def _is_square_qam(modulation: str, order: int) -> bool:
@@ -180,7 +186,7 @@ def _gray_points(
 
             result = _normalize(result, mode="average_power")
 
-    return result
+    return _read_only(result)
 
 
 def _pack(labels: ArrayType) -> ArrayType:
