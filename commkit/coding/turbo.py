@@ -89,7 +89,8 @@ class TurboCode(_Code):
     Notes
     -----
     ``n = 3 K + 12``: the streams ``d0, d1, d2`` of ``K + 4`` bits each,
-    one after the other.
+    one after the other.  The 12 trellis-termination bits put the rate
+    slightly below 1/3: ``K = 40`` gives 132 bits, rate 0.303.
     """
 
     block_length: int

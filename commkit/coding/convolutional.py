@@ -92,7 +92,14 @@ def _trellis(
 
 @dataclass(frozen=True, eq=False)
 class ConvolutionalCode(_Code):
-    """Feed-forward convolutional code of rate ``1 / len(generators)``.
+    """Feed-forward convolutional code of rate ``1 / len(generators)``, in blocks.
+
+    A convolutional encoder runs on an unbounded stream; here it encodes
+    blocks of ``block_length`` information bits, each a codeword of
+    :attr:`n` bits.  With ``g = len(generators)``: ``n = g (block_length +
+    K - 1)`` for ``"zero"`` termination, whose tail bits lower the rate
+    below ``1 / g`` (``k7(100)``: 212 bits, rate 0.472), and ``n = g
+    block_length`` for ``"tail-biting"`` (rate exactly ``1 / g``).
 
     Parameters
     ----------
@@ -138,7 +145,7 @@ class ConvolutionalCode(_Code):
 
     @property
     def n(self) -> int:
-        """Transmitted bits per block."""
+        """Transmitted bits per block, the tail included."""
         steps = self.block_length + (self.constraint_length - 1 if self._zero else 0)
         return steps * len(self.generators)
 

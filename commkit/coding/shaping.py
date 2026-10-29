@@ -74,7 +74,10 @@ class CCDM(_Code):
     constellation : Constellation
         The target: its ``pmf`` (uniform if none), points and labels.
     block_length : int
-        Points per block, ``1 <= block_length <= 2^30``.
+        Constellation points (symbols) per block, ``1 <= block_length <=
+        2^30``; a block of ``generate(..., num_blocks=)`` is that many
+        symbols.  Unlike a FEC code's, this length is a count of symbols,
+        and :attr:`n` is it in bits.
 
     Notes
     -----
@@ -280,6 +283,13 @@ class PAS(_Code):
 
     Notes
     -----
+    The block is the FEC codeword: ``n`` is the code's ``n_c`` bits, and
+    ``k``, the uniform information bits it carries, is less than the
+    code's ``k_c`` because the matcher's output is not uniform.
+    ``PAS(LDPCCode.dvbs2("3/4", "short"), Constellation.qam(64).shaped(
+    entropy=5))``: 16200 bits are 2700 64-QAM symbols carrying ``k =
+    9162`` information bits, 3.39 bits per symbol.
+
     Per FEC codeword of ``n_c`` bits there are ``N = n_c / m`` real symbols.
     A CCDM of ``N`` amplitudes maps ``k_dm`` bits to ``(m - 1) N``
     amplitude bits; the FEC encodes them together with ``gamma N = k_c -

@@ -90,16 +90,24 @@ class _Algebraic(_Code):
 
 @dataclass(frozen=True, eq=False)
 class ReedSolomonCode(_Algebraic):
-    """Reed-Solomon code ``(n, k)`` over GF(2^m), ``t = (n - k) / 2``.
+    """Reed-Solomon code over GF(2^m), correcting ``t`` symbol errors.
+
+    The standards name an RS code by its sizes in *code symbols*, elements
+    of GF(2^m) of ``m`` bits each (not constellation symbols): RS(544, 514)
+    over GF(2^10), KP4, has codewords of 544 code symbols, 514 of them
+    information, and corrects ``t = (544 - 514) / 2 = 15`` wrong code
+    symbols, whatever the bit errors inside each.  Like every code object,
+    :attr:`n` and :attr:`k` count *bits*: 5440 and 5140 for KP4.  The code
+    symbol counts are :attr:`length` (``symbols``) and ``info_symbols``.
 
     Parameters
     ----------
     symbols, info_symbols : int
-        Symbols per codeword and information symbols, ``symbols -
-        info_symbols`` even, ``symbols <= 2^m - 1`` (shorter codes are
-        shortened).
+        Code symbols per codeword and information code symbols (the two
+        numbers of RS(544, 514)), ``symbols - info_symbols`` even,
+        ``symbols <= 2^m - 1`` (shorter codes are shortened).
     m : int
-        Bits per symbol.
+        Bits per code symbol.
     primitive : int, optional
         Field polynomial with its ``x^m`` term (``0x11D`` for
         ``x^8 + x^4 + x^3 + x^2 + 1``); ``None`` takes the common primitive
@@ -109,7 +117,11 @@ class ReedSolomonCode(_Algebraic):
 
     Notes
     -----
-    In bits, ``n m`` transmitted and ``k m`` information bits per codeword.
+    ``n = symbols * m`` transmitted and ``k = info_symbols * m``
+    information bits per codeword, each code symbol MSB first; a codeword
+    is one block of ``generate(..., num_blocks=)``.  KP4 on PAM4 (2 bits
+    per constellation symbol) fills 2720 constellation symbols per
+    codeword.
     """
 
     symbols: int
@@ -131,22 +143,22 @@ class ReedSolomonCode(_Algebraic):
 
     @property
     def n(self) -> int:
-        """Transmitted bits per codeword, ``n m``."""
+        """Transmitted bits per codeword, ``symbols * m``."""
         return self.symbols * self.m
 
     @property
     def k(self) -> int:
-        """Information bits per codeword, ``k m``."""
+        """Information bits per codeword, ``info_symbols * m``."""
         return self.info_symbols * self.m
 
     @property
     def t(self) -> int:
-        """Correctable symbol errors per codeword."""
+        """Correctable code-symbol errors per codeword."""
         return (self.symbols - self.info_symbols) // 2
 
     @property
     def length(self) -> int:
-        """Transmitted symbols per codeword."""
+        """Code symbols per codeword, ``symbols`` (``n`` counts bits)."""
         return self.symbols
 
     @property
@@ -235,14 +247,20 @@ class ReedSolomonCode(_Algebraic):
 class BCHCode(_Algebraic):
     """Binary narrow-sense BCH code over GF(2^m) correcting ``t`` errors.
 
+    Named by the field and the errors it corrects; the code's sizes follow:
+    ``n = 2^m - 1`` bits (or ``length`` when shortened) and ``k = n - deg
+    g``, at most ``m t`` parity bits.  ``BCHCode(6, 3)`` is BCH(63, 45),
+    ``BCHCode(10, 8)`` BCH(1023, 943): read :attr:`n` and :attr:`k`.
+
     Parameters
     ----------
     m : int
-        Field degree: the full code length is ``2^m - 1``.
+        Field degree: the full code length is ``2^m - 1`` bits.
     t : int
         Correctable bit errors per codeword.
     length : int, optional
-        Shorten to ``n = length`` by leaving out leading information bits.
+        Shorten to ``n = length`` bits by leaving out leading information
+        bits (``k`` drops by the same number).
     primitive : int, optional
         Field polynomial with its ``x^m`` term; ``None`` takes the common
         one of degree ``m``.

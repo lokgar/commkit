@@ -107,7 +107,11 @@ _NR_SEQUENCE = np.array([
 
 @dataclass(frozen=True, eq=False)
 class PolarCode(_Code):
-    """Polar code of length ``N = 2^n`` with given information positions.
+    """Polar code of length ``N``, a power of two, with given information positions.
+
+    :attr:`n` is ``N`` and :attr:`k` the information bits without the CRC,
+    so the rate ``k / N`` counts the CRC as overhead: ``PolarCode.nr(64,
+    128, crc="11")`` carries 64 information and 11 CRC bits in 128.
 
     Parameters
     ----------
@@ -173,12 +177,16 @@ class PolarCode(_Code):
     def nr(cls, k: int, n: int, *, crc: str | None = None) -> PolarCode:
         """Polar code with the 5G NR information set (TS 38.212 clause 5.3.1.2).
 
+        The arguments are in the order of the standard's notation ``(K,
+        N)``, information bits first: ``nr(128, 256)`` is the rate-1/2 code
+        of 256 bits.
+
         Parameters
         ----------
         k : int
-            Information bits per codeword.
+            Information bits per codeword, the CRC not included.
         n : int
-            Code length, a power of two from 32 to 1024.
+            Code length in bits, a power of two from 32 to 1024.
         crc : {"6", "11", "16", "24A", "24B", "24C"}, optional
             Attach this NR CRC (``"24C"`` for downlink control, ``"11"`` and
             ``"6"`` for uplink control); the most reliable ``k + degree``

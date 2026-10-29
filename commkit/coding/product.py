@@ -196,19 +196,27 @@ class HardIterations:
 class StaircaseCode(_Code):
     """The 512 x 510 staircase code of ITU-T G.709.2 Annex A, in frames.
 
+    A staircase code is a continuous chain of 512 x 510 blocks.  Here it
+    is cut into terminated *frames*: ``num_blocks`` staircase blocks and
+    a terminating parity block.  The frame is the codeword, the unit that
+    :attr:`n`, :attr:`k` and ``generate(..., num_blocks=)`` count;
+    ``num_blocks`` here counts the staircase blocks inside one frame.
+    Per frame ``n = 261120 num_blocks + 16384`` and ``k = 244736
+    num_blocks`` bits: the default 4 gives 1060864 and 978944, rate 0.923.
+
     Parameters
     ----------
     num_blocks : int, default 4
         Staircase blocks of information per frame, each 512 x 478
-        information bits; the frame adds a terminating block of 512 x 32
-        parity bits.
+        information bits (512 x 510 with its parity); the frame adds a
+        terminating block of 512 x 32 parity bits.
 
     Notes
     -----
     Bits: the blocks in order, each row by row (510 bits per row, the
     information columns first), then the terminating block's parity row by
-    row.  Rate ``478 / 510`` per block (6.7% overhead), slightly less per
-    frame for the terminating parity.  The standard's error decorrelator
+    row.  Rate ``478 / 510`` per block (6.7% overhead), less per frame for
+    the terminating parity, the less the more blocks a frame has.  The standard's error decorrelator
     and its mapping to OTU frames are not included.
     """
 
@@ -221,12 +229,12 @@ class StaircaseCode(_Code):
 
     @property
     def n(self) -> int:
-        """Transmitted bits per frame."""
+        """Transmitted bits per frame, ``261120 num_blocks + 16384``."""
         return self.num_blocks * _ROWS * _COLUMNS + _ROWS * _PARITY
 
     @property
     def k(self) -> int:
-        """Information bits per frame."""
+        """Information bits per frame, ``244736 num_blocks``."""
         return self.num_blocks * _ROWS * _INFO
 
     def __repr__(self) -> str:
@@ -242,7 +250,8 @@ class StaircaseCode(_Code):
         Parameters
         ----------
         num_blocks : int, default 4
-            Staircase blocks of information per frame.
+            Staircase blocks of information per frame (a frame is one
+            codeword; see :class:`StaircaseCode`).
 
         Returns
         -------
@@ -371,7 +380,9 @@ class Concatenated(_Code):
 
     Notes
     -----
-    ``k = outer.k`` and ``n = ceil(outer.n / inner.k) inner.n``.  Decoding
+    A codeword is one outer codeword with the inner codewords that carry
+    it, the unit of ``generate(..., num_blocks=)``: ``k = outer.k`` and
+    ``n = ceil(outer.n / inner.k) inner.n``.  Decoding
     runs the inner decoder, passes its a-posteriori LLRs of the
     information bits on (hard decisions as +-1 for hard-output decoders),
     and runs the outer decoder.
@@ -422,6 +433,10 @@ class Concatenated(_Code):
         codeword's errors over the staircase rows.  OIF gives an input BER
         of 1.25e-2 for an output BER of 1e-15.
 
+        A codeword is one staircase frame, its bits spread over Hamming
+        codewords: with the default 4 blocks, ``k = 978944`` information
+        bits in 8915 Hamming codewords, ``n = 1141120``, rate 0.858.
+
         Parameters
         ----------
         num_blocks : int, default 4
@@ -443,7 +458,11 @@ class Concatenated(_Code):
         The concatenated FEC of the IEEE 802.3dj 200G-per-lane PMDs, with a
         block interleaver (120 rows of 136 columns over three KP4
         codewords' worth of bits) in place of the standard's interleaver:
-        each Hamming codeword draws bits from 120 different RS symbols.
+        each Hamming codeword draws bits from 120 different RS code symbols.
+
+        A codeword is three KP4 codewords (3 x 5440 bits) in 136 Hamming
+        codewords: ``k = 3 x 5140 = 15420``, ``n = 136 x 128 = 17408``,
+        rate 0.886.
         """
         from .algebraic import ReedSolomonCode
 
