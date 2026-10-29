@@ -4,6 +4,39 @@ Notable changes to CommKit, newest first. Performance figures are from the refer
 
 ## [Unreleased]
 
+### Changes that may need code updates
+
+- **`encode` rejects bits other than 0 and 1** with `ValueError`. Before, linear codes silently encoded another payload (`[2, 0, 0, 0]` gave the all-zero codeword), a value of 256 wrapped to 0, and the turbo encoder indexed its trellis with the value.
+- **`TurboCode` and `LDPCCode` reject non-integer parameters** with `TypeError` (`TurboCode(40.0)` was accepted; float LDPC indices were truncated into a different code).
+- **`fir_filter` and `ols_fir_filter` raise for complex taps on real samples.** The imaginary part was dropped (the taps `[1j]` gave zeros). Pass complex samples for a complex output.
+- **`correct_timing(mode="slice")` raises for offsets outside `[0, N)`**: a negative offset kept only the last samples. Use `mode="zero"` or `"circular"` for negative offsets.
+- **`gray_code`, `gray_to_binary` return read-only arrays.** They are cached, so writing to one changed every later call's result; copy before modifying.
+
+### Performance
+
+Paired A/B of alternating processes against the previous commit of each change:
+
+- Reed-Solomon decoding: KP4, 2048 hard-decision codewords at BER 1e-3, CPU 413 to about 110 ms (direct XOR reduction 0.80, Forney's formula at the error positions only 0.42, hard input converted in place 0.79), GPU 42 to 25 ms.
+- Chase decoding: 0.53 on the CPU, 0.30-0.51 on the GPU (no LLR round trip or re-encoding, no 4-D flip mask, larger GPU chunks).
+- Polar decoding: SC of N = 1024 0.32, SCL(8) 0.70, SCL(32) 0.68 (paths copied only when they change slot).
+- Tail-biting Viterbi: K = 7, 0.035 (all start states scored in one pass); decision storage a quarter of before at every termination.
+- Turbo decoding: LTE K = 1024, max-log 0.82, exact log-MAP 0.65.
+- Cached code tables: interleaving 2^20 values with one `Interleaver` 0.19 on the CPU, 0.013 on the GPU (identity shortcut in the code objects' equality, which every cached lookup called).
+- `mi`: one exponential per element, 256-QAM 0.82 on the CPU and 0.33 on the GPU, 16-QAM 0.52 on the GPU.
+
+### Fixed
+
+- **Staircase `valid` reflected an earlier state of the frame**: a block corrected through the next one kept its failed flag, so `HardIterations(1)` could return the right payload with `valid=False`. Success is now checked on the final frame.
+- **CCDM (and so PAS) `valid` accepted sequences no payload maps to**: a composition has more sequences than the 2^k payloads, and all were valid. Only the matcher's image is valid now.
+- **`zf_equalizer` with a float64 channel estimate returned complex128** for complex64 samples; it now computes in the samples' precision.
+- **`correct_timing(mode="zero")`** repeated each channel's first sample for a negative per-channel offset instead of zero-filling, and returned zeros for a scalar offset of 0.
+- **`mi` and `ols_fir_filter` / `zf_equalizer` bound their working memory.** `mi`'s intermediates reached GiBs for many channels of high-order QAM (1 GiB of differences for two channels of 1024-QAM); they are now capped at 2^24 elements. Overlap-save transformed the whole record at once, against its docstring, about 8 times the input; it now runs in batches of blocks (3.5 times the input on long records; about 5% slower on the CPU for 2^25 samples).
+- `load_npz` closes its archive; `ber`, `fer` and `ser` transfer their error counts once.
+
+### Development
+
+- Benchmarks for polar, Viterbi, turbo, Chase and CCDM decoding in `bench_coding.py`; `ldpc_workload` is now `coded_workload`.
+
 ## [3.0.0] - 2026-10-28
 
 The channel-coding release. `commkit.coding` grows from an empty scaffold into a full FEC toolbox: one `encode` / `decode` pair dispatched on code objects covers linear block, LDPC, BCH and Reed-Solomon, polar, convolutional and turbo codes, the FEC structures of the optical standards (KP4, the 802.3dj and 400ZR concatenated codes, the G.709.2 staircase code, PON LDPC), CRCs, interleavers, rate matching and probabilistic amplitude shaping. `generate` and frames produce coded payloads, the reference keeps the source bits next to the bits on the air, and three new notebooks teach it. Shaped `generate` now goes through a distribution matcher, and the example notebooks are renumbered; see the first section.
