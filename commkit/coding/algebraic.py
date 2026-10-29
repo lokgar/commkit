@@ -449,7 +449,9 @@ def _correct(code: Any, hard: ArrayType) -> tuple[ArrayType, ArrayType]:
         derivative[:, ::2] = locator[:, 1 : t + 1 : 2]
         xpow, xinv = _device_tables(code, "forney", xp, lambda: code._forney_tables)
         # Evaluated only at the at most t error positions of each row, (R, t).
-        pos = xp.argsort(~errors, axis=1)[:, :t]
+        # An int64 key: CuPy's sort of bool keys reads the padding of its
+        # (index, key) pairs, which compute-sanitizer's initcheck reports.
+        pos = xp.argsort(xp.where(errors, 0, 1), axis=1)[:, :t]
         hit = xp.take_along_axis(errors, pos, axis=1)
         powers = xinv[pos]  # (R, t, t): X_p^-k at those positions
         values = f.mul(
