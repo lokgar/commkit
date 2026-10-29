@@ -37,9 +37,9 @@ from ..backend import ArrayType, _device_tables, dispatch
 from ..mapping.gray import _pack, _unpack_bits
 from ._galois import PRIMITIVE, _Field
 from ._gf2 import matmul_mod2
-from .base import _Code, _Codec, _Decoded, _hard, _register
+from .base import _Code, _Codec, _Decoded, _hard, _register, _resolve_method
 from .crc import _remainders
-from .linear import Chase, _decode_chase
+from .linear import Chase, _decode_chase, _HardWords
 
 __all__ = ["BCHCode", "BerlekampMassey", "ReedSolomonCode"]
 
@@ -511,7 +511,15 @@ def _berlekamp_massey(f: _Field, s: ArrayType, t: int) -> tuple[ArrayType, Array
 
 def _decode_bch(code: BCHCode, llrs: ArrayType, method: Any) -> _Decoded:
     if isinstance(method, Chase):
-        return _decode_chase(code, llrs, method)
+        hard = _resolve_method(code, method.hard, "decode()")
+        if not isinstance(hard, BerlekampMassey):
+            return _decode_chase(code, llrs, method)
+        return _decode_chase(
+            code,
+            llrs,
+            method,
+            _HardWords(lambda h: _correct(code, h), lambda w: w[:, : code.k]),
+        )
     return _decode(code, llrs, method)
 
 

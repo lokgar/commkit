@@ -15,11 +15,12 @@ over any hard decoder, with Pyndiah's soft output; also for BCH codes).
 
 from __future__ import annotations
 
+from collections.abc import Callable
 from dataclasses import dataclass
 from functools import cached_property
 from itertools import combinations
 from math import comb
-from typing import Any
+from typing import Any, NamedTuple
 
 import numpy as np
 
@@ -34,6 +35,7 @@ from .base import (
     _encode_blocks,
     _hard,
     _register,
+    _resolve_method,
 )
 
 __all__ = ["Chase", "LinearBlockCode", "MaximumLikelihood", "Syndrome"]
@@ -362,19 +364,11 @@ def _decode_syndrome(
     code: LinearBlockCode, llrs: ArrayType, method: Syndrome
 ) -> _Decoded:
     _, xp, _ = dispatch(llrs)
-    ht, leaders, found = _device_tables(
-        code,
-        f"syndrome:{method.max_weight}",
-        xp,
-        lambda: _syndrome_table(code, method.max_weight),
-    )
-    hard = _hard(llrs)
-    s = _pack(matmul_mod2(hard, ht))
-    words = hard ^ leaders[s]
+    words, valid = _syndrome_words(code, _hard(llrs), method)
     return _Decoded(
         _information(code, words),
         None,
-        found[s],
+        valid,
         xp.ones(llrs.shape[0], dtype=np.int32),
     )
 
@@ -418,60 +412,116 @@ def _decode_ml(
     )
 
 
-def _decode_chase(code: Any, llrs: ArrayType, method: Chase) -> _Decoded:
-    """Chase-II over ``code``'s hard decoder; shared with the BCH codes."""
+class _HardWords(NamedTuple):
+    """A hard decoder's corrected words, for Chase to skip LLRs and re-encoding."""
+
+    correct: Callable[
+        [ArrayType], tuple[ArrayType, ArrayType]
+    ]  # (R, n) -> words, valid
+    information: Callable[[ArrayType], ArrayType]  # codewords (R, n) -> bits (R, k)
+
+
+def _decode_chase(
+    code: Any, llrs: ArrayType, method: Chase, hard_words: _HardWords | None = None
+) -> _Decoded:
+    """Chase-II over ``code``'s hard decoder; shared with the BCH codes.
+
+    With ``hard_words`` the test words go to the hard decoder as bits and
+    its corrected words are used directly; otherwise they go through
+    :func:`decode` as LLRs and the decoded bits are encoded again.
+    """
     _, xp, _ = dispatch(llrs)
     rows, n = llrs.shape
     p = min(method.test_positions, n)
     tests = 1 << p
-    patterns = _unpack_bits(xp.arange(tests), p).astype(bool)  # (T, p)
-    chunk = max(1, _CHASE_CHUNK // (tests * n * p))
+    patterns = _unpack_bits(xp.arange(tests), p)  # (T, p)
+    # Rows per chunk: on the GPU, fewer launches pay for more memory; on the
+    # CPU larger chunks measured slower (cache).
+    chunk = max(1, _CHASE_CHUNK // (tests * n * (p if xp is np else 1)))
     bits_out = xp.empty((rows, code.k), dtype=np.int8)
     llrs_out = xp.empty((rows, n), dtype=xp.float32)
     valid_out = xp.empty(rows, dtype=bool)
-    positions = xp.arange(n)
     for r0 in range(0, rows, chunk):
         x = llrs[r0 : r0 + chunk]
         r = x.shape[0]
+        pick = xp.arange(r)
         least = xp.argsort(xp.abs(x), axis=1)[:, :p]  # (r, p)
-        flips = (
-            (least[:, None, :, None] == positions) & patterns[None, :, :, None]
-        ).any(axis=2)
-        test_words = _hard(x)[:, None, :] ^ flips.astype(np.int8)  # (r, T, n)
-        res = _decode_blocks(
-            code,
-            (1.0 - 2.0 * test_words.reshape(-1, n)).astype(xp.float32),
-            method.hard,
-        )
-        words = _encode_blocks(code, res.bits).reshape(r, tests, n)
-        valid = res.valid.reshape(r, tests)
-        metric = xp.einsum("rtn,rn->rt", (1.0 - 2.0 * words).astype(xp.float32), x)
+        # Test word t flips the least reliable positions where its pattern has a 1.
+        test_words = xp.broadcast_to(_hard(x)[:, None, :], (r, tests, n)).copy()
+        test_words[
+            pick[:, None, None], xp.arange(tests)[None, :, None], least[:, None, :]
+        ] ^= patterns[None]
+        test_words = test_words.reshape(-1, n)
+        if hard_words is None:
+            res = _decode_blocks(
+                code, 1 - 2 * test_words.astype(xp.float32), method.hard
+            )
+            words = _encode_blocks(code, res.bits).reshape(r, tests, n)
+            valid = res.valid.reshape(r, tests)
+        else:
+            words, valid = hard_words.correct(test_words)
+            words = words.reshape(r, tests, n)
+            valid = valid.reshape(r, tests)
+        metric = xp.einsum("rtn,rn->rt", 1 - 2 * words.astype(xp.float32), x)
         metric = xp.where(valid, metric, -xp.inf)
         best = xp.argmax(metric, axis=1)
-        pick = xp.arange(r)
-        bits_out[r0 : r0 + r] = res.bits.reshape(r, tests, -1)[pick, best]
-        valid_out[r0 : r0 + r] = valid.any(axis=1)
+        decided = words[pick, best]
+        any_valid: ArrayType = valid.any(axis=1)
+        if hard_words is None:
+            bits = res.bits.reshape(r, tests, -1)[pick, best]
+        else:
+            bits = hard_words.information(decided)
+            # Where every test word failed, the decision is the encoding of
+            # the first one's bits, as for the decoders without hard words.
+            decided = xp.where(any_valid[:, None], decided, _encode_blocks(code, bits))
+        bits_out[r0 : r0 + r] = bits
+        valid_out[r0 : r0 + r] = any_valid
         # Max-log soft output from the candidates of each value of each bit.
         m = metric[:, :, None]
         m0 = xp.where(words == 0, m, -xp.inf).max(axis=1)
         m1 = xp.where(words == 1, m, -xp.inf).max(axis=1)
         with np.errstate(invalid="ignore"):
             soft = 0.5 * (m0 - m1)
-        decided = words[pick, best]
         known = xp.isfinite(soft)
         if method.beta is None:
             beta = xp.where(known, xp.abs(soft), 0).max(axis=1, keepdims=True)
             beta = xp.where(beta > 0, beta, xp.abs(x).max(axis=1, keepdims=True))
         else:
             beta = xp.float32(method.beta)
-        fallback = beta * (1.0 - 2.0 * decided)
+        fallback = beta * (1 - 2 * decided.astype(xp.float32))
         llrs_out[r0 : r0 + r] = xp.where(known, soft, fallback).astype(xp.float32)
     return _Decoded(bits_out, llrs_out, valid_out, xp.ones(rows, dtype=np.int32))
 
 
+def _syndrome_words(
+    code: LinearBlockCode, hard: ArrayType, method: Syndrome
+) -> tuple[ArrayType, ArrayType]:
+    """Syndrome decoding of hard words ``(R, n)``: corrected words and success."""
+    _, xp, _ = dispatch(hard)
+    ht, leaders, found = _device_tables(
+        code,
+        f"syndrome:{method.max_weight}",
+        xp,
+        lambda: _syndrome_table(code, method.max_weight),
+    )
+    s = _pack(matmul_mod2(hard, ht))
+    return hard ^ leaders[s], found[s]
+
+
 def _decode(code: LinearBlockCode, llrs: ArrayType, method: object) -> _Decoded:
     if isinstance(method, Chase):
-        return _decode_chase(code, llrs, method)
+        hard = _resolve_method(code, method.hard, "decode()")
+        if not isinstance(hard, Syndrome):
+            return _decode_chase(code, llrs, method)
+        return _decode_chase(
+            code,
+            llrs,
+            method,
+            _HardWords(
+                lambda h: _syndrome_words(code, h, hard),
+                lambda w: _information(code, w),
+            ),
+        )
     if isinstance(method, MaximumLikelihood):
         return _decode_ml(code, llrs, method)
     assert isinstance(method, Syndrome)
