@@ -168,18 +168,22 @@ def _plateau_mask(
         n_cells = max(int(np.ceil(np.log2(fe[-1] / fe[0]) * points_per_octave)), 1)
         edges = np.geomspace(fe[0], fe[-1], n_cells + 1)
         cell_of = np.clip(np.searchsorted(edges, fe, side="right") - 1, 0, n_cells - 1)
-        occupied = np.unique(cell_of)
+        # fe ascends, so each occupied cell is one slice of se.
+        occupied, starts, counts = np.unique(
+            cell_of, return_index=True, return_counts=True
+        )
+        cells = [se[a : a + n] for a, n in zip(starts, counts, strict=True)]
 
         cell_med = np.empty(occupied.size)
         homogeneous = np.ones(occupied.size, dtype=bool)
-        for i, k in enumerate(occupied):
-            vals = se[cell_of == k]
+        for i, vals in enumerate(cells):
             q1, q2, q3 = np.percentile(vals, (25.0, 50.0, 75.0))
             cell_med[i] = q2
             if vals.size >= 5 and q2 > 0.0:
                 homogeneous[i] = (q3 - q1) / q2 <= max_rel_iqr
 
         occ_h, med_h = occupied[homogeneous], cell_med[homogeneous]
+        cells_h = [v for v, h in zip(cells, homogeneous, strict=True) if h]
         if med_h.size < min_cells or not (med_h > 0.0).all():
             continue
 
@@ -207,14 +211,14 @@ def _plateau_mask(
         # gate (floor ±0.6 dB) that cuts the f² tail where it visibly departs
         # from the plateau; sparse low-frequency cells keep a wide gate up to
         # ``tolerance`` so genuine Welch scatter is not speckled out.
-        n_bins = np.array([int((cell_of == k).sum()) for k in occ_h])
+        n_bins = counts[homogeneous]
         rich = near & (n_bins >= 8)
         if rich.any():
             iqr_rel = np.array(
                 [
-                    float(np.subtract(*np.percentile(se[cell_of == k], (75.0, 25.0))))
-                    / med
-                    for k, med in zip(occ_h[rich], med_h[rich])
+                    float(np.subtract(*np.percentile(vals, (75.0, 25.0)))) / med
+                    for vals, med, r in zip(cells_h, med_h, rich, strict=True)
+                    if r
                 ]
             )
             sigma_bin = float(np.median(iqr_rel)) / 1.349
