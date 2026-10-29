@@ -59,6 +59,22 @@ class TestZFEqualizer:
         # The last sample lacks the precursor of tx[n], so skip the edges.
         xpt.assert_allclose(equalized[8:-8], tx[8:-8], atol=1e-4)
 
+    @pytest.mark.parametrize("estimate_dtype", ["float64", "complex128"])
+    def test_samples_set_the_precision(self, xp, xpt, estimate_dtype):
+        """A double-precision estimate does not promote complex64 samples,
+        SISO or MIMO (whose 2x2 path runs its own inversion)."""
+        rng = xp.random.RandomState(3)
+        tx = (rng.randn(2, 256) + 1j * rng.randn(2, 256)).astype(xp.complex64)
+        siso = xp.asarray([1.0, 0.5], dtype=estimate_dtype)
+        rx = xp.convolve(tx[0], siso.astype(xp.complex64), mode="full")[:256]
+        out = equalization.zf_equalizer(rx, siso)
+        assert out.dtype == xp.complex64
+        xpt.assert_allclose(out, tx[0], atol=1e-4)
+        mimo = xp.zeros((2, 2, 2), dtype=estimate_dtype)
+        mimo[0, 0, 0] = mimo[1, 1, 0] = 1.0
+        mimo[0, 1, 1] = mimo[1, 0, 1] = 0.3
+        assert equalization.zf_equalizer(tx, mimo).dtype == xp.complex64
+
     @pytest.mark.parametrize("center", [-1, 3])
     def test_center_out_of_range_raises(self, xp, center):
         channel = xp.array([0.25, 1.0, 0.4j], dtype=xp.complex64)

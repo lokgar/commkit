@@ -51,7 +51,7 @@ def zf_equalizer(
     channel_estimate : array_like
         Channel impulse response, ``(L,)`` for SISO or ``(C, C, L)`` for
         MIMO, where ``[i, j]`` is the FIR from input ``j`` to output ``i``.
-        Index ``center`` holds lag 0.
+        Index ``center`` holds lag 0.  Cast to the precision of ``samples``.
     noise_variance : float, default 0.0
         Noise variance ``σ²`` of the MMSE regularization; ``0.0`` gives ZF.
     center : int, default 0
@@ -76,7 +76,11 @@ def zf_equalizer(
 
     logger.info("ZF/MMSE equalizer: noise_variance=%.2e", noise_variance)
     samples, xp, _ = dispatch(samples)
-    channel_estimate = xp.asarray(channel_estimate)
+    # In the samples' precision before the FFT: a float64 estimate would
+    # promote the whole overlap-save spectrum and its inverse to complex128.
+    channel_estimate = xp.asarray(channel_estimate).astype(
+        xp.result_type(samples.dtype, xp.complex64), copy=False
+    )
 
     # Capture BEFORE any reshape so the later frequency-domain branch
     # can still take the efficient scalar path for SISO channels.
