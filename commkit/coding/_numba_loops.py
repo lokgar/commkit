@@ -800,13 +800,21 @@ _HALF_RANGE = np.int64(1) << (_RANGE_BITS - 1)
 
 
 @numba.njit(cache=True, nogil=True, inline="always")
-def largest(counts):  # type: ignore[no-untyped-def]
-    """Index of the largest count (the first on ties)."""
+def ccdm_shares(counts, rng, remaining, shares):  # type: ignore[no-untyped-def]
+    """Split ``rng`` among the points by their counts, in ``shares``.
+
+    ``rng * counts[i] // remaining`` each, the rounding remainder going to
+    the largest count (the first on ties), one division per point.
+    """
     big = 0
-    for i in range(1, counts.shape[0]):
+    rest = rng
+    for i in range(counts.shape[0]):
+        share = rng * counts[i] // remaining
+        shares[i] = share
+        rest -= share
         if counts[i] > counts[big]:
             big = i
-    return big
+    shares[big] += rest
 
 
 @numba.njit(cache=True, nogil=True, parallel=True)
@@ -816,6 +824,7 @@ def ccdm_match(bits, composition, out):  # type: ignore[no-untyped-def]
     n = out.shape[1]
     for b in numba.prange(bits.shape[0]):  # type: ignore[attr-defined,no-untyped-call]
         counts = composition.copy()
+        shares = np.empty(counts.shape[0], dtype=np.int64)
         rng = _TOP
         d = np.int64(0)
         pos = 0
@@ -824,17 +833,12 @@ def ccdm_match(bits, composition, out):  # type: ignore[no-untyped-def]
             pos += 1
         remaining = np.int64(n)
         for t in range(n):
-            big = largest(counts)
-            rest = rng
-            for i in range(counts.shape[0]):
-                rest -= rng * counts[i] // remaining
+            ccdm_shares(counts, rng, remaining, shares)
             cum = np.int64(0)
             s = 0
             share = np.int64(0)
             for i in range(counts.shape[0]):
-                share = rng * counts[i] // remaining
-                if i == big:
-                    share += rest
+                share = shares[i]
                 if d < cum + share:
                     s = i
                     break
@@ -850,6 +854,15 @@ def ccdm_match(bits, composition, out):  # type: ignore[no-untyped-def]
                 pos += 1
 
 
+_LIMB = np.uint64(0xFFFFFFFF)
+
+
+@numba.njit(cache=True, nogil=True, inline="always")
+def low_bit(low, j):  # type: ignore[no-untyped-def]
+    """Bit ``2^-j`` (``j >= 1``) of ``low``, 32 bits per limb, MSB first."""
+    return (low[(j - 1) >> 5] >> np.uint64(31 - ((j - 1) & 31))) & np.uint64(1)
+
+
 @numba.njit(cache=True, nogil=True, parallel=True)
 def ccdm_dematch(symbols, composition, buffer_bits, bits, valid):  # type: ignore[no-untyped-def]
     """Dematch the rows of ``symbols`` back to bits, flagging invalid rows."""
@@ -857,7 +870,9 @@ def ccdm_dematch(symbols, composition, buffer_bits, bits, valid):  # type: ignor
     n = symbols.shape[1]
     for b in numba.prange(symbols.shape[0]):  # type: ignore[attr-defined,no-untyped-call]
         counts = composition.copy()
-        low = np.zeros(buffer_bits + 1, dtype=np.uint8)  # low[j]: bit 2^-j
+        shares = np.empty(counts.shape[0], dtype=np.int64)
+        # The interval's start, bits 2^-1 .. 2^-buffer_bits, 32 per limb.
+        low = np.zeros(buffer_bits // 32 + 2, dtype=np.uint64)
         rng = _TOP
         shift = _RANGE_BITS
         remaining = np.int64(n)
@@ -867,27 +882,23 @@ def ccdm_dematch(symbols, composition, buffer_bits, bits, valid):  # type: ignor
             if s < 0 or s >= counts.shape[0] or counts[s] == 0:
                 ok = False
                 break
-            big = largest(counts)
-            rest = rng
-            for i in range(counts.shape[0]):
-                rest -= rng * counts[i] // remaining
+            ccdm_shares(counts, rng, remaining, shares)
             cum = np.int64(0)
             for i in range(s):
-                cum += rng * counts[i] // remaining
-                if i == big:
-                    cum += rest
-            share = rng * counts[s] // remaining
-            if s == big:
-                share += rest
-            # low += cum 2^-shift, with carries into the higher bits.
-            carry = 0
-            j = shift
-            while (cum > 0 or carry) and j > 0:
-                v = low[j] + (cum & 1) + carry
-                low[j] = v & 1
-                carry = v >> 1
-                cum >>= 1
-                j -= 1
+                cum += shares[i]
+            share = shares[s]
+            # low += cum 2^-shift, carries into the higher limbs (none
+            # beyond 2^-1).
+            i = (shift - 1) >> 5
+            v = np.uint64(cum) << np.uint64(31 - ((shift - 1) & 31))
+            low[i] += v & _LIMB
+            carry = (low[i] >> np.uint64(32)) + (v >> np.uint64(32))
+            low[i] &= _LIMB
+            while carry and i > 0:
+                i -= 1
+                low[i] += carry
+                carry = low[i] >> np.uint64(32)
+                low[i] &= _LIMB
             rng = share
             counts[s] -= 1
             remaining -= 1
@@ -899,15 +910,21 @@ def ccdm_dematch(symbols, composition, buffer_bits, bits, valid):  # type: ignor
                 break
         # v = ceil(low 2^k): the first k bits, plus one if more follow.
         beyond = 0
-        for j in range(k + 1, buffer_bits + 1):
-            if low[j]:
+        first = k >> 5  # the limb of bit k + 1
+        if low[first] & (_LIMB >> np.uint64(k & 31)):
+            beyond = 1
+        for i in range(first + 1, low.shape[0]):
+            if low[i]:
                 beyond = 1
                 break
+        for j in range(1, k + 1):
+            bits[b, j - 1] = low_bit(low, j)
         up = beyond
-        for j in range(k, 0, -1):
-            v = low[j] + up
-            bits[b, j - 1] = v & 1
-            up = v >> 1
+        j = k
+        while up and j > 0:  # the carry runs through trailing ones
+            up = bits[b, j - 1]
+            bits[b, j - 1] ^= 1
+            j -= 1
         # A sequence of the composition is the image of a payload only if v
         # 2^-k lies in the final interval [low, low + rng 2^-shift): the
         # composition has more sequences than the 2^k payloads.  The carry
@@ -920,12 +937,12 @@ def ccdm_dematch(symbols, composition, buffer_bits, bits, valid):  # type: ignor
             # above its lowest 32 to be 1, and then d = 2^w - (those 32 bits).
             lo = max(k + 1, shift - _RANGE_BITS + 1)
             for j in range(k + 1, lo):
-                if not low[j]:
+                if not low_bit(low, j):
                     ok = False
                     break
             if ok:
                 f = np.int64(0)
                 for j in range(lo, shift + 1):
-                    f = (f << 1) | low[j]
+                    f = (f << 1) | np.int64(low_bit(low, j))
                 ok = (np.int64(1) << (shift - lo + 1)) - f < rng
         valid[b] = ok
