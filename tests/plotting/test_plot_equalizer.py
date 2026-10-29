@@ -1,10 +1,13 @@
 """Tests for equalizer result and frequency response plotting."""
 
 import dataclasses
+from types import SimpleNamespace
 from typing import Any
 from unittest.mock import patch
 
 import matplotlib.pyplot as plt
+import numpy as np
+import pytest
 
 from commkit import equalization, generate
 from commkit.filtering import RRC
@@ -15,6 +18,30 @@ from commkit.plotting.equalizer import plot_zf_equalizer_response
 
 class TestPlotEqualizer:
     """Tests for equalizer convergence and response plotting."""
+
+    def test_long_curves_keep_their_envelope(self, xp: Any) -> None:
+        """A long result is drawn from its min/max envelope, extremes kept."""
+        n = 200_000
+        rng = np.random.default_rng(0)
+        error = (0.1 * rng.standard_normal((2, n))).astype(np.complex64)
+        error[1, 123_456] = 30.0  # one outlier survives the smoothing window
+        phase = np.cumsum(1e-3 * rng.standard_normal((2, n)), axis=1)
+        result = SimpleNamespace(
+            error=xp.asarray(error),
+            weights=xp.ones((2, 2, 5), dtype=xp.complex64),
+            phase_trajectory=xp.asarray(phase),
+            num_train_symbols=0,
+        )
+        fig, axes = plot_equalizer_result(result, smoothing=10)
+        for ax in (axes[0], axes[2]):
+            for line in ax.get_lines():
+                assert len(line.get_xdata()) <= 6000  # 4000 + a tail < 2000
+        conv = axes[0].get_lines()[1].get_ydata()
+        assert conv.max() == pytest.approx(10 * np.log10(900 / 10), abs=0.5)
+        phi = axes[2].get_lines()[0].get_ydata()
+        assert phi.max() == pytest.approx(np.degrees(phase[0]).max(), rel=1e-6)
+        assert phi.min() == pytest.approx(np.degrees(phase[0]).min(), rel=1e-6)
+        plt.close(fig)
 
     def test_equalizer_result_mimo_weights(self, xp: Any) -> None:
         """equalizer_result with MIMO error/weights plots per-channel error and weights."""

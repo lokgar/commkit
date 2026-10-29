@@ -12,9 +12,9 @@ import matplotlib.pyplot as plt
 import numpy as np
 
 from .. import _fft
-from ..backend import to_device
+from ..backend import get_array_module, to_device
 from ..smoothing import moving_average
-from .theme import _grid_figsize, _set_eng_formatter
+from .theme import _decimate_minmax, _grid_figsize, _set_eng_formatter
 
 __all__ = ["plot_equalizer_result", "plot_zf_equalizer_response"]
 
@@ -50,11 +50,11 @@ def plot_equalizer_result(
         The figure and its axes; ``None`` with ``show=True``, which
         shows the figure instead.
     """
-    error = to_device(result.error, "cpu")
+    # Reduced on the result's device: the curves are smoothed and cut to
+    # their min/max envelope there, and only the plotted points move.
+    error = result.error
     weights = to_device(result.weights, "cpu")
     phase_traj = getattr(result, "phase_trajectory", None)
-    if phase_traj is not None:
-        phase_traj = to_device(phase_traj, "cpu")
 
     is_mimo = error.ndim == 2
     n_panels = 3 if phase_traj is not None else 2
@@ -69,11 +69,12 @@ def plot_equalizer_result(
     ax_conv = axes[0]
 
     def _smooth_mse(mse, smoothing):
-        """Return (x_coords, smoothed_mse_db) in raw-symbol-index space.
+        """Return host (x_coords, smoothed_mse_db) in raw-symbol-index space.
 
         The smoothing window is clipped to at most n//3 so the curve always
         spans at least 2/3 of the data range even for short sequences.
         """
+        xp = get_array_module(mse)
         n = len(mse)
         effective = max(1, min(smoothing, n // 3))
         if effective > 1 and n > effective:
@@ -81,21 +82,22 @@ def plot_equalizer_result(
             # Element k of mode="valid" output averages mse[k : k+effective].
             # Place it at the center of that window so the x-axis is in
             # actual symbol-index space, not smoothed-bin-index space.
-            x = np.arange(len(mse_smooth)) + (effective - 1) / 2.0
+            x = xp.arange(len(mse_smooth)) + (effective - 1) / 2.0
         else:
             mse_smooth = mse
-            x = np.arange(n)
-        return x, 10 * np.log10(mse_smooth + 1e-30)
+            x = xp.arange(n, dtype=xp.float64)
+        x, y = _decimate_minmax(x, 10 * xp.log10(mse_smooth + 1e-30))
+        return to_device(x, "cpu"), to_device(y, "cpu")
 
     if is_mimo:
         num_ch = error.shape[0]
         for ch in range(num_ch):
-            mse = np.abs(error[ch]) ** 2
+            mse = abs(error[ch]) ** 2
             x_smooth, mse_db = _smooth_mse(mse, smoothing)
             ax_conv.plot(x_smooth, mse_db, label=f"Ch {ch}")
         ax_conv.legend()
     else:
-        mse = np.abs(error) ** 2
+        mse = abs(error) ** 2
         x_smooth, mse_db = _smooth_mse(mse, smoothing)
         ax_conv.plot(x_smooth, mse_db)
 
@@ -146,12 +148,18 @@ def plot_equalizer_result(
     # --- Panel 3: Phase trajectory (CPR only) ---
     if phase_traj is not None:
         ax_phase = axes[2]
-        phi = np.asarray(phase_traj)
-        if phi.ndim == 1:
-            ax_phase.plot(np.degrees(phi))
-        else:
-            for ch in range(phi.shape[0]):
-                ax_phase.plot(np.degrees(phi[ch]), label=f"Ch {ch}")
+        xp = get_array_module(phase_traj)
+        phi = phase_traj * (180.0 / np.pi)
+        rows = phi[None] if phi.ndim == 1 else phi
+        idx = xp.arange(rows.shape[-1], dtype=xp.float64)
+        for ch in range(rows.shape[0]):
+            n_d, p_d = _decimate_minmax(idx, rows[ch])
+            ax_phase.plot(
+                to_device(n_d, "cpu"),
+                to_device(p_d, "cpu"),
+                label=f"Ch {ch}" if phi.ndim > 1 else None,
+            )
+        if phi.ndim > 1:
             ax_phase.legend()
         ax_phase.set_xlabel("Symbol Index")
         ax_phase.set_ylabel("Phase [deg]")

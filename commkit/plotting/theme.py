@@ -12,7 +12,7 @@ import matplotlib.font_manager as fm
 import matplotlib.pyplot as plt
 import numpy as np
 
-from ..backend import to_device
+from ..backend import get_array_module, to_device
 from ..logger import logger
 
 __all__ = ["apply_default_theme"]
@@ -213,17 +213,20 @@ def _decimate_minmax(
 
     Parameters
     ----------
-    x, y : numpy.ndarray
-        1-D arrays of equal length.
+    x, y : ndarray
+        1-D arrays of equal length, on one device (NumPy or CuPy): a GPU
+        trace is reduced there, so only the plotted points are transferred.
     max_points : int, default 4000
         Approximate cap on the number of plotted points.  Returned length is
         ``≈ max_points`` (``2`` per bucket).  Pass ``<= 0`` to disable.
 
     Returns
     -------
-    x_dec, y_dec : numpy.ndarray
-        Decimated arrays, or the inputs unchanged when already short enough.
+    x_dec, y_dec : ndarray
+        Decimated arrays on the inputs' device, or the inputs unchanged when
+        already short enough.
     """
+    xp = get_array_module(y)
     n = len(y)
     if max_points <= 0 or n <= max_points:
         return x, y
@@ -234,22 +237,22 @@ def _decimate_minmax(
     yr = y[:trimmed].reshape(n_buckets, bucket)
     xr = x[:trimmed].reshape(n_buckets, bucket)
 
-    rows = np.arange(n_buckets)
+    rows = xp.arange(n_buckets)
     i_min = yr.argmin(axis=1)
     i_max = yr.argmax(axis=1)
     # Emit the two extrema per bucket in their original x-order so the line
     # does not zig-zag backwards.
     first_is_min = i_min <= i_max
-    x_out = np.empty(n_buckets * 2, dtype=x.dtype)
-    y_out = np.empty(n_buckets * 2, dtype=y.dtype)
-    x_out[0::2] = np.where(first_is_min, xr[rows, i_min], xr[rows, i_max])
-    y_out[0::2] = np.where(first_is_min, yr[rows, i_min], yr[rows, i_max])
-    x_out[1::2] = np.where(first_is_min, xr[rows, i_max], xr[rows, i_min])
-    y_out[1::2] = np.where(first_is_min, yr[rows, i_max], yr[rows, i_min])
+    x_out = xp.empty(n_buckets * 2, dtype=x.dtype)
+    y_out = xp.empty(n_buckets * 2, dtype=y.dtype)
+    x_out[0::2] = xp.where(first_is_min, xr[rows, i_min], xr[rows, i_max])
+    y_out[0::2] = xp.where(first_is_min, yr[rows, i_min], yr[rows, i_max])
+    x_out[1::2] = xp.where(first_is_min, xr[rows, i_max], xr[rows, i_min])
+    y_out[1::2] = xp.where(first_is_min, yr[rows, i_max], yr[rows, i_min])
 
     if trimmed < n:  # keep the tail the reshape dropped
-        x_out = np.concatenate([x_out, x[trimmed:]])
-        y_out = np.concatenate([y_out, y[trimmed:]])
+        x_out = xp.concatenate([x_out, x[trimmed:]])
+        y_out = xp.concatenate([y_out, y[trimmed:]])
     return x_out, y_out
 
 
