@@ -4,6 +4,10 @@ Notable changes to CommKit, newest first. Performance figures are from the refer
 
 ## [Unreleased]
 
+## [3.1.0] - 2026-10-29
+
+Review fixes and the completion of the coding release. Coded records are sized in codewords (`generate(num_blocks=)`, `SingleCarrierFrame(payload_blocks=)`) or padded to any length, the reference carries its code, `save_npz` stores everything a Signal holds (codes included), and `Signal.domain` is back. Reed-Solomon and BCH decoding run in per-codeword kernels (KP4 23 times faster on the GPU, 16 on the CPU), and the remaining decoders, LLRs and several DSP paths got faster. Correctness fixes cover bit validation in `encode`, staircase and CCDM validity, complex FIR taps, ZF precision and timing correction. Frame lengths in symbols are renamed `*_num_symbols`; see the first section.
+
 ### Changes that may need code updates
 
 - **The `gpu` extra requires CuPy 14.2** (`cupy-cuda13x>=14.2`), the first release with sparse arrays (`cupyx.scipy.sparse.csr_array`), which the LDPC encoder now uses on the GPU.
@@ -32,7 +36,7 @@ Notable changes to CommKit, newest first. Performance figures are from the refer
 
 Paired A/B of alternating processes against the previous commit of each change:
 
-- Reed-Solomon decoding: KP4, 2048 hard-decision codewords at BER 1e-3, CPU 413 to about 30 ms (direct XOR reduction 0.80, Forney's formula at the error positions only 0.42, hard input converted in place 0.79, a per-codeword Numba decoder from the syndromes 0.27), GPU 42 to 1.9 ms (a CUDA kernel with one thread per codeword in place of Berlekamp-Massey's 450 launches, 0.080).
+- Reed-Solomon decoding: KP4, 2048 hard-decision codewords at BER 1e-3, CPU 410 to 26 ms (direct XOR reduction 0.80, Forney's formula at the error positions only 0.42, hard input converted in place 0.79, a per-codeword Numba decoder from the syndromes 0.27), GPU 41 to 1.8 ms (a CUDA kernel with one thread per codeword in place of Berlekamp-Massey's 450 launches, 0.080).
 - BCH decoding through the same per-codeword decoders: Chase-II of BCH(1000, 970) 0.26 on the CPU and 0.22 on the GPU, staircase decoding 0.35 and 0.14.
 - Chase decoding: 0.53 on the CPU, 0.30-0.51 on the GPU (no LLR round trip or re-encoding, no 4-D flip mask, larger GPU chunks).
 - LDPC sum-product decoding on the CPU: DVB-S2 1/2, 64 codewords, 0.70 (`phi(|Q|)` kept from a row's first pass instead of computed again).
@@ -66,6 +70,8 @@ Paired A/B of alternating processes against the previous commit of each change:
 ### Development
 
 - Benchmarks for polar, Viterbi, turbo, Chase and CCDM decoding in `bench_coding.py`; `ldpc_workload` is now `coded_workload`.
+- Baseline `0008` (`v3_1`) is the new benchmark reference, the first with those benchmarks, best of ten passes. Against `0007` the geometric mean of the time ratios is 0.88 (0.92 without coding); no benchmark is slower beyond the GPU's run-to-run swing (the slowest, 1.08, on a 0.26 ms GPU call). KP4 decoding takes 1.8 ms on the GPU and 26 ms on the CPU, against 41 and 410 ms.
+- The algebraic decoders' kernel (`algebraic`) joins the sanitizer pass of AGENTS §2, and their Numba decoder the `NUMBA_DISABLE_JIT` coverage job.
 
 ## [3.0.0] - 2026-10-28
 
@@ -215,7 +221,8 @@ See the [GitHub release](https://github.com/lokgar/commkit/releases/tag/v1.1.0) 
 
 First release. See the [GitHub release](https://github.com/lokgar/commkit/releases/tag/v1.0.0).
 
-[Unreleased]: https://github.com/lokgar/commkit/compare/v3.0.0...HEAD
+[Unreleased]: https://github.com/lokgar/commkit/compare/v3.1.0...HEAD
+[3.1.0]: https://github.com/lokgar/commkit/compare/v3.0.0...v3.1.0
 [3.0.0]: https://github.com/lokgar/commkit/compare/v2.3.0...v3.0.0
 [2.3.0]: https://github.com/lokgar/commkit/compare/v2.2.0...v2.3.0
 [2.2.0]: https://github.com/lokgar/commkit/compare/v2.1.0...v2.2.0
