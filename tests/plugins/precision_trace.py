@@ -6,10 +6,12 @@
 Two kinds of site are reported in the terminal summary, with their commkit
 source line:
 
-- ``PROMOTE``: an operation on single-precision data that came through
-  ``dispatch`` (and through any ``commkit._fft`` transform after it) produced
-  a float64/complex128 array of at least 512 elements (the NEP 50 trap, a
-  float64 operand, a double reference);
+- ``PROMOTE``: an operation (a ufunc or ``astype``) on single-precision,
+  integer or bool data that came through ``dispatch`` (or, in
+  ``commkit.coding``, through ``validate_array``; and through any
+  ``commkit._fft`` transform after it) produced a float64/complex128 array
+  of at least 512 elements (the NEP 50 trap, a float64 operand, a double
+  reference, bits or hard decisions turned into double LLRs);
 - ``FRESH``: a NumPy math function (exp, cos, sin, sqrt, log, cumsum, angle,
   unwrap, ...) or a SciPy filter called from commkit returned such an array
   (a double phasor or response built and cast afterwards).
@@ -34,11 +36,20 @@ import numpy as np
 _MIN = 512
 _DOUBLE = (np.dtype(np.float64), np.dtype(np.complex128))
 _SINGLE = (np.dtype(np.float32), np.dtype(np.complex64))
+
+
+def _traced(dtype: np.dtype) -> bool:
+    """Single-precision data, and the integer or bool data (bits, hard
+    decisions, indices) that becomes floating point inside commkit."""
+    return dtype in _SINGLE or dtype.kind in "biu"
+
+
 _HITS: collections.Counter[str] = collections.Counter()
 
 
-def _site() -> str | None:
-    for f in reversed(traceback.extract_stack()[:-3]):
+def _site(depth: int = 3) -> str | None:
+    """The innermost commkit line, ``depth`` frames above this call."""
+    for f in reversed(traceback.extract_stack()[:-depth]):
         path = f.filename.replace("\\", "/")
         if "/commkit/commkit/" in path and "/plotting/" not in path:
             line = (f.line or "").strip()[:90]
@@ -63,11 +74,20 @@ class _Tagged(np.ndarray):
                 if site:
                     _HITS[f"PROMOTE {site} [{ufunc.__name__} -> {o.dtype}]"] += 1
                 return o
-            if isinstance(o, np.ndarray) and o.dtype in _SINGLE:
+            if isinstance(o, np.ndarray) and _traced(o.dtype):
                 return o.view(_Tagged)
             return o
 
         return tuple(tag(o) for o in out) if isinstance(out, tuple) else tag(out)
+
+    def astype(self, dtype: Any, *args: Any, **kwargs: Any) -> Any:
+        out = np.asarray(self).astype(dtype, *args, **kwargs)
+        if out.dtype in _DOUBLE and out.size >= _MIN:
+            site = _site(2)
+            if site:
+                _HITS[f"PROMOTE {site} [astype {self.dtype} -> {out.dtype}]"] += 1
+            return out
+        return out.view(_Tagged) if _traced(out.dtype) else out
 
 
 _Tagged.__module__ = "numpy"  # callers (and the contract tests) see NumPy
@@ -108,13 +128,33 @@ def _install() -> None:
     @functools.wraps(original)
     def dispatch(data: Any, *args: Any, **kwargs: Any) -> Any:
         x, xp, sp = original(data, *args, **kwargs)
-        if xp is np and type(x) is np.ndarray and x.dtype in _SINGLE:
+        if xp is np and type(x) is np.ndarray and _traced(x.dtype):
             x = x.view(_Tagged)
         return x, xp, sp
 
     for name, module in list(sys.modules.items()):
         if name.startswith("commkit") and getattr(module, "dispatch", None) is original:
             module.dispatch = dispatch  # type: ignore[attr-defined]
+
+    # The coding verbs validate their input instead of dispatching it (and
+    # store nothing of it, so the tag does not leak into results).
+    import commkit._array as array_module
+
+    validate = array_module.validate_array
+
+    @functools.wraps(validate)
+    def validate_array(*args: Any, **kwargs: Any) -> Any:
+        x = validate(*args, **kwargs)
+        if type(x) is np.ndarray and _traced(x.dtype):
+            x = x.view(_Tagged)
+        return x
+
+    for name, module in list(sys.modules.items()):
+        if (
+            name.startswith("commkit.coding")
+            and getattr(module, "validate_array", None) is validate
+        ):
+            module.validate_array = validate_array  # type: ignore[attr-defined]
 
     # Results leave as plain NumPy arrays (callers check the exact type).
     from commkit.core._signal_adapter import SignalAdapter
