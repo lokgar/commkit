@@ -223,6 +223,23 @@ class TestSignalProperties:
         assert html.startswith("<table>")
         assert "<b>Sampling rate</b>" in html
 
+    def test_summary_of_a_coded_reference(self):
+        """The coding rows: block, blocks with filler, information rate."""
+        from commkit import generate
+        from commkit.coding import LinearBlockCode
+
+        sig = generate(
+            Constellation.qam(16), 10, symbol_rate=1e9,
+            code=LinearBlockCode.hamming(3), pad=True,
+        )  # fmt: skip
+        text = str(sig)
+        assert "n=7  k=4  (rate 0.5714)" in text
+        assert "5 per channel  + 5 filler bits" in text
+        assert "Information rate    2.00 Gbps" in text  # 4 Gb/s x 20 / 40
+        assert "Code block" not in str(
+            generate(Constellation.qam(16), 10, symbol_rate=1e9)
+        )
+
     def test_format_si(self):
         """SI-prefix formatting used by the summary, for common magnitudes."""
         from commkit.core.signal import _format_si

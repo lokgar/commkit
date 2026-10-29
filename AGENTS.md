@@ -202,7 +202,7 @@ Dependencies point downward only:
 - The algorithm is chosen by an object, never by the function name or a string: `estimate_carrier_phase(y, BPS())`, not `recover_carrier_phase_bps(y)`. The verb function dispatches on the object's type through a private table in its module. There is no `recover_*` or `compensate_*`.
 - Computations use plain nouns (`allan_deviation`).
 - **Glossary**, one name each:
-  - `num_taps`, `step_size`, `sps`, `constellation`, `pulse`, `rng`, `num_symbols`, `num_channels`, `sampling_rate`, `symbol_rate`.
+  - `num_taps`, `step_size`, `sps`, `constellation`, `pulse`, `rng`, `num_symbols`, `num_blocks` (code blocks, codewords of a FEC code), `num_channels`, `sampling_rate`, `symbol_rate`.
   - Units are in the docstring. Use `_db` and `_hz` suffixes where the unit is ambiguous.
 
 ### Docstrings

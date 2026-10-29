@@ -286,7 +286,7 @@ class TestGenerateCoded:
         code = LinearBlockCode.hamming(3)
         with pytest.raises(ValueError, match="num_symbols=7 or 14"):
             generate(Constellation.qam(16), 10, symbol_rate=1.0, code=code)
-        with pytest.raises(ValueError, match=r"use num_symbols=7\."):
+        with pytest.raises(ValueError, match=r"use num_symbols=7,"):
             generate(Constellation.qam(16), 3, symbol_rate=1.0, code=code)
         with pytest.raises(ValueError, match="shaped"):
             generate(
@@ -294,3 +294,59 @@ class TestGenerateCoded:
             )
         with pytest.raises(TypeError, match="code object"):
             generate(Constellation.qam(16), 7, symbol_rate=1.0, code="hamming")
+        with pytest.raises(ValueError, match="fewer than one code block"):
+            generate(Constellation.qam(16), 1, symbol_rate=1.0, code=code)
+
+    def test_sized_in_blocks(self, xp: Any) -> None:
+        """num_blocks: the record holds exactly that many codewords."""
+        code = LinearBlockCode.hamming(3)  # n = 7
+        sig = generate(
+            Constellation.qam(16), symbol_rate=1.0, code=code, num_blocks=8, rng=3
+        )
+        ref = sig.reference
+        assert sig.samples.shape == (14,) and ref.num_blocks == 8
+        assert ref.info_bits.shape == (32,)
+        # The same draw as sizing by symbols.
+        by_symbols = generate(
+            Constellation.qam(16), 14, symbol_rate=1.0, code=code, rng=3
+        )
+        np.testing.assert_array_equal(ref.bits, by_symbols.reference.bits)
+
+    def test_pad_fills_after_the_last_block(self, backend_device: str) -> None:
+        """pad: whole codewords first, then random uncoded filler bits."""
+        code = LinearBlockCode.hamming(3)
+        c = Constellation.qam(16)
+        sig = generate(
+            c, 10, symbol_rate=1.0, code=code, pad=True, num_channels=2, rng=1,
+            device=backend_device,
+        )  # fmt: skip
+        ref = sig.reference
+        assert ref.num_blocks == 5  # 40 bits: 5 codewords of 7 and 5 filler bits
+        assert ref.bits.shape == (2, 40) and ref.info_bits.shape == (2, 20)
+        coded = to_numpy(ref.bits)[:, : 5 * 7]
+        np.testing.assert_array_equal(to_numpy(encode(ref.info_bits, code=code)), coded)
+        res = decode(ref.bits[:, : ref.num_blocks * code.n], code=code)
+        np.testing.assert_array_equal(to_numpy(res.bits), to_numpy(ref.info_bits))
+        # num_blocks rounds up to whole symbols with pad.
+        sig = generate(c, symbol_rate=1.0, code=code, num_blocks=3, pad=True)
+        assert sig.samples.shape == (6,) and sig.reference.num_blocks == 3
+
+    def test_sizing_errors(self) -> None:
+        code = LinearBlockCode.hamming(3)
+        c = Constellation.qam(16)
+        with pytest.raises(ValueError, match="exactly one"):
+            generate(c, symbol_rate=1.0, code=code)
+        with pytest.raises(ValueError, match="exactly one"):
+            generate(c, 14, symbol_rate=1.0, code=code, num_blocks=8)
+        with pytest.raises(ValueError, match="need code="):
+            generate(c, symbol_rate=1.0, num_blocks=8)
+        with pytest.raises(ValueError, match="need code="):
+            generate(c, 14, symbol_rate=1.0, pad=True)
+        with pytest.raises(ValueError, match="num_blocks=4 or 8"):
+            generate(c, symbol_rate=1.0, code=code, num_blocks=5)
+        shaped = c.shaped(entropy=3.5)
+        matcher = CCDM(shaped, block_length=10)
+        with pytest.raises(ValueError, match="composition"):
+            generate(shaped, 25, symbol_rate=1.0, code=matcher, pad=True)
+        sig = generate(shaped, symbol_rate=1.0, code=matcher, num_blocks=3)
+        assert sig.samples.shape == (30,) and sig.reference.num_blocks == 3

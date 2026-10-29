@@ -14,6 +14,15 @@ Notable changes to CommKit, newest first. Performance figures are from the refer
 - **`LDPCCode.parity_check()` returns a `scipy.sparse.csr_array`** instead of a `csr_matrix`, as SciPy plans to deprecate its matrix interface. `@` is unchanged, but `*` is now elementwise and indexing a row gives a 1-D array; use `@` for products, or `scipy.sparse.csr_matrix(code.parity_check())` for the old type. `LDPCCode.from_parity_check` accepts either.
 - **`gray_code`, `gray_to_binary` return read-only arrays.** They are cached, so writing to one changed every later call's result; copy before modifying.
 
+### Added
+
+- **`generate(..., code=, num_blocks=)` sizes a coded record in code blocks** (codewords of a FEC code) instead of symbols, so `generate(QPSK, symbol_rate=..., code=code, num_blocks=100)` replaces `num_codewords * code.n // bits_per_symbol`. Give either `num_symbols` or `num_blocks`.
+- **`pad=True` fits a coded record to any length**, such as an arbitrary waveform generator's record: `generate(..., num_symbols=N, code=code, pad=True)` carries as many whole codewords as fit, then random uncoded filler bits; `SingleCarrierFrame(payload_pad=True)` does the same for a frame's payload. Not with a distribution matcher, whose composition the filler would change.
+- `Reference.num_blocks`, the whole code blocks per channel: decode them with `decode(llrs[..., : ref.num_blocks * code.n], code=code)`.
+- `SingleCarrierFrame.num_symbols`, the frame length in symbols (preamble, body, guard): `to_signal` gives `num_symbols * sps` samples per stream. A `payload_len` that does not fill whole codewords now names the nearest valid lengths, pilot periods included.
+- The Signal summary (`print(sig)`) shows the code block, the blocks per channel with any filler, and the information rate of a coded reference, and a frame's payload code.
+- `generate`'s docstring explains coded payloads (blocks, sizing, decoding) and that a shaped constellation without a code goes through one CCDM block of the whole record, the ideal-matcher limit, with how to model a transmitter's shorter matcher.
+
 ### Performance
 
 Paired A/B of alternating processes against the previous commit of each change:

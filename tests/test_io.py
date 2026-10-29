@@ -366,6 +366,18 @@ class TestNPZCodedReference:
         xpt.assert_array_equal(back.reference.info_bits, sig.reference.info_bits)
         xpt.assert_array_equal(back.reference.bits, sig.reference.bits)
 
+    def test_padded_roundtrip(self, tmp_path: Any) -> None:
+        """Filler after the last codeword survives: num_blocks is derived."""
+        sig = generate(
+            Constellation.qam(16), 10, symbol_rate=1e9,
+            code=LinearBlockCode.hamming(3), pad=True, rng=0,
+        )  # fmt: skip
+        save_npz(sig, tmp_path / "padded")
+        back = load_npz(tmp_path / "padded.npz").reference
+        assert back.num_blocks == sig.reference.num_blocks == 5
+        np.testing.assert_array_equal(back.bits, sig.reference.bits)
+        np.testing.assert_array_equal(back.info_bits, sig.reference.info_bits)
+
     def test_uncoded_stores_bits_once(self, tmp_path: Any) -> None:
         save_npz(_siso_signal(), tmp_path / "plain")
         assert "reference_info_bits" not in np.load(tmp_path / "plain.npz")

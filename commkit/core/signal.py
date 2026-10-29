@@ -57,7 +57,8 @@ class Reference:
     code_block : tuple of int, optional
         ``(n, k)``: every ``n`` bits of ``bits`` carry ``k`` bits of
         ``info_bits``, so ``info_bits`` holds ``bits.shape[-1] // n`` blocks
-        of ``k`` bits (whole blocks only).
+        of ``k`` bits (:attr:`num_blocks`, whole blocks only; bits after the
+        last whole block are uncoded filler).
 
     Notes
     -----
@@ -130,6 +131,19 @@ class Reference:
     @property
     def _uncoded(self) -> bool:
         return self.info_bits is self.bits
+
+    @property
+    def num_blocks(self) -> int | None:
+        """Whole code blocks per channel, ``bits.shape[-1] // n``.
+
+        The bits of the blocks are the first ``num_blocks * n`` of ``bits``,
+        what a decoder takes; any bits after them are filler (``generate``
+        with ``pad=True``).  ``None`` without bits; for an uncoded payload,
+        one block per bit.
+        """
+        if self.bits is None or self.code_block is None:
+            return None
+        return int(self.bits.shape[-1] // self.code_block[0])
 
     def to(self, device: str) -> Reference:
         """Return a Reference with its arrays on ``device`` ("cpu" or "gpu").
@@ -306,6 +320,9 @@ class Signal:
             else:
                 rows.append(("Preamble", "none"))
             rows.append(("Payload length", f"{frame.payload_len} symbols"))
+            if frame.payload_code is not None:
+                pad = "  (filler after the last codeword)" if frame.payload_pad else ""
+                rows.append(("Payload code", f"{frame.payload_code!r}{pad}"))
             if frame.pilot_pattern != "none":
                 mask, _ = frame._generate_pilot_mask()
                 pilot_str = (
@@ -325,6 +342,24 @@ class Signal:
         ref = self.reference
         rows.append(("reference symbols", _yn(ref and ref.symbols)))
         rows.append(("reference bits", _yn(ref and ref.bits)))
+        if ref is not None and ref.bits is not None and ref.code_block != (1, 1):
+            assert ref.code_block is not None and ref.num_blocks is not None
+            assert ref.info_bits is not None
+            n, k = ref.code_block
+            filler = ref.bits.shape[-1] - ref.num_blocks * n
+            rows.append(("Code block", f"n={n}  k={k}  (rate {k / n:.4g})"))
+            rows.append(
+                (
+                    "Code blocks",
+                    f"{ref.num_blocks} per channel"
+                    + (f"  + {filler} filler bits" if filler else ""),
+                )
+            )
+            info = ref.info_bits.shape[-1] / ref.bits.shape[-1]
+            m = ref.bits.shape[-1] / ref.symbols.shape[-1]
+            rows.append(
+                ("Information rate", _format_si(self.symbol_rate * m * info, "bps"))
+            )
         rows.append(("frame attached", _yn(frame)))
         return rows
 

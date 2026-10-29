@@ -501,6 +501,54 @@ class TestExtractPayload:
             SingleCarrierFrame(payload_len=10, payload_code=LinearBlockCode.hamming(3))
         with pytest.raises(TypeError, match="code object"):
             SingleCarrierFrame(payload_len=7, payload_code="hamming")
+        with pytest.raises(ValueError, match="fewer than one codeword"):
+            SingleCarrierFrame(payload_len=3, payload_code=LinearBlockCode.hamming(3))
+        with pytest.raises(ValueError, match="payload_pad needs a payload_code"):
+            SingleCarrierFrame(payload_len=10, payload_pad=True)
+
+    def test_coded_payload_suggests_lengths_with_pilots(self):
+        """Whole codewords (every 7 QPSK symbols: 2 codewords of 7 bits) and
+        whole pilot periods (3 payload symbols each) meet every 21 symbols."""
+        with pytest.raises(ValueError, match="payload_len=21 or 42"):
+            SingleCarrierFrame(
+                payload_len=30,
+                payload_code=LinearBlockCode.hamming(3),
+                pilot_pattern="comb",
+                pilot_period=4,
+            )
+
+    def test_padded_payload(self, xp, xpt):
+        """payload_pad: whole codewords, then filler; any payload_len fits."""
+        code = LinearBlockCode.hamming(3)
+        frame = SingleCarrierFrame(
+            payload_len=30,
+            payload_code=code,
+            payload_pad=True,
+            pilot_pattern="comb",
+            pilot_period=4,
+            num_streams=2,
+        )
+        sig = frame.to_signal(sps=1, symbol_rate=1e6).to(
+            "gpu" if xp is not np else "cpu"
+        )
+        ref = extract_payload(sig).reference
+        assert ref.num_blocks == 8  # 60 bits: 8 codewords and 4 filler bits
+        assert ref.bits.shape == (2, 60) and ref.info_bits.shape == (2, 32)
+        res = decode(ref.bits[:, : ref.num_blocks * code.n], code=code)
+        xpt.assert_array_equal(res.bits, ref.info_bits)
+
+    def test_num_symbols_is_the_frame_length(self):
+        for kwargs in (
+            {},
+            {"guard_type": "cp", "guard_len": 16},
+            {"pilot_pattern": "comb", "pilot_period": 4, "payload_len": 300},
+        ):
+            frame = SingleCarrierFrame(
+                preamble=Preamble(sequence_type="zc", length=31),
+                **{"guard_len": 8, **kwargs},
+            )
+            sig = frame.to_signal(sps=2, symbol_rate=1e6)
+            assert sig.samples.shape[-1] == 2 * frame.num_symbols
 
     def test_without_frame_raises(self):
         from commkit import generate

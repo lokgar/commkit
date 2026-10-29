@@ -6,6 +6,7 @@ payload, pilots, guard intervals, MIMO streams) and builds it into a
 cuts the payload out of a frame Signal at one sample per symbol.
 """
 
+import math
 from dataclasses import dataclass, field
 from typing import Any, Literal
 
@@ -197,8 +198,15 @@ class SingleCarrierFrame:
     payload_code : code object, optional
         Channel code of the payload (:mod:`commkit.coding`), passed to
         :func:`generate` as ``code``: ``payload_len`` times the bits per
-        symbol must be a multiple of ``payload_code.n``.  Not with a shaped
-        payload constellation.
+        symbol must be a multiple of ``payload_code.n`` (whole codewords),
+        unless ``payload_pad`` is set.  Not with a shaped payload
+        constellation.
+    payload_pad : bool, default False
+        With ``payload_code``: fill the payload symbols after the last whole
+        codeword with random uncoded bits (``generate``'s ``pad``), so the
+        payload length can follow an instrument's record length instead of
+        the code.  The payload reference's ``num_blocks`` counts the
+        codewords.
     preamble : Preamble, optional
         Synchronization preamble, before the body.  A multi-stream preamble
         must have ``num_streams`` streams; a one-stream preamble is repeated
@@ -233,12 +241,23 @@ class SingleCarrierFrame:
     The layout (``get_structure_map``, the pilot mask) depends only on the
     fields and never generates data.  Payload and pilot symbols are generated
     on first access and cached.
+
+    **Sizing a frame.**  :attr:`num_symbols` is the frame's length in
+    symbols (preamble, body and guard), so ``to_signal`` gives
+    ``num_symbols * sps`` samples per stream.  For a payload of whole
+    codewords, ``payload_len = codewords * payload_code.n /
+    bits_per_symbol``; the construction error names the nearest valid
+    lengths, pilot periods included.  To fit an instrument's record (an
+    arbitrary waveform generator's memory granularity, with
+    ``to_signal(periodic=True)``), choose ``payload_len`` from the target
+    length and set ``payload_pad=True``.
     """
 
     payload_len: int = 1000
     payload_constellation: Constellation = field(default_factory=_qpsk)
     payload_seed: int = 42
     payload_code: Any = None
+    payload_pad: bool = False
 
     preamble: Preamble | None = None
 
@@ -282,12 +301,30 @@ class SingleCarrierFrame:
             from .. import coding
 
             coding.base._codec(self.payload_code, "SingleCarrierFrame()")
-            bits = self.payload_len * self.payload_constellation.bits_per_symbol
-            if bits % self.payload_code.n:
+            m = self.payload_constellation.bits_per_symbol
+            n = self.payload_code.n
+            bits = self.payload_len * m
+            if bits < n:
+                raise ValueError(
+                    f"payload_len={self.payload_len} carries {bits} bits, fewer than "
+                    f"one codeword of payload_code.n={n}."
+                )
+            if bits % n and not self.payload_pad:
+                # Whole codewords, and whole pilot periods where there are pilots.
+                step = n // math.gcd(n, m)
+                if self.pilot_pattern in ("block", "comb"):
+                    per_period = self.pilot_period - self._pilot_block()
+                    if per_period > 0:
+                        step = math.lcm(step, per_period)
+                low = self.payload_len // step * step
+                valid = f"{low} or {low + step}" if low else f"{step}"
                 raise ValueError(
                     f"payload_len={self.payload_len} carries {bits} bits, not a "
-                    f"multiple of payload_code.n={self.payload_code.n}."
+                    f"multiple of payload_code.n={n}; use payload_len={valid}, or "
+                    "payload_pad=True to fill the rest with random bits."
                 )
+        elif self.payload_pad:
+            raise ValueError("payload_pad needs a payload_code.")
         if self.pilot_pattern not in ("none", "block", "comb"):
             raise ValueError(
                 "pilot_pattern must be 'none', 'block' or 'comb', "
@@ -368,6 +405,7 @@ class SingleCarrierFrame:
             symbol_rate=1.0,
             num_channels=self.num_streams,
             code=self.payload_code,
+            pad=self.payload_pad,
             rng=self.payload_seed,
         )
         ref = sig.reference
@@ -489,6 +527,16 @@ class SingleCarrierFrame:
     # -------------------------------------------------------------------------
     # Frame Structure Mapping
     # -------------------------------------------------------------------------
+
+    @property
+    def num_symbols(self) -> int:
+        """Frame length in symbols per stream: preamble, body and guard.
+
+        ``to_signal(sps=sps)`` gives ``num_symbols * sps`` samples per
+        stream.
+        """
+        preamble_len = self.preamble.num_symbols if self.preamble else 0
+        return preamble_len + self._generate_pilot_mask()[1] + self.guard_len
 
     def get_structure_map(
         self,
