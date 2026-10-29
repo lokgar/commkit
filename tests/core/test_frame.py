@@ -194,6 +194,10 @@ class TestSingleCarrierFrameStructureMap:
         assert len(struct_s["preamble"]) == total_num_symbols * sps
         assert xp.sum(struct_s["preamble"]) == 2 * sps
 
+        assert frame.pilot_mask.shape == (frame.num_symbols,)
+        assert (frame.pilot_mask == struct["pilots"]).all()
+        assert (frame.payload_mask == struct["payload"]).all()
+
     def test_sc_frame_structure_map_cp(self, xp: Any) -> None:
         """Verify get_structure_map with Cyclic Prefix (CP) guard interval."""
         frame = SingleCarrierFrame(

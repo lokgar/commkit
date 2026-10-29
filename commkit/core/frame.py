@@ -241,7 +241,7 @@ class SingleCarrierFrame:
     guard_num_symbols : int, default 0
         Guard interval in symbols.
     num_channels : int, default 1
-        Number of independent channels (MIMO streams), each with its own payload and
+        Number of independent channels (MIMO transmitters), each with its own payload and
         pilots.
 
     Notes
@@ -624,6 +624,25 @@ class SingleCarrierFrame:
             + self.guard_num_symbols
         )
 
+    @property
+    def pilot_mask(self) -> np.ndarray:
+        """True at the pilot symbols, over the whole frame (host bool,
+        ``(num_symbols,)``).
+
+        The ``"pilots"`` mask of :meth:`get_structure_map`, which also gives
+        per-sample masks and masks over the body alone.
+        """
+        return self.get_structure_map()["pilots"]
+
+    @property
+    def payload_mask(self) -> np.ndarray:
+        """True at the payload symbols, over the whole frame (host bool,
+        ``(num_symbols,)``).
+
+        The ``"payload"`` mask of :meth:`get_structure_map`.
+        """
+        return self.get_structure_map()["payload"]
+
     def get_structure_map(
         self,
         unit: Literal["symbols", "samples"] = "symbols",
@@ -959,7 +978,7 @@ def extract_payload(signal: Signal) -> Signal:
             f"extract_payload() needs one sample per symbol, got sps={signal.sps}; "
             "decimate to the symbol rate first."
         )
-    payload = frame.get_structure_map()["payload"]
+    payload = frame.payload_mask
     x = signal.samples
     if x.shape[-1] != payload.size:
         raise ValueError(
