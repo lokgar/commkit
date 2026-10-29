@@ -10,6 +10,7 @@ import pytest
 from commkit.backend import to_device
 from commkit.coding import BCHCode, ReedSolomonCode, decode, encode
 from commkit.coding._galois import PRIMITIVE, _Field
+from commkit.coding.algebraic import _xor_reduce
 from tests.common.coding import random_bits
 
 
@@ -265,3 +266,17 @@ class TestBCH:
         np.testing.assert_array_equal(
             BCHCode(4, 1).generator_polynomial, [1, 0, 0, 1, 1]
         )
+
+
+class TestXorReduce:
+    @pytest.mark.parametrize("m", [1, 4, 8, 10, 16])
+    @pytest.mark.parametrize("shape", [(5, 7, 3), (5, 0, 3), (1, 1, 1)])
+    def test_matches_the_parity_of_each_bit(self, xp: Any, xpt: Any, m, shape) -> None:
+        """The field sum: each bit of the result is the parity of that bit."""
+        x = np.random.default_rng(m).integers(0, 1 << m, size=shape, dtype=np.int64)
+        for axis in range(3):
+            bits = (x[..., None] >> np.arange(m)) & 1
+            expected = ((bits.sum(axis=axis) & 1) << np.arange(m)).sum(axis=-1)
+            xpt.assert_array_equal(
+                _xor_reduce(xp.asarray(x), axis), xp.asarray(expected)
+            )

@@ -378,12 +378,20 @@ def _encode(code: Any, bits: ArrayType) -> ArrayType:
     return xp.concatenate([bits, matmul_mod2(bits, p)], axis=1)
 
 
-def _xor_reduce(x: ArrayType, m: int, axis: int) -> ArrayType:
-    """XOR of field elements along ``axis``, by the parity of each bit."""
+_XOR_KERNEL: dict[str, Any] = {}
+
+
+def _xor_reduce(x: ArrayType, axis: int) -> ArrayType:
+    """XOR of field elements along ``axis`` (the field sum)."""
     xp = dispatch(x)[1]
-    shifts = xp.arange(m, dtype=xp.int64)
-    parity = ((x[..., None] >> shifts) & 1).sum(axis=axis) & 1
-    return (parity << shifts).sum(axis=-1)
+    if xp is np:
+        return np.bitwise_xor.reduce(x, axis=axis)
+    # CuPy's bitwise_xor has no reduce.
+    if "k" not in _XOR_KERNEL:
+        _XOR_KERNEL["k"] = xp.ReductionKernel(
+            "T x", "T y", "x", "a ^ b", "y = a", "0", "commkit_xor_reduce"
+        )
+    return _XOR_KERNEL["k"](x, axis=axis)
 
 
 def _decode(code: Any, llrs: ArrayType, method: BerlekampMassey) -> _Decoded:
@@ -426,7 +434,7 @@ def _correct(code: Any, hard: ArrayType) -> tuple[ArrayType, ArrayType]:
         # Forney: e_p = X_p^(1-b) Omega(X_p^-1) / Lambda'(X_p^-1), with
         # Omega = S Lambda mod x^2t (characteristic 2: no signs).
         prods = f.mul(locator[:, None, : 2 * t], _toeplitz(s, xp))  # (R, 2t, 2t)
-        omega = _xor_reduce(prods, m, axis=2)
+        omega = _xor_reduce(prods, axis=2)
         omega = xp.concatenate([omega, xp.zeros((rows, 1), dtype=omega.dtype)], axis=1)
         derivative = xp.zeros_like(locator)
         derivative[:, :-1:2] = locator[:, 1::2]  # odd terms, shifted down
@@ -477,7 +485,7 @@ def _berlekamp_massey(f: _Field, s: ArrayType, t: int) -> tuple[ArrayType, Array
     for r in range(2 * t):
         # Discrepancy d = sum_{i <= r} Lambda_i S_(r - i).
         terms = f.mul(locator[:, : r + 1], s[:, r::-1])
-        d = _xor_reduce(terms, f.m, axis=1)
+        d = _xor_reduce(terms, axis=1)
         nonzero = d != 0
         grow = nonzero & (2 * length <= r)
         src = cols[None, :] - shift[:, None]
