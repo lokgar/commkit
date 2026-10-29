@@ -94,6 +94,10 @@ from .math import linear_to_db, normalize
 __all__ = ["ber", "evm", "fer", "gmi", "mi", "ngmi", "ser", "snr"]
 
 
+# Elements of each (C, chunk, M) intermediate of mi().
+_MI_ELEMENTS = 1 << 24
+
+
 def _unit_reference(tx: ArrayType, xp: Any) -> tuple[ArrayType, ArrayType]:
     """``tx`` at unit average power per channel, and its power ``(..., 1)``.
 
@@ -837,11 +841,13 @@ def mi(
     inv_nv = real.type(1.0 / noise_var)
     h_x = c.entropy
 
-    # Chunk over N to bound the (chunk, M) intermediates (~4 GB at N=1e6,
-    # M=256 in one piece); the sums accumulate on the device.
+    # Chunk over N so that each (C, chunk, M) intermediate holds at most 2^24
+    # elements (128 MB for the complex differences), whatever C and M, and
+    # at most 65536 symbols (larger chunks measured slower); the sums
+    # accumulate on the device.
     rows = rx.reshape(-1, rx.shape[-1])
     n_sym = rows.shape[-1]
-    chunk = 65536
+    chunk = max(1, min(65536, _MI_ELEMENTS // (rows.shape[0] * points.size)))
     acc = xp.zeros(rows.shape[0], dtype=xp.float64)
     for n0 in range(0, n_sym, chunk):
         diff = rows[:, n0 : n0 + chunk, None] - points  # (C, chunk, M)

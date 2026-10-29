@@ -419,6 +419,22 @@ class TestInformationMetrics:
         )
         assert out[1] < out[0]
 
+    def test_mi_does_not_depend_on_the_chunks(self, xp: Any, monkeypatch) -> None:
+        """Chunks of 7 symbols (a partial last one) give the one-chunk MI, for
+        three channels of 256-QAM."""
+        c = Constellation.qam(256)
+        rng = np.random.default_rng(5)
+        symbols = c.points[rng.integers(0, 256, (3, 200))]
+        symbols = symbols + 0.05 * (
+            rng.standard_normal((3, 200)) + 1j * rng.standard_normal((3, 200))
+        )
+        x = xp.asarray(symbols.astype(np.complex64))
+        whole = metrics.mi(x, noise_var=0.005, constellation=c)
+        monkeypatch.setattr(metrics, "_MI_ELEMENTS", 3 * 256 * 7)
+        np.testing.assert_allclose(
+            metrics.mi(x, noise_var=0.005, constellation=c), whole, rtol=1e-12
+        )
+
     def test_mi_decreases_with_noise(self, xp: Any) -> None:
         """MI should decrease as noise increases."""
         M = 16
