@@ -154,11 +154,16 @@ class _StaircaseComponent(_Algebraic):
         """
         _, xp, _ = dispatch(words)
         fixed, ok = _correct(self, words)
+        ok = ok & self.satisfied(fixed)
+        return xp.where(ok[:, None], fixed, words), ok
+
+    def satisfied(self, words: ArrayType) -> ArrayType:
+        """Whether each of the ``(R, 1022)`` words meets all 32 checks, ``(R,)``."""
+        _, xp, _ = dispatch(words)
         (h_t,) = _device_tables(
             self, "checks", xp, lambda: (self.parity_check.T.astype(np.float32),)
         )
-        ok = ok & ~matmul_mod2(fixed, h_t).any(axis=1)
-        return xp.where(ok[:, None], fixed, words), ok
+        return ~matmul_mod2(words, h_t).any(axis=1)
 
     @cached_property
     def _parity_matrix(self) -> np.ndarray:
@@ -301,31 +306,38 @@ def _decode_staircase(
         rows, _ROWS, _PARITY
     )
     zero = xp.zeros((rows, _ROWS, _COLUMNS), dtype=np.int8)
-    valid = xp.zeros((rows, num + 1), dtype=bool)
+
+    def word_of(i: int) -> ArrayType:
+        """The component words of block ``i``: rows ``[left | B_i]``, ``(R, 512, 1022)``."""
+        previous = blocks[:, i - 1] if i > 0 else zero
+        return xp.concatenate([_left(previous, columns), blocks[:, i]], axis=2)
+
     passes = 0
     for _ in range(method.iterations):
         passes += 1
-        changed = False
+        # On the device, read once per pass: no sync per block.
+        changed = xp.zeros((), dtype=bool)
         for i in range(num + 1):
-            previous = blocks[:, i - 1] if i > 0 else zero
-            word = xp.concatenate([_left(previous, columns), blocks[:, i]], axis=2)
-            fixed, ok = _COMPONENT.correct(word.reshape(-1, _COMPONENT.n))
+            word = word_of(i)
+            fixed, _ok = _COMPONENT.correct(word.reshape(-1, _COMPONENT.n))
             fixed = fixed.reshape(rows, _ROWS, _COMPONENT.n)
-            ok = ok.reshape(rows, _ROWS)
-            valid[:, i] = ok.all(axis=1)
-            changed = changed or bool((fixed != word).any())
+            changed |= (fixed != word).any()
             blocks[:, i] = fixed[:, :, _ROWS:]
             if i > 0:
                 blocks[:, i - 1, :, columns] = fixed[:, 2:, :_ROWS].transpose(1, 0, 2)
             blocks[:, num, :, :_INFO] = (
                 0  # the terminating block's information is known
             )
-        if not changed:
+        if not bool(changed):
             break
+    # Success from the final frame: correcting block i + 1 also changes block
+    # i, so the component results of the last pass may describe older words.
+    valid = xp.ones(rows, dtype=bool)
+    for i in range(num + 1):
+        ok = _COMPONENT.satisfied(word_of(i).reshape(-1, _COMPONENT.n))
+        valid &= ok.reshape(rows, _ROWS).all(axis=1)
     bits = blocks[:, :num, :, :_INFO].reshape(rows, -1)
-    return _Decoded(
-        bits, None, valid.all(axis=1), xp.full(rows, passes, dtype=np.int32)
-    )
+    return _Decoded(bits, None, valid, xp.full(rows, passes, dtype=np.int32))
 
 
 @dataclass(frozen=True)

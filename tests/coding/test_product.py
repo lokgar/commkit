@@ -176,6 +176,17 @@ class TestStaircase:
             assert bool(res.valid.all()) == decodes
         assert int(decode(c, code=code).iterations[0, 0]) == 1
 
+    def test_valid_describes_the_final_frame(self, xp: Any, xpt: Any) -> None:
+        """Four errors in one row of B_0 exceed its component (t = 3); B_1
+        then corrects them through its left halves, within the one pass."""
+        code = StaircaseCode(1)
+        u = xp.zeros(code.k, dtype=np.int8)
+        received = encode(u, code=code)
+        received[10 * 510 + xp.arange(20, 24)] ^= 1
+        res = decode(received, code=code, method=HardIterations(1))
+        xpt.assert_array_equal(res.bits, u)
+        assert res.valid.tolist() == [True]
+
     def test_validation(self) -> None:
         with pytest.raises(ValueError, match="num_blocks"):
             StaircaseCode(0)
