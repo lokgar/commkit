@@ -975,6 +975,7 @@ def extract_payload(signal: Signal) -> Signal:
         pulse=signal.pulse,
         reference=reference,
         center_frequency=signal.center_frequency,
+        domain=signal.domain,
     )
 
 

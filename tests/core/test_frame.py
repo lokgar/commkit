@@ -497,6 +497,9 @@ class TestExtractPayload:
         out = extract_payload(sig)
         ref = out.reference.symbols
         assert out.frame is None
+        rf = sig.replace(domain="RF", center_frequency=2.4e9)
+        assert extract_payload(rf).domain == "RF"
+        assert extract_payload(rf).center_frequency == 2.4e9
         assert out.constellation == Constellation.qam(16)
         assert out.samples.shape == np.shape(frame.payload_symbols)
         xpt.assert_array_equal(ref, xp.asarray(frame.payload_symbols))

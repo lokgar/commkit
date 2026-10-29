@@ -51,7 +51,12 @@ if TYPE_CHECKING:
 # -----------------------------------------------------------------------------
 
 # Scalar metadata fields round-tripped through JSON.
-_META_FIELDS: tuple[str, ...] = ("sampling_rate", "symbol_rate", "center_frequency")
+_META_FIELDS: tuple[str, ...] = (
+    "sampling_rate",
+    "symbol_rate",
+    "center_frequency",
+    "domain",
+)
 
 # Pulse classes that may be reconstructed from an archive.
 _PULSE_TYPES: tuple[str, ...] = ("RRC", "RC", "Gaussian", "Rect", "SmoothRect")

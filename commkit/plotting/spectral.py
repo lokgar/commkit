@@ -31,7 +31,7 @@ def plot_psd(
     nfft: int | None = None,
     scaling: str = "density",
     center_frequency: float | None = None,
-    domain: str = "RF",
+    domain: str | None = None,
     x_axis: str = "frequency",
     ax: Any | None = None,
     xlim: tuple[float, float] | None = None,
@@ -56,12 +56,14 @@ def plot_psd(
     nperseg, detrend, average, window, noverlap, nfft, scaling
         As for :func:`commkit.spectral.welch_psd`.
     center_frequency : float, optional
-        Frequency added to the axis in Hz (the carrier, for an RF or optical
-        axis).  Taken from the Signal (a value that disagrees with it
+        Frequency added to the axis in Hz (the carrier of an RF or optical
+        signal).  Taken from the Signal (a value that disagrees with it
         raises); 0 for arrays when not given.
-    domain : {"RF", "OPT"}, default "RF"
-        Signal domain; a wavelength axis for an ``"RF"`` signal logs a
-        warning.
+    domain : {"DIG", "RF", "OPT"}, optional
+        Signal domain.  Taken from the Signal (a value that disagrees with
+        it raises); for arrays ``"DIG"`` without a ``center_frequency`` and
+        ``"RF"`` with one.  A wavelength axis for a non-optical signal logs
+        a warning.
     x_axis : {"frequency", "wavelength"}, default "frequency"
         Horizontal axis: frequency in Hz, or wavelength ``c / f`` in nm
         (which needs ``center_frequency``).
@@ -85,12 +87,7 @@ def plot_psd(
     signal_adapter = adapt_signal(samples, function_name="plot_psd()")
     x = signal_adapter.array
     sampling_rate = signal_adapter.resolve_fact("sampling_rate", sampling_rate)
-    if signal_adapter.signal is not None:
-        center_frequency = signal_adapter.resolve_fact(
-            "center_frequency", center_frequency
-        )
-    elif center_frequency is None:
-        center_frequency = 0.0
+    center_frequency, domain = _resolve_band(signal_adapter, center_frequency, domain)
     return _plot_psd(
         x,
         sampling_rate=sampling_rate,
@@ -111,6 +108,35 @@ def plot_psd(
         show=show,
         **kwargs,
     )
+
+
+def _resolve_band(
+    signal_adapter: Any, center_frequency: float | None, domain: str | None
+) -> tuple[float, str]:
+    """The carrier and domain of the samples: the Signal's, or those given."""
+    if signal_adapter.signal is not None:
+        center_frequency = signal_adapter.resolve_fact(
+            "center_frequency", center_frequency
+        )
+        if domain is not None:
+            domain = _check_domain(domain)
+        return center_frequency, signal_adapter.resolve_fact("domain", domain)
+    center_frequency = 0.0 if center_frequency is None else float(center_frequency)
+    if domain is None:
+        return center_frequency, "RF" if center_frequency else "DIG"
+    domain = _check_domain(domain)
+    if domain == "DIG" and center_frequency:
+        raise ValueError(
+            f"center_frequency={center_frequency!r} needs domain='RF' or 'OPT'; a "
+            "digital ('DIG') signal has no carrier."
+        )
+    return center_frequency, domain
+
+
+def _check_domain(domain: Any) -> str:
+    if not isinstance(domain, str) or domain.upper() not in ("DIG", "RF", "OPT"):
+        raise ValueError(f"domain must be 'DIG', 'RF' or 'OPT', got {domain!r}.")
+    return domain.upper()
 
 
 def _plot_psd(
@@ -263,7 +289,7 @@ def plot_spectrogram(
     scaling: str = "density",
     mode: str = "psd",
     center_frequency: float | None = None,
-    domain: str = "RF",
+    domain: str | None = None,
     ax: Any | None = None,
     xlim: tuple[float, float] | None = None,
     ylim: tuple[float, float] | None = None,
@@ -287,11 +313,12 @@ def plot_spectrogram(
     window, nperseg, noverlap, nfft, detrend, return_onesided, scaling, mode
         As for :func:`commkit.spectral.spectrogram`.
     center_frequency : float, optional
-        Frequency added to the axis in Hz.  Taken from the Signal (a value
-        that disagrees with it raises); 0 for arrays when not given.
-    domain : {"RF", "OPT"}, default "RF"
-        Signal domain; accepted for symmetry with :func:`plot_psd` and
-        without effect here.
+        Frequency added to the axis in Hz (the carrier of an RF or optical
+        signal).  Taken from the Signal (a value that disagrees with it
+        raises); 0 for arrays when not given.
+    domain : {"DIG", "RF", "OPT"}, optional
+        Signal domain, resolved as for :func:`plot_psd`; it only checks the
+        ``center_frequency`` here.
     ax : matplotlib.axes.Axes, optional
         Axes to draw on; ``None`` creates a figure.
     xlim : tuple of float, optional
@@ -317,12 +344,7 @@ def plot_spectrogram(
     signal_adapter = adapt_signal(samples, function_name="plot_spectrogram()")
     x = signal_adapter.array
     sampling_rate = signal_adapter.resolve_fact("sampling_rate", sampling_rate)
-    if signal_adapter.signal is not None:
-        center_frequency = signal_adapter.resolve_fact(
-            "center_frequency", center_frequency
-        )
-    elif center_frequency is None:
-        center_frequency = 0.0
+    center_frequency, domain = _resolve_band(signal_adapter, center_frequency, domain)
     return _plot_spectrogram(
         x,
         sampling_rate=sampling_rate,

@@ -214,7 +214,15 @@ class Signal:
     frame : SingleCarrierFrame, optional
         The frame that generated the samples (a layout snapshot).
     center_frequency : float, default 0.0
-        Carrier frequency in Hz (a fact), used to label spectra.
+        Carrier frequency in Hz (a fact), used to label spectra.  Only an
+        ``"RF"`` or ``"OPT"`` signal has a carrier; a ``"DIG"`` one keeps 0.
+    domain : {"DIG", "RF", "OPT"}, default "DIG"
+        Where the samples live (a fact): ``"DIG"`` a digital baseband signal,
+        ``"RF"`` the complex envelope of a radio-frequency signal and
+        ``"OPT"`` that of an optical field, both around
+        ``center_frequency``.  Spectra of an RF or optical signal are drawn
+        at their physical frequencies (or wavelengths), and channel models
+        can use the band.  Case-insensitive; stored upper-case.
 
     Notes
     -----
@@ -232,11 +240,13 @@ class Signal:
     reference: Reference | None = None
     frame: Any | None = field(default=None, repr=False)
     center_frequency: float = 0.0
+    domain: str = "DIG"
 
     def __post_init__(self) -> None:
         for f in dataclasses.fields(self):
             value = getattr(self, f.name)
             object.__setattr__(self, f.name, _validate_field(f.name, value))
+        _check_carrier(self)
 
     def replace(self, **changes: Any) -> Signal:
         """Return a new Signal with ``changes`` applied.
@@ -257,6 +267,7 @@ class Signal:
         new = copy.copy(self)
         for name, value in changes.items():
             object.__setattr__(new, name, _validate_field(name, value))
+        _check_carrier(new)
         return new
 
     # -------------------------------------------------------------------------
@@ -299,7 +310,14 @@ class Signal:
             ("Sampling rate", _format_si(self.sampling_rate, "Hz")),
             ("Samples per symbol", f"{self.sps:.2f}"),
             ("Duration", _format_si(self.duration, "s")),
-            ("Center frequency", _format_si(self.center_frequency, "Hz")),
+            ("Domain", _DOMAIN_NAMES[self.domain]),
+        ]
+        if self.domain != "DIG":
+            carrier = _format_si(self.center_frequency, "Hz")
+            if self.domain == "OPT" and self.center_frequency > 0:
+                carrier += f"  ({_SPEED_OF_LIGHT / self.center_frequency * 1e9:.2f} nm)"
+            rows.append(("Center frequency", carrier))
+        rows += [
             ("Backend", self.backend.upper()),
             (
                 "Configuration",
@@ -465,6 +483,10 @@ class Signal:
 
 _FIELD_NAMES = frozenset(f.name for f in dataclasses.fields(Signal))
 
+# Summary label of each domain.
+_DOMAIN_NAMES = {"DIG": "DIG (digital baseband)", "RF": "RF", "OPT": "OPT (optical)"}
+_SPEED_OF_LIGHT = 299_792_458.0  # m/s
+
 
 def _validate_samples(v: Any) -> Any:
     """Coerce samples to a NumPy/CuPy array with time on the last axis."""
@@ -501,6 +523,15 @@ def _number(
     return value
 
 
+def _check_carrier(signal: Signal) -> None:
+    """A carrier needs a band: a digital signal keeps ``center_frequency`` 0."""
+    if signal.domain == "DIG" and signal.center_frequency != 0:
+        raise ValueError(
+            f"center_frequency={signal.center_frequency!r} needs domain='RF' or "
+            "'OPT'; a digital ('DIG') signal has no carrier."
+        )
+
+
 def _validate_field(name: str, value: Any) -> Any:
     """Validate and coerce one Signal field."""
     if name == "samples":
@@ -509,6 +540,10 @@ def _validate_field(name: str, value: Any) -> Any:
         return _number(name, value, float, low=0, low_open=True)
     if name == "center_frequency":
         return _number(name, value, float, low=0)
+    if name == "domain":
+        if not isinstance(value, str) or value.upper() not in _DOMAIN_NAMES:
+            raise ValueError(f"domain must be 'DIG', 'RF' or 'OPT', got {value!r}.")
+        return value.upper()
     if value is None:
         return None
     if name == "constellation":

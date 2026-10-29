@@ -80,8 +80,18 @@ class TestNPZSaveLoadSISO:
         assert sig2.sampling_rate == sig.sampling_rate
         assert sig2.symbol_rate == sig.symbol_rate
         assert sig2.center_frequency == sig.center_frequency
+        assert sig2.domain == sig.domain == "DIG"
         assert sig2.constellation == sig.constellation
         assert sig2.constellation.family == sig.constellation.family
+
+    @pytest.mark.parametrize("domain", ["RF", "OPT"])
+    def test_roundtrip_domain(self, tmp_path: Any, domain: str) -> None:
+        """The domain and the carrier round-trip."""
+        sig = _siso_signal().replace(domain=domain, center_frequency=193.1e12)
+        p = tmp_path / "sig.npz"
+        save_npz(sig, p)
+        sig2 = load_npz(p)
+        assert (sig2.domain, sig2.center_frequency) == (domain, 193.1e12)
 
     @pytest.mark.parametrize(
         "pulse",

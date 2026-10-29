@@ -223,6 +223,34 @@ class TestSignalProperties:
         assert html.startswith("<table>")
         assert "<b>Sampling rate</b>" in html
 
+    def test_domain(self, xp):
+        """DIG by default and without a carrier; RF and OPT carry one."""
+        kw = dict(samples=xp.zeros(10), sampling_rate=100.0, symbol_rate=10.0)
+        s = Signal(**kw)
+        assert s.domain == "DIG"
+        assert Signal(**kw, domain="opt").domain == "OPT"
+        with pytest.raises(ValueError, match="domain='RF' or 'OPT'"):
+            Signal(**kw, center_frequency=1e9)
+        with pytest.raises(ValueError, match="domain='RF' or 'OPT'"):
+            s.replace(center_frequency=1e9)
+        rf = s.replace(domain="RF", center_frequency=2.4e9)
+        assert (rf.domain, rf.center_frequency) == ("RF", 2.4e9)
+        assert rf.clone().domain == "RF"
+        with pytest.raises(ValueError, match="domain='RF' or 'OPT'"):
+            rf.replace(domain="DIG")
+        assert rf.replace(domain="DIG", center_frequency=0).domain == "DIG"
+
+    def test_summary_shows_the_domain(self, xp):
+        """The domain row; the carrier only for an RF or optical signal."""
+        kw = dict(samples=xp.zeros(10), sampling_rate=100.0, symbol_rate=10.0)
+        text = str(Signal(**kw))
+        assert "DIG (digital baseband)" in text
+        assert "Center frequency" not in text
+        text = str(Signal(**kw, domain="OPT", center_frequency=193.1e12))
+        assert "OPT (optical)" in text
+        assert "193.10 THz  (1552.52 nm)" in text
+        assert "2.40 GHz" in str(Signal(**kw, domain="RF", center_frequency=2.4e9))
+
     def test_summary_of_a_coded_reference(self):
         """The coding rows: block, blocks with filler, information rate."""
         from commkit import generate
@@ -342,6 +370,8 @@ class TestSignalCloningAndProvenance:
         [
             ("symbol_rate", -1.0),
             ("center_frequency", -1.0),
+            ("domain", "baseband"),
+            ("domain", 1),
             ("sampling_rate", "1e6"),
             ("constellation", "qam"),
             ("pulse", "rrc"),

@@ -53,6 +53,27 @@ class TestPlotSpectralAndPSD:
         assert fig is not None
         assert "Wavelength" in ax.get_xlabel()
 
+    def test_psd_domain_from_the_signal(self, caplog: Any, xp: Any) -> None:
+        """A Signal's domain and carrier place the axis; a conflict raises."""
+        from commkit import Signal
+
+        sig = Signal(
+            samples=xp.random.randn(256), sampling_rate=1e12, symbol_rate=1e11,
+            domain="OPT", center_frequency=193.1e12,
+        )  # fmt: skip
+        fig, ax = plot_psd(sig, x_axis="wavelength", show=False)
+        assert "Wavelength" in ax.get_xlabel()
+        assert "optical" not in caplog.text
+        lo, hi = ax.get_lines()[0].get_xdata()[[0, -1]]
+        assert 1548 < min(lo, hi) < max(lo, hi) < 1557
+        with pytest.raises(ValueError, match="domain"):
+            plot_psd(sig, domain="RF", show=False)
+        with pytest.raises(ValueError, match="domain='RF' or 'OPT'"):
+            plot_psd(xp.ones(256), sampling_rate=1.0, center_frequency=1e9,
+                     domain="DIG", show=False)  # fmt: skip
+        with pytest.raises(ValueError, match="domain must be"):
+            plot_psd(xp.ones(256), sampling_rate=1.0, domain="IF", show=False)
+
     def test_psd_auto_scale(self, xp: Any) -> None:
         """Verify PSD frequency axis uses an SI-prefixed engineering tick formatter."""
         samples = xp.random.randn(256)
