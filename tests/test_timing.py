@@ -690,6 +690,26 @@ class TestCorrectTiming:
         out = timing.correct_timing(sig, offsets, mode="zero")
         assert out.shape == (C, N)
 
+    def test_per_channel_zero_mode_matches_scalar(self, xp, xpt):
+        """Each channel of a per-channel shift equals the scalar shift of that
+        channel, negative offsets (zero-filled head) included."""
+        N = 32
+        sig = xp.asarray(np.tile(np.arange(1, N + 1, dtype=np.complex64), (3, 1)))
+        offsets = [5, -3, 0]
+        out = timing.correct_timing(sig, xp.asarray(offsets), mode="zero")
+        for c, shift in enumerate(offsets):
+            xpt.assert_array_equal(
+                out[c], timing.correct_timing(sig[c], shift, mode="zero")
+            )
+        assert not bool(out[1, :3].any())
+        xpt.assert_array_equal(out[2], sig[2])  # no shift: unchanged
+
+    @pytest.mark.parametrize("offsets", [-2, 100, [3, -1], [3, 100]])
+    def test_slice_mode_rejects_offsets_outside_the_record(self, xp, offsets):
+        sig = xp.ones((2, 100), dtype=np.complex64)
+        with pytest.raises(ValueError, match=r"must lie in \[0, 100\)"):
+            timing.correct_timing(sig, xp.asarray(offsets), mode="slice")
+
     def test_per_channel_slice_mode(self, xp):
         """Per-channel array offset with mode='slice': output length is N - max(offset)."""
         C, N = 2, 64

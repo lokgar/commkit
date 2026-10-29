@@ -738,6 +738,16 @@ def estimate_timing(
     )
 
 
+def _require_slice_shift(low: int, high: int, n: int) -> None:
+    """Raise unless the integer offsets in ``[low, high]`` leave samples to slice."""
+    if low < 0 or high >= n:
+        raise ValueError(
+            f"correct_timing(mode='slice'): integer offsets must lie in [0, {n}) "
+            f"to drop leading samples, got {low if low < 0 else high}; use "
+            f"mode='zero' or 'circular' for negative offsets."
+        )
+
+
 def correct_timing(
     samples: S,
     how: TimingEstimate | float | ArrayType,
@@ -760,7 +770,8 @@ def correct_timing(
 
         - ``'circular'``: wrap around (``roll``); same length.  For periodic
           signals; not for bursts.
-        - ``'zero'``: shift left and zero-fill the tail; same length.
+        - ``'zero'``: shift and zero-fill the samples shifted in (the tail
+          for a positive offset, the head for a negative one); same length.
         - ``'slice'``: drop the leading samples.  With per-channel offsets
           the output has ``N - max(offset)`` samples so all channels share the
           overlap.  A Signal's reference keeps the symbol periods left.
@@ -774,7 +785,8 @@ def correct_timing(
     Raises
     ------
     ValueError
-        On an unknown ``mode``.
+        On an unknown ``mode``, or for ``'slice'`` an integer offset outside
+        ``[0, N)``.
 
     Notes
     -----
@@ -823,14 +835,16 @@ def correct_timing(
         shift = int(integer_offset)
         if mode == "circular":
             x = xp.roll(x, -shift, axis=-1)
-        elif mode == "zero":
+        elif mode == "zero" and shift:
             result = xp.zeros_like(x)
             if shift > 0:
                 result[..., : N - shift] = x[..., shift:]
-            elif shift < 0:
+            else:
                 result[..., -shift:] = x[..., : N + shift]
             x = result
         elif mode == "slice":
+            _require_slice_shift(shift, shift, N)
+            trimmed = shift
             x = x[..., shift:]
 
     else:
@@ -846,11 +860,15 @@ def correct_timing(
         elif mode == "zero":
             col_raw = col_base + integer_shift[:, None]  # (C, N)
             gathered = x[row_idx, xp.clip(col_raw, 0, N - 1)]
-            x = xp.where(col_raw < N, gathered, xp.zeros_like(gathered))
+            inside = (col_raw >= 0) & (col_raw < N)
+            x = xp.where(inside, gathered, xp.zeros_like(gathered))
 
         elif mode == "slice":
             # Align all channels to common overlap: N - max(offset) samples
-            max_shift = int(xp.max(integer_shift))  # one GPU sync
+            bounds = xp.stack([xp.min(integer_shift), xp.max(integer_shift)])
+            min_shift, max_shift = (int(v) for v in to_device(bounds, "cpu"))
+            _require_slice_shift(min_shift, max_shift, N)
+            trimmed = max_shift
             common_len = N - max_shift
             col_idx_s = (
                 xp.arange(common_len, dtype=xp.int64)[None, :] + integer_shift[:, None]
@@ -869,7 +887,7 @@ def correct_timing(
             "correct_timing(mode='slice'): output is shorter than input "
             "(trimmed by %s samples). Signal length metadata (e.g. "
             "duration) will no longer match the original.",
-            int(xp.max(xp.asarray(integer_offset))),
+            trimmed,
         )
     logger.info(
         "Timing corrected: integer=applied, fractional=%s, mode=%r.",
