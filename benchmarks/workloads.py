@@ -152,7 +152,7 @@ def phase_workload(n_samples: int, num_ch: int = 2, seed: int = 0) -> np.ndarray
     return (walk + 0.1 * rng.standard_normal((num_ch, n_samples))).astype(np.float32)
 
 
-def ldpc_workload(code, num_codewords: int, esn0_db: float, seed: int = 0):
+def coded_workload(code, num_codewords: int, esn0_db: float, seed: int = 0):
     """QPSK codewords of ``code`` after AWGN, for the decoder benches.
 
     Returns ``(llrs (num_codewords * n,) float32, info_bits int8)`` on the
