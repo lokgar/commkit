@@ -141,32 +141,41 @@ def ldpc_layered(  # type: ignore[no-untyped-def]
 
 
 @_inline
-def descend(alpha, beta, i, levels):  # type: ignore[no-untyped-def]
-    """SC LLRs from the root down to leaf ``i`` (``f`` for left, ``g`` for right children)."""
+def descend(llr, alpha, beta, i, levels):  # type: ignore[no-untyped-def]
+    """SC LLRs from the root down to leaf ``i`` (``f`` for left, ``g`` for right children).
+
+    Level ``s`` of ``alpha`` (length ``n``) is ``alpha[2^s : 2^(s+1)]``; the
+    root level is the channel's ``llr``, shared by every path.
+    """
     top = levels if i == 0 else 1
     if i:
         while not (i >> (top - 1)) & 1:
             top += 1
     for s in range(top, 0, -1):
         half = 1 << (s - 1)
-        src = 1 << s
+        upper = llr if s == levels else alpha
+        src = 0 if s == levels else 1 << s
         dst = half
         if (i >> (s - 1)) & 1:
             for j in range(half):
-                a = alpha[src + j]
-                b = alpha[src + half + j]
+                a = upper[src + j]
+                b = upper[src + half + j]
                 alpha[dst + j] = b - a if beta[half + j] else b + a
         else:
             for j in range(half):
-                a = alpha[src + j]
-                b = alpha[src + half + j]
+                a = upper[src + j]
+                b = upper[src + half + j]
                 m = min(abs(a), abs(b))
                 alpha[dst + j] = -m if (a < 0) != (b < 0) else m
 
 
 @_inline
 def ascend(beta, scratch, i, bit, levels):  # type: ignore[no-untyped-def]
-    """Propagate leaf ``i``'s decision ``bit`` up through the completed subtrees."""
+    """Propagate leaf ``i``'s decision ``bit`` up through the completed subtrees.
+
+    Level ``s`` of ``beta`` (length ``n``) is ``beta[2^s : 2^(s+1)]``; the
+    root's partial sums (after the last leaf) are never read.
+    """
     scratch[0] = bit
     size = 1
     s = 0
@@ -177,8 +186,9 @@ def ascend(beta, scratch, i, bit, levels):  # type: ignore[no-untyped-def]
             scratch[j] ^= beta[size + j]
         size *= 2
         s += 1
-    for j in range(size):
-        beta[size + j] = scratch[j]
+    if size < beta.shape[0]:
+        for j in range(size):
+            beta[size + j] = scratch[j]
 
 
 @numba.njit(cache=True, nogil=True, parallel=True)
@@ -191,18 +201,27 @@ def polar_scl(llrs, frozen, list_size, crc_g, crc_c, info, k_info, out_u, valid)
     r = crc_c.shape[0]
     for row in numba.prange(rows):  # type: ignore[attr-defined,no-untyped-call]
         cap = list_size
-        alpha = np.zeros((2 * cap, 2 * n), dtype=np.float32)
-        beta = np.zeros((2 * cap, 2 * n), dtype=np.int8)
-        u = np.zeros((2 * cap, n), dtype=np.int8)
-        pm = np.full(2 * cap, np.inf, dtype=np.float64)
+        llr = llrs[row]
+        alpha = np.zeros((cap, n), dtype=np.float32)
+        beta = np.zeros((cap, n), dtype=np.int8)
+        u = np.zeros((cap, n), dtype=np.int8)
+        pm = np.zeros(cap, dtype=np.float64)
         scratch = np.zeros(n, dtype=np.int8)
+        # The candidates of a decision: path p keeps its hard decision
+        # (candidate p) or takes the other bit (candidate p + alive).
+        cand = np.empty(2 * cap, dtype=np.float64)
+        hard = np.empty(cap, dtype=np.int8)
+        order = np.empty(2 * cap, dtype=np.int64)
+        chosen = np.empty(2 * cap, dtype=np.bool_)
+        source = np.empty(cap, dtype=np.int64)  # the candidate in each slot
+        moved = np.empty(cap, dtype=np.int64)
+        buf_alpha = np.empty((cap, n), dtype=np.float32)
+        buf_beta = np.empty((cap, n), dtype=np.int8)
+        buf_u = np.empty((cap, n), dtype=np.int8)
         alive = 1
-        pm[0] = 0.0
-        for j in range(n):
-            alpha[0, n + j] = llrs[row, j]
         for i in range(n):
             for p in range(alive):
-                descend(alpha[p], beta[p], i, levels)
+                descend(llr, alpha[p], beta[p], i, levels)
             if frozen[i]:
                 for p in range(alive):
                     l0 = alpha[p, 1]
@@ -211,36 +230,57 @@ def polar_scl(llrs, frozen, list_size, crc_g, crc_c, info, k_info, out_u, valid)
                     u[p, i] = 0
                     ascend(beta[p], scratch, i, 0, levels)
                 continue
-            # Both decisions of every path: path p + alive takes the other bit.
-            for p in range(alive):
-                q = p + alive
-                alpha[q] = alpha[p]
-                beta[q] = beta[p]
-                u[q] = u[p]
-                l0 = alpha[p, 1]
-                hard = 1 if l0 < 0 else 0
-                pm[q] = pm[p] + abs(l0)
-                u[p, i] = hard
-                u[q, i] = 1 - hard
             total = 2 * alive
+            for p in range(alive):
+                l0 = alpha[p, 1]
+                hard[p] = 1 if l0 < 0 else 0
+                cand[p] = pm[p]
+                cand[p + alive] = pm[p] + abs(l0)
+            # Stable sort by metric (insertion: at most 2 cap candidates).
+            for a in range(total):
+                v = cand[a]
+                b = a
+                while b > 0 and cand[order[b - 1]] > v:
+                    order[b] = order[b - 1]
+                    b -= 1
+                order[b] = a
             keep = min(cap, total)
-            order = np.argsort(pm[:total], kind="mergesort")
-            if keep < total:
-                # Survivors to the front: copy into slots of the dropped.
-                chosen = np.zeros(total, dtype=np.bool_)
-                for t in range(keep):
-                    chosen[order[t]] = True
-                dst = 0
-                for src in range(keep, total):
-                    if not chosen[src]:
-                        continue
-                    while chosen[dst]:
-                        dst += 1
-                    alpha[dst] = alpha[src]
-                    beta[dst] = beta[src]
-                    u[dst] = u[src]
-                    pm[dst] = pm[src]
-                    chosen[dst] = True
+            chosen[:total] = False
+            for a in range(keep):
+                chosen[order[a]] = True
+            # Survivors below keep stay in their slot; the others fill the
+            # free slots in order.
+            for d in range(keep):
+                source[d] = d
+            d = 0
+            for a in range(keep, total):
+                if not chosen[a]:
+                    continue
+                while chosen[d]:
+                    d += 1
+                source[d] = a
+                chosen[d] = True
+            # Only a path that changes slot is copied (on a fork, or into a
+            # free slot), through the buffer, so that no path is overwritten
+            # before every slot it feeds has read it.
+            num = 0
+            for d in range(keep):
+                par = source[d] % alive
+                if par != d:
+                    buf_alpha[num] = alpha[par]
+                    buf_beta[num] = beta[par]
+                    buf_u[num, :i] = u[par, :i]
+                    moved[num] = d
+                    num += 1
+            for a in range(num):
+                d = moved[a]
+                alpha[d] = buf_alpha[a]
+                beta[d] = buf_beta[a]
+                u[d, :i] = buf_u[a, :i]
+            for d in range(keep):
+                a = source[d]
+                pm[d] = cand[a]
+                u[d, i] = hard[a] if a < alive else 1 - hard[a - alive]
             alive = keep
             for p in range(alive):
                 ascend(beta[p], scratch, i, u[p, i], levels)
