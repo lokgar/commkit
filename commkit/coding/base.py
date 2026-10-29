@@ -83,6 +83,10 @@ class _Value:
         )
 
     def __eq__(self, other: object) -> bool:
+        # The device-table cache compares an object with itself on every
+        # lookup (through a weak reference); _key() copies each array to bytes.
+        if self is other:
+            return True
         if type(other) is not type(self):
             return NotImplemented
         return self._key() == other._key()  # type: ignore[attr-defined]
