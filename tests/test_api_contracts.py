@@ -404,16 +404,13 @@ ROWS: list[Row] = [
         dims=(1,),
     ),
     Row(
-        "commkit.equalization.polarization.apply_interpolated_matrix", TRANSFORM, data=3
+        "commkit.equalization.polarization.correct_polarization",
+        TRANSFORM,
+        data=2,
+        call=lambda c, x: _a(x, np.eye(2)),
+        dims=(2,),
     ),
-    Row(
-        "commkit.equalization.polarization.demultiplex_polarization_tones_dynamic",
-        MULTI,
-    ),
-    Row(
-        "commkit.equalization.polarization.demultiplex_polarization_tones_static",
-        MULTI,
-    ),
+    Row("commkit.equalization.polarization.estimate_polarization_tones", MULTI),
     Row("commkit.equalization.polarization.JonesTrack", VALUE),
     Row("commkit.equalization.result.EqualizerState", VALUE),
     Row("commkit.equalization.result.EqualizerResult", VALUE),

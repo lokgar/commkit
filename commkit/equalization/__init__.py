@@ -10,9 +10,8 @@
   estimate), :func:`zf_equalizer` (its ZF / MMSE inverse) and
   :func:`apply_taps` (frozen taps).
 - Pilot-tone polarization demultiplexing:
-  :func:`demultiplex_polarization_tones_static`,
-  :func:`demultiplex_polarization_tones_dynamic` (with its
-  :class:`JonesTrack`) and :func:`apply_interpolated_matrix`.
+  :func:`estimate_polarization_tones` (a :class:`JonesTrack`) and
+  :func:`correct_polarization`.
 
 The adaptive equalizers take ``(N,)`` or butterfly-MIMO ``(C, N)`` input,
 run optional inline carrier-phase recovery (``cpr=PLL()`` or ``BPS()``) and
@@ -27,9 +26,8 @@ from .blind import block_cma, block_rde, build_pilot_ref
 from .linear import apply_taps, estimate_transfer_function, zf_equalizer
 from .polarization import (
     JonesTrack,
-    apply_interpolated_matrix,
-    demultiplex_polarization_tones_dynamic,
-    demultiplex_polarization_tones_static,
+    correct_polarization,
+    estimate_polarization_tones,
 )
 from .result import EqualizerResult, EqualizerState
 from .sequential import cma, lms, rde, rls
@@ -38,15 +36,14 @@ __all__ = [
     "EqualizerResult",
     "EqualizerState",
     "JonesTrack",
-    "apply_interpolated_matrix",
     "apply_taps",
     "block_cma",
     "block_lms",
     "block_rde",
     "build_pilot_ref",
     "cma",
-    "demultiplex_polarization_tones_dynamic",
-    "demultiplex_polarization_tones_static",
+    "correct_polarization",
+    "estimate_polarization_tones",
     "estimate_transfer_function",
     "lms",
     "rde",

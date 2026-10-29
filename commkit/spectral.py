@@ -218,7 +218,7 @@ def add_pilot_tone(
         scalar places the same tone on every channel; a sequence of length
         ``C`` places one tone per channel (channel ``c`` gets
         ``frequency[c]``), as for tone-based polarization demultiplexing
-        (:func:`~commkit.equalization.demultiplex_polarization_tones_static`).
+        (:func:`~commkit.equalization.estimate_polarization_tones`).
         Each value is snapped to the FFT grid ``f_s/N`` (see Notes);
         :func:`grid_frequency` gives the applied value.
     sampling_rate : float, optional
