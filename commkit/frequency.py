@@ -590,12 +590,13 @@ def _bias_tone(x: ArrayType, fs: float, method: BiasTone) -> _Rows:
         search = xp.where(mask[None, :], mag, xp.zeros_like(mag))
     k = xp.argmax(search, axis=-1)
     rows = xp.arange(R)
-    m64 = mag.astype(xp.float64)
-    delta = _parabolic_peak_offset(
-        m64[rows, (k - 1) % nfft], m64[rows, k], m64[rows, (k + 1) % nfft], xp, log=True
+    # The peak and its neighbours in float64, not the whole spectrum.
+    left, peak, right = (
+        mag[rows, j].astype(xp.float64) for j in ((k - 1) % nfft, k, (k + 1) % nfft)
     )
+    delta = _parabolic_peak_offset(left, peak, right, xp, log=True)
     values = freqs[k] + delta * (fs / nfft)
-    return _Rows(values=values, weights=m64[rows, k])
+    return _Rows(values=values, weights=peak)
 
 
 def _estimate_rows(
