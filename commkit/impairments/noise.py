@@ -30,11 +30,18 @@ def apply_awgn(
 
     With ``osnr_db`` (an optical Signal) the noise is amplified spontaneous
     emission specified as optical links are: the total signal power over the
-    ASE power in ``reference_bandwidth`` (12.5 GHz, 0.1 nm at 1550 nm),
-    counted in both polarizations.  Each channel (polarization) gets complex
-    noise of variance ``C · signal_power · f_s / (2 · B_ref · OSNR)``, which
-    gives the textbook ``OSNR = p R_s / (2 B_ref) · SNR`` for ``p``
-    polarizations.
+    ASE power in ``reference_bandwidth``, counted in both polarizations.  ASE
+    is white over the simulated band ``f_s``, so complex noise of variance
+    ``σ²`` per polarization has the density ``σ²/f_s`` and puts
+    ``2 σ² B_ref / f_s`` into ``B_ref`` over both polarizations; each
+    channel therefore gets
+
+        σ² = C · signal_power · f_s / (2 · B_ref · OSNR),
+
+    which gives the textbook ``Es/N0 = 2 B_ref / (p R_s) · OSNR`` for ``p``
+    polarizations, whatever the oversampling.  A single-polarization Signal
+    (``C = 1``) still counts the ASE of both polarizations, as an OSNR meter
+    does, and receives the half that falls into its own.
 
     Parameters
     ----------
@@ -52,11 +59,17 @@ def apply_awgn(
         for array input.  A value that disagrees with the Signal raises.
     signal_power : float, optional
         Signal power per channel for the noise scaling.  Defaults to the mean
-        power of ``samples`` over all channels.  Pass a value to add noise at
-        an absolute level, e.g. ``signal_power=1.0`` on a dark
-        (signal-blocked) capture, whose own power cannot set it.
+        power of ``samples`` over all channels, which counts any silent
+        stretch.  Pass the nominal power instead when that is the reference:
+        e.g. ``signal_power=1.0`` for a unit-power constellation sent in
+        bursts separated by zero guard intervals, whose measured mean falls
+        below the power of the symbols.
     reference_bandwidth : float, default 12.5e9
-        Noise reference bandwidth ``B_ref`` of ``osnr_db`` in Hz.
+        Noise reference bandwidth ``B_ref`` of ``osnr_db`` in Hz.  The
+        standard reference is 0.1 nm of optical bandwidth, ``c · 0.1 nm /
+        λ²``: 12.5 GHz in the C band (12.48 GHz at 1550 nm), 17.5 GHz at
+        1310 nm.  Outside the C band pass the value for the carrier, e.g.
+        ``reference_bandwidth=17.5e9`` for an O-band OSNR in 0.1 nm.
     rng : int, numpy.random.Generator or None
         Random source.  The noise is drawn on the data's device: from this
         Generator on the CPU, and on the GPU from a CuPy Generator seeded from
@@ -70,8 +83,9 @@ def apply_awgn(
     Raises
     ------
     ValueError
-        If neither or both of ``esn0_db`` and ``osnr_db`` are given, or
-        ``osnr_db`` is given for anything but a complex optical Signal.
+        If neither or both of ``esn0_db`` and ``osnr_db`` are given,
+        ``osnr_db`` is given for anything but a complex optical Signal, or
+        ``reference_bandwidth`` is not positive.
 
     Notes
     -----
@@ -99,6 +113,11 @@ def apply_awgn(
             raise ValueError(
                 "apply_awgn(): osnr_db needs a complex optical Signal "
                 "(domain='OPT'), whose sampling rate sets the noise bandwidth."
+            )
+        if not reference_bandwidth > 0:
+            raise ValueError(
+                "apply_awgn(): reference_bandwidth must be positive (Hz), got "
+                f"{reference_bandwidth!r}."
             )
         logger.info("Adding ASE noise (OSNR target: %.2f dB).", osnr_db)
         num_channels = 1 if x.ndim == 1 else x.shape[0]

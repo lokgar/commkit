@@ -130,3 +130,31 @@ class TestOSNR:
         for bad in (x, sig, sig.replace(domain="OPT", samples=x.real)):
             with pytest.raises(ValueError, match="optical Signal"):
                 apply_awgn(bad, osnr_db=10.0)
+        opt = sig.replace(domain="OPT", center_frequency=193.4e12)
+        for bad in (0.0, -12.5e9, float("nan")):
+            with pytest.raises(ValueError, match="reference_bandwidth"):
+                apply_awgn(opt, osnr_db=10.0, reference_bandwidth=bad)
+
+    @pytest.mark.parametrize("sps", [1, 2, 4])
+    def test_independent_of_oversampling(self, xp, sps):
+        """The in-band noise, and so Es/N0, does not depend on sps; a wider
+        reference bandwidth at the same OSNR means a
+        proportionally lower ASE density."""
+        n, rs = 1 << 17, 32e9
+        x = xp.ones((2, n), dtype=xp.complex64)
+        sig = Signal(
+            samples=x,
+            sampling_rate=sps * rs,
+            symbol_rate=rs,
+            domain="OPT",
+            center_frequency=193.4e12,
+        )
+        var = float(
+            xp.mean(xp.abs(apply_awgn(sig, osnr_db=15.0, rng=1).samples - x) ** 2)
+        )
+        esn0 = sps / var
+        expected = 10**1.5 * 2 * 12.5e9 / (2 * rs)
+        assert esn0 == pytest.approx(expected, rel=0.02)
+        wide = apply_awgn(sig, osnr_db=15.0, reference_bandwidth=25e9, rng=1)
+        var_wide = float(xp.mean(xp.abs(wide.samples - x) ** 2))
+        assert var_wide == pytest.approx(var / 2, rel=0.02)
