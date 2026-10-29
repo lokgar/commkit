@@ -1,6 +1,6 @@
 [project]
 name = "commkit"
-version = "3.1.2"
+version = "3.1.3"
 description = "A Python library for high-performance digital communications research."
 readme = "README.md"
 authors = [{ name = "Denis Fatkhiev" }]
@@ -86,7 +86,7 @@ markers = [
 ]
 
 [tool.bumpversion]
-current_version = "3.1.2"
+current_version = "3.1.3"
 parse = "(?P<major>\\d+)\\.(?P<minor>\\d+)\\.(?P<patch>\\d+)"
 serialize = ["{major}.{minor}.{patch}"]
 search = "{current_version}"
