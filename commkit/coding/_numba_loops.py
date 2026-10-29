@@ -626,14 +626,35 @@ def ccdm_dematch(symbols, composition, buffer_bits, bits, valid):  # type: ignor
             if shift > buffer_bits:
                 ok = False
                 break
-        valid[b] = ok
         # v = ceil(low 2^k): the first k bits, plus one if more follow.
-        up = 0
+        beyond = 0
         for j in range(k + 1, buffer_bits + 1):
             if low[j]:
-                up = 1
+                beyond = 1
                 break
+        up = beyond
         for j in range(k, 0, -1):
             v = low[j] + up
             bits[b, j - 1] = v & 1
             up = v >> 1
+        # A sequence of the composition is the image of a payload only if v
+        # 2^-k lies in the final interval [low, low + rng 2^-shift): the
+        # composition has more sequences than the 2^k payloads.  The carry
+        # out of the k bits means v = 2^k, no payload.
+        if ok and up:
+            ok = False
+        if ok and beyond:
+            # d = (v 2^-k - low) 2^shift = 2^(shift - k) - F, with F the bits
+            # of low after the k-th.  d < rng <= 2^32 needs every bit of F
+            # above its lowest 32 to be 1, and then d = 2^w - (those 32 bits).
+            lo = max(k + 1, shift - _RANGE_BITS + 1)
+            for j in range(k + 1, lo):
+                if not low[j]:
+                    ok = False
+                    break
+            if ok:
+                f = np.int64(0)
+                for j in range(lo, shift + 1):
+                    f = (f << 1) | low[j]
+                ok = (np.int64(1) << (shift - lo + 1)) - f < rng
+        valid[b] = ok

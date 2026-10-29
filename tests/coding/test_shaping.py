@@ -63,6 +63,35 @@ class TestCCDM:
         np.testing.assert_array_equal(back, u)
         assert valid.all()
 
+    @pytest.mark.parametrize("n", [3, 4, 6, 8])
+    @pytest.mark.parametrize(
+        "pmf", [[0.4, 0.3, 0.2, 0.1], [0.25] * 4, [0.7, 0.2, 0.05, 0.05]]
+    )
+    def test_valid_exactly_on_the_image(self, n: int, pmf) -> None:
+        """Of all sequences of the composition (more than the 2^k payloads),
+        exactly those the matcher emits are valid."""
+        cc = CCDM(Constellation(AMPLITUDES.points, pmf=pmf), block_length=n)
+        u = np.array(list(itertools.product([0, 1], repeat=cc.k)), dtype=np.int8)
+        image = {tuple(r) for r in cc._match(u)}
+        every = np.array(list(itertools.product(range(4), repeat=n)), dtype=np.int64)
+        every = every[
+            (np.stack([(every == i).sum(axis=1) for i in range(4)], axis=1)
+             == cc.composition).all(axis=1)
+        ]  # fmt: skip
+        assert len(every) > len(image)
+        _, valid = cc._dematch(every)
+        np.testing.assert_array_equal(valid, [tuple(r) in image for r in every])
+
+    def test_two_points_of_four_sequences(self) -> None:
+        """Two of each of two points: six sequences, four payloads (k = 2)."""
+        cc = CCDM(Constellation.pam(2), block_length=4)
+        assert cc.k == 2
+        every = np.array(
+            [r for r in itertools.product(range(2), repeat=4) if sum(r) == 2]
+        )
+        _, valid = cc._dematch(every)
+        assert valid.sum() == 4
+
     def test_round_trip_at_operating_size(self, xp: Any, xpt: Any) -> None:
         cc = CCDM(PS64, block_length=20_000)
         u = random_bits((3, cc.k), xp, seed=1)
