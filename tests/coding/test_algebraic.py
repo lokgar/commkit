@@ -303,6 +303,7 @@ class TestKernels:
             np.testing.assert_array_equal(got[r], want)
         assert ok[counts <= code.t].all() and not ok.all()
 
+    @pytest.mark.gpu_only
     @pytest.mark.parametrize("code", [*_KERNEL_CODES, ReedSolomonCode.kp4()], ids=repr)
     def test_gpu_matches_cpu(self, backend_device: str, code) -> None:
         skip_unless_gpu(backend_device)
