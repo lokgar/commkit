@@ -260,7 +260,9 @@ def encode(bits: ArrayType, *, code: Any) -> ArrayType:
     if x.dtype.kind not in "biu":
         raise TypeError(f"encode(): bits must be integers or bool, got {x.dtype}.")
     # Before the int8 cast, which would wrap 256 to 0; one sync on the GPU.
-    if x.dtype.kind != "b" and x.size and bool(((x != 0) & (x != 1)).any()):
+    # As unsigned, negative values are large: one comparison finds both.
+    unsigned = x.view(f"u{x.dtype.itemsize}") if x.dtype.kind == "i" else x
+    if x.dtype.kind != "b" and x.size and bool((unsigned > 1).any()):
         raise ValueError("encode(): bits must be 0 or 1.")
     x2, was_1d = as_2d(x, name="bits")
     blocks = _blocks(x2, code.k, "bits", "encode()").astype(np.int8, copy=False)

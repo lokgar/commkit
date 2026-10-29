@@ -61,6 +61,15 @@ class TestEncode:
         with pytest.raises(ValueError, match="0 or 1"):
             encode(xp.asarray(bits, dtype=xp.int16), code=H74)
 
+    @pytest.mark.parametrize("dtype", ["int8", "int64", "uint8"])
+    def test_nonbinary_bits_any_dtype_and_stride(self, xp: Any, dtype: str) -> None:
+        """The check reads every integer dtype and strided input."""
+        words = xp.zeros((2, 8), dtype=dtype)
+        words[1, 2] = 255 if dtype == "uint8" else -1
+        assert encode(words[0], code=H74).shape == (14,)
+        with pytest.raises(ValueError, match="0 or 1"):
+            encode(words[:, 2], code=LinearBlockCode.hamming(3, length=5))
+
 
 class TestDecode:
     def test_result_layout(self, xp: Any) -> None:
