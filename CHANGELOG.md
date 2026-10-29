@@ -4,6 +4,20 @@ Notable changes to CommKit, newest first. Performance figures are from the refer
 
 ## [Unreleased]
 
+## [3.1.2] - 2026-10-29
+
+`apply_awgn` without hidden assumptions about what a channel is: Es/N0 holds per channel, and the OSNR counts the ASE of the modes the medium guides instead of assuming the two polarizations of a single-mode fiber.
+
+### Changes that alter results
+
+- **`apply_awgn(esn0_db=)` gives every channel the requested Es/N0.** The default noise level comes from each channel's own mean power; it used to come from the mean over all channels, so with unequal channel powers a stronger channel got a better Es/N0 than requested and a weaker one a worse. Equal powers give the same result as before. Pass a scalar `signal_power` for the old behavior, one absolute noise level shared by every channel.
+- **`apply_awgn(osnr_db=)` counts the ASE of `noise_modes` modes, `max(C, 2)` by default.** One or two channels are unchanged (both polarizations of a single-mode fiber). More channels, such as the modes of a few-mode fiber or the cores of a multicore fiber, each count as a mode; they used to share the ASE of two polarizations, which put C/2 times too much noise on each.
+
+### Added
+
+- `apply_awgn(noise_modes=)` for a medium that guides modes without signal, e.g. `noise_modes=6` for four channels in a three-mode fiber.
+- `apply_awgn(signal_power=)` accepts one power per channel, `(C,)`.
+
 ## [3.1.1] - 2026-10-29
 
 API consistency. One name per concept and a unit in every size, defaults that model the physics, physical units where the rest of the API has them, and features that use what the Signal and the frame already carry: the optical carrier for dispersion, fiber and OSNR noise, the frame's pilots for the pilot-aided algorithms, the code of the reference for post-FEC metrics. Most changes are renames that fail loudly with `TypeError`; the four default changes and the speed of light alter numbers and are listed first.
