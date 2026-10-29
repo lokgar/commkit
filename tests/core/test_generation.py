@@ -258,7 +258,7 @@ class TestGenerateCoded:
             device=backend_device,
         )
         ref = sig.reference
-        assert ref.code_block == (7, 4)
+        assert ref.code_block == (7, 4) and ref.code is code
         assert ref.bits.shape == (2, 2800) and ref.info_bits.shape == (2, 1600)
         assert isinstance(ref.info_bits, xp.ndarray)
         np.testing.assert_array_equal(

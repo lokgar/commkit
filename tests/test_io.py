@@ -19,6 +19,7 @@ from commkit import (
     multirate,
 )
 from commkit.coding import LinearBlockCode
+from commkit.core import extract_payload
 from commkit.filtering import RRC
 from commkit.io import load_npz, save_npz
 from commkit.mapping import Constellation
@@ -362,6 +363,139 @@ class TestNPZDeviceHandling:
         assert metrics.ber(loaded) == ber_before
 
 
+def _assert_same_signal(a: Signal, b: Signal) -> None:
+    """Every field of ``b`` equals ``a``'s, the frame's generated data included."""
+    np.testing.assert_array_equal(to_numpy(a.samples), to_numpy(b.samples))
+    assert a.samples.dtype == b.samples.dtype
+    for name in (
+        "sampling_rate", "symbol_rate", "center_frequency", "domain",
+        "constellation", "pulse",
+    ):  # fmt: skip
+        assert getattr(a, name) == getattr(b, name), name
+    for ra, rb in [(a.reference, b.reference)] + (
+        [(a.frame._payload_reference(), b.frame._payload_reference())]
+        if a.frame is not None
+        else []
+    ):
+        assert (ra is None) == (rb is None)
+        if ra is None:
+            continue
+        for name in ("symbols", "bits", "info_bits"):
+            va, vb = getattr(ra, name), getattr(rb, name)
+            assert (va is None) == (vb is None), name
+            if va is not None:
+                np.testing.assert_array_equal(to_numpy(va), to_numpy(vb))
+                assert va.dtype == vb.dtype, name
+        assert (ra.info_bits is ra.bits) == (rb.info_bits is rb.bits)
+        assert ra.code_block == rb.code_block
+        assert ra.code == rb.code
+    assert a.frame == b.frame
+    if a.frame is not None:
+        for name in ("pilot_symbols", "pilot_bits", "body_symbols"):
+            va, vb = getattr(a.frame, name), getattr(b.frame, name)
+            assert (va is None) == (vb is None), name
+            if va is not None:
+                np.testing.assert_array_equal(va, vb)
+
+
+_SHAPED = Constellation.qam(16).shaped(entropy=3.5)
+
+
+@pytest.mark.parametrize(
+    "make",
+    [
+        lambda: generate(Constellation.qam(16), 70, symbol_rate=1e9, rng=0),
+        lambda: generate(
+            Constellation.qam(16),
+            70,
+            symbol_rate=1e9,
+            num_channels=2,
+            code=LinearBlockCode.hamming(3),
+            rng=0,
+        ),
+        lambda: generate(
+            Constellation.qam(16),
+            symbol_rate=1e9,
+            num_blocks=2,
+            code=coding.LDPCCode.dvbs2("1/2", "short"),
+            rng=0,
+        ),
+        lambda: generate(_SHAPED, 400, symbol_rate=1e9, rng=0, sps=2, pulse=RRC(0.1)),
+        lambda: generate(
+            Constellation.qam(16),
+            10,
+            symbol_rate=1e9,
+            code=LinearBlockCode.hamming(3),
+            pad=True,
+            rng=0,
+        ).replace(domain="OPT", center_frequency=193.1e12),
+        lambda: SingleCarrierFrame(
+            payload_num_symbols=402,
+            payload_constellation=_SHAPED,
+            preamble=Preamble(num_symbols=13),
+            pilot_pattern="block",
+            pilot_period=8,
+            pilot_block_num_symbols=2,
+            guard_type="cp",
+            guard_num_symbols=4,
+            num_streams=2,
+        ).to_signal(sps=2, symbol_rate=1e9, pulse=RRC(0.2)),
+        lambda: SingleCarrierFrame(
+            payload_blocks=12,
+            payload_code=LinearBlockCode.hamming(3),
+            pilot_pattern="comb",
+            pilot_period=4,
+        ).to_signal(sps=1, symbol_rate=1e9),
+        lambda: SingleCarrierFrame(
+            payload_num_symbols=21,
+            payload_code=LinearBlockCode.hamming(3),
+            payload_pad=True,
+        ).to_signal(sps=1, symbol_rate=1e9),
+    ],
+    ids=[
+        "plain",
+        "coded-mimo",
+        "ldpc",
+        "shaped",
+        "padded-optical",
+        "shaped-frame",
+        "coded-frame",
+        "padded-frame",
+    ],
+)
+def test_everything_is_recovered(tmp_path: Any, make) -> None:
+    """A loaded Signal equals the saved one in every field and generated array."""
+    sig = make()
+    save_npz(sig, tmp_path / "s")
+    _assert_same_signal(sig, load_npz(tmp_path / "s"))
+
+
+def test_extracted_payload_decodes_after_load(tmp_path: Any) -> None:
+    """The stored reference code decodes the loaded payload."""
+    frame = SingleCarrierFrame(
+        payload_blocks=4,
+        payload_code=coding.LDPCCode.dvbs2("1/2", "short"),
+        payload_constellation=Constellation.qam(16),
+    )
+    save_npz(extract_payload(frame.to_signal(sps=1, symbol_rate=1e9)), tmp_path / "p")
+    ref = load_npz(tmp_path / "p").reference
+    assert ref.code == frame.payload_code
+    res = coding.decode(ref.bits, code=ref.code)
+    np.testing.assert_array_equal(res.bits, ref.info_bits)
+
+
+def test_shared_payload_code_is_stored_once(tmp_path: Any) -> None:
+    """The payload reference names the frame's code instead of a second copy."""
+    frame = SingleCarrierFrame(
+        payload_blocks=4,
+        payload_code=coding.LDPCCode.dvbs2("1/2", "short"),
+        payload_constellation=Constellation.qam(16),
+    )
+    save_npz(frame.to_signal(sps=1, symbol_rate=1e9), tmp_path / "f")
+    with np.load(tmp_path / "f.npz") as data:
+        assert not any(k.startswith("frame_payload_reference_code") for k in data)
+
+
 class TestNPZCodedReference:
     """The reference's source bits are stored only when they differ."""
 
@@ -379,6 +513,7 @@ class TestNPZCodedReference:
         assert "reference_info_bits" in np.load(tmp_path / "coded.npz")
         back = load_npz(tmp_path / "coded.npz", device=device)
         assert back.reference.code_block == (7, 4)
+        assert back.reference.code == LinearBlockCode.hamming(3)
         xpt.assert_array_equal(back.reference.info_bits, sig.reference.info_bits)
         xpt.assert_array_equal(back.reference.bits, sig.reference.bits)
 

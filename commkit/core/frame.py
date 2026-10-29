@@ -486,7 +486,9 @@ class SingleCarrierFrame:
         assert ref is not None
         self._cache["payload_bits"] = ref.bits
         self._cache["payload_info_bits"] = ref.info_bits
-        self._cache["payload_code_block"] = ref.code_block
+        # The payload_code, or the matcher generate() picked for a shaped
+        # payload without one; None for uniform uncoded bits.
+        self._cache["payload_reference_code"] = ref.code
         self._cache["payload_symbols"] = ref.symbols
 
     def _ensure_pilot_generated(self) -> None:
@@ -538,13 +540,12 @@ class SingleCarrierFrame:
     def _payload_reference(self) -> Reference:
         """The payload's ground truth on the host (symbols and both bit streams)."""
         self._ensure_payload_generated()
-        code_block = self._cache["payload_code_block"]
-        coded = code_block != (1, 1)
+        code = self._cache["payload_reference_code"]
         return Reference(
             symbols=self._cache["payload_symbols"],
             bits=self._cache["payload_bits"],
-            info_bits=self._cache["payload_info_bits"] if coded else None,
-            code_block=code_block if coded else None,
+            info_bits=None if code is None else self._cache["payload_info_bits"],
+            code=code,
         )
 
     @property

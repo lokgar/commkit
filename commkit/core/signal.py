@@ -58,7 +58,14 @@ class Reference:
         ``(n, k)``: every ``n`` bits of ``bits`` carry ``k`` bits of
         ``info_bits``, so ``info_bits`` holds ``bits.shape[-1] // n`` blocks
         of ``k`` bits (:attr:`num_blocks`, whole blocks only; bits after the
-        last whole block are uncoded filler).
+        last whole block are uncoded filler).  Taken from ``code`` when
+        that is given.
+    code : code object, optional
+        The code that turned ``info_bits`` into ``bits`` (a FEC code, a
+        distribution matcher or their composition from
+        :mod:`commkit.coding`), to decode with: ``decode(llrs,
+        code=ref.code)``.  Needs ``info_bits``.  ``None`` when the bits are
+        uncoded, or the code is not known (``code_block`` alone).
 
     Notes
     -----
@@ -71,6 +78,7 @@ class Reference:
     bits: Any | None = None
     info_bits: Any | None = None
     code_block: tuple[int, int] | None = None
+    code: Any | None = None
 
     def __post_init__(self) -> None:
         symbols = validate_array(self.symbols, name="symbols")
@@ -79,6 +87,8 @@ class Reference:
                 f"symbols must have shape (N,) or (C, N), got {symbols.shape}."
             )
         object.__setattr__(self, "symbols", symbols)
+        if self.code is not None:
+            self._take_code_block()
         if (self.info_bits is None) != (self.code_block is None):
             raise ValueError("info_bits and code_block must be given together.")
         if self.bits is None:
@@ -114,6 +124,26 @@ class Reference:
                 f"{(n, k)} with {bits.shape[-1]} bits on the air needs "
                 f"{(bits.shape[-1] // n) * k}."
             )
+
+    def _take_code_block(self) -> None:
+        """``code_block`` from ``code``, which must agree with a given one."""
+        from ..coding.base import _Code
+
+        code = self.code
+        if not isinstance(code, _Code):
+            raise ValueError(
+                f"code must be a code object from commkit.coding, got "
+                f"{type(code).__name__}."
+            )
+        if self.info_bits is None:
+            raise ValueError("code needs info_bits (the bits before the code).")
+        block = (int(code.n), int(code.k))  # type: ignore[attr-defined]
+        if self.code_block is not None and tuple(self.code_block) != block:
+            raise ValueError(
+                f"code_block {self.code_block!r} disagrees with the code's (n, k) "
+                f"{block}."
+            )
+        object.__setattr__(self, "code_block", block)
 
     def _checked(self, value: Any, name: str) -> Any:
         """``value`` as an array laid out and placed like ``symbols``."""
@@ -161,6 +191,7 @@ class Reference:
             bits=bits,
             info_bits=to_device(self.info_bits, device),
             code_block=self.code_block,
+            code=self.code,
         )
 
     def head(self, num_symbols: int) -> Reference:
@@ -185,6 +216,7 @@ class Reference:
             bits=bits,
             info_bits=self.info_bits[..., : (bits.shape[-1] // n) * k],
             code_block=self.code_block,
+            code=self.code,
         )
 
 
@@ -374,6 +406,8 @@ class Signal:
             assert ref.info_bits is not None
             n, k = ref.code_block
             filler = ref.bits.shape[-1] - ref.num_blocks * n
+            if ref.code is not None:
+                rows.append(("Code", repr(ref.code)))
             rows.append(("Code block", f"n={n}  k={k}  (rate {k / n:.4g})"))
             rows.append(
                 (

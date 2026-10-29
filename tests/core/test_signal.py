@@ -115,6 +115,28 @@ class TestSignalCreation:
         with pytest.raises(ValueError, match="channel axis"):
             Reference(symbols=sym, bits=bits, info_bits=info[0], code_block=(7, 4))
 
+    def test_reference_code(self, xp):
+        """A code gives code_block; it needs info_bits and must agree."""
+        from commkit.coding import LinearBlockCode
+
+        code = LinearBlockCode.hamming(3)
+        sym, bits = xp.zeros((2, 7)), xp.zeros((2, 14), dtype=xp.int8)
+        info = xp.zeros((2, 8), dtype=xp.int8)
+        ref = Reference(symbols=sym, bits=bits, info_bits=info, code=code)
+        assert ref.code is code and ref.code_block == (7, 4)
+        assert ref.to("cpu").code is code and ref.head(4).code is code
+        assert Reference(
+            symbols=sym, bits=bits, info_bits=info, code_block=(7, 4), code=code
+        ).code_block == (7, 4)
+        with pytest.raises(ValueError, match="disagrees"):
+            Reference(
+                symbols=sym, bits=bits, info_bits=info, code_block=(14, 8), code=code
+            )
+        with pytest.raises(ValueError, match="needs info_bits"):
+            Reference(symbols=sym, bits=bits, code=code)
+        with pytest.raises(ValueError, match="code object"):
+            Reference(symbols=sym, bits=bits, info_bits=info, code=(7, 4))
+
     def test_reference_to_keeps_sharing(self, xp):
         ref = Reference(symbols=np.zeros(4), bits=np.zeros(8, np.int8))
         moved = ref.to("gpu" if xp is not np else "cpu")
@@ -262,6 +284,7 @@ class TestSignalProperties:
         )  # fmt: skip
         text = str(sig)
         assert "n=7  k=4  (rate 0.5714)" in text
+        assert "LinearBlockCode" in text
         assert "5 per channel  + 5 filler bits" in text
         assert "Information rate    2.00 Gbps" in text  # 4 Gb/s x 20 / 40
         assert "Code block" not in str(

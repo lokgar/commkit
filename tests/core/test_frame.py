@@ -527,7 +527,7 @@ class TestExtractPayload:
             "gpu" if xp is not np else "cpu"
         )
         ref = extract_payload(sig).reference
-        assert ref.code_block == (7, 4)
+        assert ref.code_block == (7, 4) and ref.code is code
         xpt.assert_array_equal(ref.info_bits, xp.asarray(frame.payload_info_bits))
         xpt.assert_array_equal(ref.bits, xp.asarray(frame.payload_bits))
         uncoded = SingleCarrierFrame(payload_num_symbols=10)
@@ -541,9 +541,9 @@ class TestExtractPayload:
         )
         ref = extract_payload(sig).reference
         matcher = CCDM(c, block_length=500)
-        assert ref.code_block == (2000, matcher.k)
+        assert ref.code_block == (2000, matcher.k) and ref.code == matcher
         xpt.assert_array_equal(ref.info_bits, xp.asarray(frame.payload_info_bits))
-        xpt.assert_array_equal(decode(ref.bits, code=matcher).bits, ref.info_bits)
+        xpt.assert_array_equal(decode(ref.bits, code=ref.code).bits, ref.info_bits)
 
     def test_coded_payload_validation(self):
         with pytest.raises(ValueError, match="payload_code.n=7"):

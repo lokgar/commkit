@@ -146,7 +146,7 @@ Dependencies point downward only:
 
 ### Signal
 
-- `Signal` holds: samples (NumPy or CuPy, `(N,)` or `(C, N)`, time on the last axis), the **facts** `sampling_rate`, `symbol_rate`, `center_frequency` and `domain` (`"DIG"`, `"RF"` or `"OPT"`; only RF and optical signals have a carrier), the **description** `constellation` and `pulse`, and the ground truth `reference` (transmitted symbols, the bits on the air `bits` and the source bits `info_bits`, the same array when nothing is coded or matched) plus the `frame` layout.
+- `Signal` holds: samples (NumPy or CuPy, `(N,)` or `(C, N)`, time on the last axis), the **facts** `sampling_rate`, `symbol_rate`, `center_frequency` and `domain` (`"DIG"`, `"RF"` or `"OPT"`; only RF and optical signals have a carrier), the **description** `constellation` and `pulse`, and the ground truth `reference` (transmitted symbols, the bits on the air `bits` and the source bits `info_bits`, the same array when nothing is coded or matched, and the `code` between them) plus the `frame` layout.
 - It never holds pipeline results.
 - Construction does no hidden work: no mapping, no normalization, no device move, no shape guessing. Factories (`generate`, frames) do that work.
 - `sig.to("gpu")` and `sig.replace(...)` return new Signals. Arrays are shared, not copied; use `clone()` for an independent copy.

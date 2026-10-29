@@ -361,7 +361,7 @@ def generate(
             symbols=symbols,
             bits=bits,
             info_bits=info_bits,
-            code_block=None if code is None else (code.n, code.k),
+            code=code,
         ),
     )
 

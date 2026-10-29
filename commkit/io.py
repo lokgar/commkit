@@ -9,6 +9,9 @@ A Signal is stored as a NumPy ``.npz`` archive with these entries:
 ``reference_info_bits``, ``reference_code_block``
     The reference's source bits and ``(n, k)`` (omitted when ``info_bits``
     is ``bits``, as for an uncoded payload).
+``reference_code.*``
+    The array fields of the reference's ``code``, which is in
+    ``__metadata__`` as its class name and fields.
 ``constellation_points``, ``constellation_bit_labels``, ``constellation_pmf``
     The constellation (omitted when ``None``; the pmf only when shaped).
 ``__metadata__``
@@ -17,12 +20,14 @@ A Signal is stored as a NumPy ``.npz`` archive with these entries:
 ``__frame_metadata__``
     A 0-d unicode array holding a JSON string with the fields of the
     Signal's frame (omitted without a frame).
-``frame_payload_symbols``, ``frame_pilot_symbols``, ``frame_payload_bits``
-    The frame's generated symbols and bits (omitted without a frame, or
-    without pilots).
-``frame_payload_info_bits``, ``frame_payload_code_block``
-    The payload's source bits and ``(n, k)``, for a shaped payload (omitted
-    when they are the payload bits).
+``frame_payload_symbols``, ``frame_payload_bits``
+    The frame's generated payload (omitted without a frame).
+``frame_pilot_symbols``, ``frame_pilot_bits``
+    The frame's pilots (omitted without a frame, or without pilots).
+``frame_payload_info_bits``, ``frame_payload_reference_code.*``
+    The payload's source bits, for a coded or shaped payload, and the
+    arrays of the code between them when it is not the ``payload_code``
+    (the matcher of a shaped payload without one).
 ``frame_payload_constellation_*``, ``frame_pilot_constellation_*``
     The frame's constellations, stored as the Signal's.
 ``frame_payload_code.*``
@@ -103,8 +108,8 @@ def save_npz(
     :func:`load_npz` rebuilds it, so ``estimate_timing``, ``extract_payload``
     and the frame-aware equalizer steps work on a loaded Signal as on a
     freshly generated one.  A ``payload_code`` (FEC code, distribution
-    matcher or their composition) is stored as its class and fields, so the
-    loaded frame decodes as the original.
+    matcher or their composition) and a reference's ``code`` are stored as
+    their class and fields, so the loaded Signal decodes as the original.
 
     Examples
     --------
@@ -130,6 +135,7 @@ def save_npz(
         if ref.info_bits is not ref.bits:
             arrays["reference_info_bits"] = _backend.to_device(ref.info_bits, "CPU")
             arrays["reference_code_block"] = np.asarray(ref.code_block, np.int64)
+        meta["reference_code"] = _put_code(ref.code, "reference_code", arrays)
 
     _put_constellation(signal.constellation, "constellation", arrays, meta)
 
@@ -166,25 +172,25 @@ def save_npz(
             frame_dict["payload_code"], "frame_payload_code", arrays
         )
         frame_dict["_frame_type"] = type(frame).__name__
-        arrays["__frame_metadata__"] = _json_array(frame_dict)
 
-        # Save the generated symbol/bit arrays from the frame's cache, which the
-        # field dict above does not include.  Payload symbols and bits are
-        # random; pilot symbols are deterministic but cheap to cache anyway.
-        for npz_key, frame_attr in (
-            ("frame_payload_symbols", "payload_symbols"),
-            ("frame_pilot_symbols", "pilot_symbols"),
-            ("frame_payload_bits", "payload_bits"),
-        ):
-            arr = getattr(frame, frame_attr, None)
-            if arr is not None:
-                arrays[npz_key] = _backend.to_device(arr, "CPU")
+        # The generated payload and pilots from the frame's cache, which the
+        # fields above do not include: the payload symbols and both bit
+        # streams, and the code between them (the payload_code, or the
+        # matcher of a shaped payload without one).
         payload = frame._payload_reference()
-        if payload.info_bits is not payload.bits:
+        arrays["frame_payload_symbols"] = payload.symbols
+        arrays["frame_payload_bits"] = payload.bits
+        if payload.code is not None:
             arrays["frame_payload_info_bits"] = payload.info_bits
-            arrays["frame_payload_code_block"] = np.asarray(
-                payload.code_block, np.int64
+            frame_dict["_payload_reference_code"] = (
+                "payload_code"
+                if payload.code is frame.payload_code
+                else _put_code(payload.code, "frame_payload_reference_code", arrays)
             )
+        if frame.pilot_symbols is not None:
+            arrays["frame_pilot_symbols"] = frame.pilot_symbols
+            arrays["frame_pilot_bits"] = frame.pilot_bits
+        arrays["__frame_metadata__"] = _json_array(frame_dict)
 
     # -------------------------------------------------------------------------
     # Build metadata dict and serialize to JSON
@@ -369,6 +375,7 @@ def _read_signal(data: Any, path: Path) -> Signal:
                 if coded
                 else None
             ),
+            code=_get_code(meta["reference_code"], data, path),
         )
     kwargs["constellation"] = _get_constellation("constellation", data, meta)
     if meta["pulse"] is not None:
@@ -407,30 +414,26 @@ def _read_signal(data: Any, path: Path) -> Signal:
         if frame_dict.get("preamble") is not None:
             frame_dict["preamble"] = _core.Preamble(**frame_dict["preamble"])
         frame_dict["payload_code"] = _get_code(frame_dict["payload_code"], data, path)
+        reference_code = frame_dict.pop("_payload_reference_code", None)
         frame = frame_cls(**frame_dict)
 
-        # Refill the frame's cache so that frame.payload_symbols,
-        # frame.pilot_symbols and frame.payload_bits return the original
-        # generated data without re-randomizing.
-        for npz_key, cache_key in (
-            ("frame_payload_symbols", "payload_symbols"),
-            ("frame_pilot_symbols", "pilot_symbols"),
-            ("frame_payload_bits", "payload_bits"),
-        ):
-            if npz_key in data:
-                frame._cache[cache_key] = data[npz_key]
-        if "frame_payload_bits" in data:
-            matched = "frame_payload_info_bits" in data
-            frame._cache["payload_info_bits"] = (
-                data["frame_payload_info_bits"]
-                if matched
-                else frame._cache["payload_bits"]
+        # Refill the frame's cache, so that its payload and pilots are the
+        # stored ones, not generated again.
+        cache = frame._cache
+        cache["payload_symbols"] = data["frame_payload_symbols"]
+        cache["payload_bits"] = data["frame_payload_bits"]
+        cache["payload_info_bits"] = cache["payload_bits"]
+        cache["payload_reference_code"] = None
+        if "frame_payload_info_bits" in data:
+            cache["payload_info_bits"] = data["frame_payload_info_bits"]
+            cache["payload_reference_code"] = (
+                frame.payload_code
+                if reference_code == "payload_code"
+                else _get_code(reference_code, data, path)
             )
-            frame._cache["payload_code_block"] = (
-                tuple(int(v) for v in data["frame_payload_code_block"])
-                if matched
-                else (1, 1)
-            )
+        if "frame_pilot_symbols" in data:
+            cache["pilot_symbols"] = data["frame_pilot_symbols"]
+            cache["pilot_bits"] = data["frame_pilot_bits"]
 
         sig = sig.replace(frame=frame)
     return sig
