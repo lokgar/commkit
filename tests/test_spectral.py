@@ -6,6 +6,7 @@ import numpy as np
 import pytest
 
 from commkit import spectral
+from tests.common.conversions import to_numpy
 
 
 class TestPowerSpectralDensity:
@@ -132,6 +133,74 @@ class TestFrequencyShift:
         s = xp.asarray(rng.standard_normal(512).astype(np.float32))
         out = spectral.shift_frequency(s, frequency=100.0, sampling_rate=1000.0)
         assert out.dtype == xp.complex64
+
+
+class TestPSDLevels:
+    """Absolute levels of welch_psd and spectrogram, from Parseval and the
+    window's equivalent noise bandwidth ``ENBW = f_s Σw² / (Σw)²``."""
+
+    FS = 1e3
+
+    def test_white_noise_density_and_parseval(self, xp: Any) -> None:
+        """Complex white noise of power σ² has the flat two-sided density
+        σ²/f_s, and the density integrates to σ² (within 2 % over 2^16
+        samples, 511 averaged segments)."""
+        sigma2, n = 4.0, 1 << 16
+        rng = np.random.default_rng(1)
+        x = np.sqrt(sigma2 / 2) * (rng.standard_normal(n) + 1j * rng.standard_normal(n))
+        f, p = spectral.welch_psd(xp.asarray(x), sampling_rate=self.FS, nperseg=256)
+        f, p = np.asarray(to_numpy(f)), np.asarray(to_numpy(p))
+        assert np.mean(p) == pytest.approx(sigma2 / self.FS, rel=0.02)
+        assert np.sum(p) * (f[1] - f[0]) == pytest.approx(sigma2, rel=0.02)
+
+    @pytest.mark.parametrize("window", ["hann", ("kaiser", 8.0), "boxcar"])
+    def test_spectrum_scaling_reads_tone_power(self, xp: Any, window: Any) -> None:
+        """``scaling="spectrum"`` gives a bin-centred real tone of amplitude
+        A the power A²/2 at its one-sided peak, for any window; the density
+        of the same record is that divided by the window's ENBW."""
+        from scipy.signal import get_window
+
+        nperseg, amp = 256, 3.0
+        f0 = 32 * self.FS / nperseg  # on a bin
+        t = np.arange(8192) / self.FS
+        x = xp.asarray(amp * np.cos(2 * np.pi * f0 * t))
+        kw = dict(sampling_rate=self.FS, nperseg=nperseg, window=window)
+        f, spec = spectral.welch_psd(x, scaling="spectrum", **kw)
+        _, dens = spectral.welch_psd(x, scaling="density", **kw)
+        spec, dens = np.asarray(to_numpy(spec)), np.asarray(to_numpy(dens))
+        k = int(np.argmax(spec))
+        assert float(to_numpy(f)[k]) == pytest.approx(f0)
+        # 1e-5 leaks in from the image at -f0 through the window sidelobes.
+        assert spec[k] == pytest.approx(amp**2 / 2, rel=1e-4)
+        w = get_window(window, nperseg)
+        enbw = self.FS * np.sum(w**2) / np.sum(w) ** 2
+        np.testing.assert_allclose(spec, dens * enbw, rtol=1e-6, atol=1e-12)
+
+    def test_spectrogram_levels_and_times(self, xp: Any) -> None:
+        """A complex tone of amplitude A on a bin reads A² in each column of
+        a ``spectrum``-scaled spectrogram; a second channel of twice the
+        field has four times the power; a tone switched on at t0 appears in
+        the first column whose segment lies after t0."""
+        nperseg, amp = 128, 1.5
+        f0 = 16 * self.FS / nperseg
+        n = 4096
+        t = np.arange(n) / self.FS
+        tone = amp * np.exp(2j * np.pi * f0 * t)
+        t0 = 2.0
+        late = np.where(t >= t0, tone, 0.0)
+        x = xp.asarray(np.stack([tone, 2 * tone, late]))
+        spec = spectral.spectrogram(
+            x, sampling_rate=self.FS, nperseg=nperseg, noverlap=0, scaling="spectrum"
+        )
+        f = np.asarray(to_numpy(spec.frequencies))
+        times = np.asarray(to_numpy(spec.times))
+        v = np.asarray(to_numpy(spec.values))
+        k = int(np.argmin(np.abs(f - f0)))
+        np.testing.assert_allclose(v[0, k], amp**2, rtol=1e-6)
+        np.testing.assert_allclose(v[1, k], 4 * amp**2, rtol=1e-6)
+        seg_start = times - nperseg / 2 / self.FS
+        on = v[2, k] > 0.5 * amp**2
+        np.testing.assert_array_equal(on, seg_start >= t0 - 1e-9)
 
 
 class TestSpectrogram:

@@ -9,6 +9,7 @@ from commkit import generate, timing
 from commkit._sequences import zc_mimo_root
 from commkit.core import Preamble, Signal, SingleCarrierFrame
 from commkit.filtering import RRC
+from commkit.impairments import apply_awgn
 from commkit.mapping import Constellation
 from commkit.timing import _parabolic_peak_offset, cross_correlate_fft
 from tests.common.conversions import device_of, to_numpy
@@ -149,21 +150,20 @@ class TestEstimateTiming:
 
         est = timing.estimate_timing(data, template=preamble, threshold=2.0, sps=1)
         integer, _frac = est.integer, est.fractional
-        assert 18 <= int(integer) <= 22
+        assert int(integer) == 20
 
         mimo_data = xp.zeros((2, 100), dtype="complex64")
         mimo_data[0, 30:37] = ref
         mimo_data[1, 30:37] = ref
         est = timing.estimate_timing(mimo_data, template=ref, threshold=2.0)
         integer_mimo, _frac = est.integer, est.fractional
-        assert 28 <= integer_mimo[0] <= 32
-        assert len(integer_mimo) == 2
+        np.testing.assert_array_equal(np.asarray(to_numpy(integer_mimo)), [30, 30])
 
         est = timing.estimate_timing(
             data, template=ref, threshold=2.0, search_range=(10, 50)
         )
         integer_range, _frac = est.integer, est.fractional
-        assert 18 <= int(integer_range) <= 22
+        assert int(integer_range) == 20
 
         with pytest.raises(ValueError, match="No correlation peak above threshold"):
             timing.estimate_timing(data, template=ref, threshold=100.0)
@@ -181,7 +181,7 @@ class TestEstimateTiming:
 
         est = timing.estimate_timing(signal, template=preamble_symbols, threshold=2.0)
         integer, _frac = est.integer, est.fractional
-        assert abs(int(integer) - start_pos) <= 1
+        assert int(integer) == start_pos
 
     def test_estimate_timing_with_preamble_object(self, xp):
         """Verify timing estimation using Preamble objects."""
@@ -194,7 +194,7 @@ class TestEstimateTiming:
 
         est = timing.estimate_timing(signal, template=preamble, sps=1, threshold=2.0)
         integer, _frac = est.integer, est.fractional
-        assert abs(int(integer) - start_pos) <= 1
+        assert int(integer) == start_pos
 
     def test_estimate_timing_siso_rank(self, xp):
         """SISO input gives 0-d integer and fractional offsets (rank rule)."""
@@ -246,17 +246,32 @@ class TestEstimateTiming:
         with pytest.raises(ValueError, match="SPS must be provided"):
             timing.estimate_timing(sig, template=pre)
 
-    def test_estimate_timing_fractional(self, xp):
-        """Verify estimate_timing returns fractional offset."""
-        preamble = xp.asarray(timing.barker_sequence(13))
-        signal = xp.zeros(200, dtype="complex64")
-        signal[50:63] = preamble
-
-        est = timing.estimate_timing(signal, template=preamble, threshold=2.0)
-        integer, frac = est.integer, est.fractional
-        assert integer.ndim == 0
-        assert frac.ndim == 0
-        assert abs(float(frac)) < 0.5
+    @pytest.mark.parametrize("delay", [37.3, 37.7, 52.5])
+    @pytest.mark.parametrize("esn0_db", [None, 15.0])
+    def test_estimate_timing_fractional(self, xp, delay, esn0_db):
+        """A band-limited QPSK record (RRC, 4 sps) delayed by a non-integer
+        number of samples: integer plus fractional estimate recover the
+        delay within 0.08 samples, sign included (the peak fit's bias on a
+        raised-cosine correlation peak is up to 0.06), noiseless or at
+        15 dB, and correcting by the estimate realigns the record."""
+        sig = generate(
+            Constellation.psk(4), 256, symbol_rate=1e6, sps=4, pulse=RRC(0.35), rng=3,
+            periodic=True,
+        )  # fmt: skip
+        clean = xp.asarray(sig.samples)
+        x = timing.fft_fractional_delay(clean, delay=delay)
+        if esn0_db is not None:
+            x = apply_awgn(x, esn0_db=esn0_db, sps=4, rng=1)
+        est = timing.estimate_timing(x, template=clean[:128], threshold=2.0)
+        assert int(est.integer) + float(est.fractional) == pytest.approx(
+            delay, abs=0.08
+        )
+        if esn0_db is None:
+            back = timing.correct_timing(x, est, mode="circular")
+            err = float(
+                xp.mean(xp.abs(back - clean) ** 2) / xp.mean(xp.abs(clean) ** 2)
+            )
+            assert 10 * np.log10(err) < -25
 
     def test_estimate_timing_no_preamble_error(self, xp):
         """Verify estimate_timing raises when no reference is given."""
@@ -379,7 +394,7 @@ class TestEstimateTimingMIMO:
         est = timing.estimate_timing(rx, template=preamble, sps=1, threshold=2.0)
         integer = est.integer
         for ch in range(2):
-            assert abs(int(integer[ch]) - preamble_pos) <= 1
+            assert int(integer[ch]) == preamble_pos
 
     def test_estimate_timing_mimo_mixed_channel(self, xp):
         """MIMO unique-root ZC: mixed channel (both streams present on each RX)."""
@@ -391,7 +406,7 @@ class TestEstimateTimingMIMO:
         est = timing.estimate_timing(rx, template=preamble, sps=1, threshold=2.0)
         integer = est.integer
         for ch in range(2):
-            assert abs(int(integer[ch]) - preamble_pos) <= 1
+            assert int(integer[ch]) == preamble_pos
 
     def test_estimate_timing_mimo_channel_skew(self, xp):
         """MIMO: hardware skew of 5 samples on channel 1 is reflected in per-channel integer offsets."""
@@ -417,7 +432,7 @@ class TestEstimateTimingMIMO:
         est = timing.estimate_timing(rx, template=preamble, sps=1, threshold=2.0)
         integer = est.integer
         for ch in range(2):
-            assert abs(int(integer[ch]) - preamble_pos) <= 1
+            assert int(integer[ch]) == preamble_pos
 
 
 class TestFractionalDelay:
@@ -433,7 +448,8 @@ class TestFractionalDelay:
 
         peak_idx = xp.argmax(xp.abs(corr))
         mu = timing.estimate_fractional_delay(corr, peak_idx)
-        assert abs(float(mu) - true_mu) < 0.15
+        # The default log-parabolic fit is exact on a Gaussian peak.
+        assert float(mu) == pytest.approx(true_mu, abs=1e-4)
 
     def test_estimate_fractional_delay_edge_peak(self, xp):
         """Verify graceful fallback when peak is at array boundary."""

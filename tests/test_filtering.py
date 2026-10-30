@@ -150,18 +150,36 @@ class TestFilterApplication:
         xpt.assert_allclose(filtered[5:-5], xp.ones(90))
 
     def test_matched_filter_normalization(self, xp: Any) -> None:
-        """Verify matched_filter respects taps_normalization."""
-        samples = xp.ones(100)
+        """On a constant input, ten equal taps normalized to unity gain pass
+        it unchanged and normalized to unit energy multiply it by
+        10/sqrt(10) = sqrt(10) (away from the edges)."""
+        samples = xp.ones(100, dtype=xp.complex64)
         pulse = xp.ones(10)
-
-        out_gain = filtering.matched_filter(
+        gain = filtering.matched_filter(
             samples, pulse=pulse, taps_normalization="unity_gain"
         )
-        assert out_gain.shape == (100,)
-        assert isinstance(out_gain, xp.ndarray)
-
+        energy = filtering.matched_filter(
+            samples, pulse=pulse, taps_normalization="unit_energy"
+        )
+        np.testing.assert_allclose(to_numpy(gain)[10:-10], 1.0, rtol=1e-6)
+        np.testing.assert_allclose(to_numpy(energy)[10:-10], np.sqrt(10), rtol=1e-6)
         with pytest.raises(ValueError, match="Unknown taps_normalization"):
             filtering.matched_filter(samples, pulse=pulse, taps_normalization="magic")
+
+    def test_matched_filter_conjugates_and_reverses(self, xp: Any) -> None:
+        """With complex asymmetric taps h the output is the convolution with
+        conj(h[::-1]) / ‖h‖, centred: its peak on an isolated copy of h is
+        the energy ‖h‖, real, at the copy's centre."""
+        h = np.array([0.2 + 0.5j, 1.0 - 0.3j, -0.4 + 0.1j, 0.3j])
+        x = np.zeros(64, np.complex64)
+        x[30:34] = h
+        out = to_numpy(filtering.matched_filter(xp.asarray(x), pulse=xp.asarray(h)))
+        g = np.conj(h[::-1]) / np.linalg.norm(h)
+        full = np.convolve(x, g)
+        expected = full[(len(g) - 1) // 2 : (len(g) - 1) // 2 + x.size]
+        np.testing.assert_allclose(out, expected, rtol=1e-5, atol=1e-6)
+        k = int(np.argmax(np.abs(out)))
+        assert out[k] == pytest.approx(np.linalg.norm(h), rel=1e-5)
 
     def test_fir_filter_preserves_real_dtype(self, xp: Any) -> None:
         """fir_filter: float32 signal + float64 taps -> float32 output."""

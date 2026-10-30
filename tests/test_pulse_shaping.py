@@ -6,10 +6,11 @@ from typing import Any
 import numpy as np
 import pytest
 
-from commkit import filtering, generate
+from commkit import filtering, generate, multirate
 from commkit.core import Signal
 from commkit.filtering import RRC, Rect, SmoothRect
 from commkit.mapping import Constellation
+from tests.common.conversions import to_numpy
 
 
 class TestSignalPulseTaps:
@@ -85,14 +86,28 @@ class TestSignalPulseTaps:
 class TestMatchedFilterAuto:
     """Tests for matched filtering with auto-derived taps."""
 
-    def test_matched_filter_auto_taps(self, xp: Any) -> None:
-        """Verify that matched_filter correctly auto-generates and applies taps."""
+    @pytest.mark.parametrize(("rolloff", "isi_db"), [(0.35, -55.0), (0.1, -40.0)])
+    def test_matched_filter_auto_taps(
+        self, xp: Any, rolloff: float, isi_db: float
+    ) -> None:
+        """The Signal's RRC pulse and the matched filter form a raised
+        cosine: sampled at the symbol instants it returns the transmitted
+        symbols with unit gain (within 1 %) and residual ISI below
+        ``isi_db`` (the truncated tails; measured -60 and -43 dB)."""
         sig = generate(
-            Constellation.pam(2), 100, symbol_rate=1e3, sps=4, pulse=RRC(0.35)
-        )
-        sig_before = sig.clone()
-        sig = filtering.matched_filter(sig)
-        assert not xp.allclose(sig.samples, sig_before.samples)
+            Constellation.qam(16),
+            4000,
+            symbol_rate=1e9,
+            sps=4,
+            pulse=RRC(rolloff),
+            rng=0,
+        ).to("gpu" if xp is not np else "cpu")
+        y = multirate.decimate_to_symbol_rate(filtering.matched_filter(sig))
+        y, ref = to_numpy(y.samples), to_numpy(sig.reference.symbols)
+        gain = np.vdot(y, ref) / np.vdot(y, y)
+        assert abs(gain - 1) < 0.01
+        isi = np.mean(np.abs(gain * y - ref)[50:-50] ** 2) / np.mean(np.abs(ref) ** 2)
+        assert 10 * np.log10(isi) < isi_db
 
     def test_pulse_is_a_choice(self, xp: Any, xpt: Any, backend_device: str) -> None:
         """pulse= defaults to sig.pulse; a Pulse or its taps give the same output;

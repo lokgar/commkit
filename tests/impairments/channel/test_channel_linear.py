@@ -9,6 +9,7 @@ from commkit.impairments import (
     apply_pmd,
     apply_polarization_mixing,
 )
+from tests.common.conversions import to_numpy
 
 
 class TestApplyPMD:
@@ -55,22 +56,57 @@ class TestApplyPMD:
         # Output must equal input for any theta.
         xpt.assert_allclose(out, samples, atol=1e-5)
 
-    def test_pure_rotation_with_dgd_zero_coupling(self, xp, xpt):
-        """With theta=0, DGD applies a phase shift but no polarization coupling."""
-        N = 256
-        rng = xp.random.RandomState(99)
-        samples = (rng.randn(2, N) + 1j * rng.randn(2, N)).astype(xp.complex64)
-        fs = 56e9
-        dgd = 5e-12
+    @pytest.mark.parametrize("dgd", [5e-12, 20e-12, -8e-12])
+    def test_dgd_is_the_differential_delay(self, xp, dgd):
+        """θ = 0 aligns the principal states with X and Y: a Gaussian burst
+        on X is delayed by +τ/2 and one on Y by -τ/2 (the documented
+        ``diag(e^{-jπfτ}, e^{+jπfτ})``), so their centroids move apart by
+        exactly τ, sign included, with no power crossing between them."""
+        fs, n = 200e9, 4096
+        t = (np.arange(n) - n / 2) / fs
+        burst = np.exp(-0.5 * (t / 10e-12) ** 2)
+        x = np.zeros((2, n), np.complex128)
+        x[0], x[1] = burst, burst
+        out = to_numpy(apply_pmd(xp.asarray(x), dgd=dgd, theta=0.0, sampling_rate=fs))
 
-        out = apply_pmd(samples, dgd=dgd, theta=0.0, sampling_rate=fs)
+        def centroid(v):
+            p = np.abs(v) ** 2
+            return float(np.sum(np.arange(n) * p) / np.sum(p)) / fs
 
-        # With theta=0, R=I so H=diag(D0, D1) - only phase shift per pol
-        # Output power should still be preserved
-        power_in = float(xp.sum(xp.abs(samples) ** 2))
-        power_out = float(xp.sum(xp.abs(out) ** 2))
+        c0 = centroid(burst)
+        assert centroid(out[0]) - c0 == pytest.approx(dgd / 2, rel=1e-3, abs=1e-16)
+        assert centroid(out[1]) - c0 == pytest.approx(-dgd / 2, rel=1e-3, abs=1e-16)
+        y_only = to_numpy(
+            apply_pmd(
+                xp.asarray(np.stack([np.zeros(n), burst]).astype(np.complex128)),
+                dgd=dgd,
+                sampling_rate=fs,
+            )
+        )
+        assert np.max(np.abs(y_only[0])) < 1e-9
 
-        xpt.assert_allclose(power_out, power_in, rtol=1e-4)
+    def test_jones_matrix_is_unitary(self, xp):
+        """J(f)ᴴ J(f) = I at every frequency for any θ (from the impulse
+        responses of X and Y), so PMD conserves power for every input."""
+        n, fs = 256, 56e9
+        imp = np.zeros((2, 2, n), np.complex128)
+        imp[0, 0, 0] = imp[1, 1, 0] = 1.0
+        cols = [
+            np.fft.fft(
+                to_numpy(
+                    apply_pmd(
+                        xp.asarray(imp[k]), dgd=7e-12, theta=0.4, sampling_rate=fs
+                    )
+                ),
+                axis=-1,
+            )
+            for k in range(2)
+        ]
+        J = np.stack(cols, axis=-1).transpose(1, 0, 2)  # (n, out, in)
+        gram = np.conj(np.swapaxes(J, 1, 2)) @ J
+        np.testing.assert_allclose(
+            gram, np.broadcast_to(np.eye(2), gram.shape), atol=1e-6
+        )
 
     def test_output_shape(self, xp):
         """Output shape should match input shape."""

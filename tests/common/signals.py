@@ -199,7 +199,6 @@ def make_test_qam_signal(
     xp: Any = None,
 ) -> Signal:
     """Generate a Signal container populated with QAM samples, optional frequency offset and AWGN."""
-    from commkit import spectral
     from commkit.impairments import apply_awgn
 
     sig = generate(
@@ -215,10 +214,11 @@ def make_test_qam_signal(
             samples=apply_awgn(sig.samples, esn0_db=snr_db, sps=sps, rng=seed)
         )
     if fo_hz != 0.0:
-        shifted = spectral.shift_frequency(
-            sig.samples, frequency=fo_hz, sampling_rate=symbol_rate * sps
-        )
-        sig = sig.replace(samples=shifted)
+        # An exact ramp: spectral.shift_frequency snaps to the FFT grid
+        # (f_s/N), which would apply a different offset than fo_hz.
+        n = np.arange(sig.samples.shape[-1])
+        ramp = np.exp(2j * np.pi * fo_hz * n / (symbol_rate * sps))
+        sig = sig.replace(samples=(sig.samples * ramp).astype(np.complex64))
     if xp is not None:
         sig = sig.to(device_of(xp))
     return sig
@@ -235,7 +235,6 @@ def make_test_psk_signal(
     xp: Any = None,
 ) -> Signal:
     """Generate a Signal container populated with PSK samples, optional frequency offset and AWGN."""
-    from commkit import spectral
     from commkit.impairments import apply_awgn
 
     sig = generate(
@@ -251,10 +250,11 @@ def make_test_psk_signal(
             samples=apply_awgn(sig.samples, esn0_db=snr_db, sps=sps, rng=seed)
         )
     if fo_hz != 0.0:
-        shifted = spectral.shift_frequency(
-            sig.samples, frequency=fo_hz, sampling_rate=symbol_rate * sps
-        )
-        sig = sig.replace(samples=shifted)
+        # An exact ramp: spectral.shift_frequency snaps to the FFT grid
+        # (f_s/N), which would apply a different offset than fo_hz.
+        n = np.arange(sig.samples.shape[-1])
+        ramp = np.exp(2j * np.pi * fo_hz * n / (symbol_rate * sps))
+        sig = sig.replace(samples=(sig.samples * ramp).astype(np.complex64))
     if xp is not None:
         sig = sig.to(device_of(xp))
     return sig

@@ -10,6 +10,7 @@ from commkit.backend import to_device
 from commkit.coding import LinearBlockCode, decode
 from commkit.impairments import apply_awgn
 from commkit.mapping import Constellation, compute_llr, map_bits
+from tests.common import scoring, theory
 from tests.common.coding import coded_awgn
 
 
@@ -79,11 +80,9 @@ class TestErrorVectorMagnitude:
         assert evm_pct < 1e-10
 
     def test_evm_with_known_error(self, xp: Any) -> None:
-        """EVM with known error magnitude."""
+        """A constant error 0.1 on unit-power points is exactly 10 % EVM."""
         tx = xp.array([1.0 + 0j, 0.0 + 1j, -1.0 + 0j, 0.0 - 1j])
-        rx = tx + 0.1
-        evm_pct = metrics.evm(rx, tx)
-        assert abs(evm_pct - 10.0) < 1.0
+        assert metrics.evm(tx + 0.1, tx) == pytest.approx(10.0, rel=1e-6)
 
     def test_evm_near_zero_ref(self, xp: Any) -> None:
         """Verify EVM behavior when reference signal is near zero."""
@@ -199,14 +198,13 @@ class TestSignalToNoiseRatio:
     """Tests for Signal-to-Noise Ratio (SNR) estimation."""
 
     def test_snr_matches_applied(self, xp: Any) -> None:
-        """SNR estimate should approximately match applied AWGN level."""
-        bits = np.random.default_rng(42).integers(0, 2, 20000, dtype="int8")
-        symbols = Constellation.qam(4).map(bits)
-        target_snr_db = 20.0
-        noisy = apply_awgn(symbols, esn0_db=target_snr_db, sps=1)
-
-        estimated_snr = metrics.snr(noisy, symbols)
-        assert abs(estimated_snr - target_snr_db) < 1.0
+        """The SNR of 20 dB AWGN on 20000 QPSK symbols is estimated within
+        0.15 dB: the noise-power estimate has a relative spread of
+        1/sqrt(N) = 0.7 %, 0.03 dB."""
+        bits = np.random.default_rng(42).integers(0, 2, 40000, dtype="int8")
+        symbols = xp.asarray(Constellation.qam(4).map(bits))
+        noisy = apply_awgn(symbols, esn0_db=20.0, sps=1, rng=3)
+        assert metrics.snr(noisy, symbols) == pytest.approx(20.0, abs=0.15)
 
     def test_snr_high_snr(self, xp: Any) -> None:
         """Very high SNR should return very high estimate."""
@@ -255,13 +253,45 @@ class TestSymbolErrorRate:
         tx = map_bits(xp.asarray(bits), constellation=Constellation.qam(16))
         assert metrics.ser(tx, tx, constellation=Constellation.qam(16)) == 0.0
 
-    def test_ser_high_snr_near_zero(self, xp: Any) -> None:
-        """SER should be negligible at very high SNR."""
-        rng = np.random.default_rng(1)
-        bits = rng.integers(0, 2, 2000).astype("int32")
-        tx = map_bits(xp.asarray(bits), constellation=Constellation.qam(4))
-        rx = apply_awgn(tx, esn0_db=40.0, sps=1)
-        assert metrics.ser(rx, tx, constellation=Constellation.qam(4)) < 1e-3
+    @pytest.mark.parametrize(
+        ("order", "esn0_db"), [(4, 6.0), (4, 9.0), (16, 12.0), (64, 18.0)]
+    )
+    def test_ser_and_ber_follow_awgn_theory(
+        self, backend_device: str, order: int, esn0_db: float
+    ) -> None:
+        """generate -> apply_awgn -> ser/ber of square QAM at Es/N0 match the
+        closed forms: SER 1 - (1 - 2(1 - 1/√M) Q(sqrt(3 Es/N0/(M-1))))², and
+        for Gray QPSK BER Q(sqrt(Es/N0)), within 4 binomial standard
+        deviations over 2e5 symbols.  This checks the symbol energy, the
+        noise scale, the demapper and the metric together."""
+        n = 200_000
+        sig = generate(
+            Constellation.qam(order), n, symbol_rate=1e9, rng=1, device=backend_device
+        )
+        rx = apply_awgn(sig, esn0_db=esn0_db, rng=2)
+        esn0 = 10 ** (esn0_db / 10)
+        p_s = theory.qam_ser(order, esn0)
+        assert metrics.ser(rx) == pytest.approx(
+            p_s, abs=scoring.binomial_margin(p_s, n)
+        )
+        if order == 4:
+            p_b = theory.qpsk_ber(esn0)
+            assert metrics.ber(rx) == pytest.approx(
+                p_b, abs=scoring.binomial_margin(p_b, 2 * n)
+            )
+
+    @pytest.mark.parametrize(("order", "esn0_db"), [(4, 3.0), (16, 10.0)])
+    def test_mi_follows_awgn_theory(self, xp: Any, order: int, esn0_db: float) -> None:
+        """MI at mid SNR equals the Gauss-Hermite integral of the AWGN mutual
+        information (QPSK 3 dB: 1.70 bit; 16-QAM 10 dB: 2.97 bit) within
+        0.01 bit (2e5 symbols)."""
+        c = Constellation.qam(order)
+        sig = apply_awgn(
+            generate(c, 200_000, symbol_rate=1e9, rng=4), esn0_db=esn0_db, rng=5
+        )
+        nv = 10 ** (-esn0_db / 10)
+        mi = metrics.mi(xp.asarray(sig.samples), noise_var=nv, constellation=c)
+        assert mi == pytest.approx(theory.awgn_mi(c.points, nv), abs=0.01)
 
     def test_ser_multichannel(self, xp: Any) -> None:
         """SER returns array (N_ch,) for 2D input."""

@@ -8,6 +8,7 @@ from commkit.core import Signal
 from commkit.filtering import RRC
 from commkit.impairments import apply_awgn
 from commkit.mapping import Constellation
+from tests.common import theory
 from tests.common.conversions import device_of, to_numpy
 from tests.common.signals import make_test_psk_signal, make_test_qam_signal
 
@@ -54,9 +55,12 @@ def _psk_signal(xp, order, n_symbols, fo_hz=0.0, snr_db=SNR_DB, fs=FS, seed=42):
 
 class TestFoeMthPower:
     @pytest.mark.parametrize("order", [4, 16, 64])
-    @pytest.mark.parametrize("fo_hz", [5_000.0, -8_000.0, 15_000.0])
+    @pytest.mark.parametrize("fo_hz", [5_000.0, -8_000.0, 15_000.0, 1_234.5])
     def test_accuracy_qam(self, xp, order, fo_hz):
-        """Estimated offset within 5% of true value for QAM at SNR=30 dB."""
+        """QAM at 30 dB, 4096 symbols: the 4th power's self-noise (absent for
+        QPSK) sets the error, which stays under 2 % of the FFT bin f_s/N
+        (4.9 Hz; measured up to 2.3 Hz for 64-QAM), so the sub-bin
+        interpolation does its job; QPSK is held to its bound below."""
         sig = _qam_signal(xp, order, 4096, fo_hz=fo_hz)
         est = frequency.estimate_frequency_offset(
             sig.samples,
@@ -64,12 +68,16 @@ class TestFoeMthPower:
             sampling_rate=FS,
             constellation=Constellation.qam(order),
         ).value
-        assert abs(est - fo_hz) / abs(fo_hz) < 0.05
+        bound = 1.5 * 4 * np.sqrt(theory.tone_frequency_crb(10**3, 4096)) * FS
+        assert abs(float(est) - fo_hz) < (bound if order == 4 else 0.02 * FS / 4096)
 
     @pytest.mark.parametrize("order", [4, 8])
-    @pytest.mark.parametrize("fo_hz", [3_000.0, -6_000.0])
+    @pytest.mark.parametrize("fo_hz", [3_000.0, -6_000.0, 777.7])
     def test_accuracy_psk(self, xp, order, fo_hz):
-        """Estimated offset within 5% of true value for PSK at SNR=30 dB."""
+        """M-PSK at 30 dB: the M-th power multiplies the phase noise by M
+        (SNR_eff ≈ SNR/M² at high SNR), so the error stays under 1.5x
+        M·sqrt(CRB) of a tone at Es/N0 over 4096 samples (QPSK: 0.28 Hz;
+        measured 0.11)."""
         sig = _psk_signal(xp, order, 4096, fo_hz=fo_hz)
         est = frequency.estimate_frequency_offset(
             sig.samples,
@@ -77,32 +85,63 @@ class TestFoeMthPower:
             sampling_rate=FS,
             constellation=Constellation.psk(order),
         ).value
-        assert abs(est - fo_hz) / abs(fo_hz) < 0.05
+        bound = 1.5 * order * np.sqrt(theory.tone_frequency_crb(10**3, 4096)) * FS
+        assert abs(float(est) - fo_hz) < bound
 
+    @pytest.mark.xfail(
+        strict=True,
+        reason="MthPower zeroes the DC bin of the M-th power spectrum "
+        "(frequency.py:497): offsets with |M Δf| < f_s/(2 nfft) are never "
+        "found.  QPSK, 4096 symbols at 1 MS/s: 0 Hz returns -81.8 kHz (a "
+        "noise peak; +77.4 kHz on clean symbols) and every offset from 0.01 "
+        "to 30 Hz returns 30.5 Hz.  At 32 GBd, nfft 2^16, the dead zone is "
+        "±61 kHz.",
+    )
     def test_zero_offset_within_lock_range(self, xp):
-        """With no frequency offset, estimate stays within the lock range [-fs/2M, fs/2M]."""
-        sig = _qam_signal(xp, 16, 4096, fo_hz=0.0)
+        """No offset: QPSK gives zero within its bound (not merely a value
+        inside the lock range ±f_s/8, which is every possible output)."""
+        sig = _psk_signal(xp, 4, 4096, fo_hz=0.0)
         est = frequency.estimate_frequency_offset(
             sig.samples,
             frequency.MthPower(),
             sampling_rate=FS,
-            constellation=Constellation.qam(16),
+            constellation=Constellation.psk(4),
         ).value
-        # Lock range for QAM with M=4: [-fs/8, fs/8] = ±125 kHz at 1 MHz
-        assert abs(est) < FS / (2 * 4)
+        bound = 1.5 * 4 * np.sqrt(theory.tone_frequency_crb(10**3, 4096)) * FS
+        assert abs(float(est)) < bound
 
-    def test_search_range_rejects_out_of_range(self, xp):
-        """Peak outside search_range returns an estimate outside the true value."""
-        # True offset is 20 kHz; search range covers only [-5 kHz, 5 kHz]
-        sig = _qam_signal(xp, 4, 8192, fo_hz=20_000.0)
+    @pytest.mark.xfail(strict=True, reason="The DC-bin dead zone above, at 10 Hz.")
+    def test_small_offset_inside_one_bin(self, xp):
+        """A 10 Hz offset (inside half a bin of the 4th power, 61 Hz here) is
+        estimated within the bound like any other."""
+        sig = _psk_signal(xp, 4, 4096, fo_hz=10.0)
         est = frequency.estimate_frequency_offset(
             sig.samples,
-            frequency.MthPower(search_range=(-5_000.0, 5_000.0)),
+            frequency.MthPower(),
             sampling_rate=FS,
-            constellation=Constellation.qam(4),
+            constellation=Constellation.psk(4),
         ).value
-        # The true offset must not be found - estimate stays within the window
-        assert abs(est) <= 5_000.0 + 200.0  # small tolerance for bin quantization
+        bound = 1.5 * 4 * np.sqrt(theory.tone_frequency_crb(10**3, 4096)) * FS
+        assert abs(float(est) - 10.0) < bound
+
+    def test_search_range_rejects_out_of_range(self, xp):
+        """A 20 kHz offset is found precisely by a window around it, and a
+        window that excludes it does not return it (the estimate stays in
+        the window)."""
+        sig = _qam_signal(xp, 4, 8192, fo_hz=20_000.0)
+        c = Constellation.qam(4)
+
+        def est(window):
+            return float(
+                frequency.estimate_frequency_offset(
+                    sig.samples, frequency.MthPower(search_range=window),
+                    sampling_rate=FS, constellation=c,
+                ).value
+            )  # fmt: skip
+
+        assert est((15_000.0, 25_000.0)) == pytest.approx(20_000.0, abs=1.0)
+        outside = est((-5_000.0, 5_000.0))
+        assert -5_000.0 - 200.0 <= outside <= 5_000.0 + 200.0
 
     def test_search_range_empty_raises(self, xp):
         """Empty search_range raises ValueError."""
@@ -725,22 +764,21 @@ class TestCorrectFrequencyOffsetBlockwise:
     FS = 1e6
 
     def test_corrects_constant_offset(self, xp):
-        """Known constant block estimates remove the offset; residual is small."""
+        """Known constant block estimates of a 10 kHz offset remove it: the
+        corrected record equals the offset-free one up to one constant
+        phase (the integration start), to float32 accuracy."""
         fs = self.FS
         fo_hz = 10_000.0
         N = 4096
+        clean = _qam_signal(xp, 4, N, fo_hz=0.0).samples
         sig = _qam_signal(xp, 4, N, fo_hz=fo_hz)
         est = _block_estimate(N, 512, 0.5, lambda b: np.full(b, fo_hz))
-        corrected = frequency.correct_frequency_offset(
-            sig.samples, est, sampling_rate=fs
+        corrected = to_numpy(
+            frequency.correct_frequency_offset(sig.samples, est, sampling_rate=fs)
         )
-        residual = frequency.estimate_frequency_offset(
-            corrected,
-            frequency.MthPower(),
-            sampling_rate=fs,
-            constellation=Constellation.qam(4),
-        ).value
-        assert abs(float(residual)) < 500.0
+        clean = to_numpy(clean)
+        rot = np.vdot(clean, corrected) / abs(np.vdot(clean, corrected))
+        np.testing.assert_allclose(corrected, clean * rot, atol=1e-4)
 
     @pytest.mark.parametrize("rows", [1, 2], ids=["shared", "per-channel"])
     def test_phase_is_the_integrated_pchip_of_the_blocks(self, xp, xpt, rows):
