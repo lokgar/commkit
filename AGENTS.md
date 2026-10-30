@@ -33,6 +33,7 @@ uv sync --all-extras                     # environment incl. GPU packages
 uv run nbstripout --install              # once per clone: strip notebook outputs on commit
 uv run pytest                            # CPU + GPU tests (default --device=all)
 uv run pytest --device=cpu               # what CI runs
+uv run pytest --run-slow                 # also the long statistical validation (marker slow)
 uv run pytest tests/equalization/ -k lms # subset
 uv run pytest --cov=commkit              # coverage
 NUMBA_DISABLE_JIT=1 uv run pytest tests/equalization tests/recovery \
@@ -111,7 +112,7 @@ uv run python benchmarks/record_baseline.py NAME   # record a new baseline
 
 **Release:**
 
-1. On `main`: the CPU and GPU suites pass with no failures or skips (`uv run pytest -rs`), `uv build` succeeds and `uv run --with twine twine check dist/*` passes.
+1. On `main`: the CPU and GPU suites pass with no failures or skips, slow validation included (`uv run pytest -rs --run-slow`; strict xfails are listed in §9), `uv build` succeeds and `uv run --with twine twine check dist/*` passes.
 2. `CHANGELOG.md`: a `## [X.Y.Z] - YYYY-MM-DD` section for the release, written for users. Changes that may need code updates come first, with how to migrate, then Added, Performance (measured, as a ratio of new to old time), Fixed and Development. Add its compare link at the bottom, and commit it.
 3. `uv run bump-my-version bump {patch|minor|major}`. This commits the new version and tags it `vX.Y.Z`.
 4. `git push origin main --tags`. The ruleset on `main` requires pull requests; repository admins bypass it for these two commits.
@@ -298,13 +299,24 @@ Docstrings describe the code as it is; a change in behavior updates them in the 
 
 ## 7. Tests
 
-- **Fixtures:** use `backend_device`, `xp` and `xpt` from `tests/conftest.py`. Assert with `xpt.assert_allclose(...)`, because `numpy.testing` raises on CuPy arrays. Cast expectations with `xp.asarray`, and reductions with `float(...)`.
+- **Fixtures:** use `backend_device`, `xp` and `xpt` from `tests/conftest.py`. The GPU legs skip when CuPy is not installed, except under an explicit `--device=gpu`, which fails; an installed CuPy that does not work fails under any setting. Assert with `xpt.assert_allclose(...)`, because `numpy.testing` raises on CuPy arrays. Cast expectations with `xp.asarray`, and reductions with `float(...)`.
 - **Layout mirrors the source:** `tests/<subpackage>/test_<module>.py`, and `tests/test_<module>.py` for flat modules. Test basenames must be globally unique (pytest prepend import mode), hence names like `channel/test_channel_linear.py`. Split a large test file by concern.
 - **Shared builders** live in `tests/common/` and use the public API.
 - **Contract registry** (`tests/test_api_contracts.py`): every public function has a row. Generic checks run per row: array in/out, Signal in/out, device preserved, input not mutated, keyword-only parameters, `TypeError` on unsupported arrays, fact-conflict errors, return rules.
   - Do not duplicate these checks in per-module tests.
 - **Oracles:** sequential kernels are tested against plain-Python reference implementations in `tests/common/reference_impl.py`. CUDA kernels are tested against their CPU reference. Kernel tests skip only on the CPU parametrization (`skip_unless_gpu`), never because a kernel is unavailable, so a kernel that fails to compile fails its tests.
 - **Mathematical meaning:** test documented definitions, such as a pulse width, a dispersion sign, or noise-variance scaling, with independently derived expectations, not only shapes and energies.
+- **A test of what an algorithm achieves** (an equalizer converges, carrier recovery tracks, a decoder corrects, an estimator is calibrated) must fail on a plausibly wrong implementation:
+  - **Score against the truth**: the transmitted reference, the true phase, delay or offset, never the receiver's own decisions or another estimate from the same family. Constellation symmetry hides a wrong quadrant, a slip or a duplicated stream from a distance to the nearest point. `tests/common/scoring.py` has the helpers (`ser`, `blind_ser`, `phase_rms`, `block_rotations`, `stream_correlation`).
+  - **Resolve only the legitimate ambiguities**, each once over the whole scored interval: one rotation per stream (by the constellation's symmetry, or any angle for a phase-blind equalizer), one bijective channel permutation for blind MIMO, a documented fixed delay. Never per segment.
+  - **A baseline must fail**: the same test runs without the block it credits (step size 0, `cpr=None`, the corrector off, no compensation) and asserts that this fails.
+  - **Tolerances are derived**, from AWGN theory, a Cramér–Rao bound, a Wiener or loop-noise prediction or a binomial interval, and the docstring states the derivation and the measured value. `tests/common/theory.py` holds the closed forms, written with NumPy and SciPy only.
+  - **Real channels**: convergence tests use `make_channel_signal` (RRC pulses, ISI, a fractional delay, polarization rotation, DGD, AWGN). The repeat-upsampled builders have no channel and serve plumbing tests only.
+  - **Check the test by breaking the code**: while writing it, monkeypatch a plausible wrong result (zeros, a factor of two, the feature disabled) and confirm the test fails.
+  - A strengthened test that exposes a library fault is marked `pytest.mark.xfail(strict=True, reason=...)` with the measured numbers and listed in §9; the fix lands in its own commit, which removes the mark.
+- **Monte Carlo tests** state what their sample bounds (0 failures in 12 frames bounds the FER below 0.22 at 95 %) and check the operating point (the pre-FEC BER against theory). The default run keeps a cheap smoke size; a `slow` parametrization (skipped unless `--run-slow`) repeats it with enough trials to mean something.
+- **End-to-end chains** in `tests/test_receiver_chain.py` run several impairments and their receiver at once, scored against the source bits or AWGN theory, each with one correction left out as a failing baseline.
+- **Warnings are failures**: a WARNING from the `commkit` logger during a test fails it, unless the test is marked `allow_warnings` (it provokes a suspect result on purpose) or takes `caplog` to assert the log. `tests/conftest.py` filters the few messages that report what the caller asked for (listed in §9); do not add to that list to quiet a test.
 - **API changes never change expected values.** A commit that changes a signature only changes how tests call the code. Numerical changes land in their own commit with independent validation.
 - **Examples** are Jupyter notebooks in `examples/`, committed without outputs: `.gitattributes` routes them through the `nbstripout` filter, which each clone enables once with `uv run nbstripout --install` (git does not ship filter configuration). `tests/test_examples.py` executes each one, so an API change updates the notebooks in the same commit.
   - They form a course: one topic per notebook, named `NN-lowercase-words.ipynb`, numbered in teaching order (signals and DSP, channel and metrics, receiver algorithms, fiber systems, characterization). Each opens with what it covers, links the notebooks it builds on and ends with a link to the next. `examples/README.md` indexes them; a new notebook takes its place in the order and updates the index and the neighbors' links.
@@ -369,6 +381,20 @@ Steps, once CuPy 14.3 (with cp315 wheels for `cupy-cuda13x`) and a fixed `jupyte
 
 1. **oFEC** (OpenROADM, ITU-T G.709.3) is not implemented: its block structure is specified in the OpenROADM MSA documents, which were not available in a form to implement from. It would build on `BCHCode` (extended BCH(256, 239)), `Chase` with soft output and the staircase decoder's iteration over a window.
 2. **NR rate matching for polar codes** (sub-block interleaving, the circular buffer, puncturing and shortening with their frozen-set rules, parity-check bits) and **LTE rate matching for turbo codes** are not included: `PolarCode` and `TurboCode` are the mother codes. `Punctured` and `Shortened` cover generic rate matching.
+
+### Library faults found by the tests (strict xfails)
+
+Each test passes once the library is fixed; the fix removes its `xfail` mark.
+
+- **PLL cycle-slip repair adds slips** (`tests/equalization/test_cpr.py`): 16-QAM, 2πΔνT = 2π·1e-4, Es/N0 16 dB, loop B·T = 2e-2, four records of 2·10⁴ symbols: 10 rotation changes against the reference with `CycleSlip`, 3 without.
+- **Tikhonov's noise model omits QAM self-noise** (`tests/recovery/test_tikhonov.py`): the observation variance `1/(M² SNR N)` (`recovery/tikhonov.py`) is 4e-6 rad² for 16-QAM at 30 dB with N = 16, where the Viterbi-Viterbi block error is about 1e-2 rad², so the smoother does not smooth (0.1012 rad RMS against 0.1013 unsmoothed).
+- **`MthPower` has a dead zone around 0 Hz** (`tests/test_frequency.py`, two tests): it zeroes the DC bin of the M-th power spectrum, so an offset with `|M Δf| < f_s / (2 nfft)` is never found (QPSK, 4096 symbols at 1 MS/s: 0 Hz is estimated as -81.8 kHz).
+- **`fir_filter` misplaces even-length taps** (`tests/test_filtering.py`): it centres them on tap `(L - 1) // 2` (SciPy `mode="same"`), while its docstring and `ols_fir_filter` use `L // 2`; for L = 4 the two filters differ by one sample.
+
+### Test suite: open items
+
+- **Standard tables against the standards.** The NR polar reliability sequence (TS 38.212 Table 5.3.1.2-1), the LTE QPP interleaver parameters (TS 36.212 Table 5.1.3-3) and the DVB-S2 and PON parity-check address tables are tested against commkit's own tables. They should be compared, in full, with fixtures under `tests/data/standards/` transcribed from the specification documents, each with a provenance header (document, version, table). ETSI's download pages refuse scripted access; the documents have to be supplied.
+- **Log levels.** Five commkit WARNING messages report what the caller asked for, not a suspect result, and `tests/conftest.py` filters them: the block equalizers' advice to use the GPU, RLS's tail trim, `correct_timing(mode="slice")` shortening the record, the fractional-spacing tap advice at `sps=1`, and the plotting theme's font fallback. Moving them to INFO (or dropping the `sps=1` case) removes them from that list.
 
 ### Nonlinear fiber channel: future features
 

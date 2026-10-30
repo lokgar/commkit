@@ -4,6 +4,12 @@ Notable changes to CommKit, newest first. Performance figures are from the refer
 
 ## [Unreleased]
 
+### Development
+
+- The test suite checks what the code achieves, not how it is written. Equalizers converge on RRC records through ISI, fractional delays, polarization rotation and DGD, scored against the transmitted symbols with only the legitimate rotation and permutation removed, and each "improves" test also runs a baseline that must fail; carrier recovery is scored against the true phase; estimators and metrics against Cramér–Rao bounds and AWGN theory; Chase and shortened-code decoding against brute force. New end-to-end receiver chains (coded single carrier, dual polarization, 80 km of fiber) each show that leaving out one correction breaks them. Monte Carlo tests state what their frame counts bound and gain `--run-slow` validation runs. A WARNING log from commkit fails the test. Tests that only repeated the contract registry's shape and device checks are removed.
+- Four library faults found this way are recorded as strict xfails and listed in AGENTS.md: the PLL's cycle-slip repair adding slips, Tikhonov's noise model on QAM, a dead zone of `MthPower` around 0 Hz and `fir_filter`'s alignment of even-length taps.
+- `benchutils.assert_converged` checks the symbol error rate of the worst channel (it compared bit errors before), and the 2048-tap block RDE benchmark uses a workload that converges.
+
 ## [3.2.0] - 2026-10-30
 
 EXIT analysis and coding diagnostics. EXIT charts for any soft-in soft-out component, measured through the existing decoders or the demapper, or in closed form for LDPC codes with their threshold; plots of LLR distributions, parity-check matrices and EXIT charts; and INFO logging in the modules where it was missing. Nothing changes for existing code.
