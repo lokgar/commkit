@@ -8,7 +8,6 @@ from tests.common.kernel_utils import (
     slip_workload,
 )
 from tests.common.metrics import (
-    calc_dispersion,
     calc_freq_response,
     calc_mse_db,
     calc_rms_phase_error,
@@ -34,7 +33,6 @@ from tests.common.signals import (
 
 __all__ = [
     "apply_phase_ramp",
-    "calc_dispersion",
     "calc_freq_response",
     "calc_mse_db",
     "calc_rms_phase_error",

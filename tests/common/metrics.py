@@ -5,7 +5,6 @@ from typing import Any
 import numpy as np
 
 from commkit import backend
-from commkit.mapping import Constellation
 from tests.common.conversions import to_numpy
 
 
@@ -80,32 +79,6 @@ def calc_rms_phase_error(phase_est: Any, phase_true: Any, xp: Any = None) -> flo
     err = phase_est - phase_true
     err = err - float(xp.mean(err))
     return float(xp.sqrt(xp.mean(err**2)))
-
-
-def calc_dispersion(y: Any, order: int = 16, mod: str = "qam") -> float:
-    """Calculate phase-blind radial dispersion to nearest constellation ring power.
-
-    A convergence metric for blind equalizers (CMA/RDE) that carry residual phase ambiguity.
-
-    Parameters
-    ----------
-    y : ArrayLike
-        Equalizer output symbols.
-    order : int
-        Constellation modulation order (e.g. 4 for QPSK, 16 for 16-QAM).
-    mod : str
-        Modulation scheme name ('qam', 'psk', 'pam').
-
-    Returns
-    -------
-    float
-        Radial dispersion metric value.
-    """
-    const = getattr(Constellation, mod)(order).points
-    const = const / np.sqrt(np.mean(np.abs(const) ** 2))
-    r2 = np.abs(const) ** 2
-    a2 = np.abs(to_numpy(y)) ** 2
-    return float(np.mean(np.min((a2[:, None] - r2[None, :]) ** 2, axis=1)))
 
 
 def calc_freq_response(taps: Any, nfft: int = 1024) -> tuple[np.ndarray, np.ndarray]:

@@ -1,104 +1,94 @@
-"""Butterfly (2x2 / 3x3) MIMO sequential equalization."""
+"""Butterfly (2x2) MIMO equalization: stream separation.
 
-from commkit import equalization, generate
-from commkit.filtering import RRC
+Every test sends independent streams and checks that each output carries
+its own one: SER against the transmitted streams after at most one
+bijective channel permutation and one constant rotation per stream (blind
+receivers only), and a near-identity stream-correlation matrix, so that two
+outputs locked onto the same source fail.
+"""
+
+import numpy as np
+
+from commkit import equalization
 from commkit.mapping import Constellation
+from tests.common import scoring
+from tests.common.conversions import to_numpy
+from tests.common.signals import make_channel_signal
+
+ISI_TAPS = [0.25, 1.0, 0.3j, -0.1]
+THETA = np.deg2rad(30.0)
+
+
+def _dual_pol(constellation, num_symbols, *, esn0_db, seed=3, xp=None, **channel):
+    """Two independent RRC streams at 2 sps through a 30-degree rotation and
+    the given channel (ISI taps or DGD), with AWGN."""
+    return make_channel_signal(
+        constellation,
+        num_symbols,
+        theta=THETA,
+        esn0_db=esn0_db,
+        num_channels=2,
+        seed=seed,
+        xp=xp,
+        **channel,
+    )
+
+
+def _assert_separated(y, ref, constellation, skip, rotation="any"):
+    y = scoring.resolve_blind(y, ref, constellation, skip=skip, rotation=rotation)
+    ref = to_numpy(ref)[:, : y.shape[-1]]
+    np.testing.assert_array_equal(
+        scoring.ser(y[:, skip:], ref[:, skip:], constellation), 0.0
+    )
+    corr = scoring.stream_correlation(y[:, skip:], ref[:, skip:])
+    assert np.all(np.diag(corr) > 0.95) and corr[0, 1] < 0.05 and corr[1, 0] < 0.05, (
+        corr
+    )
 
 
 class TestButterflyMIMO:
-    """Tests for butterfly MIMO equalization structure."""
+    """Trained and blind butterflies separate independent streams."""
 
     def test_lms_2x2_cross_channel(self, xp):
-        """LMS butterfly should recover 2 streams through a 2x2 mixing channel."""
-        n_symbols = 3000
+        """Trained LMS on ISI plus rotation: after 1000 training symbols each
+        output carries its own stream (held-out half); frozen taps leave the
+        streams mixed."""
+        c = Constellation.qam(16)
+        rx = _dual_pol(c, 8000, esn0_db=22.0, isi_taps=ISI_TAPS, xp=xp)
+        ref = to_numpy(rx.reference.symbols)
+        res = equalization.lms(rx, ref[:, :1000], num_taps=21, step_size=1e-3)
+        _assert_separated(res.y_hat, ref, c, 4000, rotation="symmetry")
+        frozen = equalization.lms(rx, ref[:, :1000], num_taps=21, step_size=0.0)
+        y = to_numpy(frozen.y_hat)
+        assert np.all(scoring.ser(y[:, 4000:], ref[:, 4000:], c) > 0.3)
 
-        # 2x2 channel mixing matrix
-        H = xp.array([[1.0, 0.3], [0.2, 1.0]], dtype=xp.complex64)
-
-        sig = generate(
-            Constellation.psk(4),
-            n_symbols,
-            symbol_rate=1e6,
-            sps=2,
-            pulse=RRC(0.35),
-            num_channels=2,
-            rng=10,
+    def test_lms_undoes_differential_group_delay(self, xp):
+        """Half a symbol of DGD at π/8 plus a rotation is frequency selective;
+        trained LMS removes it (SER 0 on both streams; frozen taps 0.73)."""
+        c = Constellation.qam(16)
+        rx = _dual_pol(
+            c, 8000, esn0_db=22.0, dgd=0.5e-9, dgd_theta=np.pi / 8, seed=4, xp=xp
         )
-        tx_mimo = xp.asarray(sig.reference.symbols)
-        rx_up = xp.asarray(sig.samples)
-
-        # Mix the streams (multiplying H @ rx_up where rx_up is (2, N_samples))
-        rx_mimo = H @ rx_up
-        rx_mimo = xp.ascontiguousarray(rx_mimo)
-
-        result = equalization.lms(
-            rx_mimo,
-            tx_mimo,
-            num_taps=21,
-            step_size=0.01,
-            constellation=Constellation.psk(4),
-            sps=2,
+        ref = to_numpy(rx.reference.symbols)
+        res = equalization.lms(rx, ref[:, :1000], num_taps=21, step_size=1e-3)
+        _assert_separated(res.y_hat, ref, c, 4000, rotation="symmetry")
+        frozen = to_numpy(
+            equalization.lms(rx, ref[:, :1000], num_taps=21, step_size=0.0).y_hat
         )
-
-        y = result.y_hat
-        w = result.weights
-
-        # Output should be (2, N_sym)
-        assert y.shape[0] == 2
-        assert w.shape == (2, 2, 21)
-
-        # Check convergence on both streams
-        e = xp.abs(result.error) ** 2
-        mse_ch0 = xp.mean(e[0, -500:])
-        mse_ch1 = xp.mean(e[1, -500:])
-
-        mse_ch0 = float(mse_ch0)
-        mse_ch1 = float(mse_ch1)
-
-        assert mse_ch0 < 0.1, f"MIMO ch0 MSE = {mse_ch0:.4f}"
-        assert mse_ch1 < 0.1, f"MIMO ch1 MSE = {mse_ch1:.4f}"
+        assert np.all(scoring.ser(frozen[:, 4000:], ref[:, 4000:], c) > 0.3)
 
     def test_cma_2x2_polarization_demux(self, xp):
-        """CMA butterfly should demux 2 mixed polarizations."""
-        n_symbols = 3000
-
-        sig = generate(
-            Constellation.psk(4),
-            n_symbols,
-            symbol_rate=1e6,
-            sps=2,
-            pulse=RRC(0.35),
-            num_channels=2,
-            rng=30,
-        )
-        rx_up = xp.asarray(sig.samples)
-
-        # Polarization rotation mixing
-        theta = xp.pi / 6  # 30 degree rotation
-        c, s = xp.cos(theta), xp.sin(theta)
-        H = xp.array([[c, s], [-s, c]], dtype=xp.complex64)
-
-        rx_mimo = H @ rx_up
-        rx_mimo = xp.ascontiguousarray(rx_mimo)
-
-        result = equalization.cma(
-            rx_mimo,
-            num_taps=11,
-            step_size=0.003,
-            constellation=Constellation.psk(4),
-            sps=2,
-        )
-
-        y = result.y_hat
-        assert y.shape[0] == 2
-
-        # After CMA, output should have constant modulus on both streams
-        for ch in range(2):
-            modulus = xp.abs(y[ch, -500:])
-            std_dev = xp.std(modulus)
-            std_dev = float(std_dev)
-
-            assert std_dev < 0.35, f"CMA MIMO ch{ch} modulus std = {std_dev:.4f}"
+        """Blind CMA demultiplexes two QPSK streams through ISI and a
+        rotation: one permutation and one rotation per stream leave no
+        errors and a cross-correlation under 0.05 (frozen taps: 0.48)."""
+        c = Constellation.psk(4)
+        rx = _dual_pol(c, 20000, esn0_db=18.0, isi_taps=ISI_TAPS, xp=xp)
+        ref = to_numpy(rx.reference.symbols)
+        res = equalization.cma(rx, num_taps=21, step_size=1e-3, constellation=c)
+        _assert_separated(res.y_hat, ref, c, 10000)
+        frozen = equalization.cma(rx, num_taps=21, step_size=0.0, constellation=c)
+        y = scoring.resolve_blind(frozen.y_hat, ref, c, skip=10000, rotation="any")
+        assert scoring.stream_correlation(y[:, 10000:], ref[:, 10000:])[0, 1] > 0.3
 
     def test_zf_mimo_channel_matrix(self, xp, xpt):
         """ZF with full (C, C, L) channel matrix should invert MIMO channel."""
@@ -148,71 +138,27 @@ class TestButterflyMIMO:
 
 
 class TestButterflyMIMOExtended:
-    """Additional MIMO butterfly tests for RDE and LMS."""
+    """The two-stage blind receiver on 16-QAM."""
 
     def test_rde_2x2_butterfly_numba(self, xp):
-        """RDE Numba butterfly should handle 2x2 cross-polarization without error."""
-
-        n_symbols = 2000
-        sig = generate(
-            Constellation.qam(16),
-            n_symbols,
-            symbol_rate=1e6,
-            sps=2,
-            pulse=RRC(0.35),
-            rng=11,
+        """CMA pre-convergence, then RDE from its taps (the standard blind
+        receiver for 16-QAM): two streams through ISI and a rotation are
+        separated without errors, with a lower EVM than CMA alone."""
+        c = Constellation.qam(16)
+        rx = _dual_pol(c, 20000, esn0_db=22.0, isi_taps=ISI_TAPS, xp=xp)
+        ref = to_numpy(rx.reference.symbols)
+        cma = equalization.cma(rx, num_taps=21, step_size=5e-4, constellation=c)
+        rde = equalization.rde(
+            rx, num_taps=21, step_size=5e-4, constellation=c, initial_taps=cma.weights
         )
-        rx = xp.asarray(sig.samples)
-
-        # Simulate polarization mixing: channel mixes two copies of same signal
-        mix = xp.array([[0.9, 0.1], [0.1, 0.9]], dtype=xp.complex64)
-        rx_mimo = xp.stack(
-            [
-                mix[0, 0] * rx + mix[0, 1] * xp.roll(rx, 3),
-                mix[1, 0] * rx + mix[1, 1] * xp.roll(rx, 5),
-            ],
-            axis=0,
-        )
-
-        result = equalization.rde(
-            rx_mimo,
-            num_taps=11,
-            step_size=5e-4,
-            constellation=Constellation.qam(16),
-            sps=2,
-        )
-
-        assert result.y_hat.shape == (2, n_symbols)
-        assert result.weights.shape == (2, 2, 11)
-        assert result.error.shape == (2, n_symbols)
-
-    def test_lms_2x2_mixed_input(self, xp):
-        """LMS butterfly should cancel cross-channel interference."""
-
-        n_symbols = 2000
-        sig = generate(
-            Constellation.psk(4),
-            n_symbols,
-            symbol_rate=1e6,
-            sps=2,
-            pulse=RRC(0.35),
-            rng=7,
-        )
-        rx = xp.asarray(sig.samples)
-        train = xp.asarray(sig.reference.symbols)
-
-        # 2x2 mixed input
-        rx_mimo = xp.stack([rx, xp.roll(rx, 2)], axis=0)
-        train_mimo = xp.stack([train, train], axis=0)
-
-        result = equalization.lms(
-            rx_mimo,
-            train_mimo,
-            num_taps=7,
-            step_size=0.05,
-            constellation=Constellation.psk(4),
-            sps=2,
-        )
-
-        assert result.y_hat.shape == (2, n_symbols)
-        assert result.weights.shape == (2, 2, 7)
+        _assert_separated(rde.y_hat, ref, c, 10000)
+        evm = [
+            scoring.evm_rms(
+                scoring.resolve_blind(r.y_hat, ref, c, skip=10000, rotation="any")[
+                    :, 10000:
+                ],
+                ref[:, 10000:],
+            )
+            for r in (cma, rde)
+        ]
+        assert np.all(evm[1] < evm[0]), evm

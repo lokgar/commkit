@@ -123,3 +123,13 @@ def zero_failure_upper_bound(num_trials: int, confidence: float = 0.95) -> float
 def binomial_margin(p: float, n: int, z: float = 4.0) -> float:
     """``z`` standard deviations of an error-rate estimate from ``n`` trials."""
     return z * float(np.sqrt(p * (1.0 - p) / n))
+
+
+def stream_correlation(y: Any, ref: Any) -> np.ndarray:
+    """Normalized correlation magnitudes ``|Σ y_i conj(s_j)| / (‖y_i‖ ‖s_j‖)``,
+    ``(C, C)``: a separating MIMO receiver has a near-identity matrix (after
+    :func:`resolve_blind`); two outputs on the same source share a column."""
+    y, ref = to_numpy(y), to_numpy(ref)[..., : to_numpy(y).shape[-1]]
+    num = np.abs(y @ np.conj(ref).T)
+    den = np.linalg.norm(y, axis=-1)[:, None] * np.linalg.norm(ref, axis=-1)[None, :]
+    return num / den

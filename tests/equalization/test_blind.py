@@ -20,7 +20,6 @@ from commkit.equalization._common import _rde_ring_radii, _rde_rings
 from commkit.mapping import Constellation
 from tests.common import scoring, skip_unless_gpu
 from tests.common.conversions import to_numpy
-from tests.common.metrics import calc_dispersion
 from tests.common.signals import make_channel_signal, make_isi_distorted_signal
 
 _isi_signal = make_isi_distorted_signal
@@ -312,18 +311,26 @@ class TestRDERings:
 
 
 class TestBlockBlindMIMO:
-    def test_butterfly_runs(self, xp):
-        channel = np.array([0.06, 1.0, -0.25], np.complex64)
-        _, rx = _isi_signal(xp, "psk", 4, 20000, 3, channel)
-        rx2 = xp.stack([rx, xp.roll(rx, 1)])
-        r = block_cma(
-            rx2,
-            constellation=Constellation.psk(4),
-            num_taps=15,
-            step_size=1e-3,
-            block_size=128,
-            sps=2,
+    def test_butterfly_separates_independent_streams(self, xp):
+        """Block CMA demultiplexes two independent QPSK streams through half a
+        symbol of DGD and a 30-degree rotation: one permutation and one
+        rotation per stream leave no errors, and each output correlates with
+        its own stream only."""
+        c = Constellation.psk(4)
+        rx = make_channel_signal(
+            c,
+            20000,
+            dgd=0.5e-9,
+            dgd_theta=np.pi / 8,
+            theta=np.deg2rad(30.0),
+            esn0_db=18.0,
+            num_channels=2,
+            seed=4,
+            xp=xp,
         )
-        assert r.y_hat.shape == (2, 20000)
-        for ch in range(2):
-            assert calc_dispersion(r.y_hat[ch, 10000:], 4, "psk") < 0.05
+        ref = to_numpy(rx.reference.symbols)
+        r = block_cma(rx, constellation=c, num_taps=21, step_size=1e-3, block_size=128)
+        y = scoring.resolve_blind(r.y_hat, ref, c, skip=10000, rotation="any")
+        np.testing.assert_array_equal(scoring.ser(y[:, 10000:], ref[:, 10000:], c), 0.0)
+        corr = scoring.stream_correlation(y[:, 10000:], ref[:, 10000:])
+        assert corr[0, 1] < 0.05 and corr[1, 0] < 0.05, corr
