@@ -6,7 +6,7 @@ steady-state form.
 """
 
 from dataclasses import dataclass
-from typing import Literal
+from typing import Any, Literal
 
 import numpy as np
 
@@ -175,8 +175,11 @@ class Tikhonov:
 
     Viterbi-Viterbi block phases are smoothed by a Kalman smoother matched
     to the laser phase noise, with process variance
-    ``σ_p² = 2π·Δν·T_s·N_b`` and observation variance
-    ``σ_v² ≈ 1/(M²·SNR·N_b)``, then interpolated to per-symbol resolution.
+    ``σ_p² = 2π·Δν·T_s·N_b`` and the observation variance ``σ_v²`` of a
+    Viterbi-Viterbi block phase, computed from the constellation and the SNR:
+    the noise through the M-th power (``1/(2·SNR·N_b)`` for PSK at high SNR)
+    plus the data self-noise of QAM.  The smoothed block phases are then
+    interpolated to per-symbol resolution.
 
     Parameters
     ----------
@@ -225,6 +228,37 @@ class Tikhonov:
             raise ValueError(f"block_size must be >= 1, got {self.block_size}.")
 
 
+def _vv_observation_variance(
+    constellation: Any, M: int, project: bool, snr_lin: float, block_size: int
+) -> float:
+    """Variance of one Viterbi-Viterbi block phase, in rad².
+
+    The block phase is ``arg(Σ z)/M`` with ``z = r^M`` (``(r/|r|)^M`` when
+    ``project``) and ``r = s + n``, ``n ~ CN(0, 1/SNR)``.  To first order its
+    error is ``Im(Σ u)/(M N |μ|)`` with ``μ = E[z]`` and ``u = z e^{-j∠μ}``,
+    so ``σ_v² = (E|z|² - Re E[u²]) / (2 N M² |μ|²)``: the AWGN through the
+    power (``1/(2 SNR N)`` for PSK at high SNR) plus the data self-noise of
+    non-constant-modulus constellations.  The expectations run over the
+    points (pmf-weighted) and the noise, by 2-D Gauss-Hermite quadrature.
+    """
+    pts = np.asarray(constellation.points, dtype=np.complex128)
+    pts = pts / np.sqrt(np.mean(np.abs(pts) ** 2))
+    pmf = constellation.pmf
+    w_pts = np.full(pts.size, 1.0 / pts.size) if pmf is None else np.asarray(pmf)
+    t, w = np.polynomial.hermite.hermgauss(24)
+    n = np.sqrt(1.0 / snr_lin) * (t[:, None] + 1j * t[None, :]).ravel()
+    w_n = (w[:, None] * w[None, :]).ravel() / np.pi
+    r = pts[:, None] + n[None, :]  # (points, nodes)
+    if project:
+        r = r / np.maximum(np.abs(r), 1e-300)
+    z = r**M
+    weight = w_pts[:, None] * w_n[None, :]
+    mu = complex(np.sum(weight * z))
+    second = complex(np.sum(weight * z * z)) * np.exp(-2j * np.angle(mu))
+    power = float(np.sum(weight * np.abs(z) ** 2))
+    return (power - second.real) / (2.0 * block_size * M**2 * abs(mu) ** 2)
+
+
 def _tikhonov(symbols: ArrayType, method: Tikhonov, ctx: _Context) -> _Phase:
     """Tikhonov-smoothed Viterbi-Viterbi phase of ``(C, N)`` symbols."""
     constellation = ctx.need_constellation(method)
@@ -240,7 +274,7 @@ def _tikhonov(symbols: ArrayType, method: Tikhonov, ctx: _Context) -> _Phase:
     snr_lin = 10.0 ** (method.snr_db / 10.0)
     linewidth_symbol_periods = method.linewidth / ctx.need_sampling_rate(method)
     sigma_p2 = float(2.0 * np.pi * linewidth_symbol_periods * block_size)
-    sigma_v2 = float(1.0 / (M**2 * snr_lin * block_size))
+    sigma_v2 = _vv_observation_variance(constellation, M, project, snr_lin, block_size)
 
     joint = method.joint_channels and C > 1
     phi_u = _vv_block_phase(

@@ -6,6 +6,7 @@ Notable changes to CommKit, newest first. Performance figures are from the refer
 
 ### Changes that alter results
 
+- **`Tikhonov` uses the actual variance of a Viterbi-Viterbi block phase** as its observation variance, computed from the constellation and `snr_db`: the noise through the M-th power plus the data self-noise of QAM. It used `1/(M²·SNR·N)`, too small by `M²/2` for PSK and by three to four orders of magnitude for QAM, so the smoother followed the raw block phases: on 16-QAM it now lowers the Viterbi-Viterbi error (static phase, 30 dB, 16-symbol blocks: 0.101 rad before and after smoothing, now 0.048 rad).
 - **`ols_fir_filter` centres even-length taps on tap `(L - 1) // 2`**, as `fir_filter` (SciPy's `mode="same"`) does and as its docstring promised; it used `L // 2`, one sample later. Odd-length taps and `causal=True` are unchanged. The docstrings of both now state the centre tap; they said `L // 2`.
 
 ### Fixed

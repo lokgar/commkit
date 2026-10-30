@@ -97,18 +97,12 @@ class TestCprTikhonov:
         bound = np.sqrt(1.0 / (2 * block_size * 10 ** (SNR_DB / 10)))
         assert scoring.phase_rms(est, np.full(2048, 0.3), symmetry=4) < 2 * bound
 
-    @pytest.mark.xfail(
-        strict=True,
-        reason="Tikhonov's observation variance 1/(M² SNR N) (tikhonov.py:243) "
-        "omits the 4th-power self-noise of QAM: 16-QAM at 30 dB, N = 16, model "
-        "4e-6 rad², actual Viterbi-Viterbi block error ~1e-2 rad².  The "
-        "smoother trusts every block: per-symbol RMS 0.1012 rad vs 0.1013 for "
-        "Viterbi-Viterbi; the Wiener smoother with the actual variance gives "
-        "~0.067.",
-    )
-    def test_smooths_qam_self_noise(self, xp):
+    @pytest.mark.parametrize("smoother", ["rts", "steady_state"])
+    def test_smooths_qam_self_noise(self, xp, smoother):
         """16-QAM, static phase, 16-symbol blocks: smoothing across blocks
-        lowers the Viterbi-Viterbi error by at least 20 %."""
+        lowers the Viterbi-Viterbi error by at least 20 % (measured 0.101 ->
+        0.048 rad; with an observation variance that left out the 4th-power
+        self-noise, 4e-6 rad² against about 1e-2, it stayed at 0.101)."""
         sig = make_test_qam_signal(
             order=16, num_symbols=2048, sps=1, symbol_rate=FS, xp=xp
         )
@@ -120,13 +114,50 @@ class TestCprTikhonov:
         ).value
         tik = recovery.estimate_carrier_phase(
             x,
-            recovery.Tikhonov(linewidth=1e-4 * FS, snr_db=SNR_DB, block_size=16),
+            recovery.Tikhonov(
+                linewidth=1e-4 * FS, snr_db=SNR_DB, block_size=16, smoother=smoother
+            ),
             constellation=c,
             sampling_rate=FS,
         ).value
         assert scoring.phase_rms(tik, truth, symmetry=4) < 0.8 * scoring.phase_rms(
             vv, truth, symmetry=4
         )
+
+    @pytest.mark.parametrize(
+        ("order", "snr_db", "tolerance"),
+        [(4, 20.0, 0.1), (4, 30.0, 0.1), (16, 20.0, 0.35), (16, 30.0, 0.35)],
+    )  # fmt: skip
+    def test_observation_variance_is_the_block_phase_variance(
+        self, order, snr_db, tolerance
+    ):
+        """The smoother's observation variance is the measured variance of a
+        Viterbi-Viterbi block phase (static phase, 16-symbol blocks, 4000
+        blocks): within 10 % for QPSK, whose high-SNR value is
+        1/(2 SNR N), and within 35 % for 16-QAM, dominated by the data
+        self-noise that the first-order model slightly underestimates."""
+        from commkit.recovery._common import _mth_power_geometry
+        from commkit.recovery.tikhonov import _vv_observation_variance
+
+        c = Constellation.psk(4) if order == 4 else Constellation.qam(16)
+        n, blocks = 16, 4000
+        rng = np.random.default_rng(order + int(snr_db))
+        s = c.points[rng.integers(0, c.order, n * blocks)]
+        s = s / np.sqrt(np.mean(np.abs(c.points) ** 2))
+        snr = 10 ** (snr_db / 10)
+        noise = rng.standard_normal(s.size) + 1j * rng.standard_normal(s.size)
+        r = (s + noise * np.sqrt(0.5 / snr)).astype(np.complex64)
+        phi = recovery.estimate_carrier_phase(
+            r, recovery.ViterbiViterbi(block_size=n), constellation=c
+        ).value
+        block = np.asarray(phi).reshape(blocks, n)[:, n // 2]
+        q = np.pi / 2
+        err = (block - np.round(np.median(block) / q) * q + q / 2) % q - q / 2
+        M, project, _ = _mth_power_geometry(c)
+        model = _vv_observation_variance(c, M, project, snr, n)
+        assert abs(model / np.var(err) - 1) < tolerance, (model, np.var(err))
+        if order == 4:
+            assert model == pytest.approx(1 / (2 * snr * n), rel=0.1)
 
     def test_too_short_raises(self, xp):
         """Tikhonov CPR: signal shorter than block_size raises ValueError."""
