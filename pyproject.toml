@@ -83,6 +83,7 @@ filterwarnings = [
 markers = [
     "gpu_only: mark test as requiring a GPU backend",
     "cpu_only: mark test as CPU-only",
+    "slow: long statistical validation, run with --run-slow",
 ]
 
 [tool.bumpversion]

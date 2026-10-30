@@ -32,6 +32,9 @@ def pytest_configure(config):
     config.addinivalue_line("filterwarnings", "error::commkit.backend.PrecisionWarning")
     config.addinivalue_line("markers", "gpu_only: mark test as requiring a GPU backend")
     config.addinivalue_line("markers", "cpu_only: mark test as CPU-only")
+    config.addinivalue_line(
+        "markers", "slow: long statistical validation, run with --run-slow"
+    )
 
 
 def pytest_addoption(parser):
@@ -41,6 +44,12 @@ def pytest_addoption(parser):
         action="store",
         default="cpu",
         help="Device to run tests on: cpu, gpu, or all",
+    )
+    parser.addoption(
+        "--run-slow",
+        action="store_true",
+        default=False,
+        help="Also run the long statistical validation tests (marker: slow)",
     )
 
 
@@ -72,6 +81,11 @@ def pytest_collection_modifyitems(config, items):
         items[:] = [item for item in items if not item.get_closest_marker("gpu_only")]
     elif device_opt == "gpu":
         items[:] = [item for item in items if not item.get_closest_marker("cpu_only")]
+    if not config.getoption("--run-slow"):
+        skip_slow = pytest.mark.skip(reason="slow validation; run with --run-slow")
+        for item in items:
+            if item.get_closest_marker("slow"):
+                item.add_marker(skip_slow)
 
 
 @pytest.fixture(autouse=True)
@@ -88,7 +102,8 @@ def backend_device(request):
     """
     Fixture that returns the current backend device name.
 
-    Skips GPU tests if CuPy is not available or functional.  The device only
+    Skips GPU tests if CuPy is not installed (fails under an explicit
+    ``--device=gpu``) and fails if it is installed but not functional.  The device only
     selects where tests build their inputs (via ``xp``); the library never
     moves data on its own.
 
@@ -107,17 +122,18 @@ def backend_device(request):
     if device == "gpu":
         if device_opt == "cpu":
             pytest.skip("Test requires GPU, but --device=cpu was selected")
+        # An explicit --device=gpu must test the GPU: a missing or broken
+        # CuPy fails instead of passing as skips.  --device=all skips only
+        # when CuPy is not installed; installed but broken still fails.
         if not _CUPY_AVAILABLE:
+            if device_opt == "gpu":
+                pytest.fail("--device=gpu was requested but CuPy is not installed")
             pytest.skip("CuPy not installed, skipping GPU tests")
         try:
-            # Aggressive check for a functional GPU context
             cp.zeros(1)
-            try:
-                cp.random.randn(1)
-            except ImportError:
-                raise
+            cp.random.randn(1)
         except Exception as e:
-            pytest.skip(f"CuPy installed but not functional (missing libs?): {e}")
+            pytest.fail(f"CuPy is installed but not functional: {e}")
 
     yield device
 

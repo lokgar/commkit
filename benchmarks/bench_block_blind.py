@@ -31,16 +31,18 @@ ROUNDS = dict(rounds=3, warmup_rounds=1, iterations=1)
 N_SYM = 100_000
 
 # Converging step sizes per (equalizer, block_size).  RDE on 16-QAM from a
-# cold start (no CMA pre-convergence) converges slowly and is still settling
-# after the skipped symbols at 2048, hence its looser SER bound; its cost does
-# not depend on the data.
+# cold start (no CMA pre-convergence) converges slowly at 2048: at 4e-4 it is
+# error-free from about symbol 70 000, so its SER is scored after that (7e-4
+# never settled, still 2-5 % SER at the end); its cost does not depend on
+# the data.
 STEP_SIZE = {
     ("cma", 256): 2e-4,
     ("cma", 2048): 3e-4,
     ("rde", 256): 3e-3,
-    ("rde", 2048): 7e-4,
+    ("rde", 2048): 4e-4,
 }
-MAX_SER = {"cma": 1e-2, "rde": 5e-2}
+SKIP = {("rde", 2048): 70_000}
+MAX_SER = {"cma": 1e-2, "rde": 1e-2}
 
 EQUALIZERS = [
     ("cma", block_cma),
@@ -66,7 +68,12 @@ def _bench_block_blind(benchmark, xp, sync, label, eq_fn, block_size):
 
     r = benchmark.pedantic(run, **ROUNDS)
     assert_converged(
-        r, syms, Constellation.qam(16), skip=20_000, max_ser=MAX_SER[label], blind=True
+        r,
+        syms,
+        Constellation.qam(16),
+        skip=SKIP.get((label, block_size), 20_000),
+        max_ser=MAX_SER[label],
+        blind=True,
     )
 
 

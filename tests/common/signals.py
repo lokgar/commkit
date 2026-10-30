@@ -21,7 +21,10 @@ def make_test_qam_samples(
     seed: int = 42,
     xp: Any = None,
 ) -> tuple[Any, Any]:
-    """Generate QAM symbol sequence and oversampled sample array with optional AWGN."""
+    """QAM symbols repeated ``sps`` times, with optional AWGN: no pulse and no
+    channel.  For plumbing (shapes, layouts, state); an equalizer starting
+    from the centre-tap identity already outputs these symbols up to a gain,
+    so convergence tests use :func:`make_channel_signal` instead."""
     rng = np.random.default_rng(seed)
     const = Constellation.qam(order).points.astype(np.complex64)
     const = normalize(const, mode="average_power").astype(np.complex64)
@@ -54,7 +57,8 @@ def make_test_psk_samples(
     seed: int = 42,
     xp: Any = None,
 ) -> tuple[Any, Any]:
-    """Generate PSK symbol sequence and oversampled sample array with optional AWGN."""
+    """PSK symbols repeated ``sps`` times, with optional AWGN: no pulse and no
+    channel (plumbing only, see :func:`make_test_qam_samples`)."""
     rng = np.random.default_rng(seed)
     const = Constellation.psk(order).points.astype(np.complex64)
     sym_indices = rng.integers(0, order, num_symbols)
@@ -87,7 +91,8 @@ def make_test_mimo_samples(
     seed: int = 42,
     xp: Any = None,
 ) -> tuple[Any, Any]:
-    """Generate multi-channel MIMO sample array and symbol sequences."""
+    """Independent streams of :func:`make_test_qam_samples`, stacked with no
+    mixing between them (plumbing only; see :func:`make_channel_signal`)."""
     samples_list = []
     symbols_list = []
     for ch in range(num_channels):
@@ -108,6 +113,79 @@ def make_test_mimo_samples(
     if xp is not None:
         return xp.asarray(samples_arr), xp.asarray(symbols_arr)
     return samples_arr, symbols_arr
+
+
+def make_channel_signal(
+    constellation: Constellation,
+    num_symbols: int,
+    *,
+    sps: int = 2,
+    rolloff: float = 0.2,
+    isi_taps: Any = None,
+    frac_delay: float = 0.0,
+    theta: float | None = None,
+    dgd: float = 0.0,
+    dgd_theta: float = np.pi / 8,
+    esn0_db: float | None = None,
+    num_channels: int = 1,
+    symbol_rate: float = 1e9,
+    seed: int = 0,
+    xp: Any = None,
+) -> Signal:
+    """A pulse-shaped record through a channel an equalizer must undo.
+
+    Independent streams (``num_channels``) of RRC-shaped symbols at ``sps``,
+    generated periodic so that the circular channel below has no edge, then
+    in order:
+
+    - ``isi_taps``: circular convolution at the sample spacing; the largest
+      tap is the main path, so reference symbol ``k`` stays at period ``k``.
+    - ``frac_delay``: a common delay in samples (:func:`fft_fractional_delay`).
+    - ``theta``: a polarization rotation (two channels).
+    - ``dgd``: differential group delay in seconds at ``dgd_theta``.
+    - ``esn0_db``: AWGN at that Es/N0.
+
+    Returns the received :class:`Signal` (complex64), whose reference holds
+    the transmitted symbols, on ``xp``'s device.
+    """
+    from commkit.impairments import (
+        apply_awgn,
+        apply_pmd,
+        apply_polarization_mixing,
+    )
+    from commkit.timing import fft_fractional_delay
+
+    sig = generate(
+        constellation,
+        num_symbols,
+        symbol_rate=symbol_rate,
+        sps=sps,
+        pulse=RRC(rolloff),
+        num_channels=num_channels,
+        periodic=True,
+        rng=seed,
+    )
+    x = np.asarray(sig.samples).astype(np.complex128)
+    if isi_taps is not None:
+        h = np.asarray(isi_taps, dtype=np.complex128)
+        main = int(np.argmax(np.abs(h)))
+        kernel = np.zeros(x.shape[-1], dtype=np.complex128)
+        kernel[: h.size] = h
+        kernel = np.roll(kernel, -main)
+        x = np.fft.ifft(np.fft.fft(x, axis=-1) * np.fft.fft(kernel), axis=-1)
+    x = x.astype(np.complex64)
+    if frac_delay:
+        x = fft_fractional_delay(x, delay=frac_delay)
+    if theta is not None:
+        x = apply_polarization_mixing(x, theta=theta)
+    if dgd:
+        x = apply_pmd(x, dgd=dgd, theta=dgd_theta, sampling_rate=sig.sampling_rate)
+    if esn0_db is not None:
+        x = apply_awgn(x, esn0_db=esn0_db, sps=sps, rng=seed + 1)
+    out = sig.replace(samples=np.asarray(x).astype(np.complex64))
+    if xp is not None:
+        out = out.to(device_of(xp))
+    return out
 
 
 def make_test_qam_signal(

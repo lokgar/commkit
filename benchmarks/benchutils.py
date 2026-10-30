@@ -64,14 +64,22 @@ def assert_converged(result, syms, constellation, *, skip, max_ser, blind=False)
     storms, divergence) instead of the operating point, so every equalizer
     benchmark checks its symbol error rate after ``skip`` symbols.  Blind
     equalizers leave a phase ambiguity, which is resolved against the
-    reference first.
+    reference first, after the channel permutation of a butterfly.
     """
     from commkit.backend import to_device
-    from commkit.recovery import resolve_phase_ambiguity
+    from commkit.recovery import resolve_channel_permutation, resolve_phase_ambiguity
 
     y = to_device(result.y_hat, "cpu")[..., skip:]
     ref = to_device(syms, "cpu")[..., skip : skip + y.shape[-1]]
     if blind:
+        if y.ndim == 2:
+            y = resolve_channel_permutation(y, ref)
         y = resolve_phase_ambiguity(y, ref, constellation=constellation)
-    ser = float((constellation.demap(y) != constellation.demap(ref)).mean())
+    # Symbol decisions, not bits (one wrong symbol is one error), and the
+    # worst channel, so one failed stream cannot hide behind a good one.
+    wrong = constellation._nearest(y.reshape(-1)) != constellation._nearest(
+        ref.reshape(-1)
+    )
+    per_channel = to_device(wrong, "cpu").reshape(y.shape).mean(axis=-1)
+    ser = float(per_channel.max())
     assert ser <= max_ser, f"benchmark workload did not converge: SER {ser:.3g}"
