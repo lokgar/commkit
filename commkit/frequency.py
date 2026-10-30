@@ -476,9 +476,6 @@ def _mth_power(
     # In the samples' precision: complex128 changed no estimate by more than
     # 0.005 Hz (16-QAM, 2^16 symbols, 15 dB; the error itself is 726 Hz rms).
     x_m = x**M
-    # Non-constant-envelope symbols leave an amplitude residual at DC.
-    if constellation is not None and np.ptp(np.abs(constellation.points)) > 1e-9:
-        x_m = x_m - xp.mean(x_m, axis=-1, keepdims=True)
 
     X_m = _fft.fft(x_m, n=nfft, axis=-1)  # (R, nfft)
     freqs_np = np.fft.fftfreq(nfft, d=1.0 / fs)  # reported on the host
@@ -494,7 +491,6 @@ def _mth_power(
         freqs = xp.fft.fftfreq(nfft, d=1.0 / fs)
         mask = (freqs >= tone_lo) & (freqs <= tone_hi)
         mag = xp.where(mask[None, :], mag, xp.zeros_like(mag))
-    mag[:, 0] = 0.0  # Δf = 0 is degenerate; also any residual DC
 
     if shared_rows:
         k_peak = xp.broadcast_to(xp.argmax(xp.sum(mag, axis=0)), (R,))

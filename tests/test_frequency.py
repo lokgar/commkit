@@ -89,15 +89,6 @@ class TestFoeMthPower:
         bound = 1.5 * order * np.sqrt(theory.tone_frequency_crb(10**3, 4096)) * FS
         assert abs(float(est) - fo_hz) < bound
 
-    @pytest.mark.xfail(
-        strict=True,
-        reason="MthPower zeroes the DC bin of the M-th power spectrum "
-        "(frequency.py:497): offsets with |M Δf| < f_s/(2 nfft) are never "
-        "found.  QPSK, 4096 symbols at 1 MS/s: 0 Hz returns -81.8 kHz (a "
-        "noise peak; +77.4 kHz on clean symbols) and every offset from 0.01 "
-        "to 30 Hz returns 30.5 Hz.  At 32 GBd, nfft 2^16, the dead zone is "
-        "±61 kHz.",
-    )
     def test_zero_offset_within_lock_range(self, xp):
         """No offset: QPSK gives zero within its bound (not merely a value
         inside the lock range ±f_s/8, which is every possible output)."""
@@ -111,10 +102,20 @@ class TestFoeMthPower:
         bound = 1.5 * 4 * np.sqrt(theory.tone_frequency_crb(10**3, 4096)) * FS
         assert abs(float(est)) < bound
 
-    @pytest.mark.xfail(strict=True, reason="The DC-bin dead zone above, at 10 Hz.")
-    def test_small_offset_inside_one_bin(self, xp):
+    @pytest.mark.parametrize("qam", [False, True], ids=["qpsk", "16qam"])
+    def test_small_offset_inside_one_bin(self, xp, qam):
         """A 10 Hz offset (inside half a bin of the 4th power, 61 Hz here) is
-        estimated within the bound like any other."""
+        estimated within the bound like any other, also for 16-QAM, whose
+        4th-power tone sits on the mean of ``x^4`` (it was subtracted, and
+        bin 0 zeroed, so every offset under half a bin read 30.5 Hz)."""
+        if qam:
+            sig = _qam_signal(xp, 16, 4096, fo_hz=10.0)
+            est = frequency.estimate_frequency_offset(
+                sig.samples, frequency.MthPower(), sampling_rate=FS,
+                constellation=Constellation.qam(16),
+            ).value  # fmt: skip
+            assert abs(float(est) - 10.0) < 0.02 * FS / 4096
+            return
         sig = _psk_signal(xp, 4, 4096, fo_hz=10.0)
         est = frequency.estimate_frequency_offset(
             sig.samples,
