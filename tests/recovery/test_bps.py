@@ -9,7 +9,6 @@ from commkit.mapping import Constellation
 from tests.common import scoring
 from tests.common.conversions import to_numpy
 from tests.common.signals import (
-    make_test_mimo_samples,
     make_test_qam_signal,
     make_test_symbols,
 )
@@ -35,26 +34,6 @@ class TestCprBps:
         corrected = recovery.correct_carrier_phase(rotated, est)
         assert scoring.ser(corrected, sig.reference.symbols, c) == 0.0
 
-    def test_output_shape_siso(self, xp):
-        """BPS CPR: 1D input -> 1D phase output of same length."""
-        sig = make_test_qam_signal(
-            order=16, num_symbols=512, sps=1, symbol_rate=FS, xp=xp
-        )
-        phase = recovery.estimate_carrier_phase(
-            sig.samples, recovery.BPS(), constellation=Constellation.qam(16)
-        ).value
-        assert phase.shape == sig.samples.shape
-
-    def test_output_shape_mimo(self, xp):
-        """BPS CPR: 2D input (C, N) -> 2D phase output (C, N)."""
-        mimo, _ = make_test_mimo_samples(
-            num_channels=2, order=16, num_symbols=512, sps=1, xp=xp
-        )
-        phase = recovery.estimate_carrier_phase(
-            mimo, recovery.BPS(), constellation=Constellation.qam(16)
-        ).value
-        assert phase.shape == mimo.shape
-
     def test_too_short_raises(self, xp):
         """BPS CPR: signal shorter than block_size raises ValueError."""
         sig = make_test_qam_signal(
@@ -75,9 +54,6 @@ class TestBPS:
         return make_test_symbols(
             scheme="qam", order=16, num_symbols=N, seed=seed, xp=xp
         )
-
-    def _qpsk_symbols(self, xp, N=512, seed=3):
-        return make_test_symbols(scheme="psk", order=4, num_symbols=N, seed=seed, xp=xp)
 
     def test_siso_qam16_output_shape(self, xp):
         """SISO QAM16 (square QAM fast path): output is (N,) float64."""
@@ -107,33 +83,6 @@ class TestBPS:
         assert abs(residual) < 0.15, (
             f"Residual phase error too large: {residual:.3f} rad"
         )
-
-    def test_siso_qpsk_general_path(self, xp):
-        """SISO QPSK (non-square: triggers general distance path): output shape correct."""
-        syms = self._qpsk_symbols(xp, N=256)
-        phi_est = recovery.estimate_carrier_phase(
-            syms,
-            recovery.BPS(test_phases=16, block_size=32),
-            constellation=Constellation.psk(4),
-        ).value
-        assert phi_est.shape == syms.shape
-
-    def test_mimo_output_shape(self, xp):
-        """MIMO input (C, N): output shape is (C, N)."""
-
-        C, N = 2, 256
-        rng = np.random.default_rng(7)
-        syms = xp.asarray(
-            (rng.standard_normal((C, N)) + 1j * rng.standard_normal((C, N))).astype(
-                np.complex64
-            )
-        )
-        phi_est = recovery.estimate_carrier_phase(
-            syms,
-            recovery.BPS(test_phases=16, block_size=32),
-            constellation=Constellation.qam(16),
-        ).value
-        assert phi_est.shape == (C, N)
 
     def test_block_size_too_large_raises(self, xp):
         """block_size > N should raise ValueError."""

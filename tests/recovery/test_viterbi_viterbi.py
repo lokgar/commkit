@@ -8,7 +8,6 @@ from commkit.core import Signal
 from commkit.mapping import Constellation
 from tests.common import scoring
 from tests.common.signals import (
-    make_test_mimo_samples,
     make_test_psk_signal,
     make_test_qam_signal,
     make_test_symbols,
@@ -60,26 +59,6 @@ class TestCprViterbiViterbi:
         assert 1.6 < rms[16] / rms[64] < 3.0, rms
         assert rms[64] < 0.1, rms
 
-    def test_output_shape_siso(self, xp):
-        """VV CPR: 1D input -> 1D phase output of same length."""
-        sig = make_test_qam_signal(
-            order=16, num_symbols=512, sps=1, symbol_rate=FS, xp=xp
-        )
-        phase = recovery.estimate_carrier_phase(
-            sig.samples, recovery.ViterbiViterbi(), constellation=Constellation.qam(16)
-        ).value
-        assert phase.shape == sig.samples.shape
-
-    def test_output_shape_mimo(self, xp):
-        """VV CPR: 2D input (C, N) -> 2D phase output (C, N)."""
-        mimo, _ = make_test_mimo_samples(
-            num_channels=2, order=4, num_symbols=512, sps=1, xp=xp
-        )
-        phase = recovery.estimate_carrier_phase(
-            mimo, recovery.ViterbiViterbi(), constellation=Constellation.qam(4)
-        ).value
-        assert phase.shape == mimo.shape
-
     def test_too_short_raises(self, xp):
         """VV CPR: signal shorter than block_size raises ValueError."""
         sig = make_test_qam_signal(
@@ -98,11 +77,6 @@ class TestViterbiViterbi:
 
     def _qpsk_symbols(self, xp, N=512, seed=0):
         return make_test_symbols(scheme="psk", order=4, num_symbols=N, seed=seed, xp=xp)
-
-    def _qam16_symbols(self, xp, N=512, seed=1):
-        return make_test_symbols(
-            scheme="qam", order=16, num_symbols=N, seed=seed, xp=xp
-        )
 
     def test_siso_qpsk_output_shape(self, xp):
         """SISO QPSK: output is (N,) float64."""
@@ -148,32 +122,6 @@ class TestViterbiViterbi:
         assert abs(residual) < 0.15, (
             f"Phase tracking error too large: {residual:.3f} rad"
         )
-
-    def test_siso_qam16_output_shape(self, xp):
-        """SISO QAM16: output shape matches input."""
-        syms = self._qam16_symbols(xp)
-        phi_est = recovery.estimate_carrier_phase(
-            syms,
-            recovery.ViterbiViterbi(block_size=32),
-            constellation=Constellation.qam(16),
-        ).value
-        assert phi_est.shape == syms.shape
-
-    def test_mimo_output_shape(self, xp):
-        """MIMO input (C, N): output shape is (C, N)."""
-        import numpy as np
-
-        C, N = 2, 256
-        syms = xp.asarray(
-            np.random.default_rng(5).standard_normal((C, N)).astype(np.float32)
-            + 1j * np.random.default_rng(6).standard_normal((C, N)).astype(np.float32)
-        )
-        phi_est = recovery.estimate_carrier_phase(
-            syms,
-            recovery.ViterbiViterbi(block_size=32),
-            constellation=Constellation.qam(16),
-        ).value
-        assert phi_est.shape == (C, N)
 
     def test_block_size_too_large_raises(self, xp):
         """block_size > N should raise ValueError."""

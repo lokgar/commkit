@@ -401,21 +401,38 @@ class TestOverlapSaveFiltering:
         L = len(taps_np)
         xpt.assert_allclose(out[L:], ref[L:], atol=1e-4)
 
-    def test_ols_fir_filter_preserves_shape_siso(self, xp: Any) -> None:
-        """ols_fir_filter returns 1-D output for 1-D input."""
-        x = xp.ones(256, dtype=xp.float32)
-        taps = xp.asarray(np.ones(8, dtype=np.float32))
-        out = filtering.ols_fir_filter(x, taps)
-        assert out.ndim == 1
-        assert out.shape == x.shape
-
-    def test_ols_fir_filter_explicit_N_fft(self, xp: Any) -> None:
-        """ols_fir_filter accepts an explicit N_fft without error."""
+    def test_ols_fir_filter_block_size_does_not_change_the_output(
+        self, xp: Any, xpt: Any
+    ) -> None:
+        """The FFT block size is an implementation choice: nfft = 16 (many
+        blocks) and the default (one block) give the same samples, and both
+        follow the documented ``y[n] = Σ_k x[n + L//2 - k] taps[k]``."""
         rng = np.random.default_rng(2)
-        x = xp.asarray(rng.standard_normal(256).astype(np.float32))
-        taps = xp.asarray(np.ones(4, dtype=np.float32) / 4)
-        out = filtering.ols_fir_filter(x, taps, nfft=1024)
-        assert out.shape == x.shape
+        x = rng.standard_normal(256)
+        taps = rng.standard_normal(4)
+        expected = np.convolve(x, taps)[2 : 2 + 256]
+        for nfft in (16, None):
+            out = filtering.ols_fir_filter(xp.asarray(x), xp.asarray(taps), nfft=nfft)
+            xpt.assert_allclose(out, xp.asarray(expected), atol=1e-12)
+
+    @pytest.mark.parametrize("num_taps", [
+        5,
+        pytest.param(4, marks=pytest.mark.xfail(strict=True, reason=(
+            "fir_filter centres even-length taps on tap (L - 1)//2 (SciPy "
+            "mode='same'), not on L//2 as its docstring and ols_fir_filter "
+            "say: for L = 4 the two differ by one sample (max |diff| 6.8 on "
+            "unit-variance data)"))),
+    ])  # fmt: skip
+    def test_fir_filter_alignment_matches_ols(
+        self, xp: Any, xpt: Any, num_taps: int
+    ) -> None:
+        """fir_filter and ols_fir_filter document the same alignment, tap
+        ``L // 2`` at lag 0, so they give the same samples."""
+        rng = np.random.default_rng(num_taps)
+        x = xp.asarray(rng.standard_normal(256))
+        taps = xp.asarray(rng.standard_normal(num_taps))
+        xpt.assert_allclose(filtering.fir_filter(x, taps),
+                            filtering.ols_fir_filter(x, taps), atol=1e-12)  # fmt: skip
 
     @pytest.mark.parametrize("causal", [False, True])
     def test_batches_do_not_change_the_output(

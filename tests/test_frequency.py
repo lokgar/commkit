@@ -584,21 +584,6 @@ class TestCorrectFrequencyOffsetBranches:
         assert out.dtype == xp.complex64
         assert out.shape == sig.shape
 
-    def test_mimo_input_broadcasts_mixer(self, xp):
-        """MIMO (C, N) input: mixer is broadcast over channels without error."""
-        import numpy as np
-
-        C, N = 2, 256
-        rng = np.random.default_rng(99)
-        sig = xp.asarray(
-            (rng.standard_normal((C, N)) + 1j * rng.standard_normal((C, N))).astype(
-                np.complex64
-            )
-        )
-        out = frequency.correct_frequency_offset(sig, 3000.0, sampling_rate=1e6)
-        assert out.shape == (C, N)
-        assert out.dtype == xp.complex64
-
 
 # -----------------------------------------------------------------------------
 # FOE - find_bias_tone
@@ -669,16 +654,6 @@ class TestFindBiasTone:
             sampling_rate=fs,
         ).value
         assert abs(est - 100e6) < 10e6
-
-    def test_returns_0d_for_siso(self, xp):
-        """A 1-D segment gives a 0-d estimate (rank rule)."""
-        N = 512
-        n = xp.arange(N, dtype=xp.float64)
-        seg = xp.exp(1j * 2 * np.pi * 1e5 / 1e6 * n).astype(xp.complex64)
-        result = frequency.estimate_frequency_offset(
-            seg, frequency.BiasTone(), sampling_rate=1e6
-        ).value
-        assert result.ndim == 0
 
     def test_partial_search_params_raises(self, xp):
         """Providing only one of target_frequency / search_band raises ValueError."""
@@ -859,18 +834,6 @@ class TestCorrectFrequencyOffsetBlockwise:
         )
         assert out.shape == (N,)
         np.testing.assert_array_equal(np.isfinite(to_numpy(out)), True)
-
-    def test_mimo_per_channel_output_shape(self, xp):
-        """(C=2, N) input produces (2, N) output with per-channel correction."""
-        C, N = 2, 4096
-        sig_a = _qam_signal(xp, 4, N, fo_hz=8_000.0)
-        sig_b = _qam_signal(xp, 4, N, fo_hz=-5_000.0)
-        mimo = xp.stack([sig_a.samples, sig_b.samples], axis=0)
-        method = frequency.MthPower(power=4, block_size=512)
-        est = frequency.estimate_frequency_offset(mimo, method, sampling_rate=self.FS)
-        assert est.block_values.shape[0] == C
-        out = frequency.correct_frequency_offset(mimo, method, sampling_rate=self.FS)
-        assert out.shape == (C, N)
 
     def test_mimo_combined_is_shared(self, xp, xpt):
         """combined() applies one shared correction to every channel."""

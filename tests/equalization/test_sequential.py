@@ -75,64 +75,6 @@ class TestLMS:
         assert scoring.evm_rms(y, ref[3000:]) < 1.4 * 10 ** (-22 / 20)
         assert scoring.ser(run(0.0), ref[3000:], c) > 0.3
 
-    def test_output_shape_siso(self, xp):
-        """LMS SISO output shapes should be correct."""
-        n = 500
-
-        sig = generate(
-            Constellation.psk(4), n, symbol_rate=1e6, sps=2, pulse=RRC(0.35), rng=0
-        )
-        tx = xp.asarray(sig.reference.symbols)
-        rx = xp.asarray(sig.samples)
-
-        result = equalization.lms(
-            rx, tx, num_taps=11, constellation=Constellation.psk(4), sps=2
-        )
-
-        assert result.y_hat.ndim == 1
-        assert result.weights.shape == (11,)
-        assert result.error.ndim == 1
-        assert result.y_hat.shape == result.error.shape
-
-    def test_store_weights(self, xp):
-        """Weight history should be stored when requested."""
-        n = 200
-        num_taps = 7
-
-        sig = generate(
-            Constellation.psk(4), n, symbol_rate=1e6, sps=2, pulse=RRC(0.35), rng=0
-        )
-        tx = xp.asarray(sig.reference.symbols)
-        rx = xp.asarray(sig.samples)
-
-        result = equalization.lms(
-            rx,
-            tx,
-            num_taps=num_taps,
-            constellation=Constellation.psk(4),
-            store_weights=True,
-            sps=2,
-        )
-
-        assert result.weights_history is not None
-        assert result.weights_history.ndim == 2
-        assert result.weights_history.shape[1] == num_taps
-
-    def test_no_weights_by_default(self, xp):
-        """Weight history should be None by default."""
-
-        sig = generate(
-            Constellation.psk(4), 100, symbol_rate=1e6, sps=2, pulse=RRC(0.35), rng=0
-        )
-        tx = xp.asarray(sig.reference.symbols)
-        rx = xp.asarray(sig.samples)
-
-        result = equalization.lms(
-            rx, tx, num_taps=5, constellation=Constellation.psk(4), sps=2
-        )
-
-        assert result.weights_history is None
-
     def test_requires_constellation_or_training(self, xp):
         """LMS should raise if neither training nor constellation is given."""
 
@@ -189,22 +131,6 @@ class TestRLS:
         assert n_rls < 2 * 15 + 20, n_rls
         assert n_lms > 1.5 * n_rls, (n_lms, n_rls)
 
-    def test_output_shape_siso(self, xp):
-        """RLS SISO output shapes should match LMS convention."""
-
-        sig = generate(
-            Constellation.psk(4), 200, symbol_rate=1e6, sps=2, pulse=RRC(0.35), rng=0
-        )
-        tx = xp.asarray(sig.reference.symbols)
-        rx = xp.asarray(sig.samples)
-
-        result = equalization.rls(
-            rx, tx, num_taps=11, constellation=Constellation.psk(4), sps=1
-        )
-
-        assert result.y_hat.ndim == 1
-        assert result.weights.shape == (11,)
-
 
 class TestCMA:
     """Tests for the CMA blind equalizer."""
@@ -227,19 +153,6 @@ class TestCMA:
         ser, adapted = evm(1e-3)
         assert ser == 0.0 and adapted < 1.4 * floor
         assert evm(0.0)[1] > 2 * floor
-
-    def test_output_shape_siso(self, xp):
-        """CMA SISO output should be 1D."""
-
-        sig = generate(
-            Constellation.psk(4), 200, symbol_rate=1e6, sps=2, pulse=RRC(0.35), rng=0
-        )
-        rx = xp.asarray(sig.samples)
-
-        result = equalization.cma(rx, num_taps=11, sps=2)
-
-        assert result.y_hat.ndim == 1
-        assert result.weights.shape == (11,)
 
 
 class TestRDE:
@@ -279,144 +192,37 @@ class TestRDE:
             evm[name] = scoring.evm_rms(y[10000:], ref[10000:])
         assert evm["rde"] < evm["cma"], evm
 
-    def test_output_shape_siso(self, xp):
-        """RDE SISO output should be 1D with correct length."""
 
-        sig = generate(
-            Constellation.qam(16), 300, symbol_rate=1e6, sps=2, pulse=RRC(0.35), rng=0
-        )
-        rx = xp.asarray(sig.samples)
+class TestResultLayout:
+    """EqualizerResult's documented layout, in one place per algorithm:
+    ``y_hat`` and ``error`` ``(N_sym,)`` or ``(C, N_sym)`` (RLS trims
+    ``tail_trim = num_taps // 2`` symbols), ``weights`` ``(num_taps,)`` or
+    ``(C, C, num_taps)``, and ``weights_history`` only with
+    ``store_weights=True``, one row per processed symbol."""
 
-        result = equalization.rde(
-            rx, num_taps=11, constellation=Constellation.qam(16), sps=2
-        )
-
-        assert result.y_hat.ndim == 1
-        assert result.weights.shape == (11,)
-
-
-class TestStoreWeights:
-    """Tests that store_weights=True produces correct weight history shapes."""
-
-    def _qpsk_rx(self, xp, n_symbols=600, seed=0):
-
-        sig = generate(
-            Constellation.psk(4),
-            n_symbols,
-            symbol_rate=1e6,
-            sps=2,
-            pulse=RRC(0.35),
-            rng=seed,
-        )
-        return xp.ascontiguousarray(xp.asarray(sig.samples)), sig
-
-    def test_lms_store_weights_numba(self, xp):
-        """LMS Numba: weights_history has shape (N_sym, num_taps) for SISO."""
-        rx, sig = self._qpsk_rx(xp)
-        n_sym = rx.shape[0] // 2
-
-        result = equalization.lms(
-            rx,
-            xp.asarray(sig.reference.symbols),
-            num_taps=9,
-            step_size=0.05,
-            constellation=Constellation.psk(4),
-            store_weights=True,
-            sps=2,
-        )
-
-        assert result.weights_history is not None
-        assert result.weights_history.shape == (n_sym, 9)
-
-    def test_rls_store_weights_numba(self, xp):
-        """RLS Numba: weights_history has shape (N_sym_truncated, num_taps) for SISO."""
-        rx, sig = self._qpsk_rx(xp)
-
-        result = equalization.rls(
-            rx,
-            xp.asarray(sig.reference.symbols),
-            sps=1,
-            num_taps=7,
-            constellation=Constellation.psk(4),
-            store_weights=True,
-        )
-
-        assert result.weights_history is not None
-        # SISO: (N_sym_truncated, num_taps)
-        assert result.weights_history.ndim == 2
-        assert result.weights_history.shape[1] == 7
-
-    def test_cma_store_weights_numba(self, xp):
-        """CMA Numba: weights_history has shape (N_sym, num_taps) for SISO."""
-        rx, _ = self._qpsk_rx(xp)
-        n_sym = rx.shape[0] // 2
-
-        result = equalization.cma(
-            rx,
-            num_taps=9,
-            step_size=0.005,
-            constellation=Constellation.psk(4),
-            store_weights=True,
-            sps=2,
-        )
-
-        assert result.weights_history is not None
-        assert result.weights_history.shape == (n_sym, 9)
-
-    def test_rde_store_weights_numba(self, xp):
-        """RDE Numba: weights_history has shape (N_sym, num_taps) for SISO."""
-        rx, _ = self._qpsk_rx(xp)
-        n_sym = rx.shape[0] // 2
-
-        result = equalization.rde(
-            rx,
-            num_taps=9,
-            step_size=0.005,
-            constellation=Constellation.psk(4),
-            store_weights=True,
-            sps=2,
-        )
-
-        assert result.weights_history is not None
-        assert result.weights_history.shape == (n_sym, 9)
-
-    def test_mimo_store_weights_numba(self, xp):
-        """LMS Numba MIMO: weights_history has shape (N_sym, C, C, num_taps)."""
-
-        sig = generate(
-            Constellation.psk(4), 600, symbol_rate=1e6, sps=2, pulse=RRC(0.35), rng=0
-        )
-        rx = xp.asarray(sig.samples)
-        rx_mimo = xp.stack([rx, xp.roll(rx, 1)], axis=0)
-        train = xp.stack([xp.asarray(sig.reference.symbols)] * 2, axis=0)
-
-        result = equalization.lms(
-            rx_mimo,
-            train,
-            num_taps=5,
-            constellation=Constellation.psk(4),
-            store_weights=True,
-            sps=2,
-        )
-
-        n_sym = rx.shape[0] // 2
-        assert result.weights_history is not None
-        assert result.weights_history.shape == (n_sym, 2, 2, 5)
-
-    def test_no_weights_by_default_all_algorithms(self, xp):
-        """All algorithms should return weights_history=None by default."""
-        rx, sig = self._qpsk_rx(xp, n_symbols=300)
-        train = xp.asarray(sig.reference.symbols)
-
-        for algo, kwargs in [
-            ("lms", dict(training_symbols=train, constellation=Constellation.psk(4))),
-            ("cma", dict(constellation=Constellation.psk(4))),
-            ("rde", dict(constellation=Constellation.psk(4))),
-        ]:
-            result = getattr(equalization, algo)(rx, num_taps=7, sps=2, **kwargs)
-            assert result.weights_history is None, (
-                f"{algo}: expected weights_history=None by default"
-            )
+    @pytest.mark.parametrize("name", ["lms", "rls", "cma", "rde"])
+    @pytest.mark.parametrize("num_channels", [1, 2])
+    def test_layout(self, xp, name, num_channels):
+        c, n, taps = Constellation.psk(4), 400, 7
+        sig = generate(c, n, symbol_rate=1e6, sps=2, pulse=RRC(0.35), rng=0,
+                       num_channels=num_channels)  # fmt: skip
+        args = [xp.asarray(sig.samples)]
+        if name in ("lms", "rls"):
+            args.append(xp.asarray(sig.reference.symbols))
+        fn = getattr(equalization, name)
+        kw = dict(num_taps=taps, constellation=c, sps=2)
+        res = fn(*args, **kw)
+        trim = taps // 2 if name == "rls" else 0
+        lead = () if num_channels == 1 else (num_channels,)
+        w = (taps,) if num_channels == 1 else (num_channels, num_channels, taps)
+        assert res.tail_trim == trim
+        assert res.y_hat.shape == res.error.shape == (*lead, n - trim)
+        assert res.weights.shape == w
+        assert res.weights_history is None
+        stored = fn(*args, store_weights=True, **kw)
+        assert stored.weights_history.shape == (n, *w)
+        xpt_w = to_numpy(stored.weights_history[-1])
+        np.testing.assert_allclose(xpt_w, to_numpy(stored.weights), rtol=1e-6)
 
 
 class TestNonSquareLatticeDecisions:
@@ -607,19 +413,6 @@ class TestNumbaBackendCoverage:
         assert ser == 0.0 and evm < 1.4 * floor
         assert score(0.0)[1] > 2 * floor
 
-    def test_rls_numba_siso(self, xp):
-        """RLS with numba backend on SISO input."""
-        rx, sig = self._make_qpsk_rx(xp, n_symbols=800)
-        train = xp.asarray(sig.reference.symbols)
-
-        result = equalization.rls(
-            rx, train, sps=2, num_taps=9, constellation=Constellation.psk(4)
-        )
-
-        assert isinstance(result, EqualizerResult)
-        assert result.y_hat.ndim == 1
-        assert result.weights.shape == (9,)
-
     def test_rls_divergence_guard(self, xp):
         """The guard behind rls() raises an actionable error on non-finite
         taps and passes finite ones (a unit test of the check: the RLS
@@ -630,31 +423,6 @@ class TestNumbaBackendCoverage:
         bad[0, 0, 0] = float("nan")
         with pytest.raises(RuntimeError, match="RLS equalizer diverged"):
             _check_rls_divergence(bad, xp, 0.99, 0.01)
-
-    def test_rls_numba_mimo(self, xp):
-        """RLS numba MIMO path correctly handles (num_channels, n_samples) input shape."""
-
-        n_symbols = 600
-        sig = generate(
-            Constellation.psk(4),
-            n_symbols,
-            symbol_rate=1e6,
-            sps=2,
-            pulse=RRC(0.35),
-            rng=5,
-        )
-        rx1 = xp.asarray(sig.samples)
-        rx_mimo = xp.stack([rx1, xp.roll(rx1, 2)], axis=0)  # (2, N)
-        train_mimo = xp.stack([xp.asarray(sig.reference.symbols)] * 2, axis=0)
-
-        result = equalization.rls(
-            rx_mimo, train_mimo, sps=2, num_taps=7, constellation=Constellation.psk(4)
-        )
-
-        # RLS truncates the last num_taps//2 symbols from y_hat
-        tail_trim = 7 // 2
-        assert result.y_hat.shape == (2, n_symbols - tail_trim)
-        assert result.weights.shape == (2, 2, 7)
 
     def test_rls_numba_num_train_symbols(self, xp):
         """RLS numba: pre-sliced training_symbols limits DA phase length."""
@@ -667,60 +435,6 @@ class TestNumbaBackendCoverage:
 
         assert isinstance(result, EqualizerResult)
         assert result.num_train_symbols <= 50
-
-    def test_rls_numba_store_weights(self, xp):
-        """RLS numba with store_weights=True should populate weight history."""
-        rx, sig = self._make_qpsk_rx(xp, n_symbols=400)
-        train = xp.asarray(sig.reference.symbols)
-
-        result = equalization.rls(
-            rx,
-            train,
-            sps=2,
-            num_taps=5,
-            constellation=Constellation.psk(4),
-            store_weights=True,
-        )
-
-        assert result.weights_history is not None
-
-    def test_cma_numba_store_weights(self, xp):
-        """CMA numba backend with store_weights=True."""
-
-        sig = generate(
-            Constellation.psk(4), 400, symbol_rate=1e6, sps=2, pulse=RRC(0.35), rng=0
-        )
-        rx = xp.asarray(sig.samples)
-
-        result = equalization.cma(
-            rx,
-            num_taps=7,
-            step_size=0.005,
-            constellation=Constellation.psk(4),
-            store_weights=True,
-            sps=2,
-        )
-
-        assert result.weights_history is not None
-
-    def test_rde_numba_store_weights(self, xp):
-        """RDE numba backend with store_weights=True."""
-
-        sig = generate(
-            Constellation.qam(16), 400, symbol_rate=1e6, sps=2, pulse=RRC(0.35), rng=0
-        )
-        rx = xp.asarray(sig.samples)
-
-        result = equalization.rde(
-            rx,
-            num_taps=7,
-            step_size=5e-4,
-            constellation=Constellation.qam(16),
-            store_weights=True,
-            sps=2,
-        )
-
-        assert result.weights_history is not None
 
 
 class TestCmaPilotAided:

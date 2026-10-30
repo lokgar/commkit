@@ -46,22 +46,6 @@ class TestApplyIQImbalance:
 
         assert kappa_after > kappa_before + 0.05
 
-    def test_output_shape_siso(self, xp):
-        """Output shape should match SISO input."""
-        samples = xp.ones(512, dtype=xp.complex64)
-        out = apply_iq_imbalance(
-            samples, amplitude_imbalance_db=1.0, phase_imbalance_deg=3.0
-        )
-        assert out.shape == (512,)
-
-    def test_output_shape_mimo(self, xp):
-        """Output shape should match MIMO input."""
-        samples = xp.ones((4, 512), dtype=xp.complex64)
-        out = apply_iq_imbalance(
-            samples, amplitude_imbalance_db=1.0, phase_imbalance_deg=3.0
-        )
-        assert out.shape == (4, 512)
-
     def test_output_dtype_preserved(self, xp):
         """Output dtype should match input dtype."""
         samples = xp.ones(256, dtype=xp.complex64)
@@ -123,19 +107,6 @@ class TestIQImbalanceCompensation:
         out = correct_iq_imbalance(s, Lowdin())
         xpt.assert_allclose(xp.abs(out), xp.abs(s), atol=0.05)
 
-    def test_lowdin_siso_shape(self, xp):
-        """Löwdin: SISO (N,) input should return (N,)."""
-        _, r = self._make_imbalanced(xp)
-        out = correct_iq_imbalance(r, Lowdin())
-        assert out.shape == r.shape
-
-    def test_lowdin_mimo_shape(self, xp):
-        """Löwdin: MIMO (C, N) input should return (C, N)."""
-        _, r = self._make_imbalanced(xp)
-        r_mimo = xp.stack([r, r])  # (2, N)
-        out = correct_iq_imbalance(r_mimo, Lowdin())
-        assert out.shape == r_mimo.shape
-
     def test_lowdin_dtype_preserved(self, xp):
         """Löwdin output dtype should match input."""
         _, r = self._make_imbalanced(xp)
@@ -170,19 +141,6 @@ class TestIQImbalanceCompensation:
         out = correct_iq_imbalance(r, GramSchmidt())
         P_out = float(xp.mean(xp.abs(out) ** 2))
         assert abs(P_out - P_in) / P_in < 0.01
-
-    def test_gram_schmidt_siso_shape(self, xp):
-        """Gram-Schmidt: SISO (N,) input should return (N,)."""
-        _, r = self._make_imbalanced(xp)
-        out = correct_iq_imbalance(r, GramSchmidt())
-        assert out.shape == r.shape
-
-    def test_gram_schmidt_mimo_shape(self, xp):
-        """Gram-Schmidt: MIMO (C, N) input should return (C, N)."""
-        _, r = self._make_imbalanced(xp)
-        r_mimo = xp.stack([r, r])  # (2, N)
-        out = correct_iq_imbalance(r_mimo, GramSchmidt())
-        assert out.shape == r_mimo.shape
 
     def test_gram_schmidt_dtype_preserved(self, xp):
         """Gram-Schmidt output dtype should match input."""

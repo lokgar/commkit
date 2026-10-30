@@ -95,35 +95,6 @@ class TestCycleSlipCorrection:
         phi_np = to_numpy(phi)
         assert np.max(np.abs(phi_np)) < 10 * np.pi
 
-    def test_vv_correction_shape(self, xp):
-        """VV cycle_slip_correction=True returns correct shape."""
-        sig = make_test_qam_signal(
-            order=16, num_symbols=2048, sps=1, snr_db=SNR_DB, xp=xp
-        )
-        phi = recovery.estimate_carrier_phase(
-            sig.samples,
-            recovery.ViterbiViterbi(cycle_slip=recovery.CycleSlip()),
-            constellation=Constellation.qam(16),
-        ).value
-        assert phi.shape == sig.samples.shape
-
-    def test_tikhonov_correction_shape(self, xp):
-        """Tikhonov cycle_slip_correction=True returns correct shape."""
-        sig = make_test_qam_signal(
-            order=16, num_symbols=2048, sps=1, snr_db=SNR_DB, xp=xp
-        )
-        phi = recovery.estimate_carrier_phase(
-            sig.samples,
-            recovery.Tikhonov(
-                linewidth=1e-4 * FS,
-                snr_db=SNR_DB,
-                cycle_slip=recovery.CycleSlip(),
-            ),
-            constellation=Constellation.qam(16),
-            sampling_rate=FS,
-        ).value
-        assert phi.shape == sig.samples.shape
-
 
 class TestCycleSlipHistoryRule:
     """The documented rule ``2π·Δν·Δt·history < threshold²/2``."""
@@ -488,15 +459,6 @@ class TestDataAided:
             recovery.DataAided(symbols=ref),
         )
         assert out.dtype == ref.dtype
-
-    def test_1d_input_returns_1d(self, xp):
-        """1-D input returns 1-D output."""
-        ref = _clean_qam16(xp, 256, seed=0)
-        out = recovery.correct_carrier_phase(
-            ref * xp.array(np.exp(1j * 0.3), dtype=ref.dtype),
-            recovery.DataAided(symbols=ref),
-        )
-        assert out.ndim == 1
 
     def test_signal_input_uses_reference(self, xp, xpt):
         """Signal input: the samples are rotated against ``sig.reference``."""

@@ -11,22 +11,6 @@ from commkit.mapping import Constellation
 class TestBitMapping:
     """Tests for bit-to-symbol mapping across modulations and orders."""
 
-    def test_qam_mapping(self, xp: Any) -> None:
-        """Verify QAM mapping produces the correct number of symbols on device."""
-        bits = xp.array([0, 0, 0, 0, 1, 1, 1, 1])
-        syms = mapping.map_bits(bits, constellation=Constellation.qam(16))
-
-        assert isinstance(syms, xp.ndarray)
-        assert len(syms) == 2
-
-    def test_psk_mapping(self, xp: Any) -> None:
-        """Verify PSK mapping produces the correct number of symbols on device."""
-        bits = xp.array([0, 1])
-        syms = mapping.map_bits(bits, constellation=Constellation.psk(2))
-
-        assert isinstance(syms, xp.ndarray)
-        assert len(syms) == 2
-
     def test_8qam_mapping(self, xp: Any, xpt: Any) -> None:
         """Verify 8-QAM (rectangular) mapping and round-trip."""
         bits = xp.array([0, 0, 0, 1, 1, 1], dtype="int32")

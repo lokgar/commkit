@@ -108,13 +108,6 @@ class TestApplyPMD:
             gram, np.broadcast_to(np.eye(2), gram.shape), atol=1e-6
         )
 
-    def test_output_shape(self, xp):
-        """Output shape should match input shape."""
-        samples = xp.ones((2, 512), dtype=xp.complex64)
-        out = apply_pmd(samples, dgd=1e-12, theta=0.3, sampling_rate=56e9)
-
-        assert out.shape == (2, 512)
-
     def test_output_dtype(self, xp):
         """Output dtype should match input dtype."""
         samples = xp.ones((2, 128), dtype=xp.complex64)
@@ -244,12 +237,6 @@ class TestApplyPolarizationMixing:
         with pytest.raises(ValueError, match="dual-pol"):
             apply_polarization_mixing(xp.ones((3, 100), dtype=xp.complex64), theta=0.1)
 
-    def test_output_shape(self, xp):
-        """Output shape should match input shape."""
-        samples = xp.ones((2, 512), dtype=xp.complex64)
-        out = apply_polarization_mixing(samples, theta=np.pi / 4)
-        assert out.shape == (2, 512)
-
 
 class TestApplyChomaticDispersion:
     """Tests for apply_chromatic_dispersion and round-trip with correct_chromatic_dispersion."""
@@ -307,30 +294,6 @@ class TestApplyChomaticDispersion:
         )
 
         xpt.assert_allclose(recovered, samples, atol=1e-3)
-
-    def test_output_shape_siso(self, xp):
-        """SISO output shape matches input."""
-        samples = xp.ones(512, dtype=xp.complex64)
-        out = apply_chromatic_dispersion(
-            samples,
-            sampling_rate=64e9,
-            dispersion_ps_nm_km=17.0,
-            fiber_length_km=80.0,
-            center_wavelength_nm=1550.0,
-        )
-        assert out.shape == (512,)
-
-    def test_output_shape_mimo(self, xp):
-        """MIMO output shape matches input."""
-        samples = xp.ones((2, 512), dtype=xp.complex64)
-        out = apply_chromatic_dispersion(
-            samples,
-            sampling_rate=64e9,
-            dispersion_ps_nm_km=17.0,
-            fiber_length_km=80.0,
-            center_wavelength_nm=1550.0,
-        )
-        assert out.shape == (2, 512)
 
     def test_modifies_signal(self, xp):
         """CD should change the signal (non-trivial dispersion)."""

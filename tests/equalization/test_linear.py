@@ -129,23 +129,17 @@ class TestZFEqualizer:
             mse = float(np.mean(np.abs(out[interior] - tx[interior]) ** 2))
             assert mse == pytest.approx(expected, rel=0.1), (nv, mse, expected)
 
-    def test_siso_output_shape(self, xp):
-        """ZF SISO output should match input shape."""
-        n = 64
-        rx = xp.ones(n, dtype=xp.complex64)
-        h = xp.array([1.0 + 0j], dtype=xp.complex64)
-
-        out = equalization.zf_equalizer(rx, h)
-        assert out.shape == (n,)
-
-    def test_mimo_per_channel(self, xp):
-        """ZF with SISO channel on MIMO input should equalize per-channel."""
-        n = 64
-        rx = xp.ones((2, n), dtype=xp.complex64)
-        h = xp.array([1.0 + 0j], dtype=xp.complex64)
-
-        out = equalization.zf_equalizer(rx, h)
-        assert out.shape == (2, n)
+    def test_identity_channel_returns_the_input(self, xp, xpt):
+        """A unit impulse channel: ZF returns the samples, SISO and per
+        channel of a (C, N) record."""
+        rng = np.random.default_rng(0)
+        for shape in ((64,), (2, 64)):
+            rx = xp.asarray((rng.standard_normal(shape) + 1j * rng.standard_normal(shape))
+                            .astype(np.complex64))  # fmt: skip
+            out = equalization.zf_equalizer(
+                rx, xp.asarray([1.0 + 0j], dtype=xp.complex64)
+            )
+            xpt.assert_allclose(out, rx, rtol=1e-5, atol=1e-6)
 
     def test_signal_input_returns_signal(self, xp, xpt):
         """Signal input returns a Signal with the equalized samples."""
@@ -223,20 +217,28 @@ class TestZF3x3:
         assert equalized.shape == (3, n)
         xpt.assert_allclose(equalized, tx, atol=1e-3)
 
-    def test_mmse_3x3_with_noise(self, xp):
-        """MMSE 3x3 should run without error and return correct shape."""
-        n = 128
-        channel = xp.zeros((3, 3, 2), dtype=xp.complex64)
+    def test_mimo_3x3_inverts_the_channel(self, xp, xpt):
+        """A 3x3 two-tap channel with cross-coupling (``rx_i = Σ_j
+        convolve(tx_j, H[i, j])[:N]``): ZF recovers the noiseless input, and
+        with noise MMSE (noise_var = σ²) has a lower MSE than ZF."""
+        h = np.zeros((3, 3, 2), np.complex64)
         for i in range(3):
-            channel[i, i, 0] = 1.0
-            channel[i, i, 1] = 0.2
-
-        rng = xp.random.RandomState(0)
-        rx = (rng.randn(3, n) + 1j * rng.randn(3, n)).astype(xp.complex64)
-
-        equalized = equalization.zf_equalizer(rx, channel, noise_var=0.01)
-
-        assert equalized.shape == (3, n)
+            h[i, i] = [1.0, 0.2]
+        h[0, 1, 0], h[2, 0, 1] = 0.3, -0.25j
+        rng = np.random.default_rng(0)
+        tx = ((rng.standard_normal((3, 512)) + 1j * rng.standard_normal((3, 512)))
+              / np.sqrt(2)).astype(np.complex64)  # fmt: skip
+        rx = np.array([sum(np.convolve(tx[j], h[i, j])[:512] for j in range(3))
+                       for i in range(3)]).astype(np.complex64)  # fmt: skip
+        out = equalization.zf_equalizer(xp.asarray(rx), xp.asarray(h))
+        xpt.assert_allclose(out, xp.asarray(tx), atol=1e-5)
+        noise = rng.standard_normal(rx.shape) + 1j * rng.standard_normal(rx.shape)
+        noisy = xp.asarray((rx + noise * np.sqrt(0.01 / 2)).astype(np.complex64))
+        mse = [
+            float(np.mean(np.abs(to_numpy(equalization.zf_equalizer(noisy, xp.asarray(h), noise_var=nv)) - tx) ** 2))
+            for nv in (0.0, 0.01)
+        ]  # fmt: skip
+        assert mse[1] < mse[0], mse
 
 
 class TestEstimateTransferFunction:

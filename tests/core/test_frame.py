@@ -353,49 +353,17 @@ class TestSingleCarrierFramePilots:
         assert pilot_power_gain > pilot_power_nogain * 3.5
 
     def test_pilot_gain_db_mimo(self, xp: Any) -> None:
-        """Non-zero pilot_gain_db boosts pilot symbols for MIMO."""
-        frame = SingleCarrierFrame(
-            payload_num_symbols=20,
-            pilot_pattern="comb",
-            pilot_period=5,
-            pilot_gain_db=6.0,
-            num_channels=2,
-        )
-        body = frame.body_symbols
-        assert body.shape[0] == 2
-        assert body.ndim == 2
-
-    def test_pilot_bits_with_pilots(self, xp: Any) -> None:
-        """pilot_bits on a frame with comb pilots generates pilot bits."""
-        frame = SingleCarrierFrame(
-            payload_num_symbols=21, pilot_pattern="comb", pilot_period=4
-        )
-        bits = frame.pilot_bits
-        assert bits is not None
-        assert len(bits) > 0
-
-    def test_pilot_bits_double_access(self, xp: Any) -> None:
-        """Accessing pilot_bits twice returns consistent cached results."""
-        frame = SingleCarrierFrame(
-            payload_num_symbols=21, pilot_pattern="comb", pilot_period=4
-        )
-        bits1 = frame.pilot_bits
-        bits2 = frame.pilot_bits
-        assert bits1 is not None
-        assert bits2 is not None
-        assert len(bits1) == len(bits2)
-
-    def test_pilot_symbols_with_pilots(self, xp: Any) -> None:
-        """pilot_symbols on a frame with block pilots generates pilot symbols."""
-        frame = SingleCarrierFrame(
-            payload_num_symbols=20,
-            pilot_pattern="block",
-            pilot_period=4,
-            pilot_block_num_symbols=2,
-        )
-        syms = frame.pilot_symbols
-        assert syms is not None
-        assert len(syms) > 0
+        """pilot_gain_db = 6 scales the (unit-modulus) pilots by 10^(6/20) on
+        every channel and leaves the payload symbols as they are."""
+        kw = dict(payload_num_symbols=20, payload_rng=1, pilot_pattern="comb", pilot_period=5,
+                  num_channels=2)  # fmt: skip
+        plain = SingleCarrierFrame(**kw).body_symbols
+        boosted = SingleCarrierFrame(pilot_gain_db=6.0, **kw)
+        mask = np.asarray(boosted.pilot_mask)
+        body = boosted.body_symbols
+        np.testing.assert_allclose(body[:, mask], plain[:, mask] * 10 ** (6 / 20),
+                                   rtol=1e-6)  # fmt: skip
+        np.testing.assert_array_equal(body[:, ~mask], plain[:, ~mask])
 
 
 class TestSingleCarrierFrameDivisibility:

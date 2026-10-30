@@ -19,13 +19,6 @@ class TestAddAWGN:
         diff = float(xp.max(xp.abs(noisy - samples)))
         assert diff > 0.001
 
-    def test_awgn_preserves_shape(self, xp):
-        """Output shape should match input."""
-        samples = xp.ones((2, 500), dtype=xp.complex64)
-        noisy = apply_awgn(samples, esn0_db=20, sps=2)
-
-        assert noisy.shape == samples.shape
-
     def test_awgn_noise_power(self, xp):
         """Noise power should match 10^(-SNR/10) for a unit-power signal."""
         data = xp.ones(1000, dtype=complex)

@@ -3,10 +3,8 @@
 import numpy as np
 import pytest
 
-from commkit import equalization, generate
+from commkit import equalization
 from commkit.backend import to_device
-from commkit.equalization import EqualizerResult
-from commkit.filtering import RRC
 from commkit.mapping import Constellation
 from tests.common import scoring
 from tests.common.conversions import to_numpy
@@ -37,77 +35,6 @@ def _make_qam16_rx(xp, n_symbols=2000, seed=0):
 class TestInitialTaps:
     """initial_taps: start from prior equalizer weights."""
 
-    def test_lms_accepts_initial_taps(self, xp):
-        """lms() accepts initial_taps array with correct shape and returns EqualizerResult."""
-        rx = _make_qam16_rx(xp)
-        num_taps, num_ch = 21, 1
-        w0 = np.zeros((num_ch, num_ch, num_taps), dtype=np.complex64)
-        w0[0, 0, num_taps // 2] = 1.0 + 0j
-
-        result = equalization.lms(
-            rx,
-            None,
-            constellation=Constellation.qam(16),
-            num_taps=num_taps,
-            initial_taps=w0,
-            sps=2,
-        )
-        assert isinstance(result, EqualizerResult)
-        assert result.weights.shape == (num_taps,)  # SISO squeeze
-
-    def test_rls_accepts_initial_taps(self, xp):
-        """rls() accepts initial_taps array with correct shape."""
-
-        sig = generate(
-            Constellation.qam(4), 1000, symbol_rate=1e6, sps=2, pulse=RRC(0.35), rng=1
-        )
-        rx = xp.asarray(sig.samples)
-        num_taps, num_ch = 11, 1
-        w0 = np.zeros((num_ch, num_ch, num_taps), dtype=np.complex64)
-        w0[0, 0, num_taps // 2] = 1.0 + 0j
-
-        result = equalization.rls(
-            rx,
-            xp.asarray(sig.reference.symbols),
-            constellation=Constellation.qam(4),
-            num_taps=num_taps,
-            sps=2,
-            initial_taps=w0,
-        )
-        assert isinstance(result, EqualizerResult)
-
-    def test_cma_accepts_initial_taps(self, xp):
-        """cma() accepts initial_taps array with correct shape."""
-        rx = _make_qam16_rx(xp)
-        num_taps, num_ch = 21, 1
-        w0 = np.zeros((num_ch, num_ch, num_taps), dtype=np.complex64)
-        w0[0, 0, num_taps // 2] = 1.0 + 0j
-
-        result = equalization.cma(
-            rx,
-            constellation=Constellation.qam(16),
-            num_taps=num_taps,
-            initial_taps=w0,
-            sps=2,
-        )
-        assert isinstance(result, EqualizerResult)
-
-    def test_rde_accepts_initial_taps(self, xp):
-        """rde() accepts initial_taps array with correct shape."""
-        rx = _make_qam16_rx(xp)
-        num_taps, num_ch = 21, 1
-        w0 = np.zeros((num_ch, num_ch, num_taps), dtype=np.complex64)
-        w0[0, 0, num_taps // 2] = 1.0 + 0j
-
-        result = equalization.rde(
-            rx,
-            constellation=Constellation.qam(16),
-            num_taps=num_taps,
-            initial_taps=w0,
-            sps=2,
-        )
-        assert isinstance(result, EqualizerResult)
-
     def test_initial_taps_shape_mismatch_raises(self, xp):
         """Wrong initial_taps shape raises ValueError before kernel is called."""
         rx = _make_qam16_rx(xp)
@@ -130,36 +57,6 @@ class TestInitialTaps:
                 initial_taps=bad_w,
                 sps=2,
             )
-
-    def test_lms_to_rde_handoff_output_shape(self, xp):
-        """LMS weights can be handed off to RDE via initial_taps; output shape is correct."""
-        rx = _make_qam16_rx(xp, n_symbols=3000)
-        half = rx.shape[-1] // 2
-
-        pre_rx = rx[..., :half]
-        payload_rx = rx[..., half:]
-
-        pre = equalization.lms(
-            pre_rx,
-            constellation=Constellation.qam(16),
-            num_taps=21,
-            step_size=0.05,
-            sps=2,
-        )
-        w0 = to_numpy(pre.weights)
-        if w0.ndim == 1:
-            w0 = w0[np.newaxis, np.newaxis, :]
-
-        result = equalization.rde(
-            payload_rx,
-            constellation=Constellation.qam(16),
-            num_taps=21,
-            step_size=1e-4,
-            initial_taps=w0,
-            sps=2,
-        )
-        expected_syms = payload_rx.shape[-1] // 2
-        assert result.y_hat.shape[-1] == expected_syms
 
     def test_warm_start_rde_same_or_better_evm(self, xp):
         """RDE started from taps that LMS trained on 200 symbols opens the

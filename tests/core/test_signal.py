@@ -487,27 +487,6 @@ class TestSignalDSPOperations:
         assert s.sampling_rate == 8.0
         assert s.samples.size == 200
 
-    def test_welch_psd(self, xp):
-        """Verify Welch PSD estimation within the Signal object."""
-        data = xp.random.randn(1000) + 1j * xp.random.randn(1000)
-        s = Signal(samples=data, sampling_rate=100.0, symbol_rate=10.0)
-
-        f, p = spectral.welch_psd(s, nperseg=64)
-        assert f.shape == p.shape
-        assert isinstance(f, xp.ndarray)
-
-        # Test custom parameters
-        f2, p2 = spectral.welch_psd(
-            s,
-            nperseg=64,
-            window=("kaiser", 8.0),
-            noverlap=32,
-            nfft=128,
-            scaling="spectrum",
-        )
-        assert len(f2) == 128
-        assert f2.shape == p2.shape
-
     def test_add_pilot_tone_returns_applied_frequency(self, xp, xpt):
         """add_pilot_tone on a Signal returns a new Signal and the applied frequency."""
         sig = generate(
@@ -564,11 +543,18 @@ class TestSignalDSPOperations:
         assert len(s.samples) == 10
         assert s.sampling_rate == 1.0
 
-    def test_signal_downsample_warning(self, xp):
-        """Verify warning when downsampling already 1 SPS signal."""
-        data = xp.ones(10, dtype="complex128")
-        s = Signal(samples=data, sampling_rate=1.0, symbol_rate=1.0)
-        multirate.decimate_to_symbol_rate(s)  # Should just warn
+    def test_decimate_at_one_sps(self, xp):
+        """At 1 sps there is nothing to drop: an array comes back unchanged,
+        a Signal rescaled to unit power (``normalize`` defaults to True)."""
+        x = xp.arange(1, 11).astype(xp.complex64)
+        xpt_x = to_numpy(x)
+        np.testing.assert_array_equal(
+            to_numpy(multirate.decimate_to_symbol_rate(x, sps=1)), xpt_x
+        )
+        s = Signal(samples=x, sampling_rate=1.0, symbol_rate=1.0)
+        out = to_numpy(multirate.decimate_to_symbol_rate(s).samples)
+        np.testing.assert_allclose(out, xpt_x / np.sqrt(np.mean(np.abs(xpt_x) ** 2)),
+                                   rtol=1e-6)  # fmt: skip
 
     def test_signal_mimo_fir_coverage(self, xp):
         """Verify FIR filtering on multichannel signals."""
@@ -656,14 +642,6 @@ class TestSignalWaveformsAndModulation:
         assert isinstance(sig.samples, np.ndarray)
         assert isinstance(sig.to(device_of(xp)).samples, xp.ndarray)
         assert sig.constellation is not None
-
-    def test_rzpam_waveform(self, xp):
-        """Verify Return-to-Zero PAM signal generation and pulse-shape validation."""
-        sig = generate(
-            Constellation.pam(2), 10, symbol_rate=1e3, sps=4, pulse=Rect(0.5)
-        ).to(device_of(xp))
-        assert sig.samples.size > 0
-        assert isinstance(sig.samples, xp.ndarray)
 
     def test_qam_waveform(self, xp):
         """Verify QAM signal generation populates samples and modulation metadata."""

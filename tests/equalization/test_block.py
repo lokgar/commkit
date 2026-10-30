@@ -102,115 +102,40 @@ def _isi_record(
 # -----------------------------------------------------------------------------
 
 
-class TestBlockLMSShapes:
-    """Output array shape validation for SISO, MIMO, CPR, and history tracking."""
+class TestBlockLMSLayout:
+    """EqualizerResult's documented layout for block LMS, also when the
+    record is not a whole number of blocks: ``y_hat`` and ``error`` one
+    value per symbol, ``weights`` ``(num_taps,)`` or ``(C, C, num_taps)``,
+    ``phase_trajectory`` only with CPR, ``weights_history`` only with
+    ``store_weights=True``."""
 
-    def test_output_shape_siso(self, xp):
-        samples, syms = _qam16(n_sym=1024, sps=2)
-        r = block_lms(
-            xp.asarray(samples),
-            xp.asarray(syms),
-            num_taps=11,
-            sps=2,
-            constellation=Constellation.qam(16),
-            block_size=128,
-        )
-        n_sym = len(syms)
-        assert r.y_hat.shape == (n_sym,), f"y_hat shape {r.y_hat.shape}"
-        assert r.weights.shape == (11,), f"weights shape {r.weights.shape}"
-        assert r.error.shape == (n_sym,)
-        assert r.phase_trajectory is None
-
-    def test_output_shape_mimo(self, xp):
-        samples, training = make_test_mimo_samples(
-            num_channels=2,
-            order=16,
-            num_symbols=1024,
-            sps=2,
-            snr_db=25.0,
-            seed=1,
-            xp=xp,
-        )
-        r = block_lms(
-            samples,
-            training,
-            num_taps=11,
-            sps=2,
-            constellation=Constellation.qam(16),
-            block_size=128,
-        )
-        assert r.y_hat.shape == (2, 1024)
-        assert r.weights.shape == (2, 2, 11)
-        assert r.error.shape == (2, 1024)
-
-    def test_output_shape_bps(self, xp):
-        samples, syms = _qam16(n_sym=1024, sps=2)
-        r = block_lms(
-            xp.asarray(samples),
-            xp.asarray(syms),
-            num_taps=11,
-            sps=2,
-            constellation=Constellation.qam(16),
-            block_size=128,
-            cpr=BPS(test_phases=16, block_size=32),
-        )
-        assert r.y_hat.shape == (1024,)
-        assert r.phase_trajectory is not None
-        assert r.phase_trajectory.shape == (1024,), (
-            f"phase_trajectory shape {r.phase_trajectory.shape}"
-        )
-
-    def test_output_shape_bps_mimo(self, xp):
-        samples, training = make_test_mimo_samples(
-            num_channels=2,
-            order=16,
-            num_symbols=1024,
-            sps=2,
-            snr_db=25.0,
-            seed=2,
-            xp=xp,
-        )
-        r = block_lms(
-            samples,
-            training,
-            num_taps=11,
-            sps=2,
-            constellation=Constellation.qam(16),
-            block_size=128,
-            cpr=BPS(test_phases=16),
-        )
-        assert r.phase_trajectory.shape == (2, 1024)
-
-    def test_store_weights_shape_siso(self, xp):
-        samples, syms = _qam16(n_sym=512, sps=2)
-        r = block_lms(
-            xp.asarray(samples),
-            xp.asarray(syms),
-            num_taps=11,
-            sps=2,
-            constellation=Constellation.qam(16),
-            block_size=64,
-            store_weights=True,
-        )
-        assert r.weights_history is not None
-        assert r.weights_history.shape == (512, 11), (
-            f"weights_history shape {r.weights_history.shape}"
-        )
-
-    def test_store_weights_shape_mimo(self, xp):
-        samples, training = make_test_mimo_samples(
-            num_channels=2, order=16, num_symbols=512, sps=2, snr_db=25.0, seed=3, xp=xp
-        )
-        r = block_lms(
-            samples,
-            training,
-            num_taps=11,
-            sps=2,
-            constellation=Constellation.qam(16),
-            block_size=64,
-            store_weights=True,
-        )
-        assert r.weights_history.shape == (512, 2, 2, 11)
+    @pytest.mark.parametrize("num_channels", [1, 2])
+    @pytest.mark.parametrize("cpr", [None, BPS(test_phases=16, block_size=32)],
+                             ids=["no-cpr", "bps"])  # fmt: skip
+    def test_layout(self, xp, num_channels, cpr):
+        n, taps = 1000, 11  # not a multiple of block_size
+        if num_channels == 1:
+            samples, syms = make_test_qam_samples(
+                order=16, num_symbols=n, sps=2, seed=1
+            )
+        else:
+            samples, syms = make_test_mimo_samples(num_channels=2, order=16,
+                                                   num_symbols=n, sps=2, seed=1)  # fmt: skip
+        kw = dict(num_taps=taps, sps=2, constellation=Constellation.qam(16),
+                  block_size=128, cpr=cpr)  # fmt: skip
+        r = block_lms(xp.asarray(samples), xp.asarray(syms), **kw)
+        lead = () if num_channels == 1 else (num_channels,)
+        w = (taps,) if num_channels == 1 else (num_channels, num_channels, taps)
+        assert r.y_hat.shape == r.error.shape == (*lead, n)
+        assert r.weights.shape == w
+        if cpr is None:
+            assert r.phase_trajectory is None
+        else:
+            assert r.phase_trajectory.shape == (*lead, n)
+        assert r.weights_history is None
+        stored = block_lms(xp.asarray(samples), xp.asarray(syms),
+                           store_weights=True, **kw)  # fmt: skip
+        assert stored.weights_history.shape == (n, *w)
 
 
 class TestBlockLMSConvergence:
@@ -506,19 +431,6 @@ class TestBlockLMSCPRIntegration:
 
 class TestBlockLMSEdgeCases:
     """Degenerate inputs, non-multiple block sizes, error handling, and Signal containers."""
-
-    def test_non_multiple_block_size(self, xp):
-        samples, syms = _qam16(n_sym=1000, sps=2)
-        r = block_lms(
-            xp.asarray(samples),
-            xp.asarray(syms),
-            num_taps=11,
-            sps=2,
-            constellation=Constellation.qam(16),
-            block_size=128,
-        )
-        assert r.y_hat.shape == (1000,)
-        assert r.error.shape == (1000,)
 
     def test_host_training_follows_the_samples(self, xp, xpt):
         """Host training symbols with device samples, like lms and rls."""

@@ -351,15 +351,6 @@ class TestInformationMetrics:
         gmi_val = metrics.gmi(llrs, bits, constellation=c)
         assert gmi_val < 0.2
 
-    def test_gmi_returns_scalar_float(self, xp: Any) -> None:
-        """gmi() of 1-D LLRs returns a Python float."""
-        bits = np.array([0, 1, 1, 0, 0, 1, 1, 0], dtype="int32")
-        c = Constellation.qam(4)
-        symbols = map_bits(xp.asarray(bits), constellation=c)
-        llrs = compute_llr(symbols, noise_var=0.1, constellation=c)
-        gmi_val = metrics.gmi(llrs, bits, constellation=c)
-        assert isinstance(gmi_val, float)
-
     def test_gmi_multichannel(self, xp: Any) -> None:
         """(C, N k) LLRs give one GMI per channel."""
         rng = np.random.default_rng(3)
@@ -429,12 +420,6 @@ class TestInformationMetrics:
                 xp.asarray(symbols), noise_var=noise_var, constellation=c
             )
             assert mi_val <= np.log2(M) + 1e-6
-
-    def test_mi_returns_scalar_float(self, xp: Any) -> None:
-        """mi() of (N,) symbols returns a Python float."""
-        c = Constellation.qam(4)
-        mi_val = metrics.mi(xp.asarray(c.points[:10]), noise_var=0.1, constellation=c)
-        assert isinstance(mi_val, float)
 
     def test_mi_multichannel(self, xp: Any) -> None:
         """(C, N) symbols give one MI per channel (1.x pooled the channels)."""

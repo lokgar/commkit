@@ -8,7 +8,6 @@ from commkit.core import Signal
 from commkit.mapping import Constellation
 from tests.common import scoring, theory
 from tests.common.signals import (
-    make_test_mimo_samples,
     make_test_psk_signal,
     make_test_qam_signal,
 )
@@ -55,25 +54,17 @@ class TestWienerPhaseSmoother:
         est_slope = float((smoothed[g][-1] - smoothed[g][0]) / (n[g][-1] - n[g][0]))
         assert abs(est_slope - slope) < 0.05 * slope + 1e-5
 
-    def test_shape_siso_and_mimo(self, xp):
-        truth, q = self._random_walk(xp, N=4000)
-        phi1d = recovery.smooth_phase_wiener(
-            truth, process_variance=q, measurement_variance=0.05
-        )
-        assert phi1d.shape == truth.shape
-        phi2d_in = xp.stack([truth, truth + 0.3])
-        phi2d = recovery.smooth_phase_wiener(
-            phi2d_in, process_variance=q, measurement_variance=0.05
-        )
-        assert phi2d.shape == phi2d_in.shape
-
-    def test_derive_variances_from_physical_params(self, xp):
-        """linewidth + sampling_rate derive q internally; r is given directly."""
+    def test_derive_variances_from_physical_params(self, xp, xpt):
+        """linewidth and sampling_rate give the Wiener increment variance
+        q = 2π Δν / f_s, the same result as passing it."""
         truth, _ = self._random_walk(xp, N=4000)
-        phi = recovery.smooth_phase_wiener(
-            truth, linewidth=100e3, sampling_rate=10e9, measurement_variance=0.05
+        kw = dict(measurement_variance=0.05)
+        derived = recovery.smooth_phase_wiener(truth, linewidth=100e3,
+                                               sampling_rate=10e9, **kw)  # fmt: skip
+        explicit = recovery.smooth_phase_wiener(
+            truth, process_variance=2 * np.pi * 100e3 / 10e9, **kw
         )
-        assert phi.shape == truth.shape
+        xpt.assert_allclose(derived, explicit, rtol=1e-12)
 
     def test_invalid_params_raise(self, xp):
         truth, _ = self._random_walk(xp, N=100)
@@ -136,32 +127,6 @@ class TestCprTikhonov:
         assert scoring.phase_rms(tik, truth, symmetry=4) < 0.8 * scoring.phase_rms(
             vv, truth, symmetry=4
         )
-
-    def test_output_shape_siso(self, xp):
-        """Tikhonov CPR: 1D input -> 1D output of same length."""
-        sig = make_test_qam_signal(
-            order=16, num_symbols=512, sps=1, symbol_rate=FS, xp=xp
-        )
-        phase = recovery.estimate_carrier_phase(
-            sig.samples,
-            recovery.Tikhonov(linewidth=1e-4 * FS, snr_db=SNR_DB),
-            constellation=Constellation.qam(16),
-            sampling_rate=FS,
-        ).value
-        assert phase.shape == sig.samples.shape
-
-    def test_output_shape_mimo(self, xp):
-        """Tikhonov CPR: 2D input (C, N) -> 2D output (C, N)."""
-        mimo, _ = make_test_mimo_samples(
-            num_channels=2, order=16, num_symbols=512, sps=1, xp=xp
-        )
-        phase = recovery.estimate_carrier_phase(
-            mimo,
-            recovery.Tikhonov(linewidth=1e-4 * FS, snr_db=SNR_DB),
-            constellation=Constellation.qam(16),
-            sampling_rate=FS,
-        ).value
-        assert phase.shape == mimo.shape
 
     def test_too_short_raises(self, xp):
         """Tikhonov CPR: signal shorter than block_size raises ValueError."""

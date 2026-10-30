@@ -63,18 +63,6 @@ class TestDDPLLEnhancements:
         ).value
         xpt.assert_allclose(phi_a, phi_b, atol=1e-10)
 
-    def test_cycle_slip_shape(self, xp):
-        """cycle_slip_correction=True (PI loop) returns correct shape."""
-        sig = make_test_qam_signal(
-            order=16, num_symbols=self.N, sps=1, snr_db=SNR_DB, xp=xp
-        )
-        phi = recovery.estimate_carrier_phase(
-            sig.samples,
-            recovery.PLL(mu=1e-2, cycle_slip=recovery.CycleSlip()),
-            constellation=Constellation.qam(16),
-        ).value
-        assert phi.shape == sig.samples.shape
-
     def test_joint_cycle_slip_mimo_rows_identical(self, xp, xpt):
         """joint_channels=True + cycle_slip_correction=True: rows remain identical."""
         mimo = self._make_mimo(xp)
@@ -106,24 +94,24 @@ class TestDDPLL:
         assert phi.shape == syms.shape
         assert phi.dtype == xp.float64
 
-    def test_mimo_output_shape(self, xp):
-        """MIMO (C, N): output shape is (C, N)."""
-        C, N = 2, 256
-        syms, _ = make_test_mimo_samples(
-            num_channels=C, order=4, num_symbols=N, sps=1, seed=11, xp=xp
+    def test_second_order_loop_removes_the_ramp_lag(self, xp):
+        """A frequency offset (a phase ramp of 1e-3 rad/symbol, noiseless):
+        the first-order loop settles with the lag Δω/μ = 0.05 rad, the
+        second-order loop (beta > 0, an integrator) with none."""
+        s = to_numpy(self._qpsk_symbols(xp, N=4000))
+        truth = 1e-3 * np.arange(4000)
+        x = xp.asarray((s * np.exp(1j * truth)).astype(np.complex64))
+        c = Constellation.psk(4)
+        first = recovery.estimate_carrier_phase(
+            x, recovery.PLL(mu=0.02), constellation=c
         )
-        phi = recovery.estimate_carrier_phase(
-            syms, recovery.PLL(mu=1e-2), constellation=Constellation.psk(4)
-        ).value
-        assert phi.shape == (C, N)
-
-    def test_second_order_loop(self, xp):
-        """beta > 0 engages 2nd-order loop without raising."""
-        syms = self._qpsk_symbols(xp, N=256)
-        phi = recovery.estimate_carrier_phase(
-            syms, recovery.PLL(mu=0.02, beta=1e-4), constellation=Constellation.psk(4)
-        ).value
-        assert phi.shape == syms.shape
+        second = recovery.estimate_carrier_phase(
+            x, recovery.PLL(mu=0.02, beta=1e-4), constellation=c
+        )
+        lag1 = truth[-1000:] - to_numpy(first.value)[-1000:]
+        lag2 = truth[-1000:] - to_numpy(second.value)[-1000:]
+        np.testing.assert_allclose(lag1, 0.05, rtol=1e-3)
+        np.testing.assert_allclose(lag2, 0.0, atol=1e-5)
 
     def test_phase_init_applied(self, xp):
         """phase_init is the phase applied to the first symbol."""
@@ -134,17 +122,6 @@ class TestDDPLL:
             constellation=Constellation.psk(4),
         ).value
         assert float(phi[0]) == pytest.approx(0.5, abs=1e-12)
-
-    def test_bandwidth_shortcut_shape(self, xp):
-        """mu=None opts into the loop_bandwidth_normalized shortcut; shape/dtype hold."""
-        syms = self._qpsk_symbols(xp, N=512)
-        phi = recovery.estimate_carrier_phase(
-            syms,
-            recovery.PLL(normalized_bandwidth=1e-3),
-            constellation=Constellation.psk(4),
-        ).value
-        assert phi.shape == syms.shape
-        assert phi.dtype == xp.float64
 
     def test_bandwidth_shortcut_equals_raw_gains(self, xp, xpt):
         """mu=None, bandwidth=B is identical to raw mu=4B, beta=4B² (the resolver mapping)."""

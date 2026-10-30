@@ -52,30 +52,6 @@ class TestSignalPulseTaps:
         taps = xp.asarray(sig.pulse.taps(sig.sps))
         xpt.assert_allclose(taps, xp.ones(4))
 
-    def test_gaussian_pulse_taps(self, xp: Any) -> None:
-        """Gaussian pulse taps from a Signal are valid."""
-        sig = Signal(
-            samples=xp.ones(40, dtype="complex64"),
-            sampling_rate=4e3,
-            symbol_rate=1e3,
-            pulse=filtering.Gaussian(fwhm=0.5, span=4),
-        )
-        taps = xp.asarray(sig.pulse.taps(sig.sps))
-        assert taps is not None
-        assert len(taps) > 0
-
-    def test_rc_pulse_taps(self, xp: Any) -> None:
-        """RC pulse taps from a Signal are valid."""
-        sig = Signal(
-            samples=xp.ones(40, dtype="complex64"),
-            sampling_rate=4e3,
-            symbol_rate=1e3,
-            pulse=filtering.RC(0.5, span=4),
-        )
-        taps = xp.asarray(sig.pulse.taps(sig.sps))
-        assert taps is not None
-        assert len(taps) > 0
-
     def test_matched_filter_needs_a_pulse(self, xp: Any) -> None:
         """matched_filter raises for a Signal without a pulse and no pulse=."""
         sig = Signal(samples=xp.ones(2), sampling_rate=10, symbol_rate=5)

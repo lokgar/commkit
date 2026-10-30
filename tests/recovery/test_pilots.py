@@ -9,7 +9,8 @@ from commkit.core import Signal
 from commkit.filtering import RRC
 from commkit.impairments import apply_awgn
 from commkit.mapping import Constellation
-from tests.common.conversions import device_of
+from tests.common import scoring
+from tests.common.conversions import device_of, to_numpy
 from tests.common.metrics import calc_rms_phase_error
 from tests.common.signals import apply_phase_ramp
 
@@ -74,24 +75,6 @@ class TestCprPilots:
         err = calc_rms_phase_error(phase_est, true_phase, xp=xp)
         assert err < 0.05
 
-    def test_output_shape_siso(self, xp):
-        """Pilot CPR: 1D input -> 1D phase output."""
-        samples, pilot_indices, pilot_values, _ = self._pilot_setup(xp)
-        phase = recovery.estimate_carrier_phase(
-            samples, recovery.PilotAided(indices=pilot_indices, values=pilot_values)
-        ).value
-        assert phase.shape == samples.shape
-
-    def test_output_shape_mimo(self, xp):
-        """Pilot CPR: 2D input (C, N) -> 2D phase output (C, N)."""
-        samples_a, pilot_indices, pilot_values, _ = self._pilot_setup(xp, n_symbols=256)
-        samples_b, _, _, _ = self._pilot_setup(xp, n_symbols=256)
-        mimo = xp.stack([samples_a, samples_b])  # (2, 256)
-        phase = recovery.estimate_carrier_phase(
-            mimo, recovery.PilotAided(indices=pilot_indices, values=pilot_values)
-        ).value
-        assert phase.shape == mimo.shape
-
     def test_large_phase_unwrap(self, xp):
         """Pilot CPR: unwrapping handles cumulative phase > 2π correctly."""
         n_symbols = 512
@@ -106,16 +89,23 @@ class TestCprPilots:
         err = _rms_phase_error(xp, phase_est, true_phase)
         assert err < 0.1  # relaxed tolerance for large phase
 
-    def test_cubic_interpolation(self, xp):
-        """Cubic interpolation works on both CPU and GPU."""
-        samples, pilot_indices, pilot_values, _ = self._pilot_setup(xp)
+    @pytest.mark.parametrize("interpolation", ["linear", "cubic"])
+    def test_interpolation_tracks_the_ramp(self, xp, interpolation):
+        """Between pilots (every 16 symbols) the estimate follows the true
+        phase ramp to within 1.5x the per-pilot phase noise
+        ``sqrt(mean(N0 / (2|p|²)))`` = 0.034 rad (interpolating noisy pilots
+        gives about that, a cubic spline up to 1.3x); the uncorrected ramp
+        is off by 0.3 rad RMS."""
+        samples, idx, values, truth = self._pilot_setup(xp)
         phase = recovery.estimate_carrier_phase(
             samples,
             recovery.PilotAided(
-                indices=pilot_indices, values=pilot_values, interpolation="cubic"
+                indices=idx, values=values, interpolation=interpolation
             ),
         ).value
-        assert phase.shape == samples.shape
+        p = to_numpy(values)
+        sigma_p = np.sqrt(np.mean(10 ** (-SNR_DB / 10) / (2 * np.abs(p) ** 2)))
+        assert scoring.phase_rms(phase, truth) < 1.5 * sigma_p
 
     def test_invalid_interpolation_raises(self, xp):
         """Unknown interpolation method raises ValueError."""
@@ -219,26 +209,6 @@ class TestCprPilotTone:
             sampling_rate=fs,
         ).value
         assert self._interior_rms(xp, theta, common) < 0.12
-
-    def test_output_shape_siso(self, xp):
-        """1D input -> 1D phase output of matching length."""
-        samples, fs, _ = self._setup(xp)
-        theta = recovery.estimate_carrier_phase(
-            samples,
-            recovery.PilotTone(frequency=self.F_TONE, bandwidth=self.BW),
-            sampling_rate=fs,
-        ).value
-        assert theta.shape == samples.shape
-
-    def test_output_shape_mimo(self, xp):
-        """2D input (C, N) -> 2D phase output (C, N)."""
-        samples, fs, _ = self._setup(xp, num_channels=2)
-        theta = recovery.estimate_carrier_phase(
-            samples,
-            recovery.PilotTone(frequency=self.F_TONE, bandwidth=self.BW),
-            sampling_rate=fs,
-        ).value
-        assert theta.shape == samples.shape
 
     def test_joint_rows_identical(self, xp):
         """joint_channels broadcasts a single trajectory to all rows."""
@@ -625,19 +595,6 @@ class TestPilotsCPREnhancements:
             ),
         ).value
         xpt.assert_allclose(phi_a, phi_b, atol=1e-10)
-
-    def test_cycle_slip_shape(self, xp):
-        """cycle_slip_correction=True returns correct shape."""
-        samples, pilot_indices, pilot_values = self._pilot_setup(xp)
-        phi = recovery.estimate_carrier_phase(
-            samples,
-            recovery.PilotAided(
-                indices=pilot_indices,
-                values=pilot_values,
-                cycle_slip=recovery.CycleSlip(),
-            ),
-        ).value
-        assert phi.shape == samples.shape
 
     def test_cycle_slip_standalone_symmetry_1(self, xp, xpt):
         """correct_cycle_slips with symmetry=1 corrects an injected 2π slip."""

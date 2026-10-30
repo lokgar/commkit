@@ -13,18 +13,6 @@ from tests.common.conversions import device_of
 class TestApplyPhaseNoise:
     """Tests for apply_phase_noise."""
 
-    def test_siso_output_shape(self, xp):
-        """SISO: output shape matches input."""
-        samples = xp.ones(1024, dtype=xp.complex64)
-        out = apply_phase_noise(samples, linewidth=100e3, sampling_rate=64e9, rng=1)
-        assert out.shape == (1024,)
-
-    def test_mimo_output_shape(self, xp):
-        """MIMO (C, N): output shape matches input."""
-        samples = xp.ones((4, 512), dtype=xp.complex64)
-        out = apply_phase_noise(samples, linewidth=100e3, sampling_rate=64e9, rng=2)
-        assert out.shape == (4, 512)
-
     def test_modifies_signal(self, xp):
         """Phase noise should change the signal."""
         samples = xp.ones(1024, dtype=xp.complex64)

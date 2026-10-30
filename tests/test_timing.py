@@ -688,26 +688,24 @@ class TestCorrectTiming:
         out = timing.correct_timing(sig, shift, mode="slice")
         assert out.shape[-1] == N - shift
 
-    def test_per_channel_circular_mode(self, xp):
-        """Per-channel array offset with mode='circular': each channel rolled independently."""
+    def test_per_channel_circular_mode(self, xp, xpt):
+        """Per-channel offsets with mode='circular': each channel rolled
+        back by its own offset, ``out[c] = roll(x[c], -d_c)``."""
         C, N = 2, 64
-        rng = np.random.default_rng(20)
-        sig = xp.asarray(
-            (rng.standard_normal((C, N)) + 1j * rng.standard_normal((C, N))).astype(
-                np.complex64
-            )
-        )
-        offsets = xp.asarray(np.array([3, 7], dtype=np.int64))
-        out = timing.correct_timing(sig, offsets, mode="circular")
-        assert out.shape == (C, N)
+        x = np.random.default_rng(20).standard_normal((C, N)).astype(np.complex64)
+        out = timing.correct_timing(xp.asarray(x), xp.asarray([3, 7]), mode="circular")
+        expected = np.stack([np.roll(x[0], -3), np.roll(x[1], -7)])
+        xpt.assert_array_equal(out, xp.asarray(expected))
 
-    def test_per_channel_zero_mode(self, xp):
-        """Per-channel array offset with mode='zero': output same shape, tail zeroed."""
+    def test_per_channel_zero_mode(self, xp, xpt):
+        """Per-channel offsets with mode='zero': each channel advanced by its
+        own offset, ``out[c, n] = x[c, n + d_c]``, and the tail zeroed."""
         C, N = 2, 64
-        sig = xp.asarray(np.ones((C, N), dtype=np.complex64))
-        offsets = xp.asarray(np.array([4, 8], dtype=np.int64))
-        out = timing.correct_timing(sig, offsets, mode="zero")
-        assert out.shape == (C, N)
+        x = np.random.default_rng(21).standard_normal((C, N)).astype(np.complex64)
+        out = timing.correct_timing(xp.asarray(x), xp.asarray([4, 8]), mode="zero")
+        expected = np.zeros_like(x)
+        expected[0, :60], expected[1, :56] = x[0, 4:], x[1, 8:]
+        xpt.assert_array_equal(out, xp.asarray(expected))
 
     def test_per_channel_zero_mode_matches_scalar(self, xp, xpt):
         """Each channel of a per-channel shift equals the scalar shift of that
