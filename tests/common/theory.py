@@ -75,3 +75,10 @@ def tone_frequency_crb(snr: float, num_samples: int) -> float:
     ``6 / ((2π)² SNR N (N² - 1))``."""
     n = num_samples
     return float(6.0 / ((2.0 * np.pi) ** 2 * snr * n * (n * n - 1)))
+
+
+def qam16_gray_ber(esn0: float) -> float:
+    """Bit error rate of Gray-labelled 16-QAM: per axis a Gray 4-PAM with
+    ``a = sqrt(Es/(5 N0))``, ``(3 Q(a) + 2 Q(3a) - Q(5a)) / 4`` (exact)."""
+    a = np.sqrt(esn0 / 5.0)
+    return float((3 * q_function(a) + 2 * q_function(3 * a) - q_function(5 * a)) / 4)

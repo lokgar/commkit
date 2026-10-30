@@ -188,16 +188,23 @@ class TestPAS:
         freq = np.bincount(idx, minlength=64) / idx.size
         np.testing.assert_allclose(freq, PS64.pmf, atol=2.5e-3)
 
-    def test_decodes_above_the_gmi_threshold(self, backend_device: str) -> None:
+    @pytest.mark.parametrize("num_frames", [
+        pytest.param(6, id="smoke"),
+        pytest.param(60, id="validation", marks=pytest.mark.slow),
+    ])  # fmt: skip
+    def test_decodes_above_the_gmi_threshold(
+        self, backend_device: str, num_frames: int
+    ) -> None:
         """DVB-S2 rate 3/4 with PS-64-QAM (entropy 5): rate 3.50 bit/symbol.
         It must fail where the GMI is below the rate, and decodes 1 dB above
         that point, the gap Böcherer, Steiner and Schulte (IEEE Trans.
-        Commun., 2015) report for DVB-S2 codes."""
+        Commun., 2015) report for DVB-S2 codes.  Smoke run: 0 failures in 6
+        frames bounds the FER below 0.4 (95 %); the slow run's 60 frames bound
+        it below 0.05."""
         pas = PAS(LDPCCode.dvbs2("3/4"), PS64)
         rate = pas.k / (pas.n / 6)
-        sig = generate(
-            PS64, 10800 * 6, symbol_rate=1e9, code=pas, rng=5, device=backend_device
-        )
+        sig = generate(PS64, 10800 * num_frames, symbol_rate=1e9, code=pas, rng=5,
+                       device=backend_device)  # fmt: skip
         for esn0_db, decodes in ((9.75, False), (11.25, True)):
             rx = apply_awgn(sig, esn0_db=esn0_db, rng=6)
             nv = 10 ** (-esn0_db / 10)

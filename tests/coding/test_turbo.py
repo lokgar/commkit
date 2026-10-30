@@ -11,6 +11,8 @@ from commkit.coding import TurboCode, TurboIterations, decode, encode
 from commkit.coding.turbo import _QPP
 from commkit.impairments import apply_awgn
 from tests.common.coding import random_bits
+from tests.common.scoring import binomial_margin
+from tests.common.theory import qpsk_ber
 
 
 def _rsc(bits: np.ndarray) -> tuple[list[int], list[tuple[int, int]]]:
@@ -65,45 +67,67 @@ class TestDecoding:
         res = decode(encode(u, code=code), code=code, method=TurboIterations(2))
         xpt.assert_array_equal(res.bits, u)
 
-    def test_waterfall(self, backend_device: str) -> None:
+    @pytest.mark.parametrize("num_frames", [
+        pytest.param(30, id="smoke"),
+        pytest.param(300, id="validation", marks=pytest.mark.slow),
+    ])  # fmt: skip
+    def test_waterfall(self, backend_device: str, num_frames: int) -> None:
         """K = 1024, rate 1/3, 8 iterations: the LTE code reaches FER 1e-2
-        near Eb/N0 = 0.7 dB; all decode at 1.2 dB, most fail at -0.3 dB."""
+        near Eb/N0 = 0.7 dB; all decode at 1.2 dB, most fail at -0.3 dB.  The
+        pre-FEC BER is first checked against Gray QPSK theory (4 sigma).
+
+        Smoke run: 0 failures in 30 frames bounds the FER below 0.1 (95 %);
+        the slow run's 300 frames bound it below 0.01."""
         code = TurboCode.lte(1024)
         c = mapping.Constellation.qam(4)
-        sig = generate(
-            c,
-            code.n // 2 * 30,
-            symbol_rate=1e9,
-            code=code,
-            rng=3,
-            device=backend_device,
-        )
+        sig = generate(c, code.n // 2 * num_frames, symbol_rate=1e9, code=code,
+                       rng=3, device=backend_device)  # fmt: skip
         for ebn0, check in ((1.2, lambda f: f == 0.0), (-0.3, lambda f: f > 0.5)):
             esn0 = ebn0 + 10 * np.log10(2 * code.rate)
             rx = apply_awgn(sig, esn0_db=esn0, rng=4)
+            p = qpsk_ber(10 ** (esn0 / 10))
+            assert abs(metrics.ber(rx) - p) < binomial_margin(p, code.n * num_frames)
             res = decode(
                 mapping.compute_llr(rx, noise_var=10 ** (-esn0 / 10)), code=code
             )
             fer = metrics.fer(res.bits, sig.reference.info_bits, block_length=code.k)
             assert check(fer), (ebn0, fer)
 
-    def test_log_map_is_better(self) -> None:
+    @pytest.mark.parametrize("num_frames", [
+        pytest.param(60, id="smoke"),
+        pytest.param(600, id="validation", marks=pytest.mark.slow),
+    ])  # fmt: skip
+    def test_log_map_is_better(self, num_frames: int) -> None:
+        """At Eb/N0 = 0.5 dB, in the waterfall, exact log-MAP decodes more
+        frames than max-log (both 4 iterations).  The operating point is
+        checked first: max-log's FER inside (0.05, 0.95), else both would sit
+        at 0 or 1 and the comparison would be empty.
+
+        Smoke run (60 frames, about 0.6 against 0.4): only the ordering.  The
+        slow run (600 frames, about 0.52 against 0.37) requires the gap to
+        exceed 4 sigma of the difference of two binomial estimates."""
         code = TurboCode.lte(512)
-        sig = generate(mapping.Constellation.qam(4), code.n // 2 * 60, symbol_rate=1e9,
-                       code=code, rng=5)  # fmt: skip
-        esn0 = 0.3 + 10 * np.log10(2 * code.rate)
+        sig = generate(mapping.Constellation.qam(4), code.n // 2 * num_frames,
+                       symbol_rate=1e9, code=code, rng=5)  # fmt: skip
+        esn0 = 0.5 + 10 * np.log10(2 * code.rate)
         llrs = mapping.compute_llr(
             apply_awgn(sig, esn0_db=esn0, rng=6), noise_var=10 ** (-esn0 / 10)
         )
-        fer = [
+        maxlog, exact = (
             metrics.fer(
                 decode(llrs, code=code, method=m).bits,
                 sig.reference.info_bits,
                 block_length=code.k,
             )  # fmt: skip
             for m in (TurboIterations(4), TurboIterations(4, method="exact"))
-        ]
-        assert fer[1] <= fer[0]
+        )
+        assert 0.05 < maxlog < 0.95, maxlog
+        if num_frames < 600:
+            assert exact < maxlog, (exact, maxlog)
+        else:
+            margin = np.hypot(binomial_margin(maxlog, num_frames),
+                              binomial_margin(exact, num_frames))  # fmt: skip
+            assert maxlog - exact > margin, (exact, maxlog, margin)
 
     def test_validation(self) -> None:
         with pytest.raises(ValueError, match="Table 5.1.3-3"):

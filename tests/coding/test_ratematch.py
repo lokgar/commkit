@@ -1,5 +1,6 @@
 """Tests for punctured and shortened codes (coding/ratematch.py)."""
 
+import itertools
 from typing import Any
 
 import numpy as np
@@ -79,15 +80,35 @@ class TestShortened:
         assert bool(res.valid.all())
 
     def test_known_zeros_help_decoding(self, xp: Any, xpt: Any) -> None:
-        """Two errors in a shortened Hamming(16, 11) block: ML with the known
-        zeros corrects what the unshortened code could not see."""
-        code = Shortened(HAMMING, 6)  # (10, 5)
-        u = random_bits(5 * 20, xp, seed=4)
-        c = encode(u, code=code).reshape(20, 10)
-        llrs = (2.0 * (1.0 - 2.0 * c)).astype(xp.float32)
-        llrs[:, 0] *= -0.2  # one weak wrong bit per block
-        res = decode(llrs.reshape(-1), code=code, method=MaximumLikelihood())
-        xpt.assert_array_equal(res.bits, u)
+        """Shortened Hamming(16, 11) to (10, 5): ML decoding is over the 32
+        words of the subcode, with the 6 shortened information bits known to
+        be 0, not over the mother code with them erased.  Both decisions are
+        computed here by brute force from the generator (systematic, so the
+        shortened bits are positions 5-10 and the sent ones 0-4 and 11-15);
+        at Es/N0 near 0 dB they differ on about half the blocks, so a decoder
+        that treated the known zeros as erasures fails."""
+        code = Shortened(HAMMING, 6)
+        kept = np.r_[0:5, 11:16]
+        u_all = np.array(list(itertools.product([0, 1], repeat=HAMMING.k)))
+        mother = u_all @ HAMMING.generator.astype(int) % 2
+        sub = mother[(u_all[:, 5:] == 0).all(axis=1)][:, kept]  # info = first 5
+        rng = np.random.default_rng(4)
+        num = 200
+        words = sub[rng.integers(0, sub.shape[0], num)]
+        llrs = (1.5 * (1 - 2 * words) + 1.5 * rng.standard_normal(words.shape)).astype(
+            np.float32
+        )
+        ml = sub[np.argmax((1 - 2 * sub) @ llrs.T, axis=0)][:, :5]
+        full = np.zeros((num, HAMMING.n), np.float32)
+        full[:, kept] = llrs
+        erased = mother[np.argmax((1 - 2 * mother) @ full.T, axis=0)][:, :5]
+        assert (ml != erased).any(axis=1).sum() > num // 4  # the test can tell
+        res = decode(
+            xp.asarray(llrs.reshape(-1)), code=code, method=MaximumLikelihood()
+        )
+        xpt.assert_array_equal(
+            res.bits, xp.asarray(ml.reshape(-1), dtype=res.bits.dtype)
+        )
 
     def test_info_positions_of_nested_wrappers(self, xp: Any, xpt: Any) -> None:
         ldpc = LDPCCode.dvbs2("1/2", "short")

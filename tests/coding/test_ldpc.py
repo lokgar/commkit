@@ -15,6 +15,8 @@ from commkit.coding import ldpc as ldpc_module
 from commkit.impairments import apply_awgn
 from tests.common.coding import random_bits
 from tests.common.reference_impl import ldpc_layered_reference
+from tests.common.scoring import binomial_margin
+from tests.common.theory import qpsk_ber
 
 # A small quasi-cyclic code with an invertible parity part (lifting 7).
 QC_BASE = np.array(
@@ -252,21 +254,34 @@ class TestDecoding:
         assert not bool(res.valid.any())
         assert bool((res.iterations == 4).all())
 
+    @pytest.mark.parametrize("num_frames", [
+        pytest.param(12, id="smoke"),
+        pytest.param(100, id="validation", marks=pytest.mark.slow),
+    ])  # fmt: skip
     @pytest.mark.parametrize(
         "method", [MinSum(), SumProduct()], ids=["min-sum", "sum-product"]
     )
-    def test_dvbs2_waterfall(self, backend_device: str, method) -> None:
+    def test_dvbs2_waterfall(
+        self, backend_device: str, method: Any, num_frames: int
+    ) -> None:
         """QPSK, rate 1/2, normal frames: ETSI EN 302 307-1 Table 13 gives
         Es/N0 = 1.00 dB at a packet error rate of 1e-7 (50 iterations, with
-        the outer BCH code).  0.3 dB above it every codeword decodes; 0.6 dB
-        below it most fail."""
+        the outer BCH code).  0.3 dB above it every codeword decodes, 0.6 dB
+        below it most fail.  The channel is checked first: the pre-FEC BER is
+        Gray QPSK's ``Q(sqrt(Es/N0))`` within 4 sigma.
+
+        Smoke run: 0 failures in 12 frames bounds the FER below 0.22 (95 %),
+        so it catches a broken decoder, not a 0.1 dB loss; the slow run's 100
+        frames bound it below 0.03."""
         code = LDPCCode.dvbs2("1/2")
         c = mapping.Constellation.qam(4)
+        sig = generate(c, 32400 * num_frames, symbol_rate=1e9, code=code, rng=6,
+                       device=backend_device)  # fmt: skip
+        num_bits = 64800 * num_frames
         for esn0_db, check in ((1.3, lambda f: f == 0.0), (0.4, lambda f: f > 0.5)):
-            sig = generate(
-                c, 32400 * 12, symbol_rate=1e9, code=code, rng=6, device=backend_device
-            )
             rx = apply_awgn(sig, esn0_db=esn0_db, rng=7)
+            p = qpsk_ber(10 ** (esn0_db / 10))
+            assert abs(metrics.ber(rx) - p) < binomial_margin(p, num_bits)
             llrs = mapping.compute_llr(rx, noise_var=10 ** (-esn0_db / 10))
             res = decode(llrs, code=code, method=method)
             fer = metrics.fer(res.bits, sig.reference.info_bits, block_length=code.k)
