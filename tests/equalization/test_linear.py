@@ -1,9 +1,12 @@
 """Linear equalizers: zero-forcing / MMSE (zf_equalizer, apply_taps)."""
 
+import numpy as np
 import pytest
 
 from commkit import equalization
 from commkit.core import Signal
+from tests.common import theory
+from tests.common.conversions import to_numpy
 
 
 def _peak_lag(xp, y, x):
@@ -95,33 +98,36 @@ class TestZFEqualizer:
         with pytest.raises(ValueError, match="center"):
             equalization.zf_equalizer(samples, channel, center_tap=center)
 
-    def test_mmse_better_than_zf_in_noise(self, xp):
-        """MMSE should have lower MSE than ZF with a noisy spectral null."""
-        n = 512
-        channel = xp.array([1.0, -0.9, 0.1], dtype=xp.complex64)
-
-        rng = xp.random.RandomState(42)
-        tx = (rng.randn(n) + 1j * rng.randn(n)).astype(xp.complex64)
-
-        rx_full = xp.convolve(tx, channel, mode="full")
-        rx = rx_full[:n]
-
-        # Add Noise
-        noise = 0.1 * (rng.randn(n) + 1j * rng.randn(n)).astype(xp.complex64)
-        rx_noisy = rx + noise
-
-        zf_out = equalization.zf_equalizer(rx_noisy, channel)
-        mmse_out = equalization.zf_equalizer(rx_noisy, channel, noise_var=0.01)
-
-        mse_zf = xp.mean(xp.abs(zf_out - tx) ** 2)
-        mse_mmse = xp.mean(xp.abs(mmse_out - tx) ** 2)
-
-        mse_zf = float(mse_zf)
-        mse_mmse = float(mse_mmse)
-
-        assert mse_mmse < mse_zf, (
-            f"MMSE ({mse_mmse:.4f}) not better than ZF ({mse_zf:.4f})"
+    @pytest.mark.parametrize(
+        "taps", [[1.0, -0.9, 0.1], [0.2, 1.0, 0.2]], ids=["near-null", "two-sided"]
+    )
+    def test_mse_matches_theory(self, xp, taps):
+        """On a unit-power white input with white noise σ², the equalized
+        MSE is the theoretical per-bin value: MMSE ``mean σ²/(|H|² + σ²)``,
+        ZF ``mean σ²/|H|²``, within 10 % (2e4 samples, several overlap-save
+        blocks).  So MMSE beats ZF, by a factor ~5 near the spectral null."""
+        n, sigma2 = 20000, 0.01
+        rng = np.random.default_rng(42)
+        tx = (rng.standard_normal(n) + 1j * rng.standard_normal(n)) / np.sqrt(2)
+        noise = np.sqrt(sigma2 / 2) * (
+            rng.standard_normal(n) + 1j * rng.standard_normal(n)
         )
+        rx = (np.convolve(tx, taps)[:n] + noise).astype(np.complex64)
+        h_fft = np.fft.fft(taps, 4096)
+        interior = slice(100, n - 100)
+        for nv, expected in (
+            (sigma2, theory.mmse_mse(h_fft, sigma2, 1.0)),
+            (0.0, float(np.mean(sigma2 / np.abs(h_fft) ** 2))),
+        ):
+            out = to_numpy(
+                equalization.zf_equalizer(
+                    xp.asarray(rx),
+                    xp.asarray(np.asarray(taps, np.complex64)),
+                    noise_var=nv,
+                )
+            )
+            mse = float(np.mean(np.abs(out[interior] - tx[interior]) ** 2))
+            assert mse == pytest.approx(expected, rel=0.1), (nv, mse, expected)
 
     def test_siso_output_shape(self, xp):
         """ZF SISO output should match input shape."""
@@ -140,38 +146,6 @@ class TestZFEqualizer:
 
         out = equalization.zf_equalizer(rx, h)
         assert out.shape == (2, n)
-
-    def test_mmse_multi_block_two_sided_channel(self, xp):
-        """MMSE must correctly handle IIR two-sided response across multiple blocks.
-
-        Channel h=[0.2, 1.0, 0.2] is symmetric with minimum frequency response 0.6
-        (no spectral null). Its MMSE inverse is IIR and two-sided. The 50% overlap-save
-        architecture discards N_fft/4 samples from each end of every IFFT block,
-        rejecting both the causal and anti-causal circular transients. This test
-        uses N >> N_fft/2 (N_fft=1024, B=512) to exercise multiple block boundaries.
-        """
-        N = 2048  # 4 blocks: ceil(2048/512)=4
-        channel = xp.array([0.2, 1.0, 0.2], dtype=xp.complex64)
-        # h=[0.2,1,0.2]: H(e^jω) = e^{-jω}(1 + 0.4cos(ω)) >= 0.6 - no null
-
-        rng = xp.random.RandomState(7)
-        tx = (rng.randn(N) + 1j * rng.randn(N)).astype(xp.complex64)
-
-        rx_full = xp.convolve(tx, channel, mode="full")
-        rx = rx_full[:N]
-
-        noise = 0.05 * (rng.randn(N) + 1j * rng.randn(N)).astype(xp.complex64)
-        rx_noisy = rx + noise
-
-        out = equalization.zf_equalizer(rx_noisy, channel, noise_var=0.0025)
-
-        # Skip edges affected by convolution truncation (mode="full"[:N])
-        interior = slice(10, N - 10)
-        mse = xp.mean(xp.abs(out[interior] - tx[interior]) ** 2)
-        mse = float(mse)
-
-        # At σ²=0.0025, worst-case MMSE MSE ≈ σ²/min(|H|²) ≈ 0.0025/0.36 ≈ 0.007
-        assert mse < 0.05, f"MMSE multi-block IIR test failed: interior MSE={mse:.4f}"
 
     def test_signal_input_returns_signal(self, xp, xpt):
         """Signal input returns a Signal with the equalized samples."""

@@ -34,14 +34,30 @@ def ser(y: Any, ref: Any, constellation: Any) -> Any:
 
 
 def resolve_blind(
-    y: Any, ref: Any, constellation: Any, *, skip: int = 0, permute: bool = True
+    y: Any,
+    ref: Any,
+    constellation: Any,
+    *,
+    skip: int = 0,
+    permute: bool = True,
+    rotation: str = "symmetry",
 ) -> np.ndarray:
-    """``y`` with the ambiguities of a blind receiver removed: one channel
-    permutation (bijective, so two outputs locked onto the same source cannot
-    both score) and one rotation per stream, estimated after ``skip``."""
-    y, ref = to_numpy(y), to_numpy(ref)
+    """``y`` with the ambiguities of a blind receiver removed, estimated
+    after ``skip``: one channel permutation (bijective, so two outputs locked
+    onto the same source cannot both score), then one rotation per stream.
+
+    ``rotation="symmetry"`` removes a multiple of ``2π/S``, what blind
+    carrier recovery leaves; ``"any"`` removes one arbitrary constant angle,
+    ``∠ Σ y conj(s)``, what a phase-blind equalizer (CMA, RDE) leaves
+    without carrier recovery.  Either way a single value per stream: a
+    rotation that drifts or jumps still counts as errors.
+    """
+    y, ref = to_numpy(y), to_numpy(ref)[..., : to_numpy(y).shape[-1]]
     if permute and y.ndim == 2 and y.shape[0] > 1:
         y = to_numpy(resolve_channel_permutation(y, ref, num_skip_symbols=skip))
+    if rotation == "any":
+        corr = np.sum(y[..., skip:] * np.conj(ref[..., skip:]), axis=-1)
+        return y * np.exp(-1j * np.angle(corr))[..., None].astype(y.dtype)
     return to_numpy(
         resolve_phase_ambiguity(
             y, ref, constellation=constellation, num_skip_symbols=skip
@@ -50,10 +66,18 @@ def resolve_blind(
 
 
 def blind_ser(
-    y: Any, ref: Any, constellation: Any, *, skip: int = 0, permute: bool = True
+    y: Any,
+    ref: Any,
+    constellation: Any,
+    *,
+    skip: int = 0,
+    permute: bool = True,
+    rotation: str = "symmetry",
 ) -> Any:
     """SER after :func:`resolve_blind`, over the symbols after ``skip``."""
-    y = resolve_blind(y, ref, constellation, skip=skip, permute=permute)
+    y = resolve_blind(
+        y, ref, constellation, skip=skip, permute=permute, rotation=rotation
+    )
     ref = to_numpy(ref)[..., : y.shape[-1]]
     return ser(y[..., skip:], ref[..., skip:], constellation)
 

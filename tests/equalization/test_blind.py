@@ -21,9 +21,23 @@ from commkit.mapping import Constellation
 from tests.common import scoring, skip_unless_gpu
 from tests.common.conversions import to_numpy
 from tests.common.metrics import calc_dispersion
-from tests.common.signals import make_isi_distorted_signal
+from tests.common.signals import make_channel_signal, make_isi_distorted_signal
 
 _isi_signal = make_isi_distorted_signal
+
+
+def _channel_record(constellation, num_symbols, *, esn0_db, seed=0, xp=None):
+    """RRC record at 2 sps through a 4-tap complex ISI channel and a
+    0.3-sample delay, with AWGN."""
+    return make_channel_signal(
+        constellation,
+        num_symbols,
+        isi_taps=[0.25, 1.0, 0.3j, -0.1],
+        frac_delay=0.3,
+        esn0_db=esn0_db,
+        seed=seed,
+        xp=xp,
+    )
 
 
 class TestBlockFDAFEngine:
@@ -88,18 +102,27 @@ class TestBlockFDAFEngine:
 
 class TestBlockCMA:
     def test_blind_converges(self, xp):
-        channel = np.array([0.06, 1.0, -0.25, 0.08], np.complex64)
-        _, rx = _isi_signal(xp, "psk", 4, 40000, 5, channel)
-        r = block_cma(
-            rx,
-            constellation=Constellation.psk(4),
-            num_taps=15,
-            step_size=1e-3,
-            block_size=256,
-            sps=2,
-        )
-        assert r.y_hat.shape[-1] == 40000
-        assert calc_dispersion(r.y_hat[20000:], 4, "psk") < 0.02
+        """Block CMA on QPSK through a 4-tap complex ISI channel and a
+        0.3-sample delay (Es/N0 18 dB): after one constant rotation the second
+        half of 2e4 symbols has no errors and an EVM within 1.4x the AWGN
+        floor (0.126); frozen taps stay above twice it."""
+        c = Constellation.psk(4)
+        rx = _channel_record(c, 20000, esn0_db=18.0, xp=xp)
+        ref = to_numpy(rx.reference.symbols)
+        floor = 10 ** (-18 / 20)
+
+        def score(step):
+            y = block_cma(
+                rx, constellation=c, num_taps=21, step_size=step, block_size=256
+            )
+            y = scoring.resolve_blind(y.y_hat, ref, c, skip=10000, rotation="any")
+            return scoring.ser(y[10000:], ref[10000:], c), scoring.evm_rms(
+                y[10000:], ref[10000:]
+            )
+
+        ser, evm = score(1e-3)
+        assert ser == 0.0 and evm < 1.4 * floor
+        assert score(0.0)[1] > 2 * floor
 
     def test_cpu_gpu_consistent(self, xp):
         """block_cma output is consistent across CPU/GPU (within float32)."""
@@ -124,25 +147,22 @@ class TestBlockCMA:
         assert np.max(np.abs(to_numpy(cur.y_hat) - ref.y_hat)) < 1e-3
 
     def test_pilot_aided_resolves_phase(self, xp):
-        channel = np.array([0.06, 1.0, -0.25, 0.08], np.complex64)
-        n = 20000
-        tx, rx = _isi_signal(xp, "psk", 4, n, 5, channel)
-        pmask = np.zeros(n, bool)
+        """Pilots every 8th symbol fix the absolute phase: through the ISI
+        channel with a 1 rad carrier rotation the last quarter of 4e4 symbols
+        matches the transmitted symbols with no ambiguity resolution; without
+        pilots it does not (SER ~1)."""
+        c = Constellation.qam(16)
+        rx = _channel_record(c, 40000, esn0_db=22.0, seed=2)
+        rx = rx.replace(samples=(rx.samples * np.exp(1j)).astype(np.complex64))
+        rx = rx.to("gpu" if xp is not np else "cpu")
+        ref = to_numpy(rx.reference.symbols)
+        pmask = np.zeros(ref.size, bool)
         pmask[::8] = True
-        pilots = EqualizerPilots(to_numpy(tx)[pmask], pmask)
-        r = block_cma(
-            rx,
-            constellation=Constellation.psk(4),
-            num_taps=15,
-            step_size=1e-3,
-            block_size=128,
-            pilots=pilots,
-            sps=2,
-        )
-        # Phase resolved by pilots => low MSE vs the true symbols (no ambiguity).
-        e = to_numpy(r.y_hat)[10000:] - to_numpy(tx)[10000 : r.y_hat.shape[-1]]
-        mse_db = 10 * np.log10(float(np.mean(np.abs(e) ** 2)) + 1e-30)
-        assert mse_db < -10.0, f"PA block_cma did not resolve phase: {mse_db:.1f} dB"
+        kw = dict(constellation=c, num_taps=21, step_size=1e-3, block_size=128)
+        aided = block_cma(rx, **kw, pilots=EqualizerPilots(ref[pmask], pmask))
+        blind = block_cma(rx, **kw)
+        assert scoring.ser(to_numpy(aided.y_hat)[30000:], ref[30000:], c) < 1e-3
+        assert scoring.ser(to_numpy(blind.y_hat)[30000:], ref[30000:], c) > 0.5
 
     def test_signal_input(self, xp, xpt):
         """Signal input: sps is taken from the signal, y_hat becomes a Signal
@@ -168,19 +188,26 @@ class TestBlockCMA:
 
 class TestBlockRDE:
     def test_blind_converges_16qam(self, xp):
-        channel = np.array([0.06, 1.0, -0.25, 0.08], np.complex64)
-        _, rx = _isi_signal(xp, "qam", 16, 16000, 5, channel)
-        r = block_rde(
-            rx,
-            constellation=Constellation.qam(16),
-            num_taps=15,
-            step_size=1e-4,
-            block_size=256,
-            sps=2,
-        )
-        assert r.y_hat.shape[-1] == 16000
-        # Multi-ring 16-QAM: RDE drives |y| onto the rings (blind, phase-ambiguous).
-        assert calc_dispersion(r.y_hat[8000:], 16, "qam") < 0.05
+        """Block RDE on 16-QAM through the ISI channel (Es/N0 22 dB): after one
+        constant rotation the second half has no errors and an EVM within
+        1.4x the AWGN floor (0.079); frozen taps leave SER above 0.3.  (The
+        radial distance to the rings, used before, passed at SER 0.12.)"""
+        c = Constellation.qam(16)
+        rx = _channel_record(c, 20000, esn0_db=22.0, xp=xp)
+        ref = to_numpy(rx.reference.symbols)
+
+        def resolved(step):
+            y = block_rde(
+                rx, constellation=c, num_taps=21, step_size=step, block_size=256
+            )
+            return scoring.resolve_blind(y.y_hat, ref, c, skip=10000, rotation="any")[
+                10000:
+            ]
+
+        y = resolved(1e-3)
+        assert scoring.ser(y, ref[10000:], c) == 0.0
+        assert scoring.evm_rms(y, ref[10000:]) < 1.4 * 10 ** (-22 / 20)
+        assert scoring.ser(resolved(0.0), ref[10000:], c) > 0.3
 
     def test_default_step_converges_from_cold_start(self, xp, xpt):
         """The default step, min(1e-3, 0.5/block_size), opens a dual-pol

@@ -28,6 +28,7 @@ from commkit.recovery import BPS, PLL, CycleSlip
 from tests.common import scoring
 from tests.common.conversions import to_numpy
 from tests.common.signals import (
+    make_channel_signal,
     make_test_mimo_samples,
     make_test_qam_samples,
     make_wiener_phase,
@@ -76,6 +77,24 @@ def _wiener_qam16_trackable(n_sym, snr_db=25.0, sigma_phi=0.005, seed=33):
         rng.standard_normal(n_sym) + 1j * rng.standard_normal(n_sym)
     ).astype(np.complex64)
     return samples, syms
+
+
+def _isi_record(
+    constellation, num_symbols, *, seed=0, theta=None, num_channels=1, xp=None
+):
+    """RRC record at 2 sps through a 4-tap complex ISI channel and a
+    0.3-sample delay (and a rotation for two channels), Es/N0 22 dB."""
+    return make_channel_signal(
+        constellation,
+        num_symbols,
+        isi_taps=[0.25, 1.0, 0.3j, -0.1],
+        frac_delay=0.3,
+        theta=theta,
+        esn0_db=22.0,
+        num_channels=num_channels,
+        seed=seed,
+        xp=xp,
+    )
 
 
 # -----------------------------------------------------------------------------
@@ -197,79 +216,34 @@ class TestBlockLMSShapes:
 class TestBlockLMSConvergence:
     """Convergence characteristics under gradient descent, AWGN, and ISI."""
 
-    def test_mse_decreases(self, xp):
-        """MSE in the last quarter of the signal must be less than in the first quarter."""
-        samples, syms = _qam16(n_sym=8192, snr_db=25.0, sps=2)
-        r = block_lms(
-            xp.asarray(samples),
-            xp.asarray(syms[:512]),
-            num_taps=11,
-            sps=2,
-            step_size=5e-4,
-            constellation=Constellation.qam(16),
-            block_size=128,
-        )
-        err = xp.abs(r.error) ** 2
-        n = len(err)
-        assert float(err[: n // 4].mean()) > float(err[3 * n // 4 :].mean()), (
-            "MSE did not decrease from first to last quarter"
-        )
-
     def test_identity_channel_convergence(self, xp):
-        """On a near-identity channel, symbols after training should match reference."""
-        samples, syms = _qam16(n_sym=4096, snr_db=30.0, sps=2)
-        n_train = 1024
-        syms_xp = xp.asarray(syms)
-        r = block_lms(
-            xp.asarray(samples),
-            syms_xp,
-            num_taps=11,
-            sps=2,
-            step_size=5e-4,
-            constellation=Constellation.qam(16),
-            block_size=128,
-        )
-        y_eval = r.y_hat[n_train:]
-        s_eval = syms_xp[n_train:]
-        evm = float(
-            xp.sqrt(
-                xp.mean(xp.abs(y_eval - s_eval) ** 2) / xp.mean(xp.abs(s_eval) ** 2)
-            )
-        )
-        assert evm < 0.15, f"EVM {evm:.3f} too high - equalizer did not converge"
+        """1024 training symbols, then decisions, on a 4-tap complex ISI
+        channel with a 0.3-sample delay (16-QAM, 2 sps, Es/N0 22 dB): the
+        held-out second half has no symbol errors and an EVM within 1.4x the
+        AWGN floor (0.079) at the default step; frozen taps keep the ISI."""
+        c = Constellation.qam(16)
+        rx = _isi_record(c, 8192, xp=xp)
+        ref = to_numpy(rx.reference.symbols)
+        kw = dict(num_taps=21, block_size=128)
+        y = to_numpy(block_lms(rx, ref[:1024], **kw).y_hat)[4096:]
+        assert scoring.ser(y, ref[4096:], c) == 0.0
+        assert scoring.evm_rms(y, ref[4096:]) < 1.4 * 10 ** (-22 / 20)
+        frozen = to_numpy(block_lms(rx, ref[:1024], step_size=0.0, **kw).y_hat)
+        assert scoring.ser(frozen[4096:], ref[4096:], c) > 0.3
 
     def test_mimo_convergence(self, xp):
-        """2x2 MIMO: both channels should converge to low EVM."""
-        n_sym = 4096
-        sps = 1
-        samples, training = make_test_mimo_samples(
-            num_channels=2,
-            order=16,
-            num_symbols=n_sym,
-            sps=sps,
-            snr_db=26.0,
-            seed=5,
-            xp=xp,
-        )
-
-        r = block_lms(
-            samples,
-            training,
-            num_taps=5,
-            sps=sps,
-            step_size=2e-3,
-            constellation=Constellation.qam(16),
-            block_size=64,
-        )
-        n_eval = n_sym // 2
-        for ch in range(2):
-            evm = float(
-                xp.sqrt(
-                    xp.mean(xp.abs(r.y_hat[ch, n_eval:] - training[ch, n_eval:]) ** 2)
-                    / xp.mean(xp.abs(training[ch, n_eval:]) ** 2)
-                )
-            )
-            assert evm < 0.15, f"MIMO ch{ch} EVM {evm:.3f} too high"
+        """2x2 butterfly: two independent 16-QAM streams through the ISI
+        channel and a 30-degree polarization rotation.  After 1024 training
+        symbols each output carries its own stream without errors over the
+        held-out half; frozen taps leave the streams mixed (SER ~0.7)."""
+        c = Constellation.qam(16)
+        rx = _isi_record(c, 8192, theta=np.deg2rad(30.0), num_channels=2, seed=1, xp=xp)
+        ref = to_numpy(rx.reference.symbols)
+        kw = dict(num_taps=21, block_size=128)
+        y = to_numpy(block_lms(rx, ref[:, :1024], step_size=2e-3, **kw).y_hat)
+        np.testing.assert_array_equal(scoring.ser(y[:, 4096:], ref[:, 4096:], c), 0.0)
+        frozen = to_numpy(block_lms(rx, ref[:, :1024], step_size=0.0, **kw).y_hat)
+        assert np.all(scoring.ser(frozen[:, 4096:], ref[:, 4096:], c) > 0.3)
 
     @pytest.mark.parametrize("block_size", [256, 2048])
     def test_default_step_converges_under_polarization_mixing(
@@ -346,36 +320,23 @@ class TestBlockLMSWeightHandling:
     """Initialization, warm-starting, and normalization parameter handling."""
 
     def test_initial_taps_used(self, xp):
-        """Warm-starting from converged weights should give lower initial MSE."""
-        samples, syms = _qam16(n_sym=4096, snr_db=25.0, sps=2)
-        samples_xp = xp.asarray(samples)
-        syms_xp = xp.asarray(syms)
-        # First pass: converge weights
-        r1 = block_lms(
-            samples_xp,
-            syms_xp,
-            num_taps=11,
-            sps=2,
-            step_size=5e-4,
-            constellation=Constellation.qam(16),
-            block_size=128,
-        )
-        # Second pass: warm-start; MSE at start should be low
-        r2 = block_lms(
-            samples_xp,
-            syms_xp,
-            num_taps=11,
-            sps=2,
-            step_size=5e-4,
-            constellation=Constellation.qam(16),
-            block_size=128,
-            initial_taps=r1.weights,
-        )
-        mse_cold_start = float(xp.mean(xp.abs(r1.error[:128]) ** 2))
-        mse_warm_start = float(xp.mean(xp.abs(r2.error[:128]) ** 2))
-        assert mse_warm_start < mse_cold_start, (
-            f"warm-start MSE ({mse_warm_start:.4f}) not better than cold ({mse_cold_start:.4f})"
-        )
+        """Taps converged on one record of a channel start a new record of
+        the same channel near its optimum: the first two blocks' MSE against
+        the reference is under a quarter of a cold start's (measured 0.010
+        vs 0.116)."""
+        c = Constellation.qam(16)
+        kw = dict(num_taps=21, step_size=1e-3, block_size=128)
+        first = _isi_record(c, 8192, seed=0, xp=xp)
+        taps = block_lms(first, first.reference.symbols, **kw).weights
+        second = _isi_record(c, 8192, seed=5, xp=xp)
+        ref = to_numpy(second.reference.symbols)
+
+        def head_mse(res):
+            return float(np.mean(np.abs(to_numpy(res.y_hat)[:256] - ref[:256]) ** 2))
+
+        cold = head_mse(block_lms(second, ref, **kw))
+        warm = head_mse(block_lms(second, ref, **kw, initial_taps=taps))
+        assert warm < cold / 4, (warm, cold)
 
     def test_num_train_symbols_respected(self, xp):
         """Training length is determined by the length of training_symbols passed in."""
@@ -429,50 +390,27 @@ class TestBlockLMSCPRIntegration:
         )
 
     def test_bps_reduces_mse_under_phase_noise(self, xp):
-        """With strong phase noise, BPS should produce lower steady-state MSE."""
+        """QPSK under a random-walk phase (0.03 rad per symbol): block_lms
+        with BPS keeps the output on the transmitted symbols after 512
+        training symbols (no errors in the second half), without CPR the
+        phase walks away (SER above 0.3)."""
         rng = np.random.default_rng(99)
-        n_sym = 4096
-        sps = 2
-        const = Constellation.psk(4).points.astype(np.complex64)
-        syms = const[rng.integers(0, 4, n_sym)]
-
-        # Add random-walk phase noise
-        phase_noise = np.cumsum(0.03 * rng.standard_normal(n_sym)).astype(np.float32)
-        samples_pn = (
-            np.repeat(syms * np.exp(1j * phase_noise), sps)
-            + 0.1
-            * (
-                rng.standard_normal(2 * n_sym) + 1j * rng.standard_normal(2 * n_sym)
-            ).astype(np.complex64)
-        ).astype(np.complex64)
-
-        n_eval = n_sym // 2
-        r_no_cpr = block_lms(
-            xp.asarray(samples_pn),
-            xp.asarray(syms[:512]),
-            num_taps=7,
-            sps=sps,
-            step_size=5e-4,
-            block_size=128,
-            constellation=Constellation.psk(4),
+        n_sym, sps = 4096, 2
+        c = Constellation.psk(4)
+        syms = c.points.astype(np.complex64)[rng.integers(0, 4, n_sym)]
+        phase = np.cumsum(0.03 * rng.standard_normal(n_sym))
+        noise = 0.1 * (
+            rng.standard_normal(2 * n_sym) + 1j * rng.standard_normal(2 * n_sym)
         )
-        r_bps = block_lms(
-            xp.asarray(samples_pn),
-            xp.asarray(syms[:512]),
-            num_taps=7,
-            sps=sps,
-            step_size=5e-4,
-            block_size=128,
-            constellation=Constellation.psk(4),
-            cpr=BPS(test_phases=32, block_size=32),
+        x = xp.asarray(
+            (np.repeat(syms * np.exp(1j * phase), sps) + noise).astype(np.complex64)
         )
-
-        mse_no_cpr = float(xp.mean(xp.abs(r_no_cpr.error[n_eval:]) ** 2))
-        mse_bps = float(xp.mean(xp.abs(r_bps.error[n_eval:]) ** 2))
-        assert mse_bps < mse_no_cpr, (
-            f"BPS MSE ({mse_bps:.4f}) not better than no-CPR ({mse_no_cpr:.4f}) "
-            "under phase noise"
-        )
+        kw = dict(num_taps=7, sps=sps, step_size=5e-4, block_size=128, constellation=c)
+        bps = block_lms(x, syms[:512], **kw, cpr=BPS(test_phases=32, block_size=32))
+        none = block_lms(x, syms[:512], **kw)
+        h = n_sym // 2
+        assert scoring.ser(to_numpy(bps.y_hat)[h:], syms[h:], c) == 0.0
+        assert scoring.ser(to_numpy(none.y_hat)[h:], syms[h:], c) > 0.3
 
     def test_state_warmstart_block_lms_bps(self, xp):
         """block_lms with BPS carries the cross-block BPS state in result.state."""

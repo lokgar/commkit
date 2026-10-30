@@ -9,103 +9,71 @@ from commkit.equalization import EqualizerResult
 from commkit.equalization.sequential._dd import _check_rls_divergence
 from commkit.filtering import RRC
 from commkit.mapping import Constellation
+from tests.common import scoring
 from tests.common.conversions import to_numpy
 from tests.common.signals import make_channel_signal
+
+ISI_TAPS = [0.25, 1.0, 0.3j, -0.1]
+
+
+def _isi_record(constellation, num_symbols, *, esn0_db, seed=0, xp=None):
+    """RRC record at 2 sps through a 4-tap complex ISI channel and a
+    0.3-sample delay, with AWGN; an equalizer must undo it."""
+    return make_channel_signal(
+        constellation,
+        num_symbols,
+        sps=2,
+        isi_taps=ISI_TAPS,
+        frac_delay=0.3,
+        esn0_db=esn0_db,
+        seed=seed,
+        xp=xp,
+    )
 
 
 class TestLMS:
     """Tests for the LMS adaptive equalizer."""
 
     def test_convergence_known_channel(self, xp):
-        """LMS should converge and recover QPSK through a known ISI channel."""
-        n_symbols = 1000
-        # Create channel on device
-        channel = xp.array([0.2, 1.0, 0.3], dtype=xp.complex64)
+        """Trained LMS on a 4-tap complex ISI channel with a 0.3-sample delay
+        (16-QAM, 2 sps, Es/N0 22 dB) approaches the least-squares Wiener
+        solution of the same 21-tap regressor: within 1.5 dB of its MSE over
+        the second half of 2e4 symbols (measured 1.2 dB; the rest is gradient
+        noise and lag).  The record is periodic, so the Wiener taps are exact
+        on circular windows.  Frozen taps (μ = 0) are far from it."""
+        rx = _isi_record(Constellation.qam(16), 20000, esn0_db=22.0, xp=xp)
+        ref = to_numpy(rx.reference.symbols)
+        x = to_numpy(rx.samples).astype(np.complex128)
+        T, sps, half = 21, 2, 10000
+        windows = (np.arange(ref.size)[:, None] * sps - T // 2 + np.arange(T)) % x.size
+        w, *_ = np.linalg.lstsq(x[windows], ref, rcond=None)
+        wiener_mse = float(np.mean(np.abs(x[windows] @ w - ref) ** 2))
 
-        # Generate bits and symbols on device
-        # Generate symbols and RRC pulse-shaped waveform
+        def tail_mse(step):
+            y = to_numpy(equalization.lms(rx, ref, num_taps=T, step_size=step).y_hat)
+            return float(np.mean(np.abs(y[half:] - ref[half:]) ** 2))
 
-        sig = generate(
-            Constellation.psk(4),
-            n_symbols,
-            symbol_rate=1e6,
-            sps=2,
-            pulse=RRC(0.35),
-            rng=42,
-        )
-
-        tx = xp.asarray(sig.reference.symbols)
-
-        rx_up = xp.asarray(sig.samples)
-
-        # Apply Channel (Convolution)
-        rx = xp.convolve(rx_up, channel, mode="same")
-
-        # Add Noise (SNR ~ 20dB implies sigma ~ 0.1 for unit power signal)
-        # Using fixed noise for reproducibility in test
-        rng = xp.random.RandomState(0)
-        noise = 0.05 * (rng.randn(len(rx)) + 1j * rng.randn(len(rx))).astype(
-            xp.complex64
-        )
-        rx = rx + noise
-
-        result = equalization.lms(
-            rx,
-            tx,
-            num_taps=15,
-            step_size=0.01,
-            constellation=Constellation.psk(4),
-            sps=2,
-        )
-
-        assert isinstance(result, EqualizerResult)
-
-        # Check convergence (MSE on device)
-        # Last 200 symbols
-        mse_tail = xp.mean(xp.abs(result.error[-200:]) ** 2)
-
-        # Move singular scalar to CPU for assertion if needed, or assert on device scalar
-        # Pytest/NumPy comparisons handling of CuPy scalars varies, explicit conversion is safest
-        mse_tail = float(mse_tail)
-
-        assert mse_tail < 0.1, f"LMS did not converge: tail MSE = {mse_tail:.4f}"
+        assert 10 * np.log10(tail_mse(1e-3) / wiener_mse) < 1.5
+        assert tail_mse(0.0) > 10 * wiener_mse
 
     def test_decision_directed_after_training(self, xp):
-        """LMS should maintain performance in DD mode after training."""
-        n_symbols = 1000
-        n_train = 300
-        channel = xp.array([0.1, 1.0, 0.2], dtype=xp.complex64)
+        """1000 training symbols, then decisions: the held-out second half
+        has no symbol errors against the transmitted symbols and an EVM
+        within 1.4x the AWGN floor (0.079 at 22 dB); frozen taps leave the
+        ISI (SER above 0.3)."""
+        c = Constellation.qam(16)
+        rx = _isi_record(c, 6000, esn0_db=22.0, xp=xp)
+        ref = to_numpy(rx.reference.symbols)
 
-        # Generate symbols and RRC pulse-shaped waveform
+        def run(step):
+            return to_numpy(
+                equalization.lms(rx, ref[:1000], num_taps=21, step_size=step).y_hat
+            )[3000:]
 
-        sig = generate(
-            Constellation.psk(4),
-            n_symbols,
-            symbol_rate=1e6,
-            sps=2,
-            pulse=RRC(0.35),
-            rng=123,
-        )
-
-        tx = xp.asarray(sig.reference.symbols)
-
-        rx_up = xp.asarray(sig.samples)
-        rx = xp.convolve(rx_up, channel, mode="same")
-
-        result = equalization.lms(
-            rx,
-            tx[:n_train],
-            num_taps=15,
-            step_size=0.01,
-            constellation=Constellation.psk(4),
-            sps=2,
-        )
-
-        # Check DD mode MSE
-        mse_dd = xp.mean(xp.abs(result.error[n_train + 50 :]) ** 2)
-        mse_dd = float(mse_dd)
-
-        assert mse_dd < 0.2, f"LMS DD mode failed: MSE = {mse_dd:.4f}"
+        y = run(1e-3)
+        assert scoring.ser(y, ref[3000:], c) == 0.0
+        assert scoring.evm_rms(y, ref[3000:]) < 1.4 * 10 ** (-22 / 20)
+        assert scoring.ser(run(0.0), ref[3000:], c) > 0.3
 
     def test_output_shape_siso(self, xp):
         """LMS SISO output shapes should be correct."""
@@ -180,36 +148,16 @@ class TestRLS:
     """Tests for the RLS adaptive equalizer."""
 
     def test_convergence(self, xp):
-        """RLS should converge on a known ISI channel."""
-        n_symbols = 500
-        channel = xp.array([0.2, 1.0, 0.3], dtype=xp.complex64)
-
-        sig = generate(
-            Constellation.psk(4),
-            n_symbols,
-            symbol_rate=1e6,
-            sps=1,
-            pulse=RRC(0.35),
-            rng=42,
-        )
-        tx = xp.asarray(sig.reference.symbols)
-        rx_up = xp.asarray(sig.samples)
-
-        rx = xp.convolve(rx_up, channel, mode="same")
-
-        result = equalization.rls(
-            rx,
-            tx,
-            num_taps=15,
-            forgetting_factor=0.99,
-            constellation=Constellation.psk(4),
-            sps=1,
-        )
-
-        mse_tail = xp.mean(xp.abs(result.error[-100:]) ** 2)
-        mse_tail = float(mse_tail)
-
-        assert mse_tail < 0.1, f"RLS did not converge: tail MSE = {mse_tail:.4f}"
+        """RLS with 500 training symbols on the ISI channel: no symbol errors
+        after training, EVM within 1.2x the AWGN floor (RLS has almost no
+        misadjustment at λ = 0.999)."""
+        c = Constellation.qam(16)
+        rx = _isi_record(c, 3000, esn0_db=22.0, xp=xp)
+        ref = to_numpy(rx.reference.symbols)
+        res = equalization.rls(rx, ref[:500], num_taps=21, forgetting_factor=0.999)
+        y = to_numpy(res.y_hat)[1000:]
+        assert scoring.ser(y, ref[1000 : 1000 + y.size], c) == 0.0
+        assert scoring.evm_rms(y, ref[1000 : 1000 + y.size]) < 1.2 * 10 ** (-22 / 20)
 
     @pytest.mark.parametrize("seed", [0, 1, 2])
     def test_faster_convergence_than_lms(self, xp, seed):
@@ -262,36 +210,23 @@ class TestCMA:
     """Tests for the CMA blind equalizer."""
 
     def test_convergence_qpsk(self, xp):
-        """CMA should converge for QPSK (constant modulus) through ISI channel."""
-        n_symbols = 2000
-        channel = xp.array([0.2, 1.0, 0.3], dtype=xp.complex64)
+        """Blind CMA on QPSK through the ISI channel (Es/N0 18 dB): after one
+        constant rotation (CMA is blind to the carrier phase) the second half
+        has no symbol errors and an EVM within 1.4x the AWGN floor (0.126);
+        frozen taps stay above twice the floor."""
+        c = Constellation.psk(4)
+        rx = _isi_record(c, 10000, esn0_db=18.0, xp=xp)
+        ref = to_numpy(rx.reference.symbols)
+        floor = 10 ** (-18 / 20)
 
-        sig = generate(
-            Constellation.psk(4),
-            n_symbols,
-            symbol_rate=1e6,
-            sps=2,
-            pulse=RRC(0.35),
-            rng=42,
-        )
-        rx_up = xp.asarray(sig.samples)
-        rx = xp.convolve(rx_up, channel, mode="same")
-        rx = xp.ascontiguousarray(rx)  # Ensure a contiguous layout
+        def evm(step):
+            y = equalization.cma(rx, num_taps=21, step_size=step, constellation=c).y_hat
+            y = scoring.resolve_blind(y, ref, c, skip=5000, rotation="any")[5000:]
+            return scoring.ser(y, ref[5000:], c), scoring.evm_rms(y, ref[5000:])
 
-        result = equalization.cma(
-            rx, num_taps=21, step_size=0.005, constellation=Constellation.psk(4), sps=2
-        )
-
-        # After convergence, output should have roughly constant modulus
-        y = result.y_hat
-        modulus_tail = xp.abs(y[-500:])
-        modulus_std = xp.std(modulus_tail)
-
-        modulus_std = float(modulus_std)
-
-        assert modulus_std < 0.3, (
-            f"CMA output modulus not constant: std = {modulus_std:.4f}"
-        )
+        ser, adapted = evm(1e-3)
+        assert ser == 0.0 and adapted < 1.4 * floor
+        assert evm(0.0)[1] > 2 * floor
 
     def test_output_shape_siso(self, xp):
         """CMA SISO output should be 1D."""
@@ -310,84 +245,39 @@ class TestCMA:
 class TestRDE:
     """Tests for the Radius Directed Equalizer."""
 
-    def test_convergence_qpsk(self, xp):
-        """RDE should converge for QPSK (single-ring) just like CMA."""
-        n_symbols = 2000
-        channel = xp.array([0.2, 1.0, 0.3], dtype=xp.complex64)
+    def test_convergence_16qam(self, xp):
+        """Blind RDE on 16-QAM through the ISI channel (Es/N0 22 dB, 4e4
+        symbols): after one constant rotation the second half has no symbol
+        errors; frozen taps leave SER above 0.3.  (A step of 1e-4 is too slow
+        for this record: SER 0.21.)"""
+        c = Constellation.qam(16)
+        rx = _isi_record(c, 40000, esn0_db=22.0, xp=xp)
+        ref = to_numpy(rx.reference.symbols)
 
-        sig = generate(
-            Constellation.psk(4),
-            n_symbols,
-            symbol_rate=1e6,
-            sps=2,
-            pulse=RRC(0.35),
-            rng=42,
+        def ser(step):
+            y = equalization.rde(rx, num_taps=21, step_size=step, constellation=c)
+            return scoring.blind_ser(y.y_hat, ref, c, skip=20000, rotation="any")
+
+        assert ser(1e-3) == 0.0
+        assert ser(0.0) > 0.3
+
+    def test_refines_cma_on_16qam(self, xp):
+        """RDE started from CMA's taps lowers the EVM on 16-QAM: CMA's error
+        y(|y|² - R²) is not zero on the points of a multi-ring constellation,
+        RDE's nearest-ring error is."""
+        c = Constellation.qam(16)
+        rx = _isi_record(c, 20000, esn0_db=22.0, xp=xp)
+        ref = to_numpy(rx.reference.symbols)
+        cma = equalization.cma(rx, num_taps=21, step_size=5e-4, constellation=c)
+        rde = equalization.rde(
+            rx, num_taps=21, step_size=5e-4, constellation=c, initial_taps=cma.weights
         )
-        rx = xp.convolve(xp.asarray(sig.samples), channel, mode="same")
-        rx = xp.ascontiguousarray(rx)
-
-        result = equalization.rde(
-            rx, num_taps=21, step_size=0.005, constellation=Constellation.psk(4), sps=2
-        )
-
-        y = result.y_hat
-        modulus_tail = xp.abs(y[-500:])
-        modulus_std = xp.std(modulus_tail)
-        modulus_std = float(modulus_std)
-
-        assert modulus_std < 0.3, (
-            f"RDE QPSK modulus not converged: std = {modulus_std:.4f}"
-        )
-
-    def test_steady_state_error_16qam(self, xp):
-        """RDE steady-state error should be much lower than CMA on 16-QAM.
-
-        CMA and RDE are both phase-ambiguous, so EVM vs the reference symbol
-        sequence is not a reliable comparison.  Instead we compare the
-        steady-state magnitude of each algorithm's *own* error signal.
-
-        For 16-QAM (3 rings), CMA's error e = y*(|y|²-R²_Godard) is bounded
-        below by a non-zero "design residual": since R²_Godard is a single
-        average radius, inner-ring and outer-ring symbols always have large
-        signed errors that cancel only in expectation, not per-symbol.
-
-        RDE's error e = y*(|y|²-R_d²) uses the nearest ring for each symbol,
-        so it approaches zero as the equalizer converges to correct ISI
-        compensation.  Therefore: mean(|e_RDE|) << mean(|e_CMA|) at steady state.
-        """
-
-        n_symbols = 5000
-        channel = xp.array([0.15, 1.0, 0.25], dtype=xp.complex64)
-
-        sig = generate(
-            Constellation.qam(16),
-            n_symbols,
-            symbol_rate=1e6,
-            sps=2,
-            pulse=RRC(0.35),
-            rng=7,
-        )
-        rx = xp.convolve(xp.asarray(sig.samples), channel, mode="same")
-        rx = xp.ascontiguousarray(rx)
-
-        result_rde = equalization.rde(
-            rx, num_taps=21, step_size=5e-4, constellation=Constellation.qam(16), sps=2
-        )
-        result_cma = equalization.cma(
-            rx, num_taps=21, step_size=5e-4, constellation=Constellation.qam(16), sps=2
-        )
-
-        def late_error(err):
-            return float(xp.mean(xp.abs(err[-500:])))
-
-        err_rde = late_error(result_rde.error)
-        err_cma = late_error(result_cma.error)
-
-        assert err_rde < err_cma, (
-            f"RDE steady-state error ({err_rde:.4f}) should be lower than "
-            f"CMA ({err_cma:.4f}) for 16-QAM: CMA has an irreducible design "
-            f"residual from using a single Godard radius on a multi-ring constellation"
-        )
+        evm = {}
+        for name, res in (("cma", cma), ("rde", rde)):
+            y = scoring.resolve_blind(res.y_hat, ref, c, skip=10000, rotation="any")
+            assert scoring.ser(y[10000:], ref[10000:], c) == 0.0, name
+            evm[name] = scoring.evm_rms(y[10000:], ref[10000:])
+        assert evm["rde"] < evm["cma"], evm
 
     def test_output_shape_siso(self, xp):
         """RDE SISO output should be 1D with correct length."""
@@ -574,18 +464,21 @@ class TestEdgeCases:
         with pytest.raises(ValueError, match="needs a constellation"):
             equalization.lms(rx, num_taps=7, sps=2)
 
-    def test_rls_warns_fractional_spacing(self, xp):
-        """RLS should warn when sps > 1 (ill-conditioned correlation matrix)."""
+    def test_rls_warns_fractional_spacing(self, xp, caplog):
+        """RLS at sps > 1 warns that its correlation matrix is ill-conditioned;
+        at 1 sps it does not."""
+        import logging
+
         rx, sig = self._qpsk_rx(xp, n_symbols=400)
-        result = equalization.rls(
-            xp.asarray(sig.samples),
-            xp.asarray(sig.reference.symbols),
-            sps=2,
-            num_taps=7,
-            constellation=Constellation.psk(4),
-        )
-        # Should complete and return valid output (even if warned)
-        assert isinstance(result, EqualizerResult)
+        train = xp.asarray(sig.reference.symbols)
+        kw = dict(num_taps=7, constellation=Constellation.psk(4))
+        with caplog.at_level(logging.WARNING, logger="commkit"):
+            equalization.rls(rx, train, sps=2, **kw)
+        assert any("ill-conditioned" in r.getMessage() for r in caplog.records)
+        caplog.clear()
+        with caplog.at_level(logging.WARNING, logger="commkit"):
+            equalization.rls(rx[::2], train, sps=1, **kw)
+        assert not any("ill-conditioned" in r.getMessage() for r in caplog.records)
 
     def test_validate_sps_small_num_taps(self, xp, caplog):
         """_validate_sps should log a warning when num_taps < 4*sps."""
@@ -602,27 +495,17 @@ class TestEdgeCases:
             )
         assert any("small" in r.message.lower() for r in caplog.records)
 
-    def test_rde_no_modulation_falls_back_to_cma(self, xp):
-        """RDE with no modulation should use unit radius (same gradient as CMA R²=1)."""
+    def test_rde_no_modulation_falls_back_to_cma(self, xp, xpt):
+        """Without a constellation RDE has the one radius 1, which is CMA
+        with R² = 1: the two give the same output."""
         rx, _ = self._qpsk_rx(xp)
-
-        result = equalization.rde(rx, num_taps=7, step_size=0.005, sps=2)
-
-        assert isinstance(result, EqualizerResult)
-        assert result.y_hat.shape[0] > 0
-
-    def test_rde_mimo_no_modulation(self, xp):
-        """RDE MIMO path with no modulation should run (unit radius, 2-ch)."""
-
-        sig = generate(
-            Constellation.psk(4), 600, symbol_rate=1e6, sps=2, pulse=RRC(0.35), rng=0
+        kw = dict(num_taps=7, step_size=0.005, sps=2)
+        xpt.assert_allclose(
+            equalization.rde(rx, **kw).y_hat,
+            equalization.cma(rx, **kw).y_hat,
+            rtol=1e-5,
+            atol=1e-6,
         )
-        rx = xp.asarray(sig.samples)
-        rx_mimo = xp.stack([rx, xp.roll(rx, 1)], axis=0)
-
-        result = equalization.rde(rx_mimo, num_taps=7, step_size=5e-4, sps=2)
-
-        assert result.y_hat.shape == (2, rx.shape[0] // 2)
 
     def test_lms_num_train_symbols_clamps_numba(self, xp):
         """LMS Numba: pre-sliced training_symbols limits DA phase length."""
@@ -654,23 +537,35 @@ class TestEdgeCases:
         result = equalization.lms(rx, train, num_taps=7, step_size=0.05, sps=2)
         assert result.num_train_symbols == result.y_hat.shape[-1]
 
-    def test_center_tap_override(self, xp):
-        """Custom center_tap should shift the decision delay without error."""
-        rx, sig = self._qpsk_rx(xp)
-        train = xp.asarray(sig.reference.symbols)
+    @pytest.mark.parametrize(
+        ("taps", "best", "worst"),
+        [([1.0, 0.6, 0.5, 0.4, 0.3], 8, 2), ([0.3, 0.4, 0.5, 0.6, 1.0], 2, 8)],
+        ids=["post-cursor", "pre-cursor"],
+    )
+    def test_center_tap_override(self, xp, xpt, taps, best, worst):
+        """``center_tap`` splits the taps around the main path: on a channel
+        whose ISI lies on one side, the matching split reaches a clearly lower
+        MSE against the reference (measured 0.054 vs 0.097), while the
+        regressor window moves with it so the output stays aligned (frozen
+        taps give the same output for any centre tap)."""
+        c = Constellation.qam(16)
+        rx = make_channel_signal(c, 6000, isi_taps=taps, esn0_db=30.0, xp=xp)
+        ref = to_numpy(rx.reference.symbols)
 
-        result = equalization.lms(
-            rx,
-            train,
-            num_taps=11,
-            step_size=0.05,
-            constellation=Constellation.psk(4),
-            center_tap=8,
-            sps=2,
+        def mse(center):
+            y = equalization.lms(
+                rx, ref, num_taps=11, step_size=1e-3, center_tap=center
+            ).y_hat
+            return float(np.mean(np.abs(to_numpy(y)[3000:] - ref[3000:]) ** 2))
+
+        assert mse(best) < 0.7 * mse(worst)
+        frozen = dict(num_taps=11, step_size=0.0, constellation=c)
+        xpt.assert_allclose(
+            equalization.cma(rx, **frozen, center_tap=best).y_hat,
+            equalization.cma(rx, **frozen).y_hat,
+            rtol=1e-5,
+            atol=1e-6,
         )
-
-        assert isinstance(result, EqualizerResult)
-        assert result.y_hat.shape[0] > 0
 
 
 class TestNumbaBackendCoverage:
@@ -691,16 +586,26 @@ class TestNumbaBackendCoverage:
         return xp.ascontiguousarray(rx), sig
 
     def test_lms_numba_pure_dd_no_training(self, xp):
-        """LMS numba with no training symbols (pure DD from start) covers _prepare_training_numpy else branch."""
-        rx, _ = self._make_qpsk_rx(xp, n_symbols=600)
-
-        # No training_symbols -> _prepare_training_numpy gets None -> n_train_aligned=0
-        result = equalization.lms(
-            rx, num_taps=11, step_size=0.01, constellation=Constellation.psk(4), sps=2
+        """Decision-directed LMS from a cold start, without training, opens
+        a mild ISI channel (QPSK, Es/N0 18 dB): after one rotation of π/2
+        multiples (decisions alone cannot fix the quadrant) the second half
+        has no symbol errors and an EVM within 1.4x the AWGN floor; frozen
+        taps stay above twice it."""
+        c = Constellation.psk(4)
+        rx = make_channel_signal(
+            c, 6000, isi_taps=[0.15, 1.0, 0.2j], esn0_db=18.0, seed=1, xp=xp
         )
+        ref = to_numpy(rx.reference.symbols)
+        floor = 10 ** (-18 / 20)
 
-        assert isinstance(result, EqualizerResult)
-        assert result.y_hat.ndim == 1
+        def score(step):
+            y = equalization.lms(rx, num_taps=21, step_size=step, constellation=c)
+            y = scoring.resolve_blind(y.y_hat, ref, c, skip=3000)[3000:]
+            return scoring.ser(y, ref[3000:], c), scoring.evm_rms(y, ref[3000:])
+
+        ser, evm = score(1e-3)
+        assert ser == 0.0 and evm < 1.4 * floor
+        assert score(0.0)[1] > 2 * floor
 
     def test_rls_numba_siso(self, xp):
         """RLS with numba backend on SISO input."""
@@ -716,12 +621,11 @@ class TestNumbaBackendCoverage:
         assert result.weights.shape == (9,)
 
     def test_rls_divergence_guard(self, xp):
-        """Non-finite RLS weights raise an actionable error instead of silently
-        returning garbage taps (mirrors the block_lms divergence safeguard)."""
+        """The guard behind rls() raises an actionable error on non-finite
+        taps and passes finite ones (a unit test of the check: the RLS
+        recursion's regularization keeps it finite on the inputs tried)."""
         good = xp.ones((2, 2, 5), dtype=xp.complex64)
-        # Finite weights pass through untouched.
         _check_rls_divergence(good, xp, 0.99, 0.01)
-
         bad = good.copy()
         bad[0, 0, 0] = float("nan")
         with pytest.raises(RuntimeError, match="RLS equalizer diverged"):
@@ -857,78 +761,28 @@ class TestCmaPilotAided:
         getattr(equalization, name)(x, sps=2, num_taps=5, pilots=pilots)
         np.testing.assert_array_equal(x, before)
 
-    def test_cma_pilot_aided_numba_output_shape(self, xp):
-        """cma() with pilots returns the body length."""
-        frame, samples_cpu, pilot_syms_cpu, pilot_mask_bool, n_body = (
-            self._make_comb_frame_and_samples(xp)
-        )
-        # Slice body samples (after preamble)
-        sps = 2
-        n_pre = frame.preamble.num_symbols * sps
-        body_samples = samples_cpu[n_pre:]
-
-        pilots = equalization.EqualizerPilots(pilot_syms_cpu, pilot_mask_bool)
-        result = equalization.cma(
-            body_samples,
-            constellation=Constellation.qam(16),
-            num_taps=11,
-            step_size=1e-4,
-            sps=2,
-            pilots=pilots,
-        )
-        assert isinstance(result, EqualizerResult)
-        assert result.y_hat.shape[-1] == n_body
-
-    def test_rde_pilot_aided_numba_output_shape(self, xp):
-        """rde() with pilots returns the body length."""
-        frame, samples_cpu, pilot_syms_cpu, pilot_mask_bool, n_body = (
-            self._make_comb_frame_and_samples(xp)
-        )
-        sps = 2
-        n_pre = frame.preamble.num_symbols * sps
-        body_samples = samples_cpu[n_pre:]
-
-        pilots = equalization.EqualizerPilots(pilot_syms_cpu, pilot_mask_bool)
-        result = equalization.rde(
-            body_samples,
-            constellation=Constellation.qam(16),
-            num_taps=11,
-            step_size=1e-4,
-            sps=2,
-            pilots=pilots,
-        )
-        assert isinstance(result, EqualizerResult)
-        assert result.y_hat.shape[-1] == n_body
-
-    def test_rde_pilot_aided_initial_taps_warm_start(self, xp):
-        """rde() PA accepts initial_taps from a prior lms() call."""
-        frame, samples_cpu, pilot_syms_cpu, pilot_mask_bool, n_body = (
-            self._make_comb_frame_and_samples(xp)
-        )
-        sps = 2
-        n_pre = frame.preamble.num_symbols * sps
-        preamble_samples = samples_cpu[:n_pre]
-        body_samples = samples_cpu[n_pre:]
-        # Pre-converge on preamble
-        pre = equalization.lms(
-            preamble_samples,
-            training_symbols=to_numpy(frame.preamble.symbols),
-            num_taps=11,
-            step_size=0.01,
-            sps=2,
-        )
-        pilots = equalization.EqualizerPilots(pilot_syms_cpu, pilot_mask_bool)
-        result = equalization.rde(
-            body_samples,
-            constellation=Constellation.qam(16),
-            num_taps=11,
-            step_size=1e-4,
-            sps=2,
-            initial_taps=pre.weights,
-            pilots=pilots,
-        )
-        assert isinstance(result, EqualizerResult)
-        assert result.y_hat.shape[-1] == n_body
+    @pytest.mark.parametrize("name", ["cma", "rde"])
+    def test_pilots_resolve_the_phase(self, xp, name):
+        """Pilots every 10th symbol fix the absolute phase a blind equalizer
+        cannot see: on the ISI channel with a 1 rad carrier rotation the
+        output matches the transmitted symbols with no ambiguity resolution
+        (SER < 1e-3 over the last quarter of 4e4 symbols; the pilot gradient turns
+        the taps at a rate set by the step and the pilot density, about 3e4
+        symbols for 1 rad at 1e-3); without pilots it does not."""
+        c = Constellation.qam(16)
+        rx = _isi_record(c, 40000, esn0_db=22.0, seed=2)
+        rx = rx.replace(samples=(rx.samples * np.exp(1j)).astype(np.complex64))
+        rx = rx.to("gpu" if xp is not np else "cpu")
+        ref = to_numpy(rx.reference.symbols)
+        mask = np.zeros(ref.size, dtype=bool)
+        mask[::10] = True
+        pilots = equalization.EqualizerPilots(ref[mask], mask)
+        fn = getattr(equalization, name)
+        kw = dict(num_taps=21, step_size=1e-3, constellation=c)
+        aided = to_numpy(fn(rx, **kw, pilots=pilots).y_hat)
+        blind = to_numpy(fn(rx, **kw).y_hat)
+        assert scoring.ser(aided[30000:], ref[30000:], c) < 1e-3
+        assert scoring.ser(blind[30000:], ref[30000:], c) > 0.5
 
     def test_equalizer_pilots(self, xp):
         """EqualizerPilots checks its shapes; from_frame takes the frame's

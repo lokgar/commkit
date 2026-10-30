@@ -8,8 +8,13 @@ from commkit.backend import to_device
 from commkit.equalization import EqualizerResult
 from commkit.filtering import RRC
 from commkit.mapping import Constellation
+from tests.common import scoring
 from tests.common.conversions import to_numpy
-from tests.common.signals import make_test_psk_samples, make_test_qam_signal
+from tests.common.signals import (
+    make_channel_signal,
+    make_test_psk_samples,
+    make_test_qam_signal,
+)
 
 # -----------------------------------------------------------------------------
 # Helpers
@@ -157,52 +162,35 @@ class TestInitialTaps:
         assert result.y_hat.shape[-1] == expected_syms
 
     def test_warm_start_rde_same_or_better_evm(self, xp):
-        """RDE warm-started from LMS achieves same or better EVM than cold-start."""
-        from commkit.impairments import apply_awgn
+        """RDE started from taps that LMS trained on 200 symbols opens the
+        ISI channel at once: over the first 2000 symbols its EVM against the
+        reference (one constant rotation removed for both) is below the
+        cold start's, which is still converging, and its second half has no
+        symbol errors."""
+        c = Constellation.qam(16)
+        rx = make_channel_signal(
+            c,
+            8000,
+            isi_taps=[0.25, 1.0, 0.3j, -0.1],
+            frac_delay=0.3,
+            esn0_db=22.0,
+            xp=xp,
+        )
+        ref = to_numpy(rx.reference.symbols)
+        kw = dict(constellation=c, num_taps=21, step_size=1e-3)
+        pre = equalization.lms(rx, ref[:200], num_taps=21, step_size=1e-2)
+        warm = equalization.rde(rx, **kw, initial_taps=pre.weights)
+        cold = equalization.rde(rx, **kw)
 
-        sig = generate(
-            Constellation.qam(16), 4000, symbol_rate=1e6, sps=2, pulse=RRC(0.35), rng=42
-        )
-        rx_np = apply_awgn(sig.samples, esn0_db=25.0, sps=2)
-        rx = xp.asarray(rx_np)
+        def resolved(res):
+            return scoring.resolve_blind(res.y_hat, ref, c, rotation="any")
 
-        # Cold-start RDE
-        cold = equalization.rde(
-            rx, constellation=Constellation.qam(16), num_taps=21, step_size=5e-4, sps=2
+        y_warm, y_cold = resolved(warm), resolved(cold)
+        head = slice(0, 2000)
+        assert scoring.evm_rms(y_warm[head], ref[head]) < scoring.evm_rms(
+            y_cold[head], ref[head]
         )
-        # LMS pre-convergence
-        pre = equalization.lms(
-            rx,
-            xp.asarray(sig.reference.symbols[:200]),
-            constellation=Constellation.qam(16),
-            num_taps=21,
-            sps=2,
-        )
-        _w = pre.weights
-        w0 = to_numpy(pre.weights)
-        if w0.ndim == 1:
-            w0 = w0[np.newaxis, np.newaxis, :]
-
-        # Warm RDE
-        warm = equalization.rde(
-            rx,
-            constellation=Constellation.qam(16),
-            num_taps=21,
-            step_size=5e-4,
-            initial_taps=w0,
-            sps=2,
-        )
-
-        tail = slice(-500, None)
-        ref = to_numpy(sig.reference.symbols)
-        cold_hat = to_numpy(cold.y_hat)
-        warm_hat = to_numpy(warm.y_hat)
-        evm_cold = float(np.mean(np.abs(cold_hat[tail] - ref[tail]) ** 2))
-        evm_warm = float(np.mean(np.abs(warm_hat[tail] - ref[tail]) ** 2))
-        # Warm start must not be significantly worse
-        assert evm_warm <= evm_cold * 1.5, (
-            f"Warm RDE EVM {evm_warm:.4f} much worse than cold {evm_cold:.4f}"
-        )
+        assert scoring.ser(y_warm[4000:], ref[4000:], c) == 0.0
 
 
 class TestNormalizationLengthIndependence:
