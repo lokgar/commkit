@@ -19,6 +19,9 @@ once per code (greedy first-fit coloring of the rows: a layer's rows share
 no variable): Numba over codewords on the CPU, one CUDA thread block per
 codeword on the GPU, the same recursion in the same order.  Early stopping
 is per codeword, on a satisfied syndrome.
+
+Their EXIT analysis, :func:`~commkit.coding.ldpc_exit_curves` and
+:func:`~commkit.coding.ldpc_threshold`, is in :mod:`commkit.coding.exit`.
 """
 
 from __future__ import annotations

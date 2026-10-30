@@ -23,13 +23,26 @@ Codes: :class:`LinearBlockCode` (Hamming), :class:`LDPCCode` (DVB-S2, PON),
 :class:`Stages`, :class:`SC`, :class:`SCL`, :class:`Viterbi`, :class:`BCJR`,
 :class:`TurboIterations`.  Bit
 permutations: :func:`interleave` and :func:`deinterleave` with an
-:class:`Interleaver`.
+:class:`Interleaver`.  EXIT analysis: :func:`exit_chart` of two
+:class:`ExitCurve` objects, from :func:`decoder_exit_curve` (any soft-output
+decoder), :func:`demapper_exit_curve` (iterative demapping) or
+:func:`ldpc_exit_curves` (LDPC nodes, closed form, with
+:func:`ldpc_threshold`).
 """
 
 from .algebraic import BCHCode, BerlekampMassey, ReedSolomonCode
 from .base import DecodeResult, decode, encode
 from .convolutional import BCJR, ConvolutionalCode, Viterbi
 from .crc import CRC
+from .exit import (
+    ExitChart,
+    ExitCurve,
+    decoder_exit_curve,
+    demapper_exit_curve,
+    exit_chart,
+    ldpc_exit_curves,
+    ldpc_threshold,
+)
 from .interleaving import Interleaver, deinterleave, interleave
 from .ldpc import LDPCCode, MinSum, SumProduct
 from .linear import Chase, LinearBlockCode, MaximumLikelihood, Syndrome
@@ -49,6 +62,8 @@ __all__ = [
     "Concatenated",
     "ConvolutionalCode",
     "DecodeResult",
+    "ExitChart",
+    "ExitCurve",
     "HardIterations",
     "Interleaver",
     "LDPCCode",
@@ -72,5 +87,10 @@ __all__ = [
     "decode",
     "deinterleave",
     "encode",
+    "decoder_exit_curve",
+    "demapper_exit_curve",
+    "exit_chart",
     "interleave",
+    "ldpc_exit_curves",
+    "ldpc_threshold",
 ]
