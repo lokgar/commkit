@@ -6,6 +6,7 @@ import pytest
 from commkit import recovery
 from commkit.core import Signal
 from commkit.mapping import Constellation
+from tests.common import scoring
 from tests.common.signals import (
     make_test_mimo_samples,
     make_test_psk_signal,
@@ -18,43 +19,46 @@ SNR_DB = 30  # generous SNR so numerical algorithms converge reliably
 
 
 class TestCprViterbiViterbi:
-    @pytest.mark.parametrize(
-        "order,modulation,block_size",
-        [
-            (4, "psk", 16),
-            (4, "psk", 32),
-            (4, "psk", 64),
-            (16, "qam", 16),
-            (16, "qam", 32),
-            (16, "qam", 64),
-            (64, "qam", 32),
-            (64, "qam", 64),
-        ],
-    )
-    def test_phase_residual(self, xp, order, modulation, block_size):
-        """VV CPR: mean phase estimate within 0.1 rad of true carrier phase (mod M-fold)."""
-        if modulation == "qam":
-            sig = make_test_qam_signal(
-                order=order, num_symbols=2048, sps=1, symbol_rate=FS, xp=xp
-            )
-        else:
-            sig = make_test_psk_signal(
-                order=order, num_symbols=2048, sps=1, symbol_rate=FS, xp=xp
-            )
-        phi_true = 0.3  # radians
-        sig = sig.replace(samples=sig.samples * xp.exp(1j * phi_true))
-
-        phase_est = recovery.estimate_carrier_phase(
-            sig.samples,
+    @pytest.mark.parametrize("block_size", [16, 32, 64])
+    def test_phase_residual(self, xp, block_size):
+        """QPSK, static 0.3 rad at Es/N0 30 dB: per-symbol RMS error against
+        the truth (one 2π/4 quantum removed) within 2x the M-th power
+        estimator's high-SNR standard deviation sqrt(1/(2 N SNR))."""
+        sig = make_test_psk_signal(
+            order=4, num_symbols=2048, sps=1, symbol_rate=FS, xp=xp
+        )
+        x = sig.samples * xp.exp(1j * 0.3).astype(sig.samples.dtype)
+        est = recovery.estimate_carrier_phase(
+            x,
             recovery.ViterbiViterbi(block_size=block_size),
-            constellation=getattr(Constellation, modulation)(order),
+            constellation=Constellation.psk(4),
         ).value
+        bound = np.sqrt(1.0 / (2 * block_size * 10 ** (SNR_DB / 10)))
+        assert scoring.phase_rms(est, np.full(2048, 0.3), symmetry=4) < 2 * bound
 
-        M = 4 if modulation == "qam" else order
-        step = 2 * np.pi / M
-        err = float(xp.mean(phase_est)) - phi_true
-        err = err - step * round(err / step)  # wrap to [-step/2, step/2)
-        assert abs(err) < 0.1
+    @pytest.mark.parametrize("order", [16, 64])
+    def test_qam_self_noise_averages_with_the_block(self, xp, order):
+        """On QAM the normalized 4th power has self-noise (the points are not
+        on one circle), which dominates at 30 dB and averages as 1/sqrt(N):
+        the error at 64-symbol blocks is 1.6-3x smaller than at 16, and
+        stays under 0.1 rad."""
+        sig = make_test_qam_signal(
+            order=order, num_symbols=2048, sps=1, symbol_rate=FS, xp=xp
+        )
+        x = sig.samples * xp.exp(1j * 0.3).astype(sig.samples.dtype)
+        c = Constellation.qam(order)
+        rms = {
+            n: scoring.phase_rms(
+                recovery.estimate_carrier_phase(
+                    x, recovery.ViterbiViterbi(block_size=n), constellation=c
+                ).value,
+                np.full(2048, 0.3),
+                symmetry=4,
+            )
+            for n in (16, 64)
+        }
+        assert 1.6 < rms[16] / rms[64] < 3.0, rms
+        assert rms[64] < 0.1, rms
 
     def test_output_shape_siso(self, xp):
         """VV CPR: 1D input -> 1D phase output of same length."""

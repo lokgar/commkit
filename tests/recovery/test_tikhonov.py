@@ -6,7 +6,7 @@ import pytest
 from commkit import recovery
 from commkit.core import Signal
 from commkit.mapping import Constellation
-from tests.common.metrics import calc_rms_phase_error
+from tests.common import scoring, theory
 from tests.common.signals import (
     make_test_mimo_samples,
     make_test_psk_signal,
@@ -25,7 +25,9 @@ class TestWienerPhaseSmoother:
         return xp.cumsum(rng.normal(0.0, float(np.sqrt(q)), N)), q
 
     def test_reduces_random_walk_noise(self, xp):
-        """Smoothing a noisy random-walk phase lowers the RMS error vs truth."""
+        """A random walk (q = 4e-4) in white noise (r = 0.05) is smoothed to
+        the two-sided Wiener error sqrt(q r / sqrt(q² + 4 q r)) = 0.047 rad
+        within 10 % (the unsmoothed error is sqrt(r) = 0.22 rad)."""
         truth, q = self._random_walk(xp)
         rng = xp.random.RandomState(11)
         r = 0.05
@@ -34,9 +36,8 @@ class TestWienerPhaseSmoother:
             noisy, process_variance=q, measurement_variance=r
         )
         g = slice(200, -200)  # trim FFT edge transients
-        rms_noisy = calc_rms_phase_error(noisy[g], truth[g], xp=xp)
-        rms_smooth = calc_rms_phase_error(smoothed[g], truth[g], xp=xp)
-        assert rms_smooth < rms_noisy
+        rms = scoring.phase_rms(smoothed[g], truth[g])
+        assert rms == pytest.approx(np.sqrt(theory.wiener_smoother_var(q, r)), rel=0.1)
 
     def test_preserves_linear_trend(self, xp):
         """A pure FOE ramp (+ tiny noise) survives the detrend/add-back path."""
@@ -81,44 +82,60 @@ class TestWienerPhaseSmoother:
 
 
 class TestCprTikhonov:
-    @pytest.mark.parametrize(
-        "order,modulation,block_size",
-        [
-            (4, "psk", 16),
-            (4, "psk", 32),
-            (4, "psk", 64),
-            (16, "qam", 16),
-            (16, "qam", 32),
-            (64, "qam", 32),
-        ],
-    )
-    def test_phase_residual(self, xp, order, modulation, block_size):
-        """Tikhonov CPR: mean estimate within 0.1 rad of true carrier phase (mod M-fold)."""
-        if modulation == "qam":
-            sig = make_test_qam_signal(
-                order=order, num_symbols=2048, sps=1, symbol_rate=FS, xp=xp
-            )
-        else:
-            sig = make_test_psk_signal(
-                order=order, num_symbols=2048, sps=1, symbol_rate=FS, xp=xp
-            )
-        phi_true = 0.3
-        sig = sig.replace(samples=sig.samples * xp.exp(1j * phi_true))
-
-        phase_est = recovery.estimate_carrier_phase(
-            sig.samples,
+    @pytest.mark.parametrize("smoother", ["rts", "steady_state"])
+    @pytest.mark.parametrize("block_size", [16, 32, 64])
+    def test_phase_residual(self, xp, block_size, smoother):
+        """QPSK, static 0.3 rad at 30 dB: per-symbol RMS against the truth
+        within 2x the M-th power block bound sqrt(1/(2 N SNR)) (smoothing
+        across blocks can only lower it)."""
+        sig = make_test_psk_signal(
+            order=4, num_symbols=2048, sps=1, symbol_rate=FS, xp=xp
+        )
+        x = sig.samples * xp.exp(1j * 0.3).astype(sig.samples.dtype)
+        est = recovery.estimate_carrier_phase(
+            x,
             recovery.Tikhonov(
-                linewidth=1e-4 * FS, snr_db=SNR_DB, block_size=block_size
+                linewidth=1e-4 * FS,
+                snr_db=SNR_DB,
+                block_size=block_size,
+                smoother=smoother,
             ),
-            constellation=getattr(Constellation, modulation)(order),
+            constellation=Constellation.psk(4),
             sampling_rate=FS,
         ).value
+        bound = np.sqrt(1.0 / (2 * block_size * 10 ** (SNR_DB / 10)))
+        assert scoring.phase_rms(est, np.full(2048, 0.3), symmetry=4) < 2 * bound
 
-        M = 4 if modulation == "qam" else order
-        step = 2 * np.pi / M
-        err = float(xp.mean(phase_est)) - phi_true
-        err = err - step * round(err / step)
-        assert abs(err) < 0.1
+    @pytest.mark.xfail(
+        strict=True,
+        reason="Tikhonov's observation variance 1/(M² SNR N) (tikhonov.py:243) "
+        "omits the 4th-power self-noise of QAM: 16-QAM at 30 dB, N = 16, model "
+        "4e-6 rad², actual Viterbi-Viterbi block error ~1e-2 rad².  The "
+        "smoother trusts every block: per-symbol RMS 0.1012 rad vs 0.1013 for "
+        "Viterbi-Viterbi; the Wiener smoother with the actual variance gives "
+        "~0.067.",
+    )
+    def test_smooths_qam_self_noise(self, xp):
+        """16-QAM, static phase, 16-symbol blocks: smoothing across blocks
+        lowers the Viterbi-Viterbi error by at least 20 %."""
+        sig = make_test_qam_signal(
+            order=16, num_symbols=2048, sps=1, symbol_rate=FS, xp=xp
+        )
+        x = sig.samples * xp.exp(1j * 0.3).astype(sig.samples.dtype)
+        c = Constellation.qam(16)
+        truth = np.full(2048, 0.3)
+        vv = recovery.estimate_carrier_phase(
+            x, recovery.ViterbiViterbi(block_size=16), constellation=c
+        ).value
+        tik = recovery.estimate_carrier_phase(
+            x,
+            recovery.Tikhonov(linewidth=1e-4 * FS, snr_db=SNR_DB, block_size=16),
+            constellation=c,
+            sampling_rate=FS,
+        ).value
+        assert scoring.phase_rms(tik, truth, symmetry=4) < 0.8 * scoring.phase_rms(
+            vv, truth, symmetry=4
+        )
 
     def test_output_shape_siso(self, xp):
         """Tikhonov CPR: 1D input -> 1D output of same length."""
@@ -163,35 +180,6 @@ class TestCprTikhonov:
         """Tikhonov CPR: an unknown smoother raises on construction."""
         with pytest.raises(ValueError, match="smoother"):
             recovery.Tikhonov(linewidth=1e-4 * FS, snr_db=20, smoother="bad")
-
-    @pytest.mark.parametrize("order,modulation", [(4, "psk"), (16, "qam")])
-    def test_sskf_phase_residual(self, xp, order, modulation):
-        """Tikhonov SSKF: mean estimate within 0.1 rad of true offset (mod M-fold)."""
-        if modulation == "qam":
-            sig = make_test_qam_signal(
-                order=order, num_symbols=2048, sps=1, symbol_rate=FS, xp=xp
-            )
-        else:
-            sig = make_test_psk_signal(
-                order=order, num_symbols=2048, sps=1, symbol_rate=FS, xp=xp
-            )
-        phi_true = 0.3
-        sig = sig.replace(samples=sig.samples * xp.exp(1j * phi_true))
-
-        phase_est = recovery.estimate_carrier_phase(
-            sig.samples,
-            recovery.Tikhonov(
-                linewidth=1e-4 * FS, snr_db=SNR_DB, smoother="steady_state"
-            ),
-            constellation=getattr(Constellation, modulation)(order),
-            sampling_rate=FS,
-        ).value
-
-        M = 4 if modulation == "qam" else order
-        step = 2 * np.pi / M
-        err = float(xp.mean(phase_est)) - phi_true
-        err = err - step * round(err / step)
-        assert abs(err) < 0.1
 
     def test_sskf_exact_close(self, xp):
         """SSKF and exact RTS produce similar phase estimates (within 0.05 rad RMS)."""
@@ -288,3 +276,42 @@ def test_linewidth_is_in_hz(xp, xpt):
             recovery.Tikhonov(1e2, 20),
             constellation=Constellation.qam(16),
         )
+
+
+def _wiener_record(constellation, linewidth_ts, esn0_db, n=20000, seed=1):
+    """``constellation`` at 1 SPS under a Wiener phase (increment variance
+    2πΔνT) with AWGN; returns ``(x, true_phase)``."""
+    rng = np.random.default_rng(seed)
+    s = constellation.points.astype(np.complex64)[
+        rng.integers(0, constellation.order, n)
+    ]
+    phase = np.cumsum(rng.standard_normal(n) * np.sqrt(2 * np.pi * linewidth_ts))
+    noise = np.sqrt(10 ** (-esn0_db / 10) / 2) * (
+        rng.standard_normal(n) + 1j * rng.standard_normal(n)
+    )
+    return (s * np.exp(1j * phase) + noise).astype(np.complex64), phase
+
+
+class TestWienerTracking:
+    """Estimators following a Wiener phase, scored against the truth."""
+
+    def test_tikhonov_beats_viterbi_viterbi_on_qpsk(self, xp):
+        """QPSK, 2πΔνT = 2π·1e-5, Es/N0 12 dB, 8-symbol blocks: smoothing
+        the block estimates across blocks lowers the error by more than 20 %
+        (measured 0.037 vs 0.059 rad); neither slips (one quantum removed)."""
+        c = Constellation.psk(4)
+        x, phase = _wiener_record(c, 1e-5, 12.0)
+        x = xp.asarray(x)
+        vv = recovery.estimate_carrier_phase(
+            x, recovery.ViterbiViterbi(block_size=8), constellation=c
+        ).value
+        tik = recovery.estimate_carrier_phase(
+            x,
+            recovery.Tikhonov(linewidth=1e-5 * FS, snr_db=12.0, block_size=8),
+            constellation=c,
+            sampling_rate=FS,
+        ).value
+        rms_vv = scoring.phase_rms(vv, phase, symmetry=4)
+        rms_tik = scoring.phase_rms(tik, phase, symmetry=4)
+        assert rms_tik < 0.8 * rms_vv, (rms_tik, rms_vv)
+        assert rms_vv < 0.1

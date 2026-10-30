@@ -273,3 +273,27 @@ class TestBPSNumbaTable:
         expected = d.min(axis=-1).reshape(C, n_blocks, K, B).sum(axis=2)
         rtol = 1e-5 if dtype == np.complex64 else 1e-12
         np.testing.assert_allclose(out, expected, rtol=rtol)
+
+
+class TestWienerTracking:
+    def test_bps_beats_viterbi_viterbi_on_16qam(self, xp):
+        """16-QAM under a Wiener phase (2πΔνT = 2π·1e-5, Es/N0 20 dB): BPS's
+        minimum-distance metric has no QAM self-noise, so it tracks within
+        0.05 rad RMS of the truth and under half the 4th-power estimator's
+        error (measured 0.020 vs 0.090 rad), without a slip (one quantum
+        removed for the whole record)."""
+        rng = np.random.default_rng(1)
+        n, c = 20000, Constellation.qam(16)
+        s = c.points.astype(np.complex64)[rng.integers(0, 16, n)]
+        phase = np.cumsum(rng.standard_normal(n) * np.sqrt(2 * np.pi * 1e-5))
+        noise = np.sqrt(10**-2 / 2) * (
+            rng.standard_normal(n) + 1j * rng.standard_normal(n)
+        )
+        x = xp.asarray((s * np.exp(1j * phase) + noise).astype(np.complex64))
+        bps = recovery.estimate_carrier_phase(x, recovery.BPS(), constellation=c).value
+        vv = recovery.estimate_carrier_phase(
+            x, recovery.ViterbiViterbi(block_size=32), constellation=c
+        ).value
+        rms_bps = scoring.phase_rms(bps, phase, symmetry=4)
+        assert rms_bps < 0.05
+        assert rms_bps < 0.5 * scoring.phase_rms(vv, phase, symmetry=4)

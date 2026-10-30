@@ -126,15 +126,14 @@ class TestDDPLL:
         assert phi.shape == syms.shape
 
     def test_phase_init_applied(self, xp):
-        """phase_init shifts the starting phase estimate."""
+        """phase_init is the phase applied to the first symbol."""
         syms = self._qpsk_symbols(xp, N=256)
-        phi_init = 0.5
         phi = recovery.estimate_carrier_phase(
             syms,
-            recovery.PLL(mu=1e-2, phase_init=phi_init),
+            recovery.PLL(mu=1e-2, phase_init=0.5),
             constellation=Constellation.psk(4),
         ).value
-        assert abs(float(phi[0]) - phi_init) < 0.5
+        assert float(phi[0]) == pytest.approx(0.5, abs=1e-12)
 
     def test_bandwidth_shortcut_shape(self, xp):
         """mu=None opts into the loop_bandwidth_normalized shortcut; shape/dtype hold."""
@@ -167,8 +166,9 @@ class TestDDPLL:
         xpt.assert_allclose(phi_bw, phi_raw, rtol=1e-6, atol=1e-9)
 
     def test_first_vs_second_order_under_frequency_offset(self, xp):
-        """Under a frequency offset, a 1st-order loop (beta=0) settles to a constant
-        phase lag; a 2nd-order loop (beta>0) nulls it to ~zero steady-state error."""
+        """Under a frequency offset Δω, a 1st-order loop (beta=0) settles to
+        the constant lag Δω/μ (0.05 rad here, within 5 %); a 2nd-order loop
+        (beta>0) nulls it to under 1 % of that."""
         N = 4000
         clean = self._qpsk_symbols(xp, N=N, seed=5)
         df = 1e-3
@@ -190,7 +190,7 @@ class TestDDPLL:
 
         lag1 = abs(float(np.mean(np.unwrap(phi1_np[tail]) - true_phase[tail])))
         lag2 = abs(float(np.mean(np.unwrap(phi2_np[tail]) - true_phase[tail])))
-        assert lag1 > 1e-3
+        assert lag1 == pytest.approx(df / 0.02, rel=0.05)
         assert lag2 < lag1 / 100.0
 
     def test_invalid_bandwidth_raises(self):

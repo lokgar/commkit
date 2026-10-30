@@ -16,7 +16,13 @@ from commkit.frequency import (
     estimate_frequency_offset,
 )
 from commkit.mapping import Constellation
-from commkit.recovery import BPS, PLL, CycleSlip, estimate_carrier_phase
+from commkit.recovery import (
+    BPS,
+    PLL,
+    CycleSlip,
+    correct_carrier_phase,
+    estimate_carrier_phase,
+)
 from tests.common import scoring
 from tests.common.conversions import to_numpy
 from tests.common.metrics import calc_mse_db
@@ -270,36 +276,31 @@ class TestCPRBPSConvergence:
     """Blind Phase Search unwrapping, convergence, and block sizing."""
 
     def test_bps_phase_unwrap(self, xp):
-        """phase_trajectory from BPS must not wrap back to [0, π/2) under a ramp."""
+        """A 0 -> 3 rad ramp (beyond the π/2 search interval): the inline BPS
+        trajectory, anchored by training, follows the ramp itself within
+        0.05 rad RMS (measured 0.018) with no symbol errors; the tap is
+        frozen so the trajectory carries the whole rotation."""
         rng = np.random.default_rng(5)
         n_sym = 3000
-        const = Constellation.qam(16).points.astype(np.complex64)
-        syms = const[rng.integers(0, 16, n_sym)]
-
-        phase_true = np.linspace(0.0, 3.0, n_sym, dtype=np.float64)
-        noise_pwr = 10 ** (-25.0 / 10)
-        awgn = float(np.sqrt(noise_pwr / 2)) * (
+        c = Constellation.qam(16)
+        syms = c.points.astype(np.complex64)[rng.integers(0, 16, n_sym)]
+        phase_true = np.linspace(0.0, 3.0, n_sym)
+        noise = np.sqrt(10**-2.5 / 2) * (
             rng.standard_normal(n_sym) + 1j * rng.standard_normal(n_sym)
-        ).astype(np.complex64)
-        samples = (syms * np.exp(1j * phase_true).astype(np.complex64) + awgn).astype(
-            np.complex64
         )
-
+        x = xp.asarray((syms * np.exp(1j * phase_true) + noise).astype(np.complex64))
         res = lms(
-            xp.asarray(samples),
+            x,
             syms[:500],
             num_taps=1,
             sps=1,
-            constellation=Constellation.qam(16),
+            step_size=0.0,
+            constellation=c,
             cpr=BPS(test_phases=64, block_size=32),
         )
-
-        phi = xp.asarray(res.phase_trajectory).astype(xp.float64)
-        span = float(phi[-1] - phi[0])
-        assert span > 1.0, f"Phase did not advance: span={span:.3f} rad"
-        assert span > np.pi / 2, (
-            f"BPS phase_trajectory looks wrapped (span={span:.3f} rad < π/2)"
-        )
+        phi = to_numpy(res.phase_trajectory)
+        assert scoring.phase_rms(phi[500:], phase_true[500:]) < 0.05
+        assert scoring.ser(to_numpy(res.y_hat)[500:], syms[500:], c) == 0.0
 
     @pytest.mark.parametrize("algo", ["lms", "rls", "block_lms"])
     @pytest.mark.parametrize(
@@ -625,41 +626,37 @@ class TestBlockwiseFOE:
     """Frequency offset estimation and blockwise correction."""
 
     def test_blockwise_foe_chirp(self, xp):
-        """A blockwise M-th power estimate removes a linearly chirping frequency."""
+        """A carrier chirping from 1 to 5 MHz (noiseless 16-QAM, 2 sps at
+        1 GS/s): the blockwise M-th power correction leaves a residual whose
+        frequency stays under 1 % of the 4 MHz sweep in the interior
+        (measured 21 kHz), slow enough that BPS on the corrected symbols
+        makes no errors (one quantum removed).  Without the correction BPS
+        cannot follow the chirp (SER 0.7)."""
         rng = np.random.default_rng(3)
-        fs = 1e9
-        n = 65536
-        sps = 2
-        f_start, f_end = 1e6, 5e6
-
-        f_t = np.linspace(f_start, f_end, n)
-        phase_chirp = 2 * np.pi * np.cumsum(f_t) / fs
-        carrier = np.exp(1j * phase_chirp).astype(np.complex64)
-
-        const = Constellation.qam(16).points.astype(np.complex64)
-        idxs = rng.integers(0, 16, n // sps)
-        syms = const[idxs]
-        base_np = np.repeat(syms, sps).astype(np.complex64)
-        samples = xp.asarray((base_np * carrier).astype(np.complex64))
-        base = xp.asarray(base_np)
+        fs, n, sps = 1e9, 65536, 2
+        f_t = np.linspace(1e6, 5e6, n)
+        carrier = np.exp(2j * np.pi * np.cumsum(f_t) / fs)
+        c = Constellation.qam(16)
+        syms = c.points.astype(np.complex64)[rng.integers(0, 16, n // sps)]
+        base = np.repeat(syms, sps)
+        samples = xp.asarray((base * carrier).astype(np.complex64))
 
         est = estimate_frequency_offset(
             samples,
             MthPower(block_size=4096, overlap=0.5),
             sampling_rate=fs,
-            constellation=Constellation.qam(16),
+            constellation=c,
         )
-        corrected = correct_frequency_offset(samples, est, sampling_rate=fs)
+        corrected = to_numpy(correct_frequency_offset(samples, est, sampling_rate=fs))
+        residual = np.unwrap(np.angle(corrected * np.conj(base)))
+        w = 1024
+        f_res = (residual[w:] - residual[:-w]) / w * fs / (2 * np.pi)
+        assert np.max(np.abs(f_res[4096:-4096])) < 0.01 * 4e6
 
-        ratio_corr = float(
-            xp.mean(xp.abs(corrected - base) ** 2) / xp.mean(xp.abs(base) ** 2)
-        )
-        ratio_uncorr = float(
-            xp.mean(xp.abs(samples - base) ** 2) / xp.mean(xp.abs(base) ** 2)
-        )
-        evm_corrected = 10 * np.log10(ratio_corr)
-        evm_uncorrected = 10 * np.log10(ratio_uncorr)
-        assert evm_corrected < evm_uncorrected - 10.0, (
-            f"FOE correction ineffective: corrected EVM={evm_corrected:.1f} dB, "
-            f"uncorrected={evm_uncorrected:.1f} dB"
-        )
+        def ser_after_bps(z):
+            z = z[::sps]
+            phi = estimate_carrier_phase(z, BPS(), constellation=c)
+            return scoring.blind_ser(correct_carrier_phase(z, phi), syms, c)
+
+        assert ser_after_bps(corrected) == 0.0
+        assert ser_after_bps(to_numpy(samples)) > 0.3
