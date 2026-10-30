@@ -513,17 +513,17 @@ class TestCorrectChromaticDispersion:
 
         distorted = apply_chromatic_dispersion(
             samples,
-            sampling_rate=d,
-            dispersion_ps_nm_km=l,
-            fiber_length_km=lam,
-            center_wavelength_nm=fs,
+            sampling_rate=fs,
+            dispersion_ps_nm_km=d,
+            fiber_length_km=l,
+            center_wavelength_nm=lam,
         )
         recovered = filtering.correct_chromatic_dispersion(
             distorted,
-            sampling_rate=d,
-            dispersion_ps_nm_km=l,
-            fiber_length_km=lam,
-            center_wavelength_nm=fs,
+            sampling_rate=fs,
+            dispersion_ps_nm_km=d,
+            fiber_length_km=l,
+            center_wavelength_nm=lam,
         )
 
         xpt.assert_allclose(recovered, samples, atol=1e-3)
@@ -544,17 +544,17 @@ class TestCorrectChromaticDispersion:
 
         distorted = apply_chromatic_dispersion(
             samples,
-            sampling_rate=d,
-            dispersion_ps_nm_km=l,
-            fiber_length_km=lam,
-            center_wavelength_nm=fs,
+            sampling_rate=fs,
+            dispersion_ps_nm_km=d,
+            fiber_length_km=l,
+            center_wavelength_nm=lam,
         )
         recovered = filtering.correct_chromatic_dispersion(
             distorted,
-            sampling_rate=d,
-            dispersion_ps_nm_km=l,
-            fiber_length_km=lam,
-            center_wavelength_nm=fs,
+            sampling_rate=fs,
+            dispersion_ps_nm_km=d,
+            fiber_length_km=l,
+            center_wavelength_nm=lam,
         )
 
         xpt.assert_allclose(recovered, samples, atol=1e-3)

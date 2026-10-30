@@ -25,6 +25,7 @@ from commkit.equalization._block._engine import _Block
 from commkit.mapping import Constellation
 from commkit.math import normalize
 from commkit.recovery import BPS, PLL, CycleSlip
+from tests.common import scoring
 from tests.common.conversions import to_numpy
 from tests.common.signals import (
     make_test_mimo_samples,
@@ -503,48 +504,46 @@ class TestBlockLMSCPRIntegration:
         assert r2.phase_trajectory is not None
 
     def test_block_lms_cycle_slip_correction(self, xp):
-        """block_lms with cpr_cycle_slip_correction=True recovers through deliberate π/2 phase steps."""
-        rng = np.random.default_rng(77)
-        n_sym = 4096
-        const = Constellation.qam(16).points.astype(np.complex64)
-        const = normalize(const, mode="average_power").astype(np.complex64)
-        syms = const[rng.integers(0, 16, n_sym)]
+        """Inline BPS slips on a smooth Wiener phase at low SNR (16-QAM,
+        2πΔνT = 2π·1e-4, Es/N0 12 dB); the repair removes most of them.
 
-        # Inject a π/2 phase step every 512 symbols (well within block_size=256 boundaries)
-        phase = np.zeros(n_sym, dtype=np.float64)
-        for step_idx in range(512, n_sym, 512):
-            phase[step_idx:] += np.pi / 2
-
-        samples = (syms * np.exp(1j * phase).astype(np.complex64)).astype(np.complex64)
-        noise_std = float(np.sqrt(10 ** (-25.0 / 10) / 2))
-        samples += noise_std * (
-            rng.standard_normal(n_sym) + 1j * rng.standard_normal(n_sym)
-        ).astype(np.complex64)
-
-        res = block_lms(
-            xp.asarray(samples),
-            xp.asarray(syms[:256]),
-            num_taps=1,
-            sps=1,
-            step_size=1e-3,
-            constellation=Constellation.qam(16),
-            block_size=128,
-            cpr=BPS(
-                test_phases=64, block_size=32, cycle_slip=CycleSlip(threshold=np.pi / 4)
-            ),
-        )
-
-        assert res.phase_trajectory is not None
-        assert res.state.carrier.cs_buf_y is not None
-
-        y_tail = res.y_hat[-n_sym // 4 :]
-        const_xp = xp.asarray(const)
-        d2 = xp.abs(y_tail[:, None] - const_xp[None, :]) ** 2
-        decisions = const_xp[xp.argmin(d2, axis=1)]
-        mse = float(xp.mean(xp.abs(y_tail - decisions) ** 2))
-        assert mse < 0.05, (
-            f"Steady-state MSE too large after cycle-slip correction: {mse:.4f}"
-        )
+        Slips are counted against the transmitted symbols: changes of the
+        output's π/2 rotation between 64-symbol blocks.  Without the repair
+        the same records slip (over 40 changes on 2 x 2e4 symbols), so the
+        test fails if the repair does nothing.
+        """
+        c = Constellation.qam(16)
+        counts = {True: 0, False: 0}
+        for seed in range(2):
+            rng = np.random.default_rng(seed)
+            n = 20000
+            syms = c.points.astype(np.complex64)[rng.integers(0, 16, n)]
+            phase = np.cumsum(rng.standard_normal(n) * np.sqrt(2 * np.pi * 1e-4))
+            noise = np.sqrt(10**-1.2 / 2) * (
+                rng.standard_normal(n) + 1j * rng.standard_normal(n)
+            )
+            x = xp.asarray((syms * np.exp(1j * phase) + noise).astype(np.complex64))
+            for repair in counts:
+                res = block_lms(
+                    x,
+                    syms[:256],
+                    num_taps=1,
+                    sps=1,
+                    step_size=0.0,
+                    block_size=128,
+                    constellation=c,
+                    cpr=BPS(
+                        test_phases=32,
+                        block_size=16,
+                        cycle_slip=CycleSlip() if repair else None,
+                    ),
+                )
+                k = scoring.block_rotations(
+                    to_numpy(res.y_hat)[256:], syms[256:], symmetry=4, block=64
+                )
+                counts[repair] += int(np.count_nonzero(np.diff(k)))
+        assert counts[False] > 40, counts
+        assert counts[True] < counts[False] / 4, counts
 
     def test_block_lms_cycle_slip_regression_warmstart(self, xp):
         """The slip regression buffer is carried in the state and restored."""

@@ -257,17 +257,17 @@ class TestApplyChomaticDispersion:
 
         distorted = apply_chromatic_dispersion(
             samples,
-            sampling_rate=D,
-            dispersion_ps_nm_km=L,
-            fiber_length_km=lam,
-            center_wavelength_nm=fs,
+            sampling_rate=fs,
+            dispersion_ps_nm_km=D,
+            fiber_length_km=L,
+            center_wavelength_nm=lam,
         )
         recovered = correct_chromatic_dispersion(
             distorted,
-            sampling_rate=D,
-            dispersion_ps_nm_km=L,
-            fiber_length_km=lam,
-            center_wavelength_nm=fs,
+            sampling_rate=fs,
+            dispersion_ps_nm_km=D,
+            fiber_length_km=L,
+            center_wavelength_nm=lam,
         )
 
         xpt.assert_allclose(recovered, samples, atol=1e-3)
@@ -277,10 +277,10 @@ class TestApplyChomaticDispersion:
         samples = xp.ones(512, dtype=xp.complex64)
         out = apply_chromatic_dispersion(
             samples,
-            sampling_rate=17.0,
-            dispersion_ps_nm_km=80.0,
-            fiber_length_km=1550.0,
-            center_wavelength_nm=64e9,
+            sampling_rate=64e9,
+            dispersion_ps_nm_km=17.0,
+            fiber_length_km=80.0,
+            center_wavelength_nm=1550.0,
         )
         assert out.shape == (512,)
 
@@ -289,10 +289,10 @@ class TestApplyChomaticDispersion:
         samples = xp.ones((2, 512), dtype=xp.complex64)
         out = apply_chromatic_dispersion(
             samples,
-            sampling_rate=17.0,
-            dispersion_ps_nm_km=80.0,
-            fiber_length_km=1550.0,
-            center_wavelength_nm=64e9,
+            sampling_rate=64e9,
+            dispersion_ps_nm_km=17.0,
+            fiber_length_km=80.0,
+            center_wavelength_nm=1550.0,
         )
         assert out.shape == (2, 512)
 
@@ -302,10 +302,10 @@ class TestApplyChomaticDispersion:
         samples = (rng.randn(512) + 1j * rng.randn(512)).astype(xp.complex64)
         out = apply_chromatic_dispersion(
             samples,
-            sampling_rate=17.0,
-            dispersion_ps_nm_km=80.0,
-            fiber_length_km=1550.0,
-            center_wavelength_nm=64e9,
+            sampling_rate=64e9,
+            dispersion_ps_nm_km=17.0,
+            fiber_length_km=80.0,
+            center_wavelength_nm=1550.0,
         )
         diff = float(xp.max(xp.abs(out - samples)))
         assert diff > 1e-3
@@ -316,10 +316,10 @@ class TestApplyChomaticDispersion:
         samples = (rng.randn(1024) + 1j * rng.randn(1024)).astype(xp.complex64)
         out = apply_chromatic_dispersion(
             samples,
-            sampling_rate=17.0,
-            dispersion_ps_nm_km=80.0,
-            fiber_length_km=1550.0,
-            center_wavelength_nm=64e9,
+            sampling_rate=64e9,
+            dispersion_ps_nm_km=17.0,
+            fiber_length_km=80.0,
+            center_wavelength_nm=1550.0,
         )
         power_in = float(xp.sum(xp.abs(samples) ** 2))
         power_out = float(xp.sum(xp.abs(out) ** 2))

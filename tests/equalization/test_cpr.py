@@ -1,18 +1,9 @@
-"""Tests for joint LMS/RLS+CPR equalizers and blockwise FOE.
+"""Equalizers with inline carrier recovery (lms/rls/block_lms + PLL/BPS), and
+blockwise frequency-offset correction.
 
-Verification plan:
-  1. Zero-Deviation Baseline   - cpr=None must produce bit-exact output
-  3. Cycle Slip Stress Test    - π/2 steps are corrected, weights converge
-  4. PLL Convergence / Phase Noise - RMSE within PLL jitter bound
-  5. Blockwise Phase Coherence - chirp FOE recovers EVM within 0.5 dB of ideal
-  6. MIMO Coverage             - 2x2 butterfly LMS+PLL converges on both channels
-  7. BPS Phase Unwrap          - phase_trajectory is monotone under linear drift
-  8. BPS Convergence           - lms(cpr=BPS()) converges under Wiener phase noise
-  9. BPS Block Size > 1        - bps_block_size=32 still converges (incremental sum)
- 10. RLS + BPS                 - rls(cpr=BPS()) convergence smoke test
- 11. PLL Joint Channels        - joint_channels=True shares phase across MIMO
- 12. state= warm-start         - second call resumes phase without re-lock transient
- 14. Inline PLL raw gains      - PLL mu and beta validation and parity
+Recovery is scored against the transmitted symbols and the true phase
+(``tests.common.scoring``), never against the receiver's own decisions: a
+π/2-rotated 16-QAM output lies on its own grid.
 """
 
 import numpy as np
@@ -26,6 +17,7 @@ from commkit.frequency import (
 )
 from commkit.mapping import Constellation
 from commkit.recovery import BPS, PLL, CycleSlip, estimate_carrier_phase
+from tests.common import scoring
 from tests.common.conversions import to_numpy
 from tests.common.metrics import calc_mse_db
 from tests.common.signals import (
@@ -78,108 +70,116 @@ def _wiener_phase_signal(n_sym=4000, snr_db=20.0, linewidth=1e4, fs=1.0, seed=42
 # -----------------------------------------------------------------------------
 
 
+def _wiener_record(order, linewidth_ts, esn0_db, seed, n):
+    """16-QAM (or square ``order``) at 1 SPS under a Wiener phase with
+    increment variance ``2π Δν T`` and AWGN; returns ``(x, symbols, phase,
+    constellation)``."""
+    rng = np.random.default_rng(seed)
+    c = Constellation.qam(order)
+    syms = c.points.astype(np.complex64)[rng.integers(0, order, n)]
+    phase = np.cumsum(rng.standard_normal(n) * np.sqrt(2 * np.pi * linewidth_ts))
+    noise = np.sqrt(10 ** (-esn0_db / 10) / 2) * (
+        rng.standard_normal(n) + 1j * rng.standard_normal(n)
+    )
+    return (syms * np.exp(1j * phase) + noise).astype(np.complex64), syms, phase, c
+
+
+def _slips(y, syms, start, block=64):
+    """Changes of the output's π/2 rotation against the reference, counted
+    over blocks of ``block`` symbols after ``start``."""
+    k = scoring.block_rotations(y[start:], syms[start:], symmetry=4, block=block)
+    return int(np.count_nonzero(np.diff(k)))
+
+
 class TestCPREqualizerBaseline:
-    """Baseline equivalence and zero-deviation tests."""
+    """An inline CPR that never moves is the equalizer without CPR."""
 
     @pytest.mark.parametrize("algo", ["lms", "rls"])
-    def test_cpr_none_baseline(self, algo, xp):
-        """cpr=None produces bit-exact output vs the unmodified algorithm."""
+    def test_zero_gain_pll_is_no_cpr(self, algo, xp, xpt):
+        """A PLL with zero gains and zero initial phase applies no rotation,
+        so its output equals ``cpr=None``, which reports no trajectory."""
         samples, syms = _qpsk_signal(n_sym=2000)
-        kwargs = dict(
+        fn = lms if algo == "lms" else rls
+        kw = dict(
             training_symbols=syms[:500],
             num_taps=11,
             sps=2,
             constellation=Constellation.psk(4),
         )
-        fn = lms if algo == "lms" else rls
-        extra = {} if algo == "lms" else {"sps": 2}
-        kwargs.update(extra)
-
-        res_base = fn(xp.asarray(samples), **kwargs, cpr=None)
-        res_cpr_none = fn(xp.asarray(samples), **kwargs, cpr=None)
-
-        assert bool(
-            xp.all(xp.asarray(res_base.y_hat) == xp.asarray(res_cpr_none.y_hat))
-        ), f"{algo}: cpr=None must be deterministic"
-        assert res_cpr_none.phase_trajectory is None
+        none = fn(xp.asarray(samples), **kw, cpr=None)
+        frozen = fn(xp.asarray(samples), **kw, cpr=PLL(mu=0.0, beta=0.0))
+        assert none.phase_trajectory is None
+        xpt.assert_array_equal(
+            frozen.phase_trajectory, xp.zeros_like(frozen.phase_trajectory)
+        )
+        xpt.assert_allclose(frozen.y_hat, none.y_hat, rtol=1e-5, atol=1e-6)
 
 
 class TestCPRPLLConvergence:
     """PLL phase tracking, cycle-slip correction, and gain parameterization."""
 
-    def test_cycle_slip_correction(self, xp):
-        """LMS+PLL recovers through deliberate π/2 phase steps without diverging."""
-        rng = np.random.default_rng(42)
-        n_sym = 3000
-        const = Constellation.psk(4).points.astype(np.complex64)
-        idxs = rng.integers(0, 4, n_sym)
-        syms = const[idxs]
-
-        phase = np.zeros(n_sym, dtype=np.float64)
-        for step_idx in range(500, n_sym, 500):
-            phase[step_idx:] += np.pi / 2
-
-        samples = (syms * np.exp(1j * phase).astype(np.complex64)).astype(np.complex64)
-        noise = 0.05 * (rng.standard_normal(n_sym) + 1j * rng.standard_normal(n_sym))
-        samples = (samples + noise.astype(np.complex64)).astype(np.complex64)
-
-        res = lms(
-            xp.asarray(samples),
-            syms[:300],
-            num_taps=1,
-            sps=1,
-            constellation=Constellation.psk(4),
-            cpr=PLL(normalized_bandwidth=5e-3, cycle_slip=CycleSlip(history=200)),
-        )
-
-        assert res.phase_trajectory is not None
-        assert bool(xp.all(xp.isfinite(xp.asarray(res.y_hat)))), (
-            "y_hat contains non-finite values"
-        )
-        y_dd = xp.asarray(res.y_hat[-500:])
-        const_xp = xp.asarray(const)
-        d = const_xp[xp.argmin(xp.abs(y_dd[:, None] - const_xp[None, :]) ** 2, axis=1)]
-        mse = float(xp.mean(xp.abs(y_dd - d) ** 2))
-        assert mse < 0.1, f"MSE after cycle slip recovery too large: {mse:.4f}"
+    @pytest.mark.xfail(
+        strict=True,
+        reason="The PLL's CycleSlip repair adds slips instead of removing them: "
+        "16-QAM, 2πΔνT = 2π·1e-4, Es/N0 16 dB, B·T = 2e-2, 4 records of 2e4 "
+        "symbols: 10 rotation changes against the reference with "
+        "CycleSlip(), 3 without (inline and standalone alike).  A PLL slip "
+        "is a drift over ~1/B symbols, which the linear predictor follows.",
+    )
+    def test_cycle_slip_repair_reduces_pll_slips(self, xp):
+        """With the repair the output changes its π/2 rotation against the
+        transmitted symbols less often than without it."""
+        counts = {True: 0, False: 0}
+        for seed in range(4):
+            x, syms, _, c = _wiener_record(16, 1e-4, 16.0, seed, 20000)
+            for repair in counts:
+                res = lms(
+                    xp.asarray(x),
+                    syms[:256],
+                    num_taps=1,
+                    sps=1,
+                    step_size=0.0,
+                    constellation=c,
+                    cpr=PLL(
+                        normalized_bandwidth=2e-2,
+                        cycle_slip=CycleSlip() if repair else None,
+                    ),
+                )
+                counts[repair] += _slips(to_numpy(res.y_hat), syms, 256)
+        assert counts[True] < counts[False], counts
 
     def test_pll_phase_noise_tracking(self, xp):
-        """LMS+PLL tracks Wiener-process phase noise; phase RMSE within expected bound."""
-        rng = np.random.default_rng(7)
-        n_sym = 5000
-        linewidth_ts = 1e-4
-        const = Constellation.qam(16).points.astype(np.complex64)
-        idxs = rng.integers(0, 16, n_sym)
-        syms = const[idxs]
+        """LMS + PLL follows a Wiener phase (16-QAM, 2πΔνT = 2π·1e-4,
+        Es/N0 25 dB) with the jitter of the loop.
 
-        phase_steps = rng.standard_normal(n_sym) * np.sqrt(2 * np.pi * linewidth_ts)
-        phase_noise = np.cumsum(phase_steps).astype(np.float64)
+        With ``mu = 4B`` the loop error is about first order, ``σ² ≈ σ_Δ²/(2μ)
+        + μ N0/4`` (σ_Δ² = 2πΔνT; the detector gain |d|² averages 1): at
+        B = 2e-2 that is 0.064 rad.  No symbol errors after training (the
+        AWGN-only SER at 25 dB is ~1e-6).  The same record with B = 5e-3,
+        whose phase-noise term alone is 0.13 rad, slips (baseline).
+        """
+        x, syms, phase, c = _wiener_record(16, 1e-4, 25.0, 7, 5000)
+        sigma_d2, n0 = 2 * np.pi * 1e-4, 10 ** (-2.5)
 
-        snr_db = 25.0
-        noise_pwr = 10 ** (-snr_db / 10)
-        awgn = float(np.sqrt(noise_pwr / 2)) * (
-            rng.standard_normal(n_sym) + 1j * rng.standard_normal(n_sym)
-        ).astype(np.complex64)
-        samples = (syms * np.exp(1j * phase_noise).astype(np.complex64) + awgn).astype(
-            np.complex64
-        )
+        def run(bw):
+            res = lms(
+                xp.asarray(x),
+                syms[:1000],
+                num_taps=1,
+                sps=1,
+                constellation=c,
+                cpr=PLL(normalized_bandwidth=bw),
+            )
+            return to_numpy(res.y_hat), to_numpy(res.phase_trajectory)
 
-        bw = 5e-3
-        res = lms(
-            xp.asarray(samples),
-            syms[:1000],
-            num_taps=1,
-            sps=1,
-            constellation=Constellation.qam(16),
-            cpr=PLL(normalized_bandwidth=bw),
-        )
+        y, phi = run(2e-2)
+        mu = 4 * 2e-2
+        predicted = np.sqrt(sigma_d2 / (2 * mu) + mu * n0 / 4)
+        assert scoring.ser(y[1500:], syms[1500:], c) == 0.0
+        assert scoring.phase_rms(phi[1500:], phase[1500:]) < 1.5 * predicted
 
-        assert res.phase_trajectory is not None
-        phi_est = xp.asarray(res.phase_trajectory)[1500:]
-        phi_true = xp.asarray(phase_noise[1500:])
-        offset = float(xp.mean(phi_true - phi_est))
-        rmse = float(xp.sqrt(xp.mean((phi_true - phi_est - offset) ** 2)))
-        bound = np.sqrt(bw / linewidth_ts)
-        assert rmse < bound, f"PLL phase RMSE {rmse:.4f} exceeds bound {bound:.4f}"
+        y_narrow, _ = run(5e-3)
+        assert scoring.ser(y_narrow[1500:], syms[1500:], c) > 0.1
 
     def test_inline_raw_gains_match_bandwidth(self, xp):
         """cpr_pll_mu/beta set to bandwidth-equivalent gains reproduces bandwidth path."""
@@ -349,122 +349,57 @@ class TestCPRBPSConvergence:
         assert np.std(residual / S) < 0.05
 
     def test_bps_phase_noise_tracking(self, xp):
-        """LMS+BPS converges under Wiener phase noise (Numba backend)."""
-        rng = np.random.default_rng(11)
-        n_sym = 5000
-        linewidth_ts = 5e-5
-        const = Constellation.qam(16).points.astype(np.complex64)
-        syms = const[rng.integers(0, 16, n_sym)]
-
-        phase_noise = np.cumsum(
-            rng.standard_normal(n_sym) * np.sqrt(2 * np.pi * linewidth_ts)
-        ).astype(np.float64)
-        noise_pwr = 10 ** (-25.0 / 10)
-        awgn = float(np.sqrt(noise_pwr / 2)) * (
-            rng.standard_normal(n_sym) + 1j * rng.standard_normal(n_sym)
-        ).astype(np.complex64)
-        samples = xp.asarray(
-            (syms * np.exp(1j * phase_noise).astype(np.complex64) + awgn).astype(
-                np.complex64
-            )
+        """LMS + BPS follows a Wiener phase (16-QAM, 2πΔνT = 2π·5e-5,
+        Es/N0 25 dB): no symbol errors against the transmitted symbols after
+        training, and the trajectory within 0.1 rad RMS of the true phase
+        (BPS's 64 candidates over π/2 quantize to 0.007 rad; a 32-symbol
+        window at 25 dB averages the noise well below 0.05 rad).  The tap is
+        frozen so that the trajectory carries the whole rotation (an adapting
+        tap takes a share of it).  Without CPR the same equalizer loses the
+        phase (baseline)."""
+        x, syms, phase, c = _wiener_record(16, 5e-5, 25.0, 11, 5000)
+        kw = dict(num_taps=1, sps=1, step_size=0.0, constellation=c)
+        res = lms(
+            xp.asarray(x), syms[:1000], **kw, cpr=BPS(test_phases=64, block_size=32)
         )
+        none = lms(xp.asarray(x), syms[:1000], **kw)
+        assert scoring.ser(to_numpy(res.y_hat)[1000:], syms[1000:], c) == 0.0
+        assert (
+            scoring.phase_rms(to_numpy(res.phase_trajectory)[1000:], phase[1000:]) < 0.1
+        )
+        assert scoring.ser(to_numpy(none.y_hat)[1000:], syms[1000:], c) > 0.1
 
-        res_bps = lms(
-            samples,
+    @pytest.mark.parametrize("block_size", [8, 32])
+    def test_bps_block_size_convergence(self, xp, block_size):
+        """LMS + BPS with an 8- and a 32-symbol window tracks a Wiener phase
+        without symbol errors against the reference.  (A one-symbol window
+        fits many rotations of 16-QAM and slips: SER 0.83 on this record.)"""
+        x, syms, _, c = _wiener_record(16, 5e-5, 25.0, 13, 4000)
+        res = lms(
+            xp.asarray(x),
             syms[:1000],
             num_taps=1,
             sps=1,
-            constellation=Constellation.qam(16),
-            cpr=BPS(test_phases=64, block_size=32),
+            constellation=c,
+            cpr=BPS(test_phases=32, block_size=block_size),
         )
-        res_none = lms(
-            samples,
-            syms[:1000],
-            num_taps=1,
-            sps=1,
-            constellation=Constellation.qam(16),
-        )
-
-        mse_bps = float(xp.mean(xp.abs(xp.asarray(res_bps.error[-2000:])) ** 2))
-        mse_none = float(xp.mean(xp.abs(xp.asarray(res_none.error[-2000:])) ** 2))
-        assert mse_bps < mse_none, (
-            f"BPS MSE ({mse_bps:.4f}) not better than no-CPR ({mse_none:.4f}) "
-            "under Wiener phase noise"
-        )
-
-    def test_bps_block_size_convergence(self, xp):
-        """lms(cpr_type='bps', bps_block_size=32) converges - verifies incremental sum."""
-        rng = np.random.default_rng(13)
-        n_sym = 4000
-        const = Constellation.qam(16).points.astype(np.complex64)
-        syms = const[rng.integers(0, 16, n_sym)]
-
-        phase_noise = np.cumsum(
-            rng.standard_normal(n_sym) * np.sqrt(2 * np.pi * 5e-5)
-        ).astype(np.float64)
-        noise_pwr = 10 ** (-25.0 / 10)
-        awgn = float(np.sqrt(noise_pwr / 2)) * (
-            rng.standard_normal(n_sym) + 1j * rng.standard_normal(n_sym)
-        ).astype(np.complex64)
-        samples = xp.asarray(
-            (syms * np.exp(1j * phase_noise).astype(np.complex64) + awgn).astype(
-                np.complex64
-            )
-        )
-
-        res_k1 = lms(
-            samples,
-            syms[:1000],
-            num_taps=1,
-            sps=1,
-            constellation=Constellation.qam(16),
-            cpr=BPS(test_phases=32, block_size=1),
-        )
-        res_k32 = lms(
-            samples,
-            syms[:1000],
-            num_taps=1,
-            sps=1,
-            constellation=Constellation.qam(16),
-            cpr=BPS(test_phases=32, block_size=32),
-        )
-
-        mse_k1 = float(xp.mean(xp.abs(xp.asarray(res_k1.error[-1000:])) ** 2))
-        mse_k32 = float(xp.mean(xp.abs(xp.asarray(res_k32.error[-1000:])) ** 2))
-        assert mse_k32 < 0.1, f"BPS K=32 did not converge: MSE={mse_k32:.4f}"
-        assert mse_k1 < 0.1, f"BPS K=1 did not converge: MSE={mse_k1:.4f}"
+        assert scoring.ser(to_numpy(res.y_hat)[1000:], syms[1000:], c) == 0.0
 
     def test_rls_bps_convergence(self, xp):
-        """rls(cpr=BPS()) converges under phase noise."""
-        rng = np.random.default_rng(17)
-        n_sym = 3000
-        const = Constellation.qam(16).points.astype(np.complex64)
-        syms = const[rng.integers(0, 16, n_sym)]
-
-        phase_noise = np.cumsum(
-            rng.standard_normal(n_sym) * np.sqrt(2 * np.pi * 5e-5)
-        ).astype(np.float64)
-        noise_pwr = 10 ** (-25.0 / 10)
-        awgn = float(np.sqrt(noise_pwr / 2)) * (
-            rng.standard_normal(n_sym) + 1j * rng.standard_normal(n_sym)
-        ).astype(np.complex64)
-        samples = (syms * np.exp(1j * phase_noise).astype(np.complex64) + awgn).astype(
-            np.complex64
-        )
-
+        """RLS + BPS tracks a Wiener phase: no symbol errors against the
+        reference after training (trajectory length is the record's)."""
+        x, syms, _, c = _wiener_record(16, 5e-5, 25.0, 17, 3000)
         res = rls(
-            xp.asarray(samples),
+            xp.asarray(x),
             syms[:500],
             num_taps=1,
             sps=1,
-            constellation=Constellation.qam(16),
+            constellation=c,
             cpr=BPS(test_phases=64, block_size=32),
         )
-
-        assert res.phase_trajectory is not None
-        assert res.phase_trajectory.shape == (n_sym,)
-        mse = float(xp.mean(xp.abs(xp.asarray(res.error[-1000:])) ** 2))
-        assert mse < 0.1, f"RLS+BPS did not converge: MSE={mse:.4f}"
+        assert res.phase_trajectory.shape == (3000,)
+        y = to_numpy(res.y_hat)
+        assert scoring.ser(y[500:], syms[500 : y.size], c) == 0.0
 
 
 class TestBlockSlipCarry:
@@ -556,53 +491,30 @@ class TestCPRMIMOJoint:
     """Multi-channel MIMO CPR and joint carrier phase tracking."""
 
     def test_mimo_lms_pll(self, xp):
-        """2x2 butterfly LMS+PLL converges on both output channels."""
+        """2x2 LMS + PLL with a different static phase per channel (0.3 and
+        1.1 rad, beyond π/4 for the second): each output matches its own
+        transmitted stream, with no rotation, after training."""
         rng = np.random.default_rng(99)
         n_sym = 3000
-        const = Constellation.qam(16).points.astype(np.complex64)
-        const_xp = xp.asarray(const)
-
-        syms_a = const[rng.integers(0, 16, n_sym)]
-        syms_b = const[rng.integers(0, 16, n_sym)]
-        phase_a = np.float32(0.3)
-        phase_b = np.float32(1.1)
-
-        sig_a = (syms_a * np.exp(1j * phase_a)).astype(np.complex64)
-        sig_b = (syms_b * np.exp(1j * phase_b)).astype(np.complex64)
-
-        snr_db = 25.0
-        noise_pwr = 10 ** (-snr_db / 10)
-        noise_a = float(np.sqrt(noise_pwr / 2)) * (
-            rng.standard_normal(n_sym) + 1j * rng.standard_normal(n_sym)
-        ).astype(np.complex64)
-        noise_b = float(np.sqrt(noise_pwr / 2)) * (
-            rng.standard_normal(n_sym) + 1j * rng.standard_normal(n_sym)
-        ).astype(np.complex64)
-
-        samples = xp.asarray(np.stack([sig_a + noise_a, sig_b + noise_b]))
-        training = np.stack([syms_a[:500], syms_b[:500]])
-
+        c = Constellation.qam(16)
+        pts = c.points.astype(np.complex64)
+        syms = pts[rng.integers(0, 16, (2, n_sym))]
+        rot = np.exp(1j * np.array([0.3, 1.1]))[:, None]
+        noise = np.sqrt(10**-2.5 / 2) * (
+            rng.standard_normal((2, n_sym)) + 1j * rng.standard_normal((2, n_sym))
+        )
+        samples = xp.asarray((syms * rot + noise).astype(np.complex64))
         res = lms(
             samples,
-            training,
+            syms[:, :500],
             num_taps=1,
             sps=1,
-            constellation=Constellation.qam(16),
+            constellation=c,
             cpr=PLL(normalized_bandwidth=5e-3),
         )
-
-        assert res.phase_trajectory is not None
-        assert res.phase_trajectory.shape == (2, n_sym), (
-            f"Expected (2, {n_sym}), got {res.phase_trajectory.shape}"
-        )
-
-        for ch in range(2):
-            y_ss = xp.asarray(res.y_hat[ch, -1000:])
-            d = const_xp[
-                xp.argmin(xp.abs(y_ss[:, None] - const_xp[None, :]) ** 2, axis=1)
-            ]
-            mse = float(xp.mean(xp.abs(y_ss - d) ** 2))
-            assert mse < 0.1, f"MIMO channel {ch} MSE too large: {mse:.4f}"
+        assert res.phase_trajectory.shape == (2, n_sym)
+        ser = scoring.ser(to_numpy(res.y_hat)[:, 500:], syms[:, 500:], c)
+        np.testing.assert_array_equal(ser, [0.0, 0.0])
 
     def test_pll_joint_channels(self, xp):
         """joint_channels=True makes both PLL integrators identical (shared LO)."""

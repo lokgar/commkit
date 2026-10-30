@@ -18,7 +18,7 @@ from commkit.equalization import (
 from commkit.equalization._block._blind import _cupy_rde_error
 from commkit.equalization._common import _rde_ring_radii, _rde_rings
 from commkit.mapping import Constellation
-from tests.common import skip_unless_gpu
+from tests.common import scoring, skip_unless_gpu
 from tests.common.conversions import to_numpy
 from tests.common.metrics import calc_dispersion
 from tests.common.signals import make_isi_distorted_signal
@@ -188,7 +188,6 @@ class TestBlockRDE:
         (the previous fixed 2e-4 had not converged after 10^5 symbols)."""
         from commkit import RRC, generate
         from commkit.impairments import apply_awgn, apply_polarization_mixing
-        from commkit.recovery import resolve_phase_ambiguity
 
         c16 = Constellation.qam(16)
         n_sym, tail, block_size = 49152, 16384, 256
@@ -202,12 +201,12 @@ class TestBlockRDE:
         r_explicit = block_rde(rx, step_size=min(1e-3, 0.5 / block_size), **kw)
         xpt.assert_array_equal(r.y_hat, r_explicit.y_hat)
 
+        # One permutation and one rotation per stream; every stream must
+        # carry its own payload (a permutation is bijective).  At 20 dB the
+        # AWGN-only 16-QAM SER is 2e-5.
         ref = tx.reference.symbols[:, -tail:]
-        y = resolve_phase_ambiguity(
-            to_numpy(r.y_hat)[:, -tail:], ref, constellation=c16
-        )
-        ser = float(np.mean(c16.demap(y) != c16.demap(ref)))
-        assert ser < 1e-3, f"SER {ser:.2e}: default step did not converge"
+        ser = scoring.blind_ser(to_numpy(r.y_hat)[:, -tail:], ref, c16)
+        assert np.all(ser < 1e-3), f"SER {ser}: default step did not converge"
 
     def test_remainder_block_size(self, xp):
         """n_sym not divisible by block_size yields full-length output."""

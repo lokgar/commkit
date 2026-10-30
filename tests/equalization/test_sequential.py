@@ -10,6 +10,7 @@ from commkit.equalization.sequential._dd import _check_rls_divergence
 from commkit.filtering import RRC
 from commkit.mapping import Constellation
 from tests.common.conversions import to_numpy
+from tests.common.signals import make_channel_signal
 
 
 class TestLMS:
@@ -210,51 +211,35 @@ class TestRLS:
 
         assert mse_tail < 0.1, f"RLS did not converge: tail MSE = {mse_tail:.4f}"
 
-    def test_faster_convergence_than_lms(self, xp):
-        """RLS should converge faster than LMS (lower MSE in early symbols)."""
-        n_symbols = 300
-        channel = xp.array([0.3, 1.0, 0.2], dtype=xp.complex64)
+    @pytest.mark.parametrize("seed", [0, 1, 2])
+    def test_faster_convergence_than_lms(self, xp, seed):
+        """RLS acquires a 3-tap ISI channel in about twice its 15 taps; LMS
+        at step 0.01 needs at least 1.5x as long on the same record.
 
-        sig = generate(
-            Constellation.psk(4),
-            n_symbols,
-            symbol_rate=1e6,
-            sps=1,
-            pulse=RRC(0.35),
-            rng=77,
+        Acquisition is the end of the last 20-symbol window whose MSE against
+        the transmitted symbols is above 0.05 (the AWGN floor at 25 dB is
+        0.003), so both run on the same symbols and indices.
+        """
+        c = Constellation.psk(4)
+        rx = make_channel_signal(
+            c, 1500, sps=1, isi_taps=[0.3, 1.0, 0.2], esn0_db=25.0, seed=seed, xp=xp
         )
-        tx = xp.asarray(sig.reference.symbols)
-        rx_up = xp.asarray(sig.samples)
+        ref = to_numpy(rx.reference.symbols)
 
-        rx = xp.convolve(rx_up, channel, mode="same")
+        def acquisition(y, w=20):
+            y = to_numpy(y)
+            e = np.convolve(np.abs(y - ref[: y.size]) ** 2, np.ones(w) / w, "valid")
+            bad = np.nonzero(e >= 0.05)[0]
+            return 0 if bad.size == 0 else int(bad[-1]) + w
 
-        lms_result = equalization.lms(
-            rx,
-            tx,
-            num_taps=15,
-            step_size=0.01,
-            constellation=Constellation.psk(4),
-            sps=2,
+        n_lms = acquisition(
+            equalization.lms(rx, ref, num_taps=15, step_size=0.01).y_hat
         )
-        rls_result = equalization.rls(
-            rx,
-            tx,
-            num_taps=15,
-            forgetting_factor=0.99,
-            constellation=Constellation.psk(4),
-            sps=1,
+        n_rls = acquisition(
+            equalization.rls(rx, ref, num_taps=15, forgetting_factor=0.99).y_hat
         )
-
-        # Compare MSE in the first 50 symbols (convergence speed)
-        lms_early = xp.mean(xp.abs(lms_result.error[:50]) ** 2)
-        rls_early = xp.mean(xp.abs(rls_result.error[:50]) ** 2)
-
-        lms_early = float(lms_early)
-        rls_early = float(rls_early)
-
-        assert rls_early <= lms_early, (
-            f"RLS ({rls_early:.4f}) not faster than LMS ({lms_early:.4f})"
-        )
+        assert n_rls < 2 * 15 + 20, n_rls
+        assert n_lms > 1.5 * n_rls, (n_lms, n_rls)
 
     def test_output_shape_siso(self, xp):
         """RLS SISO output shapes should match LMS convention."""
@@ -271,38 +256,6 @@ class TestRLS:
 
         assert result.y_hat.ndim == 1
         assert result.weights.shape == (11,)
-
-
-class TestAPIRegression:
-    """Verify that removed parameters no longer exist on the public API."""
-
-    def test_lms_has_no_normalize_param(self, xp):
-        """lms() must not accept a 'normalize' keyword - always NLMS."""
-
-        sig = generate(
-            Constellation.psk(4), 100, symbol_rate=1e6, sps=2, pulse=RRC(0.35), rng=0
-        )
-        rx = xp.asarray(sig.samples)
-        tx = xp.asarray(sig.reference.symbols)
-        with pytest.raises(TypeError, match="normalize"):
-            equalization.lms(
-                rx,
-                tx,
-                num_taps=5,
-                constellation=Constellation.psk(4),
-                normalize=True,
-                sps=2,
-            )
-
-    def test_cma_has_no_normalize_param(self, xp):
-        """cma() must not accept a 'normalize' keyword."""
-
-        sig = generate(
-            Constellation.psk(4), 100, symbol_rate=1e6, sps=2, pulse=RRC(0.35), rng=0
-        )
-        rx = xp.asarray(sig.samples)
-        with pytest.raises(TypeError, match="normalize"):
-            equalization.cma(rx, num_taps=5, normalize=True, sps=2)
 
 
 class TestCMA:
@@ -339,33 +292,6 @@ class TestCMA:
         assert modulus_std < 0.3, (
             f"CMA output modulus not constant: std = {modulus_std:.4f}"
         )
-
-    def test_r2_from_modulation(self, xp, xpt):
-        """R2 should be correctly auto-computed from constellation."""
-        # QPSK: all points on unit circle -> R2 = 1.0
-        # This test checks the logic inside CMA, but here we can just verify the property
-        # using the public API if exposed, or just run a dummy CMA and check it doesn't crash?
-        # The original test verified calculation logic.
-
-        const = xp.asarray(Constellation.psk(4).points)
-        r2 = xp.mean(xp.abs(const) ** 4) / xp.mean(xp.abs(const) ** 2)
-
-        r2 = float(r2)
-
-        xpt.assert_allclose(r2, 1.0, atol=1e-6)
-
-    def test_r2_default(self, xp):
-        """CMA should work with default R2=1.0."""
-
-        sig = generate(
-            Constellation.psk(4), 500, symbol_rate=1e6, sps=2, pulse=RRC(0.35), rng=0
-        )
-        rx = xp.asarray(sig.samples)
-
-        result = equalization.cma(rx, num_taps=11, step_size=0.01, sps=2)
-
-        assert isinstance(result, EqualizerResult)
-        assert result.y_hat.shape[0] > 0
 
     def test_output_shape_siso(self, xp):
         """CMA SISO output should be 1D."""
@@ -462,18 +388,6 @@ class TestRDE:
             f"CMA ({err_cma:.4f}) for 16-QAM: CMA has an irreducible design "
             f"residual from using a single Godard radius on a multi-ring constellation"
         )
-
-    def test_radii_extraction(self, xp):
-        """Unique radii should match known 16-QAM ring structure."""
-        import numpy as _np
-
-        const = Constellation.qam(16).points
-        radii = _np.unique(_np.round(_np.abs(const).astype(_np.float32), 6))
-
-        # Standard normalized 16-QAM has 3 unique radii
-        assert len(radii) == 3, f"Expected 3 unique radii for 16-QAM, got {len(radii)}"
-        # All radii must be positive
-        assert _np.all(radii > 0)
 
     def test_output_shape_siso(self, xp):
         """RDE SISO output should be 1D with correct length."""

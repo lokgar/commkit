@@ -116,17 +116,18 @@ def test_rls_matches_oracle(num_ch, leakage):
 
 
 @pytest.mark.parametrize("num_ch", [1, 2])
-def test_cma_matches_oracle(num_ch):
-    samples, _ = _isi_input(4, num_ch)
-    const = Constellation.qam(4).points
-    r2 = float(np.mean(np.abs(const) ** 4) / np.mean(np.abs(const) ** 2))
-    res = cma(
-        samples,
-        num_taps=NUM_TAPS,
-        sps=SPS,
-        step_size=1e-3,
-        constellation=Constellation.qam(4),
-    )
+@pytest.mark.parametrize("order", [4, 16, None], ids=["qpsk", "16qam", "none"])
+def test_cma_matches_oracle(num_ch, order):
+    """The Godard radius is E|s|⁴/E|s|² of the constellation (1.32 for
+    16-QAM, 1 for QPSK) and 1 without one."""
+    samples, _ = _isi_input(order or 4, num_ch)
+    kw = {} if order is None else {"constellation": Constellation.qam(order)}
+    if order is None:
+        r2 = 1.0
+    else:
+        const = Constellation.qam(order).points
+        r2 = float(np.mean(np.abs(const) ** 4) / np.mean(np.abs(const) ** 2))
+    res = cma(samples, num_taps=NUM_TAPS, sps=SPS, step_size=1e-3, **kw)
     ref = cma_reference(samples, num_taps=NUM_TAPS, sps=SPS, step_size=1e-3, r2=r2)
     _assert_matches(res, ref, num_ch)
 

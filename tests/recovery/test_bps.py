@@ -6,6 +6,7 @@ import pytest
 from commkit import recovery
 from commkit.core import Signal
 from commkit.mapping import Constellation
+from tests.common import scoring
 from tests.common.conversions import to_numpy
 from tests.common.signals import (
     make_test_mimo_samples,
@@ -20,22 +21,19 @@ SNR_DB = 30  # generous SNR so numerical algorithms converge reliably
 class TestCprBps:
     @pytest.mark.parametrize("order", [16, 64])
     def test_phase_residual(self, xp, order):
-        """BPS CPR: RMS phase residual < 0.05 rad for constant phase offset."""
+        """A static 0.2 rad offset (inside the principal branch ±π/4) is
+        estimated per symbol within 0.05 rad RMS of the truth at 30 dB, and
+        the corrected symbols match the transmitted ones."""
         sig = make_test_qam_signal(
             order=order, num_symbols=1024, sps=1, symbol_rate=FS, xp=xp
         )
-        phi_true = 0.2  # radians
-        sig = sig.replace(samples=sig.samples * xp.exp(1j * phi_true))
-
-        phase_est = recovery.estimate_carrier_phase(
-            sig.samples, recovery.BPS(), constellation=Constellation.qam(order)
-        ).value
-        corrected = recovery.correct_carrier_phase(sig.samples, phase_est)
-
-        phase_resid = recovery.estimate_carrier_phase(
-            corrected, recovery.BPS(), constellation=Constellation.qam(order)
-        ).value
-        assert float(xp.sqrt(xp.mean(phase_resid**2))) < 0.05
+        phi_true = 0.2
+        rotated = sig.samples * xp.exp(1j * phi_true).astype(sig.samples.dtype)
+        c = Constellation.qam(order)
+        est = recovery.estimate_carrier_phase(rotated, recovery.BPS(), constellation=c)
+        assert scoring.phase_rms(est.value, np.full(1024, phi_true)) < 0.05
+        corrected = recovery.correct_carrier_phase(rotated, est)
+        assert scoring.ser(corrected, sig.reference.symbols, c) == 0.0
 
     def test_output_shape_siso(self, xp):
         """BPS CPR: 1D input -> 1D phase output of same length."""

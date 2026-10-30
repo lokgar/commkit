@@ -471,16 +471,28 @@ def test_everything_is_recovered(tmp_path: Any, make) -> None:
 
 
 def test_extracted_payload_decodes_after_load(tmp_path: Any) -> None:
-    """The stored reference code decodes the loaded payload."""
+    """A received payload saved and loaded decodes from its samples: the
+    loaded Signal's constellation and code turn its noisy samples into LLRs
+    and back into the source bits.  At Es/N0 10 dB the DVB-S2 short rate-1/2
+    code on 16-QAM is far above its threshold (about 5 dB), while the
+    uncoded decisions still have errors, so the decoder does the work."""
+    from commkit.impairments import apply_awgn
+    from commkit.mapping import compute_llr
+
     frame = SingleCarrierFrame(
         payload_blocks=4,
         payload_code=coding.LDPCCode.dvbs2("1/2", "short"),
         payload_constellation=Constellation.qam(16),
     )
-    save_npz(extract_payload(frame.to_signal(sps=1, symbol_rate=1e9)), tmp_path / "p")
-    ref = load_npz(tmp_path / "p").reference
+    rx = apply_awgn(
+        extract_payload(frame.to_signal(sps=1, symbol_rate=1e9)), esn0_db=10.0, rng=1
+    )
+    save_npz(rx, tmp_path / "p")
+    loaded = load_npz(tmp_path / "p")
+    ref = loaded.reference
     assert ref.code == frame.payload_code
-    res = coding.decode(ref.bits, code=ref.code)
+    assert commkit.metrics.ber(loaded) > 1e-3
+    res = coding.decode(compute_llr(loaded, noise_var=0.1), code=ref.code)
     np.testing.assert_array_equal(res.bits, ref.info_bits)
 
 
