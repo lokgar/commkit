@@ -387,8 +387,8 @@ def ols_fir_filter(
         is at least ``L`` samples long.
     causal : bool, default False
         By default the output is aligned as :func:`fir_filter` aligns it
-        (SciPy's ``mode='same'``, centered on tap ``L // 2``):
-        ``y[n] = sum_k x[n + L//2 - k]·taps[k]``, which removes the group
+        (SciPy's ``mode='same'``, centered on tap ``(L - 1) // 2``):
+        ``y[n] = sum_k x[n + (L-1)//2 - k]·taps[k]``, which removes the group
         delay of a symmetric filter before symbol sampling.  With ``True``
         the output is the causal convolution ``y[n] = sum_k x[n-k]·taps[k]``
         (``numpy.convolve(x, taps, mode='full')[:N]``), for a raw causal
@@ -412,7 +412,7 @@ def ols_fir_filter(
     A symmetric guard of ``nfft // 4`` samples is discarded from each
     block edge, so ``nfft // 4 >= len(taps)`` must hold.
 
-    Without ``causal`` the input is padded at the end by ``L // 2`` zeros
+    Without ``causal`` the input is padded at the end by ``(L - 1) // 2`` zeros
     and as many leading output samples are dropped, which costs at most one
     extra block.
     """
@@ -425,7 +425,7 @@ def ols_fir_filter(
     out_dtype = x.dtype  # capture before any reshape
 
     L = len(taps)
-    half = L // 2
+    half = (L - 1) // 2  # SciPy's mode='same' centre, as fir_filter
 
     x, was_1d = as_2d(x, name="samples")
 
@@ -473,7 +473,9 @@ def fir_filter(samples: S, taps: ArrayType, *, periodic: bool = False) -> S:
     """Apply an FIR filter along the time (last) axis.
 
     FFT convolution, ``mode="same"``: the output is centered on tap
-    ``len(taps) // 2``, so a symmetric filter adds no delay.  With
+    ``(len(taps) - 1) // 2``, ``y[n] = sum_k x[n + (L-1)//2 - k]·taps[k]``,
+    so a symmetric filter of odd length adds no delay (one of even length,
+    whose centre falls between two taps, half a sample).  With
     ``periodic=True`` the convolution is circular; away from the record ends
     both give the same samples.
 

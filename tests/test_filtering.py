@@ -406,33 +406,36 @@ class TestOverlapSaveFiltering:
     ) -> None:
         """The FFT block size is an implementation choice: nfft = 16 (many
         blocks) and the default (one block) give the same samples, and both
-        follow the documented ``y[n] = Σ_k x[n + L//2 - k] taps[k]``."""
+        follow the documented ``y[n] = Σ_k x[n + (L-1)//2 - k] taps[k]``."""
         rng = np.random.default_rng(2)
         x = rng.standard_normal(256)
         taps = rng.standard_normal(4)
-        expected = np.convolve(x, taps)[2 : 2 + 256]
+        expected = np.convolve(x, taps)[1 : 1 + 256]
         for nfft in (16, None):
             out = filtering.ols_fir_filter(xp.asarray(x), xp.asarray(taps), nfft=nfft)
             xpt.assert_allclose(out, xp.asarray(expected), atol=1e-12)
 
-    @pytest.mark.parametrize("num_taps", [
-        5,
-        pytest.param(4, marks=pytest.mark.xfail(strict=True, reason=(
-            "fir_filter centres even-length taps on tap (L - 1)//2 (SciPy "
-            "mode='same'), not on L//2 as its docstring and ols_fir_filter "
-            "say: for L = 4 the two differ by one sample (max |diff| 6.8 on "
-            "unit-variance data)"))),
-    ])  # fmt: skip
-    def test_fir_filter_alignment_matches_ols(
-        self, xp: Any, xpt: Any, num_taps: int
+    @pytest.mark.parametrize("num_taps", [4, 5])
+    @pytest.mark.parametrize("periodic", [False, True])
+    def test_fir_filter_alignment(
+        self, xp: Any, xpt: Any, num_taps: int, periodic: bool
     ) -> None:
-        """fir_filter and ols_fir_filter document the same alignment, tap
-        ``L // 2`` at lag 0, so they give the same samples."""
+        """fir_filter follows its documented centre tap ``(L - 1) // 2``
+        (odd and even L, linear and circular), and ols_fir_filter, which
+        documents fir_filter's alignment, gives the same samples (it centred
+        even-length taps one sample later)."""
         rng = np.random.default_rng(num_taps)
-        x = xp.asarray(rng.standard_normal(256))
-        taps = xp.asarray(rng.standard_normal(num_taps))
-        xpt.assert_allclose(filtering.fir_filter(x, taps),
-                            filtering.ols_fir_filter(x, taps), atol=1e-12)  # fmt: skip
+        x = rng.standard_normal(256)
+        taps = rng.standard_normal(num_taps)
+        c = (num_taps - 1) // 2
+        src = np.r_[x, x, x] if periodic else x
+        start = 256 + c if periodic else c
+        expected = np.convolve(src, taps)[start : start + 256]
+        out = filtering.fir_filter(xp.asarray(x), xp.asarray(taps), periodic=periodic)
+        xpt.assert_allclose(out, xp.asarray(expected), atol=1e-12)
+        if not periodic:
+            ols = filtering.ols_fir_filter(xp.asarray(x), xp.asarray(taps))
+            xpt.assert_allclose(ols, xp.asarray(expected), atol=1e-12)
 
     @pytest.mark.parametrize("causal", [False, True])
     def test_batches_do_not_change_the_output(

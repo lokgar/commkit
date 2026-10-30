@@ -4,6 +4,10 @@ Notable changes to CommKit, newest first. Performance figures are from the refer
 
 ## [Unreleased]
 
+### Changes that alter results
+
+- **`ols_fir_filter` centres even-length taps on tap `(L - 1) // 2`**, as `fir_filter` (SciPy's `mode="same"`) does and as its docstring promised; it used `L // 2`, one sample later. Odd-length taps and `causal=True` are unchanged. The docstrings of both now state the centre tap; they said `L // 2`.
+
 ### Fixed
 
 - `rls()`: `weights_history` has one row per returned symbol, so it matches `y_hat` after the tail trim (it kept the `num_taps // 2` trimmed rows). A run whose inverse correlation matrix loses positive definiteness (a forgetting factor far below 1) raises the documented `RuntimeError` instead of a bare `ZeroDivisionError` from the kernel, and the message now advises raising the forgetting factor toward 1, not lowering it.
