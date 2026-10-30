@@ -113,6 +113,7 @@ class TestPlotAnalysis:
         fig, ax = plot_increment_variance(est)
         assert len(ax.lines) == 1
 
+    @pytest.mark.allow_warnings
     def test_dsh_beat_psd(self, xp: Any) -> None:
         """Centred on the peak, with both width contours at the method's depth."""
         z, m = _beat(xp)

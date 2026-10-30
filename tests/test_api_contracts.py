@@ -854,6 +854,7 @@ def test_rows_are_unique():
     assert len(ROW_BY_TARGET) == len(ROWS)
 
 
+@pytest.mark.allow_warnings
 @pytest.mark.parametrize(
     "row", [pytest.param(r, id=str(r)) for r in ROWS if r.call is not None]
 )
@@ -923,6 +924,7 @@ def _module(a: Any) -> str:
     return type(a).__module__.split(".")[0]
 
 
+@pytest.mark.allow_warnings
 @pytest.mark.parametrize("row", _rows({TRANSFORM, RATE_CHANGE}))
 def test_array_roundtrip(row: Row, xp):
     c = Inputs(xp)
@@ -932,6 +934,7 @@ def test_array_roundtrip(row: Row, xp):
         assert out.ndim == ndim
 
 
+@pytest.mark.allow_warnings
 @pytest.mark.parametrize(
     "row",
     _rows({TRANSFORM, RATE_CHANGE, TRAJECTORY}, predicate=lambda r: r.signal_aware),
@@ -951,6 +954,7 @@ def test_signal_roundtrip(row: Row, xp):
     np.testing.assert_array_equal(to_device(sig.samples, "cpu"), before)
 
 
+@pytest.mark.allow_warnings
 @pytest.mark.parametrize("row", _rows(BEHAVIORAL))
 def test_no_mutation(row: Row, xp):
     c = Inputs(xp)
@@ -963,6 +967,7 @@ def test_no_mutation(row: Row, xp):
         np.testing.assert_array_equal(to_device(getattr(c, k), "cpu"), v, err_msg=k)
 
 
+@pytest.mark.allow_warnings
 @pytest.mark.parametrize("row", _rows(BEHAVIORAL))
 def test_foreign_array_rejected(row: Row, xp):
     c = Inputs(xp)
@@ -996,6 +1001,7 @@ def test_trajectory_shape_and_device(row: Row, xp):
         assert out.shape == x.shape
 
 
+@pytest.mark.allow_warnings
 @pytest.mark.parametrize("row", _rows({ESTIMATE}))
 def test_estimate_rank_rule(row: Row, xp):
     c = Inputs(xp)
@@ -1018,6 +1024,7 @@ def test_metric_host_values(row: Row, xp):
             assert out.shape == (2,)
 
 
+@pytest.mark.allow_warnings
 @pytest.mark.parametrize("row", _rows({EQUALIZER}))
 def test_equalizer_result(row: Row, xp):
     c = Inputs(xp)

@@ -4,6 +4,7 @@ from typing import Any
 from unittest.mock import patch
 
 import matplotlib.pyplot as plt
+import pytest
 
 from commkit import filtering
 from commkit.plotting import plot_filter_response
@@ -38,6 +39,7 @@ class TestPlotFilterResponse:
         assert fig is not None
         assert len(axes) == 4
 
+    @pytest.mark.allow_warnings
     def test_filter_response_axis_error(self, xp: Any) -> None:
         """Verify behavior when wrong number of axes are provided for filter response."""
         taps = xp.array([1, 0, 0, 1])

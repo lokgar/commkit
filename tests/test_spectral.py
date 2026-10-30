@@ -85,6 +85,7 @@ class TestPowerSpectralDensity:
 class TestFrequencyShift:
     """Tests for complex frequency shifting and phase modulation."""
 
+    @pytest.mark.allow_warnings
     def test_shift_frequency(self, xp: Any) -> None:
         """Verify complex frequency shifting, bin quantization, and energy preservation."""
         fs = 100.0
@@ -116,6 +117,7 @@ class TestFrequencyShift:
         energy_out = xp.sum(xp.abs(shifted_q) ** 2)
         assert xp.isclose(energy_in, energy_out)
 
+    @pytest.mark.allow_warnings
     def test_shift_frequency_preserves_complex64_dtype(self, xp: Any) -> None:
         """shift_frequency: complex64 signal -> complex64 output."""
         rng = np.random.default_rng(20)
@@ -127,6 +129,7 @@ class TestFrequencyShift:
         out = spectral.shift_frequency(s, frequency=100.0, sampling_rate=1000.0)
         assert out.dtype == xp.complex64
 
+    @pytest.mark.allow_warnings
     def test_shift_frequency_preserves_float32_dtype(self, xp: Any) -> None:
         """shift_frequency: float32 signal -> complex64 output."""
         rng = np.random.default_rng(21)
@@ -265,6 +268,7 @@ class TestAddPilotTone:
         x = (rng.randn(N) + 1j * rng.randn(N)).astype(xp.complex128)
         return x / xp.sqrt(xp.mean(xp.abs(x) ** 2))
 
+    @pytest.mark.allow_warnings
     @pytest.mark.parametrize("psr_db", [-20.0, -10.0, 0.0])
     def test_power_ratio(self, xp: Any, psr_db: float) -> None:
         """Added tone power matches the requested pilot-to-signal ratio."""
@@ -277,6 +281,7 @@ class TestAddPilotTone:
         p_tone = float(xp.mean(xp.abs(y - x) ** 2))
         assert abs(10 * np.log10(p_tone / p_sig) - psr_db) < 0.05
 
+    @pytest.mark.allow_warnings
     def test_peak_location(self, xp: Any) -> None:
         """The injected tone shows up as the dominant spectral peak at the snapped f_p."""
         fs = 100.0
@@ -293,6 +298,7 @@ class TestAddPilotTone:
         k = int(xp.argmax(xp.abs(xp.fft.fft(y))))
         assert abs(float(freqs[k]) - f_actual) < fs / N
 
+    @pytest.mark.allow_warnings
     def test_snaps_to_grid(self, xp: Any) -> None:
         """Returned frequency lies exactly on the f_s/N grid, near the request."""
         fs = 100.0
@@ -307,6 +313,7 @@ class TestAddPilotTone:
         assert abs(round(f_actual / df) - f_actual / df) < 1e-9
         assert abs(f_actual - f_req) <= df / 2 + 1e-9
 
+    @pytest.mark.allow_warnings
     def test_dtype_and_shape_preserved(self, xp: Any) -> None:
         """complex64 stays complex64; SISO/MIMO shapes are preserved."""
         fs = 100.0
@@ -319,6 +326,7 @@ class TestAddPilotTone:
         ym = spectral.add_pilot_tone(mimo, sampling_rate=fs, frequency=30.0)
         assert ym.shape == mimo.shape
 
+    @pytest.mark.allow_warnings
     def test_renormalize_preserves_power(self, xp: Any) -> None:
         """renormalize=True restores each channel's original mean power."""
         fs = 100.0
@@ -341,6 +349,7 @@ class TestAddPilotTone:
         with pytest.raises(ValueError, match=r"must lie in \(-fs/2, fs/2\)"):
             spectral.add_pilot_tone(x, sampling_rate=fs, frequency=fs)
 
+    @pytest.mark.allow_warnings
     def test_scalar_returns_float(self, xp: Any) -> None:
         """Scalar frequency returns a plain float (back-compat), even for MIMO."""
         fs = 100.0
@@ -351,6 +360,7 @@ class TestAddPilotTone:
         )
         assert isinstance(f_actual, float)
 
+    @pytest.mark.allow_warnings
     def test_per_channel_frequencies(self, xp: Any) -> None:
         """A per-channel list places one distinct tone per channel at its bin."""
         fs = 100.0
@@ -387,6 +397,7 @@ class TestAddPilotTone:
         with pytest.raises(ValueError, match=r"must lie in \(-fs/2, fs/2\)"):
             spectral.add_pilot_tone(mimo, sampling_rate=fs, frequency=[20.0, fs])
 
+    @pytest.mark.allow_warnings
     def test_per_channel_power_ratio(self, xp: Any) -> None:
         """A per-channel PSR sequence realises a distinct tone power per channel."""
         fs = 100.0
@@ -400,6 +411,7 @@ class TestAddPilotTone:
             p_tone = float(xp.mean(xp.abs(y[c] - mimo[c]) ** 2))
             assert abs(10 * np.log10(p_tone / p_sig) - psr[c]) < 0.05
 
+    @pytest.mark.allow_warnings
     def test_per_channel_power_length_mismatch_raises(self, xp: Any) -> None:
         """A per-channel PSR sequence whose length != C raises ValueError."""
         fs = 100.0
@@ -427,6 +439,7 @@ class TestGridFrequency:
         with pytest.raises(ValueError, match="num_samples"):
             spectral.grid_frequency(1.0, sampling_rate=1.0, num_samples=0)
 
+    @pytest.mark.allow_warnings
     def test_shift_lands_on_grid_frequency(self, xp: Any) -> None:
         fs, n, f = 1000.0, 1000, 123.4
         out = spectral.shift_frequency(
@@ -436,6 +449,7 @@ class TestGridFrequency:
         peak = int(xp.argmax(xp.abs(xp.fft.fft(out))))
         assert peak * fs / n == pytest.approx(expected)
 
+    @pytest.mark.allow_warnings
     def test_pilot_tone_lands_on_grid_frequency(self, xp: Any) -> None:
         fs, n, f = 1000.0, 1000, -201.6
         y = spectral.add_pilot_tone(

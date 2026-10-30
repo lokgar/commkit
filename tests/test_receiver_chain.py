@@ -175,6 +175,7 @@ class TestDualPolChain:
         assert np.all(s > 0.5 * p), s
         assert np.all(s < qam_ser(4, 10 ** ((self.ESN0_DB - 1) / 10))), s
 
+    @pytest.mark.allow_warnings
     @pytest.mark.parametrize("omit", ["frequency", "cpr", "equalizer"])
     def test_each_correction_is_needed(self, xp: Any, omit: str) -> None:
         """Without any one block both streams fail (SER above 0.3; measured

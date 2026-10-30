@@ -35,6 +35,7 @@ class TestCprViterbiViterbi:
         bound = np.sqrt(1.0 / (2 * block_size * 10 ** (SNR_DB / 10)))
         assert scoring.phase_rms(est, np.full(2048, 0.3), symmetry=4) < 2 * bound
 
+    @pytest.mark.allow_warnings
     @pytest.mark.parametrize("order", [16, 64])
     def test_qam_self_noise_averages_with_the_block(self, xp, order):
         """On QAM the normalized 4th power has self-noise (the points are not

@@ -882,6 +882,7 @@ class TestSignalResolutionAndMetrics:
         assert np.isfinite(float(ber_notrim))
         assert 0.0 <= float(ber_notrim) <= 1.0
 
+    @pytest.mark.allow_warnings
     def test_rls_tail_trim_field(self, xp):
         """rls() tail_trim field equals num_taps // 2 and y_hat is shortened accordingly."""
         from commkit import equalization

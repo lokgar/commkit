@@ -77,6 +77,7 @@ CASES = [
 ]
 
 
+@pytest.mark.allow_warnings
 @pytest.mark.parametrize(
     ("name", "extra"), CASES, ids=[f"{n}-{i}" for i, (n, _) in enumerate(CASES)]
 )
@@ -227,6 +228,7 @@ class TestResultSignal:
 
         return generate(C16, n_sym, symbol_rate=1e6, sps=2, pulse=RRC(0.2), rng=4)
 
+    @pytest.mark.allow_warnings
     def test_rls_reference_is_cut_to_the_output(self):
         sig = self._sig()
         res = E.rls(sig, sig.reference.symbols[:200], num_taps=7)

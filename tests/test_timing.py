@@ -408,6 +408,7 @@ class TestEstimateTimingMIMO:
         for ch in range(2):
             assert int(integer[ch]) == preamble_pos
 
+    @pytest.mark.allow_warnings
     def test_estimate_timing_mimo_channel_skew(self, xp):
         """MIMO: hardware skew of 5 samples on channel 1 is reflected in per-channel integer offsets."""
         preamble_pos = 200

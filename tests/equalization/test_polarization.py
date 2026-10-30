@@ -43,6 +43,7 @@ class TestDemultiplexPolarizationTones:
         den = xp.sqrt(xp.sum(xp.abs(a) ** 2) * xp.sum(xp.abs(b) ** 2))
         return float(num / den)
 
+    @pytest.mark.allow_warnings
     def test_demux_recovers_streams_no_permutation(self, xp):
         """A static rotation is inverted; row j tracks tone j (no permutation)."""
 
@@ -64,6 +65,7 @@ class TestDemultiplexPolarizationTones:
             # ...and rejects the other stream (cross-talk suppressed).
             assert self._corr(xp, demuxed[j], tx[1 - j]) < 0.05
 
+    @pytest.mark.allow_warnings
     def test_demux_robust_to_noise(self, xp):
         """The tone-phasor estimate still locks under moderate AWGN."""
 
@@ -84,6 +86,7 @@ class TestDemultiplexPolarizationTones:
         for j in range(2):
             assert self._corr(xp, demuxed[j], tx[j]) > 0.99
 
+    @pytest.mark.allow_warnings
     def test_static_track(self, xp, xpt):
         """A static estimate holds one (K, C) complex128 unmixing matrix."""
 
@@ -107,6 +110,7 @@ class TestDemultiplexPolarizationTones:
             equalization.correct_polarization(tx, track),
         )
 
+    @pytest.mark.allow_warnings
     def test_overdetermined_pinv(self, xp):
         """C > K: a (3, 2) mixing is unmixed to 2 streams via the pseudo-inverse."""
 
@@ -139,6 +143,7 @@ class TestDemultiplexPolarizationTones:
         with pytest.raises(ValueError, match=r"2-D \(C, N\)"):
             _demux(s, sampling_rate=fs, tone_frequencies=[10.0])
 
+    @pytest.mark.allow_warnings
     def test_signal_input_returns_signal(self, xp, xpt):
         """Signal input: sampling_rate is taken from the signal."""
 
@@ -157,6 +162,7 @@ class TestDemultiplexPolarizationTones:
         assert isinstance(demuxed_sig, Signal)
         xpt.assert_allclose(demuxed_sig.samples, demuxed_arr)
 
+    @pytest.mark.allow_warnings
     def test_signal_input_gives_the_same_estimate(self, xp, xpt):
         """Signal input: the same estimate as the array with sampling_rate."""
 
@@ -188,6 +194,7 @@ class TestDemultiplexPolarizationTonesDynamic:
     _streams = staticmethod(TestDemultiplexPolarizationTones._streams)
     _corr = staticmethod(TestDemultiplexPolarizationTones._corr)
 
+    @pytest.mark.allow_warnings
     def test_tracks_drifting_sop_where_static_fails(self, xp):
         """A rotating SOP defeats the static one-shot inverse but is tracked here."""
 
@@ -224,6 +231,7 @@ class TestDemultiplexPolarizationTonesDynamic:
         assert min_static < 0.95  # static degraded by the drift
         assert min_dynamic > min_static + 0.04
 
+    @pytest.mark.allow_warnings
     def test_tracks_with_long_tracking_filter(self, xp):
         """A narrow tracking bandwidth (fs/B in the hundreds, as in real
         captures) gives a tracking FIR of hundreds of taps; it still tracks."""
@@ -248,6 +256,7 @@ class TestDemultiplexPolarizationTonesDynamic:
             assert self._corr(xp, dynamic[j], tx[j]) > 0.99
             assert self._corr(xp, dynamic[j], tx[1 - j]) < 0.1
 
+    @pytest.mark.allow_warnings
     def test_static_sop_still_recovered(self, xp):
         """With no drift the dynamic path matches the static result (no regression)."""
 
@@ -266,6 +275,7 @@ class TestDemultiplexPolarizationTonesDynamic:
             assert self._corr(xp, demuxed[j], tx[j]) > 0.99
             assert self._corr(xp, demuxed[j], tx[1 - j]) < 0.1
 
+    @pytest.mark.allow_warnings
     def test_track_shapes(self, xp):
         """A tracked estimate holds the (G, K, C) stack and (G,) grid positions."""
 
@@ -297,6 +307,7 @@ class TestDemultiplexPolarizationTonesDynamic:
                 s, sampling_rate=fs, tone_frequencies=self.TONES, track_bandwidth=0.0
             )
 
+    @pytest.mark.allow_warnings
     def test_trim_edges_returns_valid_interior(self, xp):
         """trim_edges drops the track's edge, num_taps//2, at each side."""
 
@@ -324,6 +335,7 @@ class TestDemultiplexPolarizationTonesDynamic:
         for j in range(2):
             assert self._corr(xp, demuxed[j], tx[j, valid]) > 0.99
 
+    @pytest.mark.allow_warnings
     def test_signal_input_returns_signal(self, xp, xpt):
         """Signal input: sampling_rate is taken from the signal."""
 
@@ -344,6 +356,7 @@ class TestDemultiplexPolarizationTonesDynamic:
         assert isinstance(demuxed_sig, Signal)
         xpt.assert_allclose(demuxed_sig.samples, demuxed_arr)
 
+    @pytest.mark.allow_warnings
     def test_signal_input_gives_the_same_track(self, xp, xpt):
         """The JonesTrack is the same for Signal and array input."""
 

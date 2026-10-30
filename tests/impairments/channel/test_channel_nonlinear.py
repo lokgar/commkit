@@ -88,6 +88,7 @@ class TestLinearLimits:
         )
         assert _rel(lossy, lossless) < 1e-5
 
+    @pytest.mark.allow_warnings
     def test_dispersion_slope_is_the_third_order_term(self, xp):
         """With S given, the extra phase over the β₂-only channel is
         -β₃ ω³ L / 6, with β₃ = (S + 2D/λ)(λ²/2πc)² (dω/dλ = -2πc/λ²)."""
@@ -307,6 +308,7 @@ class TestAmplifierNoise:
 
 
 class TestPMD:
+    @pytest.mark.allow_warnings
     def test_mean_dgd(self):
         """Over many waveplate realizations the DGD at the carrier,
         Δτ = 2 sqrt(|det dJ/dω|) of the link's Jones matrix J(ω), averages

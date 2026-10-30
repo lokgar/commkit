@@ -59,6 +59,7 @@ class TestConstruction:
         np.testing.assert_array_equal(a.parity_check().toarray(), h)
         assert repr(a) == "LDPCCode(n=8, k=4)"
 
+    @pytest.mark.allow_warnings
     def test_quasi_cyclic_circulants(self) -> None:
         code = LDPCCode.quasi_cyclic(QC_BASE, 7)
         h = code.parity_check().toarray()
@@ -123,6 +124,7 @@ class TestConstruction:
         with pytest.raises(ValueError, match="max_iterations"):
             MinSum(max_iterations=True)
 
+    @pytest.mark.allow_warnings
     def test_layers_share_no_bits(self) -> None:
         for code in (LDPCCode.quasi_cyclic(QC_BASE, 7), LDPCCode.dvbs2("3/5", "short")):
             row_ptr, cols, layer_ptr = code._schedule
@@ -179,6 +181,7 @@ class TestEncoding:
 
 
 class TestDecoding:
+    @pytest.mark.allow_warnings
     @pytest.mark.parametrize(
         "method",
         [

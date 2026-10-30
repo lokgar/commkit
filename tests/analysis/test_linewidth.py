@@ -361,6 +361,7 @@ class TestDshLinewidth:
         assert res.value == pytest.approx(2e6, rel=0.15)
         assert res.dphi_var == pytest.approx(2.0 * np.pi * 2e6 * m / FS, rel=0.2)
 
+    @pytest.mark.allow_warnings
     def test_lorentzian_incoherent(self, xp):
         n, m = 1 << 20, 2000  # τ_d = 4 µs, τ_d/τ_c ≈ 63
         dnu = 5e6
@@ -394,6 +395,7 @@ class TestDshLinewidth:
                 xp.asarray(z), DshFmPsd(delay=0.1 / FS), sampling_rate=FS
             )
 
+    @pytest.mark.allow_warnings
     def test_results_plot_directly(self, xp):
         """Every method returns the data its diagnostic plot needs."""
         from commkit import plotting
@@ -491,6 +493,7 @@ class TestEstimateLinewidthContract:
         with pytest.raises(AttributeError):
             res.value = 0.0  # type: ignore[misc]
 
+    @pytest.mark.allow_warnings
     @pytest.mark.parametrize(
         "method",
         [

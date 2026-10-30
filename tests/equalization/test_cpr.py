@@ -100,6 +100,7 @@ def _slips(y, syms, start, block=64):
 class TestCPREqualizerBaseline:
     """An inline CPR that never moves is the equalizer without CPR."""
 
+    @pytest.mark.allow_warnings
     @pytest.mark.parametrize("algo", ["lms", "rls"])
     def test_zero_gain_pll_is_no_cpr(self, algo, xp, xpt):
         """A PLL with zero gains and zero initial phase applies no rotation,
@@ -443,6 +444,7 @@ class TestBlockSlipCarry:
 class TestBPSTrainingAnchor:
     """Training symbols anchor the inline BPS phase."""
 
+    @pytest.mark.allow_warnings
     @pytest.mark.parametrize("algo", ["lms", "rls", "block_lms"])
     @pytest.mark.parametrize("seed", [1, 5])
     def test_multi_tap_receiver_locks_without_rotation(self, algo, seed, xp):

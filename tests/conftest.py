@@ -7,6 +7,9 @@ The `--device` CLI option (cpu | gpu | all) controls which backends are exercise
 The default is set to "all" in pyproject.toml [tool.pytest.ini_options] addopts.
 """
 
+import logging
+import re
+
 import matplotlib
 import numpy as np
 import pytest
@@ -34,6 +37,10 @@ def pytest_configure(config):
     config.addinivalue_line("markers", "cpu_only: mark test as CPU-only")
     config.addinivalue_line(
         "markers", "slow: long statistical validation, run with --run-slow"
+    )
+    config.addinivalue_line(
+        "markers",
+        "allow_warnings: the test provokes a commkit WARNING log on purpose",
     )
 
 
@@ -95,6 +102,54 @@ def _autoclose_figures():
     import matplotlib.pyplot as plt
 
     plt.close("all")
+
+
+# WARNING records that report what the caller asked for, not a suspect
+# result, and that a test cannot avoid; each is a log-level issue of the
+# library, kept here until it logs them below WARNING.
+_NOT_SUSPECT = re.compile(
+    "|".join([
+        r"is running on CPU \(NumPy\)",  # block equalizers' device advice
+        r"^RLS tail trim:",  # the documented trim of every RLS call
+        r"correct_timing\(mode='slice'\): output is shorter",  # what slice does
+        r"num_taps=\d+ is small for sps=1\.",  # fractional-spacing advice at 1 sps
+        r"font not found",  # the plotting theme on a machine without Roboto
+    ])
+)  # fmt: skip
+
+
+class _WarningRecords(logging.Handler):
+    def __init__(self) -> None:
+        super().__init__(logging.WARNING)
+        self.records: list[logging.LogRecord] = []
+
+    def emit(self, record: logging.LogRecord) -> None:
+        if not _NOT_SUSPECT.search(record.getMessage()):
+            self.records.append(record)
+
+
+@pytest.fixture(autouse=True)
+def _fail_on_commkit_warnings(request):
+    """Fail a test whose library calls log a WARNING (a returned but suspect
+    result: no convergence, a fit out of range, a misconfigured call), unless
+    it is marked ``allow_warnings`` or takes ``caplog`` to assert the log."""
+    if request.node.get_closest_marker("allow_warnings") or (
+        "caplog" in request.fixturenames
+    ):
+        yield
+        return
+    handler = _WarningRecords()
+    log = logging.getLogger("commkit")
+    log.addHandler(handler)
+    try:
+        yield
+    finally:
+        log.removeHandler(handler)
+    if handler.records:
+        lines = "; ".join(
+            f"{r.name}:{r.lineno}: {r.getMessage()}" for r in handler.records[:3]
+        )
+        pytest.fail(f"commkit logged {len(handler.records)} warning(s): {lines}")
 
 
 @pytest.fixture

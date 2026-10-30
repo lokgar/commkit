@@ -89,6 +89,7 @@ class TestLMS:
 class TestRLS:
     """Tests for the RLS adaptive equalizer."""
 
+    @pytest.mark.allow_warnings
     def test_convergence(self, xp):
         """RLS with 500 training symbols on the ISI channel: no symbol errors
         after training, EVM within 1.2x the AWGN floor (RLS has almost no
@@ -200,6 +201,7 @@ class TestResultLayout:
     ``(C, C, num_taps)``, and ``weights_history`` only with
     ``store_weights=True``, one row per processed symbol."""
 
+    @pytest.mark.allow_warnings
     @pytest.mark.parametrize("name", ["lms", "rls", "cma", "rde"])
     @pytest.mark.parametrize("num_channels", [1, 2])
     def test_layout(self, xp, name, num_channels):
@@ -424,6 +426,7 @@ class TestNumbaBackendCoverage:
         with pytest.raises(RuntimeError, match="RLS equalizer diverged"):
             _check_rls_divergence(bad, xp, 0.99, 0.01)
 
+    @pytest.mark.allow_warnings
     def test_rls_numba_num_train_symbols(self, xp):
         """RLS numba: pre-sliced training_symbols limits DA phase length."""
         rx, sig = self._make_qpsk_rx(xp, n_symbols=800)

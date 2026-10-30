@@ -164,6 +164,7 @@ class TestPlotCarrierPhase:
         fig, axes = plot_pilot_phase_estimate(est, sampling_rate=FS, show=False)
         assert np.asarray(axes, dtype=object).shape == (1, 2)
 
+    @pytest.mark.allow_warnings
     def test_pilot_tone_phase_estimate(self, xp: Any) -> None:
         x, _ = _qpsk(xp, n=8192)
         method = recovery.PilotTone(frequency=3e5, bandwidth=2e4)
@@ -174,6 +175,7 @@ class TestPlotCarrierPhase:
         )
         assert len(axes) == 2
 
+    @pytest.mark.allow_warnings
     def test_pilot_tones_phase_estimate(self, xp: Any) -> None:
         x, _ = _qpsk(xp, n=8192)
         tones = (2.5e5, 3.5e5)

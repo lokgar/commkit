@@ -71,6 +71,7 @@ class TestFoeMthPower:
         bound = 1.5 * 4 * np.sqrt(theory.tone_frequency_crb(10**3, 4096)) * FS
         assert abs(float(est) - fo_hz) < (bound if order == 4 else 0.02 * FS / 4096)
 
+    @pytest.mark.allow_warnings
     @pytest.mark.parametrize("order", [4, 8])
     @pytest.mark.parametrize("fo_hz", [3_000.0, -6_000.0, 777.7])
     def test_accuracy_psk(self, xp, order, fo_hz):
@@ -237,6 +238,7 @@ class TestCorrectionFunctions:
         )
         assert corrected.dtype == xp.complex64
 
+    @pytest.mark.allow_warnings
     def test_correct_static_frequency_offset_roundtrip(self, xp):
         """Applying +Δf then correcting with -Δf restores the signal."""
         sig = _qam_signal(xp, 4, 1024)

@@ -84,6 +84,7 @@ class TestErrorVectorMagnitude:
         tx = xp.array([1.0 + 0j, 0.0 + 1j, -1.0 + 0j, 0.0 - 1j])
         assert metrics.evm(tx + 0.1, tx) == pytest.approx(10.0, rel=1e-6)
 
+    @pytest.mark.allow_warnings
     def test_evm_near_zero_ref(self, xp: Any) -> None:
         """Verify EVM behavior when reference signal is near zero."""
         tx = xp.zeros(10)
@@ -95,6 +96,7 @@ class TestErrorVectorMagnitude:
         with pytest.raises(ValueError, match="shape mismatch"):
             metrics.evm(xp.zeros(10), xp.zeros(11))
 
+    @pytest.mark.allow_warnings
     def test_evm_array_handling(self, xp: Any, xpt: Any) -> None:
         """Verify evm multichannel array handling."""
         rx = xp.array([[1.0, 1.0], [1.0, 0.8]])
