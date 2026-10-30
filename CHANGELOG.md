@@ -4,6 +4,21 @@ Notable changes to CommKit, newest first. Performance figures are from the refer
 
 ## [Unreleased]
 
+## [3.2.0] - 2026-10-30
+
+EXIT analysis and coding diagnostics. EXIT charts for any soft-in soft-out component, measured through the existing decoders or the demapper, or in closed form for LDPC codes with their threshold; plots of LLR distributions, parity-check matrices and EXIT charts; and INFO logging in the modules where it was missing. Nothing changes for existing code.
+
+### Added
+
+- **EXIT analysis** in `commkit.coding.exit`. `ExitCurve` is the transfer curve of one soft-in soft-out component and `exit_chart(first, second)` the `ExitChart` of two, with the decoding trajectory, whether the tunnel is open and where it closes. Curves come from `decoder_exit_curve` (measured through `decode` for any code whose decoder returns a-posteriori LLRs: LDPC, BCJR, Chase), `demapper_exit_curve` (measured, for iterative demapping on AWGN) and `ldpc_exit_curves` (the variable and check nodes of an LDPC code in closed form), with `ldpc_threshold`, the belief-propagation threshold in the Gaussian approximation (0.498 for the DVB-S2 rate-1/2 short code, the NGMI at which simulated QPSK frames start to decode). Measured curves run on the chosen device; the docstrings list the limitations (Gaussian a-priori LLRs, long interleavers, no curve for decoders without soft output such as turbo and polar, early stopping).
+- **Coding plots**: `plot_llr_distribution(llrs, bits)` draws the LLR densities given the transmitted bit and their consistency, `log p(L | 0) / p(L | 1)` against `L`, which shows LLRs from a wrong `noise_var` or demapper model; `plot_parity_check(code)` draws the nonzero entries and node degrees of a parity-check matrix; `plot_exit_chart(chart)` draws an `ExitChart` and marks where a closed tunnel stalls.
+- INFO logging where it was missing: `decode` reports the blocks whose own check failed and the iterations used, `estimate_iq_imbalance` its estimate, and `SingleCarrierFrame.to_signal`, `save_npz` and `load_npz` what they built, saved or loaded. Notebook 00 shows how to turn it on.
+- Notebook 06 checks LLR consistency; notebook 07 predicts the LDPC threshold with an EXIT chart and charts iterative demapping with Gray and natural labels.
+
+### Development
+
+- AGENTS.md states the logging levels: DEBUG for what a call is about to do, INFO for one summary per public call, WARNING for a returned but suspect result; value objects do not log, and `warnings.warn` is kept for `PrecisionWarning`.
+
 ## [3.1.3] - 2026-10-30
 
 Additive noise without a scaling knob. `apply_awgn` either measures the signal or takes an absolute noise variance, and the OSNR moves to its own function, `apply_ase`.
@@ -303,7 +318,11 @@ See the [GitHub release](https://github.com/lokgar/commkit/releases/tag/v1.1.0) 
 
 First release. See the [GitHub release](https://github.com/lokgar/commkit/releases/tag/v1.0.0).
 
-[Unreleased]: https://github.com/lokgar/commkit/compare/v3.1.0...HEAD
+[Unreleased]: https://github.com/lokgar/commkit/compare/v3.2.0...HEAD
+[3.2.0]: https://github.com/lokgar/commkit/compare/v3.1.3...v3.2.0
+[3.1.3]: https://github.com/lokgar/commkit/compare/v3.1.2...v3.1.3
+[3.1.2]: https://github.com/lokgar/commkit/compare/v3.1.1...v3.1.2
+[3.1.1]: https://github.com/lokgar/commkit/compare/v3.1.0...v3.1.1
 [3.1.0]: https://github.com/lokgar/commkit/compare/v3.0.0...v3.1.0
 [3.0.0]: https://github.com/lokgar/commkit/compare/v2.3.0...v3.0.0
 [2.3.0]: https://github.com/lokgar/commkit/compare/v2.2.0...v2.3.0
