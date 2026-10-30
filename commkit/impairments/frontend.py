@@ -8,13 +8,14 @@ kept together because they are one device model, the widely linear mixing
 of I and Q.
 """
 
+import logging
 import math
 from collections.abc import Callable
 from dataclasses import dataclass
 from types import ModuleType
 
 from .._array import as_2d, restore_1d
-from ..backend import ArrayType, dispatch
+from ..backend import ArrayType, dispatch, to_device
 from ..core._signal_adapter import S, adapt_signal
 from ..logger import logger
 from ..math import db_to_linear
@@ -163,7 +164,12 @@ def estimate_iq_imbalance(samples: ArrayType) -> IQImbalanceEstimate:
     phase_deg = xp.degrees(xp.arctan2(-siq, sqq))
     if was_1d:
         amplitude_db, phase_deg = amplitude_db[0], phase_deg[0]
-    logger.info("Estimated IQ imbalance.")
+    if logger.isEnabledFor(logging.INFO):
+        logger.info(
+            "Estimated IQ imbalance: amplitude=%s dB, phase=%s deg.",
+            to_device(amplitude_db, "cpu").round(2),
+            to_device(phase_deg, "cpu").round(2),
+        )
     return IQImbalanceEstimate(amplitude_db, phase_deg)
 
 

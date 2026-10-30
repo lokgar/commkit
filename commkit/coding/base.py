@@ -17,6 +17,7 @@ along the last axis; a block never spans channels.
 from __future__ import annotations
 
 import dataclasses
+import logging
 from collections.abc import Callable
 from dataclasses import dataclass
 from typing import Any, NamedTuple
@@ -24,7 +25,7 @@ from typing import Any, NamedTuple
 import numpy as np
 
 from .._array import as_2d, restore_1d, validate_array, warn_if_double
-from ..backend import ArrayType, get_array_module
+from ..backend import ArrayType, get_array_module, to_device
 from ..logger import logger
 
 __all__ = ["DecodeResult", "decode", "encode"]
@@ -272,6 +273,26 @@ def encode(bits: ArrayType, *, code: Any) -> ArrayType:
     return restore_1d(was_1d, out.reshape(x2.shape[0], num_blocks * code.n))
 
 
+def _log_decode(res: _Decoded, code: Any, method: Any) -> None:
+    """Log the decoder's own success check and iterations (INFO level)."""
+    # Two (R,) transfers, made only when INFO is enabled.
+    if not logger.isEnabledFor(logging.INFO) or res.valid.size == 0:
+        return
+    valid = to_device(res.valid, "cpu")
+    iterations = to_device(res.iterations, "cpu")
+    failed = int(valid.size - np.count_nonzero(valid))
+    most = int(iterations.max())
+    used = f", iterations mean {float(iterations.mean()):.1f}, max {most}"
+    logger.info(
+        "Decoded %d block(s) of %r with %r: %d failed the decoder's check%s.",
+        valid.size,
+        code,
+        method,
+        failed,
+        used if most > 1 else "",
+    )
+
+
 def decode(llrs: ArrayType, *, code: Any, method: Any = None) -> DecodeResult:
     """Decode LLRs (or hard decisions) of a code's transmitted bits.
 
@@ -325,6 +346,7 @@ def decode(llrs: ArrayType, *, code: Any, method: Any = None) -> DecodeResult:
             return None
         return restore_1d(was_1d, a.reshape(x2.shape[0], num_blocks * size))
 
+    _log_decode(res, code, method)
     return DecodeResult(
         bits=shaped(res.bits, code.k),
         llrs=shaped(res.llrs, code.n),

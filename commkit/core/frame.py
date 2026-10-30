@@ -16,6 +16,7 @@ from .._circular import convolve_periodic
 from .._sequences import barker_sequence, zadoff_chu_sequence, zc_mimo_root
 from ..backend import ArrayType, dispatch, to_device
 from ..filtering.pulses import Pulse
+from ..logger import logger
 from ..mapping import Constellation
 from ..math import db_to_linear, normalize
 from . import generation
@@ -809,6 +810,19 @@ class SingleCarrierFrame:
         """
         sps = require_integer_sps(sps, "SingleCarrierFrame.to_signal()")
         device = require_device(device, "SingleCarrierFrame.to_signal()")
+        logger.info(
+            "Building frame: %s symbols x %s channel(s), payload %s symbols of %r, "
+            "pilot period %s, sps=%s, pulse=%r, periodic=%s, on %s.",
+            self.num_symbols,
+            self.num_channels,
+            self.payload_num_symbols,
+            self.payload_constellation,
+            self.pilot_period,
+            sps,
+            pulse if isinstance(pulse, Pulse) or pulse is None else "taps",
+            periodic,
+            device,
+        )
         if periodic:
             return Signal(
                 samples=self._periodic_samples(sps, pulse, device),

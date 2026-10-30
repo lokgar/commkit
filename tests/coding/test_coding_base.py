@@ -1,11 +1,13 @@
 """Tests for the encode/decode verbs and DecodeResult (coding/base.py)."""
 
+import logging
 import os
 import pickle
 import subprocess
 import sys
 import warnings
 from typing import Any
+from unittest.mock import patch
 
 import numpy as np
 import pytest
@@ -15,6 +17,7 @@ from commkit.coding import (
     LinearBlockCode,
     MaximumLikelihood,
     Syndrome,
+    base,
     decode,
     encode,
 )
@@ -113,6 +116,30 @@ class TestDecode:
             decode(xp.ones(8, dtype=xp.float32), code=H74)
         with pytest.raises(TypeError, match="real"):
             decode(xp.ones(7, dtype=xp.complex64), code=H74)
+
+
+class TestDecodeLogging:
+    def test_logs_failed_checks(self, xp: Any, caplog: Any) -> None:
+        """One INFO line per call with the blocks whose own check failed."""
+        h16 = LinearBlockCode.hamming(4, extended=True)
+        llrs = xp.ones(3 * 16, dtype=xp.float32)
+        llrs[[0, 1]] = -1.0  # two errors: detected, not correctable
+        with caplog.at_level(logging.INFO, logger="commkit"):
+            decode(llrs, code=h16, method=Syndrome(max_weight=1))
+        lines = [r.message for r in caplog.records if r.levelno == logging.INFO]
+        assert len(lines) == 1
+        assert "Decoded 3 block(s)" in lines[0]
+        assert "1 failed the decoder's check." in lines[0]
+
+    def test_no_op_when_info_disabled(self, xp: Any, caplog: Any) -> None:
+        """No log line and no host transfer when INFO is off."""
+        with (
+            caplog.at_level(logging.WARNING, logger="commkit"),
+            patch.object(base, "to_device") as transfer,
+        ):
+            decode(xp.ones(7, dtype=xp.float32), code=H74)
+        transfer.assert_not_called()
+        assert not caplog.records
 
 
 class TestCodeValue:

@@ -52,6 +52,7 @@ from typing import TYPE_CHECKING, Any
 import numpy as np
 
 from . import backend as _backend
+from .logger import logger
 
 __all__ = ["load_npz", "save_npz"]
 
@@ -204,6 +205,7 @@ def save_npz(
         np.savez_compressed(path, **arrays)  # type: ignore[arg-type]
     else:
         np.savez(path, **arrays)  # type: ignore[arg-type]
+    logger.info("Saved Signal %s to %s.", signal.samples.shape, path)
 
 
 def _put_constellation(c: Any, key: str, arrays: dict, meta: dict) -> None:
@@ -343,6 +345,7 @@ def load_npz(
     # loading an untrusted archive cannot execute code.
     with np.load(path, allow_pickle=False) as data:
         sig = _read_signal(data, path)
+    logger.info("Loaded Signal %s from %s, on %s.", sig.samples.shape, path, device)
     return sig.to(device)
 
 
