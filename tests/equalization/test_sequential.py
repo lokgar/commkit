@@ -6,9 +6,9 @@ import pytest
 from commkit import equalization, generate
 from commkit.core import Signal, SingleCarrierFrame
 from commkit.equalization import EqualizerResult
-from commkit.equalization.sequential._dd import _check_rls_divergence
 from commkit.filtering import RRC
 from commkit.mapping import Constellation
+from commkit.recovery import BPS
 from tests.common import scoring
 from tests.common.conversions import to_numpy
 from tests.common.signals import make_channel_signal
@@ -222,7 +222,7 @@ class TestResultLayout:
         assert res.weights.shape == w
         assert res.weights_history is None
         stored = fn(*args, store_weights=True, **kw)
-        assert stored.weights_history.shape == (n, *w)
+        assert stored.weights_history.shape == (n - trim, *w)
         xpt_w = to_numpy(stored.weights_history[-1])
         np.testing.assert_allclose(xpt_w, to_numpy(stored.weights), rtol=1e-6)
 
@@ -415,16 +415,23 @@ class TestNumbaBackendCoverage:
         assert ser == 0.0 and evm < 1.4 * floor
         assert score(0.0)[1] > 2 * floor
 
-    def test_rls_divergence_guard(self, xp):
-        """The guard behind rls() raises an actionable error on non-finite
-        taps and passes finite ones (a unit test of the check: the RLS
-        recursion's regularization keeps it finite on the inputs tried)."""
-        good = xp.ones((2, 2, 5), dtype=xp.complex64)
-        _check_rls_divergence(good, xp, 0.99, 0.01)
-        bad = good.copy()
-        bad[0, 0, 0] = float("nan")
+    @pytest.mark.allow_warnings
+    @pytest.mark.parametrize("cpr", [None, BPS(test_phases=16)], ids=["plain", "bps"])
+    def test_rls_divergence_raises(self, xp, cpr):
+        """A forgetting factor of 0.1 multiplies P by 10 every symbol, so it
+        loses positive definiteness within a few hundred symbols on 2-sps
+        input: rls() raises its actionable error (it used to stop with a bare
+        ZeroDivisionError from the kernel), while 0.99 on the same record
+        converges with finite taps."""
+        c = Constellation.qam(16)
+        sig = generate(c, 4000, symbol_rate=1e9, sps=2, pulse=RRC(0.1), rng=0)
+        rx = xp.asarray(sig.samples)
+        train = xp.asarray(sig.reference.symbols[:500])
+        kw = dict(num_taps=31, sps=2, constellation=c, cpr=cpr)
         with pytest.raises(RuntimeError, match="RLS equalizer diverged"):
-            _check_rls_divergence(bad, xp, 0.99, 0.01)
+            equalization.rls(rx, train, forgetting_factor=0.1, **kw)
+        res = equalization.rls(rx, train, forgetting_factor=0.99, **kw)
+        assert np.all(np.isfinite(to_numpy(res.weights)))
 
     @pytest.mark.allow_warnings
     def test_rls_numba_num_train_symbols(self, xp):

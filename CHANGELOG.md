@@ -4,6 +4,10 @@ Notable changes to CommKit, newest first. Performance figures are from the refer
 
 ## [Unreleased]
 
+### Fixed
+
+- `rls()`: `weights_history` has one row per returned symbol, so it matches `y_hat` after the tail trim (it kept the `num_taps // 2` trimmed rows). A run whose inverse correlation matrix loses positive definiteness (a forgetting factor far below 1) raises the documented `RuntimeError` instead of a bare `ZeroDivisionError` from the kernel, and the message now advises raising the forgetting factor toward 1, not lowering it.
+
 ### Development
 
 - The test suite checks what the code achieves, not how it is written. Equalizers converge on RRC records through ISI, fractional delays, polarization rotation and DGD, scored against the transmitted symbols with only the legitimate rotation and permutation removed, and each "improves" test also runs a baseline that must fail; carrier recovery is scored against the true phase; estimators and metrics against Cramér–Rao bounds and AWGN theory; Chase and shortened-code decoding against brute force. New end-to-end receiver chains (coded single carrier, dual polarization, 80 km of fiber) each show that leaving out one correction breaks them. Monte Carlo tests state what their frame counts bound and gain `--run-slow` validation runs. A WARNING log from commkit fails the test. Tests that only repeated the contract registry's shape and device checks are removed.

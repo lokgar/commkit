@@ -170,7 +170,9 @@ class EqualizerResult:
     error : ndarray
         Error signal, ``(N_sym,)`` or ``(C, N_sym)``.
     weights_history : ndarray or None
-        Tap weights over time, only with ``store_weights=True``.
+        Tap weights over time, only with ``store_weights=True``: one row per
+        symbol of ``y_hat`` (RLS's trimmed tail included), the taps that
+        produced it.
     num_train_symbols : int
         Training symbols consumed in the data-aided phase (LMS/RLS); skip
         them before steady-state metrics such as EVM, SNR and BER.

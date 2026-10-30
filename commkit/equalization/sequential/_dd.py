@@ -367,13 +367,17 @@ def _check_rls_divergence(
     actionable error instead of returning garbage weights.
     """
     if not bool(xp.isfinite(weights).all()):
-        raise RuntimeError(
-            f"RLS equalizer diverged (forgetting_factor={forgetting_factor}, "
-            f"regularization={regularization}). RLS requires a positive-definite "
-            "correlation matrix. "
-            "Try increasing 'regularization', reducing 'forgetting_factor', "
-            "or adding 'leakage' (e.g. 1e-4) to stabilize fractionally-spaced inputs."
-        )
+        raise RuntimeError(_rls_divergence_message(forgetting_factor, regularization))
+
+
+def _rls_divergence_message(forgetting_factor: float, regularization: float) -> str:
+    return (
+        f"RLS equalizer diverged (forgetting_factor={forgetting_factor}, "
+        f"regularization={regularization}). RLS requires a positive-definite "
+        "correlation matrix. "
+        "Try increasing 'regularization', raising 'forgetting_factor' toward 1, "
+        "or adding 'leakage' (e.g. 1e-4) to stabilize fractionally-spaced inputs."
+    )
 
 
 def rls(
@@ -477,7 +481,8 @@ def rls(
     Returns
     -------
     EqualizerResult
-        The fields described for :func:`lms`.  ``y_hat`` lacks the last
+        The fields described for :func:`lms`.  ``y_hat``, ``error``,
+        ``weights_history`` and ``phase_trajectory`` lack the last
         ``num_taps // 2`` symbols (``tail_trim``), and ``signal`` carries the
         reference cut to match.
 
@@ -663,7 +668,12 @@ def rls(
 
     # W and P freeze at n_update_halt, so the state resumes there at the latest.
     resume = min(run.n_done, n_update_halt)
-    snap = _run_resumable(run, resume, segment, snapshot)
+    try:
+        snap = _run_resumable(run, resume, segment, snapshot)
+    except FloatingPointError as err:  # raised by the kernel when P is no longer PD
+        raise RuntimeError(
+            _rls_divergence_message(forgetting_factor, regularization)
+        ) from err
     result = _assemble_sequential(
         run,
         equalizer="rls",

@@ -328,7 +328,7 @@ def _unpack_result_numpy(
 
     w_history = None
     if store_weights:
-        w_history = xp.asarray(w_hist)
+        w_history = xp.asarray(w_hist if n_sym is None else w_hist[:n_sym])
         if was_1d:
             w_history = w_history[:, 0, 0, :]
 

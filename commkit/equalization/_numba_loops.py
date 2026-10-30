@@ -150,6 +150,10 @@ def _rls_update(W, P, x_bar, e, Px, xH_P, k_gain, lam_f64, leak_term, update):
     denom = lam_f64
     for jj in range(N):
         denom = denom + (np.conj(x_bar[jj]) * Px[jj]).real
+    # A positive-definite P gives denom >= λ; anything else means P has lost
+    # it, and rls() reports the divergence.
+    if not denom > 0.0:
+        raise FloatingPointError("RLS inverse correlation matrix lost definiteness")
     inv_denom = np.float64(1.0) / denom
     for ii in range(N):
         k_gain[ii] = Px[ii] * inv_denom
