@@ -6,10 +6,12 @@ import numpy as np
 import pytest
 
 from commkit import generate, recovery
+from commkit.backend import to_device
 from commkit.filtering import RRC
 from commkit.impairments import apply_awgn, generate_phase_noise
 from commkit.mapping import Constellation
 from commkit.metrics import snr
+from tests.common import scoring
 from tests.common.conversions import device_of, to_numpy
 from tests.common.signals import (
     make_ambiguous_qam16,
@@ -167,6 +169,38 @@ class TestCycleSlipHistoryRule:
         assert np.count_nonzero(np.diff(k)) == 0
         y = recovery.resolve_phase_ambiguity(recovery.correct_carrier_phase(rx, est))
         assert snr(y) > 15.0
+
+    def test_bps_repair_removes_slips(self, backend_device):
+        """Standalone BPS slips on a smooth Wiener phase at low SNR (16-QAM,
+        2πΔνT = 2π·1e-4, Es/N0 12 dB, 16-symbol blocks); the default repair
+        removes most of them.  Counted against the transmitted symbols as
+        changes of the corrected output's π/2 rotation between 64-symbol
+        blocks (measured 13 without the repair on 2 x 2·10⁴ symbols, 3 with
+        it); without the repair the count must be at least 10, so the test
+        fails if the repair does nothing."""
+        c = Constellation.qam(16)
+        counts = {True: 0, False: 0}
+        for seed in range(2):
+            rng = np.random.default_rng(seed)
+            n = 20000
+            syms = c.points.astype(np.complex64)[rng.integers(0, 16, n)]
+            phase = np.cumsum(rng.standard_normal(n) * np.sqrt(2 * np.pi * 1e-4))
+            noise = np.sqrt(10**-1.2 / 2) * (
+                rng.standard_normal(n) + 1j * rng.standard_normal(n)
+            )
+            x = (syms * np.exp(1j * phase) + noise).astype(np.complex64)
+            x = to_device(x, backend_device)
+            for repair in counts:
+                bps = recovery.BPS(
+                    test_phases=32,
+                    block_size=16,
+                    cycle_slip=recovery.CycleSlip() if repair else None,
+                )
+                z = to_numpy(recovery.correct_carrier_phase(x, bps, constellation=c))
+                k = scoring.block_rotations(z[256:], syms[256:], symmetry=4, block=64)
+                counts[repair] += int(np.count_nonzero(np.diff(k)))
+        assert counts[False] >= 10, counts
+        assert counts[True] <= counts[False] / 3, counts
 
 
 class TestResolvePhaseAmbiguity:

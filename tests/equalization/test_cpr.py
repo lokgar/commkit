@@ -675,3 +675,29 @@ class TestBlockwiseFOE:
 
         assert ser_after_bps(corrected) == 0.0
         assert ser_after_bps(to_numpy(samples)) > 0.3
+
+
+class TestCPRBPSCycleSlip:
+    """Cycle-slip repair of an equalizer's inline BPS."""
+
+    def test_lms_inline_bps_repair_removes_slips(self, xp):
+        """Inline BPS slips on a smooth Wiener phase at low SNR (16-QAM,
+        2πΔνT = 2π·1e-4, Es/N0 12 dB, 16-symbol window); the repair removes
+        most of them.  Counted against the transmitted symbols as changes of
+        the output's π/2 rotation between 64-symbol blocks; without the
+        repair the same records slip (measured 57 on 2 x 2·10⁴ symbols, 2
+        with it), so the test fails if the repair does nothing."""
+        counts = {True: 0, False: 0}
+        for seed in range(2):
+            x, syms, _, c = _wiener_record(16, 1e-4, 12.0, seed, 20000)
+            for repair in counts:
+                bps = BPS(
+                    test_phases=32,
+                    block_size=16,
+                    cycle_slip=CycleSlip() if repair else None,
+                )
+                res = lms(xp.asarray(x), syms[:256], num_taps=1, sps=1,
+                          step_size=0.0, constellation=c, cpr=bps)  # fmt: skip
+                counts[repair] += _slips(to_numpy(res.y_hat), syms, 256)
+        assert counts[False] > 40, counts
+        assert counts[True] < counts[False] / 4, counts
