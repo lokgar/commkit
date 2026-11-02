@@ -88,10 +88,12 @@ def pytest_collection_modifyitems(config, items):
     elif device_opt == "gpu":
         items[:] = [item for item in items if not item.get_closest_marker("cpu_only")]
     if not config.getoption("--run-slow"):
-        skip_slow = pytest.mark.skip(reason="slow validation; run with --run-slow")
-        for item in items:
-            if item.get_closest_marker("slow"):
-                item.add_marker(skip_slow)
+        # Deselected, not skipped: a default run reports no skips, and the
+        # summary line counts the slow tests left out ("N deselected").
+        slow = [item for item in items if item.get_closest_marker("slow")]
+        if slow:
+            items[:] = [item for item in items if not item.get_closest_marker("slow")]
+            config.hook.pytest_deselected(items=slow)
 
 
 @pytest.fixture(autouse=True)
