@@ -782,8 +782,8 @@ def correct_timing(
     Returns
     -------
     ndarray or Signal
-        Corrected samples; shorter for ``'slice'``, which also logs a
-        warning.
+        Corrected samples; shorter for ``'slice'``, which logs the
+        trimmed length at INFO.
 
     Raises
     ------
@@ -886,7 +886,7 @@ def correct_timing(
         x = fft_fractional_delay(x, delay=-fractional_offset)
 
     if mode == "slice":
-        logger.warning(
+        logger.info(
             "correct_timing(mode='slice'): output is shorter than input "
             "(trimmed by %s samples). Signal length metadata (e.g. "
             "duration) will no longer match the original.",

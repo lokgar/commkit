@@ -8,7 +8,6 @@ The default is set to "all" in pyproject.toml [tool.pytest.ini_options] addopts.
 """
 
 import logging
-import re
 
 import matplotlib
 import numpy as np
@@ -104,28 +103,13 @@ def _autoclose_figures():
     plt.close("all")
 
 
-# WARNING records that report what the caller asked for, not a suspect
-# result, and that a test cannot avoid; each is a log-level issue of the
-# library, kept here until it logs them below WARNING.
-_NOT_SUSPECT = re.compile(
-    "|".join([
-        r"is running on CPU \(NumPy\)",  # block equalizers' device advice
-        r"^RLS tail trim:",  # the documented trim of every RLS call
-        r"correct_timing\(mode='slice'\): output is shorter",  # what slice does
-        r"num_taps=\d+ is small for sps=1\.",  # fractional-spacing advice at 1 sps
-        r"font not found",  # the plotting theme on a machine without Roboto
-    ])
-)  # fmt: skip
-
-
 class _WarningRecords(logging.Handler):
     def __init__(self) -> None:
         super().__init__(logging.WARNING)
         self.records: list[logging.LogRecord] = []
 
     def emit(self, record: logging.LogRecord) -> None:
-        if not _NOT_SUSPECT.search(record.getMessage()):
-            self.records.append(record)
+        self.records.append(record)
 
 
 @pytest.fixture(autouse=True)

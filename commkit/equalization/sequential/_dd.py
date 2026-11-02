@@ -570,7 +570,7 @@ def rls(
     n_update_halt = max(0, run.n_sym - num_taps // 2)
     tail_trim = num_taps // 2
     if tail_trim > 0:
-        logger.warning(
+        logger.info(
             "RLS tail trim: last %s symbols removed from y_hat "
             "(zero-padding contamination zone). result.signal carries the "
             "trimmed reference; trim reference arrays to match: "

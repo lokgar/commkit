@@ -14,6 +14,7 @@ Notable changes to CommKit, newest first. Performance figures are from the refer
 ### Fixed
 
 - **`MthPower` estimates offsets near 0 Hz.** It zeroed bin 0 of the M-th power spectrum and, for constellations without a constant envelope, subtracted the mean of `x^M`, which for QAM is the tone itself: an offset with `|M Δf|` under half a bin was never found (QPSK, 4096 symbols at 1 MS/s: 0 Hz read as -82 kHz, 10 Hz as 30.5 Hz). Both steps are removed; at other offsets the estimates do not change, also with a DC offset of -20 dB in the input.
+- Messages that report what the caller asked for log at INFO, not WARNING, so a WARNING from commkit always means a suspect result: the block equalizers' advice to move CPU data to the GPU, RLS's tail trim, `correct_timing(mode="slice")` shortening the record and the plotting theme's font fallback. The advice to use more taps for fractionally spaced equalization is no longer logged at `sps=1`, where it does not apply.
 - `rls()`: `weights_history` has one row per returned symbol, so it matches `y_hat` after the tail trim (it kept the `num_taps // 2` trimmed rows). A run whose inverse correlation matrix loses positive definiteness (a forgetting factor far below 1) raises the documented `RuntimeError` instead of a bare `ZeroDivisionError` from the kernel, and the message now advises raising the forgetting factor toward 1, not lowering it.
 
 ### Development

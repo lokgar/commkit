@@ -22,7 +22,7 @@ def apply_default_theme() -> None:
     """Apply the library's Matplotlib style.
 
     Matplotlib's ``dark_background`` style with Roboto (or the default
-    sans-serif font, with a logged warning, when Roboto is not installed)
+    sans-serif font, logged at INFO, when Roboto is not installed)
     for text and math, a 7 x 4.9 inch figure with constrained layout,
     300-dpi saving, a light grid, and inward ticks on all four sides.
 
@@ -38,7 +38,7 @@ def apply_default_theme() -> None:
         font_name = "Roboto"
     except ValueError:
         font_name = "sans"
-        logger.warning("Roboto font not found, falling back to default sans-serif.")
+        logger.info("Roboto font not found, falling back to default sans-serif.")
 
     plt.style.use("dark_background")
 

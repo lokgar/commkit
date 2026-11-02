@@ -375,7 +375,7 @@ def _validate_sps(sps: Any, num_taps: int) -> None:
             "proportionally more taps.",
             sps,
         )
-    if num_taps < 2 * sps:
+    if sps > 1 and num_taps < 2 * sps:  # fractionally spaced only
         logger.warning(
             "num_taps=%s is small for sps=%s. Recommend num_taps >= %s "
             "for fractionally-spaced equalization.",
