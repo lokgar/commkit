@@ -247,7 +247,9 @@ class Chase:
         code, ``Syndrome(max_weight=1)`` rejects test words with two errors.
     beta : float, optional
         Soft-output magnitude of bits without a competitor; ``None`` takes
-        the largest competitor magnitude of the same word.
+        the largest competitor magnitude of the same word, or, when no
+        candidate of the word differs from the decision anywhere, the
+        word's largest input ``|LLR|``.
     """
 
     test_positions: int = 4
