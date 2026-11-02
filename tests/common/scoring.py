@@ -114,12 +114,6 @@ def block_rotations(y: Any, ref: Any, *, symmetry: int, block: int) -> np.ndarra
     return np.round(np.angle(corr) / (2.0 * np.pi / symmetry)).astype(int) % symmetry
 
 
-def zero_failure_upper_bound(num_trials: int, confidence: float = 0.95) -> float:
-    """One-sided upper bound on a failure rate after 0 failures in
-    ``num_trials`` independent trials: ``1 - (1 - confidence)^(1/n)``."""
-    return 1.0 - (1.0 - confidence) ** (1.0 / num_trials)
-
-
 def binomial_margin(p: float, n: int, z: float = 4.0) -> float:
     """``z`` standard deviations of an error-rate estimate from ``n`` trials."""
     return z * float(np.sqrt(p * (1.0 - p) / n))

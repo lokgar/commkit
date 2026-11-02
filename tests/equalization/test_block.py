@@ -174,34 +174,29 @@ class TestBlockLMSConvergence:
     def test_default_step_converges_under_polarization_mixing(
         self, xp, xpt, block_size
     ):
-        """The default step, min(0.5/block_size, 8e-3), untangles a 30-degree
-        polarization rotation within four blocks at small and large blocks."""
-        n_sym = 8 * block_size
-        samples, training = make_test_mimo_samples(
-            num_channels=2, order=16, num_symbols=n_sym, sps=2, snr_db=25.0, seed=7
-        )
-        th = np.deg2rad(30.0)
-        rot = np.array([[np.cos(th), np.sin(th)], [-np.sin(th), np.cos(th)]])
-        mixed = xp.asarray((rot @ samples).astype(np.complex64))
-        kw = dict(
-            num_taps=21,
-            sps=2,
-            constellation=Constellation.qam(16),
-            block_size=block_size,
-        )
-        r = block_lms(mixed, xp.asarray(training), **kw)
-        r_explicit = block_lms(
-            mixed,
-            xp.asarray(training),
-            step_size=min(0.5 / block_size, 8e-3),
-            **kw,
-        )
+        """The default step, min(0.5/block_size, 8e-3), trained over four
+        blocks, separates two 16-QAM streams through the ISI channel and a
+        30-degree polarization rotation at small and large blocks: over the
+        last four blocks the SER per stream stays below 5e-3 and the EVM
+        below 2x the AWGN floor (0.079; measured SER 0-1e-3, EVM 0.115-0.127,
+        three seeds).  Frozen taps leave the streams mixed (SER ~0.7)."""
+        c = Constellation.qam(16)
+        n = 8 * block_size
+        rx = _isi_record(c, n, theta=np.deg2rad(30.0), num_channels=2, seed=1, xp=xp)
+        ref = to_numpy(rx.reference.symbols)
+        train = ref[:, : 4 * block_size]
+        kw = dict(num_taps=21, block_size=block_size)
+        r = block_lms(rx, train, **kw)
+        r_explicit = block_lms(rx, train, step_size=min(0.5 / block_size, 8e-3), **kw)
         xpt.assert_array_equal(r.y_hat, r_explicit.y_hat)
 
-        t = xp.asarray(training[:, 4 * block_size :])
-        y = r.y_hat[:, 4 * block_size :]
-        evm = float(xp.sqrt(xp.mean(xp.abs(y - t) ** 2) / xp.mean(xp.abs(t) ** 2)))
-        assert evm < 0.1, f"EVM {evm:.3f}: default step did not converge"
+        held = slice(4 * block_size, None)
+        y = to_numpy(r.y_hat)[:, held]
+        assert np.all(scoring.ser(y, ref[:, held], c) < 5e-3)
+        for k in range(2):
+            assert scoring.evm_rms(y[k], ref[k, held]) < 2 * 10 ** (-22 / 20)
+        frozen = to_numpy(block_lms(rx, train, step_size=0.0, **kw).y_hat)
+        assert np.all(scoring.ser(frozen[:, held], ref[:, held], c) > 0.3)
 
     def test_isi_channel_convergence(self, xp):
         """Known 3-tap ISI channel: equalizer must converge across block boundaries."""
