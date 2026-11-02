@@ -2,6 +2,12 @@
 
 Notable changes to CommKit, newest first. Performance figures are from the reference machine (RTX 4070 Ti, Ryzen 7 7800X3D, WSL2) unless stated otherwise, as a ratio of new to old time (below 1 is faster).
 
+## [Unreleased]
+
+### Added
+
+- `filter_response` (returning a `FilterResponse` of frequencies, complex response and group delay), `impulse_response` and `step_response` compute the responses of FIR taps, second-order sections or a `(b, a)` pair on the coefficients' device. The group delay of SOS filters is summed section by section, so high orders keep their accuracy; real IIR time responses run through `iir_filter`, in double-precision state whatever the coefficients' precision.
+
 ## [3.2.1] - 2026-11-02
 
 Fixes found by a rework of the test suite, which now checks what each algorithm achieves against the transmitted truth and theory. Five numerical defaults or models were wrong and change results (PLL cycle-slip repair, Tikhonov smoothing, `block_cma`'s step, `ols_fir_filter`'s alignment of even taps, `MthPower` near 0 Hz); no signature changes. Plots take their sizes from the theme.
