@@ -52,9 +52,9 @@ class TestCodedSisoChain:
     ESN0_DB = 14.0
     TRAIN = 2000
 
-    def _transmit(self, device: str) -> tuple[Any, Any, Any]:
+    def _transmit(self, device: str, blocks: int = 8) -> tuple[Any, Any, Any]:
         frame = SingleCarrierFrame(
-            payload_blocks=8,
+            payload_blocks=blocks,
             payload_constellation=self.C16,
             payload_code=self.CODE,
             payload_rng=4,
@@ -104,16 +104,27 @@ class TestCodedSisoChain:
         pre = ck.metrics.ber(payload, num_skip_symbols=skip)
         return pre, ck.metrics.fer(dec, payload)
 
-    def test_every_codeword_decodes(self, backend_device: str) -> None:
+    @pytest.mark.parametrize(
+        "blocks",
+        [
+            pytest.param(8, id="smoke"),
+            pytest.param(96, id="slow", marks=pytest.mark.slow),
+        ],
+    )
+    def test_every_codeword_decodes(self, backend_device: str, blocks: int) -> None:
         """FER 0 against the source bits, and a pre-FEC BER between AWGN
         theory at 14 dB (9.4e-3, less a 4-sigma margin) and theory 1.5 dB
         lower (2.2e-2), the stated budget for the ISI's noise enhancement,
-        the phase noise and the LMS misadjustment (measured: 1.6e-2)."""
-        frame, tx, rx = self._transmit(backend_device)
+        the phase noise and the LMS misadjustment (measured: 1.6e-2).
+
+        0 failures in 8 codewords bound the FER below 0.31 at 95 %; the slow
+        run's 96 codewords bound it below 0.031."""
+        frame, tx, rx = self._transmit(backend_device, blocks)
         pre, fer = self._score(self._receive(rx, frame, tx, None))
         assert fer == 0.0
         p = qam16_gray_ber(10 ** (self.ESN0_DB / 10))
-        assert p - scoring.binomial_margin(p, 4 * 30000) < pre
+        n_bits = blocks * self.CODE.n - 4 * 2 * self.TRAIN  # after the skip
+        assert p - scoring.binomial_margin(p, n_bits) < pre
         assert pre < qam16_gray_ber(10 ** ((self.ESN0_DB - 1.5) / 10))
 
     @pytest.mark.parametrize("omit", ["frequency", "timing", "cpr", "equalizer"])
