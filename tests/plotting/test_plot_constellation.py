@@ -193,3 +193,26 @@ class TestPlotConstellation:
         )
         _, ax = plot_constellation(sig, overlay_reference=True)
         assert ax.collections[0].get_offsets().shape == (16, 2)
+
+
+def test_constellation_axis_limits(xp: Any) -> None:
+    """A comparison can use the same I/Q window for different records."""
+    from commkit.plotting import plot_constellation
+
+    x = xp.asarray([1 + 1j, -1 - 1j], dtype=xp.complex64)
+    _, ax = plot_constellation(x, xlim=(-3, 3), ylim=(-2, 2))
+    assert ax.get_xlim() == (-3, 3)
+    assert ax.get_ylim() == (-2, 2)
+
+
+def test_constellation_respects_grid_theme(xp: Any) -> None:
+    """The caller's grid setting applies to the constellation axes."""
+    import matplotlib as mpl
+
+    from commkit.plotting import plot_constellation
+
+    x = xp.asarray([1 + 1j, -1 - 1j], dtype=xp.complex64)
+    for enabled in (False, True):
+        with mpl.rc_context({"axes.grid": enabled}):
+            _, ax = plot_constellation(x)
+            assert ax.get_xgridlines()[0].get_visible() is enabled

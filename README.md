@@ -13,7 +13,7 @@ CommKit covers the receiver chain of coherent and IM/DD links (waveform generati
 
 ## The model
 
-Data is a NumPy or CuPy array, or a `Signal` that wraps the samples together with what is known about them. Algorithms are plain functions that take the data and return a new `Signal` or array, or a typed result such as `EqualizerResult` or an `*Estimate`. Plotting functions draw those results; they never compute them.
+Data is a NumPy or CuPy array, or a `Signal` that wraps the samples together with what is known about them. Algorithms are plain functions that take the data and return a new `Signal` or array, or a typed result such as `EqualizerResult` or an `*Estimate`. Plotting functions draw those results or call the public compute functions needed to produce them.
 
 - **Things that describe** a modulation, a pulse or a sub-algorithm are small frozen objects written in the call: `lms(rx, cpr=BPS(test_phases=64))`. The same object works standalone: `correct_carrier_phase(y, BPS())`.
 - **A `Signal` carries facts and ground truth.** Facts are `sampling_rate`, `symbol_rate`, `center_frequency` and `domain`; the carrier of an optical Signal gives its `center_wavelength_nm`, which dispersion, fiber propagation and OSNR noise read. The description is `constellation` and `pulse`. The ground truth is `reference`: the transmitted symbols, the bits on the air and the source bits before coding or distribution matching (the same array when there is neither). Functions take facts from the Signal and raise on a conflicting argument. Choices such as the decision constellation default to the Signal's and can be overridden.
@@ -50,6 +50,32 @@ res2 = ck.equalization.lms(rx, num_taps=21, step_size=1e-3, cpr=cpr, state=res.s
 ```
 
 Without CuPy, pass `device="cpu"` (the default): the same code runs on the CPU.
+
+## Comparing filter responses
+
+Calculate a response on the coefficients' device, or overlay selected panels
+of several filters:
+
+```python
+short = ck.filtering.fir_taps(sampling_rate=1e6, num_taps=21, cutoff=100e3)
+long = ck.filtering.fir_taps(sampling_rate=1e6, num_taps=101, cutoff=100e3)
+response = ck.filtering.filter_response(long, sampling_rate=1e6)
+print(response.frequencies, response.response, response.group_delay)
+
+ck.plotting.apply_default_theme()
+_, ax = ck.plotting.plot_filter_response(
+    short, sampling_rate=1e6, quantity="magnitude", label="21 taps"
+)
+ck.plotting.plot_filter_response(
+    long, sampling_rate=1e6, quantity="magnitude", ax=ax,
+    label="101 taps", legend=True, show=True,
+)
+```
+
+See notebook 03 for filter and smoothing comparisons. The multi-panel
+equalizer, timing, recovery and coding diagnostics take `quantity=` in the
+same way: draw a second result on the returned axis with its own `label=`,
+and `annotations=False` to leave out repeated fits and guides.
 
 ## CPU and GPU
 

@@ -91,6 +91,16 @@ class TestPlotFrequencySync:
         )
         fig, axes = plot_mm_autocorrelation(est, sampling_rate=FS, show=False)
         assert fig is not None
+        _, selected = plot_mm_autocorrelation(
+            est, sampling_rate=FS, quantity="magnitude", label="measured"
+        )
+        first = selected if channels == 1 else selected[0]
+        assert first.lines[0].get_label() == "measured"
+        _, selected = plot_mm_autocorrelation(
+            est, sampling_rate=FS, quantity="phase", annotations=False
+        )
+        first = selected if channels == 1 else selected[0]
+        assert not first.lines
 
     def test_mm_autocorrelation_needs_mm_estimate(self, xp: Any) -> None:
         x, _ = _qpsk(xp, df=2e3)
@@ -112,6 +122,11 @@ class TestPlotFrequencySync:
         f_hat = float(est.value)
         assert f_hat == pytest.approx(3e3, abs=50)
         assert any(ln.get_xdata()[0] == pytest.approx(f_hat) for ln in ax.lines[1:])
+        _, ax = plot_frequency_offset_spectrum(est, label="first", annotations=False)
+        _, ax = plot_frequency_offset_spectrum(
+            est, ax=ax, label="second", annotations=False, legend=True
+        )
+        assert [line.get_label() for line in ax.lines] == ["first", "second"]
 
     def test_frequency_offset_blockwise_result(self, xp: Any) -> None:
         """The recomputed trajectory follows the block estimates."""
@@ -135,6 +150,8 @@ class TestPlotFrequencySync:
         )
         fig, axes = plot_pilot_phase_estimate(est, sampling_rate=FS, show=False)
         assert np.asarray(axes, dtype=object).shape == (1, 1)
+        with pytest.raises(ValueError, match="carrier-phase estimate"):
+            plot_pilot_phase_estimate(est, sampling_rate=FS, quantity="trajectory")
 
 
 class TestPlotCarrierPhase:
@@ -163,6 +180,22 @@ class TestPlotCarrierPhase:
         est = recovery.estimate_carrier_phase(x, recovery.PilotAided(idx, s[0, idx]))
         fig, axes = plot_pilot_phase_estimate(est, sampling_rate=FS, show=False)
         assert np.asarray(axes, dtype=object).shape == (1, 2)
+        _, ax = plot_pilot_phase_estimate(
+            est, sampling_rate=FS, quantity="trajectory", label="first"
+        )
+        _, ax = plot_pilot_phase_estimate(
+            est,
+            sampling_rate=FS,
+            quantity="trajectory",
+            label="second",
+            ax=ax,
+            legend=True,
+        )
+        assert [line.get_label() for line in ax.lines] == ["first", "second"]
+        _, ax = plot_pilot_phase_estimate(
+            est, sampling_rate=FS, quantity="pilots", xlim=(0, 100)
+        )
+        assert ax.get_xlim() == (0, 100)
 
     @pytest.mark.allow_warnings
     def test_pilot_tone_phase_estimate(self, xp: Any) -> None:
@@ -174,6 +207,51 @@ class TestPlotCarrierPhase:
             est, x, method=method, sampling_rate=FS, show=False
         )
         assert len(axes) == 2
+        fig, ax = plot_pilot_tone_phase_estimate(
+            est, x, method=method, sampling_rate=FS, quantity="phase", label="first"
+        )
+        _, ax = plot_pilot_tone_phase_estimate(
+            est,
+            x,
+            method=method,
+            sampling_rate=FS,
+            quantity="phase",
+            ax=ax,
+            label="second",
+            legend=True,
+        )
+        assert [line.get_label() for line in ax.lines] == ["first", "second"]
+        _, ax = plot_pilot_tone_phase_estimate(
+            est,
+            x,
+            method=method,
+            sampling_rate=FS,
+            quantity="spectrum",
+            xlim=(0, FS / 2),
+        )
+        assert ax.get_xlim() == (0, FS / 2)
+        fig, ax = plot_pilot_tone_phase_estimate(
+            est,
+            x,
+            method=method,
+            sampling_rate=FS,
+            quantity="spectrum",
+            label="first",
+            annotations=False,
+        )
+        _, ax = plot_pilot_tone_phase_estimate(
+            est,
+            x,
+            method=method,
+            sampling_rate=FS,
+            quantity="spectrum",
+            ax=ax,
+            label="second",
+            annotations=False,
+            legend=True,
+        )
+        assert len(fig.axes) == 1
+        assert [line.get_label() for line in ax.lines] == ["first", "second"]
 
     @pytest.mark.allow_warnings
     def test_pilot_tones_phase_estimate(self, xp: Any) -> None:
@@ -186,6 +264,15 @@ class TestPlotCarrierPhase:
         )
         fig, axes = plot_pilot_tones_phase_estimate(est, show=False)
         assert len(axes) == 2
+        _, ax = plot_pilot_tones_phase_estimate(est, quantity="phase", label="first")
+        _, ax = plot_pilot_tones_phase_estimate(
+            est, quantity="phase", label="second", ax=ax, legend=True
+        )
+        assert [line.get_label() for line in ax.lines] == ["first", "second"]
+        _, ax = plot_pilot_tones_phase_estimate(
+            est, quantity="differential", label="test"
+        )
+        assert any("test" in line.get_label() for line in ax.lines)
 
     def test_wrong_estimate_raises(self, xp: Any) -> None:
         x, _ = _qpsk(xp, n=1024)
@@ -216,3 +303,39 @@ class TestPlotCarrierPhase:
             show=False,
         )
         assert fig2 is not None
+
+
+def test_selected_timing_detail_overlay(xp: Any) -> None:
+    """Timing details can be overlaid on one axis for comparison."""
+    est = TestPlotTimingSync()._estimate(xp)
+    fig, ax = plot_timing_correlation(est, quantity="detail", label="first")
+    fig2, ax2 = plot_timing_correlation(
+        est, quantity="detail", ax=ax, label="second", xlim=(20, 60), legend=False
+    )
+    assert fig2 is fig and ax2 is ax
+    assert ax.get_xlim() == (20, 60)
+    labels = [line.get_label() for line in ax.lines]
+    assert "first" in labels and "second" in labels
+    assert ax.get_legend() is None
+
+
+def test_selected_blockwise_phase_overlay(xp: Any) -> None:
+    """The integrated phase panel can be compared on one axis."""
+    x, _ = _qpsk(xp, n=8192, df=2e3)
+    est = frequency.estimate_frequency_offset(
+        x, frequency.MthPower(power=4, block_size=1024), sampling_rate=FS
+    )
+    fig, ax = plot_frequency_offset_blockwise_result(
+        est, num_samples=8192, sampling_rate=FS, quantity="phase", label="first"
+    )
+    fig2, ax2 = plot_frequency_offset_blockwise_result(
+        est,
+        num_samples=8192,
+        sampling_rate=FS,
+        quantity="phase",
+        label="second",
+        ax=ax,
+        legend=True,
+    )
+    assert fig2 is fig and ax2 is ax
+    assert [line.get_label() for line in ax.lines] == ["first", "second"]

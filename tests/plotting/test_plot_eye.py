@@ -193,3 +193,33 @@ class TestPlotEyeDiagram:
         assert len(coll.get_segments()) == (800 - 9) // 4 + 1
         lo, hi = ax.get_ylim()
         assert lo < -0.99 and hi > 0.99
+
+
+def test_eye_axis_limits(xp: Any) -> None:
+    """Eye comparisons can share the same displayed amplitude range."""
+    from commkit.plotting import plot_eye_diagram
+
+    _, ax = plot_eye_diagram(xp.arange(200, dtype=xp.float32), sps=2, ylim=(-2, 2))
+    assert ax.get_ylim() == (-2, 2)
+
+
+def test_selected_eye_component_keeps_signal_facts(xp: Any) -> None:
+    """One complex component uses the Signal's samples-per-symbol fact."""
+    from commkit.core import Signal
+    from commkit.plotting import plot_eye_diagram
+
+    samples = xp.asarray(np.tile([1 + 2j, -1 - 2j], 100), dtype=xp.complex64)
+    sig = Signal(samples=samples, sampling_rate=2.0, symbol_rate=1.0)
+    _, ax = plot_eye_diagram(sig, quantity="q", kind="line")
+    assert len(ax.collections) == 1
+    with pytest.raises(ValueError, match="quantity"):
+        plot_eye_diagram(xp.ones(200), sps=2, quantity="q")
+
+
+def test_selected_eye_component_multichannel(xp: Any) -> None:
+    """A selected component needs one panel per channel, not two."""
+    from commkit.plotting import plot_eye_diagram
+
+    x = xp.ones((2, 200), dtype=xp.complex64) * (1 + 1j)
+    _, axes = plot_eye_diagram(x, sps=2, quantity="i", kind="line")
+    assert axes.shape == (2, 1)

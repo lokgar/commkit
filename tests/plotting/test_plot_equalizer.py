@@ -217,3 +217,76 @@ class TestPlotEqualizer:
         with patch("matplotlib.pyplot.show"):
             ret = plot_zf_equalizer_response(h, show=True)
         assert ret is None
+
+
+def test_selected_convergence_overlays_without_taps(xp: Any) -> None:
+    """A convergence comparison draws only the requested panel and data."""
+    result = SimpleNamespace(
+        error=xp.asarray([1.0, 0.5, 0.2, 0.1], dtype=xp.complex64),
+        weights=None,
+        phase_trajectory=None,
+        num_train_symbols=0,
+    )
+    fig, ax = plot_equalizer_result(result, quantity="convergence", label="first")
+    fig2, ax2 = plot_equalizer_result(
+        result,
+        quantity="convergence",
+        label="second",
+        ax=ax,
+        legend=True,
+        xlim=(0, 3),
+        ylim=(-30, 3),
+    )
+    assert fig2 is fig and ax2 is ax
+    assert [line.get_label() for line in ax.lines] == ["first", "second"]
+    assert [t.get_text() for t in ax.get_legend().get_texts()] == ["first", "second"]
+    assert ax.get_xlim() == (0, 3)
+    with pytest.raises(ValueError, match="phase_trajectory"):
+        plot_equalizer_result(result, quantity="phase")
+
+
+def test_selected_equalizer_response_overlays(xp: Any) -> None:
+    """ZF and MMSE can be compared on the same selected response axis."""
+    h = xp.asarray([1.0, 0.8j], dtype=xp.complex64)
+    fig, ax = plot_zf_equalizer_response(h, quantity="equalizer", label="ZF")
+    fig2, ax2 = plot_zf_equalizer_response(
+        h, quantity="equalizer", noise_var=0.1, ax=ax, label="MMSE", legend=True
+    )
+    assert fig2 is fig and ax2 is ax
+    assert [line.get_label() for line in ax.lines] == ["ZF", "MMSE"]
+    assert ax.lines[0].get_color() != ax.lines[1].get_color()
+    assert len(ax.get_legend().get_texts()) == 2
+
+
+def test_selected_taps_and_phase(xp: Any) -> None:
+    """Tap and phase panels each accept a single axis independently."""
+    result = SimpleNamespace(
+        error=xp.ones(100, dtype=xp.complex64),
+        weights=xp.asarray([0.1, 1.0, 0.1], dtype=xp.complex64),
+        phase_trajectory=xp.linspace(0, 1, 100),
+        num_train_symbols=0,
+    )
+    _, taps = plot_equalizer_result(
+        result, quantity="taps", label="weights", legend=True
+    )
+    _, phase = plot_equalizer_result(
+        result, quantity="phase", label="phase", legend=True
+    )
+    assert taps.get_legend() is not None
+    assert phase.lines[0].get_label() == "phase"
+    assert phase.get_legend() is not None
+
+
+def test_convergence_training_marker_can_be_suppressed(xp: Any) -> None:
+    """Overlaying results need not repeat the training boundary."""
+    result = SimpleNamespace(
+        error=xp.ones(16, dtype=xp.complex64),
+        weights=None,
+        phase_trajectory=None,
+        num_train_symbols=5,
+    )
+    _, ax = plot_equalizer_result(result, quantity="convergence", label="first")
+    _, ax = plot_equalizer_result(
+        result, quantity="convergence", ax=ax, label="second", annotations=False
+    )
+    assert sum("DD start" in line.get_label() for line in ax.lines) == 1
