@@ -125,21 +125,18 @@ class TestCPREqualizerBaseline:
 class TestCPRPLLConvergence:
     """PLL phase tracking, cycle-slip correction, and gain parameterization."""
 
-    @pytest.mark.xfail(
-        strict=True,
-        reason="The PLL's CycleSlip repair adds slips instead of removing them: "
-        "16-QAM, 2πΔνT = 2π·1e-4, Es/N0 16 dB, B·T = 2e-2, 4 records of 2e4 "
-        "symbols: 10 rotation changes against the reference with "
-        "CycleSlip(), 3 without (inline and standalone alike).  A PLL slip "
-        "is a drift over ~1/B symbols, which the linear predictor follows.",
-    )
-    def test_cycle_slip_repair_reduces_pll_slips(self, xp):
-        """With the repair the output changes its π/2 rotation against the
-        transmitted symbols less often than without it."""
-        counts = {True: 0, False: 0}
+    def test_cycle_slip_repair_adds_no_pll_slips(self, xp):
+        """With its default history the repair leaves the PLL's rotation
+        changes against the transmitted symbols as they are (16-QAM,
+        2πΔνT = 2π·1e-4, Es/N0 16 dB, B·T = 2e-2, four records of 2·10⁴
+        symbols; measured 3 with and 3 without).  A history of 640 symbols,
+        beyond the rule ``2πΔνT·history < threshold²/2`` (491 here), is the
+        failing baseline: it adds slips (measured 10)."""
+        counts = {"none": 0, "default": 0, "long": 0}
+        repairs = {"none": None, "default": CycleSlip(), "long": CycleSlip(history=640)}
         for seed in range(4):
             x, syms, _, c = _wiener_record(16, 1e-4, 16.0, seed, 20000)
-            for repair in counts:
+            for name, cs in repairs.items():
                 res = lms(
                     xp.asarray(x),
                     syms[:256],
@@ -147,13 +144,29 @@ class TestCPRPLLConvergence:
                     sps=1,
                     step_size=0.0,
                     constellation=c,
-                    cpr=PLL(
-                        normalized_bandwidth=2e-2,
-                        cycle_slip=CycleSlip() if repair else None,
-                    ),
+                    cpr=PLL(normalized_bandwidth=2e-2, cycle_slip=cs),
                 )
-                counts[repair] += _slips(to_numpy(res.y_hat), syms, 256)
-        assert counts[True] < counts[False], counts
+                counts[name] += _slips(to_numpy(res.y_hat), syms, 256)
+        assert counts["none"] > 0, counts  # the operating point slips
+        assert counts["default"] <= counts["none"], counts
+        assert counts["long"] > counts["none"], counts
+
+    def test_standalone_pll_repair_adds_no_slips(self):
+        """The same for :func:`estimate_carrier_phase` with a ``PLL``: the
+        default history (``8/μ`` = 100 symbols) adds no rotation change of
+        the trajectory against the true phase."""
+        counts = {"none": 0, "default": 0}
+        for seed in range(4):
+            x, _, phase, c = _wiener_record(16, 1e-4, 16.0, seed, 20000)
+            for name, cs in (("none", None), ("default", CycleSlip())):
+                pll = PLL(normalized_bandwidth=2e-2, cycle_slip=cs)
+                v = to_numpy(estimate_carrier_phase(x, pll, constellation=c).value)
+                err = np.convolve(v - phase, np.ones(64) / 64, mode="valid")[::64]
+                counts[name] += int(
+                    np.count_nonzero(np.diff(np.round(err / (np.pi / 2))))
+                )
+        assert counts["none"] > 0, counts
+        assert counts["default"] <= counts["none"], counts
 
     def test_pll_phase_noise_tracking(self, xp):
         """LMS + PLL follows a Wiener phase (16-QAM, 2πΔνT = 2π·1e-4,

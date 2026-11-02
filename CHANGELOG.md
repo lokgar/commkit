@@ -7,6 +7,7 @@ Notable changes to CommKit, newest first. Performance figures are from the refer
 ### Changes that alter results
 
 - **`Tikhonov` uses the actual variance of a Viterbi-Viterbi block phase** as its observation variance, computed from the constellation and `snr_db`: the noise through the M-th power plus the data self-noise of QAM. It used `1/(M²·SNR·N)`, too small by `M²/2` for PSK and by three to four orders of magnitude for QAM, so the smoother followed the raw block phases: on 16-QAM it now lowers the Viterbi-Viterbi error (static phase, 30 dB, 16-symbol blocks: 0.101 rad before and after smoothing, now 0.048 rad).
+- **`PLL(cycle_slip=CycleSlip())` defaults to a history of `8/μ` symbols** (twice the loop memory, between 10 and 640), standalone and inline in `lms` / `rls`; it used 640 symbols, as the block methods do. A PLL trajectory is smoothed by the loop, and the long linear fit lagged the phase noise enough to declare false slips: 16-QAM, `2π·Δν·T = 2π·1e-4`, 16 dB, `B·T = 2e-2`, four records of 2·10⁴ symbols: 10 rotation changes against the transmitted symbols with the repair, 3 without; now 3 with it. The repair does not undo the loop's own slips, which drift over about `1/(B·T)` symbols; the `CycleSlip` docstring says so. An explicit `history` is unchanged.
 - **`ols_fir_filter` centres even-length taps on tap `(L - 1) // 2`**, as `fir_filter` (SciPy's `mode="same"`) does and as its docstring promised; it used `L // 2`, one sample later. Odd-length taps and `causal=True` are unchanged. The docstrings of both now state the centre tap; they said `L // 2`.
 
 ### Fixed
@@ -17,7 +18,7 @@ Notable changes to CommKit, newest first. Performance figures are from the refer
 ### Development
 
 - The test suite checks what the code achieves, not how it is written. Equalizers converge on RRC records through ISI, fractional delays, polarization rotation and DGD, scored against the transmitted symbols with only the legitimate rotation and permutation removed, and each "improves" test also runs a baseline that must fail; carrier recovery is scored against the true phase; estimators and metrics against Cramér–Rao bounds and AWGN theory; Chase and shortened-code decoding against brute force. New end-to-end receiver chains (coded single carrier, dual polarization, 80 km of fiber) each show that leaving out one correction breaks them. Monte Carlo tests state what their frame counts bound and gain `--run-slow` validation runs. A WARNING log from commkit fails the test. Tests that only repeated the contract registry's shape and device checks are removed.
-- Four library faults found this way are recorded as strict xfails and listed in AGENTS.md: the PLL's cycle-slip repair adding slips, Tikhonov's noise model on QAM, a dead zone of `MthPower` around 0 Hz and `fir_filter`'s alignment of even-length taps.
+- The library faults these tests found are fixed above: the PLL's cycle-slip repair adding slips, Tikhonov's noise model on QAM, the dead zone of `MthPower` around 0 Hz, the alignment of even-length taps (`ols_fir_filter` against `fir_filter`) and RLS's `weights_history` length.
 - `benchutils.assert_converged` checks the symbol error rate of the worst channel (it compared bit errors before), and the 2048-tap block RDE benchmark uses a workload that converges.
 
 ## [3.2.0] - 2026-10-30

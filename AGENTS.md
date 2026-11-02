@@ -112,7 +112,7 @@ uv run python benchmarks/record_baseline.py NAME   # record a new baseline
 
 **Release:**
 
-1. On `main`: the CPU and GPU suites pass with no failures or skips, slow validation included (`uv run pytest -rs --run-slow`; strict xfails are listed in §9), `uv build` succeeds and `uv run --with twine twine check dist/*` passes.
+1. On `main`: the CPU and GPU suites pass with no failures or skips, slow validation included (`uv run pytest -rs --run-slow`; strict xfails, if any, are listed in §9), `uv build` succeeds and `uv run --with twine twine check dist/*` passes.
 2. `CHANGELOG.md`: a `## [X.Y.Z] - YYYY-MM-DD` section for the release, written for users. Changes that may need code updates come first, with how to migrate, then Added, Performance (measured, as a ratio of new to old time), Fixed and Development. Add its compare link at the bottom, and commit it.
 3. `uv run bump-my-version bump {patch|minor|major}`. This commits the new version and tags it `vX.Y.Z`.
 4. `git push origin main --tags`. The ruleset on `main` requires pull requests; repository admins bypass it for these two commits.
@@ -381,15 +381,6 @@ Steps, once CuPy 14.3 (with cp315 wheels for `cupy-cuda13x`) and a fixed `jupyte
 
 1. **oFEC** (OpenROADM, ITU-T G.709.3) is not implemented: its block structure is specified in the OpenROADM MSA documents, which were not available in a form to implement from. It would build on `BCHCode` (extended BCH(256, 239)), `Chase` with soft output and the staircase decoder's iteration over a window.
 2. **NR rate matching for polar codes** (sub-block interleaving, the circular buffer, puncturing and shortening with their frozen-set rules, parity-check bits) and **LTE rate matching for turbo codes** are not included: `PolarCode` and `TurboCode` are the mother codes. `Punctured` and `Shortened` cover generic rate matching.
-
-### Library faults found by the tests (strict xfails)
-
-Each test passes once the library is fixed; the fix removes its `xfail` mark.
-
-- **PLL cycle-slip repair adds slips** (`tests/equalization/test_cpr.py`): 16-QAM, 2πΔνT = 2π·1e-4, Es/N0 16 dB, loop B·T = 2e-2, four records of 2·10⁴ symbols: 10 rotation changes against the reference with `CycleSlip`, 3 without.
-- **Tikhonov's noise model omits QAM self-noise** (`tests/recovery/test_tikhonov.py`): the observation variance `1/(M² SNR N)` (`recovery/tikhonov.py`) is 4e-6 rad² for 16-QAM at 30 dB with N = 16, where the Viterbi-Viterbi block error is about 1e-2 rad², so the smoother does not smooth (0.1012 rad RMS against 0.1013 unsmoothed).
-- **`MthPower` has a dead zone around 0 Hz** (`tests/test_frequency.py`, two tests): it zeroes the DC bin of the M-th power spectrum, so an offset with `|M Δf| < f_s / (2 nfft)` is never found (QPSK, 4096 symbols at 1 MS/s: 0 Hz is estimated as -81.8 kHz).
-- **`fir_filter` misplaces even-length taps** (`tests/test_filtering.py`): it centres them on tap `(L - 1) // 2` (SciPy `mode="same"`), while its docstring and `ols_fir_filter` use `L // 2`; for L = 4 the two filters differ by one sample.
 
 ### Test suite: open items
 

@@ -7,7 +7,12 @@ import numpy as np
 
 from ..backend import ArrayType, dispatch, to_device
 from ._common import _Context, _Phase, _resolve_pll_gains
-from .corrections import CycleSlip, _log_phase_summary, _repair_slips
+from .corrections import (
+    _HISTORY_SPAN,
+    CycleSlip,
+    _log_phase_summary,
+    _repair_slips,
+)
 
 __all__ = ["PLL"]
 
@@ -282,7 +287,10 @@ class PLL:
         drive one shared loop (shared LO).
     cycle_slip : CycleSlip, optional
         Repair slips of ``2π/M`` (M the rotational symmetry, 4 for QAM)
-        in the per-symbol trajectory after the loop.
+        in the per-symbol trajectory after the loop.  Its default history
+        is ``8/μ`` symbols (between 10 and 640).  It does not undo the
+        loop's own slips, which drift over about ``1/(B·T)`` symbols (see
+        :class:`CycleSlip`).
 
     Notes
     -----
@@ -311,6 +319,18 @@ class PLL:
     def gains(self) -> tuple[Any, Any]:
         """The loop gains ``(mu, beta)``."""
         return _resolve_pll_gains(self.normalized_bandwidth, self.mu, self.beta)
+
+    @property
+    def _slip_history(self) -> int:
+        """Default cycle-slip history: twice the loop memory, ``8/μ`` symbols.
+
+        At least 10 and at most the general 640-symbol span (also for a
+        frozen loop, ``mu=0``).
+        """
+        mu = float(self.gains[0])
+        if mu <= 0.0:
+            return _HISTORY_SPAN
+        return max(10, min(_HISTORY_SPAN, round(8.0 / mu)))
 
 
 def _pll(symbols: ArrayType, method: PLL, ctx: _Context) -> _Phase:
@@ -371,7 +391,12 @@ def _pll(symbols: ArrayType, method: PLL, ctx: _Context) -> _Phase:
     else:
         phi = _get_numba_dd_pll()(symbols_cpu, *loop_args)
     phi = _repair_slips(
-        phi, np, method.cycle_slip, int(constellation.rotational_symmetry), 1
+        phi,
+        np,
+        method.cycle_slip,
+        int(constellation.rotational_symmetry),
+        1,
+        method._slip_history,
     )
     if joint:
         phi = np.broadcast_to(phi, (C, N)).copy()

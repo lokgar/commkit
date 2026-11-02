@@ -397,7 +397,9 @@ def _inline_cpr(cpr: Any, constellation: Any, function_name: str) -> _InlineCpr 
         joint=bool(cpr.joint_channels),
         symmetry=symmetry,
         cycle_slip=cycle_slip is not None,
-        history=slip._history_values(1),  # per-symbol phase
+        history=slip._history_values(  # per-symbol phase
+            1, cpr._slip_history if isinstance(cpr, PLL) else None
+        ),
         threshold=float(slip.threshold),
     )
 

@@ -422,8 +422,9 @@ class CycleSlip:
         (blocks for BPS, Viterbi-Viterbi and Tikhonov, symbols for the PLL
         and for an equalizer's inline ``cpr=``, pilots for ``PilotAided``),
         not in symbols.  By default the values that span 640 symbol periods,
-        at least 10: 20 blocks for ``BPS()``, 640 symbols for the PLL and
-        the equalizers.
+        at least 10: 20 blocks for ``BPS()``, 640 symbols for an equalizer's
+        inline ``BPS``.  For the PLL (standalone or inline) the default is
+        twice the loop memory, ``2/(B·T) = 8/μ`` symbols, between 10 and 640.
     threshold : float, default π/4
         Deviation in radians that declares a slip.
 
@@ -447,6 +448,15 @@ class CycleSlip:
     values the fit's noise gain ``1 + 4/history`` dominates instead, at low
     SNR.
 
+    A PLL's trajectory is already smoothed by the loop, so its default
+    history is short, which keeps the rule above for ``2π·Δν·T < B·T/6.5``
+    (the 640-symbol span broke it at ``B·T = 2e-2``, ``2π·Δν·T = 2π·1e-4``,
+    and more than doubled the slips there).  The repair still cannot undo a
+    PLL slip: the loop drifts by a quantum over about ``1/(B·T)`` symbols,
+    which the fit follows like phase noise (16-QAM at 16 dB at that
+    operating point: the same slips with and without the repair).  Pilots
+    (``PilotAided``) bound such slips instead.
+
     Examples
     --------
     >>> est = estimate_carrier_phase(y, BPS(cycle_slip=CycleSlip(history=50)))
@@ -461,10 +471,16 @@ class CycleSlip:
         if not self.threshold > 0:
             raise ValueError(f"threshold must be > 0, got {self.threshold}.")
 
-    def _history_values(self, spacing: float) -> int:
-        """``history`` for a trajectory with ``spacing`` symbol periods per value."""
+    def _history_values(self, spacing: float, default: int | None = None) -> int:
+        """``history`` for a trajectory with ``spacing`` symbol periods per value.
+
+        ``default`` replaces the 640-symbol span when ``history`` is not set
+        (the PLL's, from its loop bandwidth).
+        """
         if self.history is not None:
             return self.history
+        if default is not None:
+            return default
         return max(10, round(_HISTORY_SPAN / spacing))
 
 
@@ -478,14 +494,16 @@ def _repair_slips(
     cycle_slip: CycleSlip | None,
     symmetry: int,
     spacing: float,
+    default_history: int | None = None,
 ) -> ArrayType:
     """Row-wise cycle-slip repair of a ``(R, B)`` trajectory (host round trip).
 
-    ``spacing`` is the number of symbol periods between trajectory values.
+    ``spacing`` is the number of symbol periods between trajectory values;
+    ``default_history`` replaces the 640-symbol default span.
     """
     if cycle_slip is None:
         return phase
-    history = cycle_slip._history_values(spacing)
+    history = cycle_slip._history_values(spacing, default_history)
     out = xp.empty_like(phase)
     for r in range(phase.shape[0]):
         out[r] = correct_cycle_slips(
