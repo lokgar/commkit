@@ -26,16 +26,18 @@ LINK = dict(
 )
 
 
+# The plain/fused split exists on the GPU only; its CPU items are deselected.
+PATHS = ["auto", pytest.param("plain", marks=pytest.mark.gpu_only)]
+
+
 def _stages(backend_device, monkeypatch, path):
     if path == "plain":
-        if backend_device != "gpu":
-            pytest.skip("the plain/fused split exists on the GPU only")
         monkeypatch.setattr(
             _fiber, "_make_ops", lambda x, xp, *args: _fiber._Ops(xp, x.dtype, *args)
         )
 
 
-@pytest.mark.parametrize("path", ["auto", "plain"])
+@pytest.mark.parametrize("path", PATHS)
 @pytest.mark.parametrize("n", [2**16, 2**20], ids=["N64k", "N1M"])
 def bench_fiber_propagation(benchmark, backend_device, xp, sync, monkeypatch, n, path):
     _stages(backend_device, monkeypatch, path)
@@ -49,7 +51,7 @@ def bench_fiber_propagation(benchmark, backend_device, xp, sync, monkeypatch, n,
     benchmark.pedantic(run, **ROUNDS)
 
 
-@pytest.mark.parametrize("path", ["auto", "plain"])
+@pytest.mark.parametrize("path", PATHS)
 @pytest.mark.parametrize("steps", [1, 10])
 def bench_dbp(benchmark, backend_device, xp, sync, monkeypatch, steps, path):
     _stages(backend_device, monkeypatch, path)

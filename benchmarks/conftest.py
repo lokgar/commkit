@@ -56,6 +56,20 @@ def pytest_generate_tests(metafunc):
         metafunc.parametrize("backend_device", params, indirect=True)
 
 
+def pytest_collection_modifyitems(config, items):
+    """Deselect, not skip, the CPU items of ``gpu_only`` parameters."""
+    cpu_only_gpu = [
+        item
+        for item in items
+        if item.get_closest_marker("gpu_only")
+        and getattr(item, "callspec", None) is not None
+        and item.callspec.params.get("backend_device") == "cpu"
+    ]
+    if cpu_only_gpu:
+        items[:] = [item for item in items if item not in cpu_only_gpu]
+        config.hook.pytest_deselected(items=cpu_only_gpu)
+
+
 @numba.njit(cache=True, parallel=True)
 def _spin(x):
     total = 0.0
