@@ -79,7 +79,7 @@ def block_cma(
     *,
     num_taps: int = 21,
     sps: int | None = None,
-    step_size: float = 2e-4,
+    step_size: float | None = None,
     block_size: int = 256,
     constellation: Any = None,
     initial_taps: ArrayType | None = None,
@@ -113,10 +113,12 @@ def block_cma(
     sps : int, optional
         Samples per symbol, an integer.  Taken from the Signal; required for
         array input.  A value that disagrees with the Signal raises.
-    step_size : float, default 2e-4
+    step_size : float, optional
         Step size on the scale of :func:`cma`.  The weights are frozen
         across each block, so the stability ceiling is about ``block_size``
         times lower than per symbol; reduce it if the run raises divergence.
+        Defaults to ``min(1e-3, 0.5 / block_size)``, as for
+        :func:`block_rde`.
     block_size : int, default 256
         Output symbols per weight update.
     constellation : Constellation, optional

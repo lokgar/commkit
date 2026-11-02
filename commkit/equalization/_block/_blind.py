@@ -74,7 +74,7 @@ def _block_fdaf_blind(
     pilot positions overridden by the LMS residual.  ``r2`` is the Godard radius
     (CMA) and ``radii_np`` the unique ring radii (RDE), decided by their
     squared midpoints (``_rde_rings``).  ``step_size=None``
-    is block_rde's default, ``min(1e-3, 0.5 / block_size)``.
+    is the default of both, ``min(1e-3, 0.5 / block_size)``.
     """
     use_pilots = pilot_ref is not None and pilot_mask is not None
     equalizer = f"block_{kind}"
