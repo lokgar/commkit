@@ -2,7 +2,9 @@
 
 Notable changes to CommKit, newest first. Performance figures are from the reference machine (RTX 4070 Ti, Ryzen 7 7800X3D, WSL2) unless stated otherwise, as a ratio of new to old time (below 1 is faster).
 
-## [Unreleased]
+## [3.2.1] - 2026-11-02
+
+Fixes found by a rework of the test suite, which now checks what each algorithm achieves against the transmitted truth and theory. Five numerical defaults or models were wrong and change results (PLL cycle-slip repair, Tikhonov smoothing, `block_cma`'s step, `ols_fir_filter`'s alignment of even taps, `MthPower` near 0 Hz); no signature changes. Plots take their sizes from the theme.
 
 ### Changes that alter results
 
@@ -10,6 +12,8 @@ Notable changes to CommKit, newest first. Performance figures are from the refer
 - **`PLL(cycle_slip=CycleSlip())` defaults to a history of `8/μ` symbols** (twice the loop memory, between 10 and 640), standalone and inline in `lms` / `rls`; it used 640 symbols, as the block methods do. A PLL trajectory is smoothed by the loop, and the long linear fit lagged the phase noise enough to declare false slips: 16-QAM, `2π·Δν·T = 2π·1e-4`, 16 dB, `B·T = 2e-2`, four records of 2·10⁴ symbols: 10 rotation changes against the transmitted symbols with the repair, 3 without; now 3 with it. The repair does not undo the loop's own slips, which drift over about `1/(B·T)` symbols; the `CycleSlip` docstring says so. An explicit `history` is unchanged.
 - **`block_cma` defaults to `step_size=min(1e-3, 0.5 / block_size)`**, as `block_rde` does; it used 2e-4. On QPSK, where CMA and RDE are the same algorithm, the old default left the worst channel at 2.3 times the AWGN symbol error rate over the second half of 8·10⁴ symbols (dual polarization through rotation and DGD, Es/N0 10 dB; now 1.3 times) and at 16 times on 2·10⁴ symbols (now 2 times); on 16-QAM at 18 dB the SER of 2·10⁴-symbol records falls from 0.13 to 0.008. Above 2500-symbol blocks the new default is the smaller step, inside the stability ceiling that 2e-4 crossed (16-QAM, 4096-symbol blocks: SER 0.02 before, 0.004 now). Pass `step_size=2e-4` for the previous behavior.
 - **`ols_fir_filter` centres even-length taps on tap `(L - 1) // 2`**, as `fir_filter` (SciPy's `mode="same"`) does and as its docstring promised; it used `L // 2`, one sample later. Odd-length taps and `causal=True` are unchanged. The docstrings of both now state the centre tap; they said `L // 2`.
+
+- **Plots take line widths, marker sizes and fonts from the theme.** The plot functions no longer set their own line widths and marker sizes, so `apply_default_theme` and the user's rcParams control them; the theme's text is larger (16 pt, legends 14 pt, titles 18 pt) with longer ticks. SI-prefix tick labels show the prefix only (`10 k`, not `10 kHz`), as the axis labels already carry the unit.
 
 ### Fixed
 
@@ -337,7 +341,8 @@ See the [GitHub release](https://github.com/lokgar/commkit/releases/tag/v1.1.0) 
 
 First release. See the [GitHub release](https://github.com/lokgar/commkit/releases/tag/v1.0.0).
 
-[Unreleased]: https://github.com/lokgar/commkit/compare/v3.2.0...HEAD
+[Unreleased]: https://github.com/lokgar/commkit/compare/v3.2.1...HEAD
+[3.2.1]: https://github.com/lokgar/commkit/compare/v3.2.0...v3.2.1
 [3.2.0]: https://github.com/lokgar/commkit/compare/v3.1.3...v3.2.0
 [3.1.3]: https://github.com/lokgar/commkit/compare/v3.1.2...v3.1.3
 [3.1.2]: https://github.com/lokgar/commkit/compare/v3.1.1...v3.1.2
