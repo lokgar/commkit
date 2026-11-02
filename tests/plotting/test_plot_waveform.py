@@ -49,7 +49,8 @@ class TestPlotTimeDomain:
         assert ax.get_xlabel() == "Time [s]"
         fmt = ax.xaxis.get_major_formatter()
         assert isinstance(fmt, mticker.EngFormatter)
-        assert "n" in fmt(3e-9)
+        assert fmt(3e-9) == "3 n"
+        assert fmt(0) == "0"
         assert "p" in fmt(3e-12)
         assert "µ" in fmt(3e-6)
         assert "m" in fmt(3e-3)

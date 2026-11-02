@@ -158,7 +158,7 @@ def plot_llr_distribution(
         with np.errstate(divide="ignore"):
             ratio = np.log(h0[j][keep] / h1[j][keep]) + np.log(n1[j] / n0[j])
         label = "measured" if m == 1 else f"bit {j}"
-        ax_cons.plot(centers[keep], ratio, "o-", markersize=3, label=label)
+        ax_cons.plot(centers[keep], ratio, "o-", label=label)
         if keep.any():
             span = [min(span[0], centers[keep][0]), max(span[1], centers[keep][-1])]
     if span[0] > span[1]:
@@ -257,7 +257,7 @@ def plot_parity_check(
         ax_h.spy(h, markersize=size, aspect="auto", rasterized=True)
     if punctured:
         ax_h.axvspan(n - punctured - 0.5, n - 0.5, color="gray", alpha=0.3)
-        ax_h.text(n - punctured, -0.5, "punctured", va="bottom", fontsize=9)
+        ax_h.text(n - punctured, -0.5, "punctured", va="bottom")
     ax_h.tick_params(labeltop=False, labelbottom=True)
     ax_h.grid(False)
     ax_h.set_xlabel("Variable node (column)")
@@ -342,7 +342,6 @@ def plot_exit_chart(
             chart.trajectory[:, 0],
             chart.trajectory[:, 1],
             color="white",
-            linewidth=0.8,
             alpha=0.8,
             label="trajectory",
         )
@@ -358,5 +357,5 @@ def plot_exit_chart(
         state = "open" if chart.converges else "closed"
         title = f"EXIT chart: tunnel {state}, {chart.iterations} iterations"
     axi.set_title(title)
-    axi.legend(loc="lower right", fontsize=8)
+    axi.legend(loc="lower right")
     return _finish((fig, axi), show)

@@ -92,8 +92,8 @@ def plot_frequency_drift(
         axi.axhline(amp_ref, color="white", ls="--", label="±amplitude")
         axi.axhline(-amp_ref, color="white", ls="--")
 
-    _set_eng_formatter(axi, "x", "s")
-    _set_eng_formatter(axi, "y", "Hz")
+    _set_eng_formatter(axi, "x")
+    _set_eng_formatter(axi, "y")
     axi.set_xlabel("Time [s]")
     axi.set_ylabel(r"$\Delta f$ [Hz]")
     axi.set_title(title)
@@ -232,7 +232,7 @@ def plot_frequency_noise_psd(
     model = getattr(estimate, "S_f_model", None)
     if model is not None:
         m_c = _as_channels(model)
-        axi.loglog(fp, m_c[0, pos], color="#ef476f", lw=1.5, label="Fitted model")
+        axi.loglog(fp, m_c[0, pos], color="#ef476f", label="Fitted model")
 
     used_label = "Fit bins" if model is not None else "Plateau bins (median)"
     if used is not None:
@@ -246,7 +246,6 @@ def plot_frequency_noise_psd(
                 S_c[0, pos][sel],
                 ".",
                 color="#06d6a0",
-                ms=3.0,
                 ls="none",
                 label=used_label,
             )
@@ -282,7 +281,7 @@ def plot_frequency_noise_psd(
         for edge in (lo, float(band[1])):
             axi.axvline(edge, color="#06d6a0")
 
-    _set_eng_formatter(axi, "x", "Hz")
+    _set_eng_formatter(axi, "x")
     axi.set_xlabel("Frequency [Hz]")
     axi.set_ylabel("$S_f$ [Hz²/Hz]")
     axi.set_title(title)
@@ -338,7 +337,6 @@ def plot_allan_deviation(
             tau,
             adv[i],
             "o-",
-            ms=3,
             color=f"C{i}",
             label=f"Pol {i}" if C > 1 else r"$\sigma_y(\tau)$",
         )
@@ -356,8 +354,8 @@ def plot_allan_deviation(
                 label=r"$\tau^{-1/2}$ (white-FM)",
             )
 
-    _set_eng_formatter(axi, "x", "s")
-    _set_eng_formatter(axi, "y", "Hz")
+    _set_eng_formatter(axi, "x")
+    _set_eng_formatter(axi, "y")
     axi.set_xlabel(r"Averaging Time $\tau$ [s]")
     axi.set_ylabel(r"Allan Deviation $\sigma_y(\tau)$ [Hz]")
     axi.set_title(title)
@@ -414,7 +412,6 @@ def plot_increment_variance(
             lag,
             v[i],
             "o",
-            ms=4,
             color=f"C{i}",
             label=f"Measured pol {i}" if C > 1 else "Measured",
         )
@@ -437,7 +434,7 @@ def plot_increment_variance(
             label=r"Intercept (noise $2\sigma_\phi^2$)",
         )
 
-    _set_eng_formatter(axi, "x", "s")
+    _set_eng_formatter(axi, "x")
     axi.set_xlabel("Increment Lag [s]")
     axi.set_ylabel("Variance [rad²]")
     axi.set_title(title)
@@ -517,7 +514,7 @@ def plot_dsh_beat_psd(
             label=f"$W_{{-{level_db:g}\\,dB}}$",
         )
 
-    _set_eng_formatter(axi, "x", "Hz")
+    _set_eng_formatter(axi, "x")
     axi.set_xlabel(
         "Frequency Offset from Beat Peak [Hz]"
         if f_peak is not None

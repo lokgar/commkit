@@ -106,7 +106,7 @@ def plot_carrier_phase_decomposition(
             label=f"DD start ({num_train_symbols})",
         )
 
-    _set_eng_formatter(axi, "x", "s")
+    _set_eng_formatter(axi, "x")
     axi.set_xlabel("Time [s]")
     axi.set_ylabel("Phase [rad]")
     axi.set_title(title)
@@ -774,7 +774,7 @@ def plot_pilot_tone_phase_estimate(
     )
     ax_spec.axvline(
         tone_frequency,
-        color="k",
+        color="C1",
         linestyle="--",
         label=f"Nominal f_p ({tone_frequency:.3g} Hz)",
     )

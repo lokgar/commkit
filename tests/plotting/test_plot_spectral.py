@@ -81,7 +81,10 @@ class TestPlotSpectralAndPSD:
         assert ax.get_xlabel() == "Frequency [Hz]"
         fmt = ax.xaxis.get_major_formatter()
         assert isinstance(fmt, mticker.EngFormatter)
-        assert "T" in fmt(2e12)
+        assert fmt(2e12) == "2 T"
+        assert fmt(-5e9) == "−5 G"
+        assert fmt(0) == "0"
+        assert fmt(3) == "3"
 
         fig, ax = plot_psd(samples, sampling_rate=2e6, show=False)
         assert "M" in ax.xaxis.get_major_formatter()(2e6)

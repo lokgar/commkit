@@ -266,7 +266,7 @@ def _plot_psd(
     ax.set_xlabel(xlabel)
     ax.set_ylabel("PSD [dB/Hz]")
     if x_axis != "wavelength":
-        _set_eng_formatter(ax, "x", "Hz")
+        _set_eng_formatter(ax, "x")
     if title is not None:
         ax.set_title(title)
 
@@ -537,8 +537,8 @@ def _plot_spectrogram(
         mesh = ax.pcolormesh(f_plot, t_plot, image, cmap=cmap, shading="auto", **kwargs)
     ax.set_xlabel("Frequency [Hz]")
     ax.set_ylabel("Time [s]")
-    _set_eng_formatter(ax, "x", "Hz")
-    _set_eng_formatter(ax, "y", "s")
+    _set_eng_formatter(ax, "x")
+    _set_eng_formatter(ax, "y")
     if title is not None:
         ax.set_title(title)
 

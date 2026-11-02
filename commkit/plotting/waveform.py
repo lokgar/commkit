@@ -167,7 +167,7 @@ def _plot_time_domain(
         ax.legend()
     ax.set_xlabel("Time [s]")
     ax.set_ylabel("Amplitude")
-    _set_eng_formatter(ax, "x", "s")
+    _set_eng_formatter(ax, "x")
     if title is not None:
         ax.set_title(title)
 

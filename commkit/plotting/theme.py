@@ -45,10 +45,12 @@ def apply_default_theme() -> None:
     mpl.rcParams.update(
         {
             "figure.figsize": (7, 4.9),
+            "figure.titlesize": 18,
             "font.family": font_name,
-            "font.size": 12,
-            "legend.fontsize": 10,
+            "font.size": 16,
+            "legend.fontsize": 14,
             "lines.linewidth": 2,
+            "axes.titlesize": 18,
             "axes.linewidth": 1,
             "axes.grid": True,
             "grid.alpha": 0.4,
@@ -59,12 +61,12 @@ def apply_default_theme() -> None:
             "ytick.direction": "in",
             "xtick.major.width": 1,
             "ytick.major.width": 1,
-            "xtick.major.size": 4,
-            "ytick.major.size": 4,
+            "xtick.major.size": 8,
+            "ytick.major.size": 8,
             "xtick.minor.width": 1,
             "ytick.minor.width": 1,
-            "xtick.minor.size": 2,
-            "ytick.minor.size": 2,
+            "xtick.minor.size": 4,
+            "ytick.minor.size": 4,
             "xtick.top": True,
             "ytick.right": True,
         }
@@ -256,9 +258,9 @@ def _decimate_minmax(
     return x_out, y_out
 
 
-def _set_eng_formatter(ax, which: str, unit: str) -> None:
+def _set_eng_formatter(ax, which: str) -> None:
     """Apply an engineering (SI-prefix) tick formatter to an axis."""
-    fmt = mpl.ticker.EngFormatter(unit=unit, sep=" ")
+    fmt = mpl.ticker.EngFormatter(sep=" ")
     if which in ("x", "both"):
         ax.xaxis.set_major_formatter(fmt)
     if which in ("y", "both"):

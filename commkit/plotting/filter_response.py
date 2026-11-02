@@ -135,6 +135,7 @@ def plot_filter_response(
     ax1.set_title("Impulse Response")
     if sampling_rate is not None:
         ax1.set_xlabel("Time [s]")
+        _set_eng_formatter(ax1, "x")
     else:
         ax1.set_xlabel("Time [Symbol Periods]")
         ax1.xaxis.set_major_locator(ticker.MultipleLocator(1))
@@ -176,7 +177,7 @@ def plot_filter_response(
     ax2.set_xlabel(freq_label)
     ax2.set_xlim(freqs_disp[0], freqs_disp[-1])
     if sampling_rate is not None:
-        _set_eng_formatter(ax2, "x", "Hz")
+        _set_eng_formatter(ax2, "x")
 
     ax3.plot(freqs_disp, angles_cpu, color="C3")
     ax3.set_ylabel("Phase [rad]")
@@ -184,7 +185,7 @@ def plot_filter_response(
     ax3.set_xlabel(freq_label)
     ax3.set_xlim(freqs_disp[0], freqs_disp[-1])
     if sampling_rate is not None:
-        _set_eng_formatter(ax3, "x", "Hz")
+        _set_eng_formatter(ax3, "x")
 
     # --- 4. Group delay ---
     if kind == "fir":
@@ -208,7 +209,7 @@ def plot_filter_response(
     ax4.set_xlabel(freq_label)
     ax4.set_xlim(freqs_disp[0], freqs_disp[-1])
     if sampling_rate is not None:
-        _set_eng_formatter(ax4, "x", "Hz")
+        _set_eng_formatter(ax4, "x")
 
     if show:
         plt.show()

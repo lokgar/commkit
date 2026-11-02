@@ -108,7 +108,7 @@ def _plot_eye_traces(
         segments = np.empty((traces.shape[0], trace_len, 2))
         segments[:, :, 0] = t
         segments[:, :, 1] = traces
-        line_kwargs: dict[str, Any] = {"alpha": 0.2, "linewidth": 1, "color": "C0"}
+        line_kwargs: dict[str, Any] = {"alpha": 0.2, "color": "C0"}
         line_kwargs.update(kwargs)
         ax.add_collection(LineCollection(list(segments), **line_kwargs))
         y_lo, y_hi = float(traces.min()), float(traces.max())

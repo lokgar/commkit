@@ -130,7 +130,6 @@ def plot_equalizer_result(
                     tap_idx,
                     np.abs(weights[i, j]),
                     marker="o",
-                    markersize=3,
                     label=label,
                 )
         ax_taps.legend(ncol=2)
@@ -138,8 +137,7 @@ def plot_equalizer_result(
         # SISO: (num_taps,) - stem plot
         num_taps = weights.shape[0]
         tap_idx = np.arange(num_taps) - (num_taps // 2)
-        markerline, _, _ = ax_taps.stem(tap_idx, np.abs(weights))
-        markerline.set_markersize(4)
+        ax_taps.stem(tap_idx, np.abs(weights))
 
     ax_taps.set_xlabel("Tap Index")
     ax_taps.set_ylabel("|w|")
@@ -241,7 +239,7 @@ def plot_zf_equalizer_response(
             axi.plot(f_sorted, 20 * np.log10(np.abs(data) + 1e-12), color=col)
             prefix = f"{row_label} " if row_label else ""
             axi.set_title(f"{prefix}{lbl}")
-            _set_eng_formatter(axi, "x", "Hz")
+            _set_eng_formatter(axi, "x")
             axi.set_xlabel("Frequency [Hz]")
             axi.set_ylabel("Magnitude [dB]")
 
