@@ -146,13 +146,14 @@ def estimate_noise_variance(
     *,
     num_skip_symbols: int = 0,
 ) -> float | np.ndarray:
-    """Data-aided noise variance per complex symbol on the constellation's scale.
+    """Data-aided variance of the noise in the symbols, on the constellation's scale.
 
     ``σ² = E[|r / g - s|^2]`` with the reference normalized to unit average
     power and the data-aided gain ``g`` of :func:`snr` (so
     ``σ² = 10 ** (-snr / 10)``): the ``noise_var`` that
     :func:`~commkit.mapping.compute_llr`, :func:`gmi`, :func:`ngmi` and
-    :func:`mi` take for symbols on the constellation's scale.
+    :func:`mi` take for symbols on the constellation's scale, complex or
+    real: each uses the likelihood of the noise those symbols carry.
 
     Parameters
     ----------
@@ -202,7 +203,10 @@ def snr(
     ``SNR = 1 / E[|r / g - s|^2]`` with the reference ``s`` normalized to
     unit average power per channel and the data-aided gain
     ``g = |<r s*>| / <|s|^2>``, which is unbiased at any SNR (normalizing
-    ``r`` to unit total power is not).  No rotation is applied.
+    ``r`` to unit total power is not).  No rotation is applied.  A power
+    ratio in the symbols, as ``apply_awgn(snr_db=)`` sets: for complex
+    symbols it equals the Es/N0 of AWGN, for real symbols it is 3.01 dB
+    above it (they carry the in-phase half of the noise).
 
     Parameters
     ----------

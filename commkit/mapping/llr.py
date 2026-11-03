@@ -40,7 +40,8 @@ __all__ = ["compute_llr"]
 def compute_llr(
     symbols: ArrayType | Signal,
     *,
-    noise_var: float,
+    noise_var: float | None = None,
+    esn0_db: float | None = None,
     constellation: Constellation | None = None,
     method: str = "maxlog",
 ) -> ArrayType:
@@ -61,9 +62,17 @@ def compute_llr(
         Received symbols at one sample per symbol, ``(..., N)``, on the
         constellation's scale.  A :class:`Signal` must be at one sample per
         symbol.
-    noise_var : float
-        Complex noise variance ``sigma^2 = E[|n|^2]`` on the constellation's
-        scale.  For unit-power constellations, ``sigma^2 = 10^(-EsN0_dB/10)``.
+    noise_var : float, optional
+        Variance ``sigma^2 = E[|n|^2]`` of the noise in ``symbols``, on the
+        constellation's scale: of circular complex noise for complex
+        symbols, of real noise for real ones (what
+        :func:`~commkit.metrics.estimate_noise_variance` measures).  Give
+        this or ``esn0_db``.
+    esn0_db : float, optional
+        Es/N0 of the channel in dB, instead of ``noise_var``: Es is the
+        constellation's average energy, and the noise variance follows as
+        for :func:`~commkit.impairments.apply_awgn` (``Es / (Es/N0)`` for
+        complex symbols, half of it for real ones).
     constellation : Constellation, optional
         Points, bit labels and prior.  Defaults to the Signal's
         ``constellation``; required for array input.
@@ -79,14 +88,17 @@ def compute_llr(
     Raises
     ------
     ValueError
-        For GPU input and a constellation of more than 16 bits per symbol,
+        If neither or both of ``noise_var`` and ``esn0_db`` are given, and
+        for GPU input and a constellation of more than 16 bits per symbol,
         the limit of the CUDA kernels.
 
     Notes
     -----
     Max-log: ``LLR_b = max_{s: b=0} m(s) - max_{s: b=1} m(s)``; exact:
     ``LLR_b = log sum_{s: b=0} e^{m(s)} - log sum_{s: b=1} e^{m(s)}``, with
-    ``m(s) = -|r - s|^2 / sigma^2 + log P(s)``.
+    ``m(s) = -|r - s|^2 / sigma^2 + log P(s)`` for complex symbols and
+    ``m(s) = -(r - s)^2 / (2 sigma^2) + log P(s)`` for real ones: the
+    Gaussian log-likelihood of the noise the symbols carry.
     """
     from .constellation import Constellation
 
@@ -103,8 +115,33 @@ def compute_llr(
             "compute_llr(): constellation must be a Constellation, got "
             f"{type(constellation).__name__}; use e.g. Constellation.qam(16)."
         )
+    noise_var = _noise_variance(
+        noise_var, esn0_db, constellation, x.dtype.kind != "c", "compute_llr()"
+    )
     logger.debug("Computing LLRs for %r (method=%s).", constellation, method)
     return constellation.llr(x, noise_var=noise_var, method=method)
+
+
+def _noise_variance(
+    noise_var: float | None,
+    esn0_db: float | None,
+    constellation: Constellation,
+    real: bool,
+    function_name: str,
+) -> float:
+    """The noise variance in the symbols, from ``noise_var`` or ``esn0_db``.
+
+    ``esn0_db`` is the channel's Es/N0 with Es the constellation's average
+    energy: complex symbols carry noise of variance ``N0 = Es / (Es/N0)``,
+    real ones its in-phase half, ``N0 / 2``, as
+    :func:`commkit.impairments.apply_awgn` adds.
+    """
+    if (noise_var is None) == (esn0_db is None):
+        raise ValueError(f"{function_name}: give one of noise_var and esn0_db.")
+    if noise_var is not None:
+        return float(noise_var)
+    n0 = constellation.power() / 10 ** (float(esn0_db) / 10)  # type: ignore[arg-type]
+    return n0 / 2 if real else n0
 
 
 def _get_numba_llr(name: str = "llr") -> Callable[..., None]:

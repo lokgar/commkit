@@ -238,13 +238,13 @@ def error_rate_curve(
     A batch holds about 2^18 transmitted bits (at least one block).  A
     point stops after the batch that reaches either limit: it may count
     more than ``min_block_errors`` block errors, but the last batch is cut
-    to ``max_blocks``.  The noise is circular complex with variance
-    ``N0 = Es / (Es/N0)``, the channel :func:`~commkit.mapping.compute_llr`
-    models; a real constellation (PAM) sees its in-phase part, of variance
-    ``N0 / 2``, so BPSK has the coherent ``BER = Q(sqrt(2 Es/N0))``.  (This
-    differs from :func:`~commkit.impairments.apply_awgn`, which gives real
-    samples real noise of the full variance.)  The LLRs use ``N0`` and, for
-    a shaped constellation, its prior.  When the record
+    to ``max_blocks``.  The noise is what
+    :func:`~commkit.impairments.apply_awgn` adds at ``esn0_db``: circular
+    complex of variance ``N0 = Es / (Es/N0)`` for a complex constellation,
+    real of variance ``N0 / 2`` for a real one (PAM), so BPSK has
+    ``BER = Q(sqrt(2 Es/N0))``.  The LLRs use that variance, as
+    :func:`~commkit.mapping.compute_llr` does, and the constellation's
+    prior.  When the record
     does not fill whole symbols, the last symbol carries random filler bits.
     """
     name = "error_rate_curve()"
@@ -298,7 +298,9 @@ def error_rate_curve(
 
     counts = np.zeros((len(_COUNT_FIELDS), grid.size), dtype=np.int64)
     for i, esn0 in enumerate(grid):
-        noise_var = es / 10 ** (esn0 / 10)
+        n0 = es / 10 ** (esn0 / 10)
+        # As apply_awgn: real samples carry the in-phase half of the noise.
+        noise_var = n0 if constellation.is_complex else n0 / 2
         while counts[0, i] < max_blocks and counts[2, i] < min_block_errors:
             b = int(min(batch, max_blocks - counts[0, i]))
             info = to_device(gen.integers(0, 2, (b, k), dtype=np.int8), device)
@@ -308,15 +310,14 @@ def error_rate_curve(
                 extra = to_device(gen.integers(0, 2, filler, dtype=np.int8), device)
                 bits = xp.concatenate([bits, extra])
             symbols = constellation.map(bits)
-            # N0 / 2 per real dimension: the circular noise compute_llr
-            # models, of which a real constellation sees the in-phase part.
-            std = float(np.sqrt(noise_var / 2))
             real = symbols.real.dtype
             if xp.iscomplexobj(symbols):
+                std = float(np.sqrt(noise_var / 2))
                 noise = _random.complex_normal(
                     gen, symbols.shape, std=std, dtype=real, xp=xp
                 )
             else:
+                std = float(np.sqrt(noise_var))
                 noise = std * _random.standard_normal(
                     gen, symbols.shape, dtype=real, xp=xp
                 )

@@ -2,6 +2,10 @@
 spontaneous emission at an OSNR: :func:`apply_ase`.
 
 Powers are per sample and per channel, in the squared units of the samples.
+Es/N0 is the channel's: complex samples get noise of variance ``N0`` per
+sample, real samples its in-phase half, ``N0 / 2``, so error rates at an
+Es/N0 do not depend on the samples' dtype.  An SNR is a power ratio in the
+samples themselves.
 The signal's symbol energy is measured as energy per symbol: the energy of
 each channel over the number of symbols it carries, so silence around the
 signal (zero padding, a capture before the frame arrives) lowers neither.
@@ -22,35 +26,49 @@ def apply_awgn(
     samples: S,
     *,
     esn0_db: float | None = None,
+    snr_db: float | None = None,
     noise_var: float | ArrayType | None = None,
     sps: float | None = None,
     per_channel: bool = True,
     rng: RNG = None,
 ) -> S:
-    """Add white Gaussian noise, relative to the signal or of an absolute
+    """Add white Gaussian noise: at an Es/N0, at an SNR, or of an absolute
     variance.
 
     Give exactly one of:
 
-    - ``esn0_db``, the noise *relative to the signal*: the symbol energy
-      ``Es`` is measured, and channel ``c`` gets noise of variance
-      ``σ_c² = Es_c / (Es/N0)`` per sample.  Scaling the signal scales the
-      noise with it; the Es/N0 stays.
-    - ``noise_var``, the *absolute* noise variance ``σ² = E|n|²`` per sample,
-      in the squared units of the samples; nothing is measured.  A fixed
-      noise floor, such as a receiver's thermal noise: scaling the signal
-      leaves the noise as it is, and the SNR changes.
+    - ``esn0_db``, the channel's *Es/N0*, the textbook quantity of digital
+      communications: the symbol energy ``Es`` is measured, and channel
+      ``c`` gets noise of density ``N0_c = Es_c / (Es/N0)``.  Complex
+      samples get circular complex noise of variance ``N0_c`` per sample
+      (``N0_c / 2`` in I and in Q); real samples get its in-phase part,
+      real noise of variance ``N0_c / 2``.  So a constellation's error
+      rates at an Es/N0 are the same whether its samples are real or
+      complex, and the textbook formulas apply (BPSK:
+      ``Q(sqrt(2 Es/N0))``).
+    - ``snr_db``, the *signal-to-noise ratio in the samples*: channel ``c``
+      gets noise of variance ``σ_c² = P_c / SNR`` per sample, with ``P_c =
+      mean(|x_c|²)`` the channel's mean power over the record, complex for
+      complex samples and real for real ones.  What a measurement quotes
+      (a photocurrent's beat SNR) and what :func:`~commkit.metrics.snr`
+      reads back on symbols.  For complex samples at one sample per symbol
+      it equals Es/N0; for real samples ``snr_db = esn0_db + 3.01 dB``.
+    - ``noise_var``, the *absolute* noise variance ``σ² = E|n|²`` per
+      sample, in the squared units of the samples (complex or real noise,
+      after the samples); nothing is measured.  A fixed noise floor, such
+      as a receiver's thermal noise: scaling the signal leaves the noise as
+      it is, and the SNR changes.
 
-    The symbol energy is energy per symbol, ``Es_c = E_c / K`` with ``E_c =
+    With ``esn0_db`` or ``snr_db`` the noise scales with the signal.  The
+    symbol energy is energy per symbol, ``Es_c = E_c / K`` with ``E_c =
     Σ|x_c[n]|²`` the energy of channel ``c`` and ``K`` the number of symbols
     the record carries: a Signal's frame length in symbols (without a zero
     guard), else its reference's symbol count, else (and for arrays, or a
     record shorter than that) ``N / sps``.  Without silence this is
     ``sps · mean(|x_c|²)``, the power summed over the ``sps`` samples of a
     symbol; zero padding adds no energy and no symbols, so it changes
-    nothing.  With ``Es`` in these units the noise density is ``N0 = σ²``,
-    the variance of one sample, and ``Es/N0`` is the SNR per symbol after a
-    matched filter and decimation, whatever the oversampling.
+    nothing.  ``Es/N0`` is then the SNR per symbol after a matched filter
+    and decimation, whatever the oversampling.
 
     Parameters
     ----------
@@ -60,18 +78,20 @@ def apply_awgn(
         antenna, a wire pair, a lane.
     esn0_db : float, optional
         Symbol energy over noise spectral density, Es/N0, in dB.
+    snr_db : float, optional
+        Mean signal power over noise variance per sample, in dB.
     noise_var : float or array_like, optional
         Noise variance ``E|n|²`` per sample: a scalar for every channel, or
-        ``(C,)`` per channel.  Instead of ``esn0_db``.
+        ``(C,)`` per channel.
     sps : float, optional
         Samples per symbol, for ``esn0_db``.  Taken from the Signal; required
         for array input.  A value that disagrees with the Signal raises.
     per_channel : bool, default True
-        For ``esn0_db``: ``True`` gives every channel the requested Es/N0
-        from its own symbol energy; ``False`` gives every channel the same
-        noise, from the mean symbol energy over channels, as identical
-        receivers with one noise floor (a channel that arrives weaker, e.g.
-        through polarization-dependent loss, then has a lower Es/N0).
+        For ``esn0_db`` and ``snr_db``: ``True`` gives every channel the
+        requested ratio from its own energy; ``False`` gives every channel
+        the same noise, from the mean over channels, as identical receivers
+        with one noise floor (a channel that arrives weaker, e.g. through
+        polarization-dependent loss, then has a lower ratio).
     rng : int, numpy.random.Generator or None
         Random source.  The noise is drawn on the data's device: from this
         Generator on the CPU, and on the GPU from a CuPy Generator seeded from
@@ -85,24 +105,29 @@ def apply_awgn(
     Raises
     ------
     ValueError
-        If neither or both of ``esn0_db`` and ``noise_var`` are given, or a
-        per-channel ``noise_var`` does not have ``C`` entries.
+        If not exactly one of ``esn0_db``, ``snr_db`` and ``noise_var`` is
+        given, or a per-channel ``noise_var`` does not have ``C`` entries.
 
-    Notes
-    -----
-    Complex input gets circular complex noise, its variance split equally
-    between I and Q; real input gets real noise of the full variance.
+    See Also
+    --------
+    commkit.mapping.compute_llr : Takes the variance of the noise in the
+        symbols, or the same ``esn0_db``.
+    commkit.metrics.estimate_noise_variance : Measures that variance.
 
     Examples
     --------
     >>> sig = generate(Constellation.pam(4), 1000, symbol_rate=1e6, sps=4)
     >>> noisy = apply_awgn(sig, esn0_db=20)  # sps taken from sig
     >>> noisy = apply_awgn(sig.samples, esn0_db=20, sps=4)
+    >>> noisy = apply_awgn(sig, snr_db=25)  # power ratio in the samples
     >>> floor = apply_awgn(sig, noise_var=1e-3)  # absolute, whatever the signal
     """
     signal_adapter = adapt_signal(samples, function_name="apply_awgn()")
-    if (esn0_db is None) == (noise_var is None):
-        raise ValueError("apply_awgn(): give one of esn0_db and noise_var.")
+    given = [esn0_db is not None, snr_db is not None, noise_var is not None]
+    if sum(given) != 1:
+        raise ValueError(
+            "apply_awgn(): give exactly one of esn0_db, snr_db and noise_var."
+        )
     x, xp, _ = dispatch(signal_adapter.array)
     num_channels = 1 if x.ndim == 1 else x.shape[0]
 
@@ -118,13 +143,25 @@ def apply_awgn(
             var = var[:, None] if x.ndim == 2 else var
         return signal_adapter.wrap_samples(x + _noise(x, xp, var, rng))
 
+    if snr_db is not None:
+        logger.info("Adding AWGN (SNR target: %.2f dB).", snr_db)
+        power = xp.mean(xp.abs(x) ** 2, axis=-1, keepdims=True)
+        if not per_channel:
+            power = xp.mean(power)
+        snr_linear = max(db_to_linear(snr_db, power=True), 1e-20)
+        return signal_adapter.wrap_samples(x + _noise(x, xp, power / snr_linear, rng))
+
     sps = signal_adapter.resolve_fact("sps", sps)
     logger.info("Adding AWGN (Es/N0 target: %.2f dB).", esn0_db)
     es = _symbol_energy(signal_adapter, x, xp, sps)
     if not per_channel:
         es = xp.mean(es)
     esn0_linear = max(db_to_linear(esn0_db, power=True), 1e-20)
-    return signal_adapter.wrap_samples(x + _noise(x, xp, es / esn0_linear, rng))
+    n0 = es / esn0_linear
+    # Real samples carry the in-phase half of complex noise of density N0.
+    return signal_adapter.wrap_samples(
+        x + _noise(x, xp, n0 if xp.iscomplexobj(x) else n0 / 2, rng)
+    )
 
 
 def apply_ase(

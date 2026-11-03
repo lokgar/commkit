@@ -15,6 +15,7 @@ from ..core._signal_adapter import adapt_signal
 from ..core.signal import Signal
 from ..logger import logger
 from ..mapping import Constellation
+from ..mapping.llr import _noise_variance
 from ._common import (
     _constellation,
     _log_per_channel,
@@ -36,6 +37,7 @@ def _gmi_loss(
     reference: ArrayType | None,
     constellation: Constellation | None,
     noise_var: float | None,
+    esn0_db: float | None,
     method: str,
     num_skip_symbols: int,
     name: str,
@@ -51,15 +53,19 @@ def _gmi_loss(
     c = _constellation(adapter, constellation, name)
     k = c.bits_per_symbol
     if adapter.signal is not None:
-        if noise_var is None:
-            raise ValueError(f"{name} needs noise_var to compute LLRs of a Signal.")
+        if noise_var is None and esn0_db is None:
+            raise ValueError(
+                f"{name} needs noise_var or esn0_db to compute LLRs of a Signal."
+            )
         received = _reference_scaled(
             adapter, received, dispatch(received)[1], name, num_skip_symbols
         )
-        received = c.llr(received, noise_var=noise_var, method=method)
-    elif noise_var is not None:
+        nv = _noise_variance(noise_var, esn0_db, c, received.dtype.kind != "c", name)
+        received = c.llr(received, noise_var=nv, method=method)
+    elif noise_var is not None or esn0_db is not None:
         raise ValueError(
-            f"{name}: noise_var is for Signal input; LLR arrays already contain it."
+            f"{name}: noise_var and esn0_db are for Signal input; LLR arrays "
+            "already contain the noise."
         )
     llr_arr, xp, _ = dispatch(received)
     llr_arr, ref = _paired(
@@ -92,6 +98,7 @@ def gmi(
     *,
     constellation: Constellation | None = None,
     noise_var: float | None = None,
+    esn0_db: float | None = None,
     method: str = "maxlog",
     num_skip_symbols: int = 0,
 ) -> float | np.ndarray:
@@ -117,16 +124,21 @@ def gmi(
         ``(N * k,)`` or ``(C, N * k)`` (the ``k`` bits of a symbol adjacent).
         A Signal holds received *symbols* at one sample per symbol: they are
         divided by the data-aided gain against ``reference.symbols`` (if
-        present), and their LLRs are computed with ``noise_var`` and
-        ``method`` and compared with ``reference.bits``.
+        present), and their LLRs are computed with ``noise_var`` (or
+        ``esn0_db``) and ``method`` and compared with ``reference.bits``.
     reference : array_like, optional
         Transmitted bits, same shape as the LLRs.  Required for arrays.
     constellation : Constellation, optional
         Gives ``k``, and for a Signal the points, labels and prior of the
         LLRs.  Defaults to the Signal's; required for arrays.
     noise_var : float, optional
-        Complex noise variance on the constellation's scale, for a Signal
-        only (an LLR array already contains it).
+        Variance of the noise in the Signal's symbols on the constellation's
+        scale, as for :func:`~commkit.mapping.compute_llr` (complex or real
+        noise, after the symbols' dtype); for a Signal only (an LLR array
+        already contains it).
+    esn0_db : float, optional
+        Es/N0 of the channel in dB, instead of ``noise_var``, as for
+        :func:`~commkit.mapping.compute_llr`.
     method : {"maxlog", "exact"}, default "maxlog"
         LLR computation for a Signal.
     num_skip_symbols : int, default 0
@@ -141,12 +153,20 @@ def gmi(
     Raises
     ------
     ValueError
-        On a missing reference, constellation or ``noise_var``, a shape
+        On a missing reference, constellation or noise (``noise_var`` or
+        ``esn0_db``), a shape
         mismatch, an empty selection, or a frame Signal or one not at one
         sample per symbol.
     """
     loss, c = _gmi_loss(
-        llrs, reference, constellation, noise_var, method, num_skip_symbols, "gmi()"
+        llrs,
+        reference,
+        constellation,
+        noise_var,
+        esn0_db,
+        method,
+        num_skip_symbols,
+        "gmi()",
     )
     # H(X) - sum_b E[...], written so that H(X)/k is exactly 1.0 when uniform.
     k = c.bits_per_symbol
@@ -164,6 +184,7 @@ def ngmi(
     *,
     constellation: Constellation | None = None,
     noise_var: float | None = None,
+    esn0_db: float | None = None,
     method: str = "maxlog",
     num_skip_symbols: int = 0,
 ) -> float | np.ndarray:
@@ -188,8 +209,8 @@ def ngmi(
         Transmitted bits, same shape as the LLRs.  Required for arrays.
     constellation : Constellation, optional
         As for :func:`gmi`.
-    noise_var : float, optional
-        As for :func:`gmi`: for a Signal only.
+    noise_var, esn0_db : float, optional
+        As for :func:`gmi`: for a Signal only, one of them.
     method : {"maxlog", "exact"}, default "maxlog"
         LLR computation for a Signal.
     num_skip_symbols : int, default 0
@@ -210,7 +231,14 @@ def ngmi(
     gmi : The unnormalized rate in bits per symbol.
     """
     loss, _ = _gmi_loss(
-        llrs, reference, constellation, noise_var, method, num_skip_symbols, "ngmi()"
+        llrs,
+        reference,
+        constellation,
+        noise_var,
+        esn0_db,
+        method,
+        num_skip_symbols,
+        "ngmi()",
     )
     out = to_report_scalar(1.0 - loss)
     if isinstance(out, float):
@@ -223,14 +251,16 @@ def ngmi(
 def mi(
     symbols: ArrayType | Signal,
     *,
-    noise_var: float,
+    noise_var: float | None = None,
+    esn0_db: float | None = None,
     constellation: Constellation | None = None,
     num_skip_symbols: int = 0,
 ) -> float | np.ndarray:
     r"""Mutual information of the AWGN channel with the constellation's prior.
 
-    Monte-Carlo estimate with Gaussian likelihoods
-    ``p(r | s_m) ∝ exp(-|r - s_m|^2 / sigma^2)`` and prior ``P(s_m)``:
+    Monte-Carlo estimate with Gaussian likelihoods (of complex or real
+    noise, after the symbols' dtype; see ``noise_var``) and prior
+    ``P(s_m)``:
 
     .. math::
 
@@ -247,10 +277,14 @@ def mi(
         symbol; with a reference, its samples are first divided by the
         data-aided gain ``|<r s*>| / <|s|^2>``, which puts them on the
         constellation's scale whatever their normalization.
-    noise_var : float
-        Complex noise variance ``sigma^2 = E[|n|^2]`` on the constellation's
-        scale.  For a unit-power constellation at Es/N0 in dB:
-        ``10 ** (-esn0_db / 10)``.
+    noise_var : float, optional
+        Variance ``sigma^2 = E[|n|^2]`` of the noise in the symbols on the
+        constellation's scale: circular complex noise for complex symbols
+        (``p(r | s) ∝ exp(-|r - s|^2 / sigma^2)``), real noise for real ones
+        (``exp(-(r - s)^2 / (2 sigma^2))``).  Give this or ``esn0_db``.
+    esn0_db : float, optional
+        Es/N0 of the channel in dB, instead of ``noise_var``, as for
+        :func:`~commkit.mapping.compute_llr`.
     constellation : Constellation, optional
         Points and prior.  Defaults to the Signal's; required for arrays.
     num_skip_symbols : int, default 0
@@ -265,8 +299,9 @@ def mi(
     Raises
     ------
     ValueError
-        On a missing constellation, an empty selection, or a frame Signal or
-        one not at one sample per symbol.
+        On a missing constellation, neither or both of ``noise_var`` and
+        ``esn0_db``, an empty selection, or a frame Signal or one not at one
+        sample per symbol.
     """
     name = "mi()"
     adapter = adapt_signal(symbols, function_name=name)
@@ -277,6 +312,9 @@ def mi(
     # float64: single precision changed no MI by more than 5e-8 bit (QAM 4
     # to 256, Es/N0 -5 to 30 dB), far below the Monte Carlo error.
     rx = _skip(rx, num_skip_symbols, name)
+    noise_var = _noise_variance(noise_var, esn0_db, c, rx.dtype.kind != "c", name)
+    if rx.dtype.kind != "c":
+        noise_var = 2.0 * noise_var  # real noise: the in-phase half of 2 s2
     cdtype = np.result_type(rx.dtype, np.complex64)
     rx = rx.astype(cdtype, copy=False)
     real = np.empty(0, cdtype).real.dtype

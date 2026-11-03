@@ -20,32 +20,54 @@ raise.
 
 Units and scaling
 -----------------
-Units are carried by argument names (``esn0_db``, ``noise_var``); there is
-no units object.
+Units are carried by argument names (``esn0_db``, ``snr_db``,
+``noise_var``); there is no units object.  Three noise quantities, each
+with one meaning:
+
+* ``noise_var`` is the variance of the noise in *your samples*, what
+  :func:`estimate_noise_variance` measures and
+  :func:`~commkit.mapping.compute_llr` takes;
+* ``snr_db`` is a power ratio in *your samples*, what :func:`snr` measures
+  and ``apply_awgn(snr_db=)`` sets;
+* ``esn0_db`` is the *channel's* textbook Es/N0, the same whether the
+  samples are complex or real: error rates at an Es/N0 do not depend on
+  the dtype.
+
+For complex samples at one sample per symbol, ``snr_db = esn0_db`` and
+``noise_var = Es / (Es/N0)``.  Real samples carry the in-phase half of
+the noise: ``snr_db = esn0_db + 3.01 dB`` and ``noise_var = Es / (2
+Es/N0)``.  The library converts where it takes ``esn0_db``
+(``apply_awgn``, ``compute_llr``, :func:`mi`, :func:`gmi`, :func:`ngmi`,
+:func:`commkit.coding.error_rate_curve`), so the conversion is never
+written by hand.
 
 ==========================  =================================================
 Quantity                    Definition in commkit
 ==========================  =================================================
-Sample power ``P``          ``E[|x|^2]`` per complex sample.  At ``sps``
+Sample power ``P``          ``E[|x|^2]`` per sample.  At ``sps``
                             samples per symbol a normalized waveform has
                             ``P = 1/sps``; at the symbol rate ``P = 1``.
 Symbol energy ``Es``        ``sps * P``: 1 for normalized waveforms and for
                             symbols on a constellation's scale.  Every
                             factory constellation, shaped ones included, has
                             unit average power under its pmf.
-``Es/N0`` (``esn0_db``)     Symbol energy over noise spectral density.
-                            ``apply_awgn`` adds complex noise of variance
-                            ``sps * P / (Es/N0)`` per sample, which is
-                            ``Es/N0`` per symbol after a matched filter and
-                            decimation.
-Noise variance              ``noise_var = sigma^2 = E[|n|^2]`` per complex
-(``noise_var``)             symbol on the constellation's scale, so
-                            ``sigma^2 = 10 ** (-esn0_db / 10)`` at unit
-                            ``Es``.  Each quadrature (I, Q) carries
-                            ``sigma^2 / 2``.
+``Es/N0`` (``esn0_db``)     Symbol energy over noise spectral density
+                            ``N0``.  ``apply_awgn`` adds noise of variance
+                            ``N0 = sps * P / (Es/N0)`` per complex sample
+                            (``N0 / 2`` in I and in Q) and ``N0 / 2`` per
+                            real sample, which is ``Es/N0`` per symbol
+                            after a matched filter and decimation.
+Noise variance              ``noise_var = sigma^2 = E[|n|^2]`` per symbol on
+(``noise_var``)             the constellation's scale: ``10 ** (-esn0_db /
+                            10)`` at unit ``Es`` for complex symbols, half
+                            of it for real ones.  The LLRs and information
+                            rates use the likelihood of complex or real
+                            noise after the symbols' dtype.
 SNR (:func:`snr`, dB)       ``Es / E[|r/g - s|^2]`` at the symbol rate, with
-                            ``g`` the data-aided gain (below); equal to
-                            ``Es/N0`` for AWGN after a matched filter.
+                            ``g`` the data-aided gain (below): a power ratio
+                            in the samples, equal to ``Es/N0`` for complex
+                            AWGN after a matched filter, 3.01 dB above it
+                            for real samples.
 EVM (:func:`evm`, %)        ``100 sqrt(E[|r/g - s|^2] / Es)``, RMS, relative
                             to the reference's average power; ``= 100 *
                             10 ** (-SNR_dB / 20)``.  Blind EVM is relative

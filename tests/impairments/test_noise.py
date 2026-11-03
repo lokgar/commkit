@@ -114,13 +114,59 @@ class TestNoiseVar:
 
     def test_exactly_one_specification(self, xp):
         x = xp.ones(64, dtype=xp.complex64)
-        with pytest.raises(ValueError, match="one of esn0_db and noise_var"):
+        message = "exactly one of esn0_db, snr_db and noise_var"
+        with pytest.raises(ValueError, match=message):
             apply_awgn(x, sps=1)
-        with pytest.raises(ValueError, match="one of esn0_db and noise_var"):
+        with pytest.raises(ValueError, match=message):
             apply_awgn(x, sps=1, esn0_db=10.0, noise_var=0.1)
+        with pytest.raises(ValueError, match=message):
+            apply_awgn(x, esn0_db=10.0, snr_db=10.0)
         for removed in ({"signal_power": 1.0}, {"osnr_db": 20.0}):
             with pytest.raises(TypeError):
                 apply_awgn(x, sps=1, esn0_db=10.0, **removed)
+
+
+class TestRealAndComplex:
+    """Es/N0 describes the channel: real samples get the in-phase half of
+    the noise, so a constellation's error rates at an Es/N0 do not depend
+    on the dtype.  SNR is a power ratio in the samples."""
+
+    def test_esn0_real_samples_get_half_the_variance(self, xp):
+        """Unit-energy samples at 10 dB: N0 = 0.1, so 0.1 per complex sample
+        and 0.05 per real one (2e5 samples: 0.3 % standard error)."""
+        n = 200_000
+        for dtype, expected in ((xp.complex64, 0.1), (xp.float32, 0.05)):
+            x = xp.ones(n, dtype=dtype)
+            var = float(_noise_var(xp, apply_awgn(x, esn0_db=10.0, sps=1, rng=2), x))
+            assert var == pytest.approx(expected, rel=0.02), dtype
+
+    def test_snr_is_the_power_ratio_in_the_samples(self, xp):
+        """snr_db sets mean(|x|^2) / E|n|^2 for real and complex samples alike,
+        per channel, and does not need sps."""
+        rng = np.random.default_rng(3)
+        for dtype in (np.complex64, np.float32):
+            x = rng.standard_normal((2, 100_000)) * np.array([[1.0], [3.0]])
+            if dtype is np.complex64:
+                x = x + 1j * rng.standard_normal(x.shape)
+            x = xp.asarray(x.astype(dtype))
+            power = xp.mean(xp.abs(x) ** 2, axis=-1)
+            var = _noise_var(xp, apply_awgn(x, snr_db=20.0, rng=4), x)
+            assert xp.allclose(power / var, 100.0, rtol=0.02), dtype
+
+    def test_bpsk_ber_does_not_depend_on_the_dtype(self, xp):
+        """2-PAM at Es/N0 = 4 dB: BER = Q(sqrt(2 Es/N0)) = 0.0125, whether
+        the symbols are stored real or complex (4 sigma of 4e5 bits)."""
+        from tests.common.scoring import binomial_margin
+        from tests.common.theory import bpsk_ber
+
+        rng = np.random.default_rng(5)
+        bits = rng.integers(0, 2, 400_000)
+        s = (1.0 - 2.0 * bits).astype(np.float32)
+        p = bpsk_ber(10**0.4)
+        for x in (s, s.astype(np.complex64)):
+            noisy = apply_awgn(xp.asarray(x), esn0_db=4.0, sps=1, rng=6)
+            ber = float(xp.mean((noisy.real < 0) != xp.asarray(bits.astype(bool))))
+            assert abs(ber - p) < binomial_margin(p, bits.size), (x.dtype, ber, p)
 
 
 class TestSymbolEnergy:

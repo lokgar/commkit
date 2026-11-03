@@ -5,8 +5,9 @@ from typing import Any
 import numpy as np
 import pytest
 
-from commkit import mapping
+from commkit import mapping, metrics
 from commkit.core import Signal
+from commkit.impairments import apply_awgn
 from commkit.mapping import Constellation
 from tests.common.conversions import to_numpy
 
@@ -311,7 +312,9 @@ class TestComputeLLRSignalIntegration:
 
 
 class TestLLRBruteForce:
-    """compute_llr against a float64 brute force from points, labels and prior."""
+    """compute_llr against a float64 brute force from points, labels and prior,
+    with the likelihood of complex noise for complex symbols and of real
+    noise for real ones."""
 
     @pytest.mark.parametrize("method", ["maxlog", "exact"])
     @pytest.mark.parametrize(
@@ -343,12 +346,13 @@ class TestLLRBruteForce:
         rng = np.random.default_rng(9)
         pts = constellation.points
         x = pts[rng.integers(0, pts.size, 3000)]
-        sd = np.sqrt(nv / 2)
-        noise = sd * rng.standard_normal(x.shape)
         if np.iscomplexobj(pts):
-            x = x + 1j * sd * rng.standard_normal(x.shape) + noise
+            sd = np.sqrt(nv / 2)  # circular noise of variance nv
+            x = x + sd * (
+                rng.standard_normal(x.shape) + 1j * rng.standard_normal(x.shape)
+            )
         else:
-            x = x + noise
+            x = x + np.sqrt(nv) * rng.standard_normal(x.shape)  # real, variance nv
         x = x.astype(np.complex64 if np.iscomplexobj(x) else np.float32)
         got = to_numpy(
             mapping.compute_llr(
@@ -357,7 +361,10 @@ class TestLLRBruteForce:
         ).reshape(x.size, -1)
 
         prior = np.log(constellation.pmf) if constellation.pmf is not None else 0.0
-        metric = -(np.abs(x[:, None] - pts[None, :]) ** 2) / nv + prior  # (N, M)
+        # Gaussian log-likelihood of the noise: exp(-|d|^2 / nv) for circular
+        # complex noise of variance nv, exp(-d^2 / (2 nv)) for real noise.
+        scale = nv if np.iscomplexobj(pts) else 2 * nv
+        metric = -(np.abs(x[:, None] - pts[None, :]) ** 2) / scale + prior  # (N, M)
         labels = constellation.bit_labels
         expected = np.empty_like(got, dtype=np.float64)
         for b in range(labels.shape[1]):
@@ -541,3 +548,67 @@ class TestClosedFormMaxLog:
         assert launch(
             x, axis, (lev, lab, nb, nb, xp.asarray([1], xp.int32)), inv_s2=1.0
         ).shape == (4, 2)
+
+
+class TestNoiseConvention:
+    """noise_var is the variance of the noise in the symbols, esn0_db the
+    channel's Es/N0: the chain apply_awgn -> estimate_noise_variance ->
+    compute_llr gives true LLRs for real and complex symbols alike."""
+
+    @staticmethod
+    def _bpsk(dtype: Any, xp: Any, n: int = 200_000) -> tuple[Any, Any, Any]:
+        """2-PAM at Es/N0 = 3 dB stored as ``dtype``: received, bits and the
+        estimated noise variance."""
+        c = Constellation.pam(2)
+        bits = np.random.default_rng(7).integers(0, 2, n).astype(np.int8)
+        s = mapping.map_bits(bits, constellation=c).astype(dtype)
+        r = apply_awgn(xp.asarray(s), esn0_db=3.0, sps=1, rng=8)
+        nv = metrics.estimate_noise_variance(r, xp.asarray(s))
+        return r, xp.asarray(bits), nv
+
+    @pytest.mark.parametrize(
+        "dtype", [np.float32, np.complex64], ids=["real", "complex"]
+    )
+    def test_llrs_are_consistent(self, xp: Any, dtype: Any) -> None:
+        """A true LLR of BPSK given bit 0 is N(mu, 2 mu): its variance is twice
+        its mean.  At Es/N0 = 3 dB mu = 4 Es/N0 = 8.0, in either dtype (the
+        real symbols carry half the noise variance, 0.25 against 0.5).  With
+        the complex model applied to real symbols the variance would be 4
+        mu (mean 16)."""
+        r, bits, nv = self._bpsk(dtype, xp)
+        assert nv == pytest.approx(0.5 if dtype is np.complex64 else 0.25, rel=0.02)
+        L = mapping.compute_llr(r, noise_var=nv, constellation=Constellation.pam(2))
+        zero = L[bits == 0]
+        mean, var = float(zero.mean()), float(zero.var())
+        assert mean == pytest.approx(4 * 10**0.3, rel=0.03)
+        assert var == pytest.approx(2 * mean, rel=0.03)
+
+    @pytest.mark.parametrize(
+        "dtype", [np.float32, np.complex64], ids=["real", "complex"]
+    )
+    def test_esn0_db_matches_the_measured_variance(self, xp: Any, dtype: Any) -> None:
+        """compute_llr(esn0_db=) gives the LLRs of the measured noise_var,
+        within its estimation error (0.3 % of the variance here)."""
+        r, _, nv = self._bpsk(dtype, xp)
+        c = Constellation.pam(2)
+        a = mapping.compute_llr(r, esn0_db=3.0, constellation=c)
+        b = mapping.compute_llr(r, noise_var=nv, constellation=c)
+        ratio = float(xp.median(a / b))
+        assert ratio == pytest.approx(1.0, rel=0.01)
+        with pytest.raises(ValueError, match="one of noise_var and esn0_db"):
+            mapping.compute_llr(r, constellation=c)
+        with pytest.raises(ValueError, match="one of noise_var and esn0_db"):
+            mapping.compute_llr(r, noise_var=nv, esn0_db=3.0, constellation=c)
+
+    def test_information_rates_do_not_depend_on_the_dtype(self, xp: Any) -> None:
+        """MI of 4-PAM at Es/N0 = 8 dB stored real and complex agree within
+        their Monte Carlo error (0.004 bit at 1e5 symbols)."""
+        c = Constellation.pam(4)
+        bits = np.random.default_rng(9).integers(0, 2, 200_000).astype(np.int8)
+        s = mapping.map_bits(bits, constellation=c)
+        values = []
+        for dtype in (np.float32, np.complex64):
+            r = apply_awgn(xp.asarray(s.astype(dtype)), esn0_db=8.0, sps=1, rng=10)
+            values.append(metrics.mi(r, esn0_db=8.0, constellation=c))
+        assert values[0] == pytest.approx(values[1], abs=0.012)
+        assert 1.0 < values[0] < 2.0

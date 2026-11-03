@@ -146,6 +146,7 @@ Dependencies point downward only:
 - Computations use plain nouns (`allan_deviation`).
 - **Glossary**, one name each:
   - `num_taps`, `step_size`, `sps`, `constellation`, `pulse`, `rng`, `num_symbols`, `num_channels` (never streams), `sampling_rate`, `symbol_rate`, `noise_var`, `nfft`, `regularization`, `max_iterations`.
+  - Noise has three names, each with one meaning: `noise_var` is the variance E|n|² of the noise in the samples a function receives (measured by `estimate_noise_variance`); `snr_db` a power ratio in those samples (measured by `snr`); `esn0_db` the channel's textbook Es/N0, independent of the dtype (real samples carry the in-phase half of the noise, `N0/2`). A function taking `noise_var` for a demapping model (`compute_llr`, `mi`, `gmi`, `ngmi`) uses the likelihood of complex or real noise after the samples' dtype and also accepts `esn0_db`, so users never convert by hand.
   - A size names its unit: `num_symbols`, `num_blocks` (codewords of a FEC code), `info_bits` (a code's information length where it is a parameter), `blocks_per_frame`, `num_variables`, `num_segments`. In `coding`, `length` and `n` mean the codeword length in bits and `k` the information length, nothing else.
   - A seeded part of a factory takes `<part>_rng` (`payload_rng`), with the semantics of `rng`.
   - `method=` strings name only a numerical flavor of one algorithm (`method="maxlog" | "exact"`); algorithms are objects.
@@ -312,10 +313,6 @@ Steps, each its own commit (the version switch first, then each refactor):
 
 1. **oFEC** (OpenROADM, ITU-T G.709.3) is not implemented: its block structure is specified in OpenROADM MSA documents that were not available in a form to implement from. It would build on `BCHCode` (extended BCH(256, 239)), soft-output `Chase` and the staircase decoder's windowed iteration.
 2. **NR rate matching for polar codes** (sub-block interleaving, circular buffer, puncturing and shortening with their frozen-set rules, parity-check bits) and **LTE rate matching for turbo codes** are not included: `PolarCode` and `TurboCode` are the mother codes; `Punctured` and `Shortened` cover generic rate matching.
-
-### Real-valued channels
-
-- **`apply_awgn` and `compute_llr` disagree on real constellations.** `apply_awgn` gives real samples real noise of the full variance `σ²`, while `compute_llr` / `Constellation.llr` score `-|d|²/σ²`, the circular-noise model whose real part carries `σ²/2`. PAM LLRs computed with the `noise_var` that `apply_awgn` used are twice too confident, in any IM/DD link built from the two (notebook 21's PAM4 link was, until it moved to `error_rate_curve`). `error_rate_curve` uses the circular model (`N0/2` per real dimension, BPSK `BER = Q(sqrt(2 Es/N0))`). Pick one convention for real symbols, document it in both functions and in the metrics units table, and land it in its own commit with the tests' expected values rederived.
 
 ### Test suite
 
