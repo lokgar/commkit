@@ -1,5 +1,7 @@
 """Channel-coding plots.
 
+:func:`plot_error_rate` draws an :class:`~commkit.coding.ErrorRateCurve`:
+error rates against Es/N0 or Eb/N0 and the decoding outcome;
 :func:`plot_llr_distribution` draws the conditional distributions of LLRs
 given the transmitted bits and checks their consistency;
 :func:`plot_parity_check` draws the structure and node degrees of a
@@ -27,14 +29,219 @@ from .theme import (
     _square_figsize,
 )
 
-__all__ = ["plot_exit_chart", "plot_llr_distribution", "plot_parity_check"]
+__all__ = [
+    "plot_error_rate",
+    "plot_exit_chart",
+    "plot_llr_distribution",
+    "plot_parity_check",
+]
 
 # Counts per histogram bin below which the consistency panel skips the bin.
 _MIN_COUNT = 20
 
+# Two-sided confidence of the frame error rate's binomial intervals.
+_CONFIDENCE = 0.95
+
 # Matrices up to this many entries are drawn as an image, larger ones as one
 # marker per nonzero entry.
 _DENSE_ENTRIES = 1_000_000
+
+
+def _decoded_llrs(llrs: Any, bits: Any) -> tuple[Any, Any]:
+    """For a DecodeResult: its LLRs and the reference's transmitted bits."""
+    from ..coding import DecodeResult
+    from ..core.signal import Reference, Signal
+
+    if not isinstance(llrs, DecodeResult):
+        return llrs, bits
+    if llrs.llrs is None:
+        raise ValueError(
+            "plot_llr_distribution(): the DecodeResult has no LLRs; its decoder "
+            "gives hard decisions only (see DecodeResult)."
+        )
+    ref = bits.reference if isinstance(bits, Signal) else bits
+    if isinstance(ref, Reference):
+        if ref.bits is None:
+            raise ValueError("plot_llr_distribution(): the reference has no bits.")
+        # Without the uncoded filler after the last whole block.
+        return llrs.llrs, ref.bits[..., : llrs.llrs.shape[-1]]
+    if ref is None:
+        raise ValueError(
+            "plot_llr_distribution(): a DecodeResult needs the transmitted Signal, "
+            "its Reference or the transmitted bits."
+        )
+    return llrs.llrs, ref
+
+
+def plot_error_rate(
+    curves: Any,
+    *,
+    ebn0: bool = False,
+    quantity: str | None = None,
+    pre_fec: bool = True,
+    intervals: bool = True,
+    label: str | None = None,
+    legend: bool | None = None,
+    xlim: tuple[float, float] | None = None,
+    ylim: tuple[float, float] | None = None,
+    ax: Any | None = None,
+    title: str | None = None,
+    show: bool = False,
+) -> tuple[Any, Any] | None:
+    """Plot error-rate curves: BER and FER against Es/N0, and the decoding outcome.
+
+    Panels: the post-FEC bit error rate (solid) and frame error rate
+    (dashed) of each curve, with its pre-FEC bit error rate (dotted) for
+    reference; and the decoding outcome, the rate of blocks the decoder
+    flagged (detected failures, dashed) and of blocks in error that it
+    reported valid (undetected errors, solid).  A decoder without a
+    success check (``checked`` false) has only undetected errors.  Each
+    curve keeps one color across its lines and panels.
+
+    Parameters
+    ----------
+    curves : ErrorRateCurve or sequence of ErrorRateCurve
+        The curves of :func:`commkit.coding.error_rate_curve`, or built
+        from your own counts.
+    ebn0 : bool, default False
+        Plot against Eb/N0 (per information bit) instead of Es/N0.
+    quantity : {"error_rate", "outcome"}, optional
+        Plot one panel; ``None`` draws both.
+    pre_fec : bool, default True
+        Draw the pre-FEC bit error rate on the error-rate panel.
+    intervals : bool, default True
+        Draw 95 % Clopper-Pearson intervals on the frame error rate, and at
+        points without block errors the interval's upper bound (a
+        down-pointing triangle).  Bit errors within a block are not
+        independent, so the bit error rates get no interval.
+    label : str, optional
+        Legend label for a single curve, instead of its ``label``.
+    legend : bool, optional
+        Show or hide the legend; ``None`` keeps the default (shown).
+    xlim, ylim : tuple of float, optional
+        Limits for a selected panel.
+    ax : matplotlib.axes.Axes or array_like of Axes, optional
+        One axis for a selected panel, or two for both; ``None`` creates a
+        figure.  Curves drawn on the same axes compare codes or decoders.
+    title : str, optional
+        Title of the figure, or of the selected panel.
+    show : bool, default False
+        Call ``plt.show()`` and return ``None``.
+
+    Returns
+    -------
+    (fig, axes) or None
+        The figure and its axes (one axis for a selected panel); ``None``
+        with ``show=True``, which shows the figure instead.
+
+    Raises
+    ------
+    TypeError
+        If ``curves`` holds anything but
+        :class:`~commkit.coding.ErrorRateCurve` objects.
+    ValueError
+        If ``curves`` is empty, or ``label`` is given with several curves.
+
+    Notes
+    -----
+    Rates of zero are left out of the logarithmic axes.
+    """
+    from scipy import stats
+
+    from ..coding import ErrorRateCurve
+
+    panels = _select(quantity, ("error_rate", "outcome"), xlim=xlim, ylim=ylim)
+    items = [curves] if isinstance(curves, ErrorRateCurve) else list(curves)
+    if not items:
+        raise ValueError("plot_error_rate(): curves is empty.")
+    for c in items:
+        if not isinstance(c, ErrorRateCurve):
+            raise TypeError(
+                "plot_error_rate(): curves must be ErrorRateCurve objects, got "
+                f"{type(c).__name__}; measure one with "
+                "commkit.coding.error_rate_curve()."
+            )
+    if label is not None and len(items) > 1:
+        raise ValueError("plot_error_rate(): label names a single curve.")
+    logger.debug("Generating error-rate plot (%d curve(s)).", len(items))
+
+    fig, grid = _panel_grid(ax, 1, len(panels))
+    axes = grid[0]
+
+    def positive(rate: np.ndarray) -> np.ndarray:
+        """Rates with zeros masked, for logarithmic axes."""
+        return np.where(rate > 0, rate, np.nan)
+
+    # Named curves get one legend entry each (their color) and a gray key to
+    # the line styles; a single unnamed curve labels its lines directly.
+    names = [label if label is not None else (c.label or None) for c in items]
+    keyed = len(items) > 1 or names[0] is not None
+    styles = {
+        "error_rate": [("o-", "BER"), ("s--", "FER")]
+        + ([(":", "pre-FEC BER")] if pre_fec else []),
+        "outcome": [("o-", "undetected errors")]
+        + ([("s--", "detected failures")] if any(c.checked for c in items) else []),
+    }
+    alpha = 1.0 - _CONFIDENCE
+    for c, name in zip(items, names, strict=True):
+        x = c.ebn0_db if ebn0 else c.esn0_db
+        rates = {
+            "error_rate": [c.ber, c.fer] + ([c.pre_fec_ber] if pre_fec else []),
+            "outcome": [c.undetected_errors / c.num_blocks]
+            + ([c.detected_failures / c.num_blocks] if c.checked else []),
+        }
+        color = None
+        for panel in panels:
+            a = axes[panels.index(panel)]
+            for i, ((fmt, what), rate) in enumerate(
+                zip(styles[panel], rates[panel], strict=False)
+            ):
+                entry = ((name or "curve") if i == 0 else None) if keyed else what
+                (line,) = a.semilogy(x, positive(rate), fmt, color=color, label=entry)
+                color = line.get_color()
+            if panel == "error_rate" and intervals:
+                errors, blocks = c.block_errors, c.num_blocks
+                low = np.where(
+                    errors > 0,
+                    stats.beta.ppf(alpha / 2, errors, blocks - errors + 1),
+                    0,
+                )
+                high = np.where(
+                    errors < blocks,
+                    stats.beta.ppf(1 - alpha / 2, errors + 1, blocks - errors),
+                    1.0,
+                )
+                seen = errors > 0
+                a.errorbar(
+                    x[seen],
+                    c.fer[seen],
+                    yerr=[c.fer[seen] - low[seen], high[seen] - c.fer[seen]],
+                    fmt="none",
+                    ecolor=color,
+                    capsize=3,
+                )
+                a.semilogy(x[~seen], high[~seen], "v", color=color)
+    for panel in panels:
+        a = axes[panels.index(panel)]
+        if keyed:
+            for fmt, what in styles[panel]:
+                a.plot([], [], fmt, color="gray", label=what)
+        a.set_xlabel("Eb/N0 [dB]" if ebn0 else "Es/N0 [dB]")
+        if panel == "error_rate":
+            a.set_ylabel("Error rate")
+            a.set_title("Error rates")
+        else:
+            a.set_ylabel("Fraction of blocks")
+            a.set_title("Decoding outcome")
+        a.legend()
+
+    if title is not None:
+        if quantity is None:
+            fig.suptitle(title)
+        else:
+            axes[0].set_title(title)
+    output_axes = axes if quantity is None else axes[0]
+    return _finish((fig, output_axes), show, xlim=xlim, ylim=ylim, legend=legend)
 
 
 def plot_llr_distribution(
@@ -64,11 +271,16 @@ def plot_llr_distribution(
 
     Parameters
     ----------
-    llrs : array_like
+    llrs : array_like or DecodeResult
         Real LLRs, ``(N,)`` or ``(C, N)``, positive for bit 0, as
-        :func:`commkit.mapping.compute_llr` returns.
-    bits : array_like
-        The transmitted bits, 0 or 1, of the same shape.
+        :func:`commkit.mapping.compute_llr` returns, or a
+        :class:`~commkit.coding.DecodeResult` whose a-posteriori LLRs of
+        the transmitted bits are drawn.
+    bits : array_like, Signal or Reference
+        The transmitted bits, 0 or 1, of the same shape.  With a
+        DecodeResult also the transmitted Signal or its
+        :class:`~commkit.core.Reference`, whose ``bits`` (the bits on the
+        air, without the filler after the last whole block) are used.
     bits_per_symbol : int, optional
         Bits per symbol label: the consistency panel then draws one curve per
         bit position of the label, which differ for the levels of a QAM
@@ -104,7 +316,9 @@ def plot_llr_distribution(
     ------
     ValueError
         If the shapes differ, ``bits`` holds values other than 0 and 1 or
-        only one of them, or ``N`` is not a multiple of ``bits_per_symbol``.
+        only one of them, ``N`` is not a multiple of ``bits_per_symbol``, or
+        a DecodeResult has no LLRs (a hard-output decoder) or comes without
+        a reference.
     TypeError
         If ``llrs`` is complex or ``bits`` is not integer or bool.
 
@@ -117,6 +331,7 @@ def plot_llr_distribution(
     panels = _select(
         quantity, ("density", "consistency"), label=label, xlim=xlim, ylim=ylim
     )
+    llrs, bits = _decoded_llrs(llrs, bits)
     x, xp, _ = dispatch(validate_array(llrs, name="llrs"))
     b = validate_array(bits, name="bits")
     if xp.iscomplexobj(x):

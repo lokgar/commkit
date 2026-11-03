@@ -119,7 +119,7 @@ Dependencies point downward only:
   - What the channel adds (AWGN, phase noise, ASE) is drawn on the data's device through `_random.standard_normal` / `complex_normal`; realizations differ between devices, statistics agree.
   - A seed is reproducible within a library version only. Tests and baselines assert statistics, never exact realizations.
 - **Device follows the data.** No `backend=` arguments, no global switches. Unsupported array types (JAX, PyTorch) raise `TypeError`.
-  - Only factories with no input data to follow take `device: str = "cpu"` (never "GPU if available"): `generate`, `generate_phase_noise`, `Preamble`/`SingleCarrierFrame.to_signal`, `load_npz`, `decoder_exit_curve`, `demapper_exit_curve`. They validate it with `require_device()` (in `coding`, by the same check in `coding.exit`), draw randomness as above and do the vectorized work on `device`.
+  - Only factories with no input data to follow take `device: str = "cpu"` (never "GPU if available"): `generate`, `generate_phase_noise`, `Preamble`/`SingleCarrierFrame.to_signal`, `load_npz`, `decoder_exit_curve`, `demapper_exit_curve`, `error_rate_curve`. They validate it with `require_device()` (in `coding`, by the same check in `coding.exit`), draw randomness as above and do the vectorized work on `device`.
 
 ### Returns
 
@@ -203,7 +203,7 @@ Docstrings describe the code as it is; a change in behavior updates them in the 
 | Algebraic decoding (BCH, Reed-Solomon): Berlekamp-Massey, Chien search to the locator's degree, Forney | CPU: Numba `parallel=True` over codewords. GPU: `algebraic_correct`, one thread per codeword in integer table arithmetic, so both agree exactly (a lockstep CuPy version was 12x slower) | follows the input |
 | Layered LDPC belief propagation (min-sum, sum-product) | CPU: Numba `parallel=True` over codewords, all iterations inside, no fast-math. GPU: `ldpc_layered`, one block per codeword, rows of a layer in parallel, early stop per codeword; same row order, so min-sum agrees bit for bit (a CuPy version was 7-23x slower) | follows the input |
 | Maximum-likelihood decoding: the correlation with all `2^k` codewords, the decision and the per-bit maxima of the max-log soft output | CPU: one Numba pass, `parallel=True` over rows, branch-free selects under fast-math without the no-NaN and no-Inf flags (a GEMM then a separate pass ran 3x slower, its threads competing with BLAS's). GPU: the GEMM per chunk, the per-bit maxima by a CuPy `ReductionKernel` that broadcasts over the codewords instead of building `(rows, codewords, n)` | follows the input |
-| Monte Carlo analysis (EXIT curves) | the existing decoders and vectorized NumPy/CuPy; closed-form parts are host NumPy on small grids. No kernel of its own | follows `device` |
+| Monte Carlo analysis (EXIT curves, error-rate curves) | the existing encoders, decoders and demapper and vectorized NumPy/CuPy, through the private block functions (no INFO line per batch); closed-form parts are host NumPy on small grids. No kernel of its own | follows `device` |
 | Elementwise chains between multi-core FFTs (fiber solver's Kerr and PMD stages) | NumPy: a Numba `parallel=True` pass competes with `scipy.fft`'s threads and measured slower end to end; adopt one only on a paired end-to-end A/B | CPU |
 | Other hot spots limited by intermediates, launches or round trips | CUDA C++ via CuPy `RawModule` (`commkit/_cuda/src`) | GPU |
 
@@ -335,6 +335,10 @@ Steps, each its own commit (the version switch first, then each refactor):
       - Notebooks 07, 08 and 21 replace their hand-rolled loops.
 2. **oFEC** (OpenROADM, ITU-T G.709.3) is not implemented: its block structure is specified in OpenROADM MSA documents that were not available in a form to implement from. It would build on `BCHCode` (extended BCH(256, 239)), soft-output `Chase` and the staircase decoder's windowed iteration.
 3. **NR rate matching for polar codes** (sub-block interleaving, circular buffer, puncturing and shortening with their frozen-set rules, parity-check bits) and **LTE rate matching for turbo codes** are not included: `PolarCode` and `TurboCode` are the mother codes; `Punctured` and `Shortened` cover generic rate matching.
+
+### Real-valued channels
+
+- **`apply_awgn` and `compute_llr` disagree on real constellations.** `apply_awgn` gives real samples real noise of the full variance `σ²`, while `compute_llr` / `Constellation.llr` score `-|d|²/σ²`, the circular-noise model whose real part carries `σ²/2`. PAM LLRs computed with the `noise_var` that `apply_awgn` used are twice too confident, in any IM/DD link built from the two (notebook 21's PAM4 link was, until it moved to `error_rate_curve`). `error_rate_curve` uses the circular model (`N0/2` per real dimension, BPSK `BER = Q(sqrt(2 Es/N0))`). Pick one convention for real symbols, document it in both functions and in the metrics units table, and land it in its own commit with the tests' expected values rederived.
 
 ### Test suite
 

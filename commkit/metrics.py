@@ -61,7 +61,8 @@ take the :class:`~commkit.coding.DecodeResult` of
 ``Reference``): ``ber(res, sig)`` compares with ``reference.info_bits``,
 and ``fer(res, sig)`` counts blocks of the code's ``k`` bits.
 :func:`estimate_noise_variance` gives the ``noise_var`` of ``compute_llr``
-and the information rates.
+and the information rates.  :func:`commkit.coding.error_rate_curve`
+measures a code's error rates against Es/N0 by Monte Carlo.
 
 Which scale each metric reads:
 

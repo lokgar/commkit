@@ -41,6 +41,7 @@ _RECURSION = "sequential recursion on the CPU (Numba): one round trip"
 _STATE = "continuation state: host copies"
 _REPORT = "reporting layer: fit on a plot-sized reduction"
 _HOST_VALUE = "host value moved to the data's device"
+_PAYLOAD = "transmitted payload drawn on the host"
 
 # "path/to/module.py::qualname" -> why the transfer is deliberate.
 _DOCUMENTED: dict[str, str] = {
@@ -51,13 +52,15 @@ _DOCUMENTED: dict[str, str] = {
     "backend.py::_device_tables": _HOST_VALUE
     + " (tables of a value object: once per object and device)",
     "coding/convolutional.py::_decode": _RECURSION + " (Viterbi, BCJR)",
+    "coding/exit.py::decoder_exit_curve": _PAYLOAD + " (the codewords' bits)",
+    "coding/exit.py::demapper_exit_curve": _PAYLOAD + " (the labels' bits)",
     "coding/polar.py::_decode": _RECURSION + " (successive-cancellation list decoding)",
     "coding/shaping.py::_dematch_labels": _RECURSION + " (the dematcher)",
     "coding/shaping.py::_encode_ccdm": _RECURSION
     + " (the matcher; generate runs it on the host)",
     "coding/turbo.py::_decode": _RECURSION + " (turbo decoding)",
     "coding/turbo.py::_encode": _RECURSION + " (recursive systematic encoding)",
-    "core/generation.py::generate": "transmitted payload drawn on the host",
+    "core/generation.py::generate": _PAYLOAD,
     "core/signal.py::Reference.to": "explicit device move",
     "core/signal.py::Signal.to": "explicit device move",
     "equalization/_block/_blind.py::_block_fdaf_blind": _HOST_VALUE + " (pilots)",
@@ -74,6 +77,7 @@ _DOCUMENTED: dict[str, str] = {
     "_cuda/__init__.py::_iir_factory.<locals>.launch": _HOST_VALUE
     + " (the IIR state transitions)",
     "metrics.py::_paired": _HOST_VALUE + " (reference symbols)",
+    "coding/performance.py::error_rate_curve": _PAYLOAD + " (per batch of blocks)",
     "recovery/corrections.py::DataAided.__post_init__": "value object: host copy",
     "recovery/corrections.py::_data_aided": _HOST_VALUE + " (reference symbols)",
     "recovery/corrections.py::correct_cycle_slips": _RECURSION,

@@ -16,8 +16,8 @@ package changes no Matplotlib settings.
   :mod:`~commkit.plotting.equalizer`: filters and equalizers.
 - :mod:`~commkit.plotting.sync`: timing, frequency-offset and carrier-phase
   estimates.
-- :mod:`~commkit.plotting.coding`: LLR distributions, parity-check matrices
-  and EXIT charts.
+- :mod:`~commkit.plotting.coding`: error-rate curves, LLR distributions,
+  parity-check matrices and EXIT charts.
 - :mod:`~commkit.plotting.analysis`: drift, Allan deviation and linewidth.
 """
 
@@ -31,7 +31,12 @@ from .analysis import (
     plot_frequency_noise_psd,
     plot_increment_variance,
 )
-from .coding import plot_exit_chart, plot_llr_distribution, plot_parity_check
+from .coding import (
+    plot_error_rate,
+    plot_exit_chart,
+    plot_llr_distribution,
+    plot_parity_check,
+)
 from .constellation import plot_constellation, plot_ideal_constellation
 from .equalizer import (
     plot_equalizer_result,
@@ -63,6 +68,7 @@ __all__ = [
     "plot_constellation",
     "plot_dsh_beat_psd",
     "plot_equalizer_result",
+    "plot_error_rate",
     "plot_exit_chart",
     "plot_eye_diagram",
     "plot_filter_response",

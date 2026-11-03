@@ -27,7 +27,8 @@ permutations: :func:`interleave` and :func:`deinterleave` with an
 :class:`ExitCurve` objects, from :func:`decoder_exit_curve` (any soft-output
 decoder), :func:`demapper_exit_curve` (iterative demapping) or
 :func:`ldpc_exit_curves` (LDPC nodes, closed form, with
-:func:`ldpc_threshold`).
+:func:`ldpc_threshold`).  Error rates over AWGN: :func:`error_rate_curve`,
+an :class:`ErrorRateCurve` of counts by Monte Carlo.
 """
 
 from .algebraic import BCHCode, BerlekampMassey, ReedSolomonCode
@@ -46,6 +47,7 @@ from .exit import (
 from .interleaving import Interleaver, deinterleave, interleave
 from .ldpc import LDPCCode, MinSum, SumProduct
 from .linear import Chase, LinearBlockCode, MaximumLikelihood, Syndrome
+from .performance import ErrorRateCurve, error_rate_curve
 from .polar import SC, SCL, PolarCode
 from .product import Concatenated, HardIterations, Stages, StaircaseCode
 from .ratematch import Punctured, Shortened
@@ -62,6 +64,7 @@ __all__ = [
     "Concatenated",
     "ConvolutionalCode",
     "DecodeResult",
+    "ErrorRateCurve",
     "ExitChart",
     "ExitCurve",
     "HardIterations",
@@ -87,6 +90,7 @@ __all__ = [
     "decode",
     "deinterleave",
     "encode",
+    "error_rate_curve",
     "decoder_exit_curve",
     "demapper_exit_curve",
     "exit_chart",
