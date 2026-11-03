@@ -4,6 +4,8 @@ Notable changes to CommKit, newest first. Performance figures are from the refer
 
 ## [Unreleased]
 
+## [3.4.0] - 2026-11-03
+
 Error-rate curves for every code, decoders that say what they checked, and one noise convention for real and complex samples.
 
 ### Changes that may need code updates
@@ -21,12 +23,18 @@ Error-rate curves for every code, decoders that say what they checked, and one n
 - `Chase(..., soft=False)` and `MaximumLikelihood(soft=False)` skip the soft output when only the decisions matter (`llrs` is `None`, the bits are the same).
 - `compute_llr`, `mi`, `gmi` and `ngmi` take `esn0_db=` instead of `noise_var`, and convert it for real or complex symbols.
 - `plot_llr_distribution(res, sig)` takes a `DecodeResult` and the transmitted Signal or Reference, as `ber` does.
+- The example notebooks draw with the library's plot functions wherever one exists, and show spectra, constellations and eye diagrams before and after each block. Notebook 06 explains Es/N0, SNR and noise variance for real and complex samples; notebook 07 measures error-rate curves and the decoding outcome, compares the polar, convolutional and turbo codes against Eb/N0 and the turbo code at three block sizes; notebook 21 charts the optical standards' thresholds against their overhead.
 
 ### Performance
 
 - `MaximumLikelihood` searches the codewords in one Numba pass on the CPU. For 16384 Hamming(16, 11) words (paired A/B against 3.3.0, 7 runs), decisions alone (`soft=False`) take 0.62x the time on the CPU and 1.0x on the GPU; with the new soft output, 1.55x and 4.3x.
 - `Chase(soft=False)`: 0.44x the time of the default on the CPU and 0.74x on the GPU (400ZR Hamming(128, 119), 4 test positions, 4096 words).
 - Turbo decoding is unchanged (1.00), now with its soft output.
+
+### Development
+
+- `metrics` is a package (`quality`, `error_rates`, `information`); every name is still imported from `commkit.metrics`.
+- The transfer audit lists the payload moves of the EXIT and error-rate curves, which it flagged as undocumented; the kernel-coverage job runs the maximum-likelihood tests.
 
 ## [3.3.0] - 2026-11-03
 
@@ -387,7 +395,8 @@ See the [GitHub release](https://github.com/lokgar/commkit/releases/tag/v1.1.0) 
 
 First release. See the [GitHub release](https://github.com/lokgar/commkit/releases/tag/v1.0.0).
 
-[Unreleased]: https://github.com/lokgar/commkit/compare/v3.3.0...HEAD
+[Unreleased]: https://github.com/lokgar/commkit/compare/v3.4.0...HEAD
+[3.4.0]: https://github.com/lokgar/commkit/compare/v3.3.0...v3.4.0
 [3.3.0]: https://github.com/lokgar/commkit/compare/v3.2.1...v3.3.0
 [3.2.1]: https://github.com/lokgar/commkit/compare/v3.2.0...v3.2.1
 [3.2.0]: https://github.com/lokgar/commkit/compare/v3.1.3...v3.2.0
