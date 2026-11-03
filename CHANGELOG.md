@@ -4,6 +4,10 @@ Notable changes to CommKit, newest first. Performance figures are from the refer
 
 ## [Unreleased]
 
+## [3.3.0] - 2026-11-03
+
+Numerical filter responses and plots built for comparisons. `filter_response`, `impulse_response` and `step_response` evaluate any FIR, SOS or `(b, a)` filter on its device; the multi-panel diagnostics draw one selected panel, and every plot can overlay several results on one axis. The example notebooks explain what each result shows.
+
 ### Changes that may need code updates
 
 - `plot_filter_response` raises `ValueError` when `ax` holds other than four axes for the dashboard (or one for a selected `quantity=`), as the other multi-panel plots do; it used to log a warning and open a new figure. Pass the right number of axes, or none.
@@ -13,6 +17,12 @@ Notable changes to CommKit, newest first. Performance figures are from the refer
 - `filter_response` (returning a `FilterResponse` of frequencies, complex response and group delay), `impulse_response` and `step_response` compute the responses of FIR taps, second-order sections or a `(b, a)` pair on the coefficients' device. The group delay of SOS filters is summed section by section, so high orders keep their accuracy; real IIR time responses run through `iir_filter`, in double-precision state whatever the coefficients' precision.
 - Multi-panel diagnostics (`plot_filter_response`, `plot_equalizer_result`, `plot_zf_equalizer_response`, `plot_llr_distribution`, `plot_parity_check`, `plot_timing_correlation`, `plot_mm_autocorrelation`, `plot_frequency_offset_blockwise_result`, `plot_pilot_phase_estimate`, `plot_pilot_tone_phase_estimate`, `plot_pilot_tones_phase_estimate`) take `quantity=` to draw one panel on one axis.
 - Comparisons on one axis: the single-panel plots and a selected `quantity=` take `label=`, `xlim=`, `ylim=` and `legend=` (`True` shows, `False` hides, `None` keeps the plot's default), and the plots with fits, guides or markers take `annotations=False` to draw only the measured curves of an overlay. `plot_eye_diagram(quantity="i" | "q")` draws one component; `plot_carrier_phase_characterization` accepts existing axes.
+- The example notebooks explain what each receiver result shows, their subplot grids scale the theme's figure size, and notebooks 13 and 16 overlay filter, smoothing, shaping and equalizer comparisons on one axis.
+
+### Development
+
+- The transfer audit documents the Tikhonov smoother's host round trip, which it flagged as undocumented.
+- `bench_filter_response` times responses on the DFT grid and on an arbitrary grid at 31, 257 and 4097 taps.
 
 ## [3.2.1] - 2026-11-02
 
@@ -353,7 +363,8 @@ See the [GitHub release](https://github.com/lokgar/commkit/releases/tag/v1.1.0) 
 
 First release. See the [GitHub release](https://github.com/lokgar/commkit/releases/tag/v1.0.0).
 
-[Unreleased]: https://github.com/lokgar/commkit/compare/v3.2.1...HEAD
+[Unreleased]: https://github.com/lokgar/commkit/compare/v3.3.0...HEAD
+[3.3.0]: https://github.com/lokgar/commkit/compare/v3.2.1...v3.3.0
 [3.2.1]: https://github.com/lokgar/commkit/compare/v3.2.0...v3.2.1
 [3.2.0]: https://github.com/lokgar/commkit/compare/v3.1.3...v3.2.0
 [3.1.3]: https://github.com/lokgar/commkit/compare/v3.1.2...v3.1.3
