@@ -1,22 +1,23 @@
 """Filter responses: :func:`plot_filter_response`.
 
-Plots the impulse, frequency and group-delay response of a filter in any of
-the forms the library designs: FIR taps (``RRC(0.1).taps(sps)``,
-:func:`~commkit.filtering.fir_taps`, ...), a ``(b, a)`` transfer function, or
-second-order sections (:func:`commkit.filtering.butterworth_sos` and the
-other ``*_sos`` designs).  The smoothers of :mod:`commkit.smoothing` have no
-meaningful frequency response and are not plotted here.
+Plots the impulse, step, magnitude, phase and group-delay responses of a
+filter in any of the forms the library designs: FIR taps
+(``RRC(0.1).taps(sps)``, :func:`~commkit.filtering.fir_taps`, ...), a
+``(b, a)`` transfer function, or second-order sections
+(:func:`commkit.filtering.butterworth_sos` and the other ``*_sos`` designs).
+The responses come from :func:`~commkit.filtering.filter_response`,
+:func:`~commkit.filtering.impulse_response` and
+:func:`~commkit.filtering.step_response`.
 """
 
 from typing import Any
 
-import matplotlib.pyplot as plt
 import matplotlib.ticker as ticker
 import numpy as np
 
 from ..backend import dispatch, to_device
-from ..logger import logger
-from .theme import _grid_figsize, _set_eng_formatter
+from ..filtering import filter_response, impulse_response, step_response
+from .theme import _finish, _panel_grid, _select, _set_eng_formatter
 
 __all__ = ["plot_filter_response"]
 
@@ -28,190 +29,156 @@ def plot_filter_response(
     sampling_rate: float | None = None,
     ax: Any | None = None,
     num_impulse_samples: int = 500,
+    quantity: str | None = None,
+    nfft: int = 2048,
+    frequencies: Any | None = None,
+    label: str | None = None,
+    legend: bool | None = None,
+    title: str | None = None,
+    xlim: tuple[float, float] | None = None,
+    ylim: tuple[float, float] | None = None,
     show: bool = False,
-) -> tuple[Any, tuple[Any, Any, Any, Any]] | None:
-    """Plot the impulse, magnitude, phase, and group-delay response of a filter.
-
-    Four panels, ``(impulse, magnitude), (phase, group_delay)``, for any of
-    three forms of ``system``:
-
-    * a 1-D array: FIR taps (``b = system``, ``a = [1.0]``), whose impulse
-      response is ``system`` itself;
-    * a 2-D array with a trailing dimension of 6: second-order sections
-      (SOS), as :func:`commkit.filtering.butterworth_sos` and the other
-      ``*_sos`` designs return them and :func:`commkit.filtering.iir_filter`
-      applies them;
-    * a ``(b, a)`` pair: a general IIR transfer function.
-
-    The impulse response of the SOS and IIR forms is infinite: it is drawn
-    as the response to a unit impulse of length ``num_impulse_samples``, truncated
-    there.
+) -> tuple[Any, Any] | None:
+    """Plot a digital filter's response.
 
     Parameters
     ----------
     system : array_like or (b, a) tuple
-        Filter representation, see above.
+        FIR taps, second-order sections, or transfer coefficients.
     sps : float, default 1.0
-        Samples per symbol, which normalizes the time and group-delay axes
-        to symbol periods when ``sampling_rate`` is not given.
+        Samples per symbol, used for time and group delay without a sampling rate.
     sampling_rate : float, optional
-        Sampling rate in Hz.  With it the impulse and group-delay axes are in
-        seconds and the frequency axes in Hz (with SI prefixes); without it
-        they are in symbol periods and cycles per sample.
-    ax : array_like of matplotlib.axes.Axes, optional
-        Exactly 4 axes to draw on (a 2x2 array or a flat sequence of 4);
-        any other count logs a warning and creates a new 2x2 figure.
+        Sampling rate in Hz. Without it, frequency is in cycles per sample.
+    ax : matplotlib.axes.Axes or array_like of Axes, optional
+        One axis for a selected quantity; four for the default dashboard.
     num_impulse_samples : int, default 500
-        Length of the drawn impulse response of SOS and IIR input; ignored
-        for FIR taps.
+        Number of samples for IIR impulse and step responses. The default
+        dashboard displays all FIR taps as its impulse response.
+    quantity : {"impulse", "step", "magnitude", "phase", "group_delay"}, optional
+        A single response to plot. ``None`` plots the four-panel dashboard.
+    nfft : int, default 2048
+        Number of points in the frequency response.
+    frequencies : array_like, optional
+        Frequency grid on the system's device, in Hz or cycles per sample.
+        ``None`` uses the uniform ``nfft``-point grid.
+    label : str, optional
+        Label for the plotted response, for comparisons on the same axes.
+    legend : bool, optional
+        Show (``True``) or hide (``False``) the legend; ``None`` keeps the
+        default, a legend only where the plot labels its parts.
+    title : str, optional
+        Title for a single selected quantity; ``None`` uses its default title.
+    xlim, ylim : tuple of float, optional
+        Limits for a single selected quantity, in the displayed axis units.
     show : bool, default False
-        Call ``plt.show()`` and return ``None``.
+        Show the figure and return ``None``.
 
     Returns
     -------
-    (fig, axes) or None
-        The figure and the ``(impulse, magnitude, phase, group_delay)``
-        Axes; ``None`` with ``show=True``, which shows the figure instead.
+    (fig, ax) or None
+        Figure and one axis for a selected quantity, or four axes for the
+        default dashboard; ``None`` with ``show=True``.
     """
-    # --- Detect the filter representation and dispatch on its backend ---
-    if isinstance(system, (tuple, list)) and len(system) == 2:
-        kind = "ba"
-        b_raw, a_raw = system
-        b, xp, sp = dispatch(b_raw)
-        a = xp.asarray(a_raw)
+    _select(
+        quantity,
+        ("impulse", "step", "magnitude", "phase", "group_delay"),
+        title=title,
+        xlim=xlim,
+        ylim=ylim,
+    )
+    if sps <= 0:
+        raise ValueError("sps must be positive")
+    if quantity is None:
+        selected: tuple[str, ...] = ("impulse", "magnitude", "phase", "group_delay")
+        fig, grid = _panel_grid(ax, 2, 2)
     else:
-        arr, xp, sp = dispatch(system)
-        if arr.ndim == 2 and arr.shape[-1] == 6:
-            kind = "sos"
-            sos = arr
-        else:
-            kind = "fir"
-            taps = arr
+        selected = (quantity,)
+        fig, grid = _panel_grid(ax, 1, 1)
+    axes = list(grid.flat)
 
-    if ax is None:
-        logger.debug("Generating filter response plot.")
-        fig, raw_axes = plt.subplots(2, 2, figsize=_grid_figsize(2, 2))
-        ax1, ax2, ax3, ax4 = raw_axes.flat
-    else:
-        flat_ax = list(np.asarray(ax).flat) if hasattr(ax, "__len__") else [ax]
-        if len(flat_ax) == 4:
-            fig = flat_ax[0].figure
-            ax1, ax2, ax3, ax4 = flat_ax
-        else:
-            logger.warning("filter_response requires 4 axes. Creating new figure.")
-            fig, raw_axes = plt.subplots(2, 2, figsize=_grid_figsize(2, 2))
-            ax1, ax2, ax3, ax4 = raw_axes.flat
-
-    # --- 1. Impulse response ---
-    if kind == "fir":
-        h_imp = taps
-        num_imp = len(h_imp)
-        n_axis = xp.arange(num_imp) - (num_imp - 1) / 2  # centered (linear-phase FIR)
-    else:
-        impulse = xp.zeros(num_impulse_samples, dtype=xp.float64)
-        impulse[0] = 1.0
-        h_imp = (
-            sp.signal.sosfilt(sos, impulse)
-            if kind == "sos"
-            else sp.signal.lfilter(b, a, impulse)
+    response = None
+    if any(q in selected for q in ("magnitude", "phase", "group_delay")):
+        response = filter_response(
+            system, nfft=nfft, sampling_rate=sampling_rate, frequencies=frequencies
         )
-        n_axis = xp.arange(num_impulse_samples)  # causal, starts at 0
-
-    if sampling_rate is not None:
-        t = n_axis / float(sampling_rate)
-    else:
-        t = n_axis / sps
-
-    t_cpu = to_device(t, "cpu")
-    h_imp_cpu = to_device(h_imp, "cpu")
-
-    if xp.iscomplexobj(h_imp):
-        ax1.plot(t_cpu, h_imp_cpu.real, label="Real", color="C0")
-        ax1.plot(t_cpu, h_imp_cpu.imag, label="Imag", color="C1")
-        ax1.legend()
-    else:
-        ax1.plot(t_cpu, h_imp_cpu, color="C0")
-
-    ax1.set_title("Impulse Response")
-    if sampling_rate is not None:
-        ax1.set_xlabel("Time [s]")
-        _set_eng_formatter(ax1, "x")
-    else:
-        ax1.set_xlabel("Time [Symbol Periods]")
-        ax1.xaxis.set_major_locator(ticker.MultipleLocator(1))
-
-        def t_formatter(x, pos):
-            """Tick label in symbol periods (``0``, ``2T``, ``0.5T``)."""
-            if np.isclose(x, 0):
-                return "0"
-            return f"{int(x)}T" if float(x).is_integer() else f"{x}T"
-
-        ax1.xaxis.set_major_formatter(ticker.FuncFormatter(t_formatter))
-    ax1.set_ylabel("Amplitude")
-
-    # --- 2/3. Frequency response (magnitude + phase) ---
-    if kind == "fir":
-        w, h_resp = sp.signal.freqz(taps, worN=2048)
-    elif kind == "sos":
-        w, h_resp = sp.signal.sosfreqz(sos, worN=2048)
-    else:
-        w, h_resp = sp.signal.freqz(b, a, worN=2048)
-
-    mag = 20 * xp.log10(xp.abs(h_resp) + 1e-12)
-    angles = xp.unwrap(xp.angle(h_resp))
-
-    if sampling_rate is not None:
-        freqs = w / (2 * xp.pi) * float(sampling_rate)
-        freqs_disp = to_device(freqs, "cpu")
-        freq_label = "Frequency [Hz]"
-    else:
-        freqs_disp = to_device(w / (2 * xp.pi), "cpu")  # cycles/sample
-        freq_label = "Frequency [Cycles/Sample]"
-
-    mag_cpu = to_device(mag, "cpu")
-    angles_cpu = to_device(angles, "cpu")
-
-    ax2.plot(freqs_disp, mag_cpu, color="C2")
-    ax2.set_ylabel("Magnitude [dB]")
-    ax2.set_title("Frequency Response (Magnitude)")
-    ax2.set_xlabel(freq_label)
-    ax2.set_xlim(freqs_disp[0], freqs_disp[-1])
-    if sampling_rate is not None:
-        _set_eng_formatter(ax2, "x")
-
-    ax3.plot(freqs_disp, angles_cpu, color="C3")
-    ax3.set_ylabel("Phase [rad]")
-    ax3.set_title("Frequency Response (Phase)")
-    ax3.set_xlabel(freq_label)
-    ax3.set_xlim(freqs_disp[0], freqs_disp[-1])
-    if sampling_rate is not None:
-        _set_eng_formatter(ax3, "x")
-
-    # --- 4. Group delay ---
-    if kind == "fir":
-        _, gd = sp.signal.group_delay((taps, [1.0]), w=w)
-    elif kind == "sos":
-        b_tf, a_tf = sp.signal.sos2tf(sos)
-        _, gd = sp.signal.group_delay((b_tf, a_tf), w=w)
-    else:
-        _, gd = sp.signal.group_delay((b, a), w=w)
-
-    if sampling_rate is not None:
-        gd_disp = to_device(gd / float(sampling_rate), "cpu")
-        gd_label = "Group Delay [s]"
-    else:
-        gd_disp = to_device(gd / sps, "cpu")
-        gd_label = "Group Delay [Symbol Periods]"
-
-    ax4.plot(freqs_disp, gd_disp, color="C4")
-    ax4.set_ylabel(gd_label)
-    ax4.set_title("Group Delay")
-    ax4.set_xlabel(freq_label)
-    ax4.set_xlim(freqs_disp[0], freqs_disp[-1])
-    if sampling_rate is not None:
-        _set_eng_formatter(ax4, "x")
-
-    if show:
-        plt.show()
-        return None
-    return fig, (ax1, ax2, ax3, ax4)
+    raw = system[0] if isinstance(system, tuple) else system
+    coeff, _, _ = dispatch(raw)
+    is_fir = not isinstance(system, tuple) and coeff.ndim == 1
+    for q, axis in zip(selected, axes, strict=True):
+        if q in ("impulse", "step"):
+            count = (
+                coeff.size
+                if q == "impulse" and is_fir and quantity is None
+                else num_impulse_samples
+            )
+            y = (
+                impulse_response(system, num_samples=count)
+                if q == "impulse"
+                else step_response(system, num_samples=count)
+            )
+            t = np.arange(count, dtype=float)
+            if q == "impulse" and is_fir and quantity is None:
+                t -= (count - 1) / 2
+            t /= sampling_rate if sampling_rate is not None else sps
+            y = to_device(y, "cpu")
+            if np.iscomplexobj(y):
+                axis.plot(t, y.real, label=f"{label} I" if label else "Real")
+                axis.plot(t, y.imag, label=f"{label} Q" if label else "Imag")
+            else:
+                axis.plot(t, y, label=label)
+            axis.set_xlabel(
+                "Time [s]" if sampling_rate is not None else "Time [Symbol Periods]"
+            )
+            axis.set_ylabel("Amplitude")
+            if sampling_rate is not None:
+                _set_eng_formatter(axis, "x")
+            else:
+                axis.xaxis.set_major_locator(ticker.MultipleLocator(1))
+            default_title = "Impulse Response" if q == "impulse" else "Step Response"
+        else:
+            assert response is not None
+            f_host = to_device(response.frequencies, "cpu")
+            h = to_device(response.response, "cpu")
+            if q == "magnitude":
+                y = 20 * np.log10(np.abs(h) + 1e-12)
+                ylabel, default_title = (
+                    "Magnitude [dB]",
+                    "Frequency Response (Magnitude)",
+                )
+            elif q == "phase":
+                y = np.unwrap(np.angle(h).astype(np.float64))
+                ylabel, default_title = "Phase [rad]", "Frequency Response (Phase)"
+            else:
+                y = to_device(response.group_delay, "cpu")
+                if sampling_rate is None:
+                    y = y / sps
+                ylabel = (
+                    "Group Delay [s]"
+                    if sampling_rate is not None
+                    else "Group Delay [Symbol Periods]"
+                )
+                default_title = "Group Delay"
+            axis.plot(f_host, y, label=label)
+            if quantity is None:
+                axis.set_xlim(f_host[0], f_host[-1])
+            axis.set_xlabel(
+                "Frequency [Hz]"
+                if sampling_rate is not None
+                else "Frequency [Cycles/Sample]"
+            )
+            axis.set_ylabel(ylabel)
+            if sampling_rate is not None:
+                _set_eng_formatter(axis, "x")
+        axis.set_title(title if title is not None else default_title)
+        if xlim is not None:
+            axis.set_xlim(xlim)
+        if ylim is not None:
+            axis.set_ylim(ylim)
+        if legend or (
+            legend is None
+            and quantity is None
+            and q == "impulse"
+            and np.iscomplexobj(y)
+        ):
+            axis.legend()
+    return _finish((fig, tuple(axes) if quantity is None else axes[0]), show)

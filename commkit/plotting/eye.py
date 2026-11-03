@@ -10,7 +10,7 @@ from ..backend import dispatch, to_device
 from ..core._signal_adapter import adapt_signal, require_integer_sps
 from ..logger import logger
 from ..smoothing import smooth_density_2d
-from .theme import _grid_figsize
+from .theme import _finish, _grid_figsize
 
 __all__ = ["plot_eye_diagram"]
 
@@ -186,9 +186,12 @@ def plot_eye_diagram(
     ax: Any | tuple[Any, Any] | None = None,
     num_symbols: int = 2,
     kind: str = "hist",
+    quantity: str | None = None,
     title: str | None = "Eye Diagram",
     vmin: float | None = None,
     vmax: float | None = None,
+    xlim: tuple[float, float] | None = None,
+    ylim: tuple[float, float] | None = None,
     show: bool = False,
     **kwargs: Any,
 ) -> tuple[Any, Any] | None:
@@ -212,10 +215,15 @@ def plot_eye_diagram(
     kind : {"hist", "line"}, default "hist"
         ``"hist"``: a 2-D density histogram (recommended for noisy
         signals); ``"line"``: overlaid traces.
+    quantity : {"i", "q"}, optional
+        Draw only the in-phase or quadrature component. ``None`` draws both
+        for complex input; ``"q"`` requires complex input.
     title : str or None, default "Eye Diagram"
         Title of the figure; ``None`` for none.
     vmin, vmax : float, optional
         Color limits for ``kind="hist"``.
+    xlim, ylim : tuple of float, optional
+        Limits applied to the displayed axes.
     show : bool, default False
         Call ``plt.show()`` and return ``None``.
     **kwargs : Any
@@ -234,11 +242,19 @@ def plot_eye_diagram(
     and matched-filter it first.
     """
     signal_adapter = adapt_signal(samples, function_name="plot_eye_diagram()")
-    x = signal_adapter.array
+    x, _, _ = dispatch(signal_adapter.array)
+    if quantity not in (None, "i", "q"):
+        raise ValueError("quantity must be i, q, or None")
+    if quantity == "q" and x.dtype.kind != "c":
+        raise ValueError("quantity='q' requires complex samples")
+    if quantity == "i":
+        x = x.real
+    elif quantity == "q":
+        x = x.imag
     sps = require_integer_sps(
         signal_adapter.resolve_fact("sps", sps), "plot_eye_diagram()"
     )
-    return _plot_eye_diagram(
+    result = _plot_eye_diagram(
         x,
         sps=sps,
         ax=ax,
@@ -247,9 +263,10 @@ def plot_eye_diagram(
         title=title,
         vmin=vmin,
         vmax=vmax,
-        show=show,
+        show=False,
         **kwargs,
     )
+    return _finish(result, show, xlim=xlim, ylim=ylim)
 
 
 def _plot_eye_diagram(

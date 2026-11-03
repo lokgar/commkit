@@ -286,3 +286,14 @@ class TestSpectrogramImage:
         lo, hi, t0, t1 = ax.get_images()[0].get_extent()
         assert 0.99e5 - 1e6 / 128 <= lo and hi <= 2e5 + 1e6 / 128
         assert t0 >= 1e-3 - 1e-3 and t1 <= 4e-3 + 1e-3
+
+
+def test_psd_comparison_legend(xp: Any) -> None:
+    """A PSD overlay can show a legend without Matplotlib calls."""
+    x = xp.ones(256, dtype=xp.float32)
+    fig, ax = plot_psd(x, sampling_rate=1, label="before")
+    _, ax = plot_psd(x, sampling_rate=1, ax=ax, label="after", legend=True)
+    assert [text.get_text() for text in ax.get_legend().get_texts()] == [
+        "before",
+        "after",
+    ]

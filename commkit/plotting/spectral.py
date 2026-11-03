@@ -38,6 +38,8 @@ def plot_psd(
     xlim: tuple[float, float] | None = None,
     ylim: tuple[float, float] | None = None,
     title: str | None = "Power Spectral Density",
+    label: str | None = None,
+    legend: bool | None = None,
     show: bool = False,
     **kwargs: Any,
 ) -> tuple[Any, Any] | None:
@@ -74,6 +76,11 @@ def plot_psd(
         Axis limits (frequency in Hz or wavelength in nm; PSD in dB).
     title : str or None, default "Power Spectral Density"
         Title of the figure; ``None`` for none.
+    label : str, optional
+        Label for the plotted spectrum, for comparisons on one axis.
+    legend : bool, optional
+        Show (``True``) or hide (``False``) the legend; ``None`` keeps the
+        default, a legend only where the plot labels its parts.
     show : bool, default False
         Call ``plt.show()`` and return ``None``.
     **kwargs : Any
@@ -106,6 +113,8 @@ def plot_psd(
         xlim=xlim,
         ylim=ylim,
         title=title,
+        label=label,
+        legend=legend,
         show=show,
         **kwargs,
     )
@@ -158,6 +167,8 @@ def _plot_psd(
     xlim: Any,
     ylim: Any,
     title: Any,
+    label: Any,
+    legend: Any,
     show: Any,
     **kwargs: Any,
 ) -> tuple[Any, Any] | None:
@@ -198,6 +209,8 @@ def _plot_psd(
                 xlim=xlim,
                 ylim=ylim,
                 title=ch_title,
+                label=label,
+                legend=legend,
                 show=False,
                 **kwargs,
             )
@@ -262,7 +275,7 @@ def _plot_psd(
         ax.set_ylim(ylim)
 
     # Add epsilon to avoid log(0) warnings
-    ax.plot(x_values, 10 * np.log10(Pxx + 1e-20), **kwargs)
+    ax.plot(x_values, 10 * np.log10(Pxx + 1e-20), label=label, **kwargs)
     ax.set_xlabel(xlabel)
     ax.set_ylabel("PSD [dB/Hz]")
     if x_axis != "wavelength":
@@ -270,6 +283,8 @@ def _plot_psd(
     if title is not None:
         ax.set_title(title)
 
+    if legend:
+        ax.legend()
     if show:
         plt.show()
         return None

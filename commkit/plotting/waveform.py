@@ -27,6 +27,10 @@ def plot_time_domain(
     max_points: int | None = 10_000,
     ax: Any | None = None,
     title: str | None = "Waveform",
+    label: str | None = None,
+    xlim: tuple[float, float] | None = None,
+    ylim: tuple[float, float] | None = None,
+    legend: bool | None = None,
     show: bool = False,
     **kwargs: Any,
 ) -> tuple[Any, Any] | None:
@@ -60,6 +64,13 @@ def plot_time_domain(
         Axes to draw on; ``None`` creates a figure.
     title : str or None, default "Waveform"
         Title of the figure; ``None`` for none.
+    label : str, optional
+        Curve label, with I and Q suffixes for complex input.
+    xlim, ylim : tuple of float, optional
+        Limits applied to the displayed axes.
+    legend : bool, optional
+        Show (``True``) or hide (``False``) the legend; ``None`` keeps the
+        default, a legend only where the plot labels its parts.
     show : bool, default False
         Call ``plt.show()`` and return ``None``.
     **kwargs : Any
@@ -85,6 +96,10 @@ def plot_time_domain(
         max_points=max_points,
         ax=ax,
         title=title,
+        label=label,
+        xlim=xlim,
+        ylim=ylim,
+        legend=legend,
         show=show,
         **kwargs,
     )
@@ -100,6 +115,10 @@ def _plot_time_domain(
     max_points: int | None,
     ax: Any,
     title: Any,
+    label: Any,
+    xlim: Any,
+    ylim: Any,
+    legend: Any,
     show: Any,
     **kwargs: Any,
 ) -> tuple[Any, Any] | None:
@@ -131,11 +150,15 @@ def _plot_time_domain(
                 max_points=max_points,
                 ax=target_ax,
                 title=ch_title,
+                label=label,
+                xlim=xlim,
+                ylim=ylim,
+                legend=legend,
                 show=False,
                 **kwargs,
             )
 
-        return _finish((fig, axes), show)
+        return _finish((fig, axes), show, xlim=xlim, ylim=ylim)
 
     # --- 1D Logic ---
 
@@ -160,10 +183,13 @@ def _plot_time_domain(
         if xp.iscomplexobj(view)
         else [(None, view)]
     )
-    for label, part in parts:
+    for component, part in parts:
         t, y = _envelope(part, sampling_rate, max_points, xp)
-        ax.plot(t, y, label=label, **kwargs)
-    if len(parts) > 1:
+        line_label = (
+            f"{label} {component}" if label and component else (label or component)
+        )
+        ax.plot(t, y, label=line_label, **kwargs)
+    if legend or (legend is None and len(parts) > 1):
         ax.legend()
     ax.set_xlabel("Time [s]")
     ax.set_ylabel("Amplitude")
@@ -171,7 +197,7 @@ def _plot_time_domain(
     if title is not None:
         ax.set_title(title)
 
-    return _finish((fig, ax), show)
+    return _finish((fig, ax), show, xlim=xlim, ylim=ylim)
 
 
 def _envelope(

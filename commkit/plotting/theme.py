@@ -94,12 +94,83 @@ def _get_axis(ax):
     return fig, axi
 
 
-def _finish(result, show: bool):
+def _select(quantity, choices, **single_only) -> tuple[str, ...]:
+    """Panels a multi-panel plot draws: all ``choices``, or the one ``quantity``.
+
+    Raises ``ValueError`` for a ``quantity`` not in ``choices``, and for an
+    option in ``single_only`` (a label, limits, a title of one panel) given
+    while every panel is drawn.
+    """
+    if quantity is None:
+        given = [name for name, value in single_only.items() if value is not None]
+        if given:
+            raise ValueError(f"{', '.join(given)} require a selected quantity")
+        return tuple(choices)
+    if quantity not in choices:
+        raise ValueError(
+            f"quantity must be one of {', '.join(choices)} or None, got {quantity!r}"
+        )
+    return (quantity,)
+
+
+def _panel_grid(ax, rows: int, cols: int):
+    """Return ``(fig, axes)``, ``axes`` a ``(rows, cols)`` object array.
+
+    With ``ax=None`` a new figure: one Axes at the theme's default size for a
+    single panel, otherwise a grid sized by :func:`_grid_figsize`.  Given axes
+    are reshaped to ``(rows, cols)``; they must be that many, of one figure.
+    """
+    if ax is None:
+        if rows * cols == 1:
+            fig, single = plt.subplots()
+            return fig, np.asarray([[single]], dtype=object)
+        fig, grid = plt.subplots(
+            rows, cols, figsize=_grid_figsize(rows, cols), squeeze=False
+        )
+        return fig, np.asarray(grid, dtype=object)
+    axes = np.asarray(ax, dtype=object)
+    if axes.size != rows * cols:
+        raise ValueError(f"ax must contain {rows * cols} axes, got {axes.size}")
+    axes = axes.reshape(rows, cols)
+    fig = axes.flat[0].figure
+    if any(axis.figure is not fig for axis in axes.flat):
+        raise ValueError("ax must contain axes from one figure")
+    return fig, axes
+
+
+def _series_label(label, part=None, default=None):
+    """Legend entry of one curve: ``label`` prefixed to ``part``.
+
+    ``part`` names the curve within the plot (a channel, a bit, a tap) and
+    ``default`` stands in when there is neither a label nor a part.
+    """
+    if label:
+        return f"{label} {part}" if part else label
+    return part or default
+
+
+def _finish(result, show: bool, *, xlim=None, ylim=None, legend=None):
     """Show-or-return: call ``plt.show()`` and return ``None``, or return ``result``.
 
     ``result`` is whatever the caller wants returned when ``show=False``
-    (typically ``(fig, axi)`` or ``(fig, axes)``).
+    (typically ``(fig, axi)`` or ``(fig, axes)``).  ``xlim`` and ``ylim``
+    apply to every returned Axes; ``legend=True`` draws a legend on each
+    Axes with labeled artists, ``False`` removes them, ``None`` keeps what
+    the plot drew.
     """
+    if xlim is not None or ylim is not None or legend is not None:
+        axes = np.asarray(result[1], dtype=object).reshape(-1)
+        for ax in axes:
+            if xlim is not None:
+                ax.set_xlim(xlim)
+            if ylim is not None:
+                ax.set_ylim(ylim)
+            if legend is True:
+                handles, labels = ax.get_legend_handles_labels()
+                if handles:
+                    ax.legend(handles, labels)
+            elif legend is False and ax.get_legend() is not None:
+                ax.get_legend().remove()
     if show:
         plt.show()
         return None

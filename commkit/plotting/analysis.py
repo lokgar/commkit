@@ -6,7 +6,6 @@ Each plot takes the result it draws: a ``FrequencyDrift``, an
 
 from typing import Any
 
-import matplotlib.pyplot as plt
 import numpy as np
 
 from ..backend import to_device
@@ -15,7 +14,8 @@ from .theme import (
     _as_channels,
     _finish,
     _get_axis,
-    _grid_figsize,
+    _panel_grid,
+    _series_label,
     _set_eng_formatter,
 )
 
@@ -45,6 +45,10 @@ def plot_frequency_drift(
     sampling_rate: float,
     amp_ref: float | None = None,
     ax=None,
+    label: str | None = None,
+    xlim: tuple[float, float] | None = None,
+    ylim: tuple[float, float] | None = None,
+    legend: bool | None = None,
     show: bool = False,
     title: str = "Residual frequency drift",
 ) -> tuple[Any, Any] | None:
@@ -66,6 +70,12 @@ def plot_frequency_drift(
         amplitude injected in a simulation).
     ax : matplotlib.axes.Axes, optional
         Axes to draw on; ``None`` creates a figure.
+    label : str, optional
+        Label for the plotted data, prefixed to channel names when needed.
+    xlim, ylim : tuple of float, optional
+        Limits for the displayed axes. ``None`` leaves the limits automatic.
+    legend : bool, optional
+        Show or hide the legend; ``None`` preserves the default.
     show : bool, default False
         Call ``plt.show()`` and return ``None``.
     title : str, default "Residual frequency drift"
@@ -86,7 +96,7 @@ def plot_frequency_drift(
 
     t = np.arange(M) / float(sampling_rate)
     for i in range(C):
-        axi.plot(t, df_c[i], color=f"C{i}", label=f"Pol {i}" if C > 1 else None)
+        axi.plot(t, df_c[i], label=_series_label(label, f"Pol {i}" if C > 1 else None))
 
     if amp_ref is not None:
         axi.axhline(amp_ref, color="white", ls="--", label="±amplitude")
@@ -100,7 +110,7 @@ def plot_frequency_drift(
     if C > 1 or amp_ref is not None:
         axi.legend(loc="best")
 
-    return _finish((fig, axi), show)
+    return _finish((fig, axi), show, xlim=xlim, ylim=ylim, legend=legend)
 
 
 def _log_cell_median(f_pos, s, sel, points_per_octave=24):
@@ -131,6 +141,11 @@ def plot_frequency_noise_psd(
     estimate,
     *,
     ax=None,
+    label: str | None = None,
+    annotations: bool = True,
+    xlim: tuple[float, float] | None = None,
+    ylim: tuple[float, float] | None = None,
+    legend: bool | None = None,
     show: bool = False,
     title: str = "Frequency-noise PSD",
 ) -> tuple[Any, Any] | None:
@@ -163,6 +178,15 @@ def plot_frequency_noise_psd(
         ``BetaSeparation`` or ``DshFmPsd``.
     ax : matplotlib.axes.Axes, optional
         Axes to draw on; ``None`` creates a figure.
+    label : str, optional
+        Label for measured data, prefixed to channel names when needed.
+    annotations : bool, default True
+        Draw the estimate's fit, guides and markers; ``False`` leaves only
+        the measured curves, for overlays.
+    xlim, ylim : tuple of float, optional
+        Limits for the displayed axes. ``None`` leaves the limits automatic.
+    legend : bool, optional
+        Show or hide the legend; ``None`` preserves the default.
     show : bool, default False
         Call ``plt.show()`` and return ``None``.
     title : str, default "Frequency-noise PSD"
@@ -195,100 +219,102 @@ def plot_frequency_noise_psd(
 
     for i in range(C):
         s_i = S_c[i, pos]
-        lbl = f"$S_f$ pol {i}" if C > 1 else "$S_f(f)$"
+        lbl = _series_label(label, f"$S_f$ pol {i}" if C > 1 else None, "$S_f(f)$")
         if dense:
-            axi.loglog(fp, s_i, color=f"C{i}", alpha=0.4)
+            line = axi.loglog(fp, s_i, alpha=0.4)[0]
             fg, sg = _log_cell_median(fp, s_i, np.isfinite(s_i))
-            axi.loglog(fg, sg, color=f"C{i}", label=lbl + " (log-binned)")
+            axi.loglog(fg, sg, color=line.get_color(), label=lbl + " (log-binned)")
         else:
-            axi.loglog(fp, s_i, color=f"C{i}", label=lbl)
+            axi.loglog(fp, s_i, label=lbl)
 
-    b_c = None
-    if beta_line is not None:
-        b_c = np.asarray(to_device(beta_line, "cpu"), dtype=np.float64)
-        axi.loglog(
-            f_c[pos],
-            b_c[pos],
-            color="#ff5555",
-            ls="--",
-            label=r"$\beta$-separation line",
-        )
-
-    if above is not None and b_c is not None:
-        a_c = np.asarray(to_device(above, "cpu"), dtype=bool)
-        if a_c.ndim > 1:
-            a_c = a_c[0]
-        axi.fill_between(
-            f_c[pos],
-            b_c[pos],
-            S_c[0, pos],
-            where=a_c[pos].tolist(),
-            color="#ff5555",
-            alpha=0.4,
-            lw=0,
-            label=r"$\beta$-area (integrated region)",
-        )
-
-    model = getattr(estimate, "S_f_model", None)
-    if model is not None:
-        m_c = _as_channels(model)
-        axi.loglog(fp, m_c[0, pos], color="#ef476f", label="Fitted model")
-
-    used_label = "Fit bins" if model is not None else "Plateau bins (median)"
-    if used is not None:
-        u_c = np.asarray(to_device(used, "cpu"), dtype=bool)
-        if u_c.ndim > 1:
-            u_c = u_c[0]
-        sel = u_c[pos] & np.isfinite(S_c[0, pos])
-        if int(sel.sum()) <= 400:
+    if annotations:
+        b_c = None
+        if beta_line is not None:
+            b_c = np.asarray(to_device(beta_line, "cpu"), dtype=np.float64)
             axi.loglog(
-                fp[sel],
-                S_c[0, pos][sel],
-                ".",
-                color="#06d6a0",
-                ls="none",
-                label=used_label,
+                f_c[pos],
+                b_c[pos],
+                color="#ff5555",
+                ls="--",
+                label=r"$\beta$-separation line",
             )
-        else:
-            # Dense mask: highlight the log-binned median over the accepted
-            # region instead of splattering one marker per bin.
-            fg, sg = _log_cell_median(fp, S_c[0, pos], sel)
-            region = "Fit region" if model is not None else "Plateau (median region)"
-            axi.loglog(fg, sg, color="#06d6a0", label=region)
 
-    if floor is not None:
-        floors = np.atleast_1d(np.asarray(floor, dtype=np.float64))
-        floor_mean = float(np.mean(floors))
-        axi.axhline(
-            floor_mean / np.pi,
-            color="#ffd166",
-            ls=":",
-            label=r"White-FM floor  $\Delta\nu/\pi$",
-        )
-
-    if band is not None:
-        lo = max(float(band[0]), float(fp[0])) if fp.size else float(band[0])
-        if used is None:
-            # With a used-region overlay the span is redundant clutter; keep
-            # the full shading only for fence-defined (manual) bands.
-            axi.axvspan(
-                lo,
-                band[1],
-                color="#06d6a0",
+        if above is not None and b_c is not None:
+            a_c = np.asarray(to_device(above, "cpu"), dtype=bool)
+            if a_c.ndim > 1:
+                a_c = a_c[0]
+            axi.fill_between(
+                f_c[pos],
+                b_c[pos],
+                S_c[0, pos],
+                where=a_c[pos].tolist(),
+                color="#ff5555",
                 alpha=0.4,
-                label="Analysis band [f_min, f_max]",
+                lw=0,
+                label=r"$\beta$-area (integrated region)",
             )
-        for edge in (lo, float(band[1])):
-            axi.axvline(edge, color="#06d6a0")
+
+        model = getattr(estimate, "S_f_model", None)
+        if model is not None:
+            m_c = _as_channels(model)
+            axi.loglog(fp, m_c[0, pos], color="#ef476f", label="Fitted model")
+
+        used_label = "Fit bins" if model is not None else "Plateau bins (median)"
+        if used is not None:
+            u_c = np.asarray(to_device(used, "cpu"), dtype=bool)
+            if u_c.ndim > 1:
+                u_c = u_c[0]
+            sel = u_c[pos] & np.isfinite(S_c[0, pos])
+            if int(sel.sum()) <= 400:
+                axi.loglog(
+                    fp[sel],
+                    S_c[0, pos][sel],
+                    ".",
+                    color="#06d6a0",
+                    ls="none",
+                    label=used_label,
+                )
+            else:
+                # Dense mask: highlight the log-binned median over the accepted
+                # region instead of splattering one marker per bin.
+                fg, sg = _log_cell_median(fp, S_c[0, pos], sel)
+                region = (
+                    "Fit region" if model is not None else "Plateau (median region)"
+                )
+                axi.loglog(fg, sg, color="#06d6a0", label=region)
+
+        if floor is not None:
+            floors = np.atleast_1d(np.asarray(floor, dtype=np.float64))
+            floor_mean = float(np.mean(floors))
+            axi.axhline(
+                floor_mean / np.pi,
+                color="#ffd166",
+                ls=":",
+                label=r"White-FM floor  $\Delta\nu/\pi$",
+            )
+
+        if band is not None:
+            lo = max(float(band[0]), float(fp[0])) if fp.size else float(band[0])
+            if used is None:
+                # With a used-region overlay the span is redundant clutter; keep
+                # the full shading only for fence-defined (manual) bands.
+                axi.axvspan(
+                    lo,
+                    band[1],
+                    color="#06d6a0",
+                    alpha=0.4,
+                    label="Analysis band [f_min, f_max]",
+                )
+            for edge in (lo, float(band[1])):
+                axi.axvline(edge, color="#06d6a0")
 
     _set_eng_formatter(axi, "x")
     axi.set_xlabel("Frequency [Hz]")
     axi.set_ylabel("$S_f$ [Hz²/Hz]")
     axi.set_title(title)
     axi.legend(loc="best")
-    axi.grid(True, which="both")
 
-    return _finish((fig, axi), show)
+    return _finish((fig, axi), show, xlim=xlim, ylim=ylim, legend=legend)
 
 
 def plot_allan_deviation(
@@ -296,6 +322,10 @@ def plot_allan_deviation(
     *,
     reference_slopes: bool = True,
     ax=None,
+    label: str | None = None,
+    xlim: tuple[float, float] | None = None,
+    ylim: tuple[float, float] | None = None,
+    legend: bool | None = None,
     show: bool = False,
     title: str = "Allan deviation",
 ) -> tuple[Any, Any] | None:
@@ -314,6 +344,12 @@ def plot_allan_deviation(
         Overlay a faint ``τ^(-1/2)`` (white-FM) guide line.
     ax : matplotlib.axes.Axes, optional
         Axes to draw on; ``None`` creates a figure.
+    label : str, optional
+        Label for the plotted data, prefixed to channel names when needed.
+    xlim, ylim : tuple of float, optional
+        Limits for the displayed axes. ``None`` leaves the limits automatic.
+    legend : bool, optional
+        Show or hide the legend; ``None`` preserves the default.
     show : bool, default False
         Call ``plt.show()`` and return ``None``.
     title : str, default "Allan deviation"
@@ -337,8 +373,9 @@ def plot_allan_deviation(
             tau,
             adv[i],
             "o-",
-            color=f"C{i}",
-            label=f"Pol {i}" if C > 1 else r"$\sigma_y(\tau)$",
+            label=_series_label(
+                label, f"Pol {i}" if C > 1 else None, r"$\sigma_y(\tau)$"
+            ),
         )
 
     if reference_slopes:
@@ -360,15 +397,19 @@ def plot_allan_deviation(
     axi.set_ylabel(r"Allan Deviation $\sigma_y(\tau)$ [Hz]")
     axi.set_title(title)
     axi.legend(loc="best")
-    axi.grid(True, which="both")
 
-    return _finish((fig, axi), show)
+    return _finish((fig, axi), show, xlim=xlim, ylim=ylim, legend=legend)
 
 
 def plot_increment_variance(
     estimate,
     *,
     ax=None,
+    label: str | None = None,
+    annotations: bool = True,
+    xlim: tuple[float, float] | None = None,
+    ylim: tuple[float, float] | None = None,
+    legend: bool | None = None,
     show: bool = False,
     title: str = "Phase-increment variance",
 ) -> tuple[Any, Any] | None:
@@ -386,6 +427,15 @@ def plot_increment_variance(
         ``IncrementSlope``, ``IncrementSubtract`` or ``DshIncrement``.
     ax : matplotlib.axes.Axes, optional
         Axes to draw on; ``None`` creates a figure.
+    label : str, optional
+        Label for measured data, prefixed to channel names when needed.
+    annotations : bool, default True
+        Draw the estimate's fit, guides and markers; ``False`` leaves only
+        the measured curves, for overlays.
+    xlim, ylim : tuple of float, optional
+        Limits for the displayed axes. ``None`` leaves the limits automatic.
+    legend : bool, optional
+        Show or hide the legend; ``None`` preserves the default.
     show : bool, default False
         Call ``plt.show()`` and return ``None``.
     title : str, default "Phase-increment variance"
@@ -407,15 +457,14 @@ def plot_increment_variance(
 
     fig, axi = _get_axis(ax)
 
+    colors = []
     for i in range(C):
-        axi.plot(
-            lag,
-            v[i],
-            "o",
-            color=f"C{i}",
-            label=f"Measured pol {i}" if C > 1 else "Measured",
+        curve_label = _series_label(
+            label, f"Measured pol {i}" if C > 1 else None, "Measured"
         )
-    if slope is not None and intercept is not None:
+        line = axi.plot(lag, v[i], "o", label=curve_label)[0]
+        colors.append(line.get_color())
+    if annotations and slope is not None and intercept is not None:
         sl = np.atleast_1d(np.asarray(to_device(slope, "cpu"), dtype=np.float64))
         ic = np.atleast_1d(np.asarray(to_device(intercept, "cpu"), dtype=np.float64))
         for i in range(C):
@@ -423,7 +472,7 @@ def plot_increment_variance(
                 lag,
                 sl[min(i, sl.size - 1)] * lag + ic[min(i, ic.size - 1)],
                 "-",
-                color=f"C{i}",
+                color=colors[i],
                 alpha=0.4,
                 label="Fit" if i == 0 else None,
             )
@@ -440,13 +489,18 @@ def plot_increment_variance(
     axi.set_title(title)
     axi.legend(loc="best")
 
-    return _finish((fig, axi), show)
+    return _finish((fig, axi), show, xlim=xlim, ylim=ylim, legend=legend)
 
 
 def plot_dsh_beat_psd(
     estimate,
     *,
     ax=None,
+    label: str | None = None,
+    annotations: bool = True,
+    xlim: tuple[float, float] | None = None,
+    ylim: tuple[float, float] | None = None,
+    legend: bool | None = None,
     show: bool = False,
     title: str = "DSH beat spectrum",
 ) -> tuple[Any, Any] | None:
@@ -463,6 +517,15 @@ def plot_dsh_beat_psd(
         ``DshLorentzian``.
     ax : matplotlib.axes.Axes, optional
         Axes to draw on; ``None`` creates a figure.
+    label : str, optional
+        Label for measured data, prefixed to channel names when needed.
+    annotations : bool, default True
+        Draw the estimate's fit, guides and markers; ``False`` leaves only
+        the measured curves, for overlays.
+    xlim, ylim : tuple of float, optional
+        Limits for the displayed axes. ``None`` leaves the limits automatic.
+    legend : bool, optional
+        Show or hide the legend; ``None`` preserves the default.
     show : bool, default False
         Call ``plt.show()`` and return ``None``.
     title : str, default "DSH beat spectrum"
@@ -492,17 +555,16 @@ def plot_dsh_beat_psd(
         axi.plot(
             f_c - f0,
             p_db,
-            color=f"C{i}",
-            label=f"Pol {i}" if C > 1 else "Beat PSD",
+            label=_series_label(label, f"Pol {i}" if C > 1 else None, "Beat PSD"),
         )
 
-    if linewidth_3db is not None:
+    if annotations and linewidth_3db is not None:
         w3 = 2.0 * float(np.mean(np.atleast_1d(linewidth_3db)))
         axi.axhline(-3.01, color="C1", ls=":")
         axi.axvspan(
             -w3 / 2, w3 / 2, color="C1", alpha=0.4, label=r"FWHM = $2\Delta\nu$"
         )
-    if linewidth is not None:
+    if annotations and linewidth is not None:
         r = 10.0 ** (float(level_db) / 10.0)
         w_deep = 2.0 * np.sqrt(r - 1.0) * float(np.mean(np.atleast_1d(linewidth)))
         axi.axhline(-float(level_db), color="C3", ls=":")
@@ -524,7 +586,7 @@ def plot_dsh_beat_psd(
     axi.set_title(title)
     axi.legend(loc="best")
 
-    return _finish((fig, axi), show)
+    return _finish((fig, axi), show, xlim=xlim, ylim=ylim, legend=legend)
 
 
 def plot_carrier_phase_characterization(
@@ -537,6 +599,7 @@ def plot_carrier_phase_characterization(
     drift_phase=None,
     drift_cutoff: float | None = None,
     amp_ref: float | None = None,
+    ax=None,
     show: bool = False,
     title: str | None = None,
 ) -> tuple[Any, Any] | None:
@@ -570,6 +633,8 @@ def plot_carrier_phase_characterization(
     amp_ref : float, optional
         Reference wander amplitude for the drift panel, as for
         :func:`plot_frequency_drift`.
+    ax : array_like of matplotlib.axes.Axes, optional
+        Four axes in a 2-by-2 grid. ``None`` creates a figure.
     show : bool, default False
         Call ``plt.show()`` and return ``None``.
     title : str, optional
@@ -581,7 +646,7 @@ def plot_carrier_phase_characterization(
         The figure and its axes; ``None`` with ``show=True``, which
         shows the figure instead.
     """
-    fig, axes = plt.subplots(2, 2, figsize=_grid_figsize(2, 2))
+    fig, axes = _panel_grid(ax, 2, 2)
 
     lp = f"  (LP {drift_cutoff / 1e6:.1f} MHz)" if drift_cutoff else ""
     plot_carrier_phase_decomposition(

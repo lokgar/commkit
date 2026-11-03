@@ -13,7 +13,7 @@ CommKit covers the receiver chain of coherent and IM/DD links (waveform generati
 
 ## The model
 
-Data is a NumPy or CuPy array, or a `Signal` that wraps the samples together with what is known about them. Algorithms are plain functions that take the data and return a new `Signal` or array, or a typed result such as `EqualizerResult` or an `*Estimate`. Plotting functions draw those results; they never compute them.
+Data is a NumPy or CuPy array, or a `Signal` that wraps the samples together with what is known about them. Algorithms are plain functions that take the data and return a new `Signal` or array, or a typed result such as `EqualizerResult` or an `*Estimate`. Plotting functions draw those results or call the public compute functions needed to produce them.
 
 - **Things that describe** a modulation, a pulse or a sub-algorithm are small frozen objects written in the call: `lms(rx, cpr=BPS(test_phases=64))`. The same object works standalone: `correct_carrier_phase(y, BPS())`.
 - **A `Signal` carries facts and ground truth.** Facts are `sampling_rate`, `symbol_rate`, `center_frequency` and `domain`; the carrier of an optical Signal gives its `center_wavelength_nm`, which dispersion, fiber propagation and OSNR noise read. The description is `constellation` and `pulse`. The ground truth is `reference`: the transmitted symbols, the bits on the air and the source bits before coding or distribution matching (the same array when there is neither). Functions take facts from the Signal and raise on a conflicting argument. Choices such as the decision constellation default to the Signal's and can be overridden.
@@ -51,6 +51,32 @@ res2 = ck.equalization.lms(rx, num_taps=21, step_size=1e-3, cpr=cpr, state=res.s
 
 Without CuPy, pass `device="cpu"` (the default): the same code runs on the CPU.
 
+## Comparing filter responses
+
+Calculate a response on the coefficients' device, or overlay selected panels
+of several filters:
+
+```python
+short = ck.filtering.fir_taps(sampling_rate=1e6, num_taps=21, cutoff=100e3)
+long = ck.filtering.fir_taps(sampling_rate=1e6, num_taps=101, cutoff=100e3)
+response = ck.filtering.filter_response(long, sampling_rate=1e6)
+print(response.frequencies, response.response, response.group_delay)
+
+ck.plotting.apply_default_theme()
+_, ax = ck.plotting.plot_filter_response(
+    short, sampling_rate=1e6, quantity="magnitude", label="21 taps"
+)
+ck.plotting.plot_filter_response(
+    long, sampling_rate=1e6, quantity="magnitude", ax=ax,
+    label="101 taps", legend=True, show=True,
+)
+```
+
+See notebook 03 for filter and smoothing comparisons. The multi-panel
+equalizer, timing, recovery and coding diagnostics take `quantity=` in the
+same way: draw a second result on the returned axis with its own `label=`,
+and `annotations=False` to leave out repeated fits and guides.
+
 ## CPU and GPU
 
 CommKit never picks a device for you: data stays where you put it, and each function runs on the device of its input. A few habits get the speed out of a GPU:
@@ -80,7 +106,7 @@ CommKit never picks a device for you: data stays where you put it, and each func
 | --- | --- |
 | [`commkit.core`](https://github.com/lokgar/commkit/tree/main/commkit/core) | `Signal`, `Reference`, `generate` (uniform, shaped through a distribution matcher, or coded with `code=`), `SingleCarrierFrame` and `Preamble` (pilots, guard intervals, MIMO channels), `extract_payload`. |
 | [`commkit.mapping`](https://github.com/lokgar/commkit/tree/main/commkit/mapping) | `Constellation` (QAM, PSK, PAM, arbitrary points; Gray labels; probabilistic shaping with `.shaped()`), bit mapping, hard demapping, max-log and exact LLRs. |
-| [`commkit.filtering`](https://github.com/lokgar/commkit/tree/main/commkit/filtering) | Pulses (`RRC`, `RC`, `Gaussian`, `Rect`, `SmoothRect`), FIR and IIR design (Butterworth, Chebyshev I/II, elliptic, Bessel), `fir_filter`, `iir_filter`, `matched_filter`, overlap-save, chromatic-dispersion compensation and digital backpropagation (`correct_fiber_propagation`). |
+| [`commkit.filtering`](https://github.com/lokgar/commkit/tree/main/commkit/filtering) | Pulses (`RRC`, `RC`, `Gaussian`, `Rect`, `SmoothRect`), FIR and IIR design (Butterworth, Chebyshev I/II, elliptic, Bessel), numerical filter responses, `fir_filter`, `iir_filter`, `matched_filter`, overlap-save, chromatic-dispersion compensation and digital backpropagation (`correct_fiber_propagation`). |
 | [`commkit.multirate`](https://github.com/lokgar/commkit/blob/main/commkit/multirate.py) | `resample` (fractional), `decimate`, `upsample`, `decimate_to_symbol_rate`. |
 | [`commkit.spectral`](https://github.com/lokgar/commkit/blob/main/commkit/spectral.py) | Welch PSD, spectrograms, frequency shifting, pilot tones. |
 | [`commkit.impairments`](https://github.com/lokgar/commkit/tree/main/commkit/impairments) | AWGN at an Es/N0 (measured as energy per symbol) or of an absolute variance, ASE at an OSNR (`apply_ase`), phase noise, IQ imbalance (blind estimate; Löwdin and Gram-Schmidt correction), chromatic dispersion, PMD and polarization mixing, and nonlinear fiber propagation over amplified spans (split-step Kerr effect with dispersion, loss, PMD and ASE) of a `Fiber`. |

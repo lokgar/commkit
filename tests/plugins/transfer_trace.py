@@ -80,6 +80,7 @@ _DOCUMENTED: dict[str, str] = {
     "recovery/pilots.py::_extract_pilot_phasor": _HOST_VALUE
     + " (SciPy window, bin tables)",
     "recovery/pll.py::_pll": _RECURSION,
+    "recovery/tikhonov.py::_tikhonov": _RECURSION + " (RTS block-phase smoother)",
 }
 
 _HITS: collections.Counter[tuple[str, str]] = collections.Counter()

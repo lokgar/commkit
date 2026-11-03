@@ -112,3 +112,17 @@ class TestTimeDomainEnvelope:
         np.testing.assert_array_equal(ax.lines[0].get_ydata(), np.arange(40, 440))
         _, ax = plot_time_domain(x, sampling_rate=1.0, max_points=None)
         assert ax.lines[0].get_ydata().size == 40_000
+
+
+def test_waveform_comparison_labels(xp: Any) -> None:
+    """Complex waveform labels distinguish both curves and both components."""
+    x = xp.ones(20, dtype=xp.complex64)
+    fig, ax = plot_time_domain(x, sampling_rate=10, label="before")
+    _, ax = plot_time_domain(x, sampling_rate=10, ax=ax, label="after", legend=True)
+    assert [line.get_label() for line in ax.lines] == [
+        "before I",
+        "before Q",
+        "after I",
+        "after Q",
+    ]
+    assert len(ax.get_legend().get_texts()) == 4

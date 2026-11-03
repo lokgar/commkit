@@ -6,6 +6,9 @@
 - Design: :func:`fir_taps` (window method) and the IIR designs in
   second-order sections, :func:`butterworth_sos`, :func:`chebyshev1_sos`,
   :func:`chebyshev2_sos`, :func:`elliptic_sos` and :func:`bessel_sos`.
+- Responses: :func:`filter_response` (a :class:`FilterResponse`),
+  :func:`impulse_response` and :func:`step_response`, computed on the
+  coefficients' device.
 - Application: :func:`fir_filter` (FFT convolution, optionally circular),
   :func:`ols_fir_filter` (overlap-save, for long filters), :func:`iir_filter`
   and :func:`matched_filter`.
@@ -40,8 +43,10 @@ from .pulses import (
     Rect,
     SmoothRect,
 )
+from .response import FilterResponse, filter_response, impulse_response, step_response
 
 __all__ = [
+    "FilterResponse",
     "Gaussian",
     "Pulse",
     "RC",
@@ -55,9 +60,12 @@ __all__ = [
     "correct_chromatic_dispersion",
     "correct_fiber_propagation",
     "elliptic_sos",
+    "filter_response",
     "fir_filter",
     "fir_taps",
     "iir_filter",
+    "impulse_response",
     "matched_filter",
     "ols_fir_filter",
+    "step_response",
 ]

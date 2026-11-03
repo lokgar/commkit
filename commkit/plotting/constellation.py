@@ -17,6 +17,7 @@ from ..math import rms
 from ..smoothing import smooth_density_2d
 from .theme import (
     _channel_axes,
+    _finish,
     _square_figsize,
 )
 
@@ -29,6 +30,8 @@ def plot_ideal_constellation(
     ax: Any | None = None,
     title: str | None = None,
     size: float | None = None,
+    xlim: tuple[float, float] | None = None,
+    ylim: tuple[float, float] | None = None,
     show: bool = False,
 ) -> tuple[Any, Any] | None:
     """Plot the points of a constellation with their bit labels.
@@ -50,6 +53,8 @@ def plot_ideal_constellation(
     size : float, optional
         Side of the square figure in inches; defaults to the theme's square
         panel size.
+    xlim, ylim : tuple of float, optional
+        Axis limits; ``None`` uses the automatic view.
     show : bool, default False
         Call ``plt.show()`` and return ``None``.
 
@@ -119,8 +124,6 @@ def plot_ideal_constellation(
     ax.set_ylim(-limit, limit)
     ax.set_aspect("equal")
 
-    ax.grid(False)
-
     # Concentric rings at the point magnitudes (the origin excluded).
     radii = np.unique(np.round(np.abs(const), 6))
     radii = radii[radii > 1e-6]
@@ -136,10 +139,7 @@ def plot_ideal_constellation(
         )
         ax.add_artist(circle)
 
-    if show:
-        plt.show()
-        return None
-    return fig, ax
+    return _finish((fig, ax), show, xlim=xlim, ylim=ylim)
 
 
 def plot_constellation(
@@ -154,6 +154,8 @@ def plot_constellation(
     title: str | None = "Constellation",
     vmin: float | None = None,
     vmax: float | None = None,
+    xlim: tuple[float, float] | None = None,
+    ylim: tuple[float, float] | None = None,
     show: bool = False,
     **kwargs: Any,
 ) -> tuple[Any, Any] | None:
@@ -184,6 +186,8 @@ def plot_constellation(
         Title of the figure; ``None`` for none.
     vmin, vmax : float, optional
         Color limits of the normalized density, ``[0, 1]`` by default.
+    xlim, ylim : tuple of float, optional
+        Axis limits; ``None`` uses the automatic view.
     show : bool, default False
         Call ``plt.show()`` and return ``None``.
     **kwargs : Any
@@ -253,10 +257,7 @@ def plot_constellation(
         else:
             _scatter_source(axes, src)
 
-    if show:
-        plt.show()
-        return None
-    return result
+    return _finish(result, show, xlim=xlim, ylim=ylim)
 
 
 def _plot_constellation_array(
@@ -388,7 +389,6 @@ def _plot_constellation_array(
 
     ax.set_xlim(-limit, limit)
     ax.set_ylim(-limit, limit)
-    ax.grid(False)
 
     if show:
         plt.show()

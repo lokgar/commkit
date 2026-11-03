@@ -18,7 +18,14 @@ import numpy as np
 from .._array import validate_array
 from ..backend import dispatch, to_device
 from ..logger import logger
-from .theme import _finish, _get_axis, _grid_figsize, _square_figsize
+from .theme import (
+    _finish,
+    _get_axis,
+    _panel_grid,
+    _select,
+    _series_label,
+    _square_figsize,
+)
 
 __all__ = ["plot_exit_chart", "plot_llr_distribution", "plot_parity_check"]
 
@@ -36,6 +43,12 @@ def plot_llr_distribution(
     *,
     bits_per_symbol: int | None = None,
     bins: int = 100,
+    quantity: str | None = None,
+    label: str | None = None,
+    legend: bool | None = None,
+    annotations: bool = True,
+    xlim: tuple[float, float] | None = None,
+    ylim: tuple[float, float] | None = None,
     ax: Any | None = None,
     title: str | None = None,
     show: bool = False,
@@ -62,8 +75,20 @@ def plot_llr_distribution(
         label.  ``None`` pools all bits.  ``N`` must be a multiple of it.
     bins : int, default 100
         Histogram bins over the central 99.9 % of ``|L|``.
-    ax : array_like of matplotlib.axes.Axes, optional
-        Two axes to draw on; ``None`` creates a figure.
+    quantity : {"density", "consistency"}, optional
+        Plot one panel; ``None`` draws both.
+    label : str, optional
+        Prefix for the measured curves on a selected panel.
+    legend : bool, optional
+        Show or hide the legend; ``None`` keeps the default.
+    annotations : bool, default True
+        Draw the consistency diagonal; ``False`` leaves only the measured
+        curves, for overlays.
+    xlim, ylim : tuple of float, optional
+        Limits for a selected panel.
+    ax : matplotlib.axes.Axes or array_like of Axes, optional
+        One axis for a selected panel, or two for both; ``None`` creates a
+        figure.
     title : str, optional
         Title of the figure.
     show : bool, default False
@@ -89,6 +114,9 @@ def plot_llr_distribution(
     are transferred.  The consistency panel skips bins with fewer than
     20 LLRs of either bit value.
     """
+    panels = _select(
+        quantity, ("density", "consistency"), label=label, xlim=xlim, ylim=ylim
+    )
     x, xp, _ = dispatch(validate_array(llrs, name="llrs"))
     b = validate_array(bits, name="bits")
     if xp.iscomplexobj(x):
@@ -136,48 +164,66 @@ def plot_llr_distribution(
     width = edges_h[1] - edges_h[0]
     centers = 0.5 * (edges_h[1:] + edges_h[:-1])
 
-    if ax is None:
-        fig, axes = plt.subplots(1, 2, figsize=_grid_figsize(1, 2))
-    else:
-        axes = np.asarray(ax).flatten()[:2]
-        fig = axes[0].figure
-    ax_pdf, ax_cons = axes
+    fig, grid = _panel_grid(ax, 1, len(panels))
+    axes = grid[0]
 
-    ax_pdf.stairs(h0.sum(axis=0) / (n0.sum() * width), edges_h, label="b = 0")
-    ax_pdf.stairs(h1.sum(axis=0) / (n1.sum() * width), edges_h, label="b = 1")
-    ax_pdf.set_xlabel("LLR L")
-    ax_pdf.set_ylabel("Density p(L | b)")
-    ax_pdf.set_title("Conditional LLR densities")
-    ax_pdf.legend()
+    if "density" in panels:
+        ax_pdf = axes[panels.index("density")]
+        ax_pdf.stairs(
+            h0.sum(axis=0) / (n0.sum() * width),
+            edges_h,
+            label=_series_label(label, "b = 0"),
+        )
+        ax_pdf.stairs(
+            h1.sum(axis=0) / (n1.sum() * width),
+            edges_h,
+            label=_series_label(label, "b = 1"),
+        )
+        ax_pdf.set_xlabel("LLR L")
+        ax_pdf.set_ylabel("Density p(L | b)")
+        ax_pdf.set_title("Conditional LLR densities")
+        ax_pdf.legend()
 
-    span = [np.inf, -np.inf]  # measured LLR range, which the diagonal covers
-    for j in range(m):
-        if not n0[j] or not n1[j]:
-            continue
-        keep = (h0[j] >= _MIN_COUNT) & (h1[j] >= _MIN_COUNT)
-        with np.errstate(divide="ignore"):
-            ratio = np.log(h0[j][keep] / h1[j][keep]) + np.log(n1[j] / n0[j])
-        label = "measured" if m == 1 else f"bit {j}"
-        ax_cons.plot(centers[keep], ratio, "o-", label=label)
-        if keep.any():
-            span = [min(span[0], centers[keep][0]), max(span[1], centers[keep][-1])]
-    if span[0] > span[1]:
-        span = [-lim, lim]
-    ax_cons.plot(span, span, "--", color="gray", label="consistent")
-    ax_cons.set_xlabel("LLR L")
-    ax_cons.set_ylabel("log p(L | b = 0) / p(L | b = 1)")
-    ax_cons.set_title("Consistency")
-    ax_cons.legend()
+    if "consistency" in panels:
+        ax_cons = axes[panels.index("consistency")]
+        span = [np.inf, -np.inf]  # measured LLR range, which the diagonal covers
+        for j in range(m):
+            if not n0[j] or not n1[j]:
+                continue
+            keep = (h0[j] >= _MIN_COUNT) & (h1[j] >= _MIN_COUNT)
+            with np.errstate(divide="ignore"):
+                ratio = np.log(h0[j][keep] / h1[j][keep]) + np.log(n1[j] / n0[j])
+            line_label = _series_label(label, "measured" if m == 1 else f"bit {j}")
+            ax_cons.plot(centers[keep], ratio, "o-", label=line_label)
+            if keep.any():
+                span = [min(span[0], centers[keep][0]), max(span[1], centers[keep][-1])]
+        if span[0] > span[1]:
+            span = [-lim, lim]
+        if annotations:
+            ax_cons.plot(span, span, "--", color="gray", label="consistent")
+        ax_cons.set_xlabel("LLR L")
+        ax_cons.set_ylabel("log p(L | b = 0) / p(L | b = 1)")
+        ax_cons.set_title("Consistency")
+        ax_cons.legend()
 
     if title is not None:
-        fig.suptitle(title)
-    return _finish((fig, axes), show)
+        if quantity is None:
+            fig.suptitle(title)
+        else:
+            axes[0].set_title(title)
+    output_axes = axes if quantity is None else axes[0]
+    return _finish((fig, output_axes), show, xlim=xlim, ylim=ylim, legend=legend)
 
 
 def plot_parity_check(
     code: Any,
     *,
+    quantity: str | None = None,
+    label: str | None = None,
     ax: Any | None = None,
+    xlim: tuple[float, float] | None = None,
+    ylim: tuple[float, float] | None = None,
+    legend: bool | None = None,
     title: str | None = None,
     show: bool = False,
 ) -> tuple[Any, Any] | None:
@@ -193,8 +239,17 @@ def plot_parity_check(
     code : LDPCCode, LinearBlockCode or array_like
         A code with a parity-check matrix, or the matrix itself, ``(m, n)``
         with entries 0 and 1 (dense, or a ``scipy.sparse`` array).
-    ax : array_like of matplotlib.axes.Axes, optional
-        Two axes to draw on; ``None`` creates a figure.
+    quantity : {"matrix", "degrees"}, optional
+        Plot one panel; ``None`` draws both.
+    label : str, optional
+        Prefix for the node-degree labels, for comparing distributions.
+        Requires ``quantity="degrees"``.
+    ax : matplotlib.axes.Axes or array_like of Axes, optional
+        One axis for a selected quantity, or two for the dashboard.
+    xlim, ylim : tuple of float, optional
+        Limits for a selected panel.
+    legend : bool, optional
+        Show or hide the legend; ``None`` preserves the default.
     title : str, optional
         Title of the matrix panel; defaults to the code and the size of
         ``H``.
@@ -220,6 +275,10 @@ def plot_parity_check(
     """
     import scipy.sparse
 
+    panels = _select(quantity, ("matrix", "degrees"), xlim=xlim, ylim=ylim)
+    if label is not None and quantity != "degrees":
+        raise ValueError("label requires quantity='degrees'")
+
     from ..coding import LDPCCode, LinearBlockCode
 
     punctured = 0
@@ -243,40 +302,47 @@ def plot_parity_check(
     m, n = h.shape
     logger.debug("Generating parity-check plot (%s x %s, %s ones).", m, n, h.nnz)
 
-    if ax is None:
-        fig, axes = plt.subplots(1, 2, figsize=_grid_figsize(1, 2))
-    else:
-        axes = np.asarray(ax).flatten()[:2]
-        fig = axes[0].figure
-    ax_h, ax_deg = axes
+    fig, grid = _panel_grid(ax, 1, len(panels))
+    axes = grid[0]
 
-    if m * n <= _DENSE_ENTRIES:
-        ax_h.spy(h.toarray(), aspect="auto")
-    else:
-        size = float(np.clip(50.0 / np.sqrt(max(m, n)), 0.05, 2.0))
-        ax_h.spy(h, markersize=size, aspect="auto", rasterized=True)
-    if punctured:
-        ax_h.axvspan(n - punctured - 0.5, n - 0.5, color="gray", alpha=0.3)
-        ax_h.text(n - punctured, -0.5, "punctured", va="bottom")
-    ax_h.tick_params(labeltop=False, labelbottom=True)
-    ax_h.grid(False)
-    ax_h.set_xlabel("Variable node (column)")
-    ax_h.set_ylabel("Check node (row)")
-    ax_h.set_title(title if title is not None else f"{name}: {m} x {n}, {h.nnz} ones")
+    if "matrix" in panels:
+        ax_h = axes[panels.index("matrix")]
+        if m * n <= _DENSE_ENTRIES:
+            ax_h.spy(h.toarray(), aspect="auto")
+        else:
+            size = float(np.clip(50.0 / np.sqrt(max(m, n)), 0.05, 2.0))
+            ax_h.spy(h, markersize=size, aspect="auto", rasterized=True)
+        if punctured:
+            ax_h.axvspan(n - punctured - 0.5, n - 0.5, color="gray", alpha=0.3)
+            ax_h.text(n - punctured, -0.5, "punctured", va="bottom")
+        ax_h.tick_params(labeltop=False, labelbottom=True)
+        ax_h.set_xlabel("Variable node (column)")
+        ax_h.set_ylabel("Check node (row)")
+        ax_h.set_title(
+            title if title is not None else f"{name}: {m} x {n}, {h.nnz} ones"
+        )
 
-    var_deg = np.bincount(h.col, minlength=n)
-    chk_deg = np.bincount(h.row, minlength=m)
-    for degrees, total, offset, label in (
-        (var_deg, n, -0.2, "variable nodes"),
-        (chk_deg, m, 0.2, "check nodes"),
-    ):
-        values, counts = np.unique(degrees, return_counts=True)
-        ax_deg.bar(values + offset, counts / total, width=0.4, label=label)
-    ax_deg.set_xlabel("Degree")
-    ax_deg.set_ylabel("Fraction of nodes")
-    ax_deg.set_title("Node degrees")
-    ax_deg.legend()
-    return _finish((fig, axes), show)
+    if "degrees" in panels:
+        ax_deg = axes[panels.index("degrees")]
+        var_deg = np.bincount(h.col, minlength=n)
+        chk_deg = np.bincount(h.row, minlength=m)
+        for degrees, total, offset, node_label in (
+            (var_deg, n, -0.2, "variable nodes"),
+            (chk_deg, m, 0.2, "check nodes"),
+        ):
+            values, counts = np.unique(degrees, return_counts=True)
+            ax_deg.bar(
+                values + offset,
+                counts / total,
+                width=0.4,
+                label=_series_label(label, node_label),
+            )
+        ax_deg.set_xlabel("Degree")
+        ax_deg.set_ylabel("Fraction of nodes")
+        ax_deg.set_title("Node degrees")
+        ax_deg.legend()
+    output_axes = axes if quantity is None else axes[0]
+    return _finish((fig, output_axes), show, xlim=xlim, ylim=ylim, legend=legend)
 
 
 def plot_exit_chart(
@@ -285,6 +351,9 @@ def plot_exit_chart(
     trajectory: bool = True,
     ax: Any | None = None,
     title: str | None = None,
+    xlim: tuple[float, float] | None = None,
+    ylim: tuple[float, float] | None = None,
+    legend: bool | None = None,
     show: bool = False,
 ) -> tuple[Any, Any] | None:
     """Plot an EXIT chart: the two transfer curves and the decoding trajectory.
@@ -306,6 +375,10 @@ def plot_exit_chart(
     title : str, optional
         Title of the figure; defaults to whether the tunnel is open and the
         iterations of the trajectory.
+    xlim, ylim : tuple of float, optional
+        Limits for the displayed axes. ``None`` leaves the limits automatic.
+    legend : bool, optional
+        Show or hide the legend; ``None`` preserves the default.
     show : bool, default False
         Call ``plt.show()`` and return ``None``.
 
@@ -358,4 +431,4 @@ def plot_exit_chart(
         title = f"EXIT chart: tunnel {state}, {chart.iterations} iterations"
     axi.set_title(title)
     axi.legend(loc="lower right")
-    return _finish((fig, axi), show)
+    return _finish((fig, axi), show, xlim=xlim, ylim=ylim, legend=legend)

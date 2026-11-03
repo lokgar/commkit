@@ -18,6 +18,9 @@ from .theme import (
     _finish,
     _get_axis,
     _grid_figsize,
+    _panel_grid,
+    _select,
+    _series_label,
     _set_eng_formatter,
 )
 
@@ -41,6 +44,10 @@ def plot_carrier_phase_decomposition(
     symbol_rate: float,
     num_train_symbols: int = 0,
     ax=None,
+    label: str | None = None,
+    xlim: tuple[float, float] | None = None,
+    ylim: tuple[float, float] | None = None,
+    legend: bool | None = None,
     show: bool = False,
     title: str = "Recovered carrier phase",
 ) -> tuple[Any, Any] | None:
@@ -63,6 +70,12 @@ def plot_carrier_phase_decomposition(
         End of the training symbols, drawn as a dashed line when above 0.
     ax : matplotlib.axes.Axes, optional
         Axes to draw on; ``None`` creates a figure.
+    label : str, optional
+        Label for the trajectory, prefixed to channel names when needed.
+    xlim, ylim : tuple of float, optional
+        Limits for the displayed axes. ``None`` leaves the limits automatic.
+    legend : bool, optional
+        Show or hide the legend; ``None`` preserves the default.
     show : bool, default False
         Call ``plt.show()`` and return ``None``.
     title : str, default "Recovered carrier phase"
@@ -82,21 +95,20 @@ def plot_carrier_phase_decomposition(
 
     t = np.arange(N) / float(symbol_rate)
     for i in range(C):
-        clabel = f"pol {i}" if C > 1 else r"$\phi$ total"
-        axi.plot(
+        clabel = _series_label(label, f"pol {i}" if C > 1 else None, r"$\phi$ total")
+        line = axi.plot(
             t,
             phi_c[i],
-            color=f"C{i}",
             alpha=0.4,
             label=clabel if drift_c is None else None,
-        )
+        )[0]
         if drift_c is not None:
-            axi.plot(
-                t,
-                drift_c[i],
-                color=f"C{i}",
-                label=f"Drift (pol {i})" if C > 1 else "Drift",
+            drift_label = (
+                f"{label} drift"
+                if label
+                else (f"Drift (pol {i})" if C > 1 else "Drift")
             )
+            axi.plot(t, drift_c[i], color=line.get_color(), label=drift_label)
 
     if num_train_symbols > 0:
         axi.axvline(
@@ -112,7 +124,7 @@ def plot_carrier_phase_decomposition(
     axi.set_title(title)
     axi.legend(loc="best")
 
-    return _finish((fig, axi), show)
+    return _finish((fig, axi), show, xlim=xlim, ylim=ylim, legend=legend)
 
 
 # -----------------------------------------------------------------------------
@@ -137,6 +149,11 @@ def plot_timing_correlation(
     estimate: Any,
     *,
     threshold: float = 3.0,
+    quantity: str | None = None,
+    label: str | None = None,
+    legend: bool | None = None,
+    xlim: tuple[float, float] | None = None,
+    ylim: tuple[float, float] | None = None,
     ax=None,
     show: bool = False,
     title: str = "Timing Correlation",
@@ -154,9 +171,16 @@ def plot_timing_correlation(
     threshold : float, default 3.0
         Detection threshold drawn (the ``threshold`` of
         :func:`~commkit.timing.estimate_timing`).
-    ax : array_like of matplotlib.axes.Axes, optional
-        Axes to draw on, ``(C, 2)``: the overall view and the zoom of each
-        channel; ``None`` creates a figure.
+    quantity : {"full", "detail"}, optional
+        Select the full correlation or the peak detail; ``None`` draws both.
+    label : str, optional
+        Label for the correlation on a selected panel.
+    legend : bool, optional
+        Show or hide legends; ``None`` preserves the default.
+    xlim, ylim : tuple of float, optional
+        Limits applied to the selected panels.
+    ax : matplotlib.axes.Axes or array_like of Axes, optional
+        One axis per channel and selected quantity; ``None`` creates a figure.
     show : bool, default False
         Call ``plt.show()`` and return ``None``.
     title : str, default "Timing Correlation"
@@ -168,6 +192,7 @@ def plot_timing_correlation(
         The figure and its axes; ``None`` with ``show=True``, which
         shows the figure instead.
     """
+    panels = _select(quantity, ("full", "detail"), label=label, xlim=xlim, ylim=ylim)
     corr = np.atleast_2d(np.abs(_host(estimate.correlation)))
     peaks = np.atleast_1d(_host(estimate.integer)) - estimate.search_start
     corr_mag = corr
@@ -182,16 +207,9 @@ def plot_timing_correlation(
         corr_mag = corr_mag[None, :]
     C = corr_mag.shape[0]
 
-    if ax is None:
-        fig, axes = plt.subplots(C, 2, figsize=_grid_figsize(C, 2), squeeze=False)
-    else:
-        axes = ax
-        fig = axes[0][0].figure
+    fig, axes = _panel_grid(ax, C, len(panels))
 
     for i in range(C):
-        ax1 = axes[i][0]
-        ax2 = axes[i][1]
-
         c_ch = corr_mag[i]
         pk_idx = int(peak_indices[i]) if i < len(peak_indices) else 0
         norm_val = float(norm_factors[i]) if i < len(norm_factors) else 1.0
@@ -199,39 +217,53 @@ def plot_timing_correlation(
         metric_val = float(c_ch[pk_idx] / norm_val) if norm_val > 0 else 0.0
         ch_suffix = f" - Ch {i}" if C > 1 else ""
 
-        x_all = np.arange(len(c_ch)) + offset
-        ax1.plot(x_all, c_ch, label=f"Ch {i}  metric={metric_val:.2f}")
-        ax1.axhline(float(c_ch[pk_idx]), color="r", linestyle="--", label="Peak")
-        ax1.axvline(pk_idx + offset, color="r", linestyle="--")
-        if abs_thresh > 0:
-            ax1.axhline(abs_thresh, color="g", linestyle=":", label="Thresh")
-        ax1.set_title(f"{title}{ch_suffix}")
-        ax1.set_xlabel("Sample Index")
-        ax1.set_ylabel("|R|")
-        ax1.legend(loc="upper right")
+        if "full" in panels:
+            ax1 = axes[i, panels.index("full")]
+            x_all = np.arange(len(c_ch)) + offset
+            ax1.plot(x_all, c_ch, label=label or f"Ch {i}  metric={metric_val:.2f}")
+            ax1.axhline(float(c_ch[pk_idx]), color="r", linestyle="--", label="Peak")
+            ax1.axvline(pk_idx + offset, color="r", linestyle="--")
+            if abs_thresh > 0:
+                ax1.axhline(abs_thresh, color="g", linestyle=":", label="Thresh")
+            ax1.set_title(f"{title}{ch_suffix}")
+            ax1.set_xlabel("Sample Index")
+            ax1.set_ylabel("|R|")
+            ax1.legend(loc="upper right")
 
-        zoom_w = 40
-        s_z = max(0, pk_idx - zoom_w)
-        e_z = min(len(c_ch), pk_idx + zoom_w)
-        x_zoom = np.arange(s_z, e_z) + offset
-        ax2.plot(x_zoom, c_ch[s_z:e_z], label="Peak area")
-        ax2.axvline(
-            pk_idx + offset, color="r", linestyle="--", label=f"Pk @ {pk_idx + offset}"
-        )
-        if abs_thresh > 0:
-            ax2.axhline(abs_thresh, color="g", linestyle=":", label="Thresh")
-        ax2.set_title(f"{title}{ch_suffix} - Detail")
-        ax2.set_xlabel("Sample Index")
-        ax2.set_ylabel("|R|")
-        ax2.legend(loc="upper right")
+        if "detail" in panels:
+            ax2 = axes[i, panels.index("detail")]
+            zoom_w = 40
+            s_z = max(0, pk_idx - zoom_w)
+            e_z = min(len(c_ch), pk_idx + zoom_w)
+            x_zoom = np.arange(s_z, e_z) + offset
+            ax2.plot(x_zoom, c_ch[s_z:e_z], label=label or "Peak area")
+            ax2.axvline(
+                pk_idx + offset,
+                color="r",
+                linestyle="--",
+                label=f"Pk @ {pk_idx + offset}",
+            )
+            if abs_thresh > 0:
+                ax2.axhline(abs_thresh, color="g", linestyle=":", label="Thresh")
+            ax2.set_title(f"{title}{ch_suffix} - Detail")
+            ax2.set_xlabel("Sample Index")
+            ax2.set_ylabel("|R|")
+            ax2.legend(loc="upper right")
 
-    return _finish((fig, axes), show)
+    output_axes = axes if quantity is None else axes[0, 0] if C == 1 else axes[:, 0]
+    return _finish((fig, output_axes), show, xlim=xlim, ylim=ylim, legend=legend)
 
 
 def plot_mm_autocorrelation(
     estimate: Any,
     *,
     sampling_rate: float,
+    quantity: str | None = None,
+    label: str | None = None,
+    legend: bool | None = None,
+    annotations: bool = True,
+    xlim: tuple[float, float] | None = None,
+    ylim: tuple[float, float] | None = None,
     ax=None,
     show: bool = False,
     title: str = "FOE - Mengali-Morelli",
@@ -247,9 +279,19 @@ def plot_mm_autocorrelation(
         From ``estimate_frequency_offset(x, MengaliMorelli())``.
     sampling_rate : float
         Sampling rate in Hz of the estimated samples.
-    ax : array_like of matplotlib.axes.Axes, optional
-        Axes to draw on, two (magnitude and angle) or ``(C, 2)``; ``None``
-        creates a figure.
+    quantity : {"magnitude", "phase"}, optional
+        Select one panel; ``None`` draws both.
+    label : str, optional
+        Label for the measured values on selected panels.
+    legend : bool, optional
+        Show or hide legends; ``None`` preserves the default.
+    annotations : bool, default True
+        Draw the expected phase and the wrap boundaries; ``False`` leaves
+        only the measured values, for overlays.
+    xlim, ylim : tuple of float, optional
+        Limits for the selected panels.
+    ax : matplotlib.axes.Axes or array_like of Axes, optional
+        One axis per channel and selected panel; ``None`` creates a figure.
     show : bool, default False
         Call ``plt.show()`` and return ``None``.
     title : str, default "FOE - Mengali-Morelli"
@@ -261,6 +303,9 @@ def plot_mm_autocorrelation(
         The figure and its axes; ``None`` with ``show=True``, which
         shows the figure instead.
     """
+    panels = _select(
+        quantity, ("magnitude", "phase"), label=label, xlim=xlim, ylim=ylim
+    )
     r = _require(
         estimate, "autocorrelation", "plot_mm_autocorrelation()", "MengaliMorelli"
     )
@@ -278,64 +323,63 @@ def plot_mm_autocorrelation(
 
     lags = np.arange(1, L + 1)
 
-    if ax is None:
-        if C == 1:
-            fig, raw_axes = plt.subplots(1, 2, figsize=_grid_figsize(1, 2))
-            axes_per_ch = [raw_axes]  # list of (ax_amp, ax_phase)
-        else:
-            fig, raw_axes = plt.subplots(
-                C, 2, figsize=_grid_figsize(C, 2), squeeze=False
-            )
-            axes_per_ch = [(raw_axes[c, 0], raw_axes[c, 1]) for c in range(C)]
-    else:
-        ax_arr = np.asarray(ax, dtype=object)
-        if ax_arr.ndim == 1 and ax_arr.shape[0] == 2:
-            axes_per_ch = [ax_arr]
-        else:
-            axes_per_ch = [ax_arr[c] for c in range(C)]
-        fig = axes_per_ch[0][0].figure
+    fig, raw_axes = _panel_grid(ax, C, len(panels))
 
     for c in range(C):
-        ax_amp, ax_phase = axes_per_ch[c]
         amp = np.abs(R_np[c])
         theta = np.angle(R_np[c])
         f_c = f_ests[c]
         ch_suffix = f" - Ch {c}" if C > 1 else ""
         expected_phase = 2.0 * np.pi * f_c * M * lags / sampling_rate
 
-        ax_amp.plot(lags, amp, color=f"C{c}")
-        ax_amp.set_xlabel("Lag m")
-        ax_amp.set_ylabel("|R[m]|")
-        ax_amp.set_title(f"{title}{ch_suffix}  ($\\Delta f$={f_c:.2f} Hz, M={M})")
+        if "magnitude" in panels:
+            ax_amp = raw_axes[c, panels.index("magnitude")]
+            ax_amp.plot(lags, amp, label=label)
+            ax_amp.set_xlabel("Lag m")
+            ax_amp.set_ylabel("|R[m]|")
+            ax_amp.set_title(f"{title}{ch_suffix}  ($\\Delta f$={f_c:.2f} Hz, M={M})")
 
-        ax_phase.scatter(
-            lags, theta, s=6, color=f"C{c}", label="Angle(R[m])  (wrapped)", zorder=3
-        )
-        ax_phase.plot(
-            lags,
-            (expected_phase + np.pi) % (2 * np.pi) - np.pi,
-            color="red",
-            linestyle="--",
-            label=f"Expected $2\\pi \\cdot \\Delta f \\cdot M \\cdot m/f_s$  "
-            f"($\\Delta f$={f_c:.2f} Hz)",
-        )
-        ax_phase.axhline(
-            np.pi, color="gray", linestyle=":", label=r"$\pm\pi$ wrap boundary"
-        )
-        ax_phase.axhline(-np.pi, color="gray", linestyle=":")
-        ax_phase.set_xlabel("Lag m")
-        ax_phase.set_ylabel("Phase [rad]")
-        ax_phase.set_ylim(-np.pi - 0.3, np.pi + 0.3)
-        ax_phase.legend()
+        if "phase" in panels:
+            ax_phase = raw_axes[c, panels.index("phase")]
+            ax_phase.scatter(
+                lags, theta, s=6, label=label or "Angle(R[m])  (wrapped)", zorder=3
+            )
+            if annotations:
+                ax_phase.plot(
+                    lags,
+                    (expected_phase + np.pi) % (2 * np.pi) - np.pi,
+                    color="red",
+                    linestyle="--",
+                    label=f"Expected $2\\pi \\cdot \\Delta f \\cdot M \\cdot m/f_s$  "
+                    f"($\\Delta f$={f_c:.2f} Hz)",
+                )
+                ax_phase.axhline(
+                    np.pi, color="gray", linestyle=":", label=r"$\pm\pi$ wrap boundary"
+                )
+                ax_phase.axhline(-np.pi, color="gray", linestyle=":")
+            ax_phase.set_xlabel("Lag m")
+            ax_phase.set_ylabel("Phase [rad]")
+            ax_phase.set_ylim(-np.pi - 0.3, np.pi + 0.3)
+            ax_phase.legend()
 
-    return _finish((fig, axes_per_ch[0] if C == 1 else axes_per_ch), show)
+    output_axes = (
+        (raw_axes[0] if C == 1 else list(raw_axes))
+        if quantity is None
+        else (raw_axes[0, 0] if C == 1 else raw_axes[:, 0])
+    )
+    return _finish((fig, output_axes), show, xlim=xlim, ylim=ylim, legend=legend)
 
 
 def plot_frequency_offset_spectrum(
     estimate: Any,
     *,
     search_range: tuple[float, float] | None = None,
+    label: str | None = None,
+    annotations: bool = True,
     ax=None,
+    xlim: tuple[float, float] | None = None,
+    ylim: tuple[float, float] | None = None,
+    legend: bool | None = None,
     show: bool = False,
     title: str = "FOE - M-th Power Spectrum",
 ) -> tuple[Any, Any] | None:
@@ -350,8 +394,17 @@ def plot_frequency_offset_spectrum(
         From ``estimate_frequency_offset(x, MthPower())``.
     search_range : (float, float), optional
         The ``MthPower(search_range=)`` used, shaded.
+    label : str, optional
+        Label for the measured spectrum.
+    annotations : bool, default True
+        Draw the detected peak and the search range; ``False`` leaves only
+        the measured spectrum, for overlays.
     ax : array_like of matplotlib.axes.Axes, optional
         Axes to draw on, one per channel; ``None`` creates a figure.
+    xlim, ylim : tuple of float, optional
+        Limits applied to the displayed channels.
+    legend : bool, optional
+        Show or hide the legend; ``None`` preserves the default.
     show : bool, default False
         Call ``plt.show()`` and return ``None``.
     title : str, default "FOE - M-th Power Spectrum"
@@ -393,27 +446,35 @@ def plot_frequency_offset_spectrum(
         f_est = float(f_estimates[i]) if i < len(f_estimates) else 0.0
         ch_suffix = f" - Ch {i}" if C > 1 else ""
 
-        axi.plot(f_delta, mag, color="C0")
-        axi.axvline(
-            f_est,
-            color="r",
-            linestyle="--",
-            label=rf"$\hat{{f}}$ = {f_est:.2f} Hz",
-        )
-        if search_range is not None:
-            axi.axvspan(
-                search_range[0],
-                search_range[1],
-                alpha=0.4,
-                color="green",
-                label="Search range",
+        axi.plot(f_delta, mag, label=label)
+        if annotations:
+            axi.axvline(
+                f_est,
+                color="r",
+                linestyle="--",
+                label=rf"$\hat{{f}}$ = {f_est:.2f} Hz",
             )
+            if search_range is not None:
+                axi.axvspan(
+                    search_range[0],
+                    search_range[1],
+                    alpha=0.4,
+                    color="green",
+                    label="Search range",
+                )
         axi.set_title(f"{title}{ch_suffix}")
         axi.set_xlabel(f"$\\Delta f$ [Hz]  (÷M={M} applied)")
         axi.set_ylabel(f"|X^{M}(f)|")
-        axi.legend()
+        if annotations or label is not None:
+            axi.legend()
 
-    return _finish((fig, axes_list[0] if C == 1 else axes_list), show)
+    return _finish(
+        (fig, axes_list[0] if C == 1 else axes_list),
+        show,
+        xlim=xlim,
+        ylim=ylim,
+        legend=legend,
+    )
 
 
 def plot_frequency_offset_blockwise_result(
@@ -421,6 +482,11 @@ def plot_frequency_offset_blockwise_result(
     *,
     num_samples: int,
     sampling_rate: float,
+    quantity: str | None = None,
+    label: str | None = None,
+    legend: bool | None = None,
+    xlim: tuple[float, float] | None = None,
+    ylim: tuple[float, float] | None = None,
     ax=None,
     show: bool = False,
     title: str = "Block-wise FOE",
@@ -442,8 +508,16 @@ def plot_frequency_offset_blockwise_result(
         Length of the corrected record.
     sampling_rate : float
         Sampling rate in Hz.
-    ax : array_like of matplotlib.axes.Axes, optional
-        Axes to draw on, two; ``None`` creates a figure.
+    quantity : {"frequency", "phase"}, optional
+        Select one panel; ``None`` draws both.
+    label : str, optional
+        Label for the trajectory on a selected panel.
+    legend : bool, optional
+        Show or hide legends; ``None`` preserves the default.
+    xlim, ylim : tuple of float, optional
+        Limits applied to a selected panel.
+    ax : matplotlib.axes.Axes or array_like of Axes, optional
+        One axis for a selected panel, or two for the dashboard.
     show : bool, default False
         Call ``plt.show()`` and return ``None``.
     title : str, default "Block-wise FOE"
@@ -459,6 +533,10 @@ def plot_frequency_offset_blockwise_result(
         shows the figure instead.
     """
     from ..frequency import correct_frequency_offset
+
+    panels = _select(
+        quantity, ("frequency", "phase"), label=label, xlim=xlim, ylim=ylim
+    )
 
     centers = _require(
         estimate,
@@ -486,46 +564,51 @@ def plot_frequency_offset_blockwise_result(
     df_dense = np.asarray(to_device(df_dense, "cpu"), dtype=np.float64)
     phase_trajectory = np.asarray(to_device(phase_trajectory, "cpu"), dtype=np.float64)
 
-    if ax is None:
-        fig, axes = plt.subplots(1, 2, figsize=_grid_figsize(1, 2))
-    else:
-        axes = np.asarray(ax).flatten()[:2]
-        fig = axes[0].figure
+    fig, grid = _panel_grid(ax, 1, len(panels))
+    axes = grid[0]
 
     # Decimate the dense per-sample traces for fast rendering (envelope-preserving).
     nf, df_k = _decimate_minmax(n_grid, df_dense * 1e-3, max_points)
     np_, ph_deg = _decimate_minmax(n_grid, np.degrees(phase_trajectory), max_points)
 
-    # Panel 1: frequency trajectory
-    ax_f = axes[0]
-    ax_f.plot(nf, df_k, label=r"Interpolated $\Delta f$")
-    ax_f.scatter(
-        t_centers,
-        df_estimates * 1e-3,
-        s=50,
-        zorder=5,
-        color="C1",
-        label="Block estimate",
-    )
-    ax_f.set_xlabel("Sample Index")
-    ax_f.set_ylabel(r"$\Delta f$ [kHz]")
-    ax_f.set_title(f"{title} - Frequency")
-    ax_f.legend()
+    if "frequency" in panels:
+        # Panel 1: frequency trajectory
+        ax_f = axes[panels.index("frequency")]
+        ax_f.plot(nf, df_k, label=label or r"Interpolated $\Delta f$")
+        ax_f.scatter(
+            t_centers,
+            df_estimates * 1e-3,
+            s=50,
+            zorder=5,
+            color="C1",
+            label="Block estimate",
+        )
+        ax_f.set_xlabel("Sample Index")
+        ax_f.set_ylabel(r"$\Delta f$ [kHz]")
+        ax_f.set_title(f"{title} - Frequency")
+        ax_f.legend()
 
-    # Panel 2: phase trajectory
-    ax_p = axes[1]
-    ax_p.plot(np_, ph_deg)
-    ax_p.set_xlabel("Sample Index")
-    ax_p.set_ylabel("Phase [deg]")
-    ax_p.set_title(f"{title} - Integrated Phase")
+    if "phase" in panels:
+        # Panel 2: phase trajectory
+        ax_p = axes[panels.index("phase")]
+        ax_p.plot(np_, ph_deg, label=label)
+        ax_p.set_xlabel("Sample Index")
+        ax_p.set_ylabel("Phase [deg]")
+        ax_p.set_title(f"{title} - Integrated Phase")
 
-    return _finish((fig, axes), show)
+    output_axes = axes if quantity is None else axes[0]
+    return _finish((fig, output_axes), show, xlim=xlim, ylim=ylim, legend=legend)
 
 
 def plot_pilot_phase_estimate(
     estimate: Any,
     *,
     sampling_rate: float = 1.0,
+    quantity: str | None = None,
+    label: str | None = None,
+    legend: bool | None = None,
+    xlim: tuple[float, float] | None = None,
+    ylim: tuple[float, float] | None = None,
     ax=None,
     show: bool = False,
     title: str = "Pilot Phase Estimate",
@@ -544,8 +627,17 @@ def plot_pilot_phase_estimate(
     sampling_rate : float, default 1.0
         Sampling rate in Hz of the pilot indices (labels the fitted slope in
         Hz; 1.0 gives cycles per sample).
-    ax : array_like of matplotlib.axes.Axes, optional
-        Axes to draw on, one per panel; ``None`` creates a figure.
+    quantity : {"pilots", "trajectory"}, optional
+        Select one panel; ``None`` draws all available panels. A trajectory
+        is available only for a carrier-phase estimate.
+    label : str, optional
+        Label for the selected measurement or trajectory.
+    legend : bool, optional
+        Show or hide legends; ``None`` preserves the default.
+    xlim, ylim : tuple of float, optional
+        Limits applied to selected panels.
+    ax : matplotlib.axes.Axes or array_like of Axes, optional
+        One axis per channel and selected panel; ``None`` creates a figure.
     show : bool, default False
         Call ``plt.show()`` and return ``None``.
     title : str, default "Pilot Phase Estimate"
@@ -559,6 +651,9 @@ def plot_pilot_phase_estimate(
     """
     from ..recovery import CarrierPhaseEstimate
 
+    panels = _select(
+        quantity, ("pilots", "trajectory"), label=label, xlim=xlim, ylim=ylim
+    )
     name = "plot_pilot_phase_estimate()"
     pilot_phase = _require(estimate, "pilot_phase", name, "a pilot method")
     is_phase = isinstance(estimate, CarrierPhaseEstimate)
@@ -580,28 +675,17 @@ def plot_pilot_phase_estimate(
         f_ests = [float(f_est)] * C  # type: ignore[arg-type]
 
     has_full = phi_full is not None
+    if quantity == "trajectory" and not has_full:
+        raise ValueError("quantity='trajectory' requires a carrier-phase estimate")
     if has_full:
         phi_full = to_device(phi_full, "cpu")
         if phi_full.ndim == 1:
             phi_full = phi_full[None, :]
         N = phi_full.shape[1]
 
-    n_cols = 2 if has_full else 1
-    axes: Any = None
-    if ax is None:
-        fig, axes = plt.subplots(
-            C, n_cols, figsize=_grid_figsize(C, n_cols), squeeze=False
-        )
-    else:
-        # ax expected as (C, n_cols) sequence - use list of lists to avoid
-        # np.reshape() which fails when ax contains non-array objects
-        if hasattr(ax, "__len__") and hasattr(ax[0], "__len__"):
-            axes = ax  # already 2-D list
-        elif hasattr(ax, "__len__"):
-            axes = [[a] for a in ax]  # 1-D list -> wrap each in a row
-        else:
-            axes = [[ax]]
-        fig = axes[0][0].figure
+    if not has_full:
+        panels = tuple(p for p in panels if p != "trajectory")
+    fig, axes = _panel_grid(ax, C, len(panels))
 
     t_pilots = pilot_indices / sampling_rate
     for i in range(C):
@@ -621,34 +705,35 @@ def plot_pilot_phase_estimate(
             phi_fit = phi_p.copy()
         f_label = f_ests[i] if f_ests is not None else slope / (2.0 * np.pi)
 
-        ax1 = axes[i][0]
-        ax1.scatter(
-            pilot_indices,
-            np.degrees(phi_p),
-            s=14,
-            zorder=5,
-            label=r"Pilot $\phi$ (unwrapped)",
-        )
-        ax1.plot(
-            pilot_indices,
-            np.degrees(phi_fit),
-            "r--",
-            label=f"Fit  $\\Delta f$={f_label:.3f} Hz",
-        )
-        ax1.set_title(f"{title}{ch_suffix} - Pilots")
-        ax1.set_xlabel("Sample Index")
-        ax1.set_ylabel("Phase [deg]")
-        ax1.legend()
+        if "pilots" in panels:
+            ax1 = axes[i, panels.index("pilots")]
+            ax1.scatter(
+                pilot_indices,
+                np.degrees(phi_p),
+                s=14,
+                zorder=5,
+                label=label or r"Pilot $\phi$ (unwrapped)",
+            )
+            ax1.plot(
+                pilot_indices,
+                np.degrees(phi_fit),
+                "r--",
+                label=f"Fit  $\\Delta f$={f_label:.3f} Hz",
+            )
+            ax1.set_title(f"{title}{ch_suffix} - Pilots")
+            ax1.set_xlabel("Sample Index")
+            ax1.set_ylabel("Phase [deg]")
+            ax1.legend()
 
-        if has_full:
+        if "trajectory" in panels:
             assert phi_full is not None
-            ax2 = axes[i][1]
+            ax2 = axes[i, panels.index("trajectory")]
             sym_idx = np.arange(N)
             ax2.plot(
                 sym_idx,
                 np.degrees(phi_full[i]),
                 alpha=0.4,
-                label=r"$\hat{\phi}$ (interpolated)",
+                label=label or r"$\hat{\phi}$ (interpolated)",
             )
             ax2.scatter(
                 pilot_indices,
@@ -663,7 +748,8 @@ def plot_pilot_phase_estimate(
             ax2.set_ylabel("Phase [deg]")
             ax2.legend()
 
-    return _finish((fig, axes), show)
+    output_axes = axes if quantity is None else axes[0, 0] if C == 1 else axes[:, 0]
+    return _finish((fig, output_axes), show, xlim=xlim, ylim=ylim, legend=legend)
 
 
 def plot_pilot_tone_phase_estimate(
@@ -672,6 +758,12 @@ def plot_pilot_tone_phase_estimate(
     *,
     method: Any,
     sampling_rate: float | None = None,
+    quantity: str | None = None,
+    label: str | None = None,
+    annotations: bool = True,
+    legend: bool | None = None,
+    xlim: tuple[float, float] | None = None,
+    ylim: tuple[float, float] | None = None,
     ax=None,
     show: bool = False,
     title: str = "CPR - Pilot Tone",
@@ -693,8 +785,19 @@ def plot_pilot_tone_phase_estimate(
     sampling_rate : float, optional
         Sampling rate in Hz (a fact): taken from a Signal, required for
         arrays.
-    ax : array_like of matplotlib.axes.Axes, optional
-        Axes to draw on, two; ``None`` creates a figure.
+    quantity : {"spectrum", "phase"}, optional
+        Select one panel; ``None`` draws both.
+    label : str, optional
+        Label for the selected measurement or phase trajectory.
+    annotations : bool, default True
+        Draw the extraction window and the tone markers; ``False`` leaves
+        only the measured spectrum, for overlays.
+    legend : bool, optional
+        Show or hide the legend; ``None`` preserves the default.
+    xlim, ylim : tuple of float, optional
+        Limits for a selected panel.
+    ax : matplotlib.axes.Axes or array_like of Axes, optional
+        One axis for a selected panel, or two for both.
     show : bool, default False
         Call ``plt.show()`` and return ``None``.
     title : str, default "CPR - Pilot Tone"
@@ -711,10 +814,25 @@ def plot_pilot_tone_phase_estimate(
     """
     from ..core._signal_adapter import adapt_signal
 
+    _select(quantity, ("spectrum", "phase"), label=label, xlim=xlim, ylim=ylim)
     name = "plot_pilot_tone_phase_estimate()"
     tones = _require(estimate, "tone_frequencies", name, "PilotTone")
     adapter = adapt_signal(samples, function_name=name)
     fs = float(adapter.resolve_fact("sampling_rate", sampling_rate))
+    if quantity == "phase":
+        theta = np.atleast_2d(_host(estimate.value))
+        fig, axis = _get_axis(ax)
+        sample_idx = np.arange(theta.shape[1])
+        for i, row in enumerate(theta):
+            trace_label = _series_label(label, f"Ch {i}" if len(theta) > 1 else None)
+            n_d, th_d = _decimate_minmax(sample_idx, np.degrees(row), max_points)
+            axis.plot(n_d, th_d, label=trace_label)
+        axis.set_title(f"{title} - Recovered phase")
+        axis.set_xlabel("Sample Index")
+        axis.set_ylabel("Phase [deg]")
+        if len(theta) > 1:
+            axis.legend()
+        return _finish((fig, axis), show, xlim=xlim, ylim=ylim, legend=legend)
     x = np.atleast_2d(_host(adapter.array))
     freqs = np.fft.fftfreq(x.shape[-1], d=1.0 / fs)
     centers = np.atleast_1d(np.asarray(tones, dtype=float))[:, None]
@@ -737,12 +855,11 @@ def plot_pilot_tone_phase_estimate(
     f_tones = np.atleast_1d(np.asarray(to_device(f_tones, "cpu"), dtype=float))
     C, N = mag_spectrum.shape
 
-    if ax is None:
-        fig, raw_axes = plt.subplots(1, 2, figsize=_grid_figsize(1, 2), squeeze=False)
-        ax_spec, ax_phase = raw_axes[0]
+    if quantity == "spectrum":
+        fig, ax_spec = _get_axis(ax)
     else:
-        ax_spec, ax_phase = ax[0], ax[1]
-        fig = ax_spec.figure
+        fig, grid = _panel_grid(ax, 1, 2)
+        ax_spec, ax_phase = grid[0]
 
     order = np.argsort(freqs)
     f_sorted = freqs[order]
@@ -751,39 +868,44 @@ def plot_pilot_tone_phase_estimate(
     # Panel 1 - spectrum (dB) with extraction window on a twin axis.
     # Envelope-decimate the full-resolution traces: min/max preserves the tone
     # peak and the window edges that plain striding would skip over.
-    ax_win = ax_spec.twinx()
+    ax_win = ax_spec.twinx() if annotations else None
     for i in range(C):
         mag_db = 20.0 * np.log10(np.maximum(mag_spectrum[i][order], eps))
-        label = f"Ch {i}" if C > 1 else "|X(f)|"
+        curve_label = _series_label(label, f"Ch {i}" if C > 1 else None, "|X(f)|")
         f_d, mag_d = _decimate_minmax(f_sorted, mag_db, max_points)
-        f_w, win_d = _decimate_minmax(f_sorted, window[i][order], max_points)
-        ax_spec.plot(f_d, mag_d, label=label)
-        ax_win.plot(f_w, win_d, color="C3", alpha=0.4)
-        ax_spec.axvline(
-            float(f_tones[i]),
-            color="C2",
-            linestyle=":",
-            label=("Tone peak" if i == 0 else None),
+        ax_spec.plot(f_d, mag_d, label=curve_label)
+        if ax_win is not None:
+            f_w, win_d = _decimate_minmax(f_sorted, window[i][order], max_points)
+            ax_win.plot(f_w, win_d, color="C3", alpha=0.4)
+            ax_spec.axvline(
+                float(f_tones[i]),
+                color="C2",
+                linestyle=":",
+                label=("Tone peak" if i == 0 else None),
+            )
+    if ax_win is not None:
+        ax_spec.axvspan(
+            tone_frequency - bandwidth,
+            tone_frequency + bandwidth,
+            color="C3",
+            alpha=0.4,
+            label=f"Window ±B ({bandwidth:.3g} Hz)",
         )
-    ax_spec.axvspan(
-        tone_frequency - bandwidth,
-        tone_frequency + bandwidth,
-        color="C3",
-        alpha=0.4,
-        label=f"Window ±B ({bandwidth:.3g} Hz)",
-    )
-    ax_spec.axvline(
-        tone_frequency,
-        color="C1",
-        linestyle="--",
-        label=f"Nominal f_p ({tone_frequency:.3g} Hz)",
-    )
-    ax_win.set_ylim(-0.05, 1.35)
-    ax_win.set_ylabel("Window W(f)", color="C3")
+        ax_spec.axvline(
+            tone_frequency,
+            color="C1",
+            linestyle="--",
+            label=f"Nominal f_p ({tone_frequency:.3g} Hz)",
+        )
+        ax_win.set_ylim(-0.05, 1.35)
+        ax_win.set_ylabel("Window W(f)", color="C3")
     ax_spec.set_title(f"{title} - Tone Spectrum")
     ax_spec.set_xlabel("Frequency [Hz]")
     ax_spec.set_ylabel("|X(f)| [dB]")
     ax_spec.legend(loc="upper left")
+
+    if quantity == "spectrum":
+        return _finish((fig, ax_spec), show, xlim=xlim, ylim=ylim, legend=legend)
 
     # Panel 2 - recovered phase trajectory.
     sample_idx = np.arange(theta.shape[1])
@@ -808,6 +930,11 @@ def plot_pilot_tone_phase_estimate(
 def plot_pilot_tones_phase_estimate(
     estimate: Any,
     *,
+    quantity: str | None = None,
+    label: str | None = None,
+    legend: bool | None = None,
+    xlim: tuple[float, float] | None = None,
+    ylim: tuple[float, float] | None = None,
     ax=None,
     show: bool = False,
     title: str = "CPR - Pilot Tones (MRC)",
@@ -822,8 +949,16 @@ def plot_pilot_tones_phase_estimate(
     ----------
     estimate : CarrierPhaseEstimate
         From ``estimate_carrier_phase(x, PilotTones(...))``.
-    ax : array_like of matplotlib.axes.Axes, optional
-        Axes to draw on, two; ``None`` creates a figure.
+    quantity : {"differential", "phase"}, optional
+        Select one panel; ``None`` draws both.
+    label : str, optional
+        Label for the selected trace or prefix for its tone curves.
+    legend : bool, optional
+        Show or hide legends; ``None`` preserves the default.
+    xlim, ylim : tuple of float, optional
+        Limits for a selected panel.
+    ax : matplotlib.axes.Axes or array_like of Axes, optional
+        One axis for a selected panel, or two for both.
     show : bool, default False
         Call ``plt.show()`` and return ``None``.
     title : str, default "CPR - Pilot Tones (MRC)"
@@ -838,6 +973,9 @@ def plot_pilot_tones_phase_estimate(
         The figure and its axes; ``None`` with ``show=True``, which
         shows the figure instead.
     """
+    panels = _select(
+        quantity, ("differential", "phase"), label=label, xlim=xlim, ylim=ylim
+    )
     delta = _require(
         estimate,
         "differential_phase",
@@ -853,46 +991,49 @@ def plot_pilot_tones_phase_estimate(
     K = len(delta)
     used_set = {int(u) for u in used}
 
-    if ax is None:
-        fig, raw_axes = plt.subplots(1, 2, figsize=_grid_figsize(1, 2), squeeze=False)
-        ax_delta, ax_phase = raw_axes[0]
-    else:
-        ax_delta, ax_phase = ax[0], ax[1]
-        fig = ax_delta.figure
+    fig, grid = _panel_grid(ax, 1, len(panels))
+    axes = list(grid[0])
 
-    # Panel 1 - per-tone slow differential (skip the reference, whose δ ≡ 0).
-    n_plotted = 0
-    for k in range(K):
-        if k == ref:
-            continue
-        gated = k not in used_set
-        idx = np.arange(delta[k].shape[-1])
-        n_d, d_d = _decimate_minmax(idx, np.degrees(delta[k]), max_points)
-        ax_delta.plot(
-            n_d,
-            d_d,
-            linestyle="--" if gated else "-",
-            label=f"$\\delta$ tone {k}" + (" (gated)" if gated else ""),
+    if "differential" in panels:
+        ax_delta = axes[panels.index("differential")]
+        # Panel 1 - per-tone slow differential (skip the reference, whose δ ≡ 0).
+        n_plotted = 0
+        for k in range(K):
+            if k == ref:
+                continue
+            gated = k not in used_set
+            idx = np.arange(delta[k].shape[-1])
+            n_d, d_d = _decimate_minmax(idx, np.degrees(delta[k]), max_points)
+            ax_delta.plot(
+                n_d,
+                d_d,
+                linestyle="--" if gated else "-",
+                label=_series_label(
+                    label, f"$\\delta$ tone {k}" + (" (gated)" if gated else "")
+                ),
+            )
+            n_plotted += 1
+        ax_delta.set_title(f"{title} - Inter-tone $\\delta$  (ref = tone {ref})")
+        ax_delta.set_xlabel("Sample Index")
+        ax_delta.set_ylabel("Differential phase [deg]")
+        if n_plotted:
+            ax_delta.legend(loc="upper right")
+
+    if "phase" in panels:
+        ax_phase = axes[panels.index("phase")]
+        # Panel 2 - combined common-phase track.
+        idx = np.arange(phi.shape[-1])
+        n_d, p_d = _decimate_minmax(idx, np.degrees(phi), max_points)
+        ax_phase.plot(n_d, p_d, label=label)
+        ph_std = float(np.std(np.degrees(phi)))
+        ax_phase.set_title(
+            f"{title} - Combined $\\hat{{\\phi}}$  [$\\sigma$={ph_std:.2f}°, used={list(used)}]"
         )
-        n_plotted += 1
-    ax_delta.set_title(f"{title} - Inter-tone $\\delta$  (ref = tone {ref})")
-    ax_delta.set_xlabel("Sample Index")
-    ax_delta.set_ylabel("Differential phase [deg]")
-    if n_plotted:
-        ax_delta.legend(loc="upper right")
+        ax_phase.set_xlabel("Sample Index")
+        ax_phase.set_ylabel("Phase [deg]")
 
-    # Panel 2 - combined common-phase track.
-    idx = np.arange(phi.shape[-1])
-    n_d, p_d = _decimate_minmax(idx, np.degrees(phi), max_points)
-    ax_phase.plot(n_d, p_d)
-    ph_std = float(np.std(np.degrees(phi)))
-    ax_phase.set_title(
-        f"{title} - Combined $\\hat{{\\phi}}$  [$\\sigma$={ph_std:.2f}°, used={list(used)}]"
-    )
-    ax_phase.set_xlabel("Sample Index")
-    ax_phase.set_ylabel("Phase [deg]")
-
-    return _finish((fig, (ax_delta, ax_phase)), show)
+    output_axes = tuple(axes) if quantity is None else axes[0]
+    return _finish((fig, output_axes), show, xlim=xlim, ylim=ylim, legend=legend)
 
 
 def plot_carrier_phase_trajectory(
@@ -900,6 +1041,10 @@ def plot_carrier_phase_trajectory(
     *,
     num_train_symbols: int = 0,
     ax=None,
+    label: str | None = None,
+    xlim: tuple[float, float] | None = None,
+    ylim: tuple[float, float] | None = None,
+    legend: bool | None = None,
     show: bool = False,
     title: str = "Carrier Phase Trajectory",
 ) -> tuple[Any, Any] | None:
@@ -915,6 +1060,12 @@ def plot_carrier_phase_trajectory(
         End of the training symbols, drawn as a dashed line.
     ax : matplotlib.axes.Axes, optional
         Axes to draw on; ``None`` creates a figure.
+    label : str, optional
+        Label for the trajectory, prefixed to channel names when needed.
+    xlim, ylim : tuple of float, optional
+        Limits for the displayed axes. ``None`` leaves the limits automatic.
+    legend : bool, optional
+        Show or hide the legend; ``None`` preserves the default.
     show : bool, default False
         Call ``plt.show()`` and return ``None``.
     title : str, default "Carrier Phase Trajectory"
@@ -942,8 +1093,8 @@ def plot_carrier_phase_trajectory(
     sym_idx = np.arange(N)
     for i in range(C):
         phi_deg = np.degrees(phi_full[i])
-        label = f"Ch {i}" if C > 1 else None
-        axi.plot(sym_idx, phi_deg, label=label)
+        curve_label = _series_label(label, f"Ch {i}" if C > 1 else None)
+        axi.plot(sym_idx, phi_deg, label=curve_label)
 
     if block_centers is not None:
         for tc in np.asarray(to_device(block_centers, "cpu")):
@@ -966,4 +1117,4 @@ def plot_carrier_phase_trajectory(
     if C > 1 or num_train_symbols > 0:
         axi.legend(loc="upper right")
 
-    return _finish((fig, axi), show)
+    return _finish((fig, axi), show, xlim=xlim, ylim=ylim, legend=legend)

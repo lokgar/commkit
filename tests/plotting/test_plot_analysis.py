@@ -68,6 +68,21 @@ class TestPlotAnalysis:
         fig, ax = plot_allan_deviation(allan, reference_slopes=True)
         np.testing.assert_allclose(ax.lines[0].get_xdata(), allan.taus)
         assert len(ax.lines) == 2
+        _, ax = plot_allan_deviation(
+            allan, xlim=(1e-9, 1e-6), ylim=(1e-5, 1), legend=False
+        )
+        assert ax.get_xlim() == (1e-9, 1e-6)
+        assert ax.get_ylim() == (1e-5, 1)
+        assert ax.get_legend() is None
+        _, ax = plot_allan_deviation(allan, reference_slopes=False, label="before")
+        _, ax = plot_allan_deviation(
+            allan, reference_slopes=False, ax=ax, label="after", legend=True
+        )
+        assert [t.get_text() for t in ax.get_legend().get_texts()] == [
+            "before",
+            "after",
+        ]
+        assert ax.lines[0].get_color() != ax.lines[1].get_color()
 
     def test_frequency_noise_psd_beta(self, xp: Any) -> None:
         """BetaSeparation: PSD, β-line, integration fill and floor guide."""
@@ -80,6 +95,14 @@ class TestPlotAnalysis:
         assert len(ax.collections) >= 1  # the β-area fill
         floor = [ln for ln in ax.lines if "White-FM" in ln.get_label()][0]
         assert floor.get_ydata()[0] == pytest.approx(est.linewidth_floor / np.pi)
+        _, ax = plot_frequency_noise_psd(est, label="first", annotations=False)
+        _, ax = plot_frequency_noise_psd(
+            est, ax=ax, label="second", annotations=False, legend=True
+        )
+        labels = [line.get_label() for line in ax.lines]
+        assert any("first" in label for label in labels)
+        assert any("second" in label for label in labels)
+        assert not ax.collections
 
     def test_frequency_noise_psd_dsh(self, xp: Any) -> None:
         """DshFmPsd: the floor guide sits at the estimate itself."""
@@ -104,6 +127,11 @@ class TestPlotAnalysis:
         fig, ax = plot_increment_variance(est)
         np.testing.assert_allclose(ax.lines[0].get_ydata(), est.var[0])
         assert len(ax.lines) == 3  # points, fit, intercept
+        _, ax = plot_increment_variance(est, label="first", annotations=False)
+        _, ax = plot_increment_variance(
+            est, ax=ax, label="second", annotations=False, legend=True
+        )
+        assert [line.get_label() for line in ax.lines] == ["first", "second"]
 
     def test_increment_variance_subtract(self, xp: Any) -> None:
         """IncrementSubtract has no fit: only its lag-1 point is drawn."""
@@ -158,3 +186,15 @@ class TestPlotAnalysis:
         )
         assert axes.shape == (2, 2)
         assert all(ax.lines for ax in axes.flat)
+        fig2, reused = plot_carrier_phase_characterization(
+            phi,
+            drift=drift,
+            linewidth=analysis.estimate_linewidth(
+                phi, BetaSeparation(), sampling_rate=R
+            ),
+            allan=analysis.allan_deviation(drift.df, sampling_rate=R),
+            sampling_rate=R,
+            ax=axes,
+        )
+        assert fig2 is fig
+        assert all(a is b for a, b in zip(reused.flat, axes.flat, strict=True))

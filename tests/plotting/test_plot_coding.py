@@ -180,3 +180,40 @@ class TestPlotExitChart:
     def test_errors(self) -> None:
         with pytest.raises(TypeError, match="ExitChart"):
             plot_exit_chart(np.zeros(3))
+
+
+def test_llr_selected_density_overlay(xp: Any) -> None:
+    """Two demappers can be compared on a single selected density panel."""
+    bits = xp.asarray([0, 1] * 300, dtype=xp.int8)
+    llrs = xp.asarray([2.0, -2.0] * 300, dtype=xp.float32)
+    fig, ax = plot_llr_distribution(llrs, bits, quantity="density", label="first")
+    fig2, ax2 = plot_llr_distribution(
+        llrs, bits, quantity="density", label="second", ax=ax, legend=True
+    )
+    assert fig2 is fig and ax2 is ax
+    assert [t.get_text() for t in ax.get_legend().get_texts()] == [
+        "first b = 0",
+        "first b = 1",
+        "second b = 0",
+        "second b = 1",
+    ]
+
+
+def test_parity_check_selected_panels() -> None:
+    """The matrix and degree distribution can be displayed independently."""
+    h = np.asarray([[1, 1, 0], [0, 1, 1]], dtype=np.int8)
+    _, matrix = plot_parity_check(h, quantity="matrix", xlim=(-0.5, 2.5))
+    _, degrees = plot_parity_check(h, quantity="degrees", legend=False)
+    assert matrix.get_xlim() == (-0.5, 2.5)
+    assert len(degrees.patches) > 0
+    assert degrees.get_legend() is None
+    _, degrees = plot_parity_check(h, quantity="degrees", label="first")
+    _, degrees = plot_parity_check(
+        h, quantity="degrees", label="second", ax=degrees, legend=True
+    )
+    assert [t.get_text() for t in degrees.get_legend().get_texts()] == [
+        "first variable nodes",
+        "first check nodes",
+        "second variable nodes",
+        "second check nodes",
+    ]
