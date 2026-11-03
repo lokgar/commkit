@@ -13,6 +13,7 @@ from commkit import _overlap_save, metrics
 from commkit.equalization import zf_equalizer
 from commkit.filtering import ols_fir_filter
 from commkit.mapping import Constellation
+from commkit.metrics import information
 from tests.common.memory import peak_bytes
 
 
@@ -54,7 +55,7 @@ def test_zf_equalizer_workspace() -> None:
 
 def test_mi_workspace(monkeypatch: pytest.MonkeyPatch) -> None:
     """Chunk intermediates of C x chunk x M (whole record: 190x the input)."""
-    monkeypatch.setattr(metrics, "_MI_ELEMENTS", 1 << 16)
+    monkeypatch.setattr(information, "_MI_ELEMENTS", 1 << 16)
     c = Constellation.qam(64)
     rng = np.random.default_rng(0)
     tx = c.points[rng.integers(0, c.order, (2, 1 << 14))]
