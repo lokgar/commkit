@@ -252,11 +252,16 @@ class Chase:
         the largest competitor magnitude of the same word, or, when no
         candidate of the word differs from the decision anywhere, the
         word's largest input ``|LLR|``.
+    soft : bool, default True
+        Compute the soft output.  ``False`` returns ``llrs=None`` and the
+        same decisions, for the 400ZR inner code with 4 test positions in
+        0.44x the time on the CPU and 0.74x on the GPU.
     """
 
     test_positions: int = 4
     hard: Any = None
     beta: float | None = None
+    soft: bool = True
 
     def __post_init__(self) -> None:
         p = self.test_positions
@@ -266,6 +271,8 @@ class Chase:
             )
         if self.beta is not None and self.beta <= 0:
             raise ValueError(f"beta must be positive, got {self.beta}.")
+        if not isinstance(self.soft, bool):
+            raise ValueError(f"soft must be a bool, got {self.soft!r}.")
 
 
 @dataclass(frozen=True)
@@ -304,14 +311,28 @@ class MaximumLikelihood:
     """Soft maximum-likelihood decoding by exhaustive search (``k <= 20``).
 
     The codeword maximizing ``sum_i (1 - 2 c_i) LLR_i`` (minimum Hamming
-    distance for hard decisions), over all ``2^k`` codewords in chunks of
-    one GEMM each.  For small codes and as a test oracle.
+    distance for hard decisions), over all ``2^k`` codewords in chunks (one
+    Numba pass on the CPU, one GEMM on the GPU).  For small codes and as a
+    test oracle.
 
     The soft output is the max-log a-posteriori LLR of each transmitted
     bit: half the difference between the best metrics of the codewords with
     that bit 0 and with it 1, each sum over codewords replaced by its
     largest term.
+
+    Parameters
+    ----------
+    soft : bool, default True
+        Compute the soft output.  ``False`` returns ``llrs=None`` and the
+        same decisions, for Hamming(16, 11) in 0.38x the time on the CPU and
+        0.23x on the GPU.
     """
+
+    soft: bool = True
+
+    def __post_init__(self) -> None:
+        if not isinstance(self.soft, bool):
+            raise ValueError(f"soft must be a bool, got {self.soft!r}.")
 
 
 def _encode(code: LinearBlockCode, bits: ArrayType) -> ArrayType:
@@ -408,14 +429,14 @@ def _decode_ml(
             words = matmul_mod2(u, g)
             _get_numba_ml()(
                 x, 1.0 - 2.0 * words.astype(np.float32), words.astype(np.bool_), w0,
-                best_metric, best, m0, m1,
+                method.soft, best_metric, best, m0, m1,
             )  # fmt: skip
     else:
-        best, m0, m1 = _ml_gemm(llrs, g, k, words_chunk)
+        best, m0, m1 = _ml_gemm(llrs, g, k, words_chunk, method.soft)
     return _Decoded(
         _unpack_bits(best, k),
         # Max-log: half the metric is the log-likelihood up to a constant.
-        0.5 * (m0 - m1),
+        0.5 * (m0 - m1) if method.soft else None,
         xp.ones(rows, dtype=bool),
         xp.ones(rows, dtype=np.int32),
     )
@@ -431,10 +452,11 @@ def _get_numba_ml() -> Any:
 
 
 def _ml_gemm(
-    llrs: ArrayType, g: ArrayType, k: int, words_chunk: int
+    llrs: ArrayType, g: ArrayType, k: int, words_chunk: int, soft: bool
 ) -> tuple[ArrayType, ArrayType, ArrayType]:
     """GPU maximum-likelihood search: correlations by GEMM, chunked over rows
-    and codewords; best codeword index and per-bit maxima ``(m0, m1)``."""
+    and codewords; best codeword index and per-bit maxima ``(m0, m1)``
+    (left at ``-inf`` without ``soft``)."""
     _, xp, _ = dispatch(llrs)
     rows, n = llrs.shape
     num_words = 1 << k
@@ -456,6 +478,8 @@ def _ml_gemm(
             better = value > best_metric
             best_metric = xp.where(better, value, best_metric)
             best_index = xp.where(better, arg + w0, best_index)
+            if not soft:
+                continue
             # Reduced over the codewords by broadcasting, without the
             # (rows, codewords, n) array: 4x faster than building it.
             for bit, out in ((0, m0), (1, m1)):
@@ -516,7 +540,7 @@ def _decode_chase(
     # CPU larger chunks measured slower (cache).
     chunk = max(1, _CHASE_CHUNK // (tests * n * (p if xp is np else 1)))
     bits_out = xp.empty((rows, code.k), dtype=np.int8)
-    llrs_out = xp.empty((rows, n), dtype=xp.float32)
+    llrs_out = xp.empty((rows, n), dtype=xp.float32) if method.soft else None
     valid_out = xp.empty(rows, dtype=bool)
     for r0 in range(0, rows, chunk):
         x = llrs[r0 : r0 + chunk]
@@ -548,11 +572,14 @@ def _decode_chase(
             bits = res.bits.reshape(r, tests, -1)[pick, best]
         else:
             bits = hard_words.information(decided)
+        bits_out[r0 : r0 + r] = bits
+        valid_out[r0 : r0 + r] = any_valid
+        if llrs_out is None:
+            continue
+        if hard_words is not None:
             # Where every test word failed, the decision is the encoding of
             # the first one's bits, as for the decoders without hard words.
             decided = xp.where(any_valid[:, None], decided, _encode_blocks(code, bits))
-        bits_out[r0 : r0 + r] = bits
-        valid_out[r0 : r0 + r] = any_valid
         # Max-log soft output from the candidates of each value of each bit.
         m = metric[:, :, None]
         m0 = xp.where(words == 0, m, -xp.inf).max(axis=1)

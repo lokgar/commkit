@@ -157,10 +157,10 @@ _SELECT_FASTMATH = {"nsz", "arcp", "contract", "afn", "reassoc"}
 
 
 @numba.njit(cache=True, fastmath=_SELECT_FASTMATH, nogil=True, parallel=True)
-def ml_search(x, signs, ones, w0, best_metric, best, m0, m1):  # type: ignore[no-untyped-def]
+def ml_search(x, signs, ones, w0, soft, best_metric, best, m0, m1):  # type: ignore[no-untyped-def]
     """Correlate the rows of ``x`` with codewords ``w0 + w`` (signs ``(W, n)``
-    and bits ``ones``), updating each row's best metric and index and, per
-    bit, the best metric with it 0 (``m0``) and 1 (``m1``)."""
+    and bits ``ones``), updating each row's best metric and index and, with
+    ``soft``, per bit the best metric with it 0 (``m0``) and 1 (``m1``)."""
     num_words, n = signs.shape
     neg = np.float32(-np.inf)
     for r in numba.prange(x.shape[0]):  # type: ignore[attr-defined,no-untyped-call]
@@ -176,6 +176,8 @@ def ml_search(x, signs, ones, w0, best_metric, best, m0, m1):  # type: ignore[no
             if v > bv:
                 bv = v
                 bi = w0 + w
+            if not soft:
+                continue
             for j in range(n):
                 one = ones[w, j]
                 a1[j] = max(a1[j], v if one else neg)

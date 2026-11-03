@@ -255,6 +255,21 @@ class TestMaximumLikelihood:
         best = words[np.argmax(metric, axis=1)]
         np.testing.assert_array_equal(decided, best)
 
+    def test_without_soft_output(self, xp: Any, xpt: Any) -> None:
+        """soft=False: the same decisions, no LLRs."""
+        code = LinearBlockCode.hamming(4, extended=True)
+        llrs = xp.asarray(
+            (0.6 + np.random.default_rng(10).standard_normal(16 * 500)).astype(
+                np.float32
+            )
+        )
+        soft = decode(llrs, code=code, method=MaximumLikelihood())
+        hard = decode(llrs, code=code, method=MaximumLikelihood(soft=False))
+        assert hard.llrs is None and soft.llrs is not None
+        xpt.assert_array_equal(hard.bits, soft.bits)
+        with pytest.raises(ValueError, match="soft must be a bool"):
+            MaximumLikelihood(soft=1)
+
     def test_k_limit(self) -> None:
         with pytest.raises(ValueError, match="exceeds"):
             decode(

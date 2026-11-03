@@ -198,7 +198,9 @@ def error_rate_curve(
     esn0_db : array_like
         Es/N0 of each point, in dB, ``(P,)``.
     method : decoder object, optional
-        The decoder; ``None`` takes the code's default.
+        The decoder; ``None`` takes the code's default.  The curve needs no
+        soft output: ``Chase(..., soft=False)`` and
+        ``MaximumLikelihood(soft=False)`` decode the same bits faster.
     min_block_errors : int, default 100
         Block errors after which a point stops.  The relative standard
         error of the frame error rate is then about ``1/sqrt(min_block_errors)``.

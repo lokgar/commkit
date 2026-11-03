@@ -129,6 +129,26 @@ class TestChase:
             to_device(res.llrs, "cpu").reshape(num, 7), soft, rtol=1e-5, atol=1e-5
         )
 
+    @pytest.mark.parametrize(
+        "hard", [Syndrome(max_weight=1), None], ids=["hard-words", "via-decode"]
+    )
+    def test_without_soft_output(self, xp: Any, xpt: Any, hard: Any) -> None:
+        """soft=False: the same decisions and success flags, no LLRs, on both
+        paths (the syndrome table's words, and decode of the test words)."""
+        code = LinearBlockCode.hamming(4, extended=True)
+        llrs = xp.asarray(
+            (0.6 + np.random.default_rng(11).standard_normal(16 * 500)).astype(
+                np.float32
+            )
+        )
+        soft = decode(llrs, code=code, method=Chase(3, hard=hard))
+        fast = decode(llrs, code=code, method=Chase(3, hard=hard, soft=False))
+        assert fast.llrs is None and soft.llrs is not None
+        xpt.assert_array_equal(fast.bits, soft.bits)
+        xpt.assert_array_equal(fast.valid, soft.valid)
+        with pytest.raises(ValueError, match="soft must be a bool"):
+            Chase(soft="no")
+
     def test_bch_beyond_t(self, xp: Any, xpt: Any) -> None:
         """Three errors in BCH(31, 21) (t = 2) on the least reliable bits:
         hard decoding fails, Chase corrects."""

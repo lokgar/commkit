@@ -401,7 +401,7 @@ def decoder_exit_curve(
                 f"decoder_exit_curve(): {method!r} returns no a-posteriori LLRs, so "
                 "it has no EXIT curve; use a soft-output decoder (MinSum or "
                 "SumProduct for LDPC codes, BCJR, TurboIterations, Chase, "
-                "MaximumLikelihood)."
+                "MaximumLikelihood; not soft=False)."
             )
         extrinsic[i] = _information(res.llrs - a_priori, bits)
         logger.debug("  I_A = %.3f: I_E = %.4f", ia, extrinsic[i])

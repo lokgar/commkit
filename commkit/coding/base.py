@@ -84,7 +84,10 @@ class DecodeResult:
     those of the transmitted bits; :class:`Punctured`, :class:`Shortened`
     and :class:`PAS` return their code's, at the transmitted positions.
     ``iterations`` counts the configured iterations of turbo decoding (no
-    early stop) and the passes of :class:`HardIterations`.
+    early stop) and the passes of :class:`HardIterations`.  :class:`Chase`
+    and :class:`MaximumLikelihood` skip their soft output with
+    ``soft=False``: ``llrs`` is ``None``, the decisions are the same and
+    come faster.
     """
 
     bits: Any

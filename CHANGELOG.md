@@ -18,12 +18,15 @@ Error-rate curves for every code, decoders that say what they checked, and one n
 - `coding.error_rate_curve(code, constellation=, esn0_db=, ...)` measures a code's BER, FER and pre-FEC BER over AWGN by Monte Carlo. Each point stops after `min_block_errors` block errors or `max_blocks` blocks. It returns an `ErrorRateCurve` of counts, which you can also build from your own simulation loop.
 - `plotting.plot_error_rate(curves)`: BER and FER against Es/N0 or Eb/N0, with 95 % intervals on the FER and the pre-FEC BER for reference, plus a panel splitting failures into detected and undetected ones.
 - Soft output from more decoders: `TurboIterations` (a-posteriori LLRs of the last iteration), `MaximumLikelihood` (max-log) and `Concatenated` (the inner decoder's LLRs). `decoder_exit_curve` now covers turbo and maximum-likelihood decoding.
+- `Chase(..., soft=False)` and `MaximumLikelihood(soft=False)` skip the soft output when only the decisions matter (`llrs` is `None`, the bits are the same).
 - `compute_llr`, `mi`, `gmi` and `ngmi` take `esn0_db=` instead of `noise_var`, and convert it for real or complex symbols.
 - `plot_llr_distribution(res, sig)` takes a `DecodeResult` and the transmitted Signal or Reference, as `ber` does.
 
 ### Performance
 
-- `MaximumLikelihood` now computes the soft output too: 16384 Hamming(16, 11) words take 1.7x as long on the CPU (fused Numba search) and 3.8x on the GPU. Turbo decoding is unchanged (1.00).
+- `MaximumLikelihood` searches the codewords in one Numba pass on the CPU. For 16384 Hamming(16, 11) words (paired A/B against 3.3.0, 7 runs), decisions alone (`soft=False`) take 0.62x the time on the CPU and 1.0x on the GPU; with the new soft output, 1.55x and 4.3x.
+- `Chase(soft=False)`: 0.44x the time of the default on the CPU and 0.74x on the GPU (400ZR Hamming(128, 119), 4 test positions, 4096 words).
+- Turbo decoding is unchanged (1.00), now with its soft output.
 
 ## [3.3.0] - 2026-11-03
 
