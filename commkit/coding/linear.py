@@ -47,7 +47,8 @@ _MAX_TABLE_BITS = 1 << 26
 _MAX_PATTERNS = 1 << 22
 # Largest k of MaximumLikelihood.
 _MAX_ML_K = 20
-# Elements of one (rows, codewords) correlation chunk of MaximumLikelihood.
+# Codeword bits per chunk of MaximumLikelihood, and elements of one (rows,
+# codewords) correlation chunk on the GPU.
 _ML_CHUNK = 1 << 24
 # Elements of one (rows, test patterns, n) chunk of Chase.
 _CHASE_CHUNK = 1 << 23
@@ -305,6 +306,11 @@ class MaximumLikelihood:
     The codeword maximizing ``sum_i (1 - 2 c_i) LLR_i`` (minimum Hamming
     distance for hard decisions), over all ``2^k`` codewords in chunks of
     one GEMM each.  For small codes and as a test oracle.
+
+    The soft output is the max-log a-posteriori LLR of each transmitted
+    bit: half the difference between the best metrics of the codewords with
+    that bit 0 and with it 1, each sum over codewords replaced by its
+    largest term.
     """
 
 
@@ -388,31 +394,99 @@ def _decode_ml(
     (g,) = _device_tables(
         code, "generator", xp, lambda: (code.generator.astype(np.float32),)
     )
-    rows = llrs.shape[0]
+    rows, n = llrs.shape
     num_words = 1 << k
-    words_chunk = min(num_words, max(1, _ML_CHUNK // code.n))
+    words_chunk = min(num_words, max(1, _ML_CHUNK // n))
+    if xp is np:
+        best_metric = np.full(rows, -np.inf, dtype=np.float32)
+        best = np.zeros(rows, dtype=np.int64)
+        m0 = np.full((rows, n), -np.inf, dtype=np.float32)
+        m1 = np.full((rows, n), -np.inf, dtype=np.float32)
+        x = np.ascontiguousarray(llrs, dtype=np.float32)
+        for w0 in range(0, num_words, words_chunk):
+            u = _unpack_bits(np.arange(w0, min(w0 + words_chunk, num_words)), k)
+            words = matmul_mod2(u, g)
+            _get_numba_ml()(
+                x, 1.0 - 2.0 * words.astype(np.float32), words.astype(np.bool_), w0,
+                best_metric, best, m0, m1,
+            )  # fmt: skip
+    else:
+        best, m0, m1 = _ml_gemm(llrs, g, k, words_chunk)
+    return _Decoded(
+        _unpack_bits(best, k),
+        # Max-log: half the metric is the log-likelihood up to a constant.
+        0.5 * (m0 - m1),
+        xp.ones(rows, dtype=bool),
+        xp.ones(rows, dtype=np.int32),
+    )
+
+
+def _get_numba_ml() -> Any:
+    """Numba maximum-likelihood search over a chunk of codewords, parallel over
+    rows: each row's correlations with the chunk, its best codeword, and per
+    bit the best correlation with the bit 0 and with it 1."""
+    from . import _numba_loops
+
+    return _numba_loops.ml_search
+
+
+def _ml_gemm(
+    llrs: ArrayType, g: ArrayType, k: int, words_chunk: int
+) -> tuple[ArrayType, ArrayType, ArrayType]:
+    """GPU maximum-likelihood search: correlations by GEMM, chunked over rows
+    and codewords; best codeword index and per-bit maxima ``(m0, m1)``."""
+    _, xp, _ = dispatch(llrs)
+    rows, n = llrs.shape
+    num_words = 1 << k
     rows_chunk = max(1, _ML_CHUNK // words_chunk)
     best = xp.empty(rows, dtype=xp.int64)
+    m0 = xp.full((rows, n), -np.inf, dtype=xp.float32)
+    m1 = xp.full((rows, n), -np.inf, dtype=xp.float32)
+    reduce = _bit_max_kernel()
     for r0 in range(0, rows, rows_chunk):
         x = llrs[r0 : r0 + rows_chunk]
         best_metric = xp.full(x.shape[0], -np.inf, dtype=xp.float32)
         best_index = xp.zeros(x.shape[0], dtype=xp.int64)
         for w0 in range(0, num_words, words_chunk):
             u = _unpack_bits(xp.arange(w0, min(w0 + words_chunk, num_words)), k)
-            signs = 1.0 - 2.0 * matmul_mod2(u, g).astype(xp.float32)
-            metric = x @ signs.T
+            words = matmul_mod2(u, g)
+            metric = x @ (1.0 - 2.0 * words.astype(xp.float32)).T
             arg = xp.argmax(metric, axis=1)
             value = xp.take_along_axis(metric, arg[:, None], axis=1)[:, 0]
             better = value > best_metric
             best_metric = xp.where(better, value, best_metric)
             best_index = xp.where(better, arg + w0, best_index)
+            # Reduced over the codewords by broadcasting, without the
+            # (rows, codewords, n) array: 4x faster than building it.
+            for bit, out in ((0, m0), (1, m1)):
+                part = out[r0 : r0 + rows_chunk]
+                xp.maximum(
+                    part,
+                    reduce(metric[:, :, None], words[None], np.int8(bit), axis=1),
+                    out=part,
+                )
         best[r0 : r0 + rows_chunk] = best_index
-    return _Decoded(
-        _unpack_bits(best, k),
-        None,
-        xp.ones(rows, dtype=bool),
-        xp.ones(rows, dtype=np.int32),
-    )
+    return best, m0, m1
+
+
+_BIT_MAX: dict[str, Any] = {}
+
+
+def _bit_max_kernel() -> Any:
+    """CuPy reduction: the best metric over the codewords whose bit is ``bit``."""
+    if "k" not in _BIT_MAX:
+        import cupy as cp
+
+        _BIT_MAX["k"] = cp.ReductionKernel(
+            "float32 m, int8 c, int8 bit",
+            "float32 y",
+            "c == bit ? m : -__int_as_float(0x7f800000)",
+            "max(a, b)",
+            "y = a",
+            "-__int_as_float(0x7f800000)",
+            "commkit_ml_bit_max",
+        )
+    return _BIT_MAX["k"]
 
 
 class _HardWords(NamedTuple):

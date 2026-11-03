@@ -383,7 +383,9 @@ class Concatenated(_Code):
     ``n = ceil(outer.n / inner.k) inner.n``.  Decoding
     runs the inner decoder, passes its a-posteriori LLRs of the
     information bits on (hard decisions as +-1 for hard-output decoders),
-    and runs the outer decoder.
+    and runs the outer decoder.  The a-posteriori LLRs of the result are
+    the inner decoder's (``None`` for a hard-output one), the success check
+    the outer decoder's.
     """
 
     outer: Any
@@ -525,7 +527,8 @@ def _decode_concatenated(
     if code.interleaver is not None:
         soft = deinterleave(soft, interleaver=code.interleaver)
     out = _decode_blocks(code.outer, soft, method.outer)
-    return out._replace(llrs=None)
+    # The inner code's LLRs are those of the transmitted bits.
+    return out._replace(llrs=None if res.llrs is None else res.llrs.reshape(rows, -1))
 
 
 def _encode_repeat(code: _Repeat, bits: ArrayType) -> ArrayType:

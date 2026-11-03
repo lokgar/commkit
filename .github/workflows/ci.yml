@@ -119,6 +119,7 @@ jobs:
           tests/coding/test_polar.py::TestDecoding::test_crc_failure_keeps_the_best_path
           tests/coding/test_convolutional.py tests/coding/test_turbo.py::TestEncoding
           tests/coding/test_turbo.py::TestDecoding::test_noiseless
+          tests/coding/test_linear_codes.py::TestMaximumLikelihood
           -k "not waterfall and not threshold"
           --device=cpu --cov=commkit --cov-report=
 

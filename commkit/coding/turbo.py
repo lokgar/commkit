@@ -12,7 +12,10 @@ transmitted one after the other, ``n = 3 K + 12`` (no rate matching).
 
 :class:`TurboIterations` decodes iteratively with two BCJR decoders
 exchanging extrinsic LLRs, the forward-backward recursion of
-:mod:`commkit.coding.convolutional`.  Encoding and decoding are sequential
+:mod:`commkit.coding.convolutional`.  The a-posteriori LLRs of the
+transmitted bits come from the last iteration: the systematic bits from
+the second decoder (which decide them), each parity stream and its tail
+bits from the decoder that reads it.  Encoding and decoding are sequential
 per block: Numba over blocks on the CPU, and GPU input makes one round
 trip.
 """
@@ -209,14 +212,15 @@ def _decode(code: TurboCode, llrs: ArrayType, method: TurboIterations) -> _Decod
         else (1.0 if method.method == "exact" else 0.7)
     )
     bits = np.empty((rows, code.k), dtype=np.int8)
+    app = np.empty((rows, code.n), dtype=np.float32)
     _get_numba_turbo("decode")(
         host, code.interleaver, _RSC.next, _RSC.outputs, _RSC.tail, method.iterations,
-        method.method == "exact", scale, bits,
+        method.method == "exact", scale, bits, app,
     )  # fmt: skip
     device = "cpu" if xp is np else "gpu"
     return _Decoded(
         to_device(bits, device),
-        None,
+        to_device(app, device),
         xp.ones(rows, dtype=bool),
         xp.full(rows, method.iterations, dtype=np.int32),
     )

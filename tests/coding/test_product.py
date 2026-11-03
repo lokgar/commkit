@@ -292,6 +292,23 @@ class TestConcatenated:
             post = metrics.ber(res.bits, sig.reference.info_bits)
             assert (post == 0.0) == decodes, (pre, post)
 
+    def test_llrs_are_the_inner_decoders(self, xp: Any, xpt: Any) -> None:
+        """The soft output is the inner decoder's, of the transmitted bits;
+        a hard-output inner decoder gives none."""
+        outer = LinearBlockCode.hamming(4)
+        inner = LinearBlockCode.hamming(3)
+        code = Concatenated(outer, inner, Interleaver.random(15, rng=0))
+        u = random_bits(11 * 30, xp, seed=12)
+        c = encode(u, code=code)
+        rng = np.random.default_rng(13)
+        noise = xp.asarray(rng.standard_normal(c.shape).astype(np.float32))
+        llrs = (2.0 * (1.0 - 2.0 * c) + noise).astype(xp.float32)
+        chase = Chase(2)
+        res = decode(llrs, code=code, method=Stages(inner=chase))
+        xpt.assert_array_equal(res.llrs, decode(llrs, code=inner, method=chase).llrs)
+        assert res.llrs.shape == c.shape
+        assert decode(llrs, code=code).llrs is None  # Syndrome: hard output
+
     def test_ieee_802_3dj(self, xp: Any, xpt: Any) -> None:
         code = Concatenated.ieee_802_3dj()
         assert (code.n, code.k) == (136 * 128, 3 * 5140)

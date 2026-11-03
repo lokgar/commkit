@@ -68,9 +68,9 @@ class DecodeResult:
     :class:`MinSum`,                 yes           yes (syndrome)
     :class:`SumProduct` (LDPC)
     :class:`BCJR`                    yes           no
-    :class:`TurboIterations`         no            no
+    :class:`TurboIterations`         yes           no
     :class:`Chase`                   yes           as its hard decoder
-    :class:`MaximumLikelihood`       no            no
+    :class:`MaximumLikelihood`       yes (max-log) no
     :class:`Syndrome`                no            unless every syndrome
                                                    has a coset leader
     :class:`BerlekampMassey`         no            yes
@@ -80,9 +80,9 @@ class DecodeResult:
     :class:`CRC`, :class:`CCDM`      no            yes
     ===============================  ============  ======================
 
-    :class:`Concatenated` returns no ``llrs``; :class:`Punctured`,
-    :class:`Shortened` and :class:`PAS` return their code's, at the
-    transmitted positions.
+    :class:`Concatenated` returns the inner decoder's ``llrs``, which are
+    those of the transmitted bits; :class:`Punctured`, :class:`Shortened`
+    and :class:`PAS` return their code's, at the transmitted positions.
     ``iterations`` counts the configured iterations of turbo decoding (no
     early stop) and the passes of :class:`HardIterations`.
     """

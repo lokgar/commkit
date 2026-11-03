@@ -217,6 +217,44 @@ class TestMaximumLikelihood:
         )
         xpt.assert_array_equal(res.bits, xp.asarray(u.reshape(-1).astype(np.int8)))
 
+    @pytest.mark.parametrize("chunk", [None, 64], ids=["whole", "chunked"])
+    def test_soft_output_is_brute_force_max_log(
+        self, xp: Any, xpt: Any, chunk: int | None, monkeypatch
+    ) -> None:
+        """Bit ``i``'s LLR is half the gap between the best correlations
+        ``Σ (1 - 2c) LLR`` of the codewords with ``c_i = 0`` and ``c_i = 1``,
+        computed here over the full codeword list; also when the rows and
+        codewords are chunked."""
+        code = LinearBlockCode(
+            generator=np.concatenate(
+                [np.eye(6, dtype=int), np.random.default_rng(7).integers(0, 2, (6, 6))],
+                axis=1,
+            )
+        )
+        if chunk is not None:
+            monkeypatch.setattr(linear_module, "_ML_CHUNK", chunk)
+        llrs = (0.7 + np.random.default_rng(9).standard_normal((200, code.n))).astype(
+            np.float32
+        )
+        words = _codewords(code)
+        metric = llrs.astype(np.float64) @ (1 - 2 * words).T  # (rows, 2^k)
+        m0 = np.stack(
+            [metric[:, words[:, i] == 0].max(axis=1) for i in range(code.n)], axis=1
+        )
+        m1 = np.stack(
+            [metric[:, words[:, i] == 1].max(axis=1) for i in range(code.n)], axis=1
+        )
+        res = decode(
+            xp.asarray(llrs.reshape(-1)), code=code, method=MaximumLikelihood()
+        )
+        xpt.assert_allclose(
+            res.llrs, xp.asarray((0.5 * (m0 - m1)).reshape(-1)), rtol=1e-5, atol=1e-5
+        )
+        # The decision is the codeword the soft output points to.
+        decided = (to_device(res.llrs, "cpu") < 0).reshape(-1, code.n)
+        best = words[np.argmax(metric, axis=1)]
+        np.testing.assert_array_equal(decided, best)
+
     def test_k_limit(self) -> None:
         with pytest.raises(ValueError, match="exceeds"):
             decode(
