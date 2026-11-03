@@ -474,6 +474,8 @@ for _cls, _dec, _methods in (
             decode=_dec,
             default_method=lambda code: BerlekampMassey(),
             methods=_methods,
+            # Chase is checked when its hard decoder (BerlekampMassey) is.
+            checked=lambda code, method: True,
             info_positions=lambda code: np.arange(code.k),
         ),
     )

@@ -21,6 +21,7 @@ import numpy as np
 
 from ..backend import ArrayType, _device_tables, dispatch
 from .base import (
+    _checked,
     _Code,
     _Codec,
     _codec,
@@ -207,6 +208,7 @@ for _cls, _enc, _dec, _info in (
             # The inner code's decoders, resolved (and checked) on the inner code.
             default_method=lambda code: _resolve_method(code.code, None, "decode()"),
             methods=(object,),
+            checked=lambda code, method: _checked(code.code, method),
             info_positions=_info,
         ),
     )

@@ -440,6 +440,7 @@ _register(
         decode=_decode_ccdm,
         default_method=lambda code: _Dematch(),
         methods=(_Dematch,),
+        checked=lambda code, method: True,
         host=True,
     ),
 )
@@ -450,6 +451,7 @@ _register(
         decode=_decode_pas,
         default_method=lambda code: _resolve_method(code.code, None, "decode()"),
         methods=(object,),
+        checked=lambda code, method: True,  # the matcher's composition check
         host=True,
     ),
 )

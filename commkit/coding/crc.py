@@ -239,6 +239,7 @@ _register(
         decode=_decode,
         default_method=lambda code: _Check(),
         methods=(_Check,),
+        checked=lambda code, method: True,
         info_positions=lambda code: np.arange(code.k),
     ),
 )

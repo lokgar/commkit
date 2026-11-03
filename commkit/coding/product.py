@@ -39,6 +39,7 @@ from ._galois import _Field
 from ._gf2 import matmul_mod2
 from .algebraic import _Algebraic, _correct
 from .base import (
+    _checked,
     _Code,
     _Codec,
     _codec,
@@ -550,6 +551,7 @@ _register(
         decode=_decode_staircase,
         default_method=lambda code: HardIterations(),
         methods=(HardIterations,),
+        checked=lambda code, method: True,
     ),
 )
 _register(
@@ -559,6 +561,8 @@ _register(
         decode=_decode_concatenated,
         default_method=lambda code: Stages(),
         methods=(Stages,),
+        # valid is the outer decoder's.
+        checked=lambda code, method: _checked(code.outer, method.outer),
     ),
 )
 _register(
@@ -568,5 +572,6 @@ _register(
         decode=_decode_repeat,
         default_method=lambda code: _resolve_method(code.code, None, "decode()"),
         methods=(object,),
+        checked=lambda code, method: _checked(code.code, method),
     ),
 )

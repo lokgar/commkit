@@ -28,6 +28,7 @@ from ..backend import ArrayType, _device_tables, dispatch
 from ..mapping.gray import _pack, _unpack_bits
 from ._gf2 import matmul_mod2, null_space, row_reduce
 from .base import (
+    _checked,
     _Code,
     _Codec,
     _decode_blocks,
@@ -530,6 +531,21 @@ def _decode(code: LinearBlockCode, llrs: ArrayType, method: object) -> _Decoded:
     return _decode_syndrome(code, llrs, method)
 
 
+def _linear_checked(code: LinearBlockCode, method: object) -> bool:
+    if isinstance(method, Chase):
+        return _checked(code, method.hard)
+    if isinstance(method, Syndrome):
+        # Complete decoding (every syndrome has a coset leader) never fails.
+        *_, found = _device_tables(
+            code,
+            f"syndrome:{method.max_weight}",
+            np,
+            lambda: _syndrome_table(code, method.max_weight),
+        )
+        return not bool(found.all())
+    return False
+
+
 _register(
     LinearBlockCode,
     _Codec(
@@ -537,6 +553,7 @@ _register(
         decode=_decode,
         default_method=lambda code: Syndrome(),
         methods=(Syndrome, MaximumLikelihood, Chase),
+        checked=_linear_checked,
         info_positions=lambda code: code._unmix[0] if code._unmix[1] is None else None,
     ),
 )

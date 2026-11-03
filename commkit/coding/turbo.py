@@ -229,6 +229,7 @@ _register(
         decode=_decode,
         default_method=lambda code: TurboIterations(),
         methods=(TurboIterations,),
+        checked=lambda code, method: False,
         host=True,
     ),
 )

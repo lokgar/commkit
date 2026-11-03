@@ -297,5 +297,6 @@ _register(
         decode=_decode,
         default_method=lambda code: Viterbi(),
         methods=(Viterbi, BCJR),
+        checked=lambda code, method: False,
     ),
 )

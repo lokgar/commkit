@@ -12,11 +12,29 @@ from unittest.mock import patch
 import numpy as np
 import pytest
 
-from commkit import PrecisionWarning, backend
+from commkit import Constellation, PrecisionWarning, backend
 from commkit.coding import (
+    BCJR,
+    CCDM,
+    CRC,
+    SC,
+    SCL,
+    BCHCode,
+    Chase,
+    Concatenated,
+    ConvolutionalCode,
+    LDPCCode,
     LinearBlockCode,
     MaximumLikelihood,
+    MinSum,
+    PolarCode,
+    Punctured,
+    ReedSolomonCode,
+    Shortened,
+    SumProduct,
     Syndrome,
+    TurboCode,
+    Viterbi,
     base,
     decode,
     encode,
@@ -82,6 +100,7 @@ class TestDecode:
         assert res.valid.shape == (2, 3) and res.valid.dtype == bool
         assert res.iterations.shape == (2, 3) and res.iterations.dtype == np.int32
         assert res.llrs is None
+        assert res.checked is False  # Hamming(7, 4) is perfect
         res1 = decode(llrs[0], code=H74)
         assert res1.bits.shape == (12,) and res1.valid.shape == (3,)
 
@@ -131,6 +150,13 @@ class TestDecodeLogging:
         assert "Decoded 3 block(s)" in lines[0]
         assert "1 failed the decoder's check." in lines[0]
 
+    def test_logs_no_check(self, xp: Any, caplog: Any) -> None:
+        """A decoder without a success check does not report zero failures."""
+        with caplog.at_level(logging.INFO, logger="commkit"):
+            decode(xp.ones(7, dtype=xp.float32), code=H74, method=MaximumLikelihood())
+        (line,) = [r.message for r in caplog.records if r.levelno == logging.INFO]
+        assert "the decoder has no success check." in line
+
     def test_no_op_when_info_disabled(self, xp: Any, caplog: Any) -> None:
         """No log line and no host transfer when INFO is off."""
         with (
@@ -140,6 +166,76 @@ class TestDecodeLogging:
             decode(xp.ones(7, dtype=xp.float32), code=H74)
         transfer.assert_not_called()
         assert not caplog.records
+
+
+H16 = LinearBlockCode.hamming(4, extended=True)  # (16, 11), distance 4
+
+# (code, method, checked): whether each decoder's valid can be False.
+CHECKED_CASES = [
+    (H74, Syndrome(), False),  # perfect code: every syndrome has a leader
+    (H74, Syndrome(max_weight=1), False),
+    (H16, Syndrome(), False),  # complete decoding
+    (H16, Syndrome(max_weight=1), True),  # detects double errors
+    (H16, MaximumLikelihood(), False),
+    (H16, Chase(2, hard=Syndrome(max_weight=1)), True),
+    (H74, Chase(2), False),
+    (BCHCode(4, 2), None, True),
+    (BCHCode(4, 2), Chase(2), True),
+    (ReedSolomonCode.kp4(), None, True),
+    (LDPCCode.dvbs2("1/2", "short"), MinSum(), True),
+    (LDPCCode.dvbs2("1/2", "short"), SumProduct(), True),
+    (PolarCode.nr(k=32, n=64), SC(), False),
+    (PolarCode.nr(k=32, n=64, crc="11"), SCL(4), True),
+    (ConvolutionalCode.k7(32), Viterbi(), False),
+    (ConvolutionalCode.k7(32), BCJR(), False),
+    (TurboCode.lte(40), None, False),
+    (CRC.nr("6", 10), None, True),
+    (CCDM(Constellation.pam(2), num_symbols=4), None, True),
+    (Punctured(H16, [15]), Syndrome(max_weight=1), True),
+    (Shortened(H16, 2), Syndrome(), False),
+    (Concatenated.ieee_802_3dj(), None, True),
+    # valid is the outer decoder's, so a checked inner code does not count.
+    (Concatenated(H74, CRC.nr("6", 7)), None, False),
+]
+
+
+def _case_id(case: Any) -> str:
+    code, method, _ = case
+    return f"{code!r}-{type(method).__name__}"
+
+
+class TestChecked:
+    @pytest.mark.parametrize("case", CHECKED_CASES, ids=_case_id)
+    def test_flag(self, case: Any, xp: Any) -> None:
+        """Set per code and decoder, also for empty input (nothing decoded)."""
+        code, method, expected = case
+        res = decode(xp.zeros(0, dtype=xp.float32), code=code, method=method)
+        assert res.checked is expected
+        assert base._checked(code, method) is expected
+
+    @pytest.mark.parametrize(
+        "case",
+        [
+            c
+            for c in CHECKED_CASES
+            if c[0].n <= 1000
+            and not isinstance(c[0], CCDM)
+            # A test word flipping an odd number of bits always has a single
+            # error's syndrome, so this Chase never fails.
+            and not (c[0] == H16 and isinstance(c[1], Chase))
+        ],
+        ids=_case_id,
+    )
+    def test_valid_follows_the_flag(self, case: Any, xp: Any) -> None:
+        """LLRs of random words (not codewords): an unchecked decoder reports
+        every block valid; a checked one flags some of the 64."""
+        code, method, expected = case
+        rng = np.random.default_rng(3)
+        llrs = xp.asarray(rng.normal(0.0, 1.0, 64 * code.n).astype(np.float32))
+        res = decode(llrs, code=code, method=method)
+        assert res.checked is expected
+        flagged = int(xp.count_nonzero(~res.valid))
+        assert flagged > 0 if expected else flagged == 0
 
 
 class TestCodeValue:
