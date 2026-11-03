@@ -329,5 +329,6 @@ _register(
         decode=_decode,
         default_method=lambda code: SCL(),
         methods=(SC, SCL),
+        checked=lambda code, method: code.crc is not None,
     ),
 )

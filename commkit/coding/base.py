@@ -46,17 +46,55 @@ class DecodeResult:
         A-posteriori LLRs of the transmitted bits, float32, ``(..., B * n)``,
         from soft-output decoders; ``None`` otherwise.
     valid : ndarray
-        Per block, ``(..., B)`` bool: the decoder's own success check
-        (syndrome zero, CRC passed).  Detected success, not true success.
+        Per block, ``(..., B)`` bool: no failure detected by the decoder's
+        own success check (syndrome zero, CRC passed); ``True`` for every
+        block where ``checked`` is ``False``.  Detected success, not true
+        success.
     iterations : ndarray
         Iterations used per block, ``(..., B)`` int32 (1 for one-shot
         decoders).
+    checked : bool
+        Whether ``valid`` comes from a check that can fail.  A composite
+        code is checked when any of its parts is, except
+        :class:`Concatenated`, whose ``valid`` is the outer decoder's.
+
+    Notes
+    -----
+    What each decoder fills:
+
+    ===============================  ============  ======================
+    Decoder                          ``llrs``      ``checked``
+    ===============================  ============  ======================
+    :class:`MinSum`,                 yes           yes (syndrome)
+    :class:`SumProduct` (LDPC)
+    :class:`BCJR`                    yes           no
+    :class:`TurboIterations`         yes           no
+    :class:`Chase`                   yes           as its hard decoder
+    :class:`MaximumLikelihood`       yes (max-log) no
+    :class:`Syndrome`                no            unless every syndrome
+                                                   has a coset leader
+    :class:`BerlekampMassey`         no            yes
+    :class:`HardIterations`          no            yes
+    :class:`SC`, :class:`SCL`        no            with a CRC
+    :class:`Viterbi`                 no            no
+    :class:`CRC`, :class:`CCDM`      no            yes
+    ===============================  ============  ======================
+
+    :class:`Concatenated` returns the inner decoder's ``llrs``, which are
+    those of the transmitted bits; :class:`Punctured`, :class:`Shortened`
+    and :class:`PAS` return their code's, at the transmitted positions.
+    ``iterations`` counts the configured iterations of turbo decoding (no
+    early stop) and the passes of :class:`HardIterations`.  :class:`Chase`
+    and :class:`MaximumLikelihood` skip their soft output with
+    ``soft=False``: ``llrs`` is ``None``, the decisions are the same and
+    come faster.
     """
 
     bits: Any
     llrs: Any | None
     valid: Any
     iterations: Any
+    checked: bool
 
 
 class _Decoded(NamedTuple):
@@ -129,6 +167,9 @@ class _Codec:
     decode: Callable[[Any, ArrayType, Any], _Decoded]  # (code, (R, n), method)
     default_method: Callable[[Any], Any]
     methods: tuple[type, ...]
+    # Whether the decoder's valid comes from a check that can fail:
+    # (code, resolved method) -> bool.
+    checked: Callable[[Any, Any], bool]
     # Codeword positions of the information bits, for systematic codes.
     info_positions: Callable[[Any], np.ndarray | None] | None = None
     # Sequential on the host (distribution matchers): GPU input round-trips,
@@ -164,6 +205,12 @@ def _resolve_method(code: Any, method: Any, function_name: str) -> Any:
             f"{type(code).__name__}; use one of {names}."
         )
     return method
+
+
+def _checked(code: Any, method: Any = None) -> bool:
+    """Whether ``method`` (``None``: the default) reports failures of ``code``."""
+    method = _resolve_method(code, method, "decode()")
+    return bool(_codec(code, "decode()").checked(code, method))
 
 
 def _blocks(x: ArrayType, size: int, name: str, function_name: str) -> ArrayType:
@@ -273,22 +320,26 @@ def encode(bits: ArrayType, *, code: Any) -> ArrayType:
     return restore_1d(was_1d, out.reshape(x2.shape[0], num_blocks * code.n))
 
 
-def _log_decode(res: _Decoded, code: Any, method: Any) -> None:
+def _log_decode(res: _Decoded, code: Any, method: Any, checked: bool) -> None:
     """Log the decoder's own success check and iterations (INFO level)."""
-    # Two (R,) transfers, made only when INFO is enabled.
+    # Up to two (R,) transfers, made only when INFO is enabled.
     if not logger.isEnabledFor(logging.INFO) or res.valid.size == 0:
         return
-    valid = to_device(res.valid, "cpu")
     iterations = to_device(res.iterations, "cpu")
-    failed = int(valid.size - np.count_nonzero(valid))
+    if checked:
+        valid = to_device(res.valid, "cpu")
+        failed = int(valid.size - np.count_nonzero(valid))
+        outcome = f"{failed} failed the decoder's check"
+    else:
+        outcome = "the decoder has no success check"
     most = int(iterations.max())
     used = f", iterations mean {float(iterations.mean()):.1f}, max {most}"
     logger.info(
-        "Decoded %d block(s) of %r with %r: %d failed the decoder's check%s.",
-        valid.size,
+        "Decoded %d block(s) of %r with %r: %s%s.",
+        iterations.size,
         code,
         method,
-        failed,
+        outcome,
         used if most > 1 else "",
     )
 
@@ -314,7 +365,8 @@ def decode(llrs: ArrayType, *, code: Any, method: Any = None) -> DecodeResult:
     -------
     DecodeResult
         Decoded information bits, a-posteriori LLRs (soft-output decoders),
-        and per block the success check and the iterations used.
+        per block the success check and the iterations used, and whether
+        the check can fail.
 
     Raises
     ------
@@ -346,10 +398,12 @@ def decode(llrs: ArrayType, *, code: Any, method: Any = None) -> DecodeResult:
             return None
         return restore_1d(was_1d, a.reshape(x2.shape[0], num_blocks * size))
 
-    _log_decode(res, code, method)
+    checked = _checked(code, method)
+    _log_decode(res, code, method, checked)
     return DecodeResult(
         bits=shaped(res.bits, code.k),
         llrs=shaped(res.llrs, code.n),
         valid=shaped(res.valid, 1),
         iterations=shaped(res.iterations, 1),
+        checked=checked,
     )

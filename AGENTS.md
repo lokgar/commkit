@@ -119,7 +119,7 @@ Dependencies point downward only:
   - What the channel adds (AWGN, phase noise, ASE) is drawn on the data's device through `_random.standard_normal` / `complex_normal`; realizations differ between devices, statistics agree.
   - A seed is reproducible within a library version only. Tests and baselines assert statistics, never exact realizations.
 - **Device follows the data.** No `backend=` arguments, no global switches. Unsupported array types (JAX, PyTorch) raise `TypeError`.
-  - Only factories with no input data to follow take `device: str = "cpu"` (never "GPU if available"): `generate`, `generate_phase_noise`, `Preamble`/`SingleCarrierFrame.to_signal`, `load_npz`, `decoder_exit_curve`, `demapper_exit_curve`. They validate it with `require_device()` (in `coding`, by the same check in `coding.exit`), draw randomness as above and do the vectorized work on `device`.
+  - Only factories with no input data to follow take `device: str = "cpu"` (never "GPU if available"): `generate`, `generate_phase_noise`, `Preamble`/`SingleCarrierFrame.to_signal`, `load_npz`, `decoder_exit_curve`, `demapper_exit_curve`, `error_rate_curve`. They validate it with `require_device()` (in `coding`, by the same check in `coding.exit`), draw randomness as above and do the vectorized work on `device`.
 
 ### Returns
 
@@ -146,6 +146,7 @@ Dependencies point downward only:
 - Computations use plain nouns (`allan_deviation`).
 - **Glossary**, one name each:
   - `num_taps`, `step_size`, `sps`, `constellation`, `pulse`, `rng`, `num_symbols`, `num_channels` (never streams), `sampling_rate`, `symbol_rate`, `noise_var`, `nfft`, `regularization`, `max_iterations`.
+  - Noise has three names, each with one meaning: `noise_var` is the variance E|n|² of the noise in the samples a function receives (measured by `estimate_noise_variance`); `snr_db` a power ratio in those samples (measured by `snr`); `esn0_db` the channel's textbook Es/N0, independent of the dtype (real samples carry the in-phase half of the noise, `N0/2`). A function taking `noise_var` for a demapping model (`compute_llr`, `mi`, `gmi`, `ngmi`) uses the likelihood of complex or real noise after the samples' dtype and also accepts `esn0_db`, so users never convert by hand.
   - A size names its unit: `num_symbols`, `num_blocks` (codewords of a FEC code), `info_bits` (a code's information length where it is a parameter), `blocks_per_frame`, `num_variables`, `num_segments`. In `coding`, `length` and `n` mean the codeword length in bits and `k` the information length, nothing else.
   - A seeded part of a factory takes `<part>_rng` (`payload_rng`), with the semantics of `rng`.
   - `method=` strings name only a numerical flavor of one algorithm (`method="maxlog" | "exact"`); algorithms are objects.
@@ -199,10 +200,11 @@ Docstrings describe the code as it is; a change in behavior updates them in the 
 | Per-symbol searches over a small table: LLRs (all points, or per axis for separable QAM; max-log without a prior in closed form), hard decisions without a square lattice | CPU: Numba `parallel=True` over blocks of symbols (LLRs), chunked NumPy (decisions). GPU: one thread per symbol (`llr`, `llr_separable`, `llr_separable_maxlog`, `bps_min_d2`'s nearest-point mode); decisions on double input or above 1024 points use the chunked search on both devices; LLRs above 16 bits per symbol raise on the GPU | follows the input |
 | Sequential recursions: LMS/RLS/CMA/RDE, PLL, Tikhonov, cycle slips, the Mengali-Morelli bootstrap, per-codeword decoders on trellises and trees (CCDM, polar SC/SCL, Viterbi, BCJR, turbo, recursive systematic encoding) | Numba `@njit(cache=True, fastmath=True, nogil=True)`, independent rows in `prange`. The equalizers' kernel with inline carrier recovery compiles strict (unwrap, running sums) and calls fast-math tap and distance loops as separate functions (an `inline="always"` helper takes its caller's flags) | CPU; GPU input does one round trip |
 | Linear recursions: IIR filtering | CPU: Numba without `fastmath`, so double input matches SciPy bit for bit. GPU: `iir` kernel: each block's state from a zero start in parallel, states carried across blocks in two levels (groups, then across groups), blocks filtered again, in double precision | follows the input |
-| Binary linear algebra of codes: encoding, syndromes, ML-decoding correlations, Chase's test patterns | one float32 GEMM per chunk (`coding._gf2.matmul_mod2`), exact below an inner dimension of 2^24, parity in place (CPU) or by one elementwise kernel writing int8 (GPU); small tables cached per code and device (`backend._device_tables`) | follows the input |
+| Binary linear algebra of codes: encoding, syndromes, ML-decoding correlations on the GPU, Chase's test patterns | one float32 GEMM per chunk (`coding._gf2.matmul_mod2`), exact below an inner dimension of 2^24, parity in place (CPU) or by one elementwise kernel writing int8 (GPU); small tables cached per code and device (`backend._device_tables`) | follows the input |
 | Algebraic decoding (BCH, Reed-Solomon): Berlekamp-Massey, Chien search to the locator's degree, Forney | CPU: Numba `parallel=True` over codewords. GPU: `algebraic_correct`, one thread per codeword in integer table arithmetic, so both agree exactly (a lockstep CuPy version was 12x slower) | follows the input |
 | Layered LDPC belief propagation (min-sum, sum-product) | CPU: Numba `parallel=True` over codewords, all iterations inside, no fast-math. GPU: `ldpc_layered`, one block per codeword, rows of a layer in parallel, early stop per codeword; same row order, so min-sum agrees bit for bit (a CuPy version was 7-23x slower) | follows the input |
-| Monte Carlo analysis (EXIT curves) | the existing decoders and vectorized NumPy/CuPy; closed-form parts are host NumPy on small grids. No kernel of its own | follows `device` |
+| Maximum-likelihood decoding: the correlation with all `2^k` codewords, the decision and the per-bit maxima of the max-log soft output | CPU: one Numba pass, `parallel=True` over rows, branch-free selects under fast-math without the no-NaN and no-Inf flags (a GEMM then a separate pass ran 3x slower, its threads competing with BLAS's). GPU: the GEMM per chunk, the per-bit maxima by a CuPy `ReductionKernel` that broadcasts over the codewords instead of building `(rows, codewords, n)`. `soft=False` skips the maxima on both | follows the input |
+| Monte Carlo analysis (EXIT curves, error-rate curves) | the existing encoders, decoders and demapper and vectorized NumPy/CuPy, through the private block functions (no INFO line per batch); closed-form parts are host NumPy on small grids. No kernel of its own | follows `device` |
 | Elementwise chains between multi-core FFTs (fiber solver's Kerr and PMD stages) | NumPy: a Numba `parallel=True` pass competes with `scipy.fft`'s threads and measured slower end to end; adopt one only on a paired end-to-end A/B | CPU |
 | Other hot spots limited by intermediates, launches or round trips | CUDA C++ via CuPy `RawModule` (`commkit/_cuda/src`) | GPU |
 
@@ -309,31 +311,8 @@ Steps, each its own commit (the version switch first, then each refactor):
 
 ### Channel coding
 
-1. **Uniform decoder outputs and plots for every code.** Every decoder returns a `DecodeResult`, but the families fill it differently, so users hand-roll the same error-rate loop (notebooks 07, 08, 21) and the LLR plots work on few decoders. State on 2026-11-03:
-
-   | Field | Gap |
-   | --- | --- |
-   | `llrs` | Filled by LDPC, BCJR and Chase only. `None` from turbo (its kernel computes the a-posteriori LLRs and drops them), `MaximumLikelihood` (max-log bitwise LLRs follow from the correlations it already computes) and `Concatenated` (drops the inner code's LLRs, which are those of the transmitted bits). Hard by nature: Berlekamp-Massey, `Syndrome`, staircase, SC/SCL, Viterbi. |
-   | `valid` | `True` for every block where no check runs (turbo, Viterbi, BCJR, ML, polar without CRC), indistinguishable from a passed check. |
-   | `iterations` | The configured count for turbo (no early stop), the pass count for staircase, 1 for one-shot decoders. Consistent enough; no change. |
-
-   What applies to every code: error rate against SNR (BER, FER, pre-FEC BER) and the decoding outcome (correct, detected failure, undetected error), which need only `bits`, `valid` and the reference. Output-LLR plots (`plot_llr_distribution`, `decoder_exit_curve`) apply to soft-output decoders only. Soft-output polar decoding (SCAN, soft SCL) is a research variant (§1). Per-iteration convergence traces apply to iterative decoders only and are left out.
-
-   Steps, the API additions and the numerical changes in separate commits:
-
-   1. **`DecodeResult.checked: bool`**: whether the decoder ran a success check (a composite is checked when any part is). `valid` keeps its type and means "no failure detected"; outcome counts split detected from undetected failures only where `checked`. Additive.
-   2. **Fill `llrs` where the algorithm has them**: turbo (the last iteration's APP), `MaximumLikelihood` (max-log), `Concatenated` (the inner code's). Each decoder's fields are listed in the `DecodeResult` docstring. `decoder_exit_curve` then covers these decoders too.
-   3. **`ErrorRateCurve`**: a frozen dataclass of host arrays per SNR point: `esn0_db`, counts (`num_blocks`, `bit_errors`, `block_errors`, `pre_fec_bit_errors`, `detected_failures`, `undetected_errors`, total iterations) and the rates derived from them (`ber`, `fer`, `pre_fec_ber`, `mean_iterations`), plus `rate`, `bits_per_symbol` (for an `ebn0_db` property) and `label`. It holds counts, not only rates, so a user loop over any channel builds one and plots can draw binomial confidence intervals.
-   4. **`error_rate_curve(code, *, constellation, esn0_db, method=None, min_block_errors, max_blocks, rng, device="cpu")`**: random information bits, `encode`, mapping, AWGN, `compute_llr`, `decode`; each point runs until `min_block_errors` block errors or `max_blocks` blocks. It lives in `metrics`, with `ErrorRateCurve`: it needs `mapping.compute_llr`, so it cannot live in `coding` (§3). It joins the `device` factories in §4.
-   5. **Plots**:
-      - `plot_error_rate(curves)`: BER and FER against Es/N0 or Eb/N0, with binomial intervals and the pre-FEC BER as a reference, plus a panel for the decoding outcome; several curves overlay on one axis like the other result plots.
-      - `plot_llr_distribution` accepts a `DecodeResult` with the reference, as `ber` does, and raises when `llrs` is `None`.
-   6. **Tests and notebooks**:
-      - Test `error_rate_curve` against closed forms (uncoded BPSK and QAM BER, the hard-decision block error rate of Hamming(7, 4)) and its stop rule; add contract rows.
-      - Test the new soft outputs: turbo's against its decisions, ML's max-log LLRs against a brute-force reference.
-      - Notebooks 07, 08 and 21 replace their hand-rolled loops.
-2. **oFEC** (OpenROADM, ITU-T G.709.3) is not implemented: its block structure is specified in OpenROADM MSA documents that were not available in a form to implement from. It would build on `BCHCode` (extended BCH(256, 239)), soft-output `Chase` and the staircase decoder's windowed iteration.
-3. **NR rate matching for polar codes** (sub-block interleaving, circular buffer, puncturing and shortening with their frozen-set rules, parity-check bits) and **LTE rate matching for turbo codes** are not included: `PolarCode` and `TurboCode` are the mother codes; `Punctured` and `Shortened` cover generic rate matching.
+1. **oFEC** (OpenROADM, ITU-T G.709.3) is not implemented: its block structure is specified in OpenROADM MSA documents that were not available in a form to implement from. It would build on `BCHCode` (extended BCH(256, 239)), soft-output `Chase` and the staircase decoder's windowed iteration.
+2. **NR rate matching for polar codes** (sub-block interleaving, circular buffer, puncturing and shortening with their frozen-set rules, parity-check bits) and **LTE rate matching for turbo codes** are not included: `PolarCode` and `TurboCode` are the mother codes; `Punctured` and `Shortened` cover generic rate matching.
 
 ### Test suite
 

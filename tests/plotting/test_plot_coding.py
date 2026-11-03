@@ -6,14 +6,25 @@ import matplotlib.pyplot as plt
 import numpy as np
 import pytest
 
+from commkit import Constellation, generate
 from commkit.coding import (
+    ErrorRateCurve,
     ExitCurve,
     LDPCCode,
     LinearBlockCode,
+    MaximumLikelihood,
+    decode,
     exit_chart,
     ldpc_exit_curves,
 )
-from commkit.plotting import plot_exit_chart, plot_llr_distribution, plot_parity_check
+from commkit.impairments import apply_awgn
+from commkit.mapping import compute_llr
+from commkit.plotting import (
+    plot_error_rate,
+    plot_exit_chart,
+    plot_llr_distribution,
+    plot_parity_check,
+)
 
 
 def _bpsk_llrs(xp: Any, n: int, sigma: float, scale: float = 1.0, seed: int = 0):
@@ -86,6 +97,107 @@ class TestPlotLLRDistribution:
             plot_llr_distribution(llrs.astype(xp.complex64), bits)
         with pytest.raises(TypeError, match="integers or bool"):
             plot_llr_distribution(llrs, bits.astype(xp.float32))
+        plt.close("all")
+
+    def test_decode_result_with_its_reference(self, backend_device: str) -> None:
+        """A DecodeResult draws its a-posteriori LLRs against the transmitted
+        bits of the Signal, without the uncoded filler (1500 symbols of
+        16-QAM carry 6000 bits: 857 Hamming(7, 4) blocks and 1 filler bit)."""
+        code = LinearBlockCode.hamming(3)
+        tx = generate(Constellation.qam(16), 15 * 100, symbol_rate=1e9, code=code,
+                      pad=True, rng=1, device=backend_device)  # fmt: skip
+        rx = apply_awgn(tx, esn0_db=8.0, rng=2)
+        llrs = compute_llr(rx, noise_var=10**-0.8)[: tx.reference.num_blocks * code.n]
+        res = decode(llrs, code=code, method=MaximumLikelihood())
+        assert res.llrs.shape[-1] < tx.reference.bits.shape[-1]
+        _, (ax_pdf, _) = plot_llr_distribution(res, tx)
+        assert len(ax_pdf.patches) == 2
+        plot_llr_distribution(res, tx.reference, quantity="density")
+        with pytest.raises(ValueError, match="has no LLRs"):
+            plot_llr_distribution(decode(llrs, code=code), tx)
+        with pytest.raises(ValueError, match="needs the transmitted Signal"):
+            plot_llr_distribution(res, None)
+        plt.close("all")
+
+
+def _curve(label: str = "", checked: bool = True) -> ErrorRateCurve:
+    return ErrorRateCurve(
+        esn0_db=[1.0, 2.0, 3.0],
+        num_blocks=[100, 100, 1000],
+        bit_errors=[40, 8, 0],
+        block_errors=[20, 4, 0],
+        pre_fec_bit_errors=[300, 200, 1000],
+        detected_failures=[15, 3, 0] if checked else [0, 0, 0],
+        undetected_errors=[5, 1, 0] if checked else [20, 4, 0],
+        total_iterations=[100, 100, 1000],
+        k=4,
+        n=8,
+        bits_per_symbol=2,
+        checked=checked,
+        label=label,
+    )
+
+
+class TestPlotErrorRate:
+    def test_rates_and_intervals(self) -> None:
+        """BER, FER and pre-FEC BER of one curve, zeros left out; the FER
+        interval is Clopper-Pearson (95 %): 20 of 100 gives [0.127, 0.292],
+        and the zero-error point marks its upper bound 3.7e-3 (1000 blocks)."""
+        _, (ax, ax_out) = plot_error_rate(_curve())
+        ber, fer, pre = ax.get_lines()[:3]
+        np.testing.assert_allclose(ber.get_ydata(), [0.1, 0.02, np.nan])
+        np.testing.assert_allclose(fer.get_ydata(), [0.2, 0.04, np.nan])
+        np.testing.assert_allclose(pre.get_ydata(), [0.375, 0.25, 0.125])
+        bars = ax.collections[0].get_segments()
+        np.testing.assert_allclose(
+            [bars[0][0][1], bars[0][1][1]], [0.1266, 0.2918], atol=1e-4
+        )
+        (bound,) = [line for line in ax.get_lines() if line.get_marker() == "v"]
+        np.testing.assert_allclose(bound.get_ydata(), [3.682e-3], rtol=1e-3)
+        assert [t.get_text() for t in ax.get_legend().get_texts()] == [
+            "BER", "FER", "pre-FEC BER",
+        ]  # fmt: skip
+        undetected, detected = ax_out.get_lines()[:2]
+        np.testing.assert_allclose(undetected.get_ydata(), [0.05, 0.01, np.nan])
+        np.testing.assert_allclose(detected.get_ydata(), [0.15, 0.03, np.nan])
+        plt.close("all")
+
+    def test_several_curves_one_entry_each(self) -> None:
+        """Curves overlay with one legend entry each and a gray style key; an
+        unchecked decoder has no detected failures."""
+        fig, ax = plot_error_rate(
+            [_curve("a"), _curve("b", checked=False)], quantity="outcome"
+        )
+        texts = [t.get_text() for t in ax.get_legend().get_texts()]
+        assert texts == ["a", "b", "undetected errors", "detected failures"]
+        # a: undetected + detected; b: undetected only; two key entries.
+        assert len(ax.get_lines()) == 2 + 1 + 2
+        plt.close("all")
+
+    def test_ebn0_axis(self) -> None:
+        """Eb/N0 = Es/N0 - 10 log10(k/n * bits per symbol) = Es/N0 here."""
+        _, ax = plot_error_rate(_curve(), ebn0=True, quantity="error_rate")
+        np.testing.assert_allclose(ax.get_lines()[0].get_xdata(), [1.0, 2.0, 3.0])
+        assert ax.get_xlabel() == "Eb/N0 [dB]"
+        plt.close("all")
+
+    def test_overlay_on_given_axes(self) -> None:
+        fig, ax = plt.subplots()
+        plot_error_rate(_curve("a"), quantity="error_rate", ax=ax, pre_fec=False)
+        plot_error_rate(_curve("b"), quantity="error_rate", ax=ax, intervals=False)
+        labels = [t.get_text() for t in ax.get_legend().get_texts()]
+        assert "a" in labels and "b" in labels
+        plt.close("all")
+
+    def test_errors(self) -> None:
+        with pytest.raises(ValueError, match="empty"):
+            plot_error_rate([])
+        with pytest.raises(TypeError, match="ErrorRateCurve"):
+            plot_error_rate([np.zeros(3)])
+        with pytest.raises(ValueError, match="single curve"):
+            plot_error_rate([_curve(), _curve()], label="x")
+        with pytest.raises(ValueError, match="require a selected quantity"):
+            plot_error_rate(_curve(), xlim=(0, 1))
         plt.close("all")
 
 

@@ -146,6 +146,49 @@ def ldpc_layered(  # type: ignore[no-untyped-def]
 
 
 # -----------------------------------------------------------------------------
+# Maximum-likelihood soft output
+# -----------------------------------------------------------------------------
+
+
+# Fast-math without the no-NaN and no-Inf assumptions: -inf marks an empty
+# maximum.  Branch-free selects under it measured 2.3x faster than
+# branching on the bit under full fast-math.
+_SELECT_FASTMATH = {"nsz", "arcp", "contract", "afn", "reassoc"}
+
+
+@numba.njit(cache=True, fastmath=_SELECT_FASTMATH, nogil=True, parallel=True)
+def ml_search(x, signs, ones, w0, soft, best_metric, best, m0, m1):  # type: ignore[no-untyped-def]
+    """Correlate the rows of ``x`` with codewords ``w0 + w`` (signs ``(W, n)``
+    and bits ``ones``), updating each row's best metric and index and, with
+    ``soft``, per bit the best metric with it 0 (``m0``) and 1 (``m1``)."""
+    num_words, n = signs.shape
+    neg = np.float32(-np.inf)
+    for r in numba.prange(x.shape[0]):  # type: ignore[attr-defined,no-untyped-call]
+        xr = x[r]
+        a0 = m0[r].copy()
+        a1 = m1[r].copy()
+        bv = best_metric[r]
+        bi = best[r]
+        for w in range(num_words):
+            v = np.float32(0.0)
+            for j in range(n):
+                v += signs[w, j] * xr[j]
+            if v > bv:
+                bv = v
+                bi = w0 + w
+            if not soft:
+                continue
+            for j in range(n):
+                one = ones[w, j]
+                a1[j] = max(a1[j], v if one else neg)
+                a0[j] = max(a0[j], neg if one else v)
+        best_metric[r] = bv
+        best[r] = bi
+        m0[r] = a0
+        m1[r] = a1
+
+
+# -----------------------------------------------------------------------------
 # Polar list decoding
 # -----------------------------------------------------------------------------
 
@@ -628,8 +671,13 @@ def turbo_encode(bits, pi, nxt, outputs, tail, out):  # type: ignore[no-untyped-
 
 
 @numba.njit(cache=True, nogil=True, parallel=True)
-def turbo_decode(llrs, pi, nxt, outputs, tail, iterations, exact, scale, out):  # type: ignore[no-untyped-def]
-    """Iterative turbo decoding of the rows of ``llrs`` (see ``_get_numba_turbo``)."""
+def turbo_decode(llrs, pi, nxt, outputs, tail, iterations, exact, scale, out, out_llrs):  # type: ignore[no-untyped-def]
+    """Iterative turbo decoding of the rows of ``llrs`` (see ``_get_numba_turbo``).
+
+    ``out_llrs`` receives the a-posteriori LLRs of the transmitted bits from
+    the last iteration: the systematic bits from the second decoder, each
+    parity stream and its tail from the decoder that produced it.
+    """
     k = pi.shape[0]
     steps = k + 3
     forced = np.zeros(steps, dtype=np.bool_)
@@ -662,23 +710,43 @@ def turbo_decode(llrs, pi, nxt, outputs, tail, iterations, exact, scale, out):  
         app1 = np.empty(steps)
         app2 = np.empty(steps)
         no_app_c = np.empty((0, 2))  # the iterations use the inputs' LLRs only
+        app_c1 = np.empty((steps, 2))  # the outputs' LLRs, in the last one
+        app_c2 = np.empty((steps, 2))
         alpha = np.empty((steps + 1, nxt.shape[0]))
         beta = np.empty((steps + 1, nxt.shape[0]))
         gamma = np.empty((steps, nxt.shape[0], 2))
-        for _ in range(iterations):
-            bcjr(ch1, la1, nxt, outputs, tail, forced, 0, 0, exact, app1, no_app_c,
+        for it in range(iterations):
+            last = it == iterations - 1
+            c1 = app_c1 if last else no_app_c
+            c2 = app_c2 if last else no_app_c
+            bcjr(ch1, la1, nxt, outputs, tail, forced, 0, 0, exact, app1, c1,
                  alpha, beta, gamma)  # fmt: skip
             for t in range(k):
                 # Extrinsic of decoder 1, kept in la1 (natural order).
                 la1[t] = scale * (app1[t] - la1[t] - ch1[t, 0])
             for t in range(k):
                 la2[t] = la1[pi[t]]
-            bcjr(ch2, la2, nxt, outputs, tail, forced, 0, 0, exact, app2, no_app_c,
+            bcjr(ch2, la2, nxt, outputs, tail, forced, 0, 0, exact, app2, c2,
                  alpha, beta, gamma)  # fmt: skip
             for t in range(k):
                 la1[pi[t]] = scale * (app2[t] - la2[t] - ch2[t, 0])
         for t in range(k):
             out[row, pi[t]] = 1 if app2[t] < 0 else 0
+        o0 = out_llrs[row, : k + 4]
+        o1 = out_llrs[row, k + 4 : 2 * k + 8]
+        o2 = out_llrs[row, 2 * k + 8 :]
+        for t in range(k):
+            o0[pi[t]] = app2[t]
+            o1[t] = app_c1[t, 1]
+            o2[t] = app_c2[t, 1]
+        # The tails in the order the channel LLRs were read above.
+        for j, c in ((0, app_c1), (2, app_c2)):
+            o0[k + j], o1[k + j], o2[k + j] = c[k, 0], c[k, 1], c[k + 1, 0]
+            o0[k + j + 1], o1[k + j + 1], o2[k + j + 1] = (
+                c[k + 1, 1],
+                c[k + 2, 0],
+                c[k + 2, 1],
+            )
 
 
 # -----------------------------------------------------------------------------

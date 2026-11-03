@@ -7,7 +7,13 @@ import pytest
 
 from commkit import generate, mapping, metrics
 from commkit.backend import to_device
-from commkit.coding import TurboCode, TurboIterations, decode, encode
+from commkit.coding import (
+    TurboCode,
+    TurboIterations,
+    decode,
+    decoder_exit_curve,
+    encode,
+)
 from commkit.coding.turbo import _QPP
 from commkit.impairments import apply_awgn
 from tests.common.coding import random_bits
@@ -66,6 +72,46 @@ class TestDecoding:
         u = random_bits((4, 104), xp, seed=2)
         res = decode(encode(u, code=code), code=code, method=TurboIterations(2))
         xpt.assert_array_equal(res.bits, u)
+
+    @staticmethod
+    def _llrs(code: TurboCode, mean: float, num: int, xp: Any, seed: int) -> Any:
+        """Information bits, codewords and consistent Gaussian LLRs (mean
+        ``mean``, variance ``2 mean``): BPSK at Es/N0 = mean / 4."""
+        u = random_bits((num, code.k), xp, seed=seed)
+        c = encode(u, code=code)
+        noise = np.random.default_rng(seed).standard_normal(c.shape)
+        llrs = mean * (1 - 2 * c) + xp.asarray(np.sqrt(2 * mean) * noise)
+        return u, c, llrs.astype(xp.float32)
+
+    def test_soft_output_matches_the_decisions(self, xp: Any, xpt: Any) -> None:
+        """At Es/N0 = -2 dB (Eb/N0 = 3.2 dB) every K = 104 frame decodes, and
+        the sign of every a-posteriori LLR, the 24 tail bits included, is
+        the bit of the re-encoded decision; the output is more reliable
+        than the channel (mean |LLR| above it)."""
+        code = TurboCode.lte(104)
+        u, c, llrs = self._llrs(code, 2.5, 40, xp, seed=6)
+        res = decode(llrs, code=code)
+        xpt.assert_array_equal(res.bits, u)
+        assert res.llrs.shape == c.shape and res.llrs.dtype == np.float32
+        xpt.assert_array_equal((res.llrs < 0).astype(np.int8), c)
+        assert float(xp.abs(res.llrs).mean()) > 3 * float(xp.abs(llrs).mean())
+
+    def test_soft_output_in_failing_frames(self, xp: Any, xpt: Any) -> None:
+        """At Es/N0 = -6 dB most frames fail; the systematic LLRs still give
+        the decisions (the second decoder's, deinterleaved)."""
+        code = TurboCode.lte(104)
+        u, c, llrs = self._llrs(code, 1.0, 40, xp, seed=7)
+        res = decode(llrs, code=code)
+        assert float(xp.mean(xp.any(res.bits != u, axis=1))) > 0.5
+        systematic = res.llrs[:, : code.k]
+        xpt.assert_array_equal((systematic < 0).astype(np.int8), res.bits)
+
+    def test_has_an_exit_curve(self) -> None:
+        """As the outer code of a serial concatenation: I_E rises from 0 to 1
+        (measured 0, 0.12, 0.98, 1, 1 at I_A = 0, 0.25, ..., 1)."""
+        curve = decoder_exit_curve(TurboCode.lte(40), num_blocks=200, points=5, rng=1)
+        assert curve.extrinsic[0] < 0.05 and curve.extrinsic[-1] > 0.99
+        assert np.all(np.diff(curve.extrinsic) >= 0)
 
     @pytest.mark.parametrize("num_frames", [
         pytest.param(30, id="smoke"),

@@ -297,11 +297,18 @@ class Constellation:
     ) -> ArrayType:
         """Bit LLRs (positive means bit 0 is more likely), with this prior.
 
-        ``noise_var`` is the complex noise variance on the constellation's
-        scale.  ``method`` is ``"maxlog"`` or ``"exact"`` (log-sum-exp).
-        Returns ``float32``, ``(..., N * k)``, on the symbols' device.
+        ``noise_var`` is the variance ``E[|n|^2]`` of the noise in the
+        symbols on the constellation's scale: circular complex noise for
+        complex symbols, real noise for real ones, whose likelihood has
+        ``2 noise_var`` in place of ``noise_var``.  ``method`` is
+        ``"maxlog"`` or ``"exact"`` (log-sum-exp).  Returns ``float32``,
+        ``(..., N * k)``, on the symbols' device.
         """
         warn_if_double(symbols, "compute_llr() / Constellation.llr()", "float32")
+        if symbols.dtype.kind != "c":
+            # Real noise of variance s2 has the likelihood of the in-phase
+            # part of circular noise of variance 2 s2, which the kernels take.
+            noise_var = 2.0 * noise_var
         if self._axes is not None:
             if dispatch(symbols)[1] is np:
                 return _llr_separable(symbols, self._axes, noise_var, method, self)

@@ -26,8 +26,8 @@ The notebooks run on the GPU when CuPy works and on the CPU otherwise. They are 
 
 | # | notebook | topics |
 | --- | --- | --- |
-| 06 | [AWGN and performance metrics](06-awgn-and-performance-metrics.ipynb) | Es/N0 at any oversampling, SNR and EVM, BER against theory, LLRs and their consistency, GMI and MI against capacity |
-| 07 | [Channel coding](07-channel-coding.ipynb) | `encode` / `decode`, coded `generate`, post-FEC BER and FER, hard and soft decoding, Reed-Solomon, LDPC, NGMI as a threshold, EXIT charts, polar, convolutional and turbo codes |
+| 06 | [AWGN and performance metrics](06-awgn-and-performance-metrics.ipynb) | Es/N0 at any oversampling, Es/N0, SNR and noise variance for real and complex samples, SNR and EVM, BER against theory, LLRs and their consistency, GMI and MI against capacity |
+| 07 | [Channel coding](07-channel-coding.ipynb) | `encode` / `decode`, coded `generate`, post-FEC BER and FER, hard and soft decoding, error-rate curves and the decoding outcome, Reed-Solomon, LDPC, NGMI as a threshold, EXIT charts, polar, convolutional and turbo codes against Eb/N0, block length |
 | 08 | [Probabilistic shaping and coded modulation](08-probabilistic-shaping-and-coded-modulation.ipynb) | the CCDM, shaped `generate`, probabilistic amplitude shaping with LDPC, the shaping gain at the decoder |
 | 09 | [Laser phase noise](09-laser-phase-noise.ipynb) | the Wiener model, the Lorentzian line, `Δν·T`, a shared LO, flicker noise and the FM-noise PSD |
 | 10 | [Front-end impairments](10-front-end-impairments.ipynb) | IQ imbalance and its correction, DC offsets, electrical bandwidth, carrier frequency offset |
@@ -51,7 +51,7 @@ The notebooks run on the GPU when CuPy works and on the CPU otherwise. They are 
 | --- | --- | --- |
 | 19 | [Chromatic dispersion](19-chromatic-dispersion.ipynb) | the dispersion spread, the all-pass response, compensation, residual dispersion |
 | 20 | [Nonlinear fiber and backpropagation](20-nonlinear-fiber-and-backpropagation.ipynb) | the Kerr effect, the optimum launch power, digital backpropagation |
-| 21 | [FEC in optical standards](21-fec-in-optical-standards.ipynb) | KP4 and IEEE 802.3dj, G.709 RS and the staircase code, the 400ZR C-FEC, PON RS and LDPC, their thresholds |
+| 21 | [FEC in optical standards](21-fec-in-optical-standards.ipynb) | KP4 and IEEE 802.3dj, G.709 RS and the staircase code, the 400ZR C-FEC, PON RS and LDPC, their thresholds against overhead |
 | 22 | [End-to-end coherent transceiver](22-coherent-transceiver-end-to-end.ipynb) | every impairment and the full receiver DSP chain in one link, an LDPC-coded payload, the SNR budget |
 
 ## V. Laser and carrier-phase characterization

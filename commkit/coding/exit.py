@@ -45,10 +45,10 @@ Limitations, common to all EXIT analysis:
   Carlo error (about ``1/sqrt(bits per point)``) of closing.
 - Measured curves have no threshold: sweep the channel and chart each
   point.
-- Not covered: decoders that return only bits (turbo, polar SC and SCL,
-  algebraic, syndrome and maximum-likelihood decoding) have no measured
-  curve; the turbo code's constituent decoders are not exposed, so its
-  inner exchange cannot be charted; a demapper on a channel other than
+- Not covered: decoders that return only bits (polar SC and SCL,
+  algebraic, syndrome and Viterbi decoding) have no measured curve; the
+  turbo code's constituent decoders are not exposed, so its inner exchange
+  cannot be charted (the whole turbo decoder has a curve); a demapper on a channel other than
   AWGN, or with shaped symbols, needs its own model.
 """
 
@@ -345,12 +345,12 @@ def decoder_exit_curve(
     -----
     Limitations:
 
-    - Decoders that return only bits have no curve: turbo
-      (:class:`~commkit.coding.TurboIterations`), polar (SC, SCL),
-      algebraic and syndrome decoding, maximum likelihood.
+    - Decoders that return only bits have no curve: polar (SC, SCL),
+      algebraic, syndrome and Viterbi decoding.
     - The extrinsic part is the output minus the input, which assumes the
       decoder returns a-posteriori LLRs that include its input (as LDPC
-      belief propagation, BCJR and Chase-Pyndiah do).
+      belief propagation, BCJR, turbo decoding, maximum likelihood and
+      Chase-Pyndiah do).
     - An iterative decoder (LDPC) runs all its own iterations at every
       point: the curve is that of the whole decoder, not of one iteration.
     - A decoder that stops early on a satisfied check stops before its
@@ -400,7 +400,8 @@ def decoder_exit_curve(
             raise TypeError(
                 f"decoder_exit_curve(): {method!r} returns no a-posteriori LLRs, so "
                 "it has no EXIT curve; use a soft-output decoder (MinSum or "
-                "SumProduct for LDPC codes, BCJR, Chase)."
+                "SumProduct for LDPC codes, BCJR, TurboIterations, Chase, "
+                "MaximumLikelihood; not soft=False)."
             )
         extrinsic[i] = _information(res.llrs - a_priori, bits)
         logger.debug("  I_A = %.3f: I_E = %.4f", ia, extrinsic[i])

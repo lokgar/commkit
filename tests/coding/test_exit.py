@@ -15,8 +15,8 @@ from commkit.coding import (
     ExitChart,
     ExitCurve,
     LinearBlockCode,
+    MaximumLikelihood,
     Syndrome,
-    TurboCode,
     decoder_exit_curve,
     demapper_exit_curve,
     exit_chart,
@@ -155,7 +155,14 @@ class TestDecoderExitCurve:
         with pytest.raises(TypeError, match="no a-posteriori LLRs"):
             decoder_exit_curve(LinearBlockCode.hamming(3), method=Syndrome(), points=2)
         with pytest.raises(TypeError, match="no a-posteriori LLRs"):
-            decoder_exit_curve(TurboCode.lte(40), num_blocks=2, points=2)
+            decoder_exit_curve(ConvolutionalCode.k7(40), num_blocks=2, points=2)
+        with pytest.raises(TypeError, match="no a-posteriori LLRs"):
+            decoder_exit_curve(
+                LinearBlockCode.hamming(3),
+                method=MaximumLikelihood(soft=False),
+                num_blocks=2,
+                points=2,
+            )
 
     def test_validation(self) -> None:
         with pytest.raises(TypeError, match="code object"):

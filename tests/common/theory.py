@@ -82,3 +82,20 @@ def qam16_gray_ber(esn0: float) -> float:
     ``a = sqrt(Es/(5 N0))``, ``(3 Q(a) + 2 Q(3a) - Q(5a)) / 4`` (exact)."""
     a = np.sqrt(esn0 / 5.0)
     return float((3 * q_function(a) + 2 * q_function(3 * a) - q_function(5 * a)) / 4)
+
+
+def bpsk_ber(esn0: float) -> float:
+    """Coherent BPSK (2-PAM) bit error rate, ``Q(sqrt(2 Es/N0))``: the
+    in-phase noise of variance ``N0 / 2`` on unit-energy symbols."""
+    return float(q_function(np.sqrt(2.0 * esn0)))
+
+
+def bounded_distance_fer(p: float, n: int, t: int) -> float:
+    """Block error rate of a code correcting every pattern of at most ``t``
+    of ``n`` independent bit errors of probability ``p``, and no other:
+    ``1 - Σ_{i <= t} C(n, i) p^i (1 - p)^(n - i)``."""
+    from math import comb
+
+    return float(
+        1.0 - sum(comb(n, i) * p**i * (1 - p) ** (n - i) for i in range(t + 1))
+    )

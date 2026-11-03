@@ -39,6 +39,7 @@ from ._galois import _Field
 from ._gf2 import matmul_mod2
 from .algebraic import _Algebraic, _correct
 from .base import (
+    _checked,
     _Code,
     _Codec,
     _codec,
@@ -382,7 +383,9 @@ class Concatenated(_Code):
     ``n = ceil(outer.n / inner.k) inner.n``.  Decoding
     runs the inner decoder, passes its a-posteriori LLRs of the
     information bits on (hard decisions as +-1 for hard-output decoders),
-    and runs the outer decoder.
+    and runs the outer decoder.  The a-posteriori LLRs of the result are
+    the inner decoder's (``None`` for a hard-output one), the success check
+    the outer decoder's.
     """
 
     outer: Any
@@ -524,7 +527,8 @@ def _decode_concatenated(
     if code.interleaver is not None:
         soft = deinterleave(soft, interleaver=code.interleaver)
     out = _decode_blocks(code.outer, soft, method.outer)
-    return out._replace(llrs=None)
+    # The inner code's LLRs are those of the transmitted bits.
+    return out._replace(llrs=None if res.llrs is None else res.llrs.reshape(rows, -1))
 
 
 def _encode_repeat(code: _Repeat, bits: ArrayType) -> ArrayType:
@@ -550,6 +554,7 @@ _register(
         decode=_decode_staircase,
         default_method=lambda code: HardIterations(),
         methods=(HardIterations,),
+        checked=lambda code, method: True,
     ),
 )
 _register(
@@ -559,6 +564,8 @@ _register(
         decode=_decode_concatenated,
         default_method=lambda code: Stages(),
         methods=(Stages,),
+        # valid is the outer decoder's.
+        checked=lambda code, method: _checked(code.outer, method.outer),
     ),
 )
 _register(
@@ -568,5 +575,6 @@ _register(
         decode=_decode_repeat,
         default_method=lambda code: _resolve_method(code.code, None, "decode()"),
         methods=(object,),
+        checked=lambda code, method: _checked(code.code, method),
     ),
 )

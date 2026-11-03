@@ -129,6 +129,26 @@ class TestChase:
             to_device(res.llrs, "cpu").reshape(num, 7), soft, rtol=1e-5, atol=1e-5
         )
 
+    @pytest.mark.parametrize(
+        "hard", [Syndrome(max_weight=1), None], ids=["hard-words", "via-decode"]
+    )
+    def test_without_soft_output(self, xp: Any, xpt: Any, hard: Any) -> None:
+        """soft=False: the same decisions and success flags, no LLRs, on both
+        paths (the syndrome table's words, and decode of the test words)."""
+        code = LinearBlockCode.hamming(4, extended=True)
+        llrs = xp.asarray(
+            (0.6 + np.random.default_rng(11).standard_normal(16 * 500)).astype(
+                np.float32
+            )
+        )
+        soft = decode(llrs, code=code, method=Chase(3, hard=hard))
+        fast = decode(llrs, code=code, method=Chase(3, hard=hard, soft=False))
+        assert fast.llrs is None and soft.llrs is not None
+        xpt.assert_array_equal(fast.bits, soft.bits)
+        xpt.assert_array_equal(fast.valid, soft.valid)
+        with pytest.raises(ValueError, match="soft must be a bool"):
+            Chase(soft="no")
+
     def test_bch_beyond_t(self, xp: Any, xpt: Any) -> None:
         """Three errors in BCH(31, 21) (t = 2) on the least reliable bits:
         hard decoding fails, Chase corrects."""
@@ -291,6 +311,23 @@ class TestConcatenated:
                          method=method)  # fmt: skip
             post = metrics.ber(res.bits, sig.reference.info_bits)
             assert (post == 0.0) == decodes, (pre, post)
+
+    def test_llrs_are_the_inner_decoders(self, xp: Any, xpt: Any) -> None:
+        """The soft output is the inner decoder's, of the transmitted bits;
+        a hard-output inner decoder gives none."""
+        outer = LinearBlockCode.hamming(4)
+        inner = LinearBlockCode.hamming(3)
+        code = Concatenated(outer, inner, Interleaver.random(15, rng=0))
+        u = random_bits(11 * 30, xp, seed=12)
+        c = encode(u, code=code)
+        rng = np.random.default_rng(13)
+        noise = xp.asarray(rng.standard_normal(c.shape).astype(np.float32))
+        llrs = (2.0 * (1.0 - 2.0 * c) + noise).astype(xp.float32)
+        chase = Chase(2)
+        res = decode(llrs, code=code, method=Stages(inner=chase))
+        xpt.assert_array_equal(res.llrs, decode(llrs, code=inner, method=chase).llrs)
+        assert res.llrs.shape == c.shape
+        assert decode(llrs, code=code).llrs is None  # Syndrome: hard output
 
     def test_ieee_802_3dj(self, xp: Any, xpt: Any) -> None:
         code = Concatenated.ieee_802_3dj()
