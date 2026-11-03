@@ -36,20 +36,13 @@ uv run pytest --device=cpu               # what CI runs
 uv run pytest --run-slow                 # also the long statistical validation (marker slow)
 uv run pytest tests/equalization/ -k lms # subset
 uv run pytest --cov=commkit              # coverage
-NUMBA_DISABLE_JIT=1 uv run pytest tests/equalization tests/recovery \
-    tests/test_frequency.py tests/mapping/test_llr.py tests/coding/test_ldpc.py tests/coding/test_shaping.py::TestCCDM \
-    tests/coding/test_algebraic.py tests/coding/test_polar.py::TestEncoding "tests/coding/test_polar.py::TestDecoding::test_sc_matches_the_recursive_reference" \
-    "tests/coding/test_polar.py::TestDecoding::test_full_list_is_maximum_likelihood" \
-    "tests/coding/test_polar.py::TestDecoding::test_crc_failure_keeps_the_best_path" \
-    tests/coding/test_convolutional.py tests/coding/test_turbo.py::TestEncoding \
-    tests/coding/test_turbo.py::TestDecoding::test_noiseless \
-    -k "not waterfall and not threshold" \
-    --device=cpu --cov=commkit   # real kernel coverage
 uv run pytest --device=cpu -p tests.plugins.precision_trace \
     --ignore=tests/test_examples.py      # precision audit (see Numerics); the suite passes under it
 uv run pytest --device=gpu -p tests.plugins.transfer_trace \
     --ignore=tests/test_examples.py      # transfer audit (see Performance); fails on an undocumented transfer
 ```
+
+Numba kernel coverage runs the kernel tests with `NUMBA_DISABLE_JIT=1` and reports only the kernel modules; the test selection and the `--include` list are in the `kernel-coverage` job of `.github/workflows/ci.yml`.
 
 **CUDA sanitizer** (see Kernel policy): NVIDIA's `compute-sanitizer` checks the kernels for out-of-bounds and misaligned accesses (`memcheck`), shared-memory races (`racecheck`), barrier misuse (`synccheck`) and reads of uninitialized device memory (`initcheck`). It is not a dependency: install its wheel, matching the CUDA major version of `cupy-cuda13x`, into a scratch directory and run the GPU tests of the kernels under each tool (10-100x slower; the whole pass takes about 50 minutes on the reference machine):
 
@@ -219,7 +212,7 @@ Docstrings describe the code as it is; a change in behavior updates them in the 
   - Classes and modules: a noun phrase.
 - **Module docstrings** say what the module holds, by public name (`:func:`, `:class:`), then the conventions particular to it (a sign convention, a scaling, a file layout). No marketing adjectives ("high-performance", "publication-quality"), no history of earlier layouts, and no restatement of the library-wide rules in this file. A private module's summary ends with "(private)" and the body names its users.
 - **Types:** inputs are `array_like` (NumPy or CuPy), `array_like or Signal` for Signal-aware arguments; returned arrays and result fields are `ndarray` (NumPy or CuPy, on the input's device), `ndarray or Signal` for transforms, and `numpy.ndarray` where the array is always on the host. Shapes go in the description, in double backticks: ``(N,)``, ``(C, N)``.
-- **Plots** return `(fig, ax) or None` (`None` with `show=True`).
+- **Plots** return `(fig, ax) or None`, multi-panel plots `(fig, axes) or None` (`None` with `show=True`).
 - **Defaults:** `name : type, default value`; `name : type, optional` when the default is `None`, with the description saying what `None` does.
 - Units go in the description; inline code in double backticks; references to library names through `:func:` / `:class:` / `:mod:` / `:meth:`.
 
@@ -319,10 +312,10 @@ Docstrings describe the code as it is; a change in behavior updates them in the 
 - **Warnings are failures**: a WARNING from the `commkit` logger during a test fails it, unless the test is marked `allow_warnings` (it provokes a suspect result on purpose) or takes `caplog` to assert the log. There is no list of tolerated messages: a WARNING that reports what the caller asked for, not a suspect result, is a library log-level bug, fixed in the library.
 - **API changes never change expected values.** A commit that changes a signature only changes how tests call the code. Numerical changes land in their own commit with independent validation.
 - **Examples** are Jupyter notebooks in `examples/`, committed without outputs: `.gitattributes` routes them through the `nbstripout` filter, which each clone enables once with `uv run nbstripout --install` (git does not ship filter configuration). `tests/test_examples.py` executes each one, so an API change updates the notebooks in the same commit.
-  - They form a course: one topic per notebook, named `NN-lowercase-words.ipynb`, numbered in teaching order (signals and DSP, channel and metrics, receiver algorithms, fiber systems, characterization). Each opens with what it covers, links the notebooks it builds on and ends with a link to the next. `examples/README.md` indexes them; a new notebook takes its place in the order and updates the index and the neighbors' links.
+  - They form a course: one topic per notebook, named `NN-lowercase-words.ipynb`, numbered in teaching order (signals and DSP, channel and metrics, coding, receiver algorithms, fiber systems, characterization). Each opens with what it covers, links the notebooks it builds on and ends with a link to the next. `examples/README.md` indexes them; a new notebook takes its place in the order and updates the index and the neighbors' links.
   - Every claim in the text matches what the cells print: run the notebook and read its numbers before committing it. Keep each under about 20 s on the CPU.
   - Plots of hand-computed arrays go through `to_device(x, "cpu")`, so the notebooks run unchanged on the GPU.
-- **Coverage** must not drop below the CI floor. Numba kernel coverage is measured by a separate `NUMBA_DISABLE_JIT=1` job.
+- **Coverage** must not drop below the CI floors: 78 % for the package, 85 % for the Numba kernel modules, measured by a separate `NUMBA_DISABLE_JIT=1` job.
 
 ---
 
@@ -332,7 +325,6 @@ Docstrings describe the code as it is; a change in behavior updates them in the 
 
 - **Workloads must converge.** A workload the algorithm cannot handle times a failure mode (slip storms, divergence), not the operating point. Every equalizer benchmark asserts its symbol error rate with `benchutils.assert_converged`.
 - **Baselines** are recorded with `benchmarks/record_baseline.py`: each file in its own process, best of three passes (`--passes`; `0006` and `0007` used five and `0008` ten, as three still kept outliers of 2-4x on a few small benchmarks). In one full-suite process, small GPU benchmarks after the large equalizer workloads ran 2-12x slower than alone, so never record a baseline from a single `pytest benchmarks/` run.
-
 - **IDs** are `[cpu]` or `[gpu]`, meaning the input device.
 - **Timing:**
   - Timed bodies end with the `sync` fixture; otherwise GPU timings measure launches, not execution.
@@ -366,13 +358,13 @@ Steps, once CuPy 14.3 (with cp315 wheels for `cupy-cuda13x`) and a fixed `jupyte
    - `uv lock`; README install requirements; §2 here ("Python 3.12+").
    - Benchmarks: record a new baseline on 3.15 (it lands in `benchmarks/baselines/Linux-CPython-3.15-64bit/`), compare it with `0008` by a paired A/B of 3.14 against 3.15 on unchanged code, and make it the reference.
 3. **Lazy imports (PEP 810)**. Confirm the rules on the interpreter first. As specified, `lazy` is allowed only for module-level imports: not inside functions, class bodies or `try` blocks, and not with `*`.
-   - About 60 function-local imports exist to keep `import commkit` light or optional: `import cupy as cp` (11 sites), `import numba` (9), `from . import compiler` in `_cuda` (5), and local imports that break cycles (`Constellation`, `Signal`, `normalize`). Move each to a module-level `lazy import` / `lazy from`. Concentrated in `_cuda/__init__.py`, `backend.py`, `io.py`, `recovery/`, `core/`, `plotting/`.
+   - Function-local imports keep `import commkit` light or optional: `import cupy as cp`, `import numba`, `from . import compiler` in `_cuda`, and local imports that break cycles (`Constellation`, `Signal`, `normalize`). Move each to a module-level `lazy import` / `lazy from` (find them with `grep -rnE '^\s{4,}(import|from) ' commkit`).
    - CuPy stays optional: a lazy import of a missing module fails only when used, so every use must stay behind the existing availability checks (`is_cupy_available`, `dispatch`). `backend.py`'s probing needs care: decide per site whether the probe imports eagerly inside `try`.
    - Numba: `@njit` at module level compiles lazily already; check that a lazy `numba` import does not make every first call pay the import at an odd moment (time with `benchmarks/bench_import.py`).
-   - The six `TYPE_CHECKING` blocks can become `lazy from` imports where the name is also useful at run time; keep them where it is not.
+   - The `TYPE_CHECKING` blocks can become `lazy from` imports where the name is also useful at run time; keep them where it is not.
    - Measure `import commkit` before and after with `bench_import.py`, and keep `tests/test_import_hygiene.py` passing; extend it to assert that `import commkit` loads neither CuPy nor Matplotlib, if lazy imports make that true.
 4. **Other cleanups that the 3.15 floor allows** (each its own commit; verify each against What's New in 3.14 and 3.15):
-   - Drop `from __future__ import annotations` (25 modules): annotations are evaluated lazily by default since 3.14 (PEP 649/749). Check that nothing reads `__annotations__` as strings.
+   - Drop `from __future__ import annotations`: annotations are evaluated lazily by default since 3.14 (PEP 649/749). Check that nothing reads `__annotations__` as strings.
    - UTF-8 mode is the default from 3.15 (PEP 686): check `io` and any `open()` without `encoding=`.
    - `strptime` with a day and no year now raises (the `jupyter_client` failure above); grep commkit for date parsing.
    - The 3.15 sampling profiler (PEP 799) is a candidate tool for the CPU hot paths next to `nsys`; mention it in §8 if it proves useful.
