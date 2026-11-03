@@ -4,6 +4,23 @@ Notable changes to CommKit, newest first. Performance figures are from the refer
 
 ## [Unreleased]
 
+Error-rate curves for every code, and decoders that say what they checked.
+
+### Changes that may need code updates
+
+- `DecodeResult` has a new field, `checked`: whether `valid` comes from a check that can fail. Code that builds a `DecodeResult` itself must pass it. For decoders without a check, `valid` stays `True` everywhere, as before.
+
+### Added
+
+- `coding.error_rate_curve(code, constellation=, esn0_db=, ...)` measures a code's BER, FER and pre-FEC BER over AWGN by Monte Carlo. Each point stops after `min_block_errors` block errors or `max_blocks` blocks. It returns an `ErrorRateCurve` of counts, which you can also build from your own simulation loop.
+- `plotting.plot_error_rate(curves)`: BER and FER against Es/N0 or Eb/N0, with 95 % intervals on the FER and the pre-FEC BER for reference, plus a panel splitting failures into detected and undetected ones.
+- Soft output from more decoders: `TurboIterations` (a-posteriori LLRs of the last iteration), `MaximumLikelihood` (max-log) and `Concatenated` (the inner decoder's LLRs). `decoder_exit_curve` now covers turbo and maximum-likelihood decoding.
+- `plot_llr_distribution(res, sig)` takes a `DecodeResult` and the transmitted Signal or Reference, as `ber` does.
+
+### Performance
+
+- `MaximumLikelihood` now computes the soft output too: 16384 Hamming(16, 11) words take 1.7x as long on the CPU (fused Numba search) and 3.8x on the GPU. Turbo decoding is unchanged (1.00).
+
 ## [3.3.0] - 2026-11-03
 
 Numerical filter responses and plots built for comparisons. `filter_response`, `impulse_response` and `step_response` evaluate any FIR, SOS or `(b, a)` filter on its device; the multi-panel diagnostics draw one selected panel, and every plot can overlay several results on one axis. The example notebooks explain what each result shows.
