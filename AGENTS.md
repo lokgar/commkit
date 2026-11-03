@@ -309,8 +309,31 @@ Steps, each its own commit (the version switch first, then each refactor):
 
 ### Channel coding
 
-1. **oFEC** (OpenROADM, ITU-T G.709.3) is not implemented: its block structure is specified in OpenROADM MSA documents that were not available in a form to implement from. It would build on `BCHCode` (extended BCH(256, 239)), soft-output `Chase` and the staircase decoder's windowed iteration.
-2. **NR rate matching for polar codes** (sub-block interleaving, circular buffer, puncturing and shortening with their frozen-set rules, parity-check bits) and **LTE rate matching for turbo codes** are not included: `PolarCode` and `TurboCode` are the mother codes; `Punctured` and `Shortened` cover generic rate matching.
+1. **Uniform decoder outputs and plots for every code.** Every decoder returns a `DecodeResult`, but the families fill it differently, so users hand-roll the same error-rate loop (notebooks 07, 08, 21) and the LLR plots work on few decoders. State on 2026-11-03:
+
+   | Field | Gap |
+   | --- | --- |
+   | `llrs` | Filled by LDPC, BCJR and Chase only. `None` from turbo (its kernel computes the a-posteriori LLRs and drops them), `MaximumLikelihood` (max-log bitwise LLRs follow from the correlations it already computes) and `Concatenated` (drops the inner code's LLRs, which are those of the transmitted bits). Hard by nature: Berlekamp-Massey, `Syndrome`, staircase, SC/SCL, Viterbi. |
+   | `valid` | `True` for every block where no check runs (turbo, Viterbi, BCJR, ML, polar without CRC), indistinguishable from a passed check. |
+   | `iterations` | The configured count for turbo (no early stop), the pass count for staircase, 1 for one-shot decoders. Consistent enough; no change. |
+
+   What applies to every code: error rate against SNR (BER, FER, pre-FEC BER) and the decoding outcome (correct, detected failure, undetected error), which need only `bits`, `valid` and the reference. Output-LLR plots (`plot_llr_distribution`, `decoder_exit_curve`) apply to soft-output decoders only. Soft-output polar decoding (SCAN, soft SCL) is a research variant (§1). Per-iteration convergence traces apply to iterative decoders only and are left out.
+
+   Steps, the API additions and the numerical changes in separate commits:
+
+   1. **`DecodeResult.checked: bool`**: whether the decoder ran a success check (a composite is checked when any part is). `valid` keeps its type and means "no failure detected"; outcome counts split detected from undetected failures only where `checked`. Additive.
+   2. **Fill `llrs` where the algorithm has them**: turbo (the last iteration's APP), `MaximumLikelihood` (max-log), `Concatenated` (the inner code's). Each decoder's fields are listed in the `DecodeResult` docstring. `decoder_exit_curve` then covers these decoders too.
+   3. **`ErrorRateCurve`**: a frozen dataclass of host arrays per SNR point: `esn0_db`, counts (`num_blocks`, `bit_errors`, `block_errors`, `pre_fec_bit_errors`, `detected_failures`, `undetected_errors`, total iterations) and the rates derived from them (`ber`, `fer`, `pre_fec_ber`, `mean_iterations`), plus `rate`, `bits_per_symbol` (for an `ebn0_db` property) and `label`. It holds counts, not only rates, so a user loop over any channel builds one and plots can draw binomial confidence intervals.
+   4. **`error_rate_curve(code, *, constellation, esn0_db, method=None, min_block_errors, max_blocks, rng, device="cpu")`**: random information bits, `encode`, mapping, AWGN, `compute_llr`, `decode`; each point runs until `min_block_errors` block errors or `max_blocks` blocks. It lives in `metrics`, with `ErrorRateCurve`: it needs `mapping.compute_llr`, so it cannot live in `coding` (§3). It joins the `device` factories in §4.
+   5. **Plots**:
+      - `plot_error_rate(curves)`: BER and FER against Es/N0 or Eb/N0, with binomial intervals and the pre-FEC BER as a reference, plus a panel for the decoding outcome; several curves overlay on one axis like the other result plots.
+      - `plot_llr_distribution` accepts a `DecodeResult` with the reference, as `ber` does, and raises when `llrs` is `None`.
+   6. **Tests and notebooks**:
+      - Test `error_rate_curve` against closed forms (uncoded BPSK and QAM BER, the hard-decision block error rate of Hamming(7, 4)) and its stop rule; add contract rows.
+      - Test the new soft outputs: turbo's against its decisions, ML's max-log LLRs against a brute-force reference.
+      - Notebooks 07, 08 and 21 replace their hand-rolled loops.
+2. **oFEC** (OpenROADM, ITU-T G.709.3) is not implemented: its block structure is specified in OpenROADM MSA documents that were not available in a form to implement from. It would build on `BCHCode` (extended BCH(256, 239)), soft-output `Chase` and the staircase decoder's windowed iteration.
+3. **NR rate matching for polar codes** (sub-block interleaving, circular buffer, puncturing and shortening with their frozen-set rules, parity-check bits) and **LTE rate matching for turbo codes** are not included: `PolarCode` and `TurboCode` are the mother codes; `Punctured` and `Shortened` cover generic rate matching.
 
 ### Test suite
 
