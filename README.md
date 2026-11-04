@@ -1,8 +1,8 @@
-<h1 align="center">
-  <img src="https://raw.githubusercontent.com/lokgar/commkit/main/.github/logo.svg" alt="CommKit" width="420">
-</h1>
+<p align="center">
+  <img src="https://raw.githubusercontent.com/lokgar/commkit/main/.github/logo.svg" alt="CommKit" width="520">
+</p>
 
-<p align="center"><b>Digital communications research kit for Python, on CPU and GPU.</b></p>
+<p align="center">Digital communications research kit for Python with CUDA acceleration.</p>
 
 <p align="center">
   <img src="https://img.shields.io/badge/python-3.12%2B-blue" alt="Python 3.12+">
@@ -10,10 +10,6 @@
   <img src="https://img.shields.io/badge/license-MIT-green" alt="License">
   <img src="https://img.shields.io/badge/CUDA-13.x-76B900?logo=nvidia" alt="CUDA">
 </p>
-
-CommKit is a Python library for digital communications research: simulating a link, processing its signals and measuring the result, on simulated or experimental data.
-
----
 
 ## The model
 
