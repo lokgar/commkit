@@ -114,6 +114,7 @@ def plot_ideal_constellation(
     ax.set_ylabel("Quadrature (Q)")
 
     # Center lines
+    ax.grid(False)
     ax.axhline(0, color="white", alpha=0.4, zorder=0)
     ax.axvline(0, color="white", alpha=0.4, zorder=0)
 
@@ -379,6 +380,7 @@ def _plot_constellation_array(
         )
 
     # Add center lines
+    ax.grid(False)
     ax.axhline(0, color="white", alpha=0.4, zorder=0)
     ax.axvline(0, color="white", alpha=0.4, zorder=0)
 

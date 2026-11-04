@@ -205,14 +205,16 @@ def test_constellation_axis_limits(xp: Any) -> None:
     assert ax.get_ylim() == (-2, 2)
 
 
-def test_constellation_respects_grid_theme(xp: Any) -> None:
-    """The caller's grid setting applies to the constellation axes."""
+def test_constellation_has_no_grid(xp: Any) -> None:
+    """Constellation axes draw no grid, whatever the theme's ``axes.grid``."""
     import matplotlib as mpl
 
-    from commkit.plotting import plot_constellation
+    from commkit.plotting import plot_constellation, plot_ideal_constellation
 
     x = xp.asarray([1 + 1j, -1 - 1j], dtype=xp.complex64)
-    for enabled in (False, True):
-        with mpl.rc_context({"axes.grid": enabled}):
-            _, ax = plot_constellation(x)
-            assert ax.get_xgridlines()[0].get_visible() is enabled
+    with mpl.rc_context({"axes.grid": True}):
+        _, ax = plot_constellation(x)
+        assert ax.get_xgridlines()[0].get_visible() is False
+        assert ax.get_ygridlines()[0].get_visible() is False
+        _, ax = plot_ideal_constellation(Constellation.qam(16))
+        assert ax.get_xgridlines()[0].get_visible() is False
