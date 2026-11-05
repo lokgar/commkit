@@ -205,7 +205,7 @@ def _refine_tone_frequencies(
 ) -> list[float]:
     """Refine each tone frequency on the receive channel where it is strongest.
 
-    Two stages replace one ``BiasTone`` estimate per tone, each of which ran
+    Two stages replace one ``SpectralPeak`` estimate per tone, each of which ran
     its own zero-padded FFT of the full record:
 
     1. Coarse: one batched FFT, in the working precision, of the distinct
@@ -474,7 +474,7 @@ def estimate_polarization_tones(
         four grid points per tracking period.
     refine_tones : bool, default True
         Refine each tone's frequency to a fraction of a bin with the
-        ``BiasTone`` estimator (on the receive channel where the tone is
+        ``SpectralPeak`` estimator (on the receive channel where the tone is
         strongest) first, which absorbs a residual carrier frequency offset
         that moved the tone off its bin.  ``False`` uses
         ``tone_frequencies`` exactly.

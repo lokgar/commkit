@@ -86,7 +86,7 @@ _DOCUMENTED: dict[str, str] = {
     + " (the IIR state transitions)",
     "metrics/_common.py::_paired": _HOST_VALUE + " (reference symbols)",
     "coding/performance.py::error_rate_curve": _PAYLOAD + " (per batch of blocks)",
-    "recovery/corrections.py::DataAided.__post_init__": "value object: host copy",
+    "recovery/corrections.py::ConstantPhase.__post_init__": "value object: host copy",
     "recovery/corrections.py::_data_aided": _HOST_VALUE + " (reference symbols)",
     "recovery/corrections.py::correct_cycle_slips": _RECURSION,
     "recovery/pilots.py::_extract_pilot_phasor": _HOST_VALUE

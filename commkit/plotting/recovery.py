@@ -130,9 +130,9 @@ def plot_pilot_phase_estimate(
 ) -> tuple[Any, Any] | None:
     """Plot the pilot phases of a pilot-based estimate with their linear fit.
 
-    For a :class:`~commkit.recovery.CarrierPhaseEstimate` (``PilotAided``) a
+    For a :class:`~commkit.recovery.CarrierPhaseEstimate` (``PilotInterpolation``) a
     second panel shows the interpolated per-symbol trajectory; for a
-    :class:`~commkit.frequency.FrequencyOffsetEstimate` (``PilotSymbols``)
+    :class:`~commkit.frequency.FrequencyOffsetEstimate` (``PilotSlope``)
     the fit is labeled with the estimated offset.
 
     Parameters

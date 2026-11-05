@@ -146,7 +146,7 @@ def _parabolic_peak_offset(
         delta = 0.5 * (y_prev - y_next) / (y_prev - 2*y_curr + y_next)
 
     Every three-point peak fit of the library uses it: ``frequency.MthPower``
-    on magnitudes (``log=False``), ``frequency.BiasTone`` and
+    on magnitudes (``log=False``), ``frequency.SpectralPeak`` and
     ``frequency._refine_tones_from_spectrum`` (``log=True``), and
     :func:`estimate_fractional_delay` with either fit, which first rotates a
     complex peak onto the real axis and passes its own ``log_eps`` and

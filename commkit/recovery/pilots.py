@@ -1,6 +1,6 @@
 """Pilot-aided carrier-phase recovery.
 
-:class:`PilotAided` (known pilot symbols in the frame), :class:`PilotTone`
+:class:`PilotInterpolation` (known pilot symbols in the frame), :class:`PilotTone`
 (one CW pilot tone) and :class:`PilotTones` (two or more tones, combined).
 """
 
@@ -19,11 +19,11 @@ from ..math import _remove_linear_trend
 from ._common import _Context, _Phase
 from .corrections import CycleSlip, _log_phase_summary, _repair_slips
 
-__all__ = ["PilotAided", "PilotTone", "PilotTones"]
+__all__ = ["PilotInterpolation", "PilotTone", "PilotTones"]
 
 
 @dataclass(frozen=True, eq=False)
-class PilotAided:
+class PilotInterpolation:
     """Phase from known pilot symbols, interpolated between pilots.
 
     The phase at each pilot is ``∠(r_k·s_k*)``; the pilot phases are
@@ -77,7 +77,7 @@ class PilotAided:
     @classmethod
     def from_frame(
         cls, frame: Any, *, include_preamble: bool = True, **options: Any
-    ) -> "PilotAided":
+    ) -> "PilotInterpolation":
         """The pilots of a ``SingleCarrierFrame``, for its symbols at one
         sample per symbol.
 
@@ -94,18 +94,20 @@ class PilotAided:
 
         Returns
         -------
-        PilotAided
+        PilotInterpolation
 
         Raises
         ------
         ValueError
             If the frame has no pilots.
         """
-        indices, values = _frame_pilots(frame, include_preamble, "PilotAided")
+        indices, values = _frame_pilots(frame, include_preamble, "PilotInterpolation")
         return cls(indices, values, **options)
 
 
-def _pilot_aided(symbols: ArrayType, method: PilotAided, ctx: _Context) -> _Phase:
+def _pilot_aided(
+    symbols: ArrayType, method: PilotInterpolation, ctx: _Context
+) -> _Phase:
     """Pilot-aided phase of ``(C, N)`` symbols."""
     symbols, xp, _ = dispatch(symbols)
     C, N = symbols.shape

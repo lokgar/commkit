@@ -168,7 +168,7 @@ class BetaSeparation:
     a Whittle-likelihood fit of white FM, flicker FM and the white angle
     noise of the detection (the ``f²`` tail),
     ``S_f = S_white + h_-1/f + σ²·(2 f_s/π²)·sin²(πf/f_s)``, the model of
-    :class:`DshFmPsd`; ``flicker``, ``angle_noise_var`` and ``fm_psd_model``
+    :class:`DshFmFit`; ``flicker``, ``angle_noise_var`` and ``fm_psd_model``
     carry the other terms.  Without a fence the fit runs from the lower edge
     of the PSD's lowest-level (plateau) region, which excludes a drift rise
     at low frequencies, to Nyquist, so the tail is modelled rather than cut
@@ -347,7 +347,7 @@ def _beta_separation(
     lw_cpu, area_cpu = to_device(xp.stack([lw, area]), "cpu")
 
     # White-FM floor: a Whittle fit of white FM, flicker FM and the white
-    # angle noise (the f² tail) - the model of DshFmPsd - so the tail is
+    # angle noise (the f² tail) - the model of DshFmFit - so the tail is
     # modelled rather than cut away.  Without a fence the fit runs from the
     # lower edge of the detected plateau (above any drift rise) to Nyquist.
     eligible = band_cpu & (f_cpu > 0)

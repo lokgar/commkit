@@ -70,7 +70,8 @@ class TestCprPilots:
             xp, n_symbols=512, pilot_period=pilot_period, phase_per_sym=0.001
         )
         phase_est = recovery.estimate_carrier_phase(
-            samples, recovery.PilotAided(indices=pilot_indices, values=pilot_values)
+            samples,
+            recovery.PilotInterpolation(indices=pilot_indices, values=pilot_values),
         ).value
         err = calc_rms_phase_error(phase_est, true_phase, xp=xp)
         assert err < 0.05
@@ -84,7 +85,8 @@ class TestCprPilots:
             xp, n_symbols=n_symbols, pilot_period=8, phase_per_sym=phase_per_sym
         )
         phase_est = recovery.estimate_carrier_phase(
-            samples, recovery.PilotAided(indices=pilot_indices, values=pilot_values)
+            samples,
+            recovery.PilotInterpolation(indices=pilot_indices, values=pilot_values),
         ).value
         err = _rms_phase_error(xp, phase_est, true_phase)
         assert err < 0.1  # relaxed tolerance for large phase
@@ -99,7 +101,7 @@ class TestCprPilots:
         samples, idx, values, truth = self._pilot_setup(xp)
         phase = recovery.estimate_carrier_phase(
             samples,
-            recovery.PilotAided(
+            recovery.PilotInterpolation(
                 indices=idx, values=values, interpolation=interpolation
             ),
         ).value
@@ -113,7 +115,7 @@ class TestCprPilots:
         with pytest.raises(ValueError, match="Unknown interpolation method"):
             recovery.estimate_carrier_phase(
                 samples,
-                recovery.PilotAided(
+                recovery.PilotInterpolation(
                     indices=pilot_indices,
                     values=pilot_values,
                     interpolation="spline_42",
@@ -572,7 +574,7 @@ class TestPilotsCPREnhancements:
         mimo = xp.stack([samples_a, samples_b], axis=0)  # (2, N)
         phi = recovery.estimate_carrier_phase(
             mimo,
-            recovery.PilotAided(
+            recovery.PilotInterpolation(
                 indices=pilot_indices, values=pilot_values, joint_channels=True
             ),
         ).value
@@ -584,13 +586,13 @@ class TestPilotsCPREnhancements:
         samples, pilot_indices, pilot_values = self._pilot_setup(xp, seed=3)
         phi_a = recovery.estimate_carrier_phase(
             samples,
-            recovery.PilotAided(
+            recovery.PilotInterpolation(
                 indices=pilot_indices, values=pilot_values, joint_channels=False
             ),
         ).value
         phi_b = recovery.estimate_carrier_phase(
             samples,
-            recovery.PilotAided(
+            recovery.PilotInterpolation(
                 indices=pilot_indices, values=pilot_values, joint_channels=True
             ),
         ).value
@@ -612,7 +614,7 @@ class TestPilotsCPREnhancements:
         mimo = xp.stack([samples_a, samples_b], axis=0)
         phi = recovery.estimate_carrier_phase(
             mimo,
-            recovery.PilotAided(
+            recovery.PilotInterpolation(
                 indices=pilot_indices,
                 values=pilot_values,
                 joint_channels=True,
@@ -632,10 +634,11 @@ class TestSignalInputPilotFunctions:
         sig = Signal(samples=samples, sampling_rate=FS, symbol_rate=FS)
 
         phi_sig = recovery.estimate_carrier_phase(
-            sig, recovery.PilotAided(indices=pilot_indices, values=pilot_values)
+            sig, recovery.PilotInterpolation(indices=pilot_indices, values=pilot_values)
         ).value
         phi_arr = recovery.estimate_carrier_phase(
-            samples, recovery.PilotAided(indices=pilot_indices, values=pilot_values)
+            samples,
+            recovery.PilotInterpolation(indices=pilot_indices, values=pilot_values),
         ).value
 
         assert not isinstance(phi_sig, Signal)
@@ -679,7 +682,7 @@ class TestSignalInputPilotFunctions:
 
 
 def test_pilot_aided_from_frame(xp):
-    """PilotAided.from_frame reads the frame's pilot positions and symbols and
+    """PilotInterpolation.from_frame reads the frame's pilot positions and symbols and
     removes a phase offset of the frame's symbols."""
     from commkit.core import Preamble, SingleCarrierFrame
 
@@ -692,12 +695,14 @@ def test_pilot_aided_from_frame(xp):
     )
     sig = frame.to_signal(symbol_rate=1e6).to(device_of(xp))
     rotated = sig.replace(samples=sig.samples * xp.exp(1j * 0.7).astype(xp.complex64))
-    method = recovery.PilotAided.from_frame(frame)
+    method = recovery.PilotInterpolation.from_frame(frame)
     assert method.indices.size == frame.pilot_symbols.size
     assert method.indices[0] >= 13  # after the preamble
     est = recovery.estimate_carrier_phase(rotated, method)
     np.testing.assert_allclose(to_device(est.value, "cpu"), 0.7, atol=1e-4)
-    body = recovery.PilotAided.from_frame(frame, include_preamble=False)
+    body = recovery.PilotInterpolation.from_frame(frame, include_preamble=False)
     np.testing.assert_array_equal(body.indices + 13, method.indices)
     with pytest.raises(ValueError, match="no pilots"):
-        recovery.PilotAided.from_frame(SingleCarrierFrame(payload_num_symbols=10))
+        recovery.PilotInterpolation.from_frame(
+            SingleCarrierFrame(payload_num_symbols=10)
+        )

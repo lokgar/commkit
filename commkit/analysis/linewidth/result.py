@@ -36,26 +36,26 @@ class LinewidthEstimate:
     method : object
         The method object that produced the estimate.
     frequencies : numpy.ndarray or None
-        Frequency axis in Hz: of ``fm_psd`` (``BetaSeparation``, ``DshFmPsd``)
+        Frequency axis in Hz: of ``fm_psd`` (``BetaSeparation``, ``DshFmFit``)
         or of ``psd`` (``DshLorentzian``, two-sided).
     fm_psd : numpy.ndarray or None
-        FM-noise PSD :math:`S_f` in Hz²/Hz (``BetaSeparation``; for ``DshFmPsd`` the
+        FM-noise PSD :math:`S_f` in Hz²/Hz (``BetaSeparation``; for ``DshFmFit`` the
         laser PSD, the beat PSD divided by the interferometer response, NaN at
         masked bins).
     fm_psd_model : numpy.ndarray or None
-        ``BetaSeparation``, ``DshFmPsd``: the fitted model in the units of
+        ``BetaSeparation``, ``DshFmFit``: the fitted model in the units of
         ``fm_psd`` - white FM, flicker FM and the detection-noise term.
     used : numpy.ndarray or None
         Boolean mask of the bins the white-FM fit ran over, spurs removed
-        (``BetaSeparation``, ``DshFmPsd``).
+        (``BetaSeparation``, ``DshFmFit``).
     band : tuple of float or None
         ``BetaSeparation``: the ``(f_min, f_max)`` fence applied.
-        ``DshFmPsd``: the frequency extent of ``used``.
+        ``DshFmFit``: the frequency extent of ``used``.
     num_segments : int or None
         Welch segment count ``K`` behind every bin (``BetaSeparation``,
-        ``DshFmPsd``).
+        ``DshFmFit``).
     flicker : float or numpy.ndarray or None
-        ``BetaSeparation``, ``DshFmPsd``: fitted flicker-FM coefficient
+        ``BetaSeparation``, ``DshFmFit``: fitted flicker-FM coefficient
         ``h_-1`` in Hz² (``S_f = h_-1/f``).
     linewidth_floor : float or numpy.ndarray or None
         ``BetaSeparation``: the white-FM (Lorentzian) linewidth ``π·S_white``
@@ -69,12 +69,12 @@ class LinewidthEstimate:
         (``S_f > β`` within ``band``), in general a union of disjoint
         intervals.
     valid : numpy.ndarray or None
-        ``DshFmPsd``: bins away from the interferometer notches and, for a
+        ``DshFmFit``: bins away from the interferometer notches and, for a
         real (single-photodiode) beat, within the beat's support,
         ``f <= min(f_shift, f_s/2 - f_shift)``; ``fm_psd`` and
         ``fm_psd_model`` are NaN elsewhere.
     f_shift : float or numpy.ndarray or None
-        ``DshFmPsd``, ``DshIncrement``: the removed beat carrier in Hz.
+        ``DshFmFit``, ``DshIncrement``: the removed beat carrier in Hz.
     lags : numpy.ndarray or None
         ``DshIncrement``: increment lags in samples.
     lag_s : numpy.ndarray or None
@@ -89,7 +89,7 @@ class LinewidthEstimate:
         Additive-noise term in rad²: the fitted intercept (``IncrementSlope``,
         ``DshIncrement``), the subtracted term (``IncrementSubtract``) or the
         fitted angle-noise variance per sample (``BetaSeparation``,
-        ``DshFmPsd``).
+        ``DshFmFit``).
     delta_phi_var : float or numpy.ndarray or None
         ``IncrementSlope``, ``IncrementSubtract``: lag-1 increment variance in
         rad².  ``DshIncrement``: total variance of the differential phase.

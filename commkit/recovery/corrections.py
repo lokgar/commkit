@@ -2,7 +2,7 @@
 
 :func:`smooth_phase_wiener` and :func:`correct_cycle_slips` on phase
 trajectories, with the :class:`CycleSlip` configuration nested in the
-estimation methods; the static :class:`DataAided` rotation; and
+estimation methods; the static :class:`ConstantPhase` rotation; and
 :func:`resolve_phase_ambiguity` and :func:`resolve_channel_permutation`
 against the reference.
 """
@@ -24,7 +24,7 @@ from ._common import _Context, _Phase
 
 __all__ = [
     "CycleSlip",
-    "DataAided",
+    "ConstantPhase",
     "correct_cycle_slips",
     "resolve_channel_permutation",
     "resolve_phase_ambiguity",
@@ -420,7 +420,7 @@ class CycleSlip:
     history : int, optional
         Past values in the linear fit, counted in values of the trajectory
         (blocks for BPS, Viterbi-Viterbi and Tikhonov, symbols for the PLL
-        and for an equalizer's inline ``cpr=``, pilots for ``PilotAided``),
+        and for an equalizer's inline ``cpr=``, pilots for ``PilotInterpolation``),
         not in symbols.  By default the values that span 640 symbol periods,
         at least 10: 20 blocks for ``BPS()``, 640 symbols for an equalizer's
         inline ``BPS``.  For the PLL (standalone or inline) the default is
@@ -455,7 +455,7 @@ class CycleSlip:
     PLL slip: the loop drifts by a quantum over about ``1/(B·T)`` symbols,
     which the fit follows like phase noise (16-QAM at 16 dB at that
     operating point: the same slips with and without the repair).  Pilots
-    (``PilotAided``) bound such slips instead.
+    (``PilotInterpolation``) bound such slips instead.
 
     Examples
     --------
@@ -521,8 +521,8 @@ def _repair_slips(
 
 
 @dataclass(frozen=True, eq=False)
-class DataAided:
-    """Static per-channel rotation against known symbols.
+class ConstantPhase:
+    """One constant carrier phase per channel, fitted to known symbols.
 
     A rotationally invariant blind equalizer (CMA, RDE) leaves an arbitrary
     constant phase on each output channel, not limited to the discrete grid
@@ -542,8 +542,8 @@ class DataAided:
 
     Examples
     --------
-    >>> y = correct_carrier_phase(sig, DataAided())  # sig.reference
-    >>> y = correct_carrier_phase(y_arr, DataAided(symbols=tx, num_skip_symbols=500))
+    >>> y = correct_carrier_phase(sig, ConstantPhase())  # sig.reference
+    >>> y = correct_carrier_phase(y_arr, ConstantPhase(symbols=tx, num_skip_symbols=500))
     """
 
     symbols: np.ndarray | None = None
@@ -564,11 +564,11 @@ class DataAided:
             object.__setattr__(self, "symbols", symbols)
 
 
-def _data_aided(x: ArrayType, method: DataAided, ctx: _Context) -> _Phase:
+def _data_aided(x: ArrayType, method: ConstantPhase, ctx: _Context) -> _Phase:
     if ctx.reference is None:
         raise ValueError(
-            "estimate_carrier_phase(): DataAided needs known symbols (pass "
-            "DataAided(symbols=...) or a Signal with a reference)."
+            "estimate_carrier_phase(): ConstantPhase needs known symbols (pass "
+            "ConstantPhase(symbols=...) or a Signal with a reference)."
         )
     x, xp, _ = dispatch(x)
     C, N = x.shape

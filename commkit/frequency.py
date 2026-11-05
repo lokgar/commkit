@@ -3,9 +3,9 @@
 :func:`estimate_frequency_offset` measures the offset with the estimator its
 method object chooses: :class:`MthPower` (blind, the spectral peak of the
 M-th power), :class:`MengaliMorelli` (blind, multi-lag autocorrelation),
-:class:`PilotSymbols` (the phase slope of known symbols) or
-:class:`BiasTone` (a CW pilot tone).  A ``block_size`` on any method but
-``PilotSymbols`` tracks a time-varying offset.  The estimate is a
+:class:`PilotSlope` (the phase slope of known symbols) or
+:class:`SpectralPeak` (a CW pilot tone).  A ``block_size`` on any method but
+``PilotSlope`` tracks a time-varying offset.  The estimate is a
 :class:`FrequencyOffsetEstimate`; :func:`correct_frequency_offset` removes an
 estimate, an offset in Hz, or what a method estimates.
 """
@@ -106,11 +106,11 @@ def _get_numba_mm_bootstrap() -> Callable[..., np.ndarray]:
 
 
 __all__ = [
-    "BiasTone",
+    "SpectralPeak",
     "FrequencyOffsetEstimate",
     "MengaliMorelli",
     "MthPower",
-    "PilotSymbols",
+    "PilotSlope",
     "correct_frequency_offset",
     "estimate_frequency_offset",
 ]
@@ -227,7 +227,7 @@ class MengaliMorelli:
 
 
 @dataclass(frozen=True, eq=False)
-class PilotSymbols:
+class PilotSlope:
     """Least-squares phase slope of known pilot symbols.
 
     The pilot phase ``angle(r · conj(s))`` is unwrapped and fitted with a
@@ -272,7 +272,7 @@ class PilotSymbols:
         sps: int = 1,
         include_preamble: bool = True,
         snr_weighted: bool = True,
-    ) -> "PilotSymbols":
+    ) -> "PilotSlope":
         """The pilots of a ``SingleCarrierFrame``.
 
         Parameters
@@ -292,21 +292,21 @@ class PilotSymbols:
 
         Returns
         -------
-        PilotSymbols
+        PilotSlope
 
         Raises
         ------
         ValueError
             If the frame has no pilots.
         """
-        sps = require_integer_sps(sps, "PilotSymbols.from_frame()")
-        indices, values = _frame_pilots(frame, include_preamble, "PilotSymbols")
+        sps = require_integer_sps(sps, "PilotSlope.from_frame()")
+        indices, values = _frame_pilots(frame, include_preamble, "PilotSlope")
         return cls(indices * sps, values, snr_weighted)
 
 
 @dataclass(frozen=True)
-class BiasTone:
-    """Frequency of a CW pilot (bias) tone in the spectrum.
+class SpectralPeak:
+    """Frequency of the spectral peak: a CW pilot (bias) tone, no nonlinearity.
 
     Finds the spectral peak, optionally inside ``target_frequency ±
     search_band``, and refines it by a log-parabolic fit of the three bins
@@ -338,7 +338,7 @@ class BiasTone:
         _check_blocks(self.block_size, self.overlap)
 
 
-FrequencyMethod = MthPower | MengaliMorelli | PilotSymbols | BiasTone
+FrequencyMethod = MthPower | MengaliMorelli | PilotSlope | SpectralPeak
 
 
 # -----------------------------------------------------------------------------
@@ -555,7 +555,7 @@ def _mengali_morelli(
     )
 
 
-def _pilot_symbols(x: ArrayType, fs: float, method: PilotSymbols) -> _Rows:
+def _pilot_symbols(x: ArrayType, fs: float, method: PilotSlope) -> _Rows:
     xp = dispatch(x)[1]
     C, N = x.shape
     idx_np = method.indices
@@ -601,7 +601,7 @@ def _pilot_symbols(x: ArrayType, fs: float, method: PilotSymbols) -> _Rows:
     )
 
 
-def _bias_tone(x: ArrayType, fs: float, method: BiasTone) -> _Rows:
+def _bias_tone(x: ArrayType, fs: float, method: SpectralPeak) -> _Rows:
     xp = dispatch(x)[1]
     R, N = x.shape
     if N < 4:
@@ -646,7 +646,7 @@ def _estimate_rows(
         return _mth_power(x, fs, method, constellation, shared_rows)
     if isinstance(method, MengaliMorelli):
         return _mengali_morelli(x, fs, method, constellation)
-    if isinstance(method, PilotSymbols):
+    if isinstance(method, PilotSlope):
         return _pilot_symbols(x, fs, method)
     return _bias_tone(x, fs, method)
 
@@ -678,7 +678,7 @@ def estimate_frequency_offset(
     ----------
     samples : array_like or Signal
         Complex samples, ``(N,)`` or ``(C, N)``.
-    method : MthPower, MengaliMorelli, PilotSymbols or BiasTone
+    method : MthPower, MengaliMorelli, PilotSlope or SpectralPeak
         Estimation method; its ``block_size`` (blind methods) makes the
         estimate blockwise.
     sampling_rate : float, optional
@@ -702,7 +702,7 @@ def estimate_frequency_offset(
     if not isinstance(method, FrequencyMethod):
         raise TypeError(
             "estimate_frequency_offset(): method must be MthPower, MengaliMorelli, "
-            f"PilotSymbols or BiasTone, got {type(method).__name__}."
+            f"PilotSlope or SpectralPeak, got {type(method).__name__}."
         )
     signal_adapter = adapt_signal(samples, function_name="estimate_frequency_offset()")
     fs = float(signal_adapter.resolve_fact("sampling_rate", sampling_rate))
@@ -735,7 +735,7 @@ def estimate_frequency_offset(
             pilot_indices=rows.pilot_indices,
         )
     else:
-        assert not isinstance(method, PilotSymbols)
+        assert not isinstance(method, PilotSlope)
         starts, length = _block_starts(N, block_size, method.overlap)
         B = len(starts)
         # All blocks of all channels in one batched call: rows (C * B, L).
@@ -893,7 +893,7 @@ def _refine_tones_from_spectrum(
 ) -> np.ndarray:
     """Refine tone frequencies on an FFT of the whole record, in one batch.
 
-    The counterpart of ``BiasTone`` for callers that already hold the
+    The counterpart of ``SpectralPeak`` for callers that already hold the
     record's spectrum: each ``targets[t]`` is refined by an argmax search over
     ``targets[t] ± search_band`` in spectrum row ``rows[t]``, then by the same
     three-bin log-parabolic fit.  There is no zero padding (the fit makes up

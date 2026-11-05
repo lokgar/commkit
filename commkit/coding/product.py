@@ -22,7 +22,7 @@ interleaver between them and zero padding to whole inner codewords:
 :meth:`Concatenated.cfec` is the C-FEC of OIF 400ZR and
 :meth:`Concatenated.ieee_802_3dj` the KP4 + Hamming(128, 120) code of IEEE
 802.3dj, both at code level (the standards' framers, scramblers and
-interleaver details are left out).  :class:`Stages` chooses the two
+interleaver details are left out).  :class:`StageDecoders` chooses the two
 decoders.
 """
 
@@ -54,7 +54,7 @@ from .base import (
 from .interleaving import Interleaver, deinterleave, interleave
 from .linear import LinearBlockCode
 
-__all__ = ["Concatenated", "HardIterations", "Stages", "StaircaseCode"]
+__all__ = ["Concatenated", "HardIterations", "StageDecoders", "StaircaseCode"]
 
 _ROWS = 512
 _COLUMNS = 510
@@ -348,7 +348,7 @@ def _decode_staircase(
 
 
 @dataclass(frozen=True)
-class Stages:
+class StageDecoders:
     """Decoders of the two stages of a :class:`Concatenated` code.
 
     Parameters
@@ -427,7 +427,7 @@ class Concatenated(_Code):
 
         The G.709.2 staircase code outside the double-extended
         Hamming(128, 119) (:meth:`LinearBlockCode.oif400zr`); decode the
-        inner code softly, e.g. ``Stages(inner=Chase(hard=Syndrome(max_weight=1)))``.
+        inner code softly, e.g. ``StageDecoders(inner=Chase(hard=Syndrome(max_weight=1)))``.
         A fixed pseudo-random interleaver stands in for the standard's error
         decorrelator and convolutional interleaver, which spread each inner
         codeword's errors over the staircase rows.  OIF gives an input BER
@@ -513,7 +513,7 @@ def _encode_concatenated(code: Concatenated, bits: ArrayType) -> ArrayType:
 
 
 def _decode_concatenated(
-    code: Concatenated, llrs: ArrayType, method: Stages
+    code: Concatenated, llrs: ArrayType, method: StageDecoders
 ) -> _Decoded:
     _, xp, _ = dispatch(llrs)
     rows = llrs.shape[0]
@@ -562,8 +562,8 @@ _register(
     _Codec(
         encode=_encode_concatenated,
         decode=_decode_concatenated,
-        default_method=lambda code: Stages(),
-        methods=(Stages,),
+        default_method=lambda code: StageDecoders(),
+        methods=(StageDecoders,),
         # valid is the outer decoder's.
         checked=lambda code, method: _checked(code.outer, method.outer),
     ),

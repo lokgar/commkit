@@ -323,7 +323,7 @@ class TestFoePilots:
         samples, pilot_indices, pilot_values = self._setup(xp, fo_hz)
         est = frequency.estimate_frequency_offset(
             samples,
-            frequency.PilotSymbols(pilot_indices, pilot_values),
+            frequency.PilotSlope(pilot_indices, pilot_values),
             sampling_rate=FS,
         ).value
         assert abs(est - fo_hz) < 0.01 * abs(fo_hz) + 1.0
@@ -333,7 +333,7 @@ class TestFoePilots:
         samples, pilot_indices, pilot_values = self._setup(xp, fo_hz=0.0)
         est = frequency.estimate_frequency_offset(
             samples,
-            frequency.PilotSymbols(pilot_indices, pilot_values),
+            frequency.PilotSlope(pilot_indices, pilot_values),
             sampling_rate=FS,
         ).value
         assert abs(est) < 20.0
@@ -346,7 +346,7 @@ class TestFoePilots:
         samples_mimo = xp.stack([s0, s1], axis=0)  # (2, N)
         est = frequency.estimate_frequency_offset(
             samples_mimo,
-            frequency.PilotSymbols(pilot_indices, pilot_values),
+            frequency.PilotSlope(pilot_indices, pilot_values),
             sampling_rate=FS,
         ).value
         assert est.ndim == 1
@@ -362,7 +362,7 @@ class TestFoePilots:
         est = (
             frequency.estimate_frequency_offset(
                 samples_mimo,
-                frequency.PilotSymbols(pilot_indices, pilot_values),
+                frequency.PilotSlope(pilot_indices, pilot_values),
                 sampling_rate=FS,
             )
             .combined()
@@ -565,7 +565,7 @@ class TestFoeRegression:
         )
         est = frequency.estimate_frequency_offset(
             samples,
-            frequency.PilotSymbols(pilot_indices, pilot_values, snr_weighted=True),
+            frequency.PilotSlope(pilot_indices, pilot_values, snr_weighted=True),
             sampling_rate=FS,
         ).value
         assert abs(est - fo_hz) / fo_hz < 0.02
@@ -617,7 +617,7 @@ class TestFindBiasTone:
         n = xp.arange(N, dtype=xp.float64)
         seg = xp.exp(1j * 2 * np.pi * tone_hz / fs * n).astype(xp.complex64)
         est = frequency.estimate_frequency_offset(
-            seg, frequency.BiasTone(), sampling_rate=fs
+            seg, frequency.SpectralPeak(), sampling_rate=fs
         ).value
         assert abs(est - tone_hz) < bin_width
 
@@ -640,7 +640,7 @@ class TestFindBiasTone:
 
         seg_xp = xp.asarray(seg_np)
         est_interp = frequency.estimate_frequency_offset(
-            seg_xp, frequency.BiasTone(), sampling_rate=fs
+            seg_xp, frequency.SpectralPeak(), sampling_rate=fs
         ).value
 
         assert abs(est_interp - tone_hz) < abs(est_argmax - tone_hz)
@@ -657,7 +657,7 @@ class TestFindBiasTone:
         seg = (target + interferer).astype(xp.complex64)
         est = frequency.estimate_frequency_offset(
             seg,
-            frequency.BiasTone(target_frequency=100e6, search_band=50e6),
+            frequency.SpectralPeak(target_frequency=100e6, search_band=50e6),
             sampling_rate=fs,
         ).value
         assert abs(est - 100e6) < 10e6
@@ -669,11 +669,11 @@ class TestFindBiasTone:
         seg = xp.exp(1j * 2 * np.pi * 1e5 / 1e6 * n).astype(xp.complex64)
         with pytest.raises(ValueError, match="both be given or both omitted"):
             frequency.estimate_frequency_offset(
-                seg, frequency.BiasTone(target_frequency=1e5), sampling_rate=1e6
+                seg, frequency.SpectralPeak(target_frequency=1e5), sampling_rate=1e6
             )
         with pytest.raises(ValueError, match="both be given or both omitted"):
             frequency.estimate_frequency_offset(
-                seg, frequency.BiasTone(search_band=10e3), sampling_rate=1e6
+                seg, frequency.SpectralPeak(search_band=10e3), sampling_rate=1e6
             )
 
     def test_empty_search_window_raises(self, xp):
@@ -685,7 +685,7 @@ class TestFindBiasTone:
             # beyond Nyquist for fs=1 MHz
             frequency.estimate_frequency_offset(
                 seg,
-                frequency.BiasTone(target_frequency=2e6, search_band=100.0),
+                frequency.SpectralPeak(target_frequency=2e6, search_band=100.0),
                 sampling_rate=1e6,
             )
 
@@ -697,10 +697,10 @@ class TestFindBiasTone:
         n_np = np.arange(N, dtype=np.float64)
         seg_np = np.exp(1j * 2 * np.pi * tone_hz / fs * n_np).astype(np.complex64)
         est_cpu = frequency.estimate_frequency_offset(
-            seg_np, frequency.BiasTone(), sampling_rate=fs
+            seg_np, frequency.SpectralPeak(), sampling_rate=fs
         ).value
         est_dev = frequency.estimate_frequency_offset(
-            xp.asarray(seg_np), frequency.BiasTone(), sampling_rate=fs
+            xp.asarray(seg_np), frequency.SpectralPeak(), sampling_rate=fs
         ).value
         assert abs(est_cpu - est_dev) < 1.0
 
@@ -717,7 +717,7 @@ class TestFindBiasTone:
             np.exp(1j * 2 * np.pi * tone_hz / fs * n_np).astype(np.complex64)
         )
         est = frequency.estimate_frequency_offset(
-            seg, frequency.BiasTone(), sampling_rate=fs
+            seg, frequency.SpectralPeak(), sampling_rate=fs
         ).value
         assert abs(est - tone_hz) < 2 * bin_width
 
@@ -860,13 +860,13 @@ class TestCorrectFrequencyOffsetBlockwise:
         )
 
     def test_bias_tone_tracking(self, xp):
-        """A BiasTone method with block_size tracks a CW tone."""
+        """A SpectralPeak method with block_size tracks a CW tone."""
         fs = 1e9
         N = 8192
         tone_hz = 100e6
         t = np.arange(N) / fs
         sig = xp.asarray(np.exp(2j * np.pi * tone_hz * t).astype(np.complex64))
-        method = frequency.BiasTone(
+        method = frequency.SpectralPeak(
             target_frequency=tone_hz, search_band=20e6, block_size=1024
         )
         est = frequency.estimate_frequency_offset(sig, method, sampling_rate=fs)
@@ -910,11 +910,11 @@ class TestSignalInputFrequency:
         pilot_indices = np.arange(0, 512, 8)
         pilot_values = xp.asarray(sig.reference.symbols)[pilot_indices]
         est_sig = frequency.estimate_frequency_offset(
-            sig, frequency.PilotSymbols(pilot_indices, pilot_values)
+            sig, frequency.PilotSlope(pilot_indices, pilot_values)
         ).value
         est_arr = frequency.estimate_frequency_offset(
             sig.samples,
-            frequency.PilotSymbols(pilot_indices, pilot_values),
+            frequency.PilotSlope(pilot_indices, pilot_values),
             sampling_rate=FS,
         ).value
         assert float(est_sig) == pytest.approx(float(est_arr))
@@ -927,9 +927,11 @@ class TestSignalInputFrequency:
         tone = xp.asarray((np.exp(2j * np.pi * tone_hz * t)).astype(np.complex64))
         sig = Signal(samples=tone, sampling_rate=fs, symbol_rate=fs / 2)
 
-        est_sig = frequency.estimate_frequency_offset(sig, frequency.BiasTone()).value
+        est_sig = frequency.estimate_frequency_offset(
+            sig, frequency.SpectralPeak()
+        ).value
         est_arr = frequency.estimate_frequency_offset(
-            tone, frequency.BiasTone(), sampling_rate=fs
+            tone, frequency.SpectralPeak(), sampling_rate=fs
         ).value
         assert float(est_sig) == pytest.approx(float(est_arr))
 
@@ -958,15 +960,15 @@ class TestSignalInputFrequency:
 
 
 def test_pilot_symbols_from_frame(xp):
-    """PilotSymbols.from_frame: the frame's pilots at the symbol-centered
+    """PilotSlope.from_frame: the frame's pilots at the symbol-centered
     samples of a record at sps samples per symbol."""
     from commkit.core import SingleCarrierFrame
 
     frame = SingleCarrierFrame(
         payload_num_symbols=1800, pilot_pattern="comb", pilot_period=10, payload_rng=2
     )
-    method = frequency.PilotSymbols.from_frame(frame, sps=2)
-    one = frequency.PilotSymbols.from_frame(frame)
+    method = frequency.PilotSlope.from_frame(frame, sps=2)
+    one = frequency.PilotSlope.from_frame(frame)
     np.testing.assert_array_equal(method.indices, 2 * one.indices)
     sig = frame.to_signal(symbol_rate=1e6).to(device_of(xp))
     n = xp.arange(sig.samples.shape[-1])

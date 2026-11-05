@@ -13,7 +13,7 @@ import pytest
 from commkit import analysis
 from commkit.analysis import (
     BetaSeparation,
-    DshFmPsd,
+    DshFmFit,
     DshIncrement,
     DshLorentzian,
     IncrementSlope,
@@ -107,9 +107,9 @@ class TestPlotAnalysis:
         assert not ax.collections
 
     def test_frequency_noise_psd_dsh(self, xp: Any) -> None:
-        """DshFmPsd: the floor guide sits at the estimate itself."""
+        """DshFmFit: the floor guide sits at the estimate itself."""
         z, m = _beat(xp)
-        est = analysis.estimate_linewidth(z, DshFmPsd(delay=m / FS), sampling_rate=FS)
+        est = analysis.estimate_linewidth(z, DshFmFit(delay=m / FS), sampling_rate=FS)
         fig, ax = plot_frequency_noise_psd(est, title="DSH")
         floor = [ln for ln in ax.lines if "White-FM" in ln.get_label()][0]
         assert floor.get_ydata()[0] == pytest.approx(est.value / np.pi)
@@ -161,7 +161,7 @@ class TestPlotAnalysis:
     @pytest.mark.parametrize(
         ("plot", "match"),
         [
-            (plot_frequency_noise_psd, "BetaSeparation or DshFmPsd"),
+            (plot_frequency_noise_psd, "BetaSeparation or DshFmFit"),
             (plot_dsh_beat_psd, "DshLorentzian"),
         ],
     )

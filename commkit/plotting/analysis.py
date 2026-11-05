@@ -238,11 +238,11 @@ def plot_frequency_noise_psd(
     """Plot the frequency-noise PSD of a linewidth estimate on log-log axes.
 
     Draws ``fm_psd`` (:math:`S_f`) with the white-FM floor ``Δν/π`` (``linewidth_floor`` for
-    ``BetaSeparation``, the estimate itself for ``DshFmPsd``) and the region
+    ``BetaSeparation``, the estimate itself for ``DshFmFit``) and the region
     annotations the estimate carries:
 
     * ``band``: the analysis window, the ``[f_min, f_max]`` fence of
-      ``BetaSeparation`` or the extent of the ``DshFmPsd`` fit.  It is not
+      ``BetaSeparation`` or the extent of the ``DshFmFit`` fit.  It is not
       the integration region itself.
     * ``above`` (``BetaSeparation``): the β-integration region
       ``{f : S_f(f) > β(f)}``, in general a union of disjoint intervals; the
@@ -264,7 +264,7 @@ def plot_frequency_noise_psd(
     ----------
     estimate : LinewidthEstimate
         From :func:`commkit.analysis.estimate_linewidth` with
-        ``BetaSeparation`` or ``DshFmPsd``.
+        ``BetaSeparation`` or ``DshFmFit``.
     ax : matplotlib.axes.Axes, optional
         Axes to draw on; ``None`` creates a figure.
     label : str, optional
@@ -288,7 +288,7 @@ def plot_frequency_noise_psd(
         shows the figure instead.
     """
     name = "plot_frequency_noise_psd()"
-    S_f = _require(estimate, "fm_psd", name, "a BetaSeparation or DshFmPsd estimate")
+    S_f = _require(estimate, "fm_psd", name, "a BetaSeparation or DshFmFit estimate")
     f, beta_line, above = estimate.frequencies, estimate.beta_line, estimate.above
     band, used = estimate.band, estimate.used
     floor = estimate.linewidth_floor
@@ -724,7 +724,7 @@ def plot_carrier_phase_characterization(
     drift : FrequencyDrift
         From :func:`commkit.analysis.frequency_drift`.
     linewidth : LinewidthEstimate
-        A ``BetaSeparation`` or ``DshFmPsd`` estimate (its PSD is drawn).
+        A ``BetaSeparation`` or ``DshFmFit`` estimate (its PSD is drawn).
     allan : AllanDeviation
         From :func:`commkit.analysis.allan_deviation`.
     sampling_rate : float

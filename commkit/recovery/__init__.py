@@ -3,9 +3,9 @@
 :func:`estimate_carrier_phase` and :func:`correct_carrier_phase`, with one
 method object per algorithm: decision-directed :class:`PLL`, block-based
 :class:`ViterbiViterbi`, blind phase search :class:`BPS`, MAP
-:class:`Tikhonov`, pilot symbols :class:`PilotAided`, pilot tones
-:class:`PilotTone` / :class:`PilotTones` and the static :class:`DataAided`
-rotation.  The block methods, the PLL and ``PilotAided`` repair cycle
+:class:`Tikhonov`, pilot symbols :class:`PilotInterpolation`, pilot tones
+:class:`PilotTone` / :class:`PilotTones` and the static :class:`ConstantPhase`
+rotation.  The block methods, the PLL and ``PilotInterpolation`` repair cycle
 slips with a nested :class:`CycleSlip`.
 
 Also :func:`correct_cycle_slips` and :func:`smooth_phase_wiener` on phase
@@ -25,14 +25,14 @@ from .carrier_phase import (
     estimate_carrier_phase,
 )
 from .corrections import (
+    ConstantPhase,
     CycleSlip,
-    DataAided,
     correct_cycle_slips,
     resolve_channel_permutation,
     resolve_phase_ambiguity,
     smooth_phase_wiener,
 )
-from .pilots import PilotAided, PilotTone, PilotTones
+from .pilots import PilotInterpolation, PilotTone, PilotTones
 from .pll import PLL
 from .tikhonov import Tikhonov
 from .viterbi_viterbi import ViterbiViterbi
@@ -42,8 +42,8 @@ __all__ = [
     "PLL",
     "CarrierPhaseEstimate",
     "CycleSlip",
-    "DataAided",
-    "PilotAided",
+    "ConstantPhase",
+    "PilotInterpolation",
     "PilotTone",
     "PilotTones",
     "Tikhonov",

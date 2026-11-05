@@ -278,7 +278,7 @@ def dsh_fm_noise_psd(
     -------
     DshFmNoisePsd
         ``f``, ``S_f`` and ``valid``, on the input's device;
-        ``estimate_linewidth(x, DshFmPsd(...))`` is the reporting layer that
+        ``estimate_linewidth(x, DshFmFit(...))`` is the reporting layer that
         returns host values.
 
     See Also
@@ -295,7 +295,7 @@ def dsh_fm_noise_psd(
     * Additive detection noise on the beat adds white phase noise, an
       ``∝ sin²(πf/f_s)`` (≈ ``f²``) term that is not shaped by the
       interferometer; after the division it rises in every lobe.
-      ``DshFmPsd`` fits it as a separate term instead of dividing it.
+      ``DshFmFit`` fits it as a separate term instead of dividing it.
     * Near the notches (long segments only) the division amplifies the
       estimation noise by ``1/(4 sin²)``.
     * With long segments the result depends on τ_d through the notch
