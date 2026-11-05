@@ -40,7 +40,7 @@ class TestDDPLLEnhancements:
         mimo = self._make_mimo(xp)
         phi = recovery.estimate_carrier_phase(
             mimo,
-            recovery.PLL(mu=1e-2, joint_channels=True),
+            recovery.PLL(proportional_gain=1e-2, joint_channels=True),
             constellation=Constellation.qam(16),
         ).value
         assert phi.shape == (2, self.N)
@@ -53,12 +53,12 @@ class TestDDPLLEnhancements:
         )
         phi_a = recovery.estimate_carrier_phase(
             sig.samples,
-            recovery.PLL(mu=1e-2, joint_channels=False),
+            recovery.PLL(proportional_gain=1e-2, joint_channels=False),
             constellation=Constellation.qam(16),
         ).value
         phi_b = recovery.estimate_carrier_phase(
             sig.samples,
-            recovery.PLL(mu=1e-2, joint_channels=True),
+            recovery.PLL(proportional_gain=1e-2, joint_channels=True),
             constellation=Constellation.qam(16),
         ).value
         xpt.assert_allclose(phi_a, phi_b, atol=1e-10)
@@ -69,7 +69,7 @@ class TestDDPLLEnhancements:
         phi = recovery.estimate_carrier_phase(
             mimo,
             recovery.PLL(
-                mu=1e-2,
+                proportional_gain=1e-2,
                 joint_channels=True,
                 cycle_slip=recovery.CycleSlip(history=1000),
             ),
@@ -89,7 +89,9 @@ class TestDDPLL:
         """SISO: output is (N,) float64."""
         syms = self._qpsk_symbols(xp)
         phi = recovery.estimate_carrier_phase(
-            syms, recovery.PLL(mu=1e-2), constellation=Constellation.psk(4)
+            syms,
+            recovery.PLL(proportional_gain=1e-2),
+            constellation=Constellation.psk(4),
         ).value
         assert phi.shape == syms.shape
         assert phi.dtype == xp.float64
@@ -103,10 +105,10 @@ class TestDDPLL:
         x = xp.asarray((s * np.exp(1j * truth)).astype(np.complex64))
         c = Constellation.psk(4)
         first = recovery.estimate_carrier_phase(
-            x, recovery.PLL(mu=0.02), constellation=c
+            x, recovery.PLL(proportional_gain=0.02), constellation=c
         )
         second = recovery.estimate_carrier_phase(
-            x, recovery.PLL(mu=0.02, beta=1e-4), constellation=c
+            x, recovery.PLL(proportional_gain=0.02, integral_gain=1e-4), constellation=c
         )
         lag1 = truth[-1000:] - to_numpy(first.value)[-1000:]
         lag2 = truth[-1000:] - to_numpy(second.value)[-1000:]
@@ -118,13 +120,13 @@ class TestDDPLL:
         syms = self._qpsk_symbols(xp, N=256)
         phi = recovery.estimate_carrier_phase(
             syms,
-            recovery.PLL(mu=1e-2, phase_init=0.5),
+            recovery.PLL(proportional_gain=1e-2, phase_init=0.5),
             constellation=Constellation.psk(4),
         ).value
         assert float(phi[0]) == pytest.approx(0.5, abs=1e-12)
 
     def test_bandwidth_shortcut_equals_raw_gains(self, xp, xpt):
-        """mu=None, bandwidth=B is identical to raw mu=4B, beta=4B² (the resolver mapping)."""
+        """Bandwidth B is identical to raw gains 4B and 4B² (the resolver mapping)."""
         N = 512
         syms = self._qpsk_symbols(xp, N=N, seed=7)
         syms = syms * xp.exp(1j * 0.2).astype(syms.dtype)
@@ -137,7 +139,7 @@ class TestDDPLL:
         ).value
         phi_raw = recovery.estimate_carrier_phase(
             syms,
-            recovery.PLL(mu=4.0 * B, beta=4.0 * B**2),
+            recovery.PLL(proportional_gain=4.0 * B, integral_gain=4.0 * B**2),
             constellation=Constellation.psk(4),
         ).value
         xpt.assert_allclose(phi_bw, phi_raw, rtol=1e-6, atol=1e-9)
@@ -157,10 +159,14 @@ class TestDDPLL:
         tail = slice(N // 2, N)
 
         phi1 = recovery.estimate_carrier_phase(
-            syms, recovery.PLL(mu=0.02, beta=0.0), constellation=Constellation.psk(4)
+            syms,
+            recovery.PLL(proportional_gain=0.02, integral_gain=0.0),
+            constellation=Constellation.psk(4),
         ).value
         phi2 = recovery.estimate_carrier_phase(
-            syms, recovery.PLL(mu=0.02, beta=2e-4), constellation=Constellation.psk(4)
+            syms,
+            recovery.PLL(proportional_gain=0.02, integral_gain=2e-4),
+            constellation=Constellation.psk(4),
         ).value
         phi1_np = to_numpy(phi1)
         phi2_np = to_numpy(phi2)
@@ -175,10 +181,12 @@ class TestDDPLL:
         with pytest.raises(ValueError, match="bandwidth"):
             recovery.PLL(normalized_bandwidth=0.6)
 
-    def test_beta_without_mu_raises(self):
-        """Passing beta with mu=None is ambiguous and must raise ValueError."""
-        with pytest.raises(ValueError, match="beta requires mu"):
-            recovery.PLL(beta=1e-3)
+    def test_integral_without_proportional_gain_raises(self):
+        """An integral gain without a proportional gain is ambiguous and raises."""
+        with pytest.raises(
+            ValueError, match="integral_gain requires proportional_gain"
+        ):
+            recovery.PLL(integral_gain=1e-3)
 
 
 class TestSignalInputPll:
@@ -188,9 +196,13 @@ class TestSignalInputPll:
         """Signal input: modulation/order come from the signal's metadata."""
         sig = make_test_qam_signal(order=16, num_symbols=512, sps=1, xp=xp)
 
-        phi_sig = recovery.estimate_carrier_phase(sig, recovery.PLL(mu=1e-2)).value
+        phi_sig = recovery.estimate_carrier_phase(
+            sig, recovery.PLL(proportional_gain=1e-2)
+        ).value
         phi_arr = recovery.estimate_carrier_phase(
-            sig.samples, recovery.PLL(mu=1e-2), constellation=Constellation.qam(16)
+            sig.samples,
+            recovery.PLL(proportional_gain=1e-2),
+            constellation=Constellation.qam(16),
         ).value
 
         assert not isinstance(phi_sig, Signal)  # phase estimate stays a raw array

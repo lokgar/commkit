@@ -1,7 +1,10 @@
 """Laser and carrier characterization plots (drift, Allan deviation, linewidth).
 
 Each plot takes the result it draws: a ``FrequencyDrift``, an
-``AllanDeviation`` or a ``LinewidthEstimate`` from :mod:`commkit.analysis`.
+``AllanDeviation`` or a ``LinewidthEstimate`` from :mod:`commkit.analysis`,
+or the phase and drift split of
+:func:`commkit.analysis.separate_drift_phase_noise`
+(:func:`plot_carrier_phase_decomposition`).
 """
 
 from typing import Any
@@ -9,12 +12,12 @@ from typing import Any
 import numpy as np
 
 from ..backend import to_device
-from .sync import plot_carrier_phase_decomposition
 from .theme import (
     _as_channels,
     _finish,
     _get_axis,
     _panel_grid,
+    _require,
     _series_label,
     _set_eng_formatter,
 )
@@ -22,6 +25,7 @@ from .theme import (
 __all__ = [
     "plot_allan_deviation",
     "plot_carrier_phase_characterization",
+    "plot_carrier_phase_decomposition",
     "plot_dsh_beat_psd",
     "plot_frequency_drift",
     "plot_frequency_noise_psd",
@@ -29,21 +33,101 @@ __all__ = [
 ]
 
 
-def _require(result: Any, field: str, name: str, what: str) -> Any:
-    """``result.<field>``; a result without it raises, naming what is needed."""
-    value = getattr(result, field, None)
-    if value is None:
-        raise ValueError(
-            f"{name} needs {what} (got {type(result).__name__} without {field})."
+def plot_carrier_phase_decomposition(
+    phi,
+    drift=None,
+    *,
+    symbol_rate: float,
+    num_train_symbols: int = 0,
+    ax=None,
+    label: str | None = None,
+    xlim: tuple[float, float] | None = None,
+    ylim: tuple[float, float] | None = None,
+    legend: bool | None = None,
+    show: bool = False,
+    title: str = "Recovered carrier phase",
+) -> tuple[Any, Any] | None:
+    """Plot the recovered carrier-phase trajectory and its slow drift component.
+
+    The unwrapped phase ``φ(t)`` is drawn faintly with the low-pass drift
+    in bold over it: the split of
+    :func:`commkit.analysis.separate_drift_phase_noise`.  All channels of
+    MIMO input are overlaid.
+
+    Parameters
+    ----------
+    phi : array_like
+        Unwrapped carrier phase in radians, ``(N,)`` or ``(C, N)``.
+    drift : array_like, optional
+        The low-pass drift, shaped as ``phi``; drawn in bold.
+    symbol_rate : float
+        Symbol rate in Bd, for the time axis in seconds.
+    num_train_symbols : int, default 0
+        End of the training symbols, drawn as a dashed line when above 0.
+    ax : matplotlib.axes.Axes, optional
+        Axes to draw on; ``None`` creates a figure.
+    label : str, optional
+        Label for the trajectory, prefixed to channel names when needed.
+    xlim, ylim : tuple of float, optional
+        Limits for the displayed axes. ``None`` leaves the limits automatic.
+    legend : bool, optional
+        Show or hide the legend; ``None`` preserves the default.
+    show : bool, default False
+        Call ``plt.show()`` and return ``None``.
+    title : str, default "Recovered carrier phase"
+        Title of the figure.
+
+    Returns
+    -------
+    (fig, ax) or None
+        The figure and its axes; ``None`` with ``show=True``, which
+        shows the figure instead.
+    """
+    phi_c = _as_channels(phi)
+    C, N = phi_c.shape
+    drift_c = _as_channels(drift) if drift is not None else None
+
+    fig, axi = _get_axis(ax)
+
+    t = np.arange(N) / float(symbol_rate)
+    for i in range(C):
+        clabel = _series_label(label, f"pol {i}" if C > 1 else None, r"$\phi$ total")
+        line = axi.plot(
+            t,
+            phi_c[i],
+            alpha=0.4,
+            label=clabel if drift_c is None else None,
+        )[0]
+        if drift_c is not None:
+            drift_label = (
+                f"{label} drift"
+                if label
+                else (f"Drift (pol {i})" if C > 1 else "Drift")
+            )
+            axi.plot(t, drift_c[i], color=line.get_color(), label=drift_label)
+
+    if num_train_symbols > 0:
+        axi.axvline(
+            num_train_symbols / float(symbol_rate),
+            color="white",
+            ls="--",
+            label=f"DD start ({num_train_symbols})",
         )
-    return value
+
+    _set_eng_formatter(axi, "x")
+    axi.set_xlabel("Time [s]")
+    axi.set_ylabel("Phase [rad]")
+    axi.set_title(title)
+    axi.legend(loc="best")
+
+    return _finish((fig, axi), show, xlim=xlim, ylim=ylim, legend=legend)
 
 
 def plot_frequency_drift(
     drift,
     *,
     sampling_rate: float,
-    amp_ref: float | None = None,
+    reference_amplitude: float | None = None,
     ax=None,
     label: str | None = None,
     xlim: tuple[float, float] | None = None,
@@ -65,8 +149,8 @@ def plot_frequency_drift(
         ``(C, M)``.
     sampling_rate : float
         Sampling rate of ``df`` in Hz, for the time axis.
-    amp_ref : float, optional
-        Draws dashed reference lines at ``±amp_ref`` (e.g. the wander
+    reference_amplitude : float, optional
+        Draws dashed reference lines at ``±reference_amplitude`` (e.g. the wander
         amplitude injected in a simulation).
     ax : matplotlib.axes.Axes, optional
         Axes to draw on; ``None`` creates a figure.
@@ -98,16 +182,16 @@ def plot_frequency_drift(
     for i in range(C):
         axi.plot(t, df_c[i], label=_series_label(label, f"Pol {i}" if C > 1 else None))
 
-    if amp_ref is not None:
-        axi.axhline(amp_ref, color="white", ls="--", label="±amplitude")
-        axi.axhline(-amp_ref, color="white", ls="--")
+    if reference_amplitude is not None:
+        axi.axhline(reference_amplitude, color="white", ls="--", label="±amplitude")
+        axi.axhline(-reference_amplitude, color="white", ls="--")
 
     _set_eng_formatter(axi, "x")
     _set_eng_formatter(axi, "y")
     axi.set_xlabel("Time [s]")
     axi.set_ylabel(r"$\Delta f$ [Hz]")
     axi.set_title(title)
-    if C > 1 or amp_ref is not None:
+    if C > 1 or reference_amplitude is not None:
         axi.legend(loc="best")
 
     return _finish((fig, axi), show, xlim=xlim, ylim=ylim, legend=legend)
@@ -151,7 +235,7 @@ def plot_frequency_noise_psd(
 ) -> tuple[Any, Any] | None:
     """Plot the frequency-noise PSD of a linewidth estimate on log-log axes.
 
-    Draws ``S_f`` with the white-FM floor ``Δν/π`` (``linewidth_floor`` for
+    Draws ``fm_psd`` (:math:`S_f`) with the white-FM floor ``Δν/π`` (``linewidth_floor`` for
     ``BetaSeparation``, the estimate itself for ``DshFmPsd``) and the region
     annotations the estimate carries:
 
@@ -165,7 +249,7 @@ def plot_frequency_noise_psd(
       ``BetaSeparation`` floor, or the ``DshFmPsd`` fit with its spurs
       removed).  Sparse masks (400 bins or fewer) are drawn as markers on the
       PSD, dense ones as a highlighted log-binned median curve.
-    * ``S_f_model`` (``DshFmPsd``): the fitted model of white FM, flicker FM
+    * ``fm_psd_model`` (``DshFmPsd``): the fitted model of white FM, flicker FM
       and detection noise, drawn over the PSD.
 
     Dense spectra are drawn faint with a log-binned median trace on top.
@@ -199,8 +283,8 @@ def plot_frequency_noise_psd(
         shows the figure instead.
     """
     name = "plot_frequency_noise_psd()"
-    S_f = _require(estimate, "S_f", name, "a BetaSeparation or DshFmPsd estimate")
-    f, beta_line, above = estimate.f, estimate.beta_line, estimate.above
+    S_f = _require(estimate, "fm_psd", name, "a BetaSeparation or DshFmPsd estimate")
+    f, beta_line, above = estimate.frequencies, estimate.beta_line, estimate.above
     band, used = estimate.band, estimate.used
     floor = estimate.linewidth_floor
     if floor is None:
@@ -254,7 +338,7 @@ def plot_frequency_noise_psd(
                 label=r"$\beta$-area (integrated region)",
             )
 
-        model = getattr(estimate, "S_f_model", None)
+        model = getattr(estimate, "fm_psd_model", None)
         if model is not None:
             m_c = _as_channels(model)
             axi.loglog(fp, m_c[0, pos], color="#ef476f", label="Fitted model")
@@ -448,7 +532,10 @@ def plot_increment_variance(
         shows the figure instead.
     """
     var = _require(
-        estimate, "var", "plot_increment_variance()", "an increment-method estimate"
+        estimate,
+        "increment_var",
+        "plot_increment_variance()",
+        "an increment-method estimate",
     )
     slope, intercept = estimate.slope, estimate.intercept
     lag = np.asarray(to_device(estimate.lag_s, "cpu"), dtype=np.float64)
@@ -538,7 +625,7 @@ def plot_dsh_beat_psd(
         shows the figure instead.
     """
     psd = _require(estimate, "psd", "plot_dsh_beat_psd()", "a DshLorentzian estimate")
-    f, f_peak = estimate.f, estimate.f_peak
+    f, f_peak = estimate.frequencies, estimate.peak_frequency
     linewidth, linewidth_3db = estimate.value, estimate.linewidth_3db
     level_db = float(estimate.method.level_db)
     f_c = np.asarray(to_device(f, "cpu"), dtype=np.float64)
@@ -598,7 +685,7 @@ def plot_carrier_phase_characterization(
     sampling_rate: float,
     drift_phase=None,
     drift_cutoff: float | None = None,
-    amp_ref: float | None = None,
+    reference_amplitude: float | None = None,
     ax=None,
     show: bool = False,
     title: str | None = None,
@@ -630,7 +717,7 @@ def plot_carrier_phase_characterization(
     drift_cutoff : float, optional
         Low-pass cutoff of the drift in Hz, shown in the title of the
         phase panel.
-    amp_ref : float, optional
+    reference_amplitude : float, optional
         Reference wander amplitude for the drift panel, as for
         :func:`plot_frequency_drift`.
     ax : array_like of matplotlib.axes.Axes, optional
@@ -657,7 +744,10 @@ def plot_carrier_phase_characterization(
         title=f"Recovered carrier phase{lp}",
     )
     plot_frequency_drift(
-        drift, sampling_rate=sampling_rate, amp_ref=amp_ref, ax=axes[0, 1]
+        drift,
+        sampling_rate=sampling_rate,
+        reference_amplitude=reference_amplitude,
+        ax=axes[0, 1],
     )
     plot_frequency_noise_psd(linewidth, ax=axes[1, 0])
     plot_allan_deviation(allan, ax=axes[1, 1])

@@ -19,7 +19,7 @@ ROUNDS = dict(rounds=3, warmup_rounds=1, iterations=1)
 def _plain_signal():
     return generate(
         Constellation.qam(16),
-        32_768,
+        num_symbols=32_768,
         symbol_rate=1e6,
         sps=4,
         pulse=RRC(0.35, span=8),

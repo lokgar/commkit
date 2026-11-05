@@ -404,7 +404,11 @@ class TestFoeMengaliMorelli:
     def test_data_aided_accuracy(self, xp, fo_hz):
         """Data-aided mode: estimate within 1 % using known reference (exact mixing)."""
         sig = generate(
-            Constellation.psk(4), 4096, symbol_rate=FS, sps=1, pulse=RRC(0.35)
+            Constellation.psk(4),
+            num_symbols=4096,
+            symbol_rate=FS,
+            sps=1,
+            pulse=RRC(0.35),
         ).to(device_of(xp))
         ideal = sig.samples.copy()
         sig = sig.replace(samples=apply_awgn(sig.samples, esn0_db=25, sps=1))

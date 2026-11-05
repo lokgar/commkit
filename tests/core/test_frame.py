@@ -115,15 +115,6 @@ class TestSingleCarrierFrameBasics:
         with pytest.raises(ValueError, match="payload_rng"):
             SingleCarrierFrame(payload_rng=-1)
 
-    def test_preamble_to_signal(self, xp: Any) -> None:
-        """Verify Preamble.to_signal() standalone signal generation."""
-        preamble = Preamble(sequence_type="barker", num_symbols=13)
-        sig = preamble.to_signal(sps=4, symbol_rate=1e6, pulse=RRC(0.35))
-
-        assert len(sig.samples) == 13 * 4
-        assert sig.constellation is None
-        assert sig.reference is None
-
     def test_single_stream_preamble_is_broadcast(self) -> None:
         """A one-stream Barker preamble starts every stream of a MIMO frame."""
         frame = SingleCarrierFrame(
@@ -647,7 +638,7 @@ class TestExtractPayload:
     def test_without_frame_raises(self):
         from commkit import generate
 
-        sig = generate(Constellation.qam(16), 100, symbol_rate=1e6)
+        sig = generate(Constellation.qam(16), num_symbols=100, symbol_rate=1e6)
         with pytest.raises(ValueError, match="no frame"):
             extract_payload(sig)
 
@@ -753,12 +744,6 @@ class TestFrameDevice:
         assert isinstance(sig.samples, xp.ndarray)
         assert sig.samples.dtype == ref.samples.dtype
         np.testing.assert_allclose(to_numpy(sig.samples), ref.samples, atol=1e-5)
-
-    def test_preamble_device(self, backend_device: str, xp: Any) -> None:
-        sig = Preamble(sequence_type="barker", num_symbols=13).to_signal(
-            sps=4, symbol_rate=1e6, device=backend_device
-        )
-        assert isinstance(sig.samples, xp.ndarray)
 
     def test_invalid_device(self) -> None:
         with pytest.raises(ValueError, match="device"):

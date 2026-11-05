@@ -21,8 +21,8 @@ return an :class:`EqualizerResult`, whose ``state`` (an
 
 from __future__ import annotations
 
-from ._block import block_lms
-from .blind import block_cma, block_rde
+from ._block import block_cma, block_lms, block_rde
+from ._sequential import cma, lms, rde, rls
 from .linear import apply_taps, estimate_transfer_function, zf_equalizer
 from .pilots import EqualizerPilots
 from .polarization import (
@@ -31,7 +31,6 @@ from .polarization import (
     estimate_polarization_tones,
 )
 from .result import EqualizerResult, EqualizerState
-from .sequential import cma, lms, rde, rls
 
 __all__ = [
     "EqualizerPilots",

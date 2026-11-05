@@ -35,15 +35,15 @@ class LinewidthEstimate:
         (the deep-width estimate).
     method : object
         The method object that produced the estimate.
-    f : numpy.ndarray or None
-        Frequency axis in Hz: of ``S_f`` (``BetaSeparation``, ``DshFmPsd``)
+    frequencies : numpy.ndarray or None
+        Frequency axis in Hz: of ``fm_psd`` (``BetaSeparation``, ``DshFmPsd``)
         or of ``psd`` (``DshLorentzian``, two-sided).
-    S_f : numpy.ndarray or None
-        FM-noise PSD in Hz²/Hz (``BetaSeparation``; for ``DshFmPsd`` the
+    fm_psd : numpy.ndarray or None
+        FM-noise PSD :math:`S_f` in Hz²/Hz (``BetaSeparation``; for ``DshFmPsd`` the
         laser PSD, the beat PSD divided by the interferometer response, NaN at
         masked bins).
-    S_f_model : numpy.ndarray or None
-        ``DshFmPsd``: the fitted model in the units of ``S_f`` - white FM,
+    fm_psd_model : numpy.ndarray or None
+        ``DshFmPsd``: the fitted model in the units of ``fm_psd`` - white FM,
         flicker FM and the detection-noise term.
     used : numpy.ndarray or None
         Boolean mask of the bins the estimate ran over: the white-FM floor
@@ -76,17 +76,17 @@ class LinewidthEstimate:
         ``DshIncrement``: increment lags in samples.
     lag_s : numpy.ndarray or None
         Increment lags in seconds, ``(n_lags,)`` (increment methods).
-    var : numpy.ndarray or None
+    increment_var : numpy.ndarray or None
         Measured increment variances in rad², ``(C, n_lags)`` (increment
         methods).
     slope, intercept : numpy.ndarray or None
-        The fit ``var = slope * lag_s + intercept`` per channel, rad²/s and
+        The fit ``increment_var = slope * lag_s + intercept`` per channel, rad²/s and
         rad² (``IncrementSlope``, ``DshIncrement``).
     angle_noise_var : float or numpy.ndarray or None
         Additive-noise term in rad²: the fitted intercept (``IncrementSlope``,
         ``DshIncrement``), the subtracted term (``IncrementSubtract``) or the
         fitted angle-noise variance per sample (``DshFmPsd``).
-    dphi_var : float or numpy.ndarray or None
+    delta_phi_var : float or numpy.ndarray or None
         ``IncrementSlope``, ``IncrementSubtract``: lag-1 increment variance in
         rad².  ``DshIncrement``: total variance of the differential phase.
     linewidth_3db : float or numpy.ndarray or None
@@ -98,15 +98,15 @@ class LinewidthEstimate:
         ``DshLorentzian``: ``τ_d/τ_c``.
     psd : numpy.ndarray or None
         ``DshLorentzian``: the beat PSD, ``(nfreq,)`` or ``(C, nfreq)``.
-    f_peak : float or numpy.ndarray or None
+    peak_frequency : float or numpy.ndarray or None
         ``DshLorentzian``: beat peak frequency in Hz.
     """
 
     value: float | np.ndarray
     method: Any
-    f: np.ndarray | None = None
-    S_f: np.ndarray | None = None
-    S_f_model: np.ndarray | None = None
+    frequencies: np.ndarray | None = None
+    fm_psd: np.ndarray | None = None
+    fm_psd_model: np.ndarray | None = None
     used: np.ndarray | None = None
     band: tuple[float, float] | None = None
     num_segments: int | None = None
@@ -119,16 +119,16 @@ class LinewidthEstimate:
     f_shift: float | np.ndarray | None = None
     lags: np.ndarray | None = None
     lag_s: np.ndarray | None = None
-    var: np.ndarray | None = None
+    increment_var: np.ndarray | None = None
     slope: np.ndarray | None = None
     intercept: np.ndarray | None = None
     angle_noise_var: float | np.ndarray | None = None
-    dphi_var: float | np.ndarray | None = None
+    delta_phi_var: float | np.ndarray | None = None
     linewidth_3db: float | np.ndarray | None = None
     lineshape_ratio: float | np.ndarray | None = None
     coherence_factor: float | np.ndarray | None = None
     psd: np.ndarray | None = None
-    f_peak: float | np.ndarray | None = None
+    peak_frequency: float | np.ndarray | None = None
 
 
 def _check_nperseg(nperseg: int | None) -> None:

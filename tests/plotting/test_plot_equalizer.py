@@ -48,7 +48,7 @@ class TestPlotEqualizer:
         n_symbols = 400
         sig = generate(
             Constellation.psk(4),
-            n_symbols,
+            num_symbols=n_symbols,
             symbol_rate=1e6,
             sps=2,
             pulse=RRC(0.35),
@@ -74,7 +74,12 @@ class TestPlotEqualizer:
     def test_equalizer_result_custom_axes(self, xp: Any) -> None:
         """equalizer_result with pre-existing axes uses them rather than creating new figures."""
         sig = generate(
-            Constellation.psk(4), 200, symbol_rate=1e6, sps=2, pulse=RRC(0.35), rng=0
+            Constellation.psk(4),
+            num_symbols=200,
+            symbol_rate=1e6,
+            sps=2,
+            pulse=RRC(0.35),
+            rng=0,
         )
         result = equalization.lms(
             xp.asarray(sig.samples),
@@ -92,7 +97,12 @@ class TestPlotEqualizer:
     def test_equalizer_result_show(self, xp: Any) -> None:
         """equalizer_result with show=True calls plt.show() and returns None."""
         sig = generate(
-            Constellation.psk(4), 200, symbol_rate=1e6, sps=2, pulse=RRC(0.35), rng=0
+            Constellation.psk(4),
+            num_symbols=200,
+            symbol_rate=1e6,
+            sps=2,
+            pulse=RRC(0.35),
+            rng=0,
         )
         result = equalization.lms(
             xp.asarray(sig.samples),
@@ -110,7 +120,12 @@ class TestPlotEqualizer:
     def test_equalizer_result_short_smoothing_siso(self, xp: Any) -> None:
         """plot_equalizer_result() SISO where len(mse) <= smoothing uses raw mse."""
         sig = generate(
-            Constellation.psk(4), 50, symbol_rate=1e6, sps=2, pulse=RRC(0.35), rng=0
+            Constellation.psk(4),
+            num_symbols=50,
+            symbol_rate=1e6,
+            sps=2,
+            pulse=RRC(0.35),
+            rng=0,
         )
         result = equalization.lms(
             xp.asarray(sig.samples),
@@ -127,7 +142,11 @@ class TestPlotEqualizer:
         """The SISO tap stem plot must not dump Matplotlib's property table
         (a bare ``plt.setp(lines)`` prints it)."""
         sig = generate(
-            Constellation.psk(4), 500, symbol_rate=1e3, sps=2, pulse=RRC(0.35)
+            Constellation.psk(4),
+            num_symbols=500,
+            symbol_rate=1e3,
+            sps=2,
+            pulse=RRC(0.35),
         )
         res = equalization.lms(
             xp.asarray(sig.samples),
@@ -144,7 +163,7 @@ class TestPlotEqualizer:
         """plot_equalizer_result() MIMO where len(mse) <= smoothing uses raw mse."""
         sig = generate(
             Constellation.psk(4),
-            50,
+            num_symbols=50,
             symbol_rate=1e6,
             sps=2,
             pulse=RRC(0.35),
@@ -165,7 +184,12 @@ class TestPlotEqualizer:
     def test_equalizer_result_with_phase_trajectory(self, xp: Any) -> None:
         """equalizer_result with phase_trajectory renders the 3-panel CPR layout."""
         sig = generate(
-            Constellation.psk(4), 100, symbol_rate=1e6, sps=2, pulse=RRC(0.35), rng=0
+            Constellation.psk(4),
+            num_symbols=100,
+            symbol_rate=1e6,
+            sps=2,
+            pulse=RRC(0.35),
+            rng=0,
         )
         result = equalization.lms(
             xp.asarray(sig.samples),

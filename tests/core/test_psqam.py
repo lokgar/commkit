@@ -112,7 +112,7 @@ class TestGeneratePSQAM:
         """Signal container fields and metadata are correctly populated."""
         sig = generate(
             Constellation.qam(16).shaped(nu=0.5),
-            500,
+            num_symbols=500,
             symbol_rate=32e9,
             sps=2,
             pulse=RRC(0.35),
@@ -128,7 +128,7 @@ class TestGeneratePSQAM:
         target = 3.5
         sig = generate(
             Constellation.qam(16).shaped(entropy=target),
-            1000,
+            num_symbols=1000,
             symbol_rate=32e9,
             sps=2,
             pulse=RRC(0.35),
@@ -148,7 +148,10 @@ class TestGeneratePSQAM:
         nu = 0.3
         n = 10_000
         sig = generate(
-            Constellation.qam(order).shaped(nu=nu), n, symbol_rate=32e9, rng=0
+            Constellation.qam(order).shaped(nu=nu),
+            num_symbols=n,
+            symbol_rate=32e9,
+            rng=0,
         )
         c = sig.constellation
         assert c.power() == pytest.approx(1.0, rel=1e-12)
@@ -169,7 +172,9 @@ class TestGeneratePSQAM:
 
     def test_psqam_source_bits_match_symbols(self, xp: Any, xpt: Any) -> None:
         """Hard-demapping source_symbols recovers source_bits across backends."""
-        sig = generate(Constellation.qam(16).shaped(nu=0.5), 2000, symbol_rate=32e9)
+        sig = generate(
+            Constellation.qam(16).shaped(nu=0.5), num_symbols=2000, symbol_rate=32e9
+        )
         src_sym = xp.asarray(sig.reference.symbols)
         src_bits = xp.asarray(sig.reference.bits)
         recovered_bits = sig.constellation.demap(src_sym)
@@ -177,7 +182,9 @@ class TestGeneratePSQAM:
 
     def test_psqam_ber_computable(self, xp: Any) -> None:
         """BER is computable end-to-end with resolved symbols and bits."""
-        sig = generate(Constellation.qam(16).shaped(nu=0.5), 5000, symbol_rate=32e9)
+        sig = generate(
+            Constellation.qam(16).shaped(nu=0.5), num_symbols=5000, symbol_rate=32e9
+        )
         noisy = apply_awgn(xp.asarray(sig.samples), esn0_db=20.0, sps=1)
         sig = sig.replace(samples=noisy)
         ber_val = metrics.ber(multirate.decimate_to_symbol_rate(sig))
@@ -190,7 +197,9 @@ class TestPSQAMMetricsAndDemapping:
     def test_mi_uniform_pmf_matches_none(self) -> None:
         """Passing explicit uniform PMF gives identical mutual information to pmf=None."""
         order = 16
-        sig = generate(Constellation.qam(order), 5000, symbol_rate=32e9, sps=1)
+        sig = generate(
+            Constellation.qam(order), num_symbols=5000, symbol_rate=32e9, sps=1
+        )
         noisy = apply_awgn(sig.samples, esn0_db=15.0, sps=1)
 
         c = Constellation.qam(order)
@@ -208,7 +217,9 @@ class TestPSQAMMetricsAndDemapping:
         nz = pmf > 0
         h_x = float(-np.sum(pmf[nz] * np.log2(pmf[nz])))
 
-        sig = generate(Constellation.qam(order).shaped(nu=nu), 10_000, symbol_rate=32e9)
+        sig = generate(
+            Constellation.qam(order).shaped(nu=nu), num_symbols=10_000, symbol_rate=32e9
+        )
         noisy = apply_awgn(sig.samples, esn0_db=25.0, sps=1)
         mi_val = metrics.mi(
             noisy,
@@ -222,7 +233,9 @@ class TestPSQAMMetricsAndDemapping:
     def test_compute_llr_uniform_pmf_matches_none(self, xpt: Any) -> None:
         """Uniform PMF produces identical LLRs to pmf=None."""
         order = 16
-        sig = generate(Constellation.qam(order), 200, symbol_rate=32e9, sps=1)
+        sig = generate(
+            Constellation.qam(order), num_symbols=200, symbol_rate=32e9, sps=1
+        )
         noisy = apply_awgn(sig.samples, esn0_db=12.0, sps=1)
         noise_var = 10 ** (-12.0 / 10)
 

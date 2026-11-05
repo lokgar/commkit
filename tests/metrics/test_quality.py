@@ -94,7 +94,7 @@ class TestErrorVectorMagnitude:
         """At high SNR blind EVM equals data-aided EVM on a shaped
         constellation too: both are relative to its average power."""
         c = Constellation.qam(64).shaped(nu=0.075)
-        sig = generate(c, 20000, symbol_rate=1e9, rng=2)
+        sig = generate(c, num_symbols=20000, symbol_rate=1e9, rng=2)
         rx = apply_awgn(xp.asarray(sig.samples), esn0_db=35.0, sps=1, rng=3)
         sig = multirate.decimate_to_symbol_rate(sig.replace(samples=rx))
         pct_da = metrics.evm(sig)

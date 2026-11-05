@@ -29,18 +29,18 @@ class DshFmNoisePsd:
 
     Attributes
     ----------
-    f : ndarray
+    frequencies : ndarray
         One-sided frequency axis in Hz.
-    S_f : ndarray
-        Laser FM-noise PSD in Hz²/Hz (NaN at masked bins), ``(nfreq,)`` or
+    fm_psd : ndarray
+        Laser FM-noise PSD :math:`S_f` in Hz²/Hz (NaN at masked bins), ``(nfreq,)`` or
         ``(C, nfreq)``.
     valid : ndarray
         Boolean mask ``(nfreq,)`` of trustworthy bins (away from the
         interferometer's transfer-function notches).
     """
 
-    f: Any
-    S_f: Any
+    frequencies: Any
+    fm_psd: Any
     valid: Any
 
 
@@ -321,4 +321,4 @@ def dsh_fm_noise_psd(
     valid = response >= 4.0 * float(notch_guard)
     S_laser = xp.where(valid, S_beat / xp.maximum(response, 1e-300), xp.nan)
 
-    return DshFmNoisePsd(f=f, S_f=S_laser, valid=valid)
+    return DshFmNoisePsd(frequencies=f, fm_psd=S_laser, valid=valid)

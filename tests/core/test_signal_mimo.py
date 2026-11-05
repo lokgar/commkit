@@ -21,7 +21,7 @@ class TestMIMOSignalStructure:
         """Verify MIMO signal generation via high-level factories."""
         sig = generate(
             Constellation.qam(4),
-            100,
+            num_symbols=100,
             symbol_rate=1e6,
             sps=4,
             pulse=RRC(0.35),

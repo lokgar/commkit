@@ -38,37 +38,39 @@ class ErrorRateCurve:
 
     Built by :func:`error_rate_curve`, or from the counts of your own
     simulation loop over any channel, to plot with
-    :func:`commkit.plotting.plot_error_rate`.
+    :func:`commkit.plotting.plot_error_rate`: the constructor takes the
+    fields below, the arrays as any array_like.
 
-    Parameters
+    Attributes
     ----------
-    esn0_db : array_like
+    esn0_db : numpy.ndarray
         Es/N0 of each point, in dB, ``(P,)``.
-    num_blocks : array_like
+    num_blocks : numpy.ndarray
         Code blocks decoded at each point, ``>= 1``.
-    bit_errors : array_like
+    bit_errors : numpy.ndarray
         Information bits decoded in error.
-    block_errors : array_like
+    block_errors : numpy.ndarray
         Blocks with any information bit in error.
-    pre_fec_bit_errors : array_like
+    pre_fec_bit_errors : numpy.ndarray
         Transmitted bits whose channel LLR has the wrong sign.
-    detected_failures : array_like
+    detected_failures : numpy.ndarray
         Blocks the decoder flagged (``DecodeResult.valid`` false), whatever
         their bits.
-    undetected_errors : array_like
+    undetected_errors : numpy.ndarray
         Blocks in error that the decoder reported valid.  Every block error
         when ``checked`` is ``False``.
-    total_iterations : array_like
+    total_iterations : numpy.ndarray
         Decoder iterations summed over the blocks.
     k, n : int
         Information and transmitted bits per block.
     bits_per_symbol : int
         Bits per constellation symbol, for :attr:`ebn0_db`.
-    checked : bool, default True
+    checked : bool
         Whether the decoder has a success check (``DecodeResult.checked``),
-        which splits failures into detected and undetected ones.
-    label : str, default ""
-        What the curve describes, for legends.
+        which splits failures into detected and undetected ones; ``True``
+        unless given.
+    label : str
+        What the curve describes, for legends; empty unless given.
 
     Notes
     -----

@@ -22,6 +22,7 @@ from commkit.analysis import (
 from commkit.plotting.analysis import (
     plot_allan_deviation,
     plot_carrier_phase_characterization,
+    plot_carrier_phase_decomposition,
     plot_dsh_beat_psd,
     plot_frequency_drift,
     plot_frequency_noise_psd,
@@ -56,7 +57,7 @@ class TestPlotAnalysis:
     def test_frequency_drift(self, xp: Any, channels: int) -> None:
         """One trace per channel, on the time axis of the sampling rate."""
         drift = analysis.frequency_drift(_phase(xp, channels), sampling_rate=R)
-        fig, ax = plot_frequency_drift(drift, sampling_rate=R, amp_ref=6e3)
+        fig, ax = plot_frequency_drift(drift, sampling_rate=R, reference_amplitude=6e3)
         traces = [ln for ln in ax.lines if len(ln.get_xdata()) > 2]
         assert len(traces) == channels
         assert traces[0].get_xdata()[1] == pytest.approx(1.0 / R)
@@ -125,7 +126,7 @@ class TestPlotAnalysis:
                 _phase(xp), IncrementSlope(), sampling_rate=R
             )
         fig, ax = plot_increment_variance(est)
-        np.testing.assert_allclose(ax.lines[0].get_ydata(), est.var[0])
+        np.testing.assert_allclose(ax.lines[0].get_ydata(), est.increment_var[0])
         assert len(ax.lines) == 3  # points, fit, intercept
         _, ax = plot_increment_variance(est, label="first", annotations=False)
         _, ax = plot_increment_variance(
@@ -182,7 +183,7 @@ class TestPlotAnalysis:
             sampling_rate=R,
             drift_phase=drift_phase,
             drift_cutoff=1e7,
-            amp_ref=1e5,
+            reference_amplitude=1e5,
         )
         assert axes.shape == (2, 2)
         assert all(ax.lines for ax in axes.flat)
@@ -198,3 +199,24 @@ class TestPlotAnalysis:
         )
         assert fig2 is fig
         assert all(a is b for a, b in zip(reused.flat, axes.flat, strict=True))
+
+
+def test_carrier_phase_decomposition(xp: Any) -> None:
+    """Verify plot_carrier_phase_decomposition with and without drift, and with n_train."""
+    phi_raw = xp.linspace(0, 4 * np.pi, 300)
+    phi_smooth = xp.linspace(0, 4 * np.pi, 300) + 0.05
+    fig, axes = plot_carrier_phase_decomposition(
+        phi=phi_raw,
+        drift=phi_smooth,
+        symbol_rate=1e6,
+        num_train_symbols=25,
+        show=False,
+    )
+    assert fig is not None
+
+    fig2, axes2 = plot_carrier_phase_decomposition(
+        phi=phi_raw,
+        symbol_rate=1e6,
+        show=False,
+    )
+    assert fig2 is not None

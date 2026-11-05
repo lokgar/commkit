@@ -116,7 +116,7 @@ def apply_awgn(
 
     Examples
     --------
-    >>> sig = generate(Constellation.pam(4), 1000, symbol_rate=1e6, sps=4)
+    >>> sig = generate(Constellation.pam(4), num_symbols=1000, symbol_rate=1e6, sps=4)
     >>> noisy = apply_awgn(sig, esn0_db=20)  # sps taken from sig
     >>> noisy = apply_awgn(sig.samples, esn0_db=20, sps=4)
     >>> noisy = apply_awgn(sig, snr_db=25)  # power ratio in the samples

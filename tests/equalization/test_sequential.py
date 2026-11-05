@@ -79,7 +79,12 @@ class TestLMS:
         """LMS should raise if neither training nor constellation is given."""
 
         sig = generate(
-            Constellation.psk(4), 100, symbol_rate=1e6, sps=2, pulse=RRC(0.35), rng=0
+            Constellation.psk(4),
+            num_symbols=100,
+            symbol_rate=1e6,
+            sps=2,
+            pulse=RRC(0.35),
+            rng=0,
         )
         rx = xp.asarray(sig.samples)
         with pytest.raises(ValueError):
@@ -206,7 +211,7 @@ class TestResultLayout:
     @pytest.mark.parametrize("num_channels", [1, 2])
     def test_layout(self, xp, name, num_channels):
         c, n, taps = Constellation.psk(4), 400, 7
-        sig = generate(c, n, symbol_rate=1e6, sps=2, pulse=RRC(0.35), rng=0,
+        sig = generate(c, num_symbols=n, symbol_rate=1e6, sps=2, pulse=RRC(0.35), rng=0,
                        num_channels=num_channels)  # fmt: skip
         args = [xp.asarray(sig.samples)]
         if name in ("lms", "rls"):
@@ -258,7 +263,7 @@ class TestEdgeCases:
 
         sig = generate(
             Constellation.psk(4),
-            n_symbols,
+            num_symbols=n_symbols,
             symbol_rate=1e6,
             sps=2,
             pulse=RRC(0.35),
@@ -384,7 +389,7 @@ class TestNumbaBackendCoverage:
         channel = xp.array([0.1, 1.0, 0.15], dtype=xp.complex64)
         sig = generate(
             Constellation.psk(4),
-            n_symbols,
+            num_symbols=n_symbols,
             symbol_rate=1e6,
             sps=2,
             pulse=RRC(0.35),
@@ -424,7 +429,9 @@ class TestNumbaBackendCoverage:
         ZeroDivisionError from the kernel), while 0.99 on the same record
         converges with finite taps."""
         c = Constellation.qam(16)
-        sig = generate(c, 4000, symbol_rate=1e9, sps=2, pulse=RRC(0.1), rng=0)
+        sig = generate(
+            c, num_symbols=4000, symbol_rate=1e9, sps=2, pulse=RRC(0.1), rng=0
+        )
         rx = xp.asarray(sig.samples)
         train = xp.asarray(sig.reference.symbols[:500])
         kw = dict(num_taps=31, sps=2, constellation=c, cpr=cpr)
@@ -545,7 +552,7 @@ class TestSignalInputSequentialEqualizers:
     def _rx_signal(self, xp, order=16, n_symbols=2000, sps=2, seed=0):
         sig = generate(
             Constellation.qam(order),
-            n_symbols,
+            num_symbols=n_symbols,
             symbol_rate=1e6,
             sps=sps,
             pulse=RRC(0.35),

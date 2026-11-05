@@ -17,7 +17,7 @@ __all__ = ["carrier_phase_trajectory"]
 
 
 def carrier_phase_trajectory(
-    y_eq: ArrayType | Signal,
+    symbols: ArrayType | Signal,
     reference: ArrayType | None = None,
     *,
     channel_pairing: str = "auto",
@@ -35,14 +35,14 @@ def carrier_phase_trajectory(
 
     Parameters
     ----------
-    y_eq : array_like or Signal
+    symbols : array_like or Signal
         Equalized symbols at one sample per symbol, ``(N,)`` or ``(C, N)``,
         with the carrier phase left in (e.g. the output of ``apply_taps``,
         or of an equalizer without ``cpr``).  A :class:`Signal` must be at
         one sample per symbol; its ``reference.symbols`` is the default
         reference.
     reference : array_like, optional
-        Known transmitted symbols, same layout as ``y_eq``; required for
+        Known transmitted symbols, same layout as ``symbols``; required for
         arrays.  The two are truncated to their common length on the last
         axis (both start at the first symbol).
     channel_pairing : {"auto", "identity", "swap"}, default "auto"
@@ -59,13 +59,13 @@ def carrier_phase_trajectory(
     -------
     ndarray
         Unwrapped carrier phase in radians (float64), the shape of the
-        truncated input, on the device of ``y_eq``.
+        truncated input, on the device of ``symbols``.
 
     Notes
     -----
     **Limitations.**
 
-    * ``y_eq`` and ``reference`` must be symbol-aligned (same start, same
+    * ``symbols`` and ``reference`` must be symbol-aligned (same start, same
       order).  A misalignment does not raise: it turns ``y·conj(d)`` into a
       noise-like phase and inflates every downstream linewidth estimate.  ``channel_pairing="auto"`` only resolves a channel
       permutation, not a time shift.
@@ -79,7 +79,7 @@ def carrier_phase_trajectory(
       explicit noise estimate.
     """
     name = "carrier_phase_trajectory()"
-    adapter = adapt_signal(y_eq, function_name=name)
+    adapter = adapt_signal(symbols, function_name=name)
     y, xp, _ = dispatch(adapter.symbol_array())
     if reference is None:
         sig = adapter.signal
@@ -90,7 +90,7 @@ def carrier_phase_trajectory(
             )
         reference = sig.reference.symbols
 
-    y2, was_1d = as_2d(y, name="y_eq")
+    y2, was_1d = as_2d(y, name="symbols")
     c = y2.shape[0]
     d2 = broadcast_channels(
         to_device(reference, "cpu" if xp is np else "gpu"), c, xp, name="reference"

@@ -327,7 +327,7 @@ class TestNPZDeviceHandling:
         """PS-QAM signal PMF, mod_scheme, and order round-trip."""
         sig = generate(
             Constellation.qam(64).shaped(entropy=5.0),
-            1000,
+            num_symbols=1000,
             symbol_rate=10e9,
             sps=4,
             pulse=RRC(0.35),
@@ -344,7 +344,12 @@ class TestNPZDeviceHandling:
     ) -> None:
         """Signal processed via free functions preserves reproducible metrics."""
         sig = generate(
-            Constellation.qam(16), 2000, symbol_rate=10e9, sps=4, pulse=RRC(0.35), rng=7
+            Constellation.qam(16),
+            num_symbols=2000,
+            symbol_rate=10e9,
+            sps=4,
+            pulse=RRC(0.35),
+            rng=7,
         )
         sig = filtering.matched_filter(sig)
         sig = multirate.decimate_to_symbol_rate(sig)
@@ -404,10 +409,10 @@ _SHAPED = Constellation.qam(16).shaped(entropy=3.5)
 @pytest.mark.parametrize(
     "make",
     [
-        lambda: generate(Constellation.qam(16), 70, symbol_rate=1e9, rng=0),
+        lambda: generate(Constellation.qam(16), num_symbols=70, symbol_rate=1e9, rng=0),
         lambda: generate(
             Constellation.qam(16),
-            70,
+            num_symbols=70,
             symbol_rate=1e9,
             num_channels=2,
             code=LinearBlockCode.hamming(3),
@@ -420,10 +425,12 @@ _SHAPED = Constellation.qam(16).shaped(entropy=3.5)
             code=coding.LDPCCode.dvbs2("1/2", "short"),
             rng=0,
         ),
-        lambda: generate(_SHAPED, 400, symbol_rate=1e9, rng=0, sps=2, pulse=RRC(0.1)),
+        lambda: generate(
+            _SHAPED, num_symbols=400, symbol_rate=1e9, rng=0, sps=2, pulse=RRC(0.1)
+        ),
         lambda: generate(
             Constellation.qam(16),
-            10,
+            num_symbols=10,
             symbol_rate=1e9,
             code=LinearBlockCode.hamming(3),
             pad=True,
@@ -515,7 +522,7 @@ class TestNPZCodedReference:
         device = "gpu" if xp is not np else "cpu"
         sig = generate(
             Constellation.qam(16),
-            70,
+            num_symbols=70,
             symbol_rate=1e9,
             code=LinearBlockCode.hamming(3),
             rng=0,
@@ -532,7 +539,7 @@ class TestNPZCodedReference:
     def test_padded_roundtrip(self, tmp_path: Any) -> None:
         """Filler after the last codeword survives: num_blocks is derived."""
         sig = generate(
-            Constellation.qam(16), 10, symbol_rate=1e9,
+            Constellation.qam(16), num_symbols=10, symbol_rate=1e9,
             code=LinearBlockCode.hamming(3), pad=True, rng=0,
         )  # fmt: skip
         save_npz(sig, tmp_path / "padded")

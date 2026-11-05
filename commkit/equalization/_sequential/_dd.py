@@ -5,6 +5,7 @@
 
 from __future__ import annotations
 
+from types import ModuleType
 from typing import Any
 
 import numpy as np
@@ -15,7 +16,6 @@ from ...core.signal import Signal
 from ...logger import logger
 from ...mapping.constellation import _slicer_params
 from ...recovery import BPS, PLL
-from .._kernels_numba import _get_numba_cpr, _get_numba_lms, _get_numba_rls
 from ..result import (
     EqualizerResult,
     EqualizerState,
@@ -30,6 +30,30 @@ from ._setup import (
     _run_resumable,
     _Snapshot,
 )
+
+
+def _loops() -> ModuleType:
+    """``equalization._numba_loops``, imported (with Numba) on first use."""
+    from .. import _numba_loops
+
+    return _numba_loops
+
+
+def _get_numba_lms() -> Any:
+    """Decision-directed LMS."""
+    return _loops().lms_loop
+
+
+def _get_numba_rls() -> Any:
+    """Decision-directed RLS."""
+    return _loops().rls_loop
+
+
+def _get_numba_cpr() -> Any:
+    """LMS or RLS with inline carrier recovery (PLL or BPS) and cycle-slip
+    repair."""
+    return _loops().cpr_loop
+
 
 # -----------------------------------------------------------------------------
 # ADAPTIVE equalization
@@ -113,10 +137,11 @@ def lms(
         Inline carrier-phase recovery (from :mod:`commkit.recovery`), run
         jointly with the weight updates at every symbol; ``None`` for none.
 
-        * ``PLL(normalized_bandwidth=, mu=, beta=, phase_init=,
-          joint_channels=)``: a decision-directed loop in which the
-          cross-product detector ``Im(y · conj(d))`` drives a PI filter (gains
-          from ``normalized_bandwidth``, or the raw ``mu`` and ``beta``);
+        * ``PLL(normalized_bandwidth=, proportional_gain=, integral_gain=,
+          phase_init=, joint_channels=)``: a decision-directed loop in which
+          the cross-product detector ``Im(y · conj(d))`` drives a PI filter
+          (gains from ``normalized_bandwidth``, or the raw proportional and
+          integral gains);
           ``phase_init`` seeds a cold start.
           It has a low noise floor and is recommended for QPSK to 64-QAM.
         * ``BPS(test_phases=, block_size=, joint_channels=)``: blind phase

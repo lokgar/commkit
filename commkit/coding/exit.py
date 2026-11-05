@@ -104,16 +104,20 @@ _DEMAP_CHUNK = 1 << 22
 class ExitCurve:
     """The transfer curve of one soft-in soft-out component.
 
-    Parameters
+    Returned by the curve sources of this module; the constructor takes the
+    fields below, the arrays as any array_like.
+
+    Attributes
     ----------
-    a_priori : array_like
+    a_priori : numpy.ndarray
         Information per bit of the a-priori LLRs, ``(G,)``, increasing, in
         ``[0, 1]``.
-    extrinsic : array_like
+    extrinsic : numpy.ndarray
         Information per bit of the extrinsic LLRs at each ``a_priori``,
         ``(G,)``, in ``[0, 1]``.
-    label : str, default ""
-        What the curve describes, for legends and log messages.
+    label : str
+        What the curve describes, for legends and log messages; empty unless
+        given.
 
     Notes
     -----

@@ -330,7 +330,7 @@ ROWS: list[Row] = [
     Row("commkit.coding.linear.MaximumLikelihood", VALUE),
     Row("commkit.coding.linear.Syndrome", VALUE),
     # --- core ---------------------------------------------------------------
-    Row("commkit.core.frame.Preamble", VALUE),
+    Row("commkit.core.preamble.Preamble", VALUE),
     Row("commkit.core.signal.Reference", VALUE),
     Row("commkit.core.frame.SingleCarrierFrame", VALUE),
     # Signal only: the frame layout lives on the Signal.
@@ -338,11 +338,11 @@ ROWS: list[Row] = [
     Row("commkit.core.signal.Signal", VALUE),
     Row("commkit.core.generation.expand", DESIGN),
     Row("commkit.core.generation.shape_pulse", DESIGN),
-    # constellation and num_symbols are positional.
-    Row("commkit.core.generation.generate", SYNTHESIS, data=2),
+    # The constellation is the primary positional parameter.
+    Row("commkit.core.generation.generate", SYNTHESIS, data=1),
     # --- equalization -------------------------------------------------------
     Row(
-        "commkit.equalization.sequential._dd.lms",
+        "commkit.equalization._sequential._dd.lms",
         EQUALIZER,
         data=2,
         call=lambda c, x: _a(
@@ -351,7 +351,7 @@ ROWS: list[Row] = [
         fact=SPS_CONFLICT,
     ),
     Row(
-        "commkit.equalization.sequential._dd.rls",
+        "commkit.equalization._sequential._dd.rls",
         EQUALIZER,
         data=2,
         call=lambda c, x: _a(
@@ -360,13 +360,13 @@ ROWS: list[Row] = [
         fact=SPS_CONFLICT,
     ),
     Row(
-        "commkit.equalization.sequential._blind.cma",
+        "commkit.equalization._sequential._blind.cma",
         EQUALIZER,
         call=lambda c, x: _a(x, num_taps=5, sps=SPS, constellation=C16),
         fact=SPS_CONFLICT,
     ),
     Row(
-        "commkit.equalization.sequential._blind.rde",
+        "commkit.equalization._sequential._blind.rde",
         EQUALIZER,
         call=lambda c, x: _a(x, num_taps=5, sps=SPS, constellation=C16),
         fact=SPS_CONFLICT,
@@ -386,13 +386,13 @@ ROWS: list[Row] = [
         fact=SPS_CONFLICT,
     ),
     Row(
-        "commkit.equalization.blind.block_cma",
+        "commkit.equalization._block._blind.block_cma",
         EQUALIZER,
         call=lambda c, x: _a(x, num_taps=5, sps=SPS, block_size=64, constellation=C16),
         fact=SPS_CONFLICT,
     ),
     Row(
-        "commkit.equalization.blind.block_rde",
+        "commkit.equalization._block._blind.block_rde",
         EQUALIZER,
         call=lambda c, x: _a(x, num_taps=5, sps=SPS, block_size=64, constellation=C16),
         fact=SPS_CONFLICT,
@@ -506,14 +506,14 @@ ROWS: list[Row] = [
     Row("commkit.math.rms", HELPER),
     # --- impairments --------------------------------------------------------
     Row(
-        "commkit.impairments.channel.linear.apply_chromatic_dispersion",
+        "commkit.impairments.channel.apply_chromatic_dispersion",
         TRANSFORM,
         call=lambda c, x: _a(x, sampling_rate=FS, **CD),
         fact=FS_CONFLICT,
     ),
     Row("commkit._fiber.Fiber", VALUE),
     Row(
-        "commkit.impairments.channel.nonlinear.apply_fiber_propagation",
+        "commkit.impairments.channel.apply_fiber_propagation",
         TRANSFORM,
         call=lambda c, x: _a(
             x, sampling_rate=FS, noise_figure_db=5.0, rng=1, **FIBER_LINK
@@ -521,14 +521,14 @@ ROWS: list[Row] = [
         fact=FS_CONFLICT,
     ),
     Row(
-        "commkit.impairments.channel.linear.apply_pmd",
+        "commkit.impairments.channel.apply_pmd",
         TRANSFORM,
         call=lambda c, x: _a(x, sampling_rate=FS, dgd=1e-12, theta=0.3),
         fact=FS_CONFLICT,
         dims=(2,),
     ),
     Row(
-        "commkit.impairments.channel.linear.apply_polarization_mixing",
+        "commkit.impairments.channel.apply_polarization_mixing",
         TRANSFORM,
         call=lambda c, x: _a(x, theta=0.3),
         dims=(2,),
@@ -615,7 +615,7 @@ ROWS: list[Row] = [
         "commkit.metrics.error_rates.fer",
         METRIC,
         data=2,
-        call=lambda c, x: _a(_bits(c, x), _bits(c, x), block_length=8),
+        call=lambda c, x: _a(_bits(c, x), _bits(c, x), info_bits=8),
         symbols=True,
     ),
     Row(
@@ -687,15 +687,15 @@ ROWS: list[Row] = [
     Row("commkit.plotting.filter_response.plot_filter_response", PLOT),
     Row("commkit.plotting.spectral.plot_psd", PLOT),
     Row("commkit.plotting.spectral.plot_spectrogram", PLOT),
-    Row("commkit.plotting.sync.plot_carrier_phase_decomposition", PLOT, data=2),
-    Row("commkit.plotting.sync.plot_carrier_phase_trajectory", PLOT),
-    Row("commkit.plotting.sync.plot_frequency_offset_blockwise_result", PLOT),
-    Row("commkit.plotting.sync.plot_frequency_offset_spectrum", PLOT),
-    Row("commkit.plotting.sync.plot_mm_autocorrelation", PLOT),
-    Row("commkit.plotting.sync.plot_pilot_phase_estimate", PLOT),
-    Row("commkit.plotting.sync.plot_pilot_tone_phase_estimate", PLOT, data=2),
-    Row("commkit.plotting.sync.plot_pilot_tones_phase_estimate", PLOT),
-    Row("commkit.plotting.sync.plot_timing_correlation", PLOT),
+    Row("commkit.plotting.analysis.plot_carrier_phase_decomposition", PLOT, data=2),
+    Row("commkit.plotting.recovery.plot_carrier_phase_trajectory", PLOT),
+    Row("commkit.plotting.frequency.plot_frequency_offset_blockwise_result", PLOT),
+    Row("commkit.plotting.frequency.plot_frequency_offset_spectrum", PLOT),
+    Row("commkit.plotting.frequency.plot_mm_autocorrelation", PLOT),
+    Row("commkit.plotting.recovery.plot_pilot_phase_estimate", PLOT),
+    Row("commkit.plotting.recovery.plot_pilot_tone_phase_estimate", PLOT, data=2),
+    Row("commkit.plotting.recovery.plot_pilot_tones_phase_estimate", PLOT),
+    Row("commkit.plotting.timing.plot_timing_correlation", PLOT),
     Row("commkit.plotting.theme.apply_default_theme", PLOT, data=0),
     Row("commkit.plotting.waveform.plot_time_domain", PLOT),
     # --- recovery -----------------------------------------------------------

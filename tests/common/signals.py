@@ -157,7 +157,7 @@ def make_channel_signal(
 
     sig = generate(
         constellation,
-        num_symbols,
+        num_symbols=num_symbols,
         symbol_rate=symbol_rate,
         sps=sps,
         pulse=RRC(rolloff),
@@ -203,7 +203,7 @@ def make_test_qam_signal(
 
     sig = generate(
         Constellation.qam(order),
-        num_symbols,
+        num_symbols=num_symbols,
         symbol_rate=symbol_rate,
         sps=sps,
         pulse=RRC(0.35),
@@ -239,7 +239,7 @@ def make_test_psk_signal(
 
     sig = generate(
         Constellation.psk(order),
-        num_symbols,
+        num_symbols=num_symbols,
         symbol_rate=symbol_rate,
         sps=sps,
         pulse=RRC(0.35),
@@ -273,7 +273,7 @@ def make_test_mimo_signal(
 
     sig = generate(
         Constellation.qam(order),
-        num_symbols,
+        num_symbols=num_symbols,
         symbol_rate=symbol_rate,
         sps=sps,
         pulse=RRC(0.35),
@@ -347,7 +347,12 @@ def make_isi_distorted_signal(
         Constellation.qam(order) if mod == "qam" else Constellation.psk(order)
     )
     sig = generate(
-        constellation, n_symbols, symbol_rate=1e6, sps=2, pulse=RRC(0.35), rng=seed
+        constellation,
+        num_symbols=n_symbols,
+        symbol_rate=1e6,
+        sps=2,
+        pulse=RRC(0.35),
+        rng=seed,
     )
     # Known symbols on the constellation's scale, as the equalizers take them.
     tx = xp.asarray(to_numpy(sig.reference.symbols))
@@ -488,3 +493,26 @@ def make_dual_pol_dsh_beat(
             rng.standard_normal(z2.shape) + 1j * rng.standard_normal(z2.shape)
         )
     return z2, dphi
+
+
+def make_offset_qpsk(
+    xp: Any,
+    *,
+    n: int = 4096,
+    channels: int = 1,
+    df: float = 0.0,
+    seed: int = 0,
+    sampling_rate: float = 1e6,
+) -> tuple[Any, np.ndarray]:
+    """QPSK at one sample per symbol with a frequency offset and light noise.
+
+    Returns the complex64 samples on ``xp`` (``(n,)`` for one channel,
+    ``(channels, n)`` otherwise) and the host symbols ``(channels, n)``.
+    """
+    rng = np.random.default_rng(seed)
+    pts = Constellation.psk(4).points
+    s = pts[rng.integers(0, 4, (channels, n))]
+    x = s * np.exp(2j * np.pi * df * np.arange(n) / sampling_rate)
+    x = x + 0.05 * (rng.standard_normal(x.shape) + 1j * rng.standard_normal(x.shape))
+    x = x.astype(np.complex64)
+    return xp.asarray(x[0] if channels == 1 else x), s

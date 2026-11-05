@@ -217,7 +217,7 @@ class TestFiberChain:
         dispersion and none leaves about 11 symbols of memory, beyond the 15
         taps at 2 sps: both fail (SER near 0.9)."""
         fiber = Fiber()
-        tx = ck.generate(self.C16, self.N, sps=2, symbol_rate=RS,
+        tx = ck.generate(self.C16, num_symbols=self.N, sps=2, symbol_rate=RS,
                          pulse=RRC(rolloff=0.1), rng=1, device=backend_device)  # fmt: skip
         tx = tx.replace(domain="OPT", center_frequency=193.4e12)
         z = ck.impairments.apply_fiber_propagation(

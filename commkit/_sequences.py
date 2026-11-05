@@ -1,7 +1,7 @@
 """Synchronization sequences (private).
 
 Barker and Zadoff-Chu generators and the per-stream ZC root assignment.
-They live below ``core`` so that ``core.frame`` can build preambles without
+They live below ``core`` so that ``core.preamble`` can build preambles without
 importing a DSP module; ``commkit.timing`` exposes the generators publicly.
 """
 

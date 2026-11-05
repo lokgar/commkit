@@ -299,7 +299,12 @@ class TestConcatenated:
         code = Concatenated.cfec(num_frames)
         c = mapping.Constellation.qam(16)
         sig = generate(
-            c, code.n // 4, symbol_rate=1e9, code=code, rng=8, device=backend_device
+            c,
+            num_symbols=code.n // 4,
+            symbol_rate=1e9,
+            code=code,
+            rng=8,
+            device=backend_device,
         )
         method = Stages(inner=Chase(6, hard=Syndrome(max_weight=1)))
         for esn0_db, decodes in ((13.6, True), (13.2, False)):

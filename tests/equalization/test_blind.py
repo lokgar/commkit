@@ -218,7 +218,13 @@ class TestBlockRDE:
         c16 = Constellation.qam(16)
         n_sym, tail, block_size = 49152, 16384, 256
         tx = generate(
-            c16, n_sym, symbol_rate=1e9, sps=2, pulse=RRC(0.1), num_channels=2, rng=1
+            c16,
+            num_symbols=n_sym,
+            symbol_rate=1e9,
+            sps=2,
+            pulse=RRC(0.1),
+            num_channels=2,
+            rng=1,
         )
         rx = apply_polarization_mixing(tx.samples, theta=np.deg2rad(30.0))
         rx = xp.asarray(apply_awgn(rx, esn0_db=20.0, sps=2, rng=3))

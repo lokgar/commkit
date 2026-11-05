@@ -26,6 +26,8 @@ traced.
 import collections
 import functools
 import importlib
+import importlib.util
+import os
 import pkgutil
 import sys
 import traceback
@@ -44,16 +46,36 @@ def _traced(dtype: np.dtype) -> bool:
     return dtype in _SINGLE or dtype.kind in "biu"
 
 
+def _package_dir() -> str:
+    """The directory of the commkit package, found without importing it.
+
+    Sites are matched against it, not against a ``commkit/commkit/`` path
+    fragment, so the audit works in a checkout of any name (a worktree).
+    """
+    spec = importlib.util.find_spec("commkit")
+    assert spec is not None and spec.origin is not None, "commkit is not importable"
+    return os.path.dirname(os.path.realpath(spec.origin)).replace("\\", "/") + "/"
+
+
+_PKG = _package_dir()
+
+
+def _relative(path: str) -> str | None:
+    """``path`` relative to the commkit package, or None outside it."""
+    path = path.replace("\\", "/")
+    return path[len(_PKG) :] if path.startswith(_PKG) else None
+
+
 _HITS: collections.Counter[str] = collections.Counter()
 
 
 def _site(depth: int = 3) -> str | None:
     """The innermost commkit line, ``depth`` frames above this call."""
     for f in reversed(traceback.extract_stack()[:-depth]):
-        path = f.filename.replace("\\", "/")
-        if "/commkit/commkit/" in path and "/plotting/" not in path:
+        rel = _relative(f.filename)
+        if rel is not None and not rel.startswith("plotting/"):
             line = (f.line or "").strip()[:90]
-            return f"{path.split('/commkit/commkit/')[1]}:{f.lineno}: {line}"
+            return f"{rel}:{f.lineno}: {line}"
     return None
 
 

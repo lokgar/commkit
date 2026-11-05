@@ -105,7 +105,7 @@ def fer(
     bits: ArrayType | Any,
     reference: ArrayType | Signal | Reference,
     *,
-    block_length: int | None = None,
+    info_bits: int | None = None,
 ) -> float | np.ndarray:
     """Block (frame) error rate: the fraction of blocks with any bit in error.
 
@@ -118,14 +118,15 @@ def fer(
     ----------
     bits : array_like or DecodeResult
         Received bits (0 and 1), ``(N,)`` or ``(C, N)``, with ``N`` a multiple
-        of ``block_length``, or a :class:`~commkit.coding.DecodeResult`.
+        of ``info_bits``, or a :class:`~commkit.coding.DecodeResult`.
     reference : array_like, Signal or Reference
         Transmitted bits, same shape.  With a DecodeResult, the transmitted
         Signal or its :class:`~commkit.core.Reference`, whose ``info_bits``
         and code (``k`` bits per block) are used.
-    block_length : int, optional
-        Bits per block.  Required for arrays; with a Signal or Reference it
-        defaults to the code's ``k`` and must agree with it.
+    info_bits : int, optional
+        Information bits per block, the code's ``k``.  Required for arrays;
+        with a Signal or Reference it defaults to the code's ``k`` and must
+        agree with it.
 
     Returns
     -------
@@ -136,44 +137,42 @@ def fer(
     ------
     ValueError
         On a shape mismatch, a length that is not a multiple of
-        ``block_length``, or no bits.
+        ``info_bits``, or no bits.
     """
     name = "fer()"
     post = _decoded(bits, reference, name)
     if post is not None:
         bits, reference, code = post
         k = None if code is None else int(code.k)
-        if block_length is None:
-            block_length = k
-        elif k is not None and block_length != k:
+        if info_bits is None:
+            info_bits = k
+        elif k is not None and info_bits != k:
             raise ValueError(
-                f"{name}: block_length={block_length} disagrees with the "
+                f"{name}: info_bits={info_bits} disagrees with the "
                 f"reference's code (k = {k})."
             )
-    if block_length is None:
+    if info_bits is None:
         raise ValueError(
-            f"{name}: give block_length, or a DecodeResult and the Signal or "
+            f"{name}: give info_bits, or a DecodeResult and the Signal or "
             "Reference that holds the code."
         )
-    if isinstance(block_length, bool) or not isinstance(block_length, int | np.integer):
-        raise ValueError(
-            f"{name}: block_length must be an integer, got {block_length!r}."
-        )
-    if block_length < 1:
-        raise ValueError(f"{name}: block_length must be >= 1, got {block_length}.")
+    if isinstance(info_bits, bool) or not isinstance(info_bits, int | np.integer):
+        raise ValueError(f"{name}: info_bits must be an integer, got {info_bits!r}.")
+    if info_bits < 1:
+        raise ValueError(f"{name}: info_bits must be >= 1, got {info_bits}.")
     rx, xp, _ = dispatch(bits)
     rx, tx = _paired(rx, reference, xp, name)
     total = rx.shape[-1]
     if total == 0:
         raise ValueError(f"{name}: nothing to measure (no bits).")
-    if total % block_length:
+    if total % info_bits:
         raise ValueError(
-            f"{name}: the last axis ({total}) is not a multiple of block_length "
-            f"({block_length})."
+            f"{name}: the last axis ({total}) is not a multiple of info_bits "
+            f"({info_bits})."
         )
-    wrong = (rx != tx).reshape(*rx.shape[:-1], -1, block_length).any(axis=-1)
+    wrong = (rx != tx).reshape(*rx.shape[:-1], -1, info_bits).any(axis=-1)
     errors = to_device(xp.sum(wrong, axis=-1), "cpu")  # one transfer, logged too
-    blocks = total // block_length
+    blocks = total // info_bits
     out = to_report_scalar(errors / blocks)
     if isinstance(out, float):
         logger.info("FER: %.2e (%s/%s blocks)", out, int(errors), blocks)

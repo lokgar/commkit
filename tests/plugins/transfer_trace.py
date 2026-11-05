@@ -27,6 +27,8 @@ suite only).  Calls are traced with ``sys.monitoring``, since
 """
 
 import collections
+import importlib.util
+import os
 import sys
 from types import CodeType, FrameType
 from typing import Any
@@ -60,6 +62,9 @@ _DOCUMENTED: dict[str, str] = {
     + " (the matcher; generate runs it on the host)",
     "coding/turbo.py::_decode": _RECURSION + " (turbo decoding)",
     "coding/turbo.py::_encode": _RECURSION + " (recursive systematic encoding)",
+    "core/frame.py::SingleCarrierFrame.to_signal": _PAYLOAD
+    + " (the frame's body symbols)",
+    "core/frame.py::extract_payload": _HOST_VALUE + " (the payload reference)",
     "core/generation.py::generate": _PAYLOAD,
     "core/signal.py::Reference.to": "explicit device move",
     "core/signal.py::Signal.to": "explicit device move",
@@ -71,8 +76,9 @@ _DOCUMENTED: dict[str, str] = {
     + " (training symbols, pilot mask)",
     "equalization/_common.py::_unpack_result_numpy": _RECURSION,
     "equalization/polarization.py::_jones_at_grid_points": _HOST_VALUE + " (taps)",
-    "equalization/sequential/_setup.py::_assemble_sequential": _RECURSION,
-    "equalization/sequential/_setup.py::_prepare_sequential": _RECURSION,
+    "equalization/_sequential/_setup.py::_assemble_sequential": _RECURSION,
+    "equalization/_sequential/_setup.py::_prepare_sequential": _RECURSION,
+    "io.py::save_npz": "explicit device move (samples to the host to store them)",
     "frequency.py::_mengali_morelli": _RECURSION + " (bootstrap over the lags)",
     "_cuda/__init__.py::_iir_factory.<locals>.launch": _HOST_VALUE
     + " (the IIR state transitions)",
@@ -93,6 +99,26 @@ _LINES: collections.defaultdict[tuple[str, str], set[int]] = collections.default
 )
 
 
+def _package_dir() -> str:
+    """The directory of the commkit package, found without importing it.
+
+    Sites are matched against it, not against a ``commkit/commkit/`` path
+    fragment, so the audit works in a checkout of any name (a worktree).
+    """
+    spec = importlib.util.find_spec("commkit")
+    assert spec is not None and spec.origin is not None, "commkit is not importable"
+    return os.path.dirname(os.path.realpath(spec.origin)).replace("\\", "/") + "/"
+
+
+_PKG = _package_dir()
+
+
+def _relative(path: str) -> str | None:
+    """``path`` relative to the commkit package, or None outside it."""
+    path = path.replace("\\", "/")
+    return path[len(_PKG) :] if path.startswith(_PKG) else None
+
+
 def _documented(site: str) -> bool:
     return site in _DOCUMENTED or site.startswith("plotting/")
 
@@ -108,10 +134,10 @@ def _site() -> tuple[str, int] | None:
         if "/site-packages/cupy" in path or path.endswith("/commkit/backend.py"):
             frame = frame.f_back
             continue
-        if "/commkit/commkit/" not in path:
+        rel = _relative(path)
+        if rel is None:
             return None
-        site = f"{path.split('/commkit/commkit/')[1]}::{frame.f_code.co_qualname}"
-        return site, frame.f_lineno
+        return f"{rel}::{frame.f_code.co_qualname}", frame.f_lineno
     return None
 
 
@@ -135,7 +161,7 @@ def _install() -> None:
         elif any(f is u for u in uploads):
             if isinstance(arg0, np.ndarray):
                 kind, size = "H2D", arg0.size
-        elif "/commkit/commkit/" not in code.co_filename.replace("\\", "/"):
+        elif _relative(code.co_filename) is None:
             # The callee at a call site outside commkit does not change, so
             # stop watching it.  Inside commkit it may (``xp.asarray`` with
             # xp = numpy first, cupy later), so keep watching.

@@ -255,7 +255,7 @@ class TestEstimateTiming:
         raised-cosine correlation peak is up to 0.06), noiseless or at
         15 dB, and correcting by the estimate realigns the record."""
         sig = generate(
-            Constellation.psk(4), 256, symbol_rate=1e6, sps=4, pulse=RRC(0.35), rng=3,
+            Constellation.psk(4), num_symbols=256, symbol_rate=1e6, sps=4, pulse=RRC(0.35), rng=3,
             periodic=True,
         )  # fmt: skip
         clean = xp.asarray(sig.samples)
@@ -842,7 +842,12 @@ class TestTimingEstimateFlow:
         """correct_timing with a TimingEstimate undoes a delay of a band-limited
         waveform (the template starts again at sample 0)."""
         sig = generate(
-            Constellation.psk(4), 256, symbol_rate=1e6, sps=4, pulse=RRC(0.35), rng=3
+            Constellation.psk(4),
+            num_symbols=256,
+            symbol_rate=1e6,
+            sps=4,
+            pulse=RRC(0.35),
+            rng=3,
         ).to(device_of(xp))
         template = sig.samples[:128]
         delayed = xp.roll(sig.samples, 37)
@@ -865,7 +870,7 @@ class TestTimingEstimateFlow:
 
     def test_slice_keeps_reference_aligned(self, xp):
         """mode='slice' keeps only the reference symbols still covered."""
-        sig = generate(Constellation.qam(4), 100, symbol_rate=1e6, sps=2)
+        sig = generate(Constellation.qam(4), num_symbols=100, symbol_rate=1e6, sps=2)
         sig = sig.to(device_of(xp))
         out = timing.correct_timing(sig, 7, mode="slice")
         assert out.samples.shape[-1] == 193

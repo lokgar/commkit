@@ -92,7 +92,11 @@ class TestSymbolErrorRate:
         noise scale, the demapper and the metric together."""
         n = 200_000
         sig = generate(
-            Constellation.qam(order), n, symbol_rate=1e9, rng=1, device=backend_device
+            Constellation.qam(order),
+            num_symbols=n,
+            symbol_rate=1e9,
+            rng=1,
+            device=backend_device,
         )
         rx = apply_awgn(sig, esn0_db=esn0_db, rng=2)
         esn0 = 10 ** (esn0_db / 10)
@@ -113,7 +117,9 @@ class TestSymbolErrorRate:
         0.01 bit (2e5 symbols)."""
         c = Constellation.qam(order)
         sig = apply_awgn(
-            generate(c, 200_000, symbol_rate=1e9, rng=4), esn0_db=esn0_db, rng=5
+            generate(c, num_symbols=200_000, symbol_rate=1e9, rng=4),
+            esn0_db=esn0_db,
+            rng=5,
         )
         nv = 10 ** (-esn0_db / 10)
         mi = metrics.mi(xp.asarray(sig.samples), noise_var=nv, constellation=c)
@@ -135,7 +141,7 @@ class TestSymbolErrorRate:
         """A noiseless shaped signal has no symbol errors: received and
         reference symbols are both decided at unit power."""
         c = Constellation.qam(64).shaped(nu=0.075)  # E_PS ~ 0.31 on the 1.x grid
-        sig = generate(c, 2000, symbol_rate=1e9, rng=1).to(
+        sig = generate(c, num_symbols=2000, symbol_rate=1e9, rng=1).to(
             "gpu" if xp is not np else "cpu"
         )
         assert metrics.ser(multirate.decimate_to_symbol_rate(sig)) == 0.0
@@ -156,23 +162,23 @@ class TestFrameErrorRate:
         rx[0, 1] = 1  # same block: still one block error
         rx[1, 11] = 1  # last block of channel 1
         rx[1, 5] = 1  # block 1 of channel 1
-        out = metrics.fer(rx, tx, block_length=4)
+        out = metrics.fer(rx, tx, info_bits=4)
         np.testing.assert_allclose(out, [1 / 3, 2 / 3])
-        assert metrics.fer(rx[0], tx[0], block_length=4) == pytest.approx(1 / 3)
-        assert metrics.fer(tx[0], tx[0], block_length=12) == 0.0
+        assert metrics.fer(rx[0], tx[0], info_bits=4) == pytest.approx(1 / 3)
+        assert metrics.fer(tx[0], tx[0], info_bits=12) == 0.0
 
     def test_errors(self, xp: Any) -> None:
         bits = xp.zeros(8, dtype=xp.int8)
-        with pytest.raises(ValueError, match="multiple of block_length"):
-            metrics.fer(bits, bits, block_length=3)
+        with pytest.raises(ValueError, match="multiple of info_bits"):
+            metrics.fer(bits, bits, info_bits=3)
         with pytest.raises(ValueError, match="nothing to measure"):
-            metrics.fer(bits[:0], bits[:0], block_length=4)
+            metrics.fer(bits[:0], bits[:0], info_bits=4)
         with pytest.raises(ValueError, match="shape mismatch"):
-            metrics.fer(bits, bits[:4], block_length=4)
-        with pytest.raises(ValueError, match="block_length"):
-            metrics.fer(bits, bits, block_length=0)
-        with pytest.raises(ValueError, match="block_length"):
-            metrics.fer(bits, bits, block_length=2.0)
+            metrics.fer(bits, bits[:4], info_bits=4)
+        with pytest.raises(ValueError, match="info_bits"):
+            metrics.fer(bits, bits, info_bits=0)
+        with pytest.raises(ValueError, match="info_bits"):
+            metrics.fer(bits, bits, info_bits=2.0)
 
 
 class TestPostFEC:
@@ -192,7 +198,7 @@ class TestPostFEC:
         res = decode(llrs, code=code)
         pre = metrics.ber(rx)
         post = metrics.ber(res.bits, ref.info_bits)
-        fer = metrics.fer(res.bits, ref.info_bits, block_length=ref.code_block[1])
+        fer = metrics.fer(res.bits, ref.info_bits, info_bits=ref.code_block[1])
         assert np.all(post < pre / 2)
         assert np.all(fer > post) and np.all(fer < 1)
         # A DecodeResult with the Signal or its Reference: info_bits and k
@@ -200,10 +206,10 @@ class TestPostFEC:
         np.testing.assert_array_equal(metrics.ber(res, rx), post)
         np.testing.assert_array_equal(metrics.ber(res, ref), post)
         np.testing.assert_array_equal(metrics.fer(res, rx), fer)
-        np.testing.assert_array_equal(metrics.fer(res, ref, block_length=4), fer)
+        np.testing.assert_array_equal(metrics.fer(res, ref, info_bits=4), fer)
         with pytest.raises(ValueError, match="disagrees"):
-            metrics.fer(res, rx, block_length=7)
-        with pytest.raises(ValueError, match="give block_length"):
+            metrics.fer(res, rx, info_bits=7)
+        with pytest.raises(ValueError, match="give info_bits"):
             metrics.fer(res.bits, ref.info_bits)
         with pytest.raises(ValueError, match="needs the transmitted Signal"):
             metrics.ber(res)
@@ -213,7 +219,7 @@ class TestPostFEC:
     def test_estimate_noise_variance(self, xp: Any) -> None:
         """σ² on the constellation's scale, 10^(-SNR/10), near 10^(-Es/N0/10)."""
         sig = apply_awgn(
-            generate(Constellation.qam(16), 20_000, symbol_rate=1e9, rng=3),
+            generate(Constellation.qam(16), num_symbols=20_000, symbol_rate=1e9, rng=3),
             esn0_db=12.0,
             rng=4,
         ).to("gpu" if xp is not np else "cpu")
@@ -225,7 +231,7 @@ class TestPostFEC:
     def test_uncoded_post_fec_equals_pre_fec(self, xp: Any) -> None:
         """info_bits is bits: the post-FEC call measures the same BER."""
         sig = apply_awgn(
-            generate(Constellation.qam(16), 2000, symbol_rate=1e9, rng=3),
+            generate(Constellation.qam(16), num_symbols=2000, symbol_rate=1e9, rng=3),
             esn0_db=10.0,
             rng=4,
         ).to("gpu" if xp is not np else "cpu")

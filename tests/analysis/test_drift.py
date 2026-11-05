@@ -24,13 +24,13 @@ class TestFrequencyDriftAnalysis:
         drift_phase = 2.0 * np.pi * np.cumsum(amp * np.sin(2 * np.pi * fm * t)) * T
         m = analysis.frequency_drift(xp.asarray(drift_phase), sampling_rate=R)
         assert m.std == pytest.approx(amp / np.sqrt(2.0), rel=0.05)
-        assert m.pp == pytest.approx(2.0 * amp, rel=0.10)
+        assert m.peak_to_peak == pytest.approx(2.0 * amp, rel=0.10)
 
     def test_one_channel_reports_an_array(self, xp: Any) -> None:
         """(1, N) input reports (1,) statistics, not floats."""
         phi = np.cumsum(np.random.default_rng(3).normal(0.0, 0.01, (1, 4096)), -1)
         m = analysis.frequency_drift(xp.asarray(phi), sampling_rate=R)
-        for value in (m.std, m.pp, m.max_abs):
+        for value in (m.std, m.peak_to_peak, m.max_abs):
             assert isinstance(value, np.ndarray) and value.shape == (1,)
         flat = analysis.frequency_drift(xp.asarray(phi[0]), sampling_rate=R)
         assert isinstance(flat.std, float)

@@ -122,7 +122,7 @@ class TestLinewidthEstimation:
             BetaSeparation(nperseg=1 << 14, f_max=5e6),
             sampling_rate=fs,
         )
-        f, s_f, beta, above = out.f, out.S_f, out.beta_line, out.above
+        f, s_f, beta, above = out.frequencies, out.fm_psd, out.beta_line, out.above
         fmin, fmax = out.band
         assert above.dtype == bool and above.shape == f.shape
         expected = (s_f > beta) & (f >= fmin) & (f <= fmax)
@@ -150,7 +150,7 @@ class TestLinewidthEstimation:
         )
         assert out.linewidth_floor == pytest.approx(dnu, rel=0.15)
         # The tail region is excluded: the used band ends well below Nyquist.
-        f_used = out.f[out.used]
+        f_used = out.frequencies[out.used]
         assert float(f_used[-1]) < 0.5 * R / 2
 
     def test_increment_returns_plot_data(self, xp):
@@ -159,7 +159,7 @@ class TestLinewidthEstimation:
 
         phi = xp.asarray(_wiener_phase(2e6, 1 << 14, seed=17))
         res = analysis.estimate_linewidth(phi, IncrementSlope(), sampling_rate=R)
-        assert res.var.shape == (1, res.lag_s.size)
+        assert res.increment_var.shape == (1, res.lag_s.size)
         plotting.plot_increment_variance(res)
         res = analysis.estimate_linewidth(
             phi, IncrementSubtract(noise_var=0.0), sampling_rate=R
@@ -216,13 +216,13 @@ class TestDshLinewidth:
         assert res.value == pytest.approx(2e6, rel=0.05)
         # Segments much longer than the delay resolve the fringes: notch bins
         # are masked and NaN in the displayed PSD.
-        k1 = int(np.argmin(np.abs(res.f - FS / m)))
+        k1 = int(np.argmin(np.abs(res.frequencies - FS / m)))
         assert not res.valid[k1]
-        assert np.isnan(res.S_f[k1])
+        assert np.isnan(res.fm_psd[k1])
         # The fit spans many lobes, and the 'used' mask reproduces the
         # reported band extent.
         assert res.band[1] > FS / m
-        f_used = res.f[res.used]
+        f_used = res.frequencies[res.used]
         assert res.band == (float(f_used[0]), float(f_used[-1]))
 
     def test_fm_psd_flicker_is_modeled(self, xp):
@@ -302,7 +302,7 @@ class TestDshLinewidth:
         res = analysis.estimate_linewidth(
             xp.asarray(z), DshFmPsd(delay=m / FS, f_shift=80e6), sampling_rate=FS
         )
-        k = int(np.argmin(np.abs(res.f - f_spur)))
+        k = int(np.argmin(np.abs(res.frequencies - f_spur)))
         assert not res.used[k]
         assert res.value == pytest.approx(2e5, rel=0.03)
 
@@ -338,7 +338,7 @@ class TestDshLinewidth:
             DshFmPsd(delay=m / FS, f_shift=80e6, nperseg=1 << 14, f_max=FS / m),
             sampling_rate=FS,
         )
-        f_used = res.f[res.used]
+        f_used = res.frequencies[res.used]
         assert float(f_used[-1]) <= FS / m
         assert res.value == pytest.approx(2e6, rel=0.2)
 
@@ -359,7 +359,7 @@ class TestDshLinewidth:
             xp.asarray(z), DshIncrement(delay=m / FS), sampling_rate=FS
         )
         assert res.value == pytest.approx(2e6, rel=0.15)
-        assert res.dphi_var == pytest.approx(2.0 * np.pi * 2e6 * m / FS, rel=0.2)
+        assert res.delta_phi_var == pytest.approx(2.0 * np.pi * 2e6 * m / FS, rel=0.2)
 
     @pytest.mark.allow_warnings
     def test_lorentzian_incoherent(self, xp):
@@ -374,7 +374,7 @@ class TestDshLinewidth:
         # Pure white FM -> Lorentzian wings: W₂₀/W₃ ≈ √99.
         assert res.lineshape_ratio == pytest.approx(np.sqrt(99.0), rel=0.25)
         assert res.coherence_factor > 6.0
-        assert res.f_peak == pytest.approx(80e6, abs=5e5)
+        assert res.peak_frequency == pytest.approx(80e6, abs=5e5)
 
     def test_mimo_channels(self, xp):
         n, m = 1 << 19, 500
@@ -489,7 +489,7 @@ class TestEstimateLinewidthContract:
         res = analysis.estimate_linewidth(phi, method, sampling_rate=R)
         assert isinstance(res, analysis.LinewidthEstimate)
         assert res.method is method
-        assert res.f is None and res.psd is None  # other methods' fields
+        assert res.frequencies is None and res.psd is None  # other methods' fields
         with pytest.raises(AttributeError):
             res.value = 0.0  # type: ignore[misc]
 

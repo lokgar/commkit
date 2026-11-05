@@ -213,7 +213,7 @@ class TestGMIShaped:
         c = Constellation.qam(64).shaped(entropy=5.0)
         nv = 10**-1.2
         n = 100_000
-        matched = generate(c, n, symbol_rate=1e9, rng=0).reference.symbols
+        matched = generate(c, num_symbols=n, symbol_rate=1e9, rng=0).reference.symbols
         drawn = c.points[np.random.default_rng(1).choice(64, n, p=c.pmf)].astype(
             np.complex64
         )
@@ -256,7 +256,9 @@ class TestNGMI:
         "c", [Constellation.qam(16), Constellation.qam(64).shaped(entropy=5.0)]
     )
     def test_relation_to_gmi(self, xp: Any, c: Constellation) -> None:
-        sig = apply_awgn(generate(c, 4000, symbol_rate=1e9, rng=0), esn0_db=9.0, rng=1)
+        sig = apply_awgn(
+            generate(c, num_symbols=4000, symbol_rate=1e9, rng=0), esn0_db=9.0, rng=1
+        )
         sig = sig.to("gpu" if xp is not np else "cpu")
         nv = 10**-0.9
         g = metrics.gmi(sig, noise_var=nv)

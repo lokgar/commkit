@@ -329,7 +329,11 @@ class TestPipelineSPSValidation:
         with pytest.raises(ValueError, match="sps to be a positive integer"):
             if factory == "qam":
                 generation.generate(
-                    Constellation.qam(4), 16, symbol_rate=1e6, sps=sps, pulse=RRC(0.35)
+                    Constellation.qam(4),
+                    num_symbols=16,
+                    symbol_rate=1e6,
+                    sps=sps,
+                    pulse=RRC(0.35),
                 )
             elif factory == "preamble":
                 Preamble(sequence_type="barker", num_symbols=7).to_signal(

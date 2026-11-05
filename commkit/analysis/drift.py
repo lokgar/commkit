@@ -25,14 +25,14 @@ class FrequencyDrift:
     ----------
     df : ndarray
         Per-sample residual frequency in Hz, on the input's device.
-    std, pp, max_abs : float or numpy.ndarray
+    std, peak_to_peak, max_abs : float or numpy.ndarray
         Standard deviation, peak-to-peak and largest magnitude of ``df``:
         floats (SISO) or ``(C,)`` arrays (MIMO).
     """
 
     df: Any
     std: float | np.ndarray
-    pp: float | np.ndarray
+    peak_to_peak: float | np.ndarray
     max_abs: float | np.ndarray
 
 
@@ -187,6 +187,6 @@ def frequency_drift(
     return FrequencyDrift(
         df=df_out,
         std=to_report_scalar(std, was_1d=was_1d),
-        pp=to_report_scalar(pp, was_1d=was_1d),
+        peak_to_peak=to_report_scalar(pp, was_1d=was_1d),
         max_abs=to_report_scalar(max_abs, was_1d=was_1d),
     )

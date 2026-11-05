@@ -273,13 +273,15 @@ class PLL:
         One-sided loop bandwidth ``B·T`` in ``(0, 0.5)``, a fraction of the
         symbol rate (not Hz: ``1e-3`` at 32 GBd is 32 MHz).  Gives
         critically damped gains ``μ = 4BT``, ``β = 4(BT)²``.  Used when
-        ``mu`` is not given.
-    mu : float, optional
-        Raw proportional gain; overrides ``normalized_bandwidth``.  Typical values
-        ``1e-3`` (high-order QAM, high SNR) to ``5e-2`` (QPSK).
-    beta : float, optional
-        Raw integral gain (``β ≈ μ²/4`` is critically damped); requires
-        ``mu``.  Defaults to 0 (a first-order loop) with ``mu``.
+        ``proportional_gain`` is not given.
+    proportional_gain : float, optional
+        Raw proportional gain ``μ``; overrides ``normalized_bandwidth``.
+        Typical values ``1e-3`` (high-order QAM, high SNR) to ``5e-2``
+        (QPSK).
+    integral_gain : float, optional
+        Raw integral gain ``β`` (``β ≈ μ²/4`` is critically damped);
+        requires ``proportional_gain``.  Defaults to 0 (a first-order loop)
+        with ``proportional_gain``.
     phase_init : float, default 0.0
         Initial phase in radians, e.g. the last value of a BPS estimate.
     joint_channels : bool, default False
@@ -300,8 +302,8 @@ class PLL:
     """
 
     normalized_bandwidth: float = 1e-3
-    mu: float | None = None
-    beta: float | None = None
+    proportional_gain: float | None = None
+    integral_gain: float | None = None
     phase_init: float = 0.0
     joint_channels: bool = False
     cycle_slip: CycleSlip | None = None
@@ -313,19 +315,22 @@ class PLL:
                 f"normalized_bandwidth must be in (0, 0.5) (a fraction of the "
                 f"symbol rate), got {bt}."
             )
-        _resolve_pll_gains(bt, self.mu, self.beta)  # validates beta
+        # validates integral_gain
+        _resolve_pll_gains(bt, self.proportional_gain, self.integral_gain)
 
     @property
     def gains(self) -> tuple[Any, Any]:
-        """The loop gains ``(mu, beta)``."""
-        return _resolve_pll_gains(self.normalized_bandwidth, self.mu, self.beta)
+        """The loop gains ``(μ, β)``: proportional and integral."""
+        return _resolve_pll_gains(
+            self.normalized_bandwidth, self.proportional_gain, self.integral_gain
+        )
 
     @property
     def _slip_history(self) -> int:
         """Default cycle-slip history: twice the loop memory, ``8/μ`` symbols.
 
         At least 10 and at most the general 640-symbol span (also for a
-        frozen loop, ``mu=0``).
+        frozen loop, ``proportional_gain=0``).
         """
         mu = float(self.gains[0])
         if mu <= 0.0:

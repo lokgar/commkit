@@ -104,7 +104,7 @@ class TestPlotLLRDistribution:
         bits of the Signal, without the uncoded filler (1500 symbols of
         16-QAM carry 6000 bits: 857 Hamming(7, 4) blocks and 1 filler bit)."""
         code = LinearBlockCode.hamming(3)
-        tx = generate(Constellation.qam(16), 15 * 100, symbol_rate=1e9, code=code,
+        tx = generate(Constellation.qam(16), num_symbols=15 * 100, symbol_rate=1e9, code=code,
                       pad=True, rng=1, device=backend_device)  # fmt: skip
         rx = apply_awgn(tx, esn0_db=8.0, rng=2)
         llrs = compute_llr(rx, noise_var=10**-0.8)[: tx.reference.num_blocks * code.n]
@@ -176,10 +176,14 @@ class TestPlotErrorRate:
 
     def test_ebn0_axis(self) -> None:
         """Eb/N0 = Es/N0 - 10 log10(k/n * bits per symbol) = Es/N0 here."""
-        _, ax = plot_error_rate(_curve(), ebn0=True, quantity="error_rate")
+        _, ax = plot_error_rate(_curve(), x_axis="ebn0", quantity="error_rate")
         np.testing.assert_allclose(ax.get_lines()[0].get_xdata(), [1.0, 2.0, 3.0])
         assert ax.get_xlabel() == "Eb/N0 [dB]"
         plt.close("all")
+
+    def test_unknown_x_axis_raises(self) -> None:
+        with pytest.raises(ValueError, match="x_axis"):
+            plot_error_rate(_curve(), x_axis="snr")
 
     def test_overlay_on_given_axes(self) -> None:
         fig, ax = plt.subplots()

@@ -99,7 +99,9 @@ def test_bps_matches_oracle(num_ch, joint, order):
 def test_pll_matches_oracle(num_ch, beta, order):
     x = _phase_noise_input("qam", order, num_ch)
     phi = estimate_carrier_phase(
-        x, PLL(mu=2e-2, beta=beta), constellation=Constellation.qam(order)
+        x,
+        PLL(proportional_gain=2e-2, integral_gain=beta),
+        constellation=Constellation.qam(order),
     ).value
     ref = pll_reference(x, Constellation.qam(order).points, mu=2e-2, beta=beta)
     np.testing.assert_allclose(np.atleast_2d(phi), ref, rtol=0, atol=ATOL)
