@@ -57,7 +57,7 @@ FILES=(
   tests/test_cuda_infra.py
   tests/equalization/test_cs_kernel.py tests/equalization/test_bps_kernel.py tests/equalization/test_blind.py
   tests/mapping/test_llr.py tests/mapping/test_gray.py tests/recovery/test_bps.py
-  tests/test_filtering.py tests/test_fiber.py tests/impairments/channel/test_channel_nonlinear.py
+  tests/test_filtering.py tests/test_fiber.py tests/impairments/test_channel_nonlinear.py
   tests/coding/test_ldpc_kernel.py tests/coding/test_algebraic.py
 )
 # One process per file, and one per test for test_block.py: under the sanitizer

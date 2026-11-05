@@ -506,14 +506,14 @@ ROWS: list[Row] = [
     Row("commkit.math.rms", HELPER),
     # --- impairments --------------------------------------------------------
     Row(
-        "commkit.impairments.channel.linear.apply_chromatic_dispersion",
+        "commkit.impairments.channel.apply_chromatic_dispersion",
         TRANSFORM,
         call=lambda c, x: _a(x, sampling_rate=FS, **CD),
         fact=FS_CONFLICT,
     ),
     Row("commkit._fiber.Fiber", VALUE),
     Row(
-        "commkit.impairments.channel.nonlinear.apply_fiber_propagation",
+        "commkit.impairments.channel.apply_fiber_propagation",
         TRANSFORM,
         call=lambda c, x: _a(
             x, sampling_rate=FS, noise_figure_db=5.0, rng=1, **FIBER_LINK
@@ -521,14 +521,14 @@ ROWS: list[Row] = [
         fact=FS_CONFLICT,
     ),
     Row(
-        "commkit.impairments.channel.linear.apply_pmd",
+        "commkit.impairments.channel.apply_pmd",
         TRANSFORM,
         call=lambda c, x: _a(x, sampling_rate=FS, dgd=1e-12, theta=0.3),
         fact=FS_CONFLICT,
         dims=(2,),
     ),
     Row(
-        "commkit.impairments.channel.linear.apply_polarization_mixing",
+        "commkit.impairments.channel.apply_polarization_mixing",
         TRANSFORM,
         call=lambda c, x: _a(x, theta=0.3),
         dims=(2,),
