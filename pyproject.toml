@@ -141,9 +141,6 @@ ignore = [
 logger-objects = ["commkit.logger.logger"]
 
 [tool.ruff.lint.per-file-ignores]
-# Numba kernel factories rely on closures and loop-variable rebinding that
-# trip bugbear's B023; tests intentionally use broad constructs.
-"commkit/equalization/_kernels_*.py" = ["B023"]
 # Package re-export hubs deliberately import names for the public namespace.
 "commkit/equalization/__init__.py" = ["F401"]
 "commkit/plotting/__init__.py" = ["F401"]

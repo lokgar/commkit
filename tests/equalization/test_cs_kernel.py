@@ -10,7 +10,7 @@ import numpy as np
 import pytest
 
 from commkit import _cuda
-from commkit.equalization._kernels_numba import _get_numba_cs_block
+from commkit.equalization._block._dd import _get_numba_cs_block
 from tests.common.conversions import to_numpy
 from tests.common.kernel_utils import (
     reference_cs_block,

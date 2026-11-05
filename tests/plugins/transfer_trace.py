@@ -71,8 +71,8 @@ _DOCUMENTED: dict[str, str] = {
     + " (training symbols, pilot mask)",
     "equalization/_common.py::_unpack_result_numpy": _RECURSION,
     "equalization/polarization.py::_jones_at_grid_points": _HOST_VALUE + " (taps)",
-    "equalization/sequential/_setup.py::_assemble_sequential": _RECURSION,
-    "equalization/sequential/_setup.py::_prepare_sequential": _RECURSION,
+    "equalization/_sequential/_setup.py::_assemble_sequential": _RECURSION,
+    "equalization/_sequential/_setup.py::_prepare_sequential": _RECURSION,
     "frequency.py::_mengali_morelli": _RECURSION + " (bootstrap over the lags)",
     "_cuda/__init__.py::_iir_factory.<locals>.launch": _HOST_VALUE
     + " (the IIR state transitions)",

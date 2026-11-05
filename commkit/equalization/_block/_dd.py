@@ -6,6 +6,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+from types import ModuleType
 from typing import Any
 
 import numpy as np
@@ -18,7 +19,6 @@ from ...mapping.constellation import _slicer_params
 from ...math import _unit_phasor
 from ...recovery import BPS, CycleSlip
 from .._common import _cpr_symmetry
-from .._kernels_numba import _get_numba_cs_block
 from ..result import (
     EqualizerResult,
     EqualizerState,
@@ -33,6 +33,18 @@ from ._engine import (
     _fdaf_gradient_update,
     _prepare_block,
 )
+
+
+def _loops() -> ModuleType:
+    """``equalization._numba_loops``, imported (with Numba) on first use."""
+    from .. import _numba_loops
+
+    return _numba_loops
+
+
+def _get_numba_cs_block() -> Any:
+    """The cycle-slip repair of one block of the block equalizers."""
+    return _loops().cs_block
 
 
 @dataclass

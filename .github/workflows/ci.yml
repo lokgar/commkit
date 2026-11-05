@@ -126,7 +126,7 @@ jobs:
       - name: Kernel coverage report
         run: >-
           uv run coverage report --show-missing --fail-under=85
-          --include="commkit/equalization/_kernels_numba.py,commkit/equalization/_numba_loops.py,commkit/equalization/sequential/*,commkit/frequency.py,commkit/recovery/*,commkit/coding/ldpc.py,commkit/coding/shaping.py,commkit/coding/polar.py,commkit/coding/convolutional.py,commkit/coding/turbo.py"
+          --include="commkit/equalization/_numba_loops.py,commkit/equalization/_sequential/*,commkit/equalization/_block/_dd.py,commkit/frequency.py,commkit/recovery/*,commkit/coding/ldpc.py,commkit/coding/shaping.py,commkit/coding/polar.py,commkit/coding/convolutional.py,commkit/coding/turbo.py"
 
 # GPU legs (--device=gpu / --device=all) require CuPy + CUDA and are run
 # manually or on a self-hosted runner; they are intentionally not part of

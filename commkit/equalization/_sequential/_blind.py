@@ -5,6 +5,7 @@
 
 from __future__ import annotations
 
+from types import ModuleType
 from typing import Any
 
 import numpy as np
@@ -14,7 +15,6 @@ from ...core._signal_adapter import adapt_signal, require_integer_sps
 from ...core.signal import Signal
 from ...logger import logger
 from .._common import _godard_radius, _rde_ring_radii, _rde_rings
-from .._kernels_numba import _get_numba_cma, _get_numba_rde
 from ..pilots import EqualizerPilots
 from ..result import (
     EqualizerResult,
@@ -28,6 +28,23 @@ from ._setup import (
     _run_resumable,
     _Snapshot,
 )
+
+
+def _loops() -> ModuleType:
+    """``equalization._numba_loops``, imported (with Numba) on first use."""
+    from .. import _numba_loops
+
+    return _numba_loops
+
+
+def _get_numba_cma() -> Any:
+    """CMA, blind or pilot-aided."""
+    return _loops().cma_loop
+
+
+def _get_numba_rde() -> Any:
+    """RDE, blind or pilot-aided."""
+    return _loops().rde_loop
 
 
 def _check_pilots(

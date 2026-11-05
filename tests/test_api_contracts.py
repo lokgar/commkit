@@ -342,7 +342,7 @@ ROWS: list[Row] = [
     Row("commkit.core.generation.generate", SYNTHESIS, data=1),
     # --- equalization -------------------------------------------------------
     Row(
-        "commkit.equalization.sequential._dd.lms",
+        "commkit.equalization._sequential._dd.lms",
         EQUALIZER,
         data=2,
         call=lambda c, x: _a(
@@ -351,7 +351,7 @@ ROWS: list[Row] = [
         fact=SPS_CONFLICT,
     ),
     Row(
-        "commkit.equalization.sequential._dd.rls",
+        "commkit.equalization._sequential._dd.rls",
         EQUALIZER,
         data=2,
         call=lambda c, x: _a(
@@ -360,13 +360,13 @@ ROWS: list[Row] = [
         fact=SPS_CONFLICT,
     ),
     Row(
-        "commkit.equalization.sequential._blind.cma",
+        "commkit.equalization._sequential._blind.cma",
         EQUALIZER,
         call=lambda c, x: _a(x, num_taps=5, sps=SPS, constellation=C16),
         fact=SPS_CONFLICT,
     ),
     Row(
-        "commkit.equalization.sequential._blind.rde",
+        "commkit.equalization._sequential._blind.rde",
         EQUALIZER,
         call=lambda c, x: _a(x, num_taps=5, sps=SPS, constellation=C16),
         fact=SPS_CONFLICT,
@@ -386,13 +386,13 @@ ROWS: list[Row] = [
         fact=SPS_CONFLICT,
     ),
     Row(
-        "commkit.equalization.blind.block_cma",
+        "commkit.equalization._block._blind.block_cma",
         EQUALIZER,
         call=lambda c, x: _a(x, num_taps=5, sps=SPS, block_size=64, constellation=C16),
         fact=SPS_CONFLICT,
     ),
     Row(
-        "commkit.equalization.blind.block_rde",
+        "commkit.equalization._block._blind.block_rde",
         EQUALIZER,
         call=lambda c, x: _a(x, num_taps=5, sps=SPS, block_size=64, constellation=C16),
         fact=SPS_CONFLICT,

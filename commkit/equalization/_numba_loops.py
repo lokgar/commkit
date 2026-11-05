@@ -3,8 +3,10 @@
 The compiled CPU hot loops behind :func:`commkit.equalization.lms` and
 ``rls`` (with and without inline carrier-phase recovery), ``cma`` and ``rde``
 (blind and pilot-aided) and ``cs_block``, the cycle-slip scan of
-``block_lms``.  Imported on first use through the getters of
-``_kernels_numba``, so ``import commkit`` does not load Numba.
+``block_lms``.  Imported on first use through the ``_get_numba_*`` getters
+of the modules that call them (``_sequential/_dd.py``,
+``_sequential/_blind.py``, ``_block/_dd.py``), so ``import commkit`` does
+not load Numba.
 
 The kernels share their steps (window, butterfly, slicer, tap update, the
 RLS update) as helpers that Numba inlines into each kernel before compiling
