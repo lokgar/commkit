@@ -56,7 +56,7 @@ class TestPlotAnalysis:
     def test_frequency_drift(self, xp: Any, channels: int) -> None:
         """One trace per channel, on the time axis of the sampling rate."""
         drift = analysis.frequency_drift(_phase(xp, channels), sampling_rate=R)
-        fig, ax = plot_frequency_drift(drift, sampling_rate=R, amp_ref=6e3)
+        fig, ax = plot_frequency_drift(drift, sampling_rate=R, reference_amplitude=6e3)
         traces = [ln for ln in ax.lines if len(ln.get_xdata()) > 2]
         assert len(traces) == channels
         assert traces[0].get_xdata()[1] == pytest.approx(1.0 / R)
@@ -182,7 +182,7 @@ class TestPlotAnalysis:
             sampling_rate=R,
             drift_phase=drift_phase,
             drift_cutoff=1e7,
-            amp_ref=1e5,
+            reference_amplitude=1e5,
         )
         assert axes.shape == (2, 2)
         assert all(ax.lines for ax in axes.flat)

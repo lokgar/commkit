@@ -176,10 +176,14 @@ class TestPlotErrorRate:
 
     def test_ebn0_axis(self) -> None:
         """Eb/N0 = Es/N0 - 10 log10(k/n * bits per symbol) = Es/N0 here."""
-        _, ax = plot_error_rate(_curve(), ebn0=True, quantity="error_rate")
+        _, ax = plot_error_rate(_curve(), x_axis="ebn0", quantity="error_rate")
         np.testing.assert_allclose(ax.get_lines()[0].get_xdata(), [1.0, 2.0, 3.0])
         assert ax.get_xlabel() == "Eb/N0 [dB]"
         plt.close("all")
+
+    def test_unknown_x_axis_raises(self) -> None:
+        with pytest.raises(ValueError, match="x_axis"):
+            plot_error_rate(_curve(), x_axis="snr")
 
     def test_overlay_on_given_axes(self) -> None:
         fig, ax = plt.subplots()

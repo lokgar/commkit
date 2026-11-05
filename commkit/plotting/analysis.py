@@ -43,7 +43,7 @@ def plot_frequency_drift(
     drift,
     *,
     sampling_rate: float,
-    amp_ref: float | None = None,
+    reference_amplitude: float | None = None,
     ax=None,
     label: str | None = None,
     xlim: tuple[float, float] | None = None,
@@ -65,8 +65,8 @@ def plot_frequency_drift(
         ``(C, M)``.
     sampling_rate : float
         Sampling rate of ``df`` in Hz, for the time axis.
-    amp_ref : float, optional
-        Draws dashed reference lines at ``±amp_ref`` (e.g. the wander
+    reference_amplitude : float, optional
+        Draws dashed reference lines at ``±reference_amplitude`` (e.g. the wander
         amplitude injected in a simulation).
     ax : matplotlib.axes.Axes, optional
         Axes to draw on; ``None`` creates a figure.
@@ -98,16 +98,16 @@ def plot_frequency_drift(
     for i in range(C):
         axi.plot(t, df_c[i], label=_series_label(label, f"Pol {i}" if C > 1 else None))
 
-    if amp_ref is not None:
-        axi.axhline(amp_ref, color="white", ls="--", label="±amplitude")
-        axi.axhline(-amp_ref, color="white", ls="--")
+    if reference_amplitude is not None:
+        axi.axhline(reference_amplitude, color="white", ls="--", label="±amplitude")
+        axi.axhline(-reference_amplitude, color="white", ls="--")
 
     _set_eng_formatter(axi, "x")
     _set_eng_formatter(axi, "y")
     axi.set_xlabel("Time [s]")
     axi.set_ylabel(r"$\Delta f$ [Hz]")
     axi.set_title(title)
-    if C > 1 or amp_ref is not None:
+    if C > 1 or reference_amplitude is not None:
         axi.legend(loc="best")
 
     return _finish((fig, axi), show, xlim=xlim, ylim=ylim, legend=legend)
@@ -601,7 +601,7 @@ def plot_carrier_phase_characterization(
     sampling_rate: float,
     drift_phase=None,
     drift_cutoff: float | None = None,
-    amp_ref: float | None = None,
+    reference_amplitude: float | None = None,
     ax=None,
     show: bool = False,
     title: str | None = None,
@@ -633,7 +633,7 @@ def plot_carrier_phase_characterization(
     drift_cutoff : float, optional
         Low-pass cutoff of the drift in Hz, shown in the title of the
         phase panel.
-    amp_ref : float, optional
+    reference_amplitude : float, optional
         Reference wander amplitude for the drift panel, as for
         :func:`plot_frequency_drift`.
     ax : array_like of matplotlib.axes.Axes, optional
@@ -660,7 +660,10 @@ def plot_carrier_phase_characterization(
         title=f"Recovered carrier phase{lp}",
     )
     plot_frequency_drift(
-        drift, sampling_rate=sampling_rate, amp_ref=amp_ref, ax=axes[0, 1]
+        drift,
+        sampling_rate=sampling_rate,
+        reference_amplitude=reference_amplitude,
+        ax=axes[0, 1],
     )
     plot_frequency_noise_psd(linewidth, ax=axes[1, 0])
     plot_allan_deviation(allan, ax=axes[1, 1])

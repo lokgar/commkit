@@ -76,7 +76,7 @@ def _decoded_llrs(llrs: Any, bits: Any) -> tuple[Any, Any]:
 def plot_error_rate(
     curves: Any,
     *,
-    ebn0: bool = False,
+    x_axis: str = "esn0",
     quantity: str | None = None,
     pre_fec: bool = True,
     intervals: bool = True,
@@ -103,8 +103,8 @@ def plot_error_rate(
     curves : ErrorRateCurve or sequence of ErrorRateCurve
         The curves of :func:`commkit.coding.error_rate_curve`, or built
         from your own counts.
-    ebn0 : bool, default False
-        Plot against Eb/N0 (per information bit) instead of Es/N0.
+    x_axis : {"esn0", "ebn0"}, default "esn0"
+        Horizontal axis: Es/N0, or Eb/N0 (per information bit).
     quantity : {"error_rate", "outcome"}, optional
         Plot one panel; ``None`` draws both.
     pre_fec : bool, default True
@@ -140,7 +140,8 @@ def plot_error_rate(
         If ``curves`` holds anything but
         :class:`~commkit.coding.ErrorRateCurve` objects.
     ValueError
-        If ``curves`` is empty, or ``label`` is given with several curves.
+        If ``curves`` is empty, ``label`` is given with several curves, or
+        ``x_axis`` is not ``"esn0"`` or ``"ebn0"``.
 
     Notes
     -----
@@ -150,6 +151,11 @@ def plot_error_rate(
 
     from ..coding import ErrorRateCurve
 
+    if x_axis not in ("esn0", "ebn0"):
+        raise ValueError(
+            f"plot_error_rate(): x_axis must be 'esn0' or 'ebn0', got {x_axis!r}."
+        )
+    ebn0 = x_axis == "ebn0"
     panels = _select(quantity, ("error_rate", "outcome"), xlim=xlim, ylim=ylim)
     items = [curves] if isinstance(curves, ErrorRateCurve) else list(curves)
     if not items:
