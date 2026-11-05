@@ -150,6 +150,8 @@ Dependencies point downward only:
   - A size names its unit: `num_symbols`, `num_blocks` (codewords of a FEC code), `info_bits` (a code's information length where it is a parameter), `blocks_per_frame`, `num_variables`, `num_segments`. In `coding`, `length` and `n` mean the codeword length in bits and `k` the information length, nothing else.
   - A seeded part of a factory takes `<part>_rng` (`payload_rng`), with the semantics of `rng`.
   - `method=` strings name only a numerical flavor of one algorithm (`method="maxlog" | "exact"`); algorithms are objects.
+  - Output scaling has three names: `normalize` (bool) measures the power and rescales to the library's convention; `correct_power` (bool) applies the exact, known gain of a rate change without measuring; `<thing>_normalization` (a string) chooses how coefficients are scaled (`taps_normalization="unit_energy" | "unity_gain"`).
+  - A search window is `search_range`, a `(start, stop)` pair in the axis's unit, or `search_band`, a half-width in Hz around a nominal frequency.
   - Values are in SI units without a suffix (`linewidth` in Hz, `drift_rate` in rad/s, `taus` in s). A result holding one quantity in two units suffixes the SI one (`lags` in samples, `lag_s`). A conventional non-SI unit goes into the name: `_db`, `_dbm`, `_deg`, `_nm`, `_km`, `_ps_nm_km`. Normalized quantities say so (`normalized_bandwidth`). No second name for one quantity in another unit (no `center_frequency_ghz`); `center_wavelength_nm` is a different, derived quantity.
 
 ### Docstrings
@@ -158,6 +160,7 @@ Docstrings describe the code as it is; a change in behavior updates them in the 
 
 - **Summary line** on the line of the opening quotes, one line, ending with a period. Functions: imperative mood (`Apply ...`), or a noun phrase for a function named after what it returns (`evm`, `welch_psd`). Classes and modules: a noun phrase.
 - **Module docstrings** name what the module holds (`:func:`, `:class:`), then the conventions particular to it (a sign convention, a scaling, a file layout). No marketing adjectives, no history of earlier layouts, no restatement of this file. A private module's summary ends with "(private)" and the body names its users.
+- **Sections by role:** functions and the objects users configure (algorithm objects, codes, pulses, `Constellation`, frames, `Signal`) list their arguments under Parameters. Result classes, the frozen dataclasses a function returns (`*Estimate`, `*Result`, `*Curve`, `FilterResponse`, ...), list their fields under Attributes with the stored types, even when users may build one themselves; the summary then says the constructor takes the same fields.
 - **Types:** inputs are `array_like`, or `array_like or Signal` where Signal-aware; returned arrays and fields are `ndarray` (on the input's device), `ndarray or Signal` for transforms, `numpy.ndarray` where always on the host. Shapes go in the description in double backticks: ``(C, N)``.
 - **Plots** return `(fig, ax) or None`, multi-panel plots `(fig, axes) or None` (`None` with `show=True`).
 - **Defaults:** `name : type, default value`; `name : type, optional` when the default is `None`, with the description saying what `None` does.
