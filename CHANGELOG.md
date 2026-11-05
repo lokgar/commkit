@@ -4,6 +4,10 @@ Notable changes to CommKit, newest first. Performance figures are from the refer
 
 ## [Unreleased]
 
+## [3.6.0] - 2026-11-05
+
+Chromatic dispersion for real captures. The compensation takes the link's accumulated dispersion and works as a receiver does, an FIR filter (or overlap-save blocks for backpropagation) in bounded memory, with the exact whole-record path as an option that is valid on captures too; three estimators measure an unknown dispersion, blind or from known symbols. The laser-characterization chain and its notebooks were corrected wherever a plot or a number did not mean what it said, method names that were generic now say what they do, and plot axes carry their SI prefix in the label.
+
 ### Changes that may need code updates
 
 - `correct_chromatic_dispersion` takes the link's accumulated dispersion, `dispersion_ps_nm=` (D·L in ps/nm), instead of `dispersion_ps_nm_km=` and `fiber_length_km=`: a receiver knows the total, and only the product enters the physics. Write `dispersion_ps_nm=17 * 80` for 80 km of standard fiber. `dispersion_compensation_taps` takes the same argument.
@@ -11,15 +15,15 @@ Notable changes to CommKit, newest first. Performance figures are from the refer
 - Method objects whose names were generic, or named one thing two ways, say what they do: `recovery.ConstantPhase` replaces `DataAided` (every known-symbol method is data-aided; this one fits one constant phase per channel), `recovery.PilotInterpolation` replaces `PilotAided` and `frequency.PilotSlope` replaces `PilotSymbols` (the same pilots, interpolated as a phase or fitted as a slope), `frequency.SpectralPeak` replaces `BiasTone` (the tone `recovery.PilotTone` names too; its mechanism is the spectral peak, the counterpart of `MthPower`), `analysis.DshFmFit` replaces `DshFmPsd` (one word from the result class `DshFmNoisePsd`), and `coding.StageDecoders` replaces `Stages`. Rename at the call; nothing else changes.
 - `commkit.impairments.channel` is `commkit.impairments.fiber_channel`, leaving room for other channel models. Import from `commkit.impairments` and nothing changes.
 - `filter_response` and `plot_filter_response` evaluate complex coefficients over the whole band `[-fs/2, fs/2)` by default, since their response differs at negative frequencies; real coefficients keep the grid from DC to Nyquist. Pass `frequencies=` for the old grid.
-- `BetaSeparation`'s white-FM floor (`linewidth_floor`) is a Whittle fit of white FM, flicker FM and the detection noise's `f²` tail, the model of `DshFmPsd`, instead of the median of an auto-detected plateau, and the estimate now carries `flicker`, `angle_noise_var` and `fm_psd_model`. Without a fence the fit runs from the plateau's lower edge to Nyquist. The default segment is the largest power of two within an eighth of the record (it was capped at 4096 samples), so the β-area can resolve the white-FM crossover; pass `nperseg=` for the old segment.
+- `BetaSeparation`'s white-FM floor (`linewidth_floor`) is a Whittle fit of white FM, flicker FM and the detection noise's `f²` tail, the model of `DshFmFit`, instead of the median of an auto-detected plateau, and the estimate now carries `flicker`, `angle_noise_var` and `fm_psd_model`. Without a fence the fit runs from the plateau's lower edge to Nyquist. The default segment is the largest power of two within an eighth of the record (it was capped at 4096 samples), so the β-area can resolve the white-FM crossover; pass `nperseg=` for the old segment.
 - Plot axes in SI units carry one SI prefix in the axis label (`Frequency [GHz]`, `Time [ns]`) with plain numbers on the ticks, chosen anew at every draw, so zooming or new limits rescale both; ticks no longer repeat the prefix (`10 G`). Log axes keep a prefix per tick. Limits stay in SI units (`xlim=(0, 2e9)`).
 - `plot_allan_deviation` draws no `τ^(-1/2)` guide by default (`reference_slopes=False`): anchored at the first point, it was meaningless wherever that point is not white-FM limited.
 
 ### Added
 
-- `estimate_chromatic_dispersion` has two more methods: `FourthMomentScan`, blind and without an excess band (Nyquist pulses), which scores each candidate compensation by the normalized fourth moment of the field (within 11 ps/nm at rolloff 0 and 0.1; about a second on the CPU, 0.05 s on the GPU), and `QuadraticPhaseFit`, data-aided from the Signal's reference or `symbols=`, which fits the quadratic phase of the channel response measured against the known symbols (within 12 ps/nm to ±34000 ps/nm at 6 dB Es/N0, with phase noise and PMD) and returns the measured group delay. `ClockToneScan` warns when the Signal's pulse has a rolloff below 0.05.
-- `filtering.estimate_chromatic_dispersion` with `ClockToneScan` measures a capture's accumulated dispersion blind, before frequency and carrier recovery: Godard's clock-tone spectral correlation, every candidate scanned by one inverse FFT, the estimate the centroid of the peak (a standard deviation of 5 ps/nm at rolloff 0.1 and 1 ps/nm at 0.35 on 2^17 samples at 15 dB; within 62 ps/nm with 10 ps of DGD and a 1 GHz offset). It returns a `ChromaticDispersionEstimate` with the scan, which `correct_chromatic_dispersion(x, estimate)` takes as its `how` (or `correct_chromatic_dispersion(x, ClockToneScan())` to estimate first), and whose value designs the taps to study with `dispersion_compensation_taps(dispersion_ps_nm=estimate.value, ...)`.
 - `filtering.dispersion_compensation_taps` designs the FIR filter of `correct_chromatic_dispersion`: the least-squares fit of the inverse fiber response over a band (the signal's occupied bandwidth, or the whole sampled band), exact through Fresnel integrals. Its default length is 1.25 times the group-delay spread over the band, which reaches about -45 dB of residual against the frequency-domain compensation; fitting only the occupied band needs about a third of the taps of a fit over the whole band. Notebook 19 shows the taps, their response and the SNR against the length.
+- `filtering.estimate_chromatic_dispersion` with `ClockToneScan` measures a capture's accumulated dispersion blind, before frequency and carrier recovery: Godard's clock-tone spectral correlation, every candidate scanned by one inverse FFT, the estimate the centroid of the peak (a standard deviation of 5 ps/nm at rolloff 0.1 and 1 ps/nm at 0.35 on 2^17 samples at 15 dB; within 62 ps/nm with 10 ps of DGD and a 1 GHz offset). It returns a `ChromaticDispersionEstimate` with the scan, which `correct_chromatic_dispersion(x, estimate)` takes as its `how` (or `correct_chromatic_dispersion(x, ClockToneScan())` to estimate first), and whose value designs the taps to study with `dispersion_compensation_taps(dispersion_ps_nm=estimate.value, ...)`.
+- `estimate_chromatic_dispersion` has two more methods: `FourthMomentScan`, blind and without an excess band (Nyquist pulses), which scores each candidate compensation by the normalized fourth moment of the field (within 11 ps/nm at rolloff 0 and 0.1; about a second on the CPU, 0.05 s on the GPU), and `QuadraticPhaseFit`, data-aided from the Signal's reference or `symbols=`, which fits the quadratic phase of the channel response measured against the known symbols (within 12 ps/nm to ±34000 ps/nm at 6 dB Es/N0, with phase noise and PMD) and returns the measured group delay. `ClockToneScan` warns when the Signal's pulse has a rolloff below 0.05.
 
 ### Fixed
 
@@ -28,6 +32,12 @@ Notable changes to CommKit, newest first. Performance figures are from the refer
 - `plot_frequency_noise_psd` draws the fitted model through the same log-binned reduction as a dense PSD (a fringe-resolving DSH model swung at every notch and was drawn as a filled band), keeps the β-line from setting the vertical range, and no longer breaks log-binned curves at empty low-frequency cells. `plot_dsh_beat_psd` zooms on the line, twice the deep width on each side. `plot_carrier_phase_decomposition` labels the total phase next to the drift.
 - The laser-characterization notebooks (23 to 28) report what their plots show: beat-spectrum limits in Hz (they were MHz on a Hz axis, an empty plot), the β-area resolved and explained as the observed width next to the intrinsic floor, the Allan deviation of the unfiltered frequency with its white-PM, white-FM and wander regions, the flicker corner on segments that resolve it, the record-to-record scatter of `DshIncrement` and of the Lorentzian widths, and verdicts in the measurement templates computed from the numbers instead of printed unconditionally.
 - The fiber channel functions document that they treat their record as one period (circular), which the receiver inverts exactly with `method="whole_record"`.
+
+### Development
+
+- The precision audit caught the clock-tone scan's frequency-shift phasor built in complex128, which promoted the complex64 scan; it is built in the data's precision.
+- The transfer audit lists the dispersion estimators' host-side fits and the data-aided fit's known symbols; CD compensation and block DBP add no transfers.
+- `AGENTS.md` states the plotting convention for SI units (the base unit in the label, the prefix chosen at draw time) and names the fiber-channel test files.
 
 ## [3.5.0] - 2026-11-05
 
@@ -451,7 +461,8 @@ See the [GitHub release](https://github.com/lokgar/commkit/releases/tag/v1.1.0) 
 
 First release. See the [GitHub release](https://github.com/lokgar/commkit/releases/tag/v1.0.0).
 
-[Unreleased]: https://github.com/lokgar/commkit/compare/v3.5.0...HEAD
+[Unreleased]: https://github.com/lokgar/commkit/compare/v3.6.0...HEAD
+[3.6.0]: https://github.com/lokgar/commkit/compare/v3.5.0...v3.6.0
 [3.5.0]: https://github.com/lokgar/commkit/compare/v3.4.0...v3.5.0
 [3.4.0]: https://github.com/lokgar/commkit/compare/v3.3.0...v3.4.0
 [3.3.0]: https://github.com/lokgar/commkit/compare/v3.2.1...v3.3.0
