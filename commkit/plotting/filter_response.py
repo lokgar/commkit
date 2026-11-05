@@ -57,7 +57,9 @@ def plot_filter_response(
     quantity : {"impulse", "step", "magnitude", "phase", "group_delay"}, optional
         A single response to plot. ``None`` plots the four-panel dashboard.
     nfft : int, default 2048
-        Number of points in the frequency response.
+        Number of points in the frequency response, from DC to Nyquist for
+        real coefficients and over ``[-fs/2, fs/2)`` for complex ones (see
+        :func:`~commkit.filtering.filter_response`).
     frequencies : array_like, optional
         Frequency grid on the system's device, in Hz or cycles per sample.
         ``None`` uses the uniform ``nfft``-point grid.

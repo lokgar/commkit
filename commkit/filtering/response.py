@@ -75,8 +75,10 @@ def filter_response(
     system : array_like or (b, a) tuple
         FIR taps, second-order sections ``(S, 6)``, or transfer coefficients.
     nfft : int, default 2048
-        Number of frequency points from DC to just below Nyquist when
-        ``frequencies`` is not given.
+        Number of frequency points when ``frequencies`` is not given: from
+        DC to just below Nyquist for real coefficients, and over the whole
+        band ``[-fs/2, fs/2)`` for complex ones, whose response differs at
+        negative frequencies.
     sampling_rate : float, optional
         Sampling rate in Hz. Without it, frequencies are cycles per sample
         and group delays are samples; otherwise they are Hz and seconds.
@@ -106,7 +108,12 @@ def filter_response(
         raise ValueError("sampling_rate must be positive and finite")
     kind, b, a, xp, _ = _system(system)
     scale = float(sampling_rate) if sampling_rate is not None else 1.0
-    if frequencies is None:
+    two_sided = frequencies is None and bool(
+        xp.iscomplexobj(b) or (a is not None and xp.iscomplexobj(a))
+    )
+    if two_sided:
+        f = (xp.arange(nfft, dtype=xp.float64) - nfft // 2) * (scale / nfft)
+    elif frequencies is None:
         f = xp.arange(nfft, dtype=xp.float64) * (scale / (2 * nfft))
     else:
         f, fxp, _ = dispatch(frequencies)
@@ -127,17 +134,22 @@ def filter_response(
         coeff = coeff.astype(dtype, copy=False)
         weighted_coeff = coeff * xp.arange(coeff.size, dtype=coeff.real.dtype)
         if coeff.size > 16 and frequencies is None:
-            # Frequencies lie on a 2*nfft DFT grid. Folding coefficients
+            # Frequencies lie on a DFT grid (2*nfft points from DC, or nfft
+            # points shifted to start at -fs/2). Folding coefficients
             # preserves their response there even when the filter is longer.
-            fft_size = 2 * nfft
+            fft_size = nfft if two_sided else 2 * nfft
             if coeff.size > fft_size:
                 pad = (-coeff.size) % fft_size
                 coeff = xp.pad(coeff, (0, pad)).reshape(-1, fft_size).sum(axis=0)
                 weighted_coeff = (
                     xp.pad(weighted_coeff, (0, pad)).reshape(-1, fft_size).sum(axis=0)
                 )
-            value = _fft.fft(coeff, n=fft_size)[:nfft]
-            weighted = _fft.fft(weighted_coeff, n=fft_size)[:nfft]
+            if two_sided:
+                value = xp.fft.fftshift(_fft.fft(coeff, n=fft_size))
+                weighted = xp.fft.fftshift(_fft.fft(weighted_coeff, n=fft_size))
+            else:
+                value = _fft.fft(coeff, n=fft_size)[:nfft]
+                weighted = _fft.fft(weighted_coeff, n=fft_size)[:nfft]
         else:
             value = xp.polyval(coeff[::-1], z)
             weighted = xp.polyval(weighted_coeff[::-1], z)

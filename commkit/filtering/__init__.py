@@ -13,7 +13,8 @@
   :func:`ols_fir_filter` (overlap-save, for long filters), :func:`iir_filter`
   and :func:`matched_filter`.
 - Fiber compensation: :func:`correct_chromatic_dispersion`, the inverse of
-  :func:`commkit.impairments.apply_chromatic_dispersion`, and digital
+  :func:`commkit.impairments.apply_chromatic_dispersion` (its FIR form by
+  :func:`dispersion_compensation_taps`), and digital
   backpropagation :func:`correct_fiber_propagation`, the inverse of
   :func:`commkit.impairments.apply_fiber_propagation`.
 
@@ -22,7 +23,11 @@ arrays); application functions run on the device of the samples.  Display
 and estimation smoothers are in :mod:`commkit.smoothing`.
 """
 
-from .fiber import correct_chromatic_dispersion, correct_fiber_propagation
+from .fiber import (
+    correct_chromatic_dispersion,
+    correct_fiber_propagation,
+    dispersion_compensation_taps,
+)
 from .linear import (
     bessel_sos,
     butterworth_sos,
@@ -59,6 +64,7 @@ __all__ = [
     "chebyshev2_sos",
     "correct_chromatic_dispersion",
     "correct_fiber_propagation",
+    "dispersion_compensation_taps",
     "elliptic_sos",
     "filter_response",
     "fir_filter",

@@ -4,6 +4,18 @@ Notable changes to CommKit, newest first. Performance figures are from the refer
 
 ## [Unreleased]
 
+### Changes that may need code updates
+
+- `filter_response` and `plot_filter_response` evaluate complex coefficients over the whole band `[-fs/2, fs/2)` by default, since their response differs at negative frequencies; real coefficients keep the grid from DC to Nyquist. Pass `frequencies=` for the old grid.
+
+### Added
+
+- `filtering.dispersion_compensation_taps` designs the FIR form of `correct_chromatic_dispersion`: the least-squares fit of the inverse fiber response over a band (the signal's occupied bandwidth, or the whole sampled band), exact through Fresnel integrals. Its default length is 1.25 times the group-delay spread over the band, which reaches about -45 dB of residual against the frequency-domain compensation; fitting only the occupied band needs about a third of the taps of a fit over the whole band. Notebook 19 shows the taps, their response and the SNR against the length.
+
+### Fixed
+
+- `correct_chromatic_dispersion` documents that it filters the whole record in the frequency domain (a circular filter as long as the record, with no taps to choose) and logs the dispersion's spread in samples.
+
 ## [3.5.0] - 2026-11-05
 
 One name per concept, finished. A review of the API and the module layout renamed the arguments and result fields that broke the library's naming rules, split or merged the modules that broke its size rules, and fixed the two audit tools that could pass without checking anything. Numerical results do not change.

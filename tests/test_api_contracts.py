@@ -472,6 +472,7 @@ ROWS: list[Row] = [
         call=lambda c, x: _a(x, sampling_rate=FS, **CD),
         fact=FS_CONFLICT,
     ),
+    Row("commkit.filtering.fiber.dispersion_compensation_taps", DESIGN, data=0),
     Row(
         "commkit.filtering.fiber.correct_fiber_propagation",
         TRANSFORM,

@@ -650,6 +650,135 @@ class TestCorrectChromaticDispersion:
             )
 
 
+class TestDispersionCompensationTaps:
+    """dispersion_compensation_taps: the FIR form of correct_chromatic_dispersion."""
+
+    FS = 64e9
+    KW = {"dispersion_ps_nm_km": 17.0, "center_wavelength_nm": 1550.0}
+
+    @staticmethod
+    def _beta2_length(km: float) -> float:
+        # β₂ = -D λ² / (2π c), D in s/m², λ in m, L in m.
+        c = 299_792_458.0
+        return -(17.0e-6) * (1550e-9) ** 2 / (2 * np.pi * c) * km * 1e3
+
+    def test_whole_band_is_the_truncated_band_limited_response(self) -> None:
+        """Over the whole band the taps are the inverse DTFT of
+        exp(+j β₂L ω²/2) on |f| < fs/2, here by a dense inverse FFT (the
+        aliasing of the dense grid is below 1e-8)."""
+        km, n_taps, m = 80.0, 61, 2**20
+        taps = filtering.dispersion_compensation_taps(
+            fiber_length_km=km, sampling_rate=self.FS, num_taps=n_taps, **self.KW
+        )
+        omega = 2 * np.pi * np.fft.fftfreq(m, d=1 / self.FS)
+        h = np.fft.ifft(np.exp(0.5j * self._beta2_length(km) * omega**2))
+        n = np.arange(n_taps) - (n_taps - 1) // 2
+        np.testing.assert_allclose(taps, h[n % m], atol=1e-8)
+
+    def test_default_length_follows_the_spread(self) -> None:
+        """1.25 times the group-delay spread 2π|β₂L|·B·fs, odd; over the
+        whole band the spread is Savory's D λ² L / (c T²) (45 samples at
+        80 km, 64 GS/s, so 57 taps), and a short link keeps 7."""
+        savory = 17.0e-6 * (1550e-9) ** 2 * 80e3 / (299_792_458.0 / self.FS**2)
+        assert 44 < savory < 45
+        full = filtering.dispersion_compensation_taps(
+            fiber_length_km=80.0, sampling_rate=self.FS, **self.KW
+        )
+        assert len(full) == 57
+        band = filtering.dispersion_compensation_taps(
+            fiber_length_km=80.0, sampling_rate=self.FS, bandwidth=32e9, **self.KW
+        )
+        assert len(band) == 2 * int(np.ceil((1.25 * savory / 2 - 1) / 2)) + 1
+        short = filtering.dispersion_compensation_taps(
+            fiber_length_km=1.0, sampling_rate=self.FS, **self.KW
+        )
+        assert len(short) == 7
+
+    def test_zero_dispersion_is_a_delta(self) -> None:
+        taps = filtering.dispersion_compensation_taps(
+            fiber_length_km=0.0, sampling_rate=self.FS, num_taps=5, **self.KW
+        )
+        np.testing.assert_array_equal(taps, [0, 0, 1, 0, 0])
+
+    def test_band_fit_beats_truncation_inside_the_band(self) -> None:
+        """At one length, the least-squares fit over a band has a smaller
+        in-band response error than the truncated response, which spends its
+        taps on the whole band (measured: -61 dB against -15 dB)."""
+        km, n_taps, band = 80.0, 31, 35.2e9
+        f = np.linspace(-band / 2, band / 2, 2001)
+        target = np.exp(0.5j * self._beta2_length(km) * (2 * np.pi * f) ** 2)
+
+        def in_band_error_db(taps: np.ndarray) -> float:
+            n = np.arange(len(taps)) - (len(taps) - 1) // 2
+            resp = np.exp(-2j * np.pi * np.outer(f, n) / self.FS) @ taps
+            return float(10 * np.log10(np.mean(np.abs(resp - target) ** 2)))
+
+        common = {"fiber_length_km": km, "sampling_rate": self.FS, "num_taps": n_taps}
+        fit = filtering.dispersion_compensation_taps(
+            bandwidth=band, **common, **self.KW
+        )
+        trunc = filtering.dispersion_compensation_taps(**common, **self.KW)
+        assert in_band_error_db(fit) < -50
+        assert in_band_error_db(trunc) > -25
+
+    @pytest.mark.parametrize("km", [80.0, 1000.0])
+    def test_fir_matches_frequency_domain_compensation(
+        self, xp: Any, km: float
+    ) -> None:
+        """Applied by overlap-save to a 2-sps RRC signal, the default taps
+        fitted over the occupied band match correct_chromatic_dispersion away
+        from the record ends (measured -45 and -50 dB); a filter half the
+        spread long, the baseline, does not (-15 and -5 dB)."""
+        from commkit import Constellation, generate
+        from commkit.filtering import RRC
+        from commkit.impairments import apply_chromatic_dispersion
+
+        tx = generate(
+            Constellation.qam(16),
+            num_symbols=2**14,
+            symbol_rate=32e9,
+            sps=2,
+            pulse=RRC(rolloff=0.1),
+            rng=1,
+            device="gpu" if xp.__name__ == "cupy" else "cpu",
+        )
+        kw = {"fiber_length_km": km, **self.KW}
+        rx = apply_chromatic_dispersion(tx, **kw)
+        ref = to_numpy(filtering.correct_chromatic_dispersion(rx, **kw).samples)
+
+        def residual_db(taps: np.ndarray) -> float:
+            y = to_numpy(filtering.ols_fir_filter(rx, taps).samples)
+            k = 2 * len(taps)
+            err = y[k:-k] - ref[k:-k]
+            return float(
+                10 * np.log10(np.mean(np.abs(err) ** 2) / np.mean(np.abs(ref) ** 2))
+            )
+
+        taps = filtering.dispersion_compensation_taps(
+            sampling_rate=64e9, bandwidth=35.2e9, **kw
+        )
+        assert residual_db(taps) < -40
+        short = filtering.dispersion_compensation_taps(
+            sampling_rate=64e9, bandwidth=35.2e9, num_taps=len(taps) // 2 | 1, **kw
+        )
+        assert residual_db(short) > -30
+
+    @pytest.mark.parametrize(
+        ("kwargs", "match"),
+        [
+            ({"sampling_rate": 0.0}, "sampling_rate"),
+            ({"bandwidth": 0.0}, "bandwidth"),
+            ({"bandwidth": 70e9}, "bandwidth"),
+            ({"num_taps": 0}, "num_taps"),
+            ({"num_taps": 2.5}, "num_taps"),
+        ],
+    )
+    def test_invalid_arguments_raise(self, kwargs: dict[str, Any], match: str) -> None:
+        args = {"fiber_length_km": 80.0, "sampling_rate": self.FS, **self.KW, **kwargs}
+        with pytest.raises(ValueError, match=match):
+            filtering.dispersion_compensation_taps(**args)
+
+
 class TestOlsFftSize:
     def test_invalid_nfft_raises(self, xp: Any) -> None:
         """nfft must be a power of 2 with a guard of at least len(taps)."""
