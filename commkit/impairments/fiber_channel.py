@@ -1,4 +1,4 @@
-"""Fiber-channel impairments, linear and nonlinear.
+"""The fiber channel: linear and nonlinear impairments of optical fiber.
 
 Linear: :func:`apply_chromatic_dispersion`, :func:`apply_pmd` (a single
 differential-group-delay section) and :func:`apply_polarization_mixing` (a
@@ -10,6 +10,12 @@ self-phase modulation (and, for a dual-polarization field, the Manakov
 cross-phase modulation between the polarizations) together with chromatic
 dispersion, its slope, attenuation, polarization-mode dispersion and
 amplifier noise.
+
+**Records.**  Every function here works in the frequency domain on the
+whole record, which it treats as one period of a periodic sequence: the
+dispersed tails of the last symbols wrap onto the first, as when an AWG
+plays the record in a loop.  The receiver undoes such a record exactly with
+``periodic=True``; a capture's receiver uses the default.
 
 The compensation counterparts are
 :func:`commkit.filtering.correct_chromatic_dispersion` and digital
@@ -318,8 +324,7 @@ def apply_chromatic_dispersion(
     result = apply_dispersion(
         signal_adapter.array,
         sampling_rate=sampling_rate,
-        dispersion_ps_nm_km=dispersion_ps_nm_km,
-        fiber_length_km=fiber_length_km,
+        dispersion_ps_nm=dispersion_ps_nm_km * fiber_length_km,
         center_wavelength_nm=center_wavelength_nm,
         inverse=False,
     )

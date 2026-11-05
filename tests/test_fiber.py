@@ -2,7 +2,7 @@
 
 The fused CuPy kernels and the per-span CUDA graph are checked against the
 plain CuPy stages and against the CPU; the physics is tested through the
-public functions (impairments/test_channel_nonlinear.py,
+public functions (impairments/test_fiber_channel_nonlinear.py,
 test_filtering.py).
 """
 

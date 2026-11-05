@@ -1,14 +1,33 @@
 """Fiber compensation: chromatic dispersion and digital backpropagation.
 
 :func:`correct_chromatic_dispersion` is the inverse of
-:func:`commkit.impairments.apply_chromatic_dispersion`, applied to the whole
-record in the frequency domain; :func:`dispersion_compensation_taps` designs
-its FIR form.  :func:`correct_fiber_propagation` (digital backpropagation) is
-the inverse of :func:`commkit.impairments.apply_fiber_propagation`.
+:func:`commkit.impairments.apply_chromatic_dispersion` and
+:func:`correct_fiber_propagation` (digital backpropagation) the inverse of
+:func:`commkit.impairments.apply_fiber_propagation`.
+:func:`dispersion_compensation_taps` designs the FIR filter of the former.
+
+**Records.**  Both treat the samples as a window of an endless stream by
+default, as an ADC delivers it, and process it as a receiver does, in
+bounded memory: chromatic dispersion as an FIR filter applied by
+overlap-save, backpropagation in overlapping blocks.  Within half the
+dispersion's memory of either end of a capture no method can be right,
+since the history needed lies outside the capture; here those samples are
+transients of a zero history.  ``periodic=True`` treats the record as one
+period of a periodic sequence (an AWG pattern, or a record dispersed by
+the circular channel functions of :mod:`commkit.impairments`) and filters
+it whole in the frequency domain with the exact response: exact
+everywhere on such a record.  On a capture it leaves the same end
+samples wrong (the other end wraps in) and is otherwise exact, at the
+cost of transforming the whole record at once.
+
+**Dispersion.**  The receiver knows the accumulated dispersion of the link,
+``dispersion_ps_nm`` (``D·L``, measured or from the link plan), not the
+fiber's ``D`` and length apart; only their product enters
+``β₂L = -D·L·λ² / (2π c)``.
 """
 
-import logging
 import math
+from typing import Any
 
 import numpy as np
 
@@ -16,13 +35,15 @@ from .._array import restore_1d
 from .._dispersion import (
     apply_dispersion,
     beta2_length,
+    beta3_length,
     compensation_taps,
     spread_samples,
 )
 from .._fiber import Fiber, check_link, propagate, to_watts
-from ..backend import dispatch
+from ..backend import ArrayType, dispatch
 from ..core._signal_adapter import S, adapt_signal
 from ..logger import logger
+from .linear import ols_fir_filter
 
 __all__ = [
     "correct_chromatic_dispersion",
@@ -38,27 +59,32 @@ __all__ = [
 def correct_chromatic_dispersion(
     samples: S,
     *,
-    dispersion_ps_nm_km: float,
-    fiber_length_km: float,
+    dispersion_ps_nm: float,
     center_wavelength_nm: float | None = None,
     sampling_rate: float | None = None,
+    periodic: bool = False,
+    bandwidth: float | None = None,
+    num_taps: int | None = None,
 ) -> S:
-    """Compensate chromatic dispersion electronically: the inverse fiber response.
+    """Compensate chromatic dispersion: the inverse fiber response.
 
-    Multiplies the spectrum by ``H(ω) = exp(+j β₂ L ω² / 2)`` with
-    ``β₂ = -D λ² / (2π c)``, which undoes
-    :func:`commkit.impairments.apply_chromatic_dispersion` exactly.  There
-    are no taps to choose: the response is applied on the FFT grid of the
-    whole record, exact at every frequency (see Notes).
+    Filters with ``H(ω) = exp(+j β₂L ω² / 2)``, ``β₂L = -D·L·λ² / (2π c)``,
+    which undoes the dispersion of a link of accumulated dispersion
+    ``D·L``.  By default the samples are a window of a stream (a capture):
+    the filter is the FIR of :func:`dispersion_compensation_taps`, applied by
+    overlap-save (:func:`ols_fir_filter`).  With ``periodic=True`` the
+    record is one period of a periodic sequence and the response multiplies
+    its whole spectrum, the exact inverse of
+    :func:`commkit.impairments.apply_chromatic_dispersion`.
 
     Parameters
     ----------
     samples : array_like or Signal
         Complex baseband samples, ``(N,)`` or ``(C, N)``.
-    dispersion_ps_nm_km : float
-        Fiber dispersion parameter D in ps / (nm km) (SMF-28: 17 at 1550 nm).
-    fiber_length_km : float
-        Fiber length in km.
+    dispersion_ps_nm : float
+        Accumulated dispersion of the link ``D·L`` in ps/nm (standard fiber:
+        17 per km at 1550 nm, so 1360 for 80 km).  The value of the fiber,
+        not its negative: the function inverts it.
     center_wavelength_nm : float, optional
         Carrier wavelength in nm.  Taken from an optical Signal's
         carrier (``domain="OPT"``, ``c / center_frequency``); required for
@@ -67,63 +93,105 @@ def correct_chromatic_dispersion(
     sampling_rate : float, optional
         Sampling rate in Hz.  Taken from the Signal; required for array
         input.  A value that disagrees with the Signal raises.
+    periodic : bool, default False
+        Treat ``samples`` as one period of a periodic sequence and filter
+        the whole record in the frequency domain with the exact response:
+        exact everywhere on a periodic record (one AWG period, or one
+        dispersed circularly in simulation).  On a capture the samples
+        within half the spread of either end are wrong (the other end wraps
+        in), as they are transients of the FIR, and the rest exact; the
+        whole record is transformed at once.
+    bandwidth : float, optional
+        FIR only: two-sided bandwidth in Hz over which the filter is
+        fitted, the signal's occupied bandwidth (see
+        :func:`dispersion_compensation_taps`).  ``None`` fits the whole
+        sampled band.
+    num_taps : int, optional
+        FIR only: number of taps; ``None`` takes the default of
+        :func:`dispersion_compensation_taps`.
 
     Returns
     -------
     ndarray or Signal
         Compensated samples, same shape, dtype and device as the input.
+        Without ``periodic`` the first and last ``(num_taps - 1) // 2``
+        samples are filter transients (on a capture they lack the history
+        that lies outside it, whatever the method).
+
+    Raises
+    ------
+    ValueError
+        If ``bandwidth`` or ``num_taps`` comes with ``periodic=True``.
 
     See Also
     --------
-    dispersion_compensation_taps : The same compensation as FIR taps.
+    dispersion_compensation_taps : The FIR taps, to inspect or apply.
 
     Notes
     -----
-    One FFT of the record, a multiply and an inverse FFT: a circular filter
-    as long as the record.  The record is treated as one period, so the
-    dispersed tails of its last symbols wrap onto its first and the reverse;
-    the samples within half the spread of either end are compensated from
-    the other end.  That is exact for a record that was dispersed circularly
-    (by :func:`commkit.impairments.apply_chromatic_dispersion`) and wrong
-    there for a capture.  The dispersion's memory, the group-delay spread
-    ``2π |β₂ L| fs`` over the sampled band, is logged at INFO in samples.
-    For an FIR or a block filter of a given length (as a receiver applies
-    it), design the taps with :func:`dispersion_compensation_taps` and apply
-    them with :func:`ols_fir_filter`.
+    The FIR is centred, so it adds no delay and the reference stays
+    aligned.  Its default length is 1.25 times the dispersion's
+    group-delay spread over the fitted band, about -45 dB of residual
+    against the exact response on a signal inside that band; fitting the
+    occupied band rather than the whole sampled band needs about half the
+    taps (see :func:`dispersion_compensation_taps`).
+
+    Away from the ends of a capture the whole-record filter of
+    ``periodic=True`` is more precise still, as its response is exact:
+    measured on a window of an 80 km, 2-sps record, both are wrong over the
+    first and last 16 samples, the FIR then holds -45 dB, and the
+    whole-record filter reaches -30 dB over the next 16, -68 dB beyond 50
+    and -110 dB deep inside.  On a record that fits in memory it is a valid
+    choice too; the FIR is the receiver's form, in bounded memory, with taps
+    to inspect.
 
     Examples
     --------
-    >>> sig = correct_chromatic_dispersion(  # optical Signal: its carrier
-    ...     sig, dispersion_ps_nm_km=17.0, fiber_length_km=80.0)
+    >>> y = correct_chromatic_dispersion(  # a capture after 80 km of SSMF
+    ...     capture, dispersion_ps_nm=1360.0, bandwidth=35.2e9)
+    >>> y = correct_chromatic_dispersion(  # a circularly simulated record
+    ...     sig, dispersion_ps_nm=1360.0, periodic=True)
     """
     signal_adapter = adapt_signal(
         samples, function_name="correct_chromatic_dispersion()"
     )
     sampling_rate = signal_adapter.resolve_fact("sampling_rate", sampling_rate)
     center_wavelength_nm = signal_adapter.resolve_wavelength_nm(center_wavelength_nm)
-    if logger.isEnabledFor(logging.INFO):
-        b2l = beta2_length(
-            dispersion_ps_nm_km=dispersion_ps_nm_km,
-            fiber_length_km=fiber_length_km,
-            center_wavelength_nm=center_wavelength_nm,
-        )
+    if periodic:
+        if bandwidth is not None or num_taps is not None:
+            raise ValueError(
+                "correct_chromatic_dispersion(): bandwidth and num_taps design "
+                "the FIR of a capture; periodic=True filters the whole record "
+                "exactly and takes neither."
+            )
         logger.info(
-            "Correcting CD (D=%s ps/nm/km, L=%s km, λ=%s nm): spread %.1f samples "
-            "over the sampled band, applied in the frequency domain.",
-            dispersion_ps_nm_km,
-            fiber_length_km,
+            "Correcting CD of %s ps/nm (λ=%s nm) over the whole periodic record.",
+            dispersion_ps_nm,
             center_wavelength_nm,
-            spread_samples(b2l, sampling_rate=sampling_rate, bandwidth=sampling_rate),
         )
-    result = apply_dispersion(
-        signal_adapter.array,
-        sampling_rate=sampling_rate,
-        dispersion_ps_nm_km=dispersion_ps_nm_km,
-        fiber_length_km=fiber_length_km,
+        result = apply_dispersion(
+            signal_adapter.array,
+            sampling_rate=sampling_rate,
+            dispersion_ps_nm=dispersion_ps_nm,
+            center_wavelength_nm=center_wavelength_nm,
+            inverse=True,
+        )
+        return signal_adapter.wrap_samples(result)
+    taps = dispersion_compensation_taps(
+        dispersion_ps_nm=dispersion_ps_nm,
         center_wavelength_nm=center_wavelength_nm,
-        inverse=True,
+        sampling_rate=sampling_rate,
+        bandwidth=bandwidth,
+        num_taps=num_taps,
     )
-    return signal_adapter.wrap_samples(result)
+    logger.info(
+        "Correcting CD of %s ps/nm (λ=%s nm) with a %d-tap FIR.",
+        dispersion_ps_nm,
+        center_wavelength_nm,
+        taps.size,
+    )
+    x, _, _ = dispatch(signal_adapter.array)
+    return signal_adapter.wrap_samples(ols_fir_filter(x, taps))
 
 
 #: Default length over the spread: a filter exactly as long as the spread
@@ -137,8 +205,7 @@ _MIN_TAPS = 7
 
 def dispersion_compensation_taps(
     *,
-    dispersion_ps_nm_km: float,
-    fiber_length_km: float,
+    dispersion_ps_nm: float,
     center_wavelength_nm: float,
     sampling_rate: float,
     bandwidth: float | None = None,
@@ -146,20 +213,18 @@ def dispersion_compensation_taps(
 ) -> np.ndarray:
     """Design FIR taps that compensate chromatic dispersion.
 
-    The FIR form of :func:`correct_chromatic_dispersion`: the least-squares
-    fit of its response ``exp(+j β₂ L ω² / 2)`` over the band
-    ``|f| <= bandwidth / 2`` (Eghbali et al. 2014).  Over the whole sampled
-    band the fit is the band-limited impulse response truncated to
+    The FIR filter of :func:`correct_chromatic_dispersion`: the
+    least-squares fit of the inverse response ``exp(+j β₂L ω² / 2)`` over
+    the band ``|f| <= bandwidth / 2`` (Eghbali et al. 2014).  Over the whole
+    sampled band the fit is the band-limited impulse response truncated to
     ``num_taps``.  Apply the taps with :func:`ols_fir_filter` (long filters)
     or :func:`fir_filter`, both of which center them; inspect them with
     :func:`filter_response` and :func:`commkit.plotting.plot_filter_response`.
 
     Parameters
     ----------
-    dispersion_ps_nm_km : float
-        Fiber dispersion parameter D in ps / (nm km).
-    fiber_length_km : float
-        Fiber length in km.
+    dispersion_ps_nm : float
+        Accumulated dispersion of the link ``D·L`` in ps/nm.
     center_wavelength_nm : float
         Carrier wavelength in nm.
     sampling_rate : float
@@ -173,7 +238,7 @@ def dispersion_compensation_taps(
         gain, so a narrower band needs fewer taps for the same accuracy.
     num_taps : int, optional
         Number of taps, at least 1.  ``None`` takes 1.25 times the
-        group-delay spread over the band, ``2π |β₂ L| · bandwidth ·
+        group-delay spread over the band, ``2π |β₂L| · bandwidth ·
         sampling_rate`` samples, rounded up to an odd number and at least 7
         (the sinc tails of a short link's response).
 
@@ -191,20 +256,20 @@ def dispersion_compensation_taps(
 
     See Also
     --------
-    correct_chromatic_dispersion : The exact compensation of a whole record.
+    correct_chromatic_dispersion : Designs and applies these taps.
 
     Notes
     -----
     The spread is the dispersion's memory: a shorter filter cannot hold the
-    group delay ``β₂ L ω`` at the band edges.  Measured against
-    :func:`correct_chromatic_dispersion` on a 32 GBd, 2-samples-per-symbol
-    RRC signal (rolloff 0.1) over 20 to 4000 km of standard fiber, the
-    default length leaves a residual of -42 to -50 dB when fitted over the
-    occupied band (35.2 GHz), and -27 dB (20 km) to -68 dB (4000 km) over
-    the whole band, where the truncation ripple spreads into the occupied
-    band.  A filter exactly as long as the spread over the occupied band
-    leaves about -32 dB.  Sweep ``num_taps`` against a metric of the
-    compensated signal to choose a length for another signal.
+    group delay ``β₂L ω`` at the band edges.  Measured against the exact
+    response on a 32 GBd, 2-samples-per-symbol RRC signal (rolloff 0.1)
+    over 20 to 4000 km of standard fiber, the default length leaves a
+    residual of -42 to -50 dB when fitted over the occupied band
+    (35.2 GHz), and -27 dB (20 km) to -68 dB (4000 km) over the whole band,
+    where the truncation ripple spreads into the occupied band.  A filter
+    exactly as long as the spread over the occupied band leaves about
+    -32 dB.  Sweep ``num_taps`` against a metric of the compensated signal
+    to choose a length for another signal.
 
     References
     ----------
@@ -218,8 +283,8 @@ def dispersion_compensation_taps(
     Examples
     --------
     >>> taps = dispersion_compensation_taps(
-    ...     dispersion_ps_nm_km=17.0, fiber_length_km=80.0,
-    ...     center_wavelength_nm=1550.0, sampling_rate=64e9, bandwidth=35.2e9)
+    ...     dispersion_ps_nm=1360.0, center_wavelength_nm=1550.0,
+    ...     sampling_rate=64e9, bandwidth=35.2e9)
     >>> y = ols_fir_filter(x, taps)
     """
     if not sampling_rate > 0:
@@ -231,9 +296,7 @@ def dispersion_compensation_taps(
             f"got {bandwidth!r}."
         )
     b2l = beta2_length(
-        dispersion_ps_nm_km=dispersion_ps_nm_km,
-        fiber_length_km=fiber_length_km,
-        center_wavelength_nm=center_wavelength_nm,
+        dispersion_ps_nm=dispersion_ps_nm, center_wavelength_nm=center_wavelength_nm
     )
     if num_taps is None:
         spread = spread_samples(b2l, sampling_rate=sampling_rate, bandwidth=band)
@@ -262,6 +325,7 @@ def correct_fiber_propagation(
     steps_per_span: int = 100,
     nonlinear_scale: float = 1.0,
     sampling_rate: float | None = None,
+    periodic: bool = False,
 ) -> S:
     """Undo a nonlinear fiber link by digital backpropagation (DBP).
 
@@ -283,6 +347,19 @@ def correct_fiber_propagation(
     32 GBd, 6 dBm, NF 5 dB (distortion -16 dB after dispersion compensation
     alone): 10 steps per span with ξ = 1 reach the ASE floor (-30 dB); one
     step per span gains 2 dB with ξ = 0.5 but nothing with ξ = 1.
+
+    By default the samples are a window of a stream (a capture): they are
+    backpropagated in overlapping blocks, each with a guard of 1.25 times
+    half the link's dispersion memory on both sides, and the guards are
+    discarded (overlap-save), so the working memory is bounded by the block.
+    The dispersion's light cone bounds both the linear and the nonlinear
+    interaction, so every kept sample sees all of its past and future within
+    the link (measured: the blocks match the whole record to -71 dB).  With
+    ``periodic=True`` the record is one period of a periodic sequence and is
+    backpropagated whole, the exact inverse of
+    :func:`commkit.impairments.apply_fiber_propagation` (which propagates
+    its record circularly).  On a capture either way leaves half the link's
+    memory at both ends wrong, since the history needed lies outside it.
 
     Parameters
     ----------
@@ -313,12 +390,19 @@ def correct_fiber_propagation(
     sampling_rate : float, optional
         Sampling rate in Hz.  Taken from the Signal; required for array
         input.  A value that disagrees with the Signal raises.
+    periodic : bool, default False
+        Treat ``samples`` as one period of a periodic sequence and
+        backpropagate the whole record at once: exact for a circularly
+        simulated record; on a capture the ends are wrong (the other end
+        wraps in), as they are transients of the blocks.
 
     Returns
     -------
     ndarray or Signal
         The backpropagated field in the input's units, complex, on the
         input's device.  A :class:`Signal` returns a new :class:`Signal`.
+        Without ``periodic`` the first and last guard (half the link's
+        dispersion memory, times 1.25) are transients.
 
     See Also
     --------
@@ -362,13 +446,80 @@ def correct_fiber_propagation(
         link.steps_per_span,
         nonlinear_scale,
     )
-    out = propagate(
-        field,
-        xp,
-        link=link,
-        sampling_rate=sampling_rate,
-        direction=-1,
-        nonlinear_scale=float(nonlinear_scale),
-    )
+
+    def backpropagate(x: ArrayType) -> ArrayType:
+        return propagate(
+            x,
+            xp,
+            link=link,
+            sampling_rate=sampling_rate,
+            direction=-1,
+            nonlinear_scale=float(nonlinear_scale),
+        )
+
+    if periodic:
+        out = backpropagate(field)
+    else:
+        out = _overlap_save_blocks(
+            field, xp, guard=_link_guard(link, sampling_rate), run=backpropagate
+        )
     out *= out.real.dtype.type(1.0 / scale)
     return signal_adapter.wrap_samples(restore_1d(was_1d, out))
+
+
+#: Smallest block of the overlap-save backpropagation; blocks are at least
+#: eight guards long, so at most a quarter of each is discarded.
+_MIN_BLOCK = 4096
+
+
+def _link_guard(link: Any, sampling_rate: float) -> int:
+    """Guard in samples on each side of a DBP block.
+
+    1.25 times half the spread of the link's group delay
+    ``τ(ω) = β₂L ω + β₃L ω²/2`` over the sampled band, plus a few samples
+    for the band-limited tails.
+    """
+    fiber = link.fiber
+    total_ps_nm = fiber.dispersion_ps_nm_km * link.span_length_km * link.num_spans
+    kw = {
+        "dispersion_ps_nm": total_ps_nm,
+        "center_wavelength_nm": link.center_wavelength_nm,
+    }
+    b2 = beta2_length(**kw)
+    slope = fiber.dispersion_slope_ps_nm2_km
+    b3 = (
+        0.0
+        if slope is None
+        else beta3_length(
+            dispersion_slope_ps_nm2=slope * link.span_length_km * link.num_spans,
+            **kw,
+        )
+    )
+    omega = np.linspace(-np.pi, np.pi, 1025) * sampling_rate
+    tau = b2 * omega + 0.5 * b3 * omega**2
+    spread = float(tau.max() - tau.min()) * sampling_rate
+    return int(math.ceil(_TAPS_MARGIN * spread / 2.0)) + 8
+
+
+def _overlap_save_blocks(
+    field: ArrayType, xp: Any, *, guard: int, run: Any
+) -> ArrayType:
+    """Apply ``run`` to overlapping blocks of ``field`` and keep their cores.
+
+    ``field`` is ``(C, N)``; the blocks, ``(C, B, L)`` with ``L`` a power of
+    two of at least eight guards, overlap by two guards and start one guard
+    before the record (zero-padded), so the kept cores of ``L - 2·guard``
+    samples tile it.  ``run`` processes all blocks at once.
+    """
+    C, N = field.shape
+    length = max(_MIN_BLOCK, 1 << (8 * guard - 1).bit_length())
+    hop = length - 2 * guard
+    num_blocks = -(-N // hop)
+    padded = xp.zeros((C, num_blocks * hop + 2 * guard), dtype=field.dtype)
+    padded[:, guard : guard + N] = field
+    index = xp.arange(num_blocks)[:, None] * hop + xp.arange(length)[None, :]
+    logger.debug(
+        "DBP in %d blocks of %d samples (guard %d).", num_blocks, length, guard
+    )
+    out = run(padded[:, index])  # (C, B, L)
+    return out[:, :, guard : guard + hop].reshape(C, num_blocks * hop)[:, :N]

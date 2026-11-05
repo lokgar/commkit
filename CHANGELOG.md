@@ -6,13 +6,16 @@ Notable changes to CommKit, newest first. Performance figures are from the refer
 
 ### Changes that may need code updates
 
+- `correct_chromatic_dispersion` takes the link's accumulated dispersion, `dispersion_ps_nm=` (D·L in ps/nm), instead of `dispersion_ps_nm_km=` and `fiber_length_km=`: a receiver knows the total, and only the product enters the physics. Write `dispersion_ps_nm=17 * 80` for 80 km of standard fiber. `dispersion_compensation_taps` takes the same argument.
+- `correct_chromatic_dispersion` and `correct_fiber_propagation` treat the samples as a capture by default, a window of a stream, and process it as a receiver does, in bounded memory: CD by the FIR of `dispersion_compensation_taps` applied by overlap-save (`bandwidth=` and `num_taps=` choose the filter), DBP in overlapping blocks with guards of the link's dispersion memory, all blocks in one batched pass. The first and last half memory are transients. `periodic=True` keeps the former whole-record path, exact on a periodic record such as one from the circular channel functions; pass it to reproduce earlier results on simulated records.
+- `commkit.impairments.channel` is `commkit.impairments.fiber_channel`, leaving room for other channel models. Import from `commkit.impairments` and nothing changes.
 - `filter_response` and `plot_filter_response` evaluate complex coefficients over the whole band `[-fs/2, fs/2)` by default, since their response differs at negative frequencies; real coefficients keep the grid from DC to Nyquist. Pass `frequencies=` for the old grid.
 - `BetaSeparation`'s white-FM floor (`linewidth_floor`) is a Whittle fit of white FM, flicker FM and the detection noise's `f²` tail, the model of `DshFmPsd`, instead of the median of an auto-detected plateau, and the estimate now carries `flicker`, `angle_noise_var` and `fm_psd_model`. Without a fence the fit runs from the plateau's lower edge to Nyquist. The default segment is the largest power of two within an eighth of the record (it was capped at 4096 samples), so the β-area can resolve the white-FM crossover; pass `nperseg=` for the old segment.
 - `plot_allan_deviation` draws no `τ^(-1/2)` guide by default (`reference_slopes=False`): anchored at the first point, it was meaningless wherever that point is not white-FM limited.
 
 ### Added
 
-- `filtering.dispersion_compensation_taps` designs the FIR form of `correct_chromatic_dispersion`: the least-squares fit of the inverse fiber response over a band (the signal's occupied bandwidth, or the whole sampled band), exact through Fresnel integrals. Its default length is 1.25 times the group-delay spread over the band, which reaches about -45 dB of residual against the frequency-domain compensation; fitting only the occupied band needs about a third of the taps of a fit over the whole band. Notebook 19 shows the taps, their response and the SNR against the length.
+- `filtering.dispersion_compensation_taps` designs the FIR filter of `correct_chromatic_dispersion`: the least-squares fit of the inverse fiber response over a band (the signal's occupied bandwidth, or the whole sampled band), exact through Fresnel integrals. Its default length is 1.25 times the group-delay spread over the band, which reaches about -45 dB of residual against the frequency-domain compensation; fitting only the occupied band needs about a third of the taps of a fit over the whole band. Notebook 19 shows the taps, their response and the SNR against the length.
 
 ### Fixed
 
@@ -20,7 +23,7 @@ Notable changes to CommKit, newest first. Performance figures are from the refer
 - `DshFmPsd` on a real (single-photodiode) beat reports `fm_psd` and `fm_psd_model` as NaN beyond the beat's support, `min(f_shift, f_s/2 - f_shift)`, where the bins read several times low; `valid` marks it. The fit already excluded them.
 - `plot_frequency_noise_psd` draws the fitted model through the same log-binned reduction as a dense PSD (a fringe-resolving DSH model swung at every notch and was drawn as a filled band), keeps the β-line from setting the vertical range, and no longer breaks log-binned curves at empty low-frequency cells. `plot_dsh_beat_psd` zooms on the line, twice the deep width on each side. `plot_carrier_phase_decomposition` labels the total phase next to the drift.
 - The laser-characterization notebooks (23 to 28) report what their plots show: beat-spectrum limits in Hz (they were MHz on a Hz axis, an empty plot), the β-area resolved and explained as the observed width next to the intrinsic floor, the Allan deviation of the unfiltered frequency with its white-PM, white-FM and wander regions, the flicker corner on segments that resolve it, the record-to-record scatter of `DshIncrement` and of the Lorentzian widths, and verdicts in the measurement templates computed from the numbers instead of printed unconditionally.
-- `correct_chromatic_dispersion` documents that it filters the whole record in the frequency domain (a circular filter as long as the record, with no taps to choose) and logs the dispersion's spread in samples.
+- The fiber channel functions document that they treat their record as one period (circular), which the receiver inverts exactly with `periodic=True`.
 
 ## [3.5.0] - 2026-11-05
 

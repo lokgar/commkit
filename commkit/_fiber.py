@@ -620,18 +620,19 @@ def propagate(
 ) -> ArrayType:
     """Propagate the field over the link, or backpropagate it.
 
-    ``x`` is ``(C, N)`` in sqrt(W) with C in {1, 2}; ``direction=-1``
-    backpropagates (DBP: no ASE, no PMD).
+    ``x`` is ``(C, N)`` in sqrt(W) with C in {1, 2}, or ``(C, B, N)``: ``B``
+    independent records (the blocks of an overlap-save DBP) propagated at
+    once, which every stage broadcasts over; ``direction=-1`` backpropagates
+    (DBP: no ASE, no PMD).
 
     ``x`` is consumed: it is the working buffer.
     """
     fiber = link.fiber
-    C, N = x.shape
+    C, N = x.shape[0], x.shape[-1]
     forward = direction > 0
     plan = _span_plan(link, C)
-    kw = {
-        "dispersion_ps_nm_km": fiber.dispersion_ps_nm_km,
-        "fiber_length_km": 1.0,
+    kw = {  # per km: the accumulated dispersion of 1 km is D
+        "dispersion_ps_nm": fiber.dispersion_ps_nm_km,
         "center_wavelength_nm": link.center_wavelength_nm,
     }
     slope = fiber.dispersion_slope_ps_nm2_km
@@ -640,9 +641,7 @@ def propagate(
         sampling_rate=sampling_rate,
         beta2_length=beta2_length(**kw),
         beta3_length=(
-            0.0
-            if slope is None
-            else beta3_length(dispersion_slope_ps_nm2_km=slope, **kw)
+            0.0 if slope is None else beta3_length(dispersion_slope_ps_nm2=slope, **kw)
         ),
         xp=xp,
     )

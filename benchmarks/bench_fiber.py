@@ -54,11 +54,26 @@ def bench_fiber_propagation(benchmark, backend_device, xp, sync, monkeypatch, n,
 @pytest.mark.parametrize("path", PATHS)
 @pytest.mark.parametrize("steps", [1, 10])
 def bench_dbp(benchmark, backend_device, xp, sync, monkeypatch, steps, path):
+    """The whole record (``periodic=True``), as the 0008 baseline measured."""
     _stages(backend_device, monkeypatch, path)
     x = xp.asarray(fiber_workload(2**20))
 
     def run():
-        out = correct_fiber_propagation(x, steps_per_span=steps, **LINK)
+        out = correct_fiber_propagation(x, steps_per_span=steps, periodic=True, **LINK)
+        sync()
+        return out
+
+    benchmark.pedantic(run, **ROUNDS)
+
+
+@pytest.mark.parametrize("path", PATHS)
+def bench_dbp_blocks(benchmark, backend_device, xp, sync, monkeypatch, path):
+    """A capture: overlap-save blocks, ten steps per span."""
+    _stages(backend_device, monkeypatch, path)
+    x = xp.asarray(fiber_workload(2**20))
+
+    def run():
+        out = correct_fiber_propagation(x, steps_per_span=10, **LINK)
         sync()
         return out
 

@@ -261,8 +261,8 @@ class TestApplyChomaticDispersion:
         recovered = correct_chromatic_dispersion(
             distorted,
             sampling_rate=fs,
-            dispersion_ps_nm_km=D,
-            fiber_length_km=L,
+            dispersion_ps_nm=D * L,
+            periodic=True,
             center_wavelength_nm=lam,
         )
 
@@ -288,8 +288,8 @@ class TestApplyChomaticDispersion:
         recovered = correct_chromatic_dispersion(
             distorted,
             sampling_rate=fs,
-            dispersion_ps_nm_km=D,
-            fiber_length_km=L,
+            dispersion_ps_nm=D * L,
+            periodic=True,
             center_wavelength_nm=lam,
         )
 

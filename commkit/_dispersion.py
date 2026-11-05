@@ -4,9 +4,11 @@ Single source of the fiber dispersion model used by
 ``impairments.apply_chromatic_dispersion`` (the channel) and
 ``filtering.correct_chromatic_dispersion`` (its inverse):
 
-- ``beta2_length``: D [ps/(nm km)], L [km], λ [nm] to the β₂·L product [s²],
-  ``β₂ = -D λ² / (2π c)``; ``beta3_length`` adds the slope S [ps/(nm² km)]
-  for the β₃·L product [s³] (``commkit._fiber``).
+- ``beta2_length``: the accumulated dispersion D·L [ps/nm] and λ [nm] to the
+  β₂·L product [s²], ``β₂ = -D λ² / (2π c)``; ``beta3_length`` adds the
+  accumulated slope S·L [ps/nm²] for the β₃·L product [s³]
+  (``commkit._fiber``).  The channel passes D·L of a fiber, the receiver the
+  accumulated dispersion it knows.
 - ``dispersion_phase``: the phase ``-(β₂Lω²/2 + β₃Lω³/6)`` on the FFT grid
   (also used by ``commkit._fiber``).
 - ``transfer_function``: ``H(ω) = exp(-j β₂ L ω² / 2)`` on the FFT grid of
@@ -36,37 +38,29 @@ from .backend import ArrayType, dispatch
 from .math import _phasor
 
 
-def beta2_length(
-    *,
-    dispersion_ps_nm_km: float,
-    fiber_length_km: float,
-    center_wavelength_nm: float,
-) -> float:
-    """The ``β₂ · L`` product in s² for D, L and λ in engineering units."""
-    d = dispersion_ps_nm_km * 1e-12 / (1e-9 * 1e3)  # s/m²
+def beta2_length(*, dispersion_ps_nm: float, center_wavelength_nm: float) -> float:
+    """The ``β₂ · L`` product in s² for the accumulated dispersion D·L in ps/nm."""
+    dl = dispersion_ps_nm * 1e-12 / 1e-9  # s/m
     lam = center_wavelength_nm * 1e-9  # m
-    length = fiber_length_km * 1e3  # m
-    return float(-(d * lam**2) / (2.0 * np.pi * _SPEED_OF_LIGHT) * length)
+    return float(-(dl * lam**2) / (2.0 * np.pi * _SPEED_OF_LIGHT))
 
 
 def beta3_length(
     *,
-    dispersion_ps_nm_km: float,
-    dispersion_slope_ps_nm2_km: float,
-    fiber_length_km: float,
+    dispersion_ps_nm: float,
+    dispersion_slope_ps_nm2: float,
     center_wavelength_nm: float,
 ) -> float:
-    """The ``β₃ · L`` product in s³ for D, the slope S = dD/dλ, L and λ.
+    """The ``β₃ · L`` product in s³ for D·L, the accumulated slope S·L and λ.
 
     From ``D = -(2πc/λ²) β₂`` and ``dω/dλ = -2πc/λ²``:
-    ``β₃ = (S + 2D/λ) · (λ² / (2πc))²``.
+    ``β₃ = (S + 2D/λ) · (λ² / (2πc))²``, times the length.
     """
-    d = dispersion_ps_nm_km * 1e-12 / (1e-9 * 1e3)  # s/m²
-    slope = dispersion_slope_ps_nm2_km * 1e-12 / (1e-9 * 1e-9 * 1e3)  # s/m³
+    dl = dispersion_ps_nm * 1e-12 / 1e-9  # s/m
+    sl = dispersion_slope_ps_nm2 * 1e-12 / (1e-9 * 1e-9)  # s/m²
     lam = center_wavelength_nm * 1e-9  # m
-    length = fiber_length_km * 1e3  # m
     k = lam**2 / (2.0 * np.pi * _SPEED_OF_LIGHT)
-    return float((slope + 2.0 * d / lam) * k**2 * length)
+    return float((sl + 2.0 * dl / lam) * k**2)
 
 
 def dispersion_phase(
@@ -173,8 +167,7 @@ def apply_dispersion(
     samples: ArrayType,
     *,
     sampling_rate: float,
-    dispersion_ps_nm_km: float,
-    fiber_length_km: float,
+    dispersion_ps_nm: float,
     center_wavelength_nm: float,
     inverse: bool,
 ) -> ArrayType:
@@ -188,8 +181,7 @@ def apply_dispersion(
         samples.shape[-1],
         sampling_rate=sampling_rate,
         beta2_length=beta2_length(
-            dispersion_ps_nm_km=dispersion_ps_nm_km,
-            fiber_length_km=fiber_length_km,
+            dispersion_ps_nm=dispersion_ps_nm,
             center_wavelength_nm=center_wavelength_nm,
         ),
         inverse=inverse,
