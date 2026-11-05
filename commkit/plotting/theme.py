@@ -342,3 +342,18 @@ def _as_channels(arr) -> np.ndarray:
     """Bring to CPU and promote ``(N,)`` -> ``(1, N)``."""
     arr = np.atleast_2d(np.asarray(to_device(arr, "cpu")))
     return arr
+
+
+def _host(a: Any) -> np.ndarray:
+    """``a`` as a host NumPy array (one transfer for device input)."""
+    return np.asarray(to_device(a, "cpu"))
+
+
+def _require(result: Any, field: str, name: str, what: str) -> Any:
+    """``result.<field>``; a result without it raises, naming what is needed."""
+    value = getattr(result, field, None)
+    if value is None:
+        raise ValueError(
+            f"{name} needs {what} (got {type(result).__name__} without {field})."
+        )
+    return value

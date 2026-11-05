@@ -14,11 +14,13 @@ package changes no Matplotlib settings.
   the signal itself.
 - :mod:`~commkit.plotting.filter_response`,
   :mod:`~commkit.plotting.equalizer`: filters and equalizers.
-- :mod:`~commkit.plotting.sync`: timing, frequency-offset and carrier-phase
-  estimates.
+- :mod:`~commkit.plotting.timing`, :mod:`~commkit.plotting.frequency`,
+  :mod:`~commkit.plotting.recovery`: timing, frequency-offset and
+  carrier-phase estimates.
 - :mod:`~commkit.plotting.coding`: error-rate curves, LLR distributions,
   parity-check matrices and EXIT charts.
-- :mod:`~commkit.plotting.analysis`: drift, Allan deviation and linewidth.
+- :mod:`~commkit.plotting.analysis`: carrier-phase decomposition, drift,
+  Allan deviation and linewidth.
 """
 
 from __future__ import annotations
@@ -26,6 +28,7 @@ from __future__ import annotations
 from .analysis import (
     plot_allan_deviation,
     plot_carrier_phase_characterization,
+    plot_carrier_phase_decomposition,
     plot_dsh_beat_psd,
     plot_frequency_drift,
     plot_frequency_noise_psd,
@@ -44,19 +47,20 @@ from .equalizer import (
 )
 from .eye import plot_eye_diagram
 from .filter_response import plot_filter_response
-from .spectral import plot_psd, plot_spectrogram
-from .sync import (
-    plot_carrier_phase_decomposition,
-    plot_carrier_phase_trajectory,
+from .frequency import (
     plot_frequency_offset_blockwise_result,
     plot_frequency_offset_spectrum,
     plot_mm_autocorrelation,
+)
+from .recovery import (
+    plot_carrier_phase_trajectory,
     plot_pilot_phase_estimate,
     plot_pilot_tone_phase_estimate,
     plot_pilot_tones_phase_estimate,
-    plot_timing_correlation,
 )
+from .spectral import plot_psd, plot_spectrogram
 from .theme import apply_default_theme
+from .timing import plot_timing_correlation
 from .waveform import plot_time_domain
 
 __all__ = [

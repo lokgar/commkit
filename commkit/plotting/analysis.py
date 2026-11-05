@@ -1,7 +1,10 @@
 """Laser and carrier characterization plots (drift, Allan deviation, linewidth).
 
 Each plot takes the result it draws: a ``FrequencyDrift``, an
-``AllanDeviation`` or a ``LinewidthEstimate`` from :mod:`commkit.analysis`.
+``AllanDeviation`` or a ``LinewidthEstimate`` from :mod:`commkit.analysis`,
+or the phase and drift split of
+:func:`commkit.analysis.separate_drift_phase_noise`
+(:func:`plot_carrier_phase_decomposition`).
 """
 
 from typing import Any
@@ -9,12 +12,12 @@ from typing import Any
 import numpy as np
 
 from ..backend import to_device
-from .sync import plot_carrier_phase_decomposition
 from .theme import (
     _as_channels,
     _finish,
     _get_axis,
     _panel_grid,
+    _require,
     _series_label,
     _set_eng_formatter,
 )
@@ -22,6 +25,7 @@ from .theme import (
 __all__ = [
     "plot_allan_deviation",
     "plot_carrier_phase_characterization",
+    "plot_carrier_phase_decomposition",
     "plot_dsh_beat_psd",
     "plot_frequency_drift",
     "plot_frequency_noise_psd",
@@ -29,14 +33,94 @@ __all__ = [
 ]
 
 
-def _require(result: Any, field: str, name: str, what: str) -> Any:
-    """``result.<field>``; a result without it raises, naming what is needed."""
-    value = getattr(result, field, None)
-    if value is None:
-        raise ValueError(
-            f"{name} needs {what} (got {type(result).__name__} without {field})."
+def plot_carrier_phase_decomposition(
+    phi,
+    drift=None,
+    *,
+    symbol_rate: float,
+    num_train_symbols: int = 0,
+    ax=None,
+    label: str | None = None,
+    xlim: tuple[float, float] | None = None,
+    ylim: tuple[float, float] | None = None,
+    legend: bool | None = None,
+    show: bool = False,
+    title: str = "Recovered carrier phase",
+) -> tuple[Any, Any] | None:
+    """Plot the recovered carrier-phase trajectory and its slow drift component.
+
+    The unwrapped phase ``φ(t)`` is drawn faintly with the low-pass drift
+    in bold over it: the split of
+    :func:`commkit.analysis.separate_drift_phase_noise`.  All channels of
+    MIMO input are overlaid.
+
+    Parameters
+    ----------
+    phi : array_like
+        Unwrapped carrier phase in radians, ``(N,)`` or ``(C, N)``.
+    drift : array_like, optional
+        The low-pass drift, shaped as ``phi``; drawn in bold.
+    symbol_rate : float
+        Symbol rate in Bd, for the time axis in seconds.
+    num_train_symbols : int, default 0
+        End of the training symbols, drawn as a dashed line when above 0.
+    ax : matplotlib.axes.Axes, optional
+        Axes to draw on; ``None`` creates a figure.
+    label : str, optional
+        Label for the trajectory, prefixed to channel names when needed.
+    xlim, ylim : tuple of float, optional
+        Limits for the displayed axes. ``None`` leaves the limits automatic.
+    legend : bool, optional
+        Show or hide the legend; ``None`` preserves the default.
+    show : bool, default False
+        Call ``plt.show()`` and return ``None``.
+    title : str, default "Recovered carrier phase"
+        Title of the figure.
+
+    Returns
+    -------
+    (fig, ax) or None
+        The figure and its axes; ``None`` with ``show=True``, which
+        shows the figure instead.
+    """
+    phi_c = _as_channels(phi)
+    C, N = phi_c.shape
+    drift_c = _as_channels(drift) if drift is not None else None
+
+    fig, axi = _get_axis(ax)
+
+    t = np.arange(N) / float(symbol_rate)
+    for i in range(C):
+        clabel = _series_label(label, f"pol {i}" if C > 1 else None, r"$\phi$ total")
+        line = axi.plot(
+            t,
+            phi_c[i],
+            alpha=0.4,
+            label=clabel if drift_c is None else None,
+        )[0]
+        if drift_c is not None:
+            drift_label = (
+                f"{label} drift"
+                if label
+                else (f"Drift (pol {i})" if C > 1 else "Drift")
+            )
+            axi.plot(t, drift_c[i], color=line.get_color(), label=drift_label)
+
+    if num_train_symbols > 0:
+        axi.axvline(
+            num_train_symbols / float(symbol_rate),
+            color="white",
+            ls="--",
+            label=f"DD start ({num_train_symbols})",
         )
-    return value
+
+    _set_eng_formatter(axi, "x")
+    axi.set_xlabel("Time [s]")
+    axi.set_ylabel("Phase [rad]")
+    axi.set_title(title)
+    axi.legend(loc="best")
+
+    return _finish((fig, axi), show, xlim=xlim, ylim=ylim, legend=legend)
 
 
 def plot_frequency_drift(

@@ -22,6 +22,7 @@ from commkit.analysis import (
 from commkit.plotting.analysis import (
     plot_allan_deviation,
     plot_carrier_phase_characterization,
+    plot_carrier_phase_decomposition,
     plot_dsh_beat_psd,
     plot_frequency_drift,
     plot_frequency_noise_psd,
@@ -198,3 +199,24 @@ class TestPlotAnalysis:
         )
         assert fig2 is fig
         assert all(a is b for a, b in zip(reused.flat, axes.flat, strict=True))
+
+
+def test_carrier_phase_decomposition(xp: Any) -> None:
+    """Verify plot_carrier_phase_decomposition with and without drift, and with n_train."""
+    phi_raw = xp.linspace(0, 4 * np.pi, 300)
+    phi_smooth = xp.linspace(0, 4 * np.pi, 300) + 0.05
+    fig, axes = plot_carrier_phase_decomposition(
+        phi=phi_raw,
+        drift=phi_smooth,
+        symbol_rate=1e6,
+        num_train_symbols=25,
+        show=False,
+    )
+    assert fig is not None
+
+    fig2, axes2 = plot_carrier_phase_decomposition(
+        phi=phi_raw,
+        symbol_rate=1e6,
+        show=False,
+    )
+    assert fig2 is not None
