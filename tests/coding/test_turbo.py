@@ -136,7 +136,7 @@ class TestDecoding:
             res = decode(
                 mapping.compute_llr(rx, noise_var=10 ** (-esn0 / 10)), code=code
             )
-            fer = metrics.fer(res.bits, sig.reference.info_bits, block_length=code.k)
+            fer = metrics.fer(res.bits, sig.reference.info_bits, info_bits=code.k)
             assert check(fer), (ebn0, fer)
 
     @pytest.mark.parametrize("num_frames", [
@@ -163,7 +163,7 @@ class TestDecoding:
             metrics.fer(
                 decode(llrs, code=code, method=m).bits,
                 sig.reference.info_bits,
-                block_length=code.k,
+                info_bits=code.k,
             )  # fmt: skip
             for m in (TurboIterations(4), TurboIterations(4, method="exact"))
         )

@@ -162,23 +162,23 @@ class TestFrameErrorRate:
         rx[0, 1] = 1  # same block: still one block error
         rx[1, 11] = 1  # last block of channel 1
         rx[1, 5] = 1  # block 1 of channel 1
-        out = metrics.fer(rx, tx, block_length=4)
+        out = metrics.fer(rx, tx, info_bits=4)
         np.testing.assert_allclose(out, [1 / 3, 2 / 3])
-        assert metrics.fer(rx[0], tx[0], block_length=4) == pytest.approx(1 / 3)
-        assert metrics.fer(tx[0], tx[0], block_length=12) == 0.0
+        assert metrics.fer(rx[0], tx[0], info_bits=4) == pytest.approx(1 / 3)
+        assert metrics.fer(tx[0], tx[0], info_bits=12) == 0.0
 
     def test_errors(self, xp: Any) -> None:
         bits = xp.zeros(8, dtype=xp.int8)
-        with pytest.raises(ValueError, match="multiple of block_length"):
-            metrics.fer(bits, bits, block_length=3)
+        with pytest.raises(ValueError, match="multiple of info_bits"):
+            metrics.fer(bits, bits, info_bits=3)
         with pytest.raises(ValueError, match="nothing to measure"):
-            metrics.fer(bits[:0], bits[:0], block_length=4)
+            metrics.fer(bits[:0], bits[:0], info_bits=4)
         with pytest.raises(ValueError, match="shape mismatch"):
-            metrics.fer(bits, bits[:4], block_length=4)
-        with pytest.raises(ValueError, match="block_length"):
-            metrics.fer(bits, bits, block_length=0)
-        with pytest.raises(ValueError, match="block_length"):
-            metrics.fer(bits, bits, block_length=2.0)
+            metrics.fer(bits, bits[:4], info_bits=4)
+        with pytest.raises(ValueError, match="info_bits"):
+            metrics.fer(bits, bits, info_bits=0)
+        with pytest.raises(ValueError, match="info_bits"):
+            metrics.fer(bits, bits, info_bits=2.0)
 
 
 class TestPostFEC:
@@ -198,7 +198,7 @@ class TestPostFEC:
         res = decode(llrs, code=code)
         pre = metrics.ber(rx)
         post = metrics.ber(res.bits, ref.info_bits)
-        fer = metrics.fer(res.bits, ref.info_bits, block_length=ref.code_block[1])
+        fer = metrics.fer(res.bits, ref.info_bits, info_bits=ref.code_block[1])
         assert np.all(post < pre / 2)
         assert np.all(fer > post) and np.all(fer < 1)
         # A DecodeResult with the Signal or its Reference: info_bits and k
@@ -206,10 +206,10 @@ class TestPostFEC:
         np.testing.assert_array_equal(metrics.ber(res, rx), post)
         np.testing.assert_array_equal(metrics.ber(res, ref), post)
         np.testing.assert_array_equal(metrics.fer(res, rx), fer)
-        np.testing.assert_array_equal(metrics.fer(res, ref, block_length=4), fer)
+        np.testing.assert_array_equal(metrics.fer(res, ref, info_bits=4), fer)
         with pytest.raises(ValueError, match="disagrees"):
-            metrics.fer(res, rx, block_length=7)
-        with pytest.raises(ValueError, match="give block_length"):
+            metrics.fer(res, rx, info_bits=7)
+        with pytest.raises(ValueError, match="give info_bits"):
             metrics.fer(res.bits, ref.info_bits)
         with pytest.raises(ValueError, match="needs the transmitted Signal"):
             metrics.ber(res)

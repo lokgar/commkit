@@ -615,7 +615,7 @@ ROWS: list[Row] = [
         "commkit.metrics.error_rates.fer",
         METRIC,
         data=2,
-        call=lambda c, x: _a(_bits(c, x), _bits(c, x), block_length=8),
+        call=lambda c, x: _a(_bits(c, x), _bits(c, x), info_bits=8),
         symbols=True,
     ),
     Row(

@@ -212,7 +212,7 @@ class TestPAS:
             res = decode(
                 mapping.compute_llr(rx, noise_var=nv), code=pas, method=SumProduct()
             )
-            fer = metrics.fer(res.bits, sig.reference.info_bits, block_length=pas.k)
+            fer = metrics.fer(res.bits, sig.reference.info_bits, info_bits=pas.k)
             assert fer == (0.0 if decodes else 1.0)
 
     def test_validation(self) -> None:

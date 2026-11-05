@@ -287,7 +287,7 @@ class TestDecoding:
             assert abs(metrics.ber(rx) - p) < binomial_margin(p, num_bits)
             llrs = mapping.compute_llr(rx, noise_var=10 ** (-esn0_db / 10))
             res = decode(llrs, code=code, method=method)
-            fer = metrics.fer(res.bits, sig.reference.info_bits, block_length=code.k)
+            fer = metrics.fer(res.bits, sig.reference.info_bits, info_bits=code.k)
             assert check(fer), (esn0_db, fer)
 
     def test_pon_corrects_its_threshold(self, backend_device: str) -> None:

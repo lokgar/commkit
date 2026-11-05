@@ -134,8 +134,6 @@ class TestDecoding:
                 type(res.bits).__module__.split(".")[0]
                 == type(llrs).__module__.split(".")[0]
             )
-            fer[name] = metrics.fer(
-                res.bits, sig.reference.info_bits, block_length=code.k
-            )
+            fer[name] = metrics.fer(res.bits, sig.reference.info_bits, info_bits=code.k)
         assert fer["scl"] < 0.6 * fer["sc"]
         assert 0 < fer["scl"] < 0.5
