@@ -211,7 +211,7 @@ class TestPlotSpectrogram:
         fs = 100.0
         sig = generate(
             Constellation.psk(4),
-            100,
+            num_symbols=100,
             symbol_rate=10.0,
             sps=int(fs / 10.0),
             pulse=RRC(0.35),

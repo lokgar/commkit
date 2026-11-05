@@ -42,7 +42,7 @@ class TestCprPilots:
         """Return (noisy+rotated samples, pilot_indices, pilot_values, true_phase)."""
         sig = generate(
             Constellation.qam(16),
-            n_symbols,
+            num_symbols=n_symbols,
             symbol_rate=FS,
             sps=1,
             pulse=RRC(0.35),
@@ -148,7 +148,7 @@ class TestCprPilotTone:
         fs = self.SPS * FS  # symbol rate = FS
         sig = generate(
             Constellation.qam(16),
-            n_symbols,
+            num_symbols=n_symbols,
             symbol_rate=FS,
             sps=self.SPS,
             pulse=RRC(self.BETA),
@@ -330,7 +330,7 @@ class TestCprPilotTones:
         fs = self.SPS * FS
         sig = generate(
             Constellation.qam(16),
-            n_symbols,
+            num_symbols=n_symbols,
             symbol_rate=FS,
             sps=self.SPS,
             pulse=RRC(self.BETA),
@@ -550,7 +550,7 @@ class TestPilotsCPREnhancements:
         """Return (samples, pilot_indices, pilot_values) for a 16-QAM signal."""
         sig = generate(
             Constellation.qam(16),
-            n_symbols,
+            num_symbols=n_symbols,
             symbol_rate=FS,
             sps=1,
             pulse=RRC(0.35),

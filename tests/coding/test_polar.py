@@ -122,7 +122,7 @@ class TestDecoding:
     def test_list_and_crc_help(self, backend_device: str) -> None:
         code = PolarCode.nr(k=64, n=128, crc="11")
         sig = generate(
-            mapping.Constellation.qam(4), 64 * 300, symbol_rate=1e9, code=code, rng=4,
+            mapping.Constellation.qam(4), num_symbols=64 * 300, symbol_rate=1e9, code=code, rng=4,
             device=backend_device,
         )  # fmt: skip
         rx = apply_awgn(sig, esn0_db=1.5, rng=5)

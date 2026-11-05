@@ -183,7 +183,7 @@ class TestPAS:
         """Amplitudes from the matcher, signs uniform: the empirical point
         distribution is the shaped pmf."""
         pas = PAS(LDPCCode.dvbs2("3/4"), PS64)
-        sig = generate(PS64, 10800 * 6, symbol_rate=1e9, code=pas, rng=4)
+        sig = generate(PS64, num_symbols=10800 * 6, symbol_rate=1e9, code=pas, rng=4)
         idx = PS64._nearest(sig.reference.symbols)
         freq = np.bincount(idx, minlength=64) / idx.size
         np.testing.assert_allclose(freq, PS64.pmf, atol=2.5e-3)
@@ -203,7 +203,7 @@ class TestPAS:
         it below 0.05."""
         pas = PAS(LDPCCode.dvbs2("3/4"), PS64)
         rate = pas.k / (pas.n / 6)
-        sig = generate(PS64, 10800 * num_frames, symbol_rate=1e9, code=pas, rng=5,
+        sig = generate(PS64, num_symbols=10800 * num_frames, symbol_rate=1e9, code=pas, rng=5,
                        device=backend_device)  # fmt: skip
         for esn0_db, decodes in ((9.75, False), (11.25, True)):
             rx = apply_awgn(sig, esn0_db=esn0_db, rng=6)
@@ -239,7 +239,7 @@ class TestGenerateMatched:
         cc = CCDM(PS64, num_symbols=1000)
         sig = generate(
             PS64,
-            4000,
+            num_symbols=4000,
             symbol_rate=1e9,
             code=cc,
             num_channels=2,
@@ -250,7 +250,9 @@ class TestGenerateMatched:
         assert ref.code_block == (6000, cc.k)
         assert ref.info_bits.shape == (2, 4 * cc.k)
         assert isinstance(ref.bits, xp.ndarray)
-        cpu = generate(PS64, 4000, symbol_rate=1e9, code=cc, num_channels=2, rng=7)
+        cpu = generate(
+            PS64, num_symbols=4000, symbol_rate=1e9, code=cc, num_channels=2, rng=7
+        )
         np.testing.assert_array_equal(to_device(ref.bits, "cpu"), cpu.reference.bits)
         for block in to_device(ref.symbols, "cpu").reshape(8, 1000):
             np.testing.assert_array_equal(
@@ -259,9 +261,11 @@ class TestGenerateMatched:
 
     def test_invalid(self) -> None:
         with pytest.raises(ValueError, match="PAS"):
-            generate(PS64, 10800, symbol_rate=1.0, code=LDPCCode.dvbs2("3/4"))
+            generate(
+                PS64, num_symbols=10800, symbol_rate=1.0, code=LDPCCode.dvbs2("3/4")
+            )
         with pytest.raises(ValueError, match="another constellation"):
             generate(
-                Constellation.qam(64), 1000, symbol_rate=1.0,
+                Constellation.qam(64), num_symbols=1000, symbol_rate=1.0,
                 code=CCDM(PS64, num_symbols=1000),
             )  # fmt: skip

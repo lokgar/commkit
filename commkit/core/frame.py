@@ -483,7 +483,7 @@ class SingleCarrierFrame:
             return
         sig = generation.generate(
             self.payload_constellation,
-            self.payload_num_symbols,
+            num_symbols=self.payload_num_symbols,
             symbol_rate=1.0,
             num_channels=self.num_channels,
             code=self.payload_code,
@@ -511,7 +511,7 @@ class SingleCarrierFrame:
         pilot_count = int(np.sum(mask))
         sig = generation.generate(
             self.pilot_constellation,
-            pilot_count,
+            num_symbols=pilot_count,
             symbol_rate=1.0,
             num_channels=self.num_channels,
             rng=self.pilot_seed,

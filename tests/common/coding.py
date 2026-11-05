@@ -27,7 +27,7 @@ def coded_awgn(
     """
     sig = generate(
         constellation,
-        num_symbols,
+        num_symbols=num_symbols,
         symbol_rate=1e9,
         num_channels=num_channels,
         code=code,

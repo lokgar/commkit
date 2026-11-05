@@ -289,7 +289,7 @@ class TestResolvePhaseAmbiguity:
 
         sig = generate(
             Constellation.qam(16),
-            self.N,
+            num_symbols=self.N,
             symbol_rate=1e6,
             sps=1,
             pulse=RRC(0.35),
@@ -305,7 +305,12 @@ class TestResolvePhaseAmbiguity:
     def test_signal_without_reference_raises(self, xp):
         """A Signal without a reference needs reference=."""
         sig = generate(
-            Constellation.qam(16), 256, symbol_rate=1e6, sps=1, pulse=RRC(0.35), rng=0
+            Constellation.qam(16),
+            num_symbols=256,
+            symbol_rate=1e6,
+            sps=1,
+            pulse=RRC(0.35),
+            rng=0,
         )
         sig = sig.replace(reference=None)
         with pytest.raises(ValueError, match="reference"):
@@ -314,7 +319,12 @@ class TestResolvePhaseAmbiguity:
     def test_oversampled_signal_raises(self, xp):
         """Symbol operations need one sample per symbol."""
         sig = generate(
-            Constellation.qam(16), 256, symbol_rate=1e6, sps=2, pulse=RRC(0.35), rng=0
+            Constellation.qam(16),
+            num_symbols=256,
+            symbol_rate=1e6,
+            sps=2,
+            pulse=RRC(0.35),
+            rng=0,
         )
         with pytest.raises(ValueError, match="one sample per symbol"):
             recovery.resolve_phase_ambiguity(sig)
@@ -498,7 +508,7 @@ class TestDataAided:
         """Signal input: the samples are rotated against ``sig.reference``."""
         sig = generate(
             Constellation.qam(16),
-            self.N,
+            num_symbols=self.N,
             symbol_rate=1e6,
             sps=1,
             pulse=RRC(0.35),
@@ -518,7 +528,12 @@ class TestDataAided:
     def test_signal_input_needs_one_sample_per_symbol(self, xp):
         """An oversampled Signal raises instead of misaligning the reference."""
         sig = generate(
-            Constellation.qam(16), 256, symbol_rate=1e6, sps=2, pulse=RRC(0.35), rng=0
+            Constellation.qam(16),
+            num_symbols=256,
+            symbol_rate=1e6,
+            sps=2,
+            pulse=RRC(0.35),
+            rng=0,
         )
         with pytest.raises(ValueError, match="sps=2"):
             recovery.correct_carrier_phase(sig, recovery.DataAided())
@@ -526,7 +541,12 @@ class TestDataAided:
     def test_signal_input_raises_without_reference(self, xp):
         """Raises ValueError when neither DataAided nor the Signal has symbols."""
         sig = generate(
-            Constellation.qam(16), 256, symbol_rate=1e6, sps=1, pulse=RRC(0.35), rng=0
+            Constellation.qam(16),
+            num_symbols=256,
+            symbol_rate=1e6,
+            sps=1,
+            pulse=RRC(0.35),
+            rng=0,
         )
         sig = sig.replace(reference=None)
         with pytest.raises(ValueError, match="known symbols"):

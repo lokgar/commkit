@@ -126,7 +126,7 @@ def fiber_workload(n_samples: int, seed: int = 0) -> np.ndarray:
 
     sig = generate(
         Constellation.qam(16),
-        n_samples // 2,
+        num_symbols=n_samples // 2,
         symbol_rate=32e9,
         sps=2,
         pulse=RRC(0.1),
@@ -162,7 +162,9 @@ def coded_workload(code, num_codewords: int, esn0_db: float, seed: int = 0):
     from commkit.mapping import compute_llr
 
     c = Constellation.qam(4)
-    sig = generate(c, num_codewords * code.n // 2, symbol_rate=FS, code=code, rng=seed)
+    sig = generate(
+        c, num_symbols=num_codewords * code.n // 2, symbol_rate=FS, code=code, rng=seed
+    )
     rx = apply_awgn(sig, esn0_db=esn0_db, rng=seed + 1)
     llrs = compute_llr(rx, noise_var=10 ** (-esn0_db / 10))
     return np.asarray(llrs, dtype=np.float32), sig.reference.info_bits

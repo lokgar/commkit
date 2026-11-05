@@ -476,7 +476,12 @@ class TestBPSTrainingAnchor:
 
         c = Constellation.qam(16)
         tx = ck.generate(
-            c, 8192, symbol_rate=32e9, sps=2, pulse=ck.RRC(rolloff=0.1), rng=seed
+            c,
+            num_symbols=8192,
+            symbol_rate=32e9,
+            sps=2,
+            pulse=ck.RRC(rolloff=0.1),
+            rng=seed,
         )
         rx = ck.impairments.apply_awgn(tx, esn0_db=18, rng=3)
         rx = ck.filtering.matched_filter(rx).to("gpu" if xp is not np else "cpu")

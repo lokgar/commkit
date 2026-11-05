@@ -92,7 +92,11 @@ class TestSymbolErrorRate:
         noise scale, the demapper and the metric together."""
         n = 200_000
         sig = generate(
-            Constellation.qam(order), n, symbol_rate=1e9, rng=1, device=backend_device
+            Constellation.qam(order),
+            num_symbols=n,
+            symbol_rate=1e9,
+            rng=1,
+            device=backend_device,
         )
         rx = apply_awgn(sig, esn0_db=esn0_db, rng=2)
         esn0 = 10 ** (esn0_db / 10)
@@ -113,7 +117,9 @@ class TestSymbolErrorRate:
         0.01 bit (2e5 symbols)."""
         c = Constellation.qam(order)
         sig = apply_awgn(
-            generate(c, 200_000, symbol_rate=1e9, rng=4), esn0_db=esn0_db, rng=5
+            generate(c, num_symbols=200_000, symbol_rate=1e9, rng=4),
+            esn0_db=esn0_db,
+            rng=5,
         )
         nv = 10 ** (-esn0_db / 10)
         mi = metrics.mi(xp.asarray(sig.samples), noise_var=nv, constellation=c)
@@ -135,7 +141,7 @@ class TestSymbolErrorRate:
         """A noiseless shaped signal has no symbol errors: received and
         reference symbols are both decided at unit power."""
         c = Constellation.qam(64).shaped(nu=0.075)  # E_PS ~ 0.31 on the 1.x grid
-        sig = generate(c, 2000, symbol_rate=1e9, rng=1).to(
+        sig = generate(c, num_symbols=2000, symbol_rate=1e9, rng=1).to(
             "gpu" if xp is not np else "cpu"
         )
         assert metrics.ser(multirate.decimate_to_symbol_rate(sig)) == 0.0
@@ -213,7 +219,7 @@ class TestPostFEC:
     def test_estimate_noise_variance(self, xp: Any) -> None:
         """σ² on the constellation's scale, 10^(-SNR/10), near 10^(-Es/N0/10)."""
         sig = apply_awgn(
-            generate(Constellation.qam(16), 20_000, symbol_rate=1e9, rng=3),
+            generate(Constellation.qam(16), num_symbols=20_000, symbol_rate=1e9, rng=3),
             esn0_db=12.0,
             rng=4,
         ).to("gpu" if xp is not np else "cpu")
@@ -225,7 +231,7 @@ class TestPostFEC:
     def test_uncoded_post_fec_equals_pre_fec(self, xp: Any) -> None:
         """info_bits is bits: the post-FEC call measures the same BER."""
         sig = apply_awgn(
-            generate(Constellation.qam(16), 2000, symbol_rate=1e9, rng=3),
+            generate(Constellation.qam(16), num_symbols=2000, symbol_rate=1e9, rng=3),
             esn0_db=10.0,
             rng=4,
         ).to("gpu" if xp is not np else "cpu")

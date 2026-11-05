@@ -37,7 +37,12 @@ class TestSignalCreation:
     def test_to_returns_new_signal_with_all_arrays_moved(self, xp):
         """Signal.to() leaves the input untouched and moves reference arrays too."""
         sig = generate(
-            Constellation.qam(16), 64, symbol_rate=1e6, sps=2, pulse=RRC(0.35), rng=1
+            Constellation.qam(16),
+            num_symbols=64,
+            symbol_rate=1e6,
+            sps=2,
+            pulse=RRC(0.35),
+            rng=1,
         )
         moved = sig.to(device_of(xp))
         assert moved is not sig
@@ -180,12 +185,18 @@ class TestSignalCreation:
     def test_generate_records_the_description(self, xp):
         """generate stores its constellation and pulse; there is no frame."""
         sig = generate(
-            Constellation.qam(16), 8, symbol_rate=1e3, sps=2, pulse=RRC(0.35)
+            Constellation.qam(16),
+            num_symbols=8,
+            symbol_rate=1e3,
+            sps=2,
+            pulse=RRC(0.35),
         )
         assert sig.constellation == Constellation.qam(16)
         assert sig.pulse == RRC(0.35)
         assert sig.frame is None
-        rz = generate(Constellation.pam(2), 8, symbol_rate=1e3, sps=4, pulse=Rect(0.5))
+        rz = generate(
+            Constellation.pam(2), num_symbols=8, symbol_rate=1e3, sps=4, pulse=Rect(0.5)
+        )
         assert rz.pulse == Rect(0.5)
 
 
@@ -279,7 +290,7 @@ class TestSignalProperties:
         from commkit.coding import LinearBlockCode
 
         sig = generate(
-            Constellation.qam(16), 10, symbol_rate=1e9,
+            Constellation.qam(16), num_symbols=10, symbol_rate=1e9,
             code=LinearBlockCode.hamming(3), pad=True,
         )  # fmt: skip
         text = str(sig)
@@ -288,7 +299,7 @@ class TestSignalProperties:
         assert "5 per channel  + 5 filler bits" in text
         assert "Information rate    2.00 Gbps" in text  # 4 Gb/s x 20 / 40
         assert "Code block" not in str(
-            generate(Constellation.qam(16), 10, symbol_rate=1e9)
+            generate(Constellation.qam(16), num_symbols=10, symbol_rate=1e9)
         )
 
     def test_format_si(self):
@@ -490,7 +501,12 @@ class TestSignalDSPOperations:
     def test_add_pilot_tone_returns_applied_frequency(self, xp, xpt):
         """add_pilot_tone on a Signal returns a new Signal and the applied frequency."""
         sig = generate(
-            Constellation.psk(4), 128, symbol_rate=1e6, sps=8, pulse=RRC(0.35), rng=0
+            Constellation.psk(4),
+            num_symbols=128,
+            symbol_rate=1e6,
+            sps=8,
+            pulse=RRC(0.35),
+            rng=0,
         ).to(device_of(xp))
         before = xp.asarray(sig.samples.copy())
         df = sig.sampling_rate / sig.samples.shape[-1]
@@ -571,7 +587,11 @@ class TestSignalDSPOperations:
         """Verify Gaussian Signal generation."""
         # Use PSK with Gaussian pulse shaping
         s = generate(
-            Constellation.psk(2), 100, symbol_rate=1e6, sps=8, pulse=Gaussian(0.5)
+            Constellation.psk(2),
+            num_symbols=100,
+            symbol_rate=1e6,
+            sps=8,
+            pulse=Gaussian(0.5),
         )
         assert s.pulse == filtering.Gaussian(fwhm=0.5)
 
@@ -590,13 +610,19 @@ class TestSignalWaveformsAndModulation:
     def test_rzpam_odd_sps(self, xp):
         """An RZ pulse that does not fit whole samples raises instead of rounding."""
         with pytest.raises(ValueError, match=r"duty_cycle \* sps"):
-            generate(Constellation.pam(2), 10, symbol_rate=1e3, sps=3, pulse=Rect(0.5))
+            generate(
+                Constellation.pam(2),
+                num_symbols=10,
+                symbol_rate=1e3,
+                sps=3,
+                pulse=Rect(0.5),
+            )
 
     def test_rzpam_multi_stream(self, xp):
         """Verify RZ-PAM multi-stream reshape produces correctly shaped multichannel output."""
         sig = generate(
             Constellation.pam(2),
-            10,
+            num_symbols=10,
             symbol_rate=1e3,
             sps=4,
             pulse=Rect(0.5),
@@ -630,14 +656,20 @@ class TestSignalWaveformsAndModulation:
     def test_integer_valued_float_sps_accepted(self, backend_device):
         """sps=4.0 (integer-valued float) must succeed and produce correct sample count."""
         sig = generate(
-            Constellation.qam(16), 100, symbol_rate=1e6, sps=4.0, pulse=RRC(0.35)
+            Constellation.qam(16),
+            num_symbols=100,
+            symbol_rate=1e6,
+            sps=4.0,
+            pulse=RRC(0.35),
         )
         assert sig.samples.shape[-1] == 100 * 4
         assert sig.sps == 4.0
 
     def test_pam_waveform(self, xp):
         """PAM generation returns a host Signal; .to() moves it explicitly."""
-        sig = generate(Constellation.pam(2), 10, symbol_rate=1e3, sps=4, pulse=Rect())
+        sig = generate(
+            Constellation.pam(2), num_symbols=10, symbol_rate=1e3, sps=4, pulse=Rect()
+        )
         assert sig.samples.size > 0
         assert isinstance(sig.samples, np.ndarray)
         assert isinstance(sig.to(device_of(xp)).samples, xp.ndarray)
@@ -646,7 +678,11 @@ class TestSignalWaveformsAndModulation:
     def test_qam_waveform(self, xp):
         """Verify QAM signal generation populates samples and modulation metadata."""
         sig = generate(
-            Constellation.qam(16), 10, symbol_rate=1e3, sps=4, pulse=RRC(0.35)
+            Constellation.qam(16),
+            num_symbols=10,
+            symbol_rate=1e3,
+            sps=4,
+            pulse=RRC(0.35),
         ).to(device_of(xp))
         assert sig.samples.size > 0
         assert isinstance(sig.samples, xp.ndarray)
@@ -655,7 +691,12 @@ class TestSignalWaveformsAndModulation:
     def test_psk_waveform(self, xp, xpt):
         """Verify PSK signal generation, metadata, and unit-magnitude constellation."""
         sig = generate(
-            Constellation.psk(8), 50, symbol_rate=1e6, sps=2, pulse=RRC(0.35), rng=0
+            Constellation.psk(8),
+            num_symbols=50,
+            symbol_rate=1e6,
+            sps=2,
+            pulse=RRC(0.35),
+            rng=0,
         ).to(device_of(xp))
         assert sig.samples.size > 0
         assert isinstance(sig.samples, xp.ndarray)
@@ -670,7 +711,12 @@ class TestSignalWaveformsAndModulation:
     def test_signal_generate(self, xp):
         """Verify generate().to(device_of(xp)) produces correct metadata for any modulation."""
         sig = generate(
-            Constellation.qam(16), 100, symbol_rate=1e6, sps=4, pulse=RRC(0.35), rng=1
+            Constellation.qam(16),
+            num_symbols=100,
+            symbol_rate=1e6,
+            sps=4,
+            pulse=RRC(0.35),
+            rng=1,
         ).to(device_of(xp))
         assert sig.samples.size > 0
         assert isinstance(sig.samples, xp.ndarray)
@@ -690,7 +736,7 @@ class TestSignalResolutionAndMetrics:
         num_symbols = 100
         sig = generate(
             Constellation.psk(2),
-            num_symbols,
+            num_symbols=num_symbols,
             symbol_rate=symbol_rate,
             sps=sps,
             pulse=RRC(0.35),
@@ -775,7 +821,7 @@ class TestSignalResolutionAndMetrics:
         n_train = 100
         orig = generate(
             Constellation.psk(4),
-            n_symbols,
+            num_symbols=n_symbols,
             symbol_rate=1e6,
             sps=2,
             pulse=RRC(0.35),
@@ -812,7 +858,7 @@ class TestSignalResolutionAndMetrics:
         n_symbols = 600
         orig = generate(
             Constellation.psk(4),
-            n_symbols,
+            num_symbols=n_symbols,
             symbol_rate=1e6,
             sps=2,
             pulse=RRC(0.35),
@@ -849,7 +895,7 @@ class TestSignalResolutionAndMetrics:
         n_symbols = 600
         orig = generate(
             Constellation.psk(4),
-            n_symbols,
+            num_symbols=n_symbols,
             symbol_rate=1e6,
             sps=2,
             pulse=RRC(0.35),
@@ -891,7 +937,7 @@ class TestSignalResolutionAndMetrics:
         num_taps = 7
         orig = generate(
             Constellation.psk(4),
-            n_symbols,
+            num_symbols=n_symbols,
             symbol_rate=1e6,
             sps=2,
             pulse=RRC(0.35),
@@ -932,7 +978,12 @@ class TestSignalDeviceAndPlotting:
         from commkit import equalization
 
         sig = generate(
-            Constellation.psk(4), 200, symbol_rate=1e6, sps=2, pulse=RRC(0.35), rng=0
+            Constellation.psk(4),
+            num_symbols=200,
+            symbol_rate=1e6,
+            sps=2,
+            pulse=RRC(0.35),
+            rng=0,
         )
         result = equalization.lms(
             xp.asarray(sig.samples),
@@ -954,7 +1005,7 @@ class TestSignalDeviceAndPlotting:
         """Signal.plot_constellation with MIMO signal and overlay_source=True."""
         sig = generate(
             Constellation.psk(4),
-            200,
+            num_symbols=200,
             symbol_rate=1e6,
             sps=1,
             pulse=RRC(0.35),
@@ -967,7 +1018,12 @@ class TestSignalDeviceAndPlotting:
     def test_plot_constellation_show(self, xp):
         """Signal.plot_constellation(show=True) should call plt.show() and return None."""
         sig = generate(
-            Constellation.psk(4), 100, symbol_rate=1e6, sps=1, pulse=RRC(0.35), rng=0
+            Constellation.psk(4),
+            num_symbols=100,
+            symbol_rate=1e6,
+            sps=1,
+            pulse=RRC(0.35),
+            rng=0,
         )
         with patch("matplotlib.pyplot.show"):
             result = plotting.plot_constellation(sig, show=True)
@@ -976,7 +1032,12 @@ class TestSignalDeviceAndPlotting:
     def test_plot_constellation_overlay_source_siso(self, xp):
         """SISO signal with overlay_source=True uses the single-axes scatter path."""
         sig = generate(
-            Constellation.psk(4), 200, symbol_rate=1e6, sps=1, pulse=RRC(0.35), rng=0
+            Constellation.psk(4),
+            num_symbols=200,
+            symbol_rate=1e6,
+            sps=1,
+            pulse=RRC(0.35),
+            rng=0,
         )
         assert sig.num_channels == 1
         assert sig.reference.symbols is not None

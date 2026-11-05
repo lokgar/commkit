@@ -278,7 +278,7 @@ class TestDecoding:
         frames bound it below 0.03."""
         code = LDPCCode.dvbs2("1/2")
         c = mapping.Constellation.qam(4)
-        sig = generate(c, 32400 * num_frames, symbol_rate=1e9, code=code, rng=6,
+        sig = generate(c, num_symbols=32400 * num_frames, symbol_rate=1e9, code=code, rng=6,
                        device=backend_device)  # fmt: skip
         num_bits = 64800 * num_frames
         for esn0_db, check in ((1.3, lambda f: f == 0.0), (0.4, lambda f: f > 0.5)):
@@ -295,7 +295,7 @@ class TestDecoding:
         code = LDPCCode.pon()
         sig = generate(
             mapping.Constellation.qam(4),
-            8640 * 8,
+            num_symbols=8640 * 8,
             symbol_rate=1e9,
             code=code,
             rng=8,

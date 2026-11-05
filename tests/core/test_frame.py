@@ -647,7 +647,7 @@ class TestExtractPayload:
     def test_without_frame_raises(self):
         from commkit import generate
 
-        sig = generate(Constellation.qam(16), 100, symbol_rate=1e6)
+        sig = generate(Constellation.qam(16), num_symbols=100, symbol_rate=1e6)
         with pytest.raises(ValueError, match="no frame"):
             extract_payload(sig)
 

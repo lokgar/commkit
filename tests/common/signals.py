@@ -157,7 +157,7 @@ def make_channel_signal(
 
     sig = generate(
         constellation,
-        num_symbols,
+        num_symbols=num_symbols,
         symbol_rate=symbol_rate,
         sps=sps,
         pulse=RRC(rolloff),
@@ -203,7 +203,7 @@ def make_test_qam_signal(
 
     sig = generate(
         Constellation.qam(order),
-        num_symbols,
+        num_symbols=num_symbols,
         symbol_rate=symbol_rate,
         sps=sps,
         pulse=RRC(0.35),
@@ -239,7 +239,7 @@ def make_test_psk_signal(
 
     sig = generate(
         Constellation.psk(order),
-        num_symbols,
+        num_symbols=num_symbols,
         symbol_rate=symbol_rate,
         sps=sps,
         pulse=RRC(0.35),
@@ -273,7 +273,7 @@ def make_test_mimo_signal(
 
     sig = generate(
         Constellation.qam(order),
-        num_symbols,
+        num_symbols=num_symbols,
         symbol_rate=symbol_rate,
         sps=sps,
         pulse=RRC(0.35),
@@ -347,7 +347,12 @@ def make_isi_distorted_signal(
         Constellation.qam(order) if mod == "qam" else Constellation.psk(order)
     )
     sig = generate(
-        constellation, n_symbols, symbol_rate=1e6, sps=2, pulse=RRC(0.35), rng=seed
+        constellation,
+        num_symbols=n_symbols,
+        symbol_rate=1e6,
+        sps=2,
+        pulse=RRC(0.35),
+        rng=seed,
     )
     # Known symbols on the constellation's scale, as the equalizers take them.
     tx = xp.asarray(to_numpy(sig.reference.symbols))

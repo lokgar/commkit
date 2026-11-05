@@ -127,8 +127,8 @@ def shape_pulse(
 
 def generate(
     constellation: "mapping.Constellation",
-    num_symbols: int | None = None,
     *,
+    num_symbols: int | None = None,
     symbol_rate: float,
     sps: int = 1,
     pulse: "filtering.Pulse | ArrayType | None" = None,
@@ -251,7 +251,7 @@ def generate(
 
     Examples
     --------
-    >>> sig = generate(Constellation.qam(16), 10_000, symbol_rate=32e9,
+    >>> sig = generate(Constellation.qam(16), num_symbols=10_000, symbol_rate=32e9,
     ...                sps=2, pulse=RRC(0.1), rng=0)
     >>> coded = generate(Constellation.psk(4), symbol_rate=32e9,
     ...                  code=LDPCCode.dvbs2("1/2"), num_blocks=20, rng=0)

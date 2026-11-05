@@ -126,7 +126,7 @@ class TestDecoding:
         the slow run's 300 frames bound it below 0.01."""
         code = TurboCode.lte(1024)
         c = mapping.Constellation.qam(4)
-        sig = generate(c, code.n // 2 * num_frames, symbol_rate=1e9, code=code,
+        sig = generate(c, num_symbols=code.n // 2 * num_frames, symbol_rate=1e9, code=code,
                        rng=3, device=backend_device)  # fmt: skip
         for ebn0, check in ((1.2, lambda f: f == 0.0), (-0.3, lambda f: f > 0.5)):
             esn0 = ebn0 + 10 * np.log10(2 * code.rate)
@@ -153,7 +153,7 @@ class TestDecoding:
         slow run (600 frames, about 0.52 against 0.37) requires the gap to
         exceed 4 sigma of the difference of two binomial estimates."""
         code = TurboCode.lte(512)
-        sig = generate(mapping.Constellation.qam(4), code.n // 2 * num_frames,
+        sig = generate(mapping.Constellation.qam(4), num_symbols=code.n // 2 * num_frames,
                        symbol_rate=1e9, code=code, rng=5)  # fmt: skip
         esn0 = 0.5 + 10 * np.log10(2 * code.rate)
         llrs = mapping.compute_llr(

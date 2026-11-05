@@ -15,7 +15,7 @@ class TestSignalMetricsIntegration:
 
     @staticmethod
     def _sig(c: Constellation, n: int, xp: Any, **kw: Any):
-        sig = generate(c, n, symbol_rate=1e6, **kw)
+        sig = generate(c, num_symbols=n, symbol_rate=1e6, **kw)
         return multirate.decimate_to_symbol_rate(
             sig.to("gpu" if xp is not np else "cpu")
         )
@@ -72,7 +72,7 @@ class TestSignalMetricsIntegration:
 
     def test_oversampled_signal_raises(self, xp: Any) -> None:
         """Metrics need one sample per symbol; they never decimate."""
-        sig = generate(Constellation.qam(4), 100, symbol_rate=1e6, sps=2)
+        sig = generate(Constellation.qam(4), num_symbols=100, symbol_rate=1e6, sps=2)
         with pytest.raises(ValueError, match="one sample per symbol"):
             metrics.evm(sig)
 
@@ -119,7 +119,7 @@ class TestLowSNRScale:
         nv = 10 ** (-self.SNR_DB / 10)
         r = s + np.sqrt(nv / 2) * (rng.standard_normal(n) + 1j * rng.standard_normal(n))
         normalized = r / np.sqrt(np.mean(np.abs(r) ** 2))
-        sig = generate(c, n, symbol_rate=1e6).replace(
+        sig = generate(c, num_symbols=n, symbol_rate=1e6).replace(
             samples=xp.asarray(normalized.astype(np.complex64)),
         )
         bits = c.bit_labels[np.argmin(np.abs(s[:, None] - c.points), axis=1)]

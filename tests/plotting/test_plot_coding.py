@@ -104,7 +104,7 @@ class TestPlotLLRDistribution:
         bits of the Signal, without the uncoded filler (1500 symbols of
         16-QAM carry 6000 bits: 857 Hamming(7, 4) blocks and 1 filler bit)."""
         code = LinearBlockCode.hamming(3)
-        tx = generate(Constellation.qam(16), 15 * 100, symbol_rate=1e9, code=code,
+        tx = generate(Constellation.qam(16), num_symbols=15 * 100, symbol_rate=1e9, code=code,
                       pad=True, rng=1, device=backend_device)  # fmt: skip
         rx = apply_awgn(tx, esn0_db=8.0, rng=2)
         llrs = compute_llr(rx, noise_var=10**-0.8)[: tx.reference.num_blocks * code.n]

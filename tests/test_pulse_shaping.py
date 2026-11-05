@@ -18,7 +18,9 @@ class TestSignalPulseTaps:
 
     def test_signal_pulse_params(self, xp: Any) -> None:
         """Verify pulse shaping parameters (e.g. rolloff) are correctly stored and utilized."""
-        sig = generate(Constellation.qam(4), 10, symbol_rate=1e3, sps=4, pulse=RRC(0.5))
+        sig = generate(
+            Constellation.qam(4), num_symbols=10, symbol_rate=1e3, sps=4, pulse=RRC(0.5)
+        )
         assert sig.pulse == RRC(0.5)
         assert sig.pulse.rolloff == 0.5
 
@@ -29,7 +31,11 @@ class TestSignalPulseTaps:
     def test_rzpam_pulse_params(self, xp: Any) -> None:
         """Verify pulse parameters for Return-to-Zero (RZ) PAM signals."""
         sig = generate(
-            Constellation.pam(2), 10, symbol_rate=1e3, sps=4, pulse=SmoothRect(0.1, 0.5)
+            Constellation.pam(2),
+            num_symbols=10,
+            symbol_rate=1e3,
+            sps=4,
+            pulse=SmoothRect(0.1, 0.5),
         )
         assert isinstance(sig.pulse, SmoothRect)
         assert sig.pulse.rise_time == 0.1
@@ -40,7 +46,11 @@ class TestSignalPulseTaps:
     def test_rz_rect_taps_length(self, xp: Any, xpt: Any) -> None:
         """Verify that RZ rectangular pulse taps have the correct half-symbol length."""
         sig = generate(
-            Constellation.pam(2), 10, symbol_rate=1e3, sps=4, pulse=Rect(0.5)
+            Constellation.pam(2),
+            num_symbols=10,
+            symbol_rate=1e3,
+            sps=4,
+            pulse=Rect(0.5),
         )
         taps = xp.asarray(sig.pulse.taps(sig.sps))
         assert len(taps) == 2
@@ -48,7 +58,9 @@ class TestSignalPulseTaps:
 
     def test_rect_pulse_taps(self, xp: Any, xpt: Any) -> None:
         """Verify that standard rectangular pulse shaping produces all-ones taps."""
-        sig = generate(Constellation.pam(2), 10, symbol_rate=1e3, sps=4, pulse=Rect())
+        sig = generate(
+            Constellation.pam(2), num_symbols=10, symbol_rate=1e3, sps=4, pulse=Rect()
+        )
         taps = xp.asarray(sig.pulse.taps(sig.sps))
         xpt.assert_allclose(taps, xp.ones(4))
 
@@ -72,7 +84,7 @@ class TestMatchedFilterAuto:
         ``isi_db`` (the truncated tails; measured -60 and -43 dB)."""
         sig = generate(
             Constellation.qam(16),
-            4000,
+            num_symbols=4000,
             symbol_rate=1e9,
             sps=4,
             pulse=RRC(rolloff),
@@ -89,7 +101,11 @@ class TestMatchedFilterAuto:
         """pulse= defaults to sig.pulse; a Pulse or its taps give the same output;
         an explicit pulse wins over the Signal's."""
         sig = generate(
-            Constellation.qam(4), 64, symbol_rate=1e3, sps=4, pulse=RRC(0.35)
+            Constellation.qam(4),
+            num_symbols=64,
+            symbol_rate=1e3,
+            sps=4,
+            pulse=RRC(0.35),
         ).to(backend_device)
         default = filtering.matched_filter(sig).samples
         xpt.assert_allclose(

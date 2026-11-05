@@ -338,8 +338,8 @@ ROWS: list[Row] = [
     Row("commkit.core.signal.Signal", VALUE),
     Row("commkit.core.generation.expand", DESIGN),
     Row("commkit.core.generation.shape_pulse", DESIGN),
-    # constellation and num_symbols are positional.
-    Row("commkit.core.generation.generate", SYNTHESIS, data=2),
+    # The constellation is the primary positional parameter.
+    Row("commkit.core.generation.generate", SYNTHESIS, data=1),
     # --- equalization -------------------------------------------------------
     Row(
         "commkit.equalization.sequential._dd.lms",

@@ -113,7 +113,7 @@ class TestPeriodicShaping:
         for periodic in (False, True):
             sig = generate(
                 Constellation.qam(16),
-                512,
+                num_symbols=512,
                 symbol_rate=1e6,
                 sps=4,
                 pulse=pulse,
@@ -128,8 +128,8 @@ class TestPeriodicShaping:
 
     def test_generate_reference_unchanged(self) -> None:
         kw = dict(symbol_rate=1e6, sps=2, pulse=RRC(0.1), num_channels=2, rng=3)
-        a = generate(Constellation.qam(16), 256, **kw)
-        b = generate(Constellation.qam(16), 256, periodic=True, **kw)
+        a = generate(Constellation.qam(16), num_symbols=256, **kw)
+        b = generate(Constellation.qam(16), num_symbols=256, periodic=True, **kw)
         np.testing.assert_array_equal(a.reference.bits, b.reference.bits)
         assert b.samples.shape == a.samples.shape
         assert np.mean(np.abs(b.samples) ** 2) == pytest.approx(0.5, rel=1e-5)
@@ -147,7 +147,9 @@ class TestGenerate:
         ],
     )
     def test_reference_is_exact_constellation_points(self, constellation) -> None:
-        sig = generate(constellation, 500, symbol_rate=1e6, num_channels=2, rng=0)
+        sig = generate(
+            constellation, num_symbols=500, symbol_rate=1e6, num_channels=2, rng=0
+        )
         ref = sig.reference
         assert ref.symbols.shape == (2, 500)
         assert ref.bits.shape == (2, 500 * constellation.bits_per_symbol)
@@ -156,7 +158,7 @@ class TestGenerate:
         np.testing.assert_array_equal(constellation.map(ref.bits), ref.symbols)
 
     def test_unshaped_waveform_at_one_sps_is_scaled_reference(self) -> None:
-        sig = generate(Constellation.qam(16), 1000, symbol_rate=1e6, rng=1)
+        sig = generate(Constellation.qam(16), num_symbols=1000, symbol_rate=1e6, rng=1)
         scale = sig.samples / sig.reference.symbols
         np.testing.assert_allclose(scale, scale[0], rtol=1e-6)
         assert np.mean(np.abs(sig.samples) ** 2) == pytest.approx(1.0, rel=1e-6)
@@ -166,7 +168,7 @@ class TestGenerate:
         composition (the pmf quantized to 1/N), and the source bits are the
         matcher's input."""
         c = Constellation.qam(16).shaped(nu=0.1)
-        sig = generate(c, 20_000, symbol_rate=1e6, num_channels=2, rng=2)
+        sig = generate(c, num_symbols=20_000, symbol_rate=1e6, num_channels=2, rng=2)
         ref = sig.reference
         matcher = CCDM(c, num_symbols=20_000)
         assert ref.code_block == (80_000, matcher.k)
@@ -184,21 +186,23 @@ class TestGenerate:
 
     def test_int_seed_matches_default_rng_bits(self) -> None:
         """An int rng draws the bits default_rng(seed).integers would."""
-        sig = generate(Constellation.qam(16), 100, symbol_rate=1e6, rng=7)
+        sig = generate(Constellation.qam(16), num_symbols=100, symbol_rate=1e6, rng=7)
         expected = np.random.default_rng(7).integers(0, 2, 400, dtype="int8")
         np.testing.assert_array_equal(sig.reference.bits, expected)
 
     def test_generator_rng_and_cpu_output(self) -> None:
         gen = np.random.default_rng(3)
-        a = generate(Constellation.psk(4), 64, symbol_rate=1e6, rng=gen)
-        b = generate(Constellation.psk(4), 64, symbol_rate=1e6, rng=gen)
+        a = generate(Constellation.psk(4), num_symbols=64, symbol_rate=1e6, rng=gen)
+        b = generate(Constellation.psk(4), num_symbols=64, symbol_rate=1e6, rng=gen)
         assert not np.array_equal(a.reference.bits, b.reference.bits)
         assert isinstance(a.samples, np.ndarray)
 
     def test_pulse_object_and_raw_taps_agree(self) -> None:
         kw = dict(symbol_rate=1e6, sps=4, rng=4)
-        a = generate(Constellation.qam(4), 200, pulse=RRC(0.2), **kw)
-        b = generate(Constellation.qam(4), 200, pulse=RRC(0.2).taps(4), **kw)
+        a = generate(Constellation.qam(4), num_symbols=200, pulse=RRC(0.2), **kw)
+        b = generate(
+            Constellation.qam(4), num_symbols=200, pulse=RRC(0.2).taps(4), **kw
+        )
         np.testing.assert_array_equal(a.samples, b.samples)
         assert a.pulse == RRC(0.2)
         assert b.pulse is None
@@ -228,8 +232,10 @@ class TestGenerateDevice:
     )
     def test_matches_cpu(self, backend_device: str, xp: Any, constellation) -> None:
         kw = dict(symbol_rate=1e6, sps=2, pulse=RRC(0.1), num_channels=2, rng=5)
-        ref = generate(constellation, 1000, **kw)
-        sig = generate(constellation, 1000, device=backend_device.upper(), **kw)
+        ref = generate(constellation, num_symbols=1000, **kw)
+        sig = generate(
+            constellation, num_symbols=1000, device=backend_device.upper(), **kw
+        )
         for arr in (sig.samples, sig.reference.symbols, sig.reference.bits):
             assert isinstance(arr, xp.ndarray)
         np.testing.assert_array_equal(to_numpy(sig.reference.bits), ref.reference.bits)
@@ -250,7 +256,7 @@ class TestGenerateCoded:
         c = Constellation.qam(16)
         sig = generate(
             c,
-            700,
+            num_symbols=700,
             symbol_rate=1e6,
             num_channels=2,
             code=code,
@@ -265,19 +271,24 @@ class TestGenerateCoded:
             to_numpy(encode(ref.info_bits, code=code)), to_numpy(ref.bits)
         )
         np.testing.assert_array_equal(to_numpy(c.map(ref.bits)), to_numpy(ref.symbols))
-        cpu = generate(c, 700, symbol_rate=1e6, num_channels=2, code=code, rng=0)
+        cpu = generate(
+            c, num_symbols=700, symbol_rate=1e6, num_channels=2, code=code, rng=0
+        )
         np.testing.assert_array_equal(to_numpy(ref.info_bits), cpu.reference.info_bits)
 
     def test_single_channel_layout(self) -> None:
         sig = generate(
-            Constellation.psk(4), 14, symbol_rate=1.0, code=LinearBlockCode.hamming(3)
+            Constellation.psk(4),
+            num_symbols=14,
+            symbol_rate=1.0,
+            code=LinearBlockCode.hamming(3),
         )
         assert sig.reference.bits.shape == (28,)
         assert sig.reference.info_bits.shape == (16,)
 
     def test_uncoded_is_unchanged(self) -> None:
         """Without code the bits are the plain draw, shared as info_bits."""
-        sig = generate(Constellation.qam(16), 100, symbol_rate=1e6, rng=7)
+        sig = generate(Constellation.qam(16), num_symbols=100, symbol_rate=1e6, rng=7)
         expected = np.random.default_rng(7).integers(0, 2, 400, dtype="int8")
         np.testing.assert_array_equal(sig.reference.bits, expected)
         assert sig.reference.info_bits is sig.reference.bits
@@ -285,17 +296,22 @@ class TestGenerateCoded:
     def test_invalid(self) -> None:
         code = LinearBlockCode.hamming(3)
         with pytest.raises(ValueError, match="num_symbols=7 or 14"):
-            generate(Constellation.qam(16), 10, symbol_rate=1.0, code=code)
+            generate(Constellation.qam(16), num_symbols=10, symbol_rate=1.0, code=code)
         with pytest.raises(ValueError, match=r"use num_symbols=7,"):
-            generate(Constellation.qam(16), 3, symbol_rate=1.0, code=code)
+            generate(Constellation.qam(16), num_symbols=3, symbol_rate=1.0, code=code)
         with pytest.raises(ValueError, match="shaped"):
             generate(
-                Constellation.qam(16).shaped(nu=0.1), 7, symbol_rate=1.0, code=code
+                Constellation.qam(16).shaped(nu=0.1),
+                num_symbols=7,
+                symbol_rate=1.0,
+                code=code,
             )
         with pytest.raises(TypeError, match="code object"):
-            generate(Constellation.qam(16), 7, symbol_rate=1.0, code="hamming")
+            generate(
+                Constellation.qam(16), num_symbols=7, symbol_rate=1.0, code="hamming"
+            )
         with pytest.raises(ValueError, match="fewer than one code block"):
-            generate(Constellation.qam(16), 1, symbol_rate=1.0, code=code)
+            generate(Constellation.qam(16), num_symbols=1, symbol_rate=1.0, code=code)
 
     def test_sized_in_blocks(self, xp: Any) -> None:
         """num_blocks: the record holds exactly that many codewords."""
@@ -308,7 +324,7 @@ class TestGenerateCoded:
         assert ref.info_bits.shape == (32,)
         # The same draw as sizing by symbols.
         by_symbols = generate(
-            Constellation.qam(16), 14, symbol_rate=1.0, code=code, rng=3
+            Constellation.qam(16), num_symbols=14, symbol_rate=1.0, code=code, rng=3
         )
         np.testing.assert_array_equal(ref.bits, by_symbols.reference.bits)
 
@@ -317,7 +333,7 @@ class TestGenerateCoded:
         code = LinearBlockCode.hamming(3)
         c = Constellation.qam(16)
         sig = generate(
-            c, 10, symbol_rate=1.0, code=code, pad=True, num_channels=2, rng=1,
+            c, num_symbols=10, symbol_rate=1.0, code=code, pad=True, num_channels=2, rng=1,
             device=backend_device,
         )  # fmt: skip
         ref = sig.reference
@@ -337,16 +353,16 @@ class TestGenerateCoded:
         with pytest.raises(ValueError, match="exactly one"):
             generate(c, symbol_rate=1.0, code=code)
         with pytest.raises(ValueError, match="exactly one"):
-            generate(c, 14, symbol_rate=1.0, code=code, num_blocks=8)
+            generate(c, num_symbols=14, symbol_rate=1.0, code=code, num_blocks=8)
         with pytest.raises(ValueError, match="need code="):
             generate(c, symbol_rate=1.0, num_blocks=8)
         with pytest.raises(ValueError, match="need code="):
-            generate(c, 14, symbol_rate=1.0, pad=True)
+            generate(c, num_symbols=14, symbol_rate=1.0, pad=True)
         with pytest.raises(ValueError, match="num_blocks=4 or 8"):
             generate(c, symbol_rate=1.0, code=code, num_blocks=5)
         shaped = c.shaped(entropy=3.5)
         matcher = CCDM(shaped, num_symbols=10)
         with pytest.raises(ValueError, match="composition"):
-            generate(shaped, 25, symbol_rate=1.0, code=matcher, pad=True)
+            generate(shaped, num_symbols=25, symbol_rate=1.0, code=matcher, pad=True)
         sig = generate(shaped, symbol_rate=1.0, code=matcher, num_blocks=3)
         assert sig.samples.shape == (30,) and sig.reference.num_blocks == 3
