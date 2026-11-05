@@ -60,6 +60,9 @@ _DOCUMENTED: dict[str, str] = {
     + " (the matcher; generate runs it on the host)",
     "coding/turbo.py::_decode": _RECURSION + " (turbo decoding)",
     "coding/turbo.py::_encode": _RECURSION + " (recursive systematic encoding)",
+    "core/frame.py::SingleCarrierFrame.to_signal": _PAYLOAD
+    + " (the frame's body symbols)",
+    "core/frame.py::extract_payload": _HOST_VALUE + " (the payload reference)",
     "core/generation.py::generate": _PAYLOAD,
     "core/signal.py::Reference.to": "explicit device move",
     "core/signal.py::Signal.to": "explicit device move",
@@ -73,6 +76,7 @@ _DOCUMENTED: dict[str, str] = {
     "equalization/polarization.py::_jones_at_grid_points": _HOST_VALUE + " (taps)",
     "equalization/_sequential/_setup.py::_assemble_sequential": _RECURSION,
     "equalization/_sequential/_setup.py::_prepare_sequential": _RECURSION,
+    "io.py::save_npz": "explicit device move (samples to the host to store them)",
     "frequency.py::_mengali_morelli": _RECURSION + " (bootstrap over the lags)",
     "_cuda/__init__.py::_iir_factory.<locals>.launch": _HOST_VALUE
     + " (the IIR state transitions)",
