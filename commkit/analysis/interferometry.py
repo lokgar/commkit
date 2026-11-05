@@ -72,7 +72,7 @@ use.
 The DSH estimators are methods of
 :func:`~commkit.analysis.linewidth.estimate_linewidth`:
 
-* ``DshFmPsd``: fits white FM, flicker FM and detection noise to the beat's
+* ``DshFmFit``: fits white FM, flicker FM and detection noise to the beat's
   FM-noise PSD, through the interferometer response as a Welch estimate sees
   it; it works in the coherent (short-delay) and the incoherent regime and,
   with its default segments, needs the delay only roughly.

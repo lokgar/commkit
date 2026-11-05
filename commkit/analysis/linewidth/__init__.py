@@ -6,7 +6,7 @@ The method object chooses the estimator and the kind of record it reads:
   ``IncrementSubtract`` and ``BetaSeparation``, e.g. the output of
   ``carrier_phase_trajectory`` or ``separate_drift_phase_noise``;
 * delayed self-heterodyne / self-homodyne beat records (real photocurrent or
-  complex IQ, array or Signal) - ``DshFmPsd``, ``DshIncrement`` and
+  complex IQ, array or Signal) - ``DshFmFit``, ``DshIncrement`` and
   ``DshLorentzian`` (see :mod:`commkit.analysis.interferometry`).
 
 Every method returns a :class:`LinewidthEstimate`: the linewidth in Hz plus
@@ -21,7 +21,7 @@ from ...backend import ArrayType, dispatch
 from ...core._signal_adapter import adapt_signal
 from ...core.signal import Signal
 from .dsh import (
-    DshFmPsd,
+    DshFmFit,
     DshIncrement,
     DshLorentzian,
     _dsh_fm_psd,
@@ -41,7 +41,7 @@ from .result import LinewidthEstimate
 
 __all__ = [
     "BetaSeparation",
-    "DshFmPsd",
+    "DshFmFit",
     "DshIncrement",
     "DshLorentzian",
     "IncrementSlope",
@@ -61,7 +61,7 @@ _PHASE_METHODS: dict[type, Any] = {
     BetaSeparation: _beta_separation,
 }
 _BEAT_METHODS: dict[type, Any] = {
-    DshFmPsd: _dsh_fm_psd,
+    DshFmFit: _dsh_fm_psd,
     DshIncrement: _dsh_increment,
     DshLorentzian: _dsh_lorentzian,
 }
@@ -85,7 +85,7 @@ def estimate_linewidth(
           real phase trajectory in radians (``carrier_phase_trajectory``,
           ``separate_drift_phase_noise``, ``dsh_phase``).  Complex input
           raises.
-        * ``DshFmPsd``, ``DshIncrement``, ``DshLorentzian``: a delayed
+        * ``DshFmFit``, ``DshIncrement``, ``DshLorentzian``: a delayed
           self-heterodyne beat record, real (single photodetector) or complex
           (IQ front end), as an array or a Signal.  A phase trajectory is
           real too, so it cannot be rejected by type: real input logs a
@@ -94,7 +94,7 @@ def estimate_linewidth(
           beat line, a peak 10 dB above the spectrum at half and 1.5 times
           its frequency (a drift-removed residual, or a beat too weak or too
           wide for its carrier to measure).
-    method : IncrementSlope, IncrementSubtract, BetaSeparation, DshFmPsd, DshIncrement or DshLorentzian
+    method : IncrementSlope, IncrementSubtract, BetaSeparation, DshFmFit, DshIncrement or DshLorentzian
         The estimator and its parameters.
     sampling_rate : float, optional
         Sampling rate of the record in Hz (a fact: the symbol rate for a
@@ -133,6 +133,6 @@ def estimate_linewidth(
         return _BEAT_METHODS[kind](x, method, fs)
     raise TypeError(
         f"{name}: method must be IncrementSlope, IncrementSubtract, "
-        "BetaSeparation, DshFmPsd, DshIncrement or DshLorentzian, got "
+        "BetaSeparation, DshFmFit, DshIncrement or DshLorentzian, got "
         f"{kind.__name__}."
     )

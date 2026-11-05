@@ -47,6 +47,7 @@ from commkit.backend import to_device
 from commkit.coding import DecodeResult, Interleaver, LinearBlockCode
 from commkit.core import Signal
 from commkit.equalization import EqualizerResult
+from commkit.filtering import ClockToneScan
 from commkit.frequency import MthPower
 from commkit.impairments import Fiber, Lowdin
 from commkit.mapping import Constellation
@@ -221,6 +222,7 @@ def L(*checks: str) -> frozenset[str]:
 
 
 CD = {"dispersion_ps_nm_km": 17, "fiber_length_km": 1, "center_wavelength_nm": 1550}
+CDC = {"dispersion_ps_nm": 17, "center_wavelength_nm": 1550}
 FIBER_LINK = {
     "fiber": Fiber(),
     "span_length_km": 10.0,
@@ -242,7 +244,7 @@ ROWS: list[Row] = [
     Row("commkit.analysis.drift.FrequencyDrift", VALUE),
     Row("commkit.analysis.fm_noise.DshFmNoisePsd", VALUE),
     Row("commkit.analysis.linewidth.phase.BetaSeparation", VALUE),
-    Row("commkit.analysis.linewidth.dsh.DshFmPsd", VALUE),
+    Row("commkit.analysis.linewidth.dsh.DshFmFit", VALUE),
     Row("commkit.analysis.linewidth.dsh.DshIncrement", VALUE),
     Row("commkit.analysis.linewidth.dsh.DshLorentzian", VALUE),
     Row("commkit.analysis.linewidth.phase.IncrementSlope", VALUE),
@@ -293,7 +295,7 @@ ROWS: list[Row] = [
     Row("commkit.coding.polar.SCL", VALUE),
     Row("commkit.coding.product.Concatenated", VALUE),
     Row("commkit.coding.product.HardIterations", VALUE),
-    Row("commkit.coding.product.Stages", VALUE),
+    Row("commkit.coding.product.StageDecoders", VALUE),
     Row("commkit.coding.product.StaircaseCode", VALUE),
     Row("commkit.coding.ratematch.Punctured", VALUE),
     Row("commkit.coding.shaping.CCDM", VALUE),
@@ -469,7 +471,26 @@ ROWS: list[Row] = [
     Row(
         "commkit.filtering.fiber.correct_chromatic_dispersion",
         TRANSFORM,
-        call=lambda c, x: _a(x, sampling_rate=FS, **CD),
+        data=2,
+        call=lambda c, x: _a(x, sampling_rate=FS, **CDC),
+        fact=FS_CONFLICT,
+    ),
+    Row("commkit.filtering.fiber.dispersion_compensation_taps", DESIGN, data=0),
+    Row("commkit.filtering.fiber.ClockToneScan", VALUE),
+    Row("commkit.filtering.fiber.FourthMomentScan", VALUE),
+    Row("commkit.filtering.fiber.QuadraticPhaseFit", VALUE),
+    Row("commkit.filtering.fiber.ChromaticDispersionEstimate", VALUE, data=0),
+    Row(
+        "commkit.filtering.fiber.estimate_chromatic_dispersion",
+        ESTIMATE,
+        data=2,
+        call=lambda c, x: _a(
+            x,
+            ClockToneScan(search_range=(-1e6, 1e6)),
+            sampling_rate=FS,
+            symbol_rate=RS,
+            center_wavelength_nm=1550.0,
+        ),
         fact=FS_CONFLICT,
     ),
     Row(
@@ -479,11 +500,11 @@ ROWS: list[Row] = [
         fact=FS_CONFLICT,
     ),
     # --- frequency ----------------------------------------------------------
-    Row("commkit.frequency.BiasTone", VALUE),
+    Row("commkit.frequency.SpectralPeak", VALUE),
     Row("commkit.frequency.FrequencyOffsetEstimate", VALUE),
     Row("commkit.frequency.MengaliMorelli", VALUE),
     Row("commkit.frequency.MthPower", VALUE),
-    Row("commkit.frequency.PilotSymbols", VALUE),
+    Row("commkit.frequency.PilotSlope", VALUE),
     Row(
         "commkit.frequency.correct_frequency_offset",
         TRANSFORM,
@@ -506,14 +527,14 @@ ROWS: list[Row] = [
     Row("commkit.math.rms", HELPER),
     # --- impairments --------------------------------------------------------
     Row(
-        "commkit.impairments.channel.apply_chromatic_dispersion",
+        "commkit.impairments.fiber_channel.apply_chromatic_dispersion",
         TRANSFORM,
         call=lambda c, x: _a(x, sampling_rate=FS, **CD),
         fact=FS_CONFLICT,
     ),
     Row("commkit._fiber.Fiber", VALUE),
     Row(
-        "commkit.impairments.channel.apply_fiber_propagation",
+        "commkit.impairments.fiber_channel.apply_fiber_propagation",
         TRANSFORM,
         call=lambda c, x: _a(
             x, sampling_rate=FS, noise_figure_db=5.0, rng=1, **FIBER_LINK
@@ -521,14 +542,14 @@ ROWS: list[Row] = [
         fact=FS_CONFLICT,
     ),
     Row(
-        "commkit.impairments.channel.apply_pmd",
+        "commkit.impairments.fiber_channel.apply_pmd",
         TRANSFORM,
         call=lambda c, x: _a(x, sampling_rate=FS, dgd=1e-12, theta=0.3),
         fact=FS_CONFLICT,
         dims=(2,),
     ),
     Row(
-        "commkit.impairments.channel.apply_polarization_mixing",
+        "commkit.impairments.fiber_channel.apply_polarization_mixing",
         TRANSFORM,
         call=lambda c, x: _a(x, theta=0.3),
         dims=(2,),
@@ -717,8 +738,8 @@ ROWS: list[Row] = [
         symbols=True,
     ),
     Row("commkit.recovery.corrections.CycleSlip", VALUE),
-    Row("commkit.recovery.corrections.DataAided", VALUE),
-    Row("commkit.recovery.pilots.PilotAided", VALUE),
+    Row("commkit.recovery.corrections.ConstantPhase", VALUE),
+    Row("commkit.recovery.pilots.PilotInterpolation", VALUE),
     Row("commkit.recovery.pilots.PilotTone", VALUE),
     Row("commkit.recovery.pilots.PilotTones", VALUE),
     Row("commkit.recovery.pll.PLL", VALUE),

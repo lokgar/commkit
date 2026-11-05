@@ -1,5 +1,6 @@
 """Tests for digital filtering and pulse shaping tap generation."""
 
+import logging
 from typing import Any
 
 import numpy as np
@@ -559,8 +560,8 @@ class TestCorrectChromaticDispersion:
         recovered = filtering.correct_chromatic_dispersion(
             distorted,
             sampling_rate=fs,
-            dispersion_ps_nm_km=d,
-            fiber_length_km=l,
+            dispersion_ps_nm=d * l,
+            method="whole_record",
             center_wavelength_nm=lam,
         )
 
@@ -590,8 +591,8 @@ class TestCorrectChromaticDispersion:
         recovered = filtering.correct_chromatic_dispersion(
             distorted,
             sampling_rate=fs,
-            dispersion_ps_nm_km=d,
-            fiber_length_km=l,
+            dispersion_ps_nm=d * l,
+            method="whole_record",
             center_wavelength_nm=lam,
         )
 
@@ -602,8 +603,8 @@ class TestCorrectChromaticDispersion:
         samples = xp.ones(512, dtype=xp.complex64)
         out = filtering.correct_chromatic_dispersion(
             samples,
-            dispersion_ps_nm_km=17.0,
-            fiber_length_km=0.0,
+            dispersion_ps_nm=0.0,
+            method="whole_record",
             center_wavelength_nm=1550.0,
             sampling_rate=56e9,
         )
@@ -614,8 +615,8 @@ class TestCorrectChromaticDispersion:
         samples = xp.ones((2, 256), dtype=xp.complex64)
         out = filtering.correct_chromatic_dispersion(
             samples,
-            dispersion_ps_nm_km=17.0,
-            fiber_length_km=10.0,
+            dispersion_ps_nm=170.0,
+            method="whole_record",
             center_wavelength_nm=1550.0,
             sampling_rate=56e9,
         )
@@ -629,8 +630,8 @@ class TestCorrectChromaticDispersion:
 
         out = filtering.correct_chromatic_dispersion(
             sig,
-            dispersion_ps_nm_km=17.0,
-            fiber_length_km=20.0,
+            dispersion_ps_nm=340.0,
+            method="whole_record",
             center_wavelength_nm=1550.0,
         )
         assert isinstance(out, Signal)
@@ -644,10 +645,430 @@ class TestCorrectChromaticDispersion:
         with pytest.raises(ValueError, match="sampling_rate"):
             filtering.correct_chromatic_dispersion(
                 samples,
-                dispersion_ps_nm_km=17.0,
-                fiber_length_km=20.0,
+                dispersion_ps_nm=340.0,
+                method="whole_record",
                 center_wavelength_nm=1550.0,
             )
+
+    def test_capture_window_is_compensated(self, xp: Any) -> None:
+        """A capture is a window of a longer dispersed transmission.  The
+        default FIR recovers the window beyond half the filter from its ends
+        (measured -45 dB on a 2-sps RRC signal), and so does the
+        ``method="whole_record"``, exact away from the ends
+        (-68 dB beyond 50 samples).  Neither recovers the first samples,
+        whose history lies before the capture (-7 and -2 dB), and no
+        compensation at all fails everywhere (the baseline)."""
+        from commkit import Constellation, generate
+        from commkit.filtering import RRC
+        from commkit.impairments import apply_chromatic_dispersion
+
+        tx = generate(
+            Constellation.qam(16),
+            num_symbols=2**15,
+            symbol_rate=32e9,
+            sps=2,
+            pulse=RRC(rolloff=0.1),
+            rng=1,
+            device="gpu" if xp.__name__ == "cupy" else "cpu",
+        )
+        rx = apply_chromatic_dispersion(
+            tx.samples,
+            dispersion_ps_nm_km=17.0,
+            fiber_length_km=80.0,
+            center_wavelength_nm=1550.0,
+            sampling_rate=64e9,
+        )
+        start, width = 2**14, 2**14
+        window, ref = rx[start : start + width], tx.samples[start : start + width]
+        kw = dict(
+            dispersion_ps_nm=1360.0, center_wavelength_nm=1550.0, sampling_rate=64e9
+        )
+
+        def error_db(z: Any, sl: slice) -> float:
+            e = z[sl] - ref[sl]
+            return float(
+                10 * xp.log10(xp.mean(xp.abs(e) ** 2) / xp.mean(xp.abs(ref[sl]) ** 2))
+            )
+
+        fir = filtering.correct_chromatic_dispersion(window, bandwidth=35.2e9, **kw)
+        whole = filtering.correct_chromatic_dispersion(
+            window, method="whole_record", **kw
+        )
+        assert error_db(fir, slice(64, -64)) < -40
+        assert error_db(whole, slice(64, -64)) < -60
+        assert error_db(fir, slice(0, 8)) > -10
+        assert error_db(whole, slice(0, 8)) > -10
+        assert error_db(window, slice(64, -64)) > -3
+
+    @pytest.mark.parametrize("fn", ["correct_chromatic_dispersion", "dbp"])
+    def test_unknown_method_raises(self, xp: Any, fn: str) -> None:
+        from commkit.impairments import Fiber
+
+        x = xp.ones((2, 64), dtype=xp.complex64)
+        with pytest.raises(ValueError, match="method"):
+            if fn == "dbp":
+                filtering.correct_fiber_propagation(
+                    x,
+                    fiber=Fiber(),
+                    span_length_km=80.0,
+                    num_spans=1,
+                    launch_power_dbm=0.0,
+                    center_wavelength_nm=1550.0,
+                    sampling_rate=64e9,
+                    method="fir",
+                )
+            else:
+                filtering.correct_chromatic_dispersion(
+                    x,
+                    dispersion_ps_nm=17.0,
+                    center_wavelength_nm=1550.0,
+                    sampling_rate=64e9,
+                    method="blocks",
+                )
+
+    def test_whole_record_takes_no_fir_design(self, xp: Any) -> None:
+        with pytest.raises(ValueError, match="whole_record"):
+            filtering.correct_chromatic_dispersion(
+                xp.ones(64, dtype=xp.complex64),
+                dispersion_ps_nm=17.0,
+                center_wavelength_nm=1550.0,
+                sampling_rate=64e9,
+                method="whole_record",
+                num_taps=9,
+            )
+
+
+def _dispersed_signal(xp: Any, ps_nm: float, rolloff: float, noise: bool) -> Any:
+    """Dual-polarization 16-QAM at 32 GBd, 2 sps, dispersed by ``ps_nm``
+    (as D = 17 ps/(nm km) over ps_nm / 17 km, or negative D), with 12 dB
+    Es/N0, 10 ps of DGD and a 1 GHz frequency offset when ``noise``."""
+    from commkit import Constellation, generate
+    from commkit.filtering import RRC
+    from commkit.impairments import apply_awgn, apply_chromatic_dispersion, apply_pmd
+    from commkit.spectral import shift_frequency
+
+    tx = generate(
+        Constellation.qam(16),
+        num_symbols=2**16,
+        symbol_rate=32e9,
+        sps=2,
+        pulse=RRC(rolloff=max(rolloff, 1e-3)),
+        num_channels=2,
+        rng=1,
+        device="gpu" if xp.__name__ == "cupy" else "cpu",
+    ).replace(domain="OPT", center_frequency=193.4e12)
+    y = apply_chromatic_dispersion(
+        tx,
+        dispersion_ps_nm_km=17.0 if ps_nm >= 0 else -17.0,
+        fiber_length_km=abs(ps_nm) / 17.0,
+    )
+    if noise:
+        y = apply_pmd(y, dgd=10e-12, theta=0.6)
+        y = apply_awgn(y, esn0_db=12, rng=2)
+        y = shift_frequency(y, frequency=1e9)
+    return y
+
+
+class TestEstimateChromaticDispersion:
+    """estimate_chromatic_dispersion with ClockToneScan: blind, joint over channels."""
+
+    @pytest.mark.parametrize(
+        ("rolloff", "tol"), [(0.1, 100.0), (0.35, 25.0)], ids=["r010", "r035"]
+    )
+    @pytest.mark.parametrize("ps_nm", [0.0, 1360.0, -8500.0, 34000.0])
+    def test_recovers_the_accumulated_dispersion(
+        self, xp: Any, rolloff: float, tol: float, ps_nm: float
+    ) -> None:
+        """Against the dispersion applied, with noise, PMD and a frequency
+        offset: within 62 ps/nm at rolloff 0.1 and 7 at 0.35 (measured on
+        CPU and GPU realizations); the sign included, which a folded cyclic
+        frequency would flip."""
+        y = _dispersed_signal(xp, ps_nm, rolloff, noise=True)
+        est = filtering.estimate_chromatic_dispersion(y, filtering.ClockToneScan())
+        assert est.value.shape == (2,)
+        assert float(est.value[0]) == float(est.value[1])
+        assert abs(float(est.value[0]) - ps_nm) < tol
+
+    @pytest.mark.parametrize("rolloff", [0.0, 0.1], ids=["r000", "r010"])
+    @pytest.mark.parametrize("ps_nm", [1360.0, -8500.0, 34000.0])
+    def test_fourth_moment_scan(self, xp: Any, rolloff: float, ps_nm: float) -> None:
+        """Blind and without an excess band: within 11 ps/nm at rolloff 0
+        and 0.1 with noise, PMD and a frequency offset (measured)."""
+        y = _dispersed_signal(xp, ps_nm, rolloff, noise=True)
+        est = filtering.estimate_chromatic_dispersion(y, filtering.FourthMomentScan())
+        assert abs(float(est.value[0]) - ps_nm) < 25.0
+        k = int(np.argmax(est.metric))
+        assert est.metric[k] == 1.0
+        assert abs(est.candidates[k] - float(est.value[0])) < 30.0
+
+    @pytest.mark.parametrize("rolloff", [0.0, 0.1], ids=["r000", "r010"])
+    @pytest.mark.parametrize("ps_nm", [1360.0, -8500.0, 34000.0])
+    def test_quadratic_phase_fit(self, xp: Any, rolloff: float, ps_nm: float) -> None:
+        """Data-aided, against the Signal's reference symbols, with noise,
+        PMD and laser phase noise: within 12 ps/nm (measured).  The measured
+        group delay, noisy per bin, follows the line β₂L·ω."""
+        from commkit.impairments import apply_awgn, apply_phase_noise
+
+        y = _dispersed_signal(xp, ps_nm, rolloff, noise=False)
+        y = apply_phase_noise(y, linewidth=100e3, shared_lo=True, rng=4)
+        y = apply_awgn(y, esn0_db=12, rng=2)
+        est = filtering.estimate_chromatic_dispersion(y, filtering.QuadraticPhaseFit())
+        assert abs(float(est.value[0]) - ps_nm) < 25.0
+        assert est.candidates is None
+        b2l = -ps_nm * 1e-3 * (1550.12e-9) ** 2 / (2 * np.pi * 299_792_458.0)
+        inband = np.isfinite(est.group_delay) & (np.abs(est.frequencies) < 10e9)
+        omega = 2 * np.pi * est.frequencies[inband]
+        slope = np.polyfit(omega, est.group_delay[inband], 1)[0]
+        assert slope == pytest.approx(b2l, rel=0.05)
+
+    def test_quadratic_phase_fit_needs_symbols(self, xp: Any) -> None:
+        x = xp.ones((2, 8192), dtype=xp.complex64)
+        kw = dict(sampling_rate=64e9, symbol_rate=32e9, center_wavelength_nm=1550.0)
+        with pytest.raises(ValueError, match="known symbols"):
+            filtering.estimate_chromatic_dispersion(
+                x, filtering.QuadraticPhaseFit(), **kw
+            )
+        with pytest.raises(ValueError, match="max_dispersion_ps_nm"):
+            filtering.QuadraticPhaseFit(max_dispersion_ps_nm=0.0)
+
+    def test_clock_tone_warns_without_an_excess_band(
+        self, xp: Any, caplog: Any
+    ) -> None:
+        """A Nyquist pulse has no clock tone (the scan returns a spurious
+        peak, measured 1940 ps/nm off); the Signal's pulse says so."""
+        y = _dispersed_signal(xp, 1360.0, 0.0, noise=False)
+        with caplog.at_level(logging.WARNING, logger="commkit"):
+            filtering.estimate_chromatic_dispersion(y, filtering.ClockToneScan())
+        assert "excess band" in caplog.text
+
+    def test_scan_peaks_at_the_estimate(self, xp: Any) -> None:
+        y = _dispersed_signal(xp, 8500.0, 0.35, noise=False)
+        est = filtering.estimate_chromatic_dispersion(
+            y.replace(samples=y.samples[0]), filtering.ClockToneScan()
+        )
+        assert est.value.shape == ()
+        k = int(np.argmax(est.metric))
+        assert est.metric[k] == 1.0
+        assert abs(est.candidates[k] - float(est.value)) < 10.0
+        assert np.all(np.diff(est.candidates) > 0)
+
+    def test_correct_with_the_method_compensates(self, xp: Any) -> None:
+        """correct(x, ClockToneScan()) estimates then compensates; at 20 dB
+        Es/N0 the SNR after the matched filter is within 1 dB of the
+        known-dispersion compensation (measured 0.5 dB: the estimate's
+        25 ps/nm residual, which an adaptive equalizer absorbs), and an
+        uncompensated record is far below (the baseline)."""
+        from commkit import metrics, multirate
+        from commkit.impairments import apply_awgn
+
+        y = apply_awgn(
+            _dispersed_signal(xp, 1360.0, 0.1, noise=False), esn0_db=20, rng=5
+        )
+
+        def snr(z: Any) -> float:
+            d = multirate.decimate_to_symbol_rate(filtering.matched_filter(z))
+            return float(np.mean(metrics.snr(d, num_skip_symbols=64)))
+
+        known = snr(
+            filtering.correct_chromatic_dispersion(
+                y, dispersion_ps_nm=1360.0, method="whole_record"
+            )
+        )
+        blind = snr(
+            filtering.correct_chromatic_dispersion(
+                y, filtering.ClockToneScan(), method="whole_record"
+            )
+        )
+        assert blind > known - 1.0
+        assert snr(y) < known - 10
+
+    def test_estimate_feeds_the_taps(self, xp: Any) -> None:
+        """The estimate's value designs the filter to study."""
+        y = _dispersed_signal(xp, 1360.0, 0.35, noise=False)
+        est = filtering.estimate_chromatic_dispersion(y, filtering.ClockToneScan())
+        taps = filtering.dispersion_compensation_taps(
+            dispersion_ps_nm=est.value,
+            center_wavelength_nm=1550.0,
+            sampling_rate=64e9,
+        )
+        ref = filtering.dispersion_compensation_taps(
+            dispersion_ps_nm=1360.0, center_wavelength_nm=1550.0, sampling_rate=64e9
+        )
+        assert taps.size == ref.size
+
+    def test_peak_at_the_range_edge_warns(self, xp: Any, caplog: Any) -> None:
+        y = _dispersed_signal(xp, 8500.0, 0.35, noise=False)
+        with caplog.at_level(logging.WARNING, logger="commkit"):
+            filtering.estimate_chromatic_dispersion(
+                y, filtering.ClockToneScan(search_range=(-2000.0, 2000.0))
+            )
+        assert "outside search_range" in caplog.text
+
+    def test_invalid_input_raises(self, xp: Any) -> None:
+        x = xp.ones(512, dtype=xp.complex64)
+        kw = dict(sampling_rate=64e9, symbol_rate=32e9, center_wavelength_nm=1550.0)
+        with pytest.raises(ValueError, match="blocks"):
+            filtering.estimate_chromatic_dispersion(x, filtering.ClockToneScan(), **kw)
+        with pytest.raises(TypeError, match="FourthMomentScan"):
+            filtering.estimate_chromatic_dispersion(x, "clock", **kw)
+        with pytest.raises(ValueError, match="search_range"):
+            filtering.ClockToneScan(search_range=(10.0, -10.0))
+        cd_kw = dict(center_wavelength_nm=1550.0, sampling_rate=64e9)
+        with pytest.raises(ValueError, match="exactly one"):
+            filtering.correct_chromatic_dispersion(x, **cd_kw)
+        with pytest.raises(ValueError, match="exactly one"):
+            filtering.correct_chromatic_dispersion(
+                x, filtering.ClockToneScan(), dispersion_ps_nm=1.0, **cd_kw
+            )
+        with pytest.raises(TypeError, match="how"):
+            filtering.correct_chromatic_dispersion(x, 1360.0, **cd_kw)
+
+
+class TestDispersionCompensationTaps:
+    """dispersion_compensation_taps: the FIR form of correct_chromatic_dispersion."""
+
+    FS = 64e9
+    KW = {"center_wavelength_nm": 1550.0}
+
+    @staticmethod
+    def _beta2_length(km: float) -> float:
+        # β₂ = -D λ² / (2π c), D in s/m², λ in m, L in m.
+        c = 299_792_458.0
+        return -(17.0e-6) * (1550e-9) ** 2 / (2 * np.pi * c) * km * 1e3
+
+    def test_whole_band_is_the_truncated_band_limited_response(self) -> None:
+        """Over the whole band the taps are the inverse DTFT of
+        exp(+j β₂L ω²/2) on |f| < fs/2, here by a dense inverse FFT (the
+        aliasing of the dense grid is below 1e-8)."""
+        km, n_taps, m = 80.0, 61, 2**20
+        taps = filtering.dispersion_compensation_taps(
+            dispersion_ps_nm=17.0 * km,
+            sampling_rate=self.FS,
+            num_taps=n_taps,
+            **self.KW,
+        )
+        omega = 2 * np.pi * np.fft.fftfreq(m, d=1 / self.FS)
+        h = np.fft.ifft(np.exp(0.5j * self._beta2_length(km) * omega**2))
+        n = np.arange(n_taps) - (n_taps - 1) // 2
+        np.testing.assert_allclose(taps, h[n % m], atol=1e-8)
+
+    def test_default_length_follows_the_spread(self) -> None:
+        """1.25 times the group-delay spread 2π|β₂L|·B·fs, odd; over the
+        whole band the spread is Savory's D λ² L / (c T²) (45 samples at
+        80 km, 64 GS/s, so 57 taps), and a short link keeps 7."""
+        savory = 17.0e-6 * (1550e-9) ** 2 * 80e3 / (299_792_458.0 / self.FS**2)
+        assert 44 < savory < 45
+        full = filtering.dispersion_compensation_taps(
+            dispersion_ps_nm=1360.0, sampling_rate=self.FS, **self.KW
+        )
+        assert len(full) == 57
+        band = filtering.dispersion_compensation_taps(
+            dispersion_ps_nm=1360.0, sampling_rate=self.FS, bandwidth=32e9, **self.KW
+        )
+        assert len(band) == 2 * int(np.ceil((1.25 * savory / 2 - 1) / 2)) + 1
+        short = filtering.dispersion_compensation_taps(
+            dispersion_ps_nm=17.0, sampling_rate=self.FS, **self.KW
+        )
+        assert len(short) == 7
+
+    def test_zero_dispersion_is_a_delta(self) -> None:
+        taps = filtering.dispersion_compensation_taps(
+            dispersion_ps_nm=0.0, sampling_rate=self.FS, num_taps=5, **self.KW
+        )
+        np.testing.assert_array_equal(taps, [0, 0, 1, 0, 0])
+
+    def test_band_fit_beats_truncation_inside_the_band(self) -> None:
+        """At one length, the least-squares fit over a band has a smaller
+        in-band response error than the truncated response, which spends its
+        taps on the whole band (measured: -61 dB against -15 dB)."""
+        km, n_taps, band = 80.0, 31, 35.2e9
+        f = np.linspace(-band / 2, band / 2, 2001)
+        target = np.exp(0.5j * self._beta2_length(km) * (2 * np.pi * f) ** 2)
+
+        def in_band_error_db(taps: np.ndarray) -> float:
+            n = np.arange(len(taps)) - (len(taps) - 1) // 2
+            resp = np.exp(-2j * np.pi * np.outer(f, n) / self.FS) @ taps
+            return float(10 * np.log10(np.mean(np.abs(resp - target) ** 2)))
+
+        common = {
+            "dispersion_ps_nm": 17.0 * km,
+            "sampling_rate": self.FS,
+            "num_taps": n_taps,
+        }
+        fit = filtering.dispersion_compensation_taps(
+            bandwidth=band, **common, **self.KW
+        )
+        trunc = filtering.dispersion_compensation_taps(**common, **self.KW)
+        assert in_band_error_db(fit) < -50
+        assert in_band_error_db(trunc) > -25
+
+    @pytest.mark.parametrize("km", [80.0, 1000.0])
+    def test_fir_matches_frequency_domain_compensation(
+        self, xp: Any, km: float
+    ) -> None:
+        """Applied by overlap-save to a 2-sps RRC signal, the default taps
+        fitted over the occupied band match correct_chromatic_dispersion away
+        from the record ends (measured -45 and -50 dB); a filter half the
+        spread long, the baseline, does not (-15 and -5 dB)."""
+        from commkit import Constellation, generate
+        from commkit.filtering import RRC
+        from commkit.impairments import apply_chromatic_dispersion
+
+        tx = generate(
+            Constellation.qam(16),
+            num_symbols=2**14,
+            symbol_rate=32e9,
+            sps=2,
+            pulse=RRC(rolloff=0.1),
+            rng=1,
+            device="gpu" if xp.__name__ == "cupy" else "cpu",
+        )
+        kw = {"dispersion_ps_nm": 17.0 * km, **self.KW}
+        rx = apply_chromatic_dispersion(
+            tx, dispersion_ps_nm_km=17.0, fiber_length_km=km, **self.KW
+        )
+        ref = to_numpy(
+            filtering.correct_chromatic_dispersion(
+                rx, method="whole_record", **kw
+            ).samples
+        )
+
+        def residual_db(taps: np.ndarray) -> float:
+            y = to_numpy(filtering.ols_fir_filter(rx, taps).samples)
+            k = 2 * len(taps)
+            err = y[k:-k] - ref[k:-k]
+            return float(
+                10 * np.log10(np.mean(np.abs(err) ** 2) / np.mean(np.abs(ref) ** 2))
+            )
+
+        taps = filtering.dispersion_compensation_taps(
+            sampling_rate=64e9, bandwidth=35.2e9, **kw
+        )
+        assert residual_db(taps) < -40
+        short = filtering.dispersion_compensation_taps(
+            sampling_rate=64e9, bandwidth=35.2e9, num_taps=len(taps) // 2 | 1, **kw
+        )
+        assert residual_db(short) > -30
+
+    @pytest.mark.parametrize(
+        ("kwargs", "match"),
+        [
+            ({"sampling_rate": 0.0}, "sampling_rate"),
+            ({"bandwidth": 0.0}, "bandwidth"),
+            ({"bandwidth": 70e9}, "bandwidth"),
+            ({"num_taps": 0}, "num_taps"),
+            ({"num_taps": 2.5}, "num_taps"),
+        ],
+    )
+    def test_invalid_arguments_raise(self, kwargs: dict[str, Any], match: str) -> None:
+        args = {
+            "dispersion_ps_nm": 1360.0,
+            "sampling_rate": self.FS,
+            **self.KW,
+            **kwargs,
+        }
+        with pytest.raises(ValueError, match=match):
+            filtering.dispersion_compensation_taps(**args)
 
 
 class TestOlsFftSize:
@@ -688,7 +1109,7 @@ class TestCorrectFiberPropagation:
             x = xp.asarray(self._field(dtype=dtype))
             kw = dict(fiber=Fiber(), steps_per_span=40, sampling_rate=64e9, **self.LINK)
             y = apply_fiber_propagation(x, **kw)
-            z = filtering.correct_fiber_propagation(y, **kw)
+            z = filtering.correct_fiber_propagation(y, method="whole_record", **kw)
             err = float(xp.sqrt(xp.mean(xp.abs(z - x) ** 2) / xp.mean(xp.abs(x) ** 2)))
             assert err < tol, (dtype, err)
             assert z.dtype == dtype
@@ -701,6 +1122,7 @@ class TestCorrectFiberPropagation:
         x = xp.asarray(self._field())
         z = filtering.correct_fiber_propagation(
             x,
+            method="whole_record",
             fiber=Fiber(),
             steps_per_span=3,
             nonlinear_scale=0.0,
@@ -709,8 +1131,8 @@ class TestCorrectFiberPropagation:
         )
         ref = filtering.correct_chromatic_dispersion(
             x,
-            dispersion_ps_nm_km=17.0,
-            fiber_length_km=320.0,
+            dispersion_ps_nm=5440.0,
+            method="whole_record",
             center_wavelength_nm=1550.0,
             sampling_rate=64e9,
         )
@@ -742,21 +1164,80 @@ class TestCorrectFiberPropagation:
         cdc = error(
             filtering.correct_chromatic_dispersion(
                 y,
-                dispersion_ps_nm_km=17.0,
-                fiber_length_km=320.0,
+                dispersion_ps_nm=5440.0,
+                method="whole_record",
                 center_wavelength_nm=1550.0,
                 sampling_rate=64e9,
             )
         )
         kw = dict(fiber=Fiber(), sampling_rate=64e9, **self.LINK)
-        full = error(filtering.correct_fiber_propagation(y, steps_per_span=10, **kw))
+        full = error(
+            filtering.correct_fiber_propagation(
+                y, steps_per_span=10, method="whole_record", **kw
+            )
+        )
         one = error(
             filtering.correct_fiber_propagation(
-                y, steps_per_span=1, nonlinear_scale=0.5, **kw
+                y, steps_per_span=1, nonlinear_scale=0.5, method="whole_record", **kw
             )
         )
         assert full < 0.1 * cdc
         assert one < 0.75 * cdc
+
+    def test_capture_window_is_backpropagated_in_blocks(self, xp: Any) -> None:
+        """A capture is a window of a longer transmission.  Propagate a long
+        record, keep a window from its middle (with its true past and
+        future outside), and backpropagate the window alone: the default
+        blocks recover the transmitted field away from the window's ends
+        (measured -71 dB), as does the whole window.  The first samples,
+        whose history lies before the capture, are lost to either (-3 dB
+        for the whole window)."""
+        from commkit.impairments import Fiber, apply_fiber_propagation
+
+        n, start, width = 1 << 15, 1 << 13, 1 << 14
+        x = xp.asarray(self._field(n=n))
+        kw = dict(fiber=Fiber(), steps_per_span=10, sampling_rate=64e9, **self.LINK)
+        y = apply_fiber_propagation(x, **kw)
+        window = y[..., start : start + width]
+        # The window's power differs slightly from the record's; the launch
+        # power is given, so scale the window as the record was.
+        ref = x[..., start : start + width]
+        keep = slice(1024, width - 1024)  # beyond the transients (guard ~ 120)
+
+        def error_db(z: Any, sl: slice) -> float:
+            e = z[..., sl] - ref[..., sl]
+            return float(
+                10
+                * xp.log10(xp.mean(xp.abs(e) ** 2) / xp.mean(xp.abs(ref[..., sl]) ** 2))
+            )
+
+        p_window = float(xp.mean(xp.abs(window) ** 2) / xp.mean(xp.abs(y) ** 2))
+        launch = self.LINK["launch_power_dbm"] + 10 * np.log10(p_window)
+        link = {**kw, "launch_power_dbm": launch}
+        blocks = filtering.correct_fiber_propagation(window, **link)
+        whole = filtering.correct_fiber_propagation(
+            window, method="whole_record", **link
+        )
+        assert error_db(blocks, keep) < -40
+        assert error_db(whole, keep) < -40
+        assert error_db(blocks, slice(0, 64)) > -20
+        assert error_db(whole, slice(0, 64)) > -20
+
+    def test_blocks_match_the_whole_record_inside(self, xp: Any) -> None:
+        """On one record, the blocks and the whole-record backpropagation
+        agree beyond the guards: the guard covers the link's memory up to
+        the band-limited tails it truncates (measured -71 dB, the same in
+        complex128, so not rounding)."""
+        from commkit.impairments import Fiber
+
+        x = xp.asarray(self._field(n=1 << 14))
+        kw = dict(fiber=Fiber(), steps_per_span=5, sampling_rate=64e9, **self.LINK)
+        blocks = filtering.correct_fiber_propagation(x, **kw)
+        whole = filtering.correct_fiber_propagation(x, method="whole_record", **kw)
+        sl = slice(1024, -1024)
+        e = blocks[..., sl] - whole[..., sl]
+        rel = float(xp.mean(xp.abs(e) ** 2) / xp.mean(xp.abs(whole[..., sl]) ** 2))
+        assert rel < 1e-6
 
     def test_bad_nonlinear_scale_raises(self, xp: Any) -> None:
         from commkit.impairments import Fiber

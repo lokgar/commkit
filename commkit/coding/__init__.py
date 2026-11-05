@@ -20,7 +20,7 @@ Codes: :class:`LinearBlockCode` (Hamming), :class:`LDPCCode` (DVB-S2, PON),
 :class:`CCDM` and probabilistic amplitude shaping, :class:`PAS`.  Decoders: :class:`Syndrome`,
 :class:`MaximumLikelihood`, :class:`MinSum`, :class:`SumProduct`,
 :class:`BerlekampMassey`, :class:`Chase`, :class:`HardIterations`,
-:class:`Stages`, :class:`SC`, :class:`SCL`, :class:`Viterbi`, :class:`BCJR`,
+:class:`StageDecoders`, :class:`SC`, :class:`SCL`, :class:`Viterbi`, :class:`BCJR`,
 :class:`TurboIterations`.  Bit
 permutations: :func:`interleave` and :func:`deinterleave` with an
 :class:`Interleaver`.  EXIT analysis: :func:`exit_chart` of two
@@ -49,7 +49,7 @@ from .ldpc import LDPCCode, MinSum, SumProduct
 from .linear import Chase, LinearBlockCode, MaximumLikelihood, Syndrome
 from .performance import ErrorRateCurve, error_rate_curve
 from .polar import SC, SCL, PolarCode
-from .product import Concatenated, HardIterations, Stages, StaircaseCode
+from .product import Concatenated, HardIterations, StageDecoders, StaircaseCode
 from .ratematch import Punctured, Shortened
 from .shaping import CCDM, PAS
 from .turbo import TurboCode, TurboIterations
@@ -80,7 +80,7 @@ __all__ = [
     "SC",
     "SCL",
     "Shortened",
-    "Stages",
+    "StageDecoders",
     "StaircaseCode",
     "SumProduct",
     "Syndrome",

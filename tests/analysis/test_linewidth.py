@@ -6,13 +6,15 @@ synthesized from one (``Δφ(t) = φ(t) - φ(t-τ_d)`` on an AOM carrier). Input
 fixture.
 """
 
+import logging
+
 import numpy as np
 import pytest
 
 from commkit import analysis
 from commkit.analysis import (
     BetaSeparation,
-    DshFmPsd,
+    DshFmFit,
     DshIncrement,
     DshLorentzian,
     IncrementSlope,
@@ -66,17 +68,21 @@ class TestLinewidthEstimation:
         )
         assert res.value == pytest.approx(dnu, rel=0.10)
 
-    def test_beta_separation_floor(self, xp):
+    def test_beta_separation_floor(self, xp, caplog):
+        """The white-FM floor within a fence, at a segment too coarse for the
+        β-area: the floor is right and the unresolved area is flagged."""
         n = 1 << 19
         dnu = 1.5e6
         phi = _wiener_phase(dnu, n, seed=13)
-        out = analysis.estimate_linewidth(
-            xp.asarray(phi),
-            BetaSeparation(nperseg=1 << 13, f_min=5e6, f_max=2e8),
-            sampling_rate=R,
-        )
-        # White-FM floor Δν = π·S_f is the robust estimator at high baud.
+        with caplog.at_level(logging.WARNING, logger="commkit"):
+            out = analysis.estimate_linewidth(
+                xp.asarray(phi),
+                BetaSeparation(nperseg=1 << 13, f_min=5e6, f_max=2e8),
+                sampling_rate=R,
+            )
         assert out.linewidth_floor == pytest.approx(dnu, rel=0.10)
+        # f_c = πΔν/(8 ln2) ≈ 0.85 MHz lies below the 5 MHz fence.
+        assert "crossover" in caplog.text
 
     def test_beta_area_recovers_white_fm(self, xp):
         """β-area is exact for white FM when the line crossing f_c is resolved.
@@ -134,24 +140,39 @@ class TestLinewidthEstimation:
         # several times - the region is a union of intervals, not one band.
         assert above.any()
 
-    def test_beta_floor_auto_dodges_awgn_tail(self, xp):
-        """Unfenced floor auto-detects the plateau, excluding the AWGN f² tail.
-
-        Previously the unfenced floor median ran over the full band and was
-        AWGN-dominated; the plateau detector must recover the white-FM level
-        without a manual f_max.
-        """
+    def test_beta_floor_models_the_awgn_tail(self, xp):
+        """Unfenced, the floor fit models the AWGN f² tail instead of cutting
+        it: it recovers Δν and the angle noise of σ²/2 = 5e-3 rad² per
+        sample, over a band reaching Nyquist.  The old plateau median read
+        the tail's foot and came out 11 % high at the default segment of a
+        32 GBd, 1 MHz, 20 dB trajectory (measured: the fit 0.999 MHz)."""
         n, dnu = 1 << 19, 1.5e6
         phi = _wiener_phase(dnu, n, seed=13)
         rng = np.random.default_rng(8)
         phi = phi + rng.normal(0, np.sqrt(10 ** (-2.0) / 2), n)  # AWGN angle noise
         out = analysis.estimate_linewidth(
-            xp.asarray(phi), BetaSeparation(nperseg=1 << 13), sampling_rate=R
+            xp.asarray(phi), BetaSeparation(nperseg=1 << 17), sampling_rate=R
         )
-        assert out.linewidth_floor == pytest.approx(dnu, rel=0.15)
-        # The tail region is excluded: the used band ends well below Nyquist.
+        assert out.linewidth_floor == pytest.approx(dnu, rel=0.05)
+        assert out.angle_noise_var == pytest.approx(10 ** (-2.0) / 2, rel=0.05)
         f_used = out.frequencies[out.used]
-        assert float(f_used[-1]) < 0.5 * R / 2
+        assert float(f_used[-1]) > 0.9 * R / 2
+
+    def test_beta_floor_excludes_a_drift_rise(self, xp):
+        """A slow frequency wander (±20 MHz at 1 MHz) raises S_f by orders of
+        magnitude below a few MHz; the unfenced fit starts above it, at the
+        plateau's lower edge, and still reads the white-FM floor, while the
+        β-area FWHM includes the wander and exceeds it."""
+        n, dnu = 1 << 19, 1.5e6
+        t = np.arange(n) / R
+        wander = 2 * np.pi * np.cumsum(20e6 * np.sin(2 * np.pi * 1e6 * t)) / R
+        phi = _wiener_phase(dnu, n, seed=13) + wander
+        out = analysis.estimate_linewidth(
+            xp.asarray(phi), BetaSeparation(nperseg=1 << 17), sampling_rate=R
+        )
+        assert out.linewidth_floor == pytest.approx(dnu, rel=0.10)
+        assert float(out.frequencies[out.used][0]) > 1.5e6
+        assert out.value > 3 * dnu
 
     def test_increment_returns_plot_data(self, xp):
         """The returned fit data plots directly: Var(k) fit (slope), point (subtract)."""
@@ -211,7 +232,7 @@ class TestDshLinewidth:
         n, m = 1 << 20, 500
         z, _ = make_dsh_beat(2e6, n, m, 80e6, snr_db=25, seed=4)
         res = analysis.estimate_linewidth(
-            xp.asarray(z), DshFmPsd(delay=m / FS, nperseg=1 << 14), sampling_rate=FS
+            xp.asarray(z), DshFmFit(delay=m / FS, nperseg=1 << 14), sampling_rate=FS
         )
         assert res.value == pytest.approx(2e6, rel=0.05)
         # Segments much longer than the delay resolve the fringes: notch bins
@@ -224,6 +245,22 @@ class TestDshLinewidth:
         assert res.band[1] > FS / m
         f_used = res.frequencies[res.used]
         assert res.band == (float(f_used[0]), float(f_used[-1]))
+
+    def test_fm_psd_real_beat_reports_only_its_support(self, xp):
+        """A real beat at 80 MHz sampled at 500 MS/s carries FM sidebands out
+        to 80 MHz only (the distance to DC); the PSD and the model are NaN
+        beyond, where the analytic signal has no support and the bins read
+        several times low (measured below 100 MHz: 0.4 of the plateau)."""
+        n, m = 1 << 20, 500
+        z, _ = make_dsh_beat(2e6, n, m, 80e6, snr_db=25, seed=4)
+        res = analysis.estimate_linewidth(
+            xp.asarray(np.real(z)), DshFmFit(delay=m / FS), sampling_rate=FS
+        )
+        beyond = res.frequencies > 80e6 * 1.001
+        assert not res.valid[beyond].any()
+        assert np.isnan(res.fm_psd[beyond]).all()
+        assert np.isnan(res.fm_psd_model[beyond]).all()
+        assert res.valid[(res.frequencies > 0) & (res.frequencies < 70e6)].all()
 
     def test_fm_psd_flicker_is_modeled(self, xp):
         """A flicker corner inside the band neither biases the white-FM level
@@ -243,7 +280,7 @@ class TestDshLinewidth:
         z, _ = analysis.dsh_beat(phi, sampling_rate=FS, delay=m / FS, f_shift=80e6)
         z = xp.asarray(apply_awgn(z, sps=1, esn0_db=25, rng=145))
         res = analysis.estimate_linewidth(
-            z, DshFmPsd(delay=m / FS, f_shift=80e6), sampling_rate=FS
+            z, DshFmFit(delay=m / FS, f_shift=80e6), sampling_rate=FS
         )
         assert res.value == pytest.approx(dnu, rel=0.03)
         assert 1e9 < res.flicker < 8e9
@@ -257,7 +294,7 @@ class TestDshLinewidth:
             z, _ = make_dsh_beat(dnu, n, m, 80e6, snr_db=25, seed=20 + seed)
             res = analysis.estimate_linewidth(
                 xp.asarray(z),
-                DshFmPsd(delay=m / FS, f_shift=80e6, nperseg=1 << 19),
+                DshFmFit(delay=m / FS, f_shift=80e6, nperseg=1 << 19),
                 sampling_rate=FS,
             )
             assert res.num_segments <= 3
@@ -271,10 +308,10 @@ class TestDshLinewidth:
         z, _ = make_dsh_beat(2e5, n, m, 80e6, snr_db=25, seed=30)
         z = xp.asarray(z)
         exact = analysis.estimate_linewidth(
-            z, DshFmPsd(delay=m / FS, f_shift=80e6), sampling_rate=FS
+            z, DshFmFit(delay=m / FS, f_shift=80e6), sampling_rate=FS
         )
         off = analysis.estimate_linewidth(
-            z, DshFmPsd(delay=1.01 * m / FS, f_shift=80e6), sampling_rate=FS
+            z, DshFmFit(delay=1.01 * m / FS, f_shift=80e6), sampling_rate=FS
         )
         assert off.value == exact.value
         assert exact.value == pytest.approx(2e5, rel=0.02)
@@ -286,7 +323,7 @@ class TestDshLinewidth:
         n, m, snr_db = 1 << 20, 6000, 20
         z, _ = make_dsh_beat(2e5, n, m, 80e6, snr_db=snr_db, seed=31)
         res = analysis.estimate_linewidth(
-            xp.asarray(z), DshFmPsd(delay=m / FS, f_shift=80e6), sampling_rate=FS
+            xp.asarray(z), DshFmFit(delay=m / FS, f_shift=80e6), sampling_rate=FS
         )
         assert res.angle_noise_var == pytest.approx(0.5 * 10 ** (-snr_db / 10), rel=0.1)
         assert res.value == pytest.approx(2e5, rel=0.03)
@@ -300,7 +337,7 @@ class TestDshLinewidth:
         f_spur = 37e6
         z = z * np.exp(1j * 0.05 * np.sin(2 * np.pi * f_spur * t))
         res = analysis.estimate_linewidth(
-            xp.asarray(z), DshFmPsd(delay=m / FS, f_shift=80e6), sampling_rate=FS
+            xp.asarray(z), DshFmFit(delay=m / FS, f_shift=80e6), sampling_rate=FS
         )
         k = int(np.argmin(np.abs(res.frequencies - f_spur)))
         assert not res.used[k]
@@ -324,7 +361,7 @@ class TestDshLinewidth:
         beat = apply_awgn(z, sps=1, esn0_db=25, rng=1).real
         tau_cal = 4.8978e-6  # -0.05 % delay-calibration error
         res = analysis.estimate_linewidth(
-            xp.asarray(beat), DshFmPsd(delay=tau_cal, f_shift=f_aom), sampling_rate=FS
+            xp.asarray(beat), DshFmFit(delay=tau_cal, f_shift=f_aom), sampling_rate=FS
         )
         assert res.band[1] <= min(f_aom, FS / 2 - f_aom)
         assert res.value == pytest.approx(dnu, rel=0.03)
@@ -335,7 +372,7 @@ class TestDshLinewidth:
         z, _ = make_dsh_beat(2e6, n, m, 80e6, snr_db=25, seed=4)
         res = analysis.estimate_linewidth(
             xp.asarray(z),
-            DshFmPsd(delay=m / FS, f_shift=80e6, nperseg=1 << 14, f_max=FS / m),
+            DshFmFit(delay=m / FS, f_shift=80e6, nperseg=1 << 14, f_max=FS / m),
             sampling_rate=FS,
         )
         f_used = res.frequencies[res.used]
@@ -347,7 +384,7 @@ class TestDshLinewidth:
         n, m = 1 << 20, 500
         z, _ = make_dsh_beat(50e3, n, m, 80e6, snr_db=None, seed=5)
         res = analysis.estimate_linewidth(
-            xp.asarray(z), DshFmPsd(delay=m / FS, nperseg=1 << 14), sampling_rate=FS
+            xp.asarray(z), DshFmFit(delay=m / FS, nperseg=1 << 14), sampling_rate=FS
         )
         assert np.pi * 50e3 * (m / FS) < 1.0  # deeply coherent
         assert res.value == pytest.approx(50e3, rel=0.05)
@@ -392,7 +429,7 @@ class TestDshLinewidth:
         z, _ = make_dsh_beat(1e6, 1 << 12, 100, 80e6, seed=10)
         with pytest.raises(ValueError, match="unresolvable"):
             analysis.estimate_linewidth(
-                xp.asarray(z), DshFmPsd(delay=0.1 / FS), sampling_rate=FS
+                xp.asarray(z), DshFmFit(delay=0.1 / FS), sampling_rate=FS
             )
 
     @pytest.mark.allow_warnings
@@ -403,7 +440,7 @@ class TestDshLinewidth:
         n, m = 1 << 16, 200
         z, _ = make_dsh_beat(2e6, n, m, 80e6, snr_db=25, seed=12)
         z = xp.asarray(z)
-        fm = analysis.estimate_linewidth(z, DshFmPsd(delay=m / FS), sampling_rate=FS)
+        fm = analysis.estimate_linewidth(z, DshFmFit(delay=m / FS), sampling_rate=FS)
         plotting.plot_frequency_noise_psd(fm)
         inc = analysis.estimate_linewidth(
             z, DshIncrement(delay=m / FS), sampling_rate=FS
@@ -418,7 +455,7 @@ class TestDshLinewidth:
         n, m = 1 << 18, 500
         z, _ = make_dsh_beat(2e6, n, m, 80e6, snr_db=25, seed=4)
         sig = Signal(samples=xp.asarray(z), sampling_rate=FS, symbol_rate=FS)
-        method = DshFmPsd(delay=m / FS, nperseg=1 << 13)
+        method = DshFmFit(delay=m / FS, nperseg=1 << 13)
         res_sig = analysis.estimate_linewidth(sig, method)
         res_arr = analysis.estimate_linewidth(xp.asarray(z), method, sampling_rate=FS)
         assert res_sig.value == pytest.approx(res_arr.value)
@@ -429,7 +466,7 @@ class TestDshLinewidth:
         sig = Signal(samples=xp.asarray(z), sampling_rate=FS, symbol_rate=FS)
         with pytest.raises(ValueError, match="conflicts"):
             analysis.estimate_linewidth(
-                sig, DshFmPsd(delay=50 / FS), sampling_rate=FS / 2
+                sig, DshFmFit(delay=50 / FS), sampling_rate=FS / 2
             )
 
 
@@ -440,10 +477,10 @@ class TestPolarizationDiversity:
     def test_fm_psd_survives_fading(self, xp, snr_db):
         z, _ = make_dual_pol_dsh_beat(snr_db=snr_db, num_samples=1 << 20, seed=3)
         z = xp.asarray(z)
-        method = DshFmPsd(delay=2450 / FS, f_shift=80e6)
+        method = DshFmFit(delay=2450 / FS, f_shift=80e6)
         combined = analysis.estimate_linewidth(
             z,
-            DshFmPsd(delay=2450 / FS, f_shift=80e6, combine_polarizations=True),
+            DshFmFit(delay=2450 / FS, f_shift=80e6, combine_polarizations=True),
             sampling_rate=FS,
         )
         one_pol = analysis.estimate_linewidth(z[0], method, sampling_rate=FS)
@@ -456,7 +493,7 @@ class TestPolarizationDiversity:
         z, _ = make_dual_pol_dsh_beat(snr_db=25, num_samples=1 << 20, seed=4)
         res = analysis.estimate_linewidth(
             xp.asarray(z.real),
-            DshFmPsd(delay=2450 / FS, f_shift=80e6, combine_polarizations=True),
+            DshFmFit(delay=2450 / FS, f_shift=80e6, combine_polarizations=True),
             sampling_rate=FS,
         )
         assert res.value == pytest.approx(2e5, rel=0.03)
@@ -501,7 +538,7 @@ class TestEstimateLinewidthContract:
             IncrementSubtract(),
             BetaSeparation(nperseg=1024),
             DshIncrement(delay=500 / FS, f_shift=80e6),
-            DshFmPsd(delay=500 / FS, f_shift=80e6),
+            DshFmFit(delay=500 / FS, f_shift=80e6),
             DshLorentzian(delay=500 / FS),
         ],
         ids=lambda m: type(m).__name__,
@@ -509,7 +546,7 @@ class TestEstimateLinewidthContract:
     def test_one_channel_reports_an_array(self, xp, method):
         """(N,) input reports floats; (1, N) input reports (1,) arrays, as
         every (C, N) input does (they used to collapse to floats)."""
-        if isinstance(method, (DshIncrement, DshFmPsd, DshLorentzian)):
+        if isinstance(method, (DshIncrement, DshFmFit, DshLorentzian)):
             x, _ = make_dsh_beat(2e6, 1 << 16, 500, 80e6, snr_db=None, seed=1)
             fs = FS
         else:
@@ -629,7 +666,7 @@ class TestEstimateLinewidthContract:
             (lambda: IncrementSubtract(noise_var=-1.0), "noise_var"),
             (lambda: BetaSeparation(f_min=2e6, f_max=1e6), "f_min"),
             (lambda: BetaSeparation(nperseg=1), "nperseg"),
-            (lambda: DshFmPsd(delay=0.0), "positive"),
+            (lambda: DshFmFit(delay=0.0), "positive"),
             (lambda: DshIncrement(delay=1e-6, lags=(0, 5)), "positive"),
             (lambda: DshIncrement(delay=1e-6, lags=(5, 5)), "two distinct"),
             (lambda: DshLorentzian(delay=-1e-6), "positive"),

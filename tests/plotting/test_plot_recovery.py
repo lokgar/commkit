@@ -46,10 +46,12 @@ class TestPlotCarrierPhase:
         assert len(ax.lines) == 2
 
     def test_pilot_phase_carrier_estimate(self, xp: Any) -> None:
-        """PilotAided: pilot panel plus the interpolated trajectory."""
+        """PilotInterpolation: pilot panel plus the interpolated trajectory."""
         x, s = _qpsk(xp, df=1e3)
         idx = np.arange(0, 4096, 32)
-        est = recovery.estimate_carrier_phase(x, recovery.PilotAided(idx, s[0, idx]))
+        est = recovery.estimate_carrier_phase(
+            x, recovery.PilotInterpolation(idx, s[0, idx])
+        )
         fig, axes = plot_pilot_phase_estimate(est, sampling_rate=FS, show=False)
         assert np.asarray(axes, dtype=object).shape == (1, 2)
         _, ax = plot_pilot_phase_estimate(

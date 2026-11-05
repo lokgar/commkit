@@ -8,13 +8,13 @@
   (:func:`apply_iq_imbalance`, :func:`estimate_iq_imbalance`, and
   :func:`correct_iq_imbalance` with :class:`Lowdin`, :class:`GramSchmidt` or
   an :class:`IQImbalanceEstimate`).
-- :mod:`~commkit.impairments.channel`: the fiber channel, linear
+- :mod:`~commkit.impairments.fiber_channel`: the fiber channel, linear
   (:func:`apply_chromatic_dispersion`, :func:`apply_pmd`,
   :func:`apply_polarization_mixing`) and nonlinear
   (:func:`apply_fiber_propagation` over amplified spans of a :class:`Fiber`).
 """
 
-from .channel import (
+from .fiber_channel import (
     Fiber,
     apply_chromatic_dispersion,
     apply_fiber_propagation,

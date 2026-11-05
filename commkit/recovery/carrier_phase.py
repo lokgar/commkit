@@ -20,9 +20,9 @@ from ..logger import logger
 from ..math import _derotate
 from ._common import _Context, _Phase
 from .bps import BPS, _bps
-from .corrections import DataAided, _data_aided
+from .corrections import ConstantPhase, _data_aided
 from .pilots import (
-    PilotAided,
+    PilotInterpolation,
     PilotTone,
     PilotTones,
     _pilot_aided,
@@ -44,10 +44,10 @@ CarrierPhaseMethod = (
     | ViterbiViterbi
     | Tikhonov
     | PLL
-    | PilotAided
+    | PilotInterpolation
     | PilotTone
     | PilotTones
-    | DataAided
+    | ConstantPhase
 )
 
 _ESTIMATORS: dict[type, Callable[[ArrayType, Any, _Context], _Phase]] = {
@@ -55,15 +55,15 @@ _ESTIMATORS: dict[type, Callable[[ArrayType, Any, _Context], _Phase]] = {
     ViterbiViterbi: _viterbi_viterbi,
     Tikhonov: _tikhonov,
     PLL: _pll,
-    PilotAided: _pilot_aided,
+    PilotInterpolation: _pilot_aided,
     PilotTone: _pilot_tone,
     PilotTones: _pilot_tones,
-    DataAided: _data_aided,
+    ConstantPhase: _data_aided,
 }
 
 # Methods that read one symbol per sample (the tone methods read the
 # oversampled waveform).
-_SYMBOL_RATE = (BPS, ViterbiViterbi, Tikhonov, PLL, PilotAided, DataAided)
+_SYMBOL_RATE = (BPS, ViterbiViterbi, Tikhonov, PLL, PilotInterpolation, ConstantPhase)
 
 
 @dataclass(frozen=True)
@@ -86,9 +86,9 @@ class CarrierPhaseEstimate:
         Block methods: the block phases after unwrapping, smoothing and
         cycle-slip repair, ``(B,)`` or ``(C, B)``.
     pilot_indices : numpy.ndarray or None
-        ``PilotAided``: the pilot symbol indices, ``(P,)``.
+        ``PilotInterpolation``: the pilot symbol indices, ``(P,)``.
     pilot_phase : ndarray or None
-        ``PilotAided``: unwrapped pilot phases, ``(P,)`` or ``(C, P)``.
+        ``PilotInterpolation``: unwrapped pilot phases, ``(P,)`` or ``(C, P)``.
     tone_frequencies : numpy.ndarray or None
         Tone methods: measured tone centers in Hz on the host; ``PilotTone``
         per channel (0-d or ``(C,)``), ``PilotTones`` per channel and tone
@@ -129,10 +129,10 @@ def estimate_carrier_phase(
     ----------
     samples : array_like or Signal
         ``(N,)`` or ``(C, N)``: symbols at one sample per symbol for
-        ``BPS``, ``ViterbiViterbi``, ``Tikhonov``, ``PLL``, ``PilotAided``
-        and ``DataAided``; the oversampled waveform for ``PilotTone`` and
+        ``BPS``, ``ViterbiViterbi``, ``Tikhonov``, ``PLL``, ``PilotInterpolation``
+        and ``ConstantPhase``; the oversampled waveform for ``PilotTone`` and
         ``PilotTones``.
-    method : BPS, ViterbiViterbi, Tikhonov, PLL, PilotAided, PilotTone, PilotTones or DataAided
+    method : BPS, ViterbiViterbi, Tikhonov, PLL, PilotInterpolation, PilotTone, PilotTones or ConstantPhase
         Estimation method.
     sampling_rate : float, optional
         Sampling rate in Hz, needed by the tone methods and by ``Tikhonov``
@@ -158,7 +158,7 @@ def estimate_carrier_phase(
     if estimator is None:
         raise TypeError(
             "estimate_carrier_phase(): method must be BPS, ViterbiViterbi, "
-            "Tikhonov, PLL, PilotAided, PilotTone, PilotTones or DataAided, "
+            "Tikhonov, PLL, PilotInterpolation, PilotTone, PilotTones or ConstantPhase, "
             f"got {type(method).__name__}."
         )
     signal_adapter = adapt_signal(samples, function_name="estimate_carrier_phase()")

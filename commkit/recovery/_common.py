@@ -72,7 +72,7 @@ class _Context:
 
     constellation: Any  # Constellation | None
     sampling_rate: float | None
-    reference: ArrayType | None  # known symbols (DataAided)
+    reference: ArrayType | None  # known symbols (ConstantPhase)
 
     def need_constellation(self, method: object) -> Any:
         """The constellation, or raise naming the method that needs it."""

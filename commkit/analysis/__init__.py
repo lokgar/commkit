@@ -11,7 +11,7 @@ DSP stages that produce them:
 - :func:`allan_deviation`: overlapping Allan deviation of the frequency.
 - :func:`estimate_linewidth`: the laser linewidth, with one method object per
   estimator (:class:`IncrementSlope`, :class:`IncrementSubtract`,
-  :class:`BetaSeparation` on phase trajectories; :class:`DshFmPsd`,
+  :class:`BetaSeparation` on phase trajectories; :class:`DshFmFit`,
   :class:`DshIncrement`, :class:`DshLorentzian` on delayed self-heterodyne
   beats, whose front end is :func:`dsh_beat` and :func:`dsh_phase`).
 
@@ -32,7 +32,7 @@ from .fm_noise import DshFmNoisePsd, dsh_fm_noise_psd, fm_noise_psd
 from .interferometry import dsh_beat, dsh_phase
 from .linewidth import (
     BetaSeparation,
-    DshFmPsd,
+    DshFmFit,
     DshIncrement,
     DshLorentzian,
     IncrementSlope,
@@ -46,7 +46,7 @@ __all__ = [
     "AllanDeviation",
     "BetaSeparation",
     "DshFmNoisePsd",
-    "DshFmPsd",
+    "DshFmFit",
     "DshIncrement",
     "DshLorentzian",
     "FrequencyDrift",

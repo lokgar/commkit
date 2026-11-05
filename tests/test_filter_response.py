@@ -188,3 +188,24 @@ def test_complex_transfer_function_time_response(xp, xpt):
     actual = filtering.step_response((xp.asarray(b), xp.asarray(a)), num_samples=16)
     assert actual.dtype == xp.complex128
     xpt.assert_allclose(actual, xp.asarray(expected), atol=1e-12)
+
+
+@pytest.mark.parametrize("num_taps", [5, 40])
+def test_complex_fir_default_grid_is_two_sided(xp, xpt, num_taps):
+    """A complex filter's response differs at negative frequencies, so its
+    default grid spans [-fs/2, fs/2); a single tone exp(j2πf₀n) of 40 taps
+    peaks at +f₀ only, which a one-sided grid would show as well as -f₀ for
+    real taps.  Checked against scipy.signal.freqz on the whole circle, on
+    both the direct (5 taps) and the FFT path (40 taps)."""
+    fs, f0 = 1000.0, -125.0
+    n = np.arange(num_taps)
+    taps = np.exp(2j * np.pi * f0 / fs * n)
+    result = filtering.filter_response(xp.asarray(taps), nfft=64, sampling_rate=fs)
+    f = (np.arange(64) - 32) * fs / 64
+    _, expected = signal.freqz(taps, worN=2 * np.pi * f / fs)
+    xpt.assert_allclose(result.frequencies, xp.asarray(f))
+    xpt.assert_allclose(result.response, xp.asarray(expected), atol=1e-9)
+    peak = float(
+        to_device(result.frequencies, "cpu")[int(xp.argmax(xp.abs(result.response)))]
+    )
+    assert peak == f0

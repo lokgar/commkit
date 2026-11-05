@@ -12,13 +12,14 @@ import numpy as np
 
 from ..._array import as_2d, broadcast_channels, to_report_scalar
 from ...backend import ArrayType, dispatch, to_device
+from ...logger import logger
 from .._common import (
     _BETA_SLOPE,
     _FWHM_FROM_AREA,
-    _floor_levels,
     _increment_variance_fit,
-    _resolve_nperseg,
-    _welch_floor_bias,
+    _plateau_mask,
+    _welch_median_bias,
+    _whittle_fit,
 )
 from ..fm_noise import fm_noise_psd
 from .result import LinewidthEstimate, _check_fence, _check_nperseg
@@ -163,20 +164,25 @@ class BetaSeparation:
     ``f_max``, the AWGN's ``f²`` tail at high frequencies, which climbs back
     above the line and would otherwise be integrated as a false linewidth.
 
-    A cross-check from the white-FM floor, ``linewidth_floor = π·median(S_f)``,
-    is returned too.  Without a fence, the band of that median is detected
-    as the PSD's lowest-level (plateau) region: the floor from octave-band
-    medians and every bin within 3x of it, so a drift or flicker rise at low
-    frequencies and the AWGN's ``f²`` tail are excluded without fencing by
-    hand.  An explicit ``f_min`` or ``f_max`` makes the floor the median of
-    that band instead (the β-area integral always uses the fence as given).  The floor is corrected for the
-    χ²-median bias of Welch bins (a raw median reads ``≈ 1 - 1/(3K)`` below
-    the true level for ``K`` averaged segments).
+    The white-FM floor ``linewidth_floor = π·S_white`` is returned too, from
+    a Whittle-likelihood fit of white FM, flicker FM and the white angle
+    noise of the detection (the ``f²`` tail),
+    ``S_f = S_white + h_-1/f + σ²·(2 f_s/π²)·sin²(πf/f_s)``, the model of
+    :class:`DshFmFit`; ``flicker``, ``angle_noise_var`` and ``fm_psd_model``
+    carry the other terms.  Without a fence the fit runs from the lower edge
+    of the PSD's lowest-level (plateau) region, which excludes a drift rise
+    at low frequencies, to Nyquist, so the tail is modelled rather than cut
+    away by hand.  An explicit ``f_min`` or ``f_max`` makes the fit band the
+    fence instead (the β-area integral always uses the fence as given).
 
     Parameters
     ----------
     nperseg : int, optional
-        Welch segment length (see :func:`fm_noise_psd`).
+        Welch segment length.  Defaults to the largest power of two within an
+        eighth of the record (at least 256 samples): the β-area needs bins
+        well below the white-FM crossover ``f_c = πΔν/(8 ln 2)``, about
+        ``0.57·Δν``, which a coarse segment cannot resolve (a warning says
+        so).
     f_min : float, optional
         Lower fence in Hz (it drops the DC region of a residual frequency
         offset).  Defaults to the first non-zero Welch bin,
@@ -204,9 +210,10 @@ class BetaSeparation:
       below the knee where the plateau ``Δν/π`` meets the tail
       ``2σ_φ²T·f²``, ``f_knee = (Δν/(2π σ_φ² T))^{1/2}``.  Inspect it with
       :func:`commkit.plotting.plot_frequency_noise_psd`.
-    * ``linewidth_floor`` is the more robust estimate when the band holds a
-      clean white-FM plateau; the two should agree within tens of percent,
-      otherwise inspect the PSD.
+    * For pure white FM the β-area FWHM equals ``linewidth_floor`` once
+      ``f_c`` is resolved.  Drift or flicker adds area at low frequencies,
+      so the β-area FWHM then exceeds the floor: it is the width of the line
+      observed over the record, the floor the intrinsic (Lorentzian) part.
     """
 
     nperseg: int | None = None
@@ -308,15 +315,16 @@ def _beta_separation(
     phi: ArrayType, method: BetaSeparation, fs: float
 ) -> LinewidthEstimate:
     n_phi = phi.shape[-1]
-    f, S_f = fm_noise_psd(phi, sampling_rate=fs, nperseg=method.nperseg)
+    nps = min(_beta_nperseg(n_phi, method.nperseg), n_phi - 1)
+    f, S_f = fm_noise_psd(phi, sampling_rate=fs, nperseg=nps)
     _, xp, _ = dispatch(f)
 
     # Transfer the plot-sized spectrum once, up front: every fence, mask and
-    # median below is host-side arithmetic on these arrays, so reading f[1] /
-    # f[-1] off the device beforehand would only add two syncs.
+    # fit below is host-side arithmetic on these arrays.
     f_cpu = np.asarray(to_device(f, "cpu"), dtype=np.float64)
     S_cpu = np.asarray(to_device(S_f, "cpu"), dtype=np.float64)
     S2c = S_cpu[None, :] if S_cpu.ndim == 1 else S_cpu
+    n_ch = S2c.shape[0]
 
     # One-sided Welch axis: f[0] = 0, f[1] is the first non-zero bin.
     fmin = float(f_cpu[1]) if method.f_min is None else float(method.f_min)
@@ -332,52 +340,100 @@ def _beta_separation(
     S2 = S_f[None, :] if S_f.ndim == 1 else S_f
     beta = _BETA_SLOPE * f
     band = (f >= fmin) & (f <= fmax)
-    # Vectorized over channels: (C, nfreq) masks instead of a per-channel loop.
     above = band[None, :] & (S2 > beta[None, :])
     integrand = xp.where(above, S2, 0.0)
     area = xp.trapezoid(integrand, f, axis=-1)
     lw = xp.sqrt(_FWHM_FROM_AREA * area)
-
-    # Pack the two (C,) metrics into one D2H transfer; the floor median runs
-    # host-side so the plateau auto-detection is shared with DshFmPsd.
     lw_cpu, area_cpu = to_device(xp.stack([lw, area]), "cpu")
 
-    base2 = np.zeros(S2c.shape, dtype=bool)
-    base2[:] = band_cpu & (f_cpu > 0)
-    base2 &= np.isfinite(S2c)
+    # White-FM floor: a Whittle fit of white FM, flicker FM and the white
+    # angle noise (the f² tail) - the model of DshFmFit - so the tail is
+    # modelled rather than cut away.  Without a fence the fit runs from the
+    # lower edge of the detected plateau (above any drift rise) to Nyquist.
+    eligible = band_cpu & (f_cpu > 0)
+    base2 = eligible[None, :] & np.isfinite(S2c)
+    auto = method.f_min is None and method.f_max is None
+    fit2 = base2.copy()
+    if auto:
+        plateau2, _ = _plateau_mask(f_cpu, S2c, base2)
+        for c in range(n_ch):
+            if plateau2[c].any():
+                fit2[c] &= f_cpu >= f_cpu[plateau2[c]].min()
+            else:
+                logger.warning(
+                    "BetaSeparation: no white-FM plateau detected (channel %d) - "
+                    "the floor is fitted over the full band. Inspect the PSD "
+                    "before quoting Δν.",
+                    c,
+                )
+    _, k_seg = _welch_median_bias(n_phi - 1, nps)
+    dof = 2.0 * (k_seg / 1.056 if k_seg > 1 else 1.0)
+    pos = f_cpu > 0
+    noise_col = np.zeros_like(f_cpu)
+    noise_col[pos] = 2.0 * fs / np.pi**2 * np.sin(np.pi * f_cpu[pos] / fs) ** 2
+    with np.errstate(divide="ignore"):
+        X_all = np.stack([np.ones_like(f_cpu), 1.0 / f_cpu, noise_col], axis=1)
+    theta = np.zeros((n_ch, 3))
+    used2 = np.zeros(S2c.shape, dtype=bool)
+    for c in range(n_ch):
+        idx = np.flatnonzero(fit2[c])
+        if idx.size < 3:
+            raise ValueError(
+                f"BetaSeparation: only {idx.size} FM-PSD bins in the floor fit "
+                "band - widen [f_min, f_max] or lengthen nperseg."
+            )
+        theta[c], kept = _whittle_fit(S2c[c, idx], X_all[idx], dof=dof)
+        used2[c, idx[kept]] = True
+    model = np.full(S2c.shape, np.nan)
+    model[:, pos] = theta @ X_all[pos].T
+    floor_cpu = np.pi * theta[:, 0]
 
-    # Welch bins are χ²-distributed: the median-based floor reads the true
-    # level low by median(χ²_ν)/ν ≈ 1 - 1/(3K); divided back out below.  The
-    # segment length is reproduced from the resolver rather than read back off
-    # the device frequency axis (f[1] = fs/nperseg by construction).
-    nps_used = _resolve_nperseg(n_phi - 1, method.nperseg, cap=4096)
-    m_med, k_seg = _welch_floor_bias(n_phi - 1, nps_used, label="BetaSeparation")
+    # The β-area needs bins below the crossover of the white-FM plateau with
+    # the line, f_c = π Δν / (8 ln 2) ≈ 0.57 Δν; at the first bin or above
+    # it, the area is truncated or empty.
+    f_first = float(f_cpu[np.argmax(eligible)]) if eligible.any() else np.inf
+    for c in range(n_ch):
+        f_cross = np.pi * floor_cpu[c] / (8.0 * np.log(2.0))
+        if f_cross < 3.0 * f_first:
+            logger.warning(
+                "BetaSeparation: the white-FM crossover with the β-line "
+                "(f_c ≈ %.3g Hz, channel %d) is not resolved by the band, which "
+                "starts at %.3g Hz - the β-area misses the white-FM part; "
+                "lengthen nperseg to %d or more (and leave f_min below f_c/3).",
+                f_cross,
+                c,
+                f_first,
+                int(2 ** np.ceil(np.log2(3.0 * fs / max(f_cross, 1e-300)))),
+            )
 
-    used2, levels = _floor_levels(
-        f_cpu,
-        S2c,
-        base2,
-        auto=(method.f_min is None and method.f_max is None),
-        label="BetaSeparation",
-        fallback_desc="the full band",
-    )
-    # A band with no eligible bin reports a zero floor rather than NaN.
-    lw_floor_cpu = np.pi * np.where(np.isfinite(levels), levels, 0.0) / m_med
-    used_cpu = used2[0] if S_cpu.ndim == 1 else used2
-    if S_cpu.ndim == 1:
-        above_cpu = above_cpu[0]
+    def per_channel(a: np.ndarray) -> Any:
+        """The channel axis dropped for 1-D input."""
+        return a[0] if S_cpu.ndim == 1 else a
 
     was_1d = phi.ndim == 1
     return LinewidthEstimate(
         value=to_report_scalar(lw_cpu, was_1d=was_1d),
         method=method,
-        linewidth_floor=to_report_scalar(lw_floor_cpu, was_1d=was_1d),
+        linewidth_floor=to_report_scalar(floor_cpu, was_1d=was_1d),
+        flicker=to_report_scalar(theta[:, 1], was_1d=was_1d),
+        angle_noise_var=to_report_scalar(theta[:, 2], was_1d=was_1d),
         num_segments=k_seg,
         area_hz2=to_report_scalar(area_cpu, was_1d=was_1d),
         frequencies=f_cpu,
         fm_psd=S_cpu,
+        fm_psd_model=per_channel(model),
         beta_line=beta_cpu,
-        above=above_cpu,
-        used=used_cpu,
+        above=per_channel(above_cpu),
+        used=per_channel(used2),
         band=(fmin, fmax),
     )
+
+
+def _beta_nperseg(n: int, nperseg: int | None) -> int:
+    """Welch segment of ``BetaSeparation``: the largest power of two within
+    ``n/8`` by default (eight segments or more, at least 256 samples), since
+    the β-area needs bins far below the white-FM crossover and the Whittle
+    floor fit stays unbiased with few segments."""
+    if nperseg is not None:
+        return int(min(int(nperseg), n))
+    return int(min(max(1 << max(int(n // 8).bit_length() - 1, 0), 256), n))

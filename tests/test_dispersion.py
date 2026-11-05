@@ -20,17 +20,13 @@ LAMBDA_NM = 1550.0
 class TestUnits:
     def test_beta2_of_standard_fiber(self) -> None:
         """D = 17 ps/(nm km) at 1550 nm is β₂ ≈ -21.68 ps²/km."""
-        b2l = beta2_length(
-            dispersion_ps_nm_km=17.0, fiber_length_km=1.0, center_wavelength_nm=1550.0
-        )
+        b2l = beta2_length(dispersion_ps_nm=17.0, center_wavelength_nm=1550.0)
         assert b2l == pytest.approx(-21.68e-24, rel=2e-3)  # s² over 1 km
 
     def test_linear_in_length_and_dispersion(self) -> None:
         def b2l(d: float, length: float) -> float:
             return beta2_length(
-                dispersion_ps_nm_km=d,
-                fiber_length_km=length,
-                center_wavelength_nm=LAMBDA_NM,
+                dispersion_ps_nm=d * length, center_wavelength_nm=LAMBDA_NM
             )
 
         assert b2l(17.0, 80.0) == pytest.approx(80.0 * b2l(17.0, 1.0), rel=1e-12)
@@ -43,8 +39,7 @@ class TestUnits:
 
         def beta2(lam_nm: float) -> float:
             return beta2_length(
-                dispersion_ps_nm_km=d0 + s * (lam_nm - LAMBDA_NM),
-                fiber_length_km=1.0,
+                dispersion_ps_nm=d0 + s * (lam_nm - LAMBDA_NM),
                 center_wavelength_nm=lam_nm,
             )
 
@@ -56,9 +51,8 @@ class TestUnits:
             omega(LAMBDA_NM + dl) - omega(LAMBDA_NM - dl)
         )
         b3 = beta3_length(
-            dispersion_ps_nm_km=d0,
-            dispersion_slope_ps_nm2_km=s,
-            fiber_length_km=1.0,
+            dispersion_ps_nm=d0,
+            dispersion_slope_ps_nm2=s,
             center_wavelength_nm=LAMBDA_NM,
         )
         assert b3 == pytest.approx(numeric, rel=1e-6)
@@ -110,8 +104,7 @@ class TestSign:
     def test_blue_arrives_first_in_anomalous_fiber(self, xp: Any) -> None:
         kw = dict(
             sampling_rate=self.FS,
-            dispersion_ps_nm_km=self.D,
-            fiber_length_km=self.L,
+            dispersion_ps_nm=self.D * self.L,
             center_wavelength_nm=LAMBDA_NM,
         )
         blue = apply_dispersion(
@@ -126,8 +119,7 @@ class TestSign:
         x = _tone_burst(xp, self.N, self.FS, 30e9)
         kw = dict(
             sampling_rate=self.FS,
-            dispersion_ps_nm_km=self.D,
-            fiber_length_km=self.L,
+            dispersion_ps_nm=self.D * self.L,
             center_wavelength_nm=LAMBDA_NM,
         )
         forward = _centroid(apply_dispersion(x, inverse=False, **kw)) - _centroid(x)

@@ -427,7 +427,7 @@ class TestSlipQuantum:
 
 
 class TestDataAided:
-    """DataAided corrects an arbitrary constant per-channel rotation."""
+    """ConstantPhase corrects an arbitrary constant per-channel rotation."""
 
     N = 2048
 
@@ -436,7 +436,9 @@ class TestDataAided:
         ref = _clean_qam16(xp, self.N, seed=0)
         theta_true = 0.7  # ~40°, not a π/2 multiple
         rotated = ref * xp.array(np.exp(1j * theta_true), dtype=ref.dtype)
-        out = recovery.correct_carrier_phase(rotated, recovery.DataAided(symbols=ref))
+        out = recovery.correct_carrier_phase(
+            rotated, recovery.ConstantPhase(symbols=ref)
+        )
         residual = float(xp.abs(xp.angle(xp.mean(out * xp.conj(ref)))))
         assert residual < 0.02
 
@@ -446,7 +448,7 @@ class TestDataAided:
         ref_full = _clean_qam16(xp, N, seed=1)
         rotated = ref_full * xp.array(np.exp(1j * 1.2), dtype=ref_full.dtype)
         out = recovery.correct_carrier_phase(
-            rotated, recovery.DataAided(symbols=ref_full[:N_pre])
+            rotated, recovery.ConstantPhase(symbols=ref_full[:N_pre])
         )
         assert out.shape == rotated.shape
         residual = float(xp.abs(xp.angle(xp.mean(out * xp.conj(ref_full)))))
@@ -463,7 +465,9 @@ class TestDataAided:
                 ref_b * xp.array(np.exp(1j * -1.1), dtype=ref_b.dtype),
             ]
         )
-        out = recovery.correct_carrier_phase(rotated, recovery.DataAided(symbols=ref))
+        out = recovery.correct_carrier_phase(
+            rotated, recovery.ConstantPhase(symbols=ref)
+        )
         assert out.shape == (2, self.N)
         for ch in range(2):
             residual = float(xp.abs(xp.angle(xp.mean(out[ch] * xp.conj(ref[ch])))))
@@ -477,7 +481,7 @@ class TestDataAided:
         corrupted = xp.array(rotated)
         corrupted[:skip] = ref[:skip] * xp.array(np.exp(1j * 2.5), dtype=ref.dtype)
         out = recovery.correct_carrier_phase(
-            corrupted, recovery.DataAided(symbols=ref, num_skip_symbols=skip)
+            corrupted, recovery.ConstantPhase(symbols=ref, num_skip_symbols=skip)
         )
         residual = float(xp.abs(xp.angle(xp.mean(out[skip:] * xp.conj(ref[skip:])))))
         assert residual < 0.02
@@ -488,11 +492,11 @@ class TestDataAided:
         symbols = _clean_qam16(xp, 500, seed=1)
         with pytest.raises(ValueError, match="num_skip_symbols"):
             recovery.correct_carrier_phase(
-                symbols, recovery.DataAided(symbols=ref, num_skip_symbols=100)
+                symbols, recovery.ConstantPhase(symbols=ref, num_skip_symbols=100)
             )
         with pytest.raises(ValueError, match="num_skip_symbols"):
             recovery.correct_carrier_phase(
-                symbols, recovery.DataAided(symbols=ref, num_skip_symbols=200)
+                symbols, recovery.ConstantPhase(symbols=ref, num_skip_symbols=200)
             )
 
     def test_dtype_preserved(self, xp):
@@ -500,7 +504,7 @@ class TestDataAided:
         ref = _clean_qam16(xp, 256, seed=0)
         out = recovery.correct_carrier_phase(
             ref * xp.array(np.exp(1j * 0.5), dtype=ref.dtype),
-            recovery.DataAided(symbols=ref),
+            recovery.ConstantPhase(symbols=ref),
         )
         assert out.dtype == ref.dtype
 
@@ -518,7 +522,7 @@ class TestDataAided:
         sig = sig.replace(samples=ref * xp.array(np.exp(1j * 0.7), dtype=ref.dtype))
         sig = apply_awgn(sig, esn0_db=30, rng=9)
 
-        out_sig = recovery.correct_carrier_phase(sig, recovery.DataAided())
+        out_sig = recovery.correct_carrier_phase(sig, recovery.ConstantPhase())
 
         assert out_sig is not sig
         assert out_sig.reference is sig.reference
@@ -536,10 +540,10 @@ class TestDataAided:
             rng=0,
         )
         with pytest.raises(ValueError, match="sps=2"):
-            recovery.correct_carrier_phase(sig, recovery.DataAided())
+            recovery.correct_carrier_phase(sig, recovery.ConstantPhase())
 
     def test_signal_input_raises_without_reference(self, xp):
-        """Raises ValueError when neither DataAided nor the Signal has symbols."""
+        """Raises ValueError when neither ConstantPhase nor the Signal has symbols."""
         sig = generate(
             Constellation.qam(16),
             num_symbols=256,
@@ -550,7 +554,7 @@ class TestDataAided:
         )
         sig = sig.replace(reference=None)
         with pytest.raises(ValueError, match="known symbols"):
-            recovery.correct_carrier_phase(sig, recovery.DataAided())
+            recovery.correct_carrier_phase(sig, recovery.ConstantPhase())
 
 
 class TestResolveChannelPermutation:

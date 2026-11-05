@@ -5,7 +5,6 @@ from typing import Any
 from unittest.mock import patch
 
 import matplotlib.pyplot as plt
-import matplotlib.ticker as mticker
 import numpy as np
 import pytest
 
@@ -75,19 +74,18 @@ class TestPlotSpectralAndPSD:
             plot_psd(xp.ones(256), sampling_rate=1.0, domain="IF", show=False)
 
     def test_psd_auto_scale(self, xp: Any) -> None:
-        """Verify PSD frequency axis uses an SI-prefixed engineering tick formatter."""
+        """The frequency axis carries one SI prefix, in the label's unit."""
         samples = xp.random.randn(256)
         fig, ax = plot_psd(samples, sampling_rate=2e12, show=False)
-        assert ax.get_xlabel() == "Frequency [Hz]"
-        fmt = ax.xaxis.get_major_formatter()
-        assert isinstance(fmt, mticker.EngFormatter)
-        assert fmt(2e12) == "2 T"
-        assert fmt(-5e9) == "−5 G"
-        assert fmt(0) == "0"
-        assert fmt(3) == "3"
+        fig.canvas.draw()
+        assert ax.get_xlabel() == "Frequency [THz]"
+        assert "0.4" in [
+            t.get_text() for t in ax.get_xticklabels()
+        ]  # one-sided: 0-1 THz
 
         fig, ax = plot_psd(samples, sampling_rate=2e6, show=False)
-        assert "M" in ax.xaxis.get_major_formatter()(2e6)
+        fig.canvas.draw()
+        assert ax.get_xlabel() == "Frequency [MHz]"
 
     def test_psd_axis_overlay_warning(self, caplog: Any, xp: Any) -> None:
         """Verify warning when single axis is provided for multichannel PSD."""

@@ -10,16 +10,13 @@ from scipy.optimize import nnls
 from scipy.stats import chi2
 
 from ..backend import to_device
-from ..logger import logger
 
 __all__ = [
     "_BETA_SLOPE",
     "_FWHM_FROM_AREA",
-    "_floor_levels",
     "_increment_variance_fit",
     "_plateau_mask",
     "_resolve_nperseg",
-    "_welch_floor_bias",
     "_welch_median_bias",
     "_whittle_fit",
 ]
@@ -245,118 +242,6 @@ def _plateau_mask(
         levels[c] = float(np.median(med_h[final]))
         used2[c, idx_el[np.isin(cell_of, occ_h[final])]] = True
 
-    return used2, levels
-
-
-def _welch_floor_bias(n_samples: int, nperseg: int, *, label: str) -> tuple[float, int]:
-    """``_welch_median_bias`` plus the shared segment-count diagnostic.
-
-    Every median-based white-FM floor in this package (β-separation and DSH
-    alike) divides out the same χ²-median bias and wants the same warning when
-    too few Welch segments back it, so the message lives here rather than being
-    re-typed per estimator.
-
-    Parameters
-    ----------
-    n_samples : int
-        Length of the sequence handed to Welch (the differentiated phase).
-    nperseg : int
-        Welch segment length actually used (see ``_resolve_nperseg``).
-    label : str
-        Caller name used in the log messages.
-
-    Returns
-    -------
-    factor : float
-        ``median/mean`` ratio to divide the median-based floor by.
-    num_segments : int
-        Welch segment count ``K``.
-    """
-    m_med, k_seg = _welch_median_bias(n_samples, nperseg)
-    if k_seg < 4:
-        logger.warning(
-            "%s: only %d Welch segment(s) at nperseg=%d - the floor median is "
-            "noisy and the χ²-median correction (÷%.3f) is asymptotic; extend "
-            "the record (aim for ≥ 5·nperseg samples).",
-            label,
-            k_seg,
-            nperseg,
-            m_med,
-        )
-    else:
-        logger.info(
-            "%s: %d Welch segments - χ²-median floor bias corrected by ÷%.4f.",
-            label,
-            k_seg,
-            m_med,
-        )
-    return m_med, k_seg
-
-
-def _floor_levels(
-    f,
-    s2,
-    base2,
-    *,
-    auto: bool,
-    label: str,
-    fallback_desc: str = "the fenced band",
-):
-    """White-FM floor level per channel, by plateau auto-detection or fence.
-
-    The summary half of both PSD linewidth routes: ``Δν = π · level`` once the
-    caller divides out the χ²-median bias.  Host-side NumPy by design (the
-    spectrum has already been transferred once).
-
-    Parameters
-    ----------
-    f : ndarray, (nf,)
-        One-sided frequency axis (host).
-    s2 : ndarray, (C, nf)
-        FM-noise PSD per channel (host; NaN allowed at masked bins).
-    base2 : ndarray of bool, (C, nf)
-        Eligible bins (validity mask and any user fences).
-    auto : bool
-        If True, auto-detect the plateau (``_plateau_mask``) and fall back to
-        ``base2`` per channel where detection fails.  If False, the median
-        runs over ``base2`` as given.
-    label : str
-        Caller name used in the fallback warning.
-    fallback_desc : str
-        Human-readable description of ``base2``, the fallback, for the warning.
-
-    Returns
-    -------
-    used2 : ndarray of bool, (C, nf)
-        Bins the median actually ran over.
-    levels : ndarray, (C,)
-        Raw median level per channel - **not** χ²-corrected - or NaN where no
-        eligible bin remained (the caller decides whether that is a zero floor
-        or an error).
-    """
-    n_ch = s2.shape[0]
-
-    def _median(mask_row, ch):
-        return float(np.median(s2[ch][mask_row])) if mask_row.any() else np.nan
-
-    if auto:
-        used2, levels = _plateau_mask(f, s2, base2)
-        for c in range(n_ch):
-            if np.isfinite(levels[c]):
-                continue
-            logger.warning(
-                "%s: no plateau detected (channel %d) - the floor median falls "
-                "back to %s. Inspect the PSD before quoting Δν.",
-                label,
-                c,
-                fallback_desc,
-            )
-            used2[c] = base2[c]
-            levels[c] = _median(used2[c], c)
-        return used2, levels
-
-    used2 = np.broadcast_to(base2, s2.shape)
-    levels = np.array([_median(used2[c], c) for c in range(n_ch)])
     return used2, levels
 
 

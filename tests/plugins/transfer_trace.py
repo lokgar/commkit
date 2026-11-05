@@ -79,12 +79,17 @@ _DOCUMENTED: dict[str, str] = {
     "equalization/_sequential/_setup.py::_assemble_sequential": _RECURSION,
     "equalization/_sequential/_setup.py::_prepare_sequential": _RECURSION,
     "io.py::save_npz": "explicit device move (samples to the host to store them)",
+    "filtering/fiber.py::_quadratic_phase": _HOST_VALUE + " (the known symbols)",
+    "filtering/fiber.py::_quadratic_phase_pass": _REPORT
+    + " (the differential phase across the band, fitted on the host)",
+    "filtering/fiber.py::_clock_tone": _REPORT
+    + " (the dispersion scan, searched for its peak on the host)",
     "frequency.py::_mengali_morelli": _RECURSION + " (bootstrap over the lags)",
     "_cuda/__init__.py::_iir_factory.<locals>.launch": _HOST_VALUE
     + " (the IIR state transitions)",
     "metrics/_common.py::_paired": _HOST_VALUE + " (reference symbols)",
     "coding/performance.py::error_rate_curve": _PAYLOAD + " (per batch of blocks)",
-    "recovery/corrections.py::DataAided.__post_init__": "value object: host copy",
+    "recovery/corrections.py::ConstantPhase.__post_init__": "value object: host copy",
     "recovery/corrections.py::_data_aided": _HOST_VALUE + " (reference symbols)",
     "recovery/corrections.py::correct_cycle_slips": _RECURSION,
     "recovery/pilots.py::_extract_pilot_phasor": _HOST_VALUE

@@ -229,8 +229,8 @@ class TestFiberChain:
         if dispersion_sign:
             y = ck.filtering.correct_chromatic_dispersion(
                 y,
-                dispersion_ps_nm_km=dispersion_sign * fiber.dispersion_ps_nm_km,
-                fiber_length_km=80.0,
+                dispersion_ps_nm=dispersion_sign * fiber.dispersion_ps_nm_km * 80.0,
+                method="whole_record",
             )
         y = ck.filtering.matched_filter(y)
         ref = tx.reference.symbols

@@ -86,11 +86,11 @@ class TestPlotFrequencySync:
         assert np.median(df_line) == pytest.approx(2.0, abs=0.1)
 
     def test_pilot_phase_frequency_estimate(self, xp: Any) -> None:
-        """A PilotSymbols estimate labels the fit with its offset."""
+        """A PilotSlope estimate labels the fit with its offset."""
         x, s = _qpsk(xp, df=1e3)
         idx = np.arange(0, 4096, 64)
         est = frequency.estimate_frequency_offset(
-            x, frequency.PilotSymbols(idx, s[0, idx]), sampling_rate=FS
+            x, frequency.PilotSlope(idx, s[0, idx]), sampling_rate=FS
         )
         fig, axes = plot_pilot_phase_estimate(est, sampling_rate=FS, show=False)
         assert np.asarray(axes, dtype=object).shape == (1, 1)

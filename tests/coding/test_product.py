@@ -18,7 +18,7 @@ from commkit.coding import (
     LinearBlockCode,
     MaximumLikelihood,
     ReedSolomonCode,
-    Stages,
+    StageDecoders,
     StaircaseCode,
     Syndrome,
     decode,
@@ -306,7 +306,7 @@ class TestConcatenated:
             rng=8,
             device=backend_device,
         )
-        method = Stages(inner=Chase(6, hard=Syndrome(max_weight=1)))
+        method = StageDecoders(inner=Chase(6, hard=Syndrome(max_weight=1)))
         for esn0_db, decodes in ((13.6, True), (13.2, False)):
             rx = apply_awgn(sig, esn0_db=esn0_db, rng=9)
             p = qam16_gray_ber(10 ** (esn0_db / 10))
@@ -329,7 +329,7 @@ class TestConcatenated:
         noise = xp.asarray(rng.standard_normal(c.shape).astype(np.float32))
         llrs = (2.0 * (1.0 - 2.0 * c) + noise).astype(xp.float32)
         chase = Chase(2)
-        res = decode(llrs, code=code, method=Stages(inner=chase))
+        res = decode(llrs, code=code, method=StageDecoders(inner=chase))
         xpt.assert_array_equal(res.llrs, decode(llrs, code=inner, method=chase).llrs)
         assert res.llrs.shape == c.shape
         assert decode(llrs, code=code).llrs is None  # Syndrome: hard output
@@ -344,7 +344,9 @@ class TestConcatenated:
         flips = xp.asarray(rng.random(c.shape) < 3e-3)
         llrs = xp.where(flips, -0.5 * llrs, llrs)
         res = decode(
-            llrs, code=code, method=Stages(inner=Chase(3, hard=Syndrome(max_weight=1)))
+            llrs,
+            code=code,
+            method=StageDecoders(inner=Chase(3, hard=Syndrome(max_weight=1))),
         )
         xpt.assert_array_equal(res.bits, u)
 

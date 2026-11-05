@@ -1,4 +1,4 @@
-r"""Linewidth from delayed self-heterodyne beats: :class:`DshFmPsd`,
+r"""Linewidth from delayed self-heterodyne beats: :class:`DshFmFit`,
 :class:`DshIncrement` and :class:`DshLorentzian`, and their estimators.
 
 They read a beat record, real (single photodetector) or complex (IQ front
@@ -27,7 +27,7 @@ from ..interferometry import _analytic_beat, dsh_phase
 from .result import LinewidthEstimate, _check_fence, _check_nperseg
 
 __all__ = [
-    "DshFmPsd",
+    "DshFmFit",
     "DshIncrement",
     "DshLorentzian",
 ]
@@ -44,7 +44,7 @@ def _check_delay(delay: float) -> None:
 
 
 @dataclass(frozen=True)
-class DshFmPsd:
+class DshFmFit:
     r"""Linewidth from a model fit to the DSH beat FM-noise PSD.
 
     The beat's differential phase (:func:`dsh_phase`) gives the FM-noise PSD
@@ -386,7 +386,7 @@ def _lorentzian_widths(f, p, level_lin):
     return float(f_hi - f_lo)
 
 
-def _dsh_fm_psd(samples: ArrayType, method: DshFmPsd, fs: float) -> LinewidthEstimate:
+def _dsh_fm_psd(samples: ArrayType, method: DshFmFit, fs: float) -> LinewidthEstimate:
     td = float(method.delay)
     m_samp = _delay_samples(td, fs)
     dphi, f_hat = dsh_phase(
@@ -409,7 +409,7 @@ def _dsh_fm_psd(samples: ArrayType, method: DshFmPsd, fs: float) -> LinewidthEst
     )
     if nps > m_samp:
         logger.info(
-            "estimate_linewidth(DshFmPsd): nperseg=%d exceeds the delay (%.0f "
+            "estimate_linewidth(DshFmFit): nperseg=%d exceeds the delay (%.0f "
             "samples) - the fit models the interferometer fringes and depends "
             "on the exact delay.",
             nps,
@@ -422,12 +422,15 @@ def _dsh_fm_psd(samples: ArrayType, method: DshFmPsd, fs: float) -> LinewidthEst
     fmin = 0.0 if method.f_min is None else float(method.f_min)
     fmax = fs / 2.0 if method.f_max is None else float(method.f_max)
     x_in, xp_in, _ = dispatch(samples)
-    if method.f_max is None and not xp_in.iscomplexobj(x_in):
+    support = fs / 2.0
+    if not xp_in.iscomplexobj(x_in):
         # A real (single-photodiode) beat carries FM sidebands only out to the
         # carrier's distance from DC and Nyquist; beyond it the analytic
-        # signal has no support and the PSD reads fake-low.
+        # signal has no support and the PSD reads fake-low.  Those bins are
+        # neither fitted nor reported.
         fh = float(np.min(np.abs(np.asarray(f_hat))))
-        fmax = min(fmax, fh, fs / 2.0 - fh)
+        support = min(fh, fs / 2.0 - fh)
+        fmax = min(fmax, support)
     band = (f_cpu > 0) & (f_cpu >= fmin) & (f_cpu <= fmax)
     if int(band.sum()) < 8:
         raise ValueError(
@@ -448,7 +451,7 @@ def _dsh_fm_psd(samples: ArrayType, method: DshFmPsd, fs: float) -> LinewidthEst
 
     # Display: the beat PSD divided by the interferometer response, and the
     # fitted model in the same units.
-    valid = g >= 4.0 * float(method.notch_guard)
+    valid = (g >= 4.0 * float(method.notch_guard)) & (f_cpu <= support)
     with np.errstate(divide="ignore", invalid="ignore"):
         S_laser = np.where(valid, S2 / g, np.nan)
         noise = theta[:, 2:3] * (2.0 * fs / np.pi**2) * np.sin(np.pi * f_cpu / fs) ** 2
@@ -608,7 +611,7 @@ def _dsh_lorentzian(
     if np.any(np.isfinite(coh) & (coh < 6.0)):
         logger.warning(
             "estimate_linewidth: τ_d/τ_c = %s < 6 - coherent-regime fringes; the "
-            "Lorentzian width is unreliable. Use DshFmPsd or DshIncrement.",
+            "Lorentzian width is unreliable. Use DshFmFit or DshIncrement.",
             np.array2string(coh, precision=2),
         )
 
