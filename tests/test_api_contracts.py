@@ -330,7 +330,7 @@ ROWS: list[Row] = [
     Row("commkit.coding.linear.MaximumLikelihood", VALUE),
     Row("commkit.coding.linear.Syndrome", VALUE),
     # --- core ---------------------------------------------------------------
-    Row("commkit.core.frame.Preamble", VALUE),
+    Row("commkit.core.preamble.Preamble", VALUE),
     Row("commkit.core.signal.Reference", VALUE),
     Row("commkit.core.frame.SingleCarrierFrame", VALUE),
     # Signal only: the frame layout lives on the Signal.
