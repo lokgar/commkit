@@ -6,6 +6,8 @@ synthesized from one (``Δφ(t) = φ(t) - φ(t-τ_d)`` on an AOM carrier). Input
 fixture.
 """
 
+import logging
+
 import numpy as np
 import pytest
 
@@ -66,17 +68,21 @@ class TestLinewidthEstimation:
         )
         assert res.value == pytest.approx(dnu, rel=0.10)
 
-    def test_beta_separation_floor(self, xp):
+    def test_beta_separation_floor(self, xp, caplog):
+        """The white-FM floor within a fence, at a segment too coarse for the
+        β-area: the floor is right and the unresolved area is flagged."""
         n = 1 << 19
         dnu = 1.5e6
         phi = _wiener_phase(dnu, n, seed=13)
-        out = analysis.estimate_linewidth(
-            xp.asarray(phi),
-            BetaSeparation(nperseg=1 << 13, f_min=5e6, f_max=2e8),
-            sampling_rate=R,
-        )
-        # White-FM floor Δν = π·S_f is the robust estimator at high baud.
+        with caplog.at_level(logging.WARNING, logger="commkit"):
+            out = analysis.estimate_linewidth(
+                xp.asarray(phi),
+                BetaSeparation(nperseg=1 << 13, f_min=5e6, f_max=2e8),
+                sampling_rate=R,
+            )
         assert out.linewidth_floor == pytest.approx(dnu, rel=0.10)
+        # f_c = πΔν/(8 ln2) ≈ 0.85 MHz lies below the 5 MHz fence.
+        assert "crossover" in caplog.text
 
     def test_beta_area_recovers_white_fm(self, xp):
         """β-area is exact for white FM when the line crossing f_c is resolved.
@@ -134,24 +140,39 @@ class TestLinewidthEstimation:
         # several times - the region is a union of intervals, not one band.
         assert above.any()
 
-    def test_beta_floor_auto_dodges_awgn_tail(self, xp):
-        """Unfenced floor auto-detects the plateau, excluding the AWGN f² tail.
-
-        Previously the unfenced floor median ran over the full band and was
-        AWGN-dominated; the plateau detector must recover the white-FM level
-        without a manual f_max.
-        """
+    def test_beta_floor_models_the_awgn_tail(self, xp):
+        """Unfenced, the floor fit models the AWGN f² tail instead of cutting
+        it: it recovers Δν and the angle noise of σ²/2 = 5e-3 rad² per
+        sample, over a band reaching Nyquist.  The old plateau median read
+        the tail's foot and came out 11 % high at the default segment of a
+        32 GBd, 1 MHz, 20 dB trajectory (measured: the fit 0.999 MHz)."""
         n, dnu = 1 << 19, 1.5e6
         phi = _wiener_phase(dnu, n, seed=13)
         rng = np.random.default_rng(8)
         phi = phi + rng.normal(0, np.sqrt(10 ** (-2.0) / 2), n)  # AWGN angle noise
         out = analysis.estimate_linewidth(
-            xp.asarray(phi), BetaSeparation(nperseg=1 << 13), sampling_rate=R
+            xp.asarray(phi), BetaSeparation(nperseg=1 << 17), sampling_rate=R
         )
-        assert out.linewidth_floor == pytest.approx(dnu, rel=0.15)
-        # The tail region is excluded: the used band ends well below Nyquist.
+        assert out.linewidth_floor == pytest.approx(dnu, rel=0.05)
+        assert out.angle_noise_var == pytest.approx(10 ** (-2.0) / 2, rel=0.05)
         f_used = out.frequencies[out.used]
-        assert float(f_used[-1]) < 0.5 * R / 2
+        assert float(f_used[-1]) > 0.9 * R / 2
+
+    def test_beta_floor_excludes_a_drift_rise(self, xp):
+        """A slow frequency wander (±20 MHz at 1 MHz) raises S_f by orders of
+        magnitude below a few MHz; the unfenced fit starts above it, at the
+        plateau's lower edge, and still reads the white-FM floor, while the
+        β-area FWHM includes the wander and exceeds it."""
+        n, dnu = 1 << 19, 1.5e6
+        t = np.arange(n) / R
+        wander = 2 * np.pi * np.cumsum(20e6 * np.sin(2 * np.pi * 1e6 * t)) / R
+        phi = _wiener_phase(dnu, n, seed=13) + wander
+        out = analysis.estimate_linewidth(
+            xp.asarray(phi), BetaSeparation(nperseg=1 << 17), sampling_rate=R
+        )
+        assert out.linewidth_floor == pytest.approx(dnu, rel=0.10)
+        assert float(out.frequencies[out.used][0]) > 1.5e6
+        assert out.value > 3 * dnu
 
     def test_increment_returns_plot_data(self, xp):
         """The returned fit data plots directly: Var(k) fit (slope), point (subtract)."""
@@ -224,6 +245,22 @@ class TestDshLinewidth:
         assert res.band[1] > FS / m
         f_used = res.frequencies[res.used]
         assert res.band == (float(f_used[0]), float(f_used[-1]))
+
+    def test_fm_psd_real_beat_reports_only_its_support(self, xp):
+        """A real beat at 80 MHz sampled at 500 MS/s carries FM sidebands out
+        to 80 MHz only (the distance to DC); the PSD and the model are NaN
+        beyond, where the analytic signal has no support and the bins read
+        several times low (measured below 100 MHz: 0.4 of the plateau)."""
+        n, m = 1 << 20, 500
+        z, _ = make_dsh_beat(2e6, n, m, 80e6, snr_db=25, seed=4)
+        res = analysis.estimate_linewidth(
+            xp.asarray(np.real(z)), DshFmPsd(delay=m / FS), sampling_rate=FS
+        )
+        beyond = res.frequencies > 80e6 * 1.001
+        assert not res.valid[beyond].any()
+        assert np.isnan(res.fm_psd[beyond]).all()
+        assert np.isnan(res.fm_psd_model[beyond]).all()
+        assert res.valid[(res.frequencies > 0) & (res.frequencies < 70e6)].all()
 
     def test_fm_psd_flicker_is_modeled(self, xp):
         """A flicker corner inside the band neither biases the white-FM level

@@ -85,6 +85,7 @@ class TestPlotAnalysis:
         ]
         assert ax.lines[0].get_color() != ax.lines[1].get_color()
 
+    @pytest.mark.allow_warnings  # a short phase: the β-area is unresolved
     def test_frequency_noise_psd_beta(self, xp: Any) -> None:
         """BetaSeparation: PSD, β-line, integration fill and floor guide."""
         est = analysis.estimate_linewidth(
@@ -151,6 +152,9 @@ class TestPlotAnalysis:
         fig, ax = plot_dsh_beat_psd(est)
         depths = [ln.get_ydata()[0] for ln in ax.lines[1:]]
         assert -15.0 in depths and -3.01 in depths
+        # Zoomed on the line: twice the -15 dB width on each side.
+        w = 2 * np.sqrt(10**1.5 - 1) * est.value
+        assert ax.get_xlim() == pytest.approx((-2 * w, 2 * w))
         with patch("matplotlib.pyplot.show"):
             assert plot_dsh_beat_psd(est, show=True) is None
 
@@ -166,6 +170,7 @@ class TestPlotAnalysis:
         with pytest.raises(ValueError, match=match):
             plot(est)
 
+    @pytest.mark.allow_warnings  # a short phase: the β-area is unresolved
     def test_carrier_phase_characterization(self, xp: Any) -> None:
         """The dashboard draws the four results in a 2x2 grid."""
         phi = _phase(xp)

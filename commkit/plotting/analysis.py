@@ -96,7 +96,7 @@ def plot_carrier_phase_decomposition(
             t,
             phi_c[i],
             alpha=0.4,
-            label=clabel if drift_c is None else None,
+            label=clabel,
         )[0]
         if drift_c is not None:
             drift_label = (
@@ -198,11 +198,12 @@ def plot_frequency_drift(
 
 
 def _log_cell_median(f_pos, s, sel, points_per_octave=24):
-    """Median-reduce a PSD onto a log-frequency grid (NaN for empty cells).
+    """Median-reduce a PSD onto a log-frequency grid.
 
     Returns the geometric cell-center frequencies and the per-cell median of
-    the bins selected by ``sel``: a readable trace of a dense Welch spectrum,
-    and the same reduction the plateau detector takes its median over.
+    the bins selected by ``sel``, for the occupied cells only (at low
+    frequencies a cell is narrower than a Welch bin, and an empty cell would
+    break the drawn line): a readable trace of a dense Welch spectrum.
     """
     if not sel.any():
         return np.array([]), np.array([])
@@ -218,7 +219,8 @@ def _log_cell_median(f_pos, s, sel, points_per_octave=24):
         cell_sel = sel & (idx == k)
         if cell_sel.any():
             med[k] = float(np.median(s[cell_sel]))
-    return centers, med
+    occupied = np.isfinite(med)
+    return centers[occupied], med[occupied]
 
 
 def plot_frequency_noise_psd(
@@ -245,14 +247,17 @@ def plot_frequency_noise_psd(
     * ``above`` (``BetaSeparation``): the β-integration region
       ``{f : S_f(f) > β(f)}``, in general a union of disjoint intervals; the
       area between the dashed β-line and the PSD is filled where it holds.
-    * ``used``: the bins the estimate ran over (the median of the
-      ``BetaSeparation`` floor, or the ``DshFmPsd`` fit with its spurs
-      removed).  Sparse masks (400 bins or fewer) are drawn as markers on the
-      PSD, dense ones as a highlighted log-binned median curve.
-    * ``fm_psd_model`` (``DshFmPsd``): the fitted model of white FM, flicker FM
-      and detection noise, drawn over the PSD.
+    * ``used``: the bins the white-FM fit ran over, spurs removed.  Sparse
+      masks (400 bins or fewer) are drawn as markers on the PSD, dense ones
+      as a highlighted log-binned median curve.
+    * ``fm_psd_model``: the fitted model of white FM, flicker FM and
+      detection noise, drawn over the PSD.
 
-    Dense spectra are drawn faint with a log-binned median trace on top.
+    Dense spectra are drawn faint with a log-binned median trace on top, and
+    the model through the same reduction (a model divided by the response
+    of a fringe-resolving DSH fit swings at every notch).  The β-line is
+    drawn only up to ten times the highest PSD value, so it does not set
+    the vertical range.
     Every channel's PSD is drawn; the masks are those of channel 0.
 
     Parameters
@@ -315,9 +320,11 @@ def plot_frequency_noise_psd(
         b_c = None
         if beta_line is not None:
             b_c = np.asarray(to_device(beta_line, "cpu"), dtype=np.float64)
+            top = 10.0 * float(np.nanmax(S_c[:, pos]))
+            shown = pos & (b_c <= top)
             axi.loglog(
-                f_c[pos],
-                b_c[pos],
+                f_c[shown],
+                b_c[shown],
                 color="#ff5555",
                 ls="--",
                 label=r"$\beta$-separation line",
@@ -341,9 +348,14 @@ def plot_frequency_noise_psd(
         model = getattr(estimate, "fm_psd_model", None)
         if model is not None:
             m_c = _as_channels(model)
-            axi.loglog(fp, m_c[0, pos], color="#ef476f", label="Fitted model")
+            m_i = m_c[0, pos]
+            if dense:
+                fm, mm = _log_cell_median(fp, m_i, np.isfinite(m_i))
+            else:
+                fm, mm = fp, m_i
+            axi.loglog(fm, mm, color="#ef476f", label="Fitted model", zorder=3)
 
-        used_label = "Fit bins" if model is not None else "Plateau bins (median)"
+        used_label = "Fit bins"
         if used is not None:
             u_c = np.asarray(to_device(used, "cpu"), dtype=bool)
             if u_c.ndim > 1:
@@ -362,10 +374,7 @@ def plot_frequency_noise_psd(
                 # Dense mask: highlight the log-binned median over the accepted
                 # region instead of splattering one marker per bin.
                 fg, sg = _log_cell_median(fp, S_c[0, pos], sel)
-                region = (
-                    "Fit region" if model is not None else "Plateau (median region)"
-                )
-                axi.loglog(fg, sg, color="#06d6a0", label=region)
+                axi.loglog(fg, sg, color="#06d6a0", label="Fit region")
 
         if floor is not None:
             floors = np.atleast_1d(np.asarray(floor, dtype=np.float64))
@@ -404,7 +413,7 @@ def plot_frequency_noise_psd(
 def plot_allan_deviation(
     allan,
     *,
-    reference_slopes: bool = True,
+    reference_slopes: bool = False,
     ax=None,
     label: str | None = None,
     xlim: tuple[float, float] | None = None,
@@ -424,8 +433,11 @@ def plot_allan_deviation(
     allan : AllanDeviation
         From :func:`commkit.analysis.allan_deviation`; ``adev`` in Hz,
         ``(n_tau,)`` or ``(C, n_tau)``.
-    reference_slopes : bool, default True
-        Overlay a faint ``τ^(-1/2)`` (white-FM) guide line.
+    reference_slopes : bool, default False
+        Overlay a faint ``τ^(-1/2)`` (white-FM) guide line through the first
+        point, a slope to compare against; it is not a fit, and where the
+        first point is not white-FM limited (a low-passed or
+        discriminator-averaged frequency) its level means nothing.
     ax : matplotlib.axes.Axes, optional
         Axes to draw on; ``None`` creates a figure.
     label : str, optional
@@ -610,7 +622,10 @@ def plot_dsh_beat_psd(
         Draw the estimate's fit, guides and markers; ``False`` leaves only
         the measured curves, for overlays.
     xlim, ylim : tuple of float, optional
-        Limits for the displayed axes. ``None`` leaves the limits automatic.
+        Limits for the displayed axes, the horizontal one in Hz from the
+        peak.  ``None`` shows twice the ``-level_db`` width on each side of
+        the peak, where the line is (the whole spectrum when the estimate
+        has no width).
     legend : bool, optional
         Show or hide the legend; ``None`` preserves the default.
     show : bool, default False
@@ -651,9 +666,13 @@ def plot_dsh_beat_psd(
         axi.axvspan(
             -w3 / 2, w3 / 2, color="C1", alpha=0.4, label=r"FWHM = $2\Delta\nu$"
         )
-    if annotations and linewidth is not None:
-        r = 10.0 ** (float(level_db) / 10.0)
-        w_deep = 2.0 * np.sqrt(r - 1.0) * float(np.mean(np.atleast_1d(linewidth)))
+    r = 10.0 ** (float(level_db) / 10.0)
+    w_deep = np.nan
+    if linewidth is not None:
+        w_deep = 2.0 * np.sqrt(r - 1.0) * float(np.nanmean(np.atleast_1d(linewidth)))
+    if xlim is None and np.isfinite(w_deep) and w_deep > 0:
+        xlim = (-2.0 * w_deep, 2.0 * w_deep)
+    if annotations and np.isfinite(w_deep):
         axi.axhline(-float(level_db), color="C3", ls=":")
         axi.axvspan(
             -w_deep / 2,

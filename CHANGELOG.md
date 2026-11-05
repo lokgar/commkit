@@ -7,6 +7,8 @@ Notable changes to CommKit, newest first. Performance figures are from the refer
 ### Changes that may need code updates
 
 - `filter_response` and `plot_filter_response` evaluate complex coefficients over the whole band `[-fs/2, fs/2)` by default, since their response differs at negative frequencies; real coefficients keep the grid from DC to Nyquist. Pass `frequencies=` for the old grid.
+- `BetaSeparation`'s white-FM floor (`linewidth_floor`) is a Whittle fit of white FM, flicker FM and the detection noise's `f²` tail, the model of `DshFmPsd`, instead of the median of an auto-detected plateau, and the estimate now carries `flicker`, `angle_noise_var` and `fm_psd_model`. Without a fence the fit runs from the plateau's lower edge to Nyquist. The default segment is the largest power of two within an eighth of the record (it was capped at 4096 samples), so the β-area can resolve the white-FM crossover; pass `nperseg=` for the old segment.
+- `plot_allan_deviation` draws no `τ^(-1/2)` guide by default (`reference_slopes=False`): anchored at the first point, it was meaningless wherever that point is not white-FM limited.
 
 ### Added
 
@@ -14,6 +16,10 @@ Notable changes to CommKit, newest first. Performance figures are from the refer
 
 ### Fixed
 
+- `BetaSeparation`'s floor read the foot of the AWGN `f²` tail as plateau: 11 % high on the 32 GBd, 1 MHz, 20 dB trajectory of notebook 23 at the default segment (now 0.999 MHz). When the Welch bins cannot resolve the white-FM crossover with the β-line, a warning says so and names the segment needed; the β-area used to return 0 silently.
+- `DshFmPsd` on a real (single-photodiode) beat reports `fm_psd` and `fm_psd_model` as NaN beyond the beat's support, `min(f_shift, f_s/2 - f_shift)`, where the bins read several times low; `valid` marks it. The fit already excluded them.
+- `plot_frequency_noise_psd` draws the fitted model through the same log-binned reduction as a dense PSD (a fringe-resolving DSH model swung at every notch and was drawn as a filled band), keeps the β-line from setting the vertical range, and no longer breaks log-binned curves at empty low-frequency cells. `plot_dsh_beat_psd` zooms on the line, twice the deep width on each side. `plot_carrier_phase_decomposition` labels the total phase next to the drift.
+- The laser-characterization notebooks (23 to 28) report what their plots show: beat-spectrum limits in Hz (they were MHz on a Hz axis, an empty plot), the β-area resolved and explained as the observed width next to the intrinsic floor, the Allan deviation of the unfiltered frequency with its white-PM, white-FM and wander regions, the flicker corner on segments that resolve it, the record-to-record scatter of `DshIncrement` and of the Lorentzian widths, and verdicts in the measurement templates computed from the numbers instead of printed unconditionally.
 - `correct_chromatic_dispersion` documents that it filters the whole record in the frequency domain (a circular filter as long as the record, with no taps to choose) and logs the dispersion's spread in samples.
 
 ## [3.5.0] - 2026-11-05

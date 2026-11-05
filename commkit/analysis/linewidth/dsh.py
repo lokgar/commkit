@@ -422,12 +422,15 @@ def _dsh_fm_psd(samples: ArrayType, method: DshFmPsd, fs: float) -> LinewidthEst
     fmin = 0.0 if method.f_min is None else float(method.f_min)
     fmax = fs / 2.0 if method.f_max is None else float(method.f_max)
     x_in, xp_in, _ = dispatch(samples)
-    if method.f_max is None and not xp_in.iscomplexobj(x_in):
+    support = fs / 2.0
+    if not xp_in.iscomplexobj(x_in):
         # A real (single-photodiode) beat carries FM sidebands only out to the
         # carrier's distance from DC and Nyquist; beyond it the analytic
-        # signal has no support and the PSD reads fake-low.
+        # signal has no support and the PSD reads fake-low.  Those bins are
+        # neither fitted nor reported.
         fh = float(np.min(np.abs(np.asarray(f_hat))))
-        fmax = min(fmax, fh, fs / 2.0 - fh)
+        support = min(fh, fs / 2.0 - fh)
+        fmax = min(fmax, support)
     band = (f_cpu > 0) & (f_cpu >= fmin) & (f_cpu <= fmax)
     if int(band.sum()) < 8:
         raise ValueError(
@@ -448,7 +451,7 @@ def _dsh_fm_psd(samples: ArrayType, method: DshFmPsd, fs: float) -> LinewidthEst
 
     # Display: the beat PSD divided by the interferometer response, and the
     # fitted model in the same units.
-    valid = g >= 4.0 * float(method.notch_guard)
+    valid = (g >= 4.0 * float(method.notch_guard)) & (f_cpu <= support)
     with np.errstate(divide="ignore", invalid="ignore"):
         S_laser = np.where(valid, S2 / g, np.nan)
         noise = theta[:, 2:3] * (2.0 * fs / np.pi**2) * np.sin(np.pi * f_cpu / fs) ** 2
