@@ -80,6 +80,7 @@ Dependencies point downward only:
 | Presentation | `plotting` | everything; **nothing imports plotting** (no `debug_plot`: plot functions consume results or recompute through public functions) |
 
 - **Responsibilities:** `filtering` holds signal-chain filters with a real frequency response; `smoothing` display and estimation smoothers only; `analysis` laser and phase characterization; `metrics` is the reporting layer.
+- **Plot axes in SI units** are labelled with the base unit in brackets (`Frequency [Hz]`, `Time [s]`) and get `_set_eng_formatter` (`plotting/theme.py`): at each draw it picks one SI prefix from the visible ticks and writes it into the label's unit (`Frequency [GHz]`), with plain numbers on the ticks. Pass data in SI units and never pre-scale it or prefix the label by hand; log axes keep a prefix per tick, as no single one fits decades.
 - **Codes are storable:** `io` stores a code as its class and constructor fields, so those fields are numbers, strings, tuples, host arrays, constellations or other codes.
 - **Splitting modules:** promote a flat module to a package only when it exceeds about 1000 lines *and* has two or more separable concerns. Never create a `utils/` package or one-function files.
 - **One documented home per public name.** A package `__init__` re-exports its subpackages' public names, and users and documentation import them from the package (`commkit.impairments.Fiber`), not from the subpackage that defines them.

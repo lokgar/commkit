@@ -171,6 +171,8 @@ def plot_filter_response(
             axis.set_ylabel(ylabel)
             if sampling_rate is not None:
                 _set_eng_formatter(axis, "x")
+                if q == "group_delay":
+                    _set_eng_formatter(axis, "y")
         axis.set_title(title if title is not None else default_title)
         if xlim is not None:
             axis.set_xlim(xlim)

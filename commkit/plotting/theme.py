@@ -1,10 +1,11 @@
 """Plot theme and shared layout and formatting helpers.
 
 :func:`apply_default_theme` sets the library's Matplotlib style; the private
-helpers (axes and figure layout, SI-prefixed tick labels, min/max
+helpers (axes and figure layout, SI-prefixed axis units, min/max
 decimation of long traces) are shared by the plot modules.
 """
 
+import re
 from typing import Any
 
 import matplotlib as mpl
@@ -329,13 +330,109 @@ def _decimate_minmax(
     return x_out, y_out
 
 
+_SI_PREFIXES = {
+    -24: "y", -21: "z", -18: "a", -15: "f", -12: "p", -9: "n", -6: "µ",
+    -3: "m", 0: "", 3: "k", 6: "M", 9: "G", 12: "T", 15: "P", 18: "E",
+}  # fmt: skip
+_UNIT = re.compile(r"\[([^\[\]]+)\](?!.*\[)")  # the last [unit]
+
+
+class _SIAxisFormatter(mpl.ticker.Formatter):
+    """One SI prefix per axis: in the axis label's unit, not on every tick.
+
+    At every draw the prefix is chosen from the largest visible tick (the
+    engineering exponent, a multiple of 3), the tick labels are the values
+    in that unit and the label's last ``[unit]`` becomes
+    ``[<prefix><unit>]``: ``Frequency [Hz]`` reads ``Frequency [GHz]`` with
+    ticks ``-10, 0, 10``.  The label is rewritten from the text it had when
+    set by the plot (a label set later, by the plot or the user, is the new
+    base), so zooming or new limits rechoose the prefix.  A label without a
+    ``[unit]`` keeps the prefix on the ticks.  A log axis spans decades, which
+    no single prefix fits, so its ticks keep their own prefixes (``1 k``,
+    ``1 M``) and its label the base unit.
+    """
+
+    def __init__(self) -> None:
+        self._eng = mpl.ticker.EngFormatter(sep=" ")
+        self._scale = 1.0
+        self._decimals = 0
+        self._suffix = ""
+        self._log = False
+        self._written: str | None = None
+        self._base = ""
+
+    def set_axis(self, axis: Any) -> None:
+        super().set_axis(axis)
+        self._eng.set_axis(axis)
+
+    def _label(self) -> Any:
+        return getattr(self.axis, "label", None)  # colorbar axes have none
+
+    def _relabel(self, prefix: str) -> bool:
+        """Write ``prefix`` into the label's unit; False without a unit."""
+        label = self._label()
+        if label is None:
+            return False
+        text = label.get_text()
+        if text != self._written:  # set (again) by the plot or the user
+            self._base = text
+        match = _UNIT.search(self._base)
+        if match is None:
+            return False
+        new = (
+            f"{self._base[: match.start()]}[{prefix}{match.group(1)}]"
+            f"{self._base[match.end() :]}"
+        )
+        if new != text:
+            label.set_text(new)
+        self._written = new
+        return True
+
+    def set_locs(self, locs: Any) -> None:
+        get_scale = getattr(self.axis, "get_scale", None)
+        self._log = get_scale is not None and get_scale() == "log"
+        if self._log:
+            self._eng.set_locs(locs)
+            self._relabel("")
+            return
+        values = np.asarray(locs, dtype=float)
+        if self.axis is not None:
+            lo, hi = sorted(self.axis.get_view_interval())
+            values = values[(values >= lo - 1e-9 * abs(hi - lo)) & (values <= hi)]
+        finite = values[np.isfinite(values) & (values != 0)]
+        exponent = 0
+        if finite.size:
+            exponent = 3 * int(np.floor(np.log10(np.max(np.abs(finite))) / 3))
+            exponent = min(max(exponent, -24), 18)
+        self._scale = 10.0**exponent
+        prefix = _SI_PREFIXES[exponent]
+        # Decimals: as many as the tick step needs in the chosen unit.
+        self._decimals = 0
+        if values.size > 1:
+            step = float(np.min(np.diff(np.sort(values)))) / self._scale
+            while self._decimals < 6 and abs(
+                step * 10**self._decimals - round(step * 10**self._decimals)
+            ) > 1e-6 * max(1.0, step * 10**self._decimals):
+                self._decimals += 1
+        self._suffix = "" if self._relabel(prefix) else (f" {prefix}" if prefix else "")
+
+    def __call__(self, x: float, pos: int | None = None) -> str:
+        if self._log:
+            return self._eng(x, pos)
+        v = x / self._scale
+        text = f"{v:.{self._decimals}f}"
+        if float(text) == 0.0:
+            text = "0"
+        return text.replace("-", "\N{MINUS SIGN}") + self._suffix
+
+
 def _set_eng_formatter(ax, which: str) -> None:
-    """Apply an engineering (SI-prefix) tick formatter to an axis."""
-    fmt = mpl.ticker.EngFormatter(sep=" ")
+    """Show an axis in SI-prefixed units: the prefix in the axis label's
+    ``[unit]``, plain numbers on the ticks (see :class:`_SIAxisFormatter`)."""
     if which in ("x", "both"):
-        ax.xaxis.set_major_formatter(fmt)
+        ax.xaxis.set_major_formatter(_SIAxisFormatter())
     if which in ("y", "both"):
-        ax.yaxis.set_major_formatter(fmt)
+        ax.yaxis.set_major_formatter(_SIAxisFormatter())
 
 
 def _as_channels(arr) -> np.ndarray:

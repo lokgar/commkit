@@ -4,7 +4,6 @@ from typing import Any
 from unittest.mock import patch
 
 import matplotlib.pyplot as plt
-import matplotlib.ticker as mticker
 import numpy as np
 import pytest
 
@@ -43,17 +42,13 @@ class TestPlotTimeDomain:
         assert "Limit exceeds number of symbols" in caplog.text
 
     def test_time_domain_auto_scale(self, xp: Any) -> None:
-        """Verify time axis uses an SI-prefixed engineering tick formatter."""
+        """The time axis carries one SI prefix, in the label's unit."""
         sig = xp.ones(100)
-        _, ax = plot_time_domain(sig, sampling_rate=1e10)
-        assert ax.get_xlabel() == "Time [s]"
-        fmt = ax.xaxis.get_major_formatter()
-        assert isinstance(fmt, mticker.EngFormatter)
-        assert fmt(3e-9) == "3 n"
-        assert fmt(0) == "0"
-        assert "p" in fmt(3e-12)
-        assert "µ" in fmt(3e-6)
-        assert "m" in fmt(3e-3)
+        fig, ax = plot_time_domain(sig, sampling_rate=1e10)
+        fig.canvas.draw()
+        assert ax.get_xlabel() == "Time [ns]"
+        labels = [t.get_text() for t in ax.get_xticklabels()]
+        assert "0" in labels and not any("n" in t for t in labels)
 
     def test_time_domain_multichannel_axes_array(self, xp: Any) -> None:
         """plot_time_domain() multichannel with axes array normalizes axes to 2D layout."""
