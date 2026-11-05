@@ -4,6 +4,12 @@ Notable changes to CommKit, newest first. Performance figures are from the refer
 
 ## [Unreleased]
 
+## [3.6.1] - 2026-11-05
+
+### Added
+
+- `plot_frequency_noise_psd` shades the white-FM plateau: the fit bins where the fitted model stays within 10 % of the floor `Δν/π`, where white FM dominates and pins the linewidth down. It is a visual check only; `Δν` still comes from the model fitted over every bin in `used`, not from an average over the plateau.
+
 ## [3.6.0] - 2026-11-05
 
 Chromatic dispersion for real captures. The compensation takes the link's accumulated dispersion and works as a receiver does, an FIR filter (or overlap-save blocks for backpropagation) in bounded memory, with the exact whole-record path as an option that is valid on captures too; three estimators measure an unknown dispersion, blind or from known symbols. The laser-characterization chain and its notebooks were corrected wherever a plot or a number did not mean what it said, method names that were generic now say what they do, and plot axes carry their SI prefix in the label.
@@ -461,7 +467,8 @@ See the [GitHub release](https://github.com/lokgar/commkit/releases/tag/v1.1.0) 
 
 First release. See the [GitHub release](https://github.com/lokgar/commkit/releases/tag/v1.0.0).
 
-[Unreleased]: https://github.com/lokgar/commkit/compare/v3.6.0...HEAD
+[Unreleased]: https://github.com/lokgar/commkit/compare/v3.6.1...HEAD
+[3.6.1]: https://github.com/lokgar/commkit/compare/v3.6.0...v3.6.1
 [3.6.0]: https://github.com/lokgar/commkit/compare/v3.5.0...v3.6.0
 [3.5.0]: https://github.com/lokgar/commkit/compare/v3.4.0...v3.5.0
 [3.4.0]: https://github.com/lokgar/commkit/compare/v3.3.0...v3.4.0
