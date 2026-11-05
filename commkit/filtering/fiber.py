@@ -347,8 +347,9 @@ def _clock_tone(
     minus[:, :-m] = xp.sum(Y[..., :-m] * xp.conj(Y[..., m:]), axis=1)
     size = nfft * _SCAN_PADDING
     k = xp.arange(size, dtype=xp.float64)
-    # Bin k sits at frequency (k - nfft/2) fs/nfft; undo that offset.
-    shift = xp.exp(-1j * np.pi * k * nfft / size)
+    # Bin k sits at frequency (k - nfft/2) fs/nfft; undo that offset (the
+    # phase in float64, the phasor in the spectra's precision).
+    shift = _phasor(-np.pi * k * (nfft / size), Y.dtype, xp)
     scan_plus = _fft.ifft(plus, n=size, axis=-1) * shift
     scan_minus = _fft.fft(minus, n=size, axis=-1) * xp.conj(shift)
     metric = xp.sum(xp.abs(scan_plus) ** 2 + xp.abs(scan_minus) ** 2, axis=0)
