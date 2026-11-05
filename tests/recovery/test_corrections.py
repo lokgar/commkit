@@ -404,7 +404,7 @@ class TestSlipQuantum:
             recovery.BPS(cycle_slip=recovery.CycleSlip()),
             recovery.ViterbiViterbi(cycle_slip=recovery.CycleSlip()),
             recovery.Tikhonov(1e-4, 20, cycle_slip=recovery.CycleSlip()),
-            recovery.PLL(mu=1e-2, cycle_slip=recovery.CycleSlip()),
+            recovery.PLL(proportional_gain=1e-2, cycle_slip=recovery.CycleSlip()),
         ],
         ids=["bps", "vv", "tikhonov", "pll"],
     )

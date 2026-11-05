@@ -177,7 +177,12 @@ def _cpr_objects(kind, joint, slips, num_ch):
     cycle_slip = CycleSlip(history=20) if slips else None
     const = Constellation.qam(16).points
     if kind == "pll":
-        obj = PLL(mu=2e-2, beta=2e-4, joint_channels=joint, cycle_slip=cycle_slip)
+        obj = PLL(
+            proportional_gain=2e-2,
+            integral_gain=2e-4,
+            joint_channels=joint,
+            cycle_slip=cycle_slip,
+        )
         ref = _InlineCpr(
             "pll",
             num_ch,

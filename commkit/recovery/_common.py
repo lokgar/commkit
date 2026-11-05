@@ -46,7 +46,8 @@ def _resolve_pll_gains(
 
     Precedence:
 
-    * ``mu`` given: raw PI gains; ``beta`` defaults to ``0.0`` (a first-order loop).
+    * ``mu`` (the proportional gain) given: raw PI gains; ``beta`` (the
+      integral gain) defaults to ``0.0`` (a first-order loop).
     * ``mu`` is ``None``: critically damped (ζ = 1) gains ``μ = 4B, β = 4B²``
       from ``bandwidth`` via ``_pll_gains``.
 
@@ -59,7 +60,9 @@ def _resolve_pll_gains(
     if mu is not None:
         return float(mu), float(beta if beta is not None else 0.0)
     if beta is not None:  # beta without mu is ambiguous
-        raise ValueError("beta requires mu to be set (or use the bandwidth shortcut).")
+        raise ValueError(
+            "integral_gain requires proportional_gain (or use normalized_bandwidth)."
+        )
     return _pll_gains(bandwidth)
 
 

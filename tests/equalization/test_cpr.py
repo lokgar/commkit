@@ -114,7 +114,9 @@ class TestCPREqualizerBaseline:
             constellation=Constellation.psk(4),
         )
         none = fn(xp.asarray(samples), **kw, cpr=None)
-        frozen = fn(xp.asarray(samples), **kw, cpr=PLL(mu=0.0, beta=0.0))
+        frozen = fn(
+            xp.asarray(samples), **kw, cpr=PLL(proportional_gain=0.0, integral_gain=0.0)
+        )
         assert none.phase_trajectory is None
         xpt.assert_array_equal(
             frozen.phase_trajectory, xp.zeros_like(frozen.phase_trajectory)
@@ -217,7 +219,8 @@ class TestCPRPLLConvergence:
             xp.asarray(samples),
             **kw,
             cpr=PLL(
-                mu=float(np.float32(4.0 * bw)), beta=float(np.float32(4.0 * bw**2))
+                proportional_gain=float(np.float32(4.0 * bw)),
+                integral_gain=float(np.float32(4.0 * bw**2)),
             ),
         )
         max_diff = float(
@@ -230,14 +233,16 @@ class TestCPRPLLConvergence:
     def test_inline_beta_without_mu_raises(self, xp):
         """cpr_pll_beta with cpr_pll_mu=None is ambiguous and must raise ValueError."""
         samples, syms = _qpsk_signal(n_sym=400)
-        with pytest.raises(ValueError, match="beta requires mu"):
+        with pytest.raises(
+            ValueError, match="integral_gain requires proportional_gain"
+        ):
             lms(
                 xp.asarray(samples),
                 syms[:100],
                 num_taps=11,
                 sps=2,
                 constellation=Constellation.psk(4),
-                cpr=PLL(beta=1e-3),
+                cpr=PLL(integral_gain=1e-3),
             )
 
     def test_inline_pll_phase_init_seeds_cold_start(self, xp):
@@ -270,13 +275,13 @@ class TestCPRPLLConvergence:
             step_size=0.0,
             initial_taps=xp.asarray(np.array([1.0 + 0j], dtype=np.complex64)),
             constellation=Constellation.psk(4),
-            cpr=PLL(mu=m, beta=b),
+            cpr=PLL(proportional_gain=m, integral_gain=b),
         )
         phi_inline = to_numpy(res.phase_trajectory)
         phi_std = to_numpy(
             estimate_carrier_phase(
                 xp.asarray(samples),
-                PLL(mu=m, beta=b),
+                PLL(proportional_gain=m, integral_gain=b),
                 constellation=Constellation.psk(4),
             ).value
         )
