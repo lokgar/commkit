@@ -15,6 +15,7 @@ Notable changes to CommKit, newest first. Performance figures are from the refer
 
 ### Added
 
+- `filtering.estimate_chromatic_dispersion` with `ClockToneScan` measures a capture's accumulated dispersion blind, before frequency and carrier recovery: Godard's clock-tone spectral correlation, every candidate scanned by one inverse FFT, the estimate the centroid of the peak (a standard deviation of 5 ps/nm at rolloff 0.1 and 1 ps/nm at 0.35 on 2^17 samples at 15 dB; within 62 ps/nm with 10 ps of DGD and a 1 GHz offset). It returns a `ChromaticDispersionEstimate` with the scan, which `correct_chromatic_dispersion(x, estimate)` takes as its `how` (or `correct_chromatic_dispersion(x, ClockToneScan())` to estimate first), and whose value designs the taps to study with `dispersion_compensation_taps(dispersion_ps_nm=estimate.value, ...)`.
 - `filtering.dispersion_compensation_taps` designs the FIR filter of `correct_chromatic_dispersion`: the least-squares fit of the inverse fiber response over a band (the signal's occupied bandwidth, or the whole sampled band), exact through Fresnel integrals. Its default length is 1.25 times the group-delay spread over the band, which reaches about -45 dB of residual against the frequency-domain compensation; fitting only the occupied band needs about a third of the taps of a fit over the whole band. Notebook 19 shows the taps, their response and the SNR against the length.
 
 ### Fixed

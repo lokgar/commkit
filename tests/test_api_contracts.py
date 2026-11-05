@@ -47,6 +47,7 @@ from commkit.backend import to_device
 from commkit.coding import DecodeResult, Interleaver, LinearBlockCode
 from commkit.core import Signal
 from commkit.equalization import EqualizerResult
+from commkit.filtering import ClockToneScan
 from commkit.frequency import MthPower
 from commkit.impairments import Fiber, Lowdin
 from commkit.mapping import Constellation
@@ -470,10 +471,26 @@ ROWS: list[Row] = [
     Row(
         "commkit.filtering.fiber.correct_chromatic_dispersion",
         TRANSFORM,
+        data=2,
         call=lambda c, x: _a(x, sampling_rate=FS, **CDC),
         fact=FS_CONFLICT,
     ),
     Row("commkit.filtering.fiber.dispersion_compensation_taps", DESIGN, data=0),
+    Row("commkit.filtering.fiber.ClockToneScan", VALUE),
+    Row("commkit.filtering.fiber.ChromaticDispersionEstimate", VALUE, data=0),
+    Row(
+        "commkit.filtering.fiber.estimate_chromatic_dispersion",
+        ESTIMATE,
+        data=2,
+        call=lambda c, x: _a(
+            x,
+            ClockToneScan(search_range=(-1e6, 1e6)),
+            sampling_rate=FS,
+            symbol_rate=RS,
+            center_wavelength_nm=1550.0,
+        ),
+        fact=FS_CONFLICT,
+    ),
     Row(
         "commkit.filtering.fiber.correct_fiber_propagation",
         TRANSFORM,

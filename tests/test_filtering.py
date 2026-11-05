@@ -1,5 +1,6 @@
 """Tests for digital filtering and pulse shaping tap generation."""
 
+import logging
 from typing import Any
 
 import numpy as np
@@ -735,6 +736,140 @@ class TestCorrectChromaticDispersion:
                 method="whole_record",
                 num_taps=9,
             )
+
+
+def _dispersed_signal(xp: Any, ps_nm: float, rolloff: float, noise: bool) -> Any:
+    """Dual-polarization 16-QAM at 32 GBd, 2 sps, dispersed by ``ps_nm``
+    (as D = 17 ps/(nm km) over ps_nm / 17 km, or negative D), with 12 dB
+    Es/N0, 10 ps of DGD and a 1 GHz frequency offset when ``noise``."""
+    from commkit import Constellation, generate
+    from commkit.filtering import RRC
+    from commkit.impairments import apply_awgn, apply_chromatic_dispersion, apply_pmd
+    from commkit.spectral import shift_frequency
+
+    tx = generate(
+        Constellation.qam(16),
+        num_symbols=2**16,
+        symbol_rate=32e9,
+        sps=2,
+        pulse=RRC(rolloff=rolloff),
+        num_channels=2,
+        rng=1,
+        device="gpu" if xp.__name__ == "cupy" else "cpu",
+    ).replace(domain="OPT", center_frequency=193.4e12)
+    y = apply_chromatic_dispersion(
+        tx,
+        dispersion_ps_nm_km=17.0 if ps_nm >= 0 else -17.0,
+        fiber_length_km=abs(ps_nm) / 17.0,
+    )
+    if noise:
+        y = apply_pmd(y, dgd=10e-12, theta=0.6)
+        y = apply_awgn(y, esn0_db=12, rng=2)
+        y = shift_frequency(y, frequency=1e9)
+    return y
+
+
+class TestEstimateChromaticDispersion:
+    """estimate_chromatic_dispersion with ClockToneScan: blind, joint over channels."""
+
+    @pytest.mark.parametrize(
+        ("rolloff", "tol"), [(0.1, 100.0), (0.35, 25.0)], ids=["r010", "r035"]
+    )
+    @pytest.mark.parametrize("ps_nm", [0.0, 1360.0, -8500.0, 34000.0])
+    def test_recovers_the_accumulated_dispersion(
+        self, xp: Any, rolloff: float, tol: float, ps_nm: float
+    ) -> None:
+        """Against the dispersion applied, with noise, PMD and a frequency
+        offset: within 62 ps/nm at rolloff 0.1 and 7 at 0.35 (measured on
+        CPU and GPU realizations); the sign included, which a folded cyclic
+        frequency would flip."""
+        y = _dispersed_signal(xp, ps_nm, rolloff, noise=True)
+        est = filtering.estimate_chromatic_dispersion(y, filtering.ClockToneScan())
+        assert est.value.shape == (2,)
+        assert float(est.value[0]) == float(est.value[1])
+        assert abs(float(est.value[0]) - ps_nm) < tol
+
+    def test_scan_peaks_at_the_estimate(self, xp: Any) -> None:
+        y = _dispersed_signal(xp, 8500.0, 0.35, noise=False)
+        est = filtering.estimate_chromatic_dispersion(
+            y.replace(samples=y.samples[0]), filtering.ClockToneScan()
+        )
+        assert est.value.shape == ()
+        k = int(np.argmax(est.metric))
+        assert est.metric[k] == 1.0
+        assert abs(est.candidates[k] - float(est.value)) < 10.0
+        assert np.all(np.diff(est.candidates) > 0)
+
+    def test_correct_with_the_method_compensates(self, xp: Any) -> None:
+        """correct(x, ClockToneScan()) estimates then compensates; at 20 dB
+        Es/N0 the SNR after the matched filter is within 1 dB of the
+        known-dispersion compensation (measured 0.5 dB: the estimate's
+        25 ps/nm residual, which an adaptive equalizer absorbs), and an
+        uncompensated record is far below (the baseline)."""
+        from commkit import metrics, multirate
+        from commkit.impairments import apply_awgn
+
+        y = apply_awgn(
+            _dispersed_signal(xp, 1360.0, 0.1, noise=False), esn0_db=20, rng=5
+        )
+
+        def snr(z: Any) -> float:
+            d = multirate.decimate_to_symbol_rate(filtering.matched_filter(z))
+            return float(np.mean(metrics.snr(d, num_skip_symbols=64)))
+
+        known = snr(
+            filtering.correct_chromatic_dispersion(
+                y, dispersion_ps_nm=1360.0, method="whole_record"
+            )
+        )
+        blind = snr(
+            filtering.correct_chromatic_dispersion(
+                y, filtering.ClockToneScan(), method="whole_record"
+            )
+        )
+        assert blind > known - 1.0
+        assert snr(y) < known - 10
+
+    def test_estimate_feeds_the_taps(self, xp: Any) -> None:
+        """The estimate's value designs the filter to study."""
+        y = _dispersed_signal(xp, 1360.0, 0.35, noise=False)
+        est = filtering.estimate_chromatic_dispersion(y, filtering.ClockToneScan())
+        taps = filtering.dispersion_compensation_taps(
+            dispersion_ps_nm=est.value,
+            center_wavelength_nm=1550.0,
+            sampling_rate=64e9,
+        )
+        ref = filtering.dispersion_compensation_taps(
+            dispersion_ps_nm=1360.0, center_wavelength_nm=1550.0, sampling_rate=64e9
+        )
+        assert taps.size == ref.size
+
+    def test_peak_at_the_range_edge_warns(self, xp: Any, caplog: Any) -> None:
+        y = _dispersed_signal(xp, 8500.0, 0.35, noise=False)
+        with caplog.at_level(logging.WARNING, logger="commkit"):
+            filtering.estimate_chromatic_dispersion(
+                y, filtering.ClockToneScan(search_range=(-2000.0, 2000.0))
+            )
+        assert "outside search_range" in caplog.text
+
+    def test_invalid_input_raises(self, xp: Any) -> None:
+        x = xp.ones(512, dtype=xp.complex64)
+        kw = dict(sampling_rate=64e9, symbol_rate=32e9, center_wavelength_nm=1550.0)
+        with pytest.raises(ValueError, match="blocks"):
+            filtering.estimate_chromatic_dispersion(x, filtering.ClockToneScan(), **kw)
+        with pytest.raises(TypeError, match="ClockToneScan"):
+            filtering.estimate_chromatic_dispersion(x, "clock", **kw)
+        with pytest.raises(ValueError, match="search_range"):
+            filtering.ClockToneScan(search_range=(10.0, -10.0))
+        cd_kw = dict(center_wavelength_nm=1550.0, sampling_rate=64e9)
+        with pytest.raises(ValueError, match="exactly one"):
+            filtering.correct_chromatic_dispersion(x, **cd_kw)
+        with pytest.raises(ValueError, match="exactly one"):
+            filtering.correct_chromatic_dispersion(
+                x, filtering.ClockToneScan(), dispersion_ps_nm=1.0, **cd_kw
+            )
+        with pytest.raises(TypeError, match="how"):
+            filtering.correct_chromatic_dispersion(x, 1360.0, **cd_kw)
 
 
 class TestDispersionCompensationTaps:

@@ -12,9 +12,10 @@
 - Application: :func:`fir_filter` (FFT convolution, optionally circular),
   :func:`ols_fir_filter` (overlap-save, for long filters), :func:`iir_filter`
   and :func:`matched_filter`.
-- Fiber compensation: :func:`correct_chromatic_dispersion`, the inverse of
-  :func:`commkit.impairments.apply_chromatic_dispersion` (its FIR form by
-  :func:`dispersion_compensation_taps`), and digital
+- Fiber compensation: :func:`estimate_chromatic_dispersion` (blind, with
+  :class:`ClockToneScan`) and :func:`correct_chromatic_dispersion`, the inverse
+  of :func:`commkit.impairments.apply_chromatic_dispersion` (its FIR filter
+  designed by :func:`dispersion_compensation_taps`), and digital
   backpropagation :func:`correct_fiber_propagation`, the inverse of
   :func:`commkit.impairments.apply_fiber_propagation`.
 
@@ -24,9 +25,12 @@ and estimation smoothers are in :mod:`commkit.smoothing`.
 """
 
 from .fiber import (
+    ChromaticDispersionEstimate,
+    ClockToneScan,
     correct_chromatic_dispersion,
     correct_fiber_propagation,
     dispersion_compensation_taps,
+    estimate_chromatic_dispersion,
 )
 from .linear import (
     bessel_sos,
@@ -51,6 +55,8 @@ from .pulses import (
 from .response import FilterResponse, filter_response, impulse_response, step_response
 
 __all__ = [
+    "ChromaticDispersionEstimate",
+    "ClockToneScan",
     "FilterResponse",
     "Gaussian",
     "Pulse",
@@ -66,6 +72,7 @@ __all__ = [
     "correct_fiber_propagation",
     "dispersion_compensation_taps",
     "elliptic_sos",
+    "estimate_chromatic_dispersion",
     "filter_response",
     "fir_filter",
     "fir_taps",

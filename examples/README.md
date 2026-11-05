@@ -49,7 +49,7 @@ The notebooks run on the GPU when CuPy works and on the CPU otherwise. They are 
 
 | # | notebook | topics |
 | --- | --- | --- |
-| 19 | [Chromatic dispersion](19-chromatic-dispersion.ipynb) | the dispersion spread, the all-pass response, compensation, the compensating FIR and its length, residual dispersion |
+| 19 | [Chromatic dispersion](19-chromatic-dispersion.ipynb) | the dispersion spread, the all-pass response, compensation of captures and simulated records, blind estimation, the compensating FIR and its length, residual dispersion |
 | 20 | [Nonlinear fiber and backpropagation](20-nonlinear-fiber-and-backpropagation.ipynb) | the Kerr effect, the optimum launch power, digital backpropagation |
 | 21 | [FEC in optical standards](21-fec-in-optical-standards.ipynb) | KP4 and IEEE 802.3dj, G.709 RS and the staircase code, the 400ZR C-FEC, PON RS and LDPC, their thresholds against overhead |
 | 22 | [End-to-end coherent transceiver](22-coherent-transceiver-end-to-end.ipynb) | every impairment and the full receiver DSP chain in one link, an LDPC-coded payload, the SNR budget |
