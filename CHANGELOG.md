@@ -4,6 +4,37 @@ Notable changes to CommKit, newest first. Performance figures are from the refer
 
 ## [Unreleased]
 
+## [3.5.0] - 2026-11-05
+
+One name per concept, finished. A review of the API and the module layout renamed the arguments and result fields that broke the library's naming rules, split or merged the modules that broke its size rules, and fixed the two audit tools that could pass without checking anything. Numerical results do not change.
+
+### Changes that may need code updates
+
+Every rename fails loudly with `TypeError` (or `AttributeError` for a field); none changes a result.
+
+- `generate` takes `num_symbols` by keyword only, like every other parameter after the constellation: write `generate(c, num_symbols=N, ...)` instead of `generate(c, N, ...)`.
+- `metrics.fer(info_bits=)` replaces `block_length=`, the code's information length as everywhere else in the coding API.
+- Result fields of the laser analyses have descriptive names:
+  - `LinewidthEstimate`: `frequencies`, `fm_psd`, `fm_psd_model`, `increment_var`, `delta_phi_var` and `peak_frequency` replace `f`, `S_f`, `S_f_model`, `var`, `dphi_var` and `f_peak`;
+  - `DshFmNoisePsd`: `frequencies` and `fm_psd` replace `f` and `S_f`;
+  - `FrequencyDrift`: `peak_to_peak` replaces `pp`.
+- `analysis.carrier_phase_trajectory(symbols, ...)` and `equalization.estimate_transfer_function(samples, ...)` rename their first argument (was `y_eq` and `received`); positional calls are unaffected.
+- `recovery.PLL(proportional_gain=, integral_gain=)` replaces `mu=` and `beta=`, the raw loop gains. `normalized_bandwidth` is unchanged.
+- `plotting.plot_error_rate(x_axis="ebn0")` replaces `ebn0=True`, as `plot_psd(x_axis=)` chooses its axis; another value raises `ValueError`.
+- `plot_frequency_drift(reference_amplitude=)` and `plot_carrier_phase_characterization(reference_amplitude=)` replace `amp_ref=`.
+- `plot_constellation` draws no grid.
+- Modules moved; import from the packages as documented and nothing changes. `commkit.impairments.channel` is one module (it was the subpackage `channel.linear` / `channel.nonlinear`); `commkit.plotting.sync` is split into `plotting.timing`, `plotting.frequency` and `plotting.recovery`, and `plot_carrier_phase_decomposition` lives in `plotting.analysis`; `Preamble` is defined in `commkit.core.preamble`; `commkit.equalization.sequential` and `commkit.equalization.blind` are private (`_sequential`, `_block`).
+
+### Fixed
+
+- `ErrorRateCurve` and `ExitCurve` document their fields under Attributes, as every other result class does.
+
+### Development
+
+- The transfer audit (`tests/plugins/transfer_trace.py`) failed on 3.4.0 for three legitimate copies it did not list (`SingleCarrierFrame.to_signal`, `extract_payload`, `save_npz`); they are documented now. Both audit plugins found commkit by the path fragment `commkit/commkit/`, so in a checkout of another name (a git worktree) they recorded nothing and passed; they now match the installed package's directory.
+- The Numba kernel getters of the equalizers sit in the modules that call them, as in `coding` and `mapping`, and `_kernels_numba.py` is gone.
+- AGENTS.md holds only the rules for changing the code; it gains glossary entries for output scaling (`normalize`, `correct_power`, `*_normalization`) and search windows (`search_range`, `search_band`), and the rule that result classes document their fields under Attributes. The README carries the new logo.
+
 ## [3.4.0] - 2026-11-03
 
 Error-rate curves for every code, decoders that say what they checked, and one noise convention for real and complex samples.
@@ -395,7 +426,8 @@ See the [GitHub release](https://github.com/lokgar/commkit/releases/tag/v1.1.0) 
 
 First release. See the [GitHub release](https://github.com/lokgar/commkit/releases/tag/v1.0.0).
 
-[Unreleased]: https://github.com/lokgar/commkit/compare/v3.4.0...HEAD
+[Unreleased]: https://github.com/lokgar/commkit/compare/v3.5.0...HEAD
+[3.5.0]: https://github.com/lokgar/commkit/compare/v3.4.0...v3.5.0
 [3.4.0]: https://github.com/lokgar/commkit/compare/v3.3.0...v3.4.0
 [3.3.0]: https://github.com/lokgar/commkit/compare/v3.2.1...v3.3.0
 [3.2.1]: https://github.com/lokgar/commkit/compare/v3.2.0...v3.2.1
