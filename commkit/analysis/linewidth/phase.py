@@ -246,10 +246,10 @@ def _increment_slope(
     return LinewidthEstimate(
         value=to_report_scalar(np.maximum(slope, 0.0) / (2.0 * np.pi), was_1d=was_1d),
         method=method,
-        dphi_var=to_report_scalar(to_device(var1, "cpu"), was_1d=was_1d),
+        delta_phi_var=to_report_scalar(to_device(var1, "cpu"), was_1d=was_1d),
         angle_noise_var=to_report_scalar(intercept, was_1d=was_1d),
         lag_s=lag_sec,
-        var=var_k_cpu.T,
+        increment_var=var_k_cpu.T,
         slope=slope,
         intercept=intercept,
     )
@@ -295,12 +295,12 @@ def _increment_subtract(
     return LinewidthEstimate(
         value=to_report_scalar(to_device(linewidth, "cpu"), was_1d=was_1d),
         method=method,
-        dphi_var=to_report_scalar(var1_cpu, was_1d=was_1d),
+        delta_phi_var=to_report_scalar(var1_cpu, was_1d=was_1d),
         angle_noise_var=to_report_scalar(
             to_device(angle_noise_var, "cpu"), was_1d=was_1d
         ),
         lag_s=np.array([t_sym]),
-        var=np.atleast_1d(var1_cpu)[:, None],
+        increment_var=np.atleast_1d(var1_cpu)[:, None],
     )
 
 
@@ -374,8 +374,8 @@ def _beta_separation(
         linewidth_floor=to_report_scalar(lw_floor_cpu, was_1d=was_1d),
         num_segments=k_seg,
         area_hz2=to_report_scalar(area_cpu, was_1d=was_1d),
-        f=f_cpu,
-        S_f=S_cpu,
+        frequencies=f_cpu,
+        fm_psd=S_cpu,
         beta_line=beta_cpu,
         above=above_cpu,
         used=used_cpu,

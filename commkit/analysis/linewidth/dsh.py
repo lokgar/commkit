@@ -72,7 +72,7 @@ class DshFmPsd:
         (single-photodiode) capture at its FM detection bandwidth
         ``min(f_shift, f_s/2 - f_shift)``.
     notch_guard : float, default 0.1
-        Masks the bins near the notches of the reported ``S_f`` when the
+        Masks the bins near the notches of the reported ``fm_psd`` when the
         segments resolve the fringes (see :func:`dsh_fm_noise_psd`); the fit
         uses every bin either way.
     combine_polarizations : bool, default False
@@ -137,8 +137,8 @@ class DshFmPsd:
     * The model covers white FM, flicker FM and white detection noise.
       Other structure in the band (random-walk FM ``∝ 1/f²`` at the lowest
       bins, fiber acoustic lines, a colored receiver noise) biases the fit;
-      fence it out with ``f_min`` and ``f_max``, and compare ``S_f`` with
-      ``S_f_model`` on :func:`commkit.plotting.plot_frequency_noise_psd`.
+      fence it out with ``f_min`` and ``f_max``, and compare ``fm_psd`` with
+      ``fm_psd_model`` on :func:`commkit.plotting.plot_frequency_noise_psd`.
     * The detection-noise term assumes additive Gaussian angle noise, that is a
       beat SNR well above the unwrap threshold (≳ 10 dB in the record's
       bandwidth).  Below it phase slips add a white-FM-like floor.
@@ -468,9 +468,9 @@ def _dsh_fm_psd(samples: ArrayType, method: DshFmPsd, fs: float) -> LinewidthEst
         value=to_report_scalar(np.pi * theta[:, 0], was_1d=was_1d),
         method=method,
         f_shift=f_hat,
-        f=f_cpu,
-        S_f=per_channel(S_laser),
-        S_f_model=per_channel(model),
+        frequencies=f_cpu,
+        fm_psd=per_channel(S_laser),
+        fm_psd_model=per_channel(model),
         valid=valid,
         used=per_channel(used2),
         band=(float(f_used[0]), float(f_used[-1])),
@@ -535,10 +535,10 @@ def _dsh_increment(
         method=method,
         f_shift=f_hat,
         angle_noise_var=to_report_scalar(intercept, was_1d=was_1d),
-        dphi_var=to_report_scalar(to_device(dphi_var, "cpu"), was_1d=was_1d),
+        delta_phi_var=to_report_scalar(to_device(dphi_var, "cpu"), was_1d=was_1d),
         lags=ls,
         lag_s=a_sec,
-        var=var_cpu.T,
+        increment_var=var_cpu.T,
         slope=slope,
         intercept=intercept,
     )
@@ -618,7 +618,7 @@ def _dsh_lorentzian(
         linewidth_3db=to_report_scalar(dnu_3db, was_1d=was_1d),
         lineshape_ratio=to_report_scalar(ratio, was_1d=was_1d),
         coherence_factor=to_report_scalar(coh, was_1d=was_1d),
-        f=f_cpu,
+        frequencies=f_cpu,
         psd=restore_1d(was_1d, P2),
-        f_peak=to_report_scalar(f_peak, was_1d=was_1d),
+        peak_frequency=to_report_scalar(f_peak, was_1d=was_1d),
     )

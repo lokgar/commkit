@@ -151,7 +151,7 @@ def plot_frequency_noise_psd(
 ) -> tuple[Any, Any] | None:
     """Plot the frequency-noise PSD of a linewidth estimate on log-log axes.
 
-    Draws ``S_f`` with the white-FM floor ``Δν/π`` (``linewidth_floor`` for
+    Draws ``fm_psd`` (:math:`S_f`) with the white-FM floor ``Δν/π`` (``linewidth_floor`` for
     ``BetaSeparation``, the estimate itself for ``DshFmPsd``) and the region
     annotations the estimate carries:
 
@@ -165,7 +165,7 @@ def plot_frequency_noise_psd(
       ``BetaSeparation`` floor, or the ``DshFmPsd`` fit with its spurs
       removed).  Sparse masks (400 bins or fewer) are drawn as markers on the
       PSD, dense ones as a highlighted log-binned median curve.
-    * ``S_f_model`` (``DshFmPsd``): the fitted model of white FM, flicker FM
+    * ``fm_psd_model`` (``DshFmPsd``): the fitted model of white FM, flicker FM
       and detection noise, drawn over the PSD.
 
     Dense spectra are drawn faint with a log-binned median trace on top.
@@ -199,8 +199,8 @@ def plot_frequency_noise_psd(
         shows the figure instead.
     """
     name = "plot_frequency_noise_psd()"
-    S_f = _require(estimate, "S_f", name, "a BetaSeparation or DshFmPsd estimate")
-    f, beta_line, above = estimate.f, estimate.beta_line, estimate.above
+    S_f = _require(estimate, "fm_psd", name, "a BetaSeparation or DshFmPsd estimate")
+    f, beta_line, above = estimate.frequencies, estimate.beta_line, estimate.above
     band, used = estimate.band, estimate.used
     floor = estimate.linewidth_floor
     if floor is None:
@@ -254,7 +254,7 @@ def plot_frequency_noise_psd(
                 label=r"$\beta$-area (integrated region)",
             )
 
-        model = getattr(estimate, "S_f_model", None)
+        model = getattr(estimate, "fm_psd_model", None)
         if model is not None:
             m_c = _as_channels(model)
             axi.loglog(fp, m_c[0, pos], color="#ef476f", label="Fitted model")
@@ -448,7 +448,10 @@ def plot_increment_variance(
         shows the figure instead.
     """
     var = _require(
-        estimate, "var", "plot_increment_variance()", "an increment-method estimate"
+        estimate,
+        "increment_var",
+        "plot_increment_variance()",
+        "an increment-method estimate",
     )
     slope, intercept = estimate.slope, estimate.intercept
     lag = np.asarray(to_device(estimate.lag_s, "cpu"), dtype=np.float64)
@@ -538,7 +541,7 @@ def plot_dsh_beat_psd(
         shows the figure instead.
     """
     psd = _require(estimate, "psd", "plot_dsh_beat_psd()", "a DshLorentzian estimate")
-    f, f_peak = estimate.f, estimate.f_peak
+    f, f_peak = estimate.frequencies, estimate.peak_frequency
     linewidth, linewidth_3db = estimate.value, estimate.linewidth_3db
     level_db = float(estimate.method.level_db)
     f_c = np.asarray(to_device(f, "cpu"), dtype=np.float64)

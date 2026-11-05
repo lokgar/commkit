@@ -125,7 +125,7 @@ class TestPlotAnalysis:
                 _phase(xp), IncrementSlope(), sampling_rate=R
             )
         fig, ax = plot_increment_variance(est)
-        np.testing.assert_allclose(ax.lines[0].get_ydata(), est.var[0])
+        np.testing.assert_allclose(ax.lines[0].get_ydata(), est.increment_var[0])
         assert len(ax.lines) == 3  # points, fit, intercept
         _, ax = plot_increment_variance(est, label="first", annotations=False)
         _, ax = plot_increment_variance(
