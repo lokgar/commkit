@@ -6,19 +6,30 @@
 :func:`commkit.impairments.apply_fiber_propagation`.
 :func:`dispersion_compensation_taps` designs the FIR filter of the former.
 
-**Records.**  Both treat the samples as a window of an endless stream by
-default, as an ADC delivers it, and process it as a receiver does, in
-bounded memory: chromatic dispersion as an FIR filter applied by
-overlap-save, backpropagation in overlapping blocks.  Within half the
-dispersion's memory of either end of a capture no method can be right,
-since the history needed lies outside the capture; here those samples are
-transients of a zero history.  ``periodic=True`` treats the record as one
-period of a periodic sequence (an AWG pattern, or a record dispersed by
-the circular channel functions of :mod:`commkit.impairments`) and filters
-it whole in the frequency domain with the exact response: exact
-everywhere on such a record.  On a capture it leaves the same end
-samples wrong (the other end wraps in) and is otherwise exact, at the
-cost of transforming the whole record at once.
+**Methods.**  Each compensation has two implementations of the same
+inverse, chosen by ``method``; both are valid on a capture and on a
+simulated record:
+
+- the receiver's form, the default: chromatic dispersion as an FIR filter
+  applied by overlap-save (``method="fir"``), backpropagation in
+  overlapping blocks (``method="blocks"``).  The working memory is bounded
+  whatever the record length, and the FIR's taps can be designed and
+  inspected (:func:`dispersion_compensation_taps`).
+- ``method="whole_record"``: one pass over the whole record in the
+  frequency domain, with the exact response.  The record is transformed at
+  once, and treated as one period of a periodic sequence.
+
+**Captures and periodic records.**  The channel functions of
+:mod:`commkit.impairments` disperse their record circularly, as if an AWG
+played it in a loop, and ``"whole_record"`` inverts such a record exactly
+at every sample, the FIR to its design accuracy (about -45 dB).  A capture
+is a window of an endless stream: within half the dispersion's memory of
+either end, the history the inverse needs lies outside the capture, so
+those samples are wrong whatever the method (filter transients, or the
+other end wrapped in); trim them.  Beyond them both methods are right, and
+``"whole_record"`` is the more precise, its response being exact.  So on a
+capture that fits in memory ``"whole_record"`` is a correct choice; the
+default suits streams of any length and studies of the filter.
 
 **Dispersion.**  The receiver knows the accumulated dispersion of the link,
 ``dispersion_ps_nm`` (``D·L``, measured or from the link plan), not the
@@ -62,7 +73,7 @@ def correct_chromatic_dispersion(
     dispersion_ps_nm: float,
     center_wavelength_nm: float | None = None,
     sampling_rate: float | None = None,
-    periodic: bool = False,
+    method: str = "fir",
     bandwidth: float | None = None,
     num_taps: int | None = None,
 ) -> S:
@@ -70,12 +81,10 @@ def correct_chromatic_dispersion(
 
     Filters with ``H(ω) = exp(+j β₂L ω² / 2)``, ``β₂L = -D·L·λ² / (2π c)``,
     which undoes the dispersion of a link of accumulated dispersion
-    ``D·L``.  By default the samples are a window of a stream (a capture):
-    the filter is the FIR of :func:`dispersion_compensation_taps`, applied by
-    overlap-save (:func:`ols_fir_filter`).  With ``periodic=True`` the
-    record is one period of a periodic sequence and the response multiplies
-    its whole spectrum, the exact inverse of
-    :func:`commkit.impairments.apply_chromatic_dispersion`.
+    ``D·L``, either as the FIR filter of :func:`dispersion_compensation_taps`
+    applied by overlap-save (the default, as a receiver does) or by
+    multiplying the whole record's spectrum by the exact response.  Both
+    work on a capture and on a simulated record; see Notes for the choice.
 
     Parameters
     ----------
@@ -93,14 +102,11 @@ def correct_chromatic_dispersion(
     sampling_rate : float, optional
         Sampling rate in Hz.  Taken from the Signal; required for array
         input.  A value that disagrees with the Signal raises.
-    periodic : bool, default False
-        Treat ``samples`` as one period of a periodic sequence and filter
-        the whole record in the frequency domain with the exact response:
-        exact everywhere on a periodic record (one AWG period, or one
-        dispersed circularly in simulation).  On a capture the samples
-        within half the spread of either end are wrong (the other end wraps
-        in), as they are transients of the FIR, and the rest exact; the
-        whole record is transformed at once.
+    method : {"fir", "whole_record"}, default "fir"
+        ``"fir"``: the FIR of :func:`dispersion_compensation_taps`, applied
+        by overlap-save (:func:`ols_fir_filter`), in bounded memory.
+        ``"whole_record"``: the exact response on the FFT grid of the whole
+        record, which is transformed at once and treated as one period.
     bandwidth : float, optional
         FIR only: two-sided bandwidth in Hz over which the filter is
         fitted, the signal's occupied bandwidth (see
@@ -114,14 +120,15 @@ def correct_chromatic_dispersion(
     -------
     ndarray or Signal
         Compensated samples, same shape, dtype and device as the input.
-        Without ``periodic`` the first and last ``(num_taps - 1) // 2``
-        samples are filter transients (on a capture they lack the history
-        that lies outside it, whatever the method).
+        On a capture the first and last half spread (about
+        ``(num_taps - 1) // 2`` samples) are wrong with either method, see
+        Notes.
 
     Raises
     ------
     ValueError
-        If ``bandwidth`` or ``num_taps`` comes with ``periodic=True``.
+        If ``method`` is unknown, or ``bandwidth`` or ``num_taps`` comes
+        with ``method="whole_record"``.
 
     See Also
     --------
@@ -129,43 +136,58 @@ def correct_chromatic_dispersion(
 
     Notes
     -----
-    The FIR is centred, so it adds no delay and the reference stays
-    aligned.  Its default length is 1.25 times the dispersion's
-    group-delay spread over the fitted band, about -45 dB of residual
-    against the exact response on a signal inside that band; fitting the
-    occupied band rather than the whole sampled band needs about half the
-    taps (see :func:`dispersion_compensation_taps`).
+    **Choosing a method.**
 
-    Away from the ends of a capture the whole-record filter of
-    ``periodic=True`` is more precise still, as its response is exact:
-    measured on a window of an 80 km, 2-sps record, both are wrong over the
-    first and last 16 samples, the FIR then holds -45 dB, and the
-    whole-record filter reaches -30 dB over the next 16, -68 dB beyond 50
-    and -110 dB deep inside.  On a record that fits in memory it is a valid
-    choice too; the FIR is the receiver's form, in bounded memory, with taps
-    to inspect.
+    * A record from :func:`commkit.impairments.apply_chromatic_dispersion`
+      (or one AWG period) is circular: ``"whole_record"`` inverts it
+      exactly at every sample, the FIR to about -45 dB.
+    * A capture, a window of an endless stream: within half the spread of
+      either end the history the inverse needs lies outside the capture, so
+      those samples are wrong whatever the method (FIR transients, or the
+      other end wrapped in by ``"whole_record"``).  Trim them.  Beyond them
+      both are right and ``"whole_record"`` is the more precise: measured on
+      a window of an 80 km, 2-sps record, both are wrong over the first and
+      last 16 samples, the FIR then holds -45 dB, ``"whole_record"`` -30 dB
+      over the next 16, -68 dB beyond 50 and -110 dB deep inside.
+    * So ``"whole_record"`` is a correct choice for a capture that fits in
+      memory; ``"fir"`` is the receiver's form, for streams of any length
+      in bounded memory and for studying the filter.
+
+    The FIR is centred, so it adds no delay and the reference stays aligned.
+    Its default length is 1.25 times the dispersion's group-delay spread
+    over the fitted band, about -45 dB of residual against the exact
+    response on a signal inside that band; fitting the occupied band rather
+    than the whole sampled band needs about half the taps.  To see the
+    filter that is applied, design the same taps with
+    :func:`dispersion_compensation_taps` and plot them with
+    :func:`commkit.plotting.plot_filter_response`.
 
     Examples
     --------
     >>> y = correct_chromatic_dispersion(  # a capture after 80 km of SSMF
     ...     capture, dispersion_ps_nm=1360.0, bandwidth=35.2e9)
     >>> y = correct_chromatic_dispersion(  # a circularly simulated record
-    ...     sig, dispersion_ps_nm=1360.0, periodic=True)
+    ...     sig, dispersion_ps_nm=1360.0, method="whole_record")
     """
     signal_adapter = adapt_signal(
         samples, function_name="correct_chromatic_dispersion()"
     )
     sampling_rate = signal_adapter.resolve_fact("sampling_rate", sampling_rate)
     center_wavelength_nm = signal_adapter.resolve_wavelength_nm(center_wavelength_nm)
-    if periodic:
+    if method not in ("fir", "whole_record"):
+        raise ValueError(
+            "correct_chromatic_dispersion(): method must be 'fir' or "
+            f"'whole_record', got {method!r}."
+        )
+    if method == "whole_record":
         if bandwidth is not None or num_taps is not None:
             raise ValueError(
                 "correct_chromatic_dispersion(): bandwidth and num_taps design "
-                "the FIR of a capture; periodic=True filters the whole record "
-                "exactly and takes neither."
+                "the FIR; method='whole_record' applies the exact response and "
+                "takes neither."
             )
         logger.info(
-            "Correcting CD of %s ps/nm (λ=%s nm) over the whole periodic record.",
+            "Correcting CD of %s ps/nm (λ=%s nm) over the whole record.",
             dispersion_ps_nm,
             center_wavelength_nm,
         )
@@ -325,7 +347,7 @@ def correct_fiber_propagation(
     steps_per_span: int = 100,
     nonlinear_scale: float = 1.0,
     sampling_rate: float | None = None,
-    periodic: bool = False,
+    method: str = "blocks",
 ) -> S:
     """Undo a nonlinear fiber link by digital backpropagation (DBP).
 
@@ -348,18 +370,20 @@ def correct_fiber_propagation(
     alone): 10 steps per span with ξ = 1 reach the ASE floor (-30 dB); one
     step per span gains 2 dB with ξ = 0.5 but nothing with ξ = 1.
 
-    By default the samples are a window of a stream (a capture): they are
-    backpropagated in overlapping blocks, each with a guard of 1.25 times
-    half the link's dispersion memory on both sides, and the guards are
-    discarded (overlap-save), so the working memory is bounded by the block.
-    The dispersion's light cone bounds both the linear and the nonlinear
+    ``method="blocks"`` (the default, as a receiver does) backpropagates in
+    overlapping blocks, each with a guard of 1.25 times half the link's
+    dispersion memory on both sides, and discards the guards
+    (overlap-save), so the working memory is bounded by the block.  The
+    dispersion's light cone bounds both the linear and the nonlinear
     interaction, so every kept sample sees all of its past and future within
-    the link (measured: the blocks match the whole record to -71 dB).  With
-    ``periodic=True`` the record is one period of a periodic sequence and is
-    backpropagated whole, the exact inverse of
-    :func:`commkit.impairments.apply_fiber_propagation` (which propagates
-    its record circularly).  On a capture either way leaves half the link's
-    memory at both ends wrong, since the history needed lies outside it.
+    the link (measured: the blocks match the whole record to -71 dB).
+    ``method="whole_record"`` backpropagates the whole record at once, as
+    one period: the exact inverse of
+    :func:`commkit.impairments.apply_fiber_propagation`, which propagates
+    its record circularly.  On a capture both are wrong within half the
+    link's memory of either end, whose history lies outside the capture, and
+    right beyond it (see :func:`correct_chromatic_dispersion` for the same
+    choice in the linear case).
 
     Parameters
     ----------
@@ -390,19 +414,18 @@ def correct_fiber_propagation(
     sampling_rate : float, optional
         Sampling rate in Hz.  Taken from the Signal; required for array
         input.  A value that disagrees with the Signal raises.
-    periodic : bool, default False
-        Treat ``samples`` as one period of a periodic sequence and
-        backpropagate the whole record at once: exact for a circularly
-        simulated record; on a capture the ends are wrong (the other end
-        wraps in), as they are transients of the blocks.
+    method : {"blocks", "whole_record"}, default "blocks"
+        ``"blocks"``: overlapping blocks in bounded memory.
+        ``"whole_record"``: the whole record at once, as one period (exact
+        on a circularly simulated record).
 
     Returns
     -------
     ndarray or Signal
         The backpropagated field in the input's units, complex, on the
         input's device.  A :class:`Signal` returns a new :class:`Signal`.
-        Without ``periodic`` the first and last guard (half the link's
-        dispersion memory, times 1.25) are transients.
+        On a capture the first and last half of the link's dispersion
+        memory are wrong with either method.
 
     See Also
     --------
@@ -432,6 +455,10 @@ def correct_fiber_propagation(
         center_wavelength_nm=center_wavelength_nm,
         function_name=name,
     )
+    if method not in ("blocks", "whole_record"):
+        raise ValueError(
+            f"{name}: method must be 'blocks' or 'whole_record', got {method!r}."
+        )
     if not np.isfinite(nonlinear_scale):
         raise ValueError(
             f"{name}: nonlinear_scale must be finite, got {nonlinear_scale!r}."
@@ -457,7 +484,7 @@ def correct_fiber_propagation(
             nonlinear_scale=float(nonlinear_scale),
         )
 
-    if periodic:
+    if method == "whole_record":
         out = backpropagate(field)
     else:
         out = _overlap_save_blocks(

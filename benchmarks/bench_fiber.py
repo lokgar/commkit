@@ -54,12 +54,14 @@ def bench_fiber_propagation(benchmark, backend_device, xp, sync, monkeypatch, n,
 @pytest.mark.parametrize("path", PATHS)
 @pytest.mark.parametrize("steps", [1, 10])
 def bench_dbp(benchmark, backend_device, xp, sync, monkeypatch, steps, path):
-    """The whole record (``periodic=True``), as the 0008 baseline measured."""
+    """The whole record (``method="whole_record"``), as the 0008 baseline measured."""
     _stages(backend_device, monkeypatch, path)
     x = xp.asarray(fiber_workload(2**20))
 
     def run():
-        out = correct_fiber_propagation(x, steps_per_span=steps, periodic=True, **LINK)
+        out = correct_fiber_propagation(
+            x, steps_per_span=steps, method="whole_record", **LINK
+        )
         sync()
         return out
 

@@ -15,7 +15,8 @@ amplifier noise.
 whole record, which it treats as one period of a periodic sequence: the
 dispersed tails of the last symbols wrap onto the first, as when an AWG
 plays the record in a loop.  The receiver undoes such a record exactly with
-``periodic=True``; a capture's receiver uses the default.
+``method="whole_record"``, and to its design accuracy with the default
+FIR or blocks (see :mod:`commkit.filtering.fiber`).
 
 The compensation counterparts are
 :func:`commkit.filtering.correct_chromatic_dispersion` and digital

@@ -262,7 +262,7 @@ class TestApplyChomaticDispersion:
             distorted,
             sampling_rate=fs,
             dispersion_ps_nm=D * L,
-            periodic=True,
+            method="whole_record",
             center_wavelength_nm=lam,
         )
 
@@ -289,7 +289,7 @@ class TestApplyChomaticDispersion:
             distorted,
             sampling_rate=fs,
             dispersion_ps_nm=D * L,
-            periodic=True,
+            method="whole_record",
             center_wavelength_nm=lam,
         )
 

@@ -230,7 +230,7 @@ class TestFiberChain:
             y = ck.filtering.correct_chromatic_dispersion(
                 y,
                 dispersion_ps_nm=dispersion_sign * fiber.dispersion_ps_nm_km * 80.0,
-                periodic=True,
+                method="whole_record",
             )
         y = ck.filtering.matched_filter(y)
         ref = tx.reference.symbols
