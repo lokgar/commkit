@@ -298,7 +298,7 @@ def apply_taps(
 
 
 def estimate_transfer_function(
-    received: ArrayType | Signal,
+    samples: ArrayType | Signal,
     reference: ArrayType | Signal,
     *,
     nfft: int = 512,
@@ -310,7 +310,7 @@ def estimate_transfer_function(
 
     Estimates the frequency response
     :math:`B(f) \approx S_{yx}(f)\,S_{xx}(f)^{-1}` from a known ``reference``
-    ``x`` to the measured ``received`` ``y``, where :math:`S_{xx}` and
+    ``x`` to the measured ``samples`` ``y``, where :math:`S_{xx}` and
     :math:`S_{yx}` are the Welch auto- and cross-spectra (averaged
     Hann-windowed periodograms).  This is the H1 channel-sounding estimator,
     extended to the full ``(C, C)`` cross-spectral matrix, so the MIMO
@@ -328,7 +328,7 @@ def estimate_transfer_function(
 
     Parameters
     ----------
-    received, reference : array_like or Signal
+    samples, reference : array_like or Signal
         Channel output and input, time-aligned at the same rate, ``(N,)`` or
         ``(C, N)``; the measured data first and the known reference second,
         as in the metrics.  A Signal contributes its samples.
@@ -361,7 +361,7 @@ def estimate_transfer_function(
         input's device.
     """
     received = adapt_signal(
-        received, function_name="estimate_transfer_function(received)"
+        samples, function_name="estimate_transfer_function(samples)"
     ).array
     reference = adapt_signal(
         reference, function_name="estimate_transfer_function(reference)"
