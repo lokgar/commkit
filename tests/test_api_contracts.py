@@ -477,6 +477,8 @@ ROWS: list[Row] = [
     ),
     Row("commkit.filtering.fiber.dispersion_compensation_taps", DESIGN, data=0),
     Row("commkit.filtering.fiber.ClockToneScan", VALUE),
+    Row("commkit.filtering.fiber.FourthMomentScan", VALUE),
+    Row("commkit.filtering.fiber.QuadraticPhaseFit", VALUE),
     Row("commkit.filtering.fiber.ChromaticDispersionEstimate", VALUE, data=0),
     Row(
         "commkit.filtering.fiber.estimate_chromatic_dispersion",

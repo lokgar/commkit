@@ -752,7 +752,7 @@ def _dispersed_signal(xp: Any, ps_nm: float, rolloff: float, noise: bool) -> Any
         num_symbols=2**16,
         symbol_rate=32e9,
         sps=2,
-        pulse=RRC(rolloff=rolloff),
+        pulse=RRC(rolloff=max(rolloff, 1e-3)),
         num_channels=2,
         rng=1,
         device="gpu" if xp.__name__ == "cupy" else "cpu",
@@ -788,6 +788,58 @@ class TestEstimateChromaticDispersion:
         assert est.value.shape == (2,)
         assert float(est.value[0]) == float(est.value[1])
         assert abs(float(est.value[0]) - ps_nm) < tol
+
+    @pytest.mark.parametrize("rolloff", [0.0, 0.1], ids=["r000", "r010"])
+    @pytest.mark.parametrize("ps_nm", [1360.0, -8500.0, 34000.0])
+    def test_fourth_moment_scan(self, xp: Any, rolloff: float, ps_nm: float) -> None:
+        """Blind and without an excess band: within 11 ps/nm at rolloff 0
+        and 0.1 with noise, PMD and a frequency offset (measured)."""
+        y = _dispersed_signal(xp, ps_nm, rolloff, noise=True)
+        est = filtering.estimate_chromatic_dispersion(y, filtering.FourthMomentScan())
+        assert abs(float(est.value[0]) - ps_nm) < 25.0
+        k = int(np.argmax(est.metric))
+        assert est.metric[k] == 1.0
+        assert abs(est.candidates[k] - float(est.value[0])) < 30.0
+
+    @pytest.mark.parametrize("rolloff", [0.0, 0.1], ids=["r000", "r010"])
+    @pytest.mark.parametrize("ps_nm", [1360.0, -8500.0, 34000.0])
+    def test_quadratic_phase_fit(self, xp: Any, rolloff: float, ps_nm: float) -> None:
+        """Data-aided, against the Signal's reference symbols, with noise,
+        PMD and laser phase noise: within 12 ps/nm (measured).  The measured
+        group delay, noisy per bin, follows the line β₂L·ω."""
+        from commkit.impairments import apply_awgn, apply_phase_noise
+
+        y = _dispersed_signal(xp, ps_nm, rolloff, noise=False)
+        y = apply_phase_noise(y, linewidth=100e3, shared_lo=True, rng=4)
+        y = apply_awgn(y, esn0_db=12, rng=2)
+        est = filtering.estimate_chromatic_dispersion(y, filtering.QuadraticPhaseFit())
+        assert abs(float(est.value[0]) - ps_nm) < 25.0
+        assert est.candidates is None
+        b2l = -ps_nm * 1e-3 * (1550.12e-9) ** 2 / (2 * np.pi * 299_792_458.0)
+        inband = np.isfinite(est.group_delay) & (np.abs(est.frequencies) < 10e9)
+        omega = 2 * np.pi * est.frequencies[inband]
+        slope = np.polyfit(omega, est.group_delay[inband], 1)[0]
+        assert slope == pytest.approx(b2l, rel=0.05)
+
+    def test_quadratic_phase_fit_needs_symbols(self, xp: Any) -> None:
+        x = xp.ones((2, 8192), dtype=xp.complex64)
+        kw = dict(sampling_rate=64e9, symbol_rate=32e9, center_wavelength_nm=1550.0)
+        with pytest.raises(ValueError, match="known symbols"):
+            filtering.estimate_chromatic_dispersion(
+                x, filtering.QuadraticPhaseFit(), **kw
+            )
+        with pytest.raises(ValueError, match="max_dispersion_ps_nm"):
+            filtering.QuadraticPhaseFit(max_dispersion_ps_nm=0.0)
+
+    def test_clock_tone_warns_without_an_excess_band(
+        self, xp: Any, caplog: Any
+    ) -> None:
+        """A Nyquist pulse has no clock tone (the scan returns a spurious
+        peak, measured 1940 ps/nm off); the Signal's pulse says so."""
+        y = _dispersed_signal(xp, 1360.0, 0.0, noise=False)
+        with caplog.at_level(logging.WARNING, logger="commkit"):
+            filtering.estimate_chromatic_dispersion(y, filtering.ClockToneScan())
+        assert "excess band" in caplog.text
 
     def test_scan_peaks_at_the_estimate(self, xp: Any) -> None:
         y = _dispersed_signal(xp, 8500.0, 0.35, noise=False)
@@ -857,7 +909,7 @@ class TestEstimateChromaticDispersion:
         kw = dict(sampling_rate=64e9, symbol_rate=32e9, center_wavelength_nm=1550.0)
         with pytest.raises(ValueError, match="blocks"):
             filtering.estimate_chromatic_dispersion(x, filtering.ClockToneScan(), **kw)
-        with pytest.raises(TypeError, match="ClockToneScan"):
+        with pytest.raises(TypeError, match="FourthMomentScan"):
             filtering.estimate_chromatic_dispersion(x, "clock", **kw)
         with pytest.raises(ValueError, match="search_range"):
             filtering.ClockToneScan(search_range=(10.0, -10.0))

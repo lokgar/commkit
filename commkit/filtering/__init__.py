@@ -12,8 +12,9 @@
 - Application: :func:`fir_filter` (FFT convolution, optionally circular),
   :func:`ols_fir_filter` (overlap-save, for long filters), :func:`iir_filter`
   and :func:`matched_filter`.
-- Fiber compensation: :func:`estimate_chromatic_dispersion` (blind, with
-  :class:`ClockToneScan`) and :func:`correct_chromatic_dispersion`, the inverse
+- Fiber compensation: :func:`estimate_chromatic_dispersion` (blind
+  :class:`ClockToneScan` and :class:`FourthMomentScan`, data-aided
+  :class:`QuadraticPhaseFit`) and :func:`correct_chromatic_dispersion`, the inverse
   of :func:`commkit.impairments.apply_chromatic_dispersion` (its FIR filter
   designed by :func:`dispersion_compensation_taps`), and digital
   backpropagation :func:`correct_fiber_propagation`, the inverse of
@@ -27,6 +28,8 @@ and estimation smoothers are in :mod:`commkit.smoothing`.
 from .fiber import (
     ChromaticDispersionEstimate,
     ClockToneScan,
+    FourthMomentScan,
+    QuadraticPhaseFit,
     correct_chromatic_dispersion,
     correct_fiber_propagation,
     dispersion_compensation_taps,
@@ -58,8 +61,10 @@ __all__ = [
     "ChromaticDispersionEstimate",
     "ClockToneScan",
     "FilterResponse",
+    "FourthMomentScan",
     "Gaussian",
     "Pulse",
+    "QuadraticPhaseFit",
     "RC",
     "RRC",
     "Rect",
