@@ -19,6 +19,7 @@ from commkit.analysis import (
     IncrementSlope,
     IncrementSubtract,
 )
+from commkit.backend import to_device
 from commkit.plotting.analysis import (
     plot_allan_deviation,
     plot_carrier_phase_characterization,
@@ -113,6 +114,16 @@ class TestPlotAnalysis:
         fig, ax = plot_frequency_noise_psd(est, title="DSH")
         floor = [ln for ln in ax.lines if "White-FM" in ln.get_label()][0]
         assert floor.get_ydata()[0] == pytest.approx(est.value / np.pi)
+        # The plateau span covers fit bins where the model is within 10 %
+        # of the floor, and none where it is not.
+        span = [p for p in ax.patches if "Plateau" in p.get_label()][0]
+        x0, x1 = span.get_x(), span.get_x() + span.get_width()
+        f = np.asarray(to_device(est.frequencies, "cpu"))
+        model = np.asarray(to_device(est.fm_psd_model, "cpu"))
+        used = np.asarray(to_device(est.used, "cpu"))
+        flat = used & (f > 0) & (model <= 1.1 * est.value / np.pi)
+        assert x0 == pytest.approx(f[flat].min())
+        assert x1 == pytest.approx(f[flat].max())
 
     @pytest.mark.parametrize("dsh", [False, True])
     def test_increment_variance(self, xp: Any, dsh: bool) -> None:

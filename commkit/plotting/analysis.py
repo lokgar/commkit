@@ -251,7 +251,11 @@ def plot_frequency_noise_psd(
       masks (400 bins or fewer) are drawn as markers on the PSD, dense ones
       as a highlighted log-binned median curve.
     * ``fm_psd_model``: the fitted model of white FM, flicker FM and
-      detection noise, drawn over the PSD.
+      detection noise, drawn over the PSD.  The white-FM plateau, the fit
+      bins where the model stays within 10 % of ``Δν/π``, is shaded.  It
+      shows where the floor is pinned down; ``Δν`` itself comes from the
+      model fitted over all of ``used``, not from an average over the
+      plateau.
 
     Dense spectra are drawn faint with a log-binned median trace on top, and
     the model through the same reduction (a model divided by the response
@@ -346,6 +350,7 @@ def plot_frequency_noise_psd(
             )
 
         model = getattr(estimate, "fm_psd_model", None)
+        m_i = None
         if model is not None:
             m_c = _as_channels(model)
             m_i = m_c[0, pos]
@@ -385,6 +390,24 @@ def plot_frequency_noise_psd(
                 ls=":",
                 label=r"White-FM floor  $\Delta\nu/\pi$",
             )
+            if m_i is not None:
+                # Δν is the white term of a model fitted over the whole fit
+                # region, not a plateau average.  Shade where the model stays
+                # within 10 % of that term (flicker and the angle-noise tail
+                # negligible): the plateau that pins the floor down.
+                white = float(floors[0]) / np.pi
+                dom = np.isfinite(m_i) & (m_i <= 1.1 * white)
+                if used is not None:
+                    dom &= u_c[pos]
+                if dom.any():
+                    axi.axvspan(
+                        float(fp[dom].min()),
+                        float(fp[dom].max()),
+                        color="#ffd166",
+                        alpha=0.18,
+                        lw=0,
+                        label="Plateau (model within 10 % of floor)",
+                    )
 
         if band is not None:
             lo = max(float(band[0]), float(fp[0])) if fp.size else float(band[0])
