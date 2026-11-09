@@ -130,7 +130,7 @@ class TestDecoderExitCurve:
 
     def test_area_theorem(self, backend_device: str, caplog: Any) -> None:
         """For an exact a-posteriori decoder with only a-priori input, the
-        area under the curve is 1 - k / n (Ashikhmin, Kramer, ten Brink)."""
+        area under the curve is 1 - k / n (the area theorem)."""
         with caplog.at_level(logging.INFO, logger="commkit"):
             curve = decoder_exit_curve(
                 self.CODE,

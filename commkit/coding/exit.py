@@ -655,12 +655,6 @@ def ldpc_exit_curves(
       code run so close together that the closed-form fits of ``J``
       (within 1e-3) move its threshold by 0.02 bit.
 
-    References
-    ----------
-    S. ten Brink, G. Kramer, A. Ashikhmin, "Design of low-density
-    parity-check codes for modulation and detection," IEEE Trans. Commun.
-    52(4), 2004.
-
     Examples
     --------
     >>> code = LDPCCode.dvbs2("1/2", "short")

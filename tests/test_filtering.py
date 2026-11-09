@@ -954,10 +954,10 @@ class TestDispersionCompensationTaps:
 
     def test_default_length_follows_the_spread(self) -> None:
         """1.25 times the group-delay spread 2π|β₂L|·B·fs, odd; over the
-        whole band the spread is Savory's D λ² L / (c T²) (45 samples at
+        whole band the spread is D λ² L / (c T²) (45 samples at
         80 km, 64 GS/s, so 57 taps), and a short link keeps 7."""
-        savory = 17.0e-6 * (1550e-9) ** 2 * 80e3 / (299_792_458.0 / self.FS**2)
-        assert 44 < savory < 45
+        spread = 17.0e-6 * (1550e-9) ** 2 * 80e3 / (299_792_458.0 / self.FS**2)
+        assert 44 < spread < 45
         full = filtering.dispersion_compensation_taps(
             dispersion_ps_nm=1360.0, sampling_rate=self.FS, **self.KW
         )
@@ -965,7 +965,7 @@ class TestDispersionCompensationTaps:
         band = filtering.dispersion_compensation_taps(
             dispersion_ps_nm=1360.0, sampling_rate=self.FS, bandwidth=32e9, **self.KW
         )
-        assert len(band) == 2 * int(np.ceil((1.25 * savory / 2 - 1) / 2)) + 1
+        assert len(band) == 2 * int(np.ceil((1.25 * spread / 2 - 1) / 2)) + 1
         short = filtering.dispersion_compensation_taps(
             dispersion_ps_nm=17.0, sampling_rate=self.FS, **self.KW
         )

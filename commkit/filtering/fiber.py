@@ -919,7 +919,7 @@ def dispersion_compensation_taps(
 
     The FIR filter of :func:`correct_chromatic_dispersion`: the
     least-squares fit of the inverse response ``exp(+j β₂L ω² / 2)`` over
-    the band ``|f| <= bandwidth / 2`` (Eghbali et al. 2014).  Over the whole
+    the band ``|f| <= bandwidth / 2``.  Over the whole
     sampled band the fit is the band-limited impulse response truncated to
     ``num_taps``.  Apply the taps with :func:`ols_fir_filter` (long filters)
     or :func:`fir_filter`, both of which center them; inspect them with
@@ -975,15 +975,6 @@ def dispersion_compensation_taps(
     exactly as long as the spread over the occupied band leaves about
     -32 dB.  Sweep ``num_taps`` against a metric of the compensated signal
     to choose a length for another signal.
-
-    References
-    ----------
-    .. [1] S. J. Savory, "Digital filters for coherent optical receivers,"
-       Opt. Express 16(2), 804-817, 2008.
-    .. [2] A. Eghbali, H. Johansson, O. Gustafsson and S. J. Savory,
-       "Optimal least-squares FIR digital filters for compensation of
-       chromatic dispersion in digital coherent optical receivers,"
-       J. Lightw. Technol. 32(8), 1449-1456, 2014.
 
     Examples
     --------

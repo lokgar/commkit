@@ -7,10 +7,8 @@ target distribution, invertibly.  Both classes are code objects, so
 (Maxwell-Boltzmann priors, ``Constellation.shaped``) is in
 :mod:`commkit.mapping.shaping`.
 
-:class:`CCDM` (constant-composition distribution matching, Schulte and
-Böcherer, 2016) maps ``k`` bits to ``num_symbols`` points whose counts are
-fixed: the composition that best approximates the constellation's pmf
-(Böcherer and Geiger, 2016).  Each block of bits selects a point of
+:class:`CCDM` (constant-composition distribution matching) maps ``k`` bits to ``num_symbols`` points whose counts are
+fixed: the composition that best approximates the constellation's pmf.  Each block of bits selects a point of
 ``[0, 1)``; the sequences of that composition partition ``[0, 1)`` by
 arithmetic coding over the remaining counts, and the matcher outputs the
 sequence whose interval holds the point.  The coder is a 64-bit range coder:
@@ -24,8 +22,7 @@ sequential recursion per block: Numba over blocks on the CPU; GPU input to
 :func:`~commkit.coding.decode` makes one round trip, and ``generate`` runs
 it on the host before moving the payload.
 
-:class:`PAS` (probabilistic amplitude shaping, Böcherer, Steiner and
-Schulte, 2015) combines a CCDM over the amplitudes of one real dimension
+:class:`PAS` (probabilistic amplitude shaping) combines a CCDM over the amplitudes of one real dimension
 with a systematic FEC code, whose parity bits supply the signs.  It needs
 labels with a sign bit per real dimension and the same amplitude label for
 ``±a``: Gray QAM and bipolar PAM as the factories build them.
@@ -202,7 +199,7 @@ class CCDM(_Code):
 
 
 def _composition(pmf: np.ndarray, n: int) -> np.ndarray:
-    """KL-optimal counts ``c`` (sum ``n``) for ``pmf`` (Böcherer and Geiger)."""
+    """KL-optimal counts ``c`` (sum ``n``) for ``pmf``."""
     p = np.asarray(pmf, dtype=np.float64)
     c = np.floor(n * p).astype(np.int64)
     for _ in range(n - int(c.sum())):

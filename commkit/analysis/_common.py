@@ -21,7 +21,7 @@ __all__ = [
     "_whittle_fit",
 ]
 
-# β-separation-line slope (Di Domenico 2010): S_f(f) = (8 ln2 / π²) · f
+# β-separation-line slope: S_f(f) = (8 ln2 / π²) · f
 _BETA_SLOPE = 8.0 * np.log(2.0) / (np.pi**2)
 # FWHM linewidth from the integrated FM-noise area above the β-line:
 # Δν = sqrt(8 ln2 · A)

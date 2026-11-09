@@ -10,8 +10,8 @@ list decoding (CA-SCL).  Encoding is ``n`` butterfly passes on the data's
 device.
 
 Decoding is successive cancellation (:class:`SC`) or its list version
-(:class:`SCL`), with min-sum check-node updates and the path metric of
-Balatsoukas-Stimming et al. (2015): sequential per codeword, so Numba over
+(:class:`SCL`), with min-sum check-node updates and an LLR-based path
+metric: sequential per codeword, so Numba over
 codewords on the CPU, and GPU input makes one round trip.  LLRs and partial
 sums are kept level by level in buffers of ``2N`` (level ``s`` at offsets
 ``2^s ... 2^(s+1) - 1``), so a list path is copied in ``O(N)``.

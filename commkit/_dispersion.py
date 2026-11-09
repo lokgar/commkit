@@ -110,7 +110,7 @@ def spread_samples(
 
     ``τ(ω) = β₂ L ω`` over ``|f| <= bandwidth / 2`` spans
     ``2π |β₂ L| · bandwidth`` seconds; over the whole sampled band
-    (``bandwidth = fs``) this is Savory's FIR length (Opt. Express 16, 2008).
+    (``bandwidth = fs``) this is the FIR length that covers the whole spread.
     """
     return 2.0 * np.pi * abs(beta2_length) * bandwidth * sampling_rate
 
@@ -143,8 +143,7 @@ def compensation_taps(
 
     Minimizes ``∫_{|θ|<W} |Σ h[n] e^{-jθn} - exp(j a θ²)|² dθ`` with
     ``θ = ω / fs``, ``W = π · bandwidth / fs`` and ``a = β₂ L fs² / 2``, for
-    ``n`` centred on tap ``(num_taps - 1) // 2`` (Eghbali et al., J.
-    Lightw. Technol. 32, 2014): ``Q h = p`` with the Toeplitz Gram matrix
+    ``n`` centred on tap ``(num_taps - 1) // 2``: ``Q h = p`` with the Toeplitz Gram matrix
     ``Q[m, k] = (W/π) sinc(W (m-k) / π)`` and ``p[m]`` the band integral of
     the response, exact through Fresnel integrals.  Over the whole band
     (``W = π``) ``Q`` is the identity and ``h = p``, the truncated

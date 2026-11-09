@@ -236,8 +236,7 @@ class Chase:
     ``sum_i (1 - 2 c_i) LLR_i`` is the decision.  The soft output of bit
     ``i`` is half the metric difference between the best candidates with
     ``c_i = 0`` and ``c_i = 1`` (max-log), or, when no candidate disagrees
-    with the decision there, ``beta`` with the decision's sign (Pyndiah,
-    1998).  For codes with a hard decoder: linear block codes and BCH codes.
+    with the decision there, ``beta`` with the decision's sign.  For codes with a hard decoder: linear block codes and BCH codes.
 
     Parameters
     ----------

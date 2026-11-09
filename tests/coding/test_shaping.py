@@ -197,8 +197,7 @@ class TestPAS:
     ) -> None:
         """DVB-S2 rate 3/4 with PS-64-QAM (entropy 5): rate 3.50 bit/symbol.
         It must fail where the GMI is below the rate, and decodes 1 dB above
-        that point, the gap Böcherer, Steiner and Schulte (IEEE Trans.
-        Commun., 2015) report for DVB-S2 codes.  Smoke run: 0 failures in 6
+        that point, a typical gap for DVB-S2 codes.  Smoke run: 0 failures in 6
         frames bounds the FER below 0.4 (95 %); the slow run's 60 frames bound
         it below 0.05."""
         pas = PAS(LDPCCode.dvbs2("3/4"), PS64)
