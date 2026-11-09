@@ -15,7 +15,7 @@ fast birefringence of the fiber into ``8/9 · γ · (|x|² + |y|²)``.  In
 CommKit's sign convention (``_dispersion``: propagation multiplies a spectrum
 by ``exp(-j β₂ ω² L / 2)``) the field obeys
 
-    dA/dz = -α/2 A - j β₂/2 ∂²A/∂t² + β₃/6 ∂³A/∂t³ - j γ |A|² A,
+    dA/dz = -α/2 A + j β₂/2 ∂²A/∂t² + β₃/6 ∂³A/∂t³ - j γ |A|² A,
 
 the complex conjugate of the textbook (Agrawal) form, so the Kerr phase is
 ``exp(-j γ |A|² L)``.  Matching the dispersion sign is what keeps solitons
