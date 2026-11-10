@@ -4,12 +4,15 @@ import math
 
 import pytest
 
+import commkit as ck
+from commkit import RRC, Constellation
 from commkit.core import Signal
 from commkit.impairments import (
     GramSchmidt,
     IQImbalanceEstimate,
     Lowdin,
     apply_iq_imbalance,
+    apply_sampling_clock_offset,
     correct_iq_imbalance,
     estimate_iq_imbalance,
 )
@@ -155,6 +158,69 @@ class TestIQSkew:
         assert isinstance(out, Signal)
         with pytest.raises(ValueError, match="conflicts"):
             apply_iq_imbalance(sig, skew=1e-12, sampling_rate=1e9, **kw)
+
+
+class TestSamplingClockOffset:
+    """apply_sampling_clock_offset samples the band-limited waveform at
+    n / (1 + ε)."""
+
+    @pytest.mark.parametrize("dtype", ["complex64", "complex128"])
+    @pytest.mark.parametrize("ppm", [150.0, -150.0])
+    def test_tone_at_stretched_instants(self, xp, dtype, ppm):
+        """A tone at 0.3 cycles per sample comes out as the tone at
+        n / (1 + ε): error below -110 dB away from the 24 edge samples
+        (measured -132 dB in complex64, the interpolator's design
+        -119 dB at 0.4 cycles per sample)."""
+        n_in, f = 8192, 0.3
+        x = xp.exp(2j * xp.pi * f * xp.arange(n_in)).astype(dtype)
+        y = apply_sampling_clock_offset(x, offset_ppm=ppm)
+        assert y.dtype == x.dtype
+        assert y.shape[0] == math.floor((n_in - 1) * (1 + ppm * 1e-6)) + 1
+        t = xp.arange(y.shape[0]) / (1 + ppm * 1e-6)
+        err = y - xp.exp(2j * xp.pi * f * t)
+        err_db = 10 * math.log10(float(xp.mean(xp.abs(err[30:-30]) ** 2)))
+        assert err_db < -110.0
+
+    def test_symbols_drift_later_for_a_fast_clock(self, xp):
+        """A band-limited pulse at input sample 8000 peaks near output sample
+        8000 · (1 + ε): 8008 at +1000 ppm, 7992 at -1000 ppm."""
+        taps = xp.asarray(RRC(rolloff=0.5).taps(4), dtype=xp.complex64)
+        x = xp.zeros(16000, dtype=xp.complex64)
+        half = taps.shape[0] // 2
+        x[8000 - half : 8000 - half + taps.shape[0]] = taps
+        for ppm, expected in ((1000.0, 8008), (-1000.0, 7992)):
+            y = apply_sampling_clock_offset(x, offset_ppm=ppm)
+            assert int(xp.argmax(xp.abs(y))) == expected
+
+    def test_zero_offset_is_identity(self, xp, xpt):
+        x = (xp.arange(64) * (1 + 1j)).astype(xp.complex64)
+        y = apply_sampling_clock_offset(x, offset_ppm=0.0)
+        xpt.assert_allclose(y, x, atol=0)
+        assert y is not x
+
+    def test_channels_share_the_clock(self, xp, xpt):
+        rng = xp.random.default_rng(3)
+        a = (rng.standard_normal(2048) + 1j * rng.standard_normal(2048)).astype(
+            xp.complex64
+        )
+        both = apply_sampling_clock_offset(xp.stack([a, 2 * a]), offset_ppm=40.0)
+        xpt.assert_allclose(both[1], 2 * both[0], rtol=1e-5, atol=1e-6)
+        xpt.assert_allclose(
+            both[0], apply_sampling_clock_offset(a, offset_ppm=40.0), atol=1e-5
+        )
+
+    def test_signal_keeps_rate_and_reference(self):
+        sig = ck.generate(
+            Constellation.qam(16), num_symbols=1000, symbol_rate=1e9, sps=2, rng=1
+        )
+        out = apply_sampling_clock_offset(sig, offset_ppm=500.0)
+        assert out.sampling_rate == sig.sampling_rate
+        assert out.samples.shape[-1] == 2000
+        assert out.reference is sig.reference
+
+    def test_rejects_offsets_at_or_below_minus_one(self, xp):
+        with pytest.raises(ValueError, match="offset_ppm"):
+            apply_sampling_clock_offset(xp.ones(8, xp.complex64), offset_ppm=-1e6)
 
 
 class TestIQImbalanceCompensation:

@@ -7,7 +7,8 @@
 - :mod:`~commkit.impairments.frontend`: transceiver IQ imbalance
   (:func:`apply_iq_imbalance`, :func:`estimate_iq_imbalance`, and
   :func:`correct_iq_imbalance` with :class:`Lowdin`, :class:`GramSchmidt` or
-  an :class:`IQImbalanceEstimate`).
+  an :class:`IQImbalanceEstimate`), and the ADC clock
+  (:func:`apply_sampling_clock_offset`).
 - :mod:`~commkit.impairments.fiber_channel`: the fiber channel, linear
   (:func:`apply_chromatic_dispersion`, :func:`apply_pmd`,
   :func:`apply_polarization_mixing`) and nonlinear
@@ -26,6 +27,7 @@ from .frontend import (
     IQImbalanceEstimate,
     Lowdin,
     apply_iq_imbalance,
+    apply_sampling_clock_offset,
     correct_iq_imbalance,
     estimate_iq_imbalance,
 )
@@ -42,6 +44,7 @@ __all__ = [
     "apply_chromatic_dispersion",
     "apply_fiber_propagation",
     "apply_iq_imbalance",
+    "apply_sampling_clock_offset",
     "apply_phase_noise",
     "apply_pmd",
     "apply_polarization_mixing",

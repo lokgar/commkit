@@ -1,4 +1,4 @@
-"""Transceiver IQ imbalance.
+"""Transceiver front-end impairments: IQ imbalance and the ADC clock.
 
 :func:`apply_iq_imbalance`, its blind measurement
 :func:`estimate_iq_imbalance` and its compensation
@@ -8,6 +8,8 @@ kept together because they are one device model, the widely linear mixing
 of I and Q.  A time skew between the branches, the frequency-dependent part
 of the model, is applied by :func:`apply_iq_imbalance` but lies outside what
 the memoryless estimate and corrections describe.
+:func:`apply_sampling_clock_offset` resamples a signal as an ADC whose clock
+is off its nominal rate.
 """
 
 import logging
@@ -22,12 +24,14 @@ from ..backend import ArrayType, dispatch, to_device
 from ..core._signal_adapter import S, adapt_signal
 from ..logger import logger
 from ..math import _derotate, db_to_linear
+from ..multirate import _interpolate
 
 __all__ = [
     "GramSchmidt",
     "IQImbalanceEstimate",
     "Lowdin",
     "apply_iq_imbalance",
+    "apply_sampling_clock_offset",
     "correct_iq_imbalance",
     "estimate_iq_imbalance",
 ]
@@ -142,6 +146,82 @@ def _delay_quadrature(x: ArrayType, xp: ModuleType, delay: float) -> ArrayType:
     freqs = xp.fft.rfftfreq(n, d=1.0)
     q_delayed = _fft.irfft(_derotate(spec, 2.0 * math.pi * delay * freqs), n=n, axis=-1)
     return (x.real + 1j * q_delayed).astype(x.dtype, copy=False)
+
+
+def apply_sampling_clock_offset(samples: S, *, offset_ppm: float) -> S:
+    """Resample a signal as an ADC whose clock is off its nominal rate.
+
+    The receiver's clock runs at ``fs · (1 + ε)``, ``ε = offset_ppm · 1e-6``,
+    while the samples are still labelled with the nominal rate ``fs``: output
+    sample ``n`` is the input waveform at ``n / (1 + ε)`` input samples.  A
+    positive offset takes more samples per symbol than nominal, so the
+    symbols drift later in the record by ``ε`` samples per sample; a
+    negative one, earlier.  Clock recovery at the receiver undoes it.
+
+    The waveform between samples is the band-limited interpolant, through a
+    48-tap Blackman-Harris windowed sinc in the input's precision: its error
+    stays below -119 dB for content up to 0.4 cycles per sample (80 % of the
+    Nyquist band, 1.6 samples per symbol for a 0.1-rolloff pulse at 2 sps).
+    The record is zero-extended, so the first and last 24 samples lose that
+    accuracy.
+
+    Parameters
+    ----------
+    samples : array_like or Signal
+        Input samples, ``(N,)`` or ``(C, N)``; all channels share the clock.
+    offset_ppm : float
+        Clock frequency error ``ε`` in parts per million, more than -1e6.
+
+    Returns
+    -------
+    ndarray or Signal
+        ``floor((N - 1) · (1 + ε)) + 1`` samples covering the same waveform,
+        same dtype and device (a copy of the input for a zero offset).  A Signal keeps its ``sampling_rate`` (the
+        nominal one, which the receiver believes) and its reference: the
+        same symbols were sent, and their alignment to the symbol periods
+        is what the offset breaks.
+
+    Raises
+    ------
+    ValueError
+        If ``offset_ppm`` is not above -1e6.
+
+    Examples
+    --------
+    >>> rx = apply_sampling_clock_offset(tx, offset_ppm=20.0)
+    """
+    if not offset_ppm > -1e6:
+        raise ValueError(
+            f"apply_sampling_clock_offset(): offset_ppm must be above -1e6, got {offset_ppm!r}."
+        )
+    signal_adapter = adapt_signal(
+        samples, function_name="apply_sampling_clock_offset()"
+    )
+    x, xp, _ = dispatch(signal_adapter.array)
+    x, was_1d = as_2d(x, name="samples")
+    n_in = x.shape[-1]
+    eps = offset_ppm * 1e-6
+    if eps == 0.0:
+        return signal_adapter.wrap_samples(restore_1d(was_1d, x.copy()))
+    n_out = math.floor((n_in - 1) * (1.0 + eps)) + 1 if n_in else 0
+    logger.info(
+        "Applying a sampling-clock offset of %.3f ppm (%d -> %d samples).",
+        offset_ppm,
+        n_in,
+        n_out,
+    )
+    # Output n sits at n - d input samples, d = n·ε/(1 + ε); d in the real
+    # precision of x (its rounding, 6e-8 relative, is 6e-6 samples at d = 100).
+    real = xp.float32 if x.dtype in (xp.float32, xp.complex64) else xp.float64
+    n = xp.arange(n_out)
+    d = n.astype(real) * (eps / (1.0 + eps))
+    whole = xp.floor(d)
+    r = d - whole
+    on_sample = r == 0
+    base = n - whole.astype(xp.int64) - 1 + on_sample
+    frac = xp.where(on_sample, 0.0, 1.0 - r).astype(real, copy=False)
+    y = _interpolate(x, base, frac)
+    return signal_adapter.wrap_samples(restore_1d(was_1d, y))
 
 
 # -----------------------------------------------------------------------------

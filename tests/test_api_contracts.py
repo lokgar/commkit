@@ -566,6 +566,11 @@ ROWS: list[Row] = [
         ),
         fact=FS_CONFLICT,
     ),
+    Row(
+        "commkit.impairments.frontend.apply_sampling_clock_offset",
+        RATE_CHANGE,
+        call=lambda c, x: _a(x, offset_ppm=200.0),
+    ),
     Row("commkit.impairments.frontend.GramSchmidt", VALUE),
     Row("commkit.impairments.frontend.Lowdin", VALUE),
     Row("commkit.impairments.frontend.IQImbalanceEstimate", VALUE),

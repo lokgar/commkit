@@ -155,7 +155,7 @@ Dependencies point downward only:
   - `method=` strings name only a numerical flavor of one algorithm (`method="maxlog" | "exact"`); algorithms are objects.
   - Output scaling has three names: `normalize` (bool) measures the power and rescales to the library's convention; `correct_power` (bool) applies the exact, known gain of a rate change without measuring; `<thing>_normalization` (a string) chooses how coefficients are scaled (`taps_normalization="unit_energy" | "unity_gain"`).
   - A search window is `search_range`, a `(start, stop)` pair in the axis's unit, or `search_band`, a half-width in Hz around a nominal frequency.
-  - Values are in SI units without a suffix (`linewidth` in Hz, `drift_rate` in rad/s, `taus` in s). A result holding one quantity in two units suffixes the SI one (`lags` in samples, `lag_s`). A conventional non-SI unit goes into the name: `_db`, `_dbm`, `_deg`, `_nm`, `_km`, `_ps_nm_km`. Normalized quantities say so (`normalized_bandwidth`). No second name for one quantity in another unit (no `center_frequency_ghz`); `center_wavelength_nm` is a different, derived quantity.
+  - Values are in SI units without a suffix (`linewidth` in Hz, `drift_rate` in rad/s, `taus` in s). A result holding one quantity in two units suffixes the SI one (`lags` in samples, `lag_s`). A conventional non-SI unit goes into the name: `_db`, `_dbm`, `_deg`, `_nm`, `_km`, `_ps_nm_km`, `_ppm`. Normalized quantities say so (`normalized_bandwidth`). No second name for one quantity in another unit (no `center_frequency_ghz`); `center_wavelength_nm` is a different, derived quantity.
 
 ### Docstrings
 
