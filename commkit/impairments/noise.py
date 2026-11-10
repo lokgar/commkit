@@ -13,6 +13,7 @@ signal (zero padding, a capture before the frame arrives) lowers neither.
 """
 
 import logging
+import math
 from typing import Any
 
 import numpy as np
@@ -296,6 +297,9 @@ def apply_coherent_detection(
     lo_power_dbm: float,
     responsivity: float = 1.0,
     thermal_noise_density: float = 0.0,
+    cmrr_db: float | None = None,
+    lo_rin_db_hz: float | None = None,
+    balanced: bool = True,
     sampling_rate: float | None = None,
     rng: RNG = None,
 ) -> S:
@@ -306,7 +310,7 @@ def apply_coherent_detection(
     quadrature.  The beat term ``R·sqrt(P_c·P_LO)`` carries the signal; the
     shot noise of the light on the diodes, ``R (P_c + P_LO)`` in total, and
     the receiver's thermal noise add to it.  Per complex sample, the noise
-    variance relative to the signal power is
+    variance relative to the signal power of an ideal balanced receiver is
 
         1 / SNR = f_s · (q R (P_c + P_LO) + i_n²) / (R² P_c P_LO),
 
@@ -316,6 +320,12 @@ def apply_coherent_detection(
     added to the samples at that ratio, with the signal component
     unchanged.  With a strong LO and no thermal noise, ``Es/N0 = R P_c T / q``,
     ``η`` photons per symbol for a responsivity ``R = η q / (hν)``.
+
+    A balanced pair rejects what both diodes see: the signal's own power
+    ``|s|²`` (signal-signal beat) and the LO's intensity noise.  With a
+    finite ``cmrr_db`` a fraction of them leaks through, and a single-ended
+    receiver (``balanced=False``) passes them in full while losing half the
+    signal light.
 
     Parameters
     ----------
@@ -334,6 +344,19 @@ def apply_coherent_detection(
         Input-referred thermal noise current density ``i_n`` of each
         balanced pair in A/sqrt(Hz) (one-sided), non-negative; typical
         receivers are near 10-20 pA/sqrt(Hz).
+    cmrr_db : float, optional
+        Common-mode rejection ratio of the balanced pairs in dB,
+        ``20 log10((R1 + R2) / |R1 - R2|)`` for the diodes' responsivities.
+        ``None`` (default) is perfect balance.  Ignored with
+        ``balanced=False``.
+    lo_rin_db_hz : float, optional
+        Relative intensity noise of the LO in dB/Hz (one-sided), white over
+        the simulated band.  ``None`` (default) is a noiseless LO.  It
+        reaches the output only through imperfect balance or a single-ended
+        receiver.
+    balanced : bool, default True
+        Balanced photodiode pairs; ``False`` detects one output of each pair
+        with a single diode.
     sampling_rate : float, optional
         Sampling rate in Hz, the noise bandwidth.  Taken from the Signal;
         required for array input.  A value that disagrees with the Signal
@@ -365,6 +388,19 @@ def apply_coherent_detection(
     quadratures make the shot-noise limit ``Es/N0 = η·n_p``, half that of a
     single-quadrature homodyne receiver.
 
+    With diode responsivities ``R(1 ± δ)``, ``δ = 10^(-CMRR/20)``, the
+    common-mode light ``(|s(t)|² + P_LO(1 + r(t)))/4`` on each diode leaks
+    as ``δ R (|s(t)|² + P_LO r(t)) / 2`` into each quadrature; a single
+    diode passes ``R (|s(t)|² + P_LO r(t)) / 4`` and carries the beat at half
+    the amplitude, ``R sqrt(P_c P_LO) / 2``, with the shot noise of
+    ``R (P_c + P_LO) / 4``.  In units of the beat, the leak is
+    ``κ (sqrt(P_c/P_LO) (|x̃|² - 1) + sqrt(P_LO/P_c) r(t))`` on both
+    quadratures, ``κ = δ/2`` (balanced) or ``1/2`` (single-ended), for the
+    field ``x̃`` of unit mean power: the receiver is AC coupled, so the mean
+    of ``|s|²`` and the LO's DC are removed.  ``r(t)`` is white with
+    variance ``RIN · f_s / 2``; the RIN's effect on the beat itself,
+    second order, is left out.
+
     Examples
     --------
     >>> rx = apply_coherent_detection(
@@ -375,6 +411,10 @@ def apply_coherent_detection(
     if not responsivity > 0:
         raise ValueError(
             f"apply_coherent_detection(): responsivity must be positive, got {responsivity!r}."
+        )
+    if cmrr_db is not None and not cmrr_db >= 0:
+        raise ValueError(
+            f"apply_coherent_detection(): cmrr_db must be non-negative, got {cmrr_db!r}."
         )
     if not thermal_noise_density >= 0:
         raise ValueError(
@@ -396,11 +436,23 @@ def apply_coherent_detection(
     p_lo = 1e-3 * 10 ** (lo_power_dbm / 10)
     p_c = p_total * host_power / host_power.sum()
     r = responsivity
+    # Beat amplitude per quadrature, the shot-noise current of the diodes
+    # of one quadrature, and the common-mode leak (module Notes).
+    gain = 1.0 if balanced else 0.5
+    shot_current = r * (p_c + p_lo) * (0.5 if balanced else 0.25)
+    if balanced:
+        leak = 0.0 if cmrr_db is None else 0.5 * 10 ** (-cmrr_db / 20)
+    else:
+        leak = 0.5
     inv_snr = (
-        fs
-        * (ELEMENTARY_CHARGE * r * (p_c + p_lo) + thermal_noise_density**2)
-        / (r * r * p_c * p_lo)
+        2.0
+        * (ELEMENTARY_CHARGE * shot_current * fs + thermal_noise_density**2 * fs / 2)
+        / (gain * gain * r * r * p_c * p_lo)
     )
+    rin_var = 0.0
+    if leak and lo_rin_db_hz is not None:
+        rin_var = 10 ** (lo_rin_db_hz / 10) * fs / 2
+        inv_snr = inv_snr + 2.0 * leak * leak * (p_lo / p_c) * rin_var
     if logger.isEnabledFor(logging.INFO):
         sig = signal_adapter.signal
         snr_db = -10 * np.log10(inv_snr)
@@ -418,8 +470,26 @@ def apply_coherent_detection(
                 "Coherent detection: SNR %s dB per sample.",
                 np.array2string(snr_db, precision=2),
             )
-    noise_var = xp.asarray(host_power * inv_snr)[:, None]
-    y = x + _noise(x, xp, noise_var, rng)
+    gen = as_generator(rng)
+    shot_thermal = inv_snr - (2.0 * leak * leak * (p_lo / p_c) * rin_var)
+    y = x + _noise(x, xp, xp.asarray(host_power * shot_thermal)[:, None], gen)
+    if leak:
+        # Common-mode leak on both quadratures, in the units of x.
+        scale = xp.asarray(np.sqrt(host_power))[:, None]
+        real = x.real.dtype
+        term = xp.zeros(x.shape, dtype=real)
+        direct = leak * np.sqrt(p_c / p_lo)
+        intensity = xp.abs(x) ** 2 / xp.asarray(host_power, dtype=real)[:, None]
+        term = term + xp.asarray(direct, dtype=real)[:, None] * (intensity - 1.0)
+        if rin_var:
+            lo_noise = math.sqrt(rin_var) * standard_normal(
+                gen, (x.shape[-1],), dtype=real, xp=xp
+            )
+            term = (
+                term
+                + xp.asarray(leak * np.sqrt(p_lo / p_c), dtype=real)[:, None] * lo_noise
+            )
+        y = y + (scale.astype(real) * term) * (1 + 1j)
     return signal_adapter.wrap_samples(restore_1d(was_1d, y))
 
 

@@ -6,6 +6,7 @@ import pytest
 from commkit import RRC, Constellation, generate
 from commkit.core import Preamble, Signal, SingleCarrierFrame
 from commkit.impairments import apply_ase, apply_awgn, apply_coherent_detection
+from tests.common.conversions import to_numpy
 
 
 class TestAddAWGN:
@@ -469,3 +470,105 @@ class TestCoherentDetection:
             apply_coherent_detection(
                 xp.zeros(64, xp.complex64), sampling_rate=1e9, **kw
             )
+
+
+class TestDetectionImbalance:
+    """Common-mode leak of a coherent receiver: finite CMRR, LO RIN and
+    single-ended detection."""
+
+    Q = TestCoherentDetection.Q
+    RS = TestCoherentDetection.RS
+    FS = 2 * TestCoherentDetection.RS
+
+    def _rx(self, xp, rng=1):
+        return TestCoherentDetection()._rx(xp, rng=rng)
+
+    def _snr_db(self, sig):
+        return TestCoherentDetection()._snr_db(sig)
+
+    def test_rin_through_finite_cmrr(self, xp):
+        """LO RIN of -140 dB/Hz through a 20 dB CMRR, at -20 dBm received
+        and 15 dBm LO: the leak κ sqrt(P_LO/P_c) r(t), κ = δ/2,
+        δ = 10^(-1), adds white noise of 2 κ² (P_LO/P_c) RIN f_s/2 to the
+        shot noise f_s q (P_c + P_LO)/(R P_c P_LO), and Es/N0 = 2 / (sum)
+        at 2 samples per symbol (25.95 dB predicted).  Perfect balance
+        rejects the RIN: the shot limit, 32.9 dB.  Both with the clean record's
+        44.5 dB floor added.  Bound 0.15 dB."""
+        p_c, p_lo, rin = 1e-5, 10**1.5 * 1e-3, 1e-14
+        kw = {"received_power_dbm": -20.0, "lo_power_dbm": 15.0, "lo_rin_db_hz": -140.0}
+        shot = self.FS * self.Q * (p_c + p_lo) / (p_c * p_lo)
+        leak = 2 * 0.05**2 * (p_lo / p_c) * rin * self.FS / 2
+        sig = self._rx(xp)
+        # The matched filter and slicer of the clean record give a 44.5 dB
+        # floor (the pulse's truncation), which adds to the noise.
+        floor = 10 ** (-self._snr_db(sig) / 10)
+
+        def expected(white):
+            return -10 * np.log10(white / 2 + floor)
+
+        with_rin = self._snr_db(
+            apply_coherent_detection(sig, cmrr_db=20.0, rng=2, **kw)
+        )
+        assert abs(with_rin - expected(shot + leak)) < 0.15
+        rejected = self._snr_db(apply_coherent_detection(sig, rng=2, **kw))
+        assert abs(rejected - expected(shot)) < 0.15
+
+    def test_signal_signal_leak_coefficient(self, xp):
+        """The deterministic leak of |s|²: regressing the added part of both
+        quadratures on (|x̃|² - 1) sqrt(P) gives κ sqrt(P_c/P_LO) = 0.0281
+        (20 dB CMRR, -10 dBm received, -5 dBm LO) within 3 %."""
+        sig = self._rx(xp)
+        out = apply_coherent_detection(
+            sig, received_power_dbm=-10.0, lo_power_dbm=-5.0, cmrr_db=20.0, rng=3
+        )
+        x = np.asarray(to_numpy(sig.samples), dtype=np.complex128)
+        y = np.asarray(to_numpy(out.samples), dtype=np.complex128)
+        p = np.mean(np.abs(x) ** 2)
+        basis = (np.abs(x) ** 2 / p - 1) * np.sqrt(p)
+        d = (y - x).real + (y - x).imag
+        coef = np.dot(d, basis) / (2 * np.dot(basis, basis))
+        assert coef == pytest.approx(0.05 * np.sqrt(10 ** (-0.5)), rel=0.03)
+
+    def test_single_ended_shot_limit(self, xp):
+        """A single diode per quadrature loses half the signal light: the
+        shot-limited Es/N0 is n_p/2, 3 dB below the balanced receiver
+        (10.9 dB at -45 dBm, quantum efficiency 1; bound 0.15 dB)."""
+        h, nu = TestCoherentDetection.H, TestCoherentDetection.NU
+        kw = {
+            "received_power_dbm": -45.0,
+            "lo_power_dbm": 13.0,
+            "responsivity": self.Q / (h * nu),
+        }
+        sig = self._rx(xp)
+        single = self._snr_db(
+            apply_coherent_detection(sig, balanced=False, rng=4, **kw)
+        )
+        n_p = 10 ** (-4.5) * 1e-3 / self.RS / (h * nu)
+        assert abs(single - 10 * np.log10(n_p / 2)) < 0.15
+
+    def test_signal_signal_beat_falls_with_the_lo(self, xp):
+        """Single-ended, no thermal noise or RIN, -10 dBm received: the
+        signal-signal beat dominates when the LO is close to the signal and
+        fades as the LO-to-signal ratio rises (SNR rising monotonically from
+        0 to 20 dB of ratio, by more than 15 dB)."""
+        sig = self._rx(xp)
+        snr = [
+            self._snr_db(
+                apply_coherent_detection(
+                    sig, received_power_dbm=-10.0, lo_power_dbm=-10.0 + ratio,
+                    balanced=False, rng=5,
+                )
+            )
+            for ratio in (0.0, 10.0, 20.0)
+        ]  # fmt: skip
+        assert snr[0] < snr[1] < snr[2]
+        assert snr[2] - snr[0] > 15.0
+
+    def test_ideal_balance_ignores_rin(self, xp, xpt):
+        """Baseline: without a CMRR the LO's RIN draws nothing and changes
+        nothing, to the bit."""
+        sig = self._rx(xp)
+        kw = {"received_power_dbm": -20.0, "lo_power_dbm": 10.0, "rng": 6}
+        a = apply_coherent_detection(sig, **kw)
+        b = apply_coherent_detection(sig, lo_rin_db_hz=-120.0, **kw)
+        xpt.assert_allclose(a.samples, b.samples, atol=0)
