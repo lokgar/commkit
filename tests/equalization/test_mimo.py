@@ -49,43 +49,33 @@ def _assert_separated(y, ref, constellation, skip, rotation="any"):
 class TestButterflyMIMO:
     """Trained and blind butterflies separate independent streams."""
 
-    def test_lms_2x2_cross_channel(self, xp, caplog):
+    def test_lms_2x2_cross_channel(self, xp):
         """Trained LMS on ISI plus rotation: after 1000 training symbols each
         output carries its own stream (held-out half); frozen taps leave the
         streams mixed."""
         c = Constellation.qam(16)
-        caplog.set_level("WARNING", logger="commkit")
         rx = _dual_pol(c, 8000, esn0_db=22.0, isi_taps=ISI_TAPS, xp=xp)
         ref = to_numpy(rx.reference.symbols)
         res = equalization.lms(rx, ref[:, :1000], num_taps=21, step_size=1e-3)
         _assert_separated(res.y_hat, ref, c, 4000, rotation="symmetry")
-        assert "decided symbols carry" not in caplog.text
         frozen = equalization.lms(rx, ref[:, :1000], num_taps=21, step_size=0.0)
         y = to_numpy(frozen.y_hat)
         assert np.all(scoring.ser(y[:, 4000:], ref[:, 4000:], c) > 0.3)
-        assert (
-            "decided symbols carry" in caplog.text
-        )  # suspect result of the frozen taps
 
-    def test_lms_undoes_differential_group_delay(self, xp, caplog):
+    def test_lms_undoes_differential_group_delay(self, xp):
         """Half a symbol of DGD at π/8 plus a rotation is frequency selective;
         trained LMS removes it (SER 0 on both streams; frozen taps 0.73)."""
         c = Constellation.qam(16)
-        caplog.set_level("WARNING", logger="commkit")
         rx = _dual_pol(
             c, 8000, esn0_db=22.0, dgd=0.5e-9, dgd_theta=np.pi / 8, seed=4, xp=xp
         )
         ref = to_numpy(rx.reference.symbols)
         res = equalization.lms(rx, ref[:, :1000], num_taps=21, step_size=1e-3)
         _assert_separated(res.y_hat, ref, c, 4000, rotation="symmetry")
-        assert "decided symbols carry" not in caplog.text
         frozen = to_numpy(
             equalization.lms(rx, ref[:, :1000], num_taps=21, step_size=0.0).y_hat
         )
         assert np.all(scoring.ser(frozen[:, 4000:], ref[:, 4000:], c) > 0.3)
-        assert (
-            "decided symbols carry" in caplog.text
-        )  # suspect result of the frozen taps
 
     def test_cma_2x2_polarization_demux(self, xp):
         """Blind CMA demultiplexes two QPSK streams through ISI and a

@@ -130,12 +130,19 @@ class TestCodedSisoChain:
     @pytest.mark.allow_warnings
     @pytest.mark.parametrize("omit", ["frequency", "timing", "cpr", "equalizer"])
     def test_each_correction_is_needed(self, backend_device: str, omit: str) -> None:
-        """Leaving any one block out breaks the chain: the pre-FEC BER rises
-        above 0.1 and at least a quarter of the codewords fail (measured:
-        FER 0.6-1.0, pre-FEC BER 0.19-0.50)."""
+        """Leaving the frequency, timing or phase correction out breaks the
+        chain: the pre-FEC BER rises above 0.1 and at least a quarter of the
+        codewords fail (measured: FER 0.88-1.0, pre-FEC BER 0.45-0.50).  This
+        channel's ISI is mild, so without the equalizer the code still
+        decodes, but the pre-FEC BER leaves the budget of
+        :meth:`test_every_codeword_decodes`, AWGN theory 1.5 dB lower (2.2e-2;
+        measured 3.1e-2)."""
         frame, tx, rx = self._transmit(backend_device)
         pre, fer = self._score(self._receive(rx, frame, tx, omit))
-        assert pre > 0.1 and fer > 0.25, (pre, fer)
+        if omit == "equalizer":
+            assert pre > qam16_gray_ber(10 ** ((self.ESN0_DB - 1.5) / 10)), pre
+        else:
+            assert pre > 0.1 and fer > 0.25, (pre, fer)
 
     def test_through_a_capture_file(self, backend_device: str, tmp_path: Any) -> None:
         """The received Signal saved and loaded again (samples, rates, frame

@@ -30,16 +30,16 @@ from commkit.mapping import Constellation
 ROUNDS = dict(rounds=3, warmup_rounds=1, iterations=1)
 N_SYM = 100_000
 
-# Converging step sizes per (equalizer, block_size).  RDE on 16-QAM from a
-# cold start (no CMA pre-convergence) converges slowly at 2048: at 4e-4 it is
-# error-free from about symbol 70 000, so its SER is scored after that (7e-4
-# never settled, still 2-5 % SER at the end); its cost does not depend on
-# the data.
+# Converging step sizes per (equalizer, block_size), on input normalized to
+# unit mean power at 2 sps.  RDE on 16-QAM from a cold start (no CMA
+# pre-convergence) converges slowly at 2048: at 2e-4 it is error-free from
+# about symbol 70 000, so its SER is scored after that (3.5e-4 never
+# settled, still 2-5 % SER at the end); its cost does not depend on the data.
 STEP_SIZE = {
-    ("cma", 256): 2e-4,
-    ("cma", 2048): 3e-4,
-    ("rde", 256): 3e-3,
-    ("rde", 2048): 4e-4,
+    ("cma", 256): 1e-4,
+    ("cma", 2048): 1.5e-4,
+    ("rde", 256): 1.5e-3,
+    ("rde", 2048): 2e-4,
 }
 SKIP = {("rde", 2048): 70_000}
 MAX_SER = {"cma": 1e-2, "rde": 1e-2}

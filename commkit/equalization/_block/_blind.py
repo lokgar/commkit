@@ -86,7 +86,7 @@ def _block_fdaf_blind(
     pilot positions overridden by the LMS residual.  ``r2`` is the Godard radius
     (CMA) and ``radii_np`` the unique ring radii (RDE), decided by their
     squared midpoints (``_rde_rings``).  ``step_size=None``
-    is the default of both, ``min(1e-3, 0.5 / block_size)``.
+    is the default of both, ``min(1e-3, 0.5 / block_size) / sps``.
     """
     use_pilots = pilot_ref is not None and pilot_mask is not None
     equalizer = f"block_{kind}"
@@ -105,7 +105,7 @@ def _block_fdaf_blind(
         pilot_gain_db=pilot_gain_db,
     )
     xp, C, n_sym, sps = run.xp, run.C, run.n_sym, run.sps
-    mu = min(1e-3, 0.5 / run.block_size) if step_size is None else step_size
+    mu = min(1e-3, 0.5 / run.block_size) / sps if step_size is None else step_size
     logger.info(
         "%s: C=%s, num_taps=%s, sps=%s, block_size=%s, fftsize=%s, mu=%s, "
         "n_sym=%s, pilot_aided=%s",
@@ -312,7 +312,7 @@ def block_cma(
         Step size on the scale of :func:`cma`.  The weights are frozen
         across each block, so the stability ceiling is about ``block_size``
         times lower than per symbol; reduce it if the run raises divergence.
-        Defaults to ``min(1e-3, 0.5 / block_size)``, as for
+        Defaults to ``min(1e-3, 0.5 / block_size) / sps``, as for
         :func:`block_rde`.
     block_size : int, default 256
         Output symbols per weight update.
@@ -396,9 +396,9 @@ def block_rde(
     step_size : float, optional
         Step size on the scale of :func:`rde`, with the about ``block_size``
         times lower stability ceiling of frozen-block adaptation.  Defaults
-        to ``min(1e-3, 0.5 / block_size)``: the per-symbol step, capped at
-        half the ceiling (``step_size * block_size`` below about 1) for large
-        blocks.
+        to ``min(1e-3, 0.5 / block_size) / sps``: the per-symbol step, capped
+        at half the ceiling (``step_size * block_size * sps`` below about 1,
+        on input normalized to unit mean power) for large blocks.
     block_size : int, default 256
         Output symbols per weight update.
     constellation : Constellation, optional

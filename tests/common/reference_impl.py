@@ -10,8 +10,8 @@ documented definition rather than calling library helpers.
 
 Conventions shared with the library's documented contract:
 
-- Input normalization: each channel is divided by ``rms(x_ch) * sqrt(sps)`` so
-  the symbol-rate power is 1.  Training symbols are used as given, on the
+- Input normalization: each channel is divided by its RMS, ``rms(x_ch)``, so
+  the samples have unit mean power.  Training symbols are used as given, on the
   scale of the unit-power constellation.
 - Regressor for output symbol ``n``: samples ``[n*sps, n*sps + T)`` of the input
   padded with ``min(T // 2, pad_total)`` leading zeros, where
@@ -35,7 +35,7 @@ def prepare_input(
     x = np.atleast_2d(np.asarray(samples)).astype(np.complex128)
     _, n_samples = x.shape
     n_sym = n_samples // sps
-    norm = np.sqrt(np.mean(np.abs(x) ** 2, axis=-1)) * np.sqrt(sps)
+    norm = np.sqrt(np.mean(np.abs(x) ** 2, axis=-1))
     x = x / norm[:, None]
     pad_total = max(0, n_sym * sps - n_samples + num_taps - 1)
     pad_left = min(num_taps // 2, pad_total)

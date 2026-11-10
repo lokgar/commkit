@@ -130,6 +130,7 @@ def make_channel_signal(
     num_channels: int = 1,
     symbol_rate: float = 1e9,
     seed: int = 0,
+    matched: bool = True,
     xp: Any = None,
 ) -> Signal:
     """A pulse-shaped record through a channel an equalizer must undo.
@@ -144,6 +145,10 @@ def make_channel_signal(
     - ``theta``: a polarization rotation (two channels).
     - ``dgd``: differential group delay in seconds at ``dgd_theta``.
     - ``esn0_db``: AWGN at that Es/N0.
+    - ``matched``: at two or more samples per symbol, the receiver's RRC
+      matched filter, the front end an adaptive equalizer follows in a
+      standard receiver (it removes the noise beyond the roll-off, which the
+      equalizer would otherwise drain only slowly).
 
     Returns the received :class:`Signal` (complex64), whose reference holds
     the transmitted symbols, on ``xp``'s device.
@@ -183,6 +188,10 @@ def make_channel_signal(
     if esn0_db is not None:
         x = apply_awgn(x, esn0_db=esn0_db, sps=sps, rng=seed + 1)
     out = sig.replace(samples=np.asarray(x).astype(np.complex64))
+    if matched and sps >= 2:
+        from commkit.filtering import matched_filter
+
+        out = matched_filter(out)
     if xp is not None:
         out = out.to(device_of(xp))
     return out

@@ -54,7 +54,7 @@ class EqualizerState:
     weights : numpy.ndarray
         ``(C, C, num_taps)`` complex64 butterfly weights.
     input_norm_factor : float or numpy.ndarray
-        Normalization applied to the input (``(C,)`` for MIMO).
+        Per-channel RMS the input was divided by (``(C,)`` for MIMO).
     pending : numpy.ndarray
         ``(C, L)`` complex64 normalized input from the resume point on.
     lead : int
@@ -171,17 +171,32 @@ class EqualizerResult:
         Error signal, ``(N_sym,)`` or ``(C, N_sym)``.
     weights_history : ndarray or None
         Tap weights over time, only with ``store_weights=True``: one row per
-        symbol of ``y_hat`` (RLS's trimmed tail included), the taps that
-        produced it.
+        symbol of ``y_hat`` (RLS's trimmed tail included).  For the
+        sequential equalizers (:func:`lms`, :func:`rls`, :func:`cma`,
+        :func:`rde`) row ``n`` holds the taps after the update at symbol
+        ``n``, so symbol ``n`` was produced by row ``n - 1`` (symbol 0 by the
+        initial taps); for :func:`block_lms`, by the taps at the start of its
+        block, which row ``n`` holds.
     num_train_symbols : int
         Training symbols consumed in the data-aided phase (LMS/RLS); skip
         them before steady-state metrics such as EVM, SNR and BER.
     input_norm_factor : float or numpy.ndarray
-        Factor ``rms(samples, axis=-1) * sqrt(sps)`` by which each channel's
-        input was divided before equalization: a ``float`` for SISO, ``(C,)``
-        for MIMO (at ``sps=1``, the plain RMS of the input symbols).  It
-        restores absolute power when a different capture (e.g. vacuum noise)
-        is passed through the same frozen taps::
+        Per-channel RMS ``a_j = sqrt(mean(|x_j|²))`` of the input samples
+        ``x_j`` as given, which each channel was divided by before
+        equalization: a ``float`` for SISO, ``(C,)`` for MIMO (the factor
+        passed in through ``state`` for a continued call).  With the taps
+        ``W_n`` that produced symbol ``n`` (see ``weights_history``) and the
+        centre tap ``T_c``, the output is exactly::
+
+            y_hat[i, n] = sum_j sum_t conj(W_n[i, j, t])
+                          * x_j[n*sps - T_c + t] / a_j      (* exp(-j phi_n))
+
+        with zeros outside the record and the factor ``exp(-j phi_n)`` of an
+        inline ``cpr`` (``phase_trajectory``).  The overall gain on the
+        received samples is therefore ``W / a_j``, and ``y_hat`` is on the
+        decision constellation's unit-power scale.  To put a different
+        capture (vacuum noise) through the same frozen taps on the same
+        absolute scale::
 
             α = signal_result.input_norm_factor  # float or (C,) array
             β = noise_result.input_norm_factor

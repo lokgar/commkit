@@ -141,64 +141,56 @@ class TestBlockLMSLayout:
 class TestBlockLMSConvergence:
     """Convergence characteristics under gradient descent, AWGN, and ISI."""
 
-    def test_identity_channel_convergence(self, xp, caplog):
+    def test_identity_channel_convergence(self, xp):
         """1024 training symbols, then decisions, on a 4-tap complex ISI
         channel with a 0.3-sample delay (16-QAM, 2 sps, Es/N0 22 dB): the
         held-out second half has no symbol errors and an EVM within 1.4x the
-        AWGN floor (0.079) at the default step; frozen taps keep the ISI."""
+        AWGN floor (0.079) at the default step; frozen taps keep the ISI
+        (SER 0.14)."""
         c = Constellation.qam(16)
-        caplog.set_level("WARNING", logger="commkit")
         rx = _isi_record(c, 8192, xp=xp)
         ref = to_numpy(rx.reference.symbols)
         kw = dict(num_taps=21, block_size=128)
         y = to_numpy(block_lms(rx, ref[:1024], **kw).y_hat)[4096:]
         assert scoring.ser(y, ref[4096:], c) == 0.0
         assert scoring.evm_rms(y, ref[4096:]) < 1.4 * 10 ** (-22 / 20)
-        assert "decided symbols carry" not in caplog.text
         frozen = to_numpy(block_lms(rx, ref[:1024], step_size=0.0, **kw).y_hat)
-        assert scoring.ser(frozen[4096:], ref[4096:], c) > 0.3
-        assert (
-            "decided symbols carry" in caplog.text
-        )  # suspect result of the frozen taps
+        assert scoring.ser(frozen[4096:], ref[4096:], c) > 0.05
 
-    def test_mimo_convergence(self, xp, caplog):
+    def test_mimo_convergence(self, xp):
         """2x2 butterfly: two independent 16-QAM streams through the ISI
         channel and a 30-degree polarization rotation.  After 1024 training
         symbols each output carries its own stream without errors over the
         held-out half; frozen taps leave the streams mixed (SER ~0.7)."""
         c = Constellation.qam(16)
-        caplog.set_level("WARNING", logger="commkit")
         rx = _isi_record(c, 8192, theta=np.deg2rad(30.0), num_channels=2, seed=1, xp=xp)
         ref = to_numpy(rx.reference.symbols)
         kw = dict(num_taps=21, block_size=128)
         y = to_numpy(block_lms(rx, ref[:, :1024], step_size=2e-3, **kw).y_hat)
         np.testing.assert_array_equal(scoring.ser(y[:, 4096:], ref[:, 4096:], c), 0.0)
-        assert "decided symbols carry" not in caplog.text
         frozen = to_numpy(block_lms(rx, ref[:, :1024], step_size=0.0, **kw).y_hat)
         assert np.all(scoring.ser(frozen[:, 4096:], ref[:, 4096:], c) > 0.3)
-        assert (
-            "decided symbols carry" in caplog.text
-        )  # suspect result of the frozen taps
 
     @pytest.mark.parametrize("block_size", [256, 2048])
     def test_default_step_converges_under_polarization_mixing(
-        self, xp, xpt, caplog, block_size
+        self, xp, xpt, block_size
     ):
-        """The default step, min(0.5/block_size, 8e-3), trained over four
+        """The default step, min(0.5/block_size, 8e-3)/sps, trained over four
         blocks, separates two 16-QAM streams through the ISI channel and a
         30-degree polarization rotation at small and large blocks: over the
         last four blocks the SER per stream stays below 5e-3 and the EVM
         below 2x the AWGN floor (0.079; measured SER 0-1e-3, EVM 0.115-0.127,
         three seeds).  Frozen taps leave the streams mixed (SER ~0.7)."""
         c = Constellation.qam(16)
-        caplog.set_level("WARNING", logger="commkit")
         n = 8 * block_size
         rx = _isi_record(c, n, theta=np.deg2rad(30.0), num_channels=2, seed=1, xp=xp)
         ref = to_numpy(rx.reference.symbols)
         train = ref[:, : 4 * block_size]
         kw = dict(num_taps=21, block_size=block_size)
         r = block_lms(rx, train, **kw)
-        r_explicit = block_lms(rx, train, step_size=min(0.5 / block_size, 8e-3), **kw)
+        r_explicit = block_lms(
+            rx, train, step_size=min(0.5 / block_size, 8e-3) / 2, **kw
+        )
         xpt.assert_array_equal(r.y_hat, r_explicit.y_hat)
 
         held = slice(4 * block_size, None)
@@ -206,12 +198,8 @@ class TestBlockLMSConvergence:
         assert np.all(scoring.ser(y, ref[:, held], c) < 5e-3)
         for k in range(2):
             assert scoring.evm_rms(y[k], ref[k, held]) < 2 * 10 ** (-22 / 20)
-        assert "decided symbols carry" not in caplog.text
         frozen = to_numpy(block_lms(rx, train, step_size=0.0, **kw).y_hat)
         assert np.all(scoring.ser(frozen[:, held], ref[:, held], c) > 0.3)
-        assert (
-            "decided symbols carry" in caplog.text
-        )  # suspect result of the frozen taps
 
     def test_isi_channel_convergence(self, xp):
         """Known 3-tap ISI channel: equalizer must converge across block boundaries."""

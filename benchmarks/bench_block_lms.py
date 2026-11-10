@@ -54,9 +54,10 @@ CPR_CONFIGS = [
 ]
 
 
-# Converging step sizes for the 30-degree mixing of the workload: the block
-# update's stability ceiling falls with block_size.
-STEP_SIZE = {256: 3e-3, 2048: 5e-4}
+# Converging step sizes for the 30-degree mixing of the workload, on input
+# normalized to unit mean power at 2 sps: the block update's stability
+# ceiling falls with block_size.
+STEP_SIZE = {256: 1.5e-3, 2048: 2.5e-4}
 
 
 def _bench_block_lms(benchmark, xp, sync, cpr_kwargs, block_size, n_train=None):

@@ -22,15 +22,21 @@ from .result import EqualizerResult, EqualizerState
 
 
 def _normalize_inputs(
-    samples: Any, training_symbols: Any, sps: int, input_norm_factor: Any = None
+    samples: Any, training_symbols: Any, input_norm_factor: Any = None
 ) -> tuple[Any, Any, Any]:
-    """Scale samples to unit symbol power; training symbols pass through.
+    """Scale samples to unit mean power per channel; training symbols pass.
 
-    At more than one sample per symbol the timing phase is unknown, and the
-    strided power ``samples[..., ::sps]`` can land on zero crossings of the
-    Nyquist pulse, underestimating the power and destabilizing the
-    adaptation.  The power of all samples over the whole record is used
-    instead; it does not depend on whether training symbols are given.
+    The automatic gain control in front of the equalizer: each channel is
+    divided by its RMS over the whole record, so the regressor has unit
+    power per tap and a centre tap of 1 hands the slicer the samples at
+    about the constellation's unit power.  After a matched filter the
+    samples at the symbol instants have the symbols' power and those
+    between them ``1 - β/2`` of it for a raised-cosine response of roll-off
+    ``β``, so unit mean power puts the symbol instants within ``β/4`` of
+    unit power, at any timing phase.  (The transmit convention ``E|x|² =
+    1/sps`` describes energy per symbol spread over ``sps`` samples; applied
+    here it would hand the slicer a gain of ``1/sqrt(sps)``, below the
+    decision margins of 64-QAM and unipolar PAM-4.)
 
     Parameters
     ----------
@@ -38,8 +44,6 @@ def _normalize_inputs(
         Complex samples, ``(N,)`` or ``(C, N)``, NumPy or CuPy.
     training_symbols : array_like or None
         Training symbols at one sample per symbol, ``(K,)`` or ``(C, K)``.
-    sps : int
-        Samples per symbol.
     input_norm_factor : float or numpy.ndarray, optional
         Factor to divide by instead of measuring the RMS: the
         ``EqualizerResult.input_norm_factor`` of an earlier call, to keep
@@ -49,15 +53,13 @@ def _normalize_inputs(
     Returns
     -------
     samples : ndarray
-        The samples at unit symbol power, same shape and device.
+        The samples at unit mean power, same shape and device.
     training_symbols : ndarray or None
         Unchanged: known symbols are already on the constellation's scale.
     input_norm_factor : float or numpy.ndarray
-        Per-channel factor ``rms(channel)·sqrt(sps)`` the samples were divided
-        by: a ``float`` for SISO, ``(C,)`` for MIMO.  Stored in
-        ``EqualizerResult.input_norm_factor``, so that another capture (vacuum
-        noise) passed through the same frozen taps can be put on the same
-        absolute power scale.
+        Per-channel RMS ``sqrt(mean(|x_c|²))`` the samples were divided by:
+        a ``float`` for SISO, ``(C,)`` for MIMO.  Stored in
+        ``EqualizerResult.input_norm_factor``.
     """
     if input_norm_factor is not None:
         # Caller supplies scale - skip RMS and just apply it.
@@ -82,7 +84,7 @@ def _normalize_inputs(
 
     ref_samples = samples
 
-    norm_vec = _rms(ref_samples, axis=-1) * (sps**0.5)
+    norm_vec = _rms(ref_samples, axis=-1)
     if samples.ndim == 1:
         input_norm_factor = float(norm_vec)
         samples = samples / float(norm_vec)

@@ -121,8 +121,8 @@ def lms(
         normalizing by the input power, as in Haykin's *Adaptive Filter
         Theory* and most of the literature.  Stability requires
         ``0 < μ < 2 / (C · num_taps · P_x)``, with ``P_x`` the mean input
-        power per tap; the inputs are normalized to unit symbol power, so
-        ``1e-4`` to ``1e-2`` is a safe range to start from.  Steps near the
+        power per tap; each input channel is divided by its RMS, so
+        ``P_x = 1`` and ``1e-4`` to ``1e-2`` is a safe range to start from.  Steps near the
         bound converge faster but leave a larger steady-state misadjustment.
     constellation : Constellation, optional
         Decision constellation, at unit power (a shaped constellation brings
@@ -203,7 +203,7 @@ def lms(
           ``S``-fold-unwrapped float64 phase, for the PLL its integrator
           state; ``None`` without ``cpr``.
         * ``num_train_symbols``: the training symbols consumed.
-        * ``input_norm_factor``: the RMS factor that normalized the input.
+        * ``input_norm_factor``: the per-channel RMS the input was divided by.
         * ``state``: an :class:`EqualizerState`; pass it as ``state=`` to the
           next call to continue without converging again.
 
@@ -211,6 +211,18 @@ def lms(
 
     Notes
     -----
+    **Input scaling.**  Each input channel ``x_j`` is divided by its RMS
+    over the record, ``a_j = sqrt(mean(|x_j|²))``, returned as
+    ``input_norm_factor`` (or the factor passed in through ``state``), and
+    the taps start at the unit centre tap.  After a matched filter the
+    samples at the symbol instants then reach the slicer within ``β/4`` of
+    the constellation's unit power (roll-off ``β``), at any timing phase, so
+    a blind decision-directed start begins inside the decision regions.  In
+    the recursion below ``x`` stands for ``x_j / a_j``; the equalizer's
+    overall gain on the received samples of channel ``j`` is ``W / a_j``.
+    Without a matched filter the start also passes the noise beyond the
+    roll-off, which the adaptation removes only slowly.
+
     **Algorithm (per symbol n).**
 
     1. **Sliding input window**: the length-T window of input channel c'
@@ -257,8 +269,8 @@ def lms(
            w_{c,c'} += mu * conj(e_taps_c[n]) * x_{c',n}
 
        Stability bound: ``0 < mu < 2 / (C * T * P_x)`` with ``P_x`` the mean
-       input power per tap.  The equalizer normalizes the input to unit
-       symbol power before adapting, so ``P_x ≈ 1``.
+       input power per tap.  The equalizer divides each input channel by its
+       RMS before adapting, so ``P_x = 1``.
 
     7. **Cycle-slip correction** (with ``cpr.cycle_slip``): each channel keeps
        a circular buffer of its last ``history`` phase values, and a
