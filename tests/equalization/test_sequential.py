@@ -56,12 +56,13 @@ class TestLMS:
         assert 10 * np.log10(tail_mse(1e-3) / wiener_mse) < 1.5
         assert tail_mse(0.0) > 10 * wiener_mse
 
-    def test_decision_directed_after_training(self, xp):
+    def test_decision_directed_after_training(self, xp, caplog):
         """1000 training symbols, then decisions: the held-out second half
         has no symbol errors against the transmitted symbols and an EVM
         within 1.4x the AWGN floor (0.079 at 22 dB); frozen taps leave the
         ISI (SER above 0.3)."""
         c = Constellation.qam(16)
+        caplog.set_level("WARNING", logger="commkit")
         rx = _isi_record(c, 6000, esn0_db=22.0, xp=xp)
         ref = to_numpy(rx.reference.symbols)
 
@@ -73,7 +74,11 @@ class TestLMS:
         y = run(1e-3)
         assert scoring.ser(y, ref[3000:], c) == 0.0
         assert scoring.evm_rms(y, ref[3000:]) < 1.4 * 10 ** (-22 / 20)
+        assert "decided symbols carry" not in caplog.text
         assert scoring.ser(run(0.0), ref[3000:], c) > 0.3
+        assert (
+            "decided symbols carry" in caplog.text
+        )  # suspect result of the frozen taps
 
     def test_requires_constellation_or_training(self, xp):
         """LMS should raise if neither training nor constellation is given."""

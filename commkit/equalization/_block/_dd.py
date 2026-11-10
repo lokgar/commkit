@@ -23,6 +23,7 @@ from ..result import (
     EqualizerResult,
     EqualizerState,
     _attach_equalized_signal,
+    _check_decision_power,
     _log_equalizer_exit,
 )
 from ._engine import (
@@ -399,7 +400,10 @@ def block_lms(
     constellation : Constellation, optional
         Decision constellation, at unit power (a shaped constellation brings
         its pmf).  Defaults to the Signal's ``constellation``; required for
-        array input.
+        array input.  A WARNING is logged when the decided symbols of the
+        last half of the decision-directed output lack its power by more
+        than 1.5 dB: a lock at a wrong gain, or a constellation that does
+        not match the signal.
     store_weights : bool, default False
         Record the weights at the start of every block in
         ``weights_history``.
@@ -766,9 +770,9 @@ def block_lms(
         run, equalizer="block_lms", cpr=cpr, weights=weights, carrier=carrier
     )
     result = _assemble_block(run, y_all, e_all, w_hist, phi_all, n_train, state_out)
-    return _attach_equalized_signal(
-        _log_equalizer_exit(result, name="Block-LMS"), sig, state
-    )
+    result = _log_equalizer_exit(result, name="Block-LMS")
+    result = _check_decision_power(result, constellation, "block_lms()")
+    return _attach_equalized_signal(result, sig, state)
 
 
 def _block_bps(

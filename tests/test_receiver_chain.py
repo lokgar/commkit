@@ -127,6 +127,7 @@ class TestCodedSisoChain:
         assert p - scoring.binomial_margin(p, n_bits) < pre
         assert pre < qam16_gray_ber(10 ** ((self.ESN0_DB - 1.5) / 10))
 
+    @pytest.mark.allow_warnings
     @pytest.mark.parametrize("omit", ["frequency", "timing", "cpr", "equalizer"])
     def test_each_correction_is_needed(self, backend_device: str, omit: str) -> None:
         """Leaving any one block out breaks the chain: the pre-FEC BER rises
@@ -210,12 +211,13 @@ class TestFiberChain:
         ids=["compensated", "wrong-sign", "uncompensated"],
     )  # fmt: skip
     def test_dispersion_compensation(
-        self, backend_device: str, dispersion_sign: float, works: bool
+        self, backend_device: str, dispersion_sign: float, works: bool, caplog: Any
     ) -> None:
         """Compensated: SER between half the AWGN theory (7.2e-3) and theory
         1 dB lower (1.8e-2; measured 8.9e-3).  The opposite sign doubles the
         dispersion and none leaves about 11 symbols of memory, beyond the 15
         taps at 2 sps: both fail (SER near 0.9)."""
+        caplog.set_level("WARNING", logger="commkit")
         fiber = Fiber()
         tx = ck.generate(self.C16, num_symbols=self.N, sps=2, symbol_rate=RS,
                          pulse=RRC(rolloff=0.1), rng=1, device=backend_device)  # fmt: skip
@@ -242,3 +244,4 @@ class TestFiberChain:
             assert 0.5 * p < s < qam_ser(16, 10 ** ((self.ESN0_DB - 1) / 10)), s
         else:
             assert s > 0.5, s
+        assert ("decided symbols carry" in caplog.text) is not works
