@@ -4,6 +4,42 @@ Notable changes to CommKit, newest first. Performance figures are from the refer
 
 ## [Unreleased]
 
+## [3.7.0] - 2026-11-10
+
+The receiver's analog front end and the detector, at absolute power. The ADC clock, its jitter and quantizer, IQ skew and the photodiode join the impairments, with Gardner clock recovery as the inverse of the clock; coherent and square-law detection turn received and LO powers into the noise they give. Closed-form AWGN error rates and information rates sit next to the measured ones. Blind decision-directed equalizers no longer lock falsely on unipolar PAM and dense QAM, because their input scaling hands the slicer the right gain.
+
+### Changes that may need code updates
+
+- The adaptive equalizers (`lms`, `rls`, `cma`, `rde`, `block_lms`, `block_cma`, `block_rde`, `apply_taps(normalize=True)`) divide each input channel by its RMS instead of `rms * sqrt(sps)`. The old scale applied the transmit convention `E|x|^2 = 1/sps` at the slicer and handed it a gain of `1/sqrt(sps)` (0.71 at 2 sps), below the decision margins of unipolar PAM-4 (0.83) and 64-QAM (0.86), where blind decision-directed adaptation settled at a shrunk false solution (BER 0.25 and 0.20). After a matched filter the symbol instants now reach the slicer within `beta/4` of unit power at any timing phase, and blind adaptation reaches the trained BER. Consequences:
+  - an explicit `step_size` of the sequential equalizers acts `sps` times stronger (the regressor power is 1): halve it at 2 sps for the former behaviour;
+  - the block equalizers' default steps are divided by `sps`, so the defaults behave as before; explicit block steps act `sps` times stronger, and their stability ceilings read `step_size * block_size * sps`;
+  - `EqualizerResult.input_norm_factor` and `EqualizerState.input_norm_factor` are the plain per-channel RMS; the docstring gives the exact rebuild of `y_hat` from the raw samples, the taps and this factor.
+- `commkit.timing` is a package (`synchronization`, `clock_recovery`). Import from `commkit.timing` and nothing changes.
+- The example notebooks are renumbered: the new 12 (sampling-clock recovery) and 22 (direct and self-coherent detection) move the former 12-28 to 13-30.
+
+### Added
+
+- `timing.estimate_sampling_clock_offset` and `timing.correct_sampling_clock_offset` with `timing.Gardner(normalized_bandwidth=, proportional_gain=, integral_gain=, joint_channels=, method="classical" | "power")`: Gardner clock recovery in one Numba loop. The offset in ppm comes from the slope of the tracked timing trajectory (`SamplingClockOffsetEstimate`); the correction resamples along the strobes, or by a constant factor from an earlier capture's estimate. An open-loop fit of the S-curve sets the gains from the loop bandwidth and starts the loop at the right phase; the power detector keeps its gain at small rolloffs. Measured within 0.06 ppm on 2^17 symbols at 20 dB; after recovery the SNR is the AWGN's plus the jitter's ISI, as predicted.
+- `impairments.apply_sampling_clock_offset(offset_ppm=)`: an ADC clock off its nominal rate, by band-limited resampling (48-tap windowed sinc, error below -119 dB up to 0.4 cycles per sample).
+- `impairments.apply_sampling_jitter(jitter=)` and `impairments.apply_quantization(num_bits=, full_scale=, enob=)`: sampling at jittered instants (SNR `-20 log10(2 pi f sigma)` of a tone) and a mid-rise quantizer with clipping and the converter's lumped noise.
+- `apply_iq_imbalance(skew=)`: a time skew of Q against I, the frequency-dependent part of IQ imbalance (image `tan^2(pi f tau)`), which the memoryless corrections cannot remove.
+- `metrics.awgn_ser`, `awgn_ber`, `awgn_mi`, `awgn_gmi(constellation, *, esn0_db)`: closed-form performance over AWGN in the conventions of the measured metrics. Error rates are exact for one-dimensional and separable constellations (PAM bipolar and unipolar, square QAM including shaped, BPSK, QPSK) and union bounds otherwise; MI and GMI by Gauss-Hermite quadrature, converged to 3e-7 bit.
+- `impairments.apply_coherent_detection(received_power_dbm=, lo_power_dbm=, responsivity=, thermal_noise_density=, cmrr_db=, lo_rin_db_hz=, balanced=)`: the shot and thermal noise of a phase-diversity receiver from physical parameters (shot-noise limit `Es/N0 = eta n_p`), the common-mode leak of the signal's own power and of the LO's RIN through a finite CMRR, and single-ended detection.
+- `impairments.apply_photodetection(received_power_dbm=, ...)`: the square law in the input's power units with signal-dependent shot noise, thermal noise, dark current, saturation and `sum_channels`; real output, and a Signal becomes digital baseband. `impairments.apply_intensity_noise(rin_db_hz=)`: laser RIN as a real amplitude factor.
+- A WARNING when the power of an equalizer's decided symbols differs from the decision constellation's by more than 1.5 dB: a false lock, or a constellation that does not match the signal.
+- Notebooks: 12 sampling-clock recovery, 22 direct and self-coherent detection; notebook 10 covers IQ skew and the ADC, notebook 06 uses the closed forms.
+
+### Fixed
+
+- `upsample`, `decimate` and `resample` promoted float32 to float64 (complex64 to complex128) on the GPU, because `cupyx` designs its polyphase filter in float64; the GPU now applies the CPU's filter in the data's precision.
+- Equalizer docstrings: `weights_history` row `n` of the sequential equalizers holds the taps after the update at symbol `n`; an explicit `constellation` applies to the call only and the returned Signal keeps the input's description; real input is equalized as complex64. `Constellation.pam` states the unipolar energy penalty `2(2M - 1)/(M + 1)` (3.01 dB for OOK, 4.47 dB for PAM-4).
+
+### Development
+
+- `AGENTS.md`: the absolute-power rule (samples are dimensionless, a Signal holds no power, physical functions take `<where>_power_dbm` and return samples in the input's units), the `_ppm` and `_db_hz` suffixes, text-only commits skip mypy and pytest.
+- Tests: a GN-model oracle for the split-step solver (first-order NLI with the coherent span factor, within 0.5 dB and the `P^3` law), the scaling chain of every equalizer rebuilt from raw samples, an IM-DD receiver chain with blind LMS on unipolar PAM-4, a plain-Python oracle for the Gardner loop.
+- `benchmarks/bench_gardner.py` (no baseline recorded yet).
+
 ## [3.6.1] - 2026-11-05
 
 ### Added
@@ -467,7 +503,8 @@ See the [GitHub release](https://github.com/lokgar/commkit/releases/tag/v1.1.0) 
 
 First release. See the [GitHub release](https://github.com/lokgar/commkit/releases/tag/v1.0.0).
 
-[Unreleased]: https://github.com/lokgar/commkit/compare/v3.6.1...HEAD
+[Unreleased]: https://github.com/lokgar/commkit/compare/v3.7.0...HEAD
+[3.7.0]: https://github.com/lokgar/commkit/compare/v3.6.1...v3.7.0
 [3.6.1]: https://github.com/lokgar/commkit/compare/v3.6.0...v3.6.1
 [3.6.0]: https://github.com/lokgar/commkit/compare/v3.5.0...v3.6.0
 [3.5.0]: https://github.com/lokgar/commkit/compare/v3.4.0...v3.5.0
