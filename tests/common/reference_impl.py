@@ -17,7 +17,13 @@ Conventions shared with the library's documented contract:
   padded with ``min(T // 2, pad_total)`` leading zeros, where
   ``pad_total = n_sym*sps - n_samples + T - 1``.
 - Butterfly filter: ``y_i = sum_j sum_t conj(W[i, j, t]) * X[j, t]``; initial
-  taps are the centre-tap identity ``W[i, i, T // 2] = 1``.
+  taps are diagonal, ``W[i, i, c + m] = a_i g_i[m]`` with ``c = T // 2``:
+  ``g_i`` is the zero-phase filter whose response is the square root of the
+  channel's PSD (the autocovariance of the normalized channel over its first
+  4096 samples with the mean removed, lags ``|m| < T`` under a Bartlett
+  window, on a grid of ``2^bit_length(8T)`` points) and ``a_i`` sets the
+  output's mean power ``wᴴ R w`` to 1, ``R[t, t'] = r_i[t - t'] + |μ_i|²``,
+  at most ``2 / g_i[0]``.
 """
 
 from __future__ import annotations
@@ -52,11 +58,40 @@ def prepare_training(training: np.ndarray, num_ch: int) -> np.ndarray:
     return t
 
 
-def identity_taps(num_ch: int, num_taps: int) -> np.ndarray:
-    """Centre-tap identity butterfly ``(C, C, T)``."""
+def cold_start_taps(samples: np.ndarray, sps: int, num_taps: int) -> np.ndarray:
+    """Zero-phase matched-filter cold start ``(C, C, T)`` (see the module
+    docstring); the autocovariance by direct sums."""
+    x = np.atleast_2d(np.asarray(samples)).astype(np.complex128)
+    num_ch, _ = x.shape
+    x = x / (np.sqrt(np.mean(np.abs(x) ** 2, axis=-1)) * np.sqrt(sps))[:, None]
+    c = num_taps // 2
+    length = min(x.shape[-1], 1 << 12)
+    grid = 1 << (8 * num_taps).bit_length()
+    bartlett = np.bartlett(2 * num_taps + 1)[1:-1]
     w = np.zeros((num_ch, num_ch, num_taps), dtype=np.complex128)
     for i in range(num_ch):
-        w[i, i, num_taps // 2] = 1.0
+        xs = x[i, :length]
+        mu = xs.mean()
+        xz = xs - mu
+        r = {}
+        for m in range(-(num_taps - 1), num_taps):
+            if m >= 0:
+                r[m] = np.sum(xz[m:] * np.conj(xz[: length - m])) / length
+            else:
+                r[m] = np.sum(xz[: length + m] * np.conj(xz[-m:])) / length
+        lagged = np.zeros(grid, dtype=np.complex128)
+        for m, value in r.items():
+            lagged[m % grid] = value * bartlett[m + num_taps - 1]
+        g = np.fft.ifft(np.sqrt(np.maximum(np.fft.fft(lagged).real, 0.0)))
+        taps = g[np.arange(-c, num_taps - c) % grid]
+        cov = np.array(
+            [
+                [r[t - u] + abs(mu) ** 2 for u in range(num_taps)]
+                for t in range(num_taps)
+            ]
+        )
+        power = np.real(np.conj(taps) @ cov @ taps)
+        w[i, i] = taps * min(1.0 / np.sqrt(power), 2.0 / taps[c].real)
     return w
 
 
@@ -91,7 +126,7 @@ def lms_reference(
     num_ch = x.shape[0]
     d_train = None if training is None else prepare_training(training, num_ch)
     n_train = 0 if d_train is None else min(d_train.shape[-1], n_sym)
-    w = identity_taps(num_ch, num_taps)
+    w = cold_start_taps(samples, sps, num_taps)
     y_out = np.zeros((num_ch, n_sym), dtype=np.complex128)
     e_out = np.zeros_like(y_out)
     for n in range(n_sym):
@@ -129,7 +164,7 @@ def rls_reference(
     n_train = 0 if d_train is None else min(d_train.shape[-1], n_sym)
     n_halt = max(0, n_sym - num_taps // 2)
     dim = num_ch * num_taps
-    w = identity_taps(num_ch, num_taps).reshape(num_ch, dim)
+    w = cold_start_taps(samples, sps, num_taps).reshape(num_ch, dim)
     p = np.eye(dim, dtype=np.complex128) / regularization
     lam = forgetting_factor
     y_out = np.zeros((num_ch, n_sym), dtype=np.complex128)
@@ -278,7 +313,7 @@ def lms_cpr_reference(
     num_ch = x.shape[0]
     d_train = None if training is None else prepare_training(training, num_ch)
     n_train = 0 if d_train is None else min(d_train.shape[-1], n_sym)
-    w = identity_taps(num_ch, num_taps)
+    w = cold_start_taps(samples, sps, num_taps)
     out = {k: np.zeros((num_ch, n_sym), np.complex128) for k in ("y", "e")}
     phis = np.zeros((num_ch, n_sym))
     for n in range(n_sym):
@@ -320,7 +355,7 @@ def rls_cpr_reference(
     n_train = 0 if d_train is None else min(d_train.shape[-1], n_sym)
     n_halt = max(0, n_sym - num_taps // 2)
     dim = num_ch * num_taps
-    w = identity_taps(num_ch, num_taps).reshape(num_ch, dim)
+    w = cold_start_taps(samples, sps, num_taps).reshape(num_ch, dim)
     p = np.eye(dim, dtype=np.complex128) / regularization
     lam = forgetting_factor
     out = {k: np.zeros((num_ch, n_sym), np.complex128) for k in ("y", "e")}
@@ -384,7 +419,7 @@ def rde_reference(
 def _blind_reference(samples, *, num_taps, sps, step_size, radii, r2):
     x, n_sym, _ = prepare_input(samples, sps, num_taps)
     num_ch = x.shape[0]
-    w = identity_taps(num_ch, num_taps)
+    w = cold_start_taps(samples, sps, num_taps)
     y_out = np.zeros((num_ch, n_sym), dtype=np.complex128)
     e_out = np.zeros_like(y_out)
     for n in range(n_sym):

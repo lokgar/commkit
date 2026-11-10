@@ -25,7 +25,7 @@ from ...backend import ArrayType, dispatch, to_device
 from ...logger import logger
 from .._common import (
     _build_padded_samples,
-    _init_butterfly_weights_numpy,
+    _cold_start_weights,
     _normalize_inputs,
     _validate_sps,
     _validate_w_init,
@@ -296,7 +296,7 @@ def _prepare_block(
         w_arr = np.ascontiguousarray(to_device(initial_taps, "cpu"), dtype=np.complex64)
         h = xp.asarray(_validate_w_init(w_arr, C, num_taps).copy())
     else:
-        h = xp.asarray(_init_butterfly_weights_numpy(C, num_taps))  # (C, C, T)
+        h = xp.asarray(_cold_start_weights(samples, num_taps))  # (C, C, T)
 
     return _Block(
         xp=xp,
