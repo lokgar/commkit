@@ -52,16 +52,17 @@ The notebooks run on the GPU when CuPy works and on the CPU otherwise. They are 
 | --- | --- | --- |
 | 20 | [Chromatic dispersion](20-chromatic-dispersion.ipynb) | the dispersion spread, the all-pass response, compensation of captures and simulated records, blind estimation, the compensating FIR and its length, residual dispersion |
 | 21 | [Nonlinear fiber and backpropagation](21-nonlinear-fiber-and-backpropagation.ipynb) | the Kerr effect, the optimum launch power, digital backpropagation |
-| 22 | [FEC in optical standards](22-fec-in-optical-standards.ipynb) | KP4 and IEEE 802.3dj, G.709 RS and the staircase code, the 400ZR C-FEC, PON RS and LDPC, their thresholds against overhead |
-| 23 | [End-to-end coherent transceiver](23-coherent-transceiver-end-to-end.ipynb) | every impairment and the full receiver DSP chain in one link, an LDPC-coded payload, the SNR budget |
+| 22 | [Direct and self-coherent detection](22-direct-and-self-coherent-detection.ipynb) | the square law and its bandwidth, unipolar PAM-4 IM-DD and its sensitivity, shot and thermal noise, self-coherent detection with a carrier, the signal-signal beat |
+| 23 | [FEC in optical standards](23-fec-in-optical-standards.ipynb) | KP4 and IEEE 802.3dj, G.709 RS and the staircase code, the 400ZR C-FEC, PON RS and LDPC, their thresholds against overhead |
+| 24 | [End-to-end coherent transceiver](24-coherent-transceiver-end-to-end.ipynb) | every impairment and the full receiver DSP chain in one link, an LDPC-coded payload, the SNR budget |
 
 ## V. Laser and carrier-phase characterization
 
 | # | notebook | topics |
 | --- | --- | --- |
-| 24 | [Carrier-phase characterization](24-carrier-phase-characterization.ipynb) | data-aided phase, drift and phase noise, linewidth estimators, Allan deviation |
-| 25 | [Self-heterodyne linewidth](25-laser-linewidth-self-heterodyne.ipynb) | the delayed self-heterodyne setup and its three linewidth estimators |
-| 26 | [Short delays, flicker and fading](26-laser-linewidth-short-delay-and-flicker.ipynb) | the coherent regime, flicker FM noise, Allan deviation, polarization fading |
-| 27 | [Self-homodyne IQ linewidth](27-laser-linewidth-self-homodyne-iq.ipynb) | the AOM-free setup with a 90° hybrid, front-end calibration |
-| 28 | [Template: self-heterodyne](28-measurement-template-self-heterodyne.ipynb) | a lean notebook for real captures |
-| 29 | [Template: self-homodyne IQ](29-measurement-template-self-homodyne-iq.ipynb) | a lean notebook for real captures |
+| 25 | [Carrier-phase characterization](25-carrier-phase-characterization.ipynb) | data-aided phase, drift and phase noise, linewidth estimators, Allan deviation |
+| 26 | [Self-heterodyne linewidth](26-laser-linewidth-self-heterodyne.ipynb) | the delayed self-heterodyne setup and its three linewidth estimators |
+| 27 | [Short delays, flicker and fading](27-laser-linewidth-short-delay-and-flicker.ipynb) | the coherent regime, flicker FM noise, Allan deviation, polarization fading |
+| 28 | [Self-homodyne IQ linewidth](28-laser-linewidth-self-homodyne-iq.ipynb) | the AOM-free setup with a 90° hybrid, front-end calibration |
+| 29 | [Template: self-heterodyne](29-measurement-template-self-heterodyne.ipynb) | a lean notebook for real captures |
+| 30 | [Template: self-homodyne IQ](30-measurement-template-self-homodyne-iq.ipynb) | a lean notebook for real captures |
