@@ -84,6 +84,36 @@ def qam16_gray_ber(esn0: float) -> float:
     return float((3 * q_function(a) + 2 * q_function(3 * a) - q_function(5 * a)) / 4)
 
 
+def pam_gray_ber(order: int, esn0: float, *, unipolar: bool = False) -> float:
+    """Bit error rate of binary-reflected Gray M-PAM with midpoint decisions
+    (exact).  The levels ``0, 1, ..., M-1`` (centred unless ``unipolar``) are
+    scaled to unit mean energy and see real noise of variance ``N0/2``;
+    ``P(j | i) = Q((t_j - a_i)/σ) - Q((t_{j+1} - a_i)/σ)`` with thresholds
+    ``t`` halfway between levels, weighted by the Hamming distance of the
+    labels ``i ^ (i >> 1)``.  Square Gray M-QAM is ``pam_gray_ber(√M,
+    esn0 / 2)``: each axis carries half the energy and half the noise."""
+    levels = np.arange(order, dtype=float)
+    if not unipolar:
+        levels -= levels.mean()
+    levels /= np.sqrt(np.mean(levels**2))
+    sigma = np.sqrt(1.0 / (2.0 * esn0))
+    edges = np.concatenate(([-np.inf], (levels[:-1] + levels[1:]) / 2, [np.inf]))
+    gray = np.arange(order) ^ (np.arange(order) >> 1)
+    ham = np.array([[bin(a ^ b).count("1") for b in gray] for a in gray])
+    p = q_function((edges[None, :-1] - levels[:, None]) / sigma) - q_function(
+        (edges[None, 1:] - levels[:, None]) / sigma
+    )
+    return float(np.sum(p * ham) / order / np.log2(order))
+
+
+def qam_gray_ber(order: int, esn0: float) -> float:
+    """Bit error rate of square Gray M-QAM (exact), see :func:`pam_gray_ber`."""
+    m = int(round(np.sqrt(order)))
+    if m * m != order:
+        raise ValueError("square QAM only")
+    return pam_gray_ber(m, esn0 / 2.0)
+
+
 def bpsk_ber(esn0: float) -> float:
     """Coherent BPSK (2-PAM) bit error rate, ``Q(sqrt(2 Es/N0))``: the
     in-phase noise of variance ``N0 / 2`` on unit-energy symbols."""
@@ -99,3 +129,118 @@ def bounded_distance_fer(p: float, n: int, t: int) -> float:
     return float(
         1.0 - sum(comb(n, i) * p**i * (1 - p) ** (n - i) for i in range(t + 1))
     )
+
+
+def raised_cosine_slope_energy(rolloff: float) -> float:
+    """``Σ_{n≠0} g'(n)²`` for the raised-cosine pulse ``g`` (``T = 1``).
+
+    Sampling the matched-filter output ``τ`` symbol periods off the symbol
+    instants adds the ISI ``Σ_n a_n g(τ - n)`` beyond the symbol itself,
+    whose power for small ``τ`` and unit-power i.i.d. symbols is
+    ``τ² · Σ_{n≠0} g'(n)²`` (``g'(0) = 0``).  A timing jitter of variance
+    ``σ²`` therefore adds the noise ``σ² · Σ_{n≠0} g'(n)²``; ``π²/3`` for
+    ``rolloff → 0``.  The derivative by central differences of the
+    closed-form pulse, the sum over ``|n| ≤ 2000``.
+    """
+
+    def g(t: np.ndarray) -> np.ndarray:
+        den = 1 - (2 * rolloff * t) ** 2
+        return np.sinc(t) * np.cos(np.pi * rolloff * t) / den
+
+    n = np.arange(1, 2001, dtype=np.float64)
+    h = 1e-6
+    d = (g(n + h) - g(n - h)) / (2 * h)
+    return float(2 * np.sum(d**2))
+
+
+def ls_slope_std(
+    jitter_rms: float, correlation_length: float, num_points: int
+) -> float:
+    """Standard deviation of a least-squares slope through ``num_points``
+    equally spaced samples of a line plus noise of rms ``jitter_rms`` that
+    stays correlated over ``correlation_length`` samples.
+
+    With ``K / L`` independent samples, ``var = σ² / Σ(k - k̄)² · L =
+    12 σ² L / K³``.
+    """
+    return float(np.sqrt(12 * jitter_rms**2 * correlation_length / num_points**3))
+
+
+def psk_ser(order: int, esn0: float) -> float:
+    """Exact M-PSK symbol error rate over complex AWGN (Craig's form),
+    ``(1/π) ∫_0^{(M-1)π/M} exp(-Es/N0 · sin²(π/M) / sin²θ) dθ``."""
+    from scipy.integrate import quad
+
+    a = np.sin(np.pi / order) ** 2
+    val, _ = quad(
+        lambda t: np.exp(-esn0 * a / np.sin(t) ** 2), 0, (order - 1) * np.pi / order
+    )
+    return float(val / np.pi)
+
+
+def gn_nli_psd(
+    f: float,
+    *,
+    power: float,
+    bandwidth: float,
+    gamma: float,
+    beta2: float,
+    alpha: float,
+    span_length: float,
+    num_spans: int,
+    grid: int = 1601,
+) -> float:
+    """First-order NLI power spectral density at ``f`` of a scalar (one
+    polarization) Gaussian field with a flat spectrum, the GN model.
+
+    The field has power ``power`` (W) spread evenly over
+    ``|f| ≤ bandwidth / 2`` (Hz), PSD ``G = power / bandwidth``, and
+    propagates over ``num_spans`` spans of length ``span_length`` (m),
+    power loss ``alpha`` (1/m), dispersion ``beta2`` (s²/m) and Kerr
+    coefficient ``gamma`` (1/(W m)), each followed by an amplifier that
+    restores the span loss.
+
+    Derivation.  To first order in ``gamma`` the NLSE's nonlinear term
+    ``jγ|A|²A`` adds, at the link's end, the field whose frequency
+    component ``f`` sums the products ``A(f1) A(f2) A*(f1 + f2 - f)``
+    weighted by the link function
+
+        η(f1, f2, f) = Σ_{n=0}^{N_s-1} e^{jΔβ nL} ∫_0^L e^{(-α + jΔβ) z} dz,
+        Δβ = 4π² β₂ (f1 - f)(f2 - f),
+
+    the integral being ``(1 - e^{(-α + jΔβ)L}) / (α - jΔβ)`` and the sum
+    the phased-array factor ``|Σ|² = sin²(N_s ΔβL/2) / sin²(ΔβL/2)`` (the
+    spans add coherently; replacing it by ``N_s`` is the incoherent GN
+    model).  For a circular Gaussian field the sixth moment pairs
+    ``A*(f1 + f2 - f)`` with either ``A(f1)`` or ``A(f2)``, giving the
+    factor 2 of the scalar model; the pairings with ``f1 = f`` or
+    ``f2 = f`` form the deterministic mean phase rotation (measure zero in
+    the integral, removed from the measured NLI by projecting out the
+    signal).  So
+
+        G_NLI(f) = 2 γ² G³ ∬_D |η(f1, f2, f)|² df1 df2,
+
+    over ``D: |f1|, |f2|, |f1 + f2 - f| ≤ bandwidth / 2``, here by the
+    trapezoidal rule on a ``grid × grid`` mesh (relative change 2e-4 from
+    801 to 1601 points).  (Two polarizations under the Manakov equation,
+    ``8γ/9``, give per polarization ``2 · (8/9)² · (G/2)³`` from the own
+    polarization and ``(8/9)² (G/2)³`` from the other: 16/27 of
+    ``γ² G_tot³`` summed over both, the familiar dual-polarization factor.)
+    """
+    f1 = np.linspace(-bandwidth / 2, bandwidth / 2, grid)
+    a, b = np.meshgrid(f1, f1, indexing="ij")
+    inside = np.abs(a + b - f) <= bandwidth / 2
+    db = 4 * np.pi**2 * beta2 * (a - f) * (b - f)
+    span = (1 - np.exp((-alpha + 1j * db) * span_length)) / (alpha - 1j * db)
+    s_half = np.sin(db * span_length / 2)
+    small = np.abs(s_half) < 1e-12
+    array = np.where(
+        small,
+        float(num_spans) ** 2,
+        (np.sin(num_spans * db * span_length / 2) / np.where(small, 1.0, s_half)) ** 2,
+    )
+    integrand = np.abs(span) ** 2 * array * inside
+    step = f1[1] - f1[0]
+    integral = np.trapezoid(np.trapezoid(integrand, dx=step, axis=1), dx=step)
+    g = power / bandwidth
+    return float(2 * gamma**2 * g**3 * integral)

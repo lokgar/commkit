@@ -23,6 +23,7 @@ from ..result import (
     EqualizerResult,
     EqualizerState,
     _attach_equalized_signal,
+    _check_decision_power,
     _log_equalizer_exit,
 )
 from ._engine import (
@@ -386,12 +387,13 @@ def block_lms(
         ``block_size``.
 
         Because the weights are frozen across the block, the stability
-        ceiling falls as ``1/block_size``: ``μ·block_size`` must stay below
-        about 1.5 (whatever ``num_taps`` and the channel count).  The default
-        ``min(0.5 / block_size, 8e-3)`` sits at a quarter of that ceiling,
-        where convergence takes a few blocks and the steady-state MSE is
-        within a few tenths of a dB of the best step; for ``block_size``
-        below 64 the cap ``8e-3`` limits the per-symbol misadjustment.
+        ceiling falls as ``1/block_size``: on input normalized to unit mean
+        power, ``μ·block_size·sps`` must stay below about 1.5 (whatever
+        ``num_taps`` and the channel count).  The default
+        ``min(0.5 / block_size, 8e-3) / sps`` sits at a quarter of that
+        ceiling, where convergence takes a few blocks and the steady-state
+        MSE is within a few tenths of a dB of the best step; for
+        ``block_size`` below 64 the cap limits the per-symbol misadjustment.
     block_size : int, default 256
         Output symbols per weight update.  Larger blocks use the GPU better
         but adapt more slowly.  Independent of the BPS window
@@ -399,7 +401,14 @@ def block_lms(
     constellation : Constellation, optional
         Decision constellation, at unit power (a shaped constellation brings
         its pmf).  Defaults to the Signal's ``constellation``; required for
-        array input.
+        array input.  A WARNING is logged when the decided symbols of the
+        last half of the decision-directed output lack its power by more
+        than 1.5 dB: a lock at a wrong gain, or a constellation that does
+        not match the signal.  An explicit choice applies to this call
+        only: ``signal`` of the result keeps the input Signal's
+        ``constellation``, which describes its reference symbols, so pass
+        the same choice to the metrics, or set it on the Signal with
+        ``replace`` (with matching reference symbols) before equalizing.
     store_weights : bool, default False
         Record the weights at the start of every block in
         ``weights_history``.
@@ -465,7 +474,7 @@ def block_lms(
     **Stability.**  ``step_size`` multiplies the gradient summed (not
     averaged) over the block.  That keeps ``μ`` on the scale of :func:`lms`
     (the same ``μ`` converges at the same speed per symbol), but it makes the
-    stability ceiling, ``μ·block_size`` below about 1.5, about
+    stability ceiling, ``μ·block_size·sps`` below about 1.5, about
     ``block_size`` times lower than for per-symbol LMS, because the weights
     are frozen across the block.  Above the ceiling the run diverges (NaN
     weights, detected at the end, raise) or stays bounded without
@@ -553,7 +562,7 @@ def block_lms(
     xp, C, n_sym, sps, block_size = run.xp, run.C, run.n_sym, run.sps, run.block_size
     num_taps = run.num_taps
     training = run.training
-    mu = min(0.5 / block_size, 8e-3) if step_size is None else step_size
+    mu = min(0.5 / block_size, 8e-3) / sps if step_size is None else step_size
 
     if constellation is None:
         raise ValueError(
@@ -757,18 +766,19 @@ def block_lms(
         raise RuntimeError(
             f"block_lms diverged (step_size={mu}, block_size={block_size}). "
             f"Because the weights are frozen across the block, step_size * "
-            f"block_size must stay below about 1.5; the default "
-            f"min(0.5 / block_size, 8e-3) = {min(0.5 / block_size, 8e-3):.2e} "
-            f"sits at a quarter of that ceiling."
+            f"block_size * sps must stay below about 1.5; the default "
+            f"min(0.5 / block_size, 8e-3) / sps = "
+            f"{min(0.5 / block_size, 8e-3) / sps:.2e} sits at a quarter of that "
+            f"ceiling."
         )
     weights, carrier = snap[0]
     state_out = _block_state(
         run, equalizer="block_lms", cpr=cpr, weights=weights, carrier=carrier
     )
     result = _assemble_block(run, y_all, e_all, w_hist, phi_all, n_train, state_out)
-    return _attach_equalized_signal(
-        _log_equalizer_exit(result, name="Block-LMS"), sig, state
-    )
+    result = _log_equalizer_exit(result, name="Block-LMS")
+    result = _check_decision_power(result, constellation, "block_lms()")
+    return _attach_equalized_signal(result, sig, state)
 
 
 def _block_bps(

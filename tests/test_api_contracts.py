@@ -52,6 +52,7 @@ from commkit.frequency import MthPower
 from commkit.impairments import Fiber, Lowdin
 from commkit.mapping import Constellation
 from commkit.recovery import BPS
+from commkit.timing import Gardner
 
 # -----------------------------------------------------------------------------
 # Kinds and checks
@@ -542,6 +543,12 @@ ROWS: list[Row] = [
         fact=FS_CONFLICT,
     ),
     Row(
+        "commkit.impairments.source.apply_intensity_noise",
+        TRANSFORM,
+        call=lambda c, x: _a(x, rin_db_hz=-140.0, sampling_rate=FS, rng=1),
+        fact=FS_CONFLICT,
+    ),
+    Row(
         "commkit.impairments.fiber_channel.apply_pmd",
         TRANSFORM,
         call=lambda c, x: _a(x, sampling_rate=FS, dgd=1e-12, theta=0.3),
@@ -557,7 +564,30 @@ ROWS: list[Row] = [
     Row(
         "commkit.impairments.frontend.apply_iq_imbalance",
         TRANSFORM,
-        call=lambda c, x: _a(x, amplitude_imbalance_db=0.5, phase_imbalance_deg=3),
+        call=lambda c, x: _a(
+            x,
+            amplitude_imbalance_db=0.5,
+            phase_imbalance_deg=3,
+            skew=2e-12,
+            sampling_rate=FS,
+        ),
+        fact=FS_CONFLICT,
+    ),
+    Row(
+        "commkit.impairments.frontend.apply_quantization",
+        TRANSFORM,
+        call=lambda c, x: _a(x, num_bits=6, full_scale=1.0, enob=5.0, rng=1),
+    ),
+    Row(
+        "commkit.impairments.frontend.apply_sampling_jitter",
+        TRANSFORM,
+        call=lambda c, x: _a(x, jitter=1e-12, sampling_rate=FS, rng=1),
+        fact=FS_CONFLICT,
+    ),
+    Row(
+        "commkit.impairments.frontend.apply_sampling_clock_offset",
+        RATE_CHANGE,
+        call=lambda c, x: _a(x, offset_ppm=200.0),
     ),
     Row("commkit.impairments.frontend.GramSchmidt", VALUE),
     Row("commkit.impairments.frontend.Lowdin", VALUE),
@@ -571,6 +601,20 @@ ROWS: list[Row] = [
     Row("commkit.impairments.frontend.estimate_iq_imbalance", MULTI, data=2),
     # Optical Signals only, like extract_payload: tested in test_noise.py.
     Row("commkit.impairments.noise.apply_ase", DESIGN),
+    Row(
+        "commkit.impairments.noise.apply_photodetection",
+        TRANSFORM,
+        call=lambda c, x: _a(x, received_power_dbm=-10.0, sampling_rate=FS, rng=1),
+        fact=FS_CONFLICT,
+    ),
+    Row(
+        "commkit.impairments.noise.apply_coherent_detection",
+        TRANSFORM,
+        call=lambda c, x: _a(
+            x, received_power_dbm=-20.0, lo_power_dbm=10.0, sampling_rate=FS, rng=1
+        ),
+        fact=FS_CONFLICT,
+    ),
     Row(
         "commkit.impairments.noise.apply_awgn",
         TRANSFORM,
@@ -666,6 +710,10 @@ ROWS: list[Row] = [
         call=lambda c, x: _a(x, noise_var=0.1, constellation=C16),
         symbols=True,
     ),
+    Row("commkit.metrics.awgn.awgn_ber", DESIGN),
+    Row("commkit.metrics.awgn.awgn_gmi", DESIGN),
+    Row("commkit.metrics.awgn.awgn_mi", DESIGN),
+    Row("commkit.metrics.awgn.awgn_ser", DESIGN),
     # --- multirate ----------------------------------------------------------
     Row(
         "commkit.multirate.decimate",
@@ -795,22 +843,38 @@ ROWS: list[Row] = [
     # --- timing -------------------------------------------------------------
     Row("commkit._sequences.barker_sequence", DESIGN),
     Row("commkit._sequences.zadoff_chu_sequence", DESIGN),
-    Row("commkit.timing.cross_correlate_fft", HELPER, data=2),
+    Row("commkit.timing.clock_recovery.Gardner", VALUE),
+    Row("commkit.timing.clock_recovery.SamplingClockOffsetEstimate", VALUE),
     Row(
-        "commkit.timing.correct_timing",
+        "commkit.timing.clock_recovery.estimate_sampling_clock_offset",
+        ESTIMATE,
+        data=2,
+        call=lambda c, x: _a(x, Gardner(), sps=SPS),
+        fact=SPS_CONFLICT,
+    ),
+    Row(
+        "commkit.timing.clock_recovery.correct_sampling_clock_offset",
+        RATE_CHANGE,
+        data=2,
+        call=lambda c, x: _a(x, Gardner(), sps=SPS),
+        fact=SPS_CONFLICT,
+    ),
+    Row("commkit.timing.synchronization.cross_correlate_fft", HELPER, data=2),
+    Row(
+        "commkit.timing.synchronization.correct_timing",
         RATE_CHANGE,
         data=2,
         call=lambda c, x: _a(x, 3),
     ),
-    Row("commkit.timing.estimate_fractional_delay", ESTIMATE, data=2),
-    Row("commkit.timing.TimingEstimate", VALUE),
+    Row("commkit.timing.synchronization.estimate_fractional_delay", ESTIMATE, data=2),
+    Row("commkit.timing.synchronization.TimingEstimate", VALUE),
     Row(
-        "commkit.timing.estimate_timing",
+        "commkit.timing.synchronization.estimate_timing",
         ESTIMATE,
         call=lambda c, x: _a(x, template=c.wave2[0, :64], threshold=1.0),
     ),
     Row(
-        "commkit.timing.fft_fractional_delay",
+        "commkit.timing.synchronization.fft_fractional_delay",
         TRANSFORM,
         call=lambda c, x: _a(x, delay=0.25),
     ),

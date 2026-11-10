@@ -189,7 +189,7 @@ class TestBlockRDE:
     def test_blind_converges_16qam(self, xp):
         """Block RDE on 16-QAM through the ISI channel (Es/N0 22 dB): after one
         constant rotation the second half has no errors and an EVM within
-        1.4x the AWGN floor (0.079); frozen taps leave SER above 0.3.  (The
+        1.4x the AWGN floor (0.079); frozen taps leave the ISI (SER 0.07).  (The
         radial distance to the rings, used before, passed at SER 0.12.)"""
         c = Constellation.qam(16)
         rx = _channel_record(c, 20000, esn0_db=22.0, xp=xp)
@@ -206,13 +206,15 @@ class TestBlockRDE:
         y = resolved(1e-3)
         assert scoring.ser(y, ref[10000:], c) == 0.0
         assert scoring.evm_rms(y, ref[10000:]) < 1.4 * 10 ** (-22 / 20)
-        assert scoring.ser(resolved(0.0), ref[10000:], c) > 0.3
+        assert scoring.ser(resolved(0.0), ref[10000:], c) > 0.03
 
     def test_default_step_converges_from_cold_start(self, xp, xpt):
-        """The default step, min(1e-3, 0.5/block_size), opens a dual-pol
-        16-QAM eye under a 30-degree polarization rotation from a cold start
-        (the previous fixed 2e-4 had not converged after 10^5 symbols)."""
+        """The default step, min(1e-3, 0.5/block_size)/sps, opens a dual-pol
+        16-QAM eye under a 30-degree polarization rotation from a cold start,
+        behind the matched filter (the previous fixed 2e-4 had not converged
+        after 10^5 symbols)."""
         from commkit import RRC, generate
+        from commkit.filtering import matched_filter
         from commkit.impairments import apply_awgn, apply_polarization_mixing
 
         c16 = Constellation.qam(16)
@@ -227,10 +229,11 @@ class TestBlockRDE:
             rng=1,
         )
         rx = apply_polarization_mixing(tx.samples, theta=np.deg2rad(30.0))
-        rx = xp.asarray(apply_awgn(rx, esn0_db=20.0, sps=2, rng=3))
+        rx = apply_awgn(rx, esn0_db=20.0, sps=2, rng=3)
+        rx = xp.asarray(matched_filter(rx, pulse=RRC(0.1).taps(2)))
         kw = dict(sps=2, num_taps=21, constellation=c16, block_size=block_size)
         r = block_rde(rx, **kw)
-        r_explicit = block_rde(rx, step_size=min(1e-3, 0.5 / block_size), **kw)
+        r_explicit = block_rde(rx, step_size=min(1e-3, 0.5 / block_size) / 2, **kw)
         xpt.assert_array_equal(r.y_hat, r_explicit.y_hat)
 
         # One permutation and one rotation per stream; every stream must

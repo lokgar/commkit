@@ -174,7 +174,6 @@ def _prepare_sequential(
     samples_np, training_np, eq_norm = _normalize_inputs(
         samples_np,
         training_np,
-        sps,
         input_norm_factor=None if state is None else state.input_norm_factor,
     )
     if state is None:

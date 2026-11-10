@@ -412,7 +412,10 @@ def welch_psd(
         Frequencies in Hz, ``(F,)``, ascending (a two-sided spectrum runs
         from ``-f_s/2``).
     Pxx : ndarray
-        Linear PSD (or power spectrum), ``(F,)`` or ``(C, F)``.
+        Linear PSD (or power spectrum), ``(F,)`` or ``(C, F)``, in the
+        samples' squared units per Hz: samples are dimensionless, so this is
+        not dBm/Hz (a function that needs absolute power takes it as a
+        ``*_power_dbm`` argument).
 
     Raises
     ------

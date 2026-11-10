@@ -25,7 +25,7 @@ from .core.frame import _frame_pilots
 from .core.signal import Signal
 from .logger import logger
 from .math import _derotate, _linear_trend_slope
-from .timing import _parabolic_peak_offset
+from .timing.synchronization import _parabolic_peak_offset
 
 # Lazy-compiled Numba kernel for the M&M iterative bootstrap.
 _NUMBA_MM: dict[str, Callable[..., np.ndarray]] = {}

@@ -12,7 +12,7 @@ from typing import TYPE_CHECKING, Any
 
 import numpy as np
 
-from ..backend import ArrayType, to_device
+from ..backend import ArrayType, dispatch, to_device
 from ..logger import logger
 
 __all__ = ["EqualizerResult", "EqualizerState"]
@@ -54,7 +54,7 @@ class EqualizerState:
     weights : numpy.ndarray
         ``(C, C, num_taps)`` complex64 butterfly weights.
     input_norm_factor : float or numpy.ndarray
-        Normalization applied to the input (``(C,)`` for MIMO).
+        Per-channel RMS the input was divided by (``(C,)`` for MIMO).
     pending : numpy.ndarray
         ``(C, L)`` complex64 normalized input from the resume point on.
     lead : int
@@ -171,17 +171,32 @@ class EqualizerResult:
         Error signal, ``(N_sym,)`` or ``(C, N_sym)``.
     weights_history : ndarray or None
         Tap weights over time, only with ``store_weights=True``: one row per
-        symbol of ``y_hat`` (RLS's trimmed tail included), the taps that
-        produced it.
+        symbol of ``y_hat`` (RLS's trimmed tail included).  For the
+        sequential equalizers (:func:`lms`, :func:`rls`, :func:`cma`,
+        :func:`rde`) row ``n`` holds the taps after the update at symbol
+        ``n``, so symbol ``n`` was produced by row ``n - 1`` (symbol 0 by the
+        initial taps); for :func:`block_lms`, by the taps at the start of its
+        block, which row ``n`` holds.
     num_train_symbols : int
         Training symbols consumed in the data-aided phase (LMS/RLS); skip
         them before steady-state metrics such as EVM, SNR and BER.
     input_norm_factor : float or numpy.ndarray
-        Factor ``rms(samples, axis=-1) * sqrt(sps)`` by which each channel's
-        input was divided before equalization: a ``float`` for SISO, ``(C,)``
-        for MIMO (at ``sps=1``, the plain RMS of the input symbols).  It
-        restores absolute power when a different capture (e.g. vacuum noise)
-        is passed through the same frozen taps::
+        Per-channel RMS ``a_j = sqrt(mean(|x_j|²))`` of the input samples
+        ``x_j`` as given, which each channel was divided by before
+        equalization: a ``float`` for SISO, ``(C,)`` for MIMO (the factor
+        passed in through ``state`` for a continued call).  With the taps
+        ``W_n`` that produced symbol ``n`` (see ``weights_history``) and the
+        centre tap ``T_c``, the output is exactly::
+
+            y_hat[i, n] = sum_j sum_t conj(W_n[i, j, t])
+                          * x_j[n*sps - T_c + t] / a_j      (* exp(-j phi_n))
+
+        with zeros outside the record and the factor ``exp(-j phi_n)`` of an
+        inline ``cpr`` (``phase_trajectory``).  The overall gain on the
+        received samples is therefore ``W / a_j``, and ``y_hat`` is on the
+        decision constellation's unit-power scale.  To put a different
+        capture (vacuum noise) through the same frozen taps on the same
+        absolute scale::
 
             α = signal_result.input_norm_factor  # float or (C,) array
             β = noise_result.input_norm_factor
@@ -210,7 +225,10 @@ class EqualizerResult:
         Continuation state; pass as ``state=`` to the next call.
     signal : Signal or None
         For Signal input, the output as a 1-SPS Signal (``sampling_rate =
-        symbol_rate``) whose reference is cut to the output symbols.  After
+        symbol_rate``) whose reference is cut to the output symbols.  It
+        keeps the input Signal's description (``constellation``, ``pulse``):
+        a ``constellation`` passed to the equalizer applies to that call
+        only.  After
         a continued call it starts at the call's own first symbol, past the
         ``overlap`` recomputed for the previous chunk.  ``None`` for array
         input.
@@ -246,6 +264,60 @@ def _log_equalizer_exit(result: EqualizerResult, name: str) -> EqualizerResult:
             f"ch{c}={10.0 * np.log10(m + 1e-30):.1f}" for c, m in enumerate(per_ch_mse)
         )
         logger.info("%s: exit MSE (final %s symbols): %s dB", name, window, parts)
+    return result
+
+
+# Decided symbols whose power differs from the constellation's by more than
+# this (in dB) mean the slicer no longer sees the constellation's levels: a
+# false lock at a wrong gain (one level decided low on the outer points) or a
+# decision constellation that does not match the signal.  A correct lock
+# decides with nearly the constellation's own distribution: measured within
+# 1 dB for square QAM and PAM down to a pre-FEC BER of about 0.1.  Below,
+# decision-directed adaptation itself pulls the output towards the inner
+# points and the BER exceeds the AWGN value, which is worth the warning too.
+# The false locks of a cold start measure -3.1 dB (64-QAM) and -3.7 dB
+# (unipolar PAM-4).
+_DECISION_POWER_TOLERANCE_DB = 1.5
+_DECISION_POWER_WINDOW = 16384
+
+
+def _check_decision_power(
+    result: EqualizerResult, constellation: Any, name: str
+) -> EqualizerResult:
+    """Log a WARNING when the decided symbols lack the constellation's power.
+
+    Decides the last half of the decision-directed output (at most
+    16384 symbols per channel) against ``constellation`` and compares the
+    mean power of the decided points with the constellation's mean power.
+    One reduction on the device and one ``(C,)`` transfer.
+    """
+    if constellation is None:
+        return result
+    y = result.y_hat
+    n_dd = y.shape[-1] - result.num_train_symbols
+    if n_dd < 512:
+        return result
+    window = min(n_dd // 2, _DECISION_POWER_WINDOW)
+    tail = y[..., -window:]
+    tail, xp, _ = dispatch(tail)
+    points = np.asarray(constellation.points)
+    energies = np.abs(points) ** 2
+    pmf = constellation.pmf
+    expected = float(np.mean(energies) if pmf is None else np.sum(pmf * energies))
+    idx = constellation._nearest(tail.reshape(-1)).reshape(tail.shape)
+    decided = xp.mean(xp.asarray(energies)[idx], axis=-1)
+    ratio_db = 10.0 * np.log10(
+        np.atleast_1d(to_device(decided, "cpu")) / expected + 1e-30
+    )
+    if np.any(np.abs(ratio_db) > _DECISION_POWER_TOLERANCE_DB):
+        logger.warning(
+            "%s: the decided symbols carry %s dB of the constellation's power "
+            "(last %d symbols): the equalizer may have locked at a wrong gain, "
+            "or the decision constellation does not match the signal.",
+            name,
+            ", ".join(f"{r:+.1f}" for r in ratio_db),
+            window,
+        )
     return result
 
 

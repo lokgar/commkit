@@ -2,8 +2,9 @@
 
 Expectations are derived independently of the split-step solver: the
 fundamental soliton, the exact Kerr phase of a continuous wave, the linear
-dispersion operator, the noise-figure formula of an amplifier and the
-Maxwellian mean of the differential group delay.
+dispersion operator, the first-order GN model of the nonlinear
+interference, the noise-figure formula of an amplifier and the Maxwellian
+mean of the differential group delay.
 """
 
 import math
@@ -218,6 +219,97 @@ class TestKerrEffect:
         assert np.mean(np.abs(y) ** 2) == pytest.approx(
             np.mean(np.abs(x) ** 2), rel=1e-12
         )
+
+
+class TestGaussianNoiseModel:
+    """Nonlinear interference of a Gaussian-modulated field against the
+    first-order GN model (tests.common.theory.gn_nli_psd)."""
+
+    B = 32e9  # flat signal band; sampled at 4B so the NLI's 3B band fits
+    SPANS = 3
+
+    def _nli_ratio(self, xp, launch_power_dbm, n, gamma=1.3):
+        """Measured NLI PSD over the signal PSD in |f| < B/8: the nonlinear
+        output minus its projection on the linear output (which removes the
+        mean Kerr rotation), one realization of a flat complex Gaussian
+        spectrum."""
+        fs = 4 * self.B
+        rng = np.random.default_rng(0)
+        freqs = np.fft.fftfreq(n, 1 / fs)
+        band = np.abs(freqs) < self.B / 2
+        spectrum = np.zeros(n, complex)
+        spectrum[band] = rng.standard_normal(band.sum()) + 1j * rng.standard_normal(
+            band.sum()
+        )
+        x = np.fft.ifft(spectrum)
+        x = xp.asarray((x / np.sqrt(np.mean(np.abs(x) ** 2))).astype(np.complex64))
+        kw = {
+            "span_length_km": 80.0,
+            "num_spans": self.SPANS,
+            "launch_power_dbm": launch_power_dbm,
+            "center_wavelength_nm": 1550.0,
+            "sampling_rate": fs,
+        }
+        out = {}
+        for name, g in (("nl", gamma), ("lin", 0.0)):
+            y = apply_fiber_propagation(x, fiber=Fiber(nonlinearity_per_w_km=g), **kw)
+            out[name] = np.asarray(to_device(y, "cpu")).astype(np.complex128)
+        a = np.vdot(out["lin"], out["nl"]) / np.vdot(out["lin"], out["lin"])
+        nli = np.abs(np.fft.fft(out["nl"] - a * out["lin"])) ** 2
+        sig = np.abs(np.fft.fft(out["lin"])) ** 2
+        meas = np.abs(freqs) < self.B / 8
+        return float(nli[meas].mean() / sig[meas].mean())
+
+    def _theory_ratio(self, launch_power_dbm):
+        from tests.common.theory import gn_nli_psd
+
+        power = 1e-3 * 10 ** (launch_power_dbm / 10)
+        lam = 1550e-9
+        beta2 = -17.0e-6 * lam**2 / (2 * math.pi * C_LIGHT)
+        kw = {
+            "power": power,
+            "bandwidth": self.B,
+            "gamma": 1.3e-3,
+            "beta2": beta2,
+            "alpha": 0.2 * math.log(10.0) / 10.0 / 1e3,
+            "span_length": 80e3,
+            "num_spans": self.SPANS,
+        }
+        psd = np.mean(
+            [gn_nli_psd(f, **kw) for f in np.linspace(-self.B / 8, self.B / 8, 9)]
+        )
+        return float(psd / (power / self.B))
+
+    def test_nli_level(self, xp):
+        """At 0 dBm the measured NLI is within 0.03 dB of the GN integral
+        (with the exact span response and the coherent phased-array factor)
+        on this 2^15-sample realization, 0.22 dB above it on a 2^16-sample
+        one: realizations scatter by about 0.2 dB.  Above that, the excess
+        grows in proportion to the power, as a second-order term does (0.15
+        dB at -6 dBm, 0.40 dB at +6 dBm, 2^16 samples), and does not depend
+        on the step count (100 or 400 steps per span agree to 0.001 dB).
+        Bound 0.5 dB, the accuracy usually quoted for the GN model."""
+        diff = 10 * math.log10(
+            self._nli_ratio(xp, 0.0, 2**15) / self._theory_ratio(0.0)
+        )
+        assert abs(diff) < 0.5, diff
+
+    @pytest.mark.slow
+    def test_nli_grows_with_the_cube_of_the_power(self, xp):
+        """NLI-to-signal ratio against launch power from -6 to 0 dBm: slope
+        2 in dB/dB (NLI ∝ P³), measured 2.011; level 0.15, 0.18 and 0.22 dB
+        above the GN integral, bound 0.5 dB."""
+        powers = np.array([-6.0, -3.0, 0.0])
+        ratios = np.array([self._nli_ratio(xp, p, 2**16) for p in powers])
+        slope = np.polyfit(powers, 10 * np.log10(ratios), 1)[0]
+        assert abs(slope - 2.0) < 0.05, slope
+        for p, r in zip(powers, ratios, strict=True):
+            assert abs(10 * math.log10(r / self._theory_ratio(p))) < 0.5
+
+    def test_no_nli_without_kerr(self, xp):
+        """Baseline: with γ = 0 the same measurement finds no NLI (exactly
+        0 measured), against 3e-3 of the signal with it."""
+        assert self._nli_ratio(xp, 0.0, 2**15, gamma=0.0) < 1e-12
 
 
 class TestAmplifierNoise:

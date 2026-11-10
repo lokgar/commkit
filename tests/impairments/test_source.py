@@ -3,10 +3,15 @@
 import math
 
 import numpy as np
+import pytest
 
 from commkit.backend import to_device
 from commkit.core import Signal
-from commkit.impairments import apply_phase_noise, generate_phase_noise
+from commkit.impairments import (
+    apply_intensity_noise,
+    apply_phase_noise,
+    generate_phase_noise,
+)
 from tests.common.conversions import device_of
 
 
@@ -228,3 +233,42 @@ class TestPeriodicPhaseNoise:
             rng=11,
         )
         assert float(xp.max(xp.abs(xp.exp(1j * phi) - out))) < 1e-9
+
+
+class TestIntensityNoise:
+    """apply_intensity_noise: |x|² carries the declared RIN."""
+
+    FS = 64e9
+
+    def test_variance_and_spectrum(self, xp):
+        """A continuous wave at -130 dB/Hz: the relative intensity r = |y|² - 1
+        has variance RIN · f_s / 2 = 3.2e-3 (relative standard error
+        sqrt(2/N) = 0.0055 over 2^16 samples, bound 5 of those), and its
+        one-sided PSD is flat at RIN (mean over the band within 3 %)."""
+        from commkit.spectral import welch_psd
+
+        n = 2**16
+        x = xp.ones(n, dtype=xp.complex64)
+        y = apply_intensity_noise(x, rin_db_hz=-130.0, sampling_rate=self.FS, rng=1)
+        r = xp.abs(y) ** 2 - 1.0
+        expected = 1e-13 * self.FS / 2
+        assert abs(float(xp.var(r)) / expected - 1) < 5 * np.sqrt(2 / n)
+        _, psd = welch_psd(r, sampling_rate=self.FS, nperseg=1024)
+        assert float(xp.mean(psd[1:])) == pytest.approx(1e-13, rel=0.03)
+
+    def test_phase_untouched_and_one_laser(self, xp, xpt):
+        """The factor is real and shared: every channel's phase is kept and
+        both channels scale alike."""
+        rng = xp.random.default_rng(2)
+        a = (rng.standard_normal(4096) + 1j * rng.standard_normal(4096)).astype(
+            xp.complex64
+        )
+        x = xp.stack([a, 2j * a])
+        y = apply_intensity_noise(x, rin_db_hz=-120.0, sampling_rate=self.FS, rng=3)
+        ratio = y / x
+        xpt.assert_allclose(ratio.imag, 0.0, atol=1e-6)
+        xpt.assert_allclose(ratio[0], ratio[1], rtol=1e-6)
+
+    def test_needs_sampling_rate(self, xp):
+        with pytest.raises(ValueError, match="sampling_rate"):
+            apply_intensity_noise(xp.ones(8, xp.complex64), rin_db_hz=-140.0)

@@ -248,7 +248,6 @@ def _prepare_block(
     samples, training_symbols, eq_norm = _normalize_inputs(
         samples,
         training_symbols,
-        sps,
         input_norm_factor=None if state is None else state.input_norm_factor,
     )
 

@@ -54,6 +54,8 @@ uv run pytest
 uv run ruff format .
 ```
 
+A commit that changes only text that cannot change behaviour (docstrings, comments, Markdown) runs `ruff check` and `ruff format` alone. The full gate applies again as soon as code, tests or notebook cells change, or an edited docstring holds an example that runs.
+
 **Benchmarks** are explicit-only; `uv run pytest` never collects them. A commit that changes a public signature smoke-runs them once, untimed, so their call sites cannot rot:
 
 ```bash
@@ -101,6 +103,7 @@ Dependencies point downward only:
 - Construction does no hidden work: no mapping, no normalization, no device move, no shape guessing. Factories (`generate`, frames) do that work.
 - `sig.to("gpu")` and `sig.replace(...)` return new Signals sharing the arrays; `clone()` copies.
 - **Alignment invariant:** reference symbol *k* corresponds to symbol period *k* of the samples. A function that drops or shifts symbol periods slices the reference to match. Metrics raise on mismatch; they never guess.
+- **Absolute power.** Samples are dimensionless, and a Signal holds no power. Impairments never rescale the signal component: noise and distortion are added in the samples' units. A function whose model depends on absolute power takes `<where>_power_dbm` (`launch_power_dbm`, `received_power_dbm`, `lo_power_dbm`), the mean power its input stands for, summed over channels, and returns samples in the input's units (a square-law detector: the input's power units). A PSD is in the samples' units per Hz, not dBm/Hz.
 
 ### Function signatures
 
@@ -153,7 +156,7 @@ Dependencies point downward only:
   - `method=` strings name only a numerical flavor of one algorithm (`method="maxlog" | "exact"`); algorithms are objects.
   - Output scaling has three names: `normalize` (bool) measures the power and rescales to the library's convention; `correct_power` (bool) applies the exact, known gain of a rate change without measuring; `<thing>_normalization` (a string) chooses how coefficients are scaled (`taps_normalization="unit_energy" | "unity_gain"`).
   - A search window is `search_range`, a `(start, stop)` pair in the axis's unit, or `search_band`, a half-width in Hz around a nominal frequency.
-  - Values are in SI units without a suffix (`linewidth` in Hz, `drift_rate` in rad/s, `taus` in s). A result holding one quantity in two units suffixes the SI one (`lags` in samples, `lag_s`). A conventional non-SI unit goes into the name: `_db`, `_dbm`, `_deg`, `_nm`, `_km`, `_ps_nm_km`. Normalized quantities say so (`normalized_bandwidth`). No second name for one quantity in another unit (no `center_frequency_ghz`); `center_wavelength_nm` is a different, derived quantity.
+  - Values are in SI units without a suffix (`linewidth` in Hz, `drift_rate` in rad/s, `taus` in s). A result holding one quantity in two units suffixes the SI one (`lags` in samples, `lag_s`). A conventional non-SI unit goes into the name: `_db`, `_dbm`, `_deg`, `_nm`, `_km`, `_ps_nm_km`, `_ppm`, `_db_hz`. Normalized quantities say so (`normalized_bandwidth`). No second name for one quantity in another unit (no `center_frequency_ghz`); `center_wavelength_nm` is a different, derived quantity.
 
 ### Docstrings
 
@@ -184,7 +187,7 @@ Docstrings describe the code as it is; a change in behavior updates them in the 
   - **Transforms keep the input's precision** throughout (filters, impairments, the fiber solver and DBP, resampling, delays, carrier-phase correction): complex64 in and out, complex128 in and out.
   - **Fixed-precision blocks** compute in single precision whatever the input: the equalizers in complex64, `compute_llr` / `Constellation.llr` in float32. Double input emits `commkit.PrecisionWarning` (`_array.warn_if_double`, attributed to the caller's line). The test suite turns it into an error (`pytest_configure` in `tests/conftest.py`; not pyproject's `filterwarnings`, which imports commkit before coverage starts), so a library path feeding double data to these blocks fails CI. Training and reference symbols are not checked.
   - **Deliberate float64 / complex128**, documented where it happens, only on phases, small arrays or accumulators, never on sample-rate data that is then cast back:
-    - phases before `xp.unwrap()` (float32 rounding causes spurious quadrant slips), phase trajectories and ramps (wrapped in float64, rotated in the data's precision), frequency grids and estimates;
+    - phases before `xp.unwrap()` (float32 rounding causes spurious quadrant slips), phase trajectories and ramps (wrapped in float64, rotated in the data's precision), the strobe positions of clock recovery (symbol rate; the sampling instants built from them are an integer index and a fraction in the data's precision), frequency grids and estimates;
     - recursion state: PLL, Tikhonov/Kalman block transitions, the IIR filter's sections and state (poles near z = 1);
     - RLS keeps `P`, the gain `k` and the regressor buffers in complex128 (in single precision `P` loses positive definiteness and the filter diverges);
     - LMS/CMA/RDE accumulate dot products and gradient updates in complex128 around complex64 inputs and weights; the block equalizers stay complex64, as their tap sums run inside the FFTs;
@@ -202,7 +205,7 @@ Docstrings describe the code as it is; a change in behavior updates them in the 
 | --- | --- | --- |
 | Vectorized: filters, resampling, spectra, impairments, metrics, frequency-domain equalizers | NumPy/CuPy via `x, xp, sp = dispatch(samples)` | follows the input |
 | Per-symbol searches over a small table: LLRs (all points, or per axis for separable QAM; max-log without a prior in closed form), hard decisions without a square lattice | CPU: Numba `parallel=True` over blocks of symbols (LLRs), chunked NumPy (decisions). GPU: one thread per symbol (`llr`, `llr_separable`, `llr_separable_maxlog`, `bps_min_d2`'s nearest-point mode); decisions on double input or above 1024 points use the chunked search on both devices; LLRs above 16 bits per symbol raise on the GPU | follows the input |
-| Sequential recursions: LMS/RLS/CMA/RDE, PLL, Tikhonov, cycle slips, the Mengali-Morelli bootstrap, per-codeword decoders on trellises and trees (CCDM, polar SC/SCL, Viterbi, BCJR, turbo, recursive systematic encoding) | Numba `@njit(cache=True, fastmath=True, nogil=True)`, independent rows in `prange`. The equalizers' kernel with inline carrier recovery compiles strict (unwrap, running sums) and calls fast-math tap and distance loops as separate functions (an `inline="always"` helper takes its caller's flags) | CPU; GPU input does one round trip |
+| Sequential recursions: LMS/RLS/CMA/RDE, PLL, Gardner clock recovery, Tikhonov, cycle slips, the Mengali-Morelli bootstrap, per-codeword decoders on trellises and trees (CCDM, polar SC/SCL, Viterbi, BCJR, turbo, recursive systematic encoding) | Numba `@njit(cache=True, fastmath=True, nogil=True)`, independent rows in `prange`. The equalizers' kernel with inline carrier recovery compiles strict (unwrap, running sums) and calls fast-math tap and distance loops as separate functions (an `inline="always"` helper takes its caller's flags) | CPU; GPU input does one round trip |
 | Linear recursions: IIR filtering | CPU: Numba without `fastmath`, so double input matches SciPy bit for bit. GPU: `iir` kernel: each block's state from a zero start in parallel, states carried across blocks in two levels (groups, then across groups), blocks filtered again, in double precision | follows the input |
 | Binary linear algebra of codes: encoding, syndromes, ML-decoding correlations on the GPU, Chase's test patterns | one float32 GEMM per chunk (`coding._gf2.matmul_mod2`), exact below an inner dimension of 2^24, parity in place (CPU) or by one elementwise kernel writing int8 (GPU); small tables cached per code and device (`backend._device_tables`) | follows the input |
 | Algebraic decoding (BCH, Reed-Solomon): Berlekamp-Massey, Chien search to the locator's degree, Forney | CPU: Numba `parallel=True` over codewords. GPU: `algebraic_correct`, one thread per codeword in integer table arithmetic, so both agree exactly | follows the input |
@@ -212,7 +215,7 @@ Docstrings describe the code as it is; a change in behavior updates them in the 
 | Elementwise chains between multi-core FFTs (fiber solver's Kerr and PMD stages) | NumPy: a Numba `parallel=True` pass competes with `scipy.fft`'s threads; adopt one only on a paired end-to-end A/B | CPU |
 | Other hot spots limited by intermediates, launches or round trips | CUDA C++ via CuPy `RawModule` (`commkit/_cuda/src`) | GPU |
 
-**Numba kernels live at module level** in a private module (`equalization/_numba_loops.py`, `coding/_numba_loops.py`, `mapping/_numba_llr.py`) that a getter `_get_numba_<name>()`, defined in the module that calls the kernel, imports on first use, so `import commkit` does not load Numba and `cache=True` works across processes. A kernel defined inside a function that calls another kernel defined there recompiles in every process (Numba's cache key misses the captured dispatcher); a getter may build a closure that captures only constants (`_get_numba_sos`).
+**Numba kernels live at module level** in a private module (`equalization/_numba_loops.py`, `coding/_numba_loops.py`, `mapping/_numba_llr.py`, `timing/_numba_loops.py`) that a getter `_get_numba_<name>()`, defined in the module that calls the kernel, imports on first use, so `import commkit` does not load Numba and `cache=True` works across processes. A kernel defined inside a function that calls another kernel defined there recompiles in every process (Numba's cache key misses the captured dispatcher); a getter may build a closure that captures only constants (`_get_numba_sos`).
 
 **Host-sync hygiene:**
 

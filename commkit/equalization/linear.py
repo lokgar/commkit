@@ -199,8 +199,8 @@ def apply_taps(
         Samples per symbol, an integer.  Taken from the Signal; required for
         array input.  A value that disagrees with the Signal raises.
     normalize : bool, default True
-        Normalize ``samples`` to unit symbol power first, as the adaptive
-        equalizers do.  ``False`` when the caller has already scaled the
+        Divide each channel of ``samples`` by its RMS first (unit mean
+        power), as the adaptive equalizers do.  ``False`` when the caller has already scaled the
         input as in the run that produced ``weights``.
     input_norm_factor : float or array_like, optional
         Normalization factor to divide by instead of measuring one (with
@@ -251,7 +251,7 @@ def apply_taps(
     _at_eq_norm = None
     if normalize:
         samples, _, _at_eq_norm = _normalize_inputs(
-            samples, None, sps, input_norm_factor=input_norm_factor
+            samples, None, input_norm_factor=input_norm_factor
         )
 
     # Pad left by center tap so window[0] is center-aligned with sample 0,

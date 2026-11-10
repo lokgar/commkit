@@ -95,6 +95,10 @@ _DOCUMENTED: dict[str, str] = {
     "recovery/pilots.py::_extract_pilot_phasor": _HOST_VALUE
     + " (SciPy window, bin tables)",
     "recovery/pll.py::_pll": _RECURSION,
+    "timing/clock_recovery.py::_gardner_estimate": _RECURSION,
+    "timing/clock_recovery.py::correct_sampling_clock_offset": _RECURSION,
+    "timing/clock_recovery.py::estimate_sampling_clock_offset": _RECURSION,
+    "timing/clock_recovery.py::_resample_on_strobes": _RECURSION,
     "recovery/tikhonov.py::_tikhonov": _RECURSION + " (RTS block-phase smoother)",
 }
 
