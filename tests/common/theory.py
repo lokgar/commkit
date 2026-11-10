@@ -176,3 +176,71 @@ def psk_ser(order: int, esn0: float) -> float:
         lambda t: np.exp(-esn0 * a / np.sin(t) ** 2), 0, (order - 1) * np.pi / order
     )
     return float(val / np.pi)
+
+
+def gn_nli_psd(
+    f: float,
+    *,
+    power: float,
+    bandwidth: float,
+    gamma: float,
+    beta2: float,
+    alpha: float,
+    span_length: float,
+    num_spans: int,
+    grid: int = 1601,
+) -> float:
+    """First-order NLI power spectral density at ``f`` of a scalar (one
+    polarization) Gaussian field with a flat spectrum, the GN model.
+
+    The field has power ``power`` (W) spread evenly over
+    ``|f| ≤ bandwidth / 2`` (Hz), PSD ``G = power / bandwidth``, and
+    propagates over ``num_spans`` spans of length ``span_length`` (m),
+    power loss ``alpha`` (1/m), dispersion ``beta2`` (s²/m) and Kerr
+    coefficient ``gamma`` (1/(W m)), each followed by an amplifier that
+    restores the span loss.
+
+    Derivation.  To first order in ``gamma`` the NLSE's nonlinear term
+    ``jγ|A|²A`` adds, at the link's end, the field whose frequency
+    component ``f`` sums the products ``A(f1) A(f2) A*(f1 + f2 - f)``
+    weighted by the link function
+
+        η(f1, f2, f) = Σ_{n=0}^{N_s-1} e^{jΔβ nL} ∫_0^L e^{(-α + jΔβ) z} dz,
+        Δβ = 4π² β₂ (f1 - f)(f2 - f),
+
+    the integral being ``(1 - e^{(-α + jΔβ)L}) / (α - jΔβ)`` and the sum
+    the phased-array factor ``|Σ|² = sin²(N_s ΔβL/2) / sin²(ΔβL/2)`` (the
+    spans add coherently; replacing it by ``N_s`` is the incoherent GN
+    model).  For a circular Gaussian field the sixth moment pairs
+    ``A*(f1 + f2 - f)`` with either ``A(f1)`` or ``A(f2)``, giving the
+    factor 2 of the scalar model; the pairings with ``f1 = f`` or
+    ``f2 = f`` form the deterministic mean phase rotation (measure zero in
+    the integral, removed from the measured NLI by projecting out the
+    signal).  So
+
+        G_NLI(f) = 2 γ² G³ ∬_D |η(f1, f2, f)|² df1 df2,
+
+    over ``D: |f1|, |f2|, |f1 + f2 - f| ≤ bandwidth / 2``, here by the
+    trapezoidal rule on a ``grid × grid`` mesh (relative change 2e-4 from
+    801 to 1601 points).  (Two polarizations under the Manakov equation,
+    ``8γ/9``, give per polarization ``2 · (8/9)² · (G/2)³`` from the own
+    polarization and ``(8/9)² (G/2)³`` from the other: 16/27 of
+    ``γ² G_tot³`` summed over both, the familiar dual-polarization factor.)
+    """
+    f1 = np.linspace(-bandwidth / 2, bandwidth / 2, grid)
+    a, b = np.meshgrid(f1, f1, indexing="ij")
+    inside = np.abs(a + b - f) <= bandwidth / 2
+    db = 4 * np.pi**2 * beta2 * (a - f) * (b - f)
+    span = (1 - np.exp((-alpha + 1j * db) * span_length)) / (alpha - 1j * db)
+    s_half = np.sin(db * span_length / 2)
+    small = np.abs(s_half) < 1e-12
+    array = np.where(
+        small,
+        float(num_spans) ** 2,
+        (np.sin(num_spans * db * span_length / 2) / np.where(small, 1.0, s_half)) ** 2,
+    )
+    integrand = np.abs(span) ** 2 * array * inside
+    step = f1[1] - f1[0]
+    integral = np.trapezoid(np.trapezoid(integrand, dx=step, axis=1), dx=step)
+    g = power / bandwidth
+    return float(2 * gamma**2 * g**3 * integral)
