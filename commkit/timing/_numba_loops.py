@@ -111,9 +111,10 @@ def _clamp_step(step, sps):
 
 
 @_step
-def _track(x, c0, c1, pad, sps, p0, mu, beta, power, n_valid, pos, err):
+def _track(x, c0, c1, pad, sps, p0, mu, beta, nu_max, power, n_valid, pos, err):
     """One loop over channels ``c0 .. c1 - 1`` (their mean error drives it);
-    fills ``pos`` and ``err`` and returns the number of strobes."""
+    fills ``pos`` and ``err`` and returns the number of strobes.  The
+    integrator stays within ``±nu_max``."""
     nu = 0.0
     e_last = 0.0
     p = p0
@@ -131,14 +132,14 @@ def _track(x, c0, c1, pad, sps, p0, mu, beta, power, n_valid, pos, err):
         err[k] = e
         k += 1
         step = _clamp_step(sps * (1.0 + nu + mu * e_last), sps)
-        nu += beta * e_last
+        nu = min(max(nu + beta * e_last, -nu_max), nu_max)
         e_last = e
         p += step
     return k
 
 
 @numba.njit(cache=True, fastmath=True, nogil=True, parallel=True)
-def gardner_loop(x, pad, sps, p0, mu, beta, power, joint, n_valid, num_out):
+def gardner_loop(x, pad, sps, p0, mu, beta, nu_max, power, joint, n_valid, num_out):
     """Track the symbol strobes of every channel (or one joint loop).
 
     Parameters
@@ -155,6 +156,9 @@ def gardner_loop(x, pad, sps, p0, mu, beta, power, joint, n_valid, num_out):
     mu, beta : numpy.ndarray
         Proportional and integral gains per row, float64: the strobe spacing
         is ``sps · (1 + ν + μ·e)`` and ``ν += β·e``.
+    nu_max : float
+        Bound of the integrator ``|ν|``, the largest clock offset tracked
+        (fraction, not ppm).
     power, joint : bool
         Power detector; one loop driven by the mean error of all channels.
     n_valid : int
@@ -180,6 +184,18 @@ def gardner_loop(x, pad, sps, p0, mu, beta, power, joint, n_valid, num_out):
         c0 = 0 if joint else r
         c1 = C if joint else r + 1
         count[r] = _track(
-            x, c0, c1, pad, sps, p0[r], mu[r], beta[r], power, n_valid, pos[r], err[r]
+            x,
+            c0,
+            c1,
+            pad,
+            sps,
+            p0[r],
+            mu[r],
+            beta[r],
+            nu_max,
+            power,
+            n_valid,
+            pos[r],
+            err[r],
         )
     return pos, err, count

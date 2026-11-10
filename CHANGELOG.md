@@ -4,6 +4,19 @@ Notable changes to CommKit, newest first. Performance figures are from the refer
 
 ## [Unreleased]
 
+### Added
+
+- `timing.Gardner(max_offset_ppm=1000.0)`: the largest clock offset the loop tracks. The loop's integrator is held within it.
+- A WARNING when Gardner clock recovery slips whole symbols (the timing moves by more than 0.75 symbol within `8 / (B·T)` symbols), after which output symbols no longer match the transmitted ones in order. A second WARNING when the estimated offset sits at `max_offset_ppm`.
+
+### Performance
+
+- Gardner clock recovery checks its trajectory for slips after the loop: 1.01 to 1.04 of the former time (paired runs, 2^17 symbols).
+
+### Fixed
+
+- A Gardner loop too wide for its detector's noise, such as the classical detector at `normalized_bandwidth=1e-2` on a 0.1-rolloff signal, no longer runs away in frequency without notice. Once it slipped, nothing pulled its integrator back, and it reached tens of thousands of ppm on a 50 ppm clock, with thousands of extra symbols in the corrected output. The bounded loop keeps returning to lock and reports the slips.
+
 ## [3.7.0] - 2026-11-10
 
 The receiver's analog front end and the detector, at absolute power. The ADC clock, its jitter and quantizer, IQ skew and the photodiode join the impairments, with Gardner clock recovery as the inverse of the clock; coherent and square-law detection turn received and LO powers into the noise they give. Closed-form AWGN error rates and information rates sit next to the measured ones. Blind decision-directed equalizers no longer lock falsely on unipolar PAM and dense QAM, because their input scaling hands the slicer the right gain.

@@ -185,6 +185,77 @@ class TestCorrect:
         assert scoring.ser(to_numpy(recovered.y_hat)[last], ref[last], C16) < 1e-3
 
 
+class TestLockChecks:
+    """A loop too wide for its detector's noise slips; once its timing runs
+    through the symbols the mean detector output is zero and only the
+    integrator's bound keeps its frequency near the clock's."""
+
+    @pytest.mark.allow_warnings
+    def test_bound_keeps_a_slipping_loop_near_the_clock(self, xp, caplog):
+        """Classical detector, rolloff 0.1, B·T = 1e-2: jitter large enough
+        to slip throughout the record.  Within the default 1000 ppm bound the
+        loop keeps returning to lock and the estimate stays inside the bound
+        (measured 171 and 201 ppm against the true 50, CPU and GPU, after a
+        net 17 and 19 slipped symbols); the slip is reported."""
+        mf = _received(xp, ppm=50.0)
+        with caplog.at_level(logging.WARNING, logger="commkit"):
+            est = estimate_sampling_clock_offset(mf, Gardner(normalized_bandwidth=1e-2))
+        assert "slipped" in caplog.text
+        assert abs(float(est.value) - 50.0) < 1000.0
+
+    @pytest.mark.allow_warnings
+    def test_without_the_bound_the_loop_runs_away(self, xp):
+        """Baseline: the same loop with the bound at 89 000 ppm wanders off
+        in frequency (5771 and -50 907 ppm measured, CPU and GPU)."""
+        mf = _received(xp, ppm=50.0)
+        est = estimate_sampling_clock_offset(
+            mf, Gardner(normalized_bandwidth=1e-2, max_offset_ppm=8.9e4)
+        )
+        assert abs(float(est.value)) > 2000.0
+
+    @pytest.mark.allow_warnings
+    def test_slip_reported(self, xp, caplog):
+        """Power detector, rolloff 0.1, B·T = 2e-2: a few slips (3 to 5
+        measured), each moving the timing by a whole symbol, against at
+        most 0.46 symbol of jitter-driven movement over the window in the
+        loops that do not slip."""
+        mf = _received(xp, ppm=50.0)
+        with caplog.at_level(logging.WARNING, logger="commkit"):
+            correct_sampling_clock_offset(
+                mf, Gardner(method="power", normalized_bandwidth=2e-2)
+            )
+        assert "slipped" in caplog.text
+
+    def test_first_slip_on_a_known_trajectory(self):
+        """A drifting, jittery trajectory with one slip at symbol 50 000:
+        found where the window first spans the step (8 / B·T = 800 symbols
+        before it), and nothing without the step."""
+        rng = np.random.default_rng(0)
+        k = np.arange(100_000)
+        traj = k * 50e-6 + 0.05 * rng.standard_normal(k.size)
+        assert cr._first_slip(traj[None], np.array([1e-2]))[0] == -1
+        slipped = traj + (k >= 50_000)
+        first = cr._first_slip(slipped[None], np.array([1e-2]))[0]
+        assert 50_000 - 800 <= first < 50_000
+
+    @pytest.mark.allow_warnings
+    def test_offset_beyond_the_bound(self, xp, caplog):
+        """1500 ppm with the default bound: the integrator stops at 1000 ppm
+        and the proportional path carries the rest with a static timing lag
+        (the slope still reads 1499.99 ppm), and the warning names the
+        bound; with max_offset_ppm=3000 there is no warning and the offset
+        is measured within 0.5 ppm (1499.99)."""
+        mf = _received(xp, ppm=1500.0, rolloff=0.5, num_symbols=2**16)
+        with caplog.at_level(logging.WARNING, logger="commkit"):
+            estimate_sampling_clock_offset(mf, Gardner())
+        assert "max_offset_ppm" in caplog.text
+        caplog.clear()
+        with caplog.at_level(logging.WARNING, logger="commkit"):
+            est = estimate_sampling_clock_offset(mf, Gardner(max_offset_ppm=3000.0))
+        assert caplog.text == ""
+        assert abs(float(est.value) - 1500.0) < 0.5
+
+
 class TestValidation:
     def test_needs_even_sps(self, xp):
         mf = _received(xp, ppm=0.0, num_symbols=256, sps=3)
@@ -210,6 +281,8 @@ class TestValidation:
             {"normalized_bandwidth": 0.0},
             {"integral_gain": 1e-6},
             {"proportional_gain": -1.0},
+            {"max_offset_ppm": 0.0},
+            {"max_offset_ppm": 9e4},
             {"method": "squared"},
         ],
     )

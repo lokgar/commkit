@@ -40,6 +40,12 @@ _CAL_SYMBOLS = 2048
 # Below this first-harmonic amplitude of the S-curve (unit-power input) the
 # detector sees no clock tone.
 _MIN_CURVE_AMPLITUDE = 1e-3
+# Cycle-slip check: the timing may not move by more than _SLIP_THRESHOLD
+# symbol periods, beyond the record's mean drift, within _SLIP_WINDOW loop
+# time constants 1/(B·T).  The loop's own jitter stays below 0.5 symbol over
+# that window up to the bandwidths where slips begin; a slip moves it by 1.
+_SLIP_WINDOW = 8.0
+_SLIP_THRESHOLD = 0.75
 
 
 def _get_numba_gardner() -> Any:
@@ -74,8 +80,10 @@ class Gardner:
         ``β = 4(BT)² / K_d``, with the detector gain ``K_d`` measured on the
         input (see Notes).  Used when ``proportional_gain`` is not given.
         The detector's self-noise sets the timing jitter: 0.01 symbol rms at
-        ``1e-3`` for 16-QAM, 0.001 at ``1e-4``; at ``1e-2`` a 0.1-rolloff
-        signal slips whole symbols.
+        ``1e-3`` for 16-QAM (classical detector, rolloff 0.1), 0.006 at
+        ``1e-4``.  Too wide a loop slips whole symbols: the classical
+        detector at a rolloff of 0.1 from ``1e-2`` on, the power detector
+        at 0.1 from ``2e-2`` and at 0.5 from ``3e-3`` (16-QAM, 20 dB).
     proportional_gain : float, optional
         Raw proportional gain ``μ`` on the detector output of the input
         scaled to unit power; overrides ``normalized_bandwidth``.
@@ -83,6 +91,12 @@ class Gardner:
         Raw integral gain ``β``; requires ``proportional_gain``.  Defaults
         to 0 (a first-order loop, which keeps a timing lag ``ε / μK_d``
         under a clock offset) with ``proportional_gain``.
+    max_offset_ppm : float, default 1000.0
+        Largest clock offset the loop tracks, in ppm, in ``(0, 90000)``:
+        the integrator ``ν`` is held within ``±max_offset_ppm · 1e-6``.
+        Crystal clocks are within about 100 ppm.  The bound keeps a loop
+        that has lost lock from wandering off in frequency, which it
+        otherwise does without limit (see Notes).
     joint_channels : bool, default False
         MIMO: one loop driven by the mean detector output of all channels,
         for channels sampled by one clock.
@@ -109,6 +123,19 @@ class Gardner:
     pulse) while the power detector's stays at 0.34.  The strobe spacing is
     held within ±10 % of ``sps``.
 
+    A loop that slips leaves the S-curve's stable point, and while its
+    timing runs through the symbols the mean detector output is zero:
+    nothing pulls the integrator back, and its noise walks it away.
+    Unbounded, a classical loop at ``B·T = 1e-2`` on a 0.1-rolloff signal
+    reached tens of thousands of ppm on a 50 ppm clock; held within
+    ``max_offset_ppm`` it keeps returning to lock.  Two checks log a WARNING after the loop: the
+    timing moving by more than 0.75 symbol within ``8 / (B·T)`` symbols,
+    beyond the record's mean drift (a cycle slip, after which symbol ``k``
+    of the output is no longer the ``k``-th transmitted one), and an
+    estimated offset within 5 % of ``max_offset_ppm`` (a larger offset,
+    which the proportional path follows only with a static timing lag, or
+    a loop that lost lock).  ``B·T`` is ``μ K_d / 4`` for raw gains.
+
     Numba-compiled on the CPU; GPU input makes one host round trip.
 
     References
@@ -120,6 +147,7 @@ class Gardner:
     normalized_bandwidth: float = 1e-3
     proportional_gain: float | None = None
     integral_gain: float | None = None
+    max_offset_ppm: float = 1000.0
     joint_channels: bool = False
     method: Literal["classical", "power"] = "classical"
 
@@ -129,6 +157,11 @@ class Gardner:
             raise ValueError(
                 f"Gardner: normalized_bandwidth must be in (0, 0.5) (a fraction "
                 f"of the symbol rate), got {bt}."
+            )
+        if not (0.0 < self.max_offset_ppm < 9e4):
+            raise ValueError(
+                "Gardner: max_offset_ppm must be in (0, 90000), got "
+                f"{self.max_offset_ppm}."
             )
         if self.integral_gain is not None and self.proportional_gain is None:
             raise ValueError("Gardner: integral_gain requires proportional_gain.")
@@ -224,6 +257,7 @@ def _track(
         pad + tau0 * sps,
         np.ascontiguousarray(gains[:, 0]),
         np.ascontiguousarray(gains[:, 1]),
+        how.max_offset_ppm * 1e-6,
         power,
         rows != C,
         n,
@@ -232,11 +266,53 @@ def _track(
     k = int(count.min())
     pos = pos[:, :k] - pad
     err = err[:, :k]
+    _check_lock(pos / sps - np.arange(k), gains[:, 0] * kd / 4.0, how)
     if rows != C:
         pos = np.repeat(pos, C, axis=0)
         err = np.repeat(err, C, axis=0)
         kd = np.repeat(kd, C)
     return pos, kd, err
+
+
+def _first_slip(trajectory: np.ndarray, bandwidth: np.ndarray) -> np.ndarray:
+    """Per row, the first symbol where the timing moves by more than
+    _SLIP_THRESHOLD within _SLIP_WINDOW / bandwidth symbols beyond the
+    row's median drift over that window; -1 where it never does."""
+    k = trajectory.shape[-1]
+    first = np.full(trajectory.shape[0], -1, dtype=np.int64)
+    for r, bt in enumerate(bandwidth):
+        if not bt > 0.0:
+            continue
+        span = int(max(64.0, _SLIP_WINDOW / bt))
+        if span >= k:
+            continue
+        moved = trajectory[r, span:] - trajectory[r, :-span]
+        bad = np.abs(moved - np.median(moved)) > _SLIP_THRESHOLD
+        if bad.any():
+            first[r] = int(np.argmax(bad))
+    return first
+
+
+def _check_lock(trajectory: np.ndarray, bandwidth: np.ndarray, how: Gardner) -> None:
+    """Log a WARNING for cycle slips and for an offset at the loop's bound."""
+    first = _first_slip(trajectory, bandwidth)
+    if np.any(first >= 0):
+        logger.warning(
+            "Gardner clock recovery slipped whole symbols (first near symbol "
+            "%d): after a slip, output symbols no longer match the transmitted "
+            "ones in order.  Use a smaller normalized_bandwidth (B·T = %s).",
+            int(first[first >= 0].min()),
+            ", ".join(f"{bt:.1e}" for bt in np.unique(bandwidth)),
+        )
+    ppm = _offset_ppm(trajectory)
+    if np.any(np.abs(ppm) > 0.95 * how.max_offset_ppm):
+        logger.warning(
+            "Gardner clock recovery: the offset %s ppm is at the loop's bound "
+            "max_offset_ppm=%g: the loop lost lock, or the clock is further off and "
+            "the timing lags; raise max_offset_ppm.",
+            np.array2string(ppm, precision=1),
+            how.max_offset_ppm,
+        )
 
 
 def _offset_ppm(trajectory: np.ndarray) -> np.ndarray:

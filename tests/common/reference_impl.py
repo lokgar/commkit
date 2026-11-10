@@ -755,6 +755,7 @@ def gardner_reference(
     power: bool,
     normalized_bandwidth: float,
     num_cal: int,
+    max_offset: float = 1e-3,
 ) -> np.ndarray:
     """Gardner clock recovery, one loop per channel; strobe positions in
     samples of the input, ``(C, K)``.
@@ -766,7 +767,8 @@ def gardner_reference(
     ``[-0.5, 0.5)``).  Loop: the detector at strobe ``p`` uses the previous
     symbol and the midpoint one and half a period ``sps(1 + ν)`` before it;
     ``e_k`` sets the spacing ``sps(1 + ν + μ e)`` after strobe ``k + 1``,
-    ``ν += β e`` at the same time, spacing held within ``[sps/1.1, 1.1 sps]``;
+    ``ν += β e`` at the same time and held within ``±max_offset``, spacing
+    held within ``[sps/1.1, 1.1 sps]``;
     strobes until the last sample.  Zeros outside the record.
     """
     x = np.atleast_2d(np.asarray(samples, dtype=np.complex128))
@@ -806,7 +808,7 @@ def gardner_reference(
             e = _gardner_error(xs[c], p - period, p - period / 2, p, power)
             pos.append(p - pad)
             step = min(max(sps * (1 + nu + mu * e_last), sps / 1.1), sps * 1.1)
-            nu += beta * e_last
+            nu = min(max(nu + beta * e_last, -max_offset), max_offset)
             e_last = e
             p += step
         rows.append(pos)
