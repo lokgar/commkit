@@ -1,9 +1,12 @@
-"""Performance metrics: EVM, SNR, BER, FER, SER, GMI, NGMI and MI.
+"""Performance metrics: EVM, SNR, BER, FER, SER, GMI, NGMI and MI, and their
+closed forms over AWGN.
 
 :mod:`~commkit.metrics.quality` holds :func:`evm`, :func:`snr` and
 :func:`estimate_noise_variance`; :mod:`~commkit.metrics.error_rates`
 :func:`ber`, :func:`fer` and :func:`ser`; :mod:`~commkit.metrics.information`
-:func:`mi`, :func:`gmi` and :func:`ngmi`.  Import them from
+:func:`mi`, :func:`gmi` and :func:`ngmi`; :mod:`~commkit.metrics.awgn` the
+expected values over AWGN at an Es/N0, :func:`awgn_ser`, :func:`awgn_ber`,
+:func:`awgn_mi` and :func:`awgn_gmi`.  Import them from
 :mod:`commkit.metrics`.
 
 Metrics are the reporting layer.  They take received symbols (or bits, or
@@ -108,11 +111,16 @@ Which scale each metric reads:
   constellation's points: decision thresholds are the receiver's.
 """
 
+from .awgn import awgn_ber, awgn_gmi, awgn_mi, awgn_ser
 from .error_rates import ber, fer, ser
 from .information import gmi, mi, ngmi
 from .quality import estimate_noise_variance, evm, snr
 
 __all__ = [
+    "awgn_ber",
+    "awgn_gmi",
+    "awgn_mi",
+    "awgn_ser",
     "ber",
     "estimate_noise_variance",
     "evm",

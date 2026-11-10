@@ -690,6 +690,10 @@ ROWS: list[Row] = [
         call=lambda c, x: _a(x, noise_var=0.1, constellation=C16),
         symbols=True,
     ),
+    Row("commkit.metrics.awgn.awgn_ber", DESIGN),
+    Row("commkit.metrics.awgn.awgn_gmi", DESIGN),
+    Row("commkit.metrics.awgn.awgn_mi", DESIGN),
+    Row("commkit.metrics.awgn.awgn_ser", DESIGN),
     # --- multirate ----------------------------------------------------------
     Row(
         "commkit.multirate.decimate",

@@ -164,3 +164,15 @@ def ls_slope_std(
     12 σ² L / K³``.
     """
     return float(np.sqrt(12 * jitter_rms**2 * correlation_length / num_points**3))
+
+
+def psk_ser(order: int, esn0: float) -> float:
+    """Exact M-PSK symbol error rate over complex AWGN (Craig's form),
+    ``(1/π) ∫_0^{(M-1)π/M} exp(-Es/N0 · sin²(π/M) / sin²θ) dθ``."""
+    from scipy.integrate import quad
+
+    a = np.sin(np.pi / order) ** 2
+    val, _ = quad(
+        lambda t: np.exp(-esn0 * a / np.sin(t) ** 2), 0, (order - 1) * np.pi / order
+    )
+    return float(val / np.pi)
