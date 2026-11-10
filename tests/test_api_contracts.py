@@ -543,6 +543,12 @@ ROWS: list[Row] = [
         fact=FS_CONFLICT,
     ),
     Row(
+        "commkit.impairments.source.apply_intensity_noise",
+        TRANSFORM,
+        call=lambda c, x: _a(x, rin_db_hz=-140.0, sampling_rate=FS, rng=1),
+        fact=FS_CONFLICT,
+    ),
+    Row(
         "commkit.impairments.fiber_channel.apply_pmd",
         TRANSFORM,
         call=lambda c, x: _a(x, sampling_rate=FS, dgd=1e-12, theta=0.3),
@@ -595,6 +601,12 @@ ROWS: list[Row] = [
     Row("commkit.impairments.frontend.estimate_iq_imbalance", MULTI, data=2),
     # Optical Signals only, like extract_payload: tested in test_noise.py.
     Row("commkit.impairments.noise.apply_ase", DESIGN),
+    Row(
+        "commkit.impairments.noise.apply_photodetection",
+        TRANSFORM,
+        call=lambda c, x: _a(x, received_power_dbm=-10.0, sampling_rate=FS, rng=1),
+        fact=FS_CONFLICT,
+    ),
     Row(
         "commkit.impairments.noise.apply_coherent_detection",
         TRANSFORM,

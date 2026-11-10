@@ -252,3 +252,70 @@ class TestFiberChain:
         else:
             assert s > 0.5, s
         assert ("decided symbols carry" in caplog.text) is not works
+
+
+class TestIntensityModulationChain:
+    """Unipolar PAM-4 intensity modulation and direct detection at 32 GBd:
+    NRZ levels through a 4th-order Bessel modulator response at half the
+    symbol rate (its bulk delay and the NRZ half-symbol offset removed at the
+    transmitter), the square root as the optical field, -150 dB/Hz laser RIN,
+    a photodiode at -14 dBm with 30 pA/sqrt(Hz) thermal noise and shot
+    noise, resampling to 2 sps, and a blind decision-directed LMS deciding on
+    the unipolar constellation."""
+
+    C = Constellation.pam(4, unipolar=True)
+    N = 2**17
+    SKIP = 2**17 - 2**15
+
+    def _detected(self, backend_device: str) -> Any:
+        from commkit import Rect
+
+        tx = ck.generate(self.C, num_symbols=self.N, symbol_rate=RS, sps=4,
+                         pulse=Rect(), rng=1, device=backend_device)  # fmt: skip
+        sos = ck.filtering.bessel_sos(
+            sampling_rate=tx.sampling_rate, cutoff=0.5 * RS, order=4, norm="mag"
+        )
+        b, a = sos[:, :3], sos[:, 3:]
+        k = np.arange(3)
+        group_delay = float(np.sum(b @ k / b.sum(axis=1) - a @ k / a.sum(axis=1)))
+        intensity = ck.timing.fft_fractional_delay(
+            ck.filtering.iir_filter(tx, sos), delay=-(group_delay + 1.5)
+        )
+        xp = intensity.xp
+        field = intensity.replace(
+            samples=xp.sqrt(xp.maximum(intensity.samples, 0.0)).astype(xp.complex64),
+            domain="OPT",
+            center_frequency=193.4e12,
+        )
+        field = ck.impairments.apply_intensity_noise(field, rin_db_hz=-150.0, rng=2)
+        detected = ck.impairments.apply_photodetection(
+            field, received_power_dbm=-14.0, thermal_noise_density=30e-12, rng=3
+        )
+        return ck.multirate.resample(detected, up=1, down=2)
+
+    def test_blind_equalizer_reaches_theory(self, backend_device: str) -> None:
+        """The blind LMS output over the last quarter, scored against the
+        transmitted bits: BER within 1.5 times the unipolar PAM-4 theory at
+        the equalized output's SNR (measured against the truth; real noise,
+        Es/N0 = SNR/2), plus 5 binomial standard deviations (measured 2.6e-3
+        against 2.2e-3), and within 2 times the trained equalizer's.
+        Baseline: the symbol-rate slicer without the equalizer leaves the
+        modulator's ISI (BER 0.062), above 10 times theory."""
+        from tests.common.theory import pam_gray_ber
+
+        rx = self._detected(backend_device)
+        blind = ck.equalization.lms(rx, num_taps=11, step_size=1e-3)
+        trained = ck.equalization.lms(
+            rx, rx.reference.symbols[:20000], num_taps=11, step_size=1e-3
+        )
+        y = scoring.to_numpy(trained.y_hat)[self.SKIP :].real
+        ref = scoring.to_numpy(rx.reference.symbols)[self.SKIP :]
+        snr = float(np.mean(ref**2) / np.mean((y - ref) ** 2))
+        p = pam_gray_ber(4, snr / 2, unipolar=True)
+        n_bits = 2 * (self.N - self.SKIP)
+        ber_blind = ck.metrics.ber(blind.signal, num_skip_symbols=self.SKIP)
+        ber_trained = ck.metrics.ber(trained.signal, num_skip_symbols=self.SKIP)
+        assert ber_blind < 1.5 * p + 5 * np.sqrt(p / n_bits), (ber_blind, p)
+        assert ber_blind <= 2.0 * ber_trained + 1e-4
+        plain = ck.multirate.decimate_to_symbol_rate(rx)
+        assert ck.metrics.ber(plain) > 10 * p

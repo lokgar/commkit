@@ -5,7 +5,12 @@ import pytest
 
 from commkit import RRC, Constellation, generate
 from commkit.core import Preamble, Signal, SingleCarrierFrame
-from commkit.impairments import apply_ase, apply_awgn, apply_coherent_detection
+from commkit.impairments import (
+    apply_ase,
+    apply_awgn,
+    apply_coherent_detection,
+    apply_photodetection,
+)
 from tests.common.conversions import to_numpy
 
 
@@ -572,3 +577,126 @@ class TestDetectionImbalance:
         a = apply_coherent_detection(sig, **kw)
         b = apply_coherent_detection(sig, lo_rin_db_hz=-120.0, **kw)
         xpt.assert_allclose(a.samples, b.samples, atol=0)
+
+
+class TestPhotodetection:
+    """apply_photodetection: the square law, shot and thermal noise."""
+
+    Q = TestCoherentDetection.Q
+    FS = 64e9
+
+    def test_square_law(self, xp, xpt):
+        """Without noise the output is |x|², real in the input's precision,
+        its mean the input's mean power."""
+        rng = xp.random.default_rng(1)
+        x = (rng.standard_normal(1024) + 1j * rng.standard_normal(1024)).astype(
+            xp.complex64
+        )
+        y = apply_photodetection(
+            x, received_power_dbm=-10.0, shot_noise=False, sampling_rate=self.FS
+        )
+        assert y.dtype == xp.float32
+        xpt.assert_allclose(y, xp.abs(x) ** 2, rtol=1e-5)
+
+    def test_shot_noise_of_a_constant_field(self, xp):
+        """A constant field at -10 dBm, R = 0.8 A/W: I = 80 µA and shot
+        noise of variance 2qI · f_s/2 per sample, in output units divided
+        by (R k)², k = P / E|x|²; sample variance within 5 relative standard
+        errors (sqrt(2/N), 2^16 samples)."""
+        n, r = 2**16, 0.8
+        x = xp.full(n, 0.5 + 0j, dtype=xp.complex64)  # E|x|² = 0.25
+        y = apply_photodetection(
+            x, received_power_dbm=-10.0, responsivity=r, sampling_rate=self.FS, rng=2
+        )
+        p, power = 1e-4, 0.25
+        current = r * p
+        expected = 2 * self.Q * current * self.FS / 2 / (r * p / power) ** 2
+        assert abs(float(xp.var(y)) / expected - 1) < 5 * np.sqrt(2 / n)
+        assert float(xp.mean(y)) == pytest.approx(power, rel=1e-3)
+
+    @pytest.mark.parametrize("p_dbm", [-17.0, -15.0])
+    def test_thermal_limited_ook(self, xp, p_dbm):
+        """On-off keying at 1 sample per symbol with only thermal noise
+        (20 pA/sqrt(Hz) at 64 GS/s, σ = 3.58 µA): intensity levels 0 and 2P,
+        threshold at P, BER = Q((I1 - I0)/(σ1 + σ0)) = Q(R P / σ) (9e-3 and
+        5e-4).  Within 5 binomial standard deviations over 2^18 bits."""
+        from commkit.metrics.awgn import _q
+
+        n = 2**18
+        bits = np.random.default_rng(3).integers(0, 2, n)
+        x = xp.asarray(np.sqrt(2.0 * bits).astype(np.complex64))
+        y = apply_photodetection(
+            x,
+            received_power_dbm=p_dbm,
+            thermal_noise_density=20e-12,
+            shot_noise=False,
+            sampling_rate=self.FS,
+            rng=4,
+        )
+        decided = to_numpy(y) > 1.0
+        measured = float(np.mean(decided != bits.astype(bool)))
+        sigma = 20e-12 * np.sqrt(self.FS / 2)
+        p = float(_q(1e-3 * 10 ** (p_dbm / 10) / sigma))
+        assert abs(measured - p) < 5 * np.sqrt(p / n) + 1e-5
+
+    def test_noiseless_ook_is_error_free(self, xp):
+        """Baseline: both noises off, the same OOK decides every bit."""
+        bits = np.random.default_rng(3).integers(0, 2, 4096)
+        x = xp.asarray(np.sqrt(2.0 * bits).astype(np.complex64))
+        y = apply_photodetection(
+            x, received_power_dbm=-30.0, shot_noise=False, sampling_rate=self.FS
+        )
+        assert np.array_equal(to_numpy(y) > 1.0, bits.astype(bool))
+
+    def test_dark_current_and_saturation(self, xp):
+        """The dark current adds its equivalent I_d / (R k) to the mean; the
+        saturation limits the output at I_sat / (R k)."""
+        x = xp.asarray(np.array([0.0, 1.0, 2.0, 3.0] * 256, dtype=np.complex64))
+        kw = {
+            "received_power_dbm": -10.0,
+            "shot_noise": False,
+            "sampling_rate": self.FS,
+        }
+        k = 1e-4 / float(np.mean(np.abs(to_numpy(x)) ** 2))
+        dark = apply_photodetection(x, dark_current=1e-6, **kw)
+        assert float(xp.mean(dark)) == pytest.approx(3.5 + 1e-6 / k, rel=1e-5)
+        sat = apply_photodetection(x, saturation_current=4.0 * k, **kw)
+        assert float(xp.max(sat)) == pytest.approx(4.0, rel=1e-5)
+
+    def test_sum_channels_and_signal(self, xp):
+        """One diode for two polarizations: (N,) output Σ|x_c|²; a Signal
+        becomes digital baseband and drops its two-stream reference, while
+        per-channel detection keeps it."""
+        sig = generate(
+            Constellation.qam(4),
+            num_symbols=256,
+            symbol_rate=1e9,
+            num_channels=2,
+            rng=5,
+            device="gpu" if xp is not np else "cpu",
+        ).replace(domain="OPT", center_frequency=193.4e12)
+        kw = {"received_power_dbm": 0.0, "shot_noise": False}
+        one = apply_photodetection(sig, sum_channels=True, **kw)
+        assert one.samples.shape == (256,)
+        assert one.domain == "DIG" and one.center_frequency == 0.0
+        assert one.reference is None
+        x = to_numpy(sig.samples)
+        np.testing.assert_allclose(
+            to_numpy(one.samples), np.sum(np.abs(x) ** 2, axis=0), rtol=1e-5
+        )
+        both = apply_photodetection(sig, **kw)
+        assert both.samples.shape == (2, 256) and both.reference is sig.reference
+
+    def test_validation(self, xp):
+        x = xp.ones(64, dtype=xp.complex64)
+        kw = {"received_power_dbm": -10.0, "sampling_rate": self.FS}
+        for bad in (
+            {"responsivity": 0.0},
+            {"dark_current": -1.0},
+            {"thermal_noise_density": -1.0},
+            {"saturation_current": 0.0},
+        ):
+            with pytest.raises(ValueError):
+                apply_photodetection(x, **kw, **bad)
+        with pytest.raises(ValueError, match="zeros"):
+            apply_photodetection(xp.zeros(64, xp.complex64), **kw)

@@ -1,6 +1,7 @@
 """Additive white Gaussian noise: :func:`apply_awgn`, amplified spontaneous
-emission at an OSNR: :func:`apply_ase`, and the noise of coherent detection
-at absolute optical powers: :func:`apply_coherent_detection`.
+emission at an OSNR: :func:`apply_ase`, and the noise of coherent and
+square-law detection at absolute optical powers:
+:func:`apply_coherent_detection`, :func:`apply_photodetection`.
 
 Powers are per sample and per channel, in the squared units of the samples.
 Es/N0 is the channel's: complex samples get noise of variance ``N0`` per
@@ -26,7 +27,12 @@ from ..core._signal_adapter import S, SignalAdapter, adapt_signal
 from ..logger import logger
 from ..math import db_to_linear
 
-__all__ = ["apply_ase", "apply_awgn", "apply_coherent_detection"]
+__all__ = [
+    "apply_ase",
+    "apply_awgn",
+    "apply_coherent_detection",
+    "apply_photodetection",
+]
 
 
 def apply_awgn(
@@ -491,6 +497,155 @@ def apply_coherent_detection(
             )
         y = y + (scale.astype(real) * term) * (1 + 1j)
     return signal_adapter.wrap_samples(restore_1d(was_1d, y))
+
+
+def apply_photodetection(
+    samples: S,
+    *,
+    received_power_dbm: float,
+    responsivity: float = 1.0,
+    thermal_noise_density: float = 0.0,
+    dark_current: float = 0.0,
+    saturation_current: float | None = None,
+    shot_noise: bool = True,
+    sum_channels: bool = False,
+    sampling_rate: float | None = None,
+    rng: RNG = None,
+) -> S:
+    r"""Detect an optical field with a photodiode: the square law and its noise.
+
+    The output is ``|x|²``, in the input's power units, plus the noise of
+    the photocurrent.  With ``P(t)`` the optical power the samples stand for
+    (``received_power_dbm`` at their mean), the diode delivers
+    ``I(t) = R P(t) + I_d``, limited at ``saturation_current``, with shot
+    noise of variance ``q I(t) f_s`` per sample (two-sided density ``q I``)
+    and thermal noise of ``i_n² f_s / 2``.  The current is mapped back to
+    the input's units by the same scale, so the output's mean is the input's
+    mean power plus the dark current's equivalent.
+
+    Parameters
+    ----------
+    samples : array_like or Signal
+        Optical field, ``(N,)`` or ``(C, N)`` (one channel per polarization).
+    received_power_dbm : float
+        Mean optical power the input stands for, in dBm, summed over the
+        channels.
+    responsivity : float, default 1.0
+        Photodiode responsivity ``R`` in A/W, positive.
+    thermal_noise_density : float, default 0.0
+        Input-referred thermal noise current density ``i_n`` in
+        A/sqrt(Hz) (one-sided), non-negative.
+    dark_current : float, default 0.0
+        Dark current ``I_d`` in A, non-negative.
+    saturation_current : float, optional
+        Photocurrent at which the diode or its amplifier saturates, in A;
+        ``None`` for none.  A hard limit, before the noise.
+    shot_noise : bool, default True
+        Add shot noise.
+    sum_channels : bool, default False
+        One polarization-insensitive diode for all channels: the output is
+        ``Σ_c |x_c|²``, ``(N,)``.  ``False`` detects each channel on its own
+        diode (a polarization-diverse receiver), ``(C, N)``.
+    sampling_rate : float, optional
+        Sampling rate in Hz, the noise bandwidth.  Taken from the Signal;
+        required for array input.  A value that disagrees with the Signal
+        raises.
+    rng : int, numpy.random.Generator or None
+        Random source, as in :func:`apply_awgn`.
+
+    Returns
+    -------
+    ndarray or Signal
+        Real samples in the input's precision.  A Signal becomes a digital
+        baseband one (``domain="DIG"``, ``center_frequency=0``) and keeps its
+        reference; with ``sum_channels`` a reference of several streams is
+        dropped.
+
+    Raises
+    ------
+    ValueError
+        If ``responsivity`` is not positive, a current or noise density is
+        negative, the input is all zeros, or the sampling rate is missing
+        or conflicts with the Signal's.
+
+    Notes
+    -----
+    The square law doubles the field's bandwidth: a field of band
+    ``±(1 + ρ) R_s / 2`` gives an intensity of band ``±(1 + ρ) R_s``, so the
+    field needs at least ``2 (1 + ρ)`` samples per symbol (2.2 for
+    ``ρ = 0.1``) for ``|x|²`` not to alias.  The Gaussian shot-noise model
+    holds while a sample carries many photoelectrons, ``I / (q f_s) ≫ 1``.
+    Per channel, ``P_c(t) = P_rx · |x_c(t)|² / Σ_c E|x_c|²``, and
+
+    .. math::
+
+        y = \frac{\min(R P(t) + I_d, I_{sat}) + n_{shot} + n_{th}}{R k},
+        \quad k = P_{rx} / \textstyle\sum_c E|x_c|^2.
+
+    Examples
+    --------
+    >>> y = apply_photodetection(field, received_power_dbm=-10.0,
+    ...                          thermal_noise_density=15e-12, rng=1)
+    """
+    function_name = "apply_photodetection()"
+    if not responsivity > 0:
+        raise ValueError(
+            f"{function_name}: responsivity must be positive, got {responsivity!r}."
+        )
+    for name, value in (
+        ("thermal_noise_density", thermal_noise_density),
+        ("dark_current", dark_current),
+    ):
+        if not value >= 0:
+            raise ValueError(
+                f"{function_name}: {name} must be non-negative, got {value!r}."
+            )
+    if saturation_current is not None and not saturation_current > 0:
+        raise ValueError(
+            f"{function_name}: saturation_current must be positive, got {saturation_current!r}."
+        )
+    signal_adapter = adapt_signal(samples, function_name=function_name)
+    fs = signal_adapter.resolve_fact("sampling_rate", sampling_rate)
+    x, xp, _ = dispatch(signal_adapter.array)
+    x, was_1d = as_2d(x, name="samples")
+    real = x.real.dtype if xp.iscomplexobj(x) else x.dtype
+    intensity = (xp.abs(x) ** 2).astype(real, copy=False)
+    if sum_channels:
+        intensity = xp.sum(intensity, axis=0, keepdims=True)
+    total = float(xp.sum(xp.mean(intensity, axis=-1, dtype=xp.float64)))
+    if total == 0:
+        raise ValueError(f"{function_name}: the input is all zeros.")
+    p_rx = 1e-3 * 10 ** (received_power_dbm / 10)
+    to_amps = responsivity * p_rx / total  # current per unit of |x|²
+    current = intensity * to_amps + dark_current
+    if saturation_current is not None:
+        current = xp.minimum(current, saturation_current)
+    gen = as_generator(rng)
+    var = xp.zeros_like(current) + thermal_noise_density**2 * fs / 2
+    if shot_noise:
+        var = var + ELEMENTARY_CHARGE * fs * xp.maximum(current, 0.0)
+    if shot_noise or thermal_noise_density:
+        current = current + xp.sqrt(var) * standard_normal(
+            gen, current.shape, dtype=real, xp=xp
+        )
+    y = (current / to_amps).astype(real, copy=False)
+    logger.info(
+        "Photodetection at %.2f dBm: mean photocurrent %.3g A%s.",
+        received_power_dbm,
+        responsivity * p_rx
+        + dark_current * (1 if sum_channels else intensity.shape[0]),
+        "" if not sum_channels else " (one diode)",
+    )
+    out = y[0] if (was_1d or sum_channels) else y
+    sig = signal_adapter.signal
+    if sig is None:
+        return signal_adapter.wrap_samples(out)
+    reference = sig.reference
+    if sum_channels and reference is not None and reference.symbols.ndim > 1:
+        reference = None
+    return signal_adapter.wrap_samples(
+        out, domain="DIG", center_frequency=0.0, reference=reference
+    )
 
 
 def _symbol_energy(

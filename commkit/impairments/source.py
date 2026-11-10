@@ -1,9 +1,10 @@
-"""Laser and oscillator phase noise.
+"""Laser and oscillator noise.
 
 :func:`generate_phase_noise` draws a phase trajectory from the power-law
 FM-noise model (white FM, the Lorentzian linewidth, plus optional 1/f
 flicker FM) and :func:`apply_phase_noise` rotates samples by such a
-trajectory.
+trajectory.  :func:`apply_intensity_noise` adds a laser's relative
+intensity noise.
 """
 
 import math
@@ -13,13 +14,13 @@ import numpy as np
 
 from .. import _fft
 from .._array import as_2d, restore_1d
-from .._random import standard_normal
+from .._random import RNG, as_generator, standard_normal
 from ..backend import ArrayType, _module_for, dispatch
 from ..core._signal_adapter import S, adapt_signal, require_device
 from ..logger import logger
 from ..math import _derotate
 
-__all__ = ["apply_phase_noise", "generate_phase_noise"]
+__all__ = ["apply_intensity_noise", "apply_phase_noise", "generate_phase_noise"]
 
 # -----------------------------------------------------------------------------
 # PHASE-NOISE SYNTHESIS (array-only)
@@ -289,3 +290,67 @@ def apply_phase_noise(
     result = _derotate(x, -phase)
 
     return signal_adapter.wrap_samples(restore_1d(was_1d, result))
+
+
+def apply_intensity_noise(
+    samples: S,
+    *,
+    rin_db_hz: float,
+    sampling_rate: float | None = None,
+    rng: RNG = None,
+) -> S:
+    """Add a laser's relative intensity noise (RIN) to an optical field.
+
+    The power fluctuates as ``P(t) = P̄ (1 + r(t))`` with ``r`` white and
+    Gaussian, of one-sided spectral density ``RIN`` (``10^(rin_db_hz/10)``
+    per Hz): variance ``RIN · f_s / 2`` per sample.  It multiplies the field
+    by the real amplitude factor ``sqrt(1 + r(t))`` (clipped at 0 where
+    ``r < -1``, rare for any realistic RIN), so the phase is untouched and
+    ``|x|²`` carries exactly the declared intensity noise.  One ``r(t)``
+    for all channels: both polarizations come from one laser.  ``r`` is
+    drawn on the data's device.
+
+    Parameters
+    ----------
+    samples : array_like or Signal
+        Optical field, ``(N,)`` or ``(C, N)``.
+    rin_db_hz : float
+        RIN in dB/Hz (one-sided); typical lasers are between -130 and
+        -160 dB/Hz.
+    sampling_rate : float, optional
+        Sampling rate in Hz, the noise bandwidth.  Taken from the Signal;
+        required for array input.  A value that disagrees with the Signal
+        raises.
+    rng : int, numpy.random.Generator or None
+        Random source.
+
+    Returns
+    -------
+    ndarray or Signal
+        The noisy field, same shape, dtype and device.
+
+    Raises
+    ------
+    ValueError
+        If the sampling rate is missing or conflicts with the Signal's.
+
+    Examples
+    --------
+    >>> field = apply_intensity_noise(field, rin_db_hz=-145.0, rng=1)
+    """
+    signal_adapter = adapt_signal(samples, function_name="apply_intensity_noise()")
+    fs = signal_adapter.resolve_fact("sampling_rate", sampling_rate)
+    x, xp, _ = dispatch(signal_adapter.array)
+    x, was_1d = as_2d(x, name="samples")
+    var = 10 ** (rin_db_hz / 10) * fs / 2
+    logger.info(
+        "Applying %.1f dB/Hz RIN (intensity std %.3g per sample).",
+        rin_db_hz,
+        math.sqrt(var),
+    )
+    real = x.real.dtype if xp.iscomplexobj(x) else x.dtype
+    r = math.sqrt(var) * standard_normal(
+        as_generator(rng), (x.shape[-1],), dtype=real, xp=xp
+    )
+    factor = xp.sqrt(xp.maximum(1.0 + r, 0.0)).astype(real, copy=False)
+    return signal_adapter.wrap_samples(restore_1d(was_1d, x * factor[None, :]))
