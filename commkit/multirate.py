@@ -23,6 +23,8 @@ import math
 from fractions import Fraction
 from typing import Any
 
+import numpy as np
+
 from .backend import ArrayType, dispatch
 from .core._signal_adapter import S, adapt_signal, require_integer_sps
 from .logger import logger
@@ -373,22 +375,35 @@ def _interpolate(
     m = base.shape[0]
     pad = K + margin
     padded = xp.pad(x, ((0, 0), (pad, pad)))
+    # Row r of windows[c] is padded[c, r : r + 2K], a strided view: gathering
+    # whole rows is about twice as fast as indexing every tap.
+    windows = [_sliding_window_view(xp, padded[c], 2 * K) for c in range(C)]
     offsets = xp.arange(-K + 1, K + 1)
     k = offsets.astype(real)
+    # sin(π(k - μ)) = -(-1)^k sin(πμ): one sine per instant, and the window's
+    # cos 2φ, cos 3φ from cos φ (Chebyshev), one cosine per tap.
+    neg_alt = -((-1.0) ** offsets).astype(real)
+    a0, a1, a2, a3 = _BLACKMAN_HARRIS
     out = xp.empty((C, m), dtype=x.dtype)
     for start in range(0, m, _INTERP_CHUNK):
         stop = min(start + _INTERP_CHUNK, m)
-        u = k[None, :] - frac[start:stop, None].astype(real, copy=False)
-        phase = (u / K + 1.0) * math.pi
-        window = (
-            _BLACKMAN_HARRIS[0]
-            - _BLACKMAN_HARRIS[1] * xp.cos(phase)
-            + _BLACKMAN_HARRIS[2] * xp.cos(2.0 * phase)
-            - _BLACKMAN_HARRIS[3] * xp.cos(3.0 * phase)
+        mu = frac[start:stop, None].astype(real, copy=False)
+        u = k[None, :] - mu
+        c1 = xp.cos((u / K + 1.0) * math.pi)
+        window = (a0 - a2) - (a1 - 3.0 * a3) * c1 + c1 * c1 * (2.0 * a2 - 4.0 * a3 * c1)
+        # u = 0 only at μ = 0, where the instant is a sample: tap 1 there
+        on_sample = u == 0
+        sinc = xp.where(
+            on_sample,
+            1.0,
+            neg_alt[None, :]
+            * xp.sin(math.pi * mu)
+            / (math.pi * xp.where(on_sample, 1.0, u)),
         )
-        taps = xp.sinc(u) * window
-        idx = base[start:stop, None] + (offsets + pad)[None, :]
-        out[:, start:stop] = xp.sum(padded[:, idx] * taps[None], axis=-1)
+        taps = (sinc * window).astype(real, copy=False)
+        rows = base[start:stop] + (pad - K + 1)  # window start per instant
+        for c in range(C):
+            out[c, start:stop] = xp.sum(windows[c][rows] * taps, axis=-1)
     return out
 
 
@@ -410,3 +425,11 @@ def _stretched_instants(
     base = n - whole.astype(xp.int64) - 1 + on_sample
     frac = xp.where(on_sample, 0.0, 1.0 - r).astype(real, copy=False)
     return base, frac
+
+
+def _sliding_window_view(xp: Any, a: ArrayType, width: int) -> ArrayType:
+    if xp is np:
+        return np.lib.stride_tricks.sliding_window_view(a, width)
+    from cupy.lib.stride_tricks import sliding_window_view
+
+    return sliding_window_view(a, width)

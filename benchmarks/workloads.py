@@ -168,3 +168,32 @@ def coded_workload(code, num_codewords: int, esn0_db: float, seed: int = 0):
     rx = apply_awgn(sig, esn0_db=esn0_db, rng=seed + 1)
     llrs = compute_llr(rx, noise_var=10 ** (-esn0_db / 10))
     return np.asarray(llrs, dtype=np.float32), sig.reference.info_bits
+
+
+def clock_offset_workload(
+    n_sym: int, num_ch: int = 2, ppm: float = 20.0, seed: int = 0
+):
+    """Matched-filtered dual-pol 16-QAM at 2 SPS (RRC 0.1, 20 dB Es/N0, a
+    0.37-sample delay) sampled by a clock ``ppm`` fast, for the clock-recovery
+    benches.  Returns ``(samples (num_ch, ~2 n_sym) complex64, symbols)``."""
+    from commkit import RRC
+    from commkit.core import generate
+    from commkit.filtering import matched_filter
+    from commkit.impairments import apply_sampling_clock_offset
+    from commkit.timing import fft_fractional_delay
+
+    tx = generate(
+        Constellation.qam(16),
+        num_symbols=n_sym,
+        symbol_rate=FS,
+        sps=2,
+        pulse=RRC(rolloff=0.1),
+        num_channels=num_ch,
+        rng=seed,
+    )
+    rx = apply_awgn(tx, esn0_db=20.0, rng=seed + 1)
+    rx = apply_sampling_clock_offset(
+        fft_fractional_delay(rx, delay=0.37), offset_ppm=ppm
+    )
+    mf = matched_filter(rx)
+    return np.asarray(mf.samples, dtype=np.complex64), np.asarray(tx.reference.symbols)
