@@ -8,7 +8,6 @@ import pytest
 from commkit import equalization as E
 from commkit.backend import to_device
 from commkit.equalization import EqualizerState
-from commkit.equalization._common import _cold_start_weights
 from commkit.mapping import Constellation
 from commkit.recovery import BPS, PLL, CycleSlip
 
@@ -29,20 +28,13 @@ def _signal(num_ch: int, n_sym: int, sps: int, seed: int = 3):
     return x.astype(np.complex64), s.astype(np.complex64)
 
 
-def _cold_like(
-    state: EqualizerState, first_chunk: np.ndarray, device: str = "cpu"
-) -> EqualizerState:
-    """A state that starts cold (the first chunk's scaled centre taps, zero
-    left padding, cold CPR and P) with the first chunk's normalization, so an
-    uninterrupted run starts exactly like the first chunk did.
-    ``first_chunk`` is the first call's input as the equalizer saw it (after
-    any pilot de-boosting); ``device`` is where the equalizer computed its
-    cold start (the block equalizers on the input's, the sequential ones on
-    the host)."""
-    x = np.atleast_2d(np.asarray(first_chunk, dtype=np.complex64))
-    norm = np.atleast_1d(np.asarray(state.input_norm_factor, dtype=np.float32))
-    xn = to_device(x / norm[:, None], device)
-    w = _cold_start_weights(xn, state.num_taps)
+def _cold_like(state: EqualizerState) -> EqualizerState:
+    """A state that starts cold (identity taps, zero left padding, cold CPR
+    and P) but with ``state``'s normalization, so an uninterrupted run
+    normalizes exactly like the first chunk did."""
+    w = np.zeros_like(state.weights)
+    for c in range(state.num_channels):
+        w[c, c, state.num_taps // 2] = 1
     return dataclasses.replace(
         state,
         weights=w,
@@ -51,11 +43,6 @@ def _cold_like(
         carrier=None,
         inverse_correlation=None,
     )
-
-
-def _start_device(name: str, xp) -> str:
-    """Device of the cold-start computation of equalizer ``name``."""
-    return "gpu" if name.startswith("block") and xp is not np else "cpu"
 
 
 def _host(a):
@@ -111,12 +98,7 @@ def test_chunked_equals_uninterrupted(name, extra, num_ch, sps, xp):
 
     r1 = fn(x[..., :n1], *data, **kw)
     r2 = fn(x[..., n1:], *((None,) if data else ()), **kw, state=r1.state)
-    full = fn(
-        x,
-        *data,
-        **kw,
-        state=_cold_like(r1.state, x_np[..., :n1], _start_device(name, xp)),
-    )
+    full = fn(x, *data, **kw, state=_cold_like(r1.state))
     ov = r1.state.overlap
 
     np.testing.assert_array_equal(_stitch(r1.y_hat, r2.y_hat, ov), _host(full.y_hat))
@@ -138,8 +120,6 @@ def test_chunked_pilots_with_deboost(name, xp):
     mask[::10] = True
     gain = 10 ** (3.0 / 20)
     x_np = x_np[0] * np.repeat(np.where(mask, gain, 1.0), sps).astype(np.float32)
-    deboosted = x_np.copy()  # as the equalizers de-boost, in float32
-    deboosted[np.repeat(mask, sps)] /= np.float32(10.0 ** (3.0 / 20.0))
     s0 = s_np[0]
 
     def pilots(span):
@@ -155,12 +135,7 @@ def test_chunked_pilots_with_deboost(name, xp):
     r1 = fn(x[:n1], **kw, pilots=pilots(slice(None, n_sym1)))
     k = n_sym1 - r1.state.overlap  # first symbol of the continued call
     r2 = fn(x[n1:], **kw, pilots=pilots(slice(k, None)), state=r1.state)
-    full = fn(
-        x,
-        **kw,
-        pilots=pilots(slice(None)),
-        state=_cold_like(r1.state, deboosted[:n1], _start_device(name, xp)),
-    )
+    full = fn(x, **kw, pilots=pilots(slice(None)), state=_cold_like(r1.state))
 
     np.testing.assert_array_equal(
         _stitch(r1.y_hat, r2.y_hat, r1.state.overlap), _host(full.y_hat)

@@ -412,7 +412,7 @@ def block_lms(
         Record the weights at the start of every block in
         ``weights_history``.
     initial_taps : array_like, optional
-        Initial tap weights instead of the cold start (see :func:`lms`),
+        Initial tap weights instead of the center-tap identity,
         ``(C, C, T)`` or the SISO shapes of :func:`lms`.  Only for a cold
         start.
     cpr : BPS, optional

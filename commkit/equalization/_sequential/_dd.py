@@ -140,7 +140,7 @@ def lms(
     center_tap : int, optional
         Index of the center tap; defaults to ``num_taps // 2``.
     initial_taps : array_like, optional
-        Initial tap weights instead of the cold start (see :func:`lms`), e.g. the
+        Initial tap weights instead of the center-tap identity, e.g. the
         ``weights`` of an earlier stage (preamble LMS, then payload RLS):
         ``(C, C, num_taps)``, or ``(num_taps,)`` / ``(1, num_taps)`` for SISO.
         Only for a cold start: a ``state`` carries its own weights.
@@ -211,20 +211,6 @@ def lms(
 
     Notes
     -----
-    **Cold start.**  Without ``initial_taps`` or ``state``, the input is
-    divided by ``rms · sqrt(sps)`` per channel (unit symbol power) and each
-    diagonal filter ``w_{c,c}`` starts as a zero-phase matched filter: its
-    response is the square root of the channel's power spectral density
-    (from the autocovariance over ``|m| < T`` of the first 4096 samples,
-    mean removed, Bartlett-windowed), scaled so that the first outputs have
-    the constellation's unit power; cross filters start at zero.  For a
-    record shaped by a root-Nyquist pulse this is the matched filter up to
-    its phase, so the slicer sees the constellation's levels from the first
-    symbol.  A unit centre tap would leave a pulse-shaped record at 2 sps
-    with a gain near 0.72, below the margin of 64-QAM and unipolar PAM-4,
-    where blind decision-directed adaptation locks to a shrunk solution.
-    All adaptive equalizers share this start.
-
     **Algorithm (per symbol n).**
 
     1. **Sliding input window**: the length-T window of input channel c'
@@ -524,7 +510,7 @@ def rls(
     center_tap : int, optional
         Index of the center tap; defaults to ``num_taps // 2``.
     initial_taps : array_like, optional
-        Initial tap weights instead of the cold start (see :func:`lms`), e.g. the
+        Initial tap weights instead of the center-tap identity, e.g. the
         ``weights`` of an earlier stage (preamble LMS, then payload RLS):
         ``(C, C, num_taps)``, or ``(num_taps,)`` / ``(1, num_taps)`` for SISO.
         Only for a cold start: a ``state`` carries its own weights.

@@ -226,7 +226,7 @@ def cma(
     center_tap : int, optional
         Index of the center tap; defaults to ``num_taps // 2``.
     initial_taps : array_like, optional
-        Initial tap weights instead of the cold start (see :func:`lms`), e.g. the
+        Initial tap weights instead of the center-tap identity, e.g. the
         ``weights`` of a previous stage.  Shape ``(C, C, num_taps)``, or
         ``(num_taps,)`` / ``(1, num_taps)`` for SISO.  Only for a cold start:
         a ``state`` carries its own weights.

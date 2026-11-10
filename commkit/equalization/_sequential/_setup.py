@@ -26,8 +26,8 @@ from ...backend import ArrayType, dispatch, to_device
 from ...logger import logger
 from .._common import (
     _build_padded_samples,
-    _cold_start_weights,
     _cpr_symmetry,
+    _init_butterfly_weights_numpy,
     _normalize_inputs,
     _prepare_training_numpy,
     _unpack_result_numpy,
@@ -208,7 +208,7 @@ def _prepare_sequential(
         w_arr = np.ascontiguousarray(to_device(initial_taps, "cpu"), dtype=np.complex64)
         W = _validate_w_init(w_arr, num_ch, num_taps).copy()
     else:
-        W = _cold_start_weights(samples_np, num_taps, center_tap)
+        W = _init_butterfly_weights_numpy(num_ch, num_taps, center_tap=center_tap)
 
     y_out = np.empty((n_sym, num_ch), dtype=np.complex64)
     e_out = np.empty((n_sym, num_ch), dtype=np.complex64)

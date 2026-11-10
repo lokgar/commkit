@@ -56,12 +56,13 @@ class TestLMS:
         assert 10 * np.log10(tail_mse(1e-3) / wiener_mse) < 1.5
         assert tail_mse(0.0) > 10 * wiener_mse
 
-    def test_decision_directed_after_training(self, xp):
+    def test_decision_directed_after_training(self, xp, caplog):
         """1000 training symbols, then decisions: the held-out second half
         has no symbol errors against the transmitted symbols and an EVM
         within 1.4x the AWGN floor (0.079 at 22 dB); frozen taps leave the
         ISI (SER above 0.3)."""
         c = Constellation.qam(16)
+        caplog.set_level("WARNING", logger="commkit")
         rx = _isi_record(c, 6000, esn0_db=22.0, xp=xp)
         ref = to_numpy(rx.reference.symbols)
 
@@ -73,7 +74,11 @@ class TestLMS:
         y = run(1e-3)
         assert scoring.ser(y, ref[3000:], c) == 0.0
         assert scoring.evm_rms(y, ref[3000:]) < 1.4 * 10 ** (-22 / 20)
+        assert "decided symbols carry" not in caplog.text
         assert scoring.ser(run(0.0), ref[3000:], c) > 0.3
+        assert (
+            "decided symbols carry" in caplog.text
+        )  # suspect result of the frozen taps
 
     def test_requires_constellation_or_training(self, xp):
         """LMS should raise if neither training nor constellation is given."""
@@ -358,29 +363,24 @@ class TestEdgeCases:
     def test_center_tap_override(self, xp, xpt, taps, best, worst):
         """``center_tap`` splits the taps around the main path: on a channel
         whose ISI lies on one side, the matching split reaches a clearly lower
-        MSE against the reference over the second half of 20000 symbols
-        (measured 0.010 vs 0.064), while the regressor window moves with it
-        so the output stays aligned (a frozen unit tap at the centre gives
-        the same output for any centre tap)."""
+        MSE against the reference (measured 0.054 vs 0.097), while the
+        regressor window moves with it so the output stays aligned (frozen
+        taps give the same output for any centre tap)."""
         c = Constellation.qam(16)
-        rx = make_channel_signal(c, 20000, isi_taps=taps, esn0_db=30.0, xp=xp)
+        rx = make_channel_signal(c, 6000, isi_taps=taps, esn0_db=30.0, xp=xp)
         ref = to_numpy(rx.reference.symbols)
 
         def mse(center):
             y = equalization.lms(
                 rx, ref, num_taps=11, step_size=1e-3, center_tap=center
             ).y_hat
-            return float(np.mean(np.abs(to_numpy(y)[10000:] - ref[10000:]) ** 2))
+            return float(np.mean(np.abs(to_numpy(y)[3000:] - ref[3000:]) ** 2))
 
         assert mse(best) < 0.7 * mse(worst)
         frozen = dict(num_taps=11, step_size=0.0, constellation=c)
-        unit_at_best, unit_at_middle = np.zeros((2, 11), np.complex64)
-        unit_at_best[best] = unit_at_middle[5] = 1.0
         xpt.assert_allclose(
-            equalization.cma(
-                rx, **frozen, center_tap=best, initial_taps=unit_at_best
-            ).y_hat,
-            equalization.cma(rx, **frozen, initial_taps=unit_at_middle).y_hat,
+            equalization.cma(rx, **frozen, center_tap=best).y_hat,
+            equalization.cma(rx, **frozen).y_hat,
             rtol=1e-5,
             atol=1e-6,
         )
