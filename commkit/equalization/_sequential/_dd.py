@@ -98,7 +98,10 @@ def lms(
         Input samples, ``(N,)`` for SISO or ``(C, N)`` for the MIMO
         butterfly, typically at 2 samples per symbol (fractionally spaced).
         A :class:`Signal` supplies ``sps`` and ``constellation``; the result
-        then also carries ``signal``, the 1-SPS output Signal.
+        then also carries ``signal``, the 1-SPS output Signal.  Real input
+        is equalized as complex, like the input of every adaptive
+        equalizer: ``y_hat`` is complex64 with an imaginary part at the
+        rounding level.
     training_symbols : array_like, optional
         Known transmitted symbols at one sample per symbol, ``(N_train,)``
         or ``(C, N_train)``, on the scale of the unit-power
@@ -127,7 +130,11 @@ def lms(
         array input.  A WARNING is logged when the decided symbols of the
         last half of the decision-directed output lack its power by more
         than 1.5 dB: a lock at a wrong gain, or a constellation that does
-        not match the signal.
+        not match the signal.  An explicit choice applies to this call
+        only: ``signal`` of the result keeps the input Signal's
+        ``constellation``, which describes its reference symbols, so pass
+        the same choice to the metrics, or set it on the Signal with
+        ``replace`` (with matching reference symbols) before equalizing.
     store_weights : bool, default False
         Record the weights of every symbol in ``weights_history``.
     center_tap : int, optional
@@ -507,7 +514,11 @@ def rls(
         array input.  A WARNING is logged when the decided symbols of the
         last half of the decision-directed output lack its power by more
         than 1.5 dB: a lock at a wrong gain, or a constellation that does
-        not match the signal.
+        not match the signal.  An explicit choice applies to this call
+        only: ``signal`` of the result keeps the input Signal's
+        ``constellation``, which describes its reference symbols, so pass
+        the same choice to the metrics, or set it on the Signal with
+        ``replace`` (with matching reference symbols) before equalizing.
     store_weights : bool, default False
         Record the weights of every symbol in ``weights_history``.
     center_tap : int, optional

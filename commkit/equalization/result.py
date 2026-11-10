@@ -210,7 +210,10 @@ class EqualizerResult:
         Continuation state; pass as ``state=`` to the next call.
     signal : Signal or None
         For Signal input, the output as a 1-SPS Signal (``sampling_rate =
-        symbol_rate``) whose reference is cut to the output symbols.  After
+        symbol_rate``) whose reference is cut to the output symbols.  It
+        keeps the input Signal's description (``constellation``, ``pulse``):
+        a ``constellation`` passed to the equalizer applies to that call
+        only.  After
         a continued call it starts at the call's own first symbol, past the
         ``overlap`` recomputed for the previous chunk.  ``None`` for array
         input.

@@ -159,6 +159,12 @@ class Constellation:
 
         ``unipolar=True`` gives non-negative levels, which is M-ASK as used in
         intensity modulation (``pam(2, unipolar=True)`` is on-off keying).
+        Both sets share their bit labels in level order.  At unit power the
+        unipolar levels lie closer together, since the mean level carries
+        power but no information: at equal Es/N0 the unipolar set needs
+        ``2(2M - 1)/(M + 1)`` times the energy of the bipolar one for the
+        same error rate, 3.01 dB for on-off keying against BPSK and 4.47 dB
+        for PAM-4.
         """
         return _named("pam", order, unipolar)
 
