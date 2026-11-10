@@ -217,3 +217,15 @@ class TestPeriodicResampling:
             multirate.resample(
                 xp.ones(100, dtype=xp.complex64), up=3, down=8, periodic=True
             )
+
+
+@pytest.mark.parametrize(("up", "down"), [(1, 2), (3, 2), (2, 1)])
+def test_polyphase_keeps_single_precision(xp, up, down):
+    """Real float32 input stays float32 on every device, and the GPU applies
+    the CPU's anti-aliasing filter: the outputs agree to float32 rounding
+    (cupyx alone designs its filter in float64 and promotes the data)."""
+    x_host = np.random.default_rng(0).standard_normal(2048).astype(np.float32)
+    y = multirate.resample(xp.asarray(x_host), up=up, down=down)
+    assert y.dtype == xp.float32
+    reference = multirate.resample(x_host, up=up, down=down)
+    np.testing.assert_allclose(to_numpy(y), reference, atol=2e-6)

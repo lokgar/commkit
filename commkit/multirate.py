@@ -151,7 +151,7 @@ def upsample(
         out = _resample_periodic(arr, factor, 1, sp, "upsample()")
     else:
         logger.debug("Upsampling by factor %s (polyphase).", factor)
-        out = sp.signal.resample_poly(arr, factor, 1, axis=-1)
+        out = _resample_poly(arr, factor, 1, sp)
     if correct_power:
         out = out * (factor**-0.5)
     return signal_adapter.wrap_samples(out, **metadata)
@@ -216,7 +216,7 @@ def decimate(
             arr, factor, ftype=ftype, axis=-1, zero_phase=zero_phase
         )
     else:
-        out = sp.signal.resample_poly(arr, 1, factor, axis=-1)
+        out = _resample_poly(arr, 1, factor, sp)
 
     if correct_power:
         out = out * (factor**0.5)
@@ -309,11 +309,36 @@ def resample(
         out = _resample_periodic(arr, up, down, sp, "resample()")
     else:
         logger.debug("Resampling by rational factor %s/%s (polyphase).", up, down)
-        out = sp.signal.resample_poly(arr, up, down, axis=-1)
+        out = _resample_poly(arr, up, down, sp)
     if correct_power:
         # sps_after / sps_before = up / down  ->  gain = sqrt(down/up).
         out = out * (down / up) ** 0.5
     return signal_adapter.wrap_samples(out, **metadata)
+
+
+def _resample_poly(arr: ArrayType, up: int, down: int, sp: Any) -> ArrayType:
+    """``resample_poly`` along the last axis in the input's precision.
+
+    SciPy casts its anti-aliasing filter (``firwin``, Kaiser β = 5,
+    half-length ``10 · max(up, down)`` after dividing out their gcd) to the
+    input's dtype; ``cupyx`` designs it in float64 and promotes single
+    precision data.  On the GPU the same filter is designed on the host and
+    passed in the data's precision, so both devices filter alike.
+    """
+    if sp.__name__.startswith("scipy"):
+        return sp.signal.resample_poly(arr, up, down, axis=-1)
+    import scipy.signal
+
+    from .backend import to_device
+
+    g = math.gcd(up, down)
+    max_rate = max(up, down) // g
+    taps = scipy.signal.firwin(
+        2 * 10 * max_rate + 1, 1.0 / max_rate, window=("kaiser", 5.0)
+    )
+    real = arr.real.dtype if arr.dtype.kind == "c" else arr.dtype
+    window = to_device(taps.astype(real), "gpu")
+    return sp.signal.resample_poly(arr, up, down, axis=-1, window=window)
 
 
 def _resample_periodic(
