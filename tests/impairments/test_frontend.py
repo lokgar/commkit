@@ -1,5 +1,7 @@
 """Tests for transceiver front-end IQ-imbalance application and compensation."""
 
+import math
+
 import pytest
 
 from commkit.core import Signal
@@ -53,6 +55,106 @@ class TestApplyIQImbalance:
             samples, amplitude_imbalance_db=1.0, phase_imbalance_deg=2.0
         )
         assert out.dtype == xp.complex64
+
+
+class TestIQSkew:
+    """The time skew of apply_iq_imbalance: Q delayed against I."""
+
+    FS = 64e9
+
+    @pytest.mark.parametrize("dtype", ["complex64", "complex128"])
+    def test_image_ratio_of_tones(self, xp, dtype):
+        """A tone at f leaves an image at -f of relative power tan²(π f τ)
+        (from I + jQ(t - τ) = e^{jθ}(1 + e^{-jψ})/2 + e^{-jθ}(1 - e^{jψ})/2,
+        ψ = 2π f τ).  Tones on FFT bins, so the periodic delay is exact;
+        measured agreement 1e-6 relative in complex64."""
+        n, tau = 4096, 3e-12
+        t = xp.arange(n) / self.FS
+        for k in (64, 512, 1500):
+            f = k * self.FS / n
+            s = xp.exp(2j * xp.pi * f * t).astype(dtype)
+            r = apply_iq_imbalance(
+                s,
+                amplitude_imbalance_db=0.0,
+                phase_imbalance_deg=0.0,
+                skew=tau,
+                sampling_rate=self.FS,
+            )
+            assert r.dtype == s.dtype
+            spec = xp.abs(xp.fft.fft(r.astype(xp.complex128))) ** 2
+            measured = float(spec[n - k] / spec[k])
+            expected = math.tan(math.pi * f * tau) ** 2
+            assert measured == pytest.approx(expected, rel=1e-4)
+
+    def test_delays_q_not_i(self, xp, xpt):
+        """A skew of two whole samples rolls Q two samples later and leaves
+        I untouched (a sign error rolls Q earlier)."""
+        rng = xp.random.default_rng(1)
+        s = (rng.standard_normal(1024) + 1j * rng.standard_normal(1024)).astype(
+            xp.complex64
+        )
+        r = apply_iq_imbalance(
+            s,
+            amplitude_imbalance_db=0.0,
+            phase_imbalance_deg=0.0,
+            skew=2 / self.FS,
+            sampling_rate=self.FS,
+        )
+        xpt.assert_allclose(r.real, s.real, atol=0)
+        xpt.assert_allclose(r.imag, xp.roll(s.imag, 2), atol=1e-5)
+
+    def test_skew_composes_with_gain_and_phase(self, xp, xpt):
+        """The skew acts on Q before the mixing: equal to the gain and phase
+        errors applied to the skewed signal."""
+        rng = xp.random.default_rng(2)
+        s = (rng.standard_normal(512) + 1j * rng.standard_normal(512)).astype(
+            xp.complex64
+        )
+        kw = {"amplitude_imbalance_db": 1.0, "phase_imbalance_deg": 4.0}
+        skewed = apply_iq_imbalance(
+            s,
+            amplitude_imbalance_db=0.0,
+            phase_imbalance_deg=0.0,
+            skew=5e-12,
+            sampling_rate=self.FS,
+        )
+        both = apply_iq_imbalance(s, skew=5e-12, sampling_rate=self.FS, **kw)
+        xpt.assert_allclose(both, apply_iq_imbalance(skewed, **kw), atol=1e-5)
+
+    def test_memoryless_correction_leaves_skew(self, xp):
+        """Löwdin orthogonalization removes gain and phase errors, not skew:
+        on a tone pair at ±f the skew's image (tan²(π f τ) = -19 dB at
+        12 GHz and 3 ps) stays above -25 dB after the correction."""
+        n, k = 4096, 768
+        t = xp.arange(n) / self.FS
+        f = k * self.FS / n
+        s = (xp.exp(2j * xp.pi * f * t) + 0.5 * xp.exp(-2j * xp.pi * 2 * f * t)).astype(
+            xp.complex64
+        )
+        r = apply_iq_imbalance(
+            s,
+            amplitude_imbalance_db=0.0,
+            phase_imbalance_deg=0.0,
+            skew=3e-12,
+            sampling_rate=self.FS,
+        )
+        c = correct_iq_imbalance(r, Lowdin())
+        spec = xp.abs(xp.fft.fft(c.astype(xp.complex128))) ** 2
+        assert 10 * math.log10(float(spec[n - k] / spec[k])) > -25.0
+
+    def test_sampling_rate_rules(self, xp):
+        """Array input needs the sampling rate only for a skew; a Signal
+        supplies it, and a conflicting value raises."""
+        s = xp.ones(64, dtype=xp.complex64)
+        kw = {"amplitude_imbalance_db": 0.0, "phase_imbalance_deg": 0.0}
+        apply_iq_imbalance(s, **kw)
+        with pytest.raises(ValueError, match="sampling_rate"):
+            apply_iq_imbalance(s, skew=1e-12, **kw)
+        sig = Signal(samples=s, sampling_rate=self.FS, symbol_rate=self.FS / 2)
+        out = apply_iq_imbalance(sig, skew=1e-12, **kw)
+        assert isinstance(out, Signal)
+        with pytest.raises(ValueError, match="conflicts"):
+            apply_iq_imbalance(sig, skew=1e-12, sampling_rate=1e9, **kw)
 
 
 class TestIQImbalanceCompensation:

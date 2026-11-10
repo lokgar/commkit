@@ -557,7 +557,14 @@ ROWS: list[Row] = [
     Row(
         "commkit.impairments.frontend.apply_iq_imbalance",
         TRANSFORM,
-        call=lambda c, x: _a(x, amplitude_imbalance_db=0.5, phase_imbalance_deg=3),
+        call=lambda c, x: _a(
+            x,
+            amplitude_imbalance_db=0.5,
+            phase_imbalance_deg=3,
+            skew=2e-12,
+            sampling_rate=FS,
+        ),
+        fact=FS_CONFLICT,
     ),
     Row("commkit.impairments.frontend.GramSchmidt", VALUE),
     Row("commkit.impairments.frontend.Lowdin", VALUE),

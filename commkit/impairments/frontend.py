@@ -5,7 +5,9 @@
 :func:`correct_iq_imbalance` (:class:`Lowdin` or :class:`GramSchmidt`
 orthogonalization, or the inverse of an :class:`IQImbalanceEstimate`) are
 kept together because they are one device model, the widely linear mixing
-of I and Q.
+of I and Q.  A time skew between the branches, the frequency-dependent part
+of the model, is applied by :func:`apply_iq_imbalance` but lies outside what
+the memoryless estimate and corrections describe.
 """
 
 import logging
@@ -14,11 +16,12 @@ from collections.abc import Callable
 from dataclasses import dataclass
 from types import ModuleType
 
+from .. import _fft
 from .._array import as_2d, restore_1d
 from ..backend import ArrayType, dispatch, to_device
 from ..core._signal_adapter import S, adapt_signal
 from ..logger import logger
-from ..math import db_to_linear
+from ..math import _derotate, db_to_linear
 
 __all__ = [
     "GramSchmidt",
@@ -35,6 +38,8 @@ def apply_iq_imbalance(
     *,
     amplitude_imbalance_db: float,
     phase_imbalance_deg: float,
+    skew: float = 0.0,
+    sampling_rate: float | None = None,
 ) -> S:
     """Apply IQ imbalance to a complex baseband signal.
 
@@ -45,7 +50,10 @@ def apply_iq_imbalance(
         K1 = (1 + g e^{jφ}) / 2,   K2 = (1 - g e^{jφ}) / 2,
 
     with the Q-to-I amplitude ratio ``g = 10^(A/20)`` and the phase error
-    ``φ`` in radians.
+    ``φ`` in radians.  A time ``skew`` delays the Q branch against I before
+    the mixing, ``Q(t) → Q(t - τ)``: unlike the gain and phase errors it is
+    frequency dependent, and a tone at ``f`` leaves an image of power
+    ``tan²(π f τ)`` relative to the tone.
 
     Parameters
     ----------
@@ -56,25 +64,58 @@ def apply_iq_imbalance(
         Q the higher gain, ``0.0`` none.
     phase_imbalance_deg : float
         Phase error ``φ`` of the Q branch in degrees; ``0.0`` for none.
+    skew : float, default 0.0
+        Delay ``τ`` of the Q branch against I in seconds; negative advances
+        Q.  Applied as a linear phase on the spectrum of Q (ideal band-limited
+        interpolation), so the record is treated as periodic, as in
+        :func:`~commkit.timing.fft_fractional_delay`.
+    sampling_rate : float, optional
+        Sampling rate in Hz.  Taken from the Signal; required for array input
+        when ``skew`` is not zero.  A value that disagrees with the Signal
+        raises.
 
     Returns
     -------
     ndarray or Signal
         The imbalanced samples, same shape, dtype and device as the input.
 
+    Raises
+    ------
+    ValueError
+        If ``skew`` is not zero and the sampling rate is missing or
+        conflicts with the Signal's.
+
+    Notes
+    -----
+    The blind estimate (:func:`estimate_iq_imbalance`) and the
+    orthogonalizations (:class:`Lowdin`, :class:`GramSchmidt`) are memoryless:
+    they model and remove the gain and phase errors only.  A skew needs a
+    filter per branch, as a widely linear equalizer has.
+
     Examples
     --------
     >>> r = apply_iq_imbalance(s, amplitude_imbalance_db=1.0, phase_imbalance_deg=3.0)
+    >>> r = apply_iq_imbalance(
+    ...     s, amplitude_imbalance_db=0.0, phase_imbalance_deg=0.0, skew=2e-12
+    ... )
     """
     signal_adapter = adapt_signal(samples, function_name="apply_iq_imbalance()")
+    if skew != 0.0:
+        sampling_rate = signal_adapter.resolve_fact("sampling_rate", sampling_rate)
+    elif signal_adapter.signal is not None and sampling_rate is not None:
+        signal_adapter.resolve_fact("sampling_rate", sampling_rate)
 
     logger.info(
-        "Applying IQ imbalance (amplitude=%.2f dB, phase=%.2f deg).",
+        "Applying IQ imbalance (amplitude=%.2f dB, phase=%.2f deg, skew=%.3g s).",
         amplitude_imbalance_db,
         phase_imbalance_deg,
+        skew,
     )
 
     x, xp, _ = dispatch(signal_adapter.array)
+    if skew != 0.0 and xp.iscomplexobj(x):  # real input has no Q branch
+        assert sampling_rate is not None
+        x = _delay_quadrature(x, xp, skew * sampling_rate)
 
     g = db_to_linear(amplitude_imbalance_db, power=False)
     phi = math.radians(phase_imbalance_deg)
@@ -89,6 +130,18 @@ def apply_iq_imbalance(
         result = result.astype(x.dtype)
 
     return signal_adapter.wrap_samples(result)
+
+
+def _delay_quadrature(x: ArrayType, xp: ModuleType, delay: float) -> ArrayType:
+    """``I + j·Q(n - delay)``: the Q branch delayed by ``delay`` samples
+    through a linear phase on its real spectrum, in the precision of ``x``
+    (the phase in float64)."""
+    n = x.shape[-1]
+    q = x.imag
+    spec = _fft.rfft(q, axis=-1)
+    freqs = xp.fft.rfftfreq(n, d=1.0)
+    q_delayed = _fft.irfft(_derotate(spec, 2.0 * math.pi * delay * freqs), n=n, axis=-1)
+    return (x.real + 1j * q_delayed).astype(x.dtype, copy=False)
 
 
 # -----------------------------------------------------------------------------
