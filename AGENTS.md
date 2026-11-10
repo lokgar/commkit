@@ -54,6 +54,8 @@ uv run pytest
 uv run ruff format .
 ```
 
+A commit that changes only text that cannot change behaviour (docstrings, comments, Markdown) runs `ruff check` and `ruff format` alone. The full gate applies again as soon as code, tests or notebook cells change, or an edited docstring holds an example that runs.
+
 **Benchmarks** are explicit-only; `uv run pytest` never collects them. A commit that changes a public signature smoke-runs them once, untimed, so their call sites cannot rot:
 
 ```bash
