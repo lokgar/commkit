@@ -30,14 +30,14 @@ The notebooks run on the GPU when CuPy works and on the CPU otherwise. They are 
 | 07 | [Channel coding](07-channel-coding.ipynb) | `encode` / `decode`, coded `generate`, post-FEC BER and FER, hard and soft decoding, error-rate curves and the decoding outcome, Reed-Solomon, LDPC, NGMI as a threshold, EXIT charts, polar, convolutional and turbo codes against Eb/N0, block length |
 | 08 | [Probabilistic shaping and coded modulation](08-probabilistic-shaping-and-coded-modulation.ipynb) | the CCDM, shaped `generate`, probabilistic amplitude shaping with LDPC, the shaping gain at the decoder |
 | 09 | [Laser phase noise](09-laser-phase-noise.ipynb) | the Wiener model, the Lorentzian line, `Δν·T`, a shared LO, flicker noise and the FM-noise PSD |
-| 10 | [Front-end impairments](10-front-end-impairments.ipynb) | IQ imbalance and its correction, DC offsets, electrical bandwidth, carrier frequency offset |
+| 10 | [Front-end impairments](10-front-end-impairments.ipynb) | IQ imbalance and its correction, IQ skew across the band, DC offsets, electrical bandwidth, carrier frequency offset, ADC quantization and loading, sampling jitter and ENOB |
 
 ## III. Receiver algorithms
 
 | # | notebook | topics |
 | --- | --- | --- |
 | 11 | [Frame synchronization and timing](11-frame-synchronization-and-timing.ipynb) | Barker and Zadoff-Chu preambles, frames, `estimate_timing` / `correct_timing`, payload extraction |
-| 12 | [Sampling-clock recovery](12-sampling-clock-recovery.ipynb) | the clock offset and symbol drift, the Gardner detector and its power form, tracking and resampling, a known offset |
+| 12 | [Sampling-clock recovery](12-sampling-clock-recovery.ipynb) | the eye and the sampling instant, the clock offset and the drifting eye, how the Gardner detector tells early from late, S-curves and detector gain against rolloff, the loop and its bandwidth (acquisition, jitter, cycle slips), resampling, why the equalizer cannot follow a drift, a known offset |
 | 13 | [Frequency-offset estimation](13-frequency-offset-estimation.ipynb) | M-th power and Mengali-Morelli, lock range, accuracy, pilot symbols, pilot tones, drift tracking |
 | 14 | [Blind carrier-phase recovery](14-blind-carrier-phase-recovery.ipynb) | Viterbi-Viterbi, BPS, block size, Tikhonov, the 90° ambiguity, cycle slips, joint polarizations |
 | 15 | [Pilot-aided carrier recovery](15-pilot-aided-carrier-recovery.ipynb) | pilot symbols, data-aided rotation, the decision-directed PLL, pilot tones |
@@ -52,7 +52,7 @@ The notebooks run on the GPU when CuPy works and on the CPU otherwise. They are 
 | --- | --- | --- |
 | 20 | [Chromatic dispersion](20-chromatic-dispersion.ipynb) | the dispersion spread, the all-pass response, compensation of captures and simulated records, blind estimation, the compensating FIR and its length, residual dispersion |
 | 21 | [Nonlinear fiber and backpropagation](21-nonlinear-fiber-and-backpropagation.ipynb) | the Kerr effect, the optimum launch power, digital backpropagation |
-| 22 | [Direct and self-coherent detection](22-direct-and-self-coherent-detection.ipynb) | the square law and its bandwidth, unipolar PAM-4 IM-DD and its sensitivity, shot and thermal noise, self-coherent detection with a carrier, the signal-signal beat |
+| 22 | [Direct and self-coherent detection](22-direct-and-self-coherent-detection.ipynb) | what a photodiode loses, the square law and its bandwidth, unipolar PAM-4 levels and eyes, sensitivity at the KP4 threshold, thermal against shot noise, laser RIN and its BER floor, coherent detection and the shot-noise limit, balanced photodiodes, self-coherent detection, the guard band, CSPR and the signal-signal beat |
 | 23 | [FEC in optical standards](23-fec-in-optical-standards.ipynb) | KP4 and IEEE 802.3dj, G.709 RS and the staircase code, the 400ZR C-FEC, PON RS and LDPC, their thresholds against overhead |
 | 24 | [End-to-end coherent transceiver](24-coherent-transceiver-end-to-end.ipynb) | every impairment and the full receiver DSP chain in one link, an LDPC-coded payload, the SNR budget |
 
