@@ -1,5 +1,6 @@
-"""Additive white Gaussian noise: :func:`apply_awgn`, and amplified
-spontaneous emission at an OSNR: :func:`apply_ase`.
+"""Additive white Gaussian noise: :func:`apply_awgn`, amplified spontaneous
+emission at an OSNR: :func:`apply_ase`, and the noise of coherent detection
+at absolute optical powers: :func:`apply_coherent_detection`.
 
 Powers are per sample and per channel, in the squared units of the samples.
 Es/N0 is the channel's: complex samples get noise of variance ``N0`` per
@@ -11,15 +12,20 @@ each channel over the number of symbols it carries, so silence around the
 signal (zero padding, a capture before the frame arrives) lowers neither.
 """
 
+import logging
 from typing import Any
 
+import numpy as np
+
+from .._array import as_2d, restore_1d
+from .._constants import ELEMENTARY_CHARGE
 from .._random import RNG, as_generator, complex_normal, standard_normal
-from ..backend import ArrayType, dispatch
+from ..backend import ArrayType, dispatch, to_device
 from ..core._signal_adapter import S, SignalAdapter, adapt_signal
 from ..logger import logger
 from ..math import db_to_linear
 
-__all__ = ["apply_ase", "apply_awgn"]
+__all__ = ["apply_ase", "apply_awgn", "apply_coherent_detection"]
 
 
 def apply_awgn(
@@ -281,6 +287,140 @@ def apply_ase(
         / (noise_modes * reference_bandwidth * db_to_linear(osnr_db, power=True))
     )
     return signal_adapter.wrap_samples(x + _noise(x, xp, noise_power, rng))
+
+
+def apply_coherent_detection(
+    samples: S,
+    *,
+    received_power_dbm: float,
+    lo_power_dbm: float,
+    responsivity: float = 1.0,
+    thermal_noise_density: float = 0.0,
+    sampling_rate: float | None = None,
+    rng: RNG = None,
+) -> S:
+    """Add the noise of a phase-diversity coherent receiver at absolute powers.
+
+    Each channel (polarization) mixes with a local oscillator in a 90°
+    hybrid whose four outputs feed two balanced photodiode pairs, one per
+    quadrature.  The beat term ``R·sqrt(P_c·P_LO)`` carries the signal; the
+    shot noise of the light on the diodes, ``R (P_c + P_LO)`` in total, and
+    the receiver's thermal noise add to it.  Per complex sample, the noise
+    variance relative to the signal power is
+
+        1 / SNR = f_s · (q R (P_c + P_LO) + i_n²) / (R² P_c P_LO),
+
+    with ``P_c`` the channel's share of ``received_power_dbm`` (in proportion
+    to its mean sample power), ``q`` the elementary charge and ``i_n`` the
+    thermal noise density.  The output keeps the input's units: the noise is
+    added to the samples at that ratio, with the signal component
+    unchanged.  With a strong LO and no thermal noise, ``Es/N0 = R P_c T / q``,
+    ``η`` photons per symbol for a responsivity ``R = η q / (hν)``.
+
+    Parameters
+    ----------
+    samples : array_like or Signal
+        Received optical field, ``(N,)`` or ``(C, N)`` with one channel per
+        polarization, real or complex.
+    received_power_dbm : float
+        Mean optical power the input stands for, in dBm, summed over the
+        channels.
+    lo_power_dbm : float
+        Local-oscillator power at each channel's hybrid, in dBm.
+    responsivity : float, default 1.0
+        Photodiode responsivity ``R`` in A/W, positive (``η q / (hν)``:
+        1.25 A/W for a quantum efficiency of 1 at 1550 nm).
+    thermal_noise_density : float, default 0.0
+        Input-referred thermal noise current density ``i_n`` of each
+        balanced pair in A/sqrt(Hz) (one-sided), non-negative; typical
+        receivers are near 10-20 pA/sqrt(Hz).
+    sampling_rate : float, optional
+        Sampling rate in Hz, the noise bandwidth.  Taken from the Signal;
+        required for array input.  A value that disagrees with the Signal
+        raises.
+    rng : int, numpy.random.Generator or None
+        Random source, as in :func:`apply_awgn`.
+
+    Returns
+    -------
+    ndarray or Signal
+        The detected field, complex in the input's precision, same shape and
+        device; a Signal keeps its domain and carrier.
+
+    Raises
+    ------
+    ValueError
+        If ``responsivity`` is not positive, ``thermal_noise_density`` is
+        negative, a channel is all zeros, or the sampling rate is missing
+        or conflicts with the Signal's.
+
+    Notes
+    -----
+    A balanced pair sees a quarter of the signal and LO light on each
+    diode, whose shot noises (two-sided density ``q I``) add: per quadrature
+    ``q R (P_c + P_LO) f_s / 2`` per sample.  Thermal noise of one-sided
+    density ``i_n²`` adds ``i_n² f_s / 2``.  The beat term of one quadrature
+    is ``R sqrt(P_c P_LO)`` times the field's component of unit mean power,
+    so the complex signal power is ``R² P_c P_LO``.  The orthogonal
+    quadratures make the shot-noise limit ``Es/N0 = η·n_p``, half that of a
+    single-quadrature homodyne receiver.
+
+    Examples
+    --------
+    >>> rx = apply_coherent_detection(
+    ...     field, received_power_dbm=-30.0, lo_power_dbm=10.0,
+    ...     responsivity=1.0, thermal_noise_density=15e-12,
+    ... )
+    """
+    if not responsivity > 0:
+        raise ValueError(
+            f"apply_coherent_detection(): responsivity must be positive, got {responsivity!r}."
+        )
+    if not thermal_noise_density >= 0:
+        raise ValueError(
+            "apply_coherent_detection(): thermal_noise_density must be non-negative, "
+            f"got {thermal_noise_density!r}."
+        )
+    function_name = "apply_coherent_detection()"
+    signal_adapter = adapt_signal(samples, function_name=function_name)
+    fs = signal_adapter.resolve_fact("sampling_rate", sampling_rate)
+    x, xp, _ = dispatch(signal_adapter.array)
+    if not xp.iscomplexobj(x):
+        x = x.astype(xp.complex64 if x.dtype == xp.float32 else xp.complex128)
+    x, was_1d = as_2d(x, name="samples")
+    channel_power = xp.mean(xp.abs(x) ** 2, axis=-1, dtype=xp.float64)  # (C,)
+    host_power = np.asarray(to_device(channel_power, "cpu"), dtype=np.float64)
+    if np.any(host_power == 0):
+        raise ValueError(f"{function_name}: a channel is all zeros.")
+    p_total = 1e-3 * 10 ** (received_power_dbm / 10)
+    p_lo = 1e-3 * 10 ** (lo_power_dbm / 10)
+    p_c = p_total * host_power / host_power.sum()
+    r = responsivity
+    inv_snr = (
+        fs
+        * (ELEMENTARY_CHARGE * r * (p_c + p_lo) + thermal_noise_density**2)
+        / (r * r * p_c * p_lo)
+    )
+    if logger.isEnabledFor(logging.INFO):
+        sig = signal_adapter.signal
+        snr_db = -10 * np.log10(inv_snr)
+        if sig is not None and sig.symbol_rate:
+            esn0_db = snr_db + 10 * np.log10(fs / sig.symbol_rate)
+            logger.info(
+                "Coherent detection: Es/N0 %s dB per channel (%.2f dBm received, "
+                "%.2f dBm LO).",
+                np.array2string(esn0_db, precision=2),
+                received_power_dbm,
+                lo_power_dbm,
+            )
+        else:
+            logger.info(
+                "Coherent detection: SNR %s dB per sample.",
+                np.array2string(snr_db, precision=2),
+            )
+    noise_var = xp.asarray(host_power * inv_snr)[:, None]
+    y = x + _noise(x, xp, noise_var, rng)
+    return signal_adapter.wrap_samples(restore_1d(was_1d, y))
 
 
 def _symbol_energy(

@@ -5,7 +5,7 @@ import pytest
 
 from commkit import RRC, Constellation, generate
 from commkit.core import Preamble, Signal, SingleCarrierFrame
-from commkit.impairments import apply_ase, apply_awgn
+from commkit.impairments import apply_ase, apply_awgn, apply_coherent_detection
 
 
 class TestAddAWGN:
@@ -336,3 +336,136 @@ class TestASE:
         for bad in (3, 0, 4.0, True):
             with pytest.raises(ValueError, match="noise_modes"):
                 apply_ase(opt, osnr_db=20.0, noise_modes=bad)
+
+
+class TestCoherentDetection:
+    """Noise of a phase-diversity coherent receiver at absolute powers."""
+
+    Q = 1.602176634e-19
+    H = 6.62607015e-34
+    NU = 299792458.0 / 1550e-9
+    RS = 32e9
+
+    def _rx(self, xp, *, num_channels=1, num_symbols=2**15, rng=1):
+        return generate(
+            Constellation.qam(16),
+            num_symbols=num_symbols,
+            symbol_rate=self.RS,
+            sps=2,
+            pulse=RRC(rolloff=0.1),
+            num_channels=num_channels,
+            rng=rng,
+            device="gpu" if xp is not np else "cpu",
+        )
+
+    def _snr_db(self, sig):
+        from commkit.filtering import matched_filter
+        from commkit.metrics import snr
+        from commkit.multirate import decimate_to_symbol_rate
+
+        return snr(decimate_to_symbol_rate(matched_filter(sig)))
+
+    def test_shot_noise_limit(self, xp):
+        """A strong LO, no thermal noise and a responsivity of q/(hν)
+        (quantum efficiency 1): Es/N0 = n_p P_LO / (P_s + P_LO), n_p = P_s T /
+        (hν) photons per symbol, counted independently of the noise formula
+        (each quadrature of a phase-diversity receiver gets half the photons'
+        information).  At -45 dBm and 32 GBd n_p = 24.6 (13.9 dB).  The SNR
+        of 2^15 symbols has a standard error of 0.04 dB; bound 0.15 dB."""
+        p_s = 1e-3 * 10 ** (-45 / 10)
+        out = apply_coherent_detection(
+            self._rx(xp),
+            received_power_dbm=-45.0,
+            lo_power_dbm=13.0,
+            responsivity=self.Q / (self.H * self.NU),
+            rng=2,
+        )
+        n_p = p_s / self.RS / (self.H * self.NU)
+        p_lo = 1e-3 * 10**1.3
+        expected = 10 * np.log10(n_p * p_lo / (p_s + p_lo))
+        assert abs(self._snr_db(out) - expected) < 0.15
+
+    def test_thermal_noise_yields_to_the_lo(self, xp):
+        """With 20 pA/sqrt(Hz) thermal noise at -30 dBm received: at a weak
+        LO the thermal term dominates and the SNR rises 1 dB per dB of LO
+        (measured slope from -20 to -10 dBm); at a strong LO it approaches
+        the shot limit R P_c T / q within 0.3 dB."""
+        sig = self._rx(xp)
+        kw = {"received_power_dbm": -30.0, "responsivity": 1.0}
+        snr = {}
+        for lo in (-20.0, -10.0, 20.0):
+            out = apply_coherent_detection(
+                sig, lo_power_dbm=lo, thermal_noise_density=20e-12, rng=3, **kw
+            )
+            snr[lo] = self._snr_db(out)
+        assert abs((snr[-10.0] - snr[-20.0]) / 10.0 - 1.0) < 0.05
+        shot = 10 * np.log10(1e-6 / self.RS / self.Q)
+        assert abs(snr[20.0] - shot) < 0.3
+
+    def test_ber_against_received_power(self, xp):
+        """QPSK BER against the AWGN closed form at the Es/N0 the powers
+        give: within 5 binomial standard deviations over 2^16 symbols."""
+        from commkit.metrics import awgn_ber, ber
+
+        qpsk = generate(
+            Constellation.psk(4),
+            num_symbols=2**16,
+            symbol_rate=self.RS,
+            rng=4,
+            device="gpu" if xp is not np else "cpu",
+        )
+        for p_dbm in (-40.0, -37.0):
+            out = apply_coherent_detection(
+                qpsk,
+                received_power_dbm=p_dbm,
+                lo_power_dbm=10.0,
+                thermal_noise_density=10e-12,
+                rng=5,
+            )
+            p_c, p_lo = 1e-3 * 10 ** (p_dbm / 10), 1e-2
+            snr = p_c * p_lo / (self.RS * (self.Q * (p_c + p_lo) + 1e-22))
+            p = awgn_ber(Constellation.psk(4), esn0_db=10 * np.log10(snr))
+            n = 2 * 2**16
+            assert abs(ber(out) - p) < 5 * np.sqrt(p / n) + 1e-5
+
+    def test_channels_share_the_received_power(self, xp):
+        """Two polarizations at equal power each get half of it: their SNR
+        is that of one channel at 3 dB less received power."""
+        both = apply_coherent_detection(
+            self._rx(xp, num_channels=2),
+            received_power_dbm=-27.0,
+            lo_power_dbm=0.0,
+            thermal_noise_density=20e-12,
+            rng=6,
+        )
+        one = apply_coherent_detection(
+            self._rx(xp),
+            received_power_dbm=-30.0,
+            lo_power_dbm=0.0,
+            thermal_noise_density=20e-12,
+            rng=7,
+        )
+        assert np.all(np.abs(self._snr_db(both) - self._snr_db(one)) < 0.15)
+
+    def test_real_input_becomes_complex(self, xp):
+        x = xp.ones(256, dtype=xp.float32)
+        y = apply_coherent_detection(
+            x, received_power_dbm=-20.0, lo_power_dbm=10.0, sampling_rate=64e9, rng=1
+        )
+        assert y.dtype == xp.complex64
+
+    def test_validation(self, xp):
+        x = xp.ones(64, dtype=xp.complex64)
+        kw = {"received_power_dbm": -20.0, "lo_power_dbm": 10.0}
+        with pytest.raises(ValueError, match="sampling_rate"):
+            apply_coherent_detection(x, **kw)
+        with pytest.raises(ValueError, match="responsivity"):
+            apply_coherent_detection(x, responsivity=0.0, sampling_rate=1e9, **kw)
+        with pytest.raises(ValueError, match="thermal"):
+            apply_coherent_detection(
+                x, thermal_noise_density=-1.0, sampling_rate=1e9, **kw
+            )
+        with pytest.raises(ValueError, match="zeros"):
+            apply_coherent_detection(
+                xp.zeros(64, xp.complex64), sampling_rate=1e9, **kw
+            )

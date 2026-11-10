@@ -47,7 +47,9 @@ def plot_psd(
 
     The Welch estimate of :func:`commkit.spectral.welch_psd`, against
     frequency (SI prefixes) or, for optical signals, wavelength.  ``(C, N)``
-    input gets one panel per channel.
+    input gets one panel per channel.  The level is ``10 log10`` of the PSD
+    in the samples' squared units per Hz (samples are dimensionless), not
+    dBm/Hz.
 
     Parameters
     ----------

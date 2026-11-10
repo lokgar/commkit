@@ -596,6 +596,14 @@ ROWS: list[Row] = [
     # Optical Signals only, like extract_payload: tested in test_noise.py.
     Row("commkit.impairments.noise.apply_ase", DESIGN),
     Row(
+        "commkit.impairments.noise.apply_coherent_detection",
+        TRANSFORM,
+        call=lambda c, x: _a(
+            x, received_power_dbm=-20.0, lo_power_dbm=10.0, sampling_rate=FS, rng=1
+        ),
+        fact=FS_CONFLICT,
+    ),
+    Row(
         "commkit.impairments.noise.apply_awgn",
         TRANSFORM,
         call=lambda c, x: _a(x, sps=SPS, esn0_db=20, rng=1),

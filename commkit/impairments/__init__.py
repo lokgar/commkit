@@ -1,7 +1,9 @@
 """Channel impairments, grouped by where in the link they originate.
 
-- :mod:`~commkit.impairments.noise`: additive noise (:func:`apply_awgn`) and
-  amplified spontaneous emission at an OSNR (:func:`apply_ase`).
+- :mod:`~commkit.impairments.noise`: additive noise (:func:`apply_awgn`),
+  amplified spontaneous emission at an OSNR (:func:`apply_ase`) and the
+  noise of coherent detection at absolute powers
+  (:func:`apply_coherent_detection`).
 - :mod:`~commkit.impairments.source`: laser and oscillator phase noise
   (:func:`generate_phase_noise`, :func:`apply_phase_noise`).
 - :mod:`~commkit.impairments.frontend`: transceiver IQ imbalance
@@ -34,7 +36,7 @@ from .frontend import (
     correct_iq_imbalance,
     estimate_iq_imbalance,
 )
-from .noise import apply_ase, apply_awgn
+from .noise import apply_ase, apply_awgn, apply_coherent_detection
 from .source import apply_phase_noise, generate_phase_noise
 
 __all__ = [
@@ -45,6 +47,7 @@ __all__ = [
     "apply_ase",
     "apply_awgn",
     "apply_chromatic_dispersion",
+    "apply_coherent_detection",
     "apply_fiber_propagation",
     "apply_iq_imbalance",
     "apply_quantization",
