@@ -1,4 +1,4 @@
-"""Transceiver front-end impairments: IQ imbalance and the ADC clock.
+"""Transceiver front-end impairments: IQ imbalance and the ADC.
 
 :func:`apply_iq_imbalance`, its blind measurement
 :func:`estimate_iq_imbalance` and its compensation
@@ -9,7 +9,9 @@ of I and Q.  A time skew between the branches, the frequency-dependent part
 of the model, is applied by :func:`apply_iq_imbalance` but lies outside what
 the memoryless estimate and corrections describe.
 :func:`apply_sampling_clock_offset` resamples a signal as an ADC whose clock
-is off its nominal rate.
+is off its nominal rate, :func:`apply_sampling_jitter` as one whose
+sampling instants jitter, and :func:`apply_quantization` rounds it as the
+ADC's quantizer.
 """
 
 import logging
@@ -20,6 +22,7 @@ from types import ModuleType
 
 from .. import _fft
 from .._array import as_2d, restore_1d
+from .._random import RNG, as_generator, complex_normal, standard_normal
 from ..backend import ArrayType, dispatch, to_device
 from ..core._signal_adapter import S, adapt_signal
 from ..logger import logger
@@ -31,7 +34,9 @@ __all__ = [
     "IQImbalanceEstimate",
     "Lowdin",
     "apply_iq_imbalance",
+    "apply_quantization",
     "apply_sampling_clock_offset",
+    "apply_sampling_jitter",
     "correct_iq_imbalance",
     "estimate_iq_imbalance",
 ]
@@ -214,6 +219,177 @@ def apply_sampling_clock_offset(samples: S, *, offset_ppm: float) -> S:
     real = xp.float32 if x.dtype in (xp.float32, xp.complex64) else xp.float64
     base, frac = _stretched_instants(n_out, 1.0 / (1.0 + eps), real, xp)
     y = _interpolate(x, base, frac)
+    return signal_adapter.wrap_samples(restore_1d(was_1d, y))
+
+
+def apply_quantization(
+    samples: S,
+    *,
+    num_bits: int,
+    full_scale: float,
+    enob: float | None = None,
+    rng: RNG = None,
+) -> S:
+    """Quantize a signal as an ADC: clip, round, and add the converter's noise.
+
+    Each real component (I and Q separately for complex input) is clipped to
+    ``±full_scale`` and rounded by a uniform mid-rise quantizer with
+    ``2^num_bits`` levels at ``(k + 1/2)·Δ``, ``Δ = 2·full_scale / 2^num_bits``.
+    Its error, uniform in ``±Δ/2`` while the input stays in range, has the
+    variance ``Δ²/12``; a full-scale sine then has the SQNR
+    ``6.02·num_bits + 1.76`` dB.  With ``enob`` the converter's other noise
+    (thermal, aperture, nonlinearity, lumped) is added as white Gaussian noise
+    of variance ``Δ²/12 · (2^{2(num_bits - enob)} - 1)`` per component, so
+    the total is that of an ideal ``enob``-bit quantizer.
+
+    Parameters
+    ----------
+    samples : array_like or Signal
+        Input samples, ``(N,)`` or ``(C, N)``, real or complex.
+    num_bits : int
+        Resolution, at least 1.
+    full_scale : float
+        Clipping level of each component, in the units of the samples
+        (positive).  A Signal at ``E[|x|²] = 1/sps`` has components of rms
+        ``1/sqrt(2·sps)``; the ratio of ``full_scale`` to that rms is the
+        loading.
+    enob : float, optional
+        Effective number of bits, in ``(0, num_bits]``.  ``None`` adds no
+        noise beyond the rounding.
+    rng : int, numpy.random.Generator or None
+        Seed or generator for the ``enob`` noise.
+
+    Returns
+    -------
+    ndarray or Signal
+        The quantized samples, same shape, dtype and device as the input.
+
+    Raises
+    ------
+    ValueError
+        If ``num_bits``, ``full_scale`` or ``enob`` is out of range.
+
+    Examples
+    --------
+    >>> y = apply_quantization(x, num_bits=8, full_scale=0.8, enob=6.0, rng=1)
+    """
+    if isinstance(num_bits, bool) or int(num_bits) != num_bits or num_bits < 1:
+        raise ValueError(
+            f"apply_quantization(): num_bits must be a positive integer, got {num_bits!r}."
+        )
+    if not full_scale > 0:
+        raise ValueError(
+            f"apply_quantization(): full_scale must be positive, got {full_scale!r}."
+        )
+    if enob is not None and not (0 < enob <= num_bits):
+        raise ValueError(
+            f"apply_quantization(): enob must be in (0, num_bits={num_bits}], got {enob!r}."
+        )
+    signal_adapter = adapt_signal(samples, function_name="apply_quantization()")
+    x, xp, _ = dispatch(signal_adapter.array)
+    step = 2.0 * full_scale / 2 ** int(num_bits)
+    top = full_scale - step / 2
+
+    def quantize(v: ArrayType) -> ArrayType:
+        return xp.clip((xp.floor(v / step) + 0.5) * step, -top, top)
+
+    if xp.iscomplexobj(x):
+        y = (quantize(x.real) + 1j * quantize(x.imag)).astype(x.dtype, copy=False)
+    else:
+        y = quantize(x).astype(x.dtype, copy=False)
+    clipped_fraction = None
+    if logger.isEnabledFor(logging.INFO):
+        comps = (x.real, x.imag) if xp.iscomplexobj(x) else (x,)
+        clipped = sum(float(xp.count_nonzero(xp.abs(c) > full_scale)) for c in comps)
+        clipped_fraction = clipped / max(1, x.size * len(comps))
+    if enob is not None and enob < num_bits:
+        var = step**2 / 12 * (2 ** (2 * (num_bits - enob)) - 1)
+        gen = as_generator(rng)
+        real = x.real.dtype
+        if xp.iscomplexobj(x):
+            y = y + complex_normal(gen, x.shape, std=math.sqrt(var), dtype=real, xp=xp)
+        else:
+            y = y + math.sqrt(var) * standard_normal(gen, x.shape, dtype=real, xp=xp)
+    if clipped_fraction is not None:
+        logger.info(
+            "Quantized to %d bits (full scale %.4g%s): %.3g %% of the components clipped.",
+            num_bits,
+            full_scale,
+            "" if enob is None else f", ENOB {enob:g}",
+            100 * clipped_fraction,
+        )
+    return signal_adapter.wrap_samples(y)
+
+
+def apply_sampling_jitter(
+    samples: S,
+    *,
+    jitter: float,
+    sampling_rate: float | None = None,
+    rng: RNG = None,
+) -> S:
+    """Sample a signal at instants that jitter around the clock's grid.
+
+    Sample ``n`` is the band-limited waveform at ``n/fs + δ_n``, with
+    independent Gaussian ``δ_n`` of rms ``jitter`` seconds, shared by all
+    channels (one clock).  A tone at ``f`` then carries the noise of
+    relative power ``(2π f σ)²``: the SNR ``-20 log10(2π f σ)`` of a sampled
+    sine.  The waveform between samples comes from the 48-tap windowed-sinc
+    interpolator of :func:`apply_sampling_clock_offset` (error below
+    -119 dB up to 0.4 cycles per sample, the first and last 24 samples
+    excepted).  The ``δ_n`` are drawn on the data's device.
+
+    Parameters
+    ----------
+    samples : array_like or Signal
+        Input samples, ``(N,)`` or ``(C, N)``.
+    jitter : float
+        RMS sampling-time error ``σ`` in seconds, non-negative.
+    sampling_rate : float, optional
+        Sampling rate in Hz.  Taken from the Signal; required for array
+        input.  A value that disagrees with the Signal raises.
+    rng : int, numpy.random.Generator or None
+        Seed or generator for the jitter.
+
+    Returns
+    -------
+    ndarray or Signal
+        The jittered samples, same shape, dtype and device (a copy of the
+        input for zero jitter).
+
+    Raises
+    ------
+    ValueError
+        If ``jitter`` is negative, or the sampling rate is missing or
+        conflicts with the Signal's.
+
+    Examples
+    --------
+    >>> y = apply_sampling_jitter(x, jitter=100e-15, rng=1)
+    """
+    if not jitter >= 0:
+        raise ValueError(
+            f"apply_sampling_jitter(): jitter must be non-negative, got {jitter!r}."
+        )
+    signal_adapter = adapt_signal(samples, function_name="apply_sampling_jitter()")
+    fs = signal_adapter.resolve_fact("sampling_rate", sampling_rate)
+    x, xp, _ = dispatch(signal_adapter.array)
+    x, was_1d = as_2d(x, name="samples")
+    logger.info(
+        "Applying %.3g s rms sampling jitter (%.3g sample periods).",
+        jitter,
+        jitter * fs,
+    )
+    if jitter == 0:
+        return signal_adapter.wrap_samples(restore_1d(was_1d, x.copy()))
+    real = xp.float32 if x.dtype in (xp.float32, xp.complex64) else xp.float64
+    n = x.shape[-1]
+    d = (jitter * fs) * standard_normal(as_generator(rng), (n,), dtype=real, xp=xp)
+    whole = xp.floor(d)
+    base = xp.arange(n) + whole.astype(xp.int64)
+    margin = int(math.ceil(10 * jitter * fs)) + 1  # 10 σ
+    base = xp.clip(base, -margin, n - 1 + margin)
+    y = _interpolate(x, base, (d - whole).astype(real, copy=False), margin=margin)
     return signal_adapter.wrap_samples(restore_1d(was_1d, y))
 
 

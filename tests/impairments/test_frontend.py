@@ -12,7 +12,9 @@ from commkit.impairments import (
     IQImbalanceEstimate,
     Lowdin,
     apply_iq_imbalance,
+    apply_quantization,
     apply_sampling_clock_offset,
+    apply_sampling_jitter,
     correct_iq_imbalance,
     estimate_iq_imbalance,
 )
@@ -221,6 +223,158 @@ class TestSamplingClockOffset:
     def test_rejects_offsets_at_or_below_minus_one(self, xp):
         with pytest.raises(ValueError, match="offset_ppm"):
             apply_sampling_clock_offset(xp.ones(8, xp.complex64), offset_ppm=-1e6)
+
+
+def _sine(xp, n, cycles, amplitude, dtype):
+    """A real sine of ``cycles`` periods over ``n`` samples (incommensurate
+    with the quantizer's step)."""
+    t = xp.arange(n, dtype=xp.float64)
+    return (amplitude * xp.sin(2 * xp.pi * cycles * t / n + 0.1)).astype(dtype)
+
+
+def _sqnr_db(xp, y, x):
+    return 10 * math.log10(float(xp.mean(xp.abs(x) ** 2) / xp.mean(xp.abs(y - x) ** 2)))
+
+
+class TestQuantization:
+    @pytest.mark.parametrize("bits", [3, 4, 8])
+    def test_error_variance(self, xp, bits):
+        """Input spread uniformly over the full scale: the error is uniform in
+        ±Δ/2, variance Δ²/12.  Its sample variance over 2^17 values has the
+        relative standard deviation sqrt((9/5 - 1)/N) = 0.0025; bound 5 of
+        those."""
+        n = 2**17
+        rng = xp.random.default_rng(7)
+        x = rng.uniform(-1.0, 1.0, n).astype(xp.float64)
+        y = apply_quantization(x, num_bits=bits, full_scale=1.0)
+        step = 2.0 / 2**bits
+        ratio = float(xp.mean((y - x) ** 2)) / (step**2 / 12)
+        assert abs(ratio - 1) < 5 * math.sqrt(0.8 / n)
+
+    @pytest.mark.parametrize("bits", [10, 12, 14])
+    def test_full_scale_sine_sqnr(self, xp, bits):
+        """A full-scale sine: 6.02 b + 1.76 dB (Δ²/12 against A²/2).  The
+        sine dwells at its peaks, where the error is not uniform, so the
+        measured SQNR approaches the formula from below as about 2^(-b/2):
+        0.06, 0.03, 0.015 dB short.  Bound 0.1 dB."""
+        x = _sine(xp, 2**16, 1001.37, 0.999999, xp.float64)
+        y = apply_quantization(x, num_bits=bits, full_scale=1.0)
+        assert y.dtype == x.dtype
+        assert abs(_sqnr_db(xp, y, x) - (6.02 * bits + 1.76)) < 0.1
+
+    def test_components_of_complex_input(self, xp):
+        """I and Q are quantized separately: a complex tone whose components
+        are full-scale sines has the SQNR of one sine (0.13 dB short of the
+        formula at 8 bits, as for a real sine), and each component equals
+        the real quantizer's output."""
+        n = 2**16
+        t = xp.arange(n, dtype=xp.float64)
+        x = (0.999999 * xp.exp(2j * xp.pi * 1001.37 * t / n)).astype(xp.complex64)
+        y = apply_quantization(x, num_bits=8, full_scale=1.0)
+        assert y.dtype == xp.complex64
+        assert abs(_sqnr_db(xp, y, x) - (6.02 * 8 + 1.76)) < 0.2
+        xp.testing.assert_array_equal(
+            y.imag, apply_quantization(x.imag, num_bits=8, full_scale=1.0)
+        )
+
+    @pytest.mark.parametrize("enob", [5.0, 7.3])
+    def test_enob_noise(self, xp, enob):
+        """With enob the total noise is that of an ideal enob-bit quantizer:
+        SQNR 6.02 enob + 1.76 dB.  The noise power over 2^16 samples has a
+        relative standard deviation of sqrt(2/N) = 0.006 (0.02 dB); bound
+        0.15 dB."""
+        x = _sine(xp, 2**16, 1001.37, 0.999999, xp.float32)
+        y = apply_quantization(x, num_bits=10, full_scale=1.0, enob=enob, rng=3)
+        assert abs(_sqnr_db(xp, y, x) - (6.02 * enob + 1.76)) < 0.15
+
+    def test_clipping_against_gaussian_tail(self, xp):
+        """Gaussian components of rms σ against a full scale of 2σ: the
+        outputs saturate at the top level ±(A - Δ/2) exactly when the input
+        exceeds A - Δ, with probability 2Q((A - Δ)/σ) (0.0503 for 6 bits);
+        bound: 5 binomial standard deviations over 2^17 components."""
+        from tests.common.theory import q_function
+
+        n, bits, fs = 2**17, 6, 2.0
+        rng = xp.random.default_rng(4)
+        x = rng.standard_normal(n).astype(xp.float32)
+        y = apply_quantization(x, num_bits=bits, full_scale=fs)
+        step = 2 * fs / 2**bits
+        top = fs - step / 2
+        assert float(xp.max(xp.abs(y))) == pytest.approx(top)
+        measured = float(xp.mean(xp.abs(y) == xp.float32(top)))
+        p = 2 * q_function(fs - step)
+        assert abs(measured - p) < 5 * math.sqrt(p * (1 - p) / n)
+
+    def test_levels_are_mid_rise(self, xp, xpt):
+        """One bit: the levels ±full_scale/2, no zero level."""
+        y = apply_quantization(
+            xp.asarray([-3.0, -0.1, 0.0, 0.1, 3.0], dtype=xp.float32),
+            num_bits=1,
+            full_scale=2.0,
+        )
+        xpt.assert_allclose(y, xp.asarray([-1.0, -1.0, 1.0, 1.0, 1.0]), atol=0)
+
+    def test_fine_quantizer_is_transparent(self, xp):
+        """Baseline: 40 bits leave a double-precision sine untouched to
+        200 dB."""
+        x = _sine(xp, 4096, 101.3, 0.5, xp.float64)
+        y = apply_quantization(x, num_bits=40, full_scale=1.0)
+        assert _sqnr_db(xp, y, x) > 200
+
+    @pytest.mark.parametrize(
+        "kwargs",
+        [
+            {"num_bits": 0, "full_scale": 1.0},
+            {"num_bits": 8, "full_scale": 0.0},
+            {"num_bits": 8, "full_scale": 1.0, "enob": 9.0},
+            {"num_bits": 8, "full_scale": 1.0, "enob": 0.0},
+        ],
+    )
+    def test_validation(self, xp, kwargs):
+        with pytest.raises(ValueError):
+            apply_quantization(xp.ones(8, xp.float32), **kwargs)
+
+
+class TestSamplingJitter:
+    FS = 64e9
+
+    @pytest.mark.parametrize("f_ghz", [1.0, 4.0, 16.0])
+    def test_tone_snr(self, xp, f_ghz):
+        """A tone at f sampled with jitter σ: y = x·exp(j2πfδ) ≈ x(1 + j2πfδ),
+        noise of relative power (2πfσ)², SNR -20 log10(2πfσ) (70.0, 58.0,
+        45.9 dB at 50 fs).  The noise power over 2^16 samples has a relative
+        standard deviation of 0.006; bound 0.15 dB."""
+        n, sigma = 2**16, 50e-15
+        f = f_ghz * 1e9
+        x = xp.exp(2j * xp.pi * f * xp.arange(n) / self.FS).astype(xp.complex64)
+        y = apply_sampling_jitter(x, jitter=sigma, sampling_rate=self.FS, rng=5)
+        assert y.dtype == x.dtype
+        inner = slice(30, -30)
+        snr = _sqnr_db(xp, y[inner], x[inner])
+        assert abs(snr + 20 * math.log10(2 * math.pi * f * sigma)) < 0.15
+
+    def test_channels_share_the_clock(self, xp, xpt):
+        rng = xp.random.default_rng(6)
+        a = (rng.standard_normal(1024) + 1j * rng.standard_normal(1024)).astype(
+            xp.complex64
+        )
+        y = apply_sampling_jitter(
+            xp.stack([a, 3 * a]), jitter=2e-12, sampling_rate=self.FS, rng=1
+        )
+        xpt.assert_allclose(y[1], 3 * y[0], rtol=1e-5, atol=1e-5)
+
+    def test_zero_jitter_is_identity(self, xp, xpt):
+        x = xp.arange(32, dtype=xp.float32)
+        y = apply_sampling_jitter(x, jitter=0.0, sampling_rate=self.FS)
+        xpt.assert_allclose(y, x, atol=0)
+        assert y is not x
+
+    def test_sampling_rate_rules(self, xp):
+        x = xp.ones(64, dtype=xp.complex64)
+        with pytest.raises(ValueError, match="sampling_rate"):
+            apply_sampling_jitter(x, jitter=1e-12)
+        with pytest.raises(ValueError, match="jitter"):
+            apply_sampling_jitter(x, jitter=-1.0, sampling_rate=self.FS)
 
 
 class TestIQImbalanceCompensation:

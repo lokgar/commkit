@@ -568,6 +568,17 @@ ROWS: list[Row] = [
         fact=FS_CONFLICT,
     ),
     Row(
+        "commkit.impairments.frontend.apply_quantization",
+        TRANSFORM,
+        call=lambda c, x: _a(x, num_bits=6, full_scale=1.0, enob=5.0, rng=1),
+    ),
+    Row(
+        "commkit.impairments.frontend.apply_sampling_jitter",
+        TRANSFORM,
+        call=lambda c, x: _a(x, jitter=1e-12, sampling_rate=FS, rng=1),
+        fact=FS_CONFLICT,
+    ),
+    Row(
         "commkit.impairments.frontend.apply_sampling_clock_offset",
         RATE_CHANGE,
         call=lambda c, x: _a(x, offset_ppm=200.0),

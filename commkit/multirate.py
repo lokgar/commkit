@@ -389,6 +389,10 @@ def _interpolate(
         stop = min(start + _INTERP_CHUNK, m)
         mu = frac[start:stop, None].astype(real, copy=False)
         u = k[None, :] - mu
+        # sin(πμ) = sin(π(1 - μ)), on the nearer side: 1 - μ is exact, while
+        # the rounded π times a μ near 1 loses the small result (2 % at
+        # μ = 1 - 1e-6 in float32).
+        sin_pi_mu = xp.sin(math.pi * xp.minimum(mu, 1.0 - mu))
         c1 = xp.cos((u / K + 1.0) * math.pi)
         window = (a0 - a2) - (a1 - 3.0 * a3) * c1 + c1 * c1 * (2.0 * a2 - 4.0 * a3 * c1)
         # u = 0 only at μ = 0, where the instant is a sample: tap 1 there
@@ -396,9 +400,7 @@ def _interpolate(
         sinc = xp.where(
             on_sample,
             1.0,
-            neg_alt[None, :]
-            * xp.sin(math.pi * mu)
-            / (math.pi * xp.where(on_sample, 1.0, u)),
+            neg_alt[None, :] * sin_pi_mu / (math.pi * xp.where(on_sample, 1.0, u)),
         )
         taps = (sinc * window).astype(real, copy=False)
         rows = base[start:stop] + (pad - K + 1)  # window start per instant
