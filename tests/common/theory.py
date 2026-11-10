@@ -84,6 +84,36 @@ def qam16_gray_ber(esn0: float) -> float:
     return float((3 * q_function(a) + 2 * q_function(3 * a) - q_function(5 * a)) / 4)
 
 
+def pam_gray_ber(order: int, esn0: float, *, unipolar: bool = False) -> float:
+    """Bit error rate of binary-reflected Gray M-PAM with midpoint decisions
+    (exact).  The levels ``0, 1, ..., M-1`` (centred unless ``unipolar``) are
+    scaled to unit mean energy and see real noise of variance ``N0/2``;
+    ``P(j | i) = Q((t_j - a_i)/σ) - Q((t_{j+1} - a_i)/σ)`` with thresholds
+    ``t`` halfway between levels, weighted by the Hamming distance of the
+    labels ``i ^ (i >> 1)``.  Square Gray M-QAM is ``pam_gray_ber(√M,
+    esn0 / 2)``: each axis carries half the energy and half the noise."""
+    levels = np.arange(order, dtype=float)
+    if not unipolar:
+        levels -= levels.mean()
+    levels /= np.sqrt(np.mean(levels**2))
+    sigma = np.sqrt(1.0 / (2.0 * esn0))
+    edges = np.concatenate(([-np.inf], (levels[:-1] + levels[1:]) / 2, [np.inf]))
+    gray = np.arange(order) ^ (np.arange(order) >> 1)
+    ham = np.array([[bin(a ^ b).count("1") for b in gray] for a in gray])
+    p = q_function((edges[None, :-1] - levels[:, None]) / sigma) - q_function(
+        (edges[None, 1:] - levels[:, None]) / sigma
+    )
+    return float(np.sum(p * ham) / order / np.log2(order))
+
+
+def qam_gray_ber(order: int, esn0: float) -> float:
+    """Bit error rate of square Gray M-QAM (exact), see :func:`pam_gray_ber`."""
+    m = int(round(np.sqrt(order)))
+    if m * m != order:
+        raise ValueError("square QAM only")
+    return pam_gray_ber(m, esn0 / 2.0)
+
+
 def bpsk_ber(esn0: float) -> float:
     """Coherent BPSK (2-PAM) bit error rate, ``Q(sqrt(2 Es/N0))``: the
     in-phase noise of variance ``N0 / 2`` on unit-energy symbols."""
