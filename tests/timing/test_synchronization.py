@@ -11,7 +11,8 @@ from commkit.core import Preamble, Signal, SingleCarrierFrame
 from commkit.filtering import RRC
 from commkit.impairments import apply_awgn
 from commkit.mapping import Constellation
-from commkit.timing import _parabolic_peak_offset, cross_correlate_fft
+from commkit.timing import cross_correlate_fft
+from commkit.timing.synchronization import _parabolic_peak_offset
 from tests.common.conversions import device_of, to_numpy
 
 
@@ -374,7 +375,7 @@ class TestEstimateTimingMIMO:
         sig[0, 40:47] = barker
         sig[1, 42:49] = barker
 
-        with patch("commkit.timing.logger") as mock_logger:
+        with patch("commkit.timing.synchronization.logger") as mock_logger:
             est = timing.estimate_timing(sig, template=barker, threshold=2.0)
             integer = est.integer
             mock_logger.warning.assert_called()

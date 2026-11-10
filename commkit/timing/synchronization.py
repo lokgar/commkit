@@ -1,4 +1,4 @@
-"""Timing synchronization.
+"""Frame and delay synchronization.
 
 :func:`estimate_timing` finds the integer and fractional timing offset by
 cross-correlation (:func:`cross_correlate_fft`) with a template or a
@@ -15,15 +15,15 @@ from typing import Any
 
 import numpy as np
 
-from . import _fft
-from ._array import as_2d, restore_1d
-from ._sequences import barker_sequence, zadoff_chu_sequence
-from .backend import ArrayType, dispatch, to_device
-from .core import Preamble, Signal
-from .core._signal_adapter import S, adapt_signal, require_integer_sps
-from .filtering.pulses import Pulse
-from .logger import logger
-from .math import _derotate
+from .. import _fft
+from .._array import as_2d, restore_1d
+from .._sequences import barker_sequence, zadoff_chu_sequence
+from ..backend import ArrayType, dispatch, to_device
+from ..core import Preamble, Signal
+from ..core._signal_adapter import S, adapt_signal, require_integer_sps
+from ..filtering.pulses import Pulse
+from ..logger import logger
+from ..math import _derotate
 
 __all__ = [
     "TimingEstimate",

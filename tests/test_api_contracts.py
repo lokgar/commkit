@@ -802,22 +802,22 @@ ROWS: list[Row] = [
     # --- timing -------------------------------------------------------------
     Row("commkit._sequences.barker_sequence", DESIGN),
     Row("commkit._sequences.zadoff_chu_sequence", DESIGN),
-    Row("commkit.timing.cross_correlate_fft", HELPER, data=2),
+    Row("commkit.timing.synchronization.cross_correlate_fft", HELPER, data=2),
     Row(
-        "commkit.timing.correct_timing",
+        "commkit.timing.synchronization.correct_timing",
         RATE_CHANGE,
         data=2,
         call=lambda c, x: _a(x, 3),
     ),
-    Row("commkit.timing.estimate_fractional_delay", ESTIMATE, data=2),
-    Row("commkit.timing.TimingEstimate", VALUE),
+    Row("commkit.timing.synchronization.estimate_fractional_delay", ESTIMATE, data=2),
+    Row("commkit.timing.synchronization.TimingEstimate", VALUE),
     Row(
-        "commkit.timing.estimate_timing",
+        "commkit.timing.synchronization.estimate_timing",
         ESTIMATE,
         call=lambda c, x: _a(x, template=c.wave2[0, :64], threshold=1.0),
     ),
     Row(
-        "commkit.timing.fft_fractional_delay",
+        "commkit.timing.synchronization.fft_fractional_delay",
         TRANSFORM,
         call=lambda c, x: _a(x, delay=0.25),
     ),
