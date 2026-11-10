@@ -120,13 +120,15 @@ jobs:
           tests/coding/test_convolutional.py tests/coding/test_turbo.py::TestEncoding
           tests/coding/test_turbo.py::TestDecoding::test_noiseless
           tests/coding/test_linear_codes.py::TestMaximumLikelihood
+          tests/timing/test_clock_recovery.py::TestEstimate::test_matches_oracle
+          tests/timing/test_clock_recovery.py::TestValidation
           -k "not waterfall and not threshold"
           --device=cpu --cov=commkit --cov-report=
 
       - name: Kernel coverage report
         run: >-
           uv run coverage report --show-missing --fail-under=85
-          --include="commkit/equalization/_numba_loops.py,commkit/equalization/_sequential/*,commkit/frequency.py,commkit/recovery/*,commkit/coding/ldpc.py,commkit/coding/shaping.py,commkit/coding/polar.py,commkit/coding/convolutional.py,commkit/coding/turbo.py"
+          --include="commkit/equalization/_numba_loops.py,commkit/equalization/_sequential/*,commkit/frequency.py,commkit/recovery/*,commkit/coding/ldpc.py,commkit/coding/shaping.py,commkit/coding/polar.py,commkit/coding/convolutional.py,commkit/coding/turbo.py,commkit/timing/_numba_loops.py"
 
 # GPU legs (--device=gpu / --device=all) require CuPy + CUDA and are run
 # manually or on a self-hosted runner; they are intentionally not part of

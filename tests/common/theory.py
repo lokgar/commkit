@@ -129,3 +129,38 @@ def bounded_distance_fer(p: float, n: int, t: int) -> float:
     return float(
         1.0 - sum(comb(n, i) * p**i * (1 - p) ** (n - i) for i in range(t + 1))
     )
+
+
+def raised_cosine_slope_energy(rolloff: float) -> float:
+    """``Σ_{n≠0} g'(n)²`` for the raised-cosine pulse ``g`` (``T = 1``).
+
+    Sampling the matched-filter output ``τ`` symbol periods off the symbol
+    instants adds the ISI ``Σ_n a_n g(τ - n)`` beyond the symbol itself,
+    whose power for small ``τ`` and unit-power i.i.d. symbols is
+    ``τ² · Σ_{n≠0} g'(n)²`` (``g'(0) = 0``).  A timing jitter of variance
+    ``σ²`` therefore adds the noise ``σ² · Σ_{n≠0} g'(n)²``; ``π²/3`` for
+    ``rolloff → 0``.  The derivative by central differences of the
+    closed-form pulse, the sum over ``|n| ≤ 2000``.
+    """
+
+    def g(t: np.ndarray) -> np.ndarray:
+        den = 1 - (2 * rolloff * t) ** 2
+        return np.sinc(t) * np.cos(np.pi * rolloff * t) / den
+
+    n = np.arange(1, 2001, dtype=np.float64)
+    h = 1e-6
+    d = (g(n + h) - g(n - h)) / (2 * h)
+    return float(2 * np.sum(d**2))
+
+
+def ls_slope_std(
+    jitter_rms: float, correlation_length: float, num_points: int
+) -> float:
+    """Standard deviation of a least-squares slope through ``num_points``
+    equally spaced samples of a line plus noise of rms ``jitter_rms`` that
+    stays correlated over ``correlation_length`` samples.
+
+    With ``K / L`` independent samples, ``var = σ² / Σ(k - k̄)² · L =
+    12 σ² L / K³``.
+    """
+    return float(np.sqrt(12 * jitter_rms**2 * correlation_length / num_points**3))

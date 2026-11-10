@@ -52,6 +52,7 @@ from commkit.frequency import MthPower
 from commkit.impairments import Fiber, Lowdin
 from commkit.mapping import Constellation
 from commkit.recovery import BPS
+from commkit.timing import Gardner
 
 # -----------------------------------------------------------------------------
 # Kinds and checks
@@ -807,6 +808,22 @@ ROWS: list[Row] = [
     # --- timing -------------------------------------------------------------
     Row("commkit._sequences.barker_sequence", DESIGN),
     Row("commkit._sequences.zadoff_chu_sequence", DESIGN),
+    Row("commkit.timing.clock_recovery.Gardner", VALUE),
+    Row("commkit.timing.clock_recovery.SamplingClockOffsetEstimate", VALUE),
+    Row(
+        "commkit.timing.clock_recovery.estimate_sampling_clock_offset",
+        ESTIMATE,
+        data=2,
+        call=lambda c, x: _a(x, Gardner(), sps=SPS),
+        fact=SPS_CONFLICT,
+    ),
+    Row(
+        "commkit.timing.clock_recovery.correct_sampling_clock_offset",
+        RATE_CHANGE,
+        data=2,
+        call=lambda c, x: _a(x, Gardner(), sps=SPS),
+        fact=SPS_CONFLICT,
+    ),
     Row("commkit.timing.synchronization.cross_correlate_fft", HELPER, data=2),
     Row(
         "commkit.timing.synchronization.correct_timing",

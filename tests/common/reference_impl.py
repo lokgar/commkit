@@ -718,3 +718,97 @@ def algebraic_reference(
         [(sym >> (width - 1 - i)) & 1 for sym in out for i in range(width)], np.int8
     )
     return fixed, True
+
+
+def _bh_sinc_interp(x: np.ndarray, p: float, half: int) -> complex:
+    """Blackman-Harris windowed-sinc interpolation of ``x`` at ``p``,
+    ``2 · half`` taps, from the definition."""
+    i = int(np.floor(p))
+    mu = p - i
+    acc = 0j
+    for t in range(-half + 1, half + 1):
+        u = t - mu
+        ph = np.pi * (u / half + 1.0)
+        w = (
+            0.35875
+            - 0.48829 * np.cos(ph)
+            + 0.14128 * np.cos(2 * ph)
+            - 0.01168 * np.cos(3 * ph)
+        )
+        acc += x[i + t] * np.sinc(u) * w
+    return acc
+
+
+def _gardner_error(x: np.ndarray, p_prev, p_mid, p, power: bool) -> float:
+    a = _bh_sinc_interp(x, p_prev, 8)
+    m = _bh_sinc_interp(x, p_mid, 8)
+    b = _bh_sinc_interp(x, p, 8)
+    if power:
+        return -(abs(m) ** 2) * (abs(a) ** 2 - abs(b) ** 2)
+    return float(np.real(m * np.conj(a - b)))
+
+
+def gardner_reference(
+    samples: np.ndarray,
+    *,
+    sps: int,
+    power: bool,
+    normalized_bandwidth: float,
+    num_cal: int,
+) -> np.ndarray:
+    """Gardner clock recovery, one loop per channel; strobe positions in
+    samples of the input, ``(C, K)``.
+
+    Each channel is divided by its RMS.  Calibration: the mean detector
+    output over symbols ``1 .. num_cal`` at strobe offsets ``j/8`` symbol is
+    fitted with ``-A sin(2π(τ - τ0))``; ``K_d = 2πA``, ``μ = 4BT/K_d``,
+    ``β = 4(BT)²/K_d``, first strobe at ``τ0 · sps`` (``τ0`` in
+    ``[-0.5, 0.5)``).  Loop: the detector at strobe ``p`` uses the previous
+    symbol and the midpoint one and half a period ``sps(1 + ν)`` before it;
+    ``e_k`` sets the spacing ``sps(1 + ν + μ e)`` after strobe ``k + 1``,
+    ``ν += β e`` at the same time, spacing held within ``[sps/1.1, 1.1 sps]``;
+    strobes until the last sample.  Zeros outside the record.
+    """
+    x = np.atleast_2d(np.asarray(samples, dtype=np.complex128))
+    C, n = x.shape
+    pad = 64
+    xs = np.zeros((C, n + 2 * pad), dtype=np.complex128)
+    xs[:, pad : pad + n] = x / np.sqrt(np.mean(np.abs(x) ** 2, axis=-1))[:, None]
+    rows = []
+    for c in range(C):
+        offs = np.arange(8) / 8
+        curve = np.array(
+            [
+                np.mean(
+                    [
+                        _gardner_error(
+                            xs[c],
+                            pad + (k + o) * sps - sps,
+                            pad + (k + o) * sps - sps / 2,
+                            pad + (k + o) * sps,
+                            power,
+                        )
+                        for k in range(1, num_cal + 1)
+                    ]
+                )
+                for o in offs
+            ]
+        )
+        a = 2 * np.mean(curve * np.cos(2 * np.pi * offs))
+        b = 2 * np.mean(curve * np.sin(2 * np.pi * offs))
+        kd = 2 * np.pi * np.hypot(a, b)
+        tau0 = (np.arctan2(a, -b) / (2 * np.pi) + 0.5) % 1.0 - 0.5
+        mu = 4 * normalized_bandwidth / kd
+        beta = 4 * normalized_bandwidth**2 / kd
+        p, nu, e_last, pos = pad + tau0 * sps, 0.0, 0.0, []
+        while p <= pad + n - 1:
+            period = sps * (1 + nu)
+            e = _gardner_error(xs[c], p - period, p - period / 2, p, power)
+            pos.append(p - pad)
+            step = min(max(sps * (1 + nu + mu * e_last), sps / 1.1), sps * 1.1)
+            nu += beta * e_last
+            e_last = e
+            p += step
+        rows.append(pos)
+    k = min(len(r) for r in rows)
+    return np.array([r[:k] for r in rows])

@@ -24,7 +24,7 @@ from ..backend import ArrayType, dispatch, to_device
 from ..core._signal_adapter import S, adapt_signal
 from ..logger import logger
 from ..math import _derotate, db_to_linear
-from ..multirate import _interpolate
+from ..multirate import _interpolate, _stretched_instants
 
 __all__ = [
     "GramSchmidt",
@@ -156,7 +156,8 @@ def apply_sampling_clock_offset(samples: S, *, offset_ppm: float) -> S:
     sample ``n`` is the input waveform at ``n / (1 + ε)`` input samples.  A
     positive offset takes more samples per symbol than nominal, so the
     symbols drift later in the record by ``ε`` samples per sample; a
-    negative one, earlier.  Clock recovery at the receiver undoes it.
+    negative one, earlier.
+    :func:`~commkit.timing.correct_sampling_clock_offset` undoes it.
 
     The waveform between samples is the band-limited interpolant, through a
     48-tap Blackman-Harris windowed sinc in the input's precision: its error
@@ -210,16 +211,8 @@ def apply_sampling_clock_offset(samples: S, *, offset_ppm: float) -> S:
         n_in,
         n_out,
     )
-    # Output n sits at n - d input samples, d = n·ε/(1 + ε); d in the real
-    # precision of x (its rounding, 6e-8 relative, is 6e-6 samples at d = 100).
     real = xp.float32 if x.dtype in (xp.float32, xp.complex64) else xp.float64
-    n = xp.arange(n_out)
-    d = n.astype(real) * (eps / (1.0 + eps))
-    whole = xp.floor(d)
-    r = d - whole
-    on_sample = r == 0
-    base = n - whole.astype(xp.int64) - 1 + on_sample
-    frac = xp.where(on_sample, 0.0, 1.0 - r).astype(real, copy=False)
+    base, frac = _stretched_instants(n_out, 1.0 / (1.0 + eps), real, xp)
     y = _interpolate(x, base, frac)
     return signal_adapter.wrap_samples(restore_1d(was_1d, y))
 

@@ -1,0 +1,225 @@
+"""Gardner clock recovery: estimate_sampling_clock_offset and
+correct_sampling_clock_offset, scored against the clock offset and the
+timing that apply_sampling_clock_offset and a fractional delay impose."""
+
+import logging
+
+import numpy as np
+import pytest
+
+import commkit as ck
+from commkit import RRC, Constellation
+from commkit.timing import (
+    Gardner,
+    SamplingClockOffsetEstimate,
+    correct_sampling_clock_offset,
+    estimate_sampling_clock_offset,
+)
+from commkit.timing import clock_recovery as cr
+from tests.common import scoring
+from tests.common.conversions import to_numpy
+from tests.common.reference_impl import gardner_reference
+from tests.common.theory import ls_slope_std, raised_cosine_slope_energy
+
+C16 = Constellation.qam(16)
+DELAY = 0.37  # samples
+
+
+def _received(
+    xp,
+    *,
+    ppm,
+    rolloff=0.1,
+    esn0_db=20.0,
+    num_symbols=2**17,
+    sps=2,
+    constellation=C16,
+    num_channels=1,
+    rng=1,
+):
+    tx = ck.generate(
+        constellation,
+        num_symbols=num_symbols,
+        symbol_rate=32e9,
+        sps=sps,
+        pulse=RRC(rolloff=rolloff),
+        num_channels=num_channels,
+        rng=rng,
+        device="gpu" if xp is not np else "cpu",
+    )
+    rx = ck.impairments.apply_awgn(tx, esn0_db=esn0_db, rng=rng + 1)
+    rx = ck.timing.fft_fractional_delay(rx, delay=DELAY)
+    rx = ck.impairments.apply_sampling_clock_offset(rx, offset_ppm=ppm)
+    return ck.filtering.matched_filter(rx)
+
+
+def _true_trajectory(num, ppm, sps=2):
+    """Strobe of symbol k: input sample k·sps + DELAY, stretched by 1 + ε."""
+    k = np.arange(num)
+    return (k * sps + DELAY) * (1 + ppm * 1e-6) / sps - k
+
+
+class TestEstimate:
+    @pytest.mark.parametrize(
+        ("rolloff", "method"),
+        [(0.5, "classical"), (0.1, "classical"), (0.1, "power")],
+    )
+    @pytest.mark.parametrize("ppm", [20.0, -50.0])
+    def test_offset_against_truth(self, xp, rolloff, method, ppm):
+        """The offset is the least-squares slope of the trajectory over its
+        last three quarters (K = 98 304 symbols); the trajectory's error
+        against the true timing has rms σ (0.0026 to 0.018 symbol measured)
+        and stays correlated over about the loop's memory, 1/(2·B·T) = 500
+        symbols, so the slope's standard deviation is sqrt(12 σ² L / K³)
+        (0.006 to 0.05 ppm).  Bound: 4 standard deviations.  Measured
+        errors 0.006 to 0.06 ppm."""
+        mf = _received(xp, ppm=ppm, rolloff=rolloff)
+        est = estimate_sampling_clock_offset(mf, Gardner(method=method))
+        traj = to_numpy(est.trajectory)
+        err = traj - _true_trajectory(traj.size, ppm)
+        k = traj.size - traj.size // 4
+        sigma = float(np.std(err[traj.size // 4 :]))
+        bound = 4 * ls_slope_std(sigma, 1 / (2 * 1e-3), k) * 1e6
+        assert abs(float(est.value) - ppm) < bound, (float(est.value), bound)
+        assert abs(float(np.mean(err[traj.size // 4 :]))) < 0.005  # lock point
+
+    def test_joint_loop_shares_one_trajectory(self, xp):
+        """Two polarizations sampled by one clock: one loop, the same
+        trajectory and offset on both channels."""
+        mf = _received(xp, ppm=30.0, num_channels=2, num_symbols=2**16)
+        est = estimate_sampling_clock_offset(
+            mf, Gardner(method="power", joint_channels=True)
+        )
+        traj = to_numpy(est.trajectory)
+        assert traj.shape[0] == 2
+        np.testing.assert_array_equal(traj[0], traj[1])
+        value = to_numpy(est.value)
+        assert value.shape == (2,) and value[0] == value[1]
+        assert abs(value[0] - 30.0) < 0.5
+
+    def test_matches_oracle(self, xp):
+        """The kernel and its preparation against the plain-Python loop:
+        strobe positions agree to float32 rounding."""
+        mf = _received(xp, ppm=200.0, num_symbols=400, num_channels=2, esn0_db=25)
+        x = to_numpy(mf.samples)
+        for method in ("classical", "power"):
+            ref = gardner_reference(
+                x,
+                sps=2,
+                power=method == "power",
+                normalized_bandwidth=1e-2,
+                num_cal=397,
+            )
+            pos, _, _ = cr._track(
+                x, 2, Gardner(normalized_bandwidth=1e-2, method=method)
+            )
+            k = min(ref.shape[1], pos.shape[1])
+            np.testing.assert_allclose(pos[:, :k], ref[:, :k], atol=1e-4)
+
+    def test_gain_sign_matters(self, xp, monkeypatch):
+        """Baseline: with the loop's error sign flipped the loop locks to the
+        other zero of the S-curve, half a symbol off the symbol instants (it
+        still measures the slope, so the timing is what fails)."""
+        mf = _received(xp, ppm=20.0, num_symbols=2**15)
+        monkeypatch.setattr(Gardner, "gains", lambda self, kd: (-4e-3 / kd, -4e-6 / kd))
+        traj = to_numpy(estimate_sampling_clock_offset(mf, Gardner()).trajectory)
+        err = traj - _true_trajectory(traj.size, 20.0)
+        wrapped = (err[traj.size // 2 :] + 0.5) % 1.0 - 0.5
+        assert float(np.mean(np.abs(wrapped))) > 0.4
+
+
+class TestCorrect:
+    @pytest.mark.parametrize(
+        ("rolloff", "method"), [(0.5, "classical"), (0.1, "power")]
+    )
+    def test_restores_the_symbol_grid(self, xp, rolloff, method):
+        """After the loop, the symbol-rate samples carry the AWGN plus the
+        ISI of the timing jitter, σ² · Σ_{n≠0} g'(n)² for the raised-cosine
+        g (theory.raised_cosine_slope_energy), σ measured against the true
+        timing.  Predicted 19.97 and 19.70 dB, measured 20.01 and 19.59 dB;
+        bound 0.25 dB."""
+        esn0_db = 20.0
+        mf = _received(xp, ppm=20.0, rolloff=rolloff, esn0_db=esn0_db)
+        est = estimate_sampling_clock_offset(mf, Gardner(method=method))
+        traj = to_numpy(est.trajectory)
+        sigma2 = float(np.var(traj[1000:] - _true_trajectory(traj.size, 20.0)[1000:]))
+        isi = sigma2 * raised_cosine_slope_energy(rolloff)
+        predicted = -10 * np.log10(10 ** (-esn0_db / 10) + isi)
+        y = correct_sampling_clock_offset(mf, Gardner(method=method))
+        assert y.sps == 2
+        sym = ck.multirate.decimate_to_symbol_rate(y)
+        assert sym.reference.symbols.shape[-1] == sym.samples.shape[-1]
+        measured = ck.metrics.snr(sym, num_skip_symbols=1000)
+        assert abs(measured - predicted) < 0.25, (measured, predicted)
+
+    def test_static_correction_from_an_estimate(self, xp):
+        """An estimate of an earlier capture resamples by 1 + ε: the next
+        capture's residual offset is within 0.2 ppm of zero (the estimate's
+        own error, about 0.05 ppm)."""
+        first = _received(xp, ppm=40.0, rolloff=0.5, num_symbols=2**16, rng=1)
+        second = _received(xp, ppm=40.0, rolloff=0.5, num_symbols=2**16, rng=5)
+        est = estimate_sampling_clock_offset(first, Gardner())
+        fixed = correct_sampling_clock_offset(second, est)
+        residual = estimate_sampling_clock_offset(fixed, Gardner())
+        assert abs(float(residual.value)) < 0.2
+        assert fixed.reference.symbols.shape[-1] == fixed.samples.shape[-1] // 2
+
+    @pytest.mark.allow_warnings
+    def test_equalizer_needs_clock_recovery(self, xp):
+        """Baseline: at 50 ppm the symbols drift 13 symbol periods over the
+        record, beyond an 11-tap equalizer's 5.5-symbol window, and trained
+        LMS fails (SER near 0.7 over the last quarter); after Gardner
+        recovery the same equalizer decides every symbol of the last quarter
+        right at 20 dB (16-QAM SER theory 1e-5)."""
+        n = 2**18
+        mf = _received(xp, ppm=50.0, rolloff=0.5, num_symbols=n)
+        kw = {"num_taps": 11, "step_size": 1e-3}
+        train = mf.reference.symbols[..., :4000]
+        drifting = ck.equalization.lms(mf, train, **kw)
+        recovered = ck.equalization.lms(
+            correct_sampling_clock_offset(mf, Gardner()), train, **kw
+        )
+        ref = to_numpy(mf.reference.symbols)
+        last = slice(n - n // 4, n)
+        assert scoring.ser(to_numpy(drifting.y_hat)[last], ref[last], C16) > 0.3
+        assert scoring.ser(to_numpy(recovered.y_hat)[last], ref[last], C16) < 1e-3
+
+
+class TestValidation:
+    def test_needs_even_sps(self, xp):
+        mf = _received(xp, ppm=0.0, num_symbols=256, sps=3)
+        with pytest.raises(ValueError, match="even sps"):
+            estimate_sampling_clock_offset(mf, Gardner())
+
+    @pytest.mark.parametrize("method", ["classical", "power"])
+    def test_no_clock_tone_raises(self, xp, method):
+        """An unmodulated carrier has no transitions and no clock tone."""
+        carrier = xp.ones(4096, dtype=xp.complex64)
+        with pytest.raises(ValueError, match="no clock tone"):
+            estimate_sampling_clock_offset(carrier, Gardner(method=method), sps=2)
+
+    def test_method_type(self, xp):
+        with pytest.raises(TypeError, match="Gardner"):
+            estimate_sampling_clock_offset(xp.ones(64, xp.complex64), "gardner", sps=2)
+        with pytest.raises(TypeError, match="Gardner"):
+            correct_sampling_clock_offset(xp.ones(64, xp.complex64), 20.0, sps=2)
+
+    @pytest.mark.parametrize(
+        "kwargs",
+        [
+            {"normalized_bandwidth": 0.0},
+            {"integral_gain": 1e-6},
+            {"proportional_gain": -1.0},
+            {"method": "squared"},
+        ],
+    )
+    def test_gardner_validates(self, kwargs):
+        with pytest.raises(ValueError):
+            Gardner(**kwargs)
+
+    def test_logs_the_offset(self, xp, caplog):
+        mf = _received(xp, ppm=10.0, num_symbols=2**14)
+        with caplog.at_level(logging.INFO, logger="commkit"):
+            est = estimate_sampling_clock_offset(mf, Gardner())
+        assert isinstance(est, SamplingClockOffsetEstimate)
+        assert "ppm" in caplog.text

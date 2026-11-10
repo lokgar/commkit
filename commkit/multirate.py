@@ -352,7 +352,9 @@ _BLACKMAN_HARRIS = (0.35875, 0.48829, 0.14128, 0.01168)
 _INTERP_CHUNK = 1 << 14
 
 
-def _interpolate(x: ArrayType, base: ArrayType, frac: ArrayType) -> ArrayType:
+def _interpolate(
+    x: ArrayType, base: ArrayType, frac: ArrayType, *, margin: int = 0
+) -> ArrayType:
     """Band-limited interpolation of ``x`` at the instants ``base + frac``.
 
     ``x`` is ``(C, N)``, ``base`` the integer sample index left of each
@@ -360,15 +362,17 @@ def _interpolate(x: ArrayType, base: ArrayType, frac: ArrayType) -> ArrayType:
     in the real precision of ``x``).  A Blackman-Harris windowed sinc of
     ``2 · _INTERP_HALF_WIDTH`` taps, computed in the precision of ``x`` and
     chunked over the instants; the record is zero-extended, so instants
-    within the half-width of either end lose accuracy.  Returns ``(C, M)``
-    in the dtype of ``x`` on its device.
+    within the half-width of either end lose accuracy.  ``base`` may reach
+    ``margin`` samples beyond either end.  Returns ``(C, M)`` in the dtype of
+    ``x`` on its device.
     """
     x, xp, _ = dispatch(x)
     K = _INTERP_HALF_WIDTH
     real = xp.float32 if x.dtype in (xp.float32, xp.complex64) else xp.float64
     C, _n = x.shape
     m = base.shape[0]
-    padded = xp.pad(x, ((0, 0), (K, K)))
+    pad = K + margin
+    padded = xp.pad(x, ((0, 0), (pad, pad)))
     offsets = xp.arange(-K + 1, K + 1)
     k = offsets.astype(real)
     out = xp.empty((C, m), dtype=x.dtype)
@@ -383,6 +387,26 @@ def _interpolate(x: ArrayType, base: ArrayType, frac: ArrayType) -> ArrayType:
             - _BLACKMAN_HARRIS[3] * xp.cos(3.0 * phase)
         )
         taps = xp.sinc(u) * window
-        idx = base[start:stop, None] + (offsets + K)[None, :]
+        idx = base[start:stop, None] + (offsets + pad)[None, :]
         out[:, start:stop] = xp.sum(padded[:, idx] * taps[None], axis=-1)
     return out
+
+
+def _stretched_instants(
+    num_out: int, rate: float, real: Any, xp: Any
+) -> tuple[ArrayType, ArrayType]:
+    """The instants ``n · rate``, ``n = 0 .. num_out - 1``, as the integer
+    index left of each (int64) and its fraction in ``[0, 1)`` (``real``).
+
+    Written ``n - d`` with ``d = n · (1 - rate)`` in ``real`` precision, so
+    no sample-rate float64 is made: the rounding of ``d`` (6e-8 relative in
+    float32) is 6e-6 samples at ``d = 100``.
+    """
+    n = xp.arange(num_out)
+    d = n.astype(real) * (1.0 - rate)
+    whole = xp.floor(d)
+    r = d - whole
+    on_sample = r == 0
+    base = n - whole.astype(xp.int64) - 1 + on_sample
+    frac = xp.where(on_sample, 0.0, 1.0 - r).astype(real, copy=False)
+    return base, frac
