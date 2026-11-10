@@ -4,6 +4,10 @@ Notable changes to CommKit, newest first. Performance figures are from the refer
 
 ## [Unreleased]
 
+## [3.7.1] - 2026-11-10
+
+Gardner clock recovery no longer runs away when its loop is too wide: the integrator is bounded to plausible clock offsets, and slips are reported. The notebooks on clock recovery, direct and coherent detection and the ADC now introduce their topics with figures.
+
 ### Added
 
 - `timing.Gardner(max_offset_ppm=1000.0)`: the largest clock offset the loop tracks. The loop's integrator is held within it.
@@ -16,6 +20,10 @@ Notable changes to CommKit, newest first. Performance figures are from the refer
 ### Fixed
 
 - A Gardner loop too wide for its detector's noise, such as the classical detector at `normalized_bandwidth=1e-2` on a 0.1-rolloff signal, no longer runs away in frequency without notice. Once it slipped, nothing pulled its integrator back, and it reached tens of thousands of ppm on a 50 ppm clock, with thousands of extra symbols in the corrected output. The bounded loop keeps returning to lock and reports the slips.
+
+### Development
+
+- Notebooks 12 (sampling-clock recovery), 22 (direct and self-coherent detection, now also coherent detection and its LO gain) and the skew and ADC sections of 10 explain their topics with figures: the drifting eye, how the Gardner detector tells early from late, loop bandwidth and cycle slips, PAM-4 eyes and sensitivity, thermal against shot noise, laser RIN, balanced photodiodes, quantization and jitter.
 
 ## [3.7.0] - 2026-11-10
 
@@ -516,7 +524,8 @@ See the [GitHub release](https://github.com/lokgar/commkit/releases/tag/v1.1.0) 
 
 First release. See the [GitHub release](https://github.com/lokgar/commkit/releases/tag/v1.0.0).
 
-[Unreleased]: https://github.com/lokgar/commkit/compare/v3.7.0...HEAD
+[Unreleased]: https://github.com/lokgar/commkit/compare/v3.7.1...HEAD
+[3.7.1]: https://github.com/lokgar/commkit/compare/v3.7.0...v3.7.1
 [3.7.0]: https://github.com/lokgar/commkit/compare/v3.6.1...v3.7.0
 [3.6.1]: https://github.com/lokgar/commkit/compare/v3.6.0...v3.6.1
 [3.6.0]: https://github.com/lokgar/commkit/compare/v3.5.0...v3.6.0
