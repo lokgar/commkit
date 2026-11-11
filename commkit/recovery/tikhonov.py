@@ -208,6 +208,14 @@ class Tikhonov:
     Notes
     -----
     A residual ``2π/M`` ambiguity remains.
+
+    ``σ_p²`` is the long-run increment of the block means of a Wiener phase,
+    ``σ²·N_b`` per block for ``σ² = 2π·Δν·T_s``.  Adjacent block means
+    differ by less, ``σ²(2N_b² + 1)/(3N_b)``, but those differences are
+    positively correlated (by about 1/4), and the smoother's gain follows
+    the long-run behaviour: on QPSK with a Wiener phase (``Δν·T_s`` from
+    ``1e-5`` to ``1e-4``, 8 to 20 dB, blocks of 8 to 64) the lag-one
+    variance gave a per-symbol phase error 1 to 1.5 % larger.
     """
 
     linewidth: float
@@ -277,6 +285,8 @@ def _tikhonov(symbols: ArrayType, method: Tikhonov, ctx: _Context) -> _Phase:
 
     snr_lin = 10.0 ** (method.snr_db / 10.0)
     linewidth_symbol_periods = method.linewidth / ctx.need_sampling_rate(method)
+    # The long-run increment of the block means, not the variance of adjacent
+    # differences (2/3 of it, correlated); see the class Notes.
     sigma_p2 = float(2.0 * np.pi * linewidth_symbol_periods * block_size)
     sigma_v2 = _vv_observation_variance(constellation, M, project, snr_lin, block_size)
 
