@@ -488,6 +488,8 @@ ROWS: list[Row] = [
     Row(
         "commkit.filtering.fiber.estimation.ChromaticDispersionEstimate", VALUE, data=0
     ),
+    Row("commkit.filtering.fiber.estimation.DispersionFitEstimate", VALUE, data=0),
+    Row("commkit.filtering.fiber.estimation.DispersionScanEstimate", VALUE, data=0),
     Row(
         "commkit.filtering.fiber.estimation.estimate_chromatic_dispersion",
         ESTIMATE,

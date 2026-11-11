@@ -777,6 +777,7 @@ class TestEstimateChromaticDispersion:
         and 0.1 with noise, PMD and a frequency offset (measured)."""
         y = _dispersed_signal(xp, ps_nm, rolloff, noise=True)
         est = filtering.estimate_chromatic_dispersion(y, filtering.FourthMomentScan())
+        assert isinstance(est, filtering.DispersionScanEstimate)
         assert abs(float(est.value[0]) - ps_nm) < 25.0
         k = int(np.argmax(est.metric))
         assert est.metric[k] == 1.0
@@ -795,7 +796,7 @@ class TestEstimateChromaticDispersion:
         y = apply_awgn(y, esn0_db=12, rng=2)
         est = filtering.estimate_chromatic_dispersion(y, filtering.QuadraticPhaseFit())
         assert abs(float(est.value[0]) - ps_nm) < 25.0
-        assert est.candidates is None
+        assert isinstance(est, filtering.DispersionFitEstimate)
         b2l = -ps_nm * 1e-3 * (1550.12e-9) ** 2 / (2 * np.pi * 299_792_458.0)
         inband = np.isfinite(est.group_delay) & (np.abs(est.frequencies) < 10e9)
         omega = 2 * np.pi * est.frequencies[inband]

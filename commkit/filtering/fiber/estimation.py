@@ -9,7 +9,9 @@ in ps/nm, which :func:`~commkit.filtering.correct_chromatic_dispersion`
 takes as ``how``.
 """
 
+import dataclasses
 import math
+from collections.abc import Callable
 from dataclasses import dataclass
 from typing import Any
 
@@ -35,6 +37,8 @@ from ...math import _phasor
 __all__ = [
     "ChromaticDispersionEstimate",
     "ClockToneScan",
+    "DispersionFitEstimate",
+    "DispersionScanEstimate",
     "FourthMomentScan",
     "QuadraticPhaseFit",
     "estimate_chromatic_dispersion",
@@ -230,9 +234,12 @@ class QuadraticPhaseFit:
 
 @dataclass(frozen=True)
 class ChromaticDispersionEstimate:
-    """Result of :func:`estimate_chromatic_dispersion`.
+    """Result of :func:`estimate_chromatic_dispersion`, the fields every
+    method gives.
 
-    The constructor takes the same fields.
+    The constructor takes the same fields.  Each method returns a subclass
+    with its diagnostics: :class:`DispersionScanEstimate` for the scans,
+    :class:`DispersionFitEstimate` for :class:`QuadraticPhaseFit`.
 
     Attributes
     ----------
@@ -242,27 +249,60 @@ class ChromaticDispersionEstimate:
         same joint estimate (the channels share the fiber).
     method : ClockToneScan, FourthMomentScan or QuadraticPhaseFit
         The method that produced the estimate.
-    candidates : numpy.ndarray or None
-        The scans: candidate accumulated dispersions in ps/nm, ascending,
-        ``(K,)``.
-    metric : numpy.ndarray or None
-        The scans: the metric at ``candidates``, the best candidate 1
-        (``ClockToneScan``: the clock-tone power over its peak;
-        ``FourthMomentScan``: the smallest fourth moment over each one's).
-    frequencies : numpy.ndarray or None
-        ``QuadraticPhaseFit``: frequencies of ``group_delay`` in Hz.
-    group_delay : numpy.ndarray or None
-        ``QuadraticPhaseFit``: the measured group delay of the channel in
-        seconds, ``-∠ H(f + Δf) H*(f) / Δω`` (NaN outside the signal band),
-        whose slope against ``ω`` the fit reads as ``β₂L``.
     """
 
     value: ArrayType
     method: ClockToneScan | FourthMomentScan | QuadraticPhaseFit
-    candidates: np.ndarray | None = None
-    metric: np.ndarray | None = None
-    frequencies: np.ndarray | None = None
-    group_delay: np.ndarray | None = None
+
+
+@dataclass(frozen=True)
+class DispersionScanEstimate(ChromaticDispersionEstimate):
+    """Result of a scan, :class:`ClockToneScan` or :class:`FourthMomentScan`.
+
+    The constructor takes the same fields.
+
+    Attributes
+    ----------
+    value : ndarray
+        Accumulated dispersion ``D·L`` in ps/nm, as in
+        :class:`ChromaticDispersionEstimate`.
+    method : ClockToneScan or FourthMomentScan
+        The method that produced the estimate.
+    candidates : numpy.ndarray
+        Candidate accumulated dispersions in ps/nm, ascending, ``(K,)``.
+    metric : numpy.ndarray
+        The metric at ``candidates``, the best candidate 1
+        (``ClockToneScan``: the clock-tone power over its peak;
+        ``FourthMomentScan``: the smallest fourth moment over each one's).
+    """
+
+    candidates: np.ndarray
+    metric: np.ndarray
+
+
+@dataclass(frozen=True)
+class DispersionFitEstimate(ChromaticDispersionEstimate):
+    """Result of :class:`QuadraticPhaseFit`.
+
+    The constructor takes the same fields.
+
+    Attributes
+    ----------
+    value : ndarray
+        Accumulated dispersion ``D·L`` in ps/nm, as in
+        :class:`ChromaticDispersionEstimate`.
+    method : QuadraticPhaseFit
+        The method that produced the estimate.
+    frequencies : numpy.ndarray
+        Frequencies of ``group_delay`` in Hz.
+    group_delay : numpy.ndarray
+        The measured group delay of the channel in seconds,
+        ``-∠ H(f + Δf) H*(f) / Δω`` (NaN outside the signal band), whose
+        slope against ``ω`` the fit reads as ``β₂L``.
+    """
+
+    frequencies: np.ndarray
+    group_delay: np.ndarray
 
 
 #: Smallest FFT block of the clock-tone scan, and the scan's zero padding.
@@ -296,8 +336,8 @@ def _clock_tone(
     symbol_rate: float,
     wavelength_nm: float,
     reference: Any = None,
-) -> dict[str, Any]:
-    """The clock-tone scan of ``(C, N)`` samples."""
+) -> DispersionScanEstimate:
+    """The clock-tone scan of ``(C, N)`` samples (``value`` a host float)."""
     x, xp, _ = dispatch(x)
     num_ch, n = x.shape
     lo, hi = method.search_range
@@ -379,7 +419,7 @@ def _clock_tone(
         )
     peak = float(values.max())
     metric = values / peak if peak > 0 else values
-    return {"value": estimate, "candidates": candidates, "metric": metric}
+    return DispersionScanEstimate(estimate, method, candidates, metric)
 
 
 #: Candidates compensated per batch by the fourth-moment scan.
@@ -394,7 +434,7 @@ def _fourth_moment(
     symbol_rate: float,
     wavelength_nm: float,
     reference: Any = None,
-) -> dict[str, Any]:
+) -> DispersionScanEstimate:
     """The fourth-moment scan of ``(C, N)`` samples."""
     x, xp, _ = dispatch(x)
     num_ch, n = x.shape
@@ -448,11 +488,9 @@ def _fourth_moment(
     kappa = np.concatenate([k_coarse, k_fine])
     order = np.argsort(candidates)
     candidates, kappa = candidates[order], kappa[order]
-    return {
-        "value": estimate,
-        "candidates": candidates,
-        "metric": float(kappa.min()) / kappa,
-    }
+    return DispersionScanEstimate(
+        estimate, method, candidates, float(kappa.min()) / kappa
+    )
 
 
 def _quadratic_phase_pass(
@@ -498,7 +536,7 @@ def _quadratic_phase(
     symbol_rate: float,
     wavelength_nm: float,
     reference: Any = None,
-) -> dict[str, Any]:
+) -> DispersionFitEstimate:
     """The data-aided quadratic-phase fit of ``(C, N)`` samples."""
     name = "estimate_chromatic_dispersion()"
     symbols = method.symbols if method.symbols is not None else reference
@@ -539,14 +577,12 @@ def _quadratic_phase(
         b2l, _, freq, delay = _quadratic_phase_pass(
             x, known, refined, sampling_rate, xp
         )
-    return {
-        "value": float(_beta2_length_to_ps_nm(b2l, wavelength_nm)),
-        "frequencies": freq,
-        "group_delay": delay,
-    }
+    return DispersionFitEstimate(
+        float(_beta2_length_to_ps_nm(b2l, wavelength_nm)), method, freq, delay
+    )
 
 
-_ESTIMATORS: dict[type, Any] = {
+_ESTIMATORS: dict[type, Callable[..., ChromaticDispersionEstimate]] = {
     ClockToneScan: _clock_tone,
     FourthMomentScan: _fourth_moment,
     QuadraticPhaseFit: _quadratic_phase,
@@ -589,7 +625,8 @@ def estimate_chromatic_dispersion(
     Returns
     -------
     ChromaticDispersionEstimate
-        The estimate in ps/nm, with the scan (candidates and metric) or the
+        The estimate in ps/nm: a :class:`DispersionScanEstimate` with the scan
+        (candidates and metric) or a :class:`DispersionFitEstimate` with the
         measured group delay.
 
     Raises
@@ -659,7 +696,7 @@ def _estimate_chromatic_dispersion(
     reference = None
     if signal is not None and signal.reference is not None:
         reference = signal.reference.symbols
-    fields = estimator(
+    est = estimator(
         x2,
         method,
         sampling_rate=fs,
@@ -667,7 +704,7 @@ def _estimate_chromatic_dispersion(
         wavelength_nm=lam,
         reference=reference,
     )
-    value = fields.pop("value")
+    value = est.value
     rolloff = getattr(getattr(signal, "pulse", None), "rolloff", None)
     if isinstance(method, ClockToneScan) and rolloff is not None and rolloff < 0.05:
         logger.warning(
@@ -684,6 +721,4 @@ def _estimate_chromatic_dispersion(
         lam,
     )
     out = xp.full((x2.shape[0],), value, dtype=xp.float64)
-    return ChromaticDispersionEstimate(
-        value=out[0] if was_1d else out, method=method, **fields
-    )
+    return dataclasses.replace(est, value=out[0] if was_1d else out)

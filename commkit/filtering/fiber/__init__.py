@@ -16,6 +16,8 @@ from .compensation import (
 from .estimation import (
     ChromaticDispersionEstimate,
     ClockToneScan,
+    DispersionFitEstimate,
+    DispersionScanEstimate,
     FourthMomentScan,
     QuadraticPhaseFit,
     estimate_chromatic_dispersion,
@@ -24,6 +26,8 @@ from .estimation import (
 __all__ = [
     "ChromaticDispersionEstimate",
     "ClockToneScan",
+    "DispersionFitEstimate",
+    "DispersionScanEstimate",
     "FourthMomentScan",
     "QuadraticPhaseFit",
     "correct_chromatic_dispersion",

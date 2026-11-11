@@ -13,8 +13,9 @@
   after the sizes, optionally circular), :func:`iir_filter` and
   :func:`matched_filter`.
 - Fiber compensation: :func:`estimate_chromatic_dispersion` (blind
-  :class:`ClockToneScan` and :class:`FourthMomentScan`, data-aided
-  :class:`QuadraticPhaseFit`) and :func:`correct_chromatic_dispersion`, the inverse
+  :class:`ClockToneScan` and :class:`FourthMomentScan`, giving a
+  :class:`DispersionScanEstimate`, and data-aided :class:`QuadraticPhaseFit`,
+  giving a :class:`DispersionFitEstimate`) and :func:`correct_chromatic_dispersion`, the inverse
   of :func:`commkit.impairments.apply_chromatic_dispersion` (its FIR filter
   designed by :func:`dispersion_compensation_taps`), and digital
   backpropagation :func:`correct_fiber_propagation`, the inverse of
@@ -28,6 +29,8 @@ and estimation smoothers are in :mod:`commkit.smoothing`.
 from .fiber import (
     ChromaticDispersionEstimate,
     ClockToneScan,
+    DispersionFitEstimate,
+    DispersionScanEstimate,
     FourthMomentScan,
     QuadraticPhaseFit,
     correct_chromatic_dispersion,
@@ -59,6 +62,8 @@ from .response import FilterResponse, filter_response, impulse_response, step_re
 __all__ = [
     "ChromaticDispersionEstimate",
     "ClockToneScan",
+    "DispersionFitEstimate",
+    "DispersionScanEstimate",
     "FilterResponse",
     "FourthMomentScan",
     "Gaussian",
