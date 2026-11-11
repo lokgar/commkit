@@ -165,3 +165,45 @@ class TestPolarizationCombining:
             analysis.dsh_phase(
                 xp.asarray(z), sampling_rate=FS, combine_polarizations=True
             )
+
+
+class TestSinglePrecision:
+    """The beat keeps the input's precision; only the phase is widened to
+    float64 before ``unwrap``.  Single-precision rounding (ε ≈ 6e-8) moves
+    each angle by about ε radians, so float32 and float64 runs agree to well
+    within 1e-5 rad sample to sample (measured: a few 1e-7)."""
+
+    def test_dsh_beat_keeps_a_float32_trajectory_single(self, xp):
+        phi = xp.zeros(1000, dtype=xp.float32)
+        z, _ = analysis.dsh_beat(phi, sampling_rate=FS, delay=10 / FS, f_shift=80e6)
+        assert z.dtype == xp.complex64
+
+    def test_analytic_beat_keeps_the_precision(self, xp):
+        from commkit.analysis.interferometry import _analytic_beat
+
+        z, _ = make_dsh_beat(2e5, 1 << 12, 100, 80e6, seed=2)
+        z = xp.asarray(z)
+        assert _analytic_beat(z.astype(xp.complex64))[0].dtype == xp.complex64
+        assert _analytic_beat(z.real.astype(xp.float32))[0].dtype == xp.complex64
+        assert _analytic_beat(z.real)[0].dtype == xp.complex128
+        pair = xp.stack([z, 0.5 * z]).astype(xp.complex64)
+        combined, _, _ = _analytic_beat(pair, True, FS)
+        assert combined.dtype == xp.complex64
+
+    @pytest.mark.parametrize("kind", ["complex", "real", "dual_pol"])
+    def test_single_matches_double(self, xp, kind):
+        if kind == "dual_pol":
+            z, _ = make_dual_pol_dsh_beat(num_samples=1 << 16, seed=1)
+        else:
+            z, _ = make_dsh_beat(2e5, 1 << 16, 500, 80e6, snr_db=None, seed=3)
+            z = z.real if kind == "real" else z
+        z = xp.asarray(z)
+        single = z.astype(xp.complex64 if kind != "real" else xp.float32)
+        kw = dict(
+            sampling_rate=FS, f_shift=80e6, combine_polarizations=kind == "dual_pol"
+        )
+        dp64, _ = analysis.dsh_phase(z, **kw)
+        dp32, _ = analysis.dsh_phase(single, **kw)
+        assert dp32.dtype == xp.float64
+        err = to_device(xp.diff(dp32 - dp64), "cpu")
+        assert np.max(np.abs(err)) < 1e-5
