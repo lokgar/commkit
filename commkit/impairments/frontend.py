@@ -80,7 +80,7 @@ def apply_iq_imbalance(
         Delay ``τ`` of the Q branch against I in seconds; negative advances
         Q.  Applied as a linear phase on the spectrum of Q (ideal band-limited
         interpolation), so the record is treated as periodic, as in
-        :func:`~commkit.timing.fft_fractional_delay`.
+        :func:`~commkit.timing.apply_delay`.
     sampling_rate : float, optional
         Sampling rate in Hz.  Taken from the Signal; required for array input
         when ``skew`` is not zero.  A value that disagrees with the Signal

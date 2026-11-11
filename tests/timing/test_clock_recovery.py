@@ -49,7 +49,7 @@ def _received(
         device="gpu" if xp is not np else "cpu",
     )
     rx = ck.impairments.apply_awgn(tx, esn0_db=esn0_db, rng=rng + 1)
-    rx = ck.timing.fft_fractional_delay(rx, delay=DELAY)
+    rx = ck.timing.apply_delay(rx, delay=DELAY)
     rx = ck.impairments.apply_sampling_clock_offset(rx, offset_ppm=ppm)
     return ck.filtering.matched_filter(rx)
 

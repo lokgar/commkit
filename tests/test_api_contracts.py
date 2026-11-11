@@ -866,14 +866,14 @@ ROWS: list[Row] = [
         call=lambda c, x: _a(x, Gardner(), sps=SPS),
         fact=SPS_CONFLICT,
     ),
-    Row("commkit.timing.synchronization.cross_correlate_fft", HELPER, data=2),
+    Row("commkit.timing.synchronization.cross_correlate", HELPER, data=2),
     Row(
         "commkit.timing.synchronization.correct_timing",
         RATE_CHANGE,
         data=2,
         call=lambda c, x: _a(x, 3),
     ),
-    Row("commkit.timing.synchronization.estimate_fractional_delay", ESTIMATE, data=2),
+    Row("commkit.timing.synchronization.peak_offset", ESTIMATE, data=2),
     Row("commkit.timing.synchronization.TimingEstimate", VALUE),
     Row(
         "commkit.timing.synchronization.estimate_timing",
@@ -881,7 +881,7 @@ ROWS: list[Row] = [
         call=lambda c, x: _a(x, template=c.wave2[0, :64], threshold=1.0),
     ),
     Row(
-        "commkit.timing.synchronization.fft_fractional_delay",
+        "commkit.timing.synchronization.apply_delay",
         TRANSFORM,
         call=lambda c, x: _a(x, delay=0.25),
     ),

@@ -38,7 +38,7 @@ def parabolic_peak_offset(
     Every three-point peak fit of the library uses it: ``frequency.MthPower``
     on magnitudes (``log=False``), ``frequency.SpectralPeak`` and
     :func:`refine_tones` (``log=True``), and
-    :func:`estimate_fractional_delay` with either fit, which first rotates a
+    :func:`peak_offset` with either fit, which first rotates a
     complex peak onto the real axis and passes its own ``log_eps`` and
     ``denom_eps``.  The arithmetic goes through ``xp`` only, so the inputs
     may be host floats (``xp=numpy``) or device arrays.

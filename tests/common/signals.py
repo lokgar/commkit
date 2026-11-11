@@ -141,7 +141,7 @@ def make_channel_signal(
 
     - ``isi_taps``: circular convolution at the sample spacing; the largest
       tap is the main path, so reference symbol ``k`` stays at period ``k``.
-    - ``frac_delay``: a common delay in samples (:func:`fft_fractional_delay`).
+    - ``frac_delay``: a common delay in samples (:func:`apply_delay`).
     - ``theta``: a polarization rotation (two channels).
     - ``dgd``: differential group delay in seconds at ``dgd_theta``.
     - ``esn0_db``: AWGN at that Es/N0.
@@ -158,7 +158,7 @@ def make_channel_signal(
         apply_pmd,
         apply_polarization_mixing,
     )
-    from commkit.timing import fft_fractional_delay
+    from commkit.timing import apply_delay
 
     sig = generate(
         constellation,
@@ -180,7 +180,7 @@ def make_channel_signal(
         x = np.fft.ifft(np.fft.fft(x, axis=-1) * np.fft.fft(kernel), axis=-1)
     x = x.astype(np.complex64)
     if frac_delay:
-        x = fft_fractional_delay(x, delay=frac_delay)
+        x = apply_delay(x, delay=frac_delay)
     if theta is not None:
         x = apply_polarization_mixing(x, theta=theta)
     if dgd:

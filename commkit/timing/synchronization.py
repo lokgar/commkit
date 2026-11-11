@@ -1,10 +1,10 @@
 """Frame and delay synchronization.
 
 :func:`estimate_timing` finds the integer and fractional timing offset by
-cross-correlation (:func:`cross_correlate_fft`) with a template or a
+cross-correlation (:func:`cross_correlate`) with a template or a
 :class:`~commkit.core.Preamble` (a :class:`TimingEstimate`), and
-:func:`correct_timing` removes it.  :func:`estimate_fractional_delay` and
-:func:`fft_fractional_delay` measure and apply sub-sample delays.  The
+:func:`correct_timing` removes it.  :func:`peak_offset` and
+:func:`apply_delay` measure and apply sub-sample delays.  The
 sequences :func:`barker_sequence` and :func:`zadoff_chu_sequence` build
 preambles.
 """
@@ -28,16 +28,16 @@ from ..math import _derotate
 
 __all__ = [
     "TimingEstimate",
+    "apply_delay",
     "barker_sequence",
     "correct_timing",
-    "cross_correlate_fft",
-    "estimate_fractional_delay",
+    "cross_correlate",
     "estimate_timing",
-    "fft_fractional_delay",
+    "peak_offset",
     "zadoff_chu_sequence",
 ]
 
-# Window length for DFT-upsampling in estimate_fractional_delay()
+# Window length for DFT-upsampling in peak_offset()
 _DFT_WINDOW = 33
 
 # -----------------------------------------------------------------------------
@@ -45,7 +45,7 @@ _DFT_WINDOW = 33
 # -----------------------------------------------------------------------------
 
 
-def cross_correlate_fft(
+def cross_correlate(
     samples: ArrayType,
     template: ArrayType,
     *,
@@ -130,19 +130,19 @@ def cross_correlate_fft(
 # -----------------------------------------------------------------------------
 # CORRELATION-DOMAIN ESTIMATION (array-only)
 # -----------------------------------------------------------------------------
-# estimate_fractional_delay operates on a correlation array (e.g. from
-# cross_correlate_fft), not on raw IQ samples or any Signal field, so it is
+# peak_offset operates on a correlation array (e.g. from
+# cross_correlate), not on raw IQ samples or any Signal field, so it is
 # not Signal-aware.
 
 
-def estimate_fractional_delay(
+def peak_offset(
     correlation: ArrayType,
     peak_indices: ArrayType,
     *,
     dft_upsample: int = 1,
-    fit: str = "log-parabolic",
+    method: str = "log-parabolic",
 ) -> ArrayType:
-    """Estimate the sub-sample offset of correlation peaks.
+    """Sub-sample offset of correlation peaks.
 
     Fits a parabola (or, on the logarithm, a Gaussian) through the three
     samples around each integer peak.  Complex input is rotated so that the
@@ -163,7 +163,7 @@ def estimate_fractional_delay(
     dft_upsample : int, default 1
         Interpolation factor of the DFT zero-padding; 1 fits the samples
         directly.
-    fit : {'parabolic', 'log-parabolic'}, default 'log-parabolic'
+    method : {'parabolic', 'log-parabolic'}, default 'log-parabolic'
         Peak fit:
 
         - ``'parabolic'``: a parabola through the samples.
@@ -178,8 +178,11 @@ def estimate_fractional_delay(
         ``dft_upsample=1``; with upsampling, the offset of the interpolated
         peak.  0 for a peak on the first or last sample.
     """
-    if fit not in ("parabolic", "log-parabolic"):
-        raise ValueError(f"fit must be 'parabolic' or 'log-parabolic', got {fit!r}.")
+    if method not in ("parabolic", "log-parabolic"):
+        raise ValueError(
+            f"method must be 'parabolic' or 'log-parabolic', got {method!r}."
+        )
+    fit = method
     correlation, xp, _ = dispatch(correlation)
     peak_indices = xp.asarray(peak_indices)
     scalar_input = peak_indices.ndim == 0
@@ -309,12 +312,12 @@ def estimate_fractional_delay(
 # -----------------------------------------------------------------------------
 # TIMING SYNCHRONIZATION (Signal-aware)
 # -----------------------------------------------------------------------------
-# fft_fractional_delay / correct_timing rewrap to a Signal (pass-through);
+# apply_delay / correct_timing rewrap to a Signal (pass-through);
 # estimate_timing unwraps the input but returns raw (integer, fractional)
 # offset arrays.
 
 
-def fft_fractional_delay(samples: S, *, delay: float | ArrayType) -> S:
+def apply_delay(samples: S, *, delay: float | ArrayType) -> S:
     """Delay samples by a fractional number of samples in the frequency domain.
 
     The delay is a linear phase on the spectrum, ideal (periodic sinc)
@@ -342,7 +345,7 @@ def fft_fractional_delay(samples: S, *, delay: float | ArrayType) -> S:
     ``Y[k] = X[k] · exp(-j 2π k · delay / N)`` with ``k`` the signed FFT bin
     index.
     """
-    signal_adapter = adapt_signal(samples, function_name="fft_fractional_delay()")
+    signal_adapter = adapt_signal(samples, function_name="apply_delay()")
     x, xp, _ = dispatch(signal_adapter.array)
     x, was_1d = as_2d(x, name="samples")
 
@@ -393,7 +396,7 @@ class TimingEstimate:
         Sample index where the template starts (``int64``).
     fractional : ndarray
         Sub-sample offset of the correlation peak (see
-        :func:`estimate_fractional_delay`; in ``[-0.5, 0.5]`` without DFT
+        :func:`peak_offset`; in ``[-0.5, 0.5]`` without DFT
         upsampling).
     metric : ndarray
         Peak-to-mean ratio of ``|correlation|`` (the detection metric).
@@ -525,7 +528,7 @@ def estimate_timing(
     if C_tx > 1:
         # Correlate every TX template against every RX channel, with one
         # transform of the signal: corr_all[rx, tx, lag], (C_rx, C_tx, N_lag),
-        # the positive lags of cross_correlate_fft.
+        # the positive lags of cross_correlate.
         N_lag = sig_processing.shape[-1]
         n_fft = 1 << (N_lag + L - 2).bit_length()
         SIG = _fft.fft(sig_processing, n_fft, axis=-1)[:, None, :]
@@ -546,7 +549,7 @@ def estimate_timing(
         corr = xp.take_along_axis(corr_all, pick, axis=1)[:, 0]
         corr_mag = xp.take_along_axis(corr_all_mag, pick, axis=1)[:, 0]
     else:
-        corr = cross_correlate_fft(sig_processing, ref_waveform, mode="positive_lags")
+        corr = cross_correlate(sig_processing, ref_waveform, mode="positive_lags")
         corr_mag = xp.abs(corr)
     peak_indices = xp.argmax(corr_mag, axis=-1)  # (C,)
 
@@ -626,8 +629,8 @@ def estimate_timing(
     integer_offsets = xp.maximum(0, peak_indices + offset)
 
     # === Fractional Timing (Parabolic Interpolation) ===
-    fractional_offsets = estimate_fractional_delay(
-        corr, peak_indices, dft_upsample=dft_upsample, fit=fit
+    fractional_offsets = peak_offset(
+        corr, peak_indices, dft_upsample=dft_upsample, method=fit
     )
 
     if logger.isEnabledFor(logging.INFO):
@@ -741,14 +744,14 @@ def correct_timing(
     apply_frac = bool(xp.any(xp.abs(fractional_offset) > 1e-9))
 
     # mode='slice': apply fractional delay on the *full* pre-slice buffer.
-    # fft_fractional_delay treats its input as circular; applying it after the
+    # apply_delay treats its input as circular; applying it after the
     # slice would wrap the slice's trailing edge back into its new sample 0 -
     # exactly the frame boundary we just aligned to. Applying first puts the
     # wrap at the physical buffer ends, the leading one of which is then
     # discarded by the slice; only the tail of the slice carries any residual
     # ~sinc-tail artifact, well away from the equalizer training start.
     if mode == "slice" and apply_frac:
-        x = fft_fractional_delay(x, delay=-fractional_offset)
+        x = apply_delay(x, delay=-fractional_offset)
 
     # === Integer correction (integer shift) ===
 
@@ -802,7 +805,7 @@ def correct_timing(
     # buffer; here we only handle 'circular' / 'zero', whose output length
     # equals the input length so the wrap location is unchanged either way.
     if apply_frac and mode != "slice":
-        x = fft_fractional_delay(x, delay=-fractional_offset)
+        x = apply_delay(x, delay=-fractional_offset)
 
     logger.info(
         "Timing corrected: integer=applied, fractional=%s, mode=%r%s.",

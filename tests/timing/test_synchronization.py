@@ -9,7 +9,7 @@ from commkit.core import Preamble, Signal, SingleCarrierFrame
 from commkit.filtering import RRC
 from commkit.impairments import apply_awgn
 from commkit.mapping import Constellation
-from commkit.timing import cross_correlate_fft
+from commkit.timing import cross_correlate
 from tests.common.conversions import device_of, to_numpy
 
 
@@ -32,7 +32,7 @@ class TestTimingSequences:
     def test_barker_autocorrelation(self, xp):
         """Verify that Barker sequences possess optimal autocorrelation properties."""
         seq = xp.asarray(timing.barker_sequence(13))
-        acorr = cross_correlate_fft(seq, seq, mode="full")
+        acorr = cross_correlate(seq, seq, mode="full")
         peak_idx = len(acorr) // 2
         peak_val = float(xp.abs(acorr[peak_idx]))
 
@@ -112,7 +112,7 @@ class TestCrossCorrelation:
         signal = xp.zeros(100, dtype="float32")
         signal[50] = 1.0
         template = xp.array([1.0], dtype="float32")
-        corr = cross_correlate_fft(signal, template, mode="same")
+        corr = cross_correlate(signal, template, mode="same")
         peak_idx = int(xp.argmax(xp.abs(corr)))
         assert peak_idx == 50
 
@@ -121,7 +121,7 @@ class TestCrossCorrelation:
         template = xp.array([1.0, 1.0, 1.0, -1.0, -1.0], dtype="float32")
         signal = xp.zeros(50, dtype="float32")
         signal[20:25] = template
-        corr = cross_correlate_fft(signal, template, mode="same")
+        corr = cross_correlate(signal, template, mode="same")
         peak_idx = int(xp.argmax(xp.abs(corr)))
         assert abs(peak_idx - 22) <= 1
 
@@ -131,7 +131,7 @@ class TestCrossCorrelation:
         signal[0, 20] = 1.0
         signal[1, 30] = 1.0
         template = xp.array([1.0], dtype="float32")
-        corr = cross_correlate_fft(signal, template, mode="same")
+        corr = cross_correlate(signal, template, mode="same")
         assert corr.shape == (2, 50)
         peak_0 = int(xp.argmax(xp.abs(corr[0])))
         peak_1 = int(xp.argmax(xp.abs(corr[1])))
@@ -139,12 +139,12 @@ class TestCrossCorrelation:
         assert peak_1 == 30
 
     def test_cross_correlate_fft_modes(self, xp):
-        """Verify cross_correlate_fft output lengths for each mode."""
+        """Verify cross_correlate output lengths for each mode."""
         signal = xp.ones(100, dtype="float32")
         template = xp.ones(10, dtype="float32")
-        full = cross_correlate_fft(signal, template, mode="full")
-        same = cross_correlate_fft(signal, template, mode="same")
-        valid = cross_correlate_fft(signal, template, mode="valid")
+        full = cross_correlate(signal, template, mode="full")
+        same = cross_correlate(signal, template, mode="same")
+        valid = cross_correlate(signal, template, mode="valid")
         assert full.shape[-1] == 100 + 10 - 1
         assert same.shape[-1] == 100
         assert valid.shape[-1] == 91
@@ -271,7 +271,7 @@ class TestEstimateTiming:
             periodic=True,
         )  # fmt: skip
         clean = xp.asarray(sig.samples)
-        x = timing.fft_fractional_delay(clean, delay=delay)
+        x = timing.apply_delay(clean, delay=delay)
         if esn0_db is not None:
             x = apply_awgn(x, esn0_db=esn0_db, sps=4, rng=1)
         est = timing.estimate_timing(x, template=clean[:128], threshold=2.0)
@@ -462,7 +462,7 @@ class TestFractionalDelay:
         corr = xp.asarray(corr)
 
         peak_idx = xp.argmax(xp.abs(corr))
-        mu = timing.estimate_fractional_delay(corr, peak_idx)
+        mu = timing.peak_offset(corr, peak_idx)
         # The default log-parabolic fit is exact on a Gaussian peak.
         assert float(mu) == pytest.approx(true_mu, abs=1e-4)
 
@@ -470,7 +470,7 @@ class TestFractionalDelay:
         """Verify graceful fallback when peak is at array boundary."""
         corr = xp.zeros(50, dtype="float32")
         corr[0] = 1.0
-        mu = timing.estimate_fractional_delay(corr, xp.asarray(0))
+        mu = timing.peak_offset(corr, xp.asarray(0))
         assert float(mu) == 0.0
 
     def test_estimate_fractional_delay_mimo(self, xp):
@@ -486,7 +486,7 @@ class TestFractionalDelay:
         )
 
         peaks = xp.array([40, 60])
-        mu = timing.estimate_fractional_delay(corr, peaks)
+        mu = timing.peak_offset(corr, peaks)
         assert mu.shape == (2,)
         assert abs(float(mu[0]) - 0.2) < 0.15
         assert abs(float(mu[1]) - (-0.1)) < 0.15
@@ -501,12 +501,8 @@ class TestFractionalDelay:
         corr_gauss = xp.asarray(gaussian)
         peak_idx = xp.asarray(32)
 
-        est_std = timing.estimate_fractional_delay(
-            corr_gauss, peak_idx, fit="parabolic"
-        )
-        est_log = timing.estimate_fractional_delay(
-            corr_gauss, peak_idx, fit="log-parabolic"
-        )
+        est_std = timing.peak_offset(corr_gauss, peak_idx, method="parabolic")
+        est_log = timing.peak_offset(corr_gauss, peak_idx, method="log-parabolic")
         err_std = abs(float(est_std) - true_mu)
         err_log = abs(float(est_log) - true_mu)
         assert err_log < err_std
@@ -514,13 +510,9 @@ class TestFractionalDelay:
 
         sinc_val = np.sinc(t - true_mu).astype("float32")
         corr_sinc = xp.asarray(sinc_val)
-        est_sinc_1x = timing.estimate_fractional_delay(
-            corr_sinc, peak_idx, dft_upsample=1
-        )
+        est_sinc_1x = timing.peak_offset(corr_sinc, peak_idx, dft_upsample=1)
         err_sinc_1x = abs(float(est_sinc_1x) - true_mu)
-        est_sinc_8x = timing.estimate_fractional_delay(
-            corr_sinc, peak_idx, dft_upsample=8
-        )
+        est_sinc_8x = timing.peak_offset(corr_sinc, peak_idx, dft_upsample=8)
         err_sinc_8x = abs(float(est_sinc_8x) - true_mu)
         assert err_sinc_8x < err_sinc_1x
         assert err_sinc_8x < 0.01
@@ -533,14 +525,14 @@ class TestFractionalDelay:
         corr = np.exp(-0.5 * ((n - 2.0 - true_mu) / 2.0) ** 2).astype("float32")
         corr = xp.asarray(corr)
         peak_idx = xp.asarray(2)
-        mu = timing.estimate_fractional_delay(corr, peak_idx, dft_upsample=8)
+        mu = timing.peak_offset(corr, peak_idx, dft_upsample=8)
         assert abs(float(mu)) < 0.5
 
     def test_fft_fractional_delay_zero_delay(self, xp, xpt):
         """Verify delay=0 is a perfect passthrough (identity operation)."""
         n = np.arange(100, dtype="float32")
         signal = xp.asarray(np.sin(2 * np.pi * 0.05 * n).astype("complex64"))
-        out = timing.fft_fractional_delay(signal, delay=0.0)
+        out = timing.apply_delay(signal, delay=0.0)
         xpt.assert_allclose(out, signal, atol=1e-6)
 
     def test_fft_fractional_delay_known_sine(self, xp, xpt):
@@ -551,7 +543,7 @@ class TestFractionalDelay:
         n = np.arange(N, dtype="float64")
         original = np.exp(2j * np.pi * f * n).astype("complex64")
         truth = np.exp(2j * np.pi * f * (n - delay)).astype("complex64")
-        out = timing.fft_fractional_delay(xp.asarray(original), delay=delay)
+        out = timing.apply_delay(xp.asarray(original), delay=delay)
         xpt.assert_allclose(out, truth, atol=1e-5)
 
     def test_fft_fractional_delay_mimo(self, xp, xpt):
@@ -563,7 +555,7 @@ class TestFractionalDelay:
         sig[0] = np.exp(2j * np.pi * f * n).astype("complex64")
         sig[1] = np.exp(2j * np.pi * f * n).astype("complex64")
         delays = xp.asarray([0.3, -0.2], dtype="float32")
-        out = timing.fft_fractional_delay(xp.asarray(sig), delay=delays)
+        out = timing.apply_delay(xp.asarray(sig), delay=delays)
         truth0 = np.exp(2j * np.pi * f * (n - 0.3)).astype("complex64")
         truth1 = np.exp(2j * np.pi * f * (n + 0.2)).astype("complex64")
         xpt.assert_allclose(out[0], truth0, atol=1e-5)
@@ -578,7 +570,7 @@ class TestFractionalDelay:
         )
         signal_xp = xp.asarray(signal)
         delay = 0.3
-        delayed = timing.fft_fractional_delay(signal_xp, delay=delay)
+        delayed = timing.apply_delay(signal_xp, delay=delay)
         power_in = float(xp.mean(xp.abs(signal_xp) ** 2))
         power_out = float(xp.mean(xp.abs(delayed) ** 2))
         assert abs(power_out / power_in - 1.0) < 1e-5
@@ -592,34 +584,34 @@ class TestFractionalDelay:
         )
         signal_xp = xp.asarray(signal)
         delay = 0.37
-        delayed = timing.fft_fractional_delay(signal_xp, delay=delay)
-        recovered = timing.fft_fractional_delay(delayed, delay=-delay)
+        delayed = timing.apply_delay(signal_xp, delay=delay)
+        recovered = timing.apply_delay(delayed, delay=-delay)
         xpt.assert_allclose(recovered, signal_xp, atol=1e-5)
 
     def test_fft_fractional_delay_scalar_ndarray(self, xp, xpt):
-        """Verify fft_fractional_delay with 0-d array delay input."""
+        """Verify apply_delay with 0-d array delay input."""
         f = 0.02
         N = 100
         n = np.arange(N, dtype="float64")
         signal = xp.asarray(np.exp(2j * np.pi * f * n).astype("complex64"))
         delay = xp.asarray(0.3)
-        out = timing.fft_fractional_delay(signal, delay=delay)
+        out = timing.apply_delay(signal, delay=delay)
         assert out.shape == (N,)
         truth = np.exp(2j * np.pi * f * (n - 0.3)).astype("complex64")
         xpt.assert_allclose(out, truth, atol=1e-5)
 
     def test_fft_fractional_delay_preserves_complex64_dtype(self, xp):
-        """fft_fractional_delay: complex64 signal -> complex64 output."""
+        """apply_delay: complex64 signal -> complex64 output."""
         n = np.arange(200)
         sig = xp.asarray(np.exp(2j * np.pi * 0.05 * n).astype(np.complex64))
-        out = timing.fft_fractional_delay(sig, delay=0.3)
+        out = timing.apply_delay(sig, delay=0.3)
         assert out.dtype == xp.complex64
 
     def test_fft_fractional_delay_preserves_float32_dtype(self, xp):
-        """fft_fractional_delay: float32 signal -> float32 output."""
+        """apply_delay: float32 signal -> float32 output."""
         n = np.arange(200, dtype=np.float32)
         sig = xp.asarray(np.sin(2 * np.pi * 0.05 * n))
-        out = timing.fft_fractional_delay(sig, delay=0.3)
+        out = timing.apply_delay(sig, delay=0.3)
         assert out.dtype == xp.float32
 
 
@@ -769,7 +761,7 @@ class TestCorrectTiming:
 
     def test_slice_mode_fractional_matches_delay_then_slice(self, xp, xpt):
         """mode='slice' with fractional offset must be algebraically equivalent
-        to (fft_fractional_delay on full buffer) followed by (integer slice).
+        to (apply_delay on full buffer) followed by (integer slice).
         """
         rng = np.random.default_rng(7)
         N, integer, fract = 512, 50, -0.27
@@ -779,7 +771,7 @@ class TestCorrectTiming:
         sig[-10:] += 5.0 + 5.0j
         sig_xp = xp.asarray(sig)
 
-        ref = timing.fft_fractional_delay(sig_xp, delay=-fract)[..., integer:]
+        ref = timing.apply_delay(sig_xp, delay=-fract)[..., integer:]
         out = timing.correct_timing(sig_xp, integer + fract, mode="slice")
         xpt.assert_allclose(out, ref, atol=1e-5)
 
@@ -802,7 +794,7 @@ class TestCorrectTimingErrors:
 
 
 class TestSignalInputTiming:
-    """Signal-awareness for fft_fractional_delay, estimate_timing, correct_timing."""
+    """Signal-awareness for apply_delay, estimate_timing, correct_timing."""
 
     def test_fft_fractional_delay_signal_input(self, xp, xpt):
         """Signal input returns a Signal with the delayed samples."""
@@ -814,8 +806,8 @@ class TestSignalInputTiming:
         )
         sig = Signal(samples=data, sampling_rate=1.0, symbol_rate=1.0)
 
-        out_sig = timing.fft_fractional_delay(sig, delay=0.3)
-        out_arr = timing.fft_fractional_delay(data, delay=0.3)
+        out_sig = timing.apply_delay(sig, delay=0.3)
+        out_arr = timing.apply_delay(data, delay=0.3)
 
         assert isinstance(out_sig, Signal)
         xpt.assert_allclose(out_sig.samples, out_arr)

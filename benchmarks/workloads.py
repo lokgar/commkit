@@ -180,7 +180,7 @@ def clock_offset_workload(
     from commkit.core import generate
     from commkit.filtering import matched_filter
     from commkit.impairments import apply_sampling_clock_offset
-    from commkit.timing import fft_fractional_delay
+    from commkit.timing import apply_delay
 
     tx = generate(
         Constellation.qam(16),
@@ -192,8 +192,6 @@ def clock_offset_workload(
         rng=seed,
     )
     rx = apply_awgn(tx, esn0_db=20.0, rng=seed + 1)
-    rx = apply_sampling_clock_offset(
-        fft_fractional_delay(rx, delay=0.37), offset_ppm=ppm
-    )
+    rx = apply_sampling_clock_offset(apply_delay(rx, delay=0.37), offset_ppm=ppm)
     mf = matched_filter(rx)
     return np.asarray(mf.samples, dtype=np.complex64), np.asarray(tx.reference.symbols)
