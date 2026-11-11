@@ -37,7 +37,7 @@ class TestPunctured:
         xpt.assert_array_equal(res.bits, u)
 
     def test_soft_output_keeps_the_layout(self, xp: Any) -> None:
-        ldpc = LDPCCode.dvbs2("1/2", "short")
+        ldpc = LDPCCode.dvbs2("1/2", frame="short")
         code = Punctured(ldpc, np.arange(ldpc.n - 100, ldpc.n))
         u = random_bits(code.k, xp, seed=2)
         res = decode(encode(u, code=code), code=code)
@@ -66,7 +66,7 @@ class TestPunctured:
 class TestShortened:
     @pytest.mark.parametrize(
         "inner",
-        [HAMMING, LDPCCode.dvbs2("1/2", "short"), CRC.nr("16", 40)],
+        [HAMMING, LDPCCode.dvbs2("1/2", frame="short"), CRC.nr("16", info_bits=40)],
         ids=["hamming", "ldpc", "crc"],
     )
     def test_round_trip(self, xp: Any, xpt: Any, inner) -> None:
@@ -111,7 +111,7 @@ class TestShortened:
         )
 
     def test_info_positions_of_nested_wrappers(self, xp: Any, xpt: Any) -> None:
-        ldpc = LDPCCode.dvbs2("1/2", "short")
+        ldpc = LDPCCode.dvbs2("1/2", frame="short")
         code = Shortened(Punctured(ldpc, np.arange(ldpc.n - 50, ldpc.n)), 100)
         u = random_bits(code.k, xp, seed=5)
         c = encode(u, code=code)

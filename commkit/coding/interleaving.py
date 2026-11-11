@@ -58,7 +58,7 @@ class Interleaver(_Value):
         return f"Interleaver(length={self.length})"
 
     @classmethod
-    def block(cls, rows: int, columns: int) -> Interleaver:
+    def block(cls, *, rows: int, columns: int) -> Interleaver:
         """Row-in, column-out block interleaver of ``rows x columns`` values.
 
         Parameters

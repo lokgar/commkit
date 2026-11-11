@@ -18,7 +18,7 @@ def _llrs(code: LDPCCode, rows: int, mean: float, seed: int) -> np.ndarray:
     return (mean + 1.5 * rng.standard_normal((rows, code.n))).astype(np.float32)
 
 
-CODES = [LDPCCode.dvbs2("1/2", "short"), LDPCCode.pon()]
+CODES = [LDPCCode.dvbs2("1/2", frame="short"), LDPCCode.pon()]
 
 
 @pytest.mark.parametrize("code", CODES, ids=["dvbs2-short-1/2", "pon"])

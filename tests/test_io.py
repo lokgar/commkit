@@ -422,7 +422,7 @@ _SHAPED = Constellation.qam(16).shaped(entropy=3.5)
             Constellation.qam(16),
             symbol_rate=1e9,
             num_blocks=2,
-            code=coding.LDPCCode.dvbs2("1/2", "short"),
+            code=coding.LDPCCode.dvbs2("1/2", frame="short"),
             rng=0,
         ),
         lambda: generate(
@@ -488,7 +488,7 @@ def test_extracted_payload_decodes_after_load(tmp_path: Any) -> None:
 
     frame = SingleCarrierFrame(
         payload_blocks=4,
-        payload_code=coding.LDPCCode.dvbs2("1/2", "short"),
+        payload_code=coding.LDPCCode.dvbs2("1/2", frame="short"),
         payload_constellation=Constellation.qam(16),
     )
     rx = apply_awgn(
@@ -507,7 +507,7 @@ def test_shared_payload_code_is_stored_once(tmp_path: Any) -> None:
     """The payload reference names the frame's code instead of a second copy."""
     frame = SingleCarrierFrame(
         payload_blocks=4,
-        payload_code=coding.LDPCCode.dvbs2("1/2", "short"),
+        payload_code=coding.LDPCCode.dvbs2("1/2", frame="short"),
         payload_constellation=Constellation.qam(16),
     )
     save_npz(frame.to_signal(sps=1, symbol_rate=1e9), tmp_path / "f")
@@ -575,10 +575,10 @@ class TestNPZCodedReference:
         "code, constellation",
         [
             (LinearBlockCode.hamming(3), Constellation.qam(16)),
-            (coding.LDPCCode.dvbs2("1/2", "short"), Constellation.qam(16)),
+            (coding.LDPCCode.dvbs2("1/2", frame="short"), Constellation.qam(16)),
             (
                 coding.PAS(
-                    coding.LDPCCode.dvbs2("3/4", "short"),
+                    coding.LDPCCode.dvbs2("3/4", frame="short"),
                     Constellation.qam(64).shaped(entropy=5.0),
                 ),
                 Constellation.qam(64).shaped(entropy=5.0),
@@ -610,7 +610,7 @@ class TestNPZCodedReference:
 
 _CODES = [
     LinearBlockCode.hamming(4, extended=True),
-    coding.LDPCCode.dvbs2("2/3", "short"),
+    coding.LDPCCode.dvbs2("2/3", frame="short"),
     coding.ReedSolomonCode.kp4(),
     coding.BCHCode(6, 3),
     coding.StaircaseCode.g709_2(),
@@ -624,7 +624,7 @@ _CODES = [
     coding.Shortened(coding.ReedSolomonCode.kp4(), 10),
     coding.CCDM(Constellation.pam(4).shaped(entropy=1.5), num_symbols=16),
     coding.PAS(
-        coding.LDPCCode.dvbs2("3/4", "short"),
+        coding.LDPCCode.dvbs2("3/4", frame="short"),
         Constellation.qam(64).shaped(entropy=5.0),
     ),
 ]

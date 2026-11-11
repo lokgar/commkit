@@ -109,7 +109,9 @@ class TestDecoding:
     def test_has_an_exit_curve(self) -> None:
         """As the outer code of a serial concatenation: I_E rises from 0 to 1
         (measured 0, 0.12, 0.98, 1, 1 at I_A = 0, 0.25, ..., 1)."""
-        curve = decoder_exit_curve(TurboCode.lte(40), num_blocks=200, points=5, rng=1)
+        curve = decoder_exit_curve(
+            TurboCode.lte(40), num_blocks=200, num_points=5, rng=1
+        )
         assert curve.extrinsic[0] < 0.05 and curve.extrinsic[-1] > 0.99
         assert np.all(np.diff(curve.extrinsic) >= 0)
 

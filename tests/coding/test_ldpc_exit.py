@@ -75,7 +75,7 @@ class TestCurves:
         np.testing.assert_allclose(check.extrinsic, check.a_priori, atol=2e-3)
 
     def test_endpoints_and_labels(self) -> None:
-        variable, check = ldpc_exit_curves(REGULAR_3_6, channel_mi=0.5, points=11)
+        variable, check = ldpc_exit_curves(REGULAR_3_6, channel_mi=0.5, num_points=11)
         assert isinstance(variable, ExitCurve) and variable.a_priori.shape == (11,)
         assert check.extrinsic[0] == pytest.approx(0.0, abs=1e-6)
         assert check.extrinsic[-1] == pytest.approx(1.0, abs=1e-6)
@@ -91,7 +91,7 @@ class TestCurves:
         curve = decoder_exit_curve(
             REGULAR_3_6,
             method=SumProduct(early_stop=False),
-            points=5,
+            num_points=5,
             num_blocks=40,
             rng=0,
         )
@@ -105,7 +105,7 @@ class TestCurves:
         is: the extrinsic part is zero at I_A = 1, and a warning says so."""
         with caplog.at_level(logging.WARNING, logger="commkit"):
             curve = decoder_exit_curve(
-                REGULAR_3_6, method=SumProduct(), points=5, num_blocks=40, rng=0
+                REGULAR_3_6, method=SumProduct(), num_points=5, num_blocks=40, rng=0
             )
         assert curve.extrinsic[-1] < 0.05
         (warning,) = [r.message for r in caplog.records if r.levelno == logging.WARNING]
@@ -148,14 +148,14 @@ class TestThreshold:
         curve just below 1.  The threshold of the rate-1/2 short code stays
         where its frames start to decode in simulation (notebook 07: an NGMI
         of 0.49-0.50 for QPSK, the information per bit)."""
-        code = LDPCCode.dvbs2("1/2", "short")
+        code = LDPCCode.dvbs2("1/2", frame="short")
         assert np.bincount(code.variables).min() == 1
         assert 0.49 < ldpc_threshold(code) < 0.505
 
     def test_dvbs2_threshold_near_its_rate(self) -> None:
         """A capacity-approaching code opens its tunnel above, but near, an
         information equal to its rate."""
-        code = LDPCCode.dvbs2("1/2", "normal")
+        code = LDPCCode.dvbs2("1/2", frame="normal")
         assert code.k / code.n < ldpc_threshold(code) < code.k / code.n + 0.05
 
 
@@ -169,4 +169,4 @@ class TestValidation:
             with pytest.raises(ValueError, match="channel_mi"):
                 ldpc_exit_curves(REGULAR_3_6, channel_mi=mi)
         with pytest.raises(ValueError, match="points"):
-            ldpc_exit_curves(REGULAR_3_6, channel_mi=0.5, points=1)
+            ldpc_exit_curves(REGULAR_3_6, channel_mi=0.5, num_points=1)

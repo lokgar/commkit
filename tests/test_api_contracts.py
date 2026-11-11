@@ -141,7 +141,7 @@ RS = 1e9
 FS = RS * SPS
 C16 = Constellation.qam(16)
 HAMMING = LinearBlockCode.hamming(3)  # (7, 4)
-INTERLEAVER = Interleaver.block(2, 4)
+INTERLEAVER = Interleaver.block(rows=2, columns=4)
 
 
 class Inputs:

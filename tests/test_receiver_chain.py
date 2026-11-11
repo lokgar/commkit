@@ -48,7 +48,7 @@ class TestCodedSisoChain:
     when each impairment is undone."""
 
     C16 = Constellation.qam(16)
-    CODE = LDPCCode.dvbs2("3/4", "short")
+    CODE = LDPCCode.dvbs2("3/4", frame="short")
     ESN0_DB = 14.0
     TRAIN = 2000
 

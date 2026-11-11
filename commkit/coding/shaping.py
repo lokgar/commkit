@@ -281,7 +281,7 @@ class PAS(_Code):
     The block is the FEC codeword: ``n`` is the code's ``n_c`` bits, and
     ``k``, the uniform information bits it carries, is less than the
     code's ``k_c`` because the matcher's output is not uniform.
-    ``PAS(LDPCCode.dvbs2("3/4", "short"), Constellation.qam(64).shaped(
+    ``PAS(LDPCCode.dvbs2("3/4", frame="short"), Constellation.qam(64).shaped(
     entropy=5))``: 16200 bits are 2700 64-QAM symbols carrying ``k =
     9162`` information bits, 3.39 bits per symbol.
 

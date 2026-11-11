@@ -292,7 +292,7 @@ def decoder_exit_curve(
     code: Any,
     *,
     method: Any = None,
-    points: int = 11,
+    num_points: int = 11,
     num_blocks: int | None = None,
     rng: int | np.random.Generator | None = None,
     device: str = "cpu",
@@ -314,7 +314,7 @@ def decoder_exit_curve(
     method : decoder object, optional
         The decoder; ``None`` takes the code's default, as
         :func:`~commkit.coding.decode` does.
-    points : int, default 11
+    num_points : int, default 11
         Points of the a-priori grid, from 0 to 1 inclusive.
     num_blocks : int, optional
         Codewords per point; ``None`` takes enough for 2^17 bits per point.
@@ -337,7 +337,7 @@ def decoder_exit_curve(
         If ``code`` is not a code object, ``method`` does not decode it, or
         the decoder gives no a-posteriori LLRs.
     ValueError
-        If ``points < 2``, ``num_blocks < 1`` or ``device`` is not
+        If ``num_points < 2``, ``num_blocks < 1`` or ``device`` is not
         ``"cpu"`` or ``"gpu"``.
 
     See Also
@@ -370,7 +370,7 @@ def decoder_exit_curve(
       ``1 - k / n``, which the log message reports as a check.
     """
     method = _resolve_method(code, method, "decoder_exit_curve()")
-    _check_points(points, "decoder_exit_curve()")
+    _check_points(num_points, "decoder_exit_curve()")
     xp = _module_for(_check_device(device, "decoder_exit_curve()"))
     blocks = (
         max(1, math.ceil(_DEFAULT_BITS / code.n)) if num_blocks is None else num_blocks
@@ -383,19 +383,19 @@ def decoder_exit_curve(
     info = gen.integers(0, 2, (blocks, code.k), dtype=np.int8)
     bits = _encode_blocks(code, to_device(info, device))
     sign = (1 - 2 * bits).astype(np.float32)
-    grid = np.linspace(0.0, 1.0, points)
+    grid = np.linspace(0.0, 1.0, num_points)
     label = f"{method!r} on {code!r}"
     logger.debug(
         "Measuring the decoder EXIT curve of %s: %d points, %d codewords (%d bits) "
         "each, on %s.",
         label,
-        points,
+        num_points,
         blocks,
         bits.size,
         device,
     )
-    extrinsic = np.empty(points)
-    stopped = np.zeros(points, dtype=np.int64)  # blocks decoded in 0 iterations
+    extrinsic = np.empty(num_points)
+    stopped = np.zeros(num_points, dtype=np.int64)  # blocks decoded in 0 iterations
     for i, ia in enumerate(grid):
         a_priori = _a_priori_llrs(sign, float(ia), gen, xp)
         res = _decode_blocks(code, a_priori, method)
@@ -439,8 +439,9 @@ def decoder_exit_curve(
 def demapper_exit_curve(
     constellation: Any,
     *,
-    noise_var: float,
-    points: int = 11,
+    noise_var: float | None = None,
+    esn0_db: float | None = None,
+    num_points: int = 11,
     num_symbols: int = 1 << 14,
     method: str = "exact",
     rng: int | np.random.Generator | None = None,
@@ -448,7 +449,8 @@ def demapper_exit_curve(
 ) -> ExitCurve:
     """Measure the EXIT curve of a demapper on AWGN by Monte Carlo.
 
-    Uniform random symbols pass an AWGN channel of variance ``noise_var``.
+    Uniform random symbols pass an AWGN channel of variance ``noise_var``
+    (real noise for a real constellation, circular complex noise otherwise).
     For each a-priori information ``I_A``, consistent Gaussian a-priori LLRs
     of information ``I_A`` are drawn on every bit, and the demapper computes
     each bit's extrinsic LLR from the received symbol and the a-priori LLRs
@@ -458,10 +460,16 @@ def demapper_exit_curve(
     ----------
     constellation : Constellation
         The constellation and its bit labels; uniform (not shaped).
-    noise_var : float
-        Noise variance per complex symbol, on the constellation's scale, as
-        :func:`~commkit.mapping.compute_llr` takes it.
-    points : int, default 11
+    noise_var : float, optional
+        Variance ``E|n|²`` of the noise in the received symbols, on the
+        constellation's scale, as :func:`~commkit.mapping.compute_llr` takes
+        it: of real noise for a real constellation (PAM), of circular
+        complex noise otherwise.  Give this or ``esn0_db``.
+    esn0_db : float, optional
+        Es/N0 of the channel in dB, instead of ``noise_var``: the noise
+        variance is ``Es / (Es/N0)`` for a complex constellation and half of
+        it for a real one.
+    num_points : int, default 11
         Points of the a-priori grid, from 0 to 1 inclusive.
     num_symbols : int, default 16384
         Symbols per point; ``num_symbols * bits_per_symbol`` bits.
@@ -484,7 +492,8 @@ def demapper_exit_curve(
     TypeError
         If ``constellation`` is not a :class:`~commkit.mapping.Constellation`.
     ValueError
-        If the constellation is shaped, ``noise_var <= 0``, ``points < 2``,
+        If the constellation is shaped, not exactly one of ``noise_var`` and
+        ``esn0_db`` is given, ``noise_var <= 0``, ``num_points < 2``,
         ``num_symbols < 1``, ``method`` is unknown or ``device`` is not
         ``"cpu"`` or ``"gpu"``.
 
@@ -524,10 +533,18 @@ def demapper_exit_curve(
             f"{name}: the constellation is shaped; the demapper's a-priori model "
             "assumes independent bits, which holds for uniform symbols only."
         )
-    nv = float(noise_var)
+    real = not np.any(np.asarray(constellation.points).imag)
+    if (noise_var is None) == (esn0_db is None):
+        raise ValueError(f"{name}: give one of noise_var and esn0_db.")
+    es = float(np.mean(np.abs(constellation.points) ** 2))
+    if noise_var is None:
+        n0 = es / 10 ** (float(esn0_db) / 10)  # type: ignore[arg-type]
+        nv = n0 / 2 if real else n0
+    else:
+        nv = float(noise_var)
     if not nv > 0:
-        raise ValueError(f"{name}: noise_var must be positive, got {noise_var}.")
-    _check_points(points, name)
+        raise ValueError(f"{name}: noise_var must be positive, got {nv}.")
+    _check_points(num_points, name)
     if (
         isinstance(num_symbols, bool)
         or not isinstance(num_symbols, int)
@@ -542,30 +559,41 @@ def demapper_exit_curve(
 
     gen = _random.as_generator(rng)
     index = to_device(gen.integers(0, constellation.order, num_symbols), device)
-    pts = to_device(constellation.points.astype(np.complex64), device)
     labels = to_device(constellation.bit_labels.astype(np.int8), device)
-    noise = _random.complex_normal(
-        gen, (num_symbols,), std=math.sqrt(nv / 2), dtype=np.float32, xp=xp
-    )
-    received = (pts[index] + noise).astype(np.complex64)
+    if real:
+        # Real noise of variance nv; the likelihood has 2·nv in its exponent.
+        pts = to_device(constellation.points.real.astype(np.float32), device)
+        noise = math.sqrt(nv) * _random.standard_normal(
+            gen, (num_symbols,), dtype=np.float32, xp=xp
+        )
+        received = (pts[index] + noise).astype(np.float32)
+        denominator, n0 = 2.0 * nv, 2.0 * nv
+    else:
+        pts = to_device(constellation.points.astype(np.complex64), device)
+        noise = _random.complex_normal(
+            gen, (num_symbols,), std=math.sqrt(nv / 2), dtype=np.float32, xp=xp
+        )
+        received = (pts[index] + noise).astype(np.complex64)
+        denominator, n0 = nv, nv
     bits = labels[index]
     sign = (1 - 2 * bits).astype(np.float32)
-    es = float(np.mean(np.abs(constellation.points) ** 2))
-    label = f"{constellation!r} demapper, Es/N0 = {10 * math.log10(es / nv):.1f} dB"
+    label = f"{constellation!r} demapper, Es/N0 = {10 * math.log10(es / n0):.1f} dB"
     if method == "maxlog":
         label += ", max-log"
     logger.debug(
         "Measuring the demapper EXIT curve of %s: %d points, %d symbols each, on %s.",
         label,
-        points,
+        num_points,
         num_symbols,
         device,
     )
-    grid = np.linspace(0.0, 1.0, points)
-    extrinsic = np.empty(points)
+    grid = np.linspace(0.0, 1.0, num_points)
+    extrinsic = np.empty(num_points)
     for i, ia in enumerate(grid):
         a_priori = _a_priori_llrs(sign, float(ia), gen, xp)
-        llrs = _demap_extrinsic(received, pts, labels, a_priori, nv, method, xp)
+        llrs = _demap_extrinsic(
+            received, pts, labels, a_priori, denominator, method, xp
+        )
         extrinsic[i] = _information(llrs, bits)
         logger.debug("  I_A = %.3f: I_E = %.4f", ia, extrinsic[i])
     curve = ExitCurve(grid, extrinsic, label)
@@ -590,7 +618,7 @@ def demapper_exit_curve(
 
 
 def ldpc_exit_curves(
-    code: LDPCCode, *, channel_mi: float, points: int = 1001
+    code: LDPCCode, *, channel_mi: float, num_points: int = 1001
 ) -> tuple[ExitCurve, ExitCurve]:
     r"""EXIT curves of the variable and check nodes of an LDPC code, in closed form.
 
@@ -617,7 +645,7 @@ def ldpc_exit_curves(
         ``J(sqrt(8 Es/N0))``; for a BICM link with uniform symbols, the GMI
         divided by the bits per symbol, which is the NGMI
         (:func:`commkit.metrics.ngmi`).
-    points : int, default 1001
+    num_points : int, default 1001
         Points of the a-priori grid of each curve, from 0 to 1.
 
     Returns
@@ -633,7 +661,7 @@ def ldpc_exit_curves(
     TypeError
         If ``code`` is not an :class:`LDPCCode`.
     ValueError
-        If ``channel_mi`` is not in ``(0, 1)`` or ``points < 2``.
+        If ``channel_mi`` is not in ``(0, 1)`` or ``num_points < 2``.
 
     See Also
     --------
@@ -657,7 +685,7 @@ def ldpc_exit_curves(
 
     Examples
     --------
-    >>> code = LDPCCode.dvbs2("1/2", "short")
+    >>> code = LDPCCode.dvbs2("1/2", frame="short")
     >>> chart = exit_chart(*ldpc_exit_curves(code, channel_mi=0.52))
     >>> chart.converges
     True
@@ -667,10 +695,16 @@ def ldpc_exit_curves(
     mi = float(channel_mi)
     if not 0.0 < mi < 1.0:
         raise ValueError(f"{name}: channel_mi must be in (0, 1), got {mi}.")
-    if isinstance(points, bool) or not isinstance(points, int) or points < 2:
-        raise ValueError(f"{name}: points must be an integer >= 2, got {points}.")
+    if (
+        isinstance(num_points, bool)
+        or not isinstance(num_points, int)
+        or num_points < 2
+    ):
+        raise ValueError(
+            f"{name}: num_points must be an integer >= 2, got {num_points}."
+        )
     var_groups, check_groups = _edge_degrees(code)
-    grid = np.linspace(0.0, 1.0, points)
+    grid = np.linspace(0.0, 1.0, num_points)
     logger.info(
         "EXIT curves of %r (Gaussian approximation) at channel information %.4f "
         "per bit: variable-node degrees %s, check-node degrees %s, %d punctured "
@@ -899,11 +933,13 @@ def _demap_extrinsic(
     points: ArrayType,
     labels: ArrayType,
     a_priori: ArrayType,
-    noise_var: float,
+    denominator: float,
     method: str,
     xp: Any,
 ) -> ArrayType:
-    """Extrinsic demapper LLRs ``(N, m)``, float32, chunked over the symbols."""
+    """Extrinsic demapper LLRs ``(N, m)``, float32, chunked over the symbols,
+    with the channel metric ``-|y - s|² / denominator`` (``σ²`` for complex
+    noise, ``2σ²`` for real)."""
     n, m = a_priori.shape
     sign = (1 - 2 * labels).astype(np.float32)  # (M, m)
     groups = [
@@ -915,7 +951,7 @@ def _demap_extrinsic(
     for r0 in range(0, n, rows):
         y = received[r0 : r0 + rows]
         half = 0.5 * a_priori[r0 : r0 + rows]  # (r, m)
-        metric = -(xp.abs(y[:, None] - points[None, :]) ** 2) / noise_var
+        metric = -(xp.abs(y[:, None] - points[None, :]) ** 2) / denominator
         metric = metric + half @ sign.T  # a-priori log-probability of each label
         for k, (zero, one) in enumerate(groups):
             own = metric - half[:, k : k + 1] * sign[None, :, k]
@@ -933,9 +969,15 @@ def _reduce(metric: ArrayType, method: str, xp: Any) -> ArrayType:
     return top + xp.log(xp.exp(metric - top[:, None]).sum(axis=1))
 
 
-def _check_points(points: Any, name: str) -> None:
-    if isinstance(points, bool) or not isinstance(points, int) or points < 2:
-        raise ValueError(f"{name}: points must be an integer >= 2, got {points}.")
+def _check_points(num_points: Any, name: str) -> None:
+    if (
+        isinstance(num_points, bool)
+        or not isinstance(num_points, int)
+        or num_points < 2
+    ):
+        raise ValueError(
+            f"{name}: num_points must be an integer >= 2, got {num_points}."
+        )
 
 
 def _check_device(device: Any, name: str) -> str:

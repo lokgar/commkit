@@ -20,9 +20,9 @@ def _value(bits: Any) -> int:
     ("crc", "check"),
     [
         (CRC.ethernet(72), 0xCBF43926),  # CRC-32 (IEEE 802.3)
-        (CRC.nr("16", 72), 0x31C3),  # CRC-16/XMODEM
-        (CRC.nr("24A", 72), 0xCDE703),  # CRC-24/LTE-A
-        (CRC.nr("24B", 72), 0x23EF52),  # CRC-24/LTE-B
+        (CRC.nr("16", info_bits=72), 0x31C3),  # CRC-16/XMODEM
+        (CRC.nr("24A", info_bits=72), 0xCDE703),  # CRC-24/LTE-A
+        (CRC.nr("24B", info_bits=72), 0x23EF52),  # CRC-24/LTE-B
         (CRC(0x1021, 16, 72, init=0xFFFF), 0x29B1),  # CRC-16/CCITT-FALSE
         (CRC(0x1021, 16, 72, reflect_in=True, reflect_out=True), 0x2189),  # KERMIT
     ],
@@ -35,7 +35,7 @@ def test_standard_check_values(xp: Any, crc: CRC, check: int) -> None:
 
 def test_matches_polynomial_division() -> None:
     """Zero init, no reflection: the remainder of u(x) x^r divided by g(x)."""
-    crc = CRC.nr("11", 40)
+    crc = CRC.nr("11", info_bits=40)
     g = [1] + [(0x621 >> (10 - j)) & 1 for j in range(11)]
     u = np.random.default_rng(0).integers(0, 2, 40)
     reg = list(u) + [0] * 11
@@ -47,7 +47,7 @@ def test_matches_polynomial_division() -> None:
 
 
 def test_encode_appends_and_decode_checks(xp: Any, xpt: Any) -> None:
-    crc = CRC.nr("24C", 100)
+    crc = CRC.nr("24C", info_bits=100)
     u = random_bits((3, 100), xp, seed=1)
     c = encode(u, code=crc)
     assert c.shape == (3, 124)
@@ -71,6 +71,6 @@ def test_validation() -> None:
     with pytest.raises(ValueError, match="multiple of 8"):
         CRC.ethernet(12)
     with pytest.raises(ValueError, match="name"):
-        CRC.nr("32", 8)
-    assert repr(CRC.nr("6", 10)) == "CRC(0x21, degree=6, k=10)"
-    assert CRC.nr("6", 10).rate == pytest.approx(10 / 16)
+        CRC.nr("32", info_bits=8)
+    assert repr(CRC.nr("6", info_bits=10)) == "CRC(0x21, degree=6, k=10)"
+    assert CRC.nr("6", info_bits=10).rate == pytest.approx(10 / 16)

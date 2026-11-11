@@ -126,7 +126,7 @@ class TestErrorRateCurve:
         16 dB, and none at 6 dB; Eb/N0 counts the information bits per
         symbol, k/n * 6."""
         ps64 = Constellation.qam(64).shaped(entropy=5.0)
-        code = PAS(LDPCCode.dvbs2("3/4", "short"), ps64)
+        code = PAS(LDPCCode.dvbs2("3/4", frame="short"), ps64)
         curve = error_rate_curve(
             code,
             constellation=ps64,

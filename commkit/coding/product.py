@@ -471,7 +471,7 @@ class Concatenated(_Code):
         return cls(
             triple,
             LinearBlockCode.hamming(7, extended=True),
-            Interleaver.block(120, 136),
+            Interleaver.block(rows=120, columns=136),
         )
 
     @cached_property
