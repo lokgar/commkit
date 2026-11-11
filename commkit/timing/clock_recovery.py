@@ -21,6 +21,7 @@ from typing import Any, Literal
 import numpy as np
 
 from .._array import as_2d, restore_1d, warn_if_double
+from .._fft import fft
 from ..backend import ArrayType, dispatch, to_device
 from ..core._signal_adapter import S, adapt_signal, require_integer_sps
 from ..core.signal import Signal
@@ -35,9 +36,13 @@ __all__ = [
 ]
 
 # Open-loop calibration: detector means at _CAL_OFFSETS strobe offsets
-# across one symbol, over at most _CAL_SYMBOLS symbols.
+# across one symbol, over at most _CAL_SYMBOLS symbols, in blocks over
+# which the timing drifts at most _CAL_DRIFT symbol at max_offset_ppm
+# (and no shorter than _CAL_MIN_BLOCK symbols).
 _CAL_OFFSETS = 8
 _CAL_SYMBOLS = 2048
+_CAL_DRIFT = 0.1
+_CAL_MIN_BLOCK = 32
 # Below this first-harmonic amplitude of the S-curve (unit-power input) the
 # detector sees no clock tone.
 _MIN_CURVE_AMPLITUDE = 1e-3
@@ -92,8 +97,9 @@ class Gardner:
         scaled to unit power; overrides ``normalized_bandwidth``.
     integral_gain : float, optional
         Raw integral gain ``β``; requires ``proportional_gain``.  Defaults
-        to 0 (a first-order loop, which keeps a timing lag ``ε / μK_d``
-        under a clock offset) with ``proportional_gain``.
+        to 0 with ``proportional_gain``: a first-order loop, whose ``ν``
+        stays at the calibrated offset (see Notes) and which keeps a timing
+        lag ``(ε - ν) / μK_d`` for the rest.
     max_offset_ppm : float, default 1000.0
         Largest clock offset the loop tracks, in ppm, in ``(0, 90000)``:
         the integrator ``ν`` is held within ``±max_offset_ppm · 1e-6``.
@@ -116,11 +122,19 @@ class Gardner:
     Notes
     -----
     Both detectors have a sinusoidal S-curve in the timing error.  Before the
-    loop starts, the detector means at eight strobe offsets across one
-    symbol (over the first 2048 symbols, open loop) are fitted with
-    ``-A sin(2π(τ - τ_0))``: ``K_d = 2πA`` per symbol period scales the
-    gains, and ``τ_0`` starts the loop at the right strobe phase, so there
-    is no acquisition transient.  Input whose fitted amplitude is below 1e-3
+    loop starts it is calibrated open loop on the first 2048 symbols, in
+    blocks over which the timing drifts at most 0.1 symbol at
+    ``max_offset_ppm`` (100 symbols at the default, at least 32): each
+    block's detector means at eight strobe offsets across one symbol give
+    the first harmonic of ``-A sin(2π(τ - τ_b))``, and the blocks are summed
+    coherently along the drift of ``τ_b`` that maximizes the sum (searched
+    over ±0.5 symbol per block, five times ``max_offset_ppm``).  ``K_d = 2πA``
+    per symbol period scales the gains, ``τ_b`` extrapolated to symbol 0
+    starts the loop at the right strobe phase, and the drift starts the
+    integrator ``ν`` (held within the bound), so there is no acquisition
+    transient in timing or frequency.  ``K_d`` stays within a few percent of
+    its zero-offset value up to the bound; a single fit at fixed strobes
+    would scale it by ``sinc(2048 ε)``.  Input whose fitted amplitude is below 1e-3
     (no clock tone, as for an unmodulated carrier) raises.  The classical
     amplitude falls to 0.006 at a zero rolloff (16-QAM, from the truncated
     pulse) while the power detector's stays at 0.34.  The strobe spacing is
@@ -237,34 +251,36 @@ def _track(
     power = how.method == "power"
 
     num_cal = min(_CAL_SYMBOLS, n // sps - 3)
+    block = min(
+        num_cal, max(_CAL_MIN_BLOCK, int(_CAL_DRIFT / (how.max_offset_ppm * 1e-6)))
+    )
     offsets = np.arange(_CAL_OFFSETS) / _CAL_OFFSETS
-    curves = _get_numba_ted_curve()(xn, pad, float(sps), offsets, num_cal, power)
+    curves = _get_numba_ted_curve()(
+        xn, pad, float(sps), offsets, block, num_cal // block, power
+    )
     if how.joint_channels:
         curves = curves.mean(axis=0, keepdims=True)
-    # e(τ) = a cos 2πτ + b sin 2πτ = -A sin(2π(τ - τ0))
-    a = 2.0 * np.mean(curves * np.cos(2 * np.pi * offsets), axis=-1)
-    b = 2.0 * np.mean(curves * np.sin(2 * np.pi * offsets), axis=-1)
-    amplitude = np.hypot(a, b)
+    amplitude, tau0, drift = _fit_s_curve(curves, offsets, block)
     if np.any(amplitude < _MIN_CURVE_AMPLITUDE):
         raise ValueError(
             f"Gardner(method={how.method!r}): the detector sees no clock tone "
             f"(S-curve amplitude {float(amplitude.min()):.1e}), as for an "
             "unmodulated carrier."
         )
-    tau0 = np.arctan2(a, -b) / (2 * np.pi)
-    tau0 = (tau0 + 0.5) % 1.0 - 0.5  # the strobe of symbol 0, in [-0.5, 0.5)
     kd = 2 * np.pi * amplitude
 
     rows = curves.shape[0]
+    nu_max = how.max_offset_ppm * 1e-6
     gains = np.array([how.gains(float(g)) for g in kd])
     pos, err, count = _get_numba_gardner()(
         xn,
         pad,
         float(sps),
         pad + tau0 * sps,
+        np.clip(drift, -nu_max, nu_max),
         np.ascontiguousarray(gains[:, 0]),
         np.ascontiguousarray(gains[:, 1]),
-        how.max_offset_ppm * 1e-6,
+        nu_max,
         power,
         rows != C,
         n,
@@ -279,6 +295,45 @@ def _track(
         err = np.repeat(err, C, axis=0)
         kd = np.repeat(kd, C)
     return pos, kd, err
+
+
+def _fit_s_curve(
+    curves: np.ndarray, offsets: np.ndarray, block: int
+) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
+    """S-curve amplitude ``A``, strobe phase ``τ0`` of symbol 0 and timing
+    drift ``ε`` (symbol periods per symbol) per row, from the block means
+    ``(R, B, J)`` of :func:`ted_curve`.
+
+    Block ``b``'s first harmonic ``e(τ) = -A sin(2π(τ - τ_b))`` is the
+    phasor ``A e^{2πiτ_b}``.  Under a clock offset ``τ_b`` drifts by ``ε``
+    per symbol.  The phasors are summed coherently along the drift that
+    maximizes the sum, searched over the unambiguous ``±0.5`` cycle per
+    block on a grid of ``1/(16 B)`` (under 1 % loss at the last block); the
+    loss within a block, ``sinc(ε · block)``, is divided out.
+    """
+    # e(τ) = a cos 2πτ + b sin 2πτ = -A sin(2π(τ - τ_b)): i(a + ib) = A e^{2πiτ_b}
+    z = 2j * np.mean(curves * np.exp(2j * np.pi * offsets), axis=-1)
+    num_blocks = z.shape[-1]
+    # drift per block in cycles, on a grid of 1/(16 B) across ±0.5: the
+    # peak of a 4B-point spectrum, refined by two grid steps either side
+    # (one block cannot measure it)
+    b = np.arange(num_blocks)
+    cycles = np.zeros(z.shape[0])
+    if num_blocks > 1:
+        peak = np.argmax(np.abs(fft(z, n=4 * num_blocks)), axis=-1)
+        coarse = (peak / (4 * num_blocks) + 0.5) % 1.0 - 0.5
+        best = np.full(z.shape[0], -1.0)
+        for step in range(-2, 3):
+            d = coarse + step / (16 * num_blocks)
+            size = np.abs(np.sum(z * np.exp(-2j * np.pi * np.outer(d, b)), axis=-1))
+            better = size > best
+            cycles[better], best[better] = d[better], size[better]
+    drift = cycles / block  # symbol periods per symbol
+    ref = np.mean(z * np.exp(-2j * np.pi * np.outer(cycles, b)), axis=-1)
+    amplitude = np.abs(ref) / np.sinc(drift * block)
+    # block 0 is centred on symbol (block + 1) / 2
+    tau0 = np.angle(ref) / (2 * np.pi) - drift * (block + 1) / 2
+    return amplitude, (tau0 + 0.5) % 1.0 - 0.5, drift  # τ0 in [-0.5, 0.5)
 
 
 def _first_slip(trajectory: np.ndarray, bandwidth: np.ndarray) -> np.ndarray:

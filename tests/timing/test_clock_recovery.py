@@ -107,14 +107,46 @@ class TestEstimate:
                 x,
                 sps=2,
                 power=method == "power",
-                normalized_bandwidth=1e-2,
+                normalized_bandwidth=3e-3,
                 num_cal=397,
             )
             pos, _, _ = cr._track(
-                x, 2, Gardner(normalized_bandwidth=1e-2, method=method)
+                x, 2, Gardner(normalized_bandwidth=3e-3, method=method)
             )
             k = min(ref.shape[1], pos.shape[1])
             np.testing.assert_allclose(pos[:, :k], ref[:, :k], atol=1e-4)
+
+    @pytest.mark.parametrize("method", ["classical", "power"])
+    @pytest.mark.parametrize(
+        "single_block",
+        [False, pytest.param(True, marks=pytest.mark.allow_warnings)],
+    )
+    def test_detector_gain_under_a_clock_offset(
+        self, xp, method, single_block, monkeypatch
+    ):
+        """K_d at 300 and 900 ppm against its value at 0 ppm (rolloff 0.1).
+        Calibrating at fixed strobes over M symbols scales the fitted
+        amplitude by sinc(M·ε), so the gains grow by its inverse; blocks of
+        100 symbols (0.1 symbol of drift at the default 1000 ppm bound)
+        summed along the measured drift keep it.  Over 5 seeds the ratio
+        measured 0.988 to 1.047 (classical) and 0.986 to 1.002 (power):
+        bound 10 %.  Baseline, one block of 2048 symbols: 0.41 to 0.61 at
+        300 ppm and 0.08 to 0.17 at 900 ppm, as sinc(2048·ε) = 0.49 and
+        0.07 predict (the inflated gains slip, hence the warnings)."""
+        if single_block:
+            monkeypatch.setattr(cr, "_CAL_MIN_BLOCK", 2048)
+        kd = {}
+        for ppm in (0.0, 300.0, 900.0):
+            mf = _received(xp, ppm=ppm, num_symbols=2**15)
+            est = estimate_sampling_clock_offset(mf, Gardner(method=method))
+            kd[ppm] = float(est.detector_gain)
+            if not single_block:
+                assert abs(float(est.value) - ppm) < 1.0
+        ratios = np.array([kd[300.0], kd[900.0]]) / kd[0.0]
+        if single_block:
+            assert np.all(ratios < 0.7), ratios
+        else:
+            assert np.all(np.abs(ratios - 1.0) < 0.1), ratios
 
     def test_gain_sign_matters(self, xp, monkeypatch):
         """Baseline: with the loop's error sign flipped the loop locks to the
@@ -194,8 +226,8 @@ class TestLockChecks:
         """Classical detector, rolloff 0.1, B·T = 1e-2: jitter large enough
         to slip throughout the record.  Within the default 1000 ppm bound the
         loop keeps returning to lock and the estimate stays inside the bound
-        (measured 171 and 201 ppm against the true 50, CPU and GPU, after a
-        net 17 and 19 slipped symbols); the slip is reported."""
+        (measured 168 and 209 ppm against the true 50, CPU and GPU); the
+        slip is reported."""
         mf = _received(xp, ppm=50.0)
         with caplog.at_level(logging.WARNING, logger="commkit"):
             est = estimate_sampling_clock_offset(mf, Gardner(normalized_bandwidth=1e-2))
@@ -205,7 +237,7 @@ class TestLockChecks:
     @pytest.mark.allow_warnings
     def test_without_the_bound_the_loop_runs_away(self, xp):
         """Baseline: the same loop with the bound at 89 000 ppm wanders off
-        in frequency (5771 and -50 907 ppm measured, CPU and GPU)."""
+        in frequency (-37 007 and -4287 ppm measured, CPU and GPU)."""
         mf = _received(xp, ppm=50.0)
         est = estimate_sampling_clock_offset(
             mf, Gardner(normalized_bandwidth=1e-2, max_offset_ppm=8.9e4)
@@ -239,9 +271,9 @@ class TestLockChecks:
     def test_offset_beyond_the_bound(self, xp, caplog):
         """1500 ppm with the default bound: the integrator stops at 1000 ppm
         and the proportional path carries the rest with a static timing lag
-        (the slope still reads 1499.99 ppm), and the warning names the
+        (the slope still reads 1499.87 and 1499.83 ppm, CPU and GPU), and the warning names the
         bound; with max_offset_ppm=3000 there is no warning and the offset
-        is measured within 0.5 ppm (1499.99)."""
+        is measured within 0.5 ppm (1500.01 and 1499.97)."""
         mf = _received(xp, ppm=1500.0, rolloff=0.5, num_symbols=2**16)
         with caplog.at_level(logging.WARNING, logger="commkit"):
             estimate_sampling_clock_offset(mf, Gardner())

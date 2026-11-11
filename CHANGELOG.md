@@ -35,6 +35,7 @@ Notable changes to CommKit, newest first. Performance figures are from the refer
 - `evm(blind=True)` divides the error by the power of the decided points: 16-QAM at power 4 read 20 % where the data-aided EVM is 10 %.
 - `correct_polarization` with a tracked `JonesTrack` keeps complex128 input in double precision; it computed in complex64 and cast back.
 - Gardner clock recovery emits `PrecisionWarning` on double input, as the loop computes in complex64.
+- Gardner clock recovery calibrates its detector gain in blocks short against the clock drift and starts its integrator at the measured offset. A single fit over 2048 symbols scaled the gain by `sinc(2048 ε)`, so the loop ran at twice the requested bandwidth at 300 ppm and slipped from about 450 ppm (classical detector, rolloff 0.1); the gain now stays within a few percent of its zero-offset value up to `max_offset_ppm`, and offsets of 900 ppm are measured within 1 ppm by both detectors.
 - `MengaliMorelli` keeps its autocorrelation in the data's precision; a float64 lag array promoted it to complex128.
 - `plot_frequency_offset_blockwise_result` and two frequency axes label their unit with an SI prefix chosen from the data, instead of hand-scaled kHz or plain Hz.
 - Error messages of `dispersion_compensation_taps`, the dispersion estimators, `PLL`, `BPS` and `Tikhonov` name the function or class.

@@ -79,22 +79,24 @@ def _ted(x, c, p_prev, p_mid, p, power):
 
 
 @_fast
-def ted_curve(x, pad, sps, offsets, num_symbols, power):
-    """Mean detector output at fixed strobe offsets (open loop).
+def ted_curve(x, pad, sps, offsets, block, num_blocks, power):
+    """Mean detector output at fixed strobe offsets (open loop), per block.
 
-    Strobes at ``pad + (k + offset) · sps`` for ``k = 1 .. num_symbols``,
-    one row of means per channel: ``(C, len(offsets))`` float64.
+    Strobes at ``pad + (k + offset) · sps``; block ``b`` averages symbols
+    ``k = 1 + b · block .. (b + 1) · block``.  Returns
+    ``(C, num_blocks, len(offsets))`` float64.
     """
     C = x.shape[0]
     J = offsets.shape[0]
-    out = np.zeros((C, J))
+    out = np.zeros((C, num_blocks, J))
     for c in range(C):
-        for j in range(J):
-            acc = 0.0
-            for k in range(1, num_symbols + 1):
-                p = pad + (k + offsets[j]) * sps
-                acc += _ted(x, c, p - sps, p - 0.5 * sps, p, power)
-            out[c, j] = acc / num_symbols
+        for b in range(num_blocks):
+            for j in range(J):
+                acc = 0.0
+                for k in range(1 + b * block, 1 + (b + 1) * block):
+                    p = pad + (k + offsets[j]) * sps
+                    acc += _ted(x, c, p - sps, p - 0.5 * sps, p, power)
+                out[c, b, j] = acc / block
     return out
 
 
@@ -111,11 +113,11 @@ def _clamp_step(step, sps):
 
 
 @_step
-def _track(x, c0, c1, pad, sps, p0, mu, beta, nu_max, power, n_valid, pos, err):
+def _track(x, c0, c1, pad, sps, p0, nu0, mu, beta, nu_max, power, n_valid, pos, err):
     """One loop over channels ``c0 .. c1 - 1`` (their mean error drives it);
     fills ``pos`` and ``err`` and returns the number of strobes.  The
-    integrator stays within ``±nu_max``."""
-    nu = 0.0
+    integrator starts at ``nu0`` and stays within ``±nu_max``."""
+    nu = nu0
     e_last = 0.0
     p = p0
     step = float(sps)
@@ -139,7 +141,9 @@ def _track(x, c0, c1, pad, sps, p0, mu, beta, nu_max, power, n_valid, pos, err):
 
 
 @numba.njit(cache=True, fastmath=True, nogil=True, parallel=True)
-def gardner_loop(x, pad, sps, p0, mu, beta, nu_max, power, joint, n_valid, num_out):
+def gardner_loop(
+    x, pad, sps, p0, nu0, mu, beta, nu_max, power, joint, n_valid, num_out
+):
     """Track the symbol strobes of every channel (or one joint loop).
 
     Parameters
@@ -153,6 +157,8 @@ def gardner_loop(x, pad, sps, p0, mu, beta, nu_max, power, joint, n_valid, num_o
     p0 : numpy.ndarray
         First strobe per row in padded indices, float64 (one row per channel,
         or one for the joint loop).
+    nu0 : numpy.ndarray
+        Starting integrator ``ν`` per row, float64.
     mu, beta : numpy.ndarray
         Proportional and integral gains per row, float64: the strobe spacing
         is ``sps · (1 + ν + μ·e)`` and ``ν += β·e``.
@@ -190,6 +196,7 @@ def gardner_loop(x, pad, sps, p0, mu, beta, nu_max, power, joint, n_valid, num_o
             pad,
             sps,
             p0[r],
+            nu0[r],
             mu[r],
             beta[r],
             nu_max,
