@@ -538,7 +538,9 @@ def _mengali_morelli(
     nfft_r = 1 << int(np.ceil(np.log2(N + L)))
     Y_r = _fft.fft(y, n=nfft_r, axis=-1)
     R_all = _fft.ifft(Y_r * xp.conj(Y_r), axis=-1)
-    lags = xp.arange(1, L + 1, dtype=xp.float64)
+    # Lags in the data's precision: a float64 array would promote the
+    # quarter-record autocorrelation to complex128 (NEP 50).
+    lags = xp.arange(1, L + 1, dtype=R_all.real.dtype)
     R_rows = R_all[:, 1 : L + 1] / (N - lags[None, :])  # unbiased, (R, L)
 
     # The bootstrap is a sequential scan over the lags; one transfer, then one
@@ -642,13 +644,17 @@ def _estimate_rows(
     constellation: Any,
     shared_rows: bool,
 ) -> _Rows:
-    if isinstance(method, MthPower):
-        return _mth_power(x, fs, method, constellation, shared_rows)
-    if isinstance(method, MengaliMorelli):
-        return _mengali_morelli(x, fs, method, constellation)
-    if isinstance(method, PilotSlope):
-        return _pilot_symbols(x, fs, method)
-    return _bias_tone(x, fs, method)
+    return _ROW_ESTIMATORS[type(method)](x, fs, method, constellation, shared_rows)
+
+
+# Row estimator per method type, all called as
+# ``(x, fs, method, constellation, shared_rows)``.
+_ROW_ESTIMATORS: dict[type, Callable[..., _Rows]] = {
+    MthPower: _mth_power,
+    MengaliMorelli: lambda x, fs, m, c, shared: _mengali_morelli(x, fs, m, c),
+    PilotSlope: lambda x, fs, m, c, shared: _pilot_symbols(x, fs, m),
+    SpectralPeak: lambda x, fs, m, c, shared: _bias_tone(x, fs, m),
+}
 
 
 def _block_starts(n: int, block_size: int, overlap: float) -> tuple[list[int], int]:
