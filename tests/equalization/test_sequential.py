@@ -484,7 +484,7 @@ class TestCmaPilotAided:
         struct = frame.get_structure_map(unit="symbols", sps=1, include_preamble=False)
         samples_cpu = to_device(sig.samples, "cpu")
         pilot_syms_cpu = to_device(frame.pilot_symbols, "cpu")
-        pilot_mask_bool = to_device(struct["pilots"], "cpu")
+        pilot_mask_bool = to_device(struct.pilots, "cpu")
         n_body = int(pilot_mask_bool.size)
         return frame, samples_cpu, pilot_syms_cpu, pilot_mask_bool, n_body
 

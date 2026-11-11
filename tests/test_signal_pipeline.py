@@ -6,6 +6,7 @@ from collections.abc import Callable
 from dataclasses import dataclass
 from typing import Any
 
+import numpy as np
 import pytest
 
 from commkit import equalization, filtering, frequency, multirate
@@ -169,10 +170,9 @@ class TestPipelineComposition:
         assert transformed.frame.pilot_symbols is not None
         assert transformed.reference.bits is not None
         assert transformed.reference.symbols is not None
-        assert (
-            transformed.frame.get_structure_map().keys()
-            == frame.get_structure_map().keys()
-        )
+        before, after = frame.get_structure_map(), transformed.frame.get_structure_map()
+        for name in ("pilots", "payload", "preamble", "guard"):
+            np.testing.assert_array_equal(getattr(after, name), getattr(before, name))
 
 
 class TestPipelineMetadataPropagation:

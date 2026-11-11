@@ -23,7 +23,39 @@ from ._signal_adapter import _same_fact, require_device, require_integer_sps
 from .preamble import Preamble, _check_int
 from .signal import Reference, Signal
 
-__all__ = ["SingleCarrierFrame", "extract_payload"]
+__all__ = ["FrameStructure", "SingleCarrierFrame", "extract_payload"]
+
+
+def _readonly(mask: np.ndarray) -> np.ndarray:
+    mask.setflags(write=False)
+    return mask
+
+
+@dataclass(frozen=True)
+class FrameStructure:
+    """Boolean masks of a frame's segments, from
+    :meth:`SingleCarrierFrame.get_structure_map`.
+
+    The constructor takes the same fields.  All masks have one length, the
+    frame (or what follows its preamble) in symbols or samples.
+
+    Attributes
+    ----------
+    pilots : numpy.ndarray
+        True at the pilot symbols, read-only bool.
+    payload : numpy.ndarray
+        True at the payload symbols, read-only bool.
+    preamble : numpy.ndarray or None
+        True at the preamble; ``None`` when the map excludes it.
+    guard : numpy.ndarray or None
+        True at the guard interval; ``None`` when the map excludes it (a
+        cyclic prefix removed with the preamble).
+    """
+
+    pilots: np.ndarray
+    payload: np.ndarray
+    preamble: np.ndarray | None = None
+    guard: np.ndarray | None = None
 
 
 def _qpsk() -> Constellation:
@@ -494,26 +526,26 @@ class SingleCarrierFrame:
         """True at the pilot symbols, over the whole frame (host bool,
         ``(num_symbols,)``).
 
-        The ``"pilots"`` mask of :meth:`get_structure_map`, which also gives
+        The ``pilots`` mask of :meth:`get_structure_map`, which also gives
         per-sample masks and masks over the body alone.
         """
-        return self.get_structure_map()["pilots"]
+        return self.get_structure_map().pilots
 
     @property
     def payload_mask(self) -> np.ndarray:
         """True at the payload symbols, over the whole frame (host bool,
         ``(num_symbols,)``).
 
-        The ``"payload"`` mask of :meth:`get_structure_map`.
+        The ``payload`` mask of :meth:`get_structure_map`.
         """
-        return self.get_structure_map()["payload"]
+        return self.get_structure_map().payload
 
     def get_structure_map(
         self,
         unit: Literal["symbols", "samples"] = "symbols",
         sps: int = 1,
         include_preamble: bool = True,
-    ) -> dict[str, ArrayType]:
+    ) -> FrameStructure:
         """Return boolean masks of the frame's segments (host arrays).
 
         Parameters
@@ -529,10 +561,10 @@ class SingleCarrierFrame:
 
         Returns
         -------
-        dict of str to ndarray
-            ``"pilots"`` and ``"payload"``; ``"preamble"`` with
-            ``include_preamble=True``; ``"guard"`` with
-            ``include_preamble=True`` or a zero guard.
+        FrameStructure
+            ``pilots`` and ``payload``; ``preamble`` with
+            ``include_preamble=True``; ``guard`` with ``include_preamble=True``
+            or a zero guard (the others are ``None``).
         """
         if unit == "samples":
             sps = require_integer_sps(sps, "get_structure_map()")
@@ -577,7 +609,7 @@ class SingleCarrierFrame:
             if self.guard_num_symbols > 0:
                 guard_bool[g_slice] = True
 
-            res = {
+            masks = {
                 "preamble": preamble_bool,
                 "pilots": pilot_bool,
                 "payload": payload_bool,
@@ -591,7 +623,7 @@ class SingleCarrierFrame:
                 total_num_symbols = body_num_symbols
                 pilot_bool = mask
                 payload_bool = ~mask
-                res = {
+                masks = {
                     "pilots": pilot_bool,
                     "payload": payload_bool,
                 }
@@ -608,17 +640,17 @@ class SingleCarrierFrame:
                 payload_bool[b_slice] = ~mask
                 guard_bool[g_slice] = True
 
-                res = {
+                masks = {
                     "pilots": pilot_bool,
                     "payload": payload_bool,
                     "guard": guard_bool,
                 }
 
         if unit == "samples":
-            for k in res:
-                res[k] = np.repeat(res[k], sps)
-
-        return res
+            masks = {k: np.repeat(v, sps) for k, v in masks.items()}
+        else:  # copies, so the read-only flag never reaches the cached mask
+            masks = {k: v.copy() for k, v in masks.items()}
+        return FrameStructure(**{k: _readonly(v) for k, v in masks.items()})
 
     # -------------------------------------------------------------------------
     # Signal Generation
@@ -899,7 +931,7 @@ def _frame_pilots(
     ``from_frame`` constructors of the pilot-aided methods."""
     if frame.pilot_symbols is None:
         raise ValueError(f"{name}.from_frame(): the frame has no pilots.")
-    mask = frame.get_structure_map(include_preamble=include_preamble)["pilots"]
+    mask = frame.get_structure_map(include_preamble=include_preamble).pilots
     return np.flatnonzero(mask), np.asarray(frame.pilot_symbols)
 
 

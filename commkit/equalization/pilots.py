@@ -91,7 +91,7 @@ class EqualizerPilots:
             If the frame has no pilots.
         """
         _, values = _frame_pilots(frame, include_preamble, "EqualizerPilots")
-        mask = frame.get_structure_map(include_preamble=include_preamble)["pilots"]
+        mask = frame.get_structure_map(include_preamble=include_preamble).pilots
         return cls(values, mask, frame.pilot_gain_db)
 
     def _dense(self, num_channels: int, num_symbols: int, function_name: str) -> Any:

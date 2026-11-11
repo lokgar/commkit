@@ -192,22 +192,22 @@ class TestSingleCarrierFrameStructureMap:
         _, body_num_symbols = frame._generate_pilot_mask()
         total_num_symbols = 2 + body_num_symbols + 5
 
-        assert len(struct["preamble"]) == total_num_symbols
-        assert xp.sum(struct["preamble"]) == 2
-        assert xp.sum(struct["pilots"]) > 0
-        assert xp.sum(struct["payload"]) == 6
-        assert xp.sum(struct["guard"]) == 5
+        assert len(struct.preamble) == total_num_symbols
+        assert xp.sum(struct.preamble) == 2
+        assert xp.sum(struct.pilots) > 0
+        assert xp.sum(struct.payload) == 6
+        assert xp.sum(struct.guard) == 5
 
         sps = 4
         struct_s = frame.get_structure_map(
             unit="samples", sps=sps, include_preamble=True
         )
-        assert len(struct_s["preamble"]) == total_num_symbols * sps
-        assert xp.sum(struct_s["preamble"]) == 2 * sps
+        assert len(struct_s.preamble) == total_num_symbols * sps
+        assert xp.sum(struct_s.preamble) == 2 * sps
 
         assert frame.pilot_mask.shape == (frame.num_symbols,)
-        assert (frame.pilot_mask == struct["pilots"]).all()
-        assert (frame.payload_mask == struct["payload"]).all()
+        assert (frame.pilot_mask == struct.pilots).all()
+        assert (frame.payload_mask == struct.payload).all()
 
     def test_sc_frame_structure_map_cp(self, xp: Any) -> None:
         """Verify get_structure_map with Cyclic Prefix (CP) guard interval."""
@@ -215,20 +215,20 @@ class TestSingleCarrierFrameStructureMap:
             payload_num_symbols=10, guard_type="cp", guard_num_symbols=5
         )
         struct = frame.get_structure_map(unit="symbols", include_preamble=True)
-        assert struct["guard"][0]
-        assert struct["guard"][4]
-        assert not struct["guard"][5]
+        assert struct.guard[0]
+        assert struct.guard[4]
+        assert not struct.guard[5]
 
     def test_structure_map_default_no_preamble_no_guard(self, xp: Any) -> None:
         """Verify default behavior: no preamble, zero guard."""
         frame = SingleCarrierFrame(payload_num_symbols=100)
         struct = frame.get_structure_map(include_preamble=False)
 
-        assert "preamble" not in struct
-        assert "guard" in struct
-        assert len(struct["payload"]) == 100
-        assert xp.sum(struct["payload"]) == 100
-        assert xp.sum(struct["guard"]) == 0
+        assert struct.preamble is None
+        assert struct.guard is not None
+        assert len(struct.payload) == 100
+        assert xp.sum(struct.payload) == 100
+        assert xp.sum(struct.guard) == 0
 
     def test_structure_map_include_preamble(self, xp: Any) -> None:
         """Verify explicit include_preamble=True in structure map."""
@@ -236,10 +236,10 @@ class TestSingleCarrierFrameStructureMap:
         frame = SingleCarrierFrame(payload_num_symbols=100, preamble=preamble)
         struct = frame.get_structure_map(include_preamble=True)
 
-        assert "preamble" in struct
-        assert len(struct["preamble"]) == 113
-        assert xp.sum(struct["preamble"]) == 13
-        assert xp.sum(struct["payload"]) == 100
+        assert struct.preamble is not None
+        assert len(struct.preamble) == 113
+        assert xp.sum(struct.preamble) == 13
+        assert xp.sum(struct.payload) == 100
 
     def test_structure_map_no_preamble_with_zero_guard(self, xp: Any) -> None:
         """Verify behavior with zero guard when preamble is excluded."""
@@ -248,11 +248,11 @@ class TestSingleCarrierFrameStructureMap:
         )
         struct = frame.get_structure_map(include_preamble=False)
 
-        assert "preamble" not in struct
-        assert "guard" in struct
-        assert len(struct["payload"]) == 120
-        assert xp.sum(struct["payload"]) == 100
-        assert xp.sum(struct["guard"]) == 20
+        assert struct.preamble is None
+        assert struct.guard is not None
+        assert len(struct.payload) == 120
+        assert xp.sum(struct.payload) == 100
+        assert xp.sum(struct.guard) == 20
 
     def test_structure_map_no_preamble_with_cp_guard(self, xp: Any) -> None:
         """Verify behavior with CP guard when preamble is excluded."""
@@ -261,10 +261,11 @@ class TestSingleCarrierFrameStructureMap:
         )
         struct = frame.get_structure_map(include_preamble=False)
 
-        assert "preamble" not in struct
-        assert "guard" not in struct
-        assert len(struct["payload"]) == 100
-        assert xp.sum(struct["payload"]) == 100
+        assert struct.preamble is None
+        assert struct.guard is None
+        assert not struct.payload.flags.writeable
+        assert len(struct.payload) == 100
+        assert xp.sum(struct.payload) == 100
 
     def test_structure_map_with_pilots_no_preamble(self, xp: Any) -> None:
         """Verify pilot mask is correct when preamble is excluded."""
@@ -273,9 +274,9 @@ class TestSingleCarrierFrameStructureMap:
         )
         struct = frame.get_structure_map()
 
-        assert len(struct["pilots"]) == 20
-        assert xp.sum(struct["pilots"]) == 10
-        assert xp.sum(struct["payload"]) == 10
+        assert len(struct.pilots) == 20
+        assert xp.sum(struct.pilots) == 10
+        assert xp.sum(struct.payload) == 10
 
     def test_structure_map_samples_unit(self, xp: Any) -> None:
         """Verify unit='samples' with include_preamble=False."""
@@ -283,8 +284,8 @@ class TestSingleCarrierFrameStructureMap:
         sps = 4
         struct = frame.get_structure_map(unit="samples", sps=sps)
 
-        assert len(struct["payload"]) == 10 * sps
-        assert xp.sum(struct["payload"]) == 10 * sps
+        assert len(struct.payload) == 10 * sps
+        assert xp.sum(struct.payload) == 10 * sps
 
 
 class TestSingleCarrierFramePilots:
