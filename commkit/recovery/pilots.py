@@ -435,7 +435,7 @@ def _pilot_tone(samples: ArrayType, method: PilotTone, ctx: _Context) -> _Phase:
 
     df = sampling_rate / N
     if bandwidth < df:
-        logger.warning(
+        logger.debug(
             "CPR (pilot-tone): bandwidth=%.3g Hz is below the FFT "
             "resolution df=fs/N=%.3g Hz; the extraction window may capture "
             "too few bins. Increase bandwidth or the record length N.",

@@ -584,7 +584,7 @@ def rls(
     sps = require_integer_sps(signal_adapter.resolve_fact("sps", sps), "rls()")
     constellation = signal_adapter.resolve_choice("constellation", constellation)
     if sps > 1:
-        logger.warning(
+        logger.debug(
             "RLS is mathematically ill-conditioned for fractionally-spaced "
             "signals (sps=%s). The noise-only null-subspace creates a "
             "singular correlation matrix, causing tap bloat. Use LMS for "
@@ -596,15 +596,17 @@ def rls(
     inline = _inline_cpr(cpr, constellation, "rls()")
 
     n_train_log = training_symbols.shape[-1] if training_symbols is not None else 0
+    tail_trim = num_taps // 2
     logger.info(
         "RLS equalizer: num_taps=%s, forgetting_factor=%s, regularization=%.2e, "
-        "leakage=%.2e, sps=%s, n_train=%s%s",
+        "leakage=%.2e, sps=%s, n_train=%s, tail_trim=%s%s",
         num_taps,
         forgetting_factor,
         regularization,
         leakage,
         sps,
         n_train_log,
+        tail_trim,
         f", cpr={type(cpr).__name__}" if cpr is not None else "",
     )
 
@@ -624,16 +626,6 @@ def rls(
     # Early-halt boundary: freeze W and P once the sliding window reaches the
     # right zero-padding (last num_taps//2 symbols have contaminated windows).
     n_update_halt = max(0, run.n_sym - num_taps // 2)
-    tail_trim = num_taps // 2
-    if tail_trim > 0:
-        logger.info(
-            "RLS tail trim: last %s symbols removed from y_hat "
-            "(zero-padding contamination zone). result.signal carries the "
-            "trimmed reference; trim reference arrays to match: "
-            "symbols[..., :-result.tail_trim], "
-            "bits[..., :-result.tail_trim * bits_per_symbol].",
-            tail_trim,
-        )
     constellation_np = _dd_constellation(
         constellation, "rls()", decisions=run.n_train < run.n_sym
     )

@@ -230,7 +230,6 @@ class TestResultSignal:
             C16, num_symbols=n_sym, symbol_rate=1e6, sps=2, pulse=RRC(0.2), rng=4
         )
 
-    @pytest.mark.allow_warnings
     def test_rls_reference_is_cut_to_the_output(self):
         sig = self._sig()
         res = E.rls(sig, sig.reference.symbols[:200], num_taps=7)

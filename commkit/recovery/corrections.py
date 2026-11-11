@@ -582,8 +582,10 @@ def _data_aided(x: ArrayType, method: ConstantPhase, ctx: _Context) -> _Phase:
     corr = xp.sum(x[:, skip:n] * xp.conj(ref[:, skip:n]), axis=-1)  # (C,)
     theta = xp.angle(corr).astype(xp.float64)
     if logger.isEnabledFor(logging.INFO):
-        for ch, deg in enumerate(np.degrees(to_device(theta, "cpu")).tolist()):
-            logger.info("CPR (data-aided): ch=%s, theta=%.2f°", ch, deg)
+        deg = np.degrees(to_device(theta, "cpu"))
+        logger.info(
+            "CPR (data-aided): theta per channel %s°", np.round(deg, 2).tolist()
+        )
     return _Phase(phase=xp.broadcast_to(theta[:, None], (C, N)).copy())
 
 
@@ -813,9 +815,8 @@ def resolve_phase_ambiguity(
         Known transmitted symbols, ``(N,)`` or ``(C, N)``.  Required for
         arrays.
     constellation : Constellation, optional
-        Its ``rotational_symmetry`` is the default ``symmetry``; with it the
-        log reports the symbol error rate of the choice.  Defaults to the
-        Signal's ``constellation``.
+        Its ``rotational_symmetry`` is the default ``symmetry``.  Defaults to
+        the Signal's ``constellation``.
     symmetry : int, optional
         Number of rotations tested; overrides the constellation's.  One of
         the two is required.
@@ -886,24 +887,10 @@ def _resolve_phase_ambiguity_array(
     )  # (C,) - built on host from host indices, single H2D
     out = symbols * phasors[:, None]
 
-    # SER is diagnostic-only: skip the decisions entirely when INFO logging is
-    # disabled (or there is no constellation to decide on).
-    if constellation is not None and logger.isEnabledFor(logging.INFO):
-        k = constellation.bits_per_symbol
-        n = seg_r.shape[-1]
-        bits_out = constellation.demap(out[:, num_skip_symbols:]).reshape(C, n, k)
-        bits_ref = constellation.demap(seg_r).reshape(C, n, k)
-        ser_np = to_device(
-            xp.mean(xp.any(bits_out != bits_ref, axis=-1), axis=-1), "cpu"
-        )
-        for ch in range(C):
-            logger.info(
-                "Phase ambiguity resolution: ch=%s, best_k=%s, "
-                "rotation=%.1f°, SER=%.4f",
-                ch,
-                int(best_k_np[ch]),
-                best_k_np[ch] * step * 180.0 / np.pi,
-                float(ser_np[ch]),
-            )
+    logger.info(
+        "Phase ambiguity resolution: best_k per channel %s, rotation %s°",
+        best_k_np.tolist(),
+        np.round(best_k_np * step * 180.0 / np.pi, 1).tolist(),
+    )
 
     return restore_1d(was_1d, out)

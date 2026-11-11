@@ -133,8 +133,8 @@ def shift_frequency(
     """Shift the spectrum by a frequency (complex mixing).
 
     ``y[n] = x[n] · exp(j 2π f n / f_s)``, with ``f`` snapped to the FFT grid
-    ``f_s / N`` (see :func:`grid_frequency`; a warning is logged when it
-    moves), so the shift completes a whole number of cycles over the record
+    ``f_s / N`` (see :func:`grid_frequency`; the INFO line gives the applied
+    and the requested value), so the shift completes a whole number of cycles over the record
     and a periodic record stays periodic.
 
     Parameters
@@ -169,16 +169,12 @@ def shift_frequency(
         frequency, sampling_rate=sampling_rate, num_samples=n
     )
 
-    if not np.isclose(frequency, actual_offset):
-        logger.warning(
-            "Requested offset %.3f Hz quantized to %.3f Hz (step %.3f Hz) "
-            "to maintain phase continuity.",
-            frequency,
-            actual_offset,
-            df,
-        )
-    else:
-        logger.debug("Applying frequency offset: %.3f Hz.", actual_offset)
+    logger.info(
+        "Shifting by %.3f Hz (requested %.3f Hz, grid step %.3f Hz).",
+        actual_offset,
+        frequency,
+        df,
+    )
 
     # x · exp(j 2π f t): the phase in float64, the rotation in the samples'
     # precision (one fused kernel for complex64 on the GPU).
@@ -254,8 +250,8 @@ def add_pilot_tone(
 
     Notes
     -----
-    Each requested frequency is snapped to the nearest FFT bin ``f_s/N`` (a
-    warning is logged when it moves), so the tone completes a whole number of
+    Each requested frequency is snapped to the nearest FFT bin ``f_s/N`` (the
+    INFO line gives the applied value), so the tone completes a whole number of
     cycles per record and loops seamlessly on an AWG/DAC.  The snapping error
     is at most ``f_s/(2N)``.  The phase ramp is computed and wrapped in
     float64, so long records keep their phase accuracy in complex64.
@@ -298,7 +294,7 @@ def add_pilot_tone(
     ]
     for f_in, f_out in zip(f_req, actual):
         if abs(f_out - f_in) > 1e-12 * max(1.0, abs(f_in)):
-            logger.warning(
+            logger.debug(
                 "add_pilot_tone: requested %.3f Hz quantized to %.3f Hz "
                 "(grid step fs/N=%.3f Hz) for buffer-periodic "
                 "(loop-seamless) playback.",

@@ -183,9 +183,10 @@ def _bps(symbols: ArrayType, method: BPS, ctx: _Context) -> _Phase:
     # Very small block_size makes the M-fold phase unwrap unreliable: with only
     # one or two symbols per block the noise on the distance-metric argmin causes
     # large candidate-index jumps between consecutive blocks, triggering false
-    # M-fold unwrap corrections.  Warn early so users diagnose this easily.
+    # M-fold unwrap corrections.  Traced at DEBUG: the size is the caller's
+    # choice, and slips it causes show in the result.
     if block_size < 4:
-        logger.warning(
+        logger.debug(
             "CPR (BPS): block_size=%s is very small. Averaging the distance "
             "metric over only %s symbol(s) per block makes the M-fold "
             "phase unwrap unreliable. Recommended minimum: block_size ≥ 4.",

@@ -442,7 +442,7 @@ def _resolve_power(power: int | None, constellation: Any, default: int | None) -
     if constellation is not None:
         m = int(constellation.rotational_symmetry)
         if m > 4:
-            logger.warning(
+            logger.debug(
                 "M=%s-th power raises the noise variance by M²; prefer pilot-"
                 "aided estimation for constellations with this symmetry.",
                 m,

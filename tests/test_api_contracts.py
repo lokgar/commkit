@@ -1059,7 +1059,6 @@ def test_no_mutation(row: Row, xp):
         np.testing.assert_array_equal(to_device(getattr(c, k), "cpu"), v, err_msg=k)
 
 
-@pytest.mark.allow_warnings
 @pytest.mark.parametrize("row", _rows(BEHAVIORAL))
 def test_foreign_array_rejected(row: Row, xp):
     c = Inputs(xp)
@@ -1116,7 +1115,6 @@ def test_metric_host_values(row: Row, xp):
             assert out.shape == (2,)
 
 
-@pytest.mark.allow_warnings
 @pytest.mark.parametrize("row", _rows({EQUALIZER}))
 def test_equalizer_result(row: Row, xp):
     c = Inputs(xp)

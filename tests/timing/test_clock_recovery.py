@@ -190,7 +190,6 @@ class TestLockChecks:
     through the symbols the mean detector output is zero and only the
     integrator's bound keeps its frequency near the clock's."""
 
-    @pytest.mark.allow_warnings
     def test_bound_keeps_a_slipping_loop_near_the_clock(self, xp, caplog):
         """Classical detector, rolloff 0.1, B·T = 1e-2: jitter large enough
         to slip throughout the record.  Within the default 1000 ppm bound the
@@ -213,7 +212,6 @@ class TestLockChecks:
         )
         assert abs(float(est.value)) > 2000.0
 
-    @pytest.mark.allow_warnings
     def test_slip_reported(self, xp, caplog):
         """Power detector, rolloff 0.1, B·T = 2e-2: a few slips (3 to 5
         measured), each moving the timing by a whole symbol, against at
@@ -238,7 +236,6 @@ class TestLockChecks:
         first = cr._first_slip(slipped[None], np.array([1e-2]))[0]
         assert 50_000 - 800 <= first < 50_000
 
-    @pytest.mark.allow_warnings
     def test_offset_beyond_the_bound(self, xp, caplog):
         """1500 ppm with the default bound: the integrator stops at 1000 ppm
         and the proportional path carries the rest with a static timing lag

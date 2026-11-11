@@ -361,16 +361,16 @@ def _cpr_symmetry(constellation: Any) -> int:
 
 
 def _validate_sps(sps: Any, num_taps: int) -> None:
-    """Validate sps; warn about unusual values, check tap count minimum."""
+    """Validate sps; trace unusual values and short tap counts at DEBUG."""
     sps = require_integer_sps(sps, "equalizer")
     if sps == 1:
-        logger.info(
+        logger.debug(
             "sps=1: symbol-spaced equalizer mode. "
             "No fractional-spacing benefit; suitable for residual ISI correction "
             "after a prior FSE stage + FOE + CPR."
         )
     elif sps > 2:
-        logger.warning(
+        logger.debug(
             "sps=%s: non-standard oversampling ratio for adaptive "
             "equalization. T/2-spaced (sps=2) is the industry standard. "
             "Higher values give marginal benefit but require "
@@ -378,7 +378,7 @@ def _validate_sps(sps: Any, num_taps: int) -> None:
             sps,
         )
     if sps > 1 and num_taps < 2 * sps:  # fractionally spaced only
-        logger.warning(
+        logger.debug(
             "num_taps=%s is small for sps=%s. Recommend num_taps >= %s "
             "for fractionally-spaced equalization.",
             num_taps,

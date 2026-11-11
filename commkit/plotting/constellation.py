@@ -321,7 +321,7 @@ def _plot_constellation_array(
 
     # Ensure samples are complex
     if not xp.iscomplexobj(samples):
-        logger.warning("Constellation plot expects complex samples. Converting.")
+        logger.debug("Real samples plotted as complex, on the in-phase axis.")
         samples = samples.astype(xp.complex64)
 
     # Bin on the device and transfer only the (bins, bins) counts.  The view

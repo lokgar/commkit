@@ -61,7 +61,7 @@ class ViterbiViterbi:
 def _warn_small_qam_block(
     name: str, block_size: int, project: bool, order: int
 ) -> None:
-    """Warn when QAM block averaging is too short for the M-fold unwrap.
+    """Trace at DEBUG when QAM block averaging is too short for the M-fold unwrap.
 
     For QAM with order > 4 the M-th power of individual symbols does not
     cancel the data modulation; block-phase variance above the ``π/M``
@@ -71,7 +71,7 @@ def _warn_small_qam_block(
         return
     min_bs = max(8, 4 * int(np.ceil(order**0.5)))
     if block_size < min_bs:
-        logger.warning(
+        logger.debug(
             "CPR (%s): block_size=%s is too small for this %s-point "
             "constellation. Individual symbols' M-th powers do not cancel the "
             "data modulation; insufficient averaging causes block-phase "

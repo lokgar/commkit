@@ -86,7 +86,6 @@ def test_lms_matches_oracle(num_ch, n_train):
     _assert_matches(res, ref, num_ch)
 
 
-@pytest.mark.allow_warnings
 @pytest.mark.parametrize("num_ch", [1, 2])
 @pytest.mark.parametrize("leakage", [0.0, 1e-3])
 def test_rls_matches_oracle(num_ch, leakage):
@@ -257,7 +256,6 @@ def test_lms_inline_cpr_matches_oracle(num_ch, kind, joint, slips):
     _assert_cpr_matches(res, ref, num_ch)
 
 
-@pytest.mark.allow_warnings
 @pytest.mark.parametrize("num_ch", [1, 2])
 @pytest.mark.parametrize(("kind", "joint", "slips"), CPR_CASES)
 def test_rls_inline_cpr_matches_oracle(num_ch, kind, joint, slips):

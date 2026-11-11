@@ -1,7 +1,5 @@
 """Tests for timing synchronization (Barker and Zadoff-Chu sequences, frame detection)."""
 
-from unittest.mock import patch
-
 import numpy as np
 import pytest
 
@@ -382,19 +380,22 @@ class TestEstimateTimingMIMO:
         preamble = Preamble(sequence_type="zc", num_symbols=L, root=1, num_channels=2)
         return rx, preamble, L
 
-    def test_estimate_timing_skew_detection(self, xp):
-        """Verify skew warning is emitted when MIMO channels have different preamble positions."""
+    def test_estimate_timing_skew_detection(self, xp, caplog):
+        """The INFO summary reports the spread between channels whose
+        preambles sit at different positions (2 samples here)."""
+        import logging
+
         barker = xp.asarray(timing.barker_sequence(7))
         sig = xp.zeros((2, 200), dtype="complex64")
         sig[0, 40:47] = barker
         sig[1, 42:49] = barker
 
-        with patch("commkit.timing.synchronization.logger") as mock_logger:
+        with caplog.at_level(logging.INFO, logger="commkit"):
             est = timing.estimate_timing(sig, template=barker, threshold=2.0)
             integer = est.integer
-            mock_logger.warning.assert_called()
-            call_args = mock_logger.warning.call_args[0][0]
-            assert "Skew detected" in call_args
+        lines = [r for r in caplog.records if r.levelno == logging.INFO]
+        assert len(lines) == 1
+        assert "spread 2 samples" in lines[0].getMessage()
 
         assert len(integer) == 2
         assert abs(int(integer[0]) - 40) <= 1
@@ -423,7 +424,6 @@ class TestEstimateTimingMIMO:
         for ch in range(2):
             assert int(integer[ch]) == preamble_pos
 
-    @pytest.mark.allow_warnings
     def test_estimate_timing_mimo_channel_skew(self, xp):
         """MIMO: hardware skew of 5 samples on channel 1 is reflected in per-channel integer offsets."""
         preamble_pos = 200

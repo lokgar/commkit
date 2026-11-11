@@ -95,7 +95,6 @@ class TestLMS:
 class TestRLS:
     """Tests for the RLS adaptive equalizer."""
 
-    @pytest.mark.allow_warnings
     def test_convergence(self, xp):
         """RLS with 500 training symbols on the ISI channel: no symbol errors
         after training, EVM within 1.2x the AWGN floor (RLS has almost no
@@ -206,7 +205,6 @@ class TestResultLayout:
     ``(C, C, num_taps)``, and ``weights_history`` only with
     ``store_weights=True``, one row per processed symbol."""
 
-    @pytest.mark.allow_warnings
     @pytest.mark.parametrize("name", ["lms", "rls", "cma", "rde"])
     @pytest.mark.parametrize("num_channels", [1, 2])
     def test_layout(self, xp, name, num_channels):
@@ -277,28 +275,30 @@ class TestEdgeCases:
         with pytest.raises(ValueError, match="needs a constellation"):
             equalization.lms(rx, num_taps=7, sps=2)
 
-    def test_rls_warns_fractional_spacing(self, xp, caplog):
-        """RLS at sps > 1 warns that its correlation matrix is ill-conditioned;
-        at 1 sps it does not."""
+    def test_rls_traces_fractional_spacing(self, xp, caplog):
+        """RLS at sps > 1 notes at DEBUG (not WARNING: the spacing is the
+        caller's choice) that its correlation matrix is ill-conditioned; at
+        1 sps it does not."""
         import logging
 
         rx, sig = self._qpsk_rx(xp, n_symbols=400)
         train = xp.asarray(sig.reference.symbols)
         kw = dict(num_taps=7, constellation=Constellation.psk(4))
-        with caplog.at_level(logging.WARNING, logger="commkit"):
+        with caplog.at_level(logging.DEBUG, logger="commkit"):
             equalization.rls(rx, train, sps=2, **kw)
-        assert any("ill-conditioned" in r.getMessage() for r in caplog.records)
+        notes = [r for r in caplog.records if "ill-conditioned" in r.getMessage()]
+        assert notes and all(r.levelno == logging.DEBUG for r in notes)
         caplog.clear()
-        with caplog.at_level(logging.WARNING, logger="commkit"):
+        with caplog.at_level(logging.DEBUG, logger="commkit"):
             equalization.rls(rx[::2], train, sps=1, **kw)
         assert not any("ill-conditioned" in r.getMessage() for r in caplog.records)
 
     def test_validate_sps_small_num_taps(self, xp, caplog):
-        """_validate_sps should log a warning when num_taps < 4*sps."""
+        """_validate_sps notes a short num_taps at DEBUG, never WARNING."""
         import logging
 
         rx, sig = self._qpsk_rx(xp)
-        with caplog.at_level(logging.WARNING, logger="commkit"):
+        with caplog.at_level(logging.DEBUG, logger="commkit"):
             equalization.lms(
                 rx,
                 xp.asarray(sig.reference.symbols),
@@ -306,7 +306,8 @@ class TestEdgeCases:
                 constellation=Constellation.psk(4),
                 sps=2,
             )
-        assert any("small" in r.message.lower() for r in caplog.records)
+        notes = [r for r in caplog.records if "small" in r.message.lower()]
+        assert notes and all(r.levelno == logging.DEBUG for r in notes)
 
     def test_rde_no_modulation_falls_back_to_cma(self, xp, xpt):
         """Without a constellation RDE has the one radius 1, which is CMA
@@ -420,7 +421,6 @@ class TestNumbaBackendCoverage:
         assert ser == 0.0 and evm < 1.4 * floor
         assert score(0.0)[1] > 1.5 * floor
 
-    @pytest.mark.allow_warnings
     @pytest.mark.parametrize("cpr", [None, BPS(test_phases=16)], ids=["plain", "bps"])
     def test_rls_divergence_raises(self, xp, cpr):
         """A forgetting factor of 0.1 multiplies P by 10 every symbol, so it
@@ -440,7 +440,6 @@ class TestNumbaBackendCoverage:
         res = equalization.rls(rx, train, forgetting_factor=0.99, **kw)
         assert np.all(np.isfinite(to_numpy(res.weights)))
 
-    @pytest.mark.allow_warnings
     def test_rls_numba_num_train_symbols(self, xp):
         """RLS numba: pre-sliced training_symbols limits DA phase length."""
         rx, sig = self._make_qpsk_rx(xp, n_symbols=800)

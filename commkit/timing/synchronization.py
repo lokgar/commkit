@@ -650,28 +650,14 @@ def estimate_timing(
     mean_vals = xp.maximum(mean_vals, 1e-12)
     metrics = peak_vals / mean_vals
 
-    # Log coherence diagnostics - one batched D2H per array, not per channel
+    # Diagnostics from one batched D2H per array, not per channel.
     coherence_np = to_device(coherence, "cpu")
     metrics_np = to_device(metrics, "cpu")
-    for ch in range(num_sig_ch):
-        c_val = float(coherence_np[ch])
-        p_val = float(metrics_np[ch])
-        if c_val < 0.5 and p_val >= threshold:
-            logger.warning(
-                "Channel %s: Peak phase coherence is very low (%.2f), but "
-                "peak is visually prominent (PAPR=%.1f >= %s). This "
-                "suggests strong Carrier Frequency Offset (CFO) or "
-                "uncompensated dispersion destroying phase alignment "
-                "over the sequence length.",
-                ch,
-                c_val,
-                p_val,
-                threshold,
-            )
-        else:
-            logger.debug(
-                "Channel %s: Peak prominence = %.1f, coherence = %.2f", ch, p_val, c_val
-            )
+    logger.debug(
+        "Peak prominence per channel %s, coherence %s.",
+        np.round(metrics_np, 1).tolist(),
+        np.round(coherence_np, 2).tolist(),
+    )
 
     # === Threshold Check === (reuses the host copy - no further syncs)
     max_metric = float(metrics_np.max())
@@ -679,34 +665,25 @@ def estimate_timing(
         raise ValueError(
             f"No correlation peak above threshold {threshold} (max: {max_metric:.3f})"
         )
-    for _ch in range(num_sig_ch):
-        _m = float(metrics_np[_ch])
-        if _m < threshold:
-            logger.warning(
-                "Channel %s: correlation metric %.3f is below threshold "
-                "%s. Integer offset for this channel may be unreliable.",
-                _ch,
-                _m,
-                threshold,
-            )
-
-    # === Skew Check (Robust) ===
-    if num_sig_ch > 1:
-        valid_mask = metrics > threshold
-
-        if xp.sum(valid_mask) > 1:
-            valid_peaks = peak_indices[valid_mask]
-            spread = int(xp.max(valid_peaks) - xp.min(valid_peaks))
-
-            if spread > 0:
-                logger.warning(
-                    "Skew detected among valid channels! Valid Peaks: %s. "
-                    "Spread: %s samples.",
-                    valid_peaks.tolist(),
-                    spread,
-                )
-            else:
-                logger.info("Channels aligned (spread %s).", spread)
+    incoherent = np.flatnonzero((coherence_np < 0.5) & (metrics_np >= threshold))
+    if incoherent.size:
+        logger.warning(
+            "Channels %s: peak phase coherence below 0.5 (%s) although the "
+            "peak is prominent; a strong carrier frequency offset or "
+            "uncompensated dispersion destroys the phase alignment over the "
+            "sequence.",
+            incoherent.tolist(),
+            np.round(coherence_np[incoherent], 2).tolist(),
+        )
+    weak = np.flatnonzero(metrics_np < threshold)
+    if weak.size:
+        logger.warning(
+            "Channels %s: correlation metric %s below threshold %s; their "
+            "integer offsets may be unreliable.",
+            weak.tolist(),
+            np.round(metrics_np[weak], 3).tolist(),
+            threshold,
+        )
 
     # Each channel's peak is found independently so hardware skew is preserved.
     integer_offsets = xp.maximum(0, peak_indices + offset)
@@ -717,12 +694,17 @@ def estimate_timing(
     )
 
     if logger.isEnabledFor(logging.INFO):
-        # Three .tolist() host syncs, only for this summary line.
+        # Host syncs only for this summary line.  The spread is taken over
+        # the channels above the threshold (the skew between them).
+        peaks_np = to_device(peak_indices, "cpu")[metrics_np >= threshold]
+        spread = int(peaks_np.max() - peaks_np.min()) if peaks_np.size > 1 else 0
         logger.info(
-            "Timing estimated. Integer: %s, Fractional: %s, Metrics: %s",
+            "Timing estimated. Integer: %s, Fractional: %s, Metrics: %s, "
+            "spread %s samples.",
             integer_offsets.tolist(),
             fractional_offsets.tolist(),
             metrics.tolist(),
+            spread,
         )
 
     integer_offsets, fractional_offsets, metrics, coherence, corr = restore_1d(
@@ -885,17 +867,11 @@ def correct_timing(
     if apply_frac and mode != "slice":
         x = fft_fractional_delay(x, delay=-fractional_offset)
 
-    if mode == "slice":
-        logger.info(
-            "correct_timing(mode='slice'): output is shorter than input "
-            "(trimmed by %s samples). Signal length metadata (e.g. "
-            "duration) will no longer match the original.",
-            trimmed,
-        )
     logger.info(
-        "Timing corrected: integer=applied, fractional=%s, mode=%r.",
+        "Timing corrected: integer=applied, fractional=%s, mode=%r%s.",
         "applied" if apply_frac else "skipped",
         mode,
+        f", trimmed by {trimmed} samples" if mode == "slice" else "",
     )
 
     out = restore_1d(was_1d, x)
