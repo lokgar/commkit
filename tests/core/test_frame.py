@@ -209,6 +209,25 @@ class TestSingleCarrierFrameStructureMap:
         assert (frame.pilot_mask == struct.pilots).all()
         assert (frame.payload_mask == struct.payload).all()
 
+    @pytest.mark.parametrize("guard_type", ["zero", "cp"])
+    def test_pilot_indices_locate_the_pilot_symbols(self, guard_type: str) -> None:
+        """Body symbol ``indices[k]`` (without the preamble) is pilot ``k``,
+        and with the preamble the indices shift by the preamble (and a
+        cyclic prefix) in front of the body."""
+        frame = SingleCarrierFrame(
+            payload_num_symbols=42,
+            preamble=Preamble(sequence_type="barker", num_symbols=13),
+            pilot_pattern="comb",
+            pilot_period=4,
+            guard_type=guard_type,
+            guard_num_symbols=3,
+        )
+        body = frame.pilot_indices(include_preamble=False)
+        np.testing.assert_array_equal(frame.body_symbols[body], frame.pilot_symbols)
+        offset = 13 + (3 if guard_type == "cp" else 0)
+        np.testing.assert_array_equal(frame.pilot_indices(), body + offset)
+        assert SingleCarrierFrame(payload_num_symbols=8).pilot_indices().size == 0
+
     def test_sc_frame_structure_map_cp(self, xp: Any) -> None:
         """Verify get_structure_map with Cyclic Prefix (CP) guard interval."""
         frame = SingleCarrierFrame(

@@ -652,6 +652,26 @@ class SingleCarrierFrame:
             masks = {k: v.copy() for k, v in masks.items()}
         return FrameStructure(**{k: _readonly(v) for k, v in masks.items()})
 
+    def pilot_indices(self, include_preamble: bool = True) -> np.ndarray:
+        """Return the symbol indices of the pilots (host int64, ``(P,)``).
+
+        Index ``k`` of the result is the position of ``pilot_symbols[k]``;
+        empty for a frame without pilots.
+
+        Parameters
+        ----------
+        include_preamble : bool, default True
+            ``True``: indices into the whole frame.  ``False``: indices into
+            what follows the preamble, as in :meth:`get_structure_map`.
+
+        Returns
+        -------
+        numpy.ndarray
+            Pilot symbol indices in ascending order.
+        """
+        mask = self.get_structure_map(include_preamble=include_preamble).pilots
+        return np.flatnonzero(mask)
+
     # -------------------------------------------------------------------------
     # Signal Generation
     # -------------------------------------------------------------------------
@@ -922,17 +942,6 @@ def extract_payload(signal: Signal) -> Signal:
         center_frequency=signal.center_frequency,
         domain=signal.domain,
     )
-
-
-def _frame_pilots(
-    frame: SingleCarrierFrame, include_preamble: bool, name: str
-) -> tuple[np.ndarray, np.ndarray]:
-    """Symbol indices and symbols (host) of a frame's pilots, for the
-    ``from_frame`` constructors of the pilot-aided methods."""
-    if frame.pilot_symbols is None:
-        raise ValueError(f"{name}.from_frame(): the frame has no pilots.")
-    mask = frame.get_structure_map(include_preamble=include_preamble).pilots
-    return np.flatnonzero(mask), np.asarray(frame.pilot_symbols)
 
 
 def _resolve_seed(rng: Any, name: str) -> int:

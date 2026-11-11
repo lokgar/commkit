@@ -22,7 +22,6 @@ from ._array import as_2d, broadcast_channels, restore_1d
 from ._peaks import parabolic_peak_offset
 from .backend import ArrayType, dispatch, to_device
 from .core._signal_adapter import S, adapt_signal, require_integer_sps
-from .core.frame import _frame_pilots
 from .core.signal import Signal
 from .logger import logger
 from .math import _derotate, _linear_trend_slope
@@ -231,8 +230,10 @@ class PilotSlope:
             If the frame has no pilots.
         """
         sps = require_integer_sps(sps, "PilotSlope.from_frame()")
-        indices, values = _frame_pilots(frame, include_preamble, "PilotSlope")
-        return cls(indices * sps, values, snr_weighted)
+        if frame.pilot_symbols is None:
+            raise ValueError("PilotSlope.from_frame(): the frame has no pilots.")
+        indices = frame.pilot_indices(include_preamble)
+        return cls(indices * sps, np.asarray(frame.pilot_symbols), snr_weighted)
 
 
 @dataclass(frozen=True)

@@ -9,7 +9,6 @@ import numpy as np
 
 from .._array import broadcast_channels
 from ..backend import to_device
-from ..core.frame import _frame_pilots
 
 __all__ = ["EqualizerPilots"]
 
@@ -90,9 +89,10 @@ class EqualizerPilots:
         ValueError
             If the frame has no pilots.
         """
-        _, values = _frame_pilots(frame, include_preamble, "EqualizerPilots")
+        if frame.pilot_symbols is None:
+            raise ValueError("EqualizerPilots.from_frame(): the frame has no pilots.")
         mask = frame.get_structure_map(include_preamble=include_preamble).pilots
-        return cls(values, mask, frame.pilot_gain_db)
+        return cls(np.asarray(frame.pilot_symbols), mask, frame.pilot_gain_db)
 
     def _dense(self, num_channels: int, num_symbols: int, function_name: str) -> Any:
         """The dense ``(C, N_sym)`` complex64 reference (zeros at the data)

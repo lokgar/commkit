@@ -13,7 +13,6 @@ import numpy as np
 from .. import _fft
 from .._array import broadcast_channels
 from ..backend import ArrayType, dispatch, to_device
-from ..core.frame import _frame_pilots
 from ..logger import logger
 from ..math import _remove_linear_trend
 from ._common import _Context, _Phase
@@ -101,8 +100,12 @@ class PilotInterpolation:
         ValueError
             If the frame has no pilots.
         """
-        indices, values = _frame_pilots(frame, include_preamble, "PilotInterpolation")
-        return cls(indices, values, **options)
+        if frame.pilot_symbols is None:
+            raise ValueError(
+                "PilotInterpolation.from_frame(): the frame has no pilots."
+            )
+        indices = frame.pilot_indices(include_preamble)
+        return cls(indices, np.asarray(frame.pilot_symbols), **options)
 
 
 def _pilot_aided(

@@ -25,6 +25,7 @@ Notable changes to CommKit, newest first. Performance figures are from the refer
 ### Added
 
 - `demapper_exit_curve(esn0_db=)` as an alternative to `noise_var`.
+- `SingleCarrierFrame.pilot_indices(include_preamble=)`: the symbol positions of `pilot_symbols`, for pilot-aided methods of your own.
 - `impairments.apply_frequency_offset`: a carrier frequency offset at any value (not snapped to the FFT grid like `shift_frequency`), per channel if needed, the exact inverse of `correct_frequency_offset`.
 - `correct_cycle_slips` accepts a `(C, B)` trajectory and repairs each row on its own.
 - `max_points=` on `plot_carrier_phase_trajectory`, `plot_carrier_phase_decomposition`, `plot_frequency_drift`, `plot_frequency_offset_spectrum`, `plot_mm_autocorrelation`, `plot_timing_correlation` and `plot_pilot_phase_estimate`, as the other trace plots have.
