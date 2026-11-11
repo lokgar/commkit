@@ -36,6 +36,7 @@ from scipy.special import erfc
 
 from ..logger import logger
 from ..mapping import Constellation
+from ..mapping._lattice import separable_axes
 
 __all__ = ["awgn_ber", "awgn_gmi", "awgn_mi", "awgn_ser"]
 
@@ -86,7 +87,7 @@ class _Geometry:
             return [(levels, c.bit_labels, self.pmf, all_bits)]
         for angle in (0.0, math.pi / 4):
             rotated = c if angle == 0.0 else _rotated(c, angle)
-            axes = rotated._axes
+            axes = separable_axes(rotated)
             if axes is not None:
                 return [
                     (

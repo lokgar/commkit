@@ -28,9 +28,11 @@ from typing import Any
 import numpy as np
 
 from .._array import warn_if_double
+from .._bits import pack_bits, unpack_bits
 from ..backend import ArrayType, _device_tables, dispatch
-from ._demap import _Axis, _llr, _llr_separable, _llr_separable_gpu
-from .gray import _gray_points, _nearest_index, _pack, _unpack_bits
+from ._demap import _llr, _llr_separable, _llr_separable_gpu
+from ._lattice import Axis, find_separable_axes, find_square_grid
+from .gray import _gray_points, _nearest_index
 from .shaping import (
     _constellation_power,
     _entropy_bits,
@@ -101,7 +103,7 @@ class Constellation:
         if 2**k != order:
             raise ValueError(f"The number of points must be a power of 2, got {order}.")
         if self.bit_labels is None:
-            labels = _unpack_bits(np.arange(order, dtype=np.int32), k)
+            labels = unpack_bits(np.arange(order, dtype=np.int32), k)
         else:
             labels = _host_array(self.bit_labels, "bit_labels")
             if labels.shape != (order, k):
@@ -111,7 +113,7 @@ class Constellation:
             if not np.all((labels == 0) | (labels == 1)):
                 raise ValueError("bit_labels must contain only 0 and 1.")
             labels = labels.astype(np.int8)
-            if np.unique(_pack(labels)).size != order:
+            if np.unique(pack_bits(labels)).size != order:
                 raise ValueError("bit_labels must assign every bit pattern once.")
 
         pmf = None
@@ -401,92 +403,21 @@ class Constellation:
 
     @cached_property
     def _square_grid(self) -> tuple[float, float, int, np.ndarray] | None:
-        """``(lev_min, step, side, lut)`` if the points form a full square lattice.
-
-        ``lut[i * side + q]`` is the index of the point at level ``i`` on the
-        real axis and ``q`` on the imaginary axis.  ``None`` otherwise (PSK,
-        PAM, cross and 8-QAM, arbitrary points).
-        """
-        side = int(round(self.order**0.5))
-        if not self.is_complex or side * side != self.order or side < 2:
-            return None
-        re, im = self.points.real, self.points.imag
-        lev_min = float(re.min())
-        step = (float(re.max()) - lev_min) / (side - 1)
-        if step <= 0 or abs(float(im.min()) - lev_min) > 1e-9 * step:
-            return None
-        gi, gq = (re - lev_min) / step, (im - lev_min) / step
-        ri, rq = np.round(gi), np.round(gq)
-        if max(np.abs(gi - ri).max(), np.abs(gq - rq).max()) > 1e-9:
-            return None
-        cell = ri.astype(np.int64) * side + rq.astype(np.int64)
-        if cell.min() < 0 or cell.max() >= self.order:
-            return None
-        if np.unique(cell).size != self.order:
-            return None
-        lut = np.empty(self.order, dtype=np.int64)
-        lut[cell] = np.arange(self.order)
-        lut.setflags(write=False)
-        return lev_min, step, side, lut
+        """Cache of :func:`._lattice.find_square_grid`."""
+        return find_square_grid(self)
 
     @cached_property
-    def _axes(self) -> tuple[_Axis, _Axis] | None:
-        """Per-axis factors of a separable square lattice, or ``None``.
-
-        The real and imaginary axes of a square lattice whose labels and
-        prior factor into per-axis ones (Gray QAM, shaped or not).
-
-        Every bit then depends on one axis only, and the other axis's factor
-        cancels from its LLR.  ``None`` otherwise.
-        """
-        grid = self._square_grid
-        if grid is None:
-            return None
-        _, _, side, lut = grid
-        labels = self.bit_labels[lut].reshape(side, side, -1)  # [i, q, bit]
-        on_re = np.all(labels == labels[:, :1, :], axis=(0, 1))  # constant in q
-        on_im = np.all(labels == labels[:1, :, :], axis=(0, 1))  # constant in i
-        if not np.all(on_re ^ on_im):
-            return None
-        bits_re, bits_im = np.flatnonzero(on_re), np.flatnonzero(on_im)
-        if 2**bits_re.size != side or 2**bits_im.size != side:
-            return None
-        points = self.points[lut].reshape(side, side)
-        pmf_re = pmf_im = None
-        if self.pmf is not None:
-            pmf = self.pmf[lut].reshape(side, side)
-            pmf_re, pmf_im = pmf.sum(axis=1), pmf.sum(axis=0)
-            if not np.allclose(pmf, np.outer(pmf_re, pmf_im), rtol=1e-9, atol=0.0):
-                return None
-        return (
-            _Axis(points[:, 0].real, labels[:, 0][:, bits_re], pmf_re, bits_re),
-            _Axis(points[0, :].imag, labels[0, :][:, bits_im], pmf_im, bits_im),
-        )
+    def _axes(self) -> tuple[Axis, Axis] | None:
+        """Cache of :func:`._lattice.find_separable_axes`."""
+        return find_separable_axes(self)
 
     @cached_property
     def _points_by_label(self) -> np.ndarray:
         """Points in the storage dtype, indexed by packed label, ``(M,)``."""
         points: np.ndarray = np.empty(self.order, dtype=self._storage_dtype())
-        points[_pack(self.bit_labels)] = self.points
+        points[pack_bits(self.bit_labels)] = self.points
         points.setflags(write=False)
         return points
-
-
-def _slicer_params(
-    constellation: "Constellation | None",
-) -> tuple[int, np.float32, np.float32]:
-    """``(side, lev_min, step)`` for the compiled O(1) square-lattice slicers.
-
-    ``side = 0`` (and placeholder levels) unless the points form a full
-    square lattice with the same levels on both axes
-    (:attr:`Constellation._square_grid`); the slicers then search all
-    ``M`` points.  ``None`` (no decisions needed) also gives ``side = 0``.
-    """
-    grid = None if constellation is None else constellation._square_grid
-    if grid is None:
-        return 0, np.float32(0.0), np.float32(1.0)
-    lev_min, step, side, _ = grid
-    return side, np.float32(lev_min), np.float32(step)
 
 
 def _host_array(value: object, name: str) -> np.ndarray:

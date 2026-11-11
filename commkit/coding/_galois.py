@@ -17,8 +17,8 @@ from typing import Any
 
 import numpy as np
 
+from .._bits import unpack_bits
 from ..backend import ArrayType, _device_tables, get_array_module
-from ..mapping.gray import _unpack_bits
 
 # Primitive polynomials (with the x^m term), the common choice per degree:
 # x^8 + x^4 + x^3 + x^2 + 1 is the one of ITU-T G.709 and the IEEE 802.3
@@ -119,7 +119,7 @@ class _Field:
     def bits(self, values: Any) -> np.ndarray:
         """Host elements to their ``m`` bits, MSB first: ``(..., m)`` int8."""
         v = np.asarray(values, dtype=np.int64)
-        return _unpack_bits(v.reshape(-1), self.m).reshape(*v.shape, self.m)
+        return unpack_bits(v.reshape(-1), self.m).reshape(*v.shape, self.m)
 
     def evaluation_matrix(self, powers: np.ndarray) -> np.ndarray:
         """Bits of ``sum_j a_j beta_i^j`` from the bits of ``a_0 .. a_{d-1}``.

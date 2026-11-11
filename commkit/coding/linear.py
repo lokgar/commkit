@@ -24,8 +24,8 @@ from typing import Any, NamedTuple
 
 import numpy as np
 
+from .._bits import pack_bits, unpack_bits
 from ..backend import ArrayType, _device_tables, dispatch
-from ..mapping.gray import _pack, _unpack_bits
 from ._gf2 import matmul_mod2, null_space, row_reduce
 from .base import (
     _checked,
@@ -180,7 +180,7 @@ class LinearBlockCode(_Code):
             raise ValueError(f"r must be an integer >= 2, got {r!r}.")
         values = np.arange(1, 1 << r)
         info = values[(values & (values - 1)) != 0]
-        h = np.concatenate([_unpack_bits(info, r).T, np.eye(r, dtype=np.int8)], axis=1)
+        h = np.concatenate([unpack_bits(info, r).T, np.eye(r, dtype=np.int8)], axis=1)
         if extended:
             h = np.concatenate([h, np.zeros((r, 1), dtype=np.int8)], axis=1)
             h = np.concatenate([h, np.ones((1, h.shape[1]), dtype=np.int8)], axis=0)
@@ -365,7 +365,7 @@ def _syndrome_table(
             f"Syndrome(): the table of {code!r} would hold 2^{r} patterns of {n} "
             "bits; use another decoder."
         )
-    column_syndromes = _pack(h.T)  # syndrome of a single error at each position
+    column_syndromes = pack_bits(h.T)  # syndrome of a single error at each position
     leaders = np.zeros((1 << r, n), dtype=np.int8)
     found = np.zeros(1 << r, dtype=bool)
     found[0] = True
@@ -424,7 +424,7 @@ def _decode_ml(
         m1 = np.full((rows, n), -np.inf, dtype=np.float32)
         x = np.ascontiguousarray(llrs, dtype=np.float32)
         for w0 in range(0, num_words, words_chunk):
-            u = _unpack_bits(np.arange(w0, min(w0 + words_chunk, num_words)), k)
+            u = unpack_bits(np.arange(w0, min(w0 + words_chunk, num_words)), k)
             words = matmul_mod2(u, g)
             _get_numba_ml()(
                 x, 1.0 - 2.0 * words.astype(np.float32), words.astype(np.bool_), w0,
@@ -433,7 +433,7 @@ def _decode_ml(
     else:
         best, m0, m1 = _ml_gemm(llrs, g, k, words_chunk, method.soft)
     return _Decoded(
-        _unpack_bits(best, k),
+        unpack_bits(best, k),
         # Max-log: half the metric is the log-likelihood up to a constant.
         0.5 * (m0 - m1) if method.soft else None,
         xp.ones(rows, dtype=bool),
@@ -469,7 +469,7 @@ def _ml_gemm(
         best_metric = xp.full(x.shape[0], -np.inf, dtype=xp.float32)
         best_index = xp.zeros(x.shape[0], dtype=xp.int64)
         for w0 in range(0, num_words, words_chunk):
-            u = _unpack_bits(xp.arange(w0, min(w0 + words_chunk, num_words)), k)
+            u = unpack_bits(xp.arange(w0, min(w0 + words_chunk, num_words)), k)
             words = matmul_mod2(u, g)
             metric = x @ (1.0 - 2.0 * words.astype(xp.float32)).T
             arg = xp.argmax(metric, axis=1)
@@ -534,7 +534,7 @@ def _decode_chase(
     rows, n = llrs.shape
     p = min(method.test_positions, n)
     tests = 1 << p
-    patterns = _unpack_bits(xp.arange(tests), p)  # (T, p)
+    patterns = unpack_bits(xp.arange(tests), p)  # (T, p)
     # Rows per chunk: on the GPU, fewer launches pay for more memory; on the
     # CPU larger chunks measured slower (cache).
     chunk = max(1, _CHASE_CHUNK // (tests * n * (p if xp is np else 1)))
@@ -607,7 +607,7 @@ def _syndrome_words(
         xp,
         lambda: _syndrome_table(code, method.max_weight),
     )
-    s = _pack(matmul_mod2(hard, ht))
+    s = pack_bits(matmul_mod2(hard, ht))
     return hard ^ leaders[s], found[s]
 
 

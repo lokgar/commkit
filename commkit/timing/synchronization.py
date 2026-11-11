@@ -17,6 +17,7 @@ import numpy as np
 
 from .. import _fft
 from .._array import as_2d, restore_1d
+from .._peaks import parabolic_peak_offset
 from .._sequences import barker_sequence, zadoff_chu_sequence
 from ..backend import ArrayType, dispatch, to_device
 from ..core import Preamble, Signal
@@ -126,70 +127,6 @@ def cross_correlate_fft(
     return corr
 
 
-def _parabolic_peak_offset(
-    y_prev: ArrayType,
-    y_curr: ArrayType,
-    y_next: ArrayType,
-    xp: Any,
-    *,
-    log: bool = False,
-    log_eps: float = 1e-300,
-    denom_eps: float | None = None,
-) -> ArrayType:
-    r"""Offset of a peak from three samples by a (log-)parabolic fit.
-
-    Fits a parabola through the samples at ``k-1``, ``k`` and ``k+1`` around
-    a peak, or through their logarithms (the log-parabolic fit, equivalent to
-    a Gaussian), and returns the offset of the vertex from ``k``, clipped to
-    ``[-0.5, 0.5]``::
-
-        delta = 0.5 * (y_prev - y_next) / (y_prev - 2*y_curr + y_next)
-
-    Every three-point peak fit of the library uses it: ``frequency.MthPower``
-    on magnitudes (``log=False``), ``frequency.SpectralPeak`` and
-    ``frequency._refine_tones_from_spectrum`` (``log=True``), and
-    :func:`estimate_fractional_delay` with either fit, which first rotates a
-    complex peak onto the real axis and passes its own ``log_eps`` and
-    ``denom_eps``.  The arithmetic goes through ``xp`` only, so the inputs
-    may be host floats (``xp=numpy``) or device arrays.
-
-    Parameters
-    ----------
-    y_prev, y_curr, y_next : array_like or float
-        Samples at ``k-1``, ``k`` and ``k+1``.
-    xp : module
-        Array module (``numpy``/``cupy``) providing ``log``, ``maximum``,
-        ``abs``, ``where``, ``ones_like``, ``zeros_like``, ``clip``.
-    log : bool, default False
-        Fit ``log(max(y, log_eps))``, the usual fit for spectral magnitudes,
-        instead of ``y``.
-    log_eps : float, default 1e-300
-        Floor applied before the logarithm, with ``log=True`` only.
-    denom_eps : float, optional
-        Denominator magnitude below which the fit is degenerate and returns
-        0.  Defaults to ``1e-30`` with ``log=True`` and ``1e-15`` without.
-
-    Returns
-    -------
-    delta : ndarray or float
-        Offset from the center sample in ``[-0.5, 0.5]``, the type of the
-        inputs.
-    """
-    if denom_eps is None:
-        denom_eps = 1e-30 if log else 1e-15
-    if log:
-        y_prev = xp.log(xp.maximum(y_prev, log_eps))
-        y_curr = xp.log(xp.maximum(y_curr, log_eps))
-        y_next = xp.log(xp.maximum(y_next, log_eps))
-
-    denom = y_prev - 2.0 * y_curr + y_next
-    valid = xp.abs(denom) > denom_eps
-    safe_denom = xp.where(valid, denom, xp.ones_like(denom))
-    raw = 0.5 * (y_prev - y_next) / safe_denom
-    delta = xp.where(valid, raw, xp.zeros_like(raw))
-    return xp.clip(delta, -0.5, 0.5)
-
-
 # -----------------------------------------------------------------------------
 # CORRELATION-DOMAIN ESTIMATION (array-only)
 # -----------------------------------------------------------------------------
@@ -273,12 +210,12 @@ def estimate_fractional_delay(
             gamma = r_next
 
         # Same three-point (log-)parabolic fit as frequency.py's peak
-        # estimators (_parabolic_peak_offset), just in the
+        # estimators (parabolic_peak_offset), just in the
         # phase-rotated-to-real-axis coordinate used here.  denom_eps=5e-13
         # exactly reproduces this function's original degeneracy threshold,
         # which was checked against 2*(alpha - 2*beta + gamma) rather than
         # (alpha - 2*beta + gamma) directly.
-        return _parabolic_peak_offset(
+        return parabolic_peak_offset(
             alpha,
             beta,
             gamma,

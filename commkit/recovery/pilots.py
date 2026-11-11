@@ -264,7 +264,8 @@ def _extract_pilot_phasor(
     _PilotPhasor
         The phasor, the tone centers and the signal and noise powers.
     """
-    from ..frequency import _refine_tones_from_spectrum, correct_frequency_offset
+    from .._peaks import refine_tones
+    from ..frequency import correct_frequency_offset
 
     C, N = samples.shape
     df = sampling_rate / N
@@ -285,7 +286,7 @@ def _extract_pilot_phasor(
     #    has dragged the tone away from nominal, so the window stays centered on
     #    it.  Runs on the shared spectrum - no extra FFTs, one host transfer.
     if refine_tone:
-        f_centers = _refine_tones_from_spectrum(
+        f_centers = refine_tones(
             X,
             sampling_rate,
             [float(tone_frequency)] * C,

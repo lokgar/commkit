@@ -11,7 +11,7 @@ estimate, an offset in Hz, or what a method estimates.
 """
 
 import logging
-from collections.abc import Callable, Sequence
+from collections.abc import Callable
 from dataclasses import dataclass
 from typing import Any
 
@@ -19,13 +19,13 @@ import numpy as np
 
 from . import _fft
 from ._array import as_2d, broadcast_channels, restore_1d
+from ._peaks import parabolic_peak_offset
 from .backend import ArrayType, dispatch, to_device
 from .core._signal_adapter import S, adapt_signal, require_integer_sps
 from .core.frame import _frame_pilots
 from .core.signal import Signal
 from .logger import logger
 from .math import _derotate, _linear_trend_slope
-from .timing.synchronization import _parabolic_peak_offset
 
 
 def _get_numba_mm_bootstrap() -> Callable[..., np.ndarray]:
@@ -439,7 +439,7 @@ def _mth_power(
         mu_raw = ((X_km1 - X_kp1) / safe_d).real
         mu = xp.clip(xp.where(ok, mu_raw, xp.zeros_like(mu_raw)), -0.5, 0.5)
     else:
-        mu = _parabolic_peak_offset(
+        mu = parabolic_peak_offset(
             mag[rows, k_prev], mag[rows, k_peak], mag[rows, k_next], xp, log=False
         )
     # The peak bin's frequency, as fftfreq computes it: signed bin times fs/nfft.
@@ -572,7 +572,7 @@ def _bias_tone(x: ArrayType, fs: float, method: SpectralPeak) -> _Rows:
     left, peak, right = (
         mag[rows, j].astype(xp.float64) for j in ((k - 1) % nfft, k, (k + 1) % nfft)
     )
-    delta = _parabolic_peak_offset(left, peak, right, xp, log=True)
+    delta = parabolic_peak_offset(left, peak, right, xp, log=True)
     values = freqs[k] + delta * (fs / nfft)
     return _Rows(values=values, weights=peak)
 
@@ -836,69 +836,3 @@ def _correct_blockwise(
 # -----------------------------------------------------------------------------
 # SHARED TONE REFINEMENT (used by recovery and equalization)
 # -----------------------------------------------------------------------------
-
-
-def _refine_tones_from_spectrum(
-    X: ArrayType,
-    sampling_rate: float,
-    targets: Sequence[float],
-    search_band: float,
-    rows: Sequence[int] | np.ndarray | None = None,
-) -> np.ndarray:
-    """Refine tone frequencies on an FFT of the whole record, in one batch.
-
-    The counterpart of ``SpectralPeak`` for callers that already hold the
-    record's spectrum: each ``targets[t]`` is refined by an argmax search over
-    ``targets[t] ± search_band`` in spectrum row ``rows[t]``, then by the same
-    three-bin log-parabolic fit.  There is no zero padding (the fit makes up
-    for the coarser bins) and no extra FFT, and the work per tone stays on the
-    device: the refined frequencies come back in one host transfer.
-
-    Parameters
-    ----------
-    X : ndarray
-        FFT of the rows to search, in FFT-bin order, ``(R, N)``.
-    sampling_rate : float
-        Sampling rate in Hz.
-    targets : sequence of float
-        Nominal tone frequencies to refine, T values.
-    search_band : float
-        Half-width of the search window of each tone in Hz.
-    rows : sequence of int, optional
-        Spectrum row of each target; defaults to ``range(T)``, which needs
-        ``R == T``.
-
-    Returns
-    -------
-    numpy.ndarray
-        Refined frequencies in Hz, float64, ``(T,)``.
-    """
-    X, xp, _ = dispatch(X)
-    X, _ = as_2d(X, name="X")
-    N = X.shape[-1]
-    df = sampling_rate / N
-    targets = [float(f) for f in targets]
-    if rows is None:
-        rows = list(range(len(targets)))
-    neigh = xp.asarray([-1, 0, 1], dtype=xp.int64)
-
-    refined = []
-    for f_t, row in zip(targets, rows):
-        # Signed candidate bins covering [f_t - band, f_t + band] on the N-grid.
-        b_lo = max(int(np.ceil((f_t - abs(search_band)) / df)), -(N // 2))
-        b_hi = min(int(np.floor((f_t + abs(search_band)) / df)), (N - 1) // 2)
-        if b_hi < b_lo:
-            raise ValueError(
-                f"target_frequency={f_t} ± search_band={search_band} produces an "
-                f"empty search window for fs={sampling_rate} Hz, N={N}."
-            )
-        cand = xp.arange(b_lo, b_hi + 1, dtype=xp.int64)  # signed bins
-        spec_row = X[int(row)]
-        mag2 = xp.abs(spec_row[cand % N]) ** 2
-        kb = cand[xp.argmax(mag2)]  # 0-d signed peak bin, stays on device
-        # Three-bin log-parabolic fit.
-        mags = xp.abs(spec_row[(kb + neigh) % N]).astype(xp.float64)
-        delta = _parabolic_peak_offset(mags[0], mags[1], mags[2], xp, log=True)
-        refined.append((kb.astype(xp.float64) + delta) * df)
-
-    return to_device(xp.stack(refined), "cpu")

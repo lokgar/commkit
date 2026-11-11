@@ -22,13 +22,14 @@ nearest levels, so it keeps the level metrics.
 from __future__ import annotations
 
 from collections.abc import Callable
-from typing import TYPE_CHECKING, NamedTuple
+from typing import TYPE_CHECKING
 
 import numpy as np
 
 from .. import _cuda
+from .._bits import pack_bits
 from ..backend import ArrayType, _device_tables, dispatch
-from .gray import _pack
+from ._lattice import Axis
 
 if TYPE_CHECKING:
     from .constellation import Constellation
@@ -125,7 +126,7 @@ def _opposite_levels(labels: np.ndarray) -> tuple[np.ndarray, np.ndarray]:
 _CLOSED_FORM_MIN_LEVELS_CPU = 16
 
 
-def _closed_form(axes: tuple[_Axis, _Axis], method: str, min_levels: int = 2) -> bool:
+def _closed_form(axes: tuple[Axis, Axis], method: str, min_levels: int = 2) -> bool:
     """Max-log LLRs of a uniform separable constellation, with at least
     ``min_levels`` levels per axis: the closed form."""
     return method == "maxlog" and all(
@@ -244,18 +245,9 @@ def _require_gpu_bits(k: int) -> None:
         )
 
 
-class _Axis(NamedTuple):
-    """One axis of a separable constellation (see ``Constellation._axes``)."""
-
-    levels: np.ndarray  # (L,) real levels on this axis
-    labels: np.ndarray  # (L, k_axis) labels of this axis's bits
-    pmf: np.ndarray | None  # (L,) marginal prior
-    bits: np.ndarray  # (k_axis,) positions of these bits in the symbol label
-
-
 def _llr_separable(
     symbols: np.ndarray,
-    axes: tuple[_Axis, _Axis],
+    axes: tuple[Axis, Axis],
     noise_var: float,
     method: str,
     owner: Constellation | None = None,
@@ -322,7 +314,7 @@ def _llr_separable(
 
 def _llr_separable_gpu(
     symbols: ArrayType,
-    axes: tuple[_Axis, _Axis],
+    axes: tuple[Axis, Axis],
     noise_var: float,
     method: str,
     owner: Constellation | None = None,
@@ -379,4 +371,4 @@ def _llr_separable_gpu(
 
 def _packed_labels(bit_labels: np.ndarray) -> np.ndarray:
     """MSB-first bit rows to int32 labels, the CUDA kernels' layout."""
-    return _pack(bit_labels).astype(np.int32)
+    return pack_bits(bit_labels).astype(np.int32)

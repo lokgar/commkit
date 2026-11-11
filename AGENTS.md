@@ -75,7 +75,7 @@ Dependencies point downward only:
 | Layer | Modules | May import |
 | --- | --- | --- |
 | Infrastructure | `backend`, `logger`, `_cuda` | NumPy, CuPy |
-| Array and math helpers | `_array` (shape and validation), `math` (power, normalization, dB, linear trend) | infrastructure |
+| Array and math helpers | `_array` (shape and validation), `_bits` (bit rows and integers), `_peaks` (sub-bin peak fits), `math` (power, normalization, dB, linear trend) | infrastructure |
 | Value objects | `mapping.Constellation`, pulse classes, `recovery` CPR configs, `coding` (code objects with their `encode` / `decode`; array-only, never imports `core`) | layers above |
 | Core | `core` (`Signal`, frames, generation), `io` | layers above |
 | DSP | `mapping`, `filtering`, `multirate`, `spectral`, `smoothing`, `impairments`, `timing`, `frequency`, `recovery`, `equalization`, `metrics`, `analysis` | layers above, and lower DSP modules |

@@ -14,7 +14,7 @@ from ...backend import ArrayType
 from ...core._signal_adapter import adapt_signal, require_integer_sps
 from ...core.signal import Signal
 from ...logger import logger
-from ...mapping.constellation import _slicer_params
+from ...mapping._lattice import slicer_params
 from ...recovery import BPS, PLL
 from ..result import (
     EqualizerResult,
@@ -320,7 +320,7 @@ def lms(
     constellation_np = _dd_constellation(
         constellation, "lms()", decisions=run.n_train < run.n_sym
     )
-    sq_side, sq_lev_min, sq_d_grid = _slicer_params(constellation)
+    sq_side, sq_lev_min, sq_d_grid = slicer_params(constellation)
     slicer = (sq_lev_min, sq_d_grid, np.int32(sq_side))
     mu = np.float32(step_size)
 
@@ -629,7 +629,7 @@ def rls(
     constellation_np = _dd_constellation(
         constellation, "rls()", decisions=run.n_train < run.n_sym
     )
-    sq_side, sq_lev_min, sq_d_grid = _slicer_params(constellation)
+    sq_side, sq_lev_min, sq_d_grid = slicer_params(constellation)
     slicer = (sq_lev_min, sq_d_grid, np.int32(sq_side))
     # Inverse correlation matrix: complex128 throughout (single precision loses
     # the Hermitian positive-definite property and the filter diverges).

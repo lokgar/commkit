@@ -6,6 +6,7 @@ from typing import Any
 import numpy as np
 
 from ..backend import ArrayType, dispatch, to_device
+from ..mapping._lattice import square_grid
 from ._common import _Context, _Phase, _resolve_pll_gains
 from .corrections import (
     _HISTORY_SPAN,
@@ -134,7 +135,7 @@ def _pll(symbols: ArrayType, method: PLL, ctx: _Context) -> _Phase:
     # point is found by rounding to the closest level per axis.  The levels
     # are float64, like the loop: the decided point is exactly a
     # constellation point.
-    grid = constellation._square_grid
+    grid = square_grid(constellation)
     _is_sq_qam = grid is not None
     if grid is not None:
         _lev_min, _d_grid, _side, _ = grid

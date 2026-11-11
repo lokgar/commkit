@@ -221,7 +221,7 @@ def _refine_tone_frequencies(
        either peak fit.  The mix-down needs it: a tone-frequency error
        leaves a slow residual rotation on the demultiplexed output.
     """
-    from ..frequency import _refine_tones_from_spectrum
+    from .._peaks import refine_tones
 
     xw, xp, _ = dispatch(xw)
     N = int(xw.shape[-1])
@@ -230,7 +230,7 @@ def _refine_tone_frequencies(
     uniq, inv = np.unique(np.asarray(best_ch), return_inverse=True)
     xr = xw[xp.asarray(uniq)]  # (U, N) unique strongest channels only
     X = _fft.fft(xr, axis=-1)
-    f_coarse = _refine_tones_from_spectrum(
+    f_coarse = refine_tones(
         X, sampling_rate, freqs, search_band, rows=inv
     )  # (K,) float64 host
 
