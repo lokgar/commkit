@@ -121,3 +121,15 @@ def test_gpu_dispatch_emits_no_cupy_jit_warning(backend_device):
         "print('ok')"
     )
     assert result == "ok"
+
+
+def test_top_level_namespace_holds_only_the_api():
+    """Every public name of ``commkit`` is in ``__all__``, a lazy submodule
+    or a lazy value object: no helper (``importlib``, ``Any``) leaks."""
+    import commkit
+
+    public = {name for name in dir(commkit) if not name.startswith("_")}
+    allowed = set(commkit.__all__) | commkit._SUBMODULES | set(commkit._LAZY_NAMES)
+    # Submodules imported eagerly by the package itself.
+    allowed |= {"core", "io", "logger", "mapping", "backend"}
+    assert public - allowed == set()

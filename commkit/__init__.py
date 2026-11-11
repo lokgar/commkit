@@ -28,8 +28,8 @@ Importing commkit has no side effects: it does not configure logging or
 Matplotlib, change warning filters, or touch the GPU.
 """
 
-import importlib
-from typing import Any
+import importlib as _importlib
+from typing import Any as _Any
 
 __version__ = "3.7.1"
 
@@ -79,11 +79,11 @@ _LAZY_NAMES = {
 }
 
 
-def __getattr__(name: str) -> Any:
+def __getattr__(name: str) -> _Any:
     if name in _SUBMODULES:
-        return importlib.import_module(f".{name}", __name__)
+        return _importlib.import_module(f".{name}", __name__)
     if name in _LAZY_NAMES:
-        module = importlib.import_module(f".{_LAZY_NAMES[name]}", __name__)
+        module = _importlib.import_module(f".{_LAZY_NAMES[name]}", __name__)
         return getattr(module, name)
     raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
 
