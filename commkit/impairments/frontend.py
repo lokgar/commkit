@@ -400,9 +400,7 @@ def apply_sampling_jitter(
     d = (jitter * fs) * standard_normal(as_generator(rng), (n,), dtype=real, xp=xp)
     whole = xp.floor(d)
     base = xp.arange(n) + whole.astype(xp.int64)
-    margin = int(math.ceil(10 * jitter * fs)) + 1  # 10 σ
-    base = xp.clip(base, -margin, n - 1 + margin)
-    y = interpolate_at(x, base, (d - whole).astype(real, copy=False), margin=margin)
+    y = interpolate_at(x, base, (d - whole).astype(real, copy=False))
     return signal_adapter.wrap_samples(restore_1d(was_1d, y))
 
 
