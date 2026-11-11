@@ -47,10 +47,9 @@ def _apply_interpolated_matrix(
     Within each uniform cell the product reduces to two batched ``(K, C)``
     matrix products, ``M[g]·X`` and ``dM·(X·t)``, instead of building a per-sample
     ``(L, K, C)`` matrix and an einsum mat-vec, so the cost is a handful of batched
-    kernels rather than an ``O(N)`` Python/launch-bound loop.  The ``O(N)`` data
-    path runs in ``complex64`` (a well-conditioned mix with no long accumulation),
-    so a ``matrix_grid`` built by a double-precision inverse/SVD keeps its
-    precision while the bulk traffic moves at half the bandwidth.
+    kernels rather than an ``O(N)`` Python/launch-bound loop.  The data path
+    runs in the samples' precision (complex64 for single-precision input): the
+    matrices, typically from a double-precision inverse or SVD, are cast to it.
 
     Parameters
     ----------
@@ -72,12 +71,14 @@ def _apply_interpolated_matrix(
     """
     samples, xp, _ = dispatch(samples)
     C, N = samples.shape
-    M = xp.asarray(matrix_grid, dtype=xp.complex64)  # (G, K, C)
+    cdtype = xp.result_type(samples.dtype, xp.complex64)
+    rdtype = xp.empty(0, dtype=cdtype).real.dtype
+    M = xp.asarray(matrix_grid).astype(cdtype, copy=False)  # (G, K, C)
     gp = xp.asarray(grid_positions, dtype=xp.float64)  # (G,)
     G, K = int(M.shape[0]), int(M.shape[1])
-    xc = samples.astype(xp.complex64, copy=False)
+    xc = samples.astype(cdtype, copy=False)
     step = int(round(float(gp[1] - gp[0]))) if G > 1 else N
-    out = xp.empty((K, N), dtype=xp.complex64)
+    out = xp.empty((K, N), dtype=cdtype)
 
     nblk = (N - 1) // step if step > 0 else 0  # full uniform cells over [0, nblk·step)
     bulk = nblk * step
@@ -85,7 +86,7 @@ def _apply_interpolated_matrix(
         Xb = xc[:, :bulk].reshape(C, nblk, step).transpose(1, 0, 2)  # (nblk, C, step)
         M0 = M[:nblk]  # (nblk, K, C)
         dM = M[1 : nblk + 1] - M0
-        t = (xp.arange(step, dtype=xp.float32) / step).astype(xp.complex64)
+        t = (xp.arange(step, dtype=rdtype) / step).astype(cdtype)
         # Diagonal scaling on the sample axis commutes through the left matmul
         # (dM @ (Xb·diag(t)) == (dM @ Xb)·diag(t)), so stacking [M0; dM] turns the
         # two batched GEMMs into one and moves the ramp multiply from the
@@ -98,7 +99,7 @@ def _apply_interpolated_matrix(
     if bulk < N:  # tail (< step; spans the pinned last cell) - per-sample blend
         nn = xp.arange(bulk, N, dtype=xp.float64)
         lo = xp.clip(xp.searchsorted(gp, nn, side="right") - 1, 0, G - 2)
-        frac = ((nn - gp[lo]) / (gp[lo + 1] - gp[lo])).astype(xp.complex64)
+        frac = ((nn - gp[lo]) / (gp[lo + 1] - gp[lo])).astype(cdtype)
         M_full = M[lo] + (M[lo + 1] - M[lo]) * frac[:, None, None]  # (L, K, C)
         out[:, bulk:] = xp.einsum("lkc,cl->kl", M_full, xc[:, bulk:])
     return out.astype(samples.dtype, copy=False)

@@ -394,8 +394,12 @@ class TestCorrectPolarization:
     """correct_polarization with a JonesTrack built by hand: the
     grid-interpolated time-varying matrix apply."""
 
-    def test_matches_per_sample_reference(self, xp, xpt):
-        """Block-GEMM apply == per-sample linear-interp einsum (to complex64)."""
+    @pytest.mark.parametrize(
+        ("dtype", "tol"), [("complex64", 1e-4), ("complex128", 1e-10)]
+    )
+    def test_matches_per_sample_reference(self, xp, xpt, dtype, tol):
+        """Block-GEMM apply == per-sample linear-interp einsum, in the input's
+        precision: complex128 input is not computed in complex64."""
         rng = xp.random.RandomState(0)
         N, step = 20000, 4096
         idx = xp.arange(0, N, step)
@@ -403,11 +407,9 @@ class TestCorrectPolarization:
             idx = xp.concatenate([idx, xp.asarray([N - 1])])
         gp = idx.astype(xp.float64)
         G = int(gp.shape[0])
-        M = (
-            rng.standard_normal((G, 2, 2)) + 1j * rng.standard_normal((G, 2, 2))
-        ).astype(xp.complex64)
+        M = rng.standard_normal((G, 2, 2)) + 1j * rng.standard_normal((G, 2, 2))
         x = (rng.standard_normal((2, N)) + 1j * rng.standard_normal((2, N))).astype(
-            xp.complex64
+            dtype
         )
         # per-sample linear-interpolation reference (double precision)
         Md = M.astype(xp.complex128)
@@ -420,7 +422,8 @@ class TestCorrectPolarization:
             x, equalization.JonesTrack(M, gp), normalize=False
         )
         assert out.shape == (2, N)
-        xpt.assert_allclose(out, ref, rtol=1e-4, atol=1e-4)
+        assert out.dtype == dtype
+        xpt.assert_allclose(out, ref, rtol=tol, atol=tol)
 
     def test_constant_grid_is_static_matmul(self, xp, xpt):
         """A grid of identical matrices applies that one matrix everywhere."""

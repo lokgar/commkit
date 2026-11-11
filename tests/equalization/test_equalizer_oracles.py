@@ -133,6 +133,19 @@ def test_cma_matches_oracle(num_ch, order):
     _assert_matches(res, ref, num_ch)
 
 
+def test_godard_radius_follows_the_constellation_scale():
+    """R2 = E|c|⁴/E|c|² scales with the power of the points, with or without
+    a prior: 16-QAM at power 4 has R2 = 4 · 1.32 = 5.28 both ways (dividing
+    by (E|c|²)² gave 1.32 with a pmf)."""
+    from commkit.equalization._common import _godard_radius
+
+    pts = 2.0 * Constellation.qam(16).points
+    uniform = Constellation(pts)
+    with_pmf = Constellation(pts, pmf=np.full(16, 1.0 / 16))
+    assert _godard_radius(uniform) == pytest.approx(5.28, rel=1e-6)
+    assert _godard_radius(with_pmf) == pytest.approx(5.28, rel=1e-6)
+
+
 @pytest.mark.parametrize("num_ch", [1, 2])
 def test_rde_matches_oracle(num_ch):
     samples, _ = _isi_input(16, num_ch)

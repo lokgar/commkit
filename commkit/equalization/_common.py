@@ -395,12 +395,12 @@ def _godard_radius(constellation: Any) -> float:
     """
     if constellation is None:
         return 1.0
-    pts = np.asarray(constellation.points)
+    pts = np.abs(np.asarray(constellation.points)).astype(np.float64)
     if constellation.pmf is None:
-        return float(np.mean(np.abs(pts) ** 4) / np.mean(np.abs(pts) ** 2))
-    pmf = np.asarray(constellation.pmf, dtype=np.float64)
-    e = float(np.dot(pmf, np.abs(pts) ** 2))
-    return float(np.dot(pmf, np.abs(pts) ** 4)) / (e**2)
+        pmf = np.full(pts.size, 1.0 / pts.size)
+    else:
+        pmf = np.asarray(constellation.pmf, dtype=np.float64)
+    return float(np.dot(pmf, pts**4) / np.dot(pmf, pts**2))
 
 
 def _rde_ring_radii(constellation: Any) -> np.ndarray:
