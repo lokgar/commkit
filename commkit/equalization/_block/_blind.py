@@ -296,7 +296,9 @@ def block_cma(
     carrier-phase recovery stage afterwards (there is no ``cpr``, see the
     Notes of :func:`cma`).  ``pilots`` switch the pilot positions to the LMS
     residual error, which resolves the ambiguity there while the data
-    positions stay blind.
+    positions stay blind.  Like :func:`cma`, it does not converge on
+    probabilistically shaped QAM, whose kurtosis is close to a Gaussian's:
+    use :func:`block_rde` there (see the Notes of :func:`cma`).
 
     Parameters
     ----------
@@ -373,9 +375,10 @@ def block_rde(
 
     Related to :func:`block_cma` as :func:`rde` is to :func:`cma`: each
     symbol is driven towards its nearest constellation ring instead of one
-    Godard circle, which converges blindly on multi-ring QAM (16-, 64-QAM)
-    where CMA's single radius stalls.  The same overlap-save engine and
-    operating point as :func:`block_cma`.
+    Godard circle, which lowers the error floor on multi-ring QAM (16-,
+    64-QAM) and converges on probabilistically shaped QAM, where CMA does
+    not.  The same overlap-save engine and operating point as
+    :func:`block_cma`.
 
     Blind up to a phase ambiguity (run carrier-phase recovery afterwards);
     ``pilots`` resolve it at the pilot positions.  From a

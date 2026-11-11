@@ -179,6 +179,26 @@ class TestRDE:
         assert ser(1e-3) == 0.0
         assert ser(0.0) > 0.03
 
+    def test_converges_on_shaped_64qam_where_cma_fails(self, xp):
+        """Blind RDE on Maxwell-Boltzmann 64-QAM at entropy 4.5 (Es/N0 22 dB,
+        4e4 symbols, step 3e-4): no symbol errors in the second half after
+        one constant rotation.  CMA at the same step fails (SER 0.40 to 0.62
+        over seeds 0 to 3): the shaped set's kurtosis is 1.97, and the part of
+        the CMA cost that tells a clean channel from ISI scales with
+        ``2 - kurtosis``, 23 times weaker than for uniform 64-QAM.  Frozen
+        taps leave the ISI (SER 0.13)."""
+        c = Constellation.qam(64).shaped(entropy=4.5)
+        rx = _isi_record(c, 40000, esn0_db=22.0, xp=xp)
+        ref = to_numpy(rx.reference.symbols)
+
+        def ser(equalizer, step):
+            y = equalizer(rx, num_taps=21, step_size=step).y_hat
+            return scoring.blind_ser(y, ref, c, skip=20000, rotation="any")
+
+        assert ser(equalization.rde, 3e-4) == 0.0
+        assert ser(equalization.cma, 3e-4) > 0.2
+        assert ser(equalization.rde, 0.0) > 0.1
+
     def test_refines_cma_on_16qam(self, xp):
         """RDE started from CMA's taps lowers the EVM on 16-QAM: CMA's error
         y(|y|² - R²) is not zero on the points of a multi-ring constellation,

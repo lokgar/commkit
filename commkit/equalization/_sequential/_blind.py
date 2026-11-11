@@ -216,7 +216,10 @@ def cma(
     step_size : float, default 1e-3
         Step size ``μ``.  The CMA cost is non-convex and of higher order
         than the LMS cost, so normalizing the step by the input power would
-        distort the gradient: use a fixed step between 1e-5 and 1e-3.
+        distort the gradient: use a fixed step between 1e-5 and 1e-3.  The
+        default suits QPSK and 16-QAM; 64-QAM needs about 1e-4, as the
+        steady-state error of CMA grows with the step and with the spread of
+        the constellation's moduli (see Notes).
     constellation : Constellation, optional
         Sets the Godard radius ``R² = E[|c|⁴]/E[|c|²]`` (weighted by the pmf
         of a shaped constellation).  Defaults to the Signal's
@@ -283,6 +286,26 @@ def cma(
        the minus sign, opposite to LMS)::
 
            w_{c,c'} -= mu * conj(e_c[n]) * x_{c',n}
+
+    **Which constellations.**  For independent circular symbols of unit
+    power through a combined channel and equalizer response ``t``,
+    ``E|y|⁴ = 2 (Σ|t_i|²)² - (2 - κ) Σ|t_i|⁴`` with the kurtosis
+    ``κ = E|s|⁴ / (E|s|²)²``.  The first term fixes the gain and only the
+    second tells a clean channel from ISI, so CMA converges only for
+    ``κ < 2``, and the more slowly the closer ``κ`` is to 2.  ``κ`` is 1 for
+    PSK, 1.32 for 16-QAM and 1.38 for 64-QAM, but 1.89 and 1.97 for
+    Maxwell-Boltzmann 64-QAM at entropy 5 and 4.5, where that term is 6 and
+    23 times weaker than for uniform 64-QAM.  At entropy 4.5 the noise of
+    the stochastic gradient outweighs it: the taps wander away while the
+    output power stays right, so no warning fires (blind SER 0.4 to 0.6 at
+    a step of 3e-4 in a 4-tap ISI channel).  Start a probabilistically
+    shaped constellation with :func:`rde`, whose nearest-ring error does not
+    depend on the kurtosis, or with a decision-directed :func:`lms`.
+
+    The Godard error ``(|y|² - R²) y`` does not vanish on the points of a
+    multi-ring constellation, so the error floor rises with the step: on
+    64-QAM in a 4-tap ISI channel at an Es/N0 of 26 dB the SER is 0.026 at a
+    step of 1e-3 and 5e-4 at 1e-4.
 
     **Pilot-aided hybrid** (with ``pilots``): at pilot positions the Godard
     error is replaced by the LMS pilot error ``e_p[n] = p[n] - y[n]`` towards
@@ -421,7 +444,16 @@ def rde(
     three rings at ``|c| ≈ 0.45, 1.00, 1.34``: CMA pulls the inner ring
     outwards and the outer ring inwards, a lasting gradient against the
     right solution.  In RDE each symbol is attracted only to its own ring, so
-    the gradient vanishes at the right solution.
+    the gradient vanishes at the right solution.  It needs no kurtosis below
+    that of a Gaussian either, so it also converges on probabilistically
+    shaped QAM, where CMA does not (see the Notes of :func:`cma`).
+
+    **Cold start.**  While the eye is closed, the nearest ring is often the
+    wrong one, and the closer the rings the longer this lasts: on uniform
+    64-QAM (9 rings) in a 4-tap ISI channel at an Es/N0 of 26 dB, RDE from
+    the center tap needs about 6e4 symbols at a step of 1e-3, 2e5 at 3e-4
+    and more than 5e5 at 1e-4.  CMA first, then RDE with its ``state``,
+    avoids that wait.
 
     **Phase.**  Both costs depend only on ``|y|``, so any rotation of the
     output is a solution: run carrier-phase recovery after blind
