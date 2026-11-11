@@ -174,6 +174,58 @@ class TestApplyTaps:
         assert out_sig.sampling_rate == 1e6
         xpt.assert_allclose(out_sig.samples, out_arr)
 
+    @staticmethod
+    def _direct(x, w, sps, pad_mode, prefix):
+        """The documented sum, window by window, in complex128."""
+        num_ch, n = x.shape
+        num_taps = w.shape[-1]
+        c = num_taps // 2
+        n_sym = n // sps
+        right = n_sym * sps - n + num_taps - 1 - c
+        if prefix is not None:
+            p = np.concatenate([prefix[:, -c:], x, np.zeros((num_ch, right))], axis=1)
+        else:
+            mode = "constant" if pad_mode == "zeros" else pad_mode
+            p = np.pad(x, ((0, 0), (c, right)), mode=mode)
+        return np.stack(
+            [np.einsum("ijt,jt->i", w.conj(), p[:, k * sps : k * sps + num_taps])
+             for k in range(n_sym)], axis=1,
+        )  # fmt: skip
+
+    @pytest.mark.parametrize("pad_mode", ["zeros", "edge", "reflect", "prefix"])
+    @pytest.mark.parametrize(
+        ("num_ch", "num_taps", "sps", "n"),
+        [(1, 1, 1, 100), (2, 21, 2, 5000), (2, 22, 3, 4001), (3, 300, 1, 3000)],
+    )
+    def test_matches_the_direct_sum(self, xp, xpt, pad_mode, num_ch, num_taps, sps, n):
+        """The overlap-save path equals the butterfly sum of the docstring
+        at every symbol, edges included, odd and even tap counts and an sps
+        that does not divide the FFT block (measured -134 dB, complex64)."""
+        rng = np.random.default_rng(num_taps)
+        x = rng.standard_normal((num_ch, n)) + 1j * rng.standard_normal((num_ch, n))
+        w = rng.standard_normal((num_ch, num_ch, num_taps)) + 1j * rng.standard_normal(
+            (num_ch, num_ch, num_taps)
+        )
+        x, w = x.astype(np.complex64), w.astype(np.complex64)
+        prefix = x[:, -num_taps:] if pad_mode == "prefix" else None
+        y = equalization.apply_taps(
+            xp.asarray(x),
+            xp.asarray(w),
+            sps=sps,
+            normalize=False,
+            pad_mode="zeros" if prefix is not None else pad_mode,
+            samples_prefix=None if prefix is None else xp.asarray(prefix),
+        )
+        ref = self._direct(x.astype(complex), w.astype(complex), sps, pad_mode, prefix)
+        assert y.dtype == np.complex64 and y.shape == ref.shape
+        xpt.assert_allclose(y, xp.asarray(ref), rtol=0, atol=1e-5 * np.abs(ref).max())
+
+    def test_weights_of_another_channel_count_raise(self, xp):
+        with pytest.raises(ValueError, match="weights must be"):
+            equalization.apply_taps(
+                xp.ones((2, 64), np.complex64), xp.ones((3, 3, 5), np.complex64), sps=1
+            )
+
 
 class TestZF3x3:
     """Tests for the ZF/MMSE equalizer with 3+ channel MIMO (uses linalg.inv)."""

@@ -183,7 +183,7 @@ def apply_taps(
         y[i, n] = sum_j sum_t conj(W[i, j, t]) * x[j, n*sps - T_c + t]
 
     with the center tap ``T_c = num_taps // 2``: the filter of the adaptive
-    equalizers, as one batched ``einsum`` on the input's device.
+    equalizers, applied by overlap-save on the input's device.
 
     Parameters
     ----------
@@ -254,40 +254,53 @@ def apply_taps(
             x, None, input_norm_factor=input_norm_factor
         )
 
-    # Pad left by center tap so window[0] is center-aligned with sample 0,
-    # pad right to fill the last window completely - mirrors LMS pre-processing.
+    if weights.ndim != 3 or weights.shape[:2] != (C, C):
+        raise ValueError(
+            f"weights must be (num_taps,) or ({C}, {C}, num_taps) for {C} "
+            f"channel(s), got shape {tuple(weights.shape)}."
+        )
+    dtype = np.result_type(x.dtype, weights.dtype, np.complex64)
+
+    # y[i, n] = sum_j sum_t conj(W[i, j, t]) * p[j, n*sps + t] on the record
+    # p padded by the centre tap on the left: the correlation of p with the
+    # taps at the full rate, kept every sps-th sample.  It runs by
+    # overlap-save as the convolution with h[k] = conj(W[-k]) (k = 1 - T ..
+    # 0), shifted by the centre tap when the padding is zeros, which the
+    # overlap-save extension supplies: p is then x itself.
     c_tap = num_taps // 2
-    pad_left = c_tap
-    pad_right = n_sym * sps - N + num_taps - 1 - pad_left
     if samples_prefix is None and pad_mode == "zeros":
-        samples_padded = xp.pad(x, ((0, 0), (pad_left, pad_right)))
+        shift = c_tap
+        padded = x
     else:
         # _build_padded_samples is backend-generic: pad on the input device
         # instead of round-tripping the full signal through the host.
-        samples_padded = xp.ascontiguousarray(
-            _build_padded_samples(
-                x.astype(xp.complex64),
-                pad_left,
-                pad_right,
-                samples_prefix,
-                pad_mode,
-                _at_eq_norm,
-                sps,
-            )
+        shift = 0
+        padded = _build_padded_samples(
+            x.astype(xp.complex64),
+            c_tap,
+            n_sym * sps - N + num_taps - 1 - c_tap,
+            samples_prefix,
+            pad_mode,
+            _at_eq_norm,
+            sps,
         )
+    N_fft = max(1024, 1 << (4 * num_taps - 1).bit_length())
+    # h[k] at index k mod N_fft, so H = conj(FFT of W placed at -shift + t).
+    kernel = xp.zeros((C, C, N_fft), dtype=dtype)
+    kernel[..., :num_taps] = weights
+    H = xp.conj(_fft.fft(xp.roll(kernel, -shift, axis=-1), axis=-1))
 
-    # Zero-copy sliding-window view: (C, N_sym, num_taps)
-    # windows[c, n, t] = samples_padded[c, n*sps + t]
-    s0, s1 = samples_padded.strides
-    windows = xp.lib.stride_tricks.as_strided(
-        samples_padded,
-        shape=(C, n_sym, num_taps),
-        strides=(s0, sps * s1, s1),
-    )
+    def process(Y: ArrayType) -> ArrayType:
+        """Each bin's (C, C) response times the bin's channel vector."""
+        out = H[:, 0, None, :] * Y[0]
+        for j in range(1, C):
+            out += H[:, j, None, :] * Y[j]
+        return out
 
-    # Butterfly forward pass - single batched GEMM (dispatches to cuBLAS on GPU)
-    # y[i, n] = Σ_j Σ_t conj(W[i,j,t]) * windows[j, n, t]
-    y = xp.einsum("ijt,jnt->in", xp.conj(weights), windows)  # (C, N_sym)
+    # The kernel spans lags shift - T + 1 .. shift, so a guard of T - 1
+    # holds both transients; a quarter block would discard half of each.
+    y = ols_apply(padded.astype(dtype, copy=False), N_fft, process, guard=num_taps - 1)
+    y = y[:, : n_sym * sps : sps]
 
     return signal_adapter.wrap_samples(restore_1d(was_1d, y), **metadata)
 
