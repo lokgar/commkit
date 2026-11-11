@@ -1,4 +1,5 @@
-"""Linear equalizers: zero-forcing / MMSE (zf_equalizer, apply_taps)."""
+"""Linear equalizers: channel estimate, zero-forcing / MMSE correction
+(estimate_channel, correct_channel) and apply_taps."""
 
 import numpy as np
 import pytest
@@ -27,7 +28,7 @@ class TestZFEqualizer:
         rng = xp.random.RandomState(0)
         symbols = (rng.randn(n) + 1j * rng.randn(n)).astype(xp.complex64)
 
-        equalized = equalization.zf_equalizer(symbols, channel)
+        equalized = equalization.correct_channel(symbols, channel)
 
         xpt.assert_allclose(equalized, symbols, atol=1e-5)
 
@@ -43,7 +44,7 @@ class TestZFEqualizer:
         # Apply Channel
         rx = xp.convolve(tx, channel, mode="full")[:n]
 
-        equalized = equalization.zf_equalizer(rx, channel)
+        equalized = equalization.correct_channel(rx, channel)
 
         xpt.assert_allclose(equalized, tx, atol=1e-4)
 
@@ -57,7 +58,7 @@ class TestZFEqualizer:
         # rx[k] = 0.25 tx[k + 1] + tx[k] + 0.4j tx[k - 1]
         rx = xp.convolve(tx, channel, mode="full")[1 : n + 1]
 
-        equalized = equalization.zf_equalizer(rx, channel, center_tap=1)
+        equalized = equalization.correct_channel(rx, channel, center_tap=1)
 
         # The last sample lacks the precursor of tx[n], so skip the edges.
         xpt.assert_allclose(equalized[8:-8], tx[8:-8], atol=1e-4)
@@ -70,13 +71,13 @@ class TestZFEqualizer:
         tx = (rng.randn(2, 256) + 1j * rng.randn(2, 256)).astype(xp.complex64)
         siso = xp.asarray([1.0, 0.5], dtype=estimate_dtype)
         rx = xp.convolve(tx[0], siso.astype(xp.complex64), mode="full")[:256]
-        out = equalization.zf_equalizer(rx, siso)
+        out = equalization.correct_channel(rx, siso)
         assert out.dtype == xp.complex64
         xpt.assert_allclose(out, tx[0], atol=1e-4)
         mimo = xp.zeros((2, 2, 2), dtype=estimate_dtype)
         mimo[0, 0, 0] = mimo[1, 1, 0] = 1.0
         mimo[0, 1, 1] = mimo[1, 0, 1] = 0.3
-        assert equalization.zf_equalizer(tx, mimo).dtype == xp.complex64
+        assert equalization.correct_channel(tx, mimo).dtype == xp.complex64
 
     def test_batches_do_not_change_the_output(self, xp, xpt, monkeypatch):
         """MIMO ZF over batches of 3 blocks equals the one-batch result."""
@@ -87,16 +88,16 @@ class TestZFEqualizer:
         h = xp.zeros((2, 2, 3), dtype=xp.complex64)
         h[0, 0, 0] = h[1, 1, 0] = 1.0
         h[0, 1, 2] = h[1, 0, 1] = 0.3j
-        whole = equalization.zf_equalizer(tx, h)
+        whole = equalization.correct_channel(tx, h)
         monkeypatch.setattr(ols, "_OLS_ELEMENTS", 2 * 1024 * 3)
-        xpt.assert_allclose(equalization.zf_equalizer(tx, h), whole, atol=1e-5)
+        xpt.assert_allclose(equalization.correct_channel(tx, h), whole, atol=1e-5)
 
     @pytest.mark.parametrize("center", [-1, 3])
     def test_center_out_of_range_raises(self, xp, center):
         channel = xp.array([0.25, 1.0, 0.4j], dtype=xp.complex64)
         samples = xp.ones(64, dtype=xp.complex64)
         with pytest.raises(ValueError, match="center"):
-            equalization.zf_equalizer(samples, channel, center_tap=center)
+            equalization.correct_channel(samples, channel, center_tap=center)
 
     @pytest.mark.parametrize(
         "taps", [[1.0, -0.9, 0.1], [0.2, 1.0, 0.2]], ids=["near-null", "two-sided"]
@@ -120,7 +121,7 @@ class TestZFEqualizer:
             (0.0, float(np.mean(sigma2 / np.abs(h_fft) ** 2))),
         ):
             out = to_numpy(
-                equalization.zf_equalizer(
+                equalization.correct_channel(
                     xp.asarray(rx),
                     xp.asarray(np.asarray(taps, np.complex64)),
                     noise_var=nv,
@@ -136,7 +137,7 @@ class TestZFEqualizer:
         for shape in ((64,), (2, 64)):
             rx = xp.asarray((rng.standard_normal(shape) + 1j * rng.standard_normal(shape))
                             .astype(np.complex64))  # fmt: skip
-            out = equalization.zf_equalizer(
+            out = equalization.correct_channel(
                 rx, xp.asarray([1.0 + 0j], dtype=xp.complex64)
             )
             xpt.assert_allclose(out, rx, rtol=1e-5, atol=1e-6)
@@ -148,8 +149,8 @@ class TestZFEqualizer:
         data = xp.ones(n, dtype=xp.complex64)
         sig = Signal(samples=data, sampling_rate=1.0, symbol_rate=1.0)
 
-        out_sig = equalization.zf_equalizer(sig, channel)
-        out_arr = equalization.zf_equalizer(data, channel)
+        out_sig = equalization.correct_channel(sig, channel)
+        out_arr = equalization.correct_channel(data, channel)
 
         assert isinstance(out_sig, Signal)
         xpt.assert_allclose(out_sig.samples, out_arr)
@@ -241,7 +242,7 @@ class TestZF3x3:
         for i in range(3):
             channel[i, i, 0] = 1.0
 
-        equalized = equalization.zf_equalizer(symbols, channel)
+        equalized = equalization.correct_channel(symbols, channel)
 
         assert equalized.shape == (3, n)
         xpt.assert_allclose(equalized, symbols, atol=1e-4)
@@ -264,7 +265,7 @@ class TestZF3x3:
             for j in range(3):
                 rx[i] += H[i, j, 0] * tx[j]
 
-        equalized = equalization.zf_equalizer(rx, H, noise_var=0.0)
+        equalized = equalization.correct_channel(rx, H, noise_var=0.0)
 
         assert equalized.shape == (3, n)
         xpt.assert_allclose(equalized, tx, atol=1e-3)
@@ -282,18 +283,18 @@ class TestZF3x3:
               / np.sqrt(2)).astype(np.complex64)  # fmt: skip
         rx = np.array([sum(np.convolve(tx[j], h[i, j])[:512] for j in range(3))
                        for i in range(3)]).astype(np.complex64)  # fmt: skip
-        out = equalization.zf_equalizer(xp.asarray(rx), xp.asarray(h))
+        out = equalization.correct_channel(xp.asarray(rx), xp.asarray(h))
         xpt.assert_allclose(out, xp.asarray(tx), atol=1e-5)
         noise = rng.standard_normal(rx.shape) + 1j * rng.standard_normal(rx.shape)
         noisy = xp.asarray((rx + noise * np.sqrt(0.01 / 2)).astype(np.complex64))
         mse = [
-            float(np.mean(np.abs(to_numpy(equalization.zf_equalizer(noisy, xp.asarray(h), noise_var=nv)) - tx) ** 2))
+            float(np.mean(np.abs(to_numpy(equalization.correct_channel(noisy, xp.asarray(h), noise_var=nv)) - tx) ** 2))
             for nv in (0.0, 0.01)
         ]  # fmt: skip
         assert mse[1] < mse[0], mse
 
 
-class TestEstimateTransferFunction:
+class TestEstimateChannel:
     """Welch-H1 data-aided (MIMO) channel estimator."""
 
     def test_flat_gain_siso(self, xp, xpt):
@@ -303,7 +304,7 @@ class TestEstimateTransferFunction:
         x = (rng.standard_normal(n) + 1j * rng.standard_normal(n)).astype(xp.complex64)
         g = 2.0 - 1.0j
         y = (g * x).astype(xp.complex64)
-        B = equalization.estimate_transfer_function(y, x, nfft=256, regularization=1e-3)
+        B = equalization.estimate_channel(y, x, nfft=256, regularization=1e-3).response
         assert B.shape == (256,)
         xpt.assert_allclose(B, xp.full_like(B, g), rtol=2e-2, atol=2e-2)
 
@@ -316,7 +317,7 @@ class TestEstimateTransferFunction:
         )
         M = xp.asarray([[1.0, 0.3j], [-0.2, 0.9]], dtype=xp.complex64)
         y = (M @ x).astype(xp.complex64)
-        B = equalization.estimate_transfer_function(y, x, nfft=256, regularization=1e-3)
+        B = equalization.estimate_channel(y, x, nfft=256, regularization=1e-3).response
         assert B.shape == (256, 2, 2)
         xpt.assert_allclose(B[64], M, rtol=3e-2, atol=3e-2)
 
@@ -327,7 +328,7 @@ class TestEstimateTransferFunction:
         x = (rng.standard_normal(n) + 1j * rng.standard_normal(n)).astype(xp.complex64)
         h = xp.asarray([1.0, 0.5, -0.25], dtype=xp.complex64)
         y = xp.convolve(x, h)[:n].astype(xp.complex64)
-        B = equalization.estimate_transfer_function(y, x, nfft=256, regularization=1e-3)
+        B = equalization.estimate_channel(y, x, nfft=256, regularization=1e-3).response
         Hf = xp.fft.fft(h, n=256)
         xpt.assert_allclose(B, Hf, rtol=0.1, atol=0.05)
 
@@ -337,9 +338,11 @@ class TestEstimateTransferFunction:
         n = 1 << 16
         x = (rng.standard_normal(n) + 1j * rng.standard_normal(n)).astype(xp.complex64)
         y = (1.5 * x).astype(xp.complex64)
-        taps = equalization.estimate_transfer_function(
+        est = equalization.estimate_channel(
             y, x, nfft=256, regularization=1e-3, num_taps=65
         )
+        taps = est.taps
+        assert est.center_tap == 32
         assert taps.shape == (65,)
         peak = int(xp.argmax(xp.abs(taps)))
         assert peak == 32  # centre of 65 taps
@@ -351,16 +354,19 @@ class TestEstimateTransferFunction:
         n = 1 << 16
         x = (rng.standard_normal(n) + 1j * rng.standard_normal(n)).astype(xp.complex64)
         y = (1.5 * x).astype(xp.complex64)
-        taps = equalization.estimate_transfer_function(
+        est = equalization.estimate_channel(
             y, x, nfft=256, regularization=1e-3, num_taps=16
         )
+        taps = est.taps
+        assert est.center_tap == 8
         assert taps.shape == (16,)
         assert int(xp.argmax(xp.abs(taps))) == 8
         xpt.assert_allclose(taps[8], xp.asarray(1.5 + 0j), rtol=0.01, atol=0.01)
 
     @pytest.mark.parametrize("num_taps", [15, 16, 31])
-    def test_taps_compose_with_zf_equalizer(self, xp, num_taps):
-        """zf_equalizer(rx, taps, center_tap=L // 2) reproduces tx at lag 0."""
+    def test_estimate_composes_with_correct_channel(self, xp, num_taps):
+        """correct_channel(rx, estimate) reproduces tx at lag 0, as the raw
+        taps do with center_tap=L // 2."""
         rng = xp.random.RandomState(5)
         n = 1 << 15
         tx = (rng.standard_normal(n) + 1j * rng.standard_normal(n)) / 2**0.5
@@ -368,8 +374,10 @@ class TestEstimateTransferFunction:
         h = xp.asarray([0.25, 1.0, 0.4j], dtype=xp.complex64)
         rx = xp.convolve(tx, h)[:n].astype(xp.complex64)
 
-        taps = equalization.estimate_transfer_function(rx, tx, num_taps=num_taps)
-        out = equalization.zf_equalizer(rx, taps, center_tap=num_taps // 2)
+        est = equalization.estimate_channel(rx, tx, num_taps=num_taps)
+        out = equalization.correct_channel(rx, est)
+        raw = equalization.correct_channel(rx, est.taps, center_tap=num_taps // 2)
+        assert bool(xp.all(out == raw))
 
         assert _peak_lag(xp, out, tx) == 0
         # The Hann taper attenuates the off-centre taps, so the inversion is
@@ -377,7 +385,7 @@ class TestEstimateTransferFunction:
         err = float(xp.mean(xp.abs(out[64:-64] - tx[64:-64]) ** 2))
         assert err < 10 ** (-1.5)
 
-    def test_mimo_taps_compose_with_zf_equalizer(self, xp, xpt):
+    def test_mimo_estimate_composes_with_correct_channel(self, xp, xpt):
         """MIMO taps come back as (C, C, L) and invert the channel with center."""
         rng = xp.random.RandomState(4)
         n = 1 << 14
@@ -386,15 +394,15 @@ class TestEstimateTransferFunction:
         )
         M = xp.asarray([[1.0, 0.1], [0.0, 1.0]], dtype=xp.complex64)
         y = (M @ x).astype(xp.complex64)
-        taps = equalization.estimate_transfer_function(y, x, nfft=128, num_taps=63)
-        assert taps.shape == (2, 2, 63)
-        out = equalization.zf_equalizer(y, taps, noise_var=1e-2, center_tap=31)
+        est = equalization.estimate_channel(y, x, nfft=128, num_taps=63)
+        assert est.taps.shape == (2, 2, 63) and est.response.shape == (128, 2, 2)
+        out = equalization.correct_channel(y, est, noise_var=1e-2)
         assert out.shape == (2, n)
         xpt.assert_allclose(out[:, 64:-64], x[:, 64:-64], atol=0.1)
 
     def test_signal_input_unwraps_both_arguments(self, xp, xpt):
         """Signal input for either/both arguments unwraps to .samples; output
-        stays a raw array (frequency response is not signal-domain data)."""
+        stays an estimate of arrays (a channel is not signal-domain data)."""
         rng = xp.random.RandomState(0)
         n = 1 << 14
         x = (rng.standard_normal(n) + 1j * rng.standard_normal(n)).astype(xp.complex64)
@@ -403,12 +411,30 @@ class TestEstimateTransferFunction:
         ref_sig = Signal(samples=x, sampling_rate=1.0, symbol_rate=1.0)
         rx_sig = Signal(samples=y, sampling_rate=1.0, symbol_rate=1.0)
 
-        B_sig = equalization.estimate_transfer_function(
+        B_sig = equalization.estimate_channel(
             rx_sig, ref_sig, nfft=256, regularization=1e-3
-        )
-        B_arr = equalization.estimate_transfer_function(
+        ).response
+        B_arr = equalization.estimate_channel(
             y, x, nfft=256, regularization=1e-3
-        )
+        ).response
 
         assert not isinstance(B_sig, Signal)
         xpt.assert_allclose(B_sig, B_arr)
+
+    def test_default_taps_span_the_welch_segment(self, xp):
+        """num_taps=None gives nfft taps centred on nfft // 2."""
+        rng = xp.random.RandomState(6)
+        x = (rng.standard_normal(4096) + 1j * rng.standard_normal(4096)).astype(
+            xp.complex64
+        )
+        est = equalization.estimate_channel(x, x, nfft=128)
+        assert est.taps.shape == (128,) and est.center_tap == 64
+        assert int(xp.argmax(xp.abs(est.taps))) == 64
+
+    def test_center_tap_with_an_estimate_raises(self, xp):
+        x = xp.ones(256, dtype=xp.complex64)
+        est = equalization.ChannelEstimate(
+            xp.asarray([1.0 + 0j], dtype=xp.complex64), 0, xp.ones(8, xp.complex64)
+        )
+        with pytest.raises(ValueError, match="center_tap"):
+            equalization.correct_channel(x, est, center_tap=0)

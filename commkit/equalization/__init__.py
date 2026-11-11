@@ -6,9 +6,9 @@
   pilot-aided.
 - Frequency-domain block equalizers :func:`block_lms`, :func:`block_cma` and
   :func:`block_rde`, on the input's device (CUDA graphs on the GPU).
-- Linear block equalization: :func:`estimate_transfer_function` (channel
-  estimate), :func:`zf_equalizer` (its ZF / MMSE inverse) and
-  :func:`apply_taps` (frozen taps).
+- Linear block equalization: :func:`estimate_channel` (a
+  :class:`ChannelEstimate` from a known reference), :func:`correct_channel`
+  (its ZF / MMSE inverse) and :func:`apply_taps` (frozen taps).
 - Pilot-tone polarization demultiplexing:
   :func:`estimate_polarization_tones` (a :class:`JonesTrack`) and
   :func:`correct_polarization`.
@@ -23,7 +23,7 @@ from __future__ import annotations
 
 from ._block import block_cma, block_lms, block_rde
 from ._sequential import cma, lms, rde, rls
-from .linear import apply_taps, estimate_transfer_function, zf_equalizer
+from .linear import ChannelEstimate, apply_taps, correct_channel, estimate_channel
 from .pilots import EqualizerPilots
 from .polarization import (
     JonesTrack,
@@ -33,6 +33,7 @@ from .polarization import (
 from .result import EqualizerResult, EqualizerState
 
 __all__ = [
+    "ChannelEstimate",
     "EqualizerPilots",
     "EqualizerResult",
     "EqualizerState",
@@ -42,11 +43,11 @@ __all__ = [
     "block_lms",
     "block_rde",
     "cma",
+    "correct_channel",
     "correct_polarization",
+    "estimate_channel",
     "estimate_polarization_tones",
-    "estimate_transfer_function",
     "lms",
     "rde",
     "rls",
-    "zf_equalizer",
 ]

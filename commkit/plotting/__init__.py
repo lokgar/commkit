@@ -41,10 +41,7 @@ from .coding import (
     plot_parity_check,
 )
 from .constellation import plot_constellation, plot_ideal_constellation
-from .equalizer import (
-    plot_equalizer_result,
-    plot_zf_equalizer_response,
-)
+from .equalizer import plot_channel_correction, plot_equalizer_result
 from .eye import plot_eye_diagram
 from .filter_response import plot_filter_response
 from .frequency import (
@@ -69,6 +66,7 @@ __all__ = [
     "plot_carrier_phase_characterization",
     "plot_carrier_phase_decomposition",
     "plot_carrier_phase_trajectory",
+    "plot_channel_correction",
     "plot_constellation",
     "plot_dsh_beat_psd",
     "plot_equalizer_result",
@@ -92,5 +90,4 @@ __all__ = [
     "plot_spectrogram",
     "plot_time_domain",
     "plot_timing_correlation",
-    "plot_zf_equalizer_response",
 ]

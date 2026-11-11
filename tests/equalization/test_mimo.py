@@ -132,7 +132,7 @@ class TestButterflyMIMO:
 
         rx = xp.fft.ifft(Rx_f, axis=-1).astype(xp.complex64)
 
-        equalized = equalization.zf_equalizer(rx, H)
+        equalized = equalization.correct_channel(rx, H)
 
         xpt.assert_allclose(equalized, tx, atol=1e-3)
 

@@ -73,7 +73,7 @@ METADATA_PROPAGATION_TABLE = (
     MetadataCase(
         "static_equalizer",
         (),
-        lambda sig, xp: equalization.zf_equalizer(sig, _identity_taps(xp)),
+        lambda sig, xp: equalization.correct_channel(sig, _identity_taps(xp)),
         2e6,
     ),
     MetadataCase(
@@ -101,7 +101,7 @@ class TestPipelineComposition:
             lambda x, xp: apply_awgn(x, sps=2, esn0_db=30, rng=7),
             lambda x, xp: filtering.matched_filter(x, pulse=_identity_taps(xp)),
             lambda x, xp: multirate.resample(x, sps_in=2, sps_out=1.5),
-            lambda x, xp: equalization.zf_equalizer(x, _identity_taps(xp)),
+            lambda x, xp: equalization.correct_channel(x, _identity_taps(xp)),
         ],
         ids=["awgn", "matched-filter", "fractional-resample", "equalizer"],
     )
@@ -119,7 +119,7 @@ class TestPipelineComposition:
             lambda sig, xp: apply_awgn(sig, esn0_db=30, rng=7),
             lambda sig, xp: filtering.matched_filter(sig, pulse=_identity_taps(xp)),
             lambda sig, xp: multirate.resample(sig, sps_out=1.5),
-            lambda sig, xp: equalization.zf_equalizer(sig, _identity_taps(xp)),
+            lambda sig, xp: equalization.correct_channel(sig, _identity_taps(xp)),
         ],
         ids=["awgn", "matched-filter", "fractional-resample", "equalizer"],
     )
@@ -160,7 +160,7 @@ class TestPipelineComposition:
         transformed = apply_awgn(sig, esn0_db=25, rng=5)
         transformed = filtering.matched_filter(transformed)
         transformed = multirate.resample(transformed, sps_out=2)
-        transformed = equalization.zf_equalizer(transformed, _identity_taps(xp))
+        transformed = equalization.correct_channel(transformed, _identity_taps(xp))
 
         assert transformed.frame is not None
         assert transformed.frame is frame

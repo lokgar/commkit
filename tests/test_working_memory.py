@@ -10,7 +10,7 @@ import numpy as np
 import pytest
 
 from commkit import _overlap_save, metrics
-from commkit.equalization import zf_equalizer
+from commkit.equalization import correct_channel
 from commkit.filtering import fir_filter
 from commkit.mapping import Constellation
 from commkit.metrics import information
@@ -46,12 +46,12 @@ def test_fir_filter_workspace() -> None:
 
 
 @pytest.mark.usefixtures("small_ols_budget")
-def test_zf_equalizer_workspace() -> None:
+def test_correct_channel_workspace() -> None:
     x = _samples(1 << 19)
     h = np.zeros((2, 2, 9), dtype=np.complex64)
     h[0, 0, 4] = h[1, 1, 4] = 1.0
     h[0, 1, 3] = h[1, 0, 5] = 0.2
-    assert _workspace(lambda: zf_equalizer(x, h)) < 3 * x.nbytes
+    assert _workspace(lambda: correct_channel(x, h)) < 3 * x.nbytes
 
 
 def test_mi_workspace(monkeypatch: pytest.MonkeyPatch) -> None:
