@@ -10,8 +10,9 @@ Conventions: ``x`` ``(C, N)`` complex64, normalized to unit mean power and
 zero-padded by ``pad`` samples at both ends (at least ``2 · sps + 10``:
 the loop reads a symbol before its first strobe, the interpolator eight
 samples on); positions are float64 sample indices into the padded record.
-The detector interpolates with a 16-tap windowed sinc (the output is
-resampled afterwards by the 48-tap interpolator of :mod:`commkit.multirate`).  The
+The detector interpolates with the 16-tap form of the windowed sinc in
+``commkit/_numba_interpolation.py`` (the output is resampled afterwards by
+its 48-tap form).  The
 detector output is negative when the strobes are late, for both methods:
 
 - classical: ``e = Re{m_k · conj(y_{k-1} - y_k)}``;
@@ -30,6 +31,8 @@ point in proportion to the gain (0.016 symbol at ``B·T = 1e-3`` for a
 import numba
 import numpy as np
 
+from .._numba_interpolation import interp
+
 _fast = numba.njit(cache=True, fastmath=True, nogil=True)
 _step = numba.njit(inline="always", nogil=True)
 
@@ -40,37 +43,11 @@ _HALF = 8
 
 
 @_step
-def _interp(x, c, p):
-    """Windowed-sinc interpolation of channel ``c`` of ``x`` at ``p``."""
-    i = int(np.floor(p))
-    mu = p - i
-    if mu == 0.0:
-        return x[c, i].real, x[c, i].imag
-    s = np.sin(np.pi * mu)
-    re = 0.0
-    im = 0.0
-    sign = 1.0 if (_HALF - 1) % 2 == 0 else -1.0  # (-1)^t at t = -(_HALF - 1)
-    for t in range(-_HALF + 1, _HALF + 1):
-        u = t - mu
-        # sin(π(t - μ)) = -(-1)^t · sin(πμ)
-        sinc = -sign * s / (np.pi * u)
-        cw = np.cos(np.pi * (u / _HALF + 1.0))
-        window = (
-            0.35875 - 0.48829 * cw + 0.14128 * (2.0 * cw * cw - 1.0)
-        ) - 0.01168 * (4.0 * cw * cw * cw - 3.0 * cw)
-        h = sinc * window
-        re += h * x[c, i + t].real
-        im += h * x[c, i + t].imag
-        sign = -sign
-    return re, im
-
-
-@_step
 def _ted(x, c, p_prev, p_mid, p, power):
     """Timing error at the strobe ``p`` (negative when late)."""
-    a_re, a_im = _interp(x, c, p_prev)
-    m_re, m_im = _interp(x, c, p_mid)
-    b_re, b_im = _interp(x, c, p)
+    a_re, a_im = interp(x, c, p_prev, _HALF)
+    m_re, m_im = interp(x, c, p_mid, _HALF)
+    b_re, b_im = interp(x, c, p, _HALF)
     if power:
         pa = a_re * a_re + a_im * a_im
         pb = b_re * b_re + b_im * b_im

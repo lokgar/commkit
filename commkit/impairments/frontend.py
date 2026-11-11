@@ -20,15 +20,17 @@ from collections.abc import Callable
 from dataclasses import dataclass
 from types import ModuleType
 
+import numpy as np
+
 from .. import _fft
 from .._array import as_2d, restore_1d
+from .._interpolation import interpolate_at, interpolate_piecewise
 from .._random import RNG, as_generator, complex_normal, standard_normal
 from ..backend import ArrayType, dispatch, to_device
 from ..core._signal_adapter import S, adapt_signal
 from ..core.signal import Signal
 from ..logger import logger
 from ..math import _derotate, db_to_linear
-from ..multirate import _interpolate, _stretched_instants
 
 __all__ = [
     "GramSchmidt",
@@ -176,11 +178,12 @@ def apply_sampling_clock_offset(samples: S, *, offset_ppm: float) -> S:
     :func:`~commkit.timing.correct_sampling_clock_offset` undoes it.
 
     The waveform between samples is the band-limited interpolant, through a
-    48-tap Blackman-Harris windowed sinc in the input's precision: its error
-    stays below -119 dB for content up to 0.4 cycles per sample (80 % of the
-    Nyquist band, 1.6 samples per symbol for a 0.1-rolloff pulse at 2 sps).
-    The record is zero-extended, so the first and last 24 samples lose that
-    accuracy.
+    48-tap Blackman-Harris windowed sinc, returned in the input's precision:
+    its error stays below -119 dB for content up to 0.4 cycles per sample
+    (80 % of the Nyquist band, 1.6 samples per symbol for a 0.1-rolloff
+    pulse at 2 sps), at any record length and offset, as each instant is
+    formed in double precision.  The record is zero-extended, so the first
+    and last 24 samples lose that accuracy.  Numba-compiled on the CPU.
 
     Parameters
     ----------
@@ -227,9 +230,8 @@ def apply_sampling_clock_offset(samples: S, *, offset_ppm: float) -> S:
         n_in,
         n_out,
     )
-    real = x.real.dtype
-    base, frac = _stretched_instants(n_out, 1.0 / (1.0 + eps), real, xp)
-    y = _interpolate(x, base, frac)
+    # output n at input n / (1 + ε), formed in float64 per instant
+    y = interpolate_piecewise(x, np.array([[0.0, n_out / (1.0 + eps)]]), n_out)
     return signal_adapter.wrap_samples(restore_1d(was_1d, y))
 
 
@@ -400,7 +402,7 @@ def apply_sampling_jitter(
     base = xp.arange(n) + whole.astype(xp.int64)
     margin = int(math.ceil(10 * jitter * fs)) + 1  # 10 σ
     base = xp.clip(base, -margin, n - 1 + margin)
-    y = _interpolate(x, base, (d - whole).astype(real, copy=False), margin=margin)
+    y = interpolate_at(x, base, (d - whole).astype(real, copy=False), margin=margin)
     return signal_adapter.wrap_samples(restore_1d(was_1d, y))
 
 

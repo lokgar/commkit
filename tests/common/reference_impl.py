@@ -834,3 +834,33 @@ def gardner_reference(
         rows.append(pos)
     k = min(len(r) for r in rows)
     return np.array([r[:k] for r in rows])
+
+
+def windowed_sinc_reference(
+    samples: np.ndarray, positions: np.ndarray, half: int
+) -> np.ndarray:
+    """Band-limited interpolation of ``samples`` ``(C, N)`` at ``positions``
+    ``(M,)`` (samples), ``(C, M)`` complex128: taps ``h(u) = sinc(u) w(u)`` at
+    the distances ``u = k - p`` to the ``2 · half`` samples ``k`` from
+    ``floor(p) - half + 1`` to ``floor(p) + half``, with the 4-term
+    Blackman-Harris window ``w(u) = 0.35875 + 0.48829 cos(πu/half) +
+    0.14128 cos(2πu/half) + 0.01168 cos(3πu/half)``; samples outside the
+    record are zero, and a position on a sample returns it.
+    """
+    x = np.atleast_2d(np.asarray(samples, dtype=np.complex128))
+    C, n = x.shape
+    out = np.zeros((C, len(positions)), dtype=np.complex128)
+    for m, p in enumerate(positions):
+        i = int(np.floor(p))
+        for k in range(i - half + 1, i + half + 1):
+            if not 0 <= k < n:
+                continue
+            u = k - p
+            w = (
+                0.35875
+                + 0.48829 * np.cos(np.pi * u / half)
+                + 0.14128 * np.cos(2 * np.pi * u / half)
+                + 0.01168 * np.cos(3 * np.pi * u / half)
+            )
+            out[:, m] += np.sinc(u) * w * x[:, k]
+    return out

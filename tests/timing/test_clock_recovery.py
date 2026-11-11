@@ -3,6 +3,7 @@ correct_sampling_clock_offset, scored against the clock offset and the
 timing that apply_sampling_clock_offset and a fractional delay impose."""
 
 import logging
+import math
 
 import numpy as np
 import pytest
@@ -197,20 +198,42 @@ class TestCorrect:
         assert fixed.reference.symbols.shape[-1] == fixed.samples.shape[-1] // 2
 
     @pytest.mark.allow_warnings
-    def test_equalizer_needs_clock_recovery(self, xp):
+    @pytest.mark.parametrize("dtype", ["complex64", "complex128"])
+    def test_static_correction_of_a_long_record(self, xp, dtype):
+        """A tone at 0.2 cycles per sample through a 2000 ppm clock and back
+        through the static correction, 2^20 samples: over the last sixteenth
+        the error stays below -120 dB (measured -129.6 dB, two
+        interpolations).  Instants formed in float32 gave -76.2 dB in
+        complex64."""
+        n, ppm, f = 2**20, 2000.0, 0.2
+        x = xp.exp(2j * xp.pi * f * xp.arange(n)).astype(dtype)
+        y = ck.impairments.apply_sampling_clock_offset(x, offset_ppm=ppm)
+        est = SamplingClockOffsetEstimate(
+            value=xp.asarray(ppm), trajectory=None, detector_gain=None
+        )
+        z = correct_sampling_clock_offset(y, est, sps=2)
+        assert z.dtype == x.dtype
+        err = (z - x[: z.shape[0]])[-n // 16 : -60]
+        assert 10 * math.log10(float(xp.mean(xp.abs(err) ** 2))) < -120.0
+
+    def test_equalizer_needs_clock_recovery(self, xp, caplog):
         """Baseline: at 50 ppm the symbols drift 13 symbol periods over the
         record, beyond an 11-tap equalizer's 5.5-symbol window, and trained
-        LMS fails (SER near 0.7 over the last quarter); after Gardner
-        recovery the same equalizer decides every symbol of the last quarter
-        right at 20 dB (16-QAM SER theory 1e-5)."""
+        LMS fails (SER near 0.7 over the last quarter; its decisions may
+        collapse onto a few points, which LMS reports as a WARNING); after
+        Gardner recovery the same equalizer decides every symbol of the last
+        quarter right at 20 dB (16-QAM SER theory 1e-5), with no warning."""
         n = 2**18
         mf = _received(xp, ppm=50.0, rolloff=0.5, num_symbols=n)
         kw = {"num_taps": 11, "step_size": 1e-3}
         train = mf.reference.symbols[..., :4000]
         drifting = ck.equalization.lms(mf, train, **kw)
-        recovered = ck.equalization.lms(
-            correct_sampling_clock_offset(mf, Gardner()), train, **kw
-        )
+        caplog.clear()
+        with caplog.at_level(logging.WARNING, logger="commkit"):
+            recovered = ck.equalization.lms(
+                correct_sampling_clock_offset(mf, Gardner()), train, **kw
+            )
+        assert caplog.text == ""
         ref = to_numpy(mf.reference.symbols)
         last = slice(n - n // 4, n)
         assert scoring.ser(to_numpy(drifting.y_hat)[last], ref[last], C16) > 0.3

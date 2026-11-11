@@ -98,7 +98,8 @@ _DOCUMENTED: dict[str, str] = {
     "timing/clock_recovery.py::_gardner_estimate": _RECURSION,
     "timing/clock_recovery.py::correct_sampling_clock_offset": _RECURSION,
     "timing/clock_recovery.py::estimate_sampling_clock_offset": _RECURSION,
-    "timing/clock_recovery.py::_resample_on_strobes": _RECURSION,
+    "_interpolation.py::interpolate_piecewise": _RECURSION
+    + " (the strobe positions, symbol rate, as knots of the resampling)",
     "recovery/tikhonov.py::_tikhonov": _RECURSION + " (RTS block-phase smoother)",
 }
 

@@ -22,11 +22,11 @@ import numpy as np
 
 from .._array import as_2d, restore_1d, warn_if_double
 from .._fft import fft
+from .._interpolation import interpolate_piecewise
 from ..backend import ArrayType, dispatch, to_device
 from ..core._signal_adapter import S, adapt_signal, require_integer_sps
 from ..core.signal import Signal
 from ..logger import logger
-from ..multirate import _interpolate, _stretched_instants
 
 __all__ = [
     "Gardner",
@@ -483,10 +483,11 @@ def correct_sampling_clock_offset(
     ``value`` only: the drift is removed and a static timing phase remains,
     for the equalizer.
 
-    The waveform between samples comes from a 48-tap windowed-sinc
-    interpolator in the input's precision (error below -119 dB for content
-    up to 0.4 cycles per sample, as in
-    :func:`~commkit.impairments.apply_sampling_clock_offset`).
+    The waveform between samples comes from the 48-tap windowed-sinc
+    interpolator of :func:`~commkit.impairments.apply_sampling_clock_offset`,
+    returned in the input's precision (error below -119 dB for content up
+    to 0.4 cycles per sample, at any record length: each instant is formed
+    in double precision from the strobes or the constant rate).
 
     Parameters
     ----------
@@ -535,7 +536,6 @@ def correct_sampling_clock_offset(
     sps_int = _resolve_even_sps(signal_adapter, sps, function_name)
     x, xp, _ = dispatch(signal_adapter.array)
     x, was_1d = as_2d(x, name="samples")
-    real = x.real.dtype
     if isinstance(how, Gardner):
         pos, _, _ = _track(to_device(x, "cpu"), sps_int, how)
         logger.info(
@@ -543,7 +543,7 @@ def correct_sampling_clock_offset(
             how.method,
             pos.shape[-1],
         )
-        y = _resample_on_strobes(x, xp, pos, sps_int, real)
+        y = _resample_on_strobes(x, pos, sps_int)
     else:
         ppm = np.atleast_1d(np.asarray(to_device(how.value, "cpu"), dtype=np.float64))
         if ppm.size not in (1, x.shape[0]):
@@ -556,7 +556,7 @@ def correct_sampling_clock_offset(
             "Removing a sampling-clock offset of %s ppm.",
             np.array2string(ppm, precision=3),
         )
-        y = _resample_static(x, xp, ppm, real)
+        y = _resample_static(x, ppm)
     out = restore_1d(was_1d, y)
     sig = signal_adapter.signal
     if sig is not None and sig.reference is not None:
@@ -578,42 +578,18 @@ def _resolve_even_sps(signal_adapter: Any, sps: int | None, function_name: str) 
     return sps_int
 
 
-def _resample_on_strobes(
-    x: ArrayType, xp: Any, pos: np.ndarray, sps: int, real: Any
-) -> ArrayType:
+def _resample_on_strobes(x: ArrayType, pos: np.ndarray, sps: int) -> ArrayType:
     """``sps`` instants per strobe interval, ``P_k + j·(P_{k+1} - P_k)/sps``,
-    per channel; the instants are split into an integer index and a
-    fraction in ``real`` precision.  The first strobe lies at most half a
-    symbol before sample 0 and the last instants at most a symbol after the
-    record's end: ``margin=sps`` covers both."""
-    C, k = pos.shape
-    step = np.diff(pos, axis=-1, append=2 * pos[:, -1:] - pos[:, -2:-1])
-    base_k = np.floor(pos)
-    frac_k = (pos - base_k).astype(np.float32)  # symbol-rate, in [0, 1)
-    out = xp.empty((C, k * sps), dtype=x.dtype)
-    j = xp.arange(sps, dtype=real)
-    for c in range(C):
-        q = (
-            xp.asarray(frac_k[c], dtype=real)[:, None]
-            + j[None, :] * xp.asarray(step[c] / sps, dtype=real)[:, None]
-        )
-        whole = xp.floor(q)
-        base = (
-            xp.asarray(base_k[c], dtype=xp.int64)[:, None] + whole.astype(xp.int64)
-        ).ravel()
-        frac = (q - whole).ravel()
-        out[c] = _interpolate(x[c : c + 1], base, frac, margin=sps)[0]
-    return out
+    per channel, each formed in float64; the last interval repeats the one
+    before it."""
+    knots = np.concatenate([pos, 2 * pos[:, -1:] - pos[:, -2:-1]], axis=-1)
+    return interpolate_piecewise(x, knots, sps)
 
 
-def _resample_static(x: ArrayType, xp: Any, ppm: np.ndarray, real: Any) -> ArrayType:
+def _resample_static(x: ArrayType, ppm: np.ndarray) -> ArrayType:
     """Output ``n`` at input ``n · (1 + ε)``, per channel, trimmed to the
     shortest."""
-    n_in = x.shape[-1]
     rates = 1.0 + ppm * 1e-6
-    n_out = min(math.floor((n_in - 1) / r) + 1 for r in rates)
-    out = xp.empty((x.shape[0], n_out), dtype=x.dtype)
-    for c, rate in enumerate(rates):
-        base, frac = _stretched_instants(n_out, float(rate), real, xp)
-        out[c] = _interpolate(x[c : c + 1], base, frac)[0]
-    return out
+    n_out = min(math.floor((x.shape[-1] - 1) / r) + 1 for r in rates)
+    knots = np.stack([np.zeros_like(rates), n_out * rates], axis=-1)
+    return interpolate_piecewise(x, knots, n_out)
