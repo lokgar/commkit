@@ -4,6 +4,7 @@ from typing import Any
 
 import numpy as np
 import pytest
+import scipy.signal
 
 from commkit import spectral
 from tests.common.conversions import to_numpy
@@ -80,6 +81,47 @@ class TestPowerSpectralDensity:
         assert len(f) == 257
         assert isinstance(f, xp.ndarray)
         assert isinstance(p, xp.ndarray)
+
+    @pytest.mark.parametrize(
+        ("dtype", "kw"),
+        [
+            (np.complex64, {}),
+            (np.float32, {}),
+            (np.float32, {"return_onesided": False, "nfft": 300}),
+            (np.complex64, {"average": "median", "detrend": "linear"}),
+            (np.float64, {"detrend": "constant", "scaling": "spectrum", "nperseg": 255,
+                          "noverlap": 10, "window": ("tukey", 0.3)}),
+        ],
+    )  # fmt: skip
+    def test_welch_psd_matches_scipy(self, xp: Any, xpt: Any, dtype, kw) -> None:
+        """The batched estimate follows scipy.signal.welch's definitions:
+        segment grid, scaling, one-sided doubling, median bias, detrending
+        (complex128 reference; measured 1e-6 of the peak in single precision,
+        1e-15 in double)."""
+        rng = np.random.default_rng(3)
+        x = rng.standard_normal((2, 4097)) + 0.5
+        if np.dtype(dtype).kind == "c":
+            x = x + 1j * rng.standard_normal((2, 4097))
+        x = x.astype(dtype)
+        onesided = kw.get("return_onesided", np.dtype(dtype).kind == "f")
+        args = dict(nperseg=256, detrend=False) | kw  # scipy detrends by default
+        f_ref, p_ref = scipy.signal.welch(
+            x.astype(np.result_type(x, np.float64)), fs=3.0, **(args | {"return_onesided": onesided})
+        )  # fmt: skip
+        if not onesided:
+            f_ref, p_ref = np.fft.fftshift(f_ref), np.fft.fftshift(p_ref, axes=-1)
+        f, p = spectral.welch_psd(xp.asarray(x), sampling_rate=3.0, **args)
+        assert p.dtype == np.dtype(dtype).type(0).real.dtype
+        xpt.assert_allclose(f, xp.asarray(f_ref), rtol=1e-12)
+        tol = 1e-12 if dtype == np.float64 else 1e-5
+        xpt.assert_allclose(p, xp.asarray(p_ref), rtol=0, atol=tol * p_ref.max())
+
+    def test_welch_psd_on_a_record_shorter_than_nperseg(self, xp: Any, caplog) -> None:
+        """One segment of the record's length, with a WARNING."""
+        x = xp.ones(100, dtype=xp.float32)
+        f, p = spectral.welch_psd(x, sampling_rate=1.0, nperseg=256)
+        assert f.shape == (51,) and p.shape == (51,)
+        assert "exceeds the record" in caplog.text
 
 
 class TestFrequencyShift:

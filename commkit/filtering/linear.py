@@ -372,8 +372,8 @@ def ols_fir_filter(
     transformed in batches of at most 2^24 spectrum elements, so the working
     memory beyond the input and output stays bounded for long records and
     long impulse responses (chromatic dispersion, group-delay equalizers),
-    where one FFT of the whole record would exhaust GPU memory.  For short filters on moderate records, :func:`fir_filter` is
-    as fast and simpler.
+    where one FFT of the whole record would exhaust GPU memory.
+    :func:`fir_filter` runs the same filter with the default block size.
 
     Parameters
     ----------
@@ -382,9 +382,9 @@ def ols_fir_filter(
     taps : array_like
         FIR coefficients, ``(L,)``.
     nfft : int, optional
-        FFT block size, a power of 2.  Defaults to
-        ``max(1024, next_power_of_2(4·L))``, so the guard of a quarter block
-        is at least ``L`` samples long.
+        FFT block size, a power of 2 with ``nfft // 2 >= len(taps)``.
+        Defaults to ``max(1024, next_power_of_2(4·L))``, or the power of 2
+        that holds a short record and its guards in one block.
     causal : bool, default False
         By default the output is aligned as :func:`fir_filter` aligns it
         (SciPy's ``mode='same'``, centered on tap ``(L - 1) // 2``):
@@ -404,75 +404,71 @@ def ols_fir_filter(
     Raises
     ------
     ValueError
-        If ``nfft`` is not a power of 2 or ``nfft // 4 < len(taps)``,
+        If ``nfft`` is not a power of 2 or ``nfft // 2 < len(taps)``,
         or ``taps`` is complex and ``samples`` real.
 
     Notes
     -----
-    A symmetric guard of ``nfft // 4`` samples is discarded from each
-    block edge, so ``nfft // 4 >= len(taps)`` must hold.
-
-    Without ``causal`` the input is padded at the end by ``(L - 1) // 2`` zeros
-    and as many leading output samples are dropped, which costs at most one
-    extra block.
+    Each block discards a guard as long as the filter's transient,
+    ``L - 1 - (L - 1) // 2`` samples (``L - 1`` with ``causal``), at both
+    ends, so ``nfft // 2 >= len(taps)`` must hold; the alignment of
+    ``mode='same'`` is a shift of the frequency response.  Real samples and
+    taps use real FFTs.
     """
     signal_adapter = adapt_signal(samples, function_name="ols_fir_filter()")
     x = signal_adapter.array
 
     x, xp, _ = dispatch(x)
     taps = _taps_like(xp.asarray(taps), x, xp, "ols_fir_filter()")
-    is_real = not xp.iscomplexobj(x) and not xp.iscomplexobj(taps)
-    out_dtype = x.dtype  # capture before any reshape
 
     L = len(taps)
-    half = (L - 1) // 2  # SciPy's mode='same' centre, as fir_filter
-
-    x, was_1d = as_2d(x, name="samples")
-
-    N = x.shape[-1]
-
-    N_fft = nfft
-    if N_fft is None:
-        N_fft = max(1024, 1 << (max(1, 4 * L) - 1).bit_length())
-    elif N_fft & (N_fft - 1) or N_fft // 4 < L:
+    if nfft is not None and (nfft & (nfft - 1) or nfft // 2 < L):
         raise ValueError(
-            f"nfft must be a power of 2 with nfft // 4 >= len(taps) ({L}), got {nfft}."
+            f"nfft must be a power of 2 with nfft // 2 >= len(taps) ({L}), got {nfft}."
         )
-
     logger.debug(
-        "ols_fir_filter: L=%s, N=%s, N_fft=%s, num_ch=%s, causal=%s",
-        L,
-        N,
-        N_fft,
-        x.shape[0],
-        causal,
+        "ols_fir_filter: L=%s, N=%s, nfft=%s, causal=%s", L, x.shape[-1], nfft, causal
     )
+    return signal_adapter.wrap_samples(_ols_filter(x, taps, xp, nfft, causal))
 
-    H = _fft.fft(taps, n=N_fft)  # frequency response of the filter
 
-    if not causal:
-        # Post-pad by half so the OLS can compute full_conv[half : half+N].
-        # This matches scipy's mode='same' (center-aligned, group-delay compensated),
-        # which is required for correct eye-opening after pulse-shaped filtering.
-        samples_ext = xp.pad(x, ((0, 0), (0, half)))
-        out_ext = ols_apply(samples_ext, N_fft, lambda Y: Y * H)  # (num_ch, N + half)
-        out = out_ext[:, half:]  # trim leading half -> shape: (num_ch, N)
-    else:
-        out = ols_apply(x, N_fft, lambda Y: Y * H)
+def _ols_filter(
+    x: ArrayType, taps: ArrayType, xp: Any, nfft: int | None, causal: bool
+) -> ArrayType:
+    """Overlap-save FIR filter of ``x`` (any shape, time last) by ``taps``
+    already in its precision: ``mode='same'`` alignment, or causal.
 
-    if is_real:
-        out = out.real  # strip IFFT imaginary noise for real inputs
-    elif out.dtype != out_dtype:
-        out = out.astype(
-            out_dtype
-        )  # guard complex inputs (e.g. complex64 -> complex128)
-    return signal_adapter.wrap_samples(restore_1d(was_1d, out))
+    The guard is the filter's extent on the transient side, so short filters
+    discard little of each block; the ``mode='same'`` shift is folded into
+    the frequency response.  Real samples and taps take ``rfft`` blocks.
+    """
+    L = len(taps)
+    shape = x.shape
+    rows = x.reshape(-1, shape[-1])
+    N = shape[-1]
+    shift = 0 if causal else (L - 1) // 2  # SciPy's mode='same' centre
+    guard = L - 1 - shift  # lags -shift .. L - 1 - shift
+    if nfft is None:
+        nfft = max(1024, 1 << (max(1, 4 * L) - 1).bit_length())
+        # A short record needs one block, no larger than record and guards.
+        nfft = min(nfft, 1 << (N + 2 * guard - 1).bit_length())
+        nfft = max(nfft, 1 << (2 * guard).bit_length())
+    real = not xp.iscomplexobj(x) and not xp.iscomplexobj(taps)
+    kernel = xp.zeros(nfft, dtype=taps.dtype)
+    kernel[:L] = taps
+    kernel = xp.roll(kernel, -shift)  # h[m] = taps[m + shift] at m mod nfft
+    H = _fft.rfft(kernel) if real else _fft.fft(kernel)
+    if rows.shape[0] == 0 or N == 0:
+        return xp.empty(shape, dtype=x.dtype)
+    out = ols_apply(rows, nfft, lambda Y: Y * H, guard=guard, real=real)
+    return out.astype(x.dtype, copy=False).reshape(shape)
 
 
 def fir_filter(samples: S, taps: ArrayType, *, periodic: bool = False) -> S:
     """Apply an FIR filter along the time (last) axis.
 
-    FFT convolution, ``mode="same"``: the output is centered on tap
+    Overlap-save FFT convolution (as :func:`ols_fir_filter`), the alignment
+    of ``mode="same"``: the output is centered on tap
     ``(len(taps) - 1) // 2``, ``y[n] = sum_k x[n + (L-1)//2 - k]·taps[k]``,
     so a symmetric filter of odd length adds no delay (one of even length,
     whose centre falls between two taps, half a sample).  With
@@ -503,7 +499,7 @@ def fir_filter(samples: S, taps: ArrayType, *, periodic: bool = False) -> S:
         If ``taps`` is not 1-D, or is complex and ``samples`` real.
     """
     signal_adapter = adapt_signal(samples, function_name="fir_filter()")
-    x, xp, sp = dispatch(signal_adapter.array)
+    x, xp, _ = dispatch(signal_adapter.array)
     taps = xp.asarray(taps)
     if taps.ndim != 1:
         raise ValueError(f"taps must be 1-D, got shape {taps.shape}.")
@@ -512,13 +508,7 @@ def fir_filter(samples: S, taps: ArrayType, *, periodic: bool = False) -> S:
 
     if periodic:
         return signal_adapter.wrap_samples(convolve_periodic(x, taps))
-    taps_nd = taps.reshape((1,) * (x.ndim - 1) + (-1,))
-    result = sp.signal.convolve(x, taps_nd, mode="same", method="fft")
-
-    # Belt-and-suspenders: scipy may still promote internally (version-dependent)
-    if result.dtype != x.dtype:
-        result = result.astype(x.dtype)
-    return signal_adapter.wrap_samples(result)
+    return signal_adapter.wrap_samples(_ols_filter(x, taps, xp, None, causal=False))
 
 
 def matched_filter(

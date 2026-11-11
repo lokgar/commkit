@@ -438,6 +438,40 @@ class TestOverlapSaveFiltering:
             ols = filtering.ols_fir_filter(xp.asarray(x), xp.asarray(taps))
             xpt.assert_allclose(ols, xp.asarray(expected), atol=1e-12)
 
+    @pytest.mark.parametrize("complex_data", [False, True])
+    @pytest.mark.parametrize(
+        ("shape", "num_taps"),
+        [((1,), 1), ((7,), 64), ((2, 1000), 2), ((2, 1000), 65), ((3, 2, 999), 1500)],
+    )
+    def test_matches_the_full_convolution(
+        self, xp: Any, xpt: Any, shape, num_taps, complex_data
+    ) -> None:
+        """Both filters equal ``np.convolve`` at every sample, ends included,
+        for records shorter than the filter and even lengths; fir_filter also
+        on 3-D input.  Real data takes real FFTs (measured 6e-7 of the peak
+        in float32, 1e-6 in complex64)."""
+        rng = np.random.default_rng(num_taps)
+        x = rng.standard_normal(shape)
+        taps = rng.standard_normal(num_taps)
+        if complex_data:
+            x = x + 1j * rng.standard_normal(shape)
+            taps = taps + 1j * rng.standard_normal(num_taps)
+        x = x.astype(np.complex64 if complex_data else np.float32)
+        full = np.apply_along_axis(np.convolve, -1, x.astype(complex), taps)
+        n, c = shape[-1], (num_taps - 1) // 2
+        cases = [(filtering.fir_filter, {}, c)]
+        if len(shape) < 3:
+            cases += [(filtering.ols_fir_filter, {}, c),
+                      (filtering.ols_fir_filter, {"causal": True}, 0)]  # fmt: skip
+        for fn, kw, start in cases:
+            out = fn(xp.asarray(x), xp.asarray(taps), **kw)
+            ref = full[..., start : start + n]
+            if not complex_data:
+                ref = ref.real
+            assert out.dtype == x.dtype and out.shape == x.shape
+            atol = 3e-6 * np.abs(ref).max()
+            xpt.assert_allclose(out, xp.asarray(ref.astype(x.dtype)), atol=atol)
+
     @pytest.mark.parametrize("causal", [False, True])
     def test_batches_do_not_change_the_output(
         self, xp: Any, xpt: Any, monkeypatch, causal
@@ -1092,13 +1126,14 @@ class TestDispersionCompensationTaps:
 
 class TestOlsFftSize:
     def test_invalid_nfft_raises(self, xp: Any) -> None:
-        """nfft must be a power of 2 with a guard of at least len(taps)."""
+        """nfft must be a power of 2 with nfft // 2 >= len(taps)."""
         x = xp.ones(256, dtype=xp.complex64)
         taps = xp.ones(65)
         with pytest.raises(ValueError, match="nfft"):
             filtering.ols_fir_filter(x, taps, nfft=200)
         with pytest.raises(ValueError, match="nfft"):
-            filtering.ols_fir_filter(x, taps, nfft=256)
+            filtering.ols_fir_filter(x, taps, nfft=128)
+        assert filtering.ols_fir_filter(x, taps, nfft=256).shape == (256,)
 
 
 class TestCorrectFiberPropagation:

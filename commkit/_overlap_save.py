@@ -24,6 +24,7 @@ def ols_apply(
     process: Callable[[ArrayType], ArrayType],
     *,
     guard: int | None = None,
+    real: bool = False,
 ) -> ArrayType:
     """Overlap-save filtering of ``(num_ch, N)`` samples, ``(num_ch, N)`` out.
 
@@ -40,11 +41,15 @@ def ols_apply(
         Samples discarded at each end of an inverse block, at least the
         filter's extent on either side of lag 0 (its length for a causal
         filter), below ``N_fft // 2``.  ``None`` takes ``N_fft // 4``.
+    real : bool, default False
+        Real samples and a real filter: the blocks go through ``rfft`` and
+        ``irfft``, and ``process`` sees the ``N_fft // 2 + 1`` bins of each.
 
     Returns
     -------
     ndarray
-        The centers of the inverse blocks, complex, ``(num_ch, N)``.
+        The centers of the inverse blocks, ``(num_ch, N)``: complex, or real
+        with ``real``.
     """
     _, xp, _ = dispatch(samples)
     num_ch, N = samples.shape
@@ -64,8 +69,12 @@ def ols_apply(
     batch = max(1, _OLS_ELEMENTS // (num_ch * N_fft))
     out = None
     for b0 in range(0, num_blocks, batch):
-        spectra = _fft.fft(windows[:, b0 : b0 + batch], n=N_fft, axis=-1)
-        blocks = _fft.ifft(process(spectra), n=N_fft, axis=-1)
+        if real:
+            spectra = _fft.rfft(windows[:, b0 : b0 + batch], n=N_fft, axis=-1)
+            blocks = _fft.irfft(process(spectra), n=N_fft, axis=-1)
+        else:
+            spectra = _fft.fft(windows[:, b0 : b0 + batch], n=N_fft, axis=-1)
+            blocks = _fft.ifft(process(spectra), n=N_fft, axis=-1)
         if out is None:
             out = xp.empty((num_ch, num_blocks, B), dtype=blocks.dtype)
         out[:, b0 : b0 + batch] = blocks[:, :, discard : discard + B]
