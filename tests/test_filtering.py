@@ -1258,6 +1258,53 @@ class TestCorrectFiberPropagation:
         rel = float(xp.mean(xp.abs(e) ** 2) / xp.mean(xp.abs(whole[..., sl]) ** 2))
         assert rel < 1e-6
 
+    @pytest.mark.parametrize("n", [1 << 14, 3 * 3856, 1000])
+    def test_batches_do_not_change_the_blocks(
+        self, xp: Any, xpt: Any, monkeypatch: pytest.MonkeyPatch, n: int
+    ) -> None:
+        """Blocks of 4096 samples (guard 120, hop 3856) in batches of two
+        (the last one shorter) give the output of a single batch: each block
+        is propagated alone, and the input ahead of a batch survives the
+        previous batch's write.  Lengths: a ragged end, an exact multiple of
+        the hop, one block."""
+        from commkit.filtering import fiber as fiber_module
+        from commkit.impairments import Fiber
+
+        x = xp.asarray(self._field(n=n))
+        kw = dict(fiber=Fiber(), steps_per_span=2, sampling_rate=64e9, **self.LINK)
+        monkeypatch.setattr(fiber_module, "_BATCH_SAMPLES_CPU", 1 << 30)
+        monkeypatch.setattr(fiber_module, "_BATCH_SAMPLES_GPU", 1 << 30)
+        one = filtering.correct_fiber_propagation(x, **kw)
+        monkeypatch.setattr(fiber_module, "_BATCH_SAMPLES_CPU", 2 * 4096)
+        monkeypatch.setattr(fiber_module, "_BATCH_SAMPLES_GPU", 2 * 4096)
+        batched = filtering.correct_fiber_propagation(x, **kw)
+        xpt.assert_allclose(batched, one, rtol=0, atol=1e-6 * float(xp.abs(one).max()))
+
+    def test_batches_bound_the_working_memory(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """With batches far shorter than the record (on the CPU, 2**15
+        samples here against 2**16 by default), the peak is the working
+        copy of the field and the power measurement beside a batch (2.5x the
+        input, measured), not the blocks of the whole record and their
+        spectra (5.2x in one batch)."""
+        import tracemalloc
+
+        from commkit.filtering import fiber as fiber_module
+        from commkit.impairments import Fiber
+
+        x = self._field(n=1 << 19)
+        kw = dict(fiber=Fiber(), steps_per_span=1, sampling_rate=64e9, **self.LINK)
+        monkeypatch.setattr(fiber_module, "_BATCH_SAMPLES_CPU", 1 << 15)
+        filtering.correct_fiber_propagation(x, **kw)
+        tracemalloc.start()
+        try:
+            filtering.correct_fiber_propagation(x, **kw)
+            peak = tracemalloc.get_traced_memory()[1]
+        finally:
+            tracemalloc.stop()
+        assert peak < 3 * x.nbytes
+
     def test_bad_nonlinear_scale_raises(self, xp: Any) -> None:
         from commkit.impairments import Fiber
 

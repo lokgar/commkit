@@ -1092,7 +1092,11 @@ def correct_fiber_propagation(
     ``method="blocks"`` (the default, as a receiver does) backpropagates in
     overlapping blocks, each with a guard of 1.25 times half the link's
     dispersion memory on both sides, and discards the guards
-    (overlap-save), so the working memory is bounded by the block.  The
+    (overlap-save).  It propagates a batch of blocks at a time, about
+    ``2**16`` samples per polarization on the CPU and ``2**21`` on the GPU,
+    so the working memory stays bounded
+    whatever the record length: beyond the output, which it fills in place,
+    it holds one batch.  The
     dispersion's light cone bounds both the linear and the nonlinear
     interaction, so every kept sample sees all of its past and future within
     the link (measured: the blocks match the whole record to -71 dB).
@@ -1216,6 +1220,12 @@ def correct_fiber_propagation(
 #: Smallest block of the overlap-save backpropagation; blocks are at least
 #: eight guards long, so at most a quarter of each is discarded.
 _MIN_BLOCK = 4096
+#: Samples per channel propagated at once by the overlap-save backpropagation
+#: (blocks times block length), the bound of its working memory.  The CPU is
+#: fastest with batches that stay in cache (2**16 is 0.62 of one batch of
+#: 2**20 samples); the GPU needs large ones to fill the device.
+_BATCH_SAMPLES_CPU = 1 << 16
+_BATCH_SAMPLES_GPU = 1 << 21
 
 
 def _link_guard(link: Any, sampling_rate: float) -> int:
@@ -1252,20 +1262,43 @@ def _overlap_save_blocks(
 ) -> ArrayType:
     """Apply ``run`` to overlapping blocks of ``field`` and keep their cores.
 
-    ``field`` is ``(C, N)``; the blocks, ``(C, B, L)`` with ``L`` a power of
-    two of at least eight guards, overlap by two guards and start one guard
-    before the record (zero-padded), so the kept cores of ``L - 2·guard``
-    samples tile it.  ``run`` processes all blocks at once.
+    ``field`` is ``(C, N)`` and is overwritten with the result.  The blocks,
+    ``L`` samples with ``L`` a power of two of at least eight guards,
+    overlap by two guards and start one guard before the record (zeros
+    beyond either end), so the kept cores of ``L - 2·guard`` samples tile
+    it.  ``run`` processes a batch of blocks ``(C, B, L)`` at once, about
+    ``_BATCH_SAMPLES_CPU`` or ``_BATCH_SAMPLES_GPU`` samples per channel, so the working memory does not
+    grow with the record.  The guard of input before each batch is kept
+    aside, as the previous batch overwrites it.
     """
     C, N = field.shape
     length = max(_MIN_BLOCK, 1 << (8 * guard - 1).bit_length())
     hop = length - 2 * guard
     num_blocks = -(-N // hop)
-    padded = xp.zeros((C, num_blocks * hop + 2 * guard), dtype=field.dtype)
-    padded[:, guard : guard + N] = field
-    index = xp.arange(num_blocks)[:, None] * hop + xp.arange(length)[None, :]
+    batch = _BATCH_SAMPLES_CPU if xp is np else _BATCH_SAMPLES_GPU
+    num_batches = -(-num_blocks * length // batch)
+    per_batch = -(-num_blocks // num_batches)
     logger.debug(
-        "DBP in %d blocks of %d samples (guard %d).", num_blocks, length, guard
+        "DBP in %d blocks of %d samples (guard %d), %d per batch.",
+        num_blocks,
+        length,
+        guard,
+        per_batch,
     )
-    out = run(padded[:, index])  # (C, B, L)
-    return out[:, :, guard : guard + hop].reshape(C, num_blocks * hop)[:, :N]
+    index = xp.arange(per_batch)[:, None] * hop + xp.arange(length)[None, :]
+    before = xp.zeros((C, guard), dtype=field.dtype)  # input ahead of the batch
+    for first in range(0, num_blocks, per_batch):
+        count = min(per_batch, num_blocks - first)
+        start = first * hop
+        stop = min(start + count * hop, N)
+        # input from one guard before the batch to one guard after it
+        segment = xp.zeros((C, count * hop + 2 * guard), dtype=field.dtype)
+        segment[:, :guard] = before
+        tail = field[:, start : min(stop + guard, N)]
+        segment[:, guard : guard + tail.shape[1]] = tail
+        if stop < N:
+            before = field[:, stop - guard : stop].copy()
+        out = run(segment[:, index[:count]])  # (C, count, L)
+        cores = out[:, :, guard : guard + hop].reshape(C, count * hop)
+        field[:, start:stop] = cores[:, : stop - start]
+    return field

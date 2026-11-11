@@ -29,6 +29,7 @@ Notable changes to CommKit, newest first. Performance figures are from the refer
 
 - `iir_filter` and the per-channel `PLL` run their channels in parallel on the CPU.
 - `apply_sampling_clock_offset`, `apply_sampling_jitter` and the resampling of `correct_sampling_clock_offset` interpolate through a Numba kernel on the CPU, parallel over the output: 0.07 and 0.11 of the former time (clock offset and jitter, 2 x 2^20 complex64 samples). The Gardner loop's interpolator steps its window by a rotation instead of a cosine per tap. `correct_sampling_clock_offset` with `Gardner` takes 0.21 of the former time on the CPU and 0.62 on GPU input (2^18 symbols at 2 sps).
+- `correct_fiber_propagation` with `method="blocks"` backpropagates its blocks in batches of 2^16 samples per polarization on the CPU, which stay in cache: 0.64 of the former time (2 x 2^20 samples, 4 x 80 km, 10 steps per span), 0.85 at 2^23 samples. GPU input is unchanged.
 
 ### Fixed
 
@@ -38,6 +39,7 @@ Notable changes to CommKit, newest first. Performance figures are from the refer
 - Gardner clock recovery emits `PrecisionWarning` on double input, as the loop computes in complex64.
 - `apply_sampling_clock_offset` and `correct_sampling_clock_offset` keep their -119 dB interpolation accuracy at any record length. They formed the sampling instants in float32, whose rounding grew with the accumulated drift: -84 dB at the end of 2^20 complex64 samples at 2000 ppm, -68 dB at 2^23 samples and 1000 ppm. Complex128 input to the Gardner resampling also had its fractions rounded to float32.
 - Gardner clock recovery calibrates its detector gain in blocks short against the clock drift and starts its integrator at the measured offset. A single fit over 2048 symbols scaled the gain by `sinc(2048 ε)`, so the loop ran at twice the requested bandwidth at 300 ppm and slipped from about 450 ppm (classical detector, rolloff 0.1); the gain now stays within a few percent of its zero-offset value up to `max_offset_ppm`, and offsets of 900 ppm are measured within 1 ppm by both detectors.
+- `correct_fiber_propagation` with `method="blocks"` bounds its working memory, as documented: it propagated every block of the record at once, with an index array as large as the record. Peak host memory on 2 x 2^23 complex64 samples: 2.5 times the input (320 MiB), against 5.2 times before and 4 times for `"whole_record"`.
 - `MengaliMorelli` keeps its autocorrelation in the data's precision; a float64 lag array promoted it to complex128.
 - `plot_frequency_offset_blockwise_result` and two frequency axes label their unit with an SI prefix chosen from the data, instead of hand-scaled kHz or plain Hz.
 - Error messages of `dispersion_compensation_taps`, the dispersion estimators, `PLL`, `BPS` and `Tikhonov` name the function or class.
