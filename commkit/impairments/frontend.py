@@ -25,6 +25,7 @@ from .._array import as_2d, restore_1d
 from .._random import RNG, as_generator, complex_normal, standard_normal
 from ..backend import ArrayType, dispatch, to_device
 from ..core._signal_adapter import S, adapt_signal
+from ..core.signal import Signal
 from ..logger import logger
 from ..math import _derotate, db_to_linear
 from ..multirate import _interpolate, _stretched_instants
@@ -91,8 +92,8 @@ def apply_iq_imbalance(
     Raises
     ------
     ValueError
-        If ``skew`` is not zero and the sampling rate is missing or
-        conflicts with the Signal's.
+        If the samples are real, or if ``skew`` is not zero and the sampling
+        rate is missing or conflicts with the Signal's.
 
     Notes
     -----
@@ -122,7 +123,8 @@ def apply_iq_imbalance(
     )
 
     x, xp, _ = dispatch(signal_adapter.array)
-    if skew != 0.0 and xp.iscomplexobj(x):  # real input has no Q branch
+    _require_complex(x, xp, "apply_iq_imbalance()")
+    if skew != 0.0:
         assert sampling_rate is not None
         x = _delay_quadrature(x, xp, skew * sampling_rate)
 
@@ -139,6 +141,15 @@ def apply_iq_imbalance(
         result = result.astype(x.dtype)
 
     return signal_adapter.wrap_samples(result)
+
+
+def _require_complex(x: ArrayType, xp: ModuleType, function_name: str) -> None:
+    """Raise unless ``x`` is complex: real samples have no Q branch."""
+    if not xp.iscomplexobj(x):
+        raise ValueError(
+            f"{function_name}: samples must be complex baseband (an I and a Q "
+            f"branch), got {x.dtype}."
+        )
 
 
 def _delay_quadrature(x: ArrayType, xp: ModuleType, delay: float) -> ArrayType:
@@ -216,7 +227,7 @@ def apply_sampling_clock_offset(samples: S, *, offset_ppm: float) -> S:
         n_in,
         n_out,
     )
-    real = xp.float32 if x.dtype in (xp.float32, xp.complex64) else xp.float64
+    real = x.real.dtype
     base, frac = _stretched_instants(n_out, 1.0 / (1.0 + eps), real, xp)
     y = _interpolate(x, base, frac)
     return signal_adapter.wrap_samples(restore_1d(was_1d, y))
@@ -382,7 +393,7 @@ def apply_sampling_jitter(
     )
     if jitter == 0:
         return signal_adapter.wrap_samples(restore_1d(was_1d, x.copy()))
-    real = xp.float32 if x.dtype in (xp.float32, xp.complex64) else xp.float64
+    real = x.real.dtype
     n = x.shape[-1]
     d = (jitter * fs) * standard_normal(as_generator(rng), (n,), dtype=real, xp=xp)
     whole = xp.floor(d)
@@ -419,7 +430,7 @@ class IQImbalanceEstimate:
     phase_imbalance_deg: ArrayType
 
 
-def estimate_iq_imbalance(samples: ArrayType) -> IQImbalanceEstimate:
+def estimate_iq_imbalance(samples: ArrayType | Signal) -> IQImbalanceEstimate:
     """Measure IQ imbalance blindly, as the parameters of
     :func:`apply_iq_imbalance`.
 
@@ -445,6 +456,11 @@ def estimate_iq_imbalance(samples: ArrayType) -> IQImbalanceEstimate:
     IQImbalanceEstimate
         Per channel, on the input's device.
 
+    Raises
+    ------
+    ValueError
+        If the samples are real.
+
     Notes
     -----
     The moments are estimated from ``N`` samples, so the spread of the
@@ -459,6 +475,7 @@ def estimate_iq_imbalance(samples: ArrayType) -> IQImbalanceEstimate:
     """
     signal_adapter = adapt_signal(samples, function_name="estimate_iq_imbalance()")
     x, xp, _ = dispatch(signal_adapter.array)
+    _require_complex(x, xp, "estimate_iq_imbalance()")
     x2, was_1d = as_2d(x, name="samples")
     sii, sqq, siq = _branch_moments(x2, xp)
     g2 = (sqq * sqq + siq * siq) / (sii * sqq - siq * siq)
@@ -575,6 +592,13 @@ def correct_iq_imbalance(
     ndarray or Signal
         Corrected samples, same shape, dtype and device as the input.
 
+    Raises
+    ------
+    TypeError
+        If ``how`` is not one of the accepted types.
+    ValueError
+        If the samples are real.
+
     Examples
     --------
     >>> r = apply_iq_imbalance(s, amplitude_imbalance_db=1.5, phase_imbalance_deg=4.0)
@@ -588,8 +612,9 @@ def correct_iq_imbalance(
             f"IQImbalanceEstimate, got {type(how).__name__}."
         )
     signal_adapter = adapt_signal(samples, function_name="correct_iq_imbalance()")
-    logger.info("Correcting IQ imbalance (%s).", type(how).__name__)
     x, xp, _ = dispatch(signal_adapter.array)
+    _require_complex(x, xp, "correct_iq_imbalance()")
+    logger.info("Correcting IQ imbalance (%s).", type(how).__name__)
     if correct_fn is None:
         assert isinstance(how, IQImbalanceEstimate)
         return signal_adapter.wrap_samples(_invert_iq_imbalance(x, xp, how))

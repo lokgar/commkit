@@ -151,6 +151,10 @@ class TestResample:
         out_frac = multirate.resample(data, sps_in=10, sps_out=25)
         assert out_frac.size == 250
 
+        # A ratio from floating-point rates still reduces to small terms.
+        out_float = multirate.resample(data, sps_in=1.6, sps_out=2.4)
+        assert out_float.size == 150
+
     def test_resample_errors(self, xp: Any) -> None:
         """Verify inconsistent resampling parameters raise ValueError."""
         data = xp.zeros(10)
@@ -164,6 +168,11 @@ class TestResample:
             multirate.resample(data, sps_out=4)
         with pytest.raises(ValueError, match="positive integers"):
             multirate.upsample(data, factor=1.5)
+        # 2.0001 / 2 reduces to 20001/20000: a 400 021-tap filter.
+        with pytest.raises(ValueError, match="up and down explicitly"):
+            multirate.resample(data, sps_in=2, sps_out=2.0001)
+        with pytest.raises(ValueError, match="sps_out must be positive"):
+            multirate.resample(data, sps_in=2, sps_out=0.0)
         with pytest.raises(ValueError, match="offset"):
             multirate.decimate_to_symbol_rate(data, sps=2, offset=2)
 

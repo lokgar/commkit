@@ -251,8 +251,9 @@ def resample(
         ``sps_out`` for array input.  A value that disagrees with the Signal
         raises.
     sps_out : float, optional
-        Target samples per symbol; the ratio ``sps_out / sps_in`` is
-        approximated by a fraction.
+        Target samples per symbol.  The ratio ``sps_out / sps_in`` must be a
+        fraction whose reduced terms are at most 1000 (to a relative 1e-9),
+        which bounds the polyphase filter to about 20 000 taps.
     correct_power : bool, optional
         Multiply by ``sqrt(down / up)`` so that ``E[|x|²] = 1/sps`` still
         holds.  Defaults to ``True`` for Signal input and ``False`` for arrays.
@@ -273,8 +274,9 @@ def resample(
     Raises
     ------
     ValueError
-        If both or neither of ``(up, down)`` and ``sps_out`` are given, or
-        if ``periodic`` and ``N * up / down`` is not an integer.
+        If both or neither of ``(up, down)`` and ``sps_out`` are given, if
+        ``sps_out / sps_in`` has no fraction with terms up to 1000, or if
+        ``periodic`` and ``N * up / down`` is not an integer.
     """
     signal_adapter = adapt_signal(samples, function_name="resample()")
     by_factors = up is not None or down is not None
@@ -289,8 +291,7 @@ def resample(
         if signal_adapter.signal is None and sps_in is None:
             raise ValueError("resample() requires sps_in with sps_out for array input.")
         sps_in = signal_adapter.resolve_fact("sps", sps_in)
-        ratio = Fraction(sps_out / sps_in).limit_denominator()
-        up, down = ratio.numerator, ratio.denominator
+        up, down = _sps_ratio(sps_out, sps_in)
     else:
         raise ValueError("resample(): give either (up, down) or sps_out.")
 
@@ -314,6 +315,31 @@ def resample(
         # sps_after / sps_before = up / down  ->  gain = sqrt(down/up).
         out = out * (down / up) ** 0.5
     return signal_adapter.wrap_samples(out, **metadata)
+
+
+# Largest up or down factor that ``sps_out`` may reduce to: the polyphase
+# filter has about ``20 · max(up, down)`` taps.
+_MAX_SPS_RATIO_FACTOR = 1000
+
+
+def _sps_ratio(sps_out: float, sps_in: float) -> tuple[int, int]:
+    """``(up, down)`` of ``sps_out / sps_in`` with both at most
+    ``_MAX_SPS_RATIO_FACTOR``; raise when no such fraction matches the ratio
+    to a relative 1e-9."""
+    if not (sps_out > 0 and math.isfinite(sps_out)):
+        raise ValueError(f"resample(): sps_out must be positive, got {sps_out}.")
+    target = sps_out / sps_in
+    ratio = Fraction(target).limit_denominator(_MAX_SPS_RATIO_FACTOR)
+    if (
+        ratio.numerator > _MAX_SPS_RATIO_FACTOR
+        or abs(float(ratio) - target) > 1e-9 * target
+    ):
+        raise ValueError(
+            f"resample(): sps_out / sps_in = {target!r} is not a ratio of "
+            f"integers up to {_MAX_SPS_RATIO_FACTOR}; its polyphase filter would "
+            "be too long. Give up and down explicitly."
+        )
+    return ratio.numerator, ratio.denominator
 
 
 def _resample_poly(arr: ArrayType, up: int, down: int, sp: Any) -> ArrayType:
@@ -395,7 +421,7 @@ def _interpolate(
     """
     x, xp, _ = dispatch(x)
     K = _INTERP_HALF_WIDTH
-    real = xp.float32 if x.dtype in (xp.float32, xp.complex64) else xp.float64
+    real = x.real.dtype
     C, _n = x.shape
     m = base.shape[0]
     pad = K + margin

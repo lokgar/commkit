@@ -62,6 +62,24 @@ class TestApplyIQImbalance:
         assert out.dtype == xp.complex64
 
 
+@pytest.mark.parametrize(
+    "call",
+    [
+        lambda x: apply_iq_imbalance(
+            x, amplitude_imbalance_db=1.0, phase_imbalance_deg=3.0
+        ),
+        estimate_iq_imbalance,
+        lambda x: correct_iq_imbalance(x, Lowdin()),
+        lambda x: correct_iq_imbalance(x, IQImbalanceEstimate(1.0, 3.0)),
+    ],
+)
+def test_iq_functions_reject_real_samples(xp, call):
+    """Real samples have no Q branch: each IQ function raises naming them."""
+    x = xp.ones(64, dtype=xp.float32)
+    with pytest.raises(ValueError, match="samples must be complex"):
+        call(x)
+
+
 class TestIQSkew:
     """The time skew of apply_iq_imbalance: Q delayed against I."""
 
