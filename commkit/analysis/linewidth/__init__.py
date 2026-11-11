@@ -9,8 +9,10 @@ The method object chooses the estimator and the kind of record it reads:
   complex IQ, array or Signal) - ``DshFmFit``, ``DshIncrement`` and
   ``DshLorentzian`` (see :mod:`commkit.analysis.interferometry`).
 
-Every method returns a :class:`LinewidthEstimate`: the linewidth in Hz plus
-that method's diagnostics, ready for the ``plotting.analysis`` plots.  The
+Every method returns a :class:`LinewidthEstimate`, the linewidth in Hz, as
+the subclass that holds that method's diagnostics (``BetaSeparation`` a
+:class:`BetaSeparationEstimate`, ...), ready for the ``plotting.analysis``
+plots.  The
 values are host floats (SISO) or ``(C,)`` arrays (MIMO), like the metrics:
 the fits run host-side on plot-sized reductions.
 """
@@ -37,14 +39,30 @@ from .phase import (
     _increment_slope,
     _increment_subtract,
 )
-from .result import LinewidthEstimate
+from .result import (
+    BetaSeparationEstimate,
+    DshFmFitEstimate,
+    DshIncrementEstimate,
+    DshLorentzianEstimate,
+    FmNoiseFitEstimate,
+    IncrementEstimate,
+    IncrementSlopeEstimate,
+    LinewidthEstimate,
+)
 
 __all__ = [
     "BetaSeparation",
+    "BetaSeparationEstimate",
     "DshFmFit",
+    "DshFmFitEstimate",
     "DshIncrement",
+    "DshIncrementEstimate",
     "DshLorentzian",
+    "DshLorentzianEstimate",
+    "FmNoiseFitEstimate",
+    "IncrementEstimate",
     "IncrementSlope",
+    "IncrementSlopeEstimate",
     "IncrementSubtract",
     "LinewidthEstimate",
     "estimate_linewidth",

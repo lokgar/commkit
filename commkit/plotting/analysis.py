@@ -280,7 +280,7 @@ def plot_frequency_noise_psd(
 
     Parameters
     ----------
-    estimate : LinewidthEstimate
+    estimate : FmNoiseFitEstimate
         From :func:`commkit.analysis.estimate_linewidth` with
         ``BetaSeparation`` or ``DshFmFit``.
     ax : matplotlib.axes.Axes, optional
@@ -307,11 +307,11 @@ def plot_frequency_noise_psd(
     """
     name = "plot_frequency_noise_psd()"
     S_f = _require(estimate, "fm_psd", name, "a BetaSeparation or DshFmFit estimate")
-    f, beta_line, above = estimate.frequencies, estimate.beta_line, estimate.above
-    band, used = estimate.band, estimate.used
-    floor = estimate.linewidth_floor
-    if floor is None:
-        floor = estimate.value
+    f, band, used = estimate.frequencies, estimate.band, estimate.used
+    # BetaSeparation only: the β-line, its region and the white-FM floor.
+    beta_line = getattr(estimate, "beta_line", None)
+    above = getattr(estimate, "above", None)
+    floor = getattr(estimate, "linewidth_floor", estimate.value)
     f_c = np.asarray(to_device(f, "cpu"), dtype=np.float64)
     S_c = _as_channels(S_f)
     C = S_c.shape[0]
@@ -555,7 +555,7 @@ def plot_increment_variance(
 
     Parameters
     ----------
-    estimate : LinewidthEstimate
+    estimate : IncrementEstimate
         From :func:`commkit.analysis.estimate_linewidth` with
         ``IncrementSlope``, ``IncrementSubtract`` or ``DshIncrement``.
     ax : matplotlib.axes.Axes, optional
@@ -586,7 +586,9 @@ def plot_increment_variance(
         "plot_increment_variance()",
         "an increment-method estimate",
     )
-    slope, intercept = estimate.slope, estimate.intercept
+    # IncrementSlope and DshIncrement only.
+    slope = getattr(estimate, "slope", None)
+    intercept = getattr(estimate, "intercept", None)
     lag = np.asarray(to_device(estimate.lag_s, "cpu"), dtype=np.float64)
     v = _as_channels(var)
     C = v.shape[0]
@@ -648,7 +650,7 @@ def plot_dsh_beat_psd(
 
     Parameters
     ----------
-    estimate : LinewidthEstimate
+    estimate : DshLorentzianEstimate
         From :func:`commkit.analysis.estimate_linewidth` with
         ``DshLorentzian``.
     ax : matplotlib.axes.Axes, optional
@@ -760,7 +762,7 @@ def plot_carrier_phase_characterization(
         :func:`commkit.analysis.carrier_phase_trajectory`).
     drift : FrequencyDrift
         From :func:`commkit.analysis.frequency_drift`.
-    linewidth : LinewidthEstimate
+    linewidth : FmNoiseFitEstimate
         A ``BetaSeparation`` or ``DshFmFit`` estimate (its PSD is drawn).
     allan : AllanDeviation
         From :func:`commkit.analysis.allan_deviation`.

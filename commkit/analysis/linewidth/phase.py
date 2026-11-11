@@ -23,7 +23,13 @@ from .._common import (
     _whittle_fit,
 )
 from ..fm_noise import fm_noise_psd
-from .result import LinewidthEstimate, _check_fence, _check_nperseg
+from .result import (
+    BetaSeparationEstimate,
+    IncrementEstimate,
+    IncrementSlopeEstimate,
+    _check_fence,
+    _check_nperseg,
+)
 
 __all__ = [
     "BetaSeparation",
@@ -262,7 +268,7 @@ def _trimmed(p: ArrayType, edge_trim: int, xp: Any) -> tuple[ArrayType, slice, i
 
 def _increment_slope(
     p: ArrayType, method: IncrementSlope, fs: float
-) -> LinewidthEstimate:
+) -> IncrementSlopeEstimate:
     _, xp, _ = dispatch(p)
     p2, _, _ = _trimmed(p, method.edge_trim, xp)
     var1 = xp.var(p2[:, 1:] - p2[:, :-1], axis=-1)
@@ -272,7 +278,7 @@ def _increment_slope(
         p2, np.asarray(method.lags), 1.0 / fs, xp
     )
     was_1d = p.ndim == 1
-    return LinewidthEstimate(
+    return IncrementSlopeEstimate(
         value=to_report_scalar(np.maximum(slope, 0.0) / (2.0 * np.pi), was_1d=was_1d),
         method=method,
         delta_phi_var=to_report_scalar(to_device(var1, "cpu"), was_1d=was_1d),
@@ -286,7 +292,7 @@ def _increment_slope(
 
 def _increment_subtract(
     p: ArrayType, method: IncrementSubtract, fs: float
-) -> LinewidthEstimate:
+) -> IncrementEstimate:
     _, xp, _ = dispatch(p)
     p2, sl, n_full = _trimmed(p, method.edge_trim, xp)
     c = p2.shape[0]
@@ -321,7 +327,7 @@ def _increment_subtract(
 
     var1_cpu = to_device(var1, "cpu")
     was_1d = p.ndim == 1
-    return LinewidthEstimate(
+    return IncrementEstimate(
         value=to_report_scalar(to_device(linewidth, "cpu"), was_1d=was_1d),
         method=method,
         delta_phi_var=to_report_scalar(var1_cpu, was_1d=was_1d),
@@ -335,7 +341,7 @@ def _increment_subtract(
 
 def _beta_separation(
     phi: ArrayType, method: BetaSeparation, fs: float
-) -> LinewidthEstimate:
+) -> BetaSeparationEstimate:
     n_phi = phi.shape[-1]
     nps = min(_beta_nperseg(n_phi, method.nperseg), n_phi - 1)
     f, S_f = fm_noise_psd(phi, sampling_rate=fs, nperseg=nps)
@@ -438,7 +444,7 @@ def _beta_separation(
         return a[0] if S_cpu.ndim == 1 else a
 
     was_1d = phi.ndim == 1
-    return LinewidthEstimate(
+    return BetaSeparationEstimate(
         value=to_report_scalar(lw_cpu, was_1d=was_1d),
         method=method,
         linewidth_floor=to_report_scalar(floor_cpu, was_1d=was_1d),

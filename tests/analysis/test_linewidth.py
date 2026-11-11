@@ -6,6 +6,7 @@ synthesized from one (``Δφ(t) = φ(t) - φ(t-τ_d)`` on an AOM carrier). Input
 fixture.
 """
 
+import dataclasses
 import logging
 
 import numpy as np
@@ -577,7 +578,8 @@ class TestEstimateLinewidthContract:
         res = analysis.estimate_linewidth(phi, method, sampling_rate=R)
         assert isinstance(res, analysis.LinewidthEstimate)
         assert res.method is method
-        assert res.frequencies is None and res.psd is None  # other methods' fields
+        assert isinstance(res, analysis.IncrementSlopeEstimate)
+        assert not hasattr(res, "frequencies")  # other methods' fields
         with pytest.raises(AttributeError):
             res.value = 0.0  # type: ignore[misc]
 
@@ -609,6 +611,34 @@ class TestEstimateLinewidthContract:
         assert isinstance(flat.value, float)
         assert isinstance(row.value, np.ndarray) and row.value.shape == (1,)
         assert row.value[0] == pytest.approx(flat.value, rel=1e-6)
+
+    @pytest.mark.allow_warnings
+    @pytest.mark.parametrize(
+        ("method", "result"),
+        [
+            (IncrementSlope(), "IncrementSlopeEstimate"),
+            (IncrementSubtract(), "IncrementEstimate"),
+            (BetaSeparation(nperseg=1024), "BetaSeparationEstimate"),
+            (DshIncrement(delay=500 / FS, f_shift=80e6), "DshIncrementEstimate"),
+            (DshFmFit(delay=500 / FS, f_shift=80e6), "DshFmFitEstimate"),
+            (DshLorentzian(delay=500 / FS), "DshLorentzianEstimate"),
+        ],
+        ids=lambda m: type(m).__name__ if not isinstance(m, str) else m,
+    )
+    def test_each_method_returns_its_subclass(self, xp, method, result):
+        """The result holds exactly its method's fields: its own class, no
+        field of the other families."""
+        if isinstance(method, (DshIncrement, DshFmFit, DshLorentzian)):
+            x, _ = make_dsh_beat(2e6, 1 << 16, 500, 80e6, snr_db=None, seed=1)
+            fs = FS
+        else:
+            x, fs = _wiener_phase(1e6, 1 << 14, seed=1), R
+        res = analysis.estimate_linewidth(xp.asarray(x), method, sampling_rate=fs)
+        assert type(res) is getattr(analysis, result)
+        fields = {f.name for f in dataclasses.fields(res)}
+        for other in ("fm_psd", "increment_var", "psd", "beta_line", "slope", "lags"):
+            assert (other in fields) == hasattr(res, other)
+        assert all(getattr(res, f) is not None for f in fields)
 
     def test_unknown_method_raises(self, xp):
         with pytest.raises(TypeError, match="IncrementSlope"):
