@@ -121,7 +121,8 @@ def _gaussian_taps(*, sps: float, fwhm: float, span: int) -> np.ndarray:
     sps : float
         Samples per symbol.
     fwhm : float
-        Full width at half maximum of the pulse in symbol periods.  Smaller
+        Full width at half maximum of the pulse amplitude in symbol periods
+        (the intensity FWHM is ``fwhm / √2``).  Smaller
         values give a narrower pulse (less ISI, wider bandwidth).  The
         bandwidth-time product is ``BT = √2·ln(2) / (π·fwhm)``.
     span : int
@@ -387,7 +388,8 @@ class Gaussian(Pulse):
     Parameters
     ----------
     fwhm : float, default 1.0
-        Full width at half maximum in symbol periods.  The bandwidth-time
+        Full width at half maximum of the amplitude (not the intensity, whose
+        FWHM is ``fwhm / sqrt(2)``) in symbol periods.  The bandwidth-time
         product is ``BT = sqrt(2) ln(2) / (pi fwhm)``.
     span : int, default 10
         Length in symbols.  Unit energy.

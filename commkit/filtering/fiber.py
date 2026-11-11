@@ -56,6 +56,7 @@ from .._dispersion import (
 from .._fiber import Fiber, check_link, propagate, to_watts
 from ..backend import ArrayType, dispatch, to_device
 from ..core._signal_adapter import S, adapt_signal, require_integer_sps
+from ..core.signal import Signal
 from ..logger import logger
 from ..math import _phasor
 from .linear import ols_fir_filter
@@ -130,13 +131,21 @@ class ClockToneScan:
     search_range: tuple[float, float] = (-40000.0, 40000.0)
 
     def __post_init__(self) -> None:
-        lo, hi = (float(v) for v in self.search_range)
-        if not (math.isfinite(lo) and math.isfinite(hi) and lo < hi):
-            raise ValueError(
-                f"search_range must be a finite (start, stop) pair with start < "
-                f"stop, got {self.search_range!r}."
-            )
-        object.__setattr__(self, "search_range", (lo, hi))
+        object.__setattr__(
+            self, "search_range", _search_range(self.search_range, "ClockToneScan")
+        )
+
+
+def _search_range(search_range: Any, owner: str) -> tuple[float, float]:
+    """``search_range`` as a float pair; raise, naming ``owner``, unless it is
+    finite and increasing."""
+    lo, hi = (float(v) for v in search_range)
+    if not (math.isfinite(lo) and math.isfinite(hi) and lo < hi):
+        raise ValueError(
+            f"{owner}: search_range must be a finite (start, stop) pair with "
+            f"start < stop, got {search_range!r}."
+        )
+    return lo, hi
 
 
 @dataclass(frozen=True)
@@ -178,7 +187,9 @@ class FourthMomentScan:
     search_range: tuple[float, float] = (-40000.0, 40000.0)
 
     def __post_init__(self) -> None:
-        ClockToneScan.__post_init__(self)  # type: ignore[arg-type]
+        object.__setattr__(
+            self, "search_range", _search_range(self.search_range, "FourthMomentScan")
+        )
 
 
 @dataclass(frozen=True)
@@ -235,14 +246,15 @@ class QuadraticPhaseFit:
             math.isfinite(self.max_dispersion_ps_nm) and self.max_dispersion_ps_nm > 0
         ):
             raise ValueError(
-                "max_dispersion_ps_nm must be positive and finite, got "
+                "QuadraticPhaseFit: max_dispersion_ps_nm must be positive and finite, got "
                 f"{self.max_dispersion_ps_nm!r}."
             )
         if self.symbols is not None:
             symbols = np.array(to_device(self.symbols, "cpu"))
             if symbols.ndim not in (1, 2):
                 raise ValueError(
-                    f"symbols must have shape (K,) or (C, K), got {symbols.shape}."
+                    "QuadraticPhaseFit: symbols must have shape (K,) or (C, K), "
+                    f"got {symbols.shape}."
                 )
             symbols.setflags(write=False)
             object.__setattr__(self, "symbols", symbols)
@@ -574,7 +586,7 @@ _ESTIMATORS: dict[type, Any] = {
 
 
 def estimate_chromatic_dispersion(
-    samples: ArrayType | Any,
+    samples: ArrayType | Signal,
     method: ClockToneScan | FourthMomentScan | QuadraticPhaseFit,
     *,
     center_wavelength_nm: float | None = None,
@@ -984,12 +996,15 @@ def dispersion_compensation_taps(
     >>> y = ols_fir_filter(x, taps)
     """
     if not sampling_rate > 0:
-        raise ValueError(f"sampling_rate must be positive, got {sampling_rate!r}.")
+        raise ValueError(
+            "dispersion_compensation_taps(): sampling_rate must be positive, "
+            f"got {sampling_rate!r}."
+        )
     band = sampling_rate if bandwidth is None else float(bandwidth)
     if not 0 < band <= sampling_rate:
         raise ValueError(
-            f"bandwidth must be in (0, sampling_rate={sampling_rate!r}], "
-            f"got {bandwidth!r}."
+            "dispersion_compensation_taps(): bandwidth must be in "
+            f"(0, sampling_rate={sampling_rate!r}], got {bandwidth!r}."
         )
     dispersion_ps_nm = _dispersion_value(
         dispersion_ps_nm, "dispersion_compensation_taps()"
@@ -1001,7 +1016,10 @@ def dispersion_compensation_taps(
         spread = spread_samples(b2l, sampling_rate=sampling_rate, bandwidth=band)
         num_taps = max(_MIN_TAPS, 2 * math.ceil((_TAPS_MARGIN * spread - 1) / 2) + 1)
     elif int(num_taps) != num_taps or num_taps < 1:
-        raise ValueError(f"num_taps must be an integer >= 1, got {num_taps!r}.")
+        raise ValueError(
+            "dispersion_compensation_taps(): num_taps must be an integer >= 1, "
+            f"got {num_taps!r}."
+        )
     logger.debug(
         "Designing CD compensation: β₂L=%.3e s², bandwidth=%s Hz, taps=%s.",
         b2l,

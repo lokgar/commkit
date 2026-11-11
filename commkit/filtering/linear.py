@@ -603,11 +603,11 @@ def _get_numba_sos() -> Any:
 
         # No fastmath: without reassociation, double-precision input gives
         # SciPy's sosfilt result bit for bit.
-        @numba.njit(cache=True, nogil=True)
+        @numba.njit(cache=True, nogil=True, parallel=True)
         def _sos_loop(sos: Any, x: Any, zi: Any, y: Any) -> None:
             C, N = x.shape
             S = sos.shape[0]
-            for c in range(C):
+            for c in numba.prange(C):  # type: ignore[attr-defined,no-untyped-call]
                 for n in range(N):
                     # Promote the sample to the state's precision (float64
                     # or complex128): adding the zero of a state element.

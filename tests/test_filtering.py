@@ -821,6 +821,25 @@ class TestEstimateChromaticDispersion:
         slope = np.polyfit(omega, est.group_delay[inband], 1)[0]
         assert slope == pytest.approx(b2l, rel=0.05)
 
+    def test_quadratic_phase_fit_explicit_host_symbols(self, xp: Any) -> None:
+        """Symbols passed to QuadraticPhaseFit as a host array, with array
+        samples on either device, give the estimate of the Signal path."""
+        from commkit.backend import to_device
+
+        y = _dispersed_signal(xp, 1360.0, 0.1, noise=False)
+        symbols = to_device(y.reference.symbols, "cpu")
+        kw = dict(
+            sampling_rate=y.sampling_rate,
+            symbol_rate=y.symbol_rate,
+            center_wavelength_nm=y.center_wavelength_nm,
+        )
+        est = filtering.estimate_chromatic_dispersion(
+            y.samples, filtering.QuadraticPhaseFit(symbols=symbols), **kw
+        )
+        ref = filtering.estimate_chromatic_dispersion(y, filtering.QuadraticPhaseFit())
+        assert float(est.value[0]) == pytest.approx(float(ref.value[0]), abs=1e-3)
+        assert abs(float(est.value[0]) - 1360.0) < 25.0
+
     def test_quadratic_phase_fit_needs_symbols(self, xp: Any) -> None:
         x = xp.ones((2, 8192), dtype=xp.complex64)
         kw = dict(sampling_rate=64e9, symbol_rate=32e9, center_wavelength_nm=1550.0)
