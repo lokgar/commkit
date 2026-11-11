@@ -368,11 +368,12 @@ class FrequencyOffsetEstimate:
     power : int or None
         Exponent ``M`` used (M-th power and Mengali-Morelli).
     spectrum : ndarray or None
-        M-th power: ``|FFT(x^M)|`` after the search mask, ``(nfft,)`` or
-        ``(C, nfft)``.
+        M-th power: ``|FFT(x^M)|`` over the bins of the search range (all
+        ``nfft`` bins without one), in ascending frequency, ``(K,)`` or
+        ``(C, K)``.
     spectrum_frequencies : numpy.ndarray or None
-        M-th power: FFT bin frequencies of ``spectrum`` in Hz (``fftfreq``
-        order; divide by ``power`` for ``Δf``).
+        M-th power: the frequencies of ``spectrum``'s bins in Hz, ``(K,)``,
+        ascending and evenly spaced (divide by ``power`` for ``Δf``).
     autocorrelation : ndarray or None
         Mengali-Morelli: unbiased autocorrelation at lags ``1 .. L``.
     pilot_phase : ndarray or None
@@ -514,12 +515,20 @@ def _mth_power(
     k_signed = xp.where(k_peak > (nfft - 1) // 2, k_peak - nfft, k_peak)
     f_bin = k_signed.astype(xp.float64) * (1.0 / (nfft * (1.0 / fs)))
     values = (f_bin + mu * (fs / nfft)) / M
+    # The diagnostic spectrum in ascending frequency, cut to the search range
+    # (the mask zeroed every other bin), gathered on the device.
+    f_sorted = np.fft.fftshift(freqs_np)
+    lo, hi = 0, nfft
+    if method.search_range is not None:
+        lo = int(np.searchsorted(f_sorted, tone_lo, side="left"))
+        hi = int(np.searchsorted(f_sorted, tone_hi, side="right"))
+    bins = (xp.arange(lo, hi) + (nfft + 1) // 2) % nfft  # fftshift order
     return _Rows(
         values=values.astype(xp.float64),
         weights=mag[rows, k_peak].astype(xp.float64),
         power=M,
-        spectrum=mag,
-        spectrum_frequencies=freqs_np,
+        spectrum=mag[:, bins],
+        spectrum_frequencies=f_sorted[lo:hi],
     )
 
 

@@ -14,12 +14,14 @@ import numpy as np
 from ..backend import to_device
 from .theme import (
     _as_channels,
+    _device_channels,
     _finish,
     _get_axis,
     _panel_grid,
     _require,
     _series_label,
     _set_eng_formatter,
+    _trace,
 )
 
 __all__ = [
@@ -46,6 +48,7 @@ def plot_carrier_phase_decomposition(
     legend: bool | None = None,
     show: bool = False,
     title: str = "Recovered carrier phase",
+    max_points: int = 4000,
 ) -> tuple[Any, Any] | None:
     """Plot the recovered carrier-phase trajectory and its slow drift component.
 
@@ -76,6 +79,9 @@ def plot_carrier_phase_decomposition(
         Call ``plt.show()`` and return ``None``.
     title : str, default "Recovered carrier phase"
         Title of the figure.
+    max_points : int, default 4000
+        Points per trace; longer traces are drawn as their min/max envelope,
+        reduced on the data's device.  ``<= 0`` draws every point.
 
     Returns
     -------
@@ -83,28 +89,29 @@ def plot_carrier_phase_decomposition(
         The figure and its axes; ``None`` with ``show=True``, which
         shows the figure instead.
     """
-    phi_c = _as_channels(phi)
-    C, N = phi_c.shape
-    drift_c = _as_channels(drift) if drift is not None else None
+    phi_c = _device_channels(phi)
+    C = phi_c.shape[0]
+    drift_c = _device_channels(drift) if drift is not None else None
 
     fig, axi = _get_axis(ax)
 
-    t = np.arange(N) / float(symbol_rate)
+    dt = 1.0 / float(symbol_rate)
     for i in range(C):
         clabel = _series_label(label, f"pol {i}" if C > 1 else None, r"$\phi$ total")
-        line = axi.plot(
-            t,
-            phi_c[i],
-            alpha=0.4,
-            label=clabel,
-        )[0]
+        line = axi.plot(*_trace(phi_c[i], max_points, dx=dt), alpha=0.4, label=clabel)[
+            0
+        ]
         if drift_c is not None:
             drift_label = (
                 f"{label} drift"
                 if label
                 else (f"Drift (pol {i})" if C > 1 else "Drift")
             )
-            axi.plot(t, drift_c[i], color=line.get_color(), label=drift_label)
+            axi.plot(
+                *_trace(drift_c[i], max_points, dx=dt),
+                color=line.get_color(),
+                label=drift_label,
+            )
 
     if num_train_symbols > 0:
         axi.axvline(
@@ -135,6 +142,7 @@ def plot_frequency_drift(
     legend: bool | None = None,
     show: bool = False,
     title: str = "Residual frequency drift",
+    max_points: int = 4000,
 ) -> tuple[Any, Any] | None:
     """Plot the instantaneous residual frequency offset against time.
 
@@ -164,6 +172,9 @@ def plot_frequency_drift(
         Call ``plt.show()`` and return ``None``.
     title : str, default "Residual frequency drift"
         Title of the figure.
+    max_points : int, default 4000
+        Points per trace; longer traces are drawn as their min/max envelope,
+        reduced on the data's device.  ``<= 0`` draws every point.
 
     Returns
     -------
@@ -171,16 +182,19 @@ def plot_frequency_drift(
         The figure and its axes; ``None`` with ``show=True``, which
         shows the figure instead.
     """
-    df_c = _as_channels(
+    df_c = _device_channels(
         _require(drift, "df", "plot_frequency_drift()", "a FrequencyDrift")
     )
-    C, M = df_c.shape
+    C = df_c.shape[0]
 
     fig, axi = _get_axis(ax)
 
-    t = np.arange(M) / float(sampling_rate)
+    dt = 1.0 / float(sampling_rate)
     for i in range(C):
-        axi.plot(t, df_c[i], label=_series_label(label, f"Pol {i}" if C > 1 else None))
+        axi.plot(
+            *_trace(df_c[i], max_points, dx=dt),
+            label=_series_label(label, f"Pol {i}" if C > 1 else None),
+        )
 
     if reference_amplitude is not None:
         axi.axhline(reference_amplitude, color="white", ls="--", label="±amplitude")

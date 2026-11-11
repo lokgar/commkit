@@ -330,6 +330,30 @@ def _decimate_minmax(
     return x_out, y_out
 
 
+def _device_channels(a: Any) -> Any:
+    """``a`` as a 2-D array on its own device, ``(N,)`` promoted to ``(1, N)``."""
+    xp = get_array_module(a)
+    a = xp.asarray(a)
+    return a[None, :] if a.ndim == 1 else a
+
+
+def _trace(
+    y: Any, max_points: int, *, x0: float = 0.0, dx: float = 1.0, x: Any = None
+) -> tuple[np.ndarray, np.ndarray]:
+    """Host points of the 1-D trace ``y`` (on any device), ready to draw.
+
+    The abscissa is ``x0 + dx * index``, or ``x`` on ``y``'s device.  A trace
+    longer than ``max_points`` is reduced to its min/max envelope
+    (:func:`_decimate_minmax`) on its device, so only the drawn points are
+    transferred.
+    """
+    xp = get_array_module(y)
+    if x is None:
+        x = xp.arange(y.shape[-1], dtype=np.float64) * dx + x0
+    x, y = _decimate_minmax(x, y, max_points)
+    return _host(x), _host(y)
+
+
 _SI_PREFIXES = {
     -24: "y", -21: "z", -18: "a", -15: "f", -12: "p", -9: "n", -6: "µ",
     -3: "m", 0: "", 3: "k", 6: "M", 9: "G", 12: "T", 15: "P", 18: "E",

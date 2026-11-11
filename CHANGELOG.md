@@ -12,6 +12,7 @@ Notable changes to CommKit, newest first. Performance figures are from the refer
 - `TurboIterations(iterations=)` is `max_iterations=`, as decoding now stops early; positional calls are unchanged. Rename the keyword in existing calls.
 - `decoder_exit_curve`, `demapper_exit_curve` and `ldpc_exit_curves` take `num_points=` instead of `points=`.
 - `demapper_exit_curve(noise_var=)` on a real constellation (PAM) is the variance of the real noise, as for `compute_llr`; it was the variance per complex symbol, twice the real noise. Halve `noise_var` in existing PAM calls to keep their curves, or pass the new `esn0_db=`.
+- The `spectrum` of an `MthPower` estimate covers the bins of its `search_range` (all bins without one) in ascending frequency, and `spectrum_frequencies` lists those bins; it held all `nfft` bins in `fftfreq` order, zero outside the range. Code that indexed it by FFT bin reads the frequency from `spectrum_frequencies`.
 - `resample(sps_out=)` raises when `sps_out / sps_in` has no fraction with terms up to 1000; such ratios designed filters of up to millions of taps. Give `up` and `down` explicitly.
 - `zadoff_chu_sequence` raises on a root that shares a factor with the length, and the per-channel roots of a MIMO ZC `Preamble` skip such roots: on a composite length they gave full-height autocorrelation sidelobes. Preambles of prime length are unchanged; a MIMO preamble of length 64 now uses the roots 1, 3, 5, 7 instead of 1, 2, 3, 4.
 - `estimate_iq_imbalance`, `apply_iq_imbalance` and `correct_iq_imbalance` raise `ValueError` on real samples instead of returning NaN, the input unchanged or a NumPy error.
@@ -24,6 +25,7 @@ Notable changes to CommKit, newest first. Performance figures are from the refer
 
 - `demapper_exit_curve(esn0_db=)` as an alternative to `noise_var`.
 - `impairments.apply_frequency_offset`: a carrier frequency offset at any value (not snapped to the FFT grid like `shift_frequency`), per channel if needed, the exact inverse of `correct_frequency_offset`.
+- `max_points=` on `plot_carrier_phase_trajectory`, `plot_carrier_phase_decomposition`, `plot_frequency_drift`, `plot_frequency_offset_spectrum`, `plot_mm_autocorrelation`, `plot_timing_correlation` and `plot_pilot_phase_estimate`, as the other trace plots have.
 - A WARNING when the decisions of `lms`, `block_lms` or `rls` collapse onto a few points (blind unipolar PAM-4 below about 8 dB Es/N0 decides every symbol as the lowest level).
 
 ### Performance
@@ -35,6 +37,7 @@ Notable changes to CommKit, newest first. Performance figures are from the refer
 - `apply_taps` filters by overlap-save, with a guard as long as the taps: 0.45 of the former time on the CPU and 0.84 on GPU input (2 x 2 x 21 taps, 2^19 symbols at 2 sps, RTX 3070). The einsum over strided windows ran NumPy's plain loop. A weight array whose channel count differs from the samples' raises `ValueError` naming `weights`.
 - `fir_filter`, and with it `matched_filter`, filters by overlap-save through multi-threaded FFTs, as `ols_fir_filter` does; SciPy's `convolve` transformed the whole record on one core. Both use a guard as long as the filter's transient instead of a quarter block, and real FFTs for real samples and taps: 0.10 of the former time on the CPU for 65 taps on 2^20 complex64 samples (0.10 real, 0.12 for 1501 taps), and `ols_fir_filter` 0.2, which now accepts any power of 2 `nfft` with `nfft // 2 >= len(taps)`; on GPU input 0.85 for complex samples, 1.1 for real ones (0.55 ms against 0.6 ms, bound by launches).
 - `welch_psd` transforms its segments in batches on the input's device instead of through `scipy.signal.welch`, which in SciPy 1.18 calls the FFT once per segment: 0.13 of the former time on the CPU (2^20 complex64 samples, `nperseg=256`), 0.34 at `nperseg=4096`, and 0.9 on GPU input. The estimate is SciPy's to rounding (1e-6 of the peak in single precision); a record shorter than `nperseg` logs a WARNING instead of SciPy's `UserWarning`.
+- The plots of sample-rate traces (carrier-phase trajectory and decomposition, frequency drift, M-th power spectrum, Mengali-Morelli autocorrelation, timing correlation, pilot-tone spectrum and phase, pilot phase trajectory) draw a trace longer than `max_points` (default 4000) as its min/max envelope, reduced on the data's device, so GPU input moves only the drawn points to the host; they moved and drew every sample. `plot_pilot_tone_phase_estimate` computes its spectrum on the samples' device.
 - `correct_fiber_propagation` with `method="blocks"` backpropagates its blocks in batches of 2^16 samples per polarization on the CPU, which stay in cache: 0.64 of the former time (2 x 2^20 samples, 4 x 80 km, 10 steps per span), 0.85 at 2^23 samples. GPU input is unchanged.
 
 ### Fixed

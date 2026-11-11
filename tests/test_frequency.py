@@ -79,6 +79,31 @@ class TestFoeMthPower:
         bound = 1.5 * 4 * np.sqrt(theory.tone_frequency_crb(10**3, 4096)) * FS
         assert abs(float(est) - fo_hz) < (bound if order == 4 else 0.02 * FS / 4096)
 
+    @pytest.mark.parametrize("search_range", [None, (-30e3, -10e3), (-5e3, 20e3)])
+    def test_spectrum_covers_the_search_range(self, xp, xpt, search_range):
+        """The diagnostic spectrum is |FFT(x^4)| at the bins of the search
+        range (all bins without one, a range across 0 Hz included), in
+        ascending frequency, and its peak is the estimate's bin."""
+        sig = _qam_signal(xp, 4, 4096, fo_hz=-15_000.0)
+        est = frequency.estimate_frequency_offset(
+            sig.samples,
+            frequency.MthPower(search_range=search_range),
+            sampling_rate=FS,
+            constellation=Constellation.qam(4),
+        )
+        full = np.abs(np.fft.fft(to_numpy(sig.samples).astype(complex) ** 4))
+        f_all = np.fft.fftfreq(4096, 1 / FS)
+        lo, hi = (-np.inf, np.inf) if search_range is None else search_range
+        sel = np.flatnonzero((f_all >= 4 * lo) & (f_all <= 4 * hi))
+        sel = sel[np.argsort(f_all[sel])]
+        f = est.spectrum_frequencies
+        assert isinstance(f, np.ndarray) and np.all(np.diff(f) > 0)
+        np.testing.assert_allclose(f, f_all[sel])
+        atol = 1e-5 * full.max()  # float32 FFT
+        xpt.assert_allclose(est.spectrum, xp.asarray(full[sel]), rtol=0, atol=atol)
+        k = int(np.argmax(to_numpy(est.spectrum)))
+        assert abs(f[k] / 4 - float(est.value)) <= FS / 4096 / 4
+
     @pytest.mark.parametrize("order", [4, 8])
     @pytest.mark.parametrize("fo_hz", [3_000.0, -6_000.0, 777.7])
     def test_accuracy_psk(self, xp, order, fo_hz):

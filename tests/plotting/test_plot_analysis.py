@@ -56,12 +56,23 @@ class TestPlotAnalysis:
 
     @pytest.mark.parametrize("channels", [1, 2])
     def test_frequency_drift(self, xp: Any, channels: int) -> None:
-        """One trace per channel, on the time axis of the sampling rate."""
+        """One trace per channel on the time axis of the sampling rate,
+        reduced to its envelope: sample instants within the record, the
+        extremes kept, at most 1.5 ``max_points`` points."""
         drift = analysis.frequency_drift(_phase(xp, channels), sampling_rate=R)
-        fig, ax = plot_frequency_drift(drift, sampling_rate=R, reference_amplitude=6e3)
+        fig, ax = plot_frequency_drift(
+            drift, sampling_rate=R, reference_amplitude=6e3, max_points=1000
+        )
         traces = [ln for ln in ax.lines if len(ln.get_xdata()) > 2]
         assert len(traces) == channels
-        assert traces[0].get_xdata()[1] == pytest.approx(1.0 / R)
+        df = np.atleast_2d(to_device(drift.df, "cpu"))[0]
+        assert df.size > 1000
+        k = traces[0].get_xdata() * R
+        np.testing.assert_allclose(k, np.round(k), atol=1e-6)
+        assert k.min() >= 0 and k.max() <= df.size - 1
+        y = traces[0].get_ydata()
+        assert y.max() == pytest.approx(df.max()) and y.min() == pytest.approx(df.min())
+        assert y.size <= 1000 + 1000 // 2  # buckets, plus a remainder below 500
 
     def test_allan_deviation(self, xp: Any) -> None:
         """The deviation is drawn at its averaging times, plus the guide."""

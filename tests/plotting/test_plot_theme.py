@@ -5,6 +5,7 @@ from unittest.mock import patch
 
 import matplotlib.pyplot as plt
 import numpy as np
+import pytest
 
 from commkit.plotting import apply_default_theme
 from commkit.plotting.theme import _create_subplot_grid
@@ -86,3 +87,91 @@ class TestSIAxisUnits:
         assert ax.get_xlabel() == "Frequency [Hz]"
         labels = [t.get_text() for t in ax.get_xticklabels()]
         assert any("k" in t for t in labels) and any("M" in t for t in labels)
+
+
+class TestDeviceReduction:
+    """Plots of sample-rate traces reduce on the device: a long record moves
+    only the drawn points to the host."""
+
+    N = 1 << 18
+
+    @staticmethod
+    def _cases(xp: Any) -> dict[str, Any]:
+        from types import SimpleNamespace as NS
+
+        from commkit import plotting
+        from commkit.recovery import PilotTone
+
+        n = TestDeviceReduction.N
+        rng = np.random.default_rng(0)
+        phase = xp.asarray(np.cumsum(rng.standard_normal((2, n)), axis=-1) * 1e-2)
+        samples = xp.asarray(
+            (rng.standard_normal((2, n)) + 1j * rng.standard_normal((2, n))).astype(
+                np.complex64
+            )
+        )
+        value = xp.asarray([1.0, 2.0])
+        return {
+            "trajectory": lambda: plotting.plot_carrier_phase_trajectory(phase),
+            "decomposition": lambda: plotting.plot_carrier_phase_decomposition(
+                phase, phase * 0.5, symbol_rate=1e9
+            ),
+            "drift": lambda: plotting.plot_frequency_drift(
+                NS(df=phase), sampling_rate=1e9
+            ),
+            "spectrum": lambda: plotting.plot_frequency_offset_spectrum(
+                NS(
+                    spectrum=xp.abs(phase),
+                    power=4,
+                    value=value,
+                    spectrum_frequencies=np.arange(n) - n / 2.0,
+                )  # fmt: skip
+            ),
+            "autocorrelation": lambda: plotting.plot_mm_autocorrelation(
+                NS(autocorrelation=samples, power=4, value=value), sampling_rate=1e9
+            ),
+            "timing": lambda: plotting.plot_timing_correlation(
+                NS(correlation=samples, integer=xp.asarray([50, 900]), search_start=10)
+            ),
+            "pilot tone": lambda: plotting.plot_pilot_tone_phase_estimate(
+                NS(tone_frequencies=np.array([1e6, 1e6]), value=phase),
+                samples,
+                method=PilotTone(frequency=1e6, bandwidth=1e5),
+                sampling_rate=1e9,
+            ),
+        }
+
+    @pytest.mark.gpu_only
+    @pytest.mark.parametrize(
+        "case",
+        ["trajectory", "decomposition", "drift", "spectrum", "autocorrelation",
+         "timing", "pilot tone"],
+    )  # fmt: skip
+    def test_moves_only_the_drawn_points(self, xp: Any, case: str) -> None:
+        """Every device-to-host copy is at most the 4000 points of a trace
+        and its remainder, for each of the two channels (2 x 2^18 points
+        before)."""
+        from commkit import backend
+
+        sizes: list[int] = []
+        real = backend.to_device
+
+        def counting(data: Any, device: str) -> Any:
+            if device == "cpu" and isinstance(data, xp.ndarray):
+                sizes.append(int(data.size))
+            return real(data, device)
+
+        import commkit.plotting.analysis as analysis
+        import commkit.plotting.frequency as frequency
+        import commkit.plotting.recovery as recovery
+        import commkit.plotting.theme as theme
+
+        with (
+            patch.object(theme, "to_device", counting),
+            patch.object(recovery, "to_device", counting),
+            patch.object(frequency, "to_device", counting),
+            patch.object(analysis, "to_device", counting),
+        ):
+            self._cases(xp)[case]()
+        plt.close("all")
+        assert sizes and max(sizes) <= 2 * (4000 + 2000), sizes
