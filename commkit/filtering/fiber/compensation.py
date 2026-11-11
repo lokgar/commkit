@@ -57,7 +57,7 @@ from ...core._signal_adapter import (
     adapt_signal,
 )
 from ...logger import logger
-from ..linear import ols_fir_filter
+from ..linear import fir_filter
 from .estimation import (
     ChromaticDispersionEstimate,
     ClockToneScan,
@@ -142,7 +142,8 @@ def correct_chromatic_dispersion(
         input.  A value that disagrees with the Signal raises.
     method : {"fir", "whole_record"}, default "fir"
         ``"fir"``: the FIR of :func:`dispersion_compensation_taps`, applied
-        by overlap-save (:func:`ols_fir_filter`), in bounded memory.
+        by :func:`fir_filter` (overlap-save on long records, in bounded
+        memory).
         ``"whole_record"``: the exact response on the FFT grid of the whole
         record, which is transformed at once and treated as one period.
     bandwidth : float, optional
@@ -278,7 +279,7 @@ def correct_chromatic_dispersion(
         taps.size,
     )
     x, _, _ = dispatch(signal_adapter.array)
-    return signal_adapter.wrap_samples(ols_fir_filter(x, taps))
+    return signal_adapter.wrap_samples(fir_filter(x, taps))
 
 
 #: Default length over the spread: a filter exactly as long as the spread
@@ -304,9 +305,9 @@ def dispersion_compensation_taps(
     least-squares fit of the inverse response ``exp(+j β₂L ω² / 2)`` over
     the band ``|f| <= bandwidth / 2``.  Over the whole
     sampled band the fit is the band-limited impulse response truncated to
-    ``num_taps``.  Apply the taps with :func:`ols_fir_filter` (long filters)
-    or :func:`fir_filter`, both of which center them; inspect them with
-    :func:`filter_response` and :func:`commkit.plotting.plot_filter_response`.
+    ``num_taps``.  Apply the taps with :func:`fir_filter`, which centers
+    them; inspect them with :func:`filter_response` and
+    :func:`commkit.plotting.plot_filter_response`.
 
     Parameters
     ----------
@@ -364,7 +365,7 @@ def dispersion_compensation_taps(
     >>> taps = dispersion_compensation_taps(
     ...     dispersion_ps_nm=1360.0, center_wavelength_nm=1550.0,
     ...     sampling_rate=64e9, bandwidth=35.2e9)
-    >>> y = ols_fir_filter(x, taps)
+    >>> y = fir_filter(x, taps)
     """
     if not sampling_rate > 0:
         raise ValueError(

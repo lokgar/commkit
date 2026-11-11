@@ -452,12 +452,6 @@ ROWS: list[Row] = [
         call=lambda c, x: _a(x, c.taps),
     ),
     Row(
-        "commkit.filtering.linear.ols_fir_filter",
-        TRANSFORM,
-        data=2,
-        call=lambda c, x: _a(x, c.taps),
-    ),
-    Row(
         "commkit.filtering.linear.iir_filter",
         TRANSFORM,
         data=2,

@@ -1,6 +1,6 @@
 """Overlap-save block FFT filtering (private).
 
-Shared by ``filtering.ols_fir_filter`` (per-channel convolution),
+Shared by ``filtering.fir_filter`` (per-channel convolution of long records),
 ``equalization.zf_equalizer`` and ``equalization.apply_taps`` (per-bin MIMO
 matrix multiply) through :func:`ols_apply`: the record is cut into overlapping FFT blocks, the
 caller processes each block's bins, and each inverse block is kept without

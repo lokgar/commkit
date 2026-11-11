@@ -9,9 +9,9 @@
 - Responses: :func:`filter_response` (a :class:`FilterResponse`),
   :func:`impulse_response` and :func:`step_response`, computed on the
   coefficients' device.
-- Application: :func:`fir_filter` (FFT convolution, optionally circular),
-  :func:`ols_fir_filter` (overlap-save, for long filters), :func:`iir_filter`
-  and :func:`matched_filter`.
+- Application: :func:`fir_filter` (direct, FFT or overlap-save convolution
+  after the sizes, optionally circular), :func:`iir_filter` and
+  :func:`matched_filter`.
 - Fiber compensation: :func:`estimate_chromatic_dispersion` (blind
   :class:`ClockToneScan` and :class:`FourthMomentScan`, data-aided
   :class:`QuadraticPhaseFit`) and :func:`correct_chromatic_dispersion`, the inverse
@@ -45,7 +45,6 @@ from .linear import (
     fir_taps,
     iir_filter,
     matched_filter,
-    ols_fir_filter,
 )
 from .pulses import (
     RC,
@@ -84,6 +83,5 @@ __all__ = [
     "iir_filter",
     "impulse_response",
     "matched_filter",
-    "ols_fir_filter",
     "step_response",
 ]

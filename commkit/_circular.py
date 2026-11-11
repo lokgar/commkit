@@ -14,11 +14,13 @@ from . import _fft
 from .backend import ArrayType, dispatch, to_device
 
 
-def circular_kernel(taps: ArrayType, length: int) -> np.ndarray:
+def circular_kernel(
+    taps: ArrayType, length: int, center: int | None = None
+) -> np.ndarray:
     """Fold ``taps`` into a length-``length`` circular kernel on the host.
 
-    Tap ``(L - 1) // 2`` goes to index 0; taps longer than ``length`` wrap
-    around and add up, which is exactly circular convolution with them.
+    Tap ``center`` goes to index 0; taps longer than ``length`` wrap around
+    and add up, which is exactly circular convolution with them.
 
     Parameters
     ----------
@@ -26,6 +28,8 @@ def circular_kernel(taps: ArrayType, length: int) -> np.ndarray:
         Filter taps, ``(L,)``, on any device.
     length : int
         Period of the sequence the kernel is applied to.
+    center : int, optional
+        Tap that lands on the output sample; ``None`` takes ``(L - 1) // 2``.
 
     Returns
     -------
@@ -34,12 +38,15 @@ def circular_kernel(taps: ArrayType, length: int) -> np.ndarray:
     """
     h = np.asarray(to_device(taps, "cpu"))
     kernel = np.zeros(length, dtype=h.dtype)
-    idx = (np.arange(h.size) - (h.size - 1) // 2) % length
+    c = (h.size - 1) // 2 if center is None else center
+    idx = (np.arange(h.size) - c) % length
     np.add.at(kernel, idx, h)
     return kernel
 
 
-def convolve_periodic(samples: ArrayType, taps: ArrayType) -> ArrayType:
+def convolve_periodic(
+    samples: ArrayType, taps: ArrayType, center: int | None = None
+) -> ArrayType:
     """Circular convolution of each row of ``samples`` with ``taps``.
 
     Parameters
@@ -48,6 +55,8 @@ def convolve_periodic(samples: ArrayType, taps: ArrayType) -> ArrayType:
         One period of the input, time on the last axis.
     taps : array_like
         Filter taps, ``(L,)``; any ``L``.
+    center : int, optional
+        Tap that lands on the output sample; ``None`` takes ``(L - 1) // 2``.
 
     Returns
     -------
@@ -57,7 +66,7 @@ def convolve_periodic(samples: ArrayType, taps: ArrayType) -> ArrayType:
     """
     x, xp, _ = dispatch(samples)
     n = x.shape[-1]
-    kernel = circular_kernel(taps, n)
+    kernel = circular_kernel(taps, n, center)
     real = not (xp.iscomplexobj(x) or np.iscomplexobj(kernel))
     # Kernel at the sample precision, so complex64 data is not promoted.
     precision = np.dtype(x.real.dtype)

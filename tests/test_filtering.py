@@ -201,14 +201,13 @@ class TestFilterApplication:
         out = filtering.fir_filter(x, taps)
         assert out.dtype == xp.complex64
 
-    @pytest.mark.parametrize("fn", [filtering.fir_filter, filtering.ols_fir_filter])
-    def test_complex_taps_need_complex_samples(self, xp: Any, xpt: Any, fn) -> None:
+    def test_complex_taps_need_complex_samples(self, xp: Any, xpt: Any) -> None:
         """A real output has no room for the imaginary part: [1j] raises on
         real samples instead of returning zeros, and rotates complex ones."""
         taps = xp.asarray([1j], dtype=xp.complex64)
         with pytest.raises(ValueError, match="complex taps need complex samples"):
-            fn(xp.ones(256, dtype=xp.float32), taps)
-        out = fn(xp.ones(256, dtype=xp.complex64), taps)
+            filtering.fir_filter(xp.ones(256, dtype=xp.float32), taps)
+        out = filtering.fir_filter(xp.ones(256, dtype=xp.complex64), taps)
         assert out.dtype == xp.complex64
         xpt.assert_allclose(out, xp.full(256, 1j, dtype=xp.complex64), atol=1e-6)
 
@@ -350,106 +349,55 @@ class TestIirFilter:
         assert out.shape == (20,)
 
 
-class TestOverlapSaveFiltering:
-    """Tests for overlap-save FFT filtering (ols_fir_filter)."""
+_METHODS = ["direct", "whole", "overlap-save"]
 
-    def test_ols_fir_filter_center_matches_fir_filter_siso(
-        self, xp: Any, xpt: Any
-    ) -> None:
-        """ols_fir_filter() by default matches fir_filter."""
-        rng = np.random.default_rng(0)
-        x_np = rng.standard_normal(512).astype(np.float32)
-        taps_np = filtering.RRC(0.35, span=6).taps(4).astype(np.float32)
-        x = xp.asarray(x_np)
-        taps = xp.asarray(taps_np)
 
-        ref = filtering.fir_filter(x, taps)
-        out = filtering.ols_fir_filter(x, taps)
+def _force_method(monkeypatch: Any, method: str) -> None:
+    """Make fir_filter take ``method`` whatever the sizes."""
+    from commkit.filtering import linear
 
-        assert out.shape == ref.shape
-        L = len(taps_np)
-        xpt.assert_allclose(out[L:-L], ref[L:-L], atol=1e-4)
+    monkeypatch.setattr(linear, "_fir_method", lambda N, L, device: method)
 
-    def test_ols_fir_filter_center_matches_fir_filter_multichannel(
-        self, xp: Any, xpt: Any
-    ) -> None:
-        """ols_fir_filter() matches fir_filter for 2-channel input."""
-        rng = np.random.default_rng(1)
-        x_np = rng.standard_normal((2, 512)).astype(np.float32)
-        taps_np = filtering.RRC(0.35, span=6).taps(4).astype(np.float32)
-        x = xp.asarray(x_np)
-        taps = xp.asarray(taps_np)
 
-        ref = filtering.fir_filter(x, taps)
-        out = filtering.ols_fir_filter(x, taps)
+class TestFirFilterMethods:
+    """fir_filter's three methods (direct, one FFT of the record,
+    overlap-save) and the size thresholds that pick one."""
 
-        assert out.shape == ref.shape
-        L = len(taps_np)
-        xpt.assert_allclose(out[:, L:-L], ref[:, L:-L], atol=1e-4)
-
-    def test_ols_fir_filter_causal_siso(self, xp: Any, xpt: Any) -> None:
-        """ols_fir_filter(causal=True) returns causal convolution."""
-        rng = np.random.default_rng(0)
-        x_np = rng.standard_normal(512).astype(np.float32)
-        taps_np = filtering.RRC(0.35, span=6).taps(4).astype(np.float32)
-        x = xp.asarray(x_np)
-        taps = xp.asarray(taps_np)
-
-        ref = xp.asarray(np.convolve(x_np, taps_np, mode="full")[: len(x_np)])
-        out = filtering.ols_fir_filter(x, taps, causal=True)
-
-        assert out.shape == (len(x_np),)
-        L = len(taps_np)
-        xpt.assert_allclose(out[L:], ref[L:], atol=1e-4)
-
-    def test_ols_fir_filter_block_size_does_not_change_the_output(
-        self, xp: Any, xpt: Any
-    ) -> None:
-        """The FFT block size is an implementation choice: nfft = 16 (many
-        blocks) and the default (one block) give the same samples, and both
-        follow the documented ``y[n] = Σ_k x[n + (L-1)//2 - k] taps[k]``."""
-        rng = np.random.default_rng(2)
-        x = rng.standard_normal(256)
-        taps = rng.standard_normal(4)
-        expected = np.convolve(x, taps)[1 : 1 + 256]
-        for nfft in (16, None):
-            out = filtering.ols_fir_filter(xp.asarray(x), xp.asarray(taps), nfft=nfft)
-            xpt.assert_allclose(out, xp.asarray(expected), atol=1e-12)
-
+    @pytest.mark.parametrize("method", _METHODS)
     @pytest.mark.parametrize("num_taps", [4, 5])
     @pytest.mark.parametrize("periodic", [False, True])
-    def test_fir_filter_alignment(
-        self, xp: Any, xpt: Any, num_taps: int, periodic: bool
+    def test_alignment(
+        self, xp: Any, xpt: Any, monkeypatch, method, num_taps: int, periodic: bool
     ) -> None:
         """fir_filter follows its documented centre tap ``(L - 1) // 2``
-        (odd and even L, linear and circular), and ols_fir_filter, which
-        documents fir_filter's alignment, gives the same samples (it centred
-        even-length taps one sample later)."""
+        (odd and even L, linear and circular), and tap 0 with ``causal``."""
+        _force_method(monkeypatch, method)
         rng = np.random.default_rng(num_taps)
         x = rng.standard_normal(256)
         taps = rng.standard_normal(num_taps)
-        c = (num_taps - 1) // 2
         src = np.r_[x, x, x] if periodic else x
-        start = 256 + c if periodic else c
-        expected = np.convolve(src, taps)[start : start + 256]
-        out = filtering.fir_filter(xp.asarray(x), xp.asarray(taps), periodic=periodic)
-        xpt.assert_allclose(out, xp.asarray(expected), atol=1e-12)
-        if not periodic:
-            ols = filtering.ols_fir_filter(xp.asarray(x), xp.asarray(taps))
-            xpt.assert_allclose(ols, xp.asarray(expected), atol=1e-12)
+        for causal, c in ((False, (num_taps - 1) // 2), (True, 0)):
+            start = 256 + c if periodic else c
+            expected = np.convolve(src, taps)[start : start + 256]
+            out = filtering.fir_filter(
+                xp.asarray(x), xp.asarray(taps), periodic=periodic, causal=causal
+            )
+            xpt.assert_allclose(out, xp.asarray(expected), atol=1e-12)
 
+    @pytest.mark.parametrize("method", _METHODS)
     @pytest.mark.parametrize("complex_data", [False, True])
     @pytest.mark.parametrize(
         ("shape", "num_taps"),
         [((1,), 1), ((7,), 64), ((2, 1000), 2), ((2, 1000), 65), ((3, 2, 999), 1500)],
     )
     def test_matches_the_full_convolution(
-        self, xp: Any, xpt: Any, shape, num_taps, complex_data
+        self, xp: Any, xpt: Any, monkeypatch, shape, num_taps, complex_data, method
     ) -> None:
-        """Both filters equal ``np.convolve`` at every sample, ends included,
-        for records shorter than the filter and even lengths; fir_filter also
-        on 3-D input.  Real data takes real FFTs (measured 6e-7 of the peak
-        in float32, 1e-6 in complex64)."""
+        """Every method equals ``np.convolve`` at every sample, ends included,
+        for records shorter than the filter, even lengths and 3-D input, in
+        both alignments.  Real data takes real FFTs (measured 6e-7 of the
+        peak in float32, 1e-6 in complex64)."""
+        _force_method(monkeypatch, method)
         rng = np.random.default_rng(num_taps)
         x = rng.standard_normal(shape)
         taps = rng.standard_normal(num_taps)
@@ -458,19 +406,68 @@ class TestOverlapSaveFiltering:
             taps = taps + 1j * rng.standard_normal(num_taps)
         x = x.astype(np.complex64 if complex_data else np.float32)
         full = np.apply_along_axis(np.convolve, -1, x.astype(complex), taps)
-        n, c = shape[-1], (num_taps - 1) // 2
-        cases = [(filtering.fir_filter, {}, c)]
-        if len(shape) < 3:
-            cases += [(filtering.ols_fir_filter, {}, c),
-                      (filtering.ols_fir_filter, {"causal": True}, 0)]  # fmt: skip
-        for fn, kw, start in cases:
-            out = fn(xp.asarray(x), xp.asarray(taps), **kw)
+        n = shape[-1]
+        for causal, start in ((False, (num_taps - 1) // 2), (True, 0)):
+            out = filtering.fir_filter(xp.asarray(x), xp.asarray(taps), causal=causal)
             ref = full[..., start : start + n]
             if not complex_data:
                 ref = ref.real
             assert out.dtype == x.dtype and out.shape == x.shape
             atol = 3e-6 * np.abs(ref).max()
             xpt.assert_allclose(out, xp.asarray(ref.astype(x.dtype)), atol=atol)
+
+    @pytest.mark.parametrize(
+        ("N", "L", "device", "method"),
+        [
+            # Direct up to 128 taps and N·L = 2^15 (CPU), 2^25 (GPU).
+            (256, 128, "cpu", "direct"),
+            (256, 129, "cpu", "whole"),
+            (1 << 13, 4, "cpu", "direct"),
+            (1 << 13, 5, "cpu", "whole"),
+            (1 << 18, 128, "gpu", "direct"),
+            (1 << 18, 129, "gpu", "whole"),
+            (1 << 20, 32, "gpu", "direct"),
+            (1 << 20, 33, "gpu", "overlap-save"),
+            # One FFT up to 2^13 samples (CPU), 2^18 (GPU).
+            (1 << 13, 1501, "cpu", "whole"),
+            ((1 << 13) + 1, 1501, "cpu", "overlap-save"),
+            (1 << 18, 1501, "gpu", "whole"),
+            ((1 << 18) + 1, 1501, "gpu", "overlap-save"),
+        ],
+    )
+    def test_method_thresholds(self, N: int, L: int, device: str, method: str) -> None:
+        from commkit.filtering.linear import _fir_method
+
+        assert _fir_method(N, L, device) == method
+
+    @pytest.mark.parametrize(
+        ("shape", "num_taps"),
+        # Either side of each threshold on the device that runs the test.
+        [
+            ((2, 256), 128),
+            ((2, 256), 129),
+            ((2, 8192), 4),
+            ((2, 8192), 5),
+            ((2, 8193), 201),
+            ((1, 1 << 18), 129),
+            ((1, (1 << 18) + 1), 129),
+            ((1, 1 << 20), 32),
+            ((1, 1 << 20), 33),
+        ],  # fmt: skip
+    )
+    def test_sizes_around_the_thresholds(
+        self, xp: Any, xpt: Any, shape, num_taps
+    ) -> None:
+        """The method the sizes pick gives ``np.convolve`` (``mode="same"``)."""
+        rng = np.random.default_rng(num_taps)
+        x = (rng.standard_normal(shape) + 1j * rng.standard_normal(shape)).astype(
+            np.complex64
+        )
+        taps = rng.standard_normal(num_taps).astype(np.float32)
+        c = (num_taps - 1) // 2
+        ref = np.stack([np.convolve(r, taps)[c : c + shape[-1]] for r in x])
+        out = filtering.fir_filter(xp.asarray(x), xp.asarray(taps))
+        xpt.assert_allclose(out, xp.asarray(ref), atol=3e-6 * np.abs(ref).max())
 
     @pytest.mark.parametrize("causal", [False, True])
     def test_batches_do_not_change_the_output(
@@ -479,6 +476,7 @@ class TestOverlapSaveFiltering:
         """Batches of 3 blocks (a partial last one) give the one-batch output."""
         import commkit._overlap_save as ols
 
+        _force_method(monkeypatch, "overlap-save")
         rng = np.random.default_rng(6)
         x = xp.asarray(
             (
@@ -486,19 +484,19 @@ class TestOverlapSaveFiltering:
             ).astype(np.complex64)
         )
         taps = xp.asarray(np.hanning(101).astype(np.float32))
-        whole = filtering.ols_fir_filter(x, taps, causal=causal)
+        whole = filtering.fir_filter(x, taps, causal=causal)
         monkeypatch.setattr(ols, "_OLS_ELEMENTS", 2 * 1024 * 3)
         # Batched FFTs round differently in float32.
         xpt.assert_allclose(
-            filtering.ols_fir_filter(x, taps, causal=causal),
+            filtering.fir_filter(x, taps, causal=causal),
             whole,
             rtol=1e-5,
             atol=1e-5,
         )
 
     def test_batches_bound_the_working_memory(self, monkeypatch) -> None:
-        """With batches, the peak is the padded input and the output (3.5x the
-        input for complex64), not the record's spectra (8x)."""
+        """On a long record, the peak is the padded input and the output (3.5x
+        the input for complex64), not the record's spectra (8x)."""
         import tracemalloc
 
         import commkit._overlap_save as ols
@@ -508,65 +506,14 @@ class TestOverlapSaveFiltering:
         )
         taps = np.hanning(201).astype(np.float32)
         monkeypatch.setattr(ols, "_OLS_ELEMENTS", 1 << 17)
-        filtering.ols_fir_filter(x, taps)
+        filtering.fir_filter(x, taps)
         tracemalloc.start()
         try:
-            filtering.ols_fir_filter(x, taps)
+            filtering.fir_filter(x, taps)
             peak = tracemalloc.get_traced_memory()[1]
         finally:
             tracemalloc.stop()
         assert peak < 4 * x.nbytes
-
-    def test_ols_fir_filter_preserves_real_dtype(self, xp: Any) -> None:
-        """ols_fir_filter returns real dtype when both inputs are real."""
-        rng = np.random.default_rng(3)
-        x = xp.asarray(rng.standard_normal(1024).astype(np.float64))
-        taps = xp.asarray(np.hanning(64).astype(np.float64))
-        out = filtering.ols_fir_filter(x, taps)
-        assert not xp.iscomplexobj(out)
-
-    def test_ols_fir_filter_complex_input_stays_complex(self, xp: Any) -> None:
-        """ols_fir_filter returns complex when input is complex."""
-        rng = np.random.default_rng(4)
-        x = xp.asarray(
-            (rng.standard_normal(512) + 1j * rng.standard_normal(512)).astype(
-                np.complex128
-            )
-        )
-        taps = xp.asarray(np.hanning(32).astype(np.float64))
-        out = filtering.ols_fir_filter(x, taps)
-        assert xp.iscomplexobj(out)
-
-    def test_ols_fir_filter_signal_input_returns_signal(
-        self, xp: Any, xpt: Any
-    ) -> None:
-        """Signal input returns a Signal with the filtered samples."""
-        rng = np.random.default_rng(5)
-        data = xp.asarray(
-            (rng.standard_normal(512) + 1j * rng.standard_normal(512)).astype(
-                np.complex64
-            )
-        )
-        taps = xp.asarray(np.hanning(32).astype(np.float32))
-        sig = Signal(samples=data, sampling_rate=1.0, symbol_rate=1.0)
-
-        out_sig = filtering.ols_fir_filter(sig, taps)
-        out_arr = filtering.ols_fir_filter(data, taps)
-
-        assert isinstance(out_sig, Signal)
-        xpt.assert_allclose(out_sig.samples, out_arr)
-
-    def test_ols_fir_filter_preserves_complex64_dtype(self, xp: Any) -> None:
-        """ols_fir_filter: complex64 signal + float64 taps -> complex64 output."""
-        rng = np.random.default_rng(13)
-        x = xp.asarray(
-            (rng.standard_normal(1024) + 1j * rng.standard_normal(1024)).astype(
-                np.complex64
-            )
-        )
-        taps = np.hanning(64)
-        out = filtering.ols_fir_filter(x, taps)
-        assert out.dtype == xp.complex64
 
 
 class TestCorrectChromaticDispersion:
@@ -1087,7 +1034,7 @@ class TestDispersionCompensationTaps:
         )
 
         def residual_db(taps: np.ndarray) -> float:
-            y = to_numpy(filtering.ols_fir_filter(rx, taps).samples)
+            y = to_numpy(filtering.fir_filter(rx, taps).samples)
             k = 2 * len(taps)
             err = y[k:-k] - ref[k:-k]
             return float(
@@ -1122,18 +1069,6 @@ class TestDispersionCompensationTaps:
         }
         with pytest.raises(ValueError, match=match):
             filtering.dispersion_compensation_taps(**args)
-
-
-class TestOlsFftSize:
-    def test_invalid_nfft_raises(self, xp: Any) -> None:
-        """nfft must be a power of 2 with nfft // 2 >= len(taps)."""
-        x = xp.ones(256, dtype=xp.complex64)
-        taps = xp.ones(65)
-        with pytest.raises(ValueError, match="nfft"):
-            filtering.ols_fir_filter(x, taps, nfft=200)
-        with pytest.raises(ValueError, match="nfft"):
-            filtering.ols_fir_filter(x, taps, nfft=128)
-        assert filtering.ols_fir_filter(x, taps, nfft=256).shape == (256,)
 
 
 class TestCorrectFiberPropagation:

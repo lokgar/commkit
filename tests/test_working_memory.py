@@ -11,7 +11,7 @@ import pytest
 
 from commkit import _overlap_save, metrics
 from commkit.equalization import zf_equalizer
-from commkit.filtering import ols_fir_filter
+from commkit.filtering import fir_filter
 from commkit.mapping import Constellation
 from commkit.metrics import information
 from tests.common.memory import peak_bytes
@@ -37,11 +37,12 @@ def small_ols_budget(monkeypatch: pytest.MonkeyPatch) -> None:
 
 
 @pytest.mark.usefixtures("small_ols_budget")
-def test_ols_fir_filter_workspace() -> None:
-    """About one padded input copy (whole-record batches: 7x the input)."""
+def test_fir_filter_workspace() -> None:
+    """Overlap-save on a long record: about one padded input copy
+    (whole-record batches: 7x the input)."""
     x = _samples(1 << 19)
     taps = np.hanning(63).astype(np.float32)
-    assert _workspace(lambda: ols_fir_filter(x, taps, nfft=1024)) < 3 * x.nbytes
+    assert _workspace(lambda: fir_filter(x, taps)) < 3 * x.nbytes
 
 
 @pytest.mark.usefixtures("small_ols_budget")
