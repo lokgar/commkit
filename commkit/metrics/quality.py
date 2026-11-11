@@ -22,6 +22,7 @@ from ._common import (
     _log_per_channel,
     _paired,
     _reference,
+    _require_points,
     _skip,
     _unit_reference,
 )
@@ -58,7 +59,8 @@ def evm(
         Decision constellation for ``blind=True``.  Defaults to the Signal's.
         The symbols are compared with its points as they are, so they must be
         on its scale; the error is relative to the mean power of the decided
-        points.
+        points.  Data-aided, a known constellation (this or the Signal's)
+        checks that the reference symbols are its points.
     blind : bool, default False
         Measure against hard decisions instead of the reference.
     num_skip_symbols : int, default 0
@@ -74,7 +76,8 @@ def evm(
     Raises
     ------
     ValueError
-        On a missing reference or constellation, a shape mismatch, an empty
+        On a missing reference or constellation, reference symbols that are
+        not points of a known constellation, a shape mismatch, an empty
         selection, or a frame Signal or one not at one sample per symbol.
 
     Notes
@@ -108,6 +111,9 @@ def evm(
         rx, tx = _paired(rx, ref, xp, name)
         rx = _skip(rx, num_skip_symbols, name)
         tx = _skip(tx, num_skip_symbols, name)
+        known = adapter.resolve_choice("constellation", constellation)
+        if known is not None:
+            _require_points(tx, _constellation(adapter, known, name), xp, name)
         tx, tx_pwr = _unit_reference(tx, xp)
         rx = rx / _gain(rx, tx, xp, tx_pwr)
         ref_pwr = tx_pwr[..., 0]
@@ -124,7 +130,7 @@ def evm(
     if isinstance(out, float):
         logger.info("EVM: %.2f%%", out)
     else:
-        _log_per_channel("EVM Ch%s: %.2f%%", out)
+        _log_per_channel("EVM", "%.2f%%", out)
     return out
 
 
@@ -192,7 +198,7 @@ def estimate_noise_variance(
     if isinstance(out, float):
         logger.info("Noise variance: %.3e", out)
     else:
-        _log_per_channel("Noise variance Ch%s: %.3e", out)
+        _log_per_channel("Noise variance", "%.3e", out)
     return out
 
 
@@ -248,5 +254,5 @@ def snr(
     if isinstance(out, float):
         logger.info("SNR: %.2f dB", out)
     else:
-        _log_per_channel("SNR Ch%s: %.2f dB", out)
+        _log_per_channel("SNR", "%.2f dB", out)
     return out
