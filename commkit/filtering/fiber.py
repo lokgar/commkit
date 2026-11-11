@@ -55,7 +55,12 @@ from .._dispersion import (
 )
 from .._fiber import Fiber, check_link, propagate, to_watts
 from ..backend import ArrayType, dispatch, to_device
-from ..core._signal_adapter import S, adapt_signal, require_integer_sps
+from ..core._signal_adapter import (
+    S,
+    SignalAdapter,
+    adapt_signal,
+    require_integer_sps,
+)
 from ..core.signal import Signal
 from ..logger import logger
 from ..math import _phasor
@@ -655,15 +660,33 @@ def estimate_chromatic_dispersion(
     ...     dispersion_ps_nm=float(est.value), center_wavelength_nm=1550.0,
     ...     sampling_rate=64e9)
     """
+    signal_adapter = adapt_signal(
+        samples, function_name="estimate_chromatic_dispersion()"
+    )
+    return _estimate_chromatic_dispersion(
+        signal_adapter,
+        method,
+        center_wavelength_nm=center_wavelength_nm,
+        sampling_rate=sampling_rate,
+        symbol_rate=symbol_rate,
+    )
+
+
+def _estimate_chromatic_dispersion(
+    signal_adapter: SignalAdapter[Any],
+    method: ClockToneScan | FourthMomentScan | QuadraticPhaseFit,
+    *,
+    center_wavelength_nm: float | None,
+    sampling_rate: float | None,
+    symbol_rate: float | None,
+) -> ChromaticDispersionEstimate:
+    """:func:`estimate_chromatic_dispersion` on an adapted input."""
     estimator = _ESTIMATORS.get(type(method))
     if estimator is None:
         raise TypeError(
             "estimate_chromatic_dispersion(): method must be a ClockToneScan, "
             f"FourthMomentScan or QuadraticPhaseFit, got {type(method).__name__}."
         )
-    signal_adapter = adapt_signal(
-        samples, function_name="estimate_chromatic_dispersion()"
-    )
     fs = float(signal_adapter.resolve_fact("sampling_rate", sampling_rate))
     rs = float(signal_adapter.resolve_fact("symbol_rate", symbol_rate))
     lam = signal_adapter.resolve_wavelength_nm(center_wavelength_nm)
@@ -854,11 +877,12 @@ def correct_chromatic_dispersion(
             "dispersion_ps_nm, exactly one of them."
         )
     if isinstance(how, (ClockToneScan, FourthMomentScan, QuadraticPhaseFit)):
-        how = estimate_chromatic_dispersion(
-            samples,
+        how = _estimate_chromatic_dispersion(
+            signal_adapter,
             how,
             center_wavelength_nm=center_wavelength_nm,
             sampling_rate=sampling_rate,
+            symbol_rate=None,
         )
     if how is not None:
         if not isinstance(how, ChromaticDispersionEstimate):

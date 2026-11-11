@@ -713,7 +713,14 @@ def estimate_frequency_offset(
     signal_adapter = adapt_signal(samples, function_name="estimate_frequency_offset()")
     fs = float(signal_adapter.resolve_fact("sampling_rate", sampling_rate))
     constellation = signal_adapter.resolve_choice("constellation", constellation)
-    x, xp, _ = dispatch(signal_adapter.array)
+    return _estimate_frequency_offset(signal_adapter.array, method, fs, constellation)
+
+
+def _estimate_frequency_offset(
+    samples: ArrayType, method: FrequencyMethod, fs: float, constellation: Any
+) -> FrequencyOffsetEstimate:
+    """:func:`estimate_frequency_offset` on an array with resolved facts."""
+    x, xp, _ = dispatch(samples)
     x, was_1d = as_2d(x, name="samples")
     C, N = x.shape
 
@@ -812,9 +819,10 @@ def correct_frequency_offset(
     """
     signal_adapter = adapt_signal(samples, function_name="correct_frequency_offset()")
     fs = float(signal_adapter.resolve_fact("sampling_rate", sampling_rate))
-    if isinstance(how, FrequencyMethod):
-        how = estimate_frequency_offset(samples, how, sampling_rate=fs)
     x, xp, _ = dispatch(signal_adapter.array)
+    if isinstance(how, FrequencyMethod):
+        constellation = signal_adapter.resolve_choice("constellation", None)
+        how = _estimate_frequency_offset(x, how, fs, constellation)
 
     if isinstance(how, FrequencyOffsetEstimate) and how.block_values is not None:
         assert how.block_centers is not None

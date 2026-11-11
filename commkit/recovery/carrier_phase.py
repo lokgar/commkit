@@ -14,7 +14,7 @@ import numpy as np
 
 from .._array import as_2d, restore_1d
 from ..backend import ArrayType, dispatch
-from ..core._signal_adapter import S, adapt_signal
+from ..core._signal_adapter import S, SignalAdapter, adapt_signal
 from ..core.signal import Signal
 from ..logger import logger
 from ..math import _derotate
@@ -154,6 +154,20 @@ def estimate_carrier_phase(
     >>> y = correct_carrier_phase(y, est)
     >>> y = correct_carrier_phase(y, ViterbiViterbi(block_size=64))
     """
+    signal_adapter = adapt_signal(samples, function_name="estimate_carrier_phase()")
+    return _estimate_carrier_phase(
+        signal_adapter, method, sampling_rate=sampling_rate, constellation=constellation
+    )
+
+
+def _estimate_carrier_phase(
+    signal_adapter: SignalAdapter[Any],
+    method: CarrierPhaseMethod,
+    *,
+    sampling_rate: float | None,
+    constellation: Any,
+) -> CarrierPhaseEstimate:
+    """:func:`estimate_carrier_phase` on an adapted input (unwrapped once)."""
     estimator = _ESTIMATORS.get(type(method))
     if estimator is None:
         raise TypeError(
@@ -161,7 +175,6 @@ def estimate_carrier_phase(
             "Tikhonov, PLL, PilotInterpolation, PilotTone, PilotTones or ConstantPhase, "
             f"got {type(method).__name__}."
         )
-    signal_adapter = adapt_signal(samples, function_name="estimate_carrier_phase()")
     sig = signal_adapter.signal
     fs = None
     if sig is not None or sampling_rate is not None:
@@ -236,8 +249,11 @@ def correct_carrier_phase(
     """
     signal_adapter = adapt_signal(samples, function_name="correct_carrier_phase()")
     if isinstance(how, CarrierPhaseMethod):
-        how = estimate_carrier_phase(
-            samples, how, sampling_rate=sampling_rate, constellation=constellation
+        how = _estimate_carrier_phase(
+            signal_adapter,
+            how,
+            sampling_rate=sampling_rate,
+            constellation=constellation,
         )
     elif sampling_rate is not None:
         signal_adapter.resolve_fact("sampling_rate", sampling_rate)
