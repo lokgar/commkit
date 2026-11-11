@@ -471,19 +471,25 @@ ROWS: list[Row] = [
         call=lambda c, x: _a(x, pulse=c.taps),
     ),
     Row(
-        "commkit.filtering.fiber.correct_chromatic_dispersion",
+        "commkit.filtering.fiber.compensation.correct_chromatic_dispersion",
         TRANSFORM,
         data=2,
         call=lambda c, x: _a(x, sampling_rate=FS, **CDC),
         fact=FS_CONFLICT,
     ),
-    Row("commkit.filtering.fiber.dispersion_compensation_taps", DESIGN, data=0),
-    Row("commkit.filtering.fiber.ClockToneScan", VALUE),
-    Row("commkit.filtering.fiber.FourthMomentScan", VALUE),
-    Row("commkit.filtering.fiber.QuadraticPhaseFit", VALUE),
-    Row("commkit.filtering.fiber.ChromaticDispersionEstimate", VALUE, data=0),
     Row(
-        "commkit.filtering.fiber.estimate_chromatic_dispersion",
+        "commkit.filtering.fiber.compensation.dispersion_compensation_taps",
+        DESIGN,
+        data=0,
+    ),
+    Row("commkit.filtering.fiber.estimation.ClockToneScan", VALUE),
+    Row("commkit.filtering.fiber.estimation.FourthMomentScan", VALUE),
+    Row("commkit.filtering.fiber.estimation.QuadraticPhaseFit", VALUE),
+    Row(
+        "commkit.filtering.fiber.estimation.ChromaticDispersionEstimate", VALUE, data=0
+    ),
+    Row(
+        "commkit.filtering.fiber.estimation.estimate_chromatic_dispersion",
         ESTIMATE,
         data=2,
         call=lambda c, x: _a(
@@ -496,7 +502,7 @@ ROWS: list[Row] = [
         fact=FS_CONFLICT,
     ),
     Row(
-        "commkit.filtering.fiber.correct_fiber_propagation",
+        "commkit.filtering.fiber.compensation.correct_fiber_propagation",
         TRANSFORM,
         call=lambda c, x: _a(x, sampling_rate=FS, **FIBER_LINK),
         fact=FS_CONFLICT,

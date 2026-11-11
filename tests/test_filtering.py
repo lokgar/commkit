@@ -1302,7 +1302,7 @@ class TestCorrectFiberPropagation:
         is propagated alone, and the input ahead of a batch survives the
         previous batch's write.  Lengths: a ragged end, an exact multiple of
         the hop, one block."""
-        from commkit.filtering import fiber as fiber_module
+        from commkit.filtering.fiber import compensation as fiber_module
         from commkit.impairments import Fiber
 
         x = xp.asarray(self._field(n=n))
@@ -1325,7 +1325,7 @@ class TestCorrectFiberPropagation:
         spectra (5.2x in one batch)."""
         import tracemalloc
 
-        from commkit.filtering import fiber as fiber_module
+        from commkit.filtering.fiber import compensation as fiber_module
         from commkit.impairments import Fiber
 
         x = self._field(n=1 << 19)
