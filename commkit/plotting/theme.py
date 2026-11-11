@@ -262,6 +262,35 @@ def _channel_axes(
     return fig, axes, targets
 
 
+def _draw_channels(
+    x: Any,
+    ax: Any,
+    title: str | None,
+    draw: Any,
+    *,
+    panel: tuple[float, float] | None = None,
+) -> tuple[Any, Any]:
+    """Draw ``(N,)`` or ``(C, N)`` samples, one panel per channel.
+
+    ``draw(axi, row, panel_title)`` draws one channel's ``row``.  Several
+    channels get the grid of :func:`_channel_axes`, titled
+    ``"{title} (Ch i)"`` (``"Channel i"`` without a title); one channel gets
+    ``ax`` or a new figure (of size ``panel`` when given).  Returns
+    ``(fig, axes)`` or ``(fig, ax)`` for :func:`_finish`.
+    """
+    if x.ndim > 1:
+        fig, axes, targets = _channel_axes(x.shape[0], ax, panel=panel)
+        for i, target in enumerate(targets):
+            draw(target, x[i], f"{title} (Ch {i})" if title else f"Channel {i}")
+        return fig, axes
+    if ax is None:
+        fig, axi = plt.subplots(figsize=panel) if panel is not None else plt.subplots()
+    else:
+        fig, axi = ax.figure, ax
+    draw(axi, x, title)
+    return fig, axi
+
+
 def _square_figsize(n: int = 1) -> tuple[float, float]:
     """Square panel size derived from the default figure height.
 

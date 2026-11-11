@@ -8,9 +8,8 @@ from ..backend import dispatch, to_device
 from ..core._signal_adapter import adapt_signal
 from ..logger import logger
 from .theme import (
-    _channel_axes,
+    _draw_channels,
     _finish,
-    _get_axis,
     _set_eng_formatter,
 )
 
@@ -87,117 +86,44 @@ def plot_time_domain(
     sampling_rate = signal_adapter.resolve_fact("sampling_rate", sampling_rate)
     if signal_adapter.signal is not None:
         sps = signal_adapter.resolve_fact("sps", sps)
-    return _plot_time_domain(
-        x,
-        sampling_rate=sampling_rate,
-        start_symbol=start_symbol,
-        num_symbols=num_symbols,
-        sps=sps,
-        max_points=max_points,
-        ax=ax,
-        title=title,
-        label=label,
-        xlim=xlim,
-        ylim=ylim,
-        legend=legend,
-        show=show,
-        **kwargs,
-    )
-
-
-def _plot_time_domain(
-    samples: Any,
-    *,
-    sampling_rate: Any,
-    start_symbol: Any,
-    num_symbols: Any,
-    sps: Any,
-    max_points: int | None,
-    ax: Any,
-    title: Any,
-    label: Any,
-    xlim: Any,
-    ylim: Any,
-    legend: Any,
-    show: Any,
-    **kwargs: Any,
-) -> tuple[Any, Any] | None:
-    """Render array data for :func:`plot_time_domain` (the public boundary resolves the Signal)."""
     logger.debug("Generating time-domain plot.")
+    x, xp, _ = dispatch(x)
 
-    samples, xp, _ = dispatch(samples)
+    def draw(ax: Any, row: Any, title: str | None) -> None:
+        start_idx = int(start_symbol * sps) if sps is not None else int(start_symbol)
 
-    # Handle Multichannel
-    # Convention: (Channels, Time)
-    if samples.ndim > 1:
-        num_channels = samples.shape[0]
+        # Slice on the device: only the viewed row are transferred.
+        if num_symbols is not None and sps is not None:
+            limit = start_idx + int(num_symbols * sps)
+            if limit > row.shape[-1]:
+                limit = row.shape[-1]
+                logger.warning(
+                    "Limit exceeds number of symbols. Plotting up to last symbol."
+                )
+            view = row[start_idx:limit]
+        else:
+            view = row[start_idx:]
 
-        fig, axes, targets = _channel_axes(num_channels, ax)
-
-        for i in range(num_channels):
-            channel_samples = samples[i]
-
-            target_ax = targets[i]
-
-            ch_title = f"{title} (Ch {i})" if title else f"Channel {i}"
-
-            _plot_time_domain(
-                channel_samples,
-                sampling_rate=sampling_rate,
-                start_symbol=start_symbol,
-                num_symbols=num_symbols,
-                sps=sps,
-                max_points=max_points,
-                ax=target_ax,
-                title=ch_title,
-                label=label,
-                xlim=xlim,
-                ylim=ylim,
-                legend=legend,
-                show=False,
-                **kwargs,
-            )
-
-        return _finish((fig, axes), show, xlim=xlim, ylim=ylim)
-
-    # --- 1D Logic ---
-
-    fig, ax = _get_axis(ax)
-
-    start_idx = int(start_symbol * sps) if sps is not None else int(start_symbol)
-
-    # Slice on the device: only the viewed samples are transferred.
-    if num_symbols is not None and sps is not None:
-        limit = start_idx + int(num_symbols * sps)
-        if limit > samples.shape[-1]:
-            limit = samples.shape[-1]
-            logger.warning(
-                "Limit exceeds number of symbols. Plotting up to last symbol."
-            )
-        view = samples[start_idx:limit]
-    else:
-        view = samples[start_idx:]
-
-    parts = (
-        [("I", view.real), ("Q", view.imag)]
-        if xp.iscomplexobj(view)
-        else [(None, view)]
-    )
-    for component, part in parts:
-        t, y = _envelope(part, sampling_rate, max_points, xp)
-        line_label = (
-            f"{label} {component}" if label and component else (label or component)
+        parts = (
+            [("I", view.real), ("Q", view.imag)]
+            if xp.iscomplexobj(view)
+            else [(None, view)]
         )
-        ax.plot(t, y, label=line_label, **kwargs)
-    if legend or (legend is None and len(parts) > 1):
-        ax.legend()
-    ax.set_xlabel("Time [s]")
-    ax.set_ylabel("Amplitude")
-    _set_eng_formatter(ax, "x")
-    if title is not None:
-        ax.set_title(title)
+        for component, part in parts:
+            t, y = _envelope(part, sampling_rate, max_points, xp)
+            line_label = (
+                f"{label} {component}" if label and component else (label or component)
+            )
+            ax.plot(t, y, label=line_label, **kwargs)
+        if legend or (legend is None and len(parts) > 1):
+            ax.legend()
+        ax.set_xlabel("Time [s]")
+        ax.set_ylabel("Amplitude")
+        _set_eng_formatter(ax, "x")
+        if title is not None:
+            ax.set_title(title)
 
-    return _finish((fig, ax), show, xlim=xlim, ylim=ylim)
+    return _finish(_draw_channels(x, ax, title, draw), show, xlim=xlim, ylim=ylim)
 
 
 def _envelope(
