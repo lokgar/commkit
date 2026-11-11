@@ -18,17 +18,10 @@ __all__ = ["PLL"]
 
 
 def _get_numba_dd_pll() -> Any:
-    """The PLL kernel, one loop per channel."""
+    """The PLL kernel: one loop per channel, or one shared by the channels."""
     from . import _numba_loops
 
     return _numba_loops.dd_pll
-
-
-def _get_numba_dd_pll_joint() -> Any:
-    """The PLL kernel, one loop shared by the channels (error averaged over them)."""
-    from . import _numba_loops
-
-    return _numba_loops.dd_pll_joint
 
 
 @dataclass(frozen=True)
@@ -168,10 +161,7 @@ def _pll(symbols: ArrayType, method: PLL, ctx: _Context) -> _Phase:
     )
 
     joint = method.joint_channels and C > 1
-    if joint:
-        phi = _get_numba_dd_pll_joint()(symbols_cpu, *loop_args)[None, :]
-    else:
-        phi = _get_numba_dd_pll()(symbols_cpu, *loop_args)
+    phi = _get_numba_dd_pll()(symbols_cpu, joint, *loop_args)  # (1 or C, N)
     phi = _repair_slips(
         phi,
         method.cycle_slip,

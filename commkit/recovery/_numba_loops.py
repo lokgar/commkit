@@ -23,9 +23,47 @@ _parallel = numba.njit(cache=True, fastmath=True, nogil=True, parallel=True)
 _step = numba.njit(inline="always", nogil=True)
 
 
+@_step
+def _pll_error(
+    sr, si, cos_phi, sin_phi, is_sq_qam, levels, const_r, const_i, d_grid, lev_min, side
+):
+    """Phase error ``Im(y · d*)`` of the symbol ``sr + j si`` derotated by φ.
+
+    ``y = s · exp(-jφ)`` and ``d`` its hard decision: the nearest point,
+    rounded per axis on a square QAM grid, O(1), else found by a search.
+    """
+    yr = sr * cos_phi + si * sin_phi
+    yi = -sr * sin_phi + si * cos_phi
+    if is_sq_qam:
+        r_idx = int(round((yr - lev_min) / d_grid))
+        if r_idx < 0:
+            r_idx = 0
+        elif r_idx >= side:
+            r_idx = side - 1
+        d_r = levels[r_idx]
+        i_idx = int(round((yi - lev_min) / d_grid))
+        if i_idx < 0:
+            i_idx = 0
+        elif i_idx >= side:
+            i_idx = side - 1
+        d_i = levels[i_idx]
+    else:
+        min_d2 = (yr - const_r[0]) ** 2 + (yi - const_i[0]) ** 2
+        d_r = const_r[0]
+        d_i = const_i[0]
+        for k in range(1, len(const_r)):
+            d2 = (yr - const_r[k]) ** 2 + (yi - const_i[k]) ** 2
+            if d2 < min_d2:
+                min_d2 = d2
+                d_r = const_r[k]
+                d_i = const_i[k]
+    return yi * d_r - yr * d_i
+
+
 @_parallel
 def dd_pll(
     sym,
+    joint,
     const_r,
     const_i,
     mu,
@@ -38,13 +76,22 @@ def dd_pll(
     lev_min,
     side,
 ):
-    """Run one decision-directed PLL per channel over the symbols (Numba).
+    """Run decision-directed PLLs over the symbols (Numba).
+
+    One loop per channel, in parallel, or with ``joint`` one loop shared by
+    all of them, which averages their phase errors at each symbol (the
+    minimum-variance joint estimator for a shared LO).  Both run the step
+    :func:`_pll_error`.  A channel range ``c0 .. c1`` per loop, as in the
+    Gardner loop, ran this light loop body 14 to 30 % slower: the inner
+    loop of one channel, and the parallel lowering of the joint loop.
 
     Parameters
     ----------
     sym : numpy.ndarray
         Received symbols, complex64 or complex128, ``(C, N)``; each is
         widened to float64 as it is read.
+    joint : bool
+        One loop for all channels instead of one per channel.
     const_r, const_i : numpy.ndarray
         Real and imaginary parts of the constellation, float64, ``(M,)``.
     mu : float
@@ -72,157 +119,48 @@ def dd_pll(
     Returns
     -------
     numpy.ndarray
-        Per-symbol phase ``φ[c, n]``, float64, ``(C, N)``.
+        Per-symbol phase ``φ[r, n]`` of each loop, float64, ``(C, N)``, or
+        ``(1, N)`` with ``joint``.
     """
     C = sym.shape[0]
     N = sym.shape[1]
-    M = len(const_r)
-    phase_est = np.empty((C, N), dtype=np.float64)
+    if joint:
+        phase_est = np.empty((1, N), dtype=np.float64)
+        phi = phi0
+        freq = freq0
+        for n in range(N):
+            cos_phi = np.cos(phi)
+            sin_phi = np.sin(phi)
+            e_sum = 0.0
+            for c in range(C):
+                e_sum += _pll_error(
+                    np.float64(sym[c, n].real), np.float64(sym[c, n].imag),
+                    cos_phi, sin_phi,
+                    is_sq_qam, levels, const_r, const_i, d_grid, lev_min, side,
+                )  # fmt: skip
+            e = e_sum / float(C)
+            phase_est[0, n] = phi
+            phi = phi + mu * e + freq
+            freq = freq + beta * e
+        return phase_est
 
+    phase_est = np.empty((C, N), dtype=np.float64)
     for c in numba.prange(C):
         phi = phi0
         freq = freq0
         for n in range(N):
-            # Rotate received symbol by current phase estimate:
-            # y[n] = s[n] · exp(-jφ[n])
-            cos_phi = np.cos(phi)
-            sin_phi = np.sin(phi)
-            sr = np.float64(sym[c, n].real)
-            si = np.float64(sym[c, n].imag)
-            yr = sr * cos_phi + si * sin_phi
-            yi = -sr * sin_phi + si * cos_phi
-
-            # Hard decision: the nearest constellation point
-            if is_sq_qam:
-                # O(1) grid rounding for square QAM
-                r_idx = int(round((yr - lev_min) / d_grid))
-                if r_idx < 0:
-                    r_idx = 0
-                elif r_idx >= side:
-                    r_idx = side - 1
-                d_r = levels[r_idx]
-                i_idx = int(round((yi - lev_min) / d_grid))
-                if i_idx < 0:
-                    i_idx = 0
-                elif i_idx >= side:
-                    i_idx = side - 1
-                d_i = levels[i_idx]
-            else:
-                min_d2 = (yr - const_r[0]) ** 2 + (yi - const_i[0]) ** 2
-                d_r = const_r[0]
-                d_i = const_i[0]
-                for k in range(1, M):
-                    d2 = (yr - const_r[k]) ** 2 + (yi - const_i[k]) ** 2
-                    if d2 < min_d2:
-                        min_d2 = d2
-                        d_r = const_r[k]
-                        d_i = const_i[k]
-
-            # Cross-product phase error:  e = Im(y · d*) = yi·d_r - yr·d_i
-            e = yi * d_r - yr * d_i
-
+            e = _pll_error(
+                np.float64(sym[c, n].real), np.float64(sym[c, n].imag),
+                np.cos(phi), np.sin(phi),
+                is_sq_qam, levels, const_r, const_i, d_grid, lev_min, side,
+            )  # fmt: skip
             # Record the phase used to derotate symbol n - before the update.
             phase_est[c, n] = phi
-
             # 2nd-order loop filter (reduces to 1st order when beta=0):
             #   φ[n+1] = φ[n] + μ·e[n] + ν[n]
             #   ν[n]   = ν[n-1] + β·e[n]
             phi = phi + mu * e + freq
             freq = freq + beta * e
-
-    return phase_est
-
-
-@_fast
-def dd_pll_joint(
-    sym,
-    const_r,
-    const_i,
-    mu,
-    beta,
-    phi0,
-    freq0,
-    is_sq_qam,
-    levels,
-    d_grid,
-    lev_min,
-    side,
-):
-    """Run one decision-directed PLL shared by all channels (Numba).
-
-    The phase error is averaged over the channels at each symbol and drives
-    one PI loop: the minimum-variance joint estimator for a shared LO.
-
-    Parameters
-    ----------
-    sym : numpy.ndarray
-        Received symbols, complex64 or complex128, ``(C, N)``; each is
-        widened to float64 as it is read.
-    const_r, const_i : numpy.ndarray
-        Real and imaginary parts of the constellation, float64, ``(M,)``.
-    mu, beta, phi0, freq0 : float
-        Loop gains and initial state, as for ``dd_pll``.
-    is_sq_qam : bool
-        Decide by rounding on a square QAM grid.
-    levels : numpy.ndarray
-        Axis levels of the square grid, float64, ``(side,)``.
-    d_grid, lev_min : float
-        Grid spacing and smallest level.
-    side : int
-        Points per axis.
-
-    Returns
-    -------
-    numpy.ndarray
-        The shared phase ``φ[n]``, float64, ``(N,)``; the caller copies it to
-        every channel.
-    """
-    C = sym.shape[0]
-    N = sym.shape[1]
-    M = len(const_r)
-    phase_est = np.empty(N, dtype=np.float64)
-    phi = phi0
-    freq = freq0
-
-    for n in range(N):
-        cos_phi = np.cos(phi)
-        sin_phi = np.sin(phi)
-        e_sum = 0.0
-        for c in range(C):
-            sr = np.float64(sym[c, n].real)
-            si = np.float64(sym[c, n].imag)
-            yr = sr * cos_phi + si * sin_phi
-            yi = -sr * sin_phi + si * cos_phi
-            if is_sq_qam:
-                r_idx = int(round((yr - lev_min) / d_grid))
-                if r_idx < 0:
-                    r_idx = 0
-                elif r_idx >= side:
-                    r_idx = side - 1
-                d_r = levels[r_idx]
-                i_idx = int(round((yi - lev_min) / d_grid))
-                if i_idx < 0:
-                    i_idx = 0
-                elif i_idx >= side:
-                    i_idx = side - 1
-                d_i = levels[i_idx]
-            else:
-                min_d2 = (yr - const_r[0]) ** 2 + (yi - const_i[0]) ** 2
-                d_r = const_r[0]
-                d_i = const_i[0]
-                for k in range(1, M):
-                    d2 = (yr - const_r[k]) ** 2 + (yi - const_i[k]) ** 2
-                    if d2 < min_d2:
-                        min_d2 = d2
-                        d_r = const_r[k]
-                        d_i = const_i[k]
-            e_sum += yi * d_r - yr * d_i
-        # Average error across channels - MVUE for shared LO
-        e = e_sum / float(C)
-        phase_est[n] = phi
-        phi = phi + mu * e + freq
-        freq = freq + beta * e
-
     return phase_est
 
 
