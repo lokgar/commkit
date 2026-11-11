@@ -31,7 +31,7 @@ class TestWienerPhaseSmoother:
         rng = xp.random.RandomState(11)
         r = 0.05
         noisy = truth + rng.normal(0.0, float(np.sqrt(r)), truth.shape[-1])
-        smoothed = recovery.smooth_phase_wiener(
+        smoothed = recovery.smooth_phase(
             noisy, process_variance=q, measurement_variance=r
         )
         g = slice(200, -200)  # trim FFT edge transients
@@ -46,7 +46,7 @@ class TestWienerPhaseSmoother:
         ramp = slope * n
         rng = xp.random.RandomState(5)
         noisy = ramp + rng.normal(0.0, 0.01, N)
-        smoothed = recovery.smooth_phase_wiener(
+        smoothed = recovery.smooth_phase(
             noisy, process_variance=1e-6, measurement_variance=1e-2
         )
         g = slice(200, -200)
@@ -59,9 +59,9 @@ class TestWienerPhaseSmoother:
         q = 2π Δν / f_s, the same result as passing it."""
         truth, _ = self._random_walk(xp, N=4000)
         kw = dict(measurement_variance=0.05)
-        derived = recovery.smooth_phase_wiener(truth, linewidth=100e3,
+        derived = recovery.smooth_phase(truth, linewidth=100e3,
                                                sampling_rate=10e9, **kw)  # fmt: skip
-        explicit = recovery.smooth_phase_wiener(
+        explicit = recovery.smooth_phase(
             truth, process_variance=2 * np.pi * 100e3 / 10e9, **kw
         )
         xpt.assert_allclose(derived, explicit, rtol=1e-12)
@@ -69,7 +69,7 @@ class TestWienerPhaseSmoother:
     def test_invalid_params_raise(self, xp):
         truth, _ = self._random_walk(xp, N=100)
         with pytest.raises(ValueError, match="process_variance"):
-            recovery.smooth_phase_wiener(truth, measurement_variance=0.05)
+            recovery.smooth_phase(truth, measurement_variance=0.05)
 
 
 class TestCprTikhonov:

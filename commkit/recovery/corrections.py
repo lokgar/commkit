@@ -1,6 +1,6 @@
 """Phase corrections, cycle-slip repair and ambiguity resolution.
 
-:func:`smooth_phase_wiener` and :func:`correct_cycle_slips` on phase
+:func:`smooth_phase` and :func:`correct_cycle_slips` on phase
 trajectories, with the :class:`CycleSlip` configuration nested in the
 estimation methods; the static :class:`ConstantPhase` rotation; and
 :func:`resolve_phase_ambiguity` and :func:`resolve_channel_permutation`
@@ -27,7 +27,7 @@ __all__ = [
     "correct_cycle_slips",
     "resolve_channel_permutation",
     "resolve_phase_ambiguity",
-    "smooth_phase_wiener",
+    "smooth_phase",
 ]
 
 
@@ -73,14 +73,14 @@ def _log_phase_summary(
 # -----------------------------------------------------------------------------
 # PHASE-TRACK UTILITIES (array-only)
 # -----------------------------------------------------------------------------
-# smooth_phase_wiener: Zero-phase Wiener smoother on a phase trajectory.
+# smooth_phase: Zero-phase Wiener smoother on a phase trajectory.
 # correct_cycle_slips: Cycle-slip detection/correction on a phase trajectory.
 #
 # Both operate on a phase trajectory - a derived quantity, not raw IQ samples
 # or any field a Signal carries - so neither is Signal-aware.
 
 
-def smooth_phase_wiener(
+def smooth_phase(
     phase: ArrayType,
     *,
     process_variance: float | None = None,

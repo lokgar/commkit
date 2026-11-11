@@ -2,7 +2,7 @@
 closed forms over AWGN.
 
 :mod:`~commkit.metrics.quality` holds :func:`evm`, :func:`snr` and
-:func:`estimate_noise_variance`; :mod:`~commkit.metrics.error_rates`
+:func:`noise_variance`; :mod:`~commkit.metrics.error_rates`
 :func:`ber`, :func:`fer` and :func:`ser`; :mod:`~commkit.metrics.information`
 :func:`mi`, :func:`gmi` and :func:`ngmi`; :mod:`~commkit.metrics.awgn` the
 expected values over AWGN at an Es/N0, :func:`awgn_ser`, :func:`awgn_ber`,
@@ -28,7 +28,7 @@ Units are carried by argument names (``esn0_db``, ``snr_db``,
 with one meaning:
 
 * ``noise_var`` is the variance of the noise in *your samples*, what
-  :func:`estimate_noise_variance` measures and
+  :func:`noise_variance` measures and
   :func:`~commkit.mapping.compute_llr` takes;
 * ``snr_db`` is a power ratio in *your samples*, what :func:`snr` measures
   and ``apply_awgn(snr_db=)`` sets;
@@ -91,7 +91,7 @@ take the :class:`~commkit.coding.DecodeResult` of
 :func:`commkit.coding.decode` and the transmitted Signal (or its
 ``Reference``): ``ber(res, sig)`` compares with ``reference.info_bits``,
 and ``fer(res, sig)`` counts blocks of the code's ``k`` bits.
-:func:`estimate_noise_variance` gives the ``noise_var`` of ``compute_llr``
+:func:`noise_variance` gives the ``noise_var`` of ``compute_llr``
 and the information rates.  :func:`commkit.coding.error_rate_curve`
 measures a code's error rates against Es/N0 by Monte Carlo.
 
@@ -114,7 +114,7 @@ Which scale each metric reads:
 from .awgn import awgn_ber, awgn_gmi, awgn_mi, awgn_ser
 from .error_rates import ber, fer, ser
 from .information import gmi, mi, ngmi
-from .quality import estimate_noise_variance, evm, snr
+from .quality import evm, noise_variance, snr
 
 __all__ = [
     "awgn_ber",
@@ -122,12 +122,12 @@ __all__ = [
     "awgn_mi",
     "awgn_ser",
     "ber",
-    "estimate_noise_variance",
     "evm",
     "fer",
     "gmi",
     "mi",
     "ngmi",
+    "noise_variance",
     "ser",
     "snr",
 ]

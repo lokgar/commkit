@@ -670,7 +670,7 @@ ROWS: list[Row] = [
         symbols=True,
     ),
     Row(
-        "commkit.metrics.quality.estimate_noise_variance",
+        "commkit.metrics.quality.noise_variance",
         METRIC,
         data=2,
         call=lambda c, x: _a(x * 1.01, _ref(c, x)),
@@ -815,7 +815,7 @@ ROWS: list[Row] = [
         call=lambda c, x: _a(x, _ref(c, x), constellation=C16),
         symbols=True,
     ),
-    Row("commkit.recovery.corrections.smooth_phase_wiener", TRAJECTORY),
+    Row("commkit.recovery.corrections.smooth_phase", TRAJECTORY),
     # --- smoothing ----------------------------------------------------------
     Row("commkit.smoothing.moving_average", HELPER),
     Row("commkit.smoothing.savgol_smooth", HELPER),

@@ -129,7 +129,7 @@ Dependencies point downward only:
 
 - **Transforms:** array in gives array out on the same device; Signal in gives a new Signal (with `sampling_rate` updated when the rate changes).
 - **Estimators** reduce over the time axis: `(N,)` gives 0-d, `(C, N)` gives `(C,)`, on the input device.
-- **Metrics** (`evm`, `snr`, `ber`, `fer`, `ser`, `gmi`, `ngmi`, `mi`) and **analysis summaries** (`estimate_linewidth`, `allan_deviation`, the `frequency_drift` statistics, which fit plot-sized reductions) return host values: a `float` for 1-D input, `np.ndarray (C,)` for 2-D. Sample-rate outputs (trajectories, PSDs, `dsh_phase`) stay on the input device.
+- **Metrics** (`evm`, `snr`, `noise_variance`, `ber`, `fer`, `ser`, `gmi`, `ngmi`, `mi`) and **analysis summaries** (`estimate_linewidth`, `allan_deviation`, the `frequency_drift` statistics, which fit plot-sized reductions) return host values: a `float` for 1-D input, `np.ndarray (C,)` for 2-D. Sample-rate outputs (trajectories, PSDs, `dsh_phase`) stay on the input device.
 - Metrics **raise** on empty selections, never return `None` or `0.0` for "nothing measured", and never silently align, rotate or permute against the reference.
 - **More than one value** is a frozen dataclass with named fields. No dicts, no tuples longer than two.
 - **Equalizers** return `EqualizerResult`: `y_hat` is always an array, `signal` the 1-SPS Signal for Signal input, `state` the continuation state (`state=result.state`), and diagnostics as data.
@@ -150,7 +150,7 @@ Dependencies point downward only:
 - Computations use plain nouns (`allan_deviation`).
 - **Glossary**, one name each:
   - `num_taps`, `step_size`, `sps`, `constellation`, `pulse`, `rng`, `num_symbols`, `num_channels` (never streams), `sampling_rate`, `symbol_rate`, `noise_var`, `nfft`, `regularization`, `max_iterations`.
-  - Noise has three names, each with one meaning: `noise_var` is the variance E|n|² of the noise in the samples a function receives (measured by `estimate_noise_variance`); `snr_db` a power ratio in those samples (measured by `snr`); `esn0_db` the channel's textbook Es/N0, independent of the dtype (real samples carry the in-phase half of the noise, `N0/2`). A function taking `noise_var` for a demapping model (`compute_llr`, `mi`, `gmi`, `ngmi`) uses the likelihood of complex or real noise after the samples' dtype and also accepts `esn0_db`, so users never convert by hand.
+  - Noise has three names, each with one meaning: `noise_var` is the variance E|n|² of the noise in the samples a function receives (measured by `noise_variance`); `snr_db` a power ratio in those samples (measured by `snr`); `esn0_db` the channel's textbook Es/N0, independent of the dtype (real samples carry the in-phase half of the noise, `N0/2`). A function taking `noise_var` for a demapping model (`compute_llr`, `mi`, `gmi`, `ngmi`) uses the likelihood of complex or real noise after the samples' dtype and also accepts `esn0_db`, so users never convert by hand.
   - A size names its unit: `num_symbols`, `num_blocks` (codewords of a FEC code), `info_bits` (a code's information length where it is a parameter), `blocks_per_frame`, `num_variables`, `num_segments`. In `coding`, `length` and `n` mean the codeword length in bits and `k` the information length, nothing else.
   - A seeded part of a factory takes `<part>_rng` (`payload_rng`), with the semantics of `rng`.
   - `method=` strings name only a numerical flavor of one algorithm (`method="maxlog" | "exact"`); algorithms are objects.

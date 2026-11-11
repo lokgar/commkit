@@ -8,7 +8,7 @@ method object per algorithm: decision-directed :class:`PLL`, block-based
 rotation.  The block methods, the PLL and ``PilotInterpolation`` repair cycle
 slips with a nested :class:`CycleSlip`.
 
-Also :func:`correct_cycle_slips` and :func:`smooth_phase_wiener` on phase
+Also :func:`correct_cycle_slips` and :func:`smooth_phase` on phase
 trajectories, and the ambiguity resolution against the reference,
 :func:`resolve_phase_ambiguity` and :func:`resolve_channel_permutation`.
 """
@@ -30,7 +30,7 @@ from .corrections import (
     correct_cycle_slips,
     resolve_channel_permutation,
     resolve_phase_ambiguity,
-    smooth_phase_wiener,
+    smooth_phase,
 )
 from .pilots import PilotInterpolation, PilotTone, PilotTones
 from .pll import PLL
@@ -53,5 +53,5 @@ __all__ = [
     "estimate_carrier_phase",
     "resolve_channel_permutation",
     "resolve_phase_ambiguity",
-    "smooth_phase_wiener",
+    "smooth_phase",
 ]

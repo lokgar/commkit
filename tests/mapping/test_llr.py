@@ -552,7 +552,7 @@ class TestClosedFormMaxLog:
 
 class TestNoiseConvention:
     """noise_var is the variance of the noise in the symbols, esn0_db the
-    channel's Es/N0: the chain apply_awgn -> estimate_noise_variance ->
+    channel's Es/N0: the chain apply_awgn -> noise_variance ->
     compute_llr gives true LLRs for real and complex symbols alike."""
 
     @staticmethod
@@ -563,7 +563,7 @@ class TestNoiseConvention:
         bits = np.random.default_rng(7).integers(0, 2, n).astype(np.int8)
         s = mapping.map_bits(bits, constellation=c).astype(dtype)
         r = apply_awgn(xp.asarray(s), esn0_db=3.0, sps=1, rng=8)
-        nv = metrics.estimate_noise_variance(r, xp.asarray(s))
+        nv = metrics.noise_variance(r, xp.asarray(s))
         return r, xp.asarray(bits), nv
 
     @pytest.mark.parametrize(

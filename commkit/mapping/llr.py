@@ -54,7 +54,7 @@ def compute_llr(
         Variance ``sigma^2 = E[|n|^2]`` of the noise in ``symbols``, on the
         constellation's scale: of circular complex noise for complex
         symbols, of real noise for real ones (what
-        :func:`~commkit.metrics.estimate_noise_variance` measures).  Give
+        :func:`~commkit.metrics.noise_variance` measures).  Give
         this or ``esn0_db``.
     esn0_db : float, optional
         Es/N0 of the channel in dB, instead of ``noise_var``: Es is the

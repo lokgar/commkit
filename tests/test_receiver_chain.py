@@ -99,7 +99,7 @@ class TestCodedSisoChain:
 
     def _score(self, payload: Any) -> tuple[float, float]:
         skip = 2 * self.TRAIN
-        nv = float(ck.metrics.estimate_noise_variance(payload, num_skip_symbols=skip))
+        nv = float(ck.metrics.noise_variance(payload, num_skip_symbols=skip))
         dec = decode(ck.mapping.compute_llr(payload, noise_var=nv), code=self.CODE)
         pre = ck.metrics.ber(payload, num_skip_symbols=skip)
         return pre, ck.metrics.fer(dec, payload)

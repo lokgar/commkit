@@ -1,4 +1,4 @@
-"""Signal quality against the reference: :func:`evm`, :func:`snr` and :func:`estimate_noise_variance`.
+"""Signal quality against the reference: :func:`evm`, :func:`snr` and :func:`noise_variance`.
 
 All three divide the received symbols by the data-aided gain ``g = |<r s*>|
 / <|s|^2>`` against the reference normalized to unit average power, so
@@ -27,7 +27,7 @@ from ._common import (
     _unit_reference,
 )
 
-__all__ = ["estimate_noise_variance", "evm", "snr"]
+__all__ = ["noise_variance", "evm", "snr"]
 
 
 def evm(
@@ -150,7 +150,7 @@ def _error_power(
     return noise_power, tx_pwr[..., 0], xp
 
 
-def estimate_noise_variance(
+def noise_variance(
     symbols: ArrayType | Signal,
     reference: ArrayType | None = None,
     *,
@@ -188,11 +188,11 @@ def estimate_noise_variance(
 
     Examples
     --------
-    >>> noise_var = float(np.mean(estimate_noise_variance(y)))
+    >>> noise_var = float(np.mean(noise_variance(y)))
     >>> llrs = compute_llr(y, noise_var=noise_var)
     """
     noise_power, _, _ = _error_power(
-        symbols, reference, num_skip_symbols, "estimate_noise_variance()"
+        symbols, reference, num_skip_symbols, "noise_variance()"
     )
     out = to_report_scalar(noise_power)
     if isinstance(out, float):

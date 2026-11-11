@@ -128,7 +128,7 @@ def apply_awgn(
     --------
     commkit.mapping.compute_llr : Takes the variance of the noise in the
         symbols, or the same ``esn0_db``.
-    commkit.metrics.estimate_noise_variance : Measures that variance.
+    commkit.metrics.noise_variance : Measures that variance.
 
     Examples
     --------
