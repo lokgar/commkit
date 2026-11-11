@@ -1,10 +1,11 @@
-"""Laser and oscillator noise.
+"""Laser and oscillator noise and detuning.
 
 :func:`generate_phase_noise` draws a phase trajectory from the power-law
 FM-noise model (white FM, the Lorentzian linewidth, plus optional 1/f
 flicker FM) and :func:`apply_phase_noise` rotates samples by such a
 trajectory.  :func:`apply_intensity_noise` adds a laser's relative
-intensity noise.
+intensity noise, and :func:`apply_frequency_offset` the carrier frequency
+offset between transmitter and receiver oscillators.
 """
 
 import math
@@ -20,7 +21,12 @@ from ..core._signal_adapter import S, adapt_signal, require_device
 from ..logger import logger
 from ..math import _derotate
 
-__all__ = ["apply_intensity_noise", "apply_phase_noise", "generate_phase_noise"]
+__all__ = [
+    "apply_frequency_offset",
+    "apply_intensity_noise",
+    "apply_phase_noise",
+    "generate_phase_noise",
+]
 
 # -----------------------------------------------------------------------------
 # PHASE-NOISE SYNTHESIS (array-only)
@@ -289,6 +295,69 @@ def apply_phase_noise(
     # x · e^{jφ} in the samples' precision ((1, N) broadcasts across channels).
     result = _derotate(x, -phase)
 
+    return signal_adapter.wrap_samples(restore_1d(was_1d, result))
+
+
+def apply_frequency_offset(
+    samples: S,
+    *,
+    offset: float | ArrayType,
+    sampling_rate: float | None = None,
+) -> S:
+    """Add a carrier frequency offset by complex mixing.
+
+    ``y[n] = x[n] · exp(j 2π Δf n / f_s)`` with ``n = 0`` at the first
+    sample, for any offset (no snapping to the FFT grid, unlike
+    :func:`commkit.spectral.shift_frequency`).  It is the exact inverse of
+    :func:`commkit.frequency.correct_frequency_offset` with the same value.
+
+    Parameters
+    ----------
+    samples : array_like or Signal
+        Samples, ``(N,)`` or ``(C, N)``.
+    offset : float or array_like
+        Frequency offset ``Δf`` in Hz: a scalar for every channel, or one
+        value per channel, ``(C,)``.
+    sampling_rate : float, optional
+        Sampling rate in Hz.  Taken from the Signal; required for array
+        input.  A value that disagrees with the Signal raises.
+
+    Returns
+    -------
+    ndarray or Signal
+        The mixed samples, same shape, dtype and device as the input
+        (complex for real input).
+
+    Raises
+    ------
+    ValueError
+        If ``offset`` has neither one value nor one per channel.
+
+    Notes
+    -----
+    The phase ramp is computed and wrapped in float64, then the rotation
+    runs in the samples' precision, so a long complex64 record keeps its
+    phase accuracy and is never promoted.
+
+    Examples
+    --------
+    >>> y = apply_frequency_offset(x, offset=150e6, sampling_rate=64e9)
+    >>> y = apply_frequency_offset(sig, offset=[150e6, -20e6])  # per channel
+    """
+    signal_adapter = adapt_signal(samples, function_name="apply_frequency_offset()")
+    fs = float(signal_adapter.resolve_fact("sampling_rate", sampling_rate))
+    x, xp, _ = dispatch(signal_adapter.array)
+    x, was_1d = as_2d(x, name="samples")
+    C, N = x.shape
+    offsets = np.asarray(offset, dtype=np.float64).reshape(-1)
+    if offsets.size not in (1, C):
+        raise ValueError(
+            f"apply_frequency_offset(): offset has {offsets.size} values for "
+            f"{C} channel(s); give one, or one per channel."
+        )
+    logger.info("Applying frequency offset: %s Hz.", offsets.tolist())
+    step = xp.asarray(offsets * (2.0 * np.pi / fs))[:, None]  # (1 or C, 1)
+    result = _derotate(x, -step * xp.arange(N, dtype=xp.float64))
     return signal_adapter.wrap_samples(restore_1d(was_1d, result))
 
 

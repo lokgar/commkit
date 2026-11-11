@@ -6,7 +6,7 @@ import pytest
 from commkit import frequency, generate, spectral
 from commkit.core import Signal
 from commkit.filtering import RRC
-from commkit.impairments import apply_awgn
+from commkit.impairments import apply_awgn, apply_frequency_offset
 from commkit.mapping import Constellation
 from tests.common import theory
 from tests.common.conversions import device_of, to_numpy
@@ -17,6 +17,14 @@ from tests.common.signals import make_test_psk_signal, make_test_qam_signal
 # -----------------------------------------------------------------------------
 
 FS = 1e6  # 1 MHz sampling rate, common to all tests
+
+
+def _tone(xp, n, frequency_hz, fs=FS):
+    """Unit complex64 tone exp(j2πfn/fs), n = 0 at the first sample."""
+    ones = xp.ones(n, dtype=xp.complex64)
+    return apply_frequency_offset(ones, offset=frequency_hz, sampling_rate=fs)
+
+
 SNR_DB = 30  # generous SNR so numerical algorithms converge reliably
 
 
@@ -310,9 +318,7 @@ class TestFoePilots:
             symbols = (symbols + noise).astype(np.complex64)
 
         samples = xp.asarray(symbols)
-        # Apply exact frequency offset (no bin quantization)
-        t = xp.arange(n_samples, dtype=xp.float64) / fs
-        samples = samples * xp.exp(1j * 2 * np.pi * fo_hz * t).astype(xp.complex64)
+        samples = apply_frequency_offset(samples, offset=fo_hz, sampling_rate=fs)
         return samples, pilot_indices, pilot_values
 
     @pytest.mark.parametrize("fo_hz", [1_000.0, 5_000.0, -3_000.0])
@@ -383,12 +389,8 @@ class TestFoeMengaliMorelli:
     def test_blind_qam_accuracy(self, xp, fo_hz, order):
         """Blind QAM mode: estimate within 2 % of true offset at 30 dB SNR."""
         sig = _qam_signal(xp, order, 4096, fo_hz=0.0)  # generate without offset
-        # Apply exact frequency offset via direct complex mixing
-        n = xp.arange(sig.samples.shape[-1], dtype=xp.float64)
         sig = sig.replace(
-            samples=(sig.samples * xp.exp(1j * 2 * np.pi * fo_hz / FS * n)).astype(
-                sig.samples.dtype
-            )
+            samples=apply_frequency_offset(sig.samples, offset=fo_hz, sampling_rate=FS)
         )
         est = frequency.estimate_frequency_offset(
             sig.samples,
@@ -410,11 +412,8 @@ class TestFoeMengaliMorelli:
         ).to(device_of(xp))
         ideal = sig.samples.copy()
         sig = sig.replace(samples=apply_awgn(sig.samples, esn0_db=25, sps=1))
-        n = xp.arange(sig.samples.shape[-1], dtype=xp.float64)
         sig = sig.replace(
-            samples=(sig.samples * xp.exp(1j * 2 * np.pi * fo_hz / FS * n)).astype(
-                sig.samples.dtype
-            )
+            samples=apply_frequency_offset(sig.samples, offset=fo_hz, sampling_rate=FS)
         )
         est = frequency.estimate_frequency_offset(
             sig.samples * xp.conj(ideal),
@@ -427,8 +426,7 @@ class TestFoeMengaliMorelli:
         """M&M lock range [-fs/2, fs/2]: succeeds at 40 % of Nyquist where Kay wraps."""
         N = 4096
         fo_hz = 0.40 * FS  # 40 % of sampling rate
-        n = xp.arange(N, dtype=xp.float64)
-        tone = xp.exp(1j * 2 * np.pi * fo_hz / FS * n).astype(xp.complex64)
+        tone = _tone(xp, N, fo_hz)
         # Generic blind mode (no modulation - pure tone)
         est = frequency.estimate_frequency_offset(
             tone, frequency.MengaliMorelli(), sampling_rate=FS
@@ -439,8 +437,7 @@ class TestFoeMengaliMorelli:
         """Generic mode (no modulation): pure tone estimated accurately."""
         N = 2048
         fo_hz = 7_500.0
-        n = xp.arange(N, dtype=xp.float64)
-        tone = xp.exp(1j * 2 * np.pi * fo_hz / FS * n).astype(xp.complex64)
+        tone = _tone(xp, N, fo_hz)
         est = frequency.estimate_frequency_offset(
             tone, frequency.MengaliMorelli(), sampling_rate=FS
         ).value
@@ -451,9 +448,11 @@ class TestFoeMengaliMorelli:
         fo_hz = 6_000.0
         sig_a = _qam_signal(xp, 4, 2048, fo_hz=0.0)
         sig_b = _qam_signal(xp, 4, 2048, fo_hz=0.0)
-        n = xp.arange(2048, dtype=xp.float64)
-        mixer = xp.exp(1j * 2 * np.pi * fo_hz / FS * n).astype(xp.complex64)
-        mimo = xp.stack([sig_a.samples * mixer, sig_b.samples * mixer], axis=0)
+        mimo = apply_frequency_offset(
+            xp.stack([sig_a.samples, sig_b.samples], axis=0),
+            offset=fo_hz,
+            sampling_rate=FS,
+        )
         est = frequency.estimate_frequency_offset(
             mimo,
             frequency.MengaliMorelli(),
@@ -469,9 +468,11 @@ class TestFoeMengaliMorelli:
         fo_hz = 6_000.0
         sig_a = _qam_signal(xp, 4, 2048, fo_hz=0.0)
         sig_b = _qam_signal(xp, 4, 2048, fo_hz=0.0)
-        n = xp.arange(2048, dtype=xp.float64)
-        mixer = xp.exp(1j * 2 * np.pi * fo_hz / FS * n).astype(xp.complex64)
-        mimo = xp.stack([sig_a.samples * mixer, sig_b.samples * mixer], axis=0)
+        mimo = apply_frequency_offset(
+            xp.stack([sig_a.samples, sig_b.samples], axis=0),
+            offset=fo_hz,
+            sampling_rate=FS,
+        )
         est = (
             frequency.estimate_frequency_offset(
                 mimo,
@@ -489,11 +490,8 @@ class TestFoeMengaliMorelli:
         """Custom max_lag parameter: still converges to correct estimate (exact mixing)."""
         fo_hz = 3_000.0
         sig = _qam_signal(xp, 4, 2048, fo_hz=0.0)
-        n = xp.arange(sig.samples.shape[-1], dtype=xp.float64)
         sig = sig.replace(
-            samples=(sig.samples * xp.exp(1j * 2 * np.pi * fo_hz / FS * n)).astype(
-                sig.samples.dtype
-            )
+            samples=apply_frequency_offset(sig.samples, offset=fo_hz, sampling_rate=FS)
         )
         est = frequency.estimate_frequency_offset(
             sig.samples,
@@ -557,9 +555,8 @@ class TestFoeRegression:
             rng.standard_normal(n_samples) + 1j * rng.standard_normal(n_samples)
         ).astype(np.complex64) * np.sqrt(10 ** (-SNR_DB / 10) / 2)
         symbols = (symbols + noise).astype(np.complex64)
-        t = np.arange(n_samples, dtype=np.float64) / FS
-        samples = xp.asarray(
-            symbols * np.exp(1j * 2 * np.pi * fo_hz * t).astype(np.complex64)
+        samples = apply_frequency_offset(
+            xp.asarray(symbols), offset=fo_hz, sampling_rate=FS
         )
         est = frequency.estimate_frequency_offset(
             samples,
@@ -612,8 +609,7 @@ class TestFindBiasTone:
         N = 4096
         nfft = 1 << int(np.ceil(np.log2(N)))
         bin_width = fs / nfft
-        n = xp.arange(N, dtype=xp.float64)
-        seg = xp.exp(1j * 2 * np.pi * tone_hz / fs * n).astype(xp.complex64)
+        seg = _tone(xp, N, tone_hz, fs)
         est = frequency.estimate_frequency_offset(
             seg, frequency.SpectralPeak(), sampling_rate=fs
         ).value
@@ -627,8 +623,7 @@ class TestFindBiasTone:
         bin_width = fs / nfft
         # Place tone at 0.3 bins above an integer bin (maximal argmax bias region)
         tone_hz = 10.0 * bin_width + 0.3 * bin_width
-        n_np = np.arange(N, dtype=np.float64)
-        seg_np = np.exp(1j * 2 * np.pi * tone_hz / fs * n_np).astype(np.complex64)
+        seg_np = _tone(np, N, tone_hz, fs)
 
         # Argmax-only reference (nearest bin centre, no interpolation)
         X_np = np.fft.fft(seg_np, n=nfft)
@@ -647,12 +642,7 @@ class TestFindBiasTone:
         """target_frequency + search_band rejects a 10x stronger out-of-band tone."""
         fs = 1e9
         N = 4096
-        n = xp.arange(N, dtype=xp.float64)
-        target = xp.exp(1j * 2 * np.pi * 100e6 / fs * n).astype(xp.complex128)
-        interferer = 10.0 * xp.exp(1j * 2 * np.pi * 400e6 / fs * n).astype(
-            xp.complex128
-        )
-        seg = (target + interferer).astype(xp.complex64)
+        seg = _tone(xp, N, 100e6, fs) + 10.0 * _tone(xp, N, 400e6, fs)
         est = frequency.estimate_frequency_offset(
             seg,
             frequency.SpectralPeak(target_frequency=100e6, search_band=50e6),
@@ -663,8 +653,7 @@ class TestFindBiasTone:
     def test_partial_search_params_raises(self, xp):
         """Providing only one of target_frequency / search_band raises ValueError."""
         N = 256
-        n = xp.arange(N, dtype=xp.float64)
-        seg = xp.exp(1j * 2 * np.pi * 1e5 / 1e6 * n).astype(xp.complex64)
+        seg = _tone(xp, N, 1e5, 1e6)
         with pytest.raises(ValueError, match="both be given or both omitted"):
             frequency.estimate_frequency_offset(
                 seg, frequency.SpectralPeak(target_frequency=1e5), sampling_rate=1e6
@@ -677,8 +666,7 @@ class TestFindBiasTone:
     def test_empty_search_window_raises(self, xp):
         """Search window outside the FFT grid raises ValueError."""
         N = 128
-        n = xp.arange(N, dtype=xp.float64)
-        seg = xp.exp(1j * 2 * np.pi * 1e5 / 1e6 * n).astype(xp.complex64)
+        seg = _tone(xp, N, 1e5, 1e6)
         with pytest.raises(ValueError, match="empty search window"):
             # beyond Nyquist for fs=1 MHz
             frequency.estimate_frequency_offset(
@@ -692,8 +680,7 @@ class TestFindBiasTone:
         """GPU and CPU backends agree to within 1 Hz on the same segment."""
         fs = 1e6
         N = 4096
-        n_np = np.arange(N, dtype=np.float64)
-        seg_np = np.exp(1j * 2 * np.pi * tone_hz / fs * n_np).astype(np.complex64)
+        seg_np = _tone(np, N, tone_hz, fs)
         est_cpu = frequency.estimate_frequency_offset(
             seg_np, frequency.SpectralPeak(), sampling_rate=fs
         ).value
@@ -710,10 +697,7 @@ class TestFindBiasTone:
         bin_width = fs / nfft
         # Place tone 2 bins below Nyquist - peak at nfft-2, neighbors wrap to nfft-3 and nfft-1
         tone_hz = -(fs / 2) + 2 * bin_width
-        n_np = np.arange(N, dtype=np.float64)
-        seg = xp.asarray(
-            np.exp(1j * 2 * np.pi * tone_hz / fs * n_np).astype(np.complex64)
-        )
+        seg = _tone(xp, N, tone_hz, fs)
         est = frequency.estimate_frequency_offset(
             seg, frequency.SpectralPeak(), sampling_rate=fs
         ).value
@@ -862,8 +846,7 @@ class TestCorrectFrequencyOffsetBlockwise:
         fs = 1e9
         N = 8192
         tone_hz = 100e6
-        t = np.arange(N) / fs
-        sig = xp.asarray(np.exp(2j * np.pi * tone_hz * t).astype(np.complex64))
+        sig = _tone(xp, N, tone_hz, fs)
         method = frequency.SpectralPeak(
             target_frequency=tone_hz, search_band=20e6, block_size=1024
         )
@@ -921,8 +904,7 @@ class TestSignalInputFrequency:
         fs = 1e9
         N = 8192
         tone_hz = 100e6
-        t = np.arange(N) / fs
-        tone = xp.asarray((np.exp(2j * np.pi * tone_hz * t)).astype(np.complex64))
+        tone = _tone(xp, N, tone_hz, fs)
         sig = Signal(samples=tone, sampling_rate=fs, symbol_rate=fs / 2)
 
         est_sig = frequency.estimate_frequency_offset(
@@ -969,9 +951,6 @@ def test_pilot_symbols_from_frame(xp):
     one = frequency.PilotSlope.from_frame(frame)
     np.testing.assert_array_equal(method.indices, 2 * one.indices)
     sig = frame.to_signal(symbol_rate=1e6).to(device_of(xp))
-    n = xp.arange(sig.samples.shape[-1])
-    shifted = sig.replace(
-        samples=(sig.samples * xp.exp(2j * np.pi * 1e3 * n / 1e6)).astype(xp.complex64)
-    )
+    shifted = apply_frequency_offset(sig, offset=1e3)
     est = frequency.estimate_frequency_offset(shifted, one)
     assert float(to_numpy(est.value)) == pytest.approx(1e3, rel=1e-3)

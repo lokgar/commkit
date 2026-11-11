@@ -623,6 +623,12 @@ ROWS: list[Row] = [
         fact=SPS_CONFLICT,
     ),
     Row(
+        "commkit.impairments.source.apply_frequency_offset",
+        TRANSFORM,
+        call=lambda c, x: _a(x, offset=1e6, sampling_rate=FS),
+        fact=FS_CONFLICT,
+    ),
+    Row(
         "commkit.impairments.source.apply_phase_noise",
         TRANSFORM,
         call=lambda c, x: _a(x, sampling_rate=FS, linewidth=1e5, rng=1),
