@@ -14,10 +14,16 @@ Notable changes to CommKit, newest first. Performance figures are from the refer
 - `resample(sps_out=)` raises when `sps_out / sps_in` has no fraction with terms up to 1000; such ratios designed filters of up to millions of taps. Give `up` and `down` explicitly.
 - `zadoff_chu_sequence` raises on a root that shares a factor with the length, and the per-channel roots of a MIMO ZC `Preamble` skip such roots: on a composite length they gave full-height autocorrelation sidelobes. Preambles of prime length are unchanged; a MIMO preamble of length 64 now uses the roots 1, 3, 5, 7 instead of 1, 2, 3, 4.
 - `estimate_iq_imbalance`, `apply_iq_imbalance` and `correct_iq_imbalance` raise `ValueError` on real samples instead of returning NaN, the input unchanged or a NumPy error.
+- `SingleCarrierFrame.get_structure_map` returns a `FrameStructure` with the fields `pilots`, `payload`, `preamble` and `guard` (read-only, `None` where the map leaves a segment out) instead of a dict: `layout["pilots"]` becomes `layout.pilots`.
+- `ser` and `evm` raise when the reference symbols are not points of the decision constellation (for `evm`, when one is known: the argument or the Signal's), for example after remapping the samples without the reference; they reported a SER of 0.75 and an EVM of 138 % for unipolar PAM-4 shifted to bipolar levels. A reference rescaled to its measured power still passes.
+- The adaptive equalizers raise when `training_symbols` is longer than the record; the excess was dropped with a WARNING.
+- Logging: WARNINGs that only restated the call's own parameters are DEBUG (equalizer `sps` and short `num_taps`, `rls` at `sps > 1`, small `BPS`, Viterbi-Viterbi and Tikhonov blocks on QAM, M-th power above symmetry 4, a narrow `PilotTone` band, real input to `plot_constellation`); the snapping of `shift_frequency` and `add_pilot_tone` is in their INFO line. Metrics, `estimate_timing`, `correct_timing`, `rls`, `ConstantPhase` and `resolve_phase_ambiguity` log one INFO line per call, the channels in a list. Filters that matched those messages need updating.
 
 ### Added
 
 - `demapper_exit_curve(esn0_db=)` as an alternative to `noise_var`.
+- `impairments.apply_frequency_offset`: a carrier frequency offset at any value (not snapped to the FFT grid like `shift_frequency`), per channel if needed, the exact inverse of `correct_frequency_offset`.
+- A WARNING when the decisions of `lms`, `block_lms` or `rls` collapse onto a few points (blind unipolar PAM-4 below about 8 dB Es/N0 decides every symbol as the lowest level).
 
 ### Performance
 
@@ -34,6 +40,8 @@ Notable changes to CommKit, newest first. Performance figures are from the refer
 - Error messages of `dispersion_compensation_taps`, the dispersion estimators, `PLL`, `BPS` and `Tikhonov` name the function or class.
 - Docstrings: `Gaussian(fwhm=)` is the amplitude FWHM; the loop bandwidth of `Gardner` and `PLL` is nominal (the second-order loop's noise bandwidth is `1.25·B·T`); a frame's Es/N0 under `apply_awgn` is the frame average, not the payload's.
 - `import commkit` no longer exposes `Any` and `importlib`.
+- `dsh_phase`, `estimate_linewidth` with the DSH methods and `dsh_beat` keep single-precision input in single precision, widening only the phase to float64 before the unwrap; they computed the beat in complex128. Complex64 and complex128 runs agree to below 1e-6 rad per sample.
+- `plot_zf_equalizer_response` plots the equalizer `zf_equalizer` applies; for MIMO it showed a scalar inverse per path instead of the matrix inverse, and the combined panel is now the matrix product `W·H`.
 
 ## [3.7.1] - 2026-11-10
 
