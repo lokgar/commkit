@@ -65,9 +65,10 @@ class LinewidthEstimate:
     beta_line : numpy.ndarray or None
         ``BetaSeparation``: the β-line ``8 ln2 f / π²``.
     above : numpy.ndarray or None
-        ``BetaSeparation``: boolean mask of the integrated bins
-        (``S_f > β`` within ``band``), in general a union of disjoint
-        intervals.
+        ``BetaSeparation``: boolean mask of the integrated bins within
+        ``band``: where ``fm_psd_model`` exceeds the β-line, or ``fm_psd``
+        does at bins beyond the fit's spur screen; in general a union of
+        disjoint intervals.
     valid : numpy.ndarray or None
         ``DshFmFit``: bins away from the interferometer notches and, for a
         real (single-photodiode) beat, within the beat's support,
