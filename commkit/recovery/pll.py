@@ -30,7 +30,7 @@ def _get_numba_dd_pll():
     if "dd_pll" not in _NUMBA_PLL:
         import numba
 
-        @numba.njit(cache=True, fastmath=True, nogil=True)
+        @numba.njit(cache=True, fastmath=True, nogil=True, parallel=True)
         def _dd_pll_loop(
             sym,
             const_r,
@@ -86,7 +86,7 @@ def _get_numba_dd_pll():
             M = len(const_r)
             phase_est = np.empty((C, N), dtype=np.float64)
 
-            for c in range(C):
+            for c in numba.prange(C):  # type: ignore[attr-defined,no-untyped-call]
                 phi = phi0
                 freq = freq0
                 for n in range(N):
@@ -270,10 +270,12 @@ class PLL:
     Parameters
     ----------
     normalized_bandwidth : float, default 1e-3
-        One-sided loop bandwidth ``B·T`` in ``(0, 0.5)``, a fraction of the
-        symbol rate (not Hz: ``1e-3`` at 32 GBd is 32 MHz).  Gives
-        critically damped gains ``μ = 4BT``, ``β = 4(BT)²``.  Used when
-        ``proportional_gain`` is not given.
+        Nominal one-sided loop bandwidth ``B·T`` in ``(0, 0.5)``, a fraction
+        of the symbol rate (not Hz: ``1e-3`` at 32 GBd is 32 MHz).  Gives
+        critically damped gains ``μ = 4BT``, ``β = 4(BT)²``: ``ζ = 1`` and
+        ``ω_n T = 2BT``, whose noise bandwidth is ``1.25·B·T`` (``B·T`` is
+        exact for a first-order loop only).  Used when ``proportional_gain``
+        is not given.
     proportional_gain : float, optional
         Raw proportional gain ``μ``; overrides ``normalized_bandwidth``.
         Typical values ``1e-3`` (high-order QAM, high SNR) to ``5e-2``
@@ -312,7 +314,7 @@ class PLL:
         bt = self.normalized_bandwidth
         if not (0.0 < bt < 0.5):
             raise ValueError(
-                f"normalized_bandwidth must be in (0, 0.5) (a fraction of the "
+                f"PLL: normalized_bandwidth must be in (0, 0.5) (a fraction of the "
                 f"symbol rate), got {bt}."
             )
         # validates integral_gain

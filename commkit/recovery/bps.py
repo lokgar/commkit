@@ -59,9 +59,9 @@ class BPS:
 
     def __post_init__(self) -> None:
         if self.test_phases < 1:
-            raise ValueError(f"test_phases must be >= 1, got {self.test_phases}.")
+            raise ValueError(f"BPS: test_phases must be >= 1, got {self.test_phases}.")
         if self.block_size < 1:
-            raise ValueError(f"block_size must be >= 1, got {self.block_size}.")
+            raise ValueError(f"BPS: block_size must be >= 1, got {self.block_size}.")
 
 
 _NUMBA_BPS: dict = {}

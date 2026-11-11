@@ -17,7 +17,6 @@ from .. import _fft
 from .._array import as_2d, broadcast_channels, restore_1d
 from ..backend import ArrayType, dispatch, to_device
 from ..core._signal_adapter import S, adapt_signal
-from ..core.signal import Signal
 from ..logger import logger
 from ..math import _remove_linear_trend
 from ._common import _Context, _Phase
@@ -653,7 +652,7 @@ def resolve_channel_permutation(
     *,
     num_skip_symbols: int = 0,
     metric: str = "coherence",
-) -> ArrayType | Signal:
+) -> S:
     """Resolve a polarization (channel) permutation after MIMO equalization.
 
     A MIMO (butterfly) equalizer can emit the streams in a permuted order
@@ -793,7 +792,7 @@ def resolve_phase_ambiguity(
     constellation: Any = None,
     symmetry: int | None = None,
     num_skip_symbols: int = 0,
-) -> ArrayType | Signal:
+) -> S:
     """Resolve the rotational phase ambiguity left by blind carrier recovery.
 
     Blind CPR (Viterbi-Viterbi, BPS, Tikhonov, PLL) cannot tell the

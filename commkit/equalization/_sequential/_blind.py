@@ -99,7 +99,7 @@ def _blind_equalizer(
     name = f"{kind}()"
     label = kind.upper()
     signal_adapter = adapt_signal(samples, function_name=name)
-    samples = signal_adapter.array
+    x = signal_adapter.array
     sig = signal_adapter.signal
     sps = require_integer_sps(signal_adapter.resolve_fact("sps", sps), name)
     constellation = signal_adapter.resolve_choice("constellation", constellation)
@@ -131,7 +131,7 @@ def _blind_equalizer(
 
     # RMS-normalize samples to unit symbol-rate power (no training)
     run = _prepare_sequential(
-        samples,
+        x,
         equalizer=kind,
         sps=sps,
         num_taps=num_taps,

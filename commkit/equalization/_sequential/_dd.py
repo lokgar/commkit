@@ -287,7 +287,7 @@ def lms(
     arrays are on the input's device.
     """
     signal_adapter = adapt_signal(samples, function_name="lms()")
-    samples = signal_adapter.array
+    x = signal_adapter.array
     sig = signal_adapter.signal
     sps = require_integer_sps(signal_adapter.resolve_fact("sps", sps), "lms()")
     constellation = signal_adapter.resolve_choice("constellation", constellation)
@@ -305,7 +305,7 @@ def lms(
     )
 
     run = _prepare_sequential(
-        samples,
+        x,
         equalizer="lms",
         sps=sps,
         num_taps=num_taps,
@@ -579,7 +579,7 @@ def rls(
        spaced (``sps > 1``) input.
     """
     signal_adapter = adapt_signal(samples, function_name="rls()")
-    samples = signal_adapter.array
+    x = signal_adapter.array
     sig = signal_adapter.signal
     sps = require_integer_sps(signal_adapter.resolve_fact("sps", sps), "rls()")
     constellation = signal_adapter.resolve_choice("constellation", constellation)
@@ -609,7 +609,7 @@ def rls(
     )
 
     run = _prepare_sequential(
-        samples,
+        x,
         equalizer="rls",
         sps=sps,
         num_taps=num_taps,

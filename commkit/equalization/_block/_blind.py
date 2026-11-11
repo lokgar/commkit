@@ -237,7 +237,7 @@ def _block_blind(
     """The body of :func:`block_cma` and :func:`block_rde` (``kind``)."""
     name = f"block_{kind}()"
     signal_adapter = adapt_signal(samples, function_name=name)
-    samples = signal_adapter.array
+    x = signal_adapter.array
     sps = require_integer_sps(signal_adapter.resolve_fact("sps", sps), name)
     constellation = signal_adapter.resolve_choice("constellation", constellation)
     pilot_ref, pilot_mask, pilot_gain_db = _check_pilots(
@@ -250,7 +250,7 @@ def _block_blind(
     label = f"Block-{kind.upper()}"
     result = _block_fdaf_blind(
         kind,
-        samples,
+        x,
         num_taps=num_taps,
         sps=sps,
         step_size=step_size,

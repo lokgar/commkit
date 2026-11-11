@@ -220,12 +220,16 @@ class Tikhonov:
     def __post_init__(self) -> None:
         if self.smoother not in ("rts", "steady_state"):
             raise ValueError(
-                f"smoother must be 'rts' or 'steady_state', got {self.smoother!r}."
+                f"Tikhonov: smoother must be 'rts' or 'steady_state', got {self.smoother!r}."
             )
         if not self.linewidth > 0:
-            raise ValueError(f"linewidth must be > 0 Hz, got {self.linewidth}.")
+            raise ValueError(
+                f"Tikhonov: linewidth must be > 0 Hz, got {self.linewidth}."
+            )
         if self.block_size < 1:
-            raise ValueError(f"block_size must be >= 1, got {self.block_size}.")
+            raise ValueError(
+                f"Tikhonov: block_size must be >= 1, got {self.block_size}."
+            )
 
 
 def _vv_observation_variance(

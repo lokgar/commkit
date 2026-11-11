@@ -16,7 +16,7 @@ from .. import _fft
 from .._array import as_2d, restore_1d
 from .._overlap_save import ols_apply
 from ..backend import ArrayType, dispatch
-from ..core._signal_adapter import adapt_signal, require_integer_sps
+from ..core._signal_adapter import S, adapt_signal, require_integer_sps
 from ..core.signal import Signal
 from ..logger import logger
 from ._common import _build_padded_samples, _normalize_inputs
@@ -29,12 +29,12 @@ __all__ = ["apply_taps", "estimate_transfer_function", "zf_equalizer"]
 
 
 def zf_equalizer(
-    samples: ArrayType | Signal,
+    samples: S,
     channel_estimate: ArrayType,
     *,
     noise_var: float = 0.0,
     center_tap: int = 0,
-) -> ArrayType | Signal:
+) -> S:
     """Equalize a known channel in the frequency domain: zero-forcing or MMSE.
 
     Inverts a channel impulse response estimate per frequency bin over
@@ -72,25 +72,25 @@ def zf_equalizer(
         If ``center_tap`` is outside ``[0, L)``.
     """
     signal_adapter = adapt_signal(samples, function_name="zf_equalizer()")
-    samples = signal_adapter.array
+    x = signal_adapter.array
 
     logger.info("ZF/MMSE equalizer: noise_var=%.2e", noise_var)
-    samples, xp, _ = dispatch(samples)
+    x, xp, _ = dispatch(x)
     # In the samples' precision before the FFT: a float64 estimate would
     # promote the whole overlap-save spectrum and its inverse to complex128.
     channel_estimate = xp.asarray(channel_estimate).astype(
-        xp.result_type(samples.dtype, xp.complex64), copy=False
+        xp.result_type(x.dtype, xp.complex64), copy=False
     )
 
     # Capture BEFORE any reshape so the later frequency-domain branch
     # can still take the efficient scalar path for SISO channels.
     siso_channel = channel_estimate.ndim == 1
 
-    samples, was_1d = as_2d(samples, name="samples")
+    x, was_1d = as_2d(x, name="samples")
     if was_1d and siso_channel:
         channel_estimate = channel_estimate[None, None, :]
 
-    num_ch, N = samples.shape
+    num_ch, N = x.shape
     L = channel_estimate.shape[-1] if channel_estimate.ndim > 0 else 1
     center = operator.index(center_tap)
     if not 0 <= center < L:
@@ -131,7 +131,7 @@ def zf_equalizer(
         Hk_H = xp.conj(xp.transpose(Hk, (0, 2, 1)))  # (N_fft, C_tx, C_rx)
         HHh = Hk @ Hk_H  # (N_fft, C_rx, C_rx)
 
-        eye = xp.eye(num_ch, dtype=samples.dtype)[None, :, :]
+        eye = xp.eye(num_ch, dtype=x.dtype)[None, :, :]
         if num_ch == 2:
             # Fast-path: Explicit 2x2 matrix inversion via Cramer's Rule avoiding
             # GPU LAPACK solver overheads (e.g. cuSOLVER batch inversion).
@@ -160,13 +160,13 @@ def zf_equalizer(
             Y_t = xp.transpose(Y, (2, 0, 1))  # (N_fft, num_ch, blocks)
             return xp.transpose(Wk @ Y_t, (1, 2, 0))  # (num_ch, blocks, N_fft)
 
-    out = ols_apply(samples, N_fft, process)
+    out = ols_apply(x, N_fft, process)
 
     return signal_adapter.wrap_samples(restore_1d(was_1d, out))
 
 
 def apply_taps(
-    samples: ArrayType | Signal,
+    samples: S,
     weights: ArrayType,
     *,
     sps: int | None = None,
@@ -174,7 +174,7 @@ def apply_taps(
     input_norm_factor: float | np.ndarray | None = None,
     samples_prefix: ArrayType | None = None,
     pad_mode: str = "zeros",
-) -> ArrayType | Signal:
+) -> S:
     """Apply frozen equalizer taps: the butterfly filter without adaptation.
 
     Reuses the weights of an earlier equalizer run on new samples, one
@@ -230,28 +230,28 @@ def apply_taps(
                                     input_norm_factor=result.input_norm_factor)
     """
     signal_adapter = adapt_signal(samples, function_name="apply_taps()")
-    samples = signal_adapter.array
+    x = signal_adapter.array
     metadata = {}
     sps = require_integer_sps(signal_adapter.resolve_fact("sps", sps), "apply_taps()")
     if signal_adapter.signal is not None:
         metadata["sampling_rate"] = signal_adapter.signal.symbol_rate
 
-    samples, xp, _ = dispatch(samples)
+    x, xp, _ = dispatch(x)
     weights = xp.asarray(weights)
 
     # Promote SISO -> MIMO shapes for uniform butterfly code path
-    samples, was_1d = as_2d(samples, name="samples")
+    x, was_1d = as_2d(x, name="samples")
     if weights.ndim == 1:
         weights = weights[None, None, :]  # (T,) -> (1, 1, T)
 
-    C, N = samples.shape
+    C, N = x.shape
     num_taps = weights.shape[-1]
     n_sym = N // sps
 
     _at_eq_norm = None
     if normalize:
-        samples, _, _at_eq_norm = _normalize_inputs(
-            samples, None, input_norm_factor=input_norm_factor
+        x, _, _at_eq_norm = _normalize_inputs(
+            x, None, input_norm_factor=input_norm_factor
         )
 
     # Pad left by center tap so window[0] is center-aligned with sample 0,
@@ -260,13 +260,13 @@ def apply_taps(
     pad_left = c_tap
     pad_right = n_sym * sps - N + num_taps - 1 - pad_left
     if samples_prefix is None and pad_mode == "zeros":
-        samples_padded = xp.pad(samples, ((0, 0), (pad_left, pad_right)))
+        samples_padded = xp.pad(x, ((0, 0), (pad_left, pad_right)))
     else:
         # _build_padded_samples is backend-generic: pad on the input device
         # instead of round-tripping the full signal through the host.
         samples_padded = xp.ascontiguousarray(
             _build_padded_samples(
-                samples.astype(xp.complex64),
+                x.astype(xp.complex64),
                 pad_left,
                 pad_right,
                 samples_prefix,
