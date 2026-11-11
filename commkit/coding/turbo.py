@@ -160,7 +160,7 @@ class TurboIterations:
 
     Parameters
     ----------
-    iterations : int, default 8
+    max_iterations : int, default 8
         Most full iterations (both decoders).  A block stops after the first
         iteration in which both decoders take the same hard decision on
         every information bit; the result's ``iterations`` holds the count.
@@ -172,14 +172,14 @@ class TurboIterations:
         max-log-MAP (which overestimates them) and 1 for log-MAP.
     """
 
-    iterations: int = 8
+    max_iterations: int = 8
     method: str = "maxlog"
     scale: float | None = None
 
     def __post_init__(self) -> None:
-        it = self.iterations
+        it = self.max_iterations
         if isinstance(it, bool) or not isinstance(it, int) or it < 1:
-            raise ValueError(f"iterations must be an integer >= 1, got {it!r}.")
+            raise ValueError(f"max_iterations must be an integer >= 1, got {it!r}.")
         if self.method not in ("maxlog", "exact"):
             raise ValueError(
                 f"method must be 'maxlog' or 'exact', got {self.method!r}."
@@ -218,7 +218,7 @@ def _decode(code: TurboCode, llrs: ArrayType, method: TurboIterations) -> _Decod
     app = np.empty((rows, code.n), dtype=np.float32)
     used = np.empty(rows, dtype=np.int32)
     _get_numba_turbo("decode")(
-        host, code.interleaver, _RSC.next, _RSC.outputs, _RSC.tail, method.iterations,
+        host, code.interleaver, _RSC.next, _RSC.outputs, _RSC.tail, method.max_iterations,
         method.method == "exact", scale, bits, app, used,
     )  # fmt: skip
     device = "cpu" if xp is np else "gpu"

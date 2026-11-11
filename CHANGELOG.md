@@ -9,6 +9,7 @@ Notable changes to CommKit, newest first. Performance figures are from the refer
 - Factories take their secondary parameters by keyword: `LDPCCode.dvbs2(rate, frame=...)`, `LDPCCode.quasi_cyclic(base, lifting=...)`, `CRC.nr(name, info_bits=...)` and `Interleaver.block(rows=..., columns=...)`. Add the keywords to existing calls.
 - `SingleCarrierFrame` needs a payload length: give `payload_num_symbols=` or, with a `payload_code`, `payload_blocks=`. It no longer defaults to 1000 symbols.
 - `SingleCarrierFrame(pilot_seed=)` is `pilot_rng=`, with the semantics of `payload_rng` (an integer or a Generator, kept as the integer seed). Files saved with `pilot_seed` still load.
+- `TurboIterations(iterations=)` is `max_iterations=`, as decoding now stops early; positional calls are unchanged. Rename the keyword in existing calls.
 - `decoder_exit_curve`, `demapper_exit_curve` and `ldpc_exit_curves` take `num_points=` instead of `points=`.
 - `demapper_exit_curve(noise_var=)` on a real constellation (PAM) is the variance of the real noise, as for `compute_llr`; it was the variance per complex symbol, twice the real noise. Halve `noise_var` in existing PAM calls to keep their curves, or pass the new `esn0_db=`.
 - `resample(sps_out=)` raises when `sps_out / sps_in` has no fraction with terms up to 1000; such ratios designed filters of up to millions of taps. Give `up` and `down` explicitly.

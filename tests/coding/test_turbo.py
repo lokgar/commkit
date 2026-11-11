@@ -70,7 +70,9 @@ class TestDecoding:
     def test_noiseless(self, xp: Any, xpt: Any) -> None:
         code = TurboCode.lte(104)
         u = random_bits((4, 104), xp, seed=2)
-        res = decode(encode(u, code=code), code=code, method=TurboIterations(2))
+        res = decode(
+            encode(u, code=code), code=code, method=TurboIterations(max_iterations=2)
+        )
         xpt.assert_array_equal(res.bits, u)
 
     @staticmethod
@@ -205,7 +207,7 @@ class TestDecoding:
         with pytest.raises(TypeError, match="info_bits must be an integer"):
             TurboCode(True)
         assert TurboCode(np.int64(40)) == TurboCode(40)
-        with pytest.raises(ValueError, match="iterations"):
+        with pytest.raises(ValueError, match="max_iterations"):
             TurboIterations(0)
         with pytest.raises(ValueError, match="scale"):
             TurboIterations(scale=1.5)
