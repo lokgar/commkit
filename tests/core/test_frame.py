@@ -113,7 +113,27 @@ class TestSingleCarrierFrameBasics:
         )
         assert drawn.payload_rng == int(np.random.default_rng(5).integers(2**63))
         with pytest.raises(ValueError, match="payload_rng"):
-            SingleCarrierFrame(payload_rng=-1)
+            SingleCarrierFrame(payload_num_symbols=64, payload_rng=-1)
+
+    def test_pilot_rng(self) -> None:
+        """pilot_rng seeds the pilots like payload_rng the payload: the
+        default is fixed, another seed changes them, a generator is drawn
+        once and kept as an integer."""
+        kw = dict(payload_num_symbols=63, pilot_pattern="comb", pilot_period=4)
+        a, b = SingleCarrierFrame(**kw), SingleCarrierFrame(**kw)
+        np.testing.assert_array_equal(a.pilot_symbols, b.pilot_symbols)
+        other = SingleCarrierFrame(**kw, pilot_rng=2)
+        assert not np.array_equal(other.pilot_symbols, a.pilot_symbols)
+        drawn = SingleCarrierFrame(**kw, pilot_rng=np.random.default_rng(5))
+        assert drawn.pilot_rng == int(np.random.default_rng(5).integers(2**63))
+        with pytest.raises(ValueError, match="pilot_rng"):
+            SingleCarrierFrame(**kw, pilot_rng=-1)
+
+    def test_payload_length_is_required(self) -> None:
+        """A frame without payload_num_symbols or payload_blocks raises
+        instead of defaulting to 1000 symbols."""
+        with pytest.raises(ValueError, match="payload length"):
+            SingleCarrierFrame()
 
     def test_single_stream_preamble_is_broadcast(self) -> None:
         """A one-stream Barker preamble starts every stream of a MIMO frame."""
@@ -630,7 +650,7 @@ class TestExtractPayload:
         ):
             frame = SingleCarrierFrame(
                 preamble=Preamble(sequence_type="zc", num_symbols=31),
-                **{"guard_num_symbols": 8, **kwargs},
+                **{"guard_num_symbols": 8, "payload_num_symbols": 1000, **kwargs},
             )
             sig = frame.to_signal(sps=2, symbol_rate=1e6)
             assert sig.samples.shape[-1] == 2 * frame.num_symbols

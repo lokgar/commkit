@@ -68,6 +68,20 @@ class TestTimingSequences:
             timing.zadoff_chu_sequence(0)
         with pytest.raises(ValueError, match="Root must be in"):
             timing.zadoff_chu_sequence(10, root=10)
+        with pytest.raises(ValueError, match="coprime"):
+            timing.zadoff_chu_sequence(64, root=2)
+
+    @pytest.mark.parametrize("length", [63, 64])
+    def test_mimo_roots_of_composite_length_are_cazac(self, xp, length):
+        """Every channel of a composite-length MIMO preamble gets a root
+        coprime to the length, so its periodic autocorrelation has no
+        sidelobe (64 with root 2 and 63 with root 3 gave full-height peaks)."""
+        for k in range(4):
+            seq = timing.zadoff_chu_sequence(length, root=zc_mimo_root(k, 1, length))
+            spec = np.fft.fft(seq.astype(np.complex128))
+            acf = np.abs(np.fft.ifft(spec * np.conj(spec))) / length
+            assert acf[0] == pytest.approx(1.0)
+            assert np.max(acf[1:]) < 1e-5
 
     def test_preamble_auto_generation(self, xp):
         """Verify automated preamble bit and symbol generation."""
@@ -925,3 +939,8 @@ class TestParabolicAndSequences:
         for k in range(12):
             r = zc_mimo_root(k, 1, 13)
             assert 1 <= r <= 12
+
+        assert [zc_mimo_root(k, 1, 64) for k in range(4)] == [1, 3, 5, 7]
+        assert [zc_mimo_root(k, 61, 63) for k in range(3)] == [61, 62, 1]
+        with pytest.raises(ValueError, match="coprime"):
+            zc_mimo_root(0, 2, 64)

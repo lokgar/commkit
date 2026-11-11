@@ -5,6 +5,8 @@ They live below ``core`` so that ``core.preamble`` can build preambles without
 importing a DSP module; ``commkit.timing`` exposes the generators publicly.
 """
 
+import math
+
 import numpy as np
 
 from .logger import logger
@@ -73,8 +75,8 @@ def zadoff_chu_sequence(num_symbols: int, *, root: int = 1) -> np.ndarray:
         Sequence length ``N_ZC``; a prime gives the lowest cross-correlation
         between roots.
     root : int, default 1
-        Root index ``u`` in ``[1, num_symbols)``, coprime to ``num_symbols`` (not
-        checked).
+        Root index ``u`` in ``[1, num_symbols)``, coprime to ``num_symbols``
+        (otherwise the periodic autocorrelation has full-height sidelobes).
 
     Returns
     -------
@@ -84,7 +86,8 @@ def zadoff_chu_sequence(num_symbols: int, *, root: int = 1) -> np.ndarray:
     Raises
     ------
     ValueError
-        If ``num_symbols < 1`` or ``root`` is outside ``[1, num_symbols)``.
+        If ``num_symbols < 1``, ``root`` is outside ``[1, num_symbols)`` or
+        ``root`` shares a factor with ``num_symbols``.
 
     Notes
     -----
@@ -95,19 +98,22 @@ def zadoff_chu_sequence(num_symbols: int, *, root: int = 1) -> np.ndarray:
         raise ValueError(f"num_symbols must be positive, got {num_symbols}.")
     if root < 1 or root >= num_symbols:
         raise ValueError(f"Root must be in [1, {num_symbols - 1}].")
+    if math.gcd(root, num_symbols) != 1:
+        raise ValueError(
+            f"zadoff_chu_sequence(): root={root} shares the factor "
+            f"{math.gcd(root, num_symbols)} with num_symbols={num_symbols}; a "
+            "Zadoff-Chu root must be coprime to the length."
+        )
 
-    xp = np
-
-    # ZC formula: x[n] = exp(-j * pi * u * n * (n+1) / N)
-    n = xp.arange(num_symbols)
+    n = np.arange(num_symbols)
     if num_symbols % 2 == 0:
         # Even length: x[n] = exp(-j * pi * u * n^2 / N)
-        seq = xp.exp(-1j * xp.pi * root * n * n / num_symbols)
+        seq = np.exp(-1j * np.pi * root * n * n / num_symbols)
     else:
         # Odd length: x[n] = exp(-j * pi * u * n * (n+1) / N)
-        seq = xp.exp(-1j * xp.pi * root * n * (n + 1) / num_symbols)
+        seq = np.exp(-1j * np.pi * root * n * (n + 1) / num_symbols)
 
-    out: np.ndarray = seq.astype(xp.complex64)
+    out: np.ndarray = seq.astype(np.complex64)
 
     logger.debug("Generated ZC sequence: num_symbols=%s, root=%s.", num_symbols, root)
     return out
@@ -116,20 +122,22 @@ def zadoff_chu_sequence(num_symbols: int, *, root: int = 1) -> np.ndarray:
 def zc_mimo_root(channel_index: int, base_root: int, num_symbols: int) -> int:
     """Return the Zadoff-Chu root for channel ``channel_index`` in a MIMO preamble.
 
-    Assigns a deterministic unique root to each channel by cycling through
-    distinct roots starting from ``base_root``, wrapping in the range
-    ``[1, num_symbols-1]``.  For a prime ``num_symbols`` all roots are valid CAZAC
-    sequences; any two distinct roots are near-orthogonal with cross-correlation
-    magnitude ``1/sqrt(num_symbols)`` at every lag.
+    Assigns a deterministic root to each channel by cycling through the roots
+    coprime to ``num_symbols`` in ``[1, num_symbols-1]``, starting from
+    ``base_root`` and skipping the others (which are not CAZAC).  For a prime
+    ``num_symbols`` every root qualifies, and any two distinct roots are
+    near-orthogonal with cross-correlation magnitude ``1/sqrt(num_symbols)``
+    at every lag.
 
     Parameters
     ----------
     channel_index : int
         Channel index (0-based).
     base_root : int
-        ZC root assigned to channel 0.  Must be in ``[1, num_symbols-1]``.
+        ZC root assigned to channel 0, in ``[1, num_symbols-1]`` and coprime
+        to ``num_symbols``.
     num_symbols : int
-        Sequence length (should be prime for the CAZAC property).
+        Sequence length; a prime gives the lowest cross-correlation.
 
     Returns
     -------
@@ -142,5 +150,13 @@ def zc_mimo_root(channel_index: int, base_root: int, num_symbols: int) -> int:
     [1, 2, 3, 4]
     >>> [zc_mimo_root(k, 10, 13) for k in range(4)]
     [10, 11, 12, 1]
+    >>> [zc_mimo_root(k, 1, 64) for k in range(4)]
+    [1, 3, 5, 7]
     """
-    return ((base_root - 1 + channel_index) % (num_symbols - 1)) + 1
+    roots = [r for r in range(1, num_symbols) if math.gcd(r, num_symbols) == 1]
+    if base_root not in roots:
+        raise ValueError(
+            f"zc_mimo_root(): base_root={base_root} must be in "
+            f"[1, {num_symbols - 1}] and coprime to num_symbols={num_symbols}."
+        )
+    return roots[(roots.index(base_root) + channel_index) % len(roots)]

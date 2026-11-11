@@ -411,6 +411,8 @@ def _read_signal(data: Any, path: Path) -> Signal:
                 f"Cannot reconstruct frame of type {frame_type_name!r}: "
                 "unknown frame class. Extend _FRAME_CLASSES in io.py."
             )
+        if "pilot_seed" in frame_dict:  # files written before 3.8
+            frame_dict["pilot_rng"] = frame_dict.pop("pilot_seed")
         for name in ("payload_constellation", "pilot_constellation"):
             frame_dict[name] = _get_constellation(f"frame_{name}", data, frame_dict)
             frame_dict.pop(f"frame_{name}_family")

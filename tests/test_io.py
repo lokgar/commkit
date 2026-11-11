@@ -199,6 +199,23 @@ class TestNPZSaveLoadFrame:
         assert sig2.frame.payload_num_symbols == sig.frame.payload_num_symbols
         assert sig2.frame == sig.frame
 
+    def test_loads_a_frame_saved_with_pilot_seed(self, tmp_path: Any) -> None:
+        """A frame stored before the rename to pilot_rng (as pilot_seed)
+        loads with the same pilots."""
+        import json
+
+        sig = _frame_signal()
+        p = tmp_path / "frame.npz"
+        save_npz(sig, p)
+        with np.load(p, allow_pickle=False) as data:
+            arrays = {key: data[key] for key in data.files}
+        meta = json.loads(str(arrays["__frame_metadata__"]))
+        meta["pilot_seed"] = meta.pop("pilot_rng")
+        arrays["__frame_metadata__"] = np.array(json.dumps(meta))
+        old = tmp_path / "old.npz"
+        np.savez(old, **arrays)
+        assert load_npz(old).frame == sig.frame
+
     def test_roundtrip_zc_preamble_kwargs(self, tmp_path: Any) -> None:
         """Zadoff-Chu preamble root and length kwargs round-trip."""
         frame = SingleCarrierFrame(

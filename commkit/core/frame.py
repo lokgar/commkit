@@ -43,7 +43,7 @@ class SingleCarrierFrame:
     ----------
     payload_num_symbols : int, optional
         Number of payload symbols per channel; ``None`` takes the symbols of
-        ``payload_blocks``, or 1000 without it.  With pilots it must fill
+        ``payload_blocks``, and one of the two is required.  With pilots it must fill
         whole pilot periods (comb: a multiple of ``pilot_period - 1``; block:
         of ``pilot_period - pilot_block_num_symbols``); otherwise construction raises.
     payload_constellation : Constellation, default ``Constellation.psk(4)``
@@ -87,9 +87,10 @@ class SingleCarrierFrame:
         ``> pilot_block_num_symbols`` for ``"block"``.
     pilot_block_num_symbols : int, default 0
         Pilots per period for ``"block"``.
-    pilot_seed : int, default 1337
-        Seed of the pilot symbols: pilots are a known sequence, the same
-        in every frame by default.
+    pilot_rng : int or numpy.random.Generator, default 1337
+        Seed or generator of the pilot symbols, with the semantics of
+        ``payload_rng``: pilots are a known sequence, the same in every frame
+        by default.
     pilot_constellation : Constellation, default ``Constellation.psk(4)``
         Pilot constellation; must be unshaped.
     pilot_gain_db : float, default 0.0
@@ -134,7 +135,7 @@ class SingleCarrierFrame:
     pilot_period: int = 0
     pilot_block_num_symbols: int = 0
     pilot_constellation: Constellation = field(default_factory=_qpsk)
-    pilot_seed: int = 1337
+    pilot_rng: int | np.random.Generator | None = 1337
     pilot_gain_db: float = 0.0
 
     guard_type: str = "zero"
@@ -161,8 +162,12 @@ class SingleCarrierFrame:
         accepted when they agree, as ``dataclasses.replace`` and
         :func:`~commkit.io.load_npz` pass both.
         """
-        object.__setattr__(self, "payload_rng", _resolve_seed(self.payload_rng))
-        _check_int("pilot_seed", self.pilot_seed, 0)
+        object.__setattr__(
+            self, "payload_rng", _resolve_seed(self.payload_rng, "payload_rng")
+        )
+        object.__setattr__(
+            self, "pilot_rng", _resolve_seed(self.pilot_rng, "pilot_rng")
+        )
         if self.payload_num_symbols is not None:
             _check_int("payload_num_symbols", self.payload_num_symbols, 1)
         if self.payload_blocks is not None:
@@ -234,11 +239,12 @@ class SingleCarrierFrame:
                     "one of them."
                 )
         if self.payload_num_symbols is None:
-            num_symbols = (
-                1000
-                if self.payload_blocks is None
-                else self._blocks_num_symbols(per_period)
-            )
+            if self.payload_blocks is None:
+                raise ValueError(
+                    "SingleCarrierFrame(): give the payload length, "
+                    "payload_num_symbols= or (with a payload_code) payload_blocks=."
+                )
+            num_symbols = self._blocks_num_symbols(per_period)
             object.__setattr__(self, "payload_num_symbols", num_symbols)
         assert self.payload_num_symbols is not None
 
@@ -372,7 +378,7 @@ class SingleCarrierFrame:
             num_symbols=pilot_count,
             symbol_rate=1.0,
             num_channels=self.num_channels,
-            rng=self.pilot_seed,
+            rng=self.pilot_rng,
         )
         ref = sig.reference
         assert ref is not None
@@ -528,7 +534,6 @@ class SingleCarrierFrame:
             ``include_preamble=True``; ``"guard"`` with
             ``include_preamble=True`` or a zero guard.
         """
-        xp = np
         if unit == "samples":
             sps = require_integer_sps(sps, "get_structure_map()")
         mask, body_num_symbols = self._generate_pilot_mask()
@@ -540,10 +545,10 @@ class SingleCarrierFrame:
                 preamble_num_symbols + body_num_symbols + self.guard_num_symbols
             )
 
-            preamble_bool = xp.zeros(total_num_symbols, dtype=bool)
-            pilot_bool = xp.zeros(total_num_symbols, dtype=bool)
-            payload_bool = xp.zeros(total_num_symbols, dtype=bool)
-            guard_bool = xp.zeros(total_num_symbols, dtype=bool)
+            preamble_bool = np.zeros(total_num_symbols, dtype=bool)
+            pilot_bool = np.zeros(total_num_symbols, dtype=bool)
+            payload_bool = np.zeros(total_num_symbols, dtype=bool)
+            guard_bool = np.zeros(total_num_symbols, dtype=bool)
 
             if self.guard_type == "cp":
                 g_slice = slice(0, self.guard_num_symbols)
@@ -592,9 +597,9 @@ class SingleCarrierFrame:
                 }
             else:
                 total_num_symbols = body_num_symbols + self.guard_num_symbols
-                pilot_bool = xp.zeros(total_num_symbols, dtype=bool)
-                payload_bool = xp.zeros(total_num_symbols, dtype=bool)
-                guard_bool = xp.zeros(total_num_symbols, dtype=bool)
+                pilot_bool = np.zeros(total_num_symbols, dtype=bool)
+                payload_bool = np.zeros(total_num_symbols, dtype=bool)
+                guard_bool = np.zeros(total_num_symbols, dtype=bool)
 
                 b_slice = slice(0, body_num_symbols)
                 g_slice = slice(body_num_symbols, total_num_symbols)
@@ -611,7 +616,7 @@ class SingleCarrierFrame:
 
         if unit == "samples":
             for k in res:
-                res[k] = xp.repeat(res[k], sps)
+                res[k] = np.repeat(res[k], sps)
 
         return res
 
@@ -665,6 +670,15 @@ class SingleCarrierFrame:
         then normalized per channel to unit symbol power (average sample power
         ``1/sps``), as ``generate`` does; the pilot-to-payload ratio of
         ``pilot_gain_db`` is kept.
+
+        The payload's symbol energy is therefore not the frame's average: a
+        preamble of lower peak-to-average ratio than the body sits above it
+        (for a 16-QAM payload of 4096 symbols, RRC 0.1 at 2 sps, a ZC-139
+        preamble at +3.8 dB and the payload at -0.2 dB; Barker-13 at +0.7 and
+        0.0 dB), by an amount that depends on the body's peak.  An Es/N0 set
+        by :func:`~commkit.impairments.apply_awgn` on the frame refers to the
+        frame average; measure the payload's after
+        :func:`extract_payload`.
         """
         sps = require_integer_sps(sps, "SingleCarrierFrame.to_signal()")
         device = require_device(device, "SingleCarrierFrame.to_signal()")
@@ -889,12 +903,12 @@ def _frame_pilots(
     return np.flatnonzero(mask), np.asarray(frame.pilot_symbols)
 
 
-def _resolve_seed(rng: Any) -> int:
+def _resolve_seed(rng: Any, name: str) -> int:
     """The integer seed a frame keeps: ``rng`` itself, one draw from a
     Generator, or fresh entropy for ``None``."""
     if isinstance(rng, np.random.Generator):
         return int(rng.integers(2**63))
     if rng is None:
         return int(np.random.SeedSequence().generate_state(1, np.uint64)[0] >> 1)
-    _check_int("payload_rng", rng, 0)
+    _check_int(name, rng, 0)
     return int(rng)
