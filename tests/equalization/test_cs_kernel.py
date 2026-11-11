@@ -98,10 +98,7 @@ class TestCSBlockKernel:
         for a, b in ((0, 150), (150, 400)):  # fill, then past the H=100 wrap
             blk = np.ascontiguousarray(phi[:, a:b])
             corr_ref = blk.copy()
-            cs_numba(
-                blk, corr_ref, np.zeros((C, H)), *bufs_ref, st_ref, a,
-                QUANTUM, THRESHOLD, H,
-            )  # fmt: skip
+            cs_numba(blk, corr_ref, *bufs_ref, st_ref, QUANTUM, THRESHOLD)
             out_ref.append(corr_ref)
             corr_dev = xp.empty_like(xp.asarray(blk))
             kern(xp.asarray(blk), corr_dev)

@@ -276,7 +276,6 @@ class _CarrierArrays:
 
     pll_phi: np.ndarray  # (C,) float64
     pll_freq: np.ndarray  # (C,) float64
-    cs_buf_x: np.ndarray  # (C, H) float64
     cs_buf_y: np.ndarray  # (C, H) float64
     cs_buf_ptr: np.ndarray  # (C,) int64
     cs_buf_n: np.ndarray  # (C,) int64
@@ -291,7 +290,6 @@ class _CarrierArrays:
         return (
             self.pll_phi,
             self.pll_freq,
-            self.cs_buf_x,
             self.cs_buf_y,
             self.cs_buf_ptr,
             self.cs_buf_n,
@@ -347,7 +345,6 @@ class _InlineCpr:
         return _CarrierArrays(
             pll_phi=np.full(num_ch, self.phase_init, dtype=np.float64),
             pll_freq=np.zeros(num_ch, dtype=np.float64),
-            cs_buf_x=np.zeros((num_ch, self.history), dtype=np.float64),
             cs_buf_y=np.zeros((num_ch, self.history), dtype=np.float64),
             cs_buf_ptr=np.zeros(num_ch, dtype=np.int64),
             cs_buf_n=np.zeros(num_ch, dtype=np.int64),

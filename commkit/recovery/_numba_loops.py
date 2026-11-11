@@ -19,6 +19,8 @@ import numpy as np
 
 _fast = numba.njit(cache=True, fastmath=True, nogil=True)
 _parallel = numba.njit(cache=True, fastmath=True, nogil=True, parallel=True)
+# A step shared by the kernels, inlined into each before it is compiled.
+_step = numba.njit(inline="always", nogil=True)
 
 
 @_parallel
@@ -324,18 +326,93 @@ def rts_smoother(phi_obs, sigma_p2, sigma_v2):
     return x_smooth
 
 
+# -----------------------------------------------------------------------------
+# Cycle-slip repair: the steps shared with the equalizers' inline repair
+# (``equalization/_numba_loops.py``), inlined into each caller and compiled
+# with its flags.  They take and return scalars only: an array argument to
+# an inlined step is reference-counted once per call, which costs the
+# per-symbol loops of the equalizers.  The callers keep the window of past
+# repaired values in a circular buffer of ``H`` slots and its running sums
+# ``Sy = sum y_j`` and ``Sxy = sum j y_j`` in relative coordinates
+# ``j = 0 .. n-1`` (oldest first), so ``Sx`` and ``Sxx`` are closed forms of
+# ``n`` and never grow.  The CUDA kernel ``cs_block.cu`` speculates the same
+# recursion in parallel.
+# -----------------------------------------------------------------------------
+
+
+@_step
+def cs_window(n):
+    """``(Sx, D)`` of a window of ``n`` values at ``j = 0 .. n-1``.
+
+    ``Sx = sum j`` and ``D = n·Sxx - Sx² = n²(n² - 1)/12``, the constants of
+    the least-squares line.
+    """
+    n_f = np.float64(n)
+    Sx = n_f * (n_f - 1.0) / 2.0
+    Sxx = n_f * (n_f - 1.0) * (2.0 * n_f - 1.0) / 6.0
+    return Sx, n_f * Sxx - Sx * Sx
+
+
+@_step
+def cs_repair(y, n, H, warmup, Sy, Sxy, last, quantum, threshold):
+    """``y`` repaired against its prediction from the ``n <= H`` past values.
+
+    The prediction is the least-squares line through the window (its sums
+    ``Sy`` and ``Sxy``), evaluated one step past its newest value, or the
+    newest value ``last`` while ``n < warmup``; the first value (``n = 0``)
+    is kept as it is.  A deviation beyond ``threshold`` is snapped back by
+    the nearest multiple of ``quantum``.
+    """
+    if n == 0:
+        return y
+    if n < warmup:
+        predicted = last
+    else:
+        # The full window's constants as a separate branch: LLVM hoists
+        # them out of the caller's loop (computed per step from n, the
+        # standalone scan ran 20 % slower; behind a branch of the caller
+        # that keeps them, three times slower).
+        if n < H:
+            Sx, D = cs_window(n)
+        else:
+            Sx, D = cs_window(H)
+        n_f = np.float64(n)
+        if D > 1e-30:
+            slope = (n_f * Sxy - Sx * Sy) / D
+            intercept = (Sy - slope * Sx) / n_f
+        else:
+            slope = 0.0
+            intercept = Sy / n_f
+        predicted = slope * n_f + intercept
+    diff = y - predicted
+    k = np.round(diff / quantum)
+    if np.abs(diff) > threshold and k != 0.0:
+        y = y - k * quantum
+    return y
+
+
+@_step
+def cs_push(n, H, Sy, Sxy, y_old, y):
+    """The sums ``(Sy, Sxy)`` once ``y`` joins the window of ``n`` values.
+
+    A full window (``n == H``) evicts its oldest value ``y_old`` and every
+    other value moves down one position:
+    ``Sxy' = Sxy - Sy + y_old + (H - 1) y``.
+    """
+    if n == H:
+        return Sy - y_old + y, Sxy - Sy + y_old + np.float64(H - 1) * y
+    return Sy + y, Sxy + np.float64(n) * y
+
+
 @_fast
 def cycle_slip(phi_u, symmetry, history_length, threshold):
     """Detect and correct cycle slips by linear extrapolation (Numba).
 
     Scans each row of block phases ``phi_u`` in order.  Each block is
-    extrapolated linearly from up to ``history_length`` past corrected
-    blocks; a deviation beyond ``threshold`` is corrected by a multiple
-    of ``2π/symmetry``.
-
-    The regression uses the relative coordinates ``[0, W-1]``, so ``Sx`` and
-    ``Sxx`` are closed-form constants; only ``Sy`` and ``Sxy`` are kept as
-    running state, updated in O(1) per step by a sliding-window identity.
+    predicted by :func:`cs_repair` from up to ``history_length`` past
+    corrected blocks, by the newest one for the first ``min(10,
+    history_length)``; a deviation beyond ``threshold`` is corrected by a
+    multiple of ``2π/symmetry``.
 
     Parameters
     ----------
@@ -356,102 +433,31 @@ def cycle_slip(phi_u, symmetry, history_length, threshold):
     numpy.ndarray
         The corrected block phases, ``phi_u`` itself.
     """
-    two_pi = 2.0 * np.pi
-    quantum = two_pi / float(symmetry)
+    quantum = 2.0 * np.pi / float(symmetry)
     R, B = phi_u.shape
-    W = history_length
-    W_f = float(W)
+    H = history_length
+    warmup = min(10, H)
+    buf = np.zeros(H, dtype=np.float64)
 
-    # Precompute full-window regression constants in relative coords [0, W-1].
-    # With relative coords the x-values are always small integers, so Sx and
-    # Sxx never grow and there is no catastrophic cancellation regardless of
-    # how many total blocks have been processed.
-    Sx_full = W_f * (W_f - 1.0) / 2.0
-    Sxx_full = W_f * (W_f - 1.0) * (2.0 * W_f - 1.0) / 6.0
-    denom_full = W_f * Sxx_full - Sx_full * Sx_full  # W²(W²-1)/12
-
-    # Rows (channels, usually one or two) in series: under prange
-    # the scan ran at half speed per row (two rows of 2^16 values:
-    # 0.41 ms in parallel, 0.40 ms in series), a gain only from
-    # four rows on.
+    # Rows (channels, usually one or two) in series: under prange the scan
+    # ran at half speed per row (two rows of 2^16 values: 0.41 ms in
+    # parallel, 0.40 ms in series), a gain only from four rows on.
     for r in range(R):
-        row = phi_u[r]
-        # Only Sy and Sxy need to be maintained as running state.
-        buf_y = np.empty(W, dtype=np.float64)
-        buf_head = 0  # next write slot (circular)
-        n_buf = 0  # valid entries currently in buffer
-
+        slot = 0  # next slot of the circular buffer
+        last = 0.0  # newest value
+        n = 0  # values in the window
         Sy = 0.0
         Sxy = 0.0
-
         for b in range(B):
-            y_b = row[b]
-
-            if n_buf == 0:
-                # First block: trust it unconditionally (at relative position 0).
-                buf_y[0] = y_b
-                buf_head = 1
-                n_buf = 1
-                Sy = y_b
-                Sxy = 0.0  # 0 * y_b
-                continue
-
-            if n_buf < min(10, W):
-                # Constant extrapolation during warmup to avoid cementing false slips.
-                phi_pred = buf_y[(buf_head - 1) % W]
-            else:
-                # Linear extrapolation.  Prediction target is always one step past
-                # the newest buffered entry, i.e. relative coordinate = n_buf.
-                x_pred = float(n_buf)
-                n_f = float(n_buf)
-                if n_buf < W:
-                    # Partial window: derive exact Sx/Sxx from closed-form sums.
-                    Sx_p = n_f * (n_f - 1.0) / 2.0
-                    Sxx_p = n_f * (n_f - 1.0) * (2.0 * n_f - 1.0) / 6.0
-                    denom = n_f * Sxx_p - Sx_p * Sx_p
-                    if abs(denom) > 1e-30:
-                        slope = (n_f * Sxy - Sx_p * Sy) / denom
-                        intercept = (Sy - slope * Sx_p) / n_f
-                    else:
-                        slope = 0.0
-                        intercept = Sy / n_f
-                else:
-                    # Full window: use precomputed constants (numerically exact).
-                    if denom_full > 1e-30:
-                        slope = (W_f * Sxy - Sx_full * Sy) / denom_full
-                        intercept = (Sy - slope * Sx_full) / W_f
-                    else:
-                        slope = 0.0
-                        intercept = Sy / W_f
-                phi_pred = slope * x_pred + intercept
-
-            diff = y_b - phi_pred
-            # Round to nearest correction quantum
-            k = round(diff / quantum)
-            if abs(diff) > threshold and k != 0:
-                row[b] -= float(k) * quantum
-                y_b = row[b]
-
-            # Update circular buffer using relative coordinates.
-            if n_buf == W:
-                # Slide window: evict oldest (relative pos 0), shift all down by 1,
-                # add y_b at relative position W-1.
-                # Sxy update uses the identity:
-                #   Sxy_new = Sxy_old - Sy_old + y_old + (W-1)·y_new
-                # (derived by relabelling positions after eviction)
-                old_idx = buf_head % W
-                y_old = buf_y[old_idx]
-                Sxy = Sxy - Sy + y_old + (W_f - 1.0) * y_b  # must precede Sy update
-                Sy = Sy - y_old + y_b
-                buf_y[old_idx] = y_b
-                buf_head += 1
-            else:
-                # Append at relative position n_buf.
-                idx = buf_head % W
-                buf_y[idx] = y_b
-                Sxy += float(n_buf) * y_b
-                Sy += y_b
-                buf_head += 1
-                n_buf += 1
+            y = cs_repair(phi_u[r, b], n, H, warmup, Sy, Sxy, last, quantum, threshold)
+            phi_u[r, b] = y
+            Sy, Sxy = cs_push(n, H, Sy, Sxy, buf[slot], y)
+            buf[slot] = y
+            last = y
+            slot += 1
+            if slot == H:
+                slot = 0
+            if n < H:
+                n += 1
 
     return phi_u
