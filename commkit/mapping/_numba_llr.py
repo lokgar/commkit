@@ -1,7 +1,7 @@
 """Numba kernels of :func:`commkit.mapping.compute_llr` (private).
 
 The CPU LLR kernels, parallel over blocks of symbols, documented by the
-getter ``_get_numba_llr`` of :mod:`commkit.mapping.llr`: :func:`llr_kernel`
+getter ``_get_numba_llr`` of ``commkit.mapping._demap``: :func:`llr_kernel`
 (the metrics of every point), :func:`llr_separable_kernel` (the metrics of
 the levels of each axis) and :func:`llr_separable_maxlog_kernel` (the
 closed form).  Imported on first use, so ``import commkit`` does not load

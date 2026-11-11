@@ -15,7 +15,7 @@ from ..core._signal_adapter import adapt_signal
 from ..core.signal import Signal
 from ..logger import logger
 from ..mapping import Constellation
-from ..mapping.llr import _noise_variance
+from ..mapping._demap import _noise_variance
 from ._common import (
     _constellation,
     _log_per_channel,

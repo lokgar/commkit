@@ -393,7 +393,7 @@ def _llr_launch(cp: Any, kern: Any, n: int, k: int, head: tuple, tail: tuple) ->
 
 
 def _llr_factory() -> Callable:
-    """Wrapper factory for the bit-LLR kernel (``mapping.llr``).
+    """Wrapper factory for the bit-LLR kernel (``mapping._demap``).
 
     One thread per symbol walks the constellation and keeps the per-bit
     maxima (and, for the exact method, the sums of one exponential per
@@ -442,7 +442,7 @@ def _llr_factory() -> Callable:
 
 
 def _llr_separable_factory() -> Callable:
-    """Wrapper factory for the per-axis bit-LLR kernel (``mapping.llr``).
+    """Wrapper factory for the per-axis bit-LLR kernel (``mapping._demap``).
 
     The LLRs of a separable square lattice from the levels of each axis:
     2·sqrt(M) metrics (and exponentials) per symbol instead of M.
@@ -500,7 +500,7 @@ def _llr_separable_factory() -> Callable:
 
 
 def _llr_separable_maxlog_factory() -> Callable:
-    """Wrapper factory for the closed-form max-log LLR kernel (``mapping.llr``).
+    """Wrapper factory for the closed-form max-log LLR kernel (``mapping._demap``).
 
     Max-log LLRs of a uniform separable square lattice: per axis the snapped
     level's metric against the two levels just outside its run of equal

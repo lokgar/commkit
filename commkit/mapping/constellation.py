@@ -29,8 +29,8 @@ import numpy as np
 
 from .._array import warn_if_double
 from ..backend import ArrayType, _device_tables, dispatch
+from ._demap import _Axis, _llr, _llr_separable, _llr_separable_gpu
 from .gray import _gray_points, _nearest_index, _pack, _unpack_bits
-from .llr import _Axis, _llr, _llr_separable, _llr_separable_gpu
 from .shaping import (
     _constellation_power,
     _entropy_bits,
