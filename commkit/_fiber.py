@@ -409,22 +409,22 @@ def _cupy_kernels() -> dict[str, Any]:
         import cupy as cp
 
         _KERNELS["linear"] = cp.ElementwiseKernel(
-            "float32 phi, float32 length, float32 scale",
+            "float32 phi, float32 scale",
             "complex64 x",
             """
             float s, c;
-            sincosf(length * phi, &s, &c);
+            sincosf(phi, &s, &c);
             x = x * complex<float>(scale * c, scale * s);
             """,
             "commkit_fiber_linear",
         )
         _KERNELS["linear_pmd"] = cp.ElementwiseKernel(
-            "float32 phi, float32 omega, float32 length, float32 scale, "
+            "float32 phi, float32 omega, float32 scale, "
             "float32 half_tau, raw complex64 u, int32 k",
             "complex64 x0, complex64 x1",
             """
             float s, c, sd, cd;
-            sincosf(length * phi, &s, &c);
+            sincosf(phi, &s, &c);
             sincosf(omega * half_tau, &sd, &cd);
             const complex<float> h(scale * c, scale * s);
             const complex<float> u00 = u[4 * k], u01 = u[4 * k + 1];
@@ -466,9 +466,13 @@ def _cupy_kernels() -> dict[str, Any]:
 class _FusedOps(_Ops):
     """CuPy complex64 stages: one fused kernel per stage, in-place cuFFT.
 
-    The kernels compute the phase in registers (a GPU stage is limited by
-    memory traffic, so reading a precomputed response would cost more than
-    the ``sincosf``).  Both transforms run unscaled and every linear stage
+    The kernels compute the response in registers from the stage's phase
+    (a GPU stage is limited by memory traffic, so reading a precomputed
+    complex response would cost more than the ``sincosf``).  The phase of
+    each distinct stage length is formed once in float64 and reduced modulo
+    2π before the cast to float32: scaling a float32 phase of 1 km in the
+    kernel rounded the dispersion phase by ``6e-8`` of its size, an error
+    that repeats in every span (-63 dB after 20 x 80 km at 1 THz).  Both transforms run unscaled and every linear stage
     (one between each forward and inverse FFT) carries the 1/N, so there is
     no separate scaling pass.  The current span's waveplates live in a fixed
     device buffer, refreshed by :meth:`set_span` outside the graph.  Nothing
@@ -481,7 +485,7 @@ class _FusedOps(_Ops):
         super().__init__(*args)
         xp = self.xp
         self.k = _cupy_kernels()
-        self.phi = self.phase_km.astype(xp.float32)
+        self._phases: dict[float, Any] = {}
         self.omega32 = None if self.omega is None else self.omega.astype(xp.float32)
         self.inv_n = np.float32(1.0 / self.phase_km.shape[-1])
         self.u_all: Any = None
@@ -499,6 +503,20 @@ class _FusedOps(_Ops):
         if self.u_span is not None:
             self.u_span[...] = self.u_all[span]
 
+    def _phase(self, length_km: float) -> ArrayType:
+        """Dispersion phase of a stage of ``length_km``, float32 in ``[-π, π)``.
+
+        Built on a stage length's first use, which falls in the first,
+        eager span (every span has the same stage lengths), so a captured
+        span does not allocate.
+        """
+        if length_km not in self._phases:
+            xp = self.xp
+            phase = self.phase_km * length_km
+            reduced = xp.remainder(phase + math.pi, 2.0 * math.pi) - math.pi
+            self._phases[length_km] = reduced.astype(xp.float32)
+        return self._phases[length_km]
+
     def ifft(self, x: ArrayType) -> ArrayType:
         """Inverse FFT without the ``1/N``, which the fused linear stage applies."""
         return _fft.ifft(x, axis=-1, overwrite_x=True, norm="forward")
@@ -510,13 +528,13 @@ class _FusedOps(_Ops):
         none).
         """
         f32 = np.float32
+        phi = self._phase(length_km)
         if section is None:
-            self.k["linear"](self.phi, f32(length_km), self.inv_n, X)
+            self.k["linear"](phi, self.inv_n, X)
             return X
         self.k["linear_pmd"](
-            self.phi,
+            phi,
             self.omega32,
-            f32(length_km),
             self.inv_n,
             f32(self.half_tau),
             self.u_span,
