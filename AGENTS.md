@@ -216,7 +216,7 @@ Docstrings describe the code as it is; a change in behavior updates them in the 
 | Elementwise chains between multi-core FFTs (fiber solver's Kerr and PMD stages) | NumPy: a Numba `parallel=True` pass competes with `scipy.fft`'s threads; adopt one only on a paired end-to-end A/B | CPU |
 | Other hot spots limited by intermediates, launches or round trips | CUDA C++ via CuPy `RawModule` (`commkit/_cuda/src`) | GPU |
 
-**Numba kernels live at module level** in a private module (`equalization/_numba_loops.py`, `coding/_numba_loops.py`, `mapping/_numba_llr.py`, `timing/_numba_loops.py`, `_numba_interpolation.py`) that a getter `_get_numba_<name>()`, defined in the module that calls the kernel, imports on first use, so `import commkit` does not load Numba and `cache=True` works across processes. A kernel defined inside a function that calls another kernel defined there recompiles in every process (Numba's cache key misses the captured dispatcher); a getter may build a closure that captures only constants (`_get_numba_sos`).
+**Numba kernels live at module level** in a private module (`equalization/_numba_loops.py`, `recovery/_numba_loops.py`, `coding/_numba_loops.py`, `mapping/_numba_llr.py`, `timing/_numba_loops.py`, `_numba_interpolation.py`, `_numba_frequency.py`) that a getter `_get_numba_<name>()`, defined in the module that calls the kernel, imports on first use, so `import commkit` does not load Numba and `cache=True` works across processes. A kernel defined inside a function that calls another kernel defined there recompiles in every process (Numba's cache key misses the captured dispatcher); a getter may build a closure that captures only constants (`_get_numba_sos`).
 
 **Host-sync hygiene:**
 

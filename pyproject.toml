@@ -186,7 +186,10 @@ warn_return_any = true
 # Numba's integer unification); their positional array arguments are
 # documented in the docstrings instead.  The getters that return them are
 # annotated.
-module = ["commkit.equalization._numba_loops"]
+module = [
+    "commkit.equalization._numba_loops",
+    "commkit.recovery._numba_loops",
+]
 disallow_untyped_defs = false
 disallow_incomplete_defs = false
 check_untyped_defs = false  # Numba integer unification is not NumPy typing

@@ -24,64 +24,12 @@ from .viterbi_viterbi import _warn_small_qam_block
 
 __all__ = ["Tikhonov"]
 
-_NUMBA_RTS: dict = {}
 
+def _get_numba_rts_smoother() -> Any:
+    """The Rauch-Tung-Striebel smoother kernel."""
+    from . import _numba_loops
 
-def _get_numba_rts_smoother():
-    """JIT-compile and cache the Numba RTS-smoother kernel.
-
-    Returns
-    -------
-    callable
-        Numba-compiled ``_rts_loop``.
-    """
-    if "rts" not in _NUMBA_RTS:
-        import numba
-
-        @numba.njit(cache=True, fastmath=True, nogil=True)
-        def _rts_loop(phi_obs, sigma_p2, sigma_v2):
-            """Run the Rauch-Tung-Striebel smoother over the block phases (Numba).
-
-            Parameters
-            ----------
-            phi_obs : numpy.ndarray
-                Observed block phases, float64, ``(B,)``.
-            sigma_p2 : float
-                Process noise variance per block.
-            sigma_v2 : float
-                Observation noise variance per block.
-
-            Returns
-            -------
-            numpy.ndarray
-                Smoothed phases, float64, ``(B,)``.
-            """
-            B = len(phi_obs)
-            x_filt = np.empty(B, dtype=np.float64)
-            P_filt = np.empty(B, dtype=np.float64)
-            x_pred = np.empty(B, dtype=np.float64)
-            P_pred = np.empty(B, dtype=np.float64)
-
-            x_filt[0] = phi_obs[0]
-            P_filt[0] = sigma_v2
-
-            for k in range(1, B):
-                x_pred[k] = x_filt[k - 1]
-                P_pred[k] = P_filt[k - 1] + sigma_p2
-                K = P_pred[k] / (P_pred[k] + sigma_v2)
-                x_filt[k] = x_pred[k] + K * (phi_obs[k] - x_pred[k])
-                P_filt[k] = (1.0 - K) * P_pred[k]
-
-            x_smooth = x_filt.copy()
-            for k in range(B - 2, -1, -1):
-                G = P_filt[k] / P_pred[k + 1]
-                x_smooth[k] = x_filt[k] + G * (x_smooth[k + 1] - x_pred[k + 1])
-
-            return x_smooth
-
-        _NUMBA_RTS["rts"] = _rts_loop
-
-    return _NUMBA_RTS["rts"]
+    return _numba_loops.rts_smoother
 
 
 def _rts_smoother_1d(
