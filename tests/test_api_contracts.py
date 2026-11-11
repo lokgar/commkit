@@ -425,8 +425,13 @@ ROWS: list[Row] = [
         call=lambda c, x: _a(x, np.eye(2)),
         dims=(2,),
     ),
-    Row("commkit.equalization.polarization.estimate_polarization_tones", MULTI),
-    Row("commkit.equalization.polarization.JonesTrack", VALUE),
+    Row(
+        "commkit.equalization.polarization.estimate_polarization",
+        MULTI,
+        data=2,
+    ),
+    Row("commkit.equalization.polarization.PolarizationEstimate", VALUE),
+    Row("commkit.equalization.polarization.PolarizationTones", VALUE),
     Row("commkit.equalization.result.EqualizerState", VALUE),
     Row("commkit.equalization.result.EqualizerResult", VALUE),
     # --- filtering ----------------------------------------------------------

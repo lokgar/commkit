@@ -9,8 +9,8 @@
 - Linear block equalization: :func:`estimate_channel` (a
   :class:`ChannelEstimate` from a known reference), :func:`correct_channel`
   (its ZF / MMSE inverse) and :func:`apply_taps` (frozen taps).
-- Pilot-tone polarization demultiplexing:
-  :func:`estimate_polarization_tones` (a :class:`JonesTrack`) and
+- Polarization demultiplexing: :func:`estimate_polarization` (a
+  :class:`PolarizationEstimate`) with :class:`PolarizationTones`, and
   :func:`correct_polarization`.
 
 The adaptive equalizers take ``(N,)`` or butterfly-MIMO ``(C, N)`` input,
@@ -26,9 +26,10 @@ from ._sequential import cma, lms, rde, rls
 from .linear import ChannelEstimate, apply_taps, correct_channel, estimate_channel
 from .pilots import EqualizerPilots
 from .polarization import (
-    JonesTrack,
+    PolarizationEstimate,
+    PolarizationTones,
     correct_polarization,
-    estimate_polarization_tones,
+    estimate_polarization,
 )
 from .result import EqualizerResult, EqualizerState
 
@@ -37,7 +38,8 @@ __all__ = [
     "EqualizerPilots",
     "EqualizerResult",
     "EqualizerState",
-    "JonesTrack",
+    "PolarizationEstimate",
+    "PolarizationTones",
     "apply_taps",
     "block_cma",
     "block_lms",
@@ -46,7 +48,7 @@ __all__ = [
     "correct_channel",
     "correct_polarization",
     "estimate_channel",
-    "estimate_polarization_tones",
+    "estimate_polarization",
     "lms",
     "rde",
     "rls",
