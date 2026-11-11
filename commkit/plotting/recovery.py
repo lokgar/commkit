@@ -21,6 +21,7 @@ from .theme import (
     _require,
     _select,
     _series_label,
+    _set_eng_formatter,
 )
 
 __all__ = [
@@ -416,6 +417,7 @@ def plot_pilot_tone_phase_estimate(
         ax_win.set_ylabel("Window W(f)", color="C3")
     ax_spec.set_title(f"{title} - Tone Spectrum")
     ax_spec.set_xlabel("Frequency [Hz]")
+    _set_eng_formatter(ax_spec, "x")
     ax_spec.set_ylabel("|X(f)| [dB]")
     ax_spec.legend(loc="upper left")
 

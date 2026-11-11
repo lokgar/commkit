@@ -19,6 +19,7 @@ from .theme import (
     _panel_grid,
     _require,
     _select,
+    _set_eng_formatter,
 )
 
 __all__ = [
@@ -237,7 +238,8 @@ def plot_frequency_offset_spectrum(
                     label="Search range",
                 )
         axi.set_title(f"{title}{ch_suffix}")
-        axi.set_xlabel(f"$\\Delta f$ [Hz]  (÷M={M} applied)")
+        axi.set_xlabel(f"$\\Delta f$ (÷M={M} applied) [Hz]")
+        _set_eng_formatter(axi, "x")
         axi.set_ylabel(f"|X^{M}(f)|")
         if annotations or label is not None:
             axi.legend()
@@ -342,7 +344,7 @@ def plot_frequency_offset_blockwise_result(
     axes = grid[0]
 
     # Decimate the dense per-sample traces for fast rendering (envelope-preserving).
-    nf, df_k = _decimate_minmax(n_grid, df_dense * 1e-3, max_points)
+    nf, df_k = _decimate_minmax(n_grid, df_dense, max_points)
     np_, ph_deg = _decimate_minmax(n_grid, np.degrees(phase_trajectory), max_points)
 
     if "frequency" in panels:
@@ -351,14 +353,15 @@ def plot_frequency_offset_blockwise_result(
         ax_f.plot(nf, df_k, label=label or r"Interpolated $\Delta f$")
         ax_f.scatter(
             t_centers,
-            df_estimates * 1e-3,
+            df_estimates,
             s=50,
             zorder=5,
             color="C1",
             label="Block estimate",
         )
         ax_f.set_xlabel("Sample Index")
-        ax_f.set_ylabel(r"$\Delta f$ [kHz]")
+        ax_f.set_ylabel(r"$\Delta f$ [Hz]")
+        _set_eng_formatter(ax_f, "y")
         ax_f.set_title(f"{title} - Frequency")
         ax_f.legend()
 

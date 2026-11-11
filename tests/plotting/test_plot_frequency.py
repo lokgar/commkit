@@ -82,8 +82,10 @@ class TestPlotFrequencySync:
         fig, axes = plot_frequency_offset_blockwise_result(
             est, num_samples=n, sampling_rate=FS, max_points=0, show=False
         )
-        df_line = axes[0].lines[0].get_ydata()  # kHz
-        assert np.median(df_line) == pytest.approx(2.0, abs=0.1)
+        df_line = axes[0].lines[0].get_ydata()  # Hz, prefixed by the axis
+        assert np.median(df_line) == pytest.approx(2e3, abs=100.0)
+        fig.canvas.draw()
+        assert axes[0].get_ylabel().endswith("[kHz]")
 
     def test_pilot_phase_frequency_estimate(self, xp: Any) -> None:
         """A PilotSlope estimate labels the fit with its offset."""
