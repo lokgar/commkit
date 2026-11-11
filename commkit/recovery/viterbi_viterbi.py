@@ -102,7 +102,7 @@ def _viterbi_viterbi(
     )
     if joint:  # rows are copies of the joint trajectory
         phi_u = phi_u[:1]
-    phi_u = _repair_slips(phi_u, xp, method.cycle_slip, M, block_size)
+    phi_u = _repair_slips(phi_u, method.cycle_slip, M, block_size)
     phi_full = _interp_block_phases(phi_u, N, block_size, xp)
     if joint:
         phi_full = xp.broadcast_to(phi_full, (C, N)).copy()

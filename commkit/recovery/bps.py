@@ -329,7 +329,7 @@ def _bps(symbols: ArrayType, method: BPS, ctx: _Context) -> _Phase:
     # branch nearest zero instead of the edge of the candidate range.
     phi_b = xp.where(phi_b >= np.pi / M, phi_b - 2.0 * np.pi / M, phi_b)
     phi_u = xp.unwrap(phi_b * M, axis=-1) / M
-    phi_u = _repair_slips(phi_u, xp, method.cycle_slip, M, block_size)
+    phi_u = _repair_slips(phi_u, method.cycle_slip, M, block_size)
     phi_full = _interp_block_phases(phi_u, N, block_size, xp)
     if phi_u.shape[0] != C:  # joint: one trajectory for every channel
         phi_full = xp.broadcast_to(phi_full, (C, N)).copy()

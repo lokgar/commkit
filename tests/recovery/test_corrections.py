@@ -83,6 +83,30 @@ class TestCycleSlipCorrection:
         assert type(phi_out) is type(x)
         assert float(xp.max(xp.abs(phi_out - x))) == pytest.approx(np.pi / 2)
 
+    def test_rows_are_repaired_on_their_own(self, xp, xpt, monkeypatch):
+        """``(C, B)`` input: each row equals its own 1-D repair (slips in
+        different places, one row clean), in one host round trip; 3-D input
+        raises."""
+        from commkit.recovery import corrections
+
+        rows = np.tile(np.linspace(0.0, 1.0, 300), (3, 1))
+        rows[0, 100:] += np.pi / 2
+        rows[2, 200:] -= np.pi / 2
+        expected = [
+            recovery.correct_cycle_slips(r, symmetry=4, history=50) for r in rows
+        ]
+        calls = []
+        real = corrections.to_device
+        monkeypatch.setattr(
+            corrections, "to_device", lambda a, d: calls.append(d) or real(a, d)
+        )
+        out = recovery.correct_cycle_slips(xp.asarray(rows), symmetry=4, history=50)
+        assert out.shape == (3, 300) and calls == ["cpu"]
+        xpt.assert_allclose(out, xp.asarray(np.stack(expected)), atol=1e-12)
+        xpt.assert_allclose(out, xp.asarray(np.tile(rows[1], (3, 1))), atol=0.05)
+        with pytest.raises(ValueError, match="phase must be"):
+            recovery.correct_cycle_slips(xp.zeros((2, 2, 8)))
+
     def test_bps_correction_bounded_output(self, xp):
         """BPS cycle_slip_correction=True returns phase within reasonable bounds."""
         sig = make_test_qam_signal(

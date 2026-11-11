@@ -220,9 +220,10 @@ def _get_numba_cycle_slip():
         def _cycle_slip_loop(phi_u, symmetry, history_length, threshold):
             """Detect and correct cycle slips by linear extrapolation (Numba).
 
-            Scans the block phases ``phi_u`` in order.  Each block is extrapolated
-            linearly from up to ``history_length`` past corrected blocks; a deviation
-            beyond ``threshold`` is corrected by a multiple of ``2π/symmetry``.
+            Scans each row of block phases ``phi_u`` in order.  Each block is
+            extrapolated linearly from up to ``history_length`` past corrected
+            blocks; a deviation beyond ``threshold`` is corrected by a multiple
+            of ``2π/symmetry``.
 
             The regression uses the relative coordinates ``[0, W-1]``, so ``Sx`` and
             ``Sxx`` are closed-form constants; only ``Sy`` and ``Sxy`` are kept as
@@ -231,8 +232,8 @@ def _get_numba_cycle_slip():
             Parameters
             ----------
             phi_u : numpy.ndarray
-                Block phases after the M-fold unwrap, float64, ``(B,)``; modified in
-                place.
+                Block phases after the M-fold unwrap, float64, ``(R, B)``;
+                modified in place.
             symmetry : int
                 Rotational symmetry; the correction quantum is ``2π/symmetry``.
             history_length : int
@@ -249,7 +250,7 @@ def _get_numba_cycle_slip():
             """
             two_pi = 2.0 * np.pi
             quantum = two_pi / float(symmetry)
-            B = len(phi_u)
+            R, B = phi_u.shape
             W = history_length
             W_f = float(W)
 
@@ -261,83 +262,91 @@ def _get_numba_cycle_slip():
             Sxx_full = W_f * (W_f - 1.0) * (2.0 * W_f - 1.0) / 6.0
             denom_full = W_f * Sxx_full - Sx_full * Sx_full  # W²(W²-1)/12
 
-            # Only Sy and Sxy need to be maintained as running state.
-            buf_y = np.empty(W, dtype=np.float64)
-            buf_head = 0  # next write slot (circular)
-            n_buf = 0  # valid entries currently in buffer
+            # Rows (channels, usually one or two) in series: under prange
+            # the scan ran at half speed per row (two rows of 2^16 values:
+            # 0.41 ms in parallel, 0.40 ms in series), a gain only from
+            # four rows on.
+            for r in range(R):
+                row = phi_u[r]
+                # Only Sy and Sxy need to be maintained as running state.
+                buf_y = np.empty(W, dtype=np.float64)
+                buf_head = 0  # next write slot (circular)
+                n_buf = 0  # valid entries currently in buffer
 
-            Sy = 0.0
-            Sxy = 0.0
+                Sy = 0.0
+                Sxy = 0.0
 
-            for b in range(B):
-                y_b = phi_u[b]
+                for b in range(B):
+                    y_b = row[b]
 
-                if n_buf == 0:
-                    # First block: trust it unconditionally (at relative position 0).
-                    buf_y[0] = y_b
-                    buf_head = 1
-                    n_buf = 1
-                    Sy = y_b
-                    Sxy = 0.0  # 0 * y_b
-                    continue
+                    if n_buf == 0:
+                        # First block: trust it unconditionally (at relative position 0).
+                        buf_y[0] = y_b
+                        buf_head = 1
+                        n_buf = 1
+                        Sy = y_b
+                        Sxy = 0.0  # 0 * y_b
+                        continue
 
-                if n_buf < min(10, W):
-                    # Constant extrapolation during warmup to avoid cementing false slips.
-                    phi_pred = buf_y[(buf_head - 1) % W]
-                else:
-                    # Linear extrapolation.  Prediction target is always one step past
-                    # the newest buffered entry, i.e. relative coordinate = n_buf.
-                    x_pred = float(n_buf)
-                    n_f = float(n_buf)
-                    if n_buf < W:
-                        # Partial window: derive exact Sx/Sxx from closed-form sums.
-                        Sx_p = n_f * (n_f - 1.0) / 2.0
-                        Sxx_p = n_f * (n_f - 1.0) * (2.0 * n_f - 1.0) / 6.0
-                        denom = n_f * Sxx_p - Sx_p * Sx_p
-                        if abs(denom) > 1e-30:
-                            slope = (n_f * Sxy - Sx_p * Sy) / denom
-                            intercept = (Sy - slope * Sx_p) / n_f
-                        else:
-                            slope = 0.0
-                            intercept = Sy / n_f
+                    if n_buf < min(10, W):
+                        # Constant extrapolation during warmup to avoid cementing false slips.
+                        phi_pred = buf_y[(buf_head - 1) % W]
                     else:
-                        # Full window: use precomputed constants (numerically exact).
-                        if denom_full > 1e-30:
-                            slope = (W_f * Sxy - Sx_full * Sy) / denom_full
-                            intercept = (Sy - slope * Sx_full) / W_f
+                        # Linear extrapolation.  Prediction target is always one step past
+                        # the newest buffered entry, i.e. relative coordinate = n_buf.
+                        x_pred = float(n_buf)
+                        n_f = float(n_buf)
+                        if n_buf < W:
+                            # Partial window: derive exact Sx/Sxx from closed-form sums.
+                            Sx_p = n_f * (n_f - 1.0) / 2.0
+                            Sxx_p = n_f * (n_f - 1.0) * (2.0 * n_f - 1.0) / 6.0
+                            denom = n_f * Sxx_p - Sx_p * Sx_p
+                            if abs(denom) > 1e-30:
+                                slope = (n_f * Sxy - Sx_p * Sy) / denom
+                                intercept = (Sy - slope * Sx_p) / n_f
+                            else:
+                                slope = 0.0
+                                intercept = Sy / n_f
                         else:
-                            slope = 0.0
-                            intercept = Sy / W_f
-                    phi_pred = slope * x_pred + intercept
+                            # Full window: use precomputed constants (numerically exact).
+                            if denom_full > 1e-30:
+                                slope = (W_f * Sxy - Sx_full * Sy) / denom_full
+                                intercept = (Sy - slope * Sx_full) / W_f
+                            else:
+                                slope = 0.0
+                                intercept = Sy / W_f
+                        phi_pred = slope * x_pred + intercept
 
-                diff = y_b - phi_pred
-                # Round to nearest correction quantum
-                k = round(diff / quantum)
-                if abs(diff) > threshold and k != 0:
-                    phi_u[b] -= float(k) * quantum
-                    y_b = phi_u[b]
+                    diff = y_b - phi_pred
+                    # Round to nearest correction quantum
+                    k = round(diff / quantum)
+                    if abs(diff) > threshold and k != 0:
+                        row[b] -= float(k) * quantum
+                        y_b = row[b]
 
-                # Update circular buffer using relative coordinates.
-                if n_buf == W:
-                    # Slide window: evict oldest (relative pos 0), shift all down by 1,
-                    # add y_b at relative position W-1.
-                    # Sxy update uses the identity:
-                    #   Sxy_new = Sxy_old - Sy_old + y_old + (W-1)·y_new
-                    # (derived by relabelling positions after eviction)
-                    old_idx = buf_head % W
-                    y_old = buf_y[old_idx]
-                    Sxy = Sxy - Sy + y_old + (W_f - 1.0) * y_b  # must precede Sy update
-                    Sy = Sy - y_old + y_b
-                    buf_y[old_idx] = y_b
-                    buf_head += 1
-                else:
-                    # Append at relative position n_buf.
-                    idx = buf_head % W
-                    buf_y[idx] = y_b
-                    Sxy += float(n_buf) * y_b
-                    Sy += y_b
-                    buf_head += 1
-                    n_buf += 1
+                    # Update circular buffer using relative coordinates.
+                    if n_buf == W:
+                        # Slide window: evict oldest (relative pos 0), shift all down by 1,
+                        # add y_b at relative position W-1.
+                        # Sxy update uses the identity:
+                        #   Sxy_new = Sxy_old - Sy_old + y_old + (W-1)·y_new
+                        # (derived by relabelling positions after eviction)
+                        old_idx = buf_head % W
+                        y_old = buf_y[old_idx]
+                        Sxy = (
+                            Sxy - Sy + y_old + (W_f - 1.0) * y_b
+                        )  # must precede Sy update
+                        Sy = Sy - y_old + y_b
+                        buf_y[old_idx] = y_b
+                        buf_head += 1
+                    else:
+                        # Append at relative position n_buf.
+                        idx = buf_head % W
+                        buf_y[idx] = y_b
+                        Sxy += float(n_buf) * y_b
+                        Sy += y_b
+                        buf_head += 1
+                        n_buf += 1
 
             return phi_u
 
@@ -365,8 +374,8 @@ def correct_cycle_slips(
     Parameters
     ----------
     phase : array_like
-        Phase trajectory in radians after the M-fold unwrap, ``(B,)``, e.g.
-        block phases.
+        Phase trajectory in radians after the M-fold unwrap, ``(B,)`` or
+        ``(C, B)`` (each row repaired on its own), e.g. block phases.
     symmetry : int, default 4
         Rotational symmetry of the constellation; the correction quantum is
         ``2π/symmetry`` (4 for square and cross QAM, M for M-PSK, 1 for pilot
@@ -384,25 +393,25 @@ def correct_cycle_slips(
     Returns
     -------
     ndarray
-        Corrected float64 trajectory, ``(B,)``, a new array on the input's
-        device.
+        Corrected float64 trajectory, shaped as ``phase``, a new array on
+        the input's device.
 
     Raises
     ------
     ValueError
-        If ``phase`` is not 1-D.
+        If ``phase`` is not 1-D or 2-D.
 
     Notes
     -----
-    A sequential scan, Numba-compiled on the CPU; GPU input makes one host
-    round trip.
+    A sequential scan per row, Numba-compiled on the CPU; GPU input makes
+    one host round trip for the whole array.
     """
     phase, xp, _ = dispatch(phase)
-    if phase.ndim != 1:
-        raise ValueError(f"phase must be 1-D, got shape {phase.shape}.")
-    host = np.array(to_device(phase, "cpu"), dtype=np.float64)  # a copy
+    if phase.ndim not in (1, 2):
+        raise ValueError(f"phase must be (B,) or (C, B), got shape {phase.shape}.")
+    host = np.array(to_device(phase, "cpu"), dtype=np.float64, ndmin=2)  # a copy
     out = _get_numba_cycle_slip()(host, int(symmetry), int(history), float(threshold))
-    return xp.asarray(out)
+    return xp.asarray(out.reshape(phase.shape))
 
 
 @dataclass(frozen=True)
@@ -489,13 +498,13 @@ _HISTORY_SPAN = 640
 
 def _repair_slips(
     phase: ArrayType,
-    xp: Any,
     cycle_slip: CycleSlip | None,
     symmetry: int,
     spacing: float,
     default_history: int | None = None,
 ) -> ArrayType:
-    """Row-wise cycle-slip repair of a ``(R, B)`` trajectory (host round trip).
+    """Row-wise cycle-slip repair of a ``(R, B)`` trajectory (one host round
+    trip for all rows).
 
     ``spacing`` is the number of symbol periods between trajectory values;
     ``default_history`` replaces the 640-symbol default span.
@@ -503,15 +512,10 @@ def _repair_slips(
     if cycle_slip is None:
         return phase
     history = cycle_slip._history_values(spacing, default_history)
-    out = xp.empty_like(phase)
-    for r in range(phase.shape[0]):
-        out[r] = correct_cycle_slips(
-            phase[r],
-            symmetry=symmetry,
-            history=history,
-            threshold=cycle_slip.threshold,
-        )
-    return out
+    out = correct_cycle_slips(
+        phase, symmetry=symmetry, history=history, threshold=cycle_slip.threshold
+    )
+    return out.astype(phase.dtype, copy=False)
 
 
 # -----------------------------------------------------------------------------

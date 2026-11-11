@@ -306,7 +306,7 @@ def _tikhonov(symbols: ArrayType, method: Tikhonov, ctx: _Context) -> _Phase:
         phi_smooth = xp.stack(
             [_sskf_smoother_1d(row, sigma_p2, sigma_v2, sp, xp) for row in phi_u]
         )
-    phi_smooth = _repair_slips(phi_smooth, xp, method.cycle_slip, M, block_size)
+    phi_smooth = _repair_slips(phi_smooth, method.cycle_slip, M, block_size)
     phi_full = _interp_block_phases(phi_smooth, N, block_size, xp)
     if joint:
         phi_full = xp.broadcast_to(phi_full, (C, N)).copy()

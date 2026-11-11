@@ -144,7 +144,7 @@ def _pilot_aided(
     spacing = (
         float(np.mean(np.diff(pilot_indices_np))) if pilot_indices_np.size > 1 else 1.0
     )
-    phi_pilots_u = _repair_slips(phi_pilots_u, xp, method.cycle_slip, 1, spacing)
+    phi_pilots_u = _repair_slips(phi_pilots_u, method.cycle_slip, 1, spacing)
     R = phi_pilots_u.shape[0]
 
     all_positions = xp.arange(N, dtype=xp.float64)

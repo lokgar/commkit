@@ -399,7 +399,6 @@ def _pll(symbols: ArrayType, method: PLL, ctx: _Context) -> _Phase:
         phi = _get_numba_dd_pll()(symbols_cpu, *loop_args)
     phi = _repair_slips(
         phi,
-        np,
         method.cycle_slip,
         int(constellation.rotational_symmetry),
         1,

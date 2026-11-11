@@ -25,6 +25,7 @@ Notable changes to CommKit, newest first. Performance figures are from the refer
 
 - `demapper_exit_curve(esn0_db=)` as an alternative to `noise_var`.
 - `impairments.apply_frequency_offset`: a carrier frequency offset at any value (not snapped to the FFT grid like `shift_frequency`), per channel if needed, the exact inverse of `correct_frequency_offset`.
+- `correct_cycle_slips` accepts a `(C, B)` trajectory and repairs each row on its own.
 - `max_points=` on `plot_carrier_phase_trajectory`, `plot_carrier_phase_decomposition`, `plot_frequency_drift`, `plot_frequency_offset_spectrum`, `plot_mm_autocorrelation`, `plot_timing_correlation` and `plot_pilot_phase_estimate`, as the other trace plots have.
 - A WARNING when the decisions of `lms`, `block_lms` or `rls` collapse onto a few points (blind unipolar PAM-4 below about 8 dB Es/N0 decides every symbol as the lowest level).
 
@@ -38,6 +39,7 @@ Notable changes to CommKit, newest first. Performance figures are from the refer
 - `fir_filter`, and with it `matched_filter`, filters by overlap-save through multi-threaded FFTs, as `ols_fir_filter` does; SciPy's `convolve` transformed the whole record on one core. Both use a guard as long as the filter's transient instead of a quarter block, and real FFTs for real samples and taps: 0.10 of the former time on the CPU for 65 taps on 2^20 complex64 samples (0.10 real, 0.12 for 1501 taps), and `ols_fir_filter` 0.2, which now accepts any power of 2 `nfft` with `nfft // 2 >= len(taps)`; on GPU input 0.85 for complex samples, 1.1 for real ones (0.55 ms against 0.6 ms, bound by launches).
 - `welch_psd` transforms its segments in batches on the input's device instead of through `scipy.signal.welch`, which in SciPy 1.18 calls the FFT once per segment: 0.13 of the former time on the CPU (2^20 complex64 samples, `nperseg=256`), 0.34 at `nperseg=4096`, and 0.9 on GPU input. The estimate is SciPy's to rounding (1e-6 of the peak in single precision); a record shorter than `nperseg` logs a WARNING instead of SciPy's `UserWarning`.
 - The plots of sample-rate traces (carrier-phase trajectory and decomposition, frequency drift, M-th power spectrum, Mengali-Morelli autocorrelation, timing correlation, pilot-tone spectrum and phase, pilot phase trajectory) draw a trace longer than `max_points` (default 4000) as its min/max envelope, reduced on the data's device, so GPU input moves only the drawn points to the host; they moved and drew every sample. `plot_pilot_tone_phase_estimate` computes its spectrum on the samples' device.
+- The cycle-slip repair of the CPR methods (`CycleSlip`) makes one host round trip for all channels of GPU input instead of one per channel.
 - `correct_fiber_propagation` with `method="blocks"` backpropagates its blocks in batches of 2^16 samples per polarization on the CPU, which stay in cache: 0.64 of the former time (2 x 2^20 samples, 4 x 80 km, 10 steps per span), 0.85 at 2^23 samples. GPU input is unchanged.
 
 ### Fixed
