@@ -518,7 +518,11 @@ ROWS: list[Row] = [
     ),
     # --- frequency ----------------------------------------------------------
     Row("commkit.frequency.SpectralPeak", VALUE),
+    Row("commkit.frequency.BlockwiseFrequencyEstimate", VALUE),
     Row("commkit.frequency.FrequencyOffsetEstimate", VALUE),
+    Row("commkit.frequency.MengaliMorelliEstimate", VALUE),
+    Row("commkit.frequency.MthPowerEstimate", VALUE),
+    Row("commkit.frequency.PilotSlopeEstimate", VALUE),
     Row("commkit.frequency.MengaliMorelli", VALUE),
     Row("commkit.frequency.MthPower", VALUE),
     Row("commkit.frequency.PilotSlope", VALUE),

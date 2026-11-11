@@ -735,11 +735,11 @@ class TestFindBiasTone:
 
 
 def _block_estimate(n, block_size, overlap, values):
-    """A blockwise FrequencyOffsetEstimate with given per-block values."""
+    """A BlockwiseFrequencyEstimate with given per-block values."""
     starts, length = frequency._block_starts(n, block_size, overlap)
     centers = np.array([st + length / 2.0 for st in starts])
     block_values = np.asarray(values(len(starts)), dtype=np.float64)
-    return frequency.FrequencyOffsetEstimate(
+    return frequency.BlockwiseFrequencyEstimate(
         value=np.asarray(block_values.mean(axis=-1)),
         weights=np.ones(block_values.shape[:-1]),
         block_centers=centers,
@@ -979,3 +979,37 @@ def test_pilot_symbols_from_frame(xp):
     shifted = apply_frequency_offset(sig, offset=1e3)
     est = frequency.estimate_frequency_offset(shifted, one)
     assert float(to_numpy(est.value)) == pytest.approx(1e3, rel=1e-3)
+
+
+@pytest.mark.parametrize(
+    "case",
+    ["mth_power", "mengali_morelli", "pilot_slope", "spectral_peak", "blockwise"],
+)
+def test_each_method_returns_its_result_class(xp, case):
+    """The estimate is the subclass holding its method's diagnostics, none
+    of them None, and finds the applied 1 kHz offset (QPSK at 30 dB,
+    2^14 symbols: errors of a few Hz)."""
+    import dataclasses
+
+    fo = 1e3
+    sig = _psk_signal(xp, 4, 1 << 14, fo_hz=fo)
+    x = sig
+    if case == "mth_power":
+        method, result = frequency.MthPower(), frequency.MthPowerEstimate
+    elif case == "mengali_morelli":
+        method, result = frequency.MengaliMorelli(), frequency.MengaliMorelliEstimate
+    elif case == "pilot_slope":
+        idx = np.arange(0, 1 << 14, 8)
+        ref = to_numpy(sig.reference.symbols)[idx]
+        method, result = frequency.PilotSlope(idx, ref), frequency.PilotSlopeEstimate
+    elif case == "spectral_peak":
+        x = _tone(xp, 1 << 14, fo)
+        method, result = frequency.SpectralPeak(), frequency.FrequencyOffsetEstimate
+    else:
+        method = frequency.MthPower(block_size=4096)
+        result = frequency.BlockwiseFrequencyEstimate
+    est = frequency.estimate_frequency_offset(x, method, sampling_rate=FS)
+    assert type(est) is result
+    assert all(getattr(est, f.name) is not None for f in dataclasses.fields(est))
+    assert abs(float(est.value) - fo) < 20.0
+    assert est.combined() is est  # one channel: nothing to combine

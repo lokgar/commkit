@@ -136,12 +136,12 @@ def plot_pilot_phase_estimate(
 
     For a :class:`~commkit.recovery.PilotPhaseEstimate` (``PilotInterpolation``) a
     second panel shows the interpolated per-symbol trajectory; for a
-    :class:`~commkit.frequency.FrequencyOffsetEstimate` (``PilotSlope``)
+    :class:`~commkit.frequency.PilotSlopeEstimate` (``PilotSlope``)
     the fit is labeled with the estimated offset.
 
     Parameters
     ----------
-    estimate : PilotPhaseEstimate or FrequencyOffsetEstimate
+    estimate : PilotPhaseEstimate or PilotSlopeEstimate
         With ``pilot_indices`` and ``pilot_phase``.
     sampling_rate : float, default 1.0
         Sampling rate in Hz of the pilot indices (labels the fitted slope in

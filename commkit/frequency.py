@@ -6,8 +6,11 @@ M-th power), :class:`MengaliMorelli` (blind, multi-lag autocorrelation),
 :class:`PilotSlope` (the phase slope of known symbols) or
 :class:`SpectralPeak` (a CW pilot tone).  A ``block_size`` on any method but
 ``PilotSlope`` tracks a time-varying offset.  The estimate is a
-:class:`FrequencyOffsetEstimate`; :func:`correct_frequency_offset` removes an
-estimate, an offset in Hz, or what a method estimates.
+:class:`FrequencyOffsetEstimate`, as the subclass holding the method's
+diagnostics (:class:`MthPowerEstimate`, :class:`MengaliMorelliEstimate`,
+:class:`PilotSlopeEstimate`, :class:`BlockwiseFrequencyEstimate`);
+:func:`correct_frequency_offset` removes an estimate, an offset in Hz, or
+what a method estimates.
 """
 
 import logging
@@ -36,11 +39,15 @@ def _get_numba_mm_bootstrap() -> Callable[..., np.ndarray]:
 
 
 __all__ = [
-    "SpectralPeak",
+    "BlockwiseFrequencyEstimate",
     "FrequencyOffsetEstimate",
     "MengaliMorelli",
+    "MengaliMorelliEstimate",
     "MthPower",
+    "MthPowerEstimate",
     "PilotSlope",
+    "PilotSlopeEstimate",
+    "SpectralPeak",
     "correct_frequency_offset",
     "estimate_frequency_offset",
 ]
@@ -280,10 +287,15 @@ FrequencyMethod = MthPower | MengaliMorelli | PilotSlope | SpectralPeak
 
 @dataclass(frozen=True)
 class FrequencyOffsetEstimate:
-    """Result of :func:`estimate_frequency_offset`.
+    """Result of :func:`estimate_frequency_offset`: the result of
+    ``SpectralPeak``, and the fields every method gives.
 
-    Per-channel fields follow the rank rule (0-d for ``(N,)`` input, ``(C,)``
-    for ``(C, N)``) and stay on the input's device.
+    The constructor takes the same fields.  The other methods return a
+    subclass with their diagnostics: :class:`MthPowerEstimate`,
+    :class:`MengaliMorelliEstimate`, :class:`PilotSlopeEstimate`, and
+    :class:`BlockwiseFrequencyEstimate` for any method with a
+    ``block_size``.  Per-channel fields follow the rank rule (0-d for
+    ``(N,)`` input, ``(C,)`` for ``(C, N)``) and stay on the input's device.
 
     Attributes
     ----------
@@ -293,59 +305,126 @@ class FrequencyOffsetEstimate:
     weights : ndarray
         Per-channel reliability weights used by :meth:`combined` (peak
         magnitude, autocorrelation energy or pilot power).
-    block_centers : numpy.ndarray or None
-        Blockwise only: block center sample indices, ``(B,)``.
-    block_values : ndarray or None
-        Blockwise only: estimate per block in Hz, ``(B,)`` or ``(C, B)``.
-    power : int or None
-        Exponent ``M`` used (M-th power and Mengali-Morelli).
-    spectrum : ndarray or None
-        M-th power: ``|FFT(x^M)|`` over the bins of the search range (all
-        ``nfft`` bins without one), in ascending frequency, ``(K,)`` or
-        ``(C, K)``.
-    spectrum_frequencies : numpy.ndarray or None
-        M-th power: the frequencies of ``spectrum``'s bins in Hz, ``(K,)``,
-        ascending and evenly spaced (divide by ``power`` for ``Δf``).
-    autocorrelation : ndarray or None
-        Mengali-Morelli: unbiased autocorrelation at lags ``1 .. L``.
-    pilot_phase : ndarray or None
-        Pilots: unwrapped pilot phase in radians, ``(P,)`` or ``(C, P)``.
-    pilot_indices : numpy.ndarray or None
-        Pilots: the pilot sample indices.
     """
 
     value: ArrayType
     weights: ArrayType
-    block_centers: np.ndarray | None = None
-    block_values: ArrayType | None = None
-    power: int | None = None
-    spectrum: ArrayType | None = None
-    spectrum_frequencies: np.ndarray | None = None
-    autocorrelation: ArrayType | None = None
-    pilot_phase: ArrayType | None = None
-    pilot_indices: np.ndarray | None = None
 
     def combined(self) -> "FrequencyOffsetEstimate":
         """One estimate for all channels: the weighted mean over channels.
 
         For channels that share one laser (polarization diversity).  The
-        result is 0-d (block values ``(B,)``) and is applied to every channel
-        by :func:`correct_frequency_offset`.
+        result is 0-d and is applied to every channel by
+        :func:`correct_frequency_offset`; the per-channel diagnostics are
+        dropped (a blockwise estimate keeps its combined blocks).
         """
         _, xp, _ = dispatch(self.value)
         if self.value.ndim == 0:
             return self
         w = self.weights / xp.sum(self.weights)
-        block_values = (
-            None
-            if self.block_values is None
-            else xp.sum(w[:, None] * self.block_values, axis=0)
-        )
         return FrequencyOffsetEstimate(
+            value=xp.sum(w * self.value), weights=xp.sum(self.weights)
+        )
+
+
+@dataclass(frozen=True)
+class MthPowerEstimate(FrequencyOffsetEstimate):
+    """Result of :class:`MthPower`.
+
+    The constructor takes the same fields: those of
+    :class:`FrequencyOffsetEstimate`, then the attributes below.
+
+    Attributes
+    ----------
+    power : int
+        Exponent ``M`` used.
+    spectrum : ndarray
+        ``|FFT(x^M)|`` over the bins of the search range (all ``nfft`` bins
+        without one), in ascending frequency, ``(K,)`` or ``(C, K)``.
+    spectrum_frequencies : numpy.ndarray
+        The frequencies of ``spectrum``'s bins in Hz, ``(K,)``, ascending and
+        evenly spaced (divide by ``power`` for ``Δf``).
+    """
+
+    power: int
+    spectrum: ArrayType
+    spectrum_frequencies: np.ndarray
+
+
+@dataclass(frozen=True)
+class MengaliMorelliEstimate(FrequencyOffsetEstimate):
+    """Result of :class:`MengaliMorelli`.
+
+    The constructor takes the same fields: those of
+    :class:`FrequencyOffsetEstimate`, then the attributes below.
+
+    Attributes
+    ----------
+    power : int
+        Exponent ``M`` used.
+    autocorrelation : ndarray
+        Unbiased autocorrelation at lags ``1 .. L``.
+    """
+
+    power: int
+    autocorrelation: ArrayType
+
+
+@dataclass(frozen=True)
+class PilotSlopeEstimate(FrequencyOffsetEstimate):
+    """Result of :class:`PilotSlope`.
+
+    The constructor takes the same fields: those of
+    :class:`FrequencyOffsetEstimate`, then the attributes below.
+
+    Attributes
+    ----------
+    pilot_phase : ndarray
+        Unwrapped pilot phase in radians, ``(P,)`` or ``(C, P)``.
+    pilot_indices : numpy.ndarray
+        The pilot sample indices.
+    """
+
+    pilot_phase: ArrayType
+    pilot_indices: np.ndarray
+
+
+@dataclass(frozen=True)
+class BlockwiseFrequencyEstimate(FrequencyOffsetEstimate):
+    """Result of a method with a ``block_size``: a time-varying offset.
+
+    The constructor takes the same fields: those of
+    :class:`FrequencyOffsetEstimate`, then the attributes below.
+    :func:`correct_frequency_offset` interpolates the blocks.
+
+    Attributes
+    ----------
+    block_centers : numpy.ndarray
+        Block center sample indices, ``(B,)``.
+    block_values : ndarray
+        Estimate per block in Hz, ``(B,)`` or ``(C, B)``.
+    power : int, optional
+        Exponent ``M`` used by ``MthPower`` and ``MengaliMorelli``; ``None``
+        for ``SpectralPeak``.
+    """
+
+    block_centers: np.ndarray
+    block_values: ArrayType
+    power: int | None = None
+
+    def combined(self) -> "BlockwiseFrequencyEstimate":
+        """One estimate for all channels: the weighted mean over channels,
+        of the value and of each block (``(B,)``).
+        """
+        _, xp, _ = dispatch(self.value)
+        if self.value.ndim == 0:
+            return self
+        w = self.weights / xp.sum(self.weights)
+        return BlockwiseFrequencyEstimate(
             value=xp.sum(w * self.value),
             weights=xp.sum(self.weights),
             block_centers=self.block_centers,
-            block_values=block_values,
+            block_values=xp.sum(w[:, None] * self.block_values, axis=0),
             power=self.power,
         )
 
@@ -669,25 +748,31 @@ def _estimate_frequency_offset(
     if block_size is None:
         rows = _estimate_rows(x, fs, method, constellation, shared_rows=True)
         values, weights = restore_1d(was_1d, rows.values, rows.weights)
-        spectrum = None if rows.spectrum is None else restore_1d(was_1d, rows.spectrum)
-        autocorr = (
-            None
-            if rows.autocorrelation is None
-            else restore_1d(was_1d, rows.autocorrelation)
-        )
-        phase = (
-            None if rows.pilot_phase is None else restore_1d(was_1d, rows.pilot_phase)
-        )
-        est = FrequencyOffsetEstimate(
-            value=values,
-            weights=weights,
-            power=rows.power,
-            spectrum=spectrum,
-            spectrum_frequencies=rows.spectrum_frequencies,
-            autocorrelation=autocorr,
-            pilot_phase=phase,
-            pilot_indices=rows.pilot_indices,
-        )
+        est: FrequencyOffsetEstimate
+        if isinstance(method, MthPower):
+            assert rows.power is not None and rows.spectrum_frequencies is not None
+            est = MthPowerEstimate(
+                values,
+                weights,
+                rows.power,
+                restore_1d(was_1d, rows.spectrum),
+                rows.spectrum_frequencies,
+            )
+        elif isinstance(method, MengaliMorelli):
+            assert rows.power is not None
+            est = MengaliMorelliEstimate(
+                values, weights, rows.power, restore_1d(was_1d, rows.autocorrelation)
+            )
+        elif isinstance(method, PilotSlope):
+            assert rows.pilot_indices is not None
+            est = PilotSlopeEstimate(
+                values,
+                weights,
+                restore_1d(was_1d, rows.pilot_phase),
+                rows.pilot_indices,
+            )
+        else:
+            est = FrequencyOffsetEstimate(values, weights)
     else:
         assert not isinstance(method, PilotSlope)
         starts, length = _block_starts(N, block_size, method.overlap)
@@ -705,7 +790,7 @@ def _estimate_frequency_offset(
             xp.mean(block_weights, axis=-1),
             block_values,
         )
-        est = FrequencyOffsetEstimate(
+        est = BlockwiseFrequencyEstimate(
             value=values,
             weights=weights,
             block_centers=np.array([s + length / 2.0 for s in starts]),
@@ -765,8 +850,7 @@ def correct_frequency_offset(
         constellation = signal_adapter.resolve_choice("constellation", None)
         how = _estimate_frequency_offset(x, how, fs, constellation)
 
-    if isinstance(how, FrequencyOffsetEstimate) and how.block_values is not None:
-        assert how.block_centers is not None
+    if isinstance(how, BlockwiseFrequencyEstimate):
         result = _correct_blockwise(x, fs, how.block_centers, how.block_values, xp)
         return signal_adapter.wrap_samples(result)
 

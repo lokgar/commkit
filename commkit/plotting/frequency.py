@@ -53,7 +53,7 @@ def plot_mm_autocorrelation(
 
     Parameters
     ----------
-    estimate : FrequencyOffsetEstimate
+    estimate : MengaliMorelliEstimate
         From ``estimate_frequency_offset(x, MengaliMorelli())``.
     sampling_rate : float
         Sampling rate in Hz of the estimated samples.
@@ -170,7 +170,7 @@ def plot_frequency_offset_spectrum(
 
     Parameters
     ----------
-    estimate : FrequencyOffsetEstimate
+    estimate : MthPowerEstimate
         From ``estimate_frequency_offset(x, MthPower())``.
     search_range : (float, float), optional
         The ``MthPower(search_range=)`` used, shaded.
@@ -279,7 +279,7 @@ def plot_frequency_offset_blockwise_result(
 
     Parameters
     ----------
-    estimate : FrequencyOffsetEstimate
+    estimate : BlockwiseFrequencyEstimate
         A blockwise estimate (``MthPower(block_size=)`` or
         ``MengaliMorelli(block_size=)``); the first channel is drawn.
     num_samples : int
