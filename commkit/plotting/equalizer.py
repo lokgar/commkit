@@ -225,15 +225,18 @@ def plot_zf_equalizer_response(
     Three panels per channel path, in dB:
 
     * ``|H(f)|``: the channel;
-    * ``|W(f)|``: the equalizer, ``W = H* / (|H|² + σ²)``;
-    * ``|H(f)·W(f)|``: the combination (≈ 0 dB for ZF, a soft mask for
-      MMSE).
+    * ``|W(f)|``: the equalizer :func:`commkit.equalization.zf_equalizer`
+      applies (``H* / (|H|² + σ²)`` for SISO, the regularized matrix inverse
+      for MIMO), measured by its response to an impulse on each input;
+    * ``|W(f)·H(f)|``: the combination, a matrix product per bin for MIMO
+      (≈ 0 dB on the diagonal for ZF, a soft mask for MMSE).
 
     Parameters
     ----------
     channel_estimate : array_like
-        Channel impulse response, ``(L,)`` for SISO or ``(C_rx, C_tx, L)``
-        for MIMO.
+        Causal channel impulse response (lag 0 at index 0), ``(L,)`` for
+        SISO or ``(C, C, L)`` for MIMO, ``[i, j]`` from input ``j`` to
+        output ``i``.
     noise_var : float, default 0.0
         Noise variance ``σ²`` of the MMSE regularization; ``0.0`` gives ZF.
     nfft : int, default 1024
@@ -268,10 +271,11 @@ def plot_zf_equalizer_response(
         "combined": "Combined |H·W(f)|",
     }
     panels = _select(quantity, tuple(names), label=label)
+    from ..equalization import zf_equalizer
+
     h = to_device(channel_estimate, "cpu")
     if h.ndim not in (1, 3):
         raise ValueError("channel_estimate must be 1-D or 3-D")
-    reg = max(noise_var, 1e-12)
     siso = h.ndim == 1
     paths = (
         [("", h)]
@@ -287,11 +291,25 @@ def plot_zf_equalizer_response(
     sort_idx = np.argsort(freqs)
     f_sorted = freqs[sort_idx]
 
+    # The equalizer's impulse response from input j: an impulse at the
+    # record's centre (room for the anti-causal tail), rolled back to lag 0.
+    hm = h[None, None, :] if siso else h
+    c = hm.shape[0]
+    w = np.empty((c, c, nfft), dtype=np.complex64)
+    for j in range(c):
+        impulse = np.zeros((c, nfft), dtype=np.complex64)
+        impulse[j, nfft // 2] = 1.0
+        y = zf_equalizer(impulse[0] if siso else impulse, h, noise_var=noise_var)
+        w[:, j] = np.roll(np.reshape(y, (c, nfft)), -(nfft // 2), axis=-1)
+    Hf = np.moveaxis(_fft.fft(hm, n=nfft, axis=-1), -1, 0)  # (nfft, C, C)
+    Wf = np.moveaxis(_fft.fft(w, axis=-1), -1, 0)
+    Gf = Wf @ Hf
+    spectra = {"channel": Hf, "equalizer": Wf, "combined": Gf}
+
     fig, axes = _panel_grid(ax, len(paths), len(panels))
-    for (row_label, path), ax_row in zip(paths, axes, strict=True):
-        H = _fft.fft(path, n=nfft)[sort_idx]
-        W = np.conj(H) / (np.abs(H) ** 2 + reg)
-        responses = {"channel": H, "equalizer": W, "combined": H * W}
+    for k, ((row_label, _), ax_row) in enumerate(zip(paths, axes, strict=True)):
+        i, j = divmod(k, c)
+        responses = {n: s[sort_idx, i, j] for n, s in spectra.items()}
         for name, axi in zip(panels, ax_row, strict=True):
             axi.plot(
                 f_sorted,

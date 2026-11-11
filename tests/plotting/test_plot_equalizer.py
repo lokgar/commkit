@@ -10,6 +10,7 @@ import numpy as np
 import pytest
 
 from commkit import equalization, generate
+from commkit.backend import to_device
 from commkit.filtering import RRC
 from commkit.mapping import Constellation
 from commkit.plotting import plot_equalizer_result
@@ -234,6 +235,24 @@ class TestPlotEqualizer:
         fig_custom, raw_ax = plt.subplots(4, 3)
         fig_ret, axes_ret = plot_zf_equalizer_response(h, ax=raw_ax, show=False)
         assert fig_ret is fig_custom
+
+    def test_zf_equalizer_response_matches_the_equalizer(self, xp: Any) -> None:
+        """The equalizer panel is what zf_equalizer applies: for SISO the
+        closed form H*/(|H|² + σ²) (complex64 rounding, measured 5e-6 dB);
+        for 2x2 ZF the combined W·H is the identity, 0 dB on the diagonal
+        and nothing off it (measured below -96 dB)."""
+        h = xp.array([0.2, 1.0, -0.3, 0.1], dtype=xp.float32)
+        _, axes = plot_zf_equalizer_response(h, noise_var=0.01, nfft=1024)
+        H = np.fft.fft(to_device(h, "cpu"), 1024)
+        W = np.fft.fftshift(np.conj(H) / (np.abs(H) ** 2 + 0.01))
+        np.testing.assert_allclose(
+            axes[1].lines[0].get_ydata(), 20 * np.log10(np.abs(W) + 1e-12), atol=1e-3
+        )
+        hm = xp.asarray(np.random.default_rng(0).standard_normal((2, 2, 8)), xp.float32)
+        _, axes = plot_zf_equalizer_response(hm, nfft=1024)
+        diag = axes[0][2].lines[0].get_ydata()
+        assert np.max(np.abs(diag)) < 1e-2
+        assert np.max(axes[1][2].lines[0].get_ydata()) < -60
 
     def test_zf_equalizer_response_show(self, xp: Any) -> None:
         """Verify plot_zf_equalizer_response with show=True calls plt.show() and returns None."""
