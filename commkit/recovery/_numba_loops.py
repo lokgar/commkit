@@ -292,18 +292,19 @@ def cs_window(n):
 
 
 @_step
-def cs_repair(y, n, H, warmup, Sy, Sxy, last, quantum, threshold):
+def cs_repair(y, n, H, Sy, Sxy, last, quantum, threshold):
     """``y`` repaired against its prediction from the ``n <= H`` past values.
 
     The prediction is the least-squares line through the window (its sums
     ``Sy`` and ``Sxy``), evaluated one step past its newest value, or the
-    newest value ``last`` while ``n < warmup``; the first value (``n = 0``)
-    is kept as it is.  A deviation beyond ``threshold`` is snapped back by
+    newest value ``last`` during the warmup, while ``n < min(10, H)`` (a
+    line through a few noisy values would cement a false slip); the first
+    value (``n = 0``) is kept as it is.  A deviation beyond ``threshold`` is snapped back by
     the nearest multiple of ``quantum``.
     """
     if n == 0:
         return y
-    if n < warmup:
+    if n < min(10, H):
         predicted = last
     else:
         # The full window's constants as a separate branch: LLVM hoists
@@ -374,7 +375,6 @@ def cycle_slip(phi_u, symmetry, history_length, threshold):
     quantum = 2.0 * np.pi / float(symmetry)
     R, B = phi_u.shape
     H = history_length
-    warmup = min(10, H)
     buf = np.zeros(H, dtype=np.float64)
 
     # Rows (channels, usually one or two) in series: under prange the scan
@@ -387,7 +387,7 @@ def cycle_slip(phi_u, symmetry, history_length, threshold):
         Sy = 0.0
         Sxy = 0.0
         for b in range(B):
-            y = cs_repair(phi_u[r, b], n, H, warmup, Sy, Sxy, last, quantum, threshold)
+            y = cs_repair(phi_u[r, b], n, H, Sy, Sxy, last, quantum, threshold)
             phi_u[r, b] = y
             Sy, Sxy = cs_push(n, H, Sy, Sxy, buf[slot], y)
             buf[slot] = y

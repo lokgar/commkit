@@ -238,16 +238,14 @@ def _cs_step(i, y, cs_buf_y, cs_buf_ptr, cs_buf_n, cs_stats, quantum, threshold)
 
     :func:`~commkit.recovery._numba_loops.cs_repair` against the window of
     up to ``H = cs_buf_y.shape[1]`` past repaired phases (the newest one
-    alone for the first 10), whose running sums ``cs_stats[i] = [Sy, Sxy,
+    alone for the first min(10, H)), whose running sums ``cs_stats[i] = [Sy, Sxy,
     -, -]`` :func:`~commkit.recovery._numba_loops.cs_push` updates.
     """
     H = cs_buf_y.shape[1]
     n = cs_buf_n[i]
     ptr = cs_buf_ptr[i]
     last = cs_buf_y[i, (ptr - np.int64(1)) % np.int64(H)]
-    y = cs_repair(
-        y, n, H, np.int64(10), cs_stats[i, 0], cs_stats[i, 1], last, quantum, threshold
-    )
+    y = cs_repair(y, n, H, cs_stats[i, 0], cs_stats[i, 1], last, quantum, threshold)
     slot = ptr % np.int64(H)
     cs_stats[i, 0], cs_stats[i, 1] = cs_push(
         n, H, cs_stats[i, 0], cs_stats[i, 1], cs_buf_y[i, slot], y
@@ -539,7 +537,7 @@ def cpr_loop(
                 Sy = cs_stats[i, 0]
                 Sxy = cs_stats[i, 1]
                 phi_corr = cs_repair(
-                    np.float64(phi_hat), n_b, H, np.int64(10), Sy, Sxy,
+                    np.float64(phi_hat), n_b, H, Sy, Sxy,
                     cs_buf_y[i, prev], quantum, np.float64(cs_threshold),
                 )  # fmt: skip
                 cs_stats[i, 0], cs_stats[i, 1] = cs_push(

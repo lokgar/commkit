@@ -246,7 +246,7 @@ class _InlineCpr:
     def _slip(self, i, phi):
         hist = self.hist[i][-self.history :]
         if hist:
-            if len(hist) < 10:
+            if len(hist) < min(10, self.history):
                 pred = hist[-1]
             else:
                 slope, icpt = np.polyfit(np.arange(len(hist)), hist, 1)

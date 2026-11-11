@@ -3,7 +3,7 @@
 // Device version of the Numba kernel `cs_block`, its CPU reference: each
 // phase y_i is predicted by an OLS line through the last n = min(count, H)
 // corrected phases (x = 0 .. n-1, oldest first; the last value alone while
-// n < 10), and snapped by the nearest integer multiple k_i of `quantum`
+// n < min(10, H)), and snapped by the nearest integer multiple k_i of `quantum`
 // when |y_i - prediction| exceeds `threshold`.  Corrected values feed the
 // later predictions, so the recursion is sequential, but its decisions are
 // almost always "no slip".  The kernel therefore speculates:
@@ -96,7 +96,8 @@ extern "C" __global__ void cs_block(const double* __restrict__ phi_blk,
     const double Sx_H = Hd * (Hd - 1.0) / 2.0;
     const double Sxx_H = Hd * (Hd - 1.0) * (2.0 * Hd - 1.0) / 6.0;
     const double den_H = Hd * Sxx_H - Sx_H * Sx_H;
-    const bool full_ok = H >= 10 && fabs(den_H) > 1e-30;
+    const int warmup = min(10, H);
+    const bool full_ok = fabs(den_H) > 1e-30;
     const double b_H = full_ok ? (Hd - Sx_H / Hd) * Hd / den_H : 0.0;
     const double a_H = full_ok ? 1.0 / Hd - b_H * Sx_H / Hd : 0.0;
     const double inv_quantum = 1.0 / quantum;
@@ -175,7 +176,7 @@ extern "C" __global__ void cs_block(const double* __restrict__ phi_blk,
             double expected;
             if (m == 0) {
                 expected = raw;
-            } else if (m < 10) {
+            } else if (m < warmup) {
                 expected = z[p - 1];
             } else if (m == H && full_ok) {
                 const double sy = p1[p] - p1[p - m];

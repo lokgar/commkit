@@ -37,7 +37,7 @@ def reference_cs_block(
 
             if n_b == 0:
                 phi_expected = y_b
-            elif n_b < 10:
+            elif n_b < min(10, H):
                 phi_expected = cs_buf_y[ci, (ptr - 1 + H) % H]
             else:
                 sy = cs_stats[ci, 0]

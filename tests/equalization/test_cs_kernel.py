@@ -139,3 +139,51 @@ class TestCSBlockKernel:
             launch(xp.zeros((C, B + 1)), xp.zeros((C, B + 1)))  # beyond max_block
         with pytest.raises(ValueError, match="phi_corr"):
             launch(phi, corr[:, :-1])
+
+
+class TestWarmupMatchesCorrectCycleSlips:
+    """The equalizers' repair is the recursion of correct_cycle_slips."""
+
+    @pytest.mark.parametrize("H", [1, 4, 9, 30])
+    def test_blocks_match_the_standalone_repair(self, backend_device, xp, xpt, H):
+        """cs_block, fed in uneven blocks (Numba on the CPU, the CUDA kernel
+        on the GPU), repairs a trajectory as correct_cycle_slips does with
+        the same history, the warmup included: the newest value predicts
+        while fewer than min(10, H) values are known, then the line.  A ramp
+        of 0.9 rad per value separates the two predictors (the newest value
+        is off by more than the threshold at every step, the line is not),
+        so a warmup of 10 values for every history (the equalizers' former
+        rule) fails at H = 4 and 9.
+        """
+        from commkit.recovery import correct_cycle_slips
+
+        rng = np.random.default_rng(3)
+        n = 400
+        steps = np.zeros(n)
+        steps[15:19] = [0.2, 0.4, 0.6, 0.8]  # flat, an accelerating turn, flat
+        phi = np.cumsum(steps) + 0.01 * rng.standard_normal(n)
+        phi[250:] += QUANTUM
+        phi = np.ascontiguousarray(np.stack([phi, phi[::-1].copy()]))
+        expected = correct_cycle_slips(phi, symmetry=4, history=H, threshold=THRESHOLD)
+
+        C = phi.shape[0]
+        bufs = [xp.zeros((C, H)), xp.zeros(C, xp.int64), xp.zeros(C, xp.int64)]
+        stats = xp.zeros((C, 4))
+        if backend_device == "gpu":
+            kern = _cuda.get_kernel("cs_block")(
+                *bufs, stats, quantum=QUANTUM, threshold=THRESHOLD, cs_H=H,
+                max_block=200,
+            )  # fmt: skip
+        else:
+            numba_kernel = _get_numba_cs_block()
+        out = []
+        for a, b in ((0, 3), (3, 11), (11, 200), (200, 400)):
+            blk = xp.asarray(np.ascontiguousarray(phi[:, a:b]))
+            corr = xp.empty_like(blk)
+            if backend_device == "gpu":
+                kern(blk, corr)
+            else:
+                numba_kernel(blk, corr, *bufs, stats, QUANTUM, THRESHOLD)
+            out.append(to_numpy(corr))
+        got = np.concatenate(out, axis=1)
+        np.testing.assert_allclose(got, expected, rtol=0, atol=1e-9)

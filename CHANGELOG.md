@@ -44,6 +44,8 @@ Notable changes to CommKit, newest first. Performance figures are from the refer
 
 ### Fixed
 
+- The inline cycle-slip repair of the equalizers (`lms`, `rls` and `block_lms` with `cpr=...(cycle_slip=CycleSlip(history=...))`) predicts each phase by a line through its history after `min(10, history)` values, as `correct_cycle_slips` and the standalone CPR methods do. With `history` below 10 it predicted by the newest value throughout, a different recursion from the one documented. Histories of 10 and more, the defaults among them, are unchanged.
+
 - CMA on a constellation that is not at unit power and has an explicit `pmf` used the Godard radius of the unit-power set (1.32 instead of 5.28 for 16-QAM at power 4).
 - `evm(blind=True)` divides the error by the power of the decided points: 16-QAM at power 4 read 20 % where the data-aided EVM is 10 %.
 - `correct_polarization` with a tracked `JonesTrack` keeps complex128 input in double precision; it computed in complex64 and cast back.
