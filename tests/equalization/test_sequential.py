@@ -321,6 +321,19 @@ class TestEdgeCases:
             atol=1e-6,
         )
 
+    def test_training_longer_than_record_raises(self, xp):
+        """Training symbols beyond the record raise instead of being dropped."""
+        rx, sig = self._qpsk_rx(xp, n_symbols=200)
+        train = xp.asarray(sig.reference.symbols)
+        with pytest.raises(ValueError, match="training_symbols"):
+            equalization.lms(
+                rx[: rx.shape[-1] // 2],
+                train,
+                num_taps=7,
+                sps=2,
+                constellation=Constellation.psk(4),
+            )
+
     def test_lms_num_train_symbols_clamps_numba(self, xp):
         """LMS Numba: pre-sliced training_symbols limits DA phase length."""
         rx, sig = self._qpsk_rx(xp, n_symbols=1000)

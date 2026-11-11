@@ -23,7 +23,6 @@ import numpy as np
 
 from ..._array import restore_1d, warn_if_double
 from ...backend import ArrayType, dispatch, to_device
-from ...logger import logger
 from .._common import (
     _build_padded_samples,
     _cpr_symmetry,
@@ -145,11 +144,9 @@ def _prepare_sequential(
         pad_right = max(0, n_sym * stride + num_taps - 1 - (lead + offset + n_new))
 
     if training_symbols is not None and training_symbols.shape[-1] > n_sym:
-        logger.warning(
-            "training_symbols length (%s) exceeds available symbol count "
-            "(%s); excess training symbols will be ignored.",
-            training_symbols.shape[-1],
-            n_sym,
+        raise ValueError(
+            f"{equalizer}(): training_symbols has {training_symbols.shape[-1]} "
+            f"symbols but the record holds {n_sym}; slice it to the record."
         )
 
     # Plain NumPy (no-op for CPU NumPy; downloads CuPy)
