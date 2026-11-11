@@ -83,8 +83,8 @@ class DecodeResult:
     :class:`Concatenated` returns the inner decoder's ``llrs``, which are
     those of the transmitted bits; :class:`Punctured`, :class:`Shortened`
     and :class:`PAS` return their code's, at the transmitted positions.
-    ``iterations`` counts the configured iterations of turbo decoding (no
-    early stop) and the passes of :class:`HardIterations`.  :class:`Chase`
+    ``iterations`` counts the iterations turbo decoding ran (it stops once
+    its two decoders agree) and the passes of :class:`HardIterations`.  :class:`Chase`
     and :class:`MaximumLikelihood` skip their soft output with
     ``soft=False``: ``llrs`` is ``None``, the decisions are the same and
     come faster.

@@ -29,6 +29,7 @@ Notable changes to CommKit, newest first. Performance figures are from the refer
 
 - `iir_filter` and the per-channel `PLL` run their channels in parallel on the CPU.
 - `apply_sampling_clock_offset`, `apply_sampling_jitter` and the resampling of `correct_sampling_clock_offset` interpolate through a Numba kernel on the CPU, parallel over the output: 0.07 and 0.11 of the former time (clock offset and jitter, 2 x 2^20 complex64 samples). The Gardner loop's interpolator steps its window by a rotation instead of a cosine per tap. `correct_sampling_clock_offset` with `Gardner` takes 0.21 of the former time on the CPU and 0.62 on GPU input (2^18 symbols at 2 sps).
+- Turbo decoding stops a block once its two decoders take the same hard decision on every information bit, and `DecodeResult.iterations` reports the iterations run. LTE K = 6144 at Eb/N0 = 1 dB takes 4.1 iterations of the 8 allowed, K = 128 at 3 dB 1.7; 32 blocks of K = 1024 at Es/N0 = 0 dB (the benchmark) decode in 0.56 of the former time (max-log) and 0.59 (log-MAP), and in the waterfall (K = 6144, 0.5 dB) in 0.97. The FER is unchanged from K = 40 to 6144 (2^15 frames at K = 128 and 2 dB: 121 failures against 115).
 - `correct_fiber_propagation` with `method="blocks"` backpropagates its blocks in batches of 2^16 samples per polarization on the CPU, which stay in cache: 0.64 of the former time (2 x 2^20 samples, 4 x 80 km, 10 steps per span), 0.85 at 2^23 samples. GPU input is unchanged.
 
 ### Fixed

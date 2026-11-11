@@ -96,6 +96,26 @@ class TestDecoding:
         xpt.assert_array_equal((res.llrs < 0).astype(np.int8), c)
         assert float(xp.abs(res.llrs).mean()) > 3 * float(xp.abs(llrs).mean())
 
+    def test_stops_once_the_decoders_agree(self, xp: Any) -> None:
+        """K = 1024 at Eb/N0 = 1.5 dB (LLR mean 1.88): every frame decodes,
+        in 2.8 iterations on average (measured; fixed 8 before), so the mean
+        stays below 4.  At -0.3 dB (mean 1.24) most frames fail and run all
+        8: a frame whose decoders disagree never stops.  Against fixed 8
+        iterations the FER was unchanged from K = 40 to 6144 (2^15 frames at
+        K = 128 and 2 dB: 121 failures against 115)."""
+        code = TurboCode.lte(1024)
+        u, _, llrs = self._llrs(code, 1.88, 64, xp, seed=8)
+        res = decode(llrs, code=code)
+        assert bool(xp.all(res.bits == u))
+        used = to_device(res.iterations, "cpu")
+        assert used.dtype == np.int32 and used.min() >= 1
+        assert used.mean() < 4.0, used.mean()
+        u, _, llrs = self._llrs(code, 1.24, 64, xp, seed=9)
+        res = decode(llrs, code=code)
+        failed = to_device(xp.any(res.bits != u, axis=1), "cpu")
+        assert failed.mean() > 0.5
+        assert np.median(to_device(res.iterations, "cpu")[failed]) == 8
+
     def test_soft_output_in_failing_frames(self, xp: Any, xpt: Any) -> None:
         """At Es/N0 = -6 dB most frames fail; the systematic LLRs still give
         the decisions (the second decoder's, deinterleaved)."""
