@@ -20,9 +20,10 @@ from typing import Any, Literal
 
 import numpy as np
 
-from .._array import as_2d, restore_1d
+from .._array import as_2d, restore_1d, warn_if_double
 from ..backend import ArrayType, dispatch, to_device
 from ..core._signal_adapter import S, adapt_signal, require_integer_sps
+from ..core.signal import Signal
 from ..logger import logger
 from ..multirate import _interpolate, _stretched_instants
 
@@ -75,10 +76,12 @@ class Gardner:
     Parameters
     ----------
     normalized_bandwidth : float, default 1e-3
-        One-sided loop bandwidth ``B·T`` in ``(0, 0.5)``, a fraction of the
-        symbol rate.  Gives critically damped gains ``μ = 4BT / K_d`` and
-        ``β = 4(BT)² / K_d``, with the detector gain ``K_d`` measured on the
-        input (see Notes).  Used when ``proportional_gain`` is not given.
+        Nominal one-sided loop bandwidth ``B·T`` in ``(0, 0.5)``, a fraction
+        of the symbol rate.  Gives critically damped gains ``μ = 4BT / K_d``
+        and ``β = 4(BT)² / K_d``, with the detector gain ``K_d`` measured on
+        the input (see Notes): ``ζ = 1`` and ``ω_n T = 2BT``, whose noise
+        bandwidth is ``1.25·B·T`` (``B·T`` is exact for a first-order loop
+        only).  Used when ``proportional_gain`` is not given.
         The detector's self-noise sets the timing jitter: 0.01 symbol rms at
         ``1e-3`` for 16-QAM (classical detector, rolloff 0.1), 0.006 at
         ``1e-4``.  Too wide a loop slips whole symbols: the classical
@@ -136,7 +139,10 @@ class Gardner:
     which the proportional path follows only with a static timing lag, or
     a loop that lost lock).  ``B·T`` is ``μ K_d / 4`` for raw gains.
 
-    Numba-compiled on the CPU; GPU input makes one host round trip.
+    Numba-compiled on the CPU; GPU input makes one host round trip.  The
+    loop runs in complex64 whatever the input (double input emits
+    :class:`~commkit.PrecisionWarning`); the interpolation of
+    :func:`correct_sampling_clock_offset` keeps the input's precision.
 
     References
     ----------
@@ -221,6 +227,7 @@ def _track(
         raise ValueError(
             f"Gardner clock recovery needs at least 4 symbols, got {n} samples."
         )
+    warn_if_double(x, "Gardner clock recovery")
     rms = np.sqrt(np.mean(np.abs(x) ** 2, axis=-1, dtype=np.float64))
     if np.any(rms == 0.0):
         raise ValueError("Gardner clock recovery: a channel is all zeros.")
@@ -340,7 +347,7 @@ _ESTIMATORS = {Gardner: _gardner_estimate}
 
 
 def estimate_sampling_clock_offset(
-    samples: ArrayType, method: Gardner, *, sps: int | None = None
+    samples: ArrayType | Signal, method: Gardner, *, sps: int | None = None
 ) -> SamplingClockOffsetEstimate:
     """Estimate the offset of the sampling clock from the symbol clock.
 
@@ -473,7 +480,7 @@ def correct_sampling_clock_offset(
     sps_int = _resolve_even_sps(signal_adapter, sps, function_name)
     x, xp, _ = dispatch(signal_adapter.array)
     x, was_1d = as_2d(x, name="samples")
-    real = xp.float32 if x.dtype in (xp.float32, xp.complex64) else xp.float64
+    real = x.real.dtype
     if isinstance(how, Gardner):
         pos, _, _ = _track(to_device(x, "cpu"), sps_int, how)
         logger.info(
