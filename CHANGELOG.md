@@ -4,6 +4,37 @@ Notable changes to CommKit, newest first. Performance figures are from the refer
 
 ## [Unreleased]
 
+### Changes that may need code updates
+
+- Factories take their secondary parameters by keyword: `LDPCCode.dvbs2(rate, frame=...)`, `LDPCCode.quasi_cyclic(base, lifting=...)`, `CRC.nr(name, info_bits=...)` and `Interleaver.block(rows=..., columns=...)`. Add the keywords to existing calls.
+- `SingleCarrierFrame` needs a payload length: give `payload_num_symbols=` or, with a `payload_code`, `payload_blocks=`. It no longer defaults to 1000 symbols.
+- `SingleCarrierFrame(pilot_seed=)` is `pilot_rng=`, with the semantics of `payload_rng` (an integer or a Generator, kept as the integer seed). Files saved with `pilot_seed` still load.
+- `decoder_exit_curve`, `demapper_exit_curve` and `ldpc_exit_curves` take `num_points=` instead of `points=`.
+- `demapper_exit_curve(noise_var=)` on a real constellation (PAM) is the variance of the real noise, as for `compute_llr`; it was the variance per complex symbol, twice the real noise. Halve `noise_var` in existing PAM calls to keep their curves, or pass the new `esn0_db=`.
+- `resample(sps_out=)` raises when `sps_out / sps_in` has no fraction with terms up to 1000; such ratios designed filters of up to millions of taps. Give `up` and `down` explicitly.
+- `zadoff_chu_sequence` raises on a root that shares a factor with the length, and the per-channel roots of a MIMO ZC `Preamble` skip such roots: on a composite length they gave full-height autocorrelation sidelobes. Preambles of prime length are unchanged; a MIMO preamble of length 64 now uses the roots 1, 3, 5, 7 instead of 1, 2, 3, 4.
+- `estimate_iq_imbalance`, `apply_iq_imbalance` and `correct_iq_imbalance` raise `ValueError` on real samples instead of returning NaN, the input unchanged or a NumPy error.
+
+### Added
+
+- `demapper_exit_curve(esn0_db=)` as an alternative to `noise_var`.
+
+### Performance
+
+- `iir_filter` and the per-channel `PLL` run their channels in parallel on the CPU.
+
+### Fixed
+
+- CMA on a constellation that is not at unit power and has an explicit `pmf` used the Godard radius of the unit-power set (1.32 instead of 5.28 for 16-QAM at power 4).
+- `evm(blind=True)` divides the error by the power of the decided points: 16-QAM at power 4 read 20 % where the data-aided EVM is 10 %.
+- `correct_polarization` with a tracked `JonesTrack` keeps complex128 input in double precision; it computed in complex64 and cast back.
+- Gardner clock recovery emits `PrecisionWarning` on double input, as the loop computes in complex64.
+- `MengaliMorelli` keeps its autocorrelation in the data's precision; a float64 lag array promoted it to complex128.
+- `plot_frequency_offset_blockwise_result` and two frequency axes label their unit with an SI prefix chosen from the data, instead of hand-scaled kHz or plain Hz.
+- Error messages of `dispersion_compensation_taps`, the dispersion estimators, `PLL`, `BPS` and `Tikhonov` name the function or class.
+- Docstrings: `Gaussian(fwhm=)` is the amplitude FWHM; the loop bandwidth of `Gardner` and `PLL` is nominal (the second-order loop's noise bandwidth is `1.25·B·T`); a frame's Es/N0 under `apply_awgn` is the frame average, not the payload's.
+- `import commkit` no longer exposes `Any` and `importlib`.
+
 ## [3.7.1] - 2026-11-10
 
 Gardner clock recovery no longer runs away when its loop is too wide: the integrator is bounded to plausible clock offsets, and slips are reported. The notebooks on clock recovery, direct and coherent detection and the ADC now introduce their topics with figures.
