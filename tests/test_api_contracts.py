@@ -791,7 +791,11 @@ ROWS: list[Row] = [
     Row("commkit.plotting.waveform.plot_time_domain", PLOT),
     # --- recovery -----------------------------------------------------------
     Row("commkit.recovery.bps.BPS", VALUE),
+    Row("commkit.recovery.carrier_phase.BlockPhaseEstimate", VALUE),
     Row("commkit.recovery.carrier_phase.CarrierPhaseEstimate", VALUE),
+    Row("commkit.recovery.carrier_phase.MultiTonePhaseEstimate", VALUE),
+    Row("commkit.recovery.carrier_phase.PilotPhaseEstimate", VALUE),
+    Row("commkit.recovery.carrier_phase.TonePhaseEstimate", VALUE),
     Row(
         "commkit.recovery.carrier_phase.correct_carrier_phase",
         TRANSFORM,

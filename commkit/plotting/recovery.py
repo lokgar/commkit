@@ -81,7 +81,9 @@ def plot_carrier_phase_trajectory(
     from ..recovery import CarrierPhaseEstimate
 
     if isinstance(phase, CarrierPhaseEstimate):
-        phi_full, block_centers = phase.value, phase.block_centers
+        # Block methods only.
+        phi_full = phase.value
+        block_centers = getattr(phase, "block_centers", None)
     else:
         phi_full, block_centers = phase, None
     phi_deg = _device_channels(phi_full) * (180.0 / np.pi)
@@ -132,14 +134,14 @@ def plot_pilot_phase_estimate(
 ) -> tuple[Any, Any] | None:
     """Plot the pilot phases of a pilot-based estimate with their linear fit.
 
-    For a :class:`~commkit.recovery.CarrierPhaseEstimate` (``PilotInterpolation``) a
+    For a :class:`~commkit.recovery.PilotPhaseEstimate` (``PilotInterpolation``) a
     second panel shows the interpolated per-symbol trajectory; for a
     :class:`~commkit.frequency.FrequencyOffsetEstimate` (``PilotSlope``)
     the fit is labeled with the estimated offset.
 
     Parameters
     ----------
-    estimate : CarrierPhaseEstimate or FrequencyOffsetEstimate
+    estimate : PilotPhaseEstimate or FrequencyOffsetEstimate
         With ``pilot_indices`` and ``pilot_phase``.
     sampling_rate : float, default 1.0
         Sampling rate in Hz of the pilot indices (labels the fitted slope in
@@ -289,7 +291,7 @@ def plot_pilot_tone_phase_estimate(
 
     Parameters
     ----------
-    estimate : CarrierPhaseEstimate
+    estimate : TonePhaseEstimate
         From ``estimate_carrier_phase(samples, method)``.
     samples : array_like or Signal
         The samples the estimate was made from.
@@ -444,7 +446,7 @@ def plot_pilot_tones_phase_estimate(
 
     Parameters
     ----------
-    estimate : CarrierPhaseEstimate
+    estimate : MultiTonePhaseEstimate
         From ``estimate_carrier_phase(x, PilotTones(...))``.
     quantity : {"differential", "phase"}, optional
         Select one panel; ``None`` draws both.

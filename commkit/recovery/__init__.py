@@ -20,7 +20,11 @@ from __future__ import annotations
 from ..logger import logger
 from .bps import BPS
 from .carrier_phase import (
+    BlockPhaseEstimate,
     CarrierPhaseEstimate,
+    MultiTonePhaseEstimate,
+    PilotPhaseEstimate,
+    TonePhaseEstimate,
     correct_carrier_phase,
     estimate_carrier_phase,
 )
@@ -39,14 +43,18 @@ from .viterbi_viterbi import ViterbiViterbi
 
 __all__ = [
     "BPS",
-    "PLL",
+    "BlockPhaseEstimate",
     "CarrierPhaseEstimate",
-    "CycleSlip",
     "ConstantPhase",
+    "CycleSlip",
+    "MultiTonePhaseEstimate",
+    "PLL",
     "PilotInterpolation",
+    "PilotPhaseEstimate",
     "PilotTone",
     "PilotTones",
     "Tikhonov",
+    "TonePhaseEstimate",
     "ViterbiViterbi",
     "correct_carrier_phase",
     "correct_cycle_slips",

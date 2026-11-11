@@ -6,6 +6,7 @@ is dispatched through ``_ESTIMATORS``.  The estimate is a
 :class:`CarrierPhaseEstimate`.
 """
 
+import dataclasses
 from collections.abc import Callable
 from dataclasses import dataclass
 from typing import Any
@@ -34,7 +35,11 @@ from .tikhonov import Tikhonov, _tikhonov
 from .viterbi_viterbi import ViterbiViterbi, _viterbi_viterbi
 
 __all__ = [
+    "BlockPhaseEstimate",
     "CarrierPhaseEstimate",
+    "MultiTonePhaseEstimate",
+    "PilotPhaseEstimate",
+    "TonePhaseEstimate",
     "correct_carrier_phase",
     "estimate_carrier_phase",
 ]
@@ -68,52 +73,124 @@ _SYMBOL_RATE = (BPS, ViterbiViterbi, Tikhonov, PLL, PilotInterpolation, Constant
 
 @dataclass(frozen=True)
 class CarrierPhaseEstimate:
-    """Result of :func:`estimate_carrier_phase`.
+    """Result of :func:`estimate_carrier_phase`: the result of ``PLL`` and
+    ``ConstantPhase``, and the field every method gives.
 
-    Per-channel fields drop their channel axis for ``(N,)`` input and stay on
-    the input's device; method-specific fields are ``None`` for other
-    methods.
+    The constructor takes the same fields.  The other methods return a
+    subclass with their diagnostics: :class:`BlockPhaseEstimate` (BPS,
+    Viterbi-Viterbi, Tikhonov), :class:`PilotPhaseEstimate`
+    (``PilotInterpolation``), :class:`TonePhaseEstimate` (``PilotTone``) and
+    :class:`MultiTonePhaseEstimate` (``PilotTones``).  Per-channel fields
+    drop their channel axis for ``(N,)`` input and stay on the input's
+    device.
 
     Attributes
     ----------
     value : ndarray
         Phase trajectory in radians, ``float64``, the shape of the samples.
         :func:`correct_carrier_phase` rotates by ``exp(-j·value)``.
-    block_centers : numpy.ndarray or None
-        Block methods (BPS, Viterbi-Viterbi, Tikhonov): block center
-        positions in symbols, ``(B,)``.
-    block_phase : ndarray or None
-        Block methods: the block phases after unwrapping, smoothing and
-        cycle-slip repair, ``(B,)`` or ``(C, B)``.
-    pilot_indices : numpy.ndarray or None
-        ``PilotInterpolation``: the pilot symbol indices, ``(P,)``.
-    pilot_phase : ndarray or None
-        ``PilotInterpolation``: unwrapped pilot phases, ``(P,)`` or ``(C, P)``.
-    tone_frequencies : numpy.ndarray or None
-        Tone methods: measured tone centers in Hz on the host; ``PilotTone``
-        per channel (0-d or ``(C,)``), ``PilotTones`` per channel and tone
-        (``(K,)`` or ``(C, K)``).
-    tone_snr_db : numpy.ndarray or None
-        ``PilotTones``: in-band SNR of each tone in dB, ``(K,)``.
-    differential_phase : ndarray or None
-        ``PilotTones``: tracked inter-tone phase ``δ_k[n]`` in radians,
-        ``(K, N)`` (zero for the reference tone).
-    reference_tone : int or None
-        ``PilotTones``: index of the reference (strongest) tone.
-    used_tones : tuple of int or None
-        ``PilotTones``: tones that passed the gates and were combined.
     """
 
     value: ArrayType
-    block_centers: np.ndarray | None = None
-    block_phase: ArrayType | None = None
-    pilot_indices: np.ndarray | None = None
-    pilot_phase: ArrayType | None = None
-    tone_frequencies: np.ndarray | None = None
-    tone_snr_db: np.ndarray | None = None
-    differential_phase: ArrayType | None = None
-    reference_tone: int | None = None
-    used_tones: tuple[int, ...] | None = None
+
+
+@dataclass(frozen=True)
+class BlockPhaseEstimate(CarrierPhaseEstimate):
+    """Result of the block methods: BPS, Viterbi-Viterbi, Tikhonov.
+
+    The constructor takes the same fields.
+
+    Attributes
+    ----------
+    value : ndarray
+        Phase trajectory in radians, as in :class:`CarrierPhaseEstimate`.
+    block_centers : numpy.ndarray
+        Block center positions in symbols, ``(B,)``.
+    block_phase : ndarray
+        The block phases after unwrapping, smoothing and cycle-slip repair,
+        ``(B,)`` or ``(C, B)``.
+    """
+
+    block_centers: np.ndarray
+    block_phase: ArrayType
+
+
+@dataclass(frozen=True)
+class PilotPhaseEstimate(CarrierPhaseEstimate):
+    """Result of ``PilotInterpolation``.
+
+    The constructor takes the same fields.
+
+    Attributes
+    ----------
+    value : ndarray
+        Phase trajectory in radians, as in :class:`CarrierPhaseEstimate`.
+    pilot_indices : numpy.ndarray
+        The pilot symbol indices, ``(P,)``.
+    pilot_phase : ndarray
+        Unwrapped pilot phases, ``(P,)`` or ``(C, P)``.
+    """
+
+    pilot_indices: np.ndarray
+    pilot_phase: ArrayType
+
+
+@dataclass(frozen=True)
+class TonePhaseEstimate(CarrierPhaseEstimate):
+    """Result of ``PilotTone``.
+
+    The constructor takes the same fields.
+
+    Attributes
+    ----------
+    value : ndarray
+        Phase trajectory in radians, as in :class:`CarrierPhaseEstimate`.
+    tone_frequencies : numpy.ndarray
+        Measured tone centers in Hz on the host: per channel (0-d or
+        ``(C,)``) for ``PilotTone``, per channel and tone (``(K,)`` or
+        ``(C, K)``) for ``PilotTones``.
+    """
+
+    tone_frequencies: np.ndarray
+
+
+@dataclass(frozen=True)
+class MultiTonePhaseEstimate(TonePhaseEstimate):
+    """Result of ``PilotTones``.
+
+    The constructor takes the same fields: those of
+    :class:`TonePhaseEstimate`, then the attributes below.
+
+    Attributes
+    ----------
+    tone_snr_db : numpy.ndarray
+        In-band SNR of each tone in dB, ``(K,)``.
+    differential_phase : ndarray
+        Tracked inter-tone phase ``δ_k[n]`` in radians, ``(K, N)`` (zero for
+        the reference tone).
+    reference_tone : int
+        Index of the reference (strongest) tone.
+    used_tones : tuple of int
+        Tones that passed the gates and were combined.
+    """
+
+    tone_snr_db: np.ndarray
+    differential_phase: ArrayType
+    reference_tone: int
+    used_tones: tuple[int, ...]
+
+
+#: Result class by method type (CarrierPhaseEstimate for the rest).
+_RESULTS: dict[type, type[CarrierPhaseEstimate]] = {
+    BPS: BlockPhaseEstimate,
+    ViterbiViterbi: BlockPhaseEstimate,
+    Tikhonov: BlockPhaseEstimate,
+    PilotInterpolation: PilotPhaseEstimate,
+    PilotTone: TonePhaseEstimate,
+    PilotTones: MultiTonePhaseEstimate,
+}
+#: Fields with a channel axis, dropped for (N,) input.
+_PER_CHANNEL = ("value", "block_phase", "pilot_phase", "tone_frequencies")
 
 
 def estimate_carrier_phase(
@@ -198,22 +275,12 @@ def _estimate_carrier_phase(
     x, was_1d = as_2d(x, name="samples")
     res = estimator(x, method, ctx)
 
-    def per_channel(a: Any) -> Any:
-        """The channel axis dropped for 1-D input; ``None`` stays ``None``."""
-        return None if a is None else restore_1d(was_1d, a)
-
-    return CarrierPhaseEstimate(
-        value=per_channel(res.phase),
-        block_centers=res.block_centers,
-        block_phase=per_channel(res.block_phase),
-        pilot_indices=res.pilot_indices,
-        pilot_phase=per_channel(res.pilot_phase),
-        tone_frequencies=per_channel(res.tone_frequencies),
-        tone_snr_db=res.tone_snr_db,
-        differential_phase=res.differential_phase,
-        reference_tone=res.reference_tone,
-        used_tones=res.used_tones,
-    )
+    cls = _RESULTS.get(type(method), CarrierPhaseEstimate)
+    fields = {}
+    for f in dataclasses.fields(cls):
+        a = res.phase if f.name == "value" else getattr(res, f.name)
+        fields[f.name] = restore_1d(was_1d, a) if f.name in _PER_CHANNEL else a
+    return cls(**fields)
 
 
 def correct_carrier_phase(
