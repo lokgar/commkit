@@ -15,7 +15,13 @@ from ...backend import ArrayType, to_device
 from ...core._signal_adapter import adapt_signal, require_integer_sps
 from ...core.signal import Signal
 from ...logger import logger
-from .._common import _godard_radius, _rde_ring_radii, _rde_rings
+from .._common import (
+    _check_cma_kurtosis,
+    _cma_profile,
+    _godard_radius,
+    _rde_ring_radii,
+    _rde_rings,
+)
 from .._sequential._blind import _check_pilots
 from ..pilots import EqualizerPilots
 from ..result import (
@@ -67,6 +73,7 @@ def _block_fdaf_blind(
     num_taps: int,
     sps: int,
     step_size: float | None,
+    base_step: float,
     block_size: int,
     r2: float,
     radii_np: np.ndarray | None,
@@ -85,8 +92,9 @@ def _block_fdaf_blind(
     Godard (``kind='cma'``) or nearest-ring (``kind='rde'``) gradient, with
     pilot positions overridden by the LMS residual.  ``r2`` is the Godard radius
     (CMA) and ``radii_np`` the unique ring radii (RDE), decided by their
-    squared midpoints (``_rde_rings``).  ``step_size=None``
-    is the default of both, ``min(1e-3, 0.5 / block_size) / sps``.
+    squared midpoints (``_rde_rings``).  ``step_size=None`` is the default
+    of both, ``min(base_step, 0.5 / block_size) / sps``, with ``base_step``
+    the per-symbol default of :func:`cma` or :func:`rde`.
     """
     use_pilots = pilot_ref is not None and pilot_mask is not None
     equalizer = f"block_{kind}"
@@ -105,7 +113,10 @@ def _block_fdaf_blind(
         pilot_gain_db=pilot_gain_db,
     )
     xp, C, n_sym, sps = run.xp, run.C, run.n_sym, run.sps
-    mu = min(1e-3, 0.5 / run.block_size) / sps if step_size is None else step_size
+    if step_size is None:
+        mu = min(base_step, 0.5 / run.block_size) / sps
+    else:
+        mu = step_size
     logger.info(
         "%s: C=%s, num_taps=%s, sps=%s, block_size=%s, fftsize=%s, mu=%s, "
         "n_sym=%s, pilot_aided=%s",
@@ -245,8 +256,12 @@ def _block_blind(
     )
     if kind == "cma":
         r2, radii_np = _godard_radius(constellation), None
+        kurtosis, gaussian, step_scale = _cma_profile(constellation)
+        _check_cma_kurtosis(kurtosis, gaussian, name)
+        base_step = 1e-3 * step_scale
     else:
         r2, radii_np = 1.0, _rde_ring_radii(constellation)
+        base_step = 1e-3
     label = f"Block-{kind.upper()}"
     result = _block_fdaf_blind(
         kind,
@@ -254,6 +269,7 @@ def _block_blind(
         num_taps=num_taps,
         sps=sps,
         step_size=step_size,
+        base_step=base_step,
         block_size=block_size,
         r2=r2,
         radii_np=radii_np,
@@ -297,8 +313,9 @@ def block_cma(
     Notes of :func:`cma`).  ``pilots`` switch the pilot positions to the LMS
     residual error, which resolves the ambiguity there while the data
     positions stay blind.  Like :func:`cma`, it does not converge on
-    probabilistically shaped QAM, whose kurtosis is close to a Gaussian's:
-    use :func:`block_rde` there (see the Notes of :func:`cma`).
+    probabilistically shaped QAM, whose kurtosis is close to a Gaussian's,
+    and warns there: use :func:`block_rde` instead (see the Notes of
+    :func:`cma`).
 
     Parameters
     ----------
@@ -314,8 +331,9 @@ def block_cma(
         Step size on the scale of :func:`cma`.  The weights are frozen
         across each block, so the stability ceiling is about ``block_size``
         times lower than per symbol; reduce it if the run raises divergence.
-        Defaults to ``min(1e-3, 0.5 / block_size) / sps``, as for
-        :func:`block_rde`.
+        Defaults to ``min(μ₀, 0.5 / block_size) / sps``, with ``μ₀`` the
+        per-symbol default of :func:`cma` for the constellation (1e-3 for
+        PSK and 16-QAM, less for denser sets).
     block_size : int, default 256
         Output symbols per weight update.
     constellation : Constellation, optional

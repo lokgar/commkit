@@ -160,6 +160,38 @@ class TestCMA:
         assert ser == 0.0 and adapted < 1.4 * floor
         assert evm(0.0)[1] > 2 * floor
 
+    def test_default_step_lowers_the_64qam_floor(self, xp):
+        """On 64-QAM (Es/N0 26 dB, 6e4 symbols, 4-tap ISI) the default step,
+        1.6e-4 from the constellation's self-noise and minimum distance,
+        leaves a blind SER of 7e-4 to 1.3e-3 over seeds 0 to 3 in the second
+        half; the step 1e-3 that suits 16-QAM leaves 0.031 to 0.039."""
+        c = Constellation.qam(64)
+        rx = _isi_record(c, 60000, esn0_db=26.0, xp=xp)
+        ref = to_numpy(rx.reference.symbols)
+
+        def ser(**kw):
+            y = equalization.cma(rx, num_taps=21, **kw).y_hat
+            return scoring.blind_ser(y, ref, c, skip=30000, rotation="any")
+
+        assert ser() < 3e-3
+        assert ser(step_size=1e-3) > 1.5e-2
+
+    def test_warns_on_a_near_gaussian_constellation(self, xp, caplog):
+        """Maxwell-Boltzmann 64-QAM at entropy 5 (kurtosis 1.89) is beyond
+        CMA's range and the call says so; entropy 5.5 (1.73) and uniform
+        64-QAM are not, nor is PAM-4 (1.64 against a real Gaussian's 3)."""
+        x = xp.asarray(np.ones(64, dtype=np.complex64))
+        for c, warned in (
+            (Constellation.qam(64).shaped(entropy=5.0), True),
+            (Constellation.qam(64).shaped(entropy=5.5), False),
+            (Constellation.qam(64), False),
+            (Constellation.pam(4), False),
+        ):
+            caplog.clear()
+            with caplog.at_level("WARNING", logger="commkit"):
+                equalization.cma(x, num_taps=5, sps=2, constellation=c)
+            assert ("kurtosis" in caplog.text) is warned, c
+
 
 class TestRDE:
     """Tests for the Radius Directed Equalizer."""
@@ -179,7 +211,7 @@ class TestRDE:
         assert ser(1e-3) == 0.0
         assert ser(0.0) > 0.03
 
-    def test_converges_on_shaped_64qam_where_cma_fails(self, xp):
+    def test_converges_on_shaped_64qam_where_cma_fails(self, xp, caplog):
         """Blind RDE on Maxwell-Boltzmann 64-QAM at entropy 4.5 (Es/N0 22 dB,
         4e4 symbols, step 3e-4): no symbol errors in the second half after
         one constant rotation.  CMA at the same step fails (SER 0.40 to 0.62
@@ -196,7 +228,9 @@ class TestRDE:
             return scoring.blind_ser(y, ref, c, skip=20000, rotation="any")
 
         assert ser(equalization.rde, 3e-4) == 0.0
-        assert ser(equalization.cma, 3e-4) > 0.2
+        with caplog.at_level("WARNING", logger="commkit"):
+            assert ser(equalization.cma, 3e-4) > 0.2
+        assert "kurtosis" in caplog.text
         assert ser(equalization.rde, 0.0) > 0.1
 
     def test_refines_cma_on_16qam(self, xp):
