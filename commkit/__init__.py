@@ -31,7 +31,7 @@ Matplotlib, change warning filters, or touch the GPU.
 import importlib as _importlib
 from typing import Any as _Any
 
-__version__ = "3.7.1"
+__version__ = "3.8.0"
 
 from .backend import PrecisionWarning
 from .core import (
