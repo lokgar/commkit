@@ -4,6 +4,10 @@ Notable changes to CommKit, newest first. Performance figures are from the refer
 
 ## [Unreleased]
 
+## [3.8.0] - 2026-11-12
+
+The fixes of a full review of 3.7.1. Gardner clock recovery holds its loop bandwidth up to the largest offset it accepts, resampling keeps its accuracy at any record length, block backpropagation bounds its memory, and the fibre kernels form their phase in double precision. One interpolation kernel serves clock offset, jitter and Gardner on both devices, and `fir_filter`, `apply_taps`, `welch_psd` and the trace plots are several times faster. Names follow the verb rules: an estimator returns the estimate subclass of its method, with no field left `None`, and `cma` takes its default step from the constellation and warns where the constant-modulus criterion cannot work. The migration list below comes first.
+
 ### Changes that may need code updates
 
 - Factories take their secondary parameters by keyword: `LDPCCode.dvbs2(rate, frame=...)`, `LDPCCode.quasi_cyclic(base, lifting=...)`, `CRC.nr(name, info_bits=...)` and `Interleaver.block(rows=..., columns=...)`. Add the keywords to existing calls.
@@ -43,12 +47,14 @@ Notable changes to CommKit, newest first. Performance figures are from the refer
 
 ### Performance
 
+The figures of this release are from a Ryzen 7 5700X and an RTX 3070 (WSL2), timed against the former code on the same machine.
+
 - `iir_filter` and the per-channel `PLL` run their channels in parallel on the CPU.
 - `apply_sampling_clock_offset`, `apply_sampling_jitter` and the resampling of `correct_sampling_clock_offset` interpolate through a Numba kernel on the CPU, parallel over the output: 0.07 and 0.11 of the former time (clock offset and jitter, 2 x 2^20 complex64 samples). The Gardner loop's interpolator steps its window by a rotation instead of a cosine per tap. `correct_sampling_clock_offset` with `Gardner` takes 0.21 of the former time on the CPU and 0.62 on GPU input (2^18 symbols at 2 sps).
-- On GPU input `apply_sampling_clock_offset`, `apply_sampling_jitter` and the resampling of `correct_sampling_clock_offset` run a CUDA kernel, one thread per output instant, instead of CuPy gathers: 0.004 and 0.015 of the former time (clock offset and jitter, 2 x 2^23 complex64 samples, RTX 3070); `correct_sampling_clock_offset` with `Gardner` 0.74 (2 x 2^18 symbols at 2 sps, now bound by the CPU loop).
+- On GPU input `apply_sampling_clock_offset`, `apply_sampling_jitter` and the resampling of `correct_sampling_clock_offset` run a CUDA kernel, one thread per output instant, instead of CuPy gathers: 0.004 and 0.015 of the former time (clock offset and jitter, 2 x 2^23 complex64 samples); `correct_sampling_clock_offset` with `Gardner` 0.74 (2 x 2^18 symbols at 2 sps, now bound by the CPU loop).
 - Turbo decoding stops a block once its two decoders take the same hard decision on every information bit, and `DecodeResult.iterations` reports the iterations run. LTE K = 6144 at Eb/N0 = 1 dB takes 4.1 iterations of the 8 allowed, K = 128 at 3 dB 1.7; 32 blocks of K = 1024 at Es/N0 = 0 dB (the benchmark) decode in 0.56 of the former time (max-log) and 0.59 (log-MAP), and in the waterfall (K = 6144, 0.5 dB) in 0.97. The FER is unchanged from K = 40 to 6144 (2^15 frames at K = 128 and 2 dB: 121 failures against 115).
-- `apply_taps` filters by overlap-save, with a guard as long as the taps: 0.45 of the former time on the CPU and 0.84 on GPU input (2 x 2 x 21 taps, 2^19 symbols at 2 sps, RTX 3070). The einsum over strided windows ran NumPy's plain loop. A weight array whose channel count differs from the samples' raises `ValueError` naming `weights`.
-- `fir_filter`, and with it `matched_filter`, picks its method from the sizes and the device: direct convolution for short filters on short records (NumPy's `convolve` on the CPU, one CuPy kernel on the GPU), one FFT of the record, and beyond 2^13 samples on the CPU and 2^18 on the GPU overlap-save through multi-threaded FFTs, with a guard as long as the filter's transient and real FFTs for real data; SciPy's `convolve` transformed the whole record on one core. For complex64 samples on this machine (Ryzen 7 5700X, RTX 3070): 0.11 of the former time for 5 taps on 64 samples, 0.57 for 65 taps on 512, 0.51 for 5 taps on 2^15, 0.08 for 65 taps on 2^20 and 0.11 for 1501 taps; on GPU input 0.42, 0.47, 0.33, 0.79 and 0.93.
+- `apply_taps` filters by overlap-save, with a guard as long as the taps: 0.45 of the former time on the CPU and 0.84 on GPU input (2 x 2 x 21 taps, 2^19 symbols at 2 sps). The einsum over strided windows ran NumPy's plain loop. A weight array whose channel count differs from the samples' raises `ValueError` naming `weights`.
+- `fir_filter`, and with it `matched_filter`, picks its method from the sizes and the device: direct convolution for short filters on short records (NumPy's `convolve` on the CPU, one CuPy kernel on the GPU), one FFT of the record, and beyond 2^13 samples on the CPU and 2^18 on the GPU overlap-save through multi-threaded FFTs, with a guard as long as the filter's transient and real FFTs for real data; SciPy's `convolve` transformed the whole record on one core. For complex64 samples: 0.11 of the former time for 5 taps on 64 samples, 0.57 for 65 taps on 512, 0.51 for 5 taps on 2^15, 0.08 for 65 taps on 2^20 and 0.11 for 1501 taps; on GPU input 0.42, 0.47, 0.33, 0.79 and 0.93.
 - `welch_psd` transforms its segments in batches on the input's device instead of through `scipy.signal.welch`, which in SciPy 1.18 calls the FFT once per segment: 0.13 of the former time on the CPU (2^20 complex64 samples, `nperseg=256`), 0.34 at `nperseg=4096`, and 0.9 on GPU input. The estimate is SciPy's to rounding (1e-6 of the peak in single precision); a record shorter than `nperseg` logs a WARNING instead of SciPy's `UserWarning`.
 - The plots of sample-rate traces (carrier-phase trajectory and decomposition, frequency drift, M-th power spectrum, Mengali-Morelli autocorrelation, timing correlation, pilot-tone spectrum and phase, pilot phase trajectory) draw a trace longer than `max_points` (default 4000) as its min/max envelope, reduced on the data's device, so GPU input moves only the drawn points to the host; they moved and drew every sample. `plot_pilot_tone_phase_estimate` computes its spectrum on the samples' device.
 - The cycle-slip repair of the CPR methods (`CycleSlip`) makes one host round trip for all channels of GPU input instead of one per channel.
@@ -57,10 +63,9 @@ Notable changes to CommKit, newest first. Performance figures are from the refer
 ### Fixed
 
 - The inline cycle-slip repair of the equalizers (`lms`, `rls` and `block_lms` with `cpr=...(cycle_slip=CycleSlip(history=...))`) predicts each phase by a line through its history after `min(10, history)` values, as `correct_cycle_slips` and the standalone CPR methods do. With `history` below 10 it predicted by the newest value throughout, a different recursion from the one documented. Histories of 10 and more, the defaults among them, are unchanged.
-
 - CMA on a constellation that is not at unit power and has an explicit `pmf` used the Godard radius of the unit-power set (1.32 instead of 5.28 for 16-QAM at power 4).
 - `evm(blind=True)` divides the error by the power of the decided points: 16-QAM at power 4 read 20 % where the data-aided EVM is 10 %.
-- `correct_polarization` with a tracked `JonesTrack` keeps complex128 input in double precision; it computed in complex64 and cast back.
+- `correct_polarization` with a tracked estimate (then a `JonesTrack`) keeps complex128 input in double precision; it computed in complex64 and cast back.
 - Gardner clock recovery emits `PrecisionWarning` on double input, as the loop computes in complex64.
 - `apply_sampling_clock_offset` and `correct_sampling_clock_offset` keep their -119 dB interpolation accuracy at any record length. They formed the sampling instants in float32, whose rounding grew with the accumulated drift: -84 dB at the end of 2^20 complex64 samples at 2000 ppm, -68 dB at 2^23 samples and 1000 ppm. Complex128 input to the Gardner resampling also had its fractions rounded to float32.
 - Gardner clock recovery calibrates its detector gain in blocks short against the clock drift and starts its integrator at the measured offset. A single fit over 2048 symbols scaled the gain by `sinc(2048 ε)`, so the loop ran at twice the requested bandwidth at 300 ppm and slipped from about 450 ppm (classical detector, rolloff 0.1); the gain now stays within a few percent of its zero-offset value up to `max_offset_ppm`, and offsets of 900 ppm are measured within 1 ppm by both detectors.
@@ -73,7 +78,14 @@ Notable changes to CommKit, newest first. Performance figures are from the refer
 - Docstrings: `Gaussian(fwhm=)` is the amplitude FWHM; the loop bandwidth of `Gardner` and `PLL` is nominal (the second-order loop's noise bandwidth is `1.25·B·T`); a frame's Es/N0 under `apply_awgn` is the frame average, not the payload's.
 - `import commkit` no longer exposes `Any` and `importlib`.
 - `dsh_phase`, `estimate_linewidth` with the DSH methods and `dsh_beat` keep single-precision input in single precision, widening only the phase to float64 before the unwrap; they computed the beat in complex128. Complex64 and complex128 runs agree to below 1e-6 rad per sample.
-- `plot_zf_equalizer_response` plots the equalizer `zf_equalizer` applies; for MIMO it showed a scalar inverse per path instead of the matrix inverse, and the combined panel is now the matrix product `W·H`.
+- `plot_channel_correction` (then `plot_zf_equalizer_response`) plots the equalizer `correct_channel` applies; for MIMO it showed a scalar inverse per path instead of the matrix inverse, and the combined panel is now the matrix product `W·H`.
+
+### Development
+
+- Structure: the Numba kernels of `recovery` and `frequency` at module level in private kernel modules, loaded from the cache in a fresh process; the array-only LLR core below `Constellation`, so `mapping` no longer imports `core`; `filtering/fiber/` split into estimation and compensation; shared private modules for bit packing, the QAM lattice, sub-bin peak fits and interpolation, replacing private imports across packages; one inlined cycle-slip step for the equalizers and the standalone repair, one PLL kernel, and the plots without private twins (405 lines fewer, pixel identical).
+- `AGENTS.md`: the `coding` kernels compile without `fastmath`, Gardner is a fixed-precision block, method diagnostics live in estimate subclasses named after their method or family.
+- Tests: oracles for the calibrated Gardner gain at 300 and 900 ppm, the interpolation kernel against its CPU reference in double precision, bounded DBP memory, the β-separation spread on Wiener phase noise, early turbo stopping at unchanged FER, the CMA step scale against the closed forms of square QAM, and RDE against CMA on shaped 64-QAM.
+- compute-sanitizer clean (memcheck, racecheck, synccheck, initcheck) on the new `interpolate` kernel and the changed fibre and cycle-slip kernels.
 
 ## [3.7.1] - 2026-11-10
 
@@ -595,7 +607,8 @@ See the [GitHub release](https://github.com/lokgar/commkit/releases/tag/v1.1.0) 
 
 First release. See the [GitHub release](https://github.com/lokgar/commkit/releases/tag/v1.0.0).
 
-[Unreleased]: https://github.com/lokgar/commkit/compare/v3.7.1...HEAD
+[Unreleased]: https://github.com/lokgar/commkit/compare/v3.8.0...HEAD
+[3.8.0]: https://github.com/lokgar/commkit/compare/v3.7.1...v3.8.0
 [3.7.1]: https://github.com/lokgar/commkit/compare/v3.7.0...v3.7.1
 [3.7.0]: https://github.com/lokgar/commkit/compare/v3.6.1...v3.7.0
 [3.6.1]: https://github.com/lokgar/commkit/compare/v3.6.0...v3.6.1
