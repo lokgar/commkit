@@ -15,8 +15,9 @@
 - Fiber compensation: :func:`estimate_chromatic_dispersion` (blind
   :class:`ClockToneScan` and :class:`FourthMomentScan`, giving a
   :class:`DispersionScanEstimate`, and data-aided :class:`QuadraticPhaseFit`,
-  giving a :class:`QuadraticPhaseFitEstimate`) and :func:`correct_chromatic_dispersion`, the inverse
-  of :func:`commkit.impairments.apply_chromatic_dispersion` (its FIR filter
+  giving a :class:`QuadraticPhaseFitEstimate`) and
+  :func:`correct_chromatic_dispersion`, the inverse of
+  :func:`commkit.impairments.apply_chromatic_dispersion` (its FIR filter
   designed by :func:`dispersion_compensation_taps`), and digital
   backpropagation :func:`correct_fiber_propagation`, the inverse of
   :func:`commkit.impairments.apply_fiber_propagation`.

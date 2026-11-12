@@ -753,7 +753,11 @@ def estimate_frequency_offset(
     Returns
     -------
     FrequencyOffsetEstimate
-        Offset per channel in Hz plus the method's diagnostics.
+        Offset per channel in Hz, as the subclass holding the method's
+        diagnostics: :class:`MthPowerEstimate`,
+        :class:`MengaliMorelliEstimate` or :class:`PilotSlopeEstimate`, and
+        :class:`BlockwiseFrequencyEstimate` for any method with a
+        ``block_size``; the base for ``SpectralPeak``.
 
     Examples
     --------

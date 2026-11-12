@@ -43,7 +43,7 @@ The notebooks run on the GPU when CuPy works and on the CPU otherwise. They are 
 | 15 | [Pilot-aided carrier recovery](15-pilot-aided-carrier-recovery.ipynb) | pilot symbols, data-aided rotation, the decision-directed PLL, pilot tones |
 | 16 | [Linear channel equalization](16-linear-channel-equalization.ipynb) | ISI channels, zero forcing, MMSE, channel sounding |
 | 17 | [Adaptive equalization](17-adaptive-equalization.ipynb) | LMS training and decisions, step size, RLS, block LMS, inline CPR, continuation with `state=` |
-| 18 | [Blind equalization](18-blind-equalization.ipynb) | CMA and RDE, CMA pre-convergence handed over to RDE |
+| 18 | [Blind equalization](18-blind-equalization.ipynb) | CMA and RDE, CMA pre-convergence handed over to RDE, step sizes, shaped constellations |
 | 19 | [Polarization multiplexing](19-polarization-multiplexing.ipynb) | Jones matrices, the 2x2 butterfly, PMD, SOP drift, channel permutation |
 
 ## IV. Optical fiber systems

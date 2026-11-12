@@ -6,7 +6,10 @@ method object per algorithm: decision-directed :class:`PLL`, block-based
 :class:`Tikhonov`, pilot symbols :class:`PilotInterpolation`, pilot tones
 :class:`PilotTone` / :class:`PilotTones` and the static :class:`ConstantPhase`
 rotation.  The block methods, the PLL and ``PilotInterpolation`` repair cycle
-slips with a nested :class:`CycleSlip`.
+slips with a nested :class:`CycleSlip`.  The estimate is a
+:class:`CarrierPhaseEstimate`, as the subclass holding the method's
+diagnostics (:class:`BlockPhaseEstimate`, :class:`PilotInterpolationEstimate`,
+:class:`PilotToneEstimate`, :class:`PilotTonesEstimate`).
 
 Also :func:`correct_cycle_slips` and :func:`smooth_phase` on phase
 trajectories, and the ambiguity resolution against the reference,

@@ -1,10 +1,10 @@
 """Polarization demultiplexing.
 
 :func:`estimate_polarization` reads the unmixing (inverse Jones) matrix, a
-:class:`PolarizationEstimate`, with the method :class:`PolarizationTones`
-(returning a :class:`PolarizationTonesEstimate`):
-each transmitted stream carries a CW pilot tone at its own frequency, read
-once for the record or tracked over time.  :func:`correct_polarization`
+:class:`PolarizationEstimate`, with the method :class:`PolarizationTones`,
+which returns a :class:`PolarizationTonesEstimate`: each transmitted stream
+carries a CW pilot tone at its own frequency, read once for the record or
+tracked over time.  :func:`correct_polarization`
 applies the estimate.
 """
 

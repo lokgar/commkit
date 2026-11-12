@@ -140,7 +140,7 @@ Dependencies point downward only:
 | Prefix | Meaning |
 | --- | --- |
 | `apply_*` | add an impairment or apply a model |
-| `estimate_<quantity>(x, method)` | measure, never change the data; returns a frozen `<Quantity>Estimate` (value plus diagnostics) |
+| `estimate_<quantity>(x, method)` | measure, never change the data; returns a frozen `<Quantity>Estimate` (value plus diagnostics), as the subclass of the method where its diagnostics differ (see Returns) |
 | `correct_<quantity>(x, how)` | remove the impairment; returns only the corrected data. `how` is an estimate or an algorithm object (which estimates first) |
 | `resolve_*` | pick among discrete candidates (π/2 rotation, channel permutation); nothing else |
 | `generate` | synthesis from parameters, takes `rng` |

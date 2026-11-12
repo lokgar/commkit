@@ -3,7 +3,10 @@
 :func:`estimate_carrier_phase` and :func:`correct_carrier_phase`.  The method
 object selects the algorithm; each lives next to its kernel in this package and
 is dispatched through ``_ESTIMATORS``.  The estimate is a
-:class:`CarrierPhaseEstimate`.
+:class:`CarrierPhaseEstimate`, as the subclass holding the method's
+diagnostics: :class:`BlockPhaseEstimate` (BPS, Viterbi-Viterbi, Tikhonov),
+:class:`PilotInterpolationEstimate`, :class:`PilotToneEstimate` and
+:class:`PilotTonesEstimate`; ``PLL`` and ``ConstantPhase`` return the base.
 """
 
 import dataclasses
@@ -223,7 +226,12 @@ def estimate_carrier_phase(
     Returns
     -------
     CarrierPhaseEstimate
-        The phase trajectory plus the method's diagnostics.
+        The phase trajectory, as the subclass holding the method's
+        diagnostics: :class:`BlockPhaseEstimate` for ``BPS``,
+        ``ViterbiViterbi`` and ``Tikhonov``,
+        :class:`PilotInterpolationEstimate`, :class:`PilotToneEstimate` or
+        :class:`PilotTonesEstimate`; the base for ``PLL`` and
+        ``ConstantPhase``.
 
     Examples
     --------

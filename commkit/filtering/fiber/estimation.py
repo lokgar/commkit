@@ -6,7 +6,8 @@ the data-aided :class:`QuadraticPhaseFit` (the phase of the channel's
 response against known symbols), each give a
 :class:`ChromaticDispersionEstimate` of the accumulated dispersion ``D·L``
 in ps/nm, which :func:`~commkit.filtering.correct_chromatic_dispersion`
-takes as ``how``.
+takes as ``how``: a :class:`DispersionScanEstimate` from the scans, a
+:class:`QuadraticPhaseFitEstimate` from the fit.
 """
 
 import dataclasses
