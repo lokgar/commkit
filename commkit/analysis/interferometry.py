@@ -86,15 +86,18 @@ This module holds the front end they share: the forward model
 :func:`dsh_beat` and the phase extraction :func:`dsh_phase`.
 """
 
+from typing import Any
+
 import numpy as np
 
+from .. import _fft
 from .._array import as_2d, restore_1d, to_report_scalar
 from ..backend import ArrayType, dispatch
 from ..core._signal_adapter import adapt_signal
 from ..core.signal import Signal
 from ..frequency import correct_frequency_offset
 from ..logger import logger
-from ..math import _remove_linear_trend
+from ..math import _phasor, _remove_linear_trend
 
 __all__ = ["dsh_beat", "dsh_phase"]
 
@@ -111,20 +114,20 @@ def _analytic_beat(
 ):
     """Complex analytic beat ``(C, N)`` from raw DSH samples (Hilbert if real).
 
-    With ``combine_polarizations`` the channels are combined into one,
-    ``(1, N)``, and reported as 1-D; ``sampling_rate`` sets the combiner's
-    block length.
+    The beat keeps the input's precision: complex input as it is, real input
+    (float32 for float32 and small integer types) made analytic in its own
+    precision.  With ``combine_polarizations`` the channels are combined into
+    one, ``(1, N)``, and reported as 1-D; ``sampling_rate`` sets the
+    combiner's block length.
     """
-    z, xp, sp = dispatch(samples)
+    z, xp, _ = dispatch(samples)
     z2, was_1d = as_2d(z, name="samples")
-    if xp.iscomplexobj(z2):
-        z2 = z2.astype(xp.complex128, copy=False)
-    else:
+    if not xp.iscomplexobj(z2):
         # A photodiode's DC term is not part of the beat, which lies inside
         # (0, f_s/2); left in, it adds a constant phasor to the analytic
         # signal and corrupts the beat phase.
-        z2 = z2.astype(xp.float64)
-        z2 = sp.signal.hilbert(z2 - xp.mean(z2, axis=-1, keepdims=True), axis=-1)
+        z2 = z2.astype(np.result_type(z2.dtype, np.float32), copy=False)
+        z2 = _hilbert(z2 - xp.mean(z2, axis=-1, keepdims=True), xp)
     if combine_polarizations:
         if z2.shape[0] < 2:
             raise ValueError(
@@ -135,13 +138,30 @@ def _analytic_beat(
     return z2, was_1d, xp
 
 
+def _hilbert(x: ArrayType, xp: Any) -> ArrayType:
+    """Analytic signal of real ``x`` along the last axis, in its precision.
+
+    ``x + j·H{x}`` by the one-sided spectrum (SciPy's ``hilbert``), through
+    :mod:`commkit._fft`.
+    """
+    n = x.shape[-1]
+    h = xp.zeros(n, dtype=x.dtype)
+    h[0] = 1.0
+    h[1 : (n + 1) // 2] = 2.0
+    if n % 2 == 0:
+        h[n // 2] = 1.0
+    return _fft.ifft(_fft.fft(x, axis=-1) * h, axis=-1)
+
+
 def _combine_polarizations(z2, sampling_rate: float, xp):
     """Maximum-ratio combination of the polarization channels of one beat.
 
     ``(C, N)`` complex in, ``(1, N)`` out: block coherency matrices, their
     dominant eigenvectors (the Jones vector up to a phase), parallel
     transport of that phase, linear interpolation to the sample rate and
-    ``y = vᴴz``.  See the module docstring.
+    ``y = vᴴz``.  See the module docstring.  The per-block vectors are small
+    and may be double; the sample-rate weights and output stay in the beat's
+    precision.
     """
     c, n = z2.shape
     block = min(max(256, int(round(1e-6 * sampling_rate))), n)
@@ -164,15 +184,20 @@ def _combine_polarizations(z2, sampling_rate: float, xp):
     turn = xp.concatenate([xp.zeros(1), xp.cumsum(step)])
     v = v * xp.exp(-1j * turn)[:, None]
 
-    centers = (xp.arange(g, dtype=xp.float64) + 0.5) * block
-    t = xp.arange(n, dtype=xp.float64)
-    y = xp.zeros(n, dtype=xp.complex128)
-    for p in range(c):
-        w = xp.interp(t, centers, v[:, p].real) + 1j * xp.interp(
-            t, centers, v[:, p].imag
-        )
-        y += xp.conj(w) * z2[p]
-    return y[None, :]
+    # Linear interpolation between the block centers (k + 1/2)·block, held
+    # constant beyond the first and last, as np.interp.  Sample t sits at
+    # (2t - block) / (2·block) block centers: its index and remainder are
+    # integers, so the fraction is exact in the beat's precision.
+    v = v.astype(z2.dtype, copy=False)
+    if g == 1:
+        w = xp.broadcast_to(v[0][:, None], (c, n))
+    else:
+        num = 2 * xp.arange(n, dtype=xp.int64) - block
+        i0 = xp.clip(num // (2 * block), 0, g - 2)
+        rem = xp.clip(num - i0 * (2 * block), 0, 2 * block)
+        frac = rem.astype(z2.real.dtype) / (2 * block)
+        w = v[i0].T * (1 - frac) + v[i0 + 1].T * frac  # (C, N)
+    return xp.sum(xp.conj(w) * z2, axis=0)[None, :]
 
 
 def dsh_beat(
@@ -221,8 +246,9 @@ def dsh_beat(
     Returns
     -------
     z : ndarray
-        Unit-amplitude complex beat, ``(..., N - m)``, ``complex128``, on the
-        device of ``phi``.
+        Unit-amplitude complex beat, ``(..., N - m)``, on the device of
+        ``phi``: ``complex128`` for a float64 trajectory, ``complex64`` for
+        float32.
     delta_phi : ndarray
         The true differential phase ``Δφ``, ``(..., N - m)``: the ground
         truth for validating :func:`dsh_phase` and the DSH linewidth
@@ -244,11 +270,13 @@ def dsh_beat(
     )
 
     delta_phi = x[..., m:] - x[..., :-m]
-    beat_phase = delta_phi
+    # The phase in float64, the beat in the trajectory's precision.
+    beat_phase = delta_phi.astype(xp.float64, copy=False)
     if f_shift != 0.0:
         t = xp.arange(n - m, dtype=xp.float64) / sampling_rate
-        beat_phase = delta_phi + 2.0 * np.pi * f_shift * t
-    return xp.exp(1j * beat_phase), delta_phi
+        beat_phase = beat_phase + 2.0 * np.pi * f_shift * t
+    cdtype = np.result_type(x.dtype, np.complex64)
+    return _phasor(beat_phase, cdtype, xp), delta_phi
 
 
 def dsh_phase(
@@ -352,13 +380,14 @@ def dsh_phase(
         # padded FFTs plus a Numba-JIT bootstrap dependency for no payoff.)
         # Under strong phase noise the Kay estimate is biased by the sine
         # nonlinearity (kHz-scale here), which the fine stage corrects.
-        acc = xp.sum(z2[:, 1:] * xp.conj(z2[:, :-1]), axis=-1)
+        acc = xp.sum(z2[:, 1:] * xp.conj(z2[:, :-1]), axis=-1, dtype=xp.complex128)
         f_hat = xp.angle(acc) * (fs / (2.0 * np.pi))  # (C,)
     else:
         f_hat = xp.full(z2.shape[0], float(f_shift), dtype=xp.float64)
 
     z_bb = correct_frequency_offset(z2, f_hat, sampling_rate=fs)
-    dphi = xp.unwrap(xp.angle(z_bb), axis=-1)
+    # The angle in the beat's precision, widened to float64 before unwrap.
+    dphi = xp.unwrap(xp.angle(z_bb).astype(xp.float64, copy=False), axis=-1)
 
     if estimate:
         # Fine stage: remove the per-channel least-squares slope of the

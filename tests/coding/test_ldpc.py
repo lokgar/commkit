@@ -61,7 +61,7 @@ class TestConstruction:
 
     @pytest.mark.allow_warnings
     def test_quasi_cyclic_circulants(self) -> None:
-        code = LDPCCode.quasi_cyclic(QC_BASE, 7)
+        code = LDPCCode.quasi_cyclic(QC_BASE, lifting=7)
         h = code.parity_check().toarray()
         assert h.shape == (28, 56)
         for (i, j), s in np.ndenumerate(QC_BASE):
@@ -106,13 +106,13 @@ class TestConstruction:
         with pytest.raises(ValueError, match="parity bits"):
             LDPCCode.from_parity_check(_h(TREE, 8), punctured=5)
         with pytest.raises(ValueError, match="lifting"):
-            LDPCCode.quasi_cyclic(QC_BASE, 0)
+            LDPCCode.quasi_cyclic(QC_BASE, lifting=0)
         with pytest.raises(ValueError, match="shifts"):
-            LDPCCode.quasi_cyclic(QC_BASE - 2, 7)
+            LDPCCode.quasi_cyclic(QC_BASE - 2, lifting=7)
         with pytest.raises(ValueError, match="rate"):
-            LDPCCode.dvbs2("9/10", "short")
+            LDPCCode.dvbs2("9/10", frame="short")
         with pytest.raises(ValueError, match="frame"):
-            LDPCCode.dvbs2("1/2", "medium")
+            LDPCCode.dvbs2("1/2", frame="medium")
 
     def test_methods_validation(self) -> None:
         with pytest.raises(ValueError, match="scale"):
@@ -126,7 +126,10 @@ class TestConstruction:
 
     @pytest.mark.allow_warnings
     def test_layers_share_no_bits(self) -> None:
-        for code in (LDPCCode.quasi_cyclic(QC_BASE, 7), LDPCCode.dvbs2("3/5", "short")):
+        for code in (
+            LDPCCode.quasi_cyclic(QC_BASE, lifting=7),
+            LDPCCode.dvbs2("3/5", frame="short"),
+        ):
             row_ptr, cols, layer_ptr = code._schedule
             assert row_ptr[-1] == code.checks.size
             for layer in range(layer_ptr.size - 1):
@@ -145,8 +148,8 @@ class TestEncoding:
     @pytest.mark.parametrize(
         ("code", "kind"),
         [
-            (LDPCCode.dvbs2("1/2", "short"), "accumulate"),
-            (LDPCCode.quasi_cyclic(QC_BASE, 7), "inverse"),
+            (LDPCCode.dvbs2("1/2", frame="short"), "accumulate"),
+            (LDPCCode.quasi_cyclic(QC_BASE, lifting=7), "inverse"),
             (LDPCCode.from_parity_check(_h(TREE + [[0, 3, 5, 7]], 8)), "dense"),
         ],
         ids=["accumulate", "inverse", "dense"],
@@ -165,7 +168,7 @@ class TestEncoding:
         monkeypatch.setattr(ldpc_module, "_MAX_INVERSE", 1)
         monkeypatch.setattr(ldpc_module, "_MAX_DENSE", 10)
         with pytest.raises(ValueError, match="too large"):
-            LDPCCode.quasi_cyclic(QC_BASE, 7)
+            LDPCCode.quasi_cyclic(QC_BASE, lifting=7)
 
     def test_punctured_bits_are_erasures(self, xp: Any, xpt: Any) -> None:
         """PON: the last 384 parity bits are never sent; noiseless decoding
@@ -194,7 +197,7 @@ class TestDecoding:
     def test_matches_textbook_reference(self, xp: Any, method) -> None:
         """Numba (and the kernel, on the GPU) against plain float64 layered BP
         in the same row order."""
-        code = LDPCCode.quasi_cyclic(QC_BASE, 7)
+        code = LDPCCode.quasi_cyclic(QC_BASE, lifting=7)
         llrs = (
             1.0 + 1.5 * np.random.default_rng(3).standard_normal((3, code.n))
         ).astype(np.float32)
@@ -249,7 +252,7 @@ class TestDecoding:
         )
 
     def test_failed_codewords_report_invalid(self, xp: Any) -> None:
-        code = LDPCCode.dvbs2("1/2", "short")
+        code = LDPCCode.dvbs2("1/2", frame="short")
         llrs = xp.asarray(
             np.random.default_rng(5).standard_normal(2 * code.n), dtype=xp.float32
         )

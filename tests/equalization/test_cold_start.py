@@ -102,3 +102,33 @@ def test_mismatched_decision_constellation_logs_warning(xp, caplog, equalizer):
     with caplog.at_level("WARNING", logger="commkit"):
         equalizer(rx, num_taps=11, step_size=1e-3, constellation=Constellation.qam(16))
     assert "decided symbols carry" in caplog.text
+
+
+@EQUALIZERS
+def test_collapse_onto_one_level_logs_warning(xp, caplog, equalizer):
+    """review F4: blind unipolar PAM-4 at 4 dB Es/N0 decides every symbol as
+    the lowest level (BER 0.5).  The decisions use one of the four points,
+    where a correct lock uses all of them (measured: unused probability mass
+    0 down to a BER of 0.1, the threshold is 0.4): returned with a
+    WARNING that names the collapse."""
+    uni = Constellation.pam(4, unipolar=True)
+    rx = make_channel_signal(uni, 2**16, esn0_db=4.0, seed=3, xp=xp)
+    with caplog.at_level("WARNING", logger="commkit"):
+        res = equalizer(rx, num_taps=11, step_size=1e-3)
+    assert ber(res.signal, num_skip_symbols=2**15) > 0.4
+    assert "on only 1 of its 4 points" in caplog.text
+
+
+@EQUALIZERS
+def test_correct_lock_at_low_snr_does_not_warn(xp, caplog, equalizer):
+    """Baseline: trained 16-QAM at 9 dB (BER near 0.1) uses every point and
+    keeps the power: no WARNING."""
+    rx = make_channel_signal(Constellation.qam(16), 2**16, esn0_db=9.0, seed=3, xp=xp)
+    with caplog.at_level("WARNING", logger="commkit"):
+        equalizer(
+            rx,
+            num_taps=11,
+            step_size=1e-3,
+            training_symbols=rx.reference.symbols[..., :NUM_TRAIN],
+        )
+    assert "decided symbols" not in caplog.text

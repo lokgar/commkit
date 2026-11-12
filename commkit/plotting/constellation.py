@@ -16,7 +16,7 @@ from ..logger import logger
 from ..math import rms
 from ..smoothing import smooth_density_2d
 from .theme import (
-    _channel_axes,
+    _draw_channels,
     _finish,
     _square_figsize,
 )
@@ -208,19 +208,84 @@ def plot_constellation(
             "plot_constellation(): overlay_ideal needs a constellation: pass "
             "constellation= or a Signal that has one."
         )
-    result = _plot_constellation_array(
-        signal_adapter.array,
-        bins=bins,
-        cmap=cmap,
-        ax=ax,
-        overlay_ideal=overlay_ideal,
-        constellation=constellation,
-        title=title,
-        vmin=vmin,
-        vmax=vmax,
-        show=False,
-        **kwargs,
-    )
+    logger.debug("Generating constellation density plot.")
+    x, xp, _ = dispatch(signal_adapter.array)
+
+    def draw(ax: Any, row: Any, title: str | None) -> None:
+        # Ensure row are complex
+        if not xp.iscomplexobj(row):
+            logger.debug("Real row plotted as complex, on the in-phase axis.")
+            row = row.astype(xp.complex64)
+
+        # Bin on the device and transfer only the (bins, bins) counts.  The view
+        # spans 2x the RMS (robust to noise outliers).
+        i_data = row.real.ravel()
+        q_data = row.imag.ravel()
+        signal_rms = float(rms(row))
+        limit = signal_rms * 2.0
+        if limit == 0:
+            limit = 1.0  # Default view range for zero signal
+        h = _density(i_data, q_data, bins, limit, xp)
+
+        # Transpose for imshow (rows=y, cols=x)
+        h = h.T
+
+        # Apply Gaussian smoothing for nicer visuals
+        h = smooth_density_2d(h, sigma=1.0)
+
+        # Normalize histogram to [0, 1] for consistent colormap scaling
+        h_max = np.max(h)
+        if h_max > 0:
+            h = h / h_max
+
+        # Plot using imshow
+        imshow_kwargs: dict[str, Any] = {
+            "origin": "lower",
+            "extent": [-limit, limit, -limit, limit],
+            "aspect": "equal",
+            "cmap": cmap,
+            "interpolation": "bilinear",
+        }
+        if vmin is not None:
+            imshow_kwargs["vmin"] = vmin
+        if vmax is not None:
+            imshow_kwargs["vmax"] = vmax
+        imshow_kwargs.update(kwargs)
+
+        ax.imshow(h, **imshow_kwargs)
+
+        # Overlay the constellation, scaled from its unit average power (under
+        # its pmf) to the row' RMS.
+        if overlay_ideal and constellation is not None:
+            const = np.asarray(constellation.points).astype(np.complex128)
+            const_rms = float(np.sqrt(constellation.power()))
+            if const_rms > 0:
+                const = const * (signal_rms / const_rms)
+            ax.scatter(
+                const.real,
+                const.imag,
+                c="lime",
+                edgecolors="dimgray",
+                linewidths=1.5,
+                s=30,
+                zorder=10,
+                marker="o",
+            )
+
+        # Add center lines
+        ax.grid(False)
+        ax.axhline(0, color="white", alpha=0.4, zorder=0)
+        ax.axvline(0, color="white", alpha=0.4, zorder=0)
+
+        ax.set_xlabel("In-Phase (I)")
+        ax.set_ylabel("Quadrature (Q)")
+        if title is not None:
+            ax.set_title(title)
+
+        ax.set_xlim(-limit, limit)
+        ax.set_ylim(-limit, limit)
+
+    result = _draw_channels(x, ax, title, draw, panel=_square_figsize())
 
     if overlay_reference:
         if sig is None or sig.reference is None:
@@ -259,143 +324,6 @@ def plot_constellation(
             _scatter_source(axes, src)
 
     return _finish(result, show, xlim=xlim, ylim=ylim)
-
-
-def _plot_constellation_array(
-    samples: Any,
-    bins: int = 100,
-    cmap: str = "inferno",
-    ax: Any | None = None,
-    overlay_ideal: bool = False,
-    constellation: Any | None = None,
-    title: str | None = "Constellation",
-    vmin: float | None = None,
-    vmax: float | None = None,
-    show: bool = False,
-    **kwargs: Any,
-) -> tuple[Any, Any] | None:
-    """Render array data; the public boundary handles reference overlays."""
-    logger.debug("Generating constellation density plot.")
-
-    samples, xp, _ = dispatch(samples)
-
-    # Handle Multichannel (e.g. Dual-Pol)
-    # Convention: (Channels, Time)
-    if samples.ndim > 1:
-        num_channels = samples.shape[0]
-
-        fig, axes, targets = _channel_axes(num_channels, ax, panel=_square_figsize())
-
-        for i in range(num_channels):
-            channel_samples = samples[i]
-
-            target_ax = targets[i]
-
-            ch_title = f"{title} (Ch {i})" if title else f"Channel {i}"
-
-            _plot_constellation_array(
-                channel_samples,
-                bins=bins,
-                cmap=cmap,
-                ax=target_ax,
-                overlay_ideal=overlay_ideal,
-                constellation=constellation,
-                title=ch_title,
-                vmin=vmin,
-                vmax=vmax,
-                show=False,
-                **kwargs,
-            )
-
-        if show:
-            plt.show()
-            return None
-        return fig, axes
-
-    # --- 1D Logic ---
-
-    if ax is None:
-        fig, ax = plt.subplots(figsize=_square_figsize())
-    else:
-        fig = ax.figure
-
-    # Ensure samples are complex
-    if not xp.iscomplexobj(samples):
-        logger.warning("Constellation plot expects complex samples. Converting.")
-        samples = samples.astype(xp.complex64)
-
-    # Bin on the device and transfer only the (bins, bins) counts.  The view
-    # spans 2x the RMS (robust to noise outliers).
-    i_data = samples.real.ravel()
-    q_data = samples.imag.ravel()
-    signal_rms = float(rms(samples))
-    limit = signal_rms * 2.0
-    if limit == 0:
-        limit = 1.0  # Default view range for zero signal
-    h = _density(i_data, q_data, bins, limit, xp)
-
-    # Transpose for imshow (rows=y, cols=x)
-    h = h.T
-
-    # Apply Gaussian smoothing for nicer visuals
-    h = smooth_density_2d(h, sigma=1.0)
-
-    # Normalize histogram to [0, 1] for consistent colormap scaling
-    h_max = np.max(h)
-    if h_max > 0:
-        h = h / h_max
-
-    # Plot using imshow
-    imshow_kwargs: dict[str, Any] = {
-        "origin": "lower",
-        "extent": [-limit, limit, -limit, limit],
-        "aspect": "equal",
-        "cmap": cmap,
-        "interpolation": "bilinear",
-    }
-    if vmin is not None:
-        imshow_kwargs["vmin"] = vmin
-    if vmax is not None:
-        imshow_kwargs["vmax"] = vmax
-    imshow_kwargs.update(kwargs)
-
-    ax.imshow(h, **imshow_kwargs)
-
-    # Overlay the constellation, scaled from its unit average power (under
-    # its pmf) to the samples' RMS.
-    if overlay_ideal and constellation is not None:
-        const = np.asarray(constellation.points).astype(np.complex128)
-        const_rms = float(np.sqrt(constellation.power()))
-        if const_rms > 0:
-            const = const * (signal_rms / const_rms)
-        ax.scatter(
-            const.real,
-            const.imag,
-            c="lime",
-            edgecolors="dimgray",
-            linewidths=1.5,
-            s=30,
-            zorder=10,
-            marker="o",
-        )
-
-    # Add center lines
-    ax.grid(False)
-    ax.axhline(0, color="white", alpha=0.4, zorder=0)
-    ax.axvline(0, color="white", alpha=0.4, zorder=0)
-
-    ax.set_xlabel("In-Phase (I)")
-    ax.set_ylabel("Quadrature (Q)")
-    if title is not None:
-        ax.set_title(title)
-
-    ax.set_xlim(-limit, limit)
-    ax.set_ylim(-limit, limit)
-
-    if show:
-        plt.show()
-        return None
-    return fig, ax
 
 
 def _density(i_data: Any, q_data: Any, bins: int, limit: float, xp: Any) -> np.ndarray:

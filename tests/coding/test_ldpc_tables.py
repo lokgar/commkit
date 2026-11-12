@@ -18,7 +18,7 @@ K_SHORT = {"1/4": 3240, "1/3": 5400, "2/5": 6480, "1/2": 7200, "3/5": 9720,
     [("normal", r) for r in K_NORMAL] + [("short", r) for r in K_SHORT],
 )
 def test_dvbs2_dimensions_and_accumulator(frame: str, rate: str) -> None:
-    code = LDPCCode.dvbs2(rate, frame)
+    code = LDPCCode.dvbs2(rate, frame=frame)
     n = 64800 if frame == "normal" else 16200
     k = (K_NORMAL if frame == "normal" else K_SHORT)[rate]
     assert (code.n, code.k, code.num_checks) == (n, k, n - k)
@@ -45,7 +45,7 @@ def test_dvbs2_degree_distribution(rate: str, high: int, count: int) -> None:
 
 
 def test_dvbs2_codewords() -> None:
-    code = LDPCCode.dvbs2("2/3", "short")
+    code = LDPCCode.dvbs2("2/3", frame="short")
     u = np.random.default_rng(0).integers(0, 2, (3, code.k)).astype(np.int8)
     c = encode(u, code=code).astype(np.int64)
     assert not ((code.parity_check().astype(np.int64) @ c.T) % 2).any()

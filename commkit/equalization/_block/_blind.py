@@ -15,7 +15,13 @@ from ...backend import ArrayType, to_device
 from ...core._signal_adapter import adapt_signal, require_integer_sps
 from ...core.signal import Signal
 from ...logger import logger
-from .._common import _godard_radius, _rde_ring_radii, _rde_rings
+from .._common import (
+    _check_cma_kurtosis,
+    _cma_profile,
+    _godard_radius,
+    _rde_ring_radii,
+    _rde_rings,
+)
 from .._sequential._blind import _check_pilots
 from ..pilots import EqualizerPilots
 from ..result import (
@@ -67,6 +73,7 @@ def _block_fdaf_blind(
     num_taps: int,
     sps: int,
     step_size: float | None,
+    base_step: float,
     block_size: int,
     r2: float,
     radii_np: np.ndarray | None,
@@ -85,8 +92,9 @@ def _block_fdaf_blind(
     Godard (``kind='cma'``) or nearest-ring (``kind='rde'``) gradient, with
     pilot positions overridden by the LMS residual.  ``r2`` is the Godard radius
     (CMA) and ``radii_np`` the unique ring radii (RDE), decided by their
-    squared midpoints (``_rde_rings``).  ``step_size=None``
-    is the default of both, ``min(1e-3, 0.5 / block_size) / sps``.
+    squared midpoints (``_rde_rings``).  ``step_size=None`` is the default
+    of both, ``min(base_step, 0.5 / block_size) / sps``, with ``base_step``
+    the per-symbol default of :func:`cma` or :func:`rde`.
     """
     use_pilots = pilot_ref is not None and pilot_mask is not None
     equalizer = f"block_{kind}"
@@ -105,7 +113,10 @@ def _block_fdaf_blind(
         pilot_gain_db=pilot_gain_db,
     )
     xp, C, n_sym, sps = run.xp, run.C, run.n_sym, run.sps
-    mu = min(1e-3, 0.5 / run.block_size) / sps if step_size is None else step_size
+    if step_size is None:
+        mu = min(base_step, 0.5 / run.block_size) / sps
+    else:
+        mu = step_size
     logger.info(
         "%s: C=%s, num_taps=%s, sps=%s, block_size=%s, fftsize=%s, mu=%s, "
         "n_sym=%s, pilot_aided=%s",
@@ -237,7 +248,7 @@ def _block_blind(
     """The body of :func:`block_cma` and :func:`block_rde` (``kind``)."""
     name = f"block_{kind}()"
     signal_adapter = adapt_signal(samples, function_name=name)
-    samples = signal_adapter.array
+    x = signal_adapter.array
     sps = require_integer_sps(signal_adapter.resolve_fact("sps", sps), name)
     constellation = signal_adapter.resolve_choice("constellation", constellation)
     pilot_ref, pilot_mask, pilot_gain_db = _check_pilots(
@@ -245,15 +256,20 @@ def _block_blind(
     )
     if kind == "cma":
         r2, radii_np = _godard_radius(constellation), None
+        kurtosis, gaussian, step_scale = _cma_profile(constellation)
+        _check_cma_kurtosis(kurtosis, gaussian, name)
+        base_step = 1e-3 * step_scale
     else:
         r2, radii_np = 1.0, _rde_ring_radii(constellation)
+        base_step = 1e-3
     label = f"Block-{kind.upper()}"
     result = _block_fdaf_blind(
         kind,
-        samples,
+        x,
         num_taps=num_taps,
         sps=sps,
         step_size=step_size,
+        base_step=base_step,
         block_size=block_size,
         r2=r2,
         radii_np=radii_np,
@@ -296,7 +312,10 @@ def block_cma(
     carrier-phase recovery stage afterwards (there is no ``cpr``, see the
     Notes of :func:`cma`).  ``pilots`` switch the pilot positions to the LMS
     residual error, which resolves the ambiguity there while the data
-    positions stay blind.
+    positions stay blind.  Like :func:`cma`, it does not converge on
+    probabilistically shaped QAM, whose kurtosis is close to a Gaussian's,
+    and warns there: use :func:`block_rde` instead (see the Notes of
+    :func:`cma`).
 
     Parameters
     ----------
@@ -312,8 +331,9 @@ def block_cma(
         Step size on the scale of :func:`cma`.  The weights are frozen
         across each block, so the stability ceiling is about ``block_size``
         times lower than per symbol; reduce it if the run raises divergence.
-        Defaults to ``min(1e-3, 0.5 / block_size) / sps``, as for
-        :func:`block_rde`.
+        Defaults to ``min(μ₀, 0.5 / block_size) / sps``, with ``μ₀`` the
+        per-symbol default of :func:`cma` for the constellation (1e-3 for
+        PSK and 16-QAM, less for denser sets).
     block_size : int, default 256
         Output symbols per weight update.
     constellation : Constellation, optional
@@ -373,9 +393,10 @@ def block_rde(
 
     Related to :func:`block_cma` as :func:`rde` is to :func:`cma`: each
     symbol is driven towards its nearest constellation ring instead of one
-    Godard circle, which converges blindly on multi-ring QAM (16-, 64-QAM)
-    where CMA's single radius stalls.  The same overlap-save engine and
-    operating point as :func:`block_cma`.
+    Godard circle, which lowers the error floor on multi-ring QAM (16-,
+    64-QAM) and converges on probabilistically shaped QAM, where CMA does
+    not.  The same overlap-save engine and operating point as
+    :func:`block_cma`.
 
     Blind up to a phase ambiguity (run carrier-phase recovery afterwards);
     ``pilots`` resolve it at the pilot positions.  From a

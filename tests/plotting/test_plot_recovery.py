@@ -71,7 +71,6 @@ class TestPlotCarrierPhase:
         )
         assert ax.get_xlim() == (0, 100)
 
-    @pytest.mark.allow_warnings
     def test_pilot_tone_phase_estimate(self, xp: Any) -> None:
         x, _ = _qpsk(xp, n=8192)
         method = recovery.PilotTone(frequency=3e5, bandwidth=2e4)
@@ -127,7 +126,6 @@ class TestPlotCarrierPhase:
         assert len(fig.axes) == 1
         assert [line.get_label() for line in ax.lines] == ["first", "second"]
 
-    @pytest.mark.allow_warnings
     def test_pilot_tones_phase_estimate(self, xp: Any) -> None:
         x, _ = _qpsk(xp, n=8192)
         tones = (2.5e5, 3.5e5)

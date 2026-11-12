@@ -24,7 +24,13 @@ from .._common import (
 )
 from ..fm_noise import _dsh_nperseg, _interferometer_response, fm_noise_psd
 from ..interferometry import _analytic_beat, dsh_phase
-from .result import LinewidthEstimate, _check_fence, _check_nperseg
+from .result import (
+    DshFmFitEstimate,
+    DshIncrementEstimate,
+    DshLorentzianEstimate,
+    _check_fence,
+    _check_nperseg,
+)
 
 __all__ = [
     "DshFmFit",
@@ -386,7 +392,7 @@ def _lorentzian_widths(f, p, level_lin):
     return float(f_hi - f_lo)
 
 
-def _dsh_fm_psd(samples: ArrayType, method: DshFmFit, fs: float) -> LinewidthEstimate:
+def _dsh_fm_psd(samples: ArrayType, method: DshFmFit, fs: float) -> DshFmFitEstimate:
     td = float(method.delay)
     m_samp = _delay_samples(td, fs)
     dphi, f_hat = dsh_phase(
@@ -467,7 +473,7 @@ def _dsh_fm_psd(samples: ArrayType, method: DshFmFit, fs: float) -> LinewidthEst
         return a[0] if S_cpu.ndim == 1 else a
 
     was_1d = dphi.ndim == 1
-    return LinewidthEstimate(
+    return DshFmFitEstimate(
         value=to_report_scalar(np.pi * theta[:, 0], was_1d=was_1d),
         method=method,
         f_shift=f_hat,
@@ -485,7 +491,7 @@ def _dsh_fm_psd(samples: ArrayType, method: DshFmFit, fs: float) -> LinewidthEst
 
 def _dsh_increment(
     samples: ArrayType, method: DshIncrement, fs: float
-) -> LinewidthEstimate:
+) -> DshIncrementEstimate:
     m_samp = _delay_samples(method.delay, fs)
     dphi, f_hat = dsh_phase(
         samples,
@@ -533,7 +539,7 @@ def _dsh_increment(
     slope, intercept, var_cpu, a_sec = _increment_variance_fit(d2, ls, 1.0 / fs, xp)
 
     was_1d = dphi.ndim == 1
-    return LinewidthEstimate(
+    return DshIncrementEstimate(
         value=to_report_scalar(np.maximum(slope, 0.0) / (4.0 * np.pi), was_1d=was_1d),
         method=method,
         f_shift=f_hat,
@@ -549,7 +555,7 @@ def _dsh_increment(
 
 def _dsh_lorentzian(
     samples: ArrayType, method: DshLorentzian, fs: float
-) -> LinewidthEstimate:
+) -> DshLorentzianEstimate:
     td = float(method.delay)
     _delay_samples(td, fs)
     level_db = float(method.level_db)
@@ -615,7 +621,7 @@ def _dsh_lorentzian(
             np.array2string(coh, precision=2),
         )
 
-    return LinewidthEstimate(
+    return DshLorentzianEstimate(
         value=to_report_scalar(dnu_deep, was_1d=was_1d),
         method=method,
         linewidth_3db=to_report_scalar(dnu_3db, was_1d=was_1d),

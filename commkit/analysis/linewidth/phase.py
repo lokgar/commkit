@@ -9,6 +9,7 @@ from dataclasses import dataclass
 from typing import Any
 
 import numpy as np
+from scipy.stats import chi2
 
 from ..._array import as_2d, broadcast_channels, to_report_scalar
 from ...backend import ArrayType, dispatch, to_device
@@ -22,7 +23,13 @@ from .._common import (
     _whittle_fit,
 )
 from ..fm_noise import fm_noise_psd
-from .result import LinewidthEstimate, _check_fence, _check_nperseg
+from .result import (
+    BetaSeparationEstimate,
+    IncrementEstimate,
+    IncrementSlopeEstimate,
+    _check_fence,
+    _check_nperseg,
+)
 
 __all__ = [
     "BetaSeparation",
@@ -34,6 +41,12 @@ __all__ = [
 # -----------------------------------------------------------------------------
 # Methods on phase trajectories
 # -----------------------------------------------------------------------------
+
+
+#: Bins below the white-FM crossover under which ``BetaSeparation`` warns.
+_BETA_MIN_BINS = 10
+#: Family-wise false-rejection rate of the spur screen (that of the fit).
+_SPUR_ALPHA = 0.01
 
 
 def _check_edge_trim(edge_trim: int) -> None:
@@ -159,7 +172,14 @@ class BetaSeparation:
     where it lies above the β-separation line ``S_f = (8 ln2 / π²)·f``, in
     general a union of disjoint intervals; the estimate's ``above`` mask is
     the region used.  The FWHM linewidth is ``sqrt(8 ln2 · A)`` for the
-    integrated area ``A`` in Hz².  The ``[f_min, f_max]`` window only fences
+    integrated area ``A`` in Hz².  Whether a bin lies above the line is read
+    from the fitted model below, not from the bin's noisy Welch value (which
+    near the crossover would keep upward fluctuations and drop downward
+    ones, biasing the area high), except at bins that exceed the model
+    beyond the fit's spur screen (a drift rise below the fit band, a
+    modulation line): those are judged on their own value, so area the
+    model lacks still counts.  The area sums the measured PSD over the
+    region.  The ``[f_min, f_max]`` window only fences
     that region: it excludes the unresolved DC bin and, with a suitable
     ``f_max``, the AWGN's ``f²`` tail at high frequencies, which climbs back
     above the line and would otherwise be integrated as a false linewidth.
@@ -182,7 +202,7 @@ class BetaSeparation:
         eighth of the record (at least 256 samples): the β-area needs bins
         well below the white-FM crossover ``f_c = πΔν/(8 ln 2)``, about
         ``0.57·Δν``, which a coarse segment cannot resolve (a warning says
-        so).
+        so below 10 bins).
     f_min : float, optional
         Lower fence in Hz (it drops the DC region of a residual frequency
         offset).  Defaults to the first non-zero Welch bin,
@@ -199,9 +219,16 @@ class BetaSeparation:
     **Limitations.**
 
     * The β-separation FWHM is an approximation: within about 10 % for
-      lineshapes dominated by slow FM noise, and exact for pure white FM (the
-      line is built so that a flat ``S_f = Δν/π`` integrates back to
-      ``Δν``).
+      lineshapes dominated by slow FM noise, and exact in expectation for
+      pure white FM (the line is built so that a flat ``S_f = Δν/π``
+      integrates back to ``Δν``).
+    * The area of a record is a random variable.  Measured on Wiener phase
+      noise at the default ``nperseg`` (16 records each), as the number of
+      PSD bins below the crossover ``f_c`` grows: 3 bins, mean 0.86 and
+      standard deviation 0.09 of the true linewidth; 7 bins, 0.98 and 0.04;
+      30 bins, 0.98 and 0.03; 60 bins, 1.00 and 0.03.  Below 10 bins a
+      warning says so; the default segment gives ``f_c · N / (8 f_s)``
+      bins on a record of ``N`` samples.
     * For sources dominated by flicker or drift the result depends on the
       observation time: a lower ``f_min`` (a longer capture) adds
       low-frequency area and a larger ``Δν``.  Quote ``f_min`` with the
@@ -210,8 +237,9 @@ class BetaSeparation:
       below the knee where the plateau ``Δν/π`` meets the tail
       ``2σ_φ²T·f²``, ``f_knee = (Δν/(2π σ_φ² T))^{1/2}``.  Inspect it with
       :func:`commkit.plotting.plot_frequency_noise_psd`.
-    * For pure white FM the β-area FWHM equals ``linewidth_floor`` once
-      ``f_c`` is resolved.  Drift or flicker adds area at low frequencies,
+    * For pure white FM the β-area FWHM matches ``linewidth_floor`` within
+      that spread once ``f_c`` is resolved; the floor, fitted over the whole
+      band, spreads far less (0.2 %).  Drift or flicker adds area at low frequencies,
       so the β-area FWHM then exceeds the floor: it is the width of the line
       observed over the record, the floor the intrinsic (Lorentzian) part.
     """
@@ -240,7 +268,7 @@ def _trimmed(p: ArrayType, edge_trim: int, xp: Any) -> tuple[ArrayType, slice, i
 
 def _increment_slope(
     p: ArrayType, method: IncrementSlope, fs: float
-) -> LinewidthEstimate:
+) -> IncrementSlopeEstimate:
     _, xp, _ = dispatch(p)
     p2, _, _ = _trimmed(p, method.edge_trim, xp)
     var1 = xp.var(p2[:, 1:] - p2[:, :-1], axis=-1)
@@ -250,7 +278,7 @@ def _increment_slope(
         p2, np.asarray(method.lags), 1.0 / fs, xp
     )
     was_1d = p.ndim == 1
-    return LinewidthEstimate(
+    return IncrementSlopeEstimate(
         value=to_report_scalar(np.maximum(slope, 0.0) / (2.0 * np.pi), was_1d=was_1d),
         method=method,
         delta_phi_var=to_report_scalar(to_device(var1, "cpu"), was_1d=was_1d),
@@ -264,7 +292,7 @@ def _increment_slope(
 
 def _increment_subtract(
     p: ArrayType, method: IncrementSubtract, fs: float
-) -> LinewidthEstimate:
+) -> IncrementEstimate:
     _, xp, _ = dispatch(p)
     p2, sl, n_full = _trimmed(p, method.edge_trim, xp)
     c = p2.shape[0]
@@ -299,7 +327,7 @@ def _increment_subtract(
 
     var1_cpu = to_device(var1, "cpu")
     was_1d = p.ndim == 1
-    return LinewidthEstimate(
+    return IncrementEstimate(
         value=to_report_scalar(to_device(linewidth, "cpu"), was_1d=was_1d),
         method=method,
         delta_phi_var=to_report_scalar(var1_cpu, was_1d=was_1d),
@@ -313,14 +341,13 @@ def _increment_subtract(
 
 def _beta_separation(
     phi: ArrayType, method: BetaSeparation, fs: float
-) -> LinewidthEstimate:
+) -> BetaSeparationEstimate:
     n_phi = phi.shape[-1]
     nps = min(_beta_nperseg(n_phi, method.nperseg), n_phi - 1)
     f, S_f = fm_noise_psd(phi, sampling_rate=fs, nperseg=nps)
-    _, xp, _ = dispatch(f)
 
-    # Transfer the plot-sized spectrum once, up front: every fence, mask and
-    # fit below is host-side arithmetic on these arrays.
+    # Transfer the plot-sized spectrum once, up front: every fence, mask,
+    # fit and the area below are host-side arithmetic on these arrays.
     f_cpu = np.asarray(to_device(f, "cpu"), dtype=np.float64)
     S_cpu = np.asarray(to_device(S_f, "cpu"), dtype=np.float64)
     S2c = S_cpu[None, :] if S_cpu.ndim == 1 else S_cpu
@@ -331,20 +358,6 @@ def _beta_separation(
     fmax = float(f_cpu[-1]) if method.f_max is None else float(method.f_max)
     beta_cpu = _BETA_SLOPE * f_cpu
     band_cpu = (f_cpu >= fmin) & (f_cpu <= fmax)
-    # The reported/plotted mask is rebuilt from the transferred spectrum -
-    # same expression, same float64 values - instead of being transferred.
-    above_cpu = band_cpu[None, :] & (S2c > beta_cpu[None, :])
-
-    # The β-area integral itself stays on the input backend (sample-rate work),
-    # with the fence rebuilt there from the host scalars.
-    S2 = S_f[None, :] if S_f.ndim == 1 else S_f
-    beta = _BETA_SLOPE * f
-    band = (f >= fmin) & (f <= fmax)
-    above = band[None, :] & (S2 > beta[None, :])
-    integrand = xp.where(above, S2, 0.0)
-    area = xp.trapezoid(integrand, f, axis=-1)
-    lw = xp.sqrt(_FWHM_FROM_AREA * area)
-    lw_cpu, area_cpu = to_device(xp.stack([lw, area]), "cpu")
 
     # White-FM floor: a Whittle fit of white FM, flicker FM and the white
     # angle noise (the f² tail) - the model of DshFmFit - so the tail is
@@ -382,28 +395,48 @@ def _beta_separation(
                 f"BetaSeparation: only {idx.size} FM-PSD bins in the floor fit "
                 "band - widen [f_min, f_max] or lengthen nperseg."
             )
-        theta[c], kept = _whittle_fit(S2c[c, idx], X_all[idx], dof=dof)
+        theta[c], kept = _whittle_fit(
+            S2c[c, idx], X_all[idx], dof=dof, alpha=_SPUR_ALPHA
+        )
         used2[c, idx[kept]] = True
     model = np.full(S2c.shape, np.nan)
     model[:, pos] = theta @ X_all[pos].T
     floor_cpu = np.pi * theta[:, 0]
 
+    # The β-region from the model, not from the noisy bins: on the bins
+    # themselves the line keeps upward fluctuations near the crossover and
+    # drops downward ones, which biased the area high.  Bins that reject the
+    # model (by the fit's own spur screen: drift below the fit band, a
+    # modulation line) are judged on their own value, so features the model
+    # lacks still count.  The area integrates the measured PSD over it.
+    model_band = np.where(band_cpu[None, :], np.nan_to_num(model), 0.0)
+    threshold = chi2.isf(_SPUR_ALPHA / max(int(band_cpu.sum()), 1), dof) / dof
+    rejects = S2c > threshold * model_band
+    above_cpu = band_cpu[None, :] & np.where(
+        rejects, S2c > beta_cpu[None, :], model_band > beta_cpu[None, :]
+    )
+    area_cpu = np.trapezoid(np.where(above_cpu, S2c, 0.0), f_cpu, axis=-1)
+    lw_cpu = np.sqrt(_FWHM_FROM_AREA * area_cpu)
+
     # The β-area needs bins below the crossover of the white-FM plateau with
-    # the line, f_c = π Δν / (8 ln 2) ≈ 0.57 Δν; at the first bin or above
-    # it, the area is truncated or empty.
-    f_first = float(f_cpu[np.argmax(eligible)]) if eligible.any() else np.inf
+    # the line, f_c = π Δν / (8 ln 2) ≈ 0.57 Δν: with fewer than
+    # _BETA_MIN_BINS the area spreads by 5 % or more, and with a few it is
+    # truncated (measured on Wiener phase, see the class docstring).
     for c in range(n_ch):
         f_cross = np.pi * floor_cpu[c] / (8.0 * np.log(2.0))
-        if f_cross < 3.0 * f_first:
+        bins = int(np.count_nonzero(eligible & (f_cpu < f_cross)))
+        if bins < _BETA_MIN_BINS:
             logger.warning(
-                "BetaSeparation: the white-FM crossover with the β-line "
-                "(f_c ≈ %.3g Hz, channel %d) is not resolved by the band, which "
-                "starts at %.3g Hz - the β-area misses the white-FM part; "
-                "lengthen nperseg to %d or more (and leave f_min below f_c/3).",
+                "BetaSeparation: only %d PSD bins below the white-FM crossover "
+                "with the β-line (f_c ≈ %.3g Hz, channel %d), from %.3g Hz on - "
+                "the β-area is noisy, and low with fewer than about 5; "
+                "lengthen nperseg to %d or more (and leave f_min below f_c/%d).",
+                bins,
                 f_cross,
                 c,
-                f_first,
-                int(2 ** np.ceil(np.log2(3.0 * fs / max(f_cross, 1e-300)))),
+                fmin,
+                int(2 ** np.ceil(np.log2(_BETA_MIN_BINS * fs / max(f_cross, 1e-300)))),
+                _BETA_MIN_BINS,
             )
 
     def per_channel(a: np.ndarray) -> Any:
@@ -411,7 +444,7 @@ def _beta_separation(
         return a[0] if S_cpu.ndim == 1 else a
 
     was_1d = phi.ndim == 1
-    return LinewidthEstimate(
+    return BetaSeparationEstimate(
         value=to_report_scalar(lw_cpu, was_1d=was_1d),
         method=method,
         linewidth_floor=to_report_scalar(floor_cpu, was_1d=was_1d),

@@ -23,8 +23,6 @@ import math
 from fractions import Fraction
 from typing import Any
 
-import numpy as np
-
 from .backend import ArrayType, dispatch
 from .core._signal_adapter import S, adapt_signal, require_integer_sps
 from .logger import logger
@@ -251,8 +249,9 @@ def resample(
         ``sps_out`` for array input.  A value that disagrees with the Signal
         raises.
     sps_out : float, optional
-        Target samples per symbol; the ratio ``sps_out / sps_in`` is
-        approximated by a fraction.
+        Target samples per symbol.  The ratio ``sps_out / sps_in`` must be a
+        fraction whose reduced terms are at most 1000 (to a relative 1e-9),
+        which bounds the polyphase filter to about 20 000 taps.
     correct_power : bool, optional
         Multiply by ``sqrt(down / up)`` so that ``E[|x|²] = 1/sps`` still
         holds.  Defaults to ``True`` for Signal input and ``False`` for arrays.
@@ -273,8 +272,9 @@ def resample(
     Raises
     ------
     ValueError
-        If both or neither of ``(up, down)`` and ``sps_out`` are given, or
-        if ``periodic`` and ``N * up / down`` is not an integer.
+        If both or neither of ``(up, down)`` and ``sps_out`` are given, if
+        ``sps_out / sps_in`` has no fraction with terms up to 1000, or if
+        ``periodic`` and ``N * up / down`` is not an integer.
     """
     signal_adapter = adapt_signal(samples, function_name="resample()")
     by_factors = up is not None or down is not None
@@ -289,8 +289,7 @@ def resample(
         if signal_adapter.signal is None and sps_in is None:
             raise ValueError("resample() requires sps_in with sps_out for array input.")
         sps_in = signal_adapter.resolve_fact("sps", sps_in)
-        ratio = Fraction(sps_out / sps_in).limit_denominator()
-        up, down = ratio.numerator, ratio.denominator
+        up, down = _sps_ratio(sps_out, sps_in)
     else:
         raise ValueError("resample(): give either (up, down) or sps_out.")
 
@@ -314,6 +313,31 @@ def resample(
         # sps_after / sps_before = up / down  ->  gain = sqrt(down/up).
         out = out * (down / up) ** 0.5
     return signal_adapter.wrap_samples(out, **metadata)
+
+
+# Largest up or down factor that ``sps_out`` may reduce to: the polyphase
+# filter has about ``20 · max(up, down)`` taps.
+_MAX_SPS_RATIO_FACTOR = 1000
+
+
+def _sps_ratio(sps_out: float, sps_in: float) -> tuple[int, int]:
+    """``(up, down)`` of ``sps_out / sps_in`` with both at most
+    ``_MAX_SPS_RATIO_FACTOR``; raise when no such fraction matches the ratio
+    to a relative 1e-9."""
+    if not (sps_out > 0 and math.isfinite(sps_out)):
+        raise ValueError(f"resample(): sps_out must be positive, got {sps_out}.")
+    target = sps_out / sps_in
+    ratio = Fraction(target).limit_denominator(_MAX_SPS_RATIO_FACTOR)
+    if (
+        ratio.numerator > _MAX_SPS_RATIO_FACTOR
+        or abs(float(ratio) - target) > 1e-9 * target
+    ):
+        raise ValueError(
+            f"resample(): sps_out / sps_in = {target!r} is not a ratio of "
+            f"integers up to {_MAX_SPS_RATIO_FACTOR}; its polyphase filter would "
+            "be too long. Give up and down explicitly."
+        )
+    return ratio.numerator, ratio.denominator
 
 
 def _resample_poly(arr: ArrayType, up: int, down: int, sp: Any) -> ArrayType:
@@ -364,99 +388,3 @@ def _check_factor(factor: int, function_name: str) -> int:
             f"{function_name}: factors must be positive integers, got {factor!r}."
         )
     return int(factor)
-
-
-# -----------------------------------------------------------------------------
-# INTERPOLATION AT ARBITRARY INSTANTS
-# -----------------------------------------------------------------------------
-
-# Half-width of the windowed-sinc interpolator (2·K taps) and its
-# Blackman-Harris window.  Measured error of a complex tone, float32 arithmetic:
-# below -119 dB up to 0.4 cycles per sample (80 % of the Nyquist band),
-# -36 dB at 0.45.
-_INTERP_HALF_WIDTH = 24
-_BLACKMAN_HARRIS = (0.35875, 0.48829, 0.14128, 0.01168)
-_INTERP_CHUNK = 1 << 14
-
-
-def _interpolate(
-    x: ArrayType, base: ArrayType, frac: ArrayType, *, margin: int = 0
-) -> ArrayType:
-    """Band-limited interpolation of ``x`` at the instants ``base + frac``.
-
-    ``x`` is ``(C, N)``, ``base`` the integer sample index left of each
-    instant (``(M,)``, int64) and ``frac`` its fraction in ``[0, 1)`` (``(M,)``,
-    in the real precision of ``x``).  A Blackman-Harris windowed sinc of
-    ``2 · _INTERP_HALF_WIDTH`` taps, computed in the precision of ``x`` and
-    chunked over the instants; the record is zero-extended, so instants
-    within the half-width of either end lose accuracy.  ``base`` may reach
-    ``margin`` samples beyond either end.  Returns ``(C, M)`` in the dtype of
-    ``x`` on its device.
-    """
-    x, xp, _ = dispatch(x)
-    K = _INTERP_HALF_WIDTH
-    real = xp.float32 if x.dtype in (xp.float32, xp.complex64) else xp.float64
-    C, _n = x.shape
-    m = base.shape[0]
-    pad = K + margin
-    padded = xp.pad(x, ((0, 0), (pad, pad)))
-    # Row r of windows[c] is padded[c, r : r + 2K], a strided view: gathering
-    # whole rows is about twice as fast as indexing every tap.
-    windows = [_sliding_window_view(xp, padded[c], 2 * K) for c in range(C)]
-    offsets = xp.arange(-K + 1, K + 1)
-    k = offsets.astype(real)
-    # sin(π(k - μ)) = -(-1)^k sin(πμ): one sine per instant, and the window's
-    # cos 2φ, cos 3φ from cos φ (Chebyshev), one cosine per tap.
-    neg_alt = -((-1.0) ** offsets).astype(real)
-    a0, a1, a2, a3 = _BLACKMAN_HARRIS
-    out = xp.empty((C, m), dtype=x.dtype)
-    for start in range(0, m, _INTERP_CHUNK):
-        stop = min(start + _INTERP_CHUNK, m)
-        mu = frac[start:stop, None].astype(real, copy=False)
-        u = k[None, :] - mu
-        # sin(πμ) = sin(π(1 - μ)), on the nearer side: 1 - μ is exact, while
-        # the rounded π times a μ near 1 loses the small result (2 % at
-        # μ = 1 - 1e-6 in float32).
-        sin_pi_mu = xp.sin(math.pi * xp.minimum(mu, 1.0 - mu))
-        c1 = xp.cos((u / K + 1.0) * math.pi)
-        window = (a0 - a2) - (a1 - 3.0 * a3) * c1 + c1 * c1 * (2.0 * a2 - 4.0 * a3 * c1)
-        # u = 0 only at μ = 0, where the instant is a sample: tap 1 there
-        on_sample = u == 0
-        sinc = xp.where(
-            on_sample,
-            1.0,
-            neg_alt[None, :] * sin_pi_mu / (math.pi * xp.where(on_sample, 1.0, u)),
-        )
-        taps = (sinc * window).astype(real, copy=False)
-        rows = base[start:stop] + (pad - K + 1)  # window start per instant
-        for c in range(C):
-            out[c, start:stop] = xp.sum(windows[c][rows] * taps, axis=-1)
-    return out
-
-
-def _stretched_instants(
-    num_out: int, rate: float, real: Any, xp: Any
-) -> tuple[ArrayType, ArrayType]:
-    """The instants ``n · rate``, ``n = 0 .. num_out - 1``, as the integer
-    index left of each (int64) and its fraction in ``[0, 1)`` (``real``).
-
-    Written ``n - d`` with ``d = n · (1 - rate)`` in ``real`` precision, so
-    no sample-rate float64 is made: the rounding of ``d`` (6e-8 relative in
-    float32) is 6e-6 samples at ``d = 100``.
-    """
-    n = xp.arange(num_out)
-    d = n.astype(real) * (1.0 - rate)
-    whole = xp.floor(d)
-    r = d - whole
-    on_sample = r == 0
-    base = n - whole.astype(xp.int64) - 1 + on_sample
-    frac = xp.where(on_sample, 0.0, 1.0 - r).astype(real, copy=False)
-    return base, frac
-
-
-def _sliding_window_view(xp: Any, a: ArrayType, width: int) -> ArrayType:
-    if xp is np:
-        return np.lib.stride_tricks.sliding_window_view(a, width)
-    from cupy.lib.stride_tricks import sliding_window_view
-
-    return sliding_window_view(a, width)

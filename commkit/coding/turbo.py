@@ -12,8 +12,9 @@ transmitted one after the other, ``n = 3 K + 12`` (no rate matching).
 
 :class:`TurboIterations` decodes iteratively with two BCJR decoders
 exchanging extrinsic LLRs, the forward-backward recursion of
-:mod:`commkit.coding.convolutional`.  The a-posteriori LLRs of the
-transmitted bits come from the last iteration: the systematic bits from
+:mod:`commkit.coding.convolutional`, until both decoders decide every
+information bit alike.  The a-posteriori LLRs of the
+transmitted bits come from the last iteration run: the systematic bits from
 the second decoder (which decide them), each parity stream and its tail
 bits from the decoder that reads it.  Encoding and decoding are sequential
 per block: Numba over blocks on the CPU, and GPU input makes one round
@@ -159,8 +160,10 @@ class TurboIterations:
 
     Parameters
     ----------
-    iterations : int, default 8
-        Full iterations (both decoders).
+    max_iterations : int, default 8
+        Most full iterations (both decoders).  A block stops after the first
+        iteration in which both decoders take the same hard decision on
+        every information bit; the result's ``iterations`` holds the count.
     method : {"maxlog", "exact"}, default "maxlog"
         Max-log-MAP constituents, or log-MAP (exact log-sum-exp), as in
         :func:`commkit.mapping.compute_llr`.
@@ -169,14 +172,14 @@ class TurboIterations:
         max-log-MAP (which overestimates them) and 1 for log-MAP.
     """
 
-    iterations: int = 8
+    max_iterations: int = 8
     method: str = "maxlog"
     scale: float | None = None
 
     def __post_init__(self) -> None:
-        it = self.iterations
+        it = self.max_iterations
         if isinstance(it, bool) or not isinstance(it, int) or it < 1:
-            raise ValueError(f"iterations must be an integer >= 1, got {it!r}.")
+            raise ValueError(f"max_iterations must be an integer >= 1, got {it!r}.")
         if self.method not in ("maxlog", "exact"):
             raise ValueError(
                 f"method must be 'maxlog' or 'exact', got {self.method!r}."
@@ -213,16 +216,17 @@ def _decode(code: TurboCode, llrs: ArrayType, method: TurboIterations) -> _Decod
     )
     bits = np.empty((rows, code.k), dtype=np.int8)
     app = np.empty((rows, code.n), dtype=np.float32)
+    used = np.empty(rows, dtype=np.int32)
     _get_numba_turbo("decode")(
-        host, code.interleaver, _RSC.next, _RSC.outputs, _RSC.tail, method.iterations,
-        method.method == "exact", scale, bits, app,
+        host, code.interleaver, _RSC.next, _RSC.outputs, _RSC.tail, method.max_iterations,
+        method.method == "exact", scale, bits, app, used,
     )  # fmt: skip
     device = "cpu" if xp is np else "gpu"
     return _Decoded(
         to_device(bits, device),
         to_device(app, device),
         xp.ones(rows, dtype=bool),
-        xp.full(rows, method.iterations, dtype=np.int32),
+        to_device(used, device),
     )
 
 

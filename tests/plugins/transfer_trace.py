@@ -79,10 +79,11 @@ _DOCUMENTED: dict[str, str] = {
     "equalization/_sequential/_setup.py::_assemble_sequential": _RECURSION,
     "equalization/_sequential/_setup.py::_prepare_sequential": _RECURSION,
     "io.py::save_npz": "explicit device move (samples to the host to store them)",
-    "filtering/fiber.py::_quadratic_phase": _HOST_VALUE + " (the known symbols)",
-    "filtering/fiber.py::_quadratic_phase_pass": _REPORT
+    "filtering/fiber/estimation.py::_quadratic_phase": _HOST_VALUE
+    + " (the known symbols)",
+    "filtering/fiber/estimation.py::_quadratic_phase_pass": _REPORT
     + " (the differential phase across the band, fitted on the host)",
-    "filtering/fiber.py::_clock_tone": _REPORT
+    "filtering/fiber/estimation.py::_clock_tone": _REPORT
     + " (the dispersion scan, searched for its peak on the host)",
     "frequency.py::_mengali_morelli": _RECURSION + " (bootstrap over the lags)",
     "_cuda/__init__.py::_iir_factory.<locals>.launch": _HOST_VALUE
@@ -98,7 +99,8 @@ _DOCUMENTED: dict[str, str] = {
     "timing/clock_recovery.py::_gardner_estimate": _RECURSION,
     "timing/clock_recovery.py::correct_sampling_clock_offset": _RECURSION,
     "timing/clock_recovery.py::estimate_sampling_clock_offset": _RECURSION,
-    "timing/clock_recovery.py::_resample_on_strobes": _RECURSION,
+    "_interpolation.py::interpolate_piecewise": _RECURSION
+    + " (the strobe positions, symbol rate, as knots of the resampling)",
     "recovery/tikhonov.py::_tikhonov": _RECURSION + " (RTS block-phase smoother)",
 }
 

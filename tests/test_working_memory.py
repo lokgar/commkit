@@ -10,8 +10,8 @@ import numpy as np
 import pytest
 
 from commkit import _overlap_save, metrics
-from commkit.equalization import zf_equalizer
-from commkit.filtering import ols_fir_filter
+from commkit.equalization import correct_channel
+from commkit.filtering import fir_filter
 from commkit.mapping import Constellation
 from commkit.metrics import information
 from tests.common.memory import peak_bytes
@@ -37,20 +37,21 @@ def small_ols_budget(monkeypatch: pytest.MonkeyPatch) -> None:
 
 
 @pytest.mark.usefixtures("small_ols_budget")
-def test_ols_fir_filter_workspace() -> None:
-    """About one padded input copy (whole-record batches: 7x the input)."""
+def test_fir_filter_workspace() -> None:
+    """Overlap-save on a long record: about one padded input copy
+    (whole-record batches: 7x the input)."""
     x = _samples(1 << 19)
     taps = np.hanning(63).astype(np.float32)
-    assert _workspace(lambda: ols_fir_filter(x, taps, nfft=1024)) < 3 * x.nbytes
+    assert _workspace(lambda: fir_filter(x, taps)) < 3 * x.nbytes
 
 
 @pytest.mark.usefixtures("small_ols_budget")
-def test_zf_equalizer_workspace() -> None:
+def test_correct_channel_workspace() -> None:
     x = _samples(1 << 19)
     h = np.zeros((2, 2, 9), dtype=np.complex64)
     h[0, 0, 4] = h[1, 1, 4] = 1.0
     h[0, 1, 3] = h[1, 0, 5] = 0.2
-    assert _workspace(lambda: zf_equalizer(x, h)) < 3 * x.nbytes
+    assert _workspace(lambda: correct_channel(x, h)) < 3 * x.nbytes
 
 
 def test_mi_workspace(monkeypatch: pytest.MonkeyPatch) -> None:

@@ -5,6 +5,7 @@ per-channel log lines of :mod:`commkit.metrics.quality`,
 :mod:`commkit.metrics.error_rates` and :mod:`commkit.metrics.information`.
 """
 
+import functools
 import logging
 from typing import Any
 
@@ -31,25 +32,28 @@ def _unit_reference(tx: ArrayType, xp: Any) -> tuple[ArrayType, ArrayType]:
     return tx, pwr
 
 
-def _log_per_channel(fmt: str, *arrays: ArrayType, extra: tuple = ()) -> None:
-    """Gate per-channel INFO logging behind one D2H transfer per array.
+def _log_per_channel(
+    label: str, fmt: str, *arrays: ArrayType, extra: tuple = ()
+) -> None:
+    """Log one INFO line with every channel's values, after one D2H per array.
 
-    Emits, per channel index ``ch``: ``logger.info(fmt, ch, *values, *extra)``
-    where ``values`` are each array's per-channel scalar (Python ``int`` for
-    integer dtypes, ``float`` otherwise) and ``extra`` are constants appended
-    after the per-channel values (e.g. a fixed ``total`` symbol/bit count).
-    No device transfer happens at all when INFO logging is disabled.
+    The line reads ``"<label>: ch0 <fmt % values>, ch1 ..."``, where
+    ``values`` are each array's per-channel scalar (Python ``int`` for integer
+    dtypes, ``float`` otherwise) followed by ``extra``, constants such as a
+    fixed symbol or bit count.  No device transfer happens at all when INFO
+    logging is disabled.
     """
     if not logger.isEnabledFor(logging.INFO):
         return
     arrays_np = [to_device(a, "cpu") for a in arrays]
-    n_ch = arrays_np[0].shape[0]
-    for ch in range(n_ch):
+    parts = []
+    for ch in range(arrays_np[0].shape[0]):
         values = [
             int(a[ch]) if np.issubdtype(a.dtype, np.integer) else float(a[ch])
             for a in arrays_np
         ]
-        logger.info(fmt, ch, *values, *extra)
+        parts.append(f"ch{ch} " + fmt % (*values, *extra))
+    logger.info("%s: %s", label, ", ".join(parts))
 
 
 # -----------------------------------------------------------------------------
@@ -109,6 +113,51 @@ def _constellation(adapter: SignalAdapter, constellation: Any, name: str) -> Any
             f"{type(constellation).__name__}; use e.g. Constellation.qam(16)."
         )
     return constellation
+
+
+@functools.lru_cache(maxsize=64)
+def _min_distance(constellation: Constellation) -> float:
+    """Smallest distance between two points, in rows of 256 (host)."""
+    p = constellation.points.astype(np.complex128)
+    best = np.inf
+    for i in range(0, p.size, 256):
+        d = np.abs(p[i : i + 256, None] - p[None, :])
+        d[d == 0.0] = np.inf  # each point against itself
+        best = min(best, float(d.min()))
+    return best
+
+
+def _require_points(
+    tx: ArrayType,
+    constellation: Constellation,
+    xp: Any,
+    name: str,
+    decisions: ArrayType | None = None,
+) -> None:
+    """Raise unless every reference symbol is a point of ``constellation``.
+
+    A reference left on another constellation (samples remapped, a unipolar
+    set shifted to bipolar, but the reference kept) would be decided as the
+    wrong points and inflate the SER and EVM.  The tolerance, a quarter of
+    the minimum distance between points, keeps each reference symbol well
+    inside its own decision region: rounding and a reference rescaled to its
+    measured power pass, a remapping fails.  ``decisions``
+    (``constellation._nearest(tx)``) are reused when the caller has them.
+    One pass over the reference and one host sync.
+    """
+    real = np.result_type(tx.real.dtype, np.float32)
+    points = constellation.points
+    dtype = np.result_type(real, np.complex64) if np.iscomplexobj(points) else real
+    pts = xp.asarray(points.astype(dtype))
+    if decisions is None:
+        decisions = constellation._nearest(tx.reshape(-1)).reshape(tx.shape)
+    worst = float(xp.max(xp.abs(tx - pts[decisions]))) if tx.size else 0.0
+    if worst > 0.25 * _min_distance(constellation):
+        raise ValueError(
+            f"{name}: the reference symbols are not points of the decision "
+            f"constellation (up to {worst:.3g} away); remap the reference with "
+            "the samples, or pass the constellation they were drawn from."
+        )
 
 
 def _paired(

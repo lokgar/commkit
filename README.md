@@ -43,7 +43,7 @@ res = ck.equalization.lms(
 y = res.signal                    # 1-SPS Signal, reference aligned
 print(f"EVM {ck.metrics.evm(y, num_skip_symbols=2000):.1f} %, "
       f"BER {ck.metrics.ber(y, num_skip_symbols=2000):.1e}")
-# EVM 12.7 %, BER 2.4e-04 (on the CPU; the GPU draws other noise)
+# EVM 12.7 %, BER 2.0e-04 (on the CPU; the GPU draws other noise)
 
 # The next record continues from the converged taps and CPR state.
 res2 = ck.equalization.lms(rx, num_taps=21, step_size=1e-3, cpr=cpr, state=res.state)
@@ -106,15 +106,15 @@ CommKit never picks a device for you: data stays where you put it, and each func
 | --- | --- |
 | [`commkit.core`](https://github.com/lokgar/commkit/tree/main/commkit/core) | `Signal`, `Reference`, `generate` (uniform, shaped through a distribution matcher, or coded with `code=`), `SingleCarrierFrame` and `Preamble` (pilots, guard intervals, MIMO channels), `extract_payload`. |
 | [`commkit.mapping`](https://github.com/lokgar/commkit/tree/main/commkit/mapping) | `Constellation` (QAM, PSK, PAM, arbitrary points; Gray labels; probabilistic shaping with `.shaped()`), bit mapping, hard demapping, max-log and exact LLRs. |
-| [`commkit.filtering`](https://github.com/lokgar/commkit/tree/main/commkit/filtering) | Pulses (`RRC`, `RC`, `Gaussian`, `Rect`, `SmoothRect`), FIR and IIR design (Butterworth, Chebyshev I/II, elliptic, Bessel), numerical filter responses, `fir_filter`, `iir_filter`, `matched_filter`, overlap-save, chromatic-dispersion compensation and digital backpropagation (`correct_fiber_propagation`). |
+| [`commkit.filtering`](https://github.com/lokgar/commkit/tree/main/commkit/filtering) | Pulses (`RRC`, `RC`, `Gaussian`, `Rect`, `SmoothRect`), FIR and IIR design (Butterworth, Chebyshev I/II, elliptic, Bessel), numerical filter responses, `fir_filter` (direct, FFT or overlap-save convolution after the sizes), `iir_filter`, `matched_filter`, chromatic-dispersion estimation and compensation and digital backpropagation (`correct_fiber_propagation`). |
 | [`commkit.multirate`](https://github.com/lokgar/commkit/blob/main/commkit/multirate.py) | `resample` (fractional), `decimate`, `upsample`, `decimate_to_symbol_rate`. |
 | [`commkit.spectral`](https://github.com/lokgar/commkit/blob/main/commkit/spectral.py) | Welch PSD, spectrograms, frequency shifting, pilot tones. |
-| [`commkit.impairments`](https://github.com/lokgar/commkit/tree/main/commkit/impairments) | AWGN at an Es/N0 (measured as energy per symbol) or of an absolute variance, ASE at an OSNR (`apply_ase`), phase noise, IQ imbalance (blind estimate; Löwdin and Gram-Schmidt correction), chromatic dispersion, PMD and polarization mixing, and nonlinear fiber propagation over amplified spans (split-step Kerr effect with dispersion, loss, PMD and ASE) of a `Fiber`. |
-| [`commkit.timing`](https://github.com/lokgar/commkit/tree/main/commkit/timing) | Barker and Zadoff-Chu sequences, `estimate_timing` / `correct_timing`, fractional delay estimation and correction. |
+| [`commkit.impairments`](https://github.com/lokgar/commkit/tree/main/commkit/impairments) | AWGN at an Es/N0 (measured as energy per symbol) or of an absolute variance, ASE at an OSNR (`apply_ase`), phase noise, carrier frequency offset, IQ imbalance (blind estimate; Löwdin and Gram-Schmidt correction), sampling-clock offset and jitter, ADC quantization, photodetection, coherent detection and intensity noise, chromatic dispersion, PMD and polarization mixing, and nonlinear fiber propagation over amplified spans (split-step Kerr effect with dispersion, loss, PMD and ASE) of a `Fiber`. |
+| [`commkit.timing`](https://github.com/lokgar/commkit/tree/main/commkit/timing) | Barker and Zadoff-Chu sequences, `estimate_timing` / `correct_timing`, `cross_correlate`, `peak_offset` and `apply_delay`, sampling-clock recovery (`estimate_sampling_clock_offset` / `correct_sampling_clock_offset` with `Gardner`). |
 | [`commkit.frequency`](https://github.com/lokgar/commkit/blob/main/commkit/frequency.py) | `estimate_frequency_offset` / `correct_frequency_offset` with `MthPower`, `MengaliMorelli`, `PilotSlope` and `SpectralPeak`; static and blockwise. |
-| [`commkit.recovery`](https://github.com/lokgar/commkit/tree/main/commkit/recovery) | `estimate_carrier_phase` / `correct_carrier_phase` with `ViterbiViterbi`, `BPS`, `PLL`, `Tikhonov`, `ConstantPhase`, `PilotInterpolation`, `PilotTone(s)`; cycle-slip correction; `resolve_phase_ambiguity` and `resolve_channel_permutation`. |
-| [`commkit.equalization`](https://github.com/lokgar/commkit/tree/main/commkit/equalization) | Sequential `lms`, `rls`, `cma`, `rde` (Numba) and frequency-domain `block_lms`, `block_cma`, `block_rde` (CuPy, CUDA graphs), butterfly MIMO, inline carrier recovery (`cpr=PLL()` / `BPS()`), continuation with `state=`, `zf_equalizer`; pilot-aided CMA and RDE from a frame's pilots (`EqualizerPilots`); polarization demultiplexing on pilot tones (`estimate_polarization_tones` / `correct_polarization`). |
-| [`commkit.metrics`](https://github.com/lokgar/commkit/blob/main/commkit/metrics.py) | `evm`, `snr`, `ber`, `fer`, `ser`, `gmi`, `ngmi`, `mi`, including shaped constellations; pre-FEC and post-FEC (`ber(decoded, sig)`); `estimate_noise_variance` for LLRs; host values per channel. |
+| [`commkit.recovery`](https://github.com/lokgar/commkit/tree/main/commkit/recovery) | `estimate_carrier_phase` / `correct_carrier_phase` with `ViterbiViterbi`, `BPS`, `PLL`, `Tikhonov`, `ConstantPhase`, `PilotInterpolation`, `PilotTone(s)`; cycle-slip correction; the Wiener phase smoother `smooth_phase`; `resolve_phase_ambiguity` and `resolve_channel_permutation`. |
+| [`commkit.equalization`](https://github.com/lokgar/commkit/tree/main/commkit/equalization) | Sequential `lms`, `rls`, `cma`, `rde` (Numba) and frequency-domain `block_lms`, `block_cma`, `block_rde` (CuPy, CUDA graphs), butterfly MIMO, inline carrier recovery (`cpr=PLL()` / `BPS()`), continuation with `state=`, `estimate_channel` and `correct_channel` (ZF / MMSE); pilot-aided CMA and RDE from a frame's pilots (`EqualizerPilots`); polarization demultiplexing on pilot tones (`estimate_polarization(x, PolarizationTones(...))` / `correct_polarization`). |
+| [`commkit.metrics`](https://github.com/lokgar/commkit/blob/main/commkit/metrics.py) | `evm`, `snr`, `ber`, `fer`, `ser`, `gmi`, `ngmi`, `mi`, including shaped constellations; pre-FEC and post-FEC (`ber(decoded, sig)`); `noise_variance` for LLRs; the AWGN closed forms `awgn_ser`, `awgn_ber`, `awgn_mi`, `awgn_gmi`; host values per channel. |
 | [`commkit.analysis`](https://github.com/lokgar/commkit/tree/main/commkit/analysis) | Laser and carrier-phase characterization: `estimate_linewidth` (increment slope, β-separation, delayed self-heterodyne FM-PSD / increment / Lorentzian), FM-noise PSDs, drift separation, Allan deviation. |
 | [`commkit.math`](https://github.com/lokgar/commkit/blob/main/commkit/math.py) | `rms`, `normalize`, dB conversions. |
 | [`commkit.smoothing`](https://github.com/lokgar/commkit/blob/main/commkit/smoothing.py) | Display and estimation smoothers (moving average, Savitzky-Golay, 2-D density). Signal-chain filters are in `filtering`. |
@@ -150,15 +150,15 @@ With [`uv`](https://github.com/astral-sh/uv), use `uv pip install` in place of `
 
 ## Examples
 
-[`examples/`](https://github.com/lokgar/commkit/tree/main/examples) is a course in 29 Jupyter notebooks, one topic each, in teaching order (install the `notebook` extra and run `jupyter lab examples`):
+[`examples/`](https://github.com/lokgar/commkit/tree/main/examples) is a course in 31 Jupyter notebooks, one topic each, in teaching order (install the `notebook` extra and run `jupyter lab examples`):
 
 - **00-05, signals and DSP**: the `Signal`, constellations and bit mapping, spectra, filters, pulse shaping and matched filtering, resampling;
 - **06-10, channel, coding and performance**: AWGN and the metrics (SNR, BER, LLRs, GMI), channel coding, probabilistic shaping and coded modulation, laser phase noise, front-end impairments;
-- **11-18, receiver algorithms**: frame synchronization, frequency-offset estimation, blind and pilot-aided carrier recovery, linear, adaptive and blind equalization, polarization demultiplexing;
-- **19-22, optical fiber systems**: chromatic dispersion, the nonlinear fiber with digital backpropagation, FEC in optical standards, and an end-to-end coherent transceiver;
-- **23-28, characterization**: carrier phase and laser linewidth measurements, with templates for real captures.
+- **11-19, receiver algorithms**: frame synchronization, sampling-clock recovery, frequency-offset estimation, blind and pilot-aided carrier recovery, linear, adaptive and blind equalization, polarization demultiplexing;
+- **20-24, optical fiber systems**: chromatic dispersion, the nonlinear fiber with digital backpropagation, direct and self-coherent detection, FEC in optical standards, and an end-to-end coherent transceiver;
+- **25-30, characterization**: carrier phase and laser linewidth measurements, with templates for real captures.
 
-[`examples/README.md`](https://github.com/lokgar/commkit/blob/main/examples/README.md) lists every notebook with its topics.  The quickstart above appears cell by cell in `00-getting-started` and `16-adaptive-equalization`.  The notebooks are committed without outputs and run in CI.
+[`examples/README.md`](https://github.com/lokgar/commkit/blob/main/examples/README.md) lists every notebook with its topics.  The quickstart above appears cell by cell in `00-getting-started` and `17-adaptive-equalization`.  The notebooks are committed without outputs and run in CI.
 
 ## Development
 

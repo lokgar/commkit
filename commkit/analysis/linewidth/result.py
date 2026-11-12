@@ -1,4 +1,5 @@
-"""The result of :func:`estimate_linewidth`: :class:`LinewidthEstimate`.
+"""The results of :func:`estimate_linewidth`: :class:`LinewidthEstimate` and
+one subclass per method.
 
 Also the parameter checks that the phase-trajectory and the beat method
 objects share.
@@ -10,6 +11,13 @@ from typing import Any
 import numpy as np
 
 __all__ = [
+    "BetaSeparationEstimate",
+    "DshFmFitEstimate",
+    "DshIncrementEstimate",
+    "DshLorentzianEstimate",
+    "FmNoiseFitEstimate",
+    "IncrementEstimate",
+    "IncrementSlopeEstimate",
     "LinewidthEstimate",
 ]
 
@@ -21,11 +29,19 @@ __all__ = [
 
 @dataclass(frozen=True, eq=False)
 class LinewidthEstimate:
-    """Result of :func:`estimate_linewidth`.
+    """Result of :func:`estimate_linewidth`, the fields every method gives.
 
-    ``value`` and ``method`` are always set; the other fields belong to one
-    or more methods and are ``None`` for the rest.  Scalars are floats (SISO)
-    or ``(C,)`` arrays (MIMO); arrays are host NumPy arrays.
+    The constructor takes the same fields.  Each method returns a subclass
+    with its diagnostics:
+
+    - FM-noise PSD fits, :class:`FmNoiseFitEstimate`:
+      :class:`BetaSeparationEstimate` and :class:`DshFmFitEstimate`;
+    - phase increments, :class:`IncrementEstimate` (``IncrementSubtract``):
+      :class:`IncrementSlopeEstimate` and its :class:`DshIncrementEstimate`;
+    - the beat lineshape, :class:`DshLorentzianEstimate`.
+
+    Scalars are floats (SISO) or ``(C,)`` arrays (MIMO); arrays are host
+    NumPy arrays.
 
     Attributes
     ----------
@@ -35,104 +51,209 @@ class LinewidthEstimate:
         (the deep-width estimate).
     method : object
         The method object that produced the estimate.
-    frequencies : numpy.ndarray or None
-        Frequency axis in Hz: of ``fm_psd`` (``BetaSeparation``, ``DshFmFit``)
-        or of ``psd`` (``DshLorentzian``, two-sided).
-    fm_psd : numpy.ndarray or None
-        FM-noise PSD :math:`S_f` in Hz²/Hz (``BetaSeparation``; for ``DshFmFit`` the
-        laser PSD, the beat PSD divided by the interferometer response, NaN at
-        masked bins).
-    fm_psd_model : numpy.ndarray or None
-        ``BetaSeparation``, ``DshFmFit``: the fitted model in the units of
-        ``fm_psd`` - white FM, flicker FM and the detection-noise term.
-    used : numpy.ndarray or None
-        Boolean mask of the bins the white-FM fit ran over, spurs removed
-        (``BetaSeparation``, ``DshFmFit``).
-    band : tuple of float or None
-        ``BetaSeparation``: the ``(f_min, f_max)`` fence applied.
-        ``DshFmFit``: the frequency extent of ``used``.
-    num_segments : int or None
-        Welch segment count ``K`` behind every bin (``BetaSeparation``,
-        ``DshFmFit``).
-    flicker : float or numpy.ndarray or None
-        ``BetaSeparation``, ``DshFmFit``: fitted flicker-FM coefficient
-        ``h_-1`` in Hz² (``S_f = h_-1/f``).
-    linewidth_floor : float or numpy.ndarray or None
-        ``BetaSeparation``: the white-FM (Lorentzian) linewidth ``π·S_white``
-        of the fitted model, in Hz.
-    area_hz2 : float or numpy.ndarray or None
-        ``BetaSeparation``: integrated FM-noise area above the β-line, Hz².
-    beta_line : numpy.ndarray or None
-        ``BetaSeparation``: the β-line ``8 ln2 f / π²``.
-    above : numpy.ndarray or None
-        ``BetaSeparation``: boolean mask of the integrated bins
-        (``S_f > β`` within ``band``), in general a union of disjoint
-        intervals.
-    valid : numpy.ndarray or None
-        ``DshFmFit``: bins away from the interferometer notches and, for a
-        real (single-photodiode) beat, within the beat's support,
-        ``f <= min(f_shift, f_s/2 - f_shift)``; ``fm_psd`` and
-        ``fm_psd_model`` are NaN elsewhere.
-    f_shift : float or numpy.ndarray or None
-        ``DshFmFit``, ``DshIncrement``: the removed beat carrier in Hz.
-    lags : numpy.ndarray or None
-        ``DshIncrement``: increment lags in samples.
-    lag_s : numpy.ndarray or None
-        Increment lags in seconds, ``(n_lags,)`` (increment methods).
-    increment_var : numpy.ndarray or None
-        Measured increment variances in rad², ``(C, n_lags)`` (increment
-        methods).
-    slope, intercept : numpy.ndarray or None
-        The fit ``increment_var = slope * lag_s + intercept`` per channel, rad²/s and
-        rad² (``IncrementSlope``, ``DshIncrement``).
-    angle_noise_var : float or numpy.ndarray or None
-        Additive-noise term in rad²: the fitted intercept (``IncrementSlope``,
-        ``DshIncrement``), the subtracted term (``IncrementSubtract``) or the
-        fitted angle-noise variance per sample (``BetaSeparation``,
-        ``DshFmFit``).
-    delta_phi_var : float or numpy.ndarray or None
-        ``IncrementSlope``, ``IncrementSubtract``: lag-1 increment variance in
-        rad².  ``DshIncrement``: total variance of the differential phase.
-    linewidth_3db : float or numpy.ndarray or None
-        ``DshLorentzian``: half-power width / 2 (the effective linewidth).
-    lineshape_ratio : float or numpy.ndarray or None
-        ``DshLorentzian``: ``W_L/W_3`` (about 9.95 Lorentzian, 2.6 Gaussian at
-        -20 dB).
-    coherence_factor : float or numpy.ndarray or None
-        ``DshLorentzian``: ``τ_d/τ_c``.
-    psd : numpy.ndarray or None
-        ``DshLorentzian``: the beat PSD, ``(nfreq,)`` or ``(C, nfreq)``.
-    peak_frequency : float or numpy.ndarray or None
-        ``DshLorentzian``: beat peak frequency in Hz.
     """
 
     value: float | np.ndarray
     method: Any
-    frequencies: np.ndarray | None = None
-    fm_psd: np.ndarray | None = None
-    fm_psd_model: np.ndarray | None = None
-    used: np.ndarray | None = None
-    band: tuple[float, float] | None = None
-    num_segments: int | None = None
-    flicker: float | np.ndarray | None = None
-    linewidth_floor: float | np.ndarray | None = None
-    area_hz2: float | np.ndarray | None = None
-    beta_line: np.ndarray | None = None
-    above: np.ndarray | None = None
-    valid: np.ndarray | None = None
-    f_shift: float | np.ndarray | None = None
-    lags: np.ndarray | None = None
-    lag_s: np.ndarray | None = None
-    increment_var: np.ndarray | None = None
-    slope: np.ndarray | None = None
-    intercept: np.ndarray | None = None
-    angle_noise_var: float | np.ndarray | None = None
-    delta_phi_var: float | np.ndarray | None = None
-    linewidth_3db: float | np.ndarray | None = None
-    lineshape_ratio: float | np.ndarray | None = None
-    coherence_factor: float | np.ndarray | None = None
-    psd: np.ndarray | None = None
-    peak_frequency: float | np.ndarray | None = None
+
+
+@dataclass(frozen=True, eq=False)
+class FmNoiseFitEstimate(LinewidthEstimate):
+    """A linewidth from a fit to the FM-noise PSD (``BetaSeparation``,
+    ``DshFmFit``), the fields both give.
+
+    The constructor takes the same fields.
+
+    Attributes
+    ----------
+    value : float or numpy.ndarray
+        Linewidth in Hz, as in :class:`LinewidthEstimate`.
+    method : object
+        The method object that produced the estimate.
+    frequencies : numpy.ndarray
+        Frequency axis of ``fm_psd`` in Hz.
+    fm_psd : numpy.ndarray
+        FM-noise PSD :math:`S_f` in Hz²/Hz (for ``DshFmFit`` the laser PSD,
+        the beat PSD divided by the interferometer response, NaN at masked
+        bins).
+    fm_psd_model : numpy.ndarray
+        The fitted model in the units of ``fm_psd``: white FM, flicker FM and
+        the detection-noise term.
+    used : numpy.ndarray
+        Boolean mask of the bins the white-FM fit ran over, spurs removed.
+    band : tuple of float
+        ``BetaSeparation``: the ``(f_min, f_max)`` fence applied.
+        ``DshFmFit``: the frequency extent of ``used``.
+    num_segments : int
+        Welch segment count ``K`` behind every bin.
+    flicker : float or numpy.ndarray
+        Fitted flicker-FM coefficient ``h_-1`` in Hz² (``S_f = h_-1/f``).
+    angle_noise_var : float or numpy.ndarray
+        Fitted angle-noise variance per sample in rad².
+    """
+
+    frequencies: np.ndarray
+    fm_psd: np.ndarray
+    fm_psd_model: np.ndarray
+    used: np.ndarray
+    band: tuple[float, float]
+    num_segments: int
+    flicker: float | np.ndarray
+    angle_noise_var: float | np.ndarray
+
+
+@dataclass(frozen=True, eq=False)
+class BetaSeparationEstimate(FmNoiseFitEstimate):
+    """Result of ``BetaSeparation``.
+
+    The constructor takes the same fields: those of
+    :class:`FmNoiseFitEstimate`, then the attributes below.
+
+    Attributes
+    ----------
+    linewidth_floor : float or numpy.ndarray
+        The white-FM (Lorentzian) linewidth ``π·S_white`` of the fitted
+        model, in Hz.
+    area_hz2 : float or numpy.ndarray
+        Integrated FM-noise area above the β-line, Hz².
+    beta_line : numpy.ndarray
+        The β-line ``8 ln2 f / π²``.
+    above : numpy.ndarray
+        Boolean mask of the integrated bins within ``band``: where
+        ``fm_psd_model`` exceeds the β-line, or ``fm_psd`` does at bins
+        beyond the fit's spur screen; in general a union of disjoint
+        intervals.
+    """
+
+    linewidth_floor: float | np.ndarray
+    area_hz2: float | np.ndarray
+    beta_line: np.ndarray
+    above: np.ndarray
+
+
+@dataclass(frozen=True, eq=False)
+class DshFmFitEstimate(FmNoiseFitEstimate):
+    """Result of ``DshFmFit``.
+
+    The constructor takes the same fields: those of
+    :class:`FmNoiseFitEstimate`, then the attributes below.
+
+    Attributes
+    ----------
+    valid : numpy.ndarray
+        Bins away from the interferometer notches and, for a real
+        (single-photodiode) beat, within the beat's support,
+        ``f <= min(f_shift, f_s/2 - f_shift)``; ``fm_psd`` and
+        ``fm_psd_model`` are NaN elsewhere.
+    f_shift : float or numpy.ndarray
+        The removed beat carrier in Hz.
+    """
+
+    valid: np.ndarray
+    f_shift: float | np.ndarray
+
+
+@dataclass(frozen=True, eq=False)
+class IncrementEstimate(LinewidthEstimate):
+    """A linewidth from the variance of phase increments, the result of
+    ``IncrementSubtract`` and the fields every increment method gives.
+
+    The constructor takes the same fields.
+
+    Attributes
+    ----------
+    value : float or numpy.ndarray
+        Linewidth in Hz, as in :class:`LinewidthEstimate`.
+    method : object
+        The method object that produced the estimate.
+    lag_s : numpy.ndarray
+        Increment lags in seconds, ``(n_lags,)``.
+    increment_var : numpy.ndarray
+        Measured increment variances in rad², ``(C, n_lags)``.
+    angle_noise_var : float or numpy.ndarray
+        Additive-noise term in rad²: the fitted intercept (``IncrementSlope``,
+        ``DshIncrement``) or the subtracted term (``IncrementSubtract``).
+    delta_phi_var : float or numpy.ndarray
+        ``IncrementSlope``, ``IncrementSubtract``: lag-1 increment variance in
+        rad².  ``DshIncrement``: total variance of the differential phase.
+    """
+
+    lag_s: np.ndarray
+    increment_var: np.ndarray
+    angle_noise_var: float | np.ndarray
+    delta_phi_var: float | np.ndarray
+
+
+@dataclass(frozen=True, eq=False)
+class IncrementSlopeEstimate(IncrementEstimate):
+    """Result of ``IncrementSlope``: a line through the increment variances.
+
+    The constructor takes the same fields: those of
+    :class:`IncrementEstimate`, then the attributes below.
+
+    Attributes
+    ----------
+    slope, intercept : numpy.ndarray
+        The fit ``increment_var = slope * lag_s + intercept`` per channel,
+        rad²/s and rad².
+    """
+
+    slope: np.ndarray
+    intercept: np.ndarray
+
+
+@dataclass(frozen=True, eq=False)
+class DshIncrementEstimate(IncrementSlopeEstimate):
+    """Result of ``DshIncrement``: the increment fit on a self-heterodyne
+    beat.
+
+    The constructor takes the same fields: those of
+    :class:`IncrementSlopeEstimate`, then the attributes below.
+
+    Attributes
+    ----------
+    lags : numpy.ndarray
+        Increment lags in samples.
+    f_shift : float or numpy.ndarray
+        The removed beat carrier in Hz.
+    """
+
+    lags: np.ndarray
+    f_shift: float | np.ndarray
+
+
+@dataclass(frozen=True, eq=False)
+class DshLorentzianEstimate(LinewidthEstimate):
+    """Result of ``DshLorentzian``: widths of the self-heterodyne beat.
+
+    The constructor takes the same fields.
+
+    Attributes
+    ----------
+    value : float or numpy.ndarray
+        The deep-width linewidth estimate in Hz.
+    method : object
+        The method object that produced the estimate.
+    frequencies : numpy.ndarray
+        Frequency axis of ``psd`` in Hz, two-sided.
+    psd : numpy.ndarray
+        The beat PSD, ``(nfreq,)`` or ``(C, nfreq)``.
+    peak_frequency : float or numpy.ndarray
+        Beat peak frequency in Hz.
+    linewidth_3db : float or numpy.ndarray
+        Half-power width / 2 (the effective linewidth).
+    lineshape_ratio : float or numpy.ndarray
+        ``W_L/W_3`` (about 9.95 Lorentzian, 2.6 Gaussian at -20 dB).
+    coherence_factor : float or numpy.ndarray
+        ``τ_d/τ_c``.
+    """
+
+    frequencies: np.ndarray
+    psd: np.ndarray
+    peak_frequency: float | np.ndarray
+    linewidth_3db: float | np.ndarray
+    lineshape_ratio: float | np.ndarray
+    coherence_factor: float | np.ndarray
 
 
 def _check_nperseg(nperseg: int | None) -> None:

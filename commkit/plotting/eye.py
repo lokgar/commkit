@@ -254,167 +254,71 @@ def plot_eye_diagram(
     sps = require_integer_sps(
         signal_adapter.resolve_fact("sps", sps), "plot_eye_diagram()"
     )
-    result = _plot_eye_diagram(
-        x,
-        sps=sps,
-        ax=ax,
-        num_symbols=num_symbols,
-        kind=kind,
-        title=title,
-        vmin=vmin,
-        vmax=vmax,
-        show=False,
-        **kwargs,
-    )
-    return _finish(result, show, xlim=xlim, ylim=ylim)
-
-
-def _plot_eye_diagram(
-    samples: Any,
-    *,
-    sps: Any,
-    ax: Any,
-    num_symbols: Any,
-    kind: Any,
-    title: Any,
-    vmin: Any,
-    vmax: Any,
-    show: Any,
-    **kwargs: Any,
-) -> tuple[Any, Any] | None:
-    """Render array data for :func:`plot_eye_diagram` (the public boundary resolves the Signal)."""
     logger.debug("Generating eye diagram (%s mode).", kind)
+    is_complex = x.dtype.kind == "c"
+    per_channel = 2 if is_complex else 1  # I and Q panels for complex samples
 
-    # Dispatch to check backend
-    samples, xp, _ = dispatch(samples)
+    def draw(axes_row: Any, row: Any, title: str | None) -> None:
+        if is_complex:
+            for k, (part, name) in enumerate(((row.real, "I"), (row.imag, "Q"))):
+                _plot_eye_traces(
+                    part,
+                    sps,
+                    num_symbols,
+                    axes_row[k],
+                    kind,
+                    title=f"{title} ({name})" if title else f"{name}-Channel",
+                    vmin=vmin,
+                    vmax=vmax,
+                    **kwargs,
+                )
+        else:
+            _plot_eye_traces(
+                row, sps, num_symbols, axes_row[0], kind,
+                title=title, vmin=vmin, vmax=vmax, **kwargs,
+            )  # fmt: skip
 
-    # Convention: (Channels, Time)
-    if samples.ndim > 1:
-        num_channels = samples.shape[0]
-
-        # Complex eye uses 2 axes (I/Q). So for N channels we need 2*N axes.
-        is_complex = xp.iscomplexobj(samples)
-        axes_per_channel = 2 if is_complex else 1
-
-        if ax is None:
-            # Grid: Rows = Channels, Cols = Components
+    many = isinstance(ax, (list, tuple, np.ndarray))
+    if x.ndim > 1:
+        num_channels = x.shape[0]
+        if ax is None:  # rows: channels, columns: components
             fig, axes = plt.subplots(
                 num_channels,
-                axes_per_channel,
-                figsize=_grid_figsize(num_channels, axes_per_channel),
-                squeeze=False,  # Ensure 2D array
+                per_channel,
+                figsize=_grid_figsize(num_channels, per_channel),
+                squeeze=False,
             )
-        else:
-            # User provided axes. Must be flat list or correct shape
-            # We assume user knows what they are doing or we do best effort
-            if isinstance(ax, (np.ndarray, list, tuple)):
-                # Flatten
-                axes_flat = np.array(ax).flatten()
-                if len(axes_flat) < num_channels * axes_per_channel:
-                    raise ValueError(
-                        f"Not enough axes provided. Need {num_channels * axes_per_channel}."
-                    )
-                # Reshape to (Channels, Components)
-                axes = axes_flat[: num_channels * axes_per_channel].reshape(
-                    num_channels, axes_per_channel
-                )
-                fig = axes[0, 0].figure
-            else:
+        elif many:
+            axes_flat = np.array(ax).flatten()
+            if len(axes_flat) < num_channels * per_channel:
                 raise ValueError(
-                    "For multichannel eye diagram, you must provide a list of axes."
+                    f"Not enough axes provided. Need {num_channels * per_channel}."
                 )
-
-        for i in range(num_channels):
-            channel_samples = samples[i]
-            ch_axes = axes[i]
-
-            ch_title = f"{title} (Ch {i})" if title else f"Channel {i}"
-
-            # Recursive call with 1D sample
-            _plot_eye_diagram(
-                channel_samples,
-                sps=sps,
-                ax=ch_axes,
-                num_symbols=num_symbols,
-                kind=kind,
-                title=ch_title,
-                vmin=vmin,
-                vmax=vmax,
-                show=False,
-                **kwargs,
+            axes = axes_flat[: num_channels * per_channel].reshape(
+                num_channels, per_channel
             )
-
-        if show:
-            plt.show()
-            return None
-        return fig, axes
-
-    # --- 1D Logic ---
-
-    is_complex = xp.iscomplexobj(samples)
-
-    if ax is None:
-        if is_complex:
-            fig, ax = plt.subplots(1, 2, figsize=_grid_figsize(1, 2))
+            fig = axes[0, 0].figure
         else:
-            fig, ax = plt.subplots(1, 1)
-            # Handle the fact that plt.subplots(1, 1) returns a single ax, not a list
+            raise ValueError(
+                "For multichannel eye diagram, you must provide a list of axes."
+            )
+        for i in range(num_channels):
+            draw(axes[i], x[i], f"{title} (Ch {i})" if title else f"Channel {i}")
+        result: tuple[Any, Any] = (fig, axes)
     else:
-        if isinstance(ax, (list, tuple, np.ndarray)):
-            fig = ax[0].figure
+        target: Any = ax
+        if target is None:
+            if is_complex:
+                fig, target = plt.subplots(1, 2, figsize=_grid_figsize(1, 2))
+            else:
+                fig, target = plt.subplots(1, 1)
+            many = is_complex
         else:
-            fig = ax.figure
-
-    if is_complex:
-        if not isinstance(ax, (list, tuple, np.ndarray)) or len(ax) < 2:
+            fig = (target[0] if many else target).figure
+        if is_complex and (not many or len(target) < 2):
             raise ValueError(
                 "For complex signals, 'ax' must be a list/tuple of at least 2 axes."
             )
-
-        # Plot I
-        _plot_eye_traces(
-            samples.real,
-            sps,
-            num_symbols,
-            ax[0],
-            kind,
-            title=f"{title} (I)" if title else "I-Channel",
-            vmin=vmin,
-            vmax=vmax,
-            **kwargs,
-        )
-
-        # Plot Q
-        _plot_eye_traces(
-            samples.imag,
-            sps,
-            num_symbols,
-            ax[1],
-            kind,
-            title=f"{title} (Q)" if title else "Q-Channel",
-            vmin=vmin,
-            vmax=vmax,
-            **kwargs,
-        )
-    else:
-        # If user passed a list of axes for real signal, use the first one
-        target_ax = ax
-        if isinstance(ax, (list, tuple, np.ndarray)):
-            target_ax = ax[0]
-
-        _plot_eye_traces(
-            samples,
-            sps,
-            num_symbols,
-            target_ax,
-            kind,
-            title=title,
-            vmin=vmin,
-            vmax=vmax,
-            **kwargs,
-        )
-
-    if show:
-        plt.show()
-        return None
-    return fig, ax
+        draw(target if many else [target], x, title)
+        result = (fig, target)
+    return _finish(result, show, xlim=xlim, ylim=ylim)

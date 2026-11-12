@@ -13,7 +13,6 @@ import numpy as np
 from .. import _fft
 from .._array import broadcast_channels
 from ..backend import ArrayType, dispatch, to_device
-from ..core.frame import _frame_pilots
 from ..logger import logger
 from ..math import _remove_linear_trend
 from ._common import _Context, _Phase
@@ -101,8 +100,12 @@ class PilotInterpolation:
         ValueError
             If the frame has no pilots.
         """
-        indices, values = _frame_pilots(frame, include_preamble, "PilotInterpolation")
-        return cls(indices, values, **options)
+        if frame.pilot_symbols is None:
+            raise ValueError(
+                "PilotInterpolation.from_frame(): the frame has no pilots."
+            )
+        indices = frame.pilot_indices(include_preamble)
+        return cls(indices, np.asarray(frame.pilot_symbols), **options)
 
 
 def _pilot_aided(
@@ -144,7 +147,7 @@ def _pilot_aided(
     spacing = (
         float(np.mean(np.diff(pilot_indices_np))) if pilot_indices_np.size > 1 else 1.0
     )
-    phi_pilots_u = _repair_slips(phi_pilots_u, xp, method.cycle_slip, 1, spacing)
+    phi_pilots_u = _repair_slips(phi_pilots_u, method.cycle_slip, 1, spacing)
     R = phi_pilots_u.shape[0]
 
     all_positions = xp.arange(N, dtype=xp.float64)
@@ -191,6 +194,24 @@ def _pilot_aided(
     )
 
 
+@dataclass(frozen=True)
+class _PilotPhasor:
+    """A pilot tone isolated by :func:`_extract_pilot_phasor`.
+
+    ``phasor`` is ``z(n) ≈ A·e^{jθ(n)}`` per channel with the nominal
+    carrier removed, complex in the working precision, ``(C, N)``.
+    ``f_centers`` is each channel's measured tone center in Hz; ``sig_power``
+    the in-band tone power ``|A|²`` and ``noise_power`` the additive noise
+    power ``σ²`` in the tracking window, in the units of ``mean(|z|²)`` (for
+    SNR weights).  The three are host float64, ``(C,)``.
+    """
+
+    phasor: ArrayType
+    f_centers: np.ndarray
+    sig_power: np.ndarray
+    noise_power: np.ndarray
+
+
 def _extract_pilot_phasor(
     samples: ArrayType,
     sampling_rate: float,
@@ -201,8 +222,7 @@ def _extract_pilot_phasor(
     refine_tone: bool = True,
     window: str | tuple = "tukey",
     X: ArrayType | None = None,
-    return_window: bool = False,
-) -> tuple[ArrayType, np.ndarray, np.ndarray, np.ndarray, ArrayType | None, ArrayType]:
+) -> _PilotPhasor:
     """Isolate a CW pilot tone and return its phasor with the carrier removed.
 
     The shared core of ``PilotTone`` and ``PilotTones``: refine each
@@ -241,31 +261,14 @@ def _extract_pilot_phasor(
         ``_fft.fft(samples, axis=-1)`` in the working precision, ``(C, N)``.
         Pass it when several tones are extracted from one record, so the
         record is transformed once (``PilotTones``).
-    return_window : bool, default False
-        Build and return the dense extraction window ``W`` (diagnostics
-        only); otherwise its slot in the result is ``None``.
 
     Returns
     -------
-    phasor : ndarray
-        ``z(n) ≈ A·e^{jθ(n)}`` per channel with the carrier removed, complex,
-        working precision, ``(C, N)``.
-    f_centers : numpy.ndarray
-        Measured tone center of each channel in Hz, float64, ``(C,)``.
-    sig_power : numpy.ndarray
-        In-band tone power ``|A|²`` in the tracking window, in the units of
-        ``mean(|z|²)`` (for SNR weights), float64, ``(C,)``.
-    noise_power : numpy.ndarray
-        Additive noise power ``σ²`` in the tracking window, same units,
-        float64, ``(C,)``.
-    W : ndarray or None
-        The extraction window, float64, ``(C, N)``, with
-        ``return_window=True``.
-    X : ndarray
-        The FFT of the record, complex, working precision, ``(C, N)``, for
-        further tones or diagnostics.
+    _PilotPhasor
+        The phasor, the tone centers and the signal and noise powers.
     """
-    from ..frequency import _refine_tones_from_spectrum, correct_frequency_offset
+    from .._peaks import refine_tones
+    from ..frequency import correct_frequency_offset
 
     C, N = samples.shape
     df = sampling_rate / N
@@ -286,7 +289,7 @@ def _extract_pilot_phasor(
     #    has dragged the tone away from nominal, so the window stays centered on
     #    it.  Runs on the shared spectrum - no extra FFTs, one host transfer.
     if refine_tone:
-        f_centers = _refine_tones_from_spectrum(
+        f_centers = refine_tones(
             X,
             sampling_rate,
             [float(tone_frequency)] * C,
@@ -355,11 +358,7 @@ def _extract_pilot_phasor(
         tone_t, tone_frequency, sampling_rate=sampling_rate
     )
 
-    W = None
-    if return_window:  # dense window for diagnostics/plots only
-        W = xp.zeros((C, N), dtype=xp.float64)
-        W[rows, idx] = win64[None, :]
-    return phasor, f_centers, sig_power, noise_power, W, X
+    return _PilotPhasor(phasor, f_centers, sig_power, noise_power)
 
 
 @dataclass(frozen=True)
@@ -435,7 +434,7 @@ def _pilot_tone(samples: ArrayType, method: PilotTone, ctx: _Context) -> _Phase:
 
     df = sampling_rate / N
     if bandwidth < df:
-        logger.warning(
+        logger.debug(
             "CPR (pilot-tone): bandwidth=%.3g Hz is below the FFT "
             "resolution df=fs/N=%.3g Hz; the extraction window may capture "
             "too few bins. Increase bandwidth or the record length N.",
@@ -444,7 +443,7 @@ def _pilot_tone(samples: ArrayType, method: PilotTone, ctx: _Context) -> _Phase:
         )
 
     # Isolate the tone and strip the nominal carrier (shared core).
-    phasor, f_centers, _, _, _, _ = _extract_pilot_phasor(
+    tone = _extract_pilot_phasor(
         samples,
         sampling_rate,
         tone_frequency,
@@ -454,6 +453,7 @@ def _pilot_tone(samples: ArrayType, method: PilotTone, ctx: _Context) -> _Phase:
         refine_tone=method.refine,
         window=method.window,
     )
+    phasor, f_centers = tone.phasor, tone.f_centers
 
     # Phase extraction + unwrap in float64.
     joint = method.joint_channels and C > 1
@@ -586,7 +586,7 @@ def _pilot_tones(samples: ArrayType, method: PilotTones, ctx: _Context) -> _Phas
     X = _fft.fft(xw, axis=-1)  # (C, N)
     z_tones, sig, noise, f_centers = [], [], [], []
     for k, f_k in enumerate(tone_frequencies):
-        ph, fc, s_c, n_c, _, _ = _extract_pilot_phasor(
+        tone = _extract_pilot_phasor(
             samples,
             sampling_rate,
             f_k,
@@ -597,6 +597,7 @@ def _pilot_tones(samples: ArrayType, method: PilotTones, ctx: _Context) -> _Phas
             window=method.window,
             X=X,
         )
+        ph, s_c, n_c = tone.phasor, tone.sig_power, tone.noise_power
         if per_tone_channel is None:
             z_k = xp.sum(ph, axis=0)  # joint across channels (pre-demux)
             s_k, n_k = float(np.sum(s_c)), float(np.sum(n_c))
@@ -606,7 +607,7 @@ def _pilot_tones(samples: ArrayType, method: PilotTones, ctx: _Context) -> _Phas
         z_tones.append(z_k)
         sig.append(s_k)
         noise.append(max(n_k, 1e-30))
-        f_centers.append(fc)
+        f_centers.append(tone.f_centers)
 
     # 2) Reference = highest-SNR tone; build the slow differential phasors c_k.
     snr = np.array([s / nz for s, nz in zip(sig, noise)], dtype=np.float64)

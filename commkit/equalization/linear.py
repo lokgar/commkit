@@ -1,14 +1,15 @@
 """Linear block equalization: channel estimation, ZF / MMSE and fixed taps.
 
-:func:`estimate_transfer_function` estimates a (MIMO) channel from a known
-reference, :func:`zf_equalizer` inverts a channel estimate in the frequency
-domain (zero-forcing, or MMSE with a noise variance), and :func:`apply_taps`
-applies frozen equalizer taps.
+:func:`estimate_channel` estimates a (MIMO) channel from a known reference
+(a :class:`ChannelEstimate`), :func:`correct_channel` inverts it in the
+frequency domain (zero-forcing, or MMSE with a noise variance), and
+:func:`apply_taps` applies frozen equalizer taps.
 """
 
 from __future__ import annotations
 
 import operator
+from dataclasses import dataclass
 
 import numpy as np
 
@@ -16,29 +17,55 @@ from .. import _fft
 from .._array import as_2d, restore_1d
 from .._overlap_save import ols_apply
 from ..backend import ArrayType, dispatch
-from ..core._signal_adapter import adapt_signal, require_integer_sps
+from ..core._signal_adapter import S, adapt_signal, require_integer_sps
 from ..core.signal import Signal
 from ..logger import logger
 from ._common import _build_padded_samples, _normalize_inputs
 
-__all__ = ["apply_taps", "estimate_transfer_function", "zf_equalizer"]
+__all__ = ["ChannelEstimate", "apply_taps", "correct_channel", "estimate_channel"]
 
 # -----------------------------------------------------------------------------
 # BLOCK EQUALIZATION (Signal-aware)
 # -----------------------------------------------------------------------------
 
 
-def zf_equalizer(
-    samples: ArrayType | Signal,
-    channel_estimate: ArrayType,
+@dataclass(frozen=True)
+class ChannelEstimate:
+    """A (MIMO) channel estimated from a known reference, from
+    :func:`estimate_channel`, inverted by :func:`correct_channel`.
+
+    The constructor takes the same fields.
+
+    Attributes
+    ----------
+    taps : ndarray
+        Channel impulse response, ``(L,)`` for SISO or ``(C, C, L)`` for
+        MIMO, where ``[i, j]`` is the FIR from input ``j`` to output ``i``,
+        Hann-tapered about lag 0.
+    center_tap : int
+        Index of lag 0 in ``taps``; the taps before it are precursors
+        (negative lags).
+    response : ndarray
+        Frequency response on the Welch grid in FFT-bin order, ``(nfft,)``
+        for SISO or ``(nfft, C, C)`` for MIMO, untapered.
+    """
+
+    taps: ArrayType
+    center_tap: int
+    response: ArrayType
+
+
+def correct_channel(
+    samples: S,
+    how: ChannelEstimate | ArrayType,
     *,
     noise_var: float = 0.0,
-    center_tap: int = 0,
-) -> ArrayType | Signal:
+    center_tap: int | None = None,
+) -> S:
     """Equalize a known channel in the frequency domain: zero-forcing or MMSE.
 
-    Inverts a channel impulse response estimate per frequency bin over
-    overlap-save blocks, for SISO or MIMO channels: ``W = Hᴴ (H Hᴴ + σ² I)⁻¹``.
+    Inverts a channel impulse response per frequency bin over overlap-save
+    blocks, for SISO or MIMO channels: ``W = Hᴴ (H Hᴴ + σ² I)⁻¹``.
     ``noise_var=0`` gives zero-forcing (with a ``1e-12`` floor);
     ``noise_var > 0`` gives MMSE, which does not amplify the noise in
     spectral nulls.
@@ -48,18 +75,19 @@ def zf_equalizer(
     samples : array_like or Signal
         Received samples, ``(N,)`` for SISO or ``(C, N)`` for MIMO.  A
         :class:`Signal` returns a new equalized :class:`Signal`.
-    channel_estimate : array_like
-        Channel impulse response, ``(L,)`` for SISO or ``(C, C, L)`` for
-        MIMO, where ``[i, j]`` is the FIR from input ``j`` to output ``i``.
-        Index ``center_tap`` holds lag 0.  Cast to the precision of ``samples``.
+    how : ChannelEstimate or array_like
+        The channel: an estimate from :func:`estimate_channel`, which
+        carries its centre tap, or an impulse response, ``(L,)`` for SISO or
+        ``(C, C, L)`` for MIMO, where ``[i, j]`` is the FIR from input ``j``
+        to output ``i``.  Cast to the precision of ``samples``.
     noise_var : float, default 0.0
         Noise variance ``σ²`` of the MMSE regularization; ``0.0`` gives ZF.
-    center_tap : int, default 0
-        Index of lag 0 in ``channel_estimate``, in ``[0, L)``. ``0`` means a
-        causal response (``rx = convolve(tx, h)[:N]``). A centered estimate
-        from :func:`estimate_transfer_function` with ``num_taps=L`` has
-        ``center_tap=L // 2``; taps before it are precursors (negative
-        lags). The output is aligned with the transmitted samples (no delay).
+    center_tap : int, optional
+        Index of lag 0 in an impulse response ``how``, in ``[0, L)``;
+        ``None`` takes 0, a causal response (``rx = convolve(tx, h)[:N]``).
+        Taps before it are precursors (negative lags).  An estimate carries
+        its own.  The output is aligned with the transmitted samples (no
+        delay).
 
     Returns
     -------
@@ -69,34 +97,47 @@ def zf_equalizer(
     Raises
     ------
     ValueError
-        If ``center_tap`` is outside ``[0, L)``.
+        If ``center_tap`` is outside ``[0, L)``, or given with an estimate.
     """
-    signal_adapter = adapt_signal(samples, function_name="zf_equalizer()")
-    samples = signal_adapter.array
+    signal_adapter = adapt_signal(samples, function_name="correct_channel()")
+    x = signal_adapter.array
+    if isinstance(how, ChannelEstimate):
+        if center_tap is not None:
+            raise ValueError(
+                "correct_channel(): center_tap is for an impulse response; a "
+                "ChannelEstimate carries its own."
+            )
+        channel_estimate, center_tap = how.taps, how.center_tap
+    else:
+        channel_estimate = how
 
-    logger.info("ZF/MMSE equalizer: noise_var=%.2e", noise_var)
-    samples, xp, _ = dispatch(samples)
+    logger.info(
+        "correct_channel: %s, noise_var=%.2e",
+        "MMSE" if noise_var > 0 else "ZF",
+        noise_var,
+    )
+    x, xp, _ = dispatch(x)
     # In the samples' precision before the FFT: a float64 estimate would
     # promote the whole overlap-save spectrum and its inverse to complex128.
     channel_estimate = xp.asarray(channel_estimate).astype(
-        xp.result_type(samples.dtype, xp.complex64), copy=False
+        xp.result_type(x.dtype, xp.complex64), copy=False
     )
 
     # Capture BEFORE any reshape so the later frequency-domain branch
     # can still take the efficient scalar path for SISO channels.
     siso_channel = channel_estimate.ndim == 1
 
-    samples, was_1d = as_2d(samples, name="samples")
+    x, was_1d = as_2d(x, name="samples")
     if was_1d and siso_channel:
         channel_estimate = channel_estimate[None, None, :]
 
-    num_ch, N = samples.shape
+    num_ch, N = x.shape
     L = channel_estimate.shape[-1] if channel_estimate.ndim > 0 else 1
-    center = operator.index(center_tap)
+    center = 0 if center_tap is None else operator.index(center_tap)
     if not 0 <= center < L:
         raise ValueError(
-            f"center_tap must lie in [0, {L}) for a {L}-tap channel_estimate, "
-            f"got {center}"
+            f"correct_channel(): center_tap must lie in [0, {L}) for a {L}-tap "
+            f"channel, got {center}"
         )
     reg = noise_var if noise_var > 0 else 1e-12
 
@@ -131,7 +172,7 @@ def zf_equalizer(
         Hk_H = xp.conj(xp.transpose(Hk, (0, 2, 1)))  # (N_fft, C_tx, C_rx)
         HHh = Hk @ Hk_H  # (N_fft, C_rx, C_rx)
 
-        eye = xp.eye(num_ch, dtype=samples.dtype)[None, :, :]
+        eye = xp.eye(num_ch, dtype=x.dtype)[None, :, :]
         if num_ch == 2:
             # Fast-path: Explicit 2x2 matrix inversion via Cramer's Rule avoiding
             # GPU LAPACK solver overheads (e.g. cuSOLVER batch inversion).
@@ -160,13 +201,13 @@ def zf_equalizer(
             Y_t = xp.transpose(Y, (2, 0, 1))  # (N_fft, num_ch, blocks)
             return xp.transpose(Wk @ Y_t, (1, 2, 0))  # (num_ch, blocks, N_fft)
 
-    out = ols_apply(samples, N_fft, process)
+    out = ols_apply(x, N_fft, process)
 
     return signal_adapter.wrap_samples(restore_1d(was_1d, out))
 
 
 def apply_taps(
-    samples: ArrayType | Signal,
+    samples: S,
     weights: ArrayType,
     *,
     sps: int | None = None,
@@ -174,7 +215,7 @@ def apply_taps(
     input_norm_factor: float | np.ndarray | None = None,
     samples_prefix: ArrayType | None = None,
     pad_mode: str = "zeros",
-) -> ArrayType | Signal:
+) -> S:
     """Apply frozen equalizer taps: the butterfly filter without adaptation.
 
     Reuses the weights of an earlier equalizer run on new samples, one
@@ -183,7 +224,7 @@ def apply_taps(
         y[i, n] = sum_j sum_t conj(W[i, j, t]) * x[j, n*sps - T_c + t]
 
     with the center tap ``T_c = num_taps // 2``: the filter of the adaptive
-    equalizers, as one batched ``einsum`` on the input's device.
+    equalizers, applied by overlap-save on the input's device.
 
     Parameters
     ----------
@@ -230,64 +271,77 @@ def apply_taps(
                                     input_norm_factor=result.input_norm_factor)
     """
     signal_adapter = adapt_signal(samples, function_name="apply_taps()")
-    samples = signal_adapter.array
+    x = signal_adapter.array
     metadata = {}
     sps = require_integer_sps(signal_adapter.resolve_fact("sps", sps), "apply_taps()")
     if signal_adapter.signal is not None:
         metadata["sampling_rate"] = signal_adapter.signal.symbol_rate
 
-    samples, xp, _ = dispatch(samples)
+    x, xp, _ = dispatch(x)
     weights = xp.asarray(weights)
 
     # Promote SISO -> MIMO shapes for uniform butterfly code path
-    samples, was_1d = as_2d(samples, name="samples")
+    x, was_1d = as_2d(x, name="samples")
     if weights.ndim == 1:
         weights = weights[None, None, :]  # (T,) -> (1, 1, T)
 
-    C, N = samples.shape
+    C, N = x.shape
     num_taps = weights.shape[-1]
     n_sym = N // sps
 
     _at_eq_norm = None
     if normalize:
-        samples, _, _at_eq_norm = _normalize_inputs(
-            samples, None, input_norm_factor=input_norm_factor
+        x, _, _at_eq_norm = _normalize_inputs(
+            x, None, input_norm_factor=input_norm_factor
         )
 
-    # Pad left by center tap so window[0] is center-aligned with sample 0,
-    # pad right to fill the last window completely - mirrors LMS pre-processing.
+    if weights.ndim != 3 or weights.shape[:2] != (C, C):
+        raise ValueError(
+            f"weights must be (num_taps,) or ({C}, {C}, num_taps) for {C} "
+            f"channel(s), got shape {tuple(weights.shape)}."
+        )
+    dtype = np.result_type(x.dtype, weights.dtype, np.complex64)
+
+    # y[i, n] = sum_j sum_t conj(W[i, j, t]) * p[j, n*sps + t] on the record
+    # p padded by the centre tap on the left: the correlation of p with the
+    # taps at the full rate, kept every sps-th sample.  It runs by
+    # overlap-save as the convolution with h[k] = conj(W[-k]) (k = 1 - T ..
+    # 0), shifted by the centre tap when the padding is zeros, which the
+    # overlap-save extension supplies: p is then x itself.
     c_tap = num_taps // 2
-    pad_left = c_tap
-    pad_right = n_sym * sps - N + num_taps - 1 - pad_left
     if samples_prefix is None and pad_mode == "zeros":
-        samples_padded = xp.pad(samples, ((0, 0), (pad_left, pad_right)))
+        shift = c_tap
+        padded = x
     else:
         # _build_padded_samples is backend-generic: pad on the input device
         # instead of round-tripping the full signal through the host.
-        samples_padded = xp.ascontiguousarray(
-            _build_padded_samples(
-                samples.astype(xp.complex64),
-                pad_left,
-                pad_right,
-                samples_prefix,
-                pad_mode,
-                _at_eq_norm,
-                sps,
-            )
+        shift = 0
+        padded = _build_padded_samples(
+            x.astype(xp.complex64),
+            c_tap,
+            n_sym * sps - N + num_taps - 1 - c_tap,
+            samples_prefix,
+            pad_mode,
+            _at_eq_norm,
+            sps,
         )
+    N_fft = max(1024, 1 << (4 * num_taps - 1).bit_length())
+    # h[k] at index k mod N_fft, so H = conj(FFT of W placed at -shift + t).
+    kernel = xp.zeros((C, C, N_fft), dtype=dtype)
+    kernel[..., :num_taps] = weights
+    H = xp.conj(_fft.fft(xp.roll(kernel, -shift, axis=-1), axis=-1))
 
-    # Zero-copy sliding-window view: (C, N_sym, num_taps)
-    # windows[c, n, t] = samples_padded[c, n*sps + t]
-    s0, s1 = samples_padded.strides
-    windows = xp.lib.stride_tricks.as_strided(
-        samples_padded,
-        shape=(C, n_sym, num_taps),
-        strides=(s0, sps * s1, s1),
-    )
+    def process(Y: ArrayType) -> ArrayType:
+        """Each bin's (C, C) response times the bin's channel vector."""
+        out = H[:, 0, None, :] * Y[0]
+        for j in range(1, C):
+            out += H[:, j, None, :] * Y[j]
+        return out
 
-    # Butterfly forward pass - single batched GEMM (dispatches to cuBLAS on GPU)
-    # y[i, n] = Σ_j Σ_t conj(W[i,j,t]) * windows[j, n, t]
-    y = xp.einsum("ijt,jnt->in", xp.conj(weights), windows)  # (C, N_sym)
+    # The kernel spans lags shift - T + 1 .. shift, so a guard of T - 1
+    # holds both transients; a quarter block would discard half of each.
+    y = ols_apply(padded.astype(dtype, copy=False), N_fft, process, guard=num_taps - 1)
+    y = y[:, : n_sym * sps : sps]
 
     return signal_adapter.wrap_samples(restore_1d(was_1d, y), **metadata)
 
@@ -297,7 +351,7 @@ def apply_taps(
 # -----------------------------------------------------------------------------
 
 
-def estimate_transfer_function(
+def estimate_channel(
     samples: ArrayType | Signal,
     reference: ArrayType | Signal,
     *,
@@ -305,7 +359,7 @@ def estimate_transfer_function(
     regularization: float = 1e-2,
     max_windows: int = 4096,
     num_taps: int | None = None,
-) -> ArrayType:
+) -> ChannelEstimate:
     r"""Estimate a (MIMO) channel from a known reference by Welch's H1 method.
 
     Estimates the frequency response
@@ -317,11 +371,10 @@ def estimate_transfer_function(
     response comes out of one pass: the reference is transformed once and
     every channel pair is formed in one product.
 
-    Invert the estimated channel with :func:`zf_equalizer`, passing the center
-    index of the taps::
+    Invert the estimated channel with :func:`correct_channel`::
 
-        h = estimate_transfer_function(rx, tx, num_taps=L)
-        tx_hat = zf_equalizer(rx, h, center_tap=L // 2)  # aligned with tx, no delay
+        est = estimate_channel(rx, tx, num_taps=L)
+        tx_hat = correct_channel(rx, est)  # aligned with tx, no delay
 
     The taps are a channel response, not equalizer weights, so they are not
     input for :func:`apply_taps`.
@@ -346,25 +399,19 @@ def estimate_transfer_function(
         bounds the vectorized FFT batch (the averaging only trades variance, not
         bias, so the cap does not move the estimate).
     num_taps : int, optional
-        Return the centered, Hann-tapered impulse response truncated to
-        ``num_taps`` taps, ``(C, C, num_taps)`` for MIMO or ``(num_taps,)``
-        for SISO.  Lag 0 is at index ``num_taps // 2`` (the taps before it are
-        negative lags), so pass ``center_tap=num_taps // 2`` to
-        :func:`zf_equalizer`.  By default the frequency response ``B(f)`` is
-        returned in FFT-bin order, ``(nfft, C, C)`` for MIMO or ``(nfft,)``
-        for SISO.
+        Length of the impulse response, at most ``nfft``: the response is
+        centred on lag 0 (``center_tap = num_taps // 2``), Hann-tapered and
+        truncated.  ``None`` takes ``nfft``.
 
     Returns
     -------
-    ndarray
-        Frequency response or impulse response (see ``num_taps``), on the
-        input's device.
+    ChannelEstimate
+        The taps, their centre tap and the frequency response ``B(f)``, on
+        the input's device.
     """
-    received = adapt_signal(
-        samples, function_name="estimate_transfer_function(samples)"
-    ).array
+    received = adapt_signal(samples, function_name="estimate_channel(samples)").array
     reference = adapt_signal(
-        reference, function_name="estimate_transfer_function(reference)"
+        reference, function_name="estimate_channel(reference)"
     ).array
     x, xp, _ = dispatch(reference)
     y = xp.asarray(received)
@@ -397,22 +444,18 @@ def estimate_transfer_function(
     B = Syx @ xp.linalg.inv(Sxx + reg_xx * eye)  # (nfft, C, C), H1 estimate
 
     logger.info(
-        "estimate_transfer_function (Welch H1): nfft=%d, n_win=%d, regularization=%.2e "
-        "[C=%d, N=%d, %s]",
+        "estimate_channel (Welch H1): nfft=%d, n_win=%d, regularization=%.2e "
+        "[C=%d, N=%d]",
         nfft,
         int(starts.shape[0]),
         regularization,
         C,
         N,
-        "taps" if num_taps is not None else "freq-response",
     )
-
-    if num_taps is None:
-        return B[:, 0, 0] if single else B
 
     # Centered, Hann-tapered impulse response, truncated to num_taps: lag 0 sits
     # at index num_taps // 2 for odd and even lengths alike.
-    n_taps = int(min(num_taps, nfft))
+    n_taps = nfft if num_taps is None else int(min(num_taps, nfft))
     b_t = xp.fft.fftshift(_fft.ifft(B, axis=0), axes=0)  # (nfft, C, C), lag axis 0
     center = nfft // 2
     half = n_taps // 2
@@ -422,5 +465,6 @@ def estimate_transfer_function(
     window = np.hanning(2 * half + 1)[:n_taps]
     taps = taps * xp.asarray(window)[:, None, None]
     if single:
-        return taps[:, 0, 0]  # (L,)
-    return xp.transpose(taps, (1, 2, 0))  # (C, C, L), matches zf_equalizer layout
+        return ChannelEstimate(taps[:, 0, 0], half, B[:, 0, 0])  # (L,), (nfft,)
+    # (C, C, L), the layout of correct_channel
+    return ChannelEstimate(xp.transpose(taps, (1, 2, 0)), half, B)

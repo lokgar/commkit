@@ -62,6 +62,24 @@ class TestApplyIQImbalance:
         assert out.dtype == xp.complex64
 
 
+@pytest.mark.parametrize(
+    "call",
+    [
+        lambda x: apply_iq_imbalance(
+            x, amplitude_imbalance_db=1.0, phase_imbalance_deg=3.0
+        ),
+        estimate_iq_imbalance,
+        lambda x: correct_iq_imbalance(x, Lowdin()),
+        lambda x: correct_iq_imbalance(x, IQImbalanceEstimate(1.0, 3.0)),
+    ],
+)
+def test_iq_functions_reject_real_samples(xp, call):
+    """Real samples have no Q branch: each IQ function raises naming them."""
+    x = xp.ones(64, dtype=xp.float32)
+    with pytest.raises(ValueError, match="samples must be complex"):
+        call(x)
+
+
 class TestIQSkew:
     """The time skew of apply_iq_imbalance: Q delayed against I."""
 
@@ -182,6 +200,19 @@ class TestSamplingClockOffset:
         err = y - xp.exp(2j * xp.pi * f * t)
         err_db = 10 * math.log10(float(xp.mean(xp.abs(err[30:-30]) ** 2)))
         assert err_db < -110.0
+
+    @pytest.mark.parametrize("dtype", ["complex64", "complex128"])
+    def test_accuracy_holds_to_the_end_of_a_long_record(self, xp, dtype):
+        """2^20 samples at 2000 ppm, a tone at 0.2 cycles per sample: over
+        the last sixteenth the error stays below -120 dB (measured -132.6
+        and -132.9 dB).  Instants formed in float32 lose 6e-8 of the
+        accumulated drift n·ε, 2000 samples here: -83.8 dB in complex64."""
+        n, ppm, f = 2**20, 2000.0, 0.2
+        x = xp.exp(2j * xp.pi * f * xp.arange(n)).astype(dtype)
+        y = apply_sampling_clock_offset(x, offset_ppm=ppm)
+        t = xp.arange(y.shape[0]) / (1 + ppm * 1e-6)
+        err = (y - xp.exp(2j * xp.pi * f * t))[-n // 16 : -30]
+        assert 10 * math.log10(float(xp.mean(xp.abs(err) ** 2))) < -120.0
 
     def test_symbols_drift_later_for_a_fast_clock(self, xp):
         """A band-limited pulse at input sample 8000 peaks near output sample

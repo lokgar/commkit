@@ -81,7 +81,10 @@ def apply_awgn(
     ``sps · mean(|x_c|²)``, the power summed over the ``sps`` samples of a
     symbol; zero padding adds no energy and no symbols, so it changes
     nothing.  ``Es/N0`` is then the SNR per symbol after a matched filter
-    and decimation, whatever the oversampling.
+    and decimation, whatever the oversampling.  On a frame Signal it is the
+    frame average, preamble, pilots and payload together, so the payload's
+    own Es/N0 can differ (see
+    :meth:`~commkit.core.SingleCarrierFrame.to_signal`).
 
     Parameters
     ----------
@@ -125,7 +128,7 @@ def apply_awgn(
     --------
     commkit.mapping.compute_llr : Takes the variance of the noise in the
         symbols, or the same ``esn0_db``.
-    commkit.metrics.estimate_noise_variance : Measures that variance.
+    commkit.metrics.noise_variance : Measures that variance.
 
     Examples
     --------

@@ -44,7 +44,7 @@ class TestConstruction:
         with pytest.raises(ValueError, match="integers in"):
             PolarCode(8, [9])
         with pytest.raises(ValueError, match="information positions"):
-            PolarCode(8, [5, 6, 7], crc=CRC.nr("6", 2))
+            PolarCode(8, [5, 6, 7], crc=CRC.nr("6", info_bits=2))
         with pytest.raises(TypeError, match="CRC"):
             PolarCode(8, [7], crc="6")
         with pytest.raises(ValueError, match="n must be"):

@@ -1,5 +1,6 @@
 """Tests for the metrics' metrics of Signals and their input resolution (metrics/_common.py)."""
 
+import dataclasses
 from typing import Any
 
 import numpy as np
@@ -8,6 +9,7 @@ import pytest
 from commkit import generate, metrics, multirate
 from commkit.impairments import apply_awgn
 from commkit.mapping import Constellation, compute_llr
+from tests.common.conversions import device_of
 
 
 class TestSignalMetricsIntegration:
@@ -167,3 +169,44 @@ class TestLowSNRScale:
         flipped = sig.replace(samples=-sig.samples)
         assert metrics.snr(flipped) == pytest.approx(-10 * np.log10(4 + nv), abs=0.15)
         assert metrics.evm(flipped) == pytest.approx(100 * np.sqrt(4 + nv), rel=0.02)
+
+
+class TestReferenceOnConstellation:
+    """review F1: ser and evm raise when the reference symbols are not points
+    of the decision constellation (a remapped record with its old reference),
+    where they used to report SER 0.75 and EVM 138 %."""
+
+    def _remapped(self, xp):
+        """Unipolar PAM-4 shifted to bipolar levels; the Signal takes the
+        bipolar constellation but keeps the unipolar reference."""
+        uni = Constellation.pam(4, unipolar=True)
+        sig = generate(uni, num_symbols=4000, symbol_rate=1e9, sps=1, rng=3)
+        sig = sig.to(device_of(xp))
+        bip = Constellation.pam(4)
+        mapped = xp.asarray(bip.points)[uni._nearest(sig.samples)]
+        return sig.replace(samples=mapped, constellation=bip)
+
+    def test_ser_raises(self, xp):
+        with pytest.raises(ValueError, match="not points of the decision"):
+            metrics.ser(self._remapped(xp))
+
+    def test_evm_raises(self, xp):
+        with pytest.raises(ValueError, match="not points of the decision"):
+            metrics.evm(self._remapped(xp))
+
+    def test_matching_reference_passes(self, xp):
+        """With the reference remapped too, both are exact."""
+        sig = self._remapped(xp)
+        ref = dataclasses.replace(sig.reference, symbols=sig.samples.copy())
+        sig = sig.replace(reference=ref)
+        assert metrics.ser(sig) == 0.0
+        assert metrics.evm(sig) < 1e-4
+
+    def test_rescaled_reference_passes(self, xp):
+        """A reference normalized to its measured power is a few 0.1 % off
+        the points: well inside the d_min/4 tolerance."""
+        c = Constellation.qam(16)
+        rng = np.random.default_rng(0)
+        ref = c.points[rng.integers(0, 16, 500)].astype(np.complex64)
+        ref = xp.asarray(ref / np.sqrt(np.mean(np.abs(ref) ** 2)))
+        assert metrics.ser(ref, ref, constellation=c) == 0.0

@@ -70,7 +70,9 @@ class TestDecoding:
     def test_noiseless(self, xp: Any, xpt: Any) -> None:
         code = TurboCode.lte(104)
         u = random_bits((4, 104), xp, seed=2)
-        res = decode(encode(u, code=code), code=code, method=TurboIterations(2))
+        res = decode(
+            encode(u, code=code), code=code, method=TurboIterations(max_iterations=2)
+        )
         xpt.assert_array_equal(res.bits, u)
 
     @staticmethod
@@ -96,6 +98,26 @@ class TestDecoding:
         xpt.assert_array_equal((res.llrs < 0).astype(np.int8), c)
         assert float(xp.abs(res.llrs).mean()) > 3 * float(xp.abs(llrs).mean())
 
+    def test_stops_once_the_decoders_agree(self, xp: Any) -> None:
+        """K = 1024 at Eb/N0 = 1.5 dB (LLR mean 1.88): every frame decodes,
+        in 2.8 iterations on average (measured; fixed 8 before), so the mean
+        stays below 4.  At -0.3 dB (mean 1.24) most frames fail and run all
+        8: a frame whose decoders disagree never stops.  Against fixed 8
+        iterations the FER was unchanged from K = 40 to 6144 (2^15 frames at
+        K = 128 and 2 dB: 121 failures against 115)."""
+        code = TurboCode.lte(1024)
+        u, _, llrs = self._llrs(code, 1.88, 64, xp, seed=8)
+        res = decode(llrs, code=code)
+        assert bool(xp.all(res.bits == u))
+        used = to_device(res.iterations, "cpu")
+        assert used.dtype == np.int32 and used.min() >= 1
+        assert used.mean() < 4.0, used.mean()
+        u, _, llrs = self._llrs(code, 1.24, 64, xp, seed=9)
+        res = decode(llrs, code=code)
+        failed = to_device(xp.any(res.bits != u, axis=1), "cpu")
+        assert failed.mean() > 0.5
+        assert np.median(to_device(res.iterations, "cpu")[failed]) == 8
+
     def test_soft_output_in_failing_frames(self, xp: Any, xpt: Any) -> None:
         """At Es/N0 = -6 dB most frames fail; the systematic LLRs still give
         the decisions (the second decoder's, deinterleaved)."""
@@ -109,7 +131,9 @@ class TestDecoding:
     def test_has_an_exit_curve(self) -> None:
         """As the outer code of a serial concatenation: I_E rises from 0 to 1
         (measured 0, 0.12, 0.98, 1, 1 at I_A = 0, 0.25, ..., 1)."""
-        curve = decoder_exit_curve(TurboCode.lte(40), num_blocks=200, points=5, rng=1)
+        curve = decoder_exit_curve(
+            TurboCode.lte(40), num_blocks=200, num_points=5, rng=1
+        )
         assert curve.extrinsic[0] < 0.05 and curve.extrinsic[-1] > 0.99
         assert np.all(np.diff(curve.extrinsic) >= 0)
 
@@ -183,7 +207,7 @@ class TestDecoding:
         with pytest.raises(TypeError, match="info_bits must be an integer"):
             TurboCode(True)
         assert TurboCode(np.int64(40)) == TurboCode(40)
-        with pytest.raises(ValueError, match="iterations"):
+        with pytest.raises(ValueError, match="max_iterations"):
             TurboIterations(0)
         with pytest.raises(ValueError, match="scale"):
             TurboIterations(scale=1.5)

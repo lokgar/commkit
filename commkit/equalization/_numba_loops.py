@@ -3,7 +3,8 @@
 The compiled CPU hot loops behind :func:`commkit.equalization.lms` and
 ``rls`` (with and without inline carrier-phase recovery), ``cma`` and ``rde``
 (blind and pilot-aided) and ``cs_block``, the cycle-slip scan of
-``block_lms``.  Imported on first use through the ``_get_numba_*`` getters
+``block_lms``; the cycle-slip recursion is the one of
+:func:`commkit.recovery.correct_cycle_slips`, through its shared steps.  Imported on first use through the ``_get_numba_*`` getters
 of the modules that call them (``_sequential/_dd.py``,
 ``_sequential/_blind.py``, ``_block/_dd.py``), so ``import commkit`` does
 not load Numba.
@@ -13,8 +14,9 @@ RLS update) as helpers that Numba inlines into each kernel before compiling
 it (``inline="always"``), so a helper compiles with its kernel's flags.
 Every array passed to an inlined helper is reference-counted once per call,
 so the per-symbol carrier recovery of :func:`cpr_loop` (one kernel for LMS
-and RLS) stays written out in it, cycle-slip step included: as helpers, the
-same steps cost 15-25% on the CPU.  It compiles without ``fastmath`` (the
+and RLS) keeps its buffer bookkeeping written out: it calls the cycle-slip
+steps of ``recovery/_numba_loops.py``, which take scalars only, rather than
+:func:`_cs_step` (+7% on a PLL-tracked LMS).  It compiles without ``fastmath`` (the
 S-fold unwrap rounds at the ±π boundary and the running sums must not be
 reassociated), except for its arithmetic over the taps and the BPS
 distances: those run in separate fast-math functions (``*_fm``,
@@ -32,6 +34,8 @@ from typing import Any
 
 import numba
 import numpy as np
+
+from ..recovery._numba_loops import cs_push, cs_repair
 
 _fast = numba.njit(cache=True, fastmath=True, nogil=True)
 _strict = numba.njit(cache=True, nogil=True)
@@ -229,75 +233,28 @@ def _bps_distances(y, phases_neg, constellation, sq_lev_min, sq_d_grid, sq_side,
 
 
 @_step
-def _cs_step(i, y_b, cs_buf_y, cs_buf_ptr, cs_buf_n, cs_stats, H, quantum, threshold):
+def _cs_step(i, y, cs_buf_y, cs_buf_ptr, cs_buf_n, cs_stats, quantum, threshold):
     """One cycle-slip decision for channel ``i``; returns the repaired phase.
 
-    The phase is predicted by a least-squares line through the last (up to
-    ``H``) repaired phases, in relative coordinates so that ``Sx`` and
-    ``Sxx`` are closed-form (``cs_stats[i] = [Sy, Sxy, -, -]``); a deviation
-    beyond ``threshold`` is repaired by whole multiples of ``quantum``.  The
-    first 10 phases are predicted by the last one.
+    :func:`~commkit.recovery._numba_loops.cs_repair` against the window of
+    up to ``H = cs_buf_y.shape[1]`` past repaired phases (the newest one
+    alone for the first min(10, H)), whose running sums ``cs_stats[i] = [Sy, Sxy,
+    -, -]`` :func:`~commkit.recovery._numba_loops.cs_push` updates.
     """
-    n_b = cs_buf_n[i]
+    H = cs_buf_y.shape[1]
+    n = cs_buf_n[i]
     ptr = cs_buf_ptr[i]
-    if n_b == 0:
-        phi_expected = y_b
-    elif n_b < np.int64(10):
-        last_pos = (ptr - np.int64(1) + np.int64(H)) % np.int64(H)
-        phi_expected = cs_buf_y[i, last_pos]
-    else:
-        Sy = cs_stats[i, 0]
-        Sxy = cs_stats[i, 1]
-        n_f = np.float64(n_b)
-        if n_b < np.int64(H):
-            Sx_c = n_f * (n_f - np.float64(1.0)) / np.float64(2.0)
-            Sxx_c = (
-                n_f
-                * (n_f - np.float64(1.0))
-                * (np.float64(2.0) * n_f - np.float64(1.0))
-                / np.float64(6.0)
-            )
-            denom = n_f * Sxx_c - Sx_c * Sx_c
-        else:
-            H_f = np.float64(H)
-            Sx_c = H_f * (H_f - np.float64(1.0)) / np.float64(2.0)
-            Sxx_c = (
-                H_f
-                * (H_f - np.float64(1.0))
-                * (np.float64(2.0) * H_f - np.float64(1.0))
-                / np.float64(6.0)
-            )
-            denom = H_f * Sxx_c - Sx_c * Sx_c
-        if np.abs(denom) > np.float64(1e-30):
-            slope = (n_f * Sxy - Sx_c * Sy) / denom
-            intercept = (Sy - slope * Sx_c) / n_f
-        else:
-            slope = np.float64(0.0)
-            intercept = Sy / n_f
-        phi_expected = slope * n_f + intercept
-
-    diff = y_b - phi_expected
-    k_slip = np.int64(np.round(diff / quantum))
-    if np.abs(diff) > threshold and k_slip != np.int64(0):
-        y_b = y_b - np.float64(k_slip) * quantum
-
-    # Update the circular buffer (relative coordinates: only y is kept).
-    write_pos = ptr % np.int64(H)
-    if n_b == np.int64(H):
-        old_y = cs_buf_y[i, write_pos]
-        H_f = np.float64(H)
-        old_Sy = cs_stats[i, 0]
-        # Sxy_new = Sxy_old - Sy_old + y_old + (H-1)*y_new
-        cs_stats[i, 1] = cs_stats[i, 1] - old_Sy + old_y + (H_f - np.float64(1.0)) * y_b
-        cs_stats[i, 0] = old_Sy - old_y + y_b
-    else:
-        cs_stats[i, 1] += np.float64(n_b) * y_b
-        cs_stats[i, 0] += y_b
-    cs_buf_y[i, write_pos] = y_b
+    last = cs_buf_y[i, (ptr - np.int64(1)) % np.int64(H)]
+    y = cs_repair(y, n, H, cs_stats[i, 0], cs_stats[i, 1], last, quantum, threshold)
+    slot = ptr % np.int64(H)
+    cs_stats[i, 0], cs_stats[i, 1] = cs_push(
+        n, H, cs_stats[i, 0], cs_stats[i, 1], cs_buf_y[i, slot], y
+    )
+    cs_buf_y[i, slot] = y
     cs_buf_ptr[i] = ptr + np.int64(1)
-    if n_b < np.int64(H):
-        cs_buf_n[i] = n_b + np.int64(1)
-    return y_b
+    if n < np.int64(H):
+        cs_buf_n[i] = n + np.int64(1)
+    return y
 
 
 # -----------------------------------------------------------------------------
@@ -426,7 +383,6 @@ def cpr_loop(
     cs_threshold,
     pll_phi,
     pll_freq,
-    cs_buf_x,
     cs_buf_y,
     cs_buf_ptr,
     cs_buf_n,
@@ -451,18 +407,17 @@ def cpr_loop(
     optional cycle-slip repair.
 
     The PLL state (pll_phi, pll_freq), the cycle-slip buffers
-    (cs_*; cs_buf_x unused) and the BPS window (bps_prev4,
+    (cs_*) and the BPS window (bps_prev4,
     bps_dist_buf, bps_running_sum, bps_dist_ptr) are updated in
     place for continuation; phase_out (N_sym, C) gets the phase.
     """
     C = W.shape[0]
     num_taps = W.shape[2]
     n_sym = y_out.shape[0]
-    M = len(constellation)
     B = len(bps_phases_neg)
-    H = cs_buf_x.shape[1]
     two_pi = np.float64(2.0 * np.pi)
     quantum = two_pi / np.float64(symmetry)
+    H = cs_buf_y.shape[1]
 
     N = C * num_taps
     X_wins = np.empty((C, num_taps), dtype=np.complex64)
@@ -516,41 +471,27 @@ def cpr_loop(
                     bps_dist_buf[i, slot, k] = d2_new[k]
             bps_dist_ptr[0] = bps_dist_ptr[0] + np.int64(1)
 
-            if bps_joint_channels:
-                best_k_joint = np.int32(0)
-                min_tot_joint = np.float64(1e300)
-                for k in range(B):
-                    metric_k = np.float64(0.0)
-                    for i in range(C):
-                        metric_k = metric_k + bps_running_sum[i, k]
-                    if metric_k < min_tot_joint:
-                        min_tot_joint = metric_k
-                        best_k_joint = k
-                # Raw argmin in [0, 2π/S); apply S-fold causal unwrap (S = symmetry)
-                raw4 = np.float64(bps_angles[best_k_joint]) * np.float64(symmetry)
-                for i in range(C):
-                    diff4 = raw4 - bps_prev4[i]
-                    diff4 = diff4 - np.float64(2.0 * np.pi) * np.round(
-                        diff4 / (np.float64(2.0 * np.pi))
-                    )
-                    bps_prev4[i] = bps_prev4[i] + diff4
-                    phi_hat_bps[i] = bps_prev4[i] / np.float64(symmetry)
-            else:
-                for i in range(C):
+            # The argmin of each channel's metric, or of their sum for a
+            # shared LO (found once, at i = 0), then the S-fold causal
+            # unwrap of each channel (S = symmetry).
+            best_k = np.int32(0)
+            for i in range(C):
+                if i == 0 or not bps_joint_channels:
                     best_k = np.int32(0)
                     min_tot = np.float64(1e300)
                     for k in range(B):
-                        if bps_running_sum[i, k] < min_tot:
-                            min_tot = bps_running_sum[i, k]
+                        metric_k = np.float64(bps_running_sum[i, k])
+                        if bps_joint_channels:
+                            for j in range(1, C):
+                                metric_k = metric_k + bps_running_sum[j, k]
+                        if metric_k < min_tot:
+                            min_tot = metric_k
                             best_k = k
-                    # Raw argmin in [0, 2π/S); apply S-fold causal unwrap (S = symmetry)
-                    raw4 = np.float64(bps_angles[best_k]) * np.float64(symmetry)
-                    diff4 = raw4 - bps_prev4[i]
-                    diff4 = diff4 - np.float64(2.0 * np.pi) * np.round(
-                        diff4 / (np.float64(2.0 * np.pi))
-                    )
-                    bps_prev4[i] = bps_prev4[i] + diff4
-                    phi_hat_bps[i] = bps_prev4[i] / np.float64(symmetry)
+                raw4 = np.float64(bps_angles[best_k]) * np.float64(symmetry)
+                diff4 = raw4 - bps_prev4[i]
+                diff4 = diff4 - two_pi * np.round(diff4 / two_pi)
+                bps_prev4[i] = bps_prev4[i] + diff4
+                phi_hat_bps[i] = bps_prev4[i] / np.float64(symmetry)
 
         # Training symbols anchor the BPS phase: while they last, the
         # phase is the angle of sum(y_raw conj(d)) over the last K of
@@ -588,76 +529,22 @@ def cpr_loop(
 
             # -- Cycle-slip correction ------------------------------
             if cs_enabled:
+                # _cs_step written out: its array arguments would be
+                # reference-counted per symbol (+7 % on a PLL-tracked LMS).
                 n_b = cs_buf_n[i]
-                ptr = cs_buf_ptr[i]
-                y_b = np.float64(phi_hat)
-
-                if n_b == 0:
-                    phi_corr = phi_hat
-                else:
-                    if n_b < np.int64(10):
-                        last_pos = (ptr - np.int64(1) + np.int64(H)) % np.int64(H)
-                        phi_expected = cs_buf_y[i, last_pos]
-                    else:
-                        # cs_stats layout: [0]=Sy, [1]=Sxy (relative coords)
-                        Sy = cs_stats[i, 0]
-                        Sxy = cs_stats[i, 1]
-                        n_f = np.float64(n_b)
-                        if n_b < np.int64(H):
-                            Sx_c = n_f * (n_f - np.float64(1.0)) / np.float64(2.0)
-                            Sxx_c = (
-                                n_f
-                                * (n_f - np.float64(1.0))
-                                * (np.float64(2.0) * n_f - np.float64(1.0))
-                                / np.float64(6.0)
-                            )
-                            denom = n_f * Sxx_c - Sx_c * Sx_c
-                        else:
-                            H_f = np.float64(H)
-                            Sx_c = H_f * (H_f - np.float64(1.0)) / np.float64(2.0)
-                            Sxx_c = (
-                                H_f
-                                * (H_f - np.float64(1.0))
-                                * (np.float64(2.0) * H_f - np.float64(1.0))
-                                / np.float64(6.0)
-                            )
-                            denom = H_f * Sxx_c - Sx_c * Sx_c
-                        if np.abs(denom) > np.float64(1e-30):
-                            slope = (n_f * Sxy - Sx_c * Sy) / denom
-                            intercept = (Sy - slope * Sx_c) / n_f
-                        else:
-                            slope = np.float64(0.0)
-                            intercept = Sy / n_f
-                        phi_expected = slope * n_f + intercept
-
-                    diff = y_b - phi_expected
-                    k_slip = np.int64(np.round(diff / quantum))
-                    if np.abs(diff) > np.float64(cs_threshold) and k_slip != np.int64(
-                        0
-                    ):
-                        y_b = y_b - np.float64(k_slip) * quantum
-                    phi_corr = y_b
-
-                # Update circular buffer - relative coords, only y needed
-                write_pos = ptr % np.int64(H)
-                if n_b == np.int64(H):
-                    old_y = cs_buf_y[i, write_pos]
-                    H_f = np.float64(H)
-                    old_Sy = cs_stats[i, 0]
-                    # Sxy_new = Sxy_old - Sy_old + y_old + (H-1)*y_new
-                    cs_stats[i, 1] = (
-                        cs_stats[i, 1]
-                        - old_Sy
-                        + old_y
-                        + (H_f - np.float64(1.0)) * phi_corr
-                    )
-                    cs_stats[i, 0] = old_Sy - old_y + phi_corr
-                else:
-                    n_b_f = np.float64(n_b)
-                    cs_stats[i, 1] += n_b_f * phi_corr
-                    cs_stats[i, 0] += phi_corr
-                cs_buf_y[i, write_pos] = phi_corr
-                cs_buf_ptr[i] = ptr + np.int64(1)
+                slot = cs_buf_ptr[i] % np.int64(H)
+                prev = slot - np.int64(1) if slot > 0 else np.int64(H - 1)
+                Sy = cs_stats[i, 0]
+                Sxy = cs_stats[i, 1]
+                phi_corr = cs_repair(
+                    np.float64(phi_hat), n_b, H, Sy, Sxy,
+                    cs_buf_y[i, prev], quantum, np.float64(cs_threshold),
+                )  # fmt: skip
+                cs_stats[i, 0], cs_stats[i, 1] = cs_push(
+                    n_b, H, Sy, Sxy, cs_buf_y[i, slot], phi_corr
+                )
+                cs_buf_y[i, slot] = phi_corr
+                cs_buf_ptr[i] += np.int64(1)
                 if n_b < np.int64(H):
                     cs_buf_n[i] = n_b + np.int64(1)
             else:
@@ -679,30 +566,8 @@ def cpr_loop(
         for i in range(C):
             if idx < n_train:
                 d_i = training[i, idx]
-            elif sq_side > np.int32(0):
-                ir = np.int32(np.round((y_fin[i].real - sq_lev_min) / sq_d_grid))
-                if ir < np.int32(0):
-                    ir = np.int32(0)
-                if ir >= sq_side:
-                    ir = sq_side - np.int32(1)
-                ii = np.int32(np.round((y_fin[i].imag - sq_lev_min) / sq_d_grid))
-                if ii < np.int32(0):
-                    ii = np.int32(0)
-                if ii >= sq_side:
-                    ii = sq_side - np.int32(1)
-                nr = sq_lev_min + np.float32(ir) * sq_d_grid
-                ni = sq_lev_min + np.float32(ii) * sq_d_grid
-                d_i = np.complex64(nr + ni * np.complex64(1j))
             else:
-                min_dist = np.float32(1e38)
-                min_idx = 0
-                for k in range(M):
-                    dv = y_fin[i] - constellation[k]
-                    dist = dv.real * dv.real + dv.imag * dv.imag
-                    if dist < min_dist:
-                        min_dist = dist
-                        min_idx = k
-                d_i = constellation[min_idx]
+                d_i = _slice(y_fin[i], constellation, sq_lev_min, sq_d_grid, sq_side)
             d_sym[i] = d_i
             e_clean[i] = d_i - y_fin[i]
             e_out[idx, i] = e_clean[i]
@@ -819,20 +684,17 @@ def rde_loop(
 def cs_block(
     phi_blk,
     phi_corr,
-    cs_buf_x,
     cs_buf_y,
     cs_buf_ptr,
     cs_buf_n,
     cs_stats,
-    b_start,
     quantum,
     threshold,
-    cs_H,
 ):
     """Repair the cycle slips of one equalizer block, symbol by symbol.
 
     ``phi_blk`` ``(C, B)`` float64 into ``phi_corr``; the buffers as in
-    :func:`cpr_loop` (``cs_buf_x`` and ``b_start`` unused).
+    :func:`cpr_loop`.
     """
     for ci in range(phi_blk.shape[0]):
         for i in range(phi_blk.shape[1]):
@@ -843,7 +705,6 @@ def cs_block(
                 cs_buf_ptr,
                 cs_buf_n,
                 cs_stats,
-                cs_H,
                 quantum,
                 threshold,
             )

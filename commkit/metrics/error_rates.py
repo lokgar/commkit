@@ -21,6 +21,7 @@ from ._common import (
     _log_per_channel,
     _paired,
     _reference,
+    _require_points,
     _skip,
 )
 
@@ -97,7 +98,7 @@ def ber(
     if isinstance(out, float):
         logger.info("BER: %.2e (%s/%s errors)", out, int(errors), total)
     else:
-        _log_per_channel("BER Ch%s: %.2e (%s/%s errors)", out, errors, extra=(total,))
+        _log_per_channel("BER", "%.2e (%s/%s errors)", out, errors, extra=(total,))
     return out
 
 
@@ -177,7 +178,7 @@ def fer(
     if isinstance(out, float):
         logger.info("FER: %.2e (%s/%s blocks)", out, int(errors), blocks)
     else:
-        _log_per_channel("FER Ch%s: %.2e (%s/%s blocks)", out, errors, extra=(blocks,))
+        _log_per_channel("FER", "%.2e (%s/%s blocks)", out, errors, extra=(blocks,))
     return out
 
 
@@ -191,8 +192,9 @@ def ser(
     """Symbol error rate of minimum-distance hard decisions.
 
     The received and the reference symbols are both decided against the
-    constellation, so rounding in the reference does not count.  SER does
-    not depend on the bit labeling.
+    constellation, so rounding in the reference does not count, but a
+    reference that is not on the constellation raises.  SER does not depend
+    on the bit labeling.
 
     Parameters
     ----------
@@ -217,7 +219,8 @@ def ser(
     Raises
     ------
     ValueError
-        On a missing reference or constellation, a shape mismatch, an empty
+        On a missing reference or constellation, reference symbols that are
+        not points of the constellation, a shape mismatch, an empty
         selection, or a frame Signal or one not at one sample per symbol.
     """
     name = "ser()"
@@ -230,11 +233,12 @@ def ser(
 
     dec_rx = c._nearest(rx.reshape(-1)).reshape(rx.shape)
     dec_tx = c._nearest(tx.reshape(-1)).reshape(tx.shape)
+    _require_points(tx, c, xp, name, dec_tx)
     errors = to_device(xp.sum(dec_rx != dec_tx, axis=-1), "cpu")  # logged too
     total = rx.shape[-1]
     out = to_report_scalar(errors / total)
     if isinstance(out, float):
         logger.info("SER: %.2e (%s/%s errors)", out, int(errors), total)
     else:
-        _log_per_channel("SER Ch%s: %.2e (%s/%s errors)", out, errors, extra=(total,))
+        _log_per_channel("SER", "%.2e (%s/%s errors)", out, errors, extra=(total,))
     return out

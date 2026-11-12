@@ -6,14 +6,12 @@ import numpy as np
 import pytest
 
 from commkit import mapping
-from commkit.mapping.constellation import _slicer_params
 from commkit.mapping.gray import (
     _gray_ask,
     _gray_points,
     _gray_psk,
     _gray_qam_cross,
     _nearest_index,
-    _unpack_bits,
 )
 
 
@@ -57,20 +55,6 @@ class TestGrayCode:
         result of all later calls."""
         with pytest.raises(ValueError, match="read-only"):
             cached()[0] = 5
-
-    def test_unpack_bits_matches_manual_shift(self, xp: Any, xpt: Any) -> None:
-        """_unpack_bits(indices, k) must match the direct bit-shift idiom it replaced."""
-        k = 4
-        indices = xp.arange(2**k, dtype=xp.int32)
-        indices_np = np.arange(2**k, dtype=np.int32)
-        expected = (
-            (indices_np[:, None] >> np.arange(k - 1, -1, -1, dtype=np.int32)) & 1
-        ).astype(np.int8)
-
-        result = _unpack_bits(indices, k)
-        assert result.dtype == xp.int8 or result.dtype == np.int8
-        assert result.shape == (2**k, k)
-        xpt.assert_array_equal(result, xp.asarray(expected))
 
 
 class TestGrayConstellation:
@@ -130,37 +114,8 @@ class TestGrayConstellation:
             mapping.gray._gray_points("custom-unknown", 4)
 
 
-class TestConstellationSlicing:
-    """Tests for square-QAM slicing parameters and nearest-point indexing."""
-
-    def test_slicer_params_square_qam(self) -> None:
-        """16-QAM is square-sliceable: side=4, uniform lev_min/step."""
-        c = mapping.Constellation.qam(16)
-        side, lev_min, step = _slicer_params(c)
-        assert side == 4
-        levels = np.unique(np.round(c.points.real, 6))
-        assert np.isclose(lev_min, levels[0])
-        assert np.isclose(step, levels[1] - levels[0])
-
-    @pytest.mark.parametrize(
-        ("re", "im"),
-        [
-            ([-3.0, -1.0, 1.0, 3.0], [-6.0, -2.0, 2.0, 6.0]),  # other imag grid
-            ([-3.0, -1.0, 1.0, 5.0], [-3.0, -1.0, 1.0, 5.0]),  # uneven levels
-        ],
-        ids=["rectangular", "uneven"],
-    )
-    def test_slicer_params_reject_non_square_lattices(self, re, im) -> None:
-        """sqrt(M) levels per axis are not enough: a slicer that snaps both
-        axes to one grid needs the same uniform levels on both."""
-        points = (np.array(re)[:, None] + 1j * np.array(im)[None, :]).ravel()
-        assert _slicer_params(mapping.Constellation(points))[0] == 0
-
-    def test_slicer_params_non_square(self) -> None:
-        """PSK, cross QAM and no constellation fall back to side=0."""
-        assert _slicer_params(mapping.Constellation.psk(8))[0] == 0
-        assert _slicer_params(mapping.Constellation.qam(32))[0] == 0
-        assert _slicer_params(None) == (0, np.float32(0.0), np.float32(1.0))
+class TestNearestIndex:
+    """Nearest-point indexing."""
 
     def test_nearest_constellation_index_matches_unchunked_argmin(
         self, xp: Any, xpt: Any

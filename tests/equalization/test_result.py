@@ -25,7 +25,6 @@ TRAINED = {"lms", "rls", "block_lms"}
 SEQUENTIAL = {"lms", "rls", "cma", "rde"}
 
 
-@pytest.mark.allow_warnings
 @pytest.mark.parametrize("name", ["lms", "rls", "cma", "rde", "block_lms"])
 @pytest.mark.parametrize("num_channels", [1, 2])
 def test_output_is_rebuilt_from_raw_samples(xp, name, num_channels):

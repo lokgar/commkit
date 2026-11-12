@@ -223,7 +223,7 @@ class TestPostFEC:
             esn0_db=12.0,
             rng=4,
         ).to("gpu" if xp is not np else "cpu")
-        nv = metrics.estimate_noise_variance(sig)
+        nv = metrics.noise_variance(sig)
         assert isinstance(nv, float)
         assert nv == pytest.approx(10 ** (-metrics.snr(sig) / 10), rel=1e-9)
         assert nv == pytest.approx(10**-1.2, rel=0.05)

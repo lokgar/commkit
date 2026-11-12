@@ -15,7 +15,7 @@ from ...backend import ArrayType, to_device
 from ...core._signal_adapter import adapt_signal, require_integer_sps
 from ...core.signal import Signal
 from ...logger import logger
-from ...mapping.constellation import _slicer_params
+from ...mapping._lattice import slicer_params
 from ...math import _unit_phasor
 from ...recovery import BPS, CycleSlip
 from .._common import _cpr_symmetry
@@ -113,7 +113,6 @@ class _BlockCarrier:
     prev4: np.ndarray
     offset4: np.ndarray
     d2_hist: np.ndarray
-    cs_buf_x: np.ndarray
     cs_buf_y: np.ndarray
     cs_buf_ptr: np.ndarray
     cs_buf_n: np.ndarray
@@ -144,7 +143,6 @@ class _BlockBps:
     symmetry: int  # S: candidates over [0, 2π/S), S-fold unwrap
     quantum: float
     threshold: float
-    cs_buf_x: np.ndarray
     cs_buf_y: Any
     cs_buf_ptr: Any
     cs_buf_n: Any
@@ -160,7 +158,6 @@ class _BlockBps:
             prev4=to_device(self.prev4, "cpu").copy(),
             offset4=to_device(self.offset4, "cpu").copy(),
             d2_hist=to_device(self.d2_hist, "cpu").copy(),
-            cs_buf_x=self.cs_buf_x.copy(),
             cs_buf_y=to_device(self.cs_buf_y, "cpu").copy(),
             cs_buf_ptr=to_device(self.cs_buf_ptr, "cpu").copy(),
             cs_buf_n=to_device(self.cs_buf_n, "cpu").copy(),
@@ -221,7 +218,6 @@ class _BlockBps:
         self,
         y_block: ArrayType,
         slicer: _Slicer,
-        b_start: int,
         xp: Any,
         d_train: ArrayType | None = None,
     ) -> tuple[ArrayType, ArrayType]:
@@ -307,15 +303,12 @@ class _BlockBps:
                 _get_numba_cs_block()(
                     phi_blk_np,
                     phi_corr_np,
-                    self.cs_buf_x,
                     self.cs_buf_y,
                     self.cs_buf_ptr,
                     self.cs_buf_n,
                     self.cs_stats,
-                    b_start,
                     float(self.quantum),
                     float(self.threshold),
-                    self.cs_H,
                 )
                 phi_corr = xp.asarray(phi_corr_np)
             # Carry the slip correction into the unwrap accumulator.
@@ -534,7 +527,7 @@ def block_lms(
        same.
     """
     signal_adapter = adapt_signal(samples, function_name="block_lms()")
-    samples = signal_adapter.array
+    x = signal_adapter.array
     sig = signal_adapter.signal
     sps = require_integer_sps(signal_adapter.resolve_fact("sps", sps), "block_lms()")
     constellation = signal_adapter.resolve_choice("constellation", constellation)
@@ -546,7 +539,7 @@ def block_lms(
         )
 
     run = _prepare_block(
-        samples,
+        x,
         equalizer="block_lms",
         sps=sps,
         num_taps=num_taps,
@@ -570,7 +563,7 @@ def block_lms(
             "constellation= or a Signal that has one)."
         )
     constellation_np = np.ascontiguousarray(constellation.points, dtype=np.complex64)
-    sq_side, sq_lev_min, sq_d_grid = _slicer_params(constellation)
+    sq_side, sq_lev_min, sq_d_grid = slicer_params(constellation)
     slicer = _Slicer(
         constellation=xp.asarray(constellation_np),
         side=sq_side,
@@ -687,7 +680,7 @@ def block_lms(
             d_train = training[:, b_start : b_start + n_train_blk]
 
         if bps is not None:
-            phi_c, phi_traj = bps.phase(y_block, slicer, b_start, xp, d_train)
+            phi_c, phi_traj = bps.phase(y_block, slicer, xp, d_train)
             rot = _unit_phasor(-phi_c, xp.complex64, xp)  # (C, B), phi_c wrapped
             y_rot = y_block * rot
             assert phi_ws is not None
@@ -805,7 +798,6 @@ def _block_bps(
         cs_H = carrier.cs_H
         prev4 = carrier.prev4.copy()
         offset4 = carrier.offset4.copy()
-        cs_buf_x = carrier.cs_buf_x.copy()
         cs_buf_y = carrier.cs_buf_y.copy()
         cs_buf_ptr = carrier.cs_buf_ptr.copy()
         cs_buf_n = carrier.cs_buf_n.copy()
@@ -815,7 +807,6 @@ def _block_bps(
         cs_H = min(history, n_sym)
         prev4 = np.zeros(C, dtype=np.float64)
         offset4 = np.zeros(C, dtype=np.float64)
-        cs_buf_x = np.zeros((C, cs_H), dtype=np.float64)
         cs_buf_y = np.zeros((C, cs_H), dtype=np.float64)
         cs_buf_ptr = np.zeros(C, dtype=np.int64)
         cs_buf_n = np.zeros(C, dtype=np.int64)
@@ -836,7 +827,6 @@ def _block_bps(
         symmetry=symmetry,
         quantum=float(np.float64(2.0 * np.pi / symmetry)),
         threshold=threshold,
-        cs_buf_x=cs_buf_x,
         cs_buf_y=cs_buf_y,
         cs_buf_ptr=cs_buf_ptr,
         cs_buf_n=cs_buf_n,

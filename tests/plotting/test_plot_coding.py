@@ -228,7 +228,7 @@ class TestPlotParityCheck:
         plt.close("all")
 
     def test_large_matrix_marks_each_edge(self) -> None:
-        code = LDPCCode.dvbs2("1/2", "short")
+        code = LDPCCode.dvbs2("1/2", frame="short")
         _, (ax_h, _) = plot_parity_check(code)
         (marks,) = ax_h.get_lines()
         cols, rows = marks.get_data()
@@ -261,7 +261,7 @@ class TestPlotExitChart:
 
     def test_draws_the_chart(self) -> None:
         chart = exit_chart(
-            *ldpc_exit_curves(LDPCCode.dvbs2("1/2", "short"), channel_mi=0.55)
+            *ldpc_exit_curves(LDPCCode.dvbs2("1/2", frame="short"), channel_mi=0.55)
         )
         _, ax = plot_exit_chart(chart)
         first, second, trajectory = ax.get_lines()

@@ -9,6 +9,7 @@ followed by ``& 1``.  Used by every binary linear code in
 :mod:`commkit.coding` (encoding, syndromes, parity checks).
 """
 
+import functools
 from typing import Any
 
 import numpy as np
@@ -175,8 +176,10 @@ def matmul_mod2(a: ArrayType, b: ArrayType) -> ArrayType:
     return out.reshape(*lead, b.shape[1])
 
 
+@functools.cache
 def _mod2_kernel() -> Any:
-    """CuPy kernel: exact float32 sums to their parity, written as int8."""
+    """CuPy kernel: exact float32 sums to their parity, written as int8
+    (built once per process)."""
     import cupy as cp
 
     return cp.ElementwiseKernel(

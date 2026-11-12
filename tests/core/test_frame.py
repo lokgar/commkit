@@ -113,7 +113,27 @@ class TestSingleCarrierFrameBasics:
         )
         assert drawn.payload_rng == int(np.random.default_rng(5).integers(2**63))
         with pytest.raises(ValueError, match="payload_rng"):
-            SingleCarrierFrame(payload_rng=-1)
+            SingleCarrierFrame(payload_num_symbols=64, payload_rng=-1)
+
+    def test_pilot_rng(self) -> None:
+        """pilot_rng seeds the pilots like payload_rng the payload: the
+        default is fixed, another seed changes them, a generator is drawn
+        once and kept as an integer."""
+        kw = dict(payload_num_symbols=63, pilot_pattern="comb", pilot_period=4)
+        a, b = SingleCarrierFrame(**kw), SingleCarrierFrame(**kw)
+        np.testing.assert_array_equal(a.pilot_symbols, b.pilot_symbols)
+        other = SingleCarrierFrame(**kw, pilot_rng=2)
+        assert not np.array_equal(other.pilot_symbols, a.pilot_symbols)
+        drawn = SingleCarrierFrame(**kw, pilot_rng=np.random.default_rng(5))
+        assert drawn.pilot_rng == int(np.random.default_rng(5).integers(2**63))
+        with pytest.raises(ValueError, match="pilot_rng"):
+            SingleCarrierFrame(**kw, pilot_rng=-1)
+
+    def test_payload_length_is_required(self) -> None:
+        """A frame without payload_num_symbols or payload_blocks raises
+        instead of defaulting to 1000 symbols."""
+        with pytest.raises(ValueError, match="payload length"):
+            SingleCarrierFrame()
 
     def test_single_stream_preamble_is_broadcast(self) -> None:
         """A one-stream Barker preamble starts every stream of a MIMO frame."""
@@ -172,22 +192,41 @@ class TestSingleCarrierFrameStructureMap:
         _, body_num_symbols = frame._generate_pilot_mask()
         total_num_symbols = 2 + body_num_symbols + 5
 
-        assert len(struct["preamble"]) == total_num_symbols
-        assert xp.sum(struct["preamble"]) == 2
-        assert xp.sum(struct["pilots"]) > 0
-        assert xp.sum(struct["payload"]) == 6
-        assert xp.sum(struct["guard"]) == 5
+        assert len(struct.preamble) == total_num_symbols
+        assert xp.sum(struct.preamble) == 2
+        assert xp.sum(struct.pilots) > 0
+        assert xp.sum(struct.payload) == 6
+        assert xp.sum(struct.guard) == 5
 
         sps = 4
         struct_s = frame.get_structure_map(
             unit="samples", sps=sps, include_preamble=True
         )
-        assert len(struct_s["preamble"]) == total_num_symbols * sps
-        assert xp.sum(struct_s["preamble"]) == 2 * sps
+        assert len(struct_s.preamble) == total_num_symbols * sps
+        assert xp.sum(struct_s.preamble) == 2 * sps
 
         assert frame.pilot_mask.shape == (frame.num_symbols,)
-        assert (frame.pilot_mask == struct["pilots"]).all()
-        assert (frame.payload_mask == struct["payload"]).all()
+        assert (frame.pilot_mask == struct.pilots).all()
+        assert (frame.payload_mask == struct.payload).all()
+
+    @pytest.mark.parametrize("guard_type", ["zero", "cp"])
+    def test_pilot_indices_locate_the_pilot_symbols(self, guard_type: str) -> None:
+        """Body symbol ``indices[k]`` (without the preamble) is pilot ``k``,
+        and with the preamble the indices shift by the preamble (and a
+        cyclic prefix) in front of the body."""
+        frame = SingleCarrierFrame(
+            payload_num_symbols=42,
+            preamble=Preamble(sequence_type="barker", num_symbols=13),
+            pilot_pattern="comb",
+            pilot_period=4,
+            guard_type=guard_type,
+            guard_num_symbols=3,
+        )
+        body = frame.pilot_indices(include_preamble=False)
+        np.testing.assert_array_equal(frame.body_symbols[body], frame.pilot_symbols)
+        offset = 13 + (3 if guard_type == "cp" else 0)
+        np.testing.assert_array_equal(frame.pilot_indices(), body + offset)
+        assert SingleCarrierFrame(payload_num_symbols=8).pilot_indices().size == 0
 
     def test_sc_frame_structure_map_cp(self, xp: Any) -> None:
         """Verify get_structure_map with Cyclic Prefix (CP) guard interval."""
@@ -195,20 +234,20 @@ class TestSingleCarrierFrameStructureMap:
             payload_num_symbols=10, guard_type="cp", guard_num_symbols=5
         )
         struct = frame.get_structure_map(unit="symbols", include_preamble=True)
-        assert struct["guard"][0]
-        assert struct["guard"][4]
-        assert not struct["guard"][5]
+        assert struct.guard[0]
+        assert struct.guard[4]
+        assert not struct.guard[5]
 
     def test_structure_map_default_no_preamble_no_guard(self, xp: Any) -> None:
         """Verify default behavior: no preamble, zero guard."""
         frame = SingleCarrierFrame(payload_num_symbols=100)
         struct = frame.get_structure_map(include_preamble=False)
 
-        assert "preamble" not in struct
-        assert "guard" in struct
-        assert len(struct["payload"]) == 100
-        assert xp.sum(struct["payload"]) == 100
-        assert xp.sum(struct["guard"]) == 0
+        assert struct.preamble is None
+        assert struct.guard is not None
+        assert len(struct.payload) == 100
+        assert xp.sum(struct.payload) == 100
+        assert xp.sum(struct.guard) == 0
 
     def test_structure_map_include_preamble(self, xp: Any) -> None:
         """Verify explicit include_preamble=True in structure map."""
@@ -216,10 +255,10 @@ class TestSingleCarrierFrameStructureMap:
         frame = SingleCarrierFrame(payload_num_symbols=100, preamble=preamble)
         struct = frame.get_structure_map(include_preamble=True)
 
-        assert "preamble" in struct
-        assert len(struct["preamble"]) == 113
-        assert xp.sum(struct["preamble"]) == 13
-        assert xp.sum(struct["payload"]) == 100
+        assert struct.preamble is not None
+        assert len(struct.preamble) == 113
+        assert xp.sum(struct.preamble) == 13
+        assert xp.sum(struct.payload) == 100
 
     def test_structure_map_no_preamble_with_zero_guard(self, xp: Any) -> None:
         """Verify behavior with zero guard when preamble is excluded."""
@@ -228,11 +267,11 @@ class TestSingleCarrierFrameStructureMap:
         )
         struct = frame.get_structure_map(include_preamble=False)
 
-        assert "preamble" not in struct
-        assert "guard" in struct
-        assert len(struct["payload"]) == 120
-        assert xp.sum(struct["payload"]) == 100
-        assert xp.sum(struct["guard"]) == 20
+        assert struct.preamble is None
+        assert struct.guard is not None
+        assert len(struct.payload) == 120
+        assert xp.sum(struct.payload) == 100
+        assert xp.sum(struct.guard) == 20
 
     def test_structure_map_no_preamble_with_cp_guard(self, xp: Any) -> None:
         """Verify behavior with CP guard when preamble is excluded."""
@@ -241,10 +280,11 @@ class TestSingleCarrierFrameStructureMap:
         )
         struct = frame.get_structure_map(include_preamble=False)
 
-        assert "preamble" not in struct
-        assert "guard" not in struct
-        assert len(struct["payload"]) == 100
-        assert xp.sum(struct["payload"]) == 100
+        assert struct.preamble is None
+        assert struct.guard is None
+        assert not struct.payload.flags.writeable
+        assert len(struct.payload) == 100
+        assert xp.sum(struct.payload) == 100
 
     def test_structure_map_with_pilots_no_preamble(self, xp: Any) -> None:
         """Verify pilot mask is correct when preamble is excluded."""
@@ -253,9 +293,9 @@ class TestSingleCarrierFrameStructureMap:
         )
         struct = frame.get_structure_map()
 
-        assert len(struct["pilots"]) == 20
-        assert xp.sum(struct["pilots"]) == 10
-        assert xp.sum(struct["payload"]) == 10
+        assert len(struct.pilots) == 20
+        assert xp.sum(struct.pilots) == 10
+        assert xp.sum(struct.payload) == 10
 
     def test_structure_map_samples_unit(self, xp: Any) -> None:
         """Verify unit='samples' with include_preamble=False."""
@@ -263,8 +303,8 @@ class TestSingleCarrierFrameStructureMap:
         sps = 4
         struct = frame.get_structure_map(unit="samples", sps=sps)
 
-        assert len(struct["payload"]) == 10 * sps
-        assert xp.sum(struct["payload"]) == 10 * sps
+        assert len(struct.payload) == 10 * sps
+        assert xp.sum(struct.payload) == 10 * sps
 
 
 class TestSingleCarrierFramePilots:
@@ -630,7 +670,7 @@ class TestExtractPayload:
         ):
             frame = SingleCarrierFrame(
                 preamble=Preamble(sequence_type="zc", num_symbols=31),
-                **{"guard_num_symbols": 8, **kwargs},
+                **{"guard_num_symbols": 8, "payload_num_symbols": 1000, **kwargs},
             )
             sig = frame.to_signal(sps=2, symbol_rate=1e6)
             assert sig.samples.shape[-1] == 2 * frame.num_symbols

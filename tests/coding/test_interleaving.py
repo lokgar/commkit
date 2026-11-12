@@ -11,7 +11,7 @@ from commkit.coding import Interleaver, deinterleave, interleave
 
 def test_block_reads_columns(xp: Any, xpt: Any) -> None:
     """Written row by row into 2 x 3, read column by column."""
-    out = interleave(xp.arange(12), interleaver=Interleaver.block(2, 3))
+    out = interleave(xp.arange(12), interleaver=Interleaver.block(rows=2, columns=3))
     xpt.assert_array_equal(out, xp.asarray([0, 3, 1, 4, 2, 5, 6, 9, 7, 10, 8, 11]))
 
 
@@ -35,7 +35,7 @@ def test_random_is_seeded() -> None:
 
 def test_spreads_bursts() -> None:
     """A burst of `rows` adjacent errors lands in `rows` different rows."""
-    pi = Interleaver.block(4, 25)
+    pi = Interleaver.block(rows=4, columns=25)
     burst = np.zeros(100, dtype=np.int8)
     burst[40:44] = 1
     spread = to_device(deinterleave(burst, interleaver=pi), "cpu")
@@ -49,13 +49,15 @@ def test_validation(xp: Any) -> None:
     with pytest.raises(ValueError, match="1-D integer"):
         Interleaver([0.0, 1.0])
     with pytest.raises(ValueError, match="rows"):
-        Interleaver.block(0, 3)
+        Interleaver.block(rows=0, columns=3)
     with pytest.raises(ValueError, match="length"):
         Interleaver.random(0)
     with pytest.raises(ValueError, match="multiple"):
-        interleave(xp.zeros(7), interleaver=Interleaver.block(2, 2))
+        interleave(xp.zeros(7), interleaver=Interleaver.block(rows=2, columns=2))
     with pytest.raises(ValueError, match="shape"):
-        interleave(xp.zeros((2, 2, 4)), interleaver=Interleaver.block(2, 2))
+        interleave(
+            xp.zeros((2, 2, 4)), interleaver=Interleaver.block(rows=2, columns=2)
+        )
     with pytest.raises(TypeError, match="Interleaver"):
         interleave(xp.zeros(4), interleaver=[1, 0, 2, 3])
-    assert repr(Interleaver.block(2, 2)) == "Interleaver(length=4)"
+    assert repr(Interleaver.block(rows=2, columns=2)) == "Interleaver(length=4)"

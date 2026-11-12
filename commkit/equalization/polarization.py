@@ -1,15 +1,17 @@
-"""Pilot-tone polarization demultiplexing.
+"""Polarization demultiplexing.
 
-Each transmitted stream carries a CW pilot tone at its own frequency.
-:func:`estimate_polarization_tones` reads the unmixing (inverse Jones)
-matrix from the tones, once for the record or tracked over time, as a
-:class:`JonesTrack`; :func:`correct_polarization` applies it.
+:func:`estimate_polarization` reads the unmixing (inverse Jones) matrix, a
+:class:`PolarizationEstimate`, with the method :class:`PolarizationTones`,
+which returns a :class:`PolarizationTonesEstimate`: each transmitted stream
+carries a CW pilot tone at its own frequency, read once for the record or
+tracked over time.  :func:`correct_polarization`
+applies the estimate.
 """
 
 from __future__ import annotations
 
-from collections.abc import Sequence
-from dataclasses import dataclass
+from collections.abc import Callable
+from dataclasses import dataclass, field
 from typing import Any, cast
 
 import numpy as np
@@ -22,9 +24,11 @@ from ..filtering import fir_filter, fir_taps
 from ..logger import logger
 
 __all__ = [
-    "JonesTrack",
+    "PolarizationEstimate",
+    "PolarizationTones",
+    "PolarizationTonesEstimate",
     "correct_polarization",
-    "estimate_polarization_tones",
+    "estimate_polarization",
 ]
 
 # -----------------------------------------------------------------------------
@@ -47,10 +51,9 @@ def _apply_interpolated_matrix(
     Within each uniform cell the product reduces to two batched ``(K, C)``
     matrix products, ``M[g]·X`` and ``dM·(X·t)``, instead of building a per-sample
     ``(L, K, C)`` matrix and an einsum mat-vec, so the cost is a handful of batched
-    kernels rather than an ``O(N)`` Python/launch-bound loop.  The ``O(N)`` data
-    path runs in ``complex64`` (a well-conditioned mix with no long accumulation),
-    so a ``matrix_grid`` built by a double-precision inverse/SVD keeps its
-    precision while the bulk traffic moves at half the bandwidth.
+    kernels rather than an ``O(N)`` Python/launch-bound loop.  The data path
+    runs in the samples' precision (complex64 for single-precision input): the
+    matrices, typically from a double-precision inverse or SVD, are cast to it.
 
     Parameters
     ----------
@@ -72,12 +75,14 @@ def _apply_interpolated_matrix(
     """
     samples, xp, _ = dispatch(samples)
     C, N = samples.shape
-    M = xp.asarray(matrix_grid, dtype=xp.complex64)  # (G, K, C)
+    cdtype = xp.result_type(samples.dtype, xp.complex64)
+    rdtype = xp.empty(0, dtype=cdtype).real.dtype
+    M = xp.asarray(matrix_grid).astype(cdtype, copy=False)  # (G, K, C)
     gp = xp.asarray(grid_positions, dtype=xp.float64)  # (G,)
     G, K = int(M.shape[0]), int(M.shape[1])
-    xc = samples.astype(xp.complex64, copy=False)
+    xc = samples.astype(cdtype, copy=False)
     step = int(round(float(gp[1] - gp[0]))) if G > 1 else N
-    out = xp.empty((K, N), dtype=xp.complex64)
+    out = xp.empty((K, N), dtype=cdtype)
 
     nblk = (N - 1) // step if step > 0 else 0  # full uniform cells over [0, nblk·step)
     bulk = nblk * step
@@ -85,7 +90,7 @@ def _apply_interpolated_matrix(
         Xb = xc[:, :bulk].reshape(C, nblk, step).transpose(1, 0, 2)  # (nblk, C, step)
         M0 = M[:nblk]  # (nblk, K, C)
         dM = M[1 : nblk + 1] - M0
-        t = (xp.arange(step, dtype=xp.float32) / step).astype(xp.complex64)
+        t = (xp.arange(step, dtype=rdtype) / step).astype(cdtype)
         # Diagonal scaling on the sample axis commutes through the left matmul
         # (dM @ (Xb·diag(t)) == (dM @ Xb)·diag(t)), so stacking [M0; dM] turns the
         # two batched GEMMs into one and moves the ramp multiply from the
@@ -98,7 +103,7 @@ def _apply_interpolated_matrix(
     if bulk < N:  # tail (< step; spans the pinned last cell) - per-sample blend
         nn = xp.arange(bulk, N, dtype=xp.float64)
         lo = xp.clip(xp.searchsorted(gp, nn, side="right") - 1, 0, G - 2)
-        frac = ((nn - gp[lo]) / (gp[lo + 1] - gp[lo])).astype(xp.complex64)
+        frac = ((nn - gp[lo]) / (gp[lo + 1] - gp[lo])).astype(cdtype)
         M_full = M[lo] + (M[lo + 1] - M[lo]) * frac[:, None, None]  # (L, K, C)
         out[:, bulk:] = xp.einsum("lkc,cl->kl", M_full, xc[:, bulk:])
     return out.astype(samples.dtype, copy=False)
@@ -110,11 +115,11 @@ def _apply_interpolated_matrix(
 
 
 @dataclass(frozen=True)
-class JonesTrack:
+class PolarizationEstimate:
     """Unmixing (inverse Jones) matrices over time, applied by
     :func:`correct_polarization`.
 
-    Returned by :func:`estimate_polarization_tones`; build one directly to
+    Returned by :func:`estimate_polarization`; build one directly to
     apply any other per-grid-point matrix stack (a polar unitary ``Qᴴ(n)``,
     a butterfly seed, ...).
 
@@ -134,14 +139,11 @@ class JonesTrack:
         in the zero padding of its tracking filter;
         ``correct_polarization(trim_edges=True)`` drops them (align a
         reference as ``ref[..., edge : N - edge]``).
-    tone_frequencies : tuple of float, optional
-        The tone frequencies the estimate used, after refinement, in Hz.
     """
 
     matrix_grid: ArrayType
     grid_positions: ArrayType
     edge: int = 0
-    tone_frequencies: tuple[float, ...] | None = None
 
     @property
     def matrix(self) -> ArrayType:
@@ -155,10 +157,27 @@ class JonesTrack:
         """
         if self.matrix_grid.shape[0] != 1:
             raise ValueError(
-                f"JonesTrack.matrix: the track has {self.matrix_grid.shape[0]} "
+                f"PolarizationEstimate.matrix: the track has {self.matrix_grid.shape[0]} "
                 "matrices; matrix_grid holds them all."
             )
         return self.matrix_grid[0]
+
+
+@dataclass(frozen=True)
+class PolarizationTonesEstimate(PolarizationEstimate):
+    """Result of :class:`PolarizationTones`.
+
+    The constructor takes the same fields: those of
+    :class:`PolarizationEstimate`, then the attribute below, by keyword.
+
+    Attributes
+    ----------
+    tone_frequencies : tuple of float
+        The tone frequencies the estimate used, after refinement, in Hz;
+        row ``j`` of the unmixing matrices recovers the stream of tone ``j``.
+    """
+
+    tone_frequencies: tuple[float, ...] = field(kw_only=True)
 
 
 _EXTRACT_CHUNK = 1 << 20  # samples per block in the chunked tone-phasor GEMM
@@ -220,7 +239,7 @@ def _refine_tone_frequencies(
        either peak fit.  The mix-down needs it: a tone-frequency error
        leaves a slow residual rotation on the demultiplexed output.
     """
-    from ..frequency import _refine_tones_from_spectrum
+    from .._peaks import refine_tones
 
     xw, xp, _ = dispatch(xw)
     N = int(xw.shape[-1])
@@ -229,7 +248,7 @@ def _refine_tone_frequencies(
     uniq, inv = np.unique(np.asarray(best_ch), return_inverse=True)
     xr = xw[xp.asarray(uniq)]  # (U, N) unique strongest channels only
     X = _fft.fft(xr, axis=-1)
-    f_coarse = _refine_tones_from_spectrum(
+    f_coarse = refine_tones(
         X, sampling_rate, freqs, search_band, rows=inv
     )  # (K,) float64 host
 
@@ -388,24 +407,16 @@ def _check_tone_inputs(
     return f_tones
 
 
-def estimate_polarization_tones(
-    samples: ArrayType | Signal,
-    *,
-    tone_frequencies: Sequence[float],
-    sampling_rate: float | None = None,
-    track_bandwidth: float | None = None,
-    num_taps: int | None = None,
-    grid_step: int | None = None,
-    refine_tones: bool = True,
-    search_band: float | None = None,
-) -> JonesTrack:
-    r"""Estimate the polarization unmixing from distinct per-stream CW pilot tones.
+@dataclass(frozen=True)
+class PolarizationTones:
+    r"""Polarization unmixing from distinct per-stream CW pilot tones, for
+    :func:`estimate_polarization` and :func:`correct_polarization`.
 
     Reads the inverse of a frequency-flat polarization (or spatial) mixing
     from pilot tones at a distinct frequency on each transmitted stream (see
     :func:`~commkit.spectral.add_pilot_tone` with one ``frequency`` per
     channel), once for the whole record or, with ``track_bandwidth``,
-    tracked over time.  :func:`correct_polarization` applies the estimate.
+    tracked over time.
 
     **Principle.**  With tone ``f_j`` carried only by stream ``j`` and a
     frequency-flat mixing ``r = J s`` (e.g.
@@ -431,7 +442,7 @@ def estimate_polarization_tones(
     rate whose capture outlasts the SOP coherence time), the averaged
     phasors are biased and the one-shot inverse leaves crosstalk that grows
     with time.  For PMD (DGD), seed a butterfly equalizer (``cma``,
-    ``block_lms``) with :attr:`JonesTrack.matrix`.
+    ``block_lms``) with :attr:`PolarizationEstimate.matrix`.
 
     **Tracked** (``track_bandwidth`` in Hz).  Mixing receive channel ``i``
     down by ``f_j`` and low-pass filtering isolates that tone's slowly
@@ -451,14 +462,9 @@ def estimate_polarization_tones(
 
     Parameters
     ----------
-    samples : array_like or Signal
-        Received MIMO samples, ``(C, N)``.
     tone_frequencies : sequence of float
         The ``K <= C`` distinct tone frequencies in Hz, one per stream, in the
         order of the transmitted streams.
-    sampling_rate : float, optional
-        Sampling rate ``f_s`` in Hz.  Taken from the Signal; required for
-        array input.  A value that disagrees with the Signal raises.
     track_bandwidth : float, optional
         One-sided cutoff of the tracking low-pass in Hz, the polarization
         tracking bandwidth: set it a few times above the expected SOP
@@ -483,42 +489,121 @@ def estimate_polarization_tones(
         ``refine_tones=True``; defaults to ``4 * f_s / N`` (a few FFT bins).
         Keep it inside the guard between tone and data.
 
-    Returns
-    -------
-    JonesTrack
-        One ``(K, C)`` matrix (static) or the matrices on the grid
-        (tracked), complex128, with the edge of the tracking filter and the
-        refined tone frequencies.
 
     Raises
     ------
     ValueError
-        If ``samples`` is not 2-D, ``tone_frequencies`` is empty, ``K > C``,
-        a tone frequency lies outside ``(-f_s/2, f_s/2)``,
-        ``track_bandwidth`` is not positive, or ``num_taps`` or
-        ``grid_step`` come without ``track_bandwidth``.
+        If ``tone_frequencies`` is empty, ``track_bandwidth`` is not
+        positive, or ``num_taps`` or ``grid_step`` come without
+        ``track_bandwidth``.
 
     See Also
     --------
     commkit.spectral.add_pilot_tone : Add the per-stream tones at the transmitter.
     """
-    signal_adapter = adapt_signal(
-        samples, function_name="estimate_polarization_tones()"
-    )
+
+    tone_frequencies: tuple[float, ...]
+    track_bandwidth: float | None = None
+    num_taps: int | None = None
+    grid_step: int | None = None
+    refine_tones: bool = True
+    search_band: float | None = None
+
+    def __post_init__(self) -> None:
+        tones = tuple(float(f) for f in self.tone_frequencies)
+        object.__setattr__(self, "tone_frequencies", tones)
+        if not tones:
+            raise ValueError(
+                "PolarizationTones: tone_frequencies must contain at least one "
+                "frequency."
+            )
+        if self.track_bandwidth is None and (
+            self.num_taps is not None or self.grid_step is not None
+        ):
+            raise ValueError(
+                "PolarizationTones: num_taps and grid_step shape the tracking "
+                "filter; give track_bandwidth too."
+            )
+        if self.track_bandwidth is not None and not self.track_bandwidth > 0:
+            raise ValueError(
+                "PolarizationTones: track_bandwidth must be positive; got "
+                f"{self.track_bandwidth}."
+            )
+
+
+#: Polarization estimators by method type.
+PolarizationMethod = PolarizationTones
+
+
+def estimate_polarization(
+    samples: ArrayType | Signal,
+    method: PolarizationMethod,
+    *,
+    sampling_rate: float | None = None,
+) -> PolarizationEstimate:
+    """Estimate the polarization unmixing of MIMO samples.
+
+    Parameters
+    ----------
+    samples : array_like or Signal
+        Received MIMO samples, ``(C, N)``.
+    method : PolarizationTones
+        The estimator and its settings.
+    sampling_rate : float, optional
+        Sampling rate ``f_s`` in Hz.  Taken from the Signal; required for
+        array input.  A value that disagrees with the Signal raises.
+
+    Returns
+    -------
+    PolarizationEstimate
+        The subclass of the method, :class:`PolarizationTonesEstimate` for
+        :class:`PolarizationTones`: one ``(K, C)`` matrix (static) or the
+        matrices on the grid (tracked), complex128, with the edge of the
+        tracking filter and the refined tone frequencies.
+
+    Raises
+    ------
+    ValueError
+        If ``samples`` is not 2-D, there are more tones than channels, or a
+        tone frequency lies outside ``(-f_s/2, f_s/2)``.
+    TypeError
+        If ``method`` is not a polarization method.
+    """
+    signal_adapter = adapt_signal(samples, function_name="estimate_polarization()")
     sampling_rate = signal_adapter.resolve_fact("sampling_rate", sampling_rate)
-    samples, xp, _ = dispatch(signal_adapter.array)
+    x, _, _ = dispatch(signal_adapter.array)
+    return _estimate(x, method, sampling_rate)
+
+
+def _estimate(
+    x: ArrayType, method: PolarizationMethod, sampling_rate: float
+) -> PolarizationEstimate:
+    """Dispatch on the method's type (array input, rate resolved)."""
+    estimator = _ESTIMATORS.get(type(method))
+    if estimator is None:
+        raise TypeError(
+            "estimate_polarization(): method must be PolarizationTones, got "
+            f"{type(method).__name__}."
+        )
+    return estimator(x, method, sampling_rate)
+
+
+def _estimate_tones(
+    samples: ArrayType, method: PolarizationTones, sampling_rate: float
+) -> PolarizationEstimate:
+    """The pilot-tone estimator of :class:`PolarizationTones`."""
+    tone_frequencies = method.tone_frequencies
+    track_bandwidth = method.track_bandwidth
+    num_taps = method.num_taps
+    grid_step = method.grid_step
+    refine_tones = method.refine_tones
+    search_band = method.search_band
+    _, xp, _ = dispatch(samples)
     f_tones = _check_tone_inputs(
-        samples, tone_frequencies, sampling_rate, "estimate_polarization_tones"
+        samples, tone_frequencies, sampling_rate, "estimate_polarization"
     )
     C, N = samples.shape
     K = len(f_tones)
-    if track_bandwidth is None and (num_taps is not None or grid_step is not None):
-        raise ValueError(
-            "estimate_polarization_tones(): num_taps and grid_step shape the "
-            "tracking filter; give track_bandwidth too."
-        )
-    if track_bandwidth is not None and not track_bandwidth > 0:
-        raise ValueError(f"track_bandwidth must be positive; got {track_bandwidth}.")
 
     # Every O(N) pass runs in the signal's working precision (complex64 unless
     # the caller supplied complex128): the tone phasors are accumulated
@@ -546,7 +631,7 @@ def estimate_polarization_tones(
         # when square.
         W = xp.linalg.pinv(T)  # (K, C)
         logger.info(
-            "estimate_polarization_tones (static): f_tones=%s Hz, refine=%s "
+            "estimate_polarization (tones, static): f_tones=%s Hz, refine=%s "
             "[C=%d, K=%d, N=%d]",
             [f"{f:.3g}" for f in f_used],
             refine_tones,
@@ -554,8 +639,11 @@ def estimate_polarization_tones(
             K,
             N,
         )
-        return JonesTrack(
-            W[None], xp.zeros(1, dtype=xp.float64), 0, tuple(map(float, f_used))
+        return PolarizationTonesEstimate(
+            W[None],
+            xp.zeros(1, dtype=xp.float64),
+            0,
+            tone_frequencies=tuple(map(float, f_used)),
         )
 
     # --- Tracking low-pass design + feasibility check ------------------------
@@ -579,7 +667,7 @@ def estimate_polarization_tones(
         transition = 3.3 * sampling_rate / num_taps
         if 2.0 * track_bandwidth + transition >= d_min:
             logger.warning(
-                "estimate_polarization_tones: tracking bandwidth "
+                "estimate_polarization: tracking bandwidth "
                 "(%.3g Hz, FIR transition %.3g Hz) approaches the nearest tone "
                 "spacing %.3g Hz - neighboring tones may leak into the Jones "
                 "estimate. Reduce track_bandwidth or widen the tone spacing.",
@@ -642,7 +730,7 @@ def estimate_polarization_tones(
     Wg = xp.linalg.inv(gram + ridge) @ Th  # (G, K, C) - batched, CPU+GPU
 
     logger.info(
-        "estimate_polarization_tones (tracked): f_tones=%s Hz, refine=%s, "
+        "estimate_polarization (tones, tracked): f_tones=%s Hz, refine=%s, "
         "track_bw=%.3g Hz, taps=%d, grid_step=%d, G=%d [C=%d, K=%d, N=%d]",
         [f"{f:.3g}" for f in f_used],
         refine_tones,
@@ -656,13 +744,16 @@ def estimate_polarization_tones(
     )
     # A centered FIR averages zero padding into the num_taps//2 samples at
     # each end.
-    return JonesTrack(Wg, grid_positions, num_taps // 2, tuple(map(float, f_used)))
+    return PolarizationTonesEstimate(
+        Wg, grid_positions, num_taps // 2, tone_frequencies=tuple(map(float, f_used))
+    )
 
 
 def correct_polarization(
     samples: S,
-    how: JonesTrack | ArrayType,
+    how: PolarizationEstimate | PolarizationMethod | ArrayType,
     *,
+    sampling_rate: float | None = None,
     normalize: bool = True,
     trim_edges: bool = False,
 ) -> S:
@@ -673,10 +764,15 @@ def correct_polarization(
     samples : array_like or Signal
         Received MIMO samples, ``(C, N)``.  A :class:`Signal` returns a new
         demultiplexed :class:`Signal`.
-    how : JonesTrack or array_like
-        An estimate of :func:`estimate_polarization_tones` (or any
-        :class:`JonesTrack`), or one ``(K, C)`` unmixing matrix.  A tracked
-        estimate is interpolated linearly between its grid points.
+    how : PolarizationEstimate, PolarizationTones or array_like
+        An estimate of :func:`estimate_polarization` (or any
+        :class:`PolarizationEstimate`), a method, which estimates first, or
+        one ``(K, C)`` unmixing matrix.  A tracked estimate is interpolated
+        linearly between its grid points.
+    sampling_rate : float, optional
+        Sampling rate in Hz, for a method ``how``.  Taken from the Signal;
+        required for array input with a method.  A value that disagrees with
+        the Signal raises.
     normalize : bool, default True
         Rescale each output row to the mean input power per channel, which
         removes the tone-amplitude scale of a tone estimate and keeps the
@@ -704,16 +800,20 @@ def correct_polarization(
     """
     signal_adapter = adapt_signal(samples, function_name="correct_polarization()")
     x, xp, _ = dispatch(signal_adapter.array)
-    if isinstance(how, JonesTrack):
+    if isinstance(how, PolarizationEstimate):
         track = how
+    elif type(how) in _ESTIMATORS:
+        fs = signal_adapter.resolve_fact("sampling_rate", sampling_rate)
+        track = _estimate(x, cast(PolarizationMethod, how), fs)
     else:
         matrix = xp.asarray(how)
         if matrix.ndim != 2:
             raise ValueError(
-                "correct_polarization(): how must be a JonesTrack or a (K, C) "
+                "correct_polarization(): how must be a PolarizationEstimate, a method "
+                "or a (K, C) "
                 f"matrix, got shape {matrix.shape}."
             )
-        track = JonesTrack(matrix[None], xp.zeros(1, dtype=xp.float64))
+        track = PolarizationEstimate(matrix[None], xp.zeros(1, dtype=xp.float64))
     if trim_edges and signal_adapter.signal is not None:
         raise ValueError(
             "correct_polarization(): trim_edges drops samples and would "
@@ -743,3 +843,8 @@ def correct_polarization(
         p_out = xp.mean(xp.abs(demuxed) ** 2, axis=-1, keepdims=True)  # (K, 1)
         demuxed = demuxed * xp.sqrt(p_in / xp.where(p_out > 0, p_out, 1.0))
     return signal_adapter.wrap_samples(demuxed.astype(x.dtype, copy=False))
+
+
+_ESTIMATORS: dict[type, Callable[..., PolarizationEstimate]] = {
+    PolarizationTones: _estimate_tones
+}

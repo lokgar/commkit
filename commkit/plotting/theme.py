@@ -262,6 +262,35 @@ def _channel_axes(
     return fig, axes, targets
 
 
+def _draw_channels(
+    x: Any,
+    ax: Any,
+    title: str | None,
+    draw: Any,
+    *,
+    panel: tuple[float, float] | None = None,
+) -> tuple[Any, Any]:
+    """Draw ``(N,)`` or ``(C, N)`` samples, one panel per channel.
+
+    ``draw(axi, row, panel_title)`` draws one channel's ``row``.  Several
+    channels get the grid of :func:`_channel_axes`, titled
+    ``"{title} (Ch i)"`` (``"Channel i"`` without a title); one channel gets
+    ``ax`` or a new figure (of size ``panel`` when given).  Returns
+    ``(fig, axes)`` or ``(fig, ax)`` for :func:`_finish`.
+    """
+    if x.ndim > 1:
+        fig, axes, targets = _channel_axes(x.shape[0], ax, panel=panel)
+        for i, target in enumerate(targets):
+            draw(target, x[i], f"{title} (Ch {i})" if title else f"Channel {i}")
+        return fig, axes
+    if ax is None:
+        fig, axi = plt.subplots(figsize=panel) if panel is not None else plt.subplots()
+    else:
+        fig, axi = ax.figure, ax
+    draw(axi, x, title)
+    return fig, axi
+
+
 def _square_figsize(n: int = 1) -> tuple[float, float]:
     """Square panel size derived from the default figure height.
 
@@ -328,6 +357,30 @@ def _decimate_minmax(
         x_out = xp.concatenate([x_out, x[trimmed:]])
         y_out = xp.concatenate([y_out, y[trimmed:]])
     return x_out, y_out
+
+
+def _device_channels(a: Any) -> Any:
+    """``a`` as a 2-D array on its own device, ``(N,)`` promoted to ``(1, N)``."""
+    xp = get_array_module(a)
+    a = xp.asarray(a)
+    return a[None, :] if a.ndim == 1 else a
+
+
+def _trace(
+    y: Any, max_points: int, *, x0: float = 0.0, dx: float = 1.0, x: Any = None
+) -> tuple[np.ndarray, np.ndarray]:
+    """Host points of the 1-D trace ``y`` (on any device), ready to draw.
+
+    The abscissa is ``x0 + dx * index``, or ``x`` on ``y``'s device.  A trace
+    longer than ``max_points`` is reduced to its min/max envelope
+    (:func:`_decimate_minmax`) on its device, so only the drawn points are
+    transferred.
+    """
+    xp = get_array_module(y)
+    if x is None:
+        x = xp.arange(y.shape[-1], dtype=np.float64) * dx + x0
+    x, y = _decimate_minmax(x, y, max_points)
+    return _host(x), _host(y)
 
 
 _SI_PREFIXES = {

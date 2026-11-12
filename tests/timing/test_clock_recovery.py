@@ -3,6 +3,7 @@ correct_sampling_clock_offset, scored against the clock offset and the
 timing that apply_sampling_clock_offset and a fractional delay impose."""
 
 import logging
+import math
 
 import numpy as np
 import pytest
@@ -48,7 +49,7 @@ def _received(
         device="gpu" if xp is not np else "cpu",
     )
     rx = ck.impairments.apply_awgn(tx, esn0_db=esn0_db, rng=rng + 1)
-    rx = ck.timing.fft_fractional_delay(rx, delay=DELAY)
+    rx = ck.timing.apply_delay(rx, delay=DELAY)
     rx = ck.impairments.apply_sampling_clock_offset(rx, offset_ppm=ppm)
     return ck.filtering.matched_filter(rx)
 
@@ -107,14 +108,46 @@ class TestEstimate:
                 x,
                 sps=2,
                 power=method == "power",
-                normalized_bandwidth=1e-2,
+                normalized_bandwidth=3e-3,
                 num_cal=397,
             )
             pos, _, _ = cr._track(
-                x, 2, Gardner(normalized_bandwidth=1e-2, method=method)
+                x, 2, Gardner(normalized_bandwidth=3e-3, method=method)
             )
             k = min(ref.shape[1], pos.shape[1])
             np.testing.assert_allclose(pos[:, :k], ref[:, :k], atol=1e-4)
+
+    @pytest.mark.parametrize("method", ["classical", "power"])
+    @pytest.mark.parametrize(
+        "single_block",
+        [False, pytest.param(True, marks=pytest.mark.allow_warnings)],
+    )
+    def test_detector_gain_under_a_clock_offset(
+        self, xp, method, single_block, monkeypatch
+    ):
+        """K_d at 300 and 900 ppm against its value at 0 ppm (rolloff 0.1).
+        Calibrating at fixed strobes over M symbols scales the fitted
+        amplitude by sinc(M·ε), so the gains grow by its inverse; blocks of
+        100 symbols (0.1 symbol of drift at the default 1000 ppm bound)
+        summed along the measured drift keep it.  Over 5 seeds the ratio
+        measured 0.988 to 1.047 (classical) and 0.986 to 1.002 (power):
+        bound 10 %.  Baseline, one block of 2048 symbols: 0.41 to 0.61 at
+        300 ppm and 0.08 to 0.17 at 900 ppm, as sinc(2048·ε) = 0.49 and
+        0.07 predict (the inflated gains slip, hence the warnings)."""
+        if single_block:
+            monkeypatch.setattr(cr, "_CAL_MIN_BLOCK", 2048)
+        kd = {}
+        for ppm in (0.0, 300.0, 900.0):
+            mf = _received(xp, ppm=ppm, num_symbols=2**15)
+            est = estimate_sampling_clock_offset(mf, Gardner(method=method))
+            kd[ppm] = float(est.detector_gain)
+            if not single_block:
+                assert abs(float(est.value) - ppm) < 1.0
+        ratios = np.array([kd[300.0], kd[900.0]]) / kd[0.0]
+        if single_block:
+            assert np.all(ratios < 0.7), ratios
+        else:
+            assert np.all(np.abs(ratios - 1.0) < 0.1), ratios
 
     def test_gain_sign_matters(self, xp, monkeypatch):
         """Baseline: with the loop's error sign flipped the loop locks to the
@@ -165,20 +198,42 @@ class TestCorrect:
         assert fixed.reference.symbols.shape[-1] == fixed.samples.shape[-1] // 2
 
     @pytest.mark.allow_warnings
-    def test_equalizer_needs_clock_recovery(self, xp):
+    @pytest.mark.parametrize("dtype", ["complex64", "complex128"])
+    def test_static_correction_of_a_long_record(self, xp, dtype):
+        """A tone at 0.2 cycles per sample through a 2000 ppm clock and back
+        through the static correction, 2^20 samples: over the last sixteenth
+        the error stays below -120 dB (measured -129.6 dB, two
+        interpolations).  Instants formed in float32 gave -76.2 dB in
+        complex64."""
+        n, ppm, f = 2**20, 2000.0, 0.2
+        x = xp.exp(2j * xp.pi * f * xp.arange(n)).astype(dtype)
+        y = ck.impairments.apply_sampling_clock_offset(x, offset_ppm=ppm)
+        est = SamplingClockOffsetEstimate(
+            value=xp.asarray(ppm), trajectory=None, detector_gain=None
+        )
+        z = correct_sampling_clock_offset(y, est, sps=2)
+        assert z.dtype == x.dtype
+        err = (z - x[: z.shape[0]])[-n // 16 : -60]
+        assert 10 * math.log10(float(xp.mean(xp.abs(err) ** 2))) < -120.0
+
+    def test_equalizer_needs_clock_recovery(self, xp, caplog):
         """Baseline: at 50 ppm the symbols drift 13 symbol periods over the
         record, beyond an 11-tap equalizer's 5.5-symbol window, and trained
-        LMS fails (SER near 0.7 over the last quarter); after Gardner
-        recovery the same equalizer decides every symbol of the last quarter
-        right at 20 dB (16-QAM SER theory 1e-5)."""
+        LMS fails (SER near 0.7 over the last quarter; its decisions may
+        collapse onto a few points, which LMS reports as a WARNING); after
+        Gardner recovery the same equalizer decides every symbol of the last
+        quarter right at 20 dB (16-QAM SER theory 1e-5), with no warning."""
         n = 2**18
         mf = _received(xp, ppm=50.0, rolloff=0.5, num_symbols=n)
         kw = {"num_taps": 11, "step_size": 1e-3}
         train = mf.reference.symbols[..., :4000]
         drifting = ck.equalization.lms(mf, train, **kw)
-        recovered = ck.equalization.lms(
-            correct_sampling_clock_offset(mf, Gardner()), train, **kw
-        )
+        caplog.clear()
+        with caplog.at_level(logging.WARNING, logger="commkit"):
+            recovered = ck.equalization.lms(
+                correct_sampling_clock_offset(mf, Gardner()), train, **kw
+            )
+        assert caplog.text == ""
         ref = to_numpy(mf.reference.symbols)
         last = slice(n - n // 4, n)
         assert scoring.ser(to_numpy(drifting.y_hat)[last], ref[last], C16) > 0.3
@@ -190,13 +245,12 @@ class TestLockChecks:
     through the symbols the mean detector output is zero and only the
     integrator's bound keeps its frequency near the clock's."""
 
-    @pytest.mark.allow_warnings
     def test_bound_keeps_a_slipping_loop_near_the_clock(self, xp, caplog):
         """Classical detector, rolloff 0.1, B·T = 1e-2: jitter large enough
         to slip throughout the record.  Within the default 1000 ppm bound the
         loop keeps returning to lock and the estimate stays inside the bound
-        (measured 171 and 201 ppm against the true 50, CPU and GPU, after a
-        net 17 and 19 slipped symbols); the slip is reported."""
+        (measured 168 and 209 ppm against the true 50, CPU and GPU); the
+        slip is reported."""
         mf = _received(xp, ppm=50.0)
         with caplog.at_level(logging.WARNING, logger="commkit"):
             est = estimate_sampling_clock_offset(mf, Gardner(normalized_bandwidth=1e-2))
@@ -206,14 +260,13 @@ class TestLockChecks:
     @pytest.mark.allow_warnings
     def test_without_the_bound_the_loop_runs_away(self, xp):
         """Baseline: the same loop with the bound at 89 000 ppm wanders off
-        in frequency (5771 and -50 907 ppm measured, CPU and GPU)."""
+        in frequency (-37 007 and -4287 ppm measured, CPU and GPU)."""
         mf = _received(xp, ppm=50.0)
         est = estimate_sampling_clock_offset(
             mf, Gardner(normalized_bandwidth=1e-2, max_offset_ppm=8.9e4)
         )
         assert abs(float(est.value)) > 2000.0
 
-    @pytest.mark.allow_warnings
     def test_slip_reported(self, xp, caplog):
         """Power detector, rolloff 0.1, B·T = 2e-2: a few slips (3 to 5
         measured), each moving the timing by a whole symbol, against at
@@ -238,13 +291,12 @@ class TestLockChecks:
         first = cr._first_slip(slipped[None], np.array([1e-2]))[0]
         assert 50_000 - 800 <= first < 50_000
 
-    @pytest.mark.allow_warnings
     def test_offset_beyond_the_bound(self, xp, caplog):
         """1500 ppm with the default bound: the integrator stops at 1000 ppm
         and the proportional path carries the rest with a static timing lag
-        (the slope still reads 1499.99 ppm), and the warning names the
+        (the slope still reads 1499.87 and 1499.83 ppm, CPU and GPU), and the warning names the
         bound; with max_offset_ppm=3000 there is no warning and the offset
-        is measured within 0.5 ppm (1499.99)."""
+        is measured within 0.5 ppm (1500.01 and 1499.97)."""
         mf = _received(xp, ppm=1500.0, rolloff=0.5, num_symbols=2**16)
         with caplog.at_level(logging.WARNING, logger="commkit"):
             estimate_sampling_clock_offset(mf, Gardner())

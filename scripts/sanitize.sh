@@ -51,7 +51,7 @@ TOOLS=("$@")
 # never filled is a commkit bug.
 OWN=(--kernel-name kns=commkit_ --kernel-name kns=bps_ --kernel-name kns=cs_block
      --kernel-name kns=llr --kernel-name kns=iir_ --kernel-name kns=selftest
-     --kernel-name kns=ldpc --kernel-name kns=algebraic)
+     --kernel-name kns=ldpc --kernel-name kns=algebraic --kernel-name kns=interpolate)
 
 FILES=(
   tests/test_cuda_infra.py
@@ -59,6 +59,7 @@ FILES=(
   tests/mapping/test_llr.py tests/mapping/test_gray.py tests/recovery/test_bps.py
   tests/test_filtering.py tests/test_fiber.py tests/impairments/test_fiber_channel_nonlinear.py
   tests/coding/test_ldpc_kernel.py tests/coding/test_algebraic.py
+  tests/test_interpolation.py tests/impairments/test_frontend.py tests/timing/test_clock_recovery.py
 )
 # One process per file, and one per test for test_block.py: under the sanitizer
 # each CUDA-graph test of the block equalizers gets slower the more tests ran

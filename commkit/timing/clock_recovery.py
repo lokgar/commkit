@@ -20,11 +20,13 @@ from typing import Any, Literal
 
 import numpy as np
 
-from .._array import as_2d, restore_1d
+from .._array import as_2d, restore_1d, warn_if_double
+from .._fft import fft
+from .._interpolation import interpolate_piecewise
 from ..backend import ArrayType, dispatch, to_device
 from ..core._signal_adapter import S, adapt_signal, require_integer_sps
+from ..core.signal import Signal
 from ..logger import logger
-from ..multirate import _interpolate, _stretched_instants
 
 __all__ = [
     "Gardner",
@@ -34,9 +36,13 @@ __all__ = [
 ]
 
 # Open-loop calibration: detector means at _CAL_OFFSETS strobe offsets
-# across one symbol, over at most _CAL_SYMBOLS symbols.
+# across one symbol, over at most _CAL_SYMBOLS symbols, in blocks over
+# which the timing drifts at most _CAL_DRIFT symbol at max_offset_ppm
+# (and no shorter than _CAL_MIN_BLOCK symbols).
 _CAL_OFFSETS = 8
 _CAL_SYMBOLS = 2048
+_CAL_DRIFT = 0.1
+_CAL_MIN_BLOCK = 32
 # Below this first-harmonic amplitude of the S-curve (unit-power input) the
 # detector sees no clock tone.
 _MIN_CURVE_AMPLITUDE = 1e-3
@@ -75,10 +81,12 @@ class Gardner:
     Parameters
     ----------
     normalized_bandwidth : float, default 1e-3
-        One-sided loop bandwidth ``B·T`` in ``(0, 0.5)``, a fraction of the
-        symbol rate.  Gives critically damped gains ``μ = 4BT / K_d`` and
-        ``β = 4(BT)² / K_d``, with the detector gain ``K_d`` measured on the
-        input (see Notes).  Used when ``proportional_gain`` is not given.
+        Nominal one-sided loop bandwidth ``B·T`` in ``(0, 0.5)``, a fraction
+        of the symbol rate.  Gives critically damped gains ``μ = 4BT / K_d``
+        and ``β = 4(BT)² / K_d``, with the detector gain ``K_d`` measured on
+        the input (see Notes): ``ζ = 1`` and ``ω_n T = 2BT``, whose noise
+        bandwidth is ``1.25·B·T`` (``B·T`` is exact for a first-order loop
+        only).  Used when ``proportional_gain`` is not given.
         The detector's self-noise sets the timing jitter: 0.01 symbol rms at
         ``1e-3`` for 16-QAM (classical detector, rolloff 0.1), 0.006 at
         ``1e-4``.  Too wide a loop slips whole symbols: the classical
@@ -89,8 +97,9 @@ class Gardner:
         scaled to unit power; overrides ``normalized_bandwidth``.
     integral_gain : float, optional
         Raw integral gain ``β``; requires ``proportional_gain``.  Defaults
-        to 0 (a first-order loop, which keeps a timing lag ``ε / μK_d``
-        under a clock offset) with ``proportional_gain``.
+        to 0 with ``proportional_gain``: a first-order loop, whose ``ν``
+        stays at the calibrated offset (see Notes) and which keeps a timing
+        lag ``(ε - ν) / μK_d`` for the rest.
     max_offset_ppm : float, default 1000.0
         Largest clock offset the loop tracks, in ppm, in ``(0, 90000)``:
         the integrator ``ν`` is held within ``±max_offset_ppm · 1e-6``.
@@ -113,11 +122,19 @@ class Gardner:
     Notes
     -----
     Both detectors have a sinusoidal S-curve in the timing error.  Before the
-    loop starts, the detector means at eight strobe offsets across one
-    symbol (over the first 2048 symbols, open loop) are fitted with
-    ``-A sin(2π(τ - τ_0))``: ``K_d = 2πA`` per symbol period scales the
-    gains, and ``τ_0`` starts the loop at the right strobe phase, so there
-    is no acquisition transient.  Input whose fitted amplitude is below 1e-3
+    loop starts it is calibrated open loop on the first 2048 symbols, in
+    blocks over which the timing drifts at most 0.1 symbol at
+    ``max_offset_ppm`` (100 symbols at the default, at least 32): each
+    block's detector means at eight strobe offsets across one symbol give
+    the first harmonic of ``-A sin(2π(τ - τ_b))``, and the blocks are summed
+    coherently along the drift of ``τ_b`` that maximizes the sum (searched
+    over ±0.5 symbol per block, five times ``max_offset_ppm``).  ``K_d = 2πA``
+    per symbol period scales the gains, ``τ_b`` extrapolated to symbol 0
+    starts the loop at the right strobe phase, and the drift starts the
+    integrator ``ν`` (held within the bound), so there is no acquisition
+    transient in timing or frequency.  ``K_d`` stays within a few percent of
+    its zero-offset value up to the bound; a single fit at fixed strobes
+    would scale it by ``sinc(2048 ε)``.  Input whose fitted amplitude is below 1e-3
     (no clock tone, as for an unmodulated carrier) raises.  The classical
     amplitude falls to 0.006 at a zero rolloff (16-QAM, from the truncated
     pulse) while the power detector's stays at 0.34.  The strobe spacing is
@@ -136,7 +153,10 @@ class Gardner:
     which the proportional path follows only with a static timing lag, or
     a loop that lost lock).  ``B·T`` is ``μ K_d / 4`` for raw gains.
 
-    Numba-compiled on the CPU; GPU input makes one host round trip.
+    Numba-compiled on the CPU; GPU input makes one host round trip.  The
+    loop runs in complex64 whatever the input (double input emits
+    :class:`~commkit.PrecisionWarning`); the interpolation of
+    :func:`correct_sampling_clock_offset` keeps the input's precision.
 
     References
     ----------
@@ -221,6 +241,7 @@ def _track(
         raise ValueError(
             f"Gardner clock recovery needs at least 4 symbols, got {n} samples."
         )
+    warn_if_double(x, "Gardner clock recovery")
     rms = np.sqrt(np.mean(np.abs(x) ** 2, axis=-1, dtype=np.float64))
     if np.any(rms == 0.0):
         raise ValueError("Gardner clock recovery: a channel is all zeros.")
@@ -230,34 +251,36 @@ def _track(
     power = how.method == "power"
 
     num_cal = min(_CAL_SYMBOLS, n // sps - 3)
+    block = min(
+        num_cal, max(_CAL_MIN_BLOCK, int(_CAL_DRIFT / (how.max_offset_ppm * 1e-6)))
+    )
     offsets = np.arange(_CAL_OFFSETS) / _CAL_OFFSETS
-    curves = _get_numba_ted_curve()(xn, pad, float(sps), offsets, num_cal, power)
+    curves = _get_numba_ted_curve()(
+        xn, pad, float(sps), offsets, block, num_cal // block, power
+    )
     if how.joint_channels:
         curves = curves.mean(axis=0, keepdims=True)
-    # e(τ) = a cos 2πτ + b sin 2πτ = -A sin(2π(τ - τ0))
-    a = 2.0 * np.mean(curves * np.cos(2 * np.pi * offsets), axis=-1)
-    b = 2.0 * np.mean(curves * np.sin(2 * np.pi * offsets), axis=-1)
-    amplitude = np.hypot(a, b)
+    amplitude, tau0, drift = _fit_s_curve(curves, offsets, block)
     if np.any(amplitude < _MIN_CURVE_AMPLITUDE):
         raise ValueError(
             f"Gardner(method={how.method!r}): the detector sees no clock tone "
             f"(S-curve amplitude {float(amplitude.min()):.1e}), as for an "
             "unmodulated carrier."
         )
-    tau0 = np.arctan2(a, -b) / (2 * np.pi)
-    tau0 = (tau0 + 0.5) % 1.0 - 0.5  # the strobe of symbol 0, in [-0.5, 0.5)
     kd = 2 * np.pi * amplitude
 
     rows = curves.shape[0]
+    nu_max = how.max_offset_ppm * 1e-6
     gains = np.array([how.gains(float(g)) for g in kd])
     pos, err, count = _get_numba_gardner()(
         xn,
         pad,
         float(sps),
         pad + tau0 * sps,
+        np.clip(drift, -nu_max, nu_max),
         np.ascontiguousarray(gains[:, 0]),
         np.ascontiguousarray(gains[:, 1]),
-        how.max_offset_ppm * 1e-6,
+        nu_max,
         power,
         rows != C,
         n,
@@ -272,6 +295,45 @@ def _track(
         err = np.repeat(err, C, axis=0)
         kd = np.repeat(kd, C)
     return pos, kd, err
+
+
+def _fit_s_curve(
+    curves: np.ndarray, offsets: np.ndarray, block: int
+) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
+    """S-curve amplitude ``A``, strobe phase ``τ0`` of symbol 0 and timing
+    drift ``ε`` (symbol periods per symbol) per row, from the block means
+    ``(R, B, J)`` of :func:`ted_curve`.
+
+    Block ``b``'s first harmonic ``e(τ) = -A sin(2π(τ - τ_b))`` is the
+    phasor ``A e^{2πiτ_b}``.  Under a clock offset ``τ_b`` drifts by ``ε``
+    per symbol.  The phasors are summed coherently along the drift that
+    maximizes the sum, searched over the unambiguous ``±0.5`` cycle per
+    block on a grid of ``1/(16 B)`` (under 1 % loss at the last block); the
+    loss within a block, ``sinc(ε · block)``, is divided out.
+    """
+    # e(τ) = a cos 2πτ + b sin 2πτ = -A sin(2π(τ - τ_b)): i(a + ib) = A e^{2πiτ_b}
+    z = 2j * np.mean(curves * np.exp(2j * np.pi * offsets), axis=-1)
+    num_blocks = z.shape[-1]
+    # drift per block in cycles, on a grid of 1/(16 B) across ±0.5: the
+    # peak of a 4B-point spectrum, refined by two grid steps either side
+    # (one block cannot measure it)
+    b = np.arange(num_blocks)
+    cycles = np.zeros(z.shape[0])
+    if num_blocks > 1:
+        peak = np.argmax(np.abs(fft(z, n=4 * num_blocks)), axis=-1)
+        coarse = (peak / (4 * num_blocks) + 0.5) % 1.0 - 0.5
+        best = np.full(z.shape[0], -1.0)
+        for step in range(-2, 3):
+            d = coarse + step / (16 * num_blocks)
+            size = np.abs(np.sum(z * np.exp(-2j * np.pi * np.outer(d, b)), axis=-1))
+            better = size > best
+            cycles[better], best[better] = d[better], size[better]
+    drift = cycles / block  # symbol periods per symbol
+    ref = np.mean(z * np.exp(-2j * np.pi * np.outer(cycles, b)), axis=-1)
+    amplitude = np.abs(ref) / np.sinc(drift * block)
+    # block 0 is centred on symbol (block + 1) / 2
+    tau0 = np.angle(ref) / (2 * np.pi) - drift * (block + 1) / 2
+    return amplitude, (tau0 + 0.5) % 1.0 - 0.5, drift  # τ0 in [-0.5, 0.5)
 
 
 def _first_slip(trajectory: np.ndarray, bandwidth: np.ndarray) -> np.ndarray:
@@ -340,7 +402,7 @@ _ESTIMATORS = {Gardner: _gardner_estimate}
 
 
 def estimate_sampling_clock_offset(
-    samples: ArrayType, method: Gardner, *, sps: int | None = None
+    samples: ArrayType | Signal, method: Gardner, *, sps: int | None = None
 ) -> SamplingClockOffsetEstimate:
     """Estimate the offset of the sampling clock from the symbol clock.
 
@@ -421,10 +483,11 @@ def correct_sampling_clock_offset(
     ``value`` only: the drift is removed and a static timing phase remains,
     for the equalizer.
 
-    The waveform between samples comes from a 48-tap windowed-sinc
-    interpolator in the input's precision (error below -119 dB for content
-    up to 0.4 cycles per sample, as in
-    :func:`~commkit.impairments.apply_sampling_clock_offset`).
+    The waveform between samples comes from the 48-tap windowed-sinc
+    interpolator of :func:`~commkit.impairments.apply_sampling_clock_offset`,
+    returned in the input's precision (error below -119 dB for content up
+    to 0.4 cycles per sample, at any record length: each instant is formed
+    in double precision from the strobes or the constant rate).
 
     Parameters
     ----------
@@ -473,7 +536,6 @@ def correct_sampling_clock_offset(
     sps_int = _resolve_even_sps(signal_adapter, sps, function_name)
     x, xp, _ = dispatch(signal_adapter.array)
     x, was_1d = as_2d(x, name="samples")
-    real = xp.float32 if x.dtype in (xp.float32, xp.complex64) else xp.float64
     if isinstance(how, Gardner):
         pos, _, _ = _track(to_device(x, "cpu"), sps_int, how)
         logger.info(
@@ -481,7 +543,7 @@ def correct_sampling_clock_offset(
             how.method,
             pos.shape[-1],
         )
-        y = _resample_on_strobes(x, xp, pos, sps_int, real)
+        y = _resample_on_strobes(x, pos, sps_int)
     else:
         ppm = np.atleast_1d(np.asarray(to_device(how.value, "cpu"), dtype=np.float64))
         if ppm.size not in (1, x.shape[0]):
@@ -494,7 +556,7 @@ def correct_sampling_clock_offset(
             "Removing a sampling-clock offset of %s ppm.",
             np.array2string(ppm, precision=3),
         )
-        y = _resample_static(x, xp, ppm, real)
+        y = _resample_static(x, ppm)
     out = restore_1d(was_1d, y)
     sig = signal_adapter.signal
     if sig is not None and sig.reference is not None:
@@ -516,42 +578,18 @@ def _resolve_even_sps(signal_adapter: Any, sps: int | None, function_name: str) 
     return sps_int
 
 
-def _resample_on_strobes(
-    x: ArrayType, xp: Any, pos: np.ndarray, sps: int, real: Any
-) -> ArrayType:
+def _resample_on_strobes(x: ArrayType, pos: np.ndarray, sps: int) -> ArrayType:
     """``sps`` instants per strobe interval, ``P_k + j·(P_{k+1} - P_k)/sps``,
-    per channel; the instants are split into an integer index and a
-    fraction in ``real`` precision.  The first strobe lies at most half a
-    symbol before sample 0 and the last instants at most a symbol after the
-    record's end: ``margin=sps`` covers both."""
-    C, k = pos.shape
-    step = np.diff(pos, axis=-1, append=2 * pos[:, -1:] - pos[:, -2:-1])
-    base_k = np.floor(pos)
-    frac_k = (pos - base_k).astype(np.float32)  # symbol-rate, in [0, 1)
-    out = xp.empty((C, k * sps), dtype=x.dtype)
-    j = xp.arange(sps, dtype=real)
-    for c in range(C):
-        q = (
-            xp.asarray(frac_k[c], dtype=real)[:, None]
-            + j[None, :] * xp.asarray(step[c] / sps, dtype=real)[:, None]
-        )
-        whole = xp.floor(q)
-        base = (
-            xp.asarray(base_k[c], dtype=xp.int64)[:, None] + whole.astype(xp.int64)
-        ).ravel()
-        frac = (q - whole).ravel()
-        out[c] = _interpolate(x[c : c + 1], base, frac, margin=sps)[0]
-    return out
+    per channel, each formed in float64; the last interval repeats the one
+    before it."""
+    knots = np.concatenate([pos, 2 * pos[:, -1:] - pos[:, -2:-1]], axis=-1)
+    return interpolate_piecewise(x, knots, sps)
 
 
-def _resample_static(x: ArrayType, xp: Any, ppm: np.ndarray, real: Any) -> ArrayType:
+def _resample_static(x: ArrayType, ppm: np.ndarray) -> ArrayType:
     """Output ``n`` at input ``n · (1 + ε)``, per channel, trimmed to the
     shortest."""
-    n_in = x.shape[-1]
     rates = 1.0 + ppm * 1e-6
-    n_out = min(math.floor((n_in - 1) / r) + 1 for r in rates)
-    out = xp.empty((x.shape[0], n_out), dtype=x.dtype)
-    for c, rate in enumerate(rates):
-        base, frac = _stretched_instants(n_out, float(rate), real, xp)
-        out[c] = _interpolate(x[c : c + 1], base, frac)[0]
-    return out
+    n_out = min(math.floor((x.shape[-1] - 1) / r) + 1 for r in rates)
+    knots = np.stack([np.zeros_like(rates), n_out * rates], axis=-1)
+    return interpolate_piecewise(x, knots, n_out)

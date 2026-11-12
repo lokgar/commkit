@@ -6,6 +6,7 @@ from typing import Any
 import numpy as np
 
 from ..backend import ArrayType, dispatch, to_device
+from ..mapping._lattice import square_grid
 from ._common import _Context, _Phase, _resolve_pll_gains
 from .corrections import (
     _HISTORY_SPAN,
@@ -16,244 +17,12 @@ from .corrections import (
 
 __all__ = ["PLL"]
 
-_NUMBA_PLL: dict = {}
 
+def _get_numba_dd_pll() -> Any:
+    """The PLL kernel: one loop per channel, or one shared by the channels."""
+    from . import _numba_loops
 
-def _get_numba_dd_pll():
-    """JIT-compile and cache the Numba DD-PLL sample-wise loop kernel.
-
-    Returns
-    -------
-    callable
-        Numba-compiled ``_dd_pll_loop``.
-    """
-    if "dd_pll" not in _NUMBA_PLL:
-        import numba
-
-        @numba.njit(cache=True, fastmath=True, nogil=True)
-        def _dd_pll_loop(
-            sym,
-            const_r,
-            const_i,
-            mu,
-            beta,
-            phi0,
-            freq0,
-            is_sq_qam,
-            levels,
-            d_grid,
-            lev_min,
-            side,
-        ):
-            """Run one decision-directed PLL per channel over the symbols (Numba).
-
-            Parameters
-            ----------
-            sym : numpy.ndarray
-                Received symbols, complex64 or complex128, ``(C, N)``; each is
-                widened to float64 as it is read.
-            const_r, const_i : numpy.ndarray
-                Real and imaginary parts of the constellation, float64, ``(M,)``.
-            mu : float
-                Proportional (phase) gain: corrects the instantaneous phase error.
-            beta : float
-                Integral (frequency) gain: tracks a residual frequency drift; 0 for
-                a first-order loop.
-            phi0 : float
-                Initial phase in radians.
-            freq0 : float
-                Initial frequency correction in radians per symbol.
-            is_sq_qam : bool
-                The constellation is a square QAM grid: decide by rounding, O(1),
-                instead of the O(M) search.
-            levels : numpy.ndarray
-                Sorted distinct axis levels of the square grid, float64, ``(side,)``;
-                unused otherwise.
-            d_grid : float
-                Grid spacing, ``levels[1] - levels[0]``.
-            lev_min : float
-                Smallest level, ``levels[0]``.
-            side : int
-                Points per axis, ``sqrt(M)``.
-
-            Returns
-            -------
-            numpy.ndarray
-                Per-symbol phase ``φ[c, n]``, float64, ``(C, N)``.
-            """
-            C = sym.shape[0]
-            N = sym.shape[1]
-            M = len(const_r)
-            phase_est = np.empty((C, N), dtype=np.float64)
-
-            for c in range(C):
-                phi = phi0
-                freq = freq0
-                for n in range(N):
-                    # Rotate received symbol by current phase estimate:
-                    # y[n] = s[n] · exp(-jφ[n])
-                    cos_phi = np.cos(phi)
-                    sin_phi = np.sin(phi)
-                    sr = np.float64(sym[c, n].real)
-                    si = np.float64(sym[c, n].imag)
-                    yr = sr * cos_phi + si * sin_phi
-                    yi = -sr * sin_phi + si * cos_phi
-
-                    # Hard decision: the nearest constellation point
-                    if is_sq_qam:
-                        # O(1) grid rounding for square QAM
-                        r_idx = int(round((yr - lev_min) / d_grid))
-                        if r_idx < 0:
-                            r_idx = 0
-                        elif r_idx >= side:
-                            r_idx = side - 1
-                        d_r = levels[r_idx]
-                        i_idx = int(round((yi - lev_min) / d_grid))
-                        if i_idx < 0:
-                            i_idx = 0
-                        elif i_idx >= side:
-                            i_idx = side - 1
-                        d_i = levels[i_idx]
-                    else:
-                        min_d2 = (yr - const_r[0]) ** 2 + (yi - const_i[0]) ** 2
-                        d_r = const_r[0]
-                        d_i = const_i[0]
-                        for k in range(1, M):
-                            d2 = (yr - const_r[k]) ** 2 + (yi - const_i[k]) ** 2
-                            if d2 < min_d2:
-                                min_d2 = d2
-                                d_r = const_r[k]
-                                d_i = const_i[k]
-
-                    # Cross-product phase error:  e = Im(y · d*) = yi·d_r - yr·d_i
-                    e = yi * d_r - yr * d_i
-
-                    # Record the phase used to derotate symbol n - before the update.
-                    phase_est[c, n] = phi
-
-                    # 2nd-order loop filter (reduces to 1st order when beta=0):
-                    #   φ[n+1] = φ[n] + μ·e[n] + ν[n]
-                    #   ν[n]   = ν[n-1] + β·e[n]
-                    phi = phi + mu * e + freq
-                    freq = freq + beta * e
-
-            return phase_est
-
-        _NUMBA_PLL["dd_pll"] = _dd_pll_loop
-
-    return _NUMBA_PLL["dd_pll"]
-
-
-def _get_numba_dd_pll_joint():
-    """JIT-compile and cache the joint-channel DD-PLL PI kernel.
-
-    Averages the cross-product phase error across C channels at each symbol
-    before updating the single shared phase/frequency state.  This is the
-    MVUE joint estimator for shared-LO systems.
-
-    Returns
-    -------
-    callable
-        Numba-compiled ``_dd_pll_joint_loop``.
-    """
-    if "dd_pll_joint" not in _NUMBA_PLL:
-        import numba
-
-        @numba.njit(cache=True, fastmath=True, nogil=True)
-        def _dd_pll_joint_loop(
-            sym,
-            const_r,
-            const_i,
-            mu,
-            beta,
-            phi0,
-            freq0,
-            is_sq_qam,
-            levels,
-            d_grid,
-            lev_min,
-            side,
-        ):
-            """Run one decision-directed PLL shared by all channels (Numba).
-
-            The phase error is averaged over the channels at each symbol and drives
-            one PI loop.
-
-            Parameters
-            ----------
-            sym : numpy.ndarray
-                Received symbols, complex64 or complex128, ``(C, N)``; each is
-                widened to float64 as it is read.
-            const_r, const_i : numpy.ndarray
-                Real and imaginary parts of the constellation, float64, ``(M,)``.
-            mu, beta, phi0, freq0 : float
-                Loop gains and initial state, as for ``_dd_pll_loop``.
-            is_sq_qam : bool
-                Decide by rounding on a square QAM grid.
-            levels : numpy.ndarray
-                Axis levels of the square grid, float64, ``(side,)``.
-            d_grid, lev_min : float
-                Grid spacing and smallest level.
-            side : int
-                Points per axis.
-
-            Returns
-            -------
-            numpy.ndarray
-                The shared phase ``φ[n]``, float64, ``(N,)``; the caller copies it to
-                every channel.
-            """
-            C = sym.shape[0]
-            N = sym.shape[1]
-            M = len(const_r)
-            phase_est = np.empty(N, dtype=np.float64)
-            phi = phi0
-            freq = freq0
-
-            for n in range(N):
-                cos_phi = np.cos(phi)
-                sin_phi = np.sin(phi)
-                e_sum = 0.0
-                for c in range(C):
-                    sr = np.float64(sym[c, n].real)
-                    si = np.float64(sym[c, n].imag)
-                    yr = sr * cos_phi + si * sin_phi
-                    yi = -sr * sin_phi + si * cos_phi
-                    if is_sq_qam:
-                        r_idx = int(round((yr - lev_min) / d_grid))
-                        if r_idx < 0:
-                            r_idx = 0
-                        elif r_idx >= side:
-                            r_idx = side - 1
-                        d_r = levels[r_idx]
-                        i_idx = int(round((yi - lev_min) / d_grid))
-                        if i_idx < 0:
-                            i_idx = 0
-                        elif i_idx >= side:
-                            i_idx = side - 1
-                        d_i = levels[i_idx]
-                    else:
-                        min_d2 = (yr - const_r[0]) ** 2 + (yi - const_i[0]) ** 2
-                        d_r = const_r[0]
-                        d_i = const_i[0]
-                        for k in range(1, M):
-                            d2 = (yr - const_r[k]) ** 2 + (yi - const_i[k]) ** 2
-                            if d2 < min_d2:
-                                min_d2 = d2
-                                d_r = const_r[k]
-                                d_i = const_i[k]
-                    e_sum += yi * d_r - yr * d_i
-                # Average error across channels - MVUE for shared LO
-                e = e_sum / float(C)
-                phase_est[n] = phi
-                phi = phi + mu * e + freq
-                freq = freq + beta * e
-
-            return phase_est
-
-        _NUMBA_PLL["dd_pll_joint"] = _dd_pll_joint_loop
-
-    return _NUMBA_PLL["dd_pll_joint"]
+    return _numba_loops.dd_pll
 
 
 @dataclass(frozen=True)
@@ -270,10 +39,12 @@ class PLL:
     Parameters
     ----------
     normalized_bandwidth : float, default 1e-3
-        One-sided loop bandwidth ``B·T`` in ``(0, 0.5)``, a fraction of the
-        symbol rate (not Hz: ``1e-3`` at 32 GBd is 32 MHz).  Gives
-        critically damped gains ``μ = 4BT``, ``β = 4(BT)²``.  Used when
-        ``proportional_gain`` is not given.
+        Nominal one-sided loop bandwidth ``B·T`` in ``(0, 0.5)``, a fraction
+        of the symbol rate (not Hz: ``1e-3`` at 32 GBd is 32 MHz).  Gives
+        critically damped gains ``μ = 4BT``, ``β = 4(BT)²``: ``ζ = 1`` and
+        ``ω_n T = 2BT``, whose noise bandwidth is ``1.25·B·T`` (``B·T`` is
+        exact for a first-order loop only).  Used when ``proportional_gain``
+        is not given.
     proportional_gain : float, optional
         Raw proportional gain ``μ``; overrides ``normalized_bandwidth``.
         Typical values ``1e-3`` (high-order QAM, high SNR) to ``5e-2``
@@ -312,7 +83,7 @@ class PLL:
         bt = self.normalized_bandwidth
         if not (0.0 < bt < 0.5):
             raise ValueError(
-                f"normalized_bandwidth must be in (0, 0.5) (a fraction of the "
+                f"PLL: normalized_bandwidth must be in (0, 0.5) (a fraction of the "
                 f"symbol rate), got {bt}."
             )
         # validates integral_gain
@@ -364,7 +135,7 @@ def _pll(symbols: ArrayType, method: PLL, ctx: _Context) -> _Phase:
     # point is found by rounding to the closest level per axis.  The levels
     # are float64, like the loop: the decided point is exactly a
     # constellation point.
-    grid = constellation._square_grid
+    grid = square_grid(constellation)
     _is_sq_qam = grid is not None
     if grid is not None:
         _lev_min, _d_grid, _side, _ = grid
@@ -391,13 +162,9 @@ def _pll(symbols: ArrayType, method: PLL, ctx: _Context) -> _Phase:
     )
 
     joint = method.joint_channels and C > 1
-    if joint:
-        phi = _get_numba_dd_pll_joint()(symbols_cpu, *loop_args)[None, :]
-    else:
-        phi = _get_numba_dd_pll()(symbols_cpu, *loop_args)
+    phi = _get_numba_dd_pll()(symbols_cpu, joint, *loop_args)  # (1 or C, N)
     phi = _repair_slips(
         phi,
-        np,
         method.cycle_slip,
         int(constellation.rotational_symmetry),
         1,

@@ -246,7 +246,7 @@ class _InlineCpr:
     def _slip(self, i, phi):
         hist = self.hist[i][-self.history :]
         if hist:
-            if len(hist) < 10:
+            if len(hist) < min(10, self.history):
                 pred = hist[-1]
             else:
                 slope, icpt = np.polyfit(np.arange(len(hist)), hist, 1)
@@ -760,11 +760,18 @@ def gardner_reference(
     """Gardner clock recovery, one loop per channel; strobe positions in
     samples of the input, ``(C, K)``.
 
-    Each channel is divided by its RMS.  Calibration: the mean detector
-    output over symbols ``1 .. num_cal`` at strobe offsets ``j/8`` symbol is
-    fitted with ``-A sin(2π(τ - τ0))``; ``K_d = 2πA``, ``μ = 4BT/K_d``,
-    ``β = 4(BT)²/K_d``, first strobe at ``τ0 · sps`` (``τ0`` in
-    ``[-0.5, 0.5)``).  Loop: the detector at strobe ``p`` uses the previous
+    Each channel is divided by its RMS.  Calibration: symbols
+    ``1 .. num_cal`` in blocks of ``L = min(num_cal, max(32, 0.1/max_offset))``
+    symbols (the last partial block dropped); per block, the mean detector
+    output at strobe offsets ``j/8`` symbol gives the first-harmonic phasor
+    ``z_b = A e^{2πiτ_b}`` of ``-A sin(2π(τ - τ_b))``.  The drift ``δ`` (cycles
+    per block, ``16 B + 1`` points across ``[-0.5, 0.5]``, or 0 for one
+    block) maximizes ``|Σ z_b e^{-2πiδb}|``; then
+    ``A = |mean_b z_b e^{-2πiδb}| / sinc(δ)``, ``τ0`` its angle over 2π less
+    ``δ (L + 1) / 2L``, wrapped to ``[-0.5, 0.5)``.  ``K_d = 2πA``,
+    ``μ = 4BT/K_d``, ``β = 4(BT)²/K_d``, first strobe at ``τ0 · sps``, ``ν``
+    starting at ``δ / L`` held within ``±max_offset``.  Loop: the detector
+    at strobe ``p`` uses the previous
     symbol and the midpoint one and half a period ``sps(1 + ν)`` before it;
     ``e_k`` sets the spacing ``sps(1 + ν + μ e)`` after strobe ``k + 1``,
     ``ν += β e`` at the same time and held within ``±max_offset``, spacing
@@ -779,8 +786,11 @@ def gardner_reference(
     rows = []
     for c in range(C):
         offs = np.arange(8) / 8
-        curve = np.array(
-            [
+        L = min(num_cal, max(32, int(0.1 / max_offset)))
+        B = num_cal // L
+        z = []
+        for b in range(B):
+            curve = [
                 np.mean(
                     [
                         _gardner_error(
@@ -790,19 +800,29 @@ def gardner_reference(
                             pad + (k + o) * sps,
                             power,
                         )
-                        for k in range(1, num_cal + 1)
+                        for k in range(1 + b * L, 1 + (b + 1) * L)
                     ]
                 )
                 for o in offs
             ]
+            a = 2 * np.mean(curve * np.cos(2 * np.pi * offs))
+            bb = 2 * np.mean(curve * np.sin(2 * np.pi * offs))
+            z.append(1j * (a + 1j * bb))
+        grid = np.linspace(-0.5, 0.5, 16 * B + 1) if B > 1 else [0.0]
+        best = max(
+            grid,
+            key=lambda d: abs(
+                sum(zb * np.exp(-2j * np.pi * d * b) for b, zb in enumerate(z))
+            ),
         )
-        a = 2 * np.mean(curve * np.cos(2 * np.pi * offs))
-        b = 2 * np.mean(curve * np.sin(2 * np.pi * offs))
-        kd = 2 * np.pi * np.hypot(a, b)
-        tau0 = (np.arctan2(a, -b) / (2 * np.pi) + 0.5) % 1.0 - 0.5
+        ref = np.mean([zb * np.exp(-2j * np.pi * best * b) for b, zb in enumerate(z)])
+        kd = 2 * np.pi * abs(ref) / np.sinc(best)
+        tau0 = np.angle(ref) / (2 * np.pi) - best * (L + 1) / (2 * L)
+        tau0 = (tau0 + 0.5) % 1.0 - 0.5
         mu = 4 * normalized_bandwidth / kd
         beta = 4 * normalized_bandwidth**2 / kd
-        p, nu, e_last, pos = pad + tau0 * sps, 0.0, 0.0, []
+        nu = min(max(best / L, -max_offset), max_offset)
+        p, e_last, pos = pad + tau0 * sps, 0.0, []
         while p <= pad + n - 1:
             period = sps * (1 + nu)
             e = _gardner_error(xs[c], p - period, p - period / 2, p, power)
@@ -814,3 +834,33 @@ def gardner_reference(
         rows.append(pos)
     k = min(len(r) for r in rows)
     return np.array([r[:k] for r in rows])
+
+
+def windowed_sinc_reference(
+    samples: np.ndarray, positions: np.ndarray, half: int
+) -> np.ndarray:
+    """Band-limited interpolation of ``samples`` ``(C, N)`` at ``positions``
+    ``(M,)`` (samples), ``(C, M)`` complex128: taps ``h(u) = sinc(u) w(u)`` at
+    the distances ``u = k - p`` to the ``2 · half`` samples ``k`` from
+    ``floor(p) - half + 1`` to ``floor(p) + half``, with the 4-term
+    Blackman-Harris window ``w(u) = 0.35875 + 0.48829 cos(πu/half) +
+    0.14128 cos(2πu/half) + 0.01168 cos(3πu/half)``; samples outside the
+    record are zero, and a position on a sample returns it.
+    """
+    x = np.atleast_2d(np.asarray(samples, dtype=np.complex128))
+    C, n = x.shape
+    out = np.zeros((C, len(positions)), dtype=np.complex128)
+    for m, p in enumerate(positions):
+        i = int(np.floor(p))
+        for k in range(i - half + 1, i + half + 1):
+            if not 0 <= k < n:
+                continue
+            u = k - p
+            w = (
+                0.35875
+                + 0.48829 * np.cos(np.pi * u / half)
+                + 0.14128 * np.cos(2 * np.pi * u / half)
+                + 0.01168 * np.cos(3 * np.pi * u / half)
+            )
+            out[:, m] += np.sinc(u) * w * x[:, k]
+    return out

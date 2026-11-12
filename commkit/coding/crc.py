@@ -107,7 +107,7 @@ class CRC(_Code):
         return f"CRC(0x{self.polynomial:X}, degree={self.degree}, k={self.k})"
 
     @classmethod
-    def nr(cls, name: str, info_bits: int) -> CRC:
+    def nr(cls, name: str, *, info_bits: int) -> CRC:
         """A CRC of 3GPP TS 38.212 clause 5.1 (5G NR; LTE uses 24A and 24B).
 
         Parameters

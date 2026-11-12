@@ -343,3 +343,16 @@ class TestBlockBlindMIMO:
         np.testing.assert_array_equal(scoring.ser(y[:, 10000:], ref[:, 10000:], c), 0.0)
         corr = scoring.stream_correlation(y[:, 10000:], ref[:, 10000:])
         assert corr[0, 1] < 0.05 and corr[1, 0] < 0.05, corr
+
+
+def test_block_cma_default_step_follows_the_constellation(xp, xpt):
+    """block_cma's default is ``min(μ₀, 0.5 / block_size) / sps`` with ``μ₀``
+    the per-symbol default of cma: 1e-3 for 16-QAM, 1.6e-4 for 64-QAM."""
+    from commkit.equalization._common import _cma_profile
+
+    for c in (Constellation.qam(16), Constellation.qam(64)):
+        rx = make_channel_signal(c, 4096, esn0_db=30.0, seed=1, xp=xp)
+        kw = dict(num_taps=11, block_size=64)
+        mu0 = 1e-3 * _cma_profile(c)[2]
+        explicit = block_cma(rx, step_size=min(mu0, 0.5 / 64) / 2, **kw)
+        xpt.assert_array_equal(block_cma(rx, **kw).y_hat, explicit.y_hat)

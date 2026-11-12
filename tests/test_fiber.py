@@ -95,6 +95,34 @@ def test_fused_dbp_matches_plain_stages(xp, monkeypatch):
 
 
 @pytest.mark.gpu_only
+def test_fused_dispersion_phase_of_a_wideband_link(xp):
+    """20 x 80 km at 1 THz, linear, one step per span: the stage phase
+    reaches 10^7 rad at the band edge.  The fused kernels take it reduced
+    modulo 2π in float64 and land within 6 dB of the CPU's complex64 error
+    against complex128 (measured -101 and -107 dB); scaling a float32 phase
+    of 1 km in the kernel rounded it by 6e-8 of its size per stage (-60
+    dB)."""
+    rng = np.random.default_rng(0)
+    n = 1 << 16
+    x = rng.standard_normal((2, n)) + 1j * rng.standard_normal((2, n))
+    spectrum = np.fft.fft(x, axis=-1)
+    spectrum[:, np.abs(np.fft.fftfreq(n)) > 0.3] = 0.0
+    x = np.fft.ifft(spectrum, axis=-1)
+    kw = dict(
+        center_wavelength_nm=1550.0,
+        fiber=Fiber(nonlinearity_per_w_km=0.0),
+        span_length_km=80.0,
+        num_spans=20,
+        launch_power_dbm=0.0,
+        steps_per_span=1,
+        sampling_rate=1e12,
+    )
+    ref = apply_fiber_propagation(x, **kw)  # complex128 on the CPU
+    gpu = apply_fiber_propagation(xp.asarray(x.astype(np.complex64)), **kw)
+    assert 20 * np.log10(_rel(gpu, ref)) < -95
+
+
+@pytest.mark.gpu_only
 def test_gpu_matches_cpu(xp):
     """Noiseless and PMD-free, the GPU field equals the CPU field up to
     float32 rounding (the noise realizations differ between devices)."""

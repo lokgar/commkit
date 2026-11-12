@@ -10,8 +10,9 @@ Conventions: ``x`` ``(C, N)`` complex64, normalized to unit mean power and
 zero-padded by ``pad`` samples at both ends (at least ``2 · sps + 10``:
 the loop reads a symbol before its first strobe, the interpolator eight
 samples on); positions are float64 sample indices into the padded record.
-The detector interpolates with a 16-tap windowed sinc (the output is
-resampled afterwards by the 48-tap interpolator of :mod:`commkit.multirate`).  The
+The detector interpolates with the 16-tap form of the windowed sinc in
+``commkit/_numba_interpolation.py`` (the output is resampled afterwards by
+its 48-tap form).  The
 detector output is negative when the strobes are late, for both methods:
 
 - classical: ``e = Re{m_k · conj(y_{k-1} - y_k)}``;
@@ -30,6 +31,8 @@ point in proportion to the gain (0.016 symbol at ``B·T = 1e-3`` for a
 import numba
 import numpy as np
 
+from .._numba_interpolation import interp
+
 _fast = numba.njit(cache=True, fastmath=True, nogil=True)
 _step = numba.njit(inline="always", nogil=True)
 
@@ -40,37 +43,11 @@ _HALF = 8
 
 
 @_step
-def _interp(x, c, p):
-    """Windowed-sinc interpolation of channel ``c`` of ``x`` at ``p``."""
-    i = int(np.floor(p))
-    mu = p - i
-    if mu == 0.0:
-        return x[c, i].real, x[c, i].imag
-    s = np.sin(np.pi * mu)
-    re = 0.0
-    im = 0.0
-    sign = 1.0 if (_HALF - 1) % 2 == 0 else -1.0  # (-1)^t at t = -(_HALF - 1)
-    for t in range(-_HALF + 1, _HALF + 1):
-        u = t - mu
-        # sin(π(t - μ)) = -(-1)^t · sin(πμ)
-        sinc = -sign * s / (np.pi * u)
-        cw = np.cos(np.pi * (u / _HALF + 1.0))
-        window = (
-            0.35875 - 0.48829 * cw + 0.14128 * (2.0 * cw * cw - 1.0)
-        ) - 0.01168 * (4.0 * cw * cw * cw - 3.0 * cw)
-        h = sinc * window
-        re += h * x[c, i + t].real
-        im += h * x[c, i + t].imag
-        sign = -sign
-    return re, im
-
-
-@_step
 def _ted(x, c, p_prev, p_mid, p, power):
     """Timing error at the strobe ``p`` (negative when late)."""
-    a_re, a_im = _interp(x, c, p_prev)
-    m_re, m_im = _interp(x, c, p_mid)
-    b_re, b_im = _interp(x, c, p)
+    a_re, a_im = interp(x, c, p_prev, _HALF)
+    m_re, m_im = interp(x, c, p_mid, _HALF)
+    b_re, b_im = interp(x, c, p, _HALF)
     if power:
         pa = a_re * a_re + a_im * a_im
         pb = b_re * b_re + b_im * b_im
@@ -79,22 +56,24 @@ def _ted(x, c, p_prev, p_mid, p, power):
 
 
 @_fast
-def ted_curve(x, pad, sps, offsets, num_symbols, power):
-    """Mean detector output at fixed strobe offsets (open loop).
+def ted_curve(x, pad, sps, offsets, block, num_blocks, power):
+    """Mean detector output at fixed strobe offsets (open loop), per block.
 
-    Strobes at ``pad + (k + offset) · sps`` for ``k = 1 .. num_symbols``,
-    one row of means per channel: ``(C, len(offsets))`` float64.
+    Strobes at ``pad + (k + offset) · sps``; block ``b`` averages symbols
+    ``k = 1 + b · block .. (b + 1) · block``.  Returns
+    ``(C, num_blocks, len(offsets))`` float64.
     """
     C = x.shape[0]
     J = offsets.shape[0]
-    out = np.zeros((C, J))
+    out = np.zeros((C, num_blocks, J))
     for c in range(C):
-        for j in range(J):
-            acc = 0.0
-            for k in range(1, num_symbols + 1):
-                p = pad + (k + offsets[j]) * sps
-                acc += _ted(x, c, p - sps, p - 0.5 * sps, p, power)
-            out[c, j] = acc / num_symbols
+        for b in range(num_blocks):
+            for j in range(J):
+                acc = 0.0
+                for k in range(1 + b * block, 1 + (b + 1) * block):
+                    p = pad + (k + offsets[j]) * sps
+                    acc += _ted(x, c, p - sps, p - 0.5 * sps, p, power)
+                out[c, b, j] = acc / block
     return out
 
 
@@ -111,11 +90,11 @@ def _clamp_step(step, sps):
 
 
 @_step
-def _track(x, c0, c1, pad, sps, p0, mu, beta, nu_max, power, n_valid, pos, err):
+def _track(x, c0, c1, pad, sps, p0, nu0, mu, beta, nu_max, power, n_valid, pos, err):
     """One loop over channels ``c0 .. c1 - 1`` (their mean error drives it);
     fills ``pos`` and ``err`` and returns the number of strobes.  The
-    integrator stays within ``±nu_max``."""
-    nu = 0.0
+    integrator starts at ``nu0`` and stays within ``±nu_max``."""
+    nu = nu0
     e_last = 0.0
     p = p0
     step = float(sps)
@@ -139,7 +118,9 @@ def _track(x, c0, c1, pad, sps, p0, mu, beta, nu_max, power, n_valid, pos, err):
 
 
 @numba.njit(cache=True, fastmath=True, nogil=True, parallel=True)
-def gardner_loop(x, pad, sps, p0, mu, beta, nu_max, power, joint, n_valid, num_out):
+def gardner_loop(
+    x, pad, sps, p0, nu0, mu, beta, nu_max, power, joint, n_valid, num_out
+):
     """Track the symbol strobes of every channel (or one joint loop).
 
     Parameters
@@ -153,6 +134,8 @@ def gardner_loop(x, pad, sps, p0, mu, beta, nu_max, power, joint, n_valid, num_o
     p0 : numpy.ndarray
         First strobe per row in padded indices, float64 (one row per channel,
         or one for the joint loop).
+    nu0 : numpy.ndarray
+        Starting integrator ``ν`` per row, float64.
     mu, beta : numpy.ndarray
         Proportional and integral gains per row, float64: the strobe spacing
         is ``sps · (1 + ν + μ·e)`` and ``ν += β·e``.
@@ -190,6 +173,7 @@ def gardner_loop(x, pad, sps, p0, mu, beta, nu_max, power, joint, n_valid, num_o
             pad,
             sps,
             p0[r],
+            nu0[r],
             mu[r],
             beta[r],
             nu_max,

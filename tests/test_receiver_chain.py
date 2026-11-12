@@ -48,7 +48,7 @@ class TestCodedSisoChain:
     when each impairment is undone."""
 
     C16 = Constellation.qam(16)
-    CODE = LDPCCode.dvbs2("3/4", "short")
+    CODE = LDPCCode.dvbs2("3/4", frame="short")
     ESN0_DB = 14.0
     TRAIN = 2000
 
@@ -67,7 +67,7 @@ class TestCodedSisoChain:
         x = tx.replace(samples=xp.concatenate([guard, tx.samples, guard]))
         isi = xp.asarray([0.1j, 1.0, 0.25 - 0.15j, -0.08], dtype=x.samples.dtype)
         x = ck.filtering.fir_filter(x, isi)
-        x = ck.timing.fft_fractional_delay(x, delay=0.4)
+        x = ck.timing.apply_delay(x, delay=0.4)
         x = _frequency_offset(x, 0.9e9)
         x = ck.impairments.apply_phase_noise(x, linewidth=2e5, rng=2)
         rx = ck.impairments.apply_awgn(x, esn0_db=self.ESN0_DB, rng=3)
@@ -99,7 +99,7 @@ class TestCodedSisoChain:
 
     def _score(self, payload: Any) -> tuple[float, float]:
         skip = 2 * self.TRAIN
-        nv = float(ck.metrics.estimate_noise_variance(payload, num_skip_symbols=skip))
+        nv = float(ck.metrics.noise_variance(payload, num_skip_symbols=skip))
         dec = decode(ck.mapping.compute_llr(payload, noise_var=nv), code=self.CODE)
         pre = ck.metrics.ber(payload, num_skip_symbols=skip)
         return pre, ck.metrics.fer(dec, payload)
@@ -278,7 +278,7 @@ class TestIntensityModulationChain:
         b, a = sos[:, :3], sos[:, 3:]
         k = np.arange(3)
         group_delay = float(np.sum(b @ k / b.sum(axis=1) - a @ k / a.sum(axis=1)))
-        intensity = ck.timing.fft_fractional_delay(
+        intensity = ck.timing.apply_delay(
             ck.filtering.iir_filter(tx, sos), delay=-(group_delay + 1.5)
         )
         xp = intensity.xp

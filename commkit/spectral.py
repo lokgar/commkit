@@ -13,6 +13,7 @@ from typing import Any, cast
 
 import numpy as np
 
+from . import _fft
 from ._array import as_2d, restore_1d
 from .backend import ArrayType, dispatch
 from .core._signal_adapter import S, adapt_signal
@@ -133,8 +134,8 @@ def shift_frequency(
     """Shift the spectrum by a frequency (complex mixing).
 
     ``y[n] = x[n] · exp(j 2π f n / f_s)``, with ``f`` snapped to the FFT grid
-    ``f_s / N`` (see :func:`grid_frequency`; a warning is logged when it
-    moves), so the shift completes a whole number of cycles over the record
+    ``f_s / N`` (see :func:`grid_frequency`; the INFO line gives the applied
+    and the requested value), so the shift completes a whole number of cycles over the record
     and a periodic record stays periodic.
 
     Parameters
@@ -169,16 +170,12 @@ def shift_frequency(
         frequency, sampling_rate=sampling_rate, num_samples=n
     )
 
-    if not np.isclose(frequency, actual_offset):
-        logger.warning(
-            "Requested offset %.3f Hz quantized to %.3f Hz (step %.3f Hz) "
-            "to maintain phase continuity.",
-            frequency,
-            actual_offset,
-            df,
-        )
-    else:
-        logger.debug("Applying frequency offset: %.3f Hz.", actual_offset)
+    logger.info(
+        "Shifting by %.3f Hz (requested %.3f Hz, grid step %.3f Hz).",
+        actual_offset,
+        frequency,
+        df,
+    )
 
     # x · exp(j 2π f t): the phase in float64, the rotation in the samples'
     # precision (one fused kernel for complex64 on the GPU).
@@ -218,7 +215,8 @@ def add_pilot_tone(
         scalar places the same tone on every channel; a sequence of length
         ``C`` places one tone per channel (channel ``c`` gets
         ``frequency[c]``), as for tone-based polarization demultiplexing
-        (:func:`~commkit.equalization.estimate_polarization_tones`).
+        (:func:`~commkit.equalization.estimate_polarization` with
+        :class:`~commkit.equalization.PolarizationTones`).
         Each value is snapped to the FFT grid ``f_s/N`` (see Notes);
         :func:`grid_frequency` gives the applied value.
     sampling_rate : float, optional
@@ -254,8 +252,8 @@ def add_pilot_tone(
 
     Notes
     -----
-    Each requested frequency is snapped to the nearest FFT bin ``f_s/N`` (a
-    warning is logged when it moves), so the tone completes a whole number of
+    Each requested frequency is snapped to the nearest FFT bin ``f_s/N`` (the
+    INFO line gives the applied value), so the tone completes a whole number of
     cycles per record and loops seamlessly on an AWG/DAC.  The snapping error
     is at most ``f_s/(2N)``.  The phase ramp is computed and wrapped in
     float64, so long records keep their phase accuracy in complex64.
@@ -298,7 +296,7 @@ def add_pilot_tone(
     ]
     for f_in, f_out in zip(f_req, actual):
         if abs(f_out - f_in) > 1e-12 * max(1.0, abs(f_in)):
-            logger.warning(
+            logger.debug(
                 "add_pilot_tone: requested %.3f Hz quantized to %.3f Hz "
                 "(grid step fs/N=%.3f Hz) for buffer-periodic "
                 "(loop-seamless) playback.",
@@ -375,8 +373,12 @@ def welch_psd(
     """Estimate the power spectral density (PSD) with Welch's method.
 
     Averaging the periodograms of overlapping, windowed segments gives a
-    lower-variance estimate than one periodogram of the record
-    (``scipy.signal.welch`` on the input's device).
+    lower-variance estimate than one periodogram of the record.  The
+    definitions are those of ``scipy.signal.welch``: segments start at
+    sample 0 every ``nperseg - noverlap`` samples, as many as fit the
+    record.  The segments are transformed in batches on the input's device,
+    each periodogram in the input's precision, the mean accumulated in
+    float64.
 
     Parameters
     ----------
@@ -387,10 +389,12 @@ def welch_psd(
         input.  A value that disagrees with the Signal raises.
     nperseg : int, default 256
         Segment length in samples: longer segments resolve frequency more
-        finely, at a higher variance (fewer segments to average).
-    detrend : str or bool, default False
-        How to detrend each segment (``"constant"``, ``"linear"``, or
-        ``False`` for none).
+        finely, at a higher variance (fewer segments to average).  A record
+        shorter than ``nperseg`` is one segment of its own length, with a
+        WARNING.
+    detrend : str or bool or callable, default False
+        How to detrend each segment (``"constant"``, ``"linear"``, ``False``
+        for none, or a function of the segments, ``(..., nperseg)``).
     average : {"mean", "median"}, default "mean"
         How the segment periodograms are averaged; the median is more robust
         to transient outliers.
@@ -420,7 +424,10 @@ def welch_psd(
     Raises
     ------
     ValueError
-        If ``return_onesided=True`` for complex input.
+        If ``return_onesided=True`` for complex input, ``nperseg`` is not
+        positive or differs from the length of an array ``window``,
+        ``noverlap`` is not below ``nperseg``, ``nfft`` is below
+        ``nperseg``, or ``average``, ``scaling`` or ``detrend`` is unknown.
     """
     signal_adapter = adapt_signal(samples, function_name="welch_psd()")
     x = signal_adapter.array
@@ -437,22 +444,146 @@ def welch_psd(
     # For complex data, it always returns two-sided (0 to fs).
     return_onesided, shift = _validate_and_shift(xp, is_complex, return_onesided, "PSD")
 
-    f, Pxx = sp.signal.welch(
+    f, Pxx = _welch(
         x,
-        fs=sampling_rate,
-        window=window,
-        nperseg=nperseg,
-        noverlap=noverlap,
-        nfft=nfft,
-        detrend=detrend,
-        return_onesided=return_onesided,
-        scaling=scaling,
-        axis=axis,
-        average=average,
+        xp,
+        sp,
+        sampling_rate,
+        window,
+        nperseg,
+        noverlap,
+        nfft,
+        detrend,
+        return_onesided,
+        scaling,
+        average,
     )
-
     f, Pxx = shift(f, (Pxx, axis))
     return f, Pxx
+
+
+# Spectrum elements per batch of Welch segments (64 MB of complex64).
+_WELCH_ELEMENTS = 1 << 23
+
+
+def _welch(
+    x: ArrayType,
+    xp: Any,
+    sp: Any,
+    fs: float,
+    window: Any,
+    nperseg: int,
+    noverlap: int | None,
+    nfft: int | None,
+    detrend: Any,
+    onesided: bool,
+    scaling: str,
+    average: str | None,
+) -> tuple[ArrayType, ArrayType]:
+    """Welch's estimate of ``x`` (``(N,)`` or ``(C, N)``), unshifted.
+
+    ``scipy.signal.welch`` transforms one segment per FFT call, a Python
+    loop over the segments; here the segments are a strided view,
+    windowed and transformed in batches.
+    """
+    n = x.shape[-1]
+    real = x.real.dtype
+    if isinstance(window, str | tuple):
+        nperseg = int(nperseg)
+        if nperseg < 1:
+            raise ValueError(f"nperseg must be a positive integer, got {nperseg}.")
+        if 0 < n < nperseg:
+            logger.warning(
+                "welch_psd: nperseg=%s exceeds the record (%s samples); one "
+                "segment of %s samples.",
+                nperseg,
+                n,
+                n,
+            )
+            nperseg = n
+        win = sp.signal.get_window(window, max(nperseg, 1))
+    else:
+        win = xp.asarray(window)
+        if win.ndim != 1 or len(win) != nperseg:
+            raise ValueError(
+                f"window must be 1-D of length nperseg={nperseg}, got shape "
+                f"{tuple(win.shape)}."
+            )
+    nfft = nperseg if nfft is None else int(nfft)
+    if nfft < nperseg:
+        raise ValueError(f"nfft={nfft} must be at least nperseg={nperseg}.")
+    noverlap = nperseg // 2 if noverlap is None else int(noverlap)
+    if not 0 <= noverlap < nperseg:
+        raise ValueError(f"noverlap={noverlap} must lie in 0 .. nperseg - 1.")
+    if scaling not in ("density", "spectrum"):
+        raise ValueError(f"scaling must be 'density' or 'spectrum', got {scaling!r}.")
+    if average not in ("mean", "median"):
+        raise ValueError(f"average must be 'mean' or 'median', got {average!r}.")
+    if detrend in (False, None):
+        detrend_fn = None
+    elif detrend == "constant":
+        detrend_fn = lambda s: s - s.mean(axis=-1, keepdims=True)  # noqa: E731
+    elif detrend == "linear":
+        detrend_fn = lambda s: sp.signal.detrend(s, axis=-1, type="linear")  # noqa: E731
+    elif callable(detrend):
+        detrend_fn = detrend
+    else:
+        raise ValueError(
+            f"detrend must be 'constant', 'linear', False or a function, got "
+            f"{detrend!r}."
+        )
+
+    f = xp.fft.rfftfreq(nfft, 1 / fs) if onesided else xp.fft.fftfreq(nfft, 1 / fs)
+    if n == 0:
+        return f, xp.empty(x.shape, dtype=real)
+    win = xp.asarray(win, dtype=np.float64)
+    if scaling == "density":
+        scale = 1.0 / (fs * float(xp.sum(win * win)))
+    else:
+        scale = 1.0 / float(xp.sum(win)) ** 2
+    win = win.astype(real)
+
+    x2, was_1d = as_2d(x, name="samples")
+    num_ch = x2.shape[0]
+    hop = nperseg - noverlap
+    num_seg = (n - noverlap) // hop
+    if num_seg < 1:
+        raise ValueError(f"window of {nperseg} samples exceeds the record ({n}).")
+    s0, s1 = x2.strides
+    segments = xp.lib.stride_tricks.as_strided(  # a view, no copy
+        x2, shape=(num_ch, num_seg, nperseg), strides=(s0, hop * s1, s1)
+    )
+    transform = _fft.rfft if onesided else _fft.fft
+    batch = max(1, _WELCH_ELEMENTS // (num_ch * nfft))
+    total = xp.zeros((num_ch, len(f)), dtype=np.float64)
+    periodograms = []
+    for k in range(0, num_seg, batch):
+        seg = segments[:, k : k + batch]
+        if detrend_fn is not None:
+            seg = detrend_fn(seg).astype(x.dtype, copy=False)
+        spec = transform(seg * win, n=nfft, axis=-1)
+        p = spec.real**2 + spec.imag**2  # in the input's precision
+        if average == "mean":
+            total += xp.sum(p, axis=1, dtype=np.float64)
+        else:
+            periodograms.append(p)
+    if average == "mean":
+        pxx = total / num_seg
+    else:
+        p = xp.concatenate(periodograms, axis=1)
+        pxx = xp.median(p, axis=1) / _median_bias(num_seg)
+    pxx *= scale
+    if onesided:
+        pxx[:, 1 : -1 if nfft % 2 == 0 else None] *= 2
+    return f, restore_1d(was_1d, pxx.astype(real))
+
+
+def _median_bias(n: int) -> float:
+    """Bias of the median of ``n`` periodograms against their mean
+    (``scipy.signal``'s correction: Allen et al., Phys. Rev. D 85, 2012,
+    Appendix B)."""
+    ii_2 = 2 * np.arange(1.0, (n - 1) // 2 + 1)
+    return float(1 + np.sum(1.0 / (ii_2 + 1) - 1.0 / ii_2))
 
 
 @dataclass(frozen=True)
@@ -511,9 +642,9 @@ def spectrogram(
         (SciPy's default for spectrograms).
     nfft : int, optional
         FFT length, for zero-padded segments; ``None`` gives ``nperseg``.
-    detrend : str or bool, default False
-        How to detrend each segment (``"constant"``, ``"linear"``, or
-        ``False`` for none).
+    detrend : str or bool or callable, default False
+        How to detrend each segment (``"constant"``, ``"linear"``, ``False``
+        for none, or a function of the segments, ``(..., nperseg)``).
     return_onesided : bool, optional
         One-sided spectrum (``0`` to ``f_s/2``), only for real input.
         ``None`` gives one-sided for real and two-sided for complex input.

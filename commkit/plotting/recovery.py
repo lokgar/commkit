@@ -11,9 +11,9 @@ from typing import Any
 import numpy as np
 
 from .. import _fft
-from ..backend import to_device
+from ..backend import get_array_module, to_device
 from .theme import (
-    _decimate_minmax,
+    _device_channels,
     _finish,
     _get_axis,
     _host,
@@ -21,6 +21,8 @@ from .theme import (
     _require,
     _select,
     _series_label,
+    _set_eng_formatter,
+    _trace,
 )
 
 __all__ = [
@@ -42,6 +44,7 @@ def plot_carrier_phase_trajectory(
     legend: bool | None = None,
     show: bool = False,
     title: str = "Carrier Phase Trajectory",
+    max_points: int = 4000,
 ) -> tuple[Any, Any] | None:
     """Plot a per-symbol carrier-phase trajectory, all channels overlaid.
 
@@ -65,6 +68,9 @@ def plot_carrier_phase_trajectory(
         Call ``plt.show()`` and return ``None``.
     title : str, default "Carrier Phase Trajectory"
         Title of the figure.
+    max_points : int, default 4000
+        Points per trace; longer traces are drawn as their min/max envelope,
+        reduced on the data's device.  ``<= 0`` draws every point.
 
     Returns
     -------
@@ -75,21 +81,19 @@ def plot_carrier_phase_trajectory(
     from ..recovery import CarrierPhaseEstimate
 
     if isinstance(phase, CarrierPhaseEstimate):
-        phi_full, block_centers = phase.value, phase.block_centers
+        # Block methods only.
+        phi_full = phase.value
+        block_centers = getattr(phase, "block_centers", None)
     else:
         phi_full, block_centers = phase, None
-    phi_full = to_device(phi_full, "cpu")
-    if phi_full.ndim == 1:
-        phi_full = phi_full[None, :]
-    C, N = phi_full.shape
+    phi_deg = _device_channels(phi_full) * (180.0 / np.pi)
+    C = phi_deg.shape[0]
 
     fig, axi = _get_axis(ax)
 
-    sym_idx = np.arange(N)
     for i in range(C):
-        phi_deg = np.degrees(phi_full[i])
         curve_label = _series_label(label, f"Ch {i}" if C > 1 else None)
-        axi.plot(sym_idx, phi_deg, label=curve_label)
+        axi.plot(*_trace(phi_deg[i], max_points), label=curve_label)
 
     if block_centers is not None:
         for tc in np.asarray(to_device(block_centers, "cpu")):
@@ -103,9 +107,8 @@ def plot_carrier_phase_trajectory(
             label=f"DD start ({num_train_symbols})",
         )
 
-    phi_all = np.degrees(phi_full)
-    phi_mean = float(np.mean(phi_all))
-    phi_std = float(np.std(phi_all))
+    phi_mean = float(phi_deg.mean())
+    phi_std = float(phi_deg.std())
     axi.set_title(f"{title}  [$\\mu$={phi_mean:.1f}°,  $\\sigma$={phi_std:.2f}°]")
     axi.set_xlabel("Symbol Index")
     axi.set_ylabel("Phase [deg]")
@@ -127,17 +130,18 @@ def plot_pilot_phase_estimate(
     ax=None,
     show: bool = False,
     title: str = "Pilot Phase Estimate",
+    max_points: int = 4000,
 ) -> tuple[Any, Any] | None:
     """Plot the pilot phases of a pilot-based estimate with their linear fit.
 
-    For a :class:`~commkit.recovery.CarrierPhaseEstimate` (``PilotInterpolation``) a
+    For a :class:`~commkit.recovery.PilotInterpolationEstimate` (``PilotInterpolation``) a
     second panel shows the interpolated per-symbol trajectory; for a
-    :class:`~commkit.frequency.FrequencyOffsetEstimate` (``PilotSlope``)
+    :class:`~commkit.frequency.PilotSlopeEstimate` (``PilotSlope``)
     the fit is labeled with the estimated offset.
 
     Parameters
     ----------
-    estimate : CarrierPhaseEstimate or FrequencyOffsetEstimate
+    estimate : PilotInterpolationEstimate or PilotSlopeEstimate
         With ``pilot_indices`` and ``pilot_phase``.
     sampling_rate : float, default 1.0
         Sampling rate in Hz of the pilot indices (labels the fitted slope in
@@ -157,6 +161,9 @@ def plot_pilot_phase_estimate(
         Call ``plt.show()`` and return ``None``.
     title : str, default "Pilot Phase Estimate"
         Title of the figure.
+    max_points : int, default 4000
+        Points of the trajectory; a longer one is drawn as its min/max
+        envelope, reduced on the data's device.  ``<= 0`` draws every point.
 
     Returns
     -------
@@ -174,7 +181,7 @@ def plot_pilot_phase_estimate(
     is_phase = isinstance(estimate, CarrierPhaseEstimate)
     pilot_indices = _host(estimate.pilot_indices)
     phi_pilots_u = _host(pilot_phase)
-    phi_full = _host(estimate.value) if is_phase else None
+    phi_full = _device_channels(estimate.value) if is_phase else None
     f_est = None if is_phase else np.atleast_1d(_host(estimate.value))
     pilot_indices = to_device(pilot_indices, "cpu").astype(float)
     if phi_pilots_u.ndim == 1:
@@ -192,12 +199,6 @@ def plot_pilot_phase_estimate(
     has_full = phi_full is not None
     if quantity == "trajectory" and not has_full:
         raise ValueError("quantity='trajectory' requires a carrier-phase estimate")
-    if has_full:
-        phi_full = to_device(phi_full, "cpu")
-        if phi_full.ndim == 1:
-            phi_full = phi_full[None, :]
-        N = phi_full.shape[1]
-
     if not has_full:
         panels = tuple(p for p in panels if p != "trajectory")
     fig, axes = _panel_grid(ax, C, len(panels))
@@ -243,10 +244,8 @@ def plot_pilot_phase_estimate(
         if "trajectory" in panels:
             assert phi_full is not None
             ax2 = axes[i, panels.index("trajectory")]
-            sym_idx = np.arange(N)
             ax2.plot(
-                sym_idx,
-                np.degrees(phi_full[i]),
+                *_trace(phi_full[i] * (180.0 / np.pi), max_points),
                 alpha=0.4,
                 label=label or r"$\hat{\phi}$ (interpolated)",
             )
@@ -287,11 +286,12 @@ def plot_pilot_tone_phase_estimate(
     """Plot a ``PilotTone`` carrier-phase estimate against the tone spectrum.
 
     Two panels: ``|FFT(samples)|`` (dB) with the extraction passband
-    ``f_p ± B`` and the measured tone peaks, and the recovered phase.
+    ``f_p ± B`` and the measured tone peaks, and the recovered phase.  The
+    spectrum is computed and reduced on the samples' device.
 
     Parameters
     ----------
-    estimate : CarrierPhaseEstimate
+    estimate : PilotToneEstimate
         From ``estimate_carrier_phase(samples, method)``.
     samples : array_like or Signal
         The samples the estimate was made from.
@@ -318,8 +318,8 @@ def plot_pilot_tone_phase_estimate(
     title : str, default "CPR - Pilot Tone"
         Title of the figure.
     max_points : int, default 4000
-        Points per trace; longer traces are drawn as their min/max envelope.
-        ``<= 0`` draws every point.
+        Points per trace; longer traces are drawn as their min/max envelope,
+        reduced on the data's device.  ``<= 0`` draws every point.
 
     Returns
     -------
@@ -334,41 +334,31 @@ def plot_pilot_tone_phase_estimate(
     tones = _require(estimate, "tone_frequencies", name, "PilotTone")
     adapter = adapt_signal(samples, function_name=name)
     fs = float(adapter.resolve_fact("sampling_rate", sampling_rate))
+    theta_deg = _device_channels(estimate.value) * (180.0 / np.pi)
     if quantity == "phase":
-        theta = np.atleast_2d(_host(estimate.value))
         fig, axis = _get_axis(ax)
-        sample_idx = np.arange(theta.shape[1])
-        for i, row in enumerate(theta):
-            trace_label = _series_label(label, f"Ch {i}" if len(theta) > 1 else None)
-            n_d, th_d = _decimate_minmax(sample_idx, np.degrees(row), max_points)
-            axis.plot(n_d, th_d, label=trace_label)
+        for i, row in enumerate(theta_deg):
+            trace_label = _series_label(
+                label, f"Ch {i}" if len(theta_deg) > 1 else None
+            )
+            axis.plot(*_trace(row, max_points), label=trace_label)
         axis.set_title(f"{title} - Recovered phase")
         axis.set_xlabel("Sample Index")
         axis.set_ylabel("Phase [deg]")
-        if len(theta) > 1:
+        if len(theta_deg) > 1:
             axis.legend()
         return _finish((fig, axis), show, xlim=xlim, ylim=ylim, legend=legend)
-    x = np.atleast_2d(_host(adapter.array))
-    freqs = np.fft.fftfreq(x.shape[-1], d=1.0 / fs)
-    centers = np.atleast_1d(np.asarray(tones, dtype=float))[:, None]
-    passband = (np.abs(freqs[None, :] - centers) <= method.bandwidth).astype(float)
-    mag_spectrum = np.abs(_fft.fft(x, axis=-1))
-    window = np.broadcast_to(passband, x.shape)
-    f_tones = tones
-    theta = _host(estimate.value)
+    # The spectrum on the samples' device, in ascending frequency; only the
+    # drawn envelope is transferred.
+    x = _device_channels(adapter.array)
+    xp = get_array_module(x)
+    C, N = x.shape
+    mag = xp.fft.fftshift(xp.abs(_fft.fft(x, axis=-1)), axes=-1)
+    mag_db = 20.0 * xp.log10(xp.maximum(mag, xp.finfo(mag.dtype).tiny))
+    f_sorted = xp.fft.fftshift(xp.fft.fftfreq(N, d=1.0 / fs))
+    f_tones = np.atleast_1d(_host(tones)).astype(float)
     tone_frequency = method.frequency
     bandwidth = method.bandwidth
-    freqs = np.asarray(to_device(freqs, "cpu"), dtype=float)
-    mag_spectrum = to_device(mag_spectrum, "cpu")
-    window = to_device(window, "cpu")
-    if mag_spectrum.ndim == 1:
-        mag_spectrum = mag_spectrum[None, :]
-    if window.ndim == 1:
-        window = window[None, :]
-    if theta.ndim == 1:
-        theta = theta[None, :]
-    f_tones = np.atleast_1d(np.asarray(to_device(f_tones, "cpu"), dtype=float))
-    C, N = mag_spectrum.shape
 
     if quantity == "spectrum":
         fig, ax_spec = _get_axis(ax)
@@ -376,22 +366,17 @@ def plot_pilot_tone_phase_estimate(
         fig, grid = _panel_grid(ax, 1, 2)
         ax_spec, ax_phase = grid[0]
 
-    order = np.argsort(freqs)
-    f_sorted = freqs[order]
-    eps = 1e-300
-
     # Panel 1 - spectrum (dB) with extraction window on a twin axis.
     # Envelope-decimate the full-resolution traces: min/max preserves the tone
     # peak and the window edges that plain striding would skip over.
     ax_win = ax_spec.twinx() if annotations else None
     for i in range(C):
-        mag_db = 20.0 * np.log10(np.maximum(mag_spectrum[i][order], eps))
         curve_label = _series_label(label, f"Ch {i}" if C > 1 else None, "|X(f)|")
-        f_d, mag_d = _decimate_minmax(f_sorted, mag_db, max_points)
-        ax_spec.plot(f_d, mag_d, label=curve_label)
+        ax_spec.plot(*_trace(mag_db[i], max_points, x=f_sorted), label=curve_label)
         if ax_win is not None:
-            f_w, win_d = _decimate_minmax(f_sorted, window[i][order], max_points)
-            ax_win.plot(f_w, win_d, color="C3", alpha=0.4)
+            center = float(f_tones[min(i, len(f_tones) - 1)])
+            window = (xp.abs(f_sorted - center) <= bandwidth).astype(xp.float64)
+            ax_win.plot(*_trace(window, max_points, x=f_sorted), color="C3", alpha=0.4)
             ax_spec.axvline(
                 float(f_tones[i]),
                 color="C2",
@@ -416,6 +401,7 @@ def plot_pilot_tone_phase_estimate(
         ax_win.set_ylabel("Window W(f)", color="C3")
     ax_spec.set_title(f"{title} - Tone Spectrum")
     ax_spec.set_xlabel("Frequency [Hz]")
+    _set_eng_formatter(ax_spec, "x")
     ax_spec.set_ylabel("|X(f)| [dB]")
     ax_spec.legend(loc="upper left")
 
@@ -423,20 +409,18 @@ def plot_pilot_tone_phase_estimate(
         return _finish((fig, ax_spec), show, xlim=xlim, ylim=ylim, legend=legend)
 
     # Panel 2 - recovered phase trajectory.
-    sample_idx = np.arange(theta.shape[1])
-    for i in range(C):
-        ph_label = f"Ch {i}" if C > 1 else None
-        n_d, th_d = _decimate_minmax(sample_idx, np.degrees(theta[i]), max_points)
-        ax_phase.plot(n_d, th_d, label=ph_label)
-    th_mean = float(np.mean(np.degrees(theta)))
-    th_std = float(np.std(np.degrees(theta)))
+    for i, row in enumerate(theta_deg):
+        ph_label = f"Ch {i}" if len(theta_deg) > 1 else None
+        ax_phase.plot(*_trace(row, max_points), label=ph_label)
+    th_mean = float(theta_deg.mean())
+    th_std = float(theta_deg.std())
     ax_phase.set_title(
         f"{title} - Recovered $\\hat{{\\theta}}$  "
         f"[$\\mu$={th_mean:.1f}°, $\\sigma$={th_std:.2f}°]"
     )
     ax_phase.set_xlabel("Sample Index")
     ax_phase.set_ylabel("Phase [deg]")
-    if C > 1:
+    if len(theta_deg) > 1:
         ax_phase.legend(loc="upper right")
 
     return _finish((fig, (ax_spec, ax_phase)), show)
@@ -462,7 +446,7 @@ def plot_pilot_tones_phase_estimate(
 
     Parameters
     ----------
-    estimate : CarrierPhaseEstimate
+    estimate : PilotTonesEstimate
         From ``estimate_carrier_phase(x, PilotTones(...))``.
     quantity : {"differential", "phase"}, optional
         Select one panel; ``None`` draws both.
@@ -479,8 +463,8 @@ def plot_pilot_tones_phase_estimate(
     title : str, default "CPR - Pilot Tones (MRC)"
         Title of the figure.
     max_points : int, default 4000
-        Points per trace; longer traces are drawn as their min/max envelope.
-        ``<= 0`` draws every point.
+        Points per trace; longer traces are drawn as their min/max envelope,
+        reduced on the data's device.  ``<= 0`` draws every point.
 
     Returns
     -------
@@ -497,12 +481,9 @@ def plot_pilot_tones_phase_estimate(
         "plot_pilot_tones_phase_estimate()",
         "PilotTones",
     )
-    delta = _host(delta)
-    phi = np.atleast_2d(_host(estimate.value))[0]
+    phi_deg = _device_channels(estimate.value)[0] * (180.0 / np.pi)
     ref = int(estimate.reference_tone)
     used = tuple(estimate.used_tones)
-    delta = [np.asarray(to_device(d, "cpu"), dtype=float) for d in delta]
-    phi = np.asarray(to_device(phi, "cpu"), dtype=float)
     K = len(delta)
     used_set = {int(u) for u in used}
 
@@ -517,11 +498,8 @@ def plot_pilot_tones_phase_estimate(
             if k == ref:
                 continue
             gated = k not in used_set
-            idx = np.arange(delta[k].shape[-1])
-            n_d, d_d = _decimate_minmax(idx, np.degrees(delta[k]), max_points)
             ax_delta.plot(
-                n_d,
-                d_d,
+                *_trace(delta[k] * (180.0 / np.pi), max_points),
                 linestyle="--" if gated else "-",
                 label=_series_label(
                     label, f"$\\delta$ tone {k}" + (" (gated)" if gated else "")
@@ -537,10 +515,8 @@ def plot_pilot_tones_phase_estimate(
     if "phase" in panels:
         ax_phase = axes[panels.index("phase")]
         # Panel 2 - combined common-phase track.
-        idx = np.arange(phi.shape[-1])
-        n_d, p_d = _decimate_minmax(idx, np.degrees(phi), max_points)
-        ax_phase.plot(n_d, p_d, label=label)
-        ph_std = float(np.std(np.degrees(phi)))
+        ax_phase.plot(*_trace(phi_deg, max_points), label=label)
+        ph_std = float(phi_deg.std())
         ax_phase.set_title(
             f"{title} - Combined $\\hat{{\\phi}}$  [$\\sigma$={ph_std:.2f}°, used={list(used)}]"
         )

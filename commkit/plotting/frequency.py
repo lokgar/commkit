@@ -13,12 +13,15 @@ import numpy as np
 from ..backend import get_array_module, to_device
 from .theme import (
     _decimate_minmax,
+    _device_channels,
     _finish,
     _grid_figsize,
     _host,
     _panel_grid,
     _require,
     _select,
+    _set_eng_formatter,
+    _trace,
 )
 
 __all__ = [
@@ -41,6 +44,7 @@ def plot_mm_autocorrelation(
     ax=None,
     show: bool = False,
     title: str = "FOE - Mengali-Morelli",
+    max_points: int = 4000,
 ) -> tuple[Any, Any] | None:
     """Plot the autocorrelation of a Mengali-Morelli frequency estimate.
 
@@ -49,7 +53,7 @@ def plot_mm_autocorrelation(
 
     Parameters
     ----------
-    estimate : FrequencyOffsetEstimate
+    estimate : MengaliMorelliEstimate
         From ``estimate_frequency_offset(x, MengaliMorelli())``.
     sampling_rate : float
         Sampling rate in Hz of the estimated samples.
@@ -70,6 +74,10 @@ def plot_mm_autocorrelation(
         Call ``plt.show()`` and return ``None``.
     title : str, default "FOE - Mengali-Morelli"
         Title of the figure.
+    max_points : int, default 4000
+        Lags drawn: ``|R[m]|`` beyond it as its min/max envelope, the phase
+        at evenly spaced lags, both reduced on the data's device.  ``<= 0``
+        draws every lag.
 
     Returns
     -------
@@ -83,32 +91,28 @@ def plot_mm_autocorrelation(
     r = _require(
         estimate, "autocorrelation", "plot_mm_autocorrelation()", "MengaliMorelli"
     )
-    R_np = _host(r)
-    f_est = np.atleast_1d(_host(estimate.value)).tolist()
-    M = estimate.power or 1
-    if R_np.ndim == 1:
-        R_np = R_np[None, :]  # (1, L)
-    C, L = R_np.shape
-
-    if hasattr(f_est, "__len__"):
-        f_ests = [float(f) for f in f_est]
-    else:
-        f_ests = [float(f_est)] * C
-
-    lags = np.arange(1, L + 1)
+    R = _device_channels(r)
+    xp = get_array_module(R)
+    f_ests = [float(f) for f in np.atleast_1d(_host(estimate.value))]
+    M = estimate.power
+    C, L = R.shape
+    # Phase at evenly spaced lags: a wrapped angle has no envelope.
+    step = 1 if max_points <= 0 or L <= max_points else -(-L // max_points)
+    lags = np.arange(1, L + 1, step)
+    theta_all = _host(xp.angle(R[:, ::step]))
+    amp_all = xp.abs(R)
 
     fig, raw_axes = _panel_grid(ax, C, len(panels))
 
     for c in range(C):
-        amp = np.abs(R_np[c])
-        theta = np.angle(R_np[c])
-        f_c = f_ests[c]
+        theta = theta_all[c]
+        f_c = f_ests[c] if c < len(f_ests) else f_ests[0]
         ch_suffix = f" - Ch {c}" if C > 1 else ""
         expected_phase = 2.0 * np.pi * f_c * M * lags / sampling_rate
 
         if "magnitude" in panels:
             ax_amp = raw_axes[c, panels.index("magnitude")]
-            ax_amp.plot(lags, amp, label=label)
+            ax_amp.plot(*_trace(amp_all[c], max_points, x0=1.0), label=label)
             ax_amp.set_xlabel("Lag m")
             ax_amp.set_ylabel("|R[m]|")
             ax_amp.set_title(f"{title}{ch_suffix}  ($\\Delta f$={f_c:.2f} Hz, M={M})")
@@ -156,15 +160,17 @@ def plot_frequency_offset_spectrum(
     legend: bool | None = None,
     show: bool = False,
     title: str = "FOE - M-th Power Spectrum",
+    max_points: int = 4000,
 ) -> tuple[Any, Any] | None:
     """Plot the M-th power spectrum of an ``MthPower`` frequency estimate.
 
     The axis is mapped back from ``M·Δf`` to ``Δf`` so the detected peak
-    lines up with the estimate.
+    lines up with the estimate.  The spectrum covers the search range the
+    estimate used (all bins without one).
 
     Parameters
     ----------
-    estimate : FrequencyOffsetEstimate
+    estimate : MthPowerEstimate
         From ``estimate_frequency_offset(x, MthPower())``.
     search_range : (float, float), optional
         The ``MthPower(search_range=)`` used, shaded.
@@ -183,6 +189,9 @@ def plot_frequency_offset_spectrum(
         Call ``plt.show()`` and return ``None``.
     title : str, default "FOE - M-th Power Spectrum"
         Title of the figure.
+    max_points : int, default 4000
+        Points per trace; longer traces are drawn as their min/max envelope,
+        reduced on the data's device.  ``<= 0`` draws every point.
 
     Returns
     -------
@@ -193,15 +202,14 @@ def plot_frequency_offset_spectrum(
     spectrum = _require(
         estimate, "spectrum", "plot_frequency_offset_spectrum()", "MthPower"
     )
-    mag_spectrum = _host(spectrum)
-    freqs = _host(estimate.spectrum_frequencies)
-    M = estimate.power or 1
-    f_estimates = np.atleast_1d(_host(estimate.value)).tolist()
-    f_estimates = list(f_estimates)
-
-    if mag_spectrum.ndim == 1:
-        mag_spectrum = mag_spectrum[None, :]
+    mag_spectrum = _device_channels(spectrum)
+    freqs = np.asarray(estimate.spectrum_frequencies, dtype=float)
+    M = estimate.power
+    f_estimates = [float(f) for f in np.atleast_1d(_host(estimate.value))]
     C = mag_spectrum.shape[0]
+    # Evenly spaced bins in ascending frequency: the axis is f0 + k·df.
+    f0 = float(freqs[0]) / M
+    df = float(freqs[1] - freqs[0]) / M if freqs.size > 1 else 0.0
 
     if ax is None:
         fig, raw_axes = plt.subplots(1, C, figsize=_grid_figsize(1, C), squeeze=False)
@@ -210,17 +218,12 @@ def plot_frequency_offset_spectrum(
         axes_list = list(ax) if hasattr(ax, "__len__") else [ax]
         fig = axes_list[0].figure
 
-    sort_idx = np.argsort(freqs)
-    f_sorted = freqs[sort_idx]
-    f_delta = f_sorted / M  # map M·Δf -> Δf
-
     for i in range(C):
         axi = axes_list[i]
-        mag = mag_spectrum[i][sort_idx]
         f_est = float(f_estimates[i]) if i < len(f_estimates) else 0.0
         ch_suffix = f" - Ch {i}" if C > 1 else ""
 
-        axi.plot(f_delta, mag, label=label)
+        axi.plot(*_trace(mag_spectrum[i], max_points, x0=f0, dx=df), label=label)
         if annotations:
             axi.axvline(
                 f_est,
@@ -237,7 +240,8 @@ def plot_frequency_offset_spectrum(
                     label="Search range",
                 )
         axi.set_title(f"{title}{ch_suffix}")
-        axi.set_xlabel(f"$\\Delta f$ [Hz]  (÷M={M} applied)")
+        axi.set_xlabel(f"$\\Delta f$ (÷M={M} applied) [Hz]")
+        _set_eng_formatter(axi, "x")
         axi.set_ylabel(f"|X^{M}(f)|")
         if annotations or label is not None:
             axi.legend()
@@ -275,7 +279,7 @@ def plot_frequency_offset_blockwise_result(
 
     Parameters
     ----------
-    estimate : FrequencyOffsetEstimate
+    estimate : BlockwiseFrequencyEstimate
         A blockwise estimate (``MthPower(block_size=)`` or
         ``MengaliMorelli(block_size=)``); the first channel is drawn.
     num_samples : int
@@ -342,7 +346,7 @@ def plot_frequency_offset_blockwise_result(
     axes = grid[0]
 
     # Decimate the dense per-sample traces for fast rendering (envelope-preserving).
-    nf, df_k = _decimate_minmax(n_grid, df_dense * 1e-3, max_points)
+    nf, df_k = _decimate_minmax(n_grid, df_dense, max_points)
     np_, ph_deg = _decimate_minmax(n_grid, np.degrees(phase_trajectory), max_points)
 
     if "frequency" in panels:
@@ -351,14 +355,15 @@ def plot_frequency_offset_blockwise_result(
         ax_f.plot(nf, df_k, label=label or r"Interpolated $\Delta f$")
         ax_f.scatter(
             t_centers,
-            df_estimates * 1e-3,
+            df_estimates,
             s=50,
             zorder=5,
             color="C1",
             label="Block estimate",
         )
         ax_f.set_xlabel("Sample Index")
-        ax_f.set_ylabel(r"$\Delta f$ [kHz]")
+        ax_f.set_ylabel(r"$\Delta f$ [Hz]")
+        _set_eng_formatter(ax_f, "y")
         ax_f.set_title(f"{title} - Frequency")
         ax_f.legend()
 

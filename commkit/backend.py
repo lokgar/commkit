@@ -238,7 +238,7 @@ def _device_tables(
     themselves, so a table derived from the owner's fields is also built
     once.  ``owner`` is a hashable, weakly referenceable value object (a
     frozen dataclass); ``None`` (nothing to cache on) builds the tables
-    every call.  Used by :mod:`commkit.mapping.llr` and
+    every call.  Used by ``commkit.mapping._demap`` and
     :mod:`commkit.coding`.
     """
     if owner is None:

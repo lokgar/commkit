@@ -141,7 +141,7 @@ RS = 1e9
 FS = RS * SPS
 C16 = Constellation.qam(16)
 HAMMING = LinearBlockCode.hamming(3)  # (7, 4)
-INTERLEAVER = Interleaver.block(2, 4)
+INTERLEAVER = Interleaver.block(rows=2, columns=4)
 
 
 class Inputs:
@@ -250,6 +250,13 @@ ROWS: list[Row] = [
     Row("commkit.analysis.linewidth.dsh.DshLorentzian", VALUE),
     Row("commkit.analysis.linewidth.phase.IncrementSlope", VALUE),
     Row("commkit.analysis.linewidth.phase.IncrementSubtract", VALUE),
+    Row("commkit.analysis.linewidth.result.BetaSeparationEstimate", VALUE),
+    Row("commkit.analysis.linewidth.result.DshFmFitEstimate", VALUE),
+    Row("commkit.analysis.linewidth.result.DshIncrementEstimate", VALUE),
+    Row("commkit.analysis.linewidth.result.DshLorentzianEstimate", VALUE),
+    Row("commkit.analysis.linewidth.result.FmNoiseFitEstimate", VALUE),
+    Row("commkit.analysis.linewidth.result.IncrementEstimate", VALUE),
+    Row("commkit.analysis.linewidth.result.IncrementSlopeEstimate", VALUE),
     Row("commkit.analysis.linewidth.result.LinewidthEstimate", VALUE),
     Row("commkit.analysis.allan.allan_deviation", MULTI),
     Row("commkit.analysis.drift.frequency_drift", MULTI),
@@ -335,6 +342,7 @@ ROWS: list[Row] = [
     # --- core ---------------------------------------------------------------
     Row("commkit.core.preamble.Preamble", VALUE),
     Row("commkit.core.signal.Reference", VALUE),
+    Row("commkit.core.frame.FrameStructure", VALUE),
     Row("commkit.core.frame.SingleCarrierFrame", VALUE),
     # Signal only: the frame layout lives on the Signal.
     Row("commkit.core.frame.extract_payload", DESIGN),
@@ -408,9 +416,10 @@ ROWS: list[Row] = [
         call=lambda c, x: _a(x, _identity_taps(c, x), sps=SPS),
         fact=SPS_CONFLICT,
     ),
-    Row("commkit.equalization.linear.estimate_transfer_function", MULTI, data=2),
+    Row("commkit.equalization.linear.ChannelEstimate", VALUE),
+    Row("commkit.equalization.linear.estimate_channel", MULTI, data=2),
     Row(
-        "commkit.equalization.linear.zf_equalizer",
+        "commkit.equalization.linear.correct_channel",
         TRANSFORM,
         data=2,
         call=lambda c, x: _a(x, c.taps),
@@ -423,8 +432,14 @@ ROWS: list[Row] = [
         call=lambda c, x: _a(x, np.eye(2)),
         dims=(2,),
     ),
-    Row("commkit.equalization.polarization.estimate_polarization_tones", MULTI),
-    Row("commkit.equalization.polarization.JonesTrack", VALUE),
+    Row(
+        "commkit.equalization.polarization.estimate_polarization",
+        MULTI,
+        data=2,
+    ),
+    Row("commkit.equalization.polarization.PolarizationEstimate", VALUE),
+    Row("commkit.equalization.polarization.PolarizationTonesEstimate", VALUE),
+    Row("commkit.equalization.polarization.PolarizationTones", VALUE),
     Row("commkit.equalization.result.EqualizerState", VALUE),
     Row("commkit.equalization.result.EqualizerResult", VALUE),
     # --- filtering ----------------------------------------------------------
@@ -451,12 +466,6 @@ ROWS: list[Row] = [
         call=lambda c, x: _a(x, c.taps),
     ),
     Row(
-        "commkit.filtering.linear.ols_fir_filter",
-        TRANSFORM,
-        data=2,
-        call=lambda c, x: _a(x, c.taps),
-    ),
-    Row(
         "commkit.filtering.linear.iir_filter",
         TRANSFORM,
         data=2,
@@ -470,19 +479,27 @@ ROWS: list[Row] = [
         call=lambda c, x: _a(x, pulse=c.taps),
     ),
     Row(
-        "commkit.filtering.fiber.correct_chromatic_dispersion",
+        "commkit.filtering.fiber.compensation.correct_chromatic_dispersion",
         TRANSFORM,
         data=2,
         call=lambda c, x: _a(x, sampling_rate=FS, **CDC),
         fact=FS_CONFLICT,
     ),
-    Row("commkit.filtering.fiber.dispersion_compensation_taps", DESIGN, data=0),
-    Row("commkit.filtering.fiber.ClockToneScan", VALUE),
-    Row("commkit.filtering.fiber.FourthMomentScan", VALUE),
-    Row("commkit.filtering.fiber.QuadraticPhaseFit", VALUE),
-    Row("commkit.filtering.fiber.ChromaticDispersionEstimate", VALUE, data=0),
     Row(
-        "commkit.filtering.fiber.estimate_chromatic_dispersion",
+        "commkit.filtering.fiber.compensation.dispersion_compensation_taps",
+        DESIGN,
+        data=0,
+    ),
+    Row("commkit.filtering.fiber.estimation.ClockToneScan", VALUE),
+    Row("commkit.filtering.fiber.estimation.FourthMomentScan", VALUE),
+    Row("commkit.filtering.fiber.estimation.QuadraticPhaseFit", VALUE),
+    Row(
+        "commkit.filtering.fiber.estimation.ChromaticDispersionEstimate", VALUE, data=0
+    ),
+    Row("commkit.filtering.fiber.estimation.QuadraticPhaseFitEstimate", VALUE, data=0),
+    Row("commkit.filtering.fiber.estimation.DispersionScanEstimate", VALUE, data=0),
+    Row(
+        "commkit.filtering.fiber.estimation.estimate_chromatic_dispersion",
         ESTIMATE,
         data=2,
         call=lambda c, x: _a(
@@ -495,14 +512,18 @@ ROWS: list[Row] = [
         fact=FS_CONFLICT,
     ),
     Row(
-        "commkit.filtering.fiber.correct_fiber_propagation",
+        "commkit.filtering.fiber.compensation.correct_fiber_propagation",
         TRANSFORM,
         call=lambda c, x: _a(x, sampling_rate=FS, **FIBER_LINK),
         fact=FS_CONFLICT,
     ),
     # --- frequency ----------------------------------------------------------
     Row("commkit.frequency.SpectralPeak", VALUE),
+    Row("commkit.frequency.BlockwiseFrequencyEstimate", VALUE),
     Row("commkit.frequency.FrequencyOffsetEstimate", VALUE),
+    Row("commkit.frequency.MengaliMorelliEstimate", VALUE),
+    Row("commkit.frequency.MthPowerEstimate", VALUE),
+    Row("commkit.frequency.PilotSlopeEstimate", VALUE),
     Row("commkit.frequency.MengaliMorelli", VALUE),
     Row("commkit.frequency.MthPower", VALUE),
     Row("commkit.frequency.PilotSlope", VALUE),
@@ -622,6 +643,12 @@ ROWS: list[Row] = [
         fact=SPS_CONFLICT,
     ),
     Row(
+        "commkit.impairments.source.apply_frequency_offset",
+        TRANSFORM,
+        call=lambda c, x: _a(x, offset=1e6, sampling_rate=FS),
+        fact=FS_CONFLICT,
+    ),
+    Row(
         "commkit.impairments.source.apply_phase_noise",
         TRANSFORM,
         call=lambda c, x: _a(x, sampling_rate=FS, linewidth=1e5, rng=1),
@@ -663,7 +690,7 @@ ROWS: list[Row] = [
         symbols=True,
     ),
     Row(
-        "commkit.metrics.quality.estimate_noise_variance",
+        "commkit.metrics.quality.noise_variance",
         METRIC,
         data=2,
         call=lambda c, x: _a(x * 1.01, _ref(c, x)),
@@ -751,7 +778,7 @@ ROWS: list[Row] = [
     Row("commkit.plotting.constellation.plot_constellation", PLOT),
     Row("commkit.plotting.constellation.plot_ideal_constellation", PLOT),
     Row("commkit.plotting.equalizer.plot_equalizer_result", PLOT),
-    Row("commkit.plotting.equalizer.plot_zf_equalizer_response", PLOT),
+    Row("commkit.plotting.equalizer.plot_channel_correction", PLOT),
     Row("commkit.plotting.eye.plot_eye_diagram", PLOT),
     Row("commkit.plotting.filter_response.plot_filter_response", PLOT),
     Row("commkit.plotting.spectral.plot_psd", PLOT),
@@ -769,7 +796,11 @@ ROWS: list[Row] = [
     Row("commkit.plotting.waveform.plot_time_domain", PLOT),
     # --- recovery -----------------------------------------------------------
     Row("commkit.recovery.bps.BPS", VALUE),
+    Row("commkit.recovery.carrier_phase.BlockPhaseEstimate", VALUE),
     Row("commkit.recovery.carrier_phase.CarrierPhaseEstimate", VALUE),
+    Row("commkit.recovery.carrier_phase.PilotTonesEstimate", VALUE),
+    Row("commkit.recovery.carrier_phase.PilotInterpolationEstimate", VALUE),
+    Row("commkit.recovery.carrier_phase.PilotToneEstimate", VALUE),
     Row(
         "commkit.recovery.carrier_phase.correct_carrier_phase",
         TRANSFORM,
@@ -808,7 +839,7 @@ ROWS: list[Row] = [
         call=lambda c, x: _a(x, _ref(c, x), constellation=C16),
         symbols=True,
     ),
-    Row("commkit.recovery.corrections.smooth_phase_wiener", TRAJECTORY),
+    Row("commkit.recovery.corrections.smooth_phase", TRAJECTORY),
     # --- smoothing ----------------------------------------------------------
     Row("commkit.smoothing.moving_average", HELPER),
     Row("commkit.smoothing.savgol_smooth", HELPER),
@@ -859,14 +890,14 @@ ROWS: list[Row] = [
         call=lambda c, x: _a(x, Gardner(), sps=SPS),
         fact=SPS_CONFLICT,
     ),
-    Row("commkit.timing.synchronization.cross_correlate_fft", HELPER, data=2),
+    Row("commkit.timing.synchronization.cross_correlate", HELPER, data=2),
     Row(
         "commkit.timing.synchronization.correct_timing",
         RATE_CHANGE,
         data=2,
         call=lambda c, x: _a(x, 3),
     ),
-    Row("commkit.timing.synchronization.estimate_fractional_delay", ESTIMATE, data=2),
+    Row("commkit.timing.synchronization.peak_offset", ESTIMATE, data=2),
     Row("commkit.timing.synchronization.TimingEstimate", VALUE),
     Row(
         "commkit.timing.synchronization.estimate_timing",
@@ -874,7 +905,7 @@ ROWS: list[Row] = [
         call=lambda c, x: _a(x, template=c.wave2[0, :64], threshold=1.0),
     ),
     Row(
-        "commkit.timing.synchronization.fft_fractional_delay",
+        "commkit.timing.synchronization.apply_delay",
         TRANSFORM,
         call=lambda c, x: _a(x, delay=0.25),
     ),
@@ -1059,7 +1090,6 @@ def test_no_mutation(row: Row, xp):
         np.testing.assert_array_equal(to_device(getattr(c, k), "cpu"), v, err_msg=k)
 
 
-@pytest.mark.allow_warnings
 @pytest.mark.parametrize("row", _rows(BEHAVIORAL))
 def test_foreign_array_rejected(row: Row, xp):
     c = Inputs(xp)
@@ -1116,7 +1146,6 @@ def test_metric_host_values(row: Row, xp):
             assert out.shape == (2,)
 
 
-@pytest.mark.allow_warnings
 @pytest.mark.parametrize("row", _rows({EQUALIZER}))
 def test_equalizer_result(row: Row, xp):
     c = Inputs(xp)

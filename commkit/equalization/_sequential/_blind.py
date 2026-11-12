@@ -14,7 +14,13 @@ from ...backend import ArrayType, to_device
 from ...core._signal_adapter import adapt_signal, require_integer_sps
 from ...core.signal import Signal
 from ...logger import logger
-from .._common import _godard_radius, _rde_ring_radii, _rde_rings
+from .._common import (
+    _check_cma_kurtosis,
+    _cma_profile,
+    _godard_radius,
+    _rde_ring_radii,
+    _rde_rings,
+)
 from ..pilots import EqualizerPilots
 from ..result import (
     EqualizerResult,
@@ -85,7 +91,7 @@ def _blind_equalizer(
     *,
     num_taps: int,
     sps: int | None,
-    step_size: float,
+    step_size: float | None,
     constellation: Any,
     store_weights: bool,
     center_tap: int | None,
@@ -99,7 +105,7 @@ def _blind_equalizer(
     name = f"{kind}()"
     label = kind.upper()
     signal_adapter = adapt_signal(samples, function_name=name)
-    samples = signal_adapter.array
+    x = signal_adapter.array
     sig = signal_adapter.signal
     sps = require_integer_sps(signal_adapter.resolve_fact("sps", sps), name)
     constellation = signal_adapter.resolve_choice("constellation", constellation)
@@ -108,6 +114,12 @@ def _blind_equalizer(
         signal_adapter.array, sps, pilots, name, state
     )
     use_pilots = pilot_ref is not None
+    if kind == "cma":
+        kurtosis, gaussian, step_scale = _cma_profile(constellation)
+        _check_cma_kurtosis(kurtosis, gaussian, name)
+        if step_size is None:
+            step_size = 1e-3 * step_scale
+    assert step_size is not None
     logger.info(
         "%s equalizer: num_taps=%s, mu=%s, sps=%s, pilot_aided=%s, pilot_gain_db=%s",
         label,
@@ -131,7 +143,7 @@ def _blind_equalizer(
 
     # RMS-normalize samples to unit symbol-rate power (no training)
     run = _prepare_sequential(
-        samples,
+        x,
         equalizer=kind,
         sps=sps,
         num_taps=num_taps,
@@ -177,7 +189,7 @@ def cma(
     *,
     num_taps: int = 21,
     sps: int | None = None,
-    step_size: float = 1e-3,
+    step_size: float | None = None,
     constellation: Any = None,
     store_weights: bool = False,
     center_tap: int | None = None,
@@ -213,10 +225,14 @@ def cma(
         Samples per symbol at the input, an integer.  Taken from the Signal;
         required for array input.  A value that disagrees with the Signal
         raises.
-    step_size : float, default 1e-3
+    step_size : float, optional
         Step size ``μ``.  The CMA cost is non-convex and of higher order
         than the LMS cost, so normalizing the step by the input power would
         distort the gradient: use a fixed step between 1e-5 and 1e-3.
+        Defaults to 1e-3 for PSK, 16-QAM and without a constellation, and
+        less for denser sets, whose error floor would rise: 1e-3 times
+        ``d_min² / E[(|s|² - R²)² |s|²]`` (unit power) relative to 16-QAM,
+        1.6e-4 for 64-QAM and 3.7e-5 for 256-QAM (see Notes).
     constellation : Constellation, optional
         Sets the Godard radius ``R² = E[|c|⁴]/E[|c|²]`` (weighted by the pmf
         of a shaped constellation).  Defaults to the Signal's
@@ -283,6 +299,39 @@ def cma(
        the minus sign, opposite to LMS)::
 
            w_{c,c'} -= mu * conj(e_c[n]) * x_{c',n}
+
+    **Which constellations.**  For independent circular symbols of unit
+    power through a combined channel and equalizer response ``t``,
+    ``E|y|⁴ = 2 (Σ|t_i|²)² - (2 - κ) Σ|t_i|⁴`` with the kurtosis
+    ``κ = E|s|⁴ / (E|s|²)²`` (for real symbols 3 takes the place of 2).
+    The first term fixes the gain and only the second tells a clean channel
+    from ISI, so CMA converges only for ``κ`` below a Gaussian's, and the
+    more slowly the closer it gets.  ``κ`` is 1 for PSK, 1.32 for 16-QAM and
+    1.38 for 64-QAM, but 1.82, 1.89 and 1.97 for Maxwell-Boltzmann 64-QAM
+    at entropy 5.25, 5 and 4.5, where that term is 3.5, 6 and 23 times
+    weaker than for uniform 64-QAM.  From entropy 5 the noise of the
+    stochastic gradient outweighs it: the taps wander away while the output
+    power stays right (in a 4-tap ISI channel at an Es/N0 of 26 dB, blind
+    SER 0.03 at entropy 5 and 0.07 at 4.75 at the best of the steps 3e-5,
+    1e-4 and 3e-4, against none for :func:`rde`).  No check of the output can
+    tell this from a working equalizer at a low SNR, since the statistic it
+    would need is the one CMA lacks, so the call logs a WARNING from the
+    constellation instead, once ``κ`` has gone more than 0.85 of the way
+    from 1 to a Gaussian's (``κ > 1.85`` for complex sets).  Start a
+    probabilistically shaped constellation with :func:`rde`, whose
+    nearest-ring error does not depend on the kurtosis, or with a
+    decision-directed :func:`lms`.
+
+    **Step.**  The Godard error ``(|y|² - R²) y`` does not vanish on the
+    points of a multi-ring constellation, so the error floor rises with the
+    step, the more the closer the decision points: on 64-QAM in a 4-tap ISI
+    channel at an Es/N0 of 26 dB the SER is 0.03 at a step of 1e-3 and
+    5e-4 at 1e-4.  The default keeps the ratio of that self-noise,
+    ``E[(|s|² - R²)² |s|²]``, to the squared minimum distance at its
+    16-QAM value: the step is 1e-3 times ``d_min² / E[(|s|² - R²)² |s|²]``
+    over the same ratio for 16-QAM (1.84), capped at 1e-3.  A denser set
+    therefore converges more slowly at the default; a short record may need
+    a larger step, at a higher floor.
 
     **Pilot-aided hybrid** (with ``pilots``): at pilot positions the Godard
     error is replaced by the LMS pilot error ``e_p[n] = p[n] - y[n]`` towards
@@ -421,7 +470,16 @@ def rde(
     three rings at ``|c| ≈ 0.45, 1.00, 1.34``: CMA pulls the inner ring
     outwards and the outer ring inwards, a lasting gradient against the
     right solution.  In RDE each symbol is attracted only to its own ring, so
-    the gradient vanishes at the right solution.
+    the gradient vanishes at the right solution.  It needs no kurtosis below
+    that of a Gaussian either, so it also converges on probabilistically
+    shaped QAM, where CMA does not (see the Notes of :func:`cma`).
+
+    **Cold start.**  While the eye is closed, the nearest ring is often the
+    wrong one, and the closer the rings the longer this lasts: on uniform
+    64-QAM (9 rings) in a 4-tap ISI channel at an Es/N0 of 26 dB, RDE from
+    the center tap needs about 6e4 symbols at a step of 1e-3, 2e5 at 3e-4
+    and more than 5e5 at 1e-4.  CMA first, then RDE with its ``state``,
+    avoids that wait.
 
     **Phase.**  Both costs depend only on ``|y|``, so any rotation of the
     output is a solution: run carrier-phase recovery after blind

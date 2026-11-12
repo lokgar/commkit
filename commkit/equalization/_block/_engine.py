@@ -198,7 +198,7 @@ def _prepare_block(
 
     samples, xp, _ = dispatch(samples)
     if xp is np:
-        logger.info(
+        logger.debug(
             "%s is running on CPU (NumPy). For CPU workloads %s is typically "
             "faster. Move samples to GPU (CuPy) to benefit from block-FFT "
             "acceleration.",

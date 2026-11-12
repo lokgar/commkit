@@ -146,29 +146,31 @@ class TestDecoderExitCurve:
         assert "area" in caplog.records[-1].message
 
     def test_reproducible(self) -> None:
-        kwargs = dict(method=BCJR(), num_blocks=20, points=3, rng=5)
+        kwargs = dict(method=BCJR(), num_blocks=20, num_points=3, rng=5)
         a = decoder_exit_curve(self.CODE, **kwargs)
         b = decoder_exit_curve(self.CODE, **kwargs)
         np.testing.assert_array_equal(a.extrinsic, b.extrinsic)
 
     def test_needs_soft_output(self) -> None:
         with pytest.raises(TypeError, match="no a-posteriori LLRs"):
-            decoder_exit_curve(LinearBlockCode.hamming(3), method=Syndrome(), points=2)
+            decoder_exit_curve(
+                LinearBlockCode.hamming(3), method=Syndrome(), num_points=2
+            )
         with pytest.raises(TypeError, match="no a-posteriori LLRs"):
-            decoder_exit_curve(ConvolutionalCode.k7(40), num_blocks=2, points=2)
+            decoder_exit_curve(ConvolutionalCode.k7(40), num_blocks=2, num_points=2)
         with pytest.raises(TypeError, match="no a-posteriori LLRs"):
             decoder_exit_curve(
                 LinearBlockCode.hamming(3),
                 method=MaximumLikelihood(soft=False),
                 num_blocks=2,
-                points=2,
+                num_points=2,
             )
 
     def test_validation(self) -> None:
         with pytest.raises(TypeError, match="code object"):
             decoder_exit_curve("ldpc")
         with pytest.raises(ValueError, match="points"):
-            decoder_exit_curve(self.CODE, points=1)
+            decoder_exit_curve(self.CODE, num_points=1)
         with pytest.raises(ValueError, match="num_blocks"):
             decoder_exit_curve(self.CODE, num_blocks=0)
         with pytest.raises(ValueError, match="device"):
@@ -197,12 +199,30 @@ class TestDemapperExitCurve:
         nv = 10**-0.8
         c = Constellation.qam(16)
         curve = demapper_exit_curve(
-            c, noise_var=nv, points=2, num_symbols=1 << 15, rng=2
+            c, noise_var=nv, num_points=2, num_symbols=1 << 15, rng=2
         )
         sig = generate(c, num_symbols=1 << 15, symbol_rate=1e9, rng=3)
         rx = apply_awgn(sig, noise_var=nv, rng=4)
         gmi = metrics.gmi(rx, noise_var=nv, method="exact")
         assert curve.extrinsic[0] == pytest.approx(gmi / 4, abs=0.01)
+
+    def test_real_constellation_noise_var_is_the_real_noise(self, xp: Any) -> None:
+        """For PAM-4 ``noise_var`` is the variance of the real noise (N0/2),
+        as for compute_llr: at noise_var = 0.1, m·I_E(0) is awgn_gmi at
+        N0 = 0.2 (Es/N0 = 7.0 dB, 1.58 bit), not at N0 = 0.1 (1.87 bit).
+        The Monte Carlo spread over 2·2^16 bits is below 0.01 bit; esn0_db
+        gives the same curve."""
+        c = Constellation.pam(4)
+        kw = dict(num_points=2, num_symbols=1 << 16, rng=3)
+        curve = demapper_exit_curve(c, noise_var=0.1, **kw)
+        esn0_db = 10 * np.log10(c.power() / 0.2)
+        expected = metrics.awgn_gmi(c, esn0_db=esn0_db)
+        assert 2 * curve.extrinsic[0] == pytest.approx(expected, abs=0.02)
+        assert expected == pytest.approx(1.58, abs=0.01)
+        same = demapper_exit_curve(c, esn0_db=esn0_db, **kw)
+        np.testing.assert_allclose(same.extrinsic, curve.extrinsic, atol=1e-6)
+        with pytest.raises(ValueError, match="one of noise_var and esn0_db"):
+            demapper_exit_curve(c, **kw)
 
     def test_natural_labels_gain_more_from_a_priori(self) -> None:
         """Gray labels give the most information without a-priori input and
@@ -217,7 +237,7 @@ class TestDemapperExitCurve:
         assert gray.extrinsic[-1] - gray.extrinsic[0] < 0.03
 
     def test_maxlog_loses_information(self) -> None:
-        kwargs = dict(noise_var=10**-0.6, points=2, rng=6)
+        kwargs = dict(noise_var=10**-0.6, num_points=2, rng=6)
         exact = demapper_exit_curve(_natural_16qam(), **kwargs)
         maxlog = demapper_exit_curve(_natural_16qam(), method="maxlog", **kwargs)
         assert maxlog.extrinsic[0] <= exact.extrinsic[0] + 5e-3
@@ -257,7 +277,7 @@ class TestDemapperExitCurve:
 def test_curves_on_the_gpu_match_the_cpu(backend_device: str) -> None:
     """Realizations differ between devices; the measured information agrees."""
     code = ConvolutionalCode.k7(info_bits=200)
-    kwargs = dict(method=BCJR(method="exact"), num_blocks=100, points=5, rng=8)
+    kwargs = dict(method=BCJR(method="exact"), num_blocks=100, num_points=5, rng=8)
     cpu = decoder_exit_curve(code, **kwargs)
     here = decoder_exit_curve(code, device=backend_device, **kwargs)
     np.testing.assert_allclose(

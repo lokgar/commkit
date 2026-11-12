@@ -182,12 +182,13 @@ class TestCprPilotTone:
     def test_phase_residual_foe(self, xp, df):
         """Recovers a frequency-offset ramp (< B) to < 0.1 rad RMS."""
         samples, fs, common = self._setup(xp, df=df)
-        theta = recovery.estimate_carrier_phase(
+        est = recovery.estimate_carrier_phase(
             samples,
             recovery.PilotTone(frequency=self.F_TONE, bandwidth=self.BW),
             sampling_rate=fs,
-        ).value
-        assert self._interior_rms(xp, theta, common) < 0.1
+        )
+        assert isinstance(est, recovery.PilotToneEstimate)
+        assert self._interior_rms(xp, est.value, common) < 0.1
 
     def test_phase_residual_foe_and_phase_noise(self, xp):
         """Recovers joint frequency offset + Wiener phase noise."""
@@ -417,6 +418,7 @@ class TestCprPilotTones:
             ),
             sampling_rate=fs,
         )
+        assert isinstance(est, recovery.PilotTonesEstimate)
         assert est.used_tones == (0, 1)  # both tones genuinely combined
         # single-tone reads tone 0 on channel 0; compare like-for-like on row 0.
         rms_single = self._interior_rms(xp, single[0], common)

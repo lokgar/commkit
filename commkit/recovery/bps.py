@@ -1,6 +1,7 @@
 """Blind phase search (BPS) carrier-phase recovery: :class:`BPS`."""
 
 from dataclasses import dataclass
+from typing import Any
 
 import numpy as np
 
@@ -59,100 +60,28 @@ class BPS:
 
     def __post_init__(self) -> None:
         if self.test_phases < 1:
-            raise ValueError(f"test_phases must be >= 1, got {self.test_phases}.")
+            raise ValueError(f"BPS: test_phases must be >= 1, got {self.test_phases}.")
         if self.block_size < 1:
-            raise ValueError(f"block_size must be >= 1, got {self.block_size}.")
+            raise ValueError(f"BPS: block_size must be >= 1, got {self.block_size}.")
 
 
-_NUMBA_BPS: dict = {}
+def _get_numba_bps_table() -> Any:
+    """The BPS block metric, nearest point by a search over the table."""
+    from . import _numba_loops
+
+    return _numba_loops.bps_table
 
 
-def _get_numba_bps_table():
-    """Numba kernel for the BPS block metric with an arbitrary constellation.
+def _get_numba_bps_grid() -> Any:
+    """The BPS block metric of square QAM, nearest point by the O(1) slicer."""
+    from . import _numba_loops
 
-    ``metrics[c, b, k] = sum_{n in block b} min_m |x[c, n] e^{-j theta_k} - s_m|^2``
-    for ``(C, N_blocks, B)``, parallel over channels and blocks.  It replaces
-    the NumPy ``(CHUNK, B, M)`` distance tensor of the non-square CPU path;
-    square QAM has its own O(1) slicer.  Distances are float32 for complex64
-    input (as in the NumPy path), the block sums float64.
-    """
-    if "table" not in _NUMBA_BPS:
-        import numba
-
-        @numba.njit(cache=True, fastmath=True, nogil=True, parallel=True)
-        def bps_table(x_re, x_im, ph_re, ph_im, c_re, c_im, block_size, out):
-            """Per block and test phase, the summed distance to the nearest point.
-
-            ``out[c, b, k]`` for block ``b`` of channel ``c`` rotated by phase
-            ``k``, the nearest point found by a search over the table.
-            """
-            C = x_re.shape[0]
-            n_blocks = out.shape[1]
-            B = ph_re.shape[0]
-            M = c_re.shape[0]
-            for job in numba.prange(C * n_blocks):
-                c = job // n_blocks
-                b = job - c * n_blocks
-                for k in range(B):
-                    acc = 0.0
-                    for n in range(b * block_size, (b + 1) * block_size):
-                        xr = x_re[c, n] * ph_re[k] - x_im[c, n] * ph_im[k]
-                        xi = x_re[c, n] * ph_im[k] + x_im[c, n] * ph_re[k]
-                        best = (xr - c_re[0]) ** 2 + (xi - c_im[0]) ** 2
-                        for m in range(1, M):
-                            d = (xr - c_re[m]) ** 2 + (xi - c_im[m]) ** 2
-                            if d < best:
-                                best = d
-                        acc += best
-                    out[c, b, k] = acc
-
-        _NUMBA_BPS["table"] = bps_table
-    return _NUMBA_BPS["table"]
-
-
-def _get_numba_bps_grid():
-    """Numba kernel for the BPS block metric of square QAM.
-
-    As :func:`_get_numba_bps_table`, with the nearest point found in O(1) by
-    snapping each axis to the grid of ``side`` levels from ``lev_min`` in
-    steps of ``d_grid``.
-    """
-    if "grid" not in _NUMBA_BPS:
-        import numba
-
-        @numba.njit(cache=True, fastmath=True, nogil=True, parallel=True)
-        def bps_grid(x_re, x_im, ph_re, ph_im, lev_min, d_grid, side, block_size, out):
-            """Per block and test phase, the summed distance to the nearest point.
-
-            As ``bps_table``, the nearest point found by rounding each axis to
-            the square lattice.
-            """
-            C = x_re.shape[0]
-            n_blocks = out.shape[1]
-            B = ph_re.shape[0]
-            last = side - 1
-            for job in numba.prange(C * n_blocks):
-                c = job // n_blocks
-                b = job - c * n_blocks
-                for k in range(B):
-                    acc = 0.0
-                    for n in range(b * block_size, (b + 1) * block_size):
-                        xr = x_re[c, n] * ph_re[k] - x_im[c, n] * ph_im[k]
-                        xi = x_re[c, n] * ph_im[k] + x_im[c, n] * ph_re[k]
-                        ir = min(max(np.round((xr - lev_min) / d_grid), 0), last)
-                        ii = min(max(np.round((xi - lev_min) / d_grid), 0), last)
-                        dr = xr - (lev_min + ir * d_grid)
-                        di = xi - (lev_min + ii * d_grid)
-                        acc += dr * dr + di * di
-                    out[c, b, k] = acc
-
-        _NUMBA_BPS["grid"] = bps_grid
-    return _NUMBA_BPS["grid"]
+    return _numba_loops.bps_grid
 
 
 def _bps(symbols: ArrayType, method: BPS, ctx: _Context) -> _Phase:
     """BPS phase of ``(C, N)`` symbols."""
-    from ..mapping.constellation import _slicer_params
+    from ..mapping._lattice import slicer_params
     from ..math import normalize
 
     constellation = ctx.need_constellation(method)
@@ -183,9 +112,10 @@ def _bps(symbols: ArrayType, method: BPS, ctx: _Context) -> _Phase:
     # Very small block_size makes the M-fold phase unwrap unreliable: with only
     # one or two symbols per block the noise on the distance-metric argmin causes
     # large candidate-index jumps between consecutive blocks, triggering false
-    # M-fold unwrap corrections.  Warn early so users diagnose this easily.
+    # M-fold unwrap corrections.  Traced at DEBUG: the size is the caller's
+    # choice, and slips it causes show in the result.
     if block_size < 4:
-        logger.warning(
+        logger.debug(
             "CPR (BPS): block_size=%s is very small. Averaging the distance "
             "metric over only %s symbol(s) per block makes the M-fold "
             "phase unwrap unreliable. Recommended minimum: block_size ≥ 4.",
@@ -201,7 +131,7 @@ def _bps(symbols: ArrayType, method: BPS, ctx: _Context) -> _Phase:
     # For square QAM (order a perfect square): the nearest constellation point
     # can be found in O(1) per symbol via per-component rounding, eliminating
     # the (CHUNK, B, M_const) distance tensor entirely.
-    side, lev_min_f32, d_grid_f32 = _slicer_params(constellation)
+    side, lev_min_f32, d_grid_f32 = slicer_params(constellation)
     is_sq_qam = side > 0
     lev_min = float(lev_min_f32)
     d_grid = float(d_grid_f32)
@@ -328,7 +258,7 @@ def _bps(symbols: ArrayType, method: BPS, ctx: _Context) -> _Phase:
     # branch nearest zero instead of the edge of the candidate range.
     phi_b = xp.where(phi_b >= np.pi / M, phi_b - 2.0 * np.pi / M, phi_b)
     phi_u = xp.unwrap(phi_b * M, axis=-1) / M
-    phi_u = _repair_slips(phi_u, xp, method.cycle_slip, M, block_size)
+    phi_u = _repair_slips(phi_u, method.cycle_slip, M, block_size)
     phi_full = _interp_block_phases(phi_u, N, block_size, xp)
     if phi_u.shape[0] != C:  # joint: one trajectory for every channel
         phi_full = xp.broadcast_to(phi_full, (C, N)).copy()

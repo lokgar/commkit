@@ -37,9 +37,10 @@ from typing import Any
 
 import numpy as np
 
+from .._bits import pack_bits
 from ..backend import ArrayType, dispatch, to_device
 from ..mapping import Constellation
-from ..mapping.gray import _pack
+from ..mapping._lattice import separable_axes
 from .base import (
     _Code,
     _Codec,
@@ -172,7 +173,9 @@ class CCDM(_Code):
     def _label_index(self) -> np.ndarray:
         """Point index of each packed label, ``(M,)`` int64."""
         lut = np.empty(self.constellation.order, dtype=np.int64)
-        lut[_pack(self.constellation.bit_labels)] = np.arange(self.constellation.order)
+        lut[pack_bits(self.constellation.bit_labels)] = np.arange(
+            self.constellation.order
+        )
         return lut
 
     def _match(self, bits: np.ndarray) -> np.ndarray:
@@ -246,7 +249,7 @@ def _dematch_labels(code: CCDM, labels: ArrayType) -> _Decoded:
     _, xp, _ = dispatch(labels)
     m = code.constellation.bits_per_symbol
     hard = to_device(labels, "cpu").reshape(labels.shape[0], code.num_symbols, m)
-    symbols = code._label_index[_pack(hard)]
+    symbols = code._label_index[pack_bits(hard)]
     bits, valid = code._dematch(symbols)
     device = "cpu" if xp is np else "gpu"
     return _Decoded(
@@ -281,7 +284,7 @@ class PAS(_Code):
     The block is the FEC codeword: ``n`` is the code's ``n_c`` bits, and
     ``k``, the uniform information bits it carries, is less than the
     code's ``k_c`` because the matcher's output is not uniform.
-    ``PAS(LDPCCode.dvbs2("3/4", "short"), Constellation.qam(64).shaped(
+    ``PAS(LDPCCode.dvbs2("3/4", frame="short"), Constellation.qam(64).shaped(
     entropy=5))``: 16200 bits are 2700 64-QAM symbols carrying ``k =
     9162`` information bits, 3.39 bits per symbol.
 
@@ -336,7 +339,7 @@ class PAS(_Code):
         """``(m, amplitudes)``: bits per dimension and the amplitude alphabet."""
         c = self.constellation
         if c.is_complex:
-            axes = c._axes
+            axes = separable_axes(c)
             m = c.bits_per_symbol // 2
             if (
                 axes is None

@@ -393,7 +393,7 @@ def _llr_launch(cp: Any, kern: Any, n: int, k: int, head: tuple, tail: tuple) ->
 
 
 def _llr_factory() -> Callable:
-    """Wrapper factory for the bit-LLR kernel (``mapping.llr``).
+    """Wrapper factory for the bit-LLR kernel (``mapping._demap``).
 
     One thread per symbol walks the constellation and keeps the per-bit
     maxima (and, for the exact method, the sums of one exponential per
@@ -442,7 +442,7 @@ def _llr_factory() -> Callable:
 
 
 def _llr_separable_factory() -> Callable:
-    """Wrapper factory for the per-axis bit-LLR kernel (``mapping.llr``).
+    """Wrapper factory for the per-axis bit-LLR kernel (``mapping._demap``).
 
     The LLRs of a separable square lattice from the levels of each axis:
     2·sqrt(M) metrics (and exponentials) per symbol instead of M.
@@ -500,7 +500,7 @@ def _llr_separable_factory() -> Callable:
 
 
 def _llr_separable_maxlog_factory() -> Callable:
-    """Wrapper factory for the closed-form max-log LLR kernel (``mapping.llr``).
+    """Wrapper factory for the closed-form max-log LLR kernel (``mapping._demap``).
 
     Max-log LLRs of a uniform separable square lattice: per axis the snapped
     level's metric against the two levels just outside its run of equal
@@ -801,6 +801,105 @@ def _algebraic_correct_factory() -> Callable:
     return launch
 
 
+#: Sample dtype -> (sample type, real type) of the ``interpolate`` kernel.
+_INTERP_TYPES = {
+    "float32": ("float", "float"),
+    "float64": ("double", "double"),
+    "complex64": ("complex<float>", "float"),
+    "complex128": ("complex<double>", "double"),
+}
+
+
+def _interpolate_factory(half: int = 24) -> Callable:
+    """Wrapper factory for the windowed-sinc interpolator (``_interpolation``).
+
+    ``x`` ``(C, N)`` at arbitrary instants, ``2·half`` taps, one thread per
+    instant (see ``interpolate.cu``).  The wrapper returned takes
+    ``(x, base=, frac=)`` (an index and a fraction per instant, shared by the
+    channels) or ``(x, knots=, sub=)`` (instants linear between float64
+    knots, one row or one per channel).
+    """
+    import cupy as cp
+
+    from . import compiler
+
+    if half < 1:
+        raise ValueError(f"half must be >= 1, got {half}")
+    kernels: dict[tuple[str, int], Any] = {}
+    block = 256
+
+    def kernel(dtype: str, mode: int) -> Any:
+        """The compiled kernel, cached per sample dtype and mode."""
+        key = (dtype, mode)
+        if key not in kernels:
+            t, r = _INTERP_TYPES[dtype]
+            kernels[key] = compiler.get_raw_kernel(
+                "interpolate", f"interpolate<{t}, {r}, {half}, {mode}>"
+            )
+        return kernels[key]
+
+    def launch(
+        x: Any,
+        *,
+        base: Any = None,
+        frac: Any = None,
+        knots: Any = None,
+        sub: int = 0,
+    ) -> Any:
+        """``(C, M)`` in ``x``'s dtype: ``M`` the length of ``base`` and
+        ``frac`` (int64 and ``x``'s real dtype), or ``sub · (K - 1)`` for
+        ``knots`` ``(rows, K)`` float64, ``rows`` 1 or ``C``."""
+        if x.dtype.name not in _INTERP_TYPES:
+            raise TypeError(f"x must be float32/64 or complex64/128, got {x.dtype}")
+        if x.ndim != 2 or not x.flags.c_contiguous:
+            raise ValueError(f"x must be a C-contiguous (C, N) array, got {x.shape}")
+        C, N = x.shape
+        real = x.real.dtype
+        null_i64 = cp.empty(0, dtype=cp.int64)
+        null_r = cp.empty(0, dtype=real)
+        null_f64 = cp.empty(0, dtype=cp.float64)
+        if knots is None:
+            if base is None or frac is None:
+                raise ValueError("give base and frac, or knots and sub")
+            base = cp.ascontiguousarray(base)
+            frac = cp.ascontiguousarray(frac)
+            if base.dtype != cp.int64 or frac.dtype != real:
+                raise TypeError(
+                    f"base must be int64 and frac {real}, got {base.dtype}/{frac.dtype}"
+                )
+            if base.ndim != 1 or base.shape != frac.shape:
+                raise ValueError(
+                    f"base and frac must be (M,) alike, got {base.shape}/{frac.shape}"
+                )
+            M, mode, rows, K = base.shape[0], 0, 0, 0
+            args = (base, frac, null_f64)
+        else:
+            knots = cp.ascontiguousarray(knots)
+            if knots.dtype != cp.float64 or knots.ndim != 2:
+                raise TypeError(f"knots must be 2-D float64, got {knots.dtype}")
+            rows, K = knots.shape
+            if rows not in (1, C) or K < 1 or sub < 1:
+                raise ValueError(
+                    f"knots must be (1, K) or ({C}, K) and sub >= 1, "
+                    f"got {knots.shape}, sub={sub}"
+                )
+            M, mode = int(sub) * (K - 1), 1
+            args = (null_i64, null_r, knots)
+        y = cp.empty((C, M), dtype=x.dtype)
+        if y.size == 0:  # a zero-size grid is a launch error
+            return y
+        grid = (M + block - 1) // block
+        kernel(x.dtype.name, mode)(
+            (grid,),
+            (block,),
+            (x, y, cp.int64(C), cp.int64(N), cp.int64(M), *args,
+             cp.int64(rows), cp.int64(K), cp.int64(sub)),
+        )  # fmt: skip
+        return y
+
+    return launch
+
+
 _KERNEL_FACTORIES: dict[str, Callable[..., Callable]] = {
     "selftest_scale": _selftest_scale_factory,
     "bps_min_d2": _bps_min_d2_factory,
@@ -812,4 +911,5 @@ _KERNEL_FACTORIES: dict[str, Callable[..., Callable]] = {
     "iir": _iir_factory,
     "ldpc_layered": _ldpc_layered_factory,
     "algebraic_correct": _algebraic_correct_factory,
+    "interpolate": _interpolate_factory,
 }

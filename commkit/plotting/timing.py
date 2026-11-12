@@ -7,12 +7,14 @@ from typing import Any
 
 import numpy as np
 
-from ..backend import to_device
+from ..backend import get_array_module
 from .theme import (
+    _device_channels,
     _finish,
     _host,
     _panel_grid,
     _select,
+    _trace,
 )
 
 __all__ = [
@@ -32,6 +34,7 @@ def plot_timing_correlation(
     ax=None,
     show: bool = False,
     title: str = "Timing Correlation",
+    max_points: int = 4000,
 ) -> tuple[Any, Any] | None:
     """Plot the correlation of a :class:`~commkit.timing.TimingEstimate`.
 
@@ -60,6 +63,9 @@ def plot_timing_correlation(
         Call ``plt.show()`` and return ``None``.
     title : str, default "Timing Correlation"
         Title of the figure.
+    max_points : int, default 4000
+        Points of the full correlation; longer traces are drawn as their min/max envelope,
+        reduced on the data's device.  ``<= 0`` draws every point.
 
     Returns
     -------
@@ -68,35 +74,36 @@ def plot_timing_correlation(
         shows the figure instead.
     """
     panels = _select(quantity, ("full", "detail"), label=label, xlim=xlim, ylim=ylim)
-    corr = np.atleast_2d(np.abs(_host(estimate.correlation)))
-    peaks = np.atleast_1d(_host(estimate.integer)) - estimate.search_start
-    corr_mag = corr
-    peak_indices = peaks
-    norm_factors = corr.mean(axis=-1)
+    corr = _device_channels(estimate.correlation)
+    xp = get_array_module(corr)
+    corr = xp.abs(corr)  # on the device; only drawn points are transferred
+    C = corr.shape[0]
     offset = estimate.search_start
-    corr_mag = to_device(corr_mag, "cpu")
-    peak_indices = to_device(peak_indices, "cpu").flatten()
-    norm_factors = to_device(norm_factors, "cpu").flatten()
-
-    if corr_mag.ndim == 1:
-        corr_mag = corr_mag[None, :]
-    C = corr_mag.shape[0]
+    peak_indices = np.atleast_1d(_host(estimate.integer)).ravel() - offset
+    norm_factors = _host(corr.mean(axis=-1)).ravel()
 
     fig, axes = _panel_grid(ax, C, len(panels))
 
+    zoom_w = 40
     for i in range(C):
-        c_ch = corr_mag[i]
+        c_ch = corr[i]
         pk_idx = int(peak_indices[i]) if i < len(peak_indices) else 0
         norm_val = float(norm_factors[i]) if i < len(norm_factors) else 1.0
         abs_thresh = threshold * norm_val
-        metric_val = float(c_ch[pk_idx] / norm_val) if norm_val > 0 else 0.0
+        s_z = max(0, pk_idx - zoom_w)
+        e_z = min(c_ch.shape[-1], pk_idx + zoom_w)
+        zoom = _host(c_ch[s_z:e_z])  # holds the peak
+        peak_val = float(zoom[pk_idx - s_z])
+        metric_val = peak_val / norm_val if norm_val > 0 else 0.0
         ch_suffix = f" - Ch {i}" if C > 1 else ""
 
         if "full" in panels:
             ax1 = axes[i, panels.index("full")]
-            x_all = np.arange(len(c_ch)) + offset
-            ax1.plot(x_all, c_ch, label=label or f"Ch {i}  metric={metric_val:.2f}")
-            ax1.axhline(float(c_ch[pk_idx]), color="r", linestyle="--", label="Peak")
+            ax1.plot(
+                *_trace(c_ch, max_points, x0=offset),
+                label=label or f"Ch {i}  metric={metric_val:.2f}",
+            )
+            ax1.axhline(peak_val, color="r", linestyle="--", label="Peak")
             ax1.axvline(pk_idx + offset, color="r", linestyle="--")
             if abs_thresh > 0:
                 ax1.axhline(abs_thresh, color="g", linestyle=":", label="Thresh")
@@ -107,11 +114,8 @@ def plot_timing_correlation(
 
         if "detail" in panels:
             ax2 = axes[i, panels.index("detail")]
-            zoom_w = 40
-            s_z = max(0, pk_idx - zoom_w)
-            e_z = min(len(c_ch), pk_idx + zoom_w)
             x_zoom = np.arange(s_z, e_z) + offset
-            ax2.plot(x_zoom, c_ch[s_z:e_z], label=label or "Peak area")
+            ax2.plot(x_zoom, zoom, label=label or "Peak area")
             ax2.axvline(
                 pk_idx + offset,
                 color="r",

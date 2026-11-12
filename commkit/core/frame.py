@@ -23,7 +23,39 @@ from ._signal_adapter import _same_fact, require_device, require_integer_sps
 from .preamble import Preamble, _check_int
 from .signal import Reference, Signal
 
-__all__ = ["SingleCarrierFrame", "extract_payload"]
+__all__ = ["FrameStructure", "SingleCarrierFrame", "extract_payload"]
+
+
+def _readonly(mask: np.ndarray) -> np.ndarray:
+    mask.setflags(write=False)
+    return mask
+
+
+@dataclass(frozen=True)
+class FrameStructure:
+    """Boolean masks of a frame's segments, from
+    :meth:`SingleCarrierFrame.get_structure_map`.
+
+    The constructor takes the same fields.  All masks have one length, the
+    frame (or what follows its preamble) in symbols or samples.
+
+    Attributes
+    ----------
+    pilots : numpy.ndarray
+        True at the pilot symbols, read-only bool.
+    payload : numpy.ndarray
+        True at the payload symbols, read-only bool.
+    preamble : numpy.ndarray or None
+        True at the preamble; ``None`` when the map excludes it.
+    guard : numpy.ndarray or None
+        True at the guard interval; ``None`` when the map excludes it (a
+        cyclic prefix removed with the preamble).
+    """
+
+    pilots: np.ndarray
+    payload: np.ndarray
+    preamble: np.ndarray | None = None
+    guard: np.ndarray | None = None
 
 
 def _qpsk() -> Constellation:
@@ -43,7 +75,7 @@ class SingleCarrierFrame:
     ----------
     payload_num_symbols : int, optional
         Number of payload symbols per channel; ``None`` takes the symbols of
-        ``payload_blocks``, or 1000 without it.  With pilots it must fill
+        ``payload_blocks``, and one of the two is required.  With pilots it must fill
         whole pilot periods (comb: a multiple of ``pilot_period - 1``; block:
         of ``pilot_period - pilot_block_num_symbols``); otherwise construction raises.
     payload_constellation : Constellation, default ``Constellation.psk(4)``
@@ -87,9 +119,10 @@ class SingleCarrierFrame:
         ``> pilot_block_num_symbols`` for ``"block"``.
     pilot_block_num_symbols : int, default 0
         Pilots per period for ``"block"``.
-    pilot_seed : int, default 1337
-        Seed of the pilot symbols: pilots are a known sequence, the same
-        in every frame by default.
+    pilot_rng : int or numpy.random.Generator, default 1337
+        Seed or generator of the pilot symbols, with the semantics of
+        ``payload_rng``: pilots are a known sequence, the same in every frame
+        by default.
     pilot_constellation : Constellation, default ``Constellation.psk(4)``
         Pilot constellation; must be unshaped.
     pilot_gain_db : float, default 0.0
@@ -134,7 +167,7 @@ class SingleCarrierFrame:
     pilot_period: int = 0
     pilot_block_num_symbols: int = 0
     pilot_constellation: Constellation = field(default_factory=_qpsk)
-    pilot_seed: int = 1337
+    pilot_rng: int | np.random.Generator | None = 1337
     pilot_gain_db: float = 0.0
 
     guard_type: str = "zero"
@@ -161,8 +194,12 @@ class SingleCarrierFrame:
         accepted when they agree, as ``dataclasses.replace`` and
         :func:`~commkit.io.load_npz` pass both.
         """
-        object.__setattr__(self, "payload_rng", _resolve_seed(self.payload_rng))
-        _check_int("pilot_seed", self.pilot_seed, 0)
+        object.__setattr__(
+            self, "payload_rng", _resolve_seed(self.payload_rng, "payload_rng")
+        )
+        object.__setattr__(
+            self, "pilot_rng", _resolve_seed(self.pilot_rng, "pilot_rng")
+        )
         if self.payload_num_symbols is not None:
             _check_int("payload_num_symbols", self.payload_num_symbols, 1)
         if self.payload_blocks is not None:
@@ -234,11 +271,12 @@ class SingleCarrierFrame:
                     "one of them."
                 )
         if self.payload_num_symbols is None:
-            num_symbols = (
-                1000
-                if self.payload_blocks is None
-                else self._blocks_num_symbols(per_period)
-            )
+            if self.payload_blocks is None:
+                raise ValueError(
+                    "SingleCarrierFrame(): give the payload length, "
+                    "payload_num_symbols= or (with a payload_code) payload_blocks=."
+                )
+            num_symbols = self._blocks_num_symbols(per_period)
             object.__setattr__(self, "payload_num_symbols", num_symbols)
         assert self.payload_num_symbols is not None
 
@@ -372,7 +410,7 @@ class SingleCarrierFrame:
             num_symbols=pilot_count,
             symbol_rate=1.0,
             num_channels=self.num_channels,
-            rng=self.pilot_seed,
+            rng=self.pilot_rng,
         )
         ref = sig.reference
         assert ref is not None
@@ -488,26 +526,26 @@ class SingleCarrierFrame:
         """True at the pilot symbols, over the whole frame (host bool,
         ``(num_symbols,)``).
 
-        The ``"pilots"`` mask of :meth:`get_structure_map`, which also gives
+        The ``pilots`` mask of :meth:`get_structure_map`, which also gives
         per-sample masks and masks over the body alone.
         """
-        return self.get_structure_map()["pilots"]
+        return self.get_structure_map().pilots
 
     @property
     def payload_mask(self) -> np.ndarray:
         """True at the payload symbols, over the whole frame (host bool,
         ``(num_symbols,)``).
 
-        The ``"payload"`` mask of :meth:`get_structure_map`.
+        The ``payload`` mask of :meth:`get_structure_map`.
         """
-        return self.get_structure_map()["payload"]
+        return self.get_structure_map().payload
 
     def get_structure_map(
         self,
         unit: Literal["symbols", "samples"] = "symbols",
         sps: int = 1,
         include_preamble: bool = True,
-    ) -> dict[str, ArrayType]:
+    ) -> FrameStructure:
         """Return boolean masks of the frame's segments (host arrays).
 
         Parameters
@@ -523,12 +561,11 @@ class SingleCarrierFrame:
 
         Returns
         -------
-        dict of str to ndarray
-            ``"pilots"`` and ``"payload"``; ``"preamble"`` with
-            ``include_preamble=True``; ``"guard"`` with
-            ``include_preamble=True`` or a zero guard.
+        FrameStructure
+            ``pilots`` and ``payload``; ``preamble`` with
+            ``include_preamble=True``; ``guard`` with ``include_preamble=True``
+            or a zero guard (the others are ``None``).
         """
-        xp = np
         if unit == "samples":
             sps = require_integer_sps(sps, "get_structure_map()")
         mask, body_num_symbols = self._generate_pilot_mask()
@@ -540,10 +577,10 @@ class SingleCarrierFrame:
                 preamble_num_symbols + body_num_symbols + self.guard_num_symbols
             )
 
-            preamble_bool = xp.zeros(total_num_symbols, dtype=bool)
-            pilot_bool = xp.zeros(total_num_symbols, dtype=bool)
-            payload_bool = xp.zeros(total_num_symbols, dtype=bool)
-            guard_bool = xp.zeros(total_num_symbols, dtype=bool)
+            preamble_bool = np.zeros(total_num_symbols, dtype=bool)
+            pilot_bool = np.zeros(total_num_symbols, dtype=bool)
+            payload_bool = np.zeros(total_num_symbols, dtype=bool)
+            guard_bool = np.zeros(total_num_symbols, dtype=bool)
 
             if self.guard_type == "cp":
                 g_slice = slice(0, self.guard_num_symbols)
@@ -572,7 +609,7 @@ class SingleCarrierFrame:
             if self.guard_num_symbols > 0:
                 guard_bool[g_slice] = True
 
-            res = {
+            masks = {
                 "preamble": preamble_bool,
                 "pilots": pilot_bool,
                 "payload": payload_bool,
@@ -586,15 +623,15 @@ class SingleCarrierFrame:
                 total_num_symbols = body_num_symbols
                 pilot_bool = mask
                 payload_bool = ~mask
-                res = {
+                masks = {
                     "pilots": pilot_bool,
                     "payload": payload_bool,
                 }
             else:
                 total_num_symbols = body_num_symbols + self.guard_num_symbols
-                pilot_bool = xp.zeros(total_num_symbols, dtype=bool)
-                payload_bool = xp.zeros(total_num_symbols, dtype=bool)
-                guard_bool = xp.zeros(total_num_symbols, dtype=bool)
+                pilot_bool = np.zeros(total_num_symbols, dtype=bool)
+                payload_bool = np.zeros(total_num_symbols, dtype=bool)
+                guard_bool = np.zeros(total_num_symbols, dtype=bool)
 
                 b_slice = slice(0, body_num_symbols)
                 g_slice = slice(body_num_symbols, total_num_symbols)
@@ -603,17 +640,37 @@ class SingleCarrierFrame:
                 payload_bool[b_slice] = ~mask
                 guard_bool[g_slice] = True
 
-                res = {
+                masks = {
                     "pilots": pilot_bool,
                     "payload": payload_bool,
                     "guard": guard_bool,
                 }
 
         if unit == "samples":
-            for k in res:
-                res[k] = xp.repeat(res[k], sps)
+            masks = {k: np.repeat(v, sps) for k, v in masks.items()}
+        else:  # copies, so the read-only flag never reaches the cached mask
+            masks = {k: v.copy() for k, v in masks.items()}
+        return FrameStructure(**{k: _readonly(v) for k, v in masks.items()})
 
-        return res
+    def pilot_indices(self, include_preamble: bool = True) -> np.ndarray:
+        """Return the symbol indices of the pilots (host int64, ``(P,)``).
+
+        Index ``k`` of the result is the position of ``pilot_symbols[k]``;
+        empty for a frame without pilots.
+
+        Parameters
+        ----------
+        include_preamble : bool, default True
+            ``True``: indices into the whole frame.  ``False``: indices into
+            what follows the preamble, as in :meth:`get_structure_map`.
+
+        Returns
+        -------
+        numpy.ndarray
+            Pilot symbol indices in ascending order.
+        """
+        mask = self.get_structure_map(include_preamble=include_preamble).pilots
+        return np.flatnonzero(mask)
 
     # -------------------------------------------------------------------------
     # Signal Generation
@@ -665,6 +722,15 @@ class SingleCarrierFrame:
         then normalized per channel to unit symbol power (average sample power
         ``1/sps``), as ``generate`` does; the pilot-to-payload ratio of
         ``pilot_gain_db`` is kept.
+
+        The payload's symbol energy is therefore not the frame's average: a
+        preamble of lower peak-to-average ratio than the body sits above it
+        (for a 16-QAM payload of 4096 symbols, RRC 0.1 at 2 sps, a ZC-139
+        preamble at +3.8 dB and the payload at -0.2 dB; Barker-13 at +0.7 and
+        0.0 dB), by an amount that depends on the body's peak.  An Es/N0 set
+        by :func:`~commkit.impairments.apply_awgn` on the frame refers to the
+        frame average; measure the payload's after
+        :func:`extract_payload`.
         """
         sps = require_integer_sps(sps, "SingleCarrierFrame.to_signal()")
         device = require_device(device, "SingleCarrierFrame.to_signal()")
@@ -878,23 +944,12 @@ def extract_payload(signal: Signal) -> Signal:
     )
 
 
-def _frame_pilots(
-    frame: SingleCarrierFrame, include_preamble: bool, name: str
-) -> tuple[np.ndarray, np.ndarray]:
-    """Symbol indices and symbols (host) of a frame's pilots, for the
-    ``from_frame`` constructors of the pilot-aided methods."""
-    if frame.pilot_symbols is None:
-        raise ValueError(f"{name}.from_frame(): the frame has no pilots.")
-    mask = frame.get_structure_map(include_preamble=include_preamble)["pilots"]
-    return np.flatnonzero(mask), np.asarray(frame.pilot_symbols)
-
-
-def _resolve_seed(rng: Any) -> int:
+def _resolve_seed(rng: Any, name: str) -> int:
     """The integer seed a frame keeps: ``rng`` itself, one draw from a
     Generator, or fresh entropy for ``None``."""
     if isinstance(rng, np.random.Generator):
         return int(rng.integers(2**63))
     if rng is None:
         return int(np.random.SeedSequence().generate_state(1, np.uint64)[0] >> 1)
-    _check_int("payload_rng", rng, 0)
+    _check_int(name, rng, 0)
     return int(rng)

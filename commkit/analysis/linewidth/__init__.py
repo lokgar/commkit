@@ -9,10 +9,17 @@ The method object chooses the estimator and the kind of record it reads:
   complex IQ, array or Signal) - ``DshFmFit``, ``DshIncrement`` and
   ``DshLorentzian`` (see :mod:`commkit.analysis.interferometry`).
 
-Every method returns a :class:`LinewidthEstimate`: the linewidth in Hz plus
-that method's diagnostics, ready for the ``plotting.analysis`` plots.  The
-values are host floats (SISO) or ``(C,)`` arrays (MIMO), like the metrics:
-the fits run host-side on plot-sized reductions.
+Every method returns a :class:`LinewidthEstimate`, the linewidth in Hz, as
+the subclass that holds that method's diagnostics, ready for the
+``plotting.analysis`` plots: :class:`IncrementSlopeEstimate`,
+:class:`IncrementEstimate` (``IncrementSubtract``),
+:class:`BetaSeparationEstimate`, :class:`DshFmFitEstimate`,
+:class:`DshIncrementEstimate` and :class:`DshLorentzianEstimate`.  The
+plots take the family classes: :class:`FmNoiseFitEstimate` for
+``BetaSeparation`` and ``DshFmFit``, :class:`IncrementEstimate` for the
+three increment methods.  The values are host floats (SISO) or ``(C,)`` arrays
+(MIMO), like the metrics: the fits run host-side on plot-sized
+reductions.
 """
 
 from typing import Any
@@ -37,14 +44,30 @@ from .phase import (
     _increment_slope,
     _increment_subtract,
 )
-from .result import LinewidthEstimate
+from .result import (
+    BetaSeparationEstimate,
+    DshFmFitEstimate,
+    DshIncrementEstimate,
+    DshLorentzianEstimate,
+    FmNoiseFitEstimate,
+    IncrementEstimate,
+    IncrementSlopeEstimate,
+    LinewidthEstimate,
+)
 
 __all__ = [
     "BetaSeparation",
+    "BetaSeparationEstimate",
     "DshFmFit",
+    "DshFmFitEstimate",
     "DshIncrement",
+    "DshIncrementEstimate",
     "DshLorentzian",
+    "DshLorentzianEstimate",
+    "FmNoiseFitEstimate",
+    "IncrementEstimate",
     "IncrementSlope",
+    "IncrementSlopeEstimate",
     "IncrementSubtract",
     "LinewidthEstimate",
     "estimate_linewidth",
@@ -104,7 +127,9 @@ def estimate_linewidth(
     Returns
     -------
     LinewidthEstimate
-        ``value`` in Hz and the method's diagnostics, on the host.
+        ``value`` in Hz, as the subclass holding the method's diagnostics,
+        on the host (see the module docstring for the class of each
+        method).
 
     Raises
     ------

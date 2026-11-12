@@ -6,6 +6,7 @@ synthesized from one (``Δφ(t) = φ(t) - φ(t-τ_d)`` on an AOM carrier). Input
 fixture.
 """
 
+import dataclasses
 import logging
 
 import numpy as np
@@ -106,11 +107,13 @@ class TestLinewidthEstimation:
         assert out.value == pytest.approx(dnu, rel=0.15)
 
     def test_beta_area_region_is_line_gated(self, xp):
-        """'above' is the exact integrated region: S_f > β within the band fence.
-
-        The region is gated by the line, not by [f_min, f_max]; the area must be
-        reproducible from the returned mask alone.
+        """'above' is the exact integrated region within the band fence:
+        where the fitted model exceeds the β-line, or the PSD does at bins
+        beyond the fit's spur screen.  The area is reproducible from the
+        returned mask alone.
         """
+        from scipy.stats import chi2
+
         fs, n = 100e6, 1 << 19
         phi = to_device(
             generate_phase_noise(
@@ -125,22 +128,63 @@ class TestLinewidthEstimation:
         )
         out = analysis.estimate_linewidth(
             xp.asarray(phi),
-            BetaSeparation(nperseg=1 << 14, f_max=5e6),
+            BetaSeparation(nperseg=1 << 15, f_max=5e6),
             sampling_rate=fs,
         )
         f, s_f, beta, above = out.frequencies, out.fm_psd, out.beta_line, out.above
         fmin, fmax = out.band
         assert above.dtype == bool and above.shape == f.shape
-        expected = (s_f > beta) & (f >= fmin) & (f <= fmax)
+        band = (f >= fmin) & (f <= fmax)
+        model = np.where(band, np.nan_to_num(out.fm_psd_model), 0.0)
+        k = out.num_segments
+        dof = 2 * k / 1.056
+        rejects = s_f > chi2.isf(0.01 / band.sum(), dof) / dof * model
+        expected = band & np.where(rejects, s_f > beta, model > beta)
         np.testing.assert_array_equal(above, expected)
         # The reported area is exactly the trapezoid over the masked PSD.
         area = float(np.trapezoid(np.where(above, s_f, 0.0), f))
         assert out.area_hz2 == pytest.approx(area, rel=1e-9)
-        # With flicker the plateau crossing is noisy: the gate may open/close
-        # several times - the region is a union of intervals, not one band.
         assert above.any()
 
-    def test_beta_floor_models_the_awgn_tail(self, xp):
+    def test_beta_area_of_white_fm_is_unbiased(self):
+        """On Wiener phase noise with about 70 PSD bins below the crossover
+        f_c (1 MHz at 1 GS/s, 2^20 samples, default segment), the mean of 16
+        records is within 2 % of Δν: the standard deviation of one record
+        is 0.025 (measured), so the mean's is 0.006 and 2 % is over three of
+        them (measured mean 0.994).  A region taken on the noisy bins keeps
+        upward fluctuations near f_c and read 1.032."""
+        fs, dnu, n = 1e9, 1e6, 1 << 20
+        values = [
+            analysis.estimate_linewidth(
+                generate_phase_noise(
+                    num_samples=n, sampling_rate=fs, linewidth=dnu, rng=seed
+                ),
+                BetaSeparation(),
+                sampling_rate=fs,
+            ).value
+            / dnu
+            for seed in range(16)
+        ]
+        assert float(np.mean(values)) == pytest.approx(1.0, abs=0.02)
+
+    def test_beta_area_warns_with_few_bins_below_the_crossover(self, caplog):
+        """100 kHz at 1 GS/s on 2^20 samples leaves 7 bins below f_c at the
+        default segment (spread 0.04 of Δν, measured): the warning names
+        them and the segment that gives 10.  At 1 MHz (73 bins) it stays
+        quiet."""
+        fs, n = 1e9, 1 << 20
+        for dnu, warns in ((1e5, True), (1e6, False)):
+            phi = generate_phase_noise(
+                num_samples=n, sampling_rate=fs, linewidth=dnu, rng=5
+            )
+            caplog.clear()
+            with caplog.at_level(logging.WARNING, logger="commkit"):
+                analysis.estimate_linewidth(phi, BetaSeparation(), sampling_rate=fs)
+            assert ("only 7 PSD bins below" in caplog.text) is warns
+            if warns:
+                assert "nperseg to 262144" in caplog.text
+
+    def test_beta_floor_models_the_awgn_tail(self, xp, caplog):
         """Unfenced, the floor fit models the AWGN f² tail instead of cutting
         it: it recovers Δν and the angle noise of σ²/2 = 5e-3 rad² per
         sample, over a band reaching Nyquist.  The old plateau median read
@@ -150,29 +194,37 @@ class TestLinewidthEstimation:
         phi = _wiener_phase(dnu, n, seed=13)
         rng = np.random.default_rng(8)
         phi = phi + rng.normal(0, np.sqrt(10 ** (-2.0) / 2), n)  # AWGN angle noise
-        out = analysis.estimate_linewidth(
-            xp.asarray(phi), BetaSeparation(nperseg=1 << 17), sampling_rate=R
-        )
+        with caplog.at_level(logging.WARNING, logger="commkit"):
+            out = analysis.estimate_linewidth(
+                xp.asarray(phi), BetaSeparation(nperseg=1 << 17), sampling_rate=R
+            )
+        # 3 bins below f_c: the β-area is unresolved and flagged, the floor
+        # is what this test reads.
+        assert "only 3 PSD bins below" in caplog.text
         assert out.linewidth_floor == pytest.approx(dnu, rel=0.05)
         assert out.angle_noise_var == pytest.approx(10 ** (-2.0) / 2, rel=0.05)
         f_used = out.frequencies[out.used]
         assert float(f_used[-1]) > 0.9 * R / 2
 
-    def test_beta_floor_excludes_a_drift_rise(self, xp):
+    def test_beta_floor_excludes_a_drift_rise(self, xp, caplog):
         """A slow frequency wander (±20 MHz at 1 MHz) raises S_f by orders of
         magnitude below a few MHz; the unfenced fit starts above it, at the
         plateau's lower edge, and still reads the white-FM floor, while the
-        β-area FWHM includes the wander and exceeds it."""
+        β-area FWHM includes the wander and exceeds it (measured 22 Δν).  The
+        wander's bins lie beyond the model's spur screen and count on their
+        own value: a region read from the model alone gave 7.7 Δν."""
         n, dnu = 1 << 19, 1.5e6
         t = np.arange(n) / R
         wander = 2 * np.pi * np.cumsum(20e6 * np.sin(2 * np.pi * 1e6 * t)) / R
         phi = _wiener_phase(dnu, n, seed=13) + wander
-        out = analysis.estimate_linewidth(
-            xp.asarray(phi), BetaSeparation(nperseg=1 << 17), sampling_rate=R
-        )
+        with caplog.at_level(logging.WARNING, logger="commkit"):
+            out = analysis.estimate_linewidth(
+                xp.asarray(phi), BetaSeparation(nperseg=1 << 17), sampling_rate=R
+            )
+        assert "only 3 PSD bins below" in caplog.text  # the white-FM part
         assert out.linewidth_floor == pytest.approx(dnu, rel=0.10)
         assert float(out.frequencies[out.used][0]) > 1.5e6
-        assert out.value > 3 * dnu
+        assert out.value > 15 * dnu
 
     def test_increment_returns_plot_data(self, xp):
         """The returned fit data plots directly: Var(k) fit (slope), point (subtract)."""
@@ -526,7 +578,8 @@ class TestEstimateLinewidthContract:
         res = analysis.estimate_linewidth(phi, method, sampling_rate=R)
         assert isinstance(res, analysis.LinewidthEstimate)
         assert res.method is method
-        assert res.frequencies is None and res.psd is None  # other methods' fields
+        assert isinstance(res, analysis.IncrementSlopeEstimate)
+        assert not hasattr(res, "frequencies")  # other methods' fields
         with pytest.raises(AttributeError):
             res.value = 0.0  # type: ignore[misc]
 
@@ -558,6 +611,34 @@ class TestEstimateLinewidthContract:
         assert isinstance(flat.value, float)
         assert isinstance(row.value, np.ndarray) and row.value.shape == (1,)
         assert row.value[0] == pytest.approx(flat.value, rel=1e-6)
+
+    @pytest.mark.allow_warnings
+    @pytest.mark.parametrize(
+        ("method", "result"),
+        [
+            (IncrementSlope(), "IncrementSlopeEstimate"),
+            (IncrementSubtract(), "IncrementEstimate"),
+            (BetaSeparation(nperseg=1024), "BetaSeparationEstimate"),
+            (DshIncrement(delay=500 / FS, f_shift=80e6), "DshIncrementEstimate"),
+            (DshFmFit(delay=500 / FS, f_shift=80e6), "DshFmFitEstimate"),
+            (DshLorentzian(delay=500 / FS), "DshLorentzianEstimate"),
+        ],
+        ids=lambda m: type(m).__name__ if not isinstance(m, str) else m,
+    )
+    def test_each_method_returns_its_subclass(self, xp, method, result):
+        """The result holds exactly its method's fields: its own class, no
+        field of the other families."""
+        if isinstance(method, (DshIncrement, DshFmFit, DshLorentzian)):
+            x, _ = make_dsh_beat(2e6, 1 << 16, 500, 80e6, snr_db=None, seed=1)
+            fs = FS
+        else:
+            x, fs = _wiener_phase(1e6, 1 << 14, seed=1), R
+        res = analysis.estimate_linewidth(xp.asarray(x), method, sampling_rate=fs)
+        assert type(res) is getattr(analysis, result)
+        fields = {f.name for f in dataclasses.fields(res)}
+        for other in ("fm_psd", "increment_var", "psd", "beta_line", "slope", "lags"):
+            assert (other in fields) == hasattr(res, other)
+        assert all(getattr(res, f) is not None for f in fields)
 
     def test_unknown_method_raises(self, xp):
         with pytest.raises(TypeError, match="IncrementSlope"):

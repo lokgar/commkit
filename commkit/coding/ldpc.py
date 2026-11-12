@@ -177,7 +177,7 @@ class LDPCCode(_Code):
         return code
 
     @classmethod
-    def quasi_cyclic(cls, base: Any, lifting: int, *, punctured: int = 0) -> LDPCCode:
+    def quasi_cyclic(cls, base: Any, *, lifting: int, punctured: int = 0) -> LDPCCode:
         """Quasi-cyclic code from a base matrix of circulant shifts.
 
         Parameters
@@ -211,7 +211,7 @@ class LDPCCode(_Code):
         return code
 
     @classmethod
-    def dvbs2(cls, rate: str, frame: str = "normal") -> LDPCCode:
+    def dvbs2(cls, rate: str, *, frame: str = "normal") -> LDPCCode:
         """DVB-S2 LDPC code (ETSI EN 302 307-1, clause 5.3.2, Annexes B and C).
 
         Parameters
@@ -408,7 +408,7 @@ def _dvbs2(rate: str, frame: str) -> LDPCCode:
 
 @cache
 def _pon() -> LDPCCode:
-    return LDPCCode.quasi_cyclic(np.asarray(PON_BASE), 256, punctured=384)
+    return LDPCCode.quasi_cyclic(np.asarray(PON_BASE), lifting=256, punctured=384)
 
 
 def _warn_if_4_cycles(code: LDPCCode) -> None:

@@ -161,8 +161,11 @@ class TestPAS:
     @pytest.mark.parametrize(
         ("c", "code"),
         [
-            (PS64, LDPCCode.dvbs2("3/4", "short")),
-            (Constellation.pam(8).shaped(nu=0.05), LDPCCode.dvbs2("3/4", "short")),
+            (PS64, LDPCCode.dvbs2("3/4", frame="short")),
+            (
+                Constellation.pam(8).shaped(nu=0.05),
+                LDPCCode.dvbs2("3/4", frame="short"),
+            ),
             # Rate 1/2 = (m - 1) / m: every sign is a parity bit.
             (
                 Constellation.qam(16).shaped(entropy=3.5),

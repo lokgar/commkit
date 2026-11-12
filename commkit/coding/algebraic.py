@@ -35,8 +35,8 @@ from typing import Any
 import numpy as np
 
 from .. import _cuda
+from .._bits import pack_bits
 from ..backend import ArrayType, _device_tables, dispatch
-from ..mapping.gray import _pack
 from ._galois import PRIMITIVE, _Field
 from ._gf2 import matmul_mod2
 from .base import _Code, _Codec, _Decoded, _hard, _register, _resolve_method
@@ -413,7 +413,7 @@ def _correct(code: Any, hard: ArrayType) -> tuple[ArrayType, ArrayType]:
     bits = 1 if code.binary else m  # per position
     (syn_t,) = _device_tables(code, "decoder", xp, lambda: (code._syndrome_matrix,))
     # Syndromes as field elements, (R, 2t).
-    s = _pack(matmul_mod2(hard, syn_t).reshape(rows, 2 * t, m))
+    s = pack_bits(matmul_mod2(hard, syn_t).reshape(rows, 2 * t, m))
     if xp is np:
         words = np.array(hard, dtype=np.int8, order="C")
         valid = np.empty(rows, dtype=np.bool_)

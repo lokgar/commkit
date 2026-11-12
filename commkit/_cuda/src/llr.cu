@@ -1,6 +1,6 @@
 // Bit log-likelihood ratios, one thread per symbol.
 //
-// Device ports of the Numba kernels in `mapping/llr.py`, their CPU
+// Device ports of the Numba kernels in `mapping/_numba_llr.py`, their CPU
 // references:
 //
 //   llr            the M metrics m(s) = -|x - s|^2 / sigma^2 + log P(s) of
@@ -12,7 +12,7 @@
 //                  max-log LLRs of a uniform separable lattice in closed
 //                  form, 1 + 2k metrics per axis: the metric of the snapped
 //                  level against the better of the two levels just outside
-//                  its run of equal bits (see mapping/llr.py).
+//                  its run of equal bits (see mapping/_demap.py).
 //
 // Per bit, the LLR is the max over the points whose bit is 0 minus the max
 // over those whose bit is 1 (max-log), or the difference of the log-sums of

@@ -101,6 +101,19 @@ class TestErrorVectorMagnitude:
         pct_bl = metrics.evm(sig, blind=True)
         assert pct_bl == pytest.approx(pct_da, rel=0.02)
 
+    def test_evm_blind_is_relative_to_the_decided_power(self, xp: Any) -> None:
+        """Blind EVM of a constellation at power 4 equals the data-aided EVM
+        (10 % at 20 dB), not twice it: the error is divided by the power of
+        the decided points."""
+        c = Constellation(2.0 * Constellation.qam(16).points)
+        sig = generate(c, num_symbols=40000, symbol_rate=1e9, rng=5)
+        tx = xp.asarray(sig.reference.symbols)
+        rx = apply_awgn(tx, esn0_db=20.0, sps=1, rng=6)
+        pct_da = metrics.evm(rx, tx)
+        pct_bl = metrics.evm(rx, blind=True, constellation=c)
+        assert pct_da == pytest.approx(10.0, rel=0.02)
+        assert pct_bl == pytest.approx(pct_da, rel=0.02)
+
     def test_evm_blind_multichannel(self, xp: Any, xpt: Any) -> None:
         """Blind EVM returns array of shape (N_ch,) for MIMO input."""
         const = xp.asarray(Constellation.qam(4).points)

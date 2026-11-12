@@ -189,40 +189,6 @@ def _gray_points(
     return _read_only(result)
 
 
-def _pack(labels: ArrayType) -> ArrayType:
-    """MSB-first bit rows ``(..., k)`` to integers, int64, on their device.
-
-    The inverse of :func:`_unpack_bits`.
-    """
-    labels, xp, _ = dispatch(labels)
-    k = labels.shape[-1]
-    weights = xp.left_shift(1, xp.arange(k - 1, -1, -1, dtype=xp.int64))
-    return (labels.astype(xp.int64) * weights).sum(axis=-1)
-
-
-def _unpack_bits(indices: ArrayType, k: int) -> ArrayType:
-    """Unpack integer indices into their k-bit binary representation (MSB-first).
-
-    Runs with the array module of ``indices``, so a GPU-resident
-    index array (e.g. from hard-decision demapping on CuPy) unpacks without
-    a host round trip.
-
-    Parameters
-    ----------
-    indices : array_like, shape (N,), integer dtype
-    k : int
-        Number of bits per index.
-
-    Returns
-    -------
-    ndarray, shape (N, k), int8
-        MSB-first bit pattern per index, on the device of ``indices``.
-    """
-    indices, xp, _ = dispatch(indices)
-    shifts = xp.arange(k - 1, -1, -1, dtype="int32")
-    return ((indices[:, xp.newaxis] >> shifts) & 1).astype(xp.int8)
-
-
 # GPU input outside the kernel's limits (double precision, more than 1024
 # points): budget of the (chunk, M) distance matrix per chunk, in elements.
 _GPU_CHUNK_ELEMENTS = 1 << 22

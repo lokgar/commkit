@@ -182,20 +182,20 @@ CHECKED_CASES = [
     (BCHCode(4, 2), None, True),
     (BCHCode(4, 2), Chase(2), True),
     (ReedSolomonCode.kp4(), None, True),
-    (LDPCCode.dvbs2("1/2", "short"), MinSum(), True),
-    (LDPCCode.dvbs2("1/2", "short"), SumProduct(), True),
+    (LDPCCode.dvbs2("1/2", frame="short"), MinSum(), True),
+    (LDPCCode.dvbs2("1/2", frame="short"), SumProduct(), True),
     (PolarCode.nr(k=32, n=64), SC(), False),
     (PolarCode.nr(k=32, n=64, crc="11"), SCL(4), True),
     (ConvolutionalCode.k7(32), Viterbi(), False),
     (ConvolutionalCode.k7(32), BCJR(), False),
     (TurboCode.lte(40), None, False),
-    (CRC.nr("6", 10), None, True),
+    (CRC.nr("6", info_bits=10), None, True),
     (CCDM(Constellation.pam(2), num_symbols=4), None, True),
     (Punctured(H16, [15]), Syndrome(max_weight=1), True),
     (Shortened(H16, 2), Syndrome(), False),
     (Concatenated.ieee_802_3dj(), None, True),
     # valid is the outer decoder's, so a checked inner code does not count.
-    (Concatenated(H74, CRC.nr("6", 7)), None, False),
+    (Concatenated(H74, CRC.nr("6", info_bits=7)), None, False),
 ]
 
 

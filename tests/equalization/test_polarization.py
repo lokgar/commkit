@@ -1,4 +1,4 @@
-"""Static and dynamic polarization-tone demultiplexing."""
+"""Static and dynamic polarization-tone demultiplexing (PolarizationTones)."""
 
 import numpy as np
 import pytest
@@ -9,9 +9,16 @@ from commkit.impairments import apply_polarization_mixing
 from commkit.spectral import add_pilot_tone, grid_frequency
 
 
+def _estimate(samples, *, sampling_rate=None, **tones):
+    """estimate_polarization with PolarizationTones(**tones)."""
+    return equalization.estimate_polarization(
+        samples, equalization.PolarizationTones(**tones), sampling_rate=sampling_rate
+    )
+
+
 def _demux(samples, *, trim_edges=False, **estimate):
-    """estimate_polarization_tones, then correct_polarization."""
-    track = equalization.estimate_polarization_tones(samples, **estimate)
+    """estimate_polarization, then correct_polarization."""
+    track = _estimate(samples, **estimate)
     return equalization.correct_polarization(samples, track, trim_edges=trim_edges)
 
 
@@ -43,7 +50,6 @@ class TestDemultiplexPolarizationTones:
         den = xp.sqrt(xp.sum(xp.abs(a) ** 2) * xp.sum(xp.abs(b) ** 2))
         return float(num / den)
 
-    @pytest.mark.allow_warnings
     def test_demux_recovers_streams_no_permutation(self, xp):
         """A static rotation is inverted; row j tracks tone j (no permutation)."""
 
@@ -65,7 +71,6 @@ class TestDemultiplexPolarizationTones:
             # ...and rejects the other stream (cross-talk suppressed).
             assert self._corr(xp, demuxed[j], tx[1 - j]) < 0.05
 
-    @pytest.mark.allow_warnings
     def test_demux_robust_to_noise(self, xp):
         """The tone-phasor estimate still locks under moderate AWGN."""
 
@@ -86,7 +91,6 @@ class TestDemultiplexPolarizationTones:
         for j in range(2):
             assert self._corr(xp, demuxed[j], tx[j]) > 0.99
 
-    @pytest.mark.allow_warnings
     def test_static_track(self, xp, xpt):
         """A static estimate holds one (K, C) complex128 unmixing matrix."""
 
@@ -96,13 +100,12 @@ class TestDemultiplexPolarizationTones:
             s, sampling_rate=fs, frequency=self.TONES, power_ratio_db=-10.0
         )
         f_used = grid_frequency(self.TONES, sampling_rate=fs, num_samples=s.shape[-1])
-        track = equalization.estimate_polarization_tones(
-            tx, sampling_rate=fs, tone_frequencies=f_used
-        )
+        track = _estimate(tx, sampling_rate=fs, tone_frequencies=f_used)
         W = track.matrix
         assert W.shape == (2, 2)
         assert W.dtype == xp.complex128
         assert track.edge == 0 and track.matrix_grid.shape == (1, 2, 2)
+        assert isinstance(track, equalization.PolarizationTonesEstimate)
         assert track.tone_frequencies == pytest.approx(f_used, abs=0.05)
         # A bare matrix is applied like the track.
         xpt.assert_allclose(
@@ -110,7 +113,6 @@ class TestDemultiplexPolarizationTones:
             equalization.correct_polarization(tx, track),
         )
 
-    @pytest.mark.allow_warnings
     def test_overdetermined_pinv(self, xp):
         """C > K: a (3, 2) mixing is unmixed to 2 streams via the pseudo-inverse."""
 
@@ -143,7 +145,6 @@ class TestDemultiplexPolarizationTones:
         with pytest.raises(ValueError, match=r"2-D \(C, N\)"):
             _demux(s, sampling_rate=fs, tone_frequencies=[10.0])
 
-    @pytest.mark.allow_warnings
     def test_signal_input_returns_signal(self, xp, xpt):
         """Signal input: sampling_rate is taken from the signal."""
 
@@ -162,7 +163,6 @@ class TestDemultiplexPolarizationTones:
         assert isinstance(demuxed_sig, Signal)
         xpt.assert_allclose(demuxed_sig.samples, demuxed_arr)
 
-    @pytest.mark.allow_warnings
     def test_signal_input_gives_the_same_estimate(self, xp, xpt):
         """Signal input: the same estimate as the array with sampling_rate."""
 
@@ -174,17 +174,23 @@ class TestDemultiplexPolarizationTones:
         f_used = grid_frequency(self.TONES, sampling_rate=fs, num_samples=s.shape[-1])
         sig = Signal(samples=tx, sampling_rate=fs, symbol_rate=fs)
 
-        W_sig = equalization.estimate_polarization_tones(
-            sig, tone_frequencies=f_used
-        ).matrix
-        W_arr = equalization.estimate_polarization_tones(
-            tx, sampling_rate=fs, tone_frequencies=f_used
-        ).matrix
+        W_sig = _estimate(sig, tone_frequencies=f_used).matrix
+        W_arr = _estimate(tx, sampling_rate=fs, tone_frequencies=f_used).matrix
         xpt.assert_allclose(W_sig, W_arr)
+        # A method as how estimates first: the same streams as the estimate.
+        method = equalization.PolarizationTones(f_used)
+        xpt.assert_allclose(
+            equalization.correct_polarization(tx, method, sampling_rate=fs),
+            equalization.correct_polarization(tx, W_arr),
+            rtol=1e-6,
+            atol=1e-6,
+        )
+        with pytest.raises(ValueError, match="sampling_rate"):
+            equalization.correct_polarization(tx, method)
+        with pytest.raises(TypeError, match="PolarizationTones"):
+            equalization.estimate_polarization(tx, object(), sampling_rate=fs)
         with pytest.raises(ValueError, match="track_bandwidth"):
-            equalization.estimate_polarization_tones(
-                sig, tone_frequencies=f_used, num_taps=101
-            )
+            _estimate(sig, tone_frequencies=f_used, num_taps=101)
 
 
 class TestDemultiplexPolarizationTonesDynamic:
@@ -194,7 +200,6 @@ class TestDemultiplexPolarizationTonesDynamic:
     _streams = staticmethod(TestDemultiplexPolarizationTones._streams)
     _corr = staticmethod(TestDemultiplexPolarizationTones._corr)
 
-    @pytest.mark.allow_warnings
     def test_tracks_drifting_sop_where_static_fails(self, xp):
         """A rotating SOP defeats the static one-shot inverse but is tracked here."""
 
@@ -231,7 +236,6 @@ class TestDemultiplexPolarizationTonesDynamic:
         assert min_static < 0.95  # static degraded by the drift
         assert min_dynamic > min_static + 0.04
 
-    @pytest.mark.allow_warnings
     def test_tracks_with_long_tracking_filter(self, xp):
         """A narrow tracking bandwidth (fs/B in the hundreds, as in real
         captures) gives a tracking FIR of hundreds of taps; it still tracks."""
@@ -256,7 +260,6 @@ class TestDemultiplexPolarizationTonesDynamic:
             assert self._corr(xp, dynamic[j], tx[j]) > 0.99
             assert self._corr(xp, dynamic[j], tx[1 - j]) < 0.1
 
-    @pytest.mark.allow_warnings
     def test_static_sop_still_recovered(self, xp):
         """With no drift the dynamic path matches the static result (no regression)."""
 
@@ -275,7 +278,6 @@ class TestDemultiplexPolarizationTonesDynamic:
             assert self._corr(xp, demuxed[j], tx[j]) > 0.99
             assert self._corr(xp, demuxed[j], tx[1 - j]) < 0.1
 
-    @pytest.mark.allow_warnings
     def test_track_shapes(self, xp):
         """A tracked estimate holds the (G, K, C) stack and (G,) grid positions."""
 
@@ -286,7 +288,7 @@ class TestDemultiplexPolarizationTonesDynamic:
             s, sampling_rate=fs, frequency=self.TONES, power_ratio_db=-10.0
         )
         f_used = grid_frequency(self.TONES, sampling_rate=fs, num_samples=s.shape[-1])
-        track = equalization.estimate_polarization_tones(
+        track = _estimate(
             tx, sampling_rate=fs, tone_frequencies=f_used, track_bandwidth=2.0
         )
         Wg, grid = track.matrix_grid, track.grid_positions
@@ -307,7 +309,6 @@ class TestDemultiplexPolarizationTonesDynamic:
                 s, sampling_rate=fs, tone_frequencies=self.TONES, track_bandwidth=0.0
             )
 
-    @pytest.mark.allow_warnings
     def test_trim_edges_returns_valid_interior(self, xp):
         """trim_edges drops the track's edge, num_taps//2, at each side."""
 
@@ -319,7 +320,7 @@ class TestDemultiplexPolarizationTonesDynamic:
             s, sampling_rate=fs, frequency=self.TONES, power_ratio_db=-10.0
         )
         f_used = grid_frequency(self.TONES, sampling_rate=fs, num_samples=s.shape[-1])
-        track = equalization.estimate_polarization_tones(
+        track = _estimate(
             tx,
             sampling_rate=fs,
             tone_frequencies=f_used,
@@ -335,7 +336,6 @@ class TestDemultiplexPolarizationTonesDynamic:
         for j in range(2):
             assert self._corr(xp, demuxed[j], tx[j, valid]) > 0.99
 
-    @pytest.mark.allow_warnings
     def test_signal_input_returns_signal(self, xp, xpt):
         """Signal input: sampling_rate is taken from the signal."""
 
@@ -356,9 +356,8 @@ class TestDemultiplexPolarizationTonesDynamic:
         assert isinstance(demuxed_sig, Signal)
         xpt.assert_allclose(demuxed_sig.samples, demuxed_arr)
 
-    @pytest.mark.allow_warnings
     def test_signal_input_gives_the_same_track(self, xp, xpt):
-        """The JonesTrack is the same for Signal and array input."""
+        """The PolarizationEstimate is the same for Signal and array input."""
 
         fs = 100.0
         s = self._streams(xp, N=8192)
@@ -368,14 +367,12 @@ class TestDemultiplexPolarizationTonesDynamic:
         f_used = grid_frequency(self.TONES, sampling_rate=fs, num_samples=s.shape[-1])
         sig = Signal(samples=tx, sampling_rate=fs, symbol_rate=fs)
 
-        track_sig = equalization.estimate_polarization_tones(
-            sig, tone_frequencies=f_used, track_bandwidth=2.0
-        )
-        track_arr = equalization.estimate_polarization_tones(
+        track_sig = _estimate(sig, tone_frequencies=f_used, track_bandwidth=2.0)
+        track_arr = _estimate(
             tx, sampling_rate=fs, tone_frequencies=f_used, track_bandwidth=2.0
         )
 
-        assert isinstance(track_sig, equalization.JonesTrack)
+        assert isinstance(track_sig, equalization.PolarizationEstimate)
         xpt.assert_allclose(track_sig.matrix_grid, track_arr.matrix_grid)
         xpt.assert_allclose(track_sig.grid_positions, track_arr.grid_positions)
 
@@ -391,11 +388,15 @@ class TestDemultiplexPolarizationTonesDynamic:
 
 
 class TestCorrectPolarization:
-    """correct_polarization with a JonesTrack built by hand: the
+    """correct_polarization with a PolarizationEstimate built by hand: the
     grid-interpolated time-varying matrix apply."""
 
-    def test_matches_per_sample_reference(self, xp, xpt):
-        """Block-GEMM apply == per-sample linear-interp einsum (to complex64)."""
+    @pytest.mark.parametrize(
+        ("dtype", "tol"), [("complex64", 1e-4), ("complex128", 1e-10)]
+    )
+    def test_matches_per_sample_reference(self, xp, xpt, dtype, tol):
+        """Block-GEMM apply == per-sample linear-interp einsum, in the input's
+        precision: complex128 input is not computed in complex64."""
         rng = xp.random.RandomState(0)
         N, step = 20000, 4096
         idx = xp.arange(0, N, step)
@@ -403,11 +404,9 @@ class TestCorrectPolarization:
             idx = xp.concatenate([idx, xp.asarray([N - 1])])
         gp = idx.astype(xp.float64)
         G = int(gp.shape[0])
-        M = (
-            rng.standard_normal((G, 2, 2)) + 1j * rng.standard_normal((G, 2, 2))
-        ).astype(xp.complex64)
+        M = rng.standard_normal((G, 2, 2)) + 1j * rng.standard_normal((G, 2, 2))
         x = (rng.standard_normal((2, N)) + 1j * rng.standard_normal((2, N))).astype(
-            xp.complex64
+            dtype
         )
         # per-sample linear-interpolation reference (double precision)
         Md = M.astype(xp.complex128)
@@ -417,10 +416,11 @@ class TestCorrectPolarization:
         M_full = Md[lo] + (Md[lo + 1] - Md[lo]) * frac[:, None, None]
         ref = xp.einsum("lkc,cl->kl", M_full, x.astype(xp.complex128))
         out = equalization.correct_polarization(
-            x, equalization.JonesTrack(M, gp), normalize=False
+            x, equalization.PolarizationEstimate(M, gp), normalize=False
         )
         assert out.shape == (2, N)
-        xpt.assert_allclose(out, ref, rtol=1e-4, atol=1e-4)
+        assert out.dtype == dtype
+        xpt.assert_allclose(out, ref, rtol=tol, atol=tol)
 
     def test_constant_grid_is_static_matmul(self, xp, xpt):
         """A grid of identical matrices applies that one matrix everywhere."""
@@ -433,7 +433,7 @@ class TestCorrectPolarization:
             xp.complex64
         )
         out = equalization.correct_polarization(
-            x, equalization.JonesTrack(M, gp), normalize=False
+            x, equalization.PolarizationEstimate(M, gp), normalize=False
         )
         xpt.assert_allclose(out, M2 @ x, rtol=1e-4, atol=1e-4)
 
@@ -449,7 +449,7 @@ class TestCorrectPolarization:
         )
         sig = Signal(samples=data, sampling_rate=1.0, symbol_rate=1.0)
 
-        track = equalization.JonesTrack(M, gp)
+        track = equalization.PolarizationEstimate(M, gp)
         out_sig = equalization.correct_polarization(sig, track)
         out_arr = equalization.correct_polarization(data, track)
 
@@ -460,5 +460,5 @@ class TestCorrectPolarization:
         x = xp.ones((3, 64), dtype=xp.complex64)
         with pytest.raises(ValueError, match="C = 2"):
             equalization.correct_polarization(x, xp.eye(2))
-        with pytest.raises(ValueError, match="JonesTrack or a"):
+        with pytest.raises(ValueError, match="PolarizationEstimate, a method"):
             equalization.correct_polarization(x, xp.ones(3))

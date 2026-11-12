@@ -225,7 +225,7 @@ class TestLLRKernel:
         self, xp: Any, xpt: Any, method: str, constellation: Any
     ) -> None:
         """The M-point kernel, which separable QAM bypasses, gives its LLRs too."""
-        from commkit.mapping.llr import _llr
+        from commkit.mapping._demap import _llr
 
         x = _noisy(constellation, (777,), 0.1, seed=5)
         c = constellation
@@ -450,7 +450,7 @@ class TestClosedFormMaxLog:
 
     @pytest.mark.parametrize("labeling", ["gray", "natural", "random"])
     def test_opposite_levels_definition(self, labeling: str) -> None:
-        from commkit.mapping.llr import _opposite_levels
+        from commkit.mapping._demap import _opposite_levels
 
         labels = _axis_labelled(256, labeling, seed=2)._axes[0].labels
         lo, hi = _opposite_levels(labels)
@@ -469,7 +469,7 @@ class TestClosedFormMaxLog:
     ) -> None:
         """Bit for bit on the CPU (the closed form forced at every order);
         to float rounding on the GPU.  Symbols beyond the outer levels too."""
-        from commkit.mapping import llr as llr_module
+        from commkit.mapping import _demap as llr_module
 
         c = _axis_labelled(order, labeling, seed=order)
         x = xp.asarray(1.3 * _noisy(c, (2, 3000), 0.05, seed=order))
@@ -504,7 +504,7 @@ class TestClosedFormMaxLog:
         """Only max-log without a prior takes the closed form (on the CPU from
         16 levels per axis, on the GPU always); the rest the level metrics."""
         from commkit import _cuda
-        from commkit.mapping import llr as llr_module
+        from commkit.mapping import _demap as llr_module
 
         used: list[str] = []
         if xp is np:
@@ -552,7 +552,7 @@ class TestClosedFormMaxLog:
 
 class TestNoiseConvention:
     """noise_var is the variance of the noise in the symbols, esn0_db the
-    channel's Es/N0: the chain apply_awgn -> estimate_noise_variance ->
+    channel's Es/N0: the chain apply_awgn -> noise_variance ->
     compute_llr gives true LLRs for real and complex symbols alike."""
 
     @staticmethod
@@ -563,7 +563,7 @@ class TestNoiseConvention:
         bits = np.random.default_rng(7).integers(0, 2, n).astype(np.int8)
         s = mapping.map_bits(bits, constellation=c).astype(dtype)
         r = apply_awgn(xp.asarray(s), esn0_db=3.0, sps=1, rng=8)
-        nv = metrics.estimate_noise_variance(r, xp.asarray(s))
+        nv = metrics.noise_variance(r, xp.asarray(s))
         return r, xp.asarray(bits), nv
 
     @pytest.mark.parametrize(

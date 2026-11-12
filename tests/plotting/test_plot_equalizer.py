@@ -10,10 +10,11 @@ import numpy as np
 import pytest
 
 from commkit import equalization, generate
+from commkit.backend import to_device
 from commkit.filtering import RRC
 from commkit.mapping import Constellation
 from commkit.plotting import plot_equalizer_result
-from commkit.plotting.equalizer import plot_zf_equalizer_response
+from commkit.plotting.equalizer import plot_channel_correction
 
 
 class TestPlotEqualizer:
@@ -211,19 +212,19 @@ class TestPlotEqualizer:
         assert fig2 is not None
         assert len(axes2) == 3
 
-    def test_zf_equalizer_response_siso(self, xp: Any) -> None:
-        """Verify plot_zf_equalizer_response for SISO channel impulse response."""
+    def test_channel_correction_siso(self, xp: Any) -> None:
+        """Verify plot_channel_correction for SISO channel impulse response."""
         h = xp.array([0.2, 1.0, -0.3, 0.1], dtype=xp.float32)
-        fig, axes = plot_zf_equalizer_response(
+        fig, axes = plot_channel_correction(
             h, noise_var=0.01, sampling_rate=1e6, show=False
         )
         assert fig is not None
         assert len(axes) == 3
 
-    def test_zf_equalizer_response_mimo(self, xp: Any) -> None:
-        """Verify plot_zf_equalizer_response for 2x2 MIMO channel impulse response."""
+    def test_channel_correction_mimo(self, xp: Any) -> None:
+        """Verify plot_channel_correction for 2x2 MIMO channel impulse response."""
         h = xp.random.randn(2, 2, 8).astype(xp.float32)
-        fig, axes = plot_zf_equalizer_response(
+        fig, axes = plot_channel_correction(
             h, noise_var=0.005, sampling_rate=1e6, show=False
         )
         assert fig is not None
@@ -232,14 +233,46 @@ class TestPlotEqualizer:
 
         # Test with pre-allocated axes
         fig_custom, raw_ax = plt.subplots(4, 3)
-        fig_ret, axes_ret = plot_zf_equalizer_response(h, ax=raw_ax, show=False)
+        fig_ret, axes_ret = plot_channel_correction(h, ax=raw_ax, show=False)
         assert fig_ret is fig_custom
 
-    def test_zf_equalizer_response_show(self, xp: Any) -> None:
-        """Verify plot_zf_equalizer_response with show=True calls plt.show() and returns None."""
+    def test_channel_correction_matches_the_equalizer(self, xp: Any) -> None:
+        """The equalizer panel is what correct_channel applies: for SISO the
+        closed form H*/(|H|² + σ²) (complex64 rounding, measured 5e-6 dB);
+        for 2x2 ZF the combined W·H is the identity, 0 dB on the diagonal
+        and nothing off it (measured below -96 dB)."""
+        h = xp.array([0.2, 1.0, -0.3, 0.1], dtype=xp.float32)
+        _, axes = plot_channel_correction(h, noise_var=0.01, nfft=1024)
+        H = np.fft.fft(to_device(h, "cpu"), 1024)
+        W = np.fft.fftshift(np.conj(H) / (np.abs(H) ** 2 + 0.01))
+        np.testing.assert_allclose(
+            axes[1].lines[0].get_ydata(), 20 * np.log10(np.abs(W) + 1e-12), atol=1e-3
+        )
+        hm = xp.asarray(np.random.default_rng(0).standard_normal((2, 2, 8)), xp.float32)
+        _, axes = plot_channel_correction(hm, nfft=1024)
+        diag = axes[0][2].lines[0].get_ydata()
+        assert np.max(np.abs(diag)) < 1e-2
+        assert np.max(axes[1][2].lines[0].get_ydata()) < -60
+
+    def test_centred_estimate_is_corrected_exactly(self, xp: Any) -> None:
+        """A ChannelEstimate is plotted like taps: 2x2 ZF of a centred
+        estimate gives the identity, 0 dB on the diagonal and nothing off
+        it, as for causal taps."""
+        from commkit.equalization import ChannelEstimate
+
+        rng = np.random.default_rng(1)
+        taps = rng.standard_normal((2, 2, 9)).astype(np.float32)
+        taps[0, 0, 4] = taps[1, 1, 4] = 4.0  # well-conditioned
+        est = ChannelEstimate(xp.asarray(taps), 4, xp.zeros((16, 2, 2)))
+        _, axes = plot_channel_correction(est, nfft=1024)
+        assert np.max(np.abs(axes[0][2].lines[0].get_ydata())) < 1e-2
+        assert np.max(axes[1][2].lines[0].get_ydata()) < -60
+
+    def test_channel_correction_show(self, xp: Any) -> None:
+        """Verify plot_channel_correction with show=True calls plt.show() and returns None."""
         h = xp.array([1.0, 0.5])
         with patch("matplotlib.pyplot.show"):
-            ret = plot_zf_equalizer_response(h, show=True)
+            ret = plot_channel_correction(h, show=True)
         assert ret is None
 
 
@@ -272,8 +305,8 @@ def test_selected_convergence_overlays_without_taps(xp: Any) -> None:
 def test_selected_equalizer_response_overlays(xp: Any) -> None:
     """ZF and MMSE can be compared on the same selected response axis."""
     h = xp.asarray([1.0, 0.8j], dtype=xp.complex64)
-    fig, ax = plot_zf_equalizer_response(h, quantity="equalizer", label="ZF")
-    fig2, ax2 = plot_zf_equalizer_response(
+    fig, ax = plot_channel_correction(h, quantity="equalizer", label="ZF")
+    fig2, ax2 = plot_channel_correction(
         h, quantity="equalizer", noise_var=0.1, ax=ax, label="MMSE", legend=True
     )
     assert fig2 is fig and ax2 is ax

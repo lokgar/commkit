@@ -86,7 +86,6 @@ def test_lms_matches_oracle(num_ch, n_train):
     _assert_matches(res, ref, num_ch)
 
 
-@pytest.mark.allow_warnings
 @pytest.mark.parametrize("num_ch", [1, 2])
 @pytest.mark.parametrize("leakage", [0.0, 1e-3])
 def test_rls_matches_oracle(num_ch, leakage):
@@ -131,6 +130,40 @@ def test_cma_matches_oracle(num_ch, order):
     res = cma(samples, num_taps=NUM_TAPS, sps=SPS, step_size=1e-3, **kw)
     ref = cma_reference(samples, num_taps=NUM_TAPS, sps=SPS, step_size=1e-3, r2=r2)
     _assert_matches(res, ref, num_ch)
+
+
+def test_godard_radius_follows_the_constellation_scale():
+    """R2 = E|c|⁴/E|c|² scales with the power of the points, with or without
+    a prior: 16-QAM at power 4 has R2 = 4 · 1.32 = 5.28 both ways (dividing
+    by (E|c|²)² gave 1.32 with a pmf)."""
+    from commkit.equalization._common import _godard_radius
+
+    pts = 2.0 * Constellation.qam(16).points
+    uniform = Constellation(pts)
+    with_pmf = Constellation(pts, pmf=np.full(16, 1.0 / 16))
+    assert _godard_radius(uniform) == pytest.approx(5.28, rel=1e-6)
+    assert _godard_radius(with_pmf) == pytest.approx(5.28, rel=1e-6)
+
+
+def test_cma_profile_kurtosis_and_step_scale():
+    """The kurtosis of square M-QAM is (7M - 13) / (5(M - 1)): 1.32 for 16,
+    1.381 for 64; PSK has 1 and no self-noise; real PAM is judged against a
+    Gaussian's 3.  The step scale is d_min² / E[(|s|² - R²)² |s|²] over its
+    16-QAM value (0.4 / 0.2176): 64-QAM has d_min² = 4/42 and self-noise
+    328/1029 (exact, over the 64 points), hence 0.163.  None of it depends on the scale of the points."""
+    from commkit.equalization._common import _cma_profile
+
+    k16, g16, s16 = _cma_profile(Constellation.qam(16))
+    assert (k16, g16, s16) == pytest.approx((1.32, 2.0, 1.0))
+    k64, _, s64 = _cma_profile(Constellation.qam(64))
+    assert k64 == pytest.approx(435 / 315)
+    assert s64 == pytest.approx((4 / 42) / (328 / 1029) / (0.4 / 0.2176))
+    assert _cma_profile(Constellation(2.0 * Constellation.qam(64).points)) == (
+        pytest.approx((k64, 2.0, s64))
+    )
+    assert _cma_profile(Constellation.psk(8)) == pytest.approx((1.0, 2.0, 1.0))
+    assert _cma_profile(Constellation.pam(4))[1] == 3.0
+    assert _cma_profile(None) == (1.0, 2.0, 1.0)
 
 
 @pytest.mark.parametrize("num_ch", [1, 2])
@@ -244,7 +277,6 @@ def test_lms_inline_cpr_matches_oracle(num_ch, kind, joint, slips):
     _assert_cpr_matches(res, ref, num_ch)
 
 
-@pytest.mark.allow_warnings
 @pytest.mark.parametrize("num_ch", [1, 2])
 @pytest.mark.parametrize(("kind", "joint", "slips"), CPR_CASES)
 def test_rls_inline_cpr_matches_oracle(num_ch, kind, joint, slips):

@@ -1,4 +1,4 @@
-"""Tests for source impairments (laser linewidth phase noise)."""
+"""Tests for source impairments (phase noise, intensity noise, frequency offset)."""
 
 import math
 
@@ -7,7 +7,9 @@ import pytest
 
 from commkit.backend import to_device
 from commkit.core import Signal
+from commkit.frequency import correct_frequency_offset
 from commkit.impairments import (
+    apply_frequency_offset,
     apply_intensity_noise,
     apply_phase_noise,
     generate_phase_noise,
@@ -272,3 +274,61 @@ class TestIntensityNoise:
     def test_needs_sampling_rate(self, xp):
         with pytest.raises(ValueError, match="sampling_rate"):
             apply_intensity_noise(xp.ones(8, xp.complex64), rin_db_hz=-140.0)
+
+
+class TestFrequencyOffset:
+    """apply_frequency_offset: exact mixing at any offset."""
+
+    FS = 64e9
+
+    def _noise(self, xp, shape, dtype=np.complex64):
+        rng = np.random.default_rng(0)
+        x = rng.standard_normal(shape) + 1j * rng.standard_normal(shape)
+        return xp.asarray(x.astype(dtype))
+
+    @pytest.mark.parametrize("dtype", [np.complex64, np.complex128])
+    def test_matches_the_double_precision_mixer(self, xp, xpt, dtype):
+        """Against x·exp(j2πΔf n/fs) built in float64, over 2^20 samples at
+        an offset between FFT bins: the error stays at the precision of the
+        data (complex64: rounding of the phasor, about 3e-7 relative, measured
+        9e-7 absolute on unit-variance samples; a float32 phase ramp would be
+        off by radians by the end)."""
+        n = 1 << 20
+        fo = 1.234567e9
+        x = self._noise(xp, n, dtype)
+        y = apply_frequency_offset(x, offset=fo, sampling_rate=self.FS)
+        assert y.dtype == dtype
+        ref = to_device(x, "cpu").astype(np.complex128) * np.exp(
+            2j * np.pi * fo / self.FS * np.arange(n)
+        )
+        xpt.assert_allclose(
+            y, xp.asarray(ref), atol=5e-6 if dtype == np.complex64 else 1e-9
+        )
+
+    def test_inverse_of_correct_frequency_offset(self, xp, xpt):
+        x = self._noise(xp, (2, 4096))
+        y = apply_frequency_offset(x, offset=[3.3e8, -1.1e8], sampling_rate=self.FS)
+        back = correct_frequency_offset(
+            y, xp.asarray([3.3e8, -1.1e8]), sampling_rate=self.FS
+        )
+        xpt.assert_allclose(back, x, atol=2e-6)
+
+    def test_per_channel_offsets(self, xp):
+        """Each channel turns by its own step 2πΔf_c/fs per sample."""
+        x = xp.ones((2, 1000), dtype=xp.complex64)
+        fo = np.array([1e8, -3e8])
+        y = to_device(
+            apply_frequency_offset(x, offset=fo, sampling_rate=self.FS), "cpu"
+        )
+        step = np.angle(np.sum(y[:, 1:] * np.conj(y[:, :-1]), axis=-1))
+        np.testing.assert_allclose(step, 2 * np.pi * fo / self.FS, rtol=1e-5)
+
+    def test_real_input_gives_complex(self, xp):
+        x = xp.ones(16, dtype=xp.float32)
+        y = apply_frequency_offset(x, offset=1e6, sampling_rate=self.FS)
+        assert y.dtype == xp.complex64
+
+    def test_wrong_number_of_offsets_raises(self, xp):
+        x = xp.ones((2, 16), dtype=xp.complex64)
+        with pytest.raises(ValueError, match="offset"):
+            apply_frequency_offset(x, offset=[1.0, 2.0, 3.0], sampling_rate=self.FS)

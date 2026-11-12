@@ -1,4 +1,4 @@
-"""Signal quality against the reference: :func:`evm`, :func:`snr` and :func:`estimate_noise_variance`.
+"""Signal quality against the reference: :func:`evm`, :func:`snr` and :func:`noise_variance`.
 
 All three divide the received symbols by the data-aided gain ``g = |<r s*>|
 / <|s|^2>`` against the reference normalized to unit average power, so
@@ -22,11 +22,12 @@ from ._common import (
     _log_per_channel,
     _paired,
     _reference,
+    _require_points,
     _skip,
     _unit_reference,
 )
 
-__all__ = ["estimate_noise_variance", "evm", "snr"]
+__all__ = ["noise_variance", "evm", "snr"]
 
 
 def evm(
@@ -57,7 +58,9 @@ def evm(
     constellation : Constellation, optional
         Decision constellation for ``blind=True``.  Defaults to the Signal's.
         The symbols are compared with its points as they are, so they must be
-        on its scale (unit power).
+        on its scale; the error is relative to the mean power of the decided
+        points.  Data-aided, a known constellation (this or the Signal's)
+        checks that the reference symbols are its points.
     blind : bool, default False
         Measure against hard decisions instead of the reference.
     num_skip_symbols : int, default 0
@@ -73,7 +76,8 @@ def evm(
     Raises
     ------
     ValueError
-        On a missing reference or constellation, a shape mismatch, an empty
+        On a missing reference or constellation, reference symbols that are
+        not points of a known constellation, a shape mismatch, an empty
         selection, or a frame Signal or one not at one sample per symbol.
 
     Notes
@@ -82,7 +86,8 @@ def evm(
     channel and divides the received symbols by the data-aided gain
     ``|<r s*>| / <|s|^2>``, so a common gain does not count as error at any
     SNR (normalizing to unit total power would shrink the symbols by
-    ``1/sqrt(1 + 1/SNR)``).  No rotation is applied.
+    ``1/sqrt(1 + 1/SNR)``).  Blind EVM fits no gain and divides the error
+    power by the mean power of the decided points.  No rotation is applied.
     """
     name = "evm()"
     adapter = adapt_signal(symbols, function_name=name)
@@ -97,21 +102,26 @@ def evm(
         c = _constellation(adapter, constellation, name)
         rx = _skip(rx, num_skip_symbols, name)
         # No gain correction: the caller passes symbols at the constellation's
-        # scale.
+        # scale.  The error is relative to the power of the decided points.
         points = c.points.astype(np.result_type(np.complex64, rx.real.dtype))
         tx = xp.asarray(points)[c._nearest(rx.reshape(-1))].reshape(rx.shape)
-        ref_pwr = xp.mean(xp.abs(tx) ** 2, axis=axis)
+        ref_pwr = xp.mean(xp.abs(tx) ** 2, axis=axis, dtype=xp.float64)
     else:
         ref = _reference(adapter, reference, "symbols", name, hint=", or blind=True")
         rx, tx = _paired(rx, ref, xp, name)
         rx = _skip(rx, num_skip_symbols, name)
         tx = _skip(tx, num_skip_symbols, name)
+        known = adapter.resolve_choice("constellation", constellation)
+        if known is not None:
+            _require_points(tx, _constellation(adapter, known, name), xp, name)
         tx, tx_pwr = _unit_reference(tx, xp)
         rx = rx / _gain(rx, tx, xp, tx_pwr)
         ref_pwr = tx_pwr[..., 0]
 
     error_power = xp.mean(xp.abs(rx - tx) ** 2, axis=axis, dtype=xp.float64)
-    # The reference power is 1 after normalization.
+    if blind:
+        error_power = error_power / xp.where(ref_pwr < 1e-20, 1.0, ref_pwr)
+    # Data-aided: the reference power is 1 after normalization.
     evm_percent = xp.sqrt(error_power) * 100.0
     evm_percent = xp.where(ref_pwr < 1e-20, xp.inf, evm_percent)
     out = to_report_scalar(evm_percent)
@@ -120,7 +130,7 @@ def evm(
     if isinstance(out, float):
         logger.info("EVM: %.2f%%", out)
     else:
-        _log_per_channel("EVM Ch%s: %.2f%%", out)
+        _log_per_channel("EVM", "%.2f%%", out)
     return out
 
 
@@ -140,7 +150,7 @@ def _error_power(
     return noise_power, tx_pwr[..., 0], xp
 
 
-def estimate_noise_variance(
+def noise_variance(
     symbols: ArrayType | Signal,
     reference: ArrayType | None = None,
     *,
@@ -178,17 +188,17 @@ def estimate_noise_variance(
 
     Examples
     --------
-    >>> noise_var = float(np.mean(estimate_noise_variance(y)))
+    >>> noise_var = float(np.mean(noise_variance(y)))
     >>> llrs = compute_llr(y, noise_var=noise_var)
     """
     noise_power, _, _ = _error_power(
-        symbols, reference, num_skip_symbols, "estimate_noise_variance()"
+        symbols, reference, num_skip_symbols, "noise_variance()"
     )
     out = to_report_scalar(noise_power)
     if isinstance(out, float):
         logger.info("Noise variance: %.3e", out)
     else:
-        _log_per_channel("Noise variance Ch%s: %.3e", out)
+        _log_per_channel("Noise variance", "%.3e", out)
     return out
 
 
@@ -244,5 +254,5 @@ def snr(
     if isinstance(out, float):
         logger.info("SNR: %.2f dB", out)
     else:
-        _log_per_channel("SNR Ch%s: %.2f dB", out)
+        _log_per_channel("SNR", "%.2f dB", out)
     return out

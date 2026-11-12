@@ -15,7 +15,7 @@ from ..core._signal_adapter import adapt_signal
 from ..core.signal import Signal
 from ..logger import logger
 from ..mapping import Constellation
-from ..mapping.llr import _noise_variance
+from ..mapping._demap import _noise_variance
 from ._common import (
     _constellation,
     _log_per_channel,
@@ -174,7 +174,7 @@ def gmi(
     if isinstance(out, float):
         logger.info("GMI: %.4f b/symbol", out)
     else:
-        _log_per_channel("GMI Ch%s: %.4f b/symbol", out)
+        _log_per_channel("GMI", "%.4f b/symbol", out)
     return out
 
 
@@ -244,7 +244,7 @@ def ngmi(
     if isinstance(out, float):
         logger.info("NGMI: %.4f", out)
     else:
-        _log_per_channel("NGMI Ch%s: %.4f", out)
+        _log_per_channel("NGMI", "%.4f", out)
     return out
 
 
@@ -350,5 +350,5 @@ def mi(
     if isinstance(out, float):
         logger.info("MI: %.4f b/symbol (max %.2f)", out, h_x)
     else:
-        _log_per_channel("MI Ch%s: %.4f b/symbol", out)
+        _log_per_channel("MI", "%.4f b/symbol", out)
     return out

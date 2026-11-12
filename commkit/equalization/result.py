@@ -279,17 +279,29 @@ def _log_equalizer_exit(result: EqualizerResult, name: str) -> EqualizerResult:
 # (unipolar PAM-4).
 _DECISION_POWER_TOLERANCE_DB = 1.5
 _DECISION_POWER_WINDOW = 16384
+# A point is unused when it receives under a quarter of its share of the
+# decisions; the decisions collapsed when the unused points hold this much
+# of the probability mass.  A correct lock uses every point (unused mass 0
+# for PAM-4, unipolar PAM-4, 16- and 64-QAM and shaped 64-QAM at a BER below
+# 0.1, 0.06 for 64-QAM at 0.17 and 0.36 at 0.25; a shrunk 16-QAM lock that
+# misses its four corners leaves 0.25, which the power check judges); a
+# collapse onto one level leaves 0.75 for four points, onto two 0.5 (blind
+# unipolar PAM-4 below about 8 dB Es/N0).
+_DECISION_COLLAPSE_MASS = 0.4
 
 
 def _check_decision_power(
     result: EqualizerResult, constellation: Any, name: str
 ) -> EqualizerResult:
-    """Log a WARNING when the decided symbols lack the constellation's power.
+    """Log a WARNING when the decisions collapse or lack the constellation's power.
 
     Decides the last half of the decision-directed output (at most
-    16384 symbols per channel) against ``constellation`` and compares the
-    mean power of the decided points with the constellation's mean power.
-    One reduction on the device and one ``(C,)`` transfer.
+    16384 symbols per channel) against ``constellation`` and histograms the
+    decisions per channel.  A collapse (points holding at least 0.4 of the
+    probability mass left nearly unused) is reported as such; otherwise
+    the mean power of the decided points is compared with the
+    constellation's.  One histogram on the device and one ``(C, M)``
+    transfer.
     """
     if constellation is None:
         return result
@@ -300,16 +312,32 @@ def _check_decision_power(
     window = min(n_dd // 2, _DECISION_POWER_WINDOW)
     tail = y[..., -window:]
     tail, xp, _ = dispatch(tail)
+    tail = tail.reshape(-1, window)  # (C, W)
+    m = constellation.order
     points = np.asarray(constellation.points)
     energies = np.abs(points) ** 2
     pmf = constellation.pmf
-    expected = float(np.mean(energies) if pmf is None else np.sum(pmf * energies))
+    pmf = np.full(m, 1.0 / m) if pmf is None else np.asarray(pmf)
+    expected = float(np.sum(pmf * energies))
     idx = constellation._nearest(tail.reshape(-1)).reshape(tail.shape)
-    decided = xp.mean(xp.asarray(energies)[idx], axis=-1)
-    ratio_db = 10.0 * np.log10(
-        np.atleast_1d(to_device(decided, "cpu")) / expected + 1e-30
-    )
-    if np.any(np.abs(ratio_db) > _DECISION_POWER_TOLERANCE_DB):
+    rows = xp.arange(tail.shape[0])[:, None] * m
+    counts = xp.bincount((idx + rows).reshape(-1), minlength=tail.shape[0] * m)
+    share = to_device(counts, "cpu").reshape(-1, m) / window  # (C, M)
+    unused = np.sum(np.where(share < 0.25 * pmf, pmf, 0.0), axis=-1)  # (C,)
+    ratio_db = 10.0 * np.log10(share @ energies / expected + 1e-30)
+    if np.any(unused >= _DECISION_COLLAPSE_MASS):
+        logger.warning(
+            "%s: the decided symbols carry %s dB of the constellation's power "
+            "on only %s of its %d points (last %d symbols): decision-directed "
+            "adaptation collapsed (too low an SNR for a blind start), or the "
+            "decision constellation does not match the signal.",
+            name,
+            ", ".join(f"{r:+.1f}" for r in ratio_db),
+            ", ".join(str(int(n)) for n in np.sum(share >= 0.25 * pmf, axis=-1)),
+            m,
+            window,
+        )
+    elif np.any(np.abs(ratio_db) > _DECISION_POWER_TOLERANCE_DB):
         logger.warning(
             "%s: the decided symbols carry %s dB of the constellation's power "
             "(last %d symbols): the equalizer may have locked at a wrong gain, "

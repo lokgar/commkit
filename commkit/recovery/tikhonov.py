@@ -24,64 +24,12 @@ from .viterbi_viterbi import _warn_small_qam_block
 
 __all__ = ["Tikhonov"]
 
-_NUMBA_RTS: dict = {}
 
+def _get_numba_rts_smoother() -> Any:
+    """The Rauch-Tung-Striebel smoother kernel."""
+    from . import _numba_loops
 
-def _get_numba_rts_smoother():
-    """JIT-compile and cache the Numba RTS-smoother kernel.
-
-    Returns
-    -------
-    callable
-        Numba-compiled ``_rts_loop``.
-    """
-    if "rts" not in _NUMBA_RTS:
-        import numba
-
-        @numba.njit(cache=True, fastmath=True, nogil=True)
-        def _rts_loop(phi_obs, sigma_p2, sigma_v2):
-            """Run the Rauch-Tung-Striebel smoother over the block phases (Numba).
-
-            Parameters
-            ----------
-            phi_obs : numpy.ndarray
-                Observed block phases, float64, ``(B,)``.
-            sigma_p2 : float
-                Process noise variance per block.
-            sigma_v2 : float
-                Observation noise variance per block.
-
-            Returns
-            -------
-            numpy.ndarray
-                Smoothed phases, float64, ``(B,)``.
-            """
-            B = len(phi_obs)
-            x_filt = np.empty(B, dtype=np.float64)
-            P_filt = np.empty(B, dtype=np.float64)
-            x_pred = np.empty(B, dtype=np.float64)
-            P_pred = np.empty(B, dtype=np.float64)
-
-            x_filt[0] = phi_obs[0]
-            P_filt[0] = sigma_v2
-
-            for k in range(1, B):
-                x_pred[k] = x_filt[k - 1]
-                P_pred[k] = P_filt[k - 1] + sigma_p2
-                K = P_pred[k] / (P_pred[k] + sigma_v2)
-                x_filt[k] = x_pred[k] + K * (phi_obs[k] - x_pred[k])
-                P_filt[k] = (1.0 - K) * P_pred[k]
-
-            x_smooth = x_filt.copy()
-            for k in range(B - 2, -1, -1):
-                G = P_filt[k] / P_pred[k + 1]
-                x_smooth[k] = x_filt[k] + G * (x_smooth[k + 1] - x_pred[k + 1])
-
-            return x_smooth
-
-        _NUMBA_RTS["rts"] = _rts_loop
-
-    return _NUMBA_RTS["rts"]
+    return _numba_loops.rts_smoother
 
 
 def _rts_smoother_1d(
@@ -208,6 +156,14 @@ class Tikhonov:
     Notes
     -----
     A residual ``2π/M`` ambiguity remains.
+
+    ``σ_p²`` is the long-run increment of the block means of a Wiener phase,
+    ``σ²·N_b`` per block for ``σ² = 2π·Δν·T_s``.  Adjacent block means
+    differ by less, ``σ²(2N_b² + 1)/(3N_b)``, but those differences are
+    positively correlated (by about 1/4), and the smoother's gain follows
+    the long-run behaviour: on QPSK with a Wiener phase (``Δν·T_s`` from
+    ``1e-5`` to ``1e-4``, 8 to 20 dB, blocks of 8 to 64) the lag-one
+    variance gave a per-symbol phase error 1 to 1.5 % larger.
     """
 
     linewidth: float
@@ -220,12 +176,16 @@ class Tikhonov:
     def __post_init__(self) -> None:
         if self.smoother not in ("rts", "steady_state"):
             raise ValueError(
-                f"smoother must be 'rts' or 'steady_state', got {self.smoother!r}."
+                f"Tikhonov: smoother must be 'rts' or 'steady_state', got {self.smoother!r}."
             )
         if not self.linewidth > 0:
-            raise ValueError(f"linewidth must be > 0 Hz, got {self.linewidth}.")
+            raise ValueError(
+                f"Tikhonov: linewidth must be > 0 Hz, got {self.linewidth}."
+            )
         if self.block_size < 1:
-            raise ValueError(f"block_size must be >= 1, got {self.block_size}.")
+            raise ValueError(
+                f"Tikhonov: block_size must be >= 1, got {self.block_size}."
+            )
 
 
 def _vv_observation_variance(
@@ -273,6 +233,8 @@ def _tikhonov(symbols: ArrayType, method: Tikhonov, ctx: _Context) -> _Phase:
 
     snr_lin = 10.0 ** (method.snr_db / 10.0)
     linewidth_symbol_periods = method.linewidth / ctx.need_sampling_rate(method)
+    # The long-run increment of the block means, not the variance of adjacent
+    # differences (2/3 of it, correlated); see the class Notes.
     sigma_p2 = float(2.0 * np.pi * linewidth_symbol_periods * block_size)
     sigma_v2 = _vv_observation_variance(constellation, M, project, snr_lin, block_size)
 
@@ -292,7 +254,7 @@ def _tikhonov(symbols: ArrayType, method: Tikhonov, ctx: _Context) -> _Phase:
         phi_smooth = xp.stack(
             [_sskf_smoother_1d(row, sigma_p2, sigma_v2, sp, xp) for row in phi_u]
         )
-    phi_smooth = _repair_slips(phi_smooth, xp, method.cycle_slip, M, block_size)
+    phi_smooth = _repair_slips(phi_smooth, method.cycle_slip, M, block_size)
     phi_full = _interp_block_phases(phi_smooth, N, block_size, xp)
     if joint:
         phi_full = xp.broadcast_to(phi_full, (C, N)).copy()

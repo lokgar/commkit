@@ -95,7 +95,6 @@ class TestLMS:
 class TestRLS:
     """Tests for the RLS adaptive equalizer."""
 
-    @pytest.mark.allow_warnings
     def test_convergence(self, xp):
         """RLS with 500 training symbols on the ISI channel: no symbol errors
         after training, EVM within 1.2x the AWGN floor (RLS has almost no
@@ -161,6 +160,38 @@ class TestCMA:
         assert ser == 0.0 and adapted < 1.4 * floor
         assert evm(0.0)[1] > 2 * floor
 
+    def test_default_step_lowers_the_64qam_floor(self, xp):
+        """On 64-QAM (Es/N0 26 dB, 6e4 symbols, 4-tap ISI) the default step,
+        1.6e-4 from the constellation's self-noise and minimum distance,
+        leaves a blind SER of 7e-4 to 1.3e-3 over seeds 0 to 3 in the second
+        half; the step 1e-3 that suits 16-QAM leaves 0.031 to 0.039."""
+        c = Constellation.qam(64)
+        rx = _isi_record(c, 60000, esn0_db=26.0, xp=xp)
+        ref = to_numpy(rx.reference.symbols)
+
+        def ser(**kw):
+            y = equalization.cma(rx, num_taps=21, **kw).y_hat
+            return scoring.blind_ser(y, ref, c, skip=30000, rotation="any")
+
+        assert ser() < 3e-3
+        assert ser(step_size=1e-3) > 1.5e-2
+
+    def test_warns_on_a_near_gaussian_constellation(self, xp, caplog):
+        """Maxwell-Boltzmann 64-QAM at entropy 5 (kurtosis 1.89) is beyond
+        CMA's range and the call says so; entropy 5.5 (1.73) and uniform
+        64-QAM are not, nor is PAM-4 (1.64 against a real Gaussian's 3)."""
+        x = xp.asarray(np.ones(64, dtype=np.complex64))
+        for c, warned in (
+            (Constellation.qam(64).shaped(entropy=5.0), True),
+            (Constellation.qam(64).shaped(entropy=5.5), False),
+            (Constellation.qam(64), False),
+            (Constellation.pam(4), False),
+        ):
+            caplog.clear()
+            with caplog.at_level("WARNING", logger="commkit"):
+                equalization.cma(x, num_taps=5, sps=2, constellation=c)
+            assert ("kurtosis" in caplog.text) is warned, c
+
 
 class TestRDE:
     """Tests for the Radius Directed Equalizer."""
@@ -179,6 +210,28 @@ class TestRDE:
 
         assert ser(1e-3) == 0.0
         assert ser(0.0) > 0.03
+
+    def test_converges_on_shaped_64qam_where_cma_fails(self, xp, caplog):
+        """Blind RDE on Maxwell-Boltzmann 64-QAM at entropy 4.5 (Es/N0 22 dB,
+        4e4 symbols, step 3e-4): no symbol errors in the second half after
+        one constant rotation.  CMA at the same step fails (SER 0.40 to 0.62
+        over seeds 0 to 3): the shaped set's kurtosis is 1.97, and the part of
+        the CMA cost that tells a clean channel from ISI scales with
+        ``2 - kurtosis``, 23 times weaker than for uniform 64-QAM.  Frozen
+        taps leave the ISI (SER 0.13)."""
+        c = Constellation.qam(64).shaped(entropy=4.5)
+        rx = _isi_record(c, 40000, esn0_db=22.0, xp=xp)
+        ref = to_numpy(rx.reference.symbols)
+
+        def ser(equalizer, step):
+            y = equalizer(rx, num_taps=21, step_size=step).y_hat
+            return scoring.blind_ser(y, ref, c, skip=20000, rotation="any")
+
+        assert ser(equalization.rde, 3e-4) == 0.0
+        with caplog.at_level("WARNING", logger="commkit"):
+            assert ser(equalization.cma, 3e-4) > 0.2
+        assert "kurtosis" in caplog.text
+        assert ser(equalization.rde, 0.0) > 0.1
 
     def test_refines_cma_on_16qam(self, xp):
         """RDE started from CMA's taps lowers the EVM on 16-QAM: CMA's error
@@ -206,7 +259,6 @@ class TestResultLayout:
     ``(C, C, num_taps)``, and ``weights_history`` only with
     ``store_weights=True``, one row per processed symbol."""
 
-    @pytest.mark.allow_warnings
     @pytest.mark.parametrize("name", ["lms", "rls", "cma", "rde"])
     @pytest.mark.parametrize("num_channels", [1, 2])
     def test_layout(self, xp, name, num_channels):
@@ -277,28 +329,30 @@ class TestEdgeCases:
         with pytest.raises(ValueError, match="needs a constellation"):
             equalization.lms(rx, num_taps=7, sps=2)
 
-    def test_rls_warns_fractional_spacing(self, xp, caplog):
-        """RLS at sps > 1 warns that its correlation matrix is ill-conditioned;
-        at 1 sps it does not."""
+    def test_rls_traces_fractional_spacing(self, xp, caplog):
+        """RLS at sps > 1 notes at DEBUG (not WARNING: the spacing is the
+        caller's choice) that its correlation matrix is ill-conditioned; at
+        1 sps it does not."""
         import logging
 
         rx, sig = self._qpsk_rx(xp, n_symbols=400)
         train = xp.asarray(sig.reference.symbols)
         kw = dict(num_taps=7, constellation=Constellation.psk(4))
-        with caplog.at_level(logging.WARNING, logger="commkit"):
+        with caplog.at_level(logging.DEBUG, logger="commkit"):
             equalization.rls(rx, train, sps=2, **kw)
-        assert any("ill-conditioned" in r.getMessage() for r in caplog.records)
+        notes = [r for r in caplog.records if "ill-conditioned" in r.getMessage()]
+        assert notes and all(r.levelno == logging.DEBUG for r in notes)
         caplog.clear()
-        with caplog.at_level(logging.WARNING, logger="commkit"):
+        with caplog.at_level(logging.DEBUG, logger="commkit"):
             equalization.rls(rx[::2], train, sps=1, **kw)
         assert not any("ill-conditioned" in r.getMessage() for r in caplog.records)
 
     def test_validate_sps_small_num_taps(self, xp, caplog):
-        """_validate_sps should log a warning when num_taps < 4*sps."""
+        """_validate_sps notes a short num_taps at DEBUG, never WARNING."""
         import logging
 
         rx, sig = self._qpsk_rx(xp)
-        with caplog.at_level(logging.WARNING, logger="commkit"):
+        with caplog.at_level(logging.DEBUG, logger="commkit"):
             equalization.lms(
                 rx,
                 xp.asarray(sig.reference.symbols),
@@ -306,7 +360,8 @@ class TestEdgeCases:
                 constellation=Constellation.psk(4),
                 sps=2,
             )
-        assert any("small" in r.message.lower() for r in caplog.records)
+        notes = [r for r in caplog.records if "small" in r.message.lower()]
+        assert notes and all(r.levelno == logging.DEBUG for r in notes)
 
     def test_rde_no_modulation_falls_back_to_cma(self, xp, xpt):
         """Without a constellation RDE has the one radius 1, which is CMA
@@ -319,6 +374,19 @@ class TestEdgeCases:
             rtol=1e-5,
             atol=1e-6,
         )
+
+    def test_training_longer_than_record_raises(self, xp):
+        """Training symbols beyond the record raise instead of being dropped."""
+        rx, sig = self._qpsk_rx(xp, n_symbols=200)
+        train = xp.asarray(sig.reference.symbols)
+        with pytest.raises(ValueError, match="training_symbols"):
+            equalization.lms(
+                rx[: rx.shape[-1] // 2],
+                train,
+                num_taps=7,
+                sps=2,
+                constellation=Constellation.psk(4),
+            )
 
     def test_lms_num_train_symbols_clamps_numba(self, xp):
         """LMS Numba: pre-sliced training_symbols limits DA phase length."""
@@ -420,7 +488,6 @@ class TestNumbaBackendCoverage:
         assert ser == 0.0 and evm < 1.4 * floor
         assert score(0.0)[1] > 1.5 * floor
 
-    @pytest.mark.allow_warnings
     @pytest.mark.parametrize("cpr", [None, BPS(test_phases=16)], ids=["plain", "bps"])
     def test_rls_divergence_raises(self, xp, cpr):
         """A forgetting factor of 0.1 multiplies P by 10 every symbol, so it
@@ -440,7 +507,6 @@ class TestNumbaBackendCoverage:
         res = equalization.rls(rx, train, forgetting_factor=0.99, **kw)
         assert np.all(np.isfinite(to_numpy(res.weights)))
 
-    @pytest.mark.allow_warnings
     def test_rls_numba_num_train_symbols(self, xp):
         """RLS numba: pre-sliced training_symbols limits DA phase length."""
         rx, sig = self._make_qpsk_rx(xp, n_symbols=800)
@@ -472,7 +538,7 @@ class TestCmaPilotAided:
         struct = frame.get_structure_map(unit="symbols", sps=1, include_preamble=False)
         samples_cpu = to_device(sig.samples, "cpu")
         pilot_syms_cpu = to_device(frame.pilot_symbols, "cpu")
-        pilot_mask_bool = to_device(struct["pilots"], "cpu")
+        pilot_mask_bool = to_device(struct.pilots, "cpu")
         n_body = int(pilot_mask_bool.size)
         return frame, samples_cpu, pilot_syms_cpu, pilot_mask_bool, n_body
 

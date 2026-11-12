@@ -2,7 +2,7 @@
 
 :func:`plot_equalizer_result` draws an
 :class:`~commkit.equalization.EqualizerResult` (convergence, taps and the
-carrier phase of inline CPR); :func:`plot_zf_equalizer_response` draws the
+carrier phase of inline CPR); :func:`plot_channel_correction` draws the
 channel, equalizer and combined responses of a ZF / MMSE equalizer.
 """
 
@@ -22,7 +22,7 @@ from .theme import (
     _set_eng_formatter,
 )
 
-__all__ = ["plot_equalizer_result", "plot_zf_equalizer_response"]
+__all__ = ["plot_channel_correction", "plot_equalizer_result"]
 
 
 def plot_equalizer_result(
@@ -205,10 +205,11 @@ def plot_equalizer_result(
 # -----------------------------------------------------------------------------
 
 
-def plot_zf_equalizer_response(
-    channel_estimate,
+def plot_channel_correction(
+    how,
     *,
     noise_var: float = 0.0,
+    center_tap: int | None = None,
     nfft: int = 1024,
     sampling_rate: float = 1.0,
     quantity: str | None = None,
@@ -218,24 +219,29 @@ def plot_zf_equalizer_response(
     xlim: tuple[float, float] | None = None,
     ylim: tuple[float, float] | None = None,
     show: bool = False,
-    title: str = "ZF/MMSE Equalizer Response",
+    title: str = "ZF/MMSE Channel Correction",
 ) -> tuple[Any, Any] | None:
     """Plot the channel, ZF / MMSE equalizer and combined frequency responses.
 
     Three panels per channel path, in dB:
 
     * ``|H(f)|``: the channel;
-    * ``|W(f)|``: the equalizer, ``W = H* / (|H|² + σ²)``;
-    * ``|H(f)·W(f)|``: the combination (≈ 0 dB for ZF, a soft mask for
-      MMSE).
+    * ``|W(f)|``: the equalizer :func:`commkit.equalization.correct_channel`
+      applies (``H* / (|H|² + σ²)`` for SISO, the regularized matrix inverse
+      for MIMO), measured by its response to an impulse on each input;
+    * ``|W(f)·H(f)|``: the combination, a matrix product per bin for MIMO
+      (≈ 0 dB on the diagonal for ZF, a soft mask for MMSE).
 
     Parameters
     ----------
-    channel_estimate : array_like
-        Channel impulse response, ``(L,)`` for SISO or ``(C_rx, C_tx, L)``
-        for MIMO.
+    how : ChannelEstimate or array_like
+        The channel, as :func:`commkit.equalization.correct_channel` takes
+        it: an estimate, or an impulse response ``(L,)`` for SISO or
+        ``(C, C, L)`` for MIMO, ``[i, j]`` from input ``j`` to output ``i``.
     noise_var : float, default 0.0
         Noise variance ``σ²`` of the MMSE regularization; ``0.0`` gives ZF.
+    center_tap : int, optional
+        Index of lag 0 in an impulse response ``how``; ``None`` takes 0.
     nfft : int, default 1024
         FFT size of the frequency responses.
     sampling_rate : float, default 1.0
@@ -253,7 +259,7 @@ def plot_zf_equalizer_response(
         Limits applied to the frequency-response panels.
     show : bool, default False
         Call ``plt.show()`` and return ``None``.
-    title : str, default "ZF/MMSE Equalizer Response"
+    title : str, default "ZF/MMSE Channel Correction"
         Title of the figure.
 
     Returns
@@ -268,10 +274,17 @@ def plot_zf_equalizer_response(
         "combined": "Combined |H·W(f)|",
     }
     panels = _select(quantity, tuple(names), label=label)
-    h = to_device(channel_estimate, "cpu")
+    from ..equalization import ChannelEstimate, correct_channel
+
+    if isinstance(how, ChannelEstimate):
+        h, center = to_device(how.taps, "cpu"), how.center_tap
+        how = ChannelEstimate(h, center, to_device(how.response, "cpu"))
+    else:
+        h = to_device(how, "cpu")
+        center = 0 if center_tap is None else center_tap
+        how, center_tap = h, center
     if h.ndim not in (1, 3):
-        raise ValueError("channel_estimate must be 1-D or 3-D")
-    reg = max(noise_var, 1e-12)
+        raise ValueError("how must be 1-D or 3-D taps")
     siso = h.ndim == 1
     paths = (
         [("", h)]
@@ -287,11 +300,32 @@ def plot_zf_equalizer_response(
     sort_idx = np.argsort(freqs)
     f_sorted = freqs[sort_idx]
 
+    # The equalizer's impulse response from input j: an impulse at the
+    # record's centre (room for the anti-causal tail), rolled back to lag 0.
+    hm = h[None, None, :] if siso else h
+    c = hm.shape[0]
+    w = np.empty((c, c, nfft), dtype=np.complex64)
+    for j in range(c):
+        impulse = np.zeros((c, nfft), dtype=np.complex64)
+        impulse[j, nfft // 2] = 1.0
+        y = correct_channel(
+            impulse[0] if siso else impulse,
+            how,
+            noise_var=noise_var,
+            center_tap=None if isinstance(how, ChannelEstimate) else center_tap,
+        )
+        w[:, j] = np.roll(np.reshape(y, (c, nfft)), -(nfft // 2), axis=-1)
+    # Lag 0 at index 0, the precursors wrapped to the end.
+    hm = np.roll(np.pad(hm, [(0, 0), (0, 0), (0, nfft - hm.shape[-1])]), -center, -1)
+    Hf = np.moveaxis(_fft.fft(hm, axis=-1), -1, 0)  # (nfft, C, C)
+    Wf = np.moveaxis(_fft.fft(w, axis=-1), -1, 0)
+    Gf = Wf @ Hf
+    spectra = {"channel": Hf, "equalizer": Wf, "combined": Gf}
+
     fig, axes = _panel_grid(ax, len(paths), len(panels))
-    for (row_label, path), ax_row in zip(paths, axes, strict=True):
-        H = _fft.fft(path, n=nfft)[sort_idx]
-        W = np.conj(H) / (np.abs(H) ** 2 + reg)
-        responses = {"channel": H, "equalizer": W, "combined": H * W}
+    for k, ((row_label, _), ax_row) in enumerate(zip(paths, axes, strict=True)):
+        i, j = divmod(k, c)
+        responses = {n: s[sort_idx, i, j] for n, s in spectra.items()}
         for name, axi in zip(panels, ax_row, strict=True):
             axi.plot(
                 f_sorted,

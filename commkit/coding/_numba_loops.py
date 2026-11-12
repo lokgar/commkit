@@ -545,7 +545,6 @@ def bcjr(
     workspaces, overwritten.
     """
     steps = llr.shape[0]
-    r = outputs.shape[2]
     coded = app_c.shape[0] > 0
     alpha[:, :] = _NEG
     beta[:, :] = _NEG
@@ -581,13 +580,9 @@ def bcjr(
                     continue
                 acc = combine(acc, gamma[t, s, u] + beta[t + 1, nxt[s, u]], exact)
             beta[t, s] = acc
-    c0 = np.empty(r)
-    c1 = np.empty(r)
     for t in range(steps):
         zu = _NEG
         ou = _NEG
-        c0[:] = _NEG
-        c1[:] = _NEG
         for s in range(states):
             for u in range(2):
                 if gamma[t, s, u] <= _NEG or alpha[t, s] <= _NEG:
@@ -597,16 +592,35 @@ def bcjr(
                     ou = combine(ou, v, exact)
                 else:
                     zu = combine(zu, v, exact)
-                if coded:
-                    for j in range(r):
-                        if outputs[s, u, j]:
-                            c1[j] = combine(c1[j], v, exact)
-                        else:
-                            c0[j] = combine(c0[j], v, exact)
         app_u[t] = zu - ou
-        if coded:
-            for j in range(r):
-                app_c[t, j] = c0[j] - c1[j]
+    if coded:
+        bcjr_outputs(nxt, outputs, exact, app_c, alpha, beta, gamma)
+
+
+@numba.njit(cache=True, nogil=True)
+def bcjr_outputs(nxt, outputs, exact, app_c, alpha, beta, gamma):  # type: ignore[no-untyped-def]
+    """A-posteriori LLRs of the outputs into ``app_c`` ``(steps, r)``, from
+    the workspaces a :func:`bcjr` call left."""
+    steps = app_c.shape[0]
+    r = outputs.shape[2]
+    states = nxt.shape[0]
+    c0 = np.empty(r)
+    c1 = np.empty(r)
+    for t in range(steps):
+        c0[:] = _NEG
+        c1[:] = _NEG
+        for s in range(states):
+            for u in range(2):
+                if gamma[t, s, u] <= _NEG or alpha[t, s] <= _NEG:
+                    continue
+                v = alpha[t, s] + gamma[t, s, u] + beta[t + 1, nxt[s, u]]
+                for j in range(r):
+                    if outputs[s, u, j]:
+                        c1[j] = combine(c1[j], v, exact)
+                    else:
+                        c0[j] = combine(c0[j], v, exact)
+        for j in range(r):
+            app_c[t, j] = c0[j] - c1[j]
 
 
 @numba.njit(cache=True, nogil=True, parallel=True)
@@ -671,12 +685,27 @@ def turbo_encode(bits, pi, nxt, outputs, tail, out):  # type: ignore[no-untyped-
 
 
 @numba.njit(cache=True, nogil=True, parallel=True)
-def turbo_decode(llrs, pi, nxt, outputs, tail, iterations, exact, scale, out, out_llrs):  # type: ignore[no-untyped-def]
+def turbo_decode(
+    llrs,
+    pi,
+    nxt,
+    outputs,
+    tail,
+    max_iterations,
+    exact,
+    scale,
+    out,
+    out_llrs,
+    iterations,
+):  # type: ignore[no-untyped-def]
     """Iterative turbo decoding of the rows of ``llrs`` (see ``_get_numba_turbo``).
 
-    ``out_llrs`` receives the a-posteriori LLRs of the transmitted bits from
-    the last iteration: the systematic bits from the second decoder, each
-    parity stream and its tail from the decoder that produced it.
+    A row stops after the first iteration whose two decoders take the same
+    hard decision on every information bit, or after ``max_iterations``;
+    ``iterations`` receives the count.  ``out_llrs`` receives the
+    a-posteriori LLRs of the transmitted bits from the last iteration run:
+    the systematic bits from the second decoder, each parity stream and its
+    tail from the decoder that produced it.
     """
     k = pi.shape[0]
     steps = k + 3
@@ -710,15 +739,17 @@ def turbo_decode(llrs, pi, nxt, outputs, tail, iterations, exact, scale, out, ou
         app1 = np.empty(steps)
         app2 = np.empty(steps)
         no_app_c = np.empty((0, 2))  # the iterations use the inputs' LLRs only
-        app_c1 = np.empty((steps, 2))  # the outputs' LLRs, in the last one
+        app_c1 = np.empty((steps, 2))  # the outputs' LLRs, of the last one
         app_c2 = np.empty((steps, 2))
         alpha = np.empty((steps + 1, nxt.shape[0]))
         beta = np.empty((steps + 1, nxt.shape[0]))
         gamma = np.empty((steps, nxt.shape[0], 2))
-        for it in range(iterations):
-            last = it == iterations - 1
+        la1_in = np.empty(steps)  # decoder 1's a-priori input, for a rerun
+        used = max_iterations
+        for it in range(max_iterations):
+            last = it == max_iterations - 1
             c1 = app_c1 if last else no_app_c
-            c2 = app_c2 if last else no_app_c
+            la1_in[:] = la1
             bcjr(ch1, la1, nxt, outputs, tail, forced, 0, 0, exact, app1, c1,
                  alpha, beta, gamma)  # fmt: skip
             for t in range(k):
@@ -726,10 +757,27 @@ def turbo_decode(llrs, pi, nxt, outputs, tail, iterations, exact, scale, out, ou
                 la1[t] = scale * (app1[t] - la1[t] - ch1[t, 0])
             for t in range(k):
                 la2[t] = la1[pi[t]]
-            bcjr(ch2, la2, nxt, outputs, tail, forced, 0, 0, exact, app2, c2,
+            bcjr(ch2, la2, nxt, outputs, tail, forced, 0, 0, exact, app2, no_app_c,
                  alpha, beta, gamma)  # fmt: skip
+            # Stop once both decoders decide every information bit alike.
+            agree = True
+            for t in range(k):
+                if (app2[t] < 0) != (app1[pi[t]] < 0):
+                    agree = False
+                    break
+            if agree or last:
+                used = it + 1
+                # Decoder 2's outputs from its workspaces, then decoder 1's
+                # by a rerun with its input of this iteration, unless this
+                # was the planned last iteration, which produced them.
+                bcjr_outputs(nxt, outputs, exact, app_c2, alpha, beta, gamma)
+                if not last:
+                    bcjr(ch1, la1_in, nxt, outputs, tail, forced, 0, 0, exact,
+                         app1, app_c1, alpha, beta, gamma)  # fmt: skip
+                break
             for t in range(k):
                 la1[pi[t]] = scale * (app2[t] - la2[t] - ch2[t, 0])
+        iterations[row] = used
         for t in range(k):
             out[row, pi[t]] = 1 if app2[t] < 0 else 0
         o0 = out_llrs[row, : k + 4]

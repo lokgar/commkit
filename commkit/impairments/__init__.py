@@ -5,8 +5,9 @@
   noise of coherent and square-law detection at absolute powers
   (:func:`apply_coherent_detection`, :func:`apply_photodetection`).
 - :mod:`~commkit.impairments.source`: laser and oscillator phase noise
-  (:func:`generate_phase_noise`, :func:`apply_phase_noise`) and intensity
-  noise (:func:`apply_intensity_noise`).
+  (:func:`generate_phase_noise`, :func:`apply_phase_noise`), intensity
+  noise (:func:`apply_intensity_noise`) and the carrier frequency offset
+  (:func:`apply_frequency_offset`).
 - :mod:`~commkit.impairments.frontend`: transceiver IQ imbalance
   (:func:`apply_iq_imbalance`, :func:`estimate_iq_imbalance`, and
   :func:`correct_iq_imbalance` with :class:`Lowdin`, :class:`GramSchmidt` or
@@ -43,7 +44,12 @@ from .noise import (
     apply_coherent_detection,
     apply_photodetection,
 )
-from .source import apply_intensity_noise, apply_phase_noise, generate_phase_noise
+from .source import (
+    apply_frequency_offset,
+    apply_intensity_noise,
+    apply_phase_noise,
+    generate_phase_noise,
+)
 
 __all__ = [
     "Fiber",
@@ -55,6 +61,7 @@ __all__ = [
     "apply_chromatic_dispersion",
     "apply_coherent_detection",
     "apply_fiber_propagation",
+    "apply_frequency_offset",
     "apply_intensity_noise",
     "apply_iq_imbalance",
     "apply_quantization",

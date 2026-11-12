@@ -14,7 +14,7 @@ from ...backend import ArrayType
 from ...core._signal_adapter import adapt_signal, require_integer_sps
 from ...core.signal import Signal
 from ...logger import logger
-from ...mapping.constellation import _slicer_params
+from ...mapping._lattice import slicer_params
 from ...recovery import BPS, PLL
 from ..result import (
     EqualizerResult,
@@ -287,7 +287,7 @@ def lms(
     arrays are on the input's device.
     """
     signal_adapter = adapt_signal(samples, function_name="lms()")
-    samples = signal_adapter.array
+    x = signal_adapter.array
     sig = signal_adapter.signal
     sps = require_integer_sps(signal_adapter.resolve_fact("sps", sps), "lms()")
     constellation = signal_adapter.resolve_choice("constellation", constellation)
@@ -305,7 +305,7 @@ def lms(
     )
 
     run = _prepare_sequential(
-        samples,
+        x,
         equalizer="lms",
         sps=sps,
         num_taps=num_taps,
@@ -320,7 +320,7 @@ def lms(
     constellation_np = _dd_constellation(
         constellation, "lms()", decisions=run.n_train < run.n_sym
     )
-    sq_side, sq_lev_min, sq_d_grid = _slicer_params(constellation)
+    sq_side, sq_lev_min, sq_d_grid = slicer_params(constellation)
     slicer = (sq_lev_min, sq_d_grid, np.int32(sq_side))
     mu = np.float32(step_size)
 
@@ -579,12 +579,12 @@ def rls(
        spaced (``sps > 1``) input.
     """
     signal_adapter = adapt_signal(samples, function_name="rls()")
-    samples = signal_adapter.array
+    x = signal_adapter.array
     sig = signal_adapter.signal
     sps = require_integer_sps(signal_adapter.resolve_fact("sps", sps), "rls()")
     constellation = signal_adapter.resolve_choice("constellation", constellation)
     if sps > 1:
-        logger.warning(
+        logger.debug(
             "RLS is mathematically ill-conditioned for fractionally-spaced "
             "signals (sps=%s). The noise-only null-subspace creates a "
             "singular correlation matrix, causing tap bloat. Use LMS for "
@@ -596,20 +596,22 @@ def rls(
     inline = _inline_cpr(cpr, constellation, "rls()")
 
     n_train_log = training_symbols.shape[-1] if training_symbols is not None else 0
+    tail_trim = num_taps // 2
     logger.info(
         "RLS equalizer: num_taps=%s, forgetting_factor=%s, regularization=%.2e, "
-        "leakage=%.2e, sps=%s, n_train=%s%s",
+        "leakage=%.2e, sps=%s, n_train=%s, tail_trim=%s%s",
         num_taps,
         forgetting_factor,
         regularization,
         leakage,
         sps,
         n_train_log,
+        tail_trim,
         f", cpr={type(cpr).__name__}" if cpr is not None else "",
     )
 
     run = _prepare_sequential(
-        samples,
+        x,
         equalizer="rls",
         sps=sps,
         num_taps=num_taps,
@@ -624,20 +626,10 @@ def rls(
     # Early-halt boundary: freeze W and P once the sliding window reaches the
     # right zero-padding (last num_taps//2 symbols have contaminated windows).
     n_update_halt = max(0, run.n_sym - num_taps // 2)
-    tail_trim = num_taps // 2
-    if tail_trim > 0:
-        logger.info(
-            "RLS tail trim: last %s symbols removed from y_hat "
-            "(zero-padding contamination zone). result.signal carries the "
-            "trimmed reference; trim reference arrays to match: "
-            "symbols[..., :-result.tail_trim], "
-            "bits[..., :-result.tail_trim * bits_per_symbol].",
-            tail_trim,
-        )
     constellation_np = _dd_constellation(
         constellation, "rls()", decisions=run.n_train < run.n_sym
     )
-    sq_side, sq_lev_min, sq_d_grid = _slicer_params(constellation)
+    sq_side, sq_lev_min, sq_d_grid = slicer_params(constellation)
     slicer = (sq_lev_min, sq_d_grid, np.int32(sq_side))
     # Inverse correlation matrix: complex128 throughout (single precision loses
     # the Hermitian positive-definite property and the filter diverges).

@@ -361,16 +361,16 @@ def _cpr_symmetry(constellation: Any) -> int:
 
 
 def _validate_sps(sps: Any, num_taps: int) -> None:
-    """Validate sps; warn about unusual values, check tap count minimum."""
+    """Validate sps; trace unusual values and short tap counts at DEBUG."""
     sps = require_integer_sps(sps, "equalizer")
     if sps == 1:
-        logger.info(
+        logger.debug(
             "sps=1: symbol-spaced equalizer mode. "
             "No fractional-spacing benefit; suitable for residual ISI correction "
             "after a prior FSE stage + FOE + CPR."
         )
     elif sps > 2:
-        logger.warning(
+        logger.debug(
             "sps=%s: non-standard oversampling ratio for adaptive "
             "equalization. T/2-spaced (sps=2) is the industry standard. "
             "Higher values give marginal benefit but require "
@@ -378,7 +378,7 @@ def _validate_sps(sps: Any, num_taps: int) -> None:
             sps,
         )
     if sps > 1 and num_taps < 2 * sps:  # fractionally spaced only
-        logger.warning(
+        logger.debug(
             "num_taps=%s is small for sps=%s. Recommend num_taps >= %s "
             "for fractionally-spaced equalization.",
             num_taps,
@@ -395,12 +395,69 @@ def _godard_radius(constellation: Any) -> float:
     """
     if constellation is None:
         return 1.0
-    pts = np.asarray(constellation.points)
+    pts = np.abs(np.asarray(constellation.points)).astype(np.float64)
     if constellation.pmf is None:
-        return float(np.mean(np.abs(pts) ** 4) / np.mean(np.abs(pts) ** 2))
-    pmf = np.asarray(constellation.pmf, dtype=np.float64)
-    e = float(np.dot(pmf, np.abs(pts) ** 2))
-    return float(np.dot(pmf, np.abs(pts) ** 4)) / (e**2)
+        pmf = np.full(pts.size, 1.0 / pts.size)
+    else:
+        pmf = np.asarray(constellation.pmf, dtype=np.float64)
+    return float(np.dot(pmf, pts**4) / np.dot(pmf, pts**2))
+
+
+#: ``d_min² / E[(|s|² - R²)² |s|²]`` of unit-power 16-QAM (0.4 / 0.2176): the
+#: constellation the CMA step 1e-3 suits.
+_CMA_FLOOR_16QAM = 0.4 / 0.2176
+#: CMA does not converge in practice once the kurtosis has gone more than
+#: this fraction of the way from constant modulus (1) to a Gaussian's (2
+#: complex, 3 real): 2 - κ below 0.15 for complex sets, a quarter of square
+#: QAM's.
+_CMA_MAX_GAUSSIANITY = 0.85
+
+
+def _cma_profile(constellation: Any) -> tuple[float, float, float]:
+    """Kurtosis ``E|s|⁴ / (E|s|²)²`` of ``constellation`` (pmf-weighted), a
+    Gaussian's kurtosis for its kind (2 complex, 3 real), and the CMA step
+    scale: ``d_min² / E[(|s|² - R²)² |s|²]`` on unit power, relative to
+    16-QAM and capped at 1.  ``(1.0, 2.0, 1.0)``, the unit circle, without
+    a constellation.
+
+    The Godard error at the right solution, ``(|s|² - R²) s``, is the
+    self-noise that sets CMA's error floor, and the minimum distance what
+    the floor is measured against, so the step that keeps the floor of
+    16-QAM at 1e-3 scales with their ratio.
+    """
+    if constellation is None:
+        return 1.0, 2.0, 1.0
+    from scipy.spatial import cKDTree
+
+    pts = np.asarray(constellation.points).astype(np.complex128)
+    if constellation.pmf is None:
+        pmf = np.full(pts.size, 1.0 / pts.size)
+    else:
+        pmf = np.asarray(constellation.pmf, dtype=np.float64)
+    pts = pts / np.sqrt(np.dot(pmf, np.abs(pts) ** 2))
+    gaussian = 3.0 if np.all(pts.imag == 0) else 2.0
+    a2 = np.abs(pts) ** 2
+    kurtosis = float(np.dot(pmf, a2**2))  # also R², at unit power
+    self_noise = float(np.dot(pmf, (a2 - kurtosis) ** 2 * a2))
+    if pts.size < 2 or self_noise < 1e-12:  # PSK: no self-noise
+        return kurtosis, gaussian, 1.0
+    xy = np.column_stack([pts.real, pts.imag])
+    dist, _ = cKDTree(xy).query(xy, k=2)
+    d2 = float(np.min(dist[:, 1])) ** 2
+    return kurtosis, gaussian, min(1.0, d2 / self_noise / _CMA_FLOOR_16QAM)
+
+
+def _check_cma_kurtosis(kurtosis: float, gaussian: float, name: str) -> None:
+    """WARNING when the constellation is too close to Gaussian for CMA."""
+    if (kurtosis - 1.0) / (gaussian - 1.0) > _CMA_MAX_GAUSSIANITY:
+        logger.warning(
+            "%s: the constellation's kurtosis is %.3f, too close to a Gaussian's "
+            "(%g) for the constant-modulus criterion to see the ISI; CMA will "
+            "likely not converge. Use rde() or a decision-directed lms().",
+            name,
+            kurtosis,
+            gaussian,
+        )
 
 
 def _rde_ring_radii(constellation: Any) -> np.ndarray:
