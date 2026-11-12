@@ -26,7 +26,7 @@ def _symbols(xp, n=2048, phase=0.2, seed=0):
         (recovery.BPS(), recovery.BlockPhaseEstimate),
         (recovery.ViterbiViterbi(), recovery.BlockPhaseEstimate),
         (recovery.PLL(), recovery.CarrierPhaseEstimate),
-        ("pilots", recovery.PilotPhaseEstimate),
+        ("pilots", recovery.PilotInterpolationEstimate),
         ("constant", recovery.CarrierPhaseEstimate),
     ],
     ids=["bps", "vv", "pll", "pilots", "constant"],

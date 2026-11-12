@@ -37,7 +37,7 @@ from ...math import _phasor
 __all__ = [
     "ChromaticDispersionEstimate",
     "ClockToneScan",
-    "DispersionFitEstimate",
+    "QuadraticPhaseFitEstimate",
     "DispersionScanEstimate",
     "FourthMomentScan",
     "QuadraticPhaseFit",
@@ -239,7 +239,7 @@ class ChromaticDispersionEstimate:
 
     The constructor takes the same fields.  Each method returns a subclass
     with its diagnostics: :class:`DispersionScanEstimate` for the scans,
-    :class:`DispersionFitEstimate` for :class:`QuadraticPhaseFit`.
+    :class:`QuadraticPhaseFitEstimate` for :class:`QuadraticPhaseFit`.
 
     Attributes
     ----------
@@ -281,7 +281,7 @@ class DispersionScanEstimate(ChromaticDispersionEstimate):
 
 
 @dataclass(frozen=True)
-class DispersionFitEstimate(ChromaticDispersionEstimate):
+class QuadraticPhaseFitEstimate(ChromaticDispersionEstimate):
     """Result of :class:`QuadraticPhaseFit`.
 
     The constructor takes the same fields.
@@ -536,7 +536,7 @@ def _quadratic_phase(
     symbol_rate: float,
     wavelength_nm: float,
     reference: Any = None,
-) -> DispersionFitEstimate:
+) -> QuadraticPhaseFitEstimate:
     """The data-aided quadratic-phase fit of ``(C, N)`` samples."""
     name = "estimate_chromatic_dispersion()"
     symbols = method.symbols if method.symbols is not None else reference
@@ -577,7 +577,7 @@ def _quadratic_phase(
         b2l, _, freq, delay = _quadratic_phase_pass(
             x, known, refined, sampling_rate, xp
         )
-    return DispersionFitEstimate(
+    return QuadraticPhaseFitEstimate(
         float(_beta2_length_to_ps_nm(b2l, wavelength_nm)), method, freq, delay
     )
 
@@ -626,7 +626,7 @@ def estimate_chromatic_dispersion(
     -------
     ChromaticDispersionEstimate
         The estimate in ps/nm: a :class:`DispersionScanEstimate` with the scan
-        (candidates and metric) or a :class:`DispersionFitEstimate` with the
+        (candidates and metric) or a :class:`QuadraticPhaseFitEstimate` with the
         measured group delay.
 
     Raises

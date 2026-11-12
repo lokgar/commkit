@@ -134,14 +134,14 @@ def plot_pilot_phase_estimate(
 ) -> tuple[Any, Any] | None:
     """Plot the pilot phases of a pilot-based estimate with their linear fit.
 
-    For a :class:`~commkit.recovery.PilotPhaseEstimate` (``PilotInterpolation``) a
+    For a :class:`~commkit.recovery.PilotInterpolationEstimate` (``PilotInterpolation``) a
     second panel shows the interpolated per-symbol trajectory; for a
     :class:`~commkit.frequency.PilotSlopeEstimate` (``PilotSlope``)
     the fit is labeled with the estimated offset.
 
     Parameters
     ----------
-    estimate : PilotPhaseEstimate or PilotSlopeEstimate
+    estimate : PilotInterpolationEstimate or PilotSlopeEstimate
         With ``pilot_indices`` and ``pilot_phase``.
     sampling_rate : float, default 1.0
         Sampling rate in Hz of the pilot indices (labels the fitted slope in
@@ -291,7 +291,7 @@ def plot_pilot_tone_phase_estimate(
 
     Parameters
     ----------
-    estimate : TonePhaseEstimate
+    estimate : PilotToneEstimate
         From ``estimate_carrier_phase(samples, method)``.
     samples : array_like or Signal
         The samples the estimate was made from.
@@ -446,7 +446,7 @@ def plot_pilot_tones_phase_estimate(
 
     Parameters
     ----------
-    estimate : MultiTonePhaseEstimate
+    estimate : PilotTonesEstimate
         From ``estimate_carrier_phase(x, PilotTones(...))``.
     quantity : {"differential", "phase"}, optional
         Select one panel; ``None`` draws both.

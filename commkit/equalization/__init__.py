@@ -10,7 +10,8 @@
   :class:`ChannelEstimate` from a known reference), :func:`correct_channel`
   (its ZF / MMSE inverse) and :func:`apply_taps` (frozen taps).
 - Polarization demultiplexing: :func:`estimate_polarization` (a
-  :class:`PolarizationEstimate`) with :class:`PolarizationTones`, and
+  :class:`PolarizationEstimate`) with :class:`PolarizationTones` (a
+  :class:`PolarizationTonesEstimate`), and
   :func:`correct_polarization`.
 
 The adaptive equalizers take ``(N,)`` or butterfly-MIMO ``(C, N)`` input,
@@ -28,6 +29,7 @@ from .pilots import EqualizerPilots
 from .polarization import (
     PolarizationEstimate,
     PolarizationTones,
+    PolarizationTonesEstimate,
     correct_polarization,
     estimate_polarization,
 )
@@ -40,6 +42,7 @@ __all__ = [
     "EqualizerState",
     "PolarizationEstimate",
     "PolarizationTones",
+    "PolarizationTonesEstimate",
     "apply_taps",
     "block_cma",
     "block_lms",

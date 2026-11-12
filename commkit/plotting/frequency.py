@@ -94,7 +94,7 @@ def plot_mm_autocorrelation(
     R = _device_channels(r)
     xp = get_array_module(R)
     f_ests = [float(f) for f in np.atleast_1d(_host(estimate.value))]
-    M = estimate.power or 1
+    M = estimate.power
     C, L = R.shape
     # Phase at evenly spaced lags: a wrapped angle has no envelope.
     step = 1 if max_points <= 0 or L <= max_points else -(-L // max_points)
@@ -204,7 +204,7 @@ def plot_frequency_offset_spectrum(
     )
     mag_spectrum = _device_channels(spectrum)
     freqs = np.asarray(estimate.spectrum_frequencies, dtype=float)
-    M = estimate.power or 1
+    M = estimate.power
     f_estimates = [float(f) for f in np.atleast_1d(_host(estimate.value))]
     C = mag_spectrum.shape[0]
     # Evenly spaced bins in ascending frequency: the axis is f0 + k·df.

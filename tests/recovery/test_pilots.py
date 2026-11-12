@@ -187,7 +187,7 @@ class TestCprPilotTone:
             recovery.PilotTone(frequency=self.F_TONE, bandwidth=self.BW),
             sampling_rate=fs,
         )
-        assert isinstance(est, recovery.TonePhaseEstimate)
+        assert isinstance(est, recovery.PilotToneEstimate)
         assert self._interior_rms(xp, est.value, common) < 0.1
 
     def test_phase_residual_foe_and_phase_noise(self, xp):
@@ -418,7 +418,7 @@ class TestCprPilotTones:
             ),
             sampling_rate=fs,
         )
-        assert isinstance(est, recovery.MultiTonePhaseEstimate)
+        assert isinstance(est, recovery.PilotTonesEstimate)
         assert est.used_tones == (0, 1)  # both tones genuinely combined
         # single-tone reads tone 0 on channel 0; compare like-for-like on row 0.
         rms_single = self._interior_rms(xp, single[0], common)

@@ -438,6 +438,7 @@ ROWS: list[Row] = [
         data=2,
     ),
     Row("commkit.equalization.polarization.PolarizationEstimate", VALUE),
+    Row("commkit.equalization.polarization.PolarizationTonesEstimate", VALUE),
     Row("commkit.equalization.polarization.PolarizationTones", VALUE),
     Row("commkit.equalization.result.EqualizerState", VALUE),
     Row("commkit.equalization.result.EqualizerResult", VALUE),
@@ -495,7 +496,7 @@ ROWS: list[Row] = [
     Row(
         "commkit.filtering.fiber.estimation.ChromaticDispersionEstimate", VALUE, data=0
     ),
-    Row("commkit.filtering.fiber.estimation.DispersionFitEstimate", VALUE, data=0),
+    Row("commkit.filtering.fiber.estimation.QuadraticPhaseFitEstimate", VALUE, data=0),
     Row("commkit.filtering.fiber.estimation.DispersionScanEstimate", VALUE, data=0),
     Row(
         "commkit.filtering.fiber.estimation.estimate_chromatic_dispersion",
@@ -797,9 +798,9 @@ ROWS: list[Row] = [
     Row("commkit.recovery.bps.BPS", VALUE),
     Row("commkit.recovery.carrier_phase.BlockPhaseEstimate", VALUE),
     Row("commkit.recovery.carrier_phase.CarrierPhaseEstimate", VALUE),
-    Row("commkit.recovery.carrier_phase.MultiTonePhaseEstimate", VALUE),
-    Row("commkit.recovery.carrier_phase.PilotPhaseEstimate", VALUE),
-    Row("commkit.recovery.carrier_phase.TonePhaseEstimate", VALUE),
+    Row("commkit.recovery.carrier_phase.PilotTonesEstimate", VALUE),
+    Row("commkit.recovery.carrier_phase.PilotInterpolationEstimate", VALUE),
+    Row("commkit.recovery.carrier_phase.PilotToneEstimate", VALUE),
     Row(
         "commkit.recovery.carrier_phase.correct_carrier_phase",
         TRANSFORM,

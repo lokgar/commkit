@@ -37,9 +37,9 @@ from .viterbi_viterbi import ViterbiViterbi, _viterbi_viterbi
 __all__ = [
     "BlockPhaseEstimate",
     "CarrierPhaseEstimate",
-    "MultiTonePhaseEstimate",
-    "PilotPhaseEstimate",
-    "TonePhaseEstimate",
+    "PilotTonesEstimate",
+    "PilotInterpolationEstimate",
+    "PilotToneEstimate",
     "correct_carrier_phase",
     "estimate_carrier_phase",
 ]
@@ -78,9 +78,9 @@ class CarrierPhaseEstimate:
 
     The constructor takes the same fields.  The other methods return a
     subclass with their diagnostics: :class:`BlockPhaseEstimate` (BPS,
-    Viterbi-Viterbi, Tikhonov), :class:`PilotPhaseEstimate`
-    (``PilotInterpolation``), :class:`TonePhaseEstimate` (``PilotTone``) and
-    :class:`MultiTonePhaseEstimate` (``PilotTones``).  Per-channel fields
+    Viterbi-Viterbi, Tikhonov), :class:`PilotInterpolationEstimate`
+    (``PilotInterpolation``), :class:`PilotToneEstimate` (``PilotTone``) and
+    :class:`PilotTonesEstimate` (``PilotTones``).  Per-channel fields
     drop their channel axis for ``(N,)`` input and stay on the input's
     device.
 
@@ -116,7 +116,7 @@ class BlockPhaseEstimate(CarrierPhaseEstimate):
 
 
 @dataclass(frozen=True)
-class PilotPhaseEstimate(CarrierPhaseEstimate):
+class PilotInterpolationEstimate(CarrierPhaseEstimate):
     """Result of ``PilotInterpolation``.
 
     The constructor takes the same fields.
@@ -136,7 +136,7 @@ class PilotPhaseEstimate(CarrierPhaseEstimate):
 
 
 @dataclass(frozen=True)
-class TonePhaseEstimate(CarrierPhaseEstimate):
+class PilotToneEstimate(CarrierPhaseEstimate):
     """Result of ``PilotTone``.
 
     The constructor takes the same fields.
@@ -155,11 +155,11 @@ class TonePhaseEstimate(CarrierPhaseEstimate):
 
 
 @dataclass(frozen=True)
-class MultiTonePhaseEstimate(TonePhaseEstimate):
+class PilotTonesEstimate(PilotToneEstimate):
     """Result of ``PilotTones``.
 
     The constructor takes the same fields: those of
-    :class:`TonePhaseEstimate`, then the attributes below.
+    :class:`PilotToneEstimate`, then the attributes below.
 
     Attributes
     ----------
@@ -185,9 +185,9 @@ _RESULTS: dict[type, type[CarrierPhaseEstimate]] = {
     BPS: BlockPhaseEstimate,
     ViterbiViterbi: BlockPhaseEstimate,
     Tikhonov: BlockPhaseEstimate,
-    PilotInterpolation: PilotPhaseEstimate,
-    PilotTone: TonePhaseEstimate,
-    PilotTones: MultiTonePhaseEstimate,
+    PilotInterpolation: PilotInterpolationEstimate,
+    PilotTone: PilotToneEstimate,
+    PilotTones: PilotTonesEstimate,
 }
 #: Fields with a channel axis, dropped for (N,) input.
 _PER_CHANNEL = ("value", "block_phase", "pilot_phase", "tone_frequencies")

@@ -1,7 +1,8 @@
 """Polarization demultiplexing.
 
 :func:`estimate_polarization` reads the unmixing (inverse Jones) matrix, a
-:class:`PolarizationEstimate`, with the method :class:`PolarizationTones`:
+:class:`PolarizationEstimate`, with the method :class:`PolarizationTones`
+(returning a :class:`PolarizationTonesEstimate`):
 each transmitted stream carries a CW pilot tone at its own frequency, read
 once for the record or tracked over time.  :func:`correct_polarization`
 applies the estimate.
@@ -10,7 +11,7 @@ applies the estimate.
 from __future__ import annotations
 
 from collections.abc import Callable
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Any, cast
 
 import numpy as np
@@ -25,6 +26,7 @@ from ..logger import logger
 __all__ = [
     "PolarizationEstimate",
     "PolarizationTones",
+    "PolarizationTonesEstimate",
     "correct_polarization",
     "estimate_polarization",
 ]
@@ -137,14 +139,11 @@ class PolarizationEstimate:
         in the zero padding of its tracking filter;
         ``correct_polarization(trim_edges=True)`` drops them (align a
         reference as ``ref[..., edge : N - edge]``).
-    tone_frequencies : tuple of float, optional
-        The tone frequencies the estimate used, after refinement, in Hz.
     """
 
     matrix_grid: ArrayType
     grid_positions: ArrayType
     edge: int = 0
-    tone_frequencies: tuple[float, ...] | None = None
 
     @property
     def matrix(self) -> ArrayType:
@@ -162,6 +161,23 @@ class PolarizationEstimate:
                 "matrices; matrix_grid holds them all."
             )
         return self.matrix_grid[0]
+
+
+@dataclass(frozen=True)
+class PolarizationTonesEstimate(PolarizationEstimate):
+    """Result of :class:`PolarizationTones`.
+
+    The constructor takes the same fields: those of
+    :class:`PolarizationEstimate`, then the attribute below, by keyword.
+
+    Attributes
+    ----------
+    tone_frequencies : tuple of float
+        The tone frequencies the estimate used, after refinement, in Hz;
+        row ``j`` of the unmixing matrices recovers the stream of tone ``j``.
+    """
+
+    tone_frequencies: tuple[float, ...] = field(kw_only=True)
 
 
 _EXTRACT_CHUNK = 1 << 20  # samples per block in the chunked tone-phasor GEMM
@@ -540,9 +556,10 @@ def estimate_polarization(
     Returns
     -------
     PolarizationEstimate
-        One ``(K, C)`` matrix (static) or the matrices on the grid
-        (tracked), complex128, with the edge of the tracking filter and the
-        refined tone frequencies.
+        The subclass of the method, :class:`PolarizationTonesEstimate` for
+        :class:`PolarizationTones`: one ``(K, C)`` matrix (static) or the
+        matrices on the grid (tracked), complex128, with the edge of the
+        tracking filter and the refined tone frequencies.
 
     Raises
     ------
@@ -622,8 +639,11 @@ def _estimate_tones(
             K,
             N,
         )
-        return PolarizationEstimate(
-            W[None], xp.zeros(1, dtype=xp.float64), 0, tuple(map(float, f_used))
+        return PolarizationTonesEstimate(
+            W[None],
+            xp.zeros(1, dtype=xp.float64),
+            0,
+            tone_frequencies=tuple(map(float, f_used)),
         )
 
     # --- Tracking low-pass design + feasibility check ------------------------
@@ -724,8 +744,8 @@ def _estimate_tones(
     )
     # A centered FIR averages zero padding into the num_taps//2 samples at
     # each end.
-    return PolarizationEstimate(
-        Wg, grid_positions, num_taps // 2, tuple(map(float, f_used))
+    return PolarizationTonesEstimate(
+        Wg, grid_positions, num_taps // 2, tone_frequencies=tuple(map(float, f_used))
     )
 
 

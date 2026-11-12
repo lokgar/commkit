@@ -403,14 +403,10 @@ class BlockwiseFrequencyEstimate(FrequencyOffsetEstimate):
         Block center sample indices, ``(B,)``.
     block_values : ndarray
         Estimate per block in Hz, ``(B,)`` or ``(C, B)``.
-    power : int, optional
-        Exponent ``M`` used by ``MthPower`` and ``MengaliMorelli``; ``None``
-        for ``SpectralPeak``.
     """
 
     block_centers: np.ndarray
     block_values: ArrayType
-    power: int | None = None
 
     def combined(self) -> "BlockwiseFrequencyEstimate":
         """One estimate for all channels: the weighted mean over channels,
@@ -425,7 +421,6 @@ class BlockwiseFrequencyEstimate(FrequencyOffsetEstimate):
             weights=xp.sum(self.weights),
             block_centers=self.block_centers,
             block_values=xp.sum(w[:, None] * self.block_values, axis=0),
-            power=self.power,
         )
 
 
@@ -677,6 +672,47 @@ _ROW_ESTIMATORS: dict[type, Callable[..., _Rows]] = {
 }
 
 
+def _mth_power_result(
+    values: Any, weights: Any, rows: _Rows, was_1d: bool
+) -> MthPowerEstimate:
+    assert rows.power is not None and rows.spectrum_frequencies is not None
+    spectrum = restore_1d(was_1d, rows.spectrum)
+    return MthPowerEstimate(
+        values, weights, rows.power, spectrum, rows.spectrum_frequencies
+    )
+
+
+def _mengali_morelli_result(
+    values: Any, weights: Any, rows: _Rows, was_1d: bool
+) -> MengaliMorelliEstimate:
+    assert rows.power is not None
+    autocorrelation = restore_1d(was_1d, rows.autocorrelation)
+    return MengaliMorelliEstimate(values, weights, rows.power, autocorrelation)
+
+
+def _pilot_slope_result(
+    values: Any, weights: Any, rows: _Rows, was_1d: bool
+) -> PilotSlopeEstimate:
+    assert rows.pilot_indices is not None
+    pilot_phase = restore_1d(was_1d, rows.pilot_phase)
+    return PilotSlopeEstimate(values, weights, pilot_phase, rows.pilot_indices)
+
+
+def _spectral_peak_result(
+    values: Any, weights: Any, rows: _Rows, was_1d: bool
+) -> FrequencyOffsetEstimate:
+    return FrequencyOffsetEstimate(values, weights)
+
+
+#: The result of a static (whole-record) estimate, built from the method's rows.
+_RESULTS: dict[type, Callable[[Any, Any, _Rows, bool], FrequencyOffsetEstimate]] = {
+    MthPower: _mth_power_result,
+    MengaliMorelli: _mengali_morelli_result,
+    PilotSlope: _pilot_slope_result,
+    SpectralPeak: _spectral_peak_result,
+}
+
+
 def _block_starts(n: int, block_size: int, overlap: float) -> tuple[list[int], int]:
     """Block start samples and block length (the whole record if too short)."""
     step = max(1, round(block_size * (1.0 - overlap)))
@@ -748,31 +784,9 @@ def _estimate_frequency_offset(
     if block_size is None:
         rows = _estimate_rows(x, fs, method, constellation, shared_rows=True)
         values, weights = restore_1d(was_1d, rows.values, rows.weights)
-        est: FrequencyOffsetEstimate
-        if isinstance(method, MthPower):
-            assert rows.power is not None and rows.spectrum_frequencies is not None
-            est = MthPowerEstimate(
-                values,
-                weights,
-                rows.power,
-                restore_1d(was_1d, rows.spectrum),
-                rows.spectrum_frequencies,
-            )
-        elif isinstance(method, MengaliMorelli):
-            assert rows.power is not None
-            est = MengaliMorelliEstimate(
-                values, weights, rows.power, restore_1d(was_1d, rows.autocorrelation)
-            )
-        elif isinstance(method, PilotSlope):
-            assert rows.pilot_indices is not None
-            est = PilotSlopeEstimate(
-                values,
-                weights,
-                restore_1d(was_1d, rows.pilot_phase),
-                rows.pilot_indices,
-            )
-        else:
-            est = FrequencyOffsetEstimate(values, weights)
+        est: FrequencyOffsetEstimate = _RESULTS[type(method)](
+            values, weights, rows, was_1d
+        )
     else:
         assert not isinstance(method, PilotSlope)
         starts, length = _block_starts(N, block_size, method.overlap)
@@ -795,7 +809,6 @@ def _estimate_frequency_offset(
             weights=weights,
             block_centers=np.array([s + length / 2.0 for s in starts]),
             block_values=block_values,
-            power=rows.power,
         )
 
     if logger.isEnabledFor(logging.INFO):

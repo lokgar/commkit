@@ -105,6 +105,7 @@ class TestDemultiplexPolarizationTones:
         assert W.shape == (2, 2)
         assert W.dtype == xp.complex128
         assert track.edge == 0 and track.matrix_grid.shape == (1, 2, 2)
+        assert isinstance(track, equalization.PolarizationTonesEstimate)
         assert track.tone_frequencies == pytest.approx(f_used, abs=0.05)
         # A bare matrix is applied like the track.
         xpt.assert_allclose(
