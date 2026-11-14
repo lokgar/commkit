@@ -6,7 +6,7 @@ decimation of long traces) are shared by the plot modules.
 """
 
 import re
-from typing import Any
+from typing import Any, Literal
 
 import matplotlib as mpl
 import matplotlib.font_manager as fm
@@ -19,27 +19,82 @@ from ..logger import logger
 __all__ = ["apply_default_theme"]
 
 
+_FONT_CANDIDATES = ("Google Sans", "Roboto")
+_FONT_STYLES: tuple[tuple[Literal["normal", "italic"], str], ...] = (
+    ("normal", "regular"),
+    ("normal", "bold"),
+    ("italic", "regular"),
+    ("italic", "bold"),
+)
+
+
+def _family_installed(family: str) -> bool:
+    """Whether Matplotlib resolves ``family`` in all four regular/bold/italic faces."""
+    for style, weight in _FONT_STYLES:
+        prop = fm.FontProperties(family=family, style=style, weight=weight)
+        try:
+            found = fm.findfont(prop, fallback_to_default=False)
+        except ValueError:
+            return False
+        if not any(
+            str(e.fname) == str(found) and e.name == family
+            for e in fm.fontManager.ttflist
+        ):
+            return False
+    return True
+
+
+def _pick_font_family() -> str | None:
+    """First of ``_FONT_CANDIDATES`` that is installed, or ``None``.
+
+    Matplotlib reads the installed fonts from a cache file that is rebuilt
+    only when Matplotlib itself changes version, so a font installed after
+    the cache was written is invisible to it.  When no candidate is found,
+    the system font directories are scanned once and the files the cache
+    lacks are registered for this process (the cache file is left alone).
+    """
+    for scanned in (False, True):
+        if scanned:
+            known = {e.fname for e in fm.fontManager.ttflist}
+            for path in fm.findSystemFonts():
+                if path not in known:
+                    try:
+                        fm.fontManager.addfont(path)
+                    except (OSError, RuntimeError, ValueError):
+                        continue  # an unreadable or non-font file in a font directory
+        for family in _FONT_CANDIDATES:
+            if _family_installed(family):
+                return family
+    return None
+
+
 def apply_default_theme() -> None:
     """Apply the library's Matplotlib style.
 
-    Matplotlib's ``dark_background`` style with Roboto (or the default
-    sans-serif font, logged at INFO, when Roboto is not installed)
-    for text and math, a 7 x 4.9 inch figure with constrained layout,
-    300-dpi saving, a light grid, and inward ticks on all four sides.
+    Matplotlib's ``dark_background`` style with Google Sans for text and
+    math (regular, bold, italic and bold italic), a 7 x 4.9 inch figure with
+    constrained layout, 300-dpi saving, a light grid, and inward ticks on all
+    four sides.  Roboto replaces Google Sans, and the default sans-serif font
+    replaces both (logged at INFO), when the font is not installed.
 
     Notes
     -----
     Changes ``matplotlib.rcParams`` globally, so call it once at the start of
     a script or notebook.  The library never calls it on its own.
+
+    Fonts installed after Matplotlib wrote its font cache are found by
+    scanning the system font directories; the cache file is not modified.
     """
     logger.debug("Applying default plotting theme.")
-    try:
-        font_prop = fm.FontProperties(family="Roboto", weight="regular")
-        fm.findfont(font_prop, fallback_to_default=False)
-        font_name = "Roboto"
-    except ValueError:
+    family = _pick_font_family()
+    if family is None:
         font_name = "sans"
-        logger.info("Roboto font not found, falling back to default sans-serif.")
+        logger.info(
+            "None of %s found, falling back to default sans-serif.",
+            ", ".join(_FONT_CANDIDATES),
+        )
+    else:
+        font_name = family
 
     plt.style.use("dark_background")
 
@@ -75,8 +130,12 @@ def apply_default_theme() -> None:
 
     plt.rcParams["mathtext.fontset"] = "custom"
     plt.rcParams["mathtext.rm"] = font_name
+    plt.rcParams["mathtext.cal"] = font_name
+    plt.rcParams["mathtext.sf"] = font_name
+    plt.rcParams["mathtext.tt"] = font_name
     plt.rcParams["mathtext.it"] = f"{font_name}:italic"
     plt.rcParams["mathtext.bf"] = f"{font_name}:bold"
+    plt.rcParams["mathtext.bfit"] = f"{font_name}:italic:bold"
 
 
 def _get_axis(ax):

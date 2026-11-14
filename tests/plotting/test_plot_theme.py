@@ -3,10 +3,12 @@
 from typing import Any
 from unittest.mock import patch
 
+import matplotlib.font_manager as fm
 import matplotlib.pyplot as plt
 import numpy as np
 import pytest
 
+import commkit.plotting.theme as theme
 from commkit.plotting import apply_default_theme
 from commkit.plotting.theme import _create_subplot_grid
 
@@ -23,6 +25,61 @@ class TestPlotThemeAndGridUtilities:
         """Trigger the font fallback in apply_default_theme."""
         mock_find.side_effect = ValueError("Font not found")
         apply_default_theme()
+        assert plt.rcParams["font.family"] == ["sans"]
+        assert plt.rcParams["mathtext.rm"] == "sans"
+
+    def test_font_found_after_cache_was_written(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """A font missing from Matplotlib's cache is found by scanning the font directories.
+
+        Models a font installed after the cache file was written: the family
+        is dropped from the font list, and the scan (here the files shipped
+        with Matplotlib) restores it for all four faces.
+        """
+        dejavu = [e for e in fm.fontManager.ttflist if e.name == "DejaVu Sans"]
+        assert dejavu
+        files = sorted({str(e.fname) for e in dejavu})
+        monkeypatch.setattr(
+            fm.fontManager,
+            "ttflist",
+            [e for e in fm.fontManager.ttflist if e.name != "DejaVu Sans"],
+        )
+        monkeypatch.setattr(fm, "findSystemFonts", lambda *a, **k: files)
+        monkeypatch.setattr(theme, "_FONT_CANDIDATES", ("No Such Font", "DejaVu Sans"))
+        assert theme._pick_font_family() == "DejaVu Sans"
+        found = {
+            str(
+                fm.findfont(fm.FontProperties(family="DejaVu Sans", style=st, weight=w))
+            )
+            for st, w in theme._FONT_STYLES
+        }
+        assert len(found) == 4
+
+    def test_family_missing_a_face_is_rejected(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """A family without its bold face is not picked, so bold text never falls back silently."""
+        monkeypatch.setattr(
+            fm.fontManager,
+            "ttflist",
+            [
+                e
+                for e in fm.fontManager.ttflist
+                if not (e.name == "DejaVu Sans" and e.weight >= 700)
+            ],
+        )
+        monkeypatch.setattr(fm, "findSystemFonts", lambda *a, **k: [])
+        assert not theme._family_installed("DejaVu Sans")
+
+    def test_math_fonts_follow_text_font(self) -> None:
+        """Every math face uses the text family, with no generic fallback left behind."""
+        apply_default_theme()
+        name = plt.rcParams["font.family"][0]
+        assert name in theme._FONT_CANDIDATES or name == "sans"
+        assert plt.rcParams["mathtext.bfit"] == f"{name}:italic:bold"
+        for role in ("rm", "cal", "sf", "tt"):
+            assert plt.rcParams[f"mathtext.{role}"] == name
 
     def test_subplot_grid(self, xp: Any) -> None:
         """Verify subplot grid calculation."""
